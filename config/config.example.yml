@@ -1,0 +1,46 @@
+ai_log_path: /path/to/your/obsidian/copilot/copilot-jsons
+
+vault:
+  inbox: inbox
+  daily: daily
+  template: template
+  knowledge: copilot/knowledge
+  research: research
+
+files:
+  daily_note: daily.md
+  weekly_template: Weekly Template.md
+  research_candidate_theme_list: リサーチ候補テーマリスト.md
+
+backup:
+  sync_folders:
+    - source: /path/to/your/obsidian/Default
+      destination: /path/to/your/backup/Obsidian/Default
+    - source: /path/to/your/obsidian/Inbox
+      destination: /path/to/your/backup/Obsidian/Inbox
+    - source: /path/to/your/documents
+      destination: /path/to/your/backup/Documents
+    - source: /path/to/your/share
+      destination: /path/to/your/backup/Share
+
+location_map:
+  "芝公園4丁目2-8": "東京タワー"
+  "有明3-11-1": "東京ビッグサイト"
+
+regularly_date_events:
+  - [[0], 0, "来月のノート作成", 1]
+  - [[0], 0, "入金処理", 1]
+  - [[1], 0, "月カレンダー更新", 1]
+  - [[25], 0, "来月の予定を立てる", 1]
+
+regularly_weekday_events:
+  - [[1], ["土"], 0, "会議", 2]
+  - [[1,2,3,4,5], ["木"], 0, "定例会", 2]
+
+llm:
+  make_today_target:
+    provider: ollama
+    model: glm-4.7:cloud
+  inbox_audio_correction:
+    provider: ollama
+    model: gpt-oss:120b-cloud

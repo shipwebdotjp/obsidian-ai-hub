@@ -1,0 +1,14 @@
+__pycache__
+.aider*
+.env
+.venv
+
+*.egg-info/
+knowledge_sync_state.json
+last_run.json
+tasks.local.yml
+config.yml
+doc/
+.hermes/
+.jules-agent/
+.claude/

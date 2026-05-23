@@ -1,0 +1,6 @@
+- id: sample_task
+  enabled: true
+  schedule:
+    type: hourly
+    minute: 0
+  command: echo "This is a sample task running every hour at minute 0"
