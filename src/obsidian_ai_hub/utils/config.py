@@ -102,7 +102,7 @@ RESEARCH_CONTEXT_LOOKBACK_DAYS = int(os.getenv("RESEARCH_CONTEXT_LOOKBACK_DAYS",
 RESEARCH_CONTEXT_MAX_NOTES = int(os.getenv("RESEARCH_CONTEXT_MAX_NOTES", "3"))
 
 MAKE_TODAY_TARGET_PROVIDER = str(_config_value("llm", "make_today_target", "provider", default="ollama"))
-MAKE_TODAY_TARGET_MODEL = str(_config_value("llm", "make_today_target", "model", default="glm-4.7:cloud"))
+MAKE_TODAY_TARGET_MODEL = str(_config_value("llm", "make_today_target", "model", default="gemma4:e4b"))
 INBOX_AUDIO_CORRECTION_PROVIDER = str(_config_value("llm", "inbox_audio_correction", "provider", default="ollama"))
 INBOX_AUDIO_CORRECTION_MODEL = str(_config_value("llm", "inbox_audio_correction", "model", default="gpt-oss:120b-cloud"))
 

@@ -118,7 +118,7 @@ optional_previous:
 """
     response = llm_client.generate_llm_response(
         provider="ollama",  # local
-        model="gpt-oss:120b-cloud",
+        model="gemma4:e4b",
         prompt=prompt,
         max_tokens=1024,
     ).strip()
