@@ -44,3 +44,9 @@ llm:
   inbox_audio_correction:
     provider: ollama
     model: gpt-oss:120b-cloud
+
+vault_index:
+  collection_name: documents
+  sqlite_path: /path/to/your/obsidian-ai-hub/vault-index/search.sqlite
+  chroma_path: /path/to/your/obsidian-ai-hub/vault-index/chroma
+  embedder_model: cl-nagoya/ruri-v3-310m

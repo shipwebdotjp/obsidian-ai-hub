@@ -252,7 +252,7 @@ def create_ollama_llm(model: str, temperature: float = 0.7, max_tokens: int = 51
 
 # --- Local llama-cpp-python support ---
 
-def _find_model_file_in_dir(dir_path: Path) -> Path | None:
+def _find_model_file_in_dir(dir_path: Path | None) -> Path | None:
     """
     指定ディレクトリからローカルモデルファイルを探して最初に見つかったもののパスを返す。
     サポートする拡張子: .gguf, .ggml, .bin, .safetensors, .pth, .pt

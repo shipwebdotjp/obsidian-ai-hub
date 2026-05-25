@@ -50,6 +50,13 @@ def _required_path(env_name: str, *config_keys) -> Path:
     return Path(str(value)).expanduser()
 
 
+def _optional_path(env_name: str, *config_keys):
+    value = _env_or_config(env_name, *config_keys)
+    if value in (None, ""):
+        return None
+    return Path(str(value)).expanduser()
+
+
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 TAVILY_API_KEY = os.getenv('TAVILY_API_KEY')
@@ -74,7 +81,7 @@ TEMPLATE_PATH = VAULT_PATH / TEMPLATE_DIR_NAME / DAILY_TEMPLATE_FILENAME
 
 # Template for weekly notes
 WEEKLY_TEMPLATE_PATH = DAILY_PATH / TEMPLATE_DIR_NAME / WEEKLY_TEMPLATE_FILENAME
-LOCAL_MODEL_DIR = Path(os.getenv('LOCAL_MODEL_DIR', ''))
+LOCAL_MODEL_DIR = _optional_path('LOCAL_MODEL_DIR')
 LINE_TARGET_ID = os.getenv('LINE_TARGET_ID', '')
 LINE_MESSAGING_TOKEN = os.getenv('LINE_MESSAGING_TOKEN', '')
 GOG_CALENDAR_ID = os.getenv('GOG_CALENDAR_ID', '')
@@ -83,6 +90,20 @@ GOG_CALENDAR_ID = os.getenv('GOG_CALENDAR_ID', '')
 OPEN_WEB_UI_BASE_URL = os.getenv('OPEN_WEB_UI_BASE_URL', 'http://localhost:8080')
 OPEN_WEB_UI_API_KEY = os.getenv('OPEN_WEB_UI_API_KEY', '')
 KNOWLEDGE_SYNC_FOLDER = VAULT_PATH / KNOWLEDGE_DIR_NAME
+
+# Vault Index Sync
+VAULT_INDEX_COLLECTION_NAME = str(_config_value("vault_index", "collection_name", default="documents"))
+VAULT_INDEX_SQLITE_PATH = _optional_path("VAULT_INDEX_SQLITE_PATH", "vault_index", "sqlite_path")
+if VAULT_INDEX_SQLITE_PATH is None:
+    VAULT_INDEX_SQLITE_PATH = BASE_DIR / "data" / "vault-index" / "search.sqlite"
+
+VAULT_INDEX_CHROMA_PATH = _optional_path("VAULT_INDEX_CHROMA_PATH", "vault_index", "chroma_path")
+if VAULT_INDEX_CHROMA_PATH is None:
+    VAULT_INDEX_CHROMA_PATH = BASE_DIR / "data" / "vault-index" / "chroma"
+
+VAULT_INDEX_EMBEDDER_MODEL = str(
+    _config_value("vault_index", "embedder_model", default="cl-nagoya/ruri-v3-310m")
+)
 
 # Research Agent
 RESEARCH_OUTPUT_DIR = VAULT_PATH / RESEARCH_DIR_NAME

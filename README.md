@@ -42,12 +42,14 @@ Use the following split to keep the project OSS-friendly:
 - API keys and tokens
 - personal absolute paths
 - environment-specific values
+- `LOCAL_MODEL_DIR` is used as the base download cache for local embedder models
 
 `config/config.yml`
 - non-sensitive application settings
 - relative paths and filenames inside the vault
 - backup targets
 - default feature values
+- vault index storage paths and embedder model name
 
 ## Usage
 
@@ -57,7 +59,10 @@ python -m obsidian_ai_hub --make-target
 python -m obsidian_ai_hub --notify-calendar-event
 python -m obsidian_ai_hub --summerize-week
 python -m obsidian_ai_hub --backup
+python -m obsidian_ai_hub --sync-vault
 ```
+
+The vault sync command indexes the full `VAULT_PATH` tree into `md-hybrid-search` and stores its SQLite/Chroma data outside the vault by default.
 
 ## Project Structure
 

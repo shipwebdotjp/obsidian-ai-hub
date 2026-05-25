@@ -3,7 +3,19 @@ import argparse
 import logging
 from datetime import datetime, timedelta, date, time
 
-from obsidian_ai_hub import obsidian_inbox_merge, make_today_target, notify_calendar_event, summerize_week, summerize_day, do_backup, notify_today_schedule, sync_knowledge, research_agent, suggest_research_theme
+from obsidian_ai_hub import (
+    do_backup,
+    make_today_target,
+    notify_calendar_event,
+    notify_today_schedule,
+    obsidian_inbox_merge,
+    research_agent,
+    suggest_research_theme,
+    summerize_day,
+    summerize_week,
+    sync_knowledge,
+    sync_valut,
+)
 from obsidian_ai_hub.handler import add_research_theme
 from obsidian_ai_hub.utils import reader, extracter
 
@@ -12,6 +24,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
+
 
 def main():
     parser = argparse.ArgumentParser(description="Obsidian Daily Merge Tool")
@@ -54,6 +67,11 @@ def main():
         "--sync-knowledge",
         action="store_true",
         help="Obsidian VaultをOpen Web UIの知識ベースと同期"
+    )
+    parser.add_argument(
+        "--sync-vault",
+        action="store_true",
+        help="Obsidian Vaultをmd-hybrid-searchのインデックスと同期"
     )
     parser.add_argument(
         "--research-agent",
@@ -139,6 +157,9 @@ def main():
         ran = True
     if args.sync_knowledge:
         run_and_log(sync_knowledge.main, "sync_knowledge")
+        ran = True
+    if args.sync_vault:
+        run_and_log(sync_valut.main, "sync_vault")
         ran = True
     if args.research_agent:
         if args.theme:
