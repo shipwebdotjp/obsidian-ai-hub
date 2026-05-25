@@ -6,44 +6,44 @@ from typing import Optional
 
 from langchain.tools import tool
 
+from obsidian_ai_hub.sync_valut import build_vault_search_index
 from obsidian_ai_hub.utils import config
 
 logger = logging.getLogger(__name__)
 
-VECTORSEARCH_PYTHON = config.RESEARCH_VECTORSEARCH_PYTHON
-VECTORSEARCH_SCRIPT = config.RESEARCH_VECTORSEARCH_SCRIPT
-DEFAULT_COLLECTION = "documents"
+_vault_index = None
+
+def _get_vault_index():
+    global _vault_index
+    if _vault_index is None:
+        _vault_index = build_vault_search_index()
+    return _vault_index
 
 async def _search_obsidian_vault_core(
     query: str, 
     k: int = 10, 
     search_mode: str = "hybrid"
 ) -> str:
-    command = [
-        VECTORSEARCH_PYTHON,
-        VECTORSEARCH_SCRIPT,
-        query,
-        "-k", str(k),
-        "-c", DEFAULT_COLLECTION,
-        "--search-mode", search_mode,
-        "--json",
-    ]
-
     try:
-        # 非同期サブプロセス実行
-        process = await asyncio.create_subprocess_exec(
-            *command, 
-            stdout=asyncio.subprocess.PIPE, 
-            stderr=asyncio.subprocess.PIPE
+        index = _get_vault_index()
+        # 同期的な検索処理を別スレッドで実行
+        results = await asyncio.to_thread(
+            index.search,
+            query=query,
+            limit=k,
+            mode=search_mode
         )
-        stdout, stderr = await process.communicate()
 
-        if process.returncode != 0:
-            logger.error("Search command failed")
-            return json.dumps({"error": "Search command failed"}, ensure_ascii=False)
+        # 検索結果をJSON形式のリストに変換
+        formatted_results = []
+        for hit in results:
+            formatted_results.append({
+                "content": hit.content,
+                "metadata": hit.metadata,
+                "score": hit.score
+            })
 
-        # 検索結果をそのまま文字列（JSON形式）として返す
-        return stdout.decode()
+        return json.dumps(formatted_results, ensure_ascii=False)
 
     except Exception as e:
         logger.exception("Unexpected error during obsidian search")
