@@ -9,6 +9,7 @@ from obsidian_ai_hub import (
     notify_calendar_event,
     notify_today_schedule,
     obsidian_inbox_merge,
+    rebuild_valut,
     research_agent,
     suggest_research_theme,
     summerize_day,
@@ -17,7 +18,6 @@ from obsidian_ai_hub import (
     sync_valut,
 )
 from obsidian_ai_hub.handler import add_research_theme
-from obsidian_ai_hub.utils import reader, extracter
 
 # Configure logging
 logging.basicConfig(
@@ -72,6 +72,11 @@ def main():
         "--sync-vault",
         action="store_true",
         help="Obsidian Vaultをmd-hybrid-searchのインデックスと同期"
+    )
+    parser.add_argument(
+        "--rebuld-vault",
+        action="store_true",
+        help="Obsidian Vaultのmd-hybrid-searchインデックスを再構築"
     )
     parser.add_argument(
         "--research-agent",
@@ -160,6 +165,9 @@ def main():
         ran = True
     if args.sync_vault:
         run_and_log(sync_valut.main, "sync_vault")
+        ran = True
+    if getattr(args, "rebuld_vault"):
+        run_and_log(rebuild_valut.main, "rebuild_vault")
         ran = True
     if args.research_agent:
         if args.theme:
