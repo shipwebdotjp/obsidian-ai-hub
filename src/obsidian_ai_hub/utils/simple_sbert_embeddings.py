@@ -53,9 +53,9 @@ class SimpleSbertEmbeddings:
                         f"Failed to load local model from {path_to_model}: {e}"
                     ) from e
                 logger.warning(
-                    "Failed to load local model %s, falling back to network: %s",
+                    "Failed to load local model %s, falling back to network",
                     path_to_model,
-                    e,
+                    exc_info=True,
                 )
 
         # 2. Try transformers with network fallback if allowed
@@ -65,10 +65,11 @@ class SimpleSbertEmbeddings:
                 # If it was not local, we try model_name
                 if self._try_load_transformers(self.model_name, local_files_only=False):
                     return
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Transformers network loading failed for %s", self.model_name, exc_info=True)
 
             # 3. Try SentenceTransformer with network fallback if allowed
+            logger.info("Trying SentenceTransformer fallback for %s", self.model_name)
             try:
                 st_kwargs = {}
                 if self.cache_dir:
@@ -77,6 +78,7 @@ class SimpleSbertEmbeddings:
                 self._using_transformers = False
                 return
             except Exception as e:
+                logger.error("SentenceTransformer loading failed for %s", self.model_name, exc_info=True)
                 raise RuntimeError(
                     f"Failed to load model {self.model_name} even with network fallback: {e}"
                 ) from e
