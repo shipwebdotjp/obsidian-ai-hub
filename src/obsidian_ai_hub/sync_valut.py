@@ -64,6 +64,7 @@ def build_vault_search_index() -> SearchIndex:
     embedder = SimpleSbertEmbeddings(
         model_name=config.VAULT_INDEX_EMBEDDER_MODEL,
         cache_dir=cache_dir,
+        allow_network_fallback=config.VAULT_INDEX_ALLOW_NETWORK_FALLBACK,
     )
 
     return SearchIndex(
