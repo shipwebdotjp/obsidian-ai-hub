@@ -85,7 +85,9 @@ class SimpleSbertEmbeddings:
     def _resolve_embedding_dim(self) -> int:
         dim = None
         if not self._using_transformers:
-            if hasattr(self._model, "get_sentence_embedding_dimension"):
+            if hasattr(self._model, "get_embedding_dimension"):
+                dim = self._model.get_embedding_dimension()
+            elif hasattr(self._model, "get_sentence_embedding_dimension"):
                 dim = self._model.get_sentence_embedding_dimension()
             elif hasattr(self._model, "dim"):
                 dim = getattr(self._model, "dim")
