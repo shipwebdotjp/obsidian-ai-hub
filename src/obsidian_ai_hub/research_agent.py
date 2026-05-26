@@ -312,8 +312,8 @@ def collect_research_context(theme: str, explicit_context: Optional[str] = None)
         sections.append("## 既存の調査候補\n" + existing_candidates_text)
 
     try:
-        from obsidian_ai_hub.handler.obsidian_vault_retriever import search_obsidian_vault_sync
-        vault_search_results = search_obsidian_vault_sync.invoke({"query": theme, "k": 5})
+        from obsidian_ai_hub.handler.obsidian_vault_retriever import search_obsidian_vault
+        vault_search_results = search_obsidian_vault.invoke({"query": theme, "k": 5})
         if vault_search_results and '"error":' not in vault_search_results:
             sections.append("## Vault 検索結果\n" + vault_search_results)
     except Exception:
