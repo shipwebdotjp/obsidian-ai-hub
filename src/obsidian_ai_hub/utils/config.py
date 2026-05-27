@@ -104,6 +104,11 @@ if VAULT_INDEX_CHROMA_PATH is None:
 VAULT_INDEX_EMBEDDER_MODEL = str(
     _config_value("vault_index", "embedder_model", default="cl-nagoya/ruri-v3-310m")
 )
+VAULT_INDEX_ALLOW_NETWORK_FALLBACK = _env_or_config(
+    "VAULT_INDEX_ALLOW_NETWORK_FALLBACK", "vault_index", "allow_network_fallback", default=False
+)
+if isinstance(VAULT_INDEX_ALLOW_NETWORK_FALLBACK, str):
+    VAULT_INDEX_ALLOW_NETWORK_FALLBACK = VAULT_INDEX_ALLOW_NETWORK_FALLBACK.lower() in ("true", "1", "yes", "on")
 
 # Research Agent
 RESEARCH_OUTPUT_DIR = VAULT_PATH / RESEARCH_DIR_NAME

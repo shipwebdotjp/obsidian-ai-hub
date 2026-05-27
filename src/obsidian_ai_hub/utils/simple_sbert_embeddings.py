@@ -1,13 +1,17 @@
+import logging
 import torch
 from transformers import AutoTokenizer, AutoModel
 from sentence_transformers import SentenceTransformer
 from . import config
 
+logger = logging.getLogger(__name__)
+
 
 class SimpleSbertEmbeddings:
-    def __init__(self, model_name, cache_dir=None):
+    def __init__(self, model_name, cache_dir=None, allow_network_fallback=False):
         self.model_name = model_name
         self.cache_dir = cache_dir
+        self.allow_network_fallback = allow_network_fallback
         self.device = (
             "mps"
             if torch.backends.mps.is_available()
@@ -26,61 +30,99 @@ class SimpleSbertEmbeddings:
             self.query_prefix = ""
             self.doc_prefix = ""
 
-        path_to_model = model_name
-        if config.LOCAL_MODEL_DIR:
-             local_path = config.LOCAL_MODEL_DIR / model_name
-             if local_path.exists():
-                 path_to_model = str(local_path)
-
-        # まずは transformers 側で低メモリ読み込みを試みる
-        try:
-            tokenizer_kwargs = {}
-            model_kwargs = {
-                "torch_dtype": torch.float16,
-                "low_cpu_mem_usage": True,
-                "device_map": "auto",
-            }
-            if cache_dir:
-                tokenizer_kwargs["cache_dir"] = str(cache_dir)
-                model_kwargs["cache_dir"] = str(cache_dir)
-
-            if path_to_model == model_name:
-                tokenizer_kwargs["local_files_only"] = False
-                model_kwargs["local_files_only"] = False
-            else:
-                tokenizer_kwargs["local_files_only"] = True
-                model_kwargs["local_files_only"] = True
-
-            self.tokenizer = AutoTokenizer.from_pretrained(
-                path_to_model, **tokenizer_kwargs
-            )
-            try:
-                self.model = AutoModel.from_pretrained(
-                    path_to_model,
-                    **model_kwargs
-                )
-            except Exception:
-                # device_map が使えない環境向けのフォールバック
-                model_kwargs.pop("device_map", None)
-                model_kwargs.pop("torch_dtype", None)
-                self.model = AutoModel.from_pretrained(
-                    path_to_model, **model_kwargs
-                )
-                # 試しに half にして device に移動
-                try:
-                    self.model = self.model.half().to(self.device)
-                except Exception:
-                    self.model = self.model.to(self.device)
-            self._using_transformers = True
-        except Exception:
-            # transformers で失敗したら元の SentenceTransformer にフォールバック
-            st_kwargs = {}
-            if cache_dir:
-                st_kwargs["cache_folder"] = str(cache_dir)
-            self._model = SentenceTransformer(path_to_model, **st_kwargs)
-            self._using_transformers = False
-
+        self._load_model()
         self.embedding_dim = self._resolve_embedding_dim()
+
+    def _load_model(self):
+        path_to_model = self.model_name
+        is_local = False
+        if config.LOCAL_MODEL_DIR:
+            local_path = config.LOCAL_MODEL_DIR / self.model_name
+            if local_path.exists():
+                path_to_model = str(local_path)
+                is_local = True
+
+        # 1. Try transformers from local path if it exists
+        if is_local:
+            try:
+                if self._try_load_transformers(path_to_model, local_files_only=True):
+                    return
+            except Exception as e:
+                if not self.allow_network_fallback:
+                    raise RuntimeError(
+                        f"Failed to load local model from {path_to_model}: {e}"
+                    ) from e
+                logger.warning(
+                    "Failed to load local model %s, falling back to network",
+                    path_to_model,
+                    exc_info=True,
+                )
+
+        # 2. Try transformers with network fallback if allowed
+        if self.allow_network_fallback:
+            try:
+                # If it was local and failed, we try model_name (which might be in cache or hub)
+                # If it was not local, we try model_name
+                if self._try_load_transformers(self.model_name, local_files_only=False):
+                    return
+            except Exception as e:
+                logger.debug("Transformers network loading failed for %s", self.model_name, exc_info=True)
+
+            # 3. Try SentenceTransformer with network fallback if allowed
+            logger.info("Trying SentenceTransformer fallback for %s", self.model_name)
+            try:
+                st_kwargs = {}
+                if self.cache_dir:
+                    st_kwargs["cache_folder"] = str(self.cache_dir)
+                self._model = SentenceTransformer(self.model_name, **st_kwargs)
+                self._using_transformers = False
+                return
+            except Exception as e:
+                logger.error("SentenceTransformer loading failed for %s", self.model_name, exc_info=True)
+                raise RuntimeError(
+                    f"Failed to load model {self.model_name} even with network fallback: {e}"
+                ) from e
+
+        # If we reach here, it means we couldn't load the model
+        if is_local:
+            raise RuntimeError(
+                f"Failed to load local model {path_to_model} and network fallback is disabled."
+            )
+        else:
+            raise RuntimeError(
+                f"Model {self.model_name} not found locally and network fallback is disabled. "
+                "Set VAULT_INDEX_ALLOW_NETWORK_FALLBACK=True to allow downloading."
+            )
+
+    def _try_load_transformers(self, path_to_model, local_files_only):
+        tokenizer_kwargs = {"local_files_only": local_files_only}
+        model_kwargs = {
+            "torch_dtype": torch.float16,
+            "low_cpu_mem_usage": True,
+            "device_map": "auto",
+            "local_files_only": local_files_only,
+        }
+        if self.cache_dir:
+            tokenizer_kwargs["cache_dir"] = str(self.cache_dir)
+            model_kwargs["cache_dir"] = str(self.cache_dir)
+
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            path_to_model, **tokenizer_kwargs
+        )
+        try:
+            self.model = AutoModel.from_pretrained(path_to_model, **model_kwargs)
+        except Exception:
+            # device_map が使えない環境向けのフォールバック
+            model_kwargs.pop("device_map", None)
+            model_kwargs.pop("torch_dtype", None)
+            self.model = AutoModel.from_pretrained(path_to_model, **model_kwargs)
+            # 試しに half にして device に移動
+            try:
+                self.model = self.model.half().to(self.device)
+            except Exception:
+                self.model = self.model.to(self.device)
+        self._using_transformers = True
+        return True
 
     def _resolve_embedding_dim(self) -> int:
         dim = None
