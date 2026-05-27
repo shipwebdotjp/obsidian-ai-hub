@@ -10,13 +10,14 @@ import os
 import re
 import subprocess
 import tempfile
+from urllib.parse import urlparse
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 
 import whisper
 
-from obsidian_ai_hub.handler import add_research_theme
+from obsidian_ai_hub.handler import add_research_theme, web_extract
 from obsidian_ai_hub.utils import config, extracter, llm_client
 
 logger = logging.getLogger(__name__)
@@ -24,6 +25,129 @@ logger = logging.getLogger(__name__)
 # 処理対象の拡張子
 MARKDOWN_EXTENSIONS = {".md"}
 AUDIO_EXTENSIONS = {".m4a", ".mp3", ".wav"}
+
+def extract_urls(text: str) -> list[str]:
+    """
+    Extract and deduplicate URLs from text with light normalization.
+    """
+    # Regex to find URLs
+    url_pattern = re.compile(r'https?://[^\s)\]]+')
+    found_urls = url_pattern.findall(text)
+
+    normalized_urls = []
+    seen = set()
+    for url in found_urls:
+        # Light normalization: strip trailing punctuation
+        normalized = url.rstrip('.,;)]')
+        if normalized not in seen:
+            normalized_urls.append(normalized)
+            seen.add(normalized)
+
+    return normalized_urls
+
+
+def infer_title(url: str, raw_content: str) -> str:
+    """
+    Infer a title from raw content or fall back to URL-derived label.
+    """
+    if raw_content:
+        # Look for the first non-empty line
+        for line in raw_content.splitlines():
+            stripped = line.strip()
+            if stripped and not stripped.startswith('http'):
+                # Limit title length
+                if len(stripped) > 100:
+                    return stripped[:97] + "..."
+                return stripped
+
+    # Fallback to URL-derived label
+    parsed = urlparse(url)
+    domain = parsed.netloc
+    path = parsed.path.rstrip('/')
+    if path:
+        return f"{domain}{path}"
+    return domain
+
+
+def generate_web_summary(raw_content: str) -> str:
+    """
+    Generate a concise summary of the web content using LLM.
+    """
+    if not raw_content:
+        return ""
+
+    prompt = f"""
+    あなたはWebコンテンツの要約専門家です。
+    以下はWebページから抽出したテキスト内容です。
+    この内容を1〜2文の日本語で簡潔に要約してください。
+
+    ---ここから---
+    {raw_content}
+    ---ここまで---
+    """.strip()
+
+    try:
+        response = llm_client.generate_llm_response(
+            provider="openai",  # Use a smart model for summary if possible
+            model=config.RESEARCH_PROMPT_MODEL,
+            prompt=prompt,
+            temperature=0.3,
+            max_tokens=512,
+        ).strip()
+        return response
+    except Exception:
+        logger.exception("Failed to generate web summary")
+        return ""
+
+
+def process_web_clips(urls: list[str], daily_file: Path, hour_str: str) -> None:
+    """
+    Process a list of URLs, extract content, summarize, and append to daily note.
+    """
+    if not urls:
+        return
+
+    all_entries = []
+    # Chunk URLs into batches of 20 (Tavily limit)
+    for i in range(0, len(urls), 20):
+        batch = urls[i : i + 20]
+        try:
+            # web_extract.web_extract.invoke returns a JSON string
+            results_json = web_extract.web_extract.invoke({"urls": batch})
+            results = json.loads(results_json)
+
+            if not isinstance(results, list):
+                logger.error("web_extract returned non-list: %s", results)
+                for url in batch:
+                    all_entries.append(f"- {hour_str} [web] {url}")
+                continue
+
+            # Map results by URL for easier lookup
+            result_map = {r.get("url"): r.get("raw_content") for r in results if isinstance(r, dict)}
+
+            for url in batch:
+                raw_content = result_map.get(url)
+                if raw_content:
+                    title = infer_title(url, raw_content)
+                    summary = generate_web_summary(raw_content)
+                    entry = f"- {hour_str} [web] [{title}]({url})"
+                    if summary:
+                        entry += f"\n  {summary}"
+                    all_entries.append(entry)
+                else:
+                    # Fallback if no content extracted
+                    all_entries.append(f"- {hour_str} [web] {url}")
+
+        except Exception:
+            logger.exception("Failed to process web clip batch")
+            for url in batch:
+                all_entries.append(f"- {hour_str} [web] {url}")
+
+    if all_entries:
+        extracter.append_to_subheader_file(
+            daily_file.as_posix(), "## 📝メモ", all_entries
+        )
+
 
 @dataclass(frozen=True)
 class InboxClassification:
@@ -136,6 +260,11 @@ def merge_content_into_daily_note(
     daily_file: Path,
     hour_str: str,
 ) -> str:
+    urls = extract_urls(content)
+    if urls:
+        process_web_clips(urls, daily_file, hour_str)
+        return "web"
+
     location = extracter.get_frontmatter_value(content, "location")
     if location:
         subheader = "## 📍今日の移動"
