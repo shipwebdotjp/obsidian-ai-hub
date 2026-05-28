@@ -27,6 +27,8 @@ dependencies = [
     "pyobjc-framework-vision>=12.1",
     "pyobjc-framework-quartz>=12.1",
     "wurlitzer>=3.1.1",
+    "atomacos>=3.3.0",
+    "langchain-huggingface>=1.2.2",
 ]
 
 [tool.setuptools.packages.find]

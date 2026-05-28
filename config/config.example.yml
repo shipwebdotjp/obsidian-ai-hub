@@ -6,6 +6,7 @@ vault:
   template: template
   knowledge: copilot/knowledge
   research: research
+  activity: activity
 
 files:
   daily_note: daily.md

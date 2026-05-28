@@ -33,13 +33,13 @@ def main(display: int = 1):
         inbox_path.mkdir(parents=True, exist_ok=True)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"screen_{timestamp}.jpg"
+    filename = f"screen_{timestamp}.png"
     target_path = get_unique_path(inbox_path, filename)
 
-    # Run screencapture -t jpg -x -D <display> <path> via subprocess.run, not through a shell.
+    # Run screencapture -t png@ -x -D <display> <path> via subprocess.run, not through a shell.
     cmd = [
         "screencapture",
-        "-t", "jpg",
+        "-t", "png",
         "-x",
         "-D", str(display),
         str(target_path)
@@ -52,6 +52,7 @@ def main(display: int = 1):
     except subprocess.CalledProcessError as e:
         logger.error(f"Failed to capture screenshot: {e}")
         raise
+    return str(target_path)
 
 if __name__ == "__main__":
     import argparse
