@@ -16,6 +16,7 @@ from obsidian_ai_hub import (
     summerize_week,
     sync_knowledge,
     sync_valut,
+    take_screenshot,
 )
 from obsidian_ai_hub.handler import add_research_theme
 
@@ -92,6 +93,17 @@ def main():
         "--suggest-research-theme",
         action="store_true",
         help="最近30日のノートから研究候補3件を生成して追記"
+    )
+    parser.add_argument(
+        "--screenshot",
+        action="store_true",
+        help="macOSのスクリーンショットを撮影してInboxに保存"
+    )
+    parser.add_argument(
+        "--display",
+        type=int,
+        default=1,
+        help="--screenshot で使用するディスプレイ番号（デフォルト: 1）"
     )
     parser.add_argument(
         "--theme",
@@ -185,6 +197,9 @@ def main():
         ran = True
     if args.suggest_research_theme:
         run_and_log(suggest_research_theme.main, "suggest_research_theme")
+        ran = True
+    if args.screenshot:
+        run_and_log(lambda: take_screenshot.main(args.display), "take_screenshot")
         ran = True
     if not ran:
         parser.print_help()
