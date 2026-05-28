@@ -9,7 +9,6 @@ from obsidian_ai_hub import (
     notify_calendar_event,
     notify_today_schedule,
     obsidian_inbox_merge,
-    logging_activity,
     rebuild_valut,
     research_agent,
     suggest_research_theme,
@@ -208,6 +207,7 @@ def main():
         run_and_log(lambda: take_screenshot.main(args.display), "take_screenshot")
         ran = True
     if args.log_activity:
+        from obsidian_ai_hub import logging_activity
         run_and_log(logging_activity.main, "log_activity")
         ran = True
     if not ran:

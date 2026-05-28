@@ -39,6 +39,10 @@ def main():
         logger.error(f"Failed to get active window info: {e}")
         window_info = {"app_name": "Unknown", "window_title": "Unknown"}
 
+    if not isinstance(window_info, dict):
+        logger.error("Invalid active window info payload. Falling back to Unknown values.")
+        window_info = {}
+
     app_name = window_info.get("app_name", "Unknown")
     window_title = window_info.get("window_title", "Unknown")
 
@@ -46,9 +50,7 @@ def main():
     now = datetime.now()
     # YYYY/MM/DD
     date_path = now.strftime("%Y/%m/%d")
-    screenshot_base_dir = config.SCREENSHOT_DIR
-    if not screenshot_base_dir:
-        screenshot_base_dir = config.VAULT_PATH / "screenshots"
+    screenshot_base_dir = config.SCREENSHOT_PATH
 
     save_dir = screenshot_base_dir / date_path
     save_dir.mkdir(parents=True, exist_ok=True)
@@ -60,14 +62,17 @@ def main():
     screenshot_paths = []
 
     for i, screen in enumerate(screens):
-        display_num = i + 1
-        # YYYY-MM-DD_HH-MM-SS_{DisplayNumber}_{連番}.png
+        # macOS screencapture -D requires the CGDirectDisplayID
+        description = screen.deviceDescription()
+        display_id = description.objectForKey_("NSScreenNumber")
+
+        # YYYY-MM-DD_HH-MM-SS_{DisplayID}_{連番}.png
         # 既存の get_unique_path を使うためにまずベースのファイル名を決める
-        filename = f"{timestamp_str}_{display_num}_1.png"
+        filename = f"{timestamp_str}_{display_id}.png"
         target_path = get_unique_path(save_dir, filename)
 
         try:
-            capture_screen(target_path, display=display_num)
+            capture_screen(target_path, display=display_id)
             screenshot_paths.append(str(target_path))
 
             # 3. OCR実行
@@ -75,7 +80,7 @@ def main():
             normalized_text = normalize_ocr_results(ocr_results)
             all_ocr_text.extend(normalized_text)
         except Exception as e:
-            logger.error(f"Failed to process display {display_num}: {e}")
+            logger.error(f"Failed to process display {display_id}: {e}")
             # 他のディスプレイの処理を止めない
 
     # OCR結果の重複排除（複数ディスプレイ間）
@@ -91,7 +96,7 @@ def main():
 {ocr_text_combined}
 """
 
-    summary = "No activity detected."
+    summary = "アクティビティを検出できませんでした。"
     if ocr_text_combined or app_name != "Unknown":
         try:
             summary = llm_client.generate_llm_response(
@@ -102,7 +107,7 @@ def main():
             )
         except Exception as e:
             logger.error(f"LLM summarization failed: {e}")
-            summary = f"Activity in {app_name} (Summarization failed)"
+            summary = f"{app_name} での作業を検出しました（要約に失敗しました）。"
 
     # 5. JSONL 追記
     # vault.activity/YYYY/MM/YYYY-MM-DD.jsonl
