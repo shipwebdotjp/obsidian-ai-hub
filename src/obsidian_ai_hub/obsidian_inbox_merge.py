@@ -94,6 +94,8 @@ def generate_web_summary(raw_content: str) -> str:
             temperature=0.3,
             max_tokens=512,
         ).strip()
+        # 改行
+        response = response.replace("\n", "\n  ")
         return response
     except Exception:
         logger.exception("Failed to generate web summary")
@@ -114,7 +116,7 @@ def process_web_clips(urls: list[str], daily_file: Path, hour_str: str) -> None:
         try:
             # web_extract.web_extract.invoke returns a JSON string
             results_json = web_extract.web_extract.invoke({"urls": batch})
-            results = json.loads(results_json)
+            results = json.loads(results_json)["results"]
 
             if not isinstance(results, list):
                 logger.error("web_extract returned non-list: %s", results)
@@ -123,19 +125,28 @@ def process_web_clips(urls: list[str], daily_file: Path, hour_str: str) -> None:
                 continue
 
             # Map results by URL for easier lookup
-            result_map = {r.get("url"): r.get("raw_content") for r in results if isinstance(r, dict)}
+            # title も含めてマッピング
+            result_map = {
+                r.get("url"): {
+                    "raw_content": r.get("raw_content"),
+                    "title": r.get("title"),
+                }
+                for r in results if isinstance(r, dict)
+            }
+
 
             for url in batch:
-                raw_content = result_map.get(url)
-                if raw_content:
-                    title = infer_title(url, raw_content)
+                result = result_map.get(url)
+                if result and result.get("raw_content"):
+                    raw_content = result["raw_content"]
+                    # web_extract の title を優先し、なければ infer_title にフォールバック
+                    title = result.get("title") or infer_title(url, raw_content)
                     summary = generate_web_summary(raw_content)
                     entry = f"- {hour_str} [web] [{title}]({url})"
                     if summary:
                         entry += f"\n  {summary}"
                     all_entries.append(entry)
                 else:
-                    # Fallback if no content extracted
                     all_entries.append(f"- {hour_str} [web] {url}")
 
         except Exception:
