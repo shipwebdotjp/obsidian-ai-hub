@@ -1,11 +1,13 @@
+import base64
 import json
+import mimetypes
 import os
 import time
 from pathlib import Path
 from typing import Any, Sequence
 import logging
 
-from langchain_core.messages import HumanMessage, ToolMessage
+from langchain_core.messages import HumanMessage, ToolMessage, BaseMessage
 from langchain_core.tools import BaseTool
 from obsidian_ai_hub.utils import config
 
@@ -69,12 +71,50 @@ def _content_to_text(content: Any) -> str:
     return str(content).strip()
 
 
+def _prepare_messages(
+    provider: str,
+    prompt: str,
+    files: Sequence[Path | str] | None = None
+) -> list[BaseMessage]:
+    """
+    画像を含むマルチモーダルメッセージを構築する。
+    """
+    if not files:
+        return [HumanMessage(content=prompt)]
+
+    if provider == "local":
+        logger.warning("Multimodal is not supported for provider 'local'. Using prompt only.")
+        return [HumanMessage(content=prompt)]
+
+    content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
+
+    for f in files:
+        p = Path(f)
+        if not p.exists():
+            raise FileNotFoundError(f"File not found: {f}")
+
+        mime_type, _ = mimetypes.guess_type(str(p))
+        if not mime_type:
+            mime_type = "application/octet-stream"
+
+        with open(p, "rb") as image_file:
+            encoded_string = base64.b64encode(image_file.read()).decode("utf-8")
+
+        content.append({
+            "type": "image_url",
+            "image_url": {"url": f"data:{mime_type};base64,{encoded_string}"}
+        })
+
+    return [HumanMessage(content=content)]
+
+
 def generate_llm_response(
     provider: str,
     model: str,
     prompt: str,
     temperature: float = 0.7,
     max_tokens: int = 512,
+    files: Sequence[Path | str] | None = None,
 ) -> str:
     """
     指定のモデルとプロンプトで OpenAI/Gemini/Local/Ollama を呼び出し、
@@ -82,6 +122,8 @@ def generate_llm_response(
 
     既存コードとの互換性のため、戻り値は str のままにしている。
     """
+    messages = _prepare_messages(provider, prompt, files)
+
     llm = create_langchain_llm(
         provider=provider,
         model=model,
@@ -90,7 +132,7 @@ def generate_llm_response(
     )
 
     def _call() -> str:
-        message = llm.invoke([HumanMessage(content=prompt)])
+        message = llm.invoke(messages)
         return _content_to_text(message.content)
 
     return _with_exponential_backoff(_call)
@@ -104,11 +146,14 @@ def generate_llm_response_with_tools(
     temperature: float = 0.7,
     max_tokens: int = 512,
     max_iterations: int = 10,
+    files: Sequence[Path | str] | None = None,
 ) -> str:
     """
     ツール呼び出しをサポートしたLLMレスポンス生成。
     LLMがツール呼び出しを要求する限りループし、最終的なテキスト回答を返す。
     """
+    messages = _prepare_messages(provider, prompt, files)
+
     llm = create_langchain_llm(
         provider=provider,
         model=model,
@@ -118,8 +163,6 @@ def generate_llm_response_with_tools(
 
     llm_with_tools = llm.bind_tools(list(tools))
     tools_by_name = {tool.name: tool for tool in tools}
-
-    messages = [HumanMessage(content=prompt)]
 
     iterations = 0
     while iterations < max_iterations:
