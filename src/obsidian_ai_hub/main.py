@@ -9,6 +9,7 @@ from obsidian_ai_hub import (
     notify_calendar_event,
     notify_today_schedule,
     obsidian_inbox_merge,
+    logging_activity,
     rebuild_valut,
     research_agent,
     suggest_research_theme,
@@ -98,6 +99,11 @@ def main():
         "--screenshot",
         action="store_true",
         help="macOSのスクリーンショットを撮影してInboxに保存"
+    )
+    parser.add_argument(
+        "--log-activity",
+        action="store_true",
+        help="アクティビティログを記録（ウィンドウ情報、スクリーンショット、OCR、要約）"
     )
     parser.add_argument(
         "--display",
@@ -200,6 +206,9 @@ def main():
         ran = True
     if args.screenshot:
         run_and_log(lambda: take_screenshot.main(args.display), "take_screenshot")
+        ran = True
+    if args.log_activity:
+        run_and_log(logging_activity.main, "log_activity")
         ran = True
     if not ran:
         parser.print_help()
