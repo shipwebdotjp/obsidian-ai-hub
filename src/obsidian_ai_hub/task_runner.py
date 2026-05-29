@@ -25,7 +25,7 @@ def parse_cron_field(value, min_val, max_val) -> set[int]:
         for v in value:
             result.update(parse_cron_field(v, min_val, max_val))
         if not result:
-            raise ValueError(f"Empty list in cron field")
+            raise ValueError("Empty list in cron field")
         return result
 
     if not isinstance(value, str):
@@ -43,8 +43,8 @@ def parse_cron_field(value, min_val, max_val) -> set[int]:
         base, step_str = value.split("/", 1)
         try:
             step = int(step_str)
-        except ValueError:
-            raise ValueError(f"Invalid step: {step_str}")
+        except ValueError as err:
+            raise ValueError(f"Invalid step: {step_str}") from err
         if step <= 0:
             raise ValueError(f"Step must be positive: {step}")
 
@@ -54,13 +54,13 @@ def parse_cron_field(value, min_val, max_val) -> set[int]:
             start_str, end_str = base.split("-")
             try:
                 start, end = int(start_str), int(end_str)
-            except ValueError:
-                raise ValueError(f"Invalid range in step: {base}")
+            except ValueError as err:
+                raise ValueError(f"Invalid range in step: {base}") from err
         else:
             try:
                 start = int(base)
-            except ValueError:
-                raise ValueError(f"Invalid base in step: {base}")
+            except ValueError as err:
+                raise ValueError(f"Invalid base in step: {base}") from err
             end = max_val
 
         if not (min_val <= start <= max_val) or not (min_val <= end <= max_val):
@@ -74,8 +74,8 @@ def parse_cron_field(value, min_val, max_val) -> set[int]:
         start_str, end_str = value.split("-")
         try:
             start, end = int(start_str), int(end_str)
-        except ValueError:
-            raise ValueError(f"Invalid range: {value}")
+        except ValueError as err:
+            raise ValueError(f"Invalid range: {value}") from err
         if not (min_val <= start <= max_val) or not (min_val <= end <= max_val):
             raise ValueError(f"Range out of bounds: {value} for [{min_val}, {max_val}]")
         if start > end:
@@ -90,8 +90,8 @@ def parse_cron_field(value, min_val, max_val) -> set[int]:
         if not (min_val <= val <= max_val):
             raise ValueError(f"Value {val} out of range [{min_val}, {max_val}]")
         return {val}
-    except ValueError:
-        raise ValueError(f"Invalid cron field value: {value}")
+    except ValueError as err:
+        raise ValueError(f"Invalid cron field value: {value}") from err
 
 
 def compute_target(schedule: dict, now: datetime) -> datetime:

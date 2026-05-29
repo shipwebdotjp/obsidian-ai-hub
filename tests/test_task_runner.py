@@ -168,3 +168,66 @@ def test_latest_execution_only():
 
     now2 = datetime(2026, 1, 29, 10, 15, 39)
     assert compute_target(schedule, now2) == datetime(2026, 1, 29, 10, 15, 30)
+
+
+def test_hourly_multi_field_cron():
+    now = datetime(2026, 1, 29, 10, 15, 30)
+    # 0,30 minutes, 0 seconds
+    schedule = {"type": "hourly", "minute": "0,30", "second": 0}
+    # latest <= 10:15:30 is 10:00:00
+    expected = datetime(2026, 1, 29, 10, 0, 0)
+    assert compute_target(schedule, now) == expected
+
+    now2 = datetime(2026, 1, 29, 10, 35, 0)
+    # latest <= 10:35:00 is 10:30:00
+    expected2 = datetime(2026, 1, 29, 10, 30, 0)
+    assert compute_target(schedule, now2) == expected2
+
+
+def test_daily_step_hour():
+    now = datetime(2026, 1, 29, 10, 15, 30)
+    # every 6 hours (0, 6, 12, 18), 0 min, 0 sec
+    schedule = {"type": "daily", "hour": "*/6", "minute": 0, "second": 0}
+    # latest <= 10:15 is 06:00
+    expected = datetime(2026, 1, 29, 6, 0, 0)
+    assert compute_target(schedule, now) == expected
+
+
+def test_weekly_range_weekday():
+    # 2026-01-29 is Thursday (weekday=3)
+    now = datetime(2026, 1, 29, 10, 0, 0)
+    # Monday-Wednesday (0-2), at 09:00
+    schedule = {"type": "weekly", "weekday": "0-2", "hour": 9, "minute": 0}
+    # latest <= Thursday 10:00 is Wednesday 09:00
+    expected = datetime(2026, 1, 28, 9, 0, 0)
+    assert compute_target(schedule, now) == expected
+
+
+def test_monthly_list_day():
+    now = datetime(2026, 1, 29, 10, 0, 0)
+    # 1st and 15th, at 09:00
+    schedule = {"type": "monthly", "day": "1,15", "hour": 9, "minute": 0}
+    # latest <= Jan 29 is Jan 15
+    expected = datetime(2026, 1, 15, 9, 0, 0)
+    assert compute_target(schedule, now) == expected
+
+
+def test_cross_field_boundary_backtrack():
+    now = datetime(2026, 1, 29, 0, 5, 0)
+    # Every hour at minute 10
+    schedule = {"type": "hourly", "minute": 10}
+    # latest <= 00:05:00 is 23:10:00 of previous day
+    expected = datetime(2026, 1, 28, 23, 10, 0)
+    assert compute_target(schedule, now) == expected
+
+
+def test_complex_yaml_array_multi_field():
+    now = datetime(2026, 1, 29, 10, 0, 0)
+    schedule = {
+        "type": "daily",
+        "hour": [8, 12, 16],
+        "minute": [0, 30]
+    }
+    # latest <= 10:00:00 is 08:30:00
+    expected = datetime(2026, 1, 29, 8, 30, 0)
+    assert compute_target(schedule, now) == expected
