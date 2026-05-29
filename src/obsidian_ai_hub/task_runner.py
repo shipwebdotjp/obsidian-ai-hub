@@ -14,86 +14,167 @@ DEFAULT_TASK_FILE = config.BASE_DIR / "tasks" / "tasks.yml"
 LOCAL_TASK_FILE = config.BASE_DIR / "tasks" / "tasks.local.yml"
 STATE_FILE = config.BASE_DIR / "tasks" / "last_run.json"
 
+def parse_cron_field(value, min_val, max_val) -> set[int]:
+    if isinstance(value, int):
+        if not (min_val <= value <= max_val):
+            raise ValueError(f"Value {value} out of range [{min_val}, {max_val}]")
+        return {value}
+
+    if isinstance(value, list):
+        result = set()
+        for v in value:
+            result.update(parse_cron_field(v, min_val, max_val))
+        if not result:
+            raise ValueError(f"Empty list in cron field")
+        return result
+
+    if not isinstance(value, str):
+        raise ValueError(f"Invalid type for cron field: {type(value)}")
+
+    if "," in value:
+        result = set()
+        for part in value.split(","):
+            result.update(parse_cron_field(part.strip(), min_val, max_val))
+        if not result:
+            raise ValueError(f"Empty cron field: {value}")
+        return result
+
+    if "/" in value:
+        base, step_str = value.split("/", 1)
+        try:
+            step = int(step_str)
+        except ValueError:
+            raise ValueError(f"Invalid step: {step_str}")
+        if step <= 0:
+            raise ValueError(f"Step must be positive: {step}")
+
+        if base == "*":
+            start, end = min_val, max_val
+        elif "-" in base:
+            start_str, end_str = base.split("-")
+            try:
+                start, end = int(start_str), int(end_str)
+            except ValueError:
+                raise ValueError(f"Invalid range in step: {base}")
+        else:
+            try:
+                start = int(base)
+            except ValueError:
+                raise ValueError(f"Invalid base in step: {base}")
+            end = max_val
+
+        if not (min_val <= start <= max_val) or not (min_val <= end <= max_val):
+            raise ValueError(f"Range out of bounds: {base} for [{min_val}, {max_val}]")
+        if start > end:
+            raise ValueError(f"Invalid range: {start}-{end}")
+
+        return set(range(start, end + 1, step))
+
+    if "-" in value:
+        start_str, end_str = value.split("-")
+        try:
+            start, end = int(start_str), int(end_str)
+        except ValueError:
+            raise ValueError(f"Invalid range: {value}")
+        if not (min_val <= start <= max_val) or not (min_val <= end <= max_val):
+            raise ValueError(f"Range out of bounds: {value} for [{min_val}, {max_val}]")
+        if start > end:
+            raise ValueError(f"Invalid range: {start}-{end}")
+        return set(range(start, end + 1))
+
+    if value == "*":
+        return set(range(min_val, max_val + 1))
+
+    try:
+        val = int(value)
+        if not (min_val <= val <= max_val):
+            raise ValueError(f"Value {val} out of range [{min_val}, {max_val}]")
+        return {val}
+    except ValueError:
+        raise ValueError(f"Invalid cron field value: {value}")
+
+
 def compute_target(schedule: dict, now: datetime) -> datetime:
     t = schedule["type"]
+    if t not in ["minutely", "hourly", "daily", "weekly", "monthly"]:
+        raise ValueError(f"unknown schedule type: {t}")
 
-    if t == "minutely":
-        # 毎分 second 秒
-        second = schedule.get("second", 0)
-        candidate = now.replace(second=second, microsecond=0)
-        if candidate > now:
-            candidate -= timedelta(minutes=1)
-        return candidate
+    now = now.replace(microsecond=0)
 
-    if t == "hourly":
-        # 毎時 minute 分
-        minute = schedule["minute"]
-        candidate = now.replace(minute=minute, second=0, microsecond=0)
-        if candidate > now:
-            candidate -= timedelta(hours=1)
-        return candidate
+    # 許容値の集合を定義（降順ソート済みリストとして保持）
+    seconds = sorted(list(parse_cron_field(schedule.get("second", 0), 0, 59)), reverse=True)
+    minutes = sorted(list(parse_cron_field(schedule.get("minute", 0), 0, 59)), reverse=True)
+    hours = sorted(list(parse_cron_field(schedule.get("hour", 0), 0, 23)), reverse=True)
+    days = sorted(list(parse_cron_field(schedule.get("day", 1), 1, 31)), reverse=True)
+    weekdays = parse_cron_field(schedule.get("weekday", "*"), 0, 6)
 
-    if t == "daily":
-        # 毎日 hour:minute
-        hour = schedule["hour"]
-        minute = schedule["minute"]
-        candidate = datetime.combine(
-            now.date(),
-            time(hour, minute)
-        )
-        if candidate > now:
-            candidate -= timedelta(days=1)
-        return candidate
+    def is_valid(dt: datetime) -> bool:
+        if dt.second not in seconds:
+            return False
+        if t == "minutely":
+            return True
+        if dt.minute not in minutes:
+            return False
+        if t == "hourly":
+            return True
+        if dt.hour not in hours:
+            return False
+        if t == "daily":
+            return True
+        if t == "weekly":
+            return dt.weekday() in weekdays
+        if t == "monthly":
+            return dt.day in days
+        return False
 
-    if t == "weekly":
-        # 毎週 weekday の hour:minute
-        weekday = schedule["weekday"]  # 0=Mon
-        hour = schedule["hour"]
-        minute = schedule["minute"]
+    curr = now
+    while True:
+        if is_valid(curr):
+            return curr
 
-        today_weekday = now.weekday()
-        delta_days = (today_weekday - weekday) % 7
-        candidate_date = now.date() - timedelta(days=delta_days)
-        candidate = datetime.combine(
-            candidate_date,
-            time(hour, minute)
-        )
-        if candidate > now:
-            candidate -= timedelta(days=7)
-        return candidate
+        # フィールドごとに効率的に戻る
+        if curr.second not in seconds:
+            next_s = next((s for s in seconds if s < curr.second), None)
+            if next_s is not None:
+                curr = curr.replace(second=next_s)
+            else:
+                curr = (curr - timedelta(minutes=1)).replace(second=seconds[0])
+            continue
 
-    if t == "monthly":
-        # 毎月 day の hour:minute
-        day = schedule["day"]
-        hour = schedule["hour"]
-        minute = schedule["minute"]
+        if t == "minutely":
+            curr -= timedelta(minutes=1)
+            curr = curr.replace(second=seconds[0])
+            continue
 
-        year = now.year
-        month = now.month
+        if curr.minute not in minutes:
+            next_m = next((m for m in minutes if m < curr.minute), None)
+            if next_m is not None:
+                curr = curr.replace(minute=next_m, second=seconds[0])
+            else:
+                curr = (curr - timedelta(hours=1)).replace(minute=minutes[0], second=seconds[0])
+            continue
 
-        def make_candidate(y, m):
-            return datetime(y, m, day, hour, minute)
+        if t == "hourly":
+            curr -= timedelta(hours=1)
+            curr = curr.replace(minute=minutes[0], second=seconds[0])
+            continue
 
-        try:
-            candidate = make_candidate(year, month)
-        except ValueError:
-            # 31日など存在しない日はスキップ → 前月
-            month -= 1
-            if month == 0:
-                month = 12
-                year -= 1
-            candidate = make_candidate(year, month)
+        if curr.hour not in hours:
+            next_h = next((h for h in hours if h < curr.hour), None)
+            if next_h is not None:
+                curr = curr.replace(hour=next_h, minute=minutes[0], second=seconds[0])
+            else:
+                curr = (curr - timedelta(days=1)).replace(hour=hours[0], minute=minutes[0], second=seconds[0])
+            continue
 
-        if candidate > now:
-            month -= 1
-            if month == 0:
-                month = 12
-                year -= 1
-            candidate = make_candidate(year, month)
+        if t == "daily":
+            curr -= timedelta(days=1)
+            curr = curr.replace(hour=hours[0], minute=minutes[0], second=seconds[0])
+            continue
 
-        return candidate
-
-    raise ValueError(f"unknown schedule type: {t}")
+        # weekly と monthly は1日ずつ戻る
+        curr -= timedelta(days=1)
+        curr = curr.replace(hour=hours[0], minute=minutes[0], second=seconds[0])
 
 def load_tasks():
     task_file = LOCAL_TASK_FILE if LOCAL_TASK_FILE.exists() else DEFAULT_TASK_FILE
