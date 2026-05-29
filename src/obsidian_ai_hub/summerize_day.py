@@ -22,7 +22,7 @@ INTENT_ENUM = [
 ]
 
 PROMPT = """
-あなたは日次ログ要約器です。以下の「今日のデイリーノート」、「セッション要約一覧（JSON）」だけを根拠に、日本語でその日の要約を書いてください。
+あなたは日次ログ要約器です。以下の「今日のデイリーノート」、「セッション要約一覧（JSON）」、「アクティビティログ(JSONL)」だけを根拠に、日本語でその日の要約を書いてください。
 
 要約:
 -  500文字以内
@@ -36,17 +36,20 @@ PROMPT = """
 
 セッション要約一覧:
 {SESSION_SUMMARIES}
+
+アクティビティログ(JSONL):
+{ACTIVITY_LOGS}
 """
 
 
-def get_daily_ai_summary(daily_content: str) -> str:
+def get_daily_ai_summary(target_date: datetime, daily_content: str) -> str:
     """
     指定された日付のAIログから metadata を抽出し、LLMで要約を生成。
     結果をファイルに追記。
     """
-    logs = load_conversation_logs(config.AI_LOG_PATH)
-    
-    
+    logs = load_conversation_logs(config.AI_LOG_PATH, target_date)
+    activity_logs = load_activity_logs(target_date)
+
     # LLM入力用に、全 metadata を配列として連結した文字列を生成
     # → 個別にLLMかける or 全体をまとめたJSONとして渡す（ここでは全件まとめて）
     metadata_combined = json.dumps(
@@ -55,8 +58,18 @@ def get_daily_ai_summary(daily_content: str) -> str:
         indent=2
     )
 
+    activity_combined = json.dumps(
+        activity_logs,
+        ensure_ascii=False,
+        indent=2
+    )
+
     # PROMPT を更新して実行
-    prompt = PROMPT.replace("{SESSION_SUMMARIES}", metadata_combined).replace("{DAILY_NOTE_CONTENT}", daily_content)  # プレースホルダを置換
+    prompt = (
+        PROMPT.replace("{SESSION_SUMMARIES}", metadata_combined)
+        .replace("{ACTIVITY_LOGS}", activity_combined)
+        .replace("{DAILY_NOTE_CONTENT}", daily_content)
+    )
 
     # return "エラー発生: LLM呼び出し失敗"  # デバッグのため一旦LLM呼び出しを停止
     try:
@@ -72,10 +85,30 @@ def get_daily_ai_summary(daily_content: str) -> str:
         logger.exception("Failed to generate daily AI summary")
         return f"エラー発生: {type(e).__name__}"
     
-def load_conversation_logs(log_file_dir: str) -> list[dict]:
+def load_activity_logs(target_date: datetime) -> list[dict]:
+    activity_log_file = Path(config.ACTIVITY_PATH) / target_date.strftime("%Y/%m") / target_date.strftime("%Y-%m-%d.jsonl")
     logs = []
-    date = datetime.now() - timedelta(days=1)  # 昨日の日付を取得
-    date_str = date.strftime('%Y%m%d')
+    if not activity_log_file.exists():
+        return logs
+
+    with open(activity_log_file, "r", encoding="utf-8") as f:
+        for line in f:
+            try:
+                data = json.loads(line)
+                logs.append({
+                    "timestamp": data.get("timestamp"),
+                    "app_name": data.get("app_name"),
+                    "window_title": data.get("window_title"),
+                    "summary": data.get("summary")
+                })
+            except json.JSONDecodeError:
+                logger.error("Error decoding JSON from activity log file")
+    return logs
+
+
+def load_conversation_logs(log_file_dir: str, target_date: datetime) -> list[dict]:
+    logs = []
+    date_str = target_date.strftime('%Y%m%d')
     log_dir = Path(log_file_dir)
     for file in log_dir.glob(f'*@{date_str}*.json'):
         with open(file, "r", encoding="utf-8") as f:
@@ -95,7 +128,7 @@ def main():
 
     daily_file = reader.get_daily_note_path(yesterday)
     content_yesterday = reader.get_daily_note_content(yesterday)    
-    content_to_add = get_daily_ai_summary(content_yesterday)
+    content_to_add = get_daily_ai_summary(yesterday, content_yesterday)
     if content_to_add.startswith("エラー発生"):
         print(content_to_add)
         return
