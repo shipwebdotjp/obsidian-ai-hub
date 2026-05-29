@@ -416,6 +416,7 @@ def main():
                     provider=config.INBOX_AUDIO_CORRECTION_PROVIDER,
                     model=config.INBOX_AUDIO_CORRECTION_MODEL,
                     prompt=prompt,
+                    max_tokens=8192,
                 ).strip()
                 content = response
                 if not content:

@@ -51,3 +51,4 @@ vault_index:
   sqlite_path: /path/to/your/obsidian-ai-hub/vault-index/search.sqlite
   chroma_path: /path/to/your/obsidian-ai-hub/vault-index/chroma
   embedder_model: cl-nagoya/ruri-v3-310m
+  allow_network_fallback: true

@@ -123,7 +123,7 @@ def generate_llm_response(
     既存コードとの互換性のため、戻り値は str のままにしている。
     """
     messages = _prepare_messages(provider, prompt, files)
-
+    logger.info(f"Prepared messages for LLM: {messages}")
     llm = create_langchain_llm(
         provider=provider,
         model=model,
@@ -133,6 +133,7 @@ def generate_llm_response(
 
     def _call() -> str:
         message = llm.invoke(messages)
+        logger.info(f"LLM response: {message}")
         return _content_to_text(message.content)
 
     return _with_exponential_backoff(_call)

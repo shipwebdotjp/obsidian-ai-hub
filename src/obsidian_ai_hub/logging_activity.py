@@ -31,6 +31,19 @@ def normalize_ocr_results(ocr_results):
         seen.add(text)
     return normalized
 
+
+def should_skip_activity_logging(app_name: str | None) -> bool:
+    if app_name is None:
+        return True
+
+    normalized_app_name = str(app_name).strip()
+    return (
+        normalized_app_name == ""
+        or normalized_app_name == "Unknown"
+        or normalized_app_name.lower() == "loginwindow"
+    )
+
+
 def main():
     # 1. 前面アプリ情報の取得
     try:
@@ -45,6 +58,10 @@ def main():
 
     app_name = window_info.get("app_name", "Unknown")
     window_title = window_info.get("window_title", "Unknown")
+
+    if should_skip_activity_logging(app_name):
+        logger.debug("Skipping activity logging because active app is unavailable or locked.")
+        return
 
     # 2. 各ディスプレイのスクリーンショット保存
     now = datetime.now()
@@ -97,17 +114,16 @@ def main():
 """
 
     summary = "アクティビティを検出できませんでした。"
-    if ocr_text_combined or app_name != "Unknown":
-        try:
-            summary = llm_client.generate_llm_response(
-                provider=config.MAKE_TODAY_TARGET_PROVIDER,
-                model=config.MAKE_TODAY_TARGET_MODEL,
-                prompt=prompt,
-                max_tokens=100
-            )
-        except Exception as e:
-            logger.error(f"LLM summarization failed: {e}")
-            summary = f"{app_name} での作業を検出しました（要約に失敗しました）。"
+    try:
+        summary = llm_client.generate_llm_response(
+            provider=config.MAKE_TODAY_TARGET_PROVIDER,
+            model=config.MAKE_TODAY_TARGET_MODEL,
+            prompt=prompt,
+            max_tokens=8192
+        )
+    except Exception as e:
+        logger.error(f"LLM summarization failed: {e}")
+        summary = f"{app_name} での作業を検出しました（要約に失敗しました）。"
 
     # 5. JSONL 追記
     # vault.activity/YYYY/MM/YYYY-MM-DD.jsonl

@@ -199,7 +199,8 @@ today_weekday: {todays_weekday}
     response = llm_client.generate_llm_response(
         provider=config.MAKE_TODAY_TARGET_PROVIDER,
         model=config.MAKE_TODAY_TARGET_MODEL,
-        prompt=prompt
+        prompt=prompt,
+        max_tokens=8192,
     ).strip()
     print(f"Response: {response}")
 

@@ -120,7 +120,7 @@ optional_previous:
         provider="ollama",  # local
         model="gemma4:e4b",
         prompt=prompt,
-        max_tokens=1024,
+        max_tokens=8192,
     ).strip()
     logger.info("Generated weekly summary")
 
