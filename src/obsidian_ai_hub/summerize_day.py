@@ -95,11 +95,22 @@ def load_activity_logs(target_date: datetime) -> list[dict]:
         for line in f:
             try:
                 data = json.loads(line)
+                # Coalesce None to defaults
+                category = data.get("category")
+                if category is None:
+                    category = "その他"
+
+                keywords = data.get("keywords")
+                if keywords is None:
+                    keywords = []
+
                 logs.append({
                     "timestamp": data.get("timestamp"),
                     "app_name": data.get("app_name"),
                     "window_title": data.get("window_title"),
-                    "summary": data.get("summary")
+                    "summary": data.get("summary"),
+                    "category": category,
+                    "keywords": keywords
                 })
             except json.JSONDecodeError:
                 logger.error("Error decoding JSON from activity log file")

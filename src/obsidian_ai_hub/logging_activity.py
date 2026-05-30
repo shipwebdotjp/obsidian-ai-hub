@@ -9,6 +9,18 @@ from obsidian_ai_hub.utils import accessibility, config, img2text, llm_client
 
 logger = logging.getLogger(__name__)
 
+ACTIVITY_CATEGORIES = [
+    "開発",
+    "調査・リサーチ",
+    "事務・記録",
+    "コミュニケーション",
+    "インプット・読書",
+    "創作・執筆",
+    "学習",
+    "趣味・休憩",
+    "その他"
+]
+
 def normalize_ocr_results(ocr_results):
     """
     OCR結果のリストを受け取り、正規化する。
@@ -107,22 +119,77 @@ def main():
     ocr_text_combined = "\n".join(unique_ocr_text)
 
     # 4. LLM要約
-    # 「その時点で何をしていたか」を日本語で短く要約
-    prompt = f"""以下の情報に基づき、ユーザーがその時点で何をしていたか、日本語で1文程度で短く要約してください。
+    # 「その時点で何をしていたか」を日本語で短く要約、およびカテゴリ分類
+    categories_str = ", ".join(ACTIVITY_CATEGORIES)
+    prompt = f"""以下の情報に基づき、ユーザーがその時点で何をしていたかを分析し、JSON形式で出力してください。
+
+# 項目
+- summary: 日本語で1文程度で短く要約
+- category: 以下の候補から最も適切なものを1つだけ選択
+  候補: {categories_str}
+- keywords: 関連するキーワードのリスト（文字列の配列）
+
+# 出力形式
+{{
+  "summary": "...",
+  "category": "...",
+  "keywords": ["...", "..."]
+}}
+
+# 情報
 前面アプリ: {app_name}
 ウィンドウタイトル: {window_title}
 画面内のテキスト(OCR):
 {ocr_text_combined}
 """
 
-    summary = "アクティビティを検出できませんでした。"
+    summary = f"{app_name} での作業を検出しました。"
+    category = "その他"
+    keywords = []
+
     try:
-        summary = llm_client.generate_llm_response(
+        response = llm_client.generate_llm_response(
             provider=config.MAKE_TODAY_TARGET_PROVIDER,
             model=config.MAKE_TODAY_TARGET_MODEL,
             prompt=prompt,
             max_tokens=8192
         )
+        # JSONパースの試行
+        try:
+            # Markdownのコードブロックを除去
+            cleaned_response = response.strip()
+            if cleaned_response.startswith("```"):
+                lines = cleaned_response.splitlines()
+                if lines[0].startswith("```json"):
+                    cleaned_response = "\n".join(lines[1:-1])
+                elif lines[0].startswith("```"):
+                    cleaned_response = "\n".join(lines[1:-1])
+
+            data = json.loads(cleaned_response)
+
+            cand_summary = data.get("summary")
+            if isinstance(cand_summary, str) and cand_summary.strip():
+                summary = cand_summary.strip()
+
+            cand_category = data.get("category")
+            if cand_category in ACTIVITY_CATEGORIES:
+                category = cand_category
+            else:
+                logger.warning(f"Invalid category from LLM: {cand_category}")
+
+            cand_keywords = data.get("keywords")
+            if isinstance(cand_keywords, list):
+                keywords = [str(k).strip() for k in cand_keywords if k is not None and str(k).strip()]
+            else:
+                keywords = []
+
+        except (json.JSONDecodeError, ValueError) as e:
+            logger.error(f"Failed to parse LLM response as JSON: {e}")
+            # パース失敗時は、response全体をsummaryとして使うか、デフォルト維持
+            # ここでは最低限 response が空でなければ summary に入れてみる
+            if response and not response.startswith("{"):
+                summary = response.strip().split("\n")[0]
+
     except Exception as e:
         logger.error(f"LLM summarization failed: {e}")
         summary = f"{app_name} での作業を検出しました（要約に失敗しました）。"
@@ -138,6 +205,8 @@ def main():
         "app_name": app_name,
         "window_title": window_title,
         "summary": summary,
+        "category": category,
+        "keywords": keywords,
         "screenshots": screenshot_paths
     }
 
