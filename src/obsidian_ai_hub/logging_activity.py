@@ -32,15 +32,17 @@ def normalize_ocr_results(ocr_results):
     return normalized
 
 
-def should_skip_activity_logging(app_name: str | None) -> bool:
+def should_skip_activity_logging(app_name: str | None, window_title: str | None) -> bool:
     if app_name is None:
         return True
 
     normalized_app_name = str(app_name).strip()
+    normalized_window_title = str(window_title).strip() if window_title else ""
     return (
         normalized_app_name == ""
         or normalized_app_name == "Unknown"
         or normalized_app_name.lower() == "loginwindow"
+        or "プライベート" in normalized_window_title
     )
 
 
@@ -59,7 +61,7 @@ def main():
     app_name = window_info.get("app_name", "Unknown")
     window_title = window_info.get("window_title", "Unknown")
 
-    if should_skip_activity_logging(app_name):
+    if should_skip_activity_logging(app_name, window_title):
         logger.debug("Skipping activity logging because active app is unavailable or locked.")
         return
 
