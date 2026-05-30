@@ -99,7 +99,9 @@ def load_activity_logs(target_date: datetime) -> list[dict]:
                     "timestamp": data.get("timestamp"),
                     "app_name": data.get("app_name"),
                     "window_title": data.get("window_title"),
-                    "summary": data.get("summary")
+                    "summary": data.get("summary"),
+                    "category": data.get("category", "その他"),
+                    "keywords": data.get("keywords", [])
                 })
             except json.JSONDecodeError:
                 logger.error("Error decoding JSON from activity log file")

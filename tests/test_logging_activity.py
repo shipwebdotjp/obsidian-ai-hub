@@ -1,0 +1,149 @@
+import json
+import sys
+from datetime import datetime
+from unittest.mock import MagicMock, patch, mock_open
+from pathlib import Path
+import pytest
+
+# Mock modules
+mock_modules = [
+    "dotenv",
+    "AppKit",
+    "objc",
+    "yaml",
+    "langchain_core",
+    "langchain_core.messages",
+    "langchain_core.tools",
+    "obsidian_ai_hub.utils.accessibility",
+    "obsidian_ai_hub.utils.img2text",
+]
+for module_name in mock_modules:
+    sys.modules[module_name] = MagicMock()
+
+from obsidian_ai_hub.logging_activity import main, ACTIVITY_CATEGORIES
+
+@pytest.fixture
+def mock_dependencies():
+    with patch("obsidian_ai_hub.logging_activity.accessibility") as mock_acc, \
+         patch("obsidian_ai_hub.logging_activity.NSScreen") as mock_screen, \
+         patch("obsidian_ai_hub.logging_activity.capture_screen") as mock_capture, \
+         patch("obsidian_ai_hub.logging_activity.img2text") as mock_img2text, \
+         patch("obsidian_ai_hub.logging_activity.llm_client") as mock_llm, \
+         patch("obsidian_ai_hub.logging_activity.config") as mock_cfg, \
+         patch("obsidian_ai_hub.logging_activity.get_unique_path") as mock_unique:
+
+        mock_cfg.SCREENSHOT_PATH = Path("/tmp/screenshots")
+        mock_cfg.ACTIVITY_PATH = Path("/tmp/activity")
+        mock_cfg.MAKE_TODAY_TARGET_PROVIDER = "test_provider"
+        mock_cfg.MAKE_TODAY_TARGET_MODEL = "test_model"
+
+        mock_acc.get_active_window_info.return_value = {
+            "app_name": "TestApp",
+            "window_title": "TestTitle"
+        }
+
+        mock_screen_obj = MagicMock()
+        mock_screen_obj.deviceDescription.return_value.objectForKey_.return_value = "Display1"
+        mock_screen.screens.return_value = [mock_screen_obj]
+
+        mock_unique.side_effect = lambda d, f: d / f
+
+        mock_img2text.image_to_text.return_value = [("Sample Text", 0.9)]
+
+        yield {
+            "acc": mock_acc,
+            "screen": mock_screen,
+            "capture": mock_capture,
+            "img2text": mock_img2text,
+            "llm": mock_llm,
+            "cfg": mock_cfg,
+            "unique": mock_unique
+        }
+
+def test_main_success_case(mock_dependencies):
+    deps = mock_dependencies
+    # Mock LLM to return valid JSON
+    expected_json = {
+        "summary": "開発をしていました",
+        "category": "開発",
+        "keywords": ["python", "test"]
+    }
+    deps["llm"].generate_llm_response.return_value = json.dumps(expected_json)
+
+    # Mock file writing
+    m = mock_open()
+    with patch("builtins.open", m), \
+         patch("pathlib.Path.mkdir"):
+        main()
+
+    # Check if record contains expected fields
+    handle = m()
+    written_content = "".join(call.args[0] for call in handle.write.call_args_list)
+    record = json.loads(written_content.strip())
+
+    assert record["app_name"] == "TestApp"
+    assert record["summary"] == "開発をしていました"
+    assert record["category"] == "開発"
+    assert record["keywords"] == ["python", "test"]
+
+def test_main_fallback_invalid_category(mock_dependencies):
+    deps = mock_dependencies
+    # Mock LLM to return JSON with invalid category
+    expected_json = {
+        "summary": "Unknown activity",
+        "category": "InvalidCategory",
+        "keywords": ["unknown"]
+    }
+    deps["llm"].generate_llm_response.return_value = json.dumps(expected_json)
+
+    m = mock_open()
+    with patch("builtins.open", m), \
+         patch("pathlib.Path.mkdir"):
+        main()
+
+    handle = m()
+    written_content = "".join(call.args[0] for call in handle.write.call_args_list)
+    record = json.loads(written_content.strip())
+
+    assert record["category"] == "その他" # Fallback to default
+    assert record["summary"] == "Unknown activity"
+
+def test_main_fallback_broken_json(mock_dependencies):
+    deps = mock_dependencies
+    # Mock LLM to return broken JSON
+    deps["llm"].generate_llm_response.return_value = "This is not JSON"
+
+    m = mock_open()
+    with patch("builtins.open", m), \
+         patch("pathlib.Path.mkdir"):
+        main()
+
+    handle = m()
+    written_content = "".join(call.args[0] for call in handle.write.call_args_list)
+    record = json.loads(written_content.strip())
+
+    assert record["category"] == "その他"
+    # Should use the response text as summary if it's not a JSON-like string
+    assert record["summary"] == "This is not JSON"
+
+def test_main_fallback_json_markdown_block(mock_dependencies):
+    deps = mock_dependencies
+    # Mock LLM to return JSON in markdown block
+    json_content = {
+        "summary": "Markdown summary",
+        "category": "学習",
+        "keywords": ["markdown"]
+    }
+    deps["llm"].generate_llm_response.return_value = f"```json\n{json.dumps(json_content)}\n```"
+
+    m = mock_open()
+    with patch("builtins.open", m), \
+         patch("pathlib.Path.mkdir"):
+        main()
+
+    handle = m()
+    written_content = "".join(call.args[0] for call in handle.write.call_args_list)
+    record = json.loads(written_content.strip())
+
+    assert record["category"] == "学習"
+    assert record["summary"] == "Markdown summary"

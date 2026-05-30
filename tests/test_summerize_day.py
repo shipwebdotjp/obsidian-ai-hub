@@ -59,6 +59,9 @@ def test_load_activity_logs(mock_config, tmp_path):
     assert logs[0]["app_name"] == "App1"
     assert "extra" not in logs[0]
     assert logs[1]["window_title"] == "Title2"
+    # Check new fields
+    assert "category" in logs[0]
+    assert "keywords" in logs[0]
 
 def test_load_activity_logs_no_file(mock_config):
     target_date = datetime(2023, 10, 27)
