@@ -74,8 +74,8 @@ def get_daily_ai_summary(target_date: datetime, daily_content: str) -> str:
     # return "エラー発生: LLM呼び出し失敗"  # デバッグのため一旦LLM呼び出しを停止
     try:
         response_text = llm_client.generate_llm_response(
-            provider="ollama",
-            model="gemma4:e4b",
+            provider=config.MAKE_TODAY_TARGET_PROVIDER,
+            model=config.MAKE_TODAY_TARGET_MODEL,
             prompt=prompt,
             max_tokens=8120,
         ).strip()
@@ -84,7 +84,191 @@ def get_daily_ai_summary(target_date: datetime, daily_content: str) -> str:
     except Exception as e:
         logger.exception("Failed to generate daily AI summary")
         return f"エラー発生: {type(e).__name__}"
-    
+
+
+STRUCTURED_PROMPT = """
+あなたは日次ログ構造化器です。以下の「今日のデイリーノート」、「セッション要約一覧（JSON）」、「アクティビティログ(JSONL)」を元に、その日の活動を構造化されたJSON形式で出力してください。
+
+# 項目定義
+- summary: その日の短い全体像（1文）
+- topics: 関心領域のまとまり（文字列の配列）
+- activities: 主な作業内容（文字列の配列）
+- learnings: 学び・整理できたこと（文字列の配列）
+- reflections: 反省点・気づき（文字列の配列）
+- gratitude: 感謝したこと（文字列の配列）
+- people: 人物メモ。 `{"name": "...", "note": "..."}` の配列。見つからなければ空配列
+- questions: 未解決の問い（文字列の配列）
+- keywords: 後で検索しやすい語（文字列の配列）
+- next_actions: 翌日以降の具体的な次手（文字列の配列）
+
+# 出力形式
+必ず以下のJSON形式のみを出力してください。余計な解説は不要です。
+{
+  "summary": "...",
+  "topics": [],
+  "activities": [],
+  "learnings": [],
+  "reflections": [],
+  "gratitude": [],
+  "people": [{"name": "...", "note": "..."}],
+  "questions": [],
+  "keywords": [],
+  "next_actions": []
+}
+
+今日のデイリーノート:
+{DAILY_NOTE_CONTENT}
+
+セッション要約一覧:
+{SESSION_SUMMARIES}
+
+アクティビティログ(JSONL):
+{ACTIVITY_LOGS}
+"""
+
+
+def get_daily_structured_record(
+    target_date: datetime,
+    daily_content: str,
+    logs: list[dict],
+    activity_logs: list[dict]
+) -> dict:
+    """
+    指定された日付の情報を構造化データとして生成。
+    """
+    date_str = target_date.strftime("%Y-%m-%d")
+    generated_at = datetime.now().isoformat()
+
+    # source_stats 計算
+    daily_file = reader.get_daily_note_path(target_date)
+    source_stats = {
+        "activity_count": len(activity_logs),
+        "llm_session_count": len(logs),
+        "has_daily_note": daily_file.exists()
+    }
+
+    # frontmatter から mood/sleep 取得
+    mood = extracter.get_frontmatter_value(daily_content, "mood", default=None)
+    sleep = extracter.get_frontmatter_value(daily_content, "sleep", default=None)
+
+    prompt = (
+        STRUCTURED_PROMPT.replace("{SESSION_SUMMARIES}", json.dumps(logs, ensure_ascii=False, indent=2))
+        .replace("{ACTIVITY_LOGS}", json.dumps(activity_logs, ensure_ascii=False, indent=2))
+        .replace("{DAILY_NOTE_CONTENT}", daily_content)
+    )
+
+    # 最小レコード（フォールバック用）
+    record = {
+        "schema_version": 1,
+        "date": date_str,
+        "generated_at": generated_at,
+        "summary": None,
+        "topics": [],
+        "activities": [],
+        "learnings": [],
+        "reflections": [],
+        "gratitude": [],
+        "people": [],
+        "questions": [],
+        "keywords": [],
+        "next_actions": [],
+        "mood": mood,
+        "sleep": sleep,
+        "source_stats": source_stats
+    }
+
+    try:
+        response = llm_client.generate_llm_response(
+            provider=config.MAKE_TODAY_TARGET_PROVIDER,
+            model=config.MAKE_TODAY_TARGET_MODEL,
+            prompt=prompt,
+            max_tokens=8120,
+        )
+
+        # JSONパース
+        cleaned_response = response.strip()
+        if cleaned_response.startswith("```"):
+            lines = cleaned_response.splitlines()
+            if len(lines) >= 2:
+                if lines[0].startswith("```json") or lines[0].startswith("```"):
+                    cleaned_response = "\n".join(lines[1:-1])
+
+        data = json.loads(cleaned_response)
+
+        # 抽出したデータを record にマージ
+        scalar_fields = {"summary"}
+        list_fields = {
+            "topics", "activities", "learnings", "reflections",
+            "gratitude", "questions", "keywords", "next_actions",
+        }
+        for key in [
+            "summary", "topics", "activities", "learnings", "reflections",
+            "gratitude", "people", "questions", "keywords", "next_actions"
+        ]:
+            if key in data:
+                val = data[key]
+                if val is None:
+                    continue
+
+                if key == "people" and isinstance(val, list):
+                    normalized_people = []
+                    for p in val:
+                        if isinstance(p, dict) and "name" in p:
+                            normalized_people.append({
+                                "name": str(p.get("name", "")),
+                                "note": str(p.get("note", ""))
+                            })
+                    record["people"] = normalized_people
+                elif key in scalar_fields and isinstance(val, str):
+                    record[key] = val or None
+                elif key in list_fields and isinstance(val, list):
+                    record[key] = [str(item) for item in val if item not in (None, "")]
+
+    except Exception as e:
+        logger.error(f"Failed to generate or parse structured daily record: {e}")
+
+    return record
+
+
+def upsert_monthly_record(target_date: datetime, record: dict):
+    """
+    月次JSONLにレコードをupsertする。
+    """
+    monthly_log_dir = Path(config.ACTIVITY_PATH) / target_date.strftime("%Y/%m")
+    monthly_log_dir.mkdir(parents=True, exist_ok=True)
+    log_file = monthly_log_dir / target_date.strftime("%Y-%m.jsonl")
+
+    records = {}
+    parse_failed = False
+    if log_file.exists():
+        with open(log_file, "r", encoding="utf-8") as f:
+            for line in f:
+                try:
+                    data = json.loads(line)
+                    if "date" in data:
+                        records[data["date"]] = data
+                except json.JSONDecodeError:
+                    parse_failed = True
+                    logger.error("Failed to parse existing monthly JSONL; aborting upsert to avoid data loss")
+                    break
+
+    if parse_failed:
+        return
+
+    # upsert
+    records[record["date"]] = record
+
+    # 保存（date昇順）
+    sorted_dates = sorted(records.keys())
+    try:
+        with open(log_file, "w", encoding="utf-8") as f:
+            for d in sorted_dates:
+                f.write(json.dumps(records[d], ensure_ascii=False) + "\n")
+        logger.info(f"Monthly record upserted to {log_file}")
+    except Exception as e:
+        logger.error(f"Failed to write monthly record: {e}")
+
+
 def load_activity_logs(target_date: datetime) -> list[dict]:
     activity_log_file = Path(config.ACTIVITY_PATH) / target_date.strftime("%Y/%m") / target_date.strftime("%Y-%m-%d.jsonl")
     logs = []
@@ -138,15 +322,21 @@ def main():
     logger.info("Summarizing day: %s", yesterday.date())
 
     daily_file = reader.get_daily_note_path(yesterday)
-    content_yesterday = reader.get_daily_note_content(yesterday)    
-    content_to_add = get_daily_ai_summary(yesterday, content_yesterday)
-    if content_to_add.startswith("エラー発生"):
-        print(content_to_add)
-        return
+    content_yesterday = reader.get_daily_note_content(yesterday)
 
-    # print(f"Daily note path: {daily_file}")
-    # print(f"Content to add:\n{content_to_add}")
-    extracter.append_to_subheader_file(daily_file.as_posix(), "## AIによる要約", [content_to_add])
+    # 1. 人間用要約の生成と追記
+    content_to_add = get_daily_ai_summary(yesterday, content_yesterday)
+    if not content_to_add.startswith("エラー発生"):
+        extracter.append_to_subheader_file(daily_file.as_posix(), "## AIによる要約", [content_to_add])
+    else:
+        logger.error(f"Failed to generate human summary: {content_to_add}")
+
+    # 2. 構造化レコードの生成と月次JSONLへのupsert
+    logs = load_conversation_logs(config.AI_LOG_PATH, yesterday)
+    activity_logs = load_activity_logs(yesterday)
+    structured_record = get_daily_structured_record(yesterday, content_yesterday, logs, activity_logs)
+    upsert_monthly_record(yesterday, structured_record)
+
 
 if __name__ == "__main__":
     main()
