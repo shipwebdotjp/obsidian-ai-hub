@@ -140,8 +140,10 @@ def test_get_daily_structured_record(mock_fm, mock_path, mock_llm, mock_config, 
     daily_content = "---\nmood: Happy\nsleep: 8h\n---\nContent"
 
     def fm_side_effect(text, key, default=None):
-        if key == "mood": return "Happy"
-        if key == "sleep": return "8h"
+        if key == "mood":
+            return "Happy"
+        if key == "sleep":
+            return "8h"
         return default
     mock_fm.side_effect = fm_side_effect
 
@@ -168,3 +170,31 @@ def test_get_daily_structured_record(mock_fm, mock_path, mock_llm, mock_config, 
     assert record["source_stats"]["llm_session_count"] == 1
     assert record["source_stats"]["has_daily_note"] is True
     assert record["people"][0]["name"] == "Alice"
+
+@patch("obsidian_ai_hub.summerize_day.llm_client.generate_llm_response")
+@patch("obsidian_ai_hub.summerize_day.reader.get_daily_note_path")
+@patch("obsidian_ai_hub.summerize_day.extracter.get_frontmatter_value")
+def test_get_daily_structured_record_malformed_json(mock_fm, mock_path, mock_llm, mock_config, tmp_path):
+    target_date = datetime(2023, 10, 27)
+    daily_content = "---\nmood: Happy\n---"
+
+    mock_fm.return_value = "Happy"
+    mock_p = MagicMock()
+    mock_p.exists.return_value = True
+    mock_path.return_value = mock_p
+
+    # LLM returns malformed JSON
+    mock_llm.return_value = "This is not a JSON"
+
+    logs = []
+    activity_logs = [{"summary": "Act"}]
+
+    record = get_daily_structured_record(target_date, daily_content, logs, activity_logs)
+
+    # Should not raise and return minimal record
+    assert record["date"] == "2023-10-27"
+    assert record["summary"] is None
+    assert record["mood"] == "Happy"
+    assert record["source_stats"]["activity_count"] == 1
+    assert record["topics"] == []
+    assert record["people"] == []

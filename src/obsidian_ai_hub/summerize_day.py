@@ -162,7 +162,7 @@ def get_daily_structured_record(
         "schema_version": 1,
         "date": date_str,
         "generated_at": generated_at,
-        "summary": "",
+        "summary": None,
         "topics": [],
         "activities": [],
         "learnings": [],
@@ -196,17 +196,20 @@ def get_daily_structured_record(
         data = json.loads(cleaned_response)
 
         # 抽出したデータを record にマージ
+        scalar_fields = {"summary"}
+        list_fields = {
+            "topics", "activities", "learnings", "reflections",
+            "gratitude", "questions", "keywords", "next_actions",
+        }
         for key in [
             "summary", "topics", "activities", "learnings", "reflections",
             "gratitude", "people", "questions", "keywords", "next_actions"
         ]:
             if key in data:
                 val = data[key]
-                # 文字列未確定項目は空配列またはnull
                 if val is None:
                     continue
 
-                # people の正規化
                 if key == "people" and isinstance(val, list):
                     normalized_people = []
                     for p in val:
@@ -216,8 +219,10 @@ def get_daily_structured_record(
                                 "note": str(p.get("note", ""))
                             })
                     record["people"] = normalized_people
-                elif isinstance(val, (str, list)):
-                    record[key] = val
+                elif key in scalar_fields and isinstance(val, str):
+                    record[key] = val or None
+                elif key in list_fields and isinstance(val, list):
+                    record[key] = [str(item) for item in val if item not in (None, "")]
 
     except Exception as e:
         logger.error(f"Failed to generate or parse structured daily record: {e}")
@@ -234,6 +239,7 @@ def upsert_monthly_record(target_date: datetime, record: dict):
     log_file = monthly_log_dir / target_date.strftime("%Y-%m.jsonl")
 
     records = {}
+    parse_failed = False
     if log_file.exists():
         with open(log_file, "r", encoding="utf-8") as f:
             for line in f:
@@ -242,7 +248,12 @@ def upsert_monthly_record(target_date: datetime, record: dict):
                     if "date" in data:
                         records[data["date"]] = data
                 except json.JSONDecodeError:
-                    continue
+                    parse_failed = True
+                    logger.error("Failed to parse existing monthly JSONL; aborting upsert to avoid data loss")
+                    break
+
+    if parse_failed:
+        return
 
     # upsert
     records[record["date"]] = record
