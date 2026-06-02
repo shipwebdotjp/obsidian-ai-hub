@@ -77,8 +77,29 @@ def main():
         logger.debug("Skipping activity logging because active app is unavailable or locked.")
         return
 
-    # 2. 各ディスプレイのスクリーンショット保存
     now = datetime.now()
+
+    # 1.5 重複チェック: 直前の記録と同じアプリ・タイトルならスキップ
+    activity_log_dir = config.ACTIVITY_PATH / now.strftime("%Y/%m")
+    log_file = activity_log_dir / now.strftime("%Y-%m-%d.jsonl")
+    if log_file.exists():
+        try:
+            last_line = ""
+            with open(log_file, "r", encoding="utf-8") as f:
+                for line in f:
+                    if line.strip():
+                        last_line = line
+
+            if last_line:
+                last_record = json.loads(last_line)
+                if (last_record.get("app_name") == app_name and
+                    last_record.get("window_title") == window_title):
+                    logger.info(f"Skipping duplicate activity: {app_name} - {window_title}")
+                    return
+        except Exception as e:
+            logger.warning(f"Failed to read last activity log for duplication check: {e}")
+
+    # 2. 各ディスプレイのスクリーンショット保存
     # YYYY/MM/DD
     date_path = now.strftime("%Y/%m/%d")
     screenshot_base_dir = config.SCREENSHOT_PATH
