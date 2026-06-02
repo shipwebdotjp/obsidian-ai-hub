@@ -136,6 +136,9 @@ MAKE_TODAY_TARGET_MODEL = str(_config_value("llm", "make_today_target", "model",
 INBOX_AUDIO_CORRECTION_PROVIDER = str(_config_value("llm", "inbox_audio_correction", "provider", default="ollama"))
 INBOX_AUDIO_CORRECTION_MODEL = str(_config_value("llm", "inbox_audio_correction", "model", default="gpt-oss:120b-cloud"))
 
+LINE_INBOX_SCAN_PROVIDER = str(_config_value("llm", "line_inbox_scan", "provider", default=MAKE_TODAY_TARGET_PROVIDER))
+LINE_INBOX_SCAN_MODEL = str(_config_value("llm", "line_inbox_scan", "model", default=MAKE_TODAY_TARGET_MODEL))
+
 AI_LOG_PATH = _required_path("AI_LOG_PATH", "ai_log_path")
 BACKUP_SYNC_FOLDERS = _config_value("backup", "sync_folders", default=[])
 if not isinstance(BACKUP_SYNC_FOLDERS, list):

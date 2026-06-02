@@ -17,6 +17,7 @@ from obsidian_ai_hub import (
     sync_knowledge,
     sync_valut,
     take_screenshot,
+    scan_line_inbox,
 )
 from obsidian_ai_hub.handler import add_research_theme
 
@@ -98,6 +99,11 @@ def main():
         "--screenshot",
         action="store_true",
         help="macOSのスクリーンショットを撮影してInboxに保存"
+    )
+    parser.add_argument(
+        "--scan-line-inbox",
+        action="store_true",
+        help="LINE の前面ウィンドウをスキャンして未読候補を抽出"
     )
     parser.add_argument(
         "--log-activity",
@@ -205,6 +211,9 @@ def main():
         ran = True
     if args.screenshot:
         run_and_log(lambda: take_screenshot.main(args.display), "take_screenshot")
+        ran = True
+    if args.scan_line_inbox:
+        run_and_log(scan_line_inbox.main, "scan_line_inbox")
         ran = True
     if args.log_activity:
         from obsidian_ai_hub import logging_activity
