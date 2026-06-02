@@ -102,8 +102,11 @@ def get_daily_ai_summary(target_date: datetime, daily_content: str) -> str:
         top_categories = Counter(categories).most_common(5)
         top_keywords = Counter(keywords_list).most_common(20)
 
-        ranking_text = "\n\n### カテゴリ順位\n" + "\n".join([f"- {c}: {count}" for c, count in top_categories])
-        ranking_text += "\n\n### キーワード順位\n" + "\n".join([f"- {k}: {count}" for k, count in top_keywords])
+        ranking_text = ""
+        if top_categories:
+            ranking_text += "\n\n### カテゴリ順位\n" + "\n".join([f"- {c}: {count}" for c, count in top_categories])
+        if top_keywords:
+            ranking_text += "\n\n### キーワード順位\n" + "\n".join([f"- {k}: {count}" for k, count in top_keywords])
 
         return response_text + ranking_text
 

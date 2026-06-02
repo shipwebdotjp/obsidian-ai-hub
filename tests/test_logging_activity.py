@@ -150,6 +150,7 @@ def test_main_fallback_json_markdown_block(mock_dependencies):
 
 def test_main_skip_duplicate(mock_dependencies, tmp_path):
     deps = mock_dependencies
+    deps["cfg"].ACTIVITY_PATH = tmp_path
     activity_dir = deps["cfg"].ACTIVITY_PATH / datetime.now().strftime("%Y/%m")
     activity_dir.mkdir(parents=True, exist_ok=True)
     log_file = activity_dir / datetime.now().strftime("%Y-%m-%d.jsonl")
@@ -161,15 +162,14 @@ def test_main_skip_duplicate(mock_dependencies, tmp_path):
         "window_title": "TestTitle",
         "summary": "Old summary",
         "category": "開発",
-        "keywords": []
+        "keywords": ["マルチバイトテスト"]
     }
     with open(log_file, "w", encoding="utf-8") as f:
-        f.write(json.dumps(last_record) + "\n")
+        f.write(json.dumps(last_record, ensure_ascii=False) + "\n")
 
     # Mock file writing to track calls
     m = mock_open()
     # We want it to read from the real mock file we just created, but skip writing if duplicate
-    # Actually, simpler to just patch open and check if it was opened for "a" (append)
     with patch("builtins.open", side_effect=open) as mock_file_open, \
          patch("pathlib.Path.mkdir"):
         main()
@@ -179,6 +179,7 @@ def test_main_skip_duplicate(mock_dependencies, tmp_path):
 
 def test_main_no_skip_different_activity(mock_dependencies, tmp_path):
     deps = mock_dependencies
+    deps["cfg"].ACTIVITY_PATH = tmp_path
     activity_dir = deps["cfg"].ACTIVITY_PATH / datetime.now().strftime("%Y/%m")
     activity_dir.mkdir(parents=True, exist_ok=True)
     log_file = activity_dir / datetime.now().strftime("%Y-%m-%d.jsonl")
@@ -190,10 +191,10 @@ def test_main_no_skip_different_activity(mock_dependencies, tmp_path):
         "window_title": "TestTitle",
         "summary": "Old summary",
         "category": "開発",
-        "keywords": []
+        "keywords": ["マルチバイトテスト"]
     }
     with open(log_file, "w", encoding="utf-8") as f:
-        f.write(json.dumps(last_record) + "\n")
+        f.write(json.dumps(last_record, ensure_ascii=False) + "\n")
 
     expected_json = {
         "summary": "New activity",

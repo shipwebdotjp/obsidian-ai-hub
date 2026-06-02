@@ -84,30 +84,18 @@ def main():
     log_file = activity_log_dir / now.strftime("%Y-%m-%d.jsonl")
     if log_file.exists():
         try:
+            last_line = ""
             with open(log_file, "r", encoding="utf-8") as f:
-                # 効率のため末尾から読み込む
-                f.seek(0, 2)
-                pos = f.tell()
-                if pos > 0:
-                    last_line = ""
-                    # 改行を遡って一行分取得
-                    buffer_size = 1024
-                    while pos > 0 and not last_line.strip():
-                        seek_pos = max(0, pos - buffer_size)
-                        f.seek(seek_pos)
-                        chunk = f.read(pos - seek_pos)
-                        if "\n" in chunk:
-                            last_line = chunk.rsplit("\n", 2)[-2] if chunk.endswith("\n") else chunk.rsplit("\n", 1)[-1]
-                        else:
-                            last_line = chunk
-                        pos = seek_pos
+                for line in f:
+                    if line.strip():
+                        last_line = line
 
-                    if last_line.strip():
-                        last_record = json.loads(last_line)
-                        if (last_record.get("app_name") == app_name and
-                            last_record.get("window_title") == window_title):
-                            logger.info(f"Skipping duplicate activity: {app_name} - {window_title}")
-                            return
+            if last_line:
+                last_record = json.loads(last_line)
+                if (last_record.get("app_name") == app_name and
+                    last_record.get("window_title") == window_title):
+                    logger.info(f"Skipping duplicate activity: {app_name} - {window_title}")
+                    return
         except Exception as e:
             logger.warning(f"Failed to read last activity log for duplication check: {e}")
 
