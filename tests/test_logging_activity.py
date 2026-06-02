@@ -147,3 +147,63 @@ def test_main_fallback_json_markdown_block(mock_dependencies):
 
     assert record["category"] == "学習"
     assert record["summary"] == "Markdown summary"
+
+def test_main_skip_duplicate(mock_dependencies, tmp_path):
+    deps = mock_dependencies
+    activity_dir = deps["cfg"].ACTIVITY_PATH / datetime.now().strftime("%Y/%m")
+    activity_dir.mkdir(parents=True, exist_ok=True)
+    log_file = activity_dir / datetime.now().strftime("%Y-%m-%d.jsonl")
+
+    # Pre-populate log with same activity
+    last_record = {
+        "timestamp": "2023-10-27T10:00:00",
+        "app_name": "TestApp",
+        "window_title": "TestTitle",
+        "summary": "Old summary",
+        "category": "開発",
+        "keywords": []
+    }
+    with open(log_file, "w", encoding="utf-8") as f:
+        f.write(json.dumps(last_record) + "\n")
+
+    # Mock file writing to track calls
+    m = mock_open()
+    # We want it to read from the real mock file we just created, but skip writing if duplicate
+    # Actually, simpler to just patch open and check if it was opened for "a" (append)
+    with patch("builtins.open", side_effect=open) as mock_file_open, \
+         patch("pathlib.Path.mkdir"):
+        main()
+
+    # If skipped, generate_llm_response should not be called
+    deps["llm"].generate_llm_response.assert_not_called()
+
+def test_main_no_skip_different_activity(mock_dependencies, tmp_path):
+    deps = mock_dependencies
+    activity_dir = deps["cfg"].ACTIVITY_PATH / datetime.now().strftime("%Y/%m")
+    activity_dir.mkdir(parents=True, exist_ok=True)
+    log_file = activity_dir / datetime.now().strftime("%Y-%m-%d.jsonl")
+
+    # Pre-populate log with different activity
+    last_record = {
+        "timestamp": "2023-10-27T10:00:00",
+        "app_name": "DifferentApp",
+        "window_title": "TestTitle",
+        "summary": "Old summary",
+        "category": "開発",
+        "keywords": []
+    }
+    with open(log_file, "w", encoding="utf-8") as f:
+        f.write(json.dumps(last_record) + "\n")
+
+    expected_json = {
+        "summary": "New activity",
+        "category": "開発",
+        "keywords": ["python"]
+    }
+    deps["llm"].generate_llm_response.return_value = json.dumps(expected_json)
+
+    with patch("pathlib.Path.mkdir"):
+        main()
+
+    # Should NOT be skipped
+    deps["llm"].generate_llm_response.assert_called_once()

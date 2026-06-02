@@ -1,5 +1,6 @@
 import json
 import logging
+from collections import Counter
 from datetime import datetime, timedelta
 from obsidian_ai_hub.utils import config, reader, extracter, llm_client
 from pathlib import Path
@@ -58,8 +59,20 @@ def get_daily_ai_summary(target_date: datetime, daily_content: str) -> str:
         indent=2
     )
 
+    # プロンプト用のアクティビティログを簡略化（timestampとsummaryのみ）
+    simplified_activity_logs = []
+    for log in activity_logs:
+        ts = log.get("timestamp")
+        # ミリ秒を除去 (2023-10-27T10:00:00.123456 -> 2023-10-27T10:00:00)
+        if ts and "." in ts:
+            ts = ts.split(".")[0]
+        simplified_activity_logs.append({
+            "timestamp": ts,
+            "summary": log.get("summary")
+        })
+
     activity_combined = json.dumps(
-        activity_logs,
+        simplified_activity_logs,
         ensure_ascii=False,
         indent=2
     )
@@ -79,7 +92,20 @@ def get_daily_ai_summary(target_date: datetime, daily_content: str) -> str:
             prompt=prompt,
             max_tokens=8120,
         ).strip()
-        return response_text
+
+        # カテゴリとキーワードの集計
+        categories = [log.get("category") for log in activity_logs if log.get("category")]
+        keywords_list = []
+        for log in activity_logs:
+            keywords_list.extend(log.get("keywords", []))
+
+        top_categories = Counter(categories).most_common(5)
+        top_keywords = Counter(keywords_list).most_common(20)
+
+        ranking_text = "\n\n### カテゴリ順位\n" + "\n".join([f"- {c}: {count}" for c, count in top_categories])
+        ranking_text += "\n\n### キーワード順位\n" + "\n".join([f"- {k}: {count}" for k, count in top_keywords])
+
+        return response_text + ranking_text
 
     except Exception as e:
         logger.exception("Failed to generate daily AI summary")

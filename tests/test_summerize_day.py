@@ -94,12 +94,13 @@ def test_get_daily_ai_summary(mock_llm, mock_config, tmp_path):
 
     result = get_daily_ai_summary(target_date, "Today's note content")
 
-    assert result == "AI Summary Result"
+    assert "AI Summary Result" in result
+    assert "### カテゴリ順位" in result
     mock_llm.assert_called_once()
     args, kwargs = mock_llm.call_args
     prompt = kwargs["prompt"]
     assert "Today's note content" in prompt
-    assert "TestApp" in prompt
+    assert "TestActivity" in prompt
     assert "Chat Summary" in prompt
 
 def test_upsert_monthly_record(mock_config, tmp_path):
@@ -198,3 +199,37 @@ def test_get_daily_structured_record_malformed_json(mock_fm, mock_path, mock_llm
     assert record["source_stats"]["activity_count"] == 1
     assert record["topics"] == []
     assert record["people"] == []
+
+@patch("obsidian_ai_hub.summerize_day.llm_client.generate_llm_response")
+def test_get_daily_ai_summary_with_ranking(mock_llm, mock_config):
+    target_date = datetime(2023, 10, 27)
+    mock_llm.return_value = "Main Summary"
+
+    # Mock activity logs with categories and keywords
+    activity_dir = mock_config.ACTIVITY_PATH / "2023/10"
+    activity_dir.mkdir(parents=True)
+    act_file = activity_dir / "2023-10-27.jsonl"
+    records = [
+        {"timestamp": "2023-10-27T10:00:00.123", "app_name": "App1", "summary": "S1", "category": "開発", "keywords": ["k1", "k2"]},
+        {"timestamp": "2023-10-27T11:00:00.456", "app_name": "App2", "summary": "S2", "category": "開発", "keywords": ["k1", "k3"]},
+        {"timestamp": "2023-10-27T12:00:00.789", "app_name": "App3", "summary": "S3", "category": "趣味", "keywords": ["k4"]},
+    ]
+    with open(act_file, "w", encoding="utf-8") as f:
+        for r in records:
+            f.write(json.dumps(r) + "\n")
+
+    result = get_daily_ai_summary(target_date, "Content")
+
+    assert "Main Summary" in result
+    assert "### カテゴリ順位" in result
+    assert "- 開発: 2" in result
+    assert "- 趣味: 1" in result
+    assert "### キーワード順位" in result
+    assert "- k1: 2" in result
+    assert "- k2: 1" in result
+
+    # Verify prompt simplification (no milliseconds)
+    args, kwargs = mock_llm.call_args
+    prompt = kwargs["prompt"]
+    assert "2023-10-27T10:00:00" in prompt
+    assert "2023-10-27T10:00:00.123" not in prompt
