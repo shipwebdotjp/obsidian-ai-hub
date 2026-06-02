@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sys
 from types import ModuleType
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 if "EventKit" not in sys.modules:
     mock_eventkit = ModuleType("EventKit")
@@ -30,6 +30,18 @@ if "md_hybrid_search" not in sys.modules:
     mock_mdhs.SearchIndex = type("SearchIndex", (), {})
     sys.modules["md_hybrid_search"] = mock_mdhs
 
+if "langchain_tavily" not in sys.modules:
+    sys.modules["langchain_tavily"] = MagicMock()
+
+if "torch" not in sys.modules:
+    sys.modules["torch"] = MagicMock()
+
+if "sentence_transformers" not in sys.modules:
+    sys.modules["sentence_transformers"] = MagicMock()
+
+if "transformers" not in sys.modules:
+    sys.modules["transformers"] = MagicMock()
+
 from obsidian_ai_hub import main as main_module
 
 
@@ -53,6 +65,15 @@ def test_research_agent_cli_uses_queue_mode_without_theme(monkeypatch):
         main_module.main()
 
     mock_main.assert_called_once_with()
+
+
+def test_scan_line_inbox_cli_calls_scan(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["prog", "--scan-line-inbox"])
+
+    with patch.object(main_module.scan_line_inbox, "main", return_value={}) as mock_main:
+        main_module.main()
+
+    mock_main.assert_called_once()
 
 
 def test_screenshot_cli_calls_screenshot_with_default_display(monkeypatch):

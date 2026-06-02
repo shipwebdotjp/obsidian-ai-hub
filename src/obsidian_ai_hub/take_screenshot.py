@@ -23,22 +23,32 @@ def get_unique_path(directory: Path, base_filename: str) -> Path:
             return new_path
         counter += 1
 
-def capture_screen(target_path: Path, display: int = 1):
+def capture_screen(target_path: Path, display: int = 1, window_id: int | None = None):
     """
-    Captures a macOS screenshot for a specific display and saves it to the target_path.
+    Captures a macOS screenshot for a specific display or window and saves it to the target_path.
     """
     target_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Run screencapture -t png -x -D <display> <path> via subprocess.run, not through a shell.
-    cmd = [
-        "screencapture",
-        "-t", "png",
-        "-x",
-        "-D", str(display),
-        str(target_path)
-    ]
+    # Run screencapture via subprocess.run, not through a shell.
+    if window_id is not None:
+        cmd = [
+            "screencapture",
+            "-t", "png",
+            "-x",
+            "-l", str(window_id),
+            str(target_path)
+        ]
+        logger.info(f"Taking screenshot of window {window_id} to {target_path}")
+    else:
+        cmd = [
+            "screencapture",
+            "-t", "png",
+            "-x",
+            "-D", str(display),
+            str(target_path)
+        ]
+        logger.info(f"Taking screenshot on display {display} to {target_path}")
 
-    logger.info(f"Taking screenshot on display {display} to {target_path}")
     try:
         subprocess.run(cmd, check=True, shell=False)
         logger.info("Screenshot captured successfully.")
@@ -47,7 +57,7 @@ def capture_screen(target_path: Path, display: int = 1):
         raise
     return str(target_path)
 
-def main(display: int = 1):
+def main(display: int = 1, window_id: int | None = None):
     """
     Captures a macOS screenshot and saves it into the Obsidian inbox.
     """
@@ -60,11 +70,12 @@ def main(display: int = 1):
     filename = f"screen_{timestamp}.png"
     target_path = get_unique_path(inbox_path, filename)
 
-    return capture_screen(target_path, display)
+    return capture_screen(target_path, display, window_id)
 
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Capture screenshot")
     parser.add_argument("--display", type=int, default=1, help="Display index")
+    parser.add_argument("--window-id", type=int, default=None, help="Window ID to capture")
     args = parser.parse_args()
-    main(display=args.display)
+    main(display=args.display, window_id=args.window_id)
