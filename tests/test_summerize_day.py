@@ -220,7 +220,7 @@ def test_get_daily_structured_record_strips_milliseconds(mock_fm, mock_path, moc
     ]
     get_daily_structured_record(target_date, "content", [], activity_logs)
 
-    args, kwargs = mock_llm.call_args
+    _, kwargs = mock_llm.call_args
     prompt = kwargs["prompt"]
     assert "2023-10-27T10:00:00" in prompt
     assert "2023-10-27T10:00:00.123456" not in prompt

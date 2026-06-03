@@ -345,8 +345,9 @@ def summarize_day(target_date: datetime):
 
     # 4. デイリーノートへの追記 (人間用表示)
     if structured_record.get("summary"):
-        markdown_content = format_structured_record_as_markdown(structured_record, activity_logs)
-        extracter.append_to_subheader_file(daily_file.as_posix(), "## AIによる要約", [markdown_content])
+        if structured_record.get("source_stats", {}).get("has_daily_note"):
+            markdown_content = format_structured_record_as_markdown(structured_record, activity_logs)
+            extracter.append_to_subheader_file(daily_file.as_posix(), "## AIによる要約", [markdown_content])
     else:
         logger.error("Failed to generate structured record; skipping daily note update")
 
