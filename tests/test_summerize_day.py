@@ -30,10 +30,10 @@ for module_name in mock_modules:
 
 from obsidian_ai_hub.summerize_day import (
     load_activity_logs,
-    get_daily_ai_summary,
     load_conversation_logs,
     upsert_monthly_record,
-    get_daily_structured_record
+    get_daily_structured_record,
+    format_structured_record_as_markdown
 )
 
 @pytest.fixture
@@ -73,35 +73,6 @@ def test_load_activity_logs_no_file(mock_config):
     target_date = datetime(2023, 10, 27)
     logs = load_activity_logs(target_date)
     assert logs == []
-
-@patch("obsidian_ai_hub.summerize_day.llm_client.generate_llm_response")
-def test_get_daily_ai_summary(mock_llm, mock_config, tmp_path):
-    target_date = datetime(2023, 10, 27)
-    mock_llm.return_value = "AI Summary Result"
-
-    # Mock conversation logs
-    log_dir = mock_config.AI_LOG_PATH
-    log_dir.mkdir(parents=True)
-    conv_file = log_dir / "chat@20231027.json"
-    conv_data = {"metadata": {"summary": "Chat Summary"}}
-    conv_file.write_text(json.dumps(conv_data), encoding="utf-8")
-
-    # Mock activity logs
-    activity_dir = mock_config.ACTIVITY_PATH / "2023/10"
-    activity_dir.mkdir(parents=True)
-    act_file = activity_dir / "2023-10-27.jsonl"
-    act_file.write_text(json.dumps({"app_name": "TestApp", "summary": "TestActivity"}), encoding="utf-8")
-
-    result = get_daily_ai_summary(target_date, "Today's note content")
-
-    assert "AI Summary Result" in result
-    assert "### カテゴリ順位" in result
-    mock_llm.assert_called_once()
-    args, kwargs = mock_llm.call_args
-    prompt = kwargs["prompt"]
-    assert "Today's note content" in prompt
-    assert "TestActivity" in prompt
-    assert "Chat Summary" in prompt
 
 def test_upsert_monthly_record(mock_config, tmp_path):
     target_date = datetime(2023, 10, 27)
@@ -200,36 +171,56 @@ def test_get_daily_structured_record_malformed_json(mock_fm, mock_path, mock_llm
     assert record["topics"] == []
     assert record["people"] == []
 
-@patch("obsidian_ai_hub.summerize_day.llm_client.generate_llm_response")
-def test_get_daily_ai_summary_with_ranking(mock_llm, mock_config):
-    target_date = datetime(2023, 10, 27)
-    mock_llm.return_value = "Main Summary"
 
-    # Mock activity logs with categories and keywords
-    activity_dir = mock_config.ACTIVITY_PATH / "2023/10"
-    activity_dir.mkdir(parents=True)
-    act_file = activity_dir / "2023-10-27.jsonl"
-    records = [
-        {"timestamp": "2023-10-27T10:00:00.123", "app_name": "App1", "summary": "S1", "category": "開発", "keywords": ["k1", "k2"]},
-        {"timestamp": "2023-10-27T11:00:00.456", "app_name": "App2", "summary": "S2", "category": "開発", "keywords": ["k1", "k3"]},
-        {"timestamp": "2023-10-27T12:00:00.789", "app_name": "App3", "summary": "S3", "category": "趣味", "keywords": ["k4"]},
+def test_format_structured_record_as_markdown():
+    record = {
+        "summary": "Today was productive.",
+        "topics": ["AI", "Python"],
+        "activities": ["Coding", "Reading"],
+        "people": [{"name": "Alice", "note": "Discussed AI"}],
+        "keywords": ["LLM", "RAG"]
+    }
+    activity_logs = [
+        {"category": "開発", "keywords": ["Python", "Git"]},
+        {"category": "開発", "keywords": ["Python"]},
+        {"category": "事務", "keywords": ["Email"]},
     ]
-    with open(act_file, "w", encoding="utf-8") as f:
-        for r in records:
-            f.write(json.dumps(r) + "\n")
 
-    result = get_daily_ai_summary(target_date, "Content")
+    markdown = format_structured_record_as_markdown(record, activity_logs)
 
-    assert "Main Summary" in result
-    assert "### カテゴリ順位" in result
-    assert "- 開発: 2" in result
-    assert "- 趣味: 1" in result
-    assert "### キーワード順位" in result
-    assert "- k1: 2" in result
-    assert "- k2: 1" in result
+    assert "Today was productive." in markdown
+    assert "### トピックス" in markdown
+    assert "- AI" in markdown
+    assert "- Python" in markdown
+    assert "### 活動内容" in markdown
+    assert "- Coding" in markdown
+    assert "### 人物メモ" in markdown
+    assert "- **Alice**: Discussed AI" in markdown
+    assert "### キーワード" in markdown
+    assert "- LLM" in markdown
+    assert "### カテゴリ順位" in markdown
+    assert "- 開発: 2" in markdown
+    assert "- 事務: 1" in markdown
+    assert "### キーワード順位" in markdown
+    assert "- Python: 2" in markdown
 
-    # Verify prompt simplification (no milliseconds)
+
+@patch("obsidian_ai_hub.summerize_day.llm_client.generate_llm_response")
+@patch("obsidian_ai_hub.summerize_day.reader.get_daily_note_path")
+@patch("obsidian_ai_hub.summerize_day.extracter.get_frontmatter_value")
+def test_get_daily_structured_record_strips_milliseconds(mock_fm, mock_path, mock_llm, mock_config):
+    target_date = datetime(2023, 10, 27)
+    mock_llm.return_value = json.dumps({"summary": "Test Summary"})
+    mock_p = MagicMock()
+    mock_p.exists.return_value = True
+    mock_path.return_value = mock_p
+
+    activity_logs = [
+        {"timestamp": "2023-10-27T10:00:00.123456", "summary": "Activity 1"}
+    ]
+    get_daily_structured_record(target_date, "content", [], activity_logs)
+
     args, kwargs = mock_llm.call_args
     prompt = kwargs["prompt"]
     assert "2023-10-27T10:00:00" in prompt
-    assert "2023-10-27T10:00:00.123" not in prompt
+    assert "2023-10-27T10:00:00.123456" not in prompt

@@ -22,99 +22,6 @@ INTENT_ENUM = [
     "翻訳・ローカライズ", "メタ検討", "その他"
 ]
 
-PROMPT = """
-あなたは日次ログ要約器です。以下の「今日のデイリーノート」、「セッション要約一覧（JSON）」、「アクティビティログ(JSONL)」だけを根拠に、日本語でその日の要約を書いてください。
-
-要約:
--  500文字以内
--  ユーザー視点で「今日やったこと/考えたこと」と「分かったこと（学び/整理）」を含める
--  topics を踏まえ、その日の関心の軸を1フレーズで示す（例：「関心は主に〜に寄っていた」）
--  根拠は metadata.summary を最優先し、topics/intent/title/keywords は補助に使う
--  入力にない事実（具体策・数値・固有名詞・出来事）を推測で補わない。不明な点は「〜の可能性」「〜かもしれない」と書く
-
-今日のデイリーノート:
-{DAILY_NOTE_CONTENT}
-
-セッション要約一覧:
-{SESSION_SUMMARIES}
-
-アクティビティログ(JSONL):
-{ACTIVITY_LOGS}
-"""
-
-
-def get_daily_ai_summary(target_date: datetime, daily_content: str) -> str:
-    """
-    指定された日付のAIログから metadata を抽出し、LLMで要約を生成。
-    結果をファイルに追記。
-    """
-    logs = load_conversation_logs(config.AI_LOG_PATH, target_date)
-    activity_logs = load_activity_logs(target_date)
-
-    # LLM入力用に、全 metadata を配列として連結した文字列を生成
-    # → 個別にLLMかける or 全体をまとめたJSONとして渡す（ここでは全件まとめて）
-    metadata_combined = json.dumps(
-        logs,
-        ensure_ascii=False,
-        indent=2
-    )
-
-    # プロンプト用のアクティビティログを簡略化（timestampとsummaryのみ）
-    simplified_activity_logs = []
-    for log in activity_logs:
-        ts = log.get("timestamp")
-        # ミリ秒を除去 (2023-10-27T10:00:00.123456 -> 2023-10-27T10:00:00)
-        if ts and "." in ts:
-            ts = ts.split(".")[0]
-        simplified_activity_logs.append({
-            "timestamp": ts,
-            "summary": log.get("summary")
-        })
-
-    activity_combined = json.dumps(
-        simplified_activity_logs,
-        ensure_ascii=False,
-        indent=2
-    )
-
-    # PROMPT を更新して実行
-    prompt = (
-        PROMPT.replace("{SESSION_SUMMARIES}", metadata_combined)
-        .replace("{ACTIVITY_LOGS}", activity_combined)
-        .replace("{DAILY_NOTE_CONTENT}", daily_content)
-    )
-
-    # return "エラー発生: LLM呼び出し失敗"  # デバッグのため一旦LLM呼び出しを停止
-    try:
-        response_text = llm_client.generate_llm_response(
-            provider=config.MAKE_TODAY_TARGET_PROVIDER,
-            model=config.MAKE_TODAY_TARGET_MODEL,
-            prompt=prompt,
-            max_tokens=8120,
-        ).strip()
-
-        # カテゴリとキーワードの集計
-        categories = [log.get("category") for log in activity_logs if log.get("category")]
-        keywords_list = []
-        for log in activity_logs:
-            keywords_list.extend(log.get("keywords", []))
-
-        top_categories = Counter(categories).most_common(5)
-        top_keywords = Counter(keywords_list).most_common(20)
-
-        ranking_text = ""
-        if top_categories:
-            ranking_text += "\n\n### カテゴリ順位\n" + "\n".join([f"- {c}: {count}" for c, count in top_categories])
-        if top_keywords:
-            ranking_text += "\n\n### キーワード順位\n" + "\n".join([f"- {k}: {count}" for k, count in top_keywords])
-
-        return response_text + ranking_text
-
-    except Exception as e:
-        logger.exception("Failed to generate daily AI summary")
-        return f"エラー発生: {type(e).__name__}"
-
-
 STRUCTURED_PROMPT = """
 あなたは日次ログ構造化器です。以下の「今日のデイリーノート」、「セッション要約一覧（JSON）」、「アクティビティログ(JSONL)」を元に、その日の活動を構造化されたJSON形式で出力してください。
 
@@ -180,9 +87,21 @@ def get_daily_structured_record(
     mood = extracter.get_frontmatter_value(daily_content, "mood", default=None)
     sleep = extracter.get_frontmatter_value(daily_content, "sleep", default=None)
 
+    # プロンプト用のアクティビティログを簡略化（timestampとsummaryのみ）
+    simplified_activity_logs = []
+    for log in activity_logs:
+        ts = log.get("timestamp")
+        # ミリ秒を除去 (2023-10-27T10:00:00.123456 -> 2023-10-27T10:00:00)
+        if ts and "." in ts:
+            ts = ts.split(".")[0]
+        simplified_activity_logs.append({
+            "timestamp": ts,
+            "summary": log.get("summary")
+        })
+
     prompt = (
         STRUCTURED_PROMPT.replace("{SESSION_SUMMARIES}", json.dumps(logs, ensure_ascii=False, indent=2))
-        .replace("{ACTIVITY_LOGS}", json.dumps(activity_logs, ensure_ascii=False, indent=2))
+        .replace("{ACTIVITY_LOGS}", json.dumps(simplified_activity_logs, ensure_ascii=False, indent=2))
         .replace("{DAILY_NOTE_CONTENT}", daily_content)
     )
 
@@ -257,6 +176,66 @@ def get_daily_structured_record(
         logger.error(f"Failed to generate or parse structured daily record: {e}")
 
     return record
+
+
+def format_structured_record_as_markdown(record: dict, activity_logs: list[dict]) -> str:
+    """
+    構造化レコードとアクティビティログをマークダウン形式に変換。
+    """
+    lines = []
+
+    if record.get("summary"):
+        lines.append(f"{record['summary']}\n")
+
+    sections = [
+        ("topics", "トピックス"),
+        ("activities", "活動内容"),
+        ("learnings", "学び・整理"),
+        ("reflections", "反省・気づき"),
+        ("gratitude", "感謝"),
+        ("questions", "問い"),
+        ("keywords", "キーワード"),
+        ("next_actions", "ネクストアクション"),
+    ]
+
+    for key, label in sections:
+        val = record.get(key)
+        if val and isinstance(val, list):
+            lines.append(f"### {label}")
+            for item in val:
+                lines.append(f"- {item}")
+            lines.append("")
+
+    if record.get("people"):
+        lines.append("### 人物メモ")
+        for p in record["people"]:
+            name = p.get("name", "Unknown")
+            note = p.get("note", "")
+            lines.append(f"- **{name}**: {note}")
+        lines.append("")
+
+    # カテゴリとキーワードの集計 (ランキング)
+    categories = [log.get("category") for log in activity_logs if log.get("category")]
+    keywords_list = []
+    for log in activity_logs:
+        keywords_list.extend(log.get("keywords", []))
+
+    top_categories = Counter(categories).most_common(5)
+    top_keywords = Counter(keywords_list).most_common(20)
+
+    if top_categories:
+        lines.append("### カテゴリ順位")
+        for c, count in top_categories:
+            lines.append(f"- {c}: {count}")
+        lines.append("")
+
+    if top_keywords:
+        lines.append("### キーワード順位")
+        for k, count in top_keywords:
+            lines.append(f"- {k}: {count}")
+        lines.append("")
+
+    return "\n".join(lines).strip()
 
 
 def upsert_monthly_record(target_date: datetime, record: dict):
@@ -345,26 +324,37 @@ def load_conversation_logs(log_file_dir: str, target_date: datetime) -> list[dic
     return logs
 
 
+def summarize_day(target_date: datetime):
+    """
+    指定日のログをまとめ、構造化レコードの生成、月次保存、デイリーノートへの追記を行う。
+    """
+    logger.info("Summarizing day: %s", target_date.date())
+
+    daily_file = reader.get_daily_note_path(target_date)
+    daily_content = reader.get_daily_note_content(target_date)
+
+    # 1. ログのロード
+    logs = load_conversation_logs(config.AI_LOG_PATH, target_date)
+    activity_logs = load_activity_logs(target_date)
+
+    # 2. 構造化レコードの生成
+    structured_record = get_daily_structured_record(target_date, daily_content, logs, activity_logs)
+
+    # 3. 月次JSONLへの保存 (永続化)
+    upsert_monthly_record(target_date, structured_record)
+
+    # 4. デイリーノートへの追記 (人間用表示)
+    if structured_record.get("summary"):
+        markdown_content = format_structured_record_as_markdown(structured_record, activity_logs)
+        extracter.append_to_subheader_file(daily_file.as_posix(), "## AIによる要約", [markdown_content])
+    else:
+        logger.error("Failed to generate structured record; skipping daily note update")
+
+
 def main():
     today = datetime.now()
     yesterday = today - timedelta(days=1)
-    logger.info("Summarizing day: %s", yesterday.date())
-
-    daily_file = reader.get_daily_note_path(yesterday)
-    content_yesterday = reader.get_daily_note_content(yesterday)
-
-    # 1. 人間用要約の生成と追記
-    content_to_add = get_daily_ai_summary(yesterday, content_yesterday)
-    if not content_to_add.startswith("エラー発生"):
-        extracter.append_to_subheader_file(daily_file.as_posix(), "## AIによる要約", [content_to_add])
-    else:
-        logger.error(f"Failed to generate human summary: {content_to_add}")
-
-    # 2. 構造化レコードの生成と月次JSONLへのupsert
-    logs = load_conversation_logs(config.AI_LOG_PATH, yesterday)
-    activity_logs = load_activity_logs(yesterday)
-    structured_record = get_daily_structured_record(yesterday, content_yesterday, logs, activity_logs)
-    upsert_monthly_record(yesterday, structured_record)
+    summarize_day(yesterday)
 
 
 if __name__ == "__main__":
