@@ -13,9 +13,10 @@ if "EventKit" not in sys.modules:
     sys.modules["EventKit"] = mock_eventkit
 
 if "Foundation" not in sys.modules:
-    mock_foundation = ModuleType("Foundation")
+    mock_foundation = MagicMock()
     mock_foundation.NSRunLoop = object()
     mock_foundation.NSDate = object()
+    mock_foundation.NSDictionary = MagicMock()
     sys.modules["Foundation"] = mock_foundation
 
 if "whisper" not in sys.modules:
@@ -30,6 +31,36 @@ if "md_hybrid_search" not in sys.modules:
     mock_mdhs.SearchIndex = type("SearchIndex", (), {})
     sys.modules["md_hybrid_search"] = mock_mdhs
 
+if "langchain" not in sys.modules:
+    sys.modules["langchain"] = MagicMock()
+
+if "langchain.tools" not in sys.modules:
+    sys.modules["langchain.tools"] = MagicMock()
+
+if "langchain_core" not in sys.modules:
+    sys.modules["langchain_core"] = MagicMock()
+
+if "langchain_core.messages" not in sys.modules:
+    sys.modules["langchain_core.messages"] = MagicMock()
+
+if "langchain_core.tools" not in sys.modules:
+    sys.modules["langchain_core.tools"] = MagicMock()
+
+if "langchain_openai" not in sys.modules:
+    sys.modules["langchain_openai"] = MagicMock()
+
+if "langchain_google_genai" not in sys.modules:
+    sys.modules["langchain_google_genai"] = MagicMock()
+
+if "langchain_ollama" not in sys.modules:
+    sys.modules["langchain_ollama"] = MagicMock()
+
+if "langchain_community" not in sys.modules:
+    sys.modules["langchain_community"] = MagicMock()
+
+if "langchain_community.chat_models" not in sys.modules:
+    sys.modules["langchain_community.chat_models"] = MagicMock()
+
 if "langchain_tavily" not in sys.modules:
     sys.modules["langchain_tavily"] = MagicMock()
 
@@ -41,6 +72,42 @@ if "sentence_transformers" not in sys.modules:
 
 if "transformers" not in sys.modules:
     sys.modules["transformers"] = MagicMock()
+
+if "dotenv" not in sys.modules:
+    sys.modules["dotenv"] = MagicMock()
+
+if "yaml" not in sys.modules:
+    sys.modules["yaml"] = MagicMock()
+
+if "requests" not in sys.modules:
+    sys.modules["requests"] = MagicMock()
+
+if "PIL" not in sys.modules:
+    sys.modules["PIL"] = MagicMock()
+
+if "AppKit" not in sys.modules:
+    sys.modules["AppKit"] = MagicMock()
+
+if "objc" not in sys.modules:
+    sys.modules["objc"] = MagicMock()
+
+if "pydantic" not in sys.modules:
+    sys.modules["pydantic"] = MagicMock()
+
+if "ApplicationServices" not in sys.modules:
+    sys.modules["ApplicationServices"] = MagicMock()
+
+if "Quartz" not in sys.modules:
+    sys.modules["Quartz"] = MagicMock()
+
+if "Vision" not in sys.modules:
+    sys.modules["Vision"] = MagicMock()
+
+if "Cocoa" not in sys.modules:
+    sys.modules["Cocoa"] = MagicMock()
+
+if "wurlitzer" not in sys.modules:
+    sys.modules["wurlitzer"] = MagicMock()
 
 from obsidian_ai_hub import main as main_module
 
@@ -65,6 +132,62 @@ def test_research_agent_cli_uses_queue_mode_without_theme(monkeypatch):
         main_module.main()
 
     mock_main.assert_called_once_with()
+
+
+def test_vault_search_cli_calls_search(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["prog", "--vault-search", "--query", "test", "--k", "5", "--search-mode", "similarity"])
+
+    with patch.object(main_module.search_obsidian_vault, "main", return_value=None) as mock_main:
+        main_module.main()
+
+    mock_main.assert_called_once_with(
+        query="test",
+        k=5,
+        search_mode="similarity",
+        json_output=False
+    )
+
+
+def test_vault_search_cli_calls_search_with_json(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["prog", "--vault-search", "--query", "test", "--json"])
+
+    with patch.object(main_module.search_obsidian_vault, "main", return_value=None) as mock_main:
+        main_module.main()
+
+    mock_main.assert_called_once_with(
+        query="test",
+        k=10,
+        search_mode="hybrid",
+        json_output=True
+    )
+
+
+def test_vault_search_cli_requires_query(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["prog", "--vault-search"])
+
+    with patch("argparse.ArgumentParser.error") as mock_error:
+        mock_error.side_effect = SystemExit
+        with patch.object(sys, "exit"):
+            try:
+                main_module.main()
+            except SystemExit:
+                pass
+        mock_error.assert_called_once()
+        assert "--vault-search requires --query" in mock_error.call_args[0][0]
+
+
+def test_query_requires_vault_search(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["prog", "--query", "test"])
+
+    with patch("argparse.ArgumentParser.error") as mock_error:
+        mock_error.side_effect = SystemExit
+        with patch.object(sys, "exit"):
+            try:
+                main_module.main()
+            except SystemExit:
+                pass
+        mock_error.assert_called_once()
+        assert "--query requires --vault-search" in mock_error.call_args[0][0]
 
 
 def test_scan_line_inbox_cli_calls_scan(monkeypatch):

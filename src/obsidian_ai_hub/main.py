@@ -18,6 +18,7 @@ from obsidian_ai_hub import (
     sync_valut,
     take_screenshot,
     scan_line_inbox,
+    search_obsidian_vault,
 )
 from obsidian_ai_hub.handler import add_research_theme
 
@@ -111,6 +112,33 @@ def main():
         help="アクティビティログを記録（ウィンドウ情報、スクリーンショット、OCR、要約）"
     )
     parser.add_argument(
+        "--vault-search",
+        action="store_true",
+        help="Obsidian Vault を検索"
+    )
+    parser.add_argument(
+        "--query",
+        type=str,
+        help="--vault-search で使用する検索クエリ"
+    )
+    parser.add_argument(
+        "--k",
+        type=int,
+        default=10,
+        help="--vault-search の検索結果件数 (デフォルト: 10)"
+    )
+    parser.add_argument(
+        "--search-mode",
+        choices=("similarity", "keyword", "hybrid"),
+        default="hybrid",
+        help="--vault-search の検索モード (デフォルト: hybrid)"
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="結果を JSON 形式で出力"
+    )
+    parser.add_argument(
         "--display",
         type=int,
         default=1,
@@ -155,6 +183,10 @@ def main():
         parser.error("--context requires --research-agent")
     if args.output_style and not args.research_agent:
         parser.error("--output-style requires --research-agent")
+    if args.vault_search and not args.query:
+        parser.error("--vault-search requires --query")
+    if args.query and not args.vault_search:
+        parser.error("--query requires --vault-search")
 
     research_kwargs = {}
     if args.context is not None:
@@ -218,6 +250,14 @@ def main():
     if args.log_activity:
         from obsidian_ai_hub import logging_activity
         run_and_log(logging_activity.main, "log_activity")
+        ran = True
+    if args.vault_search:
+        search_obsidian_vault.main(
+            query=args.query,
+            k=args.k,
+            search_mode=args.search_mode,
+            json_output=args.json
+        )
         ran = True
     if not ran:
         parser.print_help()
