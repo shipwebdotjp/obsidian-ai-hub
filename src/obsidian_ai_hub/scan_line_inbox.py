@@ -64,6 +64,7 @@ def scan_line_inbox():
 
     # 1. LINE ウィンドウ検出
     line_window = accessibility.get_line_window()
+    # アクセシビリティAPIから取得できた生の情報をデバッグ出力
     if not line_window:
         logger.warning("LINE window not found.")
         return {
