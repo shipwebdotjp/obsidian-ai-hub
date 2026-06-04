@@ -113,18 +113,18 @@ def main():
     all_ocr_text = []
     screenshot_paths = []
 
-    for i, screen in enumerate(screens):
-        # macOS screencapture -D requires the CGDirectDisplayID
+    for display_number, screen in enumerate(screens, start=1):
+        # NSScreenNumber は macOS 内部の display ID だが、screencapture -D は 1 始まりの表示番号を要求する
         description = screen.deviceDescription()
-        display_id = description.objectForKey_("NSScreenNumber")
+        screen_number = description.objectForKey_("NSScreenNumber")
 
-        # YYYY-MM-DD_HH-MM-SS_{DisplayID}_{連番}.png
+        # YYYY-MM-DD_HH-MM-SS_{DisplayNumber}_{連番}.png
         # 既存の get_unique_path を使うためにまずベースのファイル名を決める
-        filename = f"{timestamp_str}_{display_id}.png"
+        filename = f"{timestamp_str}_{display_number}.png"
         target_path = get_unique_path(save_dir, filename)
 
         try:
-            capture_screen(target_path, display=display_id)
+            capture_screen(target_path, display=display_number)
             screenshot_paths.append(str(target_path))
 
             # 3. OCR実行
@@ -132,7 +132,9 @@ def main():
             normalized_text = normalize_ocr_results(ocr_results)
             all_ocr_text.extend(normalized_text)
         except Exception as e:
-            logger.error(f"Failed to process display {display_id}: {e}")
+            logger.error(
+                f"Failed to process display {display_number} (NSScreenNumber={screen_number}): {e}"
+            )
             # 他のディスプレイの処理を止めない
 
     # OCR結果の重複排除（複数ディスプレイ間）

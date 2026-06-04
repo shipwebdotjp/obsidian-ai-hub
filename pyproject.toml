@@ -36,3 +36,8 @@ where = ["src"]
 
 [tool.uv.sources]
 md-hybrid-search = { path = "../md-hybrid-search", editable = true }
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+]

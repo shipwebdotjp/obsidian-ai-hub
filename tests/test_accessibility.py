@@ -1,3 +1,4 @@
+import importlib
 import sys
 from unittest.mock import MagicMock, patch
 
@@ -5,7 +6,14 @@ from unittest.mock import MagicMock, patch
 sys.modules["AppKit"] = MagicMock()
 sys.modules["Quartz"] = MagicMock()
 
-from obsidian_ai_hub.utils import accessibility
+# Remove any pre-existing mock (e.g. from test_logging_activity.py's sys.modules pollution)
+sys.modules.pop("obsidian_ai_hub.utils.accessibility", None)
+
+utils_pkg = importlib.import_module("obsidian_ai_hub.utils")
+if hasattr(utils_pkg, "accessibility"):
+    delattr(utils_pkg, "accessibility")
+
+accessibility = importlib.import_module("obsidian_ai_hub.utils.accessibility")
 
 def test_list_windows():
     mock_windows = [
@@ -31,7 +39,7 @@ def test_list_windows():
         }
     ]
 
-    with patch("obsidian_ai_hub.utils.accessibility.CGWindowListCopyWindowInfo", return_value=mock_windows):
+    with patch.object(accessibility, "CGWindowListCopyWindowInfo", return_value=mock_windows):
         results = accessibility.list_windows()
 
     assert len(results) == 2
@@ -58,7 +66,7 @@ def test_get_line_window_found():
         }
     ]
 
-    with patch("obsidian_ai_hub.utils.accessibility.CGWindowListCopyWindowInfo", return_value=mock_windows):
+    with patch.object(accessibility, "CGWindowListCopyWindowInfo", return_value=mock_windows):
         win = accessibility.get_line_window()
 
     assert win is not None
@@ -76,7 +84,7 @@ def test_get_line_window_not_found():
         }
     ]
 
-    with patch("obsidian_ai_hub.utils.accessibility.CGWindowListCopyWindowInfo", return_value=mock_windows):
+    with patch.object(accessibility, "CGWindowListCopyWindowInfo", return_value=mock_windows):
         win = accessibility.get_line_window()
 
     assert win is None
@@ -99,7 +107,7 @@ def test_get_line_window_invisible_ignored():
         }
     ]
 
-    with patch("obsidian_ai_hub.utils.accessibility.CGWindowListCopyWindowInfo", return_value=mock_windows):
+    with patch.object(accessibility, "CGWindowListCopyWindowInfo", return_value=mock_windows):
         win = accessibility.get_line_window()
 
     assert win is None

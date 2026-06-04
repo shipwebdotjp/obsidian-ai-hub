@@ -3,7 +3,6 @@ from __future__ import annotations
 from unittest.mock import patch
 
 import pytest
-from md_hybrid_search import ConfigMismatchError
 
 from obsidian_ai_hub import sync_valut
 
@@ -14,6 +13,8 @@ def test_build_vault_search_index_uses_configured_values(monkeypatch, tmp_path):
     monkeypatch.setattr(sync_valut.config, "VAULT_INDEX_EMBEDDER_MODEL", "cl-nagoya/ruri-v3-310m")
     monkeypatch.setattr(sync_valut.config, "VAULT_INDEX_COLLECTION_NAME", "documents")
     monkeypatch.setattr(sync_valut.config, "VAULT_PATH", tmp_path / "vault")
+    monkeypatch.setattr(sync_valut.config, "LOCAL_MODEL_DIR", None)
+    monkeypatch.setattr(sync_valut.config, "VAULT_INDEX_ALLOW_NETWORK_FALLBACK", False)
 
     fake_embedder = object()
     fake_index = object()
@@ -27,6 +28,8 @@ def test_build_vault_search_index_uses_configured_values(monkeypatch, tmp_path):
     assert result is fake_index
     mock_embedder.assert_called_once_with(
         model_name="cl-nagoya/ruri-v3-310m",
+        cache_dir=None,
+        allow_network_fallback=False,
     )
     mock_index.assert_called_once()
     kwargs = mock_index.call_args.kwargs
@@ -38,11 +41,15 @@ def test_build_vault_search_index_uses_configured_values(monkeypatch, tmp_path):
 
 
 def test_main_exits_on_config_mismatch(monkeypatch):
+    class FakeConfigMismatchError(Exception):
+        pass
+
     class FakeIndex:
         def sync(self):
-            raise ConfigMismatchError("configuration mismatch")
+            raise FakeConfigMismatchError("configuration mismatch")
 
     monkeypatch.setattr(sync_valut, "build_vault_search_index", lambda: FakeIndex())
+    monkeypatch.setattr(sync_valut, "ConfigMismatchError", FakeConfigMismatchError, raising=False)
 
     with pytest.raises(SystemExit) as excinfo:
         sync_valut.main()

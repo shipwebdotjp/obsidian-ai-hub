@@ -16,6 +16,7 @@ mock_modules = [
     "langchain_core.tools",
     "obsidian_ai_hub.utils.accessibility",
     "obsidian_ai_hub.utils.img2text",
+    "obsidian_ai_hub.utils.config",
 ]
 for module_name in mock_modules:
     sys.modules[module_name] = MagicMock()
@@ -59,6 +60,36 @@ def mock_dependencies():
             "cfg": mock_cfg,
             "unique": mock_unique
         }
+
+def test_main_uses_display_numbers_for_screenshots(mock_dependencies):
+    deps = mock_dependencies
+
+    screen_1 = MagicMock()
+    screen_1.deviceDescription.return_value.objectForKey_.return_value = 1
+    screen_2 = MagicMock()
+    screen_2.deviceDescription.return_value.objectForKey_.return_value = 3
+    deps["screen"].screens.return_value = [screen_1, screen_2]
+
+    deps["llm"].generate_llm_response.return_value = json.dumps({
+        "summary": "確認作業をしていました",
+        "category": "事務・記録",
+        "keywords": ["確認"]
+    })
+
+    fixed_now = datetime(2026, 6, 4, 10, 45, 44)
+    with patch("obsidian_ai_hub.logging_activity.datetime") as mock_datetime, \
+         patch("builtins.open", mock_open()), \
+         patch("pathlib.Path.mkdir"):
+        mock_datetime.now.return_value = fixed_now
+        main()
+
+    assert deps["capture"].call_count == 2
+    first_call, second_call = deps["capture"].call_args_list
+
+    assert first_call.kwargs["display"] == 1
+    assert second_call.kwargs["display"] == 2
+    assert str(first_call.args[0]).endswith("_1.png")
+    assert str(second_call.args[0]).endswith("_2.png")
 
 def test_main_success_case(mock_dependencies):
     deps = mock_dependencies
