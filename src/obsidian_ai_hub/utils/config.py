@@ -71,6 +71,7 @@ RESEARCH_DIR_NAME = str(_config_value("vault", "research", default="research"))
 
 DAILY_TEMPLATE_FILENAME = str(_config_value("files", "daily_note", default="daily.md"))
 WEEKLY_TEMPLATE_FILENAME = str(_config_value("files", "weekly_template", default="Weekly Template.md"))
+MONTHLY_TEMPLATE_FILENAME = str(_config_value("files", "monthly_template", default="Monthly Template.md"))
 RESEARCH_CANDIDATE_THEME_LIST_FILENAME = str(
     _config_value("files", "research_candidate_theme_list", default="リサーチ候補テーマリスト.md")
 )
@@ -85,6 +86,8 @@ ACTIVITY_PATH = VAULT_PATH / "activity"
 
 # Template for weekly notes
 WEEKLY_TEMPLATE_PATH = DAILY_PATH / TEMPLATE_DIR_NAME / WEEKLY_TEMPLATE_FILENAME
+# Template for monthly notes
+MONTHLY_TEMPLATE_PATH = DAILY_PATH / TEMPLATE_DIR_NAME / MONTHLY_TEMPLATE_FILENAME
 LOCAL_MODEL_DIR = _optional_path('LOCAL_MODEL_DIR')
 LINE_TARGET_ID = os.getenv('LINE_TARGET_ID', '')
 LINE_MESSAGING_TOKEN = os.getenv('LINE_MESSAGING_TOKEN', '')

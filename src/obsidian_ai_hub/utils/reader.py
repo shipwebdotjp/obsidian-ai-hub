@@ -18,11 +18,9 @@ def get_daily_note_content(date):
     指定された日付のデイリーノートの内容を返す
     """
     daily_file = get_daily_note_path(date)
-    if not os.path.exists(daily_file):
+    if not daily_file.exists():
         return config.TEMPLATE_PATH.read_text(encoding="utf-8")
-    with open(daily_file, "r") as f:
-        return f.read()
-    return ""
+    return daily_file.read_text(encoding="utf-8")
 
 
 def get_weekly_note_path(date):
@@ -41,8 +39,29 @@ def get_weekly_note_content(date):
     指定された日付の週次ノートの内容を返す
     """
     weekly_file = get_weekly_note_path(date)
-    if not os.path.exists(weekly_file):
+    if not weekly_file.exists():
         return config.WEEKLY_TEMPLATE_PATH.read_text(encoding="utf-8")
-    with open(weekly_file, "r") as f:
-        return f.read()
-    return ""
+    return weekly_file.read_text(encoding="utf-8")
+
+
+def get_monthly_note_path(date):
+    """
+    指定された日付の月次ノートのパスを返す
+    """
+    year = date.strftime("%Y")
+    month = date.strftime("%m")
+    monthly_dir = config.DAILY_PATH / year / month
+    monthly_file = monthly_dir / f"{year}-{month}.md"
+    return monthly_file
+
+
+def get_monthly_note_content(date):
+    """
+    指定された日付の月次ノートの内容を返す
+    """
+    monthly_file = get_monthly_note_path(date)
+    if not monthly_file.exists():
+        if config.MONTHLY_TEMPLATE_PATH.exists():
+            return config.MONTHLY_TEMPLATE_PATH.read_text(encoding="utf-8")
+        return ""
+    return monthly_file.read_text(encoding="utf-8")
