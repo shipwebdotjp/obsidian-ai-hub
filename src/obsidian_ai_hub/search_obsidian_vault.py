@@ -4,15 +4,17 @@ import sys
 from obsidian_ai_hub.handler.obsidian_vault_retriever import search_obsidian_vault
 
 
+from obsidian_ai_hub.handler.obsidian_vault_retriever import search_obsidian_vault as retriever
+
 def main(query: str, k: int = 10, search_mode: str = "hybrid", json_output: bool = False):
     """
     CLI wrapper for searching the Obsidian vault.
     """
-    result_json = search_obsidian_vault.invoke({
-        "query": query,
-        "k": int(k),
-        "search_mode": search_mode
-    })
+    result_json = retriever.func(
+        query=query,
+        k=int(k),
+        search_mode=search_mode
+    )
 
     if json_output:
         # result_json is already a JSON string from the retriever
