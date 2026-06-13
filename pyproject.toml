@@ -35,7 +35,7 @@ dependencies = [
 where = ["src"]
 
 [tool.uv.sources]
-md-hybrid-search = { path = "../md-hybrid-search", editable = true }
+md-hybrid-search = { git = "https://github.com/shipwebdotjp/md-hybrid-search.git" }
 
 [dependency-groups]
 dev = [
