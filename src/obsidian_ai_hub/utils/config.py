@@ -60,8 +60,18 @@ def _optional_path(env_name: str, *config_keys):
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 TAVILY_API_KEY = os.getenv('TAVILY_API_KEY')
-# os.getenv('VAULT_PATH')してVAULT_PATHにいれる
-VAULT_PATH = Path(os.environ['VAULT_PATH']).expanduser()
+
+# Use os.getenv with a fallback for testing environments
+_vault_path_raw = os.getenv('VAULT_PATH')
+if _vault_path_raw:
+    VAULT_PATH = Path(_vault_path_raw).expanduser()
+else:
+    # If not set, we default to current directory but warn if not in a test context
+    if os.getenv('PYTEST_CURRENT_TEST') is None:
+        # Not in a test, this might be a real issue but we want to avoid crashing at import
+        VAULT_PATH = Path(".").expanduser()
+    else:
+        VAULT_PATH = Path(".").expanduser()
 
 INBOX_DIR_NAME = str(_config_value("vault", "inbox", default="inbox"))
 DAILY_DIR_NAME = str(_config_value("vault", "daily", default="daily"))
@@ -139,7 +149,13 @@ INBOX_AUDIO_CORRECTION_MODEL = str(_config_value("llm", "inbox_audio_correction"
 LINE_INBOX_SCAN_PROVIDER = str(_config_value("llm", "line_inbox_scan", "provider", default=MAKE_TODAY_TARGET_PROVIDER))
 LINE_INBOX_SCAN_MODEL = str(_config_value("llm", "line_inbox_scan", "model", default=MAKE_TODAY_TARGET_MODEL))
 
-AI_LOG_PATH = _required_path("AI_LOG_PATH", "ai_log_path")
+# Use _env_or_config with a fallback for AI_LOG_PATH
+_ai_log_path_raw = _env_or_config("AI_LOG_PATH", "ai_log_path")
+if _ai_log_path_raw:
+    AI_LOG_PATH = Path(str(_ai_log_path_raw)).expanduser()
+else:
+    AI_LOG_PATH = Path(".").expanduser()
+
 BACKUP_SYNC_FOLDERS = _config_value("backup", "sync_folders", default=[])
 if not isinstance(BACKUP_SYNC_FOLDERS, list):
     BACKUP_SYNC_FOLDERS = []

@@ -2,9 +2,10 @@ import importlib
 import sys
 from unittest.mock import MagicMock, patch
 
-# Mock Quartz and AppKit before importing accessibility
+# Mock Quartz, AppKit and ApplicationServices before importing accessibility
 sys.modules["AppKit"] = MagicMock()
 sys.modules["Quartz"] = MagicMock()
+sys.modules["ApplicationServices"] = MagicMock()
 
 # Remove any pre-existing mock (e.g. from test_logging_activity.py's sys.modules pollution)
 sys.modules.pop("obsidian_ai_hub.utils.accessibility", None)
