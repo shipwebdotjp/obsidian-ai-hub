@@ -3568,7 +3568,7 @@ name = "obsidian-ai-hub"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
-    { name = "atomacos" },
+    { name = "atomacos", marker = "sys_platform == 'darwin'" },
     { name = "fastmcp" },
     { name = "gpt-researcher" },
     { name = "langchain" },
@@ -3579,11 +3579,11 @@ dependencies = [
     { name = "langchain-tavily" },
     { name = "md-hybrid-search" },
     { name = "openai-whisper" },
-    { name = "pyobjc-core" },
-    { name = "pyobjc-framework-cocoa" },
-    { name = "pyobjc-framework-eventkit" },
-    { name = "pyobjc-framework-quartz" },
-    { name = "pyobjc-framework-vision" },
+    { name = "pyobjc-core", marker = "sys_platform == 'darwin'" },
+    { name = "pyobjc-framework-cocoa", marker = "sys_platform == 'darwin'" },
+    { name = "pyobjc-framework-eventkit", marker = "sys_platform == 'darwin'" },
+    { name = "pyobjc-framework-quartz", marker = "sys_platform == 'darwin'" },
+    { name = "pyobjc-framework-vision", marker = "sys_platform == 'darwin'" },
     { name = "sentence-transformers" },
     { name = "wurlitzer" },
 ]
@@ -3595,7 +3595,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "atomacos", specifier = ">=3.3.0" },
+    { name = "atomacos", marker = "sys_platform == 'darwin'", specifier = ">=3.3.0" },
     { name = "fastmcp", specifier = ">=3.3.1" },
     { name = "gpt-researcher", specifier = ">=0.14.8" },
     { name = "langchain", specifier = ">=1.3.1" },
@@ -3606,11 +3606,11 @@ requires-dist = [
     { name = "langchain-tavily", specifier = ">=0.2.18" },
     { name = "md-hybrid-search", git = "https://github.com/shipwebdotjp/md-hybrid-search.git" },
     { name = "openai-whisper" },
-    { name = "pyobjc-core", specifier = ">=11.0" },
-    { name = "pyobjc-framework-cocoa", specifier = ">=11.0" },
-    { name = "pyobjc-framework-eventkit", specifier = ">=11.0" },
-    { name = "pyobjc-framework-quartz", specifier = ">=12.1" },
-    { name = "pyobjc-framework-vision", specifier = ">=12.1" },
+    { name = "pyobjc-core", marker = "sys_platform == 'darwin'", specifier = ">=11.0" },
+    { name = "pyobjc-framework-cocoa", marker = "sys_platform == 'darwin'", specifier = ">=11.0" },
+    { name = "pyobjc-framework-eventkit", marker = "sys_platform == 'darwin'", specifier = ">=11.0" },
+    { name = "pyobjc-framework-quartz", marker = "sys_platform == 'darwin'", specifier = ">=12.1" },
+    { name = "pyobjc-framework-vision", marker = "sys_platform == 'darwin'", specifier = ">=12.1" },
     { name = "sentence-transformers" },
     { name = "wurlitzer", specifier = ">=3.1.1" },
 ]
