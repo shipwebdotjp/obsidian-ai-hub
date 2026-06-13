@@ -208,7 +208,7 @@ def format_weekly_record_as_markdown(record: dict) -> str:
 
     return "\n".join(lines).strip()
 
-def upsert_weekly_record(iso_year: int, record: dict):
+def upsert_weekly_record(iso_year: int, record: dict) -> bool:
     weekly_log_dir = Path(config.ACTIVITY_PATH) / str(iso_year)
     weekly_log_dir.mkdir(parents=True, exist_ok=True)
     log_file = weekly_log_dir / f"{iso_year}-week.jsonl"
@@ -228,7 +228,7 @@ def upsert_weekly_record(iso_year: int, record: dict):
                     break
 
     if parse_failed:
-        return
+        return False
 
     records[record["week_id"]] = record
 
@@ -238,8 +238,10 @@ def upsert_weekly_record(iso_year: int, record: dict):
             for wid in sorted_week_ids:
                 f.write(json.dumps(records[wid], ensure_ascii=False) + "\n")
         logger.info(f"Weekly record upserted to {log_file}")
+        return True
     except Exception as e:
         logger.error(f"Failed to write weekly record: {e}")
+        return False
 
 def summarize_week(target_date: datetime):
     logger.info("Summarizing week for date: %s", target_date.date())
@@ -253,7 +255,9 @@ def summarize_week(target_date: datetime):
 
     # 3. 週次JSONLへの保存
     iso_year, _, _ = target_date.isocalendar()
-    upsert_weekly_record(iso_year, structured_record)
+    if not upsert_weekly_record(iso_year, structured_record):
+        logger.error("Skipping weekly note update as JSONL upsert failed")
+        return
 
     # 4. ウィークリーノートへの書き込み
     weekly_note = reader.get_weekly_note_content(target_date)
@@ -263,11 +267,15 @@ def summarize_week(target_date: datetime):
     if "## AIによる要約" in weekly_note:
         pattern = r"(## AIによる要約\n)(.*?)(?=\n## |$)"
         new_weekly_note = re.sub(
-            pattern, rf"\1\n{markdown_content}\n\n", weekly_note, flags=re.DOTALL
+            pattern,
+            lambda m: f"{m.group(1)}\n{markdown_content}\n\n",
+            weekly_note,
+            flags=re.DOTALL
         )
     else:
         new_weekly_note = weekly_note.rstrip() + f"\n\n## AIによる要約\n\n{markdown_content}\n"
 
+    weekly_note_path.parent.mkdir(parents=True, exist_ok=True)
     with open(weekly_note_path, "w", encoding="utf-8") as f:
         f.write(new_weekly_note)
 

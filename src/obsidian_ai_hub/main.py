@@ -14,6 +14,7 @@ from obsidian_ai_hub import (
     suggest_research_theme,
     summerize_day,
     summerize_week,
+    summerize_month,
     sync_knowledge,
     sync_valut,
     take_screenshot,
@@ -50,6 +51,11 @@ def main():
         "--summerize-week",
         action="store_true",
         help="週次レビューを生成"
+    )
+    parser.add_argument(
+        "--summerize-month",
+        action="store_true",
+        help="月次レビューを生成"
     )
     parser.add_argument(
         "--summerize-day",
@@ -159,6 +165,17 @@ def main():
         choices=("short", "medium", "long"),
         help="--research-agent の出力長を切り替える"
     )
+    def validate_month(value):
+        import re
+        if not re.match(r'^\d{4}-\d{2}$', value):
+            raise argparse.ArgumentTypeError(f"Invalid month format: {value}. Expected YYYY-MM")
+        return value
+
+    parser.add_argument(
+        "--month",
+        type=validate_month,
+        help="--summerize-month で指定する対象月 (YYYY-MM)"
+    )
     args = parser.parse_args()
     ran = False
 
@@ -205,6 +222,9 @@ def main():
         ran = True
     if args.summerize_week:
         run_and_log(summerize_week.main, "summerize_week")
+        ran = True
+    if args.summerize_month:
+        run_and_log(lambda: summerize_month.main(args.month), "summerize_month")
         ran = True
     if args.summerize_day:
         run_and_log(summerize_day.main, "summerize_day")
