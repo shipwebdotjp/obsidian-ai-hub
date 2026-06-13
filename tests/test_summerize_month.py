@@ -1,34 +1,63 @@
 import json
+import sys
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 import pytest
+
+# Mock modules that might be missing in the environment
+mock_modules = [
+    "dotenv",
+    "md_hybrid_search",
+    "AppKit",
+    "objc",
+    "EventKit",
+    "sentence_transformers",
+    "torch",
+    "transformers",
+    "langchain",
+    "langchain_openai",
+    "langchain_community",
+    "langchain_google_genai",
+    "langchain_anthropic",
+    "langchain_core",
+    "langchain_core.messages",
+    "langchain_core.tools",
+    "yaml",
+]
+for module_name in mock_modules:
+    sys.modules[module_name] = MagicMock()
 
 from obsidian_ai_hub import summerize_month
 from obsidian_ai_hub.utils import config
 
 @pytest.fixture
 def mock_config(tmp_path):
-    with patch("obsidian_ai_hub.utils.config.ACTIVITY_PATH", tmp_path / "activity"):
-        with patch("obsidian_ai_hub.utils.config.DAILY_PATH", tmp_path / "daily"):
-            with patch("obsidian_ai_hub.utils.config.TEMPLATE_PATH", tmp_path / "template" / "daily.md"):
-                with patch("obsidian_ai_hub.utils.config.MONTHLY_TEMPLATE_PATH", tmp_path / "template" / "monthly.md"):
-                    config.ACTIVITY_PATH.mkdir(parents=True)
-                    config.DAILY_PATH.mkdir(parents=True)
-                    config.MONTHLY_TEMPLATE_PATH.parent.mkdir(parents=True)
-                    config.MONTHLY_TEMPLATE_PATH.write_text("Default Monthly Template")
-                    yield
+    activity_path = tmp_path / "activity"
+    daily_path = tmp_path / "daily"
+    template_path = tmp_path / "template" / "daily.md"
+    monthly_template_path = tmp_path / "template" / "monthly.md"
 
-def test_get_monthly_note_path():
+    activity_path.mkdir(parents=True, exist_ok=True)
+    daily_path.mkdir(parents=True, exist_ok=True)
+    monthly_template_path.parent.mkdir(parents=True, exist_ok=True)
+    monthly_template_path.write_text("Default Monthly Template")
+
+    with patch("obsidian_ai_hub.utils.config.ACTIVITY_PATH", activity_path), \
+         patch("obsidian_ai_hub.utils.config.DAILY_PATH", daily_path), \
+         patch("obsidian_ai_hub.utils.config.TEMPLATE_PATH", template_path), \
+         patch("obsidian_ai_hub.utils.config.MONTHLY_TEMPLATE_PATH", monthly_template_path):
+        yield
+
+def test_get_monthly_note_path(mock_config):
     dt = datetime(2024, 10, 15)
-    with patch("obsidian_ai_hub.utils.config.DAILY_PATH", Path("/vault/daily")):
-        path = summerize_month.reader.get_monthly_note_path(dt)
-        assert path == Path("/vault/daily/2024/10/2024-10.md")
+    path = summerize_month.reader.get_monthly_note_path(dt)
+    assert path.relative_to(config.DAILY_PATH) == Path("2024/10/2024-10.md")
 
 def test_load_weekly_records(mock_config):
     year = "2024"
     log_dir = config.ACTIVITY_PATH / year
-    log_dir.mkdir(parents=True)
+    log_dir.mkdir(parents=True, exist_ok=True)
     log_file = log_dir / f"{year}-week.jsonl"
 
     records = [
