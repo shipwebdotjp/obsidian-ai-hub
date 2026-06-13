@@ -8,7 +8,11 @@ def main(query: str, k: int = 10, search_mode: str = "hybrid", json_output: bool
     """
     CLI wrapper for searching the Obsidian vault.
     """
-    result_json = search_obsidian_vault(query=query, k=k, search_mode=search_mode)
+    result_json = search_obsidian_vault.invoke({
+        "query": query,
+        "k": int(k),
+        "search_mode": search_mode
+    })
 
     if json_output:
         # result_json is already a JSON string from the retriever
@@ -33,7 +37,7 @@ def main(query: str, k: int = 10, search_mode: str = "hybrid", json_output: bool
         score = hit.get("score", 0.0)
         content = hit.get("content", "")
         metadata = hit.get("metadata", {})
-        path = metadata.get("path", "Unknown path")
+        path = metadata.get("file_path", "Unknown path")
 
         print(f"{i}. [{score:.4f}] {path}")
         print("-" * 40)
