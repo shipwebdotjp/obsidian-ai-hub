@@ -42,6 +42,7 @@ llm:
   make_today_target:
     provider: ollama
     model: glm-4.7:cloud
+    prompt_path: /path/to/your/config/prompts/make_today_target.md
   inbox_audio_correction:
     provider: ollama
     model: gpt-oss:120b-cloud
