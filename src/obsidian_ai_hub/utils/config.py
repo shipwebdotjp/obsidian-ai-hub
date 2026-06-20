@@ -149,11 +149,71 @@ MAKE_TODAY_TARGET_MODEL = str(_config_value("llm", "make_today_target", "model",
 MAKE_TODAY_TARGET_PROMPT_PATH = _optional_path("MAKE_TODAY_TARGET_PROMPT_PATH", "llm", "make_today_target", "prompt_path")
 if MAKE_TODAY_TARGET_PROMPT_PATH is None:
     MAKE_TODAY_TARGET_PROMPT_PATH = BASE_DIR / "config" / "prompts" / "make_today_target.md"
+
+SUMMARIZE_DAY_PROMPT_PATH = _optional_path("SUMMARIZE_DAY_PROMPT_PATH", "llm", "summarize_day", "prompt_path")
+if SUMMARIZE_DAY_PROMPT_PATH is None:
+    SUMMARIZE_DAY_PROMPT_PATH = BASE_DIR / "config" / "prompts" / "summarize_day.md"
+
+SUMMARIZE_WEEK_PROMPT_PATH = _optional_path("SUMMARIZE_WEEK_PROMPT_PATH", "llm", "summarize_week", "prompt_path")
+if SUMMARIZE_WEEK_PROMPT_PATH is None:
+    SUMMARIZE_WEEK_PROMPT_PATH = BASE_DIR / "config" / "prompts" / "summarize_week.md"
+
+SUMMARIZE_MONTH_PROMPT_PATH = _optional_path("SUMMARIZE_MONTH_PROMPT_PATH", "llm", "summarize_month", "prompt_path")
+if SUMMARIZE_MONTH_PROMPT_PATH is None:
+    SUMMARIZE_MONTH_PROMPT_PATH = BASE_DIR / "config" / "prompts" / "summarize_month.md"
+
+ACTIVITY_CLASSIFICATION_PROMPT_PATH = _optional_path("ACTIVITY_CLASSIFICATION_PROMPT_PATH", "llm", "activity_classification", "prompt_path")
+if ACTIVITY_CLASSIFICATION_PROMPT_PATH is None:
+    ACTIVITY_CLASSIFICATION_PROMPT_PATH = BASE_DIR / "config" / "prompts" / "activity_classification.md"
+
 INBOX_AUDIO_CORRECTION_PROVIDER = str(_config_value("llm", "inbox_audio_correction", "provider", default="ollama"))
 INBOX_AUDIO_CORRECTION_MODEL = str(_config_value("llm", "inbox_audio_correction", "model", default="gpt-oss:120b-cloud"))
 
 LINE_INBOX_SCAN_PROVIDER = str(_config_value("llm", "line_inbox_scan", "provider", default=MAKE_TODAY_TARGET_PROVIDER))
 LINE_INBOX_SCAN_MODEL = str(_config_value("llm", "line_inbox_scan", "model", default=MAKE_TODAY_TARGET_MODEL))
+LINE_INBOX_SCAN_PROMPT_PATH = _optional_path("LINE_INBOX_SCAN_PROMPT_PATH", "llm", "line_inbox_scan", "prompt_path")
+if LINE_INBOX_SCAN_PROMPT_PATH is None:
+    LINE_INBOX_SCAN_PROMPT_PATH = BASE_DIR / "config" / "prompts" / "line_scan.md"
+
+INBOX_WEB_SUMMARY_PROMPT_PATH = _optional_path("INBOX_WEB_SUMMARY_PROMPT_PATH", "llm", "inbox_web_summary", "prompt_path")
+if INBOX_WEB_SUMMARY_PROMPT_PATH is None:
+    INBOX_WEB_SUMMARY_PROMPT_PATH = BASE_DIR / "config" / "prompts" / "inbox_web_summary.md"
+
+INBOX_CLASSIFICATION_PROMPT_PATH = _optional_path("INBOX_CLASSIFICATION_PROMPT_PATH", "llm", "inbox_classification", "prompt_path")
+if INBOX_CLASSIFICATION_PROMPT_PATH is None:
+    INBOX_CLASSIFICATION_PROMPT_PATH = BASE_DIR / "config" / "prompts" / "inbox_classification.md"
+
+INBOX_TRANSCRIPT_CORRECTION_PROMPT_PATH = _optional_path("INBOX_TRANSCRIPT_CORRECTION_PROMPT_PATH", "llm", "inbox_transcript_correction", "prompt_path")
+if INBOX_TRANSCRIPT_CORRECTION_PROMPT_PATH is None:
+    INBOX_TRANSCRIPT_CORRECTION_PROMPT_PATH = BASE_DIR / "config" / "prompts" / "inbox_transcript_correction.md"
+
+RESEARCH_THEME_GENERATION_PROMPT_PATH = _optional_path("RESEARCH_THEME_GENERATION_PROMPT_PATH", "llm", "research", "theme_generation", "prompt_path")
+if RESEARCH_THEME_GENERATION_PROMPT_PATH is None:
+    RESEARCH_THEME_GENERATION_PROMPT_PATH = BASE_DIR / "config" / "prompts" / "research_theme_generation.md"
+
+RESEARCH_ROUTER_PROMPT_PATH = _optional_path("RESEARCH_ROUTER_PROMPT_PATH", "llm", "research", "router", "prompt_path")
+if RESEARCH_ROUTER_PROMPT_PATH is None:
+    RESEARCH_ROUTER_PROMPT_PATH = BASE_DIR / "config" / "prompts" / "research_router.md"
+
+RESEARCH_INTERNAL_PROMPT_PATH = _optional_path("RESEARCH_INTERNAL_PROMPT_PATH", "llm", "research", "internal", "prompt_path")
+if RESEARCH_INTERNAL_PROMPT_PATH is None:
+    RESEARCH_INTERNAL_PROMPT_PATH = BASE_DIR / "config" / "prompts" / "research_internal.md"
+
+RESEARCH_WEB_PROMPT_PATH = _optional_path("RESEARCH_WEB_PROMPT_PATH", "llm", "research", "web", "prompt_path")
+if RESEARCH_WEB_PROMPT_PATH is None:
+    RESEARCH_WEB_PROMPT_PATH = BASE_DIR / "config" / "prompts" / "research_web.md"
+
+RESEARCH_DEEP_PROMPT_PATH = _optional_path("RESEARCH_DEEP_PROMPT_PATH", "llm", "research", "deep", "prompt_path")
+if RESEARCH_DEEP_PROMPT_PATH is None:
+    RESEARCH_DEEP_PROMPT_PATH = BASE_DIR / "config" / "prompts" / "research_deep.md"
+
+RESEARCH_TITLE_PROMPT_PATH = _optional_path("RESEARCH_TITLE_PROMPT_PATH", "llm", "research", "title", "prompt_path")
+if RESEARCH_TITLE_PROMPT_PATH is None:
+    RESEARCH_TITLE_PROMPT_PATH = BASE_DIR / "config" / "prompts" / "research_title.md"
+
+RESEARCH_QUERY_GENERATION_PROMPT_PATH = _optional_path("RESEARCH_QUERY_GENERATION_PROMPT_PATH", "llm", "research", "query_generation", "prompt_path")
+if RESEARCH_QUERY_GENERATION_PROMPT_PATH is None:
+    RESEARCH_QUERY_GENERATION_PROMPT_PATH = BASE_DIR / "config" / "prompts" / "research_query_generation.md"
 
 # Use _env_or_config with a fallback for AI_LOG_PATH
 _ai_log_path_raw = _env_or_config("AI_LOG_PATH", "ai_log_path")

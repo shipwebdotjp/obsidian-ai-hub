@@ -2,7 +2,7 @@ import json
 import logging
 from collections import Counter
 from datetime import datetime, timedelta
-from obsidian_ai_hub.utils import config, reader, extracter, llm_client
+from obsidian_ai_hub.utils import config, reader, extracter, llm_client, prompt
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -21,46 +21,6 @@ INTENT_ENUM = [
     "計画・タスク化", "文章生成・編集", "コード作成・レビュー", "問題解決・トラブル対応",
     "翻訳・ローカライズ", "メタ検討", "その他"
 ]
-
-STRUCTURED_PROMPT = """
-あなたは日次ログ構造化器です。以下の「今日のデイリーノート」、「セッション要約一覧（JSON）」、「アクティビティログ(JSONL)」を元に、その日の活動を構造化されたJSON形式で出力してください。
-
-# 項目定義
-- summary: その日の短い全体像（1文）
-- topics: 関心領域のまとまり（文字列の配列）
-- activities: 主な作業内容（文字列の配列）
-- learnings: 学び・整理できたこと（文字列の配列）
-- reflections: 反省点・気づき（文字列の配列）
-- gratitude: 感謝したこと（文字列の配列）
-- people: 人物メモ。 `{"name": "...", "note": "..."}` の配列。見つからなければ空配列
-- questions: 未解決の問い（文字列の配列）
-- keywords: 後で検索しやすい語（文字列の配列）
-- next_actions: 翌日以降の具体的な次手（文字列の配列）
-
-# 出力形式
-必ず以下のJSON形式のみを出力してください。余計な解説は不要です。
-{
-  "summary": "...",
-  "topics": [],
-  "activities": [],
-  "learnings": [],
-  "reflections": [],
-  "gratitude": [],
-  "people": [{"name": "...", "note": "..."}],
-  "questions": [],
-  "keywords": [],
-  "next_actions": []
-}
-
-今日のデイリーノート:
-{DAILY_NOTE_CONTENT}
-
-セッション要約一覧:
-{SESSION_SUMMARIES}
-
-アクティビティログ(JSONL):
-{ACTIVITY_LOGS}
-"""
 
 
 def get_daily_structured_record(
@@ -99,10 +59,13 @@ def get_daily_structured_record(
             "summary": log.get("summary")
         })
 
-    prompt = (
-        STRUCTURED_PROMPT.replace("{SESSION_SUMMARIES}", json.dumps(logs, ensure_ascii=False, indent=2))
-        .replace("{ACTIVITY_LOGS}", json.dumps(simplified_activity_logs, ensure_ascii=False, indent=2))
-        .replace("{DAILY_NOTE_CONTENT}", daily_content)
+    rendered_prompt = prompt.render_prompt(
+        config.SUMMARIZE_DAY_PROMPT_PATH,
+        {
+            "SESSION_SUMMARIES": json.dumps(logs, ensure_ascii=False, indent=2),
+            "ACTIVITY_LOGS": json.dumps(simplified_activity_logs, ensure_ascii=False, indent=2),
+            "DAILY_NOTE_CONTENT": daily_content,
+        }
     )
 
     # 最小レコード（フォールバック用）
@@ -129,7 +92,7 @@ def get_daily_structured_record(
         response = llm_client.generate_llm_response(
             provider=config.MAKE_TODAY_TARGET_PROVIDER,
             model=config.MAKE_TODAY_TARGET_MODEL,
-            prompt=prompt,
+            prompt=rendered_prompt,
             max_tokens=8120,
         )
 

@@ -5,7 +5,7 @@ from pathlib import Path
 from AppKit import NSScreen
 
 from obsidian_ai_hub.take_screenshot import capture_screen, get_unique_path
-from obsidian_ai_hub.utils import accessibility, config, img2text, llm_client
+from obsidian_ai_hub.utils import accessibility, config, img2text, llm_client, prompt
 
 logger = logging.getLogger(__name__)
 
@@ -144,27 +144,15 @@ def main():
     # 4. LLM要約
     # 「その時点で何をしていたか」を日本語で短く要約、およびカテゴリ分類
     categories_str = ", ".join(ACTIVITY_CATEGORIES)
-    prompt = f"""以下の情報に基づき、ユーザーがその時点で何をしていたかを分析し、JSON形式で出力してください。
-
-# 項目
-- summary: 日本語で1文程度で短く要約
-- category: 以下の候補から最も適切なものを1つだけ選択
-  候補: {categories_str}
-- keywords: 関連するキーワードのリスト（文字列の配列）
-
-# 出力形式
-{{
-  "summary": "...",
-  "category": "...",
-  "keywords": ["...", "..."]
-}}
-
-# 情報
-前面アプリ: {app_name}
-ウィンドウタイトル: {window_title}
-画面内のテキスト(OCR):
-{ocr_text_combined}
-"""
+    rendered_prompt = prompt.render_prompt(
+        config.ACTIVITY_CLASSIFICATION_PROMPT_PATH,
+        {
+            "categories_str": categories_str,
+            "app_name": app_name,
+            "window_title": window_title,
+            "ocr_text_combined": ocr_text_combined,
+        }
+    )
 
     summary = f"{app_name} での作業を検出しました。"
     category = "その他"
@@ -174,7 +162,7 @@ def main():
         response = llm_client.generate_llm_response(
             provider=config.MAKE_TODAY_TARGET_PROVIDER,
             model=config.MAKE_TODAY_TARGET_MODEL,
-            prompt=prompt,
+            prompt=rendered_prompt,
             max_tokens=8192
         )
         # JSONパースの試行

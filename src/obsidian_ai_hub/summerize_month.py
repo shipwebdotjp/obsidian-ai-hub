@@ -3,48 +3,9 @@ import logging
 import re
 from datetime import datetime, timedelta
 from pathlib import Path
-from obsidian_ai_hub.utils import config, reader, llm_client
+from obsidian_ai_hub.utils import config, reader, llm_client, prompt
 
 logger = logging.getLogger(__name__)
-
-STRUCTURED_PROMPT = """
-あなたは月次アナリスト兼コーチです。今月の週次構造化データを元に、月次レビューを構造化されたJSON形式で出力してください。
-目的は「この1ヶ月の歩みを振り返り、成長と課題を明確にすること」です。
-
-# 項目定義
-- summary: 月の一言（20〜40字程度）
-- topics: 今月の主なトピックス
-- activities: 主な活動内容
-- learnings: 学び・整理できたこと
-- reflections: 反省・気づき
-- gratitude: 感謝したこと
-- people: 人物メモ。 `{"name": "...", "note": "..."}` の配列
-- questions: 問い
-- keywords: キーワード
-- next_actions: 来月の展望やネクストアクション
-- mood: 気分・エネルギーの傾向
-- sleep: 睡眠・健康状態のまとめ
-
-# 出力形式
-必ず以下のJSON形式のみを出力してください。余計な解説は不要です。
-{
-  "summary": "...",
-  "topics": [],
-  "activities": [],
-  "learnings": [],
-  "reflections": [],
-  "gratitude": [],
-  "people": [{"name": "...", "note": "..."}],
-  "questions": [],
-  "keywords": [],
-  "next_actions": [],
-  "mood": "...",
-  "sleep": "..."
-}
-
-今月の週次データ:
-{WEEKLY_RECORDS}
-"""
 
 def load_weekly_records(target_date: datetime) -> list[dict]:
     year = target_date.strftime("%Y")
@@ -93,7 +54,10 @@ def get_monthly_structured_record(
         "weekly_record_count": len(weekly_records),
     }
 
-    prompt = STRUCTURED_PROMPT.replace("{WEEKLY_RECORDS}", json.dumps(weekly_records, ensure_ascii=False, indent=2))
+    rendered_prompt = prompt.render_prompt(
+        config.SUMMARIZE_MONTH_PROMPT_PATH,
+        {"WEEKLY_RECORDS": json.dumps(weekly_records, ensure_ascii=False, indent=2)}
+    )
 
     record = {
         "schema_version": 1,
@@ -118,7 +82,7 @@ def get_monthly_structured_record(
         response = llm_client.generate_llm_response(
             provider=config.MAKE_TODAY_TARGET_PROVIDER,
             model=config.MAKE_TODAY_TARGET_MODEL,
-            prompt=prompt,
+            prompt=rendered_prompt,
             max_tokens=8192,
         )
 

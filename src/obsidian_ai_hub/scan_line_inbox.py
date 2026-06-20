@@ -3,33 +3,9 @@ import logging
 import re
 from pathlib import Path
 from obsidian_ai_hub import take_screenshot
-from obsidian_ai_hub.utils import accessibility, config, img2text, llm_client
+from obsidian_ai_hub.utils import accessibility, config, img2text, llm_client, prompt
 
 logger = logging.getLogger(__name__)
-
-PROMPT = """
-あなたは LINE の画面キャプチャを解析して、「見えている未読トーク候補」を抽出するアシスタントです。
-提供された画像とOCR結果から、未読の可能性があるチャット（トーク）をリストアップしてください。
-
-以下のルールを厳守してください：
-1. 返却形式は純粋な JSON のみとし、Markdown のコードブロックなどで囲まないでください。
-2. スキーマは以下の通りです。
-{
-  "candidates": [
-    {
-      "chat_name": "チャット名（グループ名または個人名）",
-      "unread_count": "未読数（数字）。不明な場合は null にし、推測しないでください",
-      "preview_text": "見えている最新メッセージの断片。なければ null",
-      "confidence": 0.0〜1.0 の数値（確信度）
-    }
-  ]
-}
-3. 「不明なら推測しない」ことを徹底してください。特に数字がぼやけていたり、未読バッジか確信が持てない場合は null や低い confidence を設定してください。
-4. 画像に見えていない範囲（スクロールが必要な部分）については言及しないでください。
-
-画面内のテキスト(OCR):
-{OCR_TEXT}
-"""
 
 def parse_json_response(response_text: str) -> dict:
     """
@@ -86,8 +62,9 @@ def scan_line_inbox():
     # 3. OCR実行
     ocr_results = img2text.image_to_text(str(screenshot_path))
     ocr_text_combined = json.dumps(ocr_results, ensure_ascii=False, indent=2)
-    prompt = (
-        PROMPT.replace("{OCR_TEXT}", ocr_text_combined)
+    rendered_prompt = prompt.render_prompt(
+        config.LINE_INBOX_SCAN_PROMPT_PATH,
+        {"OCR_TEXT": ocr_text_combined}
     )
 
     # 3. LLM 呼び出し
@@ -95,7 +72,7 @@ def scan_line_inbox():
     response_text = llm_client.generate_llm_response(
         provider=provider,
         model=model,
-        prompt=prompt,
+        prompt=rendered_prompt,
         files=[screenshot_path],
         max_tokens=8192,
         temperature=0.0
