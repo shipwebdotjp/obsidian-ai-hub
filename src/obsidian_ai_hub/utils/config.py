@@ -146,6 +146,9 @@ RESEARCH_CONTEXT_MAX_NOTES = int(os.getenv("RESEARCH_CONTEXT_MAX_NOTES", "3"))
 
 MAKE_TODAY_TARGET_PROVIDER = str(_config_value("llm", "make_today_target", "provider", default="ollama"))
 MAKE_TODAY_TARGET_MODEL = str(_config_value("llm", "make_today_target", "model", default="gemma4:e4b"))
+MAKE_TODAY_TARGET_PROMPT_PATH = _optional_path("MAKE_TODAY_TARGET_PROMPT_PATH", "llm", "make_today_target", "prompt_path")
+if MAKE_TODAY_TARGET_PROMPT_PATH is None:
+    MAKE_TODAY_TARGET_PROMPT_PATH = BASE_DIR / "config" / "prompts" / "make_today_target.md"
 INBOX_AUDIO_CORRECTION_PROVIDER = str(_config_value("llm", "inbox_audio_correction", "provider", default="ollama"))
 INBOX_AUDIO_CORRECTION_MODEL = str(_config_value("llm", "inbox_audio_correction", "model", default="gpt-oss:120b-cloud"))
 

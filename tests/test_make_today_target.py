@@ -1,0 +1,75 @@
+import sys
+from datetime import datetime
+from unittest.mock import MagicMock, patch, mock_open
+import pytest
+
+# Mock modules
+mock_modules = [
+    "dotenv",
+    "yaml",
+    "langchain_core",
+    "langchain_core.messages",
+    "langchain_core.tools",
+    "langchain_openai",
+    "langchain_google_genai",
+    "langchain_community",
+    "langchain_anthropic",
+]
+for module_name in mock_modules:
+    sys.modules[module_name] = MagicMock()
+
+from obsidian_ai_hub import make_today_target
+
+@pytest.fixture
+def mock_deps():
+    with patch("obsidian_ai_hub.make_today_target.reader") as mock_reader, \
+         patch("obsidian_ai_hub.make_today_target.extracter") as mock_extracter, \
+         patch("obsidian_ai_hub.make_today_target.llm_client") as mock_llm, \
+         patch("obsidian_ai_hub.make_today_target.prompt") as mock_prompt, \
+         patch("obsidian_ai_hub.make_today_target.config") as mock_config:
+
+        mock_reader.get_daily_note_content.return_value = "今日の目標\nExisting content"
+        mock_reader.get_daily_note_path.return_value = "dummy_path.md"
+        mock_extracter.get_subheader_view.return_value = "Subheader content"
+        mock_extracter.get_frontmatter_value.return_value = "dummy"
+        mock_prompt.render_prompt.return_value = "Rendered Prompt Content"
+        mock_llm.generate_llm_response.return_value = "Generated Goal"
+        mock_config.MAKE_TODAY_TARGET_PROMPT_PATH = "dummy_prompt.md"
+        mock_config.MAKE_TODAY_TARGET_PROVIDER = "test_provider"
+        mock_config.MAKE_TODAY_TARGET_MODEL = "test_model"
+
+        yield {
+            "reader": mock_reader,
+            "extracter": mock_extracter,
+            "llm": mock_llm,
+            "prompt": mock_prompt,
+            "config": mock_config
+        }
+
+def test_make_today_target_main(mock_deps):
+    m = mock_open()
+    with patch("builtins.open", m):
+        make_today_target.main()
+
+        # Verify prompt rendering
+        mock_deps["prompt"].render_prompt.assert_called_once()
+        args, kwargs = mock_deps["prompt"].render_prompt.call_args
+        assert args[0] == "dummy_prompt.md"
+        assert "todays_schedule" in args[1]
+        assert "todays_task" in args[1]
+        assert "daily_context" in args[1]
+
+        # Verify LLM call
+        mock_deps["llm"].generate_llm_response.assert_called_once_with(
+            provider="test_provider",
+            model="test_model",
+            prompt="Rendered Prompt Content",
+            max_tokens=8192
+        )
+
+        # Verify file write
+        m.assert_called_with("dummy_path.md", "w")
+        handle = m()
+        handle.write.assert_called_once()
+        written_content = handle.write.call_args[0][0]
+        assert "今日の目標\n- [ ] Generated Goal" in written_content
