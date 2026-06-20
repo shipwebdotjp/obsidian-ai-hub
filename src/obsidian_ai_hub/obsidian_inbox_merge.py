@@ -18,7 +18,7 @@ from pathlib import Path
 import whisper
 
 from obsidian_ai_hub.handler import add_research_theme, web_extract
-from obsidian_ai_hub.utils import config, extracter, llm_client
+from obsidian_ai_hub.utils import config, extracter, llm_client, prompt
 
 logger = logging.getLogger(__name__)
 
@@ -76,21 +76,15 @@ def generate_web_summary(raw_content: str) -> str:
     if not raw_content:
         return ""
 
-    prompt = f"""
-    あなたはWebコンテンツの要約専門家です。
-    以下はWebページから抽出したテキスト内容です。
-    この内容を1〜2文の日本語で簡潔に要約してください。
-
-    ---ここから---
-    {raw_content}
-    ---ここまで---
-    """.strip()
-
     try:
+        rendered_prompt = prompt.render_prompt(
+            config.INBOX_WEB_SUMMARY_PROMPT_PATH,
+            {"raw_content": raw_content}
+        )
         response = llm_client.generate_llm_response(
             provider="openai",  # Use a smart model for summary if possible
             model=config.RESEARCH_PROMPT_MODEL,
-            prompt=prompt,
+            prompt=rendered_prompt,
             temperature=0.3,
             max_tokens=512,
         ).strip()
@@ -200,24 +194,10 @@ def wait_for_icloud_download(file_path: Path, timeout: int = 60) -> bool:
 
 
 def _build_classification_prompt(content: str) -> str:
-    return f"""
-あなたは Obsidian の Inbox 内容を分類するアシスタントです。
-
-次の2択で分類してください。
-- research: 「リサーチしてほしい」「調べたい」「検討したい」といった意図が内容から読み取れる
-- memo: 上記以外
-
-ルール:
-- 出力は JSON だけにしてください
-- 余計な説明、前置き、コードフェンスは禁止です
-
-出力形式:
-{{"category":"research"}} または {{"category":"memo"}}
-
---- Inbox content ---
-{content}
---- end ---
-""".strip()
+    return prompt.render_prompt(
+        config.INBOX_CLASSIFICATION_PROMPT_PATH,
+        {"content": content}
+    )
 
 
 def _extract_json_object(text: str) -> dict:
@@ -251,12 +231,12 @@ def parse_classification_response(text: str) -> InboxClassification:
 
 
 def classify_inbox_content(content: str) -> InboxClassification:
-    prompt = _build_classification_prompt(content)
     try:
+        rendered_prompt = _build_classification_prompt(content)
         response = llm_client.generate_llm_response(
             provider="openai",
             model=config.RESEARCH_PROMPT_MODEL,
-            prompt=prompt,
+            prompt=rendered_prompt,
             temperature=0.0,
             max_tokens=256,
         ).strip()
@@ -400,24 +380,20 @@ def main():
                 model = whisper.load_model("medium")  # または"medium", "small"
                 result = model.transcribe(tmp_path.as_posix(), language="ja")
                 raw_content = result["text"]
-                prompt = f"""
-                あなたは音声文字起こし補正専門エディタです。
-                以下はWhisperで文字起こしした日本語テキストです。
-                意味を変更してはいけません。
-                推測で内容を追加してはいけません。
-                削除も禁止です。
-                誤認識・誤変換のみ修正してください。
-
-                ---ここから---
-                {raw_content}
-                ---ここまで---
-                """
-                response = llm_client.generate_llm_response(
-                    provider=config.INBOX_AUDIO_CORRECTION_PROVIDER,
-                    model=config.INBOX_AUDIO_CORRECTION_MODEL,
-                    prompt=prompt,
-                    max_tokens=8192,
-                ).strip()
+                try:
+                    rendered_prompt = prompt.render_prompt(
+                        config.INBOX_TRANSCRIPT_CORRECTION_PROMPT_PATH,
+                        {"raw_content": raw_content}
+                    )
+                    response = llm_client.generate_llm_response(
+                        provider=config.INBOX_AUDIO_CORRECTION_PROVIDER,
+                        model=config.INBOX_AUDIO_CORRECTION_MODEL,
+                        prompt=rendered_prompt,
+                        max_tokens=8192,
+                    ).strip()
+                except Exception:
+                    logger.exception("LLM correction failed, using raw content")
+                    response = raw_content
                 content = response
                 if not content:
                     content = raw_content

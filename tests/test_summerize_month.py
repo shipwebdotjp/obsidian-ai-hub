@@ -80,8 +80,10 @@ def test_load_weekly_records(mock_config):
     assert loaded[1]["week_id"] == "2024-W41"
     assert loaded[2]["week_id"] == "2024-W44"
 
+@patch("obsidian_ai_hub.summerize_month.prompt.render_prompt")
 @patch("obsidian_ai_hub.utils.llm_client.generate_llm_response")
-def test_summarize_month(mock_llm, mock_config):
+def test_summarize_month(mock_llm, mock_render, mock_config):
+    mock_render.return_value = "Rendered Prompt"
     mock_llm.return_value = json.dumps({
         "summary": "Monthly summary test",
         "topics": ["Topic 1"],
