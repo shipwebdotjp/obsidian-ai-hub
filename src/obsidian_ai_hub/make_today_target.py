@@ -41,7 +41,7 @@ def main():
         "todays_weekday": todays_weekday,
     }
     rendered_prompt = prompt.render_prompt(config.MAKE_TODAY_TARGET_PROMPT_PATH, context)
-    print(f"Prompt: {rendered_prompt}")
+    logger.debug("Prompt rendered from: %s", config.MAKE_TODAY_TARGET_PROMPT_PATH)
 
     response = llm_client.generate_llm_response(
         provider=config.MAKE_TODAY_TARGET_PROVIDER,
