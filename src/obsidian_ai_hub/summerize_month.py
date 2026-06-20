@@ -54,11 +54,6 @@ def get_monthly_structured_record(
         "weekly_record_count": len(weekly_records),
     }
 
-    rendered_prompt = prompt.render_prompt(
-        config.SUMMARIZE_MONTH_PROMPT_PATH,
-        {"WEEKLY_RECORDS": json.dumps(weekly_records, ensure_ascii=False, indent=2)}
-    )
-
     record = {
         "schema_version": 1,
         "month": month_id,
@@ -79,6 +74,10 @@ def get_monthly_structured_record(
     }
 
     try:
+        rendered_prompt = prompt.render_prompt(
+            config.SUMMARIZE_MONTH_PROMPT_PATH,
+            {"WEEKLY_RECORDS": json.dumps(weekly_records, ensure_ascii=False, indent=2)}
+        )
         response = llm_client.generate_llm_response(
             provider=config.MAKE_TODAY_TARGET_PROVIDER,
             model=config.MAKE_TODAY_TARGET_MODEL,

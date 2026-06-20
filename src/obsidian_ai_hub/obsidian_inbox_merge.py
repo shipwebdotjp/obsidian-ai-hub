@@ -76,12 +76,11 @@ def generate_web_summary(raw_content: str) -> str:
     if not raw_content:
         return ""
 
-    rendered_prompt = prompt.render_prompt(
-        config.INBOX_WEB_SUMMARY_PROMPT_PATH,
-        {"raw_content": raw_content}
-    )
-
     try:
+        rendered_prompt = prompt.render_prompt(
+            config.INBOX_WEB_SUMMARY_PROMPT_PATH,
+            {"raw_content": raw_content}
+        )
         response = llm_client.generate_llm_response(
             provider="openai",  # Use a smart model for summary if possible
             model=config.RESEARCH_PROMPT_MODEL,
@@ -232,8 +231,8 @@ def parse_classification_response(text: str) -> InboxClassification:
 
 
 def classify_inbox_content(content: str) -> InboxClassification:
-    rendered_prompt = _build_classification_prompt(content)
     try:
+        rendered_prompt = _build_classification_prompt(content)
         response = llm_client.generate_llm_response(
             provider="openai",
             model=config.RESEARCH_PROMPT_MODEL,
@@ -381,16 +380,20 @@ def main():
                 model = whisper.load_model("medium")  # または"medium", "small"
                 result = model.transcribe(tmp_path.as_posix(), language="ja")
                 raw_content = result["text"]
-                rendered_prompt = prompt.render_prompt(
-                    config.INBOX_TRANSCRIPT_CORRECTION_PROMPT_PATH,
-                    {"raw_content": raw_content}
-                )
-                response = llm_client.generate_llm_response(
-                    provider=config.INBOX_AUDIO_CORRECTION_PROVIDER,
-                    model=config.INBOX_AUDIO_CORRECTION_MODEL,
-                    prompt=rendered_prompt,
-                    max_tokens=8192,
-                ).strip()
+                try:
+                    rendered_prompt = prompt.render_prompt(
+                        config.INBOX_TRANSCRIPT_CORRECTION_PROMPT_PATH,
+                        {"raw_content": raw_content}
+                    )
+                    response = llm_client.generate_llm_response(
+                        provider=config.INBOX_AUDIO_CORRECTION_PROVIDER,
+                        model=config.INBOX_AUDIO_CORRECTION_MODEL,
+                        prompt=rendered_prompt,
+                        max_tokens=8192,
+                    ).strip()
+                except Exception:
+                    logger.exception("LLM correction failed, using raw content")
+                    response = raw_content
                 content = response
                 if not content:
                     content = raw_content

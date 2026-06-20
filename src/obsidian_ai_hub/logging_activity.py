@@ -144,21 +144,21 @@ def main():
     # 4. LLM要約
     # 「その時点で何をしていたか」を日本語で短く要約、およびカテゴリ分類
     categories_str = ", ".join(ACTIVITY_CATEGORIES)
-    rendered_prompt = prompt.render_prompt(
-        config.ACTIVITY_CLASSIFICATION_PROMPT_PATH,
-        {
-            "categories_str": categories_str,
-            "app_name": app_name,
-            "window_title": window_title,
-            "ocr_text_combined": ocr_text_combined,
-        }
-    )
 
     summary = f"{app_name} での作業を検出しました。"
     category = "その他"
     keywords = []
 
     try:
+        rendered_prompt = prompt.render_prompt(
+            config.ACTIVITY_CLASSIFICATION_PROMPT_PATH,
+            {
+                "categories_str": categories_str,
+                "app_name": app_name,
+                "window_title": window_title,
+                "ocr_text_combined": ocr_text_combined,
+            }
+        )
         response = llm_client.generate_llm_response(
             provider=config.MAKE_TODAY_TARGET_PROVIDER,
             model=config.MAKE_TODAY_TARGET_MODEL,

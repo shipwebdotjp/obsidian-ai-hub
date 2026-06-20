@@ -57,11 +57,6 @@ def get_weekly_structured_record(
         else:
             simplified_daily_records.append({"date": d_str, "status": "no data"})
 
-    rendered_prompt = prompt.render_prompt(
-        config.SUMMARIZE_WEEK_PROMPT_PATH,
-        {"DAILY_RECORDS": json.dumps(simplified_daily_records, ensure_ascii=False, indent=2)}
-    )
-
     record = {
         "schema_version": 1,
         "week_id": week_id,
@@ -84,6 +79,10 @@ def get_weekly_structured_record(
     }
 
     try:
+        rendered_prompt = prompt.render_prompt(
+            config.SUMMARIZE_WEEK_PROMPT_PATH,
+            {"DAILY_RECORDS": json.dumps(simplified_daily_records, ensure_ascii=False, indent=2)}
+        )
         response = llm_client.generate_llm_response(
             provider=config.MAKE_TODAY_TARGET_PROVIDER,
             model=config.MAKE_TODAY_TARGET_MODEL,

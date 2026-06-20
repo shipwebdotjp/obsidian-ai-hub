@@ -59,15 +59,6 @@ def get_daily_structured_record(
             "summary": log.get("summary")
         })
 
-    rendered_prompt = prompt.render_prompt(
-        config.SUMMARIZE_DAY_PROMPT_PATH,
-        {
-            "SESSION_SUMMARIES": json.dumps(logs, ensure_ascii=False, indent=2),
-            "ACTIVITY_LOGS": json.dumps(simplified_activity_logs, ensure_ascii=False, indent=2),
-            "DAILY_NOTE_CONTENT": daily_content,
-        }
-    )
-
     # 最小レコード（フォールバック用）
     record = {
         "schema_version": 1,
@@ -89,6 +80,14 @@ def get_daily_structured_record(
     }
 
     try:
+        rendered_prompt = prompt.render_prompt(
+            config.SUMMARIZE_DAY_PROMPT_PATH,
+            {
+                "SESSION_SUMMARIES": json.dumps(logs, ensure_ascii=False, indent=2),
+                "ACTIVITY_LOGS": json.dumps(simplified_activity_logs, ensure_ascii=False, indent=2),
+                "DAILY_NOTE_CONTENT": daily_content,
+            }
+        )
         response = llm_client.generate_llm_response(
             provider=config.MAKE_TODAY_TARGET_PROVIDER,
             model=config.MAKE_TODAY_TARGET_MODEL,

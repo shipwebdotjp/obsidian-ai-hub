@@ -91,9 +91,11 @@ def test_upsert_weekly_record(mock_config):
     assert json.loads(content[0])["week_id"] == "2023-W42"
     assert json.loads(content[1])["week_id"] == "2023-W43"
 
+@patch("obsidian_ai_hub.summerize_week.prompt.render_prompt")
 @patch("obsidian_ai_hub.summerize_week.llm_client.generate_llm_response")
-def test_get_weekly_structured_record(mock_llm, mock_config):
+def test_get_weekly_structured_record(mock_llm, mock_render, mock_config):
     target_date = datetime(2023, 10, 27) # W43
+    mock_render.return_value = "Rendered Prompt"
     mock_llm.return_value = json.dumps({
         "summary": "AI Weekly Summary",
         "topics": ["Work"],
@@ -110,9 +112,11 @@ def test_get_weekly_structured_record(mock_llm, mock_config):
     assert record["source_stats"]["daily_record_count"] == 1
     assert record["people"][0]["name"] == "Bob"
 
+@patch("obsidian_ai_hub.summerize_week.prompt.render_prompt")
 @patch("obsidian_ai_hub.summerize_week.llm_client.generate_llm_response")
-def test_get_weekly_structured_record_malformed_json(mock_llm, mock_config):
+def test_get_weekly_structured_record_malformed_json(mock_llm, mock_render, mock_config):
     target_date = datetime(2023, 10, 27)
+    mock_render.return_value = "Rendered Prompt"
     mock_llm.return_value = "```json\nINVALID\n```"
 
     record = get_weekly_structured_record(target_date, [])

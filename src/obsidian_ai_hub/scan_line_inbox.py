@@ -62,21 +62,31 @@ def scan_line_inbox():
     # 3. OCR実行
     ocr_results = img2text.image_to_text(str(screenshot_path))
     ocr_text_combined = json.dumps(ocr_results, ensure_ascii=False, indent=2)
-    rendered_prompt = prompt.render_prompt(
-        config.LINE_INBOX_SCAN_PROMPT_PATH,
-        {"OCR_TEXT": ocr_text_combined}
-    )
 
     # 3. LLM 呼び出し
     logger.info(f"Calling LLM ({provider}/{model}) to scan LINE inbox...")
-    response_text = llm_client.generate_llm_response(
-        provider=provider,
-        model=model,
-        prompt=rendered_prompt,
-        files=[screenshot_path],
-        max_tokens=8192,
-        temperature=0.0
-    )
+    try:
+        rendered_prompt = prompt.render_prompt(
+            config.LINE_INBOX_SCAN_PROMPT_PATH,
+            {"OCR_TEXT": ocr_text_combined}
+        )
+        response_text = llm_client.generate_llm_response(
+            provider=provider,
+            model=model,
+            prompt=rendered_prompt,
+            files=[screenshot_path],
+            max_tokens=8192,
+            temperature=0.0
+        )
+    except Exception as e:
+        logger.error(f"Error during prompt rendering or LLM call: {e}")
+        return {
+            "window_id": window_id,
+            "window_title": window_title,
+            "screenshot_path": str(screenshot_path),
+            "candidates": [],
+            "error": "Prompt rendering or LLM call failed"
+        }
 
     # 4. パース
     try:

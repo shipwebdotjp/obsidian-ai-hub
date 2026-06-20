@@ -20,7 +20,6 @@ def mock_dependencies():
         "Cocoa": MagicMock(),
         "Foundation": MagicMock(),
         "wurlitzer": MagicMock(),
-        "langchain_tavily": MagicMock(),
         "pydantic": MagicMock(),
         "langchain_core.tools": MagicMock(),
         "langchain_core.messages": MagicMock(),
