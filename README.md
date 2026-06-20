@@ -28,6 +28,24 @@ It helps with:
 5. Run the test suite:
    - `pytest tests/`
 
+If you want to customize prompts, do not edit the shipped prompt file directly.
+Instead, copy the standard prompt file to a local path of your choice and point
+`llm.make_today_target.prompt_path` in `config/config.yml` to that copy.
+
+Example:
+
+```bash
+cp config/prompts/make_today_target.md ~/Documents/custom-make_today_target.md
+```
+
+```yaml
+llm:
+  make_today_target:
+    provider: ollama
+    model: glm-4.7:cloud
+    prompt_path: /Users/you/Documents/custom-make_today_target.md
+```
+
 ### install to LaunchAgent
 1. chmod +x install.sh
 2. make install
@@ -50,6 +68,7 @@ Use the following split to keep the project OSS-friendly:
 - backup targets
 - default feature values
 - vault index storage paths and embedder model name
+- optional prompt overrides via `llm.<name>.prompt_path`
 
 ## Usage
 
