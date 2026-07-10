@@ -11,6 +11,7 @@ from obsidian_ai_hub import (
     obsidian_inbox_merge,
     rebuild_valut,
     research_agent,
+    dashboard,
     suggest_research_theme,
     summerize_day,
     summerize_week,
@@ -75,6 +76,17 @@ def main():
         "--summerize-day",
         action="store_true",
         help="日次レビューを生成"
+    )
+    parser.add_argument(
+        "--build-dashboard",
+        action="store_true",
+        help="静的ダッシュボード用のJSON/HTMLを生成"
+    )
+    parser.add_argument(
+        "--dashboard-year",
+        type=int,
+        action="append",
+        help="--build-dashboard で再生成する対象年。省略時は利用可能な全年度を対象にする"
     )
     parser.add_argument(
         "--backup",
@@ -242,6 +254,9 @@ def main():
         ran = True
     if args.summerize_day:
         run_and_log(summerize_day.main, "summerize_day")
+        ran = True
+    if args.build_dashboard:
+        run_and_log(lambda: dashboard.build_dashboard(args.dashboard_year), "build_dashboard")
         ran = True
     if args.backup:
         run_and_log(do_backup.main, "backup")

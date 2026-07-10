@@ -98,6 +98,7 @@ python -m obsidian_ai_hub --summerize-week --week-date 2026-06-15
 python -m obsidian_ai_hub --backup
 python -m obsidian_ai_hub --sync-vault
 python -m obsidian_ai_hub --screenshot
+python -m obsidian_ai_hub --build-dashboard
 ```
 
 The vault sync command indexes the full `VAULT_PATH` tree into `md-hybrid-search` and stores its SQLite/Chroma data outside the vault by default.
