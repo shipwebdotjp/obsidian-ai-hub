@@ -1,9 +1,14 @@
 import json
 import logging
 import re
+from datetime import date as date_type
 from datetime import datetime, timedelta
 from pathlib import Path
 from obsidian_ai_hub.utils import config, reader, extracter, llm_client, prompt
+from obsidian_ai_hub.utils.summary_aggregation import (
+    calculate_average_numeric_value,
+    calculate_most_common_value,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +35,7 @@ def load_daily_record(date: datetime) -> dict | None:
                 except json.JSONDecodeError:
                     continue
     except Exception as e:
-        logger.error(f"Failed to read monthly log file {monthly_log_file}: {e}")
+            logger.error(f"Failed to read monthly log file {monthly_log_file}: {e}")
     return None
 
 def get_weekly_structured_record(
@@ -73,8 +78,8 @@ def get_weekly_structured_record(
         "questions": [],
         "keywords": [],
         "next_actions": [],
-        "mood": None,
-        "sleep": None,
+        "mood": calculate_most_common_value(daily_records, "mood"),
+        "sleep": calculate_average_numeric_value(daily_records, "sleep"),
         "source_stats": source_stats
     }
 
@@ -99,7 +104,7 @@ def get_weekly_structured_record(
 
         data = json.loads(cleaned_response)
 
-        scalar_fields = {"summary", "mood", "sleep"}
+        scalar_fields = {"summary"}
         list_fields = {
             "topics", "activities", "learnings", "reflections",
             "gratitude", "questions", "keywords", "next_actions",
@@ -206,7 +211,20 @@ def upsert_weekly_record(iso_year: int, record: dict) -> bool:
         logger.error(f"Failed to write weekly record: {e}")
         return False
 
-def summarize_week(target_date: datetime):
+def _coerce_target_date(target_date: datetime | date_type | str | None) -> datetime:
+    if target_date is None:
+        return datetime.now()
+    if isinstance(target_date, datetime):
+        return target_date
+    if isinstance(target_date, date_type):
+        return datetime.combine(target_date, datetime.min.time())
+    if isinstance(target_date, str):
+        return datetime.strptime(target_date, "%Y-%m-%d")
+    raise TypeError(f"Unsupported target_date type: {type(target_date)!r}")
+
+
+def summarize_week(target_date: datetime | date_type | str | None = None):
+    target_date = _coerce_target_date(target_date)
     logger.info("Summarizing week for date: %s", target_date.date())
 
     # 1. データの準備
@@ -244,11 +262,9 @@ def summarize_week(target_date: datetime):
 
     logger.info(f"Weekly summary updated in: {weekly_note_path}")
 
-def main():
-    today = datetime.now()
-    # デフォルトでは先週を要約する（日曜日に実行されることが多いが、月曜日に先週分をやることもある）
-    # ここではシンプルに引数の日の属する週を対象とする
-    summarize_week(today)
+def main(target_date: datetime | date_type | str | None = None):
+    # デフォルトでは実行日の属する週を対象とする
+    summarize_week(target_date)
 
 if __name__ == "__main__":
     main()

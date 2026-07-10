@@ -95,11 +95,49 @@ def test_summarize_month(mock_llm, mock_render, mock_config):
         "questions": ["Question 1"],
         "keywords": ["Keyword 1"],
         "next_actions": ["Next Action 1"],
-        "mood": "Good",
-        "sleep": "7h"
+        "mood": "LLM Mood",
+        "sleep": "99"
     })
 
     target_date = datetime(2024, 10, 1)
+
+    log_dir = config.ACTIVITY_PATH / "2024"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file = log_dir / "2024-week.jsonl"
+    weekly_records = [
+        {
+            "week_id": "2024-W40",
+            "week_start_date": "2024-09-30",
+            "week_end_date": "2024-10-06",
+            "mood": "Calm",
+            "sleep": "8h",
+        },
+        {
+            "week_id": "2024-W41",
+            "week_start_date": "2024-10-07",
+            "week_end_date": "2024-10-13",
+            "mood": "Focused",
+            "sleep": "7.5",
+        },
+        {
+            "week_id": "2024-W42",
+            "week_start_date": "2024-10-14",
+            "week_end_date": "2024-10-20",
+            "mood": "Calm",
+            "sleep": "Good",
+        },
+        {
+            "week_id": "2024-W43",
+            "week_start_date": "2024-10-21",
+            "week_end_date": "2024-10-27",
+            "mood": "Calm",
+            "sleep": "9",
+        },
+    ]
+    with open(log_file, "w", encoding="utf-8") as f:
+        for record in weekly_records:
+            f.write(json.dumps(record) + "\n")
+
     summerize_month.summarize_month(target_date)
 
     # Check JSONL output
@@ -109,6 +147,8 @@ def test_summarize_month(mock_llm, mock_render, mock_config):
         data = json.loads(f.read())
         assert data["month"] == "2024-10"
         assert data["summary"] == "Monthly summary test"
+        assert data["mood"] == "Calm"
+        assert data["sleep"] == "8.2"
 
     # Check Markdown output
     note_path = config.DAILY_PATH / "2024" / "10" / "2024-10.md"
@@ -117,3 +157,5 @@ def test_summarize_month(mock_llm, mock_render, mock_config):
     assert "## AIによる要約" in content
     assert "Monthly summary test" in content
     assert "Topic 1" in content
+    assert "Calm" in content
+    assert "8.2" in content

@@ -99,18 +99,50 @@ def test_get_weekly_structured_record(mock_llm, mock_render, mock_config):
     mock_llm.return_value = json.dumps({
         "summary": "AI Weekly Summary",
         "topics": ["Work"],
-        "mood": "Stable",
+        "mood": "LLM Mood",
+        "sleep": "999",
         "people": [{"name": "Bob", "note": "Partner"}]
     })
 
-    daily_records = [{"summary": "Day 1"}] + [None]*6
+    daily_records = [
+        {"summary": "Day 1", "mood": "Stable", "sleep": "8h"},
+        {"summary": "Day 2", "mood": "Energetic", "sleep": "7.5"},
+        {"summary": "Day 3", "mood": "Stable", "sleep": "Good"},
+        {"summary": "Day 4", "mood": "Stable", "sleep": "9"},
+        None,
+        None,
+        None,
+    ]
     record = get_weekly_structured_record(target_date, daily_records)
 
     assert record["week_id"] == "2023-W43"
     assert record["summary"] == "AI Weekly Summary"
     assert record["mood"] == "Stable"
-    assert record["source_stats"]["daily_record_count"] == 1
+    assert record["sleep"] == "8.2"
+    assert record["source_stats"]["daily_record_count"] == 4
     assert record["people"][0]["name"] == "Bob"
+
+@patch("obsidian_ai_hub.summerize_week.prompt.render_prompt")
+@patch("obsidian_ai_hub.summerize_week.llm_client.generate_llm_response")
+def test_get_weekly_structured_record_mood_tie_uses_first(mock_llm, mock_render, mock_config):
+    target_date = datetime(2023, 10, 27)
+    mock_render.return_value = "Rendered Prompt"
+    mock_llm.return_value = json.dumps({"summary": "AI Weekly Summary"})
+
+    daily_records = [
+        {"summary": "Day 1", "mood": "Calm", "sleep": "8"},
+        {"summary": "Day 2", "mood": "Busy", "sleep": "7"},
+        {"summary": "Day 3", "mood": "Calm", "sleep": "6"},
+        {"summary": "Day 4", "mood": "Busy", "sleep": "5"},
+        None,
+        None,
+        None,
+    ]
+
+    record = get_weekly_structured_record(target_date, daily_records)
+
+    assert record["mood"] == "Calm"
+    assert record["sleep"] == "6.5"
 
 @patch("obsidian_ai_hub.summerize_week.prompt.render_prompt")
 @patch("obsidian_ai_hub.summerize_week.llm_client.generate_llm_response")

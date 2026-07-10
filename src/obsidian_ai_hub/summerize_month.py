@@ -4,6 +4,10 @@ import re
 from datetime import datetime, timedelta
 from pathlib import Path
 from obsidian_ai_hub.utils import config, reader, llm_client, prompt
+from obsidian_ai_hub.utils.summary_aggregation import (
+    calculate_average_numeric_value,
+    calculate_most_common_value,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -68,8 +72,8 @@ def get_monthly_structured_record(
         "questions": [],
         "keywords": [],
         "next_actions": [],
-        "mood": None,
-        "sleep": None,
+        "mood": calculate_most_common_value(weekly_records, "mood"),
+        "sleep": calculate_average_numeric_value(weekly_records, "sleep"),
         "source_stats": source_stats
     }
 
@@ -94,7 +98,7 @@ def get_monthly_structured_record(
 
         data = json.loads(cleaned_response)
 
-        scalar_fields = {"summary", "mood", "sleep"}
+        scalar_fields = {"summary"}
         list_fields = {
             "topics", "activities", "learnings", "reflections",
             "gratitude", "questions", "keywords", "next_actions",

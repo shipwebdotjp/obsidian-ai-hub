@@ -94,6 +94,7 @@ python -m obsidian_ai_hub --merge-inbox
 python -m obsidian_ai_hub --make-target
 python -m obsidian_ai_hub --notify-calendar-event
 python -m obsidian_ai_hub --summerize-week
+python -m obsidian_ai_hub --summerize-week --week-date 2026-06-15
 python -m obsidian_ai_hub --backup
 python -m obsidian_ai_hub --sync-vault
 python -m obsidian_ai_hub --screenshot

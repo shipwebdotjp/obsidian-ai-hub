@@ -12,8 +12,6 @@
 - questions: 問い
 - keywords: キーワード
 - next_actions: 来月の展望やネクストアクション
-- mood: 気分・エネルギーの傾向
-- sleep: 睡眠・健康状態のまとめ
 
 # 出力形式
 必ず以下のJSON形式のみを出力してください。余計な解説は不要です。
@@ -27,9 +25,7 @@
   "people": [{"name": "...", "note": "..."}],
   "questions": [],
   "keywords": [],
-  "next_actions": [],
-  "mood": "...",
-  "sleep": "..."
+  "next_actions": []
 }
 
 今月の週次データ:

@@ -52,6 +52,20 @@ def main():
         action="store_true",
         help="週次レビューを生成"
     )
+    def validate_date(value):
+        try:
+            datetime.strptime(value, "%Y-%m-%d")
+        except ValueError:
+            raise argparse.ArgumentTypeError(
+                f"Invalid date format: {value}. Expected YYYY-MM-DD"
+            )
+        return value
+
+    parser.add_argument(
+        "--week-date",
+        type=validate_date,
+        help="--summerize-week で対象とする週の日付 (YYYY-MM-DD)"
+    )
     parser.add_argument(
         "--summerize-month",
         action="store_true",
@@ -221,7 +235,7 @@ def main():
         run_and_log(make_today_target.main, "make_target")
         ran = True
     if args.summerize_week:
-        run_and_log(summerize_week.main, "summerize_week")
+        run_and_log(lambda: summerize_week.main(args.week_date), "summerize_week")
         ran = True
     if args.summerize_month:
         run_and_log(lambda: summerize_month.main(args.month), "summerize_month")
