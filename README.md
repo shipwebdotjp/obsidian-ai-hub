@@ -70,6 +70,23 @@ Use the following split to keep the project OSS-friendly:
 - vault index storage paths and embedder model name
 - optional prompt overrides via `llm.<name>.prompt_path`
 
+### OpenCode Go Configuration
+
+To use the OpenCode Go provider (`opencode_go`), configure `OPENCODE_API_KEY` in your `.env` file and set the provider in `config.yml`.
+
+OpenCode Go models are automatically routed to either OpenAI-compatible or Anthropic-compatible clients based on their model ID prefixes:
+- **OpenAI-compatible** (uses `ChatOpenAI`): `glm-`, `kimi-`, `deepseek-`, `mimo-`
+- **Anthropic-compatible** (uses `ChatAnthropic`): `minimax-`, `qwen3.7-`, `qwen3.6-`
+
+Example configuration:
+
+```yaml
+llm:
+  make_today_target:
+    provider: opencode_go
+    model: deepseek-v3
+```
+
 ## Usage
 
 ```bash

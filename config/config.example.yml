@@ -43,6 +43,11 @@ llm:
     provider: ollama
     model: glm-4.7:cloud
     prompt_path: /path/to/your/config/prompts/make_today_target.md
+  # Example with opencode_go:
+  # make_today_target:
+  #   provider: opencode_go
+  #   model: deepseek-v3  # OpenAI-compatible model
+  #   # model: qwen3.7-72b  # Anthropic-compatible model
   inbox_audio_correction:
     provider: ollama
     model: gpt-oss:120b-cloud

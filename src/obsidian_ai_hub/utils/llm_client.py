@@ -214,6 +214,7 @@ def create_langchain_llm(
     - gemini: ChatGoogleGenerativeAI
     - ollama: ChatOllama
     - local: LlamaCpp
+    - opencode_go: ChatOpenAI / ChatAnthropic
     """
     if provider == "openai":
         return create_openai_llm(model, temperature, max_tokens)
@@ -227,7 +228,55 @@ def create_langchain_llm(
     if provider == "local":
         return create_local_llama_llm(model, temperature, max_tokens)
 
+    if provider == "opencode_go":
+        return create_opencode_go_llm(model, temperature, max_tokens)
+
     raise ValueError(f"Unknown provider: {provider}")
+
+
+def create_opencode_go_llm(model: str, temperature: float = 0.7, max_tokens: int = 512):
+    """OpenCode Go 用 LangChain ChatModel を返す。"""
+    api_key = config.OPENCODE_API_KEY
+    if not api_key:
+        raise RuntimeError("Environment variable OPENCODE_API_KEY is not set")
+
+    openai_prefixes = ("glm-", "kimi-", "deepseek-", "mimo-")
+    anthropic_prefixes = ("minimax-", "qwen3.7-", "qwen3.6-")
+
+    if model.startswith(openai_prefixes):
+        try:
+            from langchain_openai import ChatOpenAI
+        except ImportError:
+            raise RuntimeError(
+                "langchain-openai is required for provider 'opencode_go' with OpenAI-compatible models. "
+                "Install with: pip install -U langchain-openai"
+            )
+        return ChatOpenAI(
+            model=model,
+            api_key=api_key,
+            base_url="https://opencode.ai/zen/go/v1",
+            temperature=temperature,
+            max_tokens=max_tokens,
+            max_retries=0,
+        )
+    elif model.startswith(anthropic_prefixes):
+        try:
+            from langchain_anthropic import ChatAnthropic
+        except ImportError:
+            raise RuntimeError(
+                "langchain-anthropic is required for provider 'opencode_go' with Anthropic-compatible models. "
+                "Install with: pip install -U langchain-anthropic"
+            )
+        return ChatAnthropic(
+            model=model,
+            anthropic_api_key=api_key,
+            base_url="https://opencode.ai/zen/go/v1",
+            temperature=temperature,
+            max_tokens=max_tokens,
+            max_retries=0,
+        )
+    else:
+        raise RuntimeError(f"Unsupported model ID for opencode_go: {model}")
 
 
 def create_openai_llm(model: str, temperature: float = 0.7, max_tokens: int = 512):
