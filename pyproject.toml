@@ -29,6 +29,7 @@ dependencies = [
     "wurlitzer>=3.1.1",
     "atomacos>=3.3.0; sys_platform == 'darwin'",
     "langchain-huggingface>=1.2.2",
+    "langchain-anthropic",
 ]
 
 [tool.setuptools.packages.find]

@@ -1,0 +1,116 @@
+import pytest
+from unittest.mock import patch, MagicMock
+from langchain_core.messages import AIMessage
+from obsidian_ai_hub.utils import llm_client
+
+
+def test_opencode_go_openai_compatible_routing():
+    """Verify that OpenAI-compatible model IDs correctly route to ChatOpenAI with proper arguments."""
+    with (
+        patch("obsidian_ai_hub.utils.llm_client.config.OPENCODE_API_KEY", "test_opencode_key"),
+        patch("langchain_openai.ChatOpenAI") as mock_chat_openai
+    ):
+        mock_instance = MagicMock()
+        mock_chat_openai.return_value = mock_instance
+
+        # List of models starting with glm-, kimi-, deepseek-, mimo-
+        models = ["glm-4", "kimi-latest", "deepseek-v3", "mimo-small"]
+        for m in models:
+            llm = llm_client.create_langchain_llm(
+                provider="opencode_go",
+                model=m,
+                temperature=0.5,
+                max_tokens=256
+            )
+            assert llm == mock_instance
+            mock_chat_openai.assert_called_with(
+                model=m,
+                api_key="test_opencode_key",
+                base_url="https://opencode.ai/zen/go/v1",
+                temperature=0.5,
+                max_tokens=256,
+                max_retries=0,
+            )
+
+
+def test_opencode_go_anthropic_compatible_routing():
+    """Verify that Anthropic-compatible model IDs correctly route to ChatAnthropic with proper arguments."""
+    with (
+        patch("obsidian_ai_hub.utils.llm_client.config.OPENCODE_API_KEY", "test_opencode_key"),
+        patch("langchain_anthropic.ChatAnthropic") as mock_chat_anthropic
+    ):
+        mock_instance = MagicMock()
+        mock_chat_anthropic.return_value = mock_instance
+
+        # List of models starting with minimax-, qwen3.7-, qwen3.6-
+        models = ["minimax-v1", "qwen3.7-72b", "qwen3.6-coder"]
+        for m in models:
+            llm = llm_client.create_langchain_llm(
+                provider="opencode_go",
+                model=m,
+                temperature=0.4,
+                max_tokens=100
+            )
+            assert llm == mock_instance
+            mock_chat_anthropic.assert_called_with(
+                model=m,
+                anthropic_api_key="test_opencode_key",
+                base_url="https://opencode.ai/zen/go/v1",
+                temperature=0.4,
+                max_tokens=100,
+                max_retries=0,
+            )
+
+
+def test_opencode_go_missing_api_key():
+    """Verify that missing OPENCODE_API_KEY raises a RuntimeError."""
+    with (
+        patch("obsidian_ai_hub.utils.llm_client.config.OPENCODE_API_KEY", None),
+        patch("langchain_openai.ChatOpenAI") as mock_chat_openai,
+        patch("langchain_anthropic.ChatAnthropic") as mock_chat_anthropic
+    ):
+        with pytest.raises(RuntimeError) as exc_info:
+            llm_client.create_langchain_llm(
+                provider="opencode_go",
+                model="deepseek-v3"
+            )
+        assert "Environment variable OPENCODE_API_KEY is not set" in str(exc_info.value)
+        mock_chat_openai.assert_not_called()
+        mock_chat_anthropic.assert_not_called()
+
+
+def test_opencode_go_unsupported_model_id():
+    """Verify that an unsupported model ID raises a RuntimeError."""
+    with (
+        patch("obsidian_ai_hub.utils.llm_client.config.OPENCODE_API_KEY", "test_opencode_key"),
+        patch("langchain_openai.ChatOpenAI") as mock_chat_openai,
+        patch("langchain_anthropic.ChatAnthropic") as mock_chat_anthropic
+    ):
+        with pytest.raises(RuntimeError) as exc_info:
+            llm_client.create_langchain_llm(
+                provider="opencode_go",
+                model="unsupported-model-v1"
+            )
+        assert "Unsupported model ID for opencode_go: unsupported-model-v1" in str(exc_info.value)
+        mock_chat_openai.assert_not_called()
+        mock_chat_anthropic.assert_not_called()
+
+
+def test_generate_llm_response_opencode_go_integration():
+    """Verify integration flow using generate_llm_response with opencode_go provider."""
+    with (
+        patch("obsidian_ai_hub.utils.llm_client.config.OPENCODE_API_KEY", "test_opencode_key"),
+        patch("langchain_openai.ChatOpenAI") as mock_chat_openai
+    ):
+        mock_llm = MagicMock()
+        mock_llm.invoke.return_value = AIMessage(content="Generated response from OpenCode Go")
+        mock_chat_openai.return_value = mock_llm
+
+        response = llm_client.generate_llm_response(
+            provider="opencode_go",
+            model="deepseek-v3",
+            prompt="Tell me about OpenCode Go."
+        )
+
+        assert response == "Generated response from OpenCode Go"
+        mock_llm.invoke.assert_called_once()

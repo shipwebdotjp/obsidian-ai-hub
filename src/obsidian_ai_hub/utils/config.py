@@ -60,6 +60,7 @@ def _optional_path(env_name: str, *config_keys):
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 TAVILY_API_KEY = os.getenv('TAVILY_API_KEY')
+OPENCODE_API_KEY = os.getenv('OPENCODE_API_KEY')
 
 # Use os.getenv with a fallback for testing environments
 _vault_path_raw = os.getenv('VAULT_PATH')
