@@ -23,5 +23,8 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen --all-extras
 
+      - name: Install Playwright Browsers
+        run: uv run playwright install chromium
+
       - name: Run tests
         run: uv run pytest
