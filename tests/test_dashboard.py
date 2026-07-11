@@ -124,3 +124,13 @@ def test_build_dashboard_exports_year_payload_and_html(dashboard_env):
     assert year_payload["weekly"][0]["note_path"] == "daily/2026/07/2026-W28.md"
     assert year_payload["monthly"][0]["note_path"] == "daily/2026/07/2026-07.md"
     assert "window.__DASHBOARD_BOOTSTRAP__" in html_path.read_text(encoding="utf-8")
+
+
+def test_build_dashboard_generates_stats_html(dashboard_env):
+    output = dashboard_env["dashboard"]
+    html_path = dashboard.build_dashboard([2026])
+    assert html_path == output / "index.html"
+    assert html_path.exists()
+
+    stats_path = output / "stats.html"
+    assert stats_path.exists()
