@@ -40,5 +40,6 @@ md-hybrid-search = { git = "https://github.com/shipwebdotjp/md-hybrid-search.git
 
 [dependency-groups]
 dev = [
+    "playwright>=1.61.0",
     "pytest>=9.0.3",
 ]
