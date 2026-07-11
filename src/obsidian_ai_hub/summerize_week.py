@@ -5,6 +5,7 @@ from datetime import date as date_type
 from datetime import datetime, timedelta
 from pathlib import Path
 from obsidian_ai_hub.utils import config, reader, extracter, llm_client, prompt
+from obsidian_ai_hub.utils.topics import TOPIC_ENUM, normalize_topics
 from obsidian_ai_hub.utils.summary_aggregation import (
     calculate_average_numeric_value,
     calculate_most_common_value,
@@ -86,7 +87,10 @@ def get_weekly_structured_record(
     try:
         rendered_prompt = prompt.render_prompt(
             config.SUMMARIZE_WEEK_PROMPT_PATH,
-            {"DAILY_RECORDS": json.dumps(simplified_daily_records, ensure_ascii=False, indent=2)}
+            {
+                "DAILY_RECORDS": json.dumps(simplified_daily_records, ensure_ascii=False, indent=2),
+                "TOPIC_CANDIDATES": json.dumps(TOPIC_ENUM, ensure_ascii=False),
+            }
         )
         response = llm_client.generate_llm_response(
             provider=config.MAKE_TODAY_TARGET_PROVIDER,
@@ -128,7 +132,11 @@ def get_weekly_structured_record(
                 elif key in scalar_fields and isinstance(val, (str, int, float)):
                     record[key] = str(val)
                 elif key in list_fields and isinstance(val, list):
-                    record[key] = [str(item) for item in val if item not in (None, "")]
+                    clean_list = [str(item) for item in val if item not in (None, "")]
+                    if key == "topics":
+                        record[key] = normalize_topics(clean_list)
+                    else:
+                        record[key] = clean_list
 
     except Exception as e:
         logger.error(f"Failed to generate or parse structured weekly record: {e}")
