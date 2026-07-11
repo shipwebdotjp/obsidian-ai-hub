@@ -4,7 +4,7 @@ import json
 import logging
 import unicodedata
 from collections import Counter, defaultdict
-from datetime import datetime, date as date_cls
+from datetime import datetime, date as date_cls, timedelta
 from pathlib import Path
 from typing import Iterable
 from urllib.parse import quote
@@ -694,6 +694,7 @@ def _render_index_html(payload: dict) -> str:
           <input id="searchInput" class="control" type="search" placeholder="検索: summary / keyword / topic / date">
           <select id="monthSelect" class="control" aria-label="Month selector"></select>
           <a id="resetButton" class="button" href="#">Reset</a>
+          <a class="button" href="stats.html" style="background: linear-gradient(180deg, rgba(86,124,115,0.16), rgba(86,124,115,0.08)); border-color: rgba(86,124,115,0.18); color: var(--accent-2);">統計</a>
         </div>
       </div>
       <div class="title-block">
@@ -1052,6 +1053,656 @@ def _render_index_html(payload: dict) -> str:
     return template.replace("__BOOTSTRAP_JSON__", _safe_json(payload))
 
 
+def _render_stats_html(payload: dict) -> str:
+    template = """<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Topic Trends - Obsidian Dashboard</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f4efe6;
+      --bg-2: #e6dcc9;
+      --panel: rgba(255, 252, 247, 0.86);
+      --panel-border: rgba(89, 60, 26, 0.12);
+      --text: #1f1913;
+      --muted: #705d49;
+      --accent: #a8551f;
+      --accent-2: #567c73;
+      --shadow: 0 18px 40px rgba(71, 46, 19, 0.12);
+      --radius: 20px;
+      --radius-sm: 14px;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at top left, rgba(168, 85, 31, 0.14), transparent 36%),
+        radial-gradient(circle at right top, rgba(86, 124, 115, 0.16), transparent 30%),
+        linear-gradient(180deg, var(--bg), var(--bg-2));
+      min-height: 100vh;
+    }
+    .shell {
+      max-width: 1440px;
+      margin: 0 auto;
+      padding: 28px;
+    }
+    .hero {
+      display: grid;
+      gap: 18px;
+      grid-template-columns: 1fr;
+      align-items: end;
+      margin-bottom: 20px;
+    }
+    .title-block {
+      padding: 28px;
+      border: 1px solid var(--panel-border);
+      border-radius: 28px;
+      background: linear-gradient(180deg, rgba(255,255,255,0.76), rgba(255,255,255,0.52));
+      backdrop-filter: blur(10px);
+      box-shadow: var(--shadow);
+    }
+    h1 {
+      margin: 0 0 10px;
+      font-size: clamp(2rem, 4vw, 3.8rem);
+      letter-spacing: 0.02em;
+    }
+    .subtitle {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+    .toolbar {
+      display: flex;
+      gap: 12px;
+      margin-top: 18px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .control {
+      padding: 14px 16px;
+      border: 1px solid rgba(112, 93, 73, 0.18);
+      border-radius: 14px;
+      background: rgba(255,255,255,0.72);
+      color: var(--text);
+      font: inherit;
+    }
+    .button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 14px 18px;
+      border-radius: 14px;
+      border: 1px solid rgba(168, 85, 31, 0.18);
+      background: linear-gradient(180deg, rgba(168,85,31,0.16), rgba(168,85,31,0.08));
+      color: var(--accent);
+      font-weight: 700;
+      cursor: pointer;
+      text-decoration: none;
+    }
+    .granularity-selector {
+      display: flex;
+      gap: 8px;
+    }
+    .granularity-btn {
+      padding: 14px 18px;
+      border-radius: 14px;
+      border: 1px solid rgba(112, 93, 73, 0.18);
+      background: rgba(255,255,255,0.72);
+      color: var(--text);
+      cursor: pointer;
+      font-weight: 700;
+      font-family: inherit;
+    }
+    .granularity-btn.active {
+      background: var(--accent);
+      color: #fff;
+      border-color: var(--accent);
+    }
+    .chart-container {
+      background: var(--panel);
+      border: 1px solid var(--panel-border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 24px;
+      margin-top: 20px;
+      position: relative;
+    }
+    .chart-container h2 {
+      margin: 0 0 10px;
+      font-size: 1.4rem;
+    }
+    .chart-scroll-wrapper {
+      overflow-x: auto;
+      margin-top: 15px;
+      border: 1px solid rgba(112, 93, 73, 0.12);
+      border-radius: var(--radius-sm);
+      background: rgba(255, 255, 255, 0.4);
+    }
+    .chart-tooltip {
+      position: absolute;
+      background: rgba(31, 25, 19, 0.95);
+      color: #fff;
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      pointer-events: none;
+      display: none;
+      z-index: 100;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      line-height: 1.4;
+    }
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 15px;
+      margin-top: 20px;
+      padding: 14px;
+      border-radius: var(--radius-sm);
+      background: rgba(255, 255, 255, 0.5);
+      border: 1px solid rgba(112, 93, 73, 0.12);
+    }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.9rem;
+    }
+    .legend-color {
+      width: 16px;
+      height: 16px;
+      border-radius: 4px;
+    }
+    .empty {
+      padding: 40px;
+      text-align: center;
+      color: var(--muted);
+      border: 1px dashed rgba(112, 93, 73, 0.22);
+      border-radius: 16px;
+      background: rgba(255,255,255,0.42);
+      font-size: 1.1rem;
+    }
+    .spacer {
+      flex-grow: 1;
+    }
+    @media (max-width: 1100px) {
+      .toolbar { flex-direction: column; align-items: stretch; }
+      .spacer { display: none; }
+      .shell { padding: 16px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <section class="hero">
+      <div class="title-block">
+        <h1>Topic Trends</h1>
+        <p class="subtitle">
+          日次の topics を元にした時系列の積み上げ棒グラフです。興味関心の移り変わりを視覚的に追うことができます。
+        </p>
+        <div class="toolbar">
+          <select id="yearSelect" class="control" aria-label="Year selector"></select>
+          <div class="granularity-selector">
+            <button class="granularity-btn" data-g="day" type="button">日次</button>
+            <button class="granularity-btn" data-g="week" type="button">週次</button>
+            <button class="granularity-btn" data-g="month" type="button">月次</button>
+          </div>
+          <div class="spacer"></div>
+          <a class="button" href="index.html">ダッシュボードに戻る</a>
+        </div>
+      </div>
+    </section>
+
+    <section class="chart-container">
+      <h2 id="chartTitle">Topic Distribution</h2>
+      <div class="chart-scroll-wrapper">
+        <svg id="trendsSvg"></svg>
+      </div>
+      <div class="chart-tooltip" id="tooltip"></div>
+      <div class="legend" id="legend"></div>
+    </section>
+  </main>
+
+  <script>
+    window.__DASHBOARD_BOOTSTRAP__ = __BOOTSTRAP_JSON__;
+  </script>
+  <script>
+    const bootstrap = window.__DASHBOARD_BOOTSTRAP__;
+    const manifest = bootstrap.manifest || {};
+    const years = bootstrap.years || {};
+
+    const yearSelect = document.getElementById('yearSelect');
+    const trendsSvg = document.getElementById('trendsSvg');
+    const tooltip = document.getElementById('tooltip');
+    const legendEl = document.getElementById('legend');
+    const chartTitle = document.getElementById('chartTitle');
+
+    const defaultYear = String(
+      (manifest.latest && manifest.latest.daily && manifest.latest.daily.slice(0, 4)) ||
+      (manifest.available_years && manifest.available_years[manifest.available_years.length - 1]) ||
+      new Date().getFullYear()
+    );
+
+    const state = {
+      year: defaultYear,
+      granularity: 'week', // Default to week
+    };
+
+    const colors = ['#a8551f', '#567c73', '#2d6a4f', '#1d3557', '#e07a5f', '#81b29a'];
+    const otherColor = '#b0b0b0';
+
+    function escapeHtml(value) {
+      return String(value || '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+    }
+
+    function normalizeText(value) {
+      if (typeof value !== 'string') return '';
+      return value.normalize('NFKC').trim();
+    }
+
+    function coerceTextList(value) {
+      if (value === null || value === undefined) return [];
+      let items = [];
+      if (typeof value === 'string') {
+        items = [value];
+      } else if (Array.isArray(value)) {
+        items = value;
+      } else {
+        items = [value];
+      }
+
+      const result = [];
+      const seen = new Set();
+      items.forEach(item => {
+        if (item === null || item === undefined) return;
+        const text = normalizeText(String(item));
+        if (!text) return;
+        if (seen.has(text)) return;
+        seen.add(text);
+        result.push(text);
+      });
+      return result;
+    }
+
+    function generateDays(year) {
+      const dates = [];
+      let curr = new Date(Date.UTC(year, 0, 1));
+      while (curr.getUTCFullYear() === year) {
+        dates.push(curr.toISOString().slice(0, 10));
+        curr.setUTCDate(curr.getUTCDate() + 1);
+      }
+      return dates;
+    }
+
+    function getISOWeekString(date) {
+      const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+      const dayNum = d.getUTCDay() || 7;
+      d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+      const yearStart = new Date(Date.UTC(d.getUTCFullYear(),0,1));
+      const weekNo = Math.ceil((((d - yearStart) / 86400000) + 1)/7);
+      return d.getUTCFullYear() + '-W' + String(weekNo).padStart(2, '0');
+    }
+
+    function generateWeeks(year) {
+      const weeks = new Set();
+      let curr = new Date(Date.UTC(year, 0, 1));
+      while (curr.getUTCFullYear() === year) {
+        weeks.add(getISOWeekString(curr));
+        curr.setUTCDate(curr.getUTCDate() + 1);
+      }
+      return Array.from(weeks).sort();
+    }
+
+    function generateMonths(year) {
+      const months = [];
+      for (let m = 1; m <= 12; m++) {
+        months.push(year + '-' + String(m).padStart(2, '0'));
+      }
+      return months;
+    }
+
+    function renderYearSelect() {
+      const options = (manifest.available_years || []).slice().reverse().map(String);
+      yearSelect.innerHTML = options.map((year) => `<option value="${escapeHtml(year)}">${escapeHtml(year)}年</option>`).join('');
+      if (options.includes(state.year)) {
+        yearSelect.value = state.year;
+      } else if (options.length) {
+        state.year = options[0];
+        yearSelect.value = state.year;
+      }
+    }
+
+    function renderLegend(topTopics) {
+      legendEl.innerHTML = '';
+      if (!topTopics.length) return;
+
+      topTopics.forEach((t, i) => {
+        const item = document.createElement('div');
+        item.className = 'legend-item';
+        item.innerHTML = `
+          <span class="legend-color" style="background: ${colors[i % colors.length]}"></span>
+          <span class="legend-label">${escapeHtml(t)}</span>
+        `;
+        legendEl.appendChild(item);
+      });
+
+      const item = document.createElement('div');
+      item.className = 'legend-item';
+      item.innerHTML = `
+        <span class="legend-color" style="background: ${otherColor}"></span>
+        <span class="legend-label">Other</span>
+      `;
+      legendEl.appendChild(item);
+    }
+
+    function renderChart() {
+      trendsSvg.innerHTML = ''; // Clear SVG
+      tooltip.style.display = 'none';
+
+      const yearStr = state.year;
+      const yearInt = parseInt(yearStr);
+      const data = years[yearStr] || {daily: []};
+      const daily = data.daily || [];
+
+      // Compute top 6 topics
+      const topicCounts = {};
+      daily.forEach(r => {
+        const rTopics = Array.from(new Set(coerceTextList(r.topics)));
+        rTopics.forEach(t => {
+          topicCounts[t] = (topicCounts[t] || 0) + 1;
+        });
+      });
+      const topTopics = Object.entries(topicCounts)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 6)
+        .map(entry => entry[0]);
+
+      if (daily.length === 0) {
+        trendsSvg.setAttribute('width', '100%');
+        trendsSvg.setAttribute('height', '150');
+        trendsSvg.innerHTML = `
+          <foreignObject x="0" y="0" width="100%" height="150">
+            <div class="empty">データが存在しません。</div>
+          </foreignObject>
+        `;
+        renderLegend([]);
+        chartTitle.textContent = `${yearStr}年 トピック推移 (データなし)`;
+        return;
+      }
+
+      const labelMap = { 'day': '日次', 'week': '週次', 'month': '月次' };
+      chartTitle.textContent = `${yearStr}年 トピック推移 (${labelMap[state.granularity]})`;
+
+      // Generate continuous timeline keys
+      let keys = [];
+      if (state.granularity === 'day') {
+        keys = generateDays(yearInt);
+      } else if (state.granularity === 'week') {
+        keys = generateWeeks(yearInt);
+      } else {
+        keys = generateMonths(yearInt);
+      }
+
+      // Group daily records by granularity key
+      const bucketMap = {};
+      keys.forEach(k => { bucketMap[k] = []; });
+
+      daily.forEach(r => {
+        const dateStr = String(r.date || '').trim();
+        if (!dateStr.startsWith(yearStr)) return;
+        const parts = dateStr.split('-');
+        if (parts.length < 3) return;
+        const parsed = new Date(Date.UTC(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2])));
+        if (isNaN(parsed)) return;
+
+        let k = '';
+        if (state.granularity === 'day') {
+          k = dateStr;
+        } else if (state.granularity === 'week') {
+          k = getISOWeekString(parsed);
+        } else {
+          k = dateStr.slice(0, 7);
+        }
+
+        if (bucketMap[k]) {
+          bucketMap[k].push(r);
+        }
+      });
+
+      // Plot configurations
+      let barWidth = 12;
+      let barGap = 6;
+      if (state.granularity === 'week') {
+        barWidth = 24;
+        barGap = 10;
+      } else if (state.granularity === 'month') {
+        barWidth = 48;
+        barGap = 20;
+      }
+
+      const margin = { left: 60, right: 40, top: 30, bottom: 60 };
+      const plotHeight = 350;
+      const totalHeight = plotHeight + margin.top + margin.bottom;
+      const totalWidth = margin.left + margin.right + keys.length * (barWidth + barGap);
+
+      trendsSvg.setAttribute('width', totalWidth);
+      trendsSvg.setAttribute('height', totalHeight);
+      trendsSvg.setAttribute('viewBox', `0 0 ${totalWidth} ${totalHeight}`);
+
+      // Draw dashed horizontal lines at percentages
+      const percentages = [0, 25, 50, 75, 100];
+      percentages.forEach(p => {
+        const y = margin.top + plotHeight - (p / 100) * plotHeight;
+
+        // dashed grid line
+        const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        line.setAttribute('x1', margin.left);
+        line.setAttribute('y1', y);
+        line.setAttribute('x2', totalWidth - margin.right);
+        line.setAttribute('y2', y);
+        line.setAttribute('stroke', 'rgba(112, 93, 73, 0.15)');
+        line.setAttribute('stroke-dasharray', '4,4');
+        trendsSvg.appendChild(line);
+
+        // Y label
+        const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        text.setAttribute('x', margin.left - 10);
+        text.setAttribute('y', y + 4);
+        text.setAttribute('text-anchor', 'end');
+        text.setAttribute('fill', 'var(--muted)');
+        text.setAttribute('font-size', '0.75rem');
+        text.textContent = p + '%';
+        trendsSvg.appendChild(text);
+      });
+
+      // Draw Y axis line
+      const yAxis = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      yAxis.setAttribute('x1', margin.left);
+      yAxis.setAttribute('y1', margin.top);
+      yAxis.setAttribute('x2', margin.left);
+      yAxis.setAttribute('y2', margin.top + plotHeight);
+      yAxis.setAttribute('stroke', 'rgba(112, 93, 73, 0.3)');
+      trendsSvg.appendChild(yAxis);
+
+      // Draw bars and X labels
+      keys.forEach((key, index) => {
+        const x = margin.left + index * (barWidth + barGap);
+        const records = bucketMap[key] || [];
+
+        // Check if empty
+        if (records.length === 0) {
+          drawXLabel(key, x, index);
+          return;
+        }
+
+        // Count topics in this bucket
+        const counts = {};
+        topTopics.forEach(t => { counts[t] = 0; });
+        counts['Other'] = 0;
+        let total = 0;
+
+        records.forEach(r => {
+          const rTopics = Array.from(new Set(coerceTextList(r.topics)));
+          rTopics.forEach(t => {
+            if (topTopics.includes(t)) {
+              counts[t] = (counts[t] || 0) + 1;
+            } else {
+              counts['Other'] = (counts['Other'] || 0) + 1;
+            }
+            total++;
+          });
+        });
+
+        if (total > 0) {
+          let currentY = margin.top + plotHeight;
+          const order = [...topTopics, 'Other'];
+
+          order.forEach(t => {
+            const count = counts[t] || 0;
+            if (count === 0) return;
+            const prop = count / total;
+            const segmentHeight = prop * plotHeight;
+
+            const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+            rect.setAttribute('x', x);
+            rect.setAttribute('y', currentY - segmentHeight);
+            rect.setAttribute('width', barWidth);
+            rect.setAttribute('height', segmentHeight);
+            rect.setAttribute('fill', t === 'Other' ? otherColor : colors[topTopics.indexOf(t) % colors.length]);
+            rect.setAttribute('rx', 2);
+            rect.setAttribute('ry', 2);
+
+            // Tooltip attributes
+            rect.setAttribute('data-key', key);
+            rect.setAttribute('data-topic', t);
+            rect.setAttribute('data-count', count);
+            rect.setAttribute('data-total', total);
+            rect.setAttribute('data-pct', (prop * 100).toFixed(1) + '%');
+
+            trendsSvg.appendChild(rect);
+            currentY -= segmentHeight;
+          });
+        }
+
+        drawXLabel(key, x, index);
+      });
+
+      renderLegend(topTopics);
+
+      function drawXLabel(key, x, index) {
+        let showLabel = false;
+        let labelText = '';
+
+        if (state.granularity === 'day') {
+          if (key.endsWith('-01')) {
+            showLabel = true;
+            const parts = key.split('-');
+            labelText = parseInt(parts[1]) + '/1';
+          }
+        } else if (state.granularity === 'week') {
+          const parts = key.split('-W');
+          const wkNum = parseInt(parts[1]);
+          if (wkNum === 1 || wkNum % 4 === 1) {
+            showLabel = true;
+            labelText = 'W' + parts[1];
+          }
+        } else {
+          showLabel = true;
+          const parts = key.split('-');
+          labelText = parseInt(parts[1]) + '月';
+        }
+
+        if (showLabel) {
+          // tick
+          const tick = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+          tick.setAttribute('x1', x + barWidth / 2);
+          tick.setAttribute('y1', margin.top + plotHeight);
+          tick.setAttribute('x2', x + barWidth / 2);
+          tick.setAttribute('y2', margin.top + plotHeight + 5);
+          tick.setAttribute('stroke', 'rgba(112, 93, 73, 0.5)');
+          trendsSvg.appendChild(tick);
+
+          // text
+          const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+          text.setAttribute('x', x + barWidth / 2);
+          text.setAttribute('y', margin.top + plotHeight + 18);
+          text.setAttribute('text-anchor', 'middle');
+          text.setAttribute('fill', 'var(--muted)');
+          text.setAttribute('font-size', '0.75rem');
+          text.textContent = labelText;
+          trendsSvg.appendChild(text);
+        }
+      }
+    }
+
+    // Tooltip event listener
+    trendsSvg.addEventListener('mousemove', (e) => {
+      const target = e.target;
+      if (target.tagName === 'rect' && target.hasAttribute('data-topic')) {
+        const key = target.getAttribute('data-key');
+        const topic = target.getAttribute('data-topic');
+        const count = target.getAttribute('data-count');
+        const pct = target.getAttribute('data-pct');
+
+        tooltip.style.display = 'block';
+        tooltip.innerHTML = `
+          <strong>${escapeHtml(key)}</strong><br/>
+          トピック: <strong>${escapeHtml(topic)}</strong><br/>
+          件数: ${escapeHtml(count)}<br/>
+          割合: ${escapeHtml(pct)}
+        `;
+
+        const containerRect = document.querySelector('.chart-container').getBoundingClientRect();
+        const x = e.clientX - containerRect.left + 15;
+        const y = e.clientY - containerRect.top + 15;
+
+        tooltip.style.left = x + 'px';
+        tooltip.style.top = y + 'px';
+      } else {
+        tooltip.style.display = 'none';
+      }
+    });
+
+    trendsSvg.addEventListener('mouseleave', () => {
+      tooltip.style.display = 'none';
+    });
+
+    // Toolbar event listeners
+    yearSelect.addEventListener('change', () => {
+      state.year = yearSelect.value;
+      renderChart();
+    });
+
+    document.querySelectorAll('.granularity-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.granularity-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        state.granularity = btn.getAttribute('data-g');
+        renderChart();
+      });
+    });
+
+    // Initialize granularity active state
+    document.querySelector(`.granularity-btn[data-g="${state.granularity}"]`).classList.add('active');
+
+    renderYearSelect();
+    renderChart();
+  </script>
+</body>
+</html>
+"""
+    return template.replace("__BOOTSTRAP_JSON__", _safe_json(payload))
+
+
 def build_dashboard(years: Iterable[int] | None = None, output_dir: Path | None = None) -> Path:
     output_dir = output_dir or config.DASHBOARD_PATH
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -1080,10 +1731,138 @@ def build_dashboard(years: Iterable[int] | None = None, output_dir: Path | None 
     logger.info("Wrote dashboard manifest: %s", manifest_path)
 
     html_path = output_dir / "index.html"
+    stats_path = output_dir / "stats.html"
     html_payload = {
         "manifest": manifest,
         "years": {str(year): year_payloads[year] for year in sorted(year_payloads)},
     }
     html_path.write_text(_render_index_html(html_payload), encoding="utf-8")
     logger.info("Wrote dashboard HTML: %s", html_path)
+
+    stats_path.write_text(_render_stats_html(html_payload), encoding="utf-8")
+    logger.info("Wrote dashboard stats HTML: %s", stats_path)
     return html_path
+
+
+def aggregate_topics_by_granularity(daily_records: list[dict], year: int, granularity: str) -> dict:
+    """
+    Aggregates topics for a selected year under a given granularity: 'day', 'week', or 'month'.
+    Each daily record's topics are deduplicated before counting.
+    Returns:
+        {
+            "top_topics": [...], # Top 6 topics
+            "buckets": [
+                {
+                    "key": "2026-07-10", # or "2026-W28" or "2026-07"
+                    "total": 3,          # total topic count in this bucket
+                    "proportions": {"AI": 0.5, "Python": 0.5, "Other": 0.0},
+                    "counts": {"AI": 1, "Python": 1, "Other": 0}
+                },
+                ...
+            ]
+        }
+    """
+    # Deduplicate topics per daily record
+    deduped_records = []
+    topic_counter = Counter()
+    for r in daily_records:
+        r_date = r.get("date")
+        if not r_date or not r_date.startswith(str(year)):
+            continue
+        topics = _coerce_text_list(r.get("topics"))
+        # Deduplicate within the record
+        topics = sorted(list(set(topics)))
+        deduped_records.append({"date": r_date, "topics": topics})
+        topic_counter.update(topics)
+
+    # Top 6 topics
+    top_6 = [topic for topic, _count in topic_counter.most_common(6)]
+
+    # Generate continuous keys for the year
+    keys = []
+    if granularity == "day":
+        start_date = date_cls(year, 1, 1)
+        end_date = date_cls(year, 12, 31)
+        curr = start_date
+        while curr <= end_date:
+            keys.append(curr.strftime("%Y-%m-%d"))
+            curr += timedelta(days=1)
+    elif granularity == "week":
+        # Generate ISO weeks for all days of this calendar year
+        start_date = date_cls(year, 1, 1)
+        end_date = date_cls(year, 12, 31)
+        curr = start_date
+        seen_weeks = set()
+        while curr <= end_date:
+            iso_yr, iso_wk, _ = curr.isocalendar()
+            week_id = f"{iso_yr}-W{iso_wk:02d}"
+            if week_id not in seen_weeks:
+                seen_weeks.add(week_id)
+                keys.append(week_id)
+            curr += timedelta(days=1)
+        # Sort weeks chronologically by week_id
+        keys.sort()
+    elif granularity == "month":
+        for m in range(1, 13):
+            keys.append(f"{year}-{m:02d}")
+
+    # Map daily records to keys
+    bucket_map = defaultdict(list)
+    for r in deduped_records:
+        dt_str = r["date"]
+        parsed = _parse_date(dt_str)
+        if parsed is None:
+            continue
+        if granularity == "day":
+            bucket_map[dt_str].append(r)
+        elif granularity == "week":
+            iso_yr, iso_wk, _ = parsed.isocalendar()
+            week_id = f"{iso_yr}-W{iso_wk:02d}"
+            bucket_map[week_id].append(r)
+        elif granularity == "month":
+            m_id = parsed.strftime("%Y-%m")
+            bucket_map[m_id].append(r)
+
+    buckets_data = []
+    for key in keys:
+        records_in_bucket = bucket_map.get(key, [])
+        if not records_in_bucket:
+            # Empty bucket (missing data)
+            buckets_data.append({
+                "key": key,
+                "total": 0,
+                "proportions": {},
+                "counts": {}
+            })
+            continue
+
+        counts = {t: 0 for t in top_6}
+        counts["Other"] = 0
+        total = 0
+
+        for r in records_in_bucket:
+            for t in r["topics"]:
+                if t in top_6:
+                    counts[t] += 1
+                else:
+                    counts["Other"] += 1
+                total += 1
+
+        proportions = {}
+        if total > 0:
+            for t in counts:
+                proportions[t] = round(counts[t] / total, 4)
+        else:
+            proportions = {}
+
+        buckets_data.append({
+            "key": key,
+            "total": total,
+            "proportions": proportions,
+            "counts": counts
+        })
+
+    return {
+        "top_topics": top_6,
+        "buckets": buckets_data
+    }
