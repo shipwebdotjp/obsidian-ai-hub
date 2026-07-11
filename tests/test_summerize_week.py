@@ -1,32 +1,8 @@
 import json
-import sys
 from datetime import datetime
 from unittest.mock import MagicMock, patch
 from pathlib import Path
 import pytest
-
-# Mock modules that might be missing in the environment
-mock_modules = [
-    "dotenv",
-    "md_hybrid_search",
-    "AppKit",
-    "objc",
-    "EventKit",
-    "sentence_transformers",
-    "torch",
-    "transformers",
-    "langchain",
-    "langchain_openai",
-    "langchain_community",
-    "langchain_google_genai",
-    "langchain_anthropic",
-    "langchain_core",
-    "langchain_core.messages",
-    "langchain_core.tools",
-    "yaml",
-]
-for module_name in mock_modules:
-    sys.modules[module_name] = MagicMock()
 
 from obsidian_ai_hub.summerize_week import (
     get_week_dates,

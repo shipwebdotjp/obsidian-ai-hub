@@ -1,25 +1,8 @@
 import json
-import sys
 from datetime import datetime
 from unittest.mock import MagicMock, patch, mock_open
 from pathlib import Path
 import pytest
-
-# Mock modules
-mock_modules = [
-    "dotenv",
-    "AppKit",
-    "objc",
-    "yaml",
-    "langchain_core",
-    "langchain_core.messages",
-    "langchain_core.tools",
-    "obsidian_ai_hub.utils.accessibility",
-    "obsidian_ai_hub.utils.img2text",
-    "obsidian_ai_hub.utils.config",
-]
-for module_name in mock_modules:
-    sys.modules[module_name] = MagicMock()
 
 from obsidian_ai_hub.logging_activity import main, ACTIVITY_CATEGORIES
 

@@ -1,34 +1,3 @@
-import sys
-from types import ModuleType
-from unittest.mock import MagicMock
-
-# Mock dependencies before importing obsidian_ai_hub modules
-if "langchain" not in sys.modules:
-    sys.modules["langchain"] = MagicMock()
-if "langchain.tools" not in sys.modules:
-    sys.modules["langchain.tools"] = MagicMock()
-if "dotenv" not in sys.modules:
-    sys.modules["dotenv"] = MagicMock()
-if "yaml" not in sys.modules:
-    sys.modules["yaml"] = MagicMock()
-if "torch" not in sys.modules:
-    sys.modules["torch"] = MagicMock()
-if "sentence_transformers" not in sys.modules:
-    sys.modules["sentence_transformers"] = MagicMock()
-if "transformers" not in sys.modules:
-    sys.modules["transformers"] = MagicMock()
-if "md_hybrid_search" not in sys.modules:
-    mock_mdhs = ModuleType("md_hybrid_search")
-    mock_mdhs.ConfigMismatchError = type("ConfigMismatchError", (Exception,), {})
-    mock_mdhs.DirectorySource = type("DirectorySource", (), {})
-    mock_mdhs.SearchIndex = type("SearchIndex", (), {})
-    sys.modules["md_hybrid_search"] = mock_mdhs
-
-import os
-# VAULT_PATH and AI_LOG_PATH are required by config.py
-os.environ["VAULT_PATH"] = "."
-os.environ["AI_LOG_PATH"] = "."
-
 import json
 from unittest.mock import patch
 import io

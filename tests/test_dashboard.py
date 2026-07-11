@@ -1,16 +1,8 @@
 import json
-import sys
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
-
-mock_modules = [
-    "dotenv",
-    "yaml",
-]
-for module_name in mock_modules:
-    sys.modules[module_name] = MagicMock()
 
 from obsidian_ai_hub import dashboard
 
@@ -211,6 +203,9 @@ def test_dashboard_keywords_logic_with_playwright(dashboard_env):
     from playwright.sync_api import sync_playwright
 
     with sync_playwright() as p:
+        if not Path(p.chromium.executable_path).is_file():
+            pytest.skip("Playwright Chromium is not installed")
+
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
         page.goto(stats_path.absolute().as_uri())
