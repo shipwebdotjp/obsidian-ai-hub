@@ -15,6 +15,18 @@ INTENT_ENUM = [
 ]
 
 
+def get_activity_rankings(activity_logs: list[dict]) -> tuple[list[tuple[str, int]], list[tuple[str, int]]]:
+    """アクティビティログから表示・要約用のランキングを作成する。"""
+    categories = [log.get("category") for log in activity_logs if log.get("category")]
+    keywords = [
+        keyword
+        for log in activity_logs
+        for keyword in log.get("keywords", [])
+        if keyword
+    ]
+    return Counter(categories).most_common(5), Counter(keywords).most_common(20)
+
+
 def get_daily_structured_record(
     target_date: datetime,
     daily_content: str,
@@ -51,6 +63,8 @@ def get_daily_structured_record(
             "summary": log.get("summary")
         })
 
+    top_categories, top_keywords = get_activity_rankings(activity_logs)
+
     # 最小レコード（フォールバック用）
     record = {
         "schema_version": 1,
@@ -77,6 +91,8 @@ def get_daily_structured_record(
             {
                 "SESSION_SUMMARIES": json.dumps(logs, ensure_ascii=False, indent=2),
                 "ACTIVITY_LOGS": json.dumps(simplified_activity_logs, ensure_ascii=False, indent=2),
+                "CATEGORY_RANKINGS": json.dumps(top_categories, ensure_ascii=False, indent=2),
+                "KEYWORD_RANKINGS": json.dumps(top_keywords, ensure_ascii=False, indent=2),
                 "DAILY_NOTE_CONTENT": daily_content,
                 "TOPIC_CANDIDATES": json.dumps(TOPIC_ENUM, ensure_ascii=False),
             }
@@ -174,13 +190,7 @@ def format_structured_record_as_markdown(record: dict, activity_logs: list[dict]
         lines.append("")
 
     # カテゴリとキーワードの集計 (ランキング)
-    categories = [log.get("category") for log in activity_logs if log.get("category")]
-    keywords_list = []
-    for log in activity_logs:
-        keywords_list.extend(log.get("keywords", []))
-
-    top_categories = Counter(categories).most_common(5)
-    top_keywords = Counter(keywords_list).most_common(20)
+    top_categories, top_keywords = get_activity_rankings(activity_logs)
 
     if top_categories:
         lines.append("### カテゴリ順位")

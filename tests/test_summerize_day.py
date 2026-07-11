@@ -237,6 +237,32 @@ def test_get_daily_structured_record_strips_milliseconds(mock_fm, mock_path, moc
 @patch("obsidian_ai_hub.summerize_day.llm_client.generate_llm_response")
 @patch("obsidian_ai_hub.summerize_day.reader.get_daily_note_path")
 @patch("obsidian_ai_hub.summerize_day.extracter.get_frontmatter_value")
+def test_get_daily_structured_record_passes_activity_rankings(
+    mock_fm, mock_path, mock_llm, mock_render, mock_config
+):
+    target_date = datetime(2023, 10, 27)
+    mock_fm.return_value = None
+    mock_path.return_value.exists.return_value = True
+    mock_llm.return_value = json.dumps({"summary": "Test Summary"})
+    mock_render.return_value = "Rendered Prompt"
+
+    activity_logs = [
+        {"summary": "Activity 1", "category": "開発", "keywords": ["Python", "Git"]},
+        {"summary": "Activity 2", "category": "開発", "keywords": ["Python"]},
+        {"summary": "Activity 3", "category": "事務", "keywords": ["Email"]},
+    ]
+
+    get_daily_structured_record(target_date, "content", [], activity_logs)
+
+    context = mock_render.call_args[0][1]
+    assert json.loads(context["CATEGORY_RANKINGS"]) == [["開発", 2], ["事務", 1]]
+    assert json.loads(context["KEYWORD_RANKINGS"]) == [["Python", 2], ["Git", 1], ["Email", 1]]
+
+
+@patch("obsidian_ai_hub.summerize_day.prompt.render_prompt")
+@patch("obsidian_ai_hub.summerize_day.llm_client.generate_llm_response")
+@patch("obsidian_ai_hub.summerize_day.reader.get_daily_note_path")
+@patch("obsidian_ai_hub.summerize_day.extracter.get_frontmatter_value")
 def test_get_daily_structured_record_passes_candidates(mock_fm, mock_path, mock_llm, mock_render, mock_config):
     from datetime import datetime
     import json

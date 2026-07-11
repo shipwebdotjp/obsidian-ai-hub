@@ -13,7 +13,7 @@
 - people: 人物メモ。 `{"name": "...", "note": "..."}` の配列
 - questions: 問い
 - keywords: キーワード
-- next_actions: 来週の観測ポイントやネクストアクション
+- next_actions: 来週の試してみること
 
 # 出力形式
 必ず以下のJSON形式のみを出力してください。余計な解説は不要です。
