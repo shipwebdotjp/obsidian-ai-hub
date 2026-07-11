@@ -1283,6 +1283,63 @@ def _render_stats_html(payload: dict) -> str:
       .spacer { display: none; }
       .shell { padding: 16px; }
     }
+    .display-toggle-container {
+      display: flex;
+      width: 100%;
+      border: 1px solid rgba(112, 93, 73, 0.18);
+      border-radius: 14px;
+      background: rgba(255,255,255,0.72);
+      overflow: hidden;
+      margin-top: 14px;
+    }
+    .toggle-btn {
+      flex: 1;
+      padding: 14px;
+      border: none;
+      background: transparent;
+      color: var(--text);
+      font-size: 1rem;
+      font-weight: 700;
+      cursor: pointer;
+      text-align: center;
+      font-family: inherit;
+      transition: background 0.2s, color 0.2s;
+    }
+    .toggle-btn.active {
+      background: var(--accent);
+      color: #fff;
+    }
+    .chip-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 14px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.72);
+      border: 1px solid rgba(112, 93, 73, 0.14);
+      color: var(--text);
+      font-size: 0.88rem;
+      cursor: pointer;
+      font-family: inherit;
+      transition: all 0.2s;
+    }
+    .chip-btn.selected {
+      background: var(--accent-2);
+      color: #fff;
+      border-color: var(--accent-2);
+    }
+    .chip-btn.disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+      pointer-events: none;
+    }
+    circle {
+      cursor: pointer;
+      transition: r 0.15s;
+    }
+    circle:hover {
+      r: 8px;
+    }
   </style>
 </head>
 <body>
@@ -1303,11 +1360,19 @@ def _render_stats_html(payload: dict) -> str:
           <div class="spacer"></div>
           <a class="button" href="index.html">ダッシュボードに戻る</a>
         </div>
+        <div class="display-toggle-container">
+          <button class="toggle-btn active" data-type="topics" type="button">Topics</button>
+          <button class="toggle-btn" data-type="keywords" type="button">Keywords</button>
+        </div>
       </div>
     </section>
 
     <section class="chart-container">
       <h2 id="chartTitle">Topic Distribution</h2>
+      <div id="keywordsSelectorContainer" style="display: none; margin-bottom: 20px;">
+        <div style="font-weight: 800; margin-bottom: 10px; font-size: 0.95rem; color: var(--muted);">キーワード候補 (最大5語選択):</div>
+        <div class="chips" id="keywordCandidateChips"></div>
+      </div>
       <div class="chart-scroll-wrapper">
         <svg id="trendsSvg"></svg>
       </div>
@@ -1329,6 +1394,8 @@ def _render_stats_html(payload: dict) -> str:
     const tooltip = document.getElementById('tooltip');
     const legendEl = document.getElementById('legend');
     const chartTitle = document.getElementById('chartTitle');
+    const keywordsSelectorContainer = document.getElementById('keywordsSelectorContainer');
+    const keywordCandidateChips = document.getElementById('keywordCandidateChips');
 
     const defaultYear = String(
       (manifest.latest && manifest.latest.daily && manifest.latest.daily.slice(0, 4)) ||
@@ -1339,10 +1406,282 @@ def _render_stats_html(payload: dict) -> str:
     const state = {
       year: defaultYear,
       granularity: 'week', // Default to week
+      displayType: 'topics', // 'topics' or 'keywords'
+      selectedKeywords: [], // list of selected keywords (normalized strings)
     };
 
     const colors = ['#a8551f', '#567c73', '#2d6a4f', '#1d3557', '#e07a5f', '#81b29a'];
     const otherColor = '#b0b0b0';
+
+    function updateKeywordCandidates(daily) {
+      const keywordCounts = {};
+      daily.forEach(r => {
+        const uniqueNorms = Array.from(new Set(coerceTextList(r.keywords).map(normalizeText).filter(Boolean)));
+        uniqueNorms.forEach(normK => {
+          keywordCounts[normK] = (keywordCounts[normK] || 0) + 1;
+        });
+      });
+
+      const candidates = Object.entries(keywordCounts)
+        .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+        .slice(0, 20)
+        .map(entry => entry[0]);
+
+      state.selectedKeywords = candidates.slice(0, 5).map(normalizeText);
+    }
+
+    function renderKeywordCandidateChips() {
+      const data = years[state.year] || {daily: []};
+      const daily = data.daily || [];
+
+      const keywordCounts = {};
+      daily.forEach(r => {
+        const uniqueNorms = Array.from(new Set(coerceTextList(r.keywords).map(normalizeText).filter(Boolean)));
+        uniqueNorms.forEach(normK => {
+          keywordCounts[normK] = (keywordCounts[normK] || 0) + 1;
+        });
+      });
+
+      const candidates = Object.entries(keywordCounts)
+        .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+        .slice(0, 20)
+        .map(entry => entry[0]);
+
+      keywordCandidateChips.innerHTML = '';
+      if (candidates.length === 0) {
+        keywordCandidateChips.innerHTML = '<div class="empty">キーワードが存在しません。</div>';
+        return;
+      }
+
+      candidates.forEach(keyword => {
+        const normKeyword = normalizeText(keyword);
+        const isSelected = state.selectedKeywords.map(normalizeText).includes(normKeyword);
+        const limitReached = state.selectedKeywords.length >= 5;
+        const isDisabled = !isSelected && limitReached;
+
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = `chip-btn${isSelected ? ' selected' : ''}${isDisabled ? ' disabled' : ''}`;
+        btn.textContent = normKeyword;
+
+        btn.addEventListener('click', () => {
+          if (isSelected) {
+            state.selectedKeywords = state.selectedKeywords.filter(k => normalizeText(k) !== normKeyword);
+          } else {
+            if (state.selectedKeywords.length < 5) {
+              state.selectedKeywords.push(normKeyword);
+            }
+          }
+          renderChart();
+        });
+
+        keywordCandidateChips.appendChild(btn);
+      });
+    }
+
+    function renderKeywordsChart(yearStr, yearInt, daily) {
+      const labelMap = { 'day': '日次', 'week': '週次', 'month': '月次' };
+      chartTitle.textContent = `${yearStr}年 キーワード推移 (${labelMap[state.granularity]})`;
+
+      let keys = [];
+      if (state.granularity === 'day') {
+        keys = generateDays(yearInt);
+      } else if (state.granularity === 'week') {
+        keys = generateWeeks(yearInt);
+      } else {
+        keys = generateMonths(yearInt);
+      }
+
+      const bucketMap = {};
+      keys.forEach(k => { bucketMap[k] = []; });
+
+      daily.forEach(r => {
+        const dateStr = String(r.date || '').trim();
+        if (!dateStr.startsWith(yearStr)) return;
+        const parts = dateStr.split('-');
+        if (parts.length < 3) return;
+        const parsed = new Date(Date.UTC(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2])));
+        if (isNaN(parsed)) return;
+
+        let k = '';
+        if (state.granularity === 'day') {
+          k = dateStr;
+        } else if (state.granularity === 'week') {
+          k = getISOWeekString(parsed);
+        } else {
+          k = dateStr.slice(0, 7);
+        }
+
+        if (bucketMap[k]) {
+          bucketMap[k].push(r);
+        }
+      });
+
+      let barWidth = 12;
+      let barGap = 6;
+      if (state.granularity === 'week') {
+        barWidth = 24;
+        barGap = 10;
+      } else if (state.granularity === 'month') {
+        barWidth = 48;
+        barGap = 20;
+      }
+
+      const margin = { left: 60, right: 40, top: 30, bottom: 60 };
+      const plotHeight = 350;
+      const totalHeight = plotHeight + margin.top + margin.bottom;
+      const totalWidth = margin.left + margin.right + keys.length * (barWidth + barGap);
+
+      trendsSvg.setAttribute('width', totalWidth);
+      trendsSvg.setAttribute('height', totalHeight);
+      trendsSvg.setAttribute('viewBox', `0 0 ${totalWidth} ${totalHeight}`);
+
+      const percentages = [0, 25, 50, 75, 100];
+      percentages.forEach(p => {
+        const y = margin.top + plotHeight - (p / 100) * plotHeight;
+
+        // dashed grid line
+        const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        line.setAttribute('x1', margin.left);
+        line.setAttribute('y1', y);
+        line.setAttribute('x2', totalWidth - margin.right);
+        line.setAttribute('y2', y);
+        line.setAttribute('stroke', 'rgba(112, 93, 73, 0.15)');
+        line.setAttribute('stroke-dasharray', '4,4');
+        trendsSvg.appendChild(line);
+
+        // Y label
+        const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        text.setAttribute('x', margin.left - 10);
+        text.setAttribute('y', y + 4);
+        text.setAttribute('text-anchor', 'end');
+        text.setAttribute('fill', 'var(--muted)');
+        text.setAttribute('font-size', '0.75rem');
+        text.textContent = p + '%';
+        trendsSvg.appendChild(text);
+      });
+
+      const yAxis = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      yAxis.setAttribute('x1', margin.left);
+      yAxis.setAttribute('y1', margin.top);
+      yAxis.setAttribute('x2', margin.left);
+      yAxis.setAttribute('y2', margin.top + plotHeight);
+      yAxis.setAttribute('stroke', 'rgba(112, 93, 73, 0.3)');
+      trendsSvg.appendChild(yAxis);
+
+      state.selectedKeywords.forEach((keyword, kwIdx) => {
+        const color = colors[kwIdx % colors.length];
+        const points = [];
+
+        keys.forEach((key, index) => {
+          const records = bucketMap[key] || [];
+          const targetDays = records.length;
+
+          let occurrenceDays = 0;
+          records.forEach(r => {
+            const rKeywords = coerceTextList(r.keywords).map(normalizeText);
+            if (rKeywords.includes(keyword)) {
+              occurrenceDays++;
+            }
+          });
+
+          const pctVal = targetDays > 0 ? (occurrenceDays / targetDays) * 100 : 0;
+          const x = margin.left + index * (barWidth + barGap) + barWidth / 2;
+          const y = margin.top + plotHeight - (pctVal / 100) * plotHeight;
+
+          points.push({ x, y, key, occurrenceDays, targetDays, pctVal });
+        });
+
+        if (points.length > 0) {
+          const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+          const dStr = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
+          path.setAttribute('d', dStr);
+          path.setAttribute('stroke', color);
+          path.setAttribute('stroke-width', '2.5');
+          path.setAttribute('fill', 'none');
+          path.setAttribute('stroke-linecap', 'round');
+          path.setAttribute('stroke-linejoin', 'round');
+          trendsSvg.appendChild(path);
+        }
+
+        points.forEach(p => {
+          const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+          circle.setAttribute('cx', p.x);
+          circle.setAttribute('cy', p.y);
+          circle.setAttribute('r', '5');
+          circle.setAttribute('fill', color);
+          circle.setAttribute('stroke', '#fff');
+          circle.setAttribute('stroke-width', '1.5');
+
+          circle.setAttribute('data-key', p.key);
+          circle.setAttribute('data-keyword', keyword);
+          circle.setAttribute('data-occurred', p.occurrenceDays);
+          circle.setAttribute('data-total', p.targetDays);
+          circle.setAttribute('data-pct', p.pctVal.toFixed(1) + '%');
+
+          trendsSvg.appendChild(circle);
+        });
+      });
+
+      keys.forEach((key, index) => {
+        const x = margin.left + index * (barWidth + barGap);
+        drawXLabel(key, x, index);
+      });
+
+      function drawXLabel(key, x, index) {
+        let showLabel = false;
+        let labelText = '';
+
+        if (state.granularity === 'day') {
+          if (key.endsWith('-01')) {
+            showLabel = true;
+            const parts = key.split('-');
+            labelText = parseInt(parts[1]) + '/1';
+          }
+        } else if (state.granularity === 'week') {
+          const parts = key.split('-W');
+          const wkNum = parseInt(parts[1]);
+          if (wkNum === 1 || wkNum % 4 === 1) {
+            showLabel = true;
+            labelText = 'W' + parts[1];
+          }
+        } else {
+          showLabel = true;
+          const parts = key.split('-');
+          labelText = parseInt(parts[1]) + '月';
+        }
+
+        if (showLabel) {
+          const tick = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+          tick.setAttribute('x1', x + barWidth / 2);
+          tick.setAttribute('y1', margin.top + plotHeight);
+          tick.setAttribute('x2', x + barWidth / 2);
+          tick.setAttribute('y2', margin.top + plotHeight + 5);
+          tick.setAttribute('stroke', 'rgba(112, 93, 73, 0.5)');
+          trendsSvg.appendChild(tick);
+
+          const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+          text.setAttribute('x', x + barWidth / 2);
+          text.setAttribute('y', margin.top + plotHeight + 18);
+          text.setAttribute('text-anchor', 'middle');
+          text.setAttribute('fill', 'var(--muted)');
+          text.setAttribute('font-size', '0.75rem');
+          text.textContent = labelText;
+          trendsSvg.appendChild(text);
+        }
+      }
+
+      legendEl.innerHTML = '';
+      state.selectedKeywords.forEach((k, i) => {
+        const item = document.createElement('div');
+        item.className = 'legend-item';
+        item.innerHTML = `
+          <span class="legend-color" style="background: ${colors[i % colors.length]}"></span>
+          <span class="legend-label">${escapeHtml(k)}</span>
+        `;
+        legendEl.appendChild(item);
+      });
+    }
 
     function escapeHtml(value) {
       return String(value || '')
@@ -1461,6 +1800,15 @@ def _render_stats_html(payload: dict) -> str:
       const yearInt = parseInt(yearStr);
       const data = years[yearStr] || {daily: []};
       const daily = data.daily || [];
+
+      if (state.displayType === 'keywords') {
+        keywordsSelectorContainer.style.display = 'block';
+        renderKeywordCandidateChips();
+        renderKeywordsChart(yearStr, yearInt, daily);
+        return;
+      } else {
+        keywordsSelectorContainer.style.display = 'none';
+      }
 
       // Compute top 6 topics
       const topicCounts = {};
@@ -1716,6 +2064,28 @@ def _render_stats_html(payload: dict) -> str:
 
         tooltip.style.left = x + 'px';
         tooltip.style.top = y + 'px';
+      } else if (target.tagName === 'circle' && target.hasAttribute('data-keyword')) {
+        const key = target.getAttribute('data-key');
+        const keyword = target.getAttribute('data-keyword');
+        const occurred = target.getAttribute('data-occurred');
+        const total = target.getAttribute('data-total');
+        const pct = target.getAttribute('data-pct');
+
+        tooltip.style.display = 'block';
+        tooltip.innerHTML = `
+          <strong>${escapeHtml(key)}</strong><br/>
+          キーワード: <strong>${escapeHtml(keyword)}</strong><br/>
+          出現日数: ${escapeHtml(occurred)} 日<br/>
+          対象日数: ${escapeHtml(total)} 日<br/>
+          出現率: ${escapeHtml(pct)}
+        `;
+
+        const containerRect = document.querySelector('.chart-container').getBoundingClientRect();
+        const x = e.clientX - containerRect.left + 15;
+        const y = e.clientY - containerRect.top + 15;
+
+        tooltip.style.left = x + 'px';
+        tooltip.style.top = y + 'px';
       } else {
         tooltip.style.display = 'none';
       }
@@ -1728,6 +2098,8 @@ def _render_stats_html(payload: dict) -> str:
     // Toolbar event listeners
     yearSelect.addEventListener('change', () => {
       state.year = yearSelect.value;
+      const data = years[state.year] || {daily: []};
+      updateKeywordCandidates(data.daily || []);
       renderChart();
     });
 
@@ -1740,10 +2112,21 @@ def _render_stats_html(payload: dict) -> str:
       });
     });
 
+    document.querySelectorAll('.toggle-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.toggle-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        state.displayType = btn.getAttribute('data-type');
+        renderChart();
+      });
+    });
+
     // Initialize granularity active state
     document.querySelector(`.granularity-btn[data-g="${state.granularity}"]`).classList.add('active');
 
     renderYearSelect();
+    const initialData = years[state.year] || {daily: []};
+    updateKeywordCandidates(initialData.daily || []);
     renderChart();
   </script>
 </body>

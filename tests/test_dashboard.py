@@ -134,3 +134,151 @@ def test_build_dashboard_generates_stats_html(dashboard_env):
 
     stats_path = output / "stats.html"
     assert stats_path.exists()
+
+
+def test_dashboard_stats_html_contains_keywords_features(dashboard_env):
+    output = dashboard_env["dashboard"]
+    dashboard.build_dashboard([2026])
+    stats_path = output / "stats.html"
+    content = stats_path.read_text(encoding="utf-8")
+
+    assert "display-toggle-container" in content
+    assert "toggle-btn" in content
+    assert "keywordsSelectorContainer" in content
+    assert "keywordCandidateChips" in content
+    assert "updateKeywordCandidates" in content
+    assert "renderKeywordsChart" in content
+    assert "state.selectedKeywords" in content
+
+
+def test_dashboard_keywords_logic_with_playwright(dashboard_env):
+    activity = dashboard_env["activity"]
+    daily = dashboard_env["daily"]
+    output = dashboard_env["dashboard"]
+
+    # Write daily records with complex scenarios:
+    # - Same-day duplicate "LLM" and Zenkaku duplicate "ＬＬＭ" on 2026-07-10
+    # - More than 20 unique keywords distributed across multiple days
+    _write_jsonl(
+        activity / "2026/07/2026-07.jsonl",
+        [
+            {
+                "date": "2026-07-01",
+                "summary": "Day 1",
+                "keywords": ["AI", "ML", "DL", "NLP", "CV", "RL", "GAN", "Transformer"],
+                "source_stats": {"activity_count": 1, "llm_session_count": 1, "has_daily_note": True},
+            },
+            {
+                "date": "2026-07-02",
+                "summary": "Day 2",
+                "keywords": ["C", "C++", "Java", "Go", "Rust", "Ruby", "PHP", "Scala"],
+                "source_stats": {"activity_count": 1, "llm_session_count": 1, "has_daily_note": True},
+            },
+            {
+                "date": "2026-07-03",
+                "summary": "Day 3",
+                "keywords": ["HTML", "CSS", "JS", "React", "Vue", "Angular", "Svelte", "Node"],
+                "source_stats": {"activity_count": 1, "llm_session_count": 1, "has_daily_note": True},
+            },
+            {
+                "date": "2026-07-10",
+                "summary": "Day 10",
+                "topics": ["AI"],
+                "keywords": ["LLM", "LLM", "ＬＬＭ"],
+                "source_stats": {"activity_count": 1, "llm_session_count": 1, "has_daily_note": True},
+            },
+            {
+                "date": "2026-07-11",
+                "summary": "Day 11",
+                "topics": ["AI"],
+                "keywords": ["LLM", "Python", "Python", "Ｐｙｔｈｏｎ"],
+                "source_stats": {"activity_count": 1, "llm_session_count": 1, "has_daily_note": True},
+            },
+            {
+                "date": "2026-07-12",
+                "summary": "Day 12",
+                "topics": ["AI"],
+                "keywords": ["LLM", "Python", "Django", "FastAPI", "Flask", "Keras", "PyTorch", "NumPy"],
+                "source_stats": {"activity_count": 1, "llm_session_count": 1, "has_daily_note": True},
+            },
+        ],
+    )
+
+    dashboard.build_dashboard([2026])
+    stats_path = output / "stats.html"
+    assert stats_path.exists()
+
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page()
+        page.goto(stats_path.absolute().as_uri())
+
+        # Verify that Topics toggle is active by default
+        topics_btn = page.locator("button[data-type='topics']")
+        assert "active" in (topics_btn.get_attribute("class") or "")
+
+        # Click on Keywords toggle
+        keywords_btn = page.locator("button[data-type='keywords']")
+        keywords_btn.click()
+        assert "active" in (keywords_btn.get_attribute("class") or "")
+
+        # Check visibility of keywords selector container
+        container = page.locator("#keywordsSelectorContainer")
+        assert container.is_visible()
+
+        # Check keyword candidates list
+        # "LLM" should be the top keyword (appeared on 2026-07-10, 11, 12 -> 3 days)
+        # "Python" should be second (appeared on 2026-07-11, 12 -> 2 days)
+        # Other keywords appeared on 1 day.
+        # Candidates list should be limited to 20 chips.
+        chips = page.locator("#keywordCandidateChips button.chip-btn")
+        count = chips.count()
+        assert count == 20
+
+        # The first candidate chip should be "LLM"
+        assert chips.nth(0).inner_text() == "LLM"
+        # The second candidate chip should be "Python"
+        assert chips.nth(1).inner_text() == "Python"
+
+        # Check that top 5 chips are initially selected
+        selected_chips = page.locator("#keywordCandidateChips button.chip-btn.selected")
+        assert selected_chips.count() == 5
+
+        # Check that the 6th chip is disabled because limit is 5
+        disabled_chips = page.locator("#keywordCandidateChips button.chip-btn.disabled")
+        assert disabled_chips.count() == 15
+
+        # Deselect one selected chip (e.g. the 1st one, "LLM")
+        chips.nth(0).click()
+        assert "selected" not in (chips.nth(0).get_attribute("class") or "")
+
+        # Since we have only 4 selected now, disabled chips should become enabled
+        disabled_chips_now = page.locator("#keywordCandidateChips button.chip-btn.disabled")
+        assert disabled_chips_now.count() == 0
+
+        # Toggle granularity to monthly
+        month_btn = page.locator("button[data-g='month']")
+        month_btn.click()
+        assert "active" in (month_btn.get_attribute("class") or "")
+
+        # Check that some SVG line paths are rendered
+        paths = page.locator("#trendsSvg path")
+        assert paths.count() > 0
+
+        # Hover over one circle marker and check tooltip
+        circles = page.locator("#trendsSvg circle")
+        assert circles.count() > 0
+
+        # Dispatch mousemove on the last circle to trigger tooltip
+        circles.last.dispatch_event("mousemove")
+        tooltip = page.locator("#tooltip")
+        assert tooltip.is_visible()
+        tooltip_text = tooltip.inner_text()
+        assert "キーワード:" in tooltip_text
+        assert "出現日数:" in tooltip_text
+        assert "対象日数:" in tooltip_text
+        assert "出現率:" in tooltip_text
+
+        browser.close()
