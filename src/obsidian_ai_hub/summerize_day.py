@@ -3,18 +3,10 @@ import logging
 from collections import Counter
 from datetime import datetime, timedelta
 from obsidian_ai_hub.utils import config, reader, extracter, llm_client, prompt
+from obsidian_ai_hub.utils.topics import TOPIC_ENUM, normalize_topics
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
-
-TOPIC_ENUM = [
-    "LLM・AI活用", "AI・機械学習", "ソフトウェア開発", "開発環境・DevOps",
-    "データ・分析", "クラウド・インフラ", "ツール・自動化（生産性）",
-    "リサーチ手法・情報整理（PKM）", "ガジェット・デバイス", "金融・投資",
-    "マーケティング・発信", "ライティング・コンテンツ制作", "コミュニケーション・対人関係",
-    "思考法・判断力", "学習・教育", "自己改善（習慣・時間管理）", "メンタル・心理",
-    "健康・医療", "生活・暮らし", "信仰・聖書", "その他"
-]
 
 INTENT_ENUM = [
     "理解・質問応答", "要約・整理", "調査・比較", "意思決定支援", "設計・構成検討",
@@ -86,6 +78,7 @@ def get_daily_structured_record(
                 "SESSION_SUMMARIES": json.dumps(logs, ensure_ascii=False, indent=2),
                 "ACTIVITY_LOGS": json.dumps(simplified_activity_logs, ensure_ascii=False, indent=2),
                 "DAILY_NOTE_CONTENT": daily_content,
+                "TOPIC_CANDIDATES": json.dumps(TOPIC_ENUM, ensure_ascii=False),
             }
         )
         response = llm_client.generate_llm_response(
@@ -132,7 +125,11 @@ def get_daily_structured_record(
                 elif key in scalar_fields and isinstance(val, str):
                     record[key] = val or None
                 elif key in list_fields and isinstance(val, list):
-                    record[key] = [str(item) for item in val if item not in (None, "")]
+                    clean_list = [str(item) for item in val if item not in (None, "")]
+                    if key == "topics":
+                        record[key] = normalize_topics(clean_list)
+                    else:
+                        record[key] = clean_list
 
     except Exception as e:
         logger.error(f"Failed to generate or parse structured daily record: {e}")
