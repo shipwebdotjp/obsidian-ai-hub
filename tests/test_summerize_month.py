@@ -86,7 +86,7 @@ def test_summarize_month(mock_llm, mock_render, mock_config):
     mock_render.return_value = "Rendered Prompt"
     mock_llm.return_value = json.dumps({
         "summary": "Monthly summary test",
-        "topics": ["Topic 1"],
+        "topics": ["LLM・AI活用"],
         "activities": ["Activity 1"],
         "learnings": ["Learning 1"],
         "reflections": ["Reflection 1"],
@@ -156,6 +156,32 @@ def test_summarize_month(mock_llm, mock_render, mock_config):
     content = note_path.read_text()
     assert "## AIによる要約" in content
     assert "Monthly summary test" in content
-    assert "Topic 1" in content
+    assert "LLM・AI活用" in content
     assert "Calm" in content
     assert "8.2" in content
+
+
+@patch("obsidian_ai_hub.summerize_month.prompt.render_prompt")
+@patch("obsidian_ai_hub.utils.llm_client.generate_llm_response")
+def test_get_monthly_structured_record_passes_candidates_and_normalizes_topics(mock_llm, mock_render, mock_config):
+    target_date = datetime(2024, 10, 1)
+    mock_render.return_value = "Rendered Prompt"
+
+    # LLM returns topics with mixed valid, duplicates, and out-of-candidates
+    mock_llm.return_value = json.dumps({
+        "summary": "Monthly summary test",
+        "topics": ["LLM・AI活用", "未知のトピック", "LLM・AI活用"]
+    })
+
+    record = summerize_month.get_monthly_structured_record(target_date, [])
+
+    # Check render_prompt is called with TOPIC_CANDIDATES
+    mock_render.assert_called_once()
+    context = mock_render.call_args[0][1]
+    assert "TOPIC_CANDIDATES" in context
+    candidates = json.loads(context["TOPIC_CANDIDATES"])
+    assert "LLM・AI活用" in candidates
+    assert "その他" in candidates
+
+    # Check parsed and normalized topics in record
+    assert record["topics"] == ["LLM・AI活用", "その他"]

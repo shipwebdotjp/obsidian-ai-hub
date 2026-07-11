@@ -198,3 +198,30 @@ def test_summarize_week(mock_path, mock_content, mock_gen, mock_config):
     assert "Old content" not in new_content
     assert "## Previous Section" in new_content
     assert "## Next Section" in new_content
+
+
+@patch("obsidian_ai_hub.summerize_week.prompt.render_prompt")
+@patch("obsidian_ai_hub.summerize_week.llm_client.generate_llm_response")
+def test_get_weekly_structured_record_passes_candidates_and_normalizes_topics(mock_llm, mock_render, mock_config):
+    target_date = datetime(2023, 10, 27) # W43
+    mock_render.return_value = "Rendered Prompt"
+
+    # LLM returns topics with mixed valid, duplicates, and out-of-candidates
+    mock_llm.return_value = json.dumps({
+        "summary": "AI Weekly Summary",
+        "topics": ["LLM・AI活用", "未知のトピック", "LLM・AI活用"]
+    })
+
+    daily_records = []
+    record = get_weekly_structured_record(target_date, daily_records)
+
+    # Check render_prompt is called with TOPIC_CANDIDATES
+    mock_render.assert_called_once()
+    context = mock_render.call_args[0][1]
+    assert "TOPIC_CANDIDATES" in context
+    candidates = json.loads(context["TOPIC_CANDIDATES"])
+    assert "LLM・AI活用" in candidates
+    assert "その他" in candidates
+
+    # Check parsed and normalized topics in record
+    assert record["topics"] == ["LLM・AI活用", "その他"]

@@ -4,6 +4,7 @@ import re
 from datetime import datetime, timedelta
 from pathlib import Path
 from obsidian_ai_hub.utils import config, reader, llm_client, prompt
+from obsidian_ai_hub.utils.topics import TOPIC_ENUM, normalize_topics
 from obsidian_ai_hub.utils.summary_aggregation import (
     calculate_average_numeric_value,
     calculate_most_common_value,
@@ -80,7 +81,10 @@ def get_monthly_structured_record(
     try:
         rendered_prompt = prompt.render_prompt(
             config.SUMMARIZE_MONTH_PROMPT_PATH,
-            {"WEEKLY_RECORDS": json.dumps(weekly_records, ensure_ascii=False, indent=2)}
+            {
+                "WEEKLY_RECORDS": json.dumps(weekly_records, ensure_ascii=False, indent=2),
+                "TOPIC_CANDIDATES": json.dumps(TOPIC_ENUM, ensure_ascii=False),
+            }
         )
         response = llm_client.generate_llm_response(
             provider=config.MAKE_TODAY_TARGET_PROVIDER,
@@ -122,7 +126,11 @@ def get_monthly_structured_record(
                 elif key in scalar_fields and isinstance(val, (str, int, float)):
                     record[key] = str(val)
                 elif key in list_fields and isinstance(val, list):
-                    record[key] = [str(item) for item in val if item not in (None, "")]
+                    clean_list = [str(item) for item in val if item not in (None, "")]
+                    if key == "topics":
+                        record[key] = normalize_topics(clean_list)
+                    else:
+                        record[key] = clean_list
 
     except Exception as e:
         logger.error(f"Failed to generate or parse structured monthly record: {e}", exc_info=True)
