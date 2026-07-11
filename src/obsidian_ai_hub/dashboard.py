@@ -516,7 +516,7 @@ def _render_index_html(payload: dict) -> str:
     }
     .toolbar, .stats, .month-rail, .panel-grid { display: grid; gap: 12px; }
     .toolbar {
-      grid-template-columns: 180px 1fr 220px auto;
+      grid-template-columns: 180px 220px 1fr auto auto;
       margin-top: 18px;
       align-items: center;
     }
@@ -691,8 +691,8 @@ def _render_index_html(payload: dict) -> str:
         </p>
         <div class="toolbar">
           <select id="yearSelect" class="control" aria-label="Year selector"></select>
-          <input id="searchInput" class="control" type="search" placeholder="検索: summary / keyword / topic / date">
           <select id="monthSelect" class="control" aria-label="Month selector"></select>
+          <input id="searchInput" class="control" type="search" placeholder="検索: summary / keyword / topic / date">
           <a id="resetButton" class="button" href="#">Reset</a>
           <a class="button" href="stats.html" style="background: linear-gradient(180deg, rgba(86,124,115,0.16), rgba(86,124,115,0.08)); border-color: rgba(86,124,115,0.18); color: var(--accent-2);">統計</a>
         </div>
@@ -716,14 +716,14 @@ def _render_index_html(payload: dict) -> str:
       <section class="section">
         <div class="section-head">
           <h2>Top Topics</h2>
-          <div class="meta">selected year</div>
+          <div class="meta" id="topicSectionMeta">selected year</div>
         </div>
         <div class="chips" id="topicChips"></div>
       </section>
       <section class="section">
         <div class="section-head">
           <h2>Top Keywords</h2>
-          <div class="meta">selected year</div>
+          <div class="meta" id="keywordSectionMeta">selected year</div>
         </div>
         <div class="chips" id="keywordChips"></div>
       </section>
@@ -731,10 +731,10 @@ def _render_index_html(payload: dict) -> str:
 
     <section class="section">
       <div class="section-head">
-        <h2>Daily Records</h2>
-        <div class="meta" id="dailyMeta"></div>
+        <h2>Monthly Records</h2>
+        <div class="meta" id="monthlyMeta"></div>
       </div>
-      <div class="record-list" id="dailyList"></div>
+      <div class="record-list" id="monthlyList"></div>
     </section>
 
     <section class="section">
@@ -747,10 +747,10 @@ def _render_index_html(payload: dict) -> str:
 
     <section class="section">
       <div class="section-head">
-        <h2>Monthly Records</h2>
-        <div class="meta" id="monthlyMeta"></div>
+        <h2>Daily Records</h2>
+        <div class="meta" id="dailyMeta"></div>
       </div>
-      <div class="record-list" id="monthlyList"></div>
+      <div class="record-list" id="dailyList"></div>
     </section>
   </main>
 
@@ -800,6 +800,15 @@ def _render_index_html(payload: dict) -> str:
         .replaceAll("'", '&#39;');
     }
 
+    function formatDate(dateStr) {
+      if (!dateStr) return '';
+      const d = new Date(dateStr + 'T00:00:00');
+      const weekdays = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+      return d.getFullYear() + '/' + String(d.getMonth() + 1).padStart(2, '0')
+        + '/' + String(d.getDate()).padStart(2, '0')
+        + '(' + weekdays[d.getDay()] + ')';
+    }
+
     function obsidianUri(notePath) {
       if (!notePath) {
         return '';
@@ -842,15 +851,15 @@ def _render_index_html(payload: dict) -> str:
     }
 
     function sortDaily(items) {
-      return [...items].sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+      return [...items].sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')));
     }
 
     function sortWeekly(items) {
-      return [...items].sort((a, b) => String(b.week_id || '').localeCompare(String(a.week_id || '')));
+      return [...items].sort((a, b) => String(a.week_id || '').localeCompare(String(b.week_id || '')));
     }
 
     function sortMonthly(items) {
-      return [...items].sort((a, b) => String(b.month || '').localeCompare(String(a.month || '')));
+      return [...items].sort((a, b) => String(a.month || '').localeCompare(String(b.month || '')));
     }
 
     function renderStats(data) {
@@ -904,22 +913,61 @@ def _render_index_html(payload: dict) -> str:
       }
     }
 
+    function monthTopics(data) {
+      if (state.month === 'all') return (data.aggregates && data.aggregates.top_topics) || [];
+      const monthly = (data.monthly || []).find(m => m.month === state.month);
+      if (monthly && monthly.topics && monthly.topics.length) return monthly.topics;
+      const weekly = (data.weekly || []).filter(w => {
+        const sm = (w.week_start_date || '').slice(0, 7);
+        const em = (w.week_end_date || '').slice(0, 7);
+        return state.month >= sm && state.month <= em;
+      });
+      const counter = {};
+      weekly.forEach(w => (w.topics || []).forEach(t => { counter[t] = (counter[t] || 0) + 1; }));
+      return Object.entries(counter).sort((a, b) => b[1] - a[1]).slice(0, 8).map(e => e[0]);
+    }
+
+    function monthKeywords(data) {
+      if (state.month === 'all') return (data.aggregates && data.aggregates.top_keywords) || [];
+      const monthly = (data.monthly || []).find(m => m.month === state.month);
+      if (monthly && monthly.keywords && monthly.keywords.length) return monthly.keywords;
+      const weekly = (data.weekly || []).filter(w => {
+        const sm = (w.week_start_date || '').slice(0, 7);
+        const em = (w.week_end_date || '').slice(0, 7);
+        return state.month >= sm && state.month <= em;
+      });
+      const stats = {};
+      weekly.forEach(w => (w.keywords || []).forEach(k => {
+        const key = k.toLowerCase();
+        const entry = stats[key] || (stats[key] = {label: k, count: 0});
+        if (k.length > entry.label.length) entry.label = k;
+        entry.count++;
+      }));
+      return Object.values(stats).sort((a, b) => b.count - a.count).slice(0, 12).map(e => e.label);
+    }
+
     function renderTopicChips(data) {
-      const topics = (data.aggregates && data.aggregates.top_topics) || [];
+      const topics = monthTopics(data);
       topicChips.innerHTML = topics.length
         ? topics.map((topic) => `<span class="chip">${escapeHtml(topic)}</span>`).join('')
         : '<div class="empty">No topic data.</div>';
     }
 
     function renderKeywordChips(data) {
-      const keywords = (data.aggregates && data.aggregates.top_keywords) || [];
+      const keywords = monthKeywords(data);
       keywordChips.innerHTML = keywords.length
         ? keywords.map((keyword) => `<span class="chip">${escapeHtml(keyword)}</span>`).join('')
         : '<div class="empty">No keyword data.</div>';
     }
 
+    function renderTopicKeywordMeta() {
+      const ctx = state.month === 'all' ? state.year : state.month;
+      document.getElementById('topicSectionMeta').textContent = ctx;
+      document.getElementById('keywordSectionMeta').textContent = ctx;
+    }
+
     function renderMonthRail(data) {
-      const months = sortMonthly(data.months || []);
+      const months = [...(data.months || [])].sort((a, b) => String(b.month || '').localeCompare(String(a.month || '')));
       if (!months.length) {
         monthRailEl.innerHTML = '<div class="empty">No month summaries yet.</div>';
         monthSummaryMeta.textContent = '';
@@ -967,14 +1015,14 @@ def _render_index_html(payload: dict) -> str:
 
     function renderRecord(item, kind) {
       const title = kind === 'daily'
-        ? item.date
+        ? formatDate(item.date)
         : kind === 'weekly'
           ? item.week_id
           : item.month;
       const subtitle = kind === 'daily'
         ? `${item.activity_count || 0} activity / ${item.llm_session_count || 0} sessions`
         : kind === 'weekly'
-          ? `${item.week_start_date || ''} → ${item.week_end_date || ''} / ${item.daily_record_count || 0} daily`
+          ? `${formatDate(item.week_start_date)} → ${formatDate(item.week_end_date)} / ${item.daily_record_count || 0} daily`
           : `${item.weekly_record_count || 0} weekly summaries`;
       const topics = (item.topics || []).map((topic) => `<span class="chip">${escapeHtml(topic)}</span>`).join('');
       const keywords = (item.keywords || []).map((keyword) => `<span class="chip">${escapeHtml(keyword)}</span>`).join('');
@@ -1017,6 +1065,7 @@ def _render_index_html(payload: dict) -> str:
       renderStats(data);
       renderTopicChips(data);
       renderKeywordChips(data);
+      renderTopicKeywordMeta();
       renderMonthRail(data);
       renderCounts(data);
     }
