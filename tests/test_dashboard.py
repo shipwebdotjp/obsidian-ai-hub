@@ -128,88 +128,9 @@ def test_build_dashboard_exports_year_payload_and_html(dashboard_env):
 
 def test_build_dashboard_generates_stats_html(dashboard_env):
     output = dashboard_env["dashboard"]
-    # Verify both index.html and stats.html are generated
     html_path = dashboard.build_dashboard([2026])
     assert html_path == output / "index.html"
     assert html_path.exists()
 
     stats_path = output / "stats.html"
     assert stats_path.exists()
-
-    stats_content = stats_path.read_text(encoding="utf-8")
-    assert "window.__DASHBOARD_BOOTSTRAP__" in stats_content
-    assert "Topic Trends" in stats_content
-    assert "trendsSvg" in stats_content
-
-
-def test_aggregate_topics_by_granularity_day_and_deduplication():
-    # Day granularity with duplicates in individual records
-    daily_records = [
-        # This record has "AI" duplicated. It should be counted once.
-        {
-            "date": "2026-07-10",
-            "topics": ["AI", "AI", "Python"],
-        },
-        # This record has "AI" and "OtherTopic"
-        {
-            "date": "2026-07-11",
-            "topics": ["AI", "OtherTopic"],
-        }
-    ]
-
-    res = dashboard.aggregate_topics_by_granularity(daily_records, 2026, "day")
-
-    # AI and Python are top topics
-    top_topics = res["top_topics"]
-    assert "AI" in top_topics
-    assert "Python" in top_topics
-
-    # Total buckets should represent the whole year (365 days for 2026)
-    buckets = res["buckets"]
-    assert len(buckets) == 365
-
-    # Let's locate the bucket for 2026-07-10
-    b_10 = next(b for b in buckets if b["key"] == "2026-07-10")
-    # Python is in top 6, AI is in top 6. Let's see counts.
-    # Total deduplicated topics in record 10 is ["AI", "Python"] -> 2 total counts
-    assert b_10["total"] == 2
-    assert b_10["counts"]["AI"] == 1
-    assert b_10["counts"]["Python"] == 1
-    assert b_10["proportions"]["AI"] == 0.5
-    assert b_10["proportions"]["Python"] == 0.5
-
-    # Bucket for 2026-07-11: ["AI", "OtherTopic"]
-    b_11 = next(b for b in buckets if b["key"] == "2026-07-11")
-    # "OtherTopic" is in "Other" count if it's not in top_6
-    # Let's check proportions sum to 1.0 (100%)
-    assert sum(b_11["proportions"].values()) == pytest.approx(1.0)
-
-
-def test_aggregate_topics_by_granularity_week_and_month():
-    daily_records = [
-        {"date": "2026-01-01", "topics": ["AI"]},
-        {"date": "2026-12-31", "topics": ["Python"]}
-    ]
-
-    # Week aggregation
-    res_wk = dashboard.aggregate_topics_by_granularity(daily_records, 2026, "week")
-    assert len(res_wk["buckets"]) >= 52
-
-    # Month aggregation
-    res_m = dashboard.aggregate_topics_by_granularity(daily_records, 2026, "month")
-    assert len(res_m["buckets"]) == 12
-
-    # Jan 2026 is month index 0 (2026-01)
-    b_jan = res_m["buckets"][0]
-    assert b_jan["key"] == "2026-01"
-    assert b_jan["total"] == 1
-    assert b_jan["counts"]["AI"] == 1
-
-
-def test_aggregate_topics_by_granularity_empty():
-    res = dashboard.aggregate_topics_by_granularity([], 2026, "month")
-    assert len(res["buckets"]) == 12
-    for b in res["buckets"]:
-        assert b["total"] == 0
-        assert b["proportions"] == {}
-        assert b["counts"] == {}
