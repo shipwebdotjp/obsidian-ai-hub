@@ -95,6 +95,8 @@ python -m obsidian_ai_hub --make-target
 python -m obsidian_ai_hub --notify-calendar-event
 python -m obsidian_ai_hub --summerize-week
 python -m obsidian_ai_hub --summerize-week --week-date 2026-06-15
+python -m obsidian_ai_hub --review-draft
+python -m obsidian_ai_hub --review-draft --review-week-date 2026-07-12
 python -m obsidian_ai_hub --backup
 python -m obsidian_ai_hub --sync-vault
 python -m obsidian_ai_hub --screenshot
@@ -108,6 +110,11 @@ The vault sync command indexes the full `VAULT_PATH` tree into `md-hybrid-search
 The task runner reads scheduled jobs from `tasks/tasks.local.yml` when it exists, and falls back to `tasks/tasks.yml` otherwise. It also persists the last execution time in `tasks/last_run.json` so each task is only run once per matching schedule window.
 
 Use `tasks/tasks.local.sample.yml` as the starting point for your own `tasks/tasks.local.yml`.
+
+To create and send a weekly review draft on Sunday night, enable the
+`review_draft_sunday_evening` example after replacing its project path. The
+weekly note must contain an empty `result::` line; the generated draft is saved
+immediately below it before the LINE Push notification is sent.
 
 Each task entry uses this shape:
 

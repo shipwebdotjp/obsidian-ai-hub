@@ -21,6 +21,7 @@ from obsidian_ai_hub import (
     take_screenshot,
     scan_line_inbox,
     search_obsidian_vault,
+    review_draft,
 )
 from obsidian_ai_hub.handler import add_research_theme
 
@@ -53,6 +54,11 @@ def main():
         action="store_true",
         help="週次レビューを生成"
     )
+    parser.add_argument(
+        "--review-draft",
+        action="store_true",
+        help="空の result:: を持つ週次ノートにレビュー下書きを保存しLINEへ通知"
+    )
     def validate_date(value):
         try:
             datetime.strptime(value, "%Y-%m-%d")
@@ -66,6 +72,11 @@ def main():
         "--week-date",
         type=validate_date,
         help="--summerize-week で対象とする週の日付 (YYYY-MM-DD)"
+    )
+    parser.add_argument(
+        "--review-week-date",
+        type=validate_date,
+        help="--review-draft で対象とする週の日付 (YYYY-MM-DD)"
     )
     parser.add_argument(
         "--summerize-month",
@@ -248,6 +259,9 @@ def main():
         ran = True
     if args.summerize_week:
         run_and_log(lambda: summerize_week.main(args.week_date), "summerize_week")
+        ran = True
+    if args.review_draft:
+        run_and_log(lambda: review_draft.main(args.review_week_date), "review_draft")
         ran = True
     if args.summerize_month:
         run_and_log(lambda: summerize_month.main(args.month), "summerize_month")

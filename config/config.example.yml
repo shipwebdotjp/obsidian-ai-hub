@@ -44,6 +44,11 @@ llm:
     provider: ollama
     model: glm-4.7:cloud
     prompt_path: /path/to/your/config/prompts/make_today_target.md
+  # Optional override. When omitted, the make_today_target provider/model is used.
+  review_draft:
+    provider: ollama
+    model: glm-4.7:cloud
+    prompt_path: /path/to/your/config/prompts/review_draft.md
   # Example with opencode_go:
   # make_today_target:
   #   provider: opencode_go

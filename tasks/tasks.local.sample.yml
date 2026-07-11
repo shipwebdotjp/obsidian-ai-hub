@@ -50,6 +50,16 @@
     minute: 0
   command: 'echo "This runs on Monday, Wednesday, and Friday at 09:00"'
 
+# Enable after creating a weekly-note template containing an empty `result::` line.
+- id: review_draft_sunday_evening
+  enabled: false
+  schedule:
+    type: weekly
+    weekday: 6 # Sunday
+    hour: 21
+    minute: 30
+  command: 'uv --directory /path/to/obsidian-daily-merge run -m obsidian_ai_hub --review-draft'
+
 - id: sample_monthly
   enabled: true
   schedule:

@@ -226,6 +226,15 @@ def test_summerize_week_cli_accepts_week_date(monkeypatch):
     mock_main.assert_called_once_with("2026-06-15")
 
 
+def test_review_draft_cli_accepts_review_week_date(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["prog", "--review-draft", "--review-week-date", "2026-07-12"])
+
+    with patch.object(main_module.review_draft, "main", return_value=None) as mock_main:
+        main_module.main()
+
+    mock_main.assert_called_once_with("2026-07-12")
+
+
 def test_screenshot_cli_composable_with_other_flags(monkeypatch):
     monkeypatch.setattr(sys, "argv", ["prog", "--screenshot", "--sync-vault"])
 

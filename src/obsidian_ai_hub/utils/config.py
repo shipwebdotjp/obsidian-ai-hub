@@ -153,6 +153,18 @@ MAKE_TODAY_TARGET_PROMPT_PATH = _optional_path("MAKE_TODAY_TARGET_PROMPT_PATH", 
 if MAKE_TODAY_TARGET_PROMPT_PATH is None:
     MAKE_TODAY_TARGET_PROMPT_PATH = BASE_DIR / "config" / "prompts" / "make_today_target.md"
 
+# Weekly review drafts use the same LLM as the existing daily/weekly summaries
+# unless explicitly overridden.
+REVIEW_DRAFT_PROVIDER = str(
+    _config_value("llm", "review_draft", "provider", default=MAKE_TODAY_TARGET_PROVIDER)
+)
+REVIEW_DRAFT_MODEL = str(
+    _config_value("llm", "review_draft", "model", default=MAKE_TODAY_TARGET_MODEL)
+)
+REVIEW_DRAFT_PROMPT_PATH = _optional_path("REVIEW_DRAFT_PROMPT_PATH", "llm", "review_draft", "prompt_path")
+if REVIEW_DRAFT_PROMPT_PATH is None:
+    REVIEW_DRAFT_PROMPT_PATH = BASE_DIR / "config" / "prompts" / "review_draft.md"
+
 SUMMARIZE_DAY_PROMPT_PATH = _optional_path("SUMMARIZE_DAY_PROMPT_PATH", "llm", "summarize_day", "prompt_path")
 if SUMMARIZE_DAY_PROMPT_PATH is None:
     SUMMARIZE_DAY_PROMPT_PATH = BASE_DIR / "config" / "prompts" / "summarize_day.md"
