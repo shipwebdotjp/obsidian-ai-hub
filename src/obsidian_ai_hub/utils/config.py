@@ -293,3 +293,15 @@ if not isinstance(REGULARLY_WEEKDAY_EVENTS, list):
 REGULARLY_DATE_EVENTS = _config_value("regularly_date_events", default=[])
 if not isinstance(REGULARLY_DATE_EVENTS, list):
     REGULARLY_DATE_EVENTS = []
+
+# Memory Configuration
+MEMORY_CONTEXT_MAX_TOKENS = int(_config_value("memory", "context_max_tokens", default=800))
+_extractor_provider = _config_value("memory", "extractor", "provider")
+MEMORY_EXTRACTOR_PROVIDER = str(_extractor_provider) if _extractor_provider is not None else MAKE_TODAY_TARGET_PROVIDER
+
+_extractor_model = _config_value("memory", "extractor", "model")
+MEMORY_EXTRACTOR_MODEL = str(_extractor_model) if _extractor_model is not None else MAKE_TODAY_TARGET_MODEL
+
+MEMORY_EXTRACTOR_PROMPT_PATH = _optional_path("MEMORY_EXTRACTOR_PROMPT_PATH", "memory", "extractor", "prompt_path")
+if MEMORY_EXTRACTOR_PROMPT_PATH is None:
+    MEMORY_EXTRACTOR_PROMPT_PATH = BASE_DIR / "config" / "prompts" / "memory_extract.md"
