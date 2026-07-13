@@ -296,6 +296,14 @@ if not isinstance(REGULARLY_DATE_EVENTS, list):
 
 # Memory Configuration
 MEMORY_CONTEXT_MAX_TOKENS = int(_config_value("memory", "context_max_tokens", default=800))
+
+# SQLite memory database path setup
+MEMORY_SQLITE_PATH_RAW = _env_or_config("MEMORY_SQLITE_PATH", "memory", "sqlite_path")
+if MEMORY_SQLITE_PATH_RAW:
+    MEMORY_SQLITE_PATH = Path(str(MEMORY_SQLITE_PATH_RAW)).expanduser()
+else:
+    MEMORY_SQLITE_PATH = Path("~/.config/obsidian-ai-hub/memory.sqlite3").expanduser()
+
 _extractor_provider = _config_value("memory", "extractor", "provider")
 MEMORY_EXTRACTOR_PROVIDER = str(_extractor_provider) if _extractor_provider is not None else MAKE_TODAY_TARGET_PROVIDER
 
