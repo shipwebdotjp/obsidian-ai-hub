@@ -1,3 +1,4 @@
+# ruff: noqa: E402
 import sys
 from unittest.mock import MagicMock
 
@@ -16,11 +17,7 @@ mock_modules = {
 for name, m in mock_modules.items():
     sys.modules[name] = m
 
-import json
-import os
-from datetime import datetime
-from pathlib import Path
-from unittest.mock import patch, mock_open
+from unittest.mock import patch
 import pytest
 
 from obsidian_ai_hub import memory, main, make_today_target
@@ -43,6 +40,10 @@ def clean_memory_env(tmp_path, monkeypatch):
     activity_dir = vault_path / "activity"
     activity_dir.mkdir(exist_ok=True)
     monkeypatch.setattr(config, "ACTIVITY_PATH", activity_dir)
+
+    # SQLite DB temporary path configuration
+    db_file = tmp_path / "memory.sqlite3"
+    monkeypatch.setattr(config, "MEMORY_SQLITE_PATH", db_file)
 
     return vault_path
 
@@ -70,6 +71,36 @@ def test_id_generation():
     evt_id = memory.generate_event_id()
     assert evt_id.startswith("evt_")
     assert len(evt_id) == 16
+
+
+def test_db_initialization_and_indexes(clean_memory_env):
+    db_path = config.MEMORY_SQLITE_PATH
+    assert not db_path.exists()
+
+    # Getting connection should initialize DB
+    conn = memory.get_db_connection()
+    assert db_path.exists()
+
+    # Query schema version
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA user_version;")
+    version = cursor.fetchone()[0]
+    assert version == 1
+
+    # Verify tables exist
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+    tables = [row[0] for row in cursor.fetchall()]
+    assert "memories" in tables
+    assert "memory_events" in tables
+
+    # Verify indexes exist
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='index';")
+    indexes = [row[0] for row in cursor.fetchall()]
+    assert "idx_memories_status" in indexes
+    assert "idx_memories_memory_key" in indexes
+    assert "idx_memory_events_memory_id_occurred_at" in indexes
+
+    conn.close()
 
 
 def test_run_deduplication():
@@ -160,10 +191,18 @@ def test_extract_memories(clean_memory_env):
         assert cand["memory_key"] == "response-style-concise"
         assert cand["content"] == "簡潔な表現を好む"
 
-        # Verify saved to database
+        # Verify saved to SQLite database
         mems = memory.load_all_memories()
         assert len(mems) == 1
         assert mems[0]["memory_id"] == cand["memory_id"]
+
+        # Verify events table has "created" event
+        with memory.get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM memory_events WHERE memory_id = ?", (cand["memory_id"],))
+            events = cursor.fetchall()
+            assert len(events) == 1
+            assert events[0]["event_type"] == "created"
 
 
 def test_review_memory(clean_memory_env):
@@ -192,16 +231,25 @@ def test_review_memory(clean_memory_env):
     mems = memory.load_all_memories()
     assert mems[0]["status"] == "rejected"
 
+    # Verify event logged
+    with memory.get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT event_type FROM memory_events WHERE memory_id = ?", (mem_id,))
+        event_types = [r[0] for r in cursor.fetchall()]
+        assert "rejected" in event_types
+
     # 2. Approve review
-    mems[0]["status"] = "candidate"
-    memory.save_all_memories(mems)
+    # Update candidate status back to "candidate" for test purposes
+    with memory.get_db_connection() as conn:
+        conn.execute("UPDATE memories SET status = 'candidate' WHERE memory_id = ?", (mem_id,))
+
     success = memory.review_memory(mem_id, "approve")
     assert success is True
     mems = memory.load_all_memories()
     assert mems[0]["status"] == "approved"
 
-    # Verify approved.md exists and contains content
-    _, _, app_md_path = memory.get_memory_paths()
+    # Verify approved.md exists and contains content with revised heading
+    app_md_path = memory.get_approved_memories_path()
     assert app_md_path.exists()
     md_content = app_md_path.read_text(encoding="utf-8")
     assert "テスト内容" in md_content
@@ -340,3 +388,27 @@ def test_cli_args_parsing_validation(monkeypatch):
         with pytest.raises(SystemExit):
             monkeypatch.setattr(sys, "argv", ["main.py", "--memory-review", "--id", "mem_1", "--edit"])
             main.main()
+
+
+def test_config_fallback_ordering(tmp_path, monkeypatch):
+    # 1. Environment variable has highest precedence
+    env_path = tmp_path / "env_db.sqlite3"
+    monkeypatch.setenv("MEMORY_SQLITE_PATH", str(env_path))
+
+    # Mock config.yml value to differ
+    config_path = tmp_path / "config_db.sqlite3"
+    monkeypatch.setattr(config, "yaml_config", {"memory": {"sqlite_path": str(config_path)}})
+
+    # Real evaluation of _env_or_config
+    val = config._env_or_config("MEMORY_SQLITE_PATH", "memory", "sqlite_path")
+    assert val == str(env_path)
+
+    # 2. config.yml takes precedence if env var is not set
+    monkeypatch.delenv("MEMORY_SQLITE_PATH", raising=False)
+    val = config._env_or_config("MEMORY_SQLITE_PATH", "memory", "sqlite_path")
+    assert val == str(config_path)
+
+    # 3. Default path is used if neither is set
+    monkeypatch.setattr(config, "yaml_config", {})
+    val = config._env_or_config("MEMORY_SQLITE_PATH", "memory", "sqlite_path")
+    assert val is None
