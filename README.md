@@ -110,6 +110,124 @@ python -m obsidian_ai_hub --build-dashboard
 
 The vault sync command indexes the full `VAULT_PATH` tree into `md-hybrid-search` and stores its SQLite/Chroma data outside the vault by default.
 
+## Long-Term Memory
+
+Long-term memory lets the assistant retain useful, reviewed information from
+your notes, such as writing preferences, decision policies, commitments, and
+recurring patterns. It is designed to keep AI-generated suggestions under your
+control: new memories are always created as candidates and require review
+before they can be used.
+
+```mermaid
+flowchart LR
+    A[Weekly daily notes and structured data] --> B[AI memory candidates]
+    B --> C[Review in the CLI or Web UI]
+    C --> D[Approved long-term memories]
+    D --> E[Context for daily target generation]
+```
+
+### Create memory candidates
+
+Extract candidates from the most recently completed Monday--Sunday week:
+
+```bash
+uv run -m obsidian_ai_hub --memory-extract
+```
+
+To select a particular week, pass any date in that week:
+
+```bash
+uv run -m obsidian_ai_hub --memory-extract --week 2026-07-13
+```
+
+The extraction model considers the seven daily notes and their daily structured
+records. Each note is included only up to `## AIによる要約`; activity logs are
+not separately supplied. It produces candidates in these categories:
+`preference`, `decision_policy`, `fact`, `commitment`, `pattern`, and
+`episode`.
+
+Each candidate includes supporting evidence, an extraction-confidence score,
+and possible duplicate or replacement suggestions. Review the evidence rather
+than treating the confidence score as an approval recommendation. The model is
+instructed not to invent facts, to treat note contents as data rather than
+instructions, and not to turn a one-off event into a permanent preference or
+habit. A `pattern` requires evidence from at least two distinct days.
+
+### Review candidates with the CLI
+
+Use the candidate ID to approve or reject it:
+
+```bash
+uv run -m obsidian_ai_hub --memory-review --id mem_20260713_51609b --approve
+uv run -m obsidian_ai_hub --memory-review --id mem_20260713_3907c3 --reject
+```
+
+To correct the candidate text before accepting it, edit and approve in one
+step:
+
+```bash
+uv run -m obsidian_ai_hub --memory-review \
+  --id mem_20260713_f2ec1b \
+  --edit \
+  --content "Prefer concise Japanese responses."
+```
+
+### Review candidates in the Web UI
+
+Build the Web UI once after installing the project dependencies:
+
+```bash
+make build-web
+```
+
+Start the local server:
+
+```bash
+uv run -m obsidian_ai_hub --serve
+```
+
+Open [http://127.0.0.1:8765](http://127.0.0.1:8765). The **Memory** page lets
+you inspect a candidate and its evidence, approve or reject individual
+candidates, edit candidate text and review fields, and apply approval or
+rejection to multiple selected candidates at once.
+
+The server is local-only by default. If you intentionally make it available on
+your network with `--serve-host`, set `MEMORY_REVIEW_API_TOKEN` first.
+
+### Use approved memories in daily targets
+
+Approved memories are compiled into a small reference section for daily target
+generation. Only approved memories that are currently valid are included; old
+or not-yet-active memories are excluded, and the most relevant entries are kept
+within the configured context limit.
+
+Inspect the context that would be used with:
+
+```bash
+uv run -m obsidian_ai_hub --memory-compile --for make-target
+```
+
+When you run `--make-target`, the compiled memory context is automatically
+added to the LLM prompt. Other commands do not automatically use long-term
+memory yet.
+
+### Memory settings
+
+Add optional settings to `config/config.yml` to change the context size or the
+model used for extraction:
+
+```yaml
+memory:
+  context_max_tokens: 800
+  extractor:
+    provider: ollama
+    model: glm-4.7:cloud
+    # prompt_path: /Users/you/Documents/custom-memory-extract.md
+```
+
+When the extractor settings are omitted, the daily-target LLM provider and
+model are used.
+
 ## Task Runner
 
 The task runner reads scheduled jobs from `tasks/tasks.local.yml` when it exists, and falls back to `tasks/tasks.yml` otherwise. It also persists the last execution time in `tasks/last_run.json` so each task is only run once per matching schedule window.

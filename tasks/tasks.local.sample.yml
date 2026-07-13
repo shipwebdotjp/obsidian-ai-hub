@@ -60,6 +60,16 @@
     minute: 30
   command: 'uv --directory /path/to/obsidian-daily-merge run -m obsidian_ai_hub --review-draft'
 
+# Enable to create long-term-memory candidates from the most recently completed week.
+- id: memory_extract_monday_early
+  enabled: false
+  schedule:
+    type: weekly
+    weekday: 0 # Monday
+    hour: 0
+    minute: 15
+  command: 'uv --directory /path/to/obsidian-daily-merge run -m obsidian_ai_hub --memory-extract'
+
 - id: sample_monthly
   enabled: true
   schedule:

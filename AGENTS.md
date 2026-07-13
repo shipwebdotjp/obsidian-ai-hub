@@ -22,6 +22,15 @@ uv run python -m obsidian_ai_hub --notify-calendar-event
 uv run python -m obsidian_ai_hub --summerize-week
 uv run python -m obsidian_ai_hub --backup
 
+# Memory Review Web UI (FastAPI + React)
+make build-web                                # フロントエンドをビルド (cd frontend && npm ci && npm run build)
+uv run python -m obsidian_ai_hub --serve      # 起動 (frontend/dist が必要)
+make dev-web                                  # 開発: Vite dev server (proxy -> :8765)
+# 環境変数で上書き:
+#   MEMORY_REVIEW_HOST  (default 127.0.0.1; 非ループバック時 MEMORY_REVIEW_API_TOKEN 必須)
+#   MEMORY_REVIEW_PORT  (default 8765)
+#   MEMORY_REVIEW_API_TOKEN
+
 # Run scheduled tasks
 ./batch/scheduler.sh
 ```
@@ -34,6 +43,7 @@ uv run python -m obsidian_ai_hub --backup
 |------|---------|
 | `main.py` | CLI entry point with argparse - orchestrates all operations |
 | `task_runner.py` | Cron-like scheduler that reads `tasks/tasks.yml` and tracks execution in `tasks/last_run.json` |
+| `memory.py` | Long-term memory store (SQLite) + extraction/review/compile pipeline |
 
 ### Utility Package (`src/obsidian_ai_hub/utils/`)
 
@@ -44,9 +54,19 @@ uv run python -m obsidian_ai_hub --backup
 | `reader.py` | Helper functions for reading daily/weekly notes |
 | `extracter.py` | Extract content from notes (YAML frontmatter, subheaders) |
 
+### Web UI (`src/obsidian_ai_hub/web/`, `frontend/`)
+
+| File | Purpose |
+|------|---------|
+| `web/app.py` | FastAPI factory, security (loopback vs token), static SPA delivery |
+| `web/api.py` | `/api/v1/memories` ルート (list / detail / review / edit / batch-review) |
+| `web/schemas.py` | Pydantic 入出力モデル |
+| `web/service.py` | memory.py を呼ぶユースケース層 + threading.Lock |
+| `frontend/` | Vite + React + TS + Tailwind CSS v4 |
+
 ### Configuration
 
-- **Environment variables** (`.env`): `OPENAI_API_KEY`, `VAULT_PATH`, ...
+- **Environment variables** (`.env`): `OPENAI_API_KEY`, `VAULT_PATH`, `MEMORY_SQLITE_PATH`, `MEMORY_REVIEW_API_TOKEN`, ...
 - **YAML Config** `config/config.yml`
 - **Task scheduling**: `tasks/tasks.local.yml` defines cron-like tasks (hourly, daily, weekly, monthly)
 

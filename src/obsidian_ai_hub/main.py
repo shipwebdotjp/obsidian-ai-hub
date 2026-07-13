@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import logging
-from datetime import datetime, timedelta, date, time
+from datetime import datetime
 
 from obsidian_ai_hub import (
     do_backup,
@@ -217,12 +217,12 @@ def main():
     parser.add_argument(
         "--memory-extract",
         action="store_true",
-        help="長期記憶候補を抽出"
+        help="週次ノートから長期記憶候補を抽出"
     )
     parser.add_argument(
-        "--date",
-        type=str,
-        help="長期記憶抽出の対象日付 (YYYY-MM-DD)"
+        "--week",
+        type=validate_date,
+        help="--memory-extract の対象週に含まれる日付 (YYYY-MM-DD)。省略時は直近の完了週"
     )
     parser.add_argument(
         "--memory-review",
@@ -265,6 +265,23 @@ def main():
         type=str,
         help="長期記憶コンパイルの目的 (e.g. make-target)"
     )
+    parser.add_argument(
+        "--serve",
+        action="store_true",
+        help="Memory Review Web UI (FastAPI + React) を起動"
+    )
+    parser.add_argument(
+        "--serve-host",
+        type=str,
+        default=None,
+        help="Web UI のバインドアドレス (既定: 127.0.0.1; 非ループバック時は MEMORY_REVIEW_API_TOKEN 必須)"
+    )
+    parser.add_argument(
+        "--serve-port",
+        type=int,
+        default=None,
+        help="Web UI の待ち受けポート (既定: 8765)"
+    )
     args = parser.parse_args()
     ran = False
 
@@ -295,10 +312,8 @@ def main():
         parser.error("--query requires --vault-search")
 
     # Memory validations
-    if args.memory_extract and not args.date:
-        parser.error("--memory-extract requires --date YYYY-MM-DD")
-    if args.date and not args.memory_extract:
-        parser.error("--date requires --memory-extract")
+    if args.week and not args.memory_extract:
+        parser.error("--week requires --memory-extract")
     if args.memory_review:
         if not args.id:
             parser.error("--memory-review requires --id ID")
@@ -394,7 +409,7 @@ def main():
         ran = True
     if args.memory_extract:
         from obsidian_ai_hub import memory
-        run_and_log(lambda: memory.extract_memories(args.date), "memory_extract")
+        run_and_log(lambda: memory.extract_memories(args.week), "memory_extract")
         ran = True
     if args.memory_review:
         from obsidian_ai_hub import memory
@@ -412,6 +427,28 @@ def main():
         import json
         pack = memory.compile_context(args.for_purpose)
         print(json.dumps(pack, ensure_ascii=False, indent=2))
+        ran = True
+    if args.serve:
+        from obsidian_ai_hub.web import app as web_app
+        import os as _os
+        host = args.serve_host or _os.getenv("MEMORY_REVIEW_HOST", "127.0.0.1")
+        port = args.serve_port or int(_os.getenv("MEMORY_REVIEW_PORT", "8765"))
+        token = _os.getenv("MEMORY_REVIEW_API_TOKEN", "")
+        web_app.HOST = host
+        web_app.PORT = port
+        web_app.TOKEN = token
+        web_app.TOKEN_REQUIRED = host not in ("127.0.0.1", "::1", "localhost")
+        if web_app.TOKEN_REQUIRED and not token:
+            raise RuntimeError(
+                "MEMORY_REVIEW_API_TOKEN is required when binding to a non-loopback host."
+            )
+        import uvicorn
+        uvicorn.run(
+            web_app.create_app(host=host, port=port, token=token),
+            host=host,
+            port=port,
+            log_level="info",
+        )
         ran = True
     if not ran:
         parser.print_help()

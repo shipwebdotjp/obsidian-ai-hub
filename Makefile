@@ -4,7 +4,7 @@ PLIST=~/Library/LaunchAgents/jp.shipweb.obsidian-ai-hub.plist
 LABEL=jp.shipweb.obsidian-ai-hub
 DOMAIN=gui/$(shell id -u)
 
-.PHONY: install start stop restart reload enable disable status logs errorlogs
+.PHONY: install start stop restart reload enable disable status logs errorlogs build-web dev-web
 
 # インストール（初回のみ）
 install:
@@ -46,3 +46,11 @@ logs:
 # エラーログ表示
 errorlogs:
 	tail -f /tmp/obsidian_merge.err
+
+# Memory Review Web UI のフロントエンドをビルド（dist を生成）
+build-web:
+	cd frontend && npm ci && npm run build
+
+# Memory Review Web UI の開発サーバ（Vite + FastAPI を別portで起動する想定）
+dev-web:
+	cd frontend && npm run dev

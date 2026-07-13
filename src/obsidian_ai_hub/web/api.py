@@ -1,0 +1,107 @@
+import hmac
+import logging
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi.security.utils import get_authorization_scheme_param
+
+from obsidian_ai_hub.web import schemas, service
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/api/v1")
+
+
+def _require_loopback_or_token(request: Request) -> None:
+    """
+    Enforce bearer-token authentication when the server is bound to a
+    non-loopback interface. Localhost binds (127.0.0.1, ::1) are exempt.
+    """
+    from obsidian_ai_hub.web.app import (  # local import to avoid cycle
+        LOOPBACK_HOSTS,
+        TOKEN,
+        TOKEN_REQUIRED,
+    )
+
+    client_host = request.client.host if request.client else None
+    if client_host in LOOPBACK_HOSTS:
+        return
+
+    if not TOKEN_REQUIRED:
+        return
+
+    auth = request.headers.get("authorization") or request.headers.get("Authorization")
+    scheme, param = get_authorization_scheme_param(auth or "")
+    if (
+        scheme.lower() != "bearer"
+        or not param
+        or not hmac.compare_digest(param, TOKEN)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="invalid or missing bearer token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+
+@router.get("/memories", response_model=schemas.MemoryListResponse)
+def list_memories(
+    status_filter: Optional[str] = Query(None, alias="status"),
+    kind: Optional[str] = None,
+    topic: Optional[str] = None,
+    q: Optional[str] = None,
+    _=Depends(_require_loopback_or_token),
+):
+    if status_filter and status_filter not in schemas.ALLOWED_STATUS:
+        raise HTTPException(status_code=400, detail=f"status must be one of {sorted(schemas.ALLOWED_STATUS)}")
+    items = service.list_memories(status=status_filter, kind=kind, topic=topic, q=q)
+    return schemas.MemoryListResponse(items=items, total=len(items))
+
+
+@router.get("/memories/{memory_id}", response_model=schemas.MemoryDetail)
+def get_memory(memory_id: str, _=Depends(_require_loopback_or_token)):
+    m = service.get_memory(memory_id)
+    if m is None:
+        raise HTTPException(status_code=404, detail="memory not found")
+    events = service.get_events(memory_id)
+    detail = dict(m)
+    detail["events"] = events
+    return detail
+
+
+@router.post("/memories/{memory_id}/review", response_model=schemas.ReviewResponse)
+def review_memory(memory_id: str, body: schemas.ReviewRequest, _=Depends(_require_loopback_or_token)):
+    try:
+        result = service.review_memory(memory_id, body.action, body.new_content)
+    except LookupError:
+        raise HTTPException(status_code=404, detail="memory not found")
+    except ValueError as e:
+        logger.warning("review validation error for %s: %s", memory_id, e)
+        raise HTTPException(status_code=400, detail="invalid review request")
+    return {"memory": result}
+
+
+@router.post("/memories/{memory_id}/edit", response_model=schemas.UpdateResponse)
+def edit_memory(memory_id: str, body: schemas.EditRequest, _=Depends(_require_loopback_or_token)):
+    payload = body.model_dump(exclude_none=True)
+    if not payload:
+        raise HTTPException(status_code=400, detail="no editable fields provided")
+    try:
+        result = service.update_memory(memory_id, payload)
+    except ValueError as e:
+        logger.warning("edit validation error for %s: %s", memory_id, e)
+        raise HTTPException(status_code=400, detail="invalid edit request")
+    if not result.get("found"):
+        raise HTTPException(status_code=404, detail="memory not found")
+    return result
+
+
+@router.post("/memories/batch-review", response_model=schemas.BatchReviewResponse)
+def batch_review(body: schemas.BatchReviewRequest, _=Depends(_require_loopback_or_token)):
+    if not body.memory_ids:
+        raise HTTPException(status_code=400, detail="memory_ids must not be empty")
+    try:
+        return service.batch_review(body.memory_ids, body.action)
+    except ValueError as e:
+        logger.warning("batch review validation error: %s", e)
+        raise HTTPException(status_code=400, detail=str(e))

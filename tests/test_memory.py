@@ -1,5 +1,8 @@
 # ruff: noqa: E402
+# ruff: noqa: E402
 import sys
+import json
+from datetime import datetime
 from unittest.mock import MagicMock
 
 # Mock macOS-specific modules before importing obsidian_ai_hub to prevent ModuleNotFoundError on Linux/CI
@@ -40,6 +43,7 @@ def clean_memory_env(tmp_path, monkeypatch):
     activity_dir = vault_path / "activity"
     activity_dir.mkdir(exist_ok=True)
     monkeypatch.setattr(config, "ACTIVITY_PATH", activity_dir)
+    monkeypatch.setattr(config, "DAILY_PATH", vault_path / "daily")
 
     # SQLite DB temporary path configuration
     db_file = tmp_path / "memory.sqlite3"
@@ -71,6 +75,16 @@ def test_id_generation():
     evt_id = memory.generate_event_id()
     assert evt_id.startswith("evt_")
     assert len(evt_id) == 16
+
+
+def test_memory_week_bounds():
+    week_start, week_end = memory._week_bounds("2026-07-15")
+    assert week_start.strftime("%Y-%m-%d") == "2026-07-13"
+    assert week_end.strftime("%Y-%m-%d") == "2026-07-19"
+
+    week_start, week_end = memory._week_bounds(now=datetime(2026, 7, 13, 12, 0))
+    assert week_start.strftime("%Y-%m-%d") == "2026-07-06"
+    assert week_end.strftime("%Y-%m-%d") == "2026-07-12"
 
 
 def test_db_initialization_and_indexes(clean_memory_env):
@@ -152,7 +166,19 @@ def test_run_deduplication():
 
 
 def test_extract_memories(clean_memory_env):
-    target_date = "2026-07-13"
+    week_date = "2026-07-13"
+    daily_dir = clean_memory_env / "daily" / "2026" / "07"
+    daily_dir.mkdir(parents=True)
+    (daily_dir / "2026-07-13.md").write_text(
+        "AIは簡潔に話してほしい\n\n## AIによる要約\n\n要約本文は入力しない\n",
+        encoding="utf-8",
+    )
+    activity_dir = config.ACTIVITY_PATH / "2026" / "07"
+    activity_dir.mkdir(parents=True)
+    (activity_dir / "2026-07.jsonl").write_text(
+        json.dumps({"date": week_date, "summary": "簡潔な応答を望んだ"}, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
 
     # Mock LLM response for extraction
     mock_llm_response = """
@@ -177,13 +203,11 @@ def test_extract_memories(clean_memory_env):
     ]
     """
 
-    with patch("obsidian_ai_hub.memory.reader.get_daily_note_content") as mock_daily_note, \
-         patch("obsidian_ai_hub.memory.llm_client.generate_llm_response") as mock_llm:
+    with patch("obsidian_ai_hub.memory.llm_client.generate_llm_response") as mock_llm:
 
-        mock_daily_note.return_value = "AIは簡潔に話してほしい"
         mock_llm.return_value = mock_llm_response
 
-        candidates = memory.extract_memories(target_date)
+        candidates = memory.extract_memories(week_date)
 
         assert len(candidates) == 1
         cand = candidates[0]
@@ -202,7 +226,18 @@ def test_extract_memories(clean_memory_env):
             cursor.execute("SELECT * FROM memory_events WHERE memory_id = ?", (cand["memory_id"],))
             events = cursor.fetchall()
             assert len(events) == 1
-            assert events[0]["event_type"] == "created"
+        assert events[0]["event_type"] == "created"
+
+        rendered_prompt = mock_llm.call_args.kwargs["prompt"]
+        assert "AIは簡潔に話してほしい" in rendered_prompt
+        assert "要約本文は入力しない" not in rendered_prompt
+        assert "簡潔な応答を望んだ" in rendered_prompt
+
+
+def test_extract_memories_skips_week_without_notes(clean_memory_env):
+    with patch("obsidian_ai_hub.memory.llm_client.generate_llm_response") as mock_llm:
+        assert memory.extract_memories("2026-07-13") == []
+        mock_llm.assert_not_called()
 
 
 def test_review_memory(clean_memory_env):
@@ -239,9 +274,10 @@ def test_review_memory(clean_memory_env):
         assert "rejected" in event_types
 
     # 2. Approve review
-    # Update candidate status back to "candidate" for test purposes
-    with memory.get_db_connection() as conn:
-        conn.execute("UPDATE memories SET status = 'candidate' WHERE memory_id = ?", (mem_id,))
+    # Reset candidate status back to "candidate" through the public API
+    mems = memory.load_all_memories()
+    mems[0]["status"] = "candidate"
+    memory.save_all_memories(mems)
 
     success = memory.review_memory(mem_id, "approve")
     assert success is True
@@ -368,11 +404,22 @@ updated_at: 2026-07-13
 def test_cli_args_parsing_validation(monkeypatch):
     # Use patch to mock standard system exit during ArgumentParser.error
     with patch("argparse.ArgumentParser.error", side_effect=SystemExit) as mock_err:
-        # Invalid: memory-extract without date
+        # Invalid: --week without memory extraction
         with pytest.raises(SystemExit):
-            monkeypatch.setattr(sys, "argv", ["main.py", "--memory-extract"])
+            monkeypatch.setattr(sys, "argv", ["main.py", "--week", "2026-07-13"])
             main.main()
         mock_err.assert_called()
+
+        # --date is no longer accepted for memory extraction
+        with pytest.raises(SystemExit):
+            monkeypatch.setattr(sys, "argv", ["main.py", "--memory-extract", "--date", "2026-07-13"])
+            main.main()
+
+        # An explicit week is passed through to weekly memory extraction.
+        with patch("obsidian_ai_hub.memory.extract_memories", return_value=[]) as mock_extract:
+            monkeypatch.setattr(sys, "argv", ["main.py", "--memory-extract", "--week", "2026-07-13"])
+            main.main()
+            mock_extract.assert_called_once_with("2026-07-13")
 
         # Invalid: memory-review without action
         with pytest.raises(SystemExit):
@@ -408,7 +455,7 @@ def test_config_fallback_ordering(tmp_path, monkeypatch):
     val = config._env_or_config("MEMORY_SQLITE_PATH", "memory", "sqlite_path")
     assert val == str(config_path)
 
-    # 3. Default path is used if neither is set
+    # 3. _env_or_config returns None when neither env var nor config.yml value is set
     monkeypatch.setattr(config, "yaml_config", {})
     val = config._env_or_config("MEMORY_SQLITE_PATH", "memory", "sqlite_path")
     assert val is None

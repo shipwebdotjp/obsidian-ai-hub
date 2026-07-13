@@ -30,6 +30,9 @@ dependencies = [
     "atomacos>=3.3.0; sys_platform == 'darwin'",
     "langchain-huggingface>=1.2.2",
     "langchain-anthropic",
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+    "pydantic>=2.7.0",
 ]
 
 [tool.setuptools.packages.find]
