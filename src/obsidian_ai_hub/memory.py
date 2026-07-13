@@ -93,10 +93,26 @@ def load_all_memories() -> list[dict]:
 
 
 def save_all_memories(memories: list[dict]):
+    import os
     mem_file, _, _ = get_memory_paths()
-    with open(mem_file, "w", encoding="utf-8") as f:
-        for m in memories:
-            f.write(json.dumps(m, ensure_ascii=False) + "\n")
+    # Write to a temporary file in the same directory to allow atomic replacement
+    temp_file = mem_file.with_name(f"{mem_file.name}.tmp-{uuid.uuid4().hex}")
+    try:
+        with open(temp_file, "w", encoding="utf-8") as f:
+            for m in memories:
+                f.write(json.dumps(m, ensure_ascii=False) + "\n")
+            f.flush()
+            os.fsync(f.fileno())
+        # Atomically replace
+        os.replace(temp_file, mem_file)
+    except Exception as e:
+        logger.error(f"Failed to save memories atomically: {e}")
+        if temp_file.exists():
+            try:
+                temp_file.unlink()
+            except Exception:
+                pass
+        raise
 
 
 def log_memory_event(
@@ -321,6 +337,10 @@ def extract_memories(target_date_str: str) -> list[dict]:
 
     new_candidates = []
     for item in extracted:
+        if not isinstance(item, dict):
+            logger.warning(f"Skipping non-dict extracted candidate item: {item}")
+            continue
+
         # Generate new ID
         memory_id = generate_memory_id(target_date_str)
 

@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 import random
 import logging
+import string
 
 from obsidian_ai_hub.utils import config, reader, extracter, llm_client, prompt
 
@@ -18,7 +19,7 @@ def build_system_prompt() -> str | None:
         copilot_dir / "core" / "memory_rules.md",
     ]
 
-    def is_substantial(content: str) -> bool:
+    def get_substantial_lines(content: str) -> list[str]:
         lines = content.splitlines()
         in_frontmatter = False
         content_lines = []
@@ -35,8 +36,8 @@ def build_system_prompt() -> str | None:
                 continue
             if stripped.startswith("<!--") or stripped.endswith("-->"):
                 continue
-            content_lines.append(stripped)
-        return len(content_lines) > 0
+            content_lines.append(line)
+        return content_lines
 
     sections = []
     for f_path in files_to_check:
@@ -44,8 +45,9 @@ def build_system_prompt() -> str | None:
             try:
                 with open(f_path, "r", encoding="utf-8") as f:
                     content = f.read()
-                if is_substantial(content):
-                    sections.append(f"[{f_path.name}]\n{content}")
+                sub_lines = get_substantial_lines(content)
+                if sub_lines:
+                    sections.append(f"[{f_path.name}]\n" + "\n".join(sub_lines))
             except Exception as e:
                 logger.warning(f"Error reading core guideline {f_path.name}: {e}")
 
@@ -110,22 +112,19 @@ def main():
         "long_term_memories": long_term_memories,
     }
 
-    # Ensure the template has the placeholder, fallback append if not present
+    # Unified prompt template rendering with long-term memories injection
     try:
         with open(config.MAKE_TODAY_TARGET_PROMPT_PATH, "r", encoding="utf-8") as f:
             template_text = f.read()
     except Exception as e:
-        # Fallback if file read fails, though config is set
+        logger.warning(f"Failed to read prompt template file: {e}")
         template_text = ""
 
-    if template_text:
-        if "${long_term_memories}" not in template_text:
-            template_text += "\n\n【根拠付き参考情報（長期記憶）】\n${long_term_memories}\n"
-        import string
-        template = string.Template(template_text)
-        rendered_prompt = template.substitute(context)
-    else:
-        rendered_prompt = prompt.render_prompt(config.MAKE_TODAY_TARGET_PROMPT_PATH, context)
+    if "${long_term_memories}" not in template_text:
+        template_text += "\n\n【根拠付き参考情報（長期記憶）】\n${long_term_memories}\n"
+
+    template = string.Template(template_text)
+    rendered_prompt = template.substitute(context)
 
     logger.debug("Prompt rendered from: %s", config.MAKE_TODAY_TARGET_PROMPT_PATH)
 

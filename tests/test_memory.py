@@ -317,26 +317,26 @@ updated_at: 2026-07-13
             assert "具体的な記憶" in called_kwargs["prompt"]
 
 
-def test_cli_args_parsing_validation():
+def test_cli_args_parsing_validation(monkeypatch):
     # Use patch to mock standard system exit during ArgumentParser.error
     with patch("argparse.ArgumentParser.error", side_effect=SystemExit) as mock_err:
         # Invalid: memory-extract without date
         with pytest.raises(SystemExit):
-            sys.argv = ["main.py", "--memory-extract"]
+            monkeypatch.setattr(sys, "argv", ["main.py", "--memory-extract"])
             main.main()
         mock_err.assert_called()
 
         # Invalid: memory-review without action
         with pytest.raises(SystemExit):
-            sys.argv = ["main.py", "--memory-review", "--id", "mem_1"]
+            monkeypatch.setattr(sys, "argv", ["main.py", "--memory-review", "--id", "mem_1"])
             main.main()
 
         # Invalid: memory-review with multiple actions
         with pytest.raises(SystemExit):
-            sys.argv = ["main.py", "--memory-review", "--id", "mem_1", "--approve", "--reject"]
+            monkeypatch.setattr(sys, "argv", ["main.py", "--memory-review", "--id", "mem_1", "--approve", "--reject"])
             main.main()
 
         # Invalid: edit action without content
         with pytest.raises(SystemExit):
-            sys.argv = ["main.py", "--memory-review", "--id", "mem_1", "--edit"]
+            monkeypatch.setattr(sys, "argv", ["main.py", "--memory-review", "--id", "mem_1", "--edit"])
             main.main()

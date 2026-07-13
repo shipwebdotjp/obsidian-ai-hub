@@ -81,15 +81,18 @@ def _prepare_messages(
     画像を含むマルチモーダルメッセージを構築する。
     """
     messages: list[BaseMessage] = []
-    if system_prompt:
+    if system_prompt and provider != "local":
         messages.append(SystemMessage(content=system_prompt))
-
-    if not files:
-        messages.append(HumanMessage(content=prompt))
-        return messages
 
     if provider == "local":
         logger.warning("Multimodal is not supported for provider 'local'. Using prompt only.")
+        full_prompt = prompt
+        if system_prompt:
+            full_prompt = f"{system_prompt}\n\n{prompt}"
+        messages.append(HumanMessage(content=full_prompt))
+        return messages
+
+    if not files:
         messages.append(HumanMessage(content=prompt))
         return messages
 
