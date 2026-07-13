@@ -5,6 +5,7 @@ import logging
 import os
 import re
 import tempfile
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -25,15 +26,6 @@ RESEARCH_MODE_ALIASES = {
     "quick-first": RESEARCH_MODE_INTERNAL,
     "web-first": RESEARCH_MODE_DEEP,
 }
-
-os.environ["RETRIEVER"] = "tavily,mcp"
-os.environ["FAST_LLM"] = "openai:gpt-5.4"
-os.environ["SMART_LLM"] = "openai:gpt-5.5"
-os.environ["STRATEGIC_LLM"] = "openai:gpt-5.4"
-os.environ["EMBEDDING"] = "huggingface:cl-nagoya/ruri-v3-70m"
-os.environ["SMART_TOKEN_LIMIT"] = "16000"
-os.environ["BROWSE_CHUNK_MAX_LENGTH"] = "8192"
-os.environ["LANGUAGE"] = "japanese"
 
 @dataclass(frozen=True)
 class ResearchCandidate:
@@ -202,11 +194,11 @@ def route_research_topic(
     )
     try:
         response = llm_client.generate_llm_response(
-            provider="openai",
+            provider=config.RESEARCH_ROUTER_PROVIDER,
             model=config.RESEARCH_ROUTER_MODEL,
             prompt=prompt,
-            temperature=config.RESEARCH_ROUTER_TEMPERATURE,
-            max_tokens=config.RESEARCH_ROUTER_MAX_TOKENS,
+            temperature=0.0,
+            max_tokens=16,
         )
     except Exception:
         logger.exception("Failed to route research topic with LLM")
@@ -369,31 +361,17 @@ def expand_topic_prompt(
     why_now: Optional[str] = None,
 ) -> str:
     return build_research_prompt(
-            theme,
-            mode=mode,
-            context=context,
-            output_style=output_style,
-            why_now=why_now,
-        ).strip()
-    # return llm_client.generate_llm_response(
-    #     provider="openai",
-    #     model=config.RESEARCH_PROMPT_MODEL,
-    #     prompt=build_research_prompt(
-    #         theme,
-    #         mode=mode,
-    #         context=context,
-    #         output_style=output_style,
-    #         why_now=why_now,
-    #     ),
-    #     temperature=config.RESEARCH_PROMPT_TEMPERATURE,
-    #     max_tokens=config.RESEARCH_PROMPT_MAX_TOKENS,
-    # ).strip()
-
+        theme,
+        mode=mode,
+        context=context,
+        output_style=output_style,
+        why_now=why_now,
+    ).strip()
 
 def generate_research_title(theme: str, expanded_prompt: str) -> str:
     title = llm_client.generate_llm_response(
-        provider="openai",
-        model=config.RESEARCH_PROMPT_MODEL,
+        provider=config.RESEARCH_TITLE_GENERATION_PROVIDER,
+        model=config.RESEARCH_TITLE_GENERATION_MODEL,
         prompt=build_title_prompt(theme, expanded_prompt),
         temperature=0.0,
         max_tokens=64,
@@ -404,26 +382,52 @@ def generate_research_title(theme: str, expanded_prompt: str) -> str:
     return title
 
 
+@contextmanager
+def _gpt_researcher_environment():
+    """Expose config.yml's deep-research settings only while GPT Researcher runs."""
+    values = {
+        "RETRIEVER": config.RESEARCH_GPT_RESEARCHER_RETRIEVER,
+        "FAST_LLM": config.RESEARCH_GPT_RESEARCHER_FAST_LLM,
+        "SMART_LLM": config.RESEARCH_GPT_RESEARCHER_SMART_LLM,
+        "STRATEGIC_LLM": config.RESEARCH_GPT_RESEARCHER_STRATEGIC_LLM,
+        "EMBEDDING": config.RESEARCH_GPT_RESEARCHER_EMBEDDING,
+        "SMART_TOKEN_LIMIT": config.RESEARCH_GPT_RESEARCHER_SMART_TOKEN_LIMIT,
+        "BROWSE_CHUNK_MAX_LENGTH": config.RESEARCH_GPT_RESEARCHER_BROWSE_CHUNK_MAX_LENGTH,
+        "LANGUAGE": config.RESEARCH_GPT_RESEARCHER_LANGUAGE,
+    }
+    previous = {key: os.environ.get(key) for key in values}
+    try:
+        os.environ.update(values)
+        yield
+    finally:
+        for key, value in previous.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
 async def _run_gpt_researcher(query: str) -> str:
     try:
         from gpt_researcher import GPTResearcher  # type: ignore
     except Exception as exc:
         raise RuntimeError("gpt_researcher package is required for research agent") from exc
 
-    researcher = GPTResearcher(
-        query=query,
-        report_type="research_report",
-        mcp_configs=[
-            {
-                "name": "my_knowledge_search",
-                "command": "uv",
-                "args": ["--directory", config.RESEARCH_VECTORSEARCH_DIR, "run", config.RESEARCH_VECTORSEARCH_SCRIPT],
-            }
-        ],
-        verbose=False,
-    )
-    await researcher.conduct_research()
-    report = await researcher.write_report()
+    with _gpt_researcher_environment():
+        researcher = GPTResearcher(
+            query=query,
+            report_type="research_report",
+            mcp_configs=[
+                {
+                    "name": "my_knowledge_search",
+                    "command": "uv",
+                    "args": ["--directory", config.RESEARCH_VECTORSEARCH_DIR, "run", config.RESEARCH_VECTORSEARCH_SCRIPT],
+                }
+            ],
+            verbose=False,
+        )
+        await researcher.conduct_research()
+        report = await researcher.write_report()
     return (report or "").strip()
 
 
@@ -450,10 +454,10 @@ def _run_web_search_with_raw_theme(theme: str) -> str:
         {"theme": theme}
     )
     search_query = llm_client.generate_llm_response(
-        provider="openai",
-        model=config.RESEARCH_ROUTER_MODEL,
+        provider=config.RESEARCH_QUERY_GENERATION_PROVIDER,
+        model=config.RESEARCH_QUERY_GENERATION_MODEL,
         prompt=rendered_prompt,
-        temperature=config.RESEARCH_ROUTER_TEMPERATURE,
+        temperature=0.0,
         max_tokens=64,
     ).strip()
     logger.info("Generated Tavily search query for theme '%s'", theme)
@@ -483,23 +487,23 @@ def conduct_research(
 
     if normalized_mode == RESEARCH_MODE_INTERNAL:
         return llm_client.generate_llm_response(
-            provider="openai",
-            model=config.RESEARCH_SMART_MODEL,
+            provider=config.RESEARCH_INTERNAL_PROVIDER,
+            model=config.RESEARCH_INTERNAL_MODEL,
             prompt=prompt,
-            temperature=config.RESEARCH_PROMPT_TEMPERATURE,
-            max_tokens=config.RESEARCH_PROMPT_MAX_TOKENS,
+            temperature=0.2,
+            max_tokens=8000,
         ).strip()
 
     if normalized_mode == RESEARCH_MODE_WEB:
         from obsidian_ai_hub.handler.web_search import web_search
         from obsidian_ai_hub.handler.web_extract import web_extract
         return llm_client.generate_llm_response_with_tools(
-            provider="openai",
-            model=config.RESEARCH_SMART_MODEL,
+            provider=config.RESEARCH_WEB_PROVIDER,
+            model=config.RESEARCH_WEB_MODEL,
             prompt=prompt,
             tools=[web_search, web_extract],
-            temperature=config.RESEARCH_PROMPT_TEMPERATURE,
-            max_tokens=config.RESEARCH_PROMPT_MAX_TOKENS,
+            temperature=0.2,
+            max_tokens=8000,
             max_iterations=3,
         ).strip()
 

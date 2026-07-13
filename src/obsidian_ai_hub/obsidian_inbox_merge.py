@@ -82,8 +82,8 @@ def generate_web_summary(raw_content: str) -> str:
             {"raw_content": raw_content}
         )
         response = llm_client.generate_llm_response(
-            provider="openai",  # Use a smart model for summary if possible
-            model=config.RESEARCH_PROMPT_MODEL,
+            provider=config.INBOX_WEB_SUMMARY_PROVIDER,
+            model=config.INBOX_WEB_SUMMARY_MODEL,
             prompt=rendered_prompt,
             temperature=0.3,
             max_tokens=512,
@@ -234,8 +234,8 @@ def classify_inbox_content(content: str) -> InboxClassification:
     try:
         rendered_prompt = _build_classification_prompt(content)
         response = llm_client.generate_llm_response(
-            provider="openai",
-            model=config.RESEARCH_PROMPT_MODEL,
+            provider=config.INBOX_CLASSIFICATION_PROVIDER,
+            model=config.INBOX_CLASSIFICATION_MODEL,
             prompt=rendered_prompt,
             temperature=0.0,
             max_tokens=256,

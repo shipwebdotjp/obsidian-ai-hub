@@ -57,6 +57,61 @@ llm:
   inbox_audio_correction:
     provider: ollama
     model: gpt-oss:120b-cloud
+  inbox_web_summary:
+    provider: openai
+    model: gpt-5.4
+    prompt_path: /path/to/your/config/prompts/inbox_web_summary.md
+  inbox_classification:
+    provider: openai
+    model: gpt-5.4
+    prompt_path: /path/to/your/config/prompts/inbox_classification.md
+  research:
+    router:
+      provider: openai
+      model: gpt-5.4
+      prompt_path: /path/to/your/config/prompts/research_router.md
+    query_generation:
+      provider: openai
+      model: gpt-5.4
+      prompt_path: /path/to/your/config/prompts/research_query_generation.md
+    title_generation:
+      provider: openai
+      model: gpt-5.4
+      prompt_path: /path/to/your/config/prompts/research_title.md
+    internal:
+      provider: openai
+      model: gpt-5.4
+      prompt_path: /path/to/your/config/prompts/research_internal.md
+    web:
+      provider: openai
+      model: gpt-5.4
+      prompt_path: /path/to/your/config/prompts/research_web.md
+    deep:
+      prompt_path: /path/to/your/config/prompts/research_deep.md
+    theme_generation:
+      provider: openai
+      model: gpt-5.4
+      prompt_path: /path/to/your/config/prompts/research_theme_generation.md
+
+research:
+  default_output_style: long
+  context:
+    lookback_days: 7
+    max_notes: 3
+  # Used only by deep mode (GPT Researcher).
+  deep:
+    gpt_researcher:
+      retriever: tavily,mcp
+      fast_llm: openai:gpt-5.6-terra
+      smart_llm: openai:gpt-5.6-sol
+      strategic_llm: openai:gpt-5.6-terra
+      embedding: huggingface:cl-nagoya/ruri-v3-70m
+      smart_token_limit: 16000
+      browse_chunk_max_length: 8192
+      language: japanese
+  vectorsearch_dir: /path/to/your/vectorsearch
+  vectorsearch_python: uv
+  vectorsearch_script: your_vectorsearch_script
 
 vault_index:
   collection_name: documents

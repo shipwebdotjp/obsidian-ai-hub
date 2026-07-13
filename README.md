@@ -68,7 +68,12 @@ Use the following split to keep the project OSS-friendly:
 - backup targets
 - default feature values
 - vault index storage paths and embedder model name
-- optional prompt overrides via `llm.<name>.prompt_path`
+- LLM provider/model selections and optional prompt overrides via `llm.<name>`
+- research behavior and deep-research (GPT Researcher) settings via `research`
+
+Research provider/model selection is configured only in `config/config.yml`.
+Keep provider credentials such as `OPENAI_API_KEY`, `TAVILY_API_KEY`, and
+`OPENCODE_API_KEY` in `.env`.
 
 ### OpenCode Go Configuration
 

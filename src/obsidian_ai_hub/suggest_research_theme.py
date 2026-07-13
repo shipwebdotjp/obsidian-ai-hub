@@ -315,11 +315,11 @@ def _build_llm_candidates(
     for attempt in range(2):
         try:
             response = llm_client.generate_llm_response(
-                provider="openai",
-                model=config.RESEARCH_PROMPT_MODEL,
+                provider=config.RESEARCH_THEME_GENERATION_PROVIDER,
+                model=config.RESEARCH_THEME_GENERATION_MODEL,
                 prompt=prompt,
-                temperature=config.RESEARCH_PROMPT_TEMPERATURE,
-                max_tokens=config.RESEARCH_PROMPT_MAX_TOKENS,
+                temperature=0.2,
+                max_tokens=8000,
             ).strip()
             payload = _extract_json_payload(response)
             logger.info("LLM candidate generation response payload:\n%s", json.dumps(payload, ensure_ascii=False, indent=2))

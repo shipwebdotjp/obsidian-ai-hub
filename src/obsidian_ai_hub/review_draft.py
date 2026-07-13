@@ -22,7 +22,7 @@ REVIEW_HEADINGS = (
     "## 改善したいこと",
     "## 来週の一歩",
 )
-_EMPTY_RESULT_RE = re.compile(r"^[ \t]*result::[ \t]*$", re.MULTILINE)
+_EMPTY_RESULT_RE = re.compile(r"^[ \t]*(?:> \[!success\][ \t]*)?result::[ \t]*$", re.MULTILINE)
 
 
 def _coerce_target_date(target_date: datetime | date_type | str | None) -> datetime:

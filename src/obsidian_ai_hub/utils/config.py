@@ -57,6 +57,14 @@ def _optional_path(env_name: str, *config_keys):
     return Path(str(value)).expanduser()
 
 
+def _config_optional_path(*config_keys):
+    """Read a non-secret path from config.yml without an environment fallback."""
+    value = _config_value(*config_keys)
+    if value in (None, ""):
+        return None
+    return Path(str(value)).expanduser()
+
+
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 TAVILY_API_KEY = os.getenv('TAVILY_API_KEY')
@@ -133,19 +141,36 @@ if isinstance(VAULT_INDEX_ALLOW_NETWORK_FALLBACK, str):
 # Research Agent
 RESEARCH_OUTPUT_DIR = VAULT_PATH / RESEARCH_DIR_NAME
 RESEARCH_CANDIDATE_THEME_LIST_PATH = RESEARCH_OUTPUT_DIR / RESEARCH_CANDIDATE_THEME_LIST_FILENAME
-RESEARCH_ROUTER_MODEL = os.getenv("RESEARCH_ROUTER_MODEL", "gpt-5.4")
-RESEARCH_ROUTER_TEMPERATURE = float(os.getenv("RESEARCH_ROUTER_TEMPERATURE", "0.0"))
-RESEARCH_ROUTER_MAX_TOKENS = int(os.getenv("RESEARCH_ROUTER_MAX_TOKENS", "16"))
-RESEARCH_PROMPT_MODEL = os.getenv("RESEARCH_PROMPT_MODEL", "gpt-5.4")
-RESEARCH_PROMPT_TEMPERATURE = float(os.getenv("RESEARCH_PROMPT_TEMPERATURE", "0.2"))
-RESEARCH_PROMPT_MAX_TOKENS = int(os.getenv("RESEARCH_PROMPT_MAX_TOKENS", "8000"))
-RESEARCH_SMART_MODEL = os.getenv("RESEARCH_SMART_MODEL", "gpt-5.4")
 RESEARCH_VECTORSEARCH_DIR = str(_config_value("research", "vectorsearch_dir", default=""))
 RESEARCH_VECTORSEARCH_PYTHON = str(_config_value("research", "vectorsearch_python", default=""))
 RESEARCH_VECTORSEARCH_SCRIPT = str(_config_value("research", "vectorsearch_script", default=""))
-RESEARCH_DEFAULT_OUTPUT_STYLE = os.getenv("RESEARCH_DEFAULT_OUTPUT_STYLE", "long")
-RESEARCH_CONTEXT_LOOKBACK_DAYS = int(os.getenv("RESEARCH_CONTEXT_LOOKBACK_DAYS", "7"))
-RESEARCH_CONTEXT_MAX_NOTES = int(os.getenv("RESEARCH_CONTEXT_MAX_NOTES", "3"))
+RESEARCH_DEFAULT_OUTPUT_STYLE = str(_config_value("research", "default_output_style", default="long"))
+RESEARCH_CONTEXT_LOOKBACK_DAYS = int(_config_value("research", "context", "lookback_days", default=7))
+RESEARCH_CONTEXT_MAX_NOTES = int(_config_value("research", "context", "max_notes", default=3))
+RESEARCH_GPT_RESEARCHER_RETRIEVER = str(
+    _config_value("research", "deep", "gpt_researcher", "retriever", default="tavily,mcp")
+)
+RESEARCH_GPT_RESEARCHER_FAST_LLM = str(
+    _config_value("research", "deep", "gpt_researcher", "fast_llm", default="openai:gpt-5.6-terra")
+)
+RESEARCH_GPT_RESEARCHER_SMART_LLM = str(
+    _config_value("research", "deep", "gpt_researcher", "smart_llm", default="openai:gpt-5.6-sol")
+)
+RESEARCH_GPT_RESEARCHER_STRATEGIC_LLM = str(
+    _config_value("research", "deep", "gpt_researcher", "strategic_llm", default="openai:gpt-5.6-terra")
+)
+RESEARCH_GPT_RESEARCHER_EMBEDDING = str(
+    _config_value("research", "deep", "gpt_researcher", "embedding", default="huggingface:cl-nagoya/ruri-v3-70m")
+)
+RESEARCH_GPT_RESEARCHER_SMART_TOKEN_LIMIT = str(
+    _config_value("research", "deep", "gpt_researcher", "smart_token_limit", default=16000)
+)
+RESEARCH_GPT_RESEARCHER_BROWSE_CHUNK_MAX_LENGTH = str(
+    _config_value("research", "deep", "gpt_researcher", "browse_chunk_max_length", default=8192)
+)
+RESEARCH_GPT_RESEARCHER_LANGUAGE = str(
+    _config_value("research", "deep", "gpt_researcher", "language", default="japanese")
+)
 
 MAKE_TODAY_TARGET_PROVIDER = str(_config_value("llm", "make_today_target", "provider", default="ollama"))
 MAKE_TODAY_TARGET_MODEL = str(_config_value("llm", "make_today_target", "model", default="gemma4:e4b"))
@@ -190,11 +215,15 @@ LINE_INBOX_SCAN_PROMPT_PATH = _optional_path("LINE_INBOX_SCAN_PROMPT_PATH", "llm
 if LINE_INBOX_SCAN_PROMPT_PATH is None:
     LINE_INBOX_SCAN_PROMPT_PATH = BASE_DIR / "config" / "prompts" / "line_scan.md"
 
-INBOX_WEB_SUMMARY_PROMPT_PATH = _optional_path("INBOX_WEB_SUMMARY_PROMPT_PATH", "llm", "inbox_web_summary", "prompt_path")
+INBOX_WEB_SUMMARY_PROVIDER = str(_config_value("llm", "inbox_web_summary", "provider", default="openai"))
+INBOX_WEB_SUMMARY_MODEL = str(_config_value("llm", "inbox_web_summary", "model", default="gpt-5.4"))
+INBOX_WEB_SUMMARY_PROMPT_PATH = _config_optional_path("llm", "inbox_web_summary", "prompt_path")
 if INBOX_WEB_SUMMARY_PROMPT_PATH is None:
     INBOX_WEB_SUMMARY_PROMPT_PATH = BASE_DIR / "config" / "prompts" / "inbox_web_summary.md"
 
-INBOX_CLASSIFICATION_PROMPT_PATH = _optional_path("INBOX_CLASSIFICATION_PROMPT_PATH", "llm", "inbox_classification", "prompt_path")
+INBOX_CLASSIFICATION_PROVIDER = str(_config_value("llm", "inbox_classification", "provider", default="openai"))
+INBOX_CLASSIFICATION_MODEL = str(_config_value("llm", "inbox_classification", "model", default="gpt-5.4"))
+INBOX_CLASSIFICATION_PROMPT_PATH = _config_optional_path("llm", "inbox_classification", "prompt_path")
 if INBOX_CLASSIFICATION_PROMPT_PATH is None:
     INBOX_CLASSIFICATION_PROMPT_PATH = BASE_DIR / "config" / "prompts" / "inbox_classification.md"
 
@@ -202,31 +231,43 @@ INBOX_TRANSCRIPT_CORRECTION_PROMPT_PATH = _optional_path("INBOX_TRANSCRIPT_CORRE
 if INBOX_TRANSCRIPT_CORRECTION_PROMPT_PATH is None:
     INBOX_TRANSCRIPT_CORRECTION_PROMPT_PATH = BASE_DIR / "config" / "prompts" / "inbox_transcript_correction.md"
 
-RESEARCH_THEME_GENERATION_PROMPT_PATH = _optional_path("RESEARCH_THEME_GENERATION_PROMPT_PATH", "llm", "research", "theme_generation", "prompt_path")
+RESEARCH_THEME_GENERATION_PROVIDER = str(_config_value("llm", "research", "theme_generation", "provider", default="openai"))
+RESEARCH_THEME_GENERATION_MODEL = str(_config_value("llm", "research", "theme_generation", "model", default="gpt-5.4"))
+RESEARCH_THEME_GENERATION_PROMPT_PATH = _config_optional_path("llm", "research", "theme_generation", "prompt_path")
 if RESEARCH_THEME_GENERATION_PROMPT_PATH is None:
     RESEARCH_THEME_GENERATION_PROMPT_PATH = BASE_DIR / "config" / "prompts" / "research_theme_generation.md"
 
-RESEARCH_ROUTER_PROMPT_PATH = _optional_path("RESEARCH_ROUTER_PROMPT_PATH", "llm", "research", "router", "prompt_path")
+RESEARCH_ROUTER_PROVIDER = str(_config_value("llm", "research", "router", "provider", default="openai"))
+RESEARCH_ROUTER_MODEL = str(_config_value("llm", "research", "router", "model", default="gpt-5.4"))
+RESEARCH_ROUTER_PROMPT_PATH = _config_optional_path("llm", "research", "router", "prompt_path")
 if RESEARCH_ROUTER_PROMPT_PATH is None:
     RESEARCH_ROUTER_PROMPT_PATH = BASE_DIR / "config" / "prompts" / "research_router.md"
 
-RESEARCH_INTERNAL_PROMPT_PATH = _optional_path("RESEARCH_INTERNAL_PROMPT_PATH", "llm", "research", "internal", "prompt_path")
+RESEARCH_INTERNAL_PROVIDER = str(_config_value("llm", "research", "internal", "provider", default="openai"))
+RESEARCH_INTERNAL_MODEL = str(_config_value("llm", "research", "internal", "model", default="gpt-5.4"))
+RESEARCH_INTERNAL_PROMPT_PATH = _config_optional_path("llm", "research", "internal", "prompt_path")
 if RESEARCH_INTERNAL_PROMPT_PATH is None:
     RESEARCH_INTERNAL_PROMPT_PATH = BASE_DIR / "config" / "prompts" / "research_internal.md"
 
-RESEARCH_WEB_PROMPT_PATH = _optional_path("RESEARCH_WEB_PROMPT_PATH", "llm", "research", "web", "prompt_path")
+RESEARCH_WEB_PROVIDER = str(_config_value("llm", "research", "web", "provider", default="openai"))
+RESEARCH_WEB_MODEL = str(_config_value("llm", "research", "web", "model", default="gpt-5.4"))
+RESEARCH_WEB_PROMPT_PATH = _config_optional_path("llm", "research", "web", "prompt_path")
 if RESEARCH_WEB_PROMPT_PATH is None:
     RESEARCH_WEB_PROMPT_PATH = BASE_DIR / "config" / "prompts" / "research_web.md"
 
-RESEARCH_DEEP_PROMPT_PATH = _optional_path("RESEARCH_DEEP_PROMPT_PATH", "llm", "research", "deep", "prompt_path")
+RESEARCH_DEEP_PROMPT_PATH = _config_optional_path("llm", "research", "deep", "prompt_path")
 if RESEARCH_DEEP_PROMPT_PATH is None:
     RESEARCH_DEEP_PROMPT_PATH = BASE_DIR / "config" / "prompts" / "research_deep.md"
 
-RESEARCH_TITLE_PROMPT_PATH = _optional_path("RESEARCH_TITLE_PROMPT_PATH", "llm", "research", "title", "prompt_path")
+RESEARCH_TITLE_GENERATION_PROVIDER = str(_config_value("llm", "research", "title_generation", "provider", default="openai"))
+RESEARCH_TITLE_GENERATION_MODEL = str(_config_value("llm", "research", "title_generation", "model", default="gpt-5.4"))
+RESEARCH_TITLE_PROMPT_PATH = _config_optional_path("llm", "research", "title_generation", "prompt_path")
 if RESEARCH_TITLE_PROMPT_PATH is None:
     RESEARCH_TITLE_PROMPT_PATH = BASE_DIR / "config" / "prompts" / "research_title.md"
 
-RESEARCH_QUERY_GENERATION_PROMPT_PATH = _optional_path("RESEARCH_QUERY_GENERATION_PROMPT_PATH", "llm", "research", "query_generation", "prompt_path")
+RESEARCH_QUERY_GENERATION_PROVIDER = str(_config_value("llm", "research", "query_generation", "provider", default="openai"))
+RESEARCH_QUERY_GENERATION_MODEL = str(_config_value("llm", "research", "query_generation", "model", default="gpt-5.4"))
+RESEARCH_QUERY_GENERATION_PROMPT_PATH = _config_optional_path("llm", "research", "query_generation", "prompt_path")
 if RESEARCH_QUERY_GENERATION_PROMPT_PATH is None:
     RESEARCH_QUERY_GENERATION_PROMPT_PATH = BASE_DIR / "config" / "prompts" / "research_query_generation.md"
 
