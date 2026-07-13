@@ -53,7 +53,8 @@ def test_make_today_target_main():
                     provider="test_provider",
                     model="test_model",
                     prompt="Rendered Prompt Content",
-                    max_tokens=8192
+                    max_tokens=8192,
+                    system_prompt=None
                 )
 
                 # Verify file write

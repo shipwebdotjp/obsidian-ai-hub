@@ -213,6 +213,58 @@ def main():
         type=validate_month,
         help="--summerize-month で指定する対象月 (YYYY-MM)"
     )
+    # Memory commands
+    parser.add_argument(
+        "--memory-extract",
+        action="store_true",
+        help="長期記憶候補を抽出"
+    )
+    parser.add_argument(
+        "--date",
+        type=str,
+        help="長期記憶抽出の対象日付 (YYYY-MM-DD)"
+    )
+    parser.add_argument(
+        "--memory-review",
+        action="store_true",
+        help="長期記憶候補をレビュー"
+    )
+    parser.add_argument(
+        "--id",
+        type=str,
+        help="レビュー対象の記憶ID (e.g. mem_...)"
+    )
+    parser.add_argument(
+        "--approve",
+        action="store_true",
+        help="記憶候補を承認"
+    )
+    parser.add_argument(
+        "--reject",
+        action="store_true",
+        help="記憶候補を却下"
+    )
+    parser.add_argument(
+        "--edit",
+        action="store_true",
+        help="記憶候補を編集して承認"
+    )
+    parser.add_argument(
+        "--content",
+        type=str,
+        help="編集時の新しい記憶の本文"
+    )
+    parser.add_argument(
+        "--memory-compile",
+        action="store_true",
+        help="長期記憶コンテキストをコンパイル（診断用）"
+    )
+    parser.add_argument(
+        "--for",
+        dest="for_purpose",
+        type=str,
+        help="長期記憶コンパイルの目的 (e.g. make-target)"
+    )
     args = parser.parse_args()
     ran = False
 
@@ -241,6 +293,24 @@ def main():
         parser.error("--vault-search requires --query")
     if args.query and not args.vault_search:
         parser.error("--query requires --vault-search")
+
+    # Memory validations
+    if args.memory_extract and not args.date:
+        parser.error("--memory-extract requires --date YYYY-MM-DD")
+    if args.date and not args.memory_extract:
+        parser.error("--date requires --memory-extract")
+    if args.memory_review:
+        if not args.id:
+            parser.error("--memory-review requires --id ID")
+        actions_count = sum([args.approve, args.reject, args.edit])
+        if actions_count != 1:
+            parser.error("--memory-review requires exactly one action: --approve, --reject, or --edit")
+        if args.edit and not args.content:
+            parser.error("--edit action requires --content")
+    if args.memory_compile and not args.for_purpose:
+        parser.error("--memory-compile requires --for PURPOSE")
+    if args.for_purpose and not args.memory_compile:
+        parser.error("--for requires --memory-compile")
 
     research_kwargs = {}
     if args.context is not None:
@@ -321,6 +391,27 @@ def main():
             search_mode=args.search_mode,
             json_output=args.json
         )
+        ran = True
+    if args.memory_extract:
+        from obsidian_ai_hub import memory
+        run_and_log(lambda: memory.extract_memories(args.date), "memory_extract")
+        ran = True
+    if args.memory_review:
+        from obsidian_ai_hub import memory
+        action = None
+        if args.approve:
+            action = "approve"
+        elif args.reject:
+            action = "reject"
+        elif args.edit:
+            action = "edit"
+        run_and_log(lambda: memory.review_memory(args.id, action, args.content), "memory_review")
+        ran = True
+    if args.memory_compile:
+        from obsidian_ai_hub import memory
+        import json
+        pack = memory.compile_context(args.for_purpose)
+        print(json.dumps(pack, ensure_ascii=False, indent=2))
         ran = True
     if not ran:
         parser.print_help()

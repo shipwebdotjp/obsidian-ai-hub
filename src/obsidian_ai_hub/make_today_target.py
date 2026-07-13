@@ -6,6 +6,58 @@ from obsidian_ai_hub.utils import config, reader, extracter, llm_client, prompt
 
 logger = logging.getLogger(__name__)
 
+def build_system_prompt() -> str | None:
+    from pathlib import Path
+    copilot_dir = Path(config.VAULT_PATH) / "copilot"
+    files_to_check = [
+        copilot_dir / "AI_README.md",
+        copilot_dir / "core" / "values.md",
+        copilot_dir / "core" / "response_style.md",
+        copilot_dir / "core" / "decision_policy.md",
+        copilot_dir / "core" / "risk_tolerance.md",
+        copilot_dir / "core" / "memory_rules.md",
+    ]
+
+    def is_substantial(content: str) -> bool:
+        lines = content.splitlines()
+        in_frontmatter = False
+        content_lines = []
+        for line in lines:
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if stripped == "---":
+                in_frontmatter = not in_frontmatter
+                continue
+            if in_frontmatter:
+                continue
+            if stripped.startswith("#"):
+                continue
+            if stripped.startswith("<!--") or stripped.endswith("-->"):
+                continue
+            content_lines.append(stripped)
+        return len(content_lines) > 0
+
+    sections = []
+    for f_path in files_to_check:
+        if f_path.exists():
+            try:
+                with open(f_path, "r", encoding="utf-8") as f:
+                    content = f.read()
+                if is_substantial(content):
+                    sections.append(f"[{f_path.name}]\n{content}")
+            except Exception as e:
+                logger.warning(f"Error reading core guideline {f_path.name}: {e}")
+
+    if not sections:
+        return None
+
+    return (
+        "You must strictly adhere to the following system instructions, guidelines and policies:\n\n"
+        + "\n\n".join(sections)
+    )
+
+
 def main():
     today = datetime.now()
     todays_weekday = today.strftime('%A')
@@ -31,6 +83,22 @@ def main():
     weekly_note = reader.get_weekly_note_content(today)
     # print(f"Weekly note: {weekly_note}")
 
+    # Long-term memories compilation with fallback
+    long_term_memories = ""
+    try:
+        from obsidian_ai_hub import memory
+        context_pack = memory.compile_context("make-target")
+        long_term_memories = context_pack.get("context", "")
+    except Exception as e:
+        logger.warning(f"Failed to compile memory context: {e}. Continuing without long-term memories.")
+
+    # System prompt from Core rules
+    system_prompt = None
+    try:
+        system_prompt = build_system_prompt()
+    except Exception as e:
+        logger.warning(f"Failed to build system prompt: {e}")
+
     # プロンプトを読み込み
     context = {
         "todays_schedule": todays_schedule,
@@ -39,8 +107,26 @@ def main():
         "weekly_note": weekly_note,
         "today": today,
         "todays_weekday": todays_weekday,
+        "long_term_memories": long_term_memories,
     }
-    rendered_prompt = prompt.render_prompt(config.MAKE_TODAY_TARGET_PROMPT_PATH, context)
+
+    # Ensure the template has the placeholder, fallback append if not present
+    try:
+        with open(config.MAKE_TODAY_TARGET_PROMPT_PATH, "r", encoding="utf-8") as f:
+            template_text = f.read()
+    except Exception as e:
+        # Fallback if file read fails, though config is set
+        template_text = ""
+
+    if template_text:
+        if "${long_term_memories}" not in template_text:
+            template_text += "\n\n【根拠付き参考情報（長期記憶）】\n${long_term_memories}\n"
+        import string
+        template = string.Template(template_text)
+        rendered_prompt = template.substitute(context)
+    else:
+        rendered_prompt = prompt.render_prompt(config.MAKE_TODAY_TARGET_PROMPT_PATH, context)
+
     logger.debug("Prompt rendered from: %s", config.MAKE_TODAY_TARGET_PROMPT_PATH)
 
     response = llm_client.generate_llm_response(
@@ -48,6 +134,7 @@ def main():
         model=config.MAKE_TODAY_TARGET_MODEL,
         prompt=rendered_prompt,
         max_tokens=8192,
+        system_prompt=system_prompt,
     ).strip()
     print(f"Response: {response}")
 

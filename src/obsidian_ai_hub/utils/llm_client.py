@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Sequence
 import logging
 
-from langchain_core.messages import HumanMessage, ToolMessage, BaseMessage
+from langchain_core.messages import HumanMessage, ToolMessage, BaseMessage, SystemMessage
 from langchain_core.tools import BaseTool
 from obsidian_ai_hub.utils import config
 
@@ -74,17 +74,24 @@ def _content_to_text(content: Any) -> str:
 def _prepare_messages(
     provider: str,
     prompt: str,
-    files: Sequence[Path | str] | None = None
+    files: Sequence[Path | str] | None = None,
+    system_prompt: str | None = None,
 ) -> list[BaseMessage]:
     """
     画像を含むマルチモーダルメッセージを構築する。
     """
+    messages: list[BaseMessage] = []
+    if system_prompt:
+        messages.append(SystemMessage(content=system_prompt))
+
     if not files:
-        return [HumanMessage(content=prompt)]
+        messages.append(HumanMessage(content=prompt))
+        return messages
 
     if provider == "local":
         logger.warning("Multimodal is not supported for provider 'local'. Using prompt only.")
-        return [HumanMessage(content=prompt)]
+        messages.append(HumanMessage(content=prompt))
+        return messages
 
     content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
 
@@ -105,7 +112,8 @@ def _prepare_messages(
             "image_url": {"url": f"data:{mime_type};base64,{encoded_string}"}
         })
 
-    return [HumanMessage(content=content)]
+    messages.append(HumanMessage(content=content))
+    return messages
 
 
 def generate_llm_response(
@@ -115,6 +123,7 @@ def generate_llm_response(
     temperature: float = 0.7,
     max_tokens: int = 512,
     files: Sequence[Path | str] | None = None,
+    system_prompt: str | None = None,
 ) -> str:
     """
     指定のモデルとプロンプトで OpenAI/Gemini/Local/Ollama を呼び出し、
@@ -122,7 +131,7 @@ def generate_llm_response(
 
     既存コードとの互換性のため、戻り値は str のままにしている。
     """
-    messages = _prepare_messages(provider, prompt, files)
+    messages = _prepare_messages(provider, prompt, files, system_prompt=system_prompt)
     logger.info(f"Prepared messages for LLM: {messages}")
     llm = create_langchain_llm(
         provider=provider,
@@ -148,12 +157,13 @@ def generate_llm_response_with_tools(
     max_tokens: int = 512,
     max_iterations: int = 10,
     files: Sequence[Path | str] | None = None,
+    system_prompt: str | None = None,
 ) -> str:
     """
     ツール呼び出しをサポートしたLLMレスポンス生成。
     LLMがツール呼び出しを要求する限りループし、最終的なテキスト回答を返す。
     """
-    messages = _prepare_messages(provider, prompt, files)
+    messages = _prepare_messages(provider, prompt, files, system_prompt=system_prompt)
 
     llm = create_langchain_llm(
         provider=provider,
