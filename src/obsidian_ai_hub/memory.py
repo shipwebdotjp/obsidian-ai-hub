@@ -176,24 +176,32 @@ def get_approved_memories_path() -> Path:
 
 
 def load_all_memories() -> list[dict]:
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM memories")
-        rows = cursor.fetchall()
-        return [deserialize_memory(dict(row)) for row in rows]
+    conn = get_db_connection()
+    try:
+        with conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM memories")
+            rows = cursor.fetchall()
+            return [deserialize_memory(dict(row)) for row in rows]
+    finally:
+        conn.close()
 
 
 def save_all_memories(memories: list[dict]):
-    with get_db_connection() as conn:
-        conn.execute("DELETE FROM memories")
-        for m in memories:
-            db_row = serialize_memory(m)
-            columns = ", ".join(db_row.keys())
-            placeholders = ", ".join("?" for _ in db_row)
-            conn.execute(
-                f"INSERT INTO memories ({columns}) VALUES ({placeholders})",
-                tuple(db_row.values())
-            )
+    conn = get_db_connection()
+    try:
+        with conn:
+            conn.execute("DELETE FROM memories")
+            for m in memories:
+                db_row = serialize_memory(m)
+                columns = ", ".join(db_row.keys())
+                placeholders = ", ".join("?" for _ in db_row)
+                conn.execute(
+                    f"INSERT INTO memories ({columns}) VALUES ({placeholders})",
+                    tuple(db_row.values())
+                )
+    finally:
+        conn.close()
 
 
 def log_memory_event(
@@ -226,8 +234,12 @@ def log_memory_event(
     if conn is not None:
         conn.execute(sql, tuple(db_row.values()))
     else:
-        with get_db_connection() as c:
-            c.execute(sql, tuple(db_row.values()))
+        c = get_db_connection()
+        try:
+            with c:
+                c.execute(sql, tuple(db_row.values()))
+        finally:
+            c.close()
 
 
 def project_approved_memories():
@@ -427,70 +439,74 @@ def extract_memories(target_date_str: str) -> list[dict]:
     timestamp_now = get_current_timestamp()
 
     new_candidates = []
-    with get_db_connection() as conn:
-        for item in extracted:
-            if not isinstance(item, dict):
-                logger.warning(f"Skipping non-dict extracted candidate item: {item}")
-                continue
+    conn = get_db_connection()
+    try:
+        with conn:
+            for item in extracted:
+                if not isinstance(item, dict):
+                    logger.warning(f"Skipping non-dict extracted candidate item: {item}")
+                    continue
 
-            # Generate new ID
-            memory_id = generate_memory_id(target_date_str)
+                # Generate new ID
+                memory_id = generate_memory_id(target_date_str)
 
-            # Build complete schema structure
-            cand = {
-                "schema_version": 1,
-                "memory_id": memory_id,
-                "status": "candidate",
-                "kind": item.get("kind", "preference"),
-                "memory_key": item.get("memory_key", ""),
-                "content": item.get("content", ""),
-                "topics": normalize_topics(item.get("topics", [])),
-                "tags": item.get("tags", []),
-                "evidence": item.get("evidence", []),
-                "valid_from": item.get("valid_from") or target_date_str,
-                "valid_until": item.get("valid_until"),
-                "review_due_at": item.get("review_due_at"),
-                "stability": item.get("stability", "stable"),
-                "sensitivity": item.get("sensitivity", "personal"),
-                "extraction_confidence": float(item.get("extraction_confidence", 0.90)),
-                "supersedes": item.get("supersedes"),
-                "contradicts": item.get("contradicts") or [],
-                "provenance": {
-                    "extraction_method": "llm",
-                    "prompt_version": "mem-extract-v1",
-                    "model": f"{config.MEMORY_EXTRACTOR_PROVIDER}:{config.MEMORY_EXTRACTOR_MODEL}"
-                },
-                "created_at": timestamp_now,
-                "updated_at": timestamp_now,
-                "reviewed_by": None,
-                "reviewed_at": None
-            }
+                # Build complete schema structure
+                cand = {
+                    "schema_version": 1,
+                    "memory_id": memory_id,
+                    "status": "candidate",
+                    "kind": item.get("kind", "preference"),
+                    "memory_key": item.get("memory_key", ""),
+                    "content": item.get("content", ""),
+                    "topics": normalize_topics(item.get("topics", [])),
+                    "tags": item.get("tags", []),
+                    "evidence": item.get("evidence", []),
+                    "valid_from": item.get("valid_from") or target_date_str,
+                    "valid_until": item.get("valid_until"),
+                    "review_due_at": item.get("review_due_at"),
+                    "stability": item.get("stability", "stable"),
+                    "sensitivity": item.get("sensitivity", "personal"),
+                    "extraction_confidence": float(item.get("extraction_confidence", 0.90)),
+                    "supersedes": item.get("supersedes"),
+                    "contradicts": item.get("contradicts") or [],
+                    "provenance": {
+                        "extraction_method": "llm",
+                        "prompt_version": "mem-extract-v1",
+                        "model": f"{config.MEMORY_EXTRACTOR_PROVIDER}:{config.MEMORY_EXTRACTOR_MODEL}"
+                    },
+                    "created_at": timestamp_now,
+                    "updated_at": timestamp_now,
+                    "reviewed_by": None,
+                    "reviewed_at": None
+                }
 
-            # Sequential deduplication suggestions
-            suggestions = run_deduplication(cand, existing_memories, embedder=embedder)
-            if suggestions:
-                cand["dedup_suggestions"] = suggestions
+                # Sequential deduplication suggestions
+                suggestions = run_deduplication(cand, existing_memories, embedder=embedder)
+                if suggestions:
+                    cand["dedup_suggestions"] = suggestions
 
-            # Insert memory
-            db_row = serialize_memory(cand)
-            columns = ", ".join(db_row.keys())
-            placeholders = ", ".join("?" for _ in db_row)
-            conn.execute(
-                f"INSERT INTO memories ({columns}) VALUES ({placeholders})",
-                tuple(db_row.values())
-            )
+                # Insert memory
+                db_row = serialize_memory(cand)
+                columns = ", ".join(db_row.keys())
+                placeholders = ", ".join("?" for _ in db_row)
+                conn.execute(
+                    f"INSERT INTO memories ({columns}) VALUES ({placeholders})",
+                    tuple(db_row.values())
+                )
 
-            # Insert creation event
-            log_memory_event(
-                event_type="created",
-                memory_id=memory_id,
-                previous_status=None,
-                new_status="candidate",
-                conn=conn
-            )
+                # Insert creation event
+                log_memory_event(
+                    event_type="created",
+                    memory_id=memory_id,
+                    previous_status=None,
+                    new_status="candidate",
+                    conn=conn
+                )
 
-            new_candidates.append(cand)
-            existing_memories.append(cand)
+                new_candidates.append(cand)
+                existing_memories.append(cand)
+    finally:
+        conn.close()
 
     return new_candidates
 
@@ -501,91 +517,95 @@ def review_memory(memory_id: str, action: str, new_content: Optional[str] = None
     """
     logger.info(f"Reviewing memory {memory_id} with action {action}")
 
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM memories WHERE memory_id = ?", (memory_id,))
-        row = cursor.fetchone()
-        if row is None:
-            logger.error(f"Memory with ID {memory_id} not found")
-            return False
-
-        target = deserialize_memory(dict(row))
-        prev_status = target.get("status")
-        timestamp_now = get_current_timestamp()
-
-        if action == "approve":
-            target["status"] = "approved"
-            target["reviewed_by"] = "user"
-            target["reviewed_at"] = timestamp_now
-            target["updated_at"] = timestamp_now
-
-            # Update target in DB
-            db_row = serialize_memory(target)
-            set_clause = ", ".join(f"{col} = ?" for col in db_row if col != "memory_id")
-            values = [db_row[col] for col in db_row if col != "memory_id"] + [memory_id]
-            conn.execute(f"UPDATE memories SET {set_clause} WHERE memory_id = ?", values)
-
-            log_memory_event(
-                event_type="approved",
-                memory_id=memory_id,
-                previous_status=prev_status,
-                new_status="approved",
-                conn=conn
-            )
-        elif action == "reject":
-            target["status"] = "rejected"
-            target["reviewed_by"] = "user"
-            target["reviewed_at"] = timestamp_now
-            target["updated_at"] = timestamp_now
-
-            # Update target in DB
-            db_row = serialize_memory(target)
-            set_clause = ", ".join(f"{col} = ?" for col in db_row if col != "memory_id")
-            values = [db_row[col] for col in db_row if col != "memory_id"] + [memory_id]
-            conn.execute(f"UPDATE memories SET {set_clause} WHERE memory_id = ?", values)
-
-            log_memory_event(
-                event_type="rejected",
-                memory_id=memory_id,
-                previous_status=prev_status,
-                new_status="rejected",
-                conn=conn
-            )
-        elif action == "edit":
-            if not new_content:
-                logger.error("Content is required for edit action")
+    conn = get_db_connection()
+    try:
+        with conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM memories WHERE memory_id = ?", (memory_id,))
+            row = cursor.fetchone()
+            if row is None:
+                logger.error(f"Memory with ID {memory_id} not found")
                 return False
-            before_content = target.get("content", "")
-            target["content"] = new_content
-            target["status"] = "approved"
-            target["reviewed_by"] = "user"
-            target["reviewed_at"] = timestamp_now
-            target["updated_at"] = timestamp_now
 
-            changes = {
-                "content": {
-                    "before": before_content,
-                    "after": new_content
+            target = deserialize_memory(dict(row))
+            prev_status = target.get("status")
+            timestamp_now = get_current_timestamp()
+
+            if action == "approve":
+                target["status"] = "approved"
+                target["reviewed_by"] = "user"
+                target["reviewed_at"] = timestamp_now
+                target["updated_at"] = timestamp_now
+
+                # Update target in DB
+                db_row = serialize_memory(target)
+                set_clause = ", ".join(f"{col} = ?" for col in db_row if col != "memory_id")
+                values = [db_row[col] for col in db_row if col != "memory_id"] + [memory_id]
+                conn.execute(f"UPDATE memories SET {set_clause} WHERE memory_id = ?", values)
+
+                log_memory_event(
+                    event_type="approved",
+                    memory_id=memory_id,
+                    previous_status=prev_status,
+                    new_status="approved",
+                    conn=conn
+                )
+            elif action == "reject":
+                target["status"] = "rejected"
+                target["reviewed_by"] = "user"
+                target["reviewed_at"] = timestamp_now
+                target["updated_at"] = timestamp_now
+
+                # Update target in DB
+                db_row = serialize_memory(target)
+                set_clause = ", ".join(f"{col} = ?" for col in db_row if col != "memory_id")
+                values = [db_row[col] for col in db_row if col != "memory_id"] + [memory_id]
+                conn.execute(f"UPDATE memories SET {set_clause} WHERE memory_id = ?", values)
+
+                log_memory_event(
+                    event_type="rejected",
+                    memory_id=memory_id,
+                    previous_status=prev_status,
+                    new_status="rejected",
+                    conn=conn
+                )
+            elif action == "edit":
+                if not new_content:
+                    logger.error("Content is required for edit action")
+                    return False
+                before_content = target.get("content", "")
+                target["content"] = new_content
+                target["status"] = "approved"
+                target["reviewed_by"] = "user"
+                target["reviewed_at"] = timestamp_now
+                target["updated_at"] = timestamp_now
+
+                changes = {
+                    "content": {
+                        "before": before_content,
+                        "after": new_content
+                    }
                 }
-            }
 
-            # Update target in DB
-            db_row = serialize_memory(target)
-            set_clause = ", ".join(f"{col} = ?" for col in db_row if col != "memory_id")
-            values = [db_row[col] for col in db_row if col != "memory_id"] + [memory_id]
-            conn.execute(f"UPDATE memories SET {set_clause} WHERE memory_id = ?", values)
+                # Update target in DB
+                db_row = serialize_memory(target)
+                set_clause = ", ".join(f"{col} = ?" for col in db_row if col != "memory_id")
+                values = [db_row[col] for col in db_row if col != "memory_id"] + [memory_id]
+                conn.execute(f"UPDATE memories SET {set_clause} WHERE memory_id = ?", values)
 
-            log_memory_event(
-                event_type="edited",
-                memory_id=memory_id,
-                previous_status=prev_status,
-                new_status="approved",
-                changes=changes,
-                conn=conn
-            )
-        else:
-            logger.error(f"Unknown action: {action}")
-            return False
+                log_memory_event(
+                    event_type="edited",
+                    memory_id=memory_id,
+                    previous_status=prev_status,
+                    new_status="approved",
+                    changes=changes,
+                    conn=conn
+                )
+            else:
+                logger.error(f"Unknown action: {action}")
+                return False
+    finally:
+        conn.close()
 
     # Re-project approved memories markdown
     project_approved_memories()
@@ -628,76 +648,80 @@ def compile_context(for_purpose: str = "make-target") -> dict:
     excluded = []
     has_changes = False
 
-    with get_db_connection() as conn:
-        for m in memories:
-            m_id = m.get("memory_id")
-            status = m.get("status")
+    conn = get_db_connection()
+    try:
+        with conn:
+            for m in memories:
+                m_id = m.get("memory_id")
+                status = m.get("status")
 
-            if status != "approved":
-                continue
+                if status != "approved":
+                    continue
 
-            # Check expiration logic
-            is_expired = False
+                # Check expiration logic
+                is_expired = False
 
-            valid_until = m.get("valid_until")
-            if valid_until:
-                try:
-                    # Assuming valid_until is YYYY-MM-DD
-                    val_dt = datetime.strptime(valid_until, "%Y-%m-%d")
-                    if now_dt.date() > val_dt.date():
-                        is_expired = True
-                except Exception:
-                    pass
-
-            review_due_at = m.get("review_due_at")
-            if review_due_at:
-                try:
-                    # Try parsing as ISO datetime or YYYY-MM-DD
-                    if "T" in review_due_at:
-                        rd_dt = datetime.fromisoformat(review_due_at)
-                        if now_dt > rd_dt:
+                valid_until = m.get("valid_until")
+                if valid_until:
+                    try:
+                        # Assuming valid_until is YYYY-MM-DD
+                        val_dt = datetime.strptime(valid_until, "%Y-%m-%d")
+                        if now_dt.date() > val_dt.date():
                             is_expired = True
-                    else:
-                        rd_dt = datetime.strptime(review_due_at, "%Y-%m-%d")
-                        if now_dt.date() > rd_dt.date():
-                            is_expired = True
-                except Exception:
-                    pass
+                    except Exception:
+                        pass
 
-            if is_expired:
-                m["status"] = "expired"
-                m["updated_at"] = get_current_timestamp()
-                has_changes = True
+                review_due_at = m.get("review_due_at")
+                if review_due_at:
+                    try:
+                        # Try parsing as ISO datetime or YYYY-MM-DD
+                        if "T" in review_due_at:
+                            rd_dt = datetime.fromisoformat(review_due_at)
+                            if now_dt > rd_dt:
+                                is_expired = True
+                        else:
+                            rd_dt = datetime.strptime(review_due_at, "%Y-%m-%d")
+                            if now_dt.date() > rd_dt.date():
+                                is_expired = True
+                    except Exception:
+                        pass
 
-                # Update target in DB
-                db_row = serialize_memory(m)
-                set_clause = ", ".join(f"{col} = ?" for col in db_row if col != "memory_id")
-                values = [db_row[col] for col in db_row if col != "memory_id"] + [m_id]
-                conn.execute(f"UPDATE memories SET {set_clause} WHERE memory_id = ?", values)
+                if is_expired:
+                    m["status"] = "expired"
+                    m["updated_at"] = get_current_timestamp()
+                    has_changes = True
 
-                log_memory_event(
-                    event_type="expired",
-                    memory_id=m_id,
-                    previous_status="approved",
-                    new_status="expired",
-                    reason="Automatic expiration during context compilation",
-                    conn=conn
-                )
-                excluded.append({"memory_id": m_id, "reason": "expired"})
-                continue
+                    # Update target in DB
+                    db_row = serialize_memory(m)
+                    set_clause = ", ".join(f"{col} = ?" for col in db_row if col != "memory_id")
+                    values = [db_row[col] for col in db_row if col != "memory_id"] + [m_id]
+                    conn.execute(f"UPDATE memories SET {set_clause} WHERE memory_id = ?", values)
 
-            # Check valid_from (not yet valid)
-            valid_from = m.get("valid_from")
-            if valid_from:
-                try:
-                    vf_dt = datetime.strptime(valid_from, "%Y-%m-%d")
-                    if now_dt.date() < vf_dt.date():
-                        excluded.append({"memory_id": m_id, "reason": "not_yet_valid"})
-                        continue
-                except Exception:
-                    pass
+                    log_memory_event(
+                        event_type="expired",
+                        memory_id=m_id,
+                        previous_status="approved",
+                        new_status="expired",
+                        reason="Automatic expiration during context compilation",
+                        conn=conn
+                    )
+                    excluded.append({"memory_id": m_id, "reason": "expired"})
+                    continue
 
-            active_approved.append(m)
+                # Check valid_from (not yet valid)
+                valid_from = m.get("valid_from")
+                if valid_from:
+                    try:
+                        vf_dt = datetime.strptime(valid_from, "%Y-%m-%d")
+                        if now_dt.date() < vf_dt.date():
+                            excluded.append({"memory_id": m_id, "reason": "not_yet_valid"})
+                            continue
+                    except Exception:
+                        pass
+
+                active_approved.append(m)
+    finally:
+        conn.close()
 
     if has_changes:
         try:

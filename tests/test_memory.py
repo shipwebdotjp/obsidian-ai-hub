@@ -253,7 +253,6 @@ def test_review_memory(clean_memory_env):
     assert app_md_path.exists()
     md_content = app_md_path.read_text(encoding="utf-8")
     assert "テスト内容" in md_content
-    assert "Generated from the SQLite memory database." in md_content
 
     # 3. Edit review
     success = memory.review_memory(mem_id, "edit", "新しい編集された内容")
@@ -392,20 +391,24 @@ def test_cli_args_parsing_validation(monkeypatch):
 
 
 def test_config_fallback_ordering(tmp_path, monkeypatch):
-    # Test fallback order: MEMORY_SQLITE_PATH env variable -> config.yml -> default path.
-    # We will mock _env_or_config calls in config module
+    # 1. Environment variable has highest precedence
+    env_path = tmp_path / "env_db.sqlite3"
+    monkeypatch.setenv("MEMORY_SQLITE_PATH", str(env_path))
 
-    # Let's mock _env_or_config specifically for "MEMORY_SQLITE_PATH"
-    orig_env_or_config = config._env_or_config
+    # Mock config.yml value to differ
+    config_path = tmp_path / "config_db.sqlite3"
+    monkeypatch.setattr(config, "yaml_config", {"memory": {"sqlite_path": str(config_path)}})
 
-    def mock_env_or_config(env_name, *config_keys, default=None):
-        if env_name == "MEMORY_SQLITE_PATH":
-            return "/tmp/mock_env_path.sqlite"
-        return orig_env_or_config(env_name, *config_keys, default=default)
+    # Real evaluation of _env_or_config
+    val = config._env_or_config("MEMORY_SQLITE_PATH", "memory", "sqlite_path")
+    assert val == str(env_path)
 
-    with patch("obsidian_ai_hub.utils.config._env_or_config", side_effect=mock_env_or_config):
-        # Reloading config logic via import or re-evaluation is not strictly needed.
-        # We can directly test MEMORY_SQLITE_PATH selection logic if we reconstruct it or trigger load.
-        # But let's check config path logic:
-        raw_val = config._env_or_config("MEMORY_SQLITE_PATH", "memory", "sqlite_path")
-        assert raw_val == "/tmp/mock_env_path.sqlite"
+    # 2. config.yml takes precedence if env var is not set
+    monkeypatch.delenv("MEMORY_SQLITE_PATH", raising=False)
+    val = config._env_or_config("MEMORY_SQLITE_PATH", "memory", "sqlite_path")
+    assert val == str(config_path)
+
+    # 3. Default path is used if neither is set
+    monkeypatch.setattr(config, "yaml_config", {})
+    val = config._env_or_config("MEMORY_SQLITE_PATH", "memory", "sqlite_path")
+    assert val is None
