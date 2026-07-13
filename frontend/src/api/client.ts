@@ -99,6 +99,21 @@ export function reviewMemory(
   );
 }
 
+
+export function resolveMemory(
+  memoryId: string,
+  action: "keep_both" | "replace_existing",
+  targetMemoryId: string,
+): Promise<{ candidate: Memory; target?: Memory }> {
+  return request<{ candidate: Memory; target?: Memory }>(
+    `/api/v1/memories/${encodeURIComponent(memoryId)}/resolve`,
+    {
+      method: "POST",
+      body: JSON.stringify({ action, target_memory_id: targetMemoryId }),
+    },
+  );
+}
+
 export function editMemory(
   memoryId: string,
   payload: EditPayload,

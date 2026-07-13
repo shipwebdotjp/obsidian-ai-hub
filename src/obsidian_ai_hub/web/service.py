@@ -76,3 +76,6 @@ def batch_review(memory_ids: list, action: str) -> dict:
     if action not in schemas.ALLOWED_ACTIONS:
         raise ValueError("action must be approve/reject")
     return memory.batch_review_memories(memory_ids, action)
+
+def resolve_memory(candidate_id: str, action: str, target_memory_id: str) -> tuple[dict, Optional[dict]]:
+    return memory.resolve_memory(candidate_id, action, target_memory_id)
