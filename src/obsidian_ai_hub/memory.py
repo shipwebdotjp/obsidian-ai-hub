@@ -310,7 +310,7 @@ def extract_memories(target_date_str: str) -> list[dict]:
         provider=config.MEMORY_EXTRACTOR_PROVIDER,
         model=config.MEMORY_EXTRACTOR_MODEL,
         prompt=rendered_prompt,
-        max_tokens=4096,
+        max_tokens=32000,
         temperature=0.2
     ).strip()
 
