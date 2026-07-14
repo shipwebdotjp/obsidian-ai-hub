@@ -13,3 +13,5 @@ doc/
 .jules-agent/
 .claude/
 .cptr
+
+*.tsbuildinfo

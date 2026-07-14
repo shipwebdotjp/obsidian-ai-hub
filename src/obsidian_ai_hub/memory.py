@@ -533,6 +533,7 @@ def _load_weekly_memory_sources(week_start: datetime, week_end: datetime) -> tup
 
 def extract_memories(week_date_str: Optional[str] = None) -> list[dict]:
     """Extract memory candidates from a completed or explicitly selected week."""
+    approved_modified = False
     week_start, week_end = _week_bounds(week_date_str)
     week_start_str = week_start.strftime("%Y-%m-%d")
     week_end_str = week_end.strftime("%Y-%m-%d")
@@ -777,6 +778,9 @@ def extract_memories(week_date_str: Optional[str] = None) -> list[dict]:
                 existing_memories.append(cand)
     finally:
         conn.close()
+
+    if approved_modified:
+        project_approved_memories()
 
     return new_candidates
 

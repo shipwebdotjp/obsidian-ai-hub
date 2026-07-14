@@ -1,1 +1,0 @@
-{"root":["./src/App.tsx","./src/main.tsx","./src/api/client.ts","./src/api/types.ts","./src/components/Sidebar.tsx","./src/components/TokenPrompt.tsx","./src/constants/routes.ts","./src/features/memories/MemoryDetailPanel.tsx","./src/features/memories/MemoryEditForm.tsx","./src/features/memories/MemoryList.tsx","./src/features/memories/MemoryPage.tsx"],"version":"5.9.3"}

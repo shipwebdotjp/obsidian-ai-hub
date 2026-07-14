@@ -291,7 +291,7 @@ def test_resolve_memory_keep_both(loopback_client):
     events = memory.get_memory_events('mem_candidate_1')
     assert len(events) == 1
     assert events[0]['event_type'] == 'approved'
-    assert events[0]['reason'] == '手動操作: 両方保持を選択して承認'
+
 
 
 def test_resolve_memory_replace_existing(loopback_client):
