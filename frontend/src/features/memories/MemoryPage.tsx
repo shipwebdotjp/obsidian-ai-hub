@@ -71,7 +71,7 @@ export default function MemoryPage() {
     setSelected(new Set());
   }, [status, debouncedQuery, kind, topic]);
 
-  const showRightPanel = status === "candidate" || status === "approved" || status === "rejected";
+  const showRightPanel = status === "candidate" || status === "approved" || status === "rejected" || status === "superseded" || status === "expired";
 
   const handleRenderCopilotProfile = async () => {
     const confirmed = window.confirm(
@@ -104,6 +104,7 @@ export default function MemoryPage() {
           <option value="approved">承認済み</option>
           <option value="rejected">却下済み</option>
           <option value="expired">期限切れ</option>
+          <option value="superseded">置換済み</option>
         </select>
         <input
           type="search"

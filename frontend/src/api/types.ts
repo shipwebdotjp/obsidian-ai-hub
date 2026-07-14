@@ -1,6 +1,6 @@
 export type Stability = "stable" | "tentative" | "explicitly_settled";
 
-export type MemoryStatus = "candidate" | "approved" | "rejected" | "expired";
+export type MemoryStatus = "candidate" | "approved" | "rejected" | "expired" | "superseded";
 
 export interface Evidence {
   path: string;
@@ -13,6 +13,15 @@ export interface DedupSuggestion {
   relation: string;
   reason?: string;
   score?: number;
+}
+
+export interface DedupAssessment {
+  decision: "merge" | "new" | "supersede" | "failed";
+  target_memory_id?: string;
+  similarity_score?: number;
+  reason?: string;
+  integrated_content?: string;
+  failure_kind?: "request_failed" | "response_invalid";
 }
 
 export interface MemoryEvent {
@@ -45,6 +54,7 @@ export interface Memory {
   supersedes?: string;
   contradicts: string[];
   dedup_suggestions: DedupSuggestion[];
+  dedup_assessment?: DedupAssessment | null;
   provenance?: Record<string, unknown>;
   created_at?: string;
   updated_at?: string;
