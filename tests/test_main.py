@@ -167,3 +167,41 @@ def test_build_dashboard_cli_calls_export(monkeypatch):
         main_module.main()
 
     mock_build.assert_called_once_with([2026])
+
+
+def test_debug_alone_does_not_raise_or_start_server(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["prog", "--debug"])
+
+    with patch("argparse.ArgumentParser.print_help") as mock_help:
+        main_module.main()
+
+    mock_help.assert_called_once()
+
+
+def test_serve_without_debug_uses_no_reload_info_log(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["prog", "--serve"])
+
+    with (
+        patch("uvicorn.run") as mock_uvicorn,
+        patch("obsidian_ai_hub.web.app.create_app") as mock_create_app,
+    ):
+        main_module.main()
+
+    mock_uvicorn.assert_called_once()
+    kwargs = mock_uvicorn.call_args[1]
+    assert kwargs.get("log_level") == "info"
+    assert kwargs.get("reload") is None or kwargs.get("reload") is False
+
+
+def test_serve_with_debug_uses_reload_and_debug_log(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["prog", "--serve", "--debug"])
+
+    with patch("uvicorn.run") as mock_uvicorn:
+        main_module.main()
+
+    mock_uvicorn.assert_called_once()
+    args, kwargs = mock_uvicorn.call_args
+    assert args[0] == "obsidian_ai_hub.web.app:create_app"
+    assert kwargs.get("log_level") == "debug"
+    assert kwargs.get("reload") is True
+    assert kwargs.get("factory") is True

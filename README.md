@@ -194,6 +194,28 @@ rejection to multiple selected candidates at once.
 The server is local-only by default. If you intentionally make it available on
 your network with `--serve-host`, set `MEMORY_REVIEW_API_TOKEN` first.
 
+### Development mode
+
+For development, start the API server with auto-reload and debug logging:
+
+```bash
+uv run -m obsidian_ai_hub --serve --debug
+```
+
+In a separate terminal, start the Vite dev server:
+
+```bash
+cd frontend && npm run dev
+```
+
+Open [http://127.0.0.1:5173](http://127.0.0.1:5173) in your browser. The Vite dev server proxies API requests to `http://127.0.0.1:8765`.
+
+The `--debug` flag is a global development flag. When combined with `--serve`, it enables:
+- **Auto-reload**: Uvicorn watches Python source files and restarts the server on changes.
+- **Debug logging**: Both Uvicorn and the application use `debug` log level.
+
+When used alone, `--debug` is accepted but does not change behavior (reserved for future use with other subcommands).
+
 ### Use approved memories in daily targets
 
 Approved memories are compiled into a small reference section for daily target

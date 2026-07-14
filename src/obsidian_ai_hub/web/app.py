@@ -42,7 +42,13 @@ def _configure_security(host: str, token: str) -> None:
         )
 
 
-def create_app(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT, token: str = "") -> FastAPI:
+def create_app(host: str | None = None, port: int | None = None, token: str | None = None) -> FastAPI:
+    if host is None:
+        host = os.getenv("MEMORY_REVIEW_HOST", DEFAULT_HOST)
+    if port is None:
+        port = int(os.getenv("MEMORY_REVIEW_PORT", str(DEFAULT_PORT)))
+    if token is None:
+        token = os.getenv("MEMORY_REVIEW_API_TOKEN", "")
     _configure_security(host, token)
 
     app = FastAPI(title="obsidian-ai-hub Memory Review", version="0.1.0")

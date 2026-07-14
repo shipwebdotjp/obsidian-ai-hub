@@ -297,6 +297,11 @@ def main():
         default=None,
         help="Web UI の待ち受けポート (既定: 8765)"
     )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="開発用デバッグモード。--serve と併用時は自動リロード + 詳細ログ"
+    )
     args = parser.parse_args()
     ran = False
 
@@ -467,26 +472,39 @@ def main():
         )
         ran = True
     if args.serve:
-        from obsidian_ai_hub.web import app as web_app
         import os as _os
         host = args.serve_host or _os.getenv("MEMORY_REVIEW_HOST", "127.0.0.1")
         port = args.serve_port or int(_os.getenv("MEMORY_REVIEW_PORT", "8765"))
         token = _os.getenv("MEMORY_REVIEW_API_TOKEN", "")
-        web_app.HOST = host
-        web_app.PORT = port
-        web_app.TOKEN = token
-        web_app.TOKEN_REQUIRED = host not in ("127.0.0.1", "::1", "localhost")
-        if web_app.TOKEN_REQUIRED and not token:
+        if host not in ("127.0.0.1", "::1", "localhost") and not token:
             raise RuntimeError(
                 "MEMORY_REVIEW_API_TOKEN is required when binding to a non-loopback host."
             )
         import uvicorn
-        uvicorn.run(
-            web_app.create_app(host=host, port=port, token=token),
-            host=host,
-            port=port,
-            log_level="info",
-        )
+        if args.debug:
+            _os.environ.setdefault("MEMORY_REVIEW_HOST", host)
+            _os.environ.setdefault("MEMORY_REVIEW_PORT", str(port))
+            _os.environ.setdefault("MEMORY_REVIEW_API_TOKEN", token)
+            uvicorn.run(
+                "obsidian_ai_hub.web.app:create_app",
+                host=host,
+                port=port,
+                log_level="debug",
+                reload=True,
+                factory=True,
+            )
+        else:
+            from obsidian_ai_hub.web import app as web_app
+            web_app.HOST = host
+            web_app.PORT = port
+            web_app.TOKEN = token
+            web_app.TOKEN_REQUIRED = host not in ("127.0.0.1", "::1", "localhost")
+            uvicorn.run(
+                web_app.create_app(host=host, port=port, token=token),
+                host=host,
+                port=port,
+                log_level="info",
+            )
         ran = True
     if not ran:
         parser.print_help()
