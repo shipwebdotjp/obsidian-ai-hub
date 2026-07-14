@@ -114,7 +114,7 @@ def test_db_initialization_and_indexes(clean_memory_env):
     cursor = conn.cursor()
     cursor.execute("PRAGMA user_version;")
     version = cursor.fetchone()[0]
-    assert version == 1
+    assert version == 2
 
     # Verify tables exist
     cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
@@ -714,3 +714,225 @@ def test_batch_delete_memories_empty(clean_memory_env):
     assert result["deleted"] == []
     assert result["not_found"] == []
     assert result["events_deleted"] == 0
+
+
+def test_superseded_editing_restrictions(clean_memory_env):
+    m = {
+        "memory_id": "mem_superseded_test",
+        "status": "superseded",
+        "kind": "preference",
+        "memory_key": "restricted-key",
+        "content": "置換済みの記憶",
+        "created_at": "2026-07-14T10:00:00+09:00",
+        "updated_at": "2026-07-14T10:00:00+09:00",
+    }
+    memory.save_all_memories([m])
+
+    # Cannot review superseded memory
+    success = memory.review_memory("mem_superseded_test", "approve")
+    assert success is False
+
+    # Cannot edit superseded memory
+    with pytest.raises(ValueError, match="Cannot edit a superseded memory"):
+        memory.update_memory_fields("mem_superseded_test", {"content": "編集された内容"})
+
+
+def test_resolve_memory_merge_existing(clean_memory_env):
+    target = {
+        "memory_id": "mem_existing_target",
+        "status": "approved",
+        "kind": "preference",
+        "memory_key": "target-key",
+        "content": "マージされる既存の記憶内容",
+        "topics": ["その他"],
+        "tags": ["タグ1"],
+        "evidence": [{"path": "note1.md", "quote": "引用1"}],
+        "created_at": "2026-07-14T10:00:00+09:00",
+        "updated_at": "2026-07-14T10:00:00+09:00",
+    }
+    cand = {
+        "memory_id": "mem_cand_to_merge",
+        "status": "candidate",
+        "kind": "preference",
+        "memory_key": "target-key",
+        "content": "追加の記憶内容",
+        "topics": ["開発"],
+        "tags": ["タグ2"],
+        "evidence": [{"path": "note2.md", "quote": "引用2"}],
+        "dedup_suggestions": [{"target_memory_id": "mem_existing_target", "relation": "duplicate"}],
+        "created_at": "2026-07-14T10:00:00+09:00",
+        "updated_at": "2026-07-14T10:00:00+09:00",
+    }
+    memory.save_all_memories([target, cand])
+
+    # Perform resolve_memory with merge_existing action
+    new_cand, new_target = memory.resolve_memory(
+        candidate_id="mem_cand_to_merge",
+        action="merge_existing",
+        target_memory_id="mem_existing_target",
+        integrated_content="既存の記憶内容と追加内容を統合した文章"
+    )
+
+    assert new_cand["status"] == "rejected"
+    assert new_target["status"] == "approved"
+    assert new_target["content"] == "既存の記憶内容と追加内容を統合した文章"
+    assert "開発" in new_target["topics"]
+    assert "その他" in new_target["topics"]
+    assert "タグ1" in new_target["tags"]
+    assert "タグ2" in new_target["tags"]
+    assert len(new_target["evidence"]) == 2
+
+    # Verify event logs
+    events_cand = memory.get_memory_events("mem_cand_to_merge")
+    assert len(events_cand) == 1
+    assert events_cand[0]["event_type"] == "rejected"
+
+    events_target = memory.get_memory_events("mem_existing_target")
+    assert len(events_target) == 1
+    assert events_target[0]["event_type"] == "edited"
+
+
+def test_resolve_memory_supersede_existing(clean_memory_env):
+    target = {
+        "memory_id": "mem_existing_target",
+        "status": "approved",
+        "kind": "preference",
+        "memory_key": "target-key",
+        "content": "置換される古い記憶内容",
+        "valid_from": "2026-07-01",
+        "created_at": "2026-07-14T10:00:00+09:00",
+        "updated_at": "2026-07-14T10:00:00+09:00",
+    }
+    cand = {
+        "memory_id": "mem_cand_to_supersede",
+        "status": "candidate",
+        "kind": "preference",
+        "memory_key": "different-key",  # test key unification
+        "content": "新しい最新の記憶内容",
+        "valid_from": "2026-07-15",
+        "dedup_suggestions": [{"target_memory_id": "mem_existing_target", "relation": "supersedes"}],
+        "created_at": "2026-07-14T10:00:00+09:00",
+        "updated_at": "2026-07-14T10:00:00+09:00",
+    }
+    memory.save_all_memories([target, cand])
+
+    # Validation: switch_date must be strictly after target valid_from
+    with pytest.raises(ValueError, match="must be strictly after existing valid_from"):
+        memory.resolve_memory(
+            candidate_id="mem_cand_to_supersede",
+            action="supersede_existing",
+            target_memory_id="mem_existing_target",
+            switch_date="2026-06-30"  # before 2026-07-01
+        )
+
+    # Validation: switch_date equal to target valid_from must be rejected too
+    with pytest.raises(ValueError, match="must be strictly after existing valid_from"):
+        memory.resolve_memory(
+            candidate_id="mem_cand_to_supersede",
+            action="supersede_existing",
+            target_memory_id="mem_existing_target",
+            switch_date="2026-07-01"  # completely equal to 2026-07-01
+        )
+
+    # Valid resolution
+    new_cand, new_target = memory.resolve_memory(
+        candidate_id="mem_cand_to_supersede",
+        action="supersede_existing",
+        target_memory_id="mem_existing_target",
+        switch_date="2026-07-15"
+    )
+
+    assert new_target["status"] == "superseded"
+    assert new_target["valid_until"] == "2026-07-14"
+
+    assert new_cand["status"] == "approved"
+    assert new_cand["valid_from"] == "2026-07-15"
+    assert new_cand["supersedes"] == "mem_existing_target"
+    assert new_cand["memory_key"] == "target-key"  # unified to old memory_key
+
+    # Check event logs
+    events_target = memory.get_memory_events("mem_existing_target")
+    assert len(events_target) == 1
+    assert events_target[0]["event_type"] == "superseded"
+    assert events_target[0]["changes"]["superseded_by"] == "mem_cand_to_supersede"
+
+    events_cand = memory.get_memory_events("mem_cand_to_supersede")
+    assert len(events_cand) == 1
+    assert events_cand[0]["event_type"] == "approved"
+    assert events_cand[0]["changes"]["supersedes"]["after"] == "mem_existing_target"
+
+
+def test_extract_memories_with_dedup_assessment(clean_memory_env):
+    week_date = "2026-07-13"
+    daily_dir = clean_memory_env / "daily" / "2026" / "07"
+    daily_dir.mkdir(parents=True)
+    (daily_dir / "2026-07-13.md").write_text(
+        "# 2026-07-13\n\n"
+        "## 💡 今日の気づき・振り返り\n\nAIは簡潔に話してほしい\n\n"
+        "## 📝メモ\n\n追加のメモ\n\n",
+        encoding="utf-8",
+    )
+
+    # Pre-populate an approved memory to trigger deduplication
+    existing_approved = {
+        "memory_id": "mem_target_001",
+        "status": "approved",
+        "kind": "preference",
+        "memory_key": "response-style-concise",
+        "content": "既存の簡潔な話し方の好み",
+        "created_at": "2026-07-12T10:00:00+09:00"
+    }
+    memory.save_all_memories([existing_approved])
+
+    # Mock candidate extraction LLM response
+    mock_extract_response = """
+    [
+      {
+        "kind": "preference",
+        "memory_key": "response-style-concise",
+        "content": "簡潔な表現を好む",
+        "topics": ["その他"],
+        "tags": ["文体"],
+        "evidence": [
+          {"path": "daily/2026/07/2026-07-13.md", "quote": "AIは簡潔に話してほしい", "observed_at": "2026-07-13"}
+        ],
+        "valid_from": "2026-07-13",
+        "stability": "stable",
+        "extraction_confidence": 0.95
+      }
+    ]
+    """
+
+    # Mock dedup assessment LLM response
+    mock_dedup_response = """
+    [
+      {
+        "candidate_id": "mem_20260713_fixed",
+        "decision": "merge",
+        "target_memory_id": "mem_target_001",
+        "reason": "既存の好みの内容をより具体化・精緻化しているためマージを提案",
+        "integrated_content": "簡潔で自然な日本語の表現を好む。過度な励まし表現を避ける。"
+      }
+    ]
+    """
+
+    with patch("obsidian_ai_hub.memory.llm_client.generate_llm_response") as mock_llm, \
+         patch("obsidian_ai_hub.memory.generate_memory_id", return_value="mem_20260713_fixed"):
+
+        def fake_llm_response(*args, **kwargs):
+            prompt_str = kwargs.get("prompt", "")
+            if "対象期間" in prompt_str:
+                return mock_extract_response
+            else:
+                return mock_dedup_response
+
+        mock_llm.side_effect = fake_llm_response
+
+        candidates = memory.extract_memories(week_date)
+
+        assert len(candidates) == 1
+        cand = candidates[0]
+        assert cand["status"] == "candidate"
+        assert cand["dedup_assessment"]["decision"] == "merge"
+        assert cand["dedup_assessment"]["target_memory_id"] == "mem_target_001"
+        assert cand["dedup_assessment"]["integrated_content"] == "簡潔で自然な日本語の表現を好む。過度な励まし表現を避ける。"

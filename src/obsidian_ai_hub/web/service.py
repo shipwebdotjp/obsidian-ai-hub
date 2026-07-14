@@ -77,8 +77,20 @@ def batch_review(memory_ids: list, action: str) -> dict:
         raise ValueError("action must be approve/reject")
     return memory.batch_review_memories(memory_ids, action)
 
-def resolve_memory(candidate_id: str, action: str, target_memory_id: str) -> tuple[dict, Optional[dict]]:
-    return memory.resolve_memory(candidate_id, action, target_memory_id)
+def resolve_memory(
+    candidate_id: str,
+    action: str,
+    target_memory_id: str,
+    integrated_content: Optional[str] = None,
+    switch_date: Optional[str] = None
+) -> tuple[dict, Optional[dict]]:
+    return memory.resolve_memory(
+        candidate_id,
+        action,
+        target_memory_id,
+        integrated_content=integrated_content,
+        switch_date=switch_date
+    )
 
 
 def delete_memory(memory_id: str) -> dict:

@@ -105,14 +105,21 @@ export function reviewMemory(
 
 export function resolveMemory(
   memoryId: string,
-  action: "keep_both" | "replace_existing",
+  action: "keep_both" | "replace_existing" | "merge_existing" | "supersede_existing",
   targetMemoryId: string,
+  integratedContent?: string,
+  switchDate?: string,
 ): Promise<{ candidate: Memory; target?: Memory }> {
   return request<{ candidate: Memory; target?: Memory }>(
     `/api/v1/memories/${encodeURIComponent(memoryId)}/resolve`,
     {
       method: "POST",
-      body: JSON.stringify({ action, target_memory_id: targetMemoryId }),
+      body: JSON.stringify({
+        action,
+        target_memory_id: targetMemoryId,
+        integrated_content: integratedContent,
+        switch_date: switchDate,
+      }),
     },
   );
 }

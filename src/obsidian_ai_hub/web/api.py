@@ -109,7 +109,13 @@ def batch_review(body: schemas.BatchReviewRequest, _=Depends(_require_loopback_o
 @router.post("/memories/{candidate_id}/resolve", response_model=schemas.ResolveResponse)
 def resolve_memory(candidate_id: str, body: schemas.ResolveRequest, _=Depends(_require_loopback_or_token)):
     try:
-        cand, target = service.resolve_memory(candidate_id, body.action, body.target_memory_id)
+        cand, target = service.resolve_memory(
+            candidate_id,
+            body.action,
+            body.target_memory_id,
+            integrated_content=body.integrated_content,
+            switch_date=body.switch_date
+        )
         return {"candidate": cand, "target": target}
     except ValueError as e:
         logger.warning("resolve validation error for %s: %s", candidate_id, e)

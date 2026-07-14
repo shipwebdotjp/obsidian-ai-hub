@@ -15,3 +15,7 @@ doc/
 .cptr
 
 *.tsbuildinfo
+
+# Test artifacts
+test_temp.sqlite3
+copilot/memory/approved.md

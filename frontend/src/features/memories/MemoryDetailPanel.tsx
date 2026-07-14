@@ -23,6 +23,8 @@ export default function MemoryDetailPanel({
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [integratedContent, setIntegratedContent] = useState("");
+  const [switchDate, setSwitchDate] = useState("");
   const fetchIdRef = useRef(0);
 
   useEffect(() => {
@@ -37,12 +39,23 @@ export default function MemoryDetailPanel({
         setDetail(d);
         onChanged(d);
 
-        // Fetch target details for suggestions
-        const targetIds = (d.dedup_suggestions || [])
-          .map((s) => s.target_memory_id)
-          .filter(Boolean);
+        if (d.dedup_assessment?.integrated_content) {
+          setIntegratedContent(d.dedup_assessment.integrated_content);
+        } else {
+          setIntegratedContent("");
+        }
+        setSwitchDate(d.valid_from || "");
 
-        targetIds.forEach((tid) => {
+        // Fetch target details for suggestions and assessments
+        const targetIds = new Set<string>();
+        (d.dedup_suggestions || []).forEach((s) => {
+          if (s.target_memory_id) targetIds.add(s.target_memory_id);
+        });
+        if (d.dedup_assessment?.target_memory_id) {
+          targetIds.add(d.dedup_assessment.target_memory_id);
+        }
+
+        Array.from(targetIds).forEach((tid) => {
           getMemory(tid)
             .then((td) => {
               if (currentFetchId !== fetchIdRef.current) return;
@@ -106,12 +119,27 @@ export default function MemoryDetailPanel({
   }
 
   async function handleResolve(action: "keep_both" | "replace_existing", targetMemoryId: string) {
+    await handleResolveWithParams(action, targetMemoryId);
+  }
+
+  async function handleResolveWithParams(
+    action: "keep_both" | "replace_existing" | "merge_existing" | "supersede_existing",
+    targetMemoryId: string,
+    intContent?: string,
+    swDate?: string
+  ) {
     setIsSubmitting(true);
     try {
-      await resolveMemory(memoryId, action, targetMemoryId);
+      await resolveMemory(memoryId, action, targetMemoryId, intContent, swDate);
       const updated = await getMemory(memoryId);
       setDetail(updated);
-      notify(`${memoryId} を「${action === "keep_both" ? "両方保持" : "既存を候補で更新"}」で解決しました`);
+      let actionLabel = "";
+      if (action === "keep_both") actionLabel = "両方保持";
+      else if (action === "replace_existing") actionLabel = "既存を候補で更新";
+      else if (action === "merge_existing") actionLabel = "マージ";
+      else if (action === "supersede_existing") actionLabel = "後継として保存";
+
+      notify(`${memoryId} を「${actionLabel}」で解決しました`);
       onChanged(updated);
     } catch (e) {
       const msg = e instanceof ApiError ? e.message : "操作に失敗しました";
@@ -162,7 +190,151 @@ export default function MemoryDetailPanel({
         </>
       )}
 
-      {hasSuggestions && (
+      {detail.status === "candidate" && detail.dedup_assessment && (
+        <>
+          <h2 className="mt-4 text-sm font-semibold text-slate-700">LLM重複・置換判定</h2>
+          <div className="mt-1 space-y-2">
+            {detail.dedup_assessment.decision === "merge" && (
+              <div className="rounded border border-blue-200 bg-blue-50 p-3">
+                <div className="font-semibold text-blue-900">
+                  マージ提案 (Merge)
+                  {typeof detail.dedup_assessment.similarity_score === "number" && ` (類似度: ${detail.dedup_assessment.similarity_score})`}
+                </div>
+                {detail.dedup_assessment.reason && (
+                  <div className="text-xs text-blue-800 mt-1">理由: {detail.dedup_assessment.reason}</div>
+                )}
+
+                {detail.dedup_assessment.target_memory_id && targetDetails[detail.dedup_assessment.target_memory_id] ? (
+                  <div className="mt-3 border-t border-blue-200 pt-3 text-xs">
+                    <div className="font-semibold text-slate-700">既存記憶 ({detail.dedup_assessment.target_memory_id}):</div>
+                    <div className="mt-1 whitespace-pre-wrap text-slate-800 bg-white p-2 rounded border border-blue-100">
+                      {targetDetails[detail.dedup_assessment.target_memory_id].content}
+                    </div>
+                  </div>
+                ) : (
+                  detail.dedup_assessment.target_memory_id && <div className="text-xs text-slate-500 mt-2">既存記憶を読み込み中…</div>
+                )}
+
+                <div className="mt-3 text-xs">
+                  <label className="font-semibold text-slate-700 block mb-1 font-semibold text-blue-900">統合本文の編集:</label>
+                  <textarea
+                    value={integratedContent}
+                    onChange={(e) => setIntegratedContent(e.target.value)}
+                    className="w-full rounded border border-blue-300 p-2 text-sm bg-white"
+                    rows={3}
+                  />
+                </div>
+
+                <div className="mt-3 flex gap-2 border-t border-blue-200 pt-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (detail.dedup_assessment?.target_memory_id) {
+                        handleResolveWithParams("merge_existing", detail.dedup_assessment.target_memory_id, integratedContent);
+                      }
+                    }}
+                    disabled={isSubmitting || !integratedContent.trim() || !detail.dedup_assessment?.target_memory_id}
+                    className="rounded bg-blue-600 px-3 py-1 text-xs text-white disabled:opacity-50"
+                  >
+                    マージ
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => act("approve")}
+                    disabled={isSubmitting}
+                    className="rounded bg-slate-600 px-3 py-1 text-xs text-white disabled:opacity-50"
+                  >
+                    新規として保存
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {detail.dedup_assessment.decision === "supersede" && (
+              <div className="rounded border border-purple-200 bg-purple-50 p-3">
+                <div className="font-semibold text-purple-900">
+                  置換提案 (Supersede)
+                </div>
+                {detail.dedup_assessment.reason && (
+                  <div className="text-xs text-purple-800 mt-1">理由: {detail.dedup_assessment.reason}</div>
+                )}
+
+                {detail.dedup_assessment.target_memory_id && targetDetails[detail.dedup_assessment.target_memory_id] ? (
+                  <div className="mt-3 border-t border-purple-200 pt-3 text-xs">
+                    <div className="font-semibold text-slate-700">置換される既存記憶 ({detail.dedup_assessment.target_memory_id}):</div>
+                    <div className="mt-1 whitespace-pre-wrap text-slate-800 bg-white p-2 rounded border border-purple-100">
+                      {targetDetails[detail.dedup_assessment.target_memory_id].content}
+                    </div>
+                  </div>
+                ) : (
+                  detail.dedup_assessment.target_memory_id && <div className="text-xs text-slate-500 mt-2">既存記憶を読み込み中…</div>
+                )}
+
+                <div className="mt-3 text-xs">
+                  <label className="font-semibold text-slate-700 block mb-1 font-semibold text-purple-900">切替日 (YYYY-MM-DD):</label>
+                  <input
+                    type="text"
+                    value={switchDate}
+                    onChange={(e) => setSwitchDate(e.target.value)}
+                    placeholder="YYYY-MM-DD"
+                    className="rounded border border-purple-300 px-2 py-1 text-sm bg-white"
+                  />
+                </div>
+
+                <div className="mt-3 flex gap-2 border-t border-purple-200 pt-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (detail.dedup_assessment?.target_memory_id) {
+                        handleResolveWithParams("supersede_existing", detail.dedup_assessment.target_memory_id, undefined, switchDate);
+                      }
+                    }}
+                    disabled={isSubmitting || !/^\d{4}-\d{2}-\d{2}$/.test(switchDate) || !detail.dedup_assessment?.target_memory_id}
+                    className="rounded bg-purple-600 px-3 py-1 text-xs text-white disabled:opacity-50"
+                  >
+                    後継として保存
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => act("approve")}
+                    disabled={isSubmitting}
+                    className="rounded bg-slate-600 px-3 py-1 text-xs text-white disabled:opacity-50"
+                  >
+                    新規として保存
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {detail.dedup_assessment.decision === "new" && (
+              <div className="rounded border border-emerald-200 bg-emerald-50 p-3">
+                <div className="font-semibold text-emerald-900">
+                  新規判定 (New)
+                </div>
+                {detail.dedup_assessment.reason && (
+                  <div className="text-xs text-emerald-800 mt-1">理由: {detail.dedup_assessment.reason}</div>
+                )}
+                <div className="text-xs text-emerald-700 mt-2 font-medium">
+                  既存の記憶に重複・類似するものはなく、新しい情報であると判定されました。通常の承認フローで処理してください。
+                </div>
+              </div>
+            )}
+
+            {detail.dedup_assessment.decision === "failed" && (
+              <div className="rounded border border-rose-200 bg-rose-50 p-3">
+                <div className="font-semibold text-rose-900">
+                  LLM判定に失敗。通常レビュー可能
+                </div>
+                <div className="text-xs text-rose-700 mt-2">
+                  類似候補のLLM分類に失敗しました。通常の承認・却下フローで処理してください。
+                </div>
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
+      {!detail.dedup_assessment && hasSuggestions && (
         <>
           <h2 className="mt-4 text-sm font-semibold text-slate-700">重複・置換提案</h2>
           <ul className="mt-1 space-y-2 text-sm">
@@ -242,7 +414,11 @@ export default function MemoryDetailPanel({
       <div className="mt-6 space-y-3">
         {!editing ? (
           <div className="flex gap-2">
-            {detail.status === "candidate" && !hasSuggestions && (
+            {detail.status === "candidate" && (
+              detail.dedup_assessment
+                ? (detail.dedup_assessment.decision === "new" || detail.dedup_assessment.decision === "failed")
+                : !hasSuggestions
+            ) && (
               <>
                 <button
                   type="button"

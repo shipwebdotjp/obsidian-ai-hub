@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from typing import Literal, Optional, Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 EDITABLE_FIELDS = (
     "content",
@@ -14,7 +14,7 @@ EDITABLE_FIELDS = (
 )
 
 ALLOWED_STABILITY = {"stable", "tentative", "explicitly_settled"}
-ALLOWED_STATUS = {"candidate", "approved", "rejected", "expired"}
+ALLOWED_STATUS = {"candidate", "approved", "rejected", "expired", "superseded"}
 ALLOWED_ACTIONS = {"approve", "reject"}
 ALLOWED_KINDS = {
     "preference",
@@ -39,11 +39,20 @@ class DedupSuggestion(BaseModel):
     score: Optional[float] = None
 
 
+class DedupAssessment(BaseModel):
+    decision: Literal["merge", "new", "supersede", "failed"]
+    target_memory_id: Optional[str] = None
+    similarity_score: Optional[float] = None
+    reason: Optional[str] = None
+    integrated_content: Optional[str] = None
+    failure_kind: Optional[Literal["request_failed", "response_invalid"]] = None
+
+
 class Memory(BaseModel):
     model_config = {"populate_by_name": True}
 
     memory_id: str
-    status: Literal["candidate", "approved", "rejected", "expired"]
+    status: Literal["candidate", "approved", "rejected", "expired", "superseded"]
     kind: Optional[Literal[
         "preference",
         "decision_policy",
@@ -66,6 +75,7 @@ class Memory(BaseModel):
     supersedes: Optional[str] = None
     contradicts: Optional[list[str]] = Field(default_factory=list)
     dedup_suggestions: Optional[list[DedupSuggestion]] = Field(default_factory=list)
+    dedup_assessment: Optional[DedupAssessment] = None
     provenance: Optional[dict] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
@@ -140,8 +150,20 @@ class UpdateResponse(BaseModel):
     memory: Optional[Memory] = None
 
 class ResolveRequest(BaseModel):
-    action: Literal["keep_both", "replace_existing"]
+    action: Literal["keep_both", "replace_existing", "merge_existing", "supersede_existing"]
     target_memory_id: str
+    integrated_content: Optional[str] = None
+    switch_date: Optional[str] = None
+
+    @model_validator(mode="after")
+    def validate_action_fields(self) -> "ResolveRequest":
+        if self.action == "merge_existing":
+            if not self.integrated_content or not self.integrated_content.strip():
+                raise ValueError("integrated_content is required when action is merge_existing")
+        elif self.action == "supersede_existing":
+            if not self.switch_date or not self.switch_date.strip():
+                raise ValueError("switch_date is required when action is supersede_existing")
+        return self
 
 
 class ResolveResponse(BaseModel):
