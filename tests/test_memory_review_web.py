@@ -260,3 +260,99 @@ def test_serve_loopback_no_token(monkeypatch):
 
     with pytest.raises(RuntimeError):
         web_app.create_app(host="0.0.0.0", port=0, token="")
+
+
+def test_resolve_memory_keep_both(loopback_client):
+    # Seed approved target memory
+    m_target = _make_candidate('mem_target_1', status='approved', content='ターゲットの内容です')
+    # Seed candidate with target in suggestions
+    m_cand = _make_candidate('mem_candidate_1', status='candidate', content='候補の内容です')
+    m_cand['dedup_suggestions'] = [{
+        'target_memory_id': 'mem_target_1',
+        'relation': 'supersedes',
+        'reason': '置換候補',
+        'score': 0.90
+    }]
+
+    memory.save_all_memories([m_target, m_cand])
+
+    res = loopback_client.post(
+        '/api/v1/memories/mem_candidate_1/resolve',
+        json={'action': 'keep_both', 'target_memory_id': 'mem_target_1'}
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body['candidate']['status'] == 'approved'
+    assert body['candidate']['reviewed_by'] == 'user'
+    assert body['target']['status'] == 'approved'
+    assert body['target']['content'] == 'ターゲットの内容です'
+
+    # Check candidate events
+    events = memory.get_memory_events('mem_candidate_1')
+    assert len(events) == 1
+    assert events[0]['event_type'] == 'approved'
+
+
+
+def test_resolve_memory_replace_existing(loopback_client):
+    m_target = _make_candidate('mem_target_2', status='approved', content='古いターゲットの内容です')
+    m_target['tags'] = ['tagA']
+    m_target['evidence'] = [{'path': 'noteA.md', 'quote': 'quoteA', 'observed_at': '2026-07-01'}]
+
+    m_cand = _make_candidate('mem_candidate_2', status='candidate', content='新しい候補の内容です')
+    m_cand['tags'] = ['tagB']
+    m_cand['evidence'] = [{'path': 'noteB.md', 'quote': 'quoteB', 'observed_at': '2026-07-13'}]
+    m_cand['dedup_suggestions'] = [{
+        'target_memory_id': 'mem_target_2',
+        'relation': 'supersedes'
+    }]
+
+    memory.save_all_memories([m_target, m_cand])
+
+    res = loopback_client.post(
+        '/api/v1/memories/mem_candidate_2/resolve',
+        json={'action': 'replace_existing', 'target_memory_id': 'mem_target_2'}
+    )
+    assert res.status_code == 200
+    body = res.json()
+
+    assert body['candidate']['status'] == 'rejected'
+    assert body['target']['status'] == 'approved'
+    assert body['target']['content'] == '新しい候補の内容です'
+    assert set(body['target']['tags']) == {'tagA', 'tagB'}
+    assert len(body['target']['evidence']) == 2
+
+    # Check target events for diff
+    target_events = memory.get_memory_events('mem_target_2')
+    assert len(target_events) == 1
+    assert target_events[0]['event_type'] == 'edited'
+    assert target_events[0]['changes']['content']['after'] == '新しい候補の内容です'
+
+    # Check candidate events for rejection
+    cand_events = memory.get_memory_events('mem_candidate_2')
+    assert len(cand_events) == 1
+    assert cand_events[0]['event_type'] == 'rejected'
+
+
+def test_resolve_memory_validation_errors(loopback_client):
+    # Seed memories
+    m_target = _make_candidate('mem_target_3', status='approved', content='既存')
+    m_cand = _make_candidate('mem_candidate_3', status='candidate', content='候補')
+    m_cand['dedup_suggestions'] = [] # Empty suggestions
+
+    memory.save_all_memories([m_target, m_cand])
+
+    # 1. target not in suggestions
+    res = loopback_client.post(
+        '/api/v1/memories/mem_candidate_3/resolve',
+        json={'action': 'keep_both', 'target_memory_id': 'mem_target_3'}
+    )
+    assert res.status_code == 400
+    assert "not in candidate's suggestions" in res.json()['detail']
+
+    # 2. invalid action
+    res = loopback_client.post(
+        '/api/v1/memories/mem_candidate_3/resolve',
+        json={'action': 'invalid_action', 'target_memory_id': 'mem_target_3'}
+    )
+    assert res.status_code == 422 # Pydantic Validation Error for literal field

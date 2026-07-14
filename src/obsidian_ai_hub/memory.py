@@ -256,13 +256,14 @@ def log_memory_event(
     new_status: str,
     changes: Optional[dict] = None,
     reason: Optional[str] = None,
-    conn: Optional[sqlite3.Connection] = None
+    conn: Optional[sqlite3.Connection] = None,
+    actor: str = "user"
 ):
     event_record = {
         "schema_version": 1,
         "event_id": generate_event_id(),
         "occurred_at": get_current_timestamp(),
-        "actor": "user",
+        "actor": actor,
         "event_type": event_type,
         "memory_id": memory_id,
         "previous_status": previous_status,
@@ -340,6 +341,46 @@ def project_approved_memories():
 
     with open(approved_md_file, "w", encoding="utf-8") as f:
         f.write("\n".join(lines).strip() + "\n")
+
+
+
+def merge_topics_and_tags(existing: list[str], new_vals: list[str]) -> list[str]:
+    merged = list(existing)
+    for val in new_vals:
+        if val not in merged:
+            merged.append(val)
+    return merged
+
+
+def merge_evidence(existing: list[dict], new_vals: list[dict]) -> list[dict]:
+    merged = list(existing)
+    for item in new_vals:
+        path = item.get("path", "")
+        quote = item.get("quote", "")
+        observed_at = item.get("observed_at")
+
+        duplicate = False
+        for ex in merged:
+            if ex.get("path", "") == path and ex.get("quote", "") == quote and ex.get("observed_at") == observed_at:
+                duplicate = True
+                break
+        if not duplicate:
+            merged.append(item)
+    return merged
+
+
+def update_target_with_candidate_data(target: dict, cand: dict, reviewed_by: str) -> dict:
+    timestamp_now = get_current_timestamp()
+    target["content"] = cand.get("content", "")
+    for field in ["kind", "valid_from", "valid_until", "review_due_at", "stability", "sensitivity", "extraction_confidence", "contradicts", "provenance"]:
+        target[field] = cand.get(field)
+    target["topics"] = merge_topics_and_tags(target.get("topics") or [], cand.get("topics") or [])
+    target["tags"] = merge_topics_and_tags(target.get("tags") or [], cand.get("tags") or [])
+    target["evidence"] = merge_evidence(target.get("evidence") or [], cand.get("evidence") or [])
+    target["updated_at"] = timestamp_now
+    target["reviewed_by"] = reviewed_by
+    target["reviewed_at"] = timestamp_now
+    return target
 
 
 def run_deduplication(candidate: dict, existing_memories: list[dict], embedder=None) -> list[dict]:
@@ -492,6 +533,7 @@ def _load_weekly_memory_sources(week_start: datetime, week_end: datetime) -> tup
 
 def extract_memories(week_date_str: Optional[str] = None) -> list[dict]:
     """Extract memory candidates from a completed or explicitly selected week."""
+    approved_modified = False
     week_start, week_end = _week_bounds(week_date_str)
     week_start_str = week_start.strftime("%Y-%m-%d")
     week_end_str = week_end.strftime("%Y-%m-%d")
@@ -587,7 +629,129 @@ def extract_memories(week_date_str: Optional[str] = None) -> list[dict]:
                     "reviewed_at": None
                 }
 
-                # Sequential deduplication suggestions
+                cand_norm = normalize_content(cand.get("content", ""))
+                cand_key = cand.get("memory_key", "")
+
+                # Fetch up-to-date active approved memories
+                cursor = conn.cursor()
+                cursor.execute("SELECT * FROM memories WHERE status = 'approved'")
+                approved_rows = [deserialize_memory(dict(row)) for row in cursor.fetchall()]
+
+                # 1. Check for complete normalized content match across ANY approved memory
+                exact_content_matches = [m for m in approved_rows if normalize_content(m.get("content", "")) == cand_norm]
+
+                if exact_content_matches:
+                    # Duplicate: Auto-reject candidate, keep existing unchanged
+                    cand["status"] = "rejected"
+                    cand["reviewed_by"] = "system"
+                    cand["reviewed_at"] = timestamp_now
+                    cand["updated_at"] = timestamp_now
+
+                    matched_ids = [m["memory_id"] for m in exact_content_matches]
+
+                    # Insert rejected candidate
+                    db_row = serialize_memory(cand)
+                    columns = ", ".join(MEMORY_COLUMNS)
+                    placeholders = ", ".join("?" for _ in MEMORY_COLUMNS)
+                    conn.execute(
+                        f"INSERT INTO memories ({columns}) VALUES ({placeholders})",
+                        tuple(db_row.get(col) for col in MEMORY_COLUMNS),
+                    )
+
+                    # Create rejection event
+                    log_memory_event(
+                        event_type="rejected",
+                        memory_id=memory_id,
+                        previous_status=None,
+                        new_status="rejected",
+                        changes={"relation": "duplicate", "target_memory_ids": matched_ids},
+                        reason="内容が既存の記憶と完全に一致するため自動却下",
+                        conn=conn,
+                        actor="system"
+                    )
+                    new_candidates.append(cand)
+                    existing_memories.append(cand)
+                    continue
+
+                # 2. Check for memory_key exact match with content difference
+                key_match_approved = None
+                if cand_key:
+                    for m in approved_rows:
+                        if m.get("memory_key") == cand_key:
+                            key_match_approved = m
+                            break
+
+                if key_match_approved:
+                    # Content is different (since exact content match checked above didn't trigger).
+                    # Auto-update the existing approved memory, auto-reject candidate
+                    target_id = key_match_approved["memory_id"]
+
+                    # Store existing values for diff logging
+                    before_target = dict(key_match_approved)
+
+                    # Update target memory
+                    updated_target = update_target_with_candidate_data(key_match_approved, cand, reviewed_by="system")
+
+                    # Persist updated target
+                    db_row_target = serialize_memory(updated_target)
+                    set_clause = ", ".join(f"{col} = ?" for col in MEMORY_COLUMNS if col != "memory_id")
+                    values = [db_row_target.get(col) for col in MEMORY_COLUMNS if col != "memory_id"] + [target_id]
+                    conn.execute(f"UPDATE memories SET {set_clause} WHERE memory_id = ?", values)
+
+                    # Compute changes diff
+                    changes_diff = {}
+                    for field in MEMORY_COLUMNS:
+                        if field in ["updated_at", "reviewed_at"]:
+                            continue
+                        before_val = before_target.get(field)
+                        after_val = updated_target.get(field)
+                        if before_val != after_val:
+                            changes_diff[field] = {"before": before_val, "after": after_val}
+
+                    # Log event for existing memory update
+                    log_memory_event(
+                        event_type="edited",
+                        memory_id=target_id,
+                        previous_status="approved",
+                        new_status="approved",
+                        changes=changes_diff,
+                        reason=f"同一memory_keyの自動統合による更新（対象候補: {memory_id}）",
+                        conn=conn,
+                        actor="system"
+                    )
+
+                    # Reject candidate
+                    cand["status"] = "rejected"
+                    cand["reviewed_by"] = "system"
+                    cand["reviewed_at"] = timestamp_now
+                    cand["updated_at"] = timestamp_now
+
+                    db_row_cand = serialize_memory(cand)
+                    columns = ", ".join(MEMORY_COLUMNS)
+                    placeholders = ", ".join("?" for _ in MEMORY_COLUMNS)
+                    conn.execute(
+                        f"INSERT INTO memories ({columns}) VALUES ({placeholders})",
+                        tuple(db_row_cand.get(col) for col in MEMORY_COLUMNS),
+                    )
+
+                    # Log event for candidate rejection
+                    log_memory_event(
+                        event_type="rejected",
+                        memory_id=memory_id,
+                        previous_status=None,
+                        new_status="rejected",
+                        changes={"relation": "supersedes", "target_memory_id": target_id},
+                        reason="同一memory_keyの既存記憶があるため自動置換による却下",
+                        conn=conn,
+                        actor="system"
+                    )
+
+                    new_candidates.append(cand)
+                    existing_memories.append(cand)
+                    approved_modified = True
+                    continue
+
+                # 3. Vector similarity fallback
                 suggestions = run_deduplication(cand, existing_memories, embedder=embedder)
                 if suggestions:
                     cand["dedup_suggestions"] = suggestions
@@ -614,6 +778,9 @@ def extract_memories(week_date_str: Optional[str] = None) -> list[dict]:
                 existing_memories.append(cand)
     finally:
         conn.close()
+
+    if approved_modified:
+        project_approved_memories()
 
     return new_candidates
 
@@ -1097,3 +1264,127 @@ def get_memory_events(memory_id: str) -> list:
             return [deserialize_event(dict(row)) for row in rows]
     finally:
         conn.close()
+
+def resolve_memory(candidate_id: str, action: str, target_memory_id: str) -> tuple[dict, Optional[dict]]:
+    """
+    Resolve a candidate memory by either keeping both or replacing the existing one.
+    Returns (candidate, target).
+    Raises ValueError on invalid state/inputs.
+    """
+    if action not in ("keep_both", "replace_existing"):
+        raise ValueError("action must be 'keep_both' or 'replace_existing'")
+
+    conn = get_db_connection()
+    try:
+        with conn:
+            cursor = conn.cursor()
+
+            # Fetch candidate
+            cursor.execute("SELECT * FROM memories WHERE memory_id = ?", (candidate_id,))
+            cand_row = cursor.fetchone()
+            if cand_row is None:
+                raise ValueError(f"Candidate memory not found: {candidate_id}")
+            cand = deserialize_memory(dict(cand_row))
+
+            if cand.get("status") != "candidate":
+                raise ValueError(f"Memory {candidate_id} is not in candidate status (current: {cand.get('status')})")
+
+            # Fetch target
+            cursor.execute("SELECT * FROM memories WHERE memory_id = ?", (target_memory_id,))
+            target_row = cursor.fetchone()
+            if target_row is None:
+                raise ValueError(f"Target memory not found: {target_memory_id}")
+            target = deserialize_memory(dict(target_row))
+
+            if target.get("status") != "approved":
+                raise ValueError(f"Target memory {target_memory_id} is not in approved status")
+
+            # Validate target is in candidate's suggestions
+            suggestions = cand.get("dedup_suggestions") or []
+            target_ids = [s.get("target_memory_id") for s in suggestions if s.get("target_memory_id")]
+            if target_memory_id not in target_ids:
+                raise ValueError(f"Target {target_memory_id} is not in candidate's suggestions: {target_ids}")
+
+            timestamp_now = get_current_timestamp()
+
+            if action == "keep_both":
+                cand["status"] = "approved"
+                cand["reviewed_by"] = "user"
+                cand["reviewed_at"] = timestamp_now
+                cand["updated_at"] = timestamp_now
+
+                db_row_cand = serialize_memory(cand)
+                set_clause = ", ".join(f"{col} = ?" for col in MEMORY_COLUMNS if col != "memory_id")
+                values = [db_row_cand.get(col) for col in MEMORY_COLUMNS if col != "memory_id"] + [candidate_id]
+                conn.execute(f"UPDATE memories SET {set_clause} WHERE memory_id = ?", values)
+
+                log_memory_event(
+                    event_type="approved",
+                    memory_id=candidate_id,
+                    previous_status="candidate",
+                    new_status="approved",
+                    reason="手動操作: 両方保持を選択して承認",
+                    conn=conn
+                )
+
+            elif action == "replace_existing":
+                # Save target state before update
+                before_target = dict(target)
+
+                # Update target with candidate data
+                target = update_target_with_candidate_data(target, cand, reviewed_by="user")
+
+                # Save updated target
+                db_row_target = serialize_memory(target)
+                set_clause = ", ".join(f"{col} = ?" for col in MEMORY_COLUMNS if col != "memory_id")
+                values = [db_row_target.get(col) for col in MEMORY_COLUMNS if col != "memory_id"] + [target_memory_id]
+                conn.execute(f"UPDATE memories SET {set_clause} WHERE memory_id = ?", values)
+
+                # Compute differences
+                changes_diff = {}
+                for field in MEMORY_COLUMNS:
+                    if field in ["updated_at", "reviewed_at"]:
+                        continue
+                    before_val = before_target.get(field)
+                    after_val = target.get(field)
+                    if before_val != after_val:
+                        changes_diff[field] = {"before": before_val, "after": after_val}
+
+                # Log event for target
+                log_memory_event(
+                    event_type="edited",
+                    memory_id=target_memory_id,
+                    previous_status="approved",
+                    new_status="approved",
+                    changes=changes_diff,
+                    reason=f"手動操作: 置換による更新（対象候補: {candidate_id}）",
+                    conn=conn
+                )
+
+                # Reject candidate
+                cand["status"] = "rejected"
+                cand["reviewed_by"] = "user"
+                cand["reviewed_at"] = timestamp_now
+                cand["updated_at"] = timestamp_now
+
+                db_row_cand = serialize_memory(cand)
+                set_clause = ", ".join(f"{col} = ?" for col in MEMORY_COLUMNS if col != "memory_id")
+                values = [db_row_cand.get(col) for col in MEMORY_COLUMNS if col != "memory_id"] + [candidate_id]
+                conn.execute(f"UPDATE memories SET {set_clause} WHERE memory_id = ?", values)
+
+                # Log event for candidate
+                log_memory_event(
+                    event_type="rejected",
+                    memory_id=candidate_id,
+                    previous_status="candidate",
+                    new_status="rejected",
+                    changes={"relation": "supersedes", "target_memory_id": target_memory_id},
+                    reason="手動操作: 既存記憶の置換を選択して却下",
+                    conn=conn
+                )
+    finally:
+        conn.close()
+
+    project_approved_memories()
+
+    return cand, target

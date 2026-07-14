@@ -138,3 +138,12 @@ class UpdateResponse(BaseModel):
     updated: bool
     changes: dict
     memory: Optional[Memory] = None
+
+class ResolveRequest(BaseModel):
+    action: Literal["keep_both", "replace_existing"]
+    target_memory_id: str
+
+
+class ResolveResponse(BaseModel):
+    candidate: Memory
+    target: Optional[Memory] = None
