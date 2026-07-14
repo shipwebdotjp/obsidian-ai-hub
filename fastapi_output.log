@@ -1,0 +1,64 @@
+INFO:     Started server process [139370]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8765 (Press CTRL+C to quit)
+INFO:     127.0.0.1:53300 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53310 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53330 - "GET /api/v1/memory-options HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53332 - "GET /api/v1/memory-options HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53316 - "GET /api/v1/memories?status=candidate HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53340 - "GET /api/v1/memories?status=candidate HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53352 - "GET /api/v1/memories?status=candidate&q=VS+Code HTTP/1.1" 200 OK
+INFO:     127.0.0.1:34008 - "GET /api/v1/memories?status=candidate HTTP/1.1" 200 OK
+INFO:     127.0.0.1:34018 - "GET /api/v1/memories?status=approved HTTP/1.1" 200 OK
+INFO:     127.0.0.1:34028 - "GET /api/v1/memories/mem_20261010_xyz789 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:34040 - "GET /api/v1/memories/mem_20261010_xyz789 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:34052 - "GET /api/v1/memories?status=approved HTTP/1.1" 200 OK
+INFO:     127.0.0.1:34066 - "GET /api/v1/memories?status=approved&topic=%E3%82%BD%E3%83%95%E3%83%88%E3%82%A6%E3%82%A7%E3%82%A2%E9%96%8B%E7%99%BA HTTP/1.1" 200 OK
+2026-07-14 03:54:33,573 - obsidian_ai_hub.memory - INFO - Starting copilot profile rendering
+2026-07-14 03:54:33,574 - obsidian_ai_hub.memory - INFO - Checking and loading currently valid approved memories
+2026-07-14 03:54:33,581 - obsidian_ai_hub.utils.llm_client - INFO - Prepared messages for LLM: [HumanMessage(content='あなたは、ユーザーの承認済み長期記憶から、AI用アシスタント（Copilot）のプロファイルおよび行動ガイドラインを要約・生成するエキスパートです。\n\n以下の「承認済みかつ現在有効な長期記憶」を入力データとして分析し、指定された7つのMarkdownファイルの本文（Markdown）を合成・全置換で生成してください。\n\n## 1. 入力データ（承認済み・有効な長期記憶）\n\n[\n  {\n    "kind": "decision_policy",\n    "memory_key": "key-m2",\n    "content": "AIエージェントの作成時は、堅牢な検証レイヤーと単体テストを徹底する。",\n    "topics": [\n      "LLM・AI活用",\n      "ソフトウェア開発"\n    ],\n    "tags": [\n      "ai",\n      "testing"\n    ],\n    "valid_from": "2026-07-01",\n    "valid_until": null,\n    "stability": "stable",\n    "sensitivity": "personal",\n    "extraction_confidence": 0.98\n  }\n]\n\n---\n\n## 2. 生成対象ファイルとそれぞれの役割・内容\n\n1. `AI_README.md`\n   - **全体プロフィールとAI向けの横断的な指針**\n   - ユーザーの全体像、AIとして認識しておくべき基本的な情報、全体に関わる共通のガイドラインなどを記述します。\n2. `values.md`\n   - **明示された価値観・優先順位**\n   - ユーザーが人生や仕事、生活において重視している価値観、譲れないこだわり、大切にしたい優先順位を整理して記述します。\n3. `response_style.md`\n   - **応答・対話スタイルの好み**\n   - 望ましい文体、話し方、トーン（落ち着いたトーン、丁寧など）、過剰な表現の回避など、AIが回答を構成する際の好みを記述します。\n4. `decision_policy.md`\n   - **判断方針・優先順位**\n   - 行動や判断を迫られた際の明確な行動指針、トレードオフ発生時の判断の優先順位（例：スピード重視か、丁寧さ重視か）を整理して記述します。\n5. `risk_tolerance.md`\n   - **リスク許容度・慎重さの方針**\n   - 特定のタスク、状況、ドメインにおけるユーザーのリスク許容度や、どのような状況でより慎重であるべきか（確認を求めるかなど）を記述します。\n6. `memory_rules.md`\n   - **明示された記憶管理ルール**\n   - 記憶すべき情報の選別基準、記憶の更新頻度、不要になった記憶の削除ルールなど、記憶管理に関するユーザーの明示的なルールを記述します。\n7. `current_projects.md`\n   - **現在進行中のプロジェクト・コミットメント**\n   - 現在進行中または直近で優先して取り組んでいるプロジェクト、具体的なタスク、期限付きの目標やコミットメントを記述します。\n\n---\n\n## 3. 生成・合成における重要ルール\n\n- **エビデンスリンク・メモリIDの排除**:\n  - 生成するMarkdown本文中に、メモリID（`mem_...`）や、エビデンス/証拠リンク（例: `[[...]] — 「...」` やファイルのパスなど）、メタデータ情報を**絶対に含めない**でください。\n  - 自然な日本語の文章として読めるように、すべての情報を美しく、一貫性を持たせて要約・統合してください。\n- **ファイル本文の境界制限**:\n  - 各ファイルに設定する値は、**Markdown形式の本文（Body）のみ**としてください。\n  - フロントマター（Front Matter）、ファイルタイトル（例: `# AI_README` などのレベル1見出し）、および自動生成注記はプログラム側で自動的に付与するため、これらを含めてはいけません（見出しは `##` のレベル2から開始してください）。\n- **メモリが不足・不在の場合**:\n  - あるファイルに対して、関連する承認済みメモリが全く存在しない場合は、そのファイルの値として必ず「`現時点で承認済みメモリなし`」と出力してください。\n- **厳格なファクト遵守**:\n  - 入力データに含まれていない推測や事実誤認、憶測を交えないでください。提供された記憶情報をそのまま、あるいは要約・合成して整理する役割に徹してください。\n\n---\n\n## 4. 出力フォーマット\n\n出力は必ず以下のJSONオブジェクト形式のみとしてください。JSONはコードブロック（```json ... ```）で囲まれていても構いません。\n\n```json\n{\n  "AI_README.md": "## ユーザープロフィール...\\n\\n...",\n  "values.md": "## 重視する価値観...\\n\\n...",\n  "response_style.md": "## 望ましい文体とトーン...\\n\\n...",\n  "decision_policy.md": "## 優先される意思決定ポリシー...\\n\\n...",\n  "risk_tolerance.md": "## リスク許容方針...\\n\\n...",\n  "memory_rules.md": "## 記憶に関する明示的ルール...\\n\\n...",\n  "current_projects.md": "## 現在の主な取り組み...\\n\\n..."\n}\n```\n\n※注意事項:\n- 指定された7つのキーはすべて必須です。キー名の変更、不足、スペルミスは許されません。\n- 値は空文字列であってはなりません。情報がない場合は「現時点で承認済みメモリなし」としてください。\n', additional_kwargs={}, response_metadata={})]
+2026-07-14 03:54:33,863 - obsidian_ai_hub.web.api - ERROR - Failed to render copilot profile from API
+Traceback (most recent call last):
+  File "/app/src/obsidian_ai_hub/web/api.py", line 140, in render_copilot_profile
+    updated_files = service.render_copilot_profile()
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/src/obsidian_ai_hub/web/service.py", line 108, in render_copilot_profile
+    return memory.render_copilot_profile()
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/src/obsidian_ai_hub/memory.py", line 1591, in render_copilot_profile
+    response = llm_client.generate_llm_response(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/src/obsidian_ai_hub/utils/llm_client.py", line 139, in generate_llm_response
+    llm = create_langchain_llm(
+          ^^^^^^^^^^^^^^^^^^^^^
+  File "/app/src/obsidian_ai_hub/utils/llm_client.py", line 239, in create_langchain_llm
+    return create_ollama_llm(model, temperature, max_tokens)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/src/obsidian_ai_hub/utils/llm_client.py", line 351, in create_ollama_llm
+    return ChatOllama(
+           ^^^^^^^^^^^
+  File "/app/.venv/lib/python3.12/site-packages/langchain_core/load/serializable.py", line 118, in __init__
+    super().__init__(*args, **kwargs)
+  File "/app/.venv/lib/python3.12/site-packages/pydantic/main.py", line 263, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/.venv/lib/python3.12/site-packages/langchain_ollama/chat_models.py", line 960, in _set_clients
+    validate_model(self._client, self.model)
+  File "/app/.venv/lib/python3.12/site-packages/langchain_ollama/_utils.py", line 23, in validate_model
+    response = client.list()
+               ^^^^^^^^^^^^^
+  File "/app/.venv/lib/python3.12/site-packages/ollama/_client.py", line 626, in list
+    return self._request(
+           ^^^^^^^^^^^^^^
+  File "/app/.venv/lib/python3.12/site-packages/ollama/_client.py", line 199, in _request
+    return cls(**self._request_raw(*args, **kwargs).json())
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/.venv/lib/python3.12/site-packages/ollama/_client.py", line 145, in _request_raw
+    raise ConnectionError(CONNECTION_ERROR_MESSAGE) from None
+ConnectionError: Failed to connect to Ollama. Please check that Ollama is downloaded, running and accessible. https://ollama.com/download
+INFO:     127.0.0.1:34080 - "POST /api/v1/copilot-profile/render HTTP/1.1" 500 Internal Server Error
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [139370]

@@ -87,3 +87,22 @@ def delete_memory(memory_id: str) -> dict:
 
 def batch_delete(memory_ids: list[str]) -> dict:
     return memory.batch_delete_memories(memory_ids)
+
+
+def get_memory_options() -> dict:
+    from obsidian_ai_hub.utils.topics import TOPIC_ENUM
+    kinds = sorted(list(schemas.ALLOWED_KINDS))
+    # Keep Kinds ordered as defined or stables sorted. Since ALLOWED_KINDS is a set, sorting is stable.
+    # Actually, memory.py has a fixed order of kinds: kinds_order = ["preference", "decision_policy", "fact", "commitment", "pattern", "episode"]
+    # Let's use this stable order instead!
+    kinds_order = ["preference", "decision_policy", "fact", "commitment", "pattern", "episode"]
+    # Just in case kinds_order isn't aligned with schemas.ALLOWED_KINDS, we filter/use it
+    kinds = [k for k in kinds_order if k in schemas.ALLOWED_KINDS]
+    return {
+        "kinds": kinds,
+        "topics": list(TOPIC_ENUM)
+    }
+
+
+def render_copilot_profile() -> list[str]:
+    return memory.render_copilot_profile()

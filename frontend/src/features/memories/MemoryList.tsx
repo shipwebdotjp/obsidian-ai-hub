@@ -6,6 +6,7 @@ export interface MemoryListProps {
   status: MemoryStatus;
   query: string;
   topic: string;
+  kind?: string;
   selectedIds: Set<string>;
   onSelectionChange: (next: Set<string>) => void;
   onSelect: (memory: Memory) => void;
@@ -17,6 +18,7 @@ export default function MemoryList({
   status,
   query,
   topic,
+  kind,
   selectedIds,
   onSelectionChange,
   onSelect,
@@ -37,7 +39,7 @@ export default function MemoryList({
     setLoading(true);
     setError(null);
     try {
-      const res = await listMemories({ status, q: query, topic });
+      const res = await listMemories({ status, q: query, topic, kind });
       if (controller.signal.aborted) return;
       setItems(res.items);
       onSelectionChange(new Set());
@@ -48,7 +50,7 @@ export default function MemoryList({
     } finally {
       if (!controller.signal.aborted) setLoading(false);
     }
-  }, [status, query, topic, onSelectionChange]);
+  }, [status, query, topic, kind, onSelectionChange]);
 
   useEffect(() => {
     void reload();

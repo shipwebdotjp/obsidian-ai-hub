@@ -357,3 +357,53 @@ def test_resolve_memory_validation_errors(loopback_client):
         json={'action': 'invalid_action', 'target_memory_id': 'mem_target_3'}
     )
     assert res.status_code == 422 # Pydantic Validation Error for literal field
+
+
+def test_get_memory_options(loopback_client):
+    from obsidian_ai_hub.utils.topics import TOPIC_ENUM
+    from obsidian_ai_hub.web.schemas import ALLOWED_KINDS
+
+    res = loopback_client.get("/api/v1/memory-options")
+    assert res.status_code == 200
+    body = res.json()
+    assert "kinds" in body
+    assert "topics" in body
+    assert body["topics"] == TOPIC_ENUM
+    assert set(body["kinds"]) == ALLOWED_KINDS
+
+
+def test_render_copilot_profile_success(loopback_client):
+    with patch("obsidian_ai_hub.memory.render_copilot_profile") as mock_render:
+        mock_render.return_value = ["copilot/AI_README.md", "copilot/core/values.md"]
+        res = loopback_client.post("/api/v1/copilot-profile/render")
+        assert res.status_code == 200
+        body = res.json()
+        assert body["updated_files"] == ["copilot/AI_README.md", "copilot/core/values.md"]
+        mock_render.assert_called_once()
+
+
+def test_render_copilot_profile_failure(loopback_client):
+    with patch("obsidian_ai_hub.memory.render_copilot_profile", side_effect=ValueError("LLM Error")):
+        res = loopback_client.post("/api/v1/copilot-profile/render")
+        assert res.status_code == 500
+        assert "Failed to render copilot profile: LLM Error" in res.json()["detail"]
+
+
+def test_render_copilot_profile_token_protection():
+    from fastapi.testclient import TestClient
+    from obsidian_ai_hub.web.app import create_app
+
+    app = create_app(host="0.0.0.0", port=0, token="secret-token")
+    client = TestClient(app)
+
+    # 411/401 is returned when not authorized
+    res = client.post("/api/v1/copilot-profile/render")
+    assert res.status_code == 401
+
+    with patch("obsidian_ai_hub.memory.render_copilot_profile") as mock_render:
+        mock_render.return_value = []
+        res = client.post(
+            "/api/v1/copilot-profile/render",
+            headers={"Authorization": "Bearer secret-token"}
+        )
+        assert res.status_code == 200

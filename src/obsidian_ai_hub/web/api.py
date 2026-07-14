@@ -127,3 +127,21 @@ def delete_memory(memory_id: str, _=Depends(_require_loopback_or_token)):
 @router.post("/memories/batch-delete", response_model=schemas.BatchDeleteResponse)
 def batch_delete(body: schemas.BatchDeleteRequest, _=Depends(_require_loopback_or_token)):
     return service.batch_delete(body.memory_ids)
+
+
+@router.get("/memory-options", response_model=schemas.MemoryOptionsResponse)
+def get_memory_options(_=Depends(_require_loopback_or_token)):
+    return service.get_memory_options()
+
+
+@router.post("/copilot-profile/render", response_model=schemas.RenderCopilotProfileResponse)
+def render_copilot_profile(_=Depends(_require_loopback_or_token)):
+    try:
+        updated_files = service.render_copilot_profile()
+        return {"updated_files": updated_files}
+    except Exception as e:
+        logger.exception("Failed to render copilot profile from API")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to render copilot profile: {str(e)}"
+        )
