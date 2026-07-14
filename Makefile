@@ -48,9 +48,9 @@ errorlogs:
 	tail -f /tmp/obsidian_merge.err
 
 # Memory Review Web UI のフロントエンドをビルド（dist を生成）
-build-web:
+npm-build:
 	cd frontend && npm ci && npm run build
 
 # Memory Review Web UI の開発サーバ（Vite + FastAPI を別portで起動する想定）
-dev-web:
+npm-dev:
 	cd frontend && npm run dev

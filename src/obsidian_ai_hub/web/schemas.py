@@ -147,3 +147,29 @@ class ResolveRequest(BaseModel):
 class ResolveResponse(BaseModel):
     candidate: Memory
     target: Optional[Memory] = None
+
+
+class DeleteResponse(BaseModel):
+    found: bool
+    deleted: bool
+    events_deleted: int = 0
+    memory: Optional[Memory] = None
+
+
+class BatchDeleteRequest(BaseModel):
+    memory_ids: list[str]
+
+    @field_validator("memory_ids")
+    @classmethod
+    def _memory_ids_must_be_unique_and_non_empty(cls, v: list[str]) -> list[str]:
+        if not v:
+            raise ValueError("memory_ids must not be empty")
+        if len(v) != len(set(v)):
+            raise ValueError("memory_ids must not contain duplicates")
+        return v
+
+
+class BatchDeleteResponse(BaseModel):
+    deleted: list[str]
+    not_found: list[str]
+    events_deleted: int = 0

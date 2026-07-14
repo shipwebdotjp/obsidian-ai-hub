@@ -463,3 +463,239 @@ def test_config_fallback_ordering(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "yaml_config", {})
     val = config._env_or_config("MEMORY_SQLITE_PATH", "memory", "sqlite_path")
     assert val is None
+
+
+def test_delete_memory(clean_memory_env):
+    m = {
+        "memory_id": "mem_del_test",
+        "status": "candidate",
+        "kind": "preference",
+        "memory_key": "del-key",
+        "content": "削除テスト",
+        "created_at": "2026-07-14T10:00:00+09:00",
+        "updated_at": "2026-07-14T10:00:00+09:00",
+    }
+    memory.save_all_memories([m])
+
+    mems = memory.load_all_memories()
+    assert len(mems) == 1
+
+    result = memory.delete_memory("mem_del_test")
+    assert result["found"] is True
+    assert result["deleted"] is True
+    assert result["memory"]["content"] == "削除テスト"
+
+    mems = memory.load_all_memories()
+    assert len(mems) == 0
+
+    with memory.get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM memory_events WHERE memory_id = ?", ("mem_del_test",))
+        assert cursor.fetchone()[0] == 0
+
+
+def test_delete_memory_not_found(clean_memory_env):
+    result = memory.delete_memory("mem_nonexistent")
+    assert result["found"] is False
+    assert result["deleted"] is False
+    assert result["memory"] is None
+
+
+def test_delete_memory_with_events(clean_memory_env):
+    m = {
+        "memory_id": "mem_evt_del",
+        "status": "approved",
+        "kind": "preference",
+        "memory_key": "evt-del-key",
+        "content": "イベント付き削除テスト",
+        "created_at": "2026-07-14T10:00:00+09:00",
+        "updated_at": "2026-07-14T10:00:00+09:00",
+    }
+    memory.save_all_memories([m])
+
+    memory.log_memory_event(
+        event_type="approved",
+        memory_id="mem_evt_del",
+        previous_status="candidate",
+        new_status="approved",
+        reason="承認テスト",
+    )
+    memory.log_memory_event(
+        event_type="rejected",
+        memory_id="mem_evt_del",
+        previous_status="approved",
+        new_status="rejected",
+        reason="却下テスト",
+    )
+
+    with memory.get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM memory_events WHERE memory_id = ?", ("mem_evt_del",))
+        assert cursor.fetchone()[0] == 2
+
+    result = memory.delete_memory("mem_evt_del")
+    assert result["found"] is True
+    assert result["deleted"] is True
+    assert result["events_deleted"] == 2
+
+    with memory.get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM memory_events WHERE memory_id = ?", ("mem_evt_del",))
+        assert cursor.fetchone()[0] == 0
+
+
+def test_delete_memory_prunes_dedup_suggestions(clean_memory_env):
+    approved = {
+        "memory_id": "mem_approved_1",
+        "status": "approved",
+        "kind": "preference",
+        "memory_key": "approved-key",
+        "content": "承認済み内容",
+        "created_at": "2026-07-14T10:00:00+09:00",
+        "updated_at": "2026-07-14T10:00:00+09:00",
+    }
+    candidate_with_suggestion = {
+        "memory_id": "mem_candidate_ref",
+        "status": "candidate",
+        "kind": "preference",
+        "memory_key": "cand-key",
+        "content": "候補の内容",
+        "dedup_suggestions": [
+            {"target_memory_id": "mem_approved_1", "relation": "duplicate", "score": 0.95},
+        ],
+        "created_at": "2026-07-14T10:00:00+09:00",
+        "updated_at": "2026-07-14T10:00:00+09:00",
+    }
+    another_candidate = {
+        "memory_id": "mem_other_cand",
+        "status": "candidate",
+        "kind": "preference",
+        "memory_key": "other-key",
+        "content": "別の候補",
+        "dedup_suggestions": [
+            {"target_memory_id": "mem_approved_1", "relation": "duplicate", "score": 0.90},
+            {"target_memory_id": "mem_unrelated", "relation": "duplicate", "score": 0.80},
+        ],
+        "created_at": "2026-07-14T10:00:00+09:00",
+        "updated_at": "2026-07-14T10:00:00+09:00",
+    }
+    no_suggestion = {
+        "memory_id": "mem_no_sug",
+        "status": "candidate",
+        "kind": "preference",
+        "memory_key": "no-sug-key",
+        "content": "提案なし",
+        "created_at": "2026-07-14T10:00:00+09:00",
+        "updated_at": "2026-07-14T10:00:00+09:00",
+    }
+
+    memory.save_all_memories([approved, candidate_with_suggestion, another_candidate, no_suggestion])
+
+    result = memory.delete_memory("mem_approved_1")
+    assert result["found"] is True
+    assert result["deleted"] is True
+
+    remaining = memory.load_all_memories()
+    remaining_map = {m["memory_id"]: m for m in remaining}
+
+    # mem_candidate_ref should have empty dedup_suggestions (now None)
+    ref = remaining_map.get("mem_candidate_ref")
+    assert ref is not None
+    assert ref.get("dedup_suggestions") is None or ref["dedup_suggestions"] == []
+
+    # mem_other_cand should have the unrelated suggestion left
+    other = remaining_map.get("mem_other_cand")
+    assert other is not None
+    remaining_sugs = other.get("dedup_suggestions") or []
+    assert len(remaining_sugs) == 1
+    assert remaining_sugs[0]["target_memory_id"] == "mem_unrelated"
+
+    # no_suggestion should remain untouched
+    no_ref = remaining_map.get("mem_no_sug")
+    assert no_ref is not None
+    assert no_ref.get("dedup_suggestions") is None or no_ref["dedup_suggestions"] == []
+
+
+def test_delete_memory_reprojects_approved(clean_memory_env):
+    approved_mem = {
+        "memory_id": "mem_to_remove",
+        "status": "approved",
+        "kind": "preference",
+        "memory_key": "remove-key",
+        "content": "削除される承認済み",
+        "evidence": [],
+        "created_at": "2026-07-14T10:00:00+09:00",
+        "updated_at": "2026-07-14T10:00:00+09:00",
+    }
+    keep_mem = {
+        "memory_id": "mem_keep",
+        "status": "approved",
+        "kind": "fact",
+        "memory_key": "keep-key",
+        "content": "残る承認済み",
+        "evidence": [],
+        "created_at": "2026-07-14T10:00:00+09:00",
+        "updated_at": "2026-07-14T10:00:00+09:00",
+    }
+    memory.save_all_memories([approved_mem, keep_mem])
+
+    approved_md = memory.get_approved_memories_path()
+    memory.project_approved_memories()
+    assert approved_md.exists()
+    content_before = approved_md.read_text(encoding="utf-8")
+    assert "削除される承認済み" in content_before
+    assert "残る承認済み" in content_before
+
+    r = memory.delete_memory("mem_to_remove")
+    assert r["found"] is True
+    assert r["deleted"] is True
+
+    content_after = approved_md.read_text(encoding="utf-8")
+    assert "削除される承認済み" not in content_after
+    assert "残る承認済み" in content_after
+
+
+def test_batch_delete_memories(clean_memory_env):
+    memories = [
+        {"memory_id": "mem_batch_1", "status": "candidate", "kind": "preference", "memory_key": "b1", "content": "一括1"},
+        {"memory_id": "mem_batch_2", "status": "candidate", "kind": "preference", "memory_key": "b2", "content": "一括2"},
+        {"memory_id": "mem_batch_3", "status": "approved", "kind": "preference", "memory_key": "b3", "content": "一括3", "evidence": []},
+    ]
+    for m in memories:
+        m["created_at"] = "2026-07-14T10:00:00+09:00"
+        m["updated_at"] = "2026-07-14T10:00:00+09:00"
+    memory.save_all_memories(memories)
+
+    # Pre-create approved.md
+    memory.project_approved_memories()
+    approved_md = memory.get_approved_memories_path()
+    assert approved_md.exists()
+    assert "一括3" in approved_md.read_text(encoding="utf-8")
+
+    memory.log_memory_event(event_type="created", memory_id="mem_batch_1",
+                            previous_status=None, new_status="candidate")
+
+    # Delete 3 IDs, one of which doesn't exist
+    result = memory.batch_delete_memories(["mem_batch_1", "mem_batch_2", "mem_batch_nonexistent"])
+    assert set(result["deleted"]) == {"mem_batch_1", "mem_batch_2"}
+    assert result["not_found"] == ["mem_batch_nonexistent"]
+    assert result["events_deleted"] == 1  # only mem_batch_1 had events
+
+    remaining = memory.load_all_memories()
+    remaining_ids = [m["memory_id"] for m in remaining]
+    assert "mem_batch_1" not in remaining_ids
+    assert "mem_batch_2" not in remaining_ids
+    assert "mem_batch_3" in remaining_ids
+
+    # Verify approved.md still valid (no approved memories were deleted)
+    assert approved_md.exists()
+    content = approved_md.read_text(encoding="utf-8")
+    assert "一括3" in content
+    assert "一括1" not in content
+
+
+def test_batch_delete_memories_empty(clean_memory_env):
+    result = memory.batch_delete_memories([])
+    assert result["deleted"] == []
+    assert result["not_found"] == []
+    assert result["events_deleted"] == 0

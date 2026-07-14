@@ -5,6 +5,9 @@ import type {
   MemoryDetail,
   MemoryListResponse,
   EditPayload,
+  DeleteResponse,
+  BatchDeleteRequest,
+  BatchDeleteResponse,
 } from "./types";
 
 const TOKEN_KEY = "obsidian-ai-hub:review-token";
@@ -126,6 +129,20 @@ export function editMemory(
 
 export function batchReview(body: BatchReviewRequest): Promise<BatchReviewResponse> {
   return request<BatchReviewResponse>("/api/v1/memories/batch-review", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function deleteMemory(memoryId: string): Promise<DeleteResponse> {
+  return request<DeleteResponse>(
+    `/api/v1/memories/${encodeURIComponent(memoryId)}`,
+    { method: "DELETE" },
+  );
+}
+
+export function batchDeleteMemories(body: BatchDeleteRequest): Promise<BatchDeleteResponse> {
+  return request<BatchDeleteResponse>("/api/v1/memories/batch-delete", {
     method: "POST",
     body: JSON.stringify(body),
   });

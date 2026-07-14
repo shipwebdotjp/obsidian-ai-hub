@@ -329,7 +329,7 @@ def project_approved_memories():
             lines.append(f"- Key: `{m.get('memory_key', '')}`")
             lines.append(f"- Stability: `{m.get('stability', 'stable')}`")
             evidence_lines = []
-            for ev in m.get("evidence", []):
+            for ev in (m.get("evidence") or []):
                 path = ev.get("path", "")
                 if path.endswith(".md"):
                     path = path[:-3]
@@ -1411,6 +1411,97 @@ def resolve_memory(candidate_id: str, action: str, target_memory_id: str) -> tup
     project_approved_memories()
 
     return cand, target
+
+
+def _prune_dedup_suggestions(cursor, memory_id: str) -> None:
+    cursor.execute("SELECT memory_id, dedup_suggestions FROM memories WHERE dedup_suggestions IS NOT NULL")
+    rows = cursor.fetchall()
+    for row in rows:
+        mid = row["memory_id"]
+        raw = row["dedup_suggestions"]
+        if raw is None:
+            continue
+        try:
+            suggestions = json.loads(raw) if isinstance(raw, str) else raw
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if not isinstance(suggestions, list):
+            continue
+        filtered = [s for s in suggestions if s.get("target_memory_id") != memory_id]
+        if len(filtered) != len(suggestions):
+            new_val = json.dumps(filtered, ensure_ascii=False) if filtered else None
+            cursor.execute("UPDATE memories SET dedup_suggestions = ? WHERE memory_id = ?", (new_val, mid))
+
+
+def delete_memory(memory_id: str) -> dict:
+    conn = get_db_connection()
+    was_approved = False
+    events_deleted = 0
+    target = None
+    try:
+        with conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM memories WHERE memory_id = ?", (memory_id,))
+            row = cursor.fetchone()
+            if row is None:
+                return {"found": False, "deleted": False, "events_deleted": 0, "memory": None}
+
+            target = deserialize_memory(dict(row))
+            was_approved = target.get("status") == "approved"
+
+            cursor.execute("DELETE FROM memory_events WHERE memory_id = ?", (memory_id,))
+            events_deleted = cursor.rowcount
+
+            _prune_dedup_suggestions(cursor, memory_id)
+            cursor.execute("DELETE FROM memories WHERE memory_id = ?", (memory_id,))
+    finally:
+        conn.close()
+
+    if was_approved:
+        project_approved_memories()
+
+    return {"found": True, "deleted": True, "events_deleted": events_deleted, "memory": target}
+
+
+def batch_delete_memories(memory_ids: list[str]) -> dict:
+    if not memory_ids:
+        return {"deleted": [], "not_found": [], "events_deleted": 0}
+
+    memory_ids = list(dict.fromkeys(memory_ids))
+    conn = get_db_connection()
+    deleted = []
+    not_found = []
+    total_events = 0
+    had_approved = False
+
+    try:
+        with conn:
+            cursor = conn.cursor()
+            for mid in memory_ids:
+                cursor.execute("SELECT * FROM memories WHERE memory_id = ?", (mid,))
+                row = cursor.fetchone()
+                if row is None:
+                    not_found.append(mid)
+                    continue
+
+                target = deserialize_memory(dict(row))
+                if target.get("status") == "approved":
+                    had_approved = True
+
+                cursor.execute("DELETE FROM memory_events WHERE memory_id = ?", (mid,))
+                total_events += cursor.rowcount
+                cursor.execute("DELETE FROM memories WHERE memory_id = ?", (mid,))
+                deleted.append(mid)
+
+            for mid in deleted:
+                _prune_dedup_suggestions(cursor, mid)
+    finally:
+        conn.close()
+
+    if had_approved:
+        project_approved_memories()
+
+    return {"deleted": deleted, "not_found": not_found, "events_deleted": total_events}
 
 
 EXPECTED_FILES = {

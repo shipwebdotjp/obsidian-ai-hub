@@ -255,6 +255,16 @@ def main():
         help="編集時の新しい記憶の本文"
     )
     parser.add_argument(
+        "--memory-delete",
+        action="store_true",
+        help="長期記憶をデータベースから完全に削除"
+    )
+    parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="--memory-delete の確認プロンプトをスキップ"
+    )
+    parser.add_argument(
         "--memory-compile",
         action="store_true",
         help="長期記憶コンテキストをコンパイル（診断用）"
@@ -327,6 +337,11 @@ def main():
             parser.error("--memory-review requires exactly one action: --approve, --reject, or --edit")
         if args.edit and not args.content:
             parser.error("--edit action requires --content")
+    if args.memory_delete:
+        if not args.id:
+            parser.error("--memory-delete requires --id ID")
+        if args.memory_review:
+            parser.error("--memory-delete cannot be combined with --memory-review")
     if args.memory_compile and not args.for_purpose:
         parser.error("--memory-compile requires --for PURPOSE")
     if args.for_purpose and not args.memory_compile:
@@ -426,6 +441,17 @@ def main():
         elif args.edit:
             action = "edit"
         run_and_log(lambda: memory.review_memory(args.id, action, args.content), "memory_review")
+        ran = True
+    if args.memory_delete:
+        from obsidian_ai_hub import memory
+        proceed = args.yes
+        if not proceed:
+            ans = input(f"Memory {args.id} を完全に削除しますか? (y/N): ")
+            proceed = ans.lower() == "y"
+        if proceed:
+            run_and_log(lambda: memory.delete_memory(args.id), "memory_delete")
+        else:
+            print("キャンセルしました")
         ran = True
     if args.memory_compile:
         from obsidian_ai_hub import memory

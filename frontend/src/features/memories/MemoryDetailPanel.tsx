@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ApiError, getMemory, reviewMemory, resolveMemory } from "../../api/client";
+import { ApiError, getMemory, reviewMemory, resolveMemory, deleteMemory } from "../../api/client";
 import type { MemoryDetail } from "../../api/types";
 import type { Memory } from "../../api/types";
 import MemoryEditForm from "./MemoryEditForm";
@@ -72,6 +72,22 @@ export default function MemoryDetailPanel({
     },
     [detail, onChanged],
   );
+
+  async function handleDelete() {
+    if (!window.confirm(`記憶 ${memoryId} を完全に削除しますか？この操作は取り消せません。`)) return;
+    setIsSubmitting(true);
+    try {
+      await deleteMemory(memoryId);
+      notify(`${memoryId} を削除しました`);
+      onChanged(null);
+      setDetail(null);
+    } catch (e) {
+      const msg = e instanceof ApiError ? e.message : "削除に失敗しました";
+      notify(msg, "error");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
 
   async function act(action: "approve" | "reject") {
     setIsSubmitting(true);
@@ -253,6 +269,14 @@ export default function MemoryDetailPanel({
               className="rounded bg-slate-900 px-3 py-1 text-sm text-white disabled:opacity-50"
             >
               編集して承認
+            </button>
+            <button
+              type="button"
+              onClick={handleDelete}
+              disabled={isSubmitting}
+              className="rounded bg-rose-800 px-3 py-1 text-sm text-white disabled:opacity-50"
+            >
+              削除
             </button>
           </div>
         ) : (

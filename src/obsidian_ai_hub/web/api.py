@@ -114,3 +114,16 @@ def resolve_memory(candidate_id: str, body: schemas.ResolveRequest, _=Depends(_r
     except ValueError as e:
         logger.warning("resolve validation error for %s: %s", candidate_id, e)
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.delete("/memories/{memory_id}", response_model=schemas.DeleteResponse)
+def delete_memory(memory_id: str, _=Depends(_require_loopback_or_token)):
+    result = service.delete_memory(memory_id)
+    if not result.get("found"):
+        raise HTTPException(status_code=404, detail="memory not found")
+    return result
+
+
+@router.post("/memories/batch-delete", response_model=schemas.BatchDeleteResponse)
+def batch_delete(body: schemas.BatchDeleteRequest, _=Depends(_require_loopback_or_token)):
+    return service.batch_delete(body.memory_ids)

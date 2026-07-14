@@ -81,3 +81,20 @@ export interface BatchReviewResponse {
   not_found: string[];
   events: number;
 }
+
+export interface DeleteResponse {
+  found: boolean;
+  deleted: boolean;
+  events_deleted: number;
+  memory?: Memory | null;
+}
+
+export interface BatchDeleteResponse {
+  deleted: string[];
+  not_found: string[];
+  events_deleted: number;
+}
+
+export interface BatchDeleteRequest {
+  memory_ids: string[];
+}

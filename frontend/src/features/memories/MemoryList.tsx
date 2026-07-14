@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo, useCallback, useRef } from "react";
-import { ApiError, listMemories, batchReview, reviewMemory } from "../../api/client";
+import { ApiError, listMemories, batchReview, reviewMemory, batchDeleteMemories } from "../../api/client";
 import type { Memory, MemoryStatus } from "../../api/types";
 
 export interface MemoryListProps {
@@ -102,6 +102,25 @@ export default function MemoryList({
     }
   }
 
+  async function batchDelete() {
+    if (selectedIds.size === 0) return;
+    if (!window.confirm(`${selectedIds.size} 件を完全に削除しますか？この操作は取り消せません。`)) return;
+    setIsProcessing(new Set(selectedIds));
+    try {
+      const res = await batchDeleteMemories({ memory_ids: Array.from(selectedIds) });
+      const missing = res.not_found.length;
+      notify(
+        `${res.deleted.length} 件を削除しました` + (missing ? `（未検出 ${missing} 件）` : ""),
+      );
+      await reload();
+    } catch (e) {
+      const msg = e instanceof ApiError ? e.message : "一括削除に失敗しました";
+      notify(msg, "error");
+    } finally {
+      setIsProcessing(new Set());
+    }
+  }
+
   async function quickAction(id: string, action: "approve" | "reject") {
     setIsProcessing(new Set([id]));
     try {
@@ -147,6 +166,14 @@ export default function MemoryList({
             className="rounded bg-rose-600 px-3 py-1 text-sm font-medium text-white disabled:opacity-50"
           >
             {isProcessing.size > 0 ? "処理中…" : "一括却下"}
+          </button>
+          <button
+            type="button"
+            disabled={selectedIds.size === 0 || isProcessing.size > 0}
+            onClick={batchDelete}
+            className="rounded bg-rose-900 px-3 py-1 text-sm font-medium text-white disabled:opacity-50"
+          >
+            {isProcessing.size > 0 ? "処理中…" : "一括削除"}
           </button>
         </div>
       </div>

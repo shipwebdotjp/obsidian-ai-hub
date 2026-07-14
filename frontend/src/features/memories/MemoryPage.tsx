@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import MemoryList from "./MemoryList";
 import MemoryDetailPanel from "./MemoryDetailPanel";
-import type { Memory, MemoryStatus } from "../../api/types";
+import type { Memory, MemoryDetail, MemoryStatus } from "../../api/types";
 
 interface Toast {
   id: number;
@@ -19,6 +19,13 @@ export default function MemoryPage() {
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   const handleRefresh = useCallback(() => setRefreshKey((v) => v + 1), []);
+
+  const onChanged = useCallback((memory: MemoryDetail | null) => {
+    if (memory === null) {
+      setSelectedMemory(null);
+    }
+    handleRefresh();
+  }, [handleRefresh]);
 
   const notify = useCallback((text: string, kind: "info" | "error" = "info") => {
     const id = Date.now() + Math.random();
@@ -91,7 +98,7 @@ export default function MemoryPage() {
                 key={selectedMemory.memory_id}
                 memoryId={selectedMemory.memory_id}
                 status={status}
-                onChanged={handleRefresh}
+                onChanged={onChanged}
                 notify={notify}
               />
             ) : (

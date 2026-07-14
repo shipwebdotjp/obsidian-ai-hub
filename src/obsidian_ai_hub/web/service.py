@@ -79,3 +79,11 @@ def batch_review(memory_ids: list, action: str) -> dict:
 
 def resolve_memory(candidate_id: str, action: str, target_memory_id: str) -> tuple[dict, Optional[dict]]:
     return memory.resolve_memory(candidate_id, action, target_memory_id)
+
+
+def delete_memory(memory_id: str) -> dict:
+    return memory.delete_memory(memory_id)
+
+
+def batch_delete(memory_ids: list[str]) -> dict:
+    return memory.batch_delete_memories(memory_ids)
