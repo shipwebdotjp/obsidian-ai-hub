@@ -60,7 +60,7 @@ class Memory(BaseModel):
     valid_from: Optional[str] = None
     valid_until: Optional[str] = None
     review_due_at: Optional[str] = None
-    stability: Optional[str] = None
+    stability: Optional[Literal["stable", "tentative", "explicitly_settled"]] = None
     sensitivity: Optional[str] = None
     extraction_confidence: Optional[float] = None
     supersedes: Optional[str] = None
@@ -110,7 +110,7 @@ class EditRequest(BaseModel):
     valid_from: Optional[str] = None
     valid_until: Optional[str] = None
     review_due_at: Optional[str] = None
-    stability: Optional[str] = None
+    stability: Optional[Literal["stable", "tentative", "explicitly_settled"]] = None
 
 
 class BatchReviewRequest(BaseModel):

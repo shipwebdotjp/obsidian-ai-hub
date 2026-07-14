@@ -52,6 +52,21 @@ def clean_memory_env(tmp_path, monkeypatch):
     return vault_path
 
 
+def test_normalize_stability_valid():
+    assert memory.normalize_stability("stable") == "stable"
+    assert memory.normalize_stability("tentative") == "tentative"
+    assert memory.normalize_stability("explicitly_settled") == "explicitly_settled"
+
+
+def test_normalize_stability_coerces_invalid():
+    assert memory.normalize_stability("bogus") == "tentative"
+    assert memory.normalize_stability("") == "tentative"
+    assert memory.normalize_stability(123) == "tentative"
+    assert memory.normalize_stability(None) == "tentative"
+    assert memory.normalize_stability("stable", default="stable") == "stable"
+    assert memory.normalize_stability("", default="stable") == "stable"
+
+
 def test_normalize_content():
     text1 = " 　日本語   TEST  "
     # NFKC normalizes wide spaces to standard space, stripping deletes all whitespace

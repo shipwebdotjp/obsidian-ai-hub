@@ -130,11 +130,12 @@ def test_review_approve_reject(loopback_client):
 
 def test_edit_validates_payload(loopback_client):
     _seed("mem_e")
+    # "bogus" is caught by Pydantic Literal validation at the schema layer (422)
     res = loopback_client.post(
         "/api/v1/memories/mem_e/edit",
         json={"content": "  ", "stability": "bogus"},
     )
-    assert res.status_code == 400
+    assert res.status_code == 422
 
     res = loopback_client.post(
         "/api/v1/memories/mem_e/edit",

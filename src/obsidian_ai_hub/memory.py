@@ -11,6 +11,19 @@ from typing import Optional
 from obsidian_ai_hub.utils import config, extracter, reader, llm_client, prompt
 from obsidian_ai_hub.utils.topics import TOPIC_ENUM, normalize_topics
 
+ALLOWED_STABILITY = frozenset({"stable", "tentative", "explicitly_settled"})
+STABILITY_DEFAULT = "tentative"
+
+
+def normalize_stability(raw: object, default: str = STABILITY_DEFAULT) -> str:
+    if not isinstance(raw, str) or raw not in ALLOWED_STABILITY:
+        logger.warning(
+            "Invalid or missing stability value %r; coercing to %r",
+            raw, default,
+        )
+        return default
+    return raw
+
 logger = logging.getLogger(__name__)
 
 _embedder = None
@@ -372,8 +385,9 @@ def merge_evidence(existing: list[dict], new_vals: list[dict]) -> list[dict]:
 def update_target_with_candidate_data(target: dict, cand: dict, reviewed_by: str) -> dict:
     timestamp_now = get_current_timestamp()
     target["content"] = cand.get("content", "")
-    for field in ["kind", "valid_from", "valid_until", "review_due_at", "stability", "sensitivity", "extraction_confidence", "contradicts", "provenance"]:
+    for field in ["kind", "valid_from", "valid_until", "review_due_at", "sensitivity", "extraction_confidence", "contradicts", "provenance"]:
         target[field] = cand.get(field)
+    target["stability"] = normalize_stability(cand.get("stability"), default="tentative")
     target["topics"] = merge_topics_and_tags(target.get("topics") or [], cand.get("topics") or [])
     target["tags"] = merge_topics_and_tags(target.get("tags") or [], cand.get("tags") or [])
     target["evidence"] = merge_evidence(target.get("evidence") or [], cand.get("evidence") or [])
@@ -619,7 +633,7 @@ def extract_memories(week_date_str: Optional[str] = None) -> list[dict]:
                     "valid_from": item.get("valid_from") or week_start_str,
                     "valid_until": item.get("valid_until"),
                     "review_due_at": item.get("review_due_at"),
-                    "stability": item.get("stability", "stable"),
+                    "stability": normalize_stability(item.get("stability"), default="tentative"),
                     "sensitivity": item.get("sensitivity", "personal"),
                     "extraction_confidence": float(item.get("extraction_confidence", 0.90)),
                     "supersedes": item.get("supersedes"),
@@ -1093,9 +1107,6 @@ EDITABLE_FIELDS = (
     "review_due_at",
     "stability",
 )
-
-ALLOWED_STABILITY = {"stable", "tentative", "explicitly_settled"}
-
 
 def _validate_date_str(value, field_name: str):
     if value is None:
