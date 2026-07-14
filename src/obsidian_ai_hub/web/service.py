@@ -87,3 +87,20 @@ def delete_memory(memory_id: str) -> dict:
 
 def batch_delete(memory_ids: list[str]) -> dict:
     return memory.batch_delete_memories(memory_ids)
+
+
+def get_memory_options() -> dict:
+    from obsidian_ai_hub.utils.topics import TOPIC_ENUM
+    kinds_order = ["preference", "decision_policy", "fact", "commitment", "pattern", "episode"]
+    kinds = [k for k in kinds_order if k in schemas.ALLOWED_KINDS]
+    for k in sorted(list(schemas.ALLOWED_KINDS)):
+        if k not in kinds_order:
+            kinds.append(k)
+    return {
+        "kinds": kinds,
+        "topics": list(TOPIC_ENUM)
+    }
+
+
+def render_copilot_profile() -> list[str]:
+    return memory.render_copilot_profile()

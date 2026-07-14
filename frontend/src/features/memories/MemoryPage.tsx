@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import MemoryList from "./MemoryList";
 import MemoryDetailPanel from "./MemoryDetailPanel";
 import type { Memory, MemoryDetail, MemoryStatus } from "../../api/types";
+import { getMemoryOptions, renderCopilotProfile } from "../../api/client";
 
 interface Toast {
   id: number;
@@ -11,8 +12,14 @@ interface Toast {
 
 export default function MemoryPage() {
   const [status, setStatus] = useState<MemoryStatus>("candidate");
-  const [query, setQuery] = useState("");
+  const [queryInput, setQueryInput] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
+  const [kind, setKind] = useState("");
   const [topic, setTopic] = useState("");
+  const [kindsOptions, setKindsOptions] = useState<string[]>([]);
+  const [topicsOptions, setTopicsOptions] = useState<string[]>([]);
+  const [isRendering, setIsRendering] = useState(false);
+
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [selectedMemory, setSelectedMemory] = useState<Memory | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -35,12 +42,54 @@ export default function MemoryPage() {
     }, 3500);
   }, []);
 
+  // Fetch filter options once on page load
+  useEffect(() => {
+    getMemoryOptions()
+      .then((res) => {
+        setKindsOptions(res.kinds);
+        setTopicsOptions(res.topics);
+      })
+      .catch((err) => {
+        console.error("Failed to fetch memory options:", err);
+      });
+  }, []);
+
+  // Debounce free-text search (Local input responds immediately, updates debounced value after 500ms)
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedQuery(queryInput);
+    }, 500);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [queryInput]);
+
+  // Reset list selection and single selection when any filter changes
   useEffect(() => {
     setSelectedMemory(null);
     setSelected(new Set());
-  }, [status]);
+  }, [status, debouncedQuery, kind, topic]);
 
   const showRightPanel = status === "candidate" || status === "approved" || status === "rejected";
+
+  const handleRenderCopilotProfile = async () => {
+    const confirmed = window.confirm(
+      "Copilotプロファイルを生成します。LLMによる生成処理が実行され、Vault内の7つの生成ファイルが上書きされます。よろしいですか？"
+    );
+    if (!confirmed) return;
+
+    setIsRendering(true);
+    try {
+      const res = await renderCopilotProfile();
+      notify(`${res.updated_files.length} 個のファイルを更新しました`, "info");
+    } catch (err: any) {
+      const msg = err?.message || "Copilotプロファイルの生成に失敗しました";
+      notify(msg, "error");
+    } finally {
+      setIsRendering(false);
+    }
+  };
 
   return (
     <div className="flex h-full flex-col">
@@ -58,18 +107,35 @@ export default function MemoryPage() {
         </select>
         <input
           type="search"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          value={queryInput}
+          onChange={(e) => setQueryInput(e.target.value)}
           placeholder="検索 (本文 / タグ)"
           className="rounded border border-slate-300 px-2 py-1 text-sm"
         />
-        <input
-          type="text"
+        <select
+          value={kind}
+          onChange={(e) => setKind(e.target.value)}
+          className="rounded border border-slate-300 px-2 py-1 text-sm"
+        >
+          <option value="">種別: すべて</option>
+          {kindsOptions.map((k) => (
+            <option key={k} value={k}>
+              {k}
+            </option>
+          ))}
+        </select>
+        <select
           value={topic}
           onChange={(e) => setTopic(e.target.value)}
-          placeholder="トピック"
           className="rounded border border-slate-300 px-2 py-1 text-sm"
-        />
+        >
+          <option value="">トピック: すべて</option>
+          {topicsOptions.map((t) => (
+            <option key={t} value={t}>
+              {t}
+            </option>
+          ))}
+        </select>
         <button
           type="button"
           onClick={() => setRefreshKey((v) => v + 1)}
@@ -77,13 +143,22 @@ export default function MemoryPage() {
         >
           再読み込み
         </button>
+        <button
+          type="button"
+          onClick={handleRenderCopilotProfile}
+          disabled={isRendering}
+          className="rounded border border-slate-300 px-3 py-1 text-sm bg-indigo-50 text-indigo-700 hover:bg-indigo-100 disabled:opacity-50"
+        >
+          {isRendering ? "生成中…" : "プロファイル生成"}
+        </button>
       </header>
       <div className="flex flex-1 overflow-hidden">
         <div className="w-1/2 border-r border-slate-200">
           <MemoryList
             status={status}
-            query={query}
+            query={debouncedQuery}
             topic={topic}
+            kind={kind}
             selectedIds={selected}
             onSelectionChange={setSelected}
             onSelect={setSelectedMemory}

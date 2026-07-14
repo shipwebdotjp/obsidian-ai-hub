@@ -173,3 +173,12 @@ class BatchDeleteResponse(BaseModel):
     deleted: list[str]
     not_found: list[str]
     events_deleted: int = 0
+
+
+class MemoryOptionsResponse(BaseModel):
+    kinds: list[str]
+    topics: list[str]
+
+
+class RenderCopilotProfileResponse(BaseModel):
+    updated_files: list[str]

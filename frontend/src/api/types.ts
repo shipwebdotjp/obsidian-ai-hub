@@ -98,3 +98,12 @@ export interface BatchDeleteResponse {
 export interface BatchDeleteRequest {
   memory_ids: string[];
 }
+
+export interface MemoryOptionsResponse {
+  kinds: string[];
+  topics: string[];
+}
+
+export interface RenderCopilotProfileResponse {
+  updated_files: string[];
+}

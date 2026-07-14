@@ -151,3 +151,13 @@ export function batchDeleteMemories(body: BatchDeleteRequest): Promise<BatchDele
 export async function health(): Promise<{ status: string; auth_required: boolean }> {
   return request("/health");
 }
+
+export function getMemoryOptions(): Promise<{ kinds: string[]; topics: string[] }> {
+  return request<{ kinds: string[]; topics: string[] }>("/api/v1/memory-options");
+}
+
+export function renderCopilotProfile(): Promise<{ updated_files: string[] }> {
+  return request<{ updated_files: string[] }>("/api/v1/copilot-profile/render", {
+    method: "POST",
+  });
+}
