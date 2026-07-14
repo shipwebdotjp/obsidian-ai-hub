@@ -228,8 +228,12 @@ export default function MemoryDetailPanel({
                 <div className="mt-3 flex gap-2 border-t border-blue-200 pt-3">
                   <button
                     type="button"
-                    onClick={() => handleResolveWithParams("merge_existing", detail.dedup_assessment!.target_memory_id!, integratedContent)}
-                    disabled={isSubmitting || !integratedContent.trim()}
+                    onClick={() => {
+                      if (detail.dedup_assessment?.target_memory_id) {
+                        handleResolveWithParams("merge_existing", detail.dedup_assessment.target_memory_id, integratedContent);
+                      }
+                    }}
+                    disabled={isSubmitting || !integratedContent.trim() || !detail.dedup_assessment?.target_memory_id}
                     className="rounded bg-blue-600 px-3 py-1 text-xs text-white disabled:opacity-50"
                   >
                     マージ
@@ -280,8 +284,12 @@ export default function MemoryDetailPanel({
                 <div className="mt-3 flex gap-2 border-t border-purple-200 pt-3">
                   <button
                     type="button"
-                    onClick={() => handleResolveWithParams("supersede_existing", detail.dedup_assessment!.target_memory_id!, undefined, switchDate)}
-                    disabled={isSubmitting || !/^\d{4}-\d{2}-\d{2}$/.test(switchDate)}
+                    onClick={() => {
+                      if (detail.dedup_assessment?.target_memory_id) {
+                        handleResolveWithParams("supersede_existing", detail.dedup_assessment.target_memory_id, undefined, switchDate);
+                      }
+                    }}
+                    disabled={isSubmitting || !/^\d{4}-\d{2}-\d{2}$/.test(switchDate) || !detail.dedup_assessment?.target_memory_id}
                     className="rounded bg-purple-600 px-3 py-1 text-xs text-white disabled:opacity-50"
                   >
                     後継として保存
@@ -406,7 +414,11 @@ export default function MemoryDetailPanel({
       <div className="mt-6 space-y-3">
         {!editing ? (
           <div className="flex gap-2">
-            {detail.status === "candidate" && (!hasSuggestions || detail.dedup_assessment?.decision === "new" || detail.dedup_assessment?.decision === "failed") && (
+            {detail.status === "candidate" && (
+              detail.dedup_assessment
+                ? (detail.dedup_assessment.decision === "new" || detail.dedup_assessment.decision === "failed")
+                : !hasSuggestions
+            ) && (
               <>
                 <button
                   type="button"

@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from typing import Literal, Optional, Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 EDITABLE_FIELDS = (
     "content",
@@ -154,6 +154,16 @@ class ResolveRequest(BaseModel):
     target_memory_id: str
     integrated_content: Optional[str] = None
     switch_date: Optional[str] = None
+
+    @model_validator(mode="after")
+    def validate_action_fields(self) -> "ResolveRequest":
+        if self.action == "merge_existing":
+            if not self.integrated_content or not self.integrated_content.strip():
+                raise ValueError("integrated_content is required when action is merge_existing")
+        elif self.action == "supersede_existing":
+            if not self.switch_date or not self.switch_date.strip():
+                raise ValueError("switch_date is required when action is supersede_existing")
+        return self
 
 
 class ResolveResponse(BaseModel):

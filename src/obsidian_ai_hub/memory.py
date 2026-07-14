@@ -558,6 +558,10 @@ def _load_weekly_memory_sources(week_start: datetime, week_end: datetime) -> tup
     return daily_notes, structured_records
 
 
+DEDUP_INPUT_BATCH_TOKEN_LIMIT = 24000
+DEDUP_LLM_OUTPUT_TOKEN_LIMIT = 24000
+
+
 def perform_dedup_assessment_llm(candidates_to_assess: list[dict], existing_memories: list[dict]) -> None:
     if not candidates_to_assess:
         return
@@ -628,7 +632,7 @@ def perform_dedup_assessment_llm(candidates_to_assess: list[dict], existing_memo
     for i, grp in enumerate(comparison_groups, 1):
         grp_text = format_group_text(grp, i)
         grp_tokens = estimate_tokens(grp_text)
-        if base_tokens + current_tokens + grp_tokens > 24000:
+        if base_tokens + current_tokens + grp_tokens > DEDUP_INPUT_BATCH_TOKEN_LIMIT:
             if current_batch:
                 batches.append(current_batch)
                 current_batch = [grp]
@@ -664,7 +668,7 @@ def perform_dedup_assessment_llm(candidates_to_assess: list[dict], existing_memo
                 provider=config.MEMORY_EXTRACTOR_PROVIDER,
                 model=config.MEMORY_EXTRACTOR_MODEL,
                 prompt=rendered_prompt,
-                max_tokens=24000,
+                max_tokens=DEDUP_LLM_OUTPUT_TOKEN_LIMIT,
                 temperature=0.2
             ).strip()
 
@@ -820,7 +824,6 @@ def extract_memories(week_date_str: Optional[str] = None) -> list[dict]:
     cached_embedder = CachedEmbedder(embedder) if embedder is not None else None
 
     # Load active approved memories
-    existing_memories = load_all_memories()
     approved_mems = [m for m in existing_memories if m.get("status") == "approved"]
 
     final_candidates_to_save = []
@@ -1388,6 +1391,7 @@ def batch_review_memories(memory_ids: list, action: str) -> dict:
             cursor = conn.cursor()
             timestamp_now = get_current_timestamp()
 
+            skipped = []
             for memory_id in memory_ids:
                 cursor.execute("SELECT * FROM memories WHERE memory_id = ?", (memory_id,))
                 row = cursor.fetchone()
@@ -1397,6 +1401,7 @@ def batch_review_memories(memory_ids: list, action: str) -> dict:
                 target = deserialize_memory(dict(row))
                 prev_status = target.get("status")
                 if prev_status == "superseded":
+                    skipped.append(memory_id)
                     continue
                 target["status"] = new_status
                 target["reviewed_by"] = "user"
@@ -1423,7 +1428,7 @@ def batch_review_memories(memory_ids: list, action: str) -> dict:
     if updated:
         project_approved_memories()
 
-    return {"updated": updated, "not_found": not_found, "events": event_count}
+    return {"updated": updated, "not_found": not_found, "skipped": skipped, "events": event_count}
 
 
 def get_memory_events(memory_id: str) -> list:
@@ -1484,8 +1489,9 @@ def resolve_memory(
 
             # Validate target_memory_id matches dedup_assessment.target_memory_id
             assessment = cand.get("dedup_assessment")
-            if assessment and isinstance(assessment, dict):
-                ass_target = assessment.get("target_memory_id")
+            ass_target = assessment.get("target_memory_id") if (assessment and isinstance(assessment, dict)) else None
+
+            if ass_target:
                 if ass_target != target_memory_id:
                     raise ValueError(f"Target {target_memory_id} does not match LLM assessed target: {ass_target}")
             else:
@@ -1649,7 +1655,7 @@ def resolve_memory(
                 except ValueError:
                     raise ValueError("switch_date must be in YYYY-MM-DD format")
 
-                # Validate switch_date >= target valid_from
+                # Validate switch_date > target valid_from
                 old_valid_from = target.get("valid_from")
                 if old_valid_from:
                     old_vf_dt = None
@@ -1657,8 +1663,8 @@ def resolve_memory(
                         old_vf_dt = datetime.strptime(old_valid_from, "%Y-%m-%d")
                     except ValueError:
                         pass
-                    if old_vf_dt and switch_dt < old_vf_dt:
-                        raise ValueError(f"switch_date ({switch_date}) must be equal to or after existing valid_from ({old_valid_from})")
+                    if old_vf_dt and switch_dt <= old_vf_dt:
+                        raise ValueError(f"switch_date ({switch_date}) must be strictly after existing valid_from ({old_valid_from})")
 
                 predecessor_until_dt = switch_dt - timedelta(days=1)
                 predecessor_until_str = predecessor_until_dt.strftime("%Y-%m-%d")

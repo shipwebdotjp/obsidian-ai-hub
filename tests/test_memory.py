@@ -816,13 +816,22 @@ def test_resolve_memory_supersede_existing(clean_memory_env):
     }
     memory.save_all_memories([target, cand])
 
-    # Validation: switch_date must be >= target valid_from
-    with pytest.raises(ValueError, match="must be equal to or after existing valid_from"):
+    # Validation: switch_date must be strictly after target valid_from
+    with pytest.raises(ValueError, match="must be strictly after existing valid_from"):
         memory.resolve_memory(
             candidate_id="mem_cand_to_supersede",
             action="supersede_existing",
             target_memory_id="mem_existing_target",
             switch_date="2026-06-30"  # before 2026-07-01
+        )
+
+    # Validation: switch_date equal to target valid_from must be rejected too
+    with pytest.raises(ValueError, match="must be strictly after existing valid_from"):
+        memory.resolve_memory(
+            candidate_id="mem_cand_to_supersede",
+            action="supersede_existing",
+            target_memory_id="mem_existing_target",
+            switch_date="2026-07-01"  # completely equal to 2026-07-01
         )
 
     # Valid resolution
@@ -898,7 +907,7 @@ def test_extract_memories_with_dedup_assessment(clean_memory_env):
     mock_dedup_response = """
     [
       {
-        "candidate_id": "WILL_BE_REPLACED",
+        "candidate_id": "mem_20260713_fixed",
         "decision": "merge",
         "target_memory_id": "mem_target_001",
         "reason": "既存の好みの内容をより具体化・精緻化しているためマージを提案",
@@ -907,20 +916,15 @@ def test_extract_memories_with_dedup_assessment(clean_memory_env):
     ]
     """
 
-    with patch("obsidian_ai_hub.memory.llm_client.generate_llm_response") as mock_llm:
-        # We replace the candidate ID in mock response dynamically during call
+    with patch("obsidian_ai_hub.memory.llm_client.generate_llm_response") as mock_llm, \
+         patch("obsidian_ai_hub.memory.generate_memory_id", return_value="mem_20260713_fixed"):
+
         def fake_llm_response(*args, **kwargs):
             prompt_str = kwargs.get("prompt", "")
             if "対象期間" in prompt_str:
                 return mock_extract_response
             else:
-                # Find candidate ID from prompt
-                cand_id = "mem_20260719_"
-                for line in prompt_str.splitlines():
-                    if "候補ID: mem_" in line:
-                        cand_id = line.split("候補ID:")[1].strip()
-                        break
-                return mock_dedup_response.replace("WILL_BE_REPLACED", cand_id)
+                return mock_dedup_response
 
         mock_llm.side_effect = fake_llm_response
 
