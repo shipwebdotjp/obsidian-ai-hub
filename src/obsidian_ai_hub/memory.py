@@ -904,28 +904,18 @@ def estimate_tokens(text: str) -> int:
         return int(len(text) * 1.2)
 
 
-def compile_context(for_purpose: str = "make-target") -> dict:
+def get_currently_valid_approved_memories() -> tuple[list[dict], list[dict]]:
     """
-    Compile approved memories to be injected as ContextPack.
-    - Resolves automatic expiration of valid_until / review_due_at.
-    - Excludes non-active items.
-    - Prioritizes based on confidence, stability, and creation timestamp.
-    - Selects items within the token budget.
+    Check and update expiration status for all approved memories.
+    Returns:
+        (active_approved, excluded) where:
+            active_approved: list of currently valid, approved memory dicts
+            excluded: list of dicts with {"memory_id": str, "reason": str} for items excluded due to being expired or not yet valid
     """
-    logger.info(f"Compiling context for purpose: {for_purpose}")
-    try:
-        memories = load_all_memories()
-    except Exception as e:
-        logger.error(f"Failed to load memories for compilation fallback: {e}")
-        return {
-            "context": "",
-            "used_memory_ids": [],
-            "estimated_tokens": 0,
-            "excluded": []
-        }
+    logger.info("Checking and loading currently valid approved memories")
+    memories = load_all_memories()
 
     now_dt = datetime.now(timezone.utc)
-
     active_approved = []
     excluded = []
     has_changes = False
@@ -986,7 +976,7 @@ def compile_context(for_purpose: str = "make-target") -> dict:
                         memory_id=m_id,
                         previous_status="approved",
                         new_status="expired",
-                        reason="Automatic expiration during context compilation",
+                        reason="Automatic expiration during validity check",
                         conn=conn
                     )
                     excluded.append({"memory_id": m_id, "reason": "expired"})
@@ -1011,7 +1001,32 @@ def compile_context(for_purpose: str = "make-target") -> dict:
         try:
             project_approved_memories()
         except Exception as e:
-            logger.error(f"Failed to update memories database on compile expiration: {e}")
+            logger.error(f"Failed to update memories database on validity check: {e}")
+
+    return active_approved, excluded
+
+
+def compile_context(for_purpose: str = "make-target") -> dict:
+    """
+    Compile approved memories to be injected as ContextPack.
+    - Resolves automatic expiration of valid_until / review_due_at.
+    - Excludes non-active items.
+    - Prioritizes based on confidence, stability, and creation timestamp.
+    - Selects items within the token budget.
+    """
+    logger.info(f"Compiling context for purpose: {for_purpose}")
+    excluded = []
+    try:
+        active_approved, initial_excluded = get_currently_valid_approved_memories()
+        excluded.extend(initial_excluded)
+    except Exception as e:
+        logger.error(f"Failed to load memories for compilation fallback: {e}")
+        return {
+            "context": "",
+            "used_memory_ids": [],
+            "estimated_tokens": 0,
+            "excluded": []
+        }
 
     # Prioritization sorting
     # 1. extraction_confidence (descending)
@@ -1396,3 +1411,143 @@ def resolve_memory(candidate_id: str, action: str, target_memory_id: str) -> tup
     project_approved_memories()
 
     return cand, target
+
+
+EXPECTED_FILES = {
+    "AI_README.md": "AI全体プロフィールと横断的指針 (AI Profile & Guidelines)",
+    "values.md": "明示された価値観・優先順位 (Values)",
+    "response_style.md": "応答・対話スタイルの好み (Response Style)",
+    "decision_policy.md": "判断方針・優先順位 (Decision Policy)",
+    "risk_tolerance.md": "リスク許容度・慎重さの方針 (Risk Tolerance)",
+    "memory_rules.md": "明示された記憶管理ルール (Memory Rules)",
+    "current_projects.md": "現在進行中のプロジェクト・コミットメント (Current Projects)"
+}
+
+
+def render_copilot_profile() -> list[str]:
+    """
+    Summarize approved and valid memories and render the copilot profile markdown files.
+    Returns:
+        List of updated relative file paths.
+    """
+    logger.info("Starting copilot profile rendering")
+
+    # Get active/valid approved memories
+    active_approved, _ = get_currently_valid_approved_memories()
+
+    # Build file mapping and absolute paths
+    copilot_dir = Path(config.VAULT_PATH) / "copilot"
+    core_dir = copilot_dir / "core"
+
+    copilot_dir.mkdir(parents=True, exist_ok=True)
+    core_dir.mkdir(parents=True, exist_ok=True)
+
+    file_paths = {}
+    for filename in EXPECTED_FILES:
+        if filename == "AI_README.md":
+            file_paths[filename] = copilot_dir / filename
+        else:
+            file_paths[filename] = core_dir / filename
+
+    timestamp = get_current_timestamp()
+
+    # 7 expected keys
+    expected_keys = set(EXPECTED_FILES.keys())
+
+    contents = {}
+    if not active_approved:
+        logger.info("No active approved memories found. Generating fallback notice for all files.")
+        for filename in expected_keys:
+            contents[filename] = "現時点で承認済みメモリなし"
+    else:
+        # Prepare filtered memories for LLM input
+        filtered_memories = []
+        for m in active_approved:
+            filtered_m = {
+                "kind": m.get("kind"),
+                "memory_key": m.get("memory_key"),
+                "content": m.get("content"),
+                "topics": m.get("topics"),
+                "tags": m.get("tags"),
+                "valid_from": m.get("valid_from"),
+                "valid_until": m.get("valid_until"),
+                "stability": m.get("stability"),
+                "sensitivity": m.get("sensitivity"),
+                "extraction_confidence": m.get("extraction_confidence")
+            }
+            filtered_memories.append(filtered_m)
+
+        json_memories = json.dumps(filtered_memories, ensure_ascii=False, indent=2)
+
+        # Render prompt
+        rendered_prompt = prompt.render_prompt(
+            config.MEMORY_RENDERER_PROMPT_PATH,
+            {"memories": json_memories}
+        )
+
+        # Call LLM
+        response = llm_client.generate_llm_response(
+            provider=config.MEMORY_RENDERER_PROVIDER,
+            model=config.MEMORY_RENDERER_MODEL,
+            prompt=rendered_prompt,
+            max_tokens=32000,
+            temperature=0.2
+        ).strip()
+
+        # Clean response
+        if response.startswith("```"):
+            lines = response.splitlines()
+            if len(lines) >= 2:
+                if lines[0].startswith("```json") or lines[0].startswith("```"):
+                    response = "\n".join(lines[1:-1]).strip()
+
+        try:
+            data = json.loads(response)
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse LLM response as JSON: {e}. Response was: {response}")
+            raise ValueError(f"LLM response is not a valid JSON string: {e}")
+
+        if not isinstance(data, dict):
+            logger.error(f"LLM response is not a JSON object: {data}")
+            raise ValueError("LLM output is not a JSON object/dictionary")
+
+        # Validation checks
+        actual_keys = set(data.keys())
+        if actual_keys != expected_keys:
+            logger.error(f"JSON key mismatch. Expected keys: {expected_keys}. Got: {actual_keys}")
+            raise ValueError(f"JSON key mismatch. Expected exactly: {expected_keys}")
+
+        for key, val in data.items():
+            if not isinstance(val, str) or not val.strip():
+                logger.error(f"Key {key} has an invalid or empty value: {val!r}")
+                raise ValueError(f"Key '{key}' must have a non-empty string value")
+            contents[key] = val.strip()
+
+    # Write files if validation succeeds
+    updated_paths = []
+    for filename, body in contents.items():
+        title = EXPECTED_FILES[filename]
+        dest_path = file_paths[filename]
+
+        # Generate full markdown
+        markdown_content = f"""---
+type: copilot-profile
+generated_at: {timestamp}
+---
+
+# {title}
+
+> [!NOTE]
+> このファイルは承認済み長期記憶から自動生成されました。手書きでの変更は保持されません。
+
+{body}
+"""
+        with open(dest_path, "w", encoding="utf-8") as f:
+            f.write(markdown_content)
+
+        # relative to VAULT_PATH
+        relative_p = _vault_relative_path(dest_path)
+        updated_paths.append(relative_p)
+
+    logger.info("Copilot profile rendering completed successfully.")
+    return sorted(updated_paths)

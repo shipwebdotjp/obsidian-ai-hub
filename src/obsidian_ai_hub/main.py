@@ -260,6 +260,11 @@ def main():
         help="長期記憶コンテキストをコンパイル（診断用）"
     )
     parser.add_argument(
+        "--render-copilot-profile",
+        action="store_true",
+        help="承認済み長期記憶からCopilot説明書（7ファイル）を生成・更新"
+    )
+    parser.add_argument(
         "--for",
         dest="for_purpose",
         type=str,
@@ -427,6 +432,13 @@ def main():
         import json
         pack = memory.compile_context(args.for_purpose)
         print(json.dumps(pack, ensure_ascii=False, indent=2))
+        ran = True
+    if getattr(args, "render_copilot_profile", False):
+        from obsidian_ai_hub import memory
+        run_and_log(
+            lambda: print("\n".join(f"- {p}" for p in memory.render_copilot_profile())),
+            "render_copilot_profile"
+        )
         ran = True
     if args.serve:
         from obsidian_ai_hub.web import app as web_app

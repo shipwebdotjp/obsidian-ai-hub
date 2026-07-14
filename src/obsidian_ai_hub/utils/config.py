@@ -313,3 +313,13 @@ MEMORY_EXTRACTOR_MODEL = str(_extractor_model) if _extractor_model is not None e
 MEMORY_EXTRACTOR_PROMPT_PATH = _optional_path("MEMORY_EXTRACTOR_PROMPT_PATH", "memory", "extractor", "prompt_path")
 if MEMORY_EXTRACTOR_PROMPT_PATH is None:
     MEMORY_EXTRACTOR_PROMPT_PATH = BASE_DIR / "config" / "prompts" / "memory_extract.md"
+
+_renderer_provider = _config_value("memory", "renderer", "provider")
+MEMORY_RENDERER_PROVIDER = str(_renderer_provider) if _renderer_provider is not None else MEMORY_EXTRACTOR_PROVIDER
+
+_renderer_model = _config_value("memory", "renderer", "model")
+MEMORY_RENDERER_MODEL = str(_renderer_model) if _renderer_model is not None else MEMORY_EXTRACTOR_MODEL
+
+MEMORY_RENDERER_PROMPT_PATH = _optional_path("MEMORY_RENDERER_PROMPT_PATH", "memory", "renderer", "prompt_path")
+if MEMORY_RENDERER_PROMPT_PATH is None:
+    MEMORY_RENDERER_PROMPT_PATH = BASE_DIR / "config" / "prompts" / "memory_render.md"
