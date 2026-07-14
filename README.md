@@ -232,7 +232,7 @@ On successful execution, this command completely overwrites the following 7 file
 
 If there are no valid approved memories in the database, the command will still generate all 7 files with the fallback content "現時点で承認済みメモリなし" (No approved memory at this moment).
 
-To customize the LLM provider, model, or prompt path for rendering, add the `renderer` settings under the `memory` section in your `config/config.yml`:
+To customize the LLM provider, model, or prompt path for rendering, add the `renderer` settings under the `memory` section in your `config/config.yml`. Note that only the provider and model inherit from the memory extractor configuration if left unconfigured, while `prompt_path` instead defaults to `config/prompts/memory_render.md`.
 
 ```yaml
 memory:
@@ -242,7 +242,7 @@ memory:
     prompt_path: /Users/you/Documents/custom-memory-render.md
 ```
 
-If not configured, it will inherit your memory extractor configuration.
+If provider or model is not configured, it will inherit your memory extractor configuration.
 
 ### Memory settings
 

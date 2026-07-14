@@ -913,11 +913,7 @@ def get_currently_valid_approved_memories() -> tuple[list[dict], list[dict]]:
             excluded: list of dicts with {"memory_id": str, "reason": str} for items excluded due to being expired or not yet valid
     """
     logger.info("Checking and loading currently valid approved memories")
-    try:
-        memories = load_all_memories()
-    except Exception as e:
-        logger.error(f"Failed to load memories: {e}")
-        return [], []
+    memories = load_all_memories()
 
     now_dt = datetime.now(timezone.utc)
     active_approved = []

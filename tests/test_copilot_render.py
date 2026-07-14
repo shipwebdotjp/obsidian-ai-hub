@@ -55,7 +55,14 @@ def clean_copilot_env(tmp_path, monkeypatch):
     return vault_path
 
 
+from datetime import datetime, timedelta
+
 def test_get_currently_valid_approved_memories_basic(clean_copilot_env):
+    today = datetime.now()
+    past_date_str = (today - timedelta(days=10)).strftime("%Y-%m-%d")
+    yesterday_str = (today - timedelta(days=1)).strftime("%Y-%m-%d")
+    tomorrow_str = (today + timedelta(days=1)).strftime("%Y-%m-%d")
+
     # Setup some candidate, rejected, expired, future, and currently valid approved memories
     m_valid = {
         "memory_id": "mem_valid",
@@ -63,7 +70,7 @@ def test_get_currently_valid_approved_memories_basic(clean_copilot_env):
         "kind": "preference",
         "memory_key": "k-valid",
         "content": "Valid content",
-        "valid_from": "2026-07-01",
+        "valid_from": past_date_str,
         "stability": "stable"
     }
     m_candidate = {
@@ -72,7 +79,7 @@ def test_get_currently_valid_approved_memories_basic(clean_copilot_env):
         "kind": "preference",
         "memory_key": "k-cand",
         "content": "Candidate content",
-        "valid_from": "2026-07-01",
+        "valid_from": past_date_str,
         "stability": "stable"
     }
     m_future = {
@@ -81,7 +88,7 @@ def test_get_currently_valid_approved_memories_basic(clean_copilot_env):
         "kind": "preference",
         "memory_key": "k-future",
         "content": "Future content",
-        "valid_from": "2099-01-01", # far future
+        "valid_from": tomorrow_str,
         "stability": "stable"
     }
     m_expired = {
@@ -90,8 +97,8 @@ def test_get_currently_valid_approved_memories_basic(clean_copilot_env):
         "kind": "preference",
         "memory_key": "k-expired",
         "content": "Expired content",
-        "valid_from": "2026-07-01",
-        "valid_until": "2026-07-10", # in the past
+        "valid_from": past_date_str,
+        "valid_until": yesterday_str,
         "stability": "stable"
     }
 
