@@ -211,6 +211,39 @@ When you run `--make-target`, the compiled memory context is automatically
 added to the LLM prompt. Other commands do not automatically use long-term
 memory yet.
 
+### Generate Copilot instructions (Explanation document)
+
+You can summarize all currently valid, approved memories using an LLM to generate or completely replace the profile instruction files for Copilot.
+
+To render the profile, run:
+
+```bash
+uv run -m obsidian_ai_hub --render-copilot-profile
+```
+
+On successful execution, this command completely overwrites the following 7 files under your vault (any existing manual/handwritten content in these files will be lost and replaced):
+- `copilot/AI_README.md`: General profile and cross-cutting guidelines for AI.
+- `copilot/core/values.md`: Explicitly stated values/priorities.
+- `copilot/core/response_style.md`: Preference for response/dialog style.
+- `copilot/core/decision_policy.md`: Decision policy/priorities.
+- `copilot/core/risk_tolerance.md`: Risk tolerance/prudence policy.
+- `copilot/core/memory_rules.md`: Explicitly stated memory management rules.
+- `copilot/core/current_projects.md`: Current ongoing projects/commitments.
+
+If there are no valid approved memories in the database, the command will still generate all 7 files with the fallback content "現時点で承認済みメモリなし" (No approved memory at this moment).
+
+To customize the LLM provider, model, or prompt path for rendering, add the `renderer` settings under the `memory` section in your `config/config.yml`:
+
+```yaml
+memory:
+  renderer:
+    provider: openai
+    model: gpt-4o
+    prompt_path: /Users/you/Documents/custom-memory-render.md
+```
+
+If not configured, it will inherit your memory extractor configuration.
+
 ### Memory settings
 
 Add optional settings to `config/config.yml` to change the context size or the
