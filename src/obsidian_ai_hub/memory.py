@@ -8,7 +8,7 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Optional
 
-from obsidian_ai_hub.utils import config, reader, llm_client, prompt
+from obsidian_ai_hub.utils import config, extracter, reader, llm_client, prompt
 from obsidian_ai_hub.utils.topics import TOPIC_ENUM, normalize_topics
 
 logger = logging.getLogger(__name__)
@@ -466,13 +466,20 @@ def _week_bounds(
     return week_start, week_start + timedelta(days=6)
 
 
-def _strip_ai_summary(note_content: str) -> str:
-    """Keep the portion before the daily AI summary section."""
-    lines = note_content.splitlines()
-    for index, line in enumerate(lines):
-        if line.strip() == "## AIによる要約":
-            return "\n".join(lines[:index]).rstrip()
-    return note_content.rstrip()
+MEMORY_SOURCE_HEADERS = (
+    "## 💡 今日の気づき・振り返り",
+    "## 📝メモ",
+)
+
+
+def _extract_memory_source_content(note_content: str) -> str:
+    """Return only the daily-note sections relevant to memory extraction."""
+    sections = []
+    for header in MEMORY_SOURCE_HEADERS:
+        content = extracter.get_subheader_view(note_content, header)
+        if content:
+            sections.append(f"{header}\n{content}")
+    return "\n\n".join(sections)
 
 
 def _vault_relative_path(path: Path) -> str:
@@ -512,10 +519,11 @@ def _load_weekly_memory_sources(week_start: datetime, week_end: datetime) -> tup
         note_path = reader.get_daily_note_path(target_dt)
         if note_path.exists():
             try:
+                note_content = note_path.read_text(encoding="utf-8")
                 daily_notes.append({
                     "date": target_dt.strftime("%Y-%m-%d"),
                     "path": _vault_relative_path(note_path),
-                    "content": _strip_ai_summary(note_path.read_text(encoding="utf-8")),
+                    "content": _extract_memory_source_content(note_content),
                 })
             except OSError as exc:
                 logger.warning("Failed to read daily note %s: %s", note_path, exc)

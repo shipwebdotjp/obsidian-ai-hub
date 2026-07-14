@@ -170,7 +170,10 @@ def test_extract_memories(clean_memory_env):
     daily_dir = clean_memory_env / "daily" / "2026" / "07"
     daily_dir.mkdir(parents=True)
     (daily_dir / "2026-07-13.md").write_text(
-        "AIは簡潔に話してほしい\n\n## AIによる要約\n\n要約本文は入力しない\n",
+        "# 2026-07-13\n\n"
+        "## 💡 今日の気づき・振り返り\n\nAIは簡潔に話してほしい\n\n"
+        "## 📝メモ\n\n追加のメモ\n\n"
+        "## AIによる要約\n\n要約本文は入力しない\n",
         encoding="utf-8",
     )
     activity_dir = config.ACTIVITY_PATH / "2026" / "07"
@@ -230,6 +233,7 @@ def test_extract_memories(clean_memory_env):
 
         rendered_prompt = mock_llm.call_args.kwargs["prompt"]
         assert "AIは簡潔に話してほしい" in rendered_prompt
+        assert "追加のメモ" in rendered_prompt
         assert "要約本文は入力しない" not in rendered_prompt
         assert "簡潔な応答を望んだ" in rendered_prompt
 
