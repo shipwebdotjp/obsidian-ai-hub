@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, useRef } from "react";
+import { useCallback, useEffect, useState } from "react";
 import MemoryList from "./MemoryList";
 import MemoryDetailPanel from "./MemoryDetailPanel";
 import type { Memory, MemoryDetail, MemoryStatus } from "../../api/types";
@@ -24,8 +24,6 @@ export default function MemoryPage() {
   const [selectedMemory, setSelectedMemory] = useState<Memory | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [toasts, setToasts] = useState<Toast[]>([]);
-
-  const searchTimerRef = useRef<number | null>(null);
 
   const handleRefresh = useCallback(() => setRefreshKey((v) => v + 1), []);
 
@@ -58,17 +56,12 @@ export default function MemoryPage() {
 
   // Debounce free-text search (Local input responds immediately, updates debounced value after 500ms)
   useEffect(() => {
-    if (searchTimerRef.current !== null) {
-      window.clearTimeout(searchTimerRef.current);
-    }
-    searchTimerRef.current = window.setTimeout(() => {
+    const timer = window.setTimeout(() => {
       setDebouncedQuery(queryInput);
     }, 500);
 
     return () => {
-      if (searchTimerRef.current !== null) {
-        window.clearTimeout(searchTimerRef.current);
-      }
+      window.clearTimeout(timer);
     };
   }, [queryInput]);
 

@@ -144,4 +144,4 @@ def render_copilot_profile(_=Depends(_require_loopback_or_token)):
         raise HTTPException(
             status_code=500,
             detail=f"Failed to render copilot profile: {str(e)}"
-        )
+        ) from e
