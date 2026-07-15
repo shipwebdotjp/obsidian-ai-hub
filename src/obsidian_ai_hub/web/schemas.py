@@ -204,3 +204,53 @@ class MemoryOptionsResponse(BaseModel):
 
 class RenderCopilotProfileResponse(BaseModel):
     updated_files: list[str]
+
+
+# --- Research Theme schemas ---
+
+ALLOWED_RESEARCH_THEME_STATUS = frozenset({"candidate", "approved", "rejected", "duplicate"})
+ALLOWED_RESEARCH_JOB_STATUS = frozenset({"pending", "running", "succeeded", "failed"})
+
+
+class ResearchJob(BaseModel):
+    job_id: str
+    status: str
+    generated_title: Optional[str] = None
+    mode: Optional[str] = None
+    markdown: Optional[str] = None
+    error: Optional[str] = None
+    started_at: Optional[str] = None
+    finished_at: Optional[str] = None
+
+
+class ResearchTheme(BaseModel):
+    theme_id: str
+    status: str
+    theme: str
+    direction: Optional[str] = None
+    kind: Optional[str] = None
+    why_now: Optional[str] = None
+    confidence: Optional[float] = None
+    normalized_key: str
+    duplicate_of_theme_id: Optional[str] = None
+    duplicate_reason: Optional[str] = None
+    related_theme_ids: list[str] = []
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    reviewed_at: Optional[str] = None
+    reviewed_by: Optional[str] = None
+    latest_job: Optional[ResearchJob] = None
+
+
+class ResearchThemeListResponse(BaseModel):
+    items: list[ResearchTheme]
+    total: int
+
+
+class ResearchReviewRequest(BaseModel):
+    action: Literal["approve", "reject"]
+    reason: Optional[str] = None
+
+
+class ResearchThemeActionResponse(BaseModel):
+    theme: ResearchTheme

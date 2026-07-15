@@ -151,3 +151,49 @@ def render_copilot_profile(_=Depends(_require_loopback_or_token)):
             status_code=500,
             detail=f"Failed to render copilot profile: {str(e)}"
         ) from e
+
+
+# --- Research Theme routes ---
+
+@router.get("/research-themes", response_model=schemas.ResearchThemeListResponse)
+def list_research_themes(
+    status: Optional[str] = Query(None),
+    job_status: Optional[str] = Query(None, alias="job_status"),
+    q: Optional[str] = None,
+    _=Depends(_require_loopback_or_token),
+):
+    if status and status not in schemas.ALLOWED_RESEARCH_THEME_STATUS:
+        raise HTTPException(status_code=400, detail=f"status must be one of {sorted(schemas.ALLOWED_RESEARCH_THEME_STATUS)}")
+    if job_status and job_status not in schemas.ALLOWED_RESEARCH_JOB_STATUS:
+        raise HTTPException(status_code=400, detail=f"job_status must be one of {sorted(schemas.ALLOWED_RESEARCH_JOB_STATUS)}")
+    items = service.list_research_themes(status=status, job_status=job_status, q=q)
+    return schemas.ResearchThemeListResponse(items=items, total=len(items))
+
+
+@router.get("/research-themes/{theme_id}", response_model=schemas.ResearchTheme)
+def get_research_theme(theme_id: str, _=Depends(_require_loopback_or_token)):
+    item = service.get_research_theme(theme_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="research theme not found")
+    return item
+
+
+@router.post("/research-themes/{theme_id}/review", response_model=schemas.ResearchThemeActionResponse)
+def review_research_theme(theme_id: str, body: schemas.ResearchReviewRequest, _=Depends(_require_loopback_or_token)):
+    try:
+        result = service.review_research_theme(theme_id, body.action, reason=body.reason)
+    except ValueError as e:
+        logger.warning("review research theme validation error for %s: %s", theme_id, e)
+        raise HTTPException(status_code=400, detail=str(e))
+    if result is None:
+        raise HTTPException(status_code=404, detail="research theme not found")
+    return {"theme": result}
+
+
+@router.post("/research-themes/{theme_id}/rerun", response_model=schemas.ResearchJob)
+def rerun_research_theme(theme_id: str, _=Depends(_require_loopback_or_token)):
+    from obsidian_ai_hub.web.schemas import ALLOWED_RESEARCH_THEME_STATUS
+    job = service.rerun_research_theme(theme_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="research theme not found")
+    return job

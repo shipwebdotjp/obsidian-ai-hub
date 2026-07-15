@@ -1,51 +1,40 @@
 from __future__ import annotations
 
 import json
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
 from obsidian_ai_hub import suggest_research_theme
 
 
-def _write_daily_note(base_dir: Path, note_date: date, content: str) -> Path:
-    note_path = base_dir / note_date.strftime("%Y") / note_date.strftime("%m") / f"{note_date.strftime('%Y-%m-%d')}.md"
-    note_path.parent.mkdir(parents=True, exist_ok=True)
-    note_path.write_text(content, encoding="utf-8")
-    return note_path
+def _write_activity_log(base_dir: Path, activity_date: date, summaries: list[str]) -> Path:
+    log_dir = base_dir / activity_date.strftime("%Y") / activity_date.strftime("%m")
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file = log_dir / f"{activity_date.strftime('%Y-%m-%d')}.jsonl"
+    for s in summaries:
+        record = json.dumps({"summary": s, "category": "開発", "keywords": ["test"]}, ensure_ascii=False)
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(record + "\n")
+    return log_file
 
 
-def test_build_suggestions_uses_llm_context_and_avoids_existing_candidates(tmp_path: Path):
-    daily_root = tmp_path / "daily"
-    candidate_path = tmp_path / "リサーチ候補テーマリスト.md"
-    candidate_path.write_text("- [ ] 既存テーマ / 既存の方向\n", encoding="utf-8")
+def test_build_suggestions_uses_activity_context_and_avoids_existing(tmp_path: Path, monkeypatch):
+    today = date.today()
+    activity_root = tmp_path / "activity"
 
-    _write_daily_note(
-        daily_root,
-        date(2026, 5, 10),
-        """---
-title: 最近のメモ
----
-# Obsidian の見出し設計
-Obsidian のノート構造を見直す。
-検索しやすい見出しを作る。
-""",
-    )
-    _write_daily_note(
-        daily_root,
-        date(2026, 5, 9),
-        """# 日次レビュー
-タスク化の切り口を考える。
-見返しやすい情報の粒度を整理する。
-""",
-    )
-    _write_daily_note(
-        daily_root,
-        date(2026, 4, 1),
-        """# 古い話題
-古いノートは対象外にしたい。
-""",
-    )
+    _write_activity_log(activity_root, today, [
+        "Obsidian の見出し設計を考える",
+        "タスク管理の切り口を検討",
+    ])
+    _write_activity_log(activity_root, today - timedelta(days=1), [
+        "ノート構造の見直し",
+    ])
+
+    monkeypatch.setattr(suggest_research_theme.config, "ACTIVITY_PATH", activity_root)
+
+    from obsidian_ai_hub import research_themes
+    research_themes.create_theme(theme="既存テーマ", direction="既存の方向", kind="deep", confidence=0.9)
 
     llm_response = json.dumps(
         {
@@ -74,7 +63,7 @@ Obsidian のノート構造を見直す。
                 {
                     "kind": "deep",
                     "theme": "既存テーマ",
-                    "direction": "既存の候補と同じ内容を繰り返し調べる",
+                    "direction": "既存の候補と同じ内容",
                     "why_now": "重複チェック用",
                     "confidence": 0.99,
                 },
@@ -83,134 +72,58 @@ Obsidian のノート構造を見直す。
         ensure_ascii=False,
     )
 
-    with (
-        patch.object(suggest_research_theme.config, "DAILY_PATH", daily_root),
-        patch.object(suggest_research_theme.config, "RESEARCH_CANDIDATE_THEME_LIST_PATH", candidate_path),
-    ):
-        def fake_llm_response(*, provider: str, model: str, prompt: str, temperature: float, max_tokens: int) -> str:
-            assert provider == "openai"
-            assert "最近のメモ" in prompt
-            assert "Obsidian のノート構造を見直す。" in prompt
-            assert "既存テーマ" in prompt
-            return llm_response
+    def fake_llm_response(*, provider: str, model: str, prompt: str, temperature: float, max_tokens: int) -> str:
+        assert "Obsidian の見出し設計" in prompt
+        assert "既存テーマ" in prompt
+        return llm_response
 
-        with patch.object(suggest_research_theme.llm_client, "generate_llm_response", side_effect=fake_llm_response):
-            suggestions = suggest_research_theme.build_suggestions(as_of=date(2026, 5, 10))
+    with patch.object(suggest_research_theme.llm_client, "generate_llm_response", side_effect=fake_llm_response):
+        suggestions = suggest_research_theme.build_suggestions()
 
     assert [item.kind for item in suggestions] == ["deep", "adjacent", "explore"]
-    assert [item.theme for item in suggestions] == [
-        "意思決定ログの設計",
-        "ノート構造と検索導線の接点",
-        "調査メモの再利用パターン",
-    ]
     assert all(item.theme != "既存テーマ" for item in suggestions)
+    assert len(suggestions) == 3
 
 
-def test_build_suggestions_returns_empty_when_llm_output_is_invalid(tmp_path: Path):
-    daily_root = tmp_path / "daily"
-    _write_daily_note(
-        daily_root,
-        date(2026, 5, 10),
-        """# 日次レビュー
-タスク化の切り口を考える。
-""",
-    )
+def test_build_suggestions_returns_empty_when_llm_output_is_invalid(tmp_path: Path, monkeypatch):
+    today = date.today()
+    activity_root = tmp_path / "activity"
+    _write_activity_log(activity_root, today, ["テストアクティビティ"])
+    monkeypatch.setattr(suggest_research_theme.config, "ACTIVITY_PATH", activity_root)
 
-    with patch.object(suggest_research_theme.config, "DAILY_PATH", daily_root):
-        with patch.object(suggest_research_theme.llm_client, "generate_llm_response", side_effect=RuntimeError("boom")):
-            suggestions = suggest_research_theme.build_suggestions(as_of=date(2026, 5, 10))
+    with patch.object(suggest_research_theme.llm_client, "generate_llm_response", side_effect=RuntimeError("boom")):
+        suggestions = suggest_research_theme.build_suggestions()
 
     assert suggestions == []
 
 
-def test_append_suggestions_writes_checkbox_lines_with_directions(tmp_path: Path):
-    candidate_path = tmp_path / "リサーチ候補テーマリスト.md"
-    suggestions = [
-        suggest_research_theme.SuggestedResearchTheme("deep", "テーマA", "調査方向A"),
-        suggest_research_theme.SuggestedResearchTheme("adjacent", "テーマB", "調査方向B"),
-        suggest_research_theme.SuggestedResearchTheme("explore", "テーマC", "調査方向C"),
-    ]
+def test_main_creates_themes_and_researches(tmp_path: Path, monkeypatch):
+    today = date.today()
+    activity_root = tmp_path / "activity"
+    _write_activity_log(activity_root, today, ["テストアクティビティ"])
+    monkeypatch.setattr(suggest_research_theme.config, "ACTIVITY_PATH", activity_root)
 
-    with patch.object(suggest_research_theme.config, "RESEARCH_CANDIDATE_THEME_LIST_PATH", candidate_path):
-        result_path = suggest_research_theme.append_suggestions(suggestions, candidate_path)
-
-    assert result_path == candidate_path
-    assert candidate_path.read_text(encoding="utf-8") == (
-        "- [ ] テーマA / 調査方向A\n"
-        "- [ ] テーマB / 調査方向B\n"
-        "- [ ] テーマC / 調査方向C\n"
+    llm_response = json.dumps(
+        {
+            "candidates": [
+                {
+                    "kind": "deep",
+                    "theme": "生成テーマA",
+                    "direction": "方向A",
+                    "why_now": "理由A",
+                    "confidence": 0.9,
+                },
+            ]
+        },
+        ensure_ascii=False,
     )
 
+    with (
+        patch.object(suggest_research_theme.llm_client, "generate_llm_response", return_value=llm_response),
+        patch("obsidian_ai_hub.research_agent.run_theme_research") as mock_research,
+    ):
+        results = suggest_research_theme.main()
 
-def test_extract_preview_lines_skips_daily_template_noise():
-    content = """---
-title: 2026-05-10
-date: 2026-05-10T00:00:00+09:00
-tags:
-  - daily
----
-[[2026-05]]
-[[2026-W19]]
-
-```dataviewjs
-await dv.view("views/dailynavigation",{})
-```
-
-# 2026/05/10 日曜日
-## ☀️ 今日の天気
-晴天
-## 🚩今日の目標
-- [ ] 何かをする
-## 💡 今日の気づき・振り返り
-- 会話の前に確認したほうがよかった
-"""
-
-    terms = suggest_research_theme._extract_preview_lines(content)
-
-    assert "title" not in terms
-    assert "date" not in terms
-    assert "daily" not in terms
-    assert "dataviewjs" not in terms
-    assert "dailynavigation" not in terms
-    assert "今日の天気" not in terms
-    assert "今日の目標" not in terms
-    assert "今日の気づき・振り返り" not in terms
-    assert terms == ["- 会話の前に確認したほうがよかった"]
-
-
-def test_build_context_pack_prefers_relevant_sections_over_template_noise():
-    content = """---
-title: 最近のメモ
----
-[[2026-05]]
-
-```dataviewjs
-await dv.view("views/dailynavigation",{})
-```
-
-# 2026/05/10 日曜日
-## ☀️ 今日の天気
-晴天
-## 🚩今日の目標
-- [ ] 何かをする
-## 💡 今日の気づき・振り返り
-- 会話の前に確認したほうがよかった
-## 📝メモ
-- 次は先に事情を聞く
-"""
-
-    note = suggest_research_theme.RecentNote(
-        note_date=date(2026, 5, 10),
-        path=Path("2026-05-10.md"),
-        content=content,
-    )
-
-    context = suggest_research_theme._build_context_pack([note])
-
-    assert "dataviewjs" not in context
-    assert "今日の天気" not in context
-    assert "今日の目標" not in context
-    assert "dailynavigation" not in context
-    assert "2026-05-10" in context
-    assert "会話の前に確認したほうがよかった" in context
-    assert "次は先に事情を聞く" in context
+    assert len(results) == 1
+    assert results[0]["status"] == "candidate"
+    mock_research.assert_called_once()

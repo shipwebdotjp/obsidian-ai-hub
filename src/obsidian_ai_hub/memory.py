@@ -162,6 +162,49 @@ def get_db_connection() -> sqlite3.Connection:
         conn.execute("PRAGMA user_version = 2;")
         conn.commit()
 
+    if current_version <= 2:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS research_themes (
+                schema_version INTEGER DEFAULT 3,
+                theme_id TEXT PRIMARY KEY,
+                theme TEXT NOT NULL,
+                direction TEXT,
+                kind TEXT,
+                why_now TEXT,
+                confidence REAL,
+                normalized_key TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'candidate',
+                duplicate_of_theme_id TEXT,
+                duplicate_reason TEXT,
+                related_theme_ids TEXT,
+                created_at TEXT,
+                updated_at TEXT,
+                reviewed_at TEXT,
+                reviewed_by TEXT
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS research_jobs (
+                schema_version INTEGER DEFAULT 1,
+                job_id TEXT PRIMARY KEY,
+                theme_id TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                generated_title TEXT,
+                mode TEXT,
+                markdown TEXT,
+                error TEXT,
+                started_at TEXT,
+                finished_at TEXT,
+                FOREIGN KEY(theme_id) REFERENCES research_themes(theme_id) ON DELETE CASCADE
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_rt_status ON research_themes(status)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_rt_normalized_key ON research_themes(normalized_key)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_rj_theme_id ON research_jobs(theme_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_rj_status ON research_jobs(status)")
+        conn.execute("PRAGMA user_version = 3;")
+        conn.commit()
+
     return conn
 
 

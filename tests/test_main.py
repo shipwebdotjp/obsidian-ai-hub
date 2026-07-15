@@ -11,21 +11,24 @@ def test_research_agent_cli_accepts_theme_for_on_demand_mode(monkeypatch):
 
     with (
         patch.object(main_module.research_agent, "main", return_value=None) as mock_main,
-        patch.object(main_module.add_research_theme, "main", return_value=None) as mock_add,
     ):
         main_module.main()
 
     mock_main.assert_called_once_with("topic")
-    mock_add.assert_not_called()
 
 
-def test_research_agent_cli_uses_queue_mode_without_theme(monkeypatch):
+def test_research_agent_cli_requires_theme(monkeypatch):
     monkeypatch.setattr(sys, "argv", ["prog", "--research-agent"])
 
-    with patch.object(main_module.research_agent, "main", return_value=None) as mock_main:
-        main_module.main()
-
-    mock_main.assert_called_once_with()
+    with patch("argparse.ArgumentParser.error") as mock_error:
+        mock_error.side_effect = SystemExit
+        with patch.object(sys, "exit"):
+            try:
+                main_module.main()
+            except SystemExit:
+                pass
+        mock_error.assert_called_once()
+        assert "--research-agent requires --theme" in mock_error.call_args[0][0]
 
 
 def test_vault_search_cli_calls_search(monkeypatch):
@@ -149,6 +152,24 @@ def test_suggest_research_theme_cli_calls_suggester(monkeypatch):
         main_module.main()
 
     mock_main.assert_called_once_with()
+
+
+def test_add_research_theme_cli_calls_handler(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["prog", "--add-research-theme", "--theme", "test theme"])
+
+    with patch.object(main_module.add_research_theme, "main", return_value="candidate") as mock_main:
+        main_module.main()
+
+    mock_main.assert_called_once_with("test theme", direction=None)
+
+
+def test_add_research_theme_with_direction(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["prog", "--add-research-theme", "--theme", "test", "--direction", "方向"])
+
+    with patch.object(main_module.add_research_theme, "main", return_value="candidate") as mock_main:
+        main_module.main()
+
+    mock_main.assert_called_once_with("test", direction="方向")
 
 
 def test_sync_vault_cli_calls_sync(monkeypatch):

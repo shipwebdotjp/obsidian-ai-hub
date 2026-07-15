@@ -117,3 +117,46 @@ export interface MemoryOptionsResponse {
 export interface RenderCopilotProfileResponse {
   updated_files: string[];
 }
+
+export type ResearchStatus = "candidate" | "approved" | "rejected" | "duplicate";
+export type ResearchJobStatus = "pending" | "running" | "succeeded" | "failed";
+
+export interface ResearchJob {
+  job_id: string;
+  status: ResearchJobStatus;
+  generated_title?: string;
+  mode?: string;
+  markdown?: string;
+  error?: string;
+  started_at?: string;
+  finished_at?: string;
+}
+
+export interface ResearchTheme {
+  theme_id: string;
+  status: ResearchStatus;
+  theme: string;
+  direction?: string;
+  kind?: string;
+  why_now?: string;
+  confidence?: number;
+  normalized_key: string;
+  duplicate_of_theme_id?: string;
+  duplicate_reason?: string;
+  related_theme_ids: string[];
+  created_at?: string;
+  updated_at?: string;
+  reviewed_at?: string;
+  reviewed_by?: string;
+  latest_job?: ResearchJob | null;
+}
+
+export interface ResearchListResponse {
+  items: ResearchTheme[];
+  total: number;
+}
+
+export interface ResearchReviewRequest {
+  action: "approve" | "reject";
+  reason?: string;
+}

@@ -9,15 +9,13 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Optional, Sequence, Tuple
+from typing import Optional, Sequence
 
 from obsidian_ai_hub.utils import config, llm_client, prompt
 
 logger = logging.getLogger(__name__)
 
 INVALID_FILENAME_CHARS = '/\\:*?"<>|'
-CHECKBOX_UNCHECKED = "- [ ]"
-CHECKBOX_CHECKED = "- [x]"
 MAX_FILENAME_BYTES = 120
 RESEARCH_MODE_INTERNAL = "internal"
 RESEARCH_MODE_WEB = "web"
@@ -27,96 +25,26 @@ RESEARCH_MODE_ALIASES = {
     "web-first": RESEARCH_MODE_DEEP,
 }
 
-@dataclass(frozen=True)
-class ResearchCandidate:
-    line_index: int
-    theme: str
+MAX_CONTEXT_LINES = 48
+MAX_CONTEXT_CHARS = 1200
+
+
+@dataclass
+class ResearchReport:
+    title: str
+    mode: str
+    markdown: str
 
 
 @dataclass
 class ResearchRunResult:
     success_count: int = 0
     error_count: int = 0
-    error_topics: Optional[List[str]] = None
+    error_topics: Optional[list[str]] = None
 
     def __post_init__(self) -> None:
         if self.error_topics is None:
             self.error_topics = []
-
-
-def read_lines(path: Path) -> List[str]:
-    with path.open("r", encoding="utf-8") as f:
-        return f.read().splitlines(keepends=True)
-
-
-def write_lines_atomic(path: Path, lines: Sequence[str]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path: Optional[Path] = None
-    with tempfile.NamedTemporaryFile(
-        "w",
-        encoding="utf-8",
-        dir=str(path.parent),
-        delete=False,
-    ) as tmp:
-        tmp_path = Path(tmp.name)
-        try:
-            tmp.writelines(lines)
-            tmp.flush()
-            os.fsync(tmp.fileno())
-        except Exception:
-            if tmp_path is not None:
-                tmp_path.unlink(missing_ok=True)
-            raise
-    try:
-        os.replace(tmp_path, path)
-    except Exception:
-        if tmp_path is not None:
-            tmp_path.unlink(missing_ok=True)
-        raise
-
-
-def parse_candidates(lines: Sequence[str]) -> List[ResearchCandidate]:
-    candidates: List[ResearchCandidate] = []
-    for index, line in enumerate(lines):
-        if not line.startswith(CHECKBOX_UNCHECKED):
-            continue
-        payload = line[len(CHECKBOX_UNCHECKED):].strip()
-        theme = payload.rsplit(" / ", 1)[0].strip()
-        if theme:
-            candidates.append(ResearchCandidate(line_index=index, theme=theme))
-    return candidates
-
-
-def mark_candidate_checked(lines: Sequence[str], line_index: int) -> List[str]:
-    updated = list(lines)
-    if line_index < 0 or line_index >= len(updated):
-        raise IndexError(f"line_index out of range: {line_index}")
-    line = updated[line_index]
-    if line.startswith(CHECKBOX_UNCHECKED):
-        updated[line_index] = CHECKBOX_CHECKED + line[len(CHECKBOX_UNCHECKED):]
-    return updated
-
-
-def make_research_filename(theme: str) -> str:
-    safe = theme.translate({ord(char): "_" for char in INVALID_FILENAME_CHARS})
-    safe = safe.strip()
-    if not safe:
-        return "untitled.md"
-    return f"{_truncate_filename_base(safe)}.md"
-
-
-def _truncate_filename_base(base: str) -> str:
-    encoded = base.encode("utf-8")
-    if len(encoded) <= MAX_FILENAME_BYTES:
-        return base
-
-    trimmed = encoded[:MAX_FILENAME_BYTES]
-    while trimmed:
-        try:
-            return trimmed.decode("utf-8")
-        except UnicodeDecodeError:
-            trimmed = trimmed[:-1]
-    return "untitled"
 
 
 def _normalize_optional_text(text: Optional[str]) -> str:
@@ -187,7 +115,7 @@ def route_research_topic(
     context: Optional[str] = None,
     why_now: Optional[str] = None,
 ) -> str:
-    prompt = build_web_research_router_prompt(
+    p = build_web_research_router_prompt(
         theme,
         context=context,
         why_now=why_now,
@@ -196,7 +124,7 @@ def route_research_topic(
         response = llm_client.generate_llm_response(
             provider=config.RESEARCH_ROUTER_PROVIDER,
             model=config.RESEARCH_ROUTER_MODEL,
-            prompt=prompt,
+            prompt=p,
             temperature=0.0,
             max_tokens=16,
         )
@@ -212,70 +140,63 @@ def route_research_topic(
     return decision
 
 
-def needs_web_research(
-    theme: str,
-    *,
-    context: Optional[str] = None,
-    why_now: Optional[str] = None,
-) -> bool:
-    return route_research_topic(
-        theme,
-        context=context,
-        why_now=why_now,
-    ) != RESEARCH_MODE_INTERNAL
-
-
-def _load_recent_note_context() -> str:
-    from obsidian_ai_hub import suggest_research_theme
-
+def _load_activity_context() -> str:
+    from obsidian_ai_hub import research_themes
     try:
-        notes = suggest_research_theme._load_recent_notes(
-            days=config.RESEARCH_CONTEXT_LOOKBACK_DAYS,
-        )
+        entries = research_themes.list_recent_activity_days(days=config.RESEARCH_CONTEXT_LOOKBACK_DAYS)
     except Exception:
-        logger.exception("Failed to load recent notes for research context")
+        logger.exception("Failed to load activity context")
         return ""
 
-    if not notes:
+    if not entries:
         return ""
 
-    return suggest_research_theme._build_context_pack(
-        notes[:config.RESEARCH_CONTEXT_MAX_NOTES],
-    ).strip()
+    blocks: list[str] = []
+    for e in entries:
+        summary = (e.get("summary") or "")[:MAX_CONTEXT_CHARS]
+        category = e.get("category") or ""
+        keywords = ", ".join(e.get("keywords", []) or [])
+        date_str = e.get("activity_date", "")
+        lines = [f"- {date_str} | {summary}"]
+        if category:
+            lines.append(f"  category: {category}")
+        if keywords:
+            kw_trunc = keywords[:MAX_CONTEXT_CHARS]
+            lines.append(f"  keywords: {kw_trunc}")
+        blocks.append("\n".join(lines))
+
+        if len(blocks) >= MAX_CONTEXT_LINES:
+            break
+
+    return "\n\n".join(blocks)
 
 
-def _load_existing_candidate_context() -> str:
-    candidate_path = config.RESEARCH_CANDIDATE_THEME_LIST_PATH
-    if not candidate_path.exists():
-        return ""
-
+def _load_db_existing_theme_context() -> str:
+    from obsidian_ai_hub import research_themes
     try:
-        lines = read_lines(candidate_path)
+        themes = research_themes.list_themes()
     except Exception:
-        logger.exception("Failed to load research candidate themes")
+        logger.exception("Failed to load research themes from DB")
         return ""
 
-    themes = [candidate.theme for candidate in parse_candidates(lines)[:20]]
-    if not themes:
-        return ""
-
-    return "\n".join(f"- {theme}" for theme in themes)
+    lines = [f"- {t['theme']}" for t in themes[:50] if t.get("theme")]
+    return "\n".join(lines) if lines else "(none)"
 
 
 def collect_research_context(theme: str, explicit_context: Optional[str] = None) -> str:
-    sections: List[str] = []
+    sections: list[str] = []
 
     explicit_text = _normalize_optional_text(explicit_context)
     if explicit_text:
         sections.append("## ユーザーの補足\n" + explicit_text)
 
-    recent_notes_text = _load_recent_note_context()
-    if recent_notes_text:
-        sections.append("## 最近のノート\n" + recent_notes_text)
+    activity_text = _load_activity_context()
+    if activity_text:
+        sections.append("## 最近のアクティビティ\n" + activity_text)
 
-    existing_candidates_text = _load_existing_candidate_context()
-    if existing_candidates_text:
-        sections.append("## 既存の調査候補\n" + existing_candidates_text)
+    existing_themes_text = _load_db_existing_theme_context()
+    if existing_themes_text:
+        sections.append("## 既存の調査テーマ\n" + existing_themes_text)
 
     try:
         from obsidian_ai_hub.handler.obsidian_vault_retriever import search_obsidian_vault
@@ -298,7 +219,6 @@ def build_research_prompt(
 ) -> str:
     context_text = _normalize_optional_text(context)
     why_now_text = _normalize_optional_text(why_now)
-    # オプションセクションを事前に組み立てる
     why_now_section = f"\n## 調べたい背景:\n{why_now_text}\n" if why_now_text else ""
     context_section = f"\n## 参考文脈:\n{context_text}\n" if context_text else ""
 
@@ -306,7 +226,6 @@ def build_research_prompt(
     normalized_mode = _normalize_research_mode(mode)
 
     if normalized_mode == RESEARCH_MODE_WEB:
-        # Tavilyの検索結果をここで埋め込む
         search_results = _run_web_search_with_raw_theme(theme)
         logger.debug("Web research search results for theme '%s': %s", theme, search_results)
         return prompt.render_prompt(
@@ -352,22 +271,6 @@ def build_title_prompt(theme: str, expanded_prompt: str) -> str:
     )
 
 
-def expand_topic_prompt(
-    theme: str,
-    *,
-    mode: str = RESEARCH_MODE_INTERNAL,
-    context: Optional[str] = None,
-    output_style: Optional[str] = None,
-    why_now: Optional[str] = None,
-) -> str:
-    return build_research_prompt(
-        theme,
-        mode=mode,
-        context=context,
-        output_style=output_style,
-        why_now=why_now,
-    ).strip()
-
 def generate_research_title(theme: str, expanded_prompt: str) -> str:
     title = llm_client.generate_llm_response(
         provider=config.RESEARCH_TITLE_GENERATION_PROVIDER,
@@ -384,7 +287,6 @@ def generate_research_title(theme: str, expanded_prompt: str) -> str:
 
 @contextmanager
 def _gpt_researcher_environment():
-    """Expose config.yml's deep-research settings only while GPT Researcher runs."""
     values = {
         "RETRIEVER": config.RESEARCH_GPT_RESEARCHER_RETRIEVER,
         "FAST_LLM": config.RESEARCH_GPT_RESEARCHER_FAST_LLM,
@@ -409,7 +311,7 @@ def _gpt_researcher_environment():
 
 async def _run_gpt_researcher(query: str) -> str:
     try:
-        from gpt_researcher import GPTResearcher  # type: ignore
+        from gpt_researcher import GPTResearcher
     except Exception as exc:
         raise RuntimeError("gpt_researcher package is required for research agent") from exc
 
@@ -446,9 +348,6 @@ def _run_web_search(query: str) -> str:
 
 
 def _run_web_search_with_raw_theme(theme: str) -> str:
-    """
-    Generates a web search query from a theme using an LLM, then executes the search.
-    """
     rendered_prompt = prompt.render_prompt(
         config.RESEARCH_QUERY_GENERATION_PROMPT_PATH,
         {"theme": theme}
@@ -462,18 +361,6 @@ def _run_web_search_with_raw_theme(theme: str) -> str:
     ).strip()
     logger.info("Generated Tavily search query for theme '%s'", theme)
     return _run_web_search(search_query)
-
-
-def _truncate_text(text: str, *, limit: int = 12000) -> str:
-    cleaned = text.strip()
-    if len(cleaned) <= limit:
-        return cleaned
-    return cleaned[:limit].rstrip() + "\n...(truncated)"
-
-
-def _build_web_synthesis_prompt(query: str, search_results: str, output_style: str) -> str:
-    return f"""
-"""
 
 
 def conduct_research(
@@ -538,49 +425,68 @@ def build_markdown(
     return "".join(frontmatter) + body_text
 
 
-def build_research_body(
-    expanded_prompt: str,
-    report: str,
-    *,
-    prompt_label: str = "調査用プロンプト",
-) -> str:
-    prompt_text = expanded_prompt.rstrip()
-    report_text = report.strip()
-    if prompt_text and report_text:
-        return f"## {prompt_label}\n{prompt_text}\n\n## 調査結果レポート\n{report_text}"
-    if prompt_text:
-        return prompt_text
-    return report_text
+def make_research_filename(title: str) -> str:
+    safe = title.translate({ord(char): "_" for char in INVALID_FILENAME_CHARS})
+    safe = safe.strip()
+    if not safe:
+        return "untitled.md"
+    return f"{_truncate_filename_base(safe)}.md"
+
+
+def _truncate_filename_base(base: str) -> str:
+    encoded = base.encode("utf-8")
+    if len(encoded) <= MAX_FILENAME_BYTES:
+        return base
+
+    trimmed = encoded[:MAX_FILENAME_BYTES]
+    while trimmed:
+        try:
+            return trimmed.decode("utf-8")
+        except UnicodeDecodeError:
+            trimmed = trimmed[:-1]
+    return "untitled"
+
+
+def write_lines_atomic(path: Path, lines: Sequence[str]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path: Optional[Path] = None
+    with tempfile.NamedTemporaryFile(
+        "w",
+        encoding="utf-8",
+        dir=str(path.parent),
+        delete=False,
+    ) as tmp:
+        tmp_path = Path(tmp.name)
+        try:
+            tmp.writelines(lines)
+            tmp.flush()
+            os.fsync(tmp.fileno())
+        except Exception:
+            if tmp_path is not None:
+                tmp_path.unlink(missing_ok=True)
+            raise
+    try:
+        os.replace(tmp_path, path)
+    except Exception:
+        if tmp_path is not None:
+            tmp_path.unlink(missing_ok=True)
+        raise
 
 
 def save_markdown(path: Path, content: str) -> None:
     write_lines_atomic(path, [content])
 
 
-def process_candidate(
-    candidate: ResearchCandidate,
-    *,
-    context: Optional[str] = None,
-    mode: str = "auto",
-    output_style: Optional[str] = None,
-) -> Tuple[Path, str]:
-    return process_theme(
-        candidate.theme,
-        context=context,
-        mode=mode,
-        output_style=output_style,
-    )
-
-
-def process_theme(
+def run_research(
     theme: str,
     *,
-    context: Optional[str] = None,
-    mode: str = "auto",
-    output_style: Optional[str] = None,
+    direction: Optional[str] = None,
     why_now: Optional[str] = None,
-) -> Tuple[Path, str]:
-    combined_context = collect_research_context(theme,context)
+    mode: str = "auto",
+    context: Optional[str] = None,
+    output_style: Optional[str] = None,
+) -> ResearchReport:
+    combined_context = collect_research_context(theme, context)
     resolved_mode = mode
     if mode == "auto":
         resolved_mode = route_research_topic(
@@ -590,117 +496,93 @@ def process_theme(
         )
     normalized_mode = _normalize_research_mode(resolved_mode)
     logger.info("Resolved research mode for theme '%s': %s", theme, normalized_mode)
-    prompt = expand_topic_prompt(
+
+    p = build_research_prompt(
         theme,
         mode=resolved_mode,
         context=combined_context,
         output_style=output_style,
         why_now=why_now,
     )
-    title = generate_research_title(theme, prompt)
-    report = conduct_research(prompt, mode=resolved_mode, output_style=output_style)
-    output_path = config.RESEARCH_OUTPUT_DIR / make_research_filename(title)
+    title = generate_research_title(theme, p)
+    report_body = conduct_research(p, mode=resolved_mode, output_style=output_style)
     source = {
         RESEARCH_MODE_INTERNAL: "internal-llm",
         RESEARCH_MODE_WEB: "tavily-search",
         RESEARCH_MODE_DEEP: "gpt-researcher",
     }.get(normalized_mode, "internal-llm")
-    markdown = build_markdown(
-        title,
-        build_research_body(
-            theme,
-            report,
-            prompt_label="テーマ",
-        ),
-        source=source,
-        output_style=output_style,
-    )
-    save_markdown(output_path, markdown)
-    return output_path, markdown
+
+    body = f"## テーマ\n{theme}\n\n## 調査結果レポート\n{report_body}"
+    markdown = build_markdown(title, body, source=source, output_style=output_style)
+
+    return ResearchReport(title=title, mode=normalized_mode, markdown=markdown)
 
 
-def _run_queue_mode(
-    *,
-    context: Optional[str] = None,
-    mode: str = "auto",
-    output_style: Optional[str] = None,
-) -> ResearchRunResult:
-    result = ResearchRunResult()
+def run_theme_research(theme_id: str) -> Optional[dict]:
+    from obsidian_ai_hub import research_themes
 
-    candidate_path = config.RESEARCH_CANDIDATE_THEME_LIST_PATH
-    output_dir = config.RESEARCH_OUTPUT_DIR
-    output_dir.mkdir(parents=True, exist_ok=True)
+    theme_obj = research_themes.get_theme(theme_id)
+    if theme_obj is None:
+        logger.error("Theme not found: %s", theme_id)
+        return None
 
-    if not candidate_path.exists():
-        raise FileNotFoundError(f"Candidate theme list not found: {candidate_path}")
-
-    lines = read_lines(candidate_path)
-    candidates = parse_candidates(lines)
-
-    for candidate in candidates:
-        try:
-            logger.info("Processing research topic: %s", candidate.theme)
-            process_candidate(
-                candidate,
-                context=context,
-                mode=mode,
-                output_style=output_style,
-            )
-            updated_lines = mark_candidate_checked(lines, candidate.line_index)
-            write_lines_atomic(candidate_path, updated_lines)
-            lines = updated_lines
-            result.success_count += 1
-        except Exception as exc:
-            logger.exception("Failed to process research topic: %s", candidate.theme)
-            result.error_count += 1
-            result.error_topics.append(candidate.theme)
-            continue
-
-    logger.info(
-        "Research agent finished: success=%s error=%s",
-        result.success_count,
-        result.error_count,
-    )
-    if result.error_topics:
-        logger.info("Failed topics: %s", ", ".join(result.error_topics))
-
-    return result
-
-
-def _run_single_theme_mode(
-    theme: str,
-    *,
-    context: Optional[str] = None,
-    mode: str = "auto",
-    output_style: Optional[str] = None,
-) -> ResearchRunResult:
-    result = ResearchRunResult()
-    output_dir = config.RESEARCH_OUTPUT_DIR
-    output_dir.mkdir(parents=True, exist_ok=True)
+    job = research_themes.create_job(theme_id)
+    job_id = job["job_id"]
 
     try:
-        logger.info("Processing research topic: %s", theme)
-        process_theme(
-            theme,
-            context=context,
-            mode=mode,
-            output_style=output_style,
+        research_themes.update_job(job_id, status="running")
+        report = run_research(
+            theme=theme_obj["theme"],
+            direction=theme_obj.get("direction"),
+            why_now=theme_obj.get("why_now"),
         )
-        result.success_count += 1
-    except Exception:
-        logger.exception("Failed to process research topic: %s", theme)
-        result.error_count += 1
-        result.error_topics.append(theme)
+        research_themes.update_job(
+            job_id,
+            status="succeeded",
+            generated_title=report.title,
+            mode=report.mode,
+            markdown=report.markdown,
+        )
+        logger.info("Research succeeded for theme '%s' (job=%s)", theme_obj["theme"], job_id)
+    except Exception as exc:
+        logger.exception("Research failed for theme '%s'", theme_obj["theme"])
+        research_themes.update_job(
+            job_id,
+            status="failed",
+            error=str(exc),
+        )
 
-    logger.info(
-        "Research agent finished: success=%s error=%s",
-        result.success_count,
-        result.error_count,
-    )
-    if result.error_topics:
-        logger.info("Failed topics: %s", ", ".join(result.error_topics))
+    return research_themes.latest_job(theme_id)
 
-    return result
+
+def save_research_to_vault(theme_id: str) -> Optional[Path]:
+    from obsidian_ai_hub import research_themes
+
+    theme_obj = research_themes.get_theme(theme_id)
+    if theme_obj is None:
+        logger.error("Theme not found: %s", theme_id)
+        return None
+
+    job = research_themes.latest_job(theme_id)
+    if job is None or job.get("status") != "succeeded" or not job.get("markdown"):
+        logger.error("No successful research job for theme %s", theme_id)
+        return None
+
+    title = job.get("generated_title") or theme_obj["theme"]
+    filename = make_research_filename(title)
+
+    output_dir = config.RESEARCH_OUTPUT_DIR
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = output_dir / filename
+
+    if output_path.exists():
+        stem = output_path.stem
+        suffix = output_path.suffix
+        output_path = output_dir / f"{stem}_{theme_id}{suffix}"
+
+    save_markdown(output_path, job["markdown"])
+    logger.info("Saved research to Vault: %s", output_path)
+    return output_path
 
 
 def main(
@@ -710,6 +592,50 @@ def main(
     mode: str = "auto",
     output_style: Optional[str] = None,
 ) -> ResearchRunResult:
+    from obsidian_ai_hub import research_themes
+
+    result = ResearchRunResult()
     if theme is None:
-        return _run_queue_mode(context=context, mode=mode, output_style=output_style)
-    return _run_single_theme_mode(theme, context=context, mode=mode, output_style=output_style)
+        logger.error("--research-agent --theme <theme> is required (queue mode removed)")
+        return result
+
+    try:
+        logger.info("Processing research theme: %s", theme)
+        normalized = research_themes.normalize_theme_key(theme)
+        existing = research_themes.find_exact_duplicate(normalized)
+        if existing and existing.get("status") == "approved":
+            theme_id = existing["theme_id"]
+            logger.info("Reusing existing approved theme %s for re-research", theme_id)
+        else:
+            rec = research_themes.create_theme(
+                theme=theme,
+                direction=context or None,
+                why_now=context or None,
+                kind="explore",
+                confidence=1.0,
+                status="approved",
+            )
+            theme_id = rec["theme_id"]
+
+        job = run_theme_research(theme_id)
+        if job and job.get("status") == "succeeded":
+            save_research_to_vault(theme_id)
+            result.success_count += 1
+        else:
+            logger.error("Research failed for theme '%s'", theme)
+            result.error_count += 1
+            result.error_topics.append(theme)
+    except Exception:
+        logger.exception("Failed to process research theme: %s", theme)
+        result.error_count += 1
+        result.error_topics.append(theme or "(unknown)")
+
+    logger.info(
+        "Research agent finished: success=%s error=%s",
+        result.success_count,
+        result.error_count,
+    )
+    if result.error_topics:
+        logger.info("Failed topics: %s", ", ".join(result.error_topics))
+
+    return result

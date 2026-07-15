@@ -3,6 +3,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import Sidebar from "./components/Sidebar";
 import TokenPrompt from "./components/TokenPrompt";
 import MemoryPage from "./features/memories/MemoryPage";
+import ResearchPage from "./features/research/ResearchPage";
 import { health, ApiError } from "./api/client";
 import { ROUTES } from "./constants/routes";
 
@@ -71,6 +72,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Navigate to={ROUTES.MEMORIES} replace />} />
           <Route path={ROUTES.MEMORIES} element={<MemoryPage />} />
+          <Route path={ROUTES.RESEARCH} element={<ResearchPage />} />
           <Route path="*" element={<Navigate to={ROUTES.MEMORIES} replace />} />
         </Routes>
       </main>

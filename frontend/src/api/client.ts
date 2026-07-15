@@ -8,6 +8,9 @@ import type {
   DeleteResponse,
   BatchDeleteRequest,
   BatchDeleteResponse,
+  ResearchListResponse,
+  ResearchTheme,
+  ResearchJob,
 } from "./types";
 
 const TOKEN_KEY = "obsidian-ai-hub:review-token";
@@ -167,4 +170,44 @@ export function renderCopilotProfile(): Promise<{ updated_files: string[] }> {
   return request<{ updated_files: string[] }>("/api/v1/copilot-profile/render", {
     method: "POST",
   });
+}
+
+// Research Theme API
+
+export function listResearchThemes(params: {
+  status?: string;
+  job_status?: string;
+  q?: string;
+}): Promise<ResearchListResponse> {
+  const sp = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) {
+    if (v) sp.set(k, v);
+  }
+  const qs = sp.toString();
+  return request<ResearchListResponse>(`/api/v1/research-themes${qs ? `?${qs}` : ""}`);
+}
+
+export function getResearchTheme(themeId: string): Promise<ResearchTheme> {
+  return request<ResearchTheme>(`/api/v1/research-themes/${encodeURIComponent(themeId)}`);
+}
+
+export function reviewResearchTheme(
+  themeId: string,
+  action: "approve" | "reject",
+  reason?: string,
+): Promise<{ theme: ResearchTheme }> {
+  return request<{ theme: ResearchTheme }>(
+    `/api/v1/research-themes/${encodeURIComponent(themeId)}/review`,
+    {
+      method: "POST",
+      body: JSON.stringify({ action, reason }),
+    },
+  );
+}
+
+export function rerunResearchTheme(themeId: string): Promise<ResearchJob> {
+  return request<ResearchJob>(
+    `/api/v1/research-themes/${encodeURIComponent(themeId)}/rerun`,
+    { method: "POST" },
+  );
 }

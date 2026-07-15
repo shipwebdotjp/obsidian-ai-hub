@@ -13,6 +13,9 @@ export default function Sidebar() {
         <NavLink to={ROUTES.MEMORIES} className={linkClass}>
           メモリ
         </NavLink>
+        <NavLink to={ROUTES.RESEARCH} className={linkClass}>
+          リサーチ
+        </NavLink>
       </nav>
     </aside>
   );

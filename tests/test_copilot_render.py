@@ -58,10 +58,11 @@ def clean_copilot_env(tmp_path, monkeypatch):
 from datetime import datetime, timedelta
 
 def test_get_currently_valid_approved_memories_basic(clean_copilot_env):
-    today = datetime.now()
-    past_date_str = (today - timedelta(days=10)).strftime("%Y-%m-%d")
-    yesterday_str = (today - timedelta(days=1)).strftime("%Y-%m-%d")
-    tomorrow_str = (today + timedelta(days=1)).strftime("%Y-%m-%d")
+    from datetime import timezone
+    today = datetime.now(timezone.utc).date()
+    past_date_str = (today - timedelta(days=10)).isoformat()
+    yesterday_str = (today - timedelta(days=1)).isoformat()
+    tomorrow_str = (today + timedelta(days=1)).isoformat()
 
     # Setup some candidate, rejected, expired, future, and currently valid approved memories
     m_valid = {

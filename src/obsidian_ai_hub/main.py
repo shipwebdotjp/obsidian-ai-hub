@@ -193,6 +193,11 @@ def main():
         help="--research-agent で即時調査するテーマ名、または --add-research-theme に付けるテーマ名"
     )
     parser.add_argument(
+        "--direction",
+        type=str,
+        help="--add-research-theme に付ける調査方向（任意）"
+    )
+    parser.add_argument(
         "--context",
         type=str,
         help="--research-agent に渡す補足文脈。自分の前提知識や調べたい理由を入れる"
@@ -326,6 +331,8 @@ def main():
         parser.error("--context requires --research-agent")
     if args.output_style and not args.research_agent:
         parser.error("--output-style requires --research-agent")
+    if args.research_agent and not args.theme:
+        parser.error("--research-agent requires --theme (queue mode removed; use --suggest-research-theme instead)")
     if args.vault_search and not args.query:
         parser.error("--vault-search requires --query")
     if args.query and not args.vault_search:
@@ -398,18 +405,15 @@ def main():
         run_and_log(rebuild_valut.main, "rebuild_vault")
         ran = True
     if args.research_agent:
-        if args.theme:
-            run_and_log(
-                lambda: research_agent.main(args.theme, **research_kwargs),
-                "research_agent",
-            )
-        else:
-            run_and_log(lambda: research_agent.main(**research_kwargs), "research_agent")
+        run_and_log(
+            lambda: research_agent.main(args.theme, **research_kwargs),
+            "research_agent",
+        )
         ran = True
     if args.add_research_theme:
         if not args.theme:
             raise ValueError("--add-research-theme requires --theme")
-        run_and_log(lambda: add_research_theme.main(args.theme), "add_research_theme")
+        run_and_log(lambda: add_research_theme.main(args.theme, direction=args.direction), "add_research_theme")
         ran = True
     if args.suggest_research_theme:
         run_and_log(suggest_research_theme.main, "suggest_research_theme")

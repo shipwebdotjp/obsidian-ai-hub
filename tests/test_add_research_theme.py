@@ -8,24 +8,18 @@ import pytest
 from obsidian_ai_hub.handler import add_research_theme
 
 
-def test_append_research_theme_creates_candidate_item(tmp_path: Path):
-    candidate_path = tmp_path / "リサーチ候補テーマリスト.md"
-
-    with patch.object(add_research_theme.config, "RESEARCH_CANDIDATE_THEME_LIST_PATH", candidate_path):
-        result_path = add_research_theme.append_research_theme("新しいテーマ")
-
-    assert result_path == candidate_path
-    assert candidate_path.read_text(encoding="utf-8") == "- [ ] 新しいテーマ\n"
+def test_append_research_theme_creates_candidate_in_db():
+    with patch("obsidian_ai_hub.research_agent.run_theme_research") as mock_research:
+        result = add_research_theme.append_research_theme("新しいテーマ")
+    assert result == "candidate"
+    mock_research.assert_called_once()
 
 
-def test_append_research_theme_preserves_existing_content(tmp_path: Path):
-    candidate_path = tmp_path / "リサーチ候補テーマリスト.md"
-    candidate_path.write_text("- [ ] 既存テーマ", encoding="utf-8")
-
-    with patch.object(add_research_theme.config, "RESEARCH_CANDIDATE_THEME_LIST_PATH", candidate_path):
-        add_research_theme.append_research_theme("追加テーマ")
-
-    assert candidate_path.read_text(encoding="utf-8") == "- [ ] 既存テーマ\n- [ ] 追加テーマ\n"
+def test_append_research_theme_with_direction():
+    with patch("obsidian_ai_hub.research_agent.run_theme_research") as mock_research:
+        result = add_research_theme.append_research_theme("テーマ", direction="調査方向")
+    assert result == "candidate"
+    mock_research.assert_called_once()
 
 
 def test_append_research_theme_rejects_empty_theme():
@@ -33,19 +27,21 @@ def test_append_research_theme_rejects_empty_theme():
         add_research_theme.append_research_theme("   ")
 
 
-def test_append_research_theme_removes_newlines(tmp_path: Path):
-    candidate_path = tmp_path / "リサーチ候補テーマリスト.md"
-
-    with patch.object(add_research_theme.config, "RESEARCH_CANDIDATE_THEME_LIST_PATH", candidate_path):
+def test_append_research_theme_removes_newlines():
+    with patch("obsidian_ai_hub.research_agent.run_theme_research") as mock_research:
         add_research_theme.append_research_theme("  新しい\nテーマ\r\n")
+    mock_research.assert_called_once()
 
-    assert candidate_path.read_text(encoding="utf-8") == "- [ ] 新しいテーマ\n"
 
+def test_append_research_theme_handles_duplicate():
+    with patch("obsidian_ai_hub.research_agent.run_theme_research") as mock_research:
+        result1 = add_research_theme.append_research_theme("重複テスト")
+        assert result1 == "candidate"
+        mock_research.assert_called_once()
 
-def test_append_research_theme_can_store_direction(tmp_path: Path):
-    candidate_path = tmp_path / "リサーチ候補テーマリスト.md"
+    mock_research.reset_mock()
 
-    with patch.object(add_research_theme.config, "RESEARCH_CANDIDATE_THEME_LIST_PATH", candidate_path):
-        add_research_theme.append_research_theme("テーマ", direction="調査方向")
-
-    assert candidate_path.read_text(encoding="utf-8") == "- [ ] テーマ / 調査方向\n"
+    with patch("obsidian_ai_hub.research_agent.run_theme_research") as mock_research:
+        result2 = add_research_theme.append_research_theme("重複テスト")
+        assert result2 == "duplicate"
+        mock_research.assert_not_called()
