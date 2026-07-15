@@ -18,7 +18,7 @@ from pathlib import Path
 import whisper
 
 from obsidian_ai_hub.handler import add_research_theme, web_extract
-from obsidian_ai_hub.utils import config, extracter, llm_client, prompt
+from obsidian_ai_hub.utils import config, extracter, llm_client, prompt, webclip
 
 logger = logging.getLogger(__name__)
 
@@ -98,55 +98,55 @@ def generate_web_summary(raw_content: str) -> str:
 
 def process_web_clips(urls: list[str], daily_file: Path, hour_str: str) -> None:
     """
-    Process a list of URLs, extract content, summarize, and append to daily note.
+    Process a list of URLs, extract content, summarize as a webclip, and append to daily note.
     """
     if not urls:
         return
 
+    # Determine clipped_at_str using system local timezone
+    if re.match(r'^\d{4}-\d{2}-\d{2}$', daily_file.stem):
+        try:
+            local_dt = datetime.strptime(f"{daily_file.stem} {hour_str}", "%Y-%m-%d %H:%M")
+            clipped_at_str = local_dt.astimezone().isoformat()
+        except Exception:
+            clipped_at_str = datetime.now().astimezone().isoformat()
+    else:
+        clipped_at_str = datetime.now().astimezone().isoformat()
+
     all_entries = []
-    # Chunk URLs into batches of 20 (Tavily limit)
+
+    # Chunk URLs into batches of 20
     for i in range(0, len(urls), 20):
         batch = urls[i : i + 20]
+        results = []
         try:
-            # web_extract.web_extract.invoke returns a JSON string
             results_json = web_extract.web_extract.invoke({"urls": batch})
-            results = json.loads(results_json)["results"]
-
-            if not isinstance(results, list):
-                logger.error("web_extract returned non-list: %s", results)
-                for url in batch:
-                    all_entries.append(f"- {hour_str} [web] {url}")
-                continue
-
-            # Map results by URL for easier lookup
-            # title も含めてマッピング
-            result_map = {
-                r.get("url"): {
-                    "raw_content": r.get("raw_content"),
-                    "title": r.get("title"),
-                }
-                for r in results if isinstance(r, dict)
-            }
-
-
-            for url in batch:
-                result = result_map.get(url)
-                if result and result.get("raw_content"):
-                    raw_content = result["raw_content"]
-                    # web_extract の title を優先し、なければ infer_title にフォールバック
-                    title = result.get("title") or infer_title(url, raw_content)
-                    summary = generate_web_summary(raw_content)
-                    entry = f"- {hour_str} [web] [{title}]({url})"
-                    if summary:
-                        entry += f"\n  {summary}"
-                    all_entries.append(entry)
-                else:
-                    all_entries.append(f"- {hour_str} [web] {url}")
-
+            results = json.loads(results_json).get("results", [])
         except Exception:
-            logger.exception("Failed to process web clip batch")
-            for url in batch:
-                all_entries.append(f"- {hour_str} [web] {url}")
+            logger.exception("Failed to invoke web_extract")
+            results = []
+
+        result_map = {}
+        if isinstance(results, list):
+            for r in results:
+                if isinstance(r, dict) and r.get("url"):
+                    result_map[r["url"]] = r
+
+        for url in batch:
+            r = result_map.get(url) or {}
+            raw_content = r.get("raw_content")
+            extracted_title = r.get("title")
+
+            # process_single_webclip handles saving, duplicate check, and fallback logic
+            entry = webclip.process_single_webclip(
+                url=url,
+                raw_content=raw_content,
+                extracted_title=extracted_title,
+                hour_str=hour_str,
+                daily_file=daily_file,
+                clipped_at_str=clipped_at_str
+            )
+            all_entries.append(entry)
 
     if all_entries:
         extracter.append_to_subheader_file(
