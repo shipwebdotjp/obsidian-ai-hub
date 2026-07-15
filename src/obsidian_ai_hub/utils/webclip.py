@@ -66,8 +66,8 @@ def format_date_iso8601(date_str: str | None) -> str | None:
         dt = datetime.fromisoformat(s)
         # If no timezone is specified, default to JST (+09:00) as per requirements
         if dt.tzinfo is None:
-            s += "+09:00"
-            dt = datetime.fromisoformat(s)
+            from datetime import timezone, timedelta
+            dt = dt.replace(tzinfo=timezone(timedelta(hours=9)))
         return dt.isoformat()
     except ValueError:
         pass
@@ -171,10 +171,7 @@ def build_webclip_markdown(frontmatter: dict, content_body: str) -> str:
 
     fm_dict = {}
     for k in ordered_keys:
-        val = frontmatter.get(k)
-        if val is None:
-            val = ""
-        fm_dict[k] = val
+        fm_dict[k] = frontmatter.get(k)
 
     # Use allow_unicode to prevent escaping Japanese chars
     yaml_text = yaml.safe_dump(fm_dict, allow_unicode=True, default_flow_style=False, sort_keys=False)
@@ -300,6 +297,14 @@ def process_single_webclip(
     # Target Path determination (considering duplicate moving)
     target_path = get_unique_webclip_path(category_folder, title, exclude_path=existing_file)
 
+    # Ensure output directory exists
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Build markdown content
+    md_content = build_webclip_markdown(frontmatter, raw_content or "")
+    target_path.write_text(md_content, encoding="utf-8")
+    logger.info(f"Saved webclip to {target_path}")
+
     # If duplicate exists, handle potential move/update
     if existing_file:
         if existing_file.resolve() != target_path.resolve():
@@ -309,14 +314,6 @@ def process_single_webclip(
                 logger.info(f"Deleted old webclip at {existing_file}")
             except Exception:
                 logger.exception(f"Failed to delete old webclip {existing_file}")
-
-    # Ensure output directory exists
-    target_path.parent.mkdir(parents=True, exist_ok=True)
-
-    # Build markdown content
-    md_content = build_webclip_markdown(frontmatter, raw_content or "")
-    target_path.write_text(md_content, encoding="utf-8")
-    logger.info(f"Saved webclip to {target_path}")
 
     # 6. Generate Daily Note link format
     # - HH:MM [webclip] [[webclip/{主topic}/{タイトル}]]

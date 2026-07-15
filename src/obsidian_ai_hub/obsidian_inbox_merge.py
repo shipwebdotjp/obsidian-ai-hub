@@ -103,11 +103,15 @@ def process_web_clips(urls: list[str], daily_file: Path, hour_str: str) -> None:
     if not urls:
         return
 
-    # Determine clipped_at_str
+    # Determine clipped_at_str using system local timezone
     if re.match(r'^\d{4}-\d{2}-\d{2}$', daily_file.stem):
-        clipped_at_str = f"{daily_file.stem}T{hour_str}:00+09:00"
+        try:
+            local_dt = datetime.strptime(f"{daily_file.stem} {hour_str}", "%Y-%m-%d %H:%M")
+            clipped_at_str = local_dt.astimezone().isoformat()
+        except Exception:
+            clipped_at_str = datetime.now().astimezone().isoformat()
     else:
-        clipped_at_str = datetime.now().strftime("%Y-%m-%dT%H:%M:%S+09:00")
+        clipped_at_str = datetime.now().astimezone().isoformat()
 
     all_entries = []
 
