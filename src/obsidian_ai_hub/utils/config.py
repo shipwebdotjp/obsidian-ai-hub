@@ -223,6 +223,22 @@ INBOX_WEB_SUMMARY_PROMPT_PATH = _config_optional_path("llm", "inbox_web_summary"
 if INBOX_WEB_SUMMARY_PROMPT_PATH is None:
     INBOX_WEB_SUMMARY_PROMPT_PATH = BASE_DIR / "config" / "prompts" / "inbox_web_summary.md"
 
+YOUTUBE_TRANSCRIPT_LANGUAGES = _config_value(
+    "youtube", "transcript_languages", default=["ja", "en"]
+)
+if not isinstance(YOUTUBE_TRANSCRIPT_LANGUAGES, list):
+    YOUTUBE_TRANSCRIPT_LANGUAGES = ["ja", "en"]
+YOUTUBE_TRANSCRIPT_LANGUAGES = [str(language) for language in YOUTUBE_TRANSCRIPT_LANGUAGES]
+YOUTUBE_WHISPER_MODEL = str(_config_value("youtube", "whisper_model", default="medium"))
+YOUTUBE_SUMMARY_CHUNK_CHARS = int(
+    _config_value("youtube", "summary_chunk_chars", default=12000)
+)
+YOUTUBE_CHUNK_SUMMARY_PROMPT_PATH = _config_optional_path(
+    "llm", "inbox_youtube_chunk_summary", "prompt_path"
+)
+if YOUTUBE_CHUNK_SUMMARY_PROMPT_PATH is None:
+    YOUTUBE_CHUNK_SUMMARY_PROMPT_PATH = BASE_DIR / "config" / "prompts" / "inbox_youtube_chunk_summary.md"
+
 INBOX_CLASSIFICATION_PROVIDER = str(_config_value("llm", "inbox_classification", "provider", default="openai"))
 INBOX_CLASSIFICATION_MODEL = str(_config_value("llm", "inbox_classification", "model", default="gpt-5.4"))
 INBOX_CLASSIFICATION_PROMPT_PATH = _config_optional_path("llm", "inbox_classification", "prompt_path")

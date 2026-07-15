@@ -74,6 +74,7 @@ def format_date_iso8601(date_str: str | None) -> str | None:
 
     # Try common formats
     for fmt in (
+        "%Y%m%d",
         "%Y-%m-%d %H:%M:%S",
         "%Y/%m/%d %H:%M:%S",
         "%Y-%m-%d %H:%M",
@@ -99,7 +100,7 @@ def normalize_webclip_json(payload: dict) -> dict:
     - Category is a single valid topic from TOPIC_ENUM (fallback: 'その他')
     - Topics is list of valid TOPIC_ENUM strings normalized, max 5, preserving order, first is category
     - Key points, tags are lists of strings
-    - Summary, why_saved are strings (fallback: '')
+    - Summary is a string (fallback: '')
     """
     # Dates
     pub = format_date_iso8601(payload.get("published_at"))
@@ -145,8 +146,6 @@ def normalize_webclip_json(payload: dict) -> dict:
     kps = [str(k) for k in kps if k]
 
     summary = str(payload.get("summary") or "")
-    why_saved = str(payload.get("why_saved") or "")
-
     return {
         "published_at": pub,
         "updated_at": upd,
@@ -155,7 +154,6 @@ def normalize_webclip_json(payload: dict) -> dict:
         "tags": tags,
         "summary": summary,
         "key_points": kps,
-        "why_saved": why_saved
     }
 
 def build_webclip_markdown(frontmatter: dict, content_body: str) -> str:
@@ -168,6 +166,10 @@ def build_webclip_markdown(frontmatter: dict, content_body: str) -> str:
         "title", "source_url", "clipped_at", "published_at", "updated_at",
         "category", "topics", "tags", "summary", "key_points", "why_saved"
     ]
+    ordered_keys.extend(
+        key for key in ("content_type", "video_id", "transcript_source")
+        if key in frontmatter
+    )
 
     fm_dict = {}
     for k in ordered_keys:
@@ -222,13 +224,75 @@ def parse_llm_json(response: str) -> dict:
         logger.warning(f"Failed to parse LLM JSON response: {response}")
     return {}
 
+
+def _split_text(text: str, chunk_size: int) -> list[str]:
+    """Split long transcripts at a newline where possible."""
+    if len(text) <= chunk_size:
+        return [text]
+
+    chunks = []
+    remaining = text
+    while remaining:
+        split_at = min(len(remaining), chunk_size)
+        if split_at < len(remaining):
+            newline = remaining.rfind("\n", 0, split_at)
+            if newline > chunk_size // 2:
+                split_at = newline
+        chunks.append(remaining[:split_at])
+        remaining = remaining[split_at:].lstrip("\n")
+    return chunks
+
+
+def _generate_youtube_chunk_summary(chunk: str) -> str:
+    rendered_prompt = prompt.render_prompt(
+        config.YOUTUBE_CHUNK_SUMMARY_PROMPT_PATH,
+        {"transcript_chunk": chunk},
+    )
+    return llm_client.generate_llm_response(
+        provider=config.INBOX_WEB_SUMMARY_PROVIDER,
+        model=config.INBOX_WEB_SUMMARY_MODEL,
+        prompt=rendered_prompt,
+        temperature=0.2,
+        max_tokens=1024,
+    ).strip()
+
+
+def generate_webclip_metadata(raw_content: str, *, is_youtube: bool = False) -> dict:
+    """Generate structured metadata, reducing long YouTube transcripts first."""
+    content_for_summary = raw_content
+    if is_youtube and len(raw_content) > config.YOUTUBE_SUMMARY_CHUNK_CHARS:
+        partial_summaries = [
+            _generate_youtube_chunk_summary(chunk)
+            for chunk in _split_text(raw_content, config.YOUTUBE_SUMMARY_CHUNK_CHARS)
+        ]
+        content_for_summary = "\n\n".join(
+            summary for summary in partial_summaries if summary
+        )
+
+    rendered_prompt = prompt.render_prompt(
+        config.INBOX_WEB_SUMMARY_PROMPT_PATH,
+        {"raw_content": content_for_summary},
+    )
+    response = llm_client.generate_llm_response(
+        provider=config.INBOX_WEB_SUMMARY_PROVIDER,
+        model=config.INBOX_WEB_SUMMARY_MODEL,
+        prompt=rendered_prompt,
+        temperature=0.3,
+        max_tokens=2048,
+    ).strip()
+    return parse_llm_json(response)
+
 def process_single_webclip(
     url: str,
     raw_content: str | None,
     extracted_title: str | None,
     hour_str: str,
     daily_file: Path,
-    clipped_at_str: str
+    clipped_at_str: str,
+    *,
+    content_type: str | None = None,
+    extra_frontmatter: dict | None = None,
+    deterministic_published_at: str | None = None,
 ) -> str:
     """
     Processes a single webclip URL:
@@ -260,23 +324,17 @@ def process_single_webclip(
     parsed_json = {}
     if raw_content:
         try:
-            rendered_prompt = prompt.render_prompt(
-                config.INBOX_WEB_SUMMARY_PROMPT_PATH,
-                {"raw_content": raw_content}
+            parsed_json = generate_webclip_metadata(
+                raw_content, is_youtube=content_type == "youtube"
             )
-            response = llm_client.generate_llm_response(
-                provider=config.INBOX_WEB_SUMMARY_PROVIDER,
-                model=config.INBOX_WEB_SUMMARY_MODEL,
-                prompt=rendered_prompt,
-                temperature=0.3,
-                max_tokens=2048,
-            ).strip()
-            parsed_json = parse_llm_json(response)
         except Exception:
             logger.exception("LLM call failed during webclip processing")
 
     # 4. Normalize JSON fields
     normalized = normalize_webclip_json(parsed_json)
+    known_published_at = format_date_iso8601(deterministic_published_at)
+    if known_published_at:
+        normalized["published_at"] = known_published_at
 
     # 5. Build Frontmatter and File Writing
     frontmatter = {
@@ -290,8 +348,24 @@ def process_single_webclip(
         "tags": normalized["tags"],
         "summary": normalized["summary"],
         "key_points": normalized["key_points"],
-        "why_saved": normalized["why_saved"]
+        "why_saved": "",
     }
+    if existing_file:
+        try:
+            existing_frontmatter = extracter.parse_frontmatter(
+                existing_file.read_text(encoding="utf-8")
+            )
+            existing_why_saved = existing_frontmatter.get("why_saved")
+            if isinstance(existing_why_saved, str) and existing_why_saved:
+                frontmatter["why_saved"] = existing_why_saved
+        except Exception:
+            logger.exception(
+                "Failed to preserve why_saved from existing webclip %s", existing_file
+            )
+    if content_type:
+        frontmatter["content_type"] = content_type
+    if extra_frontmatter:
+        frontmatter.update(extra_frontmatter)
 
     category_folder = normalized["category"]
     # Target Path determination (considering duplicate moving)

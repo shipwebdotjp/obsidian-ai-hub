@@ -8,6 +8,7 @@ vault:
   knowledge: copilot/knowledge
   research: research
   activity: activity
+  webclip: webclip
 
 files:
   daily_note: daily.md
@@ -61,10 +62,13 @@ llm:
     provider: openai
     model: gpt-5.4
     prompt_path: /path/to/your/config/prompts/inbox_web_summary.md
+  inbox_youtube_chunk_summary:
+    prompt_path: /path/to/your/config/prompts/inbox_youtube_chunk_summary.md
   inbox_classification:
     provider: openai
     model: gpt-5.4
     prompt_path: /path/to/your/config/prompts/inbox_classification.md
+
   research:
     router:
       provider: openai
@@ -119,3 +123,8 @@ vault_index:
   chroma_path: /path/to/your/obsidian-ai-hub/vault-index/chroma
   embedder_model: cl-nagoya/ruri-v3-310m
   allow_network_fallback: true
+
+youtube:
+  transcript_languages: [ja, en]
+  whisper_model: medium
+  summary_chunk_chars: 12000

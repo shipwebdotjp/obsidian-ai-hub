@@ -18,7 +18,7 @@ from pathlib import Path
 import whisper
 
 from obsidian_ai_hub.handler import add_research_theme, web_extract
-from obsidian_ai_hub.utils import config, extracter, llm_client, prompt, webclip
+from obsidian_ai_hub.utils import config, extracter, llm_client, prompt, webclip, youtube
 
 logger = logging.getLogger(__name__)
 
@@ -114,10 +114,40 @@ def process_web_clips(urls: list[str], daily_file: Path, hour_str: str) -> None:
         clipped_at_str = datetime.now().astimezone().isoformat()
 
     all_entries = []
+    extracted: dict[str, dict] = {}
+
+    youtube_urls = [url for url in urls if youtube.is_youtube_url(url)]
+    regular_urls = [url for url in urls if url not in youtube_urls]
+
+    for url in youtube_urls:
+        try:
+            video = youtube.extract_youtube_content(url)
+            extracted[url] = {
+                "raw_content": video.transcript,
+                "title": video.title,
+                "content_type": "youtube",
+                "extra_frontmatter": {
+                    "video_id": video.video_id,
+                    "transcript_source": video.transcript_source,
+                },
+                "published_at": video.published_at,
+            }
+        except Exception:
+            logger.exception("Failed to process YouTube URL: %s", url)
+            extracted[url] = {
+                "raw_content": None,
+                "title": None,
+                "content_type": "youtube",
+                "extra_frontmatter": {
+                    "video_id": youtube.extract_video_id(url),
+                    "transcript_source": "unavailable",
+                },
+                "published_at": None,
+            }
 
     # Chunk URLs into batches of 20
-    for i in range(0, len(urls), 20):
-        batch = urls[i : i + 20]
+    for i in range(0, len(regular_urls), 20):
+        batch = regular_urls[i : i + 20]
         results = []
         try:
             results_json = web_extract.web_extract.invoke({"urls": batch})
@@ -133,20 +163,22 @@ def process_web_clips(urls: list[str], daily_file: Path, hour_str: str) -> None:
                     result_map[r["url"]] = r
 
         for url in batch:
-            r = result_map.get(url) or {}
-            raw_content = r.get("raw_content")
-            extracted_title = r.get("title")
+            extracted[url] = result_map.get(url) or {}
 
-            # process_single_webclip handles saving, duplicate check, and fallback logic
-            entry = webclip.process_single_webclip(
-                url=url,
-                raw_content=raw_content,
-                extracted_title=extracted_title,
-                hour_str=hour_str,
-                daily_file=daily_file,
-                clipped_at_str=clipped_at_str
-            )
-            all_entries.append(entry)
+    for url in urls:
+        result = extracted.get(url) or {}
+        entry = webclip.process_single_webclip(
+            url=url,
+            raw_content=result.get("raw_content"),
+            extracted_title=result.get("title"),
+            hour_str=hour_str,
+            daily_file=daily_file,
+            clipped_at_str=clipped_at_str,
+            content_type=result.get("content_type"),
+            extra_frontmatter=result.get("extra_frontmatter"),
+            deterministic_published_at=result.get("published_at"),
+        )
+        all_entries.append(entry)
 
     if all_entries:
         extracter.append_to_subheader_file(

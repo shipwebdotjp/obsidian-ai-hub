@@ -218,7 +218,8 @@ def test_same_url_full_update_and_move(tmp_path: Path):
         "title": "Target Page",
         "source_url": "https://update-me.com",
         "clipped_at": "2026-05-08T10:00:00+09:00",
-        "category": "健康・医療"
+        "category": "健康・医療",
+        "why_saved": "手入力した保存理由",
     }
     old_file.write_text(f"---\n{yaml.dump(old_frontmatter)}---\nold content", encoding="utf-8")
 
@@ -251,3 +252,5 @@ def test_same_url_full_update_and_move(tmp_path: Path):
     assert not old_file.exists()
     new_file = webclip_dir / "金融・投資" / "Target Page.md"
     assert new_file.exists()
+    frontmatter = yaml.safe_load(new_file.read_text(encoding="utf-8").split("---", 2)[1])
+    assert frontmatter["why_saved"] == "手入力した保存理由"
