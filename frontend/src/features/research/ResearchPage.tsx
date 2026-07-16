@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useRef } from "react";
 import ResearchList from "./ResearchList";
 import ResearchDetailPanel from "./ResearchDetailPanel";
 import type { ResearchTheme, ResearchStatus } from "../../api/types";
@@ -34,6 +34,11 @@ export default function ResearchPage() {
 
   // Background Job Tracking State
   const [trackedJobs, setTrackedJobs] = useState<TrackedJob[]>([]);
+  const trackedJobsRef = useRef<TrackedJob[]>([]);
+
+  useEffect(() => {
+    trackedJobsRef.current = trackedJobs;
+  }, [trackedJobs]);
 
   const handleRefresh = useCallback(() => setRefreshKey((v) => v + 1), []);
 
@@ -63,58 +68,82 @@ export default function ResearchPage() {
     setSelectedTheme(null);
   }, [status, debouncedQuery]);
 
-  // Poll active background jobs
+  // Poll active background jobs via sequential setTimeout (no overlapping, functional merge updates)
   useEffect(() => {
-    const activeJobs = trackedJobs.filter(
-      (j) => j.status === "pending" || j.status === "running"
-    );
-    if (activeJobs.length === 0) return;
+    let timerId: number | null = null;
+    let isCancelled = false;
 
-    const interval = window.setInterval(async () => {
-      const updatedJobs = [...trackedJobs];
-      let hasChanges = false;
-      let shouldRefreshList = false;
+    const poll = async () => {
+      const currentActive = trackedJobsRef.current.filter(
+        (j: TrackedJob) => j.status === "pending" || j.status === "running"
+      );
 
-      for (let i = 0; i < updatedJobs.length; i++) {
-        const job = updatedJobs[i];
-        if (job.status === "pending" || job.status === "running") {
-          try {
-            const latestTheme = await getResearchTheme(job.themeId);
-            const latestJob = latestTheme.latest_job;
-            if (latestJob && latestJob.job_id === job.jobId) {
-              const newStatus = latestJob.status;
-              if (newStatus !== job.status) {
-                job.status = newStatus;
-                hasChanges = true;
-                shouldRefreshList = true;
+      if (currentActive.length === 0) {
+        if (!isCancelled) {
+          timerId = window.setTimeout(poll, 3000);
+        }
+        return;
+      }
 
-                if (newStatus === "succeeded") {
-                  notify(`「${job.themeName}」の調査・保存・承認が完了しました`, "info");
-                } else if (newStatus === "failed") {
-                  notify(`「${job.themeName}」の調査に失敗しました。詳細パネルから失敗原因を確認できます`, "error");
-                }
+      for (const job of currentActive) {
+        if (isCancelled) return;
+        try {
+          const latestTheme = await getResearchTheme(job.themeId);
+          const latestJob = latestTheme.latest_job;
 
-                if (selectedTheme?.theme_id === job.themeId) {
-                  setSelectedTheme(latestTheme);
-                }
-              }
+          let resolvedStatus: "pending" | "running" | "succeeded" | "failed" | null = null;
+          let jobError: string | null = null;
+
+          if (latestJob) {
+            if (latestJob.job_id === job.jobId) {
+              resolvedStatus = latestJob.status as any;
+              jobError = latestJob.error || null;
+            } else {
+              resolvedStatus = "failed";
+              jobError = "別のジョブにより上書きまたは終了されました";
             }
-          } catch (e) {
-            console.error("Failed to poll theme detail", e);
           }
+
+          if (resolvedStatus && resolvedStatus !== job.status) {
+            setTrackedJobs((prevJobs) =>
+              prevJobs.map((j: TrackedJob) => {
+                if (j.jobId === job.jobId) {
+                  return { ...j, status: resolvedStatus! };
+                }
+                return j;
+              })
+            );
+
+            if (resolvedStatus === "succeeded") {
+              notify(`「${job.themeName}」の調査・保存・承認が完了しました`, "info");
+            } else if (resolvedStatus === "failed") {
+              const errMsg = jobError ? ` (${jobError})` : "";
+              notify(`「${job.themeName}」の調査に失敗しました${errMsg}。詳細パネルから失敗原因を確認できます`, "error");
+            }
+
+            if (selectedTheme?.theme_id === job.themeId) {
+              setSelectedTheme(latestTheme);
+            }
+          }
+        } catch (e) {
+          console.error("Failed to poll theme detail", e);
         }
       }
 
-      if (hasChanges) {
-        setTrackedJobs(updatedJobs);
+      if (!isCancelled) {
+        timerId = window.setTimeout(poll, 3000);
       }
-      if (shouldRefreshList) {
-        handleRefresh();
-      }
-    }, 3000);
+    };
 
-    return () => window.clearInterval(interval);
-  }, [trackedJobs, selectedTheme, notify, handleRefresh]);
+    timerId = window.setTimeout(poll, 3000);
+
+    return () => {
+      isCancelled = true;
+      if (timerId !== null) {
+        window.clearTimeout(timerId);
+      }
+    };
+  }, [selectedTheme, notify, handleRefresh]);
 
   const handleModalSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

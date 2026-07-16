@@ -159,7 +159,12 @@ def test_run_research_theme_success(client):
     assert data["theme"]["status"] == "candidate"
     assert data["job"]["status"] == "pending"
     assert data["theme"]["latest_job"]["job_id"] == data["job"]["job_id"]
-    assert mock_submit.called
+
+    mock_submit.assert_called_once_with(
+        theme_id=data["theme"]["theme_id"],
+        job_id=data["job"]["job_id"],
+        mode="deep"
+    )
 
 
 def test_cleanup_stale_jobs_on_startup():
@@ -172,9 +177,10 @@ def test_cleanup_stale_jobs_on_startup():
     stale_job = research_db.latest_job(theme["theme_id"])
     assert stale_job["status"] == "running"
 
-    # Trigger startup cleanup by instantiating the app or calling the cleanup directly
-    from obsidian_ai_hub.research.runner import cleanup_stale_jobs
-    cleanup_stale_jobs()
+    # Trigger startup cleanup by instantiating the app with TestClient context manager
+    app = create_app(host="127.0.0.1", port=8765, token="test-token")
+    with TestClient(app) as tc:
+        pass
 
     cleaned_job = research_db.latest_job(theme["theme_id"])
     assert cleaned_job["status"] == "failed"

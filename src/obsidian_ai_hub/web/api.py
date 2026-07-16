@@ -221,4 +221,4 @@ def run_research_theme(
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.exception("Failed to start research background job")
-        raise HTTPException(status_code=500, detail=f"Failed to start research: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to start research background job")

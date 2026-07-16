@@ -362,6 +362,19 @@ def latest_job(theme_id: str) -> Optional[dict]:
         conn.close()
 
 
+def get_job(job_id: str) -> Optional[dict]:
+    conn = _get_db()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM research_jobs WHERE job_id = ?", (job_id,))
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        return dict(row)
+    finally:
+        conn.close()
+
+
 def find_exact_duplicate(normalized_key: str) -> Optional[dict]:
     conn = _get_db()
     try:

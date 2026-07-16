@@ -647,7 +647,7 @@ def execute_research_job_sync(
         err_msg = f"Theme {theme_id} not found"
         logger.error(err_msg)
         db.update_job(job_id, status="failed", error=err_msg)
-        return db.latest_job(theme_id)
+        return db.get_job(job_id)
 
     try:
         report = run_research(
@@ -684,7 +684,7 @@ def execute_research_job_sync(
         logger.exception("Research failed for theme '%s'", theme_obj["theme"])
         db.update_job(job_id, status="failed", error=err_msg)
 
-    return db.latest_job(theme_id)
+    return db.get_job(job_id)
 
 
 def submit_research_job_bg(
@@ -692,14 +692,25 @@ def submit_research_job_bg(
     job_id: str,
     mode: str = "auto",
     output_style: Optional[str] = None,
-) -> None:
-    _research_executor.submit(
+):
+    future = _research_executor.submit(
         execute_research_job_sync,
         theme_id,
         job_id,
         mode,
         output_style
     )
+
+    def done_callback(fut):
+        try:
+            fut.result()
+        except Exception as exc:
+            logger.exception("Background research job %s failed with uncaught exception", job_id)
+            from obsidian_ai_hub.research import db
+            db.update_job(job_id, status="failed", error=str(exc))
+
+    future.add_done_callback(done_callback)
+    return future
 
 
 def save_research_to_vault(theme_id: str) -> Optional[Path]:
