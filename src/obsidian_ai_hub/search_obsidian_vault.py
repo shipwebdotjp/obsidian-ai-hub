@@ -1,9 +1,6 @@
 import json
 import sys
 
-from obsidian_ai_hub.handler.obsidian_vault_retriever import search_obsidian_vault
-
-
 from obsidian_ai_hub.handler.obsidian_vault_retriever import search_obsidian_vault as retriever
 
 def main(query: str, k: int = 10, search_mode: str = "hybrid", json_output: bool = False):

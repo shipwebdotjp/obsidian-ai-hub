@@ -165,3 +165,27 @@ export interface ResearchRunAcceptedResponse {
   theme: ResearchTheme;
   job: ResearchJob;
 }
+
+// Vault Search
+
+export interface VaultSearchHitMetadata {
+  collection_name?: string;
+  source_path?: string;
+  file_path?: string;
+  relative_path?: string;
+  vault_name?: string;
+  chunk_index?: number;
+  mtime?: number;
+  content_hash?: string;
+}
+
+export interface VaultSearchHit {
+  content: string;
+  metadata: VaultSearchHitMetadata;
+  score: number;
+}
+
+export interface VaultSearchResponse {
+  items: VaultSearchHit[];
+  total: number;
+}

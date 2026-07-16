@@ -222,3 +222,25 @@ def run_research_theme(
     except Exception as e:
         logger.exception("Failed to start research background job")
         raise HTTPException(status_code=500, detail="Failed to start research background job")
+
+
+# --- Vault Search routes ---
+
+
+@router.get("/vault-search", response_model=schemas.VaultSearchResponse)
+def vault_search(
+    q: str = Query(..., min_length=1),
+    k: int = Query(10, ge=1, le=50),
+    mode: str = Query("hybrid"),
+    _=Depends(_require_loopback_or_token),
+):
+    if mode not in schemas.ALLOWED_VAULT_SEARCH_MODES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"mode must be one of {sorted(schemas.ALLOWED_VAULT_SEARCH_MODES)}",
+        )
+    try:
+        return service.search_vault(q=q, k=k, mode=mode)
+    except ValueError as e:
+        logger.warning("vault search error: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))

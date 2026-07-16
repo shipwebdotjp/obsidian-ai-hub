@@ -1,7 +1,11 @@
+import json
 import logging
+import threading
+from pathlib import Path
 from typing import Optional
 
 from obsidian_ai_hub import memory
+from obsidian_ai_hub.handler import obsidian_vault_retriever
 from obsidian_ai_hub.web import schemas
 
 logger = logging.getLogger(__name__)
@@ -181,3 +185,29 @@ def run_research_theme(theme: str, mode: str = "auto") -> tuple[dict, dict]:
         db.update_job(job_rec["job_id"], status="failed", error=str(e))
         raise
     return theme_rec, job_rec
+
+
+# --- Vault Search services ---
+
+_vault_search_lock = threading.Lock()
+
+
+def search_vault(q: str, k: int = 10, mode: str = "hybrid") -> dict:
+    with _vault_search_lock:
+        result_json = obsidian_vault_retriever.search_obsidian_vault.func(
+            query=q, k=k, search_mode=mode
+        )
+    try:
+        results = json.loads(result_json)
+    except json.JSONDecodeError as e:
+        logger.error("Failed to parse vault search JSON output: %s", e)
+        raise ValueError("vault search returned invalid JSON") from e
+    if isinstance(results, dict) and "error" in results:
+        raise ValueError(results["error"])
+    from obsidian_ai_hub.utils import config
+    vault_name = Path(config.VAULT_PATH).name
+    for hit in results:
+        if not isinstance(hit.get("metadata"), dict):
+            hit["metadata"] = {}
+        hit["metadata"]["vault_name"] = vault_name
+    return {"items": results, "total": len(results)}

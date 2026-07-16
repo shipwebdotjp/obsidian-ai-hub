@@ -12,6 +12,7 @@ import type {
   ResearchTheme,
   ResearchJob,
   ResearchRunAcceptedResponse,
+  VaultSearchResponse,
 } from "./types";
 
 const TOKEN_KEY = "obsidian-ai-hub:review-token";
@@ -221,4 +222,18 @@ export function runResearchTheme(
     method: "POST",
     body: JSON.stringify({ theme, mode }),
   });
+}
+
+// Vault Search API
+
+export function searchVault(params: {
+  q: string;
+  k?: number;
+  mode?: "hybrid" | "keyword" | "similarity";
+}): Promise<VaultSearchResponse> {
+  const sp = new URLSearchParams();
+  sp.set("q", params.q);
+  if (params.k) sp.set("k", String(params.k));
+  if (params.mode) sp.set("mode", params.mode);
+  return request<VaultSearchResponse>(`/api/v1/vault-search?${sp.toString()}`);
 }

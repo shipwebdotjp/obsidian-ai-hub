@@ -16,6 +16,9 @@ export default function Sidebar() {
         <NavLink to={ROUTES.RESEARCH} className={linkClass}>
           リサーチ
         </NavLink>
+        <NavLink to={ROUTES.VAULT_SEARCH} className={linkClass}>
+          Vault 検索
+        </NavLink>
       </nav>
     </aside>
   );

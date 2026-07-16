@@ -264,3 +264,30 @@ class ResearchRunRequest(BaseModel):
 class ResearchRunAcceptedResponse(BaseModel):
     theme: ResearchTheme
     job: ResearchJob
+
+
+# --- Vault Search schemas ---
+
+ALLOWED_VAULT_SEARCH_MODES = frozenset({"keyword", "similarity", "hybrid"})
+
+
+class VaultSearchHitMetadata(BaseModel):
+    collection_name: Optional[str] = None
+    source_path: Optional[str] = None
+    file_path: Optional[str] = None
+    relative_path: Optional[str] = None
+    vault_name: Optional[str] = None
+    chunk_index: Optional[int] = None
+    mtime: Optional[float] = None
+    content_hash: Optional[str] = None
+
+
+class VaultSearchHit(BaseModel):
+    content: str
+    metadata: VaultSearchHitMetadata
+    score: float
+
+
+class VaultSearchResponse(BaseModel):
+    items: list[VaultSearchHit]
+    total: int
