@@ -31,6 +31,18 @@ def append_research_theme(
         why_now="",
         confidence=1.0,
     )
+
+    if result["status"] == "candidate":
+        job = result.get("job")
+        if job and job.get("status") == "succeeded":
+            try:
+                from obsidian_ai_hub.research.runner import save_research_to_vault
+                output_path = save_research_to_vault(result["theme_id"])
+                if output_path:
+                    logger.info("Research saved to vault: %s", output_path)
+            except Exception:
+                logger.exception("Failed to save research to vault for theme %s", result["theme_id"])
+
     logger.info("Added research theme '%s' (status=%s, theme_id=%s)", normalized, result["status"], result.get("theme_id"))
     return result["status"]
 

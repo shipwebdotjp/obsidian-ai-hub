@@ -120,7 +120,7 @@ def main():
         help="Obsidian Vaultをmd-hybrid-searchのインデックスと同期"
     )
     parser.add_argument(
-        "--rebuld-vault",
+        "--rebuild-vault",
         action="store_true",
         help="Obsidian Vaultのmd-hybrid-searchインデックスを再構築"
     )
@@ -401,7 +401,7 @@ def main():
     if args.sync_vault:
         run_and_log(sync_valut.main, "sync_vault")
         ran = True
-    if getattr(args, "rebuld_vault"):
+    if args.rebuild_vault:
         run_and_log(rebuild_valut.main, "rebuild_vault")
         ran = True
     if args.research_agent:
