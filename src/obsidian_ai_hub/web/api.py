@@ -244,3 +244,16 @@ def vault_search(
     except ValueError as e:
         logger.warning("vault search error: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/vault-file", response_model=schemas.VaultFileResponse)
+def get_vault_file(
+    path: str = Query(..., min_length=1),
+    _=Depends(_require_loopback_or_token),
+):
+    try:
+        return service.get_vault_file(path)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))

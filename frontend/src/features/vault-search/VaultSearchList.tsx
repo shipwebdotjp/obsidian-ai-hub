@@ -40,7 +40,6 @@ export default function VaultSearchList({
 
     setLoading(true);
     setError(null);
-    onLoaded([], null);
 
     searchVault({ q: query, k, mode })
       .then((res) => {

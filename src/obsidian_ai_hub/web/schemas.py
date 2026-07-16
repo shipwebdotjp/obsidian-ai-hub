@@ -291,3 +291,8 @@ class VaultSearchHit(BaseModel):
 class VaultSearchResponse(BaseModel):
     items: list[VaultSearchHit]
     total: int
+
+
+class VaultFileResponse(BaseModel):
+    content: str
+    relative_path: str
