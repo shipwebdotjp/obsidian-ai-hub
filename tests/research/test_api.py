@@ -130,3 +130,56 @@ def test_loopback_auth_bypass(client):
     bypass_client = TestClient(app)
     resp = bypass_client.get("/api/v1/research-themes")
     assert resp.status_code == 200
+
+
+def test_run_research_theme_validation_error(client):
+    # Empty theme
+    resp = client.post("/api/v1/research-themes/run", json={"theme": "", "mode": "auto"})
+    assert resp.status_code == 400
+
+    # Blank theme
+    resp = client.post("/api/v1/research-themes/run", json={"theme": "   ", "mode": "auto"})
+    assert resp.status_code == 400
+
+    # Invalid mode
+    resp = client.post("/api/v1/research-themes/run", json={"theme": "テスト", "mode": "invalid"})
+    assert resp.status_code == 422
+
+
+def test_run_research_theme_success(client):
+    with patch("obsidian_ai_hub.research.runner.submit_research_job_bg") as mock_submit:
+        resp = client.post(
+            "/api/v1/research-themes/run",
+            json={"theme": "APIテスト即時テーマ", "mode": "deep"}
+        )
+
+    assert resp.status_code == 202
+    data = resp.json()
+    assert data["theme"]["theme"] == "APIテスト即時テーマ"
+    assert data["theme"]["status"] == "candidate"
+    assert data["job"]["status"] == "pending"
+    assert data["theme"]["latest_job"]["job_id"] == data["job"]["job_id"]
+    assert mock_submit.called
+
+
+def test_cleanup_stale_jobs_on_startup():
+    from obsidian_ai_hub.research import db as research_db
+    theme = research_db.create_theme(theme="StaleJobTheme", status="candidate")
+    job = research_db.create_job(theme["theme_id"])
+    research_db.update_job(job["job_id"], status="running")
+
+    # Before startup cleanup
+    stale_job = research_db.latest_job(theme["theme_id"])
+    assert stale_job["status"] == "running"
+
+    # Trigger startup cleanup by instantiating the app or calling the cleanup directly
+    from obsidian_ai_hub.research.runner import cleanup_stale_jobs
+    cleanup_stale_jobs()
+
+    cleaned_job = research_db.latest_job(theme["theme_id"])
+    assert cleaned_job["status"] == "failed"
+    assert cleaned_job["error"] == "サーバー再起動により中断"
+
+    # Ensure theme is still candidate
+    t_obj = research_db.get_theme(theme["theme_id"])
+    assert t_obj["status"] == "candidate"

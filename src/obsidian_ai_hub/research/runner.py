@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 import logging
 import os
 import re
@@ -12,6 +13,8 @@ from pathlib import Path
 from typing import Optional, Sequence
 
 from obsidian_ai_hub.utils import config, llm_client, prompt
+
+_research_executor = ThreadPoolExecutor(max_workers=1)
 
 logger = logging.getLogger(__name__)
 
@@ -518,7 +521,11 @@ def run_research(
     return ResearchReport(title=title, mode=normalized_mode, markdown=markdown)
 
 
-def run_theme_research(theme_id: str) -> Optional[dict]:
+def run_theme_research(
+    theme_id: str,
+    mode: str = "auto",
+    output_style: Optional[str] = None,
+) -> Optional[dict]:
     from obsidian_ai_hub.research import db
 
     theme_obj = db.get_theme(theme_id)
@@ -535,6 +542,8 @@ def run_theme_research(theme_id: str) -> Optional[dict]:
             theme=theme_obj["theme"],
             direction=theme_obj.get("direction"),
             why_now=theme_obj.get("why_now"),
+            mode=mode,
+            output_style=output_style,
         )
         db.update_job(
             job_id,
@@ -553,6 +562,144 @@ def run_theme_research(theme_id: str) -> Optional[dict]:
         )
 
     return db.latest_job(theme_id)
+
+
+def cleanup_stale_jobs() -> None:
+    from obsidian_ai_hub.research import db
+    conn = db._get_db()
+    try:
+        with conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT job_id FROM research_jobs WHERE status IN ('pending', 'running')"
+            )
+            jobs = cursor.fetchall()
+            for row in jobs:
+                job_id = row["job_id"]
+                cursor.execute(
+                    "UPDATE research_jobs SET status = 'failed', error = ?, finished_at = ? WHERE job_id = ?",
+                    ("サーバー再起動により中断", db.get_current_timestamp(), job_id)
+                )
+            if jobs:
+                logger.info("Cleaned up %d stale jobs on startup", len(jobs))
+    except Exception as exc:
+        logger.exception("Failed to clean up stale jobs on startup")
+    finally:
+        conn.close()
+
+
+def get_or_create_theme_and_job(
+    theme: str,
+    mode: str = "auto",
+    context: Optional[str] = None,
+    output_style: Optional[str] = None,
+) -> tuple[dict, dict]:
+    from obsidian_ai_hub.research import db
+
+    if not theme or not theme.strip():
+        raise ValueError("Theme must not be empty or blank")
+
+    normalized = db.normalize_theme_key(theme)
+    existing = db.find_exact_duplicate(normalized)
+
+    if existing and existing.get("status") == "approved":
+        theme_id = existing["theme_id"]
+        theme_rec = existing
+        logger.info("Reusing existing approved theme %s for re-research", theme_id)
+    else:
+        theme_rec = db.create_theme(
+            theme=theme.strip(),
+            direction=context or None,
+            why_now=context or None,
+            kind="explore",
+            confidence=1.0,
+            status="candidate",
+        )
+        theme_id = theme_rec["theme_id"]
+
+    job_rec = db.create_job(theme_id)
+
+    theme_rec["latest_job"] = {
+        "job_id": job_rec["job_id"],
+        "status": job_rec["status"],
+        "generated_title": job_rec.get("generated_title"),
+        "mode": job_rec.get("mode"),
+        "error": job_rec.get("error"),
+        "started_at": job_rec.get("started_at"),
+        "finished_at": job_rec.get("finished_at"),
+    }
+
+    return theme_rec, job_rec
+
+
+def execute_research_job_sync(
+    theme_id: str,
+    job_id: str,
+    mode: str = "auto",
+    output_style: Optional[str] = None,
+) -> dict:
+    from obsidian_ai_hub.research import db
+
+    db.update_job(job_id, status="running")
+
+    theme_obj = db.get_theme(theme_id)
+    if theme_obj is None:
+        err_msg = f"Theme {theme_id} not found"
+        logger.error(err_msg)
+        db.update_job(job_id, status="failed", error=err_msg)
+        return db.latest_job(theme_id)
+
+    try:
+        report = run_research(
+            theme=theme_obj["theme"],
+            direction=theme_obj.get("direction"),
+            why_now=theme_obj.get("why_now"),
+            mode=mode,
+            output_style=output_style,
+        )
+
+        db.update_job(
+            job_id,
+            status="succeeded",
+            generated_title=report.title,
+            mode=report.mode,
+            markdown=report.markdown,
+        )
+        logger.info("Research succeeded for theme '%s' (job=%s)", theme_obj["theme"], job_id)
+
+        try:
+            save_research_to_vault(theme_id)
+
+            if theme_obj.get("status") == "candidate":
+                db.set_status(theme_id, "approved", reviewed_by="system")
+                logger.info("Theme %s status set to approved", theme_id)
+
+        except Exception as save_exc:
+            save_err = f"Failed to save research to vault: {str(save_exc)}"
+            logger.exception(save_err)
+            db.update_job(job_id, status="failed", error=save_err)
+
+    except Exception as exc:
+        err_msg = str(exc) or "Research process failed"
+        logger.exception("Research failed for theme '%s'", theme_obj["theme"])
+        db.update_job(job_id, status="failed", error=err_msg)
+
+    return db.latest_job(theme_id)
+
+
+def submit_research_job_bg(
+    theme_id: str,
+    job_id: str,
+    mode: str = "auto",
+    output_style: Optional[str] = None,
+) -> None:
+    _research_executor.submit(
+        execute_research_job_sync,
+        theme_id,
+        job_id,
+        mode,
+        output_style
+    )
 
 
 def save_research_to_vault(theme_id: str) -> Optional[Path]:
@@ -600,26 +747,21 @@ def main(
         return result
 
     try:
-        logger.info("Processing research theme: %s", theme)
-        normalized = db.normalize_theme_key(theme)
-        existing = db.find_exact_duplicate(normalized)
-        if existing and existing.get("status") == "approved":
-            theme_id = existing["theme_id"]
-            logger.info("Reusing existing approved theme %s for re-research", theme_id)
-        else:
-            rec = db.create_theme(
-                theme=theme,
-                direction=context or None,
-                why_now=context or None,
-                kind="explore",
-                confidence=1.0,
-                status="approved",
-            )
-            theme_id = rec["theme_id"]
+        theme_rec, job_rec = get_or_create_theme_and_job(
+            theme=theme,
+            mode=mode,
+            context=context,
+            output_style=output_style,
+        )
 
-        job = run_theme_research(theme_id)
+        job = execute_research_job_sync(
+            theme_id=theme_rec["theme_id"],
+            job_id=job_rec["job_id"],
+            mode=mode,
+            output_style=output_style,
+        )
+
         if job and job.get("status") == "succeeded":
-            save_research_to_vault(theme_id)
             result.success_count += 1
         else:
             logger.error("Research failed for theme '%s'", theme)

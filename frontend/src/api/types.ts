@@ -160,3 +160,8 @@ export interface ResearchReviewRequest {
   action: "approve" | "reject";
   reason?: string;
 }
+
+export interface ResearchRunAcceptedResponse {
+  theme: ResearchTheme;
+  job: ResearchJob;
+}

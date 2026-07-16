@@ -254,3 +254,13 @@ class ResearchReviewRequest(BaseModel):
 
 class ResearchThemeActionResponse(BaseModel):
     theme: ResearchTheme
+
+
+class ResearchRunRequest(BaseModel):
+    theme: str
+    mode: Literal["auto", "internal", "web", "deep"] = "auto"
+
+
+class ResearchRunAcceptedResponse(BaseModel):
+    theme: ResearchTheme
+    job: ResearchJob

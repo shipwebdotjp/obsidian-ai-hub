@@ -101,7 +101,7 @@ def test_main_creates_theme_and_researches(tmp_path: Path):
     assert any(output_dir.iterdir())
 
 
-def test_main_failure_keeps_approved_status():
+def test_main_failure_keeps_candidate_status():
     with (
         patch.object(runner, "collect_research_context", return_value=""),
         patch.object(runner, "route_research_topic", return_value="internal"),
@@ -114,6 +114,30 @@ def test_main_failure_keeps_approved_status():
 
     themes = research_themes.list_themes()
     failed = [t for t in themes if "失敗テーマ" in t["theme"]]
+    assert len(failed) == 1
+    assert failed[0]["status"] == "candidate"
+    job = failed[0].get("latest_job")
+    assert job is not None
+    assert job["status"] == "failed"
+    assert job["error"] is not None
+
+
+def test_main_approved_theme_failure_keeps_approved_status():
+    # 1. Create an approved theme first
+    research_themes.create_theme(theme="既存承認済み失敗テーマ", status="approved")
+
+    with (
+        patch.object(runner, "collect_research_context", return_value=""),
+        patch.object(runner, "route_research_topic", return_value="internal"),
+        patch.object(runner.llm_client, "generate_llm_response", side_effect=RuntimeError("fail")),
+    ):
+        result = runner.main(theme="既存承認済み失敗テーマ")
+
+    assert result.success_count == 0
+    assert result.error_count == 1
+
+    themes = research_themes.list_themes()
+    failed = [t for t in themes if "既存承認済み失敗テーマ" in t["theme"]]
     assert len(failed) == 1
     assert failed[0]["status"] == "approved"
     job = failed[0].get("latest_job")

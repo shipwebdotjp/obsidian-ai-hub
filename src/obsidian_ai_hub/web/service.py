@@ -161,3 +161,17 @@ def rerun_research_theme(theme_id: str) -> Optional[dict]:
     from obsidian_ai_hub import research_agent
     job = research_agent.run_theme_research(theme_id)
     return job
+
+
+def run_research_theme(theme: str, mode: str = "auto") -> tuple[dict, dict]:
+    from obsidian_ai_hub.research.runner import (
+        get_or_create_theme_and_job,
+        submit_research_job_bg,
+    )
+    theme_rec, job_rec = get_or_create_theme_and_job(theme=theme, mode=mode)
+    submit_research_job_bg(
+        theme_id=theme_rec["theme_id"],
+        job_id=job_rec["job_id"],
+        mode=mode,
+    )
+    return theme_rec, job_rec

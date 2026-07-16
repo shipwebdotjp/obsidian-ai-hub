@@ -197,3 +197,28 @@ def rerun_research_theme(theme_id: str, _=Depends(_require_loopback_or_token)):
     if job is None:
         raise HTTPException(status_code=404, detail="research theme not found")
     return job
+
+
+@router.post(
+    "/research-themes/run",
+    response_model=schemas.ResearchRunAcceptedResponse,
+    status_code=202,
+)
+def run_research_theme(
+    body: schemas.ResearchRunRequest,
+    _=Depends(_require_loopback_or_token),
+):
+    if not body.theme or not body.theme.strip():
+        raise HTTPException(status_code=400, detail="Theme must not be empty or blank")
+    try:
+        theme_rec, job_rec = service.run_research_theme(
+            theme=body.theme,
+            mode=body.mode,
+        )
+        return {"theme": theme_rec, "job": job_rec}
+    except ValueError as e:
+        logger.warning("Research run validation error: %s", e)
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.exception("Failed to start research background job")
+        raise HTTPException(status_code=500, detail=f"Failed to start research: {str(e)}")
