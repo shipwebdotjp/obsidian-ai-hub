@@ -1,25 +1,57 @@
-INFO:     Started server process [457300]
+INFO:     Started server process [221620]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://127.0.0.1:8765 (Press CTRL+C to quit)
-INFO:     127.0.0.1:46436 - "GET /api/v1/memories/mem_merge_cand HTTP/1.1" 200 OK
-INFO:     127.0.0.1:33672 - "GET /health HTTP/1.1" 200 OK
-INFO:     127.0.0.1:33676 - "GET /health HTTP/1.1" 200 OK
-INFO:     127.0.0.1:33706 - "GET /api/v1/memory-options HTTP/1.1" 200 OK
-INFO:     127.0.0.1:33690 - "GET /api/v1/memories?status=candidate HTTP/1.1" 200 OK
-INFO:     127.0.0.1:33716 - "GET /api/v1/memories?status=candidate HTTP/1.1" 200 OK
-INFO:     127.0.0.1:33714 - "GET /api/v1/memory-options HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54240 - "GET /api/v1/memories/mem_merge_cand HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54246 - "GET /api/v1/memories/mem_merge_cand HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54254 - "GET /api/v1/memories/mem_approved_1 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54264 - "GET /api/v1/memories?status=candidate HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54268 - "GET /api/v1/memories/mem_supersede_cand HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54282 - "GET /api/v1/memories/mem_supersede_cand HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54290 - "GET /api/v1/memories/mem_approved_1 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54294 - "GET /api/v1/memories?status=candidate HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54306 - "GET /api/v1/memories/mem_new_cand HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54318 - "GET /api/v1/memories/mem_new_cand HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54326 - "GET /api/v1/memories?status=candidate HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54342 - "GET /api/v1/memories/mem_failed_cand HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54348 - "GET /api/v1/memories/mem_failed_cand HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54364 - "GET /api/v1/memories?status=candidate HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50204 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50214 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50220 - "GET /api/v1/research-themes HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50224 - "GET /api/v1/research-themes HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46932 - "POST /api/v1/research-themes/run HTTP/1.1" 202 Accepted
+INFO:     127.0.0.1:46940 - "GET /api/v1/research-themes HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46948 - "GET /api/v1/research-themes/rth_20260716_8eca3f HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46954 - "GET /api/v1/research-themes/rth_20260716_8eca3f HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46956 - "GET /api/v1/research-themes/rth_20260716_8eca3f HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46984 - "GET /api/v1/research-themes/rth_20260716_8eca3f HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46970 - "GET /api/v1/research-themes HTTP/1.1" 200 OK
+INFO:     127.0.0.1:47000 - "GET /api/v1/research-themes/rth_20260716_8eca3f HTTP/1.1" 200 OK
+INFO:     127.0.0.1:47012 - "GET /api/v1/research-themes/rth_20260716_8eca3f HTTP/1.1" 200 OK
+Unexpected error during obsidian search
+Traceback (most recent call last):
+  File "/app/src/obsidian_ai_hub/handler/obsidian_vault_retriever.py", line 26, in _search_obsidian_vault_core_sync
+    index = _get_vault_index()
+            ^^^^^^^^^^^^^^^^^^
+  File "/app/src/obsidian_ai_hub/handler/obsidian_vault_retriever.py", line 16, in _get_vault_index
+    _vault_index = build_vault_search_index()
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/src/obsidian_ai_hub/sync_valut.py", line 64, in build_vault_search_index
+    embedder = SimpleSbertEmbeddings(
+               ^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/src/obsidian_ai_hub/utils/simple_sbert_embeddings.py", line 33, in __init__
+    self._load_model()
+  File "/app/src/obsidian_ai_hub/utils/simple_sbert_embeddings.py", line 92, in _load_model
+    raise RuntimeError(
+RuntimeError: Model cl-nagoya/ruri-v3-310m not found locally and network fallback is disabled. Set VAULT_INDEX_ALLOW_NETWORK_FALLBACK=True to allow downloading.
+Research failed for theme '量子コンピュータの進歩'
+Traceback (most recent call last):
+  File "/app/src/obsidian_ai_hub/research/runner.py", line 653, in execute_research_job_sync
+    report = run_research(
+             ^^^^^^^^^^^^^
+  File "/app/src/obsidian_ai_hub/research/runner.py", line 510, in run_research
+    title = generate_research_title(theme, p)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/src/obsidian_ai_hub/research/runner.py", line 278, in generate_research_title
+    title = llm_client.generate_llm_response(
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/src/obsidian_ai_hub/utils/llm_client.py", line 139, in generate_llm_response
+    llm = create_langchain_llm(
+          ^^^^^^^^^^^^^^^^^^^^^
+  File "/app/src/obsidian_ai_hub/utils/llm_client.py", line 233, in create_langchain_llm
+    return create_openai_llm(model, temperature, max_tokens)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/src/obsidian_ai_hub/utils/llm_client.py", line 307, in create_openai_llm
+    raise RuntimeError("Environment variable OPENAI_API_KEY is not set")
+RuntimeError: Environment variable OPENAI_API_KEY is not set
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [221620]

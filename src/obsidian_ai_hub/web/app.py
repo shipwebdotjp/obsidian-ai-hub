@@ -61,6 +61,11 @@ def create_app(host: str | None = None, port: int | None = None, token: str | No
     )
     app.include_router(api_router)
 
+    @app.on_event("startup")
+    def on_startup():
+        from obsidian_ai_hub.research.runner import cleanup_stale_jobs
+        cleanup_stale_jobs()
+
     @app.get("/health")
     def health():
         return {"status": "ok", "auth_required": TOKEN_REQUIRED}

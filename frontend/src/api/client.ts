@@ -11,6 +11,7 @@ import type {
   ResearchListResponse,
   ResearchTheme,
   ResearchJob,
+  ResearchRunAcceptedResponse,
 } from "./types";
 
 const TOKEN_KEY = "obsidian-ai-hub:review-token";
@@ -210,4 +211,14 @@ export function rerunResearchTheme(themeId: string): Promise<ResearchJob> {
     `/api/v1/research-themes/${encodeURIComponent(themeId)}/rerun`,
     { method: "POST" },
   );
+}
+
+export function runResearchTheme(
+  theme: string,
+  mode: "auto" | "internal" | "web" | "deep",
+): Promise<ResearchRunAcceptedResponse> {
+  return request<ResearchRunAcceptedResponse>("/api/v1/research-themes/run", {
+    method: "POST",
+    body: JSON.stringify({ theme, mode }),
+  });
 }
