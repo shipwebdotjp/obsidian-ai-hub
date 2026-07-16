@@ -44,6 +44,9 @@ const markdownComponents = {
   blockquote: ({ node, ...props }: any) => (
     <blockquote className="border-l-4 border-slate-300 bg-slate-50 pl-4 py-1 pr-2 my-2 text-slate-600 italic rounded-r" {...props} />
   ),
+  pre: ({ node, ...props }: any) => (
+    <pre className="bg-slate-50 border border-slate-200 rounded p-3 my-2 overflow-x-auto text-xs font-mono text-slate-800" {...props} />
+  ),
   code: ({ node, inline, className, children, ...props }: any) => {
     const isInline = !className;
     if (isInline) {
@@ -54,11 +57,9 @@ const markdownComponents = {
       );
     }
     return (
-      <pre className="bg-slate-50 border border-slate-200 rounded p-3 my-2 overflow-x-auto text-xs font-mono text-slate-800">
-        <code className={className} {...props}>
-          {children}
-        </code>
-      </pre>
+      <code className={className} {...props}>
+        {children}
+      </code>
     );
   },
   table: ({ node, ...props }: any) => (

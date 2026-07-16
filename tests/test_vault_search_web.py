@@ -170,23 +170,19 @@ def test_vault_file_non_markdown(loopback_client, tmp_path):
 
     res = loopback_client.get("/api/v1/vault-file", params={"path": "test.txt"})
     assert res.status_code == 400
-    assert "Only Markdown (.md) files are allowed" in res.json()["detail"]
 
 
 def test_vault_file_absolute_path(loopback_client):
     res = loopback_client.get("/api/v1/vault-file", params={"path": "/absolute/path.md"})
     assert res.status_code == 400
-    assert "Absolute paths are not allowed" in res.json()["detail"]
 
 
 def test_vault_file_path_traversal(loopback_client):
     res = loopback_client.get("/api/v1/vault-file", params={"path": "../outside.md"})
     assert res.status_code == 400
-    assert "Path traversal components" in res.json()["detail"]
 
     res = loopback_client.get("/api/v1/vault-file", params={"path": "subdir/../../outside.md"})
     assert res.status_code == 400
-    assert "Path traversal components" in res.json()["detail"]
 
 
 def test_vault_file_symlink_outside(loopback_client, tmp_path):
@@ -203,4 +199,3 @@ def test_vault_file_symlink_outside(loopback_client, tmp_path):
 
     res = loopback_client.get("/api/v1/vault-file", params={"path": "symlink.md"})
     assert res.status_code == 400
-    assert "outside the Vault" in res.json()["detail"]

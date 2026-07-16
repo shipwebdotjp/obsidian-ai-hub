@@ -48,10 +48,10 @@ export default function VaultSearchPage() {
       notify(error, "error");
       return;
     }
-    if (items.length === 0) {
+    if (committedQuery && items.length === 0) {
       notify("検索結果が見つかりませんでした", "info");
     }
-  }, [notify]);
+  }, [committedQuery, notify]);
 
   return (
     <div className="flex h-full flex-col">
