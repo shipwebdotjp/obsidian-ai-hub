@@ -17,6 +17,7 @@ export default function ResearchDetailPanel({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [relatedThemes, setRelatedThemes] = useState<Map<string, string>>(new Map());
   const fetchIdRef = useRef(0);
 
   useEffect(() => {
@@ -39,6 +40,30 @@ export default function ResearchDetailPanel({
         if (currentFetchId === fetchIdRef.current) setLoading(false);
       });
   }, [themeId]);
+
+  useEffect(() => {
+    if (!detail?.related_theme_ids.length) {
+      setRelatedThemes(new Map());
+      return;
+    }
+
+    let cancelled = false;
+    const fetchRelated = async () => {
+      const results = await Promise.allSettled(
+        detail.related_theme_ids.map((id) => getResearchTheme(id))
+      );
+      if (cancelled) return;
+      const map = new Map<string, string>();
+      results.forEach((r, i) => {
+        if (r.status === "fulfilled") {
+          map.set(detail.related_theme_ids[i], r.value.theme);
+        }
+      });
+      setRelatedThemes(map);
+    };
+    fetchRelated().catch(() => {});
+    return () => { cancelled = true; };
+  }, [detail?.related_theme_ids]);
 
   async function handleAction(action: "approve" | "reject") {
     setIsSubmitting(true);
@@ -136,7 +161,9 @@ export default function ResearchDetailPanel({
           <h2 className="mt-4 text-sm font-semibold text-blue-700">関連テーマ</h2>
           <ul className="mt-1 space-y-1 text-sm">
             {detail.related_theme_ids.map((id) => (
-              <li key={id} className="text-xs text-blue-600">{id}</li>
+              <li key={id} className="text-xs text-blue-600">
+                {relatedThemes.get(id) || id}
+              </li>
             ))}
           </ul>
         </>
@@ -161,8 +188,8 @@ export default function ResearchDetailPanel({
               <>
                 <h3 className="text-xs font-semibold text-slate-700 mt-2">結果</h3>
                 <pre className="whitespace-pre-wrap rounded border border-slate-200 bg-slate-50 p-3 text-xs">
-                  {job.markdown.slice(0, 5000)}
-                  {job.markdown.length > 5000 && "\n...(truncated)"}
+                  {job.markdown.slice(0, 10000)}
+                  {job.markdown.length > 10000 && "\n...(truncated)"}
                 </pre>
               </>
             )}

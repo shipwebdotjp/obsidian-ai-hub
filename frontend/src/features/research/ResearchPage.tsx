@@ -124,6 +124,8 @@ export default function ResearchPage() {
             if (selectedTheme?.theme_id === job.themeId) {
               setSelectedTheme(latestTheme);
             }
+
+            handleRefresh();
           }
         } catch (e) {
           console.error("Failed to poll theme detail", e);
