@@ -80,11 +80,12 @@ def test_review_research_theme_approve(client):
     t = _create_test_theme()
     _create_test_job(t["theme_id"])
 
-    with patch("obsidian_ai_hub.research.runner.save_research_to_vault", return_value=None):
+    with patch("obsidian_ai_hub.research_agent.save_research_to_vault") as mock_save:
         resp = client.post(f"/api/v1/research-themes/{t['theme_id']}/review", json={"action": "approve"})
 
     assert resp.status_code == 200
     assert resp.json()["theme"]["status"] == "approved"
+    mock_save.assert_called_once_with(t["theme_id"])
 
 
 def test_review_research_theme_reject(client):
