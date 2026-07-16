@@ -6,9 +6,10 @@ import VaultSearchPage from "./VaultSearchPage";
 vi.mock("../../api/client", () => ({
   searchVault: vi.fn(),
   ApiError: class ApiError extends Error {
-    constructor(message: string) {
+    status: number;
+    constructor(status: number, message: string) {
       super(message);
-      this.name = "ApiError";
+      this.status = status;
     }
   },
 }));
