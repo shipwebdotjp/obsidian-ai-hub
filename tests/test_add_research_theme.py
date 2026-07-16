@@ -45,3 +45,51 @@ def test_append_research_theme_handles_duplicate():
         result2 = add_research_theme.append_research_theme("重複テスト")
         assert result2 == "duplicate"
         mock_research.assert_not_called()
+
+
+def test_append_research_theme_approves_after_successful_vault_save():
+    result = {
+        "status": "candidate",
+        "theme_id": "theme_success",
+        "job": {"status": "succeeded"},
+    }
+    with (
+        patch(
+            "obsidian_ai_hub.research.pipeline.create_theme_and_research",
+            return_value=result,
+        ),
+        patch(
+            "obsidian_ai_hub.research.runner.save_research_to_vault",
+            return_value=Path("/tmp/research.md"),
+        ),
+        patch("obsidian_ai_hub.research.db.set_status") as mock_set_status,
+    ):
+        status = add_research_theme.append_research_theme("保存成功テーマ")
+
+    assert status == "candidate"
+    mock_set_status.assert_called_once_with(
+        "theme_success", "approved", reviewed_by="system"
+    )
+
+
+def test_append_research_theme_keeps_candidate_when_vault_save_returns_none():
+    result = {
+        "status": "candidate",
+        "theme_id": "theme_unsaved",
+        "job": {"status": "succeeded"},
+    }
+    with (
+        patch(
+            "obsidian_ai_hub.research.pipeline.create_theme_and_research",
+            return_value=result,
+        ),
+        patch(
+            "obsidian_ai_hub.research.runner.save_research_to_vault",
+            return_value=None,
+        ),
+        patch("obsidian_ai_hub.research.db.set_status") as mock_set_status,
+    ):
+        status = add_research_theme.append_research_theme("保存未完了テーマ")
+
+    assert status == "candidate"
+    mock_set_status.assert_not_called()

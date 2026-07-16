@@ -39,6 +39,8 @@ def append_research_theme(
                 from obsidian_ai_hub.research.runner import save_research_to_vault
                 output_path = save_research_to_vault(result["theme_id"])
                 if output_path:
+                    from obsidian_ai_hub.research import db
+                    db.set_status(result["theme_id"], "approved", reviewed_by="system")
                     logger.info("Research saved to vault: %s", output_path)
             except Exception:
                 logger.exception("Failed to save research to vault for theme %s", result["theme_id"])
