@@ -128,3 +128,79 @@ def test_vault_search_missing_metadata(loopback_client):
     body = res.json()
     assert body["total"] == 1
     assert body["items"][0]["metadata"]["vault_name"] == "vault"
+
+
+def test_vault_file_success(loopback_client, tmp_path):
+    vault_path = tmp_path / "vault"
+    note_path = vault_path / "test-note.md"
+    note_content = "---\ntitle: Hello\n---\n# World"
+    note_path.write_text(note_content, encoding="utf-8")
+
+    res = loopback_client.get("/api/v1/vault-file", params={"path": "test-note.md"})
+    assert res.status_code == 200
+    body = res.json()
+    assert body["content"] == note_content
+    assert body["relative_path"] == "test-note.md"
+
+
+def test_vault_file_subdir_success(loopback_client, tmp_path):
+    vault_path = tmp_path / "vault"
+    sub_dir = vault_path / "daily"
+    sub_dir.mkdir(exist_ok=True)
+    note_path = sub_dir / "2026-07-16.md"
+    note_content = "Subdir note content"
+    note_path.write_text(note_content, encoding="utf-8")
+
+    res = loopback_client.get("/api/v1/vault-file", params={"path": "daily/2026-07-16.md"})
+    assert res.status_code == 200
+    body = res.json()
+    assert body["content"] == note_content
+    assert body["relative_path"] == "daily/2026-07-16.md"
+
+
+def test_vault_file_not_found(loopback_client):
+    res = loopback_client.get("/api/v1/vault-file", params={"path": "non-existent.md"})
+    assert res.status_code == 404
+
+
+def test_vault_file_non_markdown(loopback_client, tmp_path):
+    vault_path = tmp_path / "vault"
+    file_path = vault_path / "test.txt"
+    file_path.write_text("hello", encoding="utf-8")
+
+    res = loopback_client.get("/api/v1/vault-file", params={"path": "test.txt"})
+    assert res.status_code == 400
+    assert "Only Markdown (.md) files are allowed" in res.json()["detail"]
+
+
+def test_vault_file_absolute_path(loopback_client):
+    res = loopback_client.get("/api/v1/vault-file", params={"path": "/absolute/path.md"})
+    assert res.status_code == 400
+    assert "Absolute paths are not allowed" in res.json()["detail"]
+
+
+def test_vault_file_path_traversal(loopback_client):
+    res = loopback_client.get("/api/v1/vault-file", params={"path": "../outside.md"})
+    assert res.status_code == 400
+    assert "Path traversal components" in res.json()["detail"]
+
+    res = loopback_client.get("/api/v1/vault-file", params={"path": "subdir/../../outside.md"})
+    assert res.status_code == 400
+    assert "Path traversal components" in res.json()["detail"]
+
+
+def test_vault_file_symlink_outside(loopback_client, tmp_path):
+    import os
+    vault_path = tmp_path / "vault"
+    outside_file = tmp_path / "outside.md"
+    outside_file.write_text("dangerous", encoding="utf-8")
+
+    sym_path = vault_path / "symlink.md"
+    try:
+        os.symlink(outside_file, sym_path)
+    except OSError:
+        pytest.skip("Symlinks are not supported on this platform/privilege level")
+
+    res = loopback_client.get("/api/v1/vault-file", params={"path": "symlink.md"})
+    assert res.status_code == 400
+    assert "outside the Vault" in res.json()["detail"]

@@ -189,3 +189,8 @@ export interface VaultSearchResponse {
   items: VaultSearchHit[];
   total: number;
 }
+
+export interface VaultFileResponse {
+  content: string;
+  relative_path: string;
+}

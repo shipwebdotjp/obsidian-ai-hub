@@ -13,6 +13,7 @@ import type {
   ResearchJob,
   ResearchRunAcceptedResponse,
   VaultSearchResponse,
+  VaultFileResponse,
 } from "./types";
 
 const TOKEN_KEY = "obsidian-ai-hub:review-token";
@@ -236,4 +237,10 @@ export function searchVault(params: {
   if (params.k) sp.set("k", String(params.k));
   if (params.mode) sp.set("mode", params.mode);
   return request<VaultSearchResponse>(`/api/v1/vault-search?${sp.toString()}`);
+}
+
+export function getVaultFile(path: string, signal?: AbortSignal): Promise<VaultFileResponse> {
+  const sp = new URLSearchParams();
+  sp.set("path", path);
+  return request<VaultFileResponse>(`/api/v1/vault-file?${sp.toString()}`, { signal });
 }
