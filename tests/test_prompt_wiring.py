@@ -113,14 +113,14 @@ def test_prompt_externalization_wiring(mock_dependencies):
         assert mock_prompt.render_prompt.call_args[0][0] == config.SUMMARIZE_MONTH_PROMPT_PATH
 
     # research_agent router
-    from obsidian_ai_hub import research_agent
-    with patch("obsidian_ai_hub.research_agent.prompt") as mock_prompt, \
-         patch("obsidian_ai_hub.research_agent.llm_client") as mock_llm:
+    from obsidian_ai_hub.research import runner
+    with patch("obsidian_ai_hub.research.runner.prompt") as mock_prompt, \
+         patch("obsidian_ai_hub.research.runner.llm_client") as mock_llm:
 
         mock_prompt.render_prompt.return_value = "Rendered Prompt"
         mock_llm.generate_llm_response.return_value = "web"
 
-        research_agent.build_web_research_router_prompt("theme")
+        runner.build_web_research_router_prompt("theme")
 
         mock_prompt.render_prompt.assert_called_once()
         assert mock_prompt.render_prompt.call_args[0][0] == config.RESEARCH_ROUTER_PROMPT_PATH

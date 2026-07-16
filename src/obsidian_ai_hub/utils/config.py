@@ -156,7 +156,7 @@ RESEARCH_GPT_RESEARCHER_FAST_LLM = str(
     _config_value("research", "deep", "gpt_researcher", "fast_llm", default="openai:gpt-5.6-terra")
 )
 RESEARCH_GPT_RESEARCHER_SMART_LLM = str(
-    _config_value("research", "deep", "gpt_researcher", "smart_llm", default="openai:gpt-5.6-sol")
+    _config_value("research", "deep", "gpt_researcher", "smart_llm", default="openai:gpt-5.6-terra")
 )
 RESEARCH_GPT_RESEARCHER_STRATEGIC_LLM = str(
     _config_value("research", "deep", "gpt_researcher", "strategic_llm", default="openai:gpt-5.6-terra")

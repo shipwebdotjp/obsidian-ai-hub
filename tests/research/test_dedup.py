@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-from obsidian_ai_hub import research_dedup
+from obsidian_ai_hub.research import dedup as research_dedup
 
 
 def test_run_dedup_no_similar():
@@ -17,7 +17,7 @@ def test_run_dedup_empty_similar():
 
 
 def test_run_dedup_llm_duplicate():
-    from obsidian_ai_hub import research_themes
+    from obsidian_ai_hub.research import db as research_themes
     t1 = research_themes.create_theme(theme="既存テーマA", confidence=0.9)
     similar = [(t1["theme_id"], 0.95)]
 
@@ -32,7 +32,7 @@ def test_run_dedup_llm_duplicate():
 
 
 def test_run_dedup_llm_related():
-    from obsidian_ai_hub import research_themes
+    from obsidian_ai_hub.research import db as research_themes
     t1 = research_themes.create_theme(theme="関連テーマ", confidence=0.8)
     similar = [(t1["theme_id"], 0.85)]
 
@@ -46,7 +46,7 @@ def test_run_dedup_llm_related():
 
 
 def test_run_dedup_llm_distinct():
-    from obsidian_ai_hub import research_themes
+    from obsidian_ai_hub.research import db as research_themes
     t1 = research_themes.create_theme(theme="異なるテーマ", confidence=0.7)
     similar = [(t1["theme_id"], 0.72)]
 
@@ -59,7 +59,7 @@ def test_run_dedup_llm_distinct():
 
 
 def test_run_dedup_llm_failure():
-    from obsidian_ai_hub import research_themes
+    from obsidian_ai_hub.research import db as research_themes
     t1 = research_themes.create_theme(theme="何かのテーマ", confidence=0.6)
     similar = [(t1["theme_id"], 0.8)]
 
@@ -71,7 +71,7 @@ def test_run_dedup_llm_failure():
 
 
 def test_run_dedup_invalid_json_response():
-    from obsidian_ai_hub import research_themes
+    from obsidian_ai_hub.research import db as research_themes
     t1 = research_themes.create_theme(theme="テーマ", confidence=0.5)
     similar = [(t1["theme_id"], 0.75)]
 

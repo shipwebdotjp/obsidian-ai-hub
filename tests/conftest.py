@@ -28,7 +28,7 @@ if sys.platform != "darwin":
 def _isolate_memory_db(tmp_path: Path):
     """Use a temporary SQLite file for every test that touches the memory DB."""
     db_file = tmp_path / "memory.sqlite3"
-    # Patch BEFORE get_db_connection() is called (research_themes._get_db -> memory.get_db_connection)
+    # Patch BEFORE get_db_connection() is called (research.db._get_db -> memory.get_db_connection)
     original = config.MEMORY_SQLITE_PATH
     config.MEMORY_SQLITE_PATH = db_file
     yield

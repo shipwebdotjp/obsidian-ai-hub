@@ -54,6 +54,18 @@ make dev-web                                  # 開発: Vite dev server (proxy -
 | `reader.py` | Helper functions for reading daily/weekly notes |
 | `extracter.py` | Extract content from notes (YAML frontmatter, subheaders) |
 
+### Research Package (`src/obsidian_ai_hub/research/`)
+
+| File | Purpose |
+|------|---------|
+| `db.py` | Research theme / job CRUD (SQLite) + activity JSONL reader |
+| `dedup.py` | 3-stage dedup: exact match → SBERT → LLM |
+| `runner.py` | Research execution engine (run_research, run_theme_research, save_research_to_vault) |
+| `pipeline.py` | `create_theme_and_research`: candidate creation → dedup → immediate research |
+| `suggest.py` | LLM-based theme suggestion from activity JSONL |
+| `research_agent.py` | CLI shim (re-exports from `runner.py`) |
+| `suggest_research_theme.py` | CLI shim (re-exports from `suggest.py`) |
+
 ### Web UI (`src/obsidian_ai_hub/web/`, `frontend/`)
 
 | File | Purpose |
@@ -76,7 +88,13 @@ make dev-web                                  # 開発: Vite dev server (proxy -
 - Reminders via **osascript**
 - Audio transcription via **Whisper**
 
+## Implementation Guidelines
+
+- Modules directly under `src/obsidian_ai_hub/` should remain thin wrappers around `main` functions that are invoked by the CLI. Put concrete application logic in appropriate subpackages instead.
+- Prefer straightforward failure over defensive error suppression. Do not add unnecessary robustness or catch exceptions merely to hide them; let unexpected errors surface naturally.
+
 ## Testing Guidelines
 - This is a personal project; avoid writing detailed test codes for implementation details.
 - Tests for frequently changing parts, such as string matching or the structure of output markdown, are not required.
 - Write only the minimum necessary test code to check for critical errors or crashes.
+- Tests must use isolated temporary databases (or explicitly injected test database paths) and must never modify the production database.

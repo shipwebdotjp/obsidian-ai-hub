@@ -125,35 +125,36 @@ def list_research_themes(
     job_status: Optional[str] = None,
     q: Optional[str] = None,
 ) -> list[dict]:
-    from obsidian_ai_hub import research_themes
-    return research_themes.list_themes(status=status, job_status=job_status, q=q)
+    from obsidian_ai_hub.research import db
+    return db.list_themes(status=status, job_status=job_status, q=q)
 
 
 def get_research_theme(theme_id: str) -> Optional[dict]:
-    from obsidian_ai_hub import research_themes
-    theme = research_themes.get_theme(theme_id)
+    from obsidian_ai_hub.research import db
+    theme = db.get_theme(theme_id)
     if theme is None:
         return None
-    job = research_themes.latest_job(theme_id)
+    job = db.latest_job(theme_id)
     theme["latest_job"] = job
     return theme
 
 
 def review_research_theme(theme_id: str, action: str, reason: Optional[str] = None) -> Optional[dict]:
-    from obsidian_ai_hub import research_themes, research_agent
-    theme = research_themes.get_theme(theme_id)
+    from obsidian_ai_hub.research import db
+    from obsidian_ai_hub import research_agent
+    theme = db.get_theme(theme_id)
     if theme is None:
         return None
     if action == "approve":
-        job = research_themes.latest_job(theme_id)
+        job = db.latest_job(theme_id)
         if job and job.get("status") == "succeeded" and job.get("markdown"):
             research_agent.save_research_to_vault(theme_id)
-        research_themes.set_status(theme_id, "approved", reviewed_by="user", reason=reason)
+        db.set_status(theme_id, "approved", reviewed_by="user", reason=reason)
     elif action == "reject":
-        research_themes.set_status(theme_id, "rejected", reviewed_by="user", reason=reason)
+        db.set_status(theme_id, "rejected", reviewed_by="user", reason=reason)
     else:
         raise ValueError(f"Invalid action: {action}")
-    return research_themes.get_theme(theme_id)
+    return db.get_theme(theme_id)
 
 
 def rerun_research_theme(theme_id: str) -> Optional[dict]:

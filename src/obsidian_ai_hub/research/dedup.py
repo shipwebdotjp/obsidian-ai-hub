@@ -5,7 +5,6 @@ import logging
 from typing import Optional
 
 from obsidian_ai_hub.utils import config, llm_client, prompt
-from obsidian_ai_hub import research_themes
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +50,8 @@ def run_dedup_review(
     candidate_why_now: Optional[str] = None,
     similar: list[tuple[str, float]] | None = None,
 ) -> dict:
+    from obsidian_ai_hub.research import db
+
     if not similar:
         return {
             "decision": "distinct",
@@ -64,7 +65,7 @@ def run_dedup_review(
     theme_ids = [tid for tid, _ in similar]
     existing: list[tuple[str, dict]] = []
     for tid in theme_ids:
-        t = research_themes.get_theme(tid)
+        t = db.get_theme(tid)
         if t:
             existing.append((tid, t))
 

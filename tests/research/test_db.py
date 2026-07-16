@@ -5,7 +5,7 @@ from datetime import date, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
-from obsidian_ai_hub import research_themes
+from obsidian_ai_hub.research import db as research_themes
 
 
 def test_normalize_theme_key():

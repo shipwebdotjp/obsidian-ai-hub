@@ -5,7 +5,7 @@ from datetime import date, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
-from obsidian_ai_hub import suggest_research_theme
+from obsidian_ai_hub.research import suggest as suggest_research_theme
 
 
 def _write_activity_log(base_dir: Path, activity_date: date, summaries: list[str]) -> Path:
@@ -33,7 +33,7 @@ def test_build_suggestions_uses_activity_context_and_avoids_existing(tmp_path: P
 
     monkeypatch.setattr(suggest_research_theme.config, "ACTIVITY_PATH", activity_root)
 
-    from obsidian_ai_hub import research_themes
+    from obsidian_ai_hub.research import db as research_themes
     research_themes.create_theme(theme="既存テーマ", direction="既存の方向", kind="deep", confidence=0.9)
 
     llm_response = json.dumps(
@@ -120,7 +120,7 @@ def test_main_creates_themes_and_researches(tmp_path: Path, monkeypatch):
 
     with (
         patch.object(suggest_research_theme.llm_client, "generate_llm_response", return_value=llm_response),
-        patch("obsidian_ai_hub.research_agent.run_theme_research") as mock_research,
+        patch("obsidian_ai_hub.research.runner.run_theme_research") as mock_research,
     ):
         results = suggest_research_theme.main()
 

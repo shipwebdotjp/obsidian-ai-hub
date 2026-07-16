@@ -9,6 +9,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
+from obsidian_ai_hub.memory import get_db_connection
 from obsidian_ai_hub.utils import config
 
 logger = logging.getLogger(__name__)
@@ -51,7 +52,6 @@ ALLOWED_KINDS = frozenset({"deep", "adjacent", "explore"})
 
 
 def _get_db():
-    from obsidian_ai_hub.memory import get_db_connection
     return get_db_connection()
 
 
@@ -100,53 +100,6 @@ def deserialize_theme(row: dict) -> dict:
     else:
         t["related_theme_ids"] = []
     return t
-
-
-def _ensure_tables():
-    conn = _get_db()
-    try:
-        with conn:
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS research_themes (
-                    schema_version INTEGER DEFAULT 3,
-                    theme_id TEXT PRIMARY KEY,
-                    theme TEXT NOT NULL,
-                    direction TEXT,
-                    kind TEXT,
-                    why_now TEXT,
-                    confidence REAL,
-                    normalized_key TEXT NOT NULL,
-                    status TEXT NOT NULL DEFAULT 'candidate',
-                    duplicate_of_theme_id TEXT,
-                    duplicate_reason TEXT,
-                    related_theme_ids TEXT,
-                    created_at TEXT,
-                    updated_at TEXT,
-                    reviewed_at TEXT,
-                    reviewed_by TEXT
-                )
-            """)
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS research_jobs (
-                    schema_version INTEGER DEFAULT 1,
-                    job_id TEXT PRIMARY KEY,
-                    theme_id TEXT NOT NULL,
-                    status TEXT NOT NULL DEFAULT 'pending',
-                    generated_title TEXT,
-                    mode TEXT,
-                    markdown TEXT,
-                    error TEXT,
-                    started_at TEXT,
-                    finished_at TEXT,
-                    FOREIGN KEY(theme_id) REFERENCES research_themes(theme_id) ON DELETE CASCADE
-                )
-            """)
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_rt_status ON research_themes(status)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_rt_normalized_key ON research_themes(normalized_key)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_rj_theme_id ON research_jobs(theme_id)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_rj_status ON research_jobs(status)")
-    finally:
-        conn.close()
 
 
 def create_theme(
@@ -254,7 +207,6 @@ def list_themes(
             ORDER BY rt.created_at DESC
         """, params)
         rows = [dict(r) for r in cursor.fetchall()]
-
     finally:
         conn.close()
 

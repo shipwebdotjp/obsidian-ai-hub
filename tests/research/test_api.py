@@ -15,7 +15,7 @@ def client():
 
 
 def _create_test_theme():
-    from obsidian_ai_hub import research_themes
+    from obsidian_ai_hub.research import db as research_themes
     return research_themes.create_theme(
         theme="APIテストテーマ",
         direction="API方向",
@@ -26,7 +26,7 @@ def _create_test_theme():
 
 
 def _create_test_job(theme_id: str):
-    from obsidian_ai_hub import research_themes
+    from obsidian_ai_hub.research import db as research_themes
     job = research_themes.create_job(theme_id)
     research_themes.update_job(job["job_id"], status="succeeded", generated_title="APIテスト", mode="internal", markdown="# 結果")
     return job
@@ -43,7 +43,7 @@ def test_list_research_themes(client):
 
 def test_list_research_themes_with_status_filter(client):
     t = _create_test_theme()
-    from obsidian_ai_hub import research_themes
+    from obsidian_ai_hub.research import db as research_themes
     research_themes.set_status(t["theme_id"], "approved", reviewed_by="test")
 
     resp = client.get("/api/v1/research-themes?status=approved")
@@ -80,7 +80,7 @@ def test_review_research_theme_approve(client):
     t = _create_test_theme()
     _create_test_job(t["theme_id"])
 
-    with patch("obsidian_ai_hub.research_agent.save_research_to_vault", return_value=None):
+    with patch("obsidian_ai_hub.research.runner.save_research_to_vault", return_value=None):
         resp = client.post(f"/api/v1/research-themes/{t['theme_id']}/review", json={"action": "approve"})
 
     assert resp.status_code == 200
@@ -103,10 +103,10 @@ def test_rerun_research_theme(client):
     t = _create_test_theme()
 
     with (
-        patch("obsidian_ai_hub.research_agent.collect_research_context", return_value=""),
-        patch("obsidian_ai_hub.research_agent.route_research_topic", return_value="internal"),
-        patch("obsidian_ai_hub.research_agent.llm_client.generate_llm_response", return_value="title"),
-        patch("obsidian_ai_hub.research_agent.conduct_research", return_value="report"),
+        patch("obsidian_ai_hub.research.runner.collect_research_context", return_value=""),
+        patch("obsidian_ai_hub.research.runner.route_research_topic", return_value="internal"),
+        patch("obsidian_ai_hub.research.runner.llm_client.generate_llm_response", return_value="title"),
+        patch("obsidian_ai_hub.research.runner.conduct_research", return_value="report"),
     ):
         resp = client.post(f"/api/v1/research-themes/{t['theme_id']}/rerun")
 

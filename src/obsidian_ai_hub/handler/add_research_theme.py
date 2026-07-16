@@ -23,7 +23,7 @@ def append_research_theme(
     normalized = _normalize_theme(theme)
     normalized_direction = direction.replace("\r", "").replace("\n", "").strip() if direction else None
 
-    from obsidian_ai_hub.research_pipeline import create_theme_and_research
+    from obsidian_ai_hub.research.pipeline import create_theme_and_research
     result = create_theme_and_research(
         theme=normalized,
         direction=normalized_direction,
