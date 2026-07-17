@@ -114,22 +114,28 @@ def test_db_initialization_and_indexes(clean_memory_env):
     cursor = conn.cursor()
     cursor.execute("PRAGMA user_version;")
     version = cursor.fetchone()[0]
-    assert version == 4
+    assert version == 5
 
     # Verify tables exist
     cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
-    tables = [row[0] for row in cursor.fetchall()]
+    tables = {row[0] for row in cursor.fetchall()}
     assert "memories" in tables
     assert "memory_events" in tables
     assert "activity_logs" in tables
+    assert "summaries" in tables
+    assert "summary_items" in tables
+    assert "topics" in tables
+    assert "projects" in tables
+    assert "people" in tables
 
     # Verify indexes exist
     cursor.execute("SELECT name FROM sqlite_master WHERE type='index';")
-    indexes = [row[0] for row in cursor.fetchall()]
+    indexes = {row[0] for row in cursor.fetchall()}
     assert "idx_memories_status" in indexes
     assert "idx_memories_memory_key" in indexes
     assert "idx_memory_events_memory_id_occurred_at" in indexes
     assert "idx_activity_logs_date_occurred" in indexes
+    assert "idx_summaries_period" in indexes
 
     conn.close()
 
@@ -193,12 +199,24 @@ def test_extract_memories(clean_memory_env):
         "## AIによる要約\n\n要約本文は入力しない\n",
         encoding="utf-8",
     )
-    activity_dir = config.ACTIVITY_PATH / "2026" / "07"
-    activity_dir.mkdir(parents=True)
-    (activity_dir / "2026-07.jsonl").write_text(
-        json.dumps({"date": week_date, "summary": "簡潔な応答を望んだ"}, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-    )
+
+    from obsidian_ai_hub.summary import store as summary_store
+    summary_store.upsert_summary({
+        "period_type": "day",
+        "period_key": week_date,
+        "period_start": week_date,
+        "period_end": week_date,
+        "generated_at": "2026-07-13T22:00:00",
+        "summary": "簡潔な応答を望んだ",
+        "keywords": [],
+        "mood": "good",
+        "sleep_raw": "7h",
+        "sleep_hours": 7.0,
+        "topics": ["その他"],
+        "projects": [],
+        "people": [],
+        "items": [],
+    })
 
     # Mock LLM response for extraction
     mock_llm_response = """
@@ -253,6 +271,43 @@ def test_extract_memories(clean_memory_env):
         assert "追加のメモ" in rendered_prompt
         assert "要約本文は入力しない" not in rendered_prompt
         assert "簡潔な応答を望んだ" in rendered_prompt
+
+
+def test_load_daily_structured_record_from_sqlite(clean_memory_env):
+    target_date = datetime(2026, 7, 13)
+    from obsidian_ai_hub.summary import store as summary_store
+    summary_store.upsert_summary({
+        "period_type": "day",
+        "period_key": "2026-07-13",
+        "period_start": "2026-07-13",
+        "period_end": "2026-07-13",
+        "generated_at": "2026-07-13T22:00:00",
+        "summary": "SQLite summary",
+        "keywords": ["sqlite"],
+        "mood": "good",
+        "sleep_raw": "7h",
+        "sleep_hours": 7.0,
+        "topics": ["LLM・AI活用"],
+        "projects": ["Project A"],
+        "people": [{"name": "Alice", "note": "met"}],
+        "items": [
+            {"kind": "highlights", "body": "Highlight", "display_order": 0},
+            {"kind": "activities", "body": "Activity", "display_order": 0},
+        ],
+    })
+
+    record = memory._load_daily_structured_record(target_date)
+    assert record["date"] == "2026-07-13"
+    assert record["summary"] == "SQLite summary"
+    assert record["mood"] == "good"
+    assert record["sleep"] == "7h"
+    assert record["topics"] == ["LLM・AI活用"]
+    assert record["highlights"] == ["Highlight"]
+    assert record["activities"] == ["Activity"]
+    assert record["people"] == [{"name": "Alice", "note": "met"}]
+
+    missing = memory._load_daily_structured_record(datetime(1900, 1, 1))
+    assert missing == {}
 
 
 def test_extract_memories_skips_week_without_notes(clean_memory_env):

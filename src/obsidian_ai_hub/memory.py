@@ -241,6 +241,96 @@ def get_db_connection() -> sqlite3.Connection:
         conn.execute("PRAGMA user_version = 4;")
         conn.commit()
 
+    if current_version <= 4:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS summaries (
+                schema_version INTEGER DEFAULT 1,
+                summary_id TEXT PRIMARY KEY,
+                period_type TEXT NOT NULL,
+                period_key TEXT NOT NULL,
+                period_start TEXT,
+                period_end TEXT,
+                generated_at TEXT,
+                summary TEXT,
+                keywords TEXT,
+                mood TEXT,
+                sleep_raw TEXT,
+                sleep_hours REAL,
+                UNIQUE(period_type, period_key)
+            );
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS summary_items (
+                summary_item_id TEXT PRIMARY KEY,
+                summary_id TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                body TEXT,
+                display_order INTEGER,
+                FOREIGN KEY(summary_id) REFERENCES summaries(summary_id) ON DELETE CASCADE
+            );
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS topics (
+                topic_id TEXT PRIMARY KEY,
+                normalized_name TEXT UNIQUE NOT NULL,
+                display_name TEXT NOT NULL
+            );
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS projects (
+                project_id TEXT PRIMARY KEY,
+                normalized_name TEXT UNIQUE NOT NULL,
+                display_name TEXT NOT NULL
+            );
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS people (
+                person_id TEXT PRIMARY KEY,
+                normalized_name TEXT UNIQUE NOT NULL,
+                display_name TEXT NOT NULL
+            );
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS summary_topics (
+                summary_id TEXT NOT NULL,
+                topic_id TEXT NOT NULL,
+                display_order INTEGER,
+                PRIMARY KEY(summary_id, topic_id),
+                FOREIGN KEY(summary_id) REFERENCES summaries(summary_id) ON DELETE CASCADE,
+                FOREIGN KEY(topic_id) REFERENCES topics(topic_id) ON DELETE CASCADE
+            );
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS summary_projects (
+                summary_id TEXT NOT NULL,
+                project_id TEXT NOT NULL,
+                display_order INTEGER,
+                PRIMARY KEY(summary_id, project_id),
+                FOREIGN KEY(summary_id) REFERENCES summaries(summary_id) ON DELETE CASCADE,
+                FOREIGN KEY(project_id) REFERENCES projects(project_id) ON DELETE CASCADE
+            );
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS summary_people (
+                summary_id TEXT NOT NULL,
+                person_id TEXT NOT NULL,
+                note TEXT,
+                display_order INTEGER,
+                PRIMARY KEY(summary_id, person_id),
+                FOREIGN KEY(summary_id) REFERENCES summaries(summary_id) ON DELETE CASCADE,
+                FOREIGN KEY(person_id) REFERENCES people(person_id) ON DELETE CASCADE
+            );
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_summaries_period ON summaries(period_type, period_key);")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_summaries_period_start ON summaries(period_start);")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_summary_items_summary_id ON summary_items(summary_id);")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_summary_items_kind ON summary_items(summary_id, kind);")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_summary_topics_summary_id ON summary_topics(summary_id);")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_summary_projects_summary_id ON summary_projects(summary_id);")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_summary_people_summary_id ON summary_people(summary_id);")
+        conn.execute("PRAGMA user_version = 5;")
+        conn.commit()
+
     return conn
 
 
@@ -588,25 +678,40 @@ def _vault_relative_path(path: Path) -> str:
 
 
 def _load_daily_structured_record(target_dt: datetime) -> dict:
-    year_str = target_dt.strftime("%Y")
-    month_str = target_dt.strftime("%m")
     target_date_str = target_dt.strftime("%Y-%m-%d")
-    monthly_jsonl_path = Path(config.ACTIVITY_PATH) / year_str / month_str / f"{year_str}-{month_str}.jsonl"
-    if not monthly_jsonl_path.exists():
+    try:
+        from obsidian_ai_hub.summary import store as summary_store
+        record = summary_store.get_summary_by_period("day", target_date_str)
+    except Exception as exc:
+        logger.warning("Failed to load structured daily record for %s: %s", target_date_str, exc)
         return {}
 
-    try:
-        with open(monthly_jsonl_path, "r", encoding="utf-8") as f:
-            for line in f:
-                try:
-                    data = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if data.get("date") == target_date_str:
-                    return data
-    except OSError as exc:
-        logger.warning("Failed to read structured daily record %s: %s", monthly_jsonl_path, exc)
-    return {}
+    if not record:
+        return {}
+
+    items = record.get("items", [])
+    kind_map = {
+        "highlights": "highlights",
+        "activities": "activities",
+        "learnings": "learnings",
+        "reflections": "reflections",
+        "gratitude": "gratitude",
+    }
+    structured = {
+        "date": target_date_str,
+        "summary": record.get("summary"),
+        "topics": record.get("topics", []),
+        "people": [{"name": p.get("name", ""), "note": p.get("note", "")} for p in record.get("people", [])],
+        "mood": record.get("mood"),
+        "sleep": record.get("sleep_raw"),
+        "keywords": record.get("keywords", []),
+    }
+    for item in items:
+        kind = item.get("kind")
+        body = item.get("body")
+        if kind in kind_map and body:
+            structured.setdefault(kind, []).append(body)
+    return structured
 
 
 def _load_weekly_memory_sources(week_start: datetime, week_end: datetime) -> tuple[list[dict], list[dict]]:

@@ -84,7 +84,6 @@ else:
 
 INBOX_DIR_NAME = str(_config_value("vault", "inbox", default="inbox"))
 DAILY_DIR_NAME = str(_config_value("vault", "daily", default="daily"))
-DASHBOARD_DIR_NAME = str(_config_value("vault", "dashboard", default="dashboard"))
 TEMPLATE_DIR_NAME = str(_config_value("vault", "template", default="template"))
 KNOWLEDGE_DIR_NAME = str(_config_value("vault", "knowledge", default="copilot/knowledge"))
 RESEARCH_DIR_NAME = str(_config_value("vault", "research", default="research"))
@@ -101,11 +100,12 @@ INBOX_PATH = VAULT_PATH / INBOX_DIR_NAME
 DAILY_PATH = VAULT_PATH / DAILY_DIR_NAME
 TEMPLATE_PATH = VAULT_PATH / TEMPLATE_DIR_NAME / DAILY_TEMPLATE_FILENAME
 WEBCLIP_PATH = VAULT_PATH / WEBCLIP_DIR_NAME
+DASHBOARD_DIR_NAME = str(_config_value("vault", "dashboard", default="dashboard"))
+DASHBOARD_PATH = VAULT_PATH / DASHBOARD_DIR_NAME
 
 SCREENSHOT_DIR = _optional_path("SCREENSHOT_DIR")
 SCREENSHOT_PATH = SCREENSHOT_DIR if SCREENSHOT_DIR is not None else (VAULT_PATH / "screenshots")
 ACTIVITY_PATH = VAULT_PATH / "activity"
-DASHBOARD_PATH = VAULT_PATH / DASHBOARD_DIR_NAME
 
 # Template for weekly notes
 WEEKLY_TEMPLATE_PATH = DAILY_PATH / TEMPLATE_DIR_NAME / WEEKLY_TEMPLATE_FILENAME

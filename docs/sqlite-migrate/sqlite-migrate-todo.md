@@ -26,9 +26,9 @@
 
 ### 呼出元の切替
 
-- [ ] `logging_activity.py` の重複判定と記録先をSQLiteへ切り替える。
-- [ ] `summerize_day.load_activity_logs()` をSQLite読取へ切り替える。
-- [ ] `research.db.list_recent_activity_days()` をSQLite読取へ切り替え、既存の要約重複除去を維持する。
+- [x] `logging_activity.py` の重複判定と記録先をSQLiteへ切り替える。
+- [x] `summerize_day.load_activity_logs()` をSQLite読取へ切り替える。
+- [x] `research.db.list_recent_activity_days()` をSQLite読取へ切り替え、既存の要約重複除去を維持する。
 
 ### 旧データ移行と検証
 
@@ -51,11 +51,11 @@
   - day: highlights, activities, learnings, reflections, gratitude
   - week: highlights, progress, learnings, reflections, patterns, gratitude
   - month: highlights, progress, changes, learnings, reflections, patterns, gratitude
-- [ ] `topics`、`projects`、`people`、`open_loops` と各関連テーブルを追加する。
+- [ ] `topics`、`projects`、`people` と各関連テーブルを追加する。
   - 表記はUnicode正規化・トリム・大小文字無視で統合し、初出表記を表示名にする。
   - topicsは`TOPIC_ENUM`の候補だけを保存する。
-  - `summary_people`には要約ごとのnote、`summary_open_loops`にはquestions / next_actionsの種別と表示順を保存する。
-  - open loopの完了状態は管理しない。
+  - `summary_people`には要約ごとのnoteを保存する。
+  - next_actions, questions は削除
 
 ### 生成・読取の切替
 

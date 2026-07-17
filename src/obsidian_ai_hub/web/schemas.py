@@ -296,3 +296,67 @@ class VaultSearchResponse(BaseModel):
 class VaultFileResponse(BaseModel):
     content: str
     relative_path: str
+
+
+# --- Summary schemas ---
+
+ALLOWED_PERIOD_TYPES = frozenset({"day", "week", "month"})
+
+
+class SummaryItem(BaseModel):
+    summary_item_id: str
+    kind: str
+    body: str
+    display_order: int = 0
+
+
+class SummaryPerson(BaseModel):
+    name: str
+    note: str = ""
+
+
+class SummaryListItem(BaseModel):
+    summary_id: str
+    period_type: Literal["day", "week", "month"]
+    period_key: str
+    period_start: Optional[str] = None
+    period_end: Optional[str] = None
+    generated_at: Optional[str] = None
+    summary: Optional[str] = None
+    keywords: list[str] = Field(default_factory=list)
+    mood: Optional[str] = None
+    sleep_raw: Optional[str] = None
+    sleep_hours: Optional[float] = None
+    topics: list[str] = Field(default_factory=list)
+    projects: list[str] = Field(default_factory=list)
+    people: list[SummaryPerson] = Field(default_factory=list)
+
+
+class SummaryDetail(BaseModel):
+    summary_id: str
+    period_type: Literal["day", "week", "month"]
+    period_key: str
+    period_start: Optional[str] = None
+    period_end: Optional[str] = None
+    generated_at: Optional[str] = None
+    summary: Optional[str] = None
+    keywords: list[str] = Field(default_factory=list)
+    mood: Optional[str] = None
+    sleep_raw: Optional[str] = None
+    sleep_hours: Optional[float] = None
+    topics: list[str] = Field(default_factory=list)
+    projects: list[str] = Field(default_factory=list)
+    people: list[SummaryPerson] = Field(default_factory=list)
+    items: list[SummaryItem] = Field(default_factory=list)
+
+
+class SummaryOptionsResponse(BaseModel):
+    period_types: list[Literal["day", "week", "month"]] = Field(default_factory=lambda: ["day", "week", "month"])
+    topics: list[str]
+    projects: list[str]
+    people: list[str]
+
+
+class SummaryListResponse(BaseModel):
+    items: list[SummaryListItem]
+    total: int

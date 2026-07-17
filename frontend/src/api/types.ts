@@ -194,3 +194,50 @@ export interface VaultFileResponse {
   content: string;
   relative_path: string;
 }
+
+export type SummaryPeriodType = "day" | "week" | "month";
+
+export interface SummaryPerson {
+  name: string;
+  note: string;
+}
+
+export interface SummaryItem {
+  summary_item_id: string;
+  kind: string;
+  body: string;
+  display_order: number;
+}
+
+export interface SummaryListItem {
+  summary_id: string;
+  period_type: SummaryPeriodType;
+  period_key: string;
+  period_start?: string | null;
+  period_end?: string | null;
+  generated_at?: string | null;
+  summary?: string | null;
+  keywords: string[];
+  mood?: string | null;
+  sleep_raw?: string | null;
+  sleep_hours?: number | null;
+  topics: string[];
+  projects: string[];
+  people: SummaryPerson[];
+}
+
+export interface SummaryDetail extends SummaryListItem {
+  items: SummaryItem[];
+}
+
+export interface SummaryListResponse {
+  items: SummaryListItem[];
+  total: number;
+}
+
+export interface SummaryOptionsResponse {
+  period_types: SummaryPeriodType[];
+  topics: string[];
+  projects: string[];
+  people: string[];
+}

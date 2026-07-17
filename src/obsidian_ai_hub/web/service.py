@@ -255,3 +255,32 @@ def get_vault_file(relative_path: str) -> dict:
         "content": content,
         "relative_path": relative_path,
     }
+
+
+# --- Summary services ---
+
+from obsidian_ai_hub.summary import store as summary_store
+
+
+def list_summaries(
+    period_type: Optional[str] = None,
+    period: Optional[str] = None,
+    topic: Optional[str] = None,
+    project: Optional[str] = None,
+    person: Optional[str] = None,
+) -> list[dict]:
+    return summary_store.list_summaries(
+        period_type=period_type,
+        period=period,
+        topic=topic,
+        project=project,
+        person=person,
+    )
+
+
+def get_summary(summary_id: str) -> Optional[dict]:
+    return summary_store.get_summary_by_id(summary_id)
+
+
+def get_summary_options() -> dict:
+    return summary_store.get_summary_options()

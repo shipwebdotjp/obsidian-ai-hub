@@ -4,8 +4,11 @@ from pathlib import Path
 from unittest.mock import patch
 import pytest
 
+from obsidian_ai_hub import memory
 from obsidian_ai_hub import summerize_month
+from obsidian_ai_hub.summary import store
 from obsidian_ai_hub.utils import config
+
 
 @pytest.fixture
 def mock_config(tmp_path):
@@ -25,106 +28,109 @@ def mock_config(tmp_path):
          patch("obsidian_ai_hub.utils.config.MONTHLY_TEMPLATE_PATH", monthly_template_path):
         yield
 
+
 def test_get_monthly_note_path(mock_config):
     dt = datetime(2024, 10, 15)
     with patch("obsidian_ai_hub.summerize_month.reader.config.DAILY_PATH", Path("/vault/daily")):
         path = summerize_month.reader.get_monthly_note_path(dt)
         assert path == Path("/vault/daily/2024/10/2024-10.md")
 
-def test_load_weekly_records(mock_config):
-    year = "2024"
-    log_dir = config.ACTIVITY_PATH / year
-    log_dir.mkdir(parents=True, exist_ok=True)
-    log_file = log_dir / f"{year}-week.jsonl"
 
-    records = [
-        {"week_id": "2024-W40", "week_start_date": "2024-09-30", "week_end_date": "2024-10-06"},
-        {"week_id": "2024-W41", "week_start_date": "2024-10-07", "week_end_date": "2024-10-13"},
-        {"week_id": "2024-W44", "week_start_date": "2024-10-28", "week_end_date": "2024-11-03"},
-        {"week_id": "2024-W45", "week_start_date": "2024-11-04", "week_end_date": "2024-11-10"},
-    ]
-
-    with open(log_file, "w", encoding="utf-8") as f:
-        for r in records:
-            f.write(json.dumps(r) + "\n")
+def test_load_weekly_records(mock_config, test_memory_db_path):
+    conn = memory.get_db_connection()
+    try:
+        for rec in [
+            {"period_key": "2024-W40", "period_start": "2024-09-30", "period_end": "2024-10-06"},
+            {"period_key": "2024-W41", "period_start": "2024-10-07", "period_end": "2024-10-13"},
+            {"period_key": "2024-W44", "period_start": "2024-10-28", "period_end": "2024-11-03"},
+            {"period_key": "2024-W45", "period_start": "2024-11-04", "period_end": "2024-11-10"},
+        ]:
+            store.upsert_summary({
+                "period_type": "week",
+                "period_key": rec["period_key"],
+                "period_start": rec["period_start"],
+                "period_end": rec["period_end"],
+                "generated_at": "2024-10-01T22:00:00",
+                "summary": f"Week {rec['period_key']}",
+                "keywords": [],
+                "mood": None,
+                "sleep_raw": None,
+                "sleep_hours": None,
+                "topics": [],
+                "projects": [],
+                "people": [],
+                "items": [],
+            }, conn=conn)
+        conn.commit()
+    finally:
+        conn.close()
 
     # Test for October
     oct_dt = datetime(2024, 10, 1)
     loaded = summerize_month.load_weekly_records(oct_dt)
     assert len(loaded) == 3
-    assert loaded[0]["week_id"] == "2024-W40"
-    assert loaded[1]["week_id"] == "2024-W41"
-    assert loaded[2]["week_id"] == "2024-W44"
+    assert loaded[0]["period_key"] == "2024-W44"
+    assert loaded[1]["period_key"] == "2024-W41"
+    assert loaded[2]["period_key"] == "2024-W40"
+
 
 @patch("obsidian_ai_hub.summerize_month.prompt.render_prompt")
 @patch("obsidian_ai_hub.utils.llm_client.generate_llm_response")
-def test_summarize_month(mock_llm, mock_render, mock_config):
+def test_summarize_month(mock_llm, mock_render, mock_config, test_memory_db_path):
     mock_render.return_value = "Rendered Prompt"
     mock_llm.return_value = json.dumps({
         "summary": "Monthly summary test",
         "topics": ["LLM・AI活用"],
-        "activities": ["Activity 1"],
+        "highlights": ["Highlight 1"],
+        "progress": ["Progress 1"],
+        "changes": ["Change 1"],
         "learnings": ["Learning 1"],
         "reflections": ["Reflection 1"],
+        "patterns": ["Pattern 1"],
         "gratitude": ["Gratitude 1"],
         "people": [{"name": "Person 1", "note": "Note 1"}],
-        "questions": ["Question 1"],
-        "keywords": ["Keyword 1"],
-        "next_actions": ["Next Action 1"],
-        "mood": "LLM Mood",
-        "sleep": "99"
     })
 
     target_date = datetime(2024, 10, 1)
 
-    log_dir = config.ACTIVITY_PATH / "2024"
-    log_dir.mkdir(parents=True, exist_ok=True)
-    log_file = log_dir / "2024-week.jsonl"
-    weekly_records = [
-        {
-            "week_id": "2024-W40",
-            "week_start_date": "2024-09-30",
-            "week_end_date": "2024-10-06",
-            "mood": "Calm",
-            "sleep": "8h",
-        },
-        {
-            "week_id": "2024-W41",
-            "week_start_date": "2024-10-07",
-            "week_end_date": "2024-10-13",
-            "mood": "Focused",
-            "sleep": "7.5",
-        },
-        {
-            "week_id": "2024-W42",
-            "week_start_date": "2024-10-14",
-            "week_end_date": "2024-10-20",
-            "mood": "Calm",
-            "sleep": "Good",
-        },
-        {
-            "week_id": "2024-W43",
-            "week_start_date": "2024-10-21",
-            "week_end_date": "2024-10-27",
-            "mood": "Calm",
-            "sleep": "9",
-        },
-    ]
-    with open(log_file, "w", encoding="utf-8") as f:
-        for record in weekly_records:
-            f.write(json.dumps(record) + "\n")
+    conn = memory.get_db_connection()
+    try:
+        for rec in [
+            {"period_key": "2024-W40", "period_start": "2024-09-30", "period_end": "2024-10-06"},
+            {"period_key": "2024-W41", "period_start": "2024-10-07", "period_end": "2024-10-13"},
+        ]:
+            store.upsert_summary({
+                "period_type": "week",
+                "period_key": rec["period_key"],
+                "period_start": rec["period_start"],
+                "period_end": rec["period_end"],
+                "generated_at": "2024-10-01T22:00:00",
+                "summary": f"Week {rec['period_key']}",
+                "keywords": [],
+                "mood": None,
+                "sleep_raw": None,
+                "sleep_hours": None,
+                "topics": [],
+                "projects": [],
+                "people": [],
+                "items": [],
+            }, conn=conn)
+        conn.commit()
+    finally:
+        conn.close()
 
     summerize_month.summarize_month(target_date)
 
-    # Check JSONL output
-    log_file = config.ACTIVITY_PATH / "2024" / "2024.jsonl"
-    assert log_file.exists()
-    with open(log_file, "r") as f:
-        data = json.loads(f.read())
-        assert data["month"] == "2024-10"
-        assert data["summary"] == "Monthly summary test"
-        assert data["mood"] == "Calm"
-        assert data["sleep"] == "8.2"
+    # Check SQLite output
+    conn = memory.get_db_connection()
+    try:
+        row = store.get_summary_by_period("month", "2024-10", conn=conn)
+        assert row is not None
+        assert row["summary"] == "Monthly summary test"
+        assert row["mood"] is None
+        assert row["sleep_hours"] is None
+    finally:
+        conn.close()
 
     # Check Markdown output
     note_path = config.DAILY_PATH / "2024" / "10" / "2024-10.md"
@@ -132,9 +138,8 @@ def test_summarize_month(mock_llm, mock_render, mock_config):
     content = note_path.read_text()
     assert "## AIによる要約" in content
     assert "Monthly summary test" in content
-    assert "LLM・AI活用" in content
-    assert "Calm" in content
-    assert "8.2" in content
+    assert "Progress 1" in content
+    assert "Pattern 1" in content
 
 
 @patch("obsidian_ai_hub.summerize_month.prompt.render_prompt")
