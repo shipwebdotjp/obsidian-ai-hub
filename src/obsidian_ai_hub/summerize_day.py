@@ -275,16 +275,17 @@ def summarize_day(target_date: datetime):
     # 2. 構造化レコードの生成
     structured_record = get_daily_structured_record(target_date, daily_content, logs, activity_logs)
 
+    if not structured_record.get("summary"):
+        logger.error("Failed to generate structured record; skipping persistence and daily note update")
+        return
+
     # 3. SQLiteへの保存 (永続化)
     upsert_summary_record(structured_record)
 
     # 4. デイリーノートへの追記 (人間用表示)
-    if structured_record.get("summary") and daily_file.exists():
+    if daily_file.exists():
         markdown_content = format_structured_record_as_markdown(structured_record, activity_logs)
         extracter.append_to_subheader_file(daily_file.as_posix(), "## AIによる要約", [markdown_content])
-    else:
-        if not structured_record.get("summary"):
-            logger.error("Failed to generate structured record; skipping daily note update")
 
 
 def main():

@@ -28,11 +28,7 @@ def load_weekly_records(target_date: datetime) -> list[dict]:
 
     # Load all week records and filter by overlap with the month
     records = []
-    try:
-        all_weeks = summary_store.list_summaries(period_type="week")
-    except Exception as e:
-        logger.error(f"Failed to load weekly summaries: {e}")
-        return records
+    all_weeks = summary_store.list_summaries(period_type="week")
 
     for rec in all_weeks:
         period_start = rec.get("period_start")
@@ -166,14 +162,19 @@ def format_monthly_record_as_markdown(record: dict) -> str:
         "gratitude": "感謝",
     }
 
+    items_by_kind: dict[str, list[str]] = {}
     for item in record.get("items", []):
         kind = item.get("kind")
         body = item.get("body")
         if not kind or not body:
             continue
+        items_by_kind.setdefault(kind, []).append(body)
+
+    for kind, bodies in items_by_kind.items():
         label = kind_labels.get(kind, kind)
         lines.append(f"### {label}")
-        lines.append(f"- {body}")
+        for body in bodies:
+            lines.append(f"- {body}")
         lines.append("")
 
     if record.get("people"):
@@ -191,11 +192,8 @@ def upsert_summary_record(record: dict):
     """
     SQLite summaries テーブルにレコードをupsertする。
     """
-    try:
-        summary_store.upsert_summary(record)
-        logger.info(f"Monthly summary upserted for {record.get('period_key')}")
-    except Exception as e:
-        logger.error(f"Failed to upsert monthly summary: {e}")
+    summary_store.upsert_summary(record)
+    logger.info(f"Monthly summary upserted for {record.get('period_key')}")
 
 
 def summarize_month(target_date: datetime):

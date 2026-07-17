@@ -199,7 +199,7 @@ export type SummaryPeriodType = "day" | "week" | "month";
 
 export interface SummaryPerson {
   name: string;
-  note?: string;
+  note: string;
 }
 
 export interface SummaryItem {
@@ -213,10 +213,10 @@ export interface SummaryListItem {
   summary_id: string;
   period_type: SummaryPeriodType;
   period_key: string;
-  period_start: string;
-  period_end: string;
-  generated_at: string;
-  summary: string;
+  period_start?: string | null;
+  period_end?: string | null;
+  generated_at?: string | null;
+  summary?: string | null;
   keywords: string[];
   mood?: string | null;
   sleep_raw?: string | null;

@@ -360,10 +360,18 @@ def _load_summary_children(conn: sqlite3.Connection, record: Dict[str, Any]) -> 
     cursor = conn.cursor()
 
     cursor.execute(
-        "SELECT kind, body, display_order FROM summary_items WHERE summary_id = ? ORDER BY display_order",
+        "SELECT summary_item_id, kind, body, display_order FROM summary_items WHERE summary_id = ? ORDER BY display_order",
         (summary_id,),
     )
-    record["items"] = [{"kind": r["kind"], "body": r["body"], "display_order": r["display_order"]} for r in cursor.fetchall()]
+    record["items"] = [
+        {
+            "summary_item_id": r["summary_item_id"],
+            "kind": r["kind"],
+            "body": r["body"],
+            "display_order": r["display_order"],
+        }
+        for r in cursor.fetchall()
+    ]
 
     cursor.execute(
         """
@@ -404,6 +412,89 @@ def _load_summary_children(conn: sqlite3.Connection, record: Dict[str, Any]) -> 
     return record
 
 
+def _attach_children_bulk(
+    conn: sqlite3.Connection,
+    records: List[Dict[str, Any]],
+) -> None:
+    """Bulk-load items, topics, projects, and people for the given summary records."""
+    if not records:
+        return
+
+    summary_ids = [r["summary_id"] for r in records]
+    placeholders = ", ".join("?" for _ in summary_ids)
+    cursor = conn.cursor()
+
+    cursor.execute(
+        f"SELECT summary_id, summary_item_id, kind, body, display_order FROM summary_items WHERE summary_id IN ({placeholders}) ORDER BY display_order",
+        summary_ids,
+    )
+    items_by_summary: Dict[str, List[Dict[str, Any]]] = {r["summary_id"]: [] for r in records}
+    for row in cursor.fetchall():
+        items_by_summary[row["summary_id"]].append(
+            {
+                "summary_item_id": row["summary_item_id"],
+                "kind": row["kind"],
+                "body": row["body"],
+                "display_order": row["display_order"],
+            }
+        )
+
+    cursor.execute(
+        f"""
+        SELECT st.summary_id, t.display_name
+        FROM summary_topics st
+        JOIN topics t ON st.topic_id = t.topic_id
+        WHERE st.summary_id IN ({placeholders})
+        ORDER BY st.display_order
+        """,
+        summary_ids,
+    )
+    topics_by_summary: Dict[str, List[str]] = {r["summary_id"]: [] for r in records}
+    for row in cursor.fetchall():
+        topics_by_summary[row["summary_id"]].append(row["display_name"])
+
+    cursor.execute(
+        f"""
+        SELECT sp.summary_id, p.display_name
+        FROM summary_projects sp
+        JOIN projects p ON sp.project_id = p.project_id
+        WHERE sp.summary_id IN ({placeholders})
+        ORDER BY sp.display_order
+        """,
+        summary_ids,
+    )
+    projects_by_summary: Dict[str, List[str]] = {r["summary_id"]: [] for r in records}
+    for row in cursor.fetchall():
+        projects_by_summary[row["summary_id"]].append(row["display_name"])
+
+    cursor.execute(
+        f"""
+        SELECT sp.summary_id, p.display_name, sp.note, sp.display_order
+        FROM summary_people sp
+        JOIN people p ON sp.person_id = p.person_id
+        WHERE sp.summary_id IN ({placeholders})
+        ORDER BY sp.display_order
+        """,
+        summary_ids,
+    )
+    people_by_summary: Dict[str, List[Dict[str, Any]]] = {r["summary_id"]: [] for r in records}
+    for row in cursor.fetchall():
+        people_by_summary[row["summary_id"]].append(
+            {
+                "name": row["display_name"],
+                "note": row["note"],
+                "display_order": row["display_order"],
+            }
+        )
+
+    for record in records:
+        sid = record["summary_id"]
+        record["items"] = items_by_summary.get(sid, [])
+        record["topics"] = topics_by_summary.get(sid, [])
+        record["projects"] = projects_by_summary.get(sid, [])
+        record["people"] = people_by_summary.get(sid, [])
+
+
 def list_summaries(
     period_type: Optional[str] = None,
     period: Optional[str] = None,
@@ -420,29 +511,41 @@ def list_summaries(
 
     try:
         cursor = conn.cursor()
-        sql = "SELECT * FROM summaries WHERE 1=1"
+        sql = "SELECT s.* FROM summaries s WHERE 1=1"
         params: List[Any] = []
         if period_type:
-            sql += " AND period_type = ?"
+            sql += " AND s.period_type = ?"
             params.append(period_type)
         if period:
-            sql += " AND period_key = ?"
+            sql += " AND s.period_key = ?"
             params.append(period)
-        sql += " ORDER BY period_start DESC, period_key DESC"
+        if topic:
+            sql += """ AND EXISTS (
+                SELECT 1 FROM summary_topics st
+                JOIN topics t ON st.topic_id = t.topic_id
+                WHERE st.summary_id = s.summary_id AND t.normalized_name = ?
+            )"""
+            params.append(normalize_entity_name(topic))
+        if project:
+            sql += """ AND EXISTS (
+                SELECT 1 FROM summary_projects sp
+                JOIN projects p ON sp.project_id = p.project_id
+                WHERE sp.summary_id = s.summary_id AND p.normalized_name = ?
+            )"""
+            params.append(normalize_entity_name(project))
+        if person:
+            sql += """ AND EXISTS (
+                SELECT 1 FROM summary_people sp
+                JOIN people p ON sp.person_id = p.person_id
+                WHERE sp.summary_id = s.summary_id AND p.normalized_name = ?
+            )"""
+            params.append(normalize_entity_name(person))
+        sql += " ORDER BY s.period_start DESC, s.period_key DESC"
         cursor.execute(sql, params)
         rows = cursor.fetchall()
 
-        records = [_load_summary_children(conn, deserialize_summary(row)) for row in rows]
-
-        if topic:
-            target = normalize_entity_name(topic)
-            records = [r for r in records if any(normalize_entity_name(t) == target for t in r.get("topics", []))]
-        if project:
-            target = normalize_entity_name(project)
-            records = [r for r in records if any(normalize_entity_name(p) == target for p in r.get("projects", []))]
-        if person:
-            target = normalize_entity_name(person)
-            records = [r for r in records if any(normalize_entity_name(p["name"]) == target for p in r.get("people", []))]
+        records = [deserialize_summary(row) for row in rows]
+        _attach_children_bulk(conn, records)
 
         return records
     finally:
@@ -451,7 +554,7 @@ def list_summaries(
 
 
 def get_summary_options(conn: Optional[sqlite3.Connection] = None) -> Dict[str, List[str]]:
-    """Return distinct filter candidates for topics, projects, and people."""
+    """Return distinct filter candidates for topics, projects, and people that are associated with at least one summary."""
     close_conn = False
     if conn is None:
         conn = get_db_connection()
@@ -459,13 +562,39 @@ def get_summary_options(conn: Optional[sqlite3.Connection] = None) -> Dict[str, 
 
     try:
         cursor = conn.cursor()
-        cursor.execute("SELECT display_name FROM topics ORDER BY display_name")
+        cursor.execute(
+            """
+            SELECT DISTINCT t.display_name
+            FROM topics t
+            JOIN summary_topics st ON t.topic_id = st.topic_id
+            ORDER BY t.display_name
+            """
+        )
         topics = [r[0] for r in cursor.fetchall()]
-        cursor.execute("SELECT display_name FROM projects ORDER BY display_name")
+        cursor.execute(
+            """
+            SELECT DISTINCT p.display_name
+            FROM projects p
+            JOIN summary_projects sp ON p.project_id = sp.project_id
+            ORDER BY p.display_name
+            """
+        )
         projects = [r[0] for r in cursor.fetchall()]
-        cursor.execute("SELECT display_name FROM people ORDER BY display_name")
+        cursor.execute(
+            """
+            SELECT DISTINCT p.display_name
+            FROM people p
+            JOIN summary_people sp ON p.person_id = sp.person_id
+            ORDER BY p.display_name
+            """
+        )
         people = [r[0] for r in cursor.fetchall()]
-        return {"topics": topics, "projects": projects, "people": people}
+        return {
+            "period_types": ["day", "week", "month"],
+            "topics": topics,
+            "projects": projects,
+            "people": people,
+        }
     finally:
         if close_conn:
             conn.close()

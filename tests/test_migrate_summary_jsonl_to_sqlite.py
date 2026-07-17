@@ -139,7 +139,13 @@ def test_idempotent(test_memory_db_path, tmp_path):
         second = store.get_summary_by_period("day", "2026-07-17", conn=conn)
         assert first["summary_id"] == second["summary_id"]
         assert first["summary"] == second["summary"]
-        assert first["items"] == second["items"]
+        assert [
+            {"kind": i["kind"], "body": i["body"], "display_order": i["display_order"]}
+            for i in first["items"]
+        ] == [
+            {"kind": i["kind"], "body": i["body"], "display_order": i["display_order"]}
+            for i in second["items"]
+        ]
     finally:
         conn.close()
 

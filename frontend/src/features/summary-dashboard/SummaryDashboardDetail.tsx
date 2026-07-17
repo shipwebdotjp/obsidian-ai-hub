@@ -89,11 +89,13 @@ export default function SummaryDashboardDetail({
           {periodTypeLabel(detail.period_type)}
         </span>
         <span>{detail.period_key}</span>
-        {detail.period_start !== detail.period_key && (
-          <span>
-            {detail.period_start} ～ {detail.period_end}
-          </span>
-        )}
+        {detail.period_start &&
+          detail.period_end &&
+          detail.period_start !== detail.period_key && (
+            <span>
+              {detail.period_start} ～ {detail.period_end}
+            </span>
+          )}
       </div>
 
       <h2 className="text-base font-semibold text-slate-800">

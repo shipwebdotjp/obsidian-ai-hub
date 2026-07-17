@@ -212,6 +212,10 @@ def summarize_week(target_date: datetime | date_type | str | None = None):
     # 2. 構造化レコードの生成
     structured_record = get_weekly_structured_record(target_date, daily_records)
 
+    if not structured_record.get("summary"):
+        logger.error("Failed to generate structured record; skipping persistence and weekly note update")
+        return
+
     # 3. SQLiteへの保存
     upsert_summary_record(structured_record)
 

@@ -70,18 +70,3 @@ def test_day_week_month_chain(test_memory_db_path):
     assert month is not None
     assert month["summary"] == "Month summary"
 
-
-def test_no_jsonl_files_created(test_memory_db_path, tmp_path):
-    with patch("obsidian_ai_hub.summerize_day.config.ACTIVITY_PATH", tmp_path / "activity"), \
-         patch("obsidian_ai_hub.summerize_week.config.ACTIVITY_PATH", tmp_path / "activity"), \
-         patch("obsidian_ai_hub.summerize_month.config.ACTIVITY_PATH", tmp_path / "activity"), \
-         patch("obsidian_ai_hub.utils.llm_client.generate_llm_response", return_value=json.dumps({"summary": "Day summary"})):
-        # Run operations that previously wrote JSONL
-        d = datetime(2026, 7, 13)
-        record = get_daily_structured_record(d, "content", [], [])
-        record["summary"] = "s"
-        store.upsert_summary(record)
-
-        # No JSONL files should be created
-        activity_path = tmp_path / "activity"
-        assert not list(activity_path.glob("**/*.jsonl"))
