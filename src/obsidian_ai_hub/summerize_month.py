@@ -1,52 +1,55 @@
 import json
 import logging
 import re
+from calendar import monthrange
 from datetime import datetime, timedelta
 from pathlib import Path
+
+from obsidian_ai_hub.summary import store as summary_store
 from obsidian_ai_hub.utils import config, reader, llm_client, prompt
 from obsidian_ai_hub.utils.topics import TOPIC_ENUM, normalize_topics
-from obsidian_ai_hub.utils.summary_aggregation import (
-    calculate_average_numeric_value,
-    calculate_most_common_value,
-)
 
 logger = logging.getLogger(__name__)
 
+MONTH_ITEM_KINDS = ["highlights", "progress", "changes", "learnings", "reflections", "patterns", "gratitude"]
+
+
 def load_weekly_records(target_date: datetime) -> list[dict]:
-    year = target_date.strftime("%Y")
-    log_file = Path(config.ACTIVITY_PATH) / year / f"{year}-week.jsonl"
+    """Load weekly summary records overlapping the target month from SQLite."""
+    year = target_date.year
+    month = target_date.month
 
-    records = []
-    if not log_file.exists():
-        return records
-
-    # 月の開始日と終了日
     first_day = target_date.replace(day=1)
-    if target_date.month == 12:
-        next_month = target_date.replace(year=target_date.year + 1, month=1, day=1)
+    if month == 12:
+        next_month = target_date.replace(year=year + 1, month=1, day=1)
     else:
-        next_month = target_date.replace(month=target_date.month + 1, day=1)
+        next_month = target_date.replace(month=month + 1, day=1)
     last_day = next_month - timedelta(days=1)
 
+    # Load all week records and filter by overlap with the month
+    records = []
     try:
-        with open(log_file, "r", encoding="utf-8") as f:
-            for line in f:
-                try:
-                    data = json.loads(line)
-                    ws = data.get("week_start_date")
-                    we = data.get("week_end_date")
-                    if ws and we:
-                        ws_dt = datetime.strptime(ws, "%Y-%m-%d")
-                        we_dt = datetime.strptime(we, "%Y-%m-%d")
-                        # 週の少なくとも一部が該当月に含まれている場合
-                        if (first_day <= ws_dt <= last_day) or (first_day <= we_dt <= last_day) or (ws_dt <= first_day and we_dt >= last_day):
-                            records.append(data)
-                except (json.JSONDecodeError, ValueError):
-                    continue
+        all_weeks = summary_store.list_summaries(period_type="week")
     except Exception as e:
-        logger.error(f"Failed to read weekly log file {log_file}: {e}")
+        logger.error(f"Failed to load weekly summaries: {e}")
+        return records
+
+    for rec in all_weeks:
+        period_start = rec.get("period_start")
+        period_end = rec.get("period_end")
+        if not period_start or not period_end:
+            continue
+        try:
+            ws_dt = datetime.strptime(period_start, "%Y-%m-%d")
+            we_dt = datetime.strptime(period_end, "%Y-%m-%d")
+        except ValueError:
+            continue
+        # 週の少なくとも一部が該当月に含まれている場合
+        if (first_day <= ws_dt <= last_day) or (first_day <= we_dt <= last_day) or (ws_dt <= first_day and we_dt >= last_day):
+            records.append(rec)
 
     return records
+
 
 def get_monthly_structured_record(
     date: datetime,
@@ -55,27 +58,26 @@ def get_monthly_structured_record(
     month_id = date.strftime("%Y-%m")
     generated_at = datetime.now().isoformat()
 
-    source_stats = {
-        "weekly_record_count": len(weekly_records),
-    }
+    _, last_day = monthrange(date.year, date.month)
+    period_start = date.replace(day=1).strftime("%Y-%m-%d")
+    period_end = date.replace(day=last_day).strftime("%Y-%m-%d")
 
     record = {
         "schema_version": 1,
-        "month": month_id,
+        "period_type": "month",
+        "period_key": month_id,
+        "period_start": period_start,
+        "period_end": period_end,
         "generated_at": generated_at,
         "summary": None,
-        "topics": [],
-        "activities": [],
-        "learnings": [],
-        "reflections": [],
-        "gratitude": [],
-        "people": [],
-        "questions": [],
         "keywords": [],
-        "next_actions": [],
-        "mood": calculate_most_common_value(weekly_records, "mood"),
-        "sleep": calculate_average_numeric_value(weekly_records, "sleep"),
-        "source_stats": source_stats
+        "mood": None,
+        "sleep_raw": None,
+        "sleep_hours": None,
+        "topics": [],
+        "projects": [],
+        "people": [],
+        "items": [],
     }
 
     try:
@@ -104,8 +106,7 @@ def get_monthly_structured_record(
 
         scalar_fields = {"summary"}
         list_fields = {
-            "topics", "activities", "learnings", "reflections",
-            "gratitude", "questions", "keywords", "next_actions",
+            "topics", "highlights", "progress", "changes", "learnings", "reflections", "patterns", "gratitude",
         }
 
         for key in scalar_fields | list_fields | {"people"}:
@@ -117,7 +118,7 @@ def get_monthly_structured_record(
                 if key == "people" and isinstance(val, list):
                     normalized_people = []
                     for p in val:
-                        if isinstance(p, dict) and "name" in p:
+                        if isinstance(p, dict) and p.get("name"):
                             normalized_people.append({
                                 "name": str(p.get("name", "")),
                                 "note": str(p.get("note", ""))
@@ -128,9 +129,19 @@ def get_monthly_structured_record(
                 elif key in list_fields and isinstance(val, list):
                     clean_list = [str(item) for item in val if item not in (None, "")]
                     if key == "topics":
-                        record[key] = normalize_topics(clean_list)
-                    else:
-                        record[key] = clean_list
+                        record["topics"] = normalize_topics(clean_list)
+                    elif key in MONTH_ITEM_KINDS:
+                        record["items"].extend(
+                            {"kind": key, "body": item, "display_order": idx}
+                            for idx, item in enumerate(clean_list)
+                        )
+
+        # display_order を kind 単位で振り直す
+        record["items"].sort(key=lambda x: (MONTH_ITEM_KINDS.index(x["kind"]), x["display_order"]))
+        for kind in MONTH_ITEM_KINDS:
+            kind_items = [i for i in record["items"] if i["kind"] == kind]
+            for idx, item in enumerate(kind_items):
+                item["display_order"] = idx
 
     except Exception as e:
         logger.error(f"Failed to generate or parse structured monthly record: {e}", exc_info=True)
@@ -138,30 +149,32 @@ def get_monthly_structured_record(
 
     return record
 
+
 def format_monthly_record_as_markdown(record: dict) -> str:
     lines = []
 
     if record.get("summary"):
         lines.append(f"{record['summary']}\n")
 
-    sections = [
-        ("topics", "トピックス"),
-        ("activities", "活動内容"),
-        ("learnings", "学び・整理"),
-        ("reflections", "反省・気づき"),
-        ("gratitude", "感謝"),
-        ("questions", "問い"),
-        ("keywords", "キーワード"),
-        ("next_actions", "来月の展望"),
-    ]
+    kind_labels = {
+        "highlights": "ハイライト",
+        "progress": "目標・プロジェクトの前進",
+        "changes": "前月からの変化",
+        "learnings": "学び・整理",
+        "reflections": "反省・気づき",
+        "patterns": "パターン・傾向",
+        "gratitude": "感謝",
+    }
 
-    for key, label in sections:
-        val = record.get(key)
-        if val and isinstance(val, list):
-            lines.append(f"### {label}")
-            for item in val:
-                lines.append(f"- {item}")
-            lines.append("")
+    for item in record.get("items", []):
+        kind = item.get("kind")
+        body = item.get("body")
+        if not kind or not body:
+            continue
+        label = kind_labels.get(kind, kind)
+        lines.append(f"### {label}")
+        lines.append(f"- {body}")
+        lines.append("")
 
     if record.get("people"):
         lines.append("### 人物メモ")
@@ -171,46 +184,19 @@ def format_monthly_record_as_markdown(record: dict) -> str:
             lines.append(f"- **{name}**: {note}")
         lines.append("")
 
-    if record.get("mood"):
-        lines.append(f"### 気分・エネルギー\n{record['mood']}\n")
-
-    if record.get("sleep"):
-        lines.append(f"### 睡眠・健康\n{record['sleep']}\n")
-
     return "\n".join(lines).strip()
 
-def upsert_monthly_record(year: int, record: dict):
-    monthly_log_dir = Path(config.ACTIVITY_PATH) / str(year)
-    monthly_log_dir.mkdir(parents=True, exist_ok=True)
-    log_file = monthly_log_dir / f"{year}.jsonl"
 
-    records = {}
-    parse_failed = False
-    if log_file.exists():
-        with open(log_file, "r", encoding="utf-8") as f:
-            for line in f:
-                try:
-                    data = json.loads(line)
-                    if "month" in data:
-                        records[data["month"]] = data
-                except json.JSONDecodeError:
-                    parse_failed = True
-                    logger.error("Failed to parse existing monthly JSONL; aborting upsert to avoid data loss")
-                    break
-
-    if parse_failed:
-        return
-
-    records[record["month"]] = record
-
-    sorted_months = sorted(records.keys())
+def upsert_summary_record(record: dict):
+    """
+    SQLite summaries テーブルにレコードをupsertする。
+    """
     try:
-        with open(log_file, "w", encoding="utf-8") as f:
-            for m in sorted_months:
-                f.write(json.dumps(records[m], ensure_ascii=False) + "\n")
-        logger.info(f"Monthly record upserted to {log_file}")
+        summary_store.upsert_summary(record)
+        logger.info(f"Monthly summary upserted for {record.get('period_key')}")
     except Exception as e:
-        logger.error(f"Failed to write monthly record: {e}")
+        logger.error(f"Failed to upsert monthly summary: {e}")
+
 
 def summarize_month(target_date: datetime):
     logger.info("Summarizing month for date: %s", target_date.strftime("%Y-%m"))
@@ -226,8 +212,8 @@ def summarize_month(target_date: datetime):
         logger.error("Skipping persistence as monthly structured record generation failed")
         return
 
-    # 3. 月次JSONLへの保存
-    upsert_monthly_record(target_date.year, structured_record)
+    # 3. SQLiteへの保存
+    upsert_summary_record(structured_record)
 
     # 4. 月次ノートへの書き込み
     monthly_note = reader.get_monthly_note_content(target_date)
@@ -253,6 +239,7 @@ def summarize_month(target_date: datetime):
 
     logger.info(f"Monthly summary updated in: {monthly_note_path}")
 
+
 def main(target_month_str: str = None):
     if target_month_str:
         try:
@@ -267,6 +254,7 @@ def main(target_month_str: str = None):
         target_date = first_day_of_this_month - timedelta(days=1)
 
     summarize_month(target_date)
+
 
 if __name__ == "__main__":
     main()
