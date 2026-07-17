@@ -114,13 +114,14 @@ def test_db_initialization_and_indexes(clean_memory_env):
     cursor = conn.cursor()
     cursor.execute("PRAGMA user_version;")
     version = cursor.fetchone()[0]
-    assert version == 3
+    assert version == 4
 
     # Verify tables exist
     cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
     tables = [row[0] for row in cursor.fetchall()]
     assert "memories" in tables
     assert "memory_events" in tables
+    assert "activity_logs" in tables
 
     # Verify indexes exist
     cursor.execute("SELECT name FROM sqlite_master WHERE type='index';")
@@ -128,6 +129,7 @@ def test_db_initialization_and_indexes(clean_memory_env):
     assert "idx_memories_status" in indexes
     assert "idx_memories_memory_key" in indexes
     assert "idx_memory_events_memory_id_occurred_at" in indexes
+    assert "idx_activity_logs_date_occurred" in indexes
 
     conn.close()
 
