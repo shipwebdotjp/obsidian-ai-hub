@@ -15,7 +15,13 @@ def mock_people_notes(monkeypatch):
             "alice": {
                 "id": "alice-id",
                 "name": "Alice",
-                "aliases": ["alice"],
+                "aliases": ["alice", "a-chan"],
+                "file_path": Path("alice.md"),
+            },
+            "a-chan": {
+                "id": "alice-id",
+                "name": "Alice",
+                "aliases": ["alice", "a-chan"],
                 "file_path": Path("alice.md"),
             }
         }
@@ -271,5 +277,32 @@ def test_unresolved_resolved_filtering(test_memory_db_path):
         options = store.get_summary_options(conn=conn)
         assert "Alice" in options["people"]
         assert "山田君" not in options["people"]
+    finally:
+        conn.close()
+
+
+def test_alias_deduplication(test_memory_db_path):
+    conn = memory.get_db_connection()
+    try:
+        # Create a summary with both Alice and A-chan (which both resolve to the same person_id)
+        record = {
+            "period_type": "day",
+            "period_key": "2026-07-22",
+            "period_start": "2026-07-22",
+            "period_end": "2026-07-22",
+            "summary": "Meeting with Alice and her alias A-chan",
+            "people": [
+                {"name": "Alice", "note": "primary name"},
+                {"name": "a-chan", "note": "alias name"},
+            ]
+        }
+        store.upsert_summary(record, conn=conn)
+
+        # Retrieve and verify that Alice is only linked once
+        got = store.get_summary_by_period("day", "2026-07-22", conn=conn)
+        assert got is not None
+        assert len(got["people"]) == 1
+        assert got["people"][0]["name"] == "Alice"
+        assert got["people"][0]["note"] == "primary name"
     finally:
         conn.close()

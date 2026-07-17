@@ -129,3 +129,29 @@ aliases:
 
     with pytest.raises(ValueError, match="Duplicate mapping for normalized name/alias 'ヤマダ'"):
         load_and_validate_people_notes()
+
+
+def test_people_loader_invalid_types_id_name(tmp_path, monkeypatch):
+    monkeypatch.setattr(app_config, "PEOPLE_PATH", tmp_path)
+
+    # Note with integer ID (should be rejected as it's not a string)
+    note1 = tmp_path / "integer_id.md"
+    note1.write_text("""---
+id: 12345
+name: Number ID Person
+---
+""", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Missing or empty required field 'id'"):
+        load_and_validate_people_notes()
+
+    # Note with list name (should be rejected as it's not a string)
+    note1.write_text("""---
+id: valid-string-id
+name:
+  - List Name Person
+---
+""", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Missing or empty required field 'name'"):
+        load_and_validate_people_notes()

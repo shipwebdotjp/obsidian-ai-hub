@@ -42,31 +42,17 @@ def load_and_validate_people_notes() -> dict[str, PersonNote]:
 
     # Recursively find all .md files
     for path in sorted(people_path.rglob("*.md")):
-        try:
-            content = path.read_text(encoding="utf-8")
-        except Exception as e:
-            logger.error("Failed to read note file %s: %s", path, e)
-            raise ValueError(f"Failed to read note file {path}: {e}")
+        content = path.read_text(encoding="utf-8")
+        fm = parse_frontmatter(content)
 
-        try:
-            fm = parse_frontmatter(content)
-        except Exception as e:
-            logger.error("Failed to parse frontmatter for note file %s: %s", path, e)
-            raise ValueError(f"Failed to parse frontmatter for note file {path}: {e}")
-
-        # Check required fields
-        if "id" not in fm or not fm["id"]:
+        # Check required fields - strictly validate type first
+        if "id" not in fm or not isinstance(fm["id"], str) or not fm["id"].strip():
             raise ValueError(f"Missing or empty required field 'id' in frontmatter of person note {path}")
-        if "name" not in fm or not fm["name"]:
+        if "name" not in fm or not isinstance(fm["name"], str) or not fm["name"].strip():
             raise ValueError(f"Missing or empty required field 'name' in frontmatter of person note {path}")
 
-        pid = str(fm["id"]).strip()
-        pname = str(fm["name"]).strip()
-
-        if not pid:
-            raise ValueError(f"Empty 'id' in frontmatter of person note {path}")
-        if not pname:
-            raise ValueError(f"Empty 'name' in frontmatter of person note {path}")
+        pid = fm["id"].strip()
+        pname = fm["name"].strip()
 
         # Validate duplicate IDs across files
         if pid in seen_ids:

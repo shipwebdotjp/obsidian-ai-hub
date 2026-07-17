@@ -108,6 +108,7 @@ Official Sato note.
         assert p_yamada["display_order"] == 0
         assert "he observed today's event" in p_yamada["note"]
         assert "old yamada note" in p_yamada["note"]
+        assert "old alias note" in p_yamada["note"]
 
         p_sato = [p for p in got_after["people"] if p["name"] == "佐藤花子"][0]
         assert p_sato["resolution_status"] == "resolved"

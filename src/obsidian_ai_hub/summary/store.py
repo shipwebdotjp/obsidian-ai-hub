@@ -298,6 +298,7 @@ def _insert_people(
     people_notes_map: Dict[str, Any]
 ) -> None:
     seen = set()
+    seen_person_ids = set()
     order = 0
     for person in people:
         if not isinstance(person, dict):
@@ -343,6 +344,10 @@ def _insert_people(
                         "INSERT INTO people (person_id, normalized_name, display_name, vault_id) VALUES (?, ?, ?, ?)",
                         (person_id, normalize_entity_name(vault_name), vault_name, vault_id),
                     )
+
+            if person_id in seen_person_ids:
+                continue
+            seen_person_ids.add(person_id)
 
             conn.execute(
                 "INSERT INTO summary_people (summary_id, person_id, note, display_order) VALUES (?, ?, ?, ?)",
@@ -665,12 +670,19 @@ def list_summaries(
 
             if normalized_person in people_notes_map:
                 vault_id = people_notes_map[normalized_person]["id"]
-                sql += """ AND EXISTS (
-                    SELECT 1 FROM summary_people sp
-                    JOIN people p ON sp.person_id = p.person_id
-                    WHERE sp.summary_id = s.summary_id AND p.vault_id = ?
+                sql += """ AND (
+                    EXISTS (
+                        SELECT 1 FROM summary_people sp
+                        JOIN people p ON sp.person_id = p.person_id
+                        WHERE sp.summary_id = s.summary_id AND p.vault_id = ?
+                    ) OR EXISTS (
+                        SELECT 1 FROM summary_person_candidates spc
+                        JOIN person_candidates pc ON spc.candidate_id = pc.candidate_id
+                        WHERE spc.summary_id = s.summary_id AND pc.normalized_name = ?
+                    )
                 )"""
                 params.append(vault_id)
+                params.append(normalized_person)
             else:
                 sql += """ AND EXISTS (
                     SELECT 1 FROM summary_person_candidates spc
