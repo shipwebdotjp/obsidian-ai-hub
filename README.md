@@ -110,6 +110,82 @@ python -m obsidian_ai_hub --build-dashboard
 
 The vault sync command indexes the full `VAULT_PATH` tree into `md-hybrid-search` and stores its SQLite/Chroma data outside the vault by default.
 
+### Additional CLI commands
+
+Generate a monthly review for the previous month, or select a month with
+`YYYY-MM`. A daily review uses the current daily note.
+
+```bash
+python -m obsidian_ai_hub --summerize-month
+python -m obsidian_ai_hub --summerize-month --month 2026-07
+python -m obsidian_ai_hub --summerize-day
+```
+
+Restrict dashboard generation to one or more years. Without
+`--dashboard-year`, all available years are regenerated.
+
+```bash
+python -m obsidian_ai_hub --build-dashboard --dashboard-year 2025 --dashboard-year 2026
+```
+
+The following commands notify today's schedule, synchronize the vault with the
+configured Open WebUI knowledge base, or fully rebuild the vault-search index:
+
+```bash
+python -m obsidian_ai_hub --notify-today-schedule
+python -m obsidian_ai_hub --sync-knowledge
+python -m obsidian_ai_hub --rebuild-vault
+```
+
+### Research commands
+
+Run research immediately with a required theme. `--context` adds background or
+the reason for researching it, and `--output-style` accepts `short`, `medium`,
+or `long`.
+
+```bash
+python -m obsidian_ai_hub --research-agent --theme "Local-first AI tools" \
+  --context "Compare options for personal knowledge management" \
+  --output-style medium
+```
+
+Add a theme to the research candidates, optionally with a research direction:
+
+```bash
+python -m obsidian_ai_hub --add-research-theme --theme "Local-first AI tools" \
+  --direction "Compare privacy and offline capabilities"
+```
+
+Generate three research candidates from notes created during the last 30 days:
+
+```bash
+python -m obsidian_ai_hub --suggest-research-theme
+```
+
+`--research-agent`, `--add-research-theme`, and `--suggest-research-theme`
+are mutually exclusive modes.
+
+### Capture, activity, and vault search
+
+Capture a screenshot from the selected macOS display (display `1` by default),
+scan the frontmost LINE window for unread-message candidates, or record an
+activity log:
+
+```bash
+python -m obsidian_ai_hub --screenshot --display 2
+python -m obsidian_ai_hub --scan-line-inbox
+python -m obsidian_ai_hub --log-activity
+```
+
+Search the vault index with a required query. `--k` controls the number of
+results (default: `10`), `--search-mode` accepts `similarity`, `keyword`, or
+`hybrid` (default), and `--json` prints machine-readable JSON.
+
+```bash
+python -m obsidian_ai_hub --vault-search --query "project planning" \
+  --k 5 --search-mode hybrid --json
+```
+
 ## Long-Term Memory
 
 Long-term memory lets the assistant retain useful, reviewed information from
@@ -172,6 +248,14 @@ uv run -m obsidian_ai_hub --memory-review \
   --content "Prefer concise Japanese responses."
 ```
 
+Delete a memory permanently with its ID. The command asks for confirmation;
+pass `--yes` to skip that prompt.
+
+```bash
+uv run -m obsidian_ai_hub --memory-delete --id mem_20260713_f2ec1b
+uv run -m obsidian_ai_hub --memory-delete --id mem_20260713_f2ec1b --yes
+```
+
 ### Review candidates in the Web UI
 
 Build the Web UI once after installing the project dependencies:
@@ -193,6 +277,11 @@ rejection to multiple selected candidates at once.
 
 The server is local-only by default. If you intentionally make it available on
 your network with `--serve-host`, set `MEMORY_REVIEW_API_TOKEN` first.
+Use `--serve-port` to override the default port (`8765`):
+
+```bash
+uv run -m obsidian_ai_hub --serve --serve-host 127.0.0.1 --serve-port 9000
+```
 
 ### Development mode
 

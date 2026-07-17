@@ -11,6 +11,7 @@
 - existing_candidates と重複するテーマは避ける
 - 抽象語だけのテーマは避ける
 - 日本語で書く
+- 既存テーマとはなるべく重ならない、視点や方向性が異なるものにする
 
 出力形式:
 {
@@ -28,5 +29,5 @@
 recent_notes:
 ${context_pack}
 
-existing_candidates:
+existing_research_themes:
 ${existing_candidates_block}
