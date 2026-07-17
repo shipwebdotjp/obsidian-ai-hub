@@ -4,14 +4,15 @@ import re
 from datetime import date as date_type
 from datetime import datetime, timedelta
 from pathlib import Path
-from obsidian_ai_hub.utils import config, reader, extracter, llm_client, prompt
+
+from obsidian_ai_hub.summary import store as summary_store
+from obsidian_ai_hub.utils import config, reader, llm_client, prompt
 from obsidian_ai_hub.utils.topics import TOPIC_ENUM, normalize_topics
-from obsidian_ai_hub.utils.summary_aggregation import (
-    calculate_average_numeric_value,
-    calculate_most_common_value,
-)
 
 logger = logging.getLogger(__name__)
+
+WEEK_ITEM_KINDS = ["highlights", "progress", "learnings", "reflections", "patterns", "gratitude"]
+
 
 def get_week_dates(date: datetime):
     """
@@ -21,23 +22,20 @@ def get_week_dates(date: datetime):
     monday = date - timedelta(days=weekday - 1)
     return [monday + timedelta(days=i) for i in range(7)]
 
-def load_daily_record(date: datetime) -> dict | None:
-    monthly_log_file = Path(config.ACTIVITY_PATH) / date.strftime("%Y/%m") / date.strftime("%Y-%m.jsonl")
-    if not monthly_log_file.exists():
-        return None
-    date_str = date.strftime("%Y-%m-%d")
-    try:
-        with open(monthly_log_file, "r", encoding="utf-8") as f:
-            for line in f:
-                try:
-                    data = json.loads(line)
-                    if data.get("date") == date_str:
-                        return data
-                except json.JSONDecodeError:
-                    continue
-    except Exception as e:
-            logger.error(f"Failed to read monthly log file {monthly_log_file}: {e}")
-    return None
+
+def load_daily_records(week_dates: list[datetime]) -> list[dict | None]:
+    """Load the 7 daily summary records for the week from SQLite."""
+    records = []
+    for d in week_dates:
+        date_str = d.strftime("%Y-%m-%d")
+        try:
+            record = summary_store.get_summary_by_period("day", date_str)
+        except Exception as e:
+            logger.error(f"Failed to load daily summary for {date_str}: {e}")
+            record = None
+        records.append(record)
+    return records
+
 
 def get_weekly_structured_record(
     date: datetime,
@@ -50,10 +48,6 @@ def get_weekly_structured_record(
     week_end = week_dates[-1].strftime("%Y-%m-%d")
     generated_at = datetime.now().isoformat()
 
-    source_stats = {
-        "daily_record_count": len([r for r in daily_records if r is not None]),
-    }
-
     # プロンプト用のデータを準備（Noneはプレースホルダに）
     simplified_daily_records = []
     for i, r in enumerate(daily_records):
@@ -65,23 +59,20 @@ def get_weekly_structured_record(
 
     record = {
         "schema_version": 1,
-        "week_id": week_id,
-        "week_start_date": week_start,
-        "week_end_date": week_end,
+        "period_type": "week",
+        "period_key": week_id,
+        "period_start": week_start,
+        "period_end": week_end,
         "generated_at": generated_at,
         "summary": None,
-        "topics": [],
-        "activities": [],
-        "learnings": [],
-        "reflections": [],
-        "gratitude": [],
-        "people": [],
-        "questions": [],
         "keywords": [],
-        "next_actions": [],
-        "mood": calculate_most_common_value(daily_records, "mood"),
-        "sleep": calculate_average_numeric_value(daily_records, "sleep"),
-        "source_stats": source_stats
+        "mood": None,
+        "sleep_raw": None,
+        "sleep_hours": None,
+        "topics": [],
+        "projects": [],
+        "people": [],
+        "items": [],
     }
 
     try:
@@ -109,10 +100,7 @@ def get_weekly_structured_record(
         data = json.loads(cleaned_response)
 
         scalar_fields = {"summary"}
-        list_fields = {
-            "topics", "activities", "learnings", "reflections",
-            "gratitude", "questions", "keywords", "next_actions",
-        }
+        list_fields = {"topics", "highlights", "progress", "learnings", "reflections", "patterns", "gratitude"}
 
         for key in scalar_fields | list_fields | {"people"}:
             if key in data:
@@ -123,7 +111,7 @@ def get_weekly_structured_record(
                 if key == "people" and isinstance(val, list):
                     normalized_people = []
                     for p in val:
-                        if isinstance(p, dict) and "name" in p:
+                        if isinstance(p, dict) and p.get("name"):
                             normalized_people.append({
                                 "name": str(p.get("name", "")),
                                 "note": str(p.get("note", ""))
@@ -134,14 +122,25 @@ def get_weekly_structured_record(
                 elif key in list_fields and isinstance(val, list):
                     clean_list = [str(item) for item in val if item not in (None, "")]
                     if key == "topics":
-                        record[key] = normalize_topics(clean_list)
-                    else:
-                        record[key] = clean_list
+                        record["topics"] = normalize_topics(clean_list)
+                    elif key in WEEK_ITEM_KINDS:
+                        record["items"].extend(
+                            {"kind": key, "body": item, "display_order": idx}
+                            for idx, item in enumerate(clean_list)
+                        )
+
+        # display_order を kind 単位で振り直す
+        record["items"].sort(key=lambda x: (WEEK_ITEM_KINDS.index(x["kind"]), x["display_order"]))
+        for kind in WEEK_ITEM_KINDS:
+            kind_items = [i for i in record["items"] if i["kind"] == kind]
+            for idx, item in enumerate(kind_items):
+                item["display_order"] = idx
 
     except Exception as e:
         logger.error(f"Failed to generate or parse structured weekly record: {e}")
 
     return record
+
 
 def format_weekly_record_as_markdown(record: dict) -> str:
     lines = []
@@ -149,24 +148,24 @@ def format_weekly_record_as_markdown(record: dict) -> str:
     if record.get("summary"):
         lines.append(f"{record['summary']}\n")
 
-    sections = [
-        ("topics", "トピックス"),
-        ("activities", "活動内容"),
-        ("learnings", "学び・整理"),
-        ("reflections", "反省・気づき"),
-        ("gratitude", "感謝"),
-        ("questions", "問い"),
-        ("keywords", "キーワード"),
-        ("next_actions", "来週の観測ポイント"),
-    ]
+    kind_labels = {
+        "highlights": "ハイライト",
+        "progress": "目標・プロジェクトの前進",
+        "learnings": "学び・整理",
+        "reflections": "反省・気づき",
+        "patterns": "パターン・傾向",
+        "gratitude": "感謝",
+    }
 
-    for key, label in sections:
-        val = record.get(key)
-        if val and isinstance(val, list):
-            lines.append(f"### {label}")
-            for item in val:
-                lines.append(f"- {item}")
-            lines.append("")
+    for item in record.get("items", []):
+        kind = item.get("kind")
+        body = item.get("body")
+        if not kind or not body:
+            continue
+        label = kind_labels.get(kind, kind)
+        lines.append(f"### {label}")
+        lines.append(f"- {body}")
+        lines.append("")
 
     if record.get("people"):
         lines.append("### 人物メモ")
@@ -176,48 +175,19 @@ def format_weekly_record_as_markdown(record: dict) -> str:
             lines.append(f"- **{name}**: {note}")
         lines.append("")
 
-    if record.get("mood"):
-        lines.append(f"### 気分・エネルギー\n{record['mood']}\n")
-
-    if record.get("sleep"):
-        lines.append(f"### 睡眠・疲労\n{record['sleep']}\n")
-
     return "\n".join(lines).strip()
 
-def upsert_weekly_record(iso_year: int, record: dict) -> bool:
-    weekly_log_dir = Path(config.ACTIVITY_PATH) / str(iso_year)
-    weekly_log_dir.mkdir(parents=True, exist_ok=True)
-    log_file = weekly_log_dir / f"{iso_year}-week.jsonl"
 
-    records = {}
-    parse_failed = False
-    if log_file.exists():
-        with open(log_file, "r", encoding="utf-8") as f:
-            for line in f:
-                try:
-                    data = json.loads(line)
-                    if "week_id" in data:
-                        records[data["week_id"]] = data
-                except json.JSONDecodeError:
-                    parse_failed = True
-                    logger.error("Failed to parse existing weekly JSONL; aborting upsert to avoid data loss")
-                    break
-
-    if parse_failed:
-        return False
-
-    records[record["week_id"]] = record
-
-    sorted_week_ids = sorted(records.keys())
+def upsert_summary_record(record: dict):
+    """
+    SQLite summaries テーブルにレコードをupsertする。
+    """
     try:
-        with open(log_file, "w", encoding="utf-8") as f:
-            for wid in sorted_week_ids:
-                f.write(json.dumps(records[wid], ensure_ascii=False) + "\n")
-        logger.info(f"Weekly record upserted to {log_file}")
-        return True
+        summary_store.upsert_summary(record)
+        logger.info(f"Weekly summary upserted for {record.get('period_key')}")
     except Exception as e:
-        logger.error(f"Failed to write weekly record: {e}")
-        return False
+        logger.error(f"Failed to upsert weekly summary: {e}")
+
 
 def _coerce_target_date(target_date: datetime | date_type | str | None) -> datetime:
     if target_date is None:
@@ -237,16 +207,13 @@ def summarize_week(target_date: datetime | date_type | str | None = None):
 
     # 1. データの準備
     week_dates = get_week_dates(target_date)
-    daily_records = [load_daily_record(d) for d in week_dates]
+    daily_records = load_daily_records(week_dates)
 
     # 2. 構造化レコードの生成
     structured_record = get_weekly_structured_record(target_date, daily_records)
 
-    # 3. 週次JSONLへの保存
-    iso_year, _, _ = target_date.isocalendar()
-    if not upsert_weekly_record(iso_year, structured_record):
-        logger.error("Skipping weekly note update as JSONL upsert failed")
-        return
+    # 3. SQLiteへの保存
+    upsert_summary_record(structured_record)
 
     # 4. ウィークリーノートへの書き込み
     weekly_note = reader.get_weekly_note_content(target_date)
@@ -270,9 +237,11 @@ def summarize_week(target_date: datetime | date_type | str | None = None):
 
     logger.info(f"Weekly summary updated in: {weekly_note_path}")
 
+
 def main(target_date: datetime | date_type | str | None = None):
     # デフォルトでは実行日の属する週を対象とする
     summarize_week(target_date)
+
 
 if __name__ == "__main__":
     main()
