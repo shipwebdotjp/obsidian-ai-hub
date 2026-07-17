@@ -257,3 +257,42 @@ def get_vault_file(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+# --- Summary routes ---
+
+@router.get("/summaries", response_model=schemas.SummaryListResponse)
+def list_summaries(
+    period_type: Optional[str] = Query(None),
+    period: Optional[str] = Query(None),
+    topic: Optional[str] = Query(None),
+    project: Optional[str] = Query(None),
+    person: Optional[str] = Query(None),
+    _=Depends(_require_loopback_or_token),
+):
+    if period_type and period_type not in schemas.ALLOWED_PERIOD_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"period_type must be one of {sorted(schemas.ALLOWED_PERIOD_TYPES)}",
+        )
+    items = service.list_summaries(
+        period_type=period_type,
+        period=period,
+        topic=topic,
+        project=project,
+        person=person,
+    )
+    return schemas.SummaryListResponse(items=items, total=len(items))
+
+
+@router.get("/summaries/{summary_id}", response_model=schemas.SummaryDetail)
+def get_summary(summary_id: str, _=Depends(_require_loopback_or_token)):
+    summary = service.get_summary(summary_id)
+    if summary is None:
+        raise HTTPException(status_code=404, detail="summary not found")
+    return summary
+
+
+@router.get("/summary-options", response_model=schemas.SummaryOptionsResponse)
+def summary_options(_=Depends(_require_loopback_or_token)):
+    return schemas.SummaryOptionsResponse(**service.get_summary_options())
