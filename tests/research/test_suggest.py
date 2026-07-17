@@ -8,15 +8,18 @@ from unittest.mock import patch
 from obsidian_ai_hub.research import suggest as suggest_research_theme
 
 
+from obsidian_ai_hub.activity.store import add_activity
+
 def _write_activity_log(base_dir: Path, activity_date: date, summaries: list[str]) -> Path:
-    log_dir = base_dir / activity_date.strftime("%Y") / activity_date.strftime("%m")
-    log_dir.mkdir(parents=True, exist_ok=True)
-    log_file = log_dir / f"{activity_date.strftime('%Y-%m-%d')}.jsonl"
-    for s in summaries:
-        record = json.dumps({"summary": s, "category": "開発", "keywords": ["test"]}, ensure_ascii=False)
-        with open(log_file, "a", encoding="utf-8") as f:
-            f.write(record + "\n")
-    return log_file
+    for i, s in enumerate(summaries):
+        add_activity(
+            activity_date=activity_date.strftime("%Y-%m-%d"),
+            occurred_at=f"{activity_date.strftime('%Y-%m-%d')}T12:{i:02d}:00",
+            summary=s,
+            category="開発",
+            keywords=["test"],
+        )
+    return base_dir / f"{activity_date.strftime('%Y-%m-%d')}.jsonl"
 
 
 def test_build_suggestions_uses_activity_context_and_avoids_existing(

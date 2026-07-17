@@ -429,43 +429,33 @@ def find_top_similar(theme: str, embedder, k: int = 5) -> list[tuple[str, float]
 
 
 def list_recent_activity_days(days: int = 30) -> list[dict]:
-    activity_root = Path(config.ACTIVITY_PATH)
-    if not activity_root.exists():
+    from obsidian_ai_hub.activity.store import get_recent_activities
+
+    try:
+        db_activities = get_recent_activities(days=days)
+    except Exception as e:
+        logger.error(f"Failed to fetch recent activities from SQLite: {e}")
         return []
 
-    today = date.today()
-    entries: list[dict] = []
-    for delta in range(days):
-        d = today - timedelta(days=delta)
-        log_path = activity_root / d.strftime("%Y") / d.strftime("%m") / f"{d.strftime('%Y-%m-%d')}.jsonl"
-        if not log_path.exists():
+    # Sort: occurred_at ASC (chronological) first
+    db_activities = sorted(db_activities, key=lambda x: x.get("occurred_at") or "")
+    # Sort: activity_date DESC (newest first) next.
+    # Because python's sort is stable, occurred_at ASC ordering is preserved within each date.
+    db_activities = sorted(db_activities, key=lambda x: x.get("activity_date") or "", reverse=True)
+
+    entries = []
+    for e in db_activities:
+        summary = e.get("summary") or ""
+        if not summary.strip():
             continue
-        try:
-            with open(log_path, "r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        data = json.loads(line)
-                    except json.JSONDecodeError:
-                        logger.warning("Skipping malformed JSON line in %s", log_path)
-                        continue
-                    summary = data.get("summary", "")
-                    if not isinstance(summary, str) or not summary.strip():
-                        continue
-                    category = data.get("category", "")
-                    keywords = data.get("keywords", [])
-                    if not isinstance(keywords, list):
-                        keywords = []
-                    entries.append({
-                        "activity_date": d.isoformat(),
-                        "summary": summary.strip(),
-                        "category": category.strip() if isinstance(category, str) else "",
-                        "keywords": [str(k).strip() for k in keywords if k],
-                    })
-        except OSError as exc:
-            logger.warning("Failed to read activity log %s: %s", log_path, exc)
+        category = e.get("category") or ""
+        keywords = e.get("keywords") or []
+        entries.append({
+            "activity_date": e.get("activity_date"),
+            "summary": summary.strip(),
+            "category": category.strip() if isinstance(category, str) else "",
+            "keywords": [str(k).strip() for k in keywords if k],
+        })
 
     seen_summaries: set[str] = set()
     deduped: list[dict] = []

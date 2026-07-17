@@ -21,4 +21,4 @@ test_temp.sqlite3
 copilot/memory/approved.md
 fastapi_output.log
 vite_output.log
-activity/
+/activity/

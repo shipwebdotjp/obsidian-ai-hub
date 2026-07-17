@@ -19,23 +19,31 @@ def mock_config(tmp_path):
         mock_cfg.AI_LOG_PATH = tmp_path / "ai_logs"
         yield mock_cfg
 
-def test_load_activity_logs(mock_config, tmp_path):
+def test_load_activity_logs(mock_config):
     target_date = datetime(2023, 10, 27)
-    activity_dir = mock_config.ACTIVITY_PATH / "2023/10"
-    activity_dir.mkdir(parents=True)
-    log_file = activity_dir / "2023-10-27.jsonl"
-
-    records = [
-        {"timestamp": "2023-10-27T10:00:00", "app_name": "App1", "window_title": "Title1", "summary": "Summary1", "extra": "data"},
-        {"timestamp": "2023-10-27T11:00:00", "app_name": "App2", "window_title": "Title2", "summary": "Summary2"}
+    mock_records = [
+        {
+            "occurred_at": "2023-10-27T10:00:00",
+            "app_name": "App1",
+            "window_title": "Title1",
+            "summary": "Summary1",
+            "category": None,
+            "keywords": None,
+            "extra": "data"
+        },
+        {
+            "occurred_at": "2023-10-27T11:00:00",
+            "app_name": "App2",
+            "window_title": "Title2",
+            "summary": "Summary2",
+            "category": "開発",
+            "keywords": ["python"]
+        }
     ]
 
-    with open(log_file, "w", encoding="utf-8") as f:
-        for r in records:
-            f.write(json.dumps(r) + "\n")
-        f.write("invalid json\n")
-
-    logs = load_activity_logs(target_date)
+    with patch("obsidian_ai_hub.summerize_day.get_activities_by_date") as mock_get:
+        mock_get.return_value = mock_records
+        logs = load_activity_logs(target_date)
 
     assert len(logs) == 2
     assert logs[0]["app_name"] == "App1"
@@ -47,7 +55,9 @@ def test_load_activity_logs(mock_config, tmp_path):
 
 def test_load_activity_logs_no_file(mock_config):
     target_date = datetime(2023, 10, 27)
-    logs = load_activity_logs(target_date)
+    with patch("obsidian_ai_hub.summerize_day.get_activities_by_date") as mock_get:
+        mock_get.return_value = []
+        logs = load_activity_logs(target_date)
     assert logs == []
 
 def test_upsert_monthly_record(mock_config, tmp_path):
