@@ -181,15 +181,6 @@ def test_sync_vault_cli_calls_sync(monkeypatch):
     mock_main.assert_called_once_with()
 
 
-def test_build_dashboard_cli_calls_export(monkeypatch):
-    monkeypatch.setattr(sys, "argv", ["prog", "--build-dashboard", "--dashboard-year", "2026"])
-
-    with patch.object(main_module.dashboard, "build_dashboard", return_value=None) as mock_build:
-        main_module.main()
-
-    mock_build.assert_called_once_with([2026])
-
-
 def test_debug_alone_does_not_raise_or_start_server(monkeypatch):
     monkeypatch.setattr(sys, "argv", ["prog", "--debug"])
 

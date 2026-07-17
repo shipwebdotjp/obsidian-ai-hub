@@ -3,7 +3,6 @@ ai_log_path: /path/to/your/obsidian/copilot/copilot-jsons
 vault:
   inbox: inbox
   daily: daily
-  dashboard: dashboard
   template: template
   knowledge: copilot/knowledge
   research: research
