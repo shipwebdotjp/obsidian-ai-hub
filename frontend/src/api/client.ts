@@ -14,6 +14,10 @@ import type {
   ResearchRunAcceptedResponse,
   VaultSearchResponse,
   VaultFileResponse,
+  SummaryListResponse,
+  SummaryDetail,
+  SummaryOptionsResponse,
+  SummaryPeriodType,
 } from "./types";
 
 const TOKEN_KEY = "obsidian-ai-hub:review-token";
@@ -243,4 +247,29 @@ export function getVaultFile(path: string, signal?: AbortSignal): Promise<VaultF
   const sp = new URLSearchParams();
   sp.set("path", path);
   return request<VaultFileResponse>(`/api/v1/vault-file?${sp.toString()}`, { signal });
+}
+
+// Summary Dashboard API
+
+export function listSummaries(params: {
+  period_type?: SummaryPeriodType;
+  period?: string;
+  topic?: string;
+  project?: string;
+  person?: string;
+}): Promise<SummaryListResponse> {
+  const sp = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) {
+    if (v) sp.set(k, v);
+  }
+  const qs = sp.toString();
+  return request<SummaryListResponse>(`/api/v1/summaries${qs ? `?${qs}` : ""}`);
+}
+
+export function getSummary(summaryId: string): Promise<SummaryDetail> {
+  return request<SummaryDetail>(`/api/v1/summaries/${encodeURIComponent(summaryId)}`);
+}
+
+export function getSummaryOptions(): Promise<SummaryOptionsResponse> {
+  return request<SummaryOptionsResponse>("/api/v1/summary-options");
 }
