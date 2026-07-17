@@ -112,17 +112,17 @@ def _seed_month(period_key: str, summary: str):
 
 
 def test_dashboard_home(loopback_client, clean_summary_env, monkeypatch):
-    # Mock datetime.now() for predictable test dates (say, 2026-07-20)
-    fake_now = datetime(2026, 7, 20, 10, 15, 0)
+    # Mock datetime.now() for predictable test dates (say, 2026-07-17)
+    fake_now = datetime(2026, 7, 17, 10, 15, 0)
 
     # Seed data
     _seed_month("2026-07", "Monthly July")
-    _seed_week("2026-W30", "2026-07-20", "2026-07-26", "Weekly 30")
-    _seed_day("2026-07-19", "Yesterday Daily")
+    _seed_week("2026-W29", "2026-07-13", "2026-07-19", "Weekly 29")
+    _seed_day("2026-07-16", "Yesterday Daily")
 
-    # Add activity logs for today (2026-07-20)
-    activity_store.add_activity(activity_date="2026-07-20", occurred_at="2026-07-20T10:00:00", summary="first log")
-    activity_store.add_activity(activity_date="2026-07-20", occurred_at="2026-07-20T09:30:00", summary="second log")
+    # Add activity logs for today (2026-07-17)
+    activity_store.add_activity(activity_date="2026-07-17", occurred_at="2026-07-17T10:00:00", summary="first log")
+    activity_store.add_activity(activity_date="2026-07-17", occurred_at="2026-07-17T09:30:00", summary="second log")
 
     # We patch datetime.now in service to fake_now
     from obsidian_ai_hub.web import service
@@ -134,11 +134,11 @@ def test_dashboard_home(loopback_client, clean_summary_env, monkeypatch):
     data = res.json()
 
     assert data["this_month_summary"]["summary"] == "Monthly July"
-    assert data["latest_week_summary"]["summary"] == "Weekly 30"
+    assert data["latest_week_summary"]["summary"] == "Weekly 29"
     assert data["yesterday_summary"]["summary"] == "Yesterday Daily"
 
     today_act = data["today_activity"]
-    assert today_act["date"] == "2026-07-20"
+    assert today_act["date"] == "2026-07-17"
     # 45 minutes active out of 10h15m (615 minutes) total_seconds.
     assert today_act["active_minutes"] == 45.0
     assert today_act["inactive_minutes"] == 615.0 - 45.0
@@ -150,7 +150,7 @@ def test_dashboard_home(loopback_client, clean_summary_env, monkeypatch):
 def test_dashboard_browse_year_level(loopback_client, clean_summary_env):
     _seed_month("2026-07", "Month 7")
     _seed_month("2026-08", "Month 8")
-    _seed_week("2026-W30", "2026-07-20", "2026-07-26", "Week 30") # Overlaps 2026
+    _seed_week("2026-W29", "2026-07-13", "2026-07-19", "Week 29") # Overlaps 2026
     _seed_week("2025-W52", "2025-12-29", "2026-01-04", "Week 52") # Overlaps both 2025 and 2026
 
     # Browse 2026
@@ -161,18 +161,18 @@ def test_dashboard_browse_year_level(loopback_client, clean_summary_env):
     assert data["selected_year"] == "2026"
     assert data["selected_month"] is None
     assert len(data["months"]) == 2
-    assert len(data["weeks"]) == 2  # Both W30 and W52 overlap 2026
+    assert len(data["weeks"]) == 2  # Both W29 and W52 overlap 2026
     assert data["days"] == []
 
 
 def test_dashboard_browse_month_level(loopback_client, clean_summary_env):
-    # Week 30: 2026-07-20 to 2026-07-26 (Overlaps July 2026)
-    _seed_week("2026-W30", "2026-07-20", "2026-07-26", "Week 30")
-    # Day 1: July 19 (has summary)
-    _seed_day("2026-07-19", "Day 19")
+    # Week 29: 2026-07-13 to 2026-07-19 (Overlaps July 2026)
+    _seed_week("2026-W29", "2026-07-13", "2026-07-19", "Week 29")
+    # Day 1: July 14 (has summary)
+    _seed_day("2026-07-14", "Day 14")
 
-    # Day 20: (only activity log, no summary)
-    activity_store.add_activity(activity_date="2026-07-20", occurred_at="2026-07-20T10:00:00", summary="activity log")
+    # Day 2: (only activity log, no summary)
+    activity_store.add_activity(activity_date="2026-07-15", occurred_at="2026-07-15T10:00:00", summary="activity log")
 
     res = loopback_client.get("/api/v1/summary-dashboard/browse?month=2026-07")
     assert res.status_code == 200
@@ -180,17 +180,17 @@ def test_dashboard_browse_month_level(loopback_client, clean_summary_env):
 
     assert data["selected_month"] == "2026-07"
     assert len(data["weeks"]) == 1
-    assert data["weeks"][0]["period_key"] == "2026-W30"
+    assert data["weeks"][0]["period_key"] == "2026-W29"
 
-    # 2026-07-20 (no summary) and 2026-07-19 (has summary)
+    # 2026-07-15 (no summary) and 2026-07-14 (has summary)
     assert len(data["days"]) == 2
-    assert data["days"][0]["date"] == "2026-07-20"
+    assert data["days"][0]["date"] == "2026-07-15"
     assert data["days"][0]["has_summary"] is False
     assert data["days"][0]["summary"] is None
 
-    assert data["days"][1]["date"] == "2026-07-19"
+    assert data["days"][1]["date"] == "2026-07-14"
     assert data["days"][1]["has_summary"] is True
-    assert data["days"][1]["summary"] == "Day 19"
+    assert data["days"][1]["summary"] == "Day 14"
 
 
 def test_dashboard_browse_validation_mismatch(loopback_client, clean_summary_env):
@@ -199,13 +199,13 @@ def test_dashboard_browse_validation_mismatch(loopback_client, clean_summary_env
 
 
 def test_dashboard_summaries_get_by_id(loopback_client, clean_summary_env):
-    _seed_day("2026-07-19", "My Day")
+    _seed_day("2026-07-14", "My Day")
 
     # Get ID
     conn = memory.get_db_connection()
     try:
         cursor = conn.cursor()
-        cursor.execute("SELECT summary_id FROM summaries WHERE period_key='2026-07-19'")
+        cursor.execute("SELECT summary_id FROM summaries WHERE period_key='2026-07-14'")
         summary_id = cursor.fetchone()[0]
     finally:
         conn.close()
@@ -216,13 +216,13 @@ def test_dashboard_summaries_get_by_id(loopback_client, clean_summary_env):
 
 
 def test_dashboard_days_get_details(loopback_client, clean_summary_env):
-    _seed_day("2026-07-19", "My Day")
-    activity_store.add_activity(activity_date="2026-07-19", occurred_at="2026-07-19T09:00:00", summary="something")
+    _seed_day("2026-07-14", "My Day")
+    activity_store.add_activity(activity_date="2026-07-14", occurred_at="2026-07-14T09:00:00", summary="something")
 
-    res = loopback_client.get("/api/v1/summary-dashboard/days/2026-07-19")
+    res = loopback_client.get("/api/v1/summary-dashboard/days/2026-07-14")
     assert res.status_code == 200
     data = res.json()
-    assert data["date"] == "2026-07-19"
+    assert data["date"] == "2026-07-14"
     assert data["summary"]["summary"] == "My Day"
     assert len(data["logs"]) == 1
     assert data["logs"][0]["summary"] == "something"
@@ -230,15 +230,15 @@ def test_dashboard_days_get_details(loopback_client, clean_summary_env):
 
 
 def test_dashboard_stats_aggregation(loopback_client, clean_summary_env):
-    # Seed 3 days with recognised topics from TOPIC_ENUM
-    _seed_day("2026-07-19", "Day 19", topics=["LLM・AI活用", "健康・医療"], keywords=["foo", "bar"])
-    _seed_day("2026-07-20", "Day 20", topics=["LLM・AI活用"], keywords=["foo"])
-    _seed_day("2026-07-21", "Day 21", topics=["ソフトウェア開発"], keywords=["baz"])
+    # Seed 3 days with recognised topics from TOPIC_ENUM (all <= 2026-07-15, which is in the past!)
+    _seed_day("2026-07-13", "Day 13", topics=["LLM・AI活用", "健康・医療"], keywords=["foo", "bar"])
+    _seed_day("2026-07-14", "Day 14", topics=["LLM・AI活用"], keywords=["foo"])
+    _seed_day("2026-07-15", "Day 15", topics=["ソフトウェア開発"], keywords=["baz"])
 
     # Seed activities
-    activity_store.add_activity(activity_date="2026-07-19", occurred_at="2026-07-19T10:00:00", summary="act")
+    activity_store.add_activity(activity_date="2026-07-13", occurred_at="2026-07-13T10:00:00", summary="act")
 
-    res = loopback_client.get("/api/v1/summary-dashboard/stats?start_date=2026-07-19&end_date=2026-07-21")
+    res = loopback_client.get("/api/v1/summary-dashboard/stats?start_date=2026-07-13&end_date=2026-07-15")
     assert res.status_code == 200
     data = res.json()
 
@@ -248,12 +248,27 @@ def test_dashboard_stats_aggregation(loopback_client, clean_summary_env):
     assert data["candidate_topics"][0] == "LLM・AI活用"
     assert data["candidate_keywords"][0] == "foo"
 
-    # Day 19 has topic LLM・AI活用, 健康・医療
-    bucket_19 = data["buckets"][0]
-    assert bucket_19["key"] == "2026-07-19"
-    assert bucket_19["daily_summary_count"] == 1
-    assert bucket_19["topic_counts"]["LLM・AI活用"] == 1
-    assert bucket_19["topic_counts"]["健康・医療"] == 1
-    assert bucket_19["keyword_counts"]["foo"] == 1
-    assert bucket_19["keyword_counts"]["bar"] == 1
-    assert bucket_19["active_minutes"] == 30.0
+    # Day 13 has topic LLM・AI活用, 健康・医療
+    bucket_13 = data["buckets"][0]
+    assert bucket_13["key"] == "2026-07-13"
+    assert bucket_13["daily_summary_count"] == 1
+    assert bucket_13["topic_counts"]["LLM・AI活用"] == 1
+    assert bucket_13["topic_counts"]["健康・医療"] == 1
+    assert bucket_13["keyword_counts"]["foo"] == 1
+    assert bucket_13["keyword_counts"]["bar"] == 1
+    assert bucket_13["active_minutes"] == 30.0
+
+
+def test_get_day_activity_times_future_date(loopback_client, clean_summary_env):
+    from obsidian_ai_hub.web import service
+    fake_now = datetime(2026, 7, 17, 10, 15, 0)
+    # 2026-07-18 is in the future relative to fake_now
+    active_mins, inactive_mins = service.get_day_activity_times([], "2026-07-18", now=fake_now)
+    assert active_mins == 0.0
+    assert inactive_mins == 0.0
+
+
+def test_stats_date_range_exceeded(loopback_client, clean_summary_env):
+    res = loopback_client.get("/api/v1/summary-dashboard/stats?start_date=2020-01-01&end_date=2031-01-01")
+    assert res.status_code == 400
+    assert "exceeds maximum limit" in res.json()["detail"]

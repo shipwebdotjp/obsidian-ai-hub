@@ -286,6 +286,9 @@ def get_day_activity_times(
     except ValueError:
         return 0.0, 1440.0
 
+    if target_date > now.date():
+        return 0.0, 0.0
+
     is_today = (target_date == now.date())
     day_start = datetime.combine(target_date, datetime.min.time())
 
@@ -587,6 +590,9 @@ def get_dashboard_stats(
         raise ValueError("start_date must be before or equal to end_date")
 
     duration = (end_date - start_date).days + 1
+
+    if duration > 3660:
+        raise ValueError("Date range exceeds maximum limit of 10 years (3660 days)")
 
     if duration <= 45:
         granularity = "day"
