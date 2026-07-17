@@ -2,18 +2,16 @@ import json
 import logging
 from collections import Counter
 from datetime import datetime, timedelta
+from pathlib import Path
+
+from obsidian_ai_hub.activity.store import get_activities_by_date
+from obsidian_ai_hub.summary import store as summary_store
 from obsidian_ai_hub.utils import config, reader, extracter, llm_client, prompt
 from obsidian_ai_hub.utils.topics import TOPIC_ENUM, normalize_topics
-from pathlib import Path
-from obsidian_ai_hub.activity.store import get_activities_by_date
 
 logger = logging.getLogger(__name__)
 
-INTENT_ENUM = [
-    "理解・質問応答", "要約・整理", "調査・比較", "意思決定支援", "設計・構成検討",
-    "計画・タスク化", "文章生成・編集", "コード作成・レビュー", "問題解決・トラブル対応",
-    "翻訳・ローカライズ", "メタ検討", "その他"
-]
+DAY_ITEM_KINDS = ["highlights", "activities", "learnings", "reflections", "gratitude"]
 
 
 def get_activity_rankings(activity_logs: list[dict]) -> tuple[list[tuple[str, int]], list[tuple[str, int]]]:
@@ -40,14 +38,6 @@ def get_daily_structured_record(
     date_str = target_date.strftime("%Y-%m-%d")
     generated_at = datetime.now().isoformat()
 
-    # source_stats 計算
-    daily_file = reader.get_daily_note_path(target_date)
-    source_stats = {
-        "activity_count": len(activity_logs),
-        "llm_session_count": len(logs),
-        "has_daily_note": daily_file.exists()
-    }
-
     # frontmatter から mood/sleep 取得
     mood = extracter.get_frontmatter_value(daily_content, "mood", default=None)
     sleep = extracter.get_frontmatter_value(daily_content, "sleep", default=None)
@@ -69,21 +59,20 @@ def get_daily_structured_record(
     # 最小レコード（フォールバック用）
     record = {
         "schema_version": 1,
-        "date": date_str,
+        "period_type": "day",
+        "period_key": date_str,
+        "period_start": date_str,
+        "period_end": date_str,
         "generated_at": generated_at,
         "summary": None,
-        "topics": [],
-        "activities": [],
-        "learnings": [],
-        "reflections": [],
-        "gratitude": [],
-        "people": [],
-        "questions": [],
         "keywords": [],
-        "next_actions": [],
         "mood": mood,
-        "sleep": sleep,
-        "source_stats": source_stats
+        "sleep_raw": sleep,
+        "sleep_hours": summary_store.parse_sleep_hours(sleep),
+        "topics": [],
+        "projects": [],
+        "people": [],
+        "items": [],
     }
 
     try:
@@ -117,13 +106,10 @@ def get_daily_structured_record(
 
         # 抽出したデータを record にマージ
         scalar_fields = {"summary"}
-        list_fields = {
-            "topics", "activities", "learnings", "reflections",
-            "gratitude", "questions", "keywords", "next_actions",
-        }
+        list_fields = {"topics", "highlights", "activities", "learnings", "reflections", "gratitude"}
         for key in [
-            "summary", "topics", "activities", "learnings", "reflections",
-            "gratitude", "people", "questions", "keywords", "next_actions"
+            "summary", "topics", "highlights", "activities", "learnings",
+            "reflections", "gratitude", "people",
         ]:
             if key in data:
                 val = data[key]
@@ -133,7 +119,7 @@ def get_daily_structured_record(
                 if key == "people" and isinstance(val, list):
                     normalized_people = []
                     for p in val:
-                        if isinstance(p, dict) and "name" in p:
+                        if isinstance(p, dict) and p.get("name"):
                             normalized_people.append({
                                 "name": str(p.get("name", "")),
                                 "note": str(p.get("note", ""))
@@ -144,9 +130,19 @@ def get_daily_structured_record(
                 elif key in list_fields and isinstance(val, list):
                     clean_list = [str(item) for item in val if item not in (None, "")]
                     if key == "topics":
-                        record[key] = normalize_topics(clean_list)
-                    else:
-                        record[key] = clean_list
+                        record["topics"] = normalize_topics(clean_list)
+                    elif key in DAY_ITEM_KINDS:
+                        record["items"].extend(
+                            {"kind": key, "body": item, "display_order": idx}
+                            for idx, item in enumerate(clean_list)
+                        )
+
+        # display_order を kind 単位で振り直す
+        record["items"].sort(key=lambda x: (DAY_ITEM_KINDS.index(x["kind"]), x["display_order"]))
+        for kind in DAY_ITEM_KINDS:
+            kind_items = [i for i in record["items"] if i["kind"] == kind]
+            for idx, item in enumerate(kind_items):
+                item["display_order"] = idx
 
     except Exception as e:
         logger.error(f"Failed to generate or parse structured daily record: {e}")
@@ -163,24 +159,23 @@ def format_structured_record_as_markdown(record: dict, activity_logs: list[dict]
     if record.get("summary"):
         lines.append(f"{record['summary']}\n")
 
-    sections = [
-        ("topics", "トピックス"),
-        ("activities", "活動内容"),
-        ("learnings", "学び・整理"),
-        ("reflections", "反省・気づき"),
-        ("gratitude", "感謝"),
-        ("questions", "問い"),
-        ("keywords", "キーワード"),
-        ("next_actions", "ネクストアクション"),
-    ]
+    kind_labels = {
+        "highlights": "ハイライト",
+        "activities": "活動内容",
+        "learnings": "学び・整理",
+        "reflections": "反省・気づき",
+        "gratitude": "感謝",
+    }
 
-    for key, label in sections:
-        val = record.get(key)
-        if val and isinstance(val, list):
-            lines.append(f"### {label}")
-            for item in val:
-                lines.append(f"- {item}")
-            lines.append("")
+    for item in record.get("items", []):
+        kind = item.get("kind")
+        body = item.get("body")
+        if not kind or not body:
+            continue
+        label = kind_labels.get(kind, kind)
+        lines.append(f"### {label}")
+        lines.append(f"- {body}")
+        lines.append("")
 
     if record.get("people"):
         lines.append("### 人物メモ")
@@ -208,43 +203,15 @@ def format_structured_record_as_markdown(record: dict, activity_logs: list[dict]
     return "\n".join(lines).strip()
 
 
-def upsert_monthly_record(target_date: datetime, record: dict):
+def upsert_summary_record(record: dict):
     """
-    月次JSONLにレコードをupsertする。
+    SQLite summaries テーブルにレコードをupsertする。
     """
-    monthly_log_dir = Path(config.ACTIVITY_PATH) / target_date.strftime("%Y/%m")
-    monthly_log_dir.mkdir(parents=True, exist_ok=True)
-    log_file = monthly_log_dir / target_date.strftime("%Y-%m.jsonl")
-
-    records = {}
-    parse_failed = False
-    if log_file.exists():
-        with open(log_file, "r", encoding="utf-8") as f:
-            for line in f:
-                try:
-                    data = json.loads(line)
-                    if "date" in data:
-                        records[data["date"]] = data
-                except json.JSONDecodeError:
-                    parse_failed = True
-                    logger.error("Failed to parse existing monthly JSONL; aborting upsert to avoid data loss")
-                    break
-
-    if parse_failed:
-        return
-
-    # upsert
-    records[record["date"]] = record
-
-    # 保存（date昇順）
-    sorted_dates = sorted(records.keys())
     try:
-        with open(log_file, "w", encoding="utf-8") as f:
-            for d in sorted_dates:
-                f.write(json.dumps(records[d], ensure_ascii=False) + "\n")
-        logger.info(f"Monthly record upserted to {log_file}")
+        summary_store.upsert_summary(record)
+        logger.info(f"Daily summary upserted for {record.get('period_key')}")
     except Exception as e:
-        logger.error(f"Failed to write monthly record: {e}")
+        logger.error(f"Failed to upsert daily summary: {e}")
 
 
 def load_activity_logs(target_date: datetime) -> list[dict]:
@@ -294,7 +261,7 @@ def load_conversation_logs(log_file_dir: str, target_date: datetime) -> list[dic
 
 def summarize_day(target_date: datetime):
     """
-    指定日のログをまとめ、構造化レコードの生成、月次保存、デイリーノートへの追記を行う。
+    指定日のログをまとめ、構造化レコードの生成、SQLite保存、デイリーノートへの追記を行う。
     """
     logger.info("Summarizing day: %s", target_date.date())
 
@@ -308,16 +275,16 @@ def summarize_day(target_date: datetime):
     # 2. 構造化レコードの生成
     structured_record = get_daily_structured_record(target_date, daily_content, logs, activity_logs)
 
-    # 3. 月次JSONLへの保存 (永続化)
-    upsert_monthly_record(target_date, structured_record)
+    # 3. SQLiteへの保存 (永続化)
+    upsert_summary_record(structured_record)
 
     # 4. デイリーノートへの追記 (人間用表示)
-    if structured_record.get("summary"):
-        if structured_record.get("source_stats", {}).get("has_daily_note"):
-            markdown_content = format_structured_record_as_markdown(structured_record, activity_logs)
-            extracter.append_to_subheader_file(daily_file.as_posix(), "## AIによる要約", [markdown_content])
+    if structured_record.get("summary") and daily_file.exists():
+        markdown_content = format_structured_record_as_markdown(structured_record, activity_logs)
+        extracter.append_to_subheader_file(daily_file.as_posix(), "## AIによる要約", [markdown_content])
     else:
-        logger.error("Failed to generate structured record; skipping daily note update")
+        if not structured_record.get("summary"):
+            logger.error("Failed to generate structured record; skipping daily note update")
 
 
 def main():

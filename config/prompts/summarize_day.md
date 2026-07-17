@@ -5,28 +5,24 @@
 - topics: 関心領域のまとまり（文字列の配列）。必ず以下の候補リストからのみ選択してください。最大5件まで、重複なく選んでください。独自のラベルや表記ゆれは禁止します。該当なしは空配列（[]）にしてください。
   【候補リスト】
   ${TOPIC_CANDIDATES}
+- highlights: その日の重要な出来事・成果・決定（文字列の配列）
 - activities: 主な作業内容（文字列の配列）
 - learnings: 学び・整理できたこと（文字列の配列）
-- reflections: 反省点・気づき（文字列の配列）
+- reflections: 自己の行動・思考・改善点に関する観察（文字列の配列）
 - gratitude: 感謝したこと（文字列の配列）
 - people: 人物メモ。 `{"name": "...", "note": "..."}` の配列。見つからなければ空配列
-- questions: 未解決の問い（文字列の配列）
-- keywords: 後で検索しやすい語（文字列の配列）
-- next_actions: 翌日以降の具体的な次手（文字列の配列）
 
 # 出力形式
 必ず以下のJSON形式のみを出力してください。余計な解説は不要です。
 {
   "summary": "...",
   "topics": [],
+  "highlights": [],
   "activities": [],
   "learnings": [],
   "reflections": [],
   "gratitude": [],
-  "people": [{"name": "...", "note": "..."}],
-  "questions": [],
-  "keywords": [],
-  "next_actions": []
+  "people": [{"name": "...", "note": "..."}]
 }
 
 今日のデイリーノート:

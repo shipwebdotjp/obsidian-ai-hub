@@ -4,13 +4,15 @@ from unittest.mock import MagicMock, patch
 from pathlib import Path
 import pytest
 
+from obsidian_ai_hub import memory
 from obsidian_ai_hub.summerize_day import (
     load_activity_logs,
     load_conversation_logs,
-    upsert_monthly_record,
+    upsert_summary_record,
     get_daily_structured_record,
-    format_structured_record_as_markdown
+    format_structured_record_as_markdown,
 )
+
 
 @pytest.fixture
 def mock_config(tmp_path):
@@ -18,6 +20,7 @@ def mock_config(tmp_path):
         mock_cfg.ACTIVITY_PATH = tmp_path / "activity"
         mock_cfg.AI_LOG_PATH = tmp_path / "ai_logs"
         yield mock_cfg
+
 
 def test_load_activity_logs(mock_config):
     target_date = datetime(2023, 10, 27)
@@ -53,6 +56,7 @@ def test_load_activity_logs(mock_config):
     assert logs[0]["category"] == "その他"
     assert logs[0]["keywords"] == []
 
+
 def test_load_activity_logs_no_file(mock_config):
     target_date = datetime(2023, 10, 27)
     with patch("obsidian_ai_hub.summerize_day.get_activities_by_date") as mock_get:
@@ -60,35 +64,36 @@ def test_load_activity_logs_no_file(mock_config):
         logs = load_activity_logs(target_date)
     assert logs == []
 
-def test_upsert_monthly_record(mock_config, tmp_path):
-    target_date = datetime(2023, 10, 27)
-    monthly_dir = mock_config.ACTIVITY_PATH / "2023/10"
-    monthly_dir.mkdir(parents=True, exist_ok=True)
-    log_file = monthly_dir / "2023-10.jsonl"
 
-    record1 = {"date": "2023-10-26", "summary": "Day 26"}
-    record2 = {"date": "2023-10-27", "summary": "Day 27"}
+def test_upsert_summary_record(mock_config, test_memory_db_path):
+    record = {
+        "period_type": "day",
+        "period_key": "2023-10-27",
+        "period_start": "2023-10-27",
+        "period_end": "2023-10-27",
+        "generated_at": "2023-10-27T22:00:00",
+        "summary": "Day 27",
+        "keywords": [],
+        "mood": None,
+        "sleep_raw": None,
+        "sleep_hours": None,
+        "topics": [],
+        "projects": [],
+        "people": [],
+        "items": [],
+    }
+    upsert_summary_record(record)
 
-    # 1. New file
-    upsert_monthly_record(target_date, record2)
-    assert log_file.exists()
-    content = log_file.read_text(encoding="utf-8").splitlines()
-    assert len(content) == 1
-    assert json.loads(content[0])["date"] == "2023-10-27"
+    conn = memory.get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM summaries WHERE period_type = ? AND period_key = ?", ("day", "2023-10-27"))
+        row = cursor.fetchone()
+        assert row is not None
+        assert row["summary"] == "Day 27"
+    finally:
+        conn.close()
 
-    # 2. Add another day (should be sorted)
-    upsert_monthly_record(target_date, record1)
-    content = log_file.read_text(encoding="utf-8").splitlines()
-    assert len(content) == 2
-    assert json.loads(content[0])["date"] == "2023-10-26"
-    assert json.loads(content[1])["date"] == "2023-10-27"
-
-    # 3. Update existing day
-    record2_updated = {"date": "2023-10-27", "summary": "Day 27 Updated"}
-    upsert_monthly_record(target_date, record2_updated)
-    content = log_file.read_text(encoding="utf-8").splitlines()
-    assert len(content) == 2
-    assert json.loads(content[1])["summary"] == "Day 27 Updated"
 
 @patch("obsidian_ai_hub.summerize_day.prompt.render_prompt")
 @patch("obsidian_ai_hub.summerize_day.llm_client.generate_llm_response")
@@ -113,6 +118,8 @@ def test_get_daily_structured_record(mock_fm, mock_path, mock_llm, mock_render, 
     mock_llm.return_value = json.dumps({
         "summary": "AI Structured Summary",
         "topics": ["AI"],
+        "highlights": ["Important decision"],
+        "activities": ["Coding"],
         "people": [{"name": "Alice", "note": "Researcher"}]
     })
 
@@ -123,14 +130,16 @@ def test_get_daily_structured_record(mock_fm, mock_path, mock_llm, mock_render, 
 
     record = get_daily_structured_record(target_date, daily_content, logs, activity_logs)
 
-    assert record["date"] == "2023-10-27"
+    assert record["period_type"] == "day"
+    assert record["period_key"] == "2023-10-27"
     assert record["summary"] == "AI Structured Summary"
     assert record["mood"] == "Happy"
-    assert record["sleep"] == "8h"
-    assert record["source_stats"]["activity_count"] == 2
-    assert record["source_stats"]["llm_session_count"] == 1
-    assert record["source_stats"]["has_daily_note"] is True
+    assert record["sleep_raw"] == "8h"
+    assert record["sleep_hours"] == 8.0
     assert record["people"][0]["name"] == "Alice"
+    assert any(i["kind"] == "highlights" and i["body"] == "Important decision" for i in record["items"])
+    assert any(i["kind"] == "activities" and i["body"] == "Coding" for i in record["items"])
+
 
 @patch("obsidian_ai_hub.summerize_day.prompt.render_prompt")
 @patch("obsidian_ai_hub.summerize_day.llm_client.generate_llm_response")
@@ -154,10 +163,9 @@ def test_get_daily_structured_record_malformed_json(mock_fm, mock_path, mock_llm
     record = get_daily_structured_record(target_date, daily_content, logs, activity_logs)
 
     # Should not raise and return minimal record
-    assert record["date"] == "2023-10-27"
+    assert record["period_key"] == "2023-10-27"
     assert record["summary"] is None
     assert record["mood"] == "Happy"
-    assert record["source_stats"]["activity_count"] == 1
     assert record["topics"] == []
     assert record["people"] == []
 
@@ -165,10 +173,12 @@ def test_get_daily_structured_record_malformed_json(mock_fm, mock_path, mock_llm
 def test_format_structured_record_as_markdown():
     record = {
         "summary": "Today was productive.",
-        "topics": ["AI", "Python"],
-        "activities": ["Coding", "Reading"],
+        "items": [
+            {"kind": "highlights", "body": "Shipped feature", "display_order": 0},
+            {"kind": "activities", "body": "Coding", "display_order": 0},
+            {"kind": "learnings", "body": "Learned asyncio", "display_order": 0},
+        ],
         "people": [{"name": "Alice", "note": "Discussed AI"}],
-        "keywords": ["LLM", "RAG"]
     }
     activity_logs = [
         {"category": "開発", "keywords": ["Python", "Git"]},
@@ -179,20 +189,17 @@ def test_format_structured_record_as_markdown():
     markdown = format_structured_record_as_markdown(record, activity_logs)
 
     assert "Today was productive." in markdown
-    assert "### トピックス" in markdown
-    assert "- AI" in markdown
-    assert "- Python" in markdown
+    assert "### ハイライト" in markdown
+    assert "- Shipped feature" in markdown
     assert "### 活動内容" in markdown
     assert "- Coding" in markdown
+    assert "### 学び・整理" in markdown
+    assert "- Learned asyncio" in markdown
     assert "### 人物メモ" in markdown
     assert "- **Alice**: Discussed AI" in markdown
-    assert "### キーワード" in markdown
-    assert "- LLM" in markdown
     assert "### カテゴリ順位" in markdown
     assert "- 開発: 2" in markdown
     assert "- 事務: 1" in markdown
-    assert "### キーワード順位" in markdown
-    assert "- Python: 2" in markdown
 
 
 @patch("obsidian_ai_hub.summerize_day.prompt.render_prompt")
