@@ -219,6 +219,28 @@ def get_db_connection() -> sqlite3.Connection:
         conn.execute("PRAGMA user_version = 3;")
         conn.commit()
 
+    if current_version <= 3:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS activity_logs (
+                schema_version INTEGER DEFAULT 1,
+                activity_id TEXT PRIMARY KEY,
+                activity_date TEXT NOT NULL,
+                occurred_at TEXT NOT NULL,
+                app_name TEXT,
+                window_title TEXT,
+                summary TEXT,
+                category TEXT,
+                keywords TEXT,
+                screenshots TEXT,
+                source_path TEXT,
+                source_line INTEGER,
+                UNIQUE(source_path, source_line)
+            );
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_activity_logs_date_occurred ON activity_logs(activity_date, occurred_at);")
+        conn.execute("PRAGMA user_version = 4;")
+        conn.commit()
+
     return conn
 
 
