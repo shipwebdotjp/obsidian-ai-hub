@@ -108,6 +108,11 @@ def main():
         help="Obsidian Vaultをmd-hybrid-searchのインデックスと同期"
     )
     parser.add_argument(
+        "--sync-people",
+        action="store_true",
+        help="人物ノート（aliases）に基づいて未解決の人物候補を既知人物へ統合"
+    )
+    parser.add_argument(
         "--rebuild-vault",
         action="store_true",
         help="Obsidian Vaultのmd-hybrid-searchインデックスを再構築"
@@ -385,6 +390,10 @@ def main():
         ran = True
     if args.sync_vault:
         run_and_log(sync_valut.main, "sync_vault")
+        ran = True
+    if args.sync_people:
+        from obsidian_ai_hub import sync_people
+        run_and_log(sync_people.main, "sync_people")
         ran = True
     if args.rebuild_vault:
         run_and_log(rebuild_valut.main, "rebuild_vault")

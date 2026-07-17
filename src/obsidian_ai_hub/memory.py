@@ -331,6 +331,40 @@ def get_db_connection() -> sqlite3.Connection:
         conn.execute("PRAGMA user_version = 5;")
         conn.commit()
 
+    if current_version <= 5:
+        # Add vault_id to people table
+        conn.execute("ALTER TABLE people ADD COLUMN vault_id TEXT;")
+
+        # Create person_candidates table
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS person_candidates (
+                candidate_id TEXT PRIMARY KEY,
+                display_name TEXT NOT NULL,
+                normalized_name TEXT UNIQUE NOT NULL,
+                status TEXT NOT NULL DEFAULT 'unresolved'
+            );
+        """)
+
+        # Create summary_person_candidates table
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS summary_person_candidates (
+                summary_id TEXT NOT NULL,
+                candidate_id TEXT NOT NULL,
+                note TEXT,
+                display_order INTEGER,
+                PRIMARY KEY(summary_id, candidate_id),
+                FOREIGN KEY(summary_id) REFERENCES summaries(summary_id) ON DELETE CASCADE,
+                FOREIGN KEY(candidate_id) REFERENCES person_candidates(candidate_id) ON DELETE CASCADE
+            );
+        """)
+
+        # Create indexes
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_spc_summary_id ON summary_person_candidates(summary_id);")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_pc_normalized_name ON person_candidates(normalized_name);")
+
+        conn.execute("PRAGMA user_version = 6;")
+        conn.commit()
+
     return conn
 
 
