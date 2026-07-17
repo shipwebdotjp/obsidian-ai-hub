@@ -4,6 +4,7 @@ import json
 import logging
 import sqlite3
 import uuid
+from datetime import date
 from pathlib import Path
 
 from obsidian_ai_hub.memory import get_db_connection
@@ -26,8 +27,17 @@ def discover_jsonl_files(activity_path: Path) -> list[Path]:
             for f in sorted(month_dir.iterdir()):
                 if not f.is_file() or f.suffix != ".jsonl":
                     continue
-                if f.name.count("-") == 2:
-                    files.append(f)
+                stem = f.stem
+                parts = stem.split("-")
+                if len(parts) != 3:
+                    continue
+                try:
+                    d = date(int(parts[0]), int(parts[1]), int(parts[2]))
+                except (ValueError, OverflowError):
+                    continue
+                if parts[0] != year_dir.name or parts[1] != month_dir.name:
+                    continue
+                files.append(f)
     return files
 
 
@@ -47,6 +57,11 @@ def parse_line(
         logger.warning("Non-object JSON at %s:%d", source_path, line_no)
         return None
 
+    timestamp = data.get("timestamp")
+    if not timestamp or not isinstance(timestamp, str) or not timestamp.strip():
+        logger.warning("Missing or invalid timestamp at %s:%d", source_path, line_no)
+        return None
+
     keywords = data.get("keywords")
     if not isinstance(keywords, list):
         keywords = []
@@ -57,7 +72,7 @@ def parse_line(
     return {
         "activity_id": f"act_{uuid.uuid4().hex}",
         "activity_date": activity_date,
-        "occurred_at": data.get("timestamp", ""),
+        "occurred_at": timestamp,
         "app_name": data.get("app_name"),
         "window_title": data.get("window_title"),
         "summary": data.get("summary", ""),
@@ -117,7 +132,7 @@ def migrate_file(
                     skipped += 1
             except sqlite3.Error as exc:
                 logger.error("SQLite error at %s:%d: %s", relative_path, line_no, exc)
-                invalid += 1
+                raise
 
     return added, skipped, invalid
 

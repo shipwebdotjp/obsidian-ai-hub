@@ -215,6 +215,7 @@ def main():
         logger.info("Activity logged to SQLite")
     except Exception as e:
         logger.error(f"Failed to write activity log to SQLite: {e}")
+        raise
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)

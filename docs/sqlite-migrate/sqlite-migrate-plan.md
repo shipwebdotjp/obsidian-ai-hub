@@ -1,12 +1,12 @@
 # JSONL生ログのSQLite移行計画
 
-  ## Phase 1. Activity
+## Phase 1. Activity
 
-  ## 概要
+## 概要
 
-  既存の MEMORY_SQLITE_PATH にActivityイベント用テーブルを追加し、logging_activity の記録・重複判定、日次要約、研究コンテキストの読取をSQLiteへ一括切替する。月次・週次・年次の集計JSONLは今回維持し、別フェーズで移行する。
+既存の MEMORY_SQLITE_PATH にActivityイベント用テーブルを追加し、logging_activity の記録・重複判定、日次要約、研究コンテキストの読取をSQLiteへ一括切替する。月次・週次・年次の集計JSONLは今回維持し、別フェーズで移行する。
 
-  ## 実装変更
+## 実装変更
 
   - memory.get_db_connection() のSQLiteスキーマを次版へ移行し、activity_logs テーブルを追加する。
       - activity_id、activity_date、occurred_at、app_name、window_title、summary、category、keywords（JSON）、screenshots（JSON）を保存する。
@@ -25,14 +25,14 @@
       - 実行結果として、走査ファイル数・追加件数・既取込スキップ数・不正行数を表示する。JSONLは削除・更新せず、読取専用アーカイブとして残す。
       - 実行方法は uv run python scripts/migrate_activity_jsonl_to_sqlite.py とする。
 
-  ## テスト
+## テスト
 
   - 一時SQLite DBを使い、スキーマ作成、追加、日別時刻順取得、直近レコード取得、直近日数取得を確認する。
   - 旧JSONLの移行で全フィールド、既定値、不正行スキップ、再実行時の冪等性を確認する。
   - logging_activity の同一ActivityスキップとSQLite保存、日次要約と研究候補生成がSQLiteデータを利用することを確認する。
   - 既存の集計JSONL利用（週次・月次・ダッシュボード・Memory抽出）が変更されないことを既存テストで確認する。
 
-  ## 前提
+## 前提
 
   - 新規Activityの保存先は既存のMemory/Researchと同じ MEMORY_SQLITE_PATH。
   - 今回の対象はActivityの生ログのみで、集計JSONLのSQLite化は次フェーズ。
@@ -45,7 +45,7 @@
 
   Phase 1のActivity生ログ移行が件数照合・通常実行ともに安定した後、日次・週次・月次の集計JSONLを共通SQLiteスキーマへ一括移行する。既存JSONLはアーカイブとして残し、生成・読取・Memory・ダッシュボードを同じリリースでSQLiteへ切り替える。
 
-  ## データモデルと要約生成
+## データモデルと要約生成
 
   - summaries を日・週・月共通テーブルにする。period_type、period_key、期間開始・終了、生成日時、summary、生の文字列配列としてのkeywordsを保存し、(period_type, period_key) を一意にする。
   - 日次だけ mood、sleep_raw、sleep_hours を持つ。週・月の気分分布と睡眠min/avg/maxは、日次データから集計APIが算出する。
@@ -63,7 +63,7 @@
   - 日・週・月のプロンプト、JSON解析、Markdownレンダリングを新スキーマに更新する。各期間は指定された項目だけを生成・表示し、旧source_statsは保存しない。
   - 日次→週次→月次の読取連鎖とMemoryの構造化日次レコード読取を、共通サマリーストア経由へ切り替える。
 
-  ## 移行と切替
+## 移行と切替
 
   - scripts/migrate_summary_jsonl_to_sqlite.py を単発スクリプトとして追加し、日次・週次・月次の既存JSONLを走査する。CLIフラグは追加しない。
   - 既存項目は対応する新テーブルへ移し、存在しない新項目は空として扱う。旧週次・月次のactivitiesはprogressへ移す。
@@ -71,7 +71,7 @@
   - 期間キーによるupsertで再実行可能にし、投入数・更新数・不正行数・重複件数を出力する。JSONLは更新・削除しない。
   - SQLiteへの切替後、dashboard.py、--build-dashboard、静的HTML/年別JSON出力、不要になったDashboard設定を削除する。
 
-  ## APIとReactダッシュボード
+## APIとReactダッシュボード
 
   - 既存の認証済み /api/v1 に読み取り専用APIを追加する。
       - GET /summaries: 期間種別、期間、topic、project、person、open loopで絞り込む一覧。
@@ -82,7 +82,7 @@
   - Pydanticレスポンス型とサービス層を追加し、既存のループバック／Bearerトークン認証をそのまま適用する。
   - React SPAにDashboardルートとサイドバー項目を追加する。概要、フィルタ可能な一覧、詳細ビューを提供し、SQLite APIだけを読取元にする。
 
-  ## 検証
+## 検証
 
   - 一時SQLite DBで、3期間のupsert・期間読取・関連エンティティ統合・表示順・日次睡眠集計を検証する。
   - 移行スクリプトの項目マッピング、不正行スキップ、重複期間の最終行優先、再実行安全性を検証する。

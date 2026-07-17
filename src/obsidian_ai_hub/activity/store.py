@@ -50,7 +50,7 @@ def deserialize_activity(row: sqlite3.Row) -> Dict[str, Any]:
         if val is not None and isinstance(val, str):
             try:
                 activity[col] = json.loads(val)
-            except Exception as e:
+            except json.JSONDecodeError as e:
                 logger.warning(f"Failed to deserialize field '{col}' for activity {activity.get('activity_id')}: {e}")
                 activity[col] = []
         elif val is None:
@@ -114,7 +114,10 @@ def add_activity(
         close_conn = True
 
     try:
-        with conn:
+        if close_conn:
+            with conn:
+                conn.execute(sql, values)
+        else:
             conn.execute(sql, values)
     finally:
         if close_conn:
