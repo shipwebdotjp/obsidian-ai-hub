@@ -105,7 +105,6 @@ python -m obsidian_ai_hub --review-draft --review-week-date 2026-07-12
 python -m obsidian_ai_hub --backup
 python -m obsidian_ai_hub --sync-vault
 python -m obsidian_ai_hub --screenshot
-python -m obsidian_ai_hub --build-dashboard
 ```
 
 The vault sync command indexes the full `VAULT_PATH` tree into `md-hybrid-search` and stores its SQLite/Chroma data outside the vault by default.
@@ -119,13 +118,6 @@ Generate a monthly review for the previous month, or select a month with
 python -m obsidian_ai_hub --summerize-month
 python -m obsidian_ai_hub --summerize-month --month 2026-07
 python -m obsidian_ai_hub --summerize-day
-```
-
-Restrict dashboard generation to one or more years. Without
-`--dashboard-year`, all available years are regenerated.
-
-```bash
-python -m obsidian_ai_hub --build-dashboard --dashboard-year 2025 --dashboard-year 2026
 ```
 
 The following commands notify today's schedule, synchronize the vault with the
@@ -273,7 +265,8 @@ uv run -m obsidian_ai_hub --serve
 Open [http://127.0.0.1:8765](http://127.0.0.1:8765). The **Memory** page lets
 you inspect a candidate and its evidence, approve or reject individual
 candidates, edit candidate text and review fields, and apply approval or
-rejection to multiple selected candidates at once.
+rejection to multiple selected candidates at once. The **Dashboard** page shows
+daily, weekly, and monthly summaries with filters and a detail panel.
 
 The server is local-only by default. If you intentionally make it available on
 your network with `--serve-host`, set `MEMORY_REVIEW_API_TOKEN` first.

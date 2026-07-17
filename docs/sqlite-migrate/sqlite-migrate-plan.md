@@ -55,10 +55,10 @@
       - 月次: highlights / progress / changes / learnings / reflections / patterns / gratitude
       - reflectionsは「自己の行動・思考・改善点に関する観察」に限定する。
 
-  - topics、projects、people、open_loops と各 summary_* 関連テーブルを追加する。Unicode正規化・トリム・大小文字無視で自動統合し、初出表記を表示名として残す。
+  - topics、projects、peopleと各 summary_* 関連テーブルを追加する。Unicode正規化・トリム・大小文字無視で自動統合し、初出表記を表示名として残す。
       - topicsは既存のTOPIC_ENUMのみ許容する。
       - peopleの要約固有メモはsummary_peopleに保存する。
-      - questions / next_actionsはopen_loopsに関連付け、関係側で元の種別と表示順を保持する。状態管理は行わない。
+      - questions / next_actionsは削除する
 
   - 日・週・月のプロンプト、JSON解析、Markdownレンダリングを新スキーマに更新する。各期間は指定された項目だけを生成・表示し、旧source_statsは保存しない。
   - 日次→週次→月次の読取連鎖とMemoryの構造化日次レコード読取を、共通サマリーストア経由へ切り替える。

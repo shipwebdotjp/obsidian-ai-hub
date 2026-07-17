@@ -13,6 +13,7 @@ doc/
 .jules-agent/
 .claude/
 .cptr
+.omo/
 
 *.tsbuildinfo
 
