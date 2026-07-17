@@ -15,8 +15,15 @@ MAX_CONTEXT_NOTE_CHARS = 1200
 MAX_CONTEXT_NOTE_LINES = 48
 MAX_THEME_LENGTH = 80
 MAX_DIRECTION_LENGTH = 140
-LLM_CANDIDATE_COUNT = 3
+LLM_CANDIDATE_COUNT = 1
 ALLOWED_KINDS = ("deep", "adjacent", "explore")
+
+
+@dataclass(frozen=True)
+class _ExistingThemeRef:
+    theme: str
+    status: str
+    key: str  # normalized_key from DB
 
 
 @dataclass(frozen=True)
@@ -70,29 +77,41 @@ def _build_context_pack() -> str:
     return "\n\n".join(blocks)
 
 
-def _load_existing_db_themes() -> list[str]:
+def _load_existing_db_themes() -> list[_ExistingThemeRef]:
     from obsidian_ai_hub.research import db
     try:
         themes = db.list_themes()
-        return [t["theme"] for t in themes[:50] if t.get("theme")]
+        return [
+            _ExistingThemeRef(
+                theme=t["theme"],
+                status=t["status"],
+                key=t["normalized_key"],
+            )
+            for t in themes[:50]
+            if t.get("theme") and t.get("normalized_key")
+        ]
     except Exception:
         logger.exception("Failed to load research themes from DB")
         return []
 
 
-def _build_existing_candidate_block(themes: Sequence[str]) -> str:
+def _build_existing_themes_block(themes: Sequence[_ExistingThemeRef]) -> str:
     if not themes:
         return "(none)"
-    return "\n".join(f"- {theme}" for theme in themes[:50])
+    lines = [f"- [{t.status}] {t.theme}" for t in themes[:50]]
+    return "\n".join(lines)
 
 
-def _build_llm_prompt(context_pack: str, existing_candidates: Sequence[str]) -> str:
+def _build_llm_prompt(existing_themes: Sequence[_ExistingThemeRef]) -> str:
+    context_pack = _build_context_pack()
+    if not context_pack:
+        return ""
     return prompt.render_prompt(
         config.RESEARCH_THEME_GENERATION_PROMPT_PATH,
         {
             "LLM_CANDIDATE_COUNT": LLM_CANDIDATE_COUNT,
             "context_pack": context_pack,
-            "existing_candidates_block": _build_existing_candidate_block(existing_candidates),
+            "existing_themes_block": _build_existing_themes_block(existing_themes),
         }
     )
 
@@ -181,16 +200,15 @@ def _validate_llm_candidate(
 
 def _build_llm_candidates(
     *,
-    existing_candidates: Sequence[str],
+    existing_themes: Sequence[_ExistingThemeRef],
 ) -> list[SuggestedResearchTheme]:
-    context_pack = _build_context_pack()
-    if not context_pack:
+    prompt_text = _build_llm_prompt(existing_themes)
+    if not prompt_text:
         logger.warning("No activity context available")
         return []
 
-    prompt = _build_llm_prompt(context_pack, existing_candidates)
-    existing_keys = {_candidate_key(theme) for theme in existing_candidates}
-    logger.info("LLM candidate generation prompt:\n%s", prompt)
+    existing_keys = {t.key for t in existing_themes}
+    logger.info("LLM candidate generation prompt:\n%s", prompt_text)
 
     last_error: Exception | None = None
     for attempt in range(2):
@@ -198,7 +216,7 @@ def _build_llm_candidates(
             response = llm_client.generate_llm_response(
                 provider=config.RESEARCH_THEME_GENERATION_PROVIDER,
                 model=config.RESEARCH_THEME_GENERATION_MODEL,
-                prompt=prompt,
+                prompt=prompt_text,
                 temperature=0.2,
                 max_tokens=8000,
             ).strip()
@@ -226,7 +244,7 @@ def _build_llm_candidates(
             last_error = exc
             logger.warning("LLM candidate generation failed on attempt %s: %s", attempt + 1, exc)
             if attempt == 0:
-                prompt = prompt + "\n\nJSON のみを返してください。余計な説明やコードフェンスは不要です。"
+                prompt_text = prompt_text + "\n\nJSON のみを返してください。余計な説明やコードフェンスは不要です。"
 
     if last_error is not None:
         logger.exception("LLM candidate generation failed; using fallback themes")
@@ -235,9 +253,9 @@ def _build_llm_candidates(
 
 def _select_final_suggestions(
     llm_candidates: Sequence[SuggestedResearchTheme],
-    existing_candidates: Sequence[str],
+    existing_themes: Sequence[_ExistingThemeRef],
 ) -> list[SuggestedResearchTheme]:
-    existing_keys = {_candidate_key(theme) for theme in existing_candidates}
+    existing_keys = {t.key for t in existing_themes}
     selected: list[SuggestedResearchTheme] = []
     seen_keys: set[str] = set(existing_keys)
 
@@ -276,11 +294,11 @@ def _select_final_suggestions(
 
 
 def build_suggestions() -> list[SuggestedResearchTheme]:
-    existing_candidates = _load_existing_db_themes()
+    existing_themes = _load_existing_db_themes()
     llm_candidates = _build_llm_candidates(
-        existing_candidates=existing_candidates,
+        existing_themes=existing_themes,
     )
-    suggestions = _select_final_suggestions(llm_candidates, existing_candidates)
+    suggestions = _select_final_suggestions(llm_candidates, existing_themes)
     return suggestions
 
 

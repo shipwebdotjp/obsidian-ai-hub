@@ -19,7 +19,11 @@ def _write_activity_log(base_dir: Path, activity_date: date, summaries: list[str
     return log_file
 
 
-def test_build_suggestions_uses_activity_context_and_avoids_existing(tmp_path: Path, monkeypatch):
+def test_build_suggestions_uses_activity_context_and_avoids_existing(
+    tmp_path: Path,
+    monkeypatch,
+    test_memory_db_path: Path,
+):
     today = date.today()
     activity_root = tmp_path / "activity"
 
@@ -34,7 +38,10 @@ def test_build_suggestions_uses_activity_context_and_avoids_existing(tmp_path: P
     monkeypatch.setattr(suggest_research_theme.config, "ACTIVITY_PATH", activity_root)
 
     from obsidian_ai_hub.research import db as research_themes
-    research_themes.create_theme(theme="既存テーマ", direction="既存の方向", kind="deep", confidence=0.9)
+    assert suggest_research_theme.config.MEMORY_SQLITE_PATH == test_memory_db_path
+    research_themes.create_theme(theme="既存テーマA", direction="既存の方向", kind="deep", confidence=0.9)
+    rejected = research_themes.create_theme(theme="却下済みテーマ", direction="却下方向", kind="explore", confidence=0.5)
+    research_themes.set_status(rejected["theme_id"], "rejected")
 
     llm_response = json.dumps(
         {
@@ -62,7 +69,7 @@ def test_build_suggestions_uses_activity_context_and_avoids_existing(tmp_path: P
                 },
                 {
                     "kind": "deep",
-                    "theme": "既存テーマ",
+                    "theme": "既存テーマA",
                     "direction": "既存の候補と同じ内容",
                     "why_now": "重複チェック用",
                     "confidence": 0.99,
@@ -74,14 +81,18 @@ def test_build_suggestions_uses_activity_context_and_avoids_existing(tmp_path: P
 
     def fake_llm_response(*, provider: str, model: str, prompt: str, temperature: float, max_tokens: int) -> str:
         assert "Obsidian の見出し設計" in prompt
-        assert "既存テーマ" in prompt
+        assert "既存テーマA" in prompt
+        assert "[candidate]" in prompt
+        assert "[rejected]" in prompt
         return llm_response
 
     with patch.object(suggest_research_theme.llm_client, "generate_llm_response", side_effect=fake_llm_response):
         suggestions = suggest_research_theme.build_suggestions()
 
     assert [item.kind for item in suggestions] == ["deep", "adjacent", "explore"]
-    assert all(item.theme != "既存テーマ" for item in suggestions)
+    existing_keys = {suggest_research_theme._candidate_key(t.theme) for t in suggest_research_theme._load_existing_db_themes()}
+    for item in suggestions:
+        assert suggest_research_theme._candidate_key(item.theme) not in existing_keys
     assert len(suggestions) == 3
 
 

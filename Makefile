@@ -54,3 +54,6 @@ npm-build:
 # Memory Review Web UI の開発サーバ（Vite + FastAPI を別portで起動する想定）
 npm-dev:
 	cd frontend && npm run dev
+
+serve:
+	uv run -m obsidian_ai_hub --serve --debug

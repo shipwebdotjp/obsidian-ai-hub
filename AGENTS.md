@@ -98,3 +98,7 @@ make dev-web                                  # 開発: Vite dev server (proxy -
 - Tests for frequently changing parts, such as string matching or the structure of output markdown, are not required.
 - Write only the minimum necessary test code to check for critical errors or crashes.
 - Tests must use isolated temporary databases (or explicitly injected test database paths) and must never modify the production database.
+- Run database-writing tests only with `uv run pytest tests/`; never call test functions or seed `memory` / `research.db` from `uv run python -` or another ad-hoc Python command.
+- Database-writing tests must use the `test_memory_db_path` fixture (the suite also applies it automatically). Do not patch a production path into `config.MEMORY_SQLITE_PATH`.
+- For a one-off database check, inject a newly created temporary SQLite path before importing or calling application DB code. Do not use the configured database as a convenient test target.
+- Do not delete or alter production data discovered during testing without explicit user authorization. See `docs/testing.md` for the test-environment contract and failure handling.

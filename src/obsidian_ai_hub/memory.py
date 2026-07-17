@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import re
 import unicodedata
 import uuid
@@ -93,8 +94,21 @@ EVENT_COLUMNS = [
 ]
 
 
+def _assert_test_db_is_not_production(db_path: Path) -> None:
+    """Reject the configured production DB while pytest isolation is active."""
+    if os.getenv("OBSIDIAN_AI_HUB_TESTING") != "1":
+        return
+
+    production_path = os.getenv("OBSIDIAN_AI_HUB_TEST_PRODUCTION_DB_PATH")
+    if not production_path:
+        raise RuntimeError("OBSIDIAN_AI_HUB_TEST_PRODUCTION_DB_PATH is required in test mode")
+    if db_path.expanduser().resolve() == Path(production_path).expanduser().resolve():
+        raise RuntimeError("Refusing to open the production memory database while tests are running")
+
+
 def get_db_connection() -> sqlite3.Connection:
     db_path = Path(config.MEMORY_SQLITE_PATH)
+    _assert_test_db_is_not_production(db_path)
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(db_path), check_same_thread=False, timeout=30.0)
     conn.row_factory = sqlite3.Row
