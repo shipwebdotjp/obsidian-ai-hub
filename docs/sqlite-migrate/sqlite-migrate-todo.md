@@ -17,12 +17,12 @@
 
 ### スキーマとストア
 
-- [ ] `MEMORY_SQLITE_PATH` のマイグレーションに `activity_logs` を追加する。
+- [x] `MEMORY_SQLITE_PATH` のマイグレーションに `activity_logs` を追加する。
   - `activity_id`、`activity_date`、`occurred_at`、アプリ・ウィンドウ情報、要約、カテゴリ、
     keywords JSON、screenshots JSONを保存する。
   - 旧JSONL取込用の相対`source_path`と`source_line`を保存し、その組合せを一意にする。
   - 日付・時刻順の一覧、日別最新、直近N日の読取に必要な索引を作る。
-- [ ] Activity永続化モジュールを追加し、追加・日別一覧・日別最新・直近日数一覧を提供する。
+- [x] Activity永続化モジュールを追加し、追加・日別一覧・日別最新・直近日数一覧を提供する。
 
 ### 呼出元の切替
 
@@ -32,11 +32,11 @@
 
 ### 旧データ移行と検証
 
-- [ ] `scripts/migrate_activity_jsonl_to_sqlite.py` を追加する。日別の
+- [x] `scripts/migrate_activity_jsonl_to_sqlite.py` を追加する。日別の
   `YYYY-MM-DD.jsonl` のみを走査し、集計JSONLは除外する。
-- [ ] 取込を再実行可能にし、追加・既取込・不正JSONの件数を表示する。不正行は警告して継続する。
-- [ ] JSONLとSQLiteの件数・代表レコードを照合し、JSONLを読み取り専用アーカイブとして残す。
-- [ ] 一時DBを使うユニットテストで、順序、重複判定、既定値、移行の冪等性を確認する。
+- [x] 取込を再実行可能にし、追加・既取込・不正JSONの件数を表示する。不正行は警告して継続する。
+- [x] `src/obsidian_ai_hub/activity/migration.py` に移行ロジックを配置し、スクリプトは薄いCLIラッパーとする。
+- [x] 一時DBを使うユニットテストで、順序、重複判定、既定値、移行の冪等性を確認する。
 
 ## Phase 2 — 構造化サマリーとダッシュボード
 
