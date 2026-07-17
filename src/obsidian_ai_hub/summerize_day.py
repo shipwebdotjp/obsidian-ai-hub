@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from obsidian_ai_hub.utils import config, reader, extracter, llm_client, prompt
 from obsidian_ai_hub.utils.topics import TOPIC_ENUM, normalize_topics
 from pathlib import Path
+from obsidian_ai_hub.activity.store import get_activities_by_date
 
 logger = logging.getLogger(__name__)
 
@@ -247,34 +248,32 @@ def upsert_monthly_record(target_date: datetime, record: dict):
 
 
 def load_activity_logs(target_date: datetime) -> list[dict]:
-    activity_log_file = Path(config.ACTIVITY_PATH) / target_date.strftime("%Y/%m") / target_date.strftime("%Y-%m-%d.jsonl")
+    activity_date_str = target_date.strftime("%Y-%m-%d")
+    try:
+        db_activities = get_activities_by_date(activity_date_str)
+    except Exception as e:
+        logger.error(f"Failed to fetch activity logs from SQLite: {e}")
+        return []
+
     logs = []
-    if not activity_log_file.exists():
-        return logs
+    for data in db_activities:
+        # Coalesce None to defaults
+        category = data.get("category")
+        if category is None:
+            category = "その他"
 
-    with open(activity_log_file, "r", encoding="utf-8") as f:
-        for line in f:
-            try:
-                data = json.loads(line)
-                # Coalesce None to defaults
-                category = data.get("category")
-                if category is None:
-                    category = "その他"
+        keywords = data.get("keywords")
+        if keywords is None:
+            keywords = []
 
-                keywords = data.get("keywords")
-                if keywords is None:
-                    keywords = []
-
-                logs.append({
-                    "timestamp": data.get("timestamp"),
-                    "app_name": data.get("app_name"),
-                    "window_title": data.get("window_title"),
-                    "summary": data.get("summary"),
-                    "category": category,
-                    "keywords": keywords
-                })
-            except json.JSONDecodeError:
-                logger.error("Error decoding JSON from activity log file")
+        logs.append({
+            "timestamp": data.get("occurred_at"),
+            "app_name": data.get("app_name"),
+            "window_title": data.get("window_title"),
+            "summary": data.get("summary"),
+            "category": category,
+            "keywords": keywords
+        })
     return logs
 
 

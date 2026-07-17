@@ -82,18 +82,33 @@ def test_create_and_update_job():
     assert latest["generated_title"] == "生成タイトル"
 
 
-def test_list_recent_activity_days(tmp_path: Path):
-    today = date.today()
-    log_dir = tmp_path / today.strftime("%Y") / today.strftime("%m")
-    log_dir.mkdir(parents=True, exist_ok=True)
-    log_file = log_dir / f"{today.strftime('%Y-%m-%d')}.jsonl"
-    with open(log_file, "w", encoding="utf-8") as f:
-        f.write(json.dumps({"summary": "テストアクティビティ", "category": "開発", "keywords": ["test"]}, ensure_ascii=False) + "\n")
-        f.write(json.dumps({"summary": "テストアクティビティ", "category": "開発", "keywords": ["test"]}, ensure_ascii=False) + "\n")
-        f.write("broken json line\n")
-        f.write(json.dumps({"summary": "別のアクティビティ", "category": "学習", "keywords": ["python"]}, ensure_ascii=False) + "\n")
+def test_list_recent_activity_days():
+    mock_activities = [
+        {
+            "activity_date": date.today().isoformat(),
+            "occurred_at": "2023-10-27T10:00:00",
+            "summary": "テストアクティビティ",
+            "category": "開発",
+            "keywords": ["test"]
+        },
+        {
+            "activity_date": date.today().isoformat(),
+            "occurred_at": "2023-10-27T10:05:00",
+            "summary": "テストアクティビティ",
+            "category": "開発",
+            "keywords": ["test"]
+        },
+        {
+            "activity_date": date.today().isoformat(),
+            "occurred_at": "2023-10-27T11:00:00",
+            "summary": "別のアクティビティ",
+            "category": "学習",
+            "keywords": ["python"]
+        }
+    ]
 
-    with patch.object(research_themes.config, "ACTIVITY_PATH", tmp_path):
+    with patch("obsidian_ai_hub.activity.store.get_recent_activities") as mock_get:
+        mock_get.return_value = mock_activities
         entries = research_themes.list_recent_activity_days(days=1)
 
     assert len(entries) == 2
