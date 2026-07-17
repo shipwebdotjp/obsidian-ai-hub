@@ -6,6 +6,7 @@ from AppKit import NSScreen
 
 from obsidian_ai_hub.take_screenshot import capture_screen, get_unique_path
 from obsidian_ai_hub.utils import accessibility, config, img2text, llm_client, prompt
+from obsidian_ai_hub.activity.store import add_activity, get_latest_activity_by_date
 
 logger = logging.getLogger(__name__)
 
@@ -80,24 +81,16 @@ def main():
     now = datetime.now()
 
     # 1.5 重複チェック: 直前の記録と同じアプリ・タイトルならスキップ
-    activity_log_dir = config.ACTIVITY_PATH / now.strftime("%Y/%m")
-    log_file = activity_log_dir / now.strftime("%Y-%m-%d.jsonl")
-    if log_file.exists():
-        try:
-            last_line = ""
-            with open(log_file, "r", encoding="utf-8") as f:
-                for line in f:
-                    if line.strip():
-                        last_line = line
-
-            if last_line:
-                last_record = json.loads(last_line)
-                if (last_record.get("app_name") == app_name and
-                    last_record.get("window_title") == window_title):
-                    logger.info(f"Skipping duplicate activity: {app_name} - {window_title}")
-                    return
-        except Exception as e:
-            logger.warning(f"Failed to read last activity log for duplication check: {e}")
+    try:
+        activity_date_str = now.strftime("%Y-%m-%d")
+        last_record = get_latest_activity_by_date(activity_date_str)
+        if last_record:
+            if (last_record.get("app_name") == app_name and
+                last_record.get("window_title") == window_title):
+                logger.info(f"Skipping duplicate activity: {app_name} - {window_title}")
+                return
+    except Exception as e:
+        logger.warning(f"Failed to fetch last activity log for duplication check: {e}")
 
     # 2. 各ディスプレイのスクリーンショット保存
     # YYYY/MM/DD
@@ -205,28 +198,23 @@ def main():
         logger.error(f"LLM summarization failed: {e}")
         summary = f"{app_name} での作業を検出しました（要約に失敗しました）。"
 
-    # 5. JSONL 追記
-    # vault.activity/YYYY/MM/YYYY-MM-DD.jsonl
-    activity_log_dir = config.ACTIVITY_PATH / now.strftime("%Y/%m")
-    activity_log_dir.mkdir(parents=True, exist_ok=True)
-    log_file = activity_log_dir / now.strftime("%Y-%m-%d.jsonl")
-
-    record = {
-        "timestamp": now.isoformat(),
-        "app_name": app_name,
-        "window_title": window_title,
-        "summary": summary,
-        "category": category,
-        "keywords": keywords,
-        "screenshots": screenshot_paths
-    }
-
+    # 5. SQLite 追記
     try:
-        with open(log_file, "a", encoding="utf-8") as f:
-            f.write(json.dumps(record, ensure_ascii=False) + "\n")
-        logger.info(f"Activity logged to {log_file}")
+        activity_date_str = now.strftime("%Y-%m-%d")
+        occurred_at_str = now.isoformat()
+        add_activity(
+            activity_date=activity_date_str,
+            occurred_at=occurred_at_str,
+            app_name=app_name,
+            window_title=window_title,
+            summary=summary,
+            category=category,
+            keywords=keywords,
+            screenshots=screenshot_paths,
+        )
+        logger.info("Activity logged to SQLite")
     except Exception as e:
-        logger.error(f"Failed to write activity log: {e}")
+        logger.error(f"Failed to write activity log to SQLite: {e}")
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
