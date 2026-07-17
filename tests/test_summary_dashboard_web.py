@@ -1,0 +1,259 @@
+# ruff: noqa: E402
+import sys
+from datetime import datetime
+from unittest.mock import MagicMock
+
+mock_modules = {
+    "EventKit": MagicMock(),
+    "AppKit": MagicMock(),
+    "objc": MagicMock(),
+    "Foundation": MagicMock(),
+    "ApplicationServices": MagicMock(),
+    "atomacos": MagicMock(),
+    "Quartz": MagicMock(),
+    "Vision": MagicMock(),
+    "Cocoa": MagicMock(),
+}
+for name, m in mock_modules.items():
+    sys.modules[name] = m
+
+import pytest
+from fastapi.testclient import TestClient
+
+from obsidian_ai_hub import memory
+from obsidian_ai_hub.summary import store as summary_store
+from obsidian_ai_hub.activity import store as activity_store
+from obsidian_ai_hub.utils import config
+from obsidian_ai_hub.web.app import create_app
+
+
+@pytest.fixture
+def clean_summary_env(tmp_path, monkeypatch):
+    vault_path = tmp_path / "vault"
+    vault_path.mkdir(exist_ok=True)
+    monkeypatch.setattr(config, "VAULT_PATH", vault_path)
+
+    activity_dir = vault_path / "activity"
+    activity_dir.mkdir(exist_ok=True)
+    monkeypatch.setattr(config, "ACTIVITY_PATH", activity_dir)
+
+    db_path = tmp_path / "memory.sqlite3"
+    monkeypatch.setattr(config, "MEMORY_SQLITE_PATH", db_path)
+
+    return vault_path
+
+
+@pytest.fixture
+def loopback_client(clean_summary_env):
+    app = create_app(host="127.0.0.1", port=0, token="")
+    return TestClient(app)
+
+
+def _seed_day(period_key: str, summary: str, topics: list[str] | None = None, keywords: list[str] | None = None):
+    summary_store.upsert_summary({
+        "period_type": "day",
+        "period_key": period_key,
+        "period_start": period_key,
+        "period_end": period_key,
+        "generated_at": f"{period_key}T22:00:00",
+        "summary": summary,
+        "keywords": keywords or [],
+        "mood": "good",
+        "sleep_raw": "7h",
+        "sleep_hours": 7.0,
+        "topics": topics or ["その他"],
+        "projects": ["Project A"],
+        "people": [{"name": "Alice", "note": "met"}],
+        "items": [
+            {"kind": "highlights", "body": f"Highlight for {period_key}", "display_order": 0},
+            {"kind": "activities", "body": f"Activity for {period_key}", "display_order": 0},
+        ],
+    })
+
+
+def _seed_week(period_key: str, start: str, end: str, summary: str):
+    summary_store.upsert_summary({
+        "period_type": "week",
+        "period_key": period_key,
+        "period_start": start,
+        "period_end": end,
+        "generated_at": f"{end}T22:00:00",
+        "summary": summary,
+        "keywords": [],
+        "mood": None,
+        "sleep_raw": None,
+        "sleep_hours": None,
+        "topics": ["LLM・AI活用"],
+        "projects": ["Project B"],
+        "people": [{"name": "Bob", "note": ""}],
+        "items": [
+            {"kind": "progress", "body": f"Progress for {period_key}", "display_order": 0},
+        ],
+    })
+
+
+def _seed_month(period_key: str, summary: str):
+    summary_store.upsert_summary({
+        "period_type": "month",
+        "period_key": period_key,
+        "period_start": f"{period_key}-01",
+        "period_end": f"{period_key}-31",
+        "generated_at": f"{period_key}-28T22:00:00",
+        "summary": summary,
+        "keywords": [],
+        "mood": None,
+        "sleep_raw": None,
+        "sleep_hours": None,
+        "topics": ["LLM・AI活用"],
+        "projects": ["Project B"],
+        "people": [],
+        "items": [],
+    })
+
+
+def test_dashboard_home(loopback_client, clean_summary_env, monkeypatch):
+    # Mock datetime.now() for predictable test dates (say, 2026-07-20)
+    fake_now = datetime(2026, 7, 20, 10, 15, 0)
+
+    # Seed data
+    _seed_month("2026-07", "Monthly July")
+    _seed_week("2026-W30", "2026-07-20", "2026-07-26", "Weekly 30")
+    _seed_day("2026-07-19", "Yesterday Daily")
+
+    # Add activity logs for today (2026-07-20)
+    activity_store.add_activity(activity_date="2026-07-20", occurred_at="2026-07-20T10:00:00", summary="first log")
+    activity_store.add_activity(activity_date="2026-07-20", occurred_at="2026-07-20T09:30:00", summary="second log")
+
+    # We patch datetime.now in service to fake_now
+    from obsidian_ai_hub.web import service
+    original_func = service.get_dashboard_home
+    monkeypatch.setattr(service, "get_dashboard_home", lambda now=None: original_func(now=fake_now))
+
+    res = loopback_client.get("/api/v1/summary-dashboard/home")
+    assert res.status_code == 200
+    data = res.json()
+
+    assert data["this_month_summary"]["summary"] == "Monthly July"
+    assert data["latest_week_summary"]["summary"] == "Weekly 30"
+    assert data["yesterday_summary"]["summary"] == "Yesterday Daily"
+
+    today_act = data["today_activity"]
+    assert today_act["date"] == "2026-07-20"
+    # 45 minutes active out of 10h15m (615 minutes) total_seconds.
+    assert today_act["active_minutes"] == 45.0
+    assert today_act["inactive_minutes"] == 615.0 - 45.0
+    assert len(today_act["logs"]) == 2
+    assert today_act["logs"][0]["summary"] == "second log"  # Sorted ascending by occurred_at
+    assert today_act["logs"][1]["summary"] == "first log"
+
+
+def test_dashboard_browse_year_level(loopback_client, clean_summary_env):
+    _seed_month("2026-07", "Month 7")
+    _seed_month("2026-08", "Month 8")
+    _seed_week("2026-W30", "2026-07-20", "2026-07-26", "Week 30") # Overlaps 2026
+    _seed_week("2025-W52", "2025-12-29", "2026-01-04", "Week 52") # Overlaps both 2025 and 2026
+
+    # Browse 2026
+    res = loopback_client.get("/api/v1/summary-dashboard/browse?year=2026")
+    assert res.status_code == 200
+    data = res.json()
+
+    assert data["selected_year"] == "2026"
+    assert data["selected_month"] is None
+    assert len(data["months"]) == 2
+    assert len(data["weeks"]) == 2  # Both W30 and W52 overlap 2026
+    assert data["days"] == []
+
+
+def test_dashboard_browse_month_level(loopback_client, clean_summary_env):
+    # Week 30: 2026-07-20 to 2026-07-26 (Overlaps July 2026)
+    _seed_week("2026-W30", "2026-07-20", "2026-07-26", "Week 30")
+    # Day 1: July 19 (has summary)
+    _seed_day("2026-07-19", "Day 19")
+
+    # Day 20: (only activity log, no summary)
+    activity_store.add_activity(activity_date="2026-07-20", occurred_at="2026-07-20T10:00:00", summary="activity log")
+
+    res = loopback_client.get("/api/v1/summary-dashboard/browse?month=2026-07")
+    assert res.status_code == 200
+    data = res.json()
+
+    assert data["selected_month"] == "2026-07"
+    assert len(data["weeks"]) == 1
+    assert data["weeks"][0]["period_key"] == "2026-W30"
+
+    # 2026-07-20 (no summary) and 2026-07-19 (has summary)
+    assert len(data["days"]) == 2
+    assert data["days"][0]["date"] == "2026-07-20"
+    assert data["days"][0]["has_summary"] is False
+    assert data["days"][0]["summary"] is None
+
+    assert data["days"][1]["date"] == "2026-07-19"
+    assert data["days"][1]["has_summary"] is True
+    assert data["days"][1]["summary"] == "Day 19"
+
+
+def test_dashboard_browse_validation_mismatch(loopback_client, clean_summary_env):
+    res = loopback_client.get("/api/v1/summary-dashboard/browse?year=2025&month=2026-07")
+    assert res.status_code == 400
+
+
+def test_dashboard_summaries_get_by_id(loopback_client, clean_summary_env):
+    _seed_day("2026-07-19", "My Day")
+
+    # Get ID
+    conn = memory.get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT summary_id FROM summaries WHERE period_key='2026-07-19'")
+        summary_id = cursor.fetchone()[0]
+    finally:
+        conn.close()
+
+    res = loopback_client.get(f"/api/v1/summary-dashboard/summaries/{summary_id}")
+    assert res.status_code == 200
+    assert res.json()["summary"] == "My Day"
+
+
+def test_dashboard_days_get_details(loopback_client, clean_summary_env):
+    _seed_day("2026-07-19", "My Day")
+    activity_store.add_activity(activity_date="2026-07-19", occurred_at="2026-07-19T09:00:00", summary="something")
+
+    res = loopback_client.get("/api/v1/summary-dashboard/days/2026-07-19")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["date"] == "2026-07-19"
+    assert data["summary"]["summary"] == "My Day"
+    assert len(data["logs"]) == 1
+    assert data["logs"][0]["summary"] == "something"
+    assert data["active_minutes"] == 30.0
+
+
+def test_dashboard_stats_aggregation(loopback_client, clean_summary_env):
+    # Seed 3 days with recognised topics from TOPIC_ENUM
+    _seed_day("2026-07-19", "Day 19", topics=["LLM・AI活用", "健康・医療"], keywords=["foo", "bar"])
+    _seed_day("2026-07-20", "Day 20", topics=["LLM・AI活用"], keywords=["foo"])
+    _seed_day("2026-07-21", "Day 21", topics=["ソフトウェア開発"], keywords=["baz"])
+
+    # Seed activities
+    activity_store.add_activity(activity_date="2026-07-19", occurred_at="2026-07-19T10:00:00", summary="act")
+
+    res = loopback_client.get("/api/v1/summary-dashboard/stats?start_date=2026-07-19&end_date=2026-07-21")
+    assert res.status_code == 200
+    data = res.json()
+
+    assert data["granularity"] == "day"
+    assert len(data["buckets"]) == 3
+    # Check candidate topics / keywords sorting (LLM・AI活用 has 2, others have 1)
+    assert data["candidate_topics"][0] == "LLM・AI活用"
+    assert data["candidate_keywords"][0] == "foo"
+
+    # Day 19 has topic LLM・AI活用, 健康・医療
+    bucket_19 = data["buckets"][0]
+    assert bucket_19["key"] == "2026-07-19"
+    assert bucket_19["daily_summary_count"] == 1
+    assert bucket_19["topic_counts"]["LLM・AI活用"] == 1
+    assert bucket_19["topic_counts"]["健康・医療"] == 1
+    assert bucket_19["keyword_counts"]["foo"] == 1
+    assert bucket_19["keyword_counts"]["bar"] == 1
+    assert bucket_19["active_minutes"] == 30.0

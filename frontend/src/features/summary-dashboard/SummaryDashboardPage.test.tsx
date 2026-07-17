@@ -4,9 +4,11 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import SummaryDashboardPage from "./SummaryDashboardPage";
 
 vi.mock("../../api/client", () => ({
-  listSummaries: vi.fn(),
-  getSummary: vi.fn(),
-  getSummaryOptions: vi.fn(),
+  getDashboardHome: vi.fn(),
+  getDashboardBrowse: vi.fn(),
+  getDashboardSummary: vi.fn(),
+  getDashboardDayDetails: vi.fn(),
+  getDashboardStats: vi.fn(),
   ApiError: class ApiError extends Error {
     status: number;
     constructor(status: number, message: string) {
@@ -17,99 +19,169 @@ vi.mock("../../api/client", () => ({
 }));
 
 import {
-  listSummaries,
-  getSummary,
-  getSummaryOptions,
+  getDashboardHome,
+  getDashboardBrowse,
+  getDashboardSummary,
+  getDashboardDayDetails,
+  getDashboardStats,
 } from "../../api/client";
 
-const mockListSummaries = vi.mocked(listSummaries);
-const mockGetSummary = vi.mocked(getSummary);
-const mockGetSummaryOptions = vi.mocked(getSummaryOptions);
+const mockGetDashboardHome = vi.mocked(getDashboardHome);
+const mockGetDashboardBrowse = vi.mocked(getDashboardBrowse);
+const mockGetDashboardSummary = vi.mocked(getDashboardSummary);
+const mockGetDashboardDayDetails = vi.mocked(getDashboardDayDetails);
+const mockGetDashboardStats = vi.mocked(getDashboardStats);
 
-const sampleSummary = {
-  summary_id: "sum_20260713_day",
-  period_type: "day" as const,
-  period_key: "2026-07-13",
-  period_start: "2026-07-13",
-  period_end: "2026-07-13",
-  generated_at: "2026-07-13T22:00:00",
-  summary: "Test summary",
-  keywords: [],
-  mood: "good",
-  sleep_raw: "7h",
-  sleep_hours: 7,
-  topics: ["LLM・AI活用"],
-  projects: ["Project A"],
-  people: [{ name: "Alice", note: "met" }],
+const sampleHomeResponse = {
+  this_month_summary: {
+    summary_id: "sum_this_month",
+    period_type: "month" as const,
+    period_key: "2026-07",
+    period_start: "2026-07-01",
+    period_end: "2026-07-31",
+    summary: "July Monthly Plan",
+    keywords: [],
+    mood: null,
+    sleep_raw: null,
+    sleep_hours: null,
+    topics: ["LLM・AI活用"],
+    projects: [],
+    people: [],
+    items: [],
+  },
+  latest_week_summary: {
+    summary_id: "sum_latest_week",
+    period_type: "week" as const,
+    period_key: "2026-W29",
+    period_start: "2026-07-13",
+    period_end: "2026-07-19",
+    summary: "Week 29 Wrapup",
+    keywords: [],
+    mood: null,
+    sleep_raw: null,
+    sleep_hours: null,
+    topics: ["ソフトウェア開発"],
+    projects: [],
+    people: [],
+    items: [],
+  },
+  yesterday_summary: {
+    summary_id: "sum_yesterday",
+    period_type: "day" as const,
+    period_key: "2026-07-19",
+    period_start: "2026-07-19",
+    period_end: "2026-07-19",
+    summary: "Yesterday Summary",
+    keywords: [],
+    mood: "good",
+    sleep_raw: "7h",
+    sleep_hours: 7.0,
+    topics: [],
+    projects: [],
+    people: [],
+    items: [],
+  },
+  today_activity: {
+    date: "2026-07-20",
+    active_minutes: 60.0,
+    inactive_minutes: 540.0,
+    logs: [
+      {
+        activity_id: "act_1",
+        occurred_at: "2026-07-20T10:00:00",
+        app_name: "VS Code",
+        window_title: "types.ts",
+        summary: "Coding summary",
+        category: "開発",
+        keywords: ["TypeScript"],
+      },
+    ],
+  },
+};
+
+const sampleBrowseResponse = {
+  selectable_years: ["2026"],
+  selected_year: "2026",
+  selected_month: null,
+  months: [sampleHomeResponse.this_month_summary],
+  weeks: [sampleHomeResponse.latest_week_summary],
+  days: [],
+};
+
+const sampleStatsResponse = {
+  granularity: "day" as const,
+  buckets: [
+    {
+      key: "2026-07-20",
+      display_label: "07/20",
+      start_date: "2026-07-20",
+      end_date: "2026-07-20",
+      active_minutes: 60.0,
+      inactive_minutes: 540.0,
+      daily_summary_count: 1,
+      topic_counts: { "LLM・AI活用": 1 },
+      keyword_counts: { TypeScript: 1 },
+    },
+  ],
+  candidate_topics: ["LLM・AI活用"],
+  candidate_keywords: ["TypeScript"],
 };
 
 beforeEach(() => {
   vi.clearAllMocks();
 });
 
-it("renders summary list and options on load", async () => {
-  mockGetSummaryOptions.mockResolvedValue({
-    period_types: ["day", "week", "month"],
-    topics: ["LLM・AI活用"],
-    projects: ["Project A"],
-    people: ["Alice"],
-  });
-  mockListSummaries.mockResolvedValue({ items: [sampleSummary], total: 1 });
+it("renders home screen metrics and logs on load", async () => {
+  mockGetDashboardHome.mockResolvedValue(sampleHomeResponse);
 
   render(<SummaryDashboardPage />);
 
   await waitFor(() => {
-    expect(screen.getByText("Test summary")).toBeInTheDocument();
+    expect(screen.getByText("今月の月次サマリ")).toBeInTheDocument();
+    expect(screen.getByText("July Monthly Plan")).toBeInTheDocument();
+    expect(screen.getByText("Week 29 Wrapup")).toBeInTheDocument();
+    expect(screen.getByText("Yesterday Summary")).toBeInTheDocument();
   });
-  expect(screen.getByText("(1 件)")).toBeInTheDocument();
-  expect(screen.getByRole("option", { name: "LLM・AI活用" })).toBeInTheDocument();
+
+  expect(screen.getByText("Coding summary")).toBeInTheDocument();
+  expect(screen.getByText("VS Code")).toBeInTheDocument();
 });
 
-it("shows detail when a summary is selected", async () => {
-  mockGetSummaryOptions.mockResolvedValue({
-    period_types: ["day", "week", "month"],
-    topics: [],
-    projects: [],
-    people: [],
-  });
-  mockListSummaries.mockResolvedValue({ items: [sampleSummary], total: 1 });
-  mockGetSummary.mockResolvedValue({
-    ...sampleSummary,
-    items: [
-      {
-        summary_item_id: "item_1",
-        kind: "highlights",
-        body: "Highlight text",
-        display_order: 0,
-      },
-    ],
-  });
+it("switches to browse tab and lists summaries", async () => {
+  mockGetDashboardHome.mockResolvedValue(sampleHomeResponse);
+  mockGetDashboardBrowse.mockResolvedValue(sampleBrowseResponse);
 
   render(<SummaryDashboardPage />);
 
   await waitFor(() => {
-    expect(screen.getByText("Test summary")).toBeInTheDocument();
+    expect(screen.getByText("今月の月次サマリ")).toBeInTheDocument();
   });
 
-  await userEvent.click(screen.getByText("Test summary"));
+  // Click on "一覧" tab
+  await userEvent.click(screen.getByRole("button", { name: "一覧" }));
 
   await waitFor(() => {
-    expect(screen.getByText("Highlight text")).toBeInTheDocument();
+    expect(screen.getByText("月次サマリ (1件)")).toBeInTheDocument();
+    expect(screen.getByText("週次サマリ (1件)")).toBeInTheDocument();
   });
 });
 
-it("shows empty message when no summaries match", async () => {
-  mockGetSummaryOptions.mockResolvedValue({
-    period_types: ["day", "week", "month"],
-    topics: [],
-    projects: [],
-    people: [],
-  });
-  mockListSummaries.mockResolvedValue({ items: [], total: 0 });
+it("switches to stats tab and renders charts", async () => {
+  mockGetDashboardHome.mockResolvedValue(sampleHomeResponse);
+  mockGetDashboardStats.mockResolvedValue(sampleStatsResponse);
 
   render(<SummaryDashboardPage />);
 
   await waitFor(() => {
-    expect(screen.getByText("該当するサマリはありません。")).toBeInTheDocument();
+    expect(screen.getByText("今月の月次サマリ")).toBeInTheDocument();
+  });
+
+  // Click on "統計" tab
+  await userEvent.click(screen.getByRole("button", { name: "統計" }));
+
+  await waitFor(() => {
+    expect(screen.getByText("トピック出現率の推移")).toBeInTheDocument();
+    expect(screen.getByText("キーワード出現率の推移")).toBeInTheDocument();
+    expect(screen.getByText("活動カバー時間と非活動時間の比率")).toBeInTheDocument();
   });
 });
