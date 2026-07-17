@@ -61,6 +61,12 @@ export default function SummaryDashboardPage() {
   const [selectedTopics, setSelectedTopics] = useState<string[]>([]);
   const [selectedKeywords, setSelectedKeywords] = useState<string[]>([]);
 
+  // Generation counter references to prevent race conditions on fast tab/selection switching
+  const homeRequestRef = useRef(0);
+  const browseRequestRef = useRef(0);
+  const statsRequestRef = useRef(0);
+  const detailRequestRef = useRef(0);
+
   // --- Helper Date Calculations ---
   const getTodayISOString = () => {
     const d = new Date();
@@ -81,21 +87,30 @@ export default function SummaryDashboardPage() {
 
   // --- API Loaders ---
   const loadHome = useCallback(() => {
+    const reqId = ++homeRequestRef.current;
     setHomeLoading(true);
     setHomeError(null);
     getDashboardHome()
-      .then(setHomeData)
+      .then((data) => {
+        if (reqId !== homeRequestRef.current) return;
+        setHomeData(data);
+      })
       .catch((e) => {
+        if (reqId !== homeRequestRef.current) return;
         setHomeError(e instanceof ApiError ? e.message : "ホームデータの取得に失敗しました");
       })
-      .finally(() => setHomeLoading(false));
+      .finally(() => {
+        if (reqId === homeRequestRef.current) setHomeLoading(false);
+      });
   }, []);
 
   const loadBrowse = useCallback((y?: string, m?: string) => {
+    const reqId = ++browseRequestRef.current;
     setBrowseLoading(true);
     setBrowseError(null);
     getDashboardBrowse({ year: y || undefined, month: m || undefined })
       .then((data) => {
+        if (reqId !== browseRequestRef.current) return;
         setBrowseData(data);
         if (!y && !m) {
           setBrowseYear(data.selected_year);
@@ -103,50 +118,75 @@ export default function SummaryDashboardPage() {
         }
       })
       .catch((e) => {
+        if (reqId !== browseRequestRef.current) return;
         setBrowseError(e instanceof ApiError ? e.message : "一覧データの取得に失敗しました");
       })
-      .finally(() => setBrowseLoading(false));
+      .finally(() => {
+        if (reqId === browseRequestRef.current) setBrowseLoading(false);
+      });
   }, []);
 
   const loadStats = useCallback((start: string, end: string) => {
+    const reqId = ++statsRequestRef.current;
     setStatsLoading(true);
     setStatsError(null);
     getDashboardStats({ start_date: start, end_date: end })
       .then((data) => {
+        if (reqId !== statsRequestRef.current) return;
         setStatsData(data);
-        // Default select top 5
         setSelectedTopics(data.candidate_topics.slice(0, 5));
         setSelectedKeywords(data.candidate_keywords.slice(0, 5));
       })
       .catch((e) => {
+        if (reqId !== statsRequestRef.current) return;
         setStatsError(e instanceof ApiError ? e.message : "統計データの取得に失敗しました");
       })
-      .finally(() => setStatsLoading(false));
+      .finally(() => {
+        if (reqId === statsRequestRef.current) setStatsLoading(false);
+      });
   }, []);
 
   // --- Detail Loader ---
   const showSummaryDetail = (summaryId: string) => {
-    setDetailLoading(true);
-    setDetailError(null);
-    setSelectedDay(null);
-    getDashboardSummary(summaryId)
-      .then(setSelectedSummary)
-      .catch((e) => {
-        setDetailError(e instanceof ApiError ? e.message : "詳細の取得に失敗しました");
-      })
-      .finally(() => setDetailLoading(false));
-  };
-
-  const showDayDetail = (targetDate: string) => {
+    const reqId = ++detailRequestRef.current;
     setDetailLoading(true);
     setDetailError(null);
     setSelectedSummary(null);
-    getDashboardDayDetails(targetDate)
-      .then(setSelectedDay)
+    setSelectedDay(null); // Ensure BOTH are not populated at the same time
+    getDashboardSummary(summaryId)
+      .then((res) => {
+        if (reqId !== detailRequestRef.current) return;
+        setSelectedSummary(res);
+        setSelectedDay(null);
+      })
       .catch((e) => {
+        if (reqId !== detailRequestRef.current) return;
+        setDetailError(e instanceof ApiError ? e.message : "詳細の取得に失敗しました");
+      })
+      .finally(() => {
+        if (reqId === detailRequestRef.current) setDetailLoading(false);
+      });
+  };
+
+  const showDayDetail = (targetDate: string) => {
+    const reqId = ++detailRequestRef.current;
+    setDetailLoading(true);
+    setDetailError(null);
+    setSelectedSummary(null);
+    setSelectedDay(null); // Ensure BOTH are not populated at the same time
+    getDashboardDayDetails(targetDate)
+      .then((res) => {
+        if (reqId !== detailRequestRef.current) return;
+        setSelectedDay(res);
+        setSelectedSummary(null);
+      })
+      .catch((e) => {
+        if (reqId !== detailRequestRef.current) return;
         setDetailError(e instanceof ApiError ? e.message : "日別詳細の取得に失敗しました");
       })
-      .finally(() => setDetailLoading(false));
+      .finally(() => {
+        if (reqId === detailRequestRef.current) setDetailLoading(false);
+      });
   };
 
   // --- Effects ---
@@ -985,9 +1025,19 @@ function SVGLineChart({
   const chartHeight = height - paddingTop - paddingBottom;
   const pointsCount = buckets.length;
 
+  const chartTitle = itemType === "topic" ? "トピック出現率の推移" : "キーワード出現率の推移";
+  const chartDesc = `選択された${itemType === "topic" ? "トピック" : "キーワード"}の各集計区間における出現率を示す折れ線グラフです。`;
+
   return (
     <div className="relative overflow-x-auto">
-      <svg viewBox={`0 0 ${width} ${height}`} className="w-full min-w-[500px] bg-white">
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        className="w-full min-w-[500px] bg-white"
+        role="img"
+        aria-label={chartTitle}
+      >
+        <title>{chartTitle}</title>
+        <desc>{chartDesc}</desc>
         {/* Y Grid & Axis Labels */}
         {[0, 0.25, 0.5, 0.75, 1].map((r) => {
           const y = paddingTop + (1 - r) * chartHeight;
@@ -1079,6 +1129,38 @@ function SVGLineChart({
           })}
         </g>
       </svg>
+
+      {/* Screen Reader Accessible Data Representation */}
+      <div className="sr-only">
+        <h4>{chartTitle}のデータ一覧</h4>
+        <table>
+          <thead>
+            <tr>
+              <th>集計区間</th>
+              {selectedItems.map((item) => (
+                <th key={item}>{item}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {buckets.map((b) => (
+              <tr key={b.key}>
+                <td>{b.display_label} ({b.start_date}～{b.end_date})</td>
+                {selectedItems.map((item) => {
+                  const total = b.daily_summary_count;
+                  const count = itemType === "topic" ? (b.topic_counts[item] || 0) : (b.keyword_counts[item] || 0);
+                  const rate = total > 0 ? (count / total) * 100 : 0;
+                  return (
+                    <td key={item}>
+                      {Math.round(rate)}% ({count}/{total})
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -1106,9 +1188,19 @@ function SVGStackedBarChart({ buckets }: { buckets: StatsBucket[] }) {
   const barGap = rawBarWidth * 0.25;
   const barWidth = Math.max(2, rawBarWidth - barGap);
 
+  const chartTitle = "活動時間と非活動時間の比率";
+  const chartDesc = "各集計区間における、推定活動カバー時間と非活動時間の比率を示す100%積み上げ棒グラフです。";
+
   return (
     <div className="relative overflow-x-auto">
-      <svg viewBox={`0 0 ${width} ${height}`} className="w-full min-w-[500px] bg-white">
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        className="w-full min-w-[500px] bg-white"
+        role="img"
+        aria-label={chartTitle}
+      >
+        <title>{chartTitle}</title>
+        <desc>{chartDesc}</desc>
         {/* Y Grid & Axis Labels */}
         {[0, 0.25, 0.5, 0.75, 1].map((r) => {
           const y = paddingTop + (1 - r) * chartHeight;
@@ -1151,9 +1243,26 @@ function SVGStackedBarChart({ buckets }: { buckets: StatsBucket[] }) {
         {/* Stacked Bars */}
         {buckets.map((b, idx) => {
           const total = b.active_minutes + b.inactive_minutes;
-          const activeRate = total > 0 ? b.active_minutes / total : 0;
           const x = paddingLeft + idx * rawBarWidth + barGap / 2;
 
+          if (total === 0) {
+            // total is 0: render a neutral grey bar representing "no data"
+            return (
+              <g key={b.key}>
+                <rect
+                  x={x}
+                  y={paddingTop}
+                  width={barWidth}
+                  height={chartHeight}
+                  fill="#e2e8f0"
+                  opacity={0.5}
+                  rx={1}
+                />
+              </g>
+            );
+          }
+
+          const activeRate = b.active_minutes / total;
           const activeHeight = activeRate * chartHeight;
           const inactiveHeight = (1 - activeRate) * chartHeight;
 
@@ -1172,6 +1281,35 @@ function SVGStackedBarChart({ buckets }: { buckets: StatsBucket[] }) {
           );
         })}
       </svg>
+
+      {/* Screen Reader Accessible Data Representation */}
+      <div className="sr-only">
+        <h4>{chartTitle}のデータ一覧</h4>
+        <table>
+          <thead>
+            <tr>
+              <th>集計区間</th>
+              <th>活動カバー時間</th>
+              <th>非活動時間</th>
+              <th>活動比率</th>
+            </tr>
+          </thead>
+          <tbody>
+            {buckets.map((b) => {
+              const total = b.active_minutes + b.inactive_minutes;
+              const rate = total > 0 ? (b.active_minutes / total) * 100 : 0;
+              return (
+                <tr key={b.key}>
+                  <td>{b.display_label} ({b.start_date}～{b.end_date})</td>
+                  <td>{Math.round(b.active_minutes)}分</td>
+                  <td>{Math.round(b.inactive_minutes)}分</td>
+                  <td>{total > 0 ? `${Math.round(rate)}%` : "データなし"}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

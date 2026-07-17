@@ -272,7 +272,17 @@ def get_dashboard_browse(
     month: Optional[str] = Query(None),
     _=Depends(_require_loopback_or_token),
 ):
+    import re
+    from datetime import datetime
     try:
+        if year is not None:
+            if not re.match(r"^\d{4}$", year):
+                raise ValueError("Invalid year format")
+        if month is not None:
+            if not re.match(r"^\d{4}-\d{2}$", month):
+                raise ValueError("Invalid month format")
+            # Strict calendar parse by appending dummy day
+            datetime.strptime(f"{month}-01", "%Y-%m-%d")
         return service.get_dashboard_browse(year=year, month=month)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -290,9 +300,15 @@ def get_dashboard_summary(summary_id: str, _=Depends(_require_loopback_or_token)
 @router.get("/summary-dashboard/days/{target_date}", response_model=schemas.DashboardDayDetailsResponse)
 def get_dashboard_day_details(target_date: str, _=Depends(_require_loopback_or_token)):
     import re
+    from datetime import datetime
     if not re.match(r"^\d{4}-\d{2}-\d{2}$", target_date):
         raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
-    return service.get_dashboard_day_details(target_date)
+    try:
+        # Strict calendar verification (raises ValueError for 2026-02-31 etc.)
+        datetime.strptime(target_date, "%Y-%m-%d")
+        return service.get_dashboard_day_details(target_date)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.get("/summary-dashboard/stats", response_model=schemas.DashboardStatsResponse)

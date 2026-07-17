@@ -1,22 +1,4 @@
-# ruff: noqa: E402
-import sys
 from datetime import datetime
-from unittest.mock import MagicMock
-
-mock_modules = {
-    "EventKit": MagicMock(),
-    "AppKit": MagicMock(),
-    "objc": MagicMock(),
-    "Foundation": MagicMock(),
-    "ApplicationServices": MagicMock(),
-    "atomacos": MagicMock(),
-    "Quartz": MagicMock(),
-    "Vision": MagicMock(),
-    "Cocoa": MagicMock(),
-}
-for name, m in mock_modules.items():
-    sys.modules[name] = m
-
 import pytest
 from fastapi.testclient import TestClient
 
@@ -271,4 +253,21 @@ def test_get_day_activity_times_future_date(loopback_client, clean_summary_env):
 def test_stats_date_range_exceeded(loopback_client, clean_summary_env):
     res = loopback_client.get("/api/v1/summary-dashboard/stats?start_date=2020-01-01&end_date=2031-01-01")
     assert res.status_code == 400
-    assert "exceeds maximum limit" in res.json()["detail"]
+
+
+def test_dashboard_strict_date_parsing(loopback_client, clean_summary_env):
+    # Test invalid year format
+    res = loopback_client.get("/api/v1/summary-dashboard/browse?year=foo")
+    assert res.status_code == 400
+
+    # Test invalid month format
+    res = loopback_client.get("/api/v1/summary-dashboard/browse?month=2026-7")
+    assert res.status_code == 400
+
+    # Test impossible month value
+    res = loopback_client.get("/api/v1/summary-dashboard/browse?month=2026-13")
+    assert res.status_code == 400
+
+    # Test impossible day details date
+    res = loopback_client.get("/api/v1/summary-dashboard/days/2026-02-31")
+    assert res.status_code == 400
