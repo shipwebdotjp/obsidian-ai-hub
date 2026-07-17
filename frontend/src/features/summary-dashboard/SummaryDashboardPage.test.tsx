@@ -4,9 +4,11 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import SummaryDashboardPage from "./SummaryDashboardPage";
 
 vi.mock("../../api/client", () => ({
-  listSummaries: vi.fn(),
-  getSummary: vi.fn(),
-  getSummaryOptions: vi.fn(),
+  getDashboardHome: vi.fn(),
+  getDashboardBrowse: vi.fn(),
+  getDashboardSummary: vi.fn(),
+  getDashboardDayDetails: vi.fn(),
+  getDashboardStats: vi.fn(),
   ApiError: class ApiError extends Error {
     status: number;
     constructor(status: number, message: string) {
@@ -17,99 +19,67 @@ vi.mock("../../api/client", () => ({
 }));
 
 import {
-  listSummaries,
-  getSummary,
-  getSummaryOptions,
+  getDashboardHome,
+  getDashboardBrowse,
+  getDashboardStats,
 } from "../../api/client";
 
-const mockListSummaries = vi.mocked(listSummaries);
-const mockGetSummary = vi.mocked(getSummary);
-const mockGetSummaryOptions = vi.mocked(getSummaryOptions);
+const mockGetDashboardHome = vi.mocked(getDashboardHome);
+const mockGetDashboardBrowse = vi.mocked(getDashboardBrowse);
+const mockGetDashboardStats = vi.mocked(getDashboardStats);
 
-const sampleSummary = {
-  summary_id: "sum_20260713_day",
-  period_type: "day" as const,
-  period_key: "2026-07-13",
-  period_start: "2026-07-13",
-  period_end: "2026-07-13",
-  generated_at: "2026-07-13T22:00:00",
-  summary: "Test summary",
-  keywords: [],
-  mood: "good",
-  sleep_raw: "7h",
-  sleep_hours: 7,
-  topics: ["LLM・AI活用"],
-  projects: ["Project A"],
-  people: [{ name: "Alice", note: "met" }],
+const sampleHomeResponse = {
+  this_month_summary: null,
+  latest_week_summary: null,
+  yesterday_summary: null,
+  today_activity: {
+    date: "2026-07-20",
+    active_minutes: 0,
+    inactive_minutes: 0,
+    logs: [],
+  },
+};
+
+const sampleBrowseResponse = {
+  selectable_years: ["2026"],
+  selected_year: "2026",
+  selected_month: null,
+  months: [],
+  weeks: [],
+  days: [],
+};
+
+const sampleStatsResponse = {
+  granularity: "day" as const,
+  buckets: [],
+  candidate_topics: [],
+  candidate_keywords: [],
 };
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockGetDashboardHome.mockResolvedValue(sampleHomeResponse);
+  mockGetDashboardBrowse.mockResolvedValue(sampleBrowseResponse);
+  mockGetDashboardStats.mockResolvedValue(sampleStatsResponse);
 });
 
-it("renders summary list and options on load", async () => {
-  mockGetSummaryOptions.mockResolvedValue({
-    period_types: ["day", "week", "month"],
-    topics: ["LLM・AI活用"],
-    projects: ["Project A"],
-    people: ["Alice"],
-  });
-  mockListSummaries.mockResolvedValue({ items: [sampleSummary], total: 1 });
-
+it("renders dashboard and supports tab navigation", async () => {
   render(<SummaryDashboardPage />);
 
+  // Verify Home tab renders initially
   await waitFor(() => {
-    expect(screen.getByText("Test summary")).toBeInTheDocument();
-  });
-  expect(screen.getByText("(1 件)")).toBeInTheDocument();
-  expect(screen.getByRole("option", { name: "LLM・AI活用" })).toBeInTheDocument();
-});
-
-it("shows detail when a summary is selected", async () => {
-  mockGetSummaryOptions.mockResolvedValue({
-    period_types: ["day", "week", "month"],
-    topics: [],
-    projects: [],
-    people: [],
-  });
-  mockListSummaries.mockResolvedValue({ items: [sampleSummary], total: 1 });
-  mockGetSummary.mockResolvedValue({
-    ...sampleSummary,
-    items: [
-      {
-        summary_item_id: "item_1",
-        kind: "highlights",
-        body: "Highlight text",
-        display_order: 0,
-      },
-    ],
+    expect(screen.getByRole("button", { name: "ホーム" })).toBeInTheDocument();
   });
 
-  render(<SummaryDashboardPage />);
-
+  // Navigate to Browse
+  await userEvent.click(screen.getByRole("button", { name: "一覧" }));
   await waitFor(() => {
-    expect(screen.getByText("Test summary")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "一覧" })).toBeInTheDocument();
   });
 
-  await userEvent.click(screen.getByText("Test summary"));
-
+  // Navigate to Stats
+  await userEvent.click(screen.getByRole("button", { name: "統計" }));
   await waitFor(() => {
-    expect(screen.getByText("Highlight text")).toBeInTheDocument();
-  });
-});
-
-it("shows empty message when no summaries match", async () => {
-  mockGetSummaryOptions.mockResolvedValue({
-    period_types: ["day", "week", "month"],
-    topics: [],
-    projects: [],
-    people: [],
-  });
-  mockListSummaries.mockResolvedValue({ items: [], total: 0 });
-
-  render(<SummaryDashboardPage />);
-
-  await waitFor(() => {
-    expect(screen.getByText("該当するサマリはありません。")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "統計" })).toBeInTheDocument();
   });
 });

@@ -259,40 +259,68 @@ def get_vault_file(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
-# --- Summary routes ---
+# --- Summary Dashboard routes ---
 
-@router.get("/summaries", response_model=schemas.SummaryListResponse)
-def list_summaries(
-    period_type: Optional[str] = Query(None),
-    period: Optional[str] = Query(None),
-    topic: Optional[str] = Query(None),
-    project: Optional[str] = Query(None),
-    person: Optional[str] = Query(None),
+@router.get("/summary-dashboard/home", response_model=schemas.DashboardHomeResponse)
+def get_dashboard_home(_=Depends(_require_loopback_or_token)):
+    return service.get_dashboard_home()
+
+
+@router.get("/summary-dashboard/browse", response_model=schemas.DashboardBrowseResponse)
+def get_dashboard_browse(
+    year: Optional[str] = Query(None),
+    month: Optional[str] = Query(None),
     _=Depends(_require_loopback_or_token),
 ):
-    if period_type and period_type not in schemas.ALLOWED_PERIOD_TYPES:
-        raise HTTPException(
-            status_code=400,
-            detail=f"period_type must be one of {sorted(schemas.ALLOWED_PERIOD_TYPES)}",
-        )
-    items = service.list_summaries(
-        period_type=period_type,
-        period=period,
-        topic=topic,
-        project=project,
-        person=person,
-    )
-    return schemas.SummaryListResponse(items=items, total=len(items))
+    import re
+    from datetime import datetime
+    try:
+        if year is not None:
+            if not re.match(r"^\d{4}$", year):
+                raise ValueError("Invalid year format")
+        if month is not None:
+            if not re.match(r"^\d{4}-\d{2}$", month):
+                raise ValueError("Invalid month format")
+            # Strict calendar parse by appending dummy day
+            datetime.strptime(f"{month}-01", "%Y-%m-%d")
+        return service.get_dashboard_browse(year=year, month=month)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.get("/summaries/{summary_id}", response_model=schemas.SummaryDetail)
-def get_summary(summary_id: str, _=Depends(_require_loopback_or_token)):
-    summary = service.get_summary(summary_id)
-    if summary is None:
+@router.get("/summary-dashboard/summaries/{summary_id}", response_model=schemas.SummaryDetail)
+def get_dashboard_summary(summary_id: str, _=Depends(_require_loopback_or_token)):
+    from obsidian_ai_hub.summary import store as summary_store
+    res = summary_store.get_summary_by_id(summary_id)
+    if res is None:
         raise HTTPException(status_code=404, detail="summary not found")
-    return summary
+    return res
 
 
-@router.get("/summary-options", response_model=schemas.SummaryOptionsResponse)
-def summary_options(_=Depends(_require_loopback_or_token)):
-    return schemas.SummaryOptionsResponse(**service.get_summary_options())
+@router.get("/summary-dashboard/days/{target_date}", response_model=schemas.DashboardDayDetailsResponse)
+def get_dashboard_day_details(target_date: str, _=Depends(_require_loopback_or_token)):
+    import re
+    from datetime import datetime
+    if not re.match(r"^\d{4}-\d{2}-\d{2}$", target_date):
+        raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
+    try:
+        # Strict calendar verification (raises ValueError for 2026-02-31 etc.)
+        datetime.strptime(target_date, "%Y-%m-%d")
+        return service.get_dashboard_day_details(target_date)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/summary-dashboard/stats", response_model=schemas.DashboardStatsResponse)
+def get_dashboard_stats(
+    start_date: str = Query(..., min_length=10, max_length=10),
+    end_date: str = Query(..., min_length=10, max_length=10),
+    _=Depends(_require_loopback_or_token),
+):
+    import re
+    if not re.match(r"^\d{4}-\d{2}-\d{2}$", start_date) or not re.match(r"^\d{4}-\d{2}-\d{2}$", end_date):
+        raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
+    try:
+        return service.get_dashboard_stats(start_date, end_date)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))

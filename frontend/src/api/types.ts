@@ -230,14 +230,72 @@ export interface SummaryDetail extends SummaryListItem {
   items: SummaryItem[];
 }
 
-export interface SummaryListResponse {
-  items: SummaryListItem[];
-  total: number;
+// --- Dashboard interfaces ---
+
+export interface DashboardActivityLog {
+  activity_id: string;
+  occurred_at: string;
+  app_name: string | null;
+  window_title: string | null;
+  summary: string | null;
+  category: string | null;
+  keywords: string[];
 }
 
-export interface SummaryOptionsResponse {
-  period_types: SummaryPeriodType[];
+export interface TodayActivity {
+  date: string;
+  active_minutes: number;
+  inactive_minutes: number;
+  logs: DashboardActivityLog[];
+}
+
+export interface DashboardHomeResponse {
+  this_month_summary: SummaryDetail | null;
+  latest_week_summary: SummaryDetail | null;
+  yesterday_summary: SummaryDetail | null;
+  today_activity: TodayActivity;
+}
+
+export interface BrowseDayItem {
+  date: string;
+  has_summary: boolean;
+  summary_id: string | null;
+  summary: string | null;
   topics: string[];
-  projects: string[];
-  people: string[];
+}
+
+export interface DashboardBrowseResponse {
+  selectable_years: string[];
+  selected_year: string;
+  selected_month: string | null;
+  months: SummaryDetail[];
+  weeks: SummaryDetail[];
+  days: BrowseDayItem[];
+}
+
+export interface DashboardDayDetailsResponse {
+  date: string;
+  summary: SummaryDetail | null;
+  active_minutes: number;
+  inactive_minutes: number;
+  logs: DashboardActivityLog[];
+}
+
+export interface StatsBucket {
+  key: string;
+  display_label: string;
+  start_date: string;
+  end_date: string;
+  active_minutes: number;
+  inactive_minutes: number;
+  daily_summary_count: number;
+  topic_counts: Record<string, number>;
+  keyword_counts: Record<string, number>;
+}
+
+export interface DashboardStatsResponse {
+  granularity: "day" | "week" | "month";
+  buckets: StatsBucket[];
+  candidate_topics: string[];
+  candidate_keywords: string[];
 }

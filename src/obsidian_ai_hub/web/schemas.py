@@ -360,3 +360,66 @@ class SummaryOptionsResponse(BaseModel):
 class SummaryListResponse(BaseModel):
     items: list[SummaryListItem]
     total: int
+
+
+# --- Dashboard schemas ---
+
+class DashboardActivityLog(BaseModel):
+    activity_id: str
+    occurred_at: str
+    app_name: Optional[str] = None
+    window_title: Optional[str] = None
+    summary: Optional[str] = None
+    category: Optional[str] = None
+    keywords: list[str] = []
+
+class TodayActivity(BaseModel):
+    date: str
+    active_minutes: float
+    inactive_minutes: float
+    logs: list[DashboardActivityLog] = []
+
+class DashboardHomeResponse(BaseModel):
+    this_month_summary: Optional[SummaryDetail] = None
+    latest_week_summary: Optional[SummaryDetail] = None
+    yesterday_summary: Optional[SummaryDetail] = None
+    today_activity: TodayActivity
+
+class BrowseDayItem(BaseModel):
+    date: str
+    has_summary: bool
+    summary_id: Optional[str] = None
+    summary: Optional[str] = None
+    topics: list[str] = []
+
+class DashboardBrowseResponse(BaseModel):
+    selectable_years: list[str]
+    selected_year: str
+    selected_month: Optional[str] = None
+    months: list[SummaryDetail] = []
+    weeks: list[SummaryDetail] = []
+    days: list[BrowseDayItem] = []
+
+class DashboardDayDetailsResponse(BaseModel):
+    date: str
+    summary: Optional[SummaryDetail] = None
+    active_minutes: float
+    inactive_minutes: float
+    logs: list[DashboardActivityLog] = []
+
+class StatsBucket(BaseModel):
+    key: str
+    display_label: str
+    start_date: str
+    end_date: str
+    active_minutes: float
+    inactive_minutes: float
+    daily_summary_count: int
+    topic_counts: dict[str, int] = {}
+    keyword_counts: dict[str, int] = {}
+
+class DashboardStatsResponse(BaseModel):
+    granularity: Literal["day", "week", "month"]
+    buckets: list[StatsBucket]
+    candidate_topics: list[str]
+    candidate_keywords: list[str]

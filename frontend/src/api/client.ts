@@ -14,10 +14,7 @@ import type {
   ResearchRunAcceptedResponse,
   VaultSearchResponse,
   VaultFileResponse,
-  SummaryListResponse,
   SummaryDetail,
-  SummaryOptionsResponse,
-  SummaryPeriodType,
 } from "./types";
 
 const TOKEN_KEY = "obsidian-ai-hub:review-token";
@@ -251,25 +248,50 @@ export function getVaultFile(path: string, signal?: AbortSignal): Promise<VaultF
 
 // Summary Dashboard API
 
-export function listSummaries(params: {
-  period_type?: SummaryPeriodType;
-  period?: string;
-  topic?: string;
-  project?: string;
-  person?: string;
-}): Promise<SummaryListResponse> {
+import type {
+  DashboardHomeResponse,
+  DashboardBrowseResponse,
+  DashboardDayDetailsResponse,
+  DashboardStatsResponse,
+} from "./types";
+
+export function getDashboardHome(): Promise<DashboardHomeResponse> {
+  return request<DashboardHomeResponse>("/api/v1/summary-dashboard/home");
+}
+
+export function getDashboardBrowse(params: {
+  year?: string;
+  month?: string;
+}): Promise<DashboardBrowseResponse> {
   const sp = new URLSearchParams();
-  for (const [k, v] of Object.entries(params)) {
-    if (v) sp.set(k, v);
-  }
+  if (params.year) sp.set("year", params.year);
+  if (params.month) sp.set("month", params.month);
   const qs = sp.toString();
-  return request<SummaryListResponse>(`/api/v1/summaries${qs ? `?${qs}` : ""}`);
+  return request<DashboardBrowseResponse>(
+    `/api/v1/summary-dashboard/browse${qs ? `?${qs}` : ""}`
+  );
 }
 
-export function getSummary(summaryId: string): Promise<SummaryDetail> {
-  return request<SummaryDetail>(`/api/v1/summaries/${encodeURIComponent(summaryId)}`);
+export function getDashboardSummary(summaryId: string): Promise<SummaryDetail> {
+  return request<SummaryDetail>(
+    `/api/v1/summary-dashboard/summaries/${encodeURIComponent(summaryId)}`
+  );
 }
 
-export function getSummaryOptions(): Promise<SummaryOptionsResponse> {
-  return request<SummaryOptionsResponse>("/api/v1/summary-options");
+export function getDashboardDayDetails(targetDate: string): Promise<DashboardDayDetailsResponse> {
+  return request<DashboardDayDetailsResponse>(
+    `/api/v1/summary-dashboard/days/${encodeURIComponent(targetDate)}`
+  );
+}
+
+export function getDashboardStats(params: {
+  start_date: string;
+  end_date: string;
+}): Promise<DashboardStatsResponse> {
+  const sp = new URLSearchParams();
+  sp.set("start_date", params.start_date);
+  sp.set("end_date", params.end_date);
+  return request<DashboardStatsResponse>(
+    `/api/v1/summary-dashboard/stats?${sp.toString()}`
+  );
 }
