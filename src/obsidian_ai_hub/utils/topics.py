@@ -45,3 +45,22 @@ def normalize_topics(topics: list[str] | None, limit: int = 5) -> list[str]:
             normalized.append(normalized_str)
 
     return normalized[:limit]
+
+
+def normalize_keywords(keywords: list[object] | None, limit: int = 5) -> list[str]:
+    """Trim, deduplicate, and limit LLM-generated keywords."""
+    if not isinstance(keywords, list):
+        return []
+
+    normalized = []
+    seen = set()
+    for keyword in keywords:
+        if not isinstance(keyword, str):
+            continue
+        normalized_keyword = keyword.strip()
+        if not normalized_keyword or normalized_keyword in seen:
+            continue
+        seen.add(normalized_keyword)
+        normalized.append(normalized_keyword)
+
+    return normalized[:limit]

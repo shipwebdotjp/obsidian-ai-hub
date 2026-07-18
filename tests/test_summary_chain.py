@@ -17,7 +17,7 @@ def _make_day_record(date: datetime, summary: str) -> dict:
         "period_end": date.strftime("%Y-%m-%d"),
         "generated_at": f"{date.strftime('%Y-%m-%d')}T22:00:00",
         "summary": summary,
-        "keywords": [],
+        "keywords": ["Daily keyword"],
         "mood": "good",
         "sleep_raw": "7h",
         "sleep_hours": 7.0,
@@ -44,8 +44,8 @@ def test_day_week_month_chain(test_memory_db_path):
         conn.close()
 
     responses = [
-        json.dumps({"summary": "Week summary", "progress": ["Week progress"]}),
-        json.dumps({"summary": "Month summary"}),
+        json.dumps({"summary": "Week summary", "keywords": ["Weekly keyword"], "progress": ["Week progress"]}),
+        json.dumps({"summary": "Month summary", "keywords": ["Monthly keyword"]}),
     ]
     with patch("obsidian_ai_hub.utils.llm_client.generate_llm_response", side_effect=responses):
         # Week generation reads days from SQLite
@@ -65,8 +65,9 @@ def test_day_week_month_chain(test_memory_db_path):
     week = store.get_summary_by_period("week", "2026-W29")
     assert week is not None
     assert week["summary"] == "Week summary"
+    assert week["keywords"] == ["Weekly keyword"]
     assert any(i["kind"] == "progress" and i["body"] == "Week progress" for i in week["items"])
     month = store.get_summary_by_period("month", "2026-07")
     assert month is not None
     assert month["summary"] == "Month summary"
-
+    assert month["keywords"] == ["Monthly keyword"]

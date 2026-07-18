@@ -26,7 +26,7 @@ for module_name in mock_modules:
     if module_name not in sys.modules:
         sys.modules[module_name] = MagicMock()
 
-from obsidian_ai_hub.utils.topics import TOPIC_ENUM, normalize_topics
+from obsidian_ai_hub.utils.topics import TOPIC_ENUM, normalize_keywords, normalize_topics
 
 
 def test_normalize_topics_as_is():
@@ -75,3 +75,14 @@ def test_normalize_topics_mixed():
 def test_normalize_topics_empty_or_none():
     assert normalize_topics([]) == []
     assert normalize_topics(None) == []
+
+
+def test_normalize_keywords_trims_deduplicates_and_limits():
+    keywords = [" Python ", "Python", "", None, 42, "Git", "LLM", "Obsidian", "SQLite", "Extra"]
+
+    assert normalize_keywords(keywords) == ["Python", "Git", "LLM", "Obsidian", "SQLite"]
+
+
+def test_normalize_keywords_rejects_non_lists():
+    assert normalize_keywords("Python") == []
+    assert normalize_keywords(None) == []

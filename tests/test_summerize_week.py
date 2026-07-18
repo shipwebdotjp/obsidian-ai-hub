@@ -104,6 +104,7 @@ def test_get_weekly_structured_record(mock_llm, mock_render, mock_config):
     mock_render.return_value = "Rendered Prompt"
     mock_llm.return_value = json.dumps({
         "summary": "AI Weekly Summary",
+        "keywords": [" Python ", "Python", "Obsidian"],
         "topics": ["Work"],
         "highlights": ["Highlight 1"],
         "progress": ["Progress 1"],
@@ -123,6 +124,7 @@ def test_get_weekly_structured_record(mock_llm, mock_render, mock_config):
 
     assert record["period_key"] == "2023-W43"
     assert record["summary"] == "AI Weekly Summary"
+    assert record["keywords"] == ["Python", "Obsidian"]
     assert record["mood"] is None
     assert record["sleep_hours"] is None
     assert record["people"][0]["name"] == "Bob"

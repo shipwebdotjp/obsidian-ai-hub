@@ -80,6 +80,7 @@ def test_summarize_month(mock_llm, mock_render, mock_config, test_memory_db_path
     mock_render.return_value = "Rendered Prompt"
     mock_llm.return_value = json.dumps({
         "summary": "Monthly summary test",
+        "keywords": [" Python ", "Python", "Obsidian"],
         "topics": ["LLM・AI活用"],
         "highlights": ["Highlight 1"],
         "progress": ["Progress 1"],
@@ -127,6 +128,7 @@ def test_summarize_month(mock_llm, mock_render, mock_config, test_memory_db_path
         row = store.get_summary_by_period("month", "2024-10", conn=conn)
         assert row is not None
         assert row["summary"] == "Monthly summary test"
+        assert row["keywords"] == ["Python", "Obsidian"]
         assert row["mood"] is None
         assert row["sleep_hours"] is None
     finally:

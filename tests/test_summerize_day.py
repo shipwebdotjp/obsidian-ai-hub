@@ -117,6 +117,7 @@ def test_get_daily_structured_record(mock_fm, mock_path, mock_llm, mock_render, 
 
     mock_llm.return_value = json.dumps({
         "summary": "AI Structured Summary",
+        "keywords": [" Python ", "Python", "Obsidian"],
         "topics": ["AI"],
         "highlights": ["Important decision"],
         "activities": ["Coding"],
@@ -133,6 +134,7 @@ def test_get_daily_structured_record(mock_fm, mock_path, mock_llm, mock_render, 
     assert record["period_type"] == "day"
     assert record["period_key"] == "2023-10-27"
     assert record["summary"] == "AI Structured Summary"
+    assert record["keywords"] == ["Python", "Obsidian"]
     assert record["mood"] == "Happy"
     assert record["sleep_raw"] == "8h"
     assert record["sleep_hours"] == 8.0

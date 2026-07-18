@@ -13,6 +13,7 @@ import type {
   DashboardDayDetailsResponse,
   DashboardStatsResponse,
   SummaryDetail,
+  SummaryItem,
   BrowseDayItem,
   StatsBucket,
 } from "../../api/types";
@@ -28,6 +29,21 @@ const PALETTE = [
   "#ef4444", // Red
   "#14b8a6", // Teal
 ];
+
+function groupSummaryItemsByKind(items: SummaryItem[]) {
+  const groups = new Map<string, SummaryItem[]>();
+
+  for (const item of items) {
+    const group = groups.get(item.kind);
+    if (group) {
+      group.push(item);
+    } else {
+      groups.set(item.kind, [item]);
+    }
+  }
+
+  return Array.from(groups, ([kind, items]) => ({ kind, items }));
+}
 
 export default function SummaryDashboardPage() {
   const [activeTab, setActiveSubTab] = useState<"home" | "browse" | "stats">("home");
@@ -696,13 +712,20 @@ export default function SummaryDashboardPage() {
 
                   {/* Nested item blocks */}
                   <div className="mt-6 space-y-4">
-                    {selectedSummary.items.map((item) => (
-                      <div key={item.summary_item_id} className="border-t border-slate-100 pt-3">
-                        <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">{item.kind}</h4>
-                        <div className="mt-1 text-xs text-slate-700 whitespace-pre-wrap leading-relaxed">
-                          {item.body}
-                        </div>
-                      </div>
+                    {groupSummaryItemsByKind(selectedSummary.items).map(({ kind, items }) => (
+                      <section key={kind} className="border-t border-slate-100 pt-3">
+                        <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">{kind}</h4>
+                        <ul className="mt-1 list-disc space-y-2 pl-5">
+                          {items.map((item) => (
+                            <li
+                              key={item.summary_item_id}
+                              className="text-xs text-slate-700 whitespace-pre-wrap leading-relaxed"
+                            >
+                              {item.body}
+                            </li>
+                          ))}
+                        </ul>
+                      </section>
                     ))}
                   </div>
 

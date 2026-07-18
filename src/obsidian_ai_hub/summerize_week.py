@@ -7,7 +7,7 @@ from pathlib import Path
 
 from obsidian_ai_hub.summary import store as summary_store
 from obsidian_ai_hub.utils import config, reader, llm_client, prompt
-from obsidian_ai_hub.utils.topics import TOPIC_ENUM, normalize_topics
+from obsidian_ai_hub.utils.topics import TOPIC_ENUM, normalize_keywords, normalize_topics
 
 logger = logging.getLogger(__name__)
 
@@ -100,7 +100,7 @@ def get_weekly_structured_record(
         data = json.loads(cleaned_response)
 
         scalar_fields = {"summary"}
-        list_fields = {"topics", "highlights", "progress", "learnings", "reflections", "patterns", "gratitude"}
+        list_fields = {"keywords", "topics", "highlights", "progress", "learnings", "reflections", "patterns", "gratitude"}
 
         for key in scalar_fields | list_fields | {"people"}:
             if key in data:
@@ -121,7 +121,9 @@ def get_weekly_structured_record(
                     record[key] = str(val)
                 elif key in list_fields and isinstance(val, list):
                     clean_list = [str(item) for item in val if item not in (None, "")]
-                    if key == "topics":
+                    if key == "keywords":
+                        record["keywords"] = normalize_keywords(val)
+                    elif key == "topics":
                         record["topics"] = normalize_topics(clean_list)
                     elif key in WEEK_ITEM_KINDS:
                         record["items"].extend(

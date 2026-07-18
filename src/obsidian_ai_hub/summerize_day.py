@@ -7,7 +7,7 @@ from pathlib import Path
 from obsidian_ai_hub.activity.store import get_activities_by_date
 from obsidian_ai_hub.summary import store as summary_store
 from obsidian_ai_hub.utils import config, reader, extracter, llm_client, prompt
-from obsidian_ai_hub.utils.topics import TOPIC_ENUM, normalize_topics
+from obsidian_ai_hub.utils.topics import TOPIC_ENUM, normalize_keywords, normalize_topics
 
 logger = logging.getLogger(__name__)
 
@@ -106,9 +106,9 @@ def get_daily_structured_record(
 
         # 抽出したデータを record にマージ
         scalar_fields = {"summary"}
-        list_fields = {"topics", "highlights", "activities", "learnings", "reflections", "gratitude"}
+        list_fields = {"keywords", "topics", "highlights", "activities", "learnings", "reflections", "gratitude"}
         for key in [
-            "summary", "topics", "highlights", "activities", "learnings",
+            "summary", "keywords", "topics", "highlights", "activities", "learnings",
             "reflections", "gratitude", "people",
         ]:
             if key in data:
@@ -129,7 +129,9 @@ def get_daily_structured_record(
                     record[key] = val or None
                 elif key in list_fields and isinstance(val, list):
                     clean_list = [str(item) for item in val if item not in (None, "")]
-                    if key == "topics":
+                    if key == "keywords":
+                        record["keywords"] = normalize_keywords(val)
+                    elif key == "topics":
                         record["topics"] = normalize_topics(clean_list)
                     elif key in DAY_ITEM_KINDS:
                         record["items"].extend(
