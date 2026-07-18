@@ -886,6 +886,26 @@ export default function SummaryDashboardPage() {
                         </div>
                       )}
 
+                      {selectedSummary.people.length > 0 && (
+                        <div>
+                          <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">人物</h3>
+                          <div className="mt-1 space-y-1">
+                            {selectedSummary.people.filter((p) => p.resolution_status === "resolved").map((p) => (
+                              <div key={p.person_id ?? p.name} className="flex items-start gap-2">
+                                <span className="text-xs font-medium text-slate-700 min-w-[80px]">{p.name}</span>
+                                {p.note && <span className="text-xs text-slate-500">{p.note}</span>}
+                              </div>
+                            ))}
+                            {selectedSummary.people.filter((p) => p.resolution_status === "unresolved").map((p) => (
+                              <div key={p.candidate_id ?? p.name} className="flex items-start gap-2 opacity-60">
+                                <span className="text-xs text-slate-500 min-w-[80px]">{p.name}</span>
+                                <span className="text-[10px] text-slate-400">(未解決候補)</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
                       {/* Nested item blocks */}
                       <div className="mt-6 space-y-4">
                         {groupSummaryItemsByKind(selectedSummary.items).map(({ kind, items }) => (
