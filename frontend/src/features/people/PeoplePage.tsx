@@ -84,6 +84,8 @@ interface SyncPeopleResponse {
 
 type Tab = "candidates" | "list" | "duplicates" | "report";
 
+const PEOPLE_API = "/api/v1/people";
+
 export default function PeoplePage() {
   const [activeTab, setActiveTab] = useState<Tab>("candidates");
   const [loading, setLoading] = useState(false);
@@ -112,7 +114,7 @@ export default function PeoplePage() {
 
   const fetchCandidates = async () => {
     try {
-      const data = await apiGet<PersonCandidate[]>("/people/candidates");
+      const data = await apiGet<PersonCandidate[]>(`${PEOPLE_API}/candidates`);
       setCandidates(data);
     } catch (e) {
       console.error(e);
@@ -122,7 +124,7 @@ export default function PeoplePage() {
 
   const fetchPeople = async () => {
     try {
-      const data = await apiGet<Person[]>("/people");
+      const data = await apiGet<Person[]>(PEOPLE_API);
       setPeople(data);
     } catch (e) {
       console.error(e);
@@ -132,7 +134,7 @@ export default function PeoplePage() {
 
   const fetchDuplicates = async () => {
     try {
-      const data = await apiGet<DuplicatesResponse>("/people/duplicates");
+      const data = await apiGet<DuplicatesResponse>(`${PEOPLE_API}/duplicates`);
       setDuplicates(data);
     } catch (e) {
       console.error(e);
@@ -142,7 +144,7 @@ export default function PeoplePage() {
 
   const fetchVaultReport = async () => {
     try {
-      const data = await apiGet<SyncPeopleResponse>("/people/vault-report");
+      const data = await apiGet<SyncPeopleResponse>(`${PEOPLE_API}/vault-report`);
       setVaultReport(data);
     } catch (e) {
       console.error(e);
@@ -179,7 +181,7 @@ export default function PeoplePage() {
     clearMessages();
     setTargetPersonId("");
     try {
-      const data = await apiGet<PersonCandidateDetail>(`/people/candidates/${cand.candidate_id}`);
+      const data = await apiGet<PersonCandidateDetail>(`${PEOPLE_API}/candidates/${cand.candidate_id}`);
       setSelectedCandidate(data);
     } catch (e) {
       setError("候補の詳細の取得に失敗しました");
@@ -189,7 +191,7 @@ export default function PeoplePage() {
   const handleSelectPerson = async (p: Person) => {
     clearMessages();
     try {
-      const data = await apiGet<PersonDetail>(`/people/${p.person_id}`);
+      const data = await apiGet<PersonDetail>(`${PEOPLE_API}/${p.person_id}`);
       setSelectedPerson(data);
     } catch (e) {
       setError("人物の詳細の取得に失敗しました");
@@ -201,7 +203,7 @@ export default function PeoplePage() {
     clearMessages();
     setLoading(true);
     try {
-      await apiPost(`/people/candidates/${selectedCandidate.candidate_id}/resolve`, {
+      await apiPost(`${PEOPLE_API}/candidates/${selectedCandidate.candidate_id}/resolve`, {
         target_person_id: targetPersonId,
       });
       setSuccessMessage(`候補「${selectedCandidate.display_name}」を解決しました。`);
@@ -222,7 +224,7 @@ export default function PeoplePage() {
     clearMessages();
     setLoading(true);
     try {
-      await apiPost("/people/merge", {
+      await apiPost(`${PEOPLE_API}/merge`, {
         from_person_id: fromId,
         to_person_id: toId,
       });
@@ -239,7 +241,7 @@ export default function PeoplePage() {
     clearMessages();
     setLoading(true);
     try {
-      const data = await apiPost<SyncPeopleResponse>("/people/sync", {});
+      const data = await apiPost<SyncPeopleResponse>(`${PEOPLE_API}/sync`, {});
       setVaultReport(data);
       setSuccessMessage("Vaultの同期が完了しました。");
       await loadAllData(false);
