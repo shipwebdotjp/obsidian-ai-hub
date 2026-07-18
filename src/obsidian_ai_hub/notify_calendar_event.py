@@ -145,6 +145,7 @@ def get_calendar_events_eventkit(
     end_date: date | None = None,
     tz_name: str = "Asia/Tokyo",
 ):
+    config.ensure_external_allowed("Apple Calendar (EventKit)")
     if start_date is None:
         start_date = date.today()
     if end_date is None:

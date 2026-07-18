@@ -10,9 +10,10 @@ from obsidian_ai_hub.utils import config
 
 logger = logging.getLogger(__name__)
 
+TEST_TASK_FILE = config.BASE_DIR / "tasks" / "tasks.test.yml"
 DEFAULT_TASK_FILE = config.BASE_DIR / "tasks" / "tasks.yml"
 LOCAL_TASK_FILE = config.BASE_DIR / "tasks" / "tasks.local.yml"
-STATE_FILE = config.BASE_DIR / "tasks" / "last_run.json"
+STATE_FILE = config.TASK_RUN_STATE_PATH
 
 def parse_cron_field(value, min_val, max_val) -> set[int]:
     if isinstance(value, int):
@@ -177,6 +178,9 @@ def compute_target(schedule: dict, now: datetime) -> datetime:
         curr = curr.replace(hour=hours[0], minute=minutes[0], second=seconds[0])
 
 def load_tasks():
+    if config.IS_TEST_ENV:
+        with TEST_TASK_FILE.open() as f:
+            return yaml.safe_load(f)
     task_file = LOCAL_TASK_FILE if LOCAL_TASK_FILE.exists() else DEFAULT_TASK_FILE
     with task_file.open() as f:
         return yaml.safe_load(f)

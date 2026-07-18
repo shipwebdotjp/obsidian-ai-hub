@@ -1,0 +1,4 @@
+backup:
+  sync_folders: []
+vault_index:
+  allow_network_fallback: false

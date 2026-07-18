@@ -15,6 +15,7 @@ import requests
 import time
 from pathlib import Path
 from typing import Optional, Dict, List, Any
+from obsidian_ai_hub.utils import config as _hub_config
 from .config import OPEN_WEB_UI_BASE_URL, OPEN_WEB_UI_API_KEY
 
 logger = logging.getLogger(__name__)
@@ -53,13 +54,14 @@ def _response_detail(response: requests.Response) -> str:
 def upload_file(file_path: Path) -> Optional[str]:
     """
     Upload a file to Open Web UI file storage.
-    
+
     Args:
         file_path: Path to the file to upload
-        
+
     Returns:
         file_id if successful, None if failed
     """
+    _hub_config.ensure_external_allowed("Open Web UI file upload")
     if not file_path.exists():
         logger.error(f"File not found: {file_path}")
         return None
@@ -101,13 +103,14 @@ def upload_file(file_path: Path) -> Optional[str]:
 def wait_for_file_processing(file_id: str) -> bool:
     """
     Wait for a file to be processed by Open Web UI.
-    
+
     Args:
         file_id: ID of the file to wait for
-        
+
     Returns:
         True if processing completed successfully, False otherwise
     """
+    _hub_config.ensure_external_allowed("Open Web UI file processing")
     start_time = time.time()
     
     try:
@@ -156,14 +159,15 @@ def wait_for_file_processing(file_id: str) -> bool:
 def add_to_knowledge(file_id: str, knowledge_id: str) -> bool:
     """
     Add a file to a knowledge base.
-    
+
     Args:
         file_id: ID of the file to add
         knowledge_id: ID of the knowledge base
-        
+
     Returns:
         True if successful, False otherwise
     """
+    _hub_config.ensure_external_allowed("Open Web UI add to knowledge")
     try:
         headers = {
             'Authorization': f'Bearer {OPEN_WEB_UI_API_KEY}',
@@ -198,14 +202,15 @@ def add_to_knowledge(file_id: str, knowledge_id: str) -> bool:
 def remove_from_knowledge(file_id: str, knowledge_id: str) -> bool:
     """
     Remove a file from a knowledge base.
-    
+
     Args:
         file_id: ID of the file to remove
         knowledge_id: ID of the knowledge base
-        
+
     Returns:
         True if successful, False otherwise
     """
+    _hub_config.ensure_external_allowed("Open Web UI remove from knowledge")
     try:
         headers = {
             'Authorization': f'Bearer {OPEN_WEB_UI_API_KEY}',
@@ -240,13 +245,14 @@ def remove_from_knowledge(file_id: str, knowledge_id: str) -> bool:
 def list_knowledge_files(knowledge_id: str) -> Optional[List[Dict[str, Any]]]:
     """
     List all files in a knowledge base.
-    
+
     Args:
         knowledge_id: ID of the knowledge base
-        
+
     Returns:
         List of file information dicts, None if failed
     """
+    _hub_config.ensure_external_allowed("Open Web UI list knowledge files")
     try:
         headers = {
             'Authorization': f'Bearer {OPEN_WEB_UI_API_KEY}',

@@ -6,6 +6,7 @@ from typing import Optional
 
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
+from obsidian_ai_hub.utils import config
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +62,8 @@ def _ensure_reminder_access(store: EKEventStore) -> None:
 
 @tool(args_schema=AddReminderInput)
 def add_reminder(title: str, due_date: Optional[str] = None) -> str:
+    config.ensure_external_allowed("Apple Reminders")
+
     """
     Add a new reminder to Apple Reminders.
     """

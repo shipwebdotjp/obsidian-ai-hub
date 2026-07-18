@@ -33,6 +33,8 @@ class WebSearchInput(BaseModel):
 
 @tool(args_schema=WebSearchInput)
 def web_search(query: str, k: int = 5) -> str:
+    config.ensure_external_allowed("Web search (Tavily)")
+
     """
     Search the public web and return relevant results with titles, URLs, and snippets.
 

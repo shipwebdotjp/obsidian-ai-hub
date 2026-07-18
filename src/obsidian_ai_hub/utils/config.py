@@ -1,13 +1,69 @@
-from dotenv import load_dotenv
-load_dotenv()
-
 import os
-import yaml
+import atexit
+import tempfile
 from pathlib import Path
 
-# プロジェクトルートディレクトリを取得
 BASE_DIR = Path(__file__).resolve().parent.parent.parent.parent
-CONFIG_YML_PATH = BASE_DIR / "config" / "config.yml"
+IS_TEST_ENV = os.environ.get("ENV", "").lower() == "test"
+
+_APP_ENV_VARS = [
+    "OPENAI_API_KEY", "GEMINI_API_KEY", "TAVILY_API_KEY", "OPENCODE_API_KEY",
+    "LINE_MESSAGING_TOKEN", "LINE_TARGET_ID", "LINE_TOKEN", "LINE_TARGET",
+    "GOG_CALENDAR_ID", "CALENDAR_ID",
+    "MEMORY_REVIEW_API_TOKEN", "MEMORY_REVIEW_HOST", "MEMORY_REVIEW_PORT",
+    "MEMORY_REVIEW_CORS_ORIGINS",
+    "OPEN_WEB_UI_API_KEY", "OPEN_WEB_UI_BASE_URL",
+    "VAULT_PATH", "AI_LOG_PATH", "MEMORY_SQLITE_PATH", "SCREENSHOT_DIR",
+    "LOCAL_MODEL_DIR",
+    "VAULT_INDEX_SQLITE_PATH", "VAULT_INDEX_CHROMA_PATH",
+    "VAULT_INDEX_ALLOW_NETWORK_FALLBACK",
+    "HUGGINGFACE_API_KEY", "SENTENCE_TRANSFORMERS_HOME",
+    "MAKE_TODAY_TARGET_PROMPT_PATH", "REVIEW_DRAFT_PROMPT_PATH",
+    "SUMMARIZE_DAY_PROMPT_PATH", "SUMMARIZE_WEEK_PROMPT_PATH",
+    "SUMMARIZE_MONTH_PROMPT_PATH", "ACTIVITY_CLASSIFICATION_PROMPT_PATH",
+    "LINE_INBOX_SCAN_PROMPT_PATH",
+    "MEMORY_EXTRACTOR_PROMPT_PATH", "MEMORY_RENDERER_PROMPT_PATH",
+    "INBOX_TRANSCRIPT_CORRECTION_PROMPT_PATH",
+    "INBOX_WEB_SUMMARY_PROMPT_PATH", "INBOX_CLASSIFICATION_PROMPT_PATH",
+    "YOUTUBE_CHUNK_SUMMARY_PROMPT_PATH",
+    "ALLOW_EXTERNAL_IN_TEST",
+]
+
+if IS_TEST_ENV:
+    for key in _APP_ENV_VARS:
+        os.environ.pop(key, None)
+
+    if not os.environ.get("OAIHUB_SKIP_DOTENV"):
+        test_dotenv = BASE_DIR / ".env.test"
+        if test_dotenv.exists():
+            from dotenv import load_dotenv
+            load_dotenv(str(test_dotenv), override=True)
+
+    ALLOW_EXTERNAL_IN_TEST = (
+        os.environ.get("ALLOW_EXTERNAL_IN_TEST", "0").lower() in ("1", "true", "yes")
+    )
+
+    _test_workspace = tempfile.TemporaryDirectory(prefix="obsidian-ai-hub-test-")
+    TEST_WORKSPACE = Path(_test_workspace.name)
+    atexit.register(_test_workspace.cleanup)
+
+    CONFIG_YML_PATH = BASE_DIR / "config" / "config.test.yml"
+else:
+    from dotenv import load_dotenv
+    load_dotenv()
+    ALLOW_EXTERNAL_IN_TEST = True
+    CONFIG_YML_PATH = BASE_DIR / "config" / "config.yml"
+
+
+def ensure_external_allowed(context: str = ""):
+    if IS_TEST_ENV and not ALLOW_EXTERNAL_IN_TEST:
+        raise RuntimeError(
+            f"External access blocked in test mode{': ' + context if context else ''}. "
+            "Set ALLOW_EXTERNAL_IN_TEST=1 in .env.test to allow."
+        )
+
+
+import yaml
 
 
 def _load_yaml_config() -> dict:
@@ -70,15 +126,12 @@ GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 TAVILY_API_KEY = os.getenv('TAVILY_API_KEY')
 OPENCODE_API_KEY = os.getenv('OPENCODE_API_KEY')
 
-# Use os.getenv with a fallback for testing environments
-_vault_path_raw = os.getenv('VAULT_PATH')
-if _vault_path_raw:
-    VAULT_PATH = Path(_vault_path_raw).expanduser()
+if IS_TEST_ENV:
+    VAULT_PATH = TEST_WORKSPACE / "vault"
 else:
-    # If not set, we default to current directory but warn if not in a test context
-    if os.getenv('PYTEST_CURRENT_TEST') is None:
-        # Not in a test, this might be a real issue but we want to avoid crashing at import
-        VAULT_PATH = Path(".").expanduser()
+    _vault_path_raw = os.getenv('VAULT_PATH')
+    if _vault_path_raw:
+        VAULT_PATH = Path(_vault_path_raw).expanduser()
     else:
         VAULT_PATH = Path(".").expanduser()
 
@@ -291,12 +344,14 @@ RESEARCH_QUERY_GENERATION_PROMPT_PATH = _config_optional_path("llm", "research",
 if RESEARCH_QUERY_GENERATION_PROMPT_PATH is None:
     RESEARCH_QUERY_GENERATION_PROMPT_PATH = BASE_DIR / "config" / "prompts" / "research_query_generation.md"
 
-# Use _env_or_config with a fallback for AI_LOG_PATH
-_ai_log_path_raw = _env_or_config("AI_LOG_PATH", "ai_log_path")
-if _ai_log_path_raw:
-    AI_LOG_PATH = Path(str(_ai_log_path_raw)).expanduser()
+if IS_TEST_ENV:
+    AI_LOG_PATH = TEST_WORKSPACE / "vault" / "ai-log"
 else:
-    AI_LOG_PATH = Path(".").expanduser()
+    _ai_log_path_raw = _env_or_config("AI_LOG_PATH", "ai_log_path")
+    if _ai_log_path_raw:
+        AI_LOG_PATH = Path(str(_ai_log_path_raw)).expanduser()
+    else:
+        AI_LOG_PATH = Path(".").expanduser()
 
 BACKUP_SYNC_FOLDERS = _config_value("backup", "sync_folders", default=[])
 if not isinstance(BACKUP_SYNC_FOLDERS, list):
@@ -317,12 +372,14 @@ if not isinstance(REGULARLY_DATE_EVENTS, list):
 # Memory Configuration
 MEMORY_CONTEXT_MAX_TOKENS = int(_config_value("memory", "context_max_tokens", default=800))
 
-# SQLite memory database path setup
-MEMORY_SQLITE_PATH_RAW = _env_or_config("MEMORY_SQLITE_PATH", "memory", "sqlite_path")
-if MEMORY_SQLITE_PATH_RAW:
-    MEMORY_SQLITE_PATH = Path(str(MEMORY_SQLITE_PATH_RAW)).expanduser()
+if IS_TEST_ENV:
+    MEMORY_SQLITE_PATH = TEST_WORKSPACE / "memory.sqlite3"
 else:
-    MEMORY_SQLITE_PATH = Path("~/.config/obsidian-ai-hub/memory.sqlite3").expanduser()
+    MEMORY_SQLITE_PATH_RAW = _env_or_config("MEMORY_SQLITE_PATH", "memory", "sqlite_path")
+    if MEMORY_SQLITE_PATH_RAW:
+        MEMORY_SQLITE_PATH = Path(str(MEMORY_SQLITE_PATH_RAW)).expanduser()
+    else:
+        MEMORY_SQLITE_PATH = Path("~/.config/obsidian-ai-hub/memory.sqlite3").expanduser()
 
 _extractor_provider = _config_value("memory", "extractor", "provider")
 MEMORY_EXTRACTOR_PROVIDER = str(_extractor_provider) if _extractor_provider is not None else MAKE_TODAY_TARGET_PROVIDER
@@ -343,3 +400,14 @@ MEMORY_RENDERER_MODEL = str(_renderer_model) if _renderer_model is not None else
 MEMORY_RENDERER_PROMPT_PATH = _optional_path("MEMORY_RENDERER_PROMPT_PATH", "memory", "renderer", "prompt_path")
 if MEMORY_RENDERER_PROMPT_PATH is None:
     MEMORY_RENDERER_PROMPT_PATH = BASE_DIR / "config" / "prompts" / "memory_render.md"
+
+# Task runner and knowledge sync state files
+TASK_RUN_STATE_PATH = BASE_DIR / "tasks" / "last_run.json"
+KNOWLEDGE_SYNC_STATE_PATH = BASE_DIR / "tasks" / "knowledge_sync_state.json"
+
+if IS_TEST_ENV:
+    LOCAL_MODEL_DIR = TEST_WORKSPACE / "local-models"
+    VAULT_INDEX_SQLITE_PATH = TEST_WORKSPACE / "vault-index" / "search.sqlite"
+    VAULT_INDEX_CHROMA_PATH = TEST_WORKSPACE / "vault-index" / "chroma"
+    TASK_RUN_STATE_PATH = TEST_WORKSPACE / "last_run.json"
+    KNOWLEDGE_SYNC_STATE_PATH = TEST_WORKSPACE / "knowledge_sync_state.json"

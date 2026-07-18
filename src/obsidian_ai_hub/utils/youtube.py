@@ -226,6 +226,7 @@ def _transcribe_with_whisper(url: str, video_id: str) -> str | None:
 
 def extract_youtube_content(url: str) -> YouTubeContent:
     """Extract metadata and a timestamped transcript without raising to inbox merge."""
+    config.ensure_external_allowed("YouTube content extraction")
     video_id = extract_video_id(url)
     if not video_id:
         raise ValueError(f"Not a supported YouTube URL: {url}")

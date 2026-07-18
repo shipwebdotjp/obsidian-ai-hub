@@ -1,9 +1,13 @@
 import requests
 import logging
 
+from obsidian_ai_hub.utils import config
+
 logger = logging.getLogger(__name__)
 
 def send_line_push(token: str, to: str, message_text: str) -> bool:
+    config.ensure_external_allowed("LINE Messaging API")
+
     payload = {
         "to": to,
         "messages": [{"type": "text", "text": message_text}]

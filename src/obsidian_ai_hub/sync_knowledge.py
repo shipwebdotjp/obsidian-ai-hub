@@ -2,11 +2,11 @@
 Open Web UI Knowledge Base Sync
 
 Synchronizes Obsidian Vault files with Open Web UI knowledge bases.
-Each subdirectory under KNOWLEDGE_SYNC_FOLDER is treated as a knowledge_id.
+Each subdirectory under config.KNOWLEDGE_SYNC_FOLDER is treated as a knowledge_id.
 
 Workflow:
 1. Load previous sync state (last_sync timestamp, file list with mtimes)
-2. Scan local files in KNOWLEDGE_SYNC_FOLDER/<knowledge_id>/
+2. Scan local files in config.KNOWLEDGE_SYNC_FOLDER/<knowledge_id>/
 3. Detect changes (NEW, UPDATED, DELETED) per knowledge_id
 4. Apply changes via Open Web UI API
 5. Save new sync state
@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 from dataclasses import dataclass, asdict, field
 from typing import Dict, List, Optional, Set, Tuple
 
-from obsidian_ai_hub.utils.config import KNOWLEDGE_SYNC_FOLDER, BASE_DIR
+from obsidian_ai_hub.utils import config
 from obsidian_ai_hub.utils.web_ui_client import (
     add_to_knowledge,
     remove_from_knowledge,
@@ -31,7 +31,7 @@ from obsidian_ai_hub.utils.web_ui_client import (
 logger = logging.getLogger(__name__)
 
 # State file location
-STATE_FILE_PATH = BASE_DIR / "tasks" / "knowledge_sync_state.json"
+STATE_FILE_PATH = config.KNOWLEDGE_SYNC_STATE_PATH
 
 
 def _empty_state() -> "SyncState":
@@ -161,20 +161,20 @@ def save_state_file(state: SyncState) -> bool:
 def scan_local_files() -> Dict[str, Dict[str, float]]:
     """
     Scan local knowledge folder for markdown files.
-    Each immediate subdirectory of KNOWLEDGE_SYNC_FOLDER is treated as a knowledge_id.
+    Each immediate subdirectory of config.KNOWLEDGE_SYNC_FOLDER is treated as a knowledge_id.
 
     Returns:
         Dict mapping knowledge_id -> Dict(relative file path -> mtime)
     """
     files: Dict[str, Dict[str, float]] = {}
 
-    if not KNOWLEDGE_SYNC_FOLDER.exists():
-        logger.warning(f"Knowledge sync folder does not exist: {KNOWLEDGE_SYNC_FOLDER}")
+    if not config.KNOWLEDGE_SYNC_FOLDER.exists():
+        logger.warning(f"Knowledge sync folder does not exist: {config.KNOWLEDGE_SYNC_FOLDER}")
         return files
 
     try:
         knowledge_dirs = sorted(
-            [path for path in KNOWLEDGE_SYNC_FOLDER.iterdir() if path.is_dir()],
+            [path for path in config.KNOWLEDGE_SYNC_FOLDER.iterdir() if path.is_dir()],
             key=lambda path: path.name,
         )
 
@@ -192,7 +192,7 @@ def scan_local_files() -> Dict[str, Dict[str, float]]:
         total_files = sum(len(knowledge_files) for knowledge_files in files.values())
         logger.info(
             f"Scanned {total_files} markdown files across {len(files)} knowledge folders "
-            f"in {KNOWLEDGE_SYNC_FOLDER}"
+            f"in {config.KNOWLEDGE_SYNC_FOLDER}"
         )
         return files
     except Exception as e:
@@ -373,7 +373,7 @@ class ChangeApplier:
         Returns:
             Tuple of (success: bool, file_id: Optional[str])
         """
-        full_path = KNOWLEDGE_SYNC_FOLDER / knowledge_id / file_path
+        full_path = config.KNOWLEDGE_SYNC_FOLDER / knowledge_id / file_path
 
         if not full_path.exists():
             logger.error(f"File not found: {full_path}")
@@ -459,6 +459,7 @@ def main() -> SyncResult:
     Returns:
         SyncResult with statistics
     """
+    config.ensure_external_allowed("Knowledge sync")
     start_time = time.time()
     result = SyncResult()
 

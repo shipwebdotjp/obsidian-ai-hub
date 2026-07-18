@@ -134,6 +134,7 @@ def generate_llm_response(
 
     既存コードとの互換性のため、戻り値は str のままにしている。
     """
+    config.ensure_external_allowed("LLM API call")
     messages = _prepare_messages(provider, prompt, files, system_prompt=system_prompt)
     logger.info(f"Prepared messages for LLM: {messages}")
     llm = create_langchain_llm(
@@ -166,6 +167,7 @@ def generate_llm_response_with_tools(
     ツール呼び出しをサポートしたLLMレスポンス生成。
     LLMがツール呼び出しを要求する限りループし、最終的なテキスト回答を返す。
     """
+    config.ensure_external_allowed("LLM API call with tools")
     messages = _prepare_messages(provider, prompt, files, system_prompt=system_prompt)
 
     llm = create_langchain_llm(

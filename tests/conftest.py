@@ -1,4 +1,7 @@
 import os
+
+os.environ.setdefault("OAIHUB_SKIP_DOTENV", "1")
+
 import tempfile
 import sys
 from pathlib import Path

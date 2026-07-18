@@ -300,7 +300,7 @@ class TestLocalFileScanning:
     
     def test_scan_empty_directory(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch('obsidian_ai_hub.sync_knowledge.KNOWLEDGE_SYNC_FOLDER', Path(tmpdir)):
+            with patch('obsidian_ai_hub.sync_knowledge.config.KNOWLEDGE_SYNC_FOLDER', Path(tmpdir)):
                 files = scan_local_files()
                 assert files == {}
     
@@ -324,7 +324,7 @@ class TestLocalFileScanning:
 
             (tmppath / "root.md").write_text("should be ignored")
             
-            with patch('obsidian_ai_hub.sync_knowledge.KNOWLEDGE_SYNC_FOLDER', tmppath):
+            with patch('obsidian_ai_hub.sync_knowledge.config.KNOWLEDGE_SYNC_FOLDER', tmppath):
                 files = scan_local_files()
                 
                 assert set(files.keys()) == {"kb1", "kb2"}

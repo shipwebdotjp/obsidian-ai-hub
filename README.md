@@ -412,3 +412,13 @@ Commands are executed without a shell. Plain argv-style commands are supported, 
 This project is licensed under the MIT License.
 
 See the `LICENSE` file for details.
+
+## Test mode
+
+Run CLI commands safely in an isolated environment:
+
+```bash
+ENV=test uv run python -m obsidian_ai_hub --merge-inbox
+```
+
+See `docs/testing.md` for full details.

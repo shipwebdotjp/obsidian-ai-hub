@@ -32,6 +32,8 @@ class WebExtractInput(BaseModel):
 
 @tool(args_schema=WebExtractInput)
 def web_extract(urls: list[str]) -> str:
+    config.ensure_external_allowed("Web extraction (Tavily)")
+
     """
     Extract the main content from specific web pages.
 

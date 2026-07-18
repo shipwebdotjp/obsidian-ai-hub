@@ -7,6 +7,7 @@ from typing import Optional
 
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
+from obsidian_ai_hub.utils import config
 
 try:
     from EventKit import (
@@ -78,6 +79,7 @@ def add_calendar_event(
         location: Optional location string.
         calendar_name: Optional name of the calendar (e.g., 'Work', 'Home').
     """
+    config.ensure_external_allowed("Apple Calendar")
     if not EVENT_KIT_AVAILABLE:
         return "Error: EventKit is not available on this system (macOS only)."
 
