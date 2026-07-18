@@ -396,6 +396,71 @@ def get_person(person_id: str, _=Depends(_require_loopback_or_token)):
     return item
 
 
+@router.patch("/people/{person_id}", response_model=schemas.PersonDetail)
+def update_person(
+    person_id: str,
+    body: schemas.PersonEditRequest,
+    _=Depends(_require_loopback_or_token),
+):
+    try:
+        return service.update_unlinked_person(
+            person_id,
+            display_name=body.display_name,
+            aliases=body.aliases
+        )
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except service.VaultLinkedPersonError as e:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": str(e),
+                "conflict_type": "vault_linked_person"
+            }
+        )
+    except service.AssignmentConflictError as e:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": str(e),
+                "conflict_type": "assignment_conflict"
+            }
+        )
+    except service.AliasConflictError as e:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": str(e),
+                "conflict_type": "alias_conflict",
+                "existing_person_id": e.existing_person_id,
+                "existing_person_name": e.existing_person_name
+            }
+        )
+    except service.MainNameConflictError as e:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": str(e),
+                "conflict_type": "main_name_conflict",
+                "existing_person_id": e.existing_person_id,
+                "existing_person_name": e.existing_person_name
+            }
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.delete("/people/{person_id}", response_model=schemas.PersonDeleteResponse)
+def delete_person(
+    person_id: str,
+    _=Depends(_require_loopback_or_token),
+):
+    try:
+        return service.delete_person(person_id)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
 @router.get("/people/candidates/{candidate_id}", response_model=schemas.PersonCandidateDetail)
 def get_person_candidate(candidate_id: str, _=Depends(_require_loopback_or_token)):
     item = service.get_person_candidate_detail(candidate_id)

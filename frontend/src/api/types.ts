@@ -353,4 +353,5 @@ export interface Person {
   normalized_name: string;
   vault_id: string | null;
   aliases: PersonAlias[];
+  summary_count: number;
 }

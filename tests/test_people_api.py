@@ -418,3 +418,197 @@ def test_people_merge_detailed(test_memory_db_path, client):
         assert old_link is None
     finally:
         conn.close()
+
+
+def test_people_list_sorting_and_counts(test_memory_db_path, client):
+    conn = memory.get_db_connection()
+    try:
+        # Create unlinked people
+        # A: 3 summaries
+        conn.execute("INSERT INTO people (person_id, display_name, normalized_name, vault_id) VALUES (?, ?, ?, ?)", ("p_a", "Alice", "alice", None))
+        # B: 5 summaries
+        conn.execute("INSERT INTO people (person_id, display_name, normalized_name, vault_id) VALUES (?, ?, ?, ?)", ("p_b", "Bob", "bob", None))
+        # C: 5 summaries
+        conn.execute("INSERT INTO people (person_id, display_name, normalized_name, vault_id) VALUES (?, ?, ?, ?)", ("p_c", "Charlie", "charlie", None))
+
+        # Insert dummy summaries first to satisfy foreign key constraints
+        for i in range(5):
+            conn.execute(
+                "INSERT INTO summaries (summary_id, period_type, period_key, period_start, period_end, generated_at, summary) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (f"sum_b_{i}", "day", f"2026-08-{i+1:02d}", f"2026-08-{i+1:02d}", f"2026-08-{i+1:02d}", "2026-08-01T12:00:00+09:00", "summary")
+            )
+            conn.execute(
+                "INSERT INTO summaries (summary_id, period_type, period_key, period_start, period_end, generated_at, summary) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (f"sum_c_{i}", "day", f"2026-09-{i+1:02d}", f"2026-09-{i+1:02d}", f"2026-09-{i+1:02d}", "2026-08-01T12:00:00+09:00", "summary")
+            )
+        for i in range(3):
+            conn.execute(
+                "INSERT INTO summaries (summary_id, period_type, period_key, period_start, period_end, generated_at, summary) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (f"sum_a_{i}", "day", f"2026-10-{i+1:02d}", f"2026-10-{i+1:02d}", f"2026-10-{i+1:02d}", "2026-08-01T12:00:00+09:00", "summary")
+            )
+
+        # Insert some summary links
+        # p_b: 5 summaries
+        for i in range(5):
+            conn.execute("INSERT INTO summary_people (summary_id, person_id, note, display_order) VALUES (?, ?, ?, ?)", (f"sum_b_{i}", "p_b", "note", i))
+        # p_c: 5 summaries
+        for i in range(5):
+            conn.execute("INSERT INTO summary_people (summary_id, person_id, note, display_order) VALUES (?, ?, ?, ?)", (f"sum_c_{i}", "p_c", "note", i))
+        # p_a: 3 summaries
+        for i in range(3):
+            conn.execute("INSERT INTO summary_people (summary_id, person_id, note, display_order) VALUES (?, ?, ?, ?)", (f"sum_a_{i}", "p_a", "note", i))
+
+        conn.commit()
+    finally:
+        conn.close()
+
+    response = client.get("/api/v1/people")
+    assert response.status_code == 200
+    res_people = response.json()
+
+    filtered = [p for p in res_people if p["person_id"] in ("p_a", "p_b", "p_c")]
+    assert len(filtered) == 3
+    assert filtered[0]["person_id"] == "p_b"
+    assert filtered[0]["summary_count"] == 5
+    assert filtered[1]["person_id"] == "p_c"
+    assert filtered[1]["summary_count"] == 5
+    assert filtered[2]["person_id"] == "p_a"
+    assert filtered[2]["summary_count"] == 3
+
+
+def test_people_detail_relation_counts(test_memory_db_path, client):
+    conn = memory.get_db_connection()
+    try:
+        conn.execute("INSERT INTO people (person_id, display_name, normalized_name, vault_id) VALUES (?, ?, ?, ?)", ("p_detail", "Dave", "dave", None))
+        conn.execute("INSERT INTO person_aliases (normalized_name, person_id, display_name) VALUES (?, ?, ?)", ("デーヴ", "p_detail", "デーヴ"))
+
+        # Insert summaries to satisfy FK constraints
+        conn.execute(
+            "INSERT INTO summaries (summary_id, period_type, period_key, period_start, period_end, generated_at, summary) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("sum_d_1", "day", "2026-08-01", "2026-08-01", "2026-08-01", "2026-08-01T12:00:00+09:00", "summary")
+        )
+        conn.execute(
+            "INSERT INTO summaries (summary_id, period_type, period_key, period_start, period_end, generated_at, summary) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("sum_d_2", "day", "2026-08-02", "2026-08-02", "2026-08-02", "2026-08-01T12:00:00+09:00", "summary")
+        )
+
+        conn.execute("INSERT INTO summary_people (summary_id, person_id, note, display_order) VALUES (?, ?, ?, ?)", ("sum_d_1", "p_detail", "note", 1))
+        conn.execute("INSERT INTO summary_person_assignments (summary_id, normalized_name, person_id) VALUES (?, ?, ?)", ("sum_d_2", "デーヴ", "p_detail"))
+        conn.commit()
+    finally:
+        conn.close()
+
+    response = client.get("/api/v1/people/p_detail")
+    assert response.status_code == 200
+    detail = response.json()
+    assert detail["summary_count"] == 1
+    assert detail["relation_counts"]["summaries"] == 1
+    assert detail["relation_counts"]["aliases"] == 1
+    assert detail["relation_counts"]["assignments"] == 1
+
+
+def test_people_edit_unlinked_success_and_conflict(test_memory_db_path, client):
+    conn = memory.get_db_connection()
+    try:
+        # A: Unlinked person
+        conn.execute("INSERT INTO people (person_id, display_name, normalized_name, vault_id) VALUES (?, ?, ?, ?)", ("p_edit_a", "Eve", "eve", None))
+        # B: Vault-linked person
+        conn.execute("INSERT INTO people (person_id, display_name, normalized_name, vault_id) VALUES (?, ?, ?, ?)", ("p_edit_b", "Frank", "frank", "frank-vault"))
+        # C: Unlinked person with conflicting name
+        conn.execute("INSERT INTO people (person_id, display_name, normalized_name, vault_id) VALUES (?, ?, ?, ?)", ("p_edit_c", "Grace", "grace", None))
+        conn.execute("INSERT INTO person_aliases (normalized_name, person_id, display_name) VALUES (?, ?, ?)", ("グレース", "p_edit_c", "グレース"))
+        conn.commit()
+    finally:
+        conn.close()
+
+    # 1. Edit Vault-linked -> Should reject with 409 vault_linked_person
+    response = client.patch("/api/v1/people/p_edit_b", json={"display_name": "Frankie"})
+    assert response.status_code == 409
+    assert response.json()["detail"]["conflict_type"] == "vault_linked_person"
+
+    # 2. Edit Unlinked (display_name only) -> success
+    response = client.patch("/api/v1/people/p_edit_a", json={"display_name": "Evelyn"})
+    assert response.status_code == 200
+    assert response.json()["display_name"] == "Evelyn"
+    assert response.json()["normalized_name"] == "evelyn"
+
+    # 3. Edit Unlinked (aliases only) -> success
+    response = client.patch("/api/v1/people/p_edit_a", json={"aliases": ["イヴ", "エヴァ"]})
+    assert response.status_code == 200
+    assert len(response.json()["aliases"]) == 2
+    alias_names = [al["display_name"] for al in response.json()["aliases"]]
+    assert "イヴ" in alias_names
+    assert "エヴァ" in alias_names
+
+    # 4. Edit with empty display_name -> HTTP 400
+    response = client.patch("/api/v1/people/p_edit_a", json={"display_name": "   "})
+    assert response.status_code == 400
+
+    # 5. Edit with duplicate alias -> HTTP 400
+    response = client.patch("/api/v1/people/p_edit_a", json={"aliases": ["イヴ", "イヴ"]})
+    assert response.status_code == 400
+
+    # 6. Edit with other person's main name conflict -> HTTP 409 main_name_conflict
+    response = client.patch("/api/v1/people/p_edit_a", json={"display_name": "Grace"})
+    assert response.status_code == 409
+    assert response.json()["detail"]["conflict_type"] == "main_name_conflict"
+    assert response.json()["detail"]["existing_person_id"] == "p_edit_c"
+
+    # 7. Edit with other person's alias conflict -> HTTP 409 alias_conflict
+    response = client.patch("/api/v1/people/p_edit_a", json={"aliases": ["グレース"]})
+    assert response.status_code == 409
+    assert response.json()["detail"]["conflict_type"] == "alias_conflict"
+    assert response.json()["detail"]["existing_person_id"] == "p_edit_c"
+
+
+def test_people_delete_success(test_memory_db_path, client):
+    conn = memory.get_db_connection()
+    try:
+        conn.execute("INSERT INTO people (person_id, display_name, normalized_name, vault_id) VALUES (?, ?, ?, ?)", ("p_del", "Heidi", "heidi", None))
+        conn.execute("INSERT INTO person_aliases (normalized_name, person_id, display_name) VALUES (?, ?, ?)", ("ハイジ", "p_del", "ハイジ"))
+
+        # Insert summaries to satisfy FK constraints
+        conn.execute(
+            "INSERT INTO summaries (summary_id, period_type, period_key, period_start, period_end, generated_at, summary) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("sum_del_1", "day", "2026-08-01", "2026-08-01", "2026-08-01", "2026-08-01T12:00:00+09:00", "summary")
+        )
+        conn.execute(
+            "INSERT INTO summaries (summary_id, period_type, period_key, period_start, period_end, generated_at, summary) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("sum_del_2", "day", "2026-08-02", "2026-08-02", "2026-08-02", "2026-08-01T12:00:00+09:00", "summary")
+        )
+
+        conn.execute("INSERT INTO summary_people (summary_id, person_id, note, display_order) VALUES (?, ?, ?, ?)", ("sum_del_1", "p_del", "note", 1))
+        conn.execute("INSERT INTO summary_person_assignments (summary_id, normalized_name, person_id) VALUES (?, ?, ?)", ("sum_del_2", "ハイジ", "p_del"))
+        conn.commit()
+    finally:
+        conn.close()
+
+    # Delete non-existent -> 404
+    response = client.delete("/api/v1/people/non_existent")
+    assert response.status_code == 404
+
+    # Delete success
+    response = client.delete("/api/v1/people/p_del")
+    assert response.status_code == 200
+    res = response.json()
+    assert res["success"] is True
+    assert res["deleted_summary_people"] == 1
+    assert res["deleted_aliases"] == 1
+    assert res["deleted_assignments"] == 1
+
+    # Verify db state
+    conn = memory.get_db_connection()
+    try:
+        assert conn.execute("SELECT * FROM people WHERE person_id = 'p_del'").fetchone() is None
+        assert conn.execute("SELECT * FROM person_aliases WHERE person_id = 'p_del'").fetchone() is None
+        assert conn.execute("SELECT * FROM summary_people WHERE person_id = 'p_del'").fetchone() is None
+        assert conn.execute("SELECT * FROM summary_person_assignments WHERE person_id = 'p_del'").fetchone() is None
+    finally:
+        conn.close()

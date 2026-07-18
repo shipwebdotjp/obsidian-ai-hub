@@ -472,6 +472,7 @@ class Person(BaseModel):
     normalized_name: str
     vault_id: Optional[str] = None
     aliases: list[PersonAlias] = []
+    summary_count: int = 0
 
 
 class PersonCandidate(BaseModel):
@@ -498,8 +499,27 @@ class PersonAssignmentRequest(BaseModel):
     target_person_id: str
 
 
+class RelationCounts(BaseModel):
+    summaries: int
+    aliases: int
+    assignments: int
+
+
 class PersonDetail(Person):
     summaries: list[AssociatedSummary] = []
+    relation_counts: Optional[RelationCounts] = None
+
+
+class PersonEditRequest(BaseModel):
+    display_name: Optional[str] = None
+    aliases: Optional[list[str]] = None
+
+
+class PersonDeleteResponse(BaseModel):
+    success: bool
+    deleted_summary_people: int
+    deleted_aliases: int
+    deleted_assignments: int
 
 
 class CandidateResolveRequest(BaseModel):
