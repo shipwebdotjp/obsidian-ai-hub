@@ -329,6 +329,25 @@ def _insert_people(
                         "INSERT INTO summary_people (summary_id, person_id, note, display_order) VALUES (?, ?, ?, ?)",
                         (summary_id, person_id, person.get("note"), order),
                     )
+                else:
+                    cursor.execute(
+                        "SELECT note FROM summary_people WHERE summary_id = ? AND person_id = ?",
+                        (summary_id, person_id)
+                    )
+                    existing_row = cursor.fetchone()
+                    if existing_row:
+                        notes_to_join = []
+                        existing_note = existing_row[0]
+                        if existing_note and existing_note.strip():
+                            notes_to_join.append(existing_note.strip())
+                        new_note = person.get("note")
+                        if new_note and new_note.strip():
+                            notes_to_join.append(new_note.strip())
+                        merged_note = "\n".join(notes_to_join) if notes_to_join else None
+                        conn.execute(
+                            "UPDATE summary_people SET note = ? WHERE summary_id = ? AND person_id = ?",
+                            (merged_note, summary_id, person_id)
+                        )
                 order += 1
                 continue
 
@@ -346,6 +365,25 @@ def _insert_people(
                         "INSERT INTO summary_people (summary_id, person_id, note, display_order) VALUES (?, ?, ?, ?)",
                         (summary_id, person_id, person.get("note"), order),
                     )
+                else:
+                    cursor.execute(
+                        "SELECT note FROM summary_people WHERE summary_id = ? AND person_id = ?",
+                        (summary_id, person_id)
+                    )
+                    existing_row = cursor.fetchone()
+                    if existing_row:
+                        notes_to_join = []
+                        existing_note = existing_row[0]
+                        if existing_note and existing_note.strip():
+                            notes_to_join.append(existing_note.strip())
+                        new_note = person.get("note")
+                        if new_note and new_note.strip():
+                            notes_to_join.append(new_note.strip())
+                        merged_note = "\n".join(notes_to_join) if notes_to_join else None
+                        conn.execute(
+                            "UPDATE summary_people SET note = ? WHERE summary_id = ? AND person_id = ?",
+                            (merged_note, summary_id, person_id)
+                        )
                 order += 1
                 continue
 
@@ -384,6 +422,25 @@ def _insert_people(
                     )
 
             if person_id in seen_person_ids:
+                cursor.execute(
+                    "SELECT note FROM summary_people WHERE summary_id = ? AND person_id = ?",
+                    (summary_id, person_id)
+                )
+                existing_row = cursor.fetchone()
+                if existing_row:
+                    notes_to_join = []
+                    existing_note = existing_row[0]
+                    if existing_note and existing_note.strip():
+                        notes_to_join.append(existing_note.strip())
+                    new_note = person.get("note")
+                    if new_note and new_note.strip():
+                        notes_to_join.append(new_note.strip())
+                    merged_note = "\n".join(notes_to_join) if notes_to_join else None
+                    conn.execute(
+                        "UPDATE summary_people SET note = ? WHERE summary_id = ? AND person_id = ?",
+                        (merged_note, summary_id, person_id)
+                    )
+                order += 1
                 continue
             seen_person_ids.add(person_id)
 

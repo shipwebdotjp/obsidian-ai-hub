@@ -129,6 +129,7 @@ def test_db_initialization_and_indexes(clean_memory_env):
     assert "people" in tables
     assert "person_candidates" in tables
     assert "summary_person_candidates" in tables
+    assert "summary_person_assignments" in tables
 
     # Verify indexes exist
     cursor.execute("SELECT name FROM sqlite_master WHERE type='index';")
@@ -140,6 +141,7 @@ def test_db_initialization_and_indexes(clean_memory_env):
     assert "idx_summaries_period" in indexes
     assert "idx_spc_summary_id" in indexes
     assert "idx_pc_normalized_name" in indexes
+    assert "idx_spa_normalized_name" in indexes
 
     conn.close()
 

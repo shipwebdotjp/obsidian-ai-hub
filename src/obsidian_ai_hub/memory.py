@@ -401,6 +401,7 @@ def run_migration_v8(conn: sqlite3.Connection) -> None:
             FOREIGN KEY(person_id) REFERENCES people(person_id) ON DELETE CASCADE
         );
     """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_spa_normalized_name ON summary_person_assignments(normalized_name);")
     conn.execute("PRAGMA user_version = 8;")
     conn.commit()
 

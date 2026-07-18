@@ -573,6 +573,7 @@ export default function PeoplePage() {
                                 <select
                                   value={assignedPersonId}
                                   onChange={(e) => setSummaryAssignments(prev => ({ ...prev, [sum.summary_id]: e.target.value }))}
+                                  aria-label={`割当先を選択 (${sum.period_key})`}
                                   className="rounded border border-slate-300 bg-white px-2 py-1 text-xs focus:border-slate-900 focus:outline-none"
                                 >
                                   <option value="">-- 割当先を選択 --</option>
@@ -587,6 +588,7 @@ export default function PeoplePage() {
                                 <button
                                   onClick={() => handleAssignCandidateSummary(sum.summary_id, assignedPersonId)}
                                   disabled={loading || !assignedPersonId}
+                                  aria-label={`このサマリ (${sum.period_key}) に割当`}
                                   className="rounded bg-slate-900 px-3 py-1 text-xs text-white hover:bg-slate-800 disabled:opacity-50"
                                 >
                                   このサマリに割当

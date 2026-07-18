@@ -69,7 +69,14 @@ def test_manual_assignment_flow(test_memory_db_path, client):
         json={"target_person_id": "peo_sato"}
     )
     assert response.status_code == 400
-    assert "Vault" in response.json()["detail"]
+    # Verify DB has no manual assignment stored
+    conn = memory.get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM summary_person_assignments WHERE summary_id = 'sum_1' AND normalized_name = '山田さん'")
+        assert cursor.fetchone()[0] == 0
+    finally:
+        conn.close()
 
     # Case 2: Assign sum_1 to Vault-linked person (peo_suzuki) -> Should succeed
     response = client.post(
@@ -297,5 +304,96 @@ def test_merge_people_transfers_manual_assignments(test_memory_db_path):
         row = cursor.fetchone()
         assert row is not None
         assert row["person_id"] == "peo_b"
+    finally:
+        conn.close()
+
+
+def test_schema_verification_migration(test_memory_db_path):
+    # This verifies the schema upgrade / migration v8 logic directly using test_memory_db_path
+    conn = memory.get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA user_version;")
+        assert cursor.fetchone()[0] == 8
+
+        # Ensure summary_person_assignments table exists with correct index
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='summary_person_assignments';")
+        assert cursor.fetchone() is not None
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='index' AND name='idx_spa_normalized_name';")
+        assert cursor.fetchone() is not None
+    finally:
+        conn.close()
+
+
+def test_duplicate_person_resolutions_note_concatenation(test_memory_db_path):
+    # Regression test verifying that when multiple candidate/resolved/assigned notations
+    # resolve to the same person_id inside the same summary, seen_person_ids does NOT
+    # skip it entirely, but instead concatenates the note and preserves both notes.
+    conn = memory.get_db_connection()
+    try:
+        # 1. Create person (鈴木健)
+        conn.execute(
+            "INSERT INTO people (person_id, display_name, normalized_name, vault_id) VALUES (?, ?, ?, ?)",
+            ("peo_suzuki", "鈴木健", "鈴木健", "suzuki-ken")
+        )
+        # Create summary first to satisfy summary_person_assignments FK constraint
+        conn.execute(
+            "INSERT INTO summaries (summary_id, period_type, period_key, period_start, period_end) VALUES (?, ?, ?, ?, ?)",
+            ("sum_1", "day", "2026-08-01", "2026-08-01", "2026-08-01")
+        )
+        # 2. Add manual assignment mapping '山田さん' -> Suzuki for sum_1
+        conn.execute(
+            "INSERT INTO summary_person_assignments (summary_id, normalized_name, person_id) VALUES (?, ?, ?)",
+            ("sum_1", "山田さん", "peo_suzuki")
+        )
+        # 3. Add confirmed alias mapping 'A-chan' -> Suzuki
+        conn.execute(
+            "INSERT INTO person_aliases (normalized_name, person_id, display_name) VALUES (?, ?, ?)",
+            ("a-chan", "peo_suzuki", "A-chan")
+        )
+        # 4. Add confirmed alias mapping '鈴木健' -> Suzuki
+        conn.execute(
+            "INSERT INTO person_aliases (normalized_name, person_id, display_name) VALUES (?, ?, ?)",
+            ("鈴木健", "peo_suzuki", "鈴木健")
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    # Create sum_1 record that has:
+    # - "山田さん" (which resolves to Suzuki via Priority 0 manual assignment)
+    # - "A-chan" (which resolves to Suzuki via Priority 1 confirmed alias)
+    # - "鈴木健" (which resolves to Suzuki via Priority 2 safe vault matching)
+    record = {
+        "period_type": "day",
+        "period_key": "2026-08-01",
+        "period_start": "2026-08-01",
+        "period_end": "2026-08-01",
+        "summary": "Meeting summary",
+        "people": [
+            {"name": "山田さん", "note": "手動割当メモ"},
+            {"name": "A-chan", "note": "別名メモ"},
+            {"name": "鈴木健", "note": "正規名メモ"}
+        ]
+    }
+
+    # Upsert summary
+    summary_store.upsert_summary(record)
+
+    conn = memory.get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM summary_people WHERE summary_id = 'sum_1'")
+        rows = cursor.fetchall()
+
+        # Only 1 unique row in summary_people for peo_suzuki
+        assert len(rows) == 1
+        assert rows[0]["person_id"] == "peo_suzuki"
+
+        # The notes from all three notations should be concatenated with newlines, preserving all information
+        note = rows[0]["note"]
+        assert "手動割当メモ" in note
+        assert "別名メモ" in note
+        assert "正規名メモ" in note
     finally:
         conn.close()
