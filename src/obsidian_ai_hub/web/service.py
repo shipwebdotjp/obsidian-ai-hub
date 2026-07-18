@@ -542,11 +542,25 @@ def get_dashboard_browse(
 
         sorted_days = [days_data[k] for k in sorted(days_data.keys(), reverse=True)]
 
+        months_summaries = []
+        conn = memory.get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM summaries WHERE period_type = 'month' AND period_key = ?",
+                (month,)
+            )
+            rows = cursor.fetchall()
+            for r in rows:
+                months_summaries.append(summary_store.get_summary_by_id(r["summary_id"], conn=conn))
+        finally:
+            conn.close()
+
         return {
             "selectable_years": selectable_years,
             "selected_year": selected_year,
             "selected_month": month,
-            "months": [],
+            "months": months_summaries,
             "weeks": overlapping_weeks,
             "days": sorted_days,
         }
