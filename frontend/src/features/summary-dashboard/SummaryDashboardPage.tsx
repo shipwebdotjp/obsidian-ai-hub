@@ -14,7 +14,6 @@ import type {
   DashboardStatsResponse,
   SummaryDetail,
   SummaryItem,
-  BrowseDayItem,
   StatsBucket,
 } from "../../api/types";
 

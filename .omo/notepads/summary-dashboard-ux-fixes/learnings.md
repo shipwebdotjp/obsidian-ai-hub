@@ -17,3 +17,4 @@
 - Removed the `!browseMonth &&` guard so the monthly summary section renders whenever the backend returns months.
 - Added `goToBrowseForSummary(summary)` and wired it to the three home card 「詳細」 buttons; it sets the filters to the summary's period, switches to the browse tab, and shows the summary detail in the right pane without auto-loading day logs.
 - Verified with `npx tsc --noEmit` (exit 0) and grep audits: `loadBrowse(` only appears inside the helper/effect, `goToBrowseForSummary` is used for all three home cards, and the months guard no longer requires `!browseMonth`.
+- 2026-07-18: Removed unused `BrowseDayItem` import from `SummaryDashboardPage.tsx` (line 17). Grep confirmed it was only present in the import line. `tsc --noEmit` passes after removal.
