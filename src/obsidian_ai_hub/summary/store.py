@@ -311,11 +311,29 @@ def _insert_people(
             continue
         seen.add(normalized_name)
 
+        # Priority 1: DB Confirmed Alias
+        cursor = conn.cursor()
+        cursor.execute("SELECT person_id FROM person_aliases WHERE normalized_name = ?", (normalized_name,))
+        row = cursor.fetchone()
+        if row is not None:
+            person_id = row[0]
+            # Ensure the target person exists in people table
+            cursor.execute("SELECT person_id FROM people WHERE person_id = ?", (person_id,))
+            if cursor.fetchone() is not None:
+                if person_id not in seen_person_ids:
+                    seen_person_ids.add(person_id)
+                    conn.execute(
+                        "INSERT INTO summary_people (summary_id, person_id, note, display_order) VALUES (?, ?, ?, ?)",
+                        (summary_id, person_id, person.get("note"), order),
+                    )
+                order += 1
+                continue
+
+        # Priority 2: Safe Vault Input
         if normalized_name in people_notes_map:
             note_data = people_notes_map[normalized_name]
             vault_id = note_data["id"]
             vault_name = note_data["name"]
-            cursor = conn.cursor()
 
             # Check if there is an existing person with this vault_id
             cursor.execute("SELECT person_id FROM people WHERE vault_id = ?", (vault_id,))
@@ -354,7 +372,7 @@ def _insert_people(
                 (summary_id, person_id, person.get("note"), order),
             )
         else:
-            # Unmatched/unregistered name: save as unresolved candidate
+            # Priority 3: Unresolved candidate
             cursor = conn.cursor()
             cursor.execute("SELECT candidate_id FROM person_candidates WHERE normalized_name = ?", (normalized_name,))
             row = cursor.fetchone()

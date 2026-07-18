@@ -425,3 +425,71 @@ class DashboardStatsResponse(BaseModel):
     buckets: list[StatsBucket]
     candidate_topics: list[str]
     candidate_keywords: list[str]
+
+
+# --- People Management schemas ---
+
+class PersonAlias(BaseModel):
+    normalized_name: str
+    display_name: str
+
+
+class Person(BaseModel):
+    person_id: str
+    display_name: str
+    normalized_name: str
+    vault_id: Optional[str] = None
+    aliases: list[PersonAlias] = []
+
+
+class PersonCandidate(BaseModel):
+    candidate_id: str
+    display_name: str
+    normalized_name: str
+    status: str
+
+
+class AssociatedSummary(BaseModel):
+    summary_id: str
+    period_type: str
+    period_key: str
+    note: Optional[str] = None
+    display_order: int
+
+
+class PersonCandidateDetail(PersonCandidate):
+    summaries: list[AssociatedSummary] = []
+
+
+class PersonDetail(Person):
+    summaries: list[AssociatedSummary] = []
+
+
+class CandidateResolveRequest(BaseModel):
+    target_person_id: str
+
+
+class PeopleMergeRequest(BaseModel):
+    from_person_id: str
+    to_person_id: str
+
+
+class DuplicateVaultMatch(BaseModel):
+    unlinked_person: Person
+    vault_person: dict[str, Any]
+
+
+class DuplicateSameVaultIdGroup(BaseModel):
+    vault_id: str
+    people: list[Person]
+
+
+class DuplicatesResponse(BaseModel):
+    vault_matches: list[DuplicateVaultMatch] = []
+    same_vault_id_groups: list[DuplicateSameVaultIdGroup] = []
+
+
+class SyncPeopleResponse(BaseModel):
+    synced: bool
+    loader_report: dict[str, Any]
+    db_conflicts: dict[str, Any]

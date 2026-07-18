@@ -263,6 +263,8 @@ from datetime import datetime, date, timedelta
 import calendar
 from obsidian_ai_hub.summary import store as summary_store
 from obsidian_ai_hub.activity import store as activity_store
+from obsidian_ai_hub.utils.people_loader import load_people_notes_with_report
+from obsidian_ai_hub.people_sync.sync import get_db_vault_conflicts_report
 
 def parse_iso_datetime(iso_str: str) -> datetime:
     dt = datetime.fromisoformat(iso_str)
@@ -733,3 +735,420 @@ def get_dashboard_stats(
         "candidate_topics": candidate_topics,
         "candidate_keywords": candidate_keywords,
     }
+
+
+# --- Custom Exception classes for Conflict checks ---
+
+class AliasConflictError(ValueError):
+    def __init__(self, existing_person_id: str, existing_person_name: str):
+        super().__init__("Conflict: This alias is already confirmed for another person")
+        self.existing_person_id = existing_person_id
+        self.existing_person_name = existing_person_name
+
+
+class MainNameConflictError(ValueError):
+    def __init__(self, existing_person_id: str, existing_person_name: str):
+        super().__init__("Conflict: This name matches another person's normalized name")
+        self.existing_person_id = existing_person_id
+        self.existing_person_name = existing_person_name
+
+
+# --- People Management services ---
+
+def list_people() -> list[dict[str, Any]]:
+    conn = memory.get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT person_id, display_name, normalized_name, vault_id FROM people")
+        people_rows = [dict(r) for r in cursor.fetchall()]
+
+        for p in people_rows:
+            cursor.execute(
+                "SELECT normalized_name, display_name FROM person_aliases WHERE person_id = ?",
+                (p["person_id"],)
+            )
+            p["aliases"] = [dict(r) for r in cursor.fetchall()]
+        return people_rows
+    finally:
+        conn.close()
+
+
+def get_person_detail(person_id: str) -> Optional[dict[str, Any]]:
+    conn = memory.get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT person_id, display_name, normalized_name, vault_id FROM people WHERE person_id = ?",
+            (person_id,)
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        p = dict(row)
+
+        cursor.execute(
+            "SELECT normalized_name, display_name FROM person_aliases WHERE person_id = ?",
+            (p["person_id"],)
+        )
+        p["aliases"] = [dict(r) for r in cursor.fetchall()]
+
+        cursor.execute(
+            """
+            SELECT s.summary_id, s.period_type, s.period_key, sp.note, sp.display_order
+            FROM summary_people sp
+            JOIN summaries s ON sp.summary_id = s.summary_id
+            WHERE sp.person_id = ?
+            ORDER BY s.period_start DESC, s.period_key DESC
+            """,
+            (person_id,)
+        )
+        p["summaries"] = [dict(r) for r in cursor.fetchall()]
+        return p
+    finally:
+        conn.close()
+
+
+def list_person_candidates() -> list[dict[str, Any]]:
+    conn = memory.get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT candidate_id, display_name, normalized_name, status FROM person_candidates")
+        return [dict(r) for r in cursor.fetchall()]
+    finally:
+        conn.close()
+
+
+def get_person_candidate_detail(candidate_id: str) -> Optional[dict[str, Any]]:
+    conn = memory.get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT candidate_id, display_name, normalized_name, status FROM person_candidates WHERE candidate_id = ?",
+            (candidate_id,)
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        c = dict(row)
+
+        cursor.execute(
+            """
+            SELECT s.summary_id, s.period_type, s.period_key, spc.note, spc.display_order
+            FROM summary_person_candidates spc
+            JOIN summaries s ON spc.summary_id = s.summary_id
+            WHERE spc.candidate_id = ?
+            ORDER BY s.period_start DESC, s.period_key DESC
+            """,
+            (candidate_id,)
+        )
+        c["summaries"] = [dict(r) for r in cursor.fetchall()]
+        return c
+    finally:
+        conn.close()
+
+
+def resolve_person_candidate(candidate_id: str, target_person_id: str) -> dict[str, Any]:
+    conn = memory.get_db_connection()
+    try:
+        with conn:
+            cursor = conn.cursor()
+
+            # 1. Fetch candidate
+            cursor.execute(
+                "SELECT candidate_id, display_name, normalized_name, status FROM person_candidates WHERE candidate_id = ?",
+                (candidate_id,)
+            )
+            cand_row = cursor.fetchone()
+            if cand_row is None:
+                raise ValueError("Candidate not found")
+            cand = dict(cand_row)
+
+            # 2. Fetch target person
+            cursor.execute(
+                "SELECT person_id, display_name, normalized_name, vault_id FROM people WHERE person_id = ?",
+                (target_person_id,)
+            )
+            target_row = cursor.fetchone()
+            if target_row is None:
+                raise ValueError("Target person not found")
+            target = dict(target_row)
+
+            # Enforce target must be a Vault-linked person
+            if not target.get("vault_id"):
+                raise ValueError("未連携人物への解決は許可されていません。解決先はVault連携済みの人物だけに制限されています。")
+
+            normalized_name = cand["normalized_name"]
+
+            # 3. Conflict check 1: person_aliases
+            cursor.execute(
+                "SELECT person_id, display_name FROM person_aliases WHERE normalized_name = ?",
+                (normalized_name,)
+            )
+            alias_row = cursor.fetchone()
+            if alias_row is not None and alias_row["person_id"] != target_person_id:
+                raise AliasConflictError(alias_row["person_id"], alias_row["display_name"])
+
+            # 4. Conflict check 2: people.normalized_name
+            cursor.execute(
+                "SELECT person_id, display_name FROM people WHERE normalized_name = ?",
+                (normalized_name,)
+            )
+            main_name_row = cursor.fetchone()
+            if main_name_row is not None and main_name_row["person_id"] != target_person_id:
+                raise MainNameConflictError(main_name_row["person_id"], main_name_row["display_name"])
+
+            # 5. Insert alias
+            conn.execute(
+                "INSERT OR IGNORE INTO person_aliases (normalized_name, person_id, display_name) VALUES (?, ?, ?)",
+                (normalized_name, target_person_id, cand["display_name"])
+            )
+
+            # 6. Migrate summaries
+            cursor.execute(
+                "SELECT summary_id, note, display_order FROM summary_person_candidates WHERE candidate_id = ?",
+                (candidate_id,)
+            )
+            links = cursor.fetchall()
+
+            for link in links:
+                summary_id = link["summary_id"]
+                cand_note = link["note"]
+                cand_order = link["display_order"]
+
+                cursor.execute(
+                    "SELECT note, display_order FROM summary_people WHERE summary_id = ? AND person_id = ?",
+                    (summary_id, target_person_id)
+                )
+                existing_link = cursor.fetchone()
+
+                if existing_link is not None:
+                    notes_to_join = []
+                    existing_note = existing_link["note"]
+                    existing_order = existing_link["display_order"]
+
+                    if existing_note and existing_note.strip():
+                        notes_to_join.append(existing_note.strip())
+                    if cand_note and cand_note.strip():
+                        notes_to_join.append(cand_note.strip())
+
+                    merged_note = "\n".join(notes_to_join) if notes_to_join else None
+                    merged_order = merge_display_orders(existing_order, cand_order)
+
+                    conn.execute(
+                        "UPDATE summary_people SET note = ?, display_order = ? WHERE summary_id = ? AND person_id = ?",
+                        (merged_note, merged_order, summary_id, target_person_id)
+                    )
+                else:
+                    conn.execute(
+                        "INSERT INTO summary_people (summary_id, person_id, note, display_order) VALUES (?, ?, ?, ?)",
+                        (summary_id, target_person_id, cand_note, cand_order)
+                    )
+
+                conn.execute(
+                    "DELETE FROM summary_person_candidates WHERE summary_id = ? AND candidate_id = ?",
+                    (summary_id, candidate_id)
+                )
+
+            # 7. Delete candidate
+            conn.execute("DELETE FROM person_candidates WHERE candidate_id = ?", (candidate_id,))
+
+            return {"success": True}
+    finally:
+        conn.close()
+
+
+def get_duplicate_candidates() -> dict[str, Any]:
+    safe_map, report = load_people_notes_with_report()
+    parsed_notes = report.get("parsed_notes", [])
+    vault_notes_by_id = {n["id"]: n for n in parsed_notes}
+
+    conn = memory.get_db_connection()
+    try:
+        cursor = conn.cursor()
+
+        # Group 1: Unlinked people matching safe Vault input
+        cursor.execute("SELECT person_id, display_name, normalized_name, vault_id FROM people WHERE vault_id IS NULL")
+        unlinked_people = [dict(r) for r in cursor.fetchall()]
+
+        vault_matches = []
+        for p in unlinked_people:
+            norm = p["normalized_name"]
+            if norm in safe_map:
+                v_note = safe_map[norm]
+                vault_matches.append({
+                    "unlinked_person": p,
+                    "vault_person": {
+                        "id": v_note["id"],
+                        "name": v_note["name"],
+                        "path": str(v_note["file_path"])
+                    }
+                })
+
+        # Group 2: Same non-NULL vault_id across multiple people records
+        cursor.execute(
+            """
+            SELECT vault_id, count(*) as cnt
+            FROM people
+            WHERE vault_id IS NOT NULL
+            GROUP BY vault_id
+            HAVING cnt > 1
+            """
+        )
+        duplicate_vault_ids = [r["vault_id"] for r in cursor.fetchall()]
+
+        same_vault_id_groups = []
+        for v_id in duplicate_vault_ids:
+            cursor.execute(
+                "SELECT person_id, display_name, normalized_name, vault_id FROM people WHERE vault_id = ?",
+                (v_id,)
+            )
+            members = [dict(r) for r in cursor.fetchall()]
+            same_vault_id_groups.append({
+                "vault_id": v_id,
+                "people": members
+            })
+
+        return {
+            "vault_matches": vault_matches,
+            "same_vault_id_groups": same_vault_id_groups
+        }
+    finally:
+        conn.close()
+
+
+def merge_people(from_person_id: str, to_person_id: str) -> bool:
+    conn = memory.get_db_connection()
+    try:
+        with conn:
+            cursor = conn.cursor()
+
+            # 1. Fetch people
+            cursor.execute("SELECT person_id, display_name, vault_id FROM people WHERE person_id = ?", (from_person_id,))
+            from_row = cursor.fetchone()
+            if from_row is None:
+                raise ValueError("Source person not found")
+            from_p = dict(from_row)
+
+            cursor.execute("SELECT person_id, display_name, vault_id FROM people WHERE person_id = ?", (to_person_id,))
+            to_row = cursor.fetchone()
+            if to_row is None:
+                raise ValueError("Target person not found")
+            to_p = dict(to_row)
+
+            # Enforce target is a Vault-linked person
+            if not to_p.get("vault_id"):
+                raise ValueError("残す人物（統合先）はVault連携済みの人物である必要があります。")
+
+            # Enforce from_p is either unlinked or has the exact same vault_id
+            if from_p.get("vault_id") and from_p["vault_id"] != to_p["vault_id"]:
+                raise ValueError("異なるVault IDを持つ人物同士の統合は拒否されます。")
+
+            # 2. Migrate summary links
+            cursor.execute("SELECT summary_id, note, display_order FROM summary_people WHERE person_id = ?", (from_person_id,))
+            links = cursor.fetchall()
+
+            for link in links:
+                summary_id = link["summary_id"]
+                note = link["note"]
+                order = link["display_order"]
+
+                cursor.execute(
+                    "SELECT note, display_order FROM summary_people WHERE summary_id = ? AND person_id = ?",
+                    (summary_id, to_person_id)
+                )
+                existing_link = cursor.fetchone()
+
+                if existing_link is not None:
+                    notes_to_join = []
+                    existing_note = existing_link["note"]
+                    existing_order = existing_link["display_order"]
+
+                    if existing_note and existing_note.strip():
+                        notes_to_join.append(existing_note.strip())
+                    if note and note.strip():
+                        notes_to_join.append(note.strip())
+
+                    merged_note = "\n".join(notes_to_join) if notes_to_join else None
+                    merged_order = merge_display_orders(existing_order, order)
+
+                    conn.execute(
+                        "UPDATE summary_people SET note = ?, display_order = ? WHERE summary_id = ? AND person_id = ?",
+                        (merged_note, merged_order, summary_id, to_person_id)
+                    )
+                else:
+                    conn.execute(
+                        "INSERT INTO summary_people (summary_id, person_id, note, display_order) VALUES (?, ?, ?, ?)",
+                        (summary_id, to_person_id, note, order)
+                    )
+
+                conn.execute(
+                    "DELETE FROM summary_people WHERE summary_id = ? AND person_id = ?",
+                    (summary_id, from_person_id)
+                )
+
+            # 3. Migrate aliases
+            # UPDATE OR IGNORE to move aliases
+            conn.execute(
+                "UPDATE OR IGNORE person_aliases SET person_id = ? WHERE person_id = ?",
+                (to_person_id, from_person_id)
+            )
+            # Delete any aliases of from_person_id that couldn't be migrated due to unique key conflicts
+            conn.execute("DELETE FROM person_aliases WHERE person_id = ?", (from_person_id,))
+
+            # 4. Delete source person
+            conn.execute("DELETE FROM people WHERE person_id = ?", (from_person_id,))
+
+            return True
+    finally:
+        conn.close()
+
+
+def sync_people() -> dict[str, Any]:
+    people_notes_map, report = load_people_notes_with_report()
+    parsed_notes = report.get("parsed_notes", [])
+
+    conn = memory.get_db_connection()
+    try:
+        with conn:
+            # 1. Detect conflicts
+            db_conflicts = get_db_vault_conflicts_report(conn, parsed_notes)
+
+            # 2. Sync safe part
+            from obsidian_ai_hub.people_sync.sync import sync_people_in_tx
+            sync_people_in_tx(conn, people_notes_map)
+
+            # Return reports
+            clean_loader_report = {
+                "file_deficiencies": report.get("file_deficiencies", []),
+                "duplicate_ids": report.get("duplicate_ids", []),
+                "normalized_name_collisions": report.get("normalized_name_collisions", []),
+                "alias_collisions": report.get("alias_collisions", [])
+            }
+            return {
+                "synced": True,
+                "loader_report": clean_loader_report,
+                "db_conflicts": db_conflicts
+            }
+    finally:
+        conn.close()
+
+
+def get_vault_report_dynamic() -> dict[str, Any]:
+    people_notes_map, report = load_people_notes_with_report()
+    parsed_notes = report.get("parsed_notes", [])
+
+    conn = memory.get_db_connection()
+    try:
+        db_conflicts = get_db_vault_conflicts_report(conn, parsed_notes)
+        clean_loader_report = {
+            "file_deficiencies": report.get("file_deficiencies", []),
+            "duplicate_ids": report.get("duplicate_ids", []),
+            "normalized_name_collisions": report.get("normalized_name_collisions", []),
+            "alias_collisions": report.get("alias_collisions", [])
+        }
+        return {
+            "loader_report": clean_loader_report,
+            "db_conflicts": db_conflicts
+        }
+    finally:
+        conn.close()

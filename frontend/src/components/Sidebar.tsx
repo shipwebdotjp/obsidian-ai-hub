@@ -22,6 +22,9 @@ export default function Sidebar() {
         <NavLink to={ROUTES.SUMMARY_DASHBOARD} className={linkClass}>
           サマリダッシュボード
         </NavLink>
+        <NavLink to={ROUTES.PEOPLE} className={linkClass}>
+          人物管理
+        </NavLink>
       </nav>
     </aside>
   );

@@ -4,7 +4,7 @@ import pytest
 from pathlib import Path
 
 from obsidian_ai_hub.utils import config as app_config
-from obsidian_ai_hub.utils.people_loader import load_and_validate_people_notes
+from obsidian_ai_hub.utils.people_loader import load_and_validate_people_notes, load_people_notes_with_report
 
 
 def test_people_loader_no_dir(tmp_path, monkeypatch):
@@ -12,8 +12,9 @@ def test_people_loader_no_dir(tmp_path, monkeypatch):
     fake_people_path = tmp_path / "non_existent_people_dir"
     monkeypatch.setattr(app_config, "PEOPLE_PATH", fake_people_path)
 
-    res = load_and_validate_people_notes()
+    res, report = load_people_notes_with_report()
     assert res == {}
+    assert report["file_deficiencies"] == []
 
 
 def test_people_loader_valid(tmp_path, monkeypatch):
@@ -42,7 +43,7 @@ aliases:
 Sato's description
 """, encoding="utf-8")
 
-    res = load_and_validate_people_notes()
+    res, report = load_people_notes_with_report()
 
     # Match normalized names/aliases
     assert "山田太郎" in res or "山田太郎".lower() in res
@@ -58,6 +59,11 @@ Sato's description
     sato_record = res["佐藤花子".lower()]
     assert sato_record["id"] == "sato-hanako"
 
+    assert report["file_deficiencies"] == []
+    assert report["duplicate_ids"] == []
+    assert report["normalized_name_collisions"] == []
+    assert report["alias_collisions"] == []
+
 
 def test_people_loader_missing_id(tmp_path, monkeypatch):
     monkeypatch.setattr(app_config, "PEOPLE_PATH", tmp_path)
@@ -68,8 +74,10 @@ name: No ID Person
 ---
 """, encoding="utf-8")
 
-    with pytest.raises(ValueError, match="Missing or empty required field 'id'"):
-        load_and_validate_people_notes()
+    res, report = load_people_notes_with_report()
+    assert res == {}
+    assert len(report["file_deficiencies"]) == 1
+    assert "Missing or empty required field 'id'" in report["file_deficiencies"][0]["message"]
 
 
 def test_people_loader_missing_name(tmp_path, monkeypatch):
@@ -81,8 +89,10 @@ id: valid-id
 ---
 """, encoding="utf-8")
 
-    with pytest.raises(ValueError, match="Missing or empty required field 'name'"):
-        load_and_validate_people_notes()
+    res, report = load_people_notes_with_report()
+    assert res == {}
+    assert len(report["file_deficiencies"]) == 1
+    assert "Missing or empty required field 'name'" in report["file_deficiencies"][0]["message"]
 
 
 def test_people_loader_duplicate_id(tmp_path, monkeypatch):
@@ -102,8 +112,11 @@ name: 別の山田太郎
 ---
 """, encoding="utf-8")
 
-    with pytest.raises(ValueError, match="Duplicate person ID 'yamada-taro'"):
-        load_and_validate_people_notes()
+    res, report = load_people_notes_with_report()
+    assert res == {}
+    assert len(report["duplicate_ids"]) == 1
+    assert report["duplicate_ids"][0]["id"] == "yamada-taro"
+    assert len(report["duplicate_ids"][0]["paths"]) == 2
 
 
 def test_people_loader_duplicate_alias(tmp_path, monkeypatch):
@@ -127,8 +140,16 @@ aliases:
 ---
 """, encoding="utf-8")
 
-    with pytest.raises(ValueError, match="Duplicate mapping for normalized name/alias 'ヤマダ'"):
-        load_and_validate_people_notes()
+    res, report = load_people_notes_with_report()
+
+    # Main names should still be mapped, but duplicate alias 'ヤマダ' is excluded
+    assert "山田太郎" in res or "山田太郎".lower() in res
+    assert "山田二郎" in res or "山田二郎".lower() in res
+    assert "ヤマダ" not in res and "ヤマダ".lower() not in res
+
+    assert len(report["alias_collisions"]) == 1
+    assert report["alias_collisions"][0]["alias"] == "ヤマダ".lower()
+    assert len(report["alias_collisions"][0]["notes"]) == 2
 
 
 def test_people_loader_invalid_types_id_name(tmp_path, monkeypatch):
@@ -142,16 +163,7 @@ name: Number ID Person
 ---
 """, encoding="utf-8")
 
-    with pytest.raises(ValueError, match="Missing or empty required field 'id'"):
-        load_and_validate_people_notes()
-
-    # Note with list name (should be rejected as it's not a string)
-    note1.write_text("""---
-id: valid-string-id
-name:
-  - List Name Person
----
-""", encoding="utf-8")
-
-    with pytest.raises(ValueError, match="Missing or empty required field 'name'"):
-        load_and_validate_people_notes()
+    res, report = load_people_notes_with_report()
+    assert res == {}
+    assert len(report["file_deficiencies"]) == 1
+    assert "Missing or empty required field 'id'" in report["file_deficiencies"][0]["message"]

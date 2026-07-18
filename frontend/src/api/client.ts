@@ -295,3 +295,14 @@ export function getDashboardStats(params: {
     `/api/v1/summary-dashboard/stats?${sp.toString()}`
   );
 }
+
+export function apiGet<T>(path: string): Promise<T> {
+  return request<T>(path);
+}
+
+export function apiPost<T>(path: string, body: any): Promise<T> {
+  return request<T>(path, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}

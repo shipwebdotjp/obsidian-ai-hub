@@ -6,6 +6,7 @@ import MemoryPage from "./features/memories/MemoryPage";
 import ResearchPage from "./features/research/ResearchPage";
 import VaultSearchPage from "./features/vault-search/VaultSearchPage";
 import SummaryDashboardPage from "./features/summary-dashboard/SummaryDashboardPage";
+import PeoplePage from "./features/people/PeoplePage";
 import { health, ApiError } from "./api/client";
 import { ROUTES } from "./constants/routes";
 
@@ -77,6 +78,7 @@ export default function App() {
           <Route path={ROUTES.RESEARCH} element={<ResearchPage />} />
           <Route path={ROUTES.VAULT_SEARCH} element={<VaultSearchPage />} />
           <Route path={ROUTES.SUMMARY_DASHBOARD} element={<SummaryDashboardPage />} />
+          <Route path={ROUTES.PEOPLE} element={<PeoplePage />} />
           <Route path="*" element={<Navigate to={ROUTES.MEMORIES} replace />} />
         </Routes>
       </main>

@@ -324,3 +324,101 @@ def get_dashboard_stats(
         return service.get_dashboard_stats(start_date, end_date)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+# --- People Management routes ---
+
+@router.get("/people", response_model=list[schemas.Person])
+def get_people(_=Depends(_require_loopback_or_token)):
+    return service.list_people()
+
+
+@router.get("/people/candidates", response_model=list[schemas.PersonCandidate])
+def get_people_candidates(_=Depends(_require_loopback_or_token)):
+    return service.list_person_candidates()
+
+
+@router.get("/people/duplicates", response_model=schemas.DuplicatesResponse)
+def get_people_duplicates(_=Depends(_require_loopback_or_token)):
+    return service.get_duplicate_candidates()
+
+
+@router.get("/people/vault-report", response_model=schemas.SyncPeopleResponse)
+def get_vault_report(_=Depends(_require_loopback_or_token)):
+    try:
+        rep = service.get_vault_report_dynamic()
+        return {
+            "synced": False,
+            "loader_report": rep["loader_report"],
+            "db_conflicts": rep["db_conflicts"]
+        }
+    except Exception as e:
+        logger.exception("Failed to get vault report")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/people/{person_id}", response_model=schemas.PersonDetail)
+def get_person(person_id: str, _=Depends(_require_loopback_or_token)):
+    item = service.get_person_detail(person_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Person not found")
+    return item
+
+
+@router.get("/people/candidates/{candidate_id}", response_model=schemas.PersonCandidateDetail)
+def get_person_candidate(candidate_id: str, _=Depends(_require_loopback_or_token)):
+    item = service.get_person_candidate_detail(candidate_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Candidate not found")
+    return item
+
+
+@router.post("/people/candidates/{candidate_id}/resolve")
+def resolve_person_candidate(
+    candidate_id: str,
+    body: schemas.CandidateResolveRequest,
+    _=Depends(_require_loopback_or_token),
+):
+    try:
+        service.resolve_person_candidate(candidate_id, body.target_person_id)
+        return {"success": True}
+    except service.AliasConflictError as e:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": str(e),
+                "conflict_type": "alias_conflict",
+                "existing_person_id": e.existing_person_id,
+                "existing_person_name": e.existing_person_name
+            }
+        )
+    except service.MainNameConflictError as e:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": str(e),
+                "conflict_type": "main_name_conflict",
+                "existing_person_id": e.existing_person_id,
+                "existing_person_name": e.existing_person_name
+            }
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/people/merge")
+def merge_people(body: schemas.PeopleMergeRequest, _=Depends(_require_loopback_or_token)):
+    try:
+        service.merge_people(body.from_person_id, body.to_person_id)
+        return {"success": True}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/people/sync", response_model=schemas.SyncPeopleResponse)
+def sync_people(_=Depends(_require_loopback_or_token)):
+    try:
+        return service.sync_people()
+    except Exception as e:
+        logger.exception("Failed to sync people")
+        raise HTTPException(status_code=500, detail=str(e))
