@@ -6,6 +6,11 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 
 This is an Obsidian Daily Note Automation Tool (`obsidian-ai-hub`) that automates daily note management for Obsidian vaults on macOS. It handles inbox merging, daily target generation, weekly reviews, and calendar event notifications.
 
+## Project Knowledge (`ai_wiki`)
+
+- For work involving prior product or architecture decisions, first check [ai_wiki/00-Index.md](ai_wiki/00-Index.md).
+- Record durable decisions, their context, and rationale in `ai_wiki/10-Decisions.md` when they affect future implementation choices. Use `ai_wiki/20-Worklog.md` only for temporary progress notes and handoffs.
+
 ## Key Commands
 
 ```bash
