@@ -33,7 +33,7 @@ def test_schema_version_bump(test_memory_db_path):
     try:
         cursor = conn.cursor()
         cursor.execute("PRAGMA user_version;")
-        assert cursor.fetchone()[0] == 7
+        assert cursor.fetchone()[0] == 8
 
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;")
         tables = {row[0] for row in cursor.fetchall()}
@@ -47,6 +47,7 @@ def test_schema_version_bump(test_memory_db_path):
         assert "summary_people" in tables
         assert "person_candidates" in tables
         assert "summary_person_candidates" in tables
+        assert "summary_person_assignments" in tables
     finally:
         conn.close()
 
@@ -303,6 +304,6 @@ def test_alias_deduplication(test_memory_db_path):
         assert got is not None
         assert len(got["people"]) == 1
         assert got["people"][0]["name"] == "Alice"
-        assert got["people"][0]["note"] == "primary name"
+        assert got["people"][0]["note"] == "primary name\nalias name"
     finally:
         conn.close()

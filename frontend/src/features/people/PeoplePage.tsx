@@ -35,6 +35,7 @@ interface PersonCandidate {
 
 interface PersonCandidateDetail extends PersonCandidate {
   summaries: AssociatedSummary[];
+  assigned_summaries_count: number;
 }
 
 interface DuplicateVaultMatch {
@@ -131,6 +132,35 @@ export default function PeoplePage() {
   // Form states
   const [targetPersonId, setTargetPersonId] = useState("");
   const [resolveError, setResolveError] = useState<any | null>(null);
+  const [summaryAssignments, setSummaryAssignments] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    setSummaryAssignments({});
+  }, [selectedCandidate]);
+
+  const handleAssignCandidateSummary = async (summaryId: string, assignedPersonId: string) => {
+    if (!selectedCandidate || !assignedPersonId) return;
+    clearMessages();
+    setLoading(true);
+    try {
+      await apiPost(`${PEOPLE_API}/candidates/${selectedCandidate.candidate_id}/summaries/${summaryId}/assign`, {
+        target_person_id: assignedPersonId,
+      });
+      setSuccessMessage(`サマリー「${summaryId}」への個別割当を保存しました。`);
+
+      try {
+        const data = await apiGet<PersonCandidateDetail>(`${PEOPLE_API}/candidates/${selectedCandidate.candidate_id}`);
+        setSelectedCandidate(data);
+      } catch (e: any) {
+        setSelectedCandidate(null);
+      }
+      await loadAllData(false);
+    } catch (e: any) {
+      setError(e.message || "個別割当に失敗しました");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // Merge modal & preview states
   const [mergeToPersonId, setMergeToPersonId] = useState("");
@@ -474,7 +504,14 @@ export default function PeoplePage() {
 
                   {/* Resolve Panel */}
                   <div className="border border-slate-200 rounded-lg p-4 bg-slate-50 space-y-3">
-                    <h3 className="text-xs font-bold text-slate-800">マスター人物と紐付け（解決）</h3>
+                    <h3 className="text-xs font-bold text-slate-800">マスター人物と紐付け（一括解決）</h3>
+
+                    {selectedCandidate.assigned_summaries_count > 0 && (
+                      <div className="rounded-lg bg-amber-50 p-3 text-xs font-medium text-amber-800 border border-amber-200 space-y-1">
+                        <div className="font-bold">⚠️ 一括解決不可</div>
+                        <div>文脈別に割り当て済みのため一括解決不可（個別割当済み件数: {selectedCandidate.assigned_summaries_count}件）</div>
+                      </div>
+                    )}
 
                     {resolveError && (
                       <div className="rounded-lg bg-red-50 p-3 text-xs font-medium text-red-800 border border-red-200">
@@ -493,7 +530,8 @@ export default function PeoplePage() {
                       <select
                         value={targetPersonId}
                         onChange={(e) => setTargetPersonId(e.target.value)}
-                        className="flex-1 rounded border border-slate-300 bg-white px-2.5 py-1.5 text-xs focus:border-slate-900 focus:outline-none"
+                        disabled={selectedCandidate.assigned_summaries_count > 0}
+                        className="flex-1 rounded border border-slate-300 bg-white px-2.5 py-1.5 text-xs focus:border-slate-900 focus:outline-none disabled:bg-slate-100 disabled:text-slate-400"
                       >
                         <option value="">-- 解決先のVault連携人物を選択してください --</option>
                         {people
@@ -506,14 +544,14 @@ export default function PeoplePage() {
                       </select>
                       <button
                         onClick={handleResolveCandidate}
-                        disabled={loading || !targetPersonId}
+                        disabled={loading || !targetPersonId || selectedCandidate.assigned_summaries_count > 0}
                         className="rounded bg-slate-900 px-4 py-1.5 text-xs text-white hover:bg-slate-800 disabled:opacity-50"
                       >
                         解決
                       </button>
                     </div>
                     <p className="text-[10px] text-slate-400">
-                      ※ 解決先は、フロントマターに ID を持つ「Vault連携済み」の人物に制限されています。未解決候補を解決すると、確定別名として登録され、候補のサマリー履歴が自動で移管されます。
+                      ※ 解決先は、フロントマターに ID を持つ「Vault連携済み」の人物に制限されています。未解決候補を解決すると、確定別名として登録され、候補のサマリー履歴が自動で移管されます。すでに手動で個別割当を行っている候補は、グローバル解決（一括解決）が禁止されます。
                     </p>
                   </div>
 
@@ -523,15 +561,42 @@ export default function PeoplePage() {
                       <p className="text-xs text-slate-400">紐づいているサマリはありません。</p>
                     ) : (
                       <div className="border border-slate-100 rounded-lg overflow-hidden divide-y divide-slate-100">
-                        {selectedCandidate.summaries.map((sum) => (
-                          <div key={sum.summary_id} className="p-3 text-xs flex justify-between items-start">
-                            <div>
-                              <div className="font-semibold">{sum.period_key} ({sum.period_type})</div>
-                              {sum.note && <div className="text-slate-600 mt-1 font-mono bg-slate-50 p-1.5 rounded">{sum.note}</div>}
+                        {selectedCandidate.summaries.map((sum) => {
+                          const assignedPersonId = summaryAssignments[sum.summary_id] || "";
+                          return (
+                            <div key={sum.summary_id} className="p-3 text-xs flex flex-col md:flex-row md:items-center justify-between gap-3">
+                              <div className="flex-1">
+                                <div className="font-semibold">{sum.period_key} ({sum.period_type})</div>
+                                {sum.note && <div className="text-slate-600 mt-1 font-mono bg-slate-50 p-1.5 rounded whitespace-pre-wrap">{sum.note}</div>}
+                              </div>
+                              <div className="flex items-center gap-2 shrink-0 self-end md:self-center">
+                                <select
+                                  value={assignedPersonId}
+                                  onChange={(e) => setSummaryAssignments(prev => ({ ...prev, [sum.summary_id]: e.target.value }))}
+                                  aria-label={`割当先を選択 (${sum.period_key})`}
+                                  className="rounded border border-slate-300 bg-white px-2 py-1 text-xs focus:border-slate-900 focus:outline-none"
+                                >
+                                  <option value="">-- 割当先を選択 --</option>
+                                  {people
+                                    .filter((p) => p.vault_id !== null)
+                                    .map((p) => (
+                                      <option key={p.person_id} value={p.person_id}>
+                                        {p.display_name} ({p.vault_id})
+                                      </option>
+                                    ))}
+                                </select>
+                                <button
+                                  onClick={() => handleAssignCandidateSummary(sum.summary_id, assignedPersonId)}
+                                  disabled={loading || !assignedPersonId}
+                                  aria-label={`このサマリ (${sum.period_key}) に割当`}
+                                  className="rounded bg-slate-900 px-3 py-1 text-xs text-white hover:bg-slate-800 disabled:opacity-50"
+                                >
+                                  このサマリに割当
+                                </button>
+                              </div>
                             </div>
-                            <div className="text-[10px] text-slate-400">表示順: {sum.display_order}</div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     )}
                   </div>

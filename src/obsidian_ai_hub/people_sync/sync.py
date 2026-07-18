@@ -178,13 +178,24 @@ def sync_people_in_tx(conn: sqlite3.Connection, people_notes_map: Dict[str, Any]
         # Step B: Match and migrate unresolved candidates
         placeholders = ", ".join("?" for _ in aliases_set)
         cursor.execute(
-            f"SELECT candidate_id FROM person_candidates WHERE normalized_name IN ({placeholders})",
+            f"SELECT candidate_id, normalized_name FROM person_candidates WHERE normalized_name IN ({placeholders})",
             list(aliases_set)
         )
         candidates = cursor.fetchall()
 
         for cand_row in candidates:
             cand_id = cand_row["candidate_id"]
+            cand_norm = cand_row["normalized_name"]
+
+            # Skip auto-absorption if this name/candidate has manual assignments
+            cursor.execute(
+                "SELECT COUNT(*) FROM summary_person_assignments WHERE normalized_name = ?",
+                (cand_norm,)
+            )
+            if cursor.fetchone()[0] > 0:
+                logger.info("Skipping candidate auto-absorption for '%s' because manual assignments exist", cand_norm)
+                continue
+
             logger.info("Migrating unresolved candidate (id=%s) to target person_id=%s", cand_id, target_person_id)
 
             cursor.execute(

@@ -459,6 +459,11 @@ class AssociatedSummary(BaseModel):
 
 class PersonCandidateDetail(PersonCandidate):
     summaries: list[AssociatedSummary] = []
+    assigned_summaries_count: int = 0
+
+
+class PersonAssignmentRequest(BaseModel):
+    target_person_id: str
 
 
 class PersonDetail(Person):
