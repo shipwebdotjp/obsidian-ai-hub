@@ -368,6 +368,9 @@ def get_db_connection() -> sqlite3.Connection:
     if current_version <= 6:
         run_migration_v7(conn)
 
+    if current_version <= 7:
+        run_migration_v8(conn)
+
     return conn
 
 
@@ -383,6 +386,22 @@ def run_migration_v7(conn: sqlite3.Connection) -> None:
     """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_person_aliases_person_id ON person_aliases(person_id);")
     conn.execute("PRAGMA user_version = 7;")
+    conn.commit()
+
+
+def run_migration_v8(conn: sqlite3.Connection) -> None:
+    """Run the migration schema upgrade for version 8 (summary_person_assignments table)."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS summary_person_assignments (
+            summary_id TEXT NOT NULL,
+            normalized_name TEXT NOT NULL,
+            person_id TEXT NOT NULL,
+            PRIMARY KEY (summary_id, normalized_name),
+            FOREIGN KEY(summary_id) REFERENCES summaries(summary_id) ON DELETE CASCADE,
+            FOREIGN KEY(person_id) REFERENCES people(person_id) ON DELETE CASCADE
+        );
+    """)
+    conn.execute("PRAGMA user_version = 8;")
     conn.commit()
 
 

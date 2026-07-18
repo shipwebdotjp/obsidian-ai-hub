@@ -373,6 +373,22 @@ def get_person_candidate(candidate_id: str, _=Depends(_require_loopback_or_token
     return item
 
 
+@router.post("/people/candidates/{candidate_id}/summaries/{summary_id}/assign")
+def assign_candidate_summary(
+    candidate_id: str,
+    summary_id: str,
+    body: schemas.PersonAssignmentRequest,
+    _=Depends(_require_loopback_or_token),
+):
+    try:
+        service.assign_candidate_summary(candidate_id, summary_id, body.target_person_id)
+        return {"success": True}
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @router.post("/people/candidates/{candidate_id}/resolve")
 def resolve_person_candidate(
     candidate_id: str,
@@ -382,6 +398,14 @@ def resolve_person_candidate(
     try:
         service.resolve_person_candidate(candidate_id, body.target_person_id)
         return {"success": True}
+    except service.AssignmentConflictError as e:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": str(e),
+                "conflict_type": "assignment_conflict"
+            }
+        )
     except service.AliasConflictError as e:
         raise HTTPException(
             status_code=409,

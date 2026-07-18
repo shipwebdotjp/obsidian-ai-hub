@@ -311,8 +311,28 @@ def _insert_people(
             continue
         seen.add(normalized_name)
 
-        # Priority 1: DB Confirmed Alias
+        # Priority 0: Manual Assignment (summary_person_assignments)
         cursor = conn.cursor()
+        cursor.execute(
+            "SELECT person_id FROM summary_person_assignments WHERE summary_id = ? AND normalized_name = ?",
+            (summary_id, normalized_name),
+        )
+        row = cursor.fetchone()
+        if row is not None:
+            person_id = row[0]
+            # Ensure the target person exists in people table
+            cursor.execute("SELECT person_id FROM people WHERE person_id = ?", (person_id,))
+            if cursor.fetchone() is not None:
+                if person_id not in seen_person_ids:
+                    seen_person_ids.add(person_id)
+                    conn.execute(
+                        "INSERT INTO summary_people (summary_id, person_id, note, display_order) VALUES (?, ?, ?, ?)",
+                        (summary_id, person_id, person.get("note"), order),
+                    )
+                order += 1
+                continue
+
+        # Priority 1: DB Confirmed Alias
         cursor.execute("SELECT person_id FROM person_aliases WHERE normalized_name = ?", (normalized_name,))
         row = cursor.fetchone()
         if row is not None:

@@ -754,6 +754,11 @@ class MainNameConflictError(ValueError):
         self.existing_person_name = existing_person_name
 
 
+class AssignmentConflictError(ValueError):
+    def __init__(self, message="Conflict: Cannot resolve globally because manual assignments exist for this normalized name"):
+        super().__init__(message)
+
+
 # --- People Management services ---
 
 def list_people() -> list[dict[str, Any]]:
@@ -843,7 +848,117 @@ def get_person_candidate_detail(candidate_id: str) -> Optional[dict[str, Any]]:
             (candidate_id,)
         )
         c["summaries"] = [dict(r) for r in cursor.fetchall()]
+
+        # Get assigned summaries count
+        cursor.execute(
+            "SELECT COUNT(*) FROM summary_person_assignments WHERE normalized_name = ?",
+            (c["normalized_name"],)
+        )
+        c["assigned_summaries_count"] = cursor.fetchone()[0]
+
         return c
+    finally:
+        conn.close()
+
+
+def assign_candidate_summary(candidate_id: str, summary_id: str, target_person_id: str) -> bool:
+    conn = memory.get_db_connection()
+    try:
+        with conn:
+            cursor = conn.cursor()
+
+            # 1. Fetch candidate to identify normalized_name
+            cursor.execute(
+                "SELECT candidate_id, display_name, normalized_name FROM person_candidates WHERE candidate_id = ?",
+                (candidate_id,)
+            )
+            cand_row = cursor.fetchone()
+            if cand_row is None:
+                raise FileNotFoundError("Candidate not found")
+            cand = dict(cand_row)
+            normalized_name = cand["normalized_name"]
+
+            # 2. Check if candidate-summary link exists
+            cursor.execute(
+                "SELECT note, display_order FROM summary_person_candidates WHERE summary_id = ? AND candidate_id = ?",
+                (summary_id, candidate_id)
+            )
+            link_row = cursor.fetchone()
+            if link_row is None:
+                raise FileNotFoundError("Candidate summary link not found")
+            cand_note = link_row["note"]
+            cand_order = link_row["display_order"]
+
+            # 3. Check target person existence and vault-linked constraint
+            cursor.execute(
+                "SELECT person_id, display_name, vault_id FROM people WHERE person_id = ?",
+                (target_person_id,)
+            )
+            target_row = cursor.fetchone()
+            if target_row is None:
+                raise ValueError("Target person not found")
+            target = dict(target_row)
+            if not target.get("vault_id"):
+                raise ValueError("割当先はVault連携済み人物のみに限定されています。")
+
+            # 4. Remove candidate's link from summary_person_candidates
+            conn.execute(
+                "DELETE FROM summary_person_candidates WHERE summary_id = ? AND candidate_id = ?",
+                (summary_id, candidate_id)
+            )
+
+            # 5. Insert/Save manual assignment to summary_person_assignments
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO summary_person_assignments (summary_id, normalized_name, person_id)
+                VALUES (?, ?, ?)
+                """,
+                (summary_id, normalized_name, target_person_id)
+            )
+
+            # 6. Insert or merge/concatenate notes and display order in summary_people
+            cursor.execute(
+                "SELECT note, display_order FROM summary_people WHERE summary_id = ? AND person_id = ?",
+                (summary_id, target_person_id)
+            )
+            existing_link = cursor.fetchone()
+
+            if existing_link is not None:
+                notes_to_join = []
+                existing_note = existing_link["note"]
+                existing_order = existing_link["display_order"]
+
+                if existing_note and existing_note.strip():
+                    notes_to_join.append(existing_note.strip())
+                if cand_note and cand_note.strip():
+                    notes_to_join.append(cand_note.strip())
+
+                merged_note = "\n".join(notes_to_join) if notes_to_join else None
+                merged_order = merge_display_orders(existing_order, cand_order)
+
+                conn.execute(
+                    "UPDATE summary_people SET note = ?, display_order = ? WHERE summary_id = ? AND person_id = ?",
+                    (merged_note, merged_order, summary_id, target_person_id)
+                )
+            else:
+                conn.execute(
+                    "INSERT INTO summary_people (summary_id, person_id, note, display_order) VALUES (?, ?, ?, ?)",
+                    (summary_id, target_person_id, cand_note, cand_order)
+                )
+
+            # 7. Delete the candidate if no remaining links exist
+            cursor.execute(
+                "SELECT COUNT(*) FROM summary_person_candidates WHERE candidate_id = ?",
+                (candidate_id,)
+            )
+            remaining_links_count = cursor.fetchone()[0]
+            if remaining_links_count == 0:
+                conn.execute(
+                    "DELETE FROM person_candidates WHERE candidate_id = ?",
+                    (candidate_id,)
+                )
+
+            return True
     finally:
         conn.close()
 
@@ -863,6 +978,15 @@ def resolve_person_candidate(candidate_id: str, target_person_id: str) -> dict[s
             if cand_row is None:
                 raise ValueError("Candidate not found")
             cand = dict(cand_row)
+
+            # 1b. Check if there are any manual assignments for this candidate's normalized_name
+            cursor.execute(
+                "SELECT COUNT(*) FROM summary_person_assignments WHERE normalized_name = ?",
+                (cand["normalized_name"],)
+            )
+            assigned_count = cursor.fetchone()[0]
+            if assigned_count > 0:
+                raise AssignmentConflictError()
 
             # 2. Fetch target person
             cursor.execute(
@@ -1308,6 +1432,12 @@ def merge_people(from_person_id: str, to_person_id: str) -> bool:
 
             # Delete any remaining aliases under from_person_id
             conn.execute("DELETE FROM person_aliases WHERE person_id = ?", (from_person_id,))
+
+            # 3b. Update summary_person_assignments for from_person_id to to_person_id
+            conn.execute(
+                "UPDATE OR REPLACE summary_person_assignments SET person_id = ? WHERE person_id = ?",
+                (to_person_id, from_person_id)
+            )
 
             # 4. Delete source person
             conn.execute("DELETE FROM people WHERE person_id = ?", (from_person_id,))
