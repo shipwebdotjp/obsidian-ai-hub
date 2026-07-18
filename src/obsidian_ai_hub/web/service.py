@@ -1579,7 +1579,7 @@ def update_summary_detail(summary_id: str, body: schemas.SummaryUpdateRequest) -
             raise ValueError("topics must contain at most 5 items")
         payload["topics"] = topics
 
-    # Validate keywords: trim, drop empty, dedup, max 5
+    # Validate keywords: trim, drop empty, dedup
     if "keywords" in payload:
         kw = payload["keywords"]
         if kw is None:
@@ -1591,7 +1591,7 @@ def update_summary_detail(summary_id: str, body: schemas.SummaryUpdateRequest) -
             if trimmed and trimmed not in seen_kw:
                 seen_kw.add(trimmed)
                 cleaned_kw.append(trimmed)
-        payload["keywords"] = cleaned_kw[:5]
+        payload["keywords"] = cleaned_kw
 
     # Validate people: dedup person_id, existence check
     if "people" in payload:

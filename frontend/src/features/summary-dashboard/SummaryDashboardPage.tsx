@@ -1311,7 +1311,7 @@ function EditForm({
     const trimmed = value.trim();
     if (!trimmed) return;
     const keywords = [...(form.keywords ?? [])];
-    if (!keywords.includes(trimmed) && keywords.length < 5) {
+    if (!keywords.includes(trimmed)) {
       keywords.push(trimmed);
     }
     setForm({ ...form, keywords });
@@ -1388,7 +1388,7 @@ function EditForm({
 
       {/* Keywords */}
       <div>
-        <label className="text-xs font-bold uppercase tracking-wider text-slate-400">キーワード (最大5)</label>
+          <label className="text-xs font-bold uppercase tracking-wider text-slate-400">キーワード</label>
         <div className="mt-1 flex flex-wrap gap-1">
           {(form.keywords ?? []).map((k, i) => (
             <span key={`${k}-${i}`} className="rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-600 font-medium flex items-center gap-1">
