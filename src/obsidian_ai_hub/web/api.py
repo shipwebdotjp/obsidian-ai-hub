@@ -409,7 +409,7 @@ def update_person(
             aliases=body.aliases
         )
     except FileNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=404, detail=str(e)) from e
     except service.VaultLinkedPersonError as e:
         raise HTTPException(
             status_code=409,
@@ -417,7 +417,7 @@ def update_person(
                 "message": str(e),
                 "conflict_type": "vault_linked_person"
             }
-        )
+        ) from e
     except service.AssignmentConflictError as e:
         raise HTTPException(
             status_code=409,
@@ -425,7 +425,7 @@ def update_person(
                 "message": str(e),
                 "conflict_type": "assignment_conflict"
             }
-        )
+        ) from e
     except service.AliasConflictError as e:
         raise HTTPException(
             status_code=409,
@@ -435,7 +435,7 @@ def update_person(
                 "existing_person_id": e.existing_person_id,
                 "existing_person_name": e.existing_person_name
             }
-        )
+        ) from e
     except service.MainNameConflictError as e:
         raise HTTPException(
             status_code=409,
@@ -445,9 +445,9 @@ def update_person(
                 "existing_person_id": e.existing_person_id,
                 "existing_person_name": e.existing_person_name
             }
-        )
+        ) from e
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @router.delete("/people/{person_id}", response_model=schemas.PersonDeleteResponse)
@@ -458,7 +458,7 @@ def delete_person(
     try:
         return service.delete_person(person_id)
     except FileNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=404, detail=str(e)) from e
 
 
 @router.get("/people/candidates/{candidate_id}", response_model=schemas.PersonCandidateDetail)
@@ -480,9 +480,9 @@ def assign_candidate_summary(
         service.assign_candidate_summary(candidate_id, summary_id, body.target_person_id)
         return {"success": True}
     except FileNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=404, detail=str(e)) from e
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @router.post("/people/candidates/{candidate_id}/resolve")
@@ -501,7 +501,7 @@ def resolve_person_candidate(
                 "message": str(e),
                 "conflict_type": "assignment_conflict"
             }
-        )
+        ) from e
     except service.AliasConflictError as e:
         raise HTTPException(
             status_code=409,
@@ -511,7 +511,7 @@ def resolve_person_candidate(
                 "existing_person_id": e.existing_person_id,
                 "existing_person_name": e.existing_person_name
             }
-        )
+        ) from e
     except service.MainNameConflictError as e:
         raise HTTPException(
             status_code=409,
@@ -521,9 +521,9 @@ def resolve_person_candidate(
                 "existing_person_id": e.existing_person_id,
                 "existing_person_name": e.existing_person_name
             }
-        )
+        ) from e
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @router.post("/people/merge/preview", response_model=schemas.PeopleMergePreviewResponse)

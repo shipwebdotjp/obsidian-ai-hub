@@ -148,6 +148,7 @@ export default function PeoplePage() {
   const [editError, setEditError] = useState<any | null>(null);
   const [editSuccess, setEditSuccess] = useState<string | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [personToDelete, setPersonToDelete] = useState<PersonDetail | null>(null);
 
   useEffect(() => {
     setSummaryAssignments({});
@@ -329,19 +330,20 @@ export default function PeoplePage() {
   };
 
   const handleExecuteDelete = async () => {
-    if (!selectedPerson) return;
+    if (!personToDelete) return;
     setLoading(true);
     try {
-      const res = await apiDelete<any>(`${PEOPLE_API}/${selectedPerson.person_id}`);
+      const res = await apiDelete<any>(`${PEOPLE_API}/${personToDelete.person_id}`);
       if (res.success) {
         setSuccessMessage(
-          `人物「${selectedPerson.display_name}」を完全に削除しました。` +
+          `人物「${personToDelete.display_name}」を完全に削除しました。` +
           `（削除された関連サマリ数: ${res.deleted_summary_people}件、別名数: ${res.deleted_aliases}件、手動割当数: ${res.deleted_assignments}件）`
         );
       } else {
-        setSuccessMessage(`人物「${selectedPerson.display_name}」を削除しました。`);
+        setSuccessMessage(`人物「${personToDelete.display_name}」を削除しました。`);
       }
       setSelectedPerson(null);
+      setPersonToDelete(null);
       setShowDeleteConfirm(false);
       await loadAllData(false);
     } catch (e: any) {
@@ -815,7 +817,10 @@ export default function PeoplePage() {
                     </p>
                     <div className="flex justify-end">
                       <button
-                        onClick={() => setShowDeleteConfirm(true)}
+                        onClick={() => {
+                          setPersonToDelete(selectedPerson);
+                          setShowDeleteConfirm(true);
+                        }}
                         disabled={loading}
                         className="rounded bg-red-600 px-4 py-1.5 text-xs text-white hover:bg-red-700 disabled:opacity-50"
                       >
@@ -1309,14 +1314,17 @@ export default function PeoplePage() {
       )}
 
       {/* Hard Delete Confirmation Modal */}
-      {showDeleteConfirm && selectedPerson && (
+      {showDeleteConfirm && personToDelete && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
           <div className="bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-md overflow-hidden flex flex-col">
             {/* Modal Header */}
             <div className="p-4 border-b border-slate-100 bg-red-50 flex items-center justify-between shrink-0">
               <h3 className="text-sm font-bold text-red-900">⚠️ 人物の完全削除確認</h3>
               <button
-                onClick={() => setShowDeleteConfirm(false)}
+                onClick={() => {
+                  setPersonToDelete(null);
+                  setShowDeleteConfirm(false);
+                }}
                 className="text-red-400 hover:text-red-600 transition-colors text-xs"
                 aria-label="閉じる"
               >
@@ -1327,16 +1335,16 @@ export default function PeoplePage() {
             {/* Modal Body */}
             <div className="p-5 overflow-y-auto space-y-3 text-xs text-slate-700 leading-normal">
               <p className="font-semibold text-slate-950">
-                本当に「{selectedPerson.display_name}」を完全に削除してもよろしいですか？
+                本当に「{personToDelete.display_name}」を完全に削除してもよろしいですか？
               </p>
 
-              {selectedPerson.vault_id ? (
+              {personToDelete.vault_id ? (
                 <div className="rounded-lg bg-orange-50 border border-orange-200 p-3 text-orange-950 font-medium space-y-1">
                   <div className="font-bold flex items-center gap-1">
                     <span>⚠️</span> Vaultノート連携に対する警告
                   </div>
                   <p className="text-[11px] leading-normal text-orange-800">
-                    この人物は Vault ノート（ID: <code>{selectedPerson.vault_id}</code>）と連携しています。DB から完全に削除されますが、Vault ノート自体は削除されません。
+                    この人物は Vault ノート（ID: <code>{personToDelete.vault_id}</code>）と連携しています。DB から完全に削除されますが、Vault ノート自体は削除されません。
                     そのため、<strong>次回の同期（Sync）を実行した際に、この人物が再びデータベース上に再作成される可能性</strong>があります。
                   </p>
                 </div>
@@ -1351,12 +1359,12 @@ export default function PeoplePage() {
                 </div>
               )}
 
-              {selectedPerson.relation_counts && (
+              {personToDelete.relation_counts && (
                 <div className="border border-slate-100 rounded-lg p-3 bg-slate-50 space-y-1 text-slate-600">
                   <div className="font-bold text-slate-800 mb-1">影響を受ける関連レコード数:</div>
-                  <div>・紐づくサマリ: <strong className="text-slate-900">{selectedPerson.relation_counts.summaries}</strong> 件</div>
-                  <div>・別名 (aliases): <strong className="text-slate-900">{selectedPerson.relation_counts.aliases}</strong> 件</div>
-                  <div>・手動個別割当: <strong className="text-slate-900">{selectedPerson.relation_counts.assignments}</strong> 件</div>
+                  <div>・紐づくサマリ: <strong className="text-slate-900">{personToDelete.relation_counts.summaries}</strong> 件</div>
+                  <div>・別名 (aliases): <strong className="text-slate-900">{personToDelete.relation_counts.aliases}</strong> 件</div>
+                  <div>・手動個別割当: <strong className="text-slate-900">{personToDelete.relation_counts.assignments}</strong> 件</div>
                 </div>
               )}
             </div>
@@ -1364,7 +1372,10 @@ export default function PeoplePage() {
             {/* Modal Footer */}
             <div className="p-4 border-t border-slate-100 bg-slate-50 flex items-center justify-end gap-2 shrink-0">
               <button
-                onClick={() => setShowDeleteConfirm(false)}
+                onClick={() => {
+                  setPersonToDelete(null);
+                  setShowDeleteConfirm(false);
+                }}
                 className="rounded border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
               >
                 キャンセル
