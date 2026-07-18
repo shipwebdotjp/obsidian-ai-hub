@@ -226,3 +226,195 @@ aliases:
     assert mismatch["alias"] == "ケン"
     assert mismatch["db_person_id"] == "peo_ken"
     assert mismatch["vault_note"]["id"] == "sato-hanako"
+
+
+def test_people_merge_detailed(test_memory_db_path, client):
+    # This test covers all detailed merge verification and execution cases
+    conn = memory.get_db_connection()
+    try:
+        # Create unlinked person A (山田)
+        conn.execute(
+            "INSERT INTO people (person_id, display_name, normalized_name, vault_id) VALUES (?, ?, ?, ?)",
+            ("unlinked_a", "山田太郎", "山田太郎", None)
+        )
+        # Create vault-linked person B (鈴木, ken-suzuki)
+        conn.execute(
+            "INSERT INTO people (person_id, display_name, normalized_name, vault_id) VALUES (?, ?, ?, ?)",
+            ("linked_b", "鈴木健", "鈴木健", "ken-suzuki")
+        )
+        # Create unlinked person C (佐藤)
+        conn.execute(
+            "INSERT INTO people (person_id, display_name, normalized_name, vault_id) VALUES (?, ?, ?, ?)",
+            ("unlinked_c", "佐藤さん", "佐藤さん", None)
+        )
+        # Create third-party person D (田中, with conflict-inducing name/alias)
+        conn.execute(
+            "INSERT INTO people (person_id, display_name, normalized_name, vault_id) VALUES (?, ?, ?, ?)",
+            ("third_d", "田中一郎", "田中一郎", "tanaka-ichiro")
+        )
+        conn.execute(
+            "INSERT INTO person_aliases (normalized_name, person_id, display_name) VALUES (?, ?, ?)",
+            ("タナカ", "third_d", "タナカ")
+        )
+
+        # Aliases for source persons
+        conn.execute(
+            "INSERT INTO person_aliases (normalized_name, person_id, display_name) VALUES (?, ?, ?)",
+            ("ヤマダ", "unlinked_a", "ヤマダ")
+        )
+
+        # Summaries for both unlinked_a and linked_b
+        # Create summary in DB
+        conn.execute(
+            "INSERT INTO summaries (summary_id, period_type, period_key, period_start, period_end, generated_at, summary) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("sum_1", "day", "2026-08-01", "2026-08-01", "2026-08-01", "2026-08-01T12:00:00+09:00", "Day 1")
+        )
+        # Link unlinked_a to sum_1
+        conn.execute(
+            "INSERT INTO summary_people (summary_id, person_id, note, display_order) VALUES (?, ?, ?, ?)",
+            ("sum_1", "unlinked_a", "山田メモ", 5)
+        )
+        # Link linked_b to sum_1
+        conn.execute(
+            "INSERT INTO summary_people (summary_id, person_id, note, display_order) VALUES (?, ?, ?, ?)",
+            ("sum_1", "linked_b", "鈴木メモ", 2)
+        )
+
+        conn.commit()
+    finally:
+        conn.close()
+
+    # Case 1: Preview: Unlinked -> Vault-linked (山田 -> 鈴木)
+    # This should be ALLOWED!
+    response = client.post("/api/v1/people/merge/preview", json={
+        "from_person_id": "unlinked_a",
+        "to_person_id": "linked_b"
+    })
+    assert response.status_code == 200
+    preview = response.json()
+    assert preview["allowed"] is True
+    assert preview["transferred_summaries_count"] == 1
+    assert preview["transferred_aliases_count"] == 2  # 'ヤマダ' + '山田太郎' (since target has neither)
+    assert len(preview["merged_summaries"]) == 1
+    merged_sum = preview["merged_summaries"][0]
+    assert merged_sum["summary_id"] == "sum_1"
+    assert merged_sum["merged_note"] == "鈴木メモ\n山田メモ"
+    assert merged_sum["merged_display_order"] == 2  # min(2, 5)
+
+    # Case 2: Preview: Vault-linked -> Unlinked (鈴木 -> 佐藤)
+    # This should be REJECTED!
+    response = client.post("/api/v1/people/merge/preview", json={
+        "from_person_id": "linked_b",
+        "to_person_id": "unlinked_c"
+    })
+    assert response.status_code == 200
+    assert response.json()["allowed"] is False
+    assert "reason" in response.json() and isinstance(response.json()["reason"], str) and len(response.json()["reason"]) > 0
+
+    # Case 3: Preview: Different Vault IDs (鈴木 -> 田中)
+    # This should be REJECTED!
+    response = client.post("/api/v1/people/merge/preview", json={
+        "from_person_id": "linked_b",
+        "to_person_id": "third_d"
+    })
+    assert response.status_code == 200
+    assert response.json()["allowed"] is False
+    assert "reason" in response.json() and isinstance(response.json()["reason"], str) and len(response.json()["reason"]) > 0
+
+    # Case 4: Preview: Third-party Name Conflict
+    # Let's add an alias to unlinked_a that conflicts with Tanaka's main name (田中一郎)
+    conn = memory.get_db_connection()
+    try:
+        conn.execute(
+            "INSERT INTO person_aliases (normalized_name, person_id, display_name) VALUES (?, ?, ?)",
+            ("田中一郎", "unlinked_a", "田中")
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    # 山田 -> 鈴木 should now be REJECTED due to Tanaka name conflict!
+    response = client.post("/api/v1/people/merge/preview", json={
+        "from_person_id": "unlinked_a",
+        "to_person_id": "linked_b"
+    })
+    assert response.status_code == 200
+    assert response.json()["allowed"] is False
+    assert "reason" in response.json() and isinstance(response.json()["reason"], str) and len(response.json()["reason"]) > 0
+
+    # Let's clean up that conflict-inducing alias
+    conn = memory.get_db_connection()
+    try:
+        conn.execute("DELETE FROM person_aliases WHERE normalized_name = ?", ("田中一郎",))
+        conn.commit()
+    finally:
+        conn.close()
+
+    # Case 5: Preview: Third-party Alias Conflict
+    # Let's temporarily change unlinked_a's main normalized name to 'タナカ' (which conflicts with third_d's alias)
+    conn = memory.get_db_connection()
+    try:
+        conn.execute(
+            "UPDATE people SET normalized_name = ? WHERE person_id = ?",
+            ("タナカ", "unlinked_a")
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    # 山田 -> 鈴木 should now be REJECTED due to Tanaka alias conflict!
+    response = client.post("/api/v1/people/merge/preview", json={
+        "from_person_id": "unlinked_a",
+        "to_person_id": "linked_b"
+    })
+    assert response.status_code == 200
+    assert response.json()["allowed"] is False
+    assert "reason" in response.json() and isinstance(response.json()["reason"], str) and len(response.json()["reason"]) > 0
+
+    # Restore unlinked_a's main name
+    conn = memory.get_db_connection()
+    try:
+        conn.execute(
+            "UPDATE people SET normalized_name = ? WHERE person_id = ?",
+            ("山田太郎", "unlinked_a")
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    # Case 6: Execute the permitted merge (山田 -> 鈴木)
+    response = client.post("/api/v1/people/merge", json={
+        "from_person_id": "unlinked_a",
+        "to_person_id": "linked_b"
+    })
+    assert response.status_code == 200
+    assert response.json()["success"] is True
+
+    # Check persistence and consistency
+    conn = memory.get_db_connection()
+    try:
+        # unlinked_a should be deleted
+        row = conn.execute("SELECT * FROM people WHERE person_id = ?", ("unlinked_a",)).fetchone()
+        assert row is None
+
+        # linked_b should remain
+        row = conn.execute("SELECT * FROM people WHERE person_id = ?", ("linked_b",)).fetchone()
+        assert row is not None
+
+        # 山田太郎 & ヤマダ should be migrated as aliases to linked_b
+        aliases = [r["normalized_name"] for r in conn.execute("SELECT normalized_name FROM person_aliases WHERE person_id = ?", ("linked_b",)).fetchall()]
+        assert "ヤマダ" in aliases
+        assert "山田太郎" in aliases
+
+        # sum_1 should be merged for linked_b with consolidated note and display order
+        link = conn.execute("SELECT * FROM summary_people WHERE summary_id = ? AND person_id = ?", ("sum_1", "linked_b")).fetchone()
+        assert link is not None
+        assert link["note"] == "鈴木メモ\n山田メモ"
+        assert link["display_order"] == 2
+
+        # unlinked_a's sum_1 link should be deleted
+        old_link = conn.execute("SELECT * FROM summary_people WHERE summary_id = ? AND person_id = ?", ("sum_1", "unlinked_a")).fetchone()
+        assert old_link is None
+    finally:
+        conn.close()

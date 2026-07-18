@@ -493,3 +493,29 @@ class SyncPeopleResponse(BaseModel):
     synced: bool
     loader_report: dict[str, Any]
     db_conflicts: dict[str, Any]
+
+
+class MergedSummaryPreview(BaseModel):
+    summary_id: str
+    period_key: str
+    period_type: str
+    from_note: Optional[str] = None
+    to_note: Optional[str] = None
+    merged_note: Optional[str] = None
+    merged_display_order: Optional[int] = None
+
+
+class AliasTransferPreview(BaseModel):
+    normalized_name: str
+    display_name: str
+
+
+class PeopleMergePreviewResponse(BaseModel):
+    allowed: bool
+    reason: Optional[str] = None
+    from_person: Optional[Person] = None
+    to_person: Optional[Person] = None
+    transferred_summaries_count: int
+    transferred_aliases_count: int
+    alias_transfers: list[AliasTransferPreview] = []
+    merged_summaries: list[MergedSummaryPreview] = []

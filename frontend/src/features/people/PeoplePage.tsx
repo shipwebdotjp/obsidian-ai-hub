@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { apiGet, apiPost, ApiError } from "../../api/client";
 
 interface PersonAlias {
@@ -82,6 +82,32 @@ interface SyncPeopleResponse {
   };
 }
 
+interface MergedSummaryPreview {
+  summary_id: string;
+  period_key: string;
+  period_type: string;
+  from_note: string | null;
+  to_note: string | null;
+  merged_note: string | null;
+  merged_display_order: number | null;
+}
+
+interface AliasTransferPreview {
+  normalized_name: string;
+  display_name: string;
+}
+
+interface PeopleMergePreviewResponse {
+  allowed: boolean;
+  reason: string | null;
+  from_person: Person | null;
+  to_person: Person | null;
+  transferred_summaries_count: number;
+  transferred_aliases_count: number;
+  alias_transfers: AliasTransferPreview[];
+  merged_summaries: MergedSummaryPreview[];
+}
+
 type Tab = "candidates" | "list" | "duplicates" | "report";
 
 const PEOPLE_API = "/api/v1/people";
@@ -105,6 +131,28 @@ export default function PeoplePage() {
   // Form states
   const [targetPersonId, setTargetPersonId] = useState("");
   const [resolveError, setResolveError] = useState<any | null>(null);
+
+  // Merge modal & preview states
+  const [mergeToPersonId, setMergeToPersonId] = useState("");
+  const [showMergeModal, setShowMergeModal] = useState(false);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewData, setPreviewData] = useState<PeopleMergePreviewResponse | null>(null);
+  const [mergeFromPerson, setMergeFromPerson] = useState<Person | null>(null);
+  const [mergeToPerson, setMergeToPerson] = useState<Person | null>(null);
+  const [mergeModalError, setMergeModalError] = useState<string | null>(null);
+
+  // Refs
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const triggerRef = useRef<HTMLElement | null>(null);
+  const requestCounterRef = useRef(0);
+
+  useEffect(() => {
+    if (showMergeModal && dialogRef.current) {
+      if (!dialogRef.current.open) {
+        dialogRef.current.showModal();
+      }
+    }
+  }, [showMergeModal]);
 
   const clearMessages = () => {
     setError(null);
@@ -190,6 +238,7 @@ export default function PeoplePage() {
 
   const handleSelectPerson = async (p: Person) => {
     clearMessages();
+    setMergeToPersonId("");
     try {
       const data = await apiGet<PersonDetail>(`${PEOPLE_API}/${p.person_id}`);
       setSelectedPerson(data);
@@ -215,6 +264,67 @@ export default function PeoplePage() {
       } else {
         setError(e.message || "解決に失敗しました");
       }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleTriggerMergePreview = async (fromPerson: Person, toPerson: Person) => {
+    triggerRef.current = document.activeElement as HTMLElement;
+    const reqId = ++requestCounterRef.current;
+    setMergeFromPerson(fromPerson);
+    setMergeToPerson(toPerson);
+    setPreviewData(null);
+    setMergeModalError(null);
+    setPreviewLoading(true);
+    setShowMergeModal(true);
+    try {
+      const data = await apiPost<PeopleMergePreviewResponse>(`${PEOPLE_API}/merge/preview`, {
+        from_person_id: fromPerson.person_id,
+        to_person_id: toPerson.person_id,
+      });
+      if (reqId === requestCounterRef.current) {
+        setPreviewData(data);
+      }
+    } catch (e: any) {
+      if (reqId === requestCounterRef.current) {
+        setMergeModalError(e.message || "マージプレビューの取得に失敗しました。");
+      }
+    } finally {
+      if (reqId === requestCounterRef.current) {
+        setPreviewLoading(false);
+      }
+    }
+  };
+
+  const handleCloseModal = () => {
+    requestCounterRef.current++;
+    if (dialogRef.current) {
+      dialogRef.current.close();
+    }
+    setShowMergeModal(false);
+    setPreviewData(null);
+    setMergeFromPerson(null);
+    setMergeToPerson(null);
+    if (triggerRef.current) {
+      triggerRef.current.focus();
+      triggerRef.current = null;
+    }
+  };
+
+  const handleExecuteMerge = async () => {
+    if (!mergeFromPerson || !mergeToPerson) return;
+    setLoading(true);
+    try {
+      await apiPost(`${PEOPLE_API}/merge`, {
+        from_person_id: mergeFromPerson.person_id,
+        to_person_id: mergeToPerson.person_id,
+      });
+      setSuccessMessage(`「${mergeFromPerson.display_name}」を「${mergeToPerson.display_name}」へ統合しました。`);
+      handleCloseModal();
+      await loadAllData(false);
+    } catch (e: any) {
+      setMergeModalError(e.message || "人物統合に失敗しました");
     } finally {
       setLoading(false);
     }
@@ -497,6 +607,42 @@ export default function PeoplePage() {
                     </div>
                   )}
 
+                  {/* Merge with another person section */}
+                  <div className="border border-slate-200 rounded-lg p-4 bg-slate-50 space-y-3">
+                    <h3 className="text-xs font-bold text-slate-800">この人物を別の人物へ統合</h3>
+                    <div className="flex gap-2">
+                      <select
+                        value={mergeToPersonId}
+                        onChange={(e) => setMergeToPersonId(e.target.value)}
+                        className="flex-1 rounded border border-slate-300 bg-white px-2.5 py-1.5 text-xs focus:border-slate-900 focus:outline-none"
+                      >
+                        <option value="">-- 統合先（残す）の人物を選択してください --</option>
+                        {people
+                          .filter((p) => p.person_id !== selectedPerson.person_id)
+                          .map((p) => (
+                            <option key={p.person_id} value={p.person_id}>
+                              {p.display_name} {p.vault_id ? `(${p.vault_id})` : "(未連携)"}
+                            </option>
+                          ))}
+                      </select>
+                      <button
+                        onClick={() => {
+                          const target = people.find((p) => p.person_id === mergeToPersonId);
+                          if (target) {
+                            handleTriggerMergePreview(selectedPerson, target);
+                          }
+                        }}
+                        disabled={loading || !mergeToPersonId}
+                        className="rounded bg-slate-900 px-4 py-1.5 text-xs text-white hover:bg-slate-800 disabled:opacity-50"
+                      >
+                        統合プレビュー
+                      </button>
+                    </div>
+                    <p className="text-[10px] text-slate-400">
+                      ※ 統合元（この人物）のサマリー履歴や別名はすべて統合先にマージされ、統合元は削除されます。異なる Vault ID を持つ人物同士の統合や、連携済みから未連携への統合は拒否されます。
+                    </p>
+                  </div>
+
                   <div>
                     <h3 className="text-xs font-bold text-slate-700 mb-2">紐づくサマリ ({selectedPerson.summaries.length})</h3>
                     {selectedPerson.summaries.length === 0 ? (
@@ -555,11 +701,7 @@ export default function PeoplePage() {
                           if (target) {
                             return (
                               <button
-                                onClick={() => {
-                                  if (window.confirm(`「${m.unlinked_person.display_name}」を「${target.display_name}」へ統合しますか？`)) {
-                                    handleMergePeople(m.unlinked_person.person_id, target.person_id);
-                                  }
-                                }}
+                                onClick={() => handleTriggerMergePreview(m.unlinked_person, target)}
                                 disabled={loading}
                                 className="rounded bg-slate-950 px-3 py-1.5 text-xs text-white hover:bg-slate-800 disabled:opacity-50"
                               >
@@ -604,11 +746,7 @@ export default function PeoplePage() {
                                 .map((other) => (
                                   <button
                                     key={other.person_id}
-                                    onClick={() => {
-                                      if (window.confirm(`「${other.display_name}」を「${p.display_name}」へ統合しますか？`)) {
-                                        handleMergePeople(other.person_id, p.person_id);
-                                      }
-                                    }}
+                                    onClick={() => handleTriggerMergePreview(other, p)}
                                     disabled={loading}
                                     className="rounded border border-slate-300 bg-white px-2 py-1 text-[11px] text-slate-700 hover:bg-slate-50"
                                   >
@@ -784,6 +922,174 @@ export default function PeoplePage() {
           </div>
         )}
       </div>
+
+      {/* People Merge Preview Modal */}
+      {showMergeModal && (
+        <dialog
+          ref={dialogRef}
+          onCancel={handleCloseModal}
+          onClose={handleCloseModal}
+          className="rounded-xl shadow-xl border border-slate-200 w-full max-w-2xl max-h-[85vh] p-0 overflow-hidden backdrop:bg-slate-900/60 backdrop:backdrop-blur-sm"
+          role="dialog"
+          aria-labelledby="merge-dialog-title"
+          aria-modal="true"
+        >
+          <div className="flex flex-col h-full bg-white">
+            {/* Modal Header */}
+            <div className="p-4 border-b border-slate-100 flex items-center justify-between shrink-0 bg-slate-50">
+              <h2 id="merge-dialog-title" className="text-sm font-bold text-slate-900">人物統合プレビューと確認</h2>
+              <button
+                onClick={handleCloseModal}
+                className="text-slate-400 hover:text-slate-600 transition-colors text-xs"
+                aria-label="閉じる"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-5 overflow-y-auto space-y-4 text-xs text-slate-700">
+              {/* Target info comparison */}
+              <div className="grid grid-cols-2 gap-4 border border-slate-100 rounded-lg p-3 bg-slate-50">
+                <div className="space-y-1">
+                  <div className="text-[10px] uppercase font-bold text-slate-400">統合元（削除される人物）</div>
+                  <div className="font-semibold text-slate-800 text-sm">{mergeFromPerson?.display_name}</div>
+                  <div className="text-slate-500 text-[10px]">ID: {mergeFromPerson?.person_id}</div>
+                  <div className="text-slate-500 text-[10px]">
+                    Vault ID: {mergeFromPerson?.vault_id ? <code className="bg-slate-200 px-1 rounded">{mergeFromPerson.vault_id}</code> : "未連携"}
+                  </div>
+                </div>
+                <div className="space-y-1 border-l border-slate-200 pl-4">
+                  <div className="text-[10px] uppercase font-bold text-slate-400">統合先（残す人物）</div>
+                  <div className="font-semibold text-slate-800 text-sm">{mergeToPerson?.display_name}</div>
+                  <div className="text-slate-500 text-[10px]">ID: {mergeToPerson?.person_id}</div>
+                  <div className="text-slate-500 text-[10px]">
+                    Vault ID: {mergeToPerson?.vault_id ? <code className="bg-slate-200 px-1 rounded">{mergeToPerson.vault_id}</code> : "未連携"}
+                  </div>
+                </div>
+              </div>
+
+              {previewLoading && (
+                <div className="text-center py-6 text-slate-500 font-medium">
+                  統合可能性と影響データを検証中...
+                </div>
+              )}
+
+              {mergeModalError && (
+                <div className="rounded-lg bg-red-50 p-3 font-medium text-red-800 border border-red-200">
+                  {mergeModalError}
+                </div>
+              )}
+
+              {previewData && (
+                <div className="space-y-4">
+                  {/* Status Banner */}
+                  {previewData.allowed ? (
+                    <div className="rounded-lg bg-green-50 p-3 text-green-800 border border-green-200 font-semibold flex items-center gap-1.5">
+                      <span>✅</span> 統合可能です。安全上の問題は検出されませんでした。
+                    </div>
+                  ) : (
+                    <div className="rounded-lg bg-red-50 p-3 text-red-800 border border-red-200 font-semibold flex items-center gap-1.5">
+                      <span>❌</span> 統合できません。
+                      <div className="font-normal mt-1">{previewData.reason}</div>
+                    </div>
+                  )}
+
+                  {previewData.allowed && (
+                    <>
+                      {/* Aliases & Summaries Migration Counts */}
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="border border-slate-100 p-3 rounded-lg">
+                          <div className="font-bold text-slate-800">移管されるサマリー</div>
+                          <div className="text-lg font-extrabold text-slate-900 mt-1">{previewData.transferred_summaries_count} <span className="text-xs font-normal text-slate-500">件</span></div>
+                          <div className="text-[10px] text-slate-400 mt-1">※ 統合元に紐付いていたすべてのサマリー履歴が統合先へ移管されます。</div>
+                        </div>
+                        <div className="border border-slate-100 p-3 rounded-lg">
+                          <div className="font-bold text-slate-800">移管・一本化される別名</div>
+                          <div className="text-lg font-extrabold text-slate-900 mt-1">{previewData.transferred_aliases_count} <span className="text-xs font-normal text-slate-500">件</span></div>
+                          {previewData.alias_transfers.length > 0 && (
+                            <div className="flex flex-wrap gap-1.5 mt-1.5">
+                              {previewData.alias_transfers.map((al) => (
+                                <span key={al.normalized_name} className="bg-slate-100 text-slate-800 text-[10px] px-1.5 py-0.5 rounded border">
+                                  {al.display_name}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Same summary note consolidation details */}
+                      {previewData.merged_summaries.length > 0 && (
+                        <div className="space-y-2">
+                          <div className="font-bold text-slate-800 flex items-center gap-1">
+                            <span>🔗</span> 同一サマリーでのメモ連結対象 ({previewData.merged_summaries.length} 件)
+                          </div>
+                          <p className="text-[10px] text-slate-400">同一サマリーに両者の参照が存在するため、メモ内容を改行連結し、表示順の先頭側を維持して統合します。</p>
+                          <div className="border border-slate-200 rounded-lg overflow-hidden max-h-48 overflow-y-auto divide-y divide-slate-100 font-mono text-[11px]">
+                            {previewData.merged_summaries.map((sum) => (
+                              <div key={sum.summary_id} className="p-3 bg-slate-50 space-y-2">
+                                <div className="font-bold text-slate-700 flex justify-between">
+                                  <span>{sum.period_key} ({sum.period_type})</span>
+                                  <span className="text-slate-400">表示順優先: {sum.merged_display_order}</span>
+                                </div>
+                                <div className="grid grid-cols-2 gap-2 text-[10px]">
+                                  <div className="bg-red-50 p-1.5 rounded border border-red-100">
+                                    <div className="font-semibold text-red-700 mb-0.5">元メモ (統合元):</div>
+                                    <div className="whitespace-pre-wrap">{sum.from_note || "(なし)"}</div>
+                                  </div>
+                                  <div className="bg-green-50 p-1.5 rounded border border-green-100">
+                                    <div className="font-semibold text-green-700 mb-0.5">元メモ (統合先):</div>
+                                    <div className="whitespace-pre-wrap">{sum.to_note || "(なし)"}</div>
+                                  </div>
+                                </div>
+                                <div className="bg-blue-50 p-2 rounded border border-blue-100 text-[11px]">
+                                  <div className="font-semibold text-blue-700 mb-0.5">連結後のメモ:</div>
+                                  <div className="whitespace-pre-wrap">{sum.merged_note || "(なし)"}</div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+
+              {/* Warnings and Unalterable Statement */}
+              {previewData?.allowed && (
+                <div className="rounded-lg bg-orange-50 border border-orange-200 p-3 text-orange-900 space-y-1.5">
+                  <div className="font-bold flex items-center gap-1">
+                    <span>⚠️</span> 取り消し不可の警告
+                  </div>
+                  <p className="text-[10px] text-orange-800 leading-normal">
+                    この操作はデータベースを直接書き換えるため取り消しできません。統合を完了すると、統合元の人物データは永久に削除されます。内容に間違いがないか、事前によく確認してください。
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 border-t border-slate-100 bg-slate-50 flex items-center justify-end gap-2 shrink-0">
+              <button
+                onClick={handleCloseModal}
+                className="rounded border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                autoFocus
+              >
+                キャンセル
+              </button>
+              <button
+                onClick={handleExecuteMerge}
+                disabled={loading || previewLoading || !previewData?.allowed}
+                className="rounded bg-slate-950 px-4 py-2 text-xs font-semibold text-white hover:bg-slate-800 disabled:opacity-50"
+              >
+                {loading ? "統合を実行中..." : "安全に統合を実行する"}
+              </button>
+            </div>
+          </div>
+        </dialog>
+      )}
     </div>
   );
 }
