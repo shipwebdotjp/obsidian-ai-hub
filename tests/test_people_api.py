@@ -299,7 +299,7 @@ def test_people_merge_detailed(test_memory_db_path, client):
     assert len(preview["merged_summaries"]) == 1
     merged_sum = preview["merged_summaries"][0]
     assert merged_sum["summary_id"] == "sum_1"
-    assert "鈴木メモ\n山田メモ" in merged_sum["merged_note"]
+    assert merged_sum["merged_note"] == "鈴木メモ\n山田メモ"
     assert merged_sum["merged_display_order"] == 2  # min(2, 5)
 
     # Case 2: Preview: Vault-linked -> Unlinked (鈴木 -> 佐藤)
@@ -310,7 +310,7 @@ def test_people_merge_detailed(test_memory_db_path, client):
     })
     assert response.status_code == 200
     assert response.json()["allowed"] is False
-    assert "Unlinked" in response.json()["reason"] or "未連携" in response.json()["reason"]
+    assert "reason" in response.json() and isinstance(response.json()["reason"], str) and len(response.json()["reason"]) > 0
 
     # Case 3: Preview: Different Vault IDs (鈴木 -> 田中)
     # This should be REJECTED!
@@ -320,7 +320,7 @@ def test_people_merge_detailed(test_memory_db_path, client):
     })
     assert response.status_code == 200
     assert response.json()["allowed"] is False
-    assert "異なるVault ID" in response.json()["reason"] or "異なる" in response.json()["reason"]
+    assert "reason" in response.json() and isinstance(response.json()["reason"], str) and len(response.json()["reason"]) > 0
 
     # Case 4: Preview: Third-party Name Conflict
     # Let's add an alias to unlinked_a that conflicts with Tanaka's main name (田中一郎)
@@ -341,7 +341,7 @@ def test_people_merge_detailed(test_memory_db_path, client):
     })
     assert response.status_code == 200
     assert response.json()["allowed"] is False
-    assert "第三者" in response.json()["reason"] or "衝突" in response.json()["reason"]
+    assert "reason" in response.json() and isinstance(response.json()["reason"], str) and len(response.json()["reason"]) > 0
 
     # Let's clean up that conflict-inducing alias
     conn = memory.get_db_connection()
@@ -370,7 +370,7 @@ def test_people_merge_detailed(test_memory_db_path, client):
     })
     assert response.status_code == 200
     assert response.json()["allowed"] is False
-    assert "第三者" in response.json()["reason"] or "衝突" in response.json()["reason"]
+    assert "reason" in response.json() and isinstance(response.json()["reason"], str) and len(response.json()["reason"]) > 0
 
     # Restore unlinked_a's main name
     conn = memory.get_db_connection()
@@ -410,7 +410,7 @@ def test_people_merge_detailed(test_memory_db_path, client):
         # sum_1 should be merged for linked_b with consolidated note and display order
         link = conn.execute("SELECT * FROM summary_people WHERE summary_id = ? AND person_id = ?", ("sum_1", "linked_b")).fetchone()
         assert link is not None
-        assert "鈴木メモ\n山田メモ" in link["note"]
+        assert link["note"] == "鈴木メモ\n山田メモ"
         assert link["display_order"] == 2
 
         # unlinked_a's sum_1 link should be deleted

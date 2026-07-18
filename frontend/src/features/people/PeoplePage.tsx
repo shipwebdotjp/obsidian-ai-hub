@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { apiGet, apiPost, ApiError } from "../../api/client";
 
 interface PersonAlias {
@@ -141,6 +141,19 @@ export default function PeoplePage() {
   const [mergeToPerson, setMergeToPerson] = useState<Person | null>(null);
   const [mergeModalError, setMergeModalError] = useState<string | null>(null);
 
+  // Refs
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const triggerRef = useRef<HTMLElement | null>(null);
+  const requestCounterRef = useRef(0);
+
+  useEffect(() => {
+    if (showMergeModal && dialogRef.current) {
+      if (!dialogRef.current.open) {
+        dialogRef.current.showModal();
+      }
+    }
+  }, [showMergeModal]);
+
   const clearMessages = () => {
     setError(null);
     setSuccessMessage(null);
@@ -257,6 +270,8 @@ export default function PeoplePage() {
   };
 
   const handleTriggerMergePreview = async (fromPerson: Person, toPerson: Person) => {
+    triggerRef.current = document.activeElement as HTMLElement;
+    const reqId = ++requestCounterRef.current;
     setMergeFromPerson(fromPerson);
     setMergeToPerson(toPerson);
     setPreviewData(null);
@@ -268,11 +283,32 @@ export default function PeoplePage() {
         from_person_id: fromPerson.person_id,
         to_person_id: toPerson.person_id,
       });
-      setPreviewData(data);
+      if (reqId === requestCounterRef.current) {
+        setPreviewData(data);
+      }
     } catch (e: any) {
-      setMergeModalError(e.message || "マージプレビューの取得に失敗しました。");
+      if (reqId === requestCounterRef.current) {
+        setMergeModalError(e.message || "マージプレビューの取得に失敗しました。");
+      }
     } finally {
-      setPreviewLoading(false);
+      if (reqId === requestCounterRef.current) {
+        setPreviewLoading(false);
+      }
+    }
+  };
+
+  const handleCloseModal = () => {
+    requestCounterRef.current++;
+    if (dialogRef.current) {
+      dialogRef.current.close();
+    }
+    setShowMergeModal(false);
+    setPreviewData(null);
+    setMergeFromPerson(null);
+    setMergeToPerson(null);
+    if (triggerRef.current) {
+      triggerRef.current.focus();
+      triggerRef.current = null;
     }
   };
 
@@ -285,9 +321,7 @@ export default function PeoplePage() {
         to_person_id: mergeToPerson.person_id,
       });
       setSuccessMessage(`「${mergeFromPerson.display_name}」を「${mergeToPerson.display_name}」へ統合しました。`);
-      setShowMergeModal(false);
-      setMergeToPersonId("");
-      setSelectedPerson(null);
+      handleCloseModal();
       await loadAllData(false);
     } catch (e: any) {
       setMergeModalError(e.message || "人物統合に失敗しました");
@@ -891,14 +925,23 @@ export default function PeoplePage() {
 
       {/* People Merge Preview Modal */}
       {showMergeModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
-          <div className="bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-2xl flex flex-col max-h-[85vh] overflow-hidden">
+        <dialog
+          ref={dialogRef}
+          onCancel={handleCloseModal}
+          onClose={handleCloseModal}
+          className="rounded-xl shadow-xl border border-slate-200 w-full max-w-2xl max-h-[85vh] p-0 overflow-hidden backdrop:bg-slate-900/60 backdrop:backdrop-blur-sm"
+          role="dialog"
+          aria-labelledby="merge-dialog-title"
+          aria-modal="true"
+        >
+          <div className="flex flex-col h-full bg-white">
             {/* Modal Header */}
             <div className="p-4 border-b border-slate-100 flex items-center justify-between shrink-0 bg-slate-50">
-              <h2 className="text-sm font-bold text-slate-900">人物統合プレビューと確認</h2>
+              <h2 id="merge-dialog-title" className="text-sm font-bold text-slate-900">人物統合プレビューと確認</h2>
               <button
-                onClick={() => { setShowMergeModal(false); setPreviewData(null); }}
+                onClick={handleCloseModal}
                 className="text-slate-400 hover:text-slate-600 transition-colors text-xs"
+                aria-label="閉じる"
               >
                 ✕
               </button>
@@ -1030,8 +1073,9 @@ export default function PeoplePage() {
             {/* Modal Footer */}
             <div className="p-4 border-t border-slate-100 bg-slate-50 flex items-center justify-end gap-2 shrink-0">
               <button
-                onClick={() => { setShowMergeModal(false); setPreviewData(null); }}
+                onClick={handleCloseModal}
                 className="rounded border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                autoFocus
               >
                 キャンセル
               </button>
@@ -1044,7 +1088,7 @@ export default function PeoplePage() {
               </button>
             </div>
           </div>
-        </div>
+        </dialog>
       )}
     </div>
   );

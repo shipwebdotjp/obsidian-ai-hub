@@ -1018,6 +1018,22 @@ def get_duplicate_candidates() -> dict[str, Any]:
         conn.close()
 
 
+def consolidate_summary_links(
+    from_note: Optional[str],
+    to_note: Optional[str],
+    from_order: Optional[int],
+    to_order: Optional[int]
+) -> tuple[Optional[str], Optional[int]]:
+    notes_to_join = []
+    if to_note and to_note.strip():
+        notes_to_join.append(to_note.strip())
+    if from_note and from_note.strip():
+        notes_to_join.append(from_note.strip())
+    merged_note = "\n".join(notes_to_join) if notes_to_join else None
+    merged_order = merge_display_orders(to_order, from_order)
+    return merged_note, merged_order
+
+
 def verify_people_merge(cursor: sqlite3.Cursor, from_person_id: str, to_person_id: str) -> dict:
     if from_person_id == to_person_id:
         return {
@@ -1186,14 +1202,9 @@ def verify_people_merge(cursor: sqlite3.Cursor, from_person_id: str, to_person_i
             from_note = from_link["note"]
             to_note = to_link["note"]
 
-            notes_to_join = []
-            if to_note and to_note.strip():
-                notes_to_join.append(to_note.strip())
-            if from_note and from_note.strip():
-                notes_to_join.append(from_note.strip())
-            merged_note = "\n".join(notes_to_join) if notes_to_join else None
-
-            merged_display_order = merge_display_orders(to_link["display_order"], from_link["display_order"])
+            merged_note, merged_display_order = consolidate_summary_links(
+                from_note, to_note, from_link["display_order"], to_link["display_order"]
+            )
 
             merged_summaries.append({
                 "summary_id": summary_id,
@@ -1259,17 +1270,9 @@ def merge_people(from_person_id: str, to_person_id: str) -> bool:
                 existing_link = cursor.fetchone()
 
                 if existing_link is not None:
-                    notes_to_join = []
-                    existing_note = existing_link["note"]
-                    existing_order = existing_link["display_order"]
-
-                    if existing_note and existing_note.strip():
-                        notes_to_join.append(existing_note.strip())
-                    if note and note.strip():
-                        notes_to_join.append(note.strip())
-
-                    merged_note = "\n".join(notes_to_join) if notes_to_join else None
-                    merged_order = merge_display_orders(existing_order, order)
+                    merged_note, merged_order = consolidate_summary_links(
+                        note, existing_link["note"], order, existing_link["display_order"]
+                    )
 
                     conn.execute(
                         "UPDATE summary_people SET note = ?, display_order = ? WHERE summary_id = ? AND person_id = ?",
@@ -1287,23 +1290,24 @@ def merge_people(from_person_id: str, to_person_id: str) -> bool:
                 )
 
             # 3. Migrate aliases
-            # UPDATE OR IGNORE to move aliases
-            conn.execute(
-                "UPDATE OR IGNORE person_aliases SET person_id = ? WHERE person_id = ?",
-                (to_person_id, from_person_id)
-            )
-            # Delete any aliases of from_person_id that couldn't be migrated due to unique key conflicts
-            conn.execute("DELETE FROM person_aliases WHERE person_id = ?", (from_person_id,))
-
-            # 3.5 Preserve from_p.normalized_name as an alias of to_person_id if there is no conflict
-            alias_transfers_normalized = {a["normalized_name"] for a in preview["alias_transfers"]}
+            # Migrate only the ones in preview["alias_transfers"], without OR IGNORE, allowing it to fail on unexpected conflict
             from_p_norm = from_p["normalized_name"]
+            for al in preview["alias_transfers"]:
+                norm = al["normalized_name"]
+                disp = al["display_name"]
+                if norm == from_p_norm:
+                    conn.execute(
+                        "INSERT INTO person_aliases (normalized_name, person_id, display_name) VALUES (?, ?, ?)",
+                        (norm, to_person_id, disp)
+                    )
+                else:
+                    conn.execute(
+                        "UPDATE person_aliases SET person_id = ? WHERE normalized_name = ?",
+                        (to_person_id, norm)
+                    )
 
-            if from_p_norm in alias_transfers_normalized:
-                conn.execute(
-                    "INSERT OR IGNORE INTO person_aliases (normalized_name, person_id, display_name) VALUES (?, ?, ?)",
-                    (from_p_norm, to_person_id, from_p["display_name"])
-                )
+            # Delete any remaining aliases under from_person_id
+            conn.execute("DELETE FROM person_aliases WHERE person_id = ?", (from_person_id,))
 
             # 4. Delete source person
             conn.execute("DELETE FROM people WHERE person_id = ?", (from_person_id,))
