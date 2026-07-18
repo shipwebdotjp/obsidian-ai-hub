@@ -1,5 +1,6 @@
 import json
 import logging
+import sqlite3
 import threading
 from pathlib import Path
 from typing import Any, Optional
@@ -1017,6 +1018,214 @@ def get_duplicate_candidates() -> dict[str, Any]:
         conn.close()
 
 
+def verify_people_merge(cursor: sqlite3.Cursor, from_person_id: str, to_person_id: str) -> dict:
+    if from_person_id == to_person_id:
+        return {
+            "allowed": False,
+            "reason": "統合元と統合主に同じ人物が指定されています。",
+            "transferred_summaries_count": 0,
+            "transferred_aliases_count": 0,
+            "alias_transfers": [],
+            "merged_summaries": []
+        }
+
+    # 1. Fetch people
+    cursor.execute("SELECT person_id, display_name, normalized_name, vault_id FROM people WHERE person_id = ?", (from_person_id,))
+    from_row = cursor.fetchone()
+    if from_row is None:
+        return {
+            "allowed": False,
+            "reason": "統合元の人物が見つかりません。",
+            "transferred_summaries_count": 0,
+            "transferred_aliases_count": 0,
+            "alias_transfers": [],
+            "merged_summaries": []
+        }
+    from_p = dict(from_row)
+
+    cursor.execute("SELECT person_id, display_name, normalized_name, vault_id FROM people WHERE person_id = ?", (to_person_id,))
+    to_row = cursor.fetchone()
+    if to_row is None:
+        return {
+            "allowed": False,
+            "reason": "統合先の人物が見つかりません。",
+            "from_person": from_p,
+            "transferred_summaries_count": 0,
+            "transferred_aliases_count": 0,
+            "alias_transfers": [],
+            "merged_summaries": []
+        }
+    to_p = dict(to_row)
+
+    # 2. Get aliases
+    cursor.execute("SELECT normalized_name, display_name FROM person_aliases WHERE person_id = ?", (from_person_id,))
+    from_aliases = [dict(r) for r in cursor.fetchall()]
+    from_p["aliases"] = from_aliases
+
+    cursor.execute("SELECT normalized_name, display_name FROM person_aliases WHERE person_id = ?", (to_person_id,))
+    to_aliases = [dict(r) for r in cursor.fetchall()]
+    to_p["aliases"] = to_aliases
+
+    # 3. Vault ID verification
+    from_vault = from_p.get("vault_id")
+    to_vault = to_p.get("vault_id")
+
+    # Reject Vault-linked to Unlinked
+    if from_vault is not None and to_vault is None:
+        return {
+            "allowed": False,
+            "reason": "Vault連携済み人物を未連携人物へ寄せる操作は拒否されます。",
+            "from_person": from_p,
+            "to_person": to_p,
+            "transferred_summaries_count": 0,
+            "transferred_aliases_count": 0,
+            "alias_transfers": [],
+            "merged_summaries": []
+        }
+
+    # Reject different vault_id values
+    if from_vault is not None and to_vault is not None and from_vault != to_vault:
+        return {
+            "allowed": False,
+            "reason": "異なるVault IDを持つ人物同士の統合は拒否されます。",
+            "from_person": from_p,
+            "to_person": to_p,
+            "transferred_summaries_count": 0,
+            "transferred_aliases_count": 0,
+            "alias_transfers": [],
+            "merged_summaries": []
+        }
+
+    # 4. Third-party conflict check
+    # Gather the set of normalized names that would be transferred
+    source_names = {from_p["normalized_name"]} | {a["normalized_name"] for a in from_aliases}
+
+    if source_names:
+        placeholders = ", ".join("?" for _ in source_names)
+
+        # Check conflicts with third-party main name
+        cursor.execute(
+            f"SELECT person_id, display_name, normalized_name FROM people WHERE normalized_name IN ({placeholders}) AND person_id NOT IN (?, ?)",
+            list(source_names) + [from_person_id, to_person_id]
+        )
+        conflicting_people = cursor.fetchall()
+        if conflicting_people:
+            names_str = ", ".join(r["display_name"] for r in conflicting_people)
+            return {
+                "allowed": False,
+                "reason": f"統合元の名前または別名が、第三者の正規名と衝突しています（衝突対象: {names_str}）。",
+                "from_person": from_p,
+                "to_person": to_p,
+                "transferred_summaries_count": 0,
+                "transferred_aliases_count": 0,
+                "alias_transfers": [],
+                "merged_summaries": []
+            }
+
+        # Check conflicts with third-party aliases
+        cursor.execute(
+            f"SELECT person_id, display_name, normalized_name FROM person_aliases WHERE normalized_name IN ({placeholders}) AND person_id NOT IN (?, ?)",
+            list(source_names) + [from_person_id, to_person_id]
+        )
+        conflicting_aliases = cursor.fetchall()
+        if conflicting_aliases:
+            names_str = ", ".join(r["display_name"] for r in conflicting_aliases)
+            return {
+                "allowed": False,
+                "reason": f"統合元の名前または別名が、第三者の別名と衝突しています（衝突対象: {names_str}）。",
+                "from_person": from_p,
+                "to_person": to_p,
+                "transferred_summaries_count": 0,
+                "transferred_aliases_count": 0,
+                "alias_transfers": [],
+                "merged_summaries": []
+            }
+
+    # 5. Build Alias Transfers Preview
+    alias_transfers = []
+    seen_normalized = {a["normalized_name"] for a in to_aliases} | {to_p["normalized_name"]}
+
+    for fa in from_aliases:
+        norm = fa["normalized_name"]
+        if norm not in seen_normalized:
+            alias_transfers.append({
+                "normalized_name": norm,
+                "display_name": fa["display_name"]
+            })
+            seen_normalized.add(norm)
+
+    from_p_norm = from_p["normalized_name"]
+    if from_p_norm not in seen_normalized:
+        alias_transfers.append({
+            "normalized_name": from_p_norm,
+            "display_name": from_p["display_name"]
+        })
+
+    # 6. Build Merged Summaries Preview
+    cursor.execute("SELECT summary_id, note, display_order FROM summary_people WHERE person_id = ?", (from_person_id,))
+    from_links = {r["summary_id"]: dict(r) for r in cursor.fetchall()}
+
+    cursor.execute("SELECT summary_id, note, display_order FROM summary_people WHERE person_id = ?", (to_person_id,))
+    to_links = {r["summary_id"]: dict(r) for r in cursor.fetchall()}
+
+    merged_summaries = []
+    for summary_id, from_link in from_links.items():
+        if summary_id in to_links:
+            to_link = to_links[summary_id]
+
+            # Fetch summary details
+            cursor.execute("SELECT period_key, period_type FROM summaries WHERE summary_id = ?", (summary_id,))
+            sum_row = cursor.fetchone()
+            if sum_row:
+                period_key = sum_row["period_key"]
+                period_type = sum_row["period_type"]
+            else:
+                period_key = "unknown"
+                period_type = "unknown"
+
+            from_note = from_link["note"]
+            to_note = to_link["note"]
+
+            notes_to_join = []
+            if to_note and to_note.strip():
+                notes_to_join.append(to_note.strip())
+            if from_note and from_note.strip():
+                notes_to_join.append(from_note.strip())
+            merged_note = "\n".join(notes_to_join) if notes_to_join else None
+
+            merged_display_order = merge_display_orders(to_link["display_order"], from_link["display_order"])
+
+            merged_summaries.append({
+                "summary_id": summary_id,
+                "period_key": period_key,
+                "period_type": period_type,
+                "from_note": from_note,
+                "to_note": to_note,
+                "merged_note": merged_note,
+                "merged_display_order": merged_display_order
+            })
+
+    return {
+        "allowed": True,
+        "reason": "統合可能です。",
+        "from_person": from_p,
+        "to_person": to_p,
+        "transferred_summaries_count": len(from_links),
+        "transferred_aliases_count": len(alias_transfers),
+        "alias_transfers": alias_transfers,
+        "merged_summaries": merged_summaries
+    }
+
+
+def preview_people_merge(from_person_id: str, to_person_id: str) -> dict:
+    conn = memory.get_db_connection()
+    try:
+        cursor = conn.cursor()
+        return verify_people_merge(cursor, from_person_id, to_person_id)
+    finally:
+        conn.close()
+
+
 def merge_people(from_person_id: str, to_person_id: str) -> bool:
     if from_person_id == to_person_id:
         raise ValueError("Source and target person IDs for merge cannot be identical.")
@@ -1026,26 +1235,13 @@ def merge_people(from_person_id: str, to_person_id: str) -> bool:
         with conn:
             cursor = conn.cursor()
 
-            # 1. Fetch people
-            cursor.execute("SELECT person_id, display_name, normalized_name, vault_id FROM people WHERE person_id = ?", (from_person_id,))
-            from_row = cursor.fetchone()
-            if from_row is None:
-                raise ValueError("Source person not found")
-            from_p = dict(from_row)
+            # Verify before merge
+            preview = verify_people_merge(cursor, from_person_id, to_person_id)
+            if not preview["allowed"]:
+                raise ValueError(preview["reason"])
 
-            cursor.execute("SELECT person_id, display_name, normalized_name, vault_id FROM people WHERE person_id = ?", (to_person_id,))
-            to_row = cursor.fetchone()
-            if to_row is None:
-                raise ValueError("Target person not found")
-            to_p = dict(to_row)
-
-            # Enforce target is a Vault-linked person
-            if not to_p.get("vault_id"):
-                raise ValueError("残す人物（統合先）はVault連携済みの人物である必要があります。")
-
-            # Enforce from_p is either unlinked or has the exact same vault_id
-            if from_p.get("vault_id") and from_p["vault_id"] != to_p["vault_id"]:
-                raise ValueError("異なるVault IDを持つ人物同士の統合は拒否されます。")
+            from_p = preview["from_person"]
+            to_p = preview["to_person"]
 
             # 2. Migrate summary links
             cursor.execute("SELECT summary_id, note, display_order FROM summary_people WHERE person_id = ?", (from_person_id,))
@@ -1100,20 +1296,10 @@ def merge_people(from_person_id: str, to_person_id: str) -> bool:
             conn.execute("DELETE FROM person_aliases WHERE person_id = ?", (from_person_id,))
 
             # 3.5 Preserve from_p.normalized_name as an alias of to_person_id if there is no conflict
+            alias_transfers_normalized = {a["normalized_name"] for a in preview["alias_transfers"]}
             from_p_norm = from_p["normalized_name"]
-            cursor.execute(
-                "SELECT person_id FROM people WHERE normalized_name = ? AND person_id NOT IN (?, ?)",
-                (from_p_norm, to_person_id, from_person_id)
-            )
-            conflict_main = cursor.fetchone()
 
-            cursor.execute(
-                "SELECT person_id FROM person_aliases WHERE normalized_name = ? AND person_id != ?",
-                (from_p_norm, to_person_id)
-            )
-            conflict_alias = cursor.fetchone()
-
-            if conflict_main is None and conflict_alias is None:
+            if from_p_norm in alias_transfers_normalized:
                 conn.execute(
                     "INSERT OR IGNORE INTO person_aliases (normalized_name, person_id, display_name) VALUES (?, ?, ?)",
                     (from_p_norm, to_person_id, from_p["display_name"])

@@ -406,6 +406,15 @@ def resolve_person_candidate(
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@router.post("/people/merge/preview", response_model=schemas.PeopleMergePreviewResponse)
+def preview_people_merge(body: schemas.PeopleMergeRequest, _=Depends(_require_loopback_or_token)):
+    try:
+        return service.preview_people_merge(body.from_person_id, body.to_person_id)
+    except Exception as e:
+        logger.exception("Failed to preview people merge")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/people/merge")
 def merge_people(body: schemas.PeopleMergeRequest, _=Depends(_require_loopback_or_token)):
     try:
