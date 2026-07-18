@@ -45,6 +45,26 @@ function groupSummaryItemsByKind(items: SummaryItem[]) {
   return Array.from(groups, ([kind, items]) => ({ kind, items }));
 }
 
+function formatYmdWithDow(ymd: string): string {
+  const match = ymd.match(/^\d{4}-\d{2}-\d{2}$/);
+  if (!match) return ymd;
+  const date = new Date(`${ymd}T00:00:00`);
+  const weekdays = ["日", "月", "火", "水", "木", "金", "土"];
+  const dow = weekdays[date.getDay()];
+  if (dow === undefined) return ymd;
+  return ymd.replace(/-/g, "/") + `(${dow})`;
+}
+
+function formatPeriodKey(periodKey: string, periodType: "day" | "week" | "month"): string {
+  if (periodType === "month") {
+    return periodKey.replace(/^(\d{4})-(\d{2})$/, "$1/$2");
+  }
+  if (periodType === "day") {
+    return formatYmdWithDow(periodKey);
+  }
+  return periodKey;
+}
+
 export default function SummaryDashboardPage() {
   const [activeTab, setActiveSubTab] = useState<"home" | "browse" | "stats">("home");
 
@@ -326,7 +346,9 @@ export default function SummaryDashboardPage() {
                       )}
                     </div>
                     <h3 className="mt-3 text-sm font-bold text-slate-700">
-                      {homeData.this_month_summary?.period_key || "月次未生成"}
+                      {homeData.this_month_summary
+                        ? formatPeriodKey(homeData.this_month_summary.period_key, "month")
+                        : "月次未生成"}
                     </h3>
                     <p className="mt-2 text-xs text-slate-600 line-clamp-3">
                       {homeData.this_month_summary?.summary || "今月のサマリはまだ生成されていません。"}
@@ -349,7 +371,9 @@ export default function SummaryDashboardPage() {
                       )}
                     </div>
                     <h3 className="mt-3 text-sm font-bold text-slate-700">
-                      {homeData.latest_week_summary?.period_key || "週次未生成"}
+                      {homeData.latest_week_summary
+                        ? formatPeriodKey(homeData.latest_week_summary.period_key, "week")
+                        : "週次未生成"}
                     </h3>
                     <p className="mt-2 text-xs text-slate-600 line-clamp-3">
                       {homeData.latest_week_summary?.summary || "週次のサマリはまだ生成されていません。"}
@@ -372,7 +396,9 @@ export default function SummaryDashboardPage() {
                       )}
                     </div>
                     <h3 className="mt-3 text-sm font-bold text-slate-700">
-                      {homeData.yesterday_summary?.period_key || "昨日未生成"}
+                      {homeData.yesterday_summary
+                        ? formatYmdWithDow(homeData.yesterday_summary.period_key)
+                        : "昨日未生成"}
                     </h3>
                     <p className="mt-2 text-xs text-slate-600 line-clamp-3">
                       {homeData.yesterday_summary?.summary || "昨日のサマリはまだ生成されていません。"}
@@ -549,8 +575,8 @@ export default function SummaryDashboardPage() {
                               className="w-full text-left rounded-lg border border-slate-100 bg-slate-50 p-3 hover:bg-slate-100 transition-all"
                             >
                               <div className="flex items-center justify-between">
-                                <span className="text-xs font-bold text-indigo-600">{m.period_key}</span>
-                                <span className="text-[10px] text-slate-400">{m.period_start} ～ {m.period_end}</span>
+                                <span className="text-xs font-bold text-indigo-600">{formatPeriodKey(m.period_key, "month")}</span>
+                                <span className="text-[10px] text-slate-400">{m.period_start ? formatYmdWithDow(m.period_start) : ""} ～ {m.period_end ? formatYmdWithDow(m.period_end) : ""}</span>
                               </div>
                               <p className="mt-1 text-xs text-slate-700 font-medium line-clamp-2">{m.summary}</p>
                             </button>
@@ -573,8 +599,8 @@ export default function SummaryDashboardPage() {
                               className="w-full text-left rounded-lg border border-slate-100 bg-slate-50 p-3 hover:bg-slate-100 transition-all"
                             >
                               <div className="flex items-center justify-between">
-                                <span className="text-xs font-bold text-emerald-600">{w.period_key}</span>
-                                <span className="text-[10px] text-slate-400">{w.period_start} ～ {w.period_end}</span>
+                                <span className="text-xs font-bold text-emerald-600">{formatPeriodKey(w.period_key, "week")}</span>
+                                <span className="text-[10px] text-slate-400">{w.period_start ? formatYmdWithDow(w.period_start) : ""} ～ {w.period_end ? formatYmdWithDow(w.period_end) : ""}</span>
                               </div>
                               <p className="mt-1 text-xs text-slate-700 font-medium line-clamp-2">{w.summary}</p>
                             </button>
@@ -603,7 +629,7 @@ export default function SummaryDashboardPage() {
                               className="w-full text-left rounded-lg border border-slate-100 bg-slate-50 p-3 hover:bg-slate-100 transition-all"
                             >
                               <div className="flex items-center justify-between">
-                                <span className="text-xs font-bold text-slate-800">{d.date}</span>
+                                <span className="text-xs font-bold text-slate-800">{formatYmdWithDow(d.date)}</span>
                                 <span
                                   className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${
                                     d.has_summary
@@ -652,7 +678,7 @@ export default function SummaryDashboardPage() {
                         ? "週次サマリ"
                         : "月次サマリ"}
                     </span>
-                    <span className="text-xs text-slate-500 font-medium">{selectedSummary.period_key}</span>
+                    <span className="text-xs text-slate-500 font-medium">{formatPeriodKey(selectedSummary.period_key, selectedSummary.period_type)}</span>
                   </div>
 
                   <h2 className="text-lg font-bold text-slate-900">{selectedSummary.summary}</h2>
@@ -748,7 +774,7 @@ export default function SummaryDashboardPage() {
                     <span className="rounded bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600 uppercase tracking-wider">
                       日別詳細ログ
                     </span>
-                    <span className="text-xs text-slate-500 font-bold">{selectedDay.date}</span>
+                    <span className="text-xs text-slate-500 font-bold">{formatYmdWithDow(selectedDay.date)}</span>
                   </div>
 
                   {/* Times Tracker Box */}
