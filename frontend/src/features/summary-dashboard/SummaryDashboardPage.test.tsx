@@ -9,6 +9,10 @@ vi.mock("../../api/client", () => ({
   getDashboardSummary: vi.fn(),
   getDashboardDayDetails: vi.fn(),
   getDashboardStats: vi.fn(),
+  getEditOptions: vi.fn(),
+  updateSummary: vi.fn(),
+  deleteSummary: vi.fn(),
+  listPeople: vi.fn(),
   ApiError: class ApiError extends Error {
     status: number;
     constructor(status: number, message: string) {
@@ -23,12 +27,20 @@ import {
   getDashboardBrowse,
   getDashboardSummary,
   getDashboardStats,
+  getEditOptions,
+  updateSummary,
+  deleteSummary,
+  listPeople,
 } from "../../api/client";
 
 const mockGetDashboardHome = vi.mocked(getDashboardHome);
 const mockGetDashboardBrowse = vi.mocked(getDashboardBrowse);
 const mockGetDashboardSummary = vi.mocked(getDashboardSummary);
 const mockGetDashboardStats = vi.mocked(getDashboardStats);
+const mockGetEditOptions = vi.mocked(getEditOptions);
+const mockUpdateSummary = vi.mocked(updateSummary);
+const mockDeleteSummary = vi.mocked(deleteSummary);
+const mockListPeople = vi.mocked(listPeople);
 
 const sampleHomeResponse = {
   this_month_summary: null,
@@ -122,10 +134,155 @@ it("groups summary items by kind in their first-seen order", async () => {
   render(<SummaryDashboardPage />);
 
   await userEvent.click(screen.getByRole("button", { name: "一覧" }));
-  await userEvent.click(await screen.findByRole("button", { name: /2026-07-19/ }));
+  await waitFor(() => {
+    expect(screen.getByText(/2026\/07\/19/)).toBeInTheDocument();
+  });
+  await userEvent.click(screen.getByText(/2026\/07\/19/));
   await screen.findByText("First activity");
 
   expect(screen.getAllByText("activities")).toHaveLength(1);
   const detailText = screen.getByText("First activity").closest("section")?.parentElement?.textContent;
   expect(detailText).toMatch(/activitiesFirst activitySecond activityhighlightsA highlight/);
+});
+
+it("shows edit and delete buttons in summary detail view", async () => {
+  mockGetDashboardBrowse.mockResolvedValue({
+    ...sampleBrowseResponse,
+    selected_month: "2026-07",
+    days: [
+      {
+        date: "2026-07-19",
+        has_summary: true,
+        summary_id: "summary-1",
+        summary: "Yesterday",
+        topics: [],
+      },
+    ],
+  });
+  mockGetDashboardSummary.mockResolvedValue({
+    summary_id: "summary-1",
+    period_type: "day",
+    period_key: "2026-07-19",
+    summary: "昨日のサマリ",
+    keywords: [],
+    topics: [],
+    projects: [],
+    people: [],
+    mood: null,
+    sleep_raw: null,
+    sleep_hours: null,
+    items: [],
+  });
+
+  render(<SummaryDashboardPage />);
+
+  await userEvent.click(screen.getByRole("button", { name: "一覧" }));
+  // Wait for browse data to load and day button to appear (formatted as 2026/07/19(土))
+  await waitFor(() => {
+    expect(screen.getByText(/2026\/07\/19/)).toBeInTheDocument();
+  });
+  await userEvent.click(screen.getByText(/2026\/07\/19/));
+  await screen.findByText("昨日のサマリ");
+
+  expect(screen.getByRole("button", { name: "編集" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "削除" })).toBeInTheDocument();
+});
+
+it("shows delete confirmation dialog when delete is clicked", async () => {
+  mockGetDashboardBrowse.mockResolvedValue({
+    ...sampleBrowseResponse,
+    selected_month: "2026-07",
+    days: [
+      {
+        date: "2026-07-19",
+        has_summary: true,
+        summary_id: "summary-1",
+        summary: "Delete me",
+        topics: [],
+      },
+    ],
+  });
+  mockGetDashboardSummary.mockResolvedValue({
+    summary_id: "summary-1",
+    period_type: "day",
+    period_key: "2026-07-19",
+    summary: "Delete me summary",
+    keywords: [],
+    topics: [],
+    projects: [],
+    people: [],
+    mood: null,
+    sleep_raw: null,
+    sleep_hours: null,
+    items: [],
+  });
+
+  render(<SummaryDashboardPage />);
+
+  await userEvent.click(screen.getByRole("button", { name: "一覧" }));
+  await waitFor(() => {
+    expect(screen.getByText(/2026\/07\/19/)).toBeInTheDocument();
+  });
+  await userEvent.click(screen.getByText(/2026\/07\/19/));
+  await screen.findByText("Delete me summary");
+
+  await userEvent.click(screen.getByRole("button", { name: "削除" }));
+  expect(screen.getByText("この操作は取り消せません。本当に削除しますか？")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "削除する" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "やめる" })).toBeInTheDocument();
+});
+
+it("enters edit mode and loads edit options", async () => {
+  mockGetDashboardBrowse.mockResolvedValue({
+    ...sampleBrowseResponse,
+    selected_month: "2026-07",
+    days: [
+      {
+        date: "2026-07-19",
+        has_summary: true,
+        summary_id: "summary-1",
+        summary: "Test",
+        topics: [],
+      },
+    ],
+  });
+  mockGetDashboardSummary.mockResolvedValue({
+    summary_id: "summary-1",
+    period_type: "day",
+    period_key: "2026-07-19",
+    summary: "Test summary",
+    keywords: ["kw1"],
+    topics: ["LLM・AI活用"],
+    projects: [],
+    people: [],
+    mood: "良い",
+    sleep_raw: "7h",
+    sleep_hours: 7,
+    items: [],
+  });
+  mockGetEditOptions.mockResolvedValue({
+    topics: ["LLM・AI活用", "ソフトウェア開発"],
+    item_kinds: { day: ["highlights", "activities"], week: [], month: [] },
+  });
+  mockListPeople.mockResolvedValue([]);
+
+  render(<SummaryDashboardPage />);
+
+  await userEvent.click(screen.getByRole("button", { name: "一覧" }));
+  await waitFor(() => {
+    expect(screen.getByText(/2026\/07\/19/)).toBeInTheDocument();
+  });
+  await userEvent.click(screen.getByText(/2026\/07\/19/));
+  await screen.findByText("Test summary");
+
+  await userEvent.click(screen.getByRole("button", { name: "編集" }));
+
+  await waitFor(() => {
+    expect(mockGetEditOptions).toHaveBeenCalled();
+    expect(mockListPeople).toHaveBeenCalled();
+  });
+
+  // Edit form should be visible
+  expect(screen.getByRole("button", { name: "保存" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "キャンセル" })).toBeInTheDocument();
 });

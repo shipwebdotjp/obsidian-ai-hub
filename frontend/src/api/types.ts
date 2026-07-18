@@ -200,6 +200,9 @@ export type SummaryPeriodType = "day" | "week" | "month";
 export interface SummaryPerson {
   name: string;
   note: string;
+  person_id?: string | null;
+  resolution_status?: string | null;
+  candidate_id?: string | null;
 }
 
 export interface SummaryItem {
@@ -298,4 +301,56 @@ export interface DashboardStatsResponse {
   buckets: StatsBucket[];
   candidate_topics: string[];
   candidate_keywords: string[];
+}
+
+// --- Summary Edit/Delete types ---
+
+export interface SummaryItemInput {
+  kind: string;
+  body: string;
+  display_order: number;
+}
+
+export interface SummaryPersonInput {
+  person_id: string;
+  note: string;
+}
+
+export interface SummaryUpdatePayload {
+  summary?: string | null;
+  keywords?: string[];
+  mood?: string | null;
+  sleep_raw?: string | null;
+  items?: SummaryItemInput[];
+  topics?: string[];
+  people?: SummaryPersonInput[];
+}
+
+export interface SummaryDeleteResponse {
+  deleted: boolean;
+  summary_id: string;
+}
+
+export interface EditOptionsResponse {
+  topics: string[];
+  item_kinds: {
+    day: string[];
+    week: string[];
+    month: string[];
+  };
+}
+
+// --- People type ---
+
+export interface PersonAlias {
+  normalized_name: string;
+  display_name: string;
+}
+
+export interface Person {
+  person_id: string;
+  display_name: string;
+  normalized_name: string;
+  vault_id: string | null;
+  aliases: PersonAlias[];
 }

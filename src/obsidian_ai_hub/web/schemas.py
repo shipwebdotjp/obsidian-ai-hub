@@ -313,6 +313,7 @@ class SummaryItem(BaseModel):
 class SummaryPerson(BaseModel):
     name: str
     note: str = ""
+    person_id: Optional[str] = None
     resolution_status: Optional[str] = None
     candidate_id: Optional[str] = None
 
@@ -350,6 +351,37 @@ class SummaryDetail(BaseModel):
     projects: list[str] = Field(default_factory=list)
     people: list[SummaryPerson] = Field(default_factory=list)
     items: list[SummaryItem] = Field(default_factory=list)
+
+
+class SummaryItemInput(BaseModel):
+    kind: str
+    body: str
+    display_order: int = 0
+
+
+class SummaryPersonInput(BaseModel):
+    person_id: str
+    note: str = ""
+
+
+class SummaryUpdateRequest(BaseModel):
+    summary: Optional[str] = None
+    keywords: Optional[list[str]] = None
+    mood: Optional[str] = None
+    sleep_raw: Optional[str] = None
+    items: Optional[list[SummaryItemInput]] = None
+    topics: Optional[list[str]] = None
+    people: Optional[list[SummaryPersonInput]] = None
+
+
+class SummaryDeleteResponse(BaseModel):
+    deleted: bool
+    summary_id: str
+
+
+class EditOptionsResponse(BaseModel):
+    topics: list[str]
+    item_kinds: dict[str, list[str]]
 
 
 class SummaryOptionsResponse(BaseModel):

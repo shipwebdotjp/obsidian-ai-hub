@@ -288,6 +288,11 @@ def get_dashboard_browse(
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@router.get("/summary-dashboard/edit-options", response_model=schemas.EditOptionsResponse)
+def get_edit_options(_=Depends(_require_loopback_or_token)):
+    return service.get_edit_options()
+
+
 @router.get("/summary-dashboard/summaries/{summary_id}", response_model=schemas.SummaryDetail)
 def get_dashboard_summary(summary_id: str, _=Depends(_require_loopback_or_token)):
     from obsidian_ai_hub.summary import store as summary_store
@@ -295,6 +300,32 @@ def get_dashboard_summary(summary_id: str, _=Depends(_require_loopback_or_token)
     if res is None:
         raise HTTPException(status_code=404, detail="summary not found")
     return res
+
+
+@router.patch("/summary-dashboard/summaries/{summary_id}", response_model=schemas.SummaryDetail)
+def update_dashboard_summary(
+    summary_id: str,
+    body: schemas.SummaryUpdateRequest,
+    _=Depends(_require_loopback_or_token),
+):
+    try:
+        result = service.update_summary_detail(summary_id, body)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="summary not found")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return result
+
+
+@router.delete("/summary-dashboard/summaries/{summary_id}", response_model=schemas.SummaryDeleteResponse)
+def delete_dashboard_summary(
+    summary_id: str,
+    _=Depends(_require_loopback_or_token),
+):
+    success = service.delete_summary_detail(summary_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="summary not found")
+    return {"deleted": True, "summary_id": summary_id}
 
 
 @router.get("/summary-dashboard/days/{target_date}", response_model=schemas.DashboardDayDetailsResponse)

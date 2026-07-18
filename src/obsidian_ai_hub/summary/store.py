@@ -563,7 +563,7 @@ def _load_summary_children(conn: sqlite3.Connection, record: Dict[str, Any]) -> 
     # Fetch resolved people
     cursor.execute(
         """
-        SELECT p.display_name, sp.note, sp.display_order
+        SELECT p.person_id, p.display_name, sp.note, sp.display_order
         FROM summary_people sp
         JOIN people p ON sp.person_id = p.person_id
         WHERE sp.summary_id = ?
@@ -572,6 +572,7 @@ def _load_summary_children(conn: sqlite3.Connection, record: Dict[str, Any]) -> 
     )
     resolved_list = [
         {
+            "person_id": r["person_id"],
             "name": r["display_name"],
             "note": r["note"],
             "display_order": r["display_order"],
@@ -669,7 +670,7 @@ def _attach_children_bulk(
     # Fetch resolved
     cursor.execute(
         f"""
-        SELECT sp.summary_id, p.display_name, sp.note, sp.display_order
+        SELECT sp.summary_id, sp.person_id, p.display_name, sp.note, sp.display_order
         FROM summary_people sp
         JOIN people p ON sp.person_id = p.person_id
         WHERE sp.summary_id IN ({placeholders})
@@ -679,6 +680,7 @@ def _attach_children_bulk(
     for row in cursor.fetchall():
         people_by_summary[row["summary_id"]].append(
             {
+                "person_id": row["person_id"],
                 "name": row["display_name"],
                 "note": row["note"],
                 "display_order": row["display_order"],
@@ -844,5 +846,234 @@ def get_summary_options(conn: Optional[sqlite3.Connection] = None) -> Dict[str, 
     finally:
         if close_conn:
             conn.close()
+
+
+def update_summary(
+    summary_id: str,
+    payload: Dict[str, Any],
+    conn: Optional[sqlite3.Connection] = None,
+) -> Dict[str, Any]:
+    """
+    Update a summary by ID with only the fields present in payload.
+    payload uses exclude_unset semantics: only keys present are updated.
+    Explicit None values clear the field (e.g. mood, sleep_raw).
+    """
+    close_conn = False
+    if conn is None:
+        conn = get_db_connection()
+        close_conn = True
+
+    try:
+        if close_conn:
+            with conn:
+                return _update_summary_in_tx(conn, summary_id, payload)
+        else:
+            return _update_summary_in_tx(conn, summary_id, payload)
+    finally:
+        if close_conn:
+            conn.close()
+
+
+def _update_summary_in_tx(
+    conn: sqlite3.Connection,
+    summary_id: str,
+    payload: Dict[str, Any],
+) -> Dict[str, Any]:
+    cursor = conn.cursor()
+
+    # 1. Verify summary exists and read period_type
+    cursor.execute(
+        "SELECT summary_id, period_type FROM summaries WHERE summary_id = ?",
+        (summary_id,),
+    )
+    row = cursor.fetchone()
+    if row is None:
+        raise ValueError(f"Summary not found: {summary_id}")
+
+    # 2. Read current children for fields NOT in payload (to preserve)
+    preserved_candidates = _read_candidates(conn, summary_id)
+    preserved_items = _read_items(conn, summary_id) if "items" not in payload else []
+    preserved_topics = _read_topics(conn, summary_id) if "topics" not in payload else []
+    preserved_resolved_people = _read_resolved_people(conn, summary_id) if "people" not in payload else []
+
+    # 3. Delete all children
+    _delete_summary_children(conn, summary_id)
+
+    # 4. Update summaries row with only the fields present in payload
+    update_fields = []
+    update_values = []
+    if "summary" in payload:
+        update_fields.append("summary = ?")
+        update_values.append(payload["summary"])
+    if "keywords" in payload:
+        update_fields.append("keywords = ?")
+        update_values.append(json.dumps(payload["keywords"], ensure_ascii=False) if payload["keywords"] else None)
+    if "mood" in payload:
+        update_fields.append("mood = ?")
+        update_values.append(payload["mood"])
+    if "sleep_raw" in payload:
+        update_fields.append("sleep_raw = ?")
+        update_values.append(payload["sleep_raw"])
+        # Recalculate sleep_hours
+        update_fields.append("sleep_hours = ?")
+        update_values.append(parse_sleep_hours(payload["sleep_raw"]))
+
+    if update_fields:
+        sql = f"UPDATE summaries SET {', '.join(update_fields)} WHERE summary_id = ?"
+        update_values.append(summary_id)
+        cursor.execute(sql, tuple(update_values))
+
+    # 5. Re-insert preserved unresolved candidates (always preserved)
+    order = 0
+    for cand in preserved_candidates:
+        conn.execute(
+            "INSERT INTO summary_person_candidates (summary_id, candidate_id, note, display_order) VALUES (?, ?, ?, ?)",
+            (summary_id, cand["candidate_id"], cand["note"], order),
+        )
+        order += 1
+
+    # 6. Insert items
+    if "items" in payload:
+        raw_items = payload["items"] or []
+        for i, item in enumerate(raw_items):
+            item_id = f"sit_{uuid.uuid4().hex}"
+            conn.execute(
+                "INSERT INTO summary_items (summary_item_id, summary_id, kind, body, display_order) VALUES (?, ?, ?, ?, ?)",
+                (item_id, summary_id, item["kind"], item["body"], i),
+            )
+    else:
+        for i, item in enumerate(preserved_items):
+            conn.execute(
+                "INSERT INTO summary_items (summary_item_id, summary_id, kind, body, display_order) VALUES (?, ?, ?, ?, ?)",
+                (item["summary_item_id"], summary_id, item["kind"], item["body"], i),
+            )
+
+    # 7. Insert topics
+    if "topics" in payload:
+        raw_topics = payload["topics"] or []
+        normalized = normalize_topics(raw_topics) if raw_topics else []
+        for i, display_name in enumerate(normalized):
+            normalized_name = normalize_entity_name(display_name)
+            topic_id = _get_or_create_entity(conn, "topics", display_name, normalized_name)
+            conn.execute(
+                "INSERT INTO summary_topics (summary_id, topic_id, display_order) VALUES (?, ?, ?)",
+                (summary_id, topic_id, i),
+            )
+    else:
+        for i, topic in enumerate(preserved_topics):
+            normalized_name = normalize_entity_name(topic)
+            conn.execute(
+                "SELECT topic_id FROM topics WHERE normalized_name = ?",
+                (normalized_name,),
+            )
+            trow = cursor.fetchone()
+            if trow:
+                conn.execute(
+                    "INSERT INTO summary_topics (summary_id, topic_id, display_order) VALUES (?, ?, ?)",
+                    (summary_id, trow["topic_id"], i),
+                )
+
+    # 8. Insert resolved people (after candidates, with continuing display_order)
+    if "people" in payload:
+        raw_people = payload["people"] or []
+        for person in raw_people:
+            conn.execute(
+                "INSERT INTO summary_people (summary_id, person_id, note, display_order) VALUES (?, ?, ?, ?)",
+                (summary_id, person["person_id"], person.get("note"), order),
+            )
+            order += 1
+    else:
+        for person in preserved_resolved_people:
+            conn.execute(
+                "INSERT INTO summary_people (summary_id, person_id, note, display_order) VALUES (?, ?, ?, ?)",
+                (summary_id, person["person_id"], person["note"], order),
+            )
+            order += 1
+
+    return get_summary_by_id(summary_id, conn=conn)
+
+
+def _read_candidates(conn: sqlite3.Connection, summary_id: str) -> list[dict]:
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT candidate_id, note, display_order FROM summary_person_candidates WHERE summary_id = ? ORDER BY display_order",
+        (summary_id,),
+    )
+    return [dict(r) for r in cursor.fetchall()]
+
+
+def _read_items(conn: sqlite3.Connection, summary_id: str) -> list[dict]:
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT summary_item_id, kind, body, display_order FROM summary_items WHERE summary_id = ? ORDER BY display_order",
+        (summary_id,),
+    )
+    return [dict(r) for r in cursor.fetchall()]
+
+
+def _read_topics(conn: sqlite3.Connection, summary_id: str) -> list[str]:
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT t.display_name
+        FROM summary_topics st
+        JOIN topics t ON st.topic_id = t.topic_id
+        WHERE st.summary_id = ?
+        ORDER BY st.display_order
+        """,
+        (summary_id,),
+    )
+    return [r["display_name"] for r in cursor.fetchall()]
+
+
+def _read_resolved_people(conn: sqlite3.Connection, summary_id: str) -> list[dict]:
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT p.person_id, sp.note, sp.display_order
+        FROM summary_people sp
+        JOIN people p ON sp.person_id = p.person_id
+        WHERE sp.summary_id = ?
+        ORDER BY sp.display_order
+        """,
+        (summary_id,),
+    )
+    return [dict(r) for r in cursor.fetchall()]
+
+
+def delete_summary(
+    summary_id: str,
+    conn: Optional[sqlite3.Connection] = None,
+) -> bool:
+    """Delete a summary and all its children. Returns True if deleted."""
+    close_conn = False
+    if conn is None:
+        conn = get_db_connection()
+        close_conn = True
+
+    try:
+        if close_conn:
+            with conn:
+                return _delete_summary_in_tx(conn, summary_id)
+        else:
+            return _delete_summary_in_tx(conn, summary_id)
+    finally:
+        if close_conn:
+            conn.close()
+
+
+def _delete_summary_in_tx(
+    conn: sqlite3.Connection,
+    summary_id: str,
+) -> bool:
+    cursor = conn.cursor()
+    cursor.execute("SELECT summary_id FROM summaries WHERE summary_id = ?", (summary_id,))
+    if cursor.fetchone() is None:
+        return False
+
+    _delete_summary_children(conn, summary_id)
+    conn.execute("DELETE FROM summaries WHERE summary_id = ?", (summary_id,))
+    conn.execute("DELETE FROM summary_person_assignments WHERE summary_id = ?", (summary_id,))
+    return True
 
 

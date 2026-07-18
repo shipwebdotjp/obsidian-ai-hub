@@ -15,6 +15,10 @@ import type {
   VaultSearchResponse,
   VaultFileResponse,
   SummaryDetail,
+  SummaryUpdatePayload,
+  SummaryDeleteResponse,
+  EditOptionsResponse,
+  Person,
 } from "./types";
 
 const TOKEN_KEY = "obsidian-ai-hub:review-token";
@@ -303,6 +307,33 @@ export function getDashboardStats(params: {
   return request<DashboardStatsResponse>(
     `/api/v1/summary-dashboard/stats?${sp.toString()}`
   );
+}
+
+export function getEditOptions(): Promise<EditOptionsResponse> {
+  return request<EditOptionsResponse>("/api/v1/summary-dashboard/edit-options");
+}
+
+export function updateSummary(
+  summaryId: string,
+  payload: SummaryUpdatePayload,
+): Promise<SummaryDetail> {
+  return request<SummaryDetail>(
+    `/api/v1/summary-dashboard/summaries/${encodeURIComponent(summaryId)}`,
+    { method: "PATCH", body: JSON.stringify(payload) },
+  );
+}
+
+export function deleteSummary(
+  summaryId: string,
+): Promise<SummaryDeleteResponse> {
+  return request<SummaryDeleteResponse>(
+    `/api/v1/summary-dashboard/summaries/${encodeURIComponent(summaryId)}`,
+    { method: "DELETE" },
+  );
+}
+
+export function listPeople(): Promise<Person[]> {
+  return request<Person[]>("/api/v1/people");
 }
 
 export function apiGet<T>(path: string): Promise<T> {

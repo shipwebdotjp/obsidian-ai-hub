@@ -6,6 +6,10 @@ import {
   getDashboardSummary,
   getDashboardDayDetails,
   getDashboardStats,
+  getEditOptions,
+  updateSummary,
+  deleteSummary,
+  listPeople,
 } from "../../api/client";
 import type {
   DashboardHomeResponse,
@@ -15,6 +19,11 @@ import type {
   SummaryDetail,
   SummaryItem,
   StatsBucket,
+  EditOptionsResponse,
+  SummaryUpdatePayload,
+  SummaryItemInput,
+  SummaryPersonInput,
+  Person,
 } from "../../api/types";
 
 // Colors for stats lines
@@ -89,6 +98,15 @@ export default function SummaryDashboardPage() {
   const [selectedDay, setSelectedDay] = useState<DashboardDayDetailsResponse | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
+
+  // Edit/Delete state
+  const [isEditing, setIsEditing] = useState(false);
+  const [editForm, setEditForm] = useState<SummaryUpdatePayload>({});
+  const [editSaving, setEditSaving] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [allPeople, setAllPeople] = useState<Person[]>([]);
+  const [editOptions, setEditOptions] = useState<EditOptionsResponse | null>(null);
 
   // --- Stats Tab State ---
   const [statsPreset, setStatsPreset] = useState<"year" | "30" | "90" | "custom">("30");
@@ -229,6 +247,78 @@ export default function SummaryDashboardPage() {
         if (reqId === detailRequestRef.current) setDetailLoading(false);
       });
   };
+
+  // --- Edit handlers ---
+  const startEditing = useCallback(async () => {
+    if (!selectedSummary) return;
+    setIsEditing(true);
+    setEditError(null);
+    setEditForm({
+      summary: selectedSummary.summary ?? "",
+      keywords: [...selectedSummary.keywords],
+      mood: selectedSummary.mood ?? null,
+      sleep_raw: selectedSummary.sleep_raw ?? null,
+      items: selectedSummary.items.map((it) => ({
+        kind: it.kind,
+        body: it.body,
+        display_order: it.display_order,
+      })),
+      topics: [...selectedSummary.topics],
+      people: selectedSummary.people
+        .filter((p) => p.resolution_status === "resolved" && p.person_id)
+        .map((p) => ({ person_id: p.person_id!, note: p.note })),
+    });
+    // Load edit options and people in parallel
+    try {
+      const [opts, people] = await Promise.all([getEditOptions(), listPeople()]);
+      setEditOptions(opts);
+      setAllPeople(people);
+    } catch {
+      setEditError("編集オプションの読み込みに失敗しました");
+    }
+  }, [selectedSummary]);
+
+  const cancelEditing = useCallback(() => {
+    setIsEditing(false);
+    setEditForm({});
+    setEditError(null);
+  }, []);
+
+  const saveEditing = useCallback(async () => {
+    if (!selectedSummary) return;
+    setEditSaving(true);
+    setEditError(null);
+    try {
+      const updated = await updateSummary(selectedSummary.summary_id, editForm);
+      setSelectedSummary(updated);
+      setIsEditing(false);
+      setEditForm({});
+      // Refresh other data
+      loadHome();
+      loadBrowse(browseYear, browseMonth);
+    } catch (e) {
+      setEditError(e instanceof ApiError ? e.message : "保存に失敗しました");
+    } finally {
+      setEditSaving(false);
+    }
+  }, [selectedSummary, editForm, loadHome, loadBrowse, browseYear, browseMonth]);
+
+  // --- Delete handlers ---
+  const confirmDelete = useCallback(async () => {
+    if (!selectedSummary) return;
+    try {
+      await deleteSummary(selectedSummary.summary_id);
+      setSelectedSummary(null);
+      setIsEditing(false);
+      setShowDeleteConfirm(false);
+      // Refresh data
+      loadHome();
+      loadBrowse(browseYear, browseMonth);
+    } catch (e) {
+      setEditError(e instanceof ApiError ? e.message : "削除に失敗しました");
+      setShowDeleteConfirm(false);
+    }
+  }, [selectedSummary, loadHome, loadBrowse, browseYear, browseMonth]);
 
   const goToBrowseForSummary = (summary: SummaryDetail): void => {
     let year: string;
@@ -715,88 +805,130 @@ export default function SummaryDashboardPage() {
                     <span className="text-xs text-slate-500 font-medium">{formatPeriodKey(selectedSummary.period_key, selectedSummary.period_type)}</span>
                   </div>
 
-                  <h2 className="text-lg font-bold text-slate-900">{selectedSummary.summary}</h2>
-
-                  {/* Metadata */}
-                  <div className="flex flex-wrap gap-2 text-xs">
-                    {selectedSummary.mood && (
-                      <span className="rounded bg-blue-50 px-2.5 py-1 text-blue-700 font-medium">
-                        気分: {selectedSummary.mood}
-                      </span>
-                    )}
-                    {selectedSummary.sleep_hours !== null && (
-                      <span className="rounded bg-indigo-50 px-2.5 py-1 text-indigo-700 font-medium">
-                        睡眠: {selectedSummary.sleep_hours}h
-                      </span>
-                    )}
-                  </div>
-
-                  {selectedSummary.topics.length > 0 && (
-                    <div>
-                      <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">トピック</h3>
-                      <div className="mt-1 flex flex-wrap gap-1">
-                        {selectedSummary.topics.map((t) => (
-                          <span key={t} className="rounded bg-emerald-50 px-2 py-0.5 text-xs text-emerald-700 font-medium">
-                            {t}
-                          </span>
-                        ))}
-                      </div>
+                  {/* Edit/Delete buttons */}
+                  {!isEditing && (
+                    <div className="flex gap-2">
+                      <button
+                        onClick={startEditing}
+                        className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 cursor-pointer"
+                      >
+                        編集
+                      </button>
+                      <button
+                        onClick={() => setShowDeleteConfirm(true)}
+                        className="rounded-md border border-red-200 bg-white px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50 cursor-pointer"
+                      >
+                        削除
+                      </button>
                     </div>
                   )}
 
-                  {selectedSummary.projects.length > 0 && (
-                    <div>
-                      <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">プロジェクト</h3>
-                      <div className="mt-1 flex flex-wrap gap-1">
-                        {selectedSummary.projects.map((p) => (
-                          <span key={p} className="rounded bg-amber-50 px-2 py-0.5 text-xs text-amber-700 font-medium">
-                            {p}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
+                  {/* Edit Error */}
+                  {editError && (
+                    <p className="rounded bg-red-50 px-3 py-2 text-xs text-red-600">{editError}</p>
                   )}
 
-                  {selectedSummary.keywords.length > 0 && (
-                    <div>
-                      <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">キーワード</h3>
-                      <div className="mt-1 flex flex-wrap gap-1">
-                        {selectedSummary.keywords.map((k) => (
-                          <span key={k} className="rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-600 font-medium">
-                            {k}
+                  {/* View Mode */}
+                  {!isEditing && (
+                    <>
+                      <h2 className="text-lg font-bold text-slate-900">{selectedSummary.summary}</h2>
+
+                      {/* Metadata */}
+                      <div className="flex flex-wrap gap-2 text-xs">
+                        {selectedSummary.mood && (
+                          <span className="rounded bg-blue-50 px-2.5 py-1 text-blue-700 font-medium">
+                            気分: {selectedSummary.mood}
                           </span>
+                        )}
+                        {selectedSummary.sleep_hours !== null && (
+                          <span className="rounded bg-indigo-50 px-2.5 py-1 text-indigo-700 font-medium">
+                            睡眠: {selectedSummary.sleep_hours}h
+                          </span>
+                        )}
+                      </div>
+
+                      {selectedSummary.topics.length > 0 && (
+                        <div>
+                          <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">トピック</h3>
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            {selectedSummary.topics.map((t) => (
+                              <span key={t} className="rounded bg-emerald-50 px-2 py-0.5 text-xs text-emerald-700 font-medium">
+                                {t}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {selectedSummary.projects.length > 0 && (
+                        <div>
+                          <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">プロジェクト</h3>
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            {selectedSummary.projects.map((p) => (
+                              <span key={p} className="rounded bg-amber-50 px-2 py-0.5 text-xs text-amber-700 font-medium">
+                                {p}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {selectedSummary.keywords.length > 0 && (
+                        <div>
+                          <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">キーワード</h3>
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            {selectedSummary.keywords.map((k) => (
+                              <span key={k} className="rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-600 font-medium">
+                                {k}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Nested item blocks */}
+                      <div className="mt-6 space-y-4">
+                        {groupSummaryItemsByKind(selectedSummary.items).map(({ kind, items }) => (
+                          <section key={kind} className="border-t border-slate-100 pt-3">
+                            <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">{kind}</h4>
+                            <ul className="mt-1 list-disc space-y-2 pl-5">
+                              {items.map((item) => (
+                                <li
+                                  key={item.summary_item_id}
+                                  className="text-xs text-slate-700 whitespace-pre-wrap leading-relaxed"
+                                >
+                                  {item.body}
+                                </li>
+                              ))}
+                            </ul>
+                          </section>
                         ))}
                       </div>
-                    </div>
+
+                      {/* If daily summary, we can also load its detailed activity logs directly below it */}
+                      {selectedSummary.period_type === "day" && (
+                        <button
+                          onClick={() => showDayDetail(selectedSummary.period_key)}
+                          className="mt-6 w-full text-center rounded-lg border border-blue-200 bg-blue-50 py-2.5 text-xs font-bold text-blue-600 hover:bg-blue-100 transition-all cursor-pointer"
+                        >
+                          この日の詳細アクティビティログを表示する
+                        </button>
+                      )}
+                    </>
                   )}
 
-                  {/* Nested item blocks */}
-                  <div className="mt-6 space-y-4">
-                    {groupSummaryItemsByKind(selectedSummary.items).map(({ kind, items }) => (
-                      <section key={kind} className="border-t border-slate-100 pt-3">
-                        <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">{kind}</h4>
-                        <ul className="mt-1 list-disc space-y-2 pl-5">
-                          {items.map((item) => (
-                            <li
-                              key={item.summary_item_id}
-                              className="text-xs text-slate-700 whitespace-pre-wrap leading-relaxed"
-                            >
-                              {item.body}
-                            </li>
-                          ))}
-                        </ul>
-                      </section>
-                    ))}
-                  </div>
-
-                  {/* If daily summary, we can also load its detailed activity logs directly below it */}
-                  {selectedSummary.period_type === "day" && (
-                    <button
-                      onClick={() => showDayDetail(selectedSummary.period_key)}
-                      className="mt-6 w-full text-center rounded-lg border border-blue-200 bg-blue-50 py-2.5 text-xs font-bold text-blue-600 hover:bg-blue-100 transition-all cursor-pointer"
-                    >
-                      この日の詳細アクティビティログを表示する
-                    </button>
+                  {/* Edit Mode */}
+                  {isEditing && (
+                    <EditForm
+                      summary={selectedSummary}
+                      form={editForm}
+                      setForm={setEditForm}
+                      editOptions={editOptions}
+                      allPeople={allPeople}
+                      saving={editSaving}
+                      onSave={saveEditing}
+                      onCancel={cancelEditing}
+                    />
                   )}
                 </div>
               )}
@@ -1071,6 +1203,341 @@ export default function SummaryDashboardPage() {
             )}
           </div>
         )}
+      </div>
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="rounded-xl bg-white p-6 shadow-xl max-w-sm w-full space-y-4">
+            <h3 className="text-sm font-bold text-slate-900">サマリの削除</h3>
+            <p className="text-xs text-slate-600">この操作は取り消せません。本当に削除しますか？</p>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setShowDeleteConfirm(false)}
+                className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 cursor-pointer"
+              >
+                やめる
+              </button>
+              <button
+                onClick={confirmDelete}
+                className="rounded-md bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-700 cursor-pointer"
+              >
+                削除する
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// --- Edit Form Component ---
+
+function EditForm({
+  summary,
+  form,
+  setForm,
+  editOptions,
+  allPeople,
+  saving,
+  onSave,
+  onCancel,
+}: {
+  summary: SummaryDetail;
+  form: SummaryUpdatePayload;
+  setForm: (f: SummaryUpdatePayload) => void;
+  editOptions: EditOptionsResponse | null;
+  allPeople: Person[];
+  saving: boolean;
+  onSave: () => void;
+  onCancel: () => void;
+}) {
+  const allowedKinds = editOptions?.item_kinds[summary.period_type] ?? [];
+
+  // Group edit items by kind, including empty kinds
+  const itemsByKind = allowedKinds.map((kind) => ({
+    kind,
+    items: (form.items ?? []).filter((it) => it.kind === kind),
+  }));
+
+  const updateItemBody = (kind: string, index: number, body: string) => {
+    const items = [...(form.items ?? [])];
+    const kindItems = items.filter((it) => it.kind === kind);
+    const otherItems = items.filter((it) => it.kind !== kind);
+    if (kindItems[index]) {
+      kindItems[index] = { ...kindItems[index], body };
+    }
+    setForm({ ...form, items: [...otherItems, ...kindItems] });
+  };
+
+  const addItem = (kind: string) => {
+    const items = [...(form.items ?? [])];
+    items.push({ kind, body: "", display_order: items.length });
+    setForm({ ...form, items });
+  };
+
+  const removeItem = (kind: string, index: number) => {
+    const items = [...(form.items ?? [])];
+    const kindItems = items.filter((it) => it.kind === kind);
+    const otherItems = items.filter((it) => it.kind !== kind);
+    kindItems.splice(index, 1);
+    setForm({ ...form, items: [...otherItems, ...kindItems] });
+  };
+
+  const moveItem = (kind: string, index: number, direction: -1 | 1) => {
+    const items = [...(form.items ?? [])];
+    const kindItems = items.filter((it) => it.kind === kind);
+    const otherItems = items.filter((it) => it.kind !== kind);
+    const newIndex = index + direction;
+    if (newIndex < 0 || newIndex >= kindItems.length) return;
+    const [moved] = kindItems.splice(index, 1);
+    kindItems.splice(newIndex, 0, moved);
+    setForm({ ...form, items: [...otherItems, ...kindItems] });
+  };
+
+  const toggleTopic = (topic: string) => {
+    const topics = [...(form.topics ?? [])];
+    const idx = topics.indexOf(topic);
+    if (idx >= 0) {
+      topics.splice(idx, 1);
+    } else if (topics.length < 5) {
+      topics.push(topic);
+    }
+    setForm({ ...form, topics });
+  };
+
+  const addKeyword = (value: string) => {
+    const trimmed = value.trim();
+    if (!trimmed) return;
+    const keywords = [...(form.keywords ?? [])];
+    if (!keywords.includes(trimmed) && keywords.length < 5) {
+      keywords.push(trimmed);
+    }
+    setForm({ ...form, keywords });
+  };
+
+  const removeKeyword = (index: number) => {
+    const keywords = [...(form.keywords ?? [])];
+    keywords.splice(index, 1);
+    setForm({ ...form, keywords });
+  };
+
+  const togglePerson = (personId: string) => {
+    const people = [...(form.people ?? [])];
+    const idx = people.findIndex((p) => p.person_id === personId);
+    if (idx >= 0) {
+      people.splice(idx, 1);
+    } else {
+      people.push({ person_id: personId, note: "" });
+    }
+    setForm({ ...form, people });
+  };
+
+  const updatePersonNote = (personId: string, note: string) => {
+    const people = [...(form.people ?? [])];
+    const idx = people.findIndex((p) => p.person_id === personId);
+    if (idx >= 0) {
+      people[idx] = { ...people[idx], note };
+    }
+    setForm({ ...form, people });
+  };
+
+  // Unresolved candidates from original summary (read-only, preserved on save)
+  const unresolvedCandidates = summary.people.filter(
+    (p) => p.resolution_status === "unresolved"
+  );
+
+  // Resolved people IDs currently selected
+  const selectedPersonIds = new Set((form.people ?? []).map((p) => p.person_id));
+
+  return (
+    <div className="space-y-5">
+      {/* Summary body */}
+      <div>
+        <label className="text-xs font-bold uppercase tracking-wider text-slate-400">本文</label>
+        <textarea
+          value={form.summary ?? ""}
+          onChange={(e) => setForm({ ...form, summary: e.target.value })}
+          rows={4}
+          className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-xs focus:border-blue-500 focus:outline-none resize-y"
+        />
+      </div>
+
+      {/* Topics */}
+      {editOptions && (
+        <div>
+          <label className="text-xs font-bold uppercase tracking-wider text-slate-400">トピック (最大5)</label>
+          <div className="mt-1 flex flex-wrap gap-1">
+            {editOptions.topics.map((t) => (
+              <button
+                key={t}
+                onClick={() => toggleTopic(t)}
+                className={`rounded px-2 py-0.5 text-xs font-medium cursor-pointer ${
+                  (form.topics ?? []).includes(t)
+                    ? "bg-emerald-500 text-white"
+                    : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                }`}
+              >
+                {t}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Keywords */}
+      <div>
+        <label className="text-xs font-bold uppercase tracking-wider text-slate-400">キーワード (最大5)</label>
+        <div className="mt-1 flex flex-wrap gap-1">
+          {(form.keywords ?? []).map((k, i) => (
+            <span key={`${k}-${i}`} className="rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-600 font-medium flex items-center gap-1">
+              {k}
+              <button onClick={() => removeKeyword(i)} className="text-slate-400 hover:text-slate-600 cursor-pointer">&times;</button>
+            </span>
+          ))}
+          <input
+            type="text"
+            placeholder="追加してEnter"
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                addKeyword((e.target as HTMLInputElement).value);
+                (e.target as HTMLInputElement).value = "";
+              }
+            }}
+            className="rounded border border-slate-300 px-2 py-0.5 text-xs focus:border-blue-500 focus:outline-none w-24"
+          />
+        </div>
+      </div>
+
+      {/* Mood / Sleep (day only) */}
+      {summary.period_type === "day" && (
+        <div className="flex gap-4">
+          <div className="flex-1">
+            <label className="text-xs font-bold uppercase tracking-wider text-slate-400">気分</label>
+            <input
+              type="text"
+              value={form.mood ?? ""}
+              onChange={(e) => setForm({ ...form, mood: e.target.value || null })}
+              placeholder="空でクリア"
+              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-xs focus:border-blue-500 focus:outline-none"
+            />
+          </div>
+          <div className="flex-1">
+            <label className="text-xs font-bold uppercase tracking-wider text-slate-400">睡眠</label>
+            <input
+              type="text"
+              value={form.sleep_raw ?? ""}
+              onChange={(e) => setForm({ ...form, sleep_raw: e.target.value || null })}
+              placeholder="空でクリア"
+              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-xs focus:border-blue-500 focus:outline-none"
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Items by kind */}
+      <div className="space-y-3">
+        <label className="text-xs font-bold uppercase tracking-wider text-slate-400">セクション</label>
+        {itemsByKind.map(({ kind, items }) => (
+          <div key={kind} className="rounded-md border border-slate-200 p-3 space-y-2">
+            <h4 className="text-xs font-bold text-slate-500">{kind}</h4>
+            {items.map((item, idx) => (
+              <div key={`${kind}-${idx}`} className="flex gap-1 items-start">
+                  <textarea
+                    value={item.body}
+                    onChange={(e) => updateItemBody(kind, idx, e.target.value)}
+                    rows={2}
+                    className="flex-1 rounded border border-slate-300 px-2 py-1 text-xs focus:border-blue-500 focus:outline-none resize-y"
+                  />
+                  <div className="flex flex-col gap-0.5">
+                    <button onClick={() => moveItem(kind, idx, -1)} disabled={idx === 0} className="text-[10px] text-slate-400 hover:text-slate-600 disabled:opacity-30 cursor-pointer">↑</button>
+                    <button onClick={() => moveItem(kind, idx, 1)} disabled={idx === items.length - 1} className="text-[10px] text-slate-400 hover:text-slate-600 disabled:opacity-30 cursor-pointer">↓</button>
+                    <button onClick={() => removeItem(kind, idx)} className="text-[10px] text-red-400 hover:text-red-600 cursor-pointer">&times;</button>
+                  </div>
+                </div>
+            ))}
+            <button
+              onClick={() => addItem(kind)}
+              className="text-[10px] text-blue-500 hover:text-blue-700 cursor-pointer"
+            >
+              + フレーズを追加
+            </button>
+          </div>
+        ))}
+      </div>
+
+      {/* People */}
+      <div>
+        <label className="text-xs font-bold uppercase tracking-wider text-slate-400">人物</label>
+        <div className="mt-1 space-y-1">
+          {allPeople.map((p) => {
+            const selected = selectedPersonIds.has(p.person_id);
+            const noteVal = (form.people ?? []).find((pp) => pp.person_id === p.person_id)?.note ?? "";
+            return (
+              <div key={p.person_id} className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={selected}
+                  onChange={() => togglePerson(p.person_id)}
+                  className="h-3 w-3"
+                />
+                <span className="text-xs text-slate-700 min-w-[80px]">{p.display_name}</span>
+                {selected && (
+                  <input
+                    type="text"
+                    value={noteVal}
+                    onChange={(e) => updatePersonNote(p.person_id, e.target.value)}
+                    placeholder="メモ"
+                    className="flex-1 rounded border border-slate-300 px-2 py-0.5 text-[10px] focus:border-blue-500 focus:outline-none"
+                  />
+                )}
+              </div>
+            );
+          })}
+          {unresolvedCandidates.length > 0 && (
+            <>
+              <div className="text-[10px] text-slate-400 mt-2">--- 未解決候補 ---</div>
+              {unresolvedCandidates.map((c) => (
+                <div key={c.candidate_id ?? c.name} className="flex items-center gap-2 opacity-60">
+                  <input type="checkbox" disabled className="h-3 w-3" />
+                  <span className="text-xs text-slate-500">{c.name}</span>
+                  <span className="text-[10px] text-slate-400">(人物管理画面で解決)</span>
+                </div>
+              ))}
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Projects (read-only) */}
+      {summary.projects.length > 0 && (
+        <div>
+          <label className="text-xs font-bold uppercase tracking-wider text-slate-400">プロジェクト (表示専用)</label>
+          <div className="mt-1 flex flex-wrap gap-1">
+            {summary.projects.map((p) => (
+              <span key={p} className="rounded bg-amber-50 px-2 py-0.5 text-xs text-amber-700 font-medium">{p}</span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Save/Cancel */}
+      <div className="flex gap-2 pt-2">
+        <button
+          onClick={onSave}
+          disabled={saving}
+          className="rounded-md bg-blue-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50 cursor-pointer"
+        >
+          {saving ? "保存中…" : "保存"}
+        </button>
+        <button
+          onClick={onCancel}
+          disabled={saving}
+          className="rounded-md border border-slate-200 bg-white px-4 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 cursor-pointer"
+        >
+          キャンセル
+        </button>
       </div>
     </div>
   );
