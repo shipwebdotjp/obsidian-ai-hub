@@ -283,7 +283,7 @@ export default function SummaryDashboardPage() {
                 activeTab === "home"
                   ? "bg-white text-slate-900 shadow-sm"
                   : "text-slate-600 hover:text-slate-900"
-              }`}
+              } cursor-pointer`}
             >
               ホーム
             </button>
@@ -297,7 +297,7 @@ export default function SummaryDashboardPage() {
                 activeTab === "browse"
                   ? "bg-white text-slate-900 shadow-sm"
                   : "text-slate-600 hover:text-slate-900"
-              }`}
+              } cursor-pointer`}
             >
               一覧
             </button>
@@ -311,7 +311,7 @@ export default function SummaryDashboardPage() {
                 activeTab === "stats"
                   ? "bg-white text-slate-900 shadow-sm"
                   : "text-slate-600 hover:text-slate-900"
-              }`}
+              } cursor-pointer`}
             >
               統計
             </button>
@@ -339,7 +339,7 @@ export default function SummaryDashboardPage() {
                       {homeData.this_month_summary && (
                         <button
                           onClick={() => showSummaryDetail(homeData.this_month_summary!.summary_id)}
-                          className="text-xs font-semibold text-blue-600 hover:underline"
+                          className="text-xs font-semibold text-blue-600 hover:underline cursor-pointer"
                         >
                           詳細
                         </button>
@@ -364,7 +364,7 @@ export default function SummaryDashboardPage() {
                       {homeData.latest_week_summary && (
                         <button
                           onClick={() => showSummaryDetail(homeData.latest_week_summary!.summary_id)}
-                          className="text-xs font-semibold text-blue-600 hover:underline"
+                          className="text-xs font-semibold text-blue-600 hover:underline cursor-pointer"
                         >
                           詳細
                         </button>
@@ -389,7 +389,7 @@ export default function SummaryDashboardPage() {
                       {homeData.yesterday_summary && (
                         <button
                           onClick={() => showSummaryDetail(homeData.yesterday_summary!.summary_id)}
-                          className="text-xs font-semibold text-blue-600 hover:underline"
+                          className="text-xs font-semibold text-blue-600 hover:underline cursor-pointer"
                         >
                           詳細
                         </button>
@@ -572,7 +572,7 @@ export default function SummaryDashboardPage() {
                             <button
                               key={m.summary_id}
                               onClick={() => showSummaryDetail(m.summary_id)}
-                              className="w-full text-left rounded-lg border border-slate-100 bg-slate-50 p-3 hover:bg-slate-100 transition-all"
+                              className="w-full text-left rounded-lg border border-slate-100 bg-slate-50 p-3 hover:bg-slate-100 transition-all cursor-pointer"
                             >
                               <div className="flex items-center justify-between">
                                 <span className="text-xs font-bold text-indigo-600">{formatPeriodKey(m.period_key, "month")}</span>
@@ -596,7 +596,7 @@ export default function SummaryDashboardPage() {
                             <button
                               key={w.summary_id}
                               onClick={() => showSummaryDetail(w.summary_id)}
-                              className="w-full text-left rounded-lg border border-slate-100 bg-slate-50 p-3 hover:bg-slate-100 transition-all"
+                              className="w-full text-left rounded-lg border border-slate-100 bg-slate-50 p-3 hover:bg-slate-100 transition-all cursor-pointer"
                             >
                               <div className="flex items-center justify-between">
                                 <span className="text-xs font-bold text-emerald-600">{formatPeriodKey(w.period_key, "week")}</span>
@@ -626,7 +626,7 @@ export default function SummaryDashboardPage() {
                                   showDayDetail(d.date);
                                 }
                               }}
-                              className="w-full text-left rounded-lg border border-slate-100 bg-slate-50 p-3 hover:bg-slate-100 transition-all"
+                              className="w-full text-left rounded-lg border border-slate-100 bg-slate-50 p-3 hover:bg-slate-100 transition-all cursor-pointer"
                             >
                               <div className="flex items-center justify-between">
                                 <span className="text-xs font-bold text-slate-800">{formatYmdWithDow(d.date)}</span>
@@ -759,7 +759,7 @@ export default function SummaryDashboardPage() {
                   {selectedSummary.period_type === "day" && (
                     <button
                       onClick={() => showDayDetail(selectedSummary.period_key)}
-                      className="mt-6 w-full text-center rounded-lg border border-blue-200 bg-blue-50 py-2.5 text-xs font-bold text-blue-600 hover:bg-blue-100 transition-all"
+                      className="mt-6 w-full text-center rounded-lg border border-blue-200 bg-blue-50 py-2.5 text-xs font-bold text-blue-600 hover:bg-blue-100 transition-all cursor-pointer"
                     >
                       この日の詳細アクティビティログを表示する
                     </button>
@@ -859,7 +859,7 @@ export default function SummaryDashboardPage() {
                   onClick={() => handlePresetChange("30")}
                   className={`rounded-md px-3 py-1.5 text-xs font-semibold ${
                     statsPreset === "30" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                  }`}
+                  } cursor-pointer`}
                 >
                   直近30日
                 </button>
@@ -867,7 +867,7 @@ export default function SummaryDashboardPage() {
                   onClick={() => handlePresetChange("90")}
                   className={`rounded-md px-3 py-1.5 text-xs font-semibold ${
                     statsPreset === "90" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                  }`}
+                  } cursor-pointer`}
                 >
                   直近90日
                 </button>
@@ -875,7 +875,7 @@ export default function SummaryDashboardPage() {
                   onClick={() => handlePresetChange("year")}
                   className={`rounded-md px-3 py-1.5 text-xs font-semibold ${
                     statsPreset === "year" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                  }`}
+                  } cursor-pointer`}
                 >
                   今年
                 </button>
@@ -883,7 +883,7 @@ export default function SummaryDashboardPage() {
                   onClick={() => setStatsPreset("custom")}
                   className={`rounded-md px-3 py-1.5 text-xs font-semibold ${
                     statsPreset === "custom" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                  }`}
+                  } cursor-pointer`}
                 >
                   期間指定
                 </button>
@@ -907,7 +907,7 @@ export default function SummaryDashboardPage() {
                   />
                   <button
                     onClick={() => loadStats(startDate, endDate)}
-                    className="rounded-md bg-blue-600 px-3 py-1 font-semibold text-white hover:bg-blue-700"
+                    className="rounded-md bg-blue-600 px-3 py-1 font-semibold text-white hover:bg-blue-700 cursor-pointer"
                   >
                     適用
                   </button>
@@ -953,7 +953,7 @@ export default function SummaryDashboardPage() {
                                 isSel
                                   ? "bg-blue-600 text-white"
                                   : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                              }`}
+                              } cursor-pointer`}
                             >
                               {t}
                             </button>
@@ -997,7 +997,7 @@ export default function SummaryDashboardPage() {
                                 isSel
                                   ? "bg-blue-600 text-white"
                                   : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                              }`}
+                              } cursor-pointer`}
                             >
                               {k}
                             </button>
