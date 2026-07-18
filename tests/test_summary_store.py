@@ -1,4 +1,5 @@
 import sqlite3
+from pathlib import Path
 
 import pytest
 
@@ -6,12 +7,33 @@ from obsidian_ai_hub import memory
 from obsidian_ai_hub.summary import store
 
 
+@pytest.fixture(autouse=True)
+def mock_people_notes(monkeypatch):
+    monkeypatch.setattr(
+        "obsidian_ai_hub.utils.people_loader.load_and_validate_people_notes",
+        lambda: {
+            "alice": {
+                "id": "alice-id",
+                "name": "Alice",
+                "aliases": ["alice", "a-chan"],
+                "file_path": Path("alice.md"),
+            },
+            "a-chan": {
+                "id": "alice-id",
+                "name": "Alice",
+                "aliases": ["alice", "a-chan"],
+                "file_path": Path("alice.md"),
+            }
+        }
+    )
+
+
 def test_schema_version_bump(test_memory_db_path):
     conn = memory.get_db_connection()
     try:
         cursor = conn.cursor()
         cursor.execute("PRAGMA user_version;")
-        assert cursor.fetchone()[0] == 5
+        assert cursor.fetchone()[0] == 6
 
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;")
         tables = {row[0] for row in cursor.fetchall()}
@@ -23,6 +45,8 @@ def test_schema_version_bump(test_memory_db_path):
         assert "summary_topics" in tables
         assert "summary_projects" in tables
         assert "summary_people" in tables
+        assert "person_candidates" in tables
+        assert "summary_person_candidates" in tables
     finally:
         conn.close()
 
@@ -205,5 +229,80 @@ def test_invalid_period_type_raises(test_memory_db_path):
     try:
         with pytest.raises(ValueError):
             store.upsert_summary({"period_type": "year", "period_key": "2026"}, conn=conn)
+    finally:
+        conn.close()
+
+
+def test_unresolved_resolved_filtering(test_memory_db_path):
+    conn = memory.get_db_connection()
+    try:
+        # Create a summary with both Alice (resolved) and Yamada-kun (unresolved candidate)
+        record = {
+            "period_type": "day",
+            "period_key": "2026-07-20",
+            "period_start": "2026-07-20",
+            "period_end": "2026-07-20",
+            "summary": "Meeting with Alice and Yamada-kun",
+            "people": [
+                {"name": "Alice", "note": "discussed project status"},
+                {"name": "山田君", "note": "guest observer"},
+            ]
+        }
+        store.upsert_summary(record, conn=conn)
+
+        # Retrieve and verify list and resolution status
+        got = store.get_summary_by_period("day", "2026-07-20", conn=conn)
+        assert got is not None
+        assert len(got["people"]) == 2
+
+        alice_p = [p for p in got["people"] if p["name"] == "Alice"][0]
+        assert alice_p["resolution_status"] == "resolved"
+        assert alice_p["candidate_id"] is None
+
+        yamada_p = [p for p in got["people"] if p["name"] == "山田君"][0]
+        assert yamada_p["resolution_status"] == "unresolved"
+        assert yamada_p["candidate_id"] is not None
+
+        # Filter by Alice (resolved)
+        res_alice = store.list_summaries(person="Alice", conn=conn)
+        assert len(res_alice) == 1
+        assert res_alice[0]["period_key"] == "2026-07-20"
+
+        # Filter by 山田君 (unresolved)
+        res_yamada = store.list_summaries(person="山田君", conn=conn)
+        assert len(res_yamada) == 1
+        assert res_yamada[0]["period_key"] == "2026-07-20"
+
+        # Verify get_summary_options contains only Alice and not 山田君
+        options = store.get_summary_options(conn=conn)
+        assert "Alice" in options["people"]
+        assert "山田君" not in options["people"]
+    finally:
+        conn.close()
+
+
+def test_alias_deduplication(test_memory_db_path):
+    conn = memory.get_db_connection()
+    try:
+        # Create a summary with both Alice and A-chan (which both resolve to the same person_id)
+        record = {
+            "period_type": "day",
+            "period_key": "2026-07-22",
+            "period_start": "2026-07-22",
+            "period_end": "2026-07-22",
+            "summary": "Meeting with Alice and her alias A-chan",
+            "people": [
+                {"name": "Alice", "note": "primary name"},
+                {"name": "a-chan", "note": "alias name"},
+            ]
+        }
+        store.upsert_summary(record, conn=conn)
+
+        # Retrieve and verify that Alice is only linked once
+        got = store.get_summary_by_period("day", "2026-07-22", conn=conn)
+        assert got is not None
+        assert len(got["people"]) == 1
+        assert got["people"][0]["name"] == "Alice"
+        assert got["people"][0]["note"] == "primary name"
     finally:
         conn.close()

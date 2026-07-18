@@ -313,6 +313,8 @@ class SummaryItem(BaseModel):
 class SummaryPerson(BaseModel):
     name: str
     note: str = ""
+    resolution_status: Optional[str] = None
+    candidate_id: Optional[str] = None
 
 
 class SummaryListItem(BaseModel):

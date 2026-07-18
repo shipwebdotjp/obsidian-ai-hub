@@ -152,6 +152,7 @@ def _delete_summary_children(conn: sqlite3.Connection, summary_id: str) -> None:
     conn.execute("DELETE FROM summary_topics WHERE summary_id = ?", (summary_id,))
     conn.execute("DELETE FROM summary_projects WHERE summary_id = ?", (summary_id,))
     conn.execute("DELETE FROM summary_people WHERE summary_id = ?", (summary_id,))
+    conn.execute("DELETE FROM summary_person_candidates WHERE summary_id = ?", (summary_id,))
 
 
 def upsert_summary(
@@ -192,6 +193,10 @@ def upsert_summary(
 
 
 def _upsert_summary_in_tx(conn: sqlite3.Connection, record: Dict[str, Any]) -> Dict[str, Any]:
+    # Validate and load people notes first so we abort on validation failures before DB changes
+    from obsidian_ai_hub.utils.people_loader import load_and_validate_people_notes
+    people_notes_map = load_and_validate_people_notes()
+
     period_type = record["period_type"]
     period_key = record["period_key"]
 
@@ -234,7 +239,7 @@ def _upsert_summary_in_tx(conn: sqlite3.Connection, record: Dict[str, Any]) -> D
     _insert_items(conn, summary_id, record.get("items") or [])
     _insert_topics(conn, summary_id, record.get("topics") or [])
     _insert_projects(conn, summary_id, record.get("projects") or [])
-    _insert_people(conn, summary_id, record.get("people") or [])
+    _insert_people(conn, summary_id, record.get("people") or [], people_notes_map)
 
     return {**db_record, "summary_id": summary_id}
 
@@ -286,8 +291,14 @@ def _insert_projects(conn: sqlite3.Connection, summary_id: str, projects: List[s
         order += 1
 
 
-def _insert_people(conn: sqlite3.Connection, summary_id: str, people: List[Dict[str, Any]]) -> None:
+def _insert_people(
+    conn: sqlite3.Connection,
+    summary_id: str,
+    people: List[Dict[str, Any]],
+    people_notes_map: Dict[str, Any]
+) -> None:
     seen = set()
+    seen_person_ids = set()
     order = 0
     for person in people:
         if not isinstance(person, dict):
@@ -299,11 +310,68 @@ def _insert_people(conn: sqlite3.Connection, summary_id: str, people: List[Dict[
         if normalized_name in seen:
             continue
         seen.add(normalized_name)
-        person_id = _get_or_create_entity(conn, "people", name, normalized_name)
-        conn.execute(
-            "INSERT INTO summary_people (summary_id, person_id, note, display_order) VALUES (?, ?, ?, ?)",
-            (summary_id, person_id, person.get("note"), order),
-        )
+
+        if normalized_name in people_notes_map:
+            note_data = people_notes_map[normalized_name]
+            vault_id = note_data["id"]
+            vault_name = note_data["name"]
+            cursor = conn.cursor()
+
+            # Check if there is an existing person with this vault_id
+            cursor.execute("SELECT person_id FROM people WHERE vault_id = ?", (vault_id,))
+            row = cursor.fetchone()
+            if row is not None:
+                person_id = row[0]
+                # Update display_name to vault_name and update normalized_name
+                conn.execute(
+                    "UPDATE people SET display_name = ?, normalized_name = ? WHERE person_id = ?",
+                    (vault_name, normalize_entity_name(vault_name), person_id),
+                )
+            else:
+                # Check if there is an existing person with the same normalized name
+                cursor.execute("SELECT person_id FROM people WHERE normalized_name = ?", (normalize_entity_name(vault_name),))
+                row = cursor.fetchone()
+                if row is not None:
+                    person_id = row[0]
+                    conn.execute(
+                        "UPDATE people SET vault_id = ?, display_name = ? WHERE person_id = ?",
+                        (vault_id, vault_name, person_id),
+                    )
+                else:
+                    # Create new person row
+                    person_id = f"peo_{uuid.uuid4().hex}"
+                    conn.execute(
+                        "INSERT INTO people (person_id, normalized_name, display_name, vault_id) VALUES (?, ?, ?, ?)",
+                        (person_id, normalize_entity_name(vault_name), vault_name, vault_id),
+                    )
+
+            if person_id in seen_person_ids:
+                continue
+            seen_person_ids.add(person_id)
+
+            conn.execute(
+                "INSERT INTO summary_people (summary_id, person_id, note, display_order) VALUES (?, ?, ?, ?)",
+                (summary_id, person_id, person.get("note"), order),
+            )
+        else:
+            # Unmatched/unregistered name: save as unresolved candidate
+            cursor = conn.cursor()
+            cursor.execute("SELECT candidate_id FROM person_candidates WHERE normalized_name = ?", (normalized_name,))
+            row = cursor.fetchone()
+            if row is not None:
+                candidate_id = row[0]
+            else:
+                candidate_id = f"cand_{uuid.uuid4().hex}"
+                conn.execute(
+                    "INSERT INTO person_candidates (candidate_id, display_name, normalized_name, status) VALUES (?, ?, ?, ?)",
+                    (candidate_id, name, normalized_name, "unresolved"),
+                )
+
+            conn.execute(
+                "INSERT INTO summary_person_candidates (summary_id, candidate_id, note, display_order) VALUES (?, ?, ?, ?)",
+                (summary_id, candidate_id, person.get("note"), order),
+            )
+
         order += 1
 
 
@@ -397,17 +465,51 @@ def _load_summary_children(conn: sqlite3.Connection, record: Dict[str, Any]) -> 
     )
     record["projects"] = [r["display_name"] for r in cursor.fetchall()]
 
+    # Fetch resolved people
     cursor.execute(
         """
         SELECT p.display_name, sp.note, sp.display_order
         FROM summary_people sp
         JOIN people p ON sp.person_id = p.person_id
         WHERE sp.summary_id = ?
-        ORDER BY sp.display_order
         """,
         (summary_id,),
     )
-    record["people"] = [{"name": r["display_name"], "note": r["note"], "display_order": r["display_order"]} for r in cursor.fetchall()]
+    resolved_list = [
+        {
+            "name": r["display_name"],
+            "note": r["note"],
+            "display_order": r["display_order"],
+            "resolution_status": "resolved",
+            "candidate_id": None
+        }
+        for r in cursor.fetchall()
+    ]
+
+    # Fetch unresolved candidates
+    cursor.execute(
+        """
+        SELECT pc.display_name, spc.note, spc.display_order, pc.candidate_id
+        FROM summary_person_candidates spc
+        JOIN person_candidates pc ON spc.candidate_id = pc.candidate_id
+        WHERE spc.summary_id = ?
+        """,
+        (summary_id,),
+    )
+    unresolved_list = [
+        {
+            "name": r["display_name"],
+            "note": r["note"],
+            "display_order": r["display_order"],
+            "resolution_status": "unresolved",
+            "candidate_id": r["candidate_id"]
+        }
+        for r in cursor.fetchall()
+    ]
+
+    combined_people = resolved_list + unresolved_list
+    combined_people.sort(key=lambda x: x["display_order"])
+    record["people"] = combined_people
 
     return record
 
@@ -467,25 +569,53 @@ def _attach_children_bulk(
     for row in cursor.fetchall():
         projects_by_summary[row["summary_id"]].append(row["display_name"])
 
+    people_by_summary: Dict[str, List[Dict[str, Any]]] = {r["summary_id"]: [] for r in records}
+
+    # Fetch resolved
     cursor.execute(
         f"""
         SELECT sp.summary_id, p.display_name, sp.note, sp.display_order
         FROM summary_people sp
         JOIN people p ON sp.person_id = p.person_id
         WHERE sp.summary_id IN ({placeholders})
-        ORDER BY sp.display_order
         """,
         summary_ids,
     )
-    people_by_summary: Dict[str, List[Dict[str, Any]]] = {r["summary_id"]: [] for r in records}
     for row in cursor.fetchall():
         people_by_summary[row["summary_id"]].append(
             {
                 "name": row["display_name"],
                 "note": row["note"],
                 "display_order": row["display_order"],
+                "resolution_status": "resolved",
+                "candidate_id": None,
             }
         )
+
+    # Fetch unresolved
+    cursor.execute(
+        f"""
+        SELECT spc.summary_id, pc.display_name, spc.note, spc.display_order, pc.candidate_id
+        FROM summary_person_candidates spc
+        JOIN person_candidates pc ON spc.candidate_id = pc.candidate_id
+        WHERE spc.summary_id IN ({placeholders})
+        """,
+        summary_ids,
+    )
+    for row in cursor.fetchall():
+        people_by_summary[row["summary_id"]].append(
+            {
+                "name": row["display_name"],
+                "note": row["note"],
+                "display_order": row["display_order"],
+                "resolution_status": "unresolved",
+                "candidate_id": row["candidate_id"],
+            }
+        )
+
+    # Sort each summary's list by display_order
+    for sid in people_by_summary:
+        people_by_summary[sid].sort(key=lambda x: x["display_order"])
 
     for record in records:
         sid = record["summary_id"]
@@ -534,12 +664,32 @@ def list_summaries(
             )"""
             params.append(normalize_entity_name(project))
         if person:
-            sql += """ AND EXISTS (
-                SELECT 1 FROM summary_people sp
-                JOIN people p ON sp.person_id = p.person_id
-                WHERE sp.summary_id = s.summary_id AND p.normalized_name = ?
-            )"""
-            params.append(normalize_entity_name(person))
+            from obsidian_ai_hub.utils.people_loader import load_and_validate_people_notes
+            people_notes_map = load_and_validate_people_notes()
+            normalized_person = normalize_entity_name(person)
+
+            if normalized_person in people_notes_map:
+                vault_id = people_notes_map[normalized_person]["id"]
+                sql += """ AND (
+                    EXISTS (
+                        SELECT 1 FROM summary_people sp
+                        JOIN people p ON sp.person_id = p.person_id
+                        WHERE sp.summary_id = s.summary_id AND p.vault_id = ?
+                    ) OR EXISTS (
+                        SELECT 1 FROM summary_person_candidates spc
+                        JOIN person_candidates pc ON spc.candidate_id = pc.candidate_id
+                        WHERE spc.summary_id = s.summary_id AND pc.normalized_name = ?
+                    )
+                )"""
+                params.append(vault_id)
+                params.append(normalized_person)
+            else:
+                sql += """ AND EXISTS (
+                    SELECT 1 FROM summary_person_candidates spc
+                    JOIN person_candidates pc ON spc.candidate_id = pc.candidate_id
+                    WHERE spc.summary_id = s.summary_id AND pc.normalized_name = ?
+                )"""
+                params.append(normalized_person)
         sql += " ORDER BY s.period_start DESC, s.period_key DESC"
         cursor.execute(sql, params)
         rows = cursor.fetchall()
@@ -585,6 +735,7 @@ def get_summary_options(conn: Optional[sqlite3.Connection] = None) -> Dict[str, 
             SELECT DISTINCT p.display_name
             FROM people p
             JOIN summary_people sp ON p.person_id = sp.person_id
+            WHERE p.vault_id IS NOT NULL
             ORDER BY p.display_name
             """
         )

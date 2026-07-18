@@ -88,6 +88,7 @@ TEMPLATE_DIR_NAME = str(_config_value("vault", "template", default="template"))
 KNOWLEDGE_DIR_NAME = str(_config_value("vault", "knowledge", default="copilot/knowledge"))
 RESEARCH_DIR_NAME = str(_config_value("vault", "research", default="research"))
 WEBCLIP_DIR_NAME = str(_config_value("vault", "webclip", default="webclip"))
+PEOPLE_DIR_NAME = str(_config_value("vault", "people", default="people"))
 
 DAILY_TEMPLATE_FILENAME = str(_config_value("files", "daily_note", default="daily.md"))
 WEEKLY_TEMPLATE_FILENAME = str(_config_value("files", "weekly_template", default="Weekly Template.md"))
@@ -100,6 +101,7 @@ INBOX_PATH = VAULT_PATH / INBOX_DIR_NAME
 DAILY_PATH = VAULT_PATH / DAILY_DIR_NAME
 TEMPLATE_PATH = VAULT_PATH / TEMPLATE_DIR_NAME / DAILY_TEMPLATE_FILENAME
 WEBCLIP_PATH = VAULT_PATH / WEBCLIP_DIR_NAME
+PEOPLE_PATH = VAULT_PATH / PEOPLE_DIR_NAME
 DASHBOARD_DIR_NAME = str(_config_value("vault", "dashboard", default="dashboard"))
 DASHBOARD_PATH = VAULT_PATH / DASHBOARD_DIR_NAME
 
