@@ -74,8 +74,13 @@ export default function SummaryDashboardPage() {
   const [homeError, setHomeError] = useState<string | null>(null);
 
   // --- Browse Tab State ---
-  const [browseYear, setBrowseYear] = useState<string>("");
-  const [browseMonth, setBrowseMonth] = useState<string>("");
+  const [browseYear, setBrowseYear] = useState<string>(() => String(new Date().getFullYear()));
+  const [browseMonth, setBrowseMonth] = useState<string>(() => {
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    return `${y}-${m}`;
+  });
   const [browseData, setBrowseData] = useState<DashboardBrowseResponse | null>(null);
   const [browseLoading, setBrowseLoading] = useState(false);
   const [browseError, setBrowseError] = useState<string | null>(null);
@@ -102,6 +107,7 @@ export default function SummaryDashboardPage() {
   const browseRequestRef = useRef(0);
   const statsRequestRef = useRef(0);
   const detailRequestRef = useRef(0);
+  const skipNextBrowseLoadRef = useRef(false);
 
   // --- Helper Date Calculations ---
   const getTodayISOString = () => {
@@ -225,12 +231,43 @@ export default function SummaryDashboardPage() {
       });
   };
 
+  const goToBrowseForSummary = (summary: SummaryDetail): void => {
+    let year: string;
+    let monthStr: string;
+    if (summary.period_type === "month") {
+      year = summary.period_key.split("-")[0] ?? String(new Date().getFullYear());
+      monthStr = summary.period_key;
+    } else {
+      const start =
+        summary.period_start ??
+        (summary.period_key.match(/^\d{4}-\d{2}-\d{2}$/) ? summary.period_key : null);
+      if (start) {
+        year = start.slice(0, 4);
+        monthStr = start.slice(0, 7);
+      } else {
+        const now = new Date();
+        year = String(now.getFullYear());
+        monthStr = `${year}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+      }
+    }
+    setBrowseYear(year);
+    setBrowseMonth(monthStr);
+    skipNextBrowseLoadRef.current = true;
+    loadBrowse(year, monthStr);
+    showSummaryDetail(summary.summary_id);
+    setActiveSubTab("browse");
+  };
+
   // --- Effects ---
   useEffect(() => {
     if (activeTab === "home") {
       loadHome();
     } else if (activeTab === "browse") {
-      loadBrowse();
+      if (skipNextBrowseLoadRef.current) {
+        skipNextBrowseLoadRef.current = false;
+        return;
+      }
+      loadBrowse(browseYear, browseMonth);
     } else if (activeTab === "stats") {
       // Set default dates
       const end = getTodayISOString();
@@ -240,7 +277,7 @@ export default function SummaryDashboardPage() {
       setStatsPreset("30");
       loadStats(start, end);
     }
-  }, [activeTab, loadHome, loadBrowse, loadStats]);
+  }, [activeTab, browseYear, browseMonth, loadHome, loadBrowse, loadStats]);
 
   // --- Presets handler ---
   const handlePresetChange = (preset: "year" | "30" | "90" | "custom") => {
@@ -338,7 +375,7 @@ export default function SummaryDashboardPage() {
                       </span>
                       {homeData.this_month_summary && (
                         <button
-                          onClick={() => showSummaryDetail(homeData.this_month_summary!.summary_id)}
+                          onClick={() => goToBrowseForSummary(homeData.this_month_summary!)}
                           className="text-xs font-semibold text-blue-600 hover:underline cursor-pointer"
                         >
                           詳細
@@ -363,7 +400,7 @@ export default function SummaryDashboardPage() {
                       </span>
                       {homeData.latest_week_summary && (
                         <button
-                          onClick={() => showSummaryDetail(homeData.latest_week_summary!.summary_id)}
+                          onClick={() => goToBrowseForSummary(homeData.latest_week_summary!)}
                           className="text-xs font-semibold text-blue-600 hover:underline cursor-pointer"
                         >
                           詳細
@@ -388,7 +425,7 @@ export default function SummaryDashboardPage() {
                       </span>
                       {homeData.yesterday_summary && (
                         <button
-                          onClick={() => showSummaryDetail(homeData.yesterday_summary!.summary_id)}
+                          onClick={() => goToBrowseForSummary(homeData.yesterday_summary!)}
                           className="text-xs font-semibold text-blue-600 hover:underline cursor-pointer"
                         >
                           詳細
@@ -520,7 +557,6 @@ export default function SummaryDashboardPage() {
                     onChange={(e) => {
                       setBrowseYear(e.target.value);
                       setBrowseMonth(""); // Reset month
-                      loadBrowse(e.target.value, "");
                     }}
                     className="mt-1 w-full rounded-md border border-slate-300 px-2.5 py-1.5 text-xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                   >
@@ -537,7 +573,6 @@ export default function SummaryDashboardPage() {
                     value={browseMonth}
                     onChange={(e) => {
                       setBrowseMonth(e.target.value);
-                      loadBrowse(browseYear, e.target.value);
                     }}
                     className="mt-1 w-full rounded-md border border-slate-300 px-2.5 py-1.5 text-xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                   >
@@ -562,7 +597,7 @@ export default function SummaryDashboardPage() {
                 {browseData && (
                   <>
                     {/* Months summary items (only in Year-level browse) */}
-                    {!browseMonth && browseData.months.length > 0 && (
+                    {browseData.months.length > 0 && (
                       <div className="p-4">
                         <h4 className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2">
                           月次サマリ ({browseData.months.length}件)
