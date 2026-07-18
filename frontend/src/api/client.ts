@@ -40,9 +40,11 @@ export function clearToken(): void {
 
 export class ApiError extends Error {
   status: number;
-  constructor(status: number, message: string) {
+  body: any;
+  constructor(status: number, message: string, body: any = null) {
     super(message);
     this.status = status;
+    this.body = body;
   }
 }
 
@@ -63,13 +65,20 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   }
   if (!res.ok) {
     let detail = res.statusText;
+    let body: any = null;
     try {
-      const body = await res.json();
-      detail = body?.detail || detail;
+      body = await res.json();
+      if (body && body.detail) {
+        if (typeof body.detail === "string") {
+          detail = body.detail;
+        } else if (typeof body.detail === "object" && body.detail.message) {
+          detail = body.detail.message;
+        }
+      }
     } catch (_) {
       // ignore
     }
-    throw new ApiError(res.status, detail);
+    throw new ApiError(res.status, detail, body);
   }
   if (res.status === 204) {
     return undefined as T;

@@ -116,6 +116,7 @@ export default function PeoplePage() {
       setCandidates(data);
     } catch (e) {
       console.error(e);
+      throw e;
     }
   };
 
@@ -125,6 +126,7 @@ export default function PeoplePage() {
       setPeople(data);
     } catch (e) {
       console.error(e);
+      throw e;
     }
   };
 
@@ -134,6 +136,7 @@ export default function PeoplePage() {
       setDuplicates(data);
     } catch (e) {
       console.error(e);
+      throw e;
     }
   };
 
@@ -143,12 +146,17 @@ export default function PeoplePage() {
       setVaultReport(data);
     } catch (e) {
       console.error(e);
+      throw e;
     }
   };
 
-  const loadAllData = async () => {
+  const loadAllData = async (shouldClearSuccess?: any) => {
     setLoading(true);
-    clearMessages();
+    setError(null);
+    setResolveError(null);
+    if (shouldClearSuccess !== false) {
+      setSuccessMessage(null);
+    }
     try {
       await Promise.all([
         fetchCandidates(),
@@ -164,7 +172,7 @@ export default function PeoplePage() {
   };
 
   useEffect(() => {
-    loadAllData();
+    loadAllData(true);
   }, []);
 
   const handleSelectCandidate = async (cand: PersonCandidate) => {
@@ -198,10 +206,10 @@ export default function PeoplePage() {
       });
       setSuccessMessage(`候補「${selectedCandidate.display_name}」を解決しました。`);
       setSelectedCandidate(null);
-      await loadAllData();
+      await loadAllData(false);
     } catch (e: any) {
       if (e instanceof ApiError && e.status === 409) {
-        setResolveError(e.message);
+        setResolveError(e.body?.detail || e.message);
       } else {
         setError(e.message || "解決に失敗しました");
       }
@@ -219,7 +227,7 @@ export default function PeoplePage() {
         to_person_id: toId,
       });
       setSuccessMessage("人物統合が完了しました。");
-      await loadAllData();
+      await loadAllData(false);
     } catch (e: any) {
       setError(e.message || "人物統合に失敗しました");
     } finally {
@@ -234,7 +242,7 @@ export default function PeoplePage() {
       const data = await apiPost<SyncPeopleResponse>("/people/sync", {});
       setVaultReport(data);
       setSuccessMessage("Vaultの同期が完了しました。");
-      await loadAllData();
+      await loadAllData(false);
     } catch (e: any) {
       setError(e.message || "同期に失敗しました");
     } finally {
@@ -358,8 +366,10 @@ export default function PeoplePage() {
 
                     {resolveError && (
                       <div className="rounded-lg bg-red-50 p-3 text-xs font-medium text-red-800 border border-red-200">
-                        <div className="font-bold">{resolveError.message || resolveError}</div>
-                        {resolveError.conflict_type && (
+                        <div className="font-bold">
+                          {typeof resolveError === "object" ? resolveError.message : resolveError}
+                        </div>
+                        {typeof resolveError === "object" && resolveError.conflict_type && (
                           <div className="mt-1 text-[11px] text-red-600">
                             確定済みの人物: ID: {resolveError.existing_person_id} (名前: {resolveError.existing_person_name})
                           </div>
@@ -543,7 +553,11 @@ export default function PeoplePage() {
                           if (target) {
                             return (
                               <button
-                                onClick={() => handleMergePeople(m.unlinked_person.person_id, target.person_id)}
+                                onClick={() => {
+                                  if (window.confirm(`「${m.unlinked_person.display_name}」を「${target.display_name}」へ統合しますか？`)) {
+                                    handleMergePeople(m.unlinked_person.person_id, target.person_id);
+                                  }
+                                }}
                                 disabled={loading}
                                 className="rounded bg-slate-950 px-3 py-1.5 text-xs text-white hover:bg-slate-800 disabled:opacity-50"
                               >
@@ -588,7 +602,11 @@ export default function PeoplePage() {
                                 .map((other) => (
                                   <button
                                     key={other.person_id}
-                                    onClick={() => handleMergePeople(other.person_id, p.person_id)}
+                                    onClick={() => {
+                                      if (window.confirm(`「${other.display_name}」を「${p.display_name}」へ統合しますか？`)) {
+                                        handleMergePeople(other.person_id, p.person_id);
+                                      }
+                                    }}
                                     disabled={loading}
                                     className="rounded border border-slate-300 bg-white px-2 py-1 text-[11px] text-slate-700 hover:bg-slate-50"
                                   >

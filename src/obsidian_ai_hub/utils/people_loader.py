@@ -77,7 +77,7 @@ def load_people_notes_with_report() -> tuple[dict[str, PersonNote], dict[str, An
                 "aliases": aliases,
                 "file_path": path,
             })
-        except Exception as e:
+        except (OSError, ValueError, TypeError) as e:
             report["file_deficiencies"].append({
                 "path": str(path),
                 "message": str(e)
@@ -196,8 +196,21 @@ def load_people_notes_with_report() -> tuple[dict[str, PersonNote], dict[str, An
 def load_and_validate_people_notes() -> dict[str, PersonNote]:
     """
     Wrapper for existing backward-compatibility.
-    Instead of raising exceptions, it skips the erroneous notes/aliases
-    and returns only the safely mapping part.
+    Does not discard the validation report; instead, it raises the first encountered error
+    to preserve original strict failure behavior for non-Web-UI callers (e.g. existing tests).
     """
-    safe_map, _ = load_people_notes_with_report()
+    safe_map, report = load_people_notes_with_report()
+
+    if report.get("file_deficiencies"):
+        raise ValueError(report["file_deficiencies"][0]["message"])
+    if report.get("duplicate_ids"):
+        dup = report["duplicate_ids"][0]
+        raise ValueError(f"Duplicate person ID '{dup['id']}' found in files: {', '.join(dup['paths'])}")
+    if report.get("normalized_name_collisions"):
+        col = report["normalized_name_collisions"][0]
+        raise ValueError(f"Duplicate mapping for normalized name/alias '{col['normalized_name']}'")
+    if report.get("alias_collisions"):
+        col = report["alias_collisions"][0]
+        raise ValueError(f"Duplicate mapping for normalized name/alias '{col['alias']}'")
+
     return safe_map

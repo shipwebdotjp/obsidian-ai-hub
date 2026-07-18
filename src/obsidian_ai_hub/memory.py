@@ -366,21 +366,24 @@ def get_db_connection() -> sqlite3.Connection:
         conn.commit()
 
     if current_version <= 6:
-        # Create person_aliases table
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS person_aliases (
-                normalized_name TEXT PRIMARY KEY,
-                person_id TEXT NOT NULL,
-                display_name TEXT NOT NULL,
-                FOREIGN KEY(person_id) REFERENCES people(person_id) ON DELETE CASCADE
-            );
-        """)
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_person_aliases_person_id ON person_aliases(person_id);")
-
-        conn.execute("PRAGMA user_version = 7;")
-        conn.commit()
+        run_migration_v7(conn)
 
     return conn
+
+
+def run_migration_v7(conn: sqlite3.Connection) -> None:
+    """Run the migration schema upgrade for version 7 (person_aliases table)."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS person_aliases (
+            normalized_name TEXT PRIMARY KEY,
+            person_id TEXT NOT NULL,
+            display_name TEXT NOT NULL,
+            FOREIGN KEY(person_id) REFERENCES people(person_id) ON DELETE CASCADE
+        );
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_person_aliases_person_id ON person_aliases(person_id);")
+    conn.execute("PRAGMA user_version = 7;")
+    conn.commit()
 
 
 def serialize_memory(m: dict) -> dict:

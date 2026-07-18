@@ -264,7 +264,7 @@ import calendar
 from obsidian_ai_hub.summary import store as summary_store
 from obsidian_ai_hub.activity import store as activity_store
 from obsidian_ai_hub.utils.people_loader import load_people_notes_with_report
-from obsidian_ai_hub.people_sync.sync import get_db_vault_conflicts_report
+from obsidian_ai_hub.people_sync.sync import get_db_vault_conflicts_report, merge_display_orders
 
 def parse_iso_datetime(iso_str: str) -> datetime:
     dt = datetime.fromisoformat(iso_str)
@@ -897,11 +897,12 @@ def resolve_person_candidate(candidate_id: str, target_person_id: str) -> dict[s
             if main_name_row is not None and main_name_row["person_id"] != target_person_id:
                 raise MainNameConflictError(main_name_row["person_id"], main_name_row["display_name"])
 
-            # 5. Insert alias
-            conn.execute(
-                "INSERT OR IGNORE INTO person_aliases (normalized_name, person_id, display_name) VALUES (?, ?, ?)",
-                (normalized_name, target_person_id, cand["display_name"])
-            )
+            # 5. Insert alias (Ensure we do a normal INSERT only if alias_row is None and raise error on fail)
+            if alias_row is None:
+                conn.execute(
+                    "INSERT INTO person_aliases (normalized_name, person_id, display_name) VALUES (?, ?, ?)",
+                    (normalized_name, target_person_id, cand["display_name"])
+                )
 
             # 6. Migrate summaries
             cursor.execute(
@@ -1017,19 +1018,22 @@ def get_duplicate_candidates() -> dict[str, Any]:
 
 
 def merge_people(from_person_id: str, to_person_id: str) -> bool:
+    if from_person_id == to_person_id:
+        raise ValueError("Source and target person IDs for merge cannot be identical.")
+
     conn = memory.get_db_connection()
     try:
         with conn:
             cursor = conn.cursor()
 
             # 1. Fetch people
-            cursor.execute("SELECT person_id, display_name, vault_id FROM people WHERE person_id = ?", (from_person_id,))
+            cursor.execute("SELECT person_id, display_name, normalized_name, vault_id FROM people WHERE person_id = ?", (from_person_id,))
             from_row = cursor.fetchone()
             if from_row is None:
                 raise ValueError("Source person not found")
             from_p = dict(from_row)
 
-            cursor.execute("SELECT person_id, display_name, vault_id FROM people WHERE person_id = ?", (to_person_id,))
+            cursor.execute("SELECT person_id, display_name, normalized_name, vault_id FROM people WHERE person_id = ?", (to_person_id,))
             to_row = cursor.fetchone()
             if to_row is None:
                 raise ValueError("Target person not found")
@@ -1094,6 +1098,26 @@ def merge_people(from_person_id: str, to_person_id: str) -> bool:
             )
             # Delete any aliases of from_person_id that couldn't be migrated due to unique key conflicts
             conn.execute("DELETE FROM person_aliases WHERE person_id = ?", (from_person_id,))
+
+            # 3.5 Preserve from_p.normalized_name as an alias of to_person_id if there is no conflict
+            from_p_norm = from_p["normalized_name"]
+            cursor.execute(
+                "SELECT person_id FROM people WHERE normalized_name = ? AND person_id NOT IN (?, ?)",
+                (from_p_norm, to_person_id, from_person_id)
+            )
+            conflict_main = cursor.fetchone()
+
+            cursor.execute(
+                "SELECT person_id FROM person_aliases WHERE normalized_name = ? AND person_id != ?",
+                (from_p_norm, to_person_id)
+            )
+            conflict_alias = cursor.fetchone()
+
+            if conflict_main is None and conflict_alias is None:
+                conn.execute(
+                    "INSERT OR IGNORE INTO person_aliases (normalized_name, person_id, display_name) VALUES (?, ?, ?)",
+                    (from_p_norm, to_person_id, from_p["display_name"])
+                )
 
             # 4. Delete source person
             conn.execute("DELETE FROM people WHERE person_id = ?", (from_person_id,))

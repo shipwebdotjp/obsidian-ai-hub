@@ -454,7 +454,7 @@ class AssociatedSummary(BaseModel):
     period_type: str
     period_key: str
     note: Optional[str] = None
-    display_order: int
+    display_order: Optional[int] = None
 
 
 class PersonCandidateDetail(PersonCandidate):

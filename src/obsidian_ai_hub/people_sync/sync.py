@@ -112,7 +112,9 @@ def sync_people_in_tx(conn: sqlite3.Connection, people_notes_map: Dict[str, Any]
         # DB Confirmed Alias Conflict Check:
         # If any of the names/aliases in aliases_set conflicts with DB confirmed aliases pointing to another person,
         # remove it from aliases_set to maintain DB confirmed alignment and prevent candidate absorption/person merging.
+        # If the conflict involves the note's primary name, skip the entire note.
         safe_aliases_set = set()
+        skip_entire_note = False
         for a_norm in aliases_set:
             cursor.execute("SELECT person_id FROM person_aliases WHERE normalized_name = ?", (a_norm,))
             row = cursor.fetchone()
@@ -122,9 +124,17 @@ def sync_people_in_tx(conn: sqlite3.Connection, people_notes_map: Dict[str, Any]
                 p_row = cursor.fetchone()
                 db_vault_id = p_row[0] if p_row else None
                 if db_vault_id != vault_id:
-                    logger.info("Maintaining DB confirmed alias for '%s' (points to %s, Vault note has %s). Skipped in candidate/merge matching.", a_norm, db_pid, vault_id)
-                    continue
+                    if a_norm == normalized_vault_name:
+                        logger.warning("Primary name conflict for '%s' (points to %s in DB, Vault note has %s). Skipping entire note.", a_norm, db_pid, vault_id)
+                        skip_entire_note = True
+                        break
+                    else:
+                        logger.info("Maintaining DB confirmed alias for '%s' (points to %s, Vault note has %s). Skipped in candidate/merge matching.", a_norm, db_pid, vault_id)
+                        continue
             safe_aliases_set.add(a_norm)
+
+        if skip_entire_note:
+            continue
 
         aliases_set = safe_aliases_set
         if not aliases_set:
