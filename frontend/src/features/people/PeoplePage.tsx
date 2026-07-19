@@ -150,6 +150,10 @@ export default function PeoplePage() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [personToDelete, setPersonToDelete] = useState<PersonDetail | null>(null);
 
+  // Alias deletion states
+  const [aliasToDelete, setAliasToDelete] = useState<PersonAlias | null>(null);
+  const [showAliasDeleteConfirm, setShowAliasDeleteConfirm] = useState(false);
+
   useEffect(() => {
     setSummaryAssignments({});
   }, [selectedCandidate]);
@@ -186,6 +190,7 @@ export default function PeoplePage() {
   const [mergeFromPerson, setMergeFromPerson] = useState<Person | null>(null);
   const [mergeToPerson, setMergeToPerson] = useState<Person | null>(null);
   const [mergeModalError, setMergeModalError] = useState<string | null>(null);
+  const [mergeGuidance, setMergeGuidance] = useState<{ personId: string; personName: string } | null>(null);
 
   // Refs
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -287,6 +292,7 @@ export default function PeoplePage() {
   const handleSelectPerson = async (p: Person) => {
     clearMessages();
     setMergeToPersonId("");
+    setMergeGuidance(null);
     setEditError(null);
     setEditSuccess(null);
     try {
@@ -316,11 +322,20 @@ export default function PeoplePage() {
       });
 
       setSuccessMessage(`人物「${res.display_name}」を更新しました。`);
-      setSelectedPerson(null);
+      setSelectedPerson(res);
+      setEditDisplayName(res.display_name);
+      setEditAliasesText((res.aliases || []).map((al) => al.display_name).join("\n"));
       await loadAllData(false);
     } catch (e: any) {
       if (e instanceof ApiError && e.status === 409) {
-        setEditError(e.body?.detail || e.message);
+        const detail = e.body?.detail;
+        setEditError(detail || e.message);
+        if (detail && (detail.conflict_type === "main_name_conflict" || detail.conflict_type === "alias_conflict")) {
+          if (detail.existing_person_id && people.some(p => p.person_id === detail.existing_person_id)) {
+            setMergeToPersonId(detail.existing_person_id);
+            setMergeGuidance({ personId: detail.existing_person_id, personName: detail.existing_person_name || "" });
+          }
+        }
       } else {
         setEditError(e.message || "更新に失敗しました");
       }
@@ -420,17 +435,45 @@ export default function PeoplePage() {
 
   const handleExecuteMerge = async () => {
     if (!mergeFromPerson || !mergeToPerson) return;
+    const toPersonId = mergeToPerson.person_id;
+    const toPersonName = mergeToPerson.display_name;
     setLoading(true);
     try {
       await apiPost(`${PEOPLE_API}/merge`, {
         from_person_id: mergeFromPerson.person_id,
-        to_person_id: mergeToPerson.person_id,
+        to_person_id: toPersonId,
       });
-      setSuccessMessage(`「${mergeFromPerson.display_name}」を「${mergeToPerson.display_name}」へ統合しました。`);
+      setSuccessMessage(`「${mergeFromPerson.display_name}」を「${toPersonName}」へ統合しました。`);
       handleCloseModal();
       await loadAllData(false);
+      setActiveTab("list");
+      const detail = await apiGet<PersonDetail>(`${PEOPLE_API}/${toPersonId}`);
+      setSelectedPerson(detail);
+      setEditDisplayName(detail.display_name);
+      setEditAliasesText((detail.aliases || []).map((al) => al.display_name).join("\n"));
     } catch (e: any) {
       setMergeModalError(e.message || "人物統合に失敗しました");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteAlias = async () => {
+    if (!selectedPerson || !aliasToDelete) return;
+    setLoading(true);
+    try {
+      const detail = await apiDelete<PersonDetail>(
+        `${PEOPLE_API}/${selectedPerson.person_id}/aliases?normalized_name=${encodeURIComponent(aliasToDelete.normalized_name)}`
+      );
+      setSuccessMessage(`別名「${aliasToDelete.display_name}」を削除しました。`);
+      setSelectedPerson(detail);
+      setEditDisplayName(detail.display_name);
+      setEditAliasesText((detail.aliases || []).map((al) => al.display_name).join("\n"));
+      setShowAliasDeleteConfirm(false);
+      setAliasToDelete(null);
+      await loadAllData(false);
+    } catch (e: any) {
+      setError(e.message || "別名の削除に失敗しました");
     } finally {
       setLoading(false);
     }
@@ -743,8 +786,18 @@ export default function PeoplePage() {
                       <h3 className="text-xs font-bold text-slate-700 mb-1.5">確定済み別名 (person_aliases)</h3>
                       <div className="flex flex-wrap gap-1.5">
                         {selectedPerson.aliases.map((al) => (
-                          <span key={al.normalized_name} className="bg-slate-100 text-slate-800 text-xs px-2 py-0.5 rounded border border-slate-200">
+                          <span key={al.normalized_name} className="inline-flex items-center gap-1 bg-slate-100 text-slate-800 text-xs px-2 py-0.5 rounded border border-slate-200">
                             {al.display_name}
+                            <button
+                              onClick={() => {
+                                setAliasToDelete(al);
+                                setShowAliasDeleteConfirm(true);
+                              }}
+                              className="text-slate-400 hover:text-red-600 transition-colors leading-none"
+                              aria-label={`別名「${al.display_name}」を削除`}
+                            >
+                              ×
+                            </button>
                           </span>
                         ))}
                       </div>
@@ -764,6 +817,12 @@ export default function PeoplePage() {
                             <div className="mt-1 text-[11px] text-red-600">
                               競合の型: {editError.conflict_type}
                               {editError.existing_person_id && ` (競合人物ID: ${editError.existing_person_id}, 名前: ${editError.existing_person_name})`}
+                            </div>
+                          )}
+                          {mergeGuidance && (
+                            <div className="mt-2 text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded p-2">
+                              同一人物の可能性があるため、統合を検討してください。
+                              統合先には競合人物（{mergeGuidance.personName}）を選択済みです。
                             </div>
                           )}
                         </div>
@@ -1151,7 +1210,7 @@ export default function PeoplePage() {
           ref={dialogRef}
           onCancel={handleCloseModal}
           onClose={handleCloseModal}
-          className="rounded-xl shadow-xl border border-slate-200 w-full max-w-2xl max-h-[85vh] p-0 overflow-hidden backdrop:bg-slate-900/60 backdrop:backdrop-blur-sm"
+          className="fixed inset-0 m-auto rounded-xl shadow-xl border border-slate-200 w-full max-w-2xl max-h-[85vh] p-0 overflow-hidden backdrop:bg-slate-900/60 backdrop:backdrop-blur-sm"
           role="dialog"
           aria-labelledby="merge-dialog-title"
           aria-modal="true"
@@ -1311,6 +1370,54 @@ export default function PeoplePage() {
             </div>
           </div>
         </dialog>
+      )}
+
+      {/* Alias Delete Confirmation Modal */}
+      {showAliasDeleteConfirm && aliasToDelete && selectedPerson && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-sm overflow-hidden flex flex-col">
+            <div className="p-4 border-b border-slate-100 bg-slate-50 flex items-center justify-between shrink-0">
+              <h3 className="text-sm font-bold text-slate-900">別名の削除確認</h3>
+              <button
+                onClick={() => {
+                  setAliasToDelete(null);
+                  setShowAliasDeleteConfirm(false);
+                }}
+                className="text-slate-400 hover:text-slate-600 transition-colors text-xs"
+                aria-label="閉じる"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="p-5 space-y-3 text-xs text-slate-700">
+              <p>
+                本当に別名「<strong className="text-slate-900">{aliasToDelete.display_name}</strong>」を
+                「<strong className="text-slate-900">{selectedPerson.display_name}</strong>」から削除してもよろしいですか？
+              </p>
+              <p className="text-[10px] text-slate-500">
+                この操作はデータベースから直接削除し、元に戻すことはできません。次回のVault同期でも復活しません。
+              </p>
+            </div>
+            <div className="p-4 border-t border-slate-100 bg-slate-50 flex items-center justify-end gap-2 shrink-0">
+              <button
+                onClick={() => {
+                  setAliasToDelete(null);
+                  setShowAliasDeleteConfirm(false);
+                }}
+                className="rounded border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                キャンセル
+              </button>
+              <button
+                onClick={handleDeleteAlias}
+                disabled={loading}
+                className="rounded bg-red-600 px-4 py-2 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+              >
+                {loading ? "削除中..." : "削除する"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Hard Delete Confirmation Modal */}

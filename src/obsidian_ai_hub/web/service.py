@@ -1693,6 +1693,33 @@ def get_vault_report_dynamic() -> dict[str, Any]:
         conn.close()
 
 
+def delete_person_alias(person_id: str, normalized_name: str) -> dict:
+    conn = memory.get_db_connection()
+    try:
+        with conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT person_id FROM people WHERE person_id = ?", (person_id,))
+            if cursor.fetchone() is None:
+                raise FileNotFoundError("Person not found")
+
+            cursor.execute(
+                "SELECT normalized_name, display_name FROM person_aliases WHERE normalized_name = ? AND person_id = ?",
+                (normalized_name, person_id)
+            )
+            alias_row = cursor.fetchone()
+            if alias_row is None:
+                raise FileNotFoundError("Alias not found for this person")
+
+            conn.execute(
+                "DELETE FROM person_aliases WHERE normalized_name = ? AND person_id = ?",
+                (normalized_name, person_id)
+            )
+
+        return get_person_detail(person_id)
+    finally:
+        conn.close()
+
+
 def get_edit_options() -> dict:
     from obsidian_ai_hub.utils.topics import TOPIC_ENUM
     from obsidian_ai_hub.summary.store import DAY_ITEM_KINDS, WEEK_ITEM_KINDS, MONTH_ITEM_KINDS

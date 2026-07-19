@@ -612,3 +612,55 @@ def test_people_delete_success(test_memory_db_path, client):
         assert conn.execute("SELECT * FROM summary_person_assignments WHERE person_id = 'p_del'").fetchone() is None
     finally:
         conn.close()
+
+
+def test_people_delete_alias(test_memory_db_path, client):
+    conn = memory.get_db_connection()
+    try:
+        conn.execute(
+            "INSERT INTO people (person_id, display_name, normalized_name, vault_id) VALUES (?, ?, ?, ?)",
+            ("peo_alias_del", "鈴木健", "鈴木健", "ken-suzuki")
+        )
+        conn.execute(
+            "INSERT INTO person_aliases (normalized_name, person_id, display_name) VALUES (?, ?, ?)",
+            ("ケン", "peo_alias_del", "ケン")
+        )
+        conn.execute(
+            "INSERT INTO person_aliases (normalized_name, person_id, display_name) VALUES (?, ?, ?)",
+            ("ケンちゃん", "peo_alias_del", "ケンちゃん")
+        )
+        conn.execute(
+            "INSERT INTO person_aliases (normalized_name, person_id, display_name) VALUES (?, ?, ?)",
+            ("スズキ", "peo_alias_del", "スズキ")
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    # 1. Delete alias 'ケン' from vault-linked person
+    response = client.delete("/api/v1/people/peo_alias_del/aliases?normalized_name=%E3%82%B1%E3%83%B3")
+    assert response.status_code == 200
+    detail = response.json()
+    assert detail["person_id"] == "peo_alias_del"
+    remaining = {al["normalized_name"] for al in detail["aliases"]}
+    assert "ケン" not in remaining
+    assert "ケンちゃん" in remaining
+    assert "スズキ" in remaining
+
+    # 2. Delete another alias 'ケンちゃん'
+    response = client.delete("/api/v1/people/peo_alias_del/aliases?normalized_name=%E3%82%B1%E3%83%B3%E3%81%A1%E3%82%83%E3%82%93")
+    assert response.status_code == 200
+    detail = response.json()
+    remaining = {al["normalized_name"] for al in detail["aliases"]}
+    assert "ケンちゃん" not in remaining
+    assert "スズキ" in remaining
+
+    # 3. Delete non-existent alias -> 404
+    response = client.delete("/api/v1/people/peo_alias_del/aliases?normalized_name=nonexistent")
+    assert response.status_code == 404
+    assert "Alias not found" in response.json()["detail"]
+
+    # 4. Delete from non-existent person -> 404
+    response = client.delete("/api/v1/people/nobody/aliases?normalized_name=%E3%82%B1%E3%83%B3")
+    assert response.status_code == 404
+    assert "Person not found" in response.json()["detail"]
