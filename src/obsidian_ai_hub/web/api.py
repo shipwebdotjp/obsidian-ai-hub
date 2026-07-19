@@ -540,6 +540,18 @@ def merge_people(body: schemas.PeopleMergeRequest, _=Depends(_require_loopback_o
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@router.delete("/people/{person_id}/aliases", response_model=schemas.PersonDetail)
+def delete_person_alias(
+    person_id: str,
+    normalized_name: str = Query(...),
+    _=Depends(_require_loopback_or_token),
+):
+    try:
+        return service.delete_person_alias(person_id, normalized_name)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+
+
 @router.post("/people/sync", response_model=schemas.SyncPeopleResponse)
 def sync_people(_=Depends(_require_loopback_or_token)):
     try:
