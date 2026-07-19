@@ -186,6 +186,7 @@ export default function PeoplePage() {
   const [mergeFromPerson, setMergeFromPerson] = useState<Person | null>(null);
   const [mergeToPerson, setMergeToPerson] = useState<Person | null>(null);
   const [mergeModalError, setMergeModalError] = useState<string | null>(null);
+  const [mergeGuidance, setMergeGuidance] = useState<{ personId: string; personName: string } | null>(null);
 
   // Refs
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -287,6 +288,7 @@ export default function PeoplePage() {
   const handleSelectPerson = async (p: Person) => {
     clearMessages();
     setMergeToPersonId("");
+    setMergeGuidance(null);
     setEditError(null);
     setEditSuccess(null);
     try {
@@ -320,7 +322,14 @@ export default function PeoplePage() {
       await loadAllData(false);
     } catch (e: any) {
       if (e instanceof ApiError && e.status === 409) {
-        setEditError(e.body?.detail || e.message);
+        const detail = e.body?.detail;
+        setEditError(detail || e.message);
+        if (detail && (detail.conflict_type === "main_name_conflict" || detail.conflict_type === "alias_conflict")) {
+          if (detail.existing_person_id) {
+            setMergeToPersonId(detail.existing_person_id);
+            setMergeGuidance({ personId: detail.existing_person_id, personName: detail.existing_person_name || "" });
+          }
+        }
       } else {
         setEditError(e.message || "更新に失敗しました");
       }
@@ -764,6 +773,12 @@ export default function PeoplePage() {
                             <div className="mt-1 text-[11px] text-red-600">
                               競合の型: {editError.conflict_type}
                               {editError.existing_person_id && ` (競合人物ID: ${editError.existing_person_id}, 名前: ${editError.existing_person_name})`}
+                            </div>
+                          )}
+                          {mergeGuidance && (
+                            <div className="mt-2 text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded p-2">
+                              同一人物の可能性があるため、統合を検討してください。
+                              統合先には競合人物（{mergeGuidance.personName}）を選択済みです。
                             </div>
                           )}
                         </div>
