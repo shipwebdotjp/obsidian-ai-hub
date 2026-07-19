@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from "react";
-import { apiGet, apiPost, ApiError } from "../../api/client";
+import { apiGet, apiPost, apiPatch, apiDelete, ApiError } from "../../api/client";
 
 interface PersonAlias {
   normalized_name: string;
@@ -12,6 +12,7 @@ interface Person {
   normalized_name: string;
   vault_id: string | null;
   aliases: PersonAlias[];
+  summary_count: number;
 }
 
 interface AssociatedSummary {
@@ -22,8 +23,15 @@ interface AssociatedSummary {
   display_order: number;
 }
 
+interface RelationCounts {
+  summaries: number;
+  aliases: number;
+  assignments: number;
+}
+
 interface PersonDetail extends Person {
   summaries: AssociatedSummary[];
+  relation_counts: RelationCounts;
 }
 
 interface PersonCandidate {
@@ -134,6 +142,14 @@ export default function PeoplePage() {
   const [resolveError, setResolveError] = useState<any | null>(null);
   const [summaryAssignments, setSummaryAssignments] = useState<Record<string, string>>({});
 
+  // Edit & Delete states
+  const [editDisplayName, setEditDisplayName] = useState("");
+  const [editAliasesText, setEditAliasesText] = useState("");
+  const [editError, setEditError] = useState<any | null>(null);
+  const [editSuccess, setEditSuccess] = useState<string | null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [personToDelete, setPersonToDelete] = useState<PersonDetail | null>(null);
+
   useEffect(() => {
     setSummaryAssignments({});
   }, [selectedCandidate]);
@@ -188,6 +204,8 @@ export default function PeoplePage() {
     setError(null);
     setSuccessMessage(null);
     setResolveError(null);
+    setEditError(null);
+    setEditSuccess(null);
   };
 
   const fetchCandidates = async () => {
@@ -269,11 +287,69 @@ export default function PeoplePage() {
   const handleSelectPerson = async (p: Person) => {
     clearMessages();
     setMergeToPersonId("");
+    setEditError(null);
+    setEditSuccess(null);
     try {
       const data = await apiGet<PersonDetail>(`${PEOPLE_API}/${p.person_id}`);
       setSelectedPerson(data);
+      setEditDisplayName(data.display_name);
+      setEditAliasesText((data.aliases || []).map((al) => al.display_name).join("\n"));
     } catch (e) {
       setError("人物の詳細の取得に失敗しました");
+    }
+  };
+
+  const handleUpdatePerson = async () => {
+    if (!selectedPerson) return;
+    setLoading(true);
+    setEditError(null);
+    setEditSuccess(null);
+    try {
+      const aliasList = editAliasesText
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0);
+
+      const res = await apiPatch<PersonDetail>(`${PEOPLE_API}/${selectedPerson.person_id}`, {
+        display_name: editDisplayName,
+        aliases: aliasList
+      });
+
+      setSuccessMessage(`人物「${res.display_name}」を更新しました。`);
+      setSelectedPerson(null);
+      await loadAllData(false);
+    } catch (e: any) {
+      if (e instanceof ApiError && e.status === 409) {
+        setEditError(e.body?.detail || e.message);
+      } else {
+        setEditError(e.message || "更新に失敗しました");
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleExecuteDelete = async () => {
+    if (!personToDelete) return;
+    setLoading(true);
+    try {
+      const res = await apiDelete<any>(`${PEOPLE_API}/${personToDelete.person_id}`);
+      if (res.success) {
+        setSuccessMessage(
+          `人物「${personToDelete.display_name}」を完全に削除しました。` +
+          `（削除された関連サマリ数: ${res.deleted_summary_people}件、別名数: ${res.deleted_aliases}件、手動割当数: ${res.deleted_assignments}件）`
+        );
+      } else {
+        setSuccessMessage(`人物「${personToDelete.display_name}」を削除しました。`);
+      }
+      setSelectedPerson(null);
+      setPersonToDelete(null);
+      setShowDeleteConfirm(false);
+      await loadAllData(false);
+    } catch (e: any) {
+      setError(e.message || "削除に失敗しました");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -637,6 +713,9 @@ export default function PeoplePage() {
                           <span className="bg-red-50 text-red-700 text-[9px] px-1.5 py-0.5 rounded-full">未連携</span>
                         )}
                       </div>
+                      <div className="flex items-center justify-between mt-1 text-[10px] text-slate-400">
+                        <span>サマリ: {p.summary_count ?? 0}件</span>
+                      </div>
                       {p.aliases && p.aliases.length > 0 && (
                         <div className="text-[10px] text-slate-400 mt-1">
                           別名: {p.aliases.map((al) => al.display_name).join(", ")}
@@ -671,6 +750,84 @@ export default function PeoplePage() {
                       </div>
                     </div>
                   )}
+
+                  {/* Edit Form (Unlinked Only) */}
+                  {selectedPerson.vault_id === null && (
+                    <div className="border border-slate-200 rounded-lg p-4 bg-slate-50 space-y-3">
+                      <h3 className="text-xs font-bold text-slate-800">未連携人物の編集</h3>
+                      {editError && (
+                        <div className="rounded-lg bg-red-50 p-3 text-xs font-medium text-red-800 border border-red-200">
+                          <div className="font-bold">
+                            {typeof editError === "object" ? editError.message : editError}
+                          </div>
+                          {typeof editError === "object" && editError.conflict_type && (
+                            <div className="mt-1 text-[11px] text-red-600">
+                              競合の型: {editError.conflict_type}
+                              {editError.existing_person_id && ` (競合人物ID: ${editError.existing_person_id}, 名前: ${editError.existing_person_name})`}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      {editSuccess && (
+                        <div className="rounded-lg bg-green-50 p-3 text-xs font-medium text-green-800 border border-green-200">
+                          {editSuccess}
+                        </div>
+                      )}
+                      <div className="space-y-2">
+                        <div>
+                          <label className="block text-[11px] font-bold text-slate-700 mb-1" htmlFor="edit-name">表示名</label>
+                          <input
+                            id="edit-name"
+                            type="text"
+                            value={editDisplayName}
+                            onChange={(e) => setEditDisplayName(e.target.value)}
+                            className="w-full rounded border border-slate-300 bg-white px-2.5 py-1.5 text-xs focus:border-slate-900 focus:outline-none"
+                            placeholder="表示名を入力してください"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-bold text-slate-700 mb-1" htmlFor="edit-aliases">別名 (1行に1別名を入力してください)</label>
+                          <textarea
+                            id="edit-aliases"
+                            value={editAliasesText}
+                            onChange={(e) => setEditAliasesText(e.target.value)}
+                            rows={3}
+                            className="w-full rounded border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-mono focus:border-slate-900 focus:outline-none"
+                            placeholder="別名を1行ずつ入力してください"
+                          />
+                        </div>
+                      </div>
+                      <div className="flex justify-end">
+                        <button
+                          onClick={handleUpdatePerson}
+                          disabled={loading || !editDisplayName.trim()}
+                          className="rounded bg-slate-900 px-4 py-1.5 text-xs text-white hover:bg-slate-800 disabled:opacity-50"
+                        >
+                          変更内容を保存
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Complete Deletion Section */}
+                  <div className="border border-red-200 rounded-lg p-4 bg-red-50/50 space-y-3">
+                    <h3 className="text-xs font-bold text-red-800">人物の完全削除 (危険操作)</h3>
+                    <p className="text-[10px] text-red-600 leading-normal">
+                      この操作を実行すると、人物データ本体に加えて、3つの関連テーブル（サマリ紐づき、確定別名、文脈別手動割当）からも関連行が完全に削除されます。サマリ本体や、Vault内のMarkdownファイル自体は削除されません。
+                    </p>
+                    <div className="flex justify-end">
+                      <button
+                        onClick={() => {
+                          setPersonToDelete(selectedPerson);
+                          setShowDeleteConfirm(true);
+                        }}
+                        disabled={loading}
+                        className="rounded bg-red-600 px-4 py-1.5 text-xs text-white hover:bg-red-700 disabled:opacity-50"
+                      >
+                        完全に削除する
+                      </button>
+                    </div>
+                  </div>
 
                   {/* Merge with another person section */}
                   <div className="border border-slate-200 rounded-lg p-4 bg-slate-50 space-y-3">
@@ -1154,6 +1311,85 @@ export default function PeoplePage() {
             </div>
           </div>
         </dialog>
+      )}
+
+      {/* Hard Delete Confirmation Modal */}
+      {showDeleteConfirm && personToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-md overflow-hidden flex flex-col">
+            {/* Modal Header */}
+            <div className="p-4 border-b border-slate-100 bg-red-50 flex items-center justify-between shrink-0">
+              <h3 className="text-sm font-bold text-red-900">⚠️ 人物の完全削除確認</h3>
+              <button
+                onClick={() => {
+                  setPersonToDelete(null);
+                  setShowDeleteConfirm(false);
+                }}
+                className="text-red-400 hover:text-red-600 transition-colors text-xs"
+                aria-label="閉じる"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-5 overflow-y-auto space-y-3 text-xs text-slate-700 leading-normal">
+              <p className="font-semibold text-slate-950">
+                本当に「{personToDelete.display_name}」を完全に削除してもよろしいですか？
+              </p>
+
+              {personToDelete.vault_id ? (
+                <div className="rounded-lg bg-orange-50 border border-orange-200 p-3 text-orange-950 font-medium space-y-1">
+                  <div className="font-bold flex items-center gap-1">
+                    <span>⚠️</span> Vaultノート連携に対する警告
+                  </div>
+                  <p className="text-[11px] leading-normal text-orange-800">
+                    この人物は Vault ノート（ID: <code>{personToDelete.vault_id}</code>）と連携しています。DB から完全に削除されますが、Vault ノート自体は削除されません。
+                    そのため、<strong>次回の同期（Sync）を実行した際に、この人物が再びデータベース上に再作成される可能性</strong>があります。
+                  </p>
+                </div>
+              ) : (
+                <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-red-950 font-medium space-y-1">
+                  <div className="font-bold flex items-center gap-1">
+                    <span>⚠️</span> 取り消し不可の警告
+                  </div>
+                  <p className="text-[11px] leading-normal text-red-800">
+                    この人物は未連携の人物です。削除を実行すると、紐づいていたすべてのサマリ履歴メモ、登録別名、手動個別割当などの関連行がDBから永久に消去され、元に戻すことはできません。
+                  </p>
+                </div>
+              )}
+
+              {personToDelete.relation_counts && (
+                <div className="border border-slate-100 rounded-lg p-3 bg-slate-50 space-y-1 text-slate-600">
+                  <div className="font-bold text-slate-800 mb-1">影響を受ける関連レコード数:</div>
+                  <div>・紐づくサマリ: <strong className="text-slate-900">{personToDelete.relation_counts.summaries}</strong> 件</div>
+                  <div>・別名 (aliases): <strong className="text-slate-900">{personToDelete.relation_counts.aliases}</strong> 件</div>
+                  <div>・手動個別割当: <strong className="text-slate-900">{personToDelete.relation_counts.assignments}</strong> 件</div>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 border-t border-slate-100 bg-slate-50 flex items-center justify-end gap-2 shrink-0">
+              <button
+                onClick={() => {
+                  setPersonToDelete(null);
+                  setShowDeleteConfirm(false);
+                }}
+                className="rounded border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                キャンセル
+              </button>
+              <button
+                onClick={handleExecuteDelete}
+                disabled={loading}
+                className="rounded bg-red-600 px-4 py-2 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+              >
+                {loading ? "削除を実行中..." : "本当に完全に削除する"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
