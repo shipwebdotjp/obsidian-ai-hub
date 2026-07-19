@@ -322,7 +322,9 @@ export default function PeoplePage() {
       });
 
       setSuccessMessage(`人物「${res.display_name}」を更新しました。`);
-      setSelectedPerson(null);
+      setSelectedPerson(res);
+      setEditDisplayName(res.display_name);
+      setEditAliasesText((res.aliases || []).map((al) => al.display_name).join("\n"));
       await loadAllData(false);
     } catch (e: any) {
       if (e instanceof ApiError && e.status === 409) {
