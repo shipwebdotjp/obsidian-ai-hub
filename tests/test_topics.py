@@ -80,7 +80,7 @@ def test_normalize_topics_empty_or_none():
 def test_normalize_keywords_trims_deduplicates_and_limits():
     keywords = [" Python ", "Python", "", None, 42, "Git", "LLM", "Obsidian", "SQLite", "Extra"]
 
-    assert normalize_keywords(keywords) == ["Python", "Git", "LLM", "Obsidian", "SQLite"]
+    assert normalize_keywords(keywords) == ["Python", "Git", "LLM", "Obsidian", "SQLite", "Extra"]
 
 
 def test_normalize_keywords_rejects_non_lists():

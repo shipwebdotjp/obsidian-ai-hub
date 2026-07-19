@@ -329,7 +329,7 @@ export default function PeoplePage() {
         const detail = e.body?.detail;
         setEditError(detail || e.message);
         if (detail && (detail.conflict_type === "main_name_conflict" || detail.conflict_type === "alias_conflict")) {
-          if (detail.existing_person_id) {
+          if (detail.existing_person_id && people.some(p => p.person_id === detail.existing_person_id)) {
             setMergeToPersonId(detail.existing_person_id);
             setMergeGuidance({ personId: detail.existing_person_id, personName: detail.existing_person_name || "" });
           }
