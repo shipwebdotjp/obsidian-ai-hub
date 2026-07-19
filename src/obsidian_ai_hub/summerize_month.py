@@ -215,29 +215,29 @@ def summarize_month(target_date: datetime):
     # 3. SQLiteへの保存
     upsert_summary_record(structured_record)
 
-    # 4. 月次ノートへの書き込み
-    monthly_note = reader.get_monthly_note_content(target_date)
-    monthly_note_path = reader.get_monthly_note_path(target_date)
-    markdown_content = format_monthly_record_as_markdown(structured_record)
+    # 4. 月次ノートへの書き込み 260719: 人間の書いたものと、AIの書いたものを混ぜないためにデイリーノートへの追記は中止
+    # monthly_note = reader.get_monthly_note_content(target_date)
+    # monthly_note_path = reader.get_monthly_note_path(target_date)
+    # markdown_content = format_monthly_record_as_markdown(structured_record)
 
-    # 月次ノートのディレクトリ作成
-    monthly_note_path.parent.mkdir(parents=True, exist_ok=True)
+    # # 月次ノートのディレクトリ作成
+    # monthly_note_path.parent.mkdir(parents=True, exist_ok=True)
 
-    if "## AIによる要約" in monthly_note:
-        pattern = r"(## AIによる要約\n)(.*?)(?=\n## |$)"
-        new_monthly_note = re.sub(
-            pattern,
-            lambda m: f"{m.group(1)}\n{markdown_content}\n\n",
-            monthly_note,
-            flags=re.DOTALL
-        )
-    else:
-        new_monthly_note = monthly_note.rstrip() + f"\n\n## AIによる要約\n\n{markdown_content}\n"
+    # if "## AIによる要約" in monthly_note:
+    #     pattern = r"(## AIによる要約\n)(.*?)(?=\n## |$)"
+    #     new_monthly_note = re.sub(
+    #         pattern,
+    #         lambda m: f"{m.group(1)}\n{markdown_content}\n\n",
+    #         monthly_note,
+    #         flags=re.DOTALL
+    #     )
+    # else:
+    #     new_monthly_note = monthly_note.rstrip() + f"\n\n## AIによる要約\n\n{markdown_content}\n"
 
-    with open(monthly_note_path, "w", encoding="utf-8") as f:
-        f.write(new_monthly_note)
+    # with open(monthly_note_path, "w", encoding="utf-8") as f:
+    #     f.write(new_monthly_note)
 
-    logger.info(f"Monthly summary updated in: {monthly_note_path}")
+    # logger.info(f"Monthly summary updated in: {monthly_note_path}")
 
 
 def main(target_month_str: str = None):

@@ -131,17 +131,11 @@ def test_summarize_month(mock_llm, mock_render, mock_config, test_memory_db_path
         assert row["keywords"] == ["Python", "Obsidian"]
         assert row["mood"] is None
         assert row["sleep_hours"] is None
+        assert len(row["items"]) == 7
+        item_kinds = {i["kind"] for i in row["items"]}
+        assert item_kinds == set(store.MONTH_ITEM_KINDS)
     finally:
         conn.close()
-
-    # Check Markdown output
-    note_path = config.DAILY_PATH / "2024" / "10" / "2024-10.md"
-    assert note_path.exists()
-    content = note_path.read_text()
-    assert "## AIによる要約" in content
-    assert "Monthly summary test" in content
-    assert "Progress 1" in content
-    assert "Pattern 1" in content
 
 
 @patch("obsidian_ai_hub.summerize_month.prompt.render_prompt")

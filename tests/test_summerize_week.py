@@ -167,9 +167,7 @@ def test_format_weekly_record_as_markdown():
 
 @patch("obsidian_ai_hub.summerize_week.prompt.render_prompt")
 @patch("obsidian_ai_hub.summerize_week.llm_client.generate_llm_response")
-@patch("obsidian_ai_hub.summerize_week.reader.get_weekly_note_content")
-@patch("obsidian_ai_hub.summerize_week.reader.get_weekly_note_path")
-def test_summarize_week(mock_path, mock_content, mock_llm, mock_render, mock_config, test_memory_db_path):
+def test_summarize_week(mock_llm, mock_render, mock_config, test_memory_db_path):
     target_date = datetime(2023, 10, 27)
     mock_render.return_value = "Rendered Prompt"
     mock_llm.return_value = json.dumps({
@@ -177,26 +175,18 @@ def test_summarize_week(mock_path, mock_content, mock_llm, mock_render, mock_con
         "topics": ["AI"],
         "highlights": ["Highlight"],
     })
-    mock_content.return_value = "## Previous Section\n\n## AIによる要約\nOld content\n\n## Next Section"
-    weekly_note_file = mock_config.DAILY_PATH / "2023/10/2023-W43.md"
-    weekly_note_file.parent.mkdir(parents=True)
-    mock_path.return_value = weekly_note_file
 
     with patch("obsidian_ai_hub.summerize_week.load_daily_records", return_value=[None] * 7):
         summarize_week(target_date)
-
-    assert weekly_note_file.exists()
-    new_content = weekly_note_file.read_text(encoding="utf-8")
-    assert "Weekly Summary" in new_content
-    assert "Old content" not in new_content
-    assert "## Previous Section" in new_content
-    assert "## Next Section" in new_content
 
     conn = memory.get_db_connection()
     try:
         row = store.get_summary_by_period("week", "2023-W43", conn=conn)
         assert row is not None
         assert row["summary"] == "Weekly Summary"
+        assert len(row["items"]) == 1
+        assert row["items"][0]["kind"] == "highlights"
+        assert row["items"][0]["body"] == "Highlight"
     finally:
         conn.close()
 

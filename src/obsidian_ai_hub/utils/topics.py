@@ -47,7 +47,7 @@ def normalize_topics(topics: list[str] | None, limit: int = 5) -> list[str]:
     return normalized[:limit]
 
 
-def normalize_keywords(keywords: list[object] | None, limit: int = 5) -> list[str]:
+def normalize_keywords(keywords: list[object] | None, limit: int = 10) -> list[str]:
     """Trim, deduplicate, and limit LLM-generated keywords."""
     if not isinstance(keywords, list):
         return []

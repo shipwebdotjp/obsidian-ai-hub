@@ -284,10 +284,10 @@ def summarize_day(target_date: datetime):
     # 3. SQLiteへの保存 (永続化)
     upsert_summary_record(structured_record)
 
-    # 4. デイリーノートへの追記 (人間用表示)
-    if daily_file.exists():
-        markdown_content = format_structured_record_as_markdown(structured_record, activity_logs)
-        extracter.append_to_subheader_file(daily_file.as_posix(), "## AIによる要約", [markdown_content])
+    # 4. デイリーノートへの追記 (人間用表示) 260719: 人間の書いたものと、AIの書いたものを混ぜないためにデイリーノートへの追記は中止
+    # if daily_file.exists():
+    #     markdown_content = format_structured_record_as_markdown(structured_record, activity_logs)
+    #     extracter.append_to_subheader_file(daily_file.as_posix(), "## AIによる要約", [markdown_content])
 
 
 def main():

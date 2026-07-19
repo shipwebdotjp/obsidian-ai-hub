@@ -221,27 +221,27 @@ def summarize_week(target_date: datetime | date_type | str | None = None):
     # 3. SQLiteへの保存
     upsert_summary_record(structured_record)
 
-    # 4. ウィークリーノートへの書き込み
-    weekly_note = reader.get_weekly_note_content(target_date)
-    weekly_note_path = reader.get_weekly_note_path(target_date)
-    markdown_content = format_weekly_record_as_markdown(structured_record)
+    # 4. ウィークリーノートへの書き込み 260719: 人間の書いたものと、AIの書いたものを混ぜないためにデイリーノートへの追記は中止
+    # weekly_note = reader.get_weekly_note_content(target_date)
+    # weekly_note_path = reader.get_weekly_note_path(target_date)
+    # markdown_content = format_weekly_record_as_markdown(structured_record)
 
-    if "## AIによる要約" in weekly_note:
-        pattern = r"(## AIによる要約\n)(.*?)(?=\n## |$)"
-        new_weekly_note = re.sub(
-            pattern,
-            lambda m: f"{m.group(1)}\n{markdown_content}\n\n",
-            weekly_note,
-            flags=re.DOTALL
-        )
-    else:
-        new_weekly_note = weekly_note.rstrip() + f"\n\n## AIによる要約\n\n{markdown_content}\n"
+    # if "## AIによる要約" in weekly_note:
+    #     pattern = r"(## AIによる要約\n)(.*?)(?=\n## |$)"
+    #     new_weekly_note = re.sub(
+    #         pattern,
+    #         lambda m: f"{m.group(1)}\n{markdown_content}\n\n",
+    #         weekly_note,
+    #         flags=re.DOTALL
+    #     )
+    # else:
+    #     new_weekly_note = weekly_note.rstrip() + f"\n\n## AIによる要約\n\n{markdown_content}\n"
 
-    weekly_note_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(weekly_note_path, "w", encoding="utf-8") as f:
-        f.write(new_weekly_note)
+    # weekly_note_path.parent.mkdir(parents=True, exist_ok=True)
+    # with open(weekly_note_path, "w", encoding="utf-8") as f:
+    #     f.write(new_weekly_note)
 
-    logger.info(f"Weekly summary updated in: {weekly_note_path}")
+    # logger.info(f"Weekly summary updated in: {weekly_note_path}")
 
 
 def main(target_date: datetime | date_type | str | None = None):
