@@ -1,4 +1,5 @@
 import pytest
+import requests
 from unittest.mock import patch, MagicMock
 
 from obsidian_ai_hub.utils.line_messaging import (
@@ -65,8 +66,8 @@ class TestSendLinePushMessages:
         ok = send_line_push_messages("t", "u", ["msg"])
         assert ok is True
 
-    def test_exception_returns_false(self, mock_post, mock_ensure_external):
-        mock_post.side_effect = Exception("connection error")
+    def test_request_exception_returns_false(self, mock_post, mock_ensure_external):
+        mock_post.side_effect = requests.RequestException("connection error")
         ok = send_line_push_messages("t", "u", ["msg"])
         assert ok is False
 

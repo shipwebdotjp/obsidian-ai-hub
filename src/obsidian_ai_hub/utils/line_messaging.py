@@ -27,7 +27,7 @@ def _post_line_push(token: str, to: str, messages: list[dict]) -> bool:
             return True
         logger.error("LINE API responded with %s", resp.status_code)
         return False
-    except Exception as exc:
+    except requests.RequestException as exc:
         logger.error("Failed to send LINE message: %s", type(exc).__name__)
         return False
 

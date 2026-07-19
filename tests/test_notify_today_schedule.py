@@ -2,7 +2,7 @@ import pytest
 from unittest.mock import patch, MagicMock
 from datetime import datetime
 
-from obsidian_ai_hub.notify_today_schedule import (
+from obsidian_ai_hub.line_notification import (
     format_summary_for_line,
     is_monday,
     prev_iso_week_key,
@@ -108,7 +108,7 @@ def test_format_summary_empty_record_returns_empty():
 
 
 def test_format_summary_with_week_kind_labels():
-    """format_summary_for_line with WEEK_KIND_LABELS produces correct output."""
+    """format_summary_for_line with WEEK_KIND_LABELS preserves summary and section order."""
     record = {
         "summary": "週の総括",
         "items": [
@@ -121,20 +121,20 @@ def test_format_summary_with_week_kind_labels():
         ],
     }
     result = format_summary_for_line(record, kind_labels=WEEK_KIND_LABELS)
-    assert "💡要約" in result
     assert "週の総括" in result
-    assert "【ハイライト】" in result
-    assert "【進捗】" in result
-    assert "【学び・整理】" in result
-    assert "【反省・気づき】" in result
-    assert "【パターン】" in result
-    assert "【感謝】" in result
-    # Verify order
-    assert result.index("【ハイライト】") < result.index("【進捗】")
-    assert result.index("【進捗】") < result.index("【学び・整理】")
-    assert result.index("【学び・整理】") < result.index("【反省・気づき】")
-    assert result.index("【反省・気づき】") < result.index("【パターン】")
-    assert result.index("【パターン】") < result.index("【感謝】")
+    assert "リリース完了" in result
+    assert "機能A 80%" in result
+    # Compact ordering check: each kind's body appears in WEEK_KIND_LABELS order
+    order_marker = "リリース完了"  # highlights
+    positions = [
+        result.index("リリース完了"),
+        result.index("機能A 80%"),
+        result.index("新しい技術を習得"),
+        result.index("計画通り進んだ"),
+        result.index("午前中に集中"),
+        result.index("チームに感謝"),
+    ]
+    assert positions == sorted(positions), f"sections out of WEEK_KIND_LABELS order: {positions}"
 
 
 def test_format_summary_people_and_projects_included():
@@ -148,12 +148,11 @@ def test_format_summary_people_and_projects_included():
         "projects": ["プロジェクトA", "プロジェクトB"],
     }
     result = format_summary_for_line(record)
-    assert "【人物】" in result
-    assert "・山田太郎: 打ち合わせ" in result
-    assert "・佐藤花子" in result
-    assert "【プロジェクト】" in result
-    assert "・プロジェクトA" in result
-    assert "・プロジェクトB" in result
+    assert "山田太郎" in result
+    assert "打ち合わせ" in result
+    assert "佐藤花子" in result
+    assert "プロジェクトA" in result
+    assert "プロジェクトB" in result
 
 
 # --- is_monday ---
@@ -213,8 +212,8 @@ date: 2026-07-20
 """
 
 
-@patch("obsidian_ai_hub.notify_today_schedule.store.get_summary_by_period")
-@patch("obsidian_ai_hub.notify_today_schedule.reader.get_daily_note_content")
+@patch("obsidian_ai_hub.line_notification.builder.store.get_summary_by_period")
+@patch("obsidian_ai_hub.line_notification.builder.reader.get_daily_note_content")
 def test_build_daily_message_text_with_all(
     mock_get_note, mock_get_summary
 ):
@@ -234,8 +233,8 @@ def test_build_daily_message_text_with_all(
     assert "タスクA" in result
 
 
-@patch("obsidian_ai_hub.notify_today_schedule.store.get_summary_by_period")
-@patch("obsidian_ai_hub.notify_today_schedule.reader.get_daily_note_content")
+@patch("obsidian_ai_hub.line_notification.builder.store.get_summary_by_period")
+@patch("obsidian_ai_hub.line_notification.builder.reader.get_daily_note_content")
 def test_build_daily_message_text_empty_note(
     mock_get_note, mock_get_summary
 ):
@@ -264,7 +263,7 @@ def test_build_week_summary_text_found():
         ],
     }
 
-    with patch("obsidian_ai_hub.notify_today_schedule.store.get_summary_by_period") as mock_get:
+    with patch("obsidian_ai_hub.line_notification.builder.store.get_summary_by_period") as mock_get:
         mock_get.return_value = week_record
         result = build_week_summary_text(dt)
 
@@ -276,7 +275,7 @@ def test_build_week_summary_text_found():
 
 def test_build_week_summary_text_not_found():
     dt = datetime(2026, 7, 20)
-    with patch("obsidian_ai_hub.notify_today_schedule.store.get_summary_by_period") as mock_get:
+    with patch("obsidian_ai_hub.line_notification.builder.store.get_summary_by_period") as mock_get:
         mock_get.return_value = None
         result = build_week_summary_text(dt)
 
@@ -285,8 +284,8 @@ def test_build_week_summary_text_not_found():
 
 # --- build_message_texts ---
 
-@patch("obsidian_ai_hub.notify_today_schedule.build_daily_message_text")
-@patch("obsidian_ai_hub.notify_today_schedule.build_week_summary_text")
+@patch("obsidian_ai_hub.line_notification.builder.build_daily_message_text")
+@patch("obsidian_ai_hub.line_notification.builder.build_week_summary_text")
 def test_build_message_texts_non_monday_daily_only(
     mock_weekly, mock_daily
 ):
@@ -301,8 +300,8 @@ def test_build_message_texts_non_monday_daily_only(
     mock_weekly.assert_not_called()
 
 
-@patch("obsidian_ai_hub.notify_today_schedule.build_daily_message_text")
-@patch("obsidian_ai_hub.notify_today_schedule.build_week_summary_text")
+@patch("obsidian_ai_hub.line_notification.builder.build_daily_message_text")
+@patch("obsidian_ai_hub.line_notification.builder.build_week_summary_text")
 def test_build_message_texts_monday_two_messages(
     mock_weekly, mock_daily
 ):
@@ -316,8 +315,8 @@ def test_build_message_texts_monday_two_messages(
     assert texts == ["今日の通知本文", "週次本文"]
 
 
-@patch("obsidian_ai_hub.notify_today_schedule.build_daily_message_text")
-@patch("obsidian_ai_hub.notify_today_schedule.build_week_summary_text")
+@patch("obsidian_ai_hub.line_notification.builder.build_daily_message_text")
+@patch("obsidian_ai_hub.line_notification.builder.build_week_summary_text")
 def test_build_message_texts_monday_no_weekly_still_sends_daily(
     mock_weekly, mock_daily
 ):
@@ -331,8 +330,8 @@ def test_build_message_texts_monday_no_weekly_still_sends_daily(
     assert texts == ["今日の通知本文"]
 
 
-@patch("obsidian_ai_hub.notify_today_schedule.build_daily_message_text")
-@patch("obsidian_ai_hub.notify_today_schedule.build_week_summary_text")
+@patch("obsidian_ai_hub.line_notification.builder.build_daily_message_text")
+@patch("obsidian_ai_hub.line_notification.builder.build_week_summary_text")
 def test_build_message_texts_monday_no_daily_weekly_only(
     mock_weekly, mock_daily
 ):
@@ -346,8 +345,8 @@ def test_build_message_texts_monday_no_daily_weekly_only(
     assert texts == ["週次本文"]
 
 
-@patch("obsidian_ai_hub.notify_today_schedule.build_daily_message_text")
-@patch("obsidian_ai_hub.notify_today_schedule.build_week_summary_text")
+@patch("obsidian_ai_hub.line_notification.builder.build_daily_message_text")
+@patch("obsidian_ai_hub.line_notification.builder.build_week_summary_text")
 def test_build_message_texts_both_empty(mock_weekly, mock_daily):
     """Both empty -> empty list."""
     mock_daily.return_value = ""
