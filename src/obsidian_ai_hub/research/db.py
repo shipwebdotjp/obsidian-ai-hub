@@ -467,3 +467,23 @@ def list_recent_activity_days(days: int = 30) -> list[dict]:
         deduped.append(e)
 
     return deduped
+
+
+def list_approved_themes_by_date(date_str: str) -> list[dict]:
+    """指定日（YYYY-MM-DD）に承認されたリサーチテーマを返す。"""
+    conn = _get_db()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT theme_id, theme, direction
+            FROM research_themes
+            WHERE status = 'approved'
+              AND substr(reviewed_at, 1, 10) = ?
+            ORDER BY reviewed_at ASC
+            """,
+            (date_str,),
+        )
+        return [dict(row) for row in cursor.fetchall()]
+    finally:
+        conn.close()

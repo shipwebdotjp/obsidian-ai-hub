@@ -291,3 +291,65 @@ def test_get_daily_structured_record_passes_candidates(mock_fm, mock_path, mock_
 
     # Check parsed and normalized topics in record
     assert record["topics"] == ["LLM・AI活用", "その他"]
+
+
+@patch("obsidian_ai_hub.summerize_day.prompt.render_prompt")
+@patch("obsidian_ai_hub.summerize_day.llm_client.generate_llm_response")
+@patch("obsidian_ai_hub.summerize_day.reader.get_daily_note_path")
+@patch("obsidian_ai_hub.summerize_day.extracter.get_frontmatter_value")
+@patch("obsidian_ai_hub.summerize_day.research_db.list_approved_themes_by_date")
+def test_get_daily_structured_record_passes_approved_research_themes(
+    mock_list_approved, mock_fm, mock_path, mock_llm, mock_render, mock_config
+):
+    target_date = datetime(2023, 10, 27)
+    daily_content = "Content"
+
+    mock_fm.return_value = None
+    mock_p = MagicMock()
+    mock_p.exists.return_value = True
+    mock_path.return_value = mock_p
+
+    mock_list_approved.return_value = [
+        {"theme_id": "rth_001", "theme": "LLM活用術", "direction": "調査方向A"},
+        {"theme_id": "rth_002", "theme": "リマインダー自動化", "direction": None},
+    ]
+
+    mock_llm.return_value = json.dumps({"summary": "Test Summary"})
+    mock_render.return_value = "Rendered Prompt"
+
+    get_daily_structured_record(target_date, daily_content, [], [])
+
+    context = mock_render.call_args[0][1]
+    approved = json.loads(context["APPROVED_RESEARCH_THEMES"])
+    assert len(approved) == 2
+    assert approved[0]["theme"] == "LLM活用術"
+    assert approved[0]["direction"] == "調査方向A"
+    assert approved[1]["theme"] == "リマインダー自動化"
+    assert "direction" not in approved[1]
+
+
+@patch("obsidian_ai_hub.summerize_day.prompt.render_prompt")
+@patch("obsidian_ai_hub.summerize_day.llm_client.generate_llm_response")
+@patch("obsidian_ai_hub.summerize_day.reader.get_daily_note_path")
+@patch("obsidian_ai_hub.summerize_day.extracter.get_frontmatter_value")
+@patch("obsidian_ai_hub.summerize_day.research_db.list_approved_themes_by_date")
+def test_get_daily_structured_record_approved_themes_empty_on_failure(
+    mock_list_approved, mock_fm, mock_path, mock_llm, mock_render, mock_config
+):
+    target_date = datetime(2023, 10, 27)
+    daily_content = "Content"
+
+    mock_fm.return_value = None
+    mock_p = MagicMock()
+    mock_p.exists.return_value = True
+    mock_path.return_value = mock_p
+
+    mock_list_approved.side_effect = Exception("DB error")
+    mock_llm.return_value = json.dumps({"summary": "Test Summary"})
+    mock_render.return_value = "Rendered Prompt"
+
+    record = get_daily_structured_record(target_date, daily_content, [], [])
+
+    context = mock_render.call_args[0][1]
+    assert json.loads(context["APPROVED_RESEARCH_THEMES"]) == []
+    assert record["summary"] == "Test Summary"

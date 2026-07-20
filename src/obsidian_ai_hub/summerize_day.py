@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from obsidian_ai_hub.activity.store import get_activities_by_date
+from obsidian_ai_hub.research import db as research_db
 from obsidian_ai_hub.summary import store as summary_store
 from obsidian_ai_hub.utils import config, reader, extracter, llm_client, prompt
 from obsidian_ai_hub.utils.topics import TOPIC_ENUM, normalize_keywords, normalize_topics
@@ -56,6 +57,17 @@ def get_daily_structured_record(
 
     top_categories, top_keywords = get_activity_rankings(activity_logs)
 
+    # 対象日に承認されたリサーチテーマ
+    approved_themes = []
+    try:
+        for t in research_db.list_approved_themes_by_date(date_str):
+            entry = {"theme": t["theme"]}
+            if t.get("direction"):
+                entry["direction"] = t["direction"]
+            approved_themes.append(entry)
+    except Exception as e:
+        logger.warning("Failed to load approved research themes: %s", e)
+
     # 最小レコード（フォールバック用）
     record = {
         "schema_version": 1,
@@ -85,6 +97,7 @@ def get_daily_structured_record(
                 "KEYWORD_RANKINGS": json.dumps(top_keywords, ensure_ascii=False, indent=2),
                 "DAILY_NOTE_CONTENT": daily_content,
                 "TOPIC_CANDIDATES": json.dumps(TOPIC_ENUM, ensure_ascii=False),
+                "APPROVED_RESEARCH_THEMES": json.dumps(approved_themes, ensure_ascii=False, indent=2),
             }
         )
         response = llm_client.generate_llm_response(

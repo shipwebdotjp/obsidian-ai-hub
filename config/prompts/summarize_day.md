@@ -41,3 +41,7 @@ ${CATEGORY_RANKINGS}
 
 キーワード順位（参考情報）:
 ${KEYWORD_RANKINGS}
+
+当日承認済みリサーチ:
+当日中に承認されたリサーチテーマ一覧です。これらは当日の活動成果として扱い、activitiesやhighlightsに反映しても構いません。ただし、承認操作そのもの以外の活動が記録されていないテーマについては、activitiesやlearningsで無理に言及しないでください。
+${APPROVED_RESEARCH_THEMES}
