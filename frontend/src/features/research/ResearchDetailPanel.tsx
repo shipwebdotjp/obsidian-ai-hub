@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, getResearchTheme, reviewResearchTheme, rerunResearchTheme } from "../../api/client";
 import type { ResearchTheme } from "../../api/types";
+import MarkdownPreview from "../../components/MarkdownPreview";
 
 export interface ResearchDetailPanelProps {
   themeId: string;
@@ -187,10 +188,7 @@ export default function ResearchDetailPanel({
             {job.markdown && job.status === "succeeded" && (
               <>
                 <h3 className="text-xs font-semibold text-slate-700 mt-2">結果</h3>
-                <pre className="whitespace-pre-wrap rounded border border-slate-200 bg-slate-50 p-3 text-xs">
-                  {job.markdown.slice(0, 10000)}
-                  {job.markdown.length > 10000 && "\n...(truncated)"}
-                </pre>
+                <MarkdownPreview content={job.markdown} />
               </>
             )}
           </div>

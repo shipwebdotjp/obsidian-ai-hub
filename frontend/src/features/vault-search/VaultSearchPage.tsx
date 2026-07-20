@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import VaultSearchList from "./VaultSearchList";
 import VaultSearchDetailPanel from "./VaultSearchDetailPanel";
 import type { VaultSearchHit } from "../../api/types";
@@ -7,6 +7,29 @@ interface Toast {
   id: number;
   text: string;
   kind: "info" | "error";
+}
+
+interface SearchHistoryItem {
+  query: string;
+  mode: "hybrid" | "keyword" | "similarity";
+  k: number;
+  searchedAt: string;
+}
+
+const HISTORY_KEY = "obsidian-ai-hub:vault-search-history:v1";
+const MAX_HISTORY = 20;
+
+function loadHistory(): SearchHistoryItem[] {
+  try {
+    const raw = localStorage.getItem(HISTORY_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function persistHistory(history: SearchHistoryItem[]) {
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
 }
 
 export default function VaultSearchPage() {
@@ -20,6 +43,11 @@ export default function VaultSearchPage() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [isSearching, setIsSearching] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const [searchHistory, setSearchHistory] = useState<SearchHistoryItem[]>(loadHistory);
+
+  useEffect(() => {
+    persistHistory(searchHistory);
+  }, [searchHistory]);
 
   const notify = useCallback((text: string, kind: "info" | "error" = "info") => {
     const id = Date.now() + Math.random();
@@ -29,18 +57,43 @@ export default function VaultSearchPage() {
     }, 3500);
   }, []);
 
+  const runSearch = useCallback((query: string, searchMode: "hybrid" | "keyword" | "similarity", resultK: number) => {
+    if (!query.trim() || isSearching) return;
+    setCommittedQuery(query.trim());
+    setCommittedMode(searchMode);
+    setCommittedK(resultK);
+    setSelectedHit(null);
+    setIsSearching(true);
+
+    setSearchHistory((prev) => {
+      const filtered = prev.filter(
+        (h) => !(h.query === query.trim() && h.mode === searchMode && h.k === resultK)
+      );
+      const updated = [
+        { query: query.trim(), mode: searchMode, k: resultK, searchedAt: new Date().toISOString() },
+        ...filtered,
+      ].slice(0, MAX_HISTORY);
+      return updated;
+    });
+
+    setRefreshKey((v) => v + 1);
+  }, [isSearching]);
+
   const handleSearch = useCallback(() => {
+    if (isSearching) return;
     if (!queryInput.trim()) {
       notify("検索クエリを入力してください", "error");
       return;
     }
-    setCommittedQuery(queryInput.trim());
-    setCommittedMode(mode);
-    setCommittedK(k);
-    setSelectedHit(null);
-    setIsSearching(true);
-    setRefreshKey((v) => v + 1);
-  }, [queryInput, mode, k, notify]);
+    runSearch(queryInput.trim(), mode, k);
+  }, [queryInput, mode, k, notify, runSearch, isSearching]);
+
+  const handleHistorySearch = useCallback((item: SearchHistoryItem) => {
+    setQueryInput(item.query);
+    setMode(item.mode);
+    setK(item.k);
+    runSearch(item.query, item.mode, item.k);
+  }, [runSearch]);
 
   const handleLoaded = useCallback((items: VaultSearchHit[], error: string | null) => {
     setIsSearching(false);
@@ -94,15 +147,37 @@ export default function VaultSearchPage() {
         </button>
       </header>
       <div className="flex flex-1 overflow-hidden">
-        <div className="w-1/2 border-r border-slate-200">
-          <VaultSearchList
-            query={committedQuery}
-            k={committedK}
-            mode={committedMode}
-            refreshKey={refreshKey}
-            onSelect={setSelectedHit}
-            onLoaded={handleLoaded}
-          />
+        <div className="flex w-1/2 flex-col border-r border-slate-200 overflow-hidden">
+          {searchHistory.length > 0 && (
+            <div className="shrink-0 max-h-36 overflow-y-auto border-b border-slate-100 p-2">
+              <h2 className="mb-1 text-xs font-semibold text-slate-500">最近の検索</h2>
+              <ul className="space-y-0.5">
+                {searchHistory.map((item, i) => (
+                  <li key={`${item.query}-${item.mode}-${item.k}-${item.searchedAt}`}>
+                    <button
+                      type="button"
+                      onClick={() => handleHistorySearch(item)}
+                      disabled={isSearching}
+                      className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-sm hover:bg-slate-100 disabled:opacity-50"
+                    >
+                      <span className="truncate text-slate-700">{item.query}</span>
+                      <span className="shrink-0 text-xs text-slate-400">{item.mode} / {item.k}件</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          <div className="flex-1 overflow-hidden">
+            <VaultSearchList
+              query={committedQuery}
+              k={committedK}
+              mode={committedMode}
+              refreshKey={refreshKey}
+              onSelect={setSelectedHit}
+              onLoaded={handleLoaded}
+            />
+          </div>
         </div>
         <div className="w-1/2 overflow-hidden">
           {selectedHit ? (

@@ -170,11 +170,19 @@ def generate_llm_response_with_tools(
     config.ensure_external_allowed("LLM API call with tools")
     messages = _prepare_messages(provider, prompt, files, system_prompt=system_prompt)
 
+    openai_tool_options = {}
+    if provider == "openai":
+        openai_tool_options = {
+            "use_responses_api": True,
+            "store": False,
+        }
+
     llm = create_langchain_llm(
         provider=provider,
         model=model,
         temperature=temperature,
         max_tokens=max_tokens,
+        **openai_tool_options,
     )
 
     llm_with_tools = llm.bind_tools(list(tools))
@@ -221,6 +229,9 @@ def create_langchain_llm(
     model: str,
     temperature: float = 0.7,
     max_tokens: int = 512,
+    *,
+    use_responses_api: bool | None = None,
+    store: bool | None = None,
 ):
     """
     provider 名から LangChain の ChatModel / LLM を生成する。
@@ -232,7 +243,12 @@ def create_langchain_llm(
     - opencode_go: ChatOpenAI / ChatAnthropic
     """
     if provider == "openai":
-        return create_openai_llm(model, temperature, max_tokens)
+        openai_options = {}
+        if use_responses_api is not None:
+            openai_options["use_responses_api"] = use_responses_api
+        if store is not None:
+            openai_options["store"] = store
+        return create_openai_llm(model, temperature, max_tokens, **openai_options)
 
     if provider == "gemini":
         return create_gemini_llm(model, temperature, max_tokens)
@@ -294,7 +310,14 @@ def create_opencode_go_llm(model: str, temperature: float = 0.7, max_tokens: int
         raise RuntimeError(f"Unsupported model ID for opencode_go: {model}")
 
 
-def create_openai_llm(model: str, temperature: float = 0.7, max_tokens: int = 512):
+def create_openai_llm(
+    model: str,
+    temperature: float = 0.7,
+    max_tokens: int = 512,
+    *,
+    use_responses_api: bool | None = None,
+    store: bool | None = None,
+):
     """OpenAI 用 LangChain ChatModel を返す。"""
     try:
         from langchain_openai import ChatOpenAI
@@ -308,12 +331,19 @@ def create_openai_llm(model: str, temperature: float = 0.7, max_tokens: int = 51
     if not api_key:
         raise RuntimeError("Environment variable OPENAI_API_KEY is not set")
 
+    options = {}
+    if use_responses_api is not None:
+        options["use_responses_api"] = use_responses_api
+    if store is not None:
+        options["store"] = store
+
     return ChatOpenAI(
         model=model,
         api_key=api_key,
         temperature=temperature,
         max_tokens=max_tokens,
         max_retries=0,  # 外側の _with_exponential_backoff に任せる
+        **options,
     )
 
 

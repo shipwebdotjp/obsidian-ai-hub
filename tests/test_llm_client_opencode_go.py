@@ -114,3 +114,47 @@ def test_generate_llm_response_opencode_go_integration():
 
         assert response == "Generated response from OpenCode Go"
         mock_llm.invoke.assert_called_once()
+
+
+def test_generate_llm_response_with_tools_uses_responses_api_for_openai():
+    mock_llm = MagicMock()
+    mock_llm.bind_tools.return_value.invoke.return_value = AIMessage(content="Research complete")
+
+    with patch("obsidian_ai_hub.utils.llm_client.create_langchain_llm", return_value=mock_llm) as factory:
+        response = llm_client.generate_llm_response_with_tools(
+            provider="openai",
+            model="gpt-5.6-terra",
+            prompt="Research this topic",
+            tools=[],
+        )
+
+    assert response == "Research complete"
+    factory.assert_called_once_with(
+        provider="openai",
+        model="gpt-5.6-terra",
+        temperature=0.7,
+        max_tokens=512,
+        use_responses_api=True,
+        store=False,
+    )
+
+
+def test_generate_llm_response_with_tools_keeps_non_openai_default():
+    mock_llm = MagicMock()
+    mock_llm.bind_tools.return_value.invoke.return_value = AIMessage(content="Research complete")
+
+    with patch("obsidian_ai_hub.utils.llm_client.create_langchain_llm", return_value=mock_llm) as factory:
+        response = llm_client.generate_llm_response_with_tools(
+            provider="opencode_go",
+            model="deepseek-v3",
+            prompt="Research this topic",
+            tools=[],
+        )
+
+    assert response == "Research complete"
+    factory.assert_called_once_with(
+        provider="opencode_go",
+        model="deepseek-v3",
+        temperature=0.7,
+        max_tokens=512,
+    )

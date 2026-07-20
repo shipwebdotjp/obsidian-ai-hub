@@ -1,5 +1,21 @@
 # アーキテクチャ決定記録
 
+## Web リサーチの OpenAI ツール呼び出しは Responses API を使う
+
+| 項目 | 内容 |
+|------|------|
+| 決定日 | 2026-07-19 |
+| カテゴリ | リサーチ・LLM連携 |
+| 決定内容 | `provider: openai` によるツール付き Web リサーチだけ、`ChatOpenAI` の `use_responses_api=True` を指定し、`store=False` とする |
+
+### 結論に至った経緯
+
+`gpt-5.6-terra` は Chat Completions API で reasoning を伴う function tools を受け付けず、
+`/v1/responses` を使うか `reasoning_effort='none'` を指定するよう 400 エラーで要求された。
+推論を無効化すると Web リサーチの品質を落とすため、Responses API を使用する。通常の LLM 呼び出し、
+deep リサーチ、OpenAI 互換の OpenCode Go 呼び出しには適用しないため、Responses API 非対応の
+プロバイダーやモデルへの影響を避ける。API 側にリサーチ内容を保持しないよう `store=False` を明示する。
+
 ## テスト環境隔離 (ENV=test)
 
 | 項目 | 内容 |

@@ -130,7 +130,7 @@ def main():
     parser.add_argument(
         "--suggest-research-theme",
         action="store_true",
-        help="最近30日のノートから研究候補3件を生成して追記"
+        help="最近30日のノートから研究候補を生成して追記"
     )
     parser.add_argument(
         "--screenshot",
