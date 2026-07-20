@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from obsidian_ai_hub.memory import get_embedder
+from obsidian_ai_hub.utils.embeddings import get_embedder
 
 logger = logging.getLogger(__name__)
 

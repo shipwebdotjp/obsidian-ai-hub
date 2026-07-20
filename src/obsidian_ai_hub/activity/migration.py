@@ -7,7 +7,7 @@ import uuid
 from datetime import date
 from pathlib import Path
 
-from obsidian_ai_hub.memory import get_db_connection
+from obsidian_ai_hub.database import get_db_connection
 from obsidian_ai_hub.utils import config as app_config
 
 logger = logging.getLogger(__name__)

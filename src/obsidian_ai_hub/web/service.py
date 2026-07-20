@@ -8,6 +8,7 @@ from typing import Any, Optional
 
 from obsidian_ai_hub import memory
 from obsidian_ai_hub.activity import store as activity_store
+from obsidian_ai_hub.database import get_db_connection
 from obsidian_ai_hub.handler import obsidian_vault_retriever
 from obsidian_ai_hub.people_sync.sync import (
     get_db_vault_conflicts_report,
@@ -46,7 +47,7 @@ def list_memories(
 
 
 def get_memory(memory_id: str) -> Optional[dict]:
-    conn = memory.get_db_connection()
+    conn = get_db_connection()
     try:
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM memories WHERE memory_id = ?", (memory_id,))
@@ -378,7 +379,7 @@ def get_dashboard_home(now: Optional[datetime] = None) -> dict:
     this_month_summary = summary_store.get_summary_by_period("month", this_month_str)
 
     # Latest weekly summary
-    conn = memory.get_db_connection()
+    conn = get_db_connection()
     latest_week_summary = None
     try:
         cursor = conn.cursor()
@@ -428,7 +429,7 @@ def get_dashboard_home(now: Optional[datetime] = None) -> dict:
 
 
 def find_selectable_years() -> list[str]:
-    conn = memory.get_db_connection()
+    conn = get_db_connection()
     years = set()
     try:
         cursor = conn.cursor()
@@ -474,7 +475,7 @@ def get_dashboard_browse(
         selected_end = f"{selected_year}-12-31"
 
         # Month summaries in that year
-        conn = memory.get_db_connection()
+        conn = get_db_connection()
         months_summaries = []
         try:
             cursor = conn.cursor()
@@ -529,7 +530,7 @@ def get_dashboard_browse(
         overlapping_weeks.sort(key=lambda x: x.get("period_key", ""), reverse=True)
 
         # Days list with either daily summary or activity logs
-        conn = memory.get_db_connection()
+        conn = get_db_connection()
         days_data = {}
         try:
             cursor = conn.cursor()
@@ -572,7 +573,7 @@ def get_dashboard_browse(
         sorted_days = [days_data[k] for k in sorted(days_data.keys(), reverse=True)]
 
         months_summaries = []
-        conn = memory.get_db_connection()
+        conn = get_db_connection()
         try:
             cursor = conn.cursor()
             cursor.execute(
@@ -652,7 +653,7 @@ def get_dashboard_stats(
         granularity = "month"
 
     all_day_summaries = []
-    conn = memory.get_db_connection()
+    conn = get_db_connection()
     try:
         cursor = conn.cursor()
         cursor.execute(
@@ -726,7 +727,7 @@ def get_dashboard_stats(
                 "keyword_counts": {},
             }
 
-    conn = memory.get_db_connection()
+    conn = get_db_connection()
     logs_by_date = {}
     try:
         cursor = conn.cursor()
@@ -826,7 +827,7 @@ class VaultLinkedPersonError(ValueError):
 
 
 def list_people() -> list[dict[str, Any]]:
-    conn = memory.get_db_connection()
+    conn = get_db_connection()
     try:
         cursor = conn.cursor()
         cursor.execute("""
@@ -850,7 +851,7 @@ def list_people() -> list[dict[str, Any]]:
 
 
 def get_person_detail(person_id: str) -> Optional[dict[str, Any]]:
-    conn = memory.get_db_connection()
+    conn = get_db_connection()
     try:
         cursor = conn.cursor()
         cursor.execute(
@@ -921,7 +922,7 @@ def update_unlinked_person(
             "At least display_name or aliases must be specified for update."
         )
 
-    conn = memory.get_db_connection()
+    conn = get_db_connection()
     try:
         with conn:
             cursor = conn.cursor()
@@ -1039,7 +1040,7 @@ def update_unlinked_person(
 
 
 def delete_person(person_id: str) -> dict:
-    conn = memory.get_db_connection()
+    conn = get_db_connection()
     try:
         with conn:
             cursor = conn.cursor()
@@ -1079,7 +1080,7 @@ def delete_person(person_id: str) -> dict:
 
 
 def list_person_candidates() -> list[dict[str, Any]]:
-    conn = memory.get_db_connection()
+    conn = get_db_connection()
     try:
         cursor = conn.cursor()
         cursor.execute(
@@ -1091,7 +1092,7 @@ def list_person_candidates() -> list[dict[str, Any]]:
 
 
 def get_person_candidate_detail(candidate_id: str) -> Optional[dict[str, Any]]:
-    conn = memory.get_db_connection()
+    conn = get_db_connection()
     try:
         cursor = conn.cursor()
         cursor.execute(
@@ -1130,7 +1131,7 @@ def get_person_candidate_detail(candidate_id: str) -> Optional[dict[str, Any]]:
 def assign_candidate_summary(
     candidate_id: str, summary_id: str, target_person_id: str
 ) -> bool:
-    conn = memory.get_db_connection()
+    conn = get_db_connection()
     try:
         with conn:
             cursor = conn.cursor()
@@ -1234,7 +1235,7 @@ def assign_candidate_summary(
 def resolve_person_candidate(
     candidate_id: str, target_person_id: str
 ) -> dict[str, Any]:
-    conn = memory.get_db_connection()
+    conn = get_db_connection()
     try:
         with conn:
             cursor = conn.cursor()
@@ -1367,7 +1368,7 @@ def resolve_person_candidate(
 def get_duplicate_candidates() -> dict[str, Any]:
     safe_map, report = load_people_notes_with_report()
 
-    conn = memory.get_db_connection()
+    conn = get_db_connection()
     try:
         cursor = conn.cursor()
 
@@ -1660,7 +1661,7 @@ def verify_people_merge(
 
 
 def preview_people_merge(from_person_id: str, to_person_id: str) -> dict:
-    conn = memory.get_db_connection()
+    conn = get_db_connection()
     try:
         cursor = conn.cursor()
         return verify_people_merge(cursor, from_person_id, to_person_id)
@@ -1672,7 +1673,7 @@ def merge_people(from_person_id: str, to_person_id: str) -> bool:
     if from_person_id == to_person_id:
         raise ValueError("Source and target person IDs for merge cannot be identical.")
 
-    conn = memory.get_db_connection()
+    conn = get_db_connection()
     try:
         with conn:
             cursor = conn.cursor()
@@ -1765,7 +1766,7 @@ def sync_people() -> dict[str, Any]:
     people_notes_map, report = load_people_notes_with_report()
     parsed_notes = report.get("parsed_notes", [])
 
-    conn = memory.get_db_connection()
+    conn = get_db_connection()
     try:
         with conn:
             # 1. Detect conflicts
@@ -1798,7 +1799,7 @@ def get_vault_report_dynamic() -> dict[str, Any]:
     people_notes_map, report = load_people_notes_with_report()
     parsed_notes = report.get("parsed_notes", [])
 
-    conn = memory.get_db_connection()
+    conn = get_db_connection()
     try:
         db_conflicts = get_db_vault_conflicts_report(conn, parsed_notes)
         clean_loader_report = {
@@ -1813,7 +1814,7 @@ def get_vault_report_dynamic() -> dict[str, Any]:
 
 
 def delete_person_alias(person_id: str, normalized_name: str) -> dict:
-    conn = memory.get_db_connection()
+    conn = get_db_connection()
     try:
         with conn:
             cursor = conn.cursor()
@@ -1938,7 +1939,7 @@ def update_summary_detail(summary_id: str, body: schemas.SummaryUpdateRequest) -
         if people is None:
             people = []
         seen_pids = set()
-        conn = memory.get_db_connection()
+        conn = get_db_connection()
         try:
             cursor = conn.cursor()
             for p in people:

@@ -140,3 +140,49 @@ Flex Message を使わないため、リッチなレイアウトは不可能だ�
 ### 補足: 要約ヘッダの文言変更
 
 `format_summary_for_line` を日次・週次で共有するため、要約ヘッダを「💡昨日の要約」から「💡要約」に変更した。ユーザ視点では日次通知のヘッダが「昨日の」修飾を失うが、関数共通化による見返りが大きく、月曜は日次と週次の2テキストが並ぶため文脈からどちらの要約か判別可能。
+
+## 共有SQLiteの所有者はdatabase.py、長期記憶はmemoryパッケージ
+
+| 項目 | 内容 |
+|------|------|
+| 決定日 | 2026-07-20 |
+| カテゴリ | アーキテクチャ・分割 |
+| 決定内容 | 共有SQLiteの接続・マイグレーションは `obsidian_ai_hub.database` に集約し、長期記憶は `obsidian_ai_hub.memory` パッケージに分割する。`obsidian_ai_hub.memory` は公開APIのファサードとして維持する |
+
+### 結論に至った経緯
+
+旧 `memory.py`（約2,600行）は、長期記憶のライフサイクルに加えて、memories / research_themes / activity_logs / summaries / people など全ドメインが共有するSQLiteの初期化と v1–v8 マイグレーションを抱えていた。これにより、
+
+- summary / activity / research / people_sync が `from obsidian_ai_hub.memory import get_db_connection` に依存し、メモリ機能に間接的に引きずられる
+- LLMクライアントなどの重い依存が、SQLiteだけを利用するドメインにも伝播する
+- ファイルが肥大化し、見通しと保守性が悪化している
+
+という問題があった。LLM呼び出しを含むメモリ機能と、純粋なDB基盤を分離する必要がある。
+
+### 構造
+
+- `obsidian_ai_hub.database` — SQLite接続、テスト環境の本番DBガード、v1–v8 マイグレーション、スキーマ所有者。
+- `obsidian_ai_hub.utils.embeddings` — 遅延初期化されるSBERT埋め込みと `cosine_similarity`。研究ドメインからも直接利用される。
+- `obsidian_ai_hub.memory` パッケージ:
+  - `models` — カラム定数、ID/時刻生成、安定性検証、シリアライザ、マージヘルパ、EDITABLE_FIELDS。
+  - `store` — memories / events のCRUD、`log_memory_event`、`_prune_dedup_suggestions`。
+  - `dedup` — 完全一致 / ベクトル類似 / LLM による重複候補評価。
+  - `extraction` — 週範囲算出、ソース抽出、LLM抽出、保存。
+  - `review` — 承認 / 却下 / 編集 / 一括 / resolve / 削除のライフサイクル。
+  - `context` — 有効期限判定、expired 遷移、`compile_context`。
+  - `projection` — `approved.md` と copilot profile Markdown の生成。
+  - `__init__.py` — 公開APIのファサード。再エクスポートのみで、テストやCLI、Webからの `from obsidian_ai_hub import memory` を維持する。
+
+### 互換性
+
+- 既存の import パス `from obsidian_ai_hub import memory` および `from obsidian_ai_hub.memory import symbol` は維持される。
+- テストの monkeypatch 対象 (`obsidian_ai_hub.memory.llm_client`、`obsidian_ai_hub.memory.generate_memory_id` 等) は、ファサード経由の解決に変更することで互換性を保つ。
+- DBスキーマ・マイグレーション内容はバイト等価で、既存の本番DBはそのまま v8 までマイグレーションされる。
+- テストでは `test_memory_db_path` フィクスチャと `OBSIDIAN_AI_HUB_TESTING=1` による本番DB保護を引き続き利用する。
+
+### トレードオフ
+
+- ファサードを維持するため、 `obsidian_ai_hub.memory` の責務は依然として広範に見える。実装はサブパッケージに閉じているため、コードの見通しは改善している。
+- 依存方向は `models → stdlib`、`store → database + models`、`dedup / extraction / review / context / projection → 上位層` となり、循環importは存在しない。
+- `projection` だけは `approved.md` の書き出しをトリガするため `review` と `context` から逆参照される。import-time の循環を避けるため、`projection.project_approved_memories` の呼び出しはローカル import で行う。
+

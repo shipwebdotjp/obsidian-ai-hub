@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from obsidian_ai_hub.memory import get_db_connection
+from obsidian_ai_hub.database import get_db_connection
 from obsidian_ai_hub.utils.topics import normalize_topics
 
 logger = logging.getLogger(__name__)

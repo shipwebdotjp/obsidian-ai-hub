@@ -8,7 +8,8 @@ import uuid
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
-from obsidian_ai_hub.memory import get_db_connection
+from obsidian_ai_hub.database import get_db_connection
+from obsidian_ai_hub.utils.embeddings import cosine_similarity
 
 logger = logging.getLogger(__name__)
 
@@ -412,8 +413,6 @@ def find_exact_duplicate(normalized_key: str) -> Optional[dict]:
 
 def find_top_similar(theme: str, embedder, k: int = 5) -> list[tuple[str, float]]:
     try:
-        from obsidian_ai_hub.memory import cosine_similarity
-
         conn = _get_db()
         try:
             cursor = conn.cursor()

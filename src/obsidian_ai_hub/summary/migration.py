@@ -8,7 +8,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-from obsidian_ai_hub.memory import get_db_connection
+from obsidian_ai_hub.database import get_db_connection
 from obsidian_ai_hub.summary import store as summary_store
 from obsidian_ai_hub.utils import config as app_config
 from obsidian_ai_hub.utils.topics import normalize_topics

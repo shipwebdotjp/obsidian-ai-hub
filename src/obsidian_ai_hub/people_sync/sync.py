@@ -5,7 +5,7 @@ import sqlite3
 import uuid
 from typing import Any, Dict
 
-from obsidian_ai_hub import memory
+from obsidian_ai_hub.database import get_db_connection
 from obsidian_ai_hub.utils.people_loader import load_people_notes_with_report
 from obsidian_ai_hub.summary.store import normalize_entity_name
 
@@ -426,7 +426,7 @@ def main() -> None:
     logger.info("Starting sync of people from Vault notes...")
     people_notes_map, report = load_people_notes_with_report()
 
-    conn = memory.get_db_connection()
+    conn = get_db_connection()
     try:
         with conn:
             # 1. Detect DB conflicts
