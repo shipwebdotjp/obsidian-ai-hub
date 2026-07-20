@@ -4,4 +4,5 @@ export const ROUTES = {
   VAULT_SEARCH: "/vault-search",
   SUMMARY_DASHBOARD: "/summary-dashboard",
   PEOPLE: "/people",
+  PROJECTS: "/projects",
 } as const;

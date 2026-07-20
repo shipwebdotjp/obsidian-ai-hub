@@ -59,6 +59,86 @@ def run_migration_v8(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def run_migration_v9(conn: sqlite3.Connection) -> None:
+    """Run migration for version 9 (projects & candidates refactoring with numerical integer IDs)."""
+    # 1. Drop old tables if they exist
+    conn.execute("DROP TABLE IF EXISTS summary_projects;")
+    conn.execute("DROP TABLE IF EXISTS projects;")
+
+    # 2. Create rebuilt projects table with integer primary key
+    conn.execute("""
+        CREATE TABLE projects (
+            project_id INTEGER PRIMARY KEY,
+            normalized_name TEXT UNIQUE NOT NULL,
+            display_name TEXT NOT NULL,
+            domain TEXT NOT NULL,                -- work / personal
+            status TEXT NOT NULL,                -- inquiry / active / paused / completed / cancelled
+            goal TEXT,
+            description TEXT,
+            keywords TEXT NOT NULL DEFAULT '[]', -- JSON array
+            start_date TEXT,
+            target_date TEXT,
+            completed_date TEXT,
+            project_path TEXT,
+            reference_url TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+    """)
+
+    # 3. Create rebuilt summary_projects table
+    conn.execute("""
+        CREATE TABLE summary_projects (
+            summary_id TEXT NOT NULL,
+            project_id INTEGER NOT NULL,
+            display_order INTEGER,
+            PRIMARY KEY(summary_id, project_id),
+            FOREIGN KEY(summary_id) REFERENCES summaries(summary_id) ON DELETE CASCADE,
+            FOREIGN KEY(project_id) REFERENCES projects(project_id) ON DELETE CASCADE
+        );
+    """)
+
+    # 4. Create project_candidates table
+    conn.execute("""
+        CREATE TABLE project_candidates (
+            candidate_id INTEGER PRIMARY KEY,
+            display_name TEXT NOT NULL,
+            normalized_name TEXT UNIQUE NOT NULL,
+            domain TEXT NOT NULL,                -- work / personal
+            status TEXT NOT NULL DEFAULT 'unresolved', -- unresolved, resolved, rejected
+            goal TEXT,
+            description TEXT,
+            keywords TEXT NOT NULL DEFAULT '[]', -- JSON array
+            start_date TEXT,
+            target_date TEXT,
+            completed_date TEXT,
+            evidence TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+    """)
+
+    # 5. Create summary_project_candidates table
+    conn.execute("""
+        CREATE TABLE summary_project_candidates (
+            summary_id TEXT NOT NULL,
+            candidate_id INTEGER NOT NULL,
+            display_order INTEGER,
+            PRIMARY KEY(summary_id, candidate_id),
+            FOREIGN KEY(summary_id) REFERENCES summaries(summary_id) ON DELETE CASCADE,
+            FOREIGN KEY(candidate_id) REFERENCES project_candidates(candidate_id) ON DELETE CASCADE
+        );
+    """)
+
+    # 6. Create indexes
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_sp_project_id ON summary_projects(project_id);")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_spc_candidate_id ON summary_project_candidates(candidate_id);")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_pc_normalized_name ON project_candidates(normalized_name);")
+
+    conn.execute("PRAGMA user_version = 9;")
+    conn.commit()
+
+
 def get_db_connection() -> sqlite3.Connection:
     db_path = Path(config.MEMORY_SQLITE_PATH)
     _assert_test_db_is_not_production(db_path)
@@ -357,5 +437,8 @@ def get_db_connection() -> sqlite3.Connection:
 
     if current_version <= 7:
         run_migration_v8(conn)
+
+    if current_version <= 8:
+        run_migration_v9(conn)
 
     return conn
