@@ -17,7 +17,9 @@ def test_append_research_theme_creates_candidate_in_db():
 
 def test_append_research_theme_with_direction():
     with patch("obsidian_ai_hub.research.runner.run_theme_research") as mock_research:
-        result = add_research_theme.append_research_theme("テーマ", direction="調査方向")
+        result = add_research_theme.append_research_theme(
+            "テーマ", direction="調査方向"
+        )
     assert result == "candidate"
     mock_research.assert_called_once()
 

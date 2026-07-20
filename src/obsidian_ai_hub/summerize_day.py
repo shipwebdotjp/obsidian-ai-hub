@@ -8,14 +8,20 @@ from obsidian_ai_hub.activity.store import get_activities_by_date
 from obsidian_ai_hub.research import db as research_db
 from obsidian_ai_hub.summary import store as summary_store
 from obsidian_ai_hub.utils import config, reader, extracter, llm_client, prompt
-from obsidian_ai_hub.utils.topics import TOPIC_ENUM, normalize_keywords, normalize_topics
+from obsidian_ai_hub.utils.topics import (
+    TOPIC_ENUM,
+    normalize_keywords,
+    normalize_topics,
+)
 
 logger = logging.getLogger(__name__)
 
 DAY_ITEM_KINDS = ["highlights", "activities", "learnings", "reflections", "gratitude"]
 
 
-def get_activity_rankings(activity_logs: list[dict]) -> tuple[list[tuple[str, int]], list[tuple[str, int]]]:
+def get_activity_rankings(
+    activity_logs: list[dict],
+) -> tuple[list[tuple[str, int]], list[tuple[str, int]]]:
     """アクティビティログから表示・要約用のランキングを作成する。"""
     categories = [log.get("category") for log in activity_logs if log.get("category")]
     keywords = [
@@ -31,7 +37,7 @@ def get_daily_structured_record(
     target_date: datetime,
     daily_content: str,
     logs: list[dict],
-    activity_logs: list[dict]
+    activity_logs: list[dict],
 ) -> dict:
     """
     指定された日付の情報を構造化データとして生成。
@@ -50,10 +56,9 @@ def get_daily_structured_record(
         # ミリ秒を除去 (2023-10-27T10:00:00.123456 -> 2023-10-27T10:00:00)
         if ts and "." in ts:
             ts = ts.split(".")[0]
-        simplified_activity_logs.append({
-            "timestamp": ts,
-            "summary": log.get("summary")
-        })
+        simplified_activity_logs.append(
+            {"timestamp": ts, "summary": log.get("summary")}
+        )
 
     top_categories, top_keywords = get_activity_rankings(activity_logs)
 
@@ -92,13 +97,21 @@ def get_daily_structured_record(
             config.SUMMARIZE_DAY_PROMPT_PATH,
             {
                 "SESSION_SUMMARIES": json.dumps(logs, ensure_ascii=False, indent=2),
-                "ACTIVITY_LOGS": json.dumps(simplified_activity_logs, ensure_ascii=False, indent=2),
-                "CATEGORY_RANKINGS": json.dumps(top_categories, ensure_ascii=False, indent=2),
-                "KEYWORD_RANKINGS": json.dumps(top_keywords, ensure_ascii=False, indent=2),
+                "ACTIVITY_LOGS": json.dumps(
+                    simplified_activity_logs, ensure_ascii=False, indent=2
+                ),
+                "CATEGORY_RANKINGS": json.dumps(
+                    top_categories, ensure_ascii=False, indent=2
+                ),
+                "KEYWORD_RANKINGS": json.dumps(
+                    top_keywords, ensure_ascii=False, indent=2
+                ),
                 "DAILY_NOTE_CONTENT": daily_content,
                 "TOPIC_CANDIDATES": json.dumps(TOPIC_ENUM, ensure_ascii=False),
-                "APPROVED_RESEARCH_THEMES": json.dumps(approved_themes, ensure_ascii=False, indent=2),
-            }
+                "APPROVED_RESEARCH_THEMES": json.dumps(
+                    approved_themes, ensure_ascii=False, indent=2
+                ),
+            },
         )
         response = llm_client.generate_llm_response(
             provider=config.MAKE_TODAY_TARGET_PROVIDER,
@@ -119,10 +132,25 @@ def get_daily_structured_record(
 
         # 抽出したデータを record にマージ
         scalar_fields = {"summary"}
-        list_fields = {"keywords", "topics", "highlights", "activities", "learnings", "reflections", "gratitude"}
+        list_fields = {
+            "keywords",
+            "topics",
+            "highlights",
+            "activities",
+            "learnings",
+            "reflections",
+            "gratitude",
+        }
         for key in [
-            "summary", "keywords", "topics", "highlights", "activities", "learnings",
-            "reflections", "gratitude", "people",
+            "summary",
+            "keywords",
+            "topics",
+            "highlights",
+            "activities",
+            "learnings",
+            "reflections",
+            "gratitude",
+            "people",
         ]:
             if key in data:
                 val = data[key]
@@ -133,10 +161,12 @@ def get_daily_structured_record(
                     normalized_people = []
                     for p in val:
                         if isinstance(p, dict) and p.get("name"):
-                            normalized_people.append({
-                                "name": str(p.get("name", "")),
-                                "note": str(p.get("note", ""))
-                            })
+                            normalized_people.append(
+                                {
+                                    "name": str(p.get("name", "")),
+                                    "note": str(p.get("note", "")),
+                                }
+                            )
                     record["people"] = normalized_people
                 elif key in scalar_fields and isinstance(val, str):
                     record[key] = val or None
@@ -153,7 +183,9 @@ def get_daily_structured_record(
                         )
 
         # display_order を kind 単位で振り直す
-        record["items"].sort(key=lambda x: (DAY_ITEM_KINDS.index(x["kind"]), x["display_order"]))
+        record["items"].sort(
+            key=lambda x: (DAY_ITEM_KINDS.index(x["kind"]), x["display_order"])
+        )
         for kind in DAY_ITEM_KINDS:
             kind_items = [i for i in record["items"] if i["kind"] == kind]
             for idx, item in enumerate(kind_items):
@@ -165,7 +197,9 @@ def get_daily_structured_record(
     return record
 
 
-def format_structured_record_as_markdown(record: dict, activity_logs: list[dict]) -> str:
+def format_structured_record_as_markdown(
+    record: dict, activity_logs: list[dict]
+) -> str:
     """
     構造化レコードとアクティビティログをマークダウン形式に変換。
     """
@@ -248,22 +282,24 @@ def load_activity_logs(target_date: datetime) -> list[dict]:
         if keywords is None:
             keywords = []
 
-        logs.append({
-            "timestamp": data.get("occurred_at"),
-            "app_name": data.get("app_name"),
-            "window_title": data.get("window_title"),
-            "summary": data.get("summary"),
-            "category": category,
-            "keywords": keywords
-        })
+        logs.append(
+            {
+                "timestamp": data.get("occurred_at"),
+                "app_name": data.get("app_name"),
+                "window_title": data.get("window_title"),
+                "summary": data.get("summary"),
+                "category": category,
+                "keywords": keywords,
+            }
+        )
     return logs
 
 
 def load_conversation_logs(log_file_dir: str, target_date: datetime) -> list[dict]:
     logs = []
-    date_str = target_date.strftime('%Y%m%d')
+    date_str = target_date.strftime("%Y%m%d")
     log_dir = Path(log_file_dir)
-    for file in log_dir.glob(f'*@{date_str}*.json'):
+    for file in log_dir.glob(f"*@{date_str}*.json"):
         with open(file, "r", encoding="utf-8") as f:
             try:
                 log = json.load(f)
@@ -280,7 +316,6 @@ def summarize_day(target_date: datetime):
     """
     logger.info("Summarizing day: %s", target_date.date())
 
-    daily_file = reader.get_daily_note_path(target_date)
     daily_content = reader.get_daily_note_content(target_date)
 
     # 1. ログのロード
@@ -288,10 +323,14 @@ def summarize_day(target_date: datetime):
     activity_logs = load_activity_logs(target_date)
 
     # 2. 構造化レコードの生成
-    structured_record = get_daily_structured_record(target_date, daily_content, logs, activity_logs)
+    structured_record = get_daily_structured_record(
+        target_date, daily_content, logs, activity_logs
+    )
 
     if not structured_record.get("summary"):
-        logger.error("Failed to generate structured record; skipping persistence and daily note update")
+        logger.error(
+            "Failed to generate structured record; skipping persistence and daily note update"
+        )
         return
 
     # 3. SQLiteへの保存 (永続化)

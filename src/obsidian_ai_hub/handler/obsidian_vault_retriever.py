@@ -33,11 +33,13 @@ def _search_obsidian_vault_core_sync(
 
         formatted_results = []
         for hit in results:
-            formatted_results.append({
-                "content": hit.content,
-                "metadata": hit.metadata,
-                "score": hit.score,
-            })
+            formatted_results.append(
+                {
+                    "content": hit.content,
+                    "metadata": hit.metadata,
+                    "score": hit.score,
+                }
+            )
 
         return json.dumps(formatted_results, ensure_ascii=False)
 

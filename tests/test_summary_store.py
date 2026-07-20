@@ -1,4 +1,3 @@
-import sqlite3
 from pathlib import Path
 
 import pytest
@@ -23,8 +22,8 @@ def mock_people_notes(monkeypatch):
                 "name": "Alice",
                 "aliases": ["alice", "a-chan"],
                 "file_path": Path("alice.md"),
-            }
-        }
+            },
+        },
     )
 
 
@@ -35,7 +34,9 @@ def test_schema_version_bump(test_memory_db_path):
         cursor.execute("PRAGMA user_version;")
         assert cursor.fetchone()[0] == 8
 
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;")
+        cursor.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;"
+        )
         tables = {row[0] for row in cursor.fetchall()}
         assert "summaries" in tables
         assert "summary_items" in tables
@@ -73,7 +74,10 @@ def _make_day_record(period_key="2026-07-17"):
         ],
         "topics": ["LLM・AI活用", "InvalidTopic"],
         "projects": ["Project A", "project a"],
-        "people": [{"name": "Alice", "note": "met for lunch"}, {"name": "alice", "note": "same person"}],
+        "people": [
+            {"name": "Alice", "note": "met for lunch"},
+            {"name": "alice", "note": "same person"},
+        ],
     }
 
 
@@ -108,7 +112,9 @@ def test_upsert_updates_existing_record(test_memory_db_path):
         store.upsert_summary(_make_day_record(), conn=conn)
         updated = _make_day_record()
         updated["summary"] = "Updated summary"
-        updated["items"] = [{"kind": "highlights", "body": "Only highlight", "display_order": 0}]
+        updated["items"] = [
+            {"kind": "highlights", "body": "Only highlight", "display_order": 0}
+        ]
         updated["topics"] = ["信仰・聖書"]
 
         store.upsert_summary(updated, conn=conn)
@@ -229,7 +235,9 @@ def test_invalid_period_type_raises(test_memory_db_path):
     conn = memory.get_db_connection()
     try:
         with pytest.raises(ValueError):
-            store.upsert_summary({"period_type": "year", "period_key": "2026"}, conn=conn)
+            store.upsert_summary(
+                {"period_type": "year", "period_key": "2026"}, conn=conn
+            )
     finally:
         conn.close()
 
@@ -247,7 +255,7 @@ def test_unresolved_resolved_filtering(test_memory_db_path):
             "people": [
                 {"name": "Alice", "note": "discussed project status"},
                 {"name": "山田君", "note": "guest observer"},
-            ]
+            ],
         }
         store.upsert_summary(record, conn=conn)
 
@@ -295,7 +303,7 @@ def test_alias_deduplication(test_memory_db_path):
             "people": [
                 {"name": "Alice", "note": "primary name"},
                 {"name": "a-chan", "note": "alias name"},
-            ]
+            ],
         }
         store.upsert_summary(record, conn=conn)
 

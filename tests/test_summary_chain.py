@@ -1,11 +1,13 @@
 import json
-from datetime import datetime, timedelta
+from datetime import datetime
 from unittest.mock import patch
 
 from obsidian_ai_hub import memory
-from obsidian_ai_hub.summerize_day import get_daily_structured_record
 from obsidian_ai_hub.summerize_week import get_week_dates, get_weekly_structured_record
-from obsidian_ai_hub.summerize_month import get_monthly_structured_record, load_weekly_records
+from obsidian_ai_hub.summerize_month import (
+    get_monthly_structured_record,
+    load_weekly_records,
+)
 from obsidian_ai_hub.summary import store
 
 
@@ -25,7 +27,11 @@ def _make_day_record(date: datetime, summary: str) -> dict:
         "projects": [],
         "people": [],
         "items": [
-            {"kind": "activities", "body": f"Activity on {date.day}", "display_order": 0},
+            {
+                "kind": "activities",
+                "body": f"Activity on {date.day}",
+                "display_order": 0,
+            },
         ],
     }
 
@@ -38,18 +44,31 @@ def test_day_week_month_chain(test_memory_db_path):
     try:
         # Seed 7 daily records
         for d in week_dates:
-            store.upsert_summary(_make_day_record(d, f"Day {d.strftime('%Y-%m-%d')}"), conn=conn)
+            store.upsert_summary(
+                _make_day_record(d, f"Day {d.strftime('%Y-%m-%d')}"), conn=conn
+            )
         conn.commit()
     finally:
         conn.close()
 
     responses = [
-        json.dumps({"summary": "Week summary", "keywords": ["Weekly keyword"], "progress": ["Week progress"]}),
+        json.dumps(
+            {
+                "summary": "Week summary",
+                "keywords": ["Weekly keyword"],
+                "progress": ["Week progress"],
+            }
+        ),
         json.dumps({"summary": "Month summary", "keywords": ["Monthly keyword"]}),
     ]
-    with patch("obsidian_ai_hub.utils.llm_client.generate_llm_response", side_effect=responses):
+    with patch(
+        "obsidian_ai_hub.utils.llm_client.generate_llm_response", side_effect=responses
+    ):
         # Week generation reads days from SQLite
-        daily_records = [store.get_summary_by_period("day", d.strftime("%Y-%m-%d")) for d in week_dates]
+        daily_records = [
+            store.get_summary_by_period("day", d.strftime("%Y-%m-%d"))
+            for d in week_dates
+        ]
         week_record = get_weekly_structured_record(target_week, daily_records)
         store.upsert_summary(week_record)
 
@@ -66,7 +85,9 @@ def test_day_week_month_chain(test_memory_db_path):
     assert week is not None
     assert week["summary"] == "Week summary"
     assert week["keywords"] == ["Weekly keyword"]
-    assert any(i["kind"] == "progress" and i["body"] == "Week progress" for i in week["items"])
+    assert any(
+        i["kind"] == "progress" and i["body"] == "Week progress" for i in week["items"]
+    )
     month = store.get_summary_by_period("month", "2026-07")
     assert month is not None
     assert month["summary"] == "Month summary"

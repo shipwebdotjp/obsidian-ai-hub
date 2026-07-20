@@ -29,6 +29,7 @@ API_OPERATION_TIMEOUT = 10  # seconds
 
 class WebUIClientError(Exception):
     """Base exception for Open Web UI client operations"""
+
     pass
 
 
@@ -40,7 +41,7 @@ def _guess_content_type(file_path: Path) -> str:
     passed. Open WebUI's upload path is sensitive to this for text files.
     """
     content_type, _ = mimetypes.guess_type(file_path.name)
-    return content_type or 'text/plain'
+    return content_type or "text/plain"
 
 
 def _response_detail(response: requests.Response) -> str:
@@ -65,33 +66,30 @@ def upload_file(file_path: Path) -> Optional[str]:
     if not file_path.exists():
         logger.error(f"File not found: {file_path}")
         return None
-    
+
     try:
-        with open(file_path, 'rb') as f:
+        with open(file_path, "rb") as f:
             files = {
-                'file': (
+                "file": (
                     file_path.name,
                     f,
                     _guess_content_type(file_path),
                 )
             }
             headers = {
-                'Authorization': f'Bearer {OPEN_WEB_UI_API_KEY}',
+                "Authorization": f"Bearer {OPEN_WEB_UI_API_KEY}",
             }
-            
-            url = f'{OPEN_WEB_UI_BASE_URL}/api/v1/files/'
+
+            url = f"{OPEN_WEB_UI_BASE_URL}/api/v1/files/"
             response = requests.post(
-                url,
-                headers=headers,
-                files=files,
-                timeout=FILE_UPLOAD_TIMEOUT
+                url, headers=headers, files=files, timeout=FILE_UPLOAD_TIMEOUT
             )
             response.raise_for_status()
-            
-            file_id = response.json().get('id')
+
+            file_id = response.json().get("id")
             logger.info(f"File uploaded: {file_path.name} (ID: {file_id})")
             return file_id
-            
+
     except requests.RequestException as e:
         logger.error(f"Failed to upload file {file_path.name}: {e}")
         return None
@@ -112,45 +110,43 @@ def wait_for_file_processing(file_id: str) -> bool:
     """
     _hub_config.ensure_external_allowed("Open Web UI file processing")
     start_time = time.time()
-    
+
     try:
         headers = {
-            'Authorization': f'Bearer {OPEN_WEB_UI_API_KEY}',
+            "Authorization": f"Bearer {OPEN_WEB_UI_API_KEY}",
         }
-        
+
         while True:
             # Check if timeout exceeded
             if time.time() - start_time > FILE_PROCESS_TIMEOUT:
                 logger.error(f"File processing timeout for file_id: {file_id}")
                 return False
-            
+
             try:
-                url = f'{OPEN_WEB_UI_BASE_URL}/api/v1/files/{file_id}/process/status'
+                url = f"{OPEN_WEB_UI_BASE_URL}/api/v1/files/{file_id}/process/status"
                 response = requests.get(
-                    url,
-                    headers=headers,
-                    timeout=API_OPERATION_TIMEOUT
+                    url, headers=headers, timeout=API_OPERATION_TIMEOUT
                 )
                 response.raise_for_status()
-                
-                status = response.json().get('status')
+
+                status = response.json().get("status")
                 logger.debug(f"File {file_id} processing status: {status}")
-                
-                if status == 'completed':
+
+                if status == "completed":
                     logger.info(f"File {file_id} processing completed")
                     return True
-                elif status == 'failed':
+                elif status == "failed":
                     logger.error(f"File {file_id} processing failed: {response.json()}")
                     return False
-                
+
                 # Wait before next poll
                 time.sleep(FILE_PROCESS_POLL_INTERVAL)
-                
+
             except requests.RequestException as e:
                 logger.error(f"Error checking file processing status: {e}")
                 # Continue polling despite temporary errors
                 time.sleep(FILE_PROCESS_POLL_INTERVAL)
-                
+
     except Exception as e:
         logger.error(f"Unexpected error waiting for file processing: {e}")
         return False
@@ -170,22 +166,22 @@ def add_to_knowledge(file_id: str, knowledge_id: str) -> bool:
     _hub_config.ensure_external_allowed("Open Web UI add to knowledge")
     try:
         headers = {
-            'Authorization': f'Bearer {OPEN_WEB_UI_API_KEY}',
-            'Content-Type': 'application/json',
+            "Authorization": f"Bearer {OPEN_WEB_UI_API_KEY}",
+            "Content-Type": "application/json",
         }
-        
-        url = f'{OPEN_WEB_UI_BASE_URL}/api/v1/knowledge/{knowledge_id}/file/add'
+
+        url = f"{OPEN_WEB_UI_BASE_URL}/api/v1/knowledge/{knowledge_id}/file/add"
         response = requests.post(
             url,
             headers=headers,
-            json={'file_id': file_id},
-            timeout=API_OPERATION_TIMEOUT
+            json={"file_id": file_id},
+            timeout=API_OPERATION_TIMEOUT,
         )
         response.raise_for_status()
-        
+
         logger.info(f"File {file_id} added to knowledge base {knowledge_id}")
         return True
-        
+
     except requests.RequestException as e:
         if getattr(e, "response", None) is not None:
             logger.error(
@@ -213,22 +209,22 @@ def remove_from_knowledge(file_id: str, knowledge_id: str) -> bool:
     _hub_config.ensure_external_allowed("Open Web UI remove from knowledge")
     try:
         headers = {
-            'Authorization': f'Bearer {OPEN_WEB_UI_API_KEY}',
-            'Content-Type': 'application/json',
+            "Authorization": f"Bearer {OPEN_WEB_UI_API_KEY}",
+            "Content-Type": "application/json",
         }
-        
-        url = f'{OPEN_WEB_UI_BASE_URL}/api/v1/knowledge/{knowledge_id}/file/remove'
+
+        url = f"{OPEN_WEB_UI_BASE_URL}/api/v1/knowledge/{knowledge_id}/file/remove"
         response = requests.post(
             url,
             headers=headers,
-            json={'file_id': file_id},
-            timeout=API_OPERATION_TIMEOUT
+            json={"file_id": file_id},
+            timeout=API_OPERATION_TIMEOUT,
         )
         response.raise_for_status()
-        
+
         logger.info(f"File {file_id} removed from knowledge base {knowledge_id}")
         return True
-        
+
     except requests.RequestException as e:
         if getattr(e, "response", None) is not None:
             logger.error(
@@ -255,22 +251,19 @@ def list_knowledge_files(knowledge_id: str) -> Optional[List[Dict[str, Any]]]:
     _hub_config.ensure_external_allowed("Open Web UI list knowledge files")
     try:
         headers = {
-            'Authorization': f'Bearer {OPEN_WEB_UI_API_KEY}',
+            "Authorization": f"Bearer {OPEN_WEB_UI_API_KEY}",
         }
-        
-        url = f'{OPEN_WEB_UI_BASE_URL}/api/v1/knowledge/{knowledge_id}/files'
+
+        url = f"{OPEN_WEB_UI_BASE_URL}/api/v1/knowledge/{knowledge_id}/files"
         response = requests.get(
-            url,
-            headers=headers,
-            params={'page': 1},
-            timeout=API_OPERATION_TIMEOUT
+            url, headers=headers, params={"page": 1}, timeout=API_OPERATION_TIMEOUT
         )
         response.raise_for_status()
-        
-        files = response.json().get('files', [])
+
+        files = response.json().get("files", [])
         logger.debug(f"Retrieved {len(files)} files from knowledge base {knowledge_id}")
         return files
-        
+
     except requests.RequestException as e:
         if getattr(e, "response", None) is not None:
             logger.error(

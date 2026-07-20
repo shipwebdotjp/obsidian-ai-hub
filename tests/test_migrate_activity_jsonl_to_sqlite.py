@@ -25,13 +25,36 @@ class TestMigration:
     def test_basic_migration(self, test_memory_db_path: Path, tmp_path: Path):
         activity_path = tmp_path / "activity"
         activity_path.mkdir()
-        _write_jsonl(activity_path, "2026-07-20", [
-            {"timestamp": "2026-07-20T10:00:00", "app_name": "Safari", "summary": "検索", "category": "調査", "keywords": ["web"]},
-            {"timestamp": "2026-07-20T11:00:00", "app_name": "Code", "summary": "コーディング", "category": "開発"},
-        ])
-        _write_jsonl(activity_path, "2026-07-21", [
-            {"timestamp": "2026-07-21T09:00:00", "app_name": "Slack", "summary": "チャット"},
-        ])
+        _write_jsonl(
+            activity_path,
+            "2026-07-20",
+            [
+                {
+                    "timestamp": "2026-07-20T10:00:00",
+                    "app_name": "Safari",
+                    "summary": "検索",
+                    "category": "調査",
+                    "keywords": ["web"],
+                },
+                {
+                    "timestamp": "2026-07-20T11:00:00",
+                    "app_name": "Code",
+                    "summary": "コーディング",
+                    "category": "開発",
+                },
+            ],
+        )
+        _write_jsonl(
+            activity_path,
+            "2026-07-21",
+            [
+                {
+                    "timestamp": "2026-07-21T09:00:00",
+                    "app_name": "Slack",
+                    "summary": "チャット",
+                },
+            ],
+        )
 
         conn = memory.get_db_connection()
         try:
@@ -47,9 +70,13 @@ class TestMigration:
     def test_idempotent(self, test_memory_db_path: Path, tmp_path: Path):
         activity_path = tmp_path / "activity"
         activity_path.mkdir()
-        _write_jsonl(activity_path, "2026-07-20", [
-            {"timestamp": "2026-07-20T10:00:00", "summary": "a"},
-        ])
+        _write_jsonl(
+            activity_path,
+            "2026-07-20",
+            [
+                {"timestamp": "2026-07-20T10:00:00", "summary": "a"},
+            ],
+        )
 
         conn = memory.get_db_connection()
         try:
@@ -67,9 +94,13 @@ class TestMigration:
     def test_database_error_rollback(self, test_memory_db_path: Path, tmp_path: Path):
         activity_path = tmp_path / "activity"
         activity_path.mkdir()
-        _write_jsonl(activity_path, "2026-07-20", [
-            {"timestamp": "2026-07-20T10:00:00", "summary": "a"},
-        ])
+        _write_jsonl(
+            activity_path,
+            "2026-07-20",
+            [
+                {"timestamp": "2026-07-20T10:00:00", "summary": "a"},
+            ],
+        )
 
         conn = memory.get_db_connection()
         conn.close()

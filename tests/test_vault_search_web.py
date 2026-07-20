@@ -10,6 +10,7 @@ from obsidian_ai_hub.web.app import create_app
 @pytest.fixture
 def loopback_client(monkeypatch, tmp_path):
     from obsidian_ai_hub.utils import config
+
     vault_path = tmp_path / "vault"
     vault_path.mkdir(exist_ok=True)
     monkeypatch.setattr(config, "VAULT_PATH", vault_path)
@@ -40,7 +41,9 @@ def test_vault_search_basic(loopback_client):
         "obsidian_ai_hub.handler.obsidian_vault_retriever.search_obsidian_vault.func",
         return_value=_mock_search_results(mock_items),
     ):
-        res = loopback_client.get("/api/v1/vault-search", params={"q": "test", "k": 5, "mode": "hybrid"})
+        res = loopback_client.get(
+            "/api/v1/vault-search", params={"q": "test", "k": 5, "mode": "hybrid"}
+        )
     assert res.status_code == 200
     body = res.json()
     assert body["total"] == 1
@@ -75,7 +78,9 @@ def test_vault_search_error(loopback_client):
 
 
 def test_vault_search_invalid_mode(loopback_client):
-    res = loopback_client.get("/api/v1/vault-search", params={"q": "test", "mode": "invalid"})
+    res = loopback_client.get(
+        "/api/v1/vault-search", params={"q": "test", "mode": "invalid"}
+    )
     assert res.status_code == 400
     assert "mode must be one of" in res.json()["detail"]
 
@@ -151,7 +156,9 @@ def test_vault_file_subdir_success(loopback_client, tmp_path):
     note_content = "Subdir note content"
     note_path.write_text(note_content, encoding="utf-8")
 
-    res = loopback_client.get("/api/v1/vault-file", params={"path": "daily/2026-07-16.md"})
+    res = loopback_client.get(
+        "/api/v1/vault-file", params={"path": "daily/2026-07-16.md"}
+    )
     assert res.status_code == 200
     body = res.json()
     assert body["content"] == note_content
@@ -173,7 +180,9 @@ def test_vault_file_non_markdown(loopback_client, tmp_path):
 
 
 def test_vault_file_absolute_path(loopback_client):
-    res = loopback_client.get("/api/v1/vault-file", params={"path": "/absolute/path.md"})
+    res = loopback_client.get(
+        "/api/v1/vault-file", params={"path": "/absolute/path.md"}
+    )
     assert res.status_code == 400
 
 
@@ -181,12 +190,15 @@ def test_vault_file_path_traversal(loopback_client):
     res = loopback_client.get("/api/v1/vault-file", params={"path": "../outside.md"})
     assert res.status_code == 400
 
-    res = loopback_client.get("/api/v1/vault-file", params={"path": "subdir/../../outside.md"})
+    res = loopback_client.get(
+        "/api/v1/vault-file", params={"path": "subdir/../../outside.md"}
+    )
     assert res.status_code == 400
 
 
 def test_vault_file_symlink_outside(loopback_client, tmp_path):
     import os
+
     vault_path = tmp_path / "vault"
     outside_file = tmp_path / "outside.md"
     outside_file.write_text("dangerous", encoding="utf-8")

@@ -1,9 +1,5 @@
 from __future__ import annotations
 
-import sqlite3
-from pathlib import Path
-
-import pytest
 
 from obsidian_ai_hub import memory
 from obsidian_ai_hub.utils import config as app_config
@@ -31,7 +27,7 @@ def test_sync_people_integration(test_memory_db_path, tmp_path, monkeypatch):
             "people": [
                 {"name": "山田君", "note": "he observed today's event"},
                 {"name": "佐藤さん", "note": "spoke during the presentation"},
-            ]
+            ],
         }
         summary_store.upsert_summary(record, conn=conn)
 
@@ -50,26 +46,27 @@ def test_sync_people_integration(test_memory_db_path, tmp_path, monkeypatch):
         # This one has the same name "山田太郎" and will be adopted as the master resolved person_id
         conn.execute(
             "INSERT INTO people (person_id, normalized_name, display_name, vault_id) VALUES (?, ?, ?, ?)",
-            ("peo_old_yamada", "山田太郎", "山田太郎", None)
+            ("peo_old_yamada", "山田太郎", "山田太郎", None),
         )
         conn.execute(
             "INSERT INTO summary_people (summary_id, person_id, note, display_order) VALUES (?, ?, ?, ?)",
-            (got["summary_id"], "peo_old_yamada", "old yamada note", 10)
+            (got["summary_id"], "peo_old_yamada", "old yamada note", 10),
         )
 
         # This one has the alias name "山田君" and will be merged into the master and deleted
         conn.execute(
             "INSERT INTO people (person_id, normalized_name, display_name, vault_id) VALUES (?, ?, ?, ?)",
-            ("peo_old_yamada_alias", "山田君", "山田君", None)
+            ("peo_old_yamada_alias", "山田君", "山田君", None),
         )
         conn.execute(
             "INSERT INTO summary_people (summary_id, person_id, note, display_order) VALUES (?, ?, ?, ?)",
-            (got["summary_id"], "peo_old_yamada_alias", "old alias note", 5)
+            (got["summary_id"], "peo_old_yamada_alias", "old alias note", 5),
         )
 
         # Now, write the Vault people note for Yamada and Sato
         note1 = people_dir / "yamada.md"
-        note1.write_text("""---
+        note1.write_text(
+            """---
 id: yamada-taro
 name: 山田太郎
 aliases:
@@ -77,17 +74,22 @@ aliases:
   - たろう
 ---
 Official Yamada note.
-""", encoding="utf-8")
+""",
+            encoding="utf-8",
+        )
 
         note2 = people_dir / "sato.md"
-        note2.write_text("""---
+        note2.write_text(
+            """---
 id: sato-hanako
 name: 佐藤花子
 aliases:
   - 佐藤さん
 ---
 Official Sato note.
-""", encoding="utf-8")
+""",
+            encoding="utf-8",
+        )
 
         conn.commit()
     finally:
@@ -121,11 +123,15 @@ Official Sato note.
         assert cursor.fetchone()[0] == 0
 
         # Check that the adopted master person is kept
-        cursor.execute("SELECT count(*) FROM people WHERE person_id = 'peo_old_yamada' AND vault_id = 'yamada-taro'")
+        cursor.execute(
+            "SELECT count(*) FROM people WHERE person_id = 'peo_old_yamada' AND vault_id = 'yamada-taro'"
+        )
         assert cursor.fetchone()[0] == 1
 
         # Check that old duplicate alias people record is deleted
-        cursor.execute("SELECT count(*) FROM people WHERE person_id = 'peo_old_yamada_alias'")
+        cursor.execute(
+            "SELECT count(*) FROM people WHERE person_id = 'peo_old_yamada_alias'"
+        )
         assert cursor.fetchone()[0] == 0
 
     finally:

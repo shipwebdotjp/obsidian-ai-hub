@@ -1,7 +1,5 @@
 # ruff: noqa: E402
 import sys
-import json
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 import pytest
 
@@ -57,8 +55,10 @@ def clean_copilot_env(tmp_path, monkeypatch):
 
 from datetime import datetime, timedelta
 
+
 def test_get_currently_valid_approved_memories_basic(clean_copilot_env):
     from datetime import timezone
+
     today = datetime.now(timezone.utc).date()
     past_date_str = (today - timedelta(days=10)).isoformat()
     yesterday_str = (today - timedelta(days=1)).isoformat()
@@ -72,7 +72,7 @@ def test_get_currently_valid_approved_memories_basic(clean_copilot_env):
         "memory_key": "k-valid",
         "content": "Valid content",
         "valid_from": past_date_str,
-        "stability": "stable"
+        "stability": "stable",
     }
     m_candidate = {
         "memory_id": "mem_candidate",
@@ -81,7 +81,7 @@ def test_get_currently_valid_approved_memories_basic(clean_copilot_env):
         "memory_key": "k-cand",
         "content": "Candidate content",
         "valid_from": past_date_str,
-        "stability": "stable"
+        "stability": "stable",
     }
     m_future = {
         "memory_id": "mem_future",
@@ -90,7 +90,7 @@ def test_get_currently_valid_approved_memories_basic(clean_copilot_env):
         "memory_key": "k-future",
         "content": "Future content",
         "valid_from": tomorrow_str,
-        "stability": "stable"
+        "stability": "stable",
     }
     m_expired = {
         "memory_id": "mem_expired",
@@ -100,7 +100,7 @@ def test_get_currently_valid_approved_memories_basic(clean_copilot_env):
         "content": "Expired content",
         "valid_from": past_date_str,
         "valid_until": yesterday_str,
-        "stability": "stable"
+        "stability": "stable",
     }
 
     memory.save_all_memories([m_valid, m_candidate, m_future, m_expired])
@@ -139,7 +139,7 @@ def test_render_copilot_profile_zero_memories(clean_copilot_env):
         "copilot/core/decision_policy.md",
         "copilot/core/risk_tolerance.md",
         "copilot/core/memory_rules.md",
-        "copilot/core/current_projects.md"
+        "copilot/core/current_projects.md",
     ]
     for rel_path in expected_rel_paths:
         assert rel_path in updated_files
@@ -163,7 +163,7 @@ def test_render_copilot_profile_happy_path(clean_copilot_env):
         "tags": ["languages"],
         "evidence": [{"path": "some-note", "quote": "I like python"}],
         "provenance": {"extractor": "weekly-extract"},
-        "stability": "stable"
+        "stability": "stable",
     }
     memory.save_all_memories([m_valid])
 
@@ -203,7 +203,7 @@ def test_render_copilot_profile_happy_path(clean_copilot_env):
         for rel_path in [
             "copilot/AI_README.md",
             "copilot/core/values.md",
-            "copilot/core/response_style.md"
+            "copilot/core/response_style.md",
         ]:
             assert rel_path in updated_files
             full_path = clean_copilot_env / rel_path
@@ -212,7 +212,9 @@ def test_render_copilot_profile_happy_path(clean_copilot_env):
             assert "type: copilot-profile" in content
 
         # Check a specific file content
-        style_content = (clean_copilot_env / "copilot/core/response_style.md").read_text(encoding="utf-8")
+        style_content = (
+            clean_copilot_env / "copilot/core/response_style.md"
+        ).read_text(encoding="utf-8")
         assert "Concise style" in style_content
 
 
@@ -225,7 +227,7 @@ def test_render_copilot_profile_validation_failures(clean_copilot_env):
         "memory_key": "k-valid",
         "content": "Prefer Python over Javascript",
         "valid_from": "2026-07-01",
-        "stability": "stable"
+        "stability": "stable",
     }
     memory.save_all_memories([m_valid])
 
@@ -267,9 +269,10 @@ def test_render_copilot_profile_validation_failures(clean_copilot_env):
 
 def test_cli_wiring_render_copilot_profile(clean_copilot_env, monkeypatch):
     # Setup mocks for CLI invocation
-    with patch("obsidian_ai_hub.memory.render_copilot_profile") as mock_render, \
-         patch("sys.argv", ["main.py", "--render-copilot-profile"]):
-
+    with (
+        patch("obsidian_ai_hub.memory.render_copilot_profile") as mock_render,
+        patch("sys.argv", ["main.py", "--render-copilot-profile"]),
+    ):
         mock_render.return_value = ["copilot/AI_README.md", "copilot/core/values.md"]
 
         main.main()

@@ -26,11 +26,15 @@ def pytest_configure(config: pytest.Config) -> None:
         _TESTING_ENV: os.environ.get(_TESTING_ENV),
         _PRODUCTION_DB_PATH_ENV: os.environ.get(_PRODUCTION_DB_PATH_ENV),
     }
-    _test_db_bootstrap_dir = tempfile.TemporaryDirectory(prefix="obsidian-ai-hub-pytest-")
+    _test_db_bootstrap_dir = tempfile.TemporaryDirectory(
+        prefix="obsidian-ai-hub-pytest-"
+    )
     bootstrap_db = Path(_test_db_bootstrap_dir.name) / "collection.sqlite3"
 
     os.environ[_TESTING_ENV] = "1"
-    os.environ[_PRODUCTION_DB_PATH_ENV] = str(_original_memory_db_path.expanduser().resolve())
+    os.environ[_PRODUCTION_DB_PATH_ENV] = str(
+        _original_memory_db_path.expanduser().resolve()
+    )
     app_config.MEMORY_SQLITE_PATH = bootstrap_db
 
 
@@ -48,6 +52,7 @@ def pytest_unconfigure(config: pytest.Config) -> None:
     if _test_db_bootstrap_dir is not None:
         _test_db_bootstrap_dir.cleanup()
         _test_db_bootstrap_dir = None
+
 
 # If we are not on macOS, mock all macOS-specific dependencies globally for test collection and execution
 if sys.platform != "darwin":

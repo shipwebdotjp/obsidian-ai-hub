@@ -7,6 +7,7 @@ from obsidian_ai_hub.utils import config
 
 logger = logging.getLogger(__name__)
 
+
 def main():
     """Synchronize configured folders using rsync.
 
@@ -16,7 +17,9 @@ def main():
     sync_folders = config.BACKUP_SYNC_FOLDERS
 
     if not sync_folders:
-        logger.error("No backup sync folders configured. Set config.backup.sync_folders in config/config.yml.")
+        logger.error(
+            "No backup sync folders configured. Set config.backup.sync_folders in config/config.yml."
+        )
         sys.exit(1)
 
     had_error = False
@@ -36,13 +39,13 @@ def main():
             continue
 
         # Ensure we copy the contents of the source directory (trailing slash)
-        src_path = src.rstrip('/') + '/'
+        src_path = src.rstrip("/") + "/"
 
         cmd = [
-            'rsync',
-            '-a',
-            '--delete',
-            '--delete-excluded',
+            "rsync",
+            "-a",
+            "--delete",
+            "--delete-excluded",
             "--exclude=.DS_Store",
             src_path,
             dest,
@@ -50,9 +53,13 @@ def main():
 
         logger.info("Running rsync for backup")
         try:
-            proc = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            proc = subprocess.run(
+                cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
         except FileNotFoundError:
-            logger.error("rsync not found on PATH. Install rsync or use a different method.")
+            logger.error(
+                "rsync not found on PATH. Install rsync or use a different method."
+            )
             sys.exit(2)
 
         if proc.returncode != 0:
@@ -61,6 +68,7 @@ def main():
 
     if had_error:
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()

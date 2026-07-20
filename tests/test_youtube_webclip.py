@@ -26,8 +26,12 @@ def test_extract_video_id_supports_common_youtube_urls():
 
 def test_youtube_transcript_api_precedes_other_fallbacks():
     with (
-        patch.object(youtube, "_get_video_metadata", return_value=("Video title", "20260715")),
-        patch.object(youtube, "_fetch_transcript_api", return_value="[00:00:00] caption") as api,
+        patch.object(
+            youtube, "_get_video_metadata", return_value=("Video title", "20260715")
+        ),
+        patch.object(
+            youtube, "_fetch_transcript_api", return_value="[00:00:00] caption"
+        ) as api,
         patch.object(youtube, "_fetch_yt_dlp_subtitles") as ytdlp,
         patch.object(youtube, "_transcribe_with_whisper") as whisper,
     ):
@@ -47,9 +51,13 @@ def test_youtube_falls_back_to_whisper_then_unavailable():
         patch.object(youtube, "_get_video_metadata", return_value=(None, None)),
         patch.object(youtube, "_fetch_transcript_api", return_value=None),
         patch.object(youtube, "_fetch_yt_dlp_subtitles", return_value=None),
-        patch.object(youtube, "_transcribe_with_whisper", return_value="[00:00:02] spoken"),
+        patch.object(
+            youtube, "_transcribe_with_whisper", return_value="[00:00:02] spoken"
+        ),
     ):
-        transcribed = youtube.extract_youtube_content("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+        transcribed = youtube.extract_youtube_content(
+            "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+        )
 
     assert transcribed.transcript_source == "whisper"
     assert transcribed.transcript == "[00:00:02] spoken"
@@ -60,13 +68,17 @@ def test_youtube_falls_back_to_whisper_then_unavailable():
         patch.object(youtube, "_fetch_yt_dlp_subtitles", return_value=None),
         patch.object(youtube, "_transcribe_with_whisper", return_value=None),
     ):
-        unavailable = youtube.extract_youtube_content("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+        unavailable = youtube.extract_youtube_content(
+            "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+        )
 
     assert unavailable.transcript is None
     assert unavailable.transcript_source == "unavailable"
 
 
-def test_youtube_webclip_writes_extra_frontmatter_and_deterministic_date(tmp_path: Path):
+def test_youtube_webclip_writes_extra_frontmatter_and_deterministic_date(
+    tmp_path: Path,
+):
     webclip_dir = tmp_path / "webclip"
     metadata = {
         "category": "学習・教育",
@@ -82,7 +94,11 @@ def test_youtube_webclip_writes_extra_frontmatter_and_deterministic_date(tmp_pat
     with (
         patch.object(config, "WEBCLIP_PATH", webclip_dir),
         patch.object(config, "WEBCLIP_DIR_NAME", "webclip"),
-        patch.object(webclip.llm_client, "generate_llm_response", return_value=json.dumps(metadata)),
+        patch.object(
+            webclip.llm_client,
+            "generate_llm_response",
+            return_value=json.dumps(metadata),
+        ),
     ):
         link = webclip.process_single_webclip(
             url="https://www.youtube.com/watch?v=dQw4w9WgXcQ",
@@ -100,7 +116,9 @@ def test_youtube_webclip_writes_extra_frontmatter_and_deterministic_date(tmp_pat
         )
 
     note_path = webclip_dir / "学習・教育" / "動画タイトル.md"
-    frontmatter = yaml.safe_load(note_path.read_text(encoding="utf-8").split("---", 2)[1])
+    frontmatter = yaml.safe_load(
+        note_path.read_text(encoding="utf-8").split("---", 2)[1]
+    )
     assert "[[webclip/学習・教育/動画タイトル]]" in link
     assert frontmatter["content_type"] == "youtube"
     assert frontmatter["video_id"] == "dQw4w9WgXcQ"
@@ -115,8 +133,14 @@ def test_youtube_long_transcript_uses_partial_summaries():
     final_payload = json.dumps({"category": "その他", "topics": ["その他"]})
     with (
         patch.object(config, "YOUTUBE_SUMMARY_CHUNK_CHARS", 10),
-        patch.object(webclip, "_generate_youtube_chunk_summary", side_effect=["part 1", "part 2", "part 3"]) as partial,
-        patch.object(webclip.llm_client, "generate_llm_response", return_value=final_payload) as llm,
+        patch.object(
+            webclip,
+            "_generate_youtube_chunk_summary",
+            side_effect=["part 1", "part 2", "part 3"],
+        ) as partial,
+        patch.object(
+            webclip.llm_client, "generate_llm_response", return_value=final_payload
+        ) as llm,
     ):
         result = webclip.generate_webclip_metadata(transcript, is_youtube=True)
 
@@ -134,10 +158,20 @@ def test_youtube_urls_skip_tavily_and_pass_video_fields_to_webclip(tmp_path: Pat
         transcript_source="youtube-transcript-api",
     )
     with (
-        patch.object(obsidian_inbox_merge.youtube, "extract_youtube_content", return_value=video),
-        patch.object(obsidian_inbox_merge.web_extract, "web_extract", MagicMock()) as tavily,
-        patch.object(obsidian_inbox_merge.webclip, "process_single_webclip", return_value="- link") as clip,
-        patch.object(obsidian_inbox_merge.extracter, "append_to_subheader_file") as append,
+        patch.object(
+            obsidian_inbox_merge.youtube, "extract_youtube_content", return_value=video
+        ),
+        patch.object(
+            obsidian_inbox_merge.web_extract, "web_extract", MagicMock()
+        ) as tavily,
+        patch.object(
+            obsidian_inbox_merge.webclip,
+            "process_single_webclip",
+            return_value="- link",
+        ) as clip,
+        patch.object(
+            obsidian_inbox_merge.extracter, "append_to_subheader_file"
+        ) as append,
     ):
         obsidian_inbox_merge.process_web_clips(
             ["https://youtu.be/dQw4w9WgXcQ"], tmp_path / "2026-07-15.md", "10:30"
@@ -145,5 +179,8 @@ def test_youtube_urls_skip_tavily_and_pass_video_fields_to_webclip(tmp_path: Pat
 
     tavily.invoke.assert_not_called()
     assert clip.call_args.kwargs["content_type"] == "youtube"
-    assert clip.call_args.kwargs["extra_frontmatter"]["transcript_source"] == "youtube-transcript-api"
+    assert (
+        clip.call_args.kwargs["extra_frontmatter"]["transcript_source"]
+        == "youtube-transcript-api"
+    )
     append.assert_called_once()

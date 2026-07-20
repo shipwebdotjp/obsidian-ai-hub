@@ -16,7 +16,9 @@ def mock_post():
 
 @pytest.fixture
 def mock_ensure_external():
-    with patch("obsidian_ai_hub.utils.line_messaging.config.ensure_external_allowed") as m:
+    with patch(
+        "obsidian_ai_hub.utils.line_messaging.config.ensure_external_allowed"
+    ) as m:
         yield m
 
 

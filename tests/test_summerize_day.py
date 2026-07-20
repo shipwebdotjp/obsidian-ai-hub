@@ -1,13 +1,11 @@
 import json
 from datetime import datetime
 from unittest.mock import MagicMock, patch
-from pathlib import Path
 import pytest
 
 from obsidian_ai_hub import memory
 from obsidian_ai_hub.summerize_day import (
     load_activity_logs,
-    load_conversation_logs,
     upsert_summary_record,
     get_daily_structured_record,
     format_structured_record_as_markdown,
@@ -32,7 +30,7 @@ def test_load_activity_logs(mock_config):
             "summary": "Summary1",
             "category": None,
             "keywords": None,
-            "extra": "data"
+            "extra": "data",
         },
         {
             "occurred_at": "2023-10-27T11:00:00",
@@ -40,8 +38,8 @@ def test_load_activity_logs(mock_config):
             "window_title": "Title2",
             "summary": "Summary2",
             "category": "開発",
-            "keywords": ["python"]
-        }
+            "keywords": ["python"],
+        },
     ]
 
     with patch("obsidian_ai_hub.summerize_day.get_activities_by_date") as mock_get:
@@ -87,7 +85,10 @@ def test_upsert_summary_record(mock_config, test_memory_db_path):
     conn = memory.get_db_connection()
     try:
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM summaries WHERE period_type = ? AND period_key = ?", ("day", "2023-10-27"))
+        cursor.execute(
+            "SELECT * FROM summaries WHERE period_type = ? AND period_key = ?",
+            ("day", "2023-10-27"),
+        )
         row = cursor.fetchone()
         assert row is not None
         assert row["summary"] == "Day 27"
@@ -99,7 +100,9 @@ def test_upsert_summary_record(mock_config, test_memory_db_path):
 @patch("obsidian_ai_hub.summerize_day.llm_client.generate_llm_response")
 @patch("obsidian_ai_hub.summerize_day.reader.get_daily_note_path")
 @patch("obsidian_ai_hub.summerize_day.extracter.get_frontmatter_value")
-def test_get_daily_structured_record(mock_fm, mock_path, mock_llm, mock_render, mock_config, tmp_path):
+def test_get_daily_structured_record(
+    mock_fm, mock_path, mock_llm, mock_render, mock_config, tmp_path
+):
     target_date = datetime(2023, 10, 27)
     daily_content = "---\nmood: Happy\nsleep: 8h\n---\nContent"
 
@@ -109,27 +112,32 @@ def test_get_daily_structured_record(mock_fm, mock_path, mock_llm, mock_render, 
         if key == "sleep":
             return "8h"
         return default
+
     mock_fm.side_effect = fm_side_effect
 
     mock_p = MagicMock()
     mock_p.exists.return_value = True
     mock_path.return_value = mock_p
 
-    mock_llm.return_value = json.dumps({
-        "summary": "AI Structured Summary",
-        "keywords": [" Python ", "Python", "Obsidian"],
-        "topics": ["AI"],
-        "highlights": ["Important decision"],
-        "activities": ["Coding"],
-        "people": [{"name": "Alice", "note": "Researcher"}]
-    })
+    mock_llm.return_value = json.dumps(
+        {
+            "summary": "AI Structured Summary",
+            "keywords": [" Python ", "Python", "Obsidian"],
+            "topics": ["AI"],
+            "highlights": ["Important decision"],
+            "activities": ["Coding"],
+            "people": [{"name": "Alice", "note": "Researcher"}],
+        }
+    )
 
     logs = [{"summary": "Session 1"}]
     activity_logs = [{"summary": "Activity 1"}, {"summary": "Activity 2"}]
 
     mock_render.return_value = "Rendered Prompt"
 
-    record = get_daily_structured_record(target_date, daily_content, logs, activity_logs)
+    record = get_daily_structured_record(
+        target_date, daily_content, logs, activity_logs
+    )
 
     assert record["period_type"] == "day"
     assert record["period_key"] == "2023-10-27"
@@ -139,15 +147,22 @@ def test_get_daily_structured_record(mock_fm, mock_path, mock_llm, mock_render, 
     assert record["sleep_raw"] == "8h"
     assert record["sleep_hours"] == 8.0
     assert record["people"][0]["name"] == "Alice"
-    assert any(i["kind"] == "highlights" and i["body"] == "Important decision" for i in record["items"])
-    assert any(i["kind"] == "activities" and i["body"] == "Coding" for i in record["items"])
+    assert any(
+        i["kind"] == "highlights" and i["body"] == "Important decision"
+        for i in record["items"]
+    )
+    assert any(
+        i["kind"] == "activities" and i["body"] == "Coding" for i in record["items"]
+    )
 
 
 @patch("obsidian_ai_hub.summerize_day.prompt.render_prompt")
 @patch("obsidian_ai_hub.summerize_day.llm_client.generate_llm_response")
 @patch("obsidian_ai_hub.summerize_day.reader.get_daily_note_path")
 @patch("obsidian_ai_hub.summerize_day.extracter.get_frontmatter_value")
-def test_get_daily_structured_record_malformed_json(mock_fm, mock_path, mock_llm, mock_render, mock_config, tmp_path):
+def test_get_daily_structured_record_malformed_json(
+    mock_fm, mock_path, mock_llm, mock_render, mock_config, tmp_path
+):
     target_date = datetime(2023, 10, 27)
     daily_content = "---\nmood: Happy\n---"
 
@@ -162,7 +177,9 @@ def test_get_daily_structured_record_malformed_json(mock_fm, mock_path, mock_llm
     logs = []
     activity_logs = [{"summary": "Act"}]
 
-    record = get_daily_structured_record(target_date, daily_content, logs, activity_logs)
+    record = get_daily_structured_record(
+        target_date, daily_content, logs, activity_logs
+    )
 
     # Should not raise and return minimal record
     assert record["period_key"] == "2023-10-27"
@@ -208,7 +225,9 @@ def test_format_structured_record_as_markdown():
 @patch("obsidian_ai_hub.summerize_day.llm_client.generate_llm_response")
 @patch("obsidian_ai_hub.summerize_day.reader.get_daily_note_path")
 @patch("obsidian_ai_hub.summerize_day.extracter.get_frontmatter_value")
-def test_get_daily_structured_record_strips_milliseconds(mock_fm, mock_path, mock_llm, mock_render, mock_config):
+def test_get_daily_structured_record_strips_milliseconds(
+    mock_fm, mock_path, mock_llm, mock_render, mock_config
+):
     target_date = datetime(2023, 10, 27)
     mock_llm.return_value = json.dumps({"summary": "Test Summary"})
     mock_render.return_value = "Rendered Prompt"
@@ -251,14 +270,20 @@ def test_get_daily_structured_record_passes_activity_rankings(
 
     context = mock_render.call_args[0][1]
     assert json.loads(context["CATEGORY_RANKINGS"]) == [["開発", 2], ["事務", 1]]
-    assert json.loads(context["KEYWORD_RANKINGS"]) == [["Python", 2], ["Git", 1], ["Email", 1]]
+    assert json.loads(context["KEYWORD_RANKINGS"]) == [
+        ["Python", 2],
+        ["Git", 1],
+        ["Email", 1],
+    ]
 
 
 @patch("obsidian_ai_hub.summerize_day.prompt.render_prompt")
 @patch("obsidian_ai_hub.summerize_day.llm_client.generate_llm_response")
 @patch("obsidian_ai_hub.summerize_day.reader.get_daily_note_path")
 @patch("obsidian_ai_hub.summerize_day.extracter.get_frontmatter_value")
-def test_get_daily_structured_record_passes_candidates(mock_fm, mock_path, mock_llm, mock_render, mock_config):
+def test_get_daily_structured_record_passes_candidates(
+    mock_fm, mock_path, mock_llm, mock_render, mock_config
+):
     from datetime import datetime
     import json
     from obsidian_ai_hub.summerize_day import get_daily_structured_record
@@ -272,10 +297,12 @@ def test_get_daily_structured_record_passes_candidates(mock_fm, mock_path, mock_
     mock_path.return_value = mock_p
 
     # LLM returns topics with some outside the candidates and some duplicates
-    mock_llm.return_value = json.dumps({
-        "summary": "Summary",
-        "topics": ["LLM・AI活用", "未知のトピック", "LLM・AI活用"]
-    })
+    mock_llm.return_value = json.dumps(
+        {
+            "summary": "Summary",
+            "topics": ["LLM・AI活用", "未知のトピック", "LLM・AI活用"],
+        }
+    )
 
     mock_render.return_value = "Rendered Prompt"
 

@@ -1,17 +1,18 @@
 import json
 import sys
 
-from obsidian_ai_hub.handler.obsidian_vault_retriever import search_obsidian_vault as retriever
+from obsidian_ai_hub.handler.obsidian_vault_retriever import (
+    search_obsidian_vault as retriever,
+)
 
-def main(query: str, k: int = 10, search_mode: str = "hybrid", json_output: bool = False):
+
+def main(
+    query: str, k: int = 10, search_mode: str = "hybrid", json_output: bool = False
+):
     """
     CLI wrapper for searching the Obsidian vault.
     """
-    result_json = retriever.func(
-        query=query,
-        k=int(k),
-        search_mode=search_mode
-    )
+    result_json = retriever.func(query=query, k=int(k), search_mode=search_mode)
 
     if json_output:
         # result_json is already a JSON string from the retriever
@@ -21,7 +22,10 @@ def main(query: str, k: int = 10, search_mode: str = "hybrid", json_output: bool
     try:
         results = json.loads(result_json)
     except json.JSONDecodeError:
-        print(f"Error: Failed to parse search results. Raw output: {result_json}", file=sys.stderr)
+        print(
+            f"Error: Failed to parse search results. Raw output: {result_json}",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     if isinstance(results, dict) and "error" in results:

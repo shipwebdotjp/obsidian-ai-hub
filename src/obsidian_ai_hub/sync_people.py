@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from obsidian_ai_hub.people_sync.sync import main, sync_people_in_tx
+from obsidian_ai_hub.people_sync.sync import main
 
 logger = logging.getLogger(__name__)
 

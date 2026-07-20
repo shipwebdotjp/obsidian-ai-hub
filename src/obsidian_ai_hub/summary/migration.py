@@ -16,8 +16,23 @@ from obsidian_ai_hub.utils.topics import normalize_topics
 logger = logging.getLogger(__name__)
 
 DAILY_KIND_ORDER = ["highlights", "activities", "learnings", "reflections", "gratitude"]
-WEEKLY_KIND_ORDER = ["highlights", "progress", "learnings", "reflections", "patterns", "gratitude"]
-MONTHLY_KIND_ORDER = ["highlights", "progress", "changes", "learnings", "reflections", "patterns", "gratitude"]
+WEEKLY_KIND_ORDER = [
+    "highlights",
+    "progress",
+    "learnings",
+    "reflections",
+    "patterns",
+    "gratitude",
+]
+MONTHLY_KIND_ORDER = [
+    "highlights",
+    "progress",
+    "changes",
+    "learnings",
+    "reflections",
+    "patterns",
+    "gratitude",
+]
 
 KIND_MAP = {
     "day": {
@@ -70,7 +85,11 @@ def _coerce_string_list(value: Any) -> list[str]:
 
 def _build_items(period_type: str, data: dict) -> list[dict]:
     kind_map = KIND_MAP[period_type]
-    kind_order = {"day": DAILY_KIND_ORDER, "week": WEEKLY_KIND_ORDER, "month": MONTHLY_KIND_ORDER}[period_type]
+    kind_order = {
+        "day": DAILY_KIND_ORDER,
+        "week": WEEKLY_KIND_ORDER,
+        "month": MONTHLY_KIND_ORDER,
+    }[period_type]
 
     raw = {}
     for old_kind, new_kind in kind_map.items():
@@ -82,11 +101,13 @@ def _build_items(period_type: str, data: dict) -> list[dict]:
     for order, kind in enumerate(kind_order):
         bodies = raw.get(kind, [])
         if bodies:
-            items.append({
-                "kind": kind,
-                "body": "\n".join(f"- {b}" for b in bodies),
-                "display_order": order,
-            })
+            items.append(
+                {
+                    "kind": kind,
+                    "body": "\n".join(f"- {b}" for b in bodies),
+                    "display_order": order,
+                }
+            )
     return items
 
 
@@ -126,14 +147,18 @@ def parse_record(
             return None
         period_start, period_end = _month_bounds(period_key)
     else:
-        logger.warning("Unknown period_type %r at %s:%d", period_type, source_path, line_no)
+        logger.warning(
+            "Unknown period_type %r at %s:%d", period_type, source_path, line_no
+        )
         return None
 
     topics = normalize_topics(_coerce_list(data.get("topics")))
     people = []
     for person in _coerce_list(data.get("people")):
         if isinstance(person, dict) and person.get("name"):
-            people.append({"name": str(person["name"]), "note": str(person.get("note", ""))})
+            people.append(
+                {"name": str(person["name"]), "note": str(person.get("note", ""))}
+            )
 
     record = {
         "period_type": period_type,
@@ -257,7 +282,9 @@ def run_migration(activity_path: Path, conn: sqlite3.Connection) -> dict:
 
     for file_path, period_type in files:
         relative = file_path.relative_to(activity_path).as_posix()
-        added, updated, invalid, duplicates = migrate_file(file_path, relative, period_type, conn)
+        added, updated, invalid, duplicates = migrate_file(
+            file_path, relative, period_type, conn
+        )
         total_added += added
         total_updated += updated
         total_invalid += invalid

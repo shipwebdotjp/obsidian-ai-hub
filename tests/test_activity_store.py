@@ -18,16 +18,31 @@ mock_modules = {
 for name, m in mock_modules.items():
     sys.modules[name] = m
 
-from obsidian_ai_hub import memory
-from obsidian_ai_hub.activity import store
+from obsidian_ai_hub import memory  # noqa: E402
+from obsidian_ai_hub.activity import store  # noqa: E402
 
 
 def test_add_and_get_activities_by_date(test_memory_db_path):
     conn = memory.get_db_connection()
     try:
-        store.add_activity(conn=conn, activity_date="2026-07-20", occurred_at="2026-07-20T10:00:00", summary="first")
-        store.add_activity(conn=conn, activity_date="2026-07-20", occurred_at="2026-07-20T11:00:00", summary="second")
-        store.add_activity(conn=conn, activity_date="2026-07-21", occurred_at="2026-07-21T09:00:00", summary="other")
+        store.add_activity(
+            conn=conn,
+            activity_date="2026-07-20",
+            occurred_at="2026-07-20T10:00:00",
+            summary="first",
+        )
+        store.add_activity(
+            conn=conn,
+            activity_date="2026-07-20",
+            occurred_at="2026-07-20T11:00:00",
+            summary="second",
+        )
+        store.add_activity(
+            conn=conn,
+            activity_date="2026-07-21",
+            occurred_at="2026-07-21T09:00:00",
+            summary="other",
+        )
 
         acts = store.get_activities_by_date("2026-07-20", conn=conn)
         assert len(acts) == 2
@@ -45,12 +60,21 @@ def test_add_and_get_activities_by_date(test_memory_db_path):
 def test_get_recent_activities_filters_empty_summary(test_memory_db_path):
     conn = memory.get_db_connection()
     try:
-        store.add_activity(conn=conn, activity_date="2026-07-22", summary="Active today")
-        store.add_activity(conn=conn, activity_date="2026-07-21", summary="", occurred_at="2026-07-21T09:00:00")
+        store.add_activity(
+            conn=conn, activity_date="2026-07-22", summary="Active today"
+        )
+        store.add_activity(
+            conn=conn,
+            activity_date="2026-07-21",
+            summary="",
+            occurred_at="2026-07-21T09:00:00",
+        )
         store.add_activity(conn=conn, activity_date="2026-07-21", summary=None)
         store.add_activity(conn=conn, activity_date="2026-07-21", summary="   ")
 
-        recent = store.get_recent_activities(days=1, base_date=date(2026, 7, 22), conn=conn)
+        recent = store.get_recent_activities(
+            days=1, base_date=date(2026, 7, 22), conn=conn
+        )
         assert len(recent) == 1
         assert recent[0]["summary"] == "Active today"
     finally:

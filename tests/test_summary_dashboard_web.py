@@ -31,66 +31,89 @@ def loopback_client(clean_summary_env):
     return TestClient(app)
 
 
-def _seed_day(period_key: str, summary: str, topics: list[str] | None = None, keywords: list[str] | None = None):
-    summary_store.upsert_summary({
-        "period_type": "day",
-        "period_key": period_key,
-        "period_start": period_key,
-        "period_end": period_key,
-        "generated_at": f"{period_key}T22:00:00",
-        "summary": summary,
-        "keywords": keywords or [],
-        "mood": "good",
-        "sleep_raw": "7h",
-        "sleep_hours": 7.0,
-        "topics": topics or ["その他"],
-        "projects": ["Project A"],
-        "people": [{"name": "Alice", "note": "met"}],
-        "items": [
-            {"kind": "highlights", "body": f"Highlight for {period_key}", "display_order": 0},
-            {"kind": "activities", "body": f"Activity for {period_key}", "display_order": 0},
-        ],
-    })
+def _seed_day(
+    period_key: str,
+    summary: str,
+    topics: list[str] | None = None,
+    keywords: list[str] | None = None,
+):
+    summary_store.upsert_summary(
+        {
+            "period_type": "day",
+            "period_key": period_key,
+            "period_start": period_key,
+            "period_end": period_key,
+            "generated_at": f"{period_key}T22:00:00",
+            "summary": summary,
+            "keywords": keywords or [],
+            "mood": "good",
+            "sleep_raw": "7h",
+            "sleep_hours": 7.0,
+            "topics": topics or ["その他"],
+            "projects": ["Project A"],
+            "people": [{"name": "Alice", "note": "met"}],
+            "items": [
+                {
+                    "kind": "highlights",
+                    "body": f"Highlight for {period_key}",
+                    "display_order": 0,
+                },
+                {
+                    "kind": "activities",
+                    "body": f"Activity for {period_key}",
+                    "display_order": 0,
+                },
+            ],
+        }
+    )
 
 
 def _seed_week(period_key: str, start: str, end: str, summary: str):
-    summary_store.upsert_summary({
-        "period_type": "week",
-        "period_key": period_key,
-        "period_start": start,
-        "period_end": end,
-        "generated_at": f"{end}T22:00:00",
-        "summary": summary,
-        "keywords": [],
-        "mood": None,
-        "sleep_raw": None,
-        "sleep_hours": None,
-        "topics": ["LLM・AI活用"],
-        "projects": ["Project B"],
-        "people": [{"name": "Bob", "note": ""}],
-        "items": [
-            {"kind": "progress", "body": f"Progress for {period_key}", "display_order": 0},
-        ],
-    })
+    summary_store.upsert_summary(
+        {
+            "period_type": "week",
+            "period_key": period_key,
+            "period_start": start,
+            "period_end": end,
+            "generated_at": f"{end}T22:00:00",
+            "summary": summary,
+            "keywords": [],
+            "mood": None,
+            "sleep_raw": None,
+            "sleep_hours": None,
+            "topics": ["LLM・AI活用"],
+            "projects": ["Project B"],
+            "people": [{"name": "Bob", "note": ""}],
+            "items": [
+                {
+                    "kind": "progress",
+                    "body": f"Progress for {period_key}",
+                    "display_order": 0,
+                },
+            ],
+        }
+    )
 
 
 def _seed_month(period_key: str, summary: str):
-    summary_store.upsert_summary({
-        "period_type": "month",
-        "period_key": period_key,
-        "period_start": f"{period_key}-01",
-        "period_end": f"{period_key}-31",
-        "generated_at": f"{period_key}-28T22:00:00",
-        "summary": summary,
-        "keywords": [],
-        "mood": None,
-        "sleep_raw": None,
-        "sleep_hours": None,
-        "topics": ["LLM・AI活用"],
-        "projects": ["Project B"],
-        "people": [],
-        "items": [],
-    })
+    summary_store.upsert_summary(
+        {
+            "period_type": "month",
+            "period_key": period_key,
+            "period_start": f"{period_key}-01",
+            "period_end": f"{period_key}-31",
+            "generated_at": f"{period_key}-28T22:00:00",
+            "summary": summary,
+            "keywords": [],
+            "mood": None,
+            "sleep_raw": None,
+            "sleep_hours": None,
+            "topics": ["LLM・AI活用"],
+            "projects": ["Project B"],
+            "people": [],
+            "items": [],
+        }
+    )
 
 
 def test_dashboard_home(loopback_client, clean_summary_env, monkeypatch):
@@ -103,13 +126,24 @@ def test_dashboard_home(loopback_client, clean_summary_env, monkeypatch):
     _seed_day("2026-07-16", "Yesterday Daily")
 
     # Add activity logs for today (2026-07-17)
-    activity_store.add_activity(activity_date="2026-07-17", occurred_at="2026-07-17T10:00:00", summary="first log")
-    activity_store.add_activity(activity_date="2026-07-17", occurred_at="2026-07-17T09:30:00", summary="second log")
+    activity_store.add_activity(
+        activity_date="2026-07-17",
+        occurred_at="2026-07-17T10:00:00",
+        summary="first log",
+    )
+    activity_store.add_activity(
+        activity_date="2026-07-17",
+        occurred_at="2026-07-17T09:30:00",
+        summary="second log",
+    )
 
     # We patch datetime.now in service to fake_now
     from obsidian_ai_hub.web import service
+
     original_func = service.get_dashboard_home
-    monkeypatch.setattr(service, "get_dashboard_home", lambda now=None: original_func(now=fake_now))
+    monkeypatch.setattr(
+        service, "get_dashboard_home", lambda now=None: original_func(now=fake_now)
+    )
 
     res = loopback_client.get("/api/v1/summary-dashboard/home")
     assert res.status_code == 200
@@ -125,15 +159,19 @@ def test_dashboard_home(loopback_client, clean_summary_env, monkeypatch):
     assert today_act["active_minutes"] == 45.0
     assert today_act["inactive_minutes"] == 615.0 - 45.0
     assert len(today_act["logs"]) == 2
-    assert today_act["logs"][0]["summary"] == "second log"  # Sorted ascending by occurred_at
+    assert (
+        today_act["logs"][0]["summary"] == "second log"
+    )  # Sorted ascending by occurred_at
     assert today_act["logs"][1]["summary"] == "first log"
 
 
 def test_dashboard_browse_year_level(loopback_client, clean_summary_env):
     _seed_month("2026-07", "Month 7")
     _seed_month("2026-08", "Month 8")
-    _seed_week("2026-W29", "2026-07-13", "2026-07-19", "Week 29") # Overlaps 2026
-    _seed_week("2025-W52", "2025-12-29", "2026-01-04", "Week 52") # Overlaps both 2025 and 2026
+    _seed_week("2026-W29", "2026-07-13", "2026-07-19", "Week 29")  # Overlaps 2026
+    _seed_week(
+        "2025-W52", "2025-12-29", "2026-01-04", "Week 52"
+    )  # Overlaps both 2025 and 2026
 
     # Browse 2026
     res = loopback_client.get("/api/v1/summary-dashboard/browse?year=2026")
@@ -154,7 +192,11 @@ def test_dashboard_browse_month_level(loopback_client, clean_summary_env):
     _seed_day("2026-07-14", "Day 14")
 
     # Day 2: (only activity log, no summary)
-    activity_store.add_activity(activity_date="2026-07-15", occurred_at="2026-07-15T10:00:00", summary="activity log")
+    activity_store.add_activity(
+        activity_date="2026-07-15",
+        occurred_at="2026-07-15T10:00:00",
+        summary="activity log",
+    )
 
     res = loopback_client.get("/api/v1/summary-dashboard/browse?month=2026-07")
     assert res.status_code == 200
@@ -176,7 +218,9 @@ def test_dashboard_browse_month_level(loopback_client, clean_summary_env):
 
 
 def test_dashboard_browse_validation_mismatch(loopback_client, clean_summary_env):
-    res = loopback_client.get("/api/v1/summary-dashboard/browse?year=2025&month=2026-07")
+    res = loopback_client.get(
+        "/api/v1/summary-dashboard/browse?year=2025&month=2026-07"
+    )
     assert res.status_code == 400
 
 
@@ -199,7 +243,11 @@ def test_dashboard_summaries_get_by_id(loopback_client, clean_summary_env):
 
 def test_dashboard_days_get_details(loopback_client, clean_summary_env):
     _seed_day("2026-07-14", "My Day")
-    activity_store.add_activity(activity_date="2026-07-14", occurred_at="2026-07-14T09:00:00", summary="something")
+    activity_store.add_activity(
+        activity_date="2026-07-14",
+        occurred_at="2026-07-14T09:00:00",
+        summary="something",
+    )
 
     res = loopback_client.get("/api/v1/summary-dashboard/days/2026-07-14")
     assert res.status_code == 200
@@ -213,14 +261,23 @@ def test_dashboard_days_get_details(loopback_client, clean_summary_env):
 
 def test_dashboard_stats_aggregation(loopback_client, clean_summary_env):
     # Seed 3 days with recognised topics from TOPIC_ENUM (all <= 2026-07-15, which is in the past!)
-    _seed_day("2026-07-13", "Day 13", topics=["LLM・AI活用", "健康・医療"], keywords=["foo", "bar"])
+    _seed_day(
+        "2026-07-13",
+        "Day 13",
+        topics=["LLM・AI活用", "健康・医療"],
+        keywords=["foo", "bar"],
+    )
     _seed_day("2026-07-14", "Day 14", topics=["LLM・AI活用"], keywords=["foo"])
     _seed_day("2026-07-15", "Day 15", topics=["ソフトウェア開発"], keywords=["baz"])
 
     # Seed activities
-    activity_store.add_activity(activity_date="2026-07-13", occurred_at="2026-07-13T10:00:00", summary="act")
+    activity_store.add_activity(
+        activity_date="2026-07-13", occurred_at="2026-07-13T10:00:00", summary="act"
+    )
 
-    res = loopback_client.get("/api/v1/summary-dashboard/stats?start_date=2026-07-13&end_date=2026-07-15")
+    res = loopback_client.get(
+        "/api/v1/summary-dashboard/stats?start_date=2026-07-13&end_date=2026-07-15"
+    )
     assert res.status_code == 200
     data = res.json()
 
@@ -243,15 +300,20 @@ def test_dashboard_stats_aggregation(loopback_client, clean_summary_env):
 
 def test_get_day_activity_times_future_date(loopback_client, clean_summary_env):
     from obsidian_ai_hub.web import service
+
     fake_now = datetime(2026, 7, 17, 10, 15, 0)
     # 2026-07-18 is in the future relative to fake_now
-    active_mins, inactive_mins = service.get_day_activity_times([], "2026-07-18", now=fake_now)
+    active_mins, inactive_mins = service.get_day_activity_times(
+        [], "2026-07-18", now=fake_now
+    )
     assert active_mins == 0.0
     assert inactive_mins == 0.0
 
 
 def test_stats_date_range_exceeded(loopback_client, clean_summary_env):
-    res = loopback_client.get("/api/v1/summary-dashboard/stats?start_date=2020-01-01&end_date=2031-01-01")
+    res = loopback_client.get(
+        "/api/v1/summary-dashboard/stats?start_date=2020-01-01&end_date=2031-01-01"
+    )
     assert res.status_code == 400
 
 

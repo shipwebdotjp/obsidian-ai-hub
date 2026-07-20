@@ -26,10 +26,13 @@ def _get_web_search_tool(k: int = 5) -> TavilySearch:
         include_usage=True,
     )
 
+
 class WebSearchInput(BaseModel):
     """Input for web search."""
+
     query: str = Field(description="Search query to look up on the web.")
     k: int = Field(default=5, description="Number of search results to return.")
+
 
 @tool(args_schema=WebSearchInput)
 def web_search(query: str, k: int = 5) -> str:

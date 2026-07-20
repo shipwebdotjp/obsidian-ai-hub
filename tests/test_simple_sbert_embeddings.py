@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import patch, MagicMock
-from pathlib import Path
 import sys
+
 
 @pytest.fixture(autouse=True)
 def isolated_sys_modules():
@@ -39,6 +39,7 @@ def isolated_sys_modules():
         else:
             sys.modules[name] = original
 
+
 @pytest.fixture
 def SimpleSbertEmbeddings():
     """Import SimpleSbertEmbeddings inside the fixture to ensure it uses the mocks."""
@@ -47,7 +48,9 @@ def SimpleSbertEmbeddings():
     if "obsidian_ai_hub.utils.simple_sbert_embeddings" in sys.modules:
         del sys.modules["obsidian_ai_hub.utils.simple_sbert_embeddings"]
     from obsidian_ai_hub.utils.simple_sbert_embeddings import SimpleSbertEmbeddings
+
     return SimpleSbertEmbeddings
+
 
 @pytest.fixture
 def config():
@@ -55,20 +58,32 @@ def config():
     if "obsidian_ai_hub.utils.config" in sys.modules:
         del sys.modules["obsidian_ai_hub.utils.config"]
     from obsidian_ai_hub.utils import config
+
     return config
+
 
 @pytest.fixture
 def mock_transformers_calls():
-    with patch("obsidian_ai_hub.utils.simple_sbert_embeddings.AutoTokenizer") as mock_tokenizer, \
-         patch("obsidian_ai_hub.utils.simple_sbert_embeddings.AutoModel") as mock_model:
+    with (
+        patch(
+            "obsidian_ai_hub.utils.simple_sbert_embeddings.AutoTokenizer"
+        ) as mock_tokenizer,
+        patch("obsidian_ai_hub.utils.simple_sbert_embeddings.AutoModel") as mock_model,
+    ):
         yield mock_tokenizer, mock_model
+
 
 @pytest.fixture
 def mock_sentence_transformer_calls():
-    with patch("obsidian_ai_hub.utils.simple_sbert_embeddings.SentenceTransformer") as mock_st:
+    with patch(
+        "obsidian_ai_hub.utils.simple_sbert_embeddings.SentenceTransformer"
+    ) as mock_st:
         yield mock_st
 
-def test_init_local_success(SimpleSbertEmbeddings, config, mock_transformers_calls, tmp_path, monkeypatch):
+
+def test_init_local_success(
+    SimpleSbertEmbeddings, config, mock_transformers_calls, tmp_path, monkeypatch
+):
     mock_tokenizer, mock_model = mock_transformers_calls
 
     model_name = "test-model"
@@ -79,7 +94,9 @@ def test_init_local_success(SimpleSbertEmbeddings, config, mock_transformers_cal
     monkeypatch.setattr(config, "LOCAL_MODEL_DIR", model_dir)
 
     # Mock resolve_embedding_dim to avoid further errors
-    with patch.object(SimpleSbertEmbeddings, "_resolve_embedding_dim", return_value=768):
+    with patch.object(
+        SimpleSbertEmbeddings, "_resolve_embedding_dim", return_value=768
+    ):
         embedder = SimpleSbertEmbeddings(model_name=model_name)
 
     assert embedder.model_name == model_name
@@ -90,7 +107,10 @@ def test_init_local_success(SimpleSbertEmbeddings, config, mock_transformers_cal
     assert args[0] == str(model_dir / model_name)
     assert kwargs["local_files_only"] is True
 
-def test_init_local_fail_no_fallback(SimpleSbertEmbeddings, config, mock_transformers_calls, tmp_path, monkeypatch):
+
+def test_init_local_fail_no_fallback(
+    SimpleSbertEmbeddings, config, mock_transformers_calls, tmp_path, monkeypatch
+):
     mock_tokenizer, mock_model = mock_transformers_calls
     mock_tokenizer.from_pretrained.side_effect = Exception("Not found")
 
@@ -107,7 +127,10 @@ def test_init_local_fail_no_fallback(SimpleSbertEmbeddings, config, mock_transfo
     assert "Failed to load local model" in str(excinfo.value)
     mock_tokenizer.from_pretrained.assert_called_once()
 
-def test_init_local_fail_with_fallback_success(SimpleSbertEmbeddings, config, mock_transformers_calls, tmp_path, monkeypatch):
+
+def test_init_local_fail_with_fallback_success(
+    SimpleSbertEmbeddings, config, mock_transformers_calls, tmp_path, monkeypatch
+):
     mock_tokenizer, mock_model = mock_transformers_calls
 
     # First call (local) fails, second call (network) succeeds
@@ -120,8 +143,10 @@ def test_init_local_fail_with_fallback_success(SimpleSbertEmbeddings, config, mo
 
     monkeypatch.setattr(config, "LOCAL_MODEL_DIR", model_dir)
 
-    with patch.object(SimpleSbertEmbeddings, "_resolve_embedding_dim", return_value=768):
-        embedder = SimpleSbertEmbeddings(model_name=model_name, allow_network_fallback=True)
+    with patch.object(
+        SimpleSbertEmbeddings, "_resolve_embedding_dim", return_value=768
+    ):
+        SimpleSbertEmbeddings(model_name=model_name, allow_network_fallback=True)
 
     assert mock_tokenizer.from_pretrained.call_count == 2
     # Local attempt
@@ -132,7 +157,10 @@ def test_init_local_fail_with_fallback_success(SimpleSbertEmbeddings, config, mo
     assert args1[0] == model_name
     assert kwargs1["local_files_only"] is False
 
-def test_init_no_local_no_fallback(SimpleSbertEmbeddings, config, mock_transformers_calls, tmp_path, monkeypatch):
+
+def test_init_no_local_no_fallback(
+    SimpleSbertEmbeddings, config, mock_transformers_calls, tmp_path, monkeypatch
+):
     model_name = "test-model"
     monkeypatch.setattr(config, "LOCAL_MODEL_DIR", tmp_path / "non-existent")
 
@@ -141,7 +169,15 @@ def test_init_no_local_no_fallback(SimpleSbertEmbeddings, config, mock_transform
 
     assert "not found locally and network fallback is disabled" in str(excinfo.value)
 
-def test_sentence_transformer_fallback_only_when_allowed(SimpleSbertEmbeddings, config, mock_transformers_calls, mock_sentence_transformer_calls, tmp_path, monkeypatch):
+
+def test_sentence_transformer_fallback_only_when_allowed(
+    SimpleSbertEmbeddings,
+    config,
+    mock_transformers_calls,
+    mock_sentence_transformer_calls,
+    tmp_path,
+    monkeypatch,
+):
     mock_tokenizer, _ = mock_transformers_calls
     mock_tokenizer.from_pretrained.side_effect = Exception("Transformers fail")
 
@@ -155,6 +191,8 @@ def test_sentence_transformer_fallback_only_when_allowed(SimpleSbertEmbeddings, 
     mock_sentence_transformer_calls.assert_not_called()
 
     # allow_network_fallback=True -> Should try SentenceTransformer
-    with patch.object(SimpleSbertEmbeddings, "_resolve_embedding_dim", return_value=768):
+    with patch.object(
+        SimpleSbertEmbeddings, "_resolve_embedding_dim", return_value=768
+    ):
         SimpleSbertEmbeddings(model_name=model_name, allow_network_fallback=True)
     mock_sentence_transformer_calls.assert_called_once()

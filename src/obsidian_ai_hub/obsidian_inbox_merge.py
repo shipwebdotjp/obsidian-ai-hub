@@ -18,7 +18,14 @@ from pathlib import Path
 import whisper
 
 from obsidian_ai_hub.handler import add_research_theme, web_extract
-from obsidian_ai_hub.utils import config, extracter, llm_client, prompt, webclip, youtube
+from obsidian_ai_hub.utils import (
+    config,
+    extracter,
+    llm_client,
+    prompt,
+    webclip,
+    youtube,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -26,19 +33,20 @@ logger = logging.getLogger(__name__)
 MARKDOWN_EXTENSIONS = {".md"}
 AUDIO_EXTENSIONS = {".m4a", ".mp3", ".wav"}
 
+
 def extract_urls(text: str) -> list[str]:
     """
     Extract and deduplicate URLs from text with light normalization.
     """
     # Regex to find URLs
-    url_pattern = re.compile(r'https?://[^\s)\]]+')
+    url_pattern = re.compile(r"https?://[^\s)\]]+")
     found_urls = url_pattern.findall(text)
 
     normalized_urls = []
     seen = set()
     for url in found_urls:
         # Light normalization: strip trailing punctuation
-        normalized = url.rstrip('.,;)]')
+        normalized = url.rstrip(".,;)]")
         if normalized not in seen:
             normalized_urls.append(normalized)
             seen.add(normalized)
@@ -54,7 +62,7 @@ def infer_title(url: str, raw_content: str) -> str:
         # Look for the first non-empty line
         for line in raw_content.splitlines():
             stripped = line.strip()
-            if stripped and not stripped.startswith('http'):
+            if stripped and not stripped.startswith("http"):
                 # Limit title length
                 if len(stripped) > 100:
                     return stripped[:97] + "..."
@@ -63,7 +71,7 @@ def infer_title(url: str, raw_content: str) -> str:
     # Fallback to URL-derived label
     parsed = urlparse(url)
     domain = parsed.netloc
-    path = parsed.path.rstrip('/')
+    path = parsed.path.rstrip("/")
     if path:
         return f"{domain}{path}"
     return domain
@@ -78,8 +86,7 @@ def generate_web_summary(raw_content: str) -> str:
 
     try:
         rendered_prompt = prompt.render_prompt(
-            config.INBOX_WEB_SUMMARY_PROMPT_PATH,
-            {"raw_content": raw_content}
+            config.INBOX_WEB_SUMMARY_PROMPT_PATH, {"raw_content": raw_content}
         )
         response = llm_client.generate_llm_response(
             provider=config.INBOX_WEB_SUMMARY_PROVIDER,
@@ -104,9 +111,11 @@ def process_web_clips(urls: list[str], daily_file: Path, hour_str: str) -> None:
         return
 
     # Determine clipped_at_str using system local timezone
-    if re.match(r'^\d{4}-\d{2}-\d{2}$', daily_file.stem):
+    if re.match(r"^\d{4}-\d{2}-\d{2}$", daily_file.stem):
         try:
-            local_dt = datetime.strptime(f"{daily_file.stem} {hour_str}", "%Y-%m-%d %H:%M")
+            local_dt = datetime.strptime(
+                f"{daily_file.stem} {hour_str}", "%Y-%m-%d %H:%M"
+            )
             clipped_at_str = local_dt.astimezone().isoformat()
         except Exception:
             clipped_at_str = datetime.now().astimezone().isoformat()
@@ -190,6 +199,7 @@ def process_web_clips(urls: list[str], daily_file: Path, hour_str: str) -> None:
 class InboxClassification:
     category: str
 
+
 def is_icloud_offloaded(file_path: Path) -> bool:
     """
     iCloud Driveでオンラインのままのファイルかどうかを確認。
@@ -200,9 +210,9 @@ def is_icloud_offloaded(file_path: Path) -> bool:
         stat = file_path.stat()
         if stat.st_size == 0:
             return True
-            
+
         # ファイルを読み込みモードで開いて、OSにダウンロードを強制させる
-        with open(file_path, 'rb') as f:
+        with open(file_path, "rb") as f:
             # 先頭1バイトだけ読んでみる（実際の読み込み）
             f.read(1)
         return False
@@ -227,8 +237,7 @@ def wait_for_icloud_download(file_path: Path, timeout: int = 60) -> bool:
 
 def _build_classification_prompt(content: str) -> str:
     return prompt.render_prompt(
-        config.INBOX_CLASSIFICATION_PROMPT_PATH,
-        {"content": content}
+        config.INBOX_CLASSIFICATION_PROMPT_PATH, {"content": content}
     )
 
 
@@ -298,7 +307,9 @@ def merge_content_into_daily_note(
                 location_name = value
                 break
         content_to_merge = f"- {hour_str} {location_name}"
-        extracter.append_to_subheader_file(daily_file.as_posix(), subheader, [content_to_merge])
+        extracter.append_to_subheader_file(
+            daily_file.as_posix(), subheader, [content_to_merge]
+        )
         return "location"
 
     classification = classify_inbox_content(content)
@@ -307,7 +318,9 @@ def merge_content_into_daily_note(
 
     subheader = "## 📝メモ"
     content_to_merge = f"- {hour_str} [{classification.category}] {content}"
-    extracter.append_to_subheader_file(daily_file.as_posix(), subheader, [content_to_merge])
+    extracter.append_to_subheader_file(
+        daily_file.as_posix(), subheader, [content_to_merge]
+    )
     return classification.category
 
 
@@ -349,7 +362,9 @@ def main():
                 inbox_file.unlink()
                 inbox_file.with_suffix(inbox_file.suffix + ".tmp").rename(inbox_file)
                 if not wait_for_icloud_download(inbox_file):
-                    logger.warning("Timeout waiting for iCloud download: %s", inbox_file.name)
+                    logger.warning(
+                        "Timeout waiting for iCloud download: %s", inbox_file.name
+                    )
                     continue
             except (subprocess.CalledProcessError, FileNotFoundError, OSError):
                 logger.exception("Failed to download iCloud file: %s", inbox_file.name)
@@ -406,7 +421,7 @@ def main():
                 logger.info("Transcribing audio file: %s", inbox_file.name)
                 with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
                     tmp_path = Path(tmp.name)
-                with open(inbox_file, 'rb') as src, open(tmp_path, 'wb') as dst:
+                with open(inbox_file, "rb") as src, open(tmp_path, "wb") as dst:
                     dst.write(src.read())
 
                 model = whisper.load_model("medium")  # または"medium", "small"
@@ -415,7 +430,7 @@ def main():
                 try:
                     rendered_prompt = prompt.render_prompt(
                         config.INBOX_TRANSCRIPT_CORRECTION_PROMPT_PATH,
-                        {"raw_content": raw_content}
+                        {"raw_content": raw_content},
                     )
                     response = llm_client.generate_llm_response(
                         provider=config.INBOX_AUDIO_CORRECTION_PROVIDER,
@@ -434,7 +449,7 @@ def main():
                 if "tmp_path" in locals():
                     try:
                         tmp_path.unlink(missing_ok=True)
-                    except:
+                    except Exception:
                         pass
                 continue
 
@@ -442,7 +457,7 @@ def main():
         if ext in AUDIO_EXTENSIONS and "tmp_path" in locals():
             try:
                 tmp_path.unlink(missing_ok=True)
-            except:
+            except Exception:
                 pass
 
         branch = merge_content_into_daily_note(content, daily_file, hour_str)

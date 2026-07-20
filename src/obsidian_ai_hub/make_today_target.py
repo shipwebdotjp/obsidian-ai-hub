@@ -1,14 +1,15 @@
 from datetime import datetime, timedelta
-import random
 import logging
 import string
 
-from obsidian_ai_hub.utils import config, reader, extracter, llm_client, prompt
+from obsidian_ai_hub.utils import config, reader, extracter, llm_client, prompt  # noqa: F401  (re-exported for test patching)
 
 logger = logging.getLogger(__name__)
 
+
 def build_system_prompt() -> str | None:
     from pathlib import Path
+
     copilot_dir = Path(config.VAULT_PATH) / "copilot"
     files_to_check = [
         copilot_dir / "AI_README.md",
@@ -62,7 +63,7 @@ def build_system_prompt() -> str | None:
 
 def main():
     today = datetime.now()
-    todays_weekday = today.strftime('%A')
+    todays_weekday = today.strftime("%A")
     logger.info("Generating target for: %s", today.date())
     todays_note = reader.get_daily_note_content(today)
     todays_schedule = extracter.get_subheader_view(todays_note, "## 📅 今日の予定")
@@ -71,14 +72,18 @@ def main():
     # 過去7日間の日記を取得
     daily_notes = []
     for i in range(7):
-        day = today - timedelta(days=i+1)
+        day = today - timedelta(days=i + 1)
         note = reader.get_daily_note_content(day)
         today_view = extracter.get_subheader_view(note, "## 💡 今日の気づき・振り返り")
         today_sleep = extracter.get_frontmatter_value(note, "sleep")
         today_mood = extracter.get_frontmatter_value(note, "mood")
         if today_sleep or today_mood:
-            daily_notes.append(f"{day.strftime('%Y-%m-%d %a')}の状態:\n- 睡眠: {today_sleep}時間\n- 気分: {today_mood}\n")
-        daily_notes.append(f"{day.strftime('%Y-%m-%d %a')}の気づき・振り返り:\n{today_view}")
+            daily_notes.append(
+                f"{day.strftime('%Y-%m-%d %a')}の状態:\n- 睡眠: {today_sleep}時間\n- 気分: {today_mood}\n"
+            )
+        daily_notes.append(
+            f"{day.strftime('%Y-%m-%d %a')}の気づき・振り返り:\n{today_view}"
+        )
     daily_context = "\n---\n".join(daily_notes)
 
     # ウィークリーノートを取得
@@ -89,10 +94,13 @@ def main():
     long_term_memories = ""
     try:
         from obsidian_ai_hub import memory
+
         context_pack = memory.compile_context("make-target")
         long_term_memories = context_pack.get("context", "")
     except Exception as e:
-        logger.warning(f"Failed to compile memory context: {e}. Continuing without long-term memories.")
+        logger.warning(
+            f"Failed to compile memory context: {e}. Continuing without long-term memories."
+        )
 
     # System prompt from Core rules
     system_prompt = None
@@ -142,6 +150,7 @@ def main():
     new_today_note = today_note.replace("今日の目標", f"今日の目標\n- [ ] {response}")
     with open(reader.get_daily_note_path(today), "w") as f:
         f.write(new_today_note)
+
 
 if __name__ == "__main__":
     main()

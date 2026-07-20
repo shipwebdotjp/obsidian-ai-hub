@@ -1,7 +1,6 @@
 import sys
-from datetime import datetime
 from unittest.mock import MagicMock, patch, mock_open
-import pytest
+
 
 def test_make_today_target_main():
     # Mock modules using patch.dict to avoid contamination
@@ -20,15 +19,18 @@ def test_make_today_target_main():
     with patch.dict(sys.modules, mock_modules):
         from obsidian_ai_hub import make_today_target
 
-        with patch("obsidian_ai_hub.make_today_target.reader") as mock_reader, \
-             patch("obsidian_ai_hub.make_today_target.extracter") as mock_extracter, \
-             patch("obsidian_ai_hub.make_today_target.llm_client") as mock_llm, \
-             patch("obsidian_ai_hub.make_today_target.prompt") as mock_prompt, \
-             patch("obsidian_ai_hub.make_today_target.config") as mock_config, \
-             patch("obsidian_ai_hub.memory.compile_context") as mock_compile_ctx:
-
+        with (
+            patch("obsidian_ai_hub.make_today_target.reader") as mock_reader,
+            patch("obsidian_ai_hub.make_today_target.extracter") as mock_extracter,
+            patch("obsidian_ai_hub.make_today_target.llm_client") as mock_llm,
+            patch("obsidian_ai_hub.make_today_target.prompt"),
+            patch("obsidian_ai_hub.make_today_target.config") as mock_config,
+            patch("obsidian_ai_hub.memory.compile_context") as mock_compile_ctx,
+        ):
             mock_compile_ctx.return_value = {"context": ""}
-            mock_reader.get_daily_note_content.return_value = "今日の目標\nExisting content"
+            mock_reader.get_daily_note_content.return_value = (
+                "今日の目標\nExisting content"
+            )
             mock_reader.get_daily_note_path.return_value = "dummy_path.md"
             mock_extracter.get_subheader_view.return_value = "Subheader content"
             mock_extracter.get_frontmatter_value.return_value = "dummy"

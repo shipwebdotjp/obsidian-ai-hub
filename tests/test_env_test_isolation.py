@@ -3,13 +3,14 @@ import sys
 import subprocess
 from pathlib import Path
 
-import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SRC_DIR = str(PROJECT_ROOT / "src")
 
 
-def _run(script: str, extra_env: dict[str, str] | None = None, expect_error: bool = False):
+def _run(
+    script: str, extra_env: dict[str, str] | None = None, expect_error: bool = False
+):
     env = {
         "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
         "HOME": os.environ.get("HOME", "/tmp"),

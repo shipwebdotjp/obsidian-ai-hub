@@ -9,14 +9,16 @@ import yaml
 from obsidian_ai_hub import obsidian_inbox_merge
 from obsidian_ai_hub.utils import config, webclip
 
+
 def test_extract_urls():
     text = "Check this out: https://example.com/page. Also https://test.org/path, and (https://nested.com/)."
     urls = obsidian_inbox_merge.extract_urls(text)
     assert urls == [
         "https://example.com/page",
         "https://test.org/path",
-        "https://nested.com/"
+        "https://nested.com/",
     ]
+
 
 def test_extract_urls_deduplication():
     text = "https://example.com https://example.com https://example.com/other"
@@ -37,7 +39,11 @@ def test_merge_content_with_web_clip(tmp_path: Path):
     mock_extract_result = json.dumps(
         {
             "results": [
-                {"url": "https://example.com", "raw_content": "Page Content here.", "title": "My Example Page"}
+                {
+                    "url": "https://example.com",
+                    "raw_content": "Page Content here.",
+                    "title": "My Example Page",
+                }
             ]
         }
     )
@@ -50,7 +56,7 @@ def test_merge_content_with_web_clip(tmp_path: Path):
         "tags": ["python", "testing"],
         "summary": "This is a summary of the page.",
         "key_points": ["First bullet", "Second bullet"],
-        "why_saved": "Interesting framework"
+        "why_saved": "Interesting framework",
     }
 
     with (
@@ -58,10 +64,18 @@ def test_merge_content_with_web_clip(tmp_path: Path):
         patch.object(config, "WEBCLIP_PATH", webclip_dir),
         patch.object(config, "WEBCLIP_DIR_NAME", "webclip"),
         patch.object(obsidian_inbox_merge.web_extract, "web_extract", MagicMock()),
-        patch.object(obsidian_inbox_merge.llm_client, "generate_llm_response", return_value=json.dumps(llm_payload)),
-        patch.object(obsidian_inbox_merge.extracter, "append_to_subheader_file") as mock_append,
+        patch.object(
+            obsidian_inbox_merge.llm_client,
+            "generate_llm_response",
+            return_value=json.dumps(llm_payload),
+        ),
+        patch.object(
+            obsidian_inbox_merge.extracter, "append_to_subheader_file"
+        ) as mock_append,
     ):
-        obsidian_inbox_merge.web_extract.web_extract.invoke = MagicMock(return_value=mock_extract_result)
+        obsidian_inbox_merge.web_extract.web_extract.invoke = MagicMock(
+            return_value=mock_extract_result
+        )
         result = obsidian_inbox_merge.merge_content_into_daily_note(
             content, daily_file, "10:30"
         )
@@ -98,7 +112,7 @@ def test_merge_content_with_web_clip_multiple_urls(tmp_path: Path):
         "tags": ["aws"],
         "summary": "Sum A",
         "key_points": ["Point A"],
-        "why_saved": "Why A"
+        "why_saved": "Why A",
     }
     llm_payload_b = {
         "published_at": None,
@@ -108,7 +122,7 @@ def test_merge_content_with_web_clip_multiple_urls(tmp_path: Path):
         "tags": ["misc"],
         "summary": "Sum B",
         "key_points": ["Point B"],
-        "why_saved": "Why B"
+        "why_saved": "Why B",
     }
 
     with (
@@ -116,11 +130,21 @@ def test_merge_content_with_web_clip_multiple_urls(tmp_path: Path):
         patch.object(config, "WEBCLIP_PATH", webclip_dir),
         patch.object(config, "WEBCLIP_DIR_NAME", "webclip"),
         patch.object(obsidian_inbox_merge.web_extract, "web_extract", MagicMock()),
-        patch.object(obsidian_inbox_merge.llm_client, "generate_llm_response", side_effect=[json.dumps(llm_payload_a), json.dumps(llm_payload_b)]),
-        patch.object(obsidian_inbox_merge.extracter, "append_to_subheader_file") as mock_append,
+        patch.object(
+            obsidian_inbox_merge.llm_client,
+            "generate_llm_response",
+            side_effect=[json.dumps(llm_payload_a), json.dumps(llm_payload_b)],
+        ),
+        patch.object(
+            obsidian_inbox_merge.extracter, "append_to_subheader_file"
+        ) as mock_append,
     ):
-        obsidian_inbox_merge.web_extract.web_extract.invoke = MagicMock(return_value=mock_extract_result)
-        result = obsidian_inbox_merge.merge_content_into_daily_note(content, daily_file, "11:00")
+        obsidian_inbox_merge.web_extract.web_extract.invoke = MagicMock(
+            return_value=mock_extract_result
+        )
+        result = obsidian_inbox_merge.merge_content_into_daily_note(
+            content, daily_file, "11:00"
+        )
 
     # Smoke assertions
     assert result == "web"
@@ -142,10 +166,16 @@ def test_merge_content_with_web_clip_failure_fallback(tmp_path: Path):
         patch.object(config, "WEBCLIP_PATH", webclip_dir),
         patch.object(config, "WEBCLIP_DIR_NAME", "webclip"),
         patch.object(obsidian_inbox_merge.web_extract, "web_extract", MagicMock()),
-        patch.object(obsidian_inbox_merge.extracter, "append_to_subheader_file") as mock_append,
+        patch.object(
+            obsidian_inbox_merge.extracter, "append_to_subheader_file"
+        ) as mock_append,
     ):
-        obsidian_inbox_merge.web_extract.web_extract.invoke = MagicMock(side_effect=Exception("API Error"))
-        result = obsidian_inbox_merge.merge_content_into_daily_note(content, daily_file, "12:00")
+        obsidian_inbox_merge.web_extract.web_extract.invoke = MagicMock(
+            side_effect=Exception("API Error")
+        )
+        result = obsidian_inbox_merge.merge_content_into_daily_note(
+            content, daily_file, "12:00"
+        )
 
     # Smoke assertions
     assert result == "web"
@@ -159,13 +189,25 @@ def test_non_web_content_still_works(tmp_path: Path):
     content = "Just a plain memo without URLs"
 
     with (
-        patch.object(obsidian_inbox_merge, "classify_inbox_content", return_value=obsidian_inbox_merge.InboxClassification(category="memo")),
-        patch.object(obsidian_inbox_merge.extracter, "append_to_subheader_file") as mock_append
+        patch.object(
+            obsidian_inbox_merge,
+            "classify_inbox_content",
+            return_value=obsidian_inbox_merge.InboxClassification(category="memo"),
+        ),
+        patch.object(
+            obsidian_inbox_merge.extracter, "append_to_subheader_file"
+        ) as mock_append,
     ):
-        result = obsidian_inbox_merge.merge_content_into_daily_note(content, daily_file, "13:00")
+        result = obsidian_inbox_merge.merge_content_into_daily_note(
+            content, daily_file, "13:00"
+        )
 
     assert result == "memo"
-    mock_append.assert_called_once_with(daily_file.as_posix(), "## 📝メモ", ["- 13:00 [memo] Just a plain memo without URLs"])
+    mock_append.assert_called_once_with(
+        daily_file.as_posix(),
+        "## 📝メモ",
+        ["- 13:00 [memo] Just a plain memo without URLs"],
+    )
 
 
 def test_topic_normalization_and_conflict_serial(tmp_path: Path):
@@ -186,7 +228,11 @@ def test_topic_normalization_and_conflict_serial(tmp_path: Path):
         patch.object(config, "VAULT_PATH", vault_dir),
         patch.object(config, "WEBCLIP_PATH", webclip_dir),
         patch.object(config, "WEBCLIP_DIR_NAME", "webclip"),
-        patch.object(obsidian_inbox_merge.llm_client, "generate_llm_response", return_value=json.dumps({"category": "その他", "topics": ["その他"]})),
+        patch.object(
+            obsidian_inbox_merge.llm_client,
+            "generate_llm_response",
+            return_value=json.dumps({"category": "その他", "topics": ["その他"]}),
+        ),
     ):
         link = webclip.process_single_webclip(
             url="https://different-url.com",
@@ -194,7 +240,7 @@ def test_topic_normalization_and_conflict_serial(tmp_path: Path):
             extracted_title="My Duplicate",
             hour_str="14:00",
             daily_file=vault_dir / "2026-05-09.md",
-            clipped_at_str="2026-05-09T14:00:00+09:00"
+            clipped_at_str="2026-05-09T14:00:00+09:00",
         )
 
     # Smoke assertions
@@ -221,36 +267,46 @@ def test_same_url_full_update_and_move(tmp_path: Path):
         "category": "健康・医療",
         "why_saved": "手入力した保存理由",
     }
-    old_file.write_text(f"---\n{yaml.dump(old_frontmatter)}---\nold content", encoding="utf-8")
+    old_file.write_text(
+        f"---\n{yaml.dump(old_frontmatter)}---\nold content", encoding="utf-8"
+    )
 
     # Re-import or patch config to point to webclip_dir
     with (
         patch.object(config, "VAULT_PATH", vault_dir),
         patch.object(config, "WEBCLIP_PATH", webclip_dir),
         patch.object(config, "WEBCLIP_DIR_NAME", "webclip"),
-        patch.object(obsidian_inbox_merge.llm_client, "generate_llm_response", return_value=json.dumps({
-            "published_at": None,
-            "updated_at": None,
-            "category": "金融・投資",  # Change Category!
-            "topics": ["金融・投資"],
-            "tags": ["money"],
-            "summary": "New text",
-            "key_points": ["Point"],
-            "why_saved": "Reason"
-        }))
+        patch.object(
+            obsidian_inbox_merge.llm_client,
+            "generate_llm_response",
+            return_value=json.dumps(
+                {
+                    "published_at": None,
+                    "updated_at": None,
+                    "category": "金融・投資",  # Change Category!
+                    "topics": ["金融・投資"],
+                    "tags": ["money"],
+                    "summary": "New text",
+                    "key_points": ["Point"],
+                    "why_saved": "Reason",
+                }
+            ),
+        ),
     ):
-        link = webclip.process_single_webclip(
+        webclip.process_single_webclip(
             url="https://update-me.com",
             raw_content="new body text",
             extracted_title="Target Page",
             hour_str="15:30",
             daily_file=vault_dir / "2026-05-09.md",
-            clipped_at_str="2026-05-09T15:30:00+09:00"
+            clipped_at_str="2026-05-09T15:30:00+09:00",
         )
 
     # Smoke assertions
     assert not old_file.exists()
     new_file = webclip_dir / "金融・投資" / "Target Page.md"
     assert new_file.exists()
-    frontmatter = yaml.safe_load(new_file.read_text(encoding="utf-8").split("---", 2)[1])
+    frontmatter = yaml.safe_load(
+        new_file.read_text(encoding="utf-8").split("---", 2)[1]
+    )
     assert frontmatter["why_saved"] == "手入力した保存理由"

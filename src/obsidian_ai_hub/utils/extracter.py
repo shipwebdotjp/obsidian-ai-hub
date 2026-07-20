@@ -18,8 +18,8 @@ def get_subheader_view(note: str, subheader: str) -> str:
 
 def append_to_subheader(content: str, subheader: str, new_lines: list[str]) -> str:
     lines = content.splitlines()
-    header_pattern = re.compile(r'^#{1,6}\s')
-    
+    header_pattern = re.compile(r"^#{1,6}\s")
+
     insert_pos = None
     in_target = False
 
@@ -39,24 +39,27 @@ def append_to_subheader(content: str, subheader: str, new_lines: list[str]) -> s
             insert_pos = len(lines)
 
     if insert_pos is None:
-        tail = ['', subheader] + new_lines
-        return '\n'.join(lines + tail) + '\n'
+        tail = ["", subheader] + new_lines
+        return "\n".join(lines + tail) + "\n"
 
     # 末尾の空行の手前に挿入（自然な見た目を保つ）
     actual_insert = insert_pos
-    while actual_insert > 0 and lines[actual_insert - 1].strip() == '':
+    while actual_insert > 0 and lines[actual_insert - 1].strip() == "":
         actual_insert -= 1
 
     for j, new_line in enumerate(new_lines):
         lines.insert(actual_insert + j, new_line)
 
-    return '\n'.join(lines) + '\n'
+    return "\n".join(lines) + "\n"
 
-def append_to_subheader_file(filepath: str, subheader: str, new_lines: list[str]) -> None:
-    with open(filepath, 'r', encoding='utf-8') as f:
+
+def append_to_subheader_file(
+    filepath: str, subheader: str, new_lines: list[str]
+) -> None:
+    with open(filepath, "r", encoding="utf-8") as f:
         content = f.read()
     updated = append_to_subheader(content, subheader, new_lines)
-    with open(filepath, 'w', encoding='utf-8') as f:
+    with open(filepath, "w", encoding="utf-8") as f:
         f.write(updated)
 
 

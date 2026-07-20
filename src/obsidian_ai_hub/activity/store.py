@@ -51,7 +51,9 @@ def deserialize_activity(row: sqlite3.Row) -> Dict[str, Any]:
             try:
                 activity[col] = json.loads(val)
             except json.JSONDecodeError as e:
-                logger.warning(f"Failed to deserialize field '{col}' for activity {activity.get('activity_id')}: {e}")
+                logger.warning(
+                    f"Failed to deserialize field '{col}' for activity {activity.get('activity_id')}: {e}"
+                )
                 activity[col] = []
         elif val is None:
             activity[col] = []

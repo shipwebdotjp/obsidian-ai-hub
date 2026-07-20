@@ -21,9 +21,12 @@ def append_research_theme(
     direction: str | None = None,
 ) -> str:
     normalized = _normalize_theme(theme)
-    normalized_direction = direction.replace("\r", "").replace("\n", "").strip() if direction else None
+    normalized_direction = (
+        direction.replace("\r", "").replace("\n", "").strip() if direction else None
+    )
 
     from obsidian_ai_hub.research.pipeline import create_theme_and_research
+
     result = create_theme_and_research(
         theme=normalized,
         direction=normalized_direction,
@@ -37,21 +40,32 @@ def append_research_theme(
         if job and job.get("status") == "succeeded":
             try:
                 from obsidian_ai_hub.research.runner import save_research_to_vault
+
                 output_path = save_research_to_vault(result["theme_id"])
                 if output_path:
                     from obsidian_ai_hub.research import db
+
                     db.set_status(result["theme_id"], "approved", reviewed_by="system")
                     logger.info("Research saved to vault: %s", output_path)
             except Exception:
-                logger.exception("Failed to save research to vault for theme %s", result["theme_id"])
+                logger.exception(
+                    "Failed to save research to vault for theme %s", result["theme_id"]
+                )
 
-    logger.info("Added research theme '%s' (status=%s, theme_id=%s)", normalized, result["status"], result.get("theme_id"))
+    logger.info(
+        "Added research theme '%s' (status=%s, theme_id=%s)",
+        normalized,
+        result["status"],
+        result.get("theme_id"),
+    )
     return result["status"]
 
 
 def main(theme: str | None = None, direction: str | None = None) -> str:
     if theme is None:
-        parser = argparse.ArgumentParser(description="Add a theme to the research candidate list")
+        parser = argparse.ArgumentParser(
+            description="Add a theme to the research candidate list"
+        )
         parser.add_argument("theme", help="テーマ名")
         parser.add_argument("--direction", "-d", help="調査方向（任意）")
         args = parser.parse_args()

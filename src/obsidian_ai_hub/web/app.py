@@ -42,7 +42,9 @@ def _configure_security(host: str, token: str) -> None:
         )
 
 
-def create_app(host: str | None = None, port: int | None = None, token: str | None = None) -> FastAPI:
+def create_app(
+    host: str | None = None, port: int | None = None, token: str | None = None
+) -> FastAPI:
     if host is None:
         host = os.getenv("MEMORY_REVIEW_HOST", DEFAULT_HOST)
     if port is None:
@@ -54,7 +56,9 @@ def create_app(host: str | None = None, port: int | None = None, token: str | No
     app = FastAPI(title="obsidian-ai-hub Memory Review", version="0.1.0")
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=os.getenv("MEMORY_REVIEW_CORS_ORIGINS", "http://127.0.0.1:5173").split(","),
+        allow_origins=os.getenv(
+            "MEMORY_REVIEW_CORS_ORIGINS", "http://127.0.0.1:5173"
+        ).split(","),
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -64,6 +68,7 @@ def create_app(host: str | None = None, port: int | None = None, token: str | No
     @app.on_event("startup")
     def on_startup():
         from obsidian_ai_hub.research.runner import cleanup_stale_jobs
+
         cleanup_stale_jobs()
 
     @app.get("/health")
@@ -89,10 +94,15 @@ def create_app(host: str | None = None, port: int | None = None, token: str | No
                 target = (dist_root / full_path).resolve()
             except (OSError, RuntimeError):
                 target = None
-            if target is not None and target.is_file() and target.is_relative_to(dist_root):
+            if (
+                target is not None
+                and target.is_file()
+                and target.is_relative_to(dist_root)
+            ):
                 return FileResponse(target)
             return FileResponse(FRONTEND_DIST / "index.html")
     else:
+
         @app.get("/")
         def index_missing():
             return JSONResponse(

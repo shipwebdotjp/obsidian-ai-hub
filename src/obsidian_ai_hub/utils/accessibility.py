@@ -23,10 +23,21 @@ from ApplicationServices import (
     kAXValueAttribute,
     kAXWindowsAttribute,
 )
-from Quartz import CGWindowListCopyWindowInfo, kCGNullWindowID, kCGWindowListOptionOnScreenOnly
+from Quartz import (
+    CGWindowListCopyWindowInfo,
+    kCGNullWindowID,
+    kCGWindowListOptionOnScreenOnly,
+)
 
 logger = logging.getLogger(__name__)
-INTERESTING_AX_ROLES = {"AXList", "AXOutline", "AXTable", "AXRow", "AXCell", "AXStaticText"}
+INTERESTING_AX_ROLES = {
+    "AXList",
+    "AXOutline",
+    "AXTable",
+    "AXRow",
+    "AXCell",
+    "AXStaticText",
+}
 TARGET_AX_ROLES = {"AXRow"}
 TEXT_AX_ATTRIBUTES = (kAXTitleAttribute, kAXValueAttribute, kAXDescriptionAttribute)
 TRAVERSAL_AX_ATTRIBUTES = (
@@ -44,13 +55,15 @@ def _convert_nsdictionary_to_python_dict(ns_dict):
     Converts an Objective-C NSDictionary object to a standard Python dictionary.
     Recursively converts nested NSDictionaries.
     """
-    if not hasattr(ns_dict, 'allKeys') or not hasattr(ns_dict, 'objectForKey_'):
-        return ns_dict # Not an NSDictionary, return as is
+    if not hasattr(ns_dict, "allKeys") or not hasattr(ns_dict, "objectForKey_"):
+        return ns_dict  # Not an NSDictionary, return as is
 
     py_dict = {}
     for key in ns_dict.allKeys():
         value = ns_dict.objectForKey_(key)
-        py_dict[str(key)] = _convert_nsdictionary_to_python_dict(value) # Recursive call
+        py_dict[str(key)] = _convert_nsdictionary_to_python_dict(
+            value
+        )  # Recursive call
     return py_dict
 
 
@@ -70,7 +83,11 @@ def _convert_ax_value(value):
     if isinstance(value, (list, tuple)):
         return [_convert_ax_value(item) for item in value]
 
-    if hasattr(value, "__iter__") and hasattr(value, "__len__") and not isinstance(value, (str, bytes, bytearray, dict)):
+    if (
+        hasattr(value, "__iter__")
+        and hasattr(value, "__len__")
+        and not isinstance(value, (str, bytes, bytearray, dict))
+    ):
         try:
             items = list(value)
         except TypeError:
@@ -174,7 +191,9 @@ def _get_ax_role(element):
     return converted if isinstance(converted, str) else str(converted)
 
 
-def _collect_ax_elements_by_role(element, target_roles, depth=0, max_depth=6, max_matches=200, visited=None):
+def _collect_ax_elements_by_role(
+    element, target_roles, depth=0, max_depth=6, max_matches=200, visited=None
+):
     """
     Traverse the AX tree and collect only elements whose AXRole matches target_roles.
     """
@@ -222,7 +241,9 @@ def _collect_ax_elements_by_role(element, target_roles, depth=0, max_depth=6, ma
     return matches
 
 
-def _find_first_ax_element_by_role(element, target_roles, depth=0, max_depth=6, visited=None):
+def _find_first_ax_element_by_role(
+    element, target_roles, depth=0, max_depth=6, visited=None
+):
     """
     Traverse the AX tree and return the first element whose AXRole matches target_roles.
     """
@@ -407,7 +428,13 @@ def _get_ax_text_signal_score(element, max_text_depth=8):
     """
     score = 0
 
-    for attribute_name in ("AXTitle", "AXValue", "AXDescription", "AXHelp", "AXSelectedText"):
+    for attribute_name in (
+        "AXTitle",
+        "AXValue",
+        "AXDescription",
+        "AXHelp",
+        "AXSelectedText",
+    ):
         value = _copy_ax_attribute_value(element, attribute_name)
         converted = _convert_ax_value(value)
         if isinstance(converted, str) and converted.strip():
@@ -524,7 +551,9 @@ def _select_best_ax_row(rows, max_text_depth=8):
         return row, list(dict.fromkeys(fragments))
 
     first_row, _geometry = candidate_rows[0]
-    return first_row, list(dict.fromkeys(_extract_text_fragments(first_row, max_depth=max_text_depth)))
+    return first_row, list(
+        dict.fromkeys(_extract_text_fragments(first_row, max_depth=max_text_depth))
+    )
 
 
 def _summarize_ax_rows(rows, limit=10, max_text_depth=8):
@@ -542,7 +571,13 @@ def _summarize_ax_rows(rows, limit=10, max_text_depth=8):
         width = geometry.get("width")
         if y is None or height is None or y < 0 or height <= 0:
             continue
-        if x is not None and width is not None and x <= 550 and width <= 700 and 20 <= height <= 150:
+        if (
+            x is not None
+            and width is not None
+            and x <= 550
+            and width <= 700
+            and 20 <= height <= 150
+        ):
             visible_rows.append((row, geometry))
 
     if not visible_rows:
@@ -639,7 +674,9 @@ def _describe_ax_element(element, depth=0, max_depth=2, max_children=20, visited
 
         description[str(child_attribute)] = child_items
         if len(children) > max_children:
-            description[f"{str(child_attribute)}_truncated"] = len(children) - max_children
+            description[f"{str(child_attribute)}_truncated"] = (
+                len(children) - max_children
+            )
 
     return description
 
@@ -650,7 +687,9 @@ def get_active_window_info():
     app_name = app.localizedName()
 
     window_title = None
-    windows = CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly, kCGNullWindowID)
+    windows = CGWindowListCopyWindowInfo(
+        kCGWindowListOptionOnScreenOnly, kCGNullWindowID
+    )
     for w in windows:
         if w.get("kCGWindowOwnerPID") == pid:
             name = w.get("kCGWindowName")
@@ -665,19 +704,25 @@ def list_windows():
     """
     Returns a list of dictionaries for all on-screen windows.
     """
-    windows = CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly, kCGNullWindowID)
+    windows = CGWindowListCopyWindowInfo(
+        kCGWindowListOptionOnScreenOnly, kCGNullWindowID
+    )
     results = []
     for w in windows:
-        results.append({
-            "window_id": w.get("kCGWindowNumber"),
-            "window_title": w.get("kCGWindowName"),
-            "bounds": _convert_nsdictionary_to_python_dict(w.get("kCGWindowBounds")),
-            "is_onscreen": w.get("kCGWindowIsOnscreen"),
-            "alpha": w.get("kCGWindowAlpha"),
-            "layer": w.get("kCGWindowLayer"),
-            "owner_name": w.get("kCGWindowOwnerName"),
-            "owner_pid": w.get("kCGWindowOwnerPID"),
-        })
+        results.append(
+            {
+                "window_id": w.get("kCGWindowNumber"),
+                "window_title": w.get("kCGWindowName"),
+                "bounds": _convert_nsdictionary_to_python_dict(
+                    w.get("kCGWindowBounds")
+                ),
+                "is_onscreen": w.get("kCGWindowIsOnscreen"),
+                "alpha": w.get("kCGWindowAlpha"),
+                "layer": w.get("kCGWindowLayer"),
+                "owner_name": w.get("kCGWindowOwnerName"),
+                "owner_pid": w.get("kCGWindowOwnerPID"),
+            }
+        )
     return results
 
 
@@ -733,11 +778,17 @@ def get_line_accessibility_debug_info(line_window=None, max_depth=2, max_childre
             ax_rows,
             max_text_depth=max_depth + 10,
         )
-        target_row_geometry = _get_ax_geometry(target_row_element) if target_row_element is not None else None
+        target_row_geometry = (
+            _get_ax_geometry(target_row_element)
+            if target_row_element is not None
+            else None
+        )
         target_row_children = []
         target_row_child_fragments = []
         if target_row_element is not None:
-            children = _copy_ax_attribute_value(target_row_element, kAXChildrenAttribute)
+            children = _copy_ax_attribute_value(
+                target_row_element, kAXChildrenAttribute
+            )
             for child in _to_python_ax_children(children)[:max_children]:
                 target_row_children.append(
                     _describe_ax_element(
@@ -817,20 +868,42 @@ def get_line_accessibility_debug_info(line_window=None, max_depth=2, max_childre
         "pid": pid,
         "focus": {
             "window_count": len(app_windows) if "app_windows" in locals() else None,
-            "first_window_repr": str(first_window_element) if "first_window_element" in locals() and first_window_element is not None else None,
+            "first_window_repr": str(first_window_element)
+            if "first_window_element" in locals() and first_window_element is not None
+            else None,
             "row_count": len(ax_rows) if "ax_rows" in locals() else None,
-            "target_row_found": target_row_element is not None if "target_row_element" in locals() else None,
+            "target_row_found": target_row_element is not None
+            if "target_row_element" in locals()
+            else None,
         },
         "app_accessibility": app_accessibility,
         "first_window_accessibility": first_window_accessibility,
         "target_row_accessibility": target_row_accessibility,
-        "target_row_text_fragments": list(dict.fromkeys(target_row_fragments)) if "target_row_fragments" in locals() else None,
-        "target_row_children_accessibility": target_row_children if "target_row_children" in locals() else None,
-        "target_row_child_text_fragments": list(dict.fromkeys(target_row_child_fragments)) if "target_row_child_fragments" in locals() else None,
-        "target_row_geometry": target_row_geometry if "target_row_geometry" in locals() else None,
-        "target_row_associated_text_elements": associated_text_elements if "associated_text_elements" in locals() else None,
-        "target_row_associated_text_fragments": list(dict.fromkeys(associated_text_fragments)) if "associated_text_fragments" in locals() else None,
-        "row_scan_summary": row_scan_summary if "row_scan_summary" in locals() else None,
+        "target_row_text_fragments": list(dict.fromkeys(target_row_fragments))
+        if "target_row_fragments" in locals()
+        else None,
+        "target_row_children_accessibility": target_row_children
+        if "target_row_children" in locals()
+        else None,
+        "target_row_child_text_fragments": list(
+            dict.fromkeys(target_row_child_fragments)
+        )
+        if "target_row_child_fragments" in locals()
+        else None,
+        "target_row_geometry": target_row_geometry
+        if "target_row_geometry" in locals()
+        else None,
+        "target_row_associated_text_elements": associated_text_elements
+        if "associated_text_elements" in locals()
+        else None,
+        "target_row_associated_text_fragments": list(
+            dict.fromkeys(associated_text_fragments)
+        )
+        if "associated_text_fragments" in locals()
+        else None,
+        "row_scan_summary": row_scan_summary
+        if "row_scan_summary" in locals()
+        else None,
     }
 
 
@@ -841,7 +914,9 @@ def main():
     line_window = get_line_window()
     logger.debug(
         "Full accessibility info for LINE window: %s",
-        json.dumps(line_window, ensure_ascii=False, indent=2) if line_window else "None",
+        json.dumps(line_window, ensure_ascii=False, indent=2)
+        if line_window
+        else "None",
     )
 
     print("\nLINE Accessibility Debug:")
@@ -854,6 +929,9 @@ def main():
 
 if __name__ == "__main__":
     # デバッグログを表示するためにレベルを変更
-    logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    )
 
     main()

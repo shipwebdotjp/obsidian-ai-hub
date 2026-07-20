@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import json
-from datetime import date, timedelta
-from pathlib import Path
+from datetime import date
 from unittest.mock import patch
 
 from obsidian_ai_hub.research import db as research_themes
@@ -54,7 +52,9 @@ def test_list_themes():
 
 def test_set_status():
     rec = research_themes.create_theme(theme="ステータステスト", confidence=0.5)
-    updated = research_themes.set_status(rec["theme_id"], "approved", reviewed_by="user")
+    updated = research_themes.set_status(
+        rec["theme_id"], "approved", reviewed_by="user"
+    )
     assert updated is not None
     assert updated["status"] == "approved"
     assert updated["reviewed_by"] == "user"
@@ -89,22 +89,22 @@ def test_list_recent_activity_days():
             "occurred_at": "2023-10-27T10:00:00",
             "summary": "テストアクティビティ",
             "category": "開発",
-            "keywords": ["test"]
+            "keywords": ["test"],
         },
         {
             "activity_date": date.today().isoformat(),
             "occurred_at": "2023-10-27T10:05:00",
             "summary": "テストアクティビティ",
             "category": "開発",
-            "keywords": ["test"]
+            "keywords": ["test"],
         },
         {
             "activity_date": date.today().isoformat(),
             "occurred_at": "2023-10-27T11:00:00",
             "summary": "別のアクティビティ",
             "category": "学習",
-            "keywords": ["python"]
-        }
+            "keywords": ["python"],
+        },
     ]
 
     with patch("obsidian_ai_hub.activity.store.get_recent_activities") as mock_get:

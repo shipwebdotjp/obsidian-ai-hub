@@ -65,8 +65,12 @@ class SimpleSbertEmbeddings:
                 # If it was not local, we try model_name
                 if self._try_load_transformers(self.model_name, local_files_only=False):
                     return
-            except Exception as e:
-                logger.debug("Transformers network loading failed for %s", self.model_name, exc_info=True)
+            except Exception:
+                logger.debug(
+                    "Transformers network loading failed for %s",
+                    self.model_name,
+                    exc_info=True,
+                )
 
             # 3. Try SentenceTransformer with network fallback if allowed
             logger.info("Trying SentenceTransformer fallback for %s", self.model_name)
@@ -78,7 +82,11 @@ class SimpleSbertEmbeddings:
                 self._using_transformers = False
                 return
             except Exception as e:
-                logger.error("SentenceTransformer loading failed for %s", self.model_name, exc_info=True)
+                logger.error(
+                    "SentenceTransformer loading failed for %s",
+                    self.model_name,
+                    exc_info=True,
+                )
                 raise RuntimeError(
                     f"Failed to load model {self.model_name} even with network fallback: {e}"
                 ) from e
@@ -136,7 +144,9 @@ class SimpleSbertEmbeddings:
         else:
             if hasattr(self.model.config, "hidden_size"):
                 dim = self.model.config.hidden_size
-            elif hasattr(self.model, "config") and hasattr(self.model.config, "d_model"):
+            elif hasattr(self.model, "config") and hasattr(
+                self.model.config, "d_model"
+            ):
                 dim = self.model.config.d_model
 
         if not isinstance(dim, int) or dim <= 0:
@@ -156,11 +166,11 @@ class SimpleSbertEmbeddings:
 
     def _embed(self, texts, max_length=512, batch_size=16):
         if not self._using_transformers:
-             # SentenceTransformer path
-             encoded = self._model.encode(texts, show_progress_bar=False)
-             if hasattr(encoded, "tolist"):
-                 encoded = encoded.tolist()
-             return [list(vector) for vector in encoded]
+            # SentenceTransformer path
+            encoded = self._model.encode(texts, show_progress_bar=False)
+            if hasattr(encoded, "tolist"):
+                encoded = encoded.tolist()
+            return [list(vector) for vector in encoded]
 
         all_vecs = []
         for i in range(0, len(texts), batch_size):

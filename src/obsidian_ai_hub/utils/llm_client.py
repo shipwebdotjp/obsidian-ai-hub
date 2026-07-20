@@ -7,7 +7,12 @@ from pathlib import Path
 from typing import Any, Sequence
 import logging
 
-from langchain_core.messages import HumanMessage, ToolMessage, BaseMessage, SystemMessage
+from langchain_core.messages import (
+    HumanMessage,
+    ToolMessage,
+    BaseMessage,
+    SystemMessage,
+)
 from langchain_core.tools import BaseTool
 from obsidian_ai_hub.utils import config
 
@@ -27,7 +32,9 @@ def _is_network_error(exc: Exception) -> bool:
     return isinstance(exc, network_error_types)
 
 
-def _with_exponential_backoff(func, *, max_attempts: int = 3, initial_delay: float = 1.0):
+def _with_exponential_backoff(
+    func, *, max_attempts: int = 3, initial_delay: float = 1.0
+):
     last_error: Exception | None = None
 
     for attempt in range(1, max_attempts + 1):
@@ -85,7 +92,9 @@ def _prepare_messages(
         messages.append(SystemMessage(content=system_prompt))
 
     if provider == "local":
-        logger.warning("Multimodal is not supported for provider 'local'. Using prompt only.")
+        logger.warning(
+            "Multimodal is not supported for provider 'local'. Using prompt only."
+        )
         full_prompt = prompt
         if system_prompt:
             full_prompt = f"{system_prompt}\n\n{prompt}"
@@ -110,10 +119,12 @@ def _prepare_messages(
         with open(p, "rb") as image_file:
             encoded_string = base64.b64encode(image_file.read()).decode("utf-8")
 
-        content.append({
-            "type": "image_url",
-            "image_url": {"url": f"data:{mime_type};base64,{encoded_string}"}
-        })
+        content.append(
+            {
+                "type": "image_url",
+                "image_url": {"url": f"data:{mime_type};base64,{encoded_string}"},
+            }
+        )
 
     messages.append(HumanMessage(content=content))
     return messages
@@ -191,6 +202,7 @@ def generate_llm_response_with_tools(
     iterations = 0
     while iterations < max_iterations:
         iterations += 1
+
         def _call():
             return llm_with_tools.invoke(messages)
 
@@ -207,7 +219,9 @@ def generate_llm_response_with_tools(
                 raise RuntimeError(f"Unknown tool called by LLM: {tool_name}")
 
             result = tools_by_name[tool_name].invoke(tool_call["args"])
-            logger.debug(f"Tool called: {tool_name} with args {tool_call['args']} returned result: {result}")
+            logger.debug(
+                f"Tool called: {tool_name} with args {tool_call['args']} returned result: {result}"
+            )
             messages.append(
                 ToolMessage(
                     content=json.dumps({"result": result}, ensure_ascii=False),
@@ -390,6 +404,7 @@ def create_ollama_llm(model: str, temperature: float = 0.7, max_tokens: int = 51
 
 # --- Local llama-cpp-python support ---
 
+
 def _find_model_file_in_dir(dir_path: Path | None) -> Path | None:
     """
     指定ディレクトリからローカルモデルファイルを探して最初に見つかったもののパスを返す。
@@ -406,7 +421,9 @@ def _find_model_file_in_dir(dir_path: Path | None) -> Path | None:
     return None
 
 
-def create_local_llama_llm(model: str | None, temperature: float = 0.7, max_tokens: int = 512):
+def create_local_llama_llm(
+    model: str | None, temperature: float = 0.7, max_tokens: int = 512
+):
     """llama-cpp-python を LangChain 経由で呼び出す。"""
     try:
         from langchain_community.llms import LlamaCpp

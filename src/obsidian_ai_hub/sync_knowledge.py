@@ -15,7 +15,6 @@ Workflow:
 import json
 import logging
 import time
-from pathlib import Path
 from datetime import datetime, timezone
 from dataclasses import dataclass, asdict, field
 from typing import Dict, List, Optional, Set, Tuple
@@ -123,7 +122,9 @@ def load_state_file() -> SyncState:
         SyncState object
     """
     if not STATE_FILE_PATH.exists():
-        logger.info(f"State file not found, starting with empty state: {STATE_FILE_PATH}")
+        logger.info(
+            f"State file not found, starting with empty state: {STATE_FILE_PATH}"
+        )
         return _empty_state()
 
     try:
@@ -169,7 +170,9 @@ def scan_local_files() -> Dict[str, Dict[str, float]]:
     files: Dict[str, Dict[str, float]] = {}
 
     if not config.KNOWLEDGE_SYNC_FOLDER.exists():
-        logger.warning(f"Knowledge sync folder does not exist: {config.KNOWLEDGE_SYNC_FOLDER}")
+        logger.warning(
+            f"Knowledge sync folder does not exist: {config.KNOWLEDGE_SYNC_FOLDER}"
+        )
         return files
 
     try:
@@ -220,7 +223,9 @@ class ChangeDetector:
         """
         previous_files: Dict[str, Dict[str, FileState]] = {}
         for file_state in previous_state.files:
-            previous_files.setdefault(file_state.knowledge_id, {})[file_state.name] = file_state
+            previous_files.setdefault(file_state.knowledge_id, {})[file_state.name] = (
+                file_state
+            )
 
         knowledge_ids = sorted(set(local_files.keys()) | set(previous_files.keys()))
         changes_by_knowledge: Dict[str, KnowledgeChanges] = {}
@@ -255,9 +260,15 @@ class ChangeDetector:
                     deleted_files=deleted_files,
                 )
 
-        total_new = sum(len(changes.new_files) for changes in changes_by_knowledge.values())
-        total_updated = sum(len(changes.updated_files) for changes in changes_by_knowledge.values())
-        total_deleted = sum(len(changes.deleted_files) for changes in changes_by_knowledge.values())
+        total_new = sum(
+            len(changes.new_files) for changes in changes_by_knowledge.values()
+        )
+        total_updated = sum(
+            len(changes.updated_files) for changes in changes_by_knowledge.values()
+        )
+        total_deleted = sum(
+            len(changes.deleted_files) for changes in changes_by_knowledge.values()
+        )
         logger.info(
             f"Change detection: {total_new} new, {total_updated} updated, {total_deleted} deleted"
         )
@@ -308,8 +319,12 @@ class ChangeApplier:
             previous_file = previous_files_map.get(file_path)
 
             if previous_file and previous_file.file_id_on_webui:
-                if not remove_from_knowledge(previous_file.file_id_on_webui, knowledge_id):
-                    logger.error(f"Failed to remove old file: {knowledge_id}/{file_path}")
+                if not remove_from_knowledge(
+                    previous_file.file_id_on_webui, knowledge_id
+                ):
+                    logger.error(
+                        f"Failed to remove old file: {knowledge_id}/{file_path}"
+                    )
                     error_count += 1
                     error_files.append(_format_file_key(knowledge_id, file_path))
                     continue
@@ -384,14 +399,20 @@ class ChangeApplier:
             logger.error(f"Failed to upload file: {knowledge_id}/{file_path}")
             return False, None
 
-        logger.info(f"File uploaded successfully: {knowledge_id}/{file_path} (ID: {file_id})")
+        logger.info(
+            f"File uploaded successfully: {knowledge_id}/{file_path} (ID: {file_id})"
+        )
 
         if not wait_for_file_processing(file_id):
-            logger.error(f"File processing failed or timed out: {knowledge_id}/{file_path}")
+            logger.error(
+                f"File processing failed or timed out: {knowledge_id}/{file_path}"
+            )
             return False, None
 
         if not add_to_knowledge(file_id, knowledge_id):
-            logger.error(f"Failed to add file to knowledge base: {knowledge_id}/{file_path}")
+            logger.error(
+                f"Failed to add file to knowledge base: {knowledge_id}/{file_path}"
+            )
             return False, None
 
         return True, file_id
@@ -483,14 +504,18 @@ def main() -> SyncResult:
 
         for knowledge_id in sorted(changes_by_knowledge.keys()):
             changes = changes_by_knowledge[knowledge_id]
-            success_count, error_count, error_files, group_file_id_map, group_successful_files = (
-                applier.apply_changes(
-                    knowledge_id,
-                    changes.new_files,
-                    changes.updated_files,
-                    changes.deleted_files,
-                    previous_state,
-                )
+            (
+                success_count,
+                error_count,
+                error_files,
+                group_file_id_map,
+                group_successful_files,
+            ) = applier.apply_changes(
+                knowledge_id,
+                changes.new_files,
+                changes.updated_files,
+                changes.deleted_files,
+                previous_state,
             )
 
             result.success_count += success_count
@@ -528,6 +553,8 @@ if __name__ == "__main__":
     )
 
     result = main()
-    logger.info("Sync result: %s succeeded, %s failed", result.success_count, result.error_count)
+    logger.info(
+        "Sync result: %s succeeded, %s failed", result.success_count, result.error_count
+    )
     if result.error_files:
         logger.info("Failed files count: %s", len(result.error_files))

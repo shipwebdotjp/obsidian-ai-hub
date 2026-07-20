@@ -1,4 +1,3 @@
-from datetime import date, datetime
 from typing import Literal, Optional, Any
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -27,7 +26,9 @@ ALLOWED_KINDS = {
 
 
 class Evidence(BaseModel):
-    path: str = Field(..., min_length=1, description="Vault-relative path to the source note")
+    path: str = Field(
+        ..., min_length=1, description="Vault-relative path to the source note"
+    )
     quote: str = ""
     observed_at: Optional[str] = None
 
@@ -53,14 +54,16 @@ class Memory(BaseModel):
 
     memory_id: str
     status: Literal["candidate", "approved", "rejected", "expired", "superseded"]
-    kind: Optional[Literal[
-        "preference",
-        "decision_policy",
-        "fact",
-        "commitment",
-        "pattern",
-        "episode",
-    ]] = None
+    kind: Optional[
+        Literal[
+            "preference",
+            "decision_policy",
+            "fact",
+            "commitment",
+            "pattern",
+            "episode",
+        ]
+    ] = None
     memory_key: Optional[str] = None
     content: str
     topics: Optional[list[str]] = Field(default_factory=list)
@@ -149,8 +152,11 @@ class UpdateResponse(BaseModel):
     changes: dict
     memory: Optional[Memory] = None
 
+
 class ResolveRequest(BaseModel):
-    action: Literal["keep_both", "replace_existing", "merge_existing", "supersede_existing"]
+    action: Literal[
+        "keep_both", "replace_existing", "merge_existing", "supersede_existing"
+    ]
     target_memory_id: str
     integrated_content: Optional[str] = None
     switch_date: Optional[str] = None
@@ -159,10 +165,14 @@ class ResolveRequest(BaseModel):
     def validate_action_fields(self) -> "ResolveRequest":
         if self.action == "merge_existing":
             if not self.integrated_content or not self.integrated_content.strip():
-                raise ValueError("integrated_content is required when action is merge_existing")
+                raise ValueError(
+                    "integrated_content is required when action is merge_existing"
+                )
         elif self.action == "supersede_existing":
             if not self.switch_date or not self.switch_date.strip():
-                raise ValueError("switch_date is required when action is supersede_existing")
+                raise ValueError(
+                    "switch_date is required when action is supersede_existing"
+                )
         return self
 
 
@@ -208,7 +218,9 @@ class RenderCopilotProfileResponse(BaseModel):
 
 # --- Research Theme schemas ---
 
-ALLOWED_RESEARCH_THEME_STATUS = frozenset({"candidate", "approved", "rejected", "duplicate"})
+ALLOWED_RESEARCH_THEME_STATUS = frozenset(
+    {"candidate", "approved", "rejected", "duplicate"}
+)
 ALLOWED_RESEARCH_JOB_STATUS = frozenset({"pending", "running", "succeeded", "failed"})
 
 
@@ -385,7 +397,9 @@ class EditOptionsResponse(BaseModel):
 
 
 class SummaryOptionsResponse(BaseModel):
-    period_types: list[Literal["day", "week", "month"]] = Field(default_factory=lambda: ["day", "week", "month"])
+    period_types: list[Literal["day", "week", "month"]] = Field(
+        default_factory=lambda: ["day", "week", "month"]
+    )
     topics: list[str]
     projects: list[str]
     people: list[str]
@@ -398,6 +412,7 @@ class SummaryListResponse(BaseModel):
 
 # --- Dashboard schemas ---
 
+
 class DashboardActivityLog(BaseModel):
     activity_id: str
     occurred_at: str
@@ -407,11 +422,13 @@ class DashboardActivityLog(BaseModel):
     category: Optional[str] = None
     keywords: list[str] = []
 
+
 class TodayActivity(BaseModel):
     date: str
     active_minutes: float
     inactive_minutes: float
     logs: list[DashboardActivityLog] = []
+
 
 class DashboardHomeResponse(BaseModel):
     this_month_summary: Optional[SummaryDetail] = None
@@ -419,12 +436,14 @@ class DashboardHomeResponse(BaseModel):
     yesterday_summary: Optional[SummaryDetail] = None
     today_activity: TodayActivity
 
+
 class BrowseDayItem(BaseModel):
     date: str
     has_summary: bool
     summary_id: Optional[str] = None
     summary: Optional[str] = None
     topics: list[str] = []
+
 
 class DashboardBrowseResponse(BaseModel):
     selectable_years: list[str]
@@ -434,12 +453,14 @@ class DashboardBrowseResponse(BaseModel):
     weeks: list[SummaryDetail] = []
     days: list[BrowseDayItem] = []
 
+
 class DashboardDayDetailsResponse(BaseModel):
     date: str
     summary: Optional[SummaryDetail] = None
     active_minutes: float
     inactive_minutes: float
     logs: list[DashboardActivityLog] = []
+
 
 class StatsBucket(BaseModel):
     key: str
@@ -452,6 +473,7 @@ class StatsBucket(BaseModel):
     topic_counts: dict[str, int] = {}
     keyword_counts: dict[str, int] = {}
 
+
 class DashboardStatsResponse(BaseModel):
     granularity: Literal["day", "week", "month"]
     buckets: list[StatsBucket]
@@ -460,6 +482,7 @@ class DashboardStatsResponse(BaseModel):
 
 
 # --- People Management schemas ---
+
 
 class PersonAlias(BaseModel):
     normalized_name: str

@@ -52,7 +52,11 @@ def test_build_dashboard_exports_year_payload_and_html(dashboard_env):
                 "keywords": ["LLM", "RAG"],
                 "mood": "Calm",
                 "sleep": "7h",
-                "source_stats": {"activity_count": 3, "llm_session_count": 1, "has_daily_note": True},
+                "source_stats": {
+                    "activity_count": 3,
+                    "llm_session_count": 1,
+                    "has_daily_note": True,
+                },
             },
             {
                 "date": "2026-07-11",
@@ -61,7 +65,11 @@ def test_build_dashboard_exports_year_payload_and_html(dashboard_env):
                 "keywords": ["Obsidian"],
                 "mood": "Focused",
                 "sleep": "6h",
-                "source_stats": {"activity_count": 5, "llm_session_count": 2, "has_daily_note": True},
+                "source_stats": {
+                    "activity_count": 5,
+                    "llm_session_count": 2,
+                    "has_daily_note": True,
+                },
             },
         ],
     )
@@ -145,7 +153,6 @@ def test_dashboard_stats_html_contains_keywords_features(dashboard_env):
 
 def test_dashboard_keywords_logic_with_playwright(dashboard_env):
     activity = dashboard_env["activity"]
-    daily = dashboard_env["daily"]
     output = dashboard_env["dashboard"]
 
     # Write daily records with complex scenarios:
@@ -158,40 +165,82 @@ def test_dashboard_keywords_logic_with_playwright(dashboard_env):
                 "date": "2026-07-01",
                 "summary": "Day 1",
                 "keywords": ["AI", "ML", "DL", "NLP", "CV", "RL", "GAN", "Transformer"],
-                "source_stats": {"activity_count": 1, "llm_session_count": 1, "has_daily_note": True},
+                "source_stats": {
+                    "activity_count": 1,
+                    "llm_session_count": 1,
+                    "has_daily_note": True,
+                },
             },
             {
                 "date": "2026-07-02",
                 "summary": "Day 2",
                 "keywords": ["C", "C++", "Java", "Go", "Rust", "Ruby", "PHP", "Scala"],
-                "source_stats": {"activity_count": 1, "llm_session_count": 1, "has_daily_note": True},
+                "source_stats": {
+                    "activity_count": 1,
+                    "llm_session_count": 1,
+                    "has_daily_note": True,
+                },
             },
             {
                 "date": "2026-07-03",
                 "summary": "Day 3",
-                "keywords": ["HTML", "CSS", "JS", "React", "Vue", "Angular", "Svelte", "Node"],
-                "source_stats": {"activity_count": 1, "llm_session_count": 1, "has_daily_note": True},
+                "keywords": [
+                    "HTML",
+                    "CSS",
+                    "JS",
+                    "React",
+                    "Vue",
+                    "Angular",
+                    "Svelte",
+                    "Node",
+                ],
+                "source_stats": {
+                    "activity_count": 1,
+                    "llm_session_count": 1,
+                    "has_daily_note": True,
+                },
             },
             {
                 "date": "2026-07-10",
                 "summary": "Day 10",
                 "topics": ["AI"],
                 "keywords": ["LLM", "LLM", "ＬＬＭ"],
-                "source_stats": {"activity_count": 1, "llm_session_count": 1, "has_daily_note": True},
+                "source_stats": {
+                    "activity_count": 1,
+                    "llm_session_count": 1,
+                    "has_daily_note": True,
+                },
             },
             {
                 "date": "2026-07-11",
                 "summary": "Day 11",
                 "topics": ["AI"],
                 "keywords": ["LLM", "Python", "Python", "Ｐｙｔｈｏｎ"],
-                "source_stats": {"activity_count": 1, "llm_session_count": 1, "has_daily_note": True},
+                "source_stats": {
+                    "activity_count": 1,
+                    "llm_session_count": 1,
+                    "has_daily_note": True,
+                },
             },
             {
                 "date": "2026-07-12",
                 "summary": "Day 12",
                 "topics": ["AI"],
-                "keywords": ["LLM", "Python", "Django", "FastAPI", "Flask", "Keras", "PyTorch", "NumPy"],
-                "source_stats": {"activity_count": 1, "llm_session_count": 1, "has_daily_note": True},
+                "keywords": [
+                    "LLM",
+                    "Python",
+                    "Django",
+                    "FastAPI",
+                    "Flask",
+                    "Keras",
+                    "PyTorch",
+                    "NumPy",
+                ],
+                "source_stats": {
+                    "activity_count": 1,
+                    "llm_session_count": 1,
+                    "has_daily_note": True,
+                },
             },
         ],
     )
@@ -250,7 +299,9 @@ def test_dashboard_keywords_logic_with_playwright(dashboard_env):
         assert "selected" not in (chips.nth(0).get_attribute("class") or "")
 
         # Since we have only 4 selected now, disabled chips should become enabled
-        disabled_chips_now = page.locator("#keywordCandidateChips button.chip-btn.disabled")
+        disabled_chips_now = page.locator(
+            "#keywordCandidateChips button.chip-btn.disabled"
+        )
         assert disabled_chips_now.count() == 0
 
         # Toggle granularity to monthly

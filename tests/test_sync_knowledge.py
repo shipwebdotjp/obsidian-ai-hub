@@ -16,7 +16,6 @@ from unittest.mock import patch
 
 from obsidian_ai_hub.sync_knowledge import (
     FileState,
-    KnowledgeChanges,
     SyncState,
     SyncResult,
     ChangeDetector,
@@ -29,14 +28,14 @@ from obsidian_ai_hub.sync_knowledge import (
 
 class TestFileState:
     """Test FileState data class"""
-    
+
     def test_create_file_state(self):
         fs = FileState(knowledge_id="kb1", name="note.md", mtime=123456.0)
         assert fs.knowledge_id == "kb1"
         assert fs.name == "note.md"
         assert fs.mtime == 123456.0
         assert fs.file_id_on_webui is None
-    
+
     def test_file_state_with_id(self):
         fs = FileState(
             knowledge_id="kb1",
@@ -49,7 +48,7 @@ class TestFileState:
 
 class TestSyncState:
     """Test SyncState data class"""
-    
+
     def test_sync_state_creation(self):
         now = datetime.now(timezone.utc).isoformat()
         files = [
@@ -62,60 +61,60 @@ class TestSyncState:
             ),
         ]
         state = SyncState(last_sync=now, files=files)
-        
+
         assert state.last_sync == now
         assert len(state.files) == 2
         assert state.files[0].name == "note1.md"
-    
+
     def test_sync_state_to_dict(self):
         now = datetime.now(timezone.utc).isoformat()
         files = [FileState(knowledge_id="kb1", name="note1.md", mtime=100.0)]
         state = SyncState(last_sync=now, files=files)
-        
+
         data = state.to_dict()
-        assert data['last_sync'] == now
-        assert len(data['files']) == 1
-        assert data['files'][0]['knowledge_id'] == "kb1"
-        assert data['files'][0]['name'] == "note1.md"
-    
+        assert data["last_sync"] == now
+        assert len(data["files"]) == 1
+        assert data["files"][0]["knowledge_id"] == "kb1"
+        assert data["files"][0]["name"] == "note1.md"
+
     def test_sync_state_from_dict(self):
         now = datetime.now(timezone.utc).isoformat()
         data = {
-            'last_sync': now,
-            'files': [
+            "last_sync": now,
+            "files": [
                 {
-                    'knowledge_id': 'kb1',
-                    'name': 'note1.md',
-                    'mtime': 100.0,
-                    'file_id_on_webui': 'file_1',
+                    "knowledge_id": "kb1",
+                    "name": "note1.md",
+                    "mtime": 100.0,
+                    "file_id_on_webui": "file_1",
                 }
-            ]
+            ],
         }
-        
+
         state = SyncState.from_dict(data)
         assert state.last_sync == now
         assert len(state.files) == 1
-        assert state.files[0].knowledge_id == 'kb1'
-        assert state.files[0].name == 'note1.md'
-        assert state.files[0].file_id_on_webui == 'file_1'
+        assert state.files[0].knowledge_id == "kb1"
+        assert state.files[0].name == "note1.md"
+        assert state.files[0].file_id_on_webui == "file_1"
 
 
 class TestSyncResult:
     """Test SyncResult data class"""
-    
+
     def test_sync_result_default(self):
         result = SyncResult()
         assert result.success_count == 0
         assert result.error_count == 0
         assert result.error_files == []
         assert result.duration_sec == 0.0
-    
+
     def test_sync_result_with_values(self):
         result = SyncResult(
             success_count=5,
             error_count=2,
-            error_files=['file1.md', 'file2.md'],
-            duration_sec=10.5
+            error_files=["file1.md", "file2.md"],
+            duration_sec=10.5,
         )
         assert result.success_count == 5
         assert result.error_count == 2
@@ -124,18 +123,21 @@ class TestSyncResult:
 
 class TestStateFilePersistence:
     """Test state file loading and saving"""
-    
+
     def test_load_state_file_not_found(self):
-        with patch('obsidian_ai_hub.sync_knowledge.STATE_FILE_PATH', Path('/nonexistent/path.json')):
+        with patch(
+            "obsidian_ai_hub.sync_knowledge.STATE_FILE_PATH",
+            Path("/nonexistent/path.json"),
+        ):
             state = load_state_file()
             assert state.files == []
             assert state.last_sync is not None
-    
+
     def test_save_and_load_state_file(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            state_path = Path(tmpdir) / 'state.json'
-            
-            with patch('obsidian_ai_hub.sync_knowledge.STATE_FILE_PATH', state_path):
+            state_path = Path(tmpdir) / "state.json"
+
+            with patch("obsidian_ai_hub.sync_knowledge.STATE_FILE_PATH", state_path):
                 # Save state
                 now = datetime.now(timezone.utc).isoformat()
                 files = [
@@ -152,10 +154,10 @@ class TestStateFilePersistence:
                     ),
                 ]
                 original_state = SyncState(last_sync=now, files=files)
-                
+
                 assert save_state_file(original_state) is True
                 assert state_path.exists()
-                
+
                 # Load state
                 loaded_state = load_state_file()
                 assert loaded_state.last_sync == now
@@ -167,7 +169,7 @@ class TestStateFilePersistence:
 
 class TestChangeDetector:
     """Test change detection logic"""
-    
+
     def test_detect_new_files(self):
         """Test detection of new files"""
         local_files = {
@@ -176,47 +178,43 @@ class TestChangeDetector:
                 "new_note.md": 200.0,
             }
         }
-        
+
         previous_state = SyncState(
             last_sync=datetime.now(timezone.utc).isoformat(),
-            files=[FileState(knowledge_id="kb1", name="old_note.md", mtime=100.0)]
+            files=[FileState(knowledge_id="kb1", name="old_note.md", mtime=100.0)],
         )
-        
+
         detector = ChangeDetector()
-        changes = detector.detect_changes(
-            local_files, previous_state
-        )
-        
+        changes = detector.detect_changes(local_files, previous_state)
+
         assert "kb1" in changes
         assert "new_note.md" in changes["kb1"].new_files
         assert len(changes["kb1"].updated_files) == 0
         assert len(changes["kb1"].deleted_files) == 0
-    
+
     def test_detect_updated_files(self):
         """Test detection of updated files"""
         old_mtime = 100.0
         new_mtime = 200.0
-        
+
         local_files = {
             "kb1": {
                 "note.md": new_mtime,
             }
         }
-        
+
         previous_state = SyncState(
             last_sync=datetime.now(timezone.utc).isoformat(),
-            files=[FileState(knowledge_id="kb1", name="note.md", mtime=old_mtime)]
+            files=[FileState(knowledge_id="kb1", name="note.md", mtime=old_mtime)],
         )
-        
+
         detector = ChangeDetector()
-        changes = detector.detect_changes(
-            local_files, previous_state
-        )
-        
+        changes = detector.detect_changes(local_files, previous_state)
+
         assert len(changes["kb1"].new_files) == 0
         assert "note.md" in changes["kb1"].updated_files
         assert len(changes["kb1"].deleted_files) == 0
-    
+
     def test_detect_deleted_files(self):
         """Test detection of deleted files"""
         local_files = {
@@ -224,24 +222,22 @@ class TestChangeDetector:
                 "existing.md": 100.0,
             }
         }
-        
+
         previous_state = SyncState(
             last_sync=datetime.now(timezone.utc).isoformat(),
             files=[
                 FileState(knowledge_id="kb1", name="existing.md", mtime=100.0),
                 FileState(knowledge_id="kb1", name="deleted.md", mtime=100.0),
-            ]
+            ],
         )
-        
+
         detector = ChangeDetector()
-        changes = detector.detect_changes(
-            local_files, previous_state
-        )
-        
+        changes = detector.detect_changes(local_files, previous_state)
+
         assert len(changes["kb1"].new_files) == 0
         assert len(changes["kb1"].updated_files) == 0
         assert "deleted.md" in changes["kb1"].deleted_files
-    
+
     def test_detect_no_changes(self):
         """Test when there are no changes"""
         local_files = {
@@ -249,17 +245,17 @@ class TestChangeDetector:
                 "note.md": 50.0,
             }
         }
-        
+
         previous_state = SyncState(
             last_sync=datetime.now(timezone.utc).isoformat(),
-            files=[FileState(knowledge_id="kb1", name="note.md", mtime=50.0)]
+            files=[FileState(knowledge_id="kb1", name="note.md", mtime=50.0)],
         )
-        
+
         detector = ChangeDetector()
         changes = detector.detect_changes(local_files, previous_state)
 
         assert changes == {}
-    
+
     def test_detect_complex_changes(self):
         """Test detection with mixed changes"""
         local_files = {
@@ -270,9 +266,9 @@ class TestChangeDetector:
             },
             "kb2": {
                 "other.md": 10.0,
-            }
+            },
         }
-        
+
         previous_state = SyncState(
             last_sync=datetime.now(timezone.utc).isoformat(),
             files=[
@@ -280,9 +276,9 @@ class TestChangeDetector:
                 FileState(knowledge_id="kb1", name="existing_updated.md", mtime=80.0),
                 FileState(knowledge_id="kb1", name="deleted_file.md", mtime=80.0),
                 FileState(knowledge_id="kb2", name="removed.md", mtime=10.0),
-            ]
+            ],
         )
-        
+
         detector = ChangeDetector()
         changes = detector.detect_changes(local_files, previous_state)
 
@@ -297,17 +293,20 @@ class TestChangeDetector:
 
 class TestLocalFileScanning:
     """Test local file scanning functionality"""
-    
+
     def test_scan_empty_directory(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch('obsidian_ai_hub.sync_knowledge.config.KNOWLEDGE_SYNC_FOLDER', Path(tmpdir)):
+            with patch(
+                "obsidian_ai_hub.sync_knowledge.config.KNOWLEDGE_SYNC_FOLDER",
+                Path(tmpdir),
+            ):
                 files = scan_local_files()
                 assert files == {}
-    
+
     def test_scan_markdown_files(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             tmppath = Path(tmpdir)
-            
+
             kb1 = tmppath / "kb1"
             kb1.mkdir()
             (kb1 / "note1.md").write_text("content1")
@@ -323,10 +322,12 @@ class TestLocalFileScanning:
             (kb2 / "other.md").write_text("content4")
 
             (tmppath / "root.md").write_text("should be ignored")
-            
-            with patch('obsidian_ai_hub.sync_knowledge.config.KNOWLEDGE_SYNC_FOLDER', tmppath):
+
+            with patch(
+                "obsidian_ai_hub.sync_knowledge.config.KNOWLEDGE_SYNC_FOLDER", tmppath
+            ):
                 files = scan_local_files()
-                
+
                 assert set(files.keys()) == {"kb1", "kb2"}
                 assert len(files["kb1"]) == 3
                 assert "note1.md" in files["kb1"]
@@ -351,7 +352,7 @@ class TestStateCreation:
                     mtime=100.0,
                     file_id_on_webui="file_1",
                 )
-            ]
+            ],
         )
 
         new_state = create_new_state(
@@ -380,7 +381,7 @@ class TestStateCreation:
                     mtime=100.0,
                     file_id_on_webui="file_1",
                 )
-            ]
+            ],
         )
 
         new_state = create_new_state(
@@ -421,5 +422,5 @@ class TestMultipleKnowledgePartitioning:
         assert changes["kb2"].updated_files == ["shared.md"]
 
 
-if __name__ == '__main__':
-    pytest.main([__file__, '-v'])
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])

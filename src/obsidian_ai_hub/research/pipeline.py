@@ -38,7 +38,12 @@ def create_theme_and_research(
     similar = db.find_top_similar(theme, embedder, k=5) if embedder else []
 
     decision = dedup.run_dedup_review(theme, direction, why_now, similar)
-    logger.info("Dedup decision for '%s': %s (failed=%s)", theme, decision["decision"], decision.get("failed"))
+    logger.info(
+        "Dedup decision for '%s': %s (failed=%s)",
+        theme,
+        decision["decision"],
+        decision.get("failed"),
+    )
 
     if decision["decision"] == "duplicate":
         target = decision["target_theme_id"]
@@ -68,7 +73,9 @@ def create_theme_and_research(
     try:
         _run_research(rec["theme_id"])
     except Exception as exc:
-        logger.exception("Immediate research failed for theme %s: %s", rec["theme_id"], exc)
+        logger.exception(
+            "Immediate research failed for theme %s: %s", rec["theme_id"], exc
+        )
 
     job = db.latest_job(rec["theme_id"])
     return {"status": "candidate", "theme_id": rec["theme_id"], "job": job}
@@ -76,4 +83,5 @@ def create_theme_and_research(
 
 def _run_research(theme_id: str) -> None:
     from obsidian_ai_hub.research.runner import run_theme_research
+
     run_theme_research(theme_id)

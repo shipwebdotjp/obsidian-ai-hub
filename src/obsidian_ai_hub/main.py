@@ -26,8 +26,7 @@ from obsidian_ai_hub.handler import add_research_theme
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 
 
@@ -36,28 +35,27 @@ def main():
     parser.add_argument(
         "--merge-inbox",
         action="store_true",
-        help="Obsidian の Inbox を DailyNote にマージ"
+        help="Obsidian の Inbox を DailyNote にマージ",
     )
     parser.add_argument(
         "--make-target",
         action="store_true",
-        help="過去のDailyNoteから今日の目標を作成し書き込み"
+        help="過去のDailyNoteから今日の目標を作成し書き込み",
     )
     parser.add_argument(
         "--notify-calendar-event",
         action="store_true",
-        help="今日のカレンダーイベントと定期リマインダをLINEに通知"
+        help="今日のカレンダーイベントと定期リマインダをLINEに通知",
     )
     parser.add_argument(
-        "--summerize-week",
-        action="store_true",
-        help="週次レビューを生成"
+        "--summerize-week", action="store_true", help="週次レビューを生成"
     )
     parser.add_argument(
         "--review-draft",
         action="store_true",
-        help="空の result:: を持つ週次ノートにレビュー下書きを保存しLINEへ通知"
+        help="空の result:: を持つ週次ノートにレビュー下書きを保存しLINEへ通知",
     )
+
     def validate_date(value):
         try:
             datetime.strptime(value, "%Y-%m-%d")
@@ -70,235 +68,195 @@ def main():
     parser.add_argument(
         "--week-date",
         type=validate_date,
-        help="--summerize-week で対象とする週の日付 (YYYY-MM-DD)"
+        help="--summerize-week で対象とする週の日付 (YYYY-MM-DD)",
     )
     parser.add_argument(
         "--review-week-date",
         type=validate_date,
-        help="--review-draft で対象とする週の日付 (YYYY-MM-DD)"
+        help="--review-draft で対象とする週の日付 (YYYY-MM-DD)",
     )
     parser.add_argument(
-        "--summerize-month",
-        action="store_true",
-        help="月次レビューを生成"
+        "--summerize-month", action="store_true", help="月次レビューを生成"
     )
     parser.add_argument(
-        "--summerize-day",
-        action="store_true",
-        help="日次レビューを生成"
+        "--summerize-day", action="store_true", help="日次レビューを生成"
     )
     parser.add_argument(
         "--backup",
         action="store_true",
-        help="指定されたフォルダをバックアップ（rsync）"
+        help="指定されたフォルダをバックアップ（rsync）",
     )
     parser.add_argument(
-        "--notify-today-schedule",
-        action="store_true",
-        help="今日の予定をLINEに通知"
+        "--notify-today-schedule", action="store_true", help="今日の予定をLINEに通知"
     )
     parser.add_argument(
         "--sync-knowledge",
         action="store_true",
-        help="Obsidian VaultをOpen Web UIの知識ベースと同期"
+        help="Obsidian VaultをOpen Web UIの知識ベースと同期",
     )
     parser.add_argument(
         "--sync-vault",
         action="store_true",
-        help="Obsidian Vaultをmd-hybrid-searchのインデックスと同期"
+        help="Obsidian Vaultをmd-hybrid-searchのインデックスと同期",
     )
     parser.add_argument(
         "--sync-people",
         action="store_true",
-        help="人物ノート（aliases）に基づいて未解決の人物候補を既知人物へ統合"
+        help="人物ノート（aliases）に基づいて未解決の人物候補を既知人物へ統合",
     )
     parser.add_argument(
         "--rebuild-vault",
         action="store_true",
-        help="Obsidian Vaultのmd-hybrid-searchインデックスを再構築"
+        help="Obsidian Vaultのmd-hybrid-searchインデックスを再構築",
     )
     parser.add_argument(
         "--research-agent",
         action="store_true",
-        help="リサーチ候補テーマリストの未調査テーマを調査して保存"
+        help="リサーチ候補テーマリストの未調査テーマを調査して保存",
     )
     parser.add_argument(
         "--add-research-theme",
         action="store_true",
-        help="リサーチ候補テーマリストにテーマを追記"
+        help="リサーチ候補テーマリストにテーマを追記",
     )
     parser.add_argument(
         "--suggest-research-theme",
         action="store_true",
-        help="最近30日のノートから研究候補を生成して追記"
+        help="最近30日のノートから研究候補を生成して追記",
     )
     parser.add_argument(
         "--screenshot",
         action="store_true",
-        help="macOSのスクリーンショットを撮影してInboxに保存"
+        help="macOSのスクリーンショットを撮影してInboxに保存",
     )
     parser.add_argument(
         "--scan-line-inbox",
         action="store_true",
-        help="LINE の前面ウィンドウをスキャンして未読候補を抽出"
+        help="LINE の前面ウィンドウをスキャンして未読候補を抽出",
     )
     parser.add_argument(
         "--log-activity",
         action="store_true",
-        help="アクティビティログを記録（ウィンドウ情報、スクリーンショット、OCR、要約）"
+        help="アクティビティログを記録（ウィンドウ情報、スクリーンショット、OCR、要約）",
     )
     parser.add_argument(
-        "--vault-search",
-        action="store_true",
-        help="Obsidian Vault を検索"
+        "--vault-search", action="store_true", help="Obsidian Vault を検索"
     )
-    parser.add_argument(
-        "--query",
-        type=str,
-        help="--vault-search で使用する検索クエリ"
-    )
+    parser.add_argument("--query", type=str, help="--vault-search で使用する検索クエリ")
     parser.add_argument(
         "--k",
         type=int,
         default=10,
-        help="--vault-search の検索結果件数 (デフォルト: 10)"
+        help="--vault-search の検索結果件数 (デフォルト: 10)",
     )
     parser.add_argument(
         "--search-mode",
         choices=("similarity", "keyword", "hybrid"),
         default="hybrid",
-        help="--vault-search の検索モード (デフォルト: hybrid)"
+        help="--vault-search の検索モード (デフォルト: hybrid)",
     )
-    parser.add_argument(
-        "--json",
-        action="store_true",
-        help="結果を JSON 形式で出力"
-    )
+    parser.add_argument("--json", action="store_true", help="結果を JSON 形式で出力")
     parser.add_argument(
         "--display",
         type=int,
         default=1,
-        help="--screenshot で使用するディスプレイ番号（デフォルト: 1）"
+        help="--screenshot で使用するディスプレイ番号（デフォルト: 1）",
     )
     parser.add_argument(
         "--theme",
         type=str,
-        help="--research-agent で即時調査するテーマ名、または --add-research-theme に付けるテーマ名"
+        help="--research-agent で即時調査するテーマ名、または --add-research-theme に付けるテーマ名",
     )
     parser.add_argument(
-        "--direction",
-        type=str,
-        help="--add-research-theme に付ける調査方向（任意）"
+        "--direction", type=str, help="--add-research-theme に付ける調査方向（任意）"
     )
     parser.add_argument(
         "--context",
         type=str,
-        help="--research-agent に渡す補足文脈。自分の前提知識や調べたい理由を入れる"
+        help="--research-agent に渡す補足文脈。自分の前提知識や調べたい理由を入れる",
     )
     parser.add_argument(
         "--output-style",
         choices=("short", "medium", "long"),
-        help="--research-agent の出力長を切り替える"
+        help="--research-agent の出力長を切り替える",
     )
+
     def validate_month(value):
         import re
-        if not re.match(r'^\d{4}-\d{2}$', value):
-            raise argparse.ArgumentTypeError(f"Invalid month format: {value}. Expected YYYY-MM")
+
+        if not re.match(r"^\d{4}-\d{2}$", value):
+            raise argparse.ArgumentTypeError(
+                f"Invalid month format: {value}. Expected YYYY-MM"
+            )
         return value
 
     parser.add_argument(
         "--month",
         type=validate_month,
-        help="--summerize-month で指定する対象月 (YYYY-MM)"
+        help="--summerize-month で指定する対象月 (YYYY-MM)",
     )
     # Memory commands
     parser.add_argument(
-        "--memory-extract",
-        action="store_true",
-        help="週次ノートから長期記憶候補を抽出"
+        "--memory-extract", action="store_true", help="週次ノートから長期記憶候補を抽出"
     )
     parser.add_argument(
         "--week",
         type=validate_date,
-        help="--memory-extract の対象週に含まれる日付 (YYYY-MM-DD)。省略時は直近の完了週"
+        help="--memory-extract の対象週に含まれる日付 (YYYY-MM-DD)。省略時は直近の完了週",
     )
     parser.add_argument(
-        "--memory-review",
-        action="store_true",
-        help="長期記憶候補をレビュー"
+        "--memory-review", action="store_true", help="長期記憶候補をレビュー"
     )
-    parser.add_argument(
-        "--id",
-        type=str,
-        help="レビュー対象の記憶ID (e.g. mem_...)"
-    )
-    parser.add_argument(
-        "--approve",
-        action="store_true",
-        help="記憶候補を承認"
-    )
-    parser.add_argument(
-        "--reject",
-        action="store_true",
-        help="記憶候補を却下"
-    )
-    parser.add_argument(
-        "--edit",
-        action="store_true",
-        help="記憶候補を編集して承認"
-    )
-    parser.add_argument(
-        "--content",
-        type=str,
-        help="編集時の新しい記憶の本文"
-    )
+    parser.add_argument("--id", type=str, help="レビュー対象の記憶ID (e.g. mem_...)")
+    parser.add_argument("--approve", action="store_true", help="記憶候補を承認")
+    parser.add_argument("--reject", action="store_true", help="記憶候補を却下")
+    parser.add_argument("--edit", action="store_true", help="記憶候補を編集して承認")
+    parser.add_argument("--content", type=str, help="編集時の新しい記憶の本文")
     parser.add_argument(
         "--memory-delete",
         action="store_true",
-        help="長期記憶をデータベースから完全に削除"
+        help="長期記憶をデータベースから完全に削除",
     )
     parser.add_argument(
-        "--yes",
-        action="store_true",
-        help="--memory-delete の確認プロンプトをスキップ"
+        "--yes", action="store_true", help="--memory-delete の確認プロンプトをスキップ"
     )
     parser.add_argument(
         "--memory-compile",
         action="store_true",
-        help="長期記憶コンテキストをコンパイル（診断用）"
+        help="長期記憶コンテキストをコンパイル（診断用）",
     )
     parser.add_argument(
         "--render-copilot-profile",
         action="store_true",
-        help="承認済み長期記憶からCopilot説明書（7ファイル）を生成・更新"
+        help="承認済み長期記憶からCopilot説明書（7ファイル）を生成・更新",
     )
     parser.add_argument(
         "--for",
         dest="for_purpose",
         type=str,
-        help="長期記憶コンパイルの目的 (e.g. make-target)"
+        help="長期記憶コンパイルの目的 (e.g. make-target)",
     )
     parser.add_argument(
         "--serve",
         action="store_true",
-        help="Memory Review Web UI (FastAPI + React) を起動"
+        help="Memory Review Web UI (FastAPI + React) を起動",
     )
     parser.add_argument(
         "--serve-host",
         type=str,
         default=None,
-        help="Web UI のバインドアドレス (既定: 127.0.0.1; 非ループバック時は MEMORY_REVIEW_API_TOKEN 必須)"
+        help="Web UI のバインドアドレス (既定: 127.0.0.1; 非ループバック時は MEMORY_REVIEW_API_TOKEN 必須)",
     )
     parser.add_argument(
         "--serve-port",
         type=int,
         default=None,
-        help="Web UI の待ち受けポート (既定: 8765)"
+        help="Web UI の待ち受けポート (既定: 8765)",
     )
     parser.add_argument(
         "--debug",
         action="store_true",
-        help="開発用デバッグモード。--serve と併用時は自動リロード + 詳細ログ"
+        help="開発用デバッグモード。--serve と併用時は自動リロード + 詳細ログ",
     )
     args = parser.parse_args()
     ran = False
@@ -317,7 +275,9 @@ def main():
     if args.research_agent and args.add_research_theme:
         parser.error("--research-agent and --add-research-theme cannot be combined")
     if args.suggest_research_theme and (args.research_agent or args.add_research_theme):
-        parser.error("--suggest-research-theme cannot be combined with other research modes")
+        parser.error(
+            "--suggest-research-theme cannot be combined with other research modes"
+        )
     if args.theme and not (args.research_agent or args.add_research_theme):
         parser.error("--theme requires --research-agent or --add-research-theme")
     if args.context and not args.research_agent:
@@ -325,7 +285,9 @@ def main():
     if args.output_style and not args.research_agent:
         parser.error("--output-style requires --research-agent")
     if args.research_agent and not args.theme:
-        parser.error("--research-agent requires --theme (queue mode removed; use --suggest-research-theme instead)")
+        parser.error(
+            "--research-agent requires --theme (queue mode removed; use --suggest-research-theme instead)"
+        )
     if args.vault_search and not args.query:
         parser.error("--vault-search requires --query")
     if args.query and not args.vault_search:
@@ -339,7 +301,9 @@ def main():
             parser.error("--memory-review requires --id ID")
         actions_count = sum([args.approve, args.reject, args.edit])
         if actions_count != 1:
-            parser.error("--memory-review requires exactly one action: --approve, --reject, or --edit")
+            parser.error(
+                "--memory-review requires exactly one action: --approve, --reject, or --edit"
+            )
         if args.edit and not args.content:
             parser.error("--edit action requires --content")
     if args.memory_delete:
@@ -393,6 +357,7 @@ def main():
         ran = True
     if args.sync_people:
         from obsidian_ai_hub import sync_people
+
         run_and_log(sync_people.main, "sync_people")
         ran = True
     if args.rebuild_vault:
@@ -407,7 +372,10 @@ def main():
     if args.add_research_theme:
         if not args.theme:
             raise ValueError("--add-research-theme requires --theme")
-        run_and_log(lambda: add_research_theme.main(args.theme, direction=args.direction), "add_research_theme")
+        run_and_log(
+            lambda: add_research_theme.main(args.theme, direction=args.direction),
+            "add_research_theme",
+        )
         ran = True
     if args.suggest_research_theme:
         run_and_log(suggest_research_theme.main, "suggest_research_theme")
@@ -420,6 +388,7 @@ def main():
         ran = True
     if args.log_activity:
         from obsidian_ai_hub import logging_activity
+
         run_and_log(logging_activity.main, "log_activity")
         ran = True
     if args.vault_search:
@@ -427,15 +396,17 @@ def main():
             query=args.query,
             k=args.k,
             search_mode=args.search_mode,
-            json_output=args.json
+            json_output=args.json,
         )
         ran = True
     if args.memory_extract:
         from obsidian_ai_hub import memory
+
         run_and_log(lambda: memory.extract_memories(args.week), "memory_extract")
         ran = True
     if args.memory_review:
         from obsidian_ai_hub import memory
+
         action = None
         if args.approve:
             action = "approve"
@@ -443,10 +414,13 @@ def main():
             action = "reject"
         elif args.edit:
             action = "edit"
-        run_and_log(lambda: memory.review_memory(args.id, action, args.content), "memory_review")
+        run_and_log(
+            lambda: memory.review_memory(args.id, action, args.content), "memory_review"
+        )
         ran = True
     if args.memory_delete:
         from obsidian_ai_hub import memory
+
         proceed = args.yes
         if not proceed:
             ans = input(f"Memory {args.id} を完全に削除しますか? (y/N): ")
@@ -459,18 +433,21 @@ def main():
     if args.memory_compile:
         from obsidian_ai_hub import memory
         import json
+
         pack = memory.compile_context(args.for_purpose)
         print(json.dumps(pack, ensure_ascii=False, indent=2))
         ran = True
     if getattr(args, "render_copilot_profile", False):
         from obsidian_ai_hub import memory
+
         run_and_log(
             lambda: print("\n".join(f"- {p}" for p in memory.render_copilot_profile())),
-            "render_copilot_profile"
+            "render_copilot_profile",
         )
         ran = True
     if args.serve:
         import os as _os
+
         host = args.serve_host or _os.getenv("MEMORY_REVIEW_HOST", "127.0.0.1")
         port = args.serve_port or int(_os.getenv("MEMORY_REVIEW_PORT", "8765"))
         token = _os.getenv("MEMORY_REVIEW_API_TOKEN", "")
@@ -479,6 +456,7 @@ def main():
                 "MEMORY_REVIEW_API_TOKEN is required when binding to a non-loopback host."
             )
         import uvicorn
+
         if args.debug:
             _os.environ.setdefault("MEMORY_REVIEW_HOST", host)
             _os.environ.setdefault("MEMORY_REVIEW_PORT", str(port))
@@ -493,6 +471,7 @@ def main():
             )
         else:
             from obsidian_ai_hub.web import app as web_app
+
             web_app.HOST = host
             web_app.PORT = port
             web_app.TOKEN = token
@@ -506,6 +485,7 @@ def main():
         ran = True
     if not ran:
         parser.print_help()
+
 
 if __name__ == "__main__":
     main()

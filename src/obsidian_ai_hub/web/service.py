@@ -2,12 +2,22 @@ import json
 import logging
 import sqlite3
 import threading
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Optional
 
 from obsidian_ai_hub import memory
+from obsidian_ai_hub.activity import store as activity_store
 from obsidian_ai_hub.handler import obsidian_vault_retriever
+from obsidian_ai_hub.people_sync.sync import (
+    get_db_vault_conflicts_report,
+    merge_display_orders,
+)
+from obsidian_ai_hub.summary import store as summary_store
+from obsidian_ai_hub.utils.people_loader import load_people_notes_with_report
 from obsidian_ai_hub.web import schemas
+
+import calendar
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +65,9 @@ def get_events(memory_id: str) -> list[dict]:
 REVIEW_ACTIONS = {"approve", "reject", "edit"}
 
 
-def review_memory(memory_id: str, action: str, new_content: Optional[str] = None) -> dict:
+def review_memory(
+    memory_id: str, action: str, new_content: Optional[str] = None
+) -> dict:
     if action not in REVIEW_ACTIONS:
         raise ValueError("action must be approve/reject/edit")
     if action == "edit" and not (new_content and new_content.strip()):
@@ -82,19 +94,20 @@ def batch_review(memory_ids: list, action: str) -> dict:
         raise ValueError("action must be approve/reject")
     return memory.batch_review_memories(memory_ids, action)
 
+
 def resolve_memory(
     candidate_id: str,
     action: str,
     target_memory_id: str,
     integrated_content: Optional[str] = None,
-    switch_date: Optional[str] = None
+    switch_date: Optional[str] = None,
 ) -> tuple[dict, Optional[dict]]:
     return memory.resolve_memory(
         candidate_id,
         action,
         target_memory_id,
         integrated_content=integrated_content,
-        switch_date=switch_date
+        switch_date=switch_date,
     )
 
 
@@ -108,15 +121,20 @@ def batch_delete(memory_ids: list[str]) -> dict:
 
 def get_memory_options() -> dict:
     from obsidian_ai_hub.utils.topics import TOPIC_ENUM
-    kinds_order = ["preference", "decision_policy", "fact", "commitment", "pattern", "episode"]
+
+    kinds_order = [
+        "preference",
+        "decision_policy",
+        "fact",
+        "commitment",
+        "pattern",
+        "episode",
+    ]
     kinds = [k for k in kinds_order if k in schemas.ALLOWED_KINDS]
     for k in sorted(list(schemas.ALLOWED_KINDS)):
         if k not in kinds_order:
             kinds.append(k)
-    return {
-        "kinds": kinds,
-        "topics": list(TOPIC_ENUM)
-    }
+    return {"kinds": kinds, "topics": list(TOPIC_ENUM)}
 
 
 def render_copilot_profile() -> list[str]:
@@ -125,17 +143,20 @@ def render_copilot_profile() -> list[str]:
 
 # --- Research Theme services ---
 
+
 def list_research_themes(
     status: Optional[str] = None,
     job_status: Optional[str] = None,
     q: Optional[str] = None,
 ) -> list[dict]:
     from obsidian_ai_hub.research import db
+
     return db.list_themes(status=status, job_status=job_status, q=q)
 
 
 def get_research_theme(theme_id: str) -> Optional[dict]:
     from obsidian_ai_hub.research import db
+
     theme = db.get_theme(theme_id)
     if theme is None:
         return None
@@ -144,9 +165,12 @@ def get_research_theme(theme_id: str) -> Optional[dict]:
     return theme
 
 
-def review_research_theme(theme_id: str, action: str, reason: Optional[str] = None) -> Optional[dict]:
+def review_research_theme(
+    theme_id: str, action: str, reason: Optional[str] = None
+) -> Optional[dict]:
     from obsidian_ai_hub.research import db
     from obsidian_ai_hub import research_agent
+
     theme = db.get_theme(theme_id)
     if theme is None:
         return None
@@ -164,6 +188,7 @@ def review_research_theme(theme_id: str, action: str, reason: Optional[str] = No
 
 def rerun_research_theme(theme_id: str) -> Optional[dict]:
     from obsidian_ai_hub import research_agent
+
     job = research_agent.run_theme_research(theme_id)
     return job
 
@@ -174,6 +199,7 @@ def run_research_theme(theme: str, mode: str = "auto") -> tuple[dict, dict]:
         submit_research_job_bg,
     )
     from obsidian_ai_hub.research import db
+
     theme_rec, job_rec = get_or_create_theme_and_job(theme=theme, mode=mode)
     try:
         submit_research_job_bg(
@@ -206,6 +232,7 @@ def search_vault(q: str, k: int = 10, mode: str = "hybrid") -> dict:
     if isinstance(results, dict) and "error" in results:
         raise ValueError(results["error"])
     from obsidian_ai_hub.utils import config
+
     vault_name = Path(config.VAULT_PATH).name
     for hit in results:
         if not isinstance(hit.get("metadata"), dict):
@@ -216,6 +243,7 @@ def search_vault(q: str, k: int = 10, mode: str = "hybrid") -> dict:
 
 def get_vault_file(relative_path: str) -> dict:
     from obsidian_ai_hub.utils import config
+
     vault_dir = Path(config.VAULT_PATH).resolve()
 
     p = Path(relative_path)
@@ -260,12 +288,6 @@ def get_vault_file(relative_path: str) -> dict:
 
 # --- Dashboard services ---
 
-from datetime import datetime, date, timedelta
-import calendar
-from obsidian_ai_hub.summary import store as summary_store
-from obsidian_ai_hub.activity import store as activity_store
-from obsidian_ai_hub.utils.people_loader import load_people_notes_with_report
-from obsidian_ai_hub.people_sync.sync import get_db_vault_conflicts_report, merge_display_orders
 
 def parse_iso_datetime(iso_str: str) -> datetime:
     dt = datetime.fromisoformat(iso_str)
@@ -273,10 +295,11 @@ def parse_iso_datetime(iso_str: str) -> datetime:
         dt = dt.replace(tzinfo=None)
     return dt
 
+
 def get_day_activity_times(
     activity_logs: list[dict[str, Any]],
     target_date_str: str,
-    now: Optional[datetime] = None
+    now: Optional[datetime] = None,
 ) -> tuple[float, float]:
     """
     Returns (active_minutes, inactive_minutes).
@@ -292,7 +315,7 @@ def get_day_activity_times(
     if target_date > now.date():
         return 0.0, 0.0
 
-    is_today = (target_date == now.date())
+    is_today = target_date == now.date()
     day_start = datetime.combine(target_date, datetime.min.time())
 
     if is_today:
@@ -364,7 +387,9 @@ def get_dashboard_home(now: Optional[datetime] = None) -> dict:
         )
         row = cursor.fetchone()
         if row:
-            latest_week_summary = summary_store.get_summary_by_id(row["summary_id"], conn=conn)
+            latest_week_summary = summary_store.get_summary_by_id(
+                row["summary_id"], conn=conn
+            )
     finally:
         conn.close()
 
@@ -375,15 +400,17 @@ def get_dashboard_home(now: Optional[datetime] = None) -> dict:
     today_logs = activity_store.get_activities_by_date(today_str)
     mapped_logs = []
     for log in today_logs:
-        mapped_logs.append({
-            "activity_id": log.get("activity_id"),
-            "occurred_at": log.get("occurred_at"),
-            "app_name": log.get("app_name"),
-            "window_title": log.get("window_title"),
-            "summary": log.get("summary"),
-            "category": log.get("category"),
-            "keywords": log.get("keywords") or [],
-        })
+        mapped_logs.append(
+            {
+                "activity_id": log.get("activity_id"),
+                "occurred_at": log.get("occurred_at"),
+                "app_name": log.get("app_name"),
+                "window_title": log.get("window_title"),
+                "summary": log.get("summary"),
+                "category": log.get("category"),
+                "keywords": log.get("keywords") or [],
+            }
+        )
 
     active_mins, inactive_mins = get_day_activity_times(today_logs, today_str, now)
 
@@ -453,11 +480,13 @@ def get_dashboard_browse(
             cursor = conn.cursor()
             cursor.execute(
                 "SELECT * FROM summaries WHERE period_type = 'month' AND period_key LIKE ? ORDER BY period_key DESC",
-                (f"{selected_year}-%",)
+                (f"{selected_year}-%",),
             )
             rows = cursor.fetchall()
             for r in rows:
-                months_summaries.append(summary_store.get_summary_by_id(r["summary_id"], conn=conn))
+                months_summaries.append(
+                    summary_store.get_summary_by_id(r["summary_id"], conn=conn)
+                )
         finally:
             conn.close()
 
@@ -507,7 +536,7 @@ def get_dashboard_browse(
             # Daily summaries in that month
             cursor.execute(
                 "SELECT * FROM summaries WHERE period_type = 'day' AND period_key LIKE ? ORDER BY period_key DESC",
-                (f"{month}-%",)
+                (f"{month}-%",),
             )
             rows = cursor.fetchall()
             for r in rows:
@@ -524,7 +553,7 @@ def get_dashboard_browse(
             # Activity log dates in that month
             cursor.execute(
                 "SELECT DISTINCT activity_date FROM activity_logs WHERE activity_date LIKE ? ORDER BY activity_date DESC",
-                (f"{month}-%",)
+                (f"{month}-%",),
             )
             rows = cursor.fetchall()
             for r in rows:
@@ -548,11 +577,13 @@ def get_dashboard_browse(
             cursor = conn.cursor()
             cursor.execute(
                 "SELECT * FROM summaries WHERE period_type = 'month' AND period_key = ?",
-                (month,)
+                (month,),
             )
             rows = cursor.fetchall()
             for r in rows:
-                months_summaries.append(summary_store.get_summary_by_id(r["summary_id"], conn=conn))
+                months_summaries.append(
+                    summary_store.get_summary_by_id(r["summary_id"], conn=conn)
+                )
         finally:
             conn.close()
 
@@ -572,15 +603,17 @@ def get_dashboard_day_details(target_date_str: str) -> dict:
     logs = activity_store.get_activities_by_date(target_date_str)
     mapped_logs = []
     for log in logs:
-        mapped_logs.append({
-            "activity_id": log.get("activity_id"),
-            "occurred_at": log.get("occurred_at"),
-            "app_name": log.get("app_name"),
-            "window_title": log.get("window_title"),
-            "summary": log.get("summary"),
-            "category": log.get("category"),
-            "keywords": log.get("keywords") or [],
-        })
+        mapped_logs.append(
+            {
+                "activity_id": log.get("activity_id"),
+                "occurred_at": log.get("occurred_at"),
+                "app_name": log.get("app_name"),
+                "window_title": log.get("window_title"),
+                "summary": log.get("summary"),
+                "category": log.get("category"),
+                "keywords": log.get("keywords") or [],
+            }
+        )
 
     active_mins, inactive_mins = get_day_activity_times(logs, target_date_str)
 
@@ -624,11 +657,13 @@ def get_dashboard_stats(
         cursor = conn.cursor()
         cursor.execute(
             "SELECT * FROM summaries WHERE period_type = 'day' AND period_key >= ? AND period_key <= ? ORDER BY period_key ASC",
-            (start_date_str, end_date_str)
+            (start_date_str, end_date_str),
         )
         rows = cursor.fetchall()
         for r in rows:
-            all_day_summaries.append(summary_store.get_summary_by_id(r["summary_id"], conn=conn))
+            all_day_summaries.append(
+                summary_store.get_summary_by_id(r["summary_id"], conn=conn)
+            )
     finally:
         conn.close()
 
@@ -640,8 +675,13 @@ def get_dashboard_stats(
         for k in s.get("keywords") or []:
             keyword_freq[k] = keyword_freq.get(k, 0) + 1
 
-    candidate_topics = [t for t, _ in sorted(topic_freq.items(), key=lambda x: x[1], reverse=True)[:20]]
-    candidate_keywords = [k for k, _ in sorted(keyword_freq.items(), key=lambda x: x[1], reverse=True)[:20]]
+    candidate_topics = [
+        t for t, _ in sorted(topic_freq.items(), key=lambda x: x[1], reverse=True)[:20]
+    ]
+    candidate_keywords = [
+        k
+        for k, _ in sorted(keyword_freq.items(), key=lambda x: x[1], reverse=True)[:20]
+    ]
 
     buckets_by_key = {}
 
@@ -666,7 +706,7 @@ def get_dashboard_stats(
             b_start = mon.strftime("%Y-%m-%d")
             b_end = sun.strftime("%Y-%m-%d")
             b_label = f"W{iso_wk:02d}"
-        else: # month
+        else:  # month
             b_key = d.strftime("%Y-%m")
             _, last_day = calendar.monthrange(d.year, d.month)
             b_start = f"{b_key}-01"
@@ -692,7 +732,7 @@ def get_dashboard_stats(
         cursor = conn.cursor()
         cursor.execute(
             "SELECT * FROM activity_logs WHERE activity_date >= ? AND activity_date <= ? ORDER BY occurred_at ASC",
-            (start_date_str, end_date_str)
+            (start_date_str, end_date_str),
         )
         for row in cursor.fetchall():
             act = activity_store.deserialize_activity(row)
@@ -714,7 +754,7 @@ def get_dashboard_stats(
         elif granularity == "week":
             iso_yr, iso_wk, _ = d.isocalendar()
             b_key = f"{iso_yr}-W{iso_wk:02d}"
-        else: # month
+        else:  # month
             b_key = d.strftime("%Y-%m")
 
         b = buckets_by_key[b_key]
@@ -754,6 +794,7 @@ def get_dashboard_stats(
 
 # --- Custom Exception classes for Conflict checks ---
 
+
 class AliasConflictError(ValueError):
     def __init__(self, existing_person_id: str, existing_person_name: str):
         super().__init__("Conflict: This alias is already confirmed for another person")
@@ -769,7 +810,10 @@ class MainNameConflictError(ValueError):
 
 
 class AssignmentConflictError(ValueError):
-    def __init__(self, message="Conflict: Cannot resolve globally because manual assignments exist for this normalized name"):
+    def __init__(
+        self,
+        message="Conflict: Cannot resolve globally because manual assignments exist for this normalized name",
+    ):
         super().__init__(message)
 
 
@@ -779,6 +823,7 @@ class VaultLinkedPersonError(ValueError):
 
 
 # --- People Management services ---
+
 
 def list_people() -> list[dict[str, Any]]:
     conn = memory.get_db_connection()
@@ -796,7 +841,7 @@ def list_people() -> list[dict[str, Any]]:
         for p in people_rows:
             cursor.execute(
                 "SELECT normalized_name, display_name FROM person_aliases WHERE person_id = ?",
-                (p["person_id"],)
+                (p["person_id"],),
             )
             p["aliases"] = [dict(r) for r in cursor.fetchall()]
         return people_rows
@@ -810,7 +855,7 @@ def get_person_detail(person_id: str) -> Optional[dict[str, Any]]:
         cursor = conn.cursor()
         cursor.execute(
             "SELECT person_id, display_name, normalized_name, vault_id FROM people WHERE person_id = ?",
-            (person_id,)
+            (person_id,),
         )
         row = cursor.fetchone()
         if row is None:
@@ -819,7 +864,7 @@ def get_person_detail(person_id: str) -> Optional[dict[str, Any]]:
 
         cursor.execute(
             "SELECT normalized_name, display_name FROM person_aliases WHERE person_id = ?",
-            (p["person_id"],)
+            (p["person_id"],),
         )
         p["aliases"] = [dict(r) for r in cursor.fetchall()]
 
@@ -831,25 +876,32 @@ def get_person_detail(person_id: str) -> Optional[dict[str, Any]]:
             WHERE sp.person_id = ?
             ORDER BY s.period_start DESC, s.period_key DESC
             """,
-            (person_id,)
+            (person_id,),
         )
         p["summaries"] = [dict(r) for r in cursor.fetchall()]
 
         # Compute counts
-        cursor.execute("SELECT COUNT(*) FROM summary_people WHERE person_id = ?", (person_id,))
+        cursor.execute(
+            "SELECT COUNT(*) FROM summary_people WHERE person_id = ?", (person_id,)
+        )
         summaries_count = cursor.fetchone()[0]
 
-        cursor.execute("SELECT COUNT(*) FROM person_aliases WHERE person_id = ?", (person_id,))
+        cursor.execute(
+            "SELECT COUNT(*) FROM person_aliases WHERE person_id = ?", (person_id,)
+        )
         aliases_count = cursor.fetchone()[0]
 
-        cursor.execute("SELECT COUNT(*) FROM summary_person_assignments WHERE person_id = ?", (person_id,))
+        cursor.execute(
+            "SELECT COUNT(*) FROM summary_person_assignments WHERE person_id = ?",
+            (person_id,),
+        )
         assignments_count = cursor.fetchone()[0]
 
         p["summary_count"] = summaries_count
         p["relation_counts"] = {
             "summaries": summaries_count,
             "aliases": aliases_count,
-            "assignments": assignments_count
+            "assignments": assignments_count,
         }
 
         return p
@@ -860,12 +912,14 @@ def get_person_detail(person_id: str) -> Optional[dict[str, Any]]:
 def update_unlinked_person(
     person_id: str,
     display_name: Optional[str] = None,
-    aliases: Optional[list[str]] = None
+    aliases: Optional[list[str]] = None,
 ) -> dict:
     from obsidian_ai_hub.summary.store import normalize_entity_name
 
     if display_name is None and aliases is None:
-        raise ValueError("At least display_name or aliases must be specified for update.")
+        raise ValueError(
+            "At least display_name or aliases must be specified for update."
+        )
 
     conn = memory.get_db_connection()
     try:
@@ -875,7 +929,7 @@ def update_unlinked_person(
             # 1. Fetch current person row
             cursor.execute(
                 "SELECT person_id, display_name, normalized_name, vault_id FROM people WHERE person_id = ?",
-                (person_id,)
+                (person_id,),
             )
             row = cursor.fetchone()
             if row is None:
@@ -889,10 +943,12 @@ def update_unlinked_person(
             # Load current aliases for self-conflict exclusion
             cursor.execute(
                 "SELECT normalized_name, display_name FROM person_aliases WHERE person_id = ?",
-                (person_id,)
+                (person_id,),
             )
             current_aliases = [dict(r) for r in cursor.fetchall()]
-            current_names = {person["normalized_name"]} | {a["normalized_name"] for a in current_aliases}
+            current_names = {person["normalized_name"]} | {
+                a["normalized_name"] for a in current_aliases
+            }
 
             # 2. Determine target main name and aliases
             target_display_name = person["display_name"]
@@ -916,41 +972,46 @@ def update_unlinked_person(
                     if norm_alias in seen_norm_aliases:
                         raise ValueError("重複した別名を指定することはできません。")
                     seen_norm_aliases.add(norm_alias)
-                    target_aliases.append({
-                        "normalized_name": norm_alias,
-                        "display_name": stripped_alias
-                    })
+                    target_aliases.append(
+                        {"normalized_name": norm_alias, "display_name": stripped_alias}
+                    )
             else:
                 # Keep current aliases
                 target_aliases = current_aliases
 
             # 3. Conflict checks
-            names_to_check = [target_normalized_name] + [a["normalized_name"] for a in target_aliases]
+            names_to_check = [target_normalized_name] + [
+                a["normalized_name"] for a in target_aliases
+            ]
 
             for name_to_check in names_to_check:
                 # Conflict with another person's main name
                 cursor.execute(
                     "SELECT person_id, display_name FROM people WHERE normalized_name = ? AND person_id != ?",
-                    (name_to_check, person_id)
+                    (name_to_check, person_id),
                 )
                 other_main = cursor.fetchone()
                 if other_main is not None:
-                    raise MainNameConflictError(other_main["person_id"], other_main["display_name"])
+                    raise MainNameConflictError(
+                        other_main["person_id"], other_main["display_name"]
+                    )
 
                 # Conflict with another person's alias
                 cursor.execute(
                     "SELECT person_id, display_name FROM person_aliases WHERE normalized_name = ? AND person_id != ?",
-                    (name_to_check, person_id)
+                    (name_to_check, person_id),
                 )
                 other_alias = cursor.fetchone()
                 if other_alias is not None:
-                    raise AliasConflictError(other_alias["person_id"], other_alias["display_name"])
+                    raise AliasConflictError(
+                        other_alias["person_id"], other_alias["display_name"]
+                    )
 
                 # Conflict with manual assignments (only newly specified)
                 if name_to_check not in current_names:
                     cursor.execute(
                         "SELECT COUNT(*) FROM summary_person_assignments WHERE normalized_name = ?",
-                        (name_to_check,)
+                        (name_to_check,),
                     )
                     if cursor.fetchone()[0] > 0:
                         raise AssignmentConflictError()
@@ -958,18 +1019,17 @@ def update_unlinked_person(
             # 4. Apply changes
             conn.execute(
                 "UPDATE people SET display_name = ?, normalized_name = ? WHERE person_id = ?",
-                (target_display_name, target_normalized_name, person_id)
+                (target_display_name, target_normalized_name, person_id),
             )
 
             if aliases is not None:
                 conn.execute(
-                    "DELETE FROM person_aliases WHERE person_id = ?",
-                    (person_id,)
+                    "DELETE FROM person_aliases WHERE person_id = ?", (person_id,)
                 )
                 for ta in target_aliases:
                     conn.execute(
                         "INSERT INTO person_aliases (normalized_name, person_id, display_name) VALUES (?, ?, ?)",
-                        (ta["normalized_name"], person_id, ta["display_name"])
+                        (ta["normalized_name"], person_id, ta["display_name"]),
                     )
 
         # On success, return updated person detail
@@ -984,17 +1044,26 @@ def delete_person(person_id: str) -> dict:
         with conn:
             cursor = conn.cursor()
 
-            cursor.execute("SELECT person_id FROM people WHERE person_id = ?", (person_id,))
+            cursor.execute(
+                "SELECT person_id FROM people WHERE person_id = ?", (person_id,)
+            )
             if cursor.fetchone() is None:
                 raise FileNotFoundError("Person not found")
 
-            cursor.execute("DELETE FROM summary_people WHERE person_id = ?", (person_id,))
+            cursor.execute(
+                "DELETE FROM summary_people WHERE person_id = ?", (person_id,)
+            )
             deleted_summary_people = cursor.rowcount
 
-            cursor.execute("DELETE FROM person_aliases WHERE person_id = ?", (person_id,))
+            cursor.execute(
+                "DELETE FROM person_aliases WHERE person_id = ?", (person_id,)
+            )
             deleted_aliases = cursor.rowcount
 
-            cursor.execute("DELETE FROM summary_person_assignments WHERE person_id = ?", (person_id,))
+            cursor.execute(
+                "DELETE FROM summary_person_assignments WHERE person_id = ?",
+                (person_id,),
+            )
             deleted_assignments = cursor.rowcount
 
             cursor.execute("DELETE FROM people WHERE person_id = ?", (person_id,))
@@ -1003,7 +1072,7 @@ def delete_person(person_id: str) -> dict:
                 "success": True,
                 "deleted_summary_people": deleted_summary_people,
                 "deleted_aliases": deleted_aliases,
-                "deleted_assignments": deleted_assignments
+                "deleted_assignments": deleted_assignments,
             }
     finally:
         conn.close()
@@ -1013,7 +1082,9 @@ def list_person_candidates() -> list[dict[str, Any]]:
     conn = memory.get_db_connection()
     try:
         cursor = conn.cursor()
-        cursor.execute("SELECT candidate_id, display_name, normalized_name, status FROM person_candidates")
+        cursor.execute(
+            "SELECT candidate_id, display_name, normalized_name, status FROM person_candidates"
+        )
         return [dict(r) for r in cursor.fetchall()]
     finally:
         conn.close()
@@ -1025,7 +1096,7 @@ def get_person_candidate_detail(candidate_id: str) -> Optional[dict[str, Any]]:
         cursor = conn.cursor()
         cursor.execute(
             "SELECT candidate_id, display_name, normalized_name, status FROM person_candidates WHERE candidate_id = ?",
-            (candidate_id,)
+            (candidate_id,),
         )
         row = cursor.fetchone()
         if row is None:
@@ -1040,14 +1111,14 @@ def get_person_candidate_detail(candidate_id: str) -> Optional[dict[str, Any]]:
             WHERE spc.candidate_id = ?
             ORDER BY s.period_start DESC, s.period_key DESC
             """,
-            (candidate_id,)
+            (candidate_id,),
         )
         c["summaries"] = [dict(r) for r in cursor.fetchall()]
 
         # Get assigned summaries count
         cursor.execute(
             "SELECT COUNT(*) FROM summary_person_assignments WHERE normalized_name = ?",
-            (c["normalized_name"],)
+            (c["normalized_name"],),
         )
         c["assigned_summaries_count"] = cursor.fetchone()[0]
 
@@ -1056,7 +1127,9 @@ def get_person_candidate_detail(candidate_id: str) -> Optional[dict[str, Any]]:
         conn.close()
 
 
-def assign_candidate_summary(candidate_id: str, summary_id: str, target_person_id: str) -> bool:
+def assign_candidate_summary(
+    candidate_id: str, summary_id: str, target_person_id: str
+) -> bool:
     conn = memory.get_db_connection()
     try:
         with conn:
@@ -1065,7 +1138,7 @@ def assign_candidate_summary(candidate_id: str, summary_id: str, target_person_i
             # 1. Fetch candidate to identify normalized_name
             cursor.execute(
                 "SELECT candidate_id, display_name, normalized_name FROM person_candidates WHERE candidate_id = ?",
-                (candidate_id,)
+                (candidate_id,),
             )
             cand_row = cursor.fetchone()
             if cand_row is None:
@@ -1076,7 +1149,7 @@ def assign_candidate_summary(candidate_id: str, summary_id: str, target_person_i
             # 2. Check if candidate-summary link exists
             cursor.execute(
                 "SELECT note, display_order FROM summary_person_candidates WHERE summary_id = ? AND candidate_id = ?",
-                (summary_id, candidate_id)
+                (summary_id, candidate_id),
             )
             link_row = cursor.fetchone()
             if link_row is None:
@@ -1087,7 +1160,7 @@ def assign_candidate_summary(candidate_id: str, summary_id: str, target_person_i
             # 3. Check target person existence and vault-linked constraint
             cursor.execute(
                 "SELECT person_id, display_name, vault_id FROM people WHERE person_id = ?",
-                (target_person_id,)
+                (target_person_id,),
             )
             target_row = cursor.fetchone()
             if target_row is None:
@@ -1099,7 +1172,7 @@ def assign_candidate_summary(candidate_id: str, summary_id: str, target_person_i
             # 4. Remove candidate's link from summary_person_candidates
             conn.execute(
                 "DELETE FROM summary_person_candidates WHERE summary_id = ? AND candidate_id = ?",
-                (summary_id, candidate_id)
+                (summary_id, candidate_id),
             )
 
             # 5. Insert/Save manual assignment to summary_person_assignments
@@ -1108,13 +1181,13 @@ def assign_candidate_summary(candidate_id: str, summary_id: str, target_person_i
                 INSERT OR REPLACE INTO summary_person_assignments (summary_id, normalized_name, person_id)
                 VALUES (?, ?, ?)
                 """,
-                (summary_id, normalized_name, target_person_id)
+                (summary_id, normalized_name, target_person_id),
             )
 
             # 6. Insert or merge/concatenate notes and display order in summary_people
             cursor.execute(
                 "SELECT note, display_order FROM summary_people WHERE summary_id = ? AND person_id = ?",
-                (summary_id, target_person_id)
+                (summary_id, target_person_id),
             )
             existing_link = cursor.fetchone()
 
@@ -1133,24 +1206,24 @@ def assign_candidate_summary(candidate_id: str, summary_id: str, target_person_i
 
                 conn.execute(
                     "UPDATE summary_people SET note = ?, display_order = ? WHERE summary_id = ? AND person_id = ?",
-                    (merged_note, merged_order, summary_id, target_person_id)
+                    (merged_note, merged_order, summary_id, target_person_id),
                 )
             else:
                 conn.execute(
                     "INSERT INTO summary_people (summary_id, person_id, note, display_order) VALUES (?, ?, ?, ?)",
-                    (summary_id, target_person_id, cand_note, cand_order)
+                    (summary_id, target_person_id, cand_note, cand_order),
                 )
 
             # 7. Delete the candidate if no remaining links exist
             cursor.execute(
                 "SELECT COUNT(*) FROM summary_person_candidates WHERE candidate_id = ?",
-                (candidate_id,)
+                (candidate_id,),
             )
             remaining_links_count = cursor.fetchone()[0]
             if remaining_links_count == 0:
                 conn.execute(
                     "DELETE FROM person_candidates WHERE candidate_id = ?",
-                    (candidate_id,)
+                    (candidate_id,),
                 )
 
             return True
@@ -1158,7 +1231,9 @@ def assign_candidate_summary(candidate_id: str, summary_id: str, target_person_i
         conn.close()
 
 
-def resolve_person_candidate(candidate_id: str, target_person_id: str) -> dict[str, Any]:
+def resolve_person_candidate(
+    candidate_id: str, target_person_id: str
+) -> dict[str, Any]:
     conn = memory.get_db_connection()
     try:
         with conn:
@@ -1167,7 +1242,7 @@ def resolve_person_candidate(candidate_id: str, target_person_id: str) -> dict[s
             # 1. Fetch candidate
             cursor.execute(
                 "SELECT candidate_id, display_name, normalized_name, status FROM person_candidates WHERE candidate_id = ?",
-                (candidate_id,)
+                (candidate_id,),
             )
             cand_row = cursor.fetchone()
             if cand_row is None:
@@ -1177,7 +1252,7 @@ def resolve_person_candidate(candidate_id: str, target_person_id: str) -> dict[s
             # 1b. Check if there are any manual assignments for this candidate's normalized_name
             cursor.execute(
                 "SELECT COUNT(*) FROM summary_person_assignments WHERE normalized_name = ?",
-                (cand["normalized_name"],)
+                (cand["normalized_name"],),
             )
             assigned_count = cursor.fetchone()[0]
             if assigned_count > 0:
@@ -1186,7 +1261,7 @@ def resolve_person_candidate(candidate_id: str, target_person_id: str) -> dict[s
             # 2. Fetch target person
             cursor.execute(
                 "SELECT person_id, display_name, normalized_name, vault_id FROM people WHERE person_id = ?",
-                (target_person_id,)
+                (target_person_id,),
             )
             target_row = cursor.fetchone()
             if target_row is None:
@@ -1195,39 +1270,48 @@ def resolve_person_candidate(candidate_id: str, target_person_id: str) -> dict[s
 
             # Enforce target must be a Vault-linked person
             if not target.get("vault_id"):
-                raise ValueError("未連携人物への解決は許可されていません。解決先はVault連携済みの人物だけに制限されています。")
+                raise ValueError(
+                    "未連携人物への解決は許可されていません。解決先はVault連携済みの人物だけに制限されています。"
+                )
 
             normalized_name = cand["normalized_name"]
 
             # 3. Conflict check 1: person_aliases
             cursor.execute(
                 "SELECT person_id, display_name FROM person_aliases WHERE normalized_name = ?",
-                (normalized_name,)
+                (normalized_name,),
             )
             alias_row = cursor.fetchone()
             if alias_row is not None and alias_row["person_id"] != target_person_id:
-                raise AliasConflictError(alias_row["person_id"], alias_row["display_name"])
+                raise AliasConflictError(
+                    alias_row["person_id"], alias_row["display_name"]
+                )
 
             # 4. Conflict check 2: people.normalized_name
             cursor.execute(
                 "SELECT person_id, display_name FROM people WHERE normalized_name = ?",
-                (normalized_name,)
+                (normalized_name,),
             )
             main_name_row = cursor.fetchone()
-            if main_name_row is not None and main_name_row["person_id"] != target_person_id:
-                raise MainNameConflictError(main_name_row["person_id"], main_name_row["display_name"])
+            if (
+                main_name_row is not None
+                and main_name_row["person_id"] != target_person_id
+            ):
+                raise MainNameConflictError(
+                    main_name_row["person_id"], main_name_row["display_name"]
+                )
 
             # 5. Insert alias (Ensure we do a normal INSERT only if alias_row is None and raise error on fail)
             if alias_row is None:
                 conn.execute(
                     "INSERT INTO person_aliases (normalized_name, person_id, display_name) VALUES (?, ?, ?)",
-                    (normalized_name, target_person_id, cand["display_name"])
+                    (normalized_name, target_person_id, cand["display_name"]),
                 )
 
             # 6. Migrate summaries
             cursor.execute(
                 "SELECT summary_id, note, display_order FROM summary_person_candidates WHERE candidate_id = ?",
-                (candidate_id,)
+                (candidate_id,),
             )
             links = cursor.fetchall()
 
@@ -1238,7 +1322,7 @@ def resolve_person_candidate(candidate_id: str, target_person_id: str) -> dict[s
 
                 cursor.execute(
                     "SELECT note, display_order FROM summary_people WHERE summary_id = ? AND person_id = ?",
-                    (summary_id, target_person_id)
+                    (summary_id, target_person_id),
                 )
                 existing_link = cursor.fetchone()
 
@@ -1257,21 +1341,23 @@ def resolve_person_candidate(candidate_id: str, target_person_id: str) -> dict[s
 
                     conn.execute(
                         "UPDATE summary_people SET note = ?, display_order = ? WHERE summary_id = ? AND person_id = ?",
-                        (merged_note, merged_order, summary_id, target_person_id)
+                        (merged_note, merged_order, summary_id, target_person_id),
                     )
                 else:
                     conn.execute(
                         "INSERT INTO summary_people (summary_id, person_id, note, display_order) VALUES (?, ?, ?, ?)",
-                        (summary_id, target_person_id, cand_note, cand_order)
+                        (summary_id, target_person_id, cand_note, cand_order),
                     )
 
                 conn.execute(
                     "DELETE FROM summary_person_candidates WHERE summary_id = ? AND candidate_id = ?",
-                    (summary_id, candidate_id)
+                    (summary_id, candidate_id),
                 )
 
             # 7. Delete candidate
-            conn.execute("DELETE FROM person_candidates WHERE candidate_id = ?", (candidate_id,))
+            conn.execute(
+                "DELETE FROM person_candidates WHERE candidate_id = ?", (candidate_id,)
+            )
 
             return {"success": True}
     finally:
@@ -1280,15 +1366,15 @@ def resolve_person_candidate(candidate_id: str, target_person_id: str) -> dict[s
 
 def get_duplicate_candidates() -> dict[str, Any]:
     safe_map, report = load_people_notes_with_report()
-    parsed_notes = report.get("parsed_notes", [])
-    vault_notes_by_id = {n["id"]: n for n in parsed_notes}
 
     conn = memory.get_db_connection()
     try:
         cursor = conn.cursor()
 
         # Group 1: Unlinked people matching safe Vault input
-        cursor.execute("SELECT person_id, display_name, normalized_name, vault_id FROM people WHERE vault_id IS NULL")
+        cursor.execute(
+            "SELECT person_id, display_name, normalized_name, vault_id FROM people WHERE vault_id IS NULL"
+        )
         unlinked_people = [dict(r) for r in cursor.fetchall()]
 
         vault_matches = []
@@ -1296,14 +1382,16 @@ def get_duplicate_candidates() -> dict[str, Any]:
             norm = p["normalized_name"]
             if norm in safe_map:
                 v_note = safe_map[norm]
-                vault_matches.append({
-                    "unlinked_person": p,
-                    "vault_person": {
-                        "id": v_note["id"],
-                        "name": v_note["name"],
-                        "path": str(v_note["file_path"])
+                vault_matches.append(
+                    {
+                        "unlinked_person": p,
+                        "vault_person": {
+                            "id": v_note["id"],
+                            "name": v_note["name"],
+                            "path": str(v_note["file_path"]),
+                        },
                     }
-                })
+                )
 
         # Group 2: Same non-NULL vault_id across multiple people records
         cursor.execute(
@@ -1321,17 +1409,14 @@ def get_duplicate_candidates() -> dict[str, Any]:
         for v_id in duplicate_vault_ids:
             cursor.execute(
                 "SELECT person_id, display_name, normalized_name, vault_id FROM people WHERE vault_id = ?",
-                (v_id,)
+                (v_id,),
             )
             members = [dict(r) for r in cursor.fetchall()]
-            same_vault_id_groups.append({
-                "vault_id": v_id,
-                "people": members
-            })
+            same_vault_id_groups.append({"vault_id": v_id, "people": members})
 
         return {
             "vault_matches": vault_matches,
-            "same_vault_id_groups": same_vault_id_groups
+            "same_vault_id_groups": same_vault_id_groups,
         }
     finally:
         conn.close()
@@ -1341,7 +1426,7 @@ def consolidate_summary_links(
     from_note: Optional[str],
     to_note: Optional[str],
     from_order: Optional[int],
-    to_order: Optional[int]
+    to_order: Optional[int],
 ) -> tuple[Optional[str], Optional[int]]:
     notes_to_join = []
     if to_note and to_note.strip():
@@ -1353,7 +1438,9 @@ def consolidate_summary_links(
     return merged_note, merged_order
 
 
-def verify_people_merge(cursor: sqlite3.Cursor, from_person_id: str, to_person_id: str) -> dict:
+def verify_people_merge(
+    cursor: sqlite3.Cursor, from_person_id: str, to_person_id: str
+) -> dict:
     if from_person_id == to_person_id:
         return {
             "allowed": False,
@@ -1361,11 +1448,14 @@ def verify_people_merge(cursor: sqlite3.Cursor, from_person_id: str, to_person_i
             "transferred_summaries_count": 0,
             "transferred_aliases_count": 0,
             "alias_transfers": [],
-            "merged_summaries": []
+            "merged_summaries": [],
         }
 
     # 1. Fetch people
-    cursor.execute("SELECT person_id, display_name, normalized_name, vault_id FROM people WHERE person_id = ?", (from_person_id,))
+    cursor.execute(
+        "SELECT person_id, display_name, normalized_name, vault_id FROM people WHERE person_id = ?",
+        (from_person_id,),
+    )
     from_row = cursor.fetchone()
     if from_row is None:
         return {
@@ -1374,11 +1464,14 @@ def verify_people_merge(cursor: sqlite3.Cursor, from_person_id: str, to_person_i
             "transferred_summaries_count": 0,
             "transferred_aliases_count": 0,
             "alias_transfers": [],
-            "merged_summaries": []
+            "merged_summaries": [],
         }
     from_p = dict(from_row)
 
-    cursor.execute("SELECT person_id, display_name, normalized_name, vault_id FROM people WHERE person_id = ?", (to_person_id,))
+    cursor.execute(
+        "SELECT person_id, display_name, normalized_name, vault_id FROM people WHERE person_id = ?",
+        (to_person_id,),
+    )
     to_row = cursor.fetchone()
     if to_row is None:
         return {
@@ -1388,16 +1481,22 @@ def verify_people_merge(cursor: sqlite3.Cursor, from_person_id: str, to_person_i
             "transferred_summaries_count": 0,
             "transferred_aliases_count": 0,
             "alias_transfers": [],
-            "merged_summaries": []
+            "merged_summaries": [],
         }
     to_p = dict(to_row)
 
     # 2. Get aliases
-    cursor.execute("SELECT normalized_name, display_name FROM person_aliases WHERE person_id = ?", (from_person_id,))
+    cursor.execute(
+        "SELECT normalized_name, display_name FROM person_aliases WHERE person_id = ?",
+        (from_person_id,),
+    )
     from_aliases = [dict(r) for r in cursor.fetchall()]
     from_p["aliases"] = from_aliases
 
-    cursor.execute("SELECT normalized_name, display_name FROM person_aliases WHERE person_id = ?", (to_person_id,))
+    cursor.execute(
+        "SELECT normalized_name, display_name FROM person_aliases WHERE person_id = ?",
+        (to_person_id,),
+    )
     to_aliases = [dict(r) for r in cursor.fetchall()]
     to_p["aliases"] = to_aliases
 
@@ -1415,7 +1514,7 @@ def verify_people_merge(cursor: sqlite3.Cursor, from_person_id: str, to_person_i
             "transferred_summaries_count": 0,
             "transferred_aliases_count": 0,
             "alias_transfers": [],
-            "merged_summaries": []
+            "merged_summaries": [],
         }
 
     # Reject different vault_id values
@@ -1428,12 +1527,14 @@ def verify_people_merge(cursor: sqlite3.Cursor, from_person_id: str, to_person_i
             "transferred_summaries_count": 0,
             "transferred_aliases_count": 0,
             "alias_transfers": [],
-            "merged_summaries": []
+            "merged_summaries": [],
         }
 
     # 4. Third-party conflict check
     # Gather the set of normalized names that would be transferred
-    source_names = {from_p["normalized_name"]} | {a["normalized_name"] for a in from_aliases}
+    source_names = {from_p["normalized_name"]} | {
+        a["normalized_name"] for a in from_aliases
+    }
 
     if source_names:
         placeholders = ", ".join("?" for _ in source_names)
@@ -1441,7 +1542,7 @@ def verify_people_merge(cursor: sqlite3.Cursor, from_person_id: str, to_person_i
         # Check conflicts with third-party main name
         cursor.execute(
             f"SELECT person_id, display_name, normalized_name FROM people WHERE normalized_name IN ({placeholders}) AND person_id NOT IN (?, ?)",
-            list(source_names) + [from_person_id, to_person_id]
+            list(source_names) + [from_person_id, to_person_id],
         )
         conflicting_people = cursor.fetchall()
         if conflicting_people:
@@ -1454,13 +1555,13 @@ def verify_people_merge(cursor: sqlite3.Cursor, from_person_id: str, to_person_i
                 "transferred_summaries_count": 0,
                 "transferred_aliases_count": 0,
                 "alias_transfers": [],
-                "merged_summaries": []
+                "merged_summaries": [],
             }
 
         # Check conflicts with third-party aliases
         cursor.execute(
             f"SELECT person_id, display_name, normalized_name FROM person_aliases WHERE normalized_name IN ({placeholders}) AND person_id NOT IN (?, ?)",
-            list(source_names) + [from_person_id, to_person_id]
+            list(source_names) + [from_person_id, to_person_id],
         )
         conflicting_aliases = cursor.fetchall()
         if conflicting_aliases:
@@ -1473,34 +1574,40 @@ def verify_people_merge(cursor: sqlite3.Cursor, from_person_id: str, to_person_i
                 "transferred_summaries_count": 0,
                 "transferred_aliases_count": 0,
                 "alias_transfers": [],
-                "merged_summaries": []
+                "merged_summaries": [],
             }
 
     # 5. Build Alias Transfers Preview
     alias_transfers = []
-    seen_normalized = {a["normalized_name"] for a in to_aliases} | {to_p["normalized_name"]}
+    seen_normalized = {a["normalized_name"] for a in to_aliases} | {
+        to_p["normalized_name"]
+    }
 
     for fa in from_aliases:
         norm = fa["normalized_name"]
         if norm not in seen_normalized:
-            alias_transfers.append({
-                "normalized_name": norm,
-                "display_name": fa["display_name"]
-            })
+            alias_transfers.append(
+                {"normalized_name": norm, "display_name": fa["display_name"]}
+            )
             seen_normalized.add(norm)
 
     from_p_norm = from_p["normalized_name"]
     if from_p_norm not in seen_normalized:
-        alias_transfers.append({
-            "normalized_name": from_p_norm,
-            "display_name": from_p["display_name"]
-        })
+        alias_transfers.append(
+            {"normalized_name": from_p_norm, "display_name": from_p["display_name"]}
+        )
 
     # 6. Build Merged Summaries Preview
-    cursor.execute("SELECT summary_id, note, display_order FROM summary_people WHERE person_id = ?", (from_person_id,))
+    cursor.execute(
+        "SELECT summary_id, note, display_order FROM summary_people WHERE person_id = ?",
+        (from_person_id,),
+    )
     from_links = {r["summary_id"]: dict(r) for r in cursor.fetchall()}
 
-    cursor.execute("SELECT summary_id, note, display_order FROM summary_people WHERE person_id = ?", (to_person_id,))
+    cursor.execute(
+        "SELECT summary_id, note, display_order FROM summary_people WHERE person_id = ?",
+        (to_person_id,),
+    )
     to_links = {r["summary_id"]: dict(r) for r in cursor.fetchall()}
 
     merged_summaries = []
@@ -1509,7 +1616,10 @@ def verify_people_merge(cursor: sqlite3.Cursor, from_person_id: str, to_person_i
             to_link = to_links[summary_id]
 
             # Fetch summary details
-            cursor.execute("SELECT period_key, period_type FROM summaries WHERE summary_id = ?", (summary_id,))
+            cursor.execute(
+                "SELECT period_key, period_type FROM summaries WHERE summary_id = ?",
+                (summary_id,),
+            )
             sum_row = cursor.fetchone()
             if sum_row:
                 period_key = sum_row["period_key"]
@@ -1525,15 +1635,17 @@ def verify_people_merge(cursor: sqlite3.Cursor, from_person_id: str, to_person_i
                 from_note, to_note, from_link["display_order"], to_link["display_order"]
             )
 
-            merged_summaries.append({
-                "summary_id": summary_id,
-                "period_key": period_key,
-                "period_type": period_type,
-                "from_note": from_note,
-                "to_note": to_note,
-                "merged_note": merged_note,
-                "merged_display_order": merged_display_order
-            })
+            merged_summaries.append(
+                {
+                    "summary_id": summary_id,
+                    "period_key": period_key,
+                    "period_type": period_type,
+                    "from_note": from_note,
+                    "to_note": to_note,
+                    "merged_note": merged_note,
+                    "merged_display_order": merged_display_order,
+                }
+            )
 
     return {
         "allowed": True,
@@ -1543,7 +1655,7 @@ def verify_people_merge(cursor: sqlite3.Cursor, from_person_id: str, to_person_i
         "transferred_summaries_count": len(from_links),
         "transferred_aliases_count": len(alias_transfers),
         "alias_transfers": alias_transfers,
-        "merged_summaries": merged_summaries
+        "merged_summaries": merged_summaries,
     }
 
 
@@ -1571,10 +1683,12 @@ def merge_people(from_person_id: str, to_person_id: str) -> bool:
                 raise ValueError(preview["reason"])
 
             from_p = preview["from_person"]
-            to_p = preview["to_person"]
 
             # 2. Migrate summary links
-            cursor.execute("SELECT summary_id, note, display_order FROM summary_people WHERE person_id = ?", (from_person_id,))
+            cursor.execute(
+                "SELECT summary_id, note, display_order FROM summary_people WHERE person_id = ?",
+                (from_person_id,),
+            )
             links = cursor.fetchall()
 
             for link in links:
@@ -1584,28 +1698,31 @@ def merge_people(from_person_id: str, to_person_id: str) -> bool:
 
                 cursor.execute(
                     "SELECT note, display_order FROM summary_people WHERE summary_id = ? AND person_id = ?",
-                    (summary_id, to_person_id)
+                    (summary_id, to_person_id),
                 )
                 existing_link = cursor.fetchone()
 
                 if existing_link is not None:
                     merged_note, merged_order = consolidate_summary_links(
-                        note, existing_link["note"], order, existing_link["display_order"]
+                        note,
+                        existing_link["note"],
+                        order,
+                        existing_link["display_order"],
                     )
 
                     conn.execute(
                         "UPDATE summary_people SET note = ?, display_order = ? WHERE summary_id = ? AND person_id = ?",
-                        (merged_note, merged_order, summary_id, to_person_id)
+                        (merged_note, merged_order, summary_id, to_person_id),
                     )
                 else:
                     conn.execute(
                         "INSERT INTO summary_people (summary_id, person_id, note, display_order) VALUES (?, ?, ?, ?)",
-                        (summary_id, to_person_id, note, order)
+                        (summary_id, to_person_id, note, order),
                     )
 
                 conn.execute(
                     "DELETE FROM summary_people WHERE summary_id = ? AND person_id = ?",
-                    (summary_id, from_person_id)
+                    (summary_id, from_person_id),
                 )
 
             # 3. Migrate aliases
@@ -1617,21 +1734,23 @@ def merge_people(from_person_id: str, to_person_id: str) -> bool:
                 if norm == from_p_norm:
                     conn.execute(
                         "INSERT INTO person_aliases (normalized_name, person_id, display_name) VALUES (?, ?, ?)",
-                        (norm, to_person_id, disp)
+                        (norm, to_person_id, disp),
                     )
                 else:
                     conn.execute(
                         "UPDATE person_aliases SET person_id = ? WHERE normalized_name = ?",
-                        (to_person_id, norm)
+                        (to_person_id, norm),
                     )
 
             # Delete any remaining aliases under from_person_id
-            conn.execute("DELETE FROM person_aliases WHERE person_id = ?", (from_person_id,))
+            conn.execute(
+                "DELETE FROM person_aliases WHERE person_id = ?", (from_person_id,)
+            )
 
             # 3b. Update summary_person_assignments for from_person_id to to_person_id
             conn.execute(
                 "UPDATE OR REPLACE summary_person_assignments SET person_id = ? WHERE person_id = ?",
-                (to_person_id, from_person_id)
+                (to_person_id, from_person_id),
             )
 
             # 4. Delete source person
@@ -1654,19 +1773,22 @@ def sync_people() -> dict[str, Any]:
 
             # 2. Sync safe part
             from obsidian_ai_hub.people_sync.sync import sync_people_in_tx
+
             sync_people_in_tx(conn, people_notes_map)
 
             # Return reports
             clean_loader_report = {
                 "file_deficiencies": report.get("file_deficiencies", []),
                 "duplicate_ids": report.get("duplicate_ids", []),
-                "normalized_name_collisions": report.get("normalized_name_collisions", []),
-                "alias_collisions": report.get("alias_collisions", [])
+                "normalized_name_collisions": report.get(
+                    "normalized_name_collisions", []
+                ),
+                "alias_collisions": report.get("alias_collisions", []),
             }
             return {
                 "synced": True,
                 "loader_report": clean_loader_report,
-                "db_conflicts": db_conflicts
+                "db_conflicts": db_conflicts,
             }
     finally:
         conn.close()
@@ -1683,12 +1805,9 @@ def get_vault_report_dynamic() -> dict[str, Any]:
             "file_deficiencies": report.get("file_deficiencies", []),
             "duplicate_ids": report.get("duplicate_ids", []),
             "normalized_name_collisions": report.get("normalized_name_collisions", []),
-            "alias_collisions": report.get("alias_collisions", [])
+            "alias_collisions": report.get("alias_collisions", []),
         }
-        return {
-            "loader_report": clean_loader_report,
-            "db_conflicts": db_conflicts
-        }
+        return {"loader_report": clean_loader_report, "db_conflicts": db_conflicts}
     finally:
         conn.close()
 
@@ -1698,13 +1817,15 @@ def delete_person_alias(person_id: str, normalized_name: str) -> dict:
     try:
         with conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT person_id FROM people WHERE person_id = ?", (person_id,))
+            cursor.execute(
+                "SELECT person_id FROM people WHERE person_id = ?", (person_id,)
+            )
             if cursor.fetchone() is None:
                 raise FileNotFoundError("Person not found")
 
             cursor.execute(
                 "SELECT normalized_name, display_name FROM person_aliases WHERE normalized_name = ? AND person_id = ?",
-                (normalized_name, person_id)
+                (normalized_name, person_id),
             )
             alias_row = cursor.fetchone()
             if alias_row is None:
@@ -1712,7 +1833,7 @@ def delete_person_alias(person_id: str, normalized_name: str) -> dict:
 
             conn.execute(
                 "DELETE FROM person_aliases WHERE normalized_name = ? AND person_id = ?",
-                (normalized_name, person_id)
+                (normalized_name, person_id),
             )
 
         return get_person_detail(person_id)
@@ -1722,7 +1843,12 @@ def delete_person_alias(person_id: str, normalized_name: str) -> dict:
 
 def get_edit_options() -> dict:
     from obsidian_ai_hub.utils.topics import TOPIC_ENUM
-    from obsidian_ai_hub.summary.store import DAY_ITEM_KINDS, WEEK_ITEM_KINDS, MONTH_ITEM_KINDS
+    from obsidian_ai_hub.summary.store import (
+        DAY_ITEM_KINDS,
+        WEEK_ITEM_KINDS,
+        MONTH_ITEM_KINDS,
+    )
+
     return {
         "topics": list(TOPIC_ENUM),
         "item_kinds": {
@@ -1736,8 +1862,9 @@ def get_edit_options() -> dict:
 def update_summary_detail(summary_id: str, body: schemas.SummaryUpdateRequest) -> dict:
     from obsidian_ai_hub.utils.topics import TOPIC_ENUM
     from obsidian_ai_hub.summary.store import (
-        DAY_ITEM_KINDS, WEEK_ITEM_KINDS, MONTH_ITEM_KINDS,
-        normalize_entity_name, parse_sleep_hours,
+        DAY_ITEM_KINDS,
+        WEEK_ITEM_KINDS,
+        MONTH_ITEM_KINDS,
     )
 
     payload = body.model_dump(exclude_unset=True)
@@ -1769,7 +1896,9 @@ def update_summary_detail(summary_id: str, body: schemas.SummaryUpdateRequest) -
             raw_items = []
         for item in raw_items:
             if item["kind"] not in allowed_kinds:
-                raise ValueError(f"Invalid item kind '{item['kind']}' for {period_type} summary; allowed: {allowed_kinds}")
+                raise ValueError(
+                    f"Invalid item kind '{item['kind']}' for {period_type} summary; allowed: {allowed_kinds}"
+                )
             if not item["body"] or not str(item["body"]).strip():
                 raise ValueError("item body must not be empty")
             item["body"] = str(item["body"]).strip()
@@ -1782,7 +1911,9 @@ def update_summary_detail(summary_id: str, body: schemas.SummaryUpdateRequest) -
             topics = []
         for t in topics:
             if t not in TOPIC_ENUM:
-                raise ValueError(f"Invalid topic '{t}'; must be one of the standard candidates")
+                raise ValueError(
+                    f"Invalid topic '{t}'; must be one of the standard candidates"
+                )
         if len(topics) > 5:
             raise ValueError("topics must contain at most 5 items")
         payload["topics"] = topics
@@ -1815,7 +1946,9 @@ def update_summary_detail(summary_id: str, body: schemas.SummaryUpdateRequest) -
                 if pid in seen_pids:
                     raise ValueError(f"Duplicate person_id: {pid}")
                 seen_pids.add(pid)
-                cursor.execute("SELECT person_id FROM people WHERE person_id = ?", (pid,))
+                cursor.execute(
+                    "SELECT person_id FROM people WHERE person_id = ?", (pid,)
+                )
                 if cursor.fetchone() is None:
                     raise ValueError(f"Person not found: {pid}")
         finally:

@@ -17,6 +17,7 @@ from obsidian_ai_hub.handler.obsidian_vault_retriever import search_obsidian_vau
 # This name will appear in Raycast or other tools that connect to this server
 mcp = FastMCP(name="Memory Search (Japanese)")
 
+
 @mcp.tool()
 def search(query: str, k: int = 10, mode: str = "hybrid") -> list:
     """Search the User's personal memory database sourced from their vault.
@@ -36,11 +37,9 @@ def search(query: str, k: int = 10, mode: str = "hybrid") -> list:
             - page_content (str): The document content/text (Japanese)
             - metadata (dict): Document metadata including source file, title, publication date, etc.
     """
-    documents = search_obsidian_vault.invoke({
-        "query": query,
-        "k": int(k),
-        "search_mode": mode
-    })
+    documents = search_obsidian_vault.invoke(
+        {"query": query, "k": int(k), "search_mode": mode}
+    )
     return documents
 
 
@@ -56,6 +55,7 @@ def read_file(file_path: str) -> str:
     """
     with open(file_path, "r", encoding="utf-8") as f:
         return f.read()
+
 
 # Main execution block
 # When run directly, starts the MCP server in stdio mode

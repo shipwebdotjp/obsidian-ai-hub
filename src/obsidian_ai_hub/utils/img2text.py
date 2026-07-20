@@ -1,4 +1,4 @@
-""" Use Apple's Vision Framework via PyObjC to detect text in images 
+"""Use Apple's Vision Framework via PyObjC to detect text in images
 To use:
 python3 -m pip install pyobjc-core pyobjc-framework-Quartz pyobjc-framework-Vision wurlitzer
 """
@@ -9,8 +9,10 @@ import Quartz
 import Vision
 from Cocoa import NSURL
 from Foundation import NSDictionary
+
 # needed to capture system-level stderr
 from wurlitzer import pipes
+
 
 def image_to_text(img_path, languages=None):
     if languages is None:
@@ -29,7 +31,9 @@ def image_to_text(img_path, languages=None):
     results = []
     handler = make_request_handler(results)
 
-    vision_request = Vision.VNRecognizeTextRequest.alloc().initWithCompletionHandler_(handler)
+    vision_request = Vision.VNRecognizeTextRequest.alloc().initWithCompletionHandler_(
+        handler
+    )
 
     vision_request.setRecognitionLanguages_(languages)
     vision_request.setUsesLanguageCorrection_(True)
@@ -37,12 +41,13 @@ def image_to_text(img_path, languages=None):
     # 精度優先
     vision_request.setRecognitionLevel_(Vision.VNRequestTextRecognitionLevelAccurate)
 
-    error = vision_handler.performRequests_error_([vision_request], None)
+    _ = vision_handler.performRequests_error_([vision_request], None)
 
     return results
 
+
 def make_request_handler(results):
-    """ results: list to store results """
+    """results: list to store results"""
     if not isinstance(results, list):
         raise ValueError("results must be a list")
 
@@ -54,12 +59,12 @@ def make_request_handler(results):
             for text_observation in observations:
                 recognized_text = text_observation.topCandidates_(1)[0]
                 results.append([recognized_text.string(), recognized_text.confidence()])
+
     return handler
 
 
 def main():
     import sys
-    import pathlib
 
     img_path = pathlib.Path(sys.argv[1])
     if not img_path.is_file():

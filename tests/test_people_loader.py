@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import pytest
-from pathlib import Path
 
 from obsidian_ai_hub.utils import config as app_config
-from obsidian_ai_hub.utils.people_loader import load_and_validate_people_notes, load_people_notes_with_report
+from obsidian_ai_hub.utils.people_loader import load_people_notes_with_report
 
 
 def test_people_loader_no_dir(tmp_path, monkeypatch):
@@ -22,7 +20,8 @@ def test_people_loader_valid(tmp_path, monkeypatch):
 
     # Note 1: Yamada
     note1 = tmp_path / "yamada.md"
-    note1.write_text("""---
+    note1.write_text(
+        """---
 id: yamada-taro
 name: 山田太郎
 aliases:
@@ -30,18 +29,23 @@ aliases:
   - たろう
 ---
 Yamada's description
-""", encoding="utf-8")
+""",
+        encoding="utf-8",
+    )
 
     # Note 2: Sato
     note2 = tmp_path / "sato.md"
-    note2.write_text("""---
+    note2.write_text(
+        """---
 id: sato-hanako
 name: 佐藤花子
 aliases:
   - はなちゃん
 ---
 Sato's description
-""", encoding="utf-8")
+""",
+        encoding="utf-8",
+    )
 
     res, report = load_people_notes_with_report()
 
@@ -69,48 +73,66 @@ def test_people_loader_missing_id(tmp_path, monkeypatch):
     monkeypatch.setattr(app_config, "PEOPLE_PATH", tmp_path)
 
     note = tmp_path / "invalid.md"
-    note.write_text("""---
+    note.write_text(
+        """---
 name: No ID Person
 ---
-""", encoding="utf-8")
+""",
+        encoding="utf-8",
+    )
 
     res, report = load_people_notes_with_report()
     assert res == {}
     assert len(report["file_deficiencies"]) == 1
-    assert "Missing or empty required field 'id'" in report["file_deficiencies"][0]["message"]
+    assert (
+        "Missing or empty required field 'id'"
+        in report["file_deficiencies"][0]["message"]
+    )
 
 
 def test_people_loader_missing_name(tmp_path, monkeypatch):
     monkeypatch.setattr(app_config, "PEOPLE_PATH", tmp_path)
 
     note = tmp_path / "invalid.md"
-    note.write_text("""---
+    note.write_text(
+        """---
 id: valid-id
 ---
-""", encoding="utf-8")
+""",
+        encoding="utf-8",
+    )
 
     res, report = load_people_notes_with_report()
     assert res == {}
     assert len(report["file_deficiencies"]) == 1
-    assert "Missing or empty required field 'name'" in report["file_deficiencies"][0]["message"]
+    assert (
+        "Missing or empty required field 'name'"
+        in report["file_deficiencies"][0]["message"]
+    )
 
 
 def test_people_loader_duplicate_id(tmp_path, monkeypatch):
     monkeypatch.setattr(app_config, "PEOPLE_PATH", tmp_path)
 
     note1 = tmp_path / "yamada1.md"
-    note1.write_text("""---
+    note1.write_text(
+        """---
 id: yamada-taro
 name: 山田太郎
 ---
-""", encoding="utf-8")
+""",
+        encoding="utf-8",
+    )
 
     note2 = tmp_path / "yamada2.md"
-    note2.write_text("""---
+    note2.write_text(
+        """---
 id: yamada-taro
 name: 別の山田太郎
 ---
-""", encoding="utf-8")
+""",
+        encoding="utf-8",
+    )
 
     res, report = load_people_notes_with_report()
     assert res == {}
@@ -123,22 +145,28 @@ def test_people_loader_duplicate_alias(tmp_path, monkeypatch):
     monkeypatch.setattr(app_config, "PEOPLE_PATH", tmp_path)
 
     note1 = tmp_path / "yamada.md"
-    note1.write_text("""---
+    note1.write_text(
+        """---
 id: yamada-taro
 name: 山田太郎
 aliases:
   - ヤマダ
 ---
-""", encoding="utf-8")
+""",
+        encoding="utf-8",
+    )
 
     note2 = tmp_path / "yamada_clone.md"
-    note2.write_text("""---
+    note2.write_text(
+        """---
 id: yamada-jiro
 name: 山田二郎
 aliases:
   - ヤマダ
 ---
-""", encoding="utf-8")
+""",
+        encoding="utf-8",
+    )
 
     res, report = load_people_notes_with_report()
 
@@ -157,13 +185,19 @@ def test_people_loader_invalid_types_id_name(tmp_path, monkeypatch):
 
     # Note with integer ID (should be rejected as it's not a string)
     note1 = tmp_path / "integer_id.md"
-    note1.write_text("""---
+    note1.write_text(
+        """---
 id: 12345
 name: Number ID Person
 ---
-""", encoding="utf-8")
+""",
+        encoding="utf-8",
+    )
 
     res, report = load_people_notes_with_report()
     assert res == {}
     assert len(report["file_deficiencies"]) == 1
-    assert "Missing or empty required field 'id'" in report["file_deficiencies"][0]["message"]
+    assert (
+        "Missing or empty required field 'id'"
+        in report["file_deficiencies"][0]["message"]
+    )

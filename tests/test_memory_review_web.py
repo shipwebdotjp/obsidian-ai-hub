@@ -55,7 +55,9 @@ def _seed(memory_id: str, status: str = "candidate", content: str = "本文") ->
     memory.save_all_memories(existing + [cand])
 
 
-def _make_candidate(memory_id: str, status: str = "candidate", content: str = "本文") -> dict:
+def _make_candidate(
+    memory_id: str, status: str = "candidate", content: str = "本文"
+) -> dict:
     return {
         "schema_version": 1,
         "memory_id": memory_id,
@@ -202,7 +204,11 @@ def test_token_required_when_not_loopback():
         ("GET", "/api/v1/memories"),
         ("POST", "/api/v1/memories/mem_x/review", {"action": "approve"}),
         ("POST", "/api/v1/memories/mem_x/edit", {"content": "updated"}),
-        ("POST", "/api/v1/memories/batch-review", {"memory_ids": ["mem_x"], "action": "approve"}),
+        (
+            "POST",
+            "/api/v1/memories/batch-review",
+            {"memory_ids": ["mem_x"], "action": "approve"},
+        ),
     ]
 
     for method, path, *payload in protected_routes:
@@ -265,98 +271,110 @@ def test_serve_loopback_no_token(monkeypatch):
 
 def test_resolve_memory_keep_both(loopback_client):
     # Seed approved target memory
-    m_target = _make_candidate('mem_target_1', status='approved', content='ターゲットの内容です')
+    m_target = _make_candidate(
+        "mem_target_1", status="approved", content="ターゲットの内容です"
+    )
     # Seed candidate with target in suggestions
-    m_cand = _make_candidate('mem_candidate_1', status='candidate', content='候補の内容です')
-    m_cand['dedup_suggestions'] = [{
-        'target_memory_id': 'mem_target_1',
-        'relation': 'supersedes',
-        'reason': '置換候補',
-        'score': 0.90
-    }]
+    m_cand = _make_candidate(
+        "mem_candidate_1", status="candidate", content="候補の内容です"
+    )
+    m_cand["dedup_suggestions"] = [
+        {
+            "target_memory_id": "mem_target_1",
+            "relation": "supersedes",
+            "reason": "置換候補",
+            "score": 0.90,
+        }
+    ]
 
     memory.save_all_memories([m_target, m_cand])
 
     res = loopback_client.post(
-        '/api/v1/memories/mem_candidate_1/resolve',
-        json={'action': 'keep_both', 'target_memory_id': 'mem_target_1'}
+        "/api/v1/memories/mem_candidate_1/resolve",
+        json={"action": "keep_both", "target_memory_id": "mem_target_1"},
     )
     assert res.status_code == 200
     body = res.json()
-    assert body['candidate']['status'] == 'approved'
-    assert body['candidate']['reviewed_by'] == 'user'
-    assert body['target']['status'] == 'approved'
-    assert body['target']['content'] == 'ターゲットの内容です'
+    assert body["candidate"]["status"] == "approved"
+    assert body["candidate"]["reviewed_by"] == "user"
+    assert body["target"]["status"] == "approved"
+    assert body["target"]["content"] == "ターゲットの内容です"
 
     # Check candidate events
-    events = memory.get_memory_events('mem_candidate_1')
+    events = memory.get_memory_events("mem_candidate_1")
     assert len(events) == 1
-    assert events[0]['event_type'] == 'approved'
-
+    assert events[0]["event_type"] == "approved"
 
 
 def test_resolve_memory_replace_existing(loopback_client):
-    m_target = _make_candidate('mem_target_2', status='approved', content='古いターゲットの内容です')
-    m_target['tags'] = ['tagA']
-    m_target['evidence'] = [{'path': 'noteA.md', 'quote': 'quoteA', 'observed_at': '2026-07-01'}]
+    m_target = _make_candidate(
+        "mem_target_2", status="approved", content="古いターゲットの内容です"
+    )
+    m_target["tags"] = ["tagA"]
+    m_target["evidence"] = [
+        {"path": "noteA.md", "quote": "quoteA", "observed_at": "2026-07-01"}
+    ]
 
-    m_cand = _make_candidate('mem_candidate_2', status='candidate', content='新しい候補の内容です')
-    m_cand['tags'] = ['tagB']
-    m_cand['evidence'] = [{'path': 'noteB.md', 'quote': 'quoteB', 'observed_at': '2026-07-13'}]
-    m_cand['dedup_suggestions'] = [{
-        'target_memory_id': 'mem_target_2',
-        'relation': 'supersedes'
-    }]
+    m_cand = _make_candidate(
+        "mem_candidate_2", status="candidate", content="新しい候補の内容です"
+    )
+    m_cand["tags"] = ["tagB"]
+    m_cand["evidence"] = [
+        {"path": "noteB.md", "quote": "quoteB", "observed_at": "2026-07-13"}
+    ]
+    m_cand["dedup_suggestions"] = [
+        {"target_memory_id": "mem_target_2", "relation": "supersedes"}
+    ]
 
     memory.save_all_memories([m_target, m_cand])
 
     res = loopback_client.post(
-        '/api/v1/memories/mem_candidate_2/resolve',
-        json={'action': 'replace_existing', 'target_memory_id': 'mem_target_2'}
+        "/api/v1/memories/mem_candidate_2/resolve",
+        json={"action": "replace_existing", "target_memory_id": "mem_target_2"},
     )
     assert res.status_code == 200
     body = res.json()
 
-    assert body['candidate']['status'] == 'rejected'
-    assert body['target']['status'] == 'approved'
-    assert body['target']['content'] == '新しい候補の内容です'
-    assert set(body['target']['tags']) == {'tagA', 'tagB'}
-    assert len(body['target']['evidence']) == 2
+    assert body["candidate"]["status"] == "rejected"
+    assert body["target"]["status"] == "approved"
+    assert body["target"]["content"] == "新しい候補の内容です"
+    assert set(body["target"]["tags"]) == {"tagA", "tagB"}
+    assert len(body["target"]["evidence"]) == 2
 
     # Check target events for diff
-    target_events = memory.get_memory_events('mem_target_2')
+    target_events = memory.get_memory_events("mem_target_2")
     assert len(target_events) == 1
-    assert target_events[0]['event_type'] == 'edited'
-    assert target_events[0]['changes']['content']['after'] == '新しい候補の内容です'
+    assert target_events[0]["event_type"] == "edited"
+    assert target_events[0]["changes"]["content"]["after"] == "新しい候補の内容です"
 
     # Check candidate events for rejection
-    cand_events = memory.get_memory_events('mem_candidate_2')
+    cand_events = memory.get_memory_events("mem_candidate_2")
     assert len(cand_events) == 1
-    assert cand_events[0]['event_type'] == 'rejected'
+    assert cand_events[0]["event_type"] == "rejected"
 
 
 def test_resolve_memory_validation_errors(loopback_client):
     # Seed memories
-    m_target = _make_candidate('mem_target_3', status='approved', content='既存')
-    m_cand = _make_candidate('mem_candidate_3', status='candidate', content='候補')
-    m_cand['dedup_suggestions'] = [] # Empty suggestions
+    m_target = _make_candidate("mem_target_3", status="approved", content="既存")
+    m_cand = _make_candidate("mem_candidate_3", status="candidate", content="候補")
+    m_cand["dedup_suggestions"] = []  # Empty suggestions
 
     memory.save_all_memories([m_target, m_cand])
 
     # 1. target not in suggestions
     res = loopback_client.post(
-        '/api/v1/memories/mem_candidate_3/resolve',
-        json={'action': 'keep_both', 'target_memory_id': 'mem_target_3'}
+        "/api/v1/memories/mem_candidate_3/resolve",
+        json={"action": "keep_both", "target_memory_id": "mem_target_3"},
     )
     assert res.status_code == 400
-    assert "not in candidate's suggestions" in res.json()['detail']
+    assert "not in candidate's suggestions" in res.json()["detail"]
 
     # 2. invalid action
     res = loopback_client.post(
-        '/api/v1/memories/mem_candidate_3/resolve',
-        json={'action': 'invalid_action', 'target_memory_id': 'mem_target_3'}
+        "/api/v1/memories/mem_candidate_3/resolve",
+        json={"action": "invalid_action", "target_memory_id": "mem_target_3"},
     )
-    assert res.status_code == 422 # Pydantic Validation Error for literal field
+    assert res.status_code == 422  # Pydantic Validation Error for literal field
 
 
 def test_get_memory_options(loopback_client):
@@ -378,12 +396,18 @@ def test_render_copilot_profile_success(loopback_client):
         res = loopback_client.post("/api/v1/copilot-profile/render")
         assert res.status_code == 200
         body = res.json()
-        assert body["updated_files"] == ["copilot/AI_README.md", "copilot/core/values.md"]
+        assert body["updated_files"] == [
+            "copilot/AI_README.md",
+            "copilot/core/values.md",
+        ]
         mock_render.assert_called_once()
 
 
 def test_render_copilot_profile_failure(loopback_client):
-    with patch("obsidian_ai_hub.memory.render_copilot_profile", side_effect=ValueError("LLM Error")):
+    with patch(
+        "obsidian_ai_hub.memory.render_copilot_profile",
+        side_effect=ValueError("LLM Error"),
+    ):
         res = loopback_client.post("/api/v1/copilot-profile/render")
         assert res.status_code == 500
         assert "Failed to render copilot profile: LLM Error" in res.json()["detail"]
@@ -404,6 +428,6 @@ def test_render_copilot_profile_token_protection():
         mock_render.return_value = []
         res = client.post(
             "/api/v1/copilot-profile/render",
-            headers={"Authorization": "Bearer secret-token"}
+            headers={"Authorization": "Bearer secret-token"},
         )
         assert res.status_code == 200

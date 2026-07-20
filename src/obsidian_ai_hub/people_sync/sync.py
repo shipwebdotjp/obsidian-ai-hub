@@ -22,14 +22,20 @@ def merge_display_orders(order1: int | None, order2: int | None) -> int | None:
     return min(order1, order2)
 
 
-def get_db_vault_conflicts_report(conn: sqlite3.Connection, parsed_notes: list[dict]) -> dict[str, list[dict]]:
+def get_db_vault_conflicts_report(
+    conn: sqlite3.Connection, parsed_notes: list[dict]
+) -> dict[str, list[dict]]:
     cursor = conn.cursor()
-    cursor.execute("SELECT normalized_name, person_id, display_name FROM person_aliases")
+    cursor.execute(
+        "SELECT normalized_name, person_id, display_name FROM person_aliases"
+    )
     aliases_rows = cursor.fetchall()
 
     cursor.execute("SELECT person_id, vault_id, display_name FROM people")
     people_rows = cursor.fetchall()
-    people_map = {r["person_id"]: (r["vault_id"], r["display_name"]) for r in people_rows}
+    people_map = {
+        r["person_id"]: (r["vault_id"], r["display_name"]) for r in people_rows
+    }
 
     mismatches = []
     compound_conflicts = []
@@ -37,7 +43,9 @@ def get_db_vault_conflicts_report(conn: sqlite3.Connection, parsed_notes: list[d
     for row in aliases_rows:
         alias_norm = row["normalized_name"]
         db_person_id = row["person_id"]
-        db_person_vault_id, db_person_display_name = people_map.get(db_person_id, (None, row["display_name"]))
+        db_person_vault_id, db_person_display_name = people_map.get(
+            db_person_id, (None, row["display_name"])
+        )
 
         # Find all claimants of this alias in the Vault notes
         vault_claimers = []
@@ -53,40 +61,39 @@ def get_db_vault_conflicts_report(conn: sqlite3.Connection, parsed_notes: list[d
         if len(vault_claimers) == 1:
             claimer = vault_claimers[0]
             if db_person_vault_id != claimer["id"]:
-                mismatches.append({
+                mismatches.append(
+                    {
+                        "alias": alias_norm,
+                        "db_person_id": db_person_id,
+                        "db_person_name": db_person_display_name,
+                        "db_person_vault_id": db_person_vault_id,
+                        "vault_note": {
+                            "id": claimer["id"],
+                            "name": claimer["name"],
+                            "path": str(claimer["file_path"]),
+                        },
+                    }
+                )
+        else:
+            compound_conflicts.append(
+                {
                     "alias": alias_norm,
                     "db_person_id": db_person_id,
                     "db_person_name": db_person_display_name,
                     "db_person_vault_id": db_person_vault_id,
-                    "vault_note": {
-                        "id": claimer["id"],
-                        "name": claimer["name"],
-                        "path": str(claimer["file_path"])
-                    }
-                })
-        else:
-            compound_conflicts.append({
-                "alias": alias_norm,
-                "db_person_id": db_person_id,
-                "db_person_name": db_person_display_name,
-                "db_person_vault_id": db_person_vault_id,
-                "vault_claimers": [
-                    {
-                        "id": c["id"],
-                        "name": c["name"],
-                        "path": str(c["file_path"])
-                    }
-                    for c in vault_claimers
-                ]
-            })
+                    "vault_claimers": [
+                        {"id": c["id"], "name": c["name"], "path": str(c["file_path"])}
+                        for c in vault_claimers
+                    ],
+                }
+            )
 
-    return {
-        "mismatches": mismatches,
-        "compound_conflicts": compound_conflicts
-    }
+    return {"mismatches": mismatches, "compound_conflicts": compound_conflicts}
 
 
-def sync_people_in_tx(conn: sqlite3.Connection, people_notes_map: Dict[str, Any]) -> None:
+def sync_people_in_tx(
+    conn: sqlite3.Connection, people_notes_map: Dict[str, Any]
+) -> None:
     # 1. Group notes by note ID (since map is normalized_name -> PersonNote, multiple keys map to same dict)
     seen_note_ids = set()
     unique_notes = []
@@ -116,20 +123,35 @@ def sync_people_in_tx(conn: sqlite3.Connection, people_notes_map: Dict[str, Any]
         safe_aliases_set = set()
         skip_entire_note = False
         for a_norm in aliases_set:
-            cursor.execute("SELECT person_id FROM person_aliases WHERE normalized_name = ?", (a_norm,))
+            cursor.execute(
+                "SELECT person_id FROM person_aliases WHERE normalized_name = ?",
+                (a_norm,),
+            )
             row = cursor.fetchone()
             if row is not None:
                 db_pid = row[0]
-                cursor.execute("SELECT vault_id FROM people WHERE person_id = ?", (db_pid,))
+                cursor.execute(
+                    "SELECT vault_id FROM people WHERE person_id = ?", (db_pid,)
+                )
                 p_row = cursor.fetchone()
                 db_vault_id = p_row[0] if p_row else None
                 if db_vault_id != vault_id:
                     if a_norm == normalized_vault_name:
-                        logger.warning("Primary name conflict for '%s' (points to %s in DB, Vault note has %s). Skipping entire note.", a_norm, db_pid, vault_id)
+                        logger.warning(
+                            "Primary name conflict for '%s' (points to %s in DB, Vault note has %s). Skipping entire note.",
+                            a_norm,
+                            db_pid,
+                            vault_id,
+                        )
                         skip_entire_note = True
                         break
                     else:
-                        logger.info("Maintaining DB confirmed alias for '%s' (points to %s, Vault note has %s). Skipped in candidate/merge matching.", a_norm, db_pid, vault_id)
+                        logger.info(
+                            "Maintaining DB confirmed alias for '%s' (points to %s, Vault note has %s). Skipped in candidate/merge matching.",
+                            a_norm,
+                            db_pid,
+                            vault_id,
+                        )
                         continue
             safe_aliases_set.add(a_norm)
 
@@ -155,22 +177,37 @@ def sync_people_in_tx(conn: sqlite3.Connection, people_notes_map: Dict[str, Any]
             final_update_args = (vault_name, normalized_vault_name, target_person_id)
         else:
             # Check if there is an existing person with the same normalized name
-            cursor.execute("SELECT person_id FROM people WHERE normalized_name = ?", (normalized_vault_name,))
+            cursor.execute(
+                "SELECT person_id FROM people WHERE normalized_name = ?",
+                (normalized_vault_name,),
+            )
             row = cursor.fetchone()
             if row is not None:
                 target_person_id = row[0]
                 needs_final_update = True
                 final_update_sql = "UPDATE people SET vault_id = ?, display_name = ?, normalized_name = ? WHERE person_id = ?"
-                final_update_args = (vault_id, vault_name, normalized_vault_name, target_person_id)
+                final_update_args = (
+                    vault_id,
+                    vault_name,
+                    normalized_vault_name,
+                    target_person_id,
+                )
             else:
                 # Create a placeholder row with a guaranteed unique temp normalized_name
                 target_person_id = f"peo_{uuid.uuid4().hex}"
                 conn.execute(
                     "INSERT INTO people (person_id, normalized_name, display_name, vault_id) VALUES (?, ?, ?, ?)",
-                    (target_person_id, f"temp_{target_person_id}", vault_name, vault_id),
+                    (
+                        target_person_id,
+                        f"temp_{target_person_id}",
+                        vault_name,
+                        vault_id,
+                    ),
                 )
                 needs_final_update = True
-                final_update_sql = "UPDATE people SET normalized_name = ? WHERE person_id = ?"
+                final_update_sql = (
+                    "UPDATE people SET normalized_name = ? WHERE person_id = ?"
+                )
                 final_update_args = (normalized_vault_name, target_person_id)
 
         logger.info("Resolved person to person_id=%s", target_person_id)
@@ -179,7 +216,7 @@ def sync_people_in_tx(conn: sqlite3.Connection, people_notes_map: Dict[str, Any]
         placeholders = ", ".join("?" for _ in aliases_set)
         cursor.execute(
             f"SELECT candidate_id, normalized_name FROM person_candidates WHERE normalized_name IN ({placeholders})",
-            list(aliases_set)
+            list(aliases_set),
         )
         candidates = cursor.fetchall()
 
@@ -190,17 +227,24 @@ def sync_people_in_tx(conn: sqlite3.Connection, people_notes_map: Dict[str, Any]
             # Skip auto-absorption if this name/candidate has manual assignments
             cursor.execute(
                 "SELECT COUNT(*) FROM summary_person_assignments WHERE normalized_name = ?",
-                (cand_norm,)
+                (cand_norm,),
             )
             if cursor.fetchone()[0] > 0:
-                logger.info("Skipping candidate auto-absorption for '%s' because manual assignments exist", cand_norm)
+                logger.info(
+                    "Skipping candidate auto-absorption for '%s' because manual assignments exist",
+                    cand_norm,
+                )
                 continue
 
-            logger.info("Migrating unresolved candidate (id=%s) to target person_id=%s", cand_id, target_person_id)
+            logger.info(
+                "Migrating unresolved candidate (id=%s) to target person_id=%s",
+                cand_id,
+                target_person_id,
+            )
 
             cursor.execute(
                 "SELECT summary_id, note, display_order FROM summary_person_candidates WHERE candidate_id = ?",
-                (cand_id,)
+                (cand_id,),
             )
             links = cursor.fetchall()
 
@@ -211,7 +255,7 @@ def sync_people_in_tx(conn: sqlite3.Connection, people_notes_map: Dict[str, Any]
 
                 cursor.execute(
                     "SELECT note, display_order FROM summary_people WHERE summary_id = ? AND person_id = ?",
-                    (summary_id, target_person_id)
+                    (summary_id, target_person_id),
                 )
                 existing_link = cursor.fetchone()
 
@@ -230,28 +274,30 @@ def sync_people_in_tx(conn: sqlite3.Connection, people_notes_map: Dict[str, Any]
 
                     conn.execute(
                         "UPDATE summary_people SET note = ?, display_order = ? WHERE summary_id = ? AND person_id = ?",
-                        (merged_note, merged_order, summary_id, target_person_id)
+                        (merged_note, merged_order, summary_id, target_person_id),
                     )
                     conn.execute(
                         "DELETE FROM summary_person_candidates WHERE summary_id = ? AND candidate_id = ?",
-                        (summary_id, cand_id)
+                        (summary_id, cand_id),
                     )
                 else:
                     conn.execute(
                         "INSERT INTO summary_people (summary_id, person_id, note, display_order) VALUES (?, ?, ?, ?)",
-                        (summary_id, target_person_id, cand_note, cand_order)
+                        (summary_id, target_person_id, cand_note, cand_order),
                     )
                     conn.execute(
                         "DELETE FROM summary_person_candidates WHERE summary_id = ? AND candidate_id = ?",
-                        (summary_id, cand_id)
+                        (summary_id, cand_id),
                     )
 
-            conn.execute("DELETE FROM person_candidates WHERE candidate_id = ?", (cand_id,))
+            conn.execute(
+                "DELETE FROM person_candidates WHERE candidate_id = ?", (cand_id,)
+            )
 
         # Step C: Match and migrate old duplicate 'people' records (vault_id IS NULL)
         cursor.execute(
             f"SELECT person_id FROM people WHERE vault_id IS NULL AND normalized_name IN ({placeholders})",
-            list(aliases_set)
+            list(aliases_set),
         )
         old_people = cursor.fetchall()
 
@@ -261,11 +307,15 @@ def sync_people_in_tx(conn: sqlite3.Connection, people_notes_map: Dict[str, Any]
             if old_person_id == target_person_id:
                 continue
 
-            logger.info("Migrating old duplicate person (id=%s) to target person_id=%s", old_person_id, target_person_id)
+            logger.info(
+                "Migrating old duplicate person (id=%s) to target person_id=%s",
+                old_person_id,
+                target_person_id,
+            )
 
             cursor.execute(
                 "SELECT summary_id, note, display_order FROM summary_people WHERE person_id = ?",
-                (old_person_id,)
+                (old_person_id,),
             )
             old_links = cursor.fetchall()
 
@@ -276,7 +326,7 @@ def sync_people_in_tx(conn: sqlite3.Connection, people_notes_map: Dict[str, Any]
 
                 cursor.execute(
                     "SELECT note, display_order FROM summary_people WHERE summary_id = ? AND person_id = ?",
-                    (summary_id, target_person_id)
+                    (summary_id, target_person_id),
                 )
                 existing_link = cursor.fetchone()
 
@@ -295,16 +345,16 @@ def sync_people_in_tx(conn: sqlite3.Connection, people_notes_map: Dict[str, Any]
 
                     conn.execute(
                         "UPDATE summary_people SET note = ?, display_order = ? WHERE summary_id = ? AND person_id = ?",
-                        (merged_note, merged_order, summary_id, target_person_id)
+                        (merged_note, merged_order, summary_id, target_person_id),
                     )
                     conn.execute(
                         "DELETE FROM summary_people WHERE summary_id = ? AND person_id = ?",
-                        (summary_id, old_person_id)
+                        (summary_id, old_person_id),
                     )
                 else:
                     conn.execute(
                         "UPDATE summary_people SET person_id = ? WHERE summary_id = ? AND person_id = ?",
-                        (target_person_id, summary_id, old_person_id)
+                        (target_person_id, summary_id, old_person_id),
                     )
 
             conn.execute("DELETE FROM people WHERE person_id = ?", (old_person_id,))
@@ -313,7 +363,9 @@ def sync_people_in_tx(conn: sqlite3.Connection, people_notes_map: Dict[str, Any]
             conn.execute(final_update_sql, final_update_args)
 
 
-def log_vault_report_to_cli(report: dict[str, Any], db_conflicts: dict[str, Any]) -> None:
+def log_vault_report_to_cli(
+    report: dict[str, Any], db_conflicts: dict[str, Any]
+) -> None:
     if report.get("file_deficiencies"):
         logger.warning("=== File Deficiencies (ファイル不備) ===")
         for fd in report["file_deficiencies"]:
@@ -338,22 +390,36 @@ def log_vault_report_to_cli(report: dict[str, Any], db_conflicts: dict[str, Any]
         for col in report["alias_collisions"]:
             logger.warning(f"  - Alias: {col['alias']}")
             for n in col["notes"]:
-                logger.warning(f"    * ID: {n['id']}, Path: {n['path']}, Role: {n['role']}")
+                logger.warning(
+                    f"    * ID: {n['id']}, Path: {n['path']}, Role: {n['role']}"
+                )
 
     if db_conflicts.get("mismatches"):
-        logger.warning("=== DB Confirmed Alias vs Vault Mismatches (DB確定別名とVault入力の不一致) ===")
+        logger.warning(
+            "=== DB Confirmed Alias vs Vault Mismatches (DB確定別名とVault入力の不一致) ==="
+        )
         for m in db_conflicts["mismatches"]:
             logger.warning(f"  - Alias: {m['alias']}")
-            logger.warning(f"    DB Person ID: {m['db_person_id']}, Name: {m['db_person_name']}")
-            logger.warning(f"    Vault Note ID: {m['vault_note']['id']}, Name: {m['vault_note']['name']}, Path: {m['vault_note']['path']}")
+            logger.warning(
+                f"    DB Person ID: {m['db_person_id']}, Name: {m['db_person_name']}"
+            )
+            logger.warning(
+                f"    Vault Note ID: {m['vault_note']['id']}, Name: {m['vault_note']['name']}, Path: {m['vault_note']['path']}"
+            )
 
     if db_conflicts.get("compound_conflicts"):
-        logger.warning("=== DB Confirmed Alias vs Vault Compound Conflicts (複合衝突) ===")
+        logger.warning(
+            "=== DB Confirmed Alias vs Vault Compound Conflicts (複合衝突) ==="
+        )
         for cc in db_conflicts["compound_conflicts"]:
             logger.warning(f"  - Alias: {cc['alias']}")
-            logger.warning(f"    DB Person ID: {cc['db_person_id']}, Name: {cc['db_person_name']}")
+            logger.warning(
+                f"    DB Person ID: {cc['db_person_id']}, Name: {cc['db_person_name']}"
+            )
             for vc in cc["vault_claimers"]:
-                logger.warning(f"    * Vault Note ID: {vc['id']}, Name: {vc['name']}, Path: {vc['path']}")
+                logger.warning(
+                    f"    * Vault Note ID: {vc['id']}, Name: {vc['name']}, Path: {vc['path']}"
+                )
 
 
 def main() -> None:
@@ -364,7 +430,9 @@ def main() -> None:
     try:
         with conn:
             # 1. Detect DB conflicts
-            db_conflicts = get_db_vault_conflicts_report(conn, report.get("parsed_notes", []))
+            db_conflicts = get_db_vault_conflicts_report(
+                conn, report.get("parsed_notes", [])
+            )
 
             # 2. Log report details to CLI
             log_vault_report_to_cli(report, db_conflicts)
@@ -372,7 +440,7 @@ def main() -> None:
             # 3. Synchronize safely
             sync_people_in_tx(conn, people_notes_map)
         logger.info("People sync completed successfully.")
-    except Exception as e:
+    except Exception:
         logger.exception("Failed to sync people from Vault notes")
         raise
     finally:

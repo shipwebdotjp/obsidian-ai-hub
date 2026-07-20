@@ -5,10 +5,10 @@ import sqlite3
 import unicodedata
 import uuid
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from obsidian_ai_hub.memory import get_db_connection
-from obsidian_ai_hub.utils.topics import TOPIC_ENUM, normalize_topics
+from obsidian_ai_hub.utils.topics import normalize_topics
 
 logger = logging.getLogger(__name__)
 
@@ -36,8 +36,23 @@ SUMMARY_ITEM_COLUMNS = [
 ]
 
 DAY_ITEM_KINDS = ["highlights", "activities", "learnings", "reflections", "gratitude"]
-WEEK_ITEM_KINDS = ["highlights", "progress", "learnings", "reflections", "patterns", "gratitude"]
-MONTH_ITEM_KINDS = ["highlights", "progress", "changes", "learnings", "reflections", "patterns", "gratitude"]
+WEEK_ITEM_KINDS = [
+    "highlights",
+    "progress",
+    "learnings",
+    "reflections",
+    "patterns",
+    "gratitude",
+]
+MONTH_ITEM_KINDS = [
+    "highlights",
+    "progress",
+    "changes",
+    "learnings",
+    "reflections",
+    "patterns",
+    "gratitude",
+]
 
 ALLOWED_PERIOD_TYPES = {"day", "week", "month"}
 
@@ -110,7 +125,9 @@ def deserialize_summary(row: sqlite3.Row) -> Dict[str, Any]:
         try:
             record["keywords"] = json.loads(val)
         except json.JSONDecodeError as e:
-            logger.warning(f"Failed to deserialize keywords for summary {record.get('summary_id')}: {e}")
+            logger.warning(
+                f"Failed to deserialize keywords for summary {record.get('summary_id')}: {e}"
+            )
             record["keywords"] = []
     elif val is None:
         record["keywords"] = []
@@ -133,7 +150,9 @@ def _get_or_create_entity(
     """Return the entity id, inserting with first-seen display name if absent."""
     id_col = _ENTITY_ID_COLUMNS[table]
     cursor = conn.cursor()
-    cursor.execute(f"SELECT {id_col} FROM {table} WHERE normalized_name = ?", (normalized_name,))
+    cursor.execute(
+        f"SELECT {id_col} FROM {table} WHERE normalized_name = ?", (normalized_name,)
+    )
     row = cursor.fetchone()
     if row is not None:
         return row[0]
@@ -152,7 +171,9 @@ def _delete_summary_children(conn: sqlite3.Connection, summary_id: str) -> None:
     conn.execute("DELETE FROM summary_topics WHERE summary_id = ?", (summary_id,))
     conn.execute("DELETE FROM summary_projects WHERE summary_id = ?", (summary_id,))
     conn.execute("DELETE FROM summary_people WHERE summary_id = ?", (summary_id,))
-    conn.execute("DELETE FROM summary_person_candidates WHERE summary_id = ?", (summary_id,))
+    conn.execute(
+        "DELETE FROM summary_person_candidates WHERE summary_id = ?", (summary_id,)
+    )
 
 
 def upsert_summary(
@@ -192,9 +213,12 @@ def upsert_summary(
             conn.close()
 
 
-def _upsert_summary_in_tx(conn: sqlite3.Connection, record: Dict[str, Any]) -> Dict[str, Any]:
+def _upsert_summary_in_tx(
+    conn: sqlite3.Connection, record: Dict[str, Any]
+) -> Dict[str, Any]:
     # Validate and load people notes first so we abort on validation failures before DB changes
     from obsidian_ai_hub.utils.people_loader import load_and_validate_people_notes
+
     people_notes_map = load_and_validate_people_notes()
 
     period_type = record["period_type"]
@@ -228,7 +252,9 @@ def _upsert_summary_in_tx(conn: sqlite3.Connection, record: Dict[str, Any]) -> D
 
     columns = ", ".join(SUMMARY_COLUMNS)
     placeholders = ", ".join("?" for _ in SUMMARY_COLUMNS)
-    updates = ", ".join(f"{c} = excluded.{c}" for c in SUMMARY_COLUMNS if c != "summary_id")
+    updates = ", ".join(
+        f"{c} = excluded.{c}" for c in SUMMARY_COLUMNS if c != "summary_id"
+    )
     sql = f"""
         INSERT INTO summaries ({columns}) VALUES ({placeholders})
         ON CONFLICT(period_type, period_key) DO UPDATE SET {updates}
@@ -244,7 +270,9 @@ def _upsert_summary_in_tx(conn: sqlite3.Connection, record: Dict[str, Any]) -> D
     return {**db_record, "summary_id": summary_id}
 
 
-def _insert_items(conn: sqlite3.Connection, summary_id: str, items: List[Dict[str, Any]]) -> None:
+def _insert_items(
+    conn: sqlite3.Connection, summary_id: str, items: List[Dict[str, Any]]
+) -> None:
     if not items:
         return
     columns = ", ".join(SUMMARY_ITEM_COLUMNS)
@@ -262,7 +290,9 @@ def _insert_items(conn: sqlite3.Connection, summary_id: str, items: List[Dict[st
         conn.execute(sql, values)
 
 
-def _insert_topics(conn: sqlite3.Connection, summary_id: str, topics: List[str]) -> None:
+def _insert_topics(
+    conn: sqlite3.Connection, summary_id: str, topics: List[str]
+) -> None:
     normalized = normalize_topics(topics) if topics else []
     for order, display_name in enumerate(normalized):
         normalized_name = normalize_entity_name(display_name)
@@ -273,7 +303,9 @@ def _insert_topics(conn: sqlite3.Connection, summary_id: str, topics: List[str])
         )
 
 
-def _insert_projects(conn: sqlite3.Connection, summary_id: str, projects: List[str]) -> None:
+def _insert_projects(
+    conn: sqlite3.Connection, summary_id: str, projects: List[str]
+) -> None:
     seen = set()
     order = 0
     for display_name in projects:
@@ -283,7 +315,9 @@ def _insert_projects(conn: sqlite3.Connection, summary_id: str, projects: List[s
         if normalized_name in seen:
             continue
         seen.add(normalized_name)
-        project_id = _get_or_create_entity(conn, "projects", display_name, normalized_name)
+        project_id = _get_or_create_entity(
+            conn, "projects", display_name, normalized_name
+        )
         conn.execute(
             "INSERT INTO summary_projects (summary_id, project_id, display_order) VALUES (?, ?, ?)",
             (summary_id, project_id, order),
@@ -295,7 +329,7 @@ def _insert_people(
     conn: sqlite3.Connection,
     summary_id: str,
     people: List[Dict[str, Any]],
-    people_notes_map: Dict[str, Any]
+    people_notes_map: Dict[str, Any],
 ) -> None:
     seen = set()
     seen_person_ids = set()
@@ -321,7 +355,9 @@ def _insert_people(
         if row is not None:
             person_id = row[0]
             # Ensure the target person exists in people table
-            cursor.execute("SELECT person_id FROM people WHERE person_id = ?", (person_id,))
+            cursor.execute(
+                "SELECT person_id FROM people WHERE person_id = ?", (person_id,)
+            )
             if cursor.fetchone() is not None:
                 if person_id not in seen_person_ids:
                     seen_person_ids.add(person_id)
@@ -332,7 +368,7 @@ def _insert_people(
                 else:
                     cursor.execute(
                         "SELECT note FROM summary_people WHERE summary_id = ? AND person_id = ?",
-                        (summary_id, person_id)
+                        (summary_id, person_id),
                     )
                     existing_row = cursor.fetchone()
                     if existing_row:
@@ -343,21 +379,28 @@ def _insert_people(
                         new_note = person.get("note")
                         if new_note and new_note.strip():
                             notes_to_join.append(new_note.strip())
-                        merged_note = "\n".join(notes_to_join) if notes_to_join else None
+                        merged_note = (
+                            "\n".join(notes_to_join) if notes_to_join else None
+                        )
                         conn.execute(
                             "UPDATE summary_people SET note = ? WHERE summary_id = ? AND person_id = ?",
-                            (merged_note, summary_id, person_id)
+                            (merged_note, summary_id, person_id),
                         )
                 order += 1
                 continue
 
         # Priority 1: DB Confirmed Alias
-        cursor.execute("SELECT person_id FROM person_aliases WHERE normalized_name = ?", (normalized_name,))
+        cursor.execute(
+            "SELECT person_id FROM person_aliases WHERE normalized_name = ?",
+            (normalized_name,),
+        )
         row = cursor.fetchone()
         if row is not None:
             person_id = row[0]
             # Ensure the target person exists in people table
-            cursor.execute("SELECT person_id FROM people WHERE person_id = ?", (person_id,))
+            cursor.execute(
+                "SELECT person_id FROM people WHERE person_id = ?", (person_id,)
+            )
             if cursor.fetchone() is not None:
                 if person_id not in seen_person_ids:
                     seen_person_ids.add(person_id)
@@ -368,7 +411,7 @@ def _insert_people(
                 else:
                     cursor.execute(
                         "SELECT note FROM summary_people WHERE summary_id = ? AND person_id = ?",
-                        (summary_id, person_id)
+                        (summary_id, person_id),
                     )
                     existing_row = cursor.fetchone()
                     if existing_row:
@@ -379,10 +422,12 @@ def _insert_people(
                         new_note = person.get("note")
                         if new_note and new_note.strip():
                             notes_to_join.append(new_note.strip())
-                        merged_note = "\n".join(notes_to_join) if notes_to_join else None
+                        merged_note = (
+                            "\n".join(notes_to_join) if notes_to_join else None
+                        )
                         conn.execute(
                             "UPDATE summary_people SET note = ? WHERE summary_id = ? AND person_id = ?",
-                            (merged_note, summary_id, person_id)
+                            (merged_note, summary_id, person_id),
                         )
                 order += 1
                 continue
@@ -394,7 +439,9 @@ def _insert_people(
             vault_name = note_data["name"]
 
             # Check if there is an existing person with this vault_id
-            cursor.execute("SELECT person_id FROM people WHERE vault_id = ?", (vault_id,))
+            cursor.execute(
+                "SELECT person_id FROM people WHERE vault_id = ?", (vault_id,)
+            )
             row = cursor.fetchone()
             if row is not None:
                 person_id = row[0]
@@ -405,7 +452,10 @@ def _insert_people(
                 )
             else:
                 # Check if there is an existing person with the same normalized name
-                cursor.execute("SELECT person_id FROM people WHERE normalized_name = ?", (normalize_entity_name(vault_name),))
+                cursor.execute(
+                    "SELECT person_id FROM people WHERE normalized_name = ?",
+                    (normalize_entity_name(vault_name),),
+                )
                 row = cursor.fetchone()
                 if row is not None:
                     person_id = row[0]
@@ -418,13 +468,18 @@ def _insert_people(
                     person_id = f"peo_{uuid.uuid4().hex}"
                     conn.execute(
                         "INSERT INTO people (person_id, normalized_name, display_name, vault_id) VALUES (?, ?, ?, ?)",
-                        (person_id, normalize_entity_name(vault_name), vault_name, vault_id),
+                        (
+                            person_id,
+                            normalize_entity_name(vault_name),
+                            vault_name,
+                            vault_id,
+                        ),
                     )
 
             if person_id in seen_person_ids:
                 cursor.execute(
                     "SELECT note FROM summary_people WHERE summary_id = ? AND person_id = ?",
-                    (summary_id, person_id)
+                    (summary_id, person_id),
                 )
                 existing_row = cursor.fetchone()
                 if existing_row:
@@ -438,7 +493,7 @@ def _insert_people(
                     merged_note = "\n".join(notes_to_join) if notes_to_join else None
                     conn.execute(
                         "UPDATE summary_people SET note = ? WHERE summary_id = ? AND person_id = ?",
-                        (merged_note, summary_id, person_id)
+                        (merged_note, summary_id, person_id),
                     )
                 order += 1
                 continue
@@ -451,7 +506,10 @@ def _insert_people(
         else:
             # Priority 3: Unresolved candidate
             cursor = conn.cursor()
-            cursor.execute("SELECT candidate_id FROM person_candidates WHERE normalized_name = ?", (normalized_name,))
+            cursor.execute(
+                "SELECT candidate_id FROM person_candidates WHERE normalized_name = ?",
+                (normalized_name,),
+            )
             row = cursor.fetchone()
             if row is not None:
                 candidate_id = row[0]
@@ -518,7 +576,9 @@ def get_summary_by_id(
             conn.close()
 
 
-def _load_summary_children(conn: sqlite3.Connection, record: Dict[str, Any]) -> Dict[str, Any]:
+def _load_summary_children(
+    conn: sqlite3.Connection, record: Dict[str, Any]
+) -> Dict[str, Any]:
     summary_id = record["summary_id"]
     cursor = conn.cursor()
 
@@ -577,7 +637,7 @@ def _load_summary_children(conn: sqlite3.Connection, record: Dict[str, Any]) -> 
             "note": r["note"],
             "display_order": r["display_order"],
             "resolution_status": "resolved",
-            "candidate_id": None
+            "candidate_id": None,
         }
         for r in cursor.fetchall()
     ]
@@ -598,7 +658,7 @@ def _load_summary_children(conn: sqlite3.Connection, record: Dict[str, Any]) -> 
             "note": r["note"],
             "display_order": r["display_order"],
             "resolution_status": "unresolved",
-            "candidate_id": r["candidate_id"]
+            "candidate_id": r["candidate_id"],
         }
         for r in cursor.fetchall()
     ]
@@ -626,7 +686,9 @@ def _attach_children_bulk(
         f"SELECT summary_id, summary_item_id, kind, body, display_order FROM summary_items WHERE summary_id IN ({placeholders}) ORDER BY display_order",
         summary_ids,
     )
-    items_by_summary: Dict[str, List[Dict[str, Any]]] = {r["summary_id"]: [] for r in records}
+    items_by_summary: Dict[str, List[Dict[str, Any]]] = {
+        r["summary_id"]: [] for r in records
+    }
     for row in cursor.fetchall():
         items_by_summary[row["summary_id"]].append(
             {
@@ -665,7 +727,9 @@ def _attach_children_bulk(
     for row in cursor.fetchall():
         projects_by_summary[row["summary_id"]].append(row["display_name"])
 
-    people_by_summary: Dict[str, List[Dict[str, Any]]] = {r["summary_id"]: [] for r in records}
+    people_by_summary: Dict[str, List[Dict[str, Any]]] = {
+        r["summary_id"]: [] for r in records
+    }
 
     # Fetch resolved
     cursor.execute(
@@ -761,7 +825,10 @@ def list_summaries(
             )"""
             params.append(normalize_entity_name(project))
         if person:
-            from obsidian_ai_hub.utils.people_loader import load_and_validate_people_notes
+            from obsidian_ai_hub.utils.people_loader import (
+                load_and_validate_people_notes,
+            )
+
             people_notes_map = load_and_validate_people_notes()
             normalized_person = normalize_entity_name(person)
 
@@ -800,7 +867,9 @@ def list_summaries(
             conn.close()
 
 
-def get_summary_options(conn: Optional[sqlite3.Connection] = None) -> Dict[str, List[str]]:
+def get_summary_options(
+    conn: Optional[sqlite3.Connection] = None,
+) -> Dict[str, List[str]]:
     """Return distinct filter candidates for topics, projects, and people that are associated with at least one summary."""
     close_conn = False
     if conn is None:
@@ -894,7 +963,9 @@ def _update_summary_in_tx(
     preserved_candidates = _read_candidates(conn, summary_id)
     preserved_items = _read_items(conn, summary_id) if "items" not in payload else []
     preserved_topics = _read_topics(conn, summary_id) if "topics" not in payload else []
-    preserved_resolved_people = _read_resolved_people(conn, summary_id) if "people" not in payload else []
+    preserved_resolved_people = (
+        _read_resolved_people(conn, summary_id) if "people" not in payload else []
+    )
 
     # 3. Delete all children
     _delete_summary_children(conn, summary_id)
@@ -907,7 +978,11 @@ def _update_summary_in_tx(
         update_values.append(payload["summary"])
     if "keywords" in payload:
         update_fields.append("keywords = ?")
-        update_values.append(json.dumps(payload["keywords"], ensure_ascii=False) if payload["keywords"] else None)
+        update_values.append(
+            json.dumps(payload["keywords"], ensure_ascii=False)
+            if payload["keywords"]
+            else None
+        )
     if "mood" in payload:
         update_fields.append("mood = ?")
         update_values.append(payload["mood"])
@@ -954,7 +1029,9 @@ def _update_summary_in_tx(
         normalized = normalize_topics(raw_topics) if raw_topics else []
         for i, display_name in enumerate(normalized):
             normalized_name = normalize_entity_name(display_name)
-            topic_id = _get_or_create_entity(conn, "topics", display_name, normalized_name)
+            topic_id = _get_or_create_entity(
+                conn, "topics", display_name, normalized_name
+            )
             conn.execute(
                 "INSERT INTO summary_topics (summary_id, topic_id, display_order) VALUES (?, ?, ?)",
                 (summary_id, topic_id, i),
@@ -1067,13 +1144,15 @@ def _delete_summary_in_tx(
     summary_id: str,
 ) -> bool:
     cursor = conn.cursor()
-    cursor.execute("SELECT summary_id FROM summaries WHERE summary_id = ?", (summary_id,))
+    cursor.execute(
+        "SELECT summary_id FROM summaries WHERE summary_id = ?", (summary_id,)
+    )
     if cursor.fetchone() is None:
         return False
 
     _delete_summary_children(conn, summary_id)
     conn.execute("DELETE FROM summaries WHERE summary_id = ?", (summary_id,))
-    conn.execute("DELETE FROM summary_person_assignments WHERE summary_id = ?", (summary_id,))
+    conn.execute(
+        "DELETE FROM summary_person_assignments WHERE summary_id = ?", (summary_id,)
+    )
     return True
-
-

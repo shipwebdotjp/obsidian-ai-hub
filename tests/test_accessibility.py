@@ -16,6 +16,7 @@ if hasattr(utils_pkg, "accessibility"):
 
 accessibility = importlib.import_module("obsidian_ai_hub.utils.accessibility")
 
+
 def test_list_windows():
     mock_windows = [
         {
@@ -37,10 +38,12 @@ def test_list_windows():
             "kCGWindowLayer": 0,
             "kCGWindowOwnerName": "App 2",
             "kCGWindowOwnerPID": 456,
-        }
+        },
     ]
 
-    with patch.object(accessibility, "CGWindowListCopyWindowInfo", return_value=mock_windows):
+    with patch.object(
+        accessibility, "CGWindowListCopyWindowInfo", return_value=mock_windows
+    ):
         results = accessibility.list_windows()
 
     assert len(results) == 2
@@ -48,6 +51,7 @@ def test_list_windows():
     assert results[0]["owner_name"] == "App 1"
     assert results[1]["window_id"] == 2
     assert results[1]["alpha"] == 0.5
+
 
 def test_get_line_window_found():
     mock_windows = [
@@ -64,15 +68,18 @@ def test_get_line_window_found():
             "kCGWindowOwnerName": "LINE",
             "kCGWindowLayer": 0,
             "kCGWindowAlpha": 1.0,
-        }
+        },
     ]
 
-    with patch.object(accessibility, "CGWindowListCopyWindowInfo", return_value=mock_windows):
+    with patch.object(
+        accessibility, "CGWindowListCopyWindowInfo", return_value=mock_windows
+    ):
         win = accessibility.get_line_window()
 
     assert win is not None
     assert win["window_id"] == 2
     assert win["owner_name"] == "LINE"
+
 
 def test_get_line_window_not_found():
     mock_windows = [
@@ -85,10 +92,13 @@ def test_get_line_window_not_found():
         }
     ]
 
-    with patch.object(accessibility, "CGWindowListCopyWindowInfo", return_value=mock_windows):
+    with patch.object(
+        accessibility, "CGWindowListCopyWindowInfo", return_value=mock_windows
+    ):
         win = accessibility.get_line_window()
 
     assert win is None
+
 
 def test_get_line_window_invisible_ignored():
     mock_windows = [
@@ -96,7 +106,7 @@ def test_get_line_window_invisible_ignored():
             "kCGWindowNumber": 1,
             "kCGWindowName": "",
             "kCGWindowOwnerName": "LINE",
-            "kCGWindowLayer": 1, # Non-zero layer
+            "kCGWindowLayer": 1,  # Non-zero layer
             "kCGWindowAlpha": 1.0,
         },
         {
@@ -104,11 +114,13 @@ def test_get_line_window_invisible_ignored():
             "kCGWindowName": "",
             "kCGWindowOwnerName": "LINE",
             "kCGWindowLayer": 0,
-            "kCGWindowAlpha": 0.0, # Zero alpha
-        }
+            "kCGWindowAlpha": 0.0,  # Zero alpha
+        },
     ]
 
-    with patch.object(accessibility, "CGWindowListCopyWindowInfo", return_value=mock_windows):
+    with patch.object(
+        accessibility, "CGWindowListCopyWindowInfo", return_value=mock_windows
+    ):
         win = accessibility.get_line_window()
 
     assert win is None

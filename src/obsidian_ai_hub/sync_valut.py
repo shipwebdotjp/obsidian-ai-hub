@@ -32,7 +32,9 @@ def _prepare_model_cache_dir() -> Path | None:
     try:
         cache_dir.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
-        raise RuntimeError(f"Failed to prepare model cache directory: {cache_dir}") from exc
+        raise RuntimeError(
+            f"Failed to prepare model cache directory: {cache_dir}"
+        ) from exc
 
     for env_name in MODEL_CACHE_ENV_VARS:
         os.environ[env_name] = str(cache_dir)

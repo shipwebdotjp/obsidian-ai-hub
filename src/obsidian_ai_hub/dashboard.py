@@ -4,7 +4,7 @@ import json
 import logging
 import unicodedata
 from collections import Counter, defaultdict
-from datetime import datetime, date as date_cls, timedelta
+from datetime import datetime, date as date_cls
 from pathlib import Path
 from typing import Iterable
 from urllib.parse import quote
@@ -42,7 +42,11 @@ def _read_jsonl(path: Path) -> list[dict]:
 
 def _safe_json(obj: object) -> str:
     text = json.dumps(obj, ensure_ascii=False, indent=2)
-    return text.replace("</", "<\\/").replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
+    return (
+        text.replace("</", "<\\/")
+        .replace("\u2028", "\\u2028")
+        .replace("\u2029", "\\u2029")
+    )
 
 
 def _normalize_text(value: str) -> str:
@@ -149,7 +153,9 @@ def _build_note_index() -> dict[str, str]:
     return index
 
 
-def _find_note_path(filename: str, note_index: dict[str, str], fallback: Path | None = None) -> str | None:
+def _find_note_path(
+    filename: str, note_index: dict[str, str], fallback: Path | None = None
+) -> str | None:
     if filename in note_index:
         return note_index[filename]
     if fallback is not None:
@@ -185,7 +191,9 @@ def _thin_daily_record(record: dict, note_index: dict[str, str]) -> dict | None:
         return None
 
     source_stats = record.get("source_stats") or {}
-    note_path = _find_note_path(f"{date_str}.md", note_index, _daily_note_fallback(date_str))
+    note_path = _find_note_path(
+        f"{date_str}.md", note_index, _daily_note_fallback(date_str)
+    )
 
     return {
         "date": date_str,
@@ -280,7 +288,9 @@ def _build_year_payload(year: int, note_index: dict[str, str]) -> dict:
     month_daily_counts: Counter[str] = Counter()
     month_weekly_counts: Counter[str] = Counter()
     month_topic_counters: defaultdict[str, Counter[str]] = defaultdict(Counter)
-    month_keyword_stats: defaultdict[str, dict[str, dict[str, object]]] = defaultdict(dict)
+    month_keyword_stats: defaultdict[str, dict[str, dict[str, object]]] = defaultdict(
+        dict
+    )
 
     for month in range(1, 13):
         monthly_daily_file = year_dir / f"{month:02d}" / f"{year}-{month:02d}.jsonl"
@@ -317,14 +327,20 @@ def _build_year_payload(year: int, note_index: dict[str, str]) -> dict:
             continue
         monthly_by_month[thin["month"]] = thin
 
-    month_keys = sorted(set(month_daily_counts) | set(month_weekly_counts) | set(monthly_by_month))
+    month_keys = sorted(
+        set(month_daily_counts) | set(month_weekly_counts) | set(monthly_by_month)
+    )
     months: list[dict] = []
     for month in month_keys:
         monthly_record = monthly_by_month.get(month) or {}
-        topics = monthly_record.get("topics") or month_topic_counters[month].most_common(5)
+        topics = monthly_record.get("topics") or month_topic_counters[
+            month
+        ].most_common(5)
         if topics and not isinstance(topics[0], str):
             topics = [topic for topic, _count in topics]
-        keywords = monthly_record.get("keywords") or _top_keyword_labels(month_keyword_stats[month], 8)
+        keywords = monthly_record.get("keywords") or _top_keyword_labels(
+            month_keyword_stats[month], 8
+        )
         note_path = monthly_record.get("note_path")
         note_uri = monthly_record.get("note_uri")
         months.append(
@@ -343,9 +359,15 @@ def _build_year_payload(year: int, note_index: dict[str, str]) -> dict:
             }
         )
 
-    daily_records = sorted(daily_by_date.values(), key=lambda item: item["date"], reverse=True)
-    weekly_records = sorted(weekly_by_id.values(), key=lambda item: item["week_id"], reverse=True)
-    monthly_records = sorted(monthly_by_month.values(), key=lambda item: item["month"], reverse=True)
+    daily_records = sorted(
+        daily_by_date.values(), key=lambda item: item["date"], reverse=True
+    )
+    weekly_records = sorted(
+        weekly_by_id.values(), key=lambda item: item["week_id"], reverse=True
+    )
+    monthly_records = sorted(
+        monthly_by_month.values(), key=lambda item: item["month"], reverse=True
+    )
     months = sorted(months, key=lambda item: item["month"], reverse=True)
 
     return {
@@ -361,8 +383,12 @@ def _build_year_payload(year: int, note_index: dict[str, str]) -> dict:
             "weekly_count": len(weekly_records),
             "monthly_count": len(monthly_records),
             "activity_count": sum(record["activity_count"] for record in daily_records),
-            "llm_session_count": sum(record["llm_session_count"] for record in daily_records),
-            "top_topics": [topic for topic, _count in daily_topic_counter.most_common(8)],
+            "llm_session_count": sum(
+                record["llm_session_count"] for record in daily_records
+            ),
+            "top_topics": [
+                topic for topic, _count in daily_topic_counter.most_common(8)
+            ],
             "top_keywords": _top_keyword_labels(daily_keyword_stats, 12),
         },
     }
@@ -447,7 +473,9 @@ def _build_manifest(year_payloads: dict[int, dict]) -> dict:
             "weekly": latest_weekly,
             "monthly": latest_monthly,
         },
-        "year_files": {str(year): f"{YEARS_DIRNAME}/{year}.json" for year in available_years},
+        "year_files": {
+            str(year): f"{YEARS_DIRNAME}/{year}.json" for year in available_years
+        },
     }
 
 
@@ -2135,7 +2163,9 @@ def _render_stats_html(payload: dict) -> str:
     return template.replace("__BOOTSTRAP_JSON__", _safe_json(payload))
 
 
-def build_dashboard(years: Iterable[int] | None = None, output_dir: Path | None = None) -> Path:
+def build_dashboard(
+    years: Iterable[int] | None = None, output_dir: Path | None = None
+) -> Path:
     output_dir = output_dir or config.DASHBOARD_PATH
     output_dir.mkdir(parents=True, exist_ok=True)
     years_dir = output_dir / YEARS_DIRNAME
@@ -2143,7 +2173,11 @@ def build_dashboard(years: Iterable[int] | None = None, output_dir: Path | None 
 
     note_index = _build_note_index()
 
-    selected_years = sorted({int(year) for year in years}) if years is not None else _discover_source_years()
+    selected_years = (
+        sorted({int(year) for year in years})
+        if years is not None
+        else _discover_source_years()
+    )
     for year in selected_years:
         payload = _build_year_payload(year, note_index)
         year_path = years_dir / f"{year}.json"

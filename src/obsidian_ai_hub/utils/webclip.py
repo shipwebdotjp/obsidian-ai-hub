@@ -15,6 +15,7 @@ from obsidian_ai_hub.utils import config, extracter, llm_client, prompt, topics
 
 logger = logging.getLogger(__name__)
 
+
 def clean_filename(title: str) -> str:
     """
     Normalizes a title to a safe filename, replacing unsafe characters with '_'.
@@ -22,10 +23,11 @@ def clean_filename(title: str) -> str:
     if not title:
         return "untitled"
     # Unsafe chars for files across OSes: \ / : * ? " < > | %
-    safe = re.sub(r'[\x00-\x1f\\/:*?"<>|%]', '_', title)
+    safe = re.sub(r'[\x00-\x1f\\/:*?"<>|%]', "_", title)
     # Strip leading/trailing whitespaces and dots
     safe = safe.strip(" .")
     return safe or "untitled"
+
 
 def find_existing_webclip_file(source_url: str) -> Path | None:
     """
@@ -47,6 +49,7 @@ def find_existing_webclip_file(source_url: str) -> Path | None:
                 continue
     return None
 
+
 def format_date_iso8601(date_str: str | None) -> str | None:
     """
     Normalizes a date string to YYYY-MM-DDTHH:MM:SS+09:00.
@@ -57,7 +60,7 @@ def format_date_iso8601(date_str: str | None) -> str | None:
 
     # Strip whitespace
     s = date_str.strip()
-    if not s or s.lower() == 'null':
+    if not s or s.lower() == "null":
         return None
 
     # Try standard ISO parsing
@@ -67,6 +70,7 @@ def format_date_iso8601(date_str: str | None) -> str | None:
         # If no timezone is specified, default to JST (+09:00) as per requirements
         if dt.tzinfo is None:
             from datetime import timezone, timedelta
+
             dt = dt.replace(tzinfo=timezone(timedelta(hours=9)))
         return dt.isoformat()
     except ValueError:
@@ -92,6 +96,7 @@ def format_date_iso8601(date_str: str | None) -> str | None:
     # but since standard is standard, we can return None if we truly can't parse it.
     logger.warning(f"Could not parse/normalize date string: '{date_str}'")
     return None
+
 
 def normalize_webclip_json(payload: dict) -> dict:
     """
@@ -129,7 +134,9 @@ def normalize_webclip_json(payload: dict) -> dict:
             normalized_topics_list = topics.normalize_topics(raw_topics, limit=5)
             # Ensure category is actually there as the first element if we have topics
             if normalized_topics_list and normalized_topics_list[0] != cat:
-                normalized_topics_list = [cat] + [t for t in normalized_topics_list if t != cat]
+                normalized_topics_list = [cat] + [
+                    t for t in normalized_topics_list if t != cat
+                ]
                 normalized_topics_list = normalized_topics_list[:5]
         else:
             normalized_topics_list = []
@@ -156,6 +163,7 @@ def normalize_webclip_json(payload: dict) -> dict:
         "key_points": kps,
     }
 
+
 def build_webclip_markdown(frontmatter: dict, content_body: str) -> str:
     """
     Renders frontmatter and content body into an Obsidian markdown file string.
@@ -163,11 +171,21 @@ def build_webclip_markdown(frontmatter: dict, content_body: str) -> str:
     # Ensure keys always exist in standard order:
     # title, source_url, clipped_at, published_at, updated_at, category, topics, tags, summary, key_points, why_saved
     ordered_keys = [
-        "title", "source_url", "clipped_at", "published_at", "updated_at",
-        "category", "topics", "tags", "summary", "key_points", "why_saved"
+        "title",
+        "source_url",
+        "clipped_at",
+        "published_at",
+        "updated_at",
+        "category",
+        "topics",
+        "tags",
+        "summary",
+        "key_points",
+        "why_saved",
     ]
     ordered_keys.extend(
-        key for key in ("content_type", "video_id", "transcript_source")
+        key
+        for key in ("content_type", "video_id", "transcript_source")
         if key in frontmatter
     )
 
@@ -176,11 +194,16 @@ def build_webclip_markdown(frontmatter: dict, content_body: str) -> str:
         fm_dict[k] = frontmatter.get(k)
 
     # Use allow_unicode to prevent escaping Japanese chars
-    yaml_text = yaml.safe_dump(fm_dict, allow_unicode=True, default_flow_style=False, sort_keys=False)
+    yaml_text = yaml.safe_dump(
+        fm_dict, allow_unicode=True, default_flow_style=False, sort_keys=False
+    )
 
     return f"---\n{yaml_text}---\n\n{content_body or ''}\n"
 
-def get_unique_webclip_path(category: str, title: str, exclude_path: Path | None = None) -> Path:
+
+def get_unique_webclip_path(
+    category: str, title: str, exclude_path: Path | None = None
+) -> Path:
     """
     Computes a unique filepath within config.WEBCLIP_PATH / category / title.md.
     If the file already exists (and is not exclude_path), appends serial number.
@@ -191,16 +214,21 @@ def get_unique_webclip_path(category: str, title: str, exclude_path: Path | None
 
     # Check simple case first
     target = base_dir / f"{safe_title}.md"
-    if not target.exists() or (exclude_path and target.resolve() == exclude_path.resolve()):
+    if not target.exists() or (
+        exclude_path and target.resolve() == exclude_path.resolve()
+    ):
         return target
 
     # Try incrementing serial
     serial = 2
     while True:
         target = base_dir / f"{safe_title} {serial}.md"
-        if not target.exists() or (exclude_path and target.resolve() == exclude_path.resolve()):
+        if not target.exists() or (
+            exclude_path and target.resolve() == exclude_path.resolve()
+        ):
             return target
         serial += 1
+
 
 def parse_llm_json(response: str) -> dict:
     """
@@ -217,7 +245,7 @@ def parse_llm_json(response: str) -> dict:
         start = cleaned.find("{")
         end = cleaned.rfind("}")
         if start != -1 and end != -1 and end >= start:
-            payload = json.loads(cleaned[start:end+1])
+            payload = json.loads(cleaned[start : end + 1])
             if isinstance(payload, dict):
                 return payload
     except Exception:
@@ -282,6 +310,7 @@ def generate_webclip_metadata(raw_content: str, *, is_youtube: bool = False) -> 
     ).strip()
     return parse_llm_json(response)
 
+
 def process_single_webclip(
     url: str,
     raw_content: str | None,
@@ -311,7 +340,7 @@ def process_single_webclip(
         # Fall back to URL domain/path label
         parsed = urlparse(url)
         domain = parsed.netloc
-        path = parsed.path.rstrip('/')
+        path = parsed.path.rstrip("/")
         if path:
             title = f"{domain}{path}"
         else:
@@ -369,7 +398,9 @@ def process_single_webclip(
 
     category_folder = normalized["category"]
     # Target Path determination (considering duplicate moving)
-    target_path = get_unique_webclip_path(category_folder, title, exclude_path=existing_file)
+    target_path = get_unique_webclip_path(
+        category_folder, title, exclude_path=existing_file
+    )
 
     # Ensure output directory exists
     target_path.parent.mkdir(parents=True, exist_ok=True)

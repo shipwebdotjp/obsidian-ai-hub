@@ -1,17 +1,26 @@
 import json
 import logging
-import re
 from datetime import date as date_type
 from datetime import datetime, timedelta
-from pathlib import Path
 
 from obsidian_ai_hub.summary import store as summary_store
-from obsidian_ai_hub.utils import config, reader, llm_client, prompt
-from obsidian_ai_hub.utils.topics import TOPIC_ENUM, normalize_keywords, normalize_topics
+from obsidian_ai_hub.utils import config, llm_client, prompt
+from obsidian_ai_hub.utils.topics import (
+    TOPIC_ENUM,
+    normalize_keywords,
+    normalize_topics,
+)
 
 logger = logging.getLogger(__name__)
 
-WEEK_ITEM_KINDS = ["highlights", "progress", "learnings", "reflections", "patterns", "gratitude"]
+WEEK_ITEM_KINDS = [
+    "highlights",
+    "progress",
+    "learnings",
+    "reflections",
+    "patterns",
+    "gratitude",
+]
 
 
 def get_week_dates(date: datetime):
@@ -38,8 +47,7 @@ def load_daily_records(week_dates: list[datetime]) -> list[dict | None]:
 
 
 def get_weekly_structured_record(
-    date: datetime,
-    daily_records: list[dict | None]
+    date: datetime, daily_records: list[dict | None]
 ) -> dict:
     iso_year, iso_week, _ = date.isocalendar()
     week_id = f"{iso_year}-W{iso_week:02d}"
@@ -79,9 +87,11 @@ def get_weekly_structured_record(
         rendered_prompt = prompt.render_prompt(
             config.SUMMARIZE_WEEK_PROMPT_PATH,
             {
-                "DAILY_RECORDS": json.dumps(simplified_daily_records, ensure_ascii=False, indent=2),
+                "DAILY_RECORDS": json.dumps(
+                    simplified_daily_records, ensure_ascii=False, indent=2
+                ),
                 "TOPIC_CANDIDATES": json.dumps(TOPIC_ENUM, ensure_ascii=False),
-            }
+            },
         )
         response = llm_client.generate_llm_response(
             provider=config.MAKE_TODAY_TARGET_PROVIDER,
@@ -100,7 +110,16 @@ def get_weekly_structured_record(
         data = json.loads(cleaned_response)
 
         scalar_fields = {"summary"}
-        list_fields = {"keywords", "topics", "highlights", "progress", "learnings", "reflections", "patterns", "gratitude"}
+        list_fields = {
+            "keywords",
+            "topics",
+            "highlights",
+            "progress",
+            "learnings",
+            "reflections",
+            "patterns",
+            "gratitude",
+        }
 
         for key in scalar_fields | list_fields | {"people"}:
             if key in data:
@@ -112,10 +131,12 @@ def get_weekly_structured_record(
                     normalized_people = []
                     for p in val:
                         if isinstance(p, dict) and p.get("name"):
-                            normalized_people.append({
-                                "name": str(p.get("name", "")),
-                                "note": str(p.get("note", ""))
-                            })
+                            normalized_people.append(
+                                {
+                                    "name": str(p.get("name", "")),
+                                    "note": str(p.get("note", "")),
+                                }
+                            )
                     record["people"] = normalized_people
                 elif key in scalar_fields and isinstance(val, (str, int, float)):
                     record[key] = str(val)
@@ -132,7 +153,9 @@ def get_weekly_structured_record(
                         )
 
         # display_order を kind 単位で振り直す
-        record["items"].sort(key=lambda x: (WEEK_ITEM_KINDS.index(x["kind"]), x["display_order"]))
+        record["items"].sort(
+            key=lambda x: (WEEK_ITEM_KINDS.index(x["kind"]), x["display_order"])
+        )
         for kind in WEEK_ITEM_KINDS:
             kind_items = [i for i in record["items"] if i["kind"] == kind]
             for idx, item in enumerate(kind_items):
@@ -215,7 +238,9 @@ def summarize_week(target_date: datetime | date_type | str | None = None):
     structured_record = get_weekly_structured_record(target_date, daily_records)
 
     if not structured_record.get("summary"):
-        logger.error("Failed to generate structured record; skipping persistence and weekly note update")
+        logger.error(
+            "Failed to generate structured record; skipping persistence and weekly note update"
+        )
         return
 
     # 3. SQLiteへの保存

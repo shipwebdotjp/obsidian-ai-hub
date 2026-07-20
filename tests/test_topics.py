@@ -1,6 +1,5 @@
 import sys
-from unittest.mock import MagicMock, patch
-import pytest
+from unittest.mock import MagicMock
 
 # Mock modules that might be missing in the environment
 mock_modules = [
@@ -26,7 +25,7 @@ for module_name in mock_modules:
     if module_name not in sys.modules:
         sys.modules[module_name] = MagicMock()
 
-from obsidian_ai_hub.utils.topics import TOPIC_ENUM, normalize_keywords, normalize_topics
+from obsidian_ai_hub.utils.topics import normalize_keywords, normalize_topics  # noqa: E402
 
 
 def test_normalize_topics_as_is():
@@ -60,7 +59,7 @@ def test_normalize_topics_mixed():
         "ソフトウェア開発",
         "データ・分析",
         "クラウド・インフラ",
-        "金融・投資"  # this exceeds the default limit of 5
+        "金融・投資",  # this exceeds the default limit of 5
     ]
     result = normalize_topics(topics, limit=5)
     assert result == [
@@ -68,7 +67,7 @@ def test_normalize_topics_mixed():
         "その他",
         "AI・機械学習",
         "ソフトウェア開発",
-        "データ・分析"
+        "データ・分析",
     ]
 
 
@@ -78,9 +77,27 @@ def test_normalize_topics_empty_or_none():
 
 
 def test_normalize_keywords_trims_deduplicates_and_limits():
-    keywords = [" Python ", "Python", "", None, 42, "Git", "LLM", "Obsidian", "SQLite", "Extra"]
+    keywords = [
+        " Python ",
+        "Python",
+        "",
+        None,
+        42,
+        "Git",
+        "LLM",
+        "Obsidian",
+        "SQLite",
+        "Extra",
+    ]
 
-    assert normalize_keywords(keywords) == ["Python", "Git", "LLM", "Obsidian", "SQLite", "Extra"]
+    assert normalize_keywords(keywords) == [
+        "Python",
+        "Git",
+        "LLM",
+        "Obsidian",
+        "SQLite",
+        "Extra",
+    ]
 
 
 def test_normalize_keywords_rejects_non_lists():

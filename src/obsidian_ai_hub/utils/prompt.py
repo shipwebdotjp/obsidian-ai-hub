@@ -1,6 +1,7 @@
 import string
 from pathlib import Path
 
+
 def render_prompt(template_path: Path, context: dict) -> str:
     """
     Loads a prompt template from a file and renders it with the given context.

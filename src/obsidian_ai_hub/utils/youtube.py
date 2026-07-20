@@ -35,7 +35,10 @@ def extract_video_id(url: str) -> str | None:
         return path_parts[0] if path_parts else None
 
     youtube_hosts = {
-        "youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com",
+        "youtube.com",
+        "www.youtube.com",
+        "m.youtube.com",
+        "music.youtube.com",
     }
     if host not in youtube_hosts:
         return None
@@ -98,7 +101,9 @@ def _fetch_transcript_api(video_id: str) -> str | None:
                 if text:
                     return text
             except Exception:
-                logger.debug("YouTube %s captions unavailable for %s", finder_name, video_id)
+                logger.debug(
+                    "YouTube %s captions unavailable for %s", finder_name, video_id
+                )
     except Exception:
         logger.info("youtube-transcript-api failed for %s", video_id, exc_info=True)
     return None
@@ -116,7 +121,9 @@ def _get_video_metadata(url: str) -> tuple[str | None, str | None]:
     try:
         from yt_dlp import YoutubeDL
 
-        with YoutubeDL({"quiet": True, "noplaylist": True, "skip_download": True}) as ydl:
+        with YoutubeDL(
+            {"quiet": True, "noplaylist": True, "skip_download": True}
+        ) as ydl:
             info = ydl.extract_info(url, download=False)
         return _metadata_from_info(info)
     except Exception:
@@ -149,7 +156,9 @@ def _parse_vtt(vtt_content: str) -> str:
             match = re.match(r"(?:(\d+):)?(\d{2}):(\d{2})(?:\.\d+)?", start)
             if match:
                 hours = int(match.group(1) or 0)
-                cue_start = f"{hours:02d}:{int(match.group(2)):02d}:{int(match.group(3)):02d}"
+                cue_start = (
+                    f"{hours:02d}:{int(match.group(2)):02d}:{int(match.group(3)):02d}"
+                )
             continue
         if not line:
             flush()
@@ -163,7 +172,9 @@ def _fetch_yt_dlp_subtitles(url: str, video_id: str) -> str | None:
     try:
         from yt_dlp import YoutubeDL
 
-        with tempfile.TemporaryDirectory(prefix="obsidian-youtube-subtitles-") as tmpdir:
+        with tempfile.TemporaryDirectory(
+            prefix="obsidian-youtube-subtitles-"
+        ) as tmpdir:
             output_template = str(Path(tmpdir) / "%(id)s.%(ext)s")
             options = {
                 "quiet": True,
@@ -182,7 +193,9 @@ def _fetch_yt_dlp_subtitles(url: str, video_id: str) -> str | None:
             for language in config.YOUTUBE_TRANSCRIPT_LANGUAGES:
                 preferred = [path for path in vtt_files if f".{language}." in path.name]
                 if preferred:
-                    vtt_files = preferred + [path for path in vtt_files if path not in preferred]
+                    vtt_files = preferred + [
+                        path for path in vtt_files if path not in preferred
+                    ]
                     break
             for vtt_file in vtt_files:
                 transcript = _parse_vtt(vtt_file.read_text(encoding="utf-8"))
@@ -211,7 +224,9 @@ def _transcribe_with_whisper(url: str, video_id: str) -> str | None:
                 info = ydl.extract_info(url, download=True)
                 audio_path = Path(ydl.prepare_filename(info))
             if not audio_path.exists():
-                candidates = [path for path in Path(tmpdir).iterdir() if path.stem == video_id]
+                candidates = [
+                    path for path in Path(tmpdir).iterdir() if path.stem == video_id
+                ]
                 if not candidates:
                     return None
                 audio_path = candidates[0]
@@ -234,7 +249,9 @@ def extract_youtube_content(url: str) -> YouTubeContent:
     title, published_at = _get_video_metadata(url)
     transcript = _fetch_transcript_api(video_id)
     if transcript:
-        return YouTubeContent(video_id, title, published_at, transcript, "youtube-transcript-api")
+        return YouTubeContent(
+            video_id, title, published_at, transcript, "youtube-transcript-api"
+        )
 
     transcript = _fetch_yt_dlp_subtitles(url, video_id)
     if transcript:

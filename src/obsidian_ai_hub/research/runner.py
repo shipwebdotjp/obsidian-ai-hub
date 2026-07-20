@@ -88,7 +88,11 @@ def _normalize_router_decision(text: str) -> Optional[str]:
         return RESEARCH_MODE_DEEP
     if "web" in normalized and "internal" not in normalized:
         return RESEARCH_MODE_WEB
-    if "internal" in normalized and "web" not in normalized and "deep" not in normalized:
+    if (
+        "internal" in normalized
+        and "web" not in normalized
+        and "deep" not in normalized
+    ):
         return RESEARCH_MODE_INTERNAL
     return None
 
@@ -108,7 +112,7 @@ def build_web_research_router_prompt(
             "theme": theme,
             "why_now_text": why_now_text,
             "context_text": context_text,
-        }
+        },
     )
 
 
@@ -137,7 +141,9 @@ def route_research_topic(
 
     decision = _normalize_router_decision(response)
     if decision is None:
-        logger.warning("Unclear research routing decision from LLM: %s", response.strip())
+        logger.warning(
+            "Unclear research routing decision from LLM: %s", response.strip()
+        )
         return RESEARCH_MODE_INTERNAL
 
     return decision
@@ -145,8 +151,11 @@ def route_research_topic(
 
 def _load_activity_context() -> str:
     from obsidian_ai_hub.research import db
+
     try:
-        entries = db.list_recent_activity_days(days=config.RESEARCH_CONTEXT_LOOKBACK_DAYS)
+        entries = db.list_recent_activity_days(
+            days=config.RESEARCH_CONTEXT_LOOKBACK_DAYS
+        )
     except Exception:
         logger.exception("Failed to load activity context")
         return ""
@@ -176,6 +185,7 @@ def _load_activity_context() -> str:
 
 def _load_db_existing_theme_context() -> str:
     from obsidian_ai_hub.research import db
+
     try:
         themes = db.list_themes()
     except Exception:
@@ -202,7 +212,10 @@ def collect_research_context(theme: str, explicit_context: Optional[str] = None)
         sections.append("## 既存の調査テーマ\n" + existing_themes_text)
 
     try:
-        from obsidian_ai_hub.handler.obsidian_vault_retriever import search_obsidian_vault
+        from obsidian_ai_hub.handler.obsidian_vault_retriever import (
+            search_obsidian_vault,
+        )
+
         vault_search_results = search_obsidian_vault.invoke({"query": theme, "k": 5})
         if vault_search_results and '"error":' not in vault_search_results:
             sections.append("## Vault 検索結果\n" + vault_search_results)
@@ -225,12 +238,16 @@ def build_research_prompt(
     why_now_section = f"\n## 調べたい背景:\n{why_now_text}\n" if why_now_text else ""
     context_section = f"\n## 参考文脈:\n{context_text}\n" if context_text else ""
 
-    output_style_text = _normalize_optional_text(output_style) or config.RESEARCH_DEFAULT_OUTPUT_STYLE
+    output_style_text = (
+        _normalize_optional_text(output_style) or config.RESEARCH_DEFAULT_OUTPUT_STYLE
+    )
     normalized_mode = _normalize_research_mode(mode)
 
     if normalized_mode == RESEARCH_MODE_WEB:
         search_results = _run_web_search_with_raw_theme(theme)
-        logger.debug("Web research search results for theme '%s': %s", theme, search_results)
+        logger.debug(
+            "Web research search results for theme '%s': %s", theme, search_results
+        )
         return prompt.render_prompt(
             config.RESEARCH_WEB_PROMPT_PATH,
             {
@@ -239,7 +256,7 @@ def build_research_prompt(
                 "why_now_section": why_now_section,
                 "context_section": context_section,
                 "search_results": search_results,
-            }
+            },
         )
 
     if normalized_mode == RESEARCH_MODE_DEEP:
@@ -250,7 +267,7 @@ def build_research_prompt(
                 "why_now_section": why_now_section,
                 "context_section": context_section,
                 "output_style_text": output_style_text,
-            }
+            },
         )
 
     return prompt.render_prompt(
@@ -260,7 +277,7 @@ def build_research_prompt(
             "why_now_section": why_now_section,
             "context_section": context_section,
             "output_style_text": output_style_text,
-        }
+        },
     )
 
 
@@ -270,7 +287,7 @@ def build_title_prompt(theme: str, expanded_prompt: str) -> str:
         {
             "theme": theme,
             "expanded_prompt": expanded_prompt,
-        }
+        },
     )
 
 
@@ -316,7 +333,9 @@ async def _run_gpt_researcher(query: str) -> str:
     try:
         from gpt_researcher import GPTResearcher
     except Exception as exc:
-        raise RuntimeError("gpt_researcher package is required for research agent") from exc
+        raise RuntimeError(
+            "gpt_researcher package is required for research agent"
+        ) from exc
 
     with _gpt_researcher_environment():
         researcher = GPTResearcher(
@@ -326,7 +345,12 @@ async def _run_gpt_researcher(query: str) -> str:
                 {
                     "name": "my_knowledge_search",
                     "command": "uv",
-                    "args": ["--directory", config.RESEARCH_VECTORSEARCH_DIR, "run", config.RESEARCH_VECTORSEARCH_SCRIPT],
+                    "args": [
+                        "--directory",
+                        config.RESEARCH_VECTORSEARCH_DIR,
+                        "run",
+                        config.RESEARCH_VECTORSEARCH_SCRIPT,
+                    ],
                 }
             ],
             verbose=False,
@@ -352,8 +376,7 @@ def _run_web_search(query: str) -> str:
 
 def _run_web_search_with_raw_theme(theme: str) -> str:
     rendered_prompt = prompt.render_prompt(
-        config.RESEARCH_QUERY_GENERATION_PROMPT_PATH,
-        {"theme": theme}
+        config.RESEARCH_QUERY_GENERATION_PROMPT_PATH, {"theme": theme}
     )
     search_query = llm_client.generate_llm_response(
         provider=config.RESEARCH_QUERY_GENERATION_PROVIDER,
@@ -372,7 +395,9 @@ def conduct_research(
     mode: str = RESEARCH_MODE_INTERNAL,
     output_style: Optional[str] = None,
 ) -> str:
-    output_style = _normalize_optional_text(output_style) or config.RESEARCH_DEFAULT_OUTPUT_STYLE
+    output_style = (
+        _normalize_optional_text(output_style) or config.RESEARCH_DEFAULT_OUTPUT_STYLE
+    )
     normalized_mode = _normalize_research_mode(mode)
 
     if normalized_mode == RESEARCH_MODE_INTERNAL:
@@ -387,6 +412,7 @@ def conduct_research(
     if normalized_mode == RESEARCH_MODE_WEB:
         from obsidian_ai_hub.handler.web_search import web_search
         from obsidian_ai_hub.handler.web_extract import web_extract
+
         return llm_client.generate_llm_response_with_tools(
             provider=config.RESEARCH_WEB_PROVIDER,
             model=config.RESEARCH_WEB_MODEL,
@@ -552,7 +578,9 @@ def run_theme_research(
             mode=report.mode,
             markdown=report.markdown,
         )
-        logger.info("Research succeeded for theme '%s' (job=%s)", theme_obj["theme"], job_id)
+        logger.info(
+            "Research succeeded for theme '%s' (job=%s)", theme_obj["theme"], job_id
+        )
     except Exception as exc:
         logger.exception("Research failed for theme '%s'", theme_obj["theme"])
         db.update_job(
@@ -566,6 +594,7 @@ def run_theme_research(
 
 def cleanup_stale_jobs() -> None:
     from obsidian_ai_hub.research import db
+
     conn = db._get_db()
     try:
         with conn:
@@ -578,11 +607,11 @@ def cleanup_stale_jobs() -> None:
                 job_id = row["job_id"]
                 cursor.execute(
                     "UPDATE research_jobs SET status = 'failed', error = ?, finished_at = ? WHERE job_id = ?",
-                    ("サーバー再起動により中断", db.get_current_timestamp(), job_id)
+                    ("サーバー再起動により中断", db.get_current_timestamp(), job_id),
                 )
             if jobs:
                 logger.info("Cleaned up %d stale jobs on startup", len(jobs))
-    except Exception as exc:
+    except Exception:
         logger.exception("Failed to clean up stale jobs on startup")
     finally:
         conn.close()
@@ -665,7 +694,9 @@ def execute_research_job_sync(
             mode=report.mode,
             markdown=report.markdown,
         )
-        logger.info("Research succeeded for theme '%s' (job=%s)", theme_obj["theme"], job_id)
+        logger.info(
+            "Research succeeded for theme '%s' (job=%s)", theme_obj["theme"], job_id
+        )
 
         try:
             save_research_to_vault(theme_id)
@@ -694,19 +725,18 @@ def submit_research_job_bg(
     output_style: Optional[str] = None,
 ):
     future = _research_executor.submit(
-        execute_research_job_sync,
-        theme_id,
-        job_id,
-        mode,
-        output_style
+        execute_research_job_sync, theme_id, job_id, mode, output_style
     )
 
     def done_callback(fut):
         try:
             fut.result()
         except Exception as exc:
-            logger.exception("Background research job %s failed with uncaught exception", job_id)
+            logger.exception(
+                "Background research job %s failed with uncaught exception", job_id
+            )
             from obsidian_ai_hub.research import db
+
             db.update_job(job_id, status="failed", error=str(exc))
 
     future.add_done_callback(done_callback)
@@ -750,11 +780,12 @@ def main(
     mode: str = "auto",
     output_style: Optional[str] = None,
 ) -> ResearchRunResult:
-    from obsidian_ai_hub.research import db
 
     result = ResearchRunResult()
     if theme is None:
-        logger.error("--research-agent --theme <theme> is required (queue mode removed)")
+        logger.error(
+            "--research-agent --theme <theme> is required (queue mode removed)"
+        )
         return result
 
     try:

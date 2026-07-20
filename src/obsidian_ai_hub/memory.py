@@ -20,14 +20,17 @@ def normalize_stability(raw: object, default: str = STABILITY_DEFAULT) -> str:
     if not isinstance(raw, str) or raw not in ALLOWED_STABILITY:
         logger.warning(
             "Invalid or missing stability value %r; coercing to %r",
-            raw, default,
+            raw,
+            default,
         )
         return default
     return raw
 
+
 logger = logging.getLogger(__name__)
 
 _embedder = None
+
 
 def get_embedder():
     global _embedder
@@ -35,13 +38,16 @@ def get_embedder():
         return _embedder
     try:
         from obsidian_ai_hub.utils.simple_sbert_embeddings import SimpleSbertEmbeddings
+
         _embedder = SimpleSbertEmbeddings(
             model_name=config.VAULT_INDEX_EMBEDDER_MODEL,
-            allow_network_fallback=config.VAULT_INDEX_ALLOW_NETWORK_FALLBACK
+            allow_network_fallback=config.VAULT_INDEX_ALLOW_NETWORK_FALLBACK,
         )
         return _embedder
     except Exception as e:
-        logger.warning(f"SBERT Embeddings are not available: {e}. Vector search is disabled.")
+        logger.warning(
+            f"SBERT Embeddings are not available: {e}. Vector search is disabled."
+        )
         return None
 
 
@@ -66,7 +72,7 @@ def normalize_content(text: str) -> str:
         return ""
     text = unicodedata.normalize("NFKC", text)
     text = text.lower()
-    text = re.sub(r'\s+', '', text)
+    text = re.sub(r"\s+", "", text)
     return text
 
 
@@ -81,16 +87,43 @@ def cosine_similarity(v1: list[float], v2: list[float]) -> float:
 
 # SQLite Store Layer
 MEMORY_COLUMNS = [
-    "schema_version", "memory_id", "status", "kind", "memory_key", "content",
-    "topics", "tags", "evidence", "valid_from", "valid_until", "review_due_at",
-    "stability", "sensitivity", "extraction_confidence", "supersedes",
-    "contradicts", "provenance", "created_at", "updated_at", "reviewed_by",
-    "reviewed_at", "dedup_suggestions", "dedup_assessment",
+    "schema_version",
+    "memory_id",
+    "status",
+    "kind",
+    "memory_key",
+    "content",
+    "topics",
+    "tags",
+    "evidence",
+    "valid_from",
+    "valid_until",
+    "review_due_at",
+    "stability",
+    "sensitivity",
+    "extraction_confidence",
+    "supersedes",
+    "contradicts",
+    "provenance",
+    "created_at",
+    "updated_at",
+    "reviewed_by",
+    "reviewed_at",
+    "dedup_suggestions",
+    "dedup_assessment",
 ]
 
 EVENT_COLUMNS = [
-    "schema_version", "event_id", "occurred_at", "actor", "event_type",
-    "memory_id", "previous_status", "new_status", "changes", "reason",
+    "schema_version",
+    "event_id",
+    "occurred_at",
+    "actor",
+    "event_type",
+    "memory_id",
+    "previous_status",
+    "new_status",
+    "changes",
+    "reason",
 ]
 
 
@@ -101,9 +134,13 @@ def _assert_test_db_is_not_production(db_path: Path) -> None:
 
     production_path = os.getenv("OBSIDIAN_AI_HUB_TEST_PRODUCTION_DB_PATH")
     if not production_path:
-        raise RuntimeError("OBSIDIAN_AI_HUB_TEST_PRODUCTION_DB_PATH is required in test mode")
+        raise RuntimeError(
+            "OBSIDIAN_AI_HUB_TEST_PRODUCTION_DB_PATH is required in test mode"
+        )
     if db_path.expanduser().resolve() == Path(production_path).expanduser().resolve():
-        raise RuntimeError("Refusing to open the production memory database while tests are running")
+        raise RuntimeError(
+            "Refusing to open the production memory database while tests are running"
+        )
 
 
 def get_db_connection() -> sqlite3.Connection:
@@ -165,9 +202,15 @@ def get_db_connection() -> sqlite3.Connection:
                 FOREIGN KEY(memory_id) REFERENCES memories(memory_id)
             );
         """)
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_memories_status ON memories(status);")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_memories_memory_key ON memories(memory_key);")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_memory_events_memory_id_occurred_at ON memory_events(memory_id, occurred_at);")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_memories_status ON memories(status);"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_memories_memory_key ON memories(memory_key);"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_memory_events_memory_id_occurred_at ON memory_events(memory_id, occurred_at);"
+        )
 
         conn.execute("PRAGMA user_version = 2;")
         conn.commit()
@@ -212,10 +255,18 @@ def get_db_connection() -> sqlite3.Connection:
                 FOREIGN KEY(theme_id) REFERENCES research_themes(theme_id) ON DELETE CASCADE
             )
         """)
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_rt_status ON research_themes(status)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_rt_normalized_key ON research_themes(normalized_key)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_rj_theme_id ON research_jobs(theme_id)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_rj_status ON research_jobs(status)")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_rt_status ON research_themes(status)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_rt_normalized_key ON research_themes(normalized_key)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_rj_theme_id ON research_jobs(theme_id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_rj_status ON research_jobs(status)"
+        )
         conn.execute("PRAGMA user_version = 3;")
         conn.commit()
 
@@ -237,7 +288,9 @@ def get_db_connection() -> sqlite3.Connection:
                 UNIQUE(source_path, source_line)
             );
         """)
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_activity_logs_date_occurred ON activity_logs(activity_date, occurred_at);")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_activity_logs_date_occurred ON activity_logs(activity_date, occurred_at);"
+        )
         conn.execute("PRAGMA user_version = 4;")
         conn.commit()
 
@@ -321,13 +374,27 @@ def get_db_connection() -> sqlite3.Connection:
                 FOREIGN KEY(person_id) REFERENCES people(person_id) ON DELETE CASCADE
             );
         """)
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_summaries_period ON summaries(period_type, period_key);")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_summaries_period_start ON summaries(period_start);")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_summary_items_summary_id ON summary_items(summary_id);")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_summary_items_kind ON summary_items(summary_id, kind);")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_summary_topics_summary_id ON summary_topics(summary_id);")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_summary_projects_summary_id ON summary_projects(summary_id);")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_summary_people_summary_id ON summary_people(summary_id);")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_summaries_period ON summaries(period_type, period_key);"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_summaries_period_start ON summaries(period_start);"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_summary_items_summary_id ON summary_items(summary_id);"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_summary_items_kind ON summary_items(summary_id, kind);"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_summary_topics_summary_id ON summary_topics(summary_id);"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_summary_projects_summary_id ON summary_projects(summary_id);"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_summary_people_summary_id ON summary_people(summary_id);"
+        )
         conn.execute("PRAGMA user_version = 5;")
         conn.commit()
 
@@ -359,8 +426,12 @@ def get_db_connection() -> sqlite3.Connection:
         """)
 
         # Create indexes
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_spc_summary_id ON summary_person_candidates(summary_id);")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_pc_normalized_name ON person_candidates(normalized_name);")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_spc_summary_id ON summary_person_candidates(summary_id);"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_pc_normalized_name ON person_candidates(normalized_name);"
+        )
 
         conn.execute("PRAGMA user_version = 6;")
         conn.commit()
@@ -384,7 +455,9 @@ def run_migration_v7(conn: sqlite3.Connection) -> None:
             FOREIGN KEY(person_id) REFERENCES people(person_id) ON DELETE CASCADE
         );
     """)
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_person_aliases_person_id ON person_aliases(person_id);")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_person_aliases_person_id ON person_aliases(person_id);"
+    )
     conn.execute("PRAGMA user_version = 7;")
     conn.commit()
 
@@ -401,14 +474,24 @@ def run_migration_v8(conn: sqlite3.Connection) -> None:
             FOREIGN KEY(person_id) REFERENCES people(person_id) ON DELETE CASCADE
         );
     """)
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_spa_normalized_name ON summary_person_assignments(normalized_name);")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_spa_normalized_name ON summary_person_assignments(normalized_name);"
+    )
     conn.execute("PRAGMA user_version = 8;")
     conn.commit()
 
 
 def serialize_memory(m: dict) -> dict:
     db_row = dict(m)
-    for col in ["topics", "tags", "evidence", "contradicts", "provenance", "dedup_suggestions", "dedup_assessment"]:
+    for col in [
+        "topics",
+        "tags",
+        "evidence",
+        "contradicts",
+        "provenance",
+        "dedup_suggestions",
+        "dedup_assessment",
+    ]:
         if col in db_row:
             if db_row[col] is not None:
                 db_row[col] = json.dumps(db_row[col], ensure_ascii=False)
@@ -419,12 +502,25 @@ def serialize_memory(m: dict) -> dict:
 
 def deserialize_memory(row: dict) -> dict:
     m = dict(row)
-    for col in ["topics", "tags", "evidence", "contradicts", "provenance", "dedup_suggestions", "dedup_assessment"]:
+    for col in [
+        "topics",
+        "tags",
+        "evidence",
+        "contradicts",
+        "provenance",
+        "dedup_suggestions",
+        "dedup_assessment",
+    ]:
         if col in m and m[col] is not None:
             try:
                 m[col] = json.loads(m[col])
             except Exception:
-                logger.warning("Failed to deserialize %s for memory %s: %r", col, m.get("memory_id"), m[col])
+                logger.warning(
+                    "Failed to deserialize %s for memory %s: %r",
+                    col,
+                    m.get("memory_id"),
+                    m[col],
+                )
                 m[col] = None
     return m
 
@@ -480,7 +576,9 @@ def save_all_memories(memories: list[dict]):
                 columns = ", ".join(MEMORY_COLUMNS)
                 placeholders = ", ".join("?" for _ in MEMORY_COLUMNS)
                 update_clause = ", ".join(
-                    f"{col}=excluded.{col}" for col in MEMORY_COLUMNS if col != "memory_id"
+                    f"{col}=excluded.{col}"
+                    for col in MEMORY_COLUMNS
+                    if col != "memory_id"
                 )
                 cursor.execute(
                     f"INSERT INTO memories ({columns}) VALUES ({placeholders}) "
@@ -516,7 +614,7 @@ def log_memory_event(
     changes: Optional[dict] = None,
     reason: Optional[str] = None,
     conn: Optional[sqlite3.Connection] = None,
-    actor: str = "user"
+    actor: str = "user",
 ):
     event_record = {
         "schema_version": 1,
@@ -528,7 +626,7 @@ def log_memory_event(
         "previous_status": previous_status,
         "new_status": new_status,
         "changes": changes or {},
-        "reason": reason
+        "reason": reason,
     }
     db_row = serialize_event(event_record)
     columns = ", ".join(EVENT_COLUMNS)
@@ -553,13 +651,17 @@ def project_approved_memories():
     approved_md_file.parent.mkdir(parents=True, exist_ok=True)
 
     memories = load_all_memories()
-    active_approved = [
-        m for m in memories
-        if m.get("status") == "approved"
-    ]
+    active_approved = [m for m in memories if m.get("status") == "approved"]
 
     # Keep a fixed order of kinds
-    kinds_order = ["preference", "decision_policy", "fact", "commitment", "pattern", "episode"]
+    kinds_order = [
+        "preference",
+        "decision_policy",
+        "fact",
+        "commitment",
+        "pattern",
+        "episode",
+    ]
     grouped_memories = {k: [] for k in kinds_order}
     for m in active_approved:
         kind = m.get("kind", "preference")
@@ -571,7 +673,7 @@ def project_approved_memories():
         "# Approved Memories",
         "",
         "> Generated from the SQLite memory database. Do not edit manually.",
-        ""
+        "",
     ]
 
     for kind in kinds_order:
@@ -588,7 +690,7 @@ def project_approved_memories():
             lines.append(f"- Key: `{m.get('memory_key', '')}`")
             lines.append(f"- Stability: `{m.get('stability', 'stable')}`")
             evidence_lines = []
-            for ev in (m.get("evidence") or []):
+            for ev in m.get("evidence") or []:
                 path = ev.get("path", "")
                 if path.endswith(".md"):
                     path = path[:-3]
@@ -600,7 +702,6 @@ def project_approved_memories():
 
     with open(approved_md_file, "w", encoding="utf-8") as f:
         f.write("\n".join(lines).strip() + "\n")
-
 
 
 def merge_topics_and_tags(existing: list[str], new_vals: list[str]) -> list[str]:
@@ -620,7 +721,11 @@ def merge_evidence(existing: list[dict], new_vals: list[dict]) -> list[dict]:
 
         duplicate = False
         for ex in merged:
-            if ex.get("path", "") == path and ex.get("quote", "") == quote and ex.get("observed_at") == observed_at:
+            if (
+                ex.get("path", "") == path
+                and ex.get("quote", "") == quote
+                and ex.get("observed_at") == observed_at
+            ):
                 duplicate = True
                 break
         if not duplicate:
@@ -628,22 +733,43 @@ def merge_evidence(existing: list[dict], new_vals: list[dict]) -> list[dict]:
     return merged
 
 
-def update_target_with_candidate_data(target: dict, cand: dict, reviewed_by: str) -> dict:
+def update_target_with_candidate_data(
+    target: dict, cand: dict, reviewed_by: str
+) -> dict:
     timestamp_now = get_current_timestamp()
     target["content"] = cand.get("content", "")
-    for field in ["kind", "valid_from", "valid_until", "review_due_at", "sensitivity", "extraction_confidence", "contradicts", "provenance"]:
+    for field in [
+        "kind",
+        "valid_from",
+        "valid_until",
+        "review_due_at",
+        "sensitivity",
+        "extraction_confidence",
+        "contradicts",
+        "provenance",
+    ]:
         target[field] = cand.get(field)
-    target["stability"] = normalize_stability(cand.get("stability"), default="tentative")
-    target["topics"] = merge_topics_and_tags(target.get("topics") or [], cand.get("topics") or [])
-    target["tags"] = merge_topics_and_tags(target.get("tags") or [], cand.get("tags") or [])
-    target["evidence"] = merge_evidence(target.get("evidence") or [], cand.get("evidence") or [])
+    target["stability"] = normalize_stability(
+        cand.get("stability"), default="tentative"
+    )
+    target["topics"] = merge_topics_and_tags(
+        target.get("topics") or [], cand.get("topics") or []
+    )
+    target["tags"] = merge_topics_and_tags(
+        target.get("tags") or [], cand.get("tags") or []
+    )
+    target["evidence"] = merge_evidence(
+        target.get("evidence") or [], cand.get("evidence") or []
+    )
     target["updated_at"] = timestamp_now
     target["reviewed_by"] = reviewed_by
     target["reviewed_at"] = timestamp_now
     return target
 
 
-def run_deduplication(candidate: dict, existing_memories: list[dict], embedder=None) -> list[dict]:
+def run_deduplication(
+    candidate: dict, existing_memories: list[dict], embedder=None
+) -> list[dict]:
     suggestions = []
     cand_norm = normalize_content(candidate.get("content", ""))
     cand_key = candidate.get("memory_key", "")
@@ -668,29 +794,35 @@ def run_deduplication(candidate: dict, existing_memories: list[dict], embedder=N
         # 1. memory_key exact match
         if cand_key and cand_key == ex_key:
             if cand_norm == ex_norm:
-                suggestions.append({
-                    "target_memory_id": ex_id,
-                    "relation": "duplicate",
-                    "reason": "同じmemory_keyで内容が実質的に一致する",
-                    "score": 1.0
-                })
+                suggestions.append(
+                    {
+                        "target_memory_id": ex_id,
+                        "relation": "duplicate",
+                        "reason": "同じmemory_keyで内容が実質的に一致する",
+                        "score": 1.0,
+                    }
+                )
             else:
-                suggestions.append({
-                    "target_memory_id": ex_id,
-                    "relation": "supersedes",
-                    "reason": "同じmemory_keyで内容が更新されているため置換を提案",
-                    "score": 1.0
-                })
+                suggestions.append(
+                    {
+                        "target_memory_id": ex_id,
+                        "relation": "supersedes",
+                        "reason": "同じmemory_keyで内容が更新されているため置換を提案",
+                        "score": 1.0,
+                    }
+                )
             continue
 
         # 2. Normalized content match
         if cand_norm and cand_norm == ex_norm:
-            suggestions.append({
-                "target_memory_id": ex_id,
-                "relation": "duplicate",
-                "reason": "内容が既存の記憶と完全に一致する",
-                "score": 1.0
-            })
+            suggestions.append(
+                {
+                    "target_memory_id": ex_id,
+                    "relation": "duplicate",
+                    "reason": "内容が既存の記憶と完全に一致する",
+                    "score": 1.0,
+                }
+            )
             continue
 
         # 3. Vector similarity
@@ -699,12 +831,14 @@ def run_deduplication(candidate: dict, existing_memories: list[dict], embedder=N
                 ex_vector = embedder.embed_query(ex_norm)
                 sim = cosine_similarity(candidate_vector, ex_vector)
                 if sim >= 0.85:
-                    suggestions.append({
-                        "target_memory_id": ex_id,
-                        "relation": "duplicate",
-                        "reason": "既存の記憶と非常に内容が類似している",
-                        "score": round(sim, 2)
-                    })
+                    suggestions.append(
+                        {
+                            "target_memory_id": ex_id,
+                            "relation": "duplicate",
+                            "reason": "既存の記憶と非常に内容が類似している",
+                            "score": round(sim, 2),
+                        }
+                    )
             except Exception as e:
                 logger.warning(f"Failed to compute similarity with {ex_id}: {e}")
 
@@ -753,9 +887,12 @@ def _load_daily_structured_record(target_dt: datetime) -> dict:
     target_date_str = target_dt.strftime("%Y-%m-%d")
     try:
         from obsidian_ai_hub.summary import store as summary_store
+
         record = summary_store.get_summary_by_period("day", target_date_str)
     except Exception as exc:
-        logger.warning("Failed to load structured daily record for %s: %s", target_date_str, exc)
+        logger.warning(
+            "Failed to load structured daily record for %s: %s", target_date_str, exc
+        )
         return {}
 
     if not record:
@@ -773,7 +910,10 @@ def _load_daily_structured_record(target_dt: datetime) -> dict:
         "date": target_date_str,
         "summary": record.get("summary"),
         "topics": record.get("topics", []),
-        "people": [{"name": p.get("name", ""), "note": p.get("note", "")} for p in record.get("people", [])],
+        "people": [
+            {"name": p.get("name", ""), "note": p.get("note", "")}
+            for p in record.get("people", [])
+        ],
         "mood": record.get("mood"),
         "sleep": record.get("sleep_raw"),
         "keywords": record.get("keywords", []),
@@ -786,7 +926,9 @@ def _load_daily_structured_record(target_dt: datetime) -> dict:
     return structured
 
 
-def _load_weekly_memory_sources(week_start: datetime, week_end: datetime) -> tuple[list[dict], list[dict]]:
+def _load_weekly_memory_sources(
+    week_start: datetime, week_end: datetime
+) -> tuple[list[dict], list[dict]]:
     daily_notes = []
     structured_records = []
     for offset in range(7):
@@ -795,11 +937,13 @@ def _load_weekly_memory_sources(week_start: datetime, week_end: datetime) -> tup
         if note_path.exists():
             try:
                 note_content = note_path.read_text(encoding="utf-8")
-                daily_notes.append({
-                    "date": target_dt.strftime("%Y-%m-%d"),
-                    "path": _vault_relative_path(note_path),
-                    "content": _extract_memory_source_content(note_content),
-                })
+                daily_notes.append(
+                    {
+                        "date": target_dt.strftime("%Y-%m-%d"),
+                        "path": _vault_relative_path(note_path),
+                        "content": _extract_memory_source_content(note_content),
+                    }
+                )
             except OSError as exc:
                 logger.warning("Failed to read daily note %s: %s", note_path, exc)
 
@@ -809,7 +953,10 @@ def _load_weekly_memory_sources(week_start: datetime, week_end: datetime) -> tup
 
     logger.info(
         "Loaded %s daily notes and %s structured records for %s to %s",
-        len(daily_notes), len(structured_records), week_start.date(), week_end.date(),
+        len(daily_notes),
+        len(structured_records),
+        week_start.date(),
+        week_end.date(),
     )
     return daily_notes, structured_records
 
@@ -818,12 +965,16 @@ DEDUP_INPUT_BATCH_TOKEN_LIMIT = 24000
 DEDUP_LLM_OUTPUT_TOKEN_LIMIT = 24000
 
 
-def perform_dedup_assessment_llm(candidates_to_assess: list[dict], existing_memories: list[dict]) -> None:
+def perform_dedup_assessment_llm(
+    candidates_to_assess: list[dict], existing_memories: list[dict]
+) -> None:
     if not candidates_to_assess:
         return
 
     # Find approved memories mapped by memory_id for quick lookup
-    approved_map = {m["memory_id"]: m for m in existing_memories if m.get("status") == "approved"}
+    approved_map = {
+        m["memory_id"]: m for m in existing_memories if m.get("status") == "approved"
+    }
 
     # Build comparison groups
     comparison_groups = []
@@ -834,21 +985,21 @@ def perform_dedup_assessment_llm(candidates_to_assess: list[dict], existing_memo
             tid = sug.get("target_memory_id")
             target_mem = approved_map.get(tid)
             if target_mem:
-                targets_info.append({
-                    "memory_id": tid,
-                    "memory_key": target_mem.get("memory_key") or "",
-                    "content": target_mem.get("content") or "",
-                    "relation": sug.get("relation") or "",
-                    "score": sug.get("score")
-                })
+                targets_info.append(
+                    {
+                        "memory_id": tid,
+                        "memory_key": target_mem.get("memory_key") or "",
+                        "content": target_mem.get("content") or "",
+                        "relation": sug.get("relation") or "",
+                        "score": sug.get("score"),
+                    }
+                )
                 target_ids.append(tid)
 
         if targets_info:
-            comparison_groups.append({
-                "candidate": cand,
-                "targets": targets_info,
-                "target_ids": target_ids
-            })
+            comparison_groups.append(
+                {"candidate": cand, "targets": targets_info, "target_ids": target_ids}
+            )
 
     if not comparison_groups:
         return
@@ -862,7 +1013,7 @@ def perform_dedup_assessment_llm(candidates_to_assess: list[dict], existing_memo
     try:
         empty_prompt = prompt.render_prompt(
             config.BASE_DIR / "config" / "prompts" / "memory_dedup_review.md",
-            {"comparison_list": ""}
+            {"comparison_list": ""},
         )
     except Exception:
         # Fallback if config files are not in expected places during tests
@@ -913,8 +1064,7 @@ def perform_dedup_assessment_llm(candidates_to_assess: list[dict], existing_memo
         prompt_path = config.BASE_DIR / "config" / "prompts" / "memory_dedup_review.md"
         try:
             rendered_prompt = prompt.render_prompt(
-                prompt_path,
-                {"comparison_list": comp_text}
+                prompt_path, {"comparison_list": comp_text}
             )
         except Exception:
             rendered_prompt = f"Please review these and return JSON:\n{comp_text}"
@@ -925,7 +1075,7 @@ def perform_dedup_assessment_llm(candidates_to_assess: list[dict], existing_memo
                 model=config.MEMORY_EXTRACTOR_MODEL,
                 prompt=rendered_prompt,
                 max_tokens=DEDUP_LLM_OUTPUT_TOKEN_LIMIT,
-                temperature=0.2
+                temperature=0.2,
             ).strip()
 
             if response.startswith("```"):
@@ -939,7 +1089,9 @@ def perform_dedup_assessment_llm(candidates_to_assess: list[dict], existing_memo
                 if not isinstance(results, list):
                     results = [results]
             except json.JSONDecodeError as je:
-                logger.error(f"Failed to parse LLM response as JSON. Error: {je}. Response: {response}")
+                logger.error(
+                    f"Failed to parse LLM response as JSON. Error: {je}. Response: {response}"
+                )
                 raise ValueError("response_invalid")
 
             results_by_cand = {}
@@ -963,7 +1115,10 @@ def perform_dedup_assessment_llm(candidates_to_assess: list[dict], existing_memo
                         if decision in ("merge", "supersede"):
                             if target_id in grp["target_ids"]:
                                 if decision == "merge":
-                                    if isinstance(integrated_content, str) and integrated_content.strip():
+                                    if (
+                                        isinstance(integrated_content, str)
+                                        and integrated_content.strip()
+                                    ):
                                         valid = True
                                 else:
                                     valid = True
@@ -979,7 +1134,9 @@ def perform_dedup_assessment_llm(candidates_to_assess: list[dict], existing_memo
 
                     assessment = {
                         "decision": decision,
-                        "target_memory_id": target_id if decision in ("merge", "supersede") else None,
+                        "target_memory_id": target_id
+                        if decision in ("merge", "supersede")
+                        else None,
                         "similarity_score": score,
                         "reason": reason,
                     }
@@ -988,19 +1145,27 @@ def perform_dedup_assessment_llm(candidates_to_assess: list[dict], existing_memo
 
                     c["dedup_assessment"] = assessment
                 else:
-                    logger.warning(f"Invalid or missing LLM response item for candidate {cid}: {res_item}")
-                    scores = [t["score"] for t in grp["targets"] if t["score"] is not None]
+                    logger.warning(
+                        f"Invalid or missing LLM response item for candidate {cid}: {res_item}"
+                    )
+                    scores = [
+                        t["score"] for t in grp["targets"] if t["score"] is not None
+                    ]
                     best_score = max(scores) if scores else 1.0
                     c["dedup_assessment"] = {
                         "decision": "failed",
                         "similarity_score": best_score,
                         "reason": "LLM response was invalid or failed validation checks",
-                        "failure_kind": "response_invalid"
+                        "failure_kind": "response_invalid",
                     }
 
         except Exception as exc:
             logger.exception(f"LLM request or parsing failed for batch: {exc}")
-            failure_kind = "response_invalid" if str(exc) == "response_invalid" else "request_failed"
+            failure_kind = (
+                "response_invalid"
+                if str(exc) == "response_invalid"
+                else "request_failed"
+            )
             for grp in batch:
                 c = grp["candidate"]
                 scores = [t["score"] for t in grp["targets"] if t["score"] is not None]
@@ -1009,13 +1174,12 @@ def perform_dedup_assessment_llm(candidates_to_assess: list[dict], existing_memo
                     "decision": "failed",
                     "similarity_score": best_score,
                     "reason": f"Failed to get or parse LLM response: {str(exc)}",
-                    "failure_kind": failure_kind
+                    "failure_kind": failure_kind,
                 }
 
 
 def extract_memories(week_date_str: Optional[str] = None) -> list[dict]:
     """Extract memory candidates from a completed or explicitly selected week."""
-    approved_modified = False
     week_start, week_end = _week_bounds(week_date_str)
     week_start_str = week_start.strftime("%Y-%m-%d")
     week_end_str = week_end.strftime("%Y-%m-%d")
@@ -1023,7 +1187,11 @@ def extract_memories(week_date_str: Optional[str] = None) -> list[dict]:
 
     daily_notes, structured_records = _load_weekly_memory_sources(week_start, week_end)
     if not daily_notes:
-        logger.info("No daily notes found for week %s to %s; skipping memory extraction", week_start_str, week_end_str)
+        logger.info(
+            "No daily notes found for week %s to %s; skipping memory extraction",
+            week_start_str,
+            week_end_str,
+        )
         return []
 
     # Build and render prompt
@@ -1033,9 +1201,13 @@ def extract_memories(week_date_str: Optional[str] = None) -> list[dict]:
             "week_start": week_start_str,
             "week_end": week_end_str,
             "daily_notes": json.dumps(daily_notes, ensure_ascii=False, indent=2),
-            "structured_records": json.dumps(structured_records, ensure_ascii=False, indent=2) if structured_records else "(なし)",
-            "topic_candidates": json.dumps(TOPIC_ENUM, ensure_ascii=False)
-        }
+            "structured_records": json.dumps(
+                structured_records, ensure_ascii=False, indent=2
+            )
+            if structured_records
+            else "(なし)",
+            "topic_candidates": json.dumps(TOPIC_ENUM, ensure_ascii=False),
+        },
     )
 
     # Call LLM
@@ -1044,7 +1216,7 @@ def extract_memories(week_date_str: Optional[str] = None) -> list[dict]:
         model=config.MEMORY_EXTRACTOR_MODEL,
         prompt=rendered_prompt,
         max_tokens=32000,
-        temperature=0.2
+        temperature=0.2,
     ).strip()
 
     # Clean code blocks
@@ -1059,7 +1231,9 @@ def extract_memories(week_date_str: Optional[str] = None) -> list[dict]:
         if not isinstance(extracted, list):
             extracted = [extracted]
     except json.JSONDecodeError as e:
-        logger.error(f"Failed to parse LLM memory extraction response as JSON. Response: {response}. Error: {e}")
+        logger.error(
+            f"Failed to parse LLM memory extraction response as JSON. Response: {response}. Error: {e}"
+        )
         return []
 
     existing_memories = load_all_memories()
@@ -1108,7 +1282,9 @@ def extract_memories(week_date_str: Optional[str] = None) -> list[dict]:
             "valid_from": item.get("valid_from") or week_start_str,
             "valid_until": item.get("valid_until"),
             "review_due_at": item.get("review_due_at"),
-            "stability": normalize_stability(item.get("stability"), default="tentative"),
+            "stability": normalize_stability(
+                item.get("stability"), default="tentative"
+            ),
             "sensitivity": item.get("sensitivity", "personal"),
             "extraction_confidence": float(item.get("extraction_confidence", 0.90)),
             "supersedes": item.get("supersedes"),
@@ -1125,13 +1301,17 @@ def extract_memories(week_date_str: Optional[str] = None) -> list[dict]:
             "reviewed_by": None,
             "reviewed_at": None,
             "dedup_suggestions": None,
-            "dedup_assessment": None
+            "dedup_assessment": None,
         }
 
         cand_norm = normalize_content(cand.get("content", ""))
 
         # 1. Check for complete normalized content match across ANY approved memory
-        exact_content_matches = [m for m in approved_mems if normalize_content(m.get("content", "")) == cand_norm]
+        exact_content_matches = [
+            m
+            for m in approved_mems
+            if normalize_content(m.get("content", "")) == cand_norm
+        ]
 
         if exact_content_matches:
             # Duplicate: Auto-reject candidate, keep existing unchanged
@@ -1146,7 +1326,9 @@ def extract_memories(week_date_str: Optional[str] = None) -> list[dict]:
             continue
 
         # 2. Get standard dedup suggestions using CachedEmbedder
-        suggestions = run_deduplication(cand, existing_memories, embedder=cached_embedder)
+        suggestions = run_deduplication(
+            cand, existing_memories, embedder=cached_embedder
+        )
         if suggestions:
             cand["dedup_suggestions"] = suggestions
             candidates_to_assess.append(cand)
@@ -1182,10 +1364,13 @@ def extract_memories(week_date_str: Optional[str] = None) -> list[dict]:
                         memory_id=cand["memory_id"],
                         previous_status=None,
                         new_status="rejected",
-                        changes={"relation": "duplicate", "target_memory_ids": matched_ids},
+                        changes={
+                            "relation": "duplicate",
+                            "target_memory_ids": matched_ids,
+                        },
                         reason="内容が既存の記憶と完全に一致するため自動却下",
                         conn=conn,
-                        actor="system"
+                        actor="system",
                     )
                 else:
                     log_memory_event(
@@ -1193,7 +1378,7 @@ def extract_memories(week_date_str: Optional[str] = None) -> list[dict]:
                         memory_id=cand["memory_id"],
                         previous_status=None,
                         new_status="candidate",
-                        conn=conn
+                        conn=conn,
                     )
     finally:
         conn.close()
@@ -1201,7 +1386,9 @@ def extract_memories(week_date_str: Optional[str] = None) -> list[dict]:
     return final_candidates_to_save
 
 
-def review_memory(memory_id: str, action: str, new_content: Optional[str] = None) -> bool:
+def review_memory(
+    memory_id: str, action: str, new_content: Optional[str] = None
+) -> bool:
     """
     Review candidate memory with specified action (approve, reject, edit).
     """
@@ -1234,16 +1421,22 @@ def review_memory(memory_id: str, action: str, new_content: Optional[str] = None
             target["updated_at"] = timestamp_now
 
             db_row = serialize_memory(target)
-            set_clause = ", ".join(f"{col} = ?" for col in MEMORY_COLUMNS if col != "memory_id")
-            values = [db_row.get(col) for col in MEMORY_COLUMNS if col != "memory_id"] + [memory_id]
-            conn.execute(f"UPDATE memories SET {set_clause} WHERE memory_id = ?", values)
+            set_clause = ", ".join(
+                f"{col} = ?" for col in MEMORY_COLUMNS if col != "memory_id"
+            )
+            values = [
+                db_row.get(col) for col in MEMORY_COLUMNS if col != "memory_id"
+            ] + [memory_id]
+            conn.execute(
+                f"UPDATE memories SET {set_clause} WHERE memory_id = ?", values
+            )
 
             log_memory_event(
                 event_type="approved",
                 memory_id=memory_id,
                 previous_status=prev_status,
                 new_status="approved",
-                conn=conn
+                conn=conn,
             )
             conn.commit()
         elif action == "reject":
@@ -1253,16 +1446,22 @@ def review_memory(memory_id: str, action: str, new_content: Optional[str] = None
             target["updated_at"] = timestamp_now
 
             db_row = serialize_memory(target)
-            set_clause = ", ".join(f"{col} = ?" for col in MEMORY_COLUMNS if col != "memory_id")
-            values = [db_row.get(col) for col in MEMORY_COLUMNS if col != "memory_id"] + [memory_id]
-            conn.execute(f"UPDATE memories SET {set_clause} WHERE memory_id = ?", values)
+            set_clause = ", ".join(
+                f"{col} = ?" for col in MEMORY_COLUMNS if col != "memory_id"
+            )
+            values = [
+                db_row.get(col) for col in MEMORY_COLUMNS if col != "memory_id"
+            ] + [memory_id]
+            conn.execute(
+                f"UPDATE memories SET {set_clause} WHERE memory_id = ?", values
+            )
 
             log_memory_event(
                 event_type="rejected",
                 memory_id=memory_id,
                 previous_status=prev_status,
                 new_status="rejected",
-                conn=conn
+                conn=conn,
             )
             conn.commit()
         elif action == "edit":
@@ -1273,17 +1472,14 @@ def review_memory(memory_id: str, action: str, new_content: Optional[str] = None
             target["reviewed_at"] = timestamp_now
             target["updated_at"] = timestamp_now
 
-            changes = {
-                "content": {
-                    "before": before_content,
-                    "after": new_content
-                }
-            }
+            changes = {"content": {"before": before_content, "after": new_content}}
 
             db_row = serialize_memory(target)
             set_clause = ", ".join(f"{col} = ?" for col in db_row if col != "memory_id")
             values = [db_row[col] for col in db_row if col != "memory_id"] + [memory_id]
-            conn.execute(f"UPDATE memories SET {set_clause} WHERE memory_id = ?", values)
+            conn.execute(
+                f"UPDATE memories SET {set_clause} WHERE memory_id = ?", values
+            )
 
             log_memory_event(
                 event_type="edited",
@@ -1291,7 +1487,7 @@ def review_memory(memory_id: str, action: str, new_content: Optional[str] = None
                 previous_status=prev_status,
                 new_status="approved",
                 changes=changes,
-                conn=conn
+                conn=conn,
             )
             conn.commit()
         else:
@@ -1308,6 +1504,7 @@ def review_memory(memory_id: str, action: str, new_content: Optional[str] = None
 def estimate_tokens(text: str) -> int:
     try:
         import tiktoken
+
         encoding = tiktoken.get_encoding("cl100k_base")
         return len(encoding.encode(text))
     except Exception:
@@ -1365,7 +1562,9 @@ def get_currently_valid_approved_memories() -> tuple[list[dict], list[dict]]:
                             if now_dt > rd_dt:
                                 is_expired = True
                         else:
-                            rd_dt = datetime.strptime(review_due_at, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                            rd_dt = datetime.strptime(
+                                review_due_at, "%Y-%m-%d"
+                            ).replace(tzinfo=timezone.utc)
                             if now_dt.date() > rd_dt.date():
                                 is_expired = True
                     except Exception:
@@ -1378,9 +1577,15 @@ def get_currently_valid_approved_memories() -> tuple[list[dict], list[dict]]:
 
                     # Update target in DB
                     db_row = serialize_memory(m)
-                    set_clause = ", ".join(f"{col} = ?" for col in MEMORY_COLUMNS if col != "memory_id")
-                    values = [db_row.get(col) for col in MEMORY_COLUMNS if col != "memory_id"] + [m_id]
-                    conn.execute(f"UPDATE memories SET {set_clause} WHERE memory_id = ?", values)
+                    set_clause = ", ".join(
+                        f"{col} = ?" for col in MEMORY_COLUMNS if col != "memory_id"
+                    )
+                    values = [
+                        db_row.get(col) for col in MEMORY_COLUMNS if col != "memory_id"
+                    ] + [m_id]
+                    conn.execute(
+                        f"UPDATE memories SET {set_clause} WHERE memory_id = ?", values
+                    )
 
                     log_memory_event(
                         event_type="expired",
@@ -1388,7 +1593,7 @@ def get_currently_valid_approved_memories() -> tuple[list[dict], list[dict]]:
                         previous_status="approved",
                         new_status="expired",
                         reason="Automatic expiration during validity check",
-                        conn=conn
+                        conn=conn,
                     )
                     excluded.append({"memory_id": m_id, "reason": "expired"})
                     continue
@@ -1399,7 +1604,9 @@ def get_currently_valid_approved_memories() -> tuple[list[dict], list[dict]]:
                     try:
                         vf_dt = datetime.strptime(valid_from, "%Y-%m-%d")
                         if now_dt.date() < vf_dt.date():
-                            excluded.append({"memory_id": m_id, "reason": "not_yet_valid"})
+                            excluded.append(
+                                {"memory_id": m_id, "reason": "not_yet_valid"}
+                            )
                             continue
                     except Exception:
                         pass
@@ -1436,7 +1643,7 @@ def compile_context(for_purpose: str = "make-target") -> dict:
             "context": "",
             "used_memory_ids": [],
             "estimated_tokens": 0,
-            "excluded": []
+            "excluded": [],
         }
 
     # Prioritization sorting
@@ -1487,7 +1694,7 @@ def compile_context(for_purpose: str = "make-target") -> dict:
         "context": context_str,
         "used_memory_ids": used_memory_ids,
         "estimated_tokens": total_tokens,
-        "excluded": excluded
+        "excluded": excluded,
     }
 
 
@@ -1504,6 +1711,7 @@ EDITABLE_FIELDS = (
     "review_due_at",
     "stability",
 )
+
 
 def _validate_date_str(value, field_name: str):
     if value is None:
@@ -1524,7 +1732,9 @@ def _validate_edit_payload(payload: dict) -> dict:
             f"editable fields are {sorted(EDITABLE_FIELDS)}; got unknown: {sorted(unknown)}"
         )
 
-    if "content" in payload and (not isinstance(payload["content"], str) or not payload["content"].strip()):
+    if "content" in payload and (
+        not isinstance(payload["content"], str) or not payload["content"].strip()
+    ):
         raise ValueError("content must be a non-empty string")
 
     if "topics" in payload:
@@ -1533,7 +1743,9 @@ def _validate_edit_payload(payload: dict) -> dict:
         payload["topics"] = normalize_topics(payload["topics"])
 
     if "tags" in payload:
-        if not isinstance(payload["tags"], list) or not all(isinstance(t, str) for t in payload["tags"]):
+        if not isinstance(payload["tags"], list) or not all(
+            isinstance(t, str) for t in payload["tags"]
+        ):
             raise ValueError("tags must be a list of strings")
 
     if "stability" in payload:
@@ -1587,7 +1799,12 @@ def update_memory_fields(memory_id: str, fields: dict) -> dict:
                     target[k] = v
 
             if not changes:
-                return {"found": True, "updated": False, "changes": {}, "memory": target}
+                return {
+                    "found": True,
+                    "updated": False,
+                    "changes": {},
+                    "memory": target,
+                }
 
             target["status"] = "approved"
             target["reviewed_by"] = "user"
@@ -1597,7 +1814,9 @@ def update_memory_fields(memory_id: str, fields: dict) -> dict:
             db_row = serialize_memory(target)
             set_clause = ", ".join(f"{col} = ?" for col in db_row if col != "memory_id")
             values = [db_row[col] for col in db_row if col != "memory_id"] + [memory_id]
-            conn.execute(f"UPDATE memories SET {set_clause} WHERE memory_id = ?", values)
+            conn.execute(
+                f"UPDATE memories SET {set_clause} WHERE memory_id = ?", values
+            )
 
             log_memory_event(
                 event_type="edited",
@@ -1649,7 +1868,9 @@ def batch_review_memories(memory_ids: list, action: str) -> dict:
 
             skipped = []
             for memory_id in memory_ids:
-                cursor.execute("SELECT * FROM memories WHERE memory_id = ?", (memory_id,))
+                cursor.execute(
+                    "SELECT * FROM memories WHERE memory_id = ?", (memory_id,)
+                )
                 row = cursor.fetchone()
                 if row is None:
                     not_found.append(memory_id)
@@ -1665,9 +1886,15 @@ def batch_review_memories(memory_ids: list, action: str) -> dict:
                 target["updated_at"] = timestamp_now
 
                 db_row = serialize_memory(target)
-                set_clause = ", ".join(f"{col} = ?" for col in MEMORY_COLUMNS if col != "memory_id")
-                values = [db_row.get(col) for col in MEMORY_COLUMNS if col != "memory_id"] + [memory_id]
-                conn.execute(f"UPDATE memories SET {set_clause} WHERE memory_id = ?", values)
+                set_clause = ", ".join(
+                    f"{col} = ?" for col in MEMORY_COLUMNS if col != "memory_id"
+                )
+                values = [
+                    db_row.get(col) for col in MEMORY_COLUMNS if col != "memory_id"
+                ] + [memory_id]
+                conn.execute(
+                    f"UPDATE memories SET {set_clause} WHERE memory_id = ?", values
+                )
 
                 log_memory_event(
                     event_type=event_type,
@@ -1684,7 +1911,12 @@ def batch_review_memories(memory_ids: list, action: str) -> dict:
     if updated:
         project_approved_memories()
 
-    return {"updated": updated, "not_found": not_found, "skipped": skipped, "events": event_count}
+    return {
+        "updated": updated,
+        "not_found": not_found,
+        "skipped": skipped,
+        "events": event_count,
+    }
 
 
 def get_memory_events(memory_id: str) -> list:
@@ -1702,19 +1934,25 @@ def get_memory_events(memory_id: str) -> list:
     finally:
         conn.close()
 
+
 def resolve_memory(
     candidate_id: str,
     action: str,
     target_memory_id: str,
     integrated_content: Optional[str] = None,
-    switch_date: Optional[str] = None
+    switch_date: Optional[str] = None,
 ) -> tuple[dict, Optional[dict]]:
     """
     Resolve a candidate memory by keeping both, replacing, merging, or superseding the existing one.
     Returns (candidate, target).
     Raises ValueError on invalid state/inputs.
     """
-    allowed_actions = ("keep_both", "replace_existing", "merge_existing", "supersede_existing")
+    allowed_actions = (
+        "keep_both",
+        "replace_existing",
+        "merge_existing",
+        "supersede_existing",
+    )
     if action not in allowed_actions:
         raise ValueError(f"action must be one of {allowed_actions}")
 
@@ -1724,38 +1962,58 @@ def resolve_memory(
             cursor = conn.cursor()
 
             # Fetch candidate
-            cursor.execute("SELECT * FROM memories WHERE memory_id = ?", (candidate_id,))
+            cursor.execute(
+                "SELECT * FROM memories WHERE memory_id = ?", (candidate_id,)
+            )
             cand_row = cursor.fetchone()
             if cand_row is None:
                 raise ValueError(f"Candidate memory not found: {candidate_id}")
             cand = deserialize_memory(dict(cand_row))
 
             if cand.get("status") != "candidate":
-                raise ValueError(f"Memory {candidate_id} is not in candidate status (current: {cand.get('status')})")
+                raise ValueError(
+                    f"Memory {candidate_id} is not in candidate status (current: {cand.get('status')})"
+                )
 
             # Fetch target
-            cursor.execute("SELECT * FROM memories WHERE memory_id = ?", (target_memory_id,))
+            cursor.execute(
+                "SELECT * FROM memories WHERE memory_id = ?", (target_memory_id,)
+            )
             target_row = cursor.fetchone()
             if target_row is None:
                 raise ValueError(f"Target memory not found: {target_memory_id}")
             target = deserialize_memory(dict(target_row))
 
             if target.get("status") != "approved":
-                raise ValueError(f"Target memory {target_memory_id} is not in approved status")
+                raise ValueError(
+                    f"Target memory {target_memory_id} is not in approved status"
+                )
 
             # Validate target_memory_id matches dedup_assessment.target_memory_id
             assessment = cand.get("dedup_assessment")
-            ass_target = assessment.get("target_memory_id") if (assessment and isinstance(assessment, dict)) else None
+            ass_target = (
+                assessment.get("target_memory_id")
+                if (assessment and isinstance(assessment, dict))
+                else None
+            )
 
             if ass_target:
                 if ass_target != target_memory_id:
-                    raise ValueError(f"Target {target_memory_id} does not match LLM assessed target: {ass_target}")
+                    raise ValueError(
+                        f"Target {target_memory_id} does not match LLM assessed target: {ass_target}"
+                    )
             else:
                 # Fallback to dedup_suggestions for backward compatibility/old data
                 suggestions = cand.get("dedup_suggestions") or []
-                target_ids = [s.get("target_memory_id") for s in suggestions if s.get("target_memory_id")]
+                target_ids = [
+                    s.get("target_memory_id")
+                    for s in suggestions
+                    if s.get("target_memory_id")
+                ]
                 if target_memory_id not in target_ids:
-                    raise ValueError(f"Target {target_memory_id} is not in candidate's suggestions: {target_ids}")
+                    raise ValueError(
+                        f"Target {target_memory_id} is not in candidate's suggestions: {target_ids}"
+                    )
 
             timestamp_now = get_current_timestamp()
 
@@ -1766,9 +2024,15 @@ def resolve_memory(
                 cand["updated_at"] = timestamp_now
 
                 db_row_cand = serialize_memory(cand)
-                set_clause = ", ".join(f"{col} = ?" for col in MEMORY_COLUMNS if col != "memory_id")
-                values = [db_row_cand.get(col) for col in MEMORY_COLUMNS if col != "memory_id"] + [candidate_id]
-                conn.execute(f"UPDATE memories SET {set_clause} WHERE memory_id = ?", values)
+                set_clause = ", ".join(
+                    f"{col} = ?" for col in MEMORY_COLUMNS if col != "memory_id"
+                )
+                values = [
+                    db_row_cand.get(col) for col in MEMORY_COLUMNS if col != "memory_id"
+                ] + [candidate_id]
+                conn.execute(
+                    f"UPDATE memories SET {set_clause} WHERE memory_id = ?", values
+                )
 
                 log_memory_event(
                     event_type="approved",
@@ -1776,7 +2040,7 @@ def resolve_memory(
                     previous_status="candidate",
                     new_status="approved",
                     reason="手動操作: 両方保持を選択して承認",
-                    conn=conn
+                    conn=conn,
                 )
 
             elif action == "replace_existing":
@@ -1784,13 +2048,23 @@ def resolve_memory(
                 before_target = dict(target)
 
                 # Update target with candidate data
-                target = update_target_with_candidate_data(target, cand, reviewed_by="user")
+                target = update_target_with_candidate_data(
+                    target, cand, reviewed_by="user"
+                )
 
                 # Save updated target
                 db_row_target = serialize_memory(target)
-                set_clause = ", ".join(f"{col} = ?" for col in MEMORY_COLUMNS if col != "memory_id")
-                values = [db_row_target.get(col) for col in MEMORY_COLUMNS if col != "memory_id"] + [target_memory_id]
-                conn.execute(f"UPDATE memories SET {set_clause} WHERE memory_id = ?", values)
+                set_clause = ", ".join(
+                    f"{col} = ?" for col in MEMORY_COLUMNS if col != "memory_id"
+                )
+                values = [
+                    db_row_target.get(col)
+                    for col in MEMORY_COLUMNS
+                    if col != "memory_id"
+                ] + [target_memory_id]
+                conn.execute(
+                    f"UPDATE memories SET {set_clause} WHERE memory_id = ?", values
+                )
 
                 # Compute differences
                 changes_diff = {}
@@ -1810,7 +2084,7 @@ def resolve_memory(
                     new_status="approved",
                     changes=changes_diff,
                     reason=f"手動操作: 置換による更新（対象候補: {candidate_id}）",
-                    conn=conn
+                    conn=conn,
                 )
 
                 # Reject candidate
@@ -1820,9 +2094,15 @@ def resolve_memory(
                 cand["updated_at"] = timestamp_now
 
                 db_row_cand = serialize_memory(cand)
-                set_clause = ", ".join(f"{col} = ?" for col in MEMORY_COLUMNS if col != "memory_id")
-                values = [db_row_cand.get(col) for col in MEMORY_COLUMNS if col != "memory_id"] + [candidate_id]
-                conn.execute(f"UPDATE memories SET {set_clause} WHERE memory_id = ?", values)
+                set_clause = ", ".join(
+                    f"{col} = ?" for col in MEMORY_COLUMNS if col != "memory_id"
+                )
+                values = [
+                    db_row_cand.get(col) for col in MEMORY_COLUMNS if col != "memory_id"
+                ] + [candidate_id]
+                conn.execute(
+                    f"UPDATE memories SET {set_clause} WHERE memory_id = ?", values
+                )
 
                 # Log event for candidate
                 log_memory_event(
@@ -1830,35 +2110,68 @@ def resolve_memory(
                     memory_id=candidate_id,
                     previous_status="candidate",
                     new_status="rejected",
-                    changes={"relation": "supersedes", "target_memory_id": target_memory_id},
+                    changes={
+                        "relation": "supersedes",
+                        "target_memory_id": target_memory_id,
+                    },
                     reason="手動操作: 既存記憶の置換を選択して却下",
-                    conn=conn
+                    conn=conn,
                 )
 
             elif action == "merge_existing":
-                if not integrated_content or not isinstance(integrated_content, str) or not integrated_content.strip():
-                    raise ValueError("integrated_content is required for merge_existing action")
+                if (
+                    not integrated_content
+                    or not isinstance(integrated_content, str)
+                    or not integrated_content.strip()
+                ):
+                    raise ValueError(
+                        "integrated_content is required for merge_existing action"
+                    )
 
                 # Save target state before update
                 before_target = dict(target)
 
                 # Update target with candidate/integrated data
                 target["content"] = integrated_content
-                for field in ["kind", "valid_until", "review_due_at", "stability", "sensitivity", "extraction_confidence", "contradicts"]:
+                for field in [
+                    "kind",
+                    "valid_until",
+                    "review_due_at",
+                    "stability",
+                    "sensitivity",
+                    "extraction_confidence",
+                    "contradicts",
+                ]:
                     target[field] = cand.get(field)
-                target["stability"] = normalize_stability(cand.get("stability"), default="tentative")
-                target["topics"] = merge_topics_and_tags(target.get("topics") or [], cand.get("topics") or [])
-                target["tags"] = merge_topics_and_tags(target.get("tags") or [], cand.get("tags") or [])
-                target["evidence"] = merge_evidence(target.get("evidence") or [], cand.get("evidence") or [])
+                target["stability"] = normalize_stability(
+                    cand.get("stability"), default="tentative"
+                )
+                target["topics"] = merge_topics_and_tags(
+                    target.get("topics") or [], cand.get("topics") or []
+                )
+                target["tags"] = merge_topics_and_tags(
+                    target.get("tags") or [], cand.get("tags") or []
+                )
+                target["evidence"] = merge_evidence(
+                    target.get("evidence") or [], cand.get("evidence") or []
+                )
                 target["updated_at"] = timestamp_now
                 target["reviewed_by"] = "user"
                 target["reviewed_at"] = timestamp_now
 
                 # Save updated target
                 db_row_target = serialize_memory(target)
-                set_clause = ", ".join(f"{col} = ?" for col in MEMORY_COLUMNS if col != "memory_id")
-                values = [db_row_target.get(col) for col in MEMORY_COLUMNS if col != "memory_id"] + [target_memory_id]
-                conn.execute(f"UPDATE memories SET {set_clause} WHERE memory_id = ?", values)
+                set_clause = ", ".join(
+                    f"{col} = ?" for col in MEMORY_COLUMNS if col != "memory_id"
+                )
+                values = [
+                    db_row_target.get(col)
+                    for col in MEMORY_COLUMNS
+                    if col != "memory_id"
+                ] + [target_memory_id]
+                conn.execute(
+                    f"UPDATE memories SET {set_clause} WHERE memory_id = ?", values
+                )
 
                 # Compute differences
                 changes_diff = {}
@@ -1878,7 +2191,7 @@ def resolve_memory(
                     new_status="approved",
                     changes=changes_diff,
                     reason=f"手動操作: マージによる更新（対象候補: {candidate_id}）",
-                    conn=conn
+                    conn=conn,
                 )
 
                 # Reject candidate
@@ -1888,9 +2201,15 @@ def resolve_memory(
                 cand["updated_at"] = timestamp_now
 
                 db_row_cand = serialize_memory(cand)
-                set_clause = ", ".join(f"{col} = ?" for col in MEMORY_COLUMNS if col != "memory_id")
-                values = [db_row_cand.get(col) for col in MEMORY_COLUMNS if col != "memory_id"] + [candidate_id]
-                conn.execute(f"UPDATE memories SET {set_clause} WHERE memory_id = ?", values)
+                set_clause = ", ".join(
+                    f"{col} = ?" for col in MEMORY_COLUMNS if col != "memory_id"
+                )
+                values = [
+                    db_row_cand.get(col) for col in MEMORY_COLUMNS if col != "memory_id"
+                ] + [candidate_id]
+                conn.execute(
+                    f"UPDATE memories SET {set_clause} WHERE memory_id = ?", values
+                )
 
                 # Log event for candidate
                 log_memory_event(
@@ -1898,14 +2217,19 @@ def resolve_memory(
                     memory_id=candidate_id,
                     previous_status="candidate",
                     new_status="rejected",
-                    changes={"relation": "duplicate", "target_memory_id": target_memory_id},
+                    changes={
+                        "relation": "duplicate",
+                        "target_memory_id": target_memory_id,
+                    },
                     reason="手動操作: 既存記憶へのマージを選択して却下",
-                    conn=conn
+                    conn=conn,
                 )
 
             elif action == "supersede_existing":
                 if not switch_date or not isinstance(switch_date, str):
-                    raise ValueError("switch_date is required for supersede_existing action")
+                    raise ValueError(
+                        "switch_date is required for supersede_existing action"
+                    )
                 try:
                     switch_dt = datetime.strptime(switch_date, "%Y-%m-%d")
                 except ValueError:
@@ -1920,7 +2244,9 @@ def resolve_memory(
                     except ValueError:
                         pass
                     if old_vf_dt and switch_dt <= old_vf_dt:
-                        raise ValueError(f"switch_date ({switch_date}) must be strictly after existing valid_from ({old_valid_from})")
+                        raise ValueError(
+                            f"switch_date ({switch_date}) must be strictly after existing valid_from ({old_valid_from})"
+                        )
 
                 predecessor_until_dt = switch_dt - timedelta(days=1)
                 predecessor_until_str = predecessor_until_dt.strftime("%Y-%m-%d")
@@ -1935,9 +2261,17 @@ def resolve_memory(
                 target["updated_at"] = timestamp_now
 
                 db_row_target = serialize_memory(target)
-                set_clause = ", ".join(f"{col} = ?" for col in MEMORY_COLUMNS if col != "memory_id")
-                values = [db_row_target.get(col) for col in MEMORY_COLUMNS if col != "memory_id"] + [target_memory_id]
-                conn.execute(f"UPDATE memories SET {set_clause} WHERE memory_id = ?", values)
+                set_clause = ", ".join(
+                    f"{col} = ?" for col in MEMORY_COLUMNS if col != "memory_id"
+                )
+                values = [
+                    db_row_target.get(col)
+                    for col in MEMORY_COLUMNS
+                    if col != "memory_id"
+                ] + [target_memory_id]
+                conn.execute(
+                    f"UPDATE memories SET {set_clause} WHERE memory_id = ?", values
+                )
 
                 # Log event for target
                 log_memory_event(
@@ -1946,11 +2280,14 @@ def resolve_memory(
                     previous_status="approved",
                     new_status="superseded",
                     changes={
-                        "valid_until": {"before": before_target.get("valid_until"), "after": predecessor_until_str},
-                        "superseded_by": candidate_id
+                        "valid_until": {
+                            "before": before_target.get("valid_until"),
+                            "after": predecessor_until_str,
+                        },
+                        "superseded_by": candidate_id,
                     },
                     reason=f"手動操作: 置換による終了（後継候補: {candidate_id}）",
-                    conn=conn
+                    conn=conn,
                 )
 
                 # Update new memory
@@ -1963,18 +2300,33 @@ def resolve_memory(
                 cand["updated_at"] = timestamp_now
 
                 db_row_cand = serialize_memory(cand)
-                set_clause = ", ".join(f"{col} = ?" for col in MEMORY_COLUMNS if col != "memory_id")
-                values = [db_row_cand.get(col) for col in MEMORY_COLUMNS if col != "memory_id"] + [candidate_id]
-                conn.execute(f"UPDATE memories SET {set_clause} WHERE memory_id = ?", values)
+                set_clause = ", ".join(
+                    f"{col} = ?" for col in MEMORY_COLUMNS if col != "memory_id"
+                )
+                values = [
+                    db_row_cand.get(col) for col in MEMORY_COLUMNS if col != "memory_id"
+                ] + [candidate_id]
+                conn.execute(
+                    f"UPDATE memories SET {set_clause} WHERE memory_id = ?", values
+                )
 
                 # Compute differences for candidate approved event
                 cand_changes = {
                     "status": {"before": "candidate", "after": "approved"},
-                    "valid_from": {"before": before_cand.get("valid_from"), "after": switch_date},
-                    "supersedes": {"before": before_cand.get("supersedes"), "after": target_memory_id}
+                    "valid_from": {
+                        "before": before_cand.get("valid_from"),
+                        "after": switch_date,
+                    },
+                    "supersedes": {
+                        "before": before_cand.get("supersedes"),
+                        "after": target_memory_id,
+                    },
                 }
                 if before_cand.get("memory_key") != target.get("memory_key"):
-                    cand_changes["memory_key"] = {"before": before_cand.get("memory_key"), "after": target.get("memory_key")}
+                    cand_changes["memory_key"] = {
+                        "before": before_cand.get("memory_key"),
+                        "after": target.get("memory_key"),
+                    }
 
                 log_memory_event(
                     event_type="approved",
@@ -1983,7 +2335,7 @@ def resolve_memory(
                     new_status="approved",
                     changes=cand_changes,
                     reason=f"手動操作: 既存記憶 {target_memory_id} の後継として承認",
-                    conn=conn
+                    conn=conn,
                 )
     finally:
         conn.close()
@@ -1994,7 +2346,9 @@ def resolve_memory(
 
 
 def _prune_dedup_suggestions(cursor, memory_id: str) -> None:
-    cursor.execute("SELECT memory_id, dedup_suggestions FROM memories WHERE dedup_suggestions IS NOT NULL")
+    cursor.execute(
+        "SELECT memory_id, dedup_suggestions FROM memories WHERE dedup_suggestions IS NOT NULL"
+    )
     rows = cursor.fetchall()
     for row in rows:
         mid = row["memory_id"]
@@ -2010,7 +2364,10 @@ def _prune_dedup_suggestions(cursor, memory_id: str) -> None:
         filtered = [s for s in suggestions if s.get("target_memory_id") != memory_id]
         if len(filtered) != len(suggestions):
             new_val = json.dumps(filtered, ensure_ascii=False) if filtered else None
-            cursor.execute("UPDATE memories SET dedup_suggestions = ? WHERE memory_id = ?", (new_val, mid))
+            cursor.execute(
+                "UPDATE memories SET dedup_suggestions = ? WHERE memory_id = ?",
+                (new_val, mid),
+            )
 
 
 def delete_memory(memory_id: str) -> dict:
@@ -2024,12 +2381,19 @@ def delete_memory(memory_id: str) -> dict:
             cursor.execute("SELECT * FROM memories WHERE memory_id = ?", (memory_id,))
             row = cursor.fetchone()
             if row is None:
-                return {"found": False, "deleted": False, "events_deleted": 0, "memory": None}
+                return {
+                    "found": False,
+                    "deleted": False,
+                    "events_deleted": 0,
+                    "memory": None,
+                }
 
             target = deserialize_memory(dict(row))
             was_approved = target.get("status") == "approved"
 
-            cursor.execute("DELETE FROM memory_events WHERE memory_id = ?", (memory_id,))
+            cursor.execute(
+                "DELETE FROM memory_events WHERE memory_id = ?", (memory_id,)
+            )
             events_deleted = cursor.rowcount
 
             _prune_dedup_suggestions(cursor, memory_id)
@@ -2040,7 +2404,12 @@ def delete_memory(memory_id: str) -> dict:
     if was_approved:
         project_approved_memories()
 
-    return {"found": True, "deleted": True, "events_deleted": events_deleted, "memory": target}
+    return {
+        "found": True,
+        "deleted": True,
+        "events_deleted": events_deleted,
+        "memory": target,
+    }
 
 
 def batch_delete_memories(memory_ids: list[str]) -> dict:
@@ -2091,7 +2460,7 @@ EXPECTED_FILES = {
     "decision_policy.md": "判断方針・優先順位 (Decision Policy)",
     "risk_tolerance.md": "リスク許容度・慎重さの方針 (Risk Tolerance)",
     "memory_rules.md": "明示された記憶管理ルール (Memory Rules)",
-    "current_projects.md": "現在進行中のプロジェクト・コミットメント (Current Projects)"
+    "current_projects.md": "現在進行中のプロジェクト・コミットメント (Current Projects)",
 }
 
 
@@ -2127,7 +2496,9 @@ def render_copilot_profile() -> list[str]:
 
     contents = {}
     if not active_approved:
-        logger.info("No active approved memories found. Generating fallback notice for all files.")
+        logger.info(
+            "No active approved memories found. Generating fallback notice for all files."
+        )
         for filename in expected_keys:
             contents[filename] = "現時点で承認済みメモリなし"
     else:
@@ -2144,7 +2515,7 @@ def render_copilot_profile() -> list[str]:
                 "valid_until": m.get("valid_until"),
                 "stability": m.get("stability"),
                 "sensitivity": m.get("sensitivity"),
-                "extraction_confidence": m.get("extraction_confidence")
+                "extraction_confidence": m.get("extraction_confidence"),
             }
             filtered_memories.append(filtered_m)
 
@@ -2152,8 +2523,7 @@ def render_copilot_profile() -> list[str]:
 
         # Render prompt
         rendered_prompt = prompt.render_prompt(
-            config.MEMORY_RENDERER_PROMPT_PATH,
-            {"memories": json_memories}
+            config.MEMORY_RENDERER_PROMPT_PATH, {"memories": json_memories}
         )
 
         # Call LLM
@@ -2162,7 +2532,7 @@ def render_copilot_profile() -> list[str]:
             model=config.MEMORY_RENDERER_MODEL,
             prompt=rendered_prompt,
             max_tokens=32000,
-            temperature=0.2
+            temperature=0.2,
         ).strip()
 
         # Clean response
@@ -2175,7 +2545,9 @@ def render_copilot_profile() -> list[str]:
         try:
             data = json.loads(response)
         except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse LLM response as JSON: {e}. Response was: {response}")
+            logger.error(
+                f"Failed to parse LLM response as JSON: {e}. Response was: {response}"
+            )
             raise ValueError(f"LLM response is not a valid JSON string: {e}")
 
         if not isinstance(data, dict):
@@ -2185,7 +2557,9 @@ def render_copilot_profile() -> list[str]:
         # Validation checks
         actual_keys = set(data.keys())
         if actual_keys != expected_keys:
-            logger.error(f"JSON key mismatch. Expected keys: {expected_keys}. Got: {actual_keys}")
+            logger.error(
+                f"JSON key mismatch. Expected keys: {expected_keys}. Got: {actual_keys}"
+            )
             raise ValueError(f"JSON key mismatch. Expected exactly: {expected_keys}")
 
         for key, val in data.items():

@@ -1,17 +1,27 @@
 import json
 import logging
-import re
 from calendar import monthrange
 from datetime import datetime, timedelta
-from pathlib import Path
 
 from obsidian_ai_hub.summary import store as summary_store
-from obsidian_ai_hub.utils import config, reader, llm_client, prompt
-from obsidian_ai_hub.utils.topics import TOPIC_ENUM, normalize_keywords, normalize_topics
+from obsidian_ai_hub.utils import config, llm_client, prompt, reader  # noqa: F401  (re-exported for test patching)
+from obsidian_ai_hub.utils.topics import (
+    TOPIC_ENUM,
+    normalize_keywords,
+    normalize_topics,
+)
 
 logger = logging.getLogger(__name__)
 
-MONTH_ITEM_KINDS = ["highlights", "progress", "changes", "learnings", "reflections", "patterns", "gratitude"]
+MONTH_ITEM_KINDS = [
+    "highlights",
+    "progress",
+    "changes",
+    "learnings",
+    "reflections",
+    "patterns",
+    "gratitude",
+]
 
 
 def load_weekly_records(target_date: datetime) -> list[dict]:
@@ -41,15 +51,18 @@ def load_weekly_records(target_date: datetime) -> list[dict]:
         except ValueError:
             continue
         # 週の少なくとも一部が該当月に含まれている場合
-        if (first_day <= ws_dt <= last_day) or (first_day <= we_dt <= last_day) or (ws_dt <= first_day and we_dt >= last_day):
+        if (
+            (first_day <= ws_dt <= last_day)
+            or (first_day <= we_dt <= last_day)
+            or (ws_dt <= first_day and we_dt >= last_day)
+        ):
             records.append(rec)
 
     return records
 
 
 def get_monthly_structured_record(
-    date: datetime,
-    weekly_records: list[dict]
+    date: datetime, weekly_records: list[dict]
 ) -> dict | None:
     month_id = date.strftime("%Y-%m")
     generated_at = datetime.now().isoformat()
@@ -80,9 +93,11 @@ def get_monthly_structured_record(
         rendered_prompt = prompt.render_prompt(
             config.SUMMARIZE_MONTH_PROMPT_PATH,
             {
-                "WEEKLY_RECORDS": json.dumps(weekly_records, ensure_ascii=False, indent=2),
+                "WEEKLY_RECORDS": json.dumps(
+                    weekly_records, ensure_ascii=False, indent=2
+                ),
                 "TOPIC_CANDIDATES": json.dumps(TOPIC_ENUM, ensure_ascii=False),
-            }
+            },
         )
         response = llm_client.generate_llm_response(
             provider=config.MAKE_TODAY_TARGET_PROVIDER,
@@ -102,7 +117,15 @@ def get_monthly_structured_record(
 
         scalar_fields = {"summary"}
         list_fields = {
-            "keywords", "topics", "highlights", "progress", "changes", "learnings", "reflections", "patterns", "gratitude",
+            "keywords",
+            "topics",
+            "highlights",
+            "progress",
+            "changes",
+            "learnings",
+            "reflections",
+            "patterns",
+            "gratitude",
         }
 
         for key in scalar_fields | list_fields | {"people"}:
@@ -115,10 +138,12 @@ def get_monthly_structured_record(
                     normalized_people = []
                     for p in val:
                         if isinstance(p, dict) and p.get("name"):
-                            normalized_people.append({
-                                "name": str(p.get("name", "")),
-                                "note": str(p.get("note", ""))
-                            })
+                            normalized_people.append(
+                                {
+                                    "name": str(p.get("name", "")),
+                                    "note": str(p.get("note", "")),
+                                }
+                            )
                     record["people"] = normalized_people
                 elif key in scalar_fields and isinstance(val, (str, int, float)):
                     record[key] = str(val)
@@ -135,14 +160,18 @@ def get_monthly_structured_record(
                         )
 
         # display_order を kind 単位で振り直す
-        record["items"].sort(key=lambda x: (MONTH_ITEM_KINDS.index(x["kind"]), x["display_order"]))
+        record["items"].sort(
+            key=lambda x: (MONTH_ITEM_KINDS.index(x["kind"]), x["display_order"])
+        )
         for kind in MONTH_ITEM_KINDS:
             kind_items = [i for i in record["items"] if i["kind"] == kind]
             for idx, item in enumerate(kind_items):
                 item["display_order"] = idx
 
     except Exception as e:
-        logger.error(f"Failed to generate or parse structured monthly record: {e}", exc_info=True)
+        logger.error(
+            f"Failed to generate or parse structured monthly record: {e}", exc_info=True
+        )
         return None
 
     return record
@@ -209,7 +238,9 @@ def summarize_month(target_date: datetime):
     # 2. 構造化レコードの生成
     structured_record = get_monthly_structured_record(target_date, weekly_records)
     if structured_record is None:
-        logger.error("Skipping persistence as monthly structured record generation failed")
+        logger.error(
+            "Skipping persistence as monthly structured record generation failed"
+        )
         return
 
     # 3. SQLiteへの保存

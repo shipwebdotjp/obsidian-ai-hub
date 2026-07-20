@@ -1,9 +1,8 @@
-from datetime import datetime, timedelta, time
+from datetime import datetime, timedelta
 import json
 import logging
 import shlex
 import subprocess
-from pathlib import Path
 
 import yaml
 from obsidian_ai_hub.utils import config
@@ -14,6 +13,7 @@ TEST_TASK_FILE = config.BASE_DIR / "tasks" / "tasks.test.yml"
 DEFAULT_TASK_FILE = config.BASE_DIR / "tasks" / "tasks.yml"
 LOCAL_TASK_FILE = config.BASE_DIR / "tasks" / "tasks.local.yml"
 STATE_FILE = config.TASK_RUN_STATE_PATH
+
 
 def parse_cron_field(value, min_val, max_val) -> set[int]:
     if isinstance(value, int):
@@ -103,8 +103,12 @@ def compute_target(schedule: dict, now: datetime) -> datetime:
     now = now.replace(microsecond=0)
 
     # 許容値の集合を定義（降順ソート済みリストとして保持）
-    seconds = sorted(list(parse_cron_field(schedule.get("second", 0), 0, 59)), reverse=True)
-    minutes = sorted(list(parse_cron_field(schedule.get("minute", 0), 0, 59)), reverse=True)
+    seconds = sorted(
+        list(parse_cron_field(schedule.get("second", 0), 0, 59)), reverse=True
+    )
+    minutes = sorted(
+        list(parse_cron_field(schedule.get("minute", 0), 0, 59)), reverse=True
+    )
     hours = sorted(list(parse_cron_field(schedule.get("hour", 0), 0, 23)), reverse=True)
     days = sorted(list(parse_cron_field(schedule.get("day", 1), 1, 31)), reverse=True)
     weekdays = parse_cron_field(schedule.get("weekday", "*"), 0, 6)
@@ -152,7 +156,9 @@ def compute_target(schedule: dict, now: datetime) -> datetime:
             if next_m is not None:
                 curr = curr.replace(minute=next_m, second=seconds[0])
             else:
-                curr = (curr - timedelta(hours=1)).replace(minute=minutes[0], second=seconds[0])
+                curr = (curr - timedelta(hours=1)).replace(
+                    minute=minutes[0], second=seconds[0]
+                )
             continue
 
         if t == "hourly":
@@ -165,7 +171,9 @@ def compute_target(schedule: dict, now: datetime) -> datetime:
             if next_h is not None:
                 curr = curr.replace(hour=next_h, minute=minutes[0], second=seconds[0])
             else:
-                curr = (curr - timedelta(days=1)).replace(hour=hours[0], minute=minutes[0], second=seconds[0])
+                curr = (curr - timedelta(days=1)).replace(
+                    hour=hours[0], minute=minutes[0], second=seconds[0]
+                )
             continue
 
         if t == "daily":
@@ -176,6 +184,7 @@ def compute_target(schedule: dict, now: datetime) -> datetime:
         # weekly と monthly は1日ずつ戻る
         curr -= timedelta(days=1)
         curr = curr.replace(hour=hours[0], minute=minutes[0], second=seconds[0])
+
 
 def load_tasks():
     if config.IS_TEST_ENV:
@@ -189,10 +198,7 @@ def load_tasks():
 def load_state():
     if STATE_FILE.exists():
         with STATE_FILE.open() as f:
-            return {
-                k: datetime.fromisoformat(v)
-                for k, v in json.load(f).items()
-            }
+            return {k: datetime.fromisoformat(v) for k, v in json.load(f).items()}
     return {}
 
 
@@ -212,7 +218,9 @@ def run_command(command):
     Each segment is parsed with shlex and executed with shell=False.
     """
     cwd = None
-    segments = [segment.strip() for segment in str(command).split("&&") if segment.strip()]
+    segments = [
+        segment.strip() for segment in str(command).split("&&") if segment.strip()
+    ]
     if not segments:
         return
 
@@ -256,4 +264,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

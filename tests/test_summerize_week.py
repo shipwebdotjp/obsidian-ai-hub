@@ -1,7 +1,6 @@
 import json
 from datetime import datetime, timedelta
-from unittest.mock import MagicMock, patch
-from pathlib import Path
+from unittest.mock import patch
 import pytest
 
 from obsidian_ai_hub import memory
@@ -40,22 +39,25 @@ def test_load_daily_records(mock_config, test_memory_db_path):
     conn = memory.get_db_connection()
     try:
         for d in week_dates[:2]:
-            store.upsert_summary({
-                "period_type": "day",
-                "period_key": d.strftime("%Y-%m-%d"),
-                "period_start": d.strftime("%Y-%m-%d"),
-                "period_end": d.strftime("%Y-%m-%d"),
-                "generated_at": "2023-10-23T22:00:00",
-                "summary": f"Day {d.day}",
-                "keywords": [],
-                "mood": None,
-                "sleep_raw": None,
-                "sleep_hours": None,
-                "topics": [],
-                "projects": [],
-                "people": [],
-                "items": [],
-            }, conn=conn)
+            store.upsert_summary(
+                {
+                    "period_type": "day",
+                    "period_key": d.strftime("%Y-%m-%d"),
+                    "period_start": d.strftime("%Y-%m-%d"),
+                    "period_end": d.strftime("%Y-%m-%d"),
+                    "generated_at": "2023-10-23T22:00:00",
+                    "summary": f"Day {d.day}",
+                    "keywords": [],
+                    "mood": None,
+                    "sleep_raw": None,
+                    "sleep_hours": None,
+                    "topics": [],
+                    "projects": [],
+                    "people": [],
+                    "items": [],
+                },
+                conn=conn,
+            )
         conn.commit()
     finally:
         conn.close()
@@ -89,7 +91,10 @@ def test_upsert_summary_record(mock_config, test_memory_db_path):
     conn = memory.get_db_connection()
     try:
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM summaries WHERE period_type = ? AND period_key = ?", ("week", "2023-W43"))
+        cursor.execute(
+            "SELECT * FROM summaries WHERE period_type = ? AND period_key = ?",
+            ("week", "2023-W43"),
+        )
         row = cursor.fetchone()
         assert row is not None
         assert row["summary"] == "Week 43"
@@ -102,18 +107,32 @@ def test_upsert_summary_record(mock_config, test_memory_db_path):
 def test_get_weekly_structured_record(mock_llm, mock_render, mock_config):
     target_date = datetime(2023, 10, 27)  # W43
     mock_render.return_value = "Rendered Prompt"
-    mock_llm.return_value = json.dumps({
-        "summary": "AI Weekly Summary",
-        "keywords": [" Python ", "Python", "Obsidian"],
-        "topics": ["Work"],
-        "highlights": ["Highlight 1"],
-        "progress": ["Progress 1"],
-        "people": [{"name": "Bob", "note": "Partner"}]
-    })
+    mock_llm.return_value = json.dumps(
+        {
+            "summary": "AI Weekly Summary",
+            "keywords": [" Python ", "Python", "Obsidian"],
+            "topics": ["Work"],
+            "highlights": ["Highlight 1"],
+            "progress": ["Progress 1"],
+            "people": [{"name": "Bob", "note": "Partner"}],
+        }
+    )
 
     daily_records = [
-        {"summary": "Day 1", "mood": "Stable", "sleep_raw": "8h", "sleep_hours": 8.0, "items": []},
-        {"summary": "Day 2", "mood": "Energetic", "sleep_raw": "7.5", "sleep_hours": 7.5, "items": []},
+        {
+            "summary": "Day 1",
+            "mood": "Stable",
+            "sleep_raw": "8h",
+            "sleep_hours": 8.0,
+            "items": [],
+        },
+        {
+            "summary": "Day 2",
+            "mood": "Energetic",
+            "sleep_raw": "7.5",
+            "sleep_hours": 7.5,
+            "items": [],
+        },
         None,
         None,
         None,
@@ -128,13 +147,20 @@ def test_get_weekly_structured_record(mock_llm, mock_render, mock_config):
     assert record["mood"] is None
     assert record["sleep_hours"] is None
     assert record["people"][0]["name"] == "Bob"
-    assert any(i["kind"] == "highlights" and i["body"] == "Highlight 1" for i in record["items"])
-    assert any(i["kind"] == "progress" and i["body"] == "Progress 1" for i in record["items"])
+    assert any(
+        i["kind"] == "highlights" and i["body"] == "Highlight 1"
+        for i in record["items"]
+    )
+    assert any(
+        i["kind"] == "progress" and i["body"] == "Progress 1" for i in record["items"]
+    )
 
 
 @patch("obsidian_ai_hub.summerize_week.prompt.render_prompt")
 @patch("obsidian_ai_hub.summerize_week.llm_client.generate_llm_response")
-def test_get_weekly_structured_record_malformed_json(mock_llm, mock_render, mock_config):
+def test_get_weekly_structured_record_malformed_json(
+    mock_llm, mock_render, mock_config
+):
     target_date = datetime(2023, 10, 27)
     mock_render.return_value = "Rendered Prompt"
     mock_llm.return_value = "```json\nINVALID\n```"
@@ -153,7 +179,7 @@ def test_format_weekly_record_as_markdown():
             {"kind": "highlights", "body": "Highlight", "display_order": 0},
             {"kind": "progress", "body": "Progress", "display_order": 0},
         ],
-        "people": [{"name": "Charlie", "note": "Met"}]
+        "people": [{"name": "Charlie", "note": "Met"}],
     }
     md = format_weekly_record_as_markdown(record)
     assert "Great week." in md
@@ -170,13 +196,17 @@ def test_format_weekly_record_as_markdown():
 def test_summarize_week(mock_llm, mock_render, mock_config, test_memory_db_path):
     target_date = datetime(2023, 10, 27)
     mock_render.return_value = "Rendered Prompt"
-    mock_llm.return_value = json.dumps({
-        "summary": "Weekly Summary",
-        "topics": ["AI"],
-        "highlights": ["Highlight"],
-    })
+    mock_llm.return_value = json.dumps(
+        {
+            "summary": "Weekly Summary",
+            "topics": ["AI"],
+            "highlights": ["Highlight"],
+        }
+    )
 
-    with patch("obsidian_ai_hub.summerize_week.load_daily_records", return_value=[None] * 7):
+    with patch(
+        "obsidian_ai_hub.summerize_week.load_daily_records", return_value=[None] * 7
+    ):
         summarize_week(target_date)
 
     conn = memory.get_db_connection()
@@ -193,15 +223,19 @@ def test_summarize_week(mock_llm, mock_render, mock_config, test_memory_db_path)
 
 @patch("obsidian_ai_hub.summerize_week.prompt.render_prompt")
 @patch("obsidian_ai_hub.summerize_week.llm_client.generate_llm_response")
-def test_get_weekly_structured_record_passes_candidates_and_normalizes_topics(mock_llm, mock_render, mock_config):
+def test_get_weekly_structured_record_passes_candidates_and_normalizes_topics(
+    mock_llm, mock_render, mock_config
+):
     target_date = datetime(2023, 10, 27)  # W43
     mock_render.return_value = "Rendered Prompt"
 
     # LLM returns topics with mixed valid, duplicates, and out-of-candidates
-    mock_llm.return_value = json.dumps({
-        "summary": "AI Weekly Summary",
-        "topics": ["LLM・AI活用", "未知のトピック", "LLM・AI活用"]
-    })
+    mock_llm.return_value = json.dumps(
+        {
+            "summary": "AI Weekly Summary",
+            "topics": ["LLM・AI活用", "未知のトピック", "LLM・AI活用"],
+        }
+    )
 
     record = get_weekly_structured_record(target_date, [])
 

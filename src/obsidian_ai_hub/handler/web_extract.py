@@ -25,9 +25,13 @@ def _get_web_extract_tool() -> TavilyExtract:
         include_images=False,
     )
 
+
 class WebExtractInput(BaseModel):
     """Input for web extraction."""
-    urls: list[str] = Field(description="A list of URL strings to extract content from. Maximum 20 URLs at once.")
+
+    urls: list[str] = Field(
+        description="A list of URL strings to extract content from. Maximum 20 URLs at once."
+    )
 
 
 @tool(args_schema=WebExtractInput)
@@ -48,13 +52,13 @@ def web_extract(urls: list[str]) -> str:
     """
     try:
         tavily_extract = _get_web_extract_tool()
-        
+
         # langchain_tavilyのTavilyExtractは引数にurlsリストを取る
         results = tavily_extract.invoke({"urls": urls})
-        
+
         # そのままJSON文字列として返す
         return json.dumps(results, ensure_ascii=False)
-        
+
     except Exception as exc:
         logger.exception("Web extract failed")
         return json.dumps({"error": str(exc)}, ensure_ascii=False)

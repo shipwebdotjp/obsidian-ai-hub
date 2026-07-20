@@ -10,7 +10,10 @@ from obsidian_ai_hub.research import suggest as suggest_research_theme
 
 from obsidian_ai_hub.activity.store import add_activity
 
-def _write_activity_log(base_dir: Path, activity_date: date, summaries: list[str]) -> Path:
+
+def _write_activity_log(
+    base_dir: Path, activity_date: date, summaries: list[str]
+) -> Path:
     for i, s in enumerate(summaries):
         add_activity(
             activity_date=activity_date.strftime("%Y-%m-%d"),
@@ -30,20 +33,33 @@ def test_build_suggestions_uses_activity_context_and_avoids_existing(
     today = date.today()
     activity_root = tmp_path / "activity"
 
-    _write_activity_log(activity_root, today, [
-        "Obsidian の見出し設計を考える",
-        "タスク管理の切り口を検討",
-    ])
-    _write_activity_log(activity_root, today - timedelta(days=1), [
-        "ノート構造の見直し",
-    ])
+    _write_activity_log(
+        activity_root,
+        today,
+        [
+            "Obsidian の見出し設計を考える",
+            "タスク管理の切り口を検討",
+        ],
+    )
+    _write_activity_log(
+        activity_root,
+        today - timedelta(days=1),
+        [
+            "ノート構造の見直し",
+        ],
+    )
 
     monkeypatch.setattr(suggest_research_theme.config, "ACTIVITY_PATH", activity_root)
 
     from obsidian_ai_hub.research import db as research_themes
+
     assert suggest_research_theme.config.MEMORY_SQLITE_PATH == test_memory_db_path
-    research_themes.create_theme(theme="既存テーマA", direction="既存の方向", kind="deep", confidence=0.9)
-    rejected = research_themes.create_theme(theme="却下済みテーマ", direction="却下方向", kind="explore", confidence=0.5)
+    research_themes.create_theme(
+        theme="既存テーマA", direction="既存の方向", kind="deep", confidence=0.9
+    )
+    rejected = research_themes.create_theme(
+        theme="却下済みテーマ", direction="却下方向", kind="explore", confidence=0.5
+    )
     research_themes.set_status(rejected["theme_id"], "rejected")
 
     llm_response = json.dumps(
@@ -82,30 +98,45 @@ def test_build_suggestions_uses_activity_context_and_avoids_existing(
         ensure_ascii=False,
     )
 
-    def fake_llm_response(*, provider: str, model: str, prompt: str, temperature: float, max_tokens: int) -> str:
+    def fake_llm_response(
+        *, provider: str, model: str, prompt: str, temperature: float, max_tokens: int
+    ) -> str:
         assert "Obsidian の見出し設計" in prompt
         assert "既存テーマA" in prompt
         assert "[candidate]" in prompt
         assert "[rejected]" in prompt
         return llm_response
 
-    with patch.object(suggest_research_theme.llm_client, "generate_llm_response", side_effect=fake_llm_response):
+    with patch.object(
+        suggest_research_theme.llm_client,
+        "generate_llm_response",
+        side_effect=fake_llm_response,
+    ):
         suggestions = suggest_research_theme.build_suggestions()
 
     assert [item.kind for item in suggestions] == ["deep", "adjacent", "explore"]
-    existing_keys = {suggest_research_theme._candidate_key(t.theme) for t in suggest_research_theme._load_existing_db_themes()}
+    existing_keys = {
+        suggest_research_theme._candidate_key(t.theme)
+        for t in suggest_research_theme._load_existing_db_themes()
+    }
     for item in suggestions:
         assert suggest_research_theme._candidate_key(item.theme) not in existing_keys
     assert len(suggestions) == 3
 
 
-def test_build_suggestions_returns_empty_when_llm_output_is_invalid(tmp_path: Path, monkeypatch):
+def test_build_suggestions_returns_empty_when_llm_output_is_invalid(
+    tmp_path: Path, monkeypatch
+):
     today = date.today()
     activity_root = tmp_path / "activity"
     _write_activity_log(activity_root, today, ["テストアクティビティ"])
     monkeypatch.setattr(suggest_research_theme.config, "ACTIVITY_PATH", activity_root)
 
-    with patch.object(suggest_research_theme.llm_client, "generate_llm_response", side_effect=RuntimeError("boom")):
+    with patch.object(
+        suggest_research_theme.llm_client,
+        "generate_llm_response",
+        side_effect=RuntimeError("boom"),
+    ):
         suggestions = suggest_research_theme.build_suggestions()
 
     assert suggestions == []
@@ -133,7 +164,11 @@ def test_main_creates_themes_and_researches(tmp_path: Path, monkeypatch):
     )
 
     with (
-        patch.object(suggest_research_theme.llm_client, "generate_llm_response", return_value=llm_response),
+        patch.object(
+            suggest_research_theme.llm_client,
+            "generate_llm_response",
+            return_value=llm_response,
+        ),
         patch("obsidian_ai_hub.research.runner.run_theme_research") as mock_research,
     ):
         results = suggest_research_theme.main()

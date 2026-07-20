@@ -223,11 +223,7 @@ def test_cross_field_boundary_backtrack():
 
 def test_complex_yaml_array_multi_field():
     now = datetime(2026, 1, 29, 10, 0, 0)
-    schedule = {
-        "type": "daily",
-        "hour": [8, 12, 16],
-        "minute": [0, 30]
-    }
+    schedule = {"type": "daily", "hour": [8, 12, 16], "minute": [0, 30]}
     # latest <= 10:00:00 is 08:30:00
     expected = datetime(2026, 1, 29, 8, 30, 0)
     assert compute_target(schedule, now) == expected

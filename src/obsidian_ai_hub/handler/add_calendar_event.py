@@ -18,29 +18,46 @@ try:
         EKEvent,
     )
     from Foundation import NSRunLoop, NSDate
+
     EVENT_KIT_AVAILABLE = True
 except ImportError:
     EVENT_KIT_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
+
 class AddCalendarEventInput(BaseModel):
     """Input for adding a calendar event."""
+
     title: str = Field(description="The title of the event.")
-    start_time: str = Field(description="The start time of the event in ISO format (e.g., '2023-10-27T10:00:00').")
-    end_time: Optional[str] = Field(default=None, description="The end time of the event in ISO format. If not provided, defaults to 1 hour after start_time.")
-    location: Optional[str] = Field(default=None, description="The location of the event.")
-    calendar_name: Optional[str] = Field(default=None, description="The name of the calendar to add the event to. Defaults to the default calendar.")
+    start_time: str = Field(
+        description="The start time of the event in ISO format (e.g., '2023-10-27T10:00:00')."
+    )
+    end_time: Optional[str] = Field(
+        default=None,
+        description="The end time of the event in ISO format. If not provided, defaults to 1 hour after start_time.",
+    )
+    location: Optional[str] = Field(
+        default=None, description="The location of the event."
+    )
+    calendar_name: Optional[str] = Field(
+        default=None,
+        description="The name of the calendar to add the event to. Defaults to the default calendar.",
+    )
+
 
 def _ensure_calendar_access(store: EKEventStore) -> None:
     import threading
+
     status = EKEventStore.authorizationStatusForEntityType_(EKEntityTypeEvent)
 
     if status == EKAuthorizationStatusAuthorized:
         return
 
     if status != EKAuthorizationStatusNotDetermined:
-        raise PermissionError("Calendar access is denied/restricted. Enable it in System Settings.")
+        raise PermissionError(
+            "Calendar access is denied/restricted. Enable it in System Settings."
+        )
 
     done = threading.Event()
     granted_box = {"granted": False, "error": None}
@@ -53,13 +70,17 @@ def _ensure_calendar_access(store: EKEventStore) -> None:
     store.requestAccessToEntityType_completion_(EKEntityTypeEvent, handler)
 
     while not done.wait(0.05):
-        NSRunLoop.currentRunLoop().runUntilDate_(NSDate.dateWithTimeIntervalSinceNow_(0.05))
+        NSRunLoop.currentRunLoop().runUntilDate_(
+            NSDate.dateWithTimeIntervalSinceNow_(0.05)
+        )
 
     if not granted_box["granted"]:
         raise PermissionError("Calendar access not granted")
 
+
 def _dt_to_nsdate(dt: datetime) -> NSDate:
     return NSDate.dateWithTimeIntervalSince1970_(dt.timestamp())
+
 
 @tool(args_schema=AddCalendarEventInput)
 def add_calendar_event(
@@ -130,8 +151,11 @@ def add_calendar_event(
     else:
         return f"Failed to save event: {error}"
 
+
 def main():
-    parser = argparse.ArgumentParser(description="Add a calendar event to macOS Calendar")
+    parser = argparse.ArgumentParser(
+        description="Add a calendar event to macOS Calendar"
+    )
     parser.add_argument("title", help="Event title")
     parser.add_argument("start_time", help="Start time (ISO format)")
     parser.add_argument("--end_time", help="End time (ISO format)")
@@ -140,14 +164,17 @@ def main():
 
     args = parser.parse_args()
 
-    result = add_calendar_event.invoke({
-        "title": args.title,
-        "start_time": args.start_time,
-        "end_time": args.end_time,
-        "location": args.location,
-        "calendar_name": args.calendar
-    })
+    result = add_calendar_event.invoke(
+        {
+            "title": args.title,
+            "start_time": args.start_time,
+            "end_time": args.end_time,
+            "location": args.location,
+            "calendar_name": args.calendar,
+        }
+    )
     print(result)
+
 
 if __name__ == "__main__":
     main()

@@ -1,7 +1,6 @@
 import json
 from pathlib import Path
 
-import pytest
 
 from obsidian_ai_hub import memory
 from obsidian_ai_hub.summary import migration
@@ -84,7 +83,9 @@ def _make_month_record(month: str, summary: str = "Month summary") -> dict:
 
 def test_basic_migration(test_memory_db_path, tmp_path):
     activity_path = tmp_path / "activity"
-    _write_jsonl(activity_path, "2026/07/2026-07.jsonl", [_make_day_record("2026-07-17")])
+    _write_jsonl(
+        activity_path, "2026/07/2026-07.jsonl", [_make_day_record("2026-07-17")]
+    )
     _write_jsonl(activity_path, "2026/2026-week.jsonl", [_make_week_record("2026-W29")])
     _write_jsonl(activity_path, "2026/2026.jsonl", [_make_month_record("2026-07")])
 
@@ -123,7 +124,9 @@ def test_basic_migration(test_memory_db_path, tmp_path):
 
 def test_idempotent(test_memory_db_path, tmp_path):
     activity_path = tmp_path / "activity"
-    _write_jsonl(activity_path, "2026/07/2026-07.jsonl", [_make_day_record("2026-07-17")])
+    _write_jsonl(
+        activity_path, "2026/07/2026-07.jsonl", [_make_day_record("2026-07-17")]
+    )
 
     conn = memory.get_db_connection()
     try:
@@ -152,11 +155,15 @@ def test_idempotent(test_memory_db_path, tmp_path):
 
 def test_invalid_json_skipped(test_memory_db_path, tmp_path):
     activity_path = tmp_path / "activity"
-    _write_jsonl(activity_path, "2026/07/2026-07.jsonl", [
-        _make_day_record("2026-07-17"),
-        "not valid json",
-        _make_day_record("2026-07-18"),
-    ])
+    _write_jsonl(
+        activity_path,
+        "2026/07/2026-07.jsonl",
+        [
+            _make_day_record("2026-07-17"),
+            "not valid json",
+            _make_day_record("2026-07-18"),
+        ],
+    )
 
     conn = memory.get_db_connection()
     try:
@@ -169,10 +176,14 @@ def test_invalid_json_skipped(test_memory_db_path, tmp_path):
 
 def test_duplicate_period_key_last_wins(test_memory_db_path, tmp_path):
     activity_path = tmp_path / "activity"
-    _write_jsonl(activity_path, "2026/07/2026-07.jsonl", [
-        _make_day_record("2026-07-17", summary="First"),
-        _make_day_record("2026-07-17", summary="Last"),
-    ])
+    _write_jsonl(
+        activity_path,
+        "2026/07/2026-07.jsonl",
+        [
+            _make_day_record("2026-07-17", summary="First"),
+            _make_day_record("2026-07-17", summary="Last"),
+        ],
+    )
 
     conn = memory.get_db_connection()
     try:
@@ -189,7 +200,9 @@ def test_duplicate_period_key_last_wins(test_memory_db_path, tmp_path):
 
 def test_historical_new_fields_empty(test_memory_db_path, tmp_path):
     activity_path = tmp_path / "activity"
-    _write_jsonl(activity_path, "2026/07/2026-07.jsonl", [_make_day_record("2026-07-17")])
+    _write_jsonl(
+        activity_path, "2026/07/2026-07.jsonl", [_make_day_record("2026-07-17")]
+    )
     _write_jsonl(activity_path, "2026/2026-week.jsonl", [_make_week_record("2026-W29")])
     _write_jsonl(activity_path, "2026/2026.jsonl", [_make_month_record("2026-07")])
 
@@ -204,6 +217,8 @@ def test_historical_new_fields_empty(test_memory_db_path, tmp_path):
         assert not any(i["kind"] in ("highlights", "patterns") for i in week["items"])
 
         month = store.get_summary_by_period("month", "2026-07", conn=conn)
-        assert not any(i["kind"] in ("highlights", "patterns", "changes") for i in month["items"])
+        assert not any(
+            i["kind"] in ("highlights", "patterns", "changes") for i in month["items"]
+        )
     finally:
         conn.close()

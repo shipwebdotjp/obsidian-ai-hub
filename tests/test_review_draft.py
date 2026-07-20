@@ -23,14 +23,20 @@ DRAFT = """## 今週の達成
 
 def _configure(monkeypatch, tmp_path, weekly_note, daily_notes):
     weekly_path = tmp_path / "2026-W28.md"
-    monkeypatch.setattr(review_draft.reader, "get_weekly_note_content", lambda _: weekly_note)
-    monkeypatch.setattr(review_draft.reader, "get_weekly_note_path", lambda _: weekly_path)
+    monkeypatch.setattr(
+        review_draft.reader, "get_weekly_note_content", lambda _: weekly_note
+    )
+    monkeypatch.setattr(
+        review_draft.reader, "get_weekly_note_path", lambda _: weekly_path
+    )
     monkeypatch.setattr(
         review_draft.reader,
         "get_daily_note_path",
         lambda day: daily_notes.get(day.strftime("%Y-%m-%d"), tmp_path / "missing.md"),
     )
-    monkeypatch.setattr(review_draft.config, "REVIEW_DRAFT_PROMPT_PATH", tmp_path / "review_draft.md")
+    monkeypatch.setattr(
+        review_draft.config, "REVIEW_DRAFT_PROMPT_PATH", tmp_path / "review_draft.md"
+    )
     monkeypatch.setattr(review_draft.config, "REVIEW_DRAFT_PROVIDER", "test-provider")
     monkeypatch.setattr(review_draft.config, "REVIEW_DRAFT_MODEL", "test-model")
     monkeypatch.setattr(review_draft.config, "LINE_MESSAGING_TOKEN", "token")
@@ -52,8 +58,12 @@ def test_creates_saves_and_sends_review_draft(monkeypatch, tmp_path):
     )
 
     with (
-        patch.object(review_draft.prompt, "render_prompt", return_value="rendered") as render,
-        patch.object(review_draft.llm_client, "generate_llm_response", return_value=DRAFT) as generate,
+        patch.object(
+            review_draft.prompt, "render_prompt", return_value="rendered"
+        ) as render,
+        patch.object(
+            review_draft.llm_client, "generate_llm_response", return_value=DRAFT
+        ) as generate,
         patch.object(review_draft, "send_line_push", return_value=True) as send,
     ):
         assert review_draft.main("2026-07-12") is True
@@ -116,7 +126,9 @@ def test_no_daily_notes_does_not_generate_or_send(monkeypatch, tmp_path):
 def test_empty_llm_response_does_not_save_or_send(monkeypatch, tmp_path):
     daily_note = tmp_path / "2026-07-06.md"
     daily_note.write_text("Monday note", encoding="utf-8")
-    weekly_path = _configure(monkeypatch, tmp_path, "result::", {"2026-07-06": daily_note})
+    weekly_path = _configure(
+        monkeypatch, tmp_path, "result::", {"2026-07-06": daily_note}
+    )
 
     with (
         patch.object(review_draft.prompt, "render_prompt", return_value="rendered"),
@@ -136,7 +148,9 @@ def test_write_failure_does_not_send(monkeypatch, tmp_path):
 
     with (
         patch.object(review_draft.prompt, "render_prompt", return_value="rendered"),
-        patch.object(review_draft.llm_client, "generate_llm_response", return_value=DRAFT),
+        patch.object(
+            review_draft.llm_client, "generate_llm_response", return_value=DRAFT
+        ),
         patch.object(Path, "write_text", side_effect=OSError("disk full")),
         patch.object(review_draft, "send_line_push") as send,
     ):

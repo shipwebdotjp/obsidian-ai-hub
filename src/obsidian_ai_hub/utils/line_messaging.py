@@ -40,8 +40,6 @@ def send_line_push(token: str, to: str, message_text: str) -> bool:
 def send_line_push_messages(token: str, to: str, message_texts: list[str]) -> bool:
     """Send 1-5 text messages in a single LINE Push API call."""
     if not 1 <= len(message_texts) <= 5:
-        raise ValueError(
-            f"message_texts must have 1-5 items, got {len(message_texts)}"
-        )
+        raise ValueError(f"message_texts must have 1-5 items, got {len(message_texts)}")
     messages = [{"type": "text", "text": t} for t in message_texts]
     return _post_line_push(token, to, messages)

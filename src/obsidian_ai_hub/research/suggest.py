@@ -48,6 +48,7 @@ def _truncate_text(text: str, max_chars: int) -> str:
 
 def _build_context_pack() -> str:
     from obsidian_ai_hub.research import db
+
     try:
         entries = db.list_recent_activity_days(days=RECENT_DAYS)
     except Exception:
@@ -59,7 +60,9 @@ def _build_context_pack() -> str:
 
     blocks: list[str] = []
     for e in entries:
-        summary = _truncate_text(e.get("summary", "")[:MAX_CONTEXT_NOTE_CHARS], MAX_CONTEXT_NOTE_CHARS)
+        summary = _truncate_text(
+            e.get("summary", "")[:MAX_CONTEXT_NOTE_CHARS], MAX_CONTEXT_NOTE_CHARS
+        )
         category = e.get("category", "") or ""
         keywords = ", ".join(e.get("keywords", []) or [])
         date_str = e.get("activity_date", "")
@@ -79,6 +82,7 @@ def _build_context_pack() -> str:
 
 def _load_existing_db_themes() -> list[_ExistingThemeRef]:
     from obsidian_ai_hub.research import db
+
     try:
         themes = db.list_themes()
         return [
@@ -112,7 +116,7 @@ def _build_llm_prompt(existing_themes: Sequence[_ExistingThemeRef]) -> str:
             "LLM_CANDIDATE_COUNT": LLM_CANDIDATE_COUNT,
             "context_pack": context_pack,
             "existing_themes_block": _build_existing_themes_block(existing_themes),
-        }
+        },
     )
 
 
@@ -154,6 +158,7 @@ def _parse_confidence(value: object) -> float:
 
 def _candidate_key(theme: str) -> str:
     from obsidian_ai_hub.research import db
+
     return db.normalize_theme_key(theme)
 
 
@@ -221,7 +226,10 @@ def _build_llm_candidates(
                 max_tokens=8000,
             ).strip()
             payload = _extract_json_payload(response)
-            logger.info("LLM candidate generation response payload:\n%s", json.dumps(payload, ensure_ascii=False, indent=2))
+            logger.info(
+                "LLM candidate generation response payload:\n%s",
+                json.dumps(payload, ensure_ascii=False, indent=2),
+            )
             raw_candidates = payload.get("candidates", [])
             if not isinstance(raw_candidates, list):
                 raise ValueError("LLM response 'candidates' must be a list")
@@ -242,9 +250,14 @@ def _build_llm_candidates(
             raise ValueError("LLM returned no valid candidates")
         except Exception as exc:
             last_error = exc
-            logger.warning("LLM candidate generation failed on attempt %s: %s", attempt + 1, exc)
+            logger.warning(
+                "LLM candidate generation failed on attempt %s: %s", attempt + 1, exc
+            )
             if attempt == 0:
-                prompt_text = prompt_text + "\n\nJSON のみを返してください。余計な説明やコードフェンスは不要です。"
+                prompt_text = (
+                    prompt_text
+                    + "\n\nJSON のみを返してください。余計な説明やコードフェンスは不要です。"
+                )
 
     if last_error is not None:
         logger.exception("LLM candidate generation failed; using fallback themes")
@@ -282,7 +295,10 @@ def _select_final_suggestions(
     if len(selected) < 3:
         sorted_candidates = sorted(
             llm_candidates,
-            key=lambda item: (item.confidence, ALLOWED_KINDS.index(item.kind) if item.kind in ALLOWED_KINDS else 99),
+            key=lambda item: (
+                item.confidence,
+                ALLOWED_KINDS.index(item.kind) if item.kind in ALLOWED_KINDS else 99,
+            ),
             reverse=True,
         )
         for candidate in sorted_candidates:

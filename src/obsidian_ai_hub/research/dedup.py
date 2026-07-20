@@ -80,7 +80,9 @@ def run_dedup_review(
         }
 
     candidate_id = f"(候補: {candidate_theme})"
-    rendered = _render_dedup_prompt(candidate_id, candidate_theme, candidate_direction, candidate_why_now, existing)
+    rendered = _render_dedup_prompt(
+        candidate_id, candidate_theme, candidate_direction, candidate_why_now, existing
+    )
 
     try:
         response = llm_client.generate_llm_response(
@@ -146,7 +148,9 @@ def run_dedup_review(
                 "reason": reason,
                 "failed": False,
             }
-        logger.warning("LLM said duplicate but target_theme_id missing/invalid; treating as distinct")
+        logger.warning(
+            "LLM said duplicate but target_theme_id missing/invalid; treating as distinct"
+        )
         return {
             "decision": "distinct",
             "target_theme_id": None,

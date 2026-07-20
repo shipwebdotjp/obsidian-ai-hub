@@ -12,7 +12,9 @@ def test_run_research_returns_report_without_saving_to_vault():
     with (
         patch.object(runner, "collect_research_context", return_value=""),
         patch.object(runner, "route_research_topic", return_value="internal"),
-        patch.object(runner.llm_client, "generate_llm_response", return_value="mocked response"),
+        patch.object(
+            runner.llm_client, "generate_llm_response", return_value="mocked response"
+        ),
         patch.object(runner, "conduct_research", return_value="mocked report"),
     ):
         report = runner.run_research("test theme")
@@ -28,7 +30,9 @@ def test_run_theme_research_succeeds():
     with (
         patch.object(runner, "collect_research_context", return_value=""),
         patch.object(runner, "route_research_topic", return_value="internal"),
-        patch.object(runner.llm_client, "generate_llm_response", return_value="mocked title"),
+        patch.object(
+            runner.llm_client, "generate_llm_response", return_value="mocked title"
+        ),
         patch.object(runner, "conduct_research", return_value="mocked report"),
     ):
         job = runner.run_theme_research(rec["theme_id"])
@@ -40,12 +44,16 @@ def test_run_theme_research_succeeds():
 
 
 def test_run_theme_research_fails_keeps_theme_candidate():
-    rec = research_themes.create_theme(theme="失敗テスト", kind="explore", confidence=0.5)
+    rec = research_themes.create_theme(
+        theme="失敗テスト", kind="explore", confidence=0.5
+    )
 
     with (
         patch.object(runner, "collect_research_context", return_value=""),
         patch.object(runner, "route_research_topic", return_value="internal"),
-        patch.object(runner.llm_client, "generate_llm_response", side_effect=RuntimeError("fail")),
+        patch.object(
+            runner.llm_client, "generate_llm_response", side_effect=RuntimeError("fail")
+        ),
     ):
         job = runner.run_theme_research(rec["theme_id"])
 
@@ -58,12 +66,16 @@ def test_run_theme_research_fails_keeps_theme_candidate():
 
 
 def test_save_research_to_vault(tmp_path: Path):
-    rec = research_themes.create_theme(theme="Vault保存テスト", kind="deep", confidence=0.9)
+    rec = research_themes.create_theme(
+        theme="Vault保存テスト", kind="deep", confidence=0.9
+    )
 
     with (
         patch.object(runner, "collect_research_context", return_value=""),
         patch.object(runner, "route_research_topic", return_value="internal"),
-        patch.object(runner.llm_client, "generate_llm_response", return_value="テストタイトル"),
+        patch.object(
+            runner.llm_client, "generate_llm_response", return_value="テストタイトル"
+        ),
         patch.object(runner, "conduct_research", return_value="テストレポート本文"),
     ):
         runner.run_theme_research(rec["theme_id"])
@@ -105,7 +117,9 @@ def test_main_failure_keeps_candidate_status():
     with (
         patch.object(runner, "collect_research_context", return_value=""),
         patch.object(runner, "route_research_topic", return_value="internal"),
-        patch.object(runner.llm_client, "generate_llm_response", side_effect=RuntimeError("fail")),
+        patch.object(
+            runner.llm_client, "generate_llm_response", side_effect=RuntimeError("fail")
+        ),
     ):
         result = runner.main(theme="失敗テーマ")
 
@@ -129,7 +143,9 @@ def test_main_approved_theme_failure_keeps_approved_status():
     with (
         patch.object(runner, "collect_research_context", return_value=""),
         patch.object(runner, "route_research_topic", return_value="internal"),
-        patch.object(runner.llm_client, "generate_llm_response", side_effect=RuntimeError("fail")),
+        patch.object(
+            runner.llm_client, "generate_llm_response", side_effect=RuntimeError("fail")
+        ),
     ):
         result = runner.main(theme="既存承認済み失敗テーマ")
 
@@ -167,7 +183,9 @@ def test_main_reuses_existing_approved_theme(tmp_path: Path):
     with (
         patch.object(runner, "collect_research_context", return_value=""),
         patch.object(runner, "route_research_topic", return_value="internal"),
-        patch.object(runner.llm_client, "generate_llm_response", return_value="mocked_v2"),
+        patch.object(
+            runner.llm_client, "generate_llm_response", return_value="mocked_v2"
+        ),
         patch.object(runner, "conduct_research", return_value="report2"),
         patch.object(runner.config, "RESEARCH_OUTPUT_DIR", output_dir),
     ):
@@ -184,11 +202,15 @@ def test_research_uses_the_provider_and_model_for_each_llm_role():
     with (
         patch.object(runner.config, "RESEARCH_ROUTER_PROVIDER", "router-provider"),
         patch.object(runner.config, "RESEARCH_ROUTER_MODEL", "router-model"),
-        patch.object(runner.config, "RESEARCH_TITLE_GENERATION_PROVIDER", "title-provider"),
+        patch.object(
+            runner.config, "RESEARCH_TITLE_GENERATION_PROVIDER", "title-provider"
+        ),
         patch.object(runner.config, "RESEARCH_TITLE_GENERATION_MODEL", "title-model"),
         patch.object(runner.config, "RESEARCH_INTERNAL_PROVIDER", "internal-provider"),
         patch.object(runner.config, "RESEARCH_INTERNAL_MODEL", "internal-model"),
-        patch.object(runner.llm_client, "generate_llm_response", return_value="internal") as mock_response,
+        patch.object(
+            runner.llm_client, "generate_llm_response", return_value="internal"
+        ) as mock_response,
     ):
         runner.route_research_topic("topic")
         runner.generate_research_title("topic", "prompt")
@@ -206,7 +228,9 @@ def test_web_research_uses_its_own_provider_and_model():
     with (
         patch.object(runner.config, "RESEARCH_WEB_PROVIDER", "web-provider"),
         patch.object(runner.config, "RESEARCH_WEB_MODEL", "web-model"),
-        patch.object(runner.llm_client, "generate_llm_response_with_tools", return_value="report") as mock_response,
+        patch.object(
+            runner.llm_client, "generate_llm_response_with_tools", return_value="report"
+        ) as mock_response,
     ):
         assert runner.conduct_research("prompt", mode="web") == "report"
 
@@ -219,8 +243,12 @@ def test_gpt_researcher_environment_uses_config_and_restores_prior_values(monkey
     monkeypatch.delenv("SMART_LLM", raising=False)
 
     with (
-        patch.object(runner.config, "RESEARCH_GPT_RESEARCHER_FAST_LLM", "configured-fast"),
-        patch.object(runner.config, "RESEARCH_GPT_RESEARCHER_SMART_LLM", "configured-smart"),
+        patch.object(
+            runner.config, "RESEARCH_GPT_RESEARCHER_FAST_LLM", "configured-fast"
+        ),
+        patch.object(
+            runner.config, "RESEARCH_GPT_RESEARCHER_SMART_LLM", "configured-smart"
+        ),
     ):
         with runner._gpt_researcher_environment():
             assert os.environ["FAST_LLM"] == "configured-fast"

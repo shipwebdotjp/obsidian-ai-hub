@@ -36,11 +36,14 @@ def load_people_notes_with_report() -> tuple[dict[str, PersonNote], dict[str, An
         "duplicate_ids": [],
         "normalized_name_collisions": [],
         "alias_collisions": [],
-        "parsed_notes": []
+        "parsed_notes": [],
     }
 
     if not people_path or not people_path.exists() or not people_path.is_dir():
-        logger.info("PEOPLE_PATH %s does not exist or is not a directory. Continuing with empty people list.", people_path)
+        logger.info(
+            "PEOPLE_PATH %s does not exist or is not a directory. Continuing with empty people list.",
+            people_path,
+        )
         return {}, report
 
     # Stage 1: Read files and catch file deficiencies
@@ -52,9 +55,17 @@ def load_people_notes_with_report() -> tuple[dict[str, PersonNote], dict[str, An
 
             # Check required fields - strictly validate type first
             if "id" not in fm or not isinstance(fm["id"], str) or not fm["id"].strip():
-                raise ValueError(f"Missing or empty required field 'id' in frontmatter of person note {path}")
-            if "name" not in fm or not isinstance(fm["name"], str) or not fm["name"].strip():
-                raise ValueError(f"Missing or empty required field 'name' in frontmatter of person note {path}")
+                raise ValueError(
+                    f"Missing or empty required field 'id' in frontmatter of person note {path}"
+                )
+            if (
+                "name" not in fm
+                or not isinstance(fm["name"], str)
+                or not fm["name"].strip()
+            ):
+                raise ValueError(
+                    f"Missing or empty required field 'name' in frontmatter of person note {path}"
+                )
 
             pid = fm["id"].strip()
             pname = fm["name"].strip()
@@ -65,23 +76,26 @@ def load_people_notes_with_report() -> tuple[dict[str, PersonNote], dict[str, An
                 raw_aliases = fm["aliases"]
                 if raw_aliases is not None:
                     if not isinstance(raw_aliases, list):
-                        raise ValueError(f"'aliases' field in frontmatter of {path} must be a list of strings, got {type(raw_aliases)}")
+                        raise ValueError(
+                            f"'aliases' field in frontmatter of {path} must be a list of strings, got {type(raw_aliases)}"
+                        )
                     for val in raw_aliases:
                         if val is None or not isinstance(val, str):
-                            raise ValueError(f"Alias '{val}' in {path} is not a valid string")
+                            raise ValueError(
+                                f"Alias '{val}' in {path} is not a valid string"
+                            )
                         aliases.append(val.strip())
 
-            raw_notes.append({
-                "id": pid,
-                "name": pname,
-                "aliases": aliases,
-                "file_path": path,
-            })
+            raw_notes.append(
+                {
+                    "id": pid,
+                    "name": pname,
+                    "aliases": aliases,
+                    "file_path": path,
+                }
+            )
         except (OSError, ValueError, TypeError) as e:
-            report["file_deficiencies"].append({
-                "path": str(path),
-                "message": str(e)
-            })
+            report["file_deficiencies"].append({"path": str(path), "message": str(e)})
 
     report["parsed_notes"] = raw_notes
 
@@ -95,10 +109,9 @@ def load_people_notes_with_report() -> tuple[dict[str, PersonNote], dict[str, An
     for pid, notes in id_to_notes.items():
         if len(notes) > 1:
             duplicate_ids_set.add(pid)
-            report["duplicate_ids"].append({
-                "id": pid,
-                "paths": [str(n["file_path"]) for n in notes]
-            })
+            report["duplicate_ids"].append(
+                {"id": pid, "paths": [str(n["file_path"]) for n in notes]}
+            )
         else:
             stage2_notes.append(notes[0])
 
@@ -115,10 +128,15 @@ def load_people_notes_with_report() -> tuple[dict[str, PersonNote], dict[str, An
         distinct_ids = {n["id"] for n in notes}
         if len(distinct_ids) > 1:
             colliding_names_set.add(norm_name)
-            report["normalized_name_collisions"].append({
-                "normalized_name": norm_name,
-                "notes": [{"id": n["id"], "name": n["name"], "path": str(n["file_path"])} for n in notes]
-            })
+            report["normalized_name_collisions"].append(
+                {
+                    "normalized_name": norm_name,
+                    "notes": [
+                        {"id": n["id"], "name": n["name"], "path": str(n["file_path"])}
+                        for n in notes
+                    ],
+                }
+            )
         else:
             stage3_notes.extend(notes)
 
@@ -128,34 +146,50 @@ def load_people_notes_with_report() -> tuple[dict[str, PersonNote], dict[str, An
         # Main name claim
         norm_name = normalize_entity_name(note["name"])
         if norm_name:
-            claims.setdefault(norm_name, []).append({
-                "id": note["id"],
-                "name": note["name"],
-                "path": str(note["file_path"]),
-                "role": "name"
-            })
+            claims.setdefault(norm_name, []).append(
+                {
+                    "id": note["id"],
+                    "name": note["name"],
+                    "path": str(note["file_path"]),
+                    "role": "name",
+                }
+            )
         # Alias claims
         for alias in note["aliases"]:
             norm_alias = normalize_entity_name(alias)
             if norm_alias:
-                claims.setdefault(norm_alias, []).append({
-                    "id": note["id"],
-                    "name": note["name"],
-                    "path": str(note["file_path"]),
-                    "role": "alias",
-                    "alias_value": alias
-                })
+                claims.setdefault(norm_alias, []).append(
+                    {
+                        "id": note["id"],
+                        "name": note["name"],
+                        "path": str(note["file_path"]),
+                        "role": "alias",
+                        "alias_value": alias,
+                    }
+                )
 
     colliding_aliases_set = set()
-    alias_exclusions: dict[str, set[str]] = {} # id -> set of normalized aliases to exclude
+    alias_exclusions: dict[
+        str, set[str]
+    ] = {}  # id -> set of normalized aliases to exclude
 
     for norm_str, claim_list in claims.items():
         distinct_ids = {c["id"] for c in claim_list}
         if len(distinct_ids) > 1:
-            report["alias_collisions"].append({
-                "alias": norm_str,
-                "notes": [{"id": c["id"], "name": c["name"], "path": c["path"], "role": c["role"]} for c in claim_list]
-            })
+            report["alias_collisions"].append(
+                {
+                    "alias": norm_str,
+                    "notes": [
+                        {
+                            "id": c["id"],
+                            "name": c["name"],
+                            "path": c["path"],
+                            "role": c["role"],
+                        }
+                        for c in claim_list
+                    ],
+                }
+            )
             colliding_aliases_set.add(norm_str)
             for c in claim_list:
                 if c["role"] == "alias":
@@ -176,7 +210,7 @@ def load_people_notes_with_report() -> tuple[dict[str, PersonNote], dict[str, An
             "id": pid,
             "name": note["name"],
             "aliases": safe_aliases,
-            "file_path": note["file_path"]
+            "file_path": note["file_path"],
         }
 
         # Map normalized name
@@ -205,12 +239,18 @@ def load_and_validate_people_notes() -> dict[str, PersonNote]:
         raise ValueError(report["file_deficiencies"][0]["message"])
     if report.get("duplicate_ids"):
         dup = report["duplicate_ids"][0]
-        raise ValueError(f"Duplicate person ID '{dup['id']}' found in files: {', '.join(dup['paths'])}")
+        raise ValueError(
+            f"Duplicate person ID '{dup['id']}' found in files: {', '.join(dup['paths'])}"
+        )
     if report.get("normalized_name_collisions"):
         col = report["normalized_name_collisions"][0]
-        raise ValueError(f"Duplicate mapping for normalized name/alias '{col['normalized_name']}'")
+        raise ValueError(
+            f"Duplicate mapping for normalized name/alias '{col['normalized_name']}'"
+        )
     if report.get("alias_collisions"):
         col = report["alias_collisions"][0]
-        raise ValueError(f"Duplicate mapping for normalized name/alias '{col['alias']}'")
+        raise ValueError(
+            f"Duplicate mapping for normalized name/alias '{col['alias']}'"
+        )
 
     return safe_map

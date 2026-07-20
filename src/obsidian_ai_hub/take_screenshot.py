@@ -6,6 +6,7 @@ from obsidian_ai_hub.utils import config
 
 logger = logging.getLogger(__name__)
 
+
 def get_unique_path(directory: Path, base_filename: str) -> Path:
     """
     If the target filename already exists, append a numeric suffix rather than overwriting.
@@ -23,6 +24,7 @@ def get_unique_path(directory: Path, base_filename: str) -> Path:
             return new_path
         counter += 1
 
+
 def capture_screen(target_path: Path, display: int = 1, window_id: int | None = None):
     """
     Captures a macOS screenshot for a specific display or window and saves it to the target_path.
@@ -33,20 +35,16 @@ def capture_screen(target_path: Path, display: int = 1, window_id: int | None = 
     if window_id is not None:
         cmd = [
             "screencapture",
-            "-t", "png",
+            "-t",
+            "png",
             "-x",
-            "-l", str(window_id),
-            str(target_path)
+            "-l",
+            str(window_id),
+            str(target_path),
         ]
         logger.info(f"Taking screenshot of window {window_id} to {target_path}")
     else:
-        cmd = [
-            "screencapture",
-            "-t", "png",
-            "-x",
-            "-D", str(display),
-            str(target_path)
-        ]
+        cmd = ["screencapture", "-t", "png", "-x", "-D", str(display), str(target_path)]
         logger.info(f"Taking screenshot on display {display} to {target_path}")
 
     try:
@@ -56,6 +54,7 @@ def capture_screen(target_path: Path, display: int = 1, window_id: int | None = 
         logger.error(f"Failed to capture screenshot: {e}")
         raise
     return str(target_path)
+
 
 def main(display: int = 1, window_id: int | None = None):
     """
@@ -72,10 +71,14 @@ def main(display: int = 1, window_id: int | None = None):
 
     return capture_screen(target_path, display, window_id)
 
+
 if __name__ == "__main__":
     import argparse
+
     parser = argparse.ArgumentParser(description="Capture screenshot")
     parser.add_argument("--display", type=int, default=1, help="Display index")
-    parser.add_argument("--window-id", type=int, default=None, help="Window ID to capture")
+    parser.add_argument(
+        "--window-id", type=int, default=None, help="Window ID to capture"
+    )
     args = parser.parse_args()
     main(display=args.display, window_id=args.window_id)

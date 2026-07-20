@@ -7,13 +7,16 @@ from obsidian_ai_hub.utils import accessibility, config, img2text, llm_client, p
 
 logger = logging.getLogger(__name__)
 
+
 def parse_json_response(response_text: str) -> dict:
     """
     LLM のレスポンスから JSON 部分を抽出してパースする。
     Markdown コードブロックの除去などを試みる。
     """
     # Remove markdown code blocks if present
-    cleaned = re.sub(r"```(?:json)?\s*(.*?)\s*```", r"\1", response_text, flags=re.DOTALL).strip()
+    cleaned = re.sub(
+        r"```(?:json)?\s*(.*?)\s*```", r"\1", response_text, flags=re.DOTALL
+    ).strip()
 
     try:
         return json.loads(cleaned)
@@ -28,6 +31,7 @@ def parse_json_response(response_text: str) -> dict:
                 pass
         raise ValueError(f"Invalid JSON response from LLM: {response_text}")
 
+
 def scan_line_inbox():
     """
     LINE ウィンドウを検出し、スクリーンショットを撮り、LLM で解析する。
@@ -36,7 +40,9 @@ def scan_line_inbox():
     model = config.LINE_INBOX_SCAN_MODEL
 
     if provider == "local":
-        raise RuntimeError("Provider 'local' does not support multimodal (image) input.")
+        raise RuntimeError(
+            "Provider 'local' does not support multimodal (image) input."
+        )
 
     # 1. LINE ウィンドウ検出
     line_window = accessibility.get_line_window()
@@ -48,7 +54,7 @@ def scan_line_inbox():
             "window_title": None,
             "screenshot_path": None,
             "candidates": [],
-            "error": "LINE window not found"
+            "error": "LINE window not found",
         }
 
     window_id = line_window["window_id"]
@@ -67,8 +73,7 @@ def scan_line_inbox():
     logger.info(f"Calling LLM ({provider}/{model}) to scan LINE inbox...")
     try:
         rendered_prompt = prompt.render_prompt(
-            config.LINE_INBOX_SCAN_PROMPT_PATH,
-            {"OCR_TEXT": ocr_text_combined}
+            config.LINE_INBOX_SCAN_PROMPT_PATH, {"OCR_TEXT": ocr_text_combined}
         )
         response_text = llm_client.generate_llm_response(
             provider=provider,
@@ -76,7 +81,7 @@ def scan_line_inbox():
             prompt=rendered_prompt,
             files=[screenshot_path],
             max_tokens=8192,
-            temperature=0.0
+            temperature=0.0,
         )
     except Exception as e:
         logger.error(f"Error during prompt rendering or LLM call: {e}")
@@ -85,7 +90,7 @@ def scan_line_inbox():
             "window_title": window_title,
             "screenshot_path": str(screenshot_path),
             "candidates": [],
-            "error": "Prompt rendering or LLM call failed"
+            "error": "Prompt rendering or LLM call failed",
         }
 
     # 4. パース
@@ -98,16 +103,17 @@ def scan_line_inbox():
             "window_title": window_title,
             "screenshot_path": str(screenshot_path),
             "candidates": [],
-            "error": "Failed to parse LLM response"
+            "error": "Failed to parse LLM response",
         }
 
     result = {
         "window_id": window_id,
         "window_title": window_title,
         "screenshot_path": str(screenshot_path),
-        "candidates": data.get("candidates", [])
+        "candidates": data.get("candidates", []),
     }
     return result
+
 
 def main():
     try:
@@ -118,6 +124,7 @@ def main():
         error_result = {"error": str(e)}
         print(json.dumps(error_result, ensure_ascii=False, indent=2))
         return error_result
+
 
 if __name__ == "__main__":
     main()

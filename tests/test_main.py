@@ -10,7 +10,9 @@ def test_research_agent_cli_accepts_theme_for_on_demand_mode(monkeypatch):
     monkeypatch.setattr(sys, "argv", ["prog", "--research-agent", "--theme", "topic"])
 
     with (
-        patch.object(main_module.research_agent, "main", return_value=None) as mock_main,
+        patch.object(
+            main_module.research_agent, "main", return_value=None
+        ) as mock_main,
     ):
         main_module.main()
 
@@ -32,30 +34,43 @@ def test_research_agent_cli_requires_theme(monkeypatch):
 
 
 def test_vault_search_cli_calls_search(monkeypatch):
-    monkeypatch.setattr(sys, "argv", ["prog", "--vault-search", "--query", "test", "--k", "5", "--search-mode", "similarity"])
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "prog",
+            "--vault-search",
+            "--query",
+            "test",
+            "--k",
+            "5",
+            "--search-mode",
+            "similarity",
+        ],
+    )
 
-    with patch.object(main_module.search_obsidian_vault, "main", return_value=None) as mock_main:
+    with patch.object(
+        main_module.search_obsidian_vault, "main", return_value=None
+    ) as mock_main:
         main_module.main()
 
     mock_main.assert_called_once_with(
-        query="test",
-        k=5,
-        search_mode="similarity",
-        json_output=False
+        query="test", k=5, search_mode="similarity", json_output=False
     )
 
 
 def test_vault_search_cli_calls_search_with_json(monkeypatch):
-    monkeypatch.setattr(sys, "argv", ["prog", "--vault-search", "--query", "test", "--json"])
+    monkeypatch.setattr(
+        sys, "argv", ["prog", "--vault-search", "--query", "test", "--json"]
+    )
 
-    with patch.object(main_module.search_obsidian_vault, "main", return_value=None) as mock_main:
+    with patch.object(
+        main_module.search_obsidian_vault, "main", return_value=None
+    ) as mock_main:
         main_module.main()
 
     mock_main.assert_called_once_with(
-        query="test",
-        k=10,
-        search_mode="hybrid",
-        json_output=True
+        query="test", k=10, search_mode="hybrid", json_output=True
     )
 
 
@@ -90,7 +105,9 @@ def test_query_requires_vault_search(monkeypatch):
 def test_scan_line_inbox_cli_calls_scan(monkeypatch):
     monkeypatch.setattr(sys, "argv", ["prog", "--scan-line-inbox"])
 
-    with patch.object(main_module.scan_line_inbox, "main", return_value={}) as mock_main:
+    with patch.object(
+        main_module.scan_line_inbox, "main", return_value={}
+    ) as mock_main:
         main_module.main()
 
     mock_main.assert_called_once()
@@ -99,7 +116,9 @@ def test_scan_line_inbox_cli_calls_scan(monkeypatch):
 def test_screenshot_cli_calls_screenshot_with_default_display(monkeypatch):
     monkeypatch.setattr(sys, "argv", ["prog", "--screenshot"])
 
-    with patch.object(main_module.take_screenshot, "main", return_value=None) as mock_main:
+    with patch.object(
+        main_module.take_screenshot, "main", return_value=None
+    ) as mock_main:
         main_module.main()
 
     mock_main.assert_called_once_with(1)
@@ -108,23 +127,31 @@ def test_screenshot_cli_calls_screenshot_with_default_display(monkeypatch):
 def test_screenshot_cli_calls_screenshot_with_custom_display(monkeypatch):
     monkeypatch.setattr(sys, "argv", ["prog", "--screenshot", "--display", "2"])
 
-    with patch.object(main_module.take_screenshot, "main", return_value=None) as mock_main:
+    with patch.object(
+        main_module.take_screenshot, "main", return_value=None
+    ) as mock_main:
         main_module.main()
 
     mock_main.assert_called_once_with(2)
 
 
 def test_summerize_week_cli_accepts_week_date(monkeypatch):
-    monkeypatch.setattr(sys, "argv", ["prog", "--summerize-week", "--week-date", "2026-06-15"])
+    monkeypatch.setattr(
+        sys, "argv", ["prog", "--summerize-week", "--week-date", "2026-06-15"]
+    )
 
-    with patch.object(main_module.summerize_week, "main", return_value=None) as mock_main:
+    with patch.object(
+        main_module.summerize_week, "main", return_value=None
+    ) as mock_main:
         main_module.main()
 
     mock_main.assert_called_once_with("2026-06-15")
 
 
 def test_review_draft_cli_accepts_review_week_date(monkeypatch):
-    monkeypatch.setattr(sys, "argv", ["prog", "--review-draft", "--review-week-date", "2026-07-12"])
+    monkeypatch.setattr(
+        sys, "argv", ["prog", "--review-draft", "--review-week-date", "2026-07-12"]
+    )
 
     with patch.object(main_module.review_draft, "main", return_value=None) as mock_main:
         main_module.main()
@@ -136,8 +163,10 @@ def test_screenshot_cli_composable_with_other_flags(monkeypatch):
     monkeypatch.setattr(sys, "argv", ["prog", "--screenshot", "--sync-vault"])
 
     with (
-        patch.object(main_module.take_screenshot, "main", return_value=None) as mock_screenshot,
-        patch.object(main_module.sync_valut, "main", return_value=None) as mock_sync
+        patch.object(
+            main_module.take_screenshot, "main", return_value=None
+        ) as mock_screenshot,
+        patch.object(main_module.sync_valut, "main", return_value=None) as mock_sync,
     ):
         main_module.main()
 
@@ -148,25 +177,37 @@ def test_screenshot_cli_composable_with_other_flags(monkeypatch):
 def test_suggest_research_theme_cli_calls_suggester(monkeypatch):
     monkeypatch.setattr(sys, "argv", ["prog", "--suggest-research-theme"])
 
-    with patch.object(main_module.suggest_research_theme, "main", return_value=[]) as mock_main:
+    with patch.object(
+        main_module.suggest_research_theme, "main", return_value=[]
+    ) as mock_main:
         main_module.main()
 
     mock_main.assert_called_once_with()
 
 
 def test_add_research_theme_cli_calls_handler(monkeypatch):
-    monkeypatch.setattr(sys, "argv", ["prog", "--add-research-theme", "--theme", "test theme"])
+    monkeypatch.setattr(
+        sys, "argv", ["prog", "--add-research-theme", "--theme", "test theme"]
+    )
 
-    with patch.object(main_module.add_research_theme, "main", return_value="candidate") as mock_main:
+    with patch.object(
+        main_module.add_research_theme, "main", return_value="candidate"
+    ) as mock_main:
         main_module.main()
 
     mock_main.assert_called_once_with("test theme", direction=None)
 
 
 def test_add_research_theme_with_direction(monkeypatch):
-    monkeypatch.setattr(sys, "argv", ["prog", "--add-research-theme", "--theme", "test", "--direction", "方向"])
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["prog", "--add-research-theme", "--theme", "test", "--direction", "方向"],
+    )
 
-    with patch.object(main_module.add_research_theme, "main", return_value="candidate") as mock_main:
+    with patch.object(
+        main_module.add_research_theme, "main", return_value="candidate"
+    ) as mock_main:
         main_module.main()
 
     mock_main.assert_called_once_with("test", direction="方向")
@@ -195,7 +236,7 @@ def test_serve_without_debug_uses_no_reload_info_log(monkeypatch):
 
     with (
         patch("uvicorn.run") as mock_uvicorn,
-        patch("obsidian_ai_hub.web.app.create_app") as mock_create_app,
+        patch("obsidian_ai_hub.web.app.create_app"),
     ):
         main_module.main()
 

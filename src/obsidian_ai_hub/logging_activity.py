@@ -1,7 +1,6 @@
 import json
 import logging
 from datetime import datetime
-from pathlib import Path
 from AppKit import NSScreen
 
 from obsidian_ai_hub.take_screenshot import capture_screen, get_unique_path
@@ -19,8 +18,9 @@ ACTIVITY_CATEGORIES = [
     "創作・執筆",
     "学習",
     "趣味・休憩",
-    "その他"
+    "その他",
 ]
+
 
 def normalize_ocr_results(ocr_results):
     """
@@ -45,7 +45,9 @@ def normalize_ocr_results(ocr_results):
     return normalized
 
 
-def should_skip_activity_logging(app_name: str | None, window_title: str | None) -> bool:
+def should_skip_activity_logging(
+    app_name: str | None, window_title: str | None
+) -> bool:
     if app_name is None:
         return True
 
@@ -68,14 +70,18 @@ def main():
         window_info = {"app_name": "Unknown", "window_title": "Unknown"}
 
     if not isinstance(window_info, dict):
-        logger.error("Invalid active window info payload. Falling back to Unknown values.")
+        logger.error(
+            "Invalid active window info payload. Falling back to Unknown values."
+        )
         window_info = {}
 
     app_name = window_info.get("app_name", "Unknown")
     window_title = window_info.get("window_title", "Unknown")
 
     if should_skip_activity_logging(app_name, window_title):
-        logger.debug("Skipping activity logging because active app is unavailable or locked.")
+        logger.debug(
+            "Skipping activity logging because active app is unavailable or locked."
+        )
         return
 
     now = datetime.now()
@@ -85,8 +91,10 @@ def main():
         activity_date_str = now.strftime("%Y-%m-%d")
         last_record = get_latest_activity_by_date(activity_date_str)
         if last_record:
-            if (last_record.get("app_name") == app_name and
-                last_record.get("window_title") == window_title):
+            if (
+                last_record.get("app_name") == app_name
+                and last_record.get("window_title") == window_title
+            ):
                 logger.info(f"Skipping duplicate activity: {app_name} - {window_title}")
                 return
     except Exception as e:
@@ -150,13 +158,13 @@ def main():
                 "app_name": app_name,
                 "window_title": window_title,
                 "ocr_text_combined": ocr_text_combined,
-            }
+            },
         )
         response = llm_client.generate_llm_response(
             provider=config.MAKE_TODAY_TARGET_PROVIDER,
             model=config.MAKE_TODAY_TARGET_MODEL,
             prompt=rendered_prompt,
-            max_tokens=8192
+            max_tokens=8192,
         )
         # JSONパースの試行
         try:
@@ -183,7 +191,11 @@ def main():
 
             cand_keywords = data.get("keywords")
             if isinstance(cand_keywords, list):
-                keywords = [str(k).strip() for k in cand_keywords if k is not None and str(k).strip()]
+                keywords = [
+                    str(k).strip()
+                    for k in cand_keywords
+                    if k is not None and str(k).strip()
+                ]
             else:
                 keywords = []
 
@@ -216,6 +228,7 @@ def main():
     except Exception as e:
         logger.error(f"Failed to write activity log to SQLite: {e}")
         raise
+
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)

@@ -1,7 +1,6 @@
 # ruff: noqa: E402
 # ruff: noqa: E402
 import sys
-import json
 from datetime import datetime
 from unittest.mock import MagicMock
 
@@ -154,21 +153,21 @@ def test_run_deduplication():
             "status": "approved",
             "kind": "preference",
             "memory_key": "response-style-concise",
-            "content": "簡潔な日本語を好みます。"
+            "content": "簡潔な日本語を好みます。",
         },
         {
             "memory_id": "mem_002",
             "status": "approved",
             "kind": "preference",
             "memory_key": "other-key",
-            "content": "別の記憶内容です。"
-        }
+            "content": "別の記憶内容です。",
+        },
     ]
 
     # Candidate with duplicate key and same normalized content
     cand1 = {
         "memory_key": "response-style-concise",
-        "content": "簡潔な日本語を好みます。"
+        "content": "簡潔な日本語を好みます。",
     }
     sug1 = memory.run_deduplication(cand1, existing, embedder=None)
     assert len(sug1) == 1
@@ -178,17 +177,14 @@ def test_run_deduplication():
     # Candidate with duplicate key but different content (supersedes)
     cand2 = {
         "memory_key": "response-style-concise",
-        "content": "より丁寧な日本語を好みます。"
+        "content": "より丁寧な日本語を好みます。",
     }
     sug2 = memory.run_deduplication(cand2, existing, embedder=None)
     assert len(sug2) == 1
     assert sug2[0]["relation"] == "supersedes"
 
     # Candidate with duplicate content but different key
-    cand3 = {
-        "memory_key": "unique-key",
-        "content": "簡潔な日本語を好みます。"
-    }
+    cand3 = {"memory_key": "unique-key", "content": "簡潔な日本語を好みます。"}
     sug3 = memory.run_deduplication(cand3, existing, embedder=None)
     assert len(sug3) == 1
     assert sug3[0]["relation"] == "duplicate"
@@ -207,22 +203,25 @@ def test_extract_memories(clean_memory_env):
     )
 
     from obsidian_ai_hub.summary import store as summary_store
-    summary_store.upsert_summary({
-        "period_type": "day",
-        "period_key": week_date,
-        "period_start": week_date,
-        "period_end": week_date,
-        "generated_at": "2026-07-13T22:00:00",
-        "summary": "簡潔な応答を望んだ",
-        "keywords": [],
-        "mood": "good",
-        "sleep_raw": "7h",
-        "sleep_hours": 7.0,
-        "topics": ["その他"],
-        "projects": [],
-        "people": [],
-        "items": [],
-    })
+
+    summary_store.upsert_summary(
+        {
+            "period_type": "day",
+            "period_key": week_date,
+            "period_start": week_date,
+            "period_end": week_date,
+            "generated_at": "2026-07-13T22:00:00",
+            "summary": "簡潔な応答を望んだ",
+            "keywords": [],
+            "mood": "good",
+            "sleep_raw": "7h",
+            "sleep_hours": 7.0,
+            "topics": ["その他"],
+            "projects": [],
+            "people": [],
+            "items": [],
+        }
+    )
 
     # Mock LLM response for extraction
     mock_llm_response = """
@@ -248,7 +247,6 @@ def test_extract_memories(clean_memory_env):
     """
 
     with patch("obsidian_ai_hub.memory.llm_client.generate_llm_response") as mock_llm:
-
         mock_llm.return_value = mock_llm_response
 
         candidates = memory.extract_memories(week_date)
@@ -267,7 +265,9 @@ def test_extract_memories(clean_memory_env):
         # Verify events table has "created" event
         with memory.get_db_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM memory_events WHERE memory_id = ?", (cand["memory_id"],))
+            cursor.execute(
+                "SELECT * FROM memory_events WHERE memory_id = ?", (cand["memory_id"],)
+            )
             events = cursor.fetchall()
             assert len(events) == 1
         assert events[0]["event_type"] == "created"
@@ -282,25 +282,28 @@ def test_extract_memories(clean_memory_env):
 def test_load_daily_structured_record_from_sqlite(clean_memory_env):
     target_date = datetime(2026, 7, 13)
     from obsidian_ai_hub.summary import store as summary_store
-    summary_store.upsert_summary({
-        "period_type": "day",
-        "period_key": "2026-07-13",
-        "period_start": "2026-07-13",
-        "period_end": "2026-07-13",
-        "generated_at": "2026-07-13T22:00:00",
-        "summary": "SQLite summary",
-        "keywords": ["sqlite"],
-        "mood": "good",
-        "sleep_raw": "7h",
-        "sleep_hours": 7.0,
-        "topics": ["LLM・AI活用"],
-        "projects": ["Project A"],
-        "people": [{"name": "Alice", "note": "met"}],
-        "items": [
-            {"kind": "highlights", "body": "Highlight", "display_order": 0},
-            {"kind": "activities", "body": "Activity", "display_order": 0},
-        ],
-    })
+
+    summary_store.upsert_summary(
+        {
+            "period_type": "day",
+            "period_key": "2026-07-13",
+            "period_start": "2026-07-13",
+            "period_end": "2026-07-13",
+            "generated_at": "2026-07-13T22:00:00",
+            "summary": "SQLite summary",
+            "keywords": ["sqlite"],
+            "mood": "good",
+            "sleep_raw": "7h",
+            "sleep_hours": 7.0,
+            "topics": ["LLM・AI活用"],
+            "projects": ["Project A"],
+            "people": [{"name": "Alice", "note": "met"}],
+            "items": [
+                {"kind": "highlights", "body": "Highlight", "display_order": 0},
+                {"kind": "activities", "body": "Activity", "display_order": 0},
+            ],
+        }
+    )
 
     record = memory._load_daily_structured_record(target_date)
     assert record["date"] == "2026-07-13"
@@ -338,7 +341,7 @@ def test_review_memory(clean_memory_env):
         "valid_from": "2026-07-13",
         "stability": "stable",
         "created_at": "2026-07-13T10:00:00+09:00",
-        "updated_at": "2026-07-13T10:00:00+09:00"
+        "updated_at": "2026-07-13T10:00:00+09:00",
     }
     memory.save_all_memories([cand])
 
@@ -351,7 +354,9 @@ def test_review_memory(clean_memory_env):
     # Verify event logged
     with memory.get_db_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT event_type FROM memory_events WHERE memory_id = ?", (mem_id,))
+        cursor.execute(
+            "SELECT event_type FROM memory_events WHERE memory_id = ?", (mem_id,)
+        )
         event_types = [r[0] for r in cursor.fetchall()]
         assert "rejected" in event_types
 
@@ -392,7 +397,7 @@ def test_compile_context(clean_memory_env, monkeypatch):
         "content": "簡潔な話し方を好む",
         "valid_from": "2026-07-01",
         "extraction_confidence": 0.95,
-        "stability": "stable"
+        "stability": "stable",
     }
     # Expired memory
     m2 = {
@@ -404,7 +409,7 @@ def test_compile_context(clean_memory_env, monkeypatch):
         "valid_from": "2026-07-01",
         "valid_until": "2026-07-10",
         "extraction_confidence": 0.90,
-        "stability": "stable"
+        "stability": "stable",
     }
     # Future memory
     m3 = {
@@ -415,7 +420,7 @@ def test_compile_context(clean_memory_env, monkeypatch):
         "content": "未来の記憶",
         "valid_from": "2026-08-01",
         "extraction_confidence": 0.90,
-        "stability": "stable"
+        "stability": "stable",
     }
 
     memory.save_all_memories([m1, m2, m3])
@@ -432,7 +437,10 @@ def test_compile_context(clean_memory_env, monkeypatch):
     assert m2_saved["status"] == "expired"
 
     # Future memory m3 should be in excluded list as not_yet_valid
-    assert any(x["memory_id"] == "mem_3" and x["reason"] == "not_yet_valid" for x in context_pack["excluded"])
+    assert any(
+        x["memory_id"] == "mem_3" and x["reason"] == "not_yet_valid"
+        for x in context_pack["excluded"]
+    )
 
 
 def test_make_today_target_integration(clean_memory_env):
@@ -453,15 +461,16 @@ updated_at: 2026-07-13
         "kind": "preference",
         "memory_key": "key-1",
         "content": "具体的な記憶",
-        "valid_from": "2026-07-01"
+        "valid_from": "2026-07-01",
     }
     memory.save_all_memories([m1])
 
     # Mock daily notes and schedule views
-    with patch("obsidian_ai_hub.make_today_target.reader") as mock_reader, \
-         patch("obsidian_ai_hub.make_today_target.extracter") as mock_extracter, \
-         patch("obsidian_ai_hub.make_today_target.llm_client") as mock_llm:
-
+    with (
+        patch("obsidian_ai_hub.make_today_target.reader") as mock_reader,
+        patch("obsidian_ai_hub.make_today_target.extracter") as mock_extracter,
+        patch("obsidian_ai_hub.make_today_target.llm_client") as mock_llm,
+    ):
         mock_reader.get_daily_note_content.return_value = "今日の目標\nExisting content"
         mock_reader.get_daily_note_path.return_value = vault_path / "daily_note.md"
         mock_extracter.get_subheader_view.return_value = "Mock Schedule"
@@ -494,28 +503,49 @@ def test_cli_args_parsing_validation(monkeypatch):
 
         # --date is no longer accepted for memory extraction
         with pytest.raises(SystemExit):
-            monkeypatch.setattr(sys, "argv", ["main.py", "--memory-extract", "--date", "2026-07-13"])
+            monkeypatch.setattr(
+                sys, "argv", ["main.py", "--memory-extract", "--date", "2026-07-13"]
+            )
             main.main()
 
         # An explicit week is passed through to weekly memory extraction.
-        with patch("obsidian_ai_hub.memory.extract_memories", return_value=[]) as mock_extract:
-            monkeypatch.setattr(sys, "argv", ["main.py", "--memory-extract", "--week", "2026-07-13"])
+        with patch(
+            "obsidian_ai_hub.memory.extract_memories", return_value=[]
+        ) as mock_extract:
+            monkeypatch.setattr(
+                sys, "argv", ["main.py", "--memory-extract", "--week", "2026-07-13"]
+            )
             main.main()
             mock_extract.assert_called_once_with("2026-07-13")
 
         # Invalid: memory-review without action
         with pytest.raises(SystemExit):
-            monkeypatch.setattr(sys, "argv", ["main.py", "--memory-review", "--id", "mem_1"])
+            monkeypatch.setattr(
+                sys, "argv", ["main.py", "--memory-review", "--id", "mem_1"]
+            )
             main.main()
 
         # Invalid: memory-review with multiple actions
         with pytest.raises(SystemExit):
-            monkeypatch.setattr(sys, "argv", ["main.py", "--memory-review", "--id", "mem_1", "--approve", "--reject"])
+            monkeypatch.setattr(
+                sys,
+                "argv",
+                [
+                    "main.py",
+                    "--memory-review",
+                    "--id",
+                    "mem_1",
+                    "--approve",
+                    "--reject",
+                ],
+            )
             main.main()
 
         # Invalid: edit action without content
         with pytest.raises(SystemExit):
-            monkeypatch.setattr(sys, "argv", ["main.py", "--memory-review", "--id", "mem_1", "--edit"])
+            monkeypatch.setattr(
+                sys, "argv", ["main.py", "--memory-review", "--id", "mem_1", "--edit"]
+            )
             main.main()
 
 
@@ -526,7 +556,9 @@ def test_config_fallback_ordering(tmp_path, monkeypatch):
 
     # Mock config.yml value to differ
     config_path = tmp_path / "config_db.sqlite3"
-    monkeypatch.setattr(config, "yaml_config", {"memory": {"sqlite_path": str(config_path)}})
+    monkeypatch.setattr(
+        config, "yaml_config", {"memory": {"sqlite_path": str(config_path)}}
+    )
 
     # Real evaluation of _env_or_config
     val = config._env_or_config("MEMORY_SQLITE_PATH", "memory", "sqlite_path")
@@ -568,7 +600,9 @@ def test_delete_memory(clean_memory_env):
 
     with memory.get_db_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT COUNT(*) FROM memory_events WHERE memory_id = ?", ("mem_del_test",))
+        cursor.execute(
+            "SELECT COUNT(*) FROM memory_events WHERE memory_id = ?", ("mem_del_test",)
+        )
         assert cursor.fetchone()[0] == 0
 
 
@@ -608,7 +642,9 @@ def test_delete_memory_with_events(clean_memory_env):
 
     with memory.get_db_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT COUNT(*) FROM memory_events WHERE memory_id = ?", ("mem_evt_del",))
+        cursor.execute(
+            "SELECT COUNT(*) FROM memory_events WHERE memory_id = ?", ("mem_evt_del",)
+        )
         assert cursor.fetchone()[0] == 2
 
     result = memory.delete_memory("mem_evt_del")
@@ -618,7 +654,9 @@ def test_delete_memory_with_events(clean_memory_env):
 
     with memory.get_db_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT COUNT(*) FROM memory_events WHERE memory_id = ?", ("mem_evt_del",))
+        cursor.execute(
+            "SELECT COUNT(*) FROM memory_events WHERE memory_id = ?", ("mem_evt_del",)
+        )
         assert cursor.fetchone()[0] == 0
 
 
@@ -639,7 +677,11 @@ def test_delete_memory_prunes_dedup_suggestions(clean_memory_env):
         "memory_key": "cand-key",
         "content": "候補の内容",
         "dedup_suggestions": [
-            {"target_memory_id": "mem_approved_1", "relation": "duplicate", "score": 0.95},
+            {
+                "target_memory_id": "mem_approved_1",
+                "relation": "duplicate",
+                "score": 0.95,
+            },
         ],
         "created_at": "2026-07-14T10:00:00+09:00",
         "updated_at": "2026-07-14T10:00:00+09:00",
@@ -651,8 +693,16 @@ def test_delete_memory_prunes_dedup_suggestions(clean_memory_env):
         "memory_key": "other-key",
         "content": "別の候補",
         "dedup_suggestions": [
-            {"target_memory_id": "mem_approved_1", "relation": "duplicate", "score": 0.90},
-            {"target_memory_id": "mem_unrelated", "relation": "duplicate", "score": 0.80},
+            {
+                "target_memory_id": "mem_approved_1",
+                "relation": "duplicate",
+                "score": 0.90,
+            },
+            {
+                "target_memory_id": "mem_unrelated",
+                "relation": "duplicate",
+                "score": 0.80,
+            },
         ],
         "created_at": "2026-07-14T10:00:00+09:00",
         "updated_at": "2026-07-14T10:00:00+09:00",
@@ -667,7 +717,9 @@ def test_delete_memory_prunes_dedup_suggestions(clean_memory_env):
         "updated_at": "2026-07-14T10:00:00+09:00",
     }
 
-    memory.save_all_memories([approved, candidate_with_suggestion, another_candidate, no_suggestion])
+    memory.save_all_memories(
+        [approved, candidate_with_suggestion, another_candidate, no_suggestion]
+    )
 
     result = memory.delete_memory("mem_approved_1")
     assert result["found"] is True
@@ -735,9 +787,28 @@ def test_delete_memory_reprojects_approved(clean_memory_env):
 
 def test_batch_delete_memories(clean_memory_env):
     memories = [
-        {"memory_id": "mem_batch_1", "status": "candidate", "kind": "preference", "memory_key": "b1", "content": "一括1"},
-        {"memory_id": "mem_batch_2", "status": "candidate", "kind": "preference", "memory_key": "b2", "content": "一括2"},
-        {"memory_id": "mem_batch_3", "status": "approved", "kind": "preference", "memory_key": "b3", "content": "一括3", "evidence": []},
+        {
+            "memory_id": "mem_batch_1",
+            "status": "candidate",
+            "kind": "preference",
+            "memory_key": "b1",
+            "content": "一括1",
+        },
+        {
+            "memory_id": "mem_batch_2",
+            "status": "candidate",
+            "kind": "preference",
+            "memory_key": "b2",
+            "content": "一括2",
+        },
+        {
+            "memory_id": "mem_batch_3",
+            "status": "approved",
+            "kind": "preference",
+            "memory_key": "b3",
+            "content": "一括3",
+            "evidence": [],
+        },
     ]
     for m in memories:
         m["created_at"] = "2026-07-14T10:00:00+09:00"
@@ -750,11 +821,17 @@ def test_batch_delete_memories(clean_memory_env):
     assert approved_md.exists()
     assert "一括3" in approved_md.read_text(encoding="utf-8")
 
-    memory.log_memory_event(event_type="created", memory_id="mem_batch_1",
-                            previous_status=None, new_status="candidate")
+    memory.log_memory_event(
+        event_type="created",
+        memory_id="mem_batch_1",
+        previous_status=None,
+        new_status="candidate",
+    )
 
     # Delete 3 IDs, one of which doesn't exist
-    result = memory.batch_delete_memories(["mem_batch_1", "mem_batch_2", "mem_batch_nonexistent"])
+    result = memory.batch_delete_memories(
+        ["mem_batch_1", "mem_batch_2", "mem_batch_nonexistent"]
+    )
     assert set(result["deleted"]) == {"mem_batch_1", "mem_batch_2"}
     assert result["not_found"] == ["mem_batch_nonexistent"]
     assert result["events_deleted"] == 1  # only mem_batch_1 had events
@@ -797,7 +874,9 @@ def test_superseded_editing_restrictions(clean_memory_env):
 
     # Cannot edit superseded memory
     with pytest.raises(ValueError, match="Cannot edit a superseded memory"):
-        memory.update_memory_fields("mem_superseded_test", {"content": "編集された内容"})
+        memory.update_memory_fields(
+            "mem_superseded_test", {"content": "編集された内容"}
+        )
 
 
 def test_resolve_memory_merge_existing(clean_memory_env):
@@ -822,7 +901,9 @@ def test_resolve_memory_merge_existing(clean_memory_env):
         "topics": ["開発"],
         "tags": ["タグ2"],
         "evidence": [{"path": "note2.md", "quote": "引用2"}],
-        "dedup_suggestions": [{"target_memory_id": "mem_existing_target", "relation": "duplicate"}],
+        "dedup_suggestions": [
+            {"target_memory_id": "mem_existing_target", "relation": "duplicate"}
+        ],
         "created_at": "2026-07-14T10:00:00+09:00",
         "updated_at": "2026-07-14T10:00:00+09:00",
     }
@@ -833,7 +914,7 @@ def test_resolve_memory_merge_existing(clean_memory_env):
         candidate_id="mem_cand_to_merge",
         action="merge_existing",
         target_memory_id="mem_existing_target",
-        integrated_content="既存の記憶内容と追加内容を統合した文章"
+        integrated_content="既存の記憶内容と追加内容を統合した文章",
     )
 
     assert new_cand["status"] == "rejected"
@@ -873,7 +954,9 @@ def test_resolve_memory_supersede_existing(clean_memory_env):
         "memory_key": "different-key",  # test key unification
         "content": "新しい最新の記憶内容",
         "valid_from": "2026-07-15",
-        "dedup_suggestions": [{"target_memory_id": "mem_existing_target", "relation": "supersedes"}],
+        "dedup_suggestions": [
+            {"target_memory_id": "mem_existing_target", "relation": "supersedes"}
+        ],
         "created_at": "2026-07-14T10:00:00+09:00",
         "updated_at": "2026-07-14T10:00:00+09:00",
     }
@@ -885,7 +968,7 @@ def test_resolve_memory_supersede_existing(clean_memory_env):
             candidate_id="mem_cand_to_supersede",
             action="supersede_existing",
             target_memory_id="mem_existing_target",
-            switch_date="2026-06-30"  # before 2026-07-01
+            switch_date="2026-06-30",  # before 2026-07-01
         )
 
     # Validation: switch_date equal to target valid_from must be rejected too
@@ -894,7 +977,7 @@ def test_resolve_memory_supersede_existing(clean_memory_env):
             candidate_id="mem_cand_to_supersede",
             action="supersede_existing",
             target_memory_id="mem_existing_target",
-            switch_date="2026-07-01"  # completely equal to 2026-07-01
+            switch_date="2026-07-01",  # completely equal to 2026-07-01
         )
 
     # Valid resolution
@@ -902,7 +985,7 @@ def test_resolve_memory_supersede_existing(clean_memory_env):
         candidate_id="mem_cand_to_supersede",
         action="supersede_existing",
         target_memory_id="mem_existing_target",
-        switch_date="2026-07-15"
+        switch_date="2026-07-15",
     )
 
     assert new_target["status"] == "superseded"
@@ -943,7 +1026,7 @@ def test_extract_memories_with_dedup_assessment(clean_memory_env):
         "kind": "preference",
         "memory_key": "response-style-concise",
         "content": "既存の簡潔な話し方の好み",
-        "created_at": "2026-07-12T10:00:00+09:00"
+        "created_at": "2026-07-12T10:00:00+09:00",
     }
     memory.save_all_memories([existing_approved])
 
@@ -979,8 +1062,13 @@ def test_extract_memories_with_dedup_assessment(clean_memory_env):
     ]
     """
 
-    with patch("obsidian_ai_hub.memory.llm_client.generate_llm_response") as mock_llm, \
-         patch("obsidian_ai_hub.memory.generate_memory_id", return_value="mem_20260713_fixed"):
+    with (
+        patch("obsidian_ai_hub.memory.llm_client.generate_llm_response") as mock_llm,
+        patch(
+            "obsidian_ai_hub.memory.generate_memory_id",
+            return_value="mem_20260713_fixed",
+        ),
+    ):
 
         def fake_llm_response(*args, **kwargs):
             prompt_str = kwargs.get("prompt", "")
@@ -998,4 +1086,7 @@ def test_extract_memories_with_dedup_assessment(clean_memory_env):
         assert cand["status"] == "candidate"
         assert cand["dedup_assessment"]["decision"] == "merge"
         assert cand["dedup_assessment"]["target_memory_id"] == "mem_target_001"
-        assert cand["dedup_assessment"]["integrated_content"] == "簡潔で自然な日本語の表現を好む。過度な励まし表現を避ける。"
+        assert (
+            cand["dedup_assessment"]["integrated_content"]
+            == "簡潔で自然な日本語の表現を好む。過度な励まし表現を避ける。"
+        )

@@ -4,13 +4,29 @@ import logging
 logger = logging.getLogger(__name__)
 
 TOPIC_ENUM = [
-    "LLM・AI活用", "AI・機械学習", "ソフトウェア開発", "開発環境・DevOps",
-    "データ・分析", "クラウド・インフラ", "ツール・自動化（生産性）",
-    "リサーチ手法・情報整理（PKM）", "ガジェット・デバイス", "金融・投資",
-    "マーケティング・発信", "ライティング・コンテンツ制作", "コミュニケーション・対人関係",
-    "思考法・判断力", "学習・教育", "自己改善（習慣・時間管理）", "メンタル・心理",
-    "健康・医療", "生活・暮らし", "信仰・聖書", "その他"
+    "LLM・AI活用",
+    "AI・機械学習",
+    "ソフトウェア開発",
+    "開発環境・DevOps",
+    "データ・分析",
+    "クラウド・インフラ",
+    "ツール・自動化（生産性）",
+    "リサーチ手法・情報整理（PKM）",
+    "ガジェット・デバイス",
+    "金融・投資",
+    "マーケティング・発信",
+    "ライティング・コンテンツ制作",
+    "コミュニケーション・対人関係",
+    "思考法・判断力",
+    "学習・教育",
+    "自己改善（習慣・時間管理）",
+    "メンタル・心理",
+    "健康・医療",
+    "生活・暮らし",
+    "信仰・聖書",
+    "その他",
 ]
+
 
 def normalize_topics(topics: list[str] | None, limit: int = 5) -> list[str]:
     """
@@ -31,13 +47,15 @@ def normalize_topics(topics: list[str] | None, limit: int = 5) -> list[str]:
         if topic is None:
             continue
         # NFKC normalization and strip
-        normalized_str = unicodedata.normalize('NFKC', str(topic)).strip()
+        normalized_str = unicodedata.normalize("NFKC", str(topic)).strip()
         if not normalized_str:
             continue
 
         # Check if in candidate list, otherwise replace with 'その他'
         if normalized_str not in TOPIC_ENUM:
-            logger.warning(f"Topic '{normalized_str}' is not in candidate list. Replaced with 'その他'.")
+            logger.warning(
+                f"Topic '{normalized_str}' is not in candidate list. Replaced with 'その他'."
+            )
             normalized_str = "その他"
 
         if normalized_str not in seen:

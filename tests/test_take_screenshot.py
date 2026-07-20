@@ -1,7 +1,7 @@
 import subprocess
-from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 from obsidian_ai_hub import take_screenshot
+
 
 def test_get_unique_path(tmp_path):
     directory = tmp_path / "inbox"
@@ -21,6 +21,7 @@ def test_get_unique_path(tmp_path):
     (directory / "screen_20260528_183000_1.png").touch()
     path = take_screenshot.get_unique_path(directory, filename)
     assert path == directory / "screen_20260528_183000_2.png"
+
 
 @patch("obsidian_ai_hub.take_screenshot.subprocess.run")
 @patch("obsidian_ai_hub.take_screenshot.config")
@@ -50,6 +51,7 @@ def test_take_screenshot_main(mock_config, mock_run, tmp_path):
     assert kwargs["shell"] is False
     assert kwargs["check"] is True
 
+
 @patch("obsidian_ai_hub.take_screenshot.subprocess.run")
 @patch("obsidian_ai_hub.take_screenshot.config")
 def test_take_screenshot_window_id(mock_config, mock_run, tmp_path):
@@ -68,6 +70,7 @@ def test_take_screenshot_window_id(mock_config, mock_run, tmp_path):
     assert "12345" in cmd
     assert "-D" not in cmd
     assert cmd[-1].endswith(".png")
+
 
 @patch("obsidian_ai_hub.take_screenshot.subprocess.run")
 @patch("obsidian_ai_hub.take_screenshot.config")

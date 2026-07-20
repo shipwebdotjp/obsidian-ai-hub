@@ -4,37 +4,24 @@ from obsidian_ai_hub.utils.extracter import append_to_subheader
 
 # --- フィクスチャ ---
 
+
 @pytest.fixture
 def basic_md():
-    return (
-        "# Main Header\n"
-        "\n"
-        "## subheader1\n"
-        "- line1\n"
-        "\n"
-        "## subheader2\n"
-        "- itemA\n"
-    )
+    return "# Main Header\n\n## subheader1\n- line1\n\n## subheader2\n- itemA\n"
+
 
 @pytest.fixture
 def 末尾セクションmd():
     """対象セクションがファイル末尾にある場合"""
     return (
-        "# Main Header\n"
-        "\n"
-        "## subheader1\n"
-        "- line1\n"
-        "\n"
-        "## subheader2\n"
-        "- itemA\n"
-        "- itemB\n"
+        "# Main Header\n\n## subheader1\n- line1\n\n## subheader2\n- itemA\n- itemB\n"
     )
 
 
 # --- 既存ヘッダーへの追記 ---
 
-class TestAppendToExistingHeader:
 
+class TestAppendToExistingHeader:
     def test_追記された行が含まれる(self, basic_md):
         result = append_to_subheader(basic_md, "## subheader1", ["- line2"])
         assert "- line2" in result
@@ -43,8 +30,8 @@ class TestAppendToExistingHeader:
         result = append_to_subheader(basic_md, "## subheader1", ["- line2"])
         lines = result.splitlines()
         idx_header = lines.index("## subheader1")
-        idx_line1  = lines.index("- line1")
-        idx_line2  = lines.index("- line2")
+        idx_line1 = lines.index("- line1")
+        idx_line2 = lines.index("- line2")
         assert idx_header < idx_line1 < idx_line2
 
     def test_次のヘッダーより前に挿入される(self, basic_md):
@@ -71,8 +58,8 @@ class TestAppendToExistingHeader:
 
 # --- ヘッダーが存在しない場合（末尾に新規追加）---
 
-class TestAppendNewHeader:
 
+class TestAppendNewHeader:
     def test_新規ヘッダーが末尾に追加される(self, basic_md):
         result = append_to_subheader(basic_md, "## subheader3", ["- newItem"])
         assert "## subheader3" in result
@@ -105,8 +92,8 @@ class TestAppendNewHeader:
 
 # --- 末尾改行 ---
 
-class TestTrailingNewline:
 
+class TestTrailingNewline:
     def test_既存ヘッダー追記後も末尾改行あり(self, basic_md):
         result = append_to_subheader(basic_md, "## subheader1", ["- line2"])
         assert result.endswith("\n")

@@ -6,7 +6,6 @@ import logging
 import re
 from datetime import date as date_type
 from datetime import datetime, timedelta
-from pathlib import Path
 
 from obsidian_ai_hub.utils import config, llm_client, prompt, reader
 from obsidian_ai_hub.utils.line_messaging import send_line_push
@@ -22,7 +21,9 @@ REVIEW_HEADINGS = (
     "## 改善したいこと",
     "## 来週の一歩",
 )
-_EMPTY_RESULT_RE = re.compile(r"^[ \t]*(?:> \[!success\][ \t]*)?result::[ \t]*$", re.MULTILINE)
+_EMPTY_RESULT_RE = re.compile(
+    r"^[ \t]*(?:> \[!success\][ \t]*)?result::[ \t]*$", re.MULTILINE
+)
 
 
 def _coerce_target_date(target_date: datetime | date_type | str | None) -> datetime:
@@ -50,7 +51,9 @@ def _get_saved_draft(content: str, start_at: int) -> str | None:
     body_start = start + len(REVIEW_DRAFT_START_MARKER)
     end = content.find(REVIEW_DRAFT_END_MARKER, body_start)
     if end == -1:
-        logger.warning("Review draft marker has no closing marker; skipping notification")
+        logger.warning(
+            "Review draft marker has no closing marker; skipping notification"
+        )
         return None
     draft = content[body_start:end].strip()
     return draft or None
@@ -85,12 +88,16 @@ def _clean_generated_draft(response: object) -> str:
 
 def _has_expected_format(draft: str) -> bool:
     positions = [draft.find(heading) for heading in REVIEW_HEADINGS]
-    return all(position >= 0 for position in positions) and positions == sorted(positions)
+    return all(position >= 0 for position in positions) and positions == sorted(
+        positions
+    )
 
 
 def _send_review_draft(draft: str) -> bool:
     if not config.LINE_MESSAGING_TOKEN or not config.LINE_TARGET_ID:
-        logger.error("LINE token or target is not configured; review draft was saved but not sent")
+        logger.error(
+            "LINE token or target is not configured; review draft was saved but not sent"
+        )
         return False
     if send_line_push(config.LINE_MESSAGING_TOKEN, config.LINE_TARGET_ID, draft):
         logger.info("Sent weekly review draft to LINE")
@@ -157,15 +164,17 @@ def review_draft(target_date: datetime | date_type | str | None = None) -> bool:
 
     weekly_note_path = reader.get_weekly_note_path(target_date)
     updated_note = (
-        weekly_note[:result_match.end()]
+        weekly_note[: result_match.end()]
         + f"\n{REVIEW_DRAFT_START_MARKER}\n{draft}\n{REVIEW_DRAFT_END_MARKER}"
-        + weekly_note[result_match.end():]
+        + weekly_note[result_match.end() :]
     )
     try:
         weekly_note_path.parent.mkdir(parents=True, exist_ok=True)
         weekly_note_path.write_text(updated_note, encoding="utf-8")
     except OSError as exc:
-        logger.error("Failed to save weekly review draft to %s: %s", weekly_note_path, exc)
+        logger.error(
+            "Failed to save weekly review draft to %s: %s", weekly_note_path, exc
+        )
         return False
 
     logger.info("Weekly review draft saved to %s", weekly_note_path)

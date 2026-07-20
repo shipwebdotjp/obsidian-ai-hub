@@ -5,3 +5,5 @@ from obsidian_ai_hub.research.suggest import (
     build_suggestions,
     main,
 )
+
+__all__ = ["SuggestedResearchTheme", "build_suggestions", "main"]

@@ -11,20 +11,20 @@ Configuration (put into your .env):
 
 Intended to be called from batch/morning_routine.sh or similar.
 """
+
 from __future__ import annotations
 
-import json
 import logging
 import os
-import shlex
 import subprocess
 from datetime import datetime, date, time, timedelta
 from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
 import threading
 from EventKit import (
-    EKEventStore, EKEntityTypeEvent,
-    EKEventStore, EKAuthorizationStatusAuthorized,
+    EKEntityTypeEvent,
+    EKEventStore,
+    EKAuthorizationStatusAuthorized,
     EKAuthorizationStatusNotDetermined,
 )
 from Foundation import NSRunLoop, NSDate
@@ -45,11 +45,27 @@ except Exception:  # pragma: no cover - optional
 
 CAT_TASK = 1
 CAT_EVENT = 2
-WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土']
+WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"]
 
-def _get_apple_reminder_events(start_date: date, end_date: date) -> List[Dict[str, Any]]:
-    MONTH_NAMES = [None, 'January', 'February', 'March', 'April', 'May', 'June',
-                   'July', 'August', 'September', 'October', 'November', 'December']
+
+def _get_apple_reminder_events(
+    start_date: date, end_date: date
+) -> List[Dict[str, Any]]:
+    MONTH_NAMES = [
+        None,
+        "January",
+        "February",
+        "March",
+        "April",
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October",
+        "November",
+        "December",
+    ]
 
     syear = start_date.year
     smonth = MONTH_NAMES[start_date.month]
@@ -61,7 +77,7 @@ def _get_apple_reminder_events(start_date: date, end_date: date) -> List[Dict[st
 
     # Build AppleScript date objects using numeric components to avoid locale-dependent
     # parsing of date strings.
-    script = f'''
+    script = f"""
     tell application "Reminders"
         set startDate to current date
         set year of startDate to {syear}
@@ -90,13 +106,9 @@ def _get_apple_reminder_events(start_date: date, end_date: date) -> List[Dict[st
         end repeat
         return output
     end tell
-    '''
+    """
 
-    result = subprocess.run(
-        ["osascript", "-e", script],
-        capture_output=True,
-        text=True
-    )
+    result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True)
 
     events = []
     for line in result.stdout.splitlines():
@@ -114,7 +126,9 @@ def _ensure_calendar_access(store: EKEventStore) -> None:
         return
 
     if status != EKAuthorizationStatusNotDetermined:
-        raise PermissionError("Calendar access is denied/restricted. Enable it in System Settings.")
+        raise PermissionError(
+            "Calendar access is denied/restricted. Enable it in System Settings."
+        )
 
     # NotDetermined: 対話実行で許可ダイアログを出せる環境のみ推奨
     done = threading.Event()
@@ -128,7 +142,9 @@ def _ensure_calendar_access(store: EKEventStore) -> None:
     store.requestAccessToEntityType_completion_(EKEntityTypeEvent, handler)
 
     while not done.wait(0.05):
-        NSRunLoop.currentRunLoop().runUntilDate_(NSDate.dateWithTimeIntervalSinceNow_(0.05))
+        NSRunLoop.currentRunLoop().runUntilDate_(
+            NSDate.dateWithTimeIntervalSinceNow_(0.05)
+        )
 
     if not granted_box["granted"]:
         raise PermissionError("Calendar access not granted")
@@ -190,11 +206,16 @@ def get_calendar_events_eventkit(
             out.append({"title": title})
             continue
 
-        s = datetime.fromtimestamp(float(e.startDate().timeIntervalSince1970()), tz=tz).isoformat()
-        en = datetime.fromtimestamp(float(e.endDate().timeIntervalSince1970()), tz=tz).isoformat()
+        s = datetime.fromtimestamp(
+            float(e.startDate().timeIntervalSince1970()), tz=tz
+        ).isoformat()
+        en = datetime.fromtimestamp(
+            float(e.endDate().timeIntervalSince1970()), tz=tz
+        ).isoformat()
         out.append({"title": title, "start": s, "end": en})
 
     return out
+
 
 def _parse_event_times(ev: Dict[str, Any]) -> Dict[str, Optional[datetime]]:
     """Return dict with 'start' and 'end' datetimes or None for all-day events."""
@@ -202,17 +223,17 @@ def _parse_event_times(ev: Dict[str, Any]) -> Dict[str, Optional[datetime]]:
     start = None
     end = None
 
-    s = ev.get('start') or ev.get('startLocal') or ev.get('start')
-    e = ev.get('end') or ev.get('endLocal') or ev.get('end')
+    s = ev.get("start") or ev.get("startLocal") or ev.get("start")
+    e = ev.get("end") or ev.get("endLocal") or ev.get("end")
 
     def _parse(val: Any) -> Optional[datetime]:
         if not val:
             return None
         if isinstance(val, dict):
             # google-like: {"dateTime": "...", "date": "..."}
-            if 'dateTime' in val:
-                dt = val['dateTime']
-            elif 'date' in val:
+            if "dateTime" in val:
+                dt = val["dateTime"]
+            elif "date" in val:
                 # all-day
                 return None
             else:
@@ -230,29 +251,29 @@ def _parse_event_times(ev: Dict[str, Any]) -> Dict[str, Optional[datetime]]:
             except Exception:
                 # last resort: try slicing
                 try:
-                    return datetime.fromisoformat(dt.replace('Z', '+00:00'))
+                    return datetime.fromisoformat(dt.replace("Z", "+00:00"))
                 except Exception:
                     return None
         return None
 
     start = _parse(s)
     end = _parse(e)
-    return {'start': start, 'end': end}
+    return {"start": start, "end": end}
 
 
 def all_plan_to_msg(events: List[Dict[str, Any]]) -> List[str]:
     msgs: List[str] = []
     for ev in events:
-        title = ev.get('summary') or ev.get('title') or ev.get('name') or ''
+        title = ev.get("summary") or ev.get("title") or ev.get("name") or ""
         times = _parse_event_times(ev)
-        if times['start'] is None:
+        if times["start"] is None:
             # all-day event
             msgs.append(title)
             continue
-        start_local = times['start']
-        end_local = times['end']
-        start_str = start_local.strftime('%H:%M') if start_local else ''
-        end_str = end_local.strftime('%H:%M') if end_local else ''
+        start_local = times["start"]
+        end_local = times["end"]
+        start_str = start_local.strftime("%H:%M") if start_local else ""
+        end_str = end_local.strftime("%H:%M") if end_local else ""
         if start_str and end_str:
             msgs.append(f"{title} {start_str}~{end_str}")
         else:
@@ -260,7 +281,9 @@ def all_plan_to_msg(events: List[Dict[str, Any]]) -> List[str]:
     return msgs
 
 
-def get_days(target_date: date, days_number: List[int], nthday: List[int]) -> List[date]:
+def get_days(
+    target_date: date, days_number: List[int], nthday: List[int]
+) -> List[date]:
     """Return dates within the month of target_date that match weekday numbers and nth occurrences.
 
     days_number: list of weekday numbers (GAS: 0=Sunday..6=Saturday)
@@ -318,22 +341,26 @@ def get_dates_in_month(target_day: date, dates: List[int]) -> List[date]:
 
 
 def is_today(target: date, days: List[date]) -> bool:
-    return any(d.year == target.year and d.month == target.month and d.day == target.day for d in days)
-
-
-
+    return any(
+        d.year == target.year and d.month == target.month and d.day == target.day
+        for d in days
+    )
 
 
 def main() -> int:
     # Load configuration from environment
-    cal_id = config.GOG_CALENDAR_ID or os.getenv('GOG_CALENDAR_ID') or os.getenv('CALENDAR_ID') or 'primary'
+    cal_id = (
+        config.GOG_CALENDAR_ID
+        or os.getenv("GOG_CALENDAR_ID")
+        or os.getenv("CALENDAR_ID")
+        or "primary"
+    )
 
     now = datetime.now()
     today_date = date(now.year, now.month, now.day)
 
     events: List[str] = []
     tasks: List[str] = []
-    messages: List[str] = []
 
     # Fetch today's events from Calendar.app
     calendar_events = get_calendar_events_eventkit(cal_id)
@@ -382,7 +409,7 @@ def main() -> int:
     reminder_events = _get_apple_reminder_events(today_date, today_date)
     if reminder_events:
         for ev in reminder_events:
-            name = ev.get('name', '')
+            name = ev.get("name", "")
             tasks.append(f"{name}")
 
     if events or tasks:
@@ -404,9 +431,9 @@ def main() -> int:
             f.write(new_today_note)
         return 0
 
-    logger.info('No messages to send today.')
+    logger.info("No messages to send today.")
     return 0
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     raise SystemExit(main())

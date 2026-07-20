@@ -1,5 +1,5 @@
-import os
 from obsidian_ai_hub.utils import config
+
 
 def get_daily_note_path(date):
     """
@@ -11,7 +11,7 @@ def get_daily_note_path(date):
     daily_dir = config.DAILY_PATH / year / month
     daily_file = daily_dir / f"{day_str}.md"
     return daily_file
-    
+
 
 def get_daily_note_content(date):
     """

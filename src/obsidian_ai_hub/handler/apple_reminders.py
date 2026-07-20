@@ -18,18 +18,32 @@ try:
         EKAuthorizationStatusAuthorized,
         EKAuthorizationStatusNotDetermined,
     )
-    from Foundation import NSRunLoop, NSDate, NSCalendar, NSCalendarUnitYear, NSCalendarUnitMonth, NSCalendarUnitDay, NSCalendarUnitHour, NSCalendarUnitMinute, NSCalendarUnitSecond
+    from Foundation import (
+        NSRunLoop,
+        NSDate,
+        NSCalendar,
+        NSCalendarUnitYear,
+        NSCalendarUnitMonth,
+        NSCalendarUnitDay,
+        NSCalendarUnitHour,
+        NSCalendarUnitMinute,
+        NSCalendarUnitSecond,
+    )
+
     EVENTKIT_AVAILABLE = True
 except ImportError:
     EVENTKIT_AVAILABLE = False
 
+
 class AddReminderInput(BaseModel):
     """Input for adding a reminder."""
+
     title: str = Field(description="The title of the reminder.")
     due_date: Optional[str] = Field(
         default=None,
-        description="The due date of the reminder in ISO format (e.g., '2023-12-31' or '2023-12-31T23:59:59')."
+        description="The due date of the reminder in ISO format (e.g., '2023-12-31' or '2023-12-31T23:59:59').",
     )
+
 
 def _ensure_reminder_access(store: EKEventStore) -> None:
     if not EVENTKIT_AVAILABLE:
@@ -41,9 +55,12 @@ def _ensure_reminder_access(store: EKEventStore) -> None:
         return
 
     if status != EKAuthorizationStatusNotDetermined:
-        raise PermissionError("Reminders access is denied/restricted. Enable it in System Settings.")
+        raise PermissionError(
+            "Reminders access is denied/restricted. Enable it in System Settings."
+        )
 
     import threading
+
     done = threading.Event()
     granted_box = {"granted": False, "error": None}
 
@@ -55,10 +72,13 @@ def _ensure_reminder_access(store: EKEventStore) -> None:
     store.requestAccessToEntityType_completion_(EKEntityTypeReminder, handler)
 
     while not done.wait(0.05):
-        NSRunLoop.currentRunLoop().runUntilDate_(NSDate.dateWithTimeIntervalSinceNow_(0.05))
+        NSRunLoop.currentRunLoop().runUntilDate_(
+            NSDate.dateWithTimeIntervalSinceNow_(0.05)
+        )
 
     if not granted_box["granted"]:
         raise PermissionError(f"Reminders access not granted: {granted_box['error']}")
+
 
 @tool(args_schema=AddReminderInput)
 def add_reminder(title: str, due_date: Optional[str] = None) -> str:
@@ -84,10 +104,16 @@ def add_reminder(title: str, due_date: Optional[str] = None) -> str:
 
                 calendar = NSCalendar.currentCalendar()
                 unit_flags = (
-                    NSCalendarUnitYear | NSCalendarUnitMonth | NSCalendarUnitDay |
-                    NSCalendarUnitHour | NSCalendarUnitMinute | NSCalendarUnitSecond
+                    NSCalendarUnitYear
+                    | NSCalendarUnitMonth
+                    | NSCalendarUnitDay
+                    | NSCalendarUnitHour
+                    | NSCalendarUnitMinute
+                    | NSCalendarUnitSecond
                 )
-                components = calendar.components_fromDate_(unit_flags, NSDate.dateWithTimeIntervalSince1970_(dt.timestamp()))
+                components = calendar.components_fromDate_(
+                    unit_flags, NSDate.dateWithTimeIntervalSince1970_(dt.timestamp())
+                )
                 reminder.setDueDateComponents_(components)
             except ValueError:
                 return f"Error: Invalid due_date format: {due_date}. Use ISO format."

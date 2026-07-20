@@ -1,6 +1,5 @@
 from datetime import date
 
-import pytest
 
 from obsidian_ai_hub.notify_calendar_event import get_days
 from obsidian_ai_hub.notify_calendar_event import get_dates_in_month, is_today
@@ -25,7 +24,6 @@ def test_multiple_weekdays_multiple_nth():
         date(2021, 8, 15),
     }
     assert set(days) == expected
-
 
 
 def test_empty_nthday_returns_empty():

@@ -6,11 +6,9 @@ import re
 import unicodedata
 import uuid
 from datetime import date, datetime, timedelta, timezone
-from pathlib import Path
 from typing import Optional
 
 from obsidian_ai_hub.memory import get_db_connection
-from obsidian_ai_hub.utils import config
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +78,9 @@ def normalize_theme_key(text: str) -> str:
 def serialize_theme(t: dict) -> dict:
     row = dict(t)
     if "related_theme_ids" in row and row["related_theme_ids"] is not None:
-        row["related_theme_ids"] = json.dumps(row["related_theme_ids"], ensure_ascii=False)
+        row["related_theme_ids"] = json.dumps(
+            row["related_theme_ids"], ensure_ascii=False
+        )
     return row
 
 
@@ -183,7 +183,9 @@ def list_themes(
         params.append(status)
 
     if q:
-        where_clauses.append("(rt.theme LIKE ? OR rt.direction LIKE ? OR rt.why_now LIKE ?)")
+        where_clauses.append(
+            "(rt.theme LIKE ? OR rt.direction LIKE ? OR rt.why_now LIKE ?)"
+        )
         like = f"%{q}%"
         params.extend([like, like, like])
 
@@ -192,7 +194,8 @@ def list_themes(
     conn = _get_db()
     try:
         cursor = conn.cursor()
-        cursor.execute(f"""
+        cursor.execute(
+            f"""
             SELECT rt.*, rj.job_id AS latest_job_id, rj.status AS job_status,
                    rj.generated_title, rj.mode, rj.error,
                    rj.started_at AS job_started_at, rj.finished_at AS job_finished_at
@@ -205,7 +208,9 @@ def list_themes(
             )
             {where_sql}
             ORDER BY rt.created_at DESC
-        """, params)
+        """,
+            params,
+        )
         rows = [dict(r) for r in cursor.fetchall()]
     finally:
         conn.close()
@@ -248,7 +253,9 @@ def set_status(
     try:
         with conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM research_themes WHERE theme_id = ?", (theme_id,))
+            cursor.execute(
+                "SELECT * FROM research_themes WHERE theme_id = ?", (theme_id,)
+            )
             row = cursor.fetchone()
             if row is None:
                 return None
@@ -265,9 +272,15 @@ def set_status(
             if related_ids is not None:
                 t["related_theme_ids"] = related_ids
             db_row = serialize_theme(t)
-            set_clause = ", ".join(f"{c} = ?" for c in RESEARCH_THEME_COLUMNS if c != "theme_id")
-            values = [db_row.get(c) for c in RESEARCH_THEME_COLUMNS if c != "theme_id"] + [theme_id]
-            conn.execute(f"UPDATE research_themes SET {set_clause} WHERE theme_id = ?", values)
+            set_clause = ", ".join(
+                f"{c} = ?" for c in RESEARCH_THEME_COLUMNS if c != "theme_id"
+            )
+            values = [
+                db_row.get(c) for c in RESEARCH_THEME_COLUMNS if c != "theme_id"
+            ] + [theme_id]
+            conn.execute(
+                f"UPDATE research_themes SET {set_clause} WHERE theme_id = ?", values
+            )
         return t
     finally:
         conn.close()
@@ -338,9 +351,15 @@ def update_job(
             elif status in ("succeeded", "failed"):
                 j["finished_at"] = get_current_timestamp()
 
-            set_clause = ", ".join(f"{c} = ?" for c in RESEARCH_JOB_COLUMNS if c != "job_id")
-            values = [j.get(c) for c in RESEARCH_JOB_COLUMNS if c != "job_id"] + [job_id]
-            conn.execute(f"UPDATE research_jobs SET {set_clause} WHERE job_id = ?", values)
+            set_clause = ", ".join(
+                f"{c} = ?" for c in RESEARCH_JOB_COLUMNS if c != "job_id"
+            )
+            values = [j.get(c) for c in RESEARCH_JOB_COLUMNS if c != "job_id"] + [
+                job_id
+            ]
+            conn.execute(
+                f"UPDATE research_jobs SET {set_clause} WHERE job_id = ?", values
+            )
             return j
     finally:
         conn.close()
@@ -394,6 +413,7 @@ def find_exact_duplicate(normalized_key: str) -> Optional[dict]:
 def find_top_similar(theme: str, embedder, k: int = 5) -> list[tuple[str, float]]:
     try:
         from obsidian_ai_hub.memory import cosine_similarity
+
         conn = _get_db()
         try:
             cursor = conn.cursor()
@@ -441,7 +461,9 @@ def list_recent_activity_days(days: int = 30) -> list[dict]:
     db_activities = sorted(db_activities, key=lambda x: x.get("occurred_at") or "")
     # Sort: activity_date DESC (newest first) next.
     # Because python's sort is stable, occurred_at ASC ordering is preserved within each date.
-    db_activities = sorted(db_activities, key=lambda x: x.get("activity_date") or "", reverse=True)
+    db_activities = sorted(
+        db_activities, key=lambda x: x.get("activity_date") or "", reverse=True
+    )
 
     entries = []
     for e in db_activities:
@@ -450,12 +472,14 @@ def list_recent_activity_days(days: int = 30) -> list[dict]:
             continue
         category = e.get("category") or ""
         keywords = e.get("keywords") or []
-        entries.append({
-            "activity_date": e.get("activity_date"),
-            "summary": summary.strip(),
-            "category": category.strip() if isinstance(category, str) else "",
-            "keywords": [str(k).strip() for k in keywords if k],
-        })
+        entries.append(
+            {
+                "activity_date": e.get("activity_date"),
+                "summary": summary.strip(),
+                "category": category.strip() if isinstance(category, str) else "",
+                "keywords": [str(k).strip() for k in keywords if k],
+            }
+        )
 
     seen_summaries: set[str] = set()
     deduped: list[dict] = []

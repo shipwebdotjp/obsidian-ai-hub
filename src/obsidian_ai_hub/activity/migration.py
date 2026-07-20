@@ -32,7 +32,7 @@ def discover_jsonl_files(activity_path: Path) -> list[Path]:
                 if len(parts) != 3:
                     continue
                 try:
-                    d = date(int(parts[0]), int(parts[1]), int(parts[2]))
+                    date(int(parts[0]), int(parts[1]), int(parts[2]))
                 except (ValueError, OverflowError):
                     continue
                 if parts[0] != year_dir.name or parts[1] != month_dir.name:
