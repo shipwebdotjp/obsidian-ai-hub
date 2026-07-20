@@ -182,7 +182,7 @@ Flex Message を使わないため、リッチなレイアウトは不可能だ�
 
 ### トレードオフ
 
-- ファサードを維持するため、 `obsidian_ai_hub.memory` の責務 is 依然として広範に見える。実装はサブパッケージに閉じているため、コードの見通しは改善している。
+- ファサードを維持するため、 `obsidian_ai_hub.memory` の責務が依然として広範に見える。実装はサブパッケージに閉じているため、コードの見通しは改善している。
 - 依存方向は `models → stdlib`、`store → database + models`、`dedup / extraction / review / context / projection → 上位層` となり、循環importは存在しない。
 - `projection` だけは `approved.md` の書き出しをトリガするため `review` と `context` から逆参照される。import-time の循環を避けるため、`projection.project_approved_memories` の呼び出しはローカル import で行う。
 

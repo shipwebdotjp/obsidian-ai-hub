@@ -694,3 +694,10 @@ class ProjectCandidateResolveRequest(BaseModel):
     completed_date: Optional[str] = None
     project_path: Optional[str] = None
     reference_url: Optional[str] = None
+
+    @model_validator(mode="after")
+    def validate_resolve_request(self) -> "ProjectCandidateResolveRequest":
+        if self.action == "link_existing":
+            if self.target_project_id is None or self.target_project_id <= 0:
+                raise ValueError("target_project_id is required and must be a valid positive integer for link_existing")
+        return self

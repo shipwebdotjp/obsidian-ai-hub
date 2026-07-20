@@ -74,20 +74,8 @@ def get_daily_structured_record(
         logger.warning("Failed to load approved research themes: %s", e)
 
     # Load active, inquiry, paused projects for prompt listing
-    existing_projects = []
-    try:
-        from obsidian_ai_hub.web.service import list_projects
-        for status_val in ("inquiry", "active", "paused"):
-            for p in list_projects(status=status_val):
-                existing_projects.append({
-                    "id": p["project_id"],
-                    "display_name": p["display_name"],
-                    "domain": p["domain"],
-                    "goal": p.get("goal"),
-                    "keywords": p.get("keywords") or []
-                })
-    except Exception as e:
-        logger.warning("Failed to load existing projects for prompt: %s", e)
+    from obsidian_ai_hub.summary.project_utils import get_active_projects_for_prompt
+    existing_projects = get_active_projects_for_prompt()
 
     # 最小レコード（フォールバック用）
     record = {

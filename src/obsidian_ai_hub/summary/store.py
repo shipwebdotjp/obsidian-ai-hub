@@ -140,7 +140,7 @@ def deserialize_candidate(row: dict | sqlite3.Row) -> dict:
     if isinstance(kw, str):
         try:
             c["keywords"] = json.loads(kw)
-        except Exception:
+        except (json.JSONDecodeError, TypeError):
             c["keywords"] = []
     elif not isinstance(kw, list):
         c["keywords"] = []

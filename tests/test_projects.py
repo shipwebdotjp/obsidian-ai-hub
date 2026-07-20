@@ -299,3 +299,41 @@ def test_weekly_and_monthly_project_inheritance(test_memory_db_path):
 
     month_cand_names = {c["display_name"] for c in month_sum["project_candidates"]}
     assert month_cand_names == {"Candidate A", "Candidate B"}
+
+
+def test_project_utils_helpers(test_memory_db_path):
+    from obsidian_ai_hub.summary.project_utils import get_active_projects_for_prompt, inherit_projects_and_candidates
+
+    # Check that get_active_projects_for_prompt retrieves active, inquiry, paused projects
+    # Let's create one of each status
+    service.create_project(schemas.ProjectCreateRequest(display_name="Proj Inquiry", domain="work", status="inquiry"))
+    service.create_project(schemas.ProjectCreateRequest(display_name="Proj Active", domain="work", status="active"))
+    service.create_project(schemas.ProjectCreateRequest(display_name="Proj Paused", domain="personal", status="paused"))
+    service.create_project(schemas.ProjectCreateRequest(display_name="Proj Completed", domain="personal", status="completed"))
+
+    active_prompt_projs = get_active_projects_for_prompt()
+    # Should get 3 projects (Inquiry, Active, Paused), but not Completed
+    assert len(active_prompt_projs) == 3
+    names = {p["display_name"] for p in active_prompt_projs}
+    assert "Proj Inquiry" in names
+    assert "Proj Active" in names
+    assert "Proj Paused" in names
+    assert "Proj Completed" not in names
+
+    # Test inherit_projects_and_candidates
+    sub_records = [
+        {
+            "project_ids": [123],
+            "project_candidates": [{"name": "Cand Helper 1", "domain": "personal"}]
+        },
+        None,
+        {
+            "project_ids": [456],
+            "project_candidates": [{"name": "Cand Helper 1", "domain": "personal"}, {"name": "Cand Helper 2", "domain": "work"}]
+        }
+    ]
+    p_ids, p_candidates = inherit_projects_and_candidates(sub_records)
+    assert set(p_ids) == {123, 456}
+    assert len(p_candidates) == 2
+    cand_names = {c["display_name"] for c in p_candidates}
+    assert cand_names == {"Cand Helper 1", "Cand Helper 2"}

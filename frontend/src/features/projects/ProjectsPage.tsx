@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { apiGet, apiPost, apiPatch, ApiError } from "../../api/client";
+import { ProjectCandidate } from "../../api/types";
 
 interface Project {
   project_id: number;
@@ -30,22 +31,6 @@ interface ProjectDetail extends Project {
   summaries: AssociatedSummary[];
 }
 
-interface ProjectCandidate {
-  candidate_id: number;
-  display_name: string;
-  normalized_name: string;
-  domain: "work" | "personal";
-  status: "unresolved" | "resolved" | "rejected";
-  goal: string | null;
-  description: string | null;
-  keywords: string[];
-  start_date: string | null;
-  target_date: string | null;
-  completed_date: string | null;
-  evidence: string | null;
-  created_at: string;
-  updated_at: string;
-}
 
 interface ProjectCandidateDetail extends ProjectCandidate {
   summaries: AssociatedSummary[];
@@ -63,7 +48,7 @@ export default function ProjectsPage() {
   // Data states
   const [candidates, setCandidates] = useState<ProjectCandidate[]>([]);
   const [archivedCandidates, setArchivedCandidates] = useState<ProjectCandidate[]>([]);
-  const [projects, setPeopleProjects] = useState<Project[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
 
   // Selection states
   const [selectedProject, setSelectedProject] = useState<ProjectDetail | null>(null);
@@ -95,51 +80,80 @@ export default function ProjectsPage() {
   const [formProjectPath, setFormProjectPath] = useState("");
   const [formReferenceUrl, setFormReferenceUrl] = useState("");
 
+  const candidatesRequestCounterRef = React.useRef(0);
+  const projectsRequestCounterRef = React.useRef(0);
+
   const clearMessages = () => {
     setError(null);
     setSuccessMessage(null);
   };
 
-  const fetchCandidates = async () => {
-    const unresolved = await apiGet<ProjectCandidate[]>("/api/v1/projects/candidates?status=unresolved");
-    setCandidates(unresolved);
-    const resolved = await apiGet<ProjectCandidate[]>("/api/v1/projects/candidates?status=resolved");
-    const rejected = await apiGet<ProjectCandidate[]>("/api/v1/projects/candidates?status=rejected");
-    setArchivedCandidates([...resolved, ...rejected]);
+  const loadCandidatesOnly = async () => {
+    const reqId = ++candidatesRequestCounterRef.current;
+    setLoading(true);
+    try {
+      const unresolved = await apiGet<ProjectCandidate[]>("/api/v1/projects/candidates?status=unresolved");
+      const resolved = await apiGet<ProjectCandidate[]>("/api/v1/projects/candidates?status=resolved");
+      const rejected = await apiGet<ProjectCandidate[]>("/api/v1/projects/candidates?status=rejected");
+      if (reqId === candidatesRequestCounterRef.current) {
+        setCandidates(unresolved);
+        setArchivedCandidates([...resolved, ...rejected]);
+      }
+    } catch (e: any) {
+      if (reqId === candidatesRequestCounterRef.current) {
+        setError(e.message || "候補の読み込みに失敗しました");
+      }
+    } finally {
+      if (reqId === candidatesRequestCounterRef.current) {
+        setLoading(false);
+      }
+    }
   };
 
-  const fetchProjects = async () => {
-    let url = "/api/v1/projects";
-    const qParts: string[] = [];
-    if (domainFilter !== "all") {
-      qParts.push(`domain=${domainFilter}`);
+  const loadProjectsOnly = async () => {
+    const reqId = ++projectsRequestCounterRef.current;
+    setLoading(true);
+    try {
+      let url = "/api/v1/projects";
+      const qParts: string[] = [];
+      if (domainFilter !== "all") {
+        qParts.push(`domain=${domainFilter}`);
+      }
+      if (statusFilter !== "all") {
+        qParts.push(`status=${statusFilter}`);
+      }
+      if (qParts.length > 0) {
+        url += "?" + qParts.join("&");
+      }
+      const data = await apiGet<Project[]>(url);
+      if (reqId === projectsRequestCounterRef.current) {
+        setProjects(data);
+      }
+    } catch (e: any) {
+      if (reqId === projectsRequestCounterRef.current) {
+        setError(e.message || "プロジェクトの読み込みに失敗しました");
+      }
+    } finally {
+      if (reqId === projectsRequestCounterRef.current) {
+        setLoading(false);
+      }
     }
-    if (statusFilter !== "all") {
-      qParts.push(`status=${statusFilter}`);
-    }
-    if (qParts.length > 0) {
-      url += "?" + qParts.join("&");
-    }
-    const data = await apiGet<Project[]>(url);
-    setPeopleProjects(data);
   };
 
   const loadAllData = async (shouldClearSuccess = true) => {
-    setLoading(true);
     if (shouldClearSuccess) {
       clearMessages();
     }
-    try {
-      await Promise.all([fetchCandidates(), fetchProjects()]);
-    } catch (e: any) {
-      setError(e.message || "データの読み込みに失敗しました");
-    } finally {
-      setLoading(false);
-    }
+    await Promise.all([loadCandidatesOnly(), loadProjectsOnly()]);
   };
 
   useEffect(() => {
-    loadAllData(true);
+    clearMessages();
+    loadCandidatesOnly();
+  }, []);
+
+  useEffect(() => {
+    loadProjectsOnly();
   }, [statusFilter, domainFilter]);
 
   const handleSelectProject = async (p: Project) => {
@@ -987,7 +1001,13 @@ export default function ProjectsPage() {
                     handleResolveCandidate();
                   }
                 }}
-                disabled={loading || (showCreateModal && !formDisplayName.trim()) || (showEditModal && !formDisplayName.trim())}
+                disabled={
+                  loading ||
+                  (showCreateModal && !formDisplayName.trim()) ||
+                  (showEditModal && !formDisplayName.trim()) ||
+                  (showResolveModal && resolveMode === "approve_new" && !formDisplayName.trim()) ||
+                  (showResolveModal && resolveMode === "link_existing" && !targetProjectId)
+                }
                 className="rounded bg-slate-950 px-4 py-2 text-xs font-semibold text-white hover:bg-slate-800 disabled:opacity-50"
               >
                 {loading ? "処理中..." : "保存する"}
