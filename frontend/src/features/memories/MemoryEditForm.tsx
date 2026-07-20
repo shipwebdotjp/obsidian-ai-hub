@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { ApiError, editMemory } from "../../api/client";
 import type { EditPayload, Memory, MemoryDetail } from "../../api/types";
 import type { Stability } from "../../api/types";
@@ -21,13 +21,6 @@ export default function MemoryEditForm({ memory, onUpdated, notify, onCancel }: 
   const [reviewDueAt, setReviewDueAt] = useState(memory.review_due_at || "");
   const [stability, setStability] = useState<Stability>(memory.stability || "stable");
   const [busy, setBusy] = useState(false);
-  const isMounted = useRef(true);
-
-  useEffect(() => {
-    return () => {
-      isMounted.current = false;
-    };
-  }, []);
 
   function splitList(value: string): string[] {
     return value
@@ -49,15 +42,13 @@ export default function MemoryEditForm({ memory, onUpdated, notify, onCancel }: 
     };
     try {
       const res = await editMemory(memory.memory_id, payload);
-      if (!isMounted.current) return;
       onUpdated(res.memory);
       notify("編集を保存して承認しました");
     } catch (e) {
-      if (!isMounted.current) return;
       const msg = e instanceof ApiError ? e.message : "編集に失敗しました";
       notify(msg, "error");
     } finally {
-      if (isMounted.current) setBusy(false);
+      setBusy(false);
     }
   }
 
