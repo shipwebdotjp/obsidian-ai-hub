@@ -212,6 +212,23 @@ export interface SummaryItem {
   display_order: number;
 }
 
+export interface ProjectCandidate {
+  candidate_id: number;
+  display_name: string;
+  normalized_name: string;
+  domain: "work" | "personal";
+  status: "unresolved" | "resolved" | "rejected";
+  goal?: string | null;
+  description?: string | null;
+  keywords: string[];
+  start_date?: string | null;
+  target_date?: string | null;
+  completed_date?: string | null;
+  evidence?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface SummaryListItem {
   summary_id: string;
   period_type: SummaryPeriodType;
@@ -226,6 +243,7 @@ export interface SummaryListItem {
   sleep_hours?: number | null;
   topics: string[];
   projects: string[];
+  project_candidates?: ProjectCandidate[];
   people: SummaryPerson[];
 }
 

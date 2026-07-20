@@ -25,6 +25,9 @@ export default function Sidebar() {
         <NavLink to={ROUTES.PEOPLE} className={linkClass}>
           人物管理
         </NavLink>
+        <NavLink to={ROUTES.PROJECTS} className={linkClass}>
+          プロジェクト管理
+        </NavLink>
       </nav>
     </aside>
   );

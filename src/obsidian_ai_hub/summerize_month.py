@@ -174,6 +174,12 @@ def get_monthly_structured_record(
         )
         return None
 
+    # Collect union of project_ids and unresolved project_candidates from weekly_records without LLM
+    from obsidian_ai_hub.summary.project_utils import inherit_projects_and_candidates
+    p_ids, p_candidates = inherit_projects_and_candidates(weekly_records)
+    record["project_ids"] = p_ids
+    record["project_candidates"] = p_candidates
+
     return record
 
 

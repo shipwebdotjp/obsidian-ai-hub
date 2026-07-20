@@ -27,12 +27,24 @@ def mock_people_notes(monkeypatch):
     )
 
 
+def _insert_test_project(conn, display_name, norm_name, domain="personal", status="active"):
+    from datetime import datetime
+    now_iso = datetime.now().isoformat()
+    conn.execute("""
+        INSERT INTO projects (
+            normalized_name, display_name, domain, status, goal, description,
+            keywords, start_date, target_date, completed_date, project_path,
+            reference_url, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, 'goal', 'desc', '[]', NULL, NULL, NULL, NULL, NULL, ?, ?)
+    """, (norm_name, display_name, domain, status, now_iso, now_iso))
+
+
 def test_schema_version_bump(test_memory_db_path):
     conn = memory.get_db_connection()
     try:
         cursor = conn.cursor()
         cursor.execute("PRAGMA user_version;")
-        assert cursor.fetchone()[0] == 8
+        assert cursor.fetchone()[0] == 9
 
         cursor.execute(
             "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;"
@@ -84,6 +96,7 @@ def _make_day_record(period_key="2026-07-17"):
 def test_upsert_and_get_day_summary(test_memory_db_path):
     conn = memory.get_db_connection()
     try:
+        _insert_test_project(conn, "Project A", "project a")
         record = _make_day_record()
         store.upsert_summary(record, conn=conn)
 
@@ -109,6 +122,7 @@ def test_upsert_and_get_day_summary(test_memory_db_path):
 def test_upsert_updates_existing_record(test_memory_db_path):
     conn = memory.get_db_connection()
     try:
+        _insert_test_project(conn, "Project A", "project a")
         store.upsert_summary(_make_day_record(), conn=conn)
         updated = _make_day_record()
         updated["summary"] = "Updated summary"
@@ -132,6 +146,8 @@ def test_upsert_updates_existing_record(test_memory_db_path):
 def test_list_summaries_with_filters(test_memory_db_path):
     conn = memory.get_db_connection()
     try:
+        _insert_test_project(conn, "Project A", "project a")
+        _insert_test_project(conn, "Project B", "project b")
         store.upsert_summary(_make_day_record("2026-07-17"), conn=conn)
         week_record = {
             "period_type": "week",
@@ -168,6 +184,7 @@ def test_list_summaries_with_filters(test_memory_db_path):
 def test_get_summary_options(test_memory_db_path):
     conn = memory.get_db_connection()
     try:
+        _insert_test_project(conn, "Project A", "project a")
         store.upsert_summary(_make_day_record(), conn=conn)
         options = store.get_summary_options(conn=conn)
         assert "LLM・AI活用" in options["topics"]

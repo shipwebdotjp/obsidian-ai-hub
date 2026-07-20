@@ -330,6 +330,23 @@ class SummaryPerson(BaseModel):
     candidate_id: Optional[str] = None
 
 
+class ProjectCandidate(BaseModel):
+    candidate_id: int
+    display_name: str
+    normalized_name: str
+    domain: Literal["work", "personal"]
+    status: Literal["unresolved", "resolved", "rejected"]
+    goal: Optional[str] = None
+    description: Optional[str] = None
+    keywords: list[str] = Field(default_factory=list)
+    start_date: Optional[str] = None
+    target_date: Optional[str] = None
+    completed_date: Optional[str] = None
+    evidence: Optional[str] = None
+    created_at: str
+    updated_at: str
+
+
 class SummaryListItem(BaseModel):
     summary_id: str
     period_type: Literal["day", "week", "month"]
@@ -344,6 +361,7 @@ class SummaryListItem(BaseModel):
     sleep_hours: Optional[float] = None
     topics: list[str] = Field(default_factory=list)
     projects: list[str] = Field(default_factory=list)
+    project_candidates: list[ProjectCandidate] = Field(default_factory=list)
     people: list[SummaryPerson] = Field(default_factory=list)
 
 
@@ -361,6 +379,7 @@ class SummaryDetail(BaseModel):
     sleep_hours: Optional[float] = None
     topics: list[str] = Field(default_factory=list)
     projects: list[str] = Field(default_factory=list)
+    project_candidates: list[ProjectCandidate] = Field(default_factory=list)
     people: list[SummaryPerson] = Field(default_factory=list)
     items: list[SummaryItem] = Field(default_factory=list)
 
@@ -383,6 +402,7 @@ class SummaryUpdateRequest(BaseModel):
     sleep_raw: Optional[str] = None
     items: Optional[list[SummaryItemInput]] = None
     topics: Optional[list[str]] = None
+    projects: Optional[list[int]] = None
     people: Optional[list[SummaryPersonInput]] = None
 
 
@@ -599,3 +619,85 @@ class PeopleMergePreviewResponse(BaseModel):
     transferred_aliases_count: int
     alias_transfers: list[AliasTransferPreview] = []
     merged_summaries: list[MergedSummaryPreview] = []
+
+
+# --- Project Management Schemas ---
+
+class Project(BaseModel):
+    project_id: int
+    normalized_name: str
+    display_name: str
+    domain: Literal["work", "personal"]
+    status: Literal["inquiry", "active", "paused", "completed", "cancelled"]
+    goal: Optional[str] = None
+    description: Optional[str] = None
+    keywords: list[str] = Field(default_factory=list)
+    start_date: Optional[str] = None
+    target_date: Optional[str] = None
+    completed_date: Optional[str] = None
+    project_path: Optional[str] = None
+    reference_url: Optional[str] = None
+    created_at: str
+    updated_at: str
+    summary_count: int = 0
+
+
+class ProjectDetail(Project):
+    summaries: list[AssociatedSummary] = []
+
+
+class ProjectCreateRequest(BaseModel):
+    display_name: str
+    domain: Literal["work", "personal"] = "personal"
+    status: Literal["inquiry", "active", "paused", "completed", "cancelled"] = "inquiry"
+    goal: Optional[str] = None
+    description: Optional[str] = None
+    keywords: list[str] = Field(default_factory=list)
+    start_date: Optional[str] = None
+    target_date: Optional[str] = None
+    completed_date: Optional[str] = None
+    project_path: Optional[str] = None
+    reference_url: Optional[str] = None
+
+
+class ProjectUpdateRequest(BaseModel):
+    display_name: Optional[str] = None
+    domain: Optional[Literal["work", "personal"]] = None
+    status: Optional[Literal["inquiry", "active", "paused", "completed", "cancelled"]] = None
+    goal: Optional[str] = None
+    description: Optional[str] = None
+    keywords: Optional[list[str]] = None
+    start_date: Optional[str] = None
+    target_date: Optional[str] = None
+    completed_date: Optional[str] = None
+    project_path: Optional[str] = None
+    reference_url: Optional[str] = None
+
+
+class ProjectCandidateDetail(ProjectCandidate):
+    summaries: list[AssociatedSummary] = []
+    assigned_summaries_count: int = 0
+
+
+class ProjectCandidateResolveRequest(BaseModel):
+    action: Literal["approve_new", "link_existing", "reject", "reopen_rejected"]
+    target_project_id: Optional[int] = None
+    # Allowed editing field values during resolution/approval
+    display_name: Optional[str] = None
+    domain: Optional[Literal["work", "personal"]] = None
+    status: Optional[Literal["inquiry", "active", "paused", "completed", "cancelled"]] = None
+    goal: Optional[str] = None
+    description: Optional[str] = None
+    keywords: Optional[list[str]] = None
+    start_date: Optional[str] = None
+    target_date: Optional[str] = None
+    completed_date: Optional[str] = None
+    project_path: Optional[str] = None
+    reference_url: Optional[str] = None
+
+    @model_validator(mode="after")
+    def validate_resolve_request(self) -> "ProjectCandidateResolveRequest":
+        if self.action == "link_existing":
+            if self.target_project_id is None or self.target_project_id <= 0:
+                raise ValueError("target_project_id is required and must be a valid positive integer for link_existing")
+        return self

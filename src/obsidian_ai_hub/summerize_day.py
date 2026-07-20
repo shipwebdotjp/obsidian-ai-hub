@@ -73,6 +73,10 @@ def get_daily_structured_record(
     except Exception as e:
         logger.warning("Failed to load approved research themes: %s", e)
 
+    # Load active, inquiry, paused projects for prompt listing
+    from obsidian_ai_hub.summary.project_utils import get_active_projects_for_prompt
+    existing_projects = get_active_projects_for_prompt()
+
     # 最小レコード（フォールバック用）
     record = {
         "schema_version": 1,
@@ -88,6 +92,8 @@ def get_daily_structured_record(
         "sleep_hours": summary_store.parse_sleep_hours(sleep),
         "topics": [],
         "projects": [],
+        "project_ids": [],
+        "project_candidates": [],
         "people": [],
         "items": [],
     }
@@ -110,6 +116,9 @@ def get_daily_structured_record(
                 "TOPIC_CANDIDATES": json.dumps(TOPIC_ENUM, ensure_ascii=False),
                 "APPROVED_RESEARCH_THEMES": json.dumps(
                     approved_themes, ensure_ascii=False, indent=2
+                ),
+                "EXISTING_PROJECTS": json.dumps(
+                    existing_projects, ensure_ascii=False, indent=2
                 ),
             },
         )
@@ -141,6 +150,30 @@ def get_daily_structured_record(
             "reflections",
             "gratitude",
         }
+
+        if "project_ids" in data and isinstance(data["project_ids"], list):
+            record["project_ids"] = [
+                int(p) for p in data["project_ids"]
+                if isinstance(p, (int, str)) and str(p).isdigit()
+            ]
+
+        if "project_candidates" in data and isinstance(data["project_candidates"], list):
+            valid_candidates = []
+            for c in data["project_candidates"]:
+                if isinstance(c, dict) and (c.get("display_name") or c.get("name")):
+                    valid_candidates.append({
+                        "display_name": c.get("display_name") or c.get("name"),
+                        "domain": c.get("domain") or "personal",
+                        "goal": c.get("goal"),
+                        "description": c.get("description"),
+                        "keywords": c.get("keywords") or [],
+                        "start_date": c.get("start_date"),
+                        "target_date": c.get("target_date"),
+                        "completed_date": c.get("completed_date"),
+                        "evidence": c.get("evidence"),
+                    })
+            record["project_candidates"] = valid_candidates
+
         for key in [
             "summary",
             "keywords",

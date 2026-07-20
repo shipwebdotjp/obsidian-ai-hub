@@ -134,9 +134,21 @@ def deserialize_summary(row: sqlite3.Row) -> Dict[str, Any]:
     return record
 
 
+def deserialize_candidate(row: dict | sqlite3.Row) -> dict:
+    c = dict(row)
+    kw = c.get("keywords")
+    if isinstance(kw, str):
+        try:
+            c["keywords"] = json.loads(kw)
+        except (json.JSONDecodeError, TypeError):
+            c["keywords"] = []
+    elif not isinstance(kw, list):
+        c["keywords"] = []
+    return c
+
+
 _ENTITY_ID_COLUMNS = {
     "topics": "topic_id",
-    "projects": "project_id",
     "people": "person_id",
 }
 
@@ -170,6 +182,7 @@ def _delete_summary_children(conn: sqlite3.Connection, summary_id: str) -> None:
     conn.execute("DELETE FROM summary_items WHERE summary_id = ?", (summary_id,))
     conn.execute("DELETE FROM summary_topics WHERE summary_id = ?", (summary_id,))
     conn.execute("DELETE FROM summary_projects WHERE summary_id = ?", (summary_id,))
+    conn.execute("DELETE FROM summary_project_candidates WHERE summary_id = ?", (summary_id,))
     conn.execute("DELETE FROM summary_people WHERE summary_id = ?", (summary_id,))
     conn.execute(
         "DELETE FROM summary_person_candidates WHERE summary_id = ?", (summary_id,)
@@ -264,7 +277,8 @@ def _upsert_summary_in_tx(
 
     _insert_items(conn, summary_id, record.get("items") or [])
     _insert_topics(conn, summary_id, record.get("topics") or [])
-    _insert_projects(conn, summary_id, record.get("projects") or [])
+    _insert_projects(conn, summary_id, record.get("project_ids") or record.get("projects") or [])
+    _insert_project_candidates(conn, summary_id, record.get("project_candidates") or [])
     _insert_people(conn, summary_id, record.get("people") or [], people_notes_map)
 
     return {**db_record, "summary_id": summary_id}
@@ -304,24 +318,121 @@ def _insert_topics(
 
 
 def _insert_projects(
-    conn: sqlite3.Connection, summary_id: str, projects: List[str]
+    conn: sqlite3.Connection, summary_id: str, projects_or_ids: List[Any]
 ) -> None:
     seen = set()
     order = 0
-    for display_name in projects:
+    for item in projects_or_ids:
+        if isinstance(item, int):
+            project_id = item
+            if project_id in seen:
+                continue
+            seen.add(project_id)
+            cursor = conn.cursor()
+            cursor.execute("SELECT project_id FROM projects WHERE project_id = ?", (project_id,))
+            if cursor.fetchone() is not None:
+                conn.execute(
+                    "INSERT INTO summary_projects (summary_id, project_id, display_order) VALUES (?, ?, ?)",
+                    (summary_id, project_id, order),
+                )
+                order += 1
+        elif isinstance(item, str):
+            display_name = item.strip()
+            if not display_name:
+                continue
+            norm_name = normalize_entity_name(display_name)
+            cursor = conn.cursor()
+            cursor.execute("SELECT project_id FROM projects WHERE normalized_name = ?", (norm_name,))
+            row = cursor.fetchone()
+            if row is not None:
+                project_id = row[0]
+                if project_id in seen:
+                    continue
+                seen.add(project_id)
+                conn.execute(
+                    "INSERT INTO summary_projects (summary_id, project_id, display_order) VALUES (?, ?, ?)",
+                    (summary_id, project_id, order),
+                )
+                order += 1
+
+
+def _insert_project_candidates(
+    conn: sqlite3.Connection,
+    summary_id: str,
+    candidates: List[Dict[str, Any]],
+) -> None:
+    seen = set()
+    order = 0
+    now_iso = datetime.now().isoformat()
+
+    for cand in candidates:
+        if not isinstance(cand, dict):
+            continue
+        display_name = cand.get("display_name") or cand.get("name")
         if not isinstance(display_name, str) or not display_name.strip():
             continue
-        normalized_name = normalize_entity_name(display_name)
-        if normalized_name in seen:
+        display_name = display_name.strip()
+        norm_name = normalize_entity_name(display_name)
+
+        if norm_name in seen:
             continue
-        seen.add(normalized_name)
-        project_id = _get_or_create_entity(
-            conn, "projects", display_name, normalized_name
-        )
-        conn.execute(
-            "INSERT INTO summary_projects (summary_id, project_id, display_order) VALUES (?, ?, ?)",
-            (summary_id, project_id, order),
-        )
+        seen.add(norm_name)
+
+        # "却下済み候補と同じ正規化名は保存しない"
+        cursor = conn.cursor()
+        cursor.execute("SELECT candidate_id, status FROM project_candidates WHERE normalized_name = ?", (norm_name,))
+        existing_row = cursor.fetchone()
+        if existing_row is not None:
+            cand_id = existing_row["candidate_id"]
+            status = existing_row["status"]
+            if status == "rejected":
+                continue
+            elif status == "resolved":
+                # Find resolved project and link directly
+                cursor.execute("SELECT project_id FROM projects WHERE normalized_name = ?", (norm_name,))
+                p_row = cursor.fetchone()
+                if p_row is not None:
+                    project_id = p_row[0]
+                    conn.execute("""
+                        INSERT OR IGNORE INTO summary_projects (summary_id, project_id, display_order)
+                        VALUES (?, ?, ?)
+                    """, (summary_id, project_id, order))
+                    order += 1
+                continue
+            else:
+                # 'unresolved'
+                conn.execute("""
+                    INSERT OR IGNORE INTO summary_project_candidates (summary_id, candidate_id, display_order)
+                    VALUES (?, ?, ?)
+                """, (summary_id, cand_id, order))
+                order += 1
+                continue
+
+        domain = cand.get("domain") or "personal"
+        if domain not in ("work", "personal"):
+            domain = "personal"
+
+        keywords = cand.get("keywords") or []
+        kw_json = json.dumps(keywords, ensure_ascii=False)
+
+        cursor.execute("""
+            INSERT INTO project_candidates (
+                display_name, normalized_name, domain, status, goal, description,
+                keywords, start_date, target_date, completed_date, evidence,
+                created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            display_name, norm_name, domain, "unresolved", cand.get("goal"),
+            cand.get("description"), kw_json, cand.get("start_date"),
+            cand.get("target_date"), cand.get("completed_date"), cand.get("evidence"),
+            now_iso, now_iso
+        ))
+        cand_id = cursor.lastrowid
+
+        conn.execute("""
+            INSERT INTO summary_project_candidates (summary_id, candidate_id, display_order)
+            VALUES (?, ?, ?)
+        """, (summary_id, cand_id, order))
         order += 1
 
 
@@ -610,7 +721,7 @@ def _load_summary_children(
 
     cursor.execute(
         """
-        SELECT p.display_name, sp.display_order
+        SELECT p.project_id, p.display_name, sp.display_order
         FROM summary_projects sp
         JOIN projects p ON sp.project_id = p.project_id
         WHERE sp.summary_id = ?
@@ -618,7 +729,21 @@ def _load_summary_children(
         """,
         (summary_id,),
     )
-    record["projects"] = [r["display_name"] for r in cursor.fetchall()]
+    rows_p = cursor.fetchall()
+    record["projects"] = [r["display_name"] for r in rows_p]
+    record["project_ids"] = [r["project_id"] for r in rows_p]
+
+    cursor.execute(
+        """
+        SELECT pc.*, spc.display_order
+        FROM summary_project_candidates spc
+        JOIN project_candidates pc ON spc.candidate_id = pc.candidate_id
+        WHERE spc.summary_id = ? AND pc.status = 'unresolved'
+        ORDER BY spc.display_order
+        """,
+        (summary_id,),
+    )
+    record["project_candidates"] = [deserialize_candidate(r) for r in cursor.fetchall()]
 
     # Fetch resolved people
     cursor.execute(
@@ -715,7 +840,7 @@ def _attach_children_bulk(
 
     cursor.execute(
         f"""
-        SELECT sp.summary_id, p.display_name
+        SELECT sp.summary_id, p.project_id, p.display_name
         FROM summary_projects sp
         JOIN projects p ON sp.project_id = p.project_id
         WHERE sp.summary_id IN ({placeholders})
@@ -724,8 +849,24 @@ def _attach_children_bulk(
         summary_ids,
     )
     projects_by_summary: Dict[str, List[str]] = {r["summary_id"]: [] for r in records}
+    project_ids_by_summary: Dict[str, List[int]] = {r["summary_id"]: [] for r in records}
     for row in cursor.fetchall():
         projects_by_summary[row["summary_id"]].append(row["display_name"])
+        project_ids_by_summary[row["summary_id"]].append(row["project_id"])
+
+    cursor.execute(
+        f"""
+        SELECT spc.summary_id, pc.*
+        FROM summary_project_candidates spc
+        JOIN project_candidates pc ON spc.candidate_id = pc.candidate_id
+        WHERE spc.summary_id IN ({placeholders}) AND pc.status = 'unresolved'
+        ORDER BY spc.display_order
+        """,
+        summary_ids,
+    )
+    candidates_by_summary: Dict[str, List[Dict[str, Any]]] = {r["summary_id"]: [] for r in records}
+    for row in cursor.fetchall():
+        candidates_by_summary[row["summary_id"]].append(deserialize_candidate(dict(row)))
 
     people_by_summary: Dict[str, List[Dict[str, Any]]] = {
         r["summary_id"]: [] for r in records
@@ -783,6 +924,8 @@ def _attach_children_bulk(
         record["items"] = items_by_summary.get(sid, [])
         record["topics"] = topics_by_summary.get(sid, [])
         record["projects"] = projects_by_summary.get(sid, [])
+        record["project_ids"] = project_ids_by_summary.get(sid, [])
+        record["project_candidates"] = candidates_by_summary.get(sid, [])
         record["people"] = people_by_summary.get(sid, [])
 
 
@@ -966,6 +1109,8 @@ def _update_summary_in_tx(
     preserved_resolved_people = (
         _read_resolved_people(conn, summary_id) if "people" not in payload else []
     )
+    preserved_projects = _read_projects(conn, summary_id) if "projects" not in payload else []
+    preserved_project_candidates = _read_project_candidates(conn, summary_id) if "project_candidates" not in payload else []
 
     # 3. Delete all children
     _delete_summary_children(conn, summary_id)
@@ -1067,6 +1212,22 @@ def _update_summary_in_tx(
             )
             order += 1
 
+    # 9. Insert projects
+    if "projects" in payload:
+        _insert_projects(conn, summary_id, payload["projects"] or [])
+    else:
+        _insert_projects(conn, summary_id, preserved_projects)
+
+    # 10. Insert project candidates
+    if "project_candidates" in payload:
+        _insert_project_candidates(conn, summary_id, payload["project_candidates"] or [])
+    else:
+        for i, cand_id in enumerate(preserved_project_candidates):
+            conn.execute(
+                "INSERT INTO summary_project_candidates (summary_id, candidate_id, display_order) VALUES (?, ?, ?)",
+                (summary_id, cand_id, i),
+            )
+
     return get_summary_by_id(summary_id, conn=conn)
 
 
@@ -1077,6 +1238,24 @@ def _read_candidates(conn: sqlite3.Connection, summary_id: str) -> list[dict]:
         (summary_id,),
     )
     return [dict(r) for r in cursor.fetchall()]
+
+
+def _read_projects(conn: sqlite3.Connection, summary_id: str) -> list[int]:
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT project_id FROM summary_projects WHERE summary_id = ? ORDER BY display_order",
+        (summary_id,),
+    )
+    return [row[0] for row in cursor.fetchall()]
+
+
+def _read_project_candidates(conn: sqlite3.Connection, summary_id: str) -> list[int]:
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT candidate_id FROM summary_project_candidates WHERE summary_id = ? ORDER BY display_order",
+        (summary_id,),
+    )
+    return [row[0] for row in cursor.fetchall()]
 
 
 def _read_items(conn: sqlite3.Connection, summary_id: str) -> list[dict]:

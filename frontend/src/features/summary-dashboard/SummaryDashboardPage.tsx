@@ -860,6 +860,19 @@ export default function SummaryDashboardPage() {
                         </div>
                       )}
 
+                      {selectedSummary.project_candidates && selectedSummary.project_candidates.length > 0 && (
+                        <div>
+                          <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">プロジェクト候補 (未解決)</h3>
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            {selectedSummary.project_candidates.map((c) => (
+                              <span key={c.candidate_id} className="rounded bg-red-50 border border-red-100 px-2 py-0.5 text-xs text-red-700 font-medium opacity-80">
+                                {c.display_name} (候補)
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
                       {selectedSummary.projects.length > 0 && (
                         <div>
                           <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">プロジェクト</h3>
