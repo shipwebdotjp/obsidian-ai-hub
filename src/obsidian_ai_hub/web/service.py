@@ -2353,8 +2353,8 @@ def get_task_config() -> dict:
         try:
             next_run = compute_next_target(t.get("schedule", {}), now)
             next_run_str = next_run.isoformat()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to compute next target for task %s: %s", t.get("id"), e, exc_info=True)
 
         task_items.append({
             "id": t.get("id"),
@@ -2383,7 +2383,7 @@ def update_task_config(revision: str, tasks: list) -> dict:
     )
 
     with acquire_task_config_lock():
-        filepath, current_sha, old_tasks = get_tasks_file_and_revision()
+        _, current_sha, old_tasks = get_tasks_file_and_revision()
 
         if revision != current_sha:
             raise TaskConfigConflictError()

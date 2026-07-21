@@ -704,10 +704,38 @@ def sync_people(_=Depends(_require_loopback_or_token)):
 
 # --- Task Config routes ---
 
+import ipaddress
+
 def _require_localhost(request: Request) -> None:
     client_host = request.client.host if request.client else None
-    if client_host in {"127.0.0.1", "::1", "localhost", "testclient"}:
+    if not client_host:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Forbidden: Client IP not resolved."
+        )
+
+    if client_host in {"localhost", "testclient"}:
         return
+
+    try:
+        ip = ipaddress.ip_address(client_host)
+        if ip.is_loopback:
+            return
+    except ValueError:
+        pass
+
+    # Support IPv4-mapped IPv6 loopback addresses like ::ffff:127.0.0.1
+    cleaned_host = client_host
+    if client_host.startswith("::ffff:"):
+        cleaned_host = client_host[7:]
+
+    try:
+        ip = ipaddress.ip_address(cleaned_host)
+        if ip.is_loopback:
+            return
+    except ValueError:
+        pass
+
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
         detail="Forbidden: This feature is only available on localhost (the same machine running this app)."

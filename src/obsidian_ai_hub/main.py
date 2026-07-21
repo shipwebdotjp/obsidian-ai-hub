@@ -1,23 +1,4 @@
 #!/usr/bin/env python3
-import sys
-from unittest.mock import MagicMock
-
-if sys.platform != "darwin":
-    mock_modules = [
-        "objc",
-        "AppKit",
-        "Foundation",
-        "EventKit",
-        "Quartz",
-        "Vision",
-        "Cocoa",
-        "ApplicationServices",
-        "atomacos",
-    ]
-    for name in mock_modules:
-        if name not in sys.modules:
-            sys.modules[name] = MagicMock()
-
 import argparse
 import logging
 from datetime import datetime

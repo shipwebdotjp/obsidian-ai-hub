@@ -188,105 +188,17 @@ def normalize_schedule(schedule: dict) -> dict:
     return normalized
 
 
-def compute_target(schedule: dict, now: datetime) -> datetime:
-    t = schedule["type"]
-    if t not in ["minutely", "hourly", "daily", "weekly", "monthly"]:
-        raise ValueError(f"unknown schedule type: {t}")
-
-    now = now.replace(microsecond=0)
-
-    seconds = sorted(
-        list(parse_cron_field(schedule.get("second", 0), 0, 59)), reverse=True
-    )
-    minutes = sorted(
-        list(parse_cron_field(schedule.get("minute", 0), 0, 59)), reverse=True
-    )
-    hours = sorted(list(parse_cron_field(schedule.get("hour", 0), 0, 23)), reverse=True)
-    days = sorted(list(parse_cron_field(schedule.get("day", 1), 1, 31)), reverse=True)
-    weekdays = parse_cron_field(schedule.get("weekday", "*"), 0, 6)
-
-    def is_valid(dt: datetime) -> bool:
-        if dt.second not in seconds:
-            return False
-        if t == "minutely":
-            return True
-        if dt.minute not in minutes:
-            return False
-        if t == "hourly":
-            return True
-        if dt.hour not in hours:
-            return False
-        if t == "daily":
-            return True
-        if t == "weekly":
-            return dt.weekday() in weekdays
-        if t == "monthly":
-            return dt.day in days
-        return False
-
-    curr = now
-    while True:
-        if is_valid(curr):
-            return curr
-
-        if curr.second not in seconds:
-            next_s = next((s for s in seconds if s < curr.second), None)
-            if next_s is not None:
-                curr = curr.replace(second=next_s)
-            else:
-                curr = (curr - timedelta(minutes=1)).replace(second=seconds[0])
-            continue
-
-        if t == "minutely":
-            curr -= timedelta(minutes=1)
-            curr = curr.replace(second=seconds[0])
-            continue
-
-        if curr.minute not in minutes:
-            next_m = next((m for m in minutes if m < curr.minute), None)
-            if next_m is not None:
-                curr = curr.replace(minute=next_m, second=seconds[0])
-            else:
-                curr = (curr - timedelta(hours=1)).replace(
-                    minute=minutes[0], second=seconds[0]
-                )
-            continue
-
-        if t == "hourly":
-            curr -= timedelta(hours=1)
-            curr = curr.replace(minute=minutes[0], second=seconds[0])
-            continue
-
-        if curr.hour not in hours:
-            next_h = next((h for h in hours if h < curr.hour), None)
-            if next_h is not None:
-                curr = curr.replace(hour=next_h, minute=minutes[0], second=seconds[0])
-            else:
-                curr = (curr - timedelta(days=1)).replace(
-                    hour=hours[0], minute=minutes[0], second=seconds[0]
-                )
-            continue
-
-        if t == "daily":
-            curr -= timedelta(days=1)
-            curr = curr.replace(hour=hours[0], minute=minutes[0], second=seconds[0])
-            continue
-
-        curr -= timedelta(days=1)
-        curr = curr.replace(hour=hours[0], minute=minutes[0], second=seconds[0])
-
-
-def compute_next_target(schedule: dict, now: datetime) -> datetime:
+def _find_target(schedule: dict, now: datetime, forward: bool) -> datetime:
     t = schedule.get("type")
     if t not in ["minutely", "hourly", "daily", "weekly", "monthly"]:
         raise ValueError(f"unknown schedule type: {t}")
 
     now = now.replace(microsecond=0)
 
-    seconds = sorted(list(parse_cron_field(schedule.get("second", 0), 0, 59)))
-    minutes = sorted(list(parse_cron_field(schedule.get("minute", 0), 0, 59)))
-    hours = sorted(list(parse_cron_field(schedule.get("hour", 0), 0, 23)))
-    days = sorted(list(parse_cron_field(schedule.get("day", 1), 1, 31)))
+    seconds = sorted(list(parse_cron_field(schedule.get("second", 0), 0, 59)), reverse=not forward)
+    minutes = sorted(list(parse_cron_field(schedule.get("minute", 0), 0, 59)), reverse=not forward)
+    hours = sorted(list(parse_cron_field(schedule.get("hour", 0), 0, 23)), reverse=not forward)
+    days = sorted(list(parse_cron_field(schedule.get("day", 1), 1, 31)), reverse=not forward)
     weekdays = parse_cron_field(schedule.get("weekday", "*"), 0, 6)
 
     def is_valid(dt: datetime) -> bool:
@@ -308,56 +220,67 @@ def compute_next_target(schedule: dict, now: datetime) -> datetime:
             return dt.day in days
         return False
 
-    curr = now + timedelta(seconds=1)
+    delta_sec = 1 if forward else 0
+    curr = now + timedelta(seconds=delta_sec) if forward else now
+    step_sign = 1 if forward else -1
+
     while True:
         if is_valid(curr):
             return curr
 
         if curr.second not in seconds:
-            next_s = next((s for s in seconds if s > curr.second), None)
+            next_s = next((s for s in seconds if (s > curr.second if forward else s < curr.second)), None)
             if next_s is not None:
                 curr = curr.replace(second=next_s)
             else:
-                curr = (curr + timedelta(minutes=1)).replace(second=seconds[0])
+                curr = (curr + step_sign * timedelta(minutes=1)).replace(second=seconds[0])
             continue
 
         if t == "minutely":
-            curr += timedelta(minutes=1)
+            curr += step_sign * timedelta(minutes=1)
             curr = curr.replace(second=seconds[0])
             continue
 
         if curr.minute not in minutes:
-            next_m = next((m for m in minutes if m > curr.minute), None)
+            next_m = next((m for m in minutes if (m > curr.minute if forward else m < curr.minute)), None)
             if next_m is not None:
                 curr = curr.replace(minute=next_m, second=seconds[0])
             else:
-                curr = (curr + timedelta(hours=1)).replace(
+                curr = (curr + step_sign * timedelta(hours=1)).replace(
                     minute=minutes[0], second=seconds[0]
                 )
             continue
 
         if t == "hourly":
-            curr += timedelta(hours=1)
+            curr += step_sign * timedelta(hours=1)
             curr = curr.replace(minute=minutes[0], second=seconds[0])
             continue
 
         if curr.hour not in hours:
-            next_h = next((h for h in hours if h > curr.hour), None)
+            next_h = next((h for h in hours if (h > curr.hour if forward else h < curr.hour)), None)
             if next_h is not None:
                 curr = curr.replace(hour=next_h, minute=minutes[0], second=seconds[0])
             else:
-                curr = (curr + timedelta(days=1)).replace(
+                curr = (curr + step_sign * timedelta(days=1)).replace(
                     hour=hours[0], minute=minutes[0], second=seconds[0]
                 )
             continue
 
         if t == "daily":
-            curr += timedelta(days=1)
+            curr += step_sign * timedelta(days=1)
             curr = curr.replace(hour=hours[0], minute=minutes[0], second=seconds[0])
             continue
 
-        curr += timedelta(days=1)
+        curr += step_sign * timedelta(days=1)
         curr = curr.replace(hour=hours[0], minute=minutes[0], second=seconds[0])
+
+
+def compute_target(schedule: dict, now: datetime) -> datetime:
+    return _find_target(schedule, now, forward=False)
+
+
+def compute_next_target(schedule: dict, now: datetime) -> datetime:
+    return _find_target(schedule, now, forward=True)
 
 
 def load_tasks():
@@ -382,23 +305,24 @@ def save_state(state):
 
 
 def get_command_preset_info(command: str) -> dict:
-    try:
-        segments = [s.strip() for s in command.split("&&") if s.strip()]
-        if len(segments) == 1:
+    segments = [s.strip() for s in command.split("&&") if s.strip()]
+    if len(segments) == 1:
+        try:
             parts = shlex.split(segments[0])
-            if parts and parts[0] == "uv":
-                try:
-                    run_idx = parts.index("run")
-                except ValueError:
-                    run_idx = -1
+        except ValueError:
+            return {"is_preset": False, "flag": None, "name": None}
 
-                if run_idx != -1 and len(parts) > run_idx + 3:
-                    if parts[run_idx + 1] == "-m" and parts[run_idx + 2] == "obsidian_ai_hub":
-                        flag = parts[run_idx + 3]
-                        if flag in PRESET_FLAGS:
-                            return {"is_preset": True, "flag": flag, "name": PRESET_FLAGS[flag]}
-    except Exception:
-        pass
+        if parts and parts[0] == "uv":
+            try:
+                run_idx = parts.index("run")
+            except ValueError:
+                run_idx = -1
+
+            if run_idx != -1 and len(parts) > run_idx + 3:
+                if parts[run_idx + 1] == "-m" and parts[run_idx + 2] == "obsidian_ai_hub":
+                    flag = parts[run_idx + 3]
+                    if flag in PRESET_FLAGS:
+                        return {"is_preset": True, "flag": flag, "name": PRESET_FLAGS[flag]}
     return {"is_preset": False, "flag": None, "name": None}
 
 
@@ -482,7 +406,7 @@ def get_tasks_file_and_revision() -> tuple[Path, str, list]:
         task_file = LOCAL_TASK_FILE if LOCAL_TASK_FILE.exists() else DEFAULT_TASK_FILE
 
     if not task_file.exists():
-        return LOCAL_TASK_FILE, "", []
+        return task_file, "", []
 
     with open(task_file, "rb") as f:
         content_bytes = f.read()
@@ -588,7 +512,6 @@ def main():
     # 2. Under config lock, load snapshot
     with acquire_task_config_lock():
         tasks = load_tasks()
-        state = load_state()
 
     # 3. Execute
     for task in tasks:
@@ -599,7 +522,10 @@ def main():
         schedule = task["schedule"]
         command = task["command"]
 
-        last_run = state.get(task_id, datetime.min)
+        with acquire_task_config_lock():
+            current_state = load_state()
+            last_run = current_state.get(task_id, datetime.min)
+
         target = compute_target(schedule, now)
 
         if last_run < target <= now:

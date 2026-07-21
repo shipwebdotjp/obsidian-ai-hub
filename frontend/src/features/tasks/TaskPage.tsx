@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import {
   getTaskConfig,
   updateTaskConfig,
@@ -56,6 +56,29 @@ export default function TaskPage() {
 
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+
+  const primaryInputRef = useRef<HTMLInputElement>(null);
+
+  // Esc-key modal closing handler
+  useEffect(() => {
+    if (!editingTask) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" || e.key === "Esc") {
+        setEditingTask(null);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [editingTask]);
+
+  // Set focus on modal open
+  useEffect(() => {
+    if (editingTask) {
+      setTimeout(() => {
+        primaryInputRef.current?.focus();
+      }, 50);
+    }
+  }, [editingTask]);
 
   const fetchConfig = async () => {
     setLoading(true);
@@ -525,6 +548,7 @@ export default function TaskPage() {
                   タスク ID
                 </label>
                 <input
+                  ref={isNew ? primaryInputRef : null}
                   type="text"
                   required
                   value={formId}
@@ -538,6 +562,7 @@ export default function TaskPage() {
               {/* Enabled */}
               <div className="flex items-center gap-2">
                 <input
+                  ref={!isNew ? primaryInputRef : null}
                   type="checkbox"
                   id="formEnabled"
                   checked={formEnabled}
