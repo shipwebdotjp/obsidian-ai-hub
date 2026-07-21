@@ -143,7 +143,7 @@ def test_generate_llm_response_with_tools_uses_responses_api_for_openai():
         provider="openai",
         model="gpt-5.6-terra",
         temperature=0.7,
-        max_tokens=512,
+        max_tokens=16384,
         use_responses_api=True,
         store=False,
     )
@@ -170,5 +170,5 @@ def test_generate_llm_response_with_tools_keeps_non_openai_default():
         provider="opencode_go",
         model="deepseek-v3",
         temperature=0.7,
-        max_tokens=512,
+        max_tokens=16384,
     )

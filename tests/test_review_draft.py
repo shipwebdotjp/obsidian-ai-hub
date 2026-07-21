@@ -72,7 +72,7 @@ def test_creates_saves_and_sends_review_draft(monkeypatch, tmp_path):
     assert "Monday note" in render.call_args.args[1]["DAILY_NOTES"]
     assert "Wednesday note" in render.call_args.args[1]["DAILY_NOTES"]
     generate.assert_called_once_with(
-        provider="test-provider", model="test-model", prompt="rendered", max_tokens=8192
+        provider="test-provider", model="test-model", prompt="rendered", max_tokens=16384
     )
     assert DRAFT in weekly_path.read_text(encoding="utf-8")
     send.assert_called_once_with("token", "target", DRAFT)

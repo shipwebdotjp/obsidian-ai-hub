@@ -177,16 +177,37 @@ def test_get_daily_structured_record_malformed_json(
     logs = []
     activity_logs = [{"summary": "Act"}]
 
-    record = get_daily_structured_record(
-        target_date, daily_content, logs, activity_logs
-    )
+    with pytest.raises(json.JSONDecodeError):
+        get_daily_structured_record(
+            target_date, daily_content, logs, activity_logs
+        )
 
-    # Should not raise and return minimal record
-    assert record["period_key"] == "2023-10-27"
-    assert record["summary"] is None
-    assert record["mood"] == "Happy"
-    assert record["topics"] == []
-    assert record["people"] == []
+
+@patch("obsidian_ai_hub.summerize_day.prompt.render_prompt")
+@patch("obsidian_ai_hub.summerize_day.llm_client.generate_llm_response")
+@patch("obsidian_ai_hub.summerize_day.reader.get_daily_note_path")
+@patch("obsidian_ai_hub.summerize_day.extracter.get_frontmatter_value")
+def test_get_daily_structured_record_truncated_fence(
+    mock_fm, mock_path, mock_llm, mock_render, mock_config, tmp_path
+):
+    target_date = datetime(2023, 10, 27)
+    daily_content = "Content"
+
+    mock_fm.return_value = None
+    mock_p = MagicMock()
+    mock_p.exists.return_value = True
+    mock_path.return_value = mock_p
+
+    # LLM returns started code fence but no closing fence
+    mock_llm.return_value = "```json\n{\"summary\": \"test\"}"
+
+    logs = []
+    activity_logs = []
+
+    with pytest.raises(ValueError, match="truncated.*closing code fence"):
+        get_daily_structured_record(
+            target_date, daily_content, logs, activity_logs
+        )
 
 
 def test_format_structured_record_as_markdown():

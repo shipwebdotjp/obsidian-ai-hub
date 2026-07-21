@@ -716,6 +716,75 @@ class TaskItem(BaseModel):
     next_run: Optional[str] = None
 
 
+# --- Execution Log schemas ---
+
+class ExecutionLogItem(BaseModel):
+    id: str
+    kind: Literal["command", "llm"]
+    status: Literal["running", "succeeded", "failed"]
+    name: str
+    started_at: str
+    finished_at: Optional[str] = None
+    summary: Optional[str] = None
+
+
+class ExecutionLogListResponse(BaseModel):
+    items: list[ExecutionLogItem]
+    total: int
+
+
+class ExecutionChildLLMCall(BaseModel):
+    call_id: str
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    temperature: Optional[float] = None
+    max_tokens: Optional[int] = None
+    prompt_tokens: Optional[int] = None
+    completion_tokens: Optional[int] = None
+    total_tokens: Optional[int] = None
+    finish_reason: Optional[str] = None
+    started_at: str
+    finished_at: Optional[str] = None
+    status: str
+    exception_type: Optional[str] = None
+    exception_message: Optional[str] = None
+
+
+class CommandRunDetail(BaseModel):
+    run_id: str
+    command: str
+    args_json: Optional[str] = None
+    started_at: str
+    finished_at: Optional[str] = None
+    status: str
+    summary: Optional[str] = None
+    exception_type: Optional[str] = None
+    exception_message: Optional[str] = None
+    traceback: Optional[str] = None
+    llm_calls: list[ExecutionChildLLMCall] = []
+
+
+class LLMCallDetail(BaseModel):
+    call_id: str
+    run_id: Optional[str] = None
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    temperature: Optional[float] = None
+    max_tokens: Optional[int] = None
+    prompt: Optional[str] = None
+    response: Optional[str] = None
+    prompt_tokens: Optional[int] = None
+    completion_tokens: Optional[int] = None
+    total_tokens: Optional[int] = None
+    finish_reason: Optional[str] = None
+    started_at: str
+    finished_at: Optional[str] = None
+    status: str
+    exception_type: Optional[str] = None
+    exception_message: Optional[str] = None
+    traceback: Optional[str] = None
+
+
 class TaskConfigResponse(BaseModel):
     tasks: list[TaskItem]
     filepath: str

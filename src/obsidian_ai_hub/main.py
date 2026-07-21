@@ -82,6 +82,11 @@ def main():
         "--summerize-day", action="store_true", help="日次レビューを生成"
     )
     parser.add_argument(
+        "--day-date",
+        type=validate_date,
+        help="--summerize-day で指定する対象日 (YYYY-MM-DD)",
+    )
+    parser.add_argument(
         "--backup",
         action="store_true",
         help="指定されたフォルダをバックアップ（rsync）",
@@ -261,16 +266,26 @@ def main():
     args = parser.parse_args()
     ran = False
 
-    def run_and_log(fn, name: str):
+    def run_and_log(fn, name: str, cmd_args: dict = None):
+        import uuid
+        from obsidian_ai_hub.utils import execution_logger
+
+        run_id = str(uuid.uuid4())
+        token = execution_logger.current_run_id.set(run_id)
+
+        execution_logger.start_command_run(run_id, name, cmd_args or {})
         print(f"[START] {name} at {datetime.now().isoformat()}")
         try:
-            fn()
+            res = fn()
+            execution_logger.succeed_command_run(run_id, res)
+            return res
         except Exception as e:
-            # surface the error but continue to ensure we always print END for debugging
             print(f"[ERROR] {name}: {type(e).__name__}")
+            execution_logger.fail_command_run(run_id, e)
             raise
         finally:
             print(f"[END] {name} at {datetime.now().isoformat()}")
+            execution_logger.current_run_id.reset(token)
 
     if args.research_agent and args.add_research_theme:
         parser.error("--research-agent and --add-research-theme cannot be combined")
@@ -323,50 +338,51 @@ def main():
         research_kwargs["output_style"] = args.output_style
 
     if args.merge_inbox:
-        run_and_log(obsidian_inbox_merge.main, "merge_inbox")
+        run_and_log(obsidian_inbox_merge.main, "merge_inbox", {})
         ran = True
     if args.notify_calendar_event:
-        run_and_log(notify_calendar_event.main, "notify_calendar_event")
+        run_and_log(notify_calendar_event.main, "notify_calendar_event", {})
         ran = True
     if args.make_target:
-        run_and_log(make_today_target.main, "make_target")
+        run_and_log(make_today_target.main, "make_target", {})
         ran = True
     if args.summerize_week:
-        run_and_log(lambda: summerize_week.main(args.week_date), "summerize_week")
+        run_and_log(lambda: summerize_week.main(args.week_date), "summerize_week", {"week_date": args.week_date})
         ran = True
     if args.review_draft:
-        run_and_log(lambda: review_draft.main(args.review_week_date), "review_draft")
+        run_and_log(lambda: review_draft.main(args.review_week_date), "review_draft", {"review_week_date": args.review_week_date})
         ran = True
     if args.summerize_month:
-        run_and_log(lambda: summerize_month.main(args.month), "summerize_month")
+        run_and_log(lambda: summerize_month.main(args.month), "summerize_month", {"month": args.month})
         ran = True
     if args.summerize_day:
-        run_and_log(summerize_day.main, "summerize_day")
+        run_and_log(lambda: summerize_day.main(args.day_date), "summerize_day", {"day_date": args.day_date})
         ran = True
     if args.backup:
-        run_and_log(do_backup.main, "backup")
+        run_and_log(do_backup.main, "backup", {})
         ran = True
     if args.notify_today_schedule:
-        run_and_log(notify_today_schedule.main, "notify_today_schedule")
+        run_and_log(notify_today_schedule.main, "notify_today_schedule", {})
         ran = True
     if args.sync_knowledge:
-        run_and_log(sync_knowledge.main, "sync_knowledge")
+        run_and_log(sync_knowledge.main, "sync_knowledge", {})
         ran = True
     if args.sync_vault:
-        run_and_log(sync_valut.main, "sync_vault")
+        run_and_log(sync_valut.main, "sync_vault", {})
         ran = True
     if args.sync_people:
         from obsidian_ai_hub import sync_people
 
-        run_and_log(sync_people.main, "sync_people")
+        run_and_log(sync_people.main, "sync_people", {})
         ran = True
     if args.rebuild_vault:
-        run_and_log(rebuild_valut.main, "rebuild_vault")
+        run_and_log(rebuild_valut.main, "rebuild_vault", {})
         ran = True
     if args.research_agent:
         run_and_log(
             lambda: research_agent.main(args.theme, **research_kwargs),
             "research_agent",
+            {"theme": args.theme, **research_kwargs},
         )
         ran = True
     if args.add_research_theme:
@@ -375,34 +391,39 @@ def main():
         run_and_log(
             lambda: add_research_theme.main(args.theme, direction=args.direction),
             "add_research_theme",
+            {"theme": args.theme, "direction": args.direction},
         )
         ran = True
     if args.suggest_research_theme:
-        run_and_log(suggest_research_theme.main, "suggest_research_theme")
+        run_and_log(suggest_research_theme.main, "suggest_research_theme", {})
         ran = True
     if args.screenshot:
-        run_and_log(lambda: take_screenshot.main(args.display), "take_screenshot")
+        run_and_log(lambda: take_screenshot.main(args.display), "take_screenshot", {"display": args.display})
         ran = True
     if args.scan_line_inbox:
-        run_and_log(scan_line_inbox.main, "scan_line_inbox")
+        run_and_log(scan_line_inbox.main, "scan_line_inbox", {})
         ran = True
     if args.log_activity:
         from obsidian_ai_hub import logging_activity
 
-        run_and_log(logging_activity.main, "log_activity")
+        run_and_log(logging_activity.main, "log_activity", {})
         ran = True
     if args.vault_search:
-        search_obsidian_vault.main(
-            query=args.query,
-            k=args.k,
-            search_mode=args.search_mode,
-            json_output=args.json,
+        run_and_log(
+            lambda: search_obsidian_vault.main(
+                query=args.query,
+                k=args.k,
+                search_mode=args.search_mode,
+                json_output=args.json,
+            ),
+            "vault_search",
+            {"query": args.query, "k": args.k, "search_mode": args.search_mode, "json": args.json},
         )
         ran = True
     if args.memory_extract:
         from obsidian_ai_hub import memory
 
-        run_and_log(lambda: memory.extract_memories(args.week), "memory_extract")
+        run_and_log(lambda: memory.extract_memories(args.week), "memory_extract", {"week": args.week})
         ran = True
     if args.memory_review:
         from obsidian_ai_hub import memory
@@ -415,7 +436,9 @@ def main():
         elif args.edit:
             action = "edit"
         run_and_log(
-            lambda: memory.review_memory(args.id, action, args.content), "memory_review"
+            lambda: memory.review_memory(args.id, action, args.content),
+            "memory_review",
+            {"id": args.id, "action": action, "content": args.content},
         )
         ran = True
     if args.memory_delete:
@@ -426,7 +449,7 @@ def main():
             ans = input(f"Memory {args.id} を完全に削除しますか? (y/N): ")
             proceed = ans.lower() == "y"
         if proceed:
-            run_and_log(lambda: memory.delete_memory(args.id), "memory_delete")
+            run_and_log(lambda: memory.delete_memory(args.id), "memory_delete", {"id": args.id})
         else:
             print("キャンセルしました")
         ran = True
@@ -434,8 +457,11 @@ def main():
         from obsidian_ai_hub import memory
         import json
 
-        pack = memory.compile_context(args.for_purpose)
-        print(json.dumps(pack, ensure_ascii=False, indent=2))
+        run_and_log(
+            lambda: print(json.dumps(memory.compile_context(args.for_purpose), ensure_ascii=False, indent=2)),
+            "memory_compile",
+            {"for": args.for_purpose},
+        )
         ran = True
     if getattr(args, "render_copilot_profile", False):
         from obsidian_ai_hub import memory
@@ -443,6 +469,7 @@ def main():
         run_and_log(
             lambda: print("\n".join(f"- {p}" for p in memory.render_copilot_profile())),
             "render_copilot_profile",
+            {},
         )
         ran = True
     if args.serve:

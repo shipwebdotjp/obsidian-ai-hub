@@ -126,16 +126,19 @@ def get_daily_structured_record(
             provider=config.MAKE_TODAY_TARGET_PROVIDER,
             model=config.MAKE_TODAY_TARGET_MODEL,
             prompt=rendered_prompt,
+            temperature=0.2,
             max_tokens=16384,
         )
 
         # JSONパース
         cleaned_response = response.strip()
         if cleaned_response.startswith("```"):
-            lines = cleaned_response.splitlines()
-            if len(lines) >= 2:
-                if lines[0].startswith("```json") or lines[0].startswith("```"):
+            if cleaned_response.endswith("```"):
+                lines = cleaned_response.splitlines()
+                if len(lines) >= 2:
                     cleaned_response = "\n".join(lines[1:-1])
+            else:
+                raise ValueError("LLM response started with a code fence but was truncated (missing closing code fence).")
 
         data = json.loads(cleaned_response)
 
@@ -226,6 +229,7 @@ def get_daily_structured_record(
 
     except Exception as e:
         logger.error(f"Failed to generate or parse structured daily record: {e}")
+        raise
 
     return record
 
@@ -361,10 +365,7 @@ def summarize_day(target_date: datetime):
     )
 
     if not structured_record.get("summary"):
-        logger.error(
-            "Failed to generate structured record; skipping persistence and daily note update"
-        )
-        return
+        raise ValueError("Failed to generate structured record: summary is missing or empty.")
 
     # 3. SQLiteへの保存 (永続化)
     upsert_summary_record(structured_record)
@@ -375,10 +376,13 @@ def summarize_day(target_date: datetime):
     #     extracter.append_to_subheader_file(daily_file.as_posix(), "## AIによる要約", [markdown_content])
 
 
-def main():
-    today = datetime.now()
-    yesterday = today - timedelta(days=1)
-    summarize_day(yesterday)
+def main(target_date: str | datetime | None = None):
+    if target_date is None:
+        today = datetime.now()
+        target_date = today - timedelta(days=1)
+    elif isinstance(target_date, str):
+        target_date = datetime.strptime(target_date, "%Y-%m-%d")
+    summarize_day(target_date)
 
 
 if __name__ == "__main__":

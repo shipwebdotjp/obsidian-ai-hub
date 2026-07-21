@@ -4,7 +4,7 @@ import mimetypes
 import os
 import time
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Sequence, Tuple, Optional
 import logging
 
 from langchain_core.messages import (
@@ -130,6 +130,104 @@ def _prepare_messages(
     return messages
 
 
+def _extract_llm_metadata(message: Any) -> Tuple[Optional[int], Optional[int], Optional[int], Optional[str]]:
+    import json
+    prompt_tokens = None
+    completion_tokens = None
+    total_tokens = None
+    finish_reason = None
+
+    # Try usage_metadata if present
+    usage = getattr(message, "usage_metadata", None)
+    if isinstance(usage, dict):
+        prompt_tokens = usage.get("input_tokens") or usage.get("prompt_tokens")
+        completion_tokens = usage.get("output_tokens") or usage.get("completion_tokens")
+        total_tokens = usage.get("total_tokens")
+
+    # Try response_metadata if present
+    meta = getattr(message, "response_metadata", None) or {}
+    if isinstance(meta, dict):
+        finish_reason = meta.get("finish_reason")
+        if not finish_reason and "choices" in meta and isinstance(meta["choices"], list) and len(meta["choices"]) > 0:
+            choice = meta["choices"][0]
+            if isinstance(choice, dict):
+                finish_reason = choice.get("finish_reason")
+
+        token_usage = meta.get("token_usage")
+        if isinstance(token_usage, dict):
+            if prompt_tokens is None:
+                prompt_tokens = token_usage.get("prompt_tokens") or token_usage.get("input_tokens")
+            if completion_tokens is None:
+                completion_tokens = token_usage.get("completion_tokens") or token_usage.get("output_tokens")
+            if total_tokens is None:
+                total_tokens = token_usage.get("total_tokens")
+
+    def safe_int(v):
+        if v is None:
+            return None
+        try:
+            return int(v)
+        except (ValueError, TypeError):
+            return None
+
+    return safe_int(prompt_tokens), safe_int(completion_tokens), safe_int(total_tokens), finish_reason
+
+
+def _logged_invoke(
+    llm: Any,
+    messages: list,
+    provider: str,
+    model: str,
+    temperature: float,
+    max_tokens: int,
+    prompt_for_log: str,
+) -> Any:
+    import uuid
+    from obsidian_ai_hub.utils import execution_logger
+
+    call_id = str(uuid.uuid4())
+    run_id = execution_logger.current_run_id.get()
+
+    execution_logger.start_llm_call(
+        call_id=call_id,
+        run_id=run_id,
+        provider=provider,
+        model=model,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        prompt=prompt_for_log,
+    )
+
+    try:
+        message = llm.invoke(messages)
+        prompt_tokens, completion_tokens, total_tokens, finish_reason = _extract_llm_metadata(message)
+        response_text = _content_to_text(message.content)
+
+        if finish_reason == "length":
+            logger.warning(
+                "LLM output was truncated (finish_reason=length): provider=%s model=%s "
+                "max_tokens=%s; the response may be incomplete.",
+                provider,
+                model,
+                max_tokens,
+            )
+
+        execution_logger.succeed_llm_call(
+            call_id=call_id,
+            response=response_text,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+            finish_reason=finish_reason,
+        )
+        return message
+    except Exception as e:
+        execution_logger.fail_llm_call(call_id, e)
+        raise
+
+
+from typing import Tuple
+
 def generate_llm_response(
     provider: str,
     model: str,
@@ -156,7 +254,7 @@ def generate_llm_response(
     )
 
     def _call() -> str:
-        message = llm.invoke(messages)
+        message = _logged_invoke(llm, messages, provider, model, temperature, max_tokens, prompt)
         logger.info(f"LLM response: {message}")
         return _content_to_text(message.content)
 
@@ -204,7 +302,7 @@ def generate_llm_response_with_tools(
         iterations += 1
 
         def _call():
-            return llm_with_tools.invoke(messages)
+            return _logged_invoke(llm_with_tools, messages, provider, model, temperature, max_tokens, prompt)
 
         ai_msg = _with_exponential_backoff(_call)
         messages.append(ai_msg)
@@ -232,7 +330,7 @@ def generate_llm_response_with_tools(
     # If we reached max_iterations and the last message still requested tool calls,
     # we need one final LLM call without tool binding to get a summary response.
     def _final_call():
-        return llm.invoke(messages)
+        return _logged_invoke(llm, messages, provider, model, temperature, max_tokens, prompt)
 
     final_ai_msg = _with_exponential_backoff(_final_call)
     return _content_to_text(final_ai_msg.content)
