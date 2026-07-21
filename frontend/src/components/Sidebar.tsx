@@ -52,6 +52,9 @@ export default function Sidebar({ open, onClose, id }: SidebarProps) {
         <NavLink to={ROUTES.TASKS} className={linkClass} onClick={onClose}>
           タスク管理
         </NavLink>
+        <NavLink to={ROUTES.EXECUTION_LOGS} className={linkClass} onClick={onClose}>
+          実行ログ
+        </NavLink>
       </nav>
     </aside>
   );

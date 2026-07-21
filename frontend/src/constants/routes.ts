@@ -6,4 +6,5 @@ export const ROUTES = {
   PEOPLE: "/people",
   PROJECTS: "/projects",
   TASKS: "/tasks",
+  EXECUTION_LOGS: "/execution-logs",
 } as const;

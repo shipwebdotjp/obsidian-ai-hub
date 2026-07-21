@@ -258,3 +258,43 @@ def test_serve_with_debug_uses_reload_and_debug_log(monkeypatch):
     assert kwargs.get("log_level") == "debug"
     assert kwargs.get("reload") is True
     assert kwargs.get("factory") is True
+
+
+def test_cli_execution_logging_success_and_failure(monkeypatch, test_memory_db_path):
+    monkeypatch.setattr(sys, "argv", ["prog", "--sync-vault"])
+
+    from obsidian_ai_hub.utils import execution_logger
+
+    with patch.object(main_module.sync_valut, "main", return_value="done") as mock_sync:
+        main_module.main()
+
+    mock_sync.assert_called_once()
+
+    items, total = execution_logger.list_execution_logs(kind="command")
+    assert total >= 1
+    assert items[0]["name"] == "sync_vault"
+    assert items[0]["status"] == "succeeded"
+    assert items[0]["summary"] == "done"
+
+
+def test_cli_execution_logging_failure(monkeypatch, test_memory_db_path):
+    monkeypatch.setattr(sys, "argv", ["prog", "--sync-vault"])
+
+    from obsidian_ai_hub.utils import execution_logger
+
+    with patch.object(main_module.sync_valut, "main", side_effect=ValueError("Sync failed")) as mock_sync:
+        try:
+            main_module.main()
+        except ValueError:
+            pass
+
+    mock_sync.assert_called_once()
+
+    items, total = execution_logger.list_execution_logs(kind="command")
+    assert total >= 1
+    detail = execution_logger.get_command_run_detail(items[0]["id"])
+    assert detail is not None
+    assert detail["status"] == "failed"
+    assert detail["exception_type"] == "ValueError"
+    assert "Sync failed" in detail["exception_message"]
+    assert detail["traceback"] is not None

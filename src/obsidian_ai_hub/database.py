@@ -441,4 +441,53 @@ def get_db_connection() -> sqlite3.Connection:
     if current_version <= 8:
         run_migration_v9(conn)
 
+    if current_version <= 9:
+        run_migration_v10(conn)
+
     return conn
+
+
+def run_migration_v10(conn: sqlite3.Connection) -> None:
+    """Run the migration schema upgrade for version 10 (command_runs and llm_call_logs tables)."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS command_runs (
+            run_id TEXT PRIMARY KEY,
+            command TEXT NOT NULL,
+            args_json TEXT,
+            started_at TEXT NOT NULL,
+            finished_at TEXT,
+            status TEXT NOT NULL CHECK(status IN ('running', 'succeeded', 'failed')),
+            summary TEXT,
+            exception_type TEXT,
+            exception_message TEXT,
+            traceback TEXT
+        );
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS llm_call_logs (
+            call_id TEXT PRIMARY KEY,
+            run_id TEXT,
+            provider TEXT,
+            model TEXT,
+            temperature REAL,
+            max_tokens INTEGER,
+            prompt TEXT,
+            response TEXT,
+            prompt_tokens INTEGER,
+            completion_tokens INTEGER,
+            total_tokens INTEGER,
+            finish_reason TEXT,
+            started_at TEXT NOT NULL,
+            finished_at TEXT,
+            status TEXT NOT NULL CHECK(status IN ('running', 'succeeded', 'failed')),
+            exception_type TEXT,
+            exception_message TEXT,
+            traceback TEXT,
+            FOREIGN KEY(run_id) REFERENCES command_runs(run_id) ON DELETE CASCADE
+        );
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_command_runs_status_started ON command_runs(status, started_at DESC);")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_llm_call_logs_status_started ON llm_call_logs(status, started_at DESC);")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_llm_call_logs_run_id_started ON llm_call_logs(run_id, started_at);")
+    conn.execute("PRAGMA user_version = 10;")
+    conn.commit()

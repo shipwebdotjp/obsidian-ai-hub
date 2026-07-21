@@ -9,6 +9,7 @@ import SummaryDashboardPage from "./features/summary-dashboard/SummaryDashboardP
 import PeoplePage from "./features/people/PeoplePage";
 import ProjectsPage from "./features/projects/ProjectsPage";
 import TaskPage from "./features/tasks/TaskPage";
+import ExecutionLogPage from "./features/execution-logs/ExecutionLogPage";
 import { health, ApiError } from "./api/client";
 import { ROUTES } from "./constants/routes";
 
@@ -126,6 +127,7 @@ export default function App() {
           <Route path={ROUTES.PEOPLE} element={<PeoplePage />} />
           <Route path={ROUTES.PROJECTS} element={<ProjectsPage />} />
           <Route path={ROUTES.TASKS} element={<TaskPage />} />
+          <Route path={ROUTES.EXECUTION_LOGS} element={<ExecutionLogPage />} />
           <Route path="*" element={<Navigate to={ROUTES.MEMORIES} replace />} />
         </Routes>
       </main>
