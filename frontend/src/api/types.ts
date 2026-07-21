@@ -373,3 +373,39 @@ export interface Person {
   aliases: PersonAlias[];
   summary_count: number;
 }
+
+// --- Task Config Types ---
+
+export interface TaskItem {
+  id: string;
+  enabled: boolean;
+  schedule: Record<string, any>;
+  command: string;
+  is_preset: boolean;
+  preset_flag?: string | null;
+  preset_name?: string | null;
+  next_run?: string | null;
+}
+
+export interface TaskConfigResponse {
+  tasks: TaskItem[];
+  filepath: string;
+  revision: string;
+}
+
+export interface TaskConfigUpdateResponse {
+  success: boolean;
+  revision: string;
+}
+
+export interface CommandSegment {
+  cwd?: string | null;
+  args: string[];
+}
+
+export interface CommandPreviewResponse {
+  segments: CommandSegment[];
+  is_preset: boolean;
+  preset_flag?: string | null;
+  preset_name?: string | null;
+}

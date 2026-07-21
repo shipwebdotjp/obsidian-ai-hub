@@ -401,6 +401,15 @@ The runner understands `second`, `minute`, `hour`, `day`, and `weekday`. Missing
 
 Commands are executed without a shell. Plain argv-style commands are supported, and you can chain a directory change with `cd /path && ...`. Shell operators like pipes, redirects, and environment expansion are not interpreted.
 
+### Task Runner Web UI (Localhost Exclusive)
+
+The Web UI provides a dedicated **Task Management** page where you can manage, add, edit, and disable tasks visually:
+- **Localhost Exclusive Security:** The configuration APIs (`GET`/`PUT` `/api/v1/task-config`) are strictly restricted to localhost. Any requests from non-loopback clients (LAN or public network) are rejected with `403 Forbidden` to prevent unauthorized execution of local commands.
+- **Structure Validation:** ID uniqueness, valid cron ranges/values, relevant fields per schedule type, and command execution structures are validated prior to saving. Syntax/meaning errors return `422 Unprocessable Entity`.
+- **Atomic Operations & Optimistic Locking:** Settings are written atomically using temporary files and `os.replace` to prevent corruption. If multiple sessions try to modify configuration concurrently, the server throws `409 Conflict`, prompting you to refresh.
+- **No Retrospective Execution (Arming):** When you add a task, re-enable it, or modify its schedule/command, the task is "armed" with the current save time, preventing retrospective execution of past run frames.
+- **Detailed Mode parsing:** When editing custom commands in detailed mode, the UI displays the backend parsed representation (shlex argv list) to prevent misinterpretation of command execution paths. Note that comments in `tasks.local.yml` are not preserved during structured saves.
+
 ## Project Structure
 
 - `src/obsidian_ai_hub/` — application code

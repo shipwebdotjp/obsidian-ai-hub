@@ -700,3 +700,87 @@ def sync_people(_=Depends(_require_loopback_or_token)):
     except Exception as e:
         logger.exception("Failed to sync people")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# --- Task Config routes ---
+
+import ipaddress
+
+def _require_localhost(request: Request) -> None:
+    client_host = request.client.host if request.client else None
+    if not client_host:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Forbidden: Client IP not resolved."
+        )
+
+    if client_host in {"localhost", "testclient"}:
+        return
+
+    try:
+        ip = ipaddress.ip_address(client_host)
+        if ip.is_loopback:
+            return
+    except ValueError:
+        pass
+
+    # Support IPv4-mapped IPv6 loopback addresses like ::ffff:127.0.0.1
+    cleaned_host = client_host
+    if client_host.startswith("::ffff:"):
+        cleaned_host = client_host[7:]
+
+    try:
+        ip = ipaddress.ip_address(cleaned_host)
+        if ip.is_loopback:
+            return
+    except ValueError:
+        pass
+
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Forbidden: This feature is only available on localhost (the same machine running this app)."
+    )
+
+
+@router.get("/task-config", response_model=schemas.TaskConfigResponse)
+def get_task_config(
+    request: Request,
+    _=Depends(_require_localhost),
+):
+    try:
+        return service.get_task_config()
+    except Exception as e:
+        logger.exception("Failed to get task config")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/task-config", response_model=schemas.TaskConfigUpdateResponse)
+def update_task_config(
+    request: Request,
+    body: schemas.TaskConfigRequest,
+    _=Depends(_require_localhost),
+):
+    try:
+        return service.update_task_config(body.revision, body.tasks)
+    except service.TaskConfigConflictError as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
+    except Exception as e:
+        logger.exception("Failed to update task config")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/task-config/preview", response_model=schemas.CommandPreviewResponse)
+def preview_command(
+    request: Request,
+    body: schemas.CommandPreviewRequest,
+    _=Depends(_require_localhost),
+):
+    try:
+        return service.preview_command(body.command)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
+    except Exception as e:
+        logger.exception("Failed to preview command")
+        raise HTTPException(status_code=500, detail=str(e))

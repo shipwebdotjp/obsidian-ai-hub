@@ -8,6 +8,7 @@ import VaultSearchPage from "./features/vault-search/VaultSearchPage";
 import SummaryDashboardPage from "./features/summary-dashboard/SummaryDashboardPage";
 import PeoplePage from "./features/people/PeoplePage";
 import ProjectsPage from "./features/projects/ProjectsPage";
+import TaskPage from "./features/tasks/TaskPage";
 import { health, ApiError } from "./api/client";
 import { ROUTES } from "./constants/routes";
 
@@ -81,6 +82,7 @@ export default function App() {
           <Route path={ROUTES.SUMMARY_DASHBOARD} element={<SummaryDashboardPage />} />
           <Route path={ROUTES.PEOPLE} element={<PeoplePage />} />
           <Route path={ROUTES.PROJECTS} element={<ProjectsPage />} />
+          <Route path={ROUTES.TASKS} element={<TaskPage />} />
           <Route path="*" element={<Navigate to={ROUTES.MEMORIES} replace />} />
         </Routes>
       </main>
