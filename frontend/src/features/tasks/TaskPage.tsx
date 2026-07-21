@@ -403,10 +403,10 @@ export default function TaskPage() {
   return (
     <div className="flex h-full flex-col bg-slate-50">
       {/* Header */}
-      <header className="flex shrink-0 items-center justify-between border-b border-slate-200 bg-white px-6 py-4">
-        <div>
+      <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3 sm:px-6 sm:py-4">
+        <div className="min-w-0">
           <h1 className="text-lg font-bold text-slate-900">タスク管理</h1>
-          <p className="text-xs text-slate-500 font-mono mt-0.5">
+          <p className="mt-0.5 truncate text-xs font-mono text-slate-500">
             設定ファイル: {filepath || "読み込み中…"}
           </p>
         </div>
@@ -431,7 +431,7 @@ export default function TaskPage() {
       </header>
 
       {/* Main Content Area */}
-      <div className="flex-1 overflow-auto p-6">
+      <div className="flex-1 overflow-auto p-4 sm:p-6">
         {error && (
           <div className="mb-6 rounded-lg bg-red-50 p-4 text-sm text-red-600">
             {error}
@@ -454,7 +454,8 @@ export default function TaskPage() {
           </div>
         ) : (
           <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-            <table className="w-full border-collapse text-left text-sm text-slate-500">
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[800px] border-collapse text-left text-sm text-slate-500">
               <thead className="bg-slate-50 text-xs font-semibold text-slate-700 uppercase">
                 <tr>
                   <th className="px-6 py-3 w-16">有効</th>
@@ -519,6 +520,7 @@ export default function TaskPage() {
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
         )}
       </div>
@@ -599,7 +601,7 @@ export default function TaskPage() {
                   </select>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   {/* Seconds */}
                   <div>
                     <label className="block text-xs font-medium text-slate-600 mb-1">
@@ -695,7 +697,7 @@ export default function TaskPage() {
                   <button
                     type="button"
                     onClick={() => setCommandMode("preset")}
-                    className={`flex-1 rounded-md py-1.5 text-xs font-medium transition ${
+                    className={`flex-1 whitespace-nowrap rounded-md py-1.5 text-xs font-medium transition ${
                       commandMode === "preset"
                         ? "bg-white text-slate-900 shadow-sm"
                         : "text-slate-500 hover:text-slate-900"
@@ -706,7 +708,7 @@ export default function TaskPage() {
                   <button
                     type="button"
                     onClick={() => setCommandMode("detailed")}
-                    className={`flex-1 rounded-md py-1.5 text-xs font-medium transition ${
+                    className={`flex-1 whitespace-nowrap rounded-md py-1.5 text-xs font-medium transition ${
                       commandMode === "detailed"
                         ? "bg-white text-slate-900 shadow-sm"
                         : "text-slate-500 hover:text-slate-900"
