@@ -103,7 +103,7 @@ def get_monthly_structured_record(
             provider=config.MAKE_TODAY_TARGET_PROVIDER,
             model=config.MAKE_TODAY_TARGET_MODEL,
             prompt=rendered_prompt,
-            max_tokens=8192,
+            max_tokens=16384,
         )
 
         cleaned_response = response.strip()

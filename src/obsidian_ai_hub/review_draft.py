@@ -148,7 +148,7 @@ def review_draft(target_date: datetime | date_type | str | None = None) -> bool:
                 provider=config.REVIEW_DRAFT_PROVIDER,
                 model=config.REVIEW_DRAFT_MODEL,
                 prompt=rendered_prompt,
-                max_tokens=8192,
+                max_tokens=16384,
             )
         )
     except Exception as exc:

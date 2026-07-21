@@ -135,7 +135,7 @@ def generate_llm_response(
     model: str,
     prompt: str,
     temperature: float = 0.7,
-    max_tokens: int = 512,
+    max_tokens: int = 16384,
     files: Sequence[Path | str] | None = None,
     system_prompt: str | None = None,
 ) -> str:
@@ -169,7 +169,7 @@ def generate_llm_response_with_tools(
     prompt: str,
     tools: Sequence[BaseTool],
     temperature: float = 0.7,
-    max_tokens: int = 512,
+    max_tokens: int = 16384,
     max_iterations: int = 10,
     files: Sequence[Path | str] | None = None,
     system_prompt: str | None = None,

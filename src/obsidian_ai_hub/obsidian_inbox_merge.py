@@ -93,7 +93,7 @@ def generate_web_summary(raw_content: str) -> str:
             model=config.INBOX_WEB_SUMMARY_MODEL,
             prompt=rendered_prompt,
             temperature=0.3,
-            max_tokens=512,
+            max_tokens=4096,
         ).strip()
         # 改行
         response = response.replace("\n", "\n  ")
@@ -279,7 +279,7 @@ def classify_inbox_content(content: str) -> InboxClassification:
             model=config.INBOX_CLASSIFICATION_MODEL,
             prompt=rendered_prompt,
             temperature=0.0,
-            max_tokens=256,
+            max_tokens=4096,
         ).strip()
         return parse_classification_response(response)
     except Exception:

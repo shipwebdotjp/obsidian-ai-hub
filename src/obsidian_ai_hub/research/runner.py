@@ -133,7 +133,7 @@ def route_research_topic(
             model=config.RESEARCH_ROUTER_MODEL,
             prompt=p,
             temperature=0.0,
-            max_tokens=16,
+            max_tokens=512,
         )
     except Exception:
         logger.exception("Failed to route research topic with LLM")
@@ -297,7 +297,7 @@ def generate_research_title(theme: str, expanded_prompt: str) -> str:
         model=config.RESEARCH_TITLE_GENERATION_MODEL,
         prompt=build_title_prompt(theme, expanded_prompt),
         temperature=0.0,
-        max_tokens=64,
+        max_tokens=512,
     ).strip()
     title = title.strip().strip('"').strip("'")
     if not title:
@@ -383,7 +383,7 @@ def _run_web_search_with_raw_theme(theme: str) -> str:
         model=config.RESEARCH_QUERY_GENERATION_MODEL,
         prompt=rendered_prompt,
         temperature=0.0,
-        max_tokens=64,
+        max_tokens=512,
     ).strip()
     logger.info("Generated Tavily search query for theme '%s'", theme)
     return _run_web_search(search_query)
