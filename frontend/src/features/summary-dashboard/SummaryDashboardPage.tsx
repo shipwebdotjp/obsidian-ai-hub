@@ -951,8 +951,9 @@ export default function SummaryDashboardPage() {
                             ))}
                             {selectedSummary.people.filter((p) => p.resolution_status === "unresolved").map((p) => (
                               <div key={p.candidate_id ?? p.name} className="flex items-start gap-2 opacity-60">
+                                <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-amber-200 text-amber-800 text-[9px] font-bold flex-shrink-0 mt-0.5" title="未解決候補" aria-label="未解決候補">?</span>
                                 <span className="text-xs text-slate-500 min-w-[80px]">{p.name}</span>
-                                <span className="text-[10px] text-slate-400">(未解決候補)</span>
+                                {p.note && <span className="text-xs text-slate-400">{p.note}</span>}
                               </div>
                             ))}
                           </div>
@@ -1574,8 +1575,9 @@ function EditForm({
               {unresolvedCandidates.map((c) => (
                 <div key={c.candidate_id ?? c.name} className="flex items-center gap-2 opacity-60">
                   <input type="checkbox" disabled className="h-3 w-3" />
+                  <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-amber-200 text-amber-800 text-[9px] font-bold flex-shrink-0" title="未解決候補" aria-label="未解決候補">?</span>
                   <span className="text-xs text-slate-500">{c.name}</span>
-                  <span className="text-[10px] text-slate-400">(人物管理画面で解決)</span>
+                  {c.note && <span className="text-xs text-slate-400">{c.note}</span>}
                 </div>
               ))}
             </>
