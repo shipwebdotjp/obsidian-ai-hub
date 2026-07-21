@@ -22,6 +22,7 @@ export default function ResearchPage() {
   const [queryInput, setQueryInput] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [selectedTheme, setSelectedTheme] = useState<ResearchTheme | null>(null);
+  const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [toasts, setToasts] = useState<Toast[]>([]);
 
@@ -66,7 +67,12 @@ export default function ResearchPage() {
 
   useEffect(() => {
     setSelectedTheme(null);
+    setMobileDetailOpen(false);
   }, [status, debouncedQuery]);
+
+  useEffect(() => {
+    if (!selectedTheme) setMobileDetailOpen(false);
+  }, [selectedTheme]);
 
   // Poll active background jobs via sequential setTimeout (no overlapping, functional merge updates)
   useEffect(() => {
@@ -162,6 +168,7 @@ export default function ResearchPage() {
 
       // Select the theme in details panel immediately
       setSelectedTheme(res.theme);
+      setMobileDetailOpen(true);
 
       // Track the job
       const newTracked: TrackedJob = {
@@ -197,7 +204,7 @@ export default function ResearchPage() {
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex items-center gap-3 border-b border-slate-200 bg-white p-3">
+      <header className="flex flex-wrap items-center gap-2 border-b border-slate-200 bg-white p-3 sm:gap-3 sm:p-4">
         <h1 className="text-base font-semibold">リサーチ</h1>
         <select
           value={status}
@@ -215,7 +222,7 @@ export default function ResearchPage() {
           value={queryInput}
           onChange={(e) => setQueryInput(e.target.value)}
           placeholder="検索 (テーマ / direction)"
-          className="rounded border border-slate-300 px-2 py-1 text-sm"
+          className="w-full min-w-0 rounded border border-slate-300 px-2 py-1 text-sm sm:w-auto sm:flex-1"
         />
         <button
           type="button"
@@ -227,32 +234,58 @@ export default function ResearchPage() {
         <button
           type="button"
           onClick={() => setIsModalOpen(true)}
-          className="rounded bg-indigo-600 px-3 py-1 text-sm font-medium text-white hover:bg-indigo-700 ml-auto"
+          className="ml-auto rounded bg-indigo-600 px-3 py-1 text-sm font-medium text-white hover:bg-indigo-700"
         >
           新規リサーチ
         </button>
       </header>
-      <div className="flex flex-1 overflow-hidden">
-        <div className="w-1/2 border-r border-slate-200">
+      <div className="flex flex-1 flex-col overflow-hidden lg:flex-row">
+        <div
+          className={`h-full w-full min-h-0 border-slate-200 lg:w-1/2 lg:border-r ${
+            mobileDetailOpen ? "hidden" : "flex flex-col"
+          } lg:flex lg:flex-col`}
+        >
           <ResearchList
             status={status}
             query={debouncedQuery}
-            onSelect={setSelectedTheme}
+            onSelect={(t) => {
+              setSelectedTheme(t);
+              setMobileDetailOpen(true);
+            }}
             refreshKey={refreshKey}
             notify={notify}
           />
         </div>
-        <div className="w-1/2 overflow-hidden">
-          {selectedTheme ? (
-            <ResearchDetailPanel
-              key={selectedTheme.theme_id + "-" + (selectedTheme.latest_job?.status || "")}
-              themeId={selectedTheme.theme_id}
-              onChanged={onChanged}
-              notify={notify}
-            />
-          ) : (
-            <p className="p-6 text-sm text-slate-500">左の一覧からテーマを選択してください。</p>
-          )}
+        <div
+          className={`h-full w-full min-h-0 overflow-hidden lg:w-1/2 ${
+            mobileDetailOpen ? "flex flex-col" : "hidden"
+          } lg:flex lg:flex-col`}
+        >
+          <div className="flex items-center gap-2 border-b border-slate-200 p-3 lg:hidden">
+            <button
+              type="button"
+              onClick={() => setMobileDetailOpen(false)}
+              aria-label="一覧に戻る"
+              className="rounded px-2 py-1 text-sm text-slate-600 hover:bg-slate-100"
+            >
+              ← 一覧
+            </button>
+            <span className="truncate text-sm font-semibold text-slate-700">
+              リサーチ詳細
+            </span>
+          </div>
+          <div className="min-h-0 flex-1 overflow-hidden">
+            {selectedTheme ? (
+              <ResearchDetailPanel
+                key={selectedTheme.theme_id + "-" + (selectedTheme.latest_job?.status || "")}
+                themeId={selectedTheme.theme_id}
+                onChanged={onChanged}
+                notify={notify}
+              />
+            ) : (
+              <p className="p-6 text-sm text-slate-500">一覧からテーマを選択してください。</p>
+            )}
+          </div>
         </div>
       </div>
       <div className="pointer-events-none fixed bottom-4 right-4 flex flex-col gap-2">

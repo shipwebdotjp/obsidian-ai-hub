@@ -15,6 +15,7 @@ export default function App() {
   const [authed, setAuthed] = useState<boolean | null>(null);
   const [needsToken, setNeedsToken] = useState(false);
   const [healthError, setHealthError] = useState<string | null>(null);
+  const [navOpen, setNavOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -38,6 +39,15 @@ export default function App() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!navOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setNavOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [navOpen]);
 
   if (authed === null) {
     return (
@@ -70,9 +80,42 @@ export default function App() {
   }
 
   return (
-    <div className="flex h-full">
-      <Sidebar />
-      <main className="flex-1 overflow-hidden">
+    <div className="flex h-full flex-col lg:flex-row">
+      <div className="flex shrink-0 items-center gap-2 border-b border-slate-200 bg-white p-3 lg:hidden">
+        <button
+          type="button"
+          onClick={() => setNavOpen(true)}
+          aria-label="メニューを開く"
+          aria-expanded={navOpen}
+          aria-controls="primary-nav"
+          className="inline-flex h-9 w-9 items-center justify-center rounded hover:bg-slate-100"
+        >
+          <span className="sr-only">メニュー</span>
+          <span aria-hidden="true" className="flex w-5 flex-col gap-1">
+            <span className="block h-0.5 w-5 bg-slate-700" />
+            <span className="block h-0.5 w-5 bg-slate-700" />
+            <span className="block h-0.5 w-5 bg-slate-700" />
+          </span>
+        </button>
+        <h1 className="text-sm font-semibold">obsidian-ai-hub</h1>
+      </div>
+
+      <Sidebar
+        id="primary-nav"
+        open={navOpen}
+        onClose={() => setNavOpen(false)}
+      />
+
+      {navOpen && (
+        <button
+          type="button"
+          aria-label="メニューを閉じる"
+          onClick={() => setNavOpen(false)}
+          className="fixed inset-0 z-40 bg-slate-900/40 lg:hidden"
+        />
+      )}
+
+      <main className="min-h-0 min-w-0 flex-1 overflow-hidden">
         <Routes>
           <Route path="/" element={<Navigate to={ROUTES.MEMORIES} replace />} />
           <Route path={ROUTES.MEMORIES} element={<MemoryPage />} />

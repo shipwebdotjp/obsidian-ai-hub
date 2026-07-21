@@ -62,7 +62,7 @@ export default function MemoryEditForm({ memory, onUpdated, notify, onCancel }: 
         value={content}
         onChange={(e) => setContent(e.target.value)}
       />
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         <div>
           <label className="block text-xs text-slate-500">Topics (カンマ区切り)</label>
           <input

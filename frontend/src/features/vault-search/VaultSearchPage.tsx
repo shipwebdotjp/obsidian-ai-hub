@@ -40,6 +40,7 @@ export default function VaultSearchPage() {
   const [committedMode, setCommittedMode] = useState<"hybrid" | "keyword" | "similarity">("hybrid");
   const [committedK, setCommittedK] = useState(10);
   const [selectedHit, setSelectedHit] = useState<VaultSearchHit | null>(null);
+  const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [isSearching, setIsSearching] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -48,6 +49,10 @@ export default function VaultSearchPage() {
   useEffect(() => {
     persistHistory(searchHistory);
   }, [searchHistory]);
+
+  useEffect(() => {
+    if (!selectedHit) setMobileDetailOpen(false);
+  }, [selectedHit]);
 
   const notify = useCallback((text: string, kind: "info" | "error" = "info") => {
     const id = Date.now() + Math.random();
@@ -108,7 +113,7 @@ export default function VaultSearchPage() {
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex items-center gap-3 border-b border-slate-200 bg-white p-3">
+      <header className="flex flex-wrap items-center gap-2 border-b border-slate-200 bg-white p-3 sm:gap-3 sm:p-4">
         <h1 className="text-base font-semibold">Vault 検索</h1>
         <input
           type="search"
@@ -116,7 +121,7 @@ export default function VaultSearchPage() {
           onChange={(e) => setQueryInput(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter") handleSearch(); }}
           placeholder="検索クエリ"
-          className="min-w-[200px] rounded border border-slate-300 px-2 py-1 text-sm"
+          className="w-full min-w-0 rounded border border-slate-300 px-2 py-1 text-sm sm:w-auto sm:min-w-[200px] sm:flex-1"
         />
         <select
           value={mode}
@@ -146,10 +151,14 @@ export default function VaultSearchPage() {
           {isSearching ? "検索中…" : "検索"}
         </button>
       </header>
-      <div className="flex flex-1 overflow-hidden">
-        <div className="flex w-1/2 flex-col border-r border-slate-200 overflow-hidden">
+      <div className="flex flex-1 flex-col overflow-hidden lg:flex-row">
+        <div
+          className={`flex w-full flex-col overflow-hidden border-slate-200 lg:w-1/2 lg:border-r ${
+            mobileDetailOpen ? "hidden" : "flex"
+          } lg:flex`}
+        >
           {searchHistory.length > 0 && (
-            <div className="shrink-0 max-h-36 overflow-y-auto border-b border-slate-100 p-2">
+            <div className="max-h-36 shrink-0 overflow-y-auto border-b border-slate-100 p-2">
               <h2 className="mb-1 text-xs font-semibold text-slate-500">最近の検索</h2>
               <ul className="space-y-0.5">
                 {searchHistory.map((item, i) => (
@@ -174,17 +183,39 @@ export default function VaultSearchPage() {
               k={committedK}
               mode={committedMode}
               refreshKey={refreshKey}
-              onSelect={setSelectedHit}
+              onSelect={(h) => {
+                setSelectedHit(h);
+                setMobileDetailOpen(true);
+              }}
               onLoaded={handleLoaded}
             />
           </div>
         </div>
-        <div className="w-1/2 overflow-hidden">
-          {selectedHit ? (
-            <VaultSearchDetailPanel hit={selectedHit} notify={notify} />
-          ) : (
-            <p className="p-6 text-sm text-slate-500">左の一覧から結果を選択してください。</p>
-          )}
+        <div
+          className={`w-full overflow-hidden lg:w-1/2 ${
+            mobileDetailOpen ? "flex flex-col" : "hidden"
+          } lg:flex lg:flex-col`}
+        >
+          <div className="flex items-center gap-2 border-b border-slate-200 p-3 lg:hidden">
+            <button
+              type="button"
+              onClick={() => setMobileDetailOpen(false)}
+              aria-label="一覧に戻る"
+              className="rounded px-2 py-1 text-sm text-slate-600 hover:bg-slate-100"
+            >
+              ← 一覧
+            </button>
+            <span className="truncate text-sm font-semibold text-slate-700">
+              検索結果プレビュー
+            </span>
+          </div>
+          <div className="flex-1 overflow-hidden">
+            {selectedHit ? (
+              <VaultSearchDetailPanel hit={selectedHit} notify={notify} />
+            ) : (
+              <p className="p-6 text-sm text-slate-500">一覧から結果を選択してください。</p>
+            )}
+          </div>
         </div>
       </div>
       <div className="pointer-events-none fixed bottom-4 right-4 flex flex-col gap-2">

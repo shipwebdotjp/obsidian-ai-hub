@@ -98,6 +98,7 @@ export default function SummaryDashboardPage() {
   const [selectedDay, setSelectedDay] = useState<DashboardDayDetailsResponse | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
+  const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
 
   // Edit/Delete state
   const [isEditing, setIsEditing] = useState(false);
@@ -368,6 +369,18 @@ export default function SummaryDashboardPage() {
     }
   }, [activeTab, browseYear, browseMonth, loadHome, loadBrowse, loadStats]);
 
+  useEffect(() => {
+    if (activeTab !== "browse") {
+      setMobileDetailOpen(false);
+      return;
+    }
+    if (selectedSummary || selectedDay) {
+      setMobileDetailOpen(true);
+    } else {
+      setMobileDetailOpen(false);
+    }
+  }, [activeTab, selectedSummary, selectedDay]);
+
   // --- Presets handler ---
   const handlePresetChange = (preset: "year" | "30" | "90" | "custom") => {
     setStatsPreset(preset);
@@ -392,13 +405,21 @@ export default function SummaryDashboardPage() {
     }
   };
 
+  const openSummaryDetail = (summaryId: string) => {
+    showSummaryDetail(summaryId);
+  };
+
+  const openDayDetail = (targetDate: string) => {
+    showDayDetail(targetDate);
+  };
+
   return (
     <div className="flex h-full flex-col bg-slate-50">
       {/* Top Navbar */}
-      <header className="flex items-center justify-between border-b border-slate-200 bg-white px-6 py-3">
-        <div className="flex items-center gap-6">
+      <header className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-white px-4 py-3 sm:px-6">
+        <div className="flex flex-wrap items-center gap-3 sm:gap-6">
           <h1 className="text-lg font-bold text-slate-900">サマリダッシュボード</h1>
-          <nav className="flex gap-1 rounded-lg bg-slate-100 p-0.5">
+          <nav className="flex shrink-0 gap-1 rounded-lg bg-slate-100 p-0.5 whitespace-nowrap">
             <button
               onClick={() => {
                 setActiveSubTab("home");
@@ -634,9 +655,13 @@ export default function SummaryDashboardPage() {
 
         {/* BROWSE TAB */}
         {activeTab === "browse" && (
-          <div className="flex h-full">
+          <div className="flex h-full flex-col lg:flex-row">
             {/* Left lists column */}
-            <div className="w-1/2 flex flex-col border-r border-slate-200 bg-white h-full">
+            <div
+              className={`flex h-full w-full flex-col border-slate-200 bg-white lg:w-1/2 lg:border-r ${
+                mobileDetailOpen ? "hidden" : "flex"
+              } lg:flex`}
+            >
               {/* Filter controls at top of list */}
               <div className="border-b border-slate-200 p-4 flex gap-3">
                 <div className="flex-1">
@@ -695,7 +720,7 @@ export default function SummaryDashboardPage() {
                           {browseData.months.map((m) => (
                             <button
                               key={m.summary_id}
-                              onClick={() => showSummaryDetail(m.summary_id)}
+                              onClick={() => openSummaryDetail(m.summary_id)}
                               className="w-full text-left rounded-lg border border-slate-100 bg-slate-50 p-3 hover:bg-slate-100 transition-all cursor-pointer"
                             >
                               <div className="flex items-center justify-between">
@@ -719,7 +744,7 @@ export default function SummaryDashboardPage() {
                           {browseData.weeks.map((w) => (
                             <button
                               key={w.summary_id}
-                              onClick={() => showSummaryDetail(w.summary_id)}
+                              onClick={() => openSummaryDetail(w.summary_id)}
                               className="w-full text-left rounded-lg border border-slate-100 bg-slate-50 p-3 hover:bg-slate-100 transition-all cursor-pointer"
                             >
                               <div className="flex items-center justify-between">
@@ -745,9 +770,9 @@ export default function SummaryDashboardPage() {
                               key={d.date}
                               onClick={() => {
                                 if (d.has_summary && d.summary_id) {
-                                  showSummaryDetail(d.summary_id);
+                                  openSummaryDetail(d.summary_id);
                                 } else {
-                                  showDayDetail(d.date);
+                                  openDayDetail(d.date);
                                 }
                               }}
                               className="w-full text-left rounded-lg border border-slate-100 bg-slate-50 p-3 hover:bg-slate-100 transition-all cursor-pointer"
@@ -787,7 +812,22 @@ export default function SummaryDashboardPage() {
             </div>
 
             {/* Right details column */}
-            <div className="w-1/2 overflow-y-auto bg-white border-l border-slate-100 h-full p-6">
+            <div
+              className={`h-full w-full overflow-y-auto border-l border-slate-100 bg-white p-4 sm:p-6 lg:w-1/2 ${
+                mobileDetailOpen ? "flex flex-col" : "hidden"
+              } lg:flex lg:flex-col`}
+            >
+              <div className="flex items-center gap-2 border-b border-slate-200 pb-3 lg:hidden">
+                <button
+                  type="button"
+                  onClick={() => setMobileDetailOpen(false)}
+                  aria-label="一覧に戻る"
+                  className="rounded px-2 py-1 text-sm text-slate-600 hover:bg-slate-100"
+                >
+                  ← 一覧
+                </button>
+                <span className="text-sm font-semibold text-slate-700">詳細</span>
+              </div>
               {detailLoading && <p className="text-sm text-slate-500">詳細をロード中…</p>}
               {detailError && <p className="text-sm text-red-600">{detailError}</p>}
 
@@ -1445,7 +1485,7 @@ function EditForm({
 
       {/* Mood / Sleep (day only) */}
       {summary.period_type === "day" && (
-        <div className="flex gap-4">
+        <div className="flex flex-col gap-4 sm:flex-row">
           <div className="flex-1">
             <label className="text-xs font-bold uppercase tracking-wider text-slate-400">気分</label>
             <input

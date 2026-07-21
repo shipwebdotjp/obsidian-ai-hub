@@ -136,6 +136,7 @@ export default function PeoplePage() {
   // Selected details
   const [selectedCandidate, setSelectedCandidate] = useState<PersonCandidateDetail | null>(null);
   const [selectedPerson, setSelectedPerson] = useState<PersonDetail | null>(null);
+  const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
 
   // Form states
   const [targetPersonId, setTargetPersonId] = useState("");
@@ -157,6 +158,14 @@ export default function PeoplePage() {
   useEffect(() => {
     setSummaryAssignments({});
   }, [selectedCandidate]);
+
+  useEffect(() => {
+    setMobileDetailOpen(false);
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (!selectedCandidate && !selectedPerson) setMobileDetailOpen(false);
+  }, [selectedCandidate, selectedPerson]);
 
   const handleAssignCandidateSummary = async (summaryId: string, assignedPersonId: string) => {
     if (!selectedCandidate || !assignedPersonId) return;
@@ -284,6 +293,7 @@ export default function PeoplePage() {
     try {
       const data = await apiGet<PersonCandidateDetail>(`${PEOPLE_API}/candidates/${cand.candidate_id}`);
       setSelectedCandidate(data);
+      setMobileDetailOpen(true);
     } catch (e) {
       setError("候補の詳細の取得に失敗しました");
     }
@@ -298,6 +308,7 @@ export default function PeoplePage() {
     try {
       const data = await apiGet<PersonDetail>(`${PEOPLE_API}/${p.person_id}`);
       setSelectedPerson(data);
+      setMobileDetailOpen(true);
       setEditDisplayName(data.display_name);
       setEditAliasesText((data.aliases || []).map((al) => al.display_name).join("\n"));
     } catch (e) {
@@ -512,11 +523,11 @@ export default function PeoplePage() {
   };
 
   return (
-    <div className="flex h-full flex-col bg-slate-50 p-6 overflow-y-auto">
-      <div className="flex items-center justify-between border-b border-slate-200 pb-4 mb-4">
+    <div className="flex h-full flex-col overflow-hidden bg-slate-50">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 p-4 sm:p-6 sm:pb-4">
         <div>
           <h1 className="text-xl font-bold text-slate-900">人物同定・管理</h1>
-          <p className="text-xs text-slate-500 mt-1">
+          <p className="mt-1 text-xs text-slate-500">
             サマリから抽出された人物の解決、重複統合、およびVaultファイルとの同期を安全に管理します。
           </p>
         </div>
@@ -529,20 +540,21 @@ export default function PeoplePage() {
         </button>
       </div>
 
-      {successMsg && (
-        <div className="mb-4 rounded-lg bg-green-50 p-3 text-xs font-medium text-green-800 border border-green-200">
-          {successMsg}
-        </div>
-      )}
+      <div className="flex-1 min-h-0 flex flex-col gap-4 overflow-hidden p-4 pt-4 sm:p-6 sm:pt-4">
+        {successMsg && (
+          <div className="shrink-0 rounded-lg bg-green-50 p-3 text-xs font-medium text-green-800 border border-green-200">
+            {successMsg}
+          </div>
+        )}
 
-      {error && (
-        <div className="mb-4 rounded-lg bg-red-50 p-3 text-xs font-medium text-red-800 border border-red-200">
-          {error}
-        </div>
-      )}
+        {error && (
+          <div className="shrink-0 rounded-lg bg-red-50 p-3 text-xs font-medium text-red-800 border border-red-200">
+            {error}
+          </div>
+        )}
 
-      {/* Tabs */}
-      <div className="flex space-x-1 border-b border-slate-200 mb-4 shrink-0">
+        {/* Tabs */}
+        <div className="flex shrink-0 space-x-1 overflow-x-auto whitespace-nowrap border-b border-slate-200">
         <button
           onClick={() => { setActiveTab("candidates"); clearMessages(); }}
           className={`px-4 py-2 text-xs font-medium border-b-2 transition-colors ${
@@ -585,12 +597,16 @@ export default function PeoplePage() {
         </button>
       </div>
 
-      <div className="flex-1 min-h-0 flex gap-4 overflow-hidden">
+      <div className="min-h-0 flex-1 flex flex-col gap-4 overflow-hidden lg:flex-row">
         {/* TAB 1: CANDIDATES */}
         {activeTab === "candidates" && (
           <>
-            <div className="w-1/3 border border-slate-200 bg-white rounded-lg p-4 flex flex-col overflow-y-auto">
-              <h2 className="text-sm font-semibold mb-3">未解決候補一覧</h2>
+            <div
+              className={`flex w-full flex-col overflow-y-auto rounded-lg border border-slate-200 bg-white p-4 lg:w-1/3 ${
+                mobileDetailOpen ? "hidden" : "flex"
+              } lg:flex`}
+            >
+              <h2 className="mb-3 text-sm font-semibold">未解決候補一覧</h2>
               {candidates.length === 0 ? (
                 <p className="text-xs text-slate-400">現在、未解決候補はありません。</p>
               ) : (
@@ -613,7 +629,26 @@ export default function PeoplePage() {
               )}
             </div>
 
-            <div className="flex-1 border border-slate-200 bg-white rounded-lg p-4 overflow-y-auto">
+            <div
+              className={`w-full overflow-y-auto rounded-lg border border-slate-200 bg-white p-4 lg:flex-1 ${
+                mobileDetailOpen ? "flex flex-col" : "hidden"
+              } lg:flex`}
+            >
+              {mobileDetailOpen && (
+                <div className="flex items-center gap-2 border-b border-slate-200 pb-2 lg:hidden">
+                  <button
+                    type="button"
+                    onClick={() => setMobileDetailOpen(false)}
+                    aria-label="一覧に戻る"
+                    className="rounded px-2 py-1 text-sm text-slate-600 hover:bg-slate-100"
+                  >
+                    ← 一覧
+                  </button>
+                  <span className="truncate text-sm font-semibold text-slate-700">
+                    候補詳細
+                  </span>
+                </div>
+              )}
               {selectedCandidate ? (
                 <div className="space-y-4">
                   <div>
@@ -645,12 +680,12 @@ export default function PeoplePage() {
                       </div>
                     )}
 
-                    <div className="flex gap-2">
+                    <div className="flex flex-col gap-2 sm:flex-row">
                       <select
                         value={targetPersonId}
                         onChange={(e) => setTargetPersonId(e.target.value)}
                         disabled={selectedCandidate.assigned_summaries_count > 0}
-                        className="flex-1 rounded border border-slate-300 bg-white px-2.5 py-1.5 text-xs focus:border-slate-900 focus:outline-none disabled:bg-slate-100 disabled:text-slate-400"
+                        className="w-full rounded border border-slate-300 bg-white px-2.5 py-1.5 text-xs focus:border-slate-900 focus:outline-none disabled:bg-slate-100 disabled:text-slate-400 sm:flex-1"
                       >
                         <option value="">-- 解決先のVault連携人物を選択してください --</option>
                         {people
@@ -664,7 +699,7 @@ export default function PeoplePage() {
                       <button
                         onClick={handleResolveCandidate}
                         disabled={loading || !targetPersonId || selectedCandidate.assigned_summaries_count > 0}
-                        className="rounded bg-slate-900 px-4 py-1.5 text-xs text-white hover:bg-slate-800 disabled:opacity-50"
+                        className="shrink-0 rounded bg-slate-900 px-4 py-1.5 text-xs text-white hover:bg-slate-800 disabled:opacity-50"
                       >
                         解決
                       </button>
@@ -688,7 +723,7 @@ export default function PeoplePage() {
                                 <div className="font-semibold">{sum.period_key} ({sum.period_type})</div>
                                 {sum.note && <div className="text-slate-600 mt-1 font-mono bg-slate-50 p-1.5 rounded whitespace-pre-wrap">{sum.note}</div>}
                               </div>
-                              <div className="flex items-center gap-2 shrink-0 self-end md:self-center">
+                              <div className="flex shrink-0 flex-wrap items-center gap-2 self-end md:self-center">
                                 <select
                                   value={assignedPersonId}
                                   onChange={(e) => setSummaryAssignments(prev => ({ ...prev, [sum.summary_id]: e.target.value }))}
@@ -732,8 +767,12 @@ export default function PeoplePage() {
         {/* TAB 2: PEOPLE LIST */}
         {activeTab === "list" && (
           <>
-            <div className="w-1/3 border border-slate-200 bg-white rounded-lg p-4 flex flex-col overflow-y-auto">
-              <h2 className="text-sm font-semibold mb-3">登録人物一覧</h2>
+            <div
+              className={`flex w-full flex-col overflow-y-auto rounded-lg border border-slate-200 bg-white p-4 lg:w-1/3 ${
+                mobileDetailOpen ? "hidden" : "flex"
+              } lg:flex`}
+            >
+              <h2 className="mb-3 text-sm font-semibold">登録人物一覧</h2>
               {people.length === 0 ? (
                 <p className="text-xs text-slate-400">現在、登録されている人物はいません。</p>
               ) : (
@@ -770,7 +809,26 @@ export default function PeoplePage() {
               )}
             </div>
 
-            <div className="flex-1 border border-slate-200 bg-white rounded-lg p-4 overflow-y-auto">
+            <div
+              className={`w-full overflow-y-auto rounded-lg border border-slate-200 bg-white p-4 lg:flex-1 ${
+                mobileDetailOpen ? "flex flex-col" : "hidden"
+              } lg:flex`}
+            >
+              {mobileDetailOpen && (
+                <div className="flex items-center gap-2 border-b border-slate-200 pb-2 lg:hidden">
+                  <button
+                    type="button"
+                    onClick={() => setMobileDetailOpen(false)}
+                    aria-label="一覧に戻る"
+                    className="rounded px-2 py-1 text-sm text-slate-600 hover:bg-slate-100"
+                  >
+                    ← 一覧
+                  </button>
+                  <span className="truncate text-sm font-semibold text-slate-700">
+                    人物詳細
+                  </span>
+                </div>
+              )}
               {selectedPerson ? (
                 <div className="space-y-4">
                   <div>
@@ -891,11 +949,11 @@ export default function PeoplePage() {
                   {/* Merge with another person section */}
                   <div className="border border-slate-200 rounded-lg p-4 bg-slate-50 space-y-3">
                     <h3 className="text-xs font-bold text-slate-800">この人物を別の人物へ統合</h3>
-                    <div className="flex gap-2">
+                    <div className="flex flex-col gap-2 sm:flex-row">
                       <select
                         value={mergeToPersonId}
                         onChange={(e) => setMergeToPersonId(e.target.value)}
-                        className="flex-1 rounded border border-slate-300 bg-white px-2.5 py-1.5 text-xs focus:border-slate-900 focus:outline-none"
+                        className="w-full rounded border border-slate-300 bg-white px-2.5 py-1.5 text-xs focus:border-slate-900 focus:outline-none sm:flex-1"
                       >
                         <option value="">-- 統合先（残す）の人物を選択してください --</option>
                         {people
@@ -914,7 +972,7 @@ export default function PeoplePage() {
                           }
                         }}
                         disabled={loading || !mergeToPersonId}
-                        className="rounded bg-slate-900 px-4 py-1.5 text-xs text-white hover:bg-slate-800 disabled:opacity-50"
+                        className="shrink-0 rounded bg-slate-900 px-4 py-1.5 text-xs text-white hover:bg-slate-800 disabled:opacity-50"
                       >
                         統合プレビュー
                       </button>
@@ -968,14 +1026,14 @@ export default function PeoplePage() {
               ) : (
                 <div className="space-y-3">
                   {duplicates.vault_matches.map((m) => (
-                    <div key={m.unlinked_person.person_id} className="border border-slate-200 rounded-lg p-4 bg-slate-50 flex items-center justify-between">
-                      <div className="space-y-1">
+                    <div key={m.unlinked_person.person_id} className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="min-w-0 space-y-1">
                         <div className="text-xs font-semibold text-red-700">未連携人物: {m.unlinked_person.display_name} (ID: {m.unlinked_person.person_id})</div>
                         <div className="text-xs text-green-700 font-medium">Vault側の該当ノート: {m.vault_person.name} (Vault ID: {m.vault_person.id})</div>
-                        <div className="text-[10px] text-slate-400 font-mono">ファイルパス: {m.vault_person.path}</div>
+                        <div className="text-[10px] text-slate-400 font-mono break-all">ファイルパス: {m.vault_person.path}</div>
                       </div>
 
-                      <div className="flex gap-2">
+                      <div className="flex shrink-0 gap-2">
                         {/* Find corresponding master person_id in DB */}
                         {(() => {
                           const target = people.find((p) => p.vault_id === m.vault_person.id);
@@ -1014,14 +1072,14 @@ export default function PeoplePage() {
 
                       <div className="divide-y divide-slate-100">
                         {grp.people.map((p) => (
-                          <div key={p.person_id} className="py-2.5 flex items-center justify-between text-xs">
-                            <div>
+                          <div key={p.person_id} className="flex flex-col gap-2 py-2.5 text-xs sm:flex-row sm:items-center sm:justify-between">
+                            <div className="min-w-0">
                               <span className="font-semibold">{p.display_name}</span>
-                              <span className="text-[10px] text-slate-400 ml-1.5">(ID: {p.person_id})</span>
+                              <span className="ml-1.5 text-[10px] text-slate-400">(ID: {p.person_id})</span>
                             </div>
 
                             {/* Allow merging other rows into this row */}
-                            <div className="flex gap-1.5">
+                            <div className="flex shrink-0 flex-wrap gap-1.5">
                               {grp.people
                                 .filter((other) => other.person_id !== p.person_id)
                                 .map((other) => (
@@ -1231,7 +1289,7 @@ export default function PeoplePage() {
             {/* Modal Body */}
             <div className="p-5 overflow-y-auto space-y-4 text-xs text-slate-700">
               {/* Target info comparison */}
-              <div className="grid grid-cols-2 gap-4 border border-slate-100 rounded-lg p-3 bg-slate-50">
+              <div className="grid grid-cols-1 gap-4 border border-slate-100 rounded-lg p-3 bg-slate-50 sm:grid-cols-2">
                 <div className="space-y-1">
                   <div className="text-[10px] uppercase font-bold text-slate-400">統合元（削除される人物）</div>
                   <div className="font-semibold text-slate-800 text-sm">{mergeFromPerson?.display_name}</div>
@@ -1240,7 +1298,7 @@ export default function PeoplePage() {
                     Vault ID: {mergeFromPerson?.vault_id ? <code className="bg-slate-200 px-1 rounded">{mergeFromPerson.vault_id}</code> : "未連携"}
                   </div>
                 </div>
-                <div className="space-y-1 border-l border-slate-200 pl-4">
+                <div className="space-y-1 border-t border-slate-200 pt-4 sm:border-l sm:border-t-0 sm:pl-4 sm:pt-0">
                   <div className="text-[10px] uppercase font-bold text-slate-400">統合先（残す人物）</div>
                   <div className="font-semibold text-slate-800 text-sm">{mergeToPerson?.display_name}</div>
                   <div className="text-slate-500 text-[10px]">ID: {mergeToPerson?.person_id}</div>
@@ -1498,6 +1556,7 @@ export default function PeoplePage() {
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 }

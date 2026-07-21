@@ -53,6 +53,7 @@ export default function ProjectsPage() {
   // Selection states
   const [selectedProject, setSelectedProject] = useState<ProjectDetail | null>(null);
   const [selectedCandidate, setSelectedCandidate] = useState<ProjectCandidateDetail | null>(null);
+  const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
 
   // Filters
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -156,11 +157,20 @@ export default function ProjectsPage() {
     loadProjectsOnly();
   }, [statusFilter, domainFilter]);
 
+  useEffect(() => {
+    setMobileDetailOpen(false);
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (!selectedProject && !selectedCandidate) setMobileDetailOpen(false);
+  }, [selectedProject, selectedCandidate]);
+
   const handleSelectProject = async (p: Project) => {
     clearMessages();
     try {
       const data = await apiGet<ProjectDetail>(`/api/v1/projects/${p.project_id}`);
       setSelectedProject(data);
+      setMobileDetailOpen(true);
     } catch (e) {
       setError("プロジェクトの詳細の取得に失敗しました");
     }
@@ -171,6 +181,7 @@ export default function ProjectsPage() {
     try {
       const data = await apiGet<ProjectCandidateDetail>(`/api/v1/projects/candidates/${c.candidate_id}`);
       setSelectedCandidate(data);
+      setMobileDetailOpen(true);
     } catch (e) {
       setError("候補の詳細の取得に失敗しました");
     }
@@ -218,6 +229,7 @@ export default function ProjectsPage() {
       setShowCreateModal(false);
       await loadAllData(false);
       setSelectedProject(res);
+      setMobileDetailOpen(true);
     } catch (e: any) {
       if (e instanceof ApiError && e.status === 409) {
         setError("競合エラー: 同一の名前を持つプロジェクトがすでに存在します。");
@@ -374,11 +386,11 @@ export default function ProjectsPage() {
   };
 
   return (
-    <div className="flex h-full flex-col bg-slate-50 p-6 overflow-y-auto">
-      <div className="flex items-center justify-between border-b border-slate-200 pb-4 mb-4">
+    <div className="flex h-full flex-col overflow-hidden bg-slate-50">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 p-4 sm:p-6 sm:pb-4">
         <div>
           <h1 className="text-xl font-bold text-slate-900">プロジェクト追跡</h1>
-          <p className="text-xs text-slate-500 mt-1">
+          <p className="mt-1 text-xs text-slate-500">
             ゴールや終了状態を持つ取り組みをプロジェクトとして管理し、サマリと紐付けます。
           </p>
         </div>
@@ -399,20 +411,21 @@ export default function ProjectsPage() {
         </div>
       </div>
 
-      {successMsg && (
-        <div className="mb-4 rounded-lg bg-green-50 p-3 text-xs font-medium text-green-800 border border-green-200">
-          {successMsg}
-        </div>
-      )}
+      <div className="flex-1 min-h-0 flex flex-col gap-4 overflow-hidden p-4 pt-4 sm:p-6 sm:pt-4">
+        {successMsg && (
+          <div className="shrink-0 rounded-lg bg-green-50 p-3 text-xs font-medium text-green-800 border border-green-200">
+            {successMsg}
+          </div>
+        )}
 
-      {error && (
-        <div className="mb-4 rounded-lg bg-red-50 p-3 text-xs font-medium text-red-800 border border-red-200">
-          {error}
-        </div>
-      )}
+        {error && (
+          <div className="shrink-0 rounded-lg bg-red-50 p-3 text-xs font-medium text-red-800 border border-red-200">
+            {error}
+          </div>
+        )}
 
-      {/* Tabs */}
-      <div className="flex space-x-1 border-b border-slate-200 mb-4 shrink-0">
+        {/* Tabs */}
+        <div className="flex shrink-0 space-x-1 overflow-x-auto whitespace-nowrap border-b border-slate-200">
         <button
           onClick={() => { setActiveTab("inbox"); clearMessages(); }}
           className={`px-4 py-2 text-xs font-medium border-b-2 transition-colors ${
@@ -445,12 +458,16 @@ export default function ProjectsPage() {
         </button>
       </div>
 
-      <div className="flex-1 min-h-0 flex gap-4 overflow-hidden">
+      <div className="min-h-0 flex-1 flex flex-col gap-4 overflow-hidden lg:flex-row">
         {/* TAB 1: INBOX */}
         {activeTab === "inbox" && (
           <>
-            <div className="w-1/3 border border-slate-200 bg-white rounded-lg p-4 flex flex-col overflow-y-auto">
-              <h2 className="text-sm font-semibold mb-3">新規候補</h2>
+            <div
+              className={`flex w-full flex-col overflow-y-auto rounded-lg border border-slate-200 bg-white p-4 lg:w-1/3 ${
+                mobileDetailOpen ? "hidden" : "flex"
+              } lg:flex`}
+            >
+              <h2 className="mb-3 text-sm font-semibold">新規候補</h2>
               {candidates.length === 0 ? (
                 <p className="text-xs text-slate-400">現在、未解決の候補はありません。</p>
               ) : (
@@ -476,7 +493,26 @@ export default function ProjectsPage() {
               )}
             </div>
 
-            <div className="flex-1 border border-slate-200 bg-white rounded-lg p-4 overflow-y-auto">
+            <div
+              className={`w-full overflow-y-auto rounded-lg border border-slate-200 bg-white p-4 lg:flex-1 ${
+                mobileDetailOpen ? "flex flex-col" : "hidden"
+              } lg:flex`}
+            >
+              {mobileDetailOpen && (
+                <div className="flex items-center gap-2 border-b border-slate-200 pb-2 lg:hidden">
+                  <button
+                    type="button"
+                    onClick={() => setMobileDetailOpen(false)}
+                    aria-label="一覧に戻る"
+                    className="rounded px-2 py-1 text-sm text-slate-600 hover:bg-slate-100"
+                  >
+                    ← 一覧
+                  </button>
+                  <span className="truncate text-sm font-semibold text-slate-700">
+                    候補詳細
+                  </span>
+                </div>
+              )}
               {selectedCandidate ? (
                 <div className="space-y-4">
                   <div className="flex items-start justify-between border-b pb-3">
@@ -525,8 +561,8 @@ export default function ProjectsPage() {
                         </div>
                       </div>
                     )}
-                    {(selectedCandidate.start_date || selectedCandidate.target_date) && (
-                      <div className="grid grid-cols-2 gap-2">
+                      {(selectedCandidate.start_date || selectedCandidate.target_date) && (
+                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                         {selectedCandidate.start_date && (
                           <div>
                             <span className="font-bold text-slate-600">開始日:</span>
@@ -579,28 +615,32 @@ export default function ProjectsPage() {
         {/* TAB 2: PROJECTS */}
         {activeTab === "projects" && (
           <>
-            <div className="w-1/3 border border-slate-200 bg-white rounded-lg p-4 flex flex-col overflow-y-auto">
-              <h2 className="text-sm font-semibold mb-3">正式プロジェクト一覧</h2>
+            <div
+              className={`flex w-full flex-col overflow-y-auto rounded-lg border border-slate-200 bg-white p-4 lg:w-1/3 ${
+                mobileDetailOpen ? "hidden" : "flex"
+              } lg:flex`}
+            >
+              <h2 className="mb-3 text-sm font-semibold">正式プロジェクト一覧</h2>
 
               {/* Filters */}
-              <div className="grid grid-cols-2 gap-2 mb-3">
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-500 mb-1">状態</label>
-                  <select
-                    value={statusFilter}
-                    onChange={(e) => setStatusFilter(e.target.value)}
-                    className="w-full rounded border border-slate-300 bg-white px-2 py-1 text-[11px] focus:outline-none"
-                  >
-                    <option value="all">すべて</option>
-                    <option value="inquiry">inquiry</option>
-                    <option value="active">active</option>
-                    <option value="paused">paused</option>
-                    <option value="completed">completed</option>
-                    <option value="cancelled">cancelled</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-500 mb-1">領域</label>
+                <div className="grid grid-cols-1 gap-2 mb-3 sm:grid-cols-2">
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 mb-1">状態</label>
+                    <select
+                      value={statusFilter}
+                      onChange={(e) => setStatusFilter(e.target.value)}
+                      className="w-full rounded border border-slate-300 bg-white px-2 py-1 text-[11px] focus:outline-none"
+                    >
+                      <option value="all">すべて</option>
+                      <option value="inquiry">inquiry</option>
+                      <option value="active">active</option>
+                      <option value="paused">paused</option>
+                      <option value="completed">completed</option>
+                      <option value="cancelled">cancelled</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 mb-1">領域</label>
                   <select
                     value={domainFilter}
                     onChange={(e) => setDomainFilter(e.target.value)}
@@ -643,7 +683,26 @@ export default function ProjectsPage() {
               )}
             </div>
 
-            <div className="flex-1 border border-slate-200 bg-white rounded-lg p-4 overflow-y-auto">
+            <div
+              className={`w-full overflow-y-auto rounded-lg border border-slate-200 bg-white p-4 lg:flex-1 ${
+                mobileDetailOpen ? "flex flex-col" : "hidden"
+              } lg:flex`}
+            >
+              {mobileDetailOpen && (
+                <div className="flex items-center gap-2 border-b border-slate-200 pb-2 lg:hidden">
+                  <button
+                    type="button"
+                    onClick={() => setMobileDetailOpen(false)}
+                    aria-label="一覧に戻る"
+                    className="rounded px-2 py-1 text-sm text-slate-600 hover:bg-slate-100"
+                  >
+                    ← 一覧
+                  </button>
+                  <span className="truncate text-sm font-semibold text-slate-700">
+                    プロジェクト詳細
+                  </span>
+                </div>
+              )}
               {selectedProject ? (
                 <div className="space-y-4">
                   <div className="flex items-start justify-between border-b pb-3">
@@ -684,7 +743,7 @@ export default function ProjectsPage() {
                         </div>
                       </div>
                     )}
-                    <div className="grid grid-cols-3 gap-2">
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                       <div>
                         <span className="font-bold text-slate-600 block">開始日:</span>
                         <span className="font-mono">{selectedProject.start_date || "-"}</span>
@@ -861,7 +920,7 @@ export default function ProjectsPage() {
                     />
                   </div>
 
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <div>
                       <label className="block text-[11px] font-bold text-slate-700 mb-1">領域 (Domain)</label>
                       <select
@@ -922,7 +981,7 @@ export default function ProjectsPage() {
                     />
                   </div>
 
-                  <div className="grid grid-cols-3 gap-2">
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                     <div>
                       <label className="block text-[11px] font-bold text-slate-700 mb-1">開始日</label>
                       <input
@@ -1016,6 +1075,7 @@ export default function ProjectsPage() {
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 }
