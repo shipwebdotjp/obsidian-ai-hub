@@ -713,6 +713,7 @@ class TaskItem(BaseModel):
     is_preset: bool
     preset_flag: Optional[str] = None
     preset_name: Optional[str] = None
+    next_run: Optional[str] = None
 
 
 # --- Execution Log schemas ---
@@ -782,7 +783,6 @@ class LLMCallDetail(BaseModel):
     exception_type: Optional[str] = None
     exception_message: Optional[str] = None
     traceback: Optional[str] = None
-    next_run: Optional[str] = None
 
 
 class TaskConfigResponse(BaseModel):
