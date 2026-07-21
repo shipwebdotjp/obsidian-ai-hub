@@ -6,8 +6,8 @@ from datetime import datetime
 from obsidian_ai_hub import (
     do_backup,
     make_today_target,
-    notify_calendar_event,
     notify_today_schedule,
+    write_today_schedule,
     obsidian_inbox_merge,
     rebuild_valut,
     research_agent,
@@ -43,9 +43,9 @@ def main():
         help="過去のDailyNoteから今日の目標を作成し書き込み",
     )
     parser.add_argument(
-        "--notify-calendar-event",
+        "--write-today-schedule",
         action="store_true",
-        help="今日のカレンダーイベントと定期リマインダをLINEに通知",
+        help="Apple Calendar/Reminders から取得した予定・タスクを今日のノートに書き込む",
     )
     parser.add_argument(
         "--summerize-week", action="store_true", help="週次レビューを生成"
@@ -340,8 +340,8 @@ def main():
     if args.merge_inbox:
         run_and_log(obsidian_inbox_merge.main, "merge_inbox", {})
         ran = True
-    if args.notify_calendar_event:
-        run_and_log(notify_calendar_event.main, "notify_calendar_event", {})
+    if args.write_today_schedule:
+        run_and_log(write_today_schedule.main, "write_today_schedule", {})
         ran = True
     if args.make_target:
         run_and_log(make_today_target.main, "make_target", {})

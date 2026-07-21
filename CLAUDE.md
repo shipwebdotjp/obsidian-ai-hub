@@ -18,7 +18,7 @@ pytest tests/
 # Run CLI commands
 python -m obsidian_ai_hub --merge-inbox
 python -m obsidian_ai_hub --make-target
-python -m obsidian_ai_hub --notify-calendar-event
+python -m obsidian_ai_hub --write-today-schedule
 python -m obsidian_ai_hub --summerize-week
 python -m obsidian_ai_hub --backup
 
@@ -36,7 +36,7 @@ python -m obsidian_ai_hub --backup
 | `task_runner.py` | Cron-like scheduler that reads `tasks/tasks.yml` and tracks execution in `tasks/last_run.json` |
 | `obsidian_inbox_merge.py` | Merges inbox files (markdown/audio) into daily notes; supports Whisper transcription |
 | `make_today_target.py` | Generates daily targets using LLM analysis of journal history |
-| `notify_calendar_event.py` | Fetches Apple Calendar events (via EventKit) and sends LINE notifications |
+| `write_today_schedule.py` | Fetches Apple Calendar/Reminders events and writes them into today's daily note |
 | `summerize_week.py` | Generates weekly review summaries via LLM |
 | `do_backup.py` | Rsync-based backup utility |
 | `sync_knowledge.py` | Synchronizes Obsidian Vault files with Open Web UI knowledge base |

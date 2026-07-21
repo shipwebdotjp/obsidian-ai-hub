@@ -1,21 +1,15 @@
 """
-Notify today's calendar events and configured recurring reminders via LINE Messaging API.
-
-This script uses the `gog` CLI to fetch calendar events (prefer --json flag) and
-sends a text push message to LINE Messaging API when there are messages to send.
+Fetch today's events from Apple Calendar and Reminders, then write them into
+the daily note under 「今日の予定」 and 「今日のタスク」 sections.
 
 Configuration (put into your .env):
-- GOG_CALENDAR_ID: calendar id to query (e.g. primary or email)
-- LINE_MESSAGING_TOKEN: LINE Messaging API channel access token
-- LINE_TARGET_ID: recipient user or group id to push messages to
-
-Intended to be called from batch/morning_routine.sh or similar.
+- APPLE_CALENDAR_NAME: title of the calendar in Calendar.app to query (optional;
+  all calendars are queried if unset)
 """
 
 from __future__ import annotations
 
 import logging
-import os
 import subprocess
 from datetime import datetime, date, time, timedelta
 from typing import Any, Dict, List, Optional
@@ -33,22 +27,12 @@ from obsidian_ai_hub.utils import config, reader
 
 logger = logging.getLogger(__name__)
 
-try:
-    import requests
-except Exception:  # pragma: no cover - requests is recommended
-    requests = None
-
-try:
-    from dateutil import parser as dateutil_parser
-except Exception:  # pragma: no cover - optional
-    dateutil_parser = None
-
 CAT_TASK = 1
 CAT_EVENT = 2
 WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"]
 
 
-def _get_apple_reminder_events(
+def _fetch_apple_reminders(
     start_date: date, end_date: date
 ) -> List[Dict[str, Any]]:
     MONTH_NAMES = [
@@ -75,8 +59,6 @@ def _get_apple_reminder_events(
     emonth = MONTH_NAMES[end_date.month]
     eday = end_date.day
 
-    # Build AppleScript date objects using numeric components to avoid locale-dependent
-    # parsing of date strings.
     script = f"""
     tell application "Reminders"
         set startDate to current date
@@ -130,7 +112,6 @@ def _ensure_calendar_access(store: EKEventStore) -> None:
             "Calendar access is denied/restricted. Enable it in System Settings."
         )
 
-    # NotDetermined: 対話実行で許可ダイアログを出せる環境のみ推奨
     done = threading.Event()
     granted_box = {"granted": False, "error": None}
 
@@ -151,11 +132,10 @@ def _ensure_calendar_access(store: EKEventStore) -> None:
 
 
 def _dt_to_nsdate(dt: datetime) -> NSDate:
-    # dt は tz-aware を想定
     return NSDate.dateWithTimeIntervalSince1970_(dt.timestamp())
 
 
-def get_calendar_events_eventkit(
+def fetch_calendar_events(
     calendar_name: str | None = None,
     start_date: date | None = None,
     end_date: date | None = None,
@@ -195,7 +175,6 @@ def get_calendar_events_eventkit(
     for e in events:
         title = str(e.title() or "")
 
-        # 全日イベント判定（PyObjC環境によってメソッド名が違う場合があるため両対応）
         is_all_day = False
         if hasattr(e, "isAllDay"):
             is_all_day = bool(e.isAllDay())
@@ -217,84 +196,38 @@ def get_calendar_events_eventkit(
     return out
 
 
-def _parse_event_times(ev: Dict[str, Any]) -> Dict[str, Optional[datetime]]:
-    """Return dict with 'start' and 'end' datetimes or None for all-day events."""
-    # Preferred keys: start.dateTime, start.date, startLocal, start
-    start = None
-    end = None
-
-    s = ev.get("start") or ev.get("startLocal") or ev.get("start")
-    e = ev.get("end") or ev.get("endLocal") or ev.get("end")
-
-    def _parse(val: Any) -> Optional[datetime]:
-        if not val:
-            return None
-        if isinstance(val, dict):
-            # google-like: {"dateTime": "...", "date": "..."}
-            if "dateTime" in val:
-                dt = val["dateTime"]
-            elif "date" in val:
-                # all-day
-                return None
-            else:
-                # unknown dict shape
-                return None
-        else:
-            dt = val
-
-        if isinstance(dt, str):
-            try:
-                if dateutil_parser:
-                    return dateutil_parser.parse(dt)
-                # Python's fromisoformat supports offset-aware strings in 3.7+
-                return datetime.fromisoformat(dt)
-            except Exception:
-                # last resort: try slicing
-                try:
-                    return datetime.fromisoformat(dt.replace("Z", "+00:00"))
-                except Exception:
-                    return None
-        return None
-
-    start = _parse(s)
-    end = _parse(e)
-    return {"start": start, "end": end}
-
-
-def all_plan_to_msg(events: List[Dict[str, Any]]) -> List[str]:
-    msgs: List[str] = []
+def _format_events_to_lines(events: List[Dict[str, Any]]) -> List[str]:
+    lines: List[str] = []
     for ev in events:
-        title = ev.get("summary") or ev.get("title") or ev.get("name") or ""
-        times = _parse_event_times(ev)
-        if times["start"] is None:
-            # all-day event
-            msgs.append(title)
-            continue
-        start_local = times["start"]
-        end_local = times["end"]
-        start_str = start_local.strftime("%H:%M") if start_local else ""
-        end_str = end_local.strftime("%H:%M") if end_local else ""
-        if start_str and end_str:
-            msgs.append(f"{title} {start_str}~{end_str}")
+        title = ev.get("title") or ""
+        s = ev.get("start")
+        e = ev.get("end")
+        if s and isinstance(s, str):
+            start_str = datetime.fromisoformat(s).strftime("%H:%M")
+            if e and isinstance(e, str):
+                end_str = datetime.fromisoformat(e).strftime("%H:%M")
+                lines.append(f"{title} {start_str}~{end_str}")
+            else:
+                lines.append(f"{title} {start_str}")
         else:
-            msgs.append(title)
-    return msgs
+            lines.append(title)
+    return lines
 
 
-def get_days(
-    target_date: date, days_number: List[int], nthday: List[int]
+def get_weekday_rule_dates(
+    target_date: date, weekdays: List[int], nth: List[int]
 ) -> List[date]:
-    """Return dates within the month of target_date that match weekday numbers and nth occurrences.
+    """Return dates within the month of target_date that match weekday numbers
+    and nth occurrences.
 
-    days_number: list of weekday numbers (GAS: 0=Sunday..6=Saturday)
-    nthday: list of occurrences (1-based)
+    weekdays: weekday numbers (0=Sunday..6=Saturday)
+    nth: list of occurrences (1-based)
     """
     year = target_date.year
     month = target_date.month
     results: List[date] = []
 
-    # Build list of all days for each requested weekday
-    for weekday in days_number:
+    for weekday in weekdays:
         days_in_month: List[date] = []
         for d in range(1, 32):
             try:
@@ -302,19 +235,16 @@ def get_days(
             except ValueError:
                 break
             if dt.weekday() == (weekday - 1 if weekday != 0 else 6):
-                # converting because google used 0=Sunday; Python weekday: 0=Mon..6=Sun
-                # Adjust: if weekday==0 (Sunday in google), map to python 6; else weekday-1
                 days_in_month.append(dt)
 
-        # pick specified nth occurrences
         for idx, dd in enumerate(days_in_month, start=1):
-            if idx in nthday:
+            if idx in nth:
                 results.append(dd)
 
     return results
 
 
-def get_dates_in_month(target_day: date, dates: List[int]) -> List[date]:
+def get_monthday_rule_dates(target_day: date, dates: List[int]) -> List[date]:
     """Return concrete date objects in the same year/month as target_day for the
     provided day numbers. Invalid dates (e.g. Feb 30) are skipped.
     """
@@ -322,9 +252,7 @@ def get_dates_in_month(target_day: date, dates: List[int]) -> List[date]:
     year = target_day.year
     month = target_day.month
     for d in dates:
-        # special sentinel: 0 means last day of the month
         if d == 0:
-            # compute first day of next month then subtract one day
             if month == 12:
                 next_month_first = date(year + 1, 1, 1)
             else:
@@ -335,12 +263,11 @@ def get_dates_in_month(target_day: date, dates: List[int]) -> List[date]:
         try:
             results.append(date(year, month, d))
         except ValueError:
-            # skip invalid day numbers for the month
             pass
     return results
 
 
-def is_today(target: date, days: List[date]) -> bool:
+def is_date_in_list(target: date, days: List[date]) -> bool:
     return any(
         d.year == target.year and d.month == target.month and d.day == target.day
         for d in days
@@ -348,13 +275,7 @@ def is_today(target: date, days: List[date]) -> bool:
 
 
 def main() -> int:
-    # Load configuration from environment
-    cal_id = (
-        config.GOG_CALENDAR_ID
-        or os.getenv("GOG_CALENDAR_ID")
-        or os.getenv("CALENDAR_ID")
-        or "primary"
-    )
+    cal_name = config.APPLE_CALENDAR_NAME or None
 
     now = datetime.now()
     today_date = date(now.year, now.month, now.day)
@@ -362,12 +283,10 @@ def main() -> int:
     events: List[str] = []
     tasks: List[str] = []
 
-    # Fetch today's events from Calendar.app
-    calendar_events = get_calendar_events_eventkit(cal_id)
+    calendar_events = fetch_calendar_events(cal_name)
     if calendar_events:
-        events.extend(all_plan_to_msg(calendar_events))
+        events.extend(_format_events_to_lines(calendar_events))
 
-    # Regular weekly rules
     for event in config.REGULARLY_WEEKDAY_EVENTS:
         number_ofdays = event[0]
         days_string = event[1]
@@ -375,19 +294,16 @@ def main() -> int:
         event_name = event[3]
         category = event[4]
 
-        # convert Japanese weekday strings to numbers used in googlecalendar.gs (0=Sun..6=Sat)
         days_number = [WEEKDAYS.index(d) for d in days_string]
         target_day = date(now.year, now.month, now.day) - timedelta(days=day_offset)
 
-        # getDays expects a date object and returns date objects
-        target_days = get_days(target_day, days_number, number_ofdays)
-        if is_today(target_day, target_days):
+        target_dates = get_weekday_rule_dates(target_day, days_number, number_ofdays)
+        if is_date_in_list(target_day, target_dates):
             if category == CAT_EVENT:
                 events.append(event_name)
             else:
                 tasks.append(event_name)
 
-    # Regular monthly date rules
     for event in config.REGULARLY_DATE_EVENTS:
         number_ofdates = event[0]
         day_offset = event[1]
@@ -396,24 +312,21 @@ def main() -> int:
 
         target_day = date(now.year, now.month, now.day) - timedelta(days=day_offset)
 
-        # Use helper to build concrete dates in the target month
-        target_days = get_dates_in_month(target_day, number_ofdates)
+        target_dates = get_monthday_rule_dates(target_day, number_ofdates)
 
-        if is_today(target_day, target_days):
+        if is_date_in_list(target_day, target_dates):
             if category == CAT_EVENT:
                 events.append(event_name)
             else:
                 tasks.append(event_name)
 
-    # Reminder events from Apple Reminders
-    reminder_events = _get_apple_reminder_events(today_date, today_date)
+    reminder_events = _fetch_apple_reminders(today_date, today_date)
     if reminder_events:
         for ev in reminder_events:
             name = ev.get("name", "")
             tasks.append(f"{name}")
 
     if events or tasks:
-        # for obsidian
         obs_parts = []
         if events:
             obs_parts.append("## 📅 今日の予定")
@@ -424,14 +337,13 @@ def main() -> int:
         obs_text = "\n".join(obs_parts)
         today = datetime.now()
 
-        # 今日のノートに目標を追記
         today_note = reader.get_daily_note_content(today)
         new_today_note = today_note.replace("## ✅今日のタスク", f"{obs_text}")
         with open(reader.get_daily_note_path(today), "w") as f:
             f.write(new_today_note)
         return 0
 
-    logger.info("No messages to send today.")
+    logger.info("No events or tasks to write today.")
     return 0
 
 

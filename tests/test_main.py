@@ -102,6 +102,17 @@ def test_query_requires_vault_search(monkeypatch):
         assert "--query requires --vault-search" in mock_error.call_args[0][0]
 
 
+def test_write_today_schedule_cli_calls_main(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["prog", "--write-today-schedule"])
+
+    with patch.object(
+        main_module.write_today_schedule, "main", return_value=0
+    ) as mock_main:
+        main_module.main()
+
+    mock_main.assert_called_once_with()
+
+
 def test_scan_line_inbox_cli_calls_scan(monkeypatch):
     monkeypatch.setattr(sys, "argv", ["prog", "--scan-line-inbox"])
 

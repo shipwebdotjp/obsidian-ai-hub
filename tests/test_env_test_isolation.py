@@ -77,13 +77,13 @@ class TestIsolation:
             assert str(p).startswith(ws), f"{p} not under {ws}"
 
     def test_env_vars_deleted(self):
-        """ENV=test → OPENAI_APIKEY, LINE_TOKEN, CALENDAR_ID are deleted"""
+        """ENV=test → OPENAI_APIKEY, LINE_TOKEN, APPLE_CALENDAR_NAME are deleted"""
         out, _ = _run(
             "from obsidian_ai_hub.utils import config; "
             "import os; "
             "print(os.environ.get('OPENAI_API_KEY', 'DELETED'), "
             "os.environ.get('LINE_TOKEN', 'DELETED'), "
-            "os.environ.get('GOG_CALENDAR_ID', 'DELETED'))",
+            "os.environ.get('APPLE_CALENDAR_NAME', 'DELETED'))",
             extra_env={
                 "ENV": "test",
                 "OAIHUB_SKIP_DOTENV": "1",

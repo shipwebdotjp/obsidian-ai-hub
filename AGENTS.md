@@ -23,7 +23,7 @@ uv run pytest tests/
 # Run CLI commands
 uv run python -m obsidian_ai_hub --merge-inbox
 uv run python -m obsidian_ai_hub --make-target
-uv run python -m obsidian_ai_hub --notify-calendar-event
+uv run python -m obsidian_ai_hub --write-today-schedule
 uv run python -m obsidian_ai_hub --summerize-week
 uv run python -m obsidian_ai_hub --backup
 

@@ -29,7 +29,7 @@ PRESET_FLAGS = {
     "--summerize-week": "週サマリ",
     "--summerize-month": "月サマリ",
     "--make-target": "目標作成",
-    "--notify-calendar-event": "カレンダー通知",
+    "--write-today-schedule": "今日の予定・タスクを書き込み",
     "--notify-today-schedule": "今日の予定通知",
     "--backup": "Backup",
     "--sync-vault": "Vault sync",
