@@ -28,6 +28,9 @@ export default function Sidebar() {
         <NavLink to={ROUTES.PROJECTS} className={linkClass}>
           プロジェクト管理
         </NavLink>
+        <NavLink to={ROUTES.TASKS} className={linkClass}>
+          タスク管理
+        </NavLink>
       </nav>
     </aside>
   );

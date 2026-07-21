@@ -701,3 +701,48 @@ class ProjectCandidateResolveRequest(BaseModel):
             if self.target_project_id is None or self.target_project_id <= 0:
                 raise ValueError("target_project_id is required and must be a valid positive integer for link_existing")
         return self
+
+
+# --- Task Config schemas ---
+
+class TaskItem(BaseModel):
+    id: str
+    enabled: bool = True
+    schedule: dict
+    command: str
+    is_preset: bool
+    preset_flag: Optional[str] = None
+    preset_name: Optional[str] = None
+    next_run: Optional[str] = None
+
+
+class TaskConfigResponse(BaseModel):
+    tasks: list[TaskItem]
+    filepath: str
+    revision: str
+
+
+class TaskConfigRequest(BaseModel):
+    revision: str
+    tasks: list[dict]
+
+
+class TaskConfigUpdateResponse(BaseModel):
+    success: bool
+    revision: str
+
+
+class CommandPreviewRequest(BaseModel):
+    command: str
+
+
+class CommandSegment(BaseModel):
+    cwd: Optional[str] = None
+    args: list[str]
+
+
+class CommandPreviewResponse(BaseModel):
+    segments: list[CommandSegment]
+    is_preset: bool
+    preset_flag: Optional[str] = None
+    preset_name: Optional[str] = None

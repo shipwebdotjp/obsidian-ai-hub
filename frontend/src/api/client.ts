@@ -161,6 +161,32 @@ export function batchReview(body: BatchReviewRequest): Promise<BatchReviewRespon
   });
 }
 
+// --- Task Config APIs ---
+
+import type {
+  TaskConfigResponse,
+  TaskConfigUpdateResponse,
+  CommandPreviewResponse,
+} from "./types";
+
+export function getTaskConfig(): Promise<TaskConfigResponse> {
+  return request<TaskConfigResponse>("/api/v1/task-config");
+}
+
+export function updateTaskConfig(revision: string, tasks: any[]): Promise<TaskConfigUpdateResponse> {
+  return request<TaskConfigUpdateResponse>("/api/v1/task-config", {
+    method: "PUT",
+    body: JSON.stringify({ revision, tasks }),
+  });
+}
+
+export function previewCommand(command: string): Promise<CommandPreviewResponse> {
+  return request<CommandPreviewResponse>("/api/v1/task-config/preview", {
+    method: "POST",
+    body: JSON.stringify({ command }),
+  });
+}
+
 export function apiPatch<T>(path: string, body: any): Promise<T> {
   return request<T>(path, {
     method: "PATCH",
