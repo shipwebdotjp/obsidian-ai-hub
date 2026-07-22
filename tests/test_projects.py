@@ -1,3 +1,4 @@
+import json
 import pytest
 from datetime import datetime
 from unittest import mock
@@ -336,3 +337,69 @@ def test_project_utils_helpers(test_memory_db_path):
     assert len(p_candidates) == 2
     cand_names = {c["display_name"] for c in p_candidates}
     assert cand_names == {"Cand Helper 1", "Cand Helper 2"}
+
+
+def test_weekly_project_notes_inheritance_and_summarization(test_memory_db_path):
+    create_req = schemas.ProjectCreateRequest(display_name="Inherited Proj", domain="work", status="active")
+    proj = service.create_project(create_req)
+    proj_id = proj["project_id"]
+
+    summary_store.upsert_summary({
+        "period_type": "day",
+        "period_key": "2026-07-20",
+        "summary": "Day 1",
+        "project_notes": [{"project_id": proj_id, "note": "Refactored auth"}],
+    })
+
+    summary_store.upsert_summary({
+        "period_type": "day",
+        "period_key": "2026-07-21",
+        "summary": "Day 2",
+    })
+
+    from obsidian_ai_hub import summerize_week
+    with mock.patch(
+        "obsidian_ai_hub.utils.llm_client.generate_llm_response",
+        return_value=json.dumps({
+            "summary": "Week summary",
+            "keywords": [],
+            "topics": [],
+            "project_notes": [
+                {"project_id": proj_id, "note": "Made progress on refactoring"},
+                {"project_id": 999, "note": "Should be ignored"},
+            ],
+        }),
+    ):
+        summerize_week.summarize_week("2026-07-20")
+
+    dt = datetime.strptime("2026-07-20", "%Y-%m-%d")
+    iso_year, iso_week, _ = dt.isocalendar()
+    week_key = f"{iso_year}-W{iso_week:02d}"
+
+    week_sum = summary_store.get_summary_by_period("week", week_key)
+    assert week_sum is not None
+    # Inherited project ID is present
+    assert proj_id in week_sum["project_ids"]
+    # LLM note for inherited project preserved, invalid ID 999 ignored
+    pn_list = week_sum["project_notes"]
+    assert len(pn_list) == 1
+    assert pn_list[0]["project_id"] == proj_id
+    assert pn_list[0]["note"] == "Made progress on refactoring"
+
+
+def test_project_detail_includes_notes(test_memory_db_path):
+    proj = service.create_project(schemas.ProjectCreateRequest(display_name="Test Proj", domain="work"))
+
+    summary_store.upsert_summary({
+        "period_type": "day",
+        "period_key": "2026-07-28",
+        "summary": "Day with note",
+        "project_notes": [{"project_id": proj["project_id"], "note": "Project activity memo"}],
+    })
+
+    detail = service.get_project_detail(proj["project_id"])
+    assert detail is not None
+    assert len(detail["summaries"]) == 1
+    summary = detail["summaries"][0]
+    assert summary["period_key"] == "2026-07-28"
+    assert summary.get("note") == "Project activity memo"

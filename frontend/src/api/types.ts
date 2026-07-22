@@ -212,6 +212,18 @@ export interface SummaryItem {
   display_order: number;
 }
 
+export interface SummaryProjectNote {
+  project_id: number;
+  display_name: string;
+  note: string;
+  display_order: number;
+}
+
+export interface SummaryProjectNoteInput {
+  project_id: number;
+  note: string;
+}
+
 export interface ProjectCandidate {
   candidate_id: number;
   display_name: string;
@@ -243,6 +255,7 @@ export interface SummaryListItem {
   sleep_hours?: number | null;
   topics: string[];
   projects: string[];
+  project_notes: SummaryProjectNote[];
   project_candidates?: ProjectCandidate[];
   people: SummaryPerson[];
 }
@@ -352,6 +365,7 @@ export interface SummaryUpdatePayload {
   items?: SummaryItemInput[];
   topics?: string[];
   people?: SummaryPersonInput[];
+  project_notes?: SummaryProjectNoteInput[];
 }
 
 export interface SummaryDeleteResponse {

@@ -277,7 +277,7 @@ def _upsert_summary_in_tx(
 
     _insert_items(conn, summary_id, record.get("items") or [])
     _insert_topics(conn, summary_id, record.get("topics") or [])
-    _insert_projects(conn, summary_id, record.get("project_ids") or record.get("projects") or [])
+    _insert_projects(conn, summary_id, record.get("project_notes") or record.get("project_ids") or record.get("projects") or [])
     _insert_project_candidates(conn, summary_id, record.get("project_candidates") or [])
     _insert_people(conn, summary_id, record.get("people") or [], people_notes_map)
 
@@ -323,7 +323,23 @@ def _insert_projects(
     seen = set()
     order = 0
     for item in projects_or_ids:
-        if isinstance(item, int):
+        if isinstance(item, dict):
+            project_id = item.get("project_id")
+            note = item.get("note") or None
+            if project_id is None or not isinstance(project_id, int):
+                continue
+            if project_id in seen:
+                continue
+            seen.add(project_id)
+            cursor = conn.cursor()
+            cursor.execute("SELECT project_id FROM projects WHERE project_id = ?", (project_id,))
+            if cursor.fetchone() is not None:
+                conn.execute(
+                    "INSERT INTO summary_projects (summary_id, project_id, note, display_order) VALUES (?, ?, ?, ?)",
+                    (summary_id, project_id, note, order),
+                )
+                order += 1
+        elif isinstance(item, int):
             project_id = item
             if project_id in seen:
                 continue
@@ -332,8 +348,8 @@ def _insert_projects(
             cursor.execute("SELECT project_id FROM projects WHERE project_id = ?", (project_id,))
             if cursor.fetchone() is not None:
                 conn.execute(
-                    "INSERT INTO summary_projects (summary_id, project_id, display_order) VALUES (?, ?, ?)",
-                    (summary_id, project_id, order),
+                    "INSERT INTO summary_projects (summary_id, project_id, note, display_order) VALUES (?, ?, ?, ?)",
+                    (summary_id, project_id, None, order),
                 )
                 order += 1
         elif isinstance(item, str):
@@ -350,8 +366,8 @@ def _insert_projects(
                     continue
                 seen.add(project_id)
                 conn.execute(
-                    "INSERT INTO summary_projects (summary_id, project_id, display_order) VALUES (?, ?, ?)",
-                    (summary_id, project_id, order),
+                    "INSERT INTO summary_projects (summary_id, project_id, note, display_order) VALUES (?, ?, ?, ?)",
+                    (summary_id, project_id, None, order),
                 )
                 order += 1
 
@@ -760,7 +776,7 @@ def _load_summary_children(
 
     cursor.execute(
         """
-        SELECT p.project_id, p.display_name, sp.display_order
+        SELECT p.project_id, p.display_name, sp.note, sp.display_order
         FROM summary_projects sp
         JOIN projects p ON sp.project_id = p.project_id
         WHERE sp.summary_id = ?
@@ -771,6 +787,15 @@ def _load_summary_children(
     rows_p = cursor.fetchall()
     record["projects"] = [r["display_name"] for r in rows_p]
     record["project_ids"] = [r["project_id"] for r in rows_p]
+    record["project_notes"] = [
+        {
+            "project_id": r["project_id"],
+            "display_name": r["display_name"],
+            "note": r["note"] or "",
+            "display_order": r["display_order"],
+        }
+        for r in rows_p
+    ]
 
     cursor.execute(
         """
@@ -879,7 +904,7 @@ def _attach_children_bulk(
 
     cursor.execute(
         f"""
-        SELECT sp.summary_id, p.project_id, p.display_name
+        SELECT sp.summary_id, p.project_id, p.display_name, sp.note, sp.display_order
         FROM summary_projects sp
         JOIN projects p ON sp.project_id = p.project_id
         WHERE sp.summary_id IN ({placeholders})
@@ -889,9 +914,16 @@ def _attach_children_bulk(
     )
     projects_by_summary: Dict[str, List[str]] = {r["summary_id"]: [] for r in records}
     project_ids_by_summary: Dict[str, List[int]] = {r["summary_id"]: [] for r in records}
+    project_notes_by_summary: Dict[str, List[Dict[str, Any]]] = {r["summary_id"]: [] for r in records}
     for row in cursor.fetchall():
         projects_by_summary[row["summary_id"]].append(row["display_name"])
         project_ids_by_summary[row["summary_id"]].append(row["project_id"])
+        project_notes_by_summary[row["summary_id"]].append({
+            "project_id": row["project_id"],
+            "display_name": row["display_name"],
+            "note": row["note"] or "",
+            "display_order": row["display_order"],
+        })
 
     cursor.execute(
         f"""
@@ -964,6 +996,7 @@ def _attach_children_bulk(
         record["topics"] = topics_by_summary.get(sid, [])
         record["projects"] = projects_by_summary.get(sid, [])
         record["project_ids"] = project_ids_by_summary.get(sid, [])
+        record["project_notes"] = project_notes_by_summary.get(sid, [])
         record["project_candidates"] = candidates_by_summary.get(sid, [])
         record["people"] = people_by_summary.get(sid, [])
 
@@ -1148,7 +1181,7 @@ def _update_summary_in_tx(
     preserved_resolved_people = (
         _read_resolved_people(conn, summary_id) if "people" not in payload else []
     )
-    preserved_projects = _read_projects(conn, summary_id) if "projects" not in payload else []
+    preserved_projects = _read_project_notes(conn, summary_id) if ("project_notes" not in payload and "projects" not in payload) else []
     preserved_project_candidates = _read_project_candidates(conn, summary_id) if "project_candidates" not in payload else []
 
     # 3. Delete all children
@@ -1252,7 +1285,9 @@ def _update_summary_in_tx(
             order += 1
 
     # 9. Insert projects
-    if "projects" in payload:
+    if "project_notes" in payload:
+        _insert_projects(conn, summary_id, payload["project_notes"] or [])
+    elif "projects" in payload:
         _insert_projects(conn, summary_id, payload["projects"] or [])
     else:
         _insert_projects(conn, summary_id, preserved_projects)
@@ -1286,6 +1321,15 @@ def _read_projects(conn: sqlite3.Connection, summary_id: str) -> list[int]:
         (summary_id,),
     )
     return [row[0] for row in cursor.fetchall()]
+
+
+def _read_project_notes(conn: sqlite3.Connection, summary_id: str) -> list[dict]:
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT project_id, note FROM summary_projects WHERE summary_id = ? ORDER BY display_order",
+        (summary_id,),
+    )
+    return [{"project_id": row["project_id"], "note": row["note"]} for row in cursor.fetchall()]
 
 
 def _read_project_candidates(conn: sqlite3.Connection, summary_id: str) -> list[int]:

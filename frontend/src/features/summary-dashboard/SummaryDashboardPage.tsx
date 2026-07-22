@@ -269,6 +269,10 @@ export default function SummaryDashboardPage() {
       people: selectedSummary.people
         .filter((p) => p.resolution_status === "resolved" && p.person_id)
         .map((p) => ({ person_id: p.person_id!, note: p.note })),
+      project_notes: (selectedSummary.project_notes ?? []).map((pn) => ({
+        project_id: pn.project_id,
+        note: pn.note,
+      })),
     });
     // Load edit options and people in parallel
     try {
@@ -921,13 +925,13 @@ export default function SummaryDashboardPage() {
                         </div>
                       )}
 
-                      {selectedSummary.projects.length > 0 && (
+                      {selectedSummary.project_notes && selectedSummary.project_notes.length > 0 && (
                         <div>
                           <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">プロジェクト</h3>
                           <div className="mt-1 flex flex-wrap gap-1">
-                            {selectedSummary.projects.map((p) => (
-                              <span key={p} className="rounded bg-amber-50 px-2 py-0.5 text-xs text-amber-700 font-medium">
-                                {p}
+                            {selectedSummary.project_notes.map((pn) => (
+                              <span key={pn.project_id} className="rounded bg-amber-50 px-2 py-0.5 text-xs text-amber-700 font-medium">
+                                {pn.note ? `${pn.display_name}: ${pn.note}` : pn.display_name}
                               </span>
                             ))}
                           </div>
@@ -1613,14 +1617,35 @@ function EditForm({
         </div>
       </div>
 
-      {/* Projects (read-only) */}
-      {summary.projects.length > 0 && (
+      {/* Project Notes */}
+      {(summary.project_notes ?? []).length > 0 && (
         <div>
-          <label className="text-xs font-bold uppercase tracking-wider text-slate-400">プロジェクト (表示専用)</label>
-          <div className="mt-1 flex flex-wrap gap-1">
-            {summary.projects.map((p) => (
-              <span key={p} className="rounded bg-amber-50 px-2 py-0.5 text-xs text-amber-700 font-medium">{p}</span>
-            ))}
+          <label className="text-xs font-bold uppercase tracking-wider text-slate-400">プロジェクト</label>
+          <div className="mt-1 space-y-1">
+            {(summary.project_notes ?? []).map((pn) => {
+              const noteVal = (form.project_notes ?? []).find((fp) => fp.project_id === pn.project_id)?.note ?? "";
+              return (
+                <div key={pn.project_id} className="flex items-center gap-2">
+                  <span className="text-xs text-slate-700 min-w-[80px]">{pn.display_name}</span>
+                  <input
+                    type="text"
+                    value={noteVal}
+                    onChange={(e) => {
+                      const notes = [...(form.project_notes ?? [])];
+                      const idx = notes.findIndex((fp) => fp.project_id === pn.project_id);
+                      if (idx >= 0) {
+                        notes[idx] = { ...notes[idx], note: e.target.value };
+                      } else {
+                        notes.push({ project_id: pn.project_id, note: e.target.value });
+                      }
+                      setForm({ ...form, project_notes: notes });
+                    }}
+                    placeholder="活動メモ"
+                    className="flex-1 rounded border border-slate-300 px-2 py-0.5 text-[10px] focus:border-blue-500 focus:outline-none"
+                  />
+                </div>
+              );
+            })}
           </div>
         </div>
       )}

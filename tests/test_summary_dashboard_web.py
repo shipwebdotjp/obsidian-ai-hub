@@ -479,3 +479,65 @@ def test_dashboard_home_with_project_association(loopback_client, clean_summary_
     assert len(data["today_activity"]["logs"]) == 1
     assert data["today_activity"]["logs"][0]["project_id"] == 456
     assert data["today_activity"]["logs"][0]["project_name"] == "Home Proj Display"
+
+
+def test_project_notes_update_via_api(loopback_client, clean_summary_env):
+    conn = memory.get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO projects (normalized_name, display_name, domain, status, created_at, updated_at)
+            VALUES ('api-proj', 'API Proj', 'work', 'active', '2026-07-14T10:00:00', '2026-07-14T10:00:00')
+        """)
+        conn.commit()
+        proj_id = cursor.lastrowid
+    finally:
+        conn.close()
+
+    summary_store.upsert_summary({
+        "period_type": "day",
+        "period_key": "2026-07-14",
+        "period_start": "2026-07-14",
+        "period_end": "2026-07-14",
+        "generated_at": "2026-07-14T22:00:00",
+        "summary": "API Test Day",
+        "keywords": [],
+        "mood": None,
+        "sleep_raw": None,
+        "sleep_hours": None,
+        "topics": [],
+        "project_ids": [proj_id],
+        "project_notes": [{"project_id": proj_id, "note": "Initial note"}],
+        "people": [],
+        "items": [],
+    })
+
+    # Get summary_id
+    summary_id = summary_store.get_summary_by_period("day", "2026-07-14")["summary_id"]
+
+    # Update project_notes via API
+    res = loopback_client.patch(
+        f"/api/v1/summary-dashboard/summaries/{summary_id}",
+        json={"project_notes": [{"project_id": proj_id, "note": "Updated note"}]},
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert len(data["project_notes"]) == 1
+    assert data["project_notes"][0]["note"] == "Updated note"
+
+    # Reject non-linked project_id
+    res = loopback_client.patch(
+        f"/api/v1/summary-dashboard/summaries/{summary_id}",
+        json={"project_notes": [{"project_id": 99999, "note": "Should fail"}]},
+    )
+    assert res.status_code == 400
+
+    # Reject duplicate project_id
+    res = loopback_client.patch(
+        f"/api/v1/summary-dashboard/summaries/{summary_id}",
+        json={"project_notes": [
+            {"project_id": proj_id, "note": "First"},
+            {"project_id": proj_id, "note": "Duplicate"},
+        ]},
+    )
+    assert res.status_code == 400

@@ -401,3 +401,51 @@ def test_get_daily_structured_record_approved_themes_empty_on_failure(
     context = mock_render.call_args[0][1]
     assert json.loads(context["APPROVED_RESEARCH_THEMES"]) == []
     assert record["summary"] == "Test Summary"
+
+
+@patch("obsidian_ai_hub.summerize_day.prompt.render_prompt")
+@patch("obsidian_ai_hub.summerize_day.llm_client.generate_llm_response")
+@patch("obsidian_ai_hub.summerize_day.reader.get_daily_note_path")
+@patch("obsidian_ai_hub.summerize_day.extracter.get_frontmatter_value")
+def test_get_daily_structured_record_project_notes(
+    mock_fm, mock_path, mock_llm, mock_render, mock_config, tmp_path
+):
+    from obsidian_ai_hub.summerize_day import get_daily_structured_record
+
+    target_date = datetime(2023, 10, 27)
+    daily_content = "---\nmood: Happy\n---"
+
+    mock_fm.return_value = "Happy"
+    mock_p = MagicMock()
+    mock_p.exists.return_value = True
+    mock_path.return_value = mock_p
+
+    mock_llm.return_value = json.dumps({
+        "summary": "Summary with notes",
+        "project_notes": [
+            {"project_id": 1, "note": "Refactored auth module"},
+            {"project_id": 2, "note": "Wrote tests"},
+            {"project_id": 999, "note": "Invalid project"},
+        ],
+    })
+
+    mock_render.return_value = "Rendered Prompt"
+
+    with patch(
+        "obsidian_ai_hub.summary.project_utils.get_active_projects_for_prompt",
+        return_value=[
+            {"id": 1, "display_name": "Project Alpha", "domain": "work"},
+            {"id": 2, "display_name": "Project Beta", "domain": "personal"},
+        ],
+    ):
+        record = get_daily_structured_record(target_date, daily_content, [], [])
+
+    # Valid project IDs only, invalid 999 rejected
+    assert len(record["project_notes"]) == 2
+    pn1 = [p for p in record["project_notes"] if p["project_id"] == 1][0]
+    assert pn1["note"] == "Refactored auth module"
+    pn2 = [p for p in record["project_notes"] if p["project_id"] == 2][0]
+    assert pn2["note"] == "Wrote tests"
+
+    # project_ids derived from project_notes
+    assert record["project_ids"] == [1, 2]

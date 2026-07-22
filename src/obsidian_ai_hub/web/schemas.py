@@ -330,6 +330,18 @@ class SummaryPerson(BaseModel):
     candidate_id: Optional[str] = None
 
 
+class SummaryProjectNote(BaseModel):
+    project_id: int
+    display_name: str
+    note: str = ""
+    display_order: int = 0
+
+
+class SummaryProjectNoteInput(BaseModel):
+    project_id: int
+    note: str = ""
+
+
 class ProjectCandidate(BaseModel):
     candidate_id: int
     display_name: str
@@ -361,6 +373,7 @@ class SummaryListItem(BaseModel):
     sleep_hours: Optional[float] = None
     topics: list[str] = Field(default_factory=list)
     projects: list[str] = Field(default_factory=list)
+    project_notes: list[SummaryProjectNote] = Field(default_factory=list)
     project_candidates: list[ProjectCandidate] = Field(default_factory=list)
     people: list[SummaryPerson] = Field(default_factory=list)
 
@@ -379,6 +392,7 @@ class SummaryDetail(BaseModel):
     sleep_hours: Optional[float] = None
     topics: list[str] = Field(default_factory=list)
     projects: list[str] = Field(default_factory=list)
+    project_notes: list[SummaryProjectNote] = Field(default_factory=list)
     project_candidates: list[ProjectCandidate] = Field(default_factory=list)
     people: list[SummaryPerson] = Field(default_factory=list)
     items: list[SummaryItem] = Field(default_factory=list)
@@ -403,6 +417,7 @@ class SummaryUpdateRequest(BaseModel):
     items: Optional[list[SummaryItemInput]] = None
     topics: Optional[list[str]] = None
     projects: Optional[list[int]] = None
+    project_notes: Optional[list[SummaryProjectNoteInput]] = None
     people: Optional[list[SummaryPersonInput]] = None
 
 

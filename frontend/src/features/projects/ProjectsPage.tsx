@@ -25,6 +25,8 @@ interface AssociatedSummary {
   summary_id: string;
   period_type: string;
   period_key: string;
+  note?: string | null;
+  display_order?: number | null;
 }
 
 interface ProjectDetail extends Project {
@@ -780,9 +782,12 @@ export default function ProjectsPage() {
                     ) : (
                       <div className="border border-slate-100 rounded-lg overflow-hidden divide-y divide-slate-100 text-xs">
                         {selectedProject.summaries.map((sum) => (
-                          <div key={sum.summary_id} className="p-2.5 flex justify-between bg-slate-50/50">
-                            <span className="font-semibold text-slate-800">{sum.period_key}</span>
-                            <span className="text-slate-400 font-mono text-[10px]">{sum.period_type}</span>
+                          <div key={sum.summary_id} className="p-2.5 flex flex-col bg-slate-50/50">
+                            <div className="flex justify-between">
+                              <span className="font-semibold text-slate-800">{sum.period_key}</span>
+                              <span className="text-slate-400 font-mono text-[10px]">{sum.period_type}</span>
+                            </div>
+                            {sum.note && <span className="text-[10px] text-slate-500 mt-0.5">{sum.note}</span>}
                           </div>
                         ))}
                       </div>

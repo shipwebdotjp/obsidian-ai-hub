@@ -44,7 +44,7 @@ def test_schema_version_bump(test_memory_db_path):
     try:
         cursor = conn.cursor()
         cursor.execute("PRAGMA user_version;")
-        assert cursor.fetchone()[0] == 11
+        assert cursor.fetchone()[0] == 12
 
         cursor.execute(
             "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;"
@@ -330,5 +330,80 @@ def test_alias_deduplication(test_memory_db_path):
         assert len(got["people"]) == 1
         assert got["people"][0]["name"] == "Alice"
         assert got["people"][0]["note"] == "primary name\nalias name"
+    finally:
+        conn.close()
+
+
+def test_project_notes_persist(test_memory_db_path):
+    conn = memory.get_db_connection()
+    try:
+        _insert_test_project(conn, "Proj A", "proj a")
+        _insert_test_project(conn, "Proj B", "proj b")
+
+        record = _make_day_record("2026-07-25")
+        record["project_notes"] = [
+            {"project_id": 1, "note": "Worked on frontend"},
+            {"project_id": 2, "note": "Reviewed backend PRs"},
+        ]
+        store.upsert_summary(record, conn=conn)
+
+        got = store.get_summary_by_period("day", "2026-07-25", conn=conn)
+        assert len(got["project_notes"]) == 2
+        pn1 = [p for p in got["project_notes"] if p["project_id"] == 1][0]
+        assert pn1["note"] == "Worked on frontend"
+        assert pn1["display_name"] == "Proj A"
+        pn2 = [p for p in got["project_notes"] if p["project_id"] == 2][0]
+        assert pn2["note"] == "Reviewed backend PRs"
+
+        # Verify project_notes are also in list
+        listed = store.list_summaries(period_type="day", conn=conn)
+        assert len(listed) == 1
+        assert len(listed[0]["project_notes"]) == 2
+    finally:
+        conn.close()
+
+
+def test_project_notes_persist_via_project_ids(test_memory_db_path):
+    conn = memory.get_db_connection()
+    try:
+        _insert_test_project(conn, "Proj A", "proj a")
+
+        record = _make_day_record("2026-07-26")
+        record["project_ids"] = [1]
+        store.upsert_summary(record, conn=conn)
+
+        got = store.get_summary_by_period("day", "2026-07-26", conn=conn)
+        assert len(got["project_notes"]) == 1
+        assert got["project_notes"][0]["note"] == ""
+        assert got["project_notes"][0]["display_name"] == "Proj A"
+        assert got["projects"] == ["Proj A"]
+        assert got["project_ids"] == [1]
+    finally:
+        conn.close()
+
+
+def test_project_notes_update(test_memory_db_path):
+    conn = memory.get_db_connection()
+    try:
+        _insert_test_project(conn, "Proj A", "proj a")
+        _insert_test_project(conn, "Proj B", "proj b")
+
+        record = _make_day_record("2026-07-27")
+        record["project_notes"] = [
+            {"project_id": 1, "note": "Original note A"},
+            {"project_id": 2, "note": "Original note B"},
+        ]
+        store.upsert_summary(record, conn=conn)
+
+        summary_id = store.get_summary_by_period("day", "2026-07-27", conn=conn)["summary_id"]
+
+        # Update only project_notes
+        updated = store.update_summary(summary_id, {
+            "project_notes": [{"project_id": 1, "note": "Updated note A"}],
+        }, conn=conn)
+
+        assert len(updated["project_notes"]) == 1
+        assert updated["project_notes"][0]["project_id"] == 1
+        assert updated["project_notes"][0]["note"] == "Updated note A"
     finally:
         conn.close()

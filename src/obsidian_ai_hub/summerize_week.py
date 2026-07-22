@@ -79,10 +79,14 @@ def get_weekly_structured_record(
         "sleep_hours": None,
         "topics": [],
         "projects": [],
+        "project_ids": [],
+        "project_notes": [],
+        "project_candidates": [],
         "people": [],
         "items": [],
     }
 
+    llm_project_notes = {}
     try:
         rendered_prompt = prompt.render_prompt(
             config.SUMMARIZE_WEEK_PROMPT_PATH,
@@ -161,6 +165,15 @@ def get_weekly_structured_record(
             for idx, item in enumerate(kind_items):
                 item["display_order"] = idx
 
+        # Parse project_notes from LLM output
+        if "project_notes" in data and isinstance(data["project_notes"], list):
+            for item in data["project_notes"]:
+                if isinstance(item, dict):
+                    pid = item.get("project_id")
+                    if isinstance(pid, int):
+                        note = item.get("note")
+                        llm_project_notes[pid] = note if isinstance(note, str) else ""
+
     except Exception as e:
         logger.error(f"Failed to generate or parse structured weekly record: {e}")
 
@@ -169,6 +182,12 @@ def get_weekly_structured_record(
     p_ids, p_candidates = inherit_projects_and_candidates(daily_records)
     record["project_ids"] = p_ids
     record["project_candidates"] = p_candidates
+
+    # Filter LLM project_notes by inherited project_ids; fill missing inherited IDs with empty note
+    record["project_notes"] = [
+        {"project_id": pid, "note": llm_project_notes.get(pid, "")}
+        for pid in p_ids
+    ]
 
     return record
 

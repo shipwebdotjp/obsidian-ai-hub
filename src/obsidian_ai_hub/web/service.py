@@ -978,7 +978,7 @@ def get_project_detail(project_id: int) -> Optional[dict]:
         p = deserialize_project(row)
 
         cursor.execute("""
-            SELECT s.summary_id, s.period_type, s.period_key
+            SELECT s.summary_id, s.period_type, s.period_key, sp.note, sp.display_order
             FROM summary_projects sp
             JOIN summaries s ON sp.summary_id = s.summary_id
             WHERE sp.project_id = ?
@@ -2495,6 +2495,24 @@ def update_summary_detail(summary_id: str, body: schemas.SummaryUpdateRequest) -
         finally:
             conn.close()
         payload["people"] = people
+
+    # Validate project_notes: only currently linked project IDs, no duplicates
+    if "project_notes" in payload:
+        pn = payload["project_notes"]
+        if pn is None:
+            pn = []
+        seen_pids = set()
+        linked_pids = {p["project_id"] for p in current.get("project_notes", [])}
+        for item in pn:
+            pid = item["project_id"]
+            if pid in seen_pids:
+                raise ValueError(f"Duplicate project_id in project_notes: {pid}")
+            seen_pids.add(pid)
+            if pid not in linked_pids:
+                raise ValueError(
+                    f"Project {pid} is not linked to this summary and cannot have a note assigned"
+                )
+        payload["project_notes"] = pn
 
     # Validate mood/sleep_raw: day-only
     if ("mood" in payload or "sleep_raw" in payload) and period_type != "day":

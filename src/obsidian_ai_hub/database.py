@@ -447,6 +447,9 @@ def get_db_connection() -> sqlite3.Connection:
     if current_version <= 10:
         run_migration_v11(conn)
 
+    if current_version <= 11:
+        run_migration_v12(conn)
+
     return conn
 
 
@@ -505,4 +508,13 @@ def run_migration_v11(conn: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS idx_activity_logs_project_id ON activity_logs(project_id);"
     )
     conn.execute("PRAGMA user_version = 11;")
+    conn.commit()
+
+
+def run_migration_v12(conn: sqlite3.Connection) -> None:
+    """Add note column to summary_projects for per-project activity notes."""
+    conn.execute(
+        "ALTER TABLE summary_projects ADD COLUMN note TEXT;"
+    )
+    conn.execute("PRAGMA user_version = 12;")
     conn.commit()
