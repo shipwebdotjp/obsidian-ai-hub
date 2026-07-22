@@ -365,6 +365,6 @@ JulesAgentによるコーディングと動作確認・テストを迅速かつ�
    - `npm --prefix frontend ci` (フロントエンド依存関係のインストール)
    - `uv run playwright install --with-deps chromium` (Playwright向けChromiumバイナリの取得)
 2. **安全な Initial Setup スナップショット:**
-   Jules VMの「Initial Setup」ステップに `make jules-setup && uv run pytest tests/` を登録。これにより、ローカル上の `.env` や既存の `dist/` ビルド、ローカルモデル・個人Vaultの存在を前提にせず、スナップショットを安定して作成する。
+   Jules VMの「Initial Setup」ステップに `make jules-setup && ENV=test uv run pytest tests/` を登録。これにより、ローカル上の `.env` や既存の `dist/` ビルド、ローカルモデル・個人Vaultの存在を前提にせず、スナップショットを安定して作成する。
 3. **`ENV=test` の強制適用:**
    `ENV=jules` は完全に廃止。探索サーバー (`e2e_server.py`) は親プロセスの `ENV` の値を継承せず、実行時に内部で `ENV=test` を強制セットするようにした。これにより、誤った設定で本番用の `.env` やデータベースにアクセスしてしまう事故を完全に防止する。

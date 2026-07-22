@@ -54,7 +54,7 @@ ENV=test uv run python -m obsidian_ai_hub --merge-inbox
 - 既定では外部連携はすべてブロックされる（LLM、YouTube、LINE、Calendar、
   Open Web UI、Web 検索）。macOS の画面取得（`--screenshot`）やアクセシビリティ
   （`--scan-line-inbox`, `--log-activity`）はローカル操作として対象外.
-- 外部連携が必要な場合のみ、`.env.test` に `ALLOW_EXTERNAL_IN_TEST=1` を明示。<｜end▁of▁thinking｜>
+- 外部連携が必要な場合のみ、`.env.test` に `ALLOW_EXTERNAL_IN_TEST=1` を明示。
 
 ## Jules環境（クリーンクローンVM）におけるテストとセットアップ
 
@@ -72,7 +72,7 @@ make jules-setup
 Jules VMの **Initial Setup** には、以下を設定して環境をスナップショット化します：
 
 ```bash
-make jules-setup && uv run pytest tests/
+make jules-setup && ENV=test uv run pytest tests/
 ```
 
 ※このセットアップは、本番の `.env` や `.env.test`、ローカル上のVaultディレクトリやダウンロード済みAIモデルなどの存在を前提とせずに完結するよう設計されています。
@@ -87,10 +87,10 @@ make jules-setup && uv run pytest tests/
 
 - 内部ロジックや一般機能の単体テスト検証：
   ```bash
-  uv run pytest tests/
+  ENV=test uv run pytest tests/
   ```
 - フロントエンド変更時、およびブラウザE2Eの検証：
   ```bash
-  make test-e2e
+  ENV=test make test-e2e
   ```
   このコマンドは自動的に `frontend/dist` をリビルドし、一時的なSQLite、一時的なテスト用Vault、シードデータ、自動起動したloopbackサーバーを使用してテストを実行します。
