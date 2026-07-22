@@ -27,6 +27,7 @@ export default function MemoryPage() {
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   const handleRefresh = useCallback(() => setRefreshKey((v) => v + 1), []);
+  const selectedMemoryId = selectedMemory?.memory_id ?? null;
 
   useEffect(() => {
     if (!selectedMemory) setMobileDetailOpen(false);
@@ -104,7 +105,7 @@ export default function MemoryPage() {
           value={status}
           onChange={(e) => setStatus(e.target.value as MemoryStatus)}
           aria-label="ステータスフィルター"
-          className="rounded border border-slate-300 px-2 py-1 text-sm"
+          className="cursor-pointer rounded border border-slate-300 px-2 py-1 text-sm"
         >
           <option value="candidate">候補</option>
           <option value="approved">承認済み</option>
@@ -118,13 +119,13 @@ export default function MemoryPage() {
           onChange={(e) => setQueryInput(e.target.value)}
           aria-label="メモリ検索"
           placeholder="検索 (本文 / タグ)"
-          className="w-full min-w-0 rounded border border-slate-300 px-2 py-1 text-sm sm:w-auto sm:flex-1"
+          className="w-full min-w-0 cursor-pointer rounded border border-slate-300 px-2 py-1 text-sm sm:w-auto sm:flex-1"
         />
         <select
           value={kind}
           onChange={(e) => setKind(e.target.value)}
           aria-label="種別フィルター"
-          className="rounded border border-slate-300 px-2 py-1 text-sm"
+          className="cursor-pointer rounded border border-slate-300 px-2 py-1 text-sm"
         >
           <option value="">種別: すべて</option>
           {kindsOptions.map((k) => (
@@ -137,7 +138,7 @@ export default function MemoryPage() {
           value={topic}
           onChange={(e) => setTopic(e.target.value)}
           aria-label="トピックフィルター"
-          className="rounded border border-slate-300 px-2 py-1 text-sm"
+          className="cursor-pointer rounded border border-slate-300 px-2 py-1 text-sm"
         >
           <option value="">トピック: すべて</option>
           {topicsOptions.map((t) => (
@@ -149,7 +150,7 @@ export default function MemoryPage() {
         <button
           type="button"
           onClick={() => setRefreshKey((v) => v + 1)}
-          className="rounded border border-slate-300 px-3 py-1 text-sm"
+          className="cursor-pointer rounded border border-slate-300 px-3 py-1 text-sm"
         >
           再読み込み
         </button>
@@ -157,7 +158,7 @@ export default function MemoryPage() {
           type="button"
           onClick={handleRenderCopilotProfile}
           disabled={isRendering}
-          className="rounded border border-slate-300 bg-indigo-50 px-3 py-1 text-sm text-indigo-700 hover:bg-indigo-100 disabled:opacity-50"
+          className="cursor-pointer rounded bg-blue-600 px-3 py-1 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {isRendering ? "生成中…" : "プロファイル生成"}
         </button>
@@ -174,6 +175,7 @@ export default function MemoryPage() {
             topic={topic}
             kind={kind}
             selectedIds={selected}
+            selectedMemoryId={selectedMemoryId}
             onSelectionChange={setSelected}
             onSelect={(m) => {
               setSelectedMemory(m);
@@ -191,9 +193,12 @@ export default function MemoryPage() {
           <div className="flex items-center gap-2 border-b border-slate-200 p-3 lg:hidden">
             <button
               type="button"
-              onClick={() => setMobileDetailOpen(false)}
+              onClick={() => {
+                setMobileDetailOpen(false);
+                setSelectedMemory(null);
+              }}
               aria-label="一覧に戻る"
-              className="rounded px-2 py-1 text-sm text-slate-600 hover:bg-slate-100"
+              className="cursor-pointer rounded px-2 py-1 text-sm text-slate-600 hover:bg-slate-100"
             >
               ← 一覧
             </button>
@@ -205,7 +210,6 @@ export default function MemoryPage() {
             {selectedMemory ? (
               showRightPanel ? (
                 <MemoryDetailPanel
-                  key={selectedMemory.memory_id}
                   memoryId={selectedMemory.memory_id}
                   status={status}
                   onChanged={onChanged}

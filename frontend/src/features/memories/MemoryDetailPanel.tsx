@@ -26,6 +26,9 @@ export default function MemoryDetailPanel({
   const [integratedContent, setIntegratedContent] = useState("");
   const [switchDate, setSwitchDate] = useState("");
   const fetchIdRef = useRef(0);
+  const fetchedOnceRef = useRef(false);
+
+  const matching = detail?.memory_id === memoryId;
 
   useEffect(() => {
     const currentFetchId = ++fetchIdRef.current;
@@ -37,7 +40,7 @@ export default function MemoryDetailPanel({
       .then((d) => {
         if (currentFetchId !== fetchIdRef.current) return;
         setDetail(d);
-        onChanged(d);
+        fetchedOnceRef.current = true;
 
         if (d.dedup_assessment?.integrated_content) {
           setIntegratedContent(d.dedup_assessment.integrated_content);
@@ -46,7 +49,6 @@ export default function MemoryDetailPanel({
         }
         setSwitchDate(d.valid_from || "");
 
-        // Fetch target details for suggestions and assessments
         const targetIds = new Set<string>();
         (d.dedup_suggestions || []).forEach((s) => {
           if (s.target_memory_id) targetIds.add(s.target_memory_id);
@@ -71,11 +73,12 @@ export default function MemoryDetailPanel({
         const msg = e instanceof ApiError ? e.message : "詳細取得に失敗しました";
         setError(msg);
         setDetail(null);
+        fetchedOnceRef.current = false;
       })
       .finally(() => {
         if (currentFetchId === fetchIdRef.current) setLoading(false);
       });
-  }, [memoryId, onChanged]);
+  }, [memoryId]);
 
   const handleUpdated = useCallback(
     (m: Memory) => {
@@ -87,6 +90,7 @@ export default function MemoryDetailPanel({
   );
 
   async function handleDelete() {
+    if (detail?.memory_id !== memoryId) return;
     if (!window.confirm(`記憶 ${memoryId} を完全に削除しますか？この操作は取り消せません。`)) return;
     setIsSubmitting(true);
     try {
@@ -103,6 +107,7 @@ export default function MemoryDetailPanel({
   }
 
   async function act(action: "approve" | "reject") {
+    if (detail?.memory_id !== memoryId) return;
     setIsSubmitting(true);
     try {
       await reviewMemory(memoryId, action);
@@ -128,6 +133,7 @@ export default function MemoryDetailPanel({
     intContent?: string,
     swDate?: string
   ) {
+    if (detail?.memory_id !== memoryId) return;
     setIsSubmitting(true);
     try {
       await resolveMemory(memoryId, action, targetMemoryId, intContent, swDate);
@@ -149,7 +155,7 @@ export default function MemoryDetailPanel({
     }
   }
 
-  if (loading) {
+  if (!fetchedOnceRef.current && loading) {
     return <p className="p-6 text-sm text-slate-500">読み込み中…</p>;
   }
   if (error) {
@@ -233,16 +239,16 @@ export default function MemoryDetailPanel({
                         handleResolveWithParams("merge_existing", detail.dedup_assessment.target_memory_id, integratedContent);
                       }
                     }}
-                    disabled={isSubmitting || !integratedContent.trim() || !detail.dedup_assessment?.target_memory_id}
-                    className="rounded bg-blue-600 px-3 py-1 text-xs text-white disabled:opacity-50"
+                    disabled={isSubmitting || !matching || !integratedContent.trim() || !detail.dedup_assessment?.target_memory_id}
+                    className="cursor-pointer rounded bg-blue-600 px-3 py-1 text-xs text-white disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     マージ
                   </button>
                   <button
                     type="button"
                     onClick={() => act("approve")}
-                    disabled={isSubmitting}
-                    className="rounded bg-slate-600 px-3 py-1 text-xs text-white disabled:opacity-50"
+                    disabled={isSubmitting || !matching}
+                    className="cursor-pointer rounded bg-slate-600 px-3 py-1 text-xs text-white disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     新規として保存
                   </button>
@@ -289,16 +295,16 @@ export default function MemoryDetailPanel({
                         handleResolveWithParams("supersede_existing", detail.dedup_assessment.target_memory_id, undefined, switchDate);
                       }
                     }}
-                    disabled={isSubmitting || !/^\d{4}-\d{2}-\d{2}$/.test(switchDate) || !detail.dedup_assessment?.target_memory_id}
-                    className="rounded bg-purple-600 px-3 py-1 text-xs text-white disabled:opacity-50"
+                    disabled={isSubmitting || !matching || !/^\d{4}-\d{2}-\d{2}$/.test(switchDate) || !detail.dedup_assessment?.target_memory_id}
+                    className="cursor-pointer rounded bg-purple-600 px-3 py-1 text-xs text-white disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     後継として保存
                   </button>
                   <button
                     type="button"
                     onClick={() => act("approve")}
-                    disabled={isSubmitting}
-                    className="rounded bg-slate-600 px-3 py-1 text-xs text-white disabled:opacity-50"
+                    disabled={isSubmitting || !matching}
+                    className="cursor-pointer rounded bg-slate-600 px-3 py-1 text-xs text-white disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     新規として保存
                   </button>
@@ -369,16 +375,16 @@ export default function MemoryDetailPanel({
                     <button
                       type="button"
                       onClick={() => handleResolve("keep_both", s.target_memory_id)}
-                      disabled={isSubmitting}
-                      className="rounded bg-emerald-600 px-3 py-1 text-xs text-white disabled:opacity-50"
+                      disabled={isSubmitting || !matching}
+                      className="cursor-pointer rounded bg-emerald-600 px-3 py-1 text-xs text-white disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       両方保持
                     </button>
                     <button
                       type="button"
                       onClick={() => handleResolve("replace_existing", s.target_memory_id)}
-                      disabled={isSubmitting}
-                      className="rounded bg-amber-600 px-3 py-1 text-xs text-white disabled:opacity-50"
+                      disabled={isSubmitting || !matching}
+                      className="cursor-pointer rounded bg-amber-600 px-3 py-1 text-xs text-white disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       既存を候補で更新
                     </button>
@@ -423,16 +429,16 @@ export default function MemoryDetailPanel({
                 <button
                   type="button"
                   onClick={() => act("approve")}
-                  disabled={isSubmitting}
-                  className="rounded bg-emerald-600 px-3 py-1 text-sm text-white disabled:opacity-50"
+                  disabled={isSubmitting || !matching}
+                  className="cursor-pointer rounded bg-emerald-600 px-3 py-1 text-sm text-white disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {isSubmitting ? "処理中…" : "承認"}
                 </button>
                 <button
                   type="button"
                   onClick={() => act("reject")}
-                  disabled={isSubmitting}
-                  className="rounded bg-rose-600 px-3 py-1 text-sm text-white disabled:opacity-50"
+                  disabled={isSubmitting || !matching}
+                  className="cursor-pointer rounded bg-rose-600 px-3 py-1 text-sm text-white disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {isSubmitting ? "処理中…" : "却下"}
                 </button>
@@ -441,16 +447,16 @@ export default function MemoryDetailPanel({
             <button
               type="button"
               onClick={() => setEditing(true)}
-              disabled={isSubmitting}
-              className="rounded bg-slate-900 px-3 py-1 text-sm text-white disabled:opacity-50"
+              disabled={isSubmitting || !matching}
+              className="cursor-pointer rounded bg-slate-900 px-3 py-1 text-sm text-white disabled:cursor-not-allowed disabled:opacity-50"
             >
               編集して承認
             </button>
             <button
               type="button"
               onClick={handleDelete}
-              disabled={isSubmitting}
-              className="rounded bg-rose-800 px-3 py-1 text-sm text-white disabled:opacity-50"
+              disabled={isSubmitting || !matching}
+              className="cursor-pointer rounded bg-rose-800 px-3 py-1 text-sm text-white disabled:cursor-not-allowed disabled:opacity-50"
             >
               削除
             </button>

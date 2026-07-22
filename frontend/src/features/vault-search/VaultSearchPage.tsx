@@ -146,7 +146,7 @@ export default function VaultSearchPage() {
           type="button"
           onClick={handleSearch}
           disabled={isSearching || !queryInput.trim()}
-          className="rounded bg-indigo-600 px-3 py-1 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+          className="rounded bg-blue-600 px-3 py-1 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
         >
           {isSearching ? "検索中…" : "検索"}
         </button>
