@@ -494,11 +494,19 @@ class StatsBucket(BaseModel):
     keyword_counts: dict[str, int] = {}
 
 
+class HourlyCategoryBucket(BaseModel):
+    hour: int
+    total_log_count: int
+    category_counts: dict[str, int] = {}
+
+
 class DashboardStatsResponse(BaseModel):
     granularity: Literal["day", "week", "month"]
     buckets: list[StatsBucket]
     candidate_topics: list[str]
     candidate_keywords: list[str]
+    activity_categories: list[str] = []
+    hourly_category_buckets: list[HourlyCategoryBucket] = []
 
 
 # --- People Management schemas ---

@@ -19,6 +19,7 @@ import type {
   SummaryDetail,
   SummaryItem,
   StatsBucket,
+  HourlyCategoryBucket,
   EditOptionsResponse,
   SummaryUpdatePayload,
   SummaryItemInput,
@@ -1251,7 +1252,16 @@ export default function SummaryDashboardPage() {
                   </div>
                 </div>
 
-                {/* 2. Proportional Stacked Bar Chart */}
+                {/* 2. Hourly Category Heatmap */}
+                <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm space-y-4">
+                  <h3 className="text-sm font-bold text-slate-800">時間帯 × カテゴリー ヒートマップ</h3>
+                  <SVGCategoryHeatmap buckets={statsData.hourly_category_buckets} categories={statsData.activity_categories} />
+                  <span className="mt-2 block text-[10px] text-slate-400 leading-normal">
+                    ※各時間帯における活動ログのカテゴリ構成比（%）です。セル内の数値は割合、括弧内は件数です。
+                  </span>
+                </div>
+
+                {/* 3. Proportional Stacked Bar Chart */}
                 <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm space-y-4">
                   <div className="flex items-center justify-between">
                     <h3 className="text-sm font-bold text-slate-800">活動カバー時間と非活動時間の比率</h3>
@@ -1932,6 +1942,113 @@ function SVGStackedBarChart({ buckets }: { buckets: StatsBucket[] }) {
                 </tr>
               );
             })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function SVGCategoryHeatmap({
+  buckets,
+  categories,
+}: {
+  buckets: HourlyCategoryBucket[];
+  categories: string[];
+}) {
+  const cellWidth = 52;
+  const labelWidth = 90;
+  const rowHeight = 28;
+
+  if (!buckets || buckets.length === 0 || categories.length === 0) {
+    return (
+      <div className="flex h-[200px] items-center justify-center bg-slate-50 text-xs text-slate-400 rounded-lg">
+        データがありません。期間を変更してください。
+      </div>
+    );
+  }
+
+  const getOpacity = (ratio: number): string => {
+    if (ratio === 0) return "rgba(59, 130, 246, 0)";
+    return `rgba(59, 130, 246, ${0.07 + ratio * 0.93})`;
+  };
+
+  return (
+    <div className="relative overflow-x-auto">
+      <div className="min-w-[500px]">
+        <table
+          className="w-full border-collapse text-[10px]"
+          role="img"
+          aria-label="時間帯 × カテゴリー ヒートマップ"
+        >
+          <caption className="sr-only">
+            各時間帯における活動ログのカテゴリ構成比を示すヒートマップです。
+          </caption>
+          <thead>
+            <tr>
+              <th className="sticky left-0 z-10 bg-white p-1 text-left text-slate-500 font-semibold" style={{ minWidth: labelWidth }} />
+              {buckets.map((b) => (
+                <th
+                  key={b.hour}
+                  className="p-1 text-center text-slate-500 font-semibold"
+                  style={{ width: cellWidth }}
+                >
+                  {b.hour}時
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {categories.map((cat) => (
+              <tr key={cat}>
+                <td
+                  className="sticky left-0 z-10 bg-white p-1 font-semibold text-slate-600 truncate"
+                  style={{ maxWidth: labelWidth }}
+                  title={cat}
+                >
+                  {cat}
+                </td>
+                {buckets.map((b) => {
+                  const count = b.category_counts[cat] || 0;
+                  const total = b.total_log_count;
+                  const ratio = total > 0 ? count / total : 0;
+                  const pct = Math.round(ratio * 100);
+                  const tooltip = `${cat} / ${b.hour}時 / ${pct}% (${count}/${total})`;
+
+                  if (total === 0) {
+                    return (
+                      <td
+                        key={b.hour}
+                        className="p-0 text-center text-slate-300"
+                        style={{ width: cellWidth, height: rowHeight }}
+                        title={`${cat} / ${b.hour}時 / データなし`}
+                      >
+                        <span className="sr-only">データなし</span>
+                        -
+                      </td>
+                    );
+                  }
+
+                  return (
+                    <td
+                      key={b.hour}
+                      className="p-0 text-center align-middle"
+                      style={{
+                        width: cellWidth,
+                        height: rowHeight,
+                        backgroundColor: getOpacity(ratio),
+                        color: ratio > 0.55 ? "#fff" : "#475569",
+                      }}
+                      title={tooltip}
+                    >
+                      <span className="sr-only">{tooltip}</span>
+                      {pct}%&nbsp;
+                      <span className="text-[8px] opacity-70">({count})</span>
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>

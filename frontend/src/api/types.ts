@@ -314,11 +314,19 @@ export interface StatsBucket {
   keyword_counts: Record<string, number>;
 }
 
+export interface HourlyCategoryBucket {
+  hour: number;
+  total_log_count: number;
+  category_counts: Record<string, number>;
+}
+
 export interface DashboardStatsResponse {
   granularity: "day" | "week" | "month";
   buckets: StatsBucket[];
   candidate_topics: string[];
   candidate_keywords: string[];
+  activity_categories: string[];
+  hourly_category_buckets: HourlyCategoryBucket[];
 }
 
 // --- Summary Edit/Delete types ---

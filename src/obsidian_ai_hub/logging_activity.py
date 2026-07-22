@@ -5,21 +5,10 @@ from AppKit import NSScreen
 
 from obsidian_ai_hub.take_screenshot import capture_screen, get_unique_path
 from obsidian_ai_hub.utils import accessibility, config, img2text, llm_client, prompt
+from obsidian_ai_hub.activity.categories import ACTIVITY_CATEGORIES
 from obsidian_ai_hub.activity.store import add_activity, get_latest_activity_by_date
 
 logger = logging.getLogger(__name__)
-
-ACTIVITY_CATEGORIES = [
-    "開発",
-    "調査・リサーチ",
-    "事務・記録",
-    "コミュニケーション",
-    "インプット・読書",
-    "創作・執筆",
-    "学習",
-    "趣味・休憩",
-    "その他",
-]
 
 
 def normalize_ocr_results(ocr_results):

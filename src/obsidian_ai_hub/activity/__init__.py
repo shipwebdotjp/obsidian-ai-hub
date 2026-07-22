@@ -1,3 +1,4 @@
+from obsidian_ai_hub.activity.categories import ACTIVITY_CATEGORIES
 from obsidian_ai_hub.activity.store import (
     add_activity,
     get_activities_by_date,
@@ -6,6 +7,7 @@ from obsidian_ai_hub.activity.store import (
 )
 
 __all__ = [
+    "ACTIVITY_CATEGORIES",
     "add_activity",
     "get_activities_by_date",
     "get_latest_activity_by_date",

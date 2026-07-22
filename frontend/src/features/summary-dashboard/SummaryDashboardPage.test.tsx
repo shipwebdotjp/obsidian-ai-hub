@@ -32,6 +32,7 @@ import {
   deleteSummary,
   listPeople,
 } from "../../api/client";
+import type { DashboardStatsResponse } from "../../api/types";
 
 const mockGetDashboardHome = vi.mocked(getDashboardHome);
 const mockGetDashboardBrowse = vi.mocked(getDashboardBrowse);
@@ -68,6 +69,12 @@ const sampleStatsResponse = {
   buckets: [],
   candidate_topics: [],
   candidate_keywords: [],
+  activity_categories: ["開発", "コミュニケーション", "その他"],
+  hourly_category_buckets: Array.from({ length: 24 }, (_, i) => ({
+    hour: i,
+    total_log_count: 0,
+    category_counts: {},
+  })),
 };
 
 beforeEach(() => {
@@ -95,6 +102,34 @@ it("renders dashboard and supports tab navigation", async () => {
   await userEvent.click(screen.getByRole("button", { name: "統計" }));
   await waitFor(() => {
     expect(screen.getByRole("button", { name: "統計" })).toBeInTheDocument();
+  });
+});
+
+it("renders category heatmap in stats tab", async () => {
+  const heatmapResponse: DashboardStatsResponse = {
+    ...sampleStatsResponse,
+    hourly_category_buckets: Array.from({ length: 24 }, (_, i) => {
+      const category_counts: Record<string, number> = {};
+      if (i === 10) {
+        category_counts["開発"] = 2;
+        category_counts["コミュニケーション"] = 1;
+      } else if (i === 15) {
+        category_counts["その他"] = 1;
+      }
+      return {
+        hour: i,
+        total_log_count: i === 10 ? 3 : i === 15 ? 1 : 0,
+        category_counts,
+      };
+    }),
+  };
+  mockGetDashboardStats.mockResolvedValue(heatmapResponse);
+
+  render(<SummaryDashboardPage />);
+
+  await userEvent.click(screen.getByRole("button", { name: "統計" }));
+  await waitFor(() => {
+    expect(screen.getByText("時間帯 × カテゴリー ヒートマップ")).toBeInTheDocument();
   });
 });
 

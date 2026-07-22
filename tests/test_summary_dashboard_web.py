@@ -310,6 +310,61 @@ def test_get_day_activity_times_future_date(loopback_client, clean_summary_env):
     assert inactive_mins == 0.0
 
 
+def test_stats_hourly_category_heatmap(loopback_client, clean_summary_env):
+    activity_store.add_activity(
+        activity_date="2026-07-13",
+        occurred_at="2026-07-13T10:00:00",
+        category="開発",
+        summary="coding",
+    )
+    activity_store.add_activity(
+        activity_date="2026-07-13",
+        occurred_at="2026-07-13T10:05:00",
+        category="開発",
+        summary="code review",
+    )
+    activity_store.add_activity(
+        activity_date="2026-07-13",
+        occurred_at="2026-07-13T10:10:00",
+        category="コミュニケーション",
+        summary="chat",
+    )
+    activity_store.add_activity(
+        activity_date="2026-07-14",
+        occurred_at="2026-07-14T15:00:00",
+        category=None,
+        summary="uncategorized",
+    )
+
+    res = loopback_client.get(
+        "/api/v1/summary-dashboard/stats?start_date=2026-07-13&end_date=2026-07-14"
+    )
+    assert res.status_code == 200
+    data = res.json()
+
+    assert "hourly_category_buckets" in data
+    assert "activity_categories" in data
+    assert len(data["hourly_category_buckets"]) == 24
+
+    bucket_10 = data["hourly_category_buckets"][10]
+    assert bucket_10["total_log_count"] == 3
+    assert bucket_10["category_counts"]["開発"] == 2
+    assert bucket_10["category_counts"]["コミュニケーション"] == 1
+
+    bucket_15 = data["hourly_category_buckets"][15]
+    assert bucket_15["total_log_count"] == 1
+    assert bucket_15["category_counts"]["その他"] == 1
+
+    for h in range(24):
+        if h in (10, 15):
+            continue
+        b = data["hourly_category_buckets"][h]
+        assert b["total_log_count"] == 0
+
+    assert "開発" in data["activity_categories"]
+    assert "その他" in data["activity_categories"]
+
+
 def test_stats_date_range_exceeded(loopback_client, clean_summary_env):
     res = loopback_client.get(
         "/api/v1/summary-dashboard/stats?start_date=2020-01-01&end_date=2031-01-01"

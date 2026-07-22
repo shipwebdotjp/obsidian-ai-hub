@@ -8,6 +8,7 @@ from typing import Any, Optional
 
 from obsidian_ai_hub import memory
 from obsidian_ai_hub.activity import store as activity_store
+from obsidian_ai_hub.activity.categories import ACTIVITY_CATEGORIES
 from obsidian_ai_hub.database import get_db_connection
 from obsidian_ai_hub.handler import obsidian_vault_retriever
 from obsidian_ai_hub.people_sync.sync import (
@@ -785,11 +786,49 @@ def get_dashboard_stats(
 
     sorted_buckets = [buckets_by_key[k] for k in sorted(buckets_by_key.keys())]
 
+    hourly_category_buckets = []
+    for hour in range(24):
+        hourly_category_buckets.append({
+            "hour": hour,
+            "total_log_count": 0,
+            "category_counts": {},
+        })
+
+    all_logs_in_range = [
+        log for day_logs in logs_by_date.values() for log in day_logs
+    ]
+    for log in all_logs_in_range:
+        occurred_at = log.get("occurred_at")
+        if not occurred_at:
+            continue
+        try:
+            log_dt = datetime.fromisoformat(occurred_at)
+        except (ValueError, TypeError):
+            continue
+        hour = log_dt.hour
+        category = log.get("category")
+        if not category:
+            category = "その他"
+
+        bucket = hourly_category_buckets[hour]
+        bucket["total_log_count"] += 1
+        bucket["category_counts"][category] = (
+            bucket["category_counts"].get(category, 0) + 1
+        )
+
+    activity_categories = list(ACTIVITY_CATEGORIES)
+    for bucket in hourly_category_buckets:
+        for cat in bucket["category_counts"]:
+            if cat not in activity_categories:
+                activity_categories.append(cat)
+
     return {
         "granularity": granularity,
         "buckets": sorted_buckets,
         "candidate_topics": candidate_topics,
         "candidate_keywords": candidate_keywords,
+        "activity_categories": activity_categories,
+        "hourly_category_buckets": hourly_category_buckets,
     }
 
 
