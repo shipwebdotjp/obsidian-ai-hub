@@ -1181,7 +1181,9 @@ def _update_summary_in_tx(
     preserved_resolved_people = (
         _read_resolved_people(conn, summary_id) if "people" not in payload else []
     )
-    preserved_projects = _read_project_notes(conn, summary_id) if ("project_notes" not in payload and "projects" not in payload) else []
+    # For project_notes payload, read current notes for merge; for projects (legacy), discard
+    current_project_notes = _read_project_notes(conn, summary_id)
+    preserved_projects = current_project_notes if ("project_notes" not in payload and "projects" not in payload) else []
     preserved_project_candidates = _read_project_candidates(conn, summary_id) if "project_candidates" not in payload else []
 
     # 3. Delete all children
@@ -1286,7 +1288,13 @@ def _update_summary_in_tx(
 
     # 9. Insert projects
     if "project_notes" in payload:
-        _insert_projects(conn, summary_id, payload["project_notes"] or [])
+        # Merge: preserve every project not in the payload, update note for matches
+        payload_map = {item["project_id"]: item["note"] for item in (payload["project_notes"] or [])}
+        merged = [
+            {"project_id": pn["project_id"], "note": payload_map.get(pn["project_id"], pn["note"])}
+            for pn in current_project_notes
+        ]
+        _insert_projects(conn, summary_id, merged)
     elif "projects" in payload:
         _insert_projects(conn, summary_id, payload["projects"] or [])
     else:

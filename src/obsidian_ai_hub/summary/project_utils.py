@@ -93,3 +93,66 @@ def inherit_projects_and_candidates(sub_records: list[dict | None]) -> tuple[lis
         conn.close()
 
     return list(set(project_ids)), filtered_candidates
+
+
+def parse_llm_project_notes(
+    data: dict,
+    valid_ids: set[int] | None = None,
+) -> dict[int, str]:
+    """Parse project_notes from LLM output dict.
+
+    Returns a dict mapping project_id → note for valid entries.
+    When valid_ids is provided, only those IDs are accepted.
+    Duplicate project_ids are skipped (first wins).
+    """
+    notes: dict[int, str] = {}
+    raw = data.get("project_notes") if isinstance(data, dict) else None
+    if not isinstance(raw, list):
+        return notes
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        pid = item.get("project_id")
+        if not isinstance(pid, int):
+            continue
+        if valid_ids is not None and pid not in valid_ids:
+            continue
+        if pid in notes:
+            continue
+        note = item.get("note")
+        notes[pid] = note if isinstance(note, str) else ""
+    return notes
+
+
+def build_project_notes_list(
+    notes_map: dict[int, str],
+    project_ids: list[int],
+) -> list[dict]:
+    """Build a sorted list of {project_id, note} from notes_map filtered by project_ids.
+
+    Project IDs are returned in the order of project_ids.
+    IDs missing from notes_map get an empty note.
+    """
+    return [
+        {"project_id": pid, "note": notes_map.get(pid, "")}
+        for pid in project_ids
+    ]
+
+
+def validate_project_ids(
+    raw_ids: list,
+    valid_ids: set[int],
+) -> list[int]:
+    """Validate and deduplicate project IDs, preserving input order."""
+    seen: set[int] = set()
+    result: list[int] = []
+    for p in raw_ids:
+        if isinstance(p, int) and p not in seen and p in valid_ids:
+            seen.add(p)
+            result.append(p)
+        elif isinstance(p, str) and str(p).isdigit():
+            pid = int(p)
+            if pid not in seen and pid in valid_ids:
+                seen.add(pid)
+                result.append(pid)
+    return result

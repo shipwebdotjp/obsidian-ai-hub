@@ -397,13 +397,15 @@ def test_project_notes_update(test_memory_db_path):
 
         summary_id = store.get_summary_by_period("day", "2026-07-27", conn=conn)["summary_id"]
 
-        # Update only project_notes
+        # Update only project_notes (merge: preserves untouched projects)
         updated = store.update_summary(summary_id, {
             "project_notes": [{"project_id": 1, "note": "Updated note A"}],
         }, conn=conn)
 
-        assert len(updated["project_notes"]) == 1
-        assert updated["project_notes"][0]["project_id"] == 1
-        assert updated["project_notes"][0]["note"] == "Updated note A"
+        assert len(updated["project_notes"]) == 2
+        pn1 = [p for p in updated["project_notes"] if p["project_id"] == 1][0]
+        assert pn1["note"] == "Updated note A"
+        pn2 = [p for p in updated["project_notes"] if p["project_id"] == 2][0]
+        assert pn2["note"] == "Original note B"
     finally:
         conn.close()

@@ -92,7 +92,7 @@ def get_monthly_structured_record(
         "items": [],
     }
 
-    llm_project_notes = {}
+    data: dict = {}
     try:
         rendered_prompt = prompt.render_prompt(
             config.SUMMARIZE_MONTH_PROMPT_PATH,
@@ -172,15 +172,6 @@ def get_monthly_structured_record(
             for idx, item in enumerate(kind_items):
                 item["display_order"] = idx
 
-        # Parse project_notes from LLM output
-        if "project_notes" in data and isinstance(data["project_notes"], list):
-            for item in data["project_notes"]:
-                if isinstance(item, dict):
-                    pid = item.get("project_id")
-                    if isinstance(pid, int):
-                        note = item.get("note")
-                        llm_project_notes[pid] = note if isinstance(note, str) else ""
-
     except Exception as e:
         logger.error(
             f"Failed to generate or parse structured monthly record: {e}", exc_info=True
@@ -188,16 +179,18 @@ def get_monthly_structured_record(
         return None
 
     # Collect union of project_ids and unresolved project_candidates from weekly_records without LLM
-    from obsidian_ai_hub.summary.project_utils import inherit_projects_and_candidates
+    from obsidian_ai_hub.summary.project_utils import (
+        inherit_projects_and_candidates,
+        parse_llm_project_notes,
+        build_project_notes_list,
+    )
     p_ids, p_candidates = inherit_projects_and_candidates(weekly_records)
     record["project_ids"] = p_ids
     record["project_candidates"] = p_candidates
 
-    # Filter LLM project_notes by inherited project_ids; fill missing inherited IDs with empty note
-    record["project_notes"] = [
-        {"project_id": pid, "note": llm_project_notes.get(pid, "")}
-        for pid in p_ids
-    ]
+    # Parse LLM project_notes and filter by inherited project IDs
+    llm_notes = parse_llm_project_notes(data)
+    record["project_notes"] = build_project_notes_list(llm_notes, p_ids)
 
     return record
 

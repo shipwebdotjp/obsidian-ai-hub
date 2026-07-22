@@ -2497,6 +2497,8 @@ def update_summary_detail(summary_id: str, body: schemas.SummaryUpdateRequest) -
         payload["people"] = people
 
     # Validate project_notes: only currently linked project IDs, no duplicates
+    # project_notes is a partial update: only the note field is updated for matched
+    # projects; projects not in the array are preserved with their existing notes.
     if "project_notes" in payload:
         pn = payload["project_notes"]
         if pn is None:

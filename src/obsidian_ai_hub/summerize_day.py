@@ -156,38 +156,22 @@ def get_daily_structured_record(
         }
 
         # Load all projects for ID validation
+        from obsidian_ai_hub.summary.project_utils import (
+            parse_llm_project_notes,
+            build_project_notes_list,
+            validate_project_ids,
+        )
         all_project_ids = {p.get("id") for p in existing_projects if p.get("id") is not None}
 
-        if "project_notes" in data and isinstance(data["project_notes"], list):
-            seen_pn = set()
-            valid_notes = []
-            for item in data["project_notes"]:
-                if not isinstance(item, dict):
-                    continue
-                pid = item.get("project_id")
-                if pid is None or not isinstance(pid, int):
-                    continue
-                if pid not in all_project_ids:
-                    continue
-                if pid in seen_pn:
-                    continue
-                seen_pn.add(pid)
-                note = item.get("note")
-                valid_notes.append({
-                    "project_id": pid,
-                    "note": note if isinstance(note, str) else "",
-                })
-            record["project_notes"] = valid_notes
-            record["project_ids"] = [n["project_id"] for n in valid_notes]
+        if "project_notes" in data:
+            notes_map = parse_llm_project_notes(data, valid_ids=all_project_ids)
+            pids = list(notes_map.keys())
+            record["project_ids"] = pids
+            record["project_notes"] = build_project_notes_list(notes_map, pids)
         elif "project_ids" in data and isinstance(data["project_ids"], list):
-            record["project_ids"] = [
-                int(p) for p in data["project_ids"]
-                if isinstance(p, (int, str)) and str(p).isdigit()
-            ]
-            record["project_notes"] = [
-                {"project_id": pid, "note": ""}
-                for pid in record["project_ids"]
-            ]
+            pids = validate_project_ids(data["project_ids"], all_project_ids)
+            record["project_ids"] = pids
+            record["project_notes"] = build_project_notes_list({}, pids)
 
         if "project_candidates" in data and isinstance(data["project_candidates"], list):
             valid_candidates = []
