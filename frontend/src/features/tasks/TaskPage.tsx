@@ -423,7 +423,7 @@ export default function TaskPage() {
             type="button"
             onClick={handleAdd}
             disabled={loading}
-            className="rounded-lg bg-slate-900 px-3 py-1.5 text-xs text-white hover:bg-slate-800 disabled:opacity-50"
+            className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
           >
             タスク新規追加
           </button>

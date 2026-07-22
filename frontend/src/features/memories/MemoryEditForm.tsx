@@ -109,7 +109,7 @@ export default function MemoryEditForm({ memory, onUpdated, notify, onCancel }: 
         <div>
           <label className="block text-xs text-slate-500">stability</label>
           <select
-            className="w-full rounded border border-slate-300 p-2 text-sm"
+            className="w-full cursor-pointer rounded border border-slate-300 p-2 text-sm"
             value={stability}
             onChange={(e) => setStability(e.target.value as Stability)}
           >
@@ -126,7 +126,7 @@ export default function MemoryEditForm({ memory, onUpdated, notify, onCancel }: 
             type="button"
             onClick={onCancel}
             disabled={busy}
-            className="rounded border border-slate-300 px-3 py-1 text-sm disabled:opacity-50"
+            className="cursor-pointer rounded border border-slate-300 px-3 py-1 text-sm disabled:cursor-not-allowed disabled:opacity-50"
           >
             キャンセル
           </button>
@@ -134,7 +134,7 @@ export default function MemoryEditForm({ memory, onUpdated, notify, onCancel }: 
           type="button"
           onClick={save}
           disabled={busy || !content.trim()}
-          className="rounded bg-slate-900 px-3 py-1 text-sm text-white disabled:opacity-50"
+          className="cursor-pointer rounded bg-slate-900 px-3 py-1 text-sm text-white disabled:cursor-not-allowed disabled:opacity-50"
         >
           {busy ? "保存中…" : "編集して承認"}
         </button>

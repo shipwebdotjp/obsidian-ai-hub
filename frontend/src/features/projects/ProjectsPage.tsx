@@ -399,7 +399,7 @@ export default function ProjectsPage() {
         <div className="flex items-center gap-2">
           <button
             onClick={openCreateModal}
-            className="rounded bg-slate-950 px-3 py-1.5 text-xs text-white hover:bg-slate-800"
+            className="rounded bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
           >
             新規登録
           </button>

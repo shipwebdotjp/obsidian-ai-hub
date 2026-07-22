@@ -26,6 +26,7 @@ import type {
   SummaryPersonInput,
   Person,
 } from "../../api/types";
+import { formatYmdWithDow } from "../../utils/date";
 
 // Colors for stats lines
 const PALETTE = [
@@ -52,16 +53,6 @@ function groupSummaryItemsByKind(items: SummaryItem[]) {
   }
 
   return Array.from(groups, ([kind, items]) => ({ kind, items }));
-}
-
-function formatYmdWithDow(ymd: string): string {
-  const match = ymd.match(/^\d{4}-\d{2}-\d{2}$/);
-  if (!match) return ymd;
-  const date = new Date(`${ymd}T00:00:00`);
-  const weekdays = ["日", "月", "火", "水", "木", "金", "土"];
-  const dow = weekdays[date.getDay()];
-  if (dow === undefined) return ymd;
-  return ymd.replace(/-/g, "/") + `(${dow})`;
 }
 
 function formatPeriodKey(periodKey: string, periodType: "day" | "week" | "month"): string {

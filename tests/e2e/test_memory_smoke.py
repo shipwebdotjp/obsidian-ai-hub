@@ -72,3 +72,42 @@ def test_spa_fallback_serves_memory_page(
 ) -> None:
     page.goto(f"{e2e_server_url}/memories")
     expect(page.get_by_role("heading", name="メモリ")).to_be_visible()
+
+
+def test_row_click_highlights_selected_row(
+    e2e_server_url: str, page: Page
+) -> None:
+    page.goto(f"{e2e_server_url}/memories")
+
+    row = page.locator(
+        '[data-testid="memory-row"]', has_text=CANDIDATE_A_TEXT
+    )
+    row.get_by_role("button").first.click()
+
+    expect(row).to_have_attribute("data-selected", "true")
+    other_rows = page.locator(
+        '[data-testid="memory-row"][data-selected="true"]'
+    )
+    expect(other_rows).to_have_count(1)
+
+
+def test_switching_rows_keeps_detail_panel_content(
+    e2e_server_url: str, page: Page
+) -> None:
+    page.goto(f"{e2e_server_url}/memories")
+
+    row_a = page.locator(
+        '[data-testid="memory-row"]', has_text=CANDIDATE_A_TEXT
+    )
+    row_b = page.locator(
+        '[data-testid="memory-row"]', has_text=EVIDENCE_CANDIDATE_TEXT
+    )
+
+    row_a.get_by_role("button").first.click()
+    expect(page.get_by_text(CANDIDATE_A_TEXT).nth(1)).to_be_visible()
+
+    row_b.get_by_role("button").first.click()
+
+    expect(row_a).to_have_attribute("data-selected", "false")
+    expect(row_b).to_have_attribute("data-selected", "true")
+    expect(page.get_by_text(EVIDENCE_CANDIDATE_TEXT).nth(1)).to_be_visible()
