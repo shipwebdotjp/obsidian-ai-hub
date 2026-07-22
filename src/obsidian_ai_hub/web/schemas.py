@@ -441,6 +441,8 @@ class DashboardActivityLog(BaseModel):
     summary: Optional[str] = None
     category: Optional[str] = None
     keywords: list[str] = []
+    project_id: Optional[int] = None
+    project_name: Optional[str] = None
 
 
 class TodayActivity(BaseModel):
@@ -575,6 +577,10 @@ class PersonDeleteResponse(BaseModel):
 
 class CandidateResolveRequest(BaseModel):
     target_person_id: str
+
+
+class PersonPromoteRequest(BaseModel):
+    display_name: str
 
 
 class PeopleMergeRequest(BaseModel):

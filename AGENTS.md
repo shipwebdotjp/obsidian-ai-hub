@@ -30,11 +30,14 @@ uv run python -m obsidian_ai_hub --backup
 # Memory Review Web UI (FastAPI + React)
 make build-web                                # フロントエンドをビルド (cd frontend && npm ci && npm run build)
 uv run python -m obsidian_ai_hub --serve      # 起動 (frontend/dist が必要)
-make dev-web                                  # 開発: Vite dev server (proxy -> :8765)
 # 環境変数で上書き:
 #   MEMORY_REVIEW_HOST  (default 127.0.0.1; 非ループバック時 MEMORY_REVIEW_API_TOKEN 必須)
 #   MEMORY_REVIEW_PORT  (default 8765)
 #   MEMORY_REVIEW_API_TOKEN
+
+# E2E / 探索
+make e2e-serve                                # シード済み探索サーバーを起動 (http://127.0.0.1:8766)
+make test-e2e                                 # フロントエンドビルド + ブラウザ E2E テスト実行
 
 # Run scheduled tasks
 ./batch/scheduler.sh
@@ -107,3 +110,10 @@ make dev-web                                  # 開発: Vite dev server (proxy -
 - Database-writing tests must use the `test_memory_db_path` fixture (the suite also applies it automatically). Do not patch a production path into `config.MEMORY_SQLITE_PATH`.
 - For a one-off database check, inject a newly created temporary SQLite path before importing or calling application DB code. Do not use the configured database as a convenient test target.
 - Do not delete or alter production data discovered during testing without explicit user authorization. See `docs/testing.md` for the test-environment contract and failure handling.
+
+## E2E テスト / フロントエンド検証
+
+- フロントエンド機能を変更したら、playwright-cli を使い `make e2e-serve` 環境で変更導線を実際に操作して確認してください。
+- 重要な導線は `tests/e2e/` に自動テストとして追加してください。
+- フロントエンドの作業完了時には必ず `make test-e2e` を実行し、回帰が起きていないことを確認してください。
+- E2E テスト失敗時の診断情報（スクリーンショット、console error、Playwright trace、サーバーログ）は `test-results/e2e/` に出力されます。

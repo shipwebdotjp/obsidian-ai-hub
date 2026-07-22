@@ -388,3 +388,94 @@ def test_dashboard_strict_date_parsing(loopback_client, clean_summary_env):
     # Test impossible day details date
     res = loopback_client.get("/api/v1/summary-dashboard/days/2026-02-31")
     assert res.status_code == 400
+
+
+def test_dashboard_activity_project_association(loopback_client, clean_summary_env):
+    conn = memory.get_db_connection()
+    try:
+        # Create a project
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO projects (
+                project_id, normalized_name, display_name, domain, status, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                123,
+                "dashboard-proj",
+                "Dashboard Proj Display",
+                "work",
+                "active",
+                "2026-07-14T10:00:00",
+                "2026-07-14T10:00:00",
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    # Seed daily summary and associated activity log
+    _seed_day("2026-07-14", "My Associated Day")
+    activity_store.add_activity(
+        activity_date="2026-07-14",
+        occurred_at="2026-07-14T09:00:00",
+        summary="something linked to project",
+        project_id=123,
+    )
+
+    # 1. Verify /summary-dashboard/days/{target_date} API response
+    res_days = loopback_client.get("/api/v1/summary-dashboard/days/2026-07-14")
+    assert res_days.status_code == 200
+    data_days = res_days.json()
+    assert len(data_days["logs"]) == 1
+    assert data_days["logs"][0]["project_id"] == 123
+    assert data_days["logs"][0]["project_name"] == "Dashboard Proj Display"
+
+
+def test_dashboard_home_with_project_association(loopback_client, clean_summary_env, monkeypatch):
+    fake_now = datetime(2026, 7, 14, 10, 15, 0)
+
+    conn = memory.get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO projects (
+                project_id, normalized_name, display_name, domain, status, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                456,
+                "home-proj",
+                "Home Proj Display",
+                "work",
+                "active",
+                "2026-07-14T10:00:00",
+                "2026-07-14T10:00:00",
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    activity_store.add_activity(
+        activity_date="2026-07-14",
+        occurred_at="2026-07-14T09:00:00",
+        summary="home log with project",
+        project_id=456,
+    )
+
+    from obsidian_ai_hub.web import service
+
+    original_func = service.get_dashboard_home
+    monkeypatch.setattr(
+        service, "get_dashboard_home", lambda now=None: original_func(now=fake_now)
+    )
+
+    res = loopback_client.get("/api/v1/summary-dashboard/home")
+    assert res.status_code == 200
+    data = res.json()
+    assert len(data["today_activity"]["logs"]) == 1
+    assert data["today_activity"]["logs"][0]["project_id"] == 456
+    assert data["today_activity"]["logs"][0]["project_name"] == "Home Proj Display"

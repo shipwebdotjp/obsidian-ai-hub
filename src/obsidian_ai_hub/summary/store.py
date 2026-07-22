@@ -615,26 +615,65 @@ def _insert_people(
                 (summary_id, person_id, person.get("note"), order),
             )
         else:
-            # Priority 3: Unresolved candidate
+            # Priority 3: Unlinked person's normalized name (exact match, vault_id IS NULL)
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT candidate_id FROM person_candidates WHERE normalized_name = ?",
+                "SELECT person_id FROM people WHERE normalized_name = ? AND vault_id IS NULL",
                 (normalized_name,),
             )
             row = cursor.fetchone()
             if row is not None:
-                candidate_id = row[0]
+                person_id = row[0]
+                if person_id not in seen_person_ids:
+                    seen_person_ids.add(person_id)
+                    conn.execute(
+                        "INSERT INTO summary_people (summary_id, person_id, note, display_order) VALUES (?, ?, ?, ?)",
+                        (summary_id, person_id, person.get("note"), order),
+                    )
+                else:
+                    cursor.execute(
+                        "SELECT note FROM summary_people WHERE summary_id = ? AND person_id = ?",
+                        (summary_id, person_id),
+                    )
+                    existing_row = cursor.fetchone()
+                    if existing_row:
+                        notes_to_join = []
+                        existing_note = existing_row[0]
+                        if existing_note and existing_note.strip():
+                            notes_to_join.append(existing_note.strip())
+                        new_note = person.get("note")
+                        if new_note and new_note.strip():
+                            notes_to_join.append(new_note.strip())
+                        merged_note = (
+                            "\n".join(notes_to_join) if notes_to_join else None
+                        )
+                        conn.execute(
+                            "UPDATE summary_people SET note = ? WHERE summary_id = ? AND person_id = ?",
+                            (merged_note, summary_id, person_id),
+                        )
+                order += 1
+                continue
             else:
-                candidate_id = f"cand_{uuid.uuid4().hex}"
-                conn.execute(
-                    "INSERT INTO person_candidates (candidate_id, display_name, normalized_name, status) VALUES (?, ?, ?, ?)",
-                    (candidate_id, name, normalized_name, "unresolved"),
+                # Priority 4: Unresolved candidate
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT candidate_id FROM person_candidates WHERE normalized_name = ?",
+                    (normalized_name,),
                 )
+                row = cursor.fetchone()
+                if row is not None:
+                    candidate_id = row[0]
+                else:
+                    candidate_id = f"cand_{uuid.uuid4().hex}"
+                    conn.execute(
+                        "INSERT INTO person_candidates (candidate_id, display_name, normalized_name, status) VALUES (?, ?, ?, ?)",
+                        (candidate_id, name, normalized_name, "unresolved"),
+                    )
 
-            conn.execute(
-                "INSERT INTO summary_person_candidates (summary_id, candidate_id, note, display_order) VALUES (?, ?, ?, ?)",
-                (summary_id, candidate_id, person.get("note"), order),
-            )
+                conn.execute(
+                    "INSERT INTO summary_person_candidates (summary_id, candidate_id, note, display_order) VALUES (?, ?, ?, ?)",
+                    (summary_id, candidate_id, person.get("note"), order),
+                )
 
         order += 1
 

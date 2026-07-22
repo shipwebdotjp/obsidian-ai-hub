@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 import subprocess
 from datetime import datetime, date, time, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 from zoneinfo import ZoneInfo
 import threading
 from EventKit import (

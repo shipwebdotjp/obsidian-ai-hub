@@ -84,3 +84,31 @@ def test_memory_db_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path
 def _isolate_memory_db(test_memory_db_path: Path):
     """Use a temporary SQLite file for every test that touches the memory DB."""
     yield
+
+
+@pytest.fixture(autouse=True)
+def _filesystem_sandbox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Redirect all writable application paths under tmp_path."""
+    vault = tmp_path / "vault"
+
+    monkeypatch.setattr(app_config, "VAULT_PATH", vault)
+    monkeypatch.setattr(app_config, "INBOX_PATH", vault / app_config.INBOX_DIR_NAME)
+    monkeypatch.setattr(app_config, "DAILY_PATH", vault / app_config.DAILY_DIR_NAME)
+    monkeypatch.setattr(app_config, "PEOPLE_PATH", vault / app_config.PEOPLE_DIR_NAME)
+    monkeypatch.setattr(app_config, "DASHBOARD_PATH", vault / app_config.DASHBOARD_DIR_NAME)
+    monkeypatch.setattr(app_config, "ACTIVITY_PATH", vault / "activity")
+    monkeypatch.setattr(app_config, "RESEARCH_OUTPUT_DIR", vault / app_config.RESEARCH_DIR_NAME)
+    monkeypatch.setattr(app_config, "KNOWLEDGE_SYNC_FOLDER", vault / app_config.KNOWLEDGE_DIR_NAME)
+    monkeypatch.setattr(app_config, "WEBCLIP_PATH", vault / app_config.WEBCLIP_DIR_NAME)
+    monkeypatch.setattr(app_config, "SCREENSHOT_PATH", vault / "screenshots")
+    monkeypatch.setattr(app_config, "TEMPLATE_PATH", vault / app_config.DAILY_DIR_NAME / app_config.TEMPLATE_DIR_NAME / app_config.DAILY_TEMPLATE_FILENAME)
+    monkeypatch.setattr(app_config, "WEEKLY_TEMPLATE_PATH", vault / app_config.DAILY_DIR_NAME / app_config.TEMPLATE_DIR_NAME / app_config.WEEKLY_TEMPLATE_FILENAME)
+    monkeypatch.setattr(app_config, "MONTHLY_TEMPLATE_PATH", vault / app_config.DAILY_DIR_NAME / app_config.TEMPLATE_DIR_NAME / app_config.MONTHLY_TEMPLATE_FILENAME)
+    monkeypatch.setattr(app_config, "RESEARCH_CANDIDATE_THEME_LIST_PATH", (vault / app_config.RESEARCH_DIR_NAME) / app_config.RESEARCH_CANDIDATE_THEME_LIST_FILENAME)
+
+    monkeypatch.setattr(app_config, "AI_LOG_PATH", tmp_path / "ai-log")
+    monkeypatch.setattr(app_config, "TASK_RUN_STATE_PATH", tmp_path / "last_run.json")
+    monkeypatch.setattr(app_config, "KNOWLEDGE_SYNC_STATE_PATH", tmp_path / "knowledge_sync_state.json")
+    monkeypatch.setattr(app_config, "VAULT_INDEX_SQLITE_PATH", tmp_path / "vault-index" / "search.sqlite")
+    monkeypatch.setattr(app_config, "VAULT_INDEX_CHROMA_PATH", tmp_path / "vault-index" / "chroma")
+    monkeypatch.setattr(app_config, "LOCAL_MODEL_DIR", tmp_path / "local-models")

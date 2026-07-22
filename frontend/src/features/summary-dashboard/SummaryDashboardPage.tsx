@@ -621,11 +621,18 @@ export default function SummaryDashboardPage() {
                             </td>
                             <td className="py-2.5 pr-2 max-w-[250px] font-medium text-slate-900">{log.summary}</td>
                             <td className="py-2.5 pr-2">
-                              {log.category && (
-                                <span className="rounded-md bg-slate-100 px-1.5 py-0.5 font-medium">
-                                  {log.category}
-                                </span>
-                              )}
+                              <div className="flex flex-col gap-1 items-start">
+                                {log.category && (
+                                  <span className="rounded-md bg-slate-100 px-1.5 py-0.5 font-medium">
+                                    {log.category}
+                                  </span>
+                                )}
+                                {log.project_name && (
+                                  <span className="rounded-md bg-sky-50 text-sky-700 border border-sky-100 px-1.5 py-0.5 font-medium flex items-center gap-0.5 whitespace-nowrap">
+                                    📁 {log.project_name}
+                                  </span>
+                                )}
+                              </div>
                             </td>
                             <td className="py-2.5">
                               <div className="flex flex-wrap gap-1">
@@ -1067,6 +1074,11 @@ export default function SummaryDashboardPage() {
                                 {log.category}
                               </span>
                             )}
+                            {log.project_name && (
+                              <span className="rounded bg-sky-50 border border-sky-100 px-1.5 py-0.5 text-[10px] text-sky-700 font-semibold flex items-center gap-0.5 whitespace-nowrap">
+                                📁 {log.project_name}
+                              </span>
+                            )}
                             {log.keywords.map((k) => (
                               <span key={k} className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600">
                                 {k}
@@ -1180,6 +1192,8 @@ export default function SummaryDashboardPage() {
                       <div className="mt-1 flex flex-wrap gap-1.5">
                         {statsData.candidate_topics.map((t) => {
                           const isSel = selectedTopics.includes(t);
+                          const selIdx = selectedTopics.indexOf(t);
+                          const paletteColor = isSel ? PALETTE[selIdx % PALETTE.length] : undefined;
                           return (
                             <button
                               key={t}
@@ -1190,9 +1204,10 @@ export default function SummaryDashboardPage() {
                                   setSelectedTopics([...selectedTopics, t]);
                                 }
                               }}
+                              style={isSel && paletteColor ? { backgroundColor: paletteColor, color: "#fff" } : undefined}
                               className={`rounded px-2 py-1 text-[10px] font-medium transition-all ${
                                 isSel
-                                  ? "bg-blue-600 text-white"
+                                  ? ""
                                   : "bg-slate-100 text-slate-600 hover:bg-slate-200"
                               } cursor-pointer`}
                             >
@@ -1224,6 +1239,8 @@ export default function SummaryDashboardPage() {
                       <div className="mt-1 flex flex-wrap gap-1.5">
                         {statsData.candidate_keywords.map((k) => {
                           const isSel = selectedKeywords.includes(k);
+                          const selIdx = selectedKeywords.indexOf(k);
+                          const paletteColor = isSel ? PALETTE[selIdx % PALETTE.length] : undefined;
                           return (
                             <button
                               key={k}
@@ -1234,9 +1251,10 @@ export default function SummaryDashboardPage() {
                                   setSelectedKeywords([...selectedKeywords, k]);
                                 }
                               }}
+                              style={isSel && paletteColor ? { backgroundColor: paletteColor, color: "#fff" } : undefined}
                               className={`rounded px-2 py-1 text-[10px] font-medium transition-all ${
                                 isSel
-                                  ? "bg-blue-600 text-white"
+                                  ? ""
                                   : "bg-slate-100 text-slate-600 hover:bg-slate-200"
                               } cursor-pointer`}
                             >

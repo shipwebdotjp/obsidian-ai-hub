@@ -261,6 +261,8 @@ export interface DashboardActivityLog {
   summary: string | null;
   category: string | null;
   keywords: string[];
+  project_id?: number | null;
+  project_name?: string | null;
 }
 
 export interface TodayActivity {

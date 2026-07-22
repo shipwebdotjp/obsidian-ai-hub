@@ -7,17 +7,21 @@ uv run pytest tests/
 ```
 
 Pytest switches `MEMORY_SQLITE_PATH` to a temporary SQLite file before test
-collection and to a test-specific file for each test. It also sets
-`OBSIDIAN_AI_HUB_TESTING=1`. While that flag is active, opening the database
-path configured when pytest started is rejected before SQLite can create or
-modify it.
+collection and to a test-specific file for each test. An autouse fixture also
+redirects all writable application paths (Vault, inbox, daily notes, people,
+activity, logs, task state, search index, etc.) under that test's temporary
+directory. It also sets `OBSIDIAN_AI_HUB_TESTING=1`. While that flag is active,
+opening the database path configured when pytest started is rejected before
+SQLite can create or modify it.
 
 ## Database-writing tests
 
-- Add `test_memory_db_path` to the test function arguments when it writes via
-  `memory` or `obsidian_ai_hub.research.db`.
-- Use that fixture path only for assertions about the database location; use
-  the application APIs to seed and inspect test records.
+Every test is automatically given an isolated `MEMORY_SQLITE_PATH` and a
+Vault workspace under `tmp_path`. Request `test_memory_db_path` only when the
+test needs the path for an assertion, explicit setup explanation, or fixture
+composition — it is not required for isolation.
+
+Use the application APIs to seed and inspect test records.
 - Keep vault, activity, and research output under pytest's `tmp_path`.
 - Execute the test through pytest. Do not manually invoke a test function or
   copy its setup into `uv run python -`; doing so bypasses pytest isolation.

@@ -22,6 +22,7 @@ ACTIVITY_LOGS_COLUMNS = [
     "screenshots",
     "source_path",
     "source_line",
+    "project_id",
 ]
 
 
@@ -73,6 +74,7 @@ def add_activity(
     screenshots: Optional[List[str]] = None,
     source_path: Optional[str] = None,
     source_line: Optional[int] = None,
+    project_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     Add a new activity log entry to the database.
@@ -101,6 +103,7 @@ def add_activity(
         "screenshots": screenshots or [],
         "source_path": source_path,
         "source_line": source_line,
+        "project_id": project_id,
     }
 
     db_row = serialize_activity(record)
@@ -136,9 +139,11 @@ def get_activities_by_date(
     Get all activities on the specified date, sorted by occurred_at ascending.
     """
     sql = """
-        SELECT * FROM activity_logs
-        WHERE activity_date = ?
-        ORDER BY occurred_at ASC
+        SELECT al.*, p.display_name AS project_name
+        FROM activity_logs al
+        LEFT JOIN projects p ON al.project_id = p.project_id
+        WHERE al.activity_date = ?
+        ORDER BY al.occurred_at ASC
     """
     close_conn = False
     if conn is None:

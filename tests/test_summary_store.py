@@ -44,7 +44,7 @@ def test_schema_version_bump(test_memory_db_path):
     try:
         cursor = conn.cursor()
         cursor.execute("PRAGMA user_version;")
-        assert cursor.fetchone()[0] == 10
+        assert cursor.fetchone()[0] == 11
 
         cursor.execute(
             "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;"

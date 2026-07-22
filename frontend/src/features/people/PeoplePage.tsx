@@ -155,8 +155,14 @@ export default function PeoplePage() {
   const [aliasToDelete, setAliasToDelete] = useState<PersonAlias | null>(null);
   const [showAliasDeleteConfirm, setShowAliasDeleteConfirm] = useState(false);
 
+  // Promote states
+  const [promoteDisplayName, setPromoteDisplayName] = useState("");
+  const [promoteError, setPromoteError] = useState<any | null>(null);
+
   useEffect(() => {
     setSummaryAssignments({});
+    setPromoteDisplayName(selectedCandidate?.display_name || "");
+    setPromoteError(null);
   }, [selectedCandidate]);
 
   useEffect(() => {
@@ -490,6 +496,34 @@ export default function PeoplePage() {
     }
   };
 
+  const handlePromoteCandidate = async () => {
+    if (!selectedCandidate) return;
+    clearMessages();
+    setPromoteError(null);
+    setLoading(true);
+    try {
+      const result = await apiPost<PersonDetail>(
+        `${PEOPLE_API}/candidates/${selectedCandidate.candidate_id}/promote`,
+        { display_name: promoteDisplayName }
+      );
+      setSuccessMessage(`人物「${result.display_name}」を未連携人物として作成しました。`);
+      setSelectedCandidate(null);
+      setActiveTab("list");
+      await loadAllData(false);
+      setSelectedPerson(result);
+      setEditDisplayName(result.display_name);
+      setEditAliasesText((result.aliases || []).map((al) => al.display_name).join("\n"));
+    } catch (e: any) {
+      if (e instanceof ApiError && e.status === 409) {
+        setPromoteError(e.body?.detail || e.message);
+      } else {
+        setError(e.message || "昇格に失敗しました");
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleMergePeople = async (fromId: string, toId: string) => {
     clearMessages();
     setLoading(true);
@@ -706,6 +740,62 @@ export default function PeoplePage() {
                     </div>
                     <p className="text-[10px] text-slate-400">
                       ※ 解決先は、フロントマターに ID を持つ「Vault連携済み」の人物に制限されています。未解決候補を解決すると、確定別名として登録され、候補のサマリー履歴が自動で移管されます。すでに手動で個別割当を行っている候補は、グローバル解決（一括解決）が禁止されます。
+                    </p>
+                  </div>
+
+                  {/* Promote to Unlinked Person Panel */}
+                  <div className="border border-slate-200 rounded-lg p-4 bg-blue-50/50 space-y-3">
+                    <h3 className="text-xs font-bold text-slate-800">未連携人物として昇格</h3>
+
+                    {selectedCandidate.assigned_summaries_count > 0 && (
+                      <div className="rounded-lg bg-amber-50 p-3 text-xs font-medium text-amber-800 border border-amber-200 space-y-1">
+                        <div className="font-bold">⚠️ 昇格不可</div>
+                        <div>文脈別に割り当て済みのため昇格不可（個別割当済み件数: {selectedCandidate.assigned_summaries_count}件）</div>
+                      </div>
+                    )}
+
+                    {promoteError && (
+                      <div className="rounded-lg bg-red-50 p-3 text-xs font-medium text-red-800 border border-red-200">
+                        <div className="font-bold">
+                          {typeof promoteError === "object" ? promoteError.message : promoteError}
+                        </div>
+                        {typeof promoteError === "object" && promoteError.conflict_type && (
+                          <div className="mt-1 text-[11px] text-red-600">
+                            競合の型: {promoteError.conflict_type}
+                            {promoteError.existing_person_id && ` (競合人物ID: ${promoteError.existing_person_id}, 名前: ${promoteError.existing_person_name})`}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    <div className="text-[10px] text-slate-500">
+                      移管対象サマリ: <strong>{selectedCandidate.summaries.length}</strong>件
+                    </div>
+                    {promoteDisplayName !== selectedCandidate.display_name && (
+                      <div className="text-[10px] text-blue-600">
+                        ※ 候補表記「{selectedCandidate.display_name}」は新人物の別名として保存されます。
+                      </div>
+                    )}
+
+                    <div className="flex flex-col gap-2 sm:flex-row">
+                      <input
+                        type="text"
+                        value={promoteDisplayName}
+                        onChange={(e) => setPromoteDisplayName(e.target.value)}
+                        disabled={selectedCandidate.assigned_summaries_count > 0}
+                        className="w-full rounded border border-slate-300 bg-white px-2.5 py-1.5 text-xs focus:border-slate-900 focus:outline-none disabled:bg-slate-100 disabled:text-slate-400 sm:flex-1"
+                        placeholder="新人物の表示名を入力"
+                      />
+                      <button
+                        onClick={handlePromoteCandidate}
+                        disabled={loading || !promoteDisplayName.trim() || selectedCandidate.assigned_summaries_count > 0}
+                        className="shrink-0 rounded bg-blue-600 px-4 py-1.5 text-xs text-white hover:bg-blue-700 disabled:opacity-50"
+                      >
+                        昇格
+                      </button>
+                    </div>
+                    <p className="text-[10px] text-slate-400">
+                      ※ 未連携人物として新規作成します。Vault連携は行われず、既存の未連携人物と同じ同期・統合ルールが適用されます。
                     </p>
                   </div>
 
