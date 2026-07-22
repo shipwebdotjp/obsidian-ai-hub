@@ -86,6 +86,7 @@ export default function ExecutionLogPage() {
   const [llmDetail, setLlmDetail] = useState<LLMCallDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
+  const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
 
   // Fetch logs list
   const fetchLogs = async () => {
@@ -155,10 +156,12 @@ export default function ExecutionLogPage() {
 
   const handleRowClick = (item: ExecutionLogItem) => {
     setSelectedItem({ id: item.id, kind: item.kind });
+    setMobileDetailOpen(true);
   };
 
   const handleChildLLMClick = (callId: string) => {
     setSelectedItem({ id: callId, kind: "llm" });
+    setMobileDetailOpen(true);
   };
 
   const formatLocalTime = (isoString: string | undefined) => {
@@ -303,7 +306,9 @@ export default function ExecutionLogPage() {
       {/* Main Workspace */}
       <div className="flex-1 flex overflow-hidden min-h-0">
         {/* Left Side: Logs List */}
-        <div className="flex-1 flex flex-col border-r border-slate-200 overflow-y-auto min-w-[320px]">
+        <div className={`flex-col border-r border-slate-200 overflow-y-auto min-w-[320px] ${
+          mobileDetailOpen ? 'hidden' : 'flex-1 flex'
+        } md:flex-1 md:flex md:flex-col`}>
           {loading ? (
             <div className="p-8 text-center text-slate-500 text-sm">読み込み中…</div>
           ) : error ? (
@@ -317,10 +322,10 @@ export default function ExecutionLogPage() {
                 {logs.map((item) => {
                   const isSelected = selectedItem?.id === item.id;
                   return (
-                    <div
+                    <button
                       key={item.id}
                       onClick={() => handleRowClick(item)}
-                      className={`p-4 cursor-pointer transition flex flex-col gap-2 hover:bg-slate-100 ${
+                      className={`w-full p-4 text-left transition flex flex-col gap-2 hover:bg-slate-100 ${
                         isSelected ? "bg-slate-200 border-l-4 border-slate-800" : "bg-white"
                       }`}
                     >
@@ -345,7 +350,7 @@ export default function ExecutionLogPage() {
                           {item.summary}
                         </div>
                       )}
-                    </div>
+                    </button>
                   );
                 })}
               </div>
@@ -382,17 +387,34 @@ export default function ExecutionLogPage() {
         </div>
 
         {/* Right Side: Selected Detail Panel */}
-        <div className="w-1/2 flex flex-col bg-white overflow-y-auto hidden md:flex min-w-[400px]">
+        <div className={`flex-col bg-white ${
+          mobileDetailOpen ? 'flex flex-1' : 'hidden'
+        } md:w-1/2 md:flex md:flex-col`}>
+          {/* Mobile back button */}
+          <div className="flex items-center gap-2 border-b border-slate-200 p-3 md:hidden">
+            <button
+              type="button"
+              onClick={() => setMobileDetailOpen(false)}
+              aria-label="一覧に戻る"
+              className="rounded px-2 py-1 text-sm text-slate-600 hover:bg-slate-100"
+            >
+              ← 一覧
+            </button>
+            <span className="truncate text-sm font-semibold text-slate-700">
+              実行ログ詳細
+            </span>
+          </div>
+          <div className="flex-1 overflow-y-auto min-w-[400px]">
           {!selectedItem ? (
-            <div className="flex-1 flex items-center justify-center text-slate-400 text-sm italic p-6">
+            <div className="flex items-center justify-center text-slate-400 text-sm italic p-6 h-full">
               左側の一覧からログを選択すると詳細が表示されます。
             </div>
           ) : detailLoading ? (
-            <div className="flex-1 flex items-center justify-center text-slate-500 text-sm p-6">
+            <div className="flex items-center justify-center text-slate-500 text-sm p-6 h-full">
               詳細データを読み込み中…
             </div>
           ) : detailError ? (
-            <div className="flex-1 flex items-center justify-center text-red-500 text-sm font-semibold p-6">
+            <div className="flex items-center justify-center text-red-500 text-sm font-semibold p-6 h-full">
               {detailError}
             </div>
           ) : cmdDetail ? (
@@ -622,6 +644,7 @@ export default function ExecutionLogPage() {
               )}
             </div>
           ) : null}
+        </div>
         </div>
       </div>
     </div>
