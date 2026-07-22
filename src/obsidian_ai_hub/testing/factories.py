@@ -42,6 +42,7 @@ def make_memory(
         "supersedes": None,
         "contradicts": [],
         "dedup_suggestions": [],
+        "dedup_assessment": None,
         "provenance": {"extraction_method": "test"},
         "created_at": "2026-07-01T00:00:00+09:00",
         "updated_at": "2026-07-01T00:00:00+09:00",

@@ -116,4 +116,4 @@ make test-e2e                                 # フロントエンドビルド +
 - フロントエンド機能を変更したら、playwright-cli を使い `make e2e-serve` 環境で変更導線を実際に操作して確認してください。
 - 重要な導線は `tests/e2e/` に自動テストとして追加してください。
 - フロントエンドの作業完了時には必ず `make test-e2e` を実行し、回帰が起きていないことを確認してください。
-- E2E テスト失敗時の診断情報（trace、スクリーンショット、console error、サーバーログ）は `test-results/e2e/` に出力されます。
+- E2E テスト失敗時の診断情報（スクリーンショット、console error、Playwright trace、サーバーログ）は `test-results/e2e/` に出力されます。

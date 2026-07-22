@@ -50,13 +50,11 @@ def test_approve_candidate_removes_from_list_and_shows_in_approved(
     row = page.locator('[data-testid="memory-row"]', has_text=CANDIDATE_B_TEXT)
     expect(row).to_be_visible()
     row.get_by_role("button", name="承認").click()
-    page.wait_for_timeout(500)
     expect(row).not_to_be_visible()
 
     # Switch filter to approved
     status_select = page.get_by_label("ステータスフィルター")
     status_select.select_option("approved")
-    page.wait_for_timeout(500)
     expect(page.get_by_text(CANDIDATE_B_TEXT)).to_be_visible()
 
 
@@ -66,7 +64,6 @@ def test_approved_seeded_memory_appears_in_approved_filter(
     page.goto(f"{e2e_server_url}/memories")
     status_select = page.get_by_label("ステータスフィルター")
     status_select.select_option("approved")
-    page.wait_for_timeout(500)
     expect(page.get_by_text(APPROVED_TEXT)).to_be_visible()
 
 

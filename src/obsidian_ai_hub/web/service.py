@@ -1825,6 +1825,20 @@ def promote_person_candidate(
 
             # 5. Save alias if candidate display_name differs from input display_name
             if target_normalized != cand["normalized_name"]:
+                cursor.execute(
+                    "SELECT person_id, display_name FROM people WHERE normalized_name = ?",
+                    (cand["normalized_name"],),
+                )
+                alias_main_row = cursor.fetchone()
+                if alias_main_row is not None:
+                    raise MainNameConflictError(alias_main_row["person_id"], alias_main_row["display_name"])
+                cursor.execute(
+                    "SELECT person_id, display_name FROM person_aliases WHERE normalized_name = ?",
+                    (cand["normalized_name"],),
+                )
+                alias_alias_row = cursor.fetchone()
+                if alias_alias_row is not None:
+                    raise AliasConflictError(alias_alias_row["person_id"], alias_alias_row["display_name"])
                 conn.execute(
                     "INSERT INTO person_aliases (normalized_name, person_id, display_name) VALUES (?, ?, ?)",
                     (cand["normalized_name"], person_id, cand["display_name"]),

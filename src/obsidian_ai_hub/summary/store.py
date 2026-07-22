@@ -652,6 +652,7 @@ def _insert_people(
                             (merged_note, summary_id, person_id),
                         )
                 order += 1
+                continue
             else:
                 # Priority 4: Unresolved candidate
                 cursor = conn.cursor()
