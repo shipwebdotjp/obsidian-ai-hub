@@ -131,7 +131,6 @@ def _prepare_messages(
 
 
 def _extract_llm_metadata(message: Any) -> Tuple[Optional[int], Optional[int], Optional[int], Optional[str]]:
-    import json
     prompt_tokens = None
     completion_tokens = None
     total_tokens = None
@@ -225,8 +224,6 @@ def _logged_invoke(
         execution_logger.fail_llm_call(call_id, e)
         raise
 
-
-from typing import Tuple
 
 def generate_llm_response(
     provider: str,

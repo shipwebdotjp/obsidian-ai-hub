@@ -1,6 +1,6 @@
 # ruff: noqa: E402
 import sys
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 # Mock macOS-specific modules before importing obsidian_ai_hub
 mock_modules = {
@@ -19,9 +19,7 @@ for name, m in mock_modules.items():
 
 import pytest
 import yaml
-import json
 from datetime import datetime
-from pathlib import Path
 from fastapi.testclient import TestClient
 
 from obsidian_ai_hub.utils import config

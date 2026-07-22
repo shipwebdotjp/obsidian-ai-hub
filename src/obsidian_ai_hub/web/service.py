@@ -2,6 +2,7 @@ import json
 import logging
 import sqlite3
 import threading
+import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Optional
@@ -998,7 +999,6 @@ def update_project(project_id: int, body: schemas.ProjectUpdateRequest) -> dict:
             if row is None:
                 raise FileNotFoundError("Project not found")
 
-            p = deserialize_project(row)
             updates = []
             params = []
 
@@ -1755,6 +1755,129 @@ def resolve_person_candidate(
             )
 
             return {"success": True}
+    finally:
+        conn.close()
+
+
+def promote_person_candidate(
+    candidate_id: str, display_name: str
+) -> dict[str, Any]:
+    from obsidian_ai_hub.summary.store import normalize_entity_name
+
+    stripped_display_name = display_name.strip()
+    if not stripped_display_name:
+        raise ValueError("表示名に空文字を指定することはできません。")
+
+    conn = get_db_connection()
+    try:
+        with conn:
+            cursor = conn.cursor()
+
+            # 1. Fetch candidate
+            cursor.execute(
+                "SELECT candidate_id, display_name, normalized_name, status FROM person_candidates WHERE candidate_id = ?",
+                (candidate_id,),
+            )
+            cand_row = cursor.fetchone()
+            if cand_row is None:
+                raise FileNotFoundError("Candidate not found")
+            cand = dict(cand_row)
+
+            # 2. Check if there are any manual assignments for this candidate's normalized_name
+            cursor.execute(
+                "SELECT COUNT(*) FROM summary_person_assignments WHERE normalized_name = ?",
+                (cand["normalized_name"],),
+            )
+            if cursor.fetchone()[0] > 0:
+                raise AssignmentConflictError()
+
+            # 3. Conflict checks for the new display_name
+            target_normalized = normalize_entity_name(stripped_display_name)
+
+            # Conflict with another person's main name
+            cursor.execute(
+                "SELECT person_id, display_name FROM people WHERE normalized_name = ?",
+                (target_normalized,),
+            )
+            main_row = cursor.fetchone()
+            if main_row is not None:
+                raise MainNameConflictError(main_row["person_id"], main_row["display_name"])
+
+            # Conflict with another person's alias
+            cursor.execute(
+                "SELECT person_id, display_name FROM person_aliases WHERE normalized_name = ?",
+                (target_normalized,),
+            )
+            alias_row = cursor.fetchone()
+            if alias_row is not None:
+                raise AliasConflictError(alias_row["person_id"], alias_row["display_name"])
+
+            # 4. Create new unlinked person
+            person_id = f"peo_{uuid.uuid4().hex}"
+            conn.execute(
+                "INSERT INTO people (person_id, normalized_name, display_name, vault_id) VALUES (?, ?, ?, NULL)",
+                (person_id, target_normalized, stripped_display_name),
+            )
+
+            # 5. Save alias if candidate display_name differs from input display_name
+            if target_normalized != cand["normalized_name"]:
+                conn.execute(
+                    "INSERT INTO person_aliases (normalized_name, person_id, display_name) VALUES (?, ?, ?)",
+                    (cand["normalized_name"], person_id, cand["display_name"]),
+                )
+
+            # 6. Migrate summaries from summary_person_candidates to summary_people
+            cursor.execute(
+                "SELECT summary_id, note, display_order FROM summary_person_candidates WHERE candidate_id = ?",
+                (candidate_id,),
+            )
+            links = cursor.fetchall()
+
+            for link in links:
+                summary_id = link["summary_id"]
+                cand_note = link["note"]
+                cand_order = link["display_order"]
+
+                cursor.execute(
+                    "SELECT note, display_order FROM summary_people WHERE summary_id = ? AND person_id = ?",
+                    (summary_id, person_id),
+                )
+                existing_link = cursor.fetchone()
+
+                if existing_link is not None:
+                    notes_to_join = []
+                    existing_note = existing_link["note"]
+                    existing_order = existing_link["display_order"]
+
+                    if existing_note and existing_note.strip():
+                        notes_to_join.append(existing_note.strip())
+                    if cand_note and cand_note.strip():
+                        notes_to_join.append(cand_note.strip())
+
+                    merged_note = "\n".join(notes_to_join) if notes_to_join else None
+                    merged_order = merge_display_orders(existing_order, cand_order)
+
+                    conn.execute(
+                        "UPDATE summary_people SET note = ?, display_order = ? WHERE summary_id = ? AND person_id = ?",
+                        (merged_note, merged_order, summary_id, person_id),
+                    )
+                else:
+                    conn.execute(
+                        "INSERT INTO summary_people (summary_id, person_id, note, display_order) VALUES (?, ?, ?, ?)",
+                        (summary_id, person_id, cand_note, cand_order),
+                    )
+
+                conn.execute(
+                    "DELETE FROM summary_person_candidates WHERE summary_id = ? AND candidate_id = ?",
+                    (summary_id, candidate_id),
+                )
+
+            # 7. Delete candidate
+            conn.execute(
+                "DELETE FROM person_candidates WHERE candidate_id = ?", (candidate_id,)
+            )
+
+        return get_person_detail(person_id)
     finally:
         conn.close()
 

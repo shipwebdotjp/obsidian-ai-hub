@@ -877,3 +877,295 @@ def test_people_delete_alias(test_memory_db_path, client):
     )
     assert response.status_code == 404
     assert "Person not found" in response.json()["detail"]
+
+
+# --- Promote Candidate Tests ---
+
+
+def test_promote_candidate_different_name(test_memory_db_path, client):
+    """Promote with a different name creates person and saves alias."""
+    conn = memory.get_db_connection()
+    try:
+        # Create summary with unresolved candidate
+        summary_store.upsert_summary(
+            {
+                "period_type": "day",
+                "period_key": "2026-09-01",
+                "summary": "Met Ken",
+                "people": [{"name": "ケン", "note": "Ken's note"}],
+            },
+            conn=conn,
+        )
+        summary_store.upsert_summary(
+            {
+                "period_type": "day",
+                "period_key": "2026-09-02",
+                "summary": "Met Ken again",
+                "people": [{"name": "ケン", "note": "Ken's note 2"}],
+            },
+            conn=conn,
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    # Get candidate
+    response = client.get("/api/v1/people/candidates")
+    assert response.status_code == 200
+    candidates = response.json()
+    assert len(candidates) == 1
+    cand_id = candidates[0]["candidate_id"]
+
+    # Promote with different name
+    response = client.post(
+        f"/api/v1/people/candidates/{cand_id}/promote",
+        json={"display_name": "鈴木健"},
+    )
+    assert response.status_code == 200
+    person = response.json()
+    assert person["display_name"] == "鈴木健"
+    assert person["vault_id"] is None
+    assert person["summary_count"] == 2
+
+    # Check alias was saved
+    aliases = {al["normalized_name"] for al in person["aliases"]}
+    assert "ケン" in aliases
+
+    # Check candidate was deleted
+    response = client.get("/api/v1/people/candidates")
+    assert response.status_code == 200
+    assert len(response.json()) == 0
+
+
+def test_promote_candidate_same_name(test_memory_db_path, client):
+    """Promote with the same name does not create alias."""
+    conn = memory.get_db_connection()
+    try:
+        summary_store.upsert_summary(
+            {
+                "period_type": "day",
+                "period_key": "2026-09-03",
+                "summary": "Met Tanaka",
+                "people": [{"name": "田中"}],
+            },
+            conn=conn,
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    # Get candidate
+    response = client.get("/api/v1/people/candidates")
+    assert response.status_code == 200
+    candidates = response.json()
+    cand_id = candidates[0]["candidate_id"]
+
+    # Promote with same name
+    response = client.post(
+        f"/api/v1/people/candidates/{cand_id}/promote",
+        json={"display_name": "田中"},
+    )
+    assert response.status_code == 200
+    person = response.json()
+    assert person["display_name"] == "田中"
+    assert len(person["aliases"]) == 0
+
+    # Next upsert should resolve to the promoted person
+    summary_store.upsert_summary(
+        {
+            "period_type": "day",
+            "period_key": "2026-09-04",
+            "summary": "Met Tanaka again",
+            "people": [{"name": "田中"}],
+        }
+    )
+
+    # Verify the new summary was linked to the promoted person
+    conn = memory.get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT sp.person_id FROM summary_people sp
+            JOIN summaries s ON sp.summary_id = s.summary_id
+            WHERE s.period_key = ? AND s.period_type = ?""",
+            ("2026-09-04", "day"),
+        )
+        row = cursor.fetchone()
+        assert row is not None
+        assert row["person_id"] == person["person_id"]
+    finally:
+        conn.close()
+
+
+def test_promote_candidate_assignment_conflict(test_memory_db_path, client):
+    """Promote fails with 409 when candidate has manual assignments."""
+    conn = memory.get_db_connection()
+    try:
+        # Create candidate
+        conn.execute(
+            "INSERT INTO person_candidates (candidate_id, display_name, normalized_name, status) VALUES (?, ?, ?, ?)",
+            ("cand_assigned", "ケン", "ケン", "unresolved"),
+        )
+        # Create a target person for the assignment
+        conn.execute(
+            "INSERT INTO people (person_id, display_name, normalized_name, vault_id) VALUES (?, ?, ?, ?)",
+            ("peo_someone", " Someone", "someone", "someone-vault"),
+        )
+        # Create a summary and manual assignment
+        conn.execute(
+            "INSERT INTO summaries (summary_id, period_type, period_key, generated_at, summary) VALUES (?, ?, ?, ?, ?)",
+            ("sum_test", "day", "2026-09-05", "2026-09-05T12:00:00", "Test"),
+        )
+        conn.execute(
+            "INSERT INTO summary_person_assignments (summary_id, normalized_name, person_id) VALUES (?, ?, ?)",
+            ("sum_test", "ケン", "peo_someone"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    response = client.post(
+        "/api/v1/people/candidates/cand_assigned/promote",
+        json={"display_name": "鈴木健"},
+    )
+    assert response.status_code == 409
+    assert response.json()["detail"]["conflict_type"] == "assignment_conflict"
+
+
+def test_promote_candidate_main_name_conflict(test_memory_db_path, client):
+    """Promote fails with 409 when display_name conflicts with existing person."""
+    conn = memory.get_db_connection()
+    try:
+        # Create existing person
+        conn.execute(
+            "INSERT INTO people (person_id, display_name, normalized_name, vault_id) VALUES (?, ?, ?, ?)",
+            ("peo_existing", "鈴木健", "鈴木健", "ken-suzuki"),
+        )
+        # Create candidate with different name
+        conn.execute(
+            "INSERT INTO person_candidates (candidate_id, display_name, normalized_name, status) VALUES (?, ?, ?, ?)",
+            ("cand_name_conflict", "ケン", "ケン", "unresolved"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    response = client.post(
+        "/api/v1/people/candidates/cand_name_conflict/promote",
+        json={"display_name": "鈴木健"},
+    )
+    assert response.status_code == 409
+    assert response.json()["detail"]["conflict_type"] == "main_name_conflict"
+
+
+def test_promote_candidate_alias_conflict(test_memory_db_path, client):
+    """Promote fails with 409 when display_name conflicts with existing alias."""
+    conn = memory.get_db_connection()
+    try:
+        # Create existing person with alias
+        conn.execute(
+            "INSERT INTO people (person_id, display_name, normalized_name, vault_id) VALUES (?, ?, ?, ?)",
+            ("peo_alias_owner", "山田太郎", "山田太郎", "yamada-taro"),
+        )
+        conn.execute(
+            "INSERT INTO person_aliases (normalized_name, person_id, display_name) VALUES (?, ?, ?)",
+            ("田中", "peo_alias_owner", "田中"),
+        )
+        # Create candidate
+        conn.execute(
+            "INSERT INTO person_candidates (candidate_id, display_name, normalized_name, status) VALUES (?, ?, ?, ?)",
+            ("cand_alias_conflict", "ケン", "ケン", "unresolved"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    response = client.post(
+        "/api/v1/people/candidates/cand_alias_conflict/promote",
+        json={"display_name": "田中"},
+    )
+    assert response.status_code == 409
+    assert response.json()["detail"]["conflict_type"] == "alias_conflict"
+
+
+def test_promote_candidate_not_found(test_memory_db_path, client):
+    """Promote fails with 404 when candidate does not exist."""
+    response = client.post(
+        "/api/v1/people/candidates/nonexistent/promote",
+        json={"display_name": "テスト"},
+    )
+    assert response.status_code == 404
+
+
+def test_promote_candidate_empty_name(test_memory_db_path, client):
+    """Promote fails with 400 when display_name is empty."""
+    conn = memory.get_db_connection()
+    try:
+        conn.execute(
+            "INSERT INTO person_candidates (candidate_id, display_name, normalized_name, status) VALUES (?, ?, ?, ?)",
+            ("cand_empty", "ケン", "ケン", "unresolved"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    response = client.post(
+        "/api/v1/people/candidates/cand_empty/promote",
+        json={"display_name": "  "},
+    )
+    assert response.status_code == 400
+
+
+def test_promote_candidate_then_vault_sync(test_memory_db_path, tmp_path, monkeypatch, client):
+    """Promoted person can later be Vault-linked via sync."""
+    people_dir = tmp_path / "people"
+    people_dir.mkdir()
+    monkeypatch.setattr(app_config, "PEOPLE_PATH", people_dir)
+
+    conn = memory.get_db_connection()
+    try:
+        summary_store.upsert_summary(
+            {
+                "period_type": "day",
+                "period_key": "2026-09-10",
+                "summary": "Met Suzuki",
+                "people": [{"name": "鈴木健"}],
+            },
+            conn=conn,
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    # Get candidate and promote
+    response = client.get("/api/v1/people/candidates")
+    cand_id = response.json()[0]["candidate_id"]
+    response = client.post(
+        f"/api/v1/people/candidates/{cand_id}/promote",
+        json={"display_name": "鈴木健"},
+    )
+    assert response.status_code == 200
+    promoted_person = response.json()
+    assert promoted_person["vault_id"] is None
+
+    # Create Vault note with matching name
+    note_path = people_dir / "suzuki.md"
+    note_path.write_text(
+        """---
+id: ken-suzuki
+name: 鈴木健
+---
+""",
+        encoding="utf-8",
+    )
+
+    # Sync
+    response = client.post("/api/v1/people/sync")
+    assert response.status_code == 200
+
+    # Verify promoted person is now Vault-linked
+    response = client.get(f"/api/v1/people/{promoted_person['person_id']}")
+    assert response.status_code == 200
+    updated = response.json()
+    assert updated["vault_id"] == "ken-suzuki"

@@ -577,6 +577,10 @@ class CandidateResolveRequest(BaseModel):
     target_person_id: str
 
 
+class PersonPromoteRequest(BaseModel):
+    display_name: str
+
+
 class PeopleMergeRequest(BaseModel):
     from_person_id: str
     to_person_id: str

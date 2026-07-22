@@ -1,4 +1,5 @@
 import hmac
+import ipaddress
 import logging
 from typing import Optional
 
@@ -663,6 +664,45 @@ def resolve_person_candidate(
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 
+@router.post("/people/candidates/{candidate_id}/promote", response_model=schemas.PersonDetail)
+def promote_person_candidate(
+    candidate_id: str,
+    body: schemas.PersonPromoteRequest,
+    _=Depends(_require_loopback_or_token),
+):
+    try:
+        return service.promote_person_candidate(candidate_id, body.display_name)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except service.AssignmentConflictError as e:
+        raise HTTPException(
+            status_code=409,
+            detail={"message": str(e), "conflict_type": "assignment_conflict"},
+        ) from e
+    except service.AliasConflictError as e:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": str(e),
+                "conflict_type": "alias_conflict",
+                "existing_person_id": e.existing_person_id,
+                "existing_person_name": e.existing_person_name,
+            },
+        ) from e
+    except service.MainNameConflictError as e:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": str(e),
+                "conflict_type": "main_name_conflict",
+                "existing_person_id": e.existing_person_id,
+                "existing_person_name": e.existing_person_name,
+            },
+        ) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
 @router.post("/people/merge/preview", response_model=schemas.PeopleMergePreviewResponse)
 def preview_people_merge(
     body: schemas.PeopleMergeRequest, _=Depends(_require_loopback_or_token)
@@ -703,8 +743,6 @@ def sync_people(_=Depends(_require_loopback_or_token)):
 
 
 # --- Task Config routes ---
-
-import ipaddress
 
 def _require_localhost(request: Request) -> None:
     client_host = request.client.host if request.client else None

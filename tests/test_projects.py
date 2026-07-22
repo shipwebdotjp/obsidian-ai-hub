@@ -1,7 +1,6 @@
 import pytest
 from datetime import datetime
 from unittest import mock
-from obsidian_ai_hub import memory
 from obsidian_ai_hub.summary import store as summary_store
 from obsidian_ai_hub.web import service, schemas
 
