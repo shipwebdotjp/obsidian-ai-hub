@@ -525,9 +525,9 @@ export default function ProjectsPage() {
                     <div className="flex gap-2">
                       <button
                         onClick={openResolveModal}
-                        className="rounded bg-slate-900 px-3 py-1.5 text-xs text-white hover:bg-slate-800"
-                      >
-                        処理・解決
+                         className="rounded bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
+                       >
+                         処理・解決
                       </button>
                       <button
                         onClick={() => handleQuickCandidateAction(selectedCandidate, "reject")}
@@ -714,9 +714,9 @@ export default function ProjectsPage() {
                     </div>
                     <button
                       onClick={openEditModal}
-                      className="rounded bg-slate-900 px-3 py-1.5 text-xs text-white hover:bg-slate-800"
-                    >
-                      詳細編集
+                       className="rounded bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
+                     >
+                       詳細編集
                     </button>
                   </div>
 
@@ -1072,7 +1072,7 @@ export default function ProjectsPage() {
                   (showResolveModal && resolveMode === "approve_new" && !formDisplayName.trim()) ||
                   (showResolveModal && resolveMode === "link_existing" && !targetProjectId)
                 }
-                className="rounded bg-slate-950 px-4 py-2 text-xs font-semibold text-white hover:bg-slate-800 disabled:opacity-50"
+                 className="rounded bg-blue-600 px-4 py-2 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
               >
                 {loading ? "処理中..." : "保存する"}
               </button>

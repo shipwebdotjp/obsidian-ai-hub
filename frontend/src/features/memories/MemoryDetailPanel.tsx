@@ -28,6 +28,8 @@ export default function MemoryDetailPanel({
   const fetchIdRef = useRef(0);
   const fetchedOnceRef = useRef(false);
 
+  const matching = detail?.memory_id === memoryId;
+
   useEffect(() => {
     const currentFetchId = ++fetchIdRef.current;
     setLoading(true);
@@ -88,6 +90,7 @@ export default function MemoryDetailPanel({
   );
 
   async function handleDelete() {
+    if (detail?.memory_id !== memoryId) return;
     if (!window.confirm(`記憶 ${memoryId} を完全に削除しますか？この操作は取り消せません。`)) return;
     setIsSubmitting(true);
     try {
@@ -104,6 +107,7 @@ export default function MemoryDetailPanel({
   }
 
   async function act(action: "approve" | "reject") {
+    if (detail?.memory_id !== memoryId) return;
     setIsSubmitting(true);
     try {
       await reviewMemory(memoryId, action);
@@ -129,6 +133,7 @@ export default function MemoryDetailPanel({
     intContent?: string,
     swDate?: string
   ) {
+    if (detail?.memory_id !== memoryId) return;
     setIsSubmitting(true);
     try {
       await resolveMemory(memoryId, action, targetMemoryId, intContent, swDate);
@@ -234,7 +239,7 @@ export default function MemoryDetailPanel({
                         handleResolveWithParams("merge_existing", detail.dedup_assessment.target_memory_id, integratedContent);
                       }
                     }}
-                    disabled={isSubmitting || !integratedContent.trim() || !detail.dedup_assessment?.target_memory_id}
+                    disabled={isSubmitting || !matching || !integratedContent.trim() || !detail.dedup_assessment?.target_memory_id}
                     className="cursor-pointer rounded bg-blue-600 px-3 py-1 text-xs text-white disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     マージ
@@ -242,7 +247,7 @@ export default function MemoryDetailPanel({
                   <button
                     type="button"
                     onClick={() => act("approve")}
-                    disabled={isSubmitting}
+                    disabled={isSubmitting || !matching}
                     className="cursor-pointer rounded bg-slate-600 px-3 py-1 text-xs text-white disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     新規として保存
@@ -290,7 +295,7 @@ export default function MemoryDetailPanel({
                         handleResolveWithParams("supersede_existing", detail.dedup_assessment.target_memory_id, undefined, switchDate);
                       }
                     }}
-                    disabled={isSubmitting || !/^\d{4}-\d{2}-\d{2}$/.test(switchDate) || !detail.dedup_assessment?.target_memory_id}
+                    disabled={isSubmitting || !matching || !/^\d{4}-\d{2}-\d{2}$/.test(switchDate) || !detail.dedup_assessment?.target_memory_id}
                     className="cursor-pointer rounded bg-purple-600 px-3 py-1 text-xs text-white disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     後継として保存
@@ -298,7 +303,7 @@ export default function MemoryDetailPanel({
                   <button
                     type="button"
                     onClick={() => act("approve")}
-                    disabled={isSubmitting}
+                    disabled={isSubmitting || !matching}
                     className="cursor-pointer rounded bg-slate-600 px-3 py-1 text-xs text-white disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     新規として保存
@@ -370,7 +375,7 @@ export default function MemoryDetailPanel({
                     <button
                       type="button"
                       onClick={() => handleResolve("keep_both", s.target_memory_id)}
-                      disabled={isSubmitting}
+                      disabled={isSubmitting || !matching}
                       className="cursor-pointer rounded bg-emerald-600 px-3 py-1 text-xs text-white disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       両方保持
@@ -378,7 +383,7 @@ export default function MemoryDetailPanel({
                     <button
                       type="button"
                       onClick={() => handleResolve("replace_existing", s.target_memory_id)}
-                      disabled={isSubmitting}
+                      disabled={isSubmitting || !matching}
                       className="cursor-pointer rounded bg-amber-600 px-3 py-1 text-xs text-white disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       既存を候補で更新
@@ -424,7 +429,7 @@ export default function MemoryDetailPanel({
                 <button
                   type="button"
                   onClick={() => act("approve")}
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || !matching}
                   className="cursor-pointer rounded bg-emerald-600 px-3 py-1 text-sm text-white disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {isSubmitting ? "処理中…" : "承認"}
@@ -432,7 +437,7 @@ export default function MemoryDetailPanel({
                 <button
                   type="button"
                   onClick={() => act("reject")}
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || !matching}
                   className="cursor-pointer rounded bg-rose-600 px-3 py-1 text-sm text-white disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {isSubmitting ? "処理中…" : "却下"}
@@ -442,7 +447,7 @@ export default function MemoryDetailPanel({
             <button
               type="button"
               onClick={() => setEditing(true)}
-              disabled={isSubmitting}
+              disabled={isSubmitting || !matching}
               className="cursor-pointer rounded bg-slate-900 px-3 py-1 text-sm text-white disabled:cursor-not-allowed disabled:opacity-50"
             >
               編集して承認
@@ -450,7 +455,7 @@ export default function MemoryDetailPanel({
             <button
               type="button"
               onClick={handleDelete}
-              disabled={isSubmitting}
+              disabled={isSubmitting || !matching}
               className="cursor-pointer rounded bg-rose-800 px-3 py-1 text-sm text-white disabled:cursor-not-allowed disabled:opacity-50"
             >
               削除
