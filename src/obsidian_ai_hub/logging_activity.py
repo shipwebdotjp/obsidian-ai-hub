@@ -205,18 +205,20 @@ def main():
 
             # Parse and validate project_id
             raw_project_id = data.get("project_id")
+            valid_ids = {p["id"] for p in active_projects}
             if isinstance(raw_project_id, bool):
                 # Booleans are not numbers
                 pass
             elif isinstance(raw_project_id, (int, float)):
-                val = int(raw_project_id)
-                valid_ids = {p["id"] for p in active_projects}
-                if val in valid_ids:
-                    project_id = val
+                if isinstance(raw_project_id, float) and not raw_project_id.is_integer():
+                    pass  # reject non-integer floats
+                else:
+                    val = int(raw_project_id)
+                    if val in valid_ids:
+                        project_id = val
             elif isinstance(raw_project_id, str):
                 if raw_project_id.strip().isdigit():
                     val = int(raw_project_id.strip())
-                    valid_ids = {p["id"] for p in active_projects}
                     if val in valid_ids:
                         project_id = val
 

@@ -182,3 +182,33 @@ def test_main_project_id_validation_cases(mock_dependencies):
         kwargs4 = deps["add"].call_args[1]
         assert kwargs4["project_id"] is None
         deps["add"].reset_mock()
+
+        # Case 5: Boolean project_id (should be None)
+        deps["llm"].generate_llm_response.return_value = json.dumps(
+            {
+                "summary": "Bool project",
+                "category": "開発",
+                "keywords": ["test"],
+                "project_id": False,
+            }
+        )
+        with patch("pathlib.Path.mkdir"):
+            main()
+        kwargs5 = deps["add"].call_args[1]
+        assert kwargs5["project_id"] is None
+        deps["add"].reset_mock()
+
+        # Case 6: Non-integer float (should be None)
+        deps["llm"].generate_llm_response.return_value = json.dumps(
+            {
+                "summary": "Float project",
+                "category": "開発",
+                "keywords": ["test"],
+                "project_id": 42.7,
+            }
+        )
+        with patch("pathlib.Path.mkdir"):
+            main()
+        kwargs6 = deps["add"].call_args[1]
+        assert kwargs6["project_id"] is None
+        deps["add"].reset_mock()
