@@ -1180,6 +1180,8 @@ export default function SummaryDashboardPage() {
                       <div className="mt-1 flex flex-wrap gap-1.5">
                         {statsData.candidate_topics.map((t) => {
                           const isSel = selectedTopics.includes(t);
+                          const selIdx = selectedTopics.indexOf(t);
+                          const paletteColor = isSel ? PALETTE[selIdx % PALETTE.length] : undefined;
                           return (
                             <button
                               key={t}
@@ -1190,9 +1192,10 @@ export default function SummaryDashboardPage() {
                                   setSelectedTopics([...selectedTopics, t]);
                                 }
                               }}
+                              style={isSel && paletteColor ? { backgroundColor: paletteColor, color: "#fff" } : undefined}
                               className={`rounded px-2 py-1 text-[10px] font-medium transition-all ${
                                 isSel
-                                  ? "bg-blue-600 text-white"
+                                  ? ""
                                   : "bg-slate-100 text-slate-600 hover:bg-slate-200"
                               } cursor-pointer`}
                             >
@@ -1224,6 +1227,8 @@ export default function SummaryDashboardPage() {
                       <div className="mt-1 flex flex-wrap gap-1.5">
                         {statsData.candidate_keywords.map((k) => {
                           const isSel = selectedKeywords.includes(k);
+                          const selIdx = selectedKeywords.indexOf(k);
+                          const paletteColor = isSel ? PALETTE[selIdx % PALETTE.length] : undefined;
                           return (
                             <button
                               key={k}
@@ -1234,9 +1239,10 @@ export default function SummaryDashboardPage() {
                                   setSelectedKeywords([...selectedKeywords, k]);
                                 }
                               }}
+                              style={isSel && paletteColor ? { backgroundColor: paletteColor, color: "#fff" } : undefined}
                               className={`rounded px-2 py-1 text-[10px] font-medium transition-all ${
                                 isSel
-                                  ? "bg-blue-600 text-white"
+                                  ? ""
                                   : "bg-slate-100 text-slate-600 hover:bg-slate-200"
                               } cursor-pointer`}
                             >

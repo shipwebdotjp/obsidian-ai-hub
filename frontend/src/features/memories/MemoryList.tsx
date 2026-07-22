@@ -187,6 +187,7 @@ export default function MemoryList({
           return (
             <li
               key={m.memory_id}
+              data-testid="memory-row"
               className={`flex items-start gap-2 p-3 hover:bg-slate-50 ${checked ? "bg-slate-100" : ""}`}
             >
               <input

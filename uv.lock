@@ -3641,6 +3641,7 @@ dependencies = [
 dev = [
     { name = "playwright" },
     { name = "pytest" },
+    { name = "requests" },
 ]
 
 [package.metadata]
@@ -3676,6 +3677,7 @@ requires-dist = [
 dev = [
     { name = "playwright", specifier = ">=1.61.0" },
     { name = "pytest", specifier = ">=9.0.3" },
+    { name = "requests", specifier = ">=2.31.0" },
 ]
 
 [[package]]

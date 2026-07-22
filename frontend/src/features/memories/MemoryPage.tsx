@@ -103,6 +103,7 @@ export default function MemoryPage() {
         <select
           value={status}
           onChange={(e) => setStatus(e.target.value as MemoryStatus)}
+          aria-label="ステータスフィルター"
           className="rounded border border-slate-300 px-2 py-1 text-sm"
         >
           <option value="candidate">候補</option>
@@ -115,12 +116,14 @@ export default function MemoryPage() {
           type="search"
           value={queryInput}
           onChange={(e) => setQueryInput(e.target.value)}
+          aria-label="メモリ検索"
           placeholder="検索 (本文 / タグ)"
           className="w-full min-w-0 rounded border border-slate-300 px-2 py-1 text-sm sm:w-auto sm:flex-1"
         />
         <select
           value={kind}
           onChange={(e) => setKind(e.target.value)}
+          aria-label="種別フィルター"
           className="rounded border border-slate-300 px-2 py-1 text-sm"
         >
           <option value="">種別: すべて</option>
@@ -133,6 +136,7 @@ export default function MemoryPage() {
         <select
           value={topic}
           onChange={(e) => setTopic(e.target.value)}
+          aria-label="トピックフィルター"
           className="rounded border border-slate-300 px-2 py-1 text-sm"
         >
           <option value="">トピック: すべて</option>

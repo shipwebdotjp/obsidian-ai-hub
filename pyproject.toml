@@ -44,8 +44,15 @@ where = ["src"]
 [tool.uv.sources]
 md-hybrid-search = { git = "https://github.com/shipwebdotjp/md-hybrid-search.git" }
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "e2e: browser end-to-end tests that require frontend/dist and Playwright Chromium",
+]
+
 [dependency-groups]
 dev = [
     "playwright>=1.61.0",
     "pytest>=9.0.3",
+    "requests>=2.31.0",
 ]

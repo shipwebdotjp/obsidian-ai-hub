@@ -29,3 +29,6 @@ memory.sqlite3
 server_output.log
 
 .env.test
+
+# E2E test artifacts
+test-results/
