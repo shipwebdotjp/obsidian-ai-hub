@@ -621,11 +621,18 @@ export default function SummaryDashboardPage() {
                             </td>
                             <td className="py-2.5 pr-2 max-w-[250px] font-medium text-slate-900">{log.summary}</td>
                             <td className="py-2.5 pr-2">
-                              {log.category && (
-                                <span className="rounded-md bg-slate-100 px-1.5 py-0.5 font-medium">
-                                  {log.category}
-                                </span>
-                              )}
+                              <div className="flex flex-col gap-1 items-start">
+                                {log.category && (
+                                  <span className="rounded-md bg-slate-100 px-1.5 py-0.5 font-medium">
+                                    {log.category}
+                                  </span>
+                                )}
+                                {log.project_name && (
+                                  <span className="rounded-md bg-sky-50 text-sky-700 border border-sky-100 px-1.5 py-0.5 font-medium flex items-center gap-0.5 whitespace-nowrap">
+                                    📁 {log.project_name}
+                                  </span>
+                                )}
+                              </div>
                             </td>
                             <td className="py-2.5">
                               <div className="flex flex-wrap gap-1">
@@ -1065,6 +1072,11 @@ export default function SummaryDashboardPage() {
                             {log.category && (
                               <span className="rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] text-indigo-600 font-semibold">
                                 {log.category}
+                              </span>
+                            )}
+                            {log.project_name && (
+                              <span className="rounded bg-sky-50 border border-sky-100 px-1.5 py-0.5 text-[10px] text-sky-700 font-semibold flex items-center gap-0.5 whitespace-nowrap">
+                                📁 {log.project_name}
                               </span>
                             )}
                             {log.keywords.map((k) => (

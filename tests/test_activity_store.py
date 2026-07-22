@@ -98,3 +98,55 @@ def test_no_conn_specified(test_memory_db_path):
 
     acts = store.get_activities_by_date(act["activity_date"])
     assert len(acts) == 1
+
+
+def test_activity_project_association_and_cascade_delete(test_memory_db_path):
+    conn = memory.get_db_connection()
+    try:
+        # Create a project first in the projects table
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO projects (
+                project_id, normalized_name, display_name, domain, status, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                42,
+                "test-project-n",
+                "Test Project N",
+                "work",
+                "active",
+                "2026-07-20T10:00:00",
+                "2026-07-20T10:00:00",
+            ),
+        )
+        conn.commit()
+
+        # Add an activity associated with the project
+        act = store.add_activity(
+            conn=conn,
+            activity_date="2026-07-20",
+            occurred_at="2026-07-20T12:00:00",
+            summary="Associated with project",
+            project_id=42,
+        )
+
+        # Retrieve and verify association & left join
+        acts = store.get_activities_by_date("2026-07-20", conn=conn)
+        assert len(acts) == 1
+        assert acts[0]["project_id"] == 42
+        assert acts[0]["project_name"] == "Test Project N"
+
+        # Now delete the project to verify ON DELETE SET NULL foreign key constraint cascade
+        cursor.execute("DELETE FROM projects WHERE project_id = 42")
+        conn.commit()
+
+        # Retrieve again and verify project_id has cascade-updated to NULL (None)
+        acts = store.get_activities_by_date("2026-07-20", conn=conn)
+        assert len(acts) == 1
+        assert acts[0]["project_id"] is None
+        assert acts[0]["project_name"] is None
+
+    finally:
+        conn.close()

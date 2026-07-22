@@ -441,6 +441,8 @@ class DashboardActivityLog(BaseModel):
     summary: Optional[str] = None
     category: Optional[str] = None
     keywords: list[str] = []
+    project_id: Optional[int] = None
+    project_name: Optional[str] = None
 
 
 class TodayActivity(BaseModel):

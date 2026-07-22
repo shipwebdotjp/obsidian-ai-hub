@@ -7,6 +7,7 @@ from obsidian_ai_hub.take_screenshot import capture_screen, get_unique_path
 from obsidian_ai_hub.utils import accessibility, config, img2text, llm_client, prompt
 from obsidian_ai_hub.activity.categories import ACTIVITY_CATEGORIES
 from obsidian_ai_hub.activity.store import add_activity, get_latest_activity_by_date
+from obsidian_ai_hub.summary.project_utils import get_active_projects_for_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -135,9 +136,22 @@ def main():
     # 「その時点で何をしていたか」を日本語で短く要約、およびカテゴリ分類
     categories_str = ", ".join(ACTIVITY_CATEGORIES)
 
+    # Fetch active projects
+    try:
+        active_projects = get_active_projects_for_prompt()
+    except Exception as e:
+        logger.error(f"Failed to fetch active projects: {e}")
+        active_projects = []
+
+    if active_projects:
+        projects_str = json.dumps(active_projects, ensure_ascii=False, indent=2)
+    else:
+        projects_str = "現在有効なプロジェクトはありません。"
+
     summary = f"{app_name} での作業を検出しました。"
     category = "その他"
     keywords = []
+    project_id = None
 
     try:
         rendered_prompt = prompt.render_prompt(
@@ -147,6 +161,7 @@ def main():
                 "app_name": app_name,
                 "window_title": window_title,
                 "ocr_text_combined": ocr_text_combined,
+                "projects_str": projects_str,
             },
         )
         response = llm_client.generate_llm_response(
@@ -188,6 +203,23 @@ def main():
             else:
                 keywords = []
 
+            # Parse and validate project_id
+            raw_project_id = data.get("project_id")
+            if isinstance(raw_project_id, bool):
+                # Booleans are not numbers
+                pass
+            elif isinstance(raw_project_id, (int, float)):
+                val = int(raw_project_id)
+                valid_ids = {p["id"] for p in active_projects}
+                if val in valid_ids:
+                    project_id = val
+            elif isinstance(raw_project_id, str):
+                if raw_project_id.strip().isdigit():
+                    val = int(raw_project_id.strip())
+                    valid_ids = {p["id"] for p in active_projects}
+                    if val in valid_ids:
+                        project_id = val
+
         except (json.JSONDecodeError, ValueError) as e:
             logger.error(f"Failed to parse LLM response as JSON: {e}")
             # パース失敗時は、response全体をsummaryとして使うか、デフォルト維持
@@ -212,6 +244,7 @@ def main():
             category=category,
             keywords=keywords,
             screenshots=screenshot_paths,
+            project_id=project_id,
         )
         logger.info("Activity logged to SQLite")
     except Exception as e:

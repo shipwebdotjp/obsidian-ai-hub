@@ -412,6 +412,8 @@ def get_dashboard_home(now: Optional[datetime] = None) -> dict:
                 "summary": log.get("summary"),
                 "category": log.get("category"),
                 "keywords": log.get("keywords") or [],
+                "project_id": log.get("project_id"),
+                "project_name": log.get("project_name"),
             }
         )
 
@@ -615,6 +617,8 @@ def get_dashboard_day_details(target_date_str: str) -> dict:
                 "summary": log.get("summary"),
                 "category": log.get("category"),
                 "keywords": log.get("keywords") or [],
+                "project_id": log.get("project_id"),
+                "project_name": log.get("project_name"),
             }
         )
 

@@ -444,6 +444,9 @@ def get_db_connection() -> sqlite3.Connection:
     if current_version <= 9:
         run_migration_v10(conn)
 
+    if current_version <= 10:
+        run_migration_v11(conn)
+
     return conn
 
 
@@ -490,4 +493,16 @@ def run_migration_v10(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_llm_call_logs_status_started ON llm_call_logs(status, started_at DESC);")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_llm_call_logs_run_id_started ON llm_call_logs(run_id, started_at);")
     conn.execute("PRAGMA user_version = 10;")
+    conn.commit()
+
+
+def run_migration_v11(conn: sqlite3.Connection) -> None:
+    """Run the migration schema upgrade for version 11 (activity_logs.project_id column and index)."""
+    conn.execute(
+        "ALTER TABLE activity_logs ADD COLUMN project_id INTEGER REFERENCES projects(project_id) ON DELETE SET NULL;"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_activity_logs_project_id ON activity_logs(project_id);"
+    )
+    conn.execute("PRAGMA user_version = 11;")
     conn.commit()
