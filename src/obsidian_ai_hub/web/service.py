@@ -2650,3 +2650,44 @@ def get_command_run_detail(run_id: str) -> Optional[dict]:
 def get_llm_call_detail(call_id: str) -> Optional[dict]:
     from obsidian_ai_hub.utils import execution_logger
     return execution_logger.get_llm_call_detail(call_id)
+
+
+# --- HITL services ---
+
+def list_hitl_runs(
+    status: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> tuple[list[dict], int]:
+    from obsidian_ai_hub.hitl import store as hitl_store
+    return hitl_store.list_runs(status=status, limit=limit, offset=offset)
+
+
+def get_hitl_run_detail(run_id: str) -> Optional[dict]:
+    from obsidian_ai_hub.hitl import store as hitl_store
+    run = hitl_store.get_run(run_id)
+    if run is None:
+        return None
+    questions = hitl_store.get_all_questions_for_run(run_id)
+    run_detail = dict(run)
+    run_detail["questions"] = questions
+    return run_detail
+
+
+def submit_hitl_answer(run_id: str, question_key: str, answer: Any) -> None:
+    from obsidian_ai_hub.hitl import service as hitl_service
+    from obsidian_ai_hub.hitl import store as hitl_store
+    run = hitl_store.get_run(run_id)
+    if run is None:
+        raise FileNotFoundError(f"Run {run_id} not found")
+
+    active_set_id = run.get("active_question_set_id")
+    if not active_set_id:
+        raise ValueError(f"No active question set for run {run_id}")
+
+    hitl_service.submit_answer(run_id, active_set_id, question_key, answer)
+
+
+def cancel_hitl_run(run_id: str) -> None:
+    from obsidian_ai_hub.hitl import service as hitl_service
+    hitl_service.cancel_run(run_id)

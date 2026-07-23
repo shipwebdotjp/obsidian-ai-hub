@@ -161,6 +161,51 @@ export function batchReview(body: BatchReviewRequest): Promise<BatchReviewRespon
   });
 }
 
+// --- HITL client functions ---
+
+import type {
+  HitlRunDetail,
+  HitlRunListResponse,
+} from "./types";
+
+export function listHitlRuns(params: {
+  status?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<HitlRunListResponse> {
+  const sp = new URLSearchParams();
+  if (params.status) sp.set("status", params.status);
+  if (params.limit) sp.set("limit", String(params.limit));
+  if (params.offset) sp.set("offset", String(params.offset));
+  const qs = sp.toString();
+  return request<HitlRunListResponse>(`/api/v1/hitl/runs${qs ? `?${qs}` : ""}`);
+}
+
+export function getHitlRun(runId: string): Promise<HitlRunDetail> {
+  return request<HitlRunDetail>(`/api/v1/hitl/runs/${encodeURIComponent(runId)}`);
+}
+
+export function submitHitlAnswer(
+  runId: string,
+  questionKey: string,
+  answer: any,
+): Promise<{ success: boolean }> {
+  return request<{ success: boolean }>(
+    `/api/v1/hitl/runs/${encodeURIComponent(runId)}/questions/${encodeURIComponent(questionKey)}/answer`,
+    {
+      method: "POST",
+      body: JSON.stringify({ answer }),
+    },
+  );
+}
+
+export function cancelHitlRun(runId: string): Promise<{ success: boolean }> {
+  return request<{ success: boolean }>(
+    `/api/v1/hitl/runs/${encodeURIComponent(runId)}/cancel`,
+    { method: "POST" },
+  );
+}
+
 // --- Task Config APIs ---
 
 import type {

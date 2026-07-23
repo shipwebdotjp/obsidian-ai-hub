@@ -1,0 +1,444 @@
+import { useEffect, useState, useCallback, useRef } from "react";
+import {
+  ApiError,
+  listHitlRuns,
+  getHitlRun,
+  submitHitlAnswer,
+  cancelHitlRun,
+} from "../../api/client";
+import type { HitlRun, HitlRunDetail, HitlQuestion } from "../../api/types";
+import { formatDateTime } from "../../utils/date";
+
+export default function HitlPage() {
+  const [runs, setRuns] = useState<HitlRun[]>([]);
+  const [total, setTotal] = useState(0);
+  const [selectedRun, setSelectedRun] = useState<HitlRunDetail | null>(null);
+  const [statusFilter, setStatusFilter] = useState<string>("pending_user");
+  const [loading, setLoading] = useState(false);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [detailError, setDetailError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState<string | null>(null); // question_id or runId if cancelling
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [answers, setAnswers] = useState<Record<string, any>>({});
+
+  const abortRef = useRef<AbortController | null>(null);
+
+  const reloadRuns = useCallback(async () => {
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await listHitlRuns({
+        status: statusFilter === "all" ? undefined : statusFilter,
+        limit: 100,
+      });
+      if (controller.signal.aborted) return;
+      setRuns(res.items);
+      setTotal(res.total);
+    } catch (e) {
+      if (controller.signal.aborted) return;
+      setError(e instanceof ApiError ? e.message : "確認待ちタスクの取得に失敗しました");
+    } finally {
+      if (!controller.signal.aborted) setLoading(false);
+    }
+  }, [statusFilter]);
+
+  useEffect(() => {
+    void reloadRuns();
+    return () => {
+      abortRef.current?.abort();
+    };
+  }, [reloadRuns]);
+
+  const loadDetail = useCallback(async (runId: string) => {
+    setDetailLoading(true);
+    setDetailError(null);
+    setSuccessMessage(null);
+    setAnswers({});
+    try {
+      const detail = await getHitlRun(runId);
+      setSelectedRun(detail);
+      // Initialize answer states for pending questions
+      const initialAnswers: Record<string, any> = {};
+      detail.questions.forEach((q) => {
+        if (q.status === "pending") {
+          initialAnswers[q.question_key] = q.question_type === "boolean" ? true : "";
+        }
+      });
+      setAnswers(initialAnswers);
+    } catch (e) {
+      setDetailError(e instanceof ApiError ? e.message : "詳細情報の取得に失敗しました");
+      setSelectedRun(null);
+    } finally {
+      setDetailLoading(false);
+    }
+  }, []);
+
+  const handleSelectRun = (run: HitlRun) => {
+    void loadDetail(run.run_id);
+  };
+
+  const handleSubmitAnswer = async (q: HitlQuestion) => {
+    if (!selectedRun) return;
+    const ansValue = answers[q.question_key];
+
+    // Simple validation
+    if (q.is_required && (ansValue === undefined || ansValue === "")) {
+      setDetailError(`${q.display_text} の回答は必須です。`);
+      return;
+    }
+
+    setSubmitting(q.question_id);
+    setDetailError(null);
+    setSuccessMessage(null);
+    try {
+      await submitHitlAnswer(selectedRun.run_id, q.question_key, ansValue);
+      setSuccessMessage("回答を正常に送信しました。");
+      // Reload run detail to reflect updated questions and run status
+      await loadDetail(selectedRun.run_id);
+      await reloadRuns();
+    } catch (e) {
+      setDetailError(e instanceof ApiError ? e.message : "回答の送信に失敗しました");
+    } finally {
+      setSubmitting(null);
+    }
+  };
+
+  const handleCancelRun = async () => {
+    if (!selectedRun) return;
+    if (!window.confirm("この確認タスクの実行全体をキャンセルしますか？")) return;
+
+    setSubmitting(selectedRun.run_id);
+    setDetailError(null);
+    setSuccessMessage(null);
+    try {
+      await cancelHitlRun(selectedRun.run_id);
+      setSuccessMessage("タスク全体を正常にキャンセルしました。");
+      await loadDetail(selectedRun.run_id);
+      await reloadRuns();
+    } catch (e) {
+      setDetailError(e instanceof ApiError ? e.message : "キャンセルの実行に失敗しました");
+    } finally {
+      setSubmitting(null);
+    }
+  };
+
+  const statusLabel = (s: string) => {
+    switch (s) {
+      case "pending_user": return "回答待ち";
+      case "ready_to_resume": return "再開可能";
+      case "running": return "実行中";
+      case "completed": return "完了";
+      case "failed": return "失敗";
+      case "cancelled": return "キャンセル済み";
+      default: return s;
+    }
+  };
+
+  const statusBadgeColor = (s: string) => {
+    switch (s) {
+      case "pending_user": return "bg-yellow-100 text-yellow-800";
+      case "ready_to_resume": return "bg-emerald-100 text-emerald-800";
+      case "running": return "bg-blue-100 text-blue-800";
+      case "completed": return "bg-slate-100 text-slate-800";
+      case "failed": return "bg-rose-100 text-rose-800";
+      case "cancelled": return "bg-rose-100 text-rose-800";
+      default: return "bg-slate-100 text-slate-800";
+    }
+  };
+
+  return (
+    <div className="flex h-full flex-col bg-slate-50 lg:flex-row">
+      {/* Runs Side Panel */}
+      <div className="flex h-full w-full flex-col border-r border-slate-200 bg-white lg:w-80 shrink-0">
+        <div className="border-b border-slate-200 p-4">
+          <div className="flex items-center justify-between">
+            <h1 className="text-base font-semibold text-slate-800">確認待ちタスク</h1>
+            <span className="text-xs text-slate-500">({total} 件)</span>
+          </div>
+          <div className="mt-3">
+            <label htmlFor="status-filter" className="sr-only">
+              ステータス
+            </label>
+            <select
+              id="status-filter"
+              aria-label="ステータスフィルター"
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="w-full cursor-pointer rounded border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 outline-none"
+            >
+              <option value="all">すべて</option>
+              <option value="pending_user">回答待ち</option>
+              <option value="ready_to_resume">再開可能</option>
+              <option value="running">実行中</option>
+              <option value="completed">完了</option>
+              <option value="failed">失敗</option>
+              <option value="cancelled">キャンセル済み</option>
+            </select>
+          </div>
+        </div>
+
+        {loading && <p className="p-4 text-xs text-slate-500">読み込み中…</p>}
+        {error && <p className="p-4 text-xs text-red-600">{error}</p>}
+
+        <ul className="flex-1 overflow-y-auto divide-y divide-slate-100">
+          {runs.map((r) => {
+            const isSelected = selectedRun?.run_id === r.run_id;
+            return (
+              <li
+                key={r.run_id}
+                data-testid="hitl-run-row"
+                data-selected={isSelected ? "true" : "false"}
+                onClick={() => handleSelectRun(r)}
+                className={`cursor-pointer p-4 transition-colors ${
+                  isSelected
+                    ? "bg-slate-200 border-l-4 border-slate-800"
+                    : "hover:bg-slate-50"
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-slate-800 truncate" title={r.run_id}>
+                    {r.run_id}
+                  </span>
+                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${statusBadgeColor(r.status)}`}>
+                    {statusLabel(r.status)}
+                  </span>
+                </div>
+                <div className="mt-1 text-xs text-slate-500 truncate">
+                  Handler: {r.handler}
+                </div>
+                <div className="mt-1 text-[10px] text-slate-400">
+                  {formatDateTime(r.created_at)}
+                </div>
+              </li>
+            );
+          })}
+          {!loading && runs.length === 0 && (
+            <li className="p-6 text-center text-xs text-slate-400">
+              該当するタスクはありません。
+            </li>
+          )}
+        </ul>
+      </div>
+
+      {/* Run Details Panel */}
+      <div className="min-w-0 flex-1 overflow-y-auto bg-slate-50 p-6">
+        {detailLoading && (
+          <p className="text-sm text-slate-500">詳細情報を読み込み中…</p>
+        )}
+
+        {detailError && (
+          <div className="mb-4 rounded border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
+            {detailError}
+          </div>
+        )}
+
+        {successMessage && (
+          <div className="mb-4 rounded border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-700">
+            {successMessage}
+          </div>
+        )}
+
+        {selectedRun ? (
+          <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+            <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-200 pb-4">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-800">{selectedRun.run_id}</h2>
+                <p className="mt-1 text-xs text-slate-500">
+                  Handler: <code className="rounded bg-slate-100 px-1 py-0.5">{selectedRun.handler}</code>
+                </p>
+              </div>
+              <div className="flex flex-col items-end gap-2">
+                <span className={`rounded px-2.5 py-1 text-xs font-semibold ${statusBadgeColor(selectedRun.status)}`}>
+                  {statusLabel(selectedRun.status)}
+                </span>
+                <span className="text-[10px] text-slate-400">
+                  登録: {formatDateTime(selectedRun.created_at)}
+                </span>
+              </div>
+            </div>
+
+            {selectedRun.error_message && (
+              <div className="mt-4 rounded border border-rose-100 bg-rose-50/50 p-4">
+                <h3 className="text-xs font-semibold text-rose-800">エラーメッセージ</h3>
+                <p className="mt-1 text-xs text-rose-700">{selectedRun.error_message}</p>
+              </div>
+            )}
+
+            {/* Run-level Action (Cancellation) */}
+            {["pending_user", "ready_to_resume"].includes(selectedRun.status) && (
+              <div className="mt-6 flex justify-end">
+                <button
+                  type="button"
+                  onClick={handleCancelRun}
+                  disabled={!!submitting}
+                  className="rounded bg-rose-600 px-4 py-2 text-xs font-semibold text-white hover:bg-rose-700 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                >
+                  {submitting === selectedRun.run_id ? "キャンセル中…" : "実行全体をキャンセル"}
+                </button>
+              </div>
+            )}
+
+            {/* Question Set List */}
+            <div className="mt-8 space-y-6">
+              <h3 className="text-sm font-bold text-slate-700 border-l-4 border-slate-700 pl-2">
+                質問セット ({selectedRun.active_question_set_id || "デフォルト"})
+              </h3>
+
+              <div className="space-y-4">
+                {selectedRun.questions.map((q) => {
+                  const isPending = q.status === "pending";
+                  const answerVal = answers[q.question_key];
+
+                  return (
+                    <div
+                      key={q.question_id}
+                      className="rounded-lg border border-slate-100 bg-slate-50/50 p-5"
+                    >
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-bold text-slate-500">[{q.question_key}]</span>
+                            {q.is_required === 1 && (
+                              <span className="rounded bg-red-100 px-1 py-0.5 text-[10px] font-medium text-red-800">
+                                必須
+                              </span>
+                            )}
+                          </div>
+                          <p className="mt-2 text-sm font-medium text-slate-800">{q.display_text}</p>
+                        </div>
+                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                          q.status === "pending"
+                            ? "bg-yellow-100 text-yellow-800"
+                            : q.status === "answered"
+                            ? "bg-emerald-100 text-emerald-800"
+                            : "bg-slate-200 text-slate-600"
+                        }`}>
+                          {q.status === "pending"
+                            ? "回答待ち"
+                            : q.status === "answered"
+                            ? "回答済み"
+                            : q.status === "skipped"
+                            ? "スキップ"
+                            : "キャンセル"}
+                        </span>
+                      </div>
+
+                      {/* Answering fields */}
+                      <div className="mt-4 border-t border-slate-100 pt-4">
+                        {isPending ? (
+                          <div className="space-y-4">
+                            {/* Boolean type Rendering */}
+                            {q.question_type === "boolean" && (
+                              <div className="flex items-center gap-4">
+                                <label className="flex items-center gap-2 cursor-pointer text-sm text-slate-700">
+                                  <input
+                                    type="radio"
+                                    name={q.question_id}
+                                    checked={answerVal === true}
+                                    onChange={() => setAnswers({ ...answers, [q.question_key]: true })}
+                                    className="cursor-pointer"
+                                  />
+                                  <span>はい (True)</span>
+                                </label>
+                                <label className="flex items-center gap-2 cursor-pointer text-sm text-slate-700">
+                                  <input
+                                    type="radio"
+                                    name={q.question_id}
+                                    checked={answerVal === false}
+                                    onChange={() => setAnswers({ ...answers, [q.question_key]: false })}
+                                    className="cursor-pointer"
+                                  />
+                                  <span>いいえ (False)</span>
+                                </label>
+                              </div>
+                            )}
+
+                            {/* Select type Rendering */}
+                            {q.question_type === "select" && q.choices && (
+                              <div className="flex flex-wrap gap-2">
+                                {q.choices.map((choice: any) => {
+                                  const choiceStr = String(choice);
+                                  const isSelected = answerVal === choice;
+                                  return (
+                                    <button
+                                      key={choiceStr}
+                                      type="button"
+                                      onClick={() => setAnswers({ ...answers, [q.question_key]: choice })}
+                                      className={`rounded px-3 py-1.5 text-xs font-medium cursor-pointer transition-colors ${
+                                        isSelected
+                                          ? "bg-blue-600 text-white"
+                                          : "bg-slate-200 text-slate-700 hover:bg-slate-300"
+                                      }`}
+                                    >
+                                      {choiceStr}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            )}
+
+                            {/* Text / Comment type Rendering */}
+                            {q.question_type === "text" && (
+                              <textarea
+                                value={answerVal || ""}
+                                onChange={(e) => setAnswers({ ...answers, [q.question_key]: e.target.value })}
+                                placeholder="回答を入力してください…"
+                                className="w-full rounded border border-slate-200 bg-white p-3 text-sm text-slate-800 outline-none focus:border-slate-400"
+                                rows={3}
+                              />
+                            )}
+
+                            <div className="flex justify-end mt-2">
+                              <button
+                                type="button"
+                                onClick={() => handleSubmitAnswer(q)}
+                                disabled={submitting === q.question_id}
+                                className="rounded bg-blue-600 px-4 py-2 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                              >
+                                {submitting === q.question_id ? "送信中…" : "回答を送信"}
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          // Answered or Cancelled state display
+                          <div className="text-sm">
+                            <span className="text-xs text-slate-500 font-semibold block">
+                              回答内容:
+                            </span>
+                            <div className="mt-1 rounded border border-slate-100 bg-white p-3 font-medium text-slate-800 whitespace-pre-wrap">
+                              {q.answer === null || q.answer === undefined
+                                ? "(回答なし/スキップ)"
+                                : typeof q.answer === "object"
+                                ? JSON.stringify(q.answer)
+                                : String(q.answer)}
+                            </div>
+                            {q.answered_at && (
+                              <span className="mt-1 block text-[10px] text-slate-400 text-right">
+                                回答日時: {formatDateTime(q.answered_at)}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        ) : (
+          !detailLoading && (
+            <div className="flex h-64 flex-col items-center justify-center rounded-xl border border-dashed border-slate-300 bg-white text-slate-400 shadow-sm">
+              <span className="text-sm">一覧から確認待ちタスクを選択してください。</span>
+            </div>
+          )
+        )}
+      </div>
+    </div>
+  );
+}

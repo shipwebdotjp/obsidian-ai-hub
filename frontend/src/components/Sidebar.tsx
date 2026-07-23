@@ -37,6 +37,9 @@ export default function Sidebar({ open, onClose, id }: SidebarProps) {
         <NavLink to={ROUTES.RESEARCH} className={linkClass} onClick={onClose}>
           リサーチ
         </NavLink>
+        <NavLink to={ROUTES.HITL} className={linkClass} onClick={onClose}>
+          確認待ち
+        </NavLink>
         <NavLink to={ROUTES.VAULT_SEARCH} className={linkClass} onClick={onClose}>
           Vault 検索
         </NavLink>

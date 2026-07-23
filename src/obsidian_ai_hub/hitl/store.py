@@ -134,6 +134,35 @@ def upsert_run(run: Dict[str, Any], conn: Optional[sqlite3.Connection] = None) -
             active_conn.execute(sql, values)
 
 
+def list_runs(
+    status: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
+    conn: Optional[sqlite3.Connection] = None,
+) -> tuple[List[Dict[str, Any]], int]:
+    """Fetch a paginated list of HITL runs and the total count."""
+    sql = "SELECT * FROM hitl_runs"
+    count_sql = "SELECT COUNT(*) FROM hitl_runs"
+    params = []
+
+    if status:
+        sql += " WHERE status = ?"
+        count_sql += " WHERE status = ?"
+        params.append(status)
+
+    sql += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+    query_params = list(params) + [limit, offset]
+
+    with auto_connection(conn) as (active_conn, _):
+        cursor = active_conn.cursor()
+        cursor.execute(count_sql, tuple(params))
+        total = cursor.fetchone()[0]
+
+        cursor.execute(sql, tuple(query_params))
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows], total
+
+
 def insert_question(q: Dict[str, Any], conn: Optional[sqlite3.Connection] = None) -> None:
     """Insert a new HITL question."""
     if not q.get("question_id"):

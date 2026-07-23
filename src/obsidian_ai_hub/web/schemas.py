@@ -844,3 +844,48 @@ class CommandPreviewResponse(BaseModel):
     is_preset: bool
     preset_flag: Optional[str] = None
     preset_name: Optional[str] = None
+
+# --- HITL schemas ---
+
+class HitlQuestion(BaseModel):
+    question_id: str
+    run_id: str
+    question_set_id: str
+    question_key: str
+    status: str
+    question_type: str
+    display_text: str
+    choices: Optional[Any] = None
+    answer: Optional[Any] = None
+    is_required: int
+    expires_at: Optional[str] = None
+    answered_at: Optional[str] = None
+    created_at: str
+    updated_at: str
+
+
+class HitlRun(BaseModel):
+    run_id: str
+    handler: str
+    status: str
+    checkpoint: Optional[str] = None
+    active_question_set_id: Optional[str] = None
+    lease_owner: Optional[str] = None
+    lease_expires_at: Optional[str] = None
+    retry_count: int
+    error_message: Optional[str] = None
+    created_at: str
+    updated_at: str
+
+
+class HitlRunDetail(HitlRun):
+    questions: list[HitlQuestion] = []
+
+
+class HitlRunListResponse(BaseModel):
+    items: list[HitlRun]
+    total: int
+
+
+class SubmitAnswerRequest(BaseModel):
+    answer: Any

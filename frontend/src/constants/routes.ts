@@ -7,4 +7,5 @@ export const ROUTES = {
   PROJECTS: "/projects",
   TASKS: "/tasks",
   EXECUTION_LOGS: "/execution-logs",
+  HITL: "/hitl",
 } as const;

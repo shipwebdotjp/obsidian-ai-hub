@@ -433,3 +433,45 @@ export interface CommandPreviewResponse {
   preset_flag?: string | null;
   preset_name?: string | null;
 }
+
+// --- HITL types ---
+
+export interface HitlQuestion {
+  question_id: string;
+  run_id: string;
+  question_set_id: string;
+  question_key: string;
+  status: string;
+  question_type: string;
+  display_text: string;
+  choices: any[] | null;
+  answer: any | null;
+  is_required: number;
+  expires_at: string | null;
+  answered_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface HitlRun {
+  run_id: string;
+  handler: string;
+  status: string;
+  checkpoint: string | null;
+  active_question_set_id: string | null;
+  lease_owner: string | null;
+  lease_expires_at: string | null;
+  retry_count: number;
+  error_message: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface HitlRunDetail extends HitlRun {
+  questions: HitlQuestion[];
+}
+
+export interface HitlRunListResponse {
+  items: HitlRun[];
+  total: number;
+}
