@@ -453,7 +453,24 @@ def get_db_connection() -> sqlite3.Connection:
     if current_version <= 12:
         run_migration_v13(conn)
 
+    if current_version <= 13:
+        run_migration_v14(conn)
+
     return conn
+
+
+def run_migration_v14(conn: sqlite3.Connection) -> None:
+    """Run the migration schema upgrade for version 14 (research_jobs output columns)."""
+    try:
+        conn.execute("ALTER TABLE research_jobs ADD COLUMN output_path TEXT;")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        conn.execute("ALTER TABLE research_jobs ADD COLUMN is_published INTEGER NOT NULL DEFAULT 0;")
+    except sqlite3.OperationalError:
+        pass
+    conn.execute("PRAGMA user_version = 14;")
+    conn.commit()
 
 
 def run_migration_v13(conn: sqlite3.Connection) -> None:

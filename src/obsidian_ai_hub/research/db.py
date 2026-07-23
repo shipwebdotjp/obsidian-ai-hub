@@ -43,6 +43,8 @@ RESEARCH_JOB_COLUMNS = [
     "error",
     "started_at",
     "finished_at",
+    "output_path",
+    "is_published",
 ]
 
 ALLOWED_THEME_STATUS = frozenset({"candidate", "approved", "rejected", "duplicate"})
@@ -114,6 +116,7 @@ def create_theme(
     duplicate_of_theme_id: Optional[str] = None,
     duplicate_reason: Optional[str] = None,
     related_theme_ids: Optional[list[str]] = None,
+    conn: Optional[sqlite3.Connection] = None,
 ) -> dict:
     now = get_current_timestamp()
     theme_id = generate_theme_id()
@@ -143,29 +146,37 @@ def create_theme(
     db_row = serialize_theme(rec)
     columns = ", ".join(RESEARCH_THEME_COLUMNS)
     placeholders = ", ".join("?" for _ in RESEARCH_THEME_COLUMNS)
-    conn = _get_db()
+    db_conn = conn if conn is not None else _get_db()
     try:
-        with conn:
-            conn.execute(
+        if conn is not None:
+            db_conn.execute(
                 f"INSERT INTO research_themes ({columns}) VALUES ({placeholders})",
                 tuple(db_row.get(c) for c in RESEARCH_THEME_COLUMNS),
             )
+        else:
+            with db_conn:
+                db_conn.execute(
+                    f"INSERT INTO research_themes ({columns}) VALUES ({placeholders})",
+                    tuple(db_row.get(c) for c in RESEARCH_THEME_COLUMNS),
+                )
     finally:
-        conn.close()
+        if conn is None:
+            db_conn.close()
     return rec
 
 
-def get_theme(theme_id: str) -> Optional[dict]:
-    conn = _get_db()
+def get_theme(theme_id: str, conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
+    db_conn = conn if conn is not None else _get_db()
     try:
-        cursor = conn.cursor()
+        cursor = db_conn.cursor()
         cursor.execute("SELECT * FROM research_themes WHERE theme_id = ?", (theme_id,))
         row = cursor.fetchone()
         if row is None:
             return None
         return deserialize_theme(dict(row))
     finally:
-        conn.close()
+        if conn is None:
+            db_conn.close()
 
 
 def list_themes(
@@ -246,14 +257,15 @@ def set_status(
     reason: Optional[str] = None,
     duplicate_of: Optional[str] = None,
     related_ids: Optional[list[str]] = None,
+    conn: Optional[sqlite3.Connection] = None,
 ) -> Optional[dict]:
     if status not in ALLOWED_THEME_STATUS:
         raise ValueError(f"Invalid status: {status}")
     now = get_current_timestamp()
-    conn = _get_db()
+    db_conn = conn if conn is not None else _get_db()
     try:
-        with conn:
-            cursor = conn.cursor()
+        def _execute_update(c_conn):
+            cursor = c_conn.cursor()
             cursor.execute(
                 "SELECT * FROM research_themes WHERE theme_id = ?", (theme_id,)
             )
@@ -279,15 +291,22 @@ def set_status(
             values = [
                 db_row.get(c) for c in RESEARCH_THEME_COLUMNS if c != "theme_id"
             ] + [theme_id]
-            conn.execute(
+            c_conn.execute(
                 f"UPDATE research_themes SET {set_clause} WHERE theme_id = ?", values
             )
-        return t
+            return t
+
+        if conn is not None:
+            return _execute_update(db_conn)
+        else:
+            with db_conn:
+                return _execute_update(db_conn)
     finally:
-        conn.close()
+        if conn is None:
+            db_conn.close()
 
 
-def create_job(theme_id: str) -> dict:
+def create_job(theme_id: str, conn: Optional[sqlite3.Connection] = None) -> dict:
     now = get_current_timestamp()
     job_id = generate_job_id()
     rec = {
@@ -301,18 +320,27 @@ def create_job(theme_id: str) -> dict:
         "error": None,
         "started_at": now,
         "finished_at": None,
+        "output_path": None,
+        "is_published": 0,
     }
     columns = ", ".join(RESEARCH_JOB_COLUMNS)
     placeholders = ", ".join("?" for _ in RESEARCH_JOB_COLUMNS)
-    conn = _get_db()
+    db_conn = conn if conn is not None else _get_db()
     try:
-        with conn:
-            conn.execute(
+        if conn is not None:
+            db_conn.execute(
                 f"INSERT INTO research_jobs ({columns}) VALUES ({placeholders})",
                 tuple(rec.get(c) for c in RESEARCH_JOB_COLUMNS),
             )
+        else:
+            with db_conn:
+                db_conn.execute(
+                    f"INSERT INTO research_jobs ({columns}) VALUES ({placeholders})",
+                    tuple(rec.get(c) for c in RESEARCH_JOB_COLUMNS),
+                )
     finally:
-        conn.close()
+        if conn is None:
+            db_conn.close()
     return rec
 
 
@@ -325,11 +353,14 @@ def update_job(
     markdown: Optional[str] = None,
     error: Optional[str] = None,
     finished_at: Optional[str] = None,
+    output_path: Optional[str] = None,
+    is_published: Optional[int] = None,
+    conn: Optional[sqlite3.Connection] = None,
 ) -> Optional[dict]:
-    conn = _get_db()
+    db_conn = conn if conn is not None else _get_db()
     try:
-        with conn:
-            cursor = conn.cursor()
+        def _execute_update(c_conn):
+            cursor = c_conn.cursor()
             cursor.execute("SELECT * FROM research_jobs WHERE job_id = ?", (job_id,))
             row = cursor.fetchone()
             if row is None:
@@ -351,6 +382,10 @@ def update_job(
                 j["finished_at"] = finished_at
             elif status in ("succeeded", "failed"):
                 j["finished_at"] = get_current_timestamp()
+            if output_path is not None:
+                j["output_path"] = output_path
+            if is_published is not None:
+                j["is_published"] = is_published
 
             set_clause = ", ".join(
                 f"{c} = ?" for c in RESEARCH_JOB_COLUMNS if c != "job_id"
@@ -358,18 +393,25 @@ def update_job(
             values = [j.get(c) for c in RESEARCH_JOB_COLUMNS if c != "job_id"] + [
                 job_id
             ]
-            conn.execute(
+            c_conn.execute(
                 f"UPDATE research_jobs SET {set_clause} WHERE job_id = ?", values
             )
             return j
+
+        if conn is not None:
+            return _execute_update(db_conn)
+        else:
+            with db_conn:
+                return _execute_update(db_conn)
     finally:
-        conn.close()
+        if conn is None:
+            db_conn.close()
 
 
-def latest_job(theme_id: str) -> Optional[dict]:
-    conn = _get_db()
+def latest_job(theme_id: str, conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
+    db_conn = conn if conn is not None else _get_db()
     try:
-        cursor = conn.cursor()
+        cursor = db_conn.cursor()
         cursor.execute(
             "SELECT * FROM research_jobs WHERE theme_id = ? ORDER BY started_at DESC LIMIT 1",
             (theme_id,),
@@ -379,26 +421,28 @@ def latest_job(theme_id: str) -> Optional[dict]:
             return None
         return dict(row)
     finally:
-        conn.close()
+        if conn is None:
+            db_conn.close()
 
 
-def get_job(job_id: str) -> Optional[dict]:
-    conn = _get_db()
+def get_job(job_id: str, conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
+    db_conn = conn if conn is not None else _get_db()
     try:
-        cursor = conn.cursor()
+        cursor = db_conn.cursor()
         cursor.execute("SELECT * FROM research_jobs WHERE job_id = ?", (job_id,))
         row = cursor.fetchone()
         if row is None:
             return None
         return dict(row)
     finally:
-        conn.close()
+        if conn is None:
+            db_conn.close()
 
 
-def find_exact_duplicate(normalized_key: str) -> Optional[dict]:
-    conn = _get_db()
+def find_exact_duplicate(normalized_key: str, conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
+    db_conn = conn if conn is not None else _get_db()
     try:
-        cursor = conn.cursor()
+        cursor = db_conn.cursor()
         cursor.execute(
             "SELECT * FROM research_themes WHERE normalized_key = ? LIMIT 1",
             (normalized_key,),
@@ -408,18 +452,20 @@ def find_exact_duplicate(normalized_key: str) -> Optional[dict]:
             return None
         return deserialize_theme(dict(row))
     finally:
-        conn.close()
+        if conn is None:
+            db_conn.close()
 
 
-def find_top_similar(theme: str, embedder, k: int = 5) -> list[tuple[str, float]]:
+def find_top_similar(theme: str, embedder, k: int = 5, conn: Optional[sqlite3.Connection] = None) -> list[tuple[str, float]]:
     try:
-        conn = _get_db()
+        db_conn = conn if conn is not None else _get_db()
         try:
-            cursor = conn.cursor()
+            cursor = db_conn.cursor()
             cursor.execute("SELECT theme_id, theme FROM research_themes")
             rows = cursor.fetchall()
         finally:
-            conn.close()
+            if conn is None:
+                db_conn.close()
 
         if not rows:
             return []

@@ -34,9 +34,9 @@ def register_hitl_handlers():
     """Register all HITL feature handlers. Done here at the application
     composition root to avoid core-to-domain imports in the HITL package.
     """
-    # Specific research handlers and workflow integrations are out of scope.
-    # We can register domain-specific handlers here in the future.
-    pass
+    from obsidian_ai_hub.hitl.dispatcher import register_handler
+    from obsidian_ai_hub.research.runner import run_approved_suggestion
+    register_handler("research.run_approved_suggestion", run_approved_suggestion)
 
 
 def main():
