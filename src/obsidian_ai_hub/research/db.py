@@ -7,7 +7,7 @@ import unicodedata
 import uuid
 import sqlite3
 from datetime import date, datetime, timedelta, timezone
-from typing import Optional
+from typing import Any, Optional
 from contextlib import contextmanager
 
 from obsidian_ai_hub.database import get_db_connection
@@ -46,6 +46,8 @@ RESEARCH_THEME_COLUMNS = [
     "updated_at",
     "reviewed_at",
     "reviewed_by",
+    "origin",
+    "hitl_run_id",
 ]
 
 RESEARCH_JOB_COLUMNS = [
@@ -132,6 +134,8 @@ def create_theme(
     duplicate_of_theme_id: Optional[str] = None,
     duplicate_reason: Optional[str] = None,
     related_theme_ids: Optional[list[str]] = None,
+    origin: Optional[str] = None,
+    hitl_run_id: Optional[str] = None,
     conn: Optional[sqlite3.Connection] = None,
 ) -> dict:
     now = get_current_timestamp()
@@ -158,6 +162,8 @@ def create_theme(
         "updated_at": now,
         "reviewed_at": None,
         "reviewed_by": None,
+        "origin": origin,
+        "hitl_run_id": hitl_run_id,
     }
     db_row = serialize_theme(rec)
     columns = ", ".join(RESEARCH_THEME_COLUMNS)
@@ -539,3 +545,21 @@ def list_approved_themes_by_date(date_str: str) -> list[dict]:
         return [dict(row) for row in cursor.fetchall()]
     finally:
         conn.close()
+
+
+def _set_theme_field(theme_id: str, field: str, value: Any, conn: Optional[sqlite3.Connection] = None) -> None:
+    """Update a single field on a research theme."""
+    if field not in RESEARCH_THEME_COLUMNS:
+        raise ValueError(f"Unsupported research theme field: {field}")
+    with auto_connection(conn) as (active_conn, is_generated):
+        if is_generated:
+            with active_conn:
+                active_conn.execute(
+                    f"UPDATE research_themes SET {field} = ?, updated_at = ? WHERE theme_id = ?",
+                    (value, get_current_timestamp(), theme_id)
+                )
+        else:
+            active_conn.execute(
+                f"UPDATE research_themes SET {field} = ?, updated_at = ? WHERE theme_id = ?",
+                (value, get_current_timestamp(), theme_id)
+            )

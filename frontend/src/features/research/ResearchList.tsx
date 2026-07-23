@@ -1,11 +1,12 @@
 import { useEffect, useState, useCallback, useRef } from "react";
+import { Link } from "react-router-dom";
 import {
   ApiError,
   listResearchThemes,
-  reviewResearchTheme,
   rerunResearchTheme,
 } from "../../api/client";
 import type { ResearchTheme } from "../../api/types";
+import { ROUTES } from "../../constants/routes";
 
 export interface ResearchListProps {
   status: string;
@@ -83,20 +84,6 @@ export default function ResearchList({
     );
   };
 
-  async function handleQuickAction(id: string, action: "approve" | "reject") {
-    setIsProcessing(new Set([id]));
-    try {
-      await reviewResearchTheme(id, action);
-      notify(`${id} を${action === "approve" ? "承認" : "却下"}しました`);
-      await reload();
-    } catch (e) {
-      const msg = e instanceof ApiError ? e.message : "操作に失敗しました";
-      notify(msg, "error");
-    } finally {
-      setIsProcessing(new Set());
-    }
-  }
-
   async function handleRerun(id: string) {
     setIsProcessing(new Set([id]));
     try {
@@ -156,24 +143,14 @@ export default function ResearchList({
                   </div>
                 </button>
               </div>
-              {t.status === "candidate" && (
+              {t.status === "candidate" && t.origin === "auto_suggestion" && t.hitl_run_id && (
                 <div className="flex flex-col gap-1 shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => handleQuickAction(t.theme_id, "approve")}
-                    disabled={isProcessing.has(t.theme_id)}
-                    className="rounded bg-emerald-600 px-2 py-0.5 text-xs text-white disabled:opacity-50"
+                  <Link
+                    to={ROUTES.HITL}
+                    className="rounded bg-blue-600 px-2 py-0.5 text-xs text-white text-center cursor-pointer"
                   >
-                    {isProcessing.has(t.theme_id) ? "…" : "承認"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleQuickAction(t.theme_id, "reject")}
-                    disabled={isProcessing.has(t.theme_id)}
-                    className="rounded bg-rose-600 px-2 py-0.5 text-xs text-white disabled:opacity-50"
-                  >
-                    {isProcessing.has(t.theme_id) ? "…" : "却下"}
-                  </button>
+                    確認待ち
+                  </Link>
                 </div>
               )}
               {job?.status === "failed" && (

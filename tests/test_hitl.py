@@ -16,7 +16,7 @@ def test_hitl_db_migration_and_structure(test_memory_db_path):
         cursor = conn.cursor()
         cursor.execute("PRAGMA user_version;")
         version = cursor.fetchone()[0]
-        assert version == 14
+        assert version == 15
 
         # Verify hitl_runs columns
         cursor.execute("PRAGMA table_info(hitl_runs);")
@@ -30,6 +30,9 @@ def test_hitl_db_migration_and_structure(test_memory_db_path):
         assert "lease_expires_at" in runs_cols
         assert "retry_count" in runs_cols
         assert "error_message" in runs_cols
+        # v15 additions
+        assert "title" in runs_cols, "v15: hitl_runs.title"
+        assert "description" in runs_cols, "v15: hitl_runs.description"
 
         # Verify hitl_questions columns
         cursor.execute("PRAGMA table_info(hitl_questions);")
@@ -46,6 +49,21 @@ def test_hitl_db_migration_and_structure(test_memory_db_path):
         assert "is_required" in questions_cols
         assert "expires_at" in questions_cols
         assert "answered_at" in questions_cols
+        # v15 additions
+        assert "sequence" in questions_cols, "v15: hitl_questions.sequence"
+        assert "title" in questions_cols, "v15: hitl_questions.title"
+        assert "prompt" in questions_cols, "v15: hitl_questions.prompt"
+        assert "context_json" in questions_cols, "v15: hitl_questions.context_json"
+
+        # Verify v15 index on hitl_questions
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='index' AND name='idx_hitl_questions_set_seq'")
+        assert cursor.fetchone() is not None, "v15: idx_hitl_questions_set_seq index"
+
+        # Verify research_themes v15 columns
+        cursor.execute("PRAGMA table_info(research_themes);")
+        themes_cols = {row["name"]: row["type"] for row in cursor.fetchall()}
+        assert "origin" in themes_cols, "v15: research_themes.origin"
+        assert "hitl_run_id" in themes_cols, "v15: research_themes.hitl_run_id"
     finally:
         conn.close()
 
@@ -157,7 +175,7 @@ def test_submit_answer_choice_validation_and_once_only(test_memory_db_path):
         # Check question was updated
         q = hitl.get_question(run_id, question_set_id, "favorite_color", conn)
         assert q["status"] == "answered"
-        assert q["answer"] == "blue"
+        assert q["answer"] == {"value": "blue", "comment": None}
         assert q["answered_at"] is not None
 
         # Check run status became ready_to_resume
@@ -541,7 +559,7 @@ def test_register_run_and_questions_idempotence(test_memory_db_path):
         q1_second = hitl.get_question(run_id, qset_id, "q1", conn)
         assert q1_second["question_id"] == q1_first["question_id"]
         assert q1_second["status"] == "answered"
-        assert q1_second["answer"] == "Answer content"
+        assert q1_second["answer"] == {"value": "Answer content", "comment": None}
         assert q1_second["display_text"] == "Updated text"
     finally:
         conn.close()
@@ -585,13 +603,13 @@ def test_submit_answer_rejects_historical_inactive_sets(test_memory_db_path):
         hitl.submit_answer(run_id, "set_2", "q", "active answer", conn)
         q2 = hitl.get_question(run_id, "set_2", "q", conn)
         assert q2["status"] == "answered"
-        assert q2["answer"] == "active answer"
+        assert q2["answer"] == {"value": "active answer", "comment": None}
     finally:
         conn.close()
 
 
 def test_choices_and_answer_serialization_symmetry(test_memory_db_path):
-    """Test that choices and answer fields serialize and deserialize symmetrically (e.g. including plain strings)."""
+    """Test that choices and answer fields serialize and deserialize symmetrically ({value, comment} format)."""
     conn = get_db_connection()
     try:
         run_id = "run_sym"
@@ -612,11 +630,11 @@ def test_choices_and_answer_serialization_symmetry(test_memory_db_path):
         q = hitl.get_question(run_id, qset_id, "q", conn)
         assert q["choices"] == ["yes", "no"]
 
-        # Submit a plain string answer (should be JSON-encoded on save and decoded on load as a string)
+        # Submit a value-only answer gets normalized to {value, comment}
         hitl.submit_answer(run_id, qset_id, "q", "yes", conn)
 
         q_ans = hitl.get_question(run_id, qset_id, "q", conn)
-        assert q_ans["answer"] == "yes"
+        assert q_ans["answer"] == {"value": "yes", "comment": None}
     finally:
         conn.close()
 
@@ -647,10 +665,40 @@ def test_submit_answer_concurrent_conflict(test_memory_db_path):
         with pytest.raises(ValueError, match="Conflict detected|already finalized"):
             hitl.submit_answer(run_id, qset_id, "q1", "Second Answer", conn2)
 
-        # Verify that the answer saved in DB remains "First Answer"
+        # Verify that the answer saved in DB remains "First Answer" (in {value, comment} format)
         q = hitl.get_question(run_id, qset_id, "q1", conn1)
         assert q["status"] == "answered"
-        assert q["answer"] == "First Answer"
+        assert q["answer"] == {"value": "First Answer", "comment": None}
     finally:
         conn1.close()
         conn2.close()
+
+
+def test_register_run_and_questions_rollback_on_failure(test_memory_db_path):
+    """If an exception occurs during question insertion, the entire register_run_and_questions must rollback — neither run nor questions are committed."""
+    conn = get_db_connection()
+    try:
+        with pytest.raises(RuntimeError, match="simulated insert failure"):
+            monkeypatch = pytest.MonkeyPatch()
+            monkeypatch.setattr("obsidian_ai_hub.hitl.service.insert_question", lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("simulated insert failure")))
+            try:
+                hitl.register_run_and_questions(
+                    run_id="run_rollback",
+                    handler="test_handler",
+                    checkpoint="c1",
+                    question_set_id="qset_rollback",
+                    questions_data=[
+                        {"question_key": "q1", "question_type": "text", "display_text": "Q1", "is_required": 1}
+                    ],
+                    conn=conn,
+                )
+            finally:
+                monkeypatch.undo()
+
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM hitl_runs WHERE run_id = ?", ("run_rollback",))
+        assert cursor.fetchone()[0] == 0
+        cursor.execute("SELECT COUNT(*) FROM hitl_questions WHERE run_id = ?", ("run_rollback",))
+        assert cursor.fetchone()[0] == 0
+    finally:
+        conn.close()

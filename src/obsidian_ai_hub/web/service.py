@@ -168,27 +168,6 @@ def get_research_theme(theme_id: str) -> Optional[dict]:
     return theme
 
 
-def review_research_theme(
-    theme_id: str, action: str, reason: Optional[str] = None
-) -> Optional[dict]:
-    from obsidian_ai_hub.research import db
-    from obsidian_ai_hub import research_agent
-
-    theme = db.get_theme(theme_id)
-    if theme is None:
-        return None
-    if action == "approve":
-        job = db.latest_job(theme_id)
-        if job and job.get("status") == "succeeded" and job.get("markdown"):
-            research_agent.save_research_to_vault(theme_id)
-        db.set_status(theme_id, "approved", reviewed_by="user", reason=reason)
-    elif action == "reject":
-        db.set_status(theme_id, "rejected", reviewed_by="user", reason=reason)
-    else:
-        raise ValueError(f"Invalid action: {action}")
-    return db.get_theme(theme_id)
-
-
 def rerun_research_theme(theme_id: str) -> Optional[dict]:
     from obsidian_ai_hub import research_agent
 
@@ -2669,6 +2648,9 @@ def get_hitl_run_detail(run_id: str) -> Optional[dict]:
     if run is None:
         return None
     questions = hitl_store.get_all_questions_for_run(run_id)
+    for q in questions:
+        if "context_json" in q:
+            q["context"] = q.pop("context_json")
     run_detail = dict(run)
     run_detail["questions"] = questions
     return run_detail

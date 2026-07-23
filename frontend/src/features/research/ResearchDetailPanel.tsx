@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ApiError, getResearchTheme, reviewResearchTheme, rerunResearchTheme } from "../../api/client";
+import { Link } from "react-router-dom";
+import { ApiError, getResearchTheme, rerunResearchTheme } from "../../api/client";
 import type { ResearchTheme } from "../../api/types";
 import MarkdownPreview from "../../components/MarkdownPreview";
+import { ROUTES } from "../../constants/routes";
 
 export interface ResearchDetailPanelProps {
   themeId: string;
@@ -65,22 +67,6 @@ export default function ResearchDetailPanel({
     fetchRelated().catch(() => {});
     return () => { cancelled = true; };
   }, [detail?.related_theme_ids]);
-
-  async function handleAction(action: "approve" | "reject") {
-    setIsSubmitting(true);
-    try {
-      await reviewResearchTheme(themeId, action);
-      const updated = await getResearchTheme(themeId);
-      setDetail(updated);
-      notify(`${themeId} を${action === "approve" ? "承認" : "却下"}しました`);
-      onChanged(updated);
-    } catch (e) {
-      const msg = e instanceof ApiError ? e.message : "操作に失敗しました";
-      notify(msg, "error");
-    } finally {
-      setIsSubmitting(false);
-    }
-  }
 
   async function handleRerun() {
     setIsSubmitting(true);
@@ -196,25 +182,13 @@ export default function ResearchDetailPanel({
       )}
 
       <div className="mt-6 space-x-2">
-        {detail.status === "candidate" && (
-          <>
-            <button
-              type="button"
-              onClick={() => handleAction("approve")}
-              disabled={isSubmitting}
-              className="rounded bg-emerald-600 px-3 py-1 text-sm text-white disabled:opacity-50"
-            >
-              {isSubmitting ? "処理中…" : "承認"}
-            </button>
-            <button
-              type="button"
-              onClick={() => handleAction("reject")}
-              disabled={isSubmitting}
-              className="rounded bg-rose-600 px-3 py-1 text-sm text-white disabled:opacity-50"
-            >
-              {isSubmitting ? "処理中…" : "却下"}
-            </button>
-          </>
+        {detail.status === "candidate" && detail.origin === "auto_suggestion" && detail.hitl_run_id && (
+          <Link
+            to={ROUTES.HITL}
+            className="inline-block rounded bg-blue-600 px-3 py-1.5 text-xs text-white hover:bg-blue-700 cursor-pointer"
+          >
+            HITLで回答
+          </Link>
         )}
         {job?.status === "failed" && (
           <button

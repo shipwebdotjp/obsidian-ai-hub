@@ -142,7 +142,13 @@ def _process_run(
 
     active_set_id = run_record["active_question_set_id"]
     questions = get_questions_by_set(run_id, active_set_id, conn) if active_set_id else []
-    answers = {q["question_key"]: q["answer"] for q in questions}
+    answers = {}
+    for q in questions:
+        ans = q["answer"]
+        if isinstance(ans, dict):
+            answers[q["question_key"]] = ans.get("value", ans)
+        else:
+            answers[q["question_key"]] = ans
 
     context = HitlContext(
         run_id=run_id,
@@ -152,11 +158,11 @@ def _process_run(
     )
 
     try:
-        with conn:
-            result = handler(context)
-            if not isinstance(result, HitlResult):
-                raise ValueError(f"Handler must return a HitlResult, got {type(result)}")
+        result = handler(context)
+        if not isinstance(result, HitlResult):
+            raise ValueError(f"Handler must return a HitlResult, got {type(result)}")
 
+        with conn:
             now = get_current_iso()
             run = get_run(run_id, conn)
             if run:
@@ -181,7 +187,6 @@ def _process_run(
                 else:
                     raise ValueError(f"Invalid HitlResult status: {result.status}")
 
-                # Release lease and persist state change
                 run["lease_owner"] = None
                 run["lease_expires_at"] = None
                 run["updated_at"] = now

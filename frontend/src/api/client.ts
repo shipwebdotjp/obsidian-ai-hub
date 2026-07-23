@@ -189,12 +189,13 @@ export function submitHitlAnswer(
   runId: string,
   questionKey: string,
   answer: any,
+  comment?: string | null,
 ): Promise<{ success: boolean }> {
   return request<{ success: boolean }>(
     `/api/v1/hitl/runs/${encodeURIComponent(runId)}/questions/${encodeURIComponent(questionKey)}/answer`,
     {
       method: "POST",
-      body: JSON.stringify({ answer }),
+      body: JSON.stringify({ answer, comment }),
     },
   );
 }
@@ -290,20 +291,6 @@ export function listResearchThemes(params: {
 
 export function getResearchTheme(themeId: string): Promise<ResearchTheme> {
   return request<ResearchTheme>(`/api/v1/research-themes/${encodeURIComponent(themeId)}`);
-}
-
-export function reviewResearchTheme(
-  themeId: string,
-  action: "approve" | "reject",
-  reason?: string,
-): Promise<{ theme: ResearchTheme }> {
-  return request<{ theme: ResearchTheme }>(
-    `/api/v1/research-themes/${encodeURIComponent(themeId)}/review`,
-    {
-      method: "POST",
-      body: JSON.stringify({ action, reason }),
-    },
-  );
 }
 
 export function rerunResearchTheme(themeId: string): Promise<ResearchJob> {

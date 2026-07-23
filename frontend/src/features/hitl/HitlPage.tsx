@@ -21,6 +21,7 @@ export default function HitlPage() {
   const [submitting, setSubmitting] = useState<string | null>(null); // question_id or runId if cancelling
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [answers, setAnswers] = useState<Record<string, any>>({});
+  const [comments, setComments] = useState<Record<string, string>>({});
 
   const abortRef = useRef<AbortController | null>(null);
 
@@ -59,6 +60,7 @@ export default function HitlPage() {
     setDetailError(null);
     setSuccessMessage(null);
     setAnswers({});
+    setComments({});
     try {
       const detail = await getHitlRun(runId);
       setSelectedRun(detail);
@@ -85,6 +87,7 @@ export default function HitlPage() {
   const handleSubmitAnswer = async (q: HitlQuestion) => {
     if (!selectedRun) return;
     const ansValue = answers[q.question_key];
+    const commentVal = comments[q.question_key] || null;
 
     // Simple validation
     if (q.is_required && (ansValue === undefined || ansValue === "")) {
@@ -96,7 +99,7 @@ export default function HitlPage() {
     setDetailError(null);
     setSuccessMessage(null);
     try {
-      await submitHitlAnswer(selectedRun.run_id, q.question_key, ansValue);
+      await submitHitlAnswer(selectedRun.run_id, q.question_key, ansValue, commentVal);
       setSuccessMessage("回答を正常に送信しました。");
       // Reload run detail to reflect updated questions and run status
       await loadDetail(selectedRun.run_id);
@@ -255,7 +258,10 @@ export default function HitlPage() {
           <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
             <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-200 pb-4">
               <div>
-                <h2 className="text-lg font-semibold text-slate-800">{selectedRun.run_id}</h2>
+                <h2 className="text-lg font-semibold text-slate-800">{selectedRun.title || selectedRun.run_id}</h2>
+                {selectedRun.description && (
+                  <p className="mt-1 text-xs text-slate-500">{selectedRun.description}</p>
+                )}
                 <p className="mt-1 text-xs text-slate-500">
                   Handler: <code className="rounded bg-slate-100 px-1 py-0.5">{selectedRun.handler}</code>
                 </p>
@@ -293,9 +299,9 @@ export default function HitlPage() {
 
             {/* Question Set List */}
             <div className="mt-8 space-y-6">
-              <h3 className="text-sm font-bold text-slate-700 border-l-4 border-slate-700 pl-2">
-                質問セット ({selectedRun.active_question_set_id || "デフォルト"})
-              </h3>
+            <h3 className="text-sm font-bold text-slate-700 border-l-4 border-slate-700 pl-2">
+              質問
+            </h3>
 
               <div className="space-y-4">
                 {selectedRun.questions.map((q) => {
@@ -310,14 +316,17 @@ export default function HitlPage() {
                       <div className="flex items-start justify-between gap-4">
                         <div className="flex-1">
                           <div className="flex items-center gap-2">
-                            <span className="text-xs font-bold text-slate-500">[{q.question_key}]</span>
+                            <span className="text-xs font-bold text-slate-500">{q.title || q.question_key}</span>
                             {q.is_required === 1 && (
                               <span className="rounded bg-red-100 px-1 py-0.5 text-[10px] font-medium text-red-800">
                                 必須
                               </span>
                             )}
                           </div>
-                          <p className="mt-2 text-sm font-medium text-slate-800">{q.display_text}</p>
+                          <p className="mt-2 text-sm font-medium text-slate-800">{q.prompt || q.display_text}</p>
+                          {q.context != null && (
+                            <p className="mt-1 text-xs text-slate-400">{JSON.stringify(q.context)}</p>
+                          )}
                         </div>
                         <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
                           q.status === "pending"
@@ -400,6 +409,17 @@ export default function HitlPage() {
                                 rows={3}
                               />
                             )}
+
+                            {/* Comment input */}
+                            <div>
+                              <textarea
+                                value={comments[q.question_key] || ""}
+                                onChange={(e) => setComments({ ...comments, [q.question_key]: e.target.value })}
+                                placeholder="コメント（任意）"
+                                className="w-full rounded border border-slate-200 bg-white p-2 text-xs text-slate-600 outline-none focus:border-slate-400"
+                                rows={2}
+                              />
+                            </div>
 
                             <div className="flex justify-end mt-2">
                               <button

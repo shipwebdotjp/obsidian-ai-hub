@@ -199,27 +199,6 @@ def get_research_theme(theme_id: str, _=Depends(_require_loopback_or_token)):
     return item
 
 
-@router.post(
-    "/research-themes/{theme_id}/review",
-    response_model=schemas.ResearchThemeActionResponse,
-)
-def review_research_theme(
-    theme_id: str,
-    body: schemas.ResearchReviewRequest,
-    _=Depends(_require_loopback_or_token),
-):
-    try:
-        result = service.review_research_theme(
-            theme_id, body.action, reason=body.reason
-        )
-    except ValueError as e:
-        logger.warning("review research theme validation error for %s: %s", theme_id, e)
-        raise HTTPException(status_code=400, detail=str(e))
-    if result is None:
-        raise HTTPException(status_code=404, detail="research theme not found")
-    return {"theme": result}
-
-
 @router.post("/research-themes/{theme_id}/rerun", response_model=schemas.ResearchJob)
 def rerun_research_theme(theme_id: str, _=Depends(_require_loopback_or_token)):
     job = service.rerun_research_theme(theme_id)
@@ -893,7 +872,8 @@ def submit_hitl_answer(
     _=Depends(_require_loopback_or_token),
 ):
     try:
-        service.submit_hitl_answer(run_id, question_key, body.answer)
+        answer_payload = {"value": body.answer, "comment": body.comment}
+        service.submit_hitl_answer(run_id, question_key, answer_payload)
         return {"success": True}
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))

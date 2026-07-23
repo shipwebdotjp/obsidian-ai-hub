@@ -149,6 +149,8 @@ export interface ResearchTheme {
   reviewed_at?: string;
   reviewed_by?: string;
   latest_job?: ResearchJob | null;
+  origin?: string;
+  hitl_run_id?: string;
 }
 
 export interface ResearchListResponse {
@@ -451,6 +453,10 @@ export interface HitlQuestion {
   answered_at: string | null;
   created_at: string;
   updated_at: string;
+  sequence: number;
+  title: string | null;
+  prompt: string | null;
+  context: unknown | null;
 }
 
 export interface HitlRun {
@@ -465,6 +471,8 @@ export interface HitlRun {
   error_message: string | null;
   created_at: string;
   updated_at: string;
+  title: string | null;
+  description: string | null;
 }
 
 export interface HitlRunDetail extends HitlRun {
