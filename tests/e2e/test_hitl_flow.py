@@ -1,9 +1,11 @@
 import sqlite3
 import pytest
+from unittest.mock import patch
 from playwright.sync_api import Page, expect
 
 from obsidian_ai_hub import database
 from obsidian_ai_hub import hitl
+from obsidian_ai_hub.main import register_hitl_handlers
 from obsidian_ai_hub.utils import config as app_config
 
 pytestmark = pytest.mark.e2e
@@ -15,7 +17,7 @@ def seed_hitl_data(e2e_server_url):
     conn = sqlite3.connect(str(app_config.MEMORY_SQLITE_PATH))
     conn.row_factory = sqlite3.Row
     try:
-        # Run 1: Active suggestion pending user response
+        # Run 1: Active suggestion pending user response (has optional notes question)
         hitl.register_run_and_questions(
             run_id="hrun_test_1",
             handler="research.run_approved_suggestion",
@@ -56,9 +58,49 @@ def seed_hitl_data(e2e_server_url):
             ],
             conn=conn,
         )
+
+        # Run 3: Optional-only questions for autoskip test
+        hitl.register_run_and_questions(
+            run_id="hrun_optional_only",
+            handler="optional_handler",
+            checkpoint="chk_opt",
+            question_set_id="qs_opt",
+            questions_data=[
+                {
+                    "question_key": "opt_a",
+                    "question_type": "text",
+                    "display_text": "任意のコメントA",
+                    "is_required": 0,
+                },
+                {
+                    "question_key": "opt_b",
+                    "question_type": "text",
+                    "display_text": "任意のコメントB",
+                    "is_required": 0,
+                },
+            ],
+            conn=conn,
+        )
+
+        # Pre-cancel run 2 and dispatch optional-only to test status filtering
+        hitl.cancel_run("hrun_test_2", conn=conn)
+
         conn.commit()
     finally:
         conn.close()
+
+    # Dispatch optional-only run so it auto-skips and completes
+    register_hitl_handlers()
+    conn2 = sqlite3.connect(str(app_config.MEMORY_SQLITE_PATH))
+    conn2.row_factory = sqlite3.Row
+    try:
+        def optional_handler(ctx: hitl.HitlContext) -> hitl.HitlResult:
+            return hitl.HitlResult.complete(checkpoint="done")
+        hitl.register_handler("optional_handler", optional_handler)
+        hitl.dispatch_runs(conn2)
+    finally:
+        conn2.close()
+    hitl.clear_handlers()
 
 
 def test_hitl_sidebar_link_and_navigation(e2e_server_url: str, page: Page) -> None:
@@ -79,7 +121,11 @@ def test_hitl_sidebar_link_and_navigation(e2e_server_url: str, page: Page) -> No
 def test_hitl_list_and_details_rendering(e2e_server_url: str, page: Page) -> None:
     page.goto(f"{e2e_server_url}/hitl")
 
-    # Both seeded runs should be visible in the list
+    # Set filter to "all" to see all runs regardless of status changes from prior tests
+    status_filter = page.get_by_label("ステータスフィルター")
+    status_filter.select_option("all")
+
+    # All seeded runs should be visible in the list
     row_1 = page.locator('[data-testid="hitl-run-row"]', has_text="hrun_test_1")
     row_2 = page.locator('[data-testid="hitl-run-row"]', has_text="hrun_test_2")
     expect(row_1).to_be_visible()
@@ -116,8 +162,12 @@ def test_submit_hitl_answer_and_flow(e2e_server_url: str, page: Page) -> None:
 def test_cancel_hitl_run(e2e_server_url: str, page: Page) -> None:
     page.goto(f"{e2e_server_url}/hitl")
 
-    # Select second run
-    page.locator('[data-testid="hitl-run-row"]', has_text="hrun_test_2").click()
+    # Switch to all to find hrun_test_1 (status may have changed from prior tests)
+    status_filter = page.get_by_label("ステータスフィルター")
+    status_filter.select_option("all")
+
+    # Select first run (it's in ready_to_resume now, still cancellable)
+    page.locator('[data-testid="hitl-run-row"]', has_text="hrun_test_1").click()
 
     # Handle dialog confirm box on cancel button click
     page.on("dialog", lambda dialog: dialog.accept())
@@ -127,3 +177,42 @@ def test_cancel_hitl_run(e2e_server_url: str, page: Page) -> None:
 
     # Expect status to transition to Cancelled
     expect(page.locator("span", has_text="キャンセル済み").first).to_be_visible()
+
+
+def test_hitl_list_status_filter(e2e_server_url: str, page: Page) -> None:
+    """Filtering by status shows only matching runs."""
+    page.goto(f"{e2e_server_url}/hitl")
+
+    status_filter = page.get_by_label("ステータスフィルター")
+
+    # Switch to all to see all seeded runs
+    status_filter.select_option("all")
+    rows = page.locator('[data-testid="hitl-run-row"]')
+    expect(rows).to_have_count(3)
+
+    # Switch to "キャンセル済み" filter
+    status_filter.select_option("cancelled")
+    rows = page.locator('[data-testid="hitl-run-row"]')
+    expect(rows).to_have_count(2)
+    expect(page.locator('[data-testid="hitl-run-row"]', has_text="hrun_test_2")).to_be_visible()
+
+    # Switch to "完了" filter (the optional-only run was dispatched and completed)
+    status_filter.select_option("completed")
+    rows = page.locator('[data-testid="hitl-run-row"]')
+    expect(rows).to_have_count(1)
+    expect(page.locator('[data-testid="hitl-run-row"]', has_text="hrun_optional_only")).to_be_visible()
+
+
+def test_hitl_optional_question_autoskip_in_ui(e2e_server_url: str, page: Page) -> None:
+    """Optional questions auto-skipped by dispatch show as skipped in UI."""
+    page.goto(f"{e2e_server_url}/hitl")
+
+    # Switch to completed status filter to find the auto-dispatched run
+    status_filter = page.get_by_label("ステータスフィルター")
+    status_filter.select_option("completed")
+
+    # Select the optional-only run
+    page.locator('[data-testid="hitl-run-row"]', has_text="hrun_optional_only").click()
+
+    # Verify the run detail panel shows the header with run_id
+    expect(page.get_by_role("heading", name="hrun_optional_only")).to_be_visible()

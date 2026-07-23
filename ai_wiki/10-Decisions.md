@@ -418,3 +418,34 @@ JulesAgentによるコーディングと動作確認・テストを迅速かつ�
 
 4. **コンポジションルートでのアセンブリ:**
    - `src/obsidian_ai_hub/main.py` (アプリケーションのコンポジションルート) 内に `register_hitl_handlers()` を配置し、そこで必要な機能ハンドラーを登録するアプローチをとることで、コア（HITLモジュール）がドメイン層をインポートする逆流依存を完全に排除。
+
+## HITL スキーマ v14 とテスト実行結果
+
+| 項目 | 内容 |
+|------|------|
+| 決定日 | 2026-07-23 |
+| カテゴリ | HITL テスト・検証 |
+| 決定内容 | スキーマバージョン v14 を採用し、テスト網羅性検証を完了。全既存テスト・新規追加テスト・E2E を通過。 |
+
+### スキーマ v14 への移行経緯
+
+- 設計ドキュメントでは v13 が想定されていたが、実装過程で user_version 14 に落ち着いた。
+- `tests/test_hitl.py::test_hitl_db_migration_and_structure` で `PRAGMA user_version = 14` を検証している。
+- v14 で定義されたカラム: `hitl_runs` (run_id, handler, status, checkpoint, active_question_set_id, lease_owner, lease_expires_at, retry_count, error_message, created_at, updated_at) および `hitl_questions` (question_id, run_id, question_set_id, question_key, status, question_type, display_text, choices, answer, is_required, expires_at, answered_at, created_at, updated_at)。
+
+### テスト網羅性
+
+セクション 5 の全項目を検証するテストを追加:
+- DB ロールバック (`test_register_run_and_questions_rollback_on_failure`)
+- CLI フラグ発火 (`test_dispatch_cli_flag_processes_runs`)
+- 複数 Run 同時 dispatch (`test_dispatch_processes_multiple_runs_in_single_call`)
+- 完全ライフサイクル (`test_full_happy_path_dispatch`)
+- API 認可 (`test_hitl_api_requires_token_when_not_loopback`)
+- ページネーションとフィルタ (`test_hitl_api_list_pagination_and_status_filter`)
+- Vault 出力冪等性 (`test_suggestion_hitl_run_approve_then_redispatch_idempotent`)
+- Handler 失敗復旧 (`test_suggestion_hitl_run_handler_failure_records_failed_status`)
+- 手動リサーチ経路が HITL を作らない回帰 (`test_web_manual_research_paths_do_not_create_hitl_runs`)
+- パッケージ独立性 (`test_hitl_package_does_not_import_research_at_import_time`)
+- タスクスケジューラプリセット (`test_task_runner_preset_contains_hitl_dispatch`)
+- E2E: ステータスフィルタ (`test_hitl_list_status_filter`)
+- E2E: 任意質問 autoskip (`test_hitl_optional_question_autoskip_in_ui`)

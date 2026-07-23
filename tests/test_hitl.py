@@ -654,3 +654,33 @@ def test_submit_answer_concurrent_conflict(test_memory_db_path):
     finally:
         conn1.close()
         conn2.close()
+
+
+def test_register_run_and_questions_rollback_on_failure(test_memory_db_path):
+    """If an exception occurs during question insertion, the entire register_run_and_questions must rollback — neither run nor questions are committed."""
+    conn = get_db_connection()
+    try:
+        with pytest.raises(RuntimeError, match="simulated insert failure"):
+            monkeypatch = pytest.MonkeyPatch()
+            monkeypatch.setattr("obsidian_ai_hub.hitl.service.insert_question", lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("simulated insert failure")))
+            try:
+                hitl.register_run_and_questions(
+                    run_id="run_rollback",
+                    handler="test_handler",
+                    checkpoint="c1",
+                    question_set_id="qset_rollback",
+                    questions_data=[
+                        {"question_key": "q1", "question_type": "text", "display_text": "Q1", "is_required": 1}
+                    ],
+                    conn=conn,
+                )
+            finally:
+                monkeypatch.undo()
+
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM hitl_runs WHERE run_id = ?", ("run_rollback",))
+        assert cursor.fetchone()[0] == 0
+        cursor.execute("SELECT COUNT(*) FROM hitl_questions WHERE run_id = ?", ("run_rollback",))
+        assert cursor.fetchone()[0] == 0
+    finally:
+        conn.close()

@@ -331,3 +331,154 @@ def test_suggestion_hitl_run_reject(tmp_path: Path, monkeypatch, test_memory_db_
 
     finally:
         conn.close()
+
+
+def test_suggestion_hitl_run_approve_then_redispatch_idempotent(tmp_path: Path, monkeypatch, test_memory_db_path):
+    """Re-dispatching an already-completed HITL run must not create a duplicate vault file or flip is_published."""
+    from obsidian_ai_hub.database import get_db_connection
+    from obsidian_ai_hub import hitl
+    from obsidian_ai_hub.research import db as research_db
+    from obsidian_ai_hub.main import register_hitl_handlers
+
+    register_hitl_handlers()
+
+    conn = get_db_connection()
+    try:
+        theme_rec = research_db.create_theme(
+            theme="テスト再dispatchテーマ",
+            direction="方向",
+            kind="explore",
+            why_now="理由",
+            confidence=0.8,
+            status="candidate",
+            conn=conn,
+        )
+        theme_id = theme_rec["theme_id"]
+        run_id = f"hrun_redispatch_{theme_id}"
+
+        questions_data = [
+            {
+                "question_key": "action",
+                "question_type": "select",
+                "display_text": "Approve?",
+                "choices": ["approve", "reject"],
+                "is_required": 1,
+            }
+        ]
+        hitl.register_run_and_questions(
+            run_id=run_id,
+            handler="research.run_approved_suggestion",
+            checkpoint=theme_id,
+            question_set_id="confirm_suggest",
+            questions_data=questions_data,
+            conn=conn,
+        )
+        hitl.submit_answer(run_id, "confirm_suggest", "action", "approve", conn)
+
+        from obsidian_ai_hub.research.runner import ResearchReport
+        mock_report = ResearchReport(
+            title="テスト再dispatchテーマの調査結果",
+            mode="internal",
+            markdown="---\ntitle: テスト再dispatchテーマの調査結果\n---\n## 調査結果",
+        )
+        with patch("obsidian_ai_hub.research.runner.run_research", return_value=mock_report):
+            processed = hitl.dispatch_runs(conn)
+            assert processed == 1
+
+        job_after_first = research_db.latest_job(theme_id, conn=conn)
+        first_output_path = job_after_first["output_path"]
+        assert first_output_path is not None
+        assert job_after_first["is_published"] == 1
+        output_file = Path(first_output_path)
+        assert output_file.exists()
+
+        vault_file_count_before = len(list(output_file.parent.iterdir()))
+
+        # Reset run to ready_to_resume to simulate dispatcher re-processing
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE hitl_runs
+            SET status = 'ready_to_resume', lease_owner = NULL, lease_expires_at = NULL
+            WHERE run_id = ?
+        """, (run_id,))
+        conn.commit()
+
+        # Re-dispatch — must be idempotent
+        with patch("obsidian_ai_hub.research.runner.run_research") as mock_re_run:
+            processed_again = hitl.dispatch_runs(conn)
+
+        # run_research must NOT be called when re-running a completed+published run
+        mock_re_run.assert_not_called()
+        assert processed_again in (0, 1)
+
+        # Vault must have same number of files as before
+        vault_file_count_after = len(list(output_file.parent.iterdir()))
+        assert vault_file_count_after == vault_file_count_before
+
+        # is_published must remain 1
+        job_after_second = research_db.latest_job(theme_id, conn=conn)
+        assert job_after_second["is_published"] == 1
+        assert job_after_second["output_path"] == first_output_path
+
+    finally:
+        conn.close()
+
+
+def test_suggestion_hitl_run_handler_failure_records_failed_status(tmp_path: Path, monkeypatch, test_memory_db_path):
+    """When run_research raises inside the handler, the run transitions to failed with error details."""
+    from obsidian_ai_hub.database import get_db_connection
+    from obsidian_ai_hub import hitl
+    from obsidian_ai_hub.research import db as research_db
+    from obsidian_ai_hub.main import register_hitl_handlers
+
+    register_hitl_handlers()
+
+    conn = get_db_connection()
+    try:
+        theme_rec = research_db.create_theme(
+            theme="テスト失敗恢復テーマ",
+            direction="方向",
+            kind="explore",
+            why_now="理由",
+            confidence=0.8,
+            status="candidate",
+            conn=conn,
+        )
+        theme_id = theme_rec["theme_id"]
+        run_id = f"hrun_fail_{theme_id}"
+
+        questions_data = [
+            {
+                "question_key": "action",
+                "question_type": "select",
+                "display_text": "Approve?",
+                "choices": ["approve", "reject"],
+                "is_required": 1,
+            }
+        ]
+        hitl.register_run_and_questions(
+            run_id=run_id,
+            handler="research.run_approved_suggestion",
+            checkpoint=theme_id,
+            question_set_id="confirm_suggest",
+            questions_data=questions_data,
+            conn=conn,
+        )
+        hitl.submit_answer(run_id, "confirm_suggest", "action", "approve", conn)
+
+        with patch("obsidian_ai_hub.research.runner.run_research", side_effect=RuntimeError("simulated crash")):
+            processed = hitl.dispatch_runs(conn)
+            assert processed == 1
+
+        run = hitl.get_run(run_id, conn)
+        assert run["status"] == "failed"
+        assert "simulated crash" in (run["error_message"] or "")
+        assert run["retry_count"] in (0, 1)
+        assert run["lease_owner"] is None
+        assert run["lease_expires_at"] is None
+
+        theme_obj = research_db.get_theme(theme_id, conn=conn)
+        assert theme_obj["status"] == "approved"
+
+    finally:
+        conn.close()

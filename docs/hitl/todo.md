@@ -2,7 +2,7 @@
 
 ## 1. 永続モデルとコアサービス
 
-- [ ] `database.py` のスキーマをv13へ移行し、`hitl_runs` と `hitl_questions` を追加する。
+- [ ] `database.py` のスキーマをv14へ移行し、`hitl_runs` と `hitl_questions` を追加する。
   - [ ] Runにhandler、checkpoint、active question set、lease、試行回数、エラー、監査日時を持たせる。
   - [ ] Questionにset ID、key、表示順、必須フラグ、汎用表示データ、選択肢、回答、期限を持たせる。
   - [ ] `(run_id, question_set_id, question_key)` の一意制約と、待機・再開検索用インデックスを追加する。
@@ -42,12 +42,25 @@
 
 ## 5. テストと記録
 
-- [ ] DB移行、複数質問セット、必須／任意質問、回答競合、Run取消、再中断、lease回収をテストする。
-- [ ] リサーチの承認／却下、失敗回復、Vault出力の冪等性、自動提案のみ質問化されることをテストする。
-- [ ] 手動リサーチ経路が即時実行・自動保存のまま維持されることを回帰テストする。
-- [ ] API認可とReactの回答導線をテストし、重要フローのE2Eを追加する。
-- [ ] `uv run pytest tests/` と `make test-e2e` を実行する。
-- [ ] durableな設計判断を `ai_wiki/10-Decisions.md` に記録する。
+- [x] DB移行、複数質問セット、必須／任意質問、回答競合、Run取消、再中断、lease回収をテストする。
+  - `tests/test_hitl.py` (14 tests): migration, register, answer validation, concurrent, rollback, cancel, checkpoint, multiple sets, idempotence, constraints
+  - `tests/test_hitl_resume.py` (8 tests): handler registry, re-suspension, failure, unregistered, lease reclaim, CLI flag, happy path, multi-run dispatch
+  - `tests/test_hitl_api.py` (6 tests): lifecycle, auth, pagination/filter, 404, completed answer rejection, cancel rejection
+- [x] リサーチの承認／却下、失敗回復、Vault出力の冪等性、自動提案のみ質問化されることをテストする。
+  - `tests/research/test_suggest.py` (7 tests): suggest→HITL, approve→vault, reject, redispatch idempotency, handler failure recovery
+- [x] 手動リサーチ経路が即時実行・自動保存のまま維持されることを回帰テストする。
+  - `tests/test_hitl_manual_regression.py` (1 test): web POST /run, /rerun, /review all assert 0 hitl_runs rows
+  - `tests/research/test_runner.py` (13 tests): manual run, vault save, failure paths, rerun, web modes — all preserved
+  - `tests/research/test_api.py` (16 tests): web research endpoints unchanged
+  - `tests/test_add_research_theme.py` (7 tests): CLI theme add path unchanged
+- [x] API認可とReactの回答導線をテストし、重要フローのE2Eを追加する。
+  - `tests/test_hitl_api.py::test_hitl_api_requires_token_when_not_loopback`: 401 on non-loopback w/o token
+  - `tests/test_hitl_composition.py::test_hitl_package_does_not_import_research_at_import_time`: import isolation verified via subprocess
+  - `tests/test_hitl_composition.py::test_task_runner_preset_contains_hitl_dispatch`: PRESET_FLAGS includes --hitl-dispatch
+  - `tests/test_hitl_composition.py::test_register_hitl_handlers_registers_research_handler`: handler registered at composition root
+  - `tests/e2e/test_hitl_flow.py` (6 tests): sidebar nav, list/details, answer submit, cancel, status filter, optional autoskip in UI
+- [x] `uv run pytest tests/` と `make test-e2e` を実行する。
+- [x] durableな設計判断を `ai_wiki/10-Decisions.md` に記録する。
 
 ## MVP外
 

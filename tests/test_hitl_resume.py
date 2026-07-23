@@ -267,3 +267,114 @@ def test_reclaim_expired_leases_and_repeated_execution_safety(test_memory_db_pat
         assert run["lease_owner"] is None
     finally:
         conn.close()
+
+
+def test_dispatch_cli_flag_processes_runs(test_memory_db_path, monkeypatch):
+    """Invoking main() with --hitl-dispatch processes a ready_to_resume run to completion."""
+    conn = get_db_connection()
+    try:
+        run_id = "run_cli_flag"
+        qset_id = "set_cli"
+
+        hitl.register_run_and_questions(
+            run_id=run_id,
+            handler="cli_handler",
+            checkpoint="start",
+            question_set_id=qset_id,
+            questions_data=[
+                {"question_key": "q1", "question_type": "text", "display_text": "Q1", "is_required": 1}
+            ],
+            conn=conn,
+        )
+        hitl.submit_answer(run_id, qset_id, "q1", "done", conn)
+
+        def cli_handler(ctx: hitl.HitlContext) -> hitl.HitlResult:
+            return hitl.HitlResult.complete(checkpoint="done")
+
+        hitl.register_handler("cli_handler", cli_handler)
+
+        monkeypatch.setattr("sys.argv", ["obsidian-ai-hub", "--hitl-dispatch"])
+        from obsidian_ai_hub.main import main
+        main()
+
+        run = hitl.get_run(run_id, conn)
+        assert run["status"] == "completed"
+        assert run["checkpoint"] == "done"
+    finally:
+        conn.close()
+
+
+def test_full_happy_path_dispatch(test_memory_db_path):
+    """A run progresses through the complete lifecycle: pending_user → ready_to_resume → running → completed."""
+    conn = get_db_connection()
+    try:
+        run_id = "run_happy_path"
+        qset_id = "set_happy"
+
+        hitl.register_run_and_questions(
+            run_id=run_id,
+            handler="happy_handler",
+            checkpoint="chk",
+            question_set_id=qset_id,
+            questions_data=[
+                {"question_key": "q1", "question_type": "text", "display_text": "Q1", "is_required": 1}
+            ],
+            conn=conn,
+        )
+
+        run = hitl.get_run(run_id, conn)
+        assert run["status"] == "pending_user"
+
+        hitl.submit_answer(run_id, qset_id, "q1", "value", conn)
+
+        run = hitl.get_run(run_id, conn)
+        assert run["status"] == "ready_to_resume"
+
+        def happy_handler(ctx: hitl.HitlContext) -> hitl.HitlResult:
+            return hitl.HitlResult.complete(checkpoint="chk_final")
+
+        hitl.register_handler("happy_handler", happy_handler)
+        count = hitl.dispatch_runs(conn)
+        assert count == 1
+
+        run = hitl.get_run(run_id, conn)
+        assert run["status"] == "completed"
+        assert run["checkpoint"] == "chk_final"
+        assert run["lease_owner"] is None
+        assert run["lease_expires_at"] is None
+    finally:
+        conn.close()
+
+
+def test_dispatch_processes_multiple_runs_in_single_call(test_memory_db_path):
+    """A single dispatch_runs call processes all eligible ready_to_resume runs."""
+    conn = get_db_connection()
+    try:
+        run_ids = []
+        for i in range(2):
+            rid = f"run_multi_{i}"
+            run_ids.append(rid)
+            hitl.register_run_and_questions(
+                run_id=rid,
+                handler="multi_handler",
+                checkpoint="chk",
+                question_set_id=f"set_multi_{i}",
+                questions_data=[
+                    {"question_key": "q", "question_type": "text", "display_text": "Q", "is_required": 1}
+                ],
+                conn=conn,
+            )
+            hitl.submit_answer(rid, f"set_multi_{i}", "q", f"val_{i}", conn)
+
+        def multi_handler(ctx: hitl.HitlContext) -> hitl.HitlResult:
+            return hitl.HitlResult.complete(checkpoint="chk_done")
+
+        hitl.register_handler("multi_handler", multi_handler)
+        count = hitl.dispatch_runs(conn)
+        assert count == 2
+
+        for rid in run_ids:
+            run = hitl.get_run(rid, conn)
+            assert run["status"] == "completed"
+    finally:
+        conn.close()

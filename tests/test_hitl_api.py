@@ -123,3 +123,112 @@ def test_hitl_api_lifecycle(test_memory_db_path, client):
     response = client.get("/api/v1/hitl/runs/cancel_run_test")
     assert response.status_code == 200
     assert response.json()["status"] == "cancelled"
+
+
+def test_hitl_api_requires_token_when_not_loopback(test_memory_db_path):
+    """HITL endpoints must return 401 on non-loopback host without a valid token."""
+    app = create_app(host="0.0.0.0", port=0, token="secret-token")
+    client = TestClient(app)
+
+    conn = database.get_db_connection()
+    try:
+        hitl.register_run_and_questions(
+            run_id="run_auth_test",
+            handler="dummy",
+            checkpoint="chk",
+            question_set_id="qs",
+            questions_data=[{"question_key": "q", "question_type": "text", "display_text": "Q", "is_required": 1}],
+            conn=conn,
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    protected = [
+        ("GET", "/api/v1/hitl/runs", None),
+        ("GET", "/api/v1/hitl/runs/run_auth_test", None),
+        ("POST", "/api/v1/hitl/runs/run_auth_test/questions/q/answer", {"answer": "x"}),
+        ("POST", "/api/v1/hitl/runs/run_auth_test/cancel", None),
+    ]
+    for method, path, payload in protected:
+        kwargs = {"json": payload} if payload else {}
+        res = client.request(method, path, **kwargs)
+        assert res.status_code == 401, (method, path, res.status_code)
+
+        res = client.request(method, path, headers={"Authorization": "Bearer wrong"}, **kwargs)
+        assert res.status_code == 401, (method, path, res.status_code)
+
+        res = client.request(method, path, headers={"Authorization": "Bearer secret-token"}, **kwargs)
+        assert res.status_code == 200, (method, path, res.status_code)
+
+
+def test_hitl_api_list_pagination_and_status_filter(test_memory_db_path, client):
+    """List endpoint supports status filter and limit/offset pagination."""
+    conn = database.get_db_connection()
+    try:
+        for i in range(3):
+            hitl.register_run_and_questions(
+                run_id=f"run_pag_{i}",
+                handler="dummy",
+                checkpoint="chk",
+                question_set_id="qs",
+                questions_data=[{"question_key": "q", "question_type": "text", "display_text": "Q"}],
+                conn=conn,
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+    res = client.get("/api/v1/hitl/runs?status=pending_user")
+    assert res.status_code == 200
+    data = res.json()
+    assert all(item["status"] == "pending_user" for item in data["items"])
+
+    res = client.get("/api/v1/hitl/runs?limit=1&offset=0")
+    assert res.status_code == 200
+    data = res.json()
+    assert len(data["items"]) <= 1
+    assert data["total"] >= 0
+
+
+def test_hitl_api_returns_404_for_missing_run(client):
+    """Detail, answer, and cancel endpoints return 404 for non-existent runs."""
+    res = client.get("/api/v1/hitl/runs/non_existent_run")
+    assert res.status_code == 404
+
+    res = client.post("/api/v1/hitl/runs/non_existent_run/questions/q/answer", json={"answer": "x"})
+    assert res.status_code == 404
+
+    res = client.post("/api/v1/hitl/runs/non_existent_run/cancel")
+    assert res.status_code == 404
+
+
+def test_hitl_api_rejects_answer_after_run_completed(test_memory_db_path, client):
+    """Submitting an answer to a completed run returns a 409 or 400."""
+    conn = database.get_db_connection()
+    try:
+        hitl.register_run_and_questions(
+            run_id="run_completed",
+            handler="dummy",
+            checkpoint="chk",
+            question_set_id="qs",
+            questions_data=[{"question_key": "q", "question_type": "text", "display_text": "Q", "is_required": 1}],
+            conn=conn,
+        )
+        hitl.submit_answer("run_completed", "qs", "q", "done", conn)
+
+        def completing_handler(ctx):
+            return hitl.HitlResult.complete(checkpoint="done")
+        hitl.register_handler("dummy", completing_handler)
+        hitl.dispatch_runs(conn)
+    finally:
+        conn.close()
+
+    res = client.post("/api/v1/hitl/runs/run_completed/questions/q/answer", json={"answer": "x"})
+    assert res.status_code in (400, 409)
+
+
+def test_hitl_api_rejects_cancel_on_non_pending_run(test_memory_db_path, client):
+    """Cancelling a non-existent run returns 404."""
+    res = client.post("/api/v1/hitl/runs/non_existent_cancel_test/cancel")
+    assert res.status_code == 404
