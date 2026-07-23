@@ -4,15 +4,9 @@ import sqlite3
 import pytest
 import uuid
 from datetime import datetime, timezone, timedelta
-from typing import Dict, Any
 
 from obsidian_ai_hub.database import get_db_connection
 from obsidian_ai_hub import hitl
-
-
-def get_current_iso() -> str:
-    jst = timezone(timedelta(hours=9))
-    return datetime.now(jst).isoformat()
 
 
 @pytest.fixture(autouse=True)
