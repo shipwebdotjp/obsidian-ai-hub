@@ -46,7 +46,7 @@
   - `tests/test_hitl.py` (14 tests): migration, register, answer validation, concurrent, rollback, cancel, checkpoint, multiple sets, idempotence, constraints
   - `tests/test_hitl_resume.py` (8 tests): handler registry, re-suspension, failure, unregistered, lease reclaim, CLI flag, happy path, multi-run dispatch
   - `tests/test_hitl_api.py` (6 tests): lifecycle, auth, pagination/filter, 404, completed answer rejection, cancel rejection
-- [x] リサーチの承認／却下、失敗回復、Vault出力の冪等性（再発火時の二重実行抑止）、自動提案のみ質問化されることをテストする。
+- [x] リサーチの承認・却下、Vault出力の冪等性（completed＋published状態からの再dispatchがhandler re-entryしても二重実行しない）、自動提案のみ質問化されることをテストする。
   - `tests/research/test_suggest.py` (7 tests): suggest→HITL, approve→vault, reject, redispatch idempotency, handler failure recovery
 - [x] 手動リサーチ経路が即時実行・自動保存のまま維持されることを回帰テストする。
   - `tests/test_hitl_manual_regression.py` (1 test): web POST /run, /rerun, /review all assert 0 hitl_runs rows

@@ -490,38 +490,38 @@ def run_migration_v15(conn: sqlite3.Connection) -> None:
     try:
         conn.execute("ALTER TABLE hitl_runs ADD COLUMN title TEXT;")
     except sqlite3.OperationalError as e:
-        _ignore_dup_column(e)
+        _ignore_duplicate_schema_object(e)
     try:
         conn.execute("ALTER TABLE hitl_runs ADD COLUMN description TEXT;")
     except sqlite3.OperationalError as e:
-        _ignore_dup_column(e)
+        _ignore_duplicate_schema_object(e)
     # hitl_questions: add sequence, title, prompt, context_json
     try:
         conn.execute("ALTER TABLE hitl_questions ADD COLUMN sequence INTEGER NOT NULL DEFAULT 0;")
     except sqlite3.OperationalError as e:
-        _ignore_dup_column(e)
+        _ignore_duplicate_schema_object(e)
     try:
         conn.execute("ALTER TABLE hitl_questions ADD COLUMN title TEXT;")
     except sqlite3.OperationalError as e:
-        _ignore_dup_column(e)
+        _ignore_duplicate_schema_object(e)
     try:
         conn.execute("ALTER TABLE hitl_questions ADD COLUMN prompt TEXT;")
     except sqlite3.OperationalError as e:
-        _ignore_dup_column(e)
+        _ignore_duplicate_schema_object(e)
     try:
         conn.execute("ALTER TABLE hitl_questions ADD COLUMN context_json TEXT;")
     except sqlite3.OperationalError as e:
-        _ignore_dup_column(e)
+        _ignore_duplicate_schema_object(e)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_hitl_questions_set_seq ON hitl_questions(run_id, question_set_id, sequence);")
     # research_themes: add origin and hitl_run_id
     try:
         conn.execute("ALTER TABLE research_themes ADD COLUMN origin TEXT;")
     except sqlite3.OperationalError as e:
-        _ignore_dup_column(e)
+        _ignore_duplicate_schema_object(e)
     try:
         conn.execute("ALTER TABLE research_themes ADD COLUMN hitl_run_id TEXT;")
     except sqlite3.OperationalError as e:
-        _ignore_dup_column(e)
+        _ignore_duplicate_schema_object(e)
     conn.execute("PRAGMA user_version = 15;")
     conn.commit()
 

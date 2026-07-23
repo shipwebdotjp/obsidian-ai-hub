@@ -928,7 +928,6 @@ def run_approved_suggestion(ctx) -> "HitlResult":
         job = db.create_job(theme_id, conn=ctx.conn)
         job_id = job["job_id"]
         new_cp = json.dumps({"theme_id": theme_id, "job_id": job_id, "phase": "job_created"})
-        ctx.conn.commit()
         update_checkpoint(ctx.run_id, checkpoint=new_cp, conn=ctx.conn)
         cp = {"theme_id": theme_id, "job_id": job_id, "phase": "job_created"}
 
