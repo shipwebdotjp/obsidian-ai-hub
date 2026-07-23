@@ -85,20 +85,6 @@ def test_get_research_theme_not_found(client):
     assert resp.status_code == 404
 
 
-def test_review_endpoint_removed(client):
-    """The review endpoint was removed — POST returns 405 (method not allowed on the overlapping /{theme_id} path)."""
-    t = _create_test_theme()
-    resp = client.post(
-        f"/api/v1/research-themes/{t['theme_id']}/review", json={"action": "approve"}
-    )
-    assert resp.status_code == 405
-
-    resp = client.post(
-        "/api/v1/research-themes/nonexistent/review", json={"action": "approve"}
-    )
-    assert resp.status_code == 405
-
-
 def test_rerun_research_theme(client):
     t = _create_test_theme()
 

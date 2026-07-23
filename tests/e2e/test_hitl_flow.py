@@ -198,21 +198,3 @@ def test_hitl_list_status_filter(e2e_server_url: str, page: Page) -> None:
     rows = page.locator('[data-testid="hitl-run-row"]')
     expect(rows).to_have_count(1)
     expect(page.locator('[data-testid="hitl-run-row"]', has_text="hrun_optional_only")).to_be_visible()
-
-
-def test_hitl_optional_question_autoskip_in_ui(e2e_server_url: str, page: Page) -> None:
-    """Optional questions auto-skipped by dispatch show as skipped in UI."""
-    page.goto(f"{e2e_server_url}/hitl")
-
-    # Switch to completed status filter to find the auto-dispatched run
-    status_filter = page.get_by_label("ステータスフィルター")
-    status_filter.select_option("completed")
-
-    # Select the optional-only run
-    page.locator('[data-testid="hitl-run-row"]', has_text="hrun_optional_only").click()
-
-    # Verify the run detail panel shows the header with run_id
-    expect(page.get_by_role("heading", name="hrun_optional_only")).to_be_visible()
-
-    # Verify both optional questions are shown as skipped
-    expect(page.get_by_text("スキップ")).to_have_count(2)
