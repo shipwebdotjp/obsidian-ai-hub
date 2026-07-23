@@ -14,7 +14,8 @@ import os
 import sys
 
 # Must be set before any application import so config.py enters test mode.
-os.environ.setdefault("ENV", "test")
+# Force ENV=test so it never inherits any external ENV like jules.
+os.environ["ENV"] = "test"
 
 import argparse
 import logging

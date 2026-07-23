@@ -31,3 +31,10 @@
   server and add coverage for important user flows in `tests/e2e/`.
 - Complete frontend work by running `make test-e2e`. Its diagnostic artifacts
   are written to `test-results/e2e/` on failure.
+
+## Jules clean-clone & test environments
+
+- Jules runs in a clean-clone virtual machine where neither `.env`, local databases, nor `.env.test` exist.
+- Always run `make jules-setup` to install dependencies (Python packages, npm frontend dependencies, and Playwright Chromium browser dependencies) before executing tests in clean environments.
+- **NEVER use `ENV=jules`** or assume it exists. All automated test validation and exploration must run strictly under `ENV=test` (which is forced internally on exploration servers) to guarantee full isolation from production configurations and local databases.
+- The default setup step for Jules's Initial Setup snapshotting is: `make jules-setup && ENV=test uv run pytest tests/`

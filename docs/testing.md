@@ -53,5 +53,44 @@ ENV=test uv run python -m obsidian_ai_hub --merge-inbox
 - プロセス終了後、一時データは自動削除。
 - 既定では外部連携はすべてブロックされる（LLM、YouTube、LINE、Calendar、
   Open Web UI、Web 検索）。macOS の画面取得（`--screenshot`）やアクセシビリティ
-  （`--scan-line-inbox`, `--log-activity`）はローカル操作として対象外。
-- 外部連携が必要な場合のみ、`.env.test` に `ALLOW_EXTERNAL_IN_TEST=1` を明示。<｜end▁of▁thinking｜>
+  （`--scan-line-inbox`, `--log-activity`）はローカル操作として対象外.
+- 外部連携が必要な場合のみ、`.env.test` に `ALLOW_EXTERNAL_IN_TEST=1` を明示。
+
+## Jules環境（クリーンクローンVM）におけるテストとセットアップ
+
+Jules VMなどのクリーンな一時環境において、動作検証やE2Eテストを実行するためのガイドラインです。
+
+### 1. クリーン環境のセットアップ
+
+Jules VMが立ち上がった直後、および最初の動作確認を行う前に必ず以下のセットアップを実行します。
+これにより、フロントエンドビルド依存関係（`npm ci`）、Python依存関係（`uv sync`）、およびPlaywrightのChromiumブラウザが準備されます。
+
+```bash
+make jules-setup
+```
+
+Jules VMの **Initial Setup** には、以下を設定して環境をスナップショット化します：
+
+```bash
+make jules-setup && ENV=test uv run pytest tests/
+```
+
+※このセットアップは、本番の `.env` や `.env.test`、ローカル上のVaultディレクトリやダウンロード済みAIモデルなどの存在を前提とせずに完結するよう設計されています。
+
+### 2. 環境変数設定とサーバー起動のルール
+
+- **`ENV=jules` は使用しないでください（非推奨・無効化されました）**。
+- Jules VM環境においても、すべてのテストとアドホック検証は標準の `ENV=test` 隔離環境を使用します。
+- 探索用サーバーなどの起動は、親プロセスの環境変数を継承せず、内部で強制的に `ENV=test` にセットされて実行されます。これにより誤って本番用データ（Vault等）や `.env` の本番設定に触れるリスクが完全に排除されます。
+
+### 3. 通常検証とE2Eテストの実行方法
+
+- 内部ロジックや一般機能の単体テスト検証：
+  ```bash
+  ENV=test uv run pytest tests/
+  ```
+- フロントエンド変更時、およびブラウザE2Eの検証：
+  ```bash
+  ENV=test make test-e2e
+  ```
+  このコマンドは自動的に `frontend/dist` をリビルドし、一時的なSQLite、一時的なテスト用Vault、シードデータ、自動起動したloopbackサーバーを使用してテストを実行します。

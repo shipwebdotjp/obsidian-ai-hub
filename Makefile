@@ -4,11 +4,17 @@ PLIST=~/Library/LaunchAgents/jp.shipweb.obsidian-ai-hub.plist
 LABEL=jp.shipweb.obsidian-ai-hub
 DOMAIN=gui/$(shell id -u)
 
-.PHONY: install start stop restart reload enable disable status logs errorlogs build-web dev-web
+.PHONY: install start stop restart reload enable disable status logs errorlogs build-web dev-web jules-setup
 
 # インストール（初回のみ）
 install:
 	bash ./install.sh
+
+# Jules VM用環境構築セットアップ
+jules-setup:
+	uv sync --frozen --all-extras
+	npm --prefix frontend ci
+	uv run playwright install --with-deps chromium
 
 # 起動（登録済み前提）
 start:
