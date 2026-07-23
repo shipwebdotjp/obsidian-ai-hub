@@ -30,7 +30,17 @@ logging.basicConfig(
 )
 
 
+def register_hitl_handlers():
+    """Register all HITL feature handlers. Done here at the application
+    composition root to avoid core-to-domain imports in the HITL package.
+    """
+    # Specific research handlers and workflow integrations are out of scope.
+    # We can register domain-specific handlers here in the future.
+    pass
+
+
 def main():
+    register_hitl_handlers()
     parser = argparse.ArgumentParser(description="Obsidian Daily Merge Tool")
     parser.add_argument(
         "--merge-inbox",
@@ -262,6 +272,11 @@ def main():
         "--debug",
         action="store_true",
         help="開発用デバッグモード。--serve と併用時は自動リロード + 詳細ログ",
+    )
+    parser.add_argument(
+        "--hitl-dispatch",
+        action="store_true",
+        help="Atomically claim and execute eligible HITL runs",
     )
     args = parser.parse_args()
     ran = False
@@ -509,6 +524,11 @@ def main():
                 port=port,
                 log_level="info",
             )
+        ran = True
+    if args.hitl_dispatch:
+        from obsidian_ai_hub.hitl.dispatcher import dispatch_runs
+
+        run_and_log(dispatch_runs, "hitl_dispatch", {})
         ran = True
     if not ran:
         parser.print_help()

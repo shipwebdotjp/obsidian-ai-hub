@@ -86,3 +86,10 @@
     hour: 7
     minute: 0
   command: 'cd /path/to/project && python -m your_tool --flag "value"'
+
+- id: hitl_dispatch_minutely
+  enabled: false
+  schedule:
+    type: minutely
+    second: [0, 30]
+  command: 'uv --directory /path/to/obsidian-daily-merge run -m obsidian_ai_hub --hitl-dispatch'

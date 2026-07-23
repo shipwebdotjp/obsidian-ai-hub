@@ -39,6 +39,7 @@ PRESET_FLAGS = {
     "--memory-extract": "Memory extract",
     "--suggest-research-theme": "Research suggestion",
     "--log-activity": "Activity log",
+    "--hitl-dispatch": "HITL dispatch",
 }
 
 
