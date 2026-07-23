@@ -145,7 +145,7 @@ export default function ResearchList({
                 <div className="flex flex-col gap-1 shrink-0">
                   <a
                     href="/hitl"
-                    className="rounded bg-blue-600 px-2 py-0.5 text-xs text-white text-center"
+                    className="rounded bg-blue-600 px-2 py-0.5 text-xs text-white text-center cursor-pointer"
                   >
                     確認待ち
                   </a>

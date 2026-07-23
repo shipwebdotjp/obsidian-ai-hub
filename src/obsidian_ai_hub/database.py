@@ -476,47 +476,55 @@ def run_migration_v14(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _ignore_dup_column(err: sqlite3.OperationalError) -> None:
+    """Raise unless the error is a duplicate-column or duplicate-index error."""
+    msg = str(err)
+    if "duplicate column name" in msg or "already exists" in msg:
+        return
+    raise err
+
+
 def run_migration_v15(conn: sqlite3.Connection) -> None:
     """Run the migration schema upgrade for version 15 (generic question model + research theme origin/hitl_run_id)."""
     # hitl_runs: add title and description
     try:
         conn.execute("ALTER TABLE hitl_runs ADD COLUMN title TEXT;")
-    except sqlite3.OperationalError:
-        pass
+    except sqlite3.OperationalError as e:
+        _ignore_dup_column(e)
     try:
         conn.execute("ALTER TABLE hitl_runs ADD COLUMN description TEXT;")
-    except sqlite3.OperationalError:
-        pass
+    except sqlite3.OperationalError as e:
+        _ignore_dup_column(e)
     # hitl_questions: add sequence, title, prompt, context_json
     try:
         conn.execute("ALTER TABLE hitl_questions ADD COLUMN sequence INTEGER NOT NULL DEFAULT 0;")
-    except sqlite3.OperationalError:
-        pass
+    except sqlite3.OperationalError as e:
+        _ignore_dup_column(e)
     try:
         conn.execute("ALTER TABLE hitl_questions ADD COLUMN title TEXT;")
-    except sqlite3.OperationalError:
-        pass
+    except sqlite3.OperationalError as e:
+        _ignore_dup_column(e)
     try:
         conn.execute("ALTER TABLE hitl_questions ADD COLUMN prompt TEXT;")
-    except sqlite3.OperationalError:
-        pass
+    except sqlite3.OperationalError as e:
+        _ignore_dup_column(e)
     try:
         conn.execute("ALTER TABLE hitl_questions ADD COLUMN context_json TEXT;")
-    except sqlite3.OperationalError:
-        pass
+    except sqlite3.OperationalError as e:
+        _ignore_dup_column(e)
     try:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_hitl_questions_set_seq ON hitl_questions(run_id, question_set_id, sequence);")
-    except sqlite3.OperationalError:
-        pass
+    except sqlite3.OperationalError as e:
+        _ignore_dup_column(e)
     # research_themes: add origin and hitl_run_id
     try:
         conn.execute("ALTER TABLE research_themes ADD COLUMN origin TEXT;")
-    except sqlite3.OperationalError:
-        pass
+    except sqlite3.OperationalError as e:
+        _ignore_dup_column(e)
     try:
         conn.execute("ALTER TABLE research_themes ADD COLUMN hitl_run_id TEXT;")
-    except sqlite3.OperationalError:
-        pass
+    except sqlite3.OperationalError as e:
+        _ignore_dup_column(e)
     conn.execute("PRAGMA user_version = 15;")
     conn.commit()
 

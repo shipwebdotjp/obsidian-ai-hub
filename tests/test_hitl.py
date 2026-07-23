@@ -30,6 +30,9 @@ def test_hitl_db_migration_and_structure(test_memory_db_path):
         assert "lease_expires_at" in runs_cols
         assert "retry_count" in runs_cols
         assert "error_message" in runs_cols
+        # v15 additions
+        assert "title" in runs_cols, "v15: hitl_runs.title"
+        assert "description" in runs_cols, "v15: hitl_runs.description"
 
         # Verify hitl_questions columns
         cursor.execute("PRAGMA table_info(hitl_questions);")
@@ -46,6 +49,21 @@ def test_hitl_db_migration_and_structure(test_memory_db_path):
         assert "is_required" in questions_cols
         assert "expires_at" in questions_cols
         assert "answered_at" in questions_cols
+        # v15 additions
+        assert "sequence" in questions_cols, "v15: hitl_questions.sequence"
+        assert "title" in questions_cols, "v15: hitl_questions.title"
+        assert "prompt" in questions_cols, "v15: hitl_questions.prompt"
+        assert "context_json" in questions_cols, "v15: hitl_questions.context_json"
+
+        # Verify v15 index on hitl_questions
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='index' AND name='idx_hitl_questions_set_seq'")
+        assert cursor.fetchone() is not None, "v15: idx_hitl_questions_set_seq index"
+
+        # Verify research_themes v15 columns
+        cursor.execute("PRAGMA table_info(research_themes);")
+        themes_cols = {row["name"]: row["type"] for row in cursor.fetchall()}
+        assert "origin" in themes_cols, "v15: research_themes.origin"
+        assert "hitl_run_id" in themes_cols, "v15: research_themes.hitl_run_id"
     finally:
         conn.close()
 

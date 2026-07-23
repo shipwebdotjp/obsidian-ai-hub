@@ -7,7 +7,7 @@ import unicodedata
 import uuid
 import sqlite3
 from datetime import date, datetime, timedelta, timezone
-from typing import Optional
+from typing import Any, Optional
 from contextlib import contextmanager
 
 from obsidian_ai_hub.database import get_db_connection
@@ -549,6 +549,8 @@ def list_approved_themes_by_date(date_str: str) -> list[dict]:
 
 def _set_theme_field(theme_id: str, field: str, value: Any, conn: Optional[sqlite3.Connection] = None) -> None:
     """Update a single field on a research theme."""
+    if field not in RESEARCH_THEME_COLUMNS:
+        raise ValueError(f"Unsupported research theme field: {field}")
     with auto_connection(conn) as (active_conn, is_generated):
         if is_generated:
             with active_conn:

@@ -661,6 +661,31 @@ def get_or_create_theme_and_job(
     return theme_rec, job_rec
 
 
+def _claim_research_job(job_id: str) -> Optional[dict]:
+    """Atomically claim a pending research job.
+
+    Uses a conditional UPDATE that only affects rows whose status is
+    ``'pending'``, and inspects the affected-row count to determine
+    ownership. Returns the updated job dict on success, or ``None`` if
+    the job did not exist or was already claimed by another caller.
+    """
+    from obsidian_ai_hub.research import db as research_db
+
+    conn = research_db.get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE research_jobs SET status = 'running' WHERE job_id = ? AND status = 'pending'",
+            (job_id,),
+        )
+        if cursor.rowcount == 0:
+            return None
+        conn.commit()
+        return research_db.get_job(job_id, conn)
+    finally:
+        conn.close()
+
+
 def execute_research_job_sync(
     theme_id: str,
     job_id: str,
@@ -669,15 +694,13 @@ def execute_research_job_sync(
 ) -> dict:
     from obsidian_ai_hub.research import db
 
-    job = db.get_job(job_id)
-    if job and job.get("status") != "pending":
+    job = _claim_research_job(job_id)
+    if job is None:
         logger.warning(
-            "Job %s is not pending (status=%s), refusing to re-run.",
-            job_id, job.get("status")
+            "Job %s could not be claimed (already claimed or nonexistent), refusing to re-run.",
+            job_id,
         )
-        return job
-
-    db.update_job(job_id, status="running")
+        return db.get_job(job_id) or {}
 
     theme_obj = db.get_theme(theme_id)
     if theme_obj is None:
@@ -786,7 +809,7 @@ def save_research_to_vault(theme_id: str, job_id: Optional[str] = None) -> Optio
     stem = output_dir / filename
     stem_path = stem.with_suffix("")
     job_id_slug = job["job_id"].replace(":", "_").replace("/", "_")
-    output_path = output_dir / f"{stem_path.stem}_{job_id_slug}.md"
+    output_path = output_dir / f"{stem_path.name}_{job_id_slug}.md"
 
     db.update_job(job["job_id"], output_path=str(output_path))
 

@@ -93,6 +93,7 @@ def register_run_and_questions(
                     q_id = existing_q["question_id"]
                     db_updates = serialize_question({
                         "choices": q_data.get("choices"),
+                        "context_json": q_data.get("context_json"),
                     })
                     sql = """
                         UPDATE hitl_questions
@@ -111,7 +112,7 @@ def register_run_and_questions(
                         q_data.get("sequence", 0),
                         q_data.get("title"),
                         q_data.get("prompt"),
-                        q_data.get("context_json"),
+                        db_updates["context_json"],
                         q_id
                     ))
                 else:

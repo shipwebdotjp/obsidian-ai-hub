@@ -86,7 +86,7 @@ def test_get_research_theme_not_found(client):
 
 
 def test_review_endpoint_removed(client):
-    """The review endpoint should be removed — POST returns 405."""
+    """The review endpoint was removed — POST returns 405 (method not allowed on the overlapping /{theme_id} path)."""
     t = _create_test_theme()
     resp = client.post(
         f"/api/v1/research-themes/{t['theme_id']}/review", json={"action": "approve"}

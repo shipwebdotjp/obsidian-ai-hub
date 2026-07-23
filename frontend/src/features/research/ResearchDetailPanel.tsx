@@ -183,9 +183,9 @@ export default function ResearchDetailPanel({
         {detail.status === "candidate" && detail.origin === "auto_suggestion" && detail.hitl_run_id && (
           <a
             href={`/hitl`}
-            className="inline-block rounded bg-blue-600 px-3 py-1 text-sm text-white hover:bg-blue-700 cursor-pointer"
+            className="inline-block rounded bg-blue-600 px-3 py-1.5 text-xs text-white hover:bg-blue-700 cursor-pointer"
           >
-            確認待ちで回答
+            HITLで回答
           </a>
         )}
         {job?.status === "failed" && (
