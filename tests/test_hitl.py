@@ -507,3 +507,115 @@ def test_multiple_question_sets_and_unique_constraint(test_memory_db_path):
             }, conn)
     finally:
         conn.close()
+
+
+def test_register_run_and_questions_idempotence(test_memory_db_path):
+    """Verify that register_run_and_questions is idempotent and preserves question_ids."""
+    conn = get_db_connection()
+    try:
+        run_id = "run_idemp"
+        qset_id = "qset_idemp"
+        questions_data = [
+            {"question_key": "q1", "question_type": "text", "display_text": "Original text", "is_required": 1}
+        ]
+
+        # First registration
+        hitl.register_run_and_questions(run_id, "test", "c1", qset_id, questions_data, conn)
+        q1_first = hitl.get_question(run_id, qset_id, "q1", conn)
+        assert q1_first is not None
+        assert q1_first["display_text"] == "Original text"
+        assert q1_first["status"] == "pending"
+
+        # Submit answer to q1
+        hitl.submit_answer(run_id, qset_id, "q1", "Answer content", conn)
+        q1_ans = hitl.get_question(run_id, qset_id, "q1", conn)
+        assert q1_ans["status"] == "answered"
+
+        # Second registration with modified display_text
+        questions_data_mod = [
+            {"question_key": "q1", "question_type": "text", "display_text": "Updated text", "is_required": 1}
+        ]
+        hitl.register_run_and_questions(run_id, "test", "c1", qset_id, questions_data_mod, conn)
+
+        # Retrieve again: question_id, status, and answer must be preserved!
+        q1_second = hitl.get_question(run_id, qset_id, "q1", conn)
+        assert q1_second["question_id"] == q1_first["question_id"]
+        assert q1_second["status"] == "answered"
+        assert q1_second["answer"] == "Answer content"
+        assert q1_second["display_text"] == "Updated text"
+    finally:
+        conn.close()
+
+
+def test_submit_answer_rejects_historical_inactive_sets(test_memory_db_path):
+    """Verify that submit_answer rejects answers targeting historical/inactive question sets."""
+    conn = get_db_connection()
+    try:
+        run_id = "run_hist"
+
+        # Register Set 1
+        hitl.register_run_and_questions(
+            run_id=run_id,
+            handler="test",
+            checkpoint="c1",
+            question_set_id="set_1",
+            questions_data=[
+                {"question_key": "q", "question_type": "text", "display_text": "Q1", "is_required": 1}
+            ],
+            conn=conn,
+        )
+
+        # Register Set 2 (making Set 2 the active set)
+        hitl.register_run_and_questions(
+            run_id=run_id,
+            handler="test",
+            checkpoint="c2",
+            question_set_id="set_2",
+            questions_data=[
+                {"question_key": "q", "question_type": "text", "display_text": "Q2", "is_required": 1}
+            ],
+            conn=conn,
+        )
+
+        # Attempt to answer the question from the historical set_1
+        with pytest.raises(ValueError, match="Cannot submit answer for inactive or historical question set"):
+            hitl.submit_answer(run_id, "set_1", "q", "some answer", conn)
+
+        # Answering the active set_2 must succeed
+        hitl.submit_answer(run_id, "set_2", "q", "active answer", conn)
+        q2 = hitl.get_question(run_id, "set_2", "q", conn)
+        assert q2["status"] == "answered"
+        assert q2["answer"] == "active answer"
+    finally:
+        conn.close()
+
+
+def test_choices_and_answer_serialization_symmetry(test_memory_db_path):
+    """Test that choices and answer fields serialize and deserialize symmetrically (e.g. including plain strings)."""
+    conn = get_db_connection()
+    try:
+        run_id = "run_sym"
+        qset_id = "qset_sym"
+        questions_data = [
+            {
+                "question_key": "q",
+                "question_type": "select",
+                "display_text": "Symmetric selection",
+                "choices": ["yes", "no"],
+                "is_required": 1,
+            }
+        ]
+
+        hitl.register_run_and_questions(run_id, "test", "c1", qset_id, questions_data, conn)
+
+        # Verify choices deserialized as a Python list
+        q = hitl.get_question(run_id, qset_id, "q", conn)
+        assert q["choices"] == ["yes", "no"]
+
+        # Submit a plain string answer (should be JSON-encoded on save and decoded on load as a string)
+        hitl.submit_answer(run_id, qset_id, "q", "yes", conn)
+
+        q_ans = hitl.get_question(run_id, qset_id, "q", conn)
+        assert q_ans["answer"] == "yes"
+    finally:
+        conn.close()
