@@ -619,3 +619,38 @@ def test_choices_and_answer_serialization_symmetry(test_memory_db_path):
         assert q_ans["answer"] == "yes"
     finally:
         conn.close()
+
+
+def test_submit_answer_concurrent_conflict(test_memory_db_path):
+    """Test that concurrent/repeated submit_answer calls on two distinct connections result in only one success and one conflict."""
+    # We open two completely distinct sqlite3 connections to the same isolated DB file
+    conn1 = get_db_connection()
+    conn2 = sqlite3.connect(str(test_memory_db_path), check_same_thread=False, timeout=30.0)
+    conn2.row_factory = sqlite3.Row
+    conn2.execute("PRAGMA foreign_keys = ON;")
+
+    try:
+        run_id = "run_concurrent"
+        qset_id = "qset_concurrent"
+        questions_data = [
+            {"question_key": "q1", "question_type": "text", "display_text": "Concurrent Q", "is_required": 1}
+        ]
+
+        # Register using conn1
+        hitl.register_run_and_questions(run_id, "test", "c1", qset_id, questions_data, conn1)
+
+        # Call submit_answer on conn1 (first connection). This must succeed.
+        hitl.submit_answer(run_id, qset_id, "q1", "First Answer", conn1)
+
+        # Now attempt to answer on conn2 (second connection).
+        # This must raise a ValueError (Conflict detected) because the status is no longer 'pending'
+        with pytest.raises(ValueError, match="Conflict detected|already finalized"):
+            hitl.submit_answer(run_id, qset_id, "q1", "Second Answer", conn2)
+
+        # Verify that the answer saved in DB remains "First Answer"
+        q = hitl.get_question(run_id, qset_id, "q1", conn1)
+        assert q["status"] == "answered"
+        assert q["answer"] == "First Answer"
+    finally:
+        conn1.close()
+        conn2.close()

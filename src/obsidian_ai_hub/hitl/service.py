@@ -13,6 +13,7 @@ from obsidian_ai_hub.hitl.store import (
     get_question,
     get_questions_by_set,
     update_question_status_and_answer,
+    update_pending_question_answer,
     bulk_update_questions_status_by_set,
     generate_question_id,
     serialize_question,
@@ -190,15 +191,18 @@ def submit_answer(
                             f"Answer '{answer}' is not a valid choice. Valid choices: {choices}"
                         )
 
-            # Update question
+            # Update question conditionally only if it is still pending
             now = get_current_iso()
-            update_question_status_and_answer(
+            success = update_pending_question_answer(
                 question["question_id"],
-                status="answered",
                 answer=answer,
                 answered_at=now,
                 conn=conn,
             )
+            if not success:
+                raise ValueError(
+                    f"Conflict detected: Question {question_key} has already been answered, skipped, or cancelled by another transaction."
+                )
 
             # Check if all required questions in active set of the run are answered
             active_set_id = run["active_question_set_id"]

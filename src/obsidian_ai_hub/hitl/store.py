@@ -234,6 +234,47 @@ def update_question_status_and_answer(
             active_conn.execute(sql, values)
 
 
+def update_pending_question_answer(
+    question_id: str, answer: Any, answered_at: Optional[str] = None, conn: Optional[sqlite3.Connection] = None
+) -> bool:
+    """
+    Atomically update a pending question to 'answered' with the provided answer.
+    Returns True if update succeeded, False if the question was not pending.
+    """
+    now = get_current_iso()
+    answered_time = answered_at or now
+
+    q_updates = {
+        "status": "answered",
+        "answer": answer,
+        "answered_at": answered_time,
+        "updated_at": now,
+    }
+    db_updates = serialize_question(q_updates)
+
+    sql = """
+        UPDATE hitl_questions
+        SET status = ?, answer = ?, answered_at = ?, updated_at = ?
+        WHERE question_id = ? AND status = 'pending'
+    """
+    values = (
+        db_updates["status"],
+        db_updates["answer"],
+        db_updates["answered_at"],
+        db_updates["updated_at"],
+        question_id,
+    )
+
+    with auto_connection(conn) as (active_conn, is_generated):
+        if is_generated:
+            with active_conn:
+                cursor = active_conn.execute(sql, values)
+                return cursor.rowcount > 0
+        else:
+            cursor = active_conn.execute(sql, values)
+            return cursor.rowcount > 0
+
+
 def bulk_update_questions_status_by_set(
     run_id: str, question_set_id: str, from_status: str, to_status: str, conn: Optional[sqlite3.Connection] = None
 ) -> None:
