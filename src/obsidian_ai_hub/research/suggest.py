@@ -331,6 +331,7 @@ def main() -> list[dict]:
             kind=s.kind,
             why_now=s.why_now,
             confidence=s.confidence,
+            is_suggestion=True,
         )
         results.append(result)
         logger.info(

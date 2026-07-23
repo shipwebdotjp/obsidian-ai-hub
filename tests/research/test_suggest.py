@@ -142,7 +142,7 @@ def test_build_suggestions_returns_empty_when_llm_output_is_invalid(
     assert suggestions == []
 
 
-def test_main_creates_themes_and_researches(tmp_path: Path, monkeypatch):
+def test_main_creates_themes_and_researches(tmp_path: Path, monkeypatch, test_memory_db_path):
     today = date.today()
     activity_root = tmp_path / "activity"
     _write_activity_log(activity_root, today, ["テストアクティビティ"])
@@ -175,4 +175,159 @@ def test_main_creates_themes_and_researches(tmp_path: Path, monkeypatch):
 
     assert len(results) == 1
     assert results[0]["status"] == "candidate"
-    mock_research.assert_called_once()
+    assert "hitl_run_id" in results[0]
+    mock_research.assert_not_called()
+
+    # Verify that the HITL Run is registered in DB
+    from obsidian_ai_hub.database import get_db_connection
+    from obsidian_ai_hub.hitl import get_run, get_questions_by_set
+
+    conn = get_db_connection()
+    try:
+        run_id = results[0]["hitl_run_id"]
+        run = get_run(run_id, conn)
+        assert run is not None
+        assert run["handler"] == "research.run_approved_suggestion"
+        assert run["status"] == "pending_user"
+        assert run["checkpoint"] == results[0]["theme_id"]
+
+        questions = get_questions_by_set(run_id, "confirm_suggest", conn)
+        assert len(questions) == 1
+        assert questions[0]["question_key"] == "action"
+        assert questions[0]["choices"] == ["approve", "reject"]
+    finally:
+        conn.close()
+
+
+def test_suggestion_hitl_run_approve_and_execute(tmp_path: Path, monkeypatch, test_memory_db_path):
+    """Test approving a suggested research theme HITL Run, which runs research, saves to vault, and approves the theme."""
+    from obsidian_ai_hub.database import get_db_connection
+    from obsidian_ai_hub import hitl
+    from obsidian_ai_hub.research import db as research_db
+    from obsidian_ai_hub.main import register_hitl_handlers
+
+    register_hitl_handlers()
+
+    # Step 1: Create a mock theme and register a HITL run manually
+    conn = get_db_connection()
+    try:
+        theme_rec = research_db.create_theme(
+            theme="テスト自動承認テーマ",
+            direction="方向",
+            kind="explore",
+            why_now="理由",
+            confidence=0.8,
+            status="candidate",
+            conn=conn,
+        )
+        theme_id = theme_rec["theme_id"]
+        run_id = f"hrun_suggest_{theme_id}"
+
+        questions_data = [
+            {
+                "question_key": "action",
+                "question_type": "select",
+                "display_text": "Approve?",
+                "choices": ["approve", "reject"],
+                "is_required": 1,
+            }
+        ]
+        hitl.register_run_and_questions(
+            run_id=run_id,
+            handler="research.run_approved_suggestion",
+            checkpoint=theme_id,
+            question_set_id="confirm_suggest",
+            questions_data=questions_data,
+            conn=conn,
+        )
+
+        # Step 2: Answer the HITL Run as 'approve'
+        hitl.submit_answer(run_id, "confirm_suggest", "action", "approve", conn)
+
+        # Step 3: Dispatch HITL Runs with mock research report
+        from obsidian_ai_hub.research.runner import ResearchReport
+        mock_report = ResearchReport(
+            title="テスト自動承認テーマの調査結果",
+            mode="internal",
+            markdown="---\ntitle: テスト自動承認テーマの調査結果\nstatus: researched\n---\n## 調査結果詳細",
+        )
+
+        with patch("obsidian_ai_hub.research.runner.run_research", return_value=mock_report) as mock_conduct:
+            processed = hitl.dispatch_runs(conn)
+            assert processed == 1
+
+        # Check theme is approved and job succeeded
+        theme_obj = research_db.get_theme(theme_id, conn=conn)
+        assert theme_obj["status"] == "approved"
+
+        job = research_db.latest_job(theme_id, conn=conn)
+        assert job["status"] == "succeeded"
+        assert job["output_path"] is not None
+        assert job["is_published"] == 1
+
+        # Verify output exists
+        output_file = Path(job["output_path"])
+        assert output_file.exists()
+        assert "## 調査結果詳細" in output_file.read_text()
+
+    finally:
+        conn.close()
+
+
+def test_suggestion_hitl_run_reject(tmp_path: Path, monkeypatch, test_memory_db_path):
+    """Test rejecting a suggested research theme HITL Run, which sets theme to rejected and completes without job."""
+    from obsidian_ai_hub.database import get_db_connection
+    from obsidian_ai_hub import hitl
+    from obsidian_ai_hub.research import db as research_db
+    from obsidian_ai_hub.main import register_hitl_handlers
+
+    register_hitl_handlers()
+
+    conn = get_db_connection()
+    try:
+        theme_rec = research_db.create_theme(
+            theme="テスト自動却下テーマ",
+            direction="方向",
+            kind="explore",
+            why_now="理由",
+            confidence=0.8,
+            status="candidate",
+            conn=conn,
+        )
+        theme_id = theme_rec["theme_id"]
+        run_id = f"hrun_suggest_{theme_id}"
+
+        questions_data = [
+            {
+                "question_key": "action",
+                "question_type": "select",
+                "display_text": "Approve?",
+                "choices": ["approve", "reject"],
+                "is_required": 1,
+            }
+        ]
+        hitl.register_run_and_questions(
+            run_id=run_id,
+            handler="research.run_approved_suggestion",
+            checkpoint=theme_id,
+            question_set_id="confirm_suggest",
+            questions_data=questions_data,
+            conn=conn,
+        )
+
+        # Answer as 'reject'
+        hitl.submit_answer(run_id, "confirm_suggest", "action", "reject", conn)
+
+        # Dispatch
+        processed = hitl.dispatch_runs(conn)
+        assert processed == 1
+
+        # Verify theme status is rejected and no job is created
+        theme_obj = research_db.get_theme(theme_id, conn=conn)
+        assert theme_obj["status"] == "rejected"
+
+        job = research_db.latest_job(theme_id, conn=conn)
+        assert job is None
+
+    finally:
+        conn.close()
