@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from typing import Optional
 
@@ -88,7 +89,6 @@ def create_theme_and_research(
 
             if is_suggestion:
                 from obsidian_ai_hub.hitl.service import register_run_and_questions
-                import json
 
                 run_id = f"hrun_suggest_{rec['theme_id']}"
                 questions_data = [
@@ -110,8 +110,7 @@ def create_theme_and_research(
                     conn=conn,
                 )
                 # Save hitl_run_id on theme in the same transaction
-                from obsidian_ai_hub.research import db as research_db
-                research_db._set_theme_field(rec["theme_id"], "hitl_run_id", run_id, conn=conn)
+                db._set_theme_field(rec["theme_id"], "hitl_run_id", run_id, conn=conn)
                 logger.info(
                     "Registered HITL Run %s for suggested theme '%s'",
                     run_id,

@@ -300,6 +300,8 @@ def test_dispatch_cli_flag_processes_runs(test_memory_db_path, monkeypatch):
         run = hitl.get_run(run_id, conn)
         assert run["status"] == "completed"
         assert run["checkpoint"] == "done"
+        assert run["lease_owner"] is None
+        assert run["lease_expires_at"] is None
     finally:
         conn.close()
 

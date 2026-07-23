@@ -99,7 +99,7 @@ export default function HitlPage() {
     setDetailError(null);
     setSuccessMessage(null);
     try {
-      await submitHitlAnswer(selectedRun.run_id, q.question_key, { value: ansValue, comment: commentVal });
+      await submitHitlAnswer(selectedRun.run_id, q.question_key, ansValue, commentVal);
       setSuccessMessage("回答を正常に送信しました。");
       // Reload run detail to reflect updated questions and run status
       await loadDetail(selectedRun.run_id);
@@ -324,7 +324,7 @@ export default function HitlPage() {
                             )}
                           </div>
                           <p className="mt-2 text-sm font-medium text-slate-800">{q.prompt || q.display_text}</p>
-                          {q.context && (
+                          {q.context != null && (
                             <p className="mt-1 text-xs text-slate-400">{JSON.stringify(q.context)}</p>
                           )}
                         </div>

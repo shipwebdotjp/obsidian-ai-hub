@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { ApiError, getResearchTheme, rerunResearchTheme } from "../../api/client";
 import type { ResearchTheme } from "../../api/types";
 import MarkdownPreview from "../../components/MarkdownPreview";
+import { ROUTES } from "../../constants/routes";
 
 export interface ResearchDetailPanelProps {
   themeId: string;
@@ -181,12 +183,12 @@ export default function ResearchDetailPanel({
 
       <div className="mt-6 space-x-2">
         {detail.status === "candidate" && detail.origin === "auto_suggestion" && detail.hitl_run_id && (
-          <a
-            href={`/hitl`}
+          <Link
+            to={ROUTES.HITL}
             className="inline-block rounded bg-blue-600 px-3 py-1.5 text-xs text-white hover:bg-blue-700 cursor-pointer"
           >
             HITLで回答
-          </a>
+          </Link>
         )}
         {job?.status === "failed" && (
           <button

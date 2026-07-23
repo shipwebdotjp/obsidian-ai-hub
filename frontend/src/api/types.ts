@@ -456,7 +456,7 @@ export interface HitlQuestion {
   sequence: number;
   title: string | null;
   prompt: string | null;
-  context: any | null;
+  context: unknown | null;
 }
 
 export interface HitlRun {

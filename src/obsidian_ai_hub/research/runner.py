@@ -679,9 +679,13 @@ def _claim_research_job(job_id: str) -> Optional[dict]:
             (job_id,),
         )
         if cursor.rowcount == 0:
+            conn.rollback()
             return None
         conn.commit()
         return research_db.get_job(job_id, conn)
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         conn.close()
 
@@ -873,6 +877,7 @@ def main(
 
 def run_approved_suggestion(ctx) -> "HitlResult":
     from obsidian_ai_hub.hitl.dispatcher import HitlResult
+    from obsidian_ai_hub.hitl.service import update_checkpoint
     from obsidian_ai_hub.research import db
     import json
 
@@ -885,7 +890,6 @@ def run_approved_suggestion(ctx) -> "HitlResult":
     if isinstance(answer, dict):
         answer = answer.get("value", answer)
 
-    # Parse structured checkpoint
     cp = {}
     if ctx.checkpoint:
         try:
@@ -893,7 +897,19 @@ def run_approved_suggestion(ctx) -> "HitlResult":
         except (json.JSONDecodeError, TypeError):
             pass
     theme_id = cp.get("theme_id") or ctx.checkpoint
-    if not theme_id or theme_id.startswith("rjob_"):
+
+    # Legacy rjob_ checkpoints: extract theme_id from the referenced job
+    if theme_id and isinstance(theme_id, str) and theme_id.startswith("rjob_"):
+        legacy_job = db.get_job(theme_id, conn=ctx.conn)
+        if not legacy_job:
+            return HitlResult.fail(f"Legacy checkpoint {ctx.checkpoint} references nonexistent job")
+        theme_id = legacy_job["theme_id"]
+        # Migrate to new JSON format
+        new_cp = json.dumps({"theme_id": theme_id, "phase": "awaiting_approval"})
+        update_checkpoint(ctx.run_id, checkpoint=new_cp, conn=ctx.conn)
+        cp = {"theme_id": theme_id, "phase": "awaiting_approval"}
+
+    if not theme_id:
         return HitlResult.fail(f"Invalid or missing theme_id in checkpoint: {ctx.checkpoint}")
 
     if answer == "reject":
@@ -912,7 +928,7 @@ def run_approved_suggestion(ctx) -> "HitlResult":
         job = db.create_job(theme_id, conn=ctx.conn)
         job_id = job["job_id"]
         new_cp = json.dumps({"theme_id": theme_id, "job_id": job_id, "phase": "job_created"})
-        from obsidian_ai_hub.hitl.service import update_checkpoint
+        ctx.conn.commit()
         update_checkpoint(ctx.run_id, checkpoint=new_cp, conn=ctx.conn)
         cp = {"theme_id": theme_id, "job_id": job_id, "phase": "job_created"}
 
@@ -922,7 +938,6 @@ def run_approved_suggestion(ctx) -> "HitlResult":
     if js == "succeeded":
         save_research_to_vault(theme_id, job_id)
         new_cp = json.dumps({"theme_id": theme_id, "job_id": job_id, "phase": "published"})
-        from obsidian_ai_hub.hitl.service import update_checkpoint
         update_checkpoint(ctx.run_id, checkpoint=new_cp, conn=ctx.conn)
         return HitlResult.complete(checkpoint=new_cp)
 
@@ -941,7 +956,6 @@ def run_approved_suggestion(ctx) -> "HitlResult":
 
     if js == "succeeded":
         new_cp = json.dumps({"theme_id": theme_id, "job_id": job_id, "phase": "published"})
-        from obsidian_ai_hub.hitl.service import update_checkpoint
         update_checkpoint(ctx.run_id, checkpoint=new_cp, conn=ctx.conn)
         return HitlResult.complete(checkpoint=new_cp)
     else:

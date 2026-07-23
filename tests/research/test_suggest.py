@@ -189,7 +189,7 @@ def test_main_creates_themes_and_researches(tmp_path: Path, monkeypatch, test_me
         assert run is not None
         assert run["handler"] == "research.run_approved_suggestion"
         assert run["status"] == "pending_user"
-        assert results[0]["theme_id"] in (run["checkpoint"] or "")
+        assert json.loads(run["checkpoint"] or "{}").get("theme_id") == results[0]["theme_id"]
 
         questions = get_questions_by_set(run_id, "confirm_suggest", conn)
         assert len(questions) == 1
@@ -409,7 +409,7 @@ def test_suggestion_hitl_run_approve_then_redispatch_idempotent(tmp_path: Path, 
 
         # run_research must NOT be called when re-running a completed+published run
         mock_re_run.assert_not_called()
-        assert processed_again in (0, 1)
+        assert processed_again == 1
 
         # Vault must have same number of files as before
         vault_file_count_after = len(list(output_file.parent.iterdir()))

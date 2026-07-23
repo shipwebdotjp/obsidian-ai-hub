@@ -1,11 +1,9 @@
 import sqlite3
 import pytest
-from unittest.mock import patch
 from playwright.sync_api import Page, expect
 
 from obsidian_ai_hub import database
 from obsidian_ai_hub import hitl
-from obsidian_ai_hub.main import register_hitl_handlers
 from obsidian_ai_hub.utils import config as app_config
 
 pytestmark = pytest.mark.e2e
@@ -90,7 +88,6 @@ def seed_hitl_data(e2e_server_url):
         conn.close()
 
     # Dispatch optional-only run so it auto-skips and completes
-    register_hitl_handlers()
     conn2 = sqlite3.connect(str(app_config.MEMORY_SQLITE_PATH))
     conn2.row_factory = sqlite3.Row
     try:
@@ -99,8 +96,8 @@ def seed_hitl_data(e2e_server_url):
         hitl.register_handler("optional_handler", optional_handler)
         hitl.dispatch_runs(conn2)
     finally:
+        hitl.clear_handlers()
         conn2.close()
-    hitl.clear_handlers()
 
 
 def test_hitl_sidebar_link_and_navigation(e2e_server_url: str, page: Page) -> None:
@@ -216,3 +213,6 @@ def test_hitl_optional_question_autoskip_in_ui(e2e_server_url: str, page: Page) 
 
     # Verify the run detail panel shows the header with run_id
     expect(page.get_by_role("heading", name="hrun_optional_only")).to_be_visible()
+
+    # Verify both optional questions are shown as skipped
+    expect(page.get_by_text("スキップ")).to_have_count(2)

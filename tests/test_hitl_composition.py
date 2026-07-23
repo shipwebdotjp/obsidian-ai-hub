@@ -46,13 +46,9 @@ def test_task_runner_preset_contains_hitl_dispatch():
 
 def test_register_hitl_handlers_registers_research_handler(test_memory_db_path):
     """register_hitl_handlers() must register the research.run_approved_suggestion handler."""
-    conn = get_db_connection()
-    try:
-        register_hitl_handlers()
+    register_hitl_handlers()
 
-        handler = get_handler("research.run_approved_suggestion")
-        assert handler is not None, (
-            "research.run_approved_suggestion handler must be registered by register_hitl_handlers"
-        )
-    finally:
-        conn.close()
+    handler = get_handler("research.run_approved_suggestion")
+    assert handler is not None, (
+        "research.run_approved_suggestion handler must be registered by register_hitl_handlers"
+    )

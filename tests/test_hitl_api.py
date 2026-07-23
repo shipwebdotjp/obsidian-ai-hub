@@ -220,15 +220,18 @@ def test_hitl_api_rejects_answer_after_run_completed(test_memory_db_path, client
         def completing_handler(ctx):
             return hitl.HitlResult.complete(checkpoint="done")
         hitl.register_handler("dummy", completing_handler)
-        hitl.dispatch_runs(conn)
+        try:
+            hitl.dispatch_runs(conn)
+        finally:
+            hitl.clear_handlers()
     finally:
         conn.close()
 
     res = client.post("/api/v1/hitl/runs/run_completed/questions/q/answer", json={"answer": "x"})
-    assert res.status_code in (400, 409)
+    assert res.status_code == 400
 
 
-def test_hitl_api_rejects_cancel_on_non_pending_run(test_memory_db_path, client):
+def test_hitl_api_returns_404_for_cancel_on_missing_run(test_memory_db_path, client):
     """Cancelling a non-existent run returns 404."""
     res = client.post("/api/v1/hitl/runs/non_existent_cancel_test/cancel")
     assert res.status_code == 404

@@ -256,16 +256,6 @@ class ResearchTheme(BaseModel):
     hitl_run_id: Optional[str] = None
 
 
-class ResearchRunRequest(BaseModel):
-    theme: str
-    mode: str = "auto"
-
-
-class ResearchRunAcceptedResponse(BaseModel):
-    theme: ResearchTheme
-    job: ResearchJob
-
-
 class ResearchThemeListResponse(BaseModel):
     items: list[ResearchTheme]
     total: int
