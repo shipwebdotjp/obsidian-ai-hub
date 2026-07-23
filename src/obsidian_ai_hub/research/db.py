@@ -5,13 +5,29 @@ import logging
 import re
 import unicodedata
 import uuid
+import sqlite3
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
+from contextlib import contextmanager
 
 from obsidian_ai_hub.database import get_db_connection
 from obsidian_ai_hub.utils.embeddings import cosine_similarity
 
 logger = logging.getLogger(__name__)
+
+
+@contextmanager
+def auto_connection(conn: Optional[sqlite3.Connection] = None):
+    """Context manager to reuse passed connection or open and close a new one."""
+    close_conn = False
+    if conn is None:
+        conn = get_db_connection()
+        close_conn = True
+    try:
+        yield conn, close_conn
+    finally:
+        if close_conn:
+            conn.close()
 
 RESEARCH_THEME_COLUMNS = [
     "schema_version",
@@ -146,37 +162,30 @@ def create_theme(
     db_row = serialize_theme(rec)
     columns = ", ".join(RESEARCH_THEME_COLUMNS)
     placeholders = ", ".join("?" for _ in RESEARCH_THEME_COLUMNS)
-    db_conn = conn if conn is not None else _get_db()
-    try:
-        if conn is not None:
-            db_conn.execute(
-                f"INSERT INTO research_themes ({columns}) VALUES ({placeholders})",
-                tuple(db_row.get(c) for c in RESEARCH_THEME_COLUMNS),
-            )
-        else:
-            with db_conn:
-                db_conn.execute(
+
+    with auto_connection(conn) as (active_conn, is_generated):
+        if is_generated:
+            with active_conn:
+                active_conn.execute(
                     f"INSERT INTO research_themes ({columns}) VALUES ({placeholders})",
                     tuple(db_row.get(c) for c in RESEARCH_THEME_COLUMNS),
                 )
-    finally:
-        if conn is None:
-            db_conn.close()
+        else:
+            active_conn.execute(
+                f"INSERT INTO research_themes ({columns}) VALUES ({placeholders})",
+                tuple(db_row.get(c) for c in RESEARCH_THEME_COLUMNS),
+            )
     return rec
 
 
 def get_theme(theme_id: str, conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
-    db_conn = conn if conn is not None else _get_db()
-    try:
-        cursor = db_conn.cursor()
+    with auto_connection(conn) as (active_conn, _):
+        cursor = active_conn.cursor()
         cursor.execute("SELECT * FROM research_themes WHERE theme_id = ?", (theme_id,))
         row = cursor.fetchone()
         if row is None:
             return None
         return deserialize_theme(dict(row))
-    finally:
-        if conn is None:
-            db_conn.close()
 
 
 def list_themes(
@@ -262,48 +271,45 @@ def set_status(
     if status not in ALLOWED_THEME_STATUS:
         raise ValueError(f"Invalid status: {status}")
     now = get_current_timestamp()
-    db_conn = conn if conn is not None else _get_db()
-    try:
-        def _execute_update(c_conn):
-            cursor = c_conn.cursor()
-            cursor.execute(
-                "SELECT * FROM research_themes WHERE theme_id = ?", (theme_id,)
-            )
-            row = cursor.fetchone()
-            if row is None:
-                return None
-            t = deserialize_theme(dict(row))
-            t["status"] = status
-            t["updated_at"] = now
-            if status in ("approved", "rejected", "duplicate"):
-                t["reviewed_at"] = now
-                t["reviewed_by"] = reviewed_by
-            if reason:
-                t["duplicate_reason"] = reason
-            if duplicate_of:
-                t["duplicate_of_theme_id"] = duplicate_of
-            if related_ids is not None:
-                t["related_theme_ids"] = related_ids
-            db_row = serialize_theme(t)
-            set_clause = ", ".join(
-                f"{c} = ?" for c in RESEARCH_THEME_COLUMNS if c != "theme_id"
-            )
-            values = [
-                db_row.get(c) for c in RESEARCH_THEME_COLUMNS if c != "theme_id"
-            ] + [theme_id]
-            c_conn.execute(
-                f"UPDATE research_themes SET {set_clause} WHERE theme_id = ?", values
-            )
-            return t
 
-        if conn is not None:
-            return _execute_update(db_conn)
+    def _execute_update(c_conn):
+        cursor = c_conn.cursor()
+        cursor.execute(
+            "SELECT * FROM research_themes WHERE theme_id = ?", (theme_id,)
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        t = deserialize_theme(dict(row))
+        t["status"] = status
+        t["updated_at"] = now
+        if status in ("approved", "rejected", "duplicate"):
+            t["reviewed_at"] = now
+            t["reviewed_by"] = reviewed_by
+        if reason:
+            t["duplicate_reason"] = reason
+        if duplicate_of:
+            t["duplicate_of_theme_id"] = duplicate_of
+        if related_ids is not None:
+            t["related_theme_ids"] = related_ids
+        db_row = serialize_theme(t)
+        set_clause = ", ".join(
+            f"{c} = ?" for c in RESEARCH_THEME_COLUMNS if c != "theme_id"
+        )
+        values = [
+            db_row.get(c) for c in RESEARCH_THEME_COLUMNS if c != "theme_id"
+        ] + [theme_id]
+        c_conn.execute(
+            f"UPDATE research_themes SET {set_clause} WHERE theme_id = ?", values
+        )
+        return t
+
+    with auto_connection(conn) as (active_conn, is_generated):
+        if is_generated:
+            with active_conn:
+                return _execute_update(active_conn)
         else:
-            with db_conn:
-                return _execute_update(db_conn)
-    finally:
-        if conn is None:
-            db_conn.close()
+            return _execute_update(active_conn)
 
 
 def create_job(theme_id: str, conn: Optional[sqlite3.Connection] = None) -> dict:
@@ -325,22 +331,19 @@ def create_job(theme_id: str, conn: Optional[sqlite3.Connection] = None) -> dict
     }
     columns = ", ".join(RESEARCH_JOB_COLUMNS)
     placeholders = ", ".join("?" for _ in RESEARCH_JOB_COLUMNS)
-    db_conn = conn if conn is not None else _get_db()
-    try:
-        if conn is not None:
-            db_conn.execute(
-                f"INSERT INTO research_jobs ({columns}) VALUES ({placeholders})",
-                tuple(rec.get(c) for c in RESEARCH_JOB_COLUMNS),
-            )
-        else:
-            with db_conn:
-                db_conn.execute(
+
+    with auto_connection(conn) as (active_conn, is_generated):
+        if is_generated:
+            with active_conn:
+                active_conn.execute(
                     f"INSERT INTO research_jobs ({columns}) VALUES ({placeholders})",
                     tuple(rec.get(c) for c in RESEARCH_JOB_COLUMNS),
                 )
-    finally:
-        if conn is None:
-            db_conn.close()
+        else:
+            active_conn.execute(
+                f"INSERT INTO research_jobs ({columns}) VALUES ({placeholders})",
+                tuple(rec.get(c) for c in RESEARCH_JOB_COLUMNS),
+            )
     return rec
 
 
@@ -357,61 +360,56 @@ def update_job(
     is_published: Optional[int] = None,
     conn: Optional[sqlite3.Connection] = None,
 ) -> Optional[dict]:
-    db_conn = conn if conn is not None else _get_db()
-    try:
-        def _execute_update(c_conn):
-            cursor = c_conn.cursor()
-            cursor.execute("SELECT * FROM research_jobs WHERE job_id = ?", (job_id,))
-            row = cursor.fetchone()
-            if row is None:
-                return None
-            j = dict(row)
-            if status is not None:
-                if status not in ALLOWED_JOB_STATUS:
-                    raise ValueError(f"Invalid job status: {status}")
-                j["status"] = status
-            if generated_title is not None:
-                j["generated_title"] = generated_title
-            if mode is not None:
-                j["mode"] = mode
-            if markdown is not None:
-                j["markdown"] = markdown
-            if error is not None:
-                j["error"] = error
-            if finished_at is not None:
-                j["finished_at"] = finished_at
-            elif status in ("succeeded", "failed"):
-                j["finished_at"] = get_current_timestamp()
-            if output_path is not None:
-                j["output_path"] = output_path
-            if is_published is not None:
-                j["is_published"] = is_published
+    def _execute_update(c_conn):
+        cursor = c_conn.cursor()
+        cursor.execute("SELECT * FROM research_jobs WHERE job_id = ?", (job_id,))
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        j = dict(row)
+        if status is not None:
+            if status not in ALLOWED_JOB_STATUS:
+                raise ValueError(f"Invalid job status: {status}")
+            j["status"] = status
+        if generated_title is not None:
+            j["generated_title"] = generated_title
+        if mode is not None:
+            j["mode"] = mode
+        if markdown is not None:
+            j["markdown"] = markdown
+        if error is not None:
+            j["error"] = error
+        if finished_at is not None:
+            j["finished_at"] = finished_at
+        elif status in ("succeeded", "failed"):
+            j["finished_at"] = get_current_timestamp()
+        if output_path is not None:
+            j["output_path"] = output_path
+        if is_published is not None:
+            j["is_published"] = is_published
 
-            set_clause = ", ".join(
-                f"{c} = ?" for c in RESEARCH_JOB_COLUMNS if c != "job_id"
-            )
-            values = [j.get(c) for c in RESEARCH_JOB_COLUMNS if c != "job_id"] + [
-                job_id
-            ]
-            c_conn.execute(
-                f"UPDATE research_jobs SET {set_clause} WHERE job_id = ?", values
-            )
-            return j
+        set_clause = ", ".join(
+            f"{c} = ?" for c in RESEARCH_JOB_COLUMNS if c != "job_id"
+        )
+        values = [j.get(c) for c in RESEARCH_JOB_COLUMNS if c != "job_id"] + [
+            job_id
+        ]
+        c_conn.execute(
+            f"UPDATE research_jobs SET {set_clause} WHERE job_id = ?", values
+        )
+        return j
 
-        if conn is not None:
-            return _execute_update(db_conn)
+    with auto_connection(conn) as (active_conn, is_generated):
+        if is_generated:
+            with active_conn:
+                return _execute_update(active_conn)
         else:
-            with db_conn:
-                return _execute_update(db_conn)
-    finally:
-        if conn is None:
-            db_conn.close()
+            return _execute_update(active_conn)
 
 
 def latest_job(theme_id: str, conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
-    db_conn = conn if conn is not None else _get_db()
-    try:
-        cursor = db_conn.cursor()
+    with auto_connection(conn) as (active_conn, _):
+        cursor = active_conn.cursor()
         cursor.execute(
             "SELECT * FROM research_jobs WHERE theme_id = ? ORDER BY started_at DESC LIMIT 1",
             (theme_id,),
@@ -420,29 +418,21 @@ def latest_job(theme_id: str, conn: Optional[sqlite3.Connection] = None) -> Opti
         if row is None:
             return None
         return dict(row)
-    finally:
-        if conn is None:
-            db_conn.close()
 
 
 def get_job(job_id: str, conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
-    db_conn = conn if conn is not None else _get_db()
-    try:
-        cursor = db_conn.cursor()
+    with auto_connection(conn) as (active_conn, _):
+        cursor = active_conn.cursor()
         cursor.execute("SELECT * FROM research_jobs WHERE job_id = ?", (job_id,))
         row = cursor.fetchone()
         if row is None:
             return None
         return dict(row)
-    finally:
-        if conn is None:
-            db_conn.close()
 
 
 def find_exact_duplicate(normalized_key: str, conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
-    db_conn = conn if conn is not None else _get_db()
-    try:
-        cursor = db_conn.cursor()
+    with auto_connection(conn) as (active_conn, _):
+        cursor = active_conn.cursor()
         cursor.execute(
             "SELECT * FROM research_themes WHERE normalized_key = ? LIMIT 1",
             (normalized_key,),
@@ -451,21 +441,14 @@ def find_exact_duplicate(normalized_key: str, conn: Optional[sqlite3.Connection]
         if row is None:
             return None
         return deserialize_theme(dict(row))
-    finally:
-        if conn is None:
-            db_conn.close()
 
 
 def find_top_similar(theme: str, embedder, k: int = 5, conn: Optional[sqlite3.Connection] = None) -> list[tuple[str, float]]:
     try:
-        db_conn = conn if conn is not None else _get_db()
-        try:
-            cursor = db_conn.cursor()
+        with auto_connection(conn) as (active_conn, _):
+            cursor = active_conn.cursor()
             cursor.execute("SELECT theme_id, theme FROM research_themes")
             rows = cursor.fetchall()
-        finally:
-            if conn is None:
-                db_conn.close()
 
         if not rows:
             return []
