@@ -13,6 +13,14 @@ from obsidian_ai_hub.hitl.service import (
     claim_run,
     update_checkpoint,
 )
+from obsidian_ai_hub.hitl.dispatcher import (
+    HitlContext,
+    HitlResult,
+    register_handler,
+    get_handler,
+    clear_handlers,
+    dispatch_runs,
+)
 
 __all__ = [
     "get_run",
@@ -24,4 +32,10 @@ __all__ = [
     "cancel_run",
     "claim_run",
     "update_checkpoint",
+    "HitlContext",
+    "HitlResult",
+    "register_handler",
+    "get_handler",
+    "clear_handlers",
+    "dispatch_runs",
 ]
