@@ -82,11 +82,13 @@ def create_theme_and_research(
                 status="candidate",
                 related_theme_ids=decision.get("related_ids", []),
                 duplicate_reason=decision.get("reason"),
+                origin="auto_suggestion" if is_suggestion else None,
                 conn=conn,
             )
 
             if is_suggestion:
                 from obsidian_ai_hub.hitl.service import register_run_and_questions
+                import json
 
                 run_id = f"hrun_suggest_{rec['theme_id']}"
                 questions_data = [
@@ -98,14 +100,18 @@ def create_theme_and_research(
                         "is_required": 1,
                     }
                 ]
+                checkpoint = json.dumps({"theme_id": rec["theme_id"], "phase": "awaiting_approval"})
                 register_run_and_questions(
                     run_id=run_id,
                     handler="research.run_approved_suggestion",
-                    checkpoint=rec["theme_id"],
+                    checkpoint=checkpoint,
                     question_set_id="confirm_suggest",
                     questions_data=questions_data,
                     conn=conn,
                 )
+                # Save hitl_run_id on theme in the same transaction
+                from obsidian_ai_hub.research import db as research_db
+                research_db._set_theme_field(rec["theme_id"], "hitl_run_id", run_id, conn=conn)
                 logger.info(
                     "Registered HITL Run %s for suggested theme '%s'",
                     run_id,

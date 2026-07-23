@@ -669,6 +669,14 @@ def execute_research_job_sync(
 ) -> dict:
     from obsidian_ai_hub.research import db
 
+    job = db.get_job(job_id)
+    if job and job.get("status") != "pending":
+        logger.warning(
+            "Job %s is not pending (status=%s), refusing to re-run.",
+            job_id, job.get("status")
+        )
+        return job
+
     db.update_job(job_id, status="running")
 
     theme_obj = db.get_theme(theme_id)
@@ -760,21 +768,27 @@ def save_research_to_vault(theme_id: str, job_id: Optional[str] = None) -> Optio
         logger.error("No successful research job")
         return None
 
-    if job.get("output_path"):
-        output_path = Path(job["output_path"])
-    else:
-        title = job.get("generated_title") or theme_obj["theme"]
-        filename = make_research_filename(title)
-        output_dir = config.RESEARCH_OUTPUT_DIR
-        output_dir.mkdir(parents=True, exist_ok=True)
-        output_path = output_dir / filename
+    # Idempotent: already published with existing file — skip
+    if job.get("output_path") and job.get("is_published") == 1:
+        existing_file = Path(job["output_path"])
+        if existing_file.exists():
+            logger.info("Vault output already published at %s, skipping.", existing_file)
+            return existing_file
+        else:
+            logger.warning("output_path is set but file missing: %s, rewriting.", existing_file)
 
-        if output_path.exists():
-            stem = output_path.stem
-            suffix = output_path.suffix
-            output_path = output_dir / f"{stem}_{job['job_id']}{suffix}"
+    # Always use <safe_title>_<job_id>.md for deterministic output
+    title = job.get("generated_title") or theme_obj["theme"]
+    filename = make_research_filename(title)
+    output_dir = config.RESEARCH_OUTPUT_DIR
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-        db.update_job(job["job_id"], output_path=str(output_path))
+    stem = output_dir / filename
+    stem_path = stem.with_suffix("")
+    job_id_slug = job["job_id"].replace(":", "_").replace("/", "_")
+    output_path = output_dir / f"{stem_path.stem}_{job_id_slug}.md"
+
+    db.update_job(job["job_id"], output_path=str(output_path))
 
     save_markdown(output_path, job["markdown"])
     db.update_job(job["job_id"], is_published=1)
@@ -837,55 +851,76 @@ def main(
 def run_approved_suggestion(ctx) -> "HitlResult":
     from obsidian_ai_hub.hitl.dispatcher import HitlResult
     from obsidian_ai_hub.research import db
+    import json
 
-    # Retrieve answer
     answer = ctx.answers_by_question_key.get("action")
     if not answer:
         answer = ctx.answers_by_question_key.get("approve")
-
     if not answer:
         return HitlResult.fail("Action answer not found in active question set answers.")
 
-    theme_id = None
-    job_id = None
+    if isinstance(answer, dict):
+        answer = answer.get("value", answer)
 
+    # Parse structured checkpoint
+    cp = {}
     if ctx.checkpoint:
-        if ctx.checkpoint.startswith("rjob_"):
-            job_id = ctx.checkpoint
-            job = db.get_job(job_id, conn=ctx.conn)
-            if job:
-                theme_id = job["theme_id"]
-        elif ctx.checkpoint.startswith("rth_"):
-            theme_id = ctx.checkpoint
-
-    if not theme_id:
-        return HitlResult.fail(f"Invalid or missing theme_id/job_id in checkpoint: {ctx.checkpoint}")
+        try:
+            cp = json.loads(ctx.checkpoint)
+        except (json.JSONDecodeError, TypeError):
+            pass
+    theme_id = cp.get("theme_id") or ctx.checkpoint
+    if not theme_id or theme_id.startswith("rjob_"):
+        return HitlResult.fail(f"Invalid or missing theme_id in checkpoint: {ctx.checkpoint}")
 
     if answer == "reject":
-        # 却下時はテーマをrejectedにし、jobを作らずRunを完了する。
         db.set_status(theme_id, "rejected", reviewed_by="system", conn=ctx.conn)
-        return HitlResult.complete(checkpoint=ctx.checkpoint)
+        return HitlResult.complete(checkpoint=json.dumps({**cp, "phase": "rejected"}))
 
-    if answer == "approve":
-        # 承認時はテーマをapprovedにし、job IDをcheckpointへ保存して調査を実行する。
-        db.set_status(theme_id, "approved", reviewed_by="system", conn=ctx.conn)
+    if answer != "approve":
+        return HitlResult.fail(f"Invalid action choice: {answer}")
 
-        if not job_id:
-            # Create the job
-            job = db.create_job(theme_id, conn=ctx.conn)
-            job_id = job["job_id"]
-            # Save job ID to checkpoint immediately inside the connection context
-            from obsidian_ai_hub.hitl.service import update_checkpoint
-            update_checkpoint(ctx.run_id, checkpoint=job_id, conn=ctx.conn)
+    db.set_status(theme_id, "approved", reviewed_by="system", conn=ctx.conn)
 
-        # Execute research synchronously
-        # This will update job, execute run_research, save to vault, and update theme to approved
-        job = execute_research_job_sync(theme_id, job_id)
+    job_id = cp.get("job_id")
+    phase = cp.get("phase", "awaiting_approval")
 
-        if job and job.get("status") == "succeeded":
-            return HitlResult.complete(checkpoint=job_id)
-        else:
-            error_msg = job.get("error") if job else "Research execution failed"
-            return HitlResult.fail(error_msg, checkpoint=job_id)
+    if not job_id:
+        job = db.create_job(theme_id, conn=ctx.conn)
+        job_id = job["job_id"]
+        new_cp = json.dumps({"theme_id": theme_id, "job_id": job_id, "phase": "job_created"})
+        from obsidian_ai_hub.hitl.service import update_checkpoint
+        update_checkpoint(ctx.run_id, checkpoint=new_cp, conn=ctx.conn)
+        cp = {"theme_id": theme_id, "job_id": job_id, "phase": "job_created"}
 
-    return HitlResult.fail(f"Invalid action choice: {answer}")
+    job = db.get_job(job_id)
+    js = job.get("status") if job else None
+
+    if js == "succeeded":
+        save_research_to_vault(theme_id, job_id)
+        new_cp = json.dumps({"theme_id": theme_id, "job_id": job_id, "phase": "published"})
+        from obsidian_ai_hub.hitl.service import update_checkpoint
+        update_checkpoint(ctx.run_id, checkpoint=new_cp, conn=ctx.conn)
+        return HitlResult.complete(checkpoint=new_cp)
+
+    if js == "running":
+        return HitlResult.fail("Research job already running elsewhere", checkpoint=ctx.checkpoint)
+
+    if js == "failed":
+        return HitlResult.fail(f"Research job previously failed: {job.get('error', 'unknown')}", checkpoint=ctx.checkpoint)
+
+    if js is None:
+        return HitlResult.fail(f"Research job {job_id} not found", checkpoint=ctx.checkpoint)
+
+    # js == "pending" — run research
+    job = execute_research_job_sync(theme_id, job_id)
+    js = job.get("status") if job else None
+
+    if js == "succeeded":
+        new_cp = json.dumps({"theme_id": theme_id, "job_id": job_id, "phase": "published"})
+        from obsidian_ai_hub.hitl.service import update_checkpoint
+        update_checkpoint(ctx.run_id, checkpoint=new_cp, conn=ctx.conn)
+        return HitlResult.complete(checkpoint=new_cp)
+    else:
+        error_msg = job.get("error") if job else "Research execution failed"
+        return HitlResult.fail(error_msg, checkpoint=ctx.checkpoint)

@@ -85,35 +85,18 @@ def test_get_research_theme_not_found(client):
     assert resp.status_code == 404
 
 
-def test_review_research_theme_approve(client):
-    t = _create_test_theme()
-    _create_test_job(t["theme_id"])
-
-    with patch("obsidian_ai_hub.research_agent.save_research_to_vault") as mock_save:
-        resp = client.post(
-            f"/api/v1/research-themes/{t['theme_id']}/review",
-            json={"action": "approve"},
-        )
-
-    assert resp.status_code == 200
-    assert resp.json()["theme"]["status"] == "approved"
-    mock_save.assert_called_once_with(t["theme_id"])
-
-
-def test_review_research_theme_reject(client):
+def test_review_endpoint_removed(client):
+    """The review endpoint should be removed — POST returns 405."""
     t = _create_test_theme()
     resp = client.post(
-        f"/api/v1/research-themes/{t['theme_id']}/review", json={"action": "reject"}
+        f"/api/v1/research-themes/{t['theme_id']}/review", json={"action": "approve"}
     )
-    assert resp.status_code == 200
-    assert resp.json()["theme"]["status"] == "rejected"
+    assert resp.status_code == 405
 
-
-def test_review_research_theme_not_found(client):
     resp = client.post(
         "/api/v1/research-themes/nonexistent/review", json={"action": "approve"}
     )
-    assert resp.status_code == 404
+    assert resp.status_code == 405
 
 
 def test_rerun_research_theme(client):

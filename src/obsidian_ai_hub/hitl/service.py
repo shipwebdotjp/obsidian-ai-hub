@@ -35,6 +35,8 @@ def register_run_and_questions(
     question_set_id: str,
     questions_data: List[Dict[str, Any]],
     conn: Optional[sqlite3.Connection] = None,
+    title: Optional[str] = None,
+    description: Optional[str] = None,
 ) -> None:
     """
     Register or update a Run and insert or update its active question set of questions.
@@ -64,6 +66,8 @@ def register_run_and_questions(
                     "error_message": None,
                     "created_at": now,
                     "updated_at": now,
+                    "title": title,
+                    "description": description,
                 }
             else:
                 run["handler"] = handler
@@ -73,6 +77,10 @@ def register_run_and_questions(
                 run["lease_owner"] = None
                 run["lease_expires_at"] = None
                 run["updated_at"] = now
+                if title is not None:
+                    run["title"] = title
+                if description is not None:
+                    run["description"] = description
 
             # Upsert the run first to satisfy foreign key constraint on questions
             upsert_run(run, conn)
@@ -88,7 +96,9 @@ def register_run_and_questions(
                     })
                     sql = """
                         UPDATE hitl_questions
-                        SET question_type = ?, display_text = ?, choices = ?, is_required = ?, expires_at = ?, updated_at = ?
+                        SET question_type = ?, display_text = ?, choices = ?,
+                            is_required = ?, expires_at = ?, updated_at = ?,
+                            sequence = ?, title = ?, prompt = ?, context_json = ?
                         WHERE question_id = ?
                     """
                     conn.execute(sql, (
@@ -98,6 +108,10 @@ def register_run_and_questions(
                         q_data.get("is_required", 1),
                         q_data.get("expires_at"),
                         now,
+                        q_data.get("sequence", 0),
+                        q_data.get("title"),
+                        q_data.get("prompt"),
+                        q_data.get("context_json"),
                         q_id
                     ))
                 else:
@@ -112,6 +126,10 @@ def register_run_and_questions(
                         "choices": q_data.get("choices"),
                         "answer": None,
                         "is_required": q_data.get("is_required", 1),
+                        "sequence": q_data.get("sequence", 0),
+                        "title": q_data.get("title"),
+                        "prompt": q_data.get("prompt"),
+                        "context_json": q_data.get("context_json"),
                         "expires_at": q_data.get("expires_at"),
                         "answered_at": None,
                         "created_at": now,
@@ -182,13 +200,18 @@ def submit_answer(
                     f"Question {question_key} is already finalized (status: {question['status']})"
                 )
 
-            # Validate answer against choices if specified
+            # Normalize answer to {value, comment} format
+            if not isinstance(answer, dict):
+                answer = {"value": answer, "comment": None}
+            answer_value = answer.get("value")
+
+            # Validate answer value against choices if specified
             choices = question.get("choices")
             if choices is not None:
                 if isinstance(choices, list) and len(choices) > 0:
-                    if answer not in choices:
+                    if answer_value not in choices:
                         raise ValueError(
-                            f"Answer '{answer}' is not a valid choice. Valid choices: {choices}"
+                            f"Answer '{answer_value}' is not a valid choice. Valid choices: {choices}"
                         )
 
             # Update question conditionally only if it is still pending

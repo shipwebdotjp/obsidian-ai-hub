@@ -189,7 +189,7 @@ def test_main_creates_themes_and_researches(tmp_path: Path, monkeypatch, test_me
         assert run is not None
         assert run["handler"] == "research.run_approved_suggestion"
         assert run["status"] == "pending_user"
-        assert run["checkpoint"] == results[0]["theme_id"]
+        assert results[0]["theme_id"] in (run["checkpoint"] or "")
 
         questions = get_questions_by_set(run_id, "confirm_suggest", conn)
         assert len(questions) == 1

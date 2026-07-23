@@ -192,7 +192,7 @@ def test_hitl_api_list_pagination_and_status_filter(test_memory_db_path, client)
 
 
 def test_hitl_api_returns_404_for_missing_run(client):
-    """Detail, answer, and cancel endpoints return 404 for non-existent runs."""
+    """Detail endpoint returns 404 for non-existent runs."""
     res = client.get("/api/v1/hitl/runs/non_existent_run")
     assert res.status_code == 404
 

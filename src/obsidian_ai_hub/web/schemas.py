@@ -252,20 +252,23 @@ class ResearchTheme(BaseModel):
     reviewed_at: Optional[str] = None
     reviewed_by: Optional[str] = None
     latest_job: Optional[ResearchJob] = None
+    origin: Optional[str] = None
+    hitl_run_id: Optional[str] = None
+
+
+class ResearchRunRequest(BaseModel):
+    theme: str
+    mode: str = "auto"
+
+
+class ResearchRunAcceptedResponse(BaseModel):
+    theme: ResearchTheme
+    job: ResearchJob
 
 
 class ResearchThemeListResponse(BaseModel):
     items: list[ResearchTheme]
     total: int
-
-
-class ResearchReviewRequest(BaseModel):
-    action: Literal["approve", "reject"]
-    reason: Optional[str] = None
-
-
-class ResearchThemeActionResponse(BaseModel):
-    theme: ResearchTheme
 
 
 class ResearchRunRequest(BaseModel):
@@ -862,6 +865,10 @@ class HitlQuestion(BaseModel):
     answered_at: Optional[str] = None
     created_at: str
     updated_at: str
+    sequence: int = 0
+    title: Optional[str] = None
+    prompt: Optional[str] = None
+    context: Optional[Any] = None
 
 
 class HitlRun(BaseModel):
@@ -876,6 +883,8 @@ class HitlRun(BaseModel):
     error_message: Optional[str] = None
     created_at: str
     updated_at: str
+    title: Optional[str] = None
+    description: Optional[str] = None
 
 
 class HitlRunDetail(HitlRun):
@@ -889,3 +898,4 @@ class HitlRunListResponse(BaseModel):
 
 class SubmitAnswerRequest(BaseModel):
     answer: Any
+    comment: Optional[str] = None

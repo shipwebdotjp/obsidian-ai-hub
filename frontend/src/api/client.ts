@@ -292,20 +292,6 @@ export function getResearchTheme(themeId: string): Promise<ResearchTheme> {
   return request<ResearchTheme>(`/api/v1/research-themes/${encodeURIComponent(themeId)}`);
 }
 
-export function reviewResearchTheme(
-  themeId: string,
-  action: "approve" | "reject",
-  reason?: string,
-): Promise<{ theme: ResearchTheme }> {
-  return request<{ theme: ResearchTheme }>(
-    `/api/v1/research-themes/${encodeURIComponent(themeId)}/review`,
-    {
-      method: "POST",
-      body: JSON.stringify({ action, reason }),
-    },
-  );
-}
-
 export function rerunResearchTheme(themeId: string): Promise<ResearchJob> {
   return request<ResearchJob>(
     `/api/v1/research-themes/${encodeURIComponent(themeId)}/rerun`,

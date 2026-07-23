@@ -67,15 +67,5 @@ def test_web_manual_research_paths_do_not_create_hitl_runs(test_memory_db_path):
             assert res.status_code == 200
         assert _count_hitl_runs(conn) == 0, "POST /rerun must not create HITL run"
 
-        # Web POST /api/v1/research-themes/{id}/review
-        with patch("obsidian_ai_hub.web.service.review_research_theme") as mock_review:
-            mock_review.return_value = dict(theme_rec, status="approved")
-            res = client.post(
-                f"/api/v1/research-themes/{theme_rec['theme_id']}/review",
-                json={"action": "approve"},
-            )
-            assert res.status_code == 200
-        assert _count_hitl_runs(conn) == 0, "POST /review must not create HITL run"
-
     finally:
         conn.close()

@@ -24,6 +24,8 @@ RUN_COLUMNS = [
     "error_message",
     "created_at",
     "updated_at",
+    "title",
+    "description",
 ]
 
 QUESTION_COLUMNS = [
@@ -41,6 +43,10 @@ QUESTION_COLUMNS = [
     "answered_at",
     "created_at",
     "updated_at",
+    "sequence",
+    "title",
+    "prompt",
+    "context_json",
 ]
 
 
@@ -72,7 +78,7 @@ def auto_connection(conn: Optional[sqlite3.Connection] = None):
 def serialize_question(q: Dict[str, Any]) -> Dict[str, Any]:
     """Serialize Python objects/lists/dicts inside a question for DB storage."""
     row = dict(q)
-    for col in ["choices", "answer"]:
+    for col in ["choices", "answer", "context_json"]:
         val = row.get(col)
         if val is not None:
             row[col] = json.dumps(val, ensure_ascii=False)
@@ -84,7 +90,7 @@ def serialize_question(q: Dict[str, Any]) -> Dict[str, Any]:
 def deserialize_question(row: sqlite3.Row) -> Dict[str, Any]:
     """Deserialize SQLite row for a question and restore its JSON fields."""
     q = dict(row)
-    for col in ["choices", "answer"]:
+    for col in ["choices", "answer", "context_json"]:
         val = q.get(col)
         if val is not None and isinstance(val, str):
             q[col] = json.loads(val)
@@ -207,7 +213,7 @@ def get_questions_by_set(
     run_id: str, question_set_id: str, conn: Optional[sqlite3.Connection] = None
 ) -> List[Dict[str, Any]]:
     """Get all questions in a specific question set for a run."""
-    sql = "SELECT * FROM hitl_questions WHERE run_id = ? AND question_set_id = ? ORDER BY created_at ASC"
+    sql = "SELECT * FROM hitl_questions WHERE run_id = ? AND question_set_id = ? ORDER BY sequence ASC, created_at ASC"
     with auto_connection(conn) as (active_conn, _):
         cursor = active_conn.cursor()
         cursor.execute(sql, (run_id, question_set_id))

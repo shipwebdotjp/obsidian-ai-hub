@@ -16,7 +16,7 @@ def test_hitl_db_migration_and_structure(test_memory_db_path):
         cursor = conn.cursor()
         cursor.execute("PRAGMA user_version;")
         version = cursor.fetchone()[0]
-        assert version == 14
+        assert version == 15
 
         # Verify hitl_runs columns
         cursor.execute("PRAGMA table_info(hitl_runs);")
@@ -157,7 +157,7 @@ def test_submit_answer_choice_validation_and_once_only(test_memory_db_path):
         # Check question was updated
         q = hitl.get_question(run_id, question_set_id, "favorite_color", conn)
         assert q["status"] == "answered"
-        assert q["answer"] == "blue"
+        assert q["answer"] == {"value": "blue", "comment": None}
         assert q["answered_at"] is not None
 
         # Check run status became ready_to_resume
@@ -541,7 +541,7 @@ def test_register_run_and_questions_idempotence(test_memory_db_path):
         q1_second = hitl.get_question(run_id, qset_id, "q1", conn)
         assert q1_second["question_id"] == q1_first["question_id"]
         assert q1_second["status"] == "answered"
-        assert q1_second["answer"] == "Answer content"
+        assert q1_second["answer"] == {"value": "Answer content", "comment": None}
         assert q1_second["display_text"] == "Updated text"
     finally:
         conn.close()
@@ -585,13 +585,13 @@ def test_submit_answer_rejects_historical_inactive_sets(test_memory_db_path):
         hitl.submit_answer(run_id, "set_2", "q", "active answer", conn)
         q2 = hitl.get_question(run_id, "set_2", "q", conn)
         assert q2["status"] == "answered"
-        assert q2["answer"] == "active answer"
+        assert q2["answer"] == {"value": "active answer", "comment": None}
     finally:
         conn.close()
 
 
 def test_choices_and_answer_serialization_symmetry(test_memory_db_path):
-    """Test that choices and answer fields serialize and deserialize symmetrically (e.g. including plain strings)."""
+    """Test that choices and answer fields serialize and deserialize symmetrically ({value, comment} format)."""
     conn = get_db_connection()
     try:
         run_id = "run_sym"
@@ -612,11 +612,11 @@ def test_choices_and_answer_serialization_symmetry(test_memory_db_path):
         q = hitl.get_question(run_id, qset_id, "q", conn)
         assert q["choices"] == ["yes", "no"]
 
-        # Submit a plain string answer (should be JSON-encoded on save and decoded on load as a string)
+        # Submit a value-only answer gets normalized to {value, comment}
         hitl.submit_answer(run_id, qset_id, "q", "yes", conn)
 
         q_ans = hitl.get_question(run_id, qset_id, "q", conn)
-        assert q_ans["answer"] == "yes"
+        assert q_ans["answer"] == {"value": "yes", "comment": None}
     finally:
         conn.close()
 
@@ -647,10 +647,10 @@ def test_submit_answer_concurrent_conflict(test_memory_db_path):
         with pytest.raises(ValueError, match="Conflict detected|already finalized"):
             hitl.submit_answer(run_id, qset_id, "q1", "Second Answer", conn2)
 
-        # Verify that the answer saved in DB remains "First Answer"
+        # Verify that the answer saved in DB remains "First Answer" (in {value, comment} format)
         q = hitl.get_question(run_id, qset_id, "q1", conn1)
         assert q["status"] == "answered"
-        assert q["answer"] == "First Answer"
+        assert q["answer"] == {"value": "First Answer", "comment": None}
     finally:
         conn1.close()
         conn2.close()
