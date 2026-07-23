@@ -193,7 +193,15 @@ export default function HitlPage() {
                 key={r.run_id}
                 data-testid="hitl-run-row"
                 data-selected={isSelected ? "true" : "false"}
+                role="button"
+                tabIndex={0}
                 onClick={() => handleSelectRun(r)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    handleSelectRun(r);
+                  }
+                }}
                 className={`cursor-pointer p-4 transition-colors ${
                   isSelected
                     ? "bg-slate-200 border-l-4 border-slate-800"

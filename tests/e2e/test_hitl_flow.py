@@ -103,7 +103,7 @@ def test_submit_hitl_answer_and_flow(e2e_server_url: str, page: Page) -> None:
 
     # Select choices (choices are select: 'approve', 'reject')
     # Click choice button for 'approve'
-    page.get_by_role("button", name="approve").click()
+    page.get_by_role("button", name="approve", exact=True).click()
 
     # Submit the select answer first
     page.get_by_role("button", name="回答を送信").first.click()
