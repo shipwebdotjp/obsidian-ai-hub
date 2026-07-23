@@ -368,3 +368,27 @@ JulesAgentによるコーディングと動作確認・テストを迅速かつ�
    Jules VMの「Initial Setup」ステップに `make jules-setup && ENV=test uv run pytest tests/` を登録。これにより、ローカル上の `.env` や既存の `dist/` ビルド、ローカルモデル・個人Vaultの存在を前提にせず、スナップショットを安定して作成する。
 3. **`ENV=test` の強制適用:**
    `ENV=jules` は完全に廃止。探索サーバー (`e2e_server.py`) は親プロセスの `ENV` の値を継承せず、実行時に内部で `ENV=test` を強制セットするようにした。これにより、誤った設定で本番用の `.env` やデータベースにアクセスしてしまう事故を完全に防止する。
+
+## HITL（Human-In-The-Loop）永続化モデルとコアサービスの実装
+
+| 項目 | 内容 |
+|------|------|
+| 決定日 | 2026-07-23 |
+| カテゴリ | HITL管理・データベース |
+| 決定内容 | SQLiteのスキーマをv13へ移行し、`hitl_runs` と `hitl_questions` テーブル、インデックス、および一意制約を追加。状態遷移・回答検証・アトミックなトランザクションを保証するストアとサービス層を実装する。 |
+
+### 結論に至った経緯
+
+1. **データベース・スキーマ設計 (v13):**
+   - 実行制御（Run）と、個々の対話（Question）を完全に分離して管理。
+   - `hitl_questions` 側で `(run_id, question_set_id, question_key)` の複合一意制約（UNIQUE）を定義し、同一質問セット内の重複登録を厳密に防止。
+   - インデックスとして、Runsの `status`、およびQuestionsの `(run_id, question_set_id)` および `status` を追加して、待機・再開検索を高速化。
+
+2. **状態遷移と回答検証の保証:**
+   - 単一トランザクションによる整合性担保: `register_run_and_questions`、`submit_answer`、`cancel_run`、`claim_run` などの操作は、それぞれSQLite接続のトランザクションコンテキスト（`with conn:`）で囲み、状態更新をアトミックに実行する。
+   - 外部キー制約保護: 質問登録時は、まずRunの登録/更新を完了（`upsert_run`）させてから質問群をインサート（`insert_question`）することで、FK違反エラーを回避する。
+   - 回答の検証（選択肢の合致確認）と一回のみの回答制限（finalized状態でない場合のみ受付）を厳格に行う。
+
+3. **アトミックClaimと任意質問の自動スキップ:**
+   - `claim_run` 実行時、Runの状態が `'ready_to_resume'`（またはリース切れ）であることをアトミックに検証したうえで、同一トランザクション内で未回答の任意質問（`is_required = 0` 且つ `status = 'pending'`) をすべて一括して `'skipped'` に確定させ、Runのリース情報を設定して `'running'` 状態へ移行する。
+   - `cancel_run` 実行時には、active question setの待機中の質問を `'cancelled'` へと一括してステータス移行する。

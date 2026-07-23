@@ -450,7 +450,54 @@ def get_db_connection() -> sqlite3.Connection:
     if current_version <= 11:
         run_migration_v12(conn)
 
+    if current_version <= 12:
+        run_migration_v13(conn)
+
     return conn
+
+
+def run_migration_v13(conn: sqlite3.Connection) -> None:
+    """Run the migration schema upgrade for version 13 (HITL runs and questions)."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS hitl_runs (
+            run_id TEXT PRIMARY KEY,
+            handler TEXT NOT NULL,
+            status TEXT NOT NULL,
+            checkpoint TEXT,
+            active_question_set_id TEXT,
+            lease_owner TEXT,
+            lease_expires_at TEXT,
+            retry_count INTEGER NOT NULL DEFAULT 0,
+            error_message TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS hitl_questions (
+            question_id TEXT PRIMARY KEY,
+            run_id TEXT NOT NULL,
+            question_set_id TEXT NOT NULL,
+            question_key TEXT NOT NULL,
+            status TEXT NOT NULL,
+            question_type TEXT NOT NULL,
+            display_text TEXT NOT NULL,
+            choices TEXT, -- JSON string
+            answer TEXT, -- JSON string
+            is_required INTEGER NOT NULL DEFAULT 1,
+            expires_at TEXT,
+            answered_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY(run_id) REFERENCES hitl_runs(run_id) ON DELETE CASCADE,
+            UNIQUE(run_id, question_set_id, question_key)
+        );
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_hitl_runs_status ON hitl_runs(status);")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_hitl_questions_run_set ON hitl_questions(run_id, question_set_id);")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_hitl_questions_status ON hitl_questions(status);")
+    conn.execute("PRAGMA user_version = 13;")
+    conn.commit()
 
 
 def run_migration_v10(conn: sqlite3.Connection) -> None:
