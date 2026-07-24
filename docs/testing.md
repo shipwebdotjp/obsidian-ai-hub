@@ -33,6 +33,23 @@ directory and set `config.MEMORY_SQLITE_PATH` to a SQLite file inside it before
 calling any database API. Prefer adding a focused pytest test instead. Never
 use the configured production database for a test, reproduction, or seed data.
 
+## E2E の対象範囲
+
+E2E は、ブラウザを通した主要なユーザーフローが壊れて操作不能になる重大な
+回帰を防ぐためだけに使う。テストの追加・更新は、回帰によって主要な操作が完了
+できない、ユーザーデータを失う・壊す、または認可境界を越える場合に限る。
+
+- 追加対象は、画面の起動・遷移不能、主要なデータ変更操作の失敗、破壊的操作の
+  安全性、認可・権限に関わる一連の操作など、利用者に重大な影響を与える導線。
+- E2E は、操作とその結果を検証する。追加したコンポーネントや文言そのものの
+  存在を検証するためには使わない。
+- 静的なプリセット・選択肢、単一のUI要素、ラベルなどの文言、ステータス表示、
+  スタイル、並び順だけの追加・変更にはE2Eを追加しない。コードレビューと必要な
+  目視確認で十分である。
+- コードレビューで「表示されることのテスト」を求められても、具体的な重大障害の
+  シナリオがなければE2E追加の理由にはならない。ドメインロジックがある場合は、
+  E2Eではなく単体テストまたは結合テストで検証する。
+
 ## When the safety guard fails
 
 `Refusing to open the production memory database while tests are running`

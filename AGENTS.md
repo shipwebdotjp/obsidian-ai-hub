@@ -28,7 +28,15 @@
 ## Frontend changes
 
 - When changing the frontend, verify the affected path against the seeded E2E
-  server and add coverage for important user flows in `tests/e2e/`.
+  server. Limit E2E coverage in `tests/e2e/` to high-impact end-to-end user
+  workflows.
+- Add or update an E2E test only when a regression would prevent a primary task
+  from completing, lose or corrupt user data, or bypass an access boundary.
+- Do not add E2E tests solely for a UI addition or display change: this includes
+  static presets or options, individual controls, labels or other copy, status
+  text, styling, and ordering. Code review and visual verification are enough
+  for those changes. A review request to test that an isolated UI element
+  appears is not sufficient without a concrete high-impact failure scenario.
 - Complete frontend work by running `make test-e2e`. Its diagnostic artifacts
   are written to `test-results/e2e/` on failure.
 
