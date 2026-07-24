@@ -33,7 +33,7 @@ directory and set `config.MEMORY_SQLITE_PATH` to a SQLite file inside it before
 calling any database API. Prefer adding a focused pytest test instead. Never
 use the configured production database for a test, reproduction, or seed data.
 
-## E2E の対象範囲
+## E2E の対象範囲とシナリオ設計
 
 E2E は、ブラウザを通した主要なユーザーフローが壊れて操作不能になる重大な
 回帰を防ぐためだけに使う。テストの追加・更新は、回帰によって主要な操作が完了
@@ -46,9 +46,25 @@ E2E は、ブラウザを通した主要なユーザーフローが壊れて操�
 - 静的なプリセット・選択肢、単一のUI要素、ラベルなどの文言、ステータス表示、
   スタイル、並び順だけの追加・変更にはE2Eを追加しない。コードレビューと必要な
   目視確認で十分である。
-- コードレビューで「表示されることのテスト」を求められても、具体的な重大障害の
-  シナリオがなければE2E追加の理由にはならない。ドメインロジックがある場合は、
-  E2Eではなく単体テストまたは結合テストで検証する。
+- ドメインロジックがある場合は、E2Eではなく単体テストまたは結合テストで検証する。
+
+### E2E シナリオ分割とシード設計
+
+E2E テストスイート（`tests/e2e/`）は、不透明な生 SQL による初期化ではなく、クリーンなアプリケーション API で構築したシナリオ（`src/obsidian_ai_hub/testing/seed.py`）を使用します。
+
+各テストモジュールは `e2e_seed_scenario` フィクスチャをオーバーライドすることで、テスト実行前に必要なシナリオのみ（`memory`、`hitl`など）をシードできます。
+
+```python
+import pytest
+
+@pytest.fixture(scope="module")
+def e2e_seed_scenario() -> list[str]:
+    return ["hitl"]
+```
+
+これにより、不要なデータのコンフリクトを回避し、E2E 実行時間を最適化しつつ安全性を担保します。
+
+---
 
 ## When the safety guard fails
 
@@ -77,7 +93,7 @@ ENV=test uv run python -m obsidian_ai_hub --merge-inbox
 
 Jules VMなどのクリーンな一時環境において、動作検証やE2Eテストを実行するためのガイドラインです。
 
-### 1. クリーン環境のセットアップ
+### 1. クリーン環境 of セットアップ
 
 Jules VMが立ち上がった直後、および最初の動作確認を行う前に必ず以下のセットアップを実行します。
 これにより、フロントエンドビルド依存関係（`npm ci`）、Python依存関係（`uv sync`）、およびPlaywrightのChromiumブラウザが準備されます。

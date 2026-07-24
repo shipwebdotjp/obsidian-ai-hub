@@ -7,6 +7,11 @@ pytestmark = pytest.mark.e2e
 CANDIDATE_B_TEXT = "プロジェクトXは来月までに完了させる"
 
 
+@pytest.fixture(scope="module")
+def e2e_seed_scenario() -> list[str]:
+    return ["memory"]
+
+
 def test_page_loads_and_redirects_to_memories(e2e_server_url: str, page: Page) -> None:
     page.goto(e2e_server_url)
     page.wait_for_url(f"{e2e_server_url}/memories")

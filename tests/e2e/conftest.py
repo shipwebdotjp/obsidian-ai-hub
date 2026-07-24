@@ -53,12 +53,25 @@ def frontend_dist() -> Path:
 
 
 # ---------------------------------------------------------------------------
+# Module-scoped seed scenario override
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(scope="module")
+def e2e_seed_scenario():
+    """Override this module-scope fixture to specify which scenarios to seed.
+    Can be a list containing 'memory' and/or 'hitl'.
+    """
+    return ["memory"]
+
+
+# ---------------------------------------------------------------------------
 # Module-scoped: live Uvicorn server with seeded data
 # ---------------------------------------------------------------------------
 
 @pytest.fixture(scope="module")
-def e2e_server_url(frontend_dist: Path) -> str:
-    from obsidian_ai_hub.testing.seed import seed_memory_demo_data
+def e2e_server_url(frontend_dist: Path, e2e_seed_scenario: list[str]) -> str:
+    from obsidian_ai_hub.testing.seed import seed_memory_demo_data, seed_hitl_demo_data
+    from obsidian_ai_hub import database
     from obsidian_ai_hub.utils import config as app_config
     from obsidian_ai_hub.web.app import create_app
     import tempfile
@@ -77,6 +90,10 @@ def e2e_server_url(frontend_dist: Path) -> str:
     app_config.MEMORY_SQLITE_PATH = db_path
     app_config.VAULT_PATH = vault
 
+    # Explicitly run database migrations to prepare the schema
+    conn = database.get_db_connection()
+    conn.close()
+
     uvicorn_logger = logging.getLogger("uvicorn")
     uvicorn_logger.setLevel(logging.INFO)
     uvicorn_logger.addHandler(server_log_capture)
@@ -84,7 +101,10 @@ def e2e_server_url(frontend_dist: Path) -> str:
     server_log_capture.records.clear()
 
     try:
-        seed_memory_demo_data()
+        if "memory" in e2e_seed_scenario:
+            seed_memory_demo_data()
+        if "hitl" in e2e_seed_scenario:
+            seed_hitl_demo_data()
 
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.bind(("127.0.0.1", 0))
