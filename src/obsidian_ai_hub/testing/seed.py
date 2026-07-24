@@ -4,6 +4,7 @@ All seed functions use the application persistence APIs (not raw SQL) so the
 records have the same representation as production data.
 """
 
+import sqlite3
 from obsidian_ai_hub.testing import ensure_test_mode
 from obsidian_ai_hub.testing.factories import make_memory
 
@@ -63,3 +64,98 @@ def seed_memory_demo_data() -> None:
 
     existing = mem_mod.load_all_memories()
     mem_mod.save_all_memories(existing + candidates)
+
+
+def seed_hitl_demo_data() -> None:
+    """Insert a set of HITL runs and questions directly into the temporary database."""
+    ensure_test_mode()
+
+    from obsidian_ai_hub import hitl
+    from obsidian_ai_hub.utils import config as app_config
+
+    conn = sqlite3.connect(str(app_config.MEMORY_SQLITE_PATH))
+    conn.row_factory = sqlite3.Row
+    try:
+        # Run 1: Active suggestion pending user response (has optional notes question)
+        hitl.register_run_and_questions(
+            run_id="hrun_test_1",
+            handler="research.run_approved_suggestion",
+            checkpoint="rth_suggest_theme_1",
+            question_set_id="confirm_suggest",
+            questions_data=[
+                {
+                    "question_key": "action",
+                    "question_type": "select",
+                    "display_text": "自動提案されたリサーチテーマ「AIエージェントの未来」を承認して調査を実行しますか？",
+                    "choices": ["approve", "reject"],
+                    "is_required": 1,
+                },
+                {
+                    "question_key": "notes",
+                    "question_type": "text",
+                    "display_text": "補足メモがあれば入力してください（任意）",
+                    "is_required": 0,
+                }
+            ],
+            conn=conn,
+        )
+
+        # Run 2: Another pending user run for cancellation
+        hitl.register_run_and_questions(
+            run_id="hrun_test_2",
+            handler="dummy_handler",
+            checkpoint="none",
+            question_set_id="qs_cancel",
+            questions_data=[
+                {
+                    "question_key": "confirm",
+                    "question_type": "boolean",
+                    "display_text": "進めますか？",
+                    "choices": [True, False],
+                    "is_required": 1,
+                }
+            ],
+            conn=conn,
+        )
+
+        # Run 3: Optional-only questions for autoskip test
+        hitl.register_run_and_questions(
+            run_id="hrun_optional_only",
+            handler="optional_handler",
+            checkpoint="chk_opt",
+            question_set_id="qs_opt",
+            questions_data=[
+                {
+                    "question_key": "opt_a",
+                    "question_type": "text",
+                    "display_text": "任意のコメントA",
+                    "is_required": 0,
+                },
+                {
+                    "question_key": "opt_b",
+                    "question_type": "text",
+                    "display_text": "任意のコメントB",
+                    "is_required": 0,
+                },
+            ],
+            conn=conn,
+        )
+
+        # Pre-cancel run 2 and dispatch optional-only to test status filtering
+        hitl.cancel_run("hrun_test_2", conn=conn)
+
+        conn.commit()
+    finally:
+        conn.close()
+
+    # Dispatch optional-only run so it auto-skips and completes
+    conn2 = sqlite3.connect(str(app_config.MEMORY_SQLITE_PATH))
+    conn2.row_factory = sqlite3.Row
+    try:
+        def optional_handler(ctx: hitl.HitlContext) -> hitl.HitlResult:
+            return hitl.HitlResult.complete(checkpoint="done")
+        hitl.register_handler("optional_handler", optional_handler)
+        hitl.dispatch_runs(conn2)
+    finally:
+        hitl.clear_handlers()
+        conn2.close()

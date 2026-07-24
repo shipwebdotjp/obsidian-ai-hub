@@ -77,7 +77,7 @@ minor であるため、これは許容可能である。
 
 ### トレードオフ
 
-SQLite がサマリーの唯一の正本となり、Markdown ファイルとの二重管理が解消される。Notification 送信前にサマリーが SQLite に存在しない場合は、今日のスケジュール情報のみが通知され、昨日の要約は省略される。古いノート上の `## AIによる要約` は参照されず放置されるが、人間の記述を汚染しないという方針と一貫する。
+SQLite がサマリーの唯一 of 正本となり、Markdown ファイルとの二重管理が解消される。Notification 送信前にサマリーが SQLite に存在しない場合は、今日のスケジュール情報のみが通知され、昨日の要約は省略される。古いノート上の `## AIによる要約` は参照されず放置されるが、人間の記述を汚染しないという方針と一貫する。
 
 ## 未連携人物の編集・人物削除とサマリ数順表示
 
@@ -182,7 +182,7 @@ Flex Message を使わないため、リッチなレイアウトは不可能だ�
 
 ### トレードオフ
 
-- ファサードを維持するため、 `obsidian_ai_hub.memory` の責務が依然として広範に見える。実装はサブパッケージに閉じているため、コードの見通しは改善している。
+- ファサードを維持するため、 `obsidian_ai_hub.memory` の責務が依然として広範に見える。実装はサブパッケージに閉じているため、コードの見た目は改善している。
 - 依存方向は `models → stdlib`、`store → database + models`、`dedup / extraction / review / context / projection → 上位層` となり、循環importは存在しない。
 - `projection` だけは `approved.md` の書き出しをトリガするため `review` と `context` から逆参照される。import-time の循環を避けるため、`projection.project_approved_memories` の呼び出しはローカル import で行う。
 
@@ -382,7 +382,7 @@ JulesAgentによるコーディングと動作確認・テストを迅速かつ�
 1. **データベース・スキーマ設計 (v13):**
    - 実行制御（Run）と、個々の対話（Question）を完全に分離して管理。
    - `hitl_questions` 側で `(run_id, question_set_id, question_key)` の複合一意制約（UNIQUE）を定義し、同一質問セット内の重複登録を厳密に防止。
-   - インデックスとして、Runsの `status`、およびQuestionsの `(run_id, question_set_id)` および `status` を追加して、待機・再開検索を高速化。
+   - インデックスとして、Runsの `status`、およびQuestions of `(run_id, question_set_id)` および `status` を追加して、待機・再開検索を高速化。
 
 2. **状態遷移と回答検証の保証:**
    - 単一トランザクションによる整合性担保: `register_run_and_questions`、`submit_answer`、`cancel_run`、`claim_run` などの操作は、それぞれSQLite接続のトランザクションコンテキスト（`with conn:`）で囲み、状態更新をアトミックに実行する。
@@ -449,7 +449,7 @@ JulesAgentによるコーディングと動作確認・テストを迅速かつ�
 - タスクスケジューラプリセット (`test_task_runner_preset_contains_hitl_dispatch`)
 - E2E: ステータスフィルタ (`test_hitl_list_status_filter`)
 
-## E2E を重大なユーザーフローに限定する
+## E2E を重大なユーザーフローに限定する (Phase 7〜9 追加検証)
 
 | 項目 | 内容 |
 |------|------|
@@ -505,13 +505,13 @@ Vite 6 は現在の安定 LTS ラインであり、Vitest 4 を本格活用す�
 - ローカル開発では `node_modules/vitest/node_modules/vite` 由来のビルドサイズ・型解決の不整合がなくなる。
 - Node バージョンを `>=20.19.0` に引き上げる必要があり、CI の Node セットアップを明示する。
 
-## フロントエンドテストの Vitest 化と E2E テストの役割縮小 (Phase 3〜5)
+## フロントエンドテストの Vitest 化と E2E テストの役割縮小 (Phase 3〜5、および 7〜9)
 
 | 項目 | 内容 |
 |------|------|
 | 決定日 | 2026-07-24 |
 | カテゴリ | フロントエンド・テスト戦略 |
-| 決定内容 | UIの表示状態、フィルター操作、非同期処理の競合、デバウンス、およびダイアログ制御は Vitest (React Testing Library) で網羅検証し、Playwright E2E は真に重要な結合ユーザーフローに限定して役割を縮小する。 |
+| 決定内容 | UIの表示状態、フィルター操作、非同期処理の競合、デバウンス、およびダイアログ制御は Vitest (React Testing Library) で網羅検証し、Playwright E2E は真に重要な結合ユーザーフローに限定して役割を縮小する。さらに Phase 7〜9 でシナリオベースに再編し、テスト・データのセットアップをクリーンにモジュール化する。 |
 
 ### 結論に至った経緯
 
@@ -525,13 +525,18 @@ Vite 6 は現在の安定 LTS ラインであり、Vitest 4 を本格活用す�
    - `App.tsx` の認証状態、健康チェック失敗、ルートリダイレクト、モバイルナビ、サイドバー遷移。
    - `MemoryPage` / `MemoryList` / `MemoryDetailPanel` の初回ロード、フィルター連動、500msデバウンス、選択リreset、一意選択状態、レース条件抑止、詳細API失敗ハンドリング。
    - `HitlPage` の初期ロード、フィルター、行選択、必須検証、回答送信、キャンセル確認ダイアログ。
-2. **Playwright E2E の縮小**:
-   - `test_memory_smoke.py` における 5 件 of UI確認テストを削除し、Memory承認結合フローに集約。
-   - `test_hitl_flow.py` における 3 件 of ナビゲーションやフィルターの存在確認テストを削除し、回答送信フローとキャンセルフローに集約。
-   - 結果として、E2Eは起動・SPAフォールバック・主要データ永続化を含む3本の高インパクト導線のみに限定された。
+2. **Playwright E2E の縮小・再編 (Phase 7〜9 完了)**:
+   - 旧 E2E の 5 件のテストを、役割と関心に応じて 3 つのシナリオベースのファイル（1つのメモリシナリオ、2つの HITL シナリオ）へ整理統合。
+     - `test_memory_scenario.py` (メモリ承認・ロード関連)
+     - `test_hitl_answer_scenario.py` (HITL 回答送信フロー)
+     - `test_hitl_cancel_scenario.py` (HITL キャンセルフロー)
+   - `conftest.py` にモジュール単位でシードするシナリオを指定できるパラメータ化（`e2e_seed_scenario`）を導入。
+   - テストシードデータを DB 操作 API などでクリーンに構築する処理を `src/obsidian_ai_hub/testing/seed.py` の `seed_hitl_demo_data()` に集約し、テストファイル内の不透明な SQL べた書きを廃止。
+   - 結果として、E2Eは起動・SPAフォールバック・主要データ永続化を含む3つの高インパクト導線シナリオのみに限定・整理された。
 
 ### トレードオフ
 
 - ローカルおよびCIでのテスト実行速度が飛躍的に向上した（E2E実行数の削減と高速なJSDOMテスト）。
 - 静的なアサーションによるテストの脆さが解消され、ロジック変更に対するリグレッション耐性が向上した。
+- シードシナリオが疎結合かつ構造化されたため、将来の追加の際も既存テストのシードとの干渉や無駄なオーバーヘッドが最小化される。
 - 実ブラウザでしか発生しない特殊なアセット崩れや一部ブラウザ仕様の不整合を網羅する範囲は狭まるが、目視およびレビュー、縮小後のコアE2Eで実質的な品質担保を補完する。
