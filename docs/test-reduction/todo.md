@@ -19,24 +19,37 @@ Vitest を React の標準テスト層に格上げし、Playwright E2E を主要
       `tests/e2e/conftest.py:47-52` が `frontend/dist/index.html` 不在で skip するため、
       PR CI で Vitest・E2E は未検証。Phase 1 で `frontend-unit` ジョブを新設する。
 
-## Phase 1: CI に Vitest とビルドを組込む
+## Phase 1: CI に Vitest とビルドを組込む — 完了 (2026-07-24)
 
-- [ ] `.github/workflows/` にフロントエンド用ジョブ (`frontend-unit`) を新設し、Node
-      `>=20.19.0` のセットアップ、`npm --prefix frontend ci`、`npm --prefix frontend test`、
-      `npm --prefix frontend run build` を順次実行する。
-- [ ] 既存 Python ジョブと並列で起動し、両方が green であることを PR で確認する。
-- [ ] この段階で E2E はまだ変更しない。`tests/e2e/conftest.py` のスキップ挙動も据え置き。
+- [x] `.github/workflows/frontend-unit.yml` を新設し、Node 24 (LTS、JSDOM 29 / Vitest 4
+      の engines 要件 `>=24.0.0` を満たす) のセットアップ、`npm --prefix frontend ci`、
+      `npm --prefix frontend test`、`npm --prefix frontend run build` を順次実行する。
+      `cache: 'npm'` と `cache-dependency-path: frontend/package-lock.json` で
+      `node_modules` インストール結果をキャッシュし、2 回目以降の PR での `npm ci` を高速化。
+- [x] 既存 `pytest.yml` と並列で起動する (両 workflow とも `pull_request` トリガ)。
+      YAML 妥当性を `yaml.safe_load` で確認済み。CI と同等コマンド列をローカル実行し、
+      24/24 Vitest green + `vite build` 成功を確認。
+- [x] E2E はまだ変更しない。`tests/e2e/conftest.py` のスキップ挙動も据え置き。
 
-## Phase 2: Vitest の API クライアント契約テスト
+## Phase 2: Vitest の API クライアント契約テスト — 完了 (2026-07-24)
 
-- [ ] `frontend/src/api/client.test.ts` を新規作成し、以下を検証する:
-      - `listMemories` などのクエリ付きリクエストが URL エンコードされたクエリ文字列で
-        `/api/v1/memories` へ GET される。
-      - `reviewMemory` が `POST` で `action` / `new_content` を JSON ボディとして送信する。
-      - `sessionStorage` のトークンが `Authorization: Bearer ...` ヘッダとして付与される。
-      - 401 応答で `clearToken()` が呼ばれ `ApiError(401, ...)` がスローされる。
-      - `ApiError` の `detail` 抽出 (文字列とオブジェクト両形式) が想定通り動作する。
-      - 204 応答が `undefined` として返る。
+- [x] `frontend/src/api/client.test.ts` を新規作成 (26 テスト)。`globalThis.fetch` を
+      `vi.stubGlobal` で差し替え、`api/client.ts` の `request` 関数の入出力を直接検証する。
+      カバー範囲:
+      - **token 管理**: `getToken` / `setToken("")` / `clearToken` の `sessionStorage` 連携。
+      - **リクエスト構築**: `listMemories` のクエリ文字列 (URL エンコード、空パラメータ省略、
+        `+` エンコード)、`reviewMemory` の POST + JSON (action/new_content、省略時挙動)、
+        特殊文字を含む `memoryId` の `encodeURIComponent` 動作、`submitHitlAnswer` の
+        question-specific パス、`cancelHitlRun` / `renderCopilotProfile` の body なし POST、
+        `deleteMemory` の DELETE、`updateSummary` の PATCH、`getMemory` の GET、`health` が
+        `/health` を叩くこと。
+      - **Authorization**: トークン未設定時は付与なし、設定時は `Bearer <token>`、呼び出し
+        ごとに最新トークンが反映されること。
+      - **エラー**: 401 で `clearToken` + `ApiError(401, "Authentication failed...")`、
+        `detail` 文字列抽出、`detail.message` オブジェクト抽出、非 JSON body は statusText
+        フォールバック、`detail` 欠落時も statusText フォールバック。
+      - **204 No Content**: `deleteMemory` が `undefined` を返すこと。
+      - 全 50 テスト (既存 24 + 新規 26) green、`tsc -b && vite build` 成功。
 
 ## Phase 3: `App` の Vitest 化
 
