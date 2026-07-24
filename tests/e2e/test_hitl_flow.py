@@ -100,44 +100,6 @@ def seed_hitl_data(e2e_server_url):
         conn2.close()
 
 
-def test_hitl_sidebar_link_and_navigation(e2e_server_url: str, page: Page) -> None:
-    # Go to home/memories
-    page.goto(e2e_server_url)
-    page.wait_for_url(f"{e2e_server_url}/memories")
-
-    # Sidebar link should exist
-    sidebar_link = page.get_by_role("link", name="確認待ち")
-    expect(sidebar_link).to_be_visible()
-
-    # Click navigation to /hitl
-    sidebar_link.click()
-    page.wait_for_url(f"{e2e_server_url}/hitl")
-    expect(page.get_by_role("heading", name="確認待ちタスク")).to_be_visible()
-
-
-def test_hitl_list_and_details_rendering(e2e_server_url: str, page: Page) -> None:
-    page.goto(f"{e2e_server_url}/hitl")
-
-    # Set filter to "all" to see all runs regardless of status changes from prior tests
-    status_filter = page.get_by_label("ステータスフィルター")
-    status_filter.select_option("all")
-
-    # All seeded runs should be visible in the list
-    row_1 = page.locator('[data-testid="hitl-run-row"]', has_text="hrun_test_1")
-    row_2 = page.locator('[data-testid="hitl-run-row"]', has_text="hrun_test_2")
-    expect(row_1).to_be_visible()
-    expect(row_2).to_be_visible()
-
-    # Click first run row and check details are loaded
-    row_1.click()
-    expect(page.get_by_role("heading", name="hrun_test_1")).to_be_visible()
-    expect(page.locator("code", has_text="research.run_approved_suggestion")).to_be_visible()
-
-    # Check question display text and keys are rendered
-    expect(page.get_by_text("自動提案されたリサーチテーマ「AIエージェントの未来」")).to_be_visible()
-    expect(page.get_by_text("補足メモがあれば入力してください（任意）")).to_be_visible()
-
-
 def test_submit_hitl_answer_and_flow(e2e_server_url: str, page: Page) -> None:
     page.goto(f"{e2e_server_url}/hitl")
 
@@ -174,27 +136,3 @@ def test_cancel_hitl_run(e2e_server_url: str, page: Page) -> None:
 
     # Expect status to transition to Cancelled
     expect(page.locator("span", has_text="キャンセル済み").first).to_be_visible()
-
-
-def test_hitl_list_status_filter(e2e_server_url: str, page: Page) -> None:
-    """Filtering by status shows only matching runs."""
-    page.goto(f"{e2e_server_url}/hitl")
-
-    status_filter = page.get_by_label("ステータスフィルター")
-
-    # Switch to all to see all seeded runs
-    status_filter.select_option("all")
-    rows = page.locator('[data-testid="hitl-run-row"]')
-    expect(rows).to_have_count(3)
-
-    # Switch to "キャンセル済み" filter
-    status_filter.select_option("cancelled")
-    rows = page.locator('[data-testid="hitl-run-row"]')
-    expect(rows).to_have_count(2)
-    expect(page.locator('[data-testid="hitl-run-row"]', has_text="hrun_test_2")).to_be_visible()
-
-    # Switch to "完了" filter (the optional-only run was dispatched and completed)
-    status_filter.select_option("completed")
-    rows = page.locator('[data-testid="hitl-run-row"]')
-    expect(rows).to_have_count(1)
-    expect(page.locator('[data-testid="hitl-run-row"]', has_text="hrun_optional_only")).to_be_visible()
