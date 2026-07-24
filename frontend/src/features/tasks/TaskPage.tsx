@@ -23,6 +23,7 @@ const PRESET_OPTIONS = [
   { name: "Memory extract", flag: "--memory-extract" },
   { name: "Research suggestion", flag: "--suggest-research-theme" },
   { name: "Activity log", flag: "--log-activity" },
+  { name: "HITL dispatch", flag: "--hitl-dispatch" },
 ];
 
 export default function TaskPage() {

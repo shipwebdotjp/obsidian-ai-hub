@@ -695,6 +695,7 @@ def execute_research_job_sync(
     job_id: str,
     mode: str = "auto",
     output_style: Optional[str] = None,
+    context: Optional[str] = None,
 ) -> dict:
     from obsidian_ai_hub.research import db
 
@@ -719,6 +720,7 @@ def execute_research_job_sync(
             direction=theme_obj.get("direction"),
             why_now=theme_obj.get("why_now"),
             mode=mode,
+            context=context,
             output_style=output_style,
         )
 
@@ -890,6 +892,27 @@ def run_approved_suggestion(ctx) -> "HitlResult":
     if isinstance(answer, dict):
         answer = answer.get("value", answer)
 
+    comment = None
+    raw_answer = None
+    if getattr(ctx, "raw_answers_by_question_key", None) is not None:
+        raw_answer = ctx.raw_answers_by_question_key.get("action") or ctx.raw_answers_by_question_key.get("approve")
+    else:
+        # Fallback to DB lookup
+        from obsidian_ai_hub.hitl.store import get_questions_by_set, get_run
+        run = get_run(ctx.run_id, conn=ctx.conn)
+        if run and run.get("active_question_set_id"):
+            questions = get_questions_by_set(ctx.run_id, run["active_question_set_id"], conn=ctx.conn)
+            for q in questions:
+                if q["question_key"] in ("action", "approve"):
+                    raw_answer = q["answer"]
+                    break
+
+    if isinstance(raw_answer, dict):
+        comment = raw_answer.get("comment")
+
+    if comment and not comment.strip():
+        comment = None
+
     cp = {}
     if ctx.checkpoint:
         try:
@@ -950,7 +973,7 @@ def run_approved_suggestion(ctx) -> "HitlResult":
         return HitlResult.fail(f"Research job {job_id} not found", checkpoint=ctx.checkpoint)
 
     # js == "pending" — run research
-    job = execute_research_job_sync(theme_id, job_id)
+    job = execute_research_job_sync(theme_id, job_id, context=comment)
     js = job.get("status") if job else None
 
     if js == "succeeded":
