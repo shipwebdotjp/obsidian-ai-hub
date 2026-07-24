@@ -28,6 +28,7 @@ class HitlContext:
     checkpoint: Optional[str]
     answers_by_question_key: Dict[str, Any]
     conn: sqlite3.Connection
+    raw_answers_by_question_key: Dict[str, Any] = None
 
     def register_next_questions(
         self,
@@ -143,8 +144,10 @@ def _process_run(
     active_set_id = run_record["active_question_set_id"]
     questions = get_questions_by_set(run_id, active_set_id, conn) if active_set_id else []
     answers = {}
+    raw_answers = {}
     for q in questions:
         ans = q["answer"]
+        raw_answers[q["question_key"]] = ans
         if isinstance(ans, dict):
             answers[q["question_key"]] = ans.get("value", ans)
         else:
@@ -155,6 +158,7 @@ def _process_run(
         checkpoint=run_record["checkpoint"],
         answers_by_question_key=answers,
         conn=conn,
+        raw_answers_by_question_key=raw_answers,
     )
 
     try:
