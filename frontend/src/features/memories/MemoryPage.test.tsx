@@ -67,6 +67,10 @@ beforeEach(() => {
   mockGetMemory.mockResolvedValue(sampleDetail as any);
 });
 
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
 describe("MemoryPage", () => {
   it("initial load fetches options and lists candidate memories", async () => {
     render(<MemoryPage />);

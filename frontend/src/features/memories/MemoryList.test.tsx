@@ -1,6 +1,6 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import MemoryList from "./MemoryList";
 
 vi.mock("../../api/client", () => ({
@@ -51,6 +51,10 @@ const onSelectMock = vi.fn();
 beforeEach(() => {
   vi.clearAllMocks();
   mockListMemories.mockResolvedValue(sampleItems as any);
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 describe("MemoryList", () => {

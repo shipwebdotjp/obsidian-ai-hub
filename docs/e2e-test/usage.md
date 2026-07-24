@@ -51,7 +51,7 @@ Behind the scenes, this executes `pytest -m e2e` with pytest temporary sandboxes
 
 The E2E tests are organized cleanly in scenario files under `tests/e2e/`:
 
-1. `test_memory_scenario.py`: Covers the full Memory Review journey, including candidate list loading, details modal inspect, approval cascading, and correct redirection fallbacks.
+1. `test_memory_scenario.py`: Covers the Memory approval main flow: page load with `/` → `/memories` redirect, direct URL access to `/memories`, candidate approval cascading, the approved entry showing up under the approved filter, and SPA fallback for arbitrary paths.
 2. `test_hitl_answer_scenario.py`: Covers the Human-In-The-Loop flow for answering active interaction questions.
 3. `test_hitl_cancel_scenario.py`: Covers the Human-In-The-Loop flow for cancelling outstanding execution runs.
 
@@ -83,5 +83,5 @@ If an E2E test fails, the framework automatically dumps full failure diagnostics
 
 Open Playwright Trace Viewer to inspect the failure:
 ```bash
-npx playwright show-trace test-results/e2e/some_test_name.trace.zip
+uv run playwright show-trace test-results/e2e/some_test_name.trace.zip
 ```

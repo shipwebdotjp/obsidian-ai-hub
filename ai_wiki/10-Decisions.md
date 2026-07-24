@@ -77,7 +77,7 @@ minor であるため、これは許容可能である。
 
 ### トレードオフ
 
-SQLite がサマリーの唯一 of 正本となり、Markdown ファイルとの二重管理が解消される。Notification 送信前にサマリーが SQLite に存在しない場合は、今日のスケジュール情報のみが通知され、昨日の要約は省略される。古いノート上の `## AIによる要約` は参照されず放置されるが、人間の記述を汚染しないという方針と一貫する。
+SQLite がサマリーの唯一の正本となり、Markdown ファイルとの二重管理が解消される。Notification 送信前にサマリーが SQLite に存在しない場合は、今日のスケジュール情報のみが通知され、昨日の要約は省略される。古いノート上の `## AIによる要約` は参照されず放置されるが、人間の記述を汚染しないという方針と一貫する。
 
 ## 未連携人物の編集・人物削除とサマリ数順表示
 
@@ -382,7 +382,7 @@ JulesAgentによるコーディングと動作確認・テストを迅速かつ�
 1. **データベース・スキーマ設計 (v13):**
    - 実行制御（Run）と、個々の対話（Question）を完全に分離して管理。
    - `hitl_questions` 側で `(run_id, question_set_id, question_key)` の複合一意制約（UNIQUE）を定義し、同一質問セット内の重複登録を厳密に防止。
-   - インデックスとして、Runsの `status`、およびQuestions of `(run_id, question_set_id)` および `status` を追加して、待機・再開検索を高速化。
+   - インデックスとして、Runsの `status`、およびQuestions の `(run_id, question_set_id)` および `status` を追加して、待機・再開検索を高速化。
 
 2. **状態遷移と回答検証の保証:**
    - 単一トランザクションによる整合性担保: `register_run_and_questions`、`submit_answer`、`cancel_run`、`claim_run` などの操作は、それぞれSQLite接続のトランザクションコンテキスト（`with conn:`）で囲み、状態更新をアトミックに実行する。
@@ -447,7 +447,7 @@ JulesAgentによるコーディングと動作確認・テストを迅速かつ�
 - 手動リサーチ経路が HITL を作らない回帰 (`test_web_manual_research_paths_do_not_create_hitl_runs`)
 - パッケージ独立性 (`test_hitl_package_does_not_import_research_at_import_time`)
 - タスクスケジューラプリセット (`test_task_runner_preset_contains_hitl_dispatch`)
-- E2E: ステータスフィルタ (`test_hitl_list_status_filter`)
+- Vitest: ステータスフィルター (`HitlPage.test.tsx` の `filters runs by status when dropdown changes`)
 
 ## E2E を重大なユーザーフローに限定する (Phase 7〜9 追加検証)
 
@@ -523,7 +523,7 @@ Vite 6 は現在の安定 LTS ラインであり、Vitest 4 を本格活用す�
 
 1. **Vitest (React Testing Library) の拡充**:
    - `App.tsx` の認証状態、健康チェック失敗、ルートリダイレクト、モバイルナビ、サイドバー遷移。
-   - `MemoryPage` / `MemoryList` / `MemoryDetailPanel` の初回ロード、フィルター連動、500msデバウンス、選択リreset、一意選択状態、レース条件抑止、詳細API失敗ハンドリング。
+   - `MemoryPage` / `MemoryList` / `MemoryDetailPanel` の初回ロード、フィルター連動、500msデバウンス、選択リセット、一意選択状態、レース条件抑止、詳細API失敗ハンドリング。
    - `HitlPage` の初期ロード、フィルター、行選択、必須検証、回答送信、キャンセル確認ダイアログ。
 2. **Playwright E2E の縮小・再編 (Phase 7〜9 完了)**:
    - 旧 E2E の 5 件のテストを、役割と関心に応じて 3 つのシナリオベースのファイル（1つのメモリシナリオ、2つの HITL シナリオ）へ整理統合。

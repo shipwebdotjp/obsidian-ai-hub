@@ -131,8 +131,10 @@ describe("MemoryDetailPanel", () => {
     resolve1(sampleDetail1);
 
     // The detail panel should STILL display mem-2 (not overwritten by the stale promise1)
-    await new Promise((r) => setTimeout(r, 50));
-    expect(screen.queryByText("Stretch for 10 mins")).not.toBeInTheDocument();
+    // Flush pending microtasks before asserting the absence of the stale text
+    await waitFor(() => {
+      expect(screen.queryByText("Stretch for 10 mins")).not.toBeInTheDocument();
+    });
     expect(screen.getByText("Drink water regularly")).toBeInTheDocument();
   });
 });

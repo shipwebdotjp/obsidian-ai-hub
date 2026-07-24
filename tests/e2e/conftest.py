@@ -90,17 +90,22 @@ def e2e_server_url(frontend_dist: Path, e2e_seed_scenario: list[str]) -> str:
     app_config.MEMORY_SQLITE_PATH = db_path
     app_config.VAULT_PATH = vault
 
-    # Explicitly run database migrations to prepare the schema
-    conn = database.get_db_connection()
-    conn.close()
-
     uvicorn_logger = logging.getLogger("uvicorn")
-    uvicorn_logger.setLevel(logging.INFO)
-    uvicorn_logger.addHandler(server_log_capture)
 
-    server_log_capture.records.clear()
+    server: uvicorn.Server | None = None
+    thread: threading.Thread | None = None
+    workspace_cleaned = False
 
     try:
+        # Explicitly run database migrations to prepare the schema
+        conn = database.get_db_connection()
+        conn.close()
+
+        uvicorn_logger.setLevel(logging.INFO)
+        uvicorn_logger.addHandler(server_log_capture)
+
+        server_log_capture.records.clear()
+
         if "memory" in e2e_seed_scenario:
             seed_memory_demo_data()
         if "hitl" in e2e_seed_scenario:
@@ -128,16 +133,22 @@ def e2e_server_url(frontend_dist: Path, e2e_seed_scenario: list[str]) -> str:
                 pass
             time.sleep(0.2)
         else:
-            server.should_exit = True
-            thread.join(timeout=5)
+            if server is not None:
+                server.should_exit = True
+            if thread is not None:
+                thread.join(timeout=5)
             workspace.cleanup()
+            workspace_cleaned = True
             pytest.fail("E2E server did not start in time")
 
         yield base_url
     finally:
-        server.should_exit = True
-        thread.join(timeout=10)
-        workspace.cleanup()
+        if server is not None:
+            server.should_exit = True
+        if thread is not None:
+            thread.join(timeout=10)
+        if not workspace_cleaned:
+            workspace.cleanup()
 
         uvicorn_logger.removeHandler(server_log_capture)
 

@@ -1,6 +1,6 @@
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import HitlPage from "./HitlPage";
 
 // Mock the API client
@@ -95,6 +95,10 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockListHitlRuns.mockResolvedValue(sampleRuns as any);
   mockGetHitlRun.mockResolvedValue(sampleDetail1 as any);
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 describe("HitlPage", () => {
@@ -215,6 +219,9 @@ describe("HitlPage", () => {
       expect(screen.getByText("AIエージェントの未来")).toBeInTheDocument();
     });
 
+    // Initial getHitlRun from row selection
+    expect(mockGetHitlRun).toHaveBeenCalledTimes(1);
+
     // Select choice 'approve'
     const approveBtn = screen.getByRole("button", { name: "approve" });
     fireEvent.click(approveBtn);
@@ -231,6 +238,12 @@ describe("HitlPage", () => {
         null
       );
     });
+
+    // After successful submit the page should refetch the run detail
+    await waitFor(() => {
+      expect(mockGetHitlRun).toHaveBeenCalledTimes(2);
+    });
+    expect(mockGetHitlRun).toHaveBeenLastCalledWith("hrun-1");
   });
 
   it("displays detail error if submitHitlAnswer fails with ApiError", async () => {

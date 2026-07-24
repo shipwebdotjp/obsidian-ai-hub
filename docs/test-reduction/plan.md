@@ -115,11 +115,11 @@ Vitest は新規導入ではなく既に `frontend/package.json` に含まれて
 
 ## ツールチェーンメモ
 
-- Vite 5.4.x / Vitest 4.1.x の組合せは、Vitest が Vite 6〜8 を peer に取るため `package-lock.json`
-  で Vite 8 がネスト導入されている。動作はするが、ビルドエンジンが二重に存在する状態のため、
-  Vitest 拡充を始める前に「Vite 5 互換の Vitest 系に統一」または「Vite を 6+ へ揃えて Vitest
-  4 を正式採用」を方針として選ぶこと。本プランでは Vite 5 系を維持する場合の Vitest 3 系ダウ
-  ングレードを推奨案とする。
+- 採用構成: Vite 6.4.3 / Vitest 4.1.10。`frontend/package.json` の `vite` は `^6.0.0`、
+  `vitest` は `^4.1.10` に揃え、`overrides.vite: "^6.0.0"` で root と vitest 内部の二重
+  Vite 状態を解消した (Phase 0 完了)。
+- Node バージョンは最狭 engines 要件である `jsdom@29.1.1` の `^20.19.0 || ^22.13.0 || >=24.0.0`
+  を満たす必要がある。CI ワークフローは Node 24 LTS に固定する。
 - 既存テストは globals なしの個別 import を採用している (`import { describe, it, expect, vi,
   beforeEach } from "vitest"`)。これに揃える。
 - `@testing-library/jest-dom/vitest` は `frontend/src/test/setup.ts` で有効化済み。
