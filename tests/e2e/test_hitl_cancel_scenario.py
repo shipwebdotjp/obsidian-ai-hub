@@ -17,7 +17,7 @@ def test_cancel_hitl_run(e2e_server_url: str, page: Page) -> None:
     status_filter.select_option("all")
 
     # Select first run
-    page.locator('[data-testid="hitl-run-row"]', has_text="hrun_test_1").click()
+    page.locator('[data-testid="hitl-run-row"]', has_text="「AIエージェントの未来」を調査するか確認").click()
 
     # Handle dialog confirm box on cancel button click
     page.on("dialog", lambda dialog: dialog.accept())

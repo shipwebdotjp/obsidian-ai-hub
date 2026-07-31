@@ -50,7 +50,7 @@ def main() -> None:
 
     # Now safe to import application modules — config.py already read ENV=test.
     import uvicorn
-    from obsidian_ai_hub.testing.seed import seed_memory_demo_data
+    from obsidian_ai_hub.testing.seed import seed_memory_demo_data, seed_hitl_demo_data
     from obsidian_ai_hub.utils import config as app_config
     from obsidian_ai_hub.web.app import create_app
 
@@ -60,6 +60,7 @@ def main() -> None:
 
     if args.seed == "demo":
         seed_memory_demo_data()
+        seed_hitl_demo_data()
         print("Seeded demo data.", flush=True)
     else:
         print(f"Unknown seed scenario: {args.seed}", file=sys.stderr)

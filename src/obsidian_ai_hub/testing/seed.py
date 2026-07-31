@@ -86,8 +86,13 @@ def seed_hitl_demo_data() -> None:
                 {
                     "question_key": "action",
                     "question_type": "select",
-                    "display_text": "自動提案されたリサーチテーマ「AIエージェントの未来」を承認して調査を実行しますか？",
-                    "choices": ["approve", "reject"],
+                    "display_text": "「AIエージェントの未来」を調査しますか？",
+                    "title": "調査の実行",
+                    "prompt": "「AIエージェントの未来」を調査しますか？",
+                    "choices": [
+                        {"value": "approve", "label": "調査を実行する", "description": "提案を承認し、詳細なリサーチとVaultへの保存を行います。"},
+                        {"value": "reject", "label": "今回は見送る", "description": "このテーマのリサーチを行わず、却下として終了します。"}
+                    ],
                     "is_required": 1,
                 },
                 {
@@ -98,6 +103,9 @@ def seed_hitl_demo_data() -> None:
                 }
             ],
             conn=conn,
+            display_type="リサーチ提案",
+            title="「AIエージェントの未来」を調査するか確認",
+            description="承認すると、このテーマを詳しく調査し、結果をVaultに保存します。",
         )
 
         # Run 2: Another pending user run for cancellation
@@ -116,6 +124,9 @@ def seed_hitl_demo_data() -> None:
                 }
             ],
             conn=conn,
+            display_type="進捗確認",
+            title="進行確認",
+            description="継続するか確認します。",
         )
 
         # Run 3: Optional-only questions for autoskip test
@@ -139,6 +150,9 @@ def seed_hitl_demo_data() -> None:
                 },
             ],
             conn=conn,
+            display_type="アンケート",
+            title="任意のアンケート",
+            description="任意の補足情報入力を求めます。",
         )
 
         # Pre-cancel run 2 and dispatch optional-only to test status filtering

@@ -26,6 +26,7 @@ RUN_COLUMNS = [
     "updated_at",
     "title",
     "description",
+    "display_type",
 ]
 
 QUESTION_COLUMNS = [

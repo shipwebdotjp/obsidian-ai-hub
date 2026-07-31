@@ -875,6 +875,8 @@ class HitlRun(BaseModel):
     updated_at: str
     title: Optional[str] = None
     description: Optional[str] = None
+    display_type: Optional[str] = None
+    display_title: Optional[str] = None
 
 
 class HitlRunDetail(HitlRun):

@@ -32,12 +32,20 @@ const sampleRuns = {
       handler: "research.run_approved_suggestion",
       status: "pending_user",
       created_at: "2026-07-20T10:00:00Z",
+      title: "AIエージェントの未来",
+      display_title: "AIエージェントの未来",
+      display_type: "リサーチ提案",
+      description: "自動提案されたリサーチテーマの承認",
     },
     {
       run_id: "hrun-2",
       handler: "dummy_handler",
       status: "cancelled",
       created_at: "2026-07-20T11:00:00Z",
+      title: "Boolean Test",
+      display_title: "Boolean Test",
+      display_type: "進捗確認",
+      description: "Boolean type rendering test",
     },
   ],
   total: 2,
@@ -48,6 +56,8 @@ const sampleDetail1 = {
   handler: "research.run_approved_suggestion",
   status: "pending_user",
   title: "AIエージェントの未来",
+  display_title: "AIエージェントの未来",
+  display_type: "リサーチ提案",
   description: "自動提案されたリサーチテーマの承認",
   created_at: "2026-07-20T10:00:00Z",
   questions: [
@@ -56,7 +66,10 @@ const sampleDetail1 = {
       question_key: "action",
       question_type: "select",
       display_text: "リサーチテーマを承認しますか？",
-      choices: ["approve", "reject"],
+      choices: [
+        { value: "approve", label: "調査を実行する", description: "承認してリサーチを実行します" },
+        { value: "reject", label: "今回は見送る", description: "却下して見送ります" }
+      ],
       is_required: 1,
       status: "pending",
     },
@@ -76,6 +89,8 @@ const sampleDetail2 = {
   handler: "dummy_handler",
   status: "pending_user",
   title: "Boolean Test",
+  display_title: "Boolean Test",
+  display_type: "進捗確認",
   description: "Boolean type rendering test",
   created_at: "2026-07-20T12:00:00Z",
   questions: [
@@ -113,15 +128,15 @@ describe("HitlPage", () => {
     });
 
     // Verify runs render
-    expect(screen.getByText("hrun-1")).toBeInTheDocument();
-    expect(screen.getByText("Handler: research.run_approved_suggestion")).toBeInTheDocument();
+    expect(screen.getByText("AIエージェントの未来")).toBeInTheDocument();
+    expect(screen.getByText("リサーチ提案")).toBeInTheDocument();
   });
 
   it("filters runs by status when dropdown changes", async () => {
     render(<HitlPage />);
 
     await waitFor(() => {
-      expect(screen.getByText("hrun-1")).toBeInTheDocument();
+      expect(screen.getByText("AIエージェントの未来")).toBeInTheDocument();
     });
 
     const filterSelect = screen.getByLabelText("ステータスフィルター");
@@ -141,11 +156,11 @@ describe("HitlPage", () => {
     render(<HitlPage />);
 
     await waitFor(() => {
-      expect(screen.getByText("hrun-1")).toBeInTheDocument();
+      expect(screen.getByText("AIエージェントの未来")).toBeInTheDocument();
     });
 
     // Click the first row to select it
-    const row = screen.getByText("hrun-1");
+    const row = screen.getByText("AIエージェントの未来");
     fireEvent.click(row);
 
     await waitFor(() => {
@@ -153,12 +168,12 @@ describe("HitlPage", () => {
     });
 
     // Check title and description render
-    expect(screen.getByText("AIエージェントの未来")).toBeInTheDocument();
+    expect(screen.getAllByText("AIエージェントの未来")).toHaveLength(2); // one in sidebar, one in detail top
     expect(screen.getByText("リサーチテーマを承認しますか？")).toBeInTheDocument();
 
-    // Verify select type choices render
-    expect(screen.getByRole("button", { name: "approve" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "reject" })).toBeInTheDocument();
+    // Verify select type choices render (using structured labels)
+    expect(screen.getByText("調査を実行する")).toBeInTheDocument();
+    expect(screen.getByText("今回は見送る")).toBeInTheDocument();
   });
 
   it("initializes boolean questions to true by default", async () => {
@@ -166,10 +181,10 @@ describe("HitlPage", () => {
     render(<HitlPage />);
 
     await waitFor(() => {
-      expect(screen.getByText("hrun-1")).toBeInTheDocument();
+      expect(screen.getByText("AIエージェントの未来")).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByText("hrun-1"));
+    fireEvent.click(screen.getByText("AIエージェントの未来"));
 
     await waitFor(() => {
       expect(screen.getByText("Boolean Test")).toBeInTheDocument();
@@ -184,13 +199,13 @@ describe("HitlPage", () => {
     render(<HitlPage />);
 
     await waitFor(() => {
-      expect(screen.getByText("hrun-1")).toBeInTheDocument();
+      expect(screen.getByText("AIエージェントの未来")).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByText("hrun-1"));
+    fireEvent.click(screen.getByText("AIエージェントの未来"));
 
     await waitFor(() => {
-      expect(screen.getByText("AIエージェントの未来")).toBeInTheDocument();
+      expect(screen.getAllByText("AIエージェントの未来")).toHaveLength(2);
     });
 
     // Submit answer without choosing 'approve' or 'reject'
@@ -210,20 +225,20 @@ describe("HitlPage", () => {
     render(<HitlPage />);
 
     await waitFor(() => {
-      expect(screen.getByText("hrun-1")).toBeInTheDocument();
+      expect(screen.getByText("AIエージェントの未来")).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByText("hrun-1"));
+    fireEvent.click(screen.getByText("AIエージェントの未来"));
 
     await waitFor(() => {
-      expect(screen.getByText("AIエージェントの未来")).toBeInTheDocument();
+      expect(screen.getAllByText("AIエージェントの未来")).toHaveLength(2);
     });
 
     // Initial getHitlRun from row selection
     expect(mockGetHitlRun).toHaveBeenCalledTimes(1);
 
     // Select choice 'approve'
-    const approveBtn = screen.getByRole("button", { name: "approve" });
+    const approveBtn = screen.getByText("調査を実行する");
     fireEvent.click(approveBtn);
 
     // Submit
@@ -252,17 +267,17 @@ describe("HitlPage", () => {
     render(<HitlPage />);
 
     await waitFor(() => {
-      expect(screen.getByText("hrun-1")).toBeInTheDocument();
-    });
-
-    fireEvent.click(screen.getByText("hrun-1"));
-
-    await waitFor(() => {
       expect(screen.getByText("AIエージェントの未来")).toBeInTheDocument();
     });
 
+    fireEvent.click(screen.getByText("AIエージェントの未来"));
+
+    await waitFor(() => {
+      expect(screen.getAllByText("AIエージェントの未来")).toHaveLength(2);
+    });
+
     // Choose 'approve'
-    fireEvent.click(screen.getByRole("button", { name: "approve" }));
+    fireEvent.click(screen.getByText("調査を実行する"));
 
     // Submit
     const submitBtn = screen.getAllByRole("button", { name: "回答を送信" })[0];
@@ -280,13 +295,13 @@ describe("HitlPage", () => {
     render(<HitlPage />);
 
     await waitFor(() => {
-      expect(screen.getByText("hrun-1")).toBeInTheDocument();
+      expect(screen.getByText("AIエージェントの未来")).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByText("hrun-1"));
+    fireEvent.click(screen.getByText("AIエージェントの未来"));
 
     await waitFor(() => {
-      expect(screen.getByText("AIエージェントの未来")).toBeInTheDocument();
+      expect(screen.getAllByText("AIエージェントの未来")).toHaveLength(2);
     });
 
     const cancelBtn = screen.getByRole("button", { name: "実行全体をキャンセル" });
@@ -304,13 +319,13 @@ describe("HitlPage", () => {
     render(<HitlPage />);
 
     await waitFor(() => {
-      expect(screen.getByText("hrun-1")).toBeInTheDocument();
+      expect(screen.getByText("AIエージェントの未来")).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByText("hrun-1"));
+    fireEvent.click(screen.getByText("AIエージェントの未来"));
 
     await waitFor(() => {
-      expect(screen.getByText("AIエージェントの未来")).toBeInTheDocument();
+      expect(screen.getAllByText("AIエージェントの未来")).toHaveLength(2);
     });
 
     const cancelBtn = screen.getByRole("button", { name: "実行全体をキャンセル" });

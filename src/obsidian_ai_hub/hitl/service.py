@@ -37,6 +37,7 @@ def register_run_and_questions(
     conn: Optional[sqlite3.Connection] = None,
     title: Optional[str] = None,
     description: Optional[str] = None,
+    display_type: Optional[str] = None,
 ) -> None:
     """
     Register or update a Run and insert or update its active question set of questions.
@@ -53,7 +54,14 @@ def register_run_and_questions(
             run = get_run(run_id, conn)
             now = get_current_iso()
 
+            # Metadata Validation & Contract checks
             if run is None:
+                # New Run: display_type and title are absolutely required, including non-blank constraint
+                if not display_type or not display_type.strip():
+                    raise ValueError("display_type is required for registering a new HITL Run")
+                if not title or not title.strip():
+                    raise ValueError("title is required for registering a new HITL Run")
+
                 run = {
                     "run_id": run_id,
                     "handler": handler,
@@ -66,10 +74,27 @@ def register_run_and_questions(
                     "error_message": None,
                     "created_at": now,
                     "updated_at": now,
-                    "title": title,
-                    "description": description,
+                    "title": title.strip(),
+                    "description": description.strip() if description and description.strip() else description,
+                    "display_type": display_type.strip(),
                 }
             else:
+                # Existing Run update:
+                # - If display_type/title is not None but blank, raise ValueError (prevent wiping metadata)
+                # - If None, keep the existing value
+                if display_type is not None:
+                    if not display_type.strip():
+                        raise ValueError("display_type cannot be set to empty/blank string on existing HITL Run")
+                    run["display_type"] = display_type.strip()
+
+                if title is not None:
+                    if not title.strip():
+                        raise ValueError("title cannot be set to empty/blank string on existing HITL Run")
+                    run["title"] = title.strip()
+
+                if description is not None:
+                    run["description"] = description.strip() if description.strip() else None
+
                 run["handler"] = handler
                 run["checkpoint"] = checkpoint
                 run["active_question_set_id"] = question_set_id
@@ -77,10 +102,44 @@ def register_run_and_questions(
                 run["lease_owner"] = None
                 run["lease_expires_at"] = None
                 run["updated_at"] = now
-                if title is not None:
-                    run["title"] = title
-                if description is not None:
-                    run["description"] = description
+
+            # Validate structural choices for questions to avoid mixing scalar and structured types
+            for q_data in questions_data:
+                choices = q_data.get("choices")
+                if choices:
+                    if not isinstance(choices, list):
+                        raise ValueError("choices must be a list if provided")
+
+                    is_structured = [isinstance(c, dict) for c in choices]
+                    if any(is_structured) and not all(is_structured):
+                        raise ValueError("Cannot mix structured choices (dictionaries) and scalar choices in the same question")
+
+                    if all(is_structured):
+                        # Structured Choice array constraints:
+                        # - value is JSON scalar (str, int, float, bool)
+                        # - label is non-blank string
+                        # - description is optional string
+                        # - No duplicate values allowed
+                        seen_values = set()
+                        for c in choices:
+                            val = c.get("value")
+                            label = c.get("label")
+                            desc = c.get("description")
+
+                            if val is None:
+                                raise ValueError("Each structured choice must have a 'value'")
+                            if not isinstance(val, (str, int, float, bool)):
+                                raise ValueError("Choice value must be a scalar JSON type (string, number, or boolean)")
+
+                            if not label or not isinstance(label, str) or not label.strip():
+                                raise ValueError("Each structured choice must have a non-empty string 'label'")
+
+                            if desc is not None and not isinstance(desc, str):
+                                raise ValueError("Structured choice description must be a string if provided")
+
+                            if val in seen_values:
+                                raise ValueError(f"Duplicate choice value detected: {val}")
+                            seen_values.add(val)
 
             # Upsert the run first to satisfy foreign key constraint on questions
             upsert_run(run, conn)
@@ -210,10 +269,18 @@ def submit_answer(
             choices = question.get("choices")
             if choices is not None:
                 if isinstance(choices, list) and len(choices) > 0:
-                    if answer_value not in choices:
-                        raise ValueError(
-                            f"Answer '{answer_value}' is not a valid choice. Valid choices: {choices}"
-                        )
+                    is_structured = [isinstance(c, dict) for c in choices]
+                    if all(is_structured):
+                        valid_values = [c["value"] for c in choices]
+                        if answer_value not in valid_values:
+                            raise ValueError(
+                                f"Answer '{answer_value}' is not a valid choice value. Valid choice values: {valid_values}"
+                            )
+                    else:
+                        if answer_value not in choices:
+                            raise ValueError(
+                                f"Answer '{answer_value}' is not a valid choice. Valid choices: {choices}"
+                            )
 
             # Update question conditionally only if it is still pending
             now = get_current_iso()

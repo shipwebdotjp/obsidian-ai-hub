@@ -473,6 +473,8 @@ export interface HitlRun {
   updated_at: string;
   title: string | null;
   description: string | null;
+  display_type: string | null;
+  display_title: string | null;
 }
 
 export interface HitlRunDetail extends HitlRun {

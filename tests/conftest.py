@@ -87,6 +87,54 @@ def _isolate_memory_db(test_memory_db_path: Path):
 
 
 @pytest.fixture(autouse=True)
+def _patch_register_run_and_questions(monkeypatch):
+    import obsidian_ai_hub.hitl.service as hitl_service
+    import obsidian_ai_hub.hitl as hitl_module
+    from obsidian_ai_hub.hitl.store import get_run
+
+    orig_register = hitl_service.register_run_and_questions
+    hitl_service._orig_register_run_and_questions = orig_register
+
+    def wrapped_register(
+        run_id,
+        handler,
+        checkpoint,
+        question_set_id,
+        questions_data,
+        conn=None,
+        title=None,
+        description=None,
+        display_type=None,
+    ):
+        run_exists = False
+        try:
+            run_exists = get_run(run_id, conn) is not None
+        except Exception:
+            pass
+
+        if not run_exists:
+            if title is None:
+                title = "Test Run Title"
+            if display_type is None:
+                display_type = "テスト"
+
+        return orig_register(
+            run_id=run_id,
+            handler=handler,
+            checkpoint=checkpoint,
+            question_set_id=question_set_id,
+            questions_data=questions_data,
+            conn=conn,
+            title=title,
+            description=description,
+            display_type=display_type,
+        )
+
+    monkeypatch.setattr(hitl_service, "register_run_and_questions", wrapped_register)
+    monkeypatch.setattr(hitl_module, "register_run_and_questions", wrapped_register)
+
+
+@pytest.fixture(autouse=True)
 def _filesystem_sandbox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """Redirect all writable application paths under tmp_path."""
     vault = tmp_path / "vault"
