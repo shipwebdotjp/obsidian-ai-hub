@@ -95,8 +95,13 @@ def create_theme_and_research(
                     {
                         "question_key": "action",
                         "question_type": "select",
-                        "display_text": f"自動提案されたリサーチテーマ「{theme}」を承認して調査を実行しますか？",
-                        "choices": ["approve", "reject"],
+                        "display_text": f"「{theme}」を調査しますか？",
+                        "title": "調査の実行",
+                        "prompt": f"「{theme}」を調査しますか？",
+                        "choices": [
+                            {"value": "approve", "label": "調査を実行する"},
+                            {"value": "reject", "label": "今回は見送る"}
+                        ],
                         "is_required": 1,
                     }
                 ]
@@ -108,6 +113,9 @@ def create_theme_and_research(
                     question_set_id="confirm_suggest",
                     questions_data=questions_data,
                     conn=conn,
+                    display_type="リサーチ提案",
+                    title=f"「{theme}」を調査するか確認",
+                    description="承認すると、このテーマを詳しく調査し、結果をVaultに保存します。",
                 )
                 # Save hitl_run_id on theme in the same transaction
                 db._set_theme_field(rec["theme_id"], "hitl_run_id", run_id, conn=conn)

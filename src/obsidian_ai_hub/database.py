@@ -459,6 +459,9 @@ def get_db_connection() -> sqlite3.Connection:
     if current_version <= 14:
         run_migration_v15(conn)
 
+    if current_version <= 15:
+        run_migration_v16(conn)
+
     return conn
 
 
@@ -523,6 +526,16 @@ def run_migration_v15(conn: sqlite3.Connection) -> None:
     except sqlite3.OperationalError as e:
         _ignore_duplicate_schema_object(e)
     conn.execute("PRAGMA user_version = 15;")
+    conn.commit()
+
+
+def run_migration_v16(conn: sqlite3.Connection) -> None:
+    """Run migration for version 16 (hitl_runs.display_type TEXT column)."""
+    try:
+        conn.execute("ALTER TABLE hitl_runs ADD COLUMN display_type TEXT;")
+    except sqlite3.OperationalError as e:
+        _ignore_duplicate_schema_object(e)
+    conn.execute("PRAGMA user_version = 16;")
     conn.commit()
 
 

@@ -12,11 +12,11 @@ def test_hitl_db_migration_and_structure(test_memory_db_path):
     """Verify that the database migration correctly creates hitl_runs and hitl_questions tables with proper constraints."""
     conn = get_db_connection()
     try:
-        # Check database user_version is 14
+        # Check database user_version is 16
         cursor = conn.cursor()
         cursor.execute("PRAGMA user_version;")
         version = cursor.fetchone()[0]
-        assert version == 15
+        assert version == 16
 
         # Verify hitl_runs columns
         cursor.execute("PRAGMA table_info(hitl_runs);")
@@ -33,6 +33,8 @@ def test_hitl_db_migration_and_structure(test_memory_db_path):
         # v15 additions
         assert "title" in runs_cols, "v15: hitl_runs.title"
         assert "description" in runs_cols, "v15: hitl_runs.description"
+        # v16 additions
+        assert "display_type" in runs_cols, "v16: hitl_runs.display_type"
 
         # Verify hitl_questions columns
         cursor.execute("PRAGMA table_info(hitl_questions);")
@@ -191,6 +193,112 @@ def test_submit_answer_choice_validation_and_once_only(test_memory_db_path):
                 answer="red",
                 conn=conn,
             )
+    finally:
+        conn.close()
+
+
+def test_display_title_resolution(test_memory_db_path):
+    """Test resolution rules for display_title."""
+    from obsidian_ai_hub.web.service import resolve_display_title
+    import obsidian_ai_hub.hitl.service as hitl_service
+    conn = get_db_connection()
+    try:
+        # Rule 1: Non-blank run.title (even if there is active set with pending questions)
+        run_1 = {
+            "run_id": "r1",
+            "title": "  Custom Title  ",
+            "active_question_set_id": "set1"
+        }
+        hitl_service._orig_register_run_and_questions(
+            run_id="r1",
+            handler="h",
+            checkpoint="c",
+            question_set_id="set1",
+            questions_data=[
+                {"question_key": "q", "question_type": "text", "prompt": "Pending prompt", "display_text": "Pend DT", "is_required": 1}
+            ],
+            conn=conn,
+            title="Custom Title",
+            display_type="T"
+        )
+        assert resolve_display_title(run_1, conn=conn) == "Custom Title"
+
+        # Rule 2: No custom run title, falls back to first pending question's resolved text
+        # (check prompt -> display_text -> title resolution priority)
+        run_2 = {
+            "run_id": "r2",
+            "title": "   ",
+            "active_question_set_id": "set1"
+        }
+        hitl_service._orig_register_run_and_questions(
+            run_id="r2",
+            handler="h",
+            checkpoint="c",
+            question_set_id="set1",
+            questions_data=[
+                {
+                    "question_key": "q1",
+                    "question_type": "text",
+                    "prompt": "First Pending Prompt",
+                    "display_text": "First Pending DT",
+                    "title": "First Pending Title",
+                    "is_required": 1,
+                    "sequence": 1
+                },
+                {
+                    "question_key": "q2",
+                    "question_type": "text",
+                    "prompt": "Second Pending Prompt",
+                    "display_text": "Second Pending DT",
+                    "is_required": 1,
+                    "sequence": 2
+                }
+            ],
+            conn=conn,
+            title="Temp Title",
+            display_type="T"
+        )
+        # Empty out title in the database to test fallback resolution
+        conn.execute("UPDATE hitl_runs SET title = '   ' WHERE run_id = 'r2'")
+        assert resolve_display_title(run_2, conn=conn) == "First Pending Prompt"
+
+        # Rule 3: No custom run title, no pending questions, falls back to first question in set
+        run_3 = {
+            "run_id": "r3",
+            "title": None,
+            "active_question_set_id": "set1"
+        }
+        hitl_service._orig_register_run_and_questions(
+            run_id="r3",
+            handler="h",
+            checkpoint="c",
+            question_set_id="set1",
+            questions_data=[
+                {
+                    "question_key": "q1",
+                    "question_type": "text",
+                    "display_text": "Non-pending DT",
+                    "is_required": 1,
+                    "sequence": 1
+                }
+            ],
+            conn=conn,
+            title="Temp Title 2",
+            display_type="T"
+        )
+        # Empty out title in the database
+        conn.execute("UPDATE hitl_runs SET title = NULL WHERE run_id = 'r3'")
+        # Answer the question to make it non-pending
+        hitl_service.submit_answer("r3", "set1", "q1", "Some answer", conn=conn)
+        assert resolve_display_title(run_3, conn=conn) == "Non-pending DT"
+
+        # Rule 4: Absolute fallback
+        run_4 = {
+            "run_id": "r4",
+            "title": None,
+            "active_question_set_id": None
+        }
+        assert resolve_display_title(run_4, conn=conn) == "確認待ちタスク"
     finally:
         conn.close()
 
@@ -700,5 +808,212 @@ def test_register_run_and_questions_rollback_on_failure(test_memory_db_path):
         assert cursor.fetchone()[0] == 0
         cursor.execute("SELECT COUNT(*) FROM hitl_questions WHERE run_id = ?", ("run_rollback",))
         assert cursor.fetchone()[0] == 0
+    finally:
+        conn.close()
+
+
+def test_new_run_validation_missing_metadata(test_memory_db_path):
+    """Test registering a new run with display_type or title as None or blank string raises ValueError."""
+    import obsidian_ai_hub.hitl.service as hitl_service
+    conn = get_db_connection()
+    try:
+        # 1. Missing display_type on new run
+        with pytest.raises(ValueError, match="display_type is required"):
+            hitl_service._orig_register_run_and_questions(
+                run_id="v_run_1",
+                handler="v_handler",
+                checkpoint="c1",
+                question_set_id="qset1",
+                questions_data=[],
+                conn=conn,
+                title="Only Title Specified"
+            )
+
+        # 2. Missing title on new run
+        with pytest.raises(ValueError, match="title is required"):
+            hitl_service._orig_register_run_and_questions(
+                run_id="v_run_2",
+                handler="v_handler",
+                checkpoint="c1",
+                question_set_id="qset1",
+                questions_data=[],
+                conn=conn,
+                display_type="Only Display Type Specified"
+            )
+
+        # 3. Blank display_type
+        with pytest.raises(ValueError, match="display_type is required"):
+            hitl_service._orig_register_run_and_questions(
+                run_id="v_run_3",
+                handler="v_handler",
+                checkpoint="c1",
+                question_set_id="qset1",
+                questions_data=[],
+                conn=conn,
+                display_type="   ",
+                title="Title Specified"
+            )
+    finally:
+        conn.close()
+
+
+def test_existing_run_validation_empty_wipes(test_memory_db_path):
+    """Test updating display_type or title with blank strings is rejected on an existing run."""
+    import obsidian_ai_hub.hitl.service as hitl_service
+    conn = get_db_connection()
+    try:
+        run_id = "v_run_exist"
+        # Register a valid run first
+        hitl_service._orig_register_run_and_questions(
+            run_id=run_id,
+            handler="v_handler",
+            checkpoint="c1",
+            question_set_id="qset1",
+            questions_data=[],
+            conn=conn,
+            display_type="Valid Type",
+            title="Valid Title"
+        )
+
+        # Try to clear display_type with blank string
+        with pytest.raises(ValueError, match="display_type cannot be set to empty/blank string"):
+            hitl_service._orig_register_run_and_questions(
+                run_id=run_id,
+                handler="v_handler",
+                checkpoint="c1",
+                question_set_id="qset1",
+                questions_data=[],
+                conn=conn,
+                display_type="   "
+            )
+
+        # Try to clear title with blank string
+        with pytest.raises(ValueError, match="title cannot be set to empty/blank string"):
+            hitl_service._orig_register_run_and_questions(
+                run_id=run_id,
+                handler="v_handler",
+                checkpoint="c1",
+                question_set_id="qset1",
+                questions_data=[],
+                conn=conn,
+                title="   "
+            )
+    finally:
+        conn.close()
+
+
+def test_choices_validation_rules(test_memory_db_path):
+    """Test structured choice validation constraints (value requirements, types, unique constraints)."""
+    import obsidian_ai_hub.hitl.service as hitl_service
+    conn = get_db_connection()
+    try:
+        # 1. Invalid mixture of structured and scalar choices
+        with pytest.raises(ValueError, match="Cannot mix structured choices"):
+            hitl_service._orig_register_run_and_questions(
+                run_id="run_choices_invalid",
+                handler="v_handler",
+                checkpoint="c1",
+                question_set_id="qset1",
+                questions_data=[
+                    {
+                        "question_key": "q",
+                        "question_type": "select",
+                        "display_text": "text",
+                        "choices": ["legacy_scalar", {"value": "structured_val", "label": "Label"}]
+                    }
+                ],
+                conn=conn,
+                display_type="Type",
+                title="Title"
+            )
+
+        # 2. Duplicate structured values
+        with pytest.raises(ValueError, match="Duplicate choice value detected"):
+            hitl_service._orig_register_run_and_questions(
+                run_id="run_choices_invalid",
+                handler="v_handler",
+                checkpoint="c1",
+                question_set_id="qset1",
+                questions_data=[
+                    {
+                        "question_key": "q",
+                        "question_type": "select",
+                        "display_text": "text",
+                        "choices": [
+                            {"value": "dup", "label": "Label 1"},
+                            {"value": "dup", "label": "Label 2"}
+                        ]
+                    }
+                ],
+                conn=conn,
+                display_type="Type",
+                title="Title"
+            )
+
+        # 3. Missing or empty label in structured choice
+        with pytest.raises(ValueError, match="Each structured choice must have a non-empty string 'label'"):
+            hitl_service._orig_register_run_and_questions(
+                run_id="run_choices_invalid",
+                handler="v_handler",
+                checkpoint="c1",
+                question_set_id="qset1",
+                questions_data=[
+                    {
+                        "question_key": "q",
+                        "question_type": "select",
+                        "display_text": "text",
+                        "choices": [
+                            {"value": "val1", "label": "  "}
+                        ]
+                    }
+                ],
+                conn=conn,
+                display_type="Type",
+                title="Title"
+            )
+
+        # 4. Structured choice missing the value field
+        with pytest.raises(ValueError, match="Each structured choice must have a 'value'"):
+            hitl_service._orig_register_run_and_questions(
+                run_id="run_choices_invalid",
+                handler="v_handler",
+                checkpoint="c1",
+                question_set_id="qset1",
+                questions_data=[
+                    {
+                        "question_key": "q",
+                        "question_type": "select",
+                        "display_text": "text",
+                        "choices": [
+                            {"label": "Label without value"}
+                        ]
+                    }
+                ],
+                conn=conn,
+                display_type="Type",
+                title="Title"
+            )
+
+        # 5. Value set to a non-scalar type (e.g. dict or list)
+        with pytest.raises(ValueError, match="Choice value must be a scalar JSON type"):
+            hitl_service._orig_register_run_and_questions(
+                run_id="run_choices_invalid",
+                handler="v_handler",
+                checkpoint="c1",
+                question_set_id="qset1",
+                questions_data=[
+                    {
+                        "question_key": "q",
+                        "question_type": "select",
+                        "display_text": "text",
+                        "choices": [
+                            {"value": {"nested": "dict"}, "label": "Nested Value Label"}
+                        ]
+                    }
+                ],
+                conn=conn,
+                display_type="Type",
+                title="Title"
+            )
     finally:
         conn.close()

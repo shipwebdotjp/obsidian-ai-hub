@@ -194,7 +194,10 @@ def test_main_creates_themes_and_researches(tmp_path: Path, monkeypatch, test_me
         questions = get_questions_by_set(run_id, "confirm_suggest", conn)
         assert len(questions) == 1
         assert questions[0]["question_key"] == "action"
-        assert questions[0]["choices"] == ["approve", "reject"]
+        assert questions[0]["choices"] == [
+            {"value": "approve", "label": "調査を実行する"},
+            {"value": "reject", "label": "今回は見送る"}
+        ]
     finally:
         conn.close()
 

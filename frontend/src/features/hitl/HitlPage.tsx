@@ -154,6 +154,37 @@ export default function HitlPage() {
     }
   };
 
+  const isStructuredChoice = (choice: any): choice is { value: any; label: string; description?: string } => {
+    return choice && typeof choice === 'object' && 'value' in choice && 'label' in choice;
+  };
+
+  const getAnswerLabel = (q: HitlQuestion): string => {
+    if (q.answer === null || q.answer === undefined) {
+      return "(回答なし/スキップ)";
+    }
+
+    let val: any = q.answer;
+    if (q.answer && typeof q.answer === "object" && "value" in q.answer) {
+      val = q.answer.value;
+    }
+
+    if (q.choices && Array.isArray(q.choices)) {
+      for (const choice of q.choices) {
+        if (isStructuredChoice(choice) && choice.value === val) {
+          return choice.label;
+        }
+      }
+    }
+    return String(val);
+  };
+
+  const getAnswerComment = (q: HitlQuestion): string | null => {
+    if (q.answer && typeof q.answer === "object" && "comment" in q.answer) {
+      return q.answer.comment || null;
+    }
+    return null;
+  };
+
   return (
     <div className="flex h-full flex-col bg-slate-50 lg:flex-row">
       {/* Runs Side Panel */}
@@ -212,15 +243,19 @@ export default function HitlPage() {
                 }`}
               >
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-slate-800 truncate" title={r.run_id}>
-                    {r.run_id}
-                  </span>
-                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${statusBadgeColor(r.status)}`}>
+                  <div className="flex items-center gap-1.5 truncate mr-2">
+                    {r.display_type && (
+                      <span className="rounded bg-indigo-50 text-indigo-700 border border-indigo-100 px-1.5 py-0.5 text-[10px] font-medium shrink-0">
+                        {r.display_type}
+                      </span>
+                    )}
+                    <span className="text-xs font-semibold text-slate-800 truncate" title={r.display_title || r.title || "確認待ちタスク"}>
+                      {r.display_title || r.title || "確認待ちタスク"}
+                    </span>
+                  </div>
+                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium shrink-0 ${statusBadgeColor(r.status)}`}>
                     {statusLabel(r.status)}
                   </span>
-                </div>
-                <div className="mt-1 text-xs text-slate-500 truncate">
-                  Handler: {r.handler}
                 </div>
                 <div className="mt-1 text-[10px] text-slate-400">
                   {formatDateTime(r.created_at)}
@@ -258,15 +293,29 @@ export default function HitlPage() {
           <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
             <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-200 pb-4">
               <div>
-                <h2 className="text-lg font-semibold text-slate-800">{selectedRun.title || selectedRun.run_id}</h2>
+                <div className="flex items-center gap-2 flex-wrap">
+                  {selectedRun.display_type && (
+                    <span className="rounded bg-indigo-50 text-indigo-700 border border-indigo-100 px-2 py-0.5 text-[10px] font-bold">
+                      {selectedRun.display_type}
+                    </span>
+                  )}
+                  <h2 className="text-lg font-semibold text-slate-800">{selectedRun.display_title || selectedRun.title || "確認待ちタスク"}</h2>
+                </div>
                 {selectedRun.description && (
-                  <p className="mt-1 text-xs text-slate-500">{selectedRun.description}</p>
+                  <p className="mt-2 text-xs text-slate-600 leading-relaxed max-w-2xl">{selectedRun.description}</p>
                 )}
-                <p className="mt-1 text-xs text-slate-500">
-                  Handler: <code className="rounded bg-slate-100 px-1 py-0.5">{selectedRun.handler}</code>
-                </p>
+
+                <details className="mt-4 text-xs text-slate-500 bg-slate-50 border border-slate-100 rounded-lg p-3 max-w-sm">
+                  <summary className="font-semibold cursor-pointer outline-none select-none text-slate-600 hover:text-slate-800">
+                    技術情報
+                  </summary>
+                  <div className="mt-2 space-y-1.5">
+                    <p>Run ID: <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono">{selectedRun.run_id}</code></p>
+                    <p>Handler: <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono">{selectedRun.handler}</code></p>
+                  </div>
+                </details>
               </div>
-              <div className="flex flex-col items-end gap-2">
+              <div className="flex flex-col items-end gap-2 shrink-0">
                 <span className={`rounded px-2.5 py-1 text-xs font-semibold ${statusBadgeColor(selectedRun.status)}`}>
                   {statusLabel(selectedRun.status)}
                 </span>
@@ -377,25 +426,55 @@ export default function HitlPage() {
 
                             {/* Select type Rendering */}
                             {q.question_type === "select" && q.choices && (
-                              <div className="flex flex-wrap gap-2">
-                                {q.choices.map((choice: any) => {
-                                  const choiceStr = String(choice);
-                                  const isSelected = answerVal === choice;
-                                  return (
-                                    <button
-                                      key={choiceStr}
-                                      type="button"
-                                      onClick={() => setAnswers({ ...answers, [q.question_key]: choice })}
-                                      className={`rounded px-3 py-1.5 text-xs font-medium cursor-pointer transition-colors ${
-                                        isSelected
-                                          ? "bg-blue-600 text-white"
-                                          : "bg-slate-200 text-slate-700 hover:bg-slate-300"
-                                      }`}
-                                    >
-                                      {choiceStr}
-                                    </button>
-                                  );
-                                })}
+                              <div>
+                                {q.choices.some((c: any) => isStructuredChoice(c)) ? (
+                                  <div className="space-y-2 max-w-md">
+                                    {q.choices.map((choice: any) => {
+                                      const val = isStructuredChoice(choice) ? choice.value : choice;
+                                      const label = isStructuredChoice(choice) ? choice.label : String(choice);
+                                      const desc = isStructuredChoice(choice) ? choice.description : undefined;
+                                      const isSelected = answerVal === val;
+                                      return (
+                                        <button
+                                          key={String(val)}
+                                          type="button"
+                                          aria-pressed={isSelected}
+                                          onClick={() => setAnswers({ ...answers, [q.question_key]: val })}
+                                          className={`w-full text-left rounded-lg p-3 border transition-all cursor-pointer ${
+                                            isSelected
+                                              ? "border-blue-600 bg-blue-50 text-blue-900 ring-1 ring-blue-600"
+                                              : "border-slate-200 bg-white hover:bg-slate-50 text-slate-700"
+                                          }`}
+                                        >
+                                          <span className="text-xs font-bold block">{label}</span>
+                                          {desc && <span className="mt-1 block text-[10px] text-slate-500 leading-normal">{desc}</span>}
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                ) : (
+                                  <div className="flex flex-wrap gap-2">
+                                    {q.choices.map((choice: any) => {
+                                      const choiceStr = String(choice);
+                                      const isSelected = answerVal === choice;
+                                      return (
+                                        <button
+                                          key={choiceStr}
+                                          type="button"
+                                          aria-pressed={isSelected}
+                                          onClick={() => setAnswers({ ...answers, [q.question_key]: choice })}
+                                          className={`rounded px-3 py-1.5 text-xs font-medium cursor-pointer transition-colors ${
+                                            isSelected
+                                              ? "bg-blue-600 text-white"
+                                              : "bg-slate-200 text-slate-700 hover:bg-slate-300"
+                                          }`}
+                                        >
+                                          {choiceStr}
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                )}
                               </div>
                             )}
 
@@ -439,12 +518,18 @@ export default function HitlPage() {
                               回答内容:
                             </span>
                             <div className="mt-1 rounded border border-slate-100 bg-white p-3 font-medium text-slate-800 whitespace-pre-wrap">
-                              {q.answer === null || q.answer === undefined
-                                ? "(回答なし/スキップ)"
-                                : typeof q.answer === "object"
-                                ? JSON.stringify(q.answer)
-                                : String(q.answer)}
+                              {getAnswerLabel(q)}
                             </div>
+                            {getAnswerComment(q) && (
+                              <div className="mt-2">
+                                <span className="text-xs text-slate-500 font-semibold block">
+                                  コメント:
+                                </span>
+                                <div className="mt-1 rounded border border-slate-100 bg-slate-50 p-2 text-xs text-slate-600 whitespace-pre-wrap">
+                                  {getAnswerComment(q)}
+                                </div>
+                              </div>
+                            )}
                             {q.answered_at && (
                               <span className="mt-1 block text-[10px] text-slate-400 text-right">
                                 回答日時: {formatDateTime(q.answered_at)}
