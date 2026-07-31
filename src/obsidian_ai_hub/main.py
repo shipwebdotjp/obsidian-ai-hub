@@ -36,7 +36,9 @@ def register_hitl_handlers():
     """
     from obsidian_ai_hub.hitl.dispatcher import register_handler
     from obsidian_ai_hub.research.runner import run_approved_suggestion
+    from obsidian_ai_hub.memory.maintenance import run_approved_maintenance
     register_handler("research.run_approved_suggestion", run_approved_suggestion)
+    register_handler("memory.apply_maintenance_proposals", run_approved_maintenance)
 
 
 def main():
@@ -277,6 +279,11 @@ def main():
         "--hitl-dispatch",
         action="store_true",
         help="Atomically claim and execute eligible HITL runs",
+    )
+    parser.add_argument(
+        "--memory-maintain",
+        action="store_true",
+        help="手動で承認済み長期記憶の保守・診断メンテナンスを実行",
     )
     args = parser.parse_args()
     ran = False
@@ -529,6 +536,11 @@ def main():
         from obsidian_ai_hub.hitl.dispatcher import dispatch_runs
 
         run_and_log(dispatch_runs, "hitl_dispatch", {})
+        ran = True
+    if getattr(args, "memory_maintain", False):
+        from obsidian_ai_hub.memory.maintenance import run_maintenance_cli
+
+        run_and_log(run_maintenance_cli, "memory_maintain", {})
         ran = True
     if not ran:
         parser.print_help()
