@@ -265,6 +265,14 @@ def submit_answer(
                 answer = {"value": answer, "comment": None}
             answer_value = answer.get("value")
 
+            # Check comment requirement for memory maintenance feedback
+            maint_ctx = question.get("context_json")
+            if maint_ctx and isinstance(maint_ctx, dict) and maint_ctx.get("type") == "memory_maintenance":
+                if answer_value == "feedback":
+                    comment = answer.get("comment")
+                    if not comment or not comment.strip():
+                        raise ValueError("フィードバックして再提案を選択した場合は、コメントを入力してください。")
+
             # Validate answer value against choices if specified
             choices = question.get("choices")
             if choices is not None:
