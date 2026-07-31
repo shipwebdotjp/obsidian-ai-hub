@@ -438,6 +438,7 @@ export default function HitlPage() {
                                         <button
                                           key={String(val)}
                                           type="button"
+                                          aria-pressed={isSelected}
                                           onClick={() => setAnswers({ ...answers, [q.question_key]: val })}
                                           className={`w-full text-left rounded-lg p-3 border transition-all cursor-pointer ${
                                             isSelected
@@ -460,6 +461,7 @@ export default function HitlPage() {
                                         <button
                                           key={choiceStr}
                                           type="button"
+                                          aria-pressed={isSelected}
                                           onClick={() => setAnswers({ ...answers, [q.question_key]: choice })}
                                           className={`rounded px-3 py-1.5 text-xs font-medium cursor-pointer transition-colors ${
                                             isSelected

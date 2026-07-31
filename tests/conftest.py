@@ -106,11 +106,13 @@ def _patch_register_run_and_questions(monkeypatch):
         description=None,
         display_type=None,
     ):
+        import sqlite3
+        import logging
         run_exists = False
         try:
             run_exists = get_run(run_id, conn) is not None
-        except Exception:
-            pass
+        except sqlite3.Error as e:
+            logging.getLogger(__name__).warning("sqlite3.Error in wrapped_register run_exists check: %s", e)
 
         if not run_exists:
             if title is None:

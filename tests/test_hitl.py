@@ -971,5 +971,49 @@ def test_choices_validation_rules(test_memory_db_path):
                 display_type="Type",
                 title="Title"
             )
+
+        # 4. Structured choice missing the value field
+        with pytest.raises(ValueError, match="Each structured choice must have a 'value'"):
+            hitl_service._orig_register_run_and_questions(
+                run_id="run_choices_invalid",
+                handler="v_handler",
+                checkpoint="c1",
+                question_set_id="qset1",
+                questions_data=[
+                    {
+                        "question_key": "q",
+                        "question_type": "select",
+                        "display_text": "text",
+                        "choices": [
+                            {"label": "Label without value"}
+                        ]
+                    }
+                ],
+                conn=conn,
+                display_type="Type",
+                title="Title"
+            )
+
+        # 5. Value set to a non-scalar type (e.g. dict or list)
+        with pytest.raises(ValueError, match="Choice value must be a scalar JSON type"):
+            hitl_service._orig_register_run_and_questions(
+                run_id="run_choices_invalid",
+                handler="v_handler",
+                checkpoint="c1",
+                question_set_id="qset1",
+                questions_data=[
+                    {
+                        "question_key": "q",
+                        "question_type": "select",
+                        "display_text": "text",
+                        "choices": [
+                            {"value": {"nested": "dict"}, "label": "Nested Value Label"}
+                        ]
+                    }
+                ],
+                conn=conn,
+                display_type="Type",
+                title="Title"
+            )
     finally:
         conn.close()

@@ -75,7 +75,7 @@ def register_run_and_questions(
                     "created_at": now,
                     "updated_at": now,
                     "title": title.strip(),
-                    "description": description.strip() if description and description.strip() else description,
+                    "description": description.strip() if description and description.strip() else None,
                     "display_type": display_type.strip(),
                 }
             else:
