@@ -7,7 +7,49 @@ import {
   cancelHitlRun,
 } from "../../api/client";
 import type { HitlRun, HitlRunDetail, HitlQuestion } from "../../api/types";
-import { formatDateTime } from "../../utils/date";
+import { formatDateTime, formatYmdWithDow } from "../../utils/date";
+
+interface MaintEvidence {
+  path: string;
+  quote?: string;
+  observed_at?: string;
+}
+
+interface MaintMemory {
+  memory_id: string;
+  status: string;
+  content: string;
+  evidence?: MaintEvidence[];
+}
+
+interface MemoryMaintenanceContext {
+  type: "memory_maintenance";
+  proposal_id: string;
+  action: "merge" | "correct" | "expire" | "no_action";
+  main_id: string;
+  absorbed_ids: string[];
+  reason: string;
+  integrated_content?: string | null;
+  target_memories?: MaintMemory[];
+}
+
+function asMemoryMaintenanceContext(context: unknown): MemoryMaintenanceContext | null {
+  if (context && typeof context === "object" && (context as any).type === "memory_maintenance") {
+    return context as MemoryMaintenanceContext;
+  }
+  return null;
+}
+
+function getFormattedObserved(observedAt: string | undefined): string {
+  if (!observedAt) return "";
+  const cleanYmd = observedAt.substring(0, 10);
+  const formatted = formatYmdWithDow(cleanYmd);
+  if (formatted && formatted !== cleanYmd) {
+    return formatted;
+  }
+  const dt = formatDateTime(observedAt);
+  return dt || "";
+}
 
 export default function HitlPage() {
   const [runs, setRuns] = useState<HitlRun[]>([]);
@@ -96,7 +138,8 @@ export default function HitlPage() {
     }
 
     // Custom validation for memory maintenance feedback
-    if (ansValue === "feedback" && (!commentVal || !commentVal.trim())) {
+    const maintCtx = asMemoryMaintenanceContext(q.context);
+    if (maintCtx && ansValue === "feedback" && (!commentVal || !commentVal.trim())) {
       setDetailError("フィードバックして再提案を選択した場合は、コメントを入力してください。");
       return;
     }
@@ -381,79 +424,88 @@ export default function HitlPage() {
                           <p className="mt-2 text-sm font-semibold text-slate-800">{q.prompt || q.display_text}</p>
 
                           {/* Dedicated rendering for memory maintenance proposal details */}
-                          {q.context && typeof q.context === "object" && (q.context as any).type === "memory_maintenance" ? (
-                            <div className="mt-3 space-y-3 bg-white border border-slate-200 rounded-lg p-4 text-xs text-slate-700">
-                              <div>
-                                <span className="font-bold text-slate-600">提案アクション: </span>
-                                <span className="rounded bg-indigo-50 border border-indigo-100 px-1.5 py-0.5 text-[10px] font-bold text-indigo-700 uppercase ml-1">
-                                  {(q.context as any).action}
-                                </span>
-                              </div>
-                              <div>
-                                <span className="font-bold text-slate-600">根拠・理由: </span>
-                                <p className="mt-0.5 text-slate-800 leading-relaxed font-medium">{(q.context as any).reason}</p>
-                              </div>
-                              {["merge", "correct"].includes((q.context as any).action) && (q.context as any).integrated_content && (
-                                <div>
-                                  <span className="font-bold text-slate-600">変更・適用後の本文: </span>
-                                  <div className="mt-1 bg-emerald-50 border border-emerald-100 rounded p-2 text-emerald-900 font-medium whitespace-pre-wrap">
-                                    {(q.context as any).integrated_content}
+                          {(() => {
+                            const currentMaintCtx = asMemoryMaintenanceContext(q.context);
+                            if (currentMaintCtx) {
+                              return (
+                                <div className="mt-3 space-y-3 bg-white border border-slate-200 rounded-lg p-4 text-xs text-slate-700">
+                                  <div>
+                                    <span className="font-bold text-slate-600">提案アクション: </span>
+                                    <span className="rounded bg-indigo-50 border border-indigo-100 px-1.5 py-0.5 text-[10px] font-bold text-indigo-700 uppercase ml-1">
+                                      {currentMaintCtx.action}
+                                    </span>
+                                  </div>
+                                  <div>
+                                    <span className="font-bold text-slate-600">根拠・理由: </span>
+                                    <p className="mt-0.5 text-slate-800 leading-relaxed font-medium">{currentMaintCtx.reason}</p>
+                                  </div>
+                                  {["merge", "correct"].includes(currentMaintCtx.action) && currentMaintCtx.integrated_content && (
+                                    <div>
+                                      <span className="font-bold text-slate-600">変更・適用後の本文: </span>
+                                      <div className="mt-1 bg-emerald-50 border border-emerald-100 rounded p-2 text-emerald-900 font-medium whitespace-pre-wrap">
+                                        {currentMaintCtx.integrated_content}
+                                      </div>
+                                    </div>
+                                  )}
+                                  <div>
+                                    <span className="font-bold text-slate-600">対象メモリ群:</span>
+                                    <div className="mt-1.5 space-y-2">
+                                      {(currentMaintCtx.target_memories || []).map((m) => {
+                                        const isMain = m.memory_id === currentMaintCtx.main_id;
+                                        const isAbsorbed = (currentMaintCtx.absorbed_ids || []).includes(m.memory_id);
+                                        let labelClass = "bg-slate-100 text-slate-700 border-slate-200";
+                                        let labelText = "対象";
+                                        if (isMain) {
+                                          if (currentMaintCtx.action === "expire") {
+                                            labelClass = "bg-rose-50 text-rose-700 border-rose-200";
+                                            labelText = "失効対象";
+                                          } else {
+                                            labelClass = "bg-emerald-50 text-emerald-700 border-emerald-200";
+                                            labelText = "正本 (残す)";
+                                          }
+                                        } else if (isAbsorbed) {
+                                          labelClass = "bg-rose-50 text-rose-700 border-rose-200";
+                                          labelText = "吸収 (superseded)";
+                                        }
+
+                                        return (
+                                          <div key={m.memory_id} className="rounded border border-slate-100 bg-slate-50 p-2.5">
+                                            <div className="flex items-center gap-1.5 mb-1">
+                                              <span className="font-mono font-bold text-slate-500 text-[10px]">{m.memory_id}</span>
+                                              <span className={`rounded border px-1 py-0.2 text-[9px] font-bold ${labelClass}`}>
+                                                {labelText}
+                                              </span>
+                                            </div>
+                                            <p className="font-medium text-slate-800">{m.content}</p>
+                                            {m.evidence && m.evidence.length > 0 && (
+                                              <div className="mt-1.5 pt-1.5 border-t border-slate-200/50">
+                                                <span className="text-[10px] text-slate-400 font-bold block mb-0.5">エビデンス（証拠）:</span>
+                                                <ul className="space-y-1 list-disc pl-3 text-[10px] text-slate-500">
+                                                  {m.evidence.map((ev, evIdx) => {
+                                                    const formattedDate = getFormattedObserved(ev.observed_at);
+                                                    return (
+                                                      <li key={evIdx}>
+                                                        {formattedDate && <span className="font-semibold text-slate-600 mr-1">[{formattedDate}]</span>}
+                                                        {ev.quote && <span>&ldquo;{ev.quote}&rdquo;</span>}
+                                                        <span className="text-[9px] text-slate-400 block mt-0.5">({ev.path})</span>
+                                                      </li>
+                                                    );
+                                                  })}
+                                                </ul>
+                                              </div>
+                                            )}
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
                                   </div>
                                 </div>
-                              )}
-                              <div>
-                                <span className="font-bold text-slate-600">対象メモリ群:</span>
-                                <div className="mt-1.5 space-y-2">
-                                  {((q.context as any).target_memories || []).map((m: any) => {
-                                    const isMain = m.memory_id === (q.context as any).main_id;
-                                    const isAbsorbed = ((q.context as any).absorbed_ids || []).includes(m.memory_id);
-                                    let labelClass = "bg-slate-100 text-slate-700 border-slate-200";
-                                    let labelText = "対象";
-                                    if (isMain) {
-                                      if ((q.context as any).action === "expire") {
-                                        labelClass = "bg-rose-50 text-rose-700 border-rose-200";
-                                        labelText = "失効対象";
-                                      } else {
-                                        labelClass = "bg-emerald-50 text-emerald-700 border-emerald-200";
-                                        labelText = "正本 (残す)";
-                                      }
-                                    } else if (isAbsorbed) {
-                                      labelClass = "bg-rose-50 text-rose-700 border-rose-200";
-                                      labelText = "吸収 (superseded)";
-                                    }
-
-                                    return (
-                                      <div key={m.memory_id} className="rounded border border-slate-100 bg-slate-50 p-2.5">
-                                        <div className="flex items-center gap-1.5 mb-1">
-                                          <span className="font-mono font-bold text-slate-500 text-[10px]">{m.memory_id}</span>
-                                          <span className={`rounded border px-1 py-0.2 text-[9px] font-bold ${labelClass}`}>
-                                            {labelText}
-                                          </span>
-                                        </div>
-                                        <p className="font-medium text-slate-800">{m.content}</p>
-                                        {m.evidence && m.evidence.length > 0 && (
-                                          <div className="mt-1.5 pt-1.5 border-t border-slate-200/50">
-                                            <span className="text-[10px] text-slate-400 font-bold block mb-0.5">エビデンス（証拠）:</span>
-                                            <ul className="space-y-1 list-disc pl-3 text-[10px] text-slate-500">
-                                              {m.evidence.map((ev: any, evIdx: number) => (
-                                                <li key={evIdx}>
-                                                  {ev.observed_at && <span className="font-semibold text-slate-600 mr-1">[{ev.observed_at}]</span>}
-                                                  {ev.quote && <span>&ldquo;{ev.quote}&rdquo;</span>}
-                                                  <span className="text-[9px] text-slate-400 block mt-0.5">({ev.path})</span>
-                                                </li>
-                                              ))}
-                                            </ul>
-                                          </div>
-                                        )}
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              </div>
-                            </div>
-                          ) : q.context != null ? (
-                            <p className="mt-1 text-xs text-slate-400">{JSON.stringify(q.context)}</p>
-                          ) : null}
+                              );
+                            } else if (q.context != null) {
+                              return <p className="mt-1 text-xs text-slate-400">{JSON.stringify(q.context)}</p>;
+                            }
+                            return null;
+                          })()}
                         </div>
                         <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
                           q.status === "pending"

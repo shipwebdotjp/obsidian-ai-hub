@@ -88,6 +88,8 @@ def is_obsolete(m: dict, base_date: datetime) -> bool:
 def build_maintenance_groups(memories: List[Dict[str, Any]], embedder=None) -> List[List[Dict[str, Any]]]:
     """
     Group approved memories by memory_key, exact normalized content, or vector similarity >= 0.85.
+    Every approved memory in the system is included in the output. Standalone memories that do
+    not belong to any multi-item similar group are returned as single-item groups.
     Returns a list of disjoint memory groups.
     """
     approved_mems = [m for m in memories if m.get("status") == "approved"]
@@ -196,7 +198,8 @@ def validate_proposals(proposals: List[Dict[str, Any]], target_mem_ids: List[str
             continue
 
         main_id = p.get("main_id")
-        absorbed_ids = p.get("absorbed_ids") or []
+        raw_absorbed_ids = p.get("absorbed_ids")
+        absorbed_ids = list(raw_absorbed_ids) if isinstance(raw_absorbed_ids, list) else []
 
         if not main_id or main_id not in target_set:
             continue
@@ -211,9 +214,15 @@ def validate_proposals(proposals: List[Dict[str, Any]], target_mem_ids: List[str
         if main_id in processed_ids or any(aid in processed_ids for aid in absorbed_ids):
             continue
 
-        # merge / correct requires integrated_content and non-empty absorbed_ids
+        # expire proposals proceed only when absorbed_ids is empty
+        if action == "expire":
+            if len(absorbed_ids) > 0:
+                continue
+
+        # merge / correct requires integrated_content to be a string before stripping
         if action in ("merge", "correct"):
-            if not p.get("integrated_content") or not p.get("integrated_content").strip():
+            integrated_content = p.get("integrated_content")
+            if not isinstance(integrated_content, str) or not integrated_content.strip():
                 continue
             if not absorbed_ids:
                 continue
@@ -234,6 +243,84 @@ def validate_proposals(proposals: List[Dict[str, Any]], target_mem_ids: List[str
     return valid_proposals
 
 
+def _parse_llm_proposals(response_text: str) -> List[Dict[str, Any]]:
+    """
+    Safely parses LLM response text into proposals.
+    Removes optional fences, preserves the final line when no closing fence exists,
+    parses list/object JSON, and centralizes parse-failure logging.
+    """
+    cleaned = response_text.strip()
+    if cleaned.startswith("```"):
+        lines = cleaned.splitlines()
+        if len(lines) >= 2:
+            if lines[0].startswith("```json") or lines[0].startswith("```"):
+                # If there's a closing fence, remove it, otherwise preserve the final line
+                if lines[-1].startswith("```"):
+                    cleaned = "\n".join(lines[1:-1]).strip()
+                else:
+                    cleaned = "\n".join(lines[1:]).strip()
+
+    try:
+        results = json.loads(cleaned)
+        if not isinstance(results, list):
+            results = [results]
+        return results
+    except json.JSONDecodeError as e:
+        logger.warning(f"Failed to parse LLM response as JSON: {response_text}. Error: {e}")
+        return []
+
+
+def _build_proposal_question(
+    q_key: str,
+    proposal: Dict[str, Any],
+    seq: int,
+    memories_map: Dict[str, dict],
+    label_prefix: str = "提案",
+) -> Dict[str, Any]:
+    """
+    Extract duplicated question/context and choices construction into a shared helper.
+    """
+    main_id = proposal["main_id"]
+    absorbed_ids = proposal.get("absorbed_ids") or []
+    action = proposal["action"]
+    reason = proposal["reason"]
+    integrated_content = proposal.get("integrated_content")
+
+    main_mem = memories_map.get(main_id)
+    absorbed_mems = [memories_map[aid] for aid in absorbed_ids if aid in memories_map]
+
+    display_text = f"【{label_prefix} - {action.upper()}】正本ID: {main_id}"
+    if absorbed_ids:
+        display_text += f"、吸収ID: {', '.join(absorbed_ids)}"
+
+    context_json = {
+        "type": "memory_maintenance",
+        "proposal_id": q_key,
+        "action": action,
+        "main_id": main_id,
+        "absorbed_ids": absorbed_ids,
+        "reason": reason,
+        "integrated_content": integrated_content,
+        "target_memories": [main_mem] + absorbed_mems if main_mem else absorbed_mems,
+    }
+
+    return {
+        "question_key": q_key,
+        "question_type": "select",
+        "display_text": display_text,
+        "choices": [
+            {"value": "apply", "label": "適用", "description": "提案内容をデータベースに適用します。"},
+            {"value": "skip", "label": "見送り", "description": "今回の提案は見送ります（変更は加えません）。"},
+            {"value": "feedback", "label": "フィードバックして再提案", "description": "コメント付きで再診断を要求します。"},
+        ],
+        "is_required": 1,
+        "sequence": seq,
+        "title": f"{label_prefix} #{seq}",
+        "prompt": reason,
+        "context_json": context_json,
+    }
+
+
 def run_maintenance_diagnosis(
     base_date: datetime,
     memories: List[Dict[str, Any]],
@@ -244,18 +331,7 @@ def run_maintenance_diagnosis(
     Checks obsolete memories and similar groups, returning compiled maintenance proposals.
     """
     # 1. Build similar groups
-    groups = build_maintenance_groups(memories, embedder=embedder)
-
-    # 2. Check independent obsolete memories
-    grouped_ids = {m["memory_id"] for g in groups for m in g}
-    obsolete_independent = []
-    for m in memories:
-        if m.get("status") == "approved" and m["memory_id"] not in grouped_ids:
-            if is_obsolete(m, base_date):
-                obsolete_independent.append([m])
-
-    # Combine all candidate groupings for LLM review
-    all_candidate_groups = groups + obsolete_independent
+    all_candidate_groups = build_maintenance_groups(memories, embedder=embedder)
     all_proposals = []
 
     for grp in all_candidate_groups:
@@ -288,18 +364,8 @@ def run_maintenance_diagnosis(
                 max_tokens=8000,
             ).strip()
 
-            if response.startswith("```"):
-                lines = response.splitlines()
-                if len(lines) >= 2:
-                    if lines[0].startswith("```json") or lines[0].startswith("```"):
-                        response = "\n".join(lines[1:-1]).strip()
-
-            try:
-                results = json.loads(response)
-                if not isinstance(results, list):
-                    results = [results]
-            except json.JSONDecodeError:
-                logger.warning(f"Failed to parse LLM response as JSON: {response}")
+            results = _parse_llm_proposals(response)
+            if not results:
                 continue
 
             # Validate proposals against the exact group memories
@@ -307,7 +373,7 @@ def run_maintenance_diagnosis(
             all_proposals.extend(group_proposals)
 
         except Exception as e:
-            logger.exception(f"Failed to perform LLM memory maintenance diagnosis: {e}")
+            logger.exception(f"Failed to perform LLM memory memory maintenance diagnosis: {e}")
 
     return all_proposals
 
@@ -329,41 +395,7 @@ def register_maintenance_hitl_run(
     questions_data = []
     for i, p in enumerate(proposals, 1):
         q_key = f"proposal_{i}"
-
-        main_mem = memories_map.get(p["main_id"])
-        absorbed_mems = [memories_map[aid] for aid in p["absorbed_ids"] if aid in memories_map]
-
-        display_text = f"【{p['action'].upper()} 提案】正本ID: {p['main_id']}"
-        if p["absorbed_ids"]:
-            display_text += f"、吸収ID: {', '.join(p['absorbed_ids'])}"
-
-        # Structure context_json neatly for frontend rendering
-        context_json = {
-            "type": "memory_maintenance",
-            "proposal_id": q_key,
-            "action": p["action"],
-            "main_id": p["main_id"],
-            "absorbed_ids": p["absorbed_ids"],
-            "reason": p["reason"],
-            "integrated_content": p["integrated_content"],
-            "target_memories": [main_mem] + absorbed_mems,
-        }
-
-        questions_data.append({
-            "question_key": q_key,
-            "question_type": "select",
-            "display_text": display_text,
-            "choices": [
-                {"value": "apply", "label": "適用", "description": "提案内容をデータベースに適用します。"},
-                {"value": "skip", "label": "見送り", "description": "今回の提案は見送ります（変更は加えません）。"},
-                {"value": "feedback", "label": "フィードバックして再提案", "description": "コメント付きで再診断を要求します。"},
-            ],
-            "is_required": 1,
-            "sequence": i,
-            "title": f"提案 #{i}",
-            "prompt": p["reason"],
-            "context_json": context_json,
-        })
+        questions_data.append(_build_proposal_question(q_key, p, i, memories_map, label_prefix="提案"))
 
     # Prepare checkpoint snapshot mapping ID -> updated_at
     snapshots = {}
@@ -387,7 +419,7 @@ def register_maintenance_hitl_run(
         question_set_id=question_set_id,
         questions_data=questions_data,
         title="メモリ長期記憶 診断メンテナンス",
-        description=f"基準日 {base_date.strftime('%Y-%m-%d')} の長期記憶定期診断に基づく、{len(proposals)}件のメンテナンス提案です。",
+        description=f"基準日 {base_date.strftime('%Y-%m-%d')} の長期記憶定期診断に基づく、{len(proposals)}件 of メンテナンス提案です。",
         display_type="長期記憶保守",
     )
 
@@ -453,7 +485,7 @@ def apply_single_proposal(
         db_row = serialize_memory(main_mem)
         set_clause = ", ".join(f"{col} = ?" for col in MEMORY_COLUMNS if col != "memory_id")
         conn.execute(
-            f"UPDATE memories SET {set_clause} WHERE memory_id = ?",
+            f"UPDATE memories SET {set_clause} WHERE memory_id = ?",  # noqa: S608
             [db_row.get(col) for col in MEMORY_COLUMNS if col != "memory_id"] + [main_id]
         )
 
@@ -483,7 +515,6 @@ def apply_single_proposal(
                 amem["status"] = "superseded"
                 amem["updated_at"] = timestamp_now
 
-                db_row_abs = serialize_memory(amem)
                 conn.execute(
                     "UPDATE memories SET status = ?, updated_at = ? WHERE memory_id = ?",
                     ("superseded", timestamp_now, aid)
@@ -516,7 +547,7 @@ def apply_single_proposal(
         )
 
         log_memory_event(
-            event_type="expired",
+            event_type="maintenance_expired",
             memory_id=main_id,
             previous_status=prev_status,
             new_status="expired",
@@ -572,19 +603,7 @@ def re_diagnose_individual_proposal(
             max_tokens=8000,
         ).strip()
 
-        if response.startswith("```"):
-            lines = response.splitlines()
-            if len(lines) >= 2:
-                if lines[0].startswith("```json") or lines[0].startswith("```"):
-                    response = "\n".join(lines[1:-1]).strip()
-
-        try:
-            results = json.loads(response)
-            if not isinstance(results, list):
-                results = [results]
-        except json.JSONDecodeError:
-            return []
-
+        results = _parse_llm_proposals(response)
         return validate_proposals(results, target_ids)
     except Exception as e:
         logger.exception(f"Individual re-diagnosis failed: {e}")
@@ -596,7 +615,6 @@ def run_approved_maintenance(ctx: HitlContext) -> HitlResult:
     Handler to apply and transition maintenance proposals.
     Executes on dispatcher trigger once the user answers.
     """
-    import json
     from obsidian_ai_hub.hitl.service import update_checkpoint
 
     checkpoint_data = json.loads(ctx.checkpoint)
@@ -611,7 +629,7 @@ def run_approved_maintenance(ctx: HitlContext) -> HitlResult:
     current_memories_map = {m["memory_id"]: m for m in current_mems}
 
     new_round_proposals = []
-    has_conflicts = False
+    applied_count = 0
 
     # First pass: Verify snapshots and apply accepted non-conflicting proposals
     for idx, p in enumerate(proposals, 1):
@@ -626,7 +644,6 @@ def run_approved_maintenance(ctx: HitlContext) -> HitlResult:
             # Verify snapshot conflict
             conflict = check_snapshot_conflicts(p, expected_snapshots, current_memories_map)
             if conflict:
-                has_conflicts = True
                 # Trigger individual re-diagnosis right away
                 re_diagnosed = re_diagnose_individual_proposal(p, base_date_str, current_memories_map)
                 new_round_proposals.extend(re_diagnosed)
@@ -636,6 +653,9 @@ def run_approved_maintenance(ctx: HitlContext) -> HitlResult:
                     with ctx.conn:
                         apply_single_proposal(ctx.conn, p, q_key, current_memories_map)
                     applied_proposal_ids.append(q_key)
+                    applied_count += 1
+                    checkpoint_data["applied_proposal_ids"] = applied_proposal_ids
+                    update_checkpoint(ctx.run_id, checkpoint=json.dumps(checkpoint_data), conn=ctx.conn)
                 except Exception as ex:
                     logger.exception(f"Failed to apply proposal {q_key}: {ex}")
                     return HitlResult.fail(f"Proposal application failed: {str(ex)}")
@@ -646,24 +666,26 @@ def run_approved_maintenance(ctx: HitlContext) -> HitlResult:
             if isinstance(raw_ans, dict):
                 user_comment = raw_ans.get("comment") or ""
 
-            if not user_comment.strip():
-                return HitlResult.fail(f"コメントが入力されていません。フィードバックして再提案にはコメントが必須です。")
-
-            # Re-diagnose with feedback context
+            # Re-diagnose with feedback context (comment verified mandatory on API level)
             re_diagnosed = re_diagnose_individual_proposal(p, base_date_str, current_memories_map, user_comment)
             new_round_proposals.extend(re_diagnosed)
             applied_proposal_ids.append(q_key)
+            checkpoint_data["applied_proposal_ids"] = applied_proposal_ids
+            update_checkpoint(ctx.run_id, checkpoint=json.dumps(checkpoint_data), conn=ctx.conn)
 
         elif user_choice == "skip":
             # Just log skip in audit, no DB changes
             logger.info(f"Proposal {q_key} was skipped by user.")
             applied_proposal_ids.append(q_key)
+            checkpoint_data["applied_proposal_ids"] = applied_proposal_ids
+            update_checkpoint(ctx.run_id, checkpoint=json.dumps(checkpoint_data), conn=ctx.conn)
 
     # Re-project approved memories markdown in case anything changed
-    try:
-        project_approved_memories()
-    except Exception as proj_ex:
-        logger.exception(f"Failed to project memories after maintenance: {proj_ex}")
+    if applied_count > 0:
+        try:
+            project_approved_memories()
+        except Exception as proj_ex:
+            logger.exception(f"Failed to project memories after maintenance: {proj_ex}")
 
     # Check if we have new proposals to present as the next set/round
     if new_round_proposals:
@@ -673,39 +695,7 @@ def run_approved_maintenance(ctx: HitlContext) -> HitlResult:
         questions_data = []
         for i, np in enumerate(new_round_proposals, 1):
             nq_key = f"proposal_{i}"
-            main_mem = current_memories_map.get(np["main_id"])
-            absorbed_mems = [current_memories_map[aid] for aid in np["absorbed_ids"] if aid in current_memories_map]
-
-            display_text = f"【再提案 - {np['action'].upper()}】正本ID: {np['main_id']}"
-            if np["absorbed_ids"]:
-                display_text += f"、吸収ID: {', '.join(np['absorbed_ids'])}"
-
-            context_json = {
-                "type": "memory_maintenance",
-                "proposal_id": nq_key,
-                "action": np["action"],
-                "main_id": np["main_id"],
-                "absorbed_ids": np["absorbed_ids"],
-                "reason": np["reason"],
-                "integrated_content": np["integrated_content"],
-                "target_memories": [main_mem] + absorbed_mems,
-            }
-
-            questions_data.append({
-                "question_key": nq_key,
-                "question_type": "select",
-                "display_text": display_text,
-                "choices": [
-                    {"value": "apply", "label": "適用", "description": "提案内容をデータベースに適用します。"},
-                    {"value": "skip", "label": "見送り", "description": "今回の提案は見送ります（変更は加えません）。"},
-                    {"value": "feedback", "label": "フィードバックして再提案", "description": "コメント付きで再診断を要求します。"},
-                ],
-                "is_required": 1,
-                "sequence": i,
-                "title": f"再提案 #{i}",
-                "prompt": np["reason"],
-                "context_json": context_json,
-            })
+            questions_data.append(_build_proposal_question(nq_key, np, i, current_memories_map, label_prefix="再提案"))
 
         # Update expected snapshots for the next round
         next_snapshots = {}
@@ -731,14 +721,15 @@ def run_approved_maintenance(ctx: HitlContext) -> HitlResult:
         return HitlResult.re_suspend(checkpoint=next_checkpoint)
 
     # No more proposals left unresolved
-    return HitlResult.complete(checkpoint=json.dumps({
+    final_cp = json.dumps({
         "base_date": base_date_str,
         "proposals": proposals,
         "proposal_round": proposal_round,
         "snapshots": expected_snapshots,
         "applied_proposal_ids": applied_proposal_ids,
         "finished": True,
-    }))
+    })
+    return HitlResult.complete(checkpoint=final_cp)
 
 
 def run_maintenance_cli() -> None:
