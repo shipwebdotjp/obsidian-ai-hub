@@ -5,25 +5,47 @@ from fastapi import HTTPException, Request, status
 from fastapi.security.utils import get_authorization_scheme_param
 
 
+def _is_loopback_host(host: str | None) -> bool:
+    """Return True when the host is a loopback address.
+
+    Handles the ``localhost`` hostname, plain IPv4/IPv6 loopbacks, and
+    IPv4-mapped IPv6 loopback addresses (``::ffff:127.0.0.1``).
+    """
+    if not host:
+        return False
+    if host == "localhost":
+        return True
+    try:
+        addr = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    if addr.is_loopback:
+        return True
+    if isinstance(addr, ipaddress.IPv6Address):
+        mapped = addr.ipv4_mapped
+        if mapped is not None and mapped.is_loopback:
+            return True
+    return False
+
+
 def require_loopback_or_token(request: Request) -> None:
     """
     Enforce bearer-token authentication when the server is bound to a
     non-loopback interface. Localhost binds (127.0.0.1, ::1) are exempt.
     """
     from obsidian_ai_hub.web.app import (  # local import to avoid cycle
-        LOOPBACK_HOSTS,
         TOKEN,
         TOKEN_REQUIRED,
     )
 
     client_host = request.client.host if request.client else None
-    if client_host in LOOPBACK_HOSTS:
+    if _is_loopback_host(client_host):
         return
 
     if not TOKEN_REQUIRED:
         return
 
-    auth = request.headers.get("authorization") or request.headers.get("Authorization")
+    auth = request.headers.get("authorization")
     scheme, param = get_authorization_scheme_param(auth or "")
     if scheme.lower() != "bearer" or not param or not hmac.compare_digest(param, TOKEN):
         raise HTTPException(
@@ -41,27 +63,8 @@ def require_localhost(request: Request) -> None:
             detail="Forbidden: Client IP not resolved."
         )
 
-    if client_host in {"localhost", "testclient"}:
+    if client_host == "testclient" or _is_loopback_host(client_host):
         return
-
-    try:
-        ip = ipaddress.ip_address(client_host)
-        if ip.is_loopback:
-            return
-    except ValueError:
-        pass
-
-    # Support IPv4-mapped IPv6 loopback addresses like ::ffff:127.0.0.1
-    cleaned_host = client_host
-    if client_host.startswith("::ffff:"):
-        cleaned_host = client_host[7:]
-
-    try:
-        ip = ipaddress.ip_address(cleaned_host)
-        if ip.is_loopback:
-            return
-    except ValueError:
-        pass
 
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,

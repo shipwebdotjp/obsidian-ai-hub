@@ -4,6 +4,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
+from obsidian_ai_hub.summary import store as summary_store
 from obsidian_ai_hub.web import schemas, service
 from obsidian_ai_hub.web.routes.deps import require_loopback_or_token
 
@@ -46,8 +47,6 @@ def get_edit_options(_=Depends(require_loopback_or_token)):
     "/summary-dashboard/summaries/{summary_id}", response_model=schemas.SummaryDetail
 )
 def get_dashboard_summary(summary_id: str, _=Depends(require_loopback_or_token)):
-    from obsidian_ai_hub.summary import store as summary_store
-
     res = summary_store.get_summary_by_id(summary_id)
     if res is None:
         raise HTTPException(status_code=404, detail="summary not found")

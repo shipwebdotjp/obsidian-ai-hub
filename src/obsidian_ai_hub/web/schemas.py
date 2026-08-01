@@ -583,6 +583,10 @@ class PersonDeleteResponse(BaseModel):
     deleted_assignments: int
 
 
+class PersonActionResponse(BaseModel):
+    success: bool
+
+
 class CandidateResolveRequest(BaseModel):
     target_person_id: str
 
@@ -612,6 +616,8 @@ class DuplicatesResponse(BaseModel):
 
 
 class SyncPeopleResponse(BaseModel):
+    # True when a sync was actually applied (POST /people/sync); False for the
+    # read-only vault report (GET /people/vault-report), which never syncs.
     synced: bool
     loader_report: dict[str, Any]
     db_conflicts: dict[str, Any]

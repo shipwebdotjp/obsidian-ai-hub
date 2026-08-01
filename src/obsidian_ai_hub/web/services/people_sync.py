@@ -51,6 +51,12 @@ def get_vault_report_dynamic() -> dict[str, Any]:
             "normalized_name_collisions": report.get("normalized_name_collisions", []),
             "alias_collisions": report.get("alias_collisions", []),
         }
-        return {"loader_report": clean_loader_report, "db_conflicts": db_conflicts}
+        # Read-only report: no sync is performed here, so synced is always False.
+        # sync_people() reports True because it actually applied the sync.
+        return {
+            "synced": False,
+            "loader_report": clean_loader_report,
+            "db_conflicts": db_conflicts,
+        }
     finally:
         conn.close()

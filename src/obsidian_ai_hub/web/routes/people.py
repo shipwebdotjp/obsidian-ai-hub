@@ -7,6 +7,11 @@ from obsidian_ai_hub.web.routes.deps import require_loopback_or_token
 
 logger = logging.getLogger(__name__)
 
+# NOTE: Static route prefixes (/people/candidates, /people/duplicates,
+# /people/vault-report, /people/merge, /people/sync) must be declared before the
+# parametrized /people/{person_id} routes so that "candidates" etc. are not
+# captured as a person_id.
+
 router = APIRouter()
 
 
@@ -28,15 +33,10 @@ def get_people_duplicates(_=Depends(require_loopback_or_token)):
 @router.get("/people/vault-report", response_model=schemas.SyncPeopleResponse)
 def get_vault_report(_=Depends(require_loopback_or_token)):
     try:
-        rep = service.get_vault_report_dynamic()
-        return {
-            "synced": False,
-            "loader_report": rep["loader_report"],
-            "db_conflicts": rep["db_conflicts"],
-        }
-    except Exception as e:
+        return service.get_vault_report_dynamic()
+    except Exception:
         logger.exception("Failed to get vault report")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Failed to get vault report")
 
 
 @router.get("/people/{person_id}", response_model=schemas.PersonDetail)
@@ -114,7 +114,10 @@ def get_person_candidate(candidate_id: str, _=Depends(require_loopback_or_token)
     return item
 
 
-@router.post("/people/candidates/{candidate_id}/summaries/{summary_id}/assign")
+@router.post(
+    "/people/candidates/{candidate_id}/summaries/{summary_id}/assign",
+    response_model=schemas.PersonActionResponse,
+)
 def assign_candidate_summary(
     candidate_id: str,
     summary_id: str,
@@ -132,7 +135,10 @@ def assign_candidate_summary(
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 
-@router.post("/people/candidates/{candidate_id}/resolve")
+@router.post(
+    "/people/candidates/{candidate_id}/resolve",
+    response_model=schemas.PersonActionResponse,
+)
 def resolve_person_candidate(
     candidate_id: str,
     body: schemas.CandidateResolveRequest,
@@ -216,7 +222,7 @@ def preview_people_merge(
     return service.preview_people_merge(body.from_person_id, body.to_person_id)
 
 
-@router.post("/people/merge")
+@router.post("/people/merge", response_model=schemas.PersonActionResponse)
 def merge_people(
     body: schemas.PeopleMergeRequest, _=Depends(require_loopback_or_token)
 ):
@@ -243,6 +249,6 @@ def delete_person_alias(
 def sync_people(_=Depends(require_loopback_or_token)):
     try:
         return service.sync_people()
-    except Exception as e:
+    except Exception:
         logger.exception("Failed to sync people")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Failed to sync people")
