@@ -100,21 +100,29 @@ def update_summary_detail(summary_id: str, body: schemas.SummaryUpdateRequest) -
         if people is None:
             people = []
         seen_pids = set()
-        conn = get_db_connection()
-        try:
-            cursor = conn.cursor()
-            for p in people:
-                pid = p["person_id"]
-                if pid in seen_pids:
-                    raise ValueError(f"Duplicate person_id: {pid}")
-                seen_pids.add(pid)
+        input_pids = []
+        for p in people:
+            pid = p["person_id"]
+            if pid in seen_pids:
+                raise ValueError(f"Duplicate person_id: {pid}")
+            seen_pids.add(pid)
+            input_pids.append(pid)
+
+        if input_pids:
+            conn = get_db_connection()
+            try:
+                cursor = conn.cursor()
+                placeholders = ", ".join("?" for _ in input_pids)
                 cursor.execute(
-                    "SELECT person_id FROM people WHERE person_id = ?", (pid,)
+                    f"SELECT person_id FROM people WHERE person_id IN ({placeholders})",
+                    input_pids,
                 )
-                if cursor.fetchone() is None:
-                    raise ValueError(f"Person not found: {pid}")
-        finally:
-            conn.close()
+                found_pids = {row[0] for row in cursor.fetchall()}
+                for pid in input_pids:
+                    if pid not in found_pids:
+                        raise ValueError(f"Person not found: {pid}")
+            finally:
+                conn.close()
         payload["people"] = people
 
     # Validate project_notes: only currently linked project IDs, no duplicates
@@ -141,10 +149,7 @@ def update_summary_detail(summary_id: str, body: schemas.SummaryUpdateRequest) -
     if ("mood" in payload or "sleep_raw" in payload) and period_type != "day":
         raise ValueError("mood and sleep_raw can only be set on day summaries")
 
-    try:
-        result = summary_store.update_summary(summary_id, payload)
-    except ValueError:
-        raise ValueError(f"Summary not found: {summary_id}")
+    result = summary_store.update_summary(summary_id, payload)
     return result
 
 

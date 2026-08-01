@@ -74,6 +74,7 @@ from obsidian_ai_hub.memory.review import (
     update_memory_fields,
 )
 from obsidian_ai_hub.memory.store import (
+    get_memory,
     get_memory_events,
     load_all_memories,
     log_memory_event,
@@ -104,6 +105,7 @@ __all__ = [
     "get_currently_valid_approved_memories",
     "get_db_connection",
     "get_embedder",
+    "get_memory",
     "get_memory_events",
     "llm_client",
     "load_all_memories",

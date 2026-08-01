@@ -1172,7 +1172,7 @@ def _update_summary_in_tx(
     )
     row = cursor.fetchone()
     if row is None:
-        raise ValueError(f"Summary not found: {summary_id}")
+        raise FileNotFoundError(f"Summary not found: {summary_id}")
 
     # 2. Read current children for fields NOT in payload (to preserve)
     preserved_candidates = _read_candidates(conn, summary_id)
@@ -1426,3 +1426,58 @@ def _delete_summary_in_tx(
         "DELETE FROM summary_person_assignments WHERE summary_id = ?", (summary_id,)
     )
     return True
+
+
+def get_summaries_by_period_range(
+    period_type: str,
+    start_key: str,
+    end_key: str,
+    desc: bool = False,
+    conn: Optional[sqlite3.Connection] = None,
+) -> List[Dict[str, Any]]:
+    """Fetch summaries of a specific period_type whose period_key is in [start_key, end_key], with bulk child attachment."""
+    close_conn = False
+    if conn is None:
+        conn = get_db_connection()
+        close_conn = True
+
+    try:
+        order_dir = "DESC" if desc else "ASC"
+        cursor = conn.cursor()
+        cursor.execute(
+            f"SELECT * FROM summaries WHERE period_type = ? AND period_key >= ? AND period_key <= ? ORDER BY period_key {order_dir}",
+            (period_type, start_key, end_key),
+        )
+        rows = cursor.fetchall()
+        records = [deserialize_summary(row) for row in rows]
+        _attach_children_bulk(conn, records)
+        return records
+    finally:
+        if close_conn:
+            conn.close()
+
+
+def get_overlapping_week_summaries(
+    start_date_str: str,
+    end_date_str: str,
+    conn: Optional[sqlite3.Connection] = None,
+) -> List[Dict[str, Any]]:
+    """Fetch week summaries overlapping with [start_date_str, end_date_str], ordered by period_key DESC, with bulk child attachment."""
+    close_conn = False
+    if conn is None:
+        conn = get_db_connection()
+        close_conn = True
+
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM summaries WHERE period_type = 'week' AND period_start <= ? AND period_end >= ? ORDER BY period_key DESC",
+            (end_date_str, start_date_str),
+        )
+        rows = cursor.fetchall()
+        records = [deserialize_summary(row) for row in rows]
+        _attach_children_bulk(conn, records)
+        return records
+    finally:
+        if close_conn:
+            conn.close()
