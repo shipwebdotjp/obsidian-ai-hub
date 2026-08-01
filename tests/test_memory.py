@@ -418,7 +418,7 @@ def test_compile_context(clean_memory_env, monkeypatch):
         "kind": "preference",
         "memory_key": "key-3",
         "content": "未来の記憶",
-        "valid_from": "2026-08-01",
+            "valid_from": "2036-08-01",
         "extraction_confidence": 0.90,
         "stability": "stable",
     }
