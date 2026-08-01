@@ -80,9 +80,15 @@ from obsidian_ai_hub.memory.store import (
     log_memory_event,
     save_all_memories,
 )
+from obsidian_ai_hub.memory.interview import (
+    generate_interview_questions,
+    apply_interview_answers,
+)
 
 
 __all__ = [
+    "generate_interview_questions",
+    "apply_interview_answers",
     "ALLOWED_STABILITY",
     "EDITABLE_FIELDS",
     "EVENT_COLUMNS",

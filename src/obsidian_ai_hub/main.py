@@ -37,8 +37,10 @@ def register_hitl_handlers():
     from obsidian_ai_hub.hitl.dispatcher import register_handler
     from obsidian_ai_hub.research.runner import run_approved_suggestion
     from obsidian_ai_hub.memory.maintenance import run_approved_maintenance
+    from obsidian_ai_hub.memory.interview import apply_interview_answers
     register_handler("research.run_approved_suggestion", run_approved_suggestion)
     register_handler("memory.apply_maintenance_proposals", run_approved_maintenance)
+    register_handler("memory.apply_interview_answers", apply_interview_answers)
 
 
 def main():
@@ -217,6 +219,14 @@ def main():
         "--memory-extract", action="store_true", help="週次ノートから長期記憶候補を抽出"
     )
     parser.add_argument(
+        "--memory-interview", action="store_true", help="週次記録からインタビュー質問を生成しHITLへ登録"
+    )
+    parser.add_argument(
+        "--memory-interview-week",
+        type=validate_date,
+        help="--memory-interview の対象週に含まれる日付 (YYYY-MM-DD)。省略時は直近の完了週",
+    )
+    parser.add_argument(
         "--week",
         type=validate_date,
         help="--memory-extract の対象週に含まれる日付 (YYYY-MM-DD)。省略時は直近の完了週",
@@ -333,6 +343,8 @@ def main():
     # Memory validations
     if args.week and not args.memory_extract:
         parser.error("--week requires --memory-extract")
+    if args.memory_interview_week and not args.memory_interview:
+        parser.error("--memory-interview-week requires --memory-interview")
     if args.memory_review:
         if not args.id:
             parser.error("--memory-review requires --id ID")
@@ -446,6 +458,15 @@ def main():
         from obsidian_ai_hub import memory
 
         run_and_log(lambda: memory.extract_memories(args.week), "memory_extract", {"week": args.week})
+        ran = True
+    if args.memory_interview:
+        from obsidian_ai_hub.memory.interview import generate_interview_questions
+
+        run_and_log(
+            lambda: generate_interview_questions(args.memory_interview_week),
+            "memory_interview",
+            {"week": args.memory_interview_week},
+        )
         ran = True
     if args.memory_review:
         from obsidian_ai_hub import memory

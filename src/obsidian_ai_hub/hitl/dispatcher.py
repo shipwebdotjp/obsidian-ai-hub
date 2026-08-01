@@ -215,6 +215,76 @@ def _process_run(
         return False
 
 
+def process_expired_questions(conn: sqlite3.Connection) -> None:
+    """
+    Scan all pending runs and process their active set's pending questions that have expired.
+    - If a required question has expired, cancel the entire run.
+    - If an optional question has expired, set it to skipped.
+    """
+    now = get_current_iso()
+    # Find all active/pending runs
+    cursor = conn.cursor()
+    cursor.execute("SELECT run_id, active_question_set_id, status FROM hitl_runs WHERE status IN ('pending_user', 'ready_to_resume')")
+    runs = [dict(row) for row in cursor.fetchall()]
+
+    for run in runs:
+        run_id = run["run_id"]
+        active_set_id = run["active_question_set_id"]
+        if not active_set_id:
+            continue
+
+        # Get all pending questions in active set for this run
+        questions = get_questions_by_set(run_id, active_set_id, conn)
+        pending_questions = [q for q in questions if q["status"] == "pending"]
+        if not pending_questions:
+            continue
+
+        any_required_expired = False
+        expired_optional_ids = []
+
+        for q in pending_questions:
+            expires_at = q.get("expires_at")
+            if expires_at and expires_at < now:
+                if q["is_required"] == 1:
+                    any_required_expired = True
+                    break
+                else:
+                    expired_optional_ids.append(q["question_id"])
+
+        if any_required_expired:
+            logger.info(f"Cancelling Run {run_id} due to expired required question.")
+            with conn:
+                # Update run status to cancelled
+                cursor.execute(
+                    "UPDATE hitl_runs SET status = 'cancelled', updated_at = ? WHERE run_id = ?",
+                    (now, run_id)
+                )
+                # Update all pending questions in active set to cancelled
+                cursor.execute(
+                    "UPDATE hitl_questions SET status = 'cancelled', updated_at = ? WHERE run_id = ? AND question_set_id = ? AND status = 'pending'",
+                    (now, run_id, active_set_id)
+                )
+        elif expired_optional_ids:
+            logger.info(f"Skipping {len(expired_optional_ids)} expired optional questions in Run {run_id}.")
+            with conn:
+                for q_id in expired_optional_ids:
+                    cursor.execute(
+                        "UPDATE hitl_questions SET status = 'skipped', updated_at = ? WHERE question_id = ?",
+                        (now, q_id)
+                    )
+                # Re-evaluate the run status after skipping optional questions
+                all_qs = get_questions_by_set(run_id, active_set_id, conn)
+                pending_required = [
+                    q for q in all_qs
+                    if q["is_required"] == 1 and q["status"] == "pending"
+                ]
+                new_status = "ready_to_resume" if len(pending_required) == 0 else "pending_user"
+                cursor.execute(
+                    "UPDATE hitl_runs SET status = ?, updated_at = ? WHERE run_id = ?",
+                    (new_status, now, run_id)
+                )
+
+
 def dispatch_runs(conn: Optional[sqlite3.Connection] = None) -> int:
     """
     Atomically claims eligible runs and executes their handlers.
@@ -230,6 +300,9 @@ def dispatch_runs(conn: Optional[sqlite3.Connection] = None) -> int:
 
     processed_count = 0
     try:
+        # Pre-process expired questions before dispatching
+        process_expired_questions(conn)
+
         eligible_runs = get_eligible_runs(conn)
         for run_record in eligible_runs:
             success = _process_run(run_record, worker_id, lease_duration, conn)

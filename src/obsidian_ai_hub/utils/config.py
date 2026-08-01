@@ -568,6 +568,20 @@ MEMORY_CONTEXT_MAX_TOKENS = int(
     _config_value("memory", "context_max_tokens", default=800)
 )
 
+# Memory Interview Configuration
+MEMORY_INTERVIEW_PROVIDER = _config_value("memory", "interview", "provider")
+MEMORY_INTERVIEW_MODEL = _config_value("memory", "interview", "model")
+MEMORY_INTERVIEW_MAX_QUESTIONS = int(_config_value("memory", "interview", "max_questions", default=3))
+MEMORY_INTERVIEW_CONTEXT_MAX_TOKENS = int(_config_value("memory", "interview", "context_max_tokens", default=4000))
+
+MEMORY_INTERVIEW_QUESTION_PROMPT_PATH = _optional_path("MEMORY_INTERVIEW_QUESTION_PROMPT_PATH", "memory", "interview", "question_prompt_path")
+if MEMORY_INTERVIEW_QUESTION_PROMPT_PATH is None:
+    MEMORY_INTERVIEW_QUESTION_PROMPT_PATH = BASE_DIR / "config" / "prompts" / "memory_interview_questions.md"
+
+MEMORY_INTERVIEW_EXTRACTION_PROMPT_PATH = _optional_path("MEMORY_INTERVIEW_EXTRACTION_PROMPT_PATH", "memory", "interview", "extraction_prompt_path")
+if MEMORY_INTERVIEW_EXTRACTION_PROMPT_PATH is None:
+    MEMORY_INTERVIEW_EXTRACTION_PROMPT_PATH = BASE_DIR / "config" / "prompts" / "memory_interview_extract.md"
+
 if IS_TEST_ENV:
     MEMORY_SQLITE_PATH = TEST_WORKSPACE / "memory.sqlite3"
 else:

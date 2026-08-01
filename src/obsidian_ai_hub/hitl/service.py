@@ -43,6 +43,17 @@ def register_run_and_questions(
     Register or update a Run and insert or update its active question set of questions.
     Ensures all operations occur within a single transaction and are completely idempotent.
     """
+    # Pre-validate expires_at ISO 8601 format on all questions before opening transaction
+    for q_data in questions_data:
+        expires_at = q_data.get("expires_at")
+        if expires_at is not None:
+            if not isinstance(expires_at, str):
+                raise ValueError("expires_at must be an ISO 8601 datetime string")
+            try:
+                datetime.fromisoformat(expires_at)
+            except ValueError as e:
+                raise ValueError(f"Invalid ISO 8601 datetime format for expires_at '{expires_at}': {e}")
+
     close_conn = False
     if conn is None:
         conn = get_db_connection()
