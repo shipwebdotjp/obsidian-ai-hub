@@ -611,10 +611,19 @@ class DuplicatesResponse(BaseModel):
     same_vault_id_groups: list[DuplicateSameVaultIdGroup] = []
 
 
+class VaultReportResponse(BaseModel):
+    loader_report: dict[str, Any]
+    db_conflicts: dict[str, Any]
+
+
 class SyncPeopleResponse(BaseModel):
     synced: bool
     loader_report: dict[str, Any]
     db_conflicts: dict[str, Any]
+
+
+class PersonActionResponse(BaseModel):
+    success: bool
 
 
 class MergedSummaryPreview(BaseModel):

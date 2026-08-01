@@ -64,8 +64,7 @@ export interface DuplicatesResponse {
   same_vault_id_groups: DuplicateSameVaultIdGroup[];
 }
 
-export interface SyncPeopleResponse {
-  synced: boolean;
+export interface VaultReportResponse {
   loader_report: {
     file_deficiencies: Array<{ path: string; message: string }>;
     duplicate_ids: Array<{ id: string; paths: string[] }>;
@@ -88,6 +87,10 @@ export interface SyncPeopleResponse {
       vault_claimers: Array<{ id: string; name: string; path: string }>;
     }>;
   };
+}
+
+export interface SyncPeopleResponse extends VaultReportResponse {
+  synced: boolean;
 }
 
 export interface MergedSummaryPreview {

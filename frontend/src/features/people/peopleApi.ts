@@ -6,6 +6,7 @@ import {
   PersonDetail,
   DuplicatesResponse,
   SyncPeopleResponse,
+  VaultReportResponse,
   PeopleMergePreviewResponse,
   DeletePersonResponse
 } from "./types";
@@ -24,8 +25,8 @@ export async function fetchDuplicates(): Promise<DuplicatesResponse> {
   return apiGet<DuplicatesResponse>(`${PEOPLE_API}/duplicates`);
 }
 
-export async function fetchVaultReport(): Promise<SyncPeopleResponse> {
-  return apiGet<SyncPeopleResponse>(`${PEOPLE_API}/vault-report`);
+export async function fetchVaultReport(): Promise<VaultReportResponse> {
+  return apiGet<VaultReportResponse>(`${PEOPLE_API}/vault-report`);
 }
 
 export async function fetchCandidateDetail(candidateId: string): Promise<PersonCandidateDetail> {

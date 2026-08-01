@@ -7,6 +7,7 @@ import {
   PersonDetail,
   DuplicatesResponse,
   SyncPeopleResponse,
+  VaultReportResponse,
   PeopleMergePreviewResponse,
   PeopleError
 } from "./types";
@@ -62,7 +63,7 @@ export default function PeoplePage() {
   const [candidates, setCandidates] = useState<PersonCandidate[]>([]);
   const [people, setPeople] = useState<Person[]>([]);
   const [duplicates, setDuplicates] = useState<DuplicatesResponse | null>(null);
-  const [vaultReport, setVaultReport] = useState<SyncPeopleResponse | null>(null);
+  const [vaultReport, setVaultReport] = useState<VaultReportResponse | null>(null);
 
   // Selected details
   const [selectedCandidate, setSelectedCandidate] = useState<PersonCandidateDetail | null>(null);

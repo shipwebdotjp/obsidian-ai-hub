@@ -1,8 +1,8 @@
 import React from "react";
-import { SyncPeopleResponse } from "./types";
+import { VaultReportResponse } from "./types";
 
 interface VaultReportTabProps {
-  vaultReport: SyncPeopleResponse | null;
+  vaultReport: VaultReportResponse | null;
   loading: boolean;
   onSyncPeople: () => void;
 }
