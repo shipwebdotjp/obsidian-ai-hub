@@ -619,3 +619,36 @@ Vite 6 は現在の安定 LTS ラインであり、Vitest 4 を本格活用す�
 - `npm --prefix frontend test`（Vitest 81件）全通過。`SummaryDashboardPage.test.tsx` は Page 経由のため分割後も回帰カバレッジを担保。
 - `npx --prefix frontend tsc -b` で型チェック通過。
 - 表示のみの変更のため E2E は追加しない（E2E 限定方針と整合）。
+
+## Web サービス層の分割リファクタリング
+
+| 項目 | 内容 |
+|------|------|
+| 決定日 | 2026-08-01 |
+| カテゴリ | アーキテクチャ・構成 |
+| 決定内容 | 2,719行に肥大化した `src/obsidian_ai_hub/web/service.py` を、機能ドメイン単位のサブパッケージ `web/services/` に分割する。`web/service.py` は公開APIのファサード（再エクスポートのみ）として維持し、`api.py`・テスト・`summary/project_utils.py` の既存 import を変更せず互換性を保証する。 |
+
+### 構造
+
+- `services/memory.py` — 長期記憶（list/get/review/update/resolve/delete 等）。
+- `services/research.py` — リサーチテーマ（list/get/run/rerun）。
+- `services/vault.py` — Vault 検索・ファイル読み取り。
+- `services/dashboard.py` — ダッシュボード（home/browse/day/stats）と集計ヘルパ。
+- `services/projects.py` — プロジェクト・プロジェクト候補。`ProjectConflictError` を所有。
+- `services/people.py` — 人物 CRUD・別名編集。人物系コンフリクト例外（`AliasConflictError` 等）を所有。
+- `services/people_candidates.py` — 人物候補（list/detail/assign/resolve/promote）。
+- `services/people_merge.py` — 人物統合（verify/preview/merge）と重複候補検出。
+- `services/people_sync.py` — Vault 同期とレポート。
+- `services/summary.py` — サマリ編集オプション・詳細更新/削除。
+- `services/task_config.py` — タスク設定（get/update/preview）。`TaskConfigConflictError` を所有。
+- `services/execution_logs.py` — 実行ログ・LLM コール詳細。
+- `services/hitl.py` — HITL 実行一覧・回答・キャンセル。
+
+### 結論に至った経緯
+
+`service.py` は API ルーター `api.py` からモジュール全体を `service.X` として参照され、テストも `service.X`・パッチ（`obsidian_ai_hub.web.service.<func>`）・直接 import で同一モジュールに依存している。memory パッケージ分割で確立済みの「公開APIのファサードを維持する」パターンを踏襲し、`service.py` を再エクスポート専用にすることで、`api.py`・テスト・`summary/project_utils.py` を一切変更せずに分割できる。ロジックは一切変更せず純粋な移動・抽出のみとする。People 領域はさらに candidate / merge / sync で機能分割し、単一モジュールの肥大化（約1,150行）を回避する。
+
+### 検証
+
+- `uv run pytest tests/` を全通過させる。
+- lint 設定は存在しないため、テストにより回帰がないことを担保する。
