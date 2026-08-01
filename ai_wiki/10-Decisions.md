@@ -593,3 +593,29 @@ Vite 6 は現在の安定 LTS ラインであり、Vitest 4 を本格活用す�
    - 適用前に対象メモリの最新の `updated_at` と登録時のスナップショットを検証し、不一致（競合）がある提案のみを最新状態で個別再診断する。
    - 「フィードバックして再提案」が選択された場合はコメント入力を必須（UI・APIの両方でバリデーション）とし、元提案・コメント・最新状態をLLMに渡して該当提案だけを次のラウンド（`round_2` 等の新質問セット）として再提示する。
    - 各提案はそれぞれ独立したトランザクションで確定され、正本には `maintenance_merged`/`maintenance_corrected`、吸収側には `maintenance_superseded` の専用の `memory_events` を記録。変更適用後はMarkdown投影（`approved.md`）を自動更新する。
+
+## サマリダッシュボードのコンポーネント分割（ビュー抽出方式）
+
+| 項目 | 内容 |
+|------|------|
+| 決定日 | 2026-08-01 |
+| カテゴリ | フロントエンド・構成 |
+| 決定内容 | 肥大化した `SummaryDashboardPage.tsx`（約2,091行）を、タブ/パネル/フォーム/チャート単位のファイルに分割する。state・ローダー・ハンドラはコンテナに残し、ビューは props 経由で受け取るプレゼンテーショナル分割とする。 |
+
+### 構造
+
+- `SummaryDashboardPage.tsx` — コンテナ。全 state、APIローダー、編集/削除ハンドラ、エフェクト、ヘッダ/タブ切替、削除確認モーダル。
+- `utils.ts` — `PALETTE`, `groupSummaryItemsByKind`, `formatPeriodKey`。
+- `charts.tsx` — `SVGLineChart`, `SVGStackedBarChart`, `SVGCategoryHeatmap` を1ファイルに集約。
+- `EditSummaryForm.tsx` — 既存の `EditForm` を移設。
+- `HomeTab.tsx` / `BrowseTab.tsx` / `BrowseList.tsx` / `DetailPanel.tsx` / `StatsTab.tsx` — タブ・パネル単位のビュー。
+
+### 結論に至った経緯
+
+`projects`, `memories`, `research`, `vault-search` 各機能で確立済みの「コンテナ Page + ビュー別コンポーネント」パターン（props による受け渡し、カスタムフックなし）に合わせる。`selectedSummary` / `selectedDay` 等は Home→Browse 遷移（`goToBrowseForSummary`）やヘッダでクロスタブに共有されるため state はコンテナに残す。ロジックは一切変更せず純粋な移動・抽出のみとし、レース条件ガード（request ref 等）はコンテナに維持する。カスタムフックによる state カプセル化は変更範囲と回帰リスクが大きいため採用しない。
+
+### 検証
+
+- `npm --prefix frontend test`（Vitest 81件）全通過。`SummaryDashboardPage.test.tsx` は Page 経由のため分割後も回帰カバレッジを担保。
+- `npx --prefix frontend tsc -b` で型チェック通過。
+- 表示のみの変更のため E2E は追加しない（E2E 限定方針と整合）。
