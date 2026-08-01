@@ -221,7 +221,11 @@ def process_expired_questions(conn: sqlite3.Connection) -> None:
     - If a required question has expired, cancel the entire run.
     - If an optional question has expired, set it to skipped.
     """
-    now = get_current_iso()
+    from datetime import datetime, timezone, timedelta
+    jst = timezone(timedelta(hours=9))
+    now_dt = datetime.now(jst)
+    now_str = get_current_iso()
+
     # Find all active/pending runs
     cursor = conn.cursor()
     cursor.execute("SELECT run_id, active_question_set_id, status FROM hitl_runs WHERE status IN ('pending_user', 'ready_to_resume')")
@@ -243,13 +247,26 @@ def process_expired_questions(conn: sqlite3.Connection) -> None:
         expired_optional_ids = []
 
         for q in pending_questions:
-            expires_at = q.get("expires_at")
-            if expires_at and expires_at < now:
-                if q["is_required"] == 1:
-                    any_required_expired = True
-                    break
-                else:
-                    expired_optional_ids.append(q["question_id"])
+            expires_at_str = q.get("expires_at")
+            if expires_at_str:
+                try:
+                    expires_dt = datetime.fromisoformat(expires_at_str)
+                    if expires_dt.tzinfo is None:
+                        expires_dt = expires_dt.replace(tzinfo=jst)
+                    if expires_dt < now_dt:
+                        if q["is_required"] == 1:
+                            any_required_expired = True
+                            break
+                        else:
+                            expired_optional_ids.append(q["question_id"])
+                except ValueError:
+                    # If parsing fails, fall back to string comparison or ignore
+                    if expires_at_str < now_str:
+                        if q["is_required"] == 1:
+                            any_required_expired = True
+                            break
+                        else:
+                            expired_optional_ids.append(q["question_id"])
 
         if any_required_expired:
             logger.info(f"Cancelling Run {run_id} due to expired required question.")
@@ -257,12 +274,12 @@ def process_expired_questions(conn: sqlite3.Connection) -> None:
                 # Update run status to cancelled
                 cursor.execute(
                     "UPDATE hitl_runs SET status = 'cancelled', updated_at = ? WHERE run_id = ?",
-                    (now, run_id)
+                    (now_str, run_id)
                 )
                 # Update all pending questions in active set to cancelled
                 cursor.execute(
                     "UPDATE hitl_questions SET status = 'cancelled', updated_at = ? WHERE run_id = ? AND question_set_id = ? AND status = 'pending'",
-                    (now, run_id, active_set_id)
+                    (now_str, run_id, active_set_id)
                 )
         elif expired_optional_ids:
             logger.info(f"Skipping {len(expired_optional_ids)} expired optional questions in Run {run_id}.")
@@ -270,7 +287,7 @@ def process_expired_questions(conn: sqlite3.Connection) -> None:
                 for q_id in expired_optional_ids:
                     cursor.execute(
                         "UPDATE hitl_questions SET status = 'skipped', updated_at = ? WHERE question_id = ?",
-                        (now, q_id)
+                        (now_str, q_id)
                     )
                 # Re-evaluate the run status after skipping optional questions
                 all_qs = get_questions_by_set(run_id, active_set_id, conn)
@@ -281,7 +298,7 @@ def process_expired_questions(conn: sqlite3.Connection) -> None:
                 new_status = "ready_to_resume" if len(pending_required) == 0 else "pending_user"
                 cursor.execute(
                     "UPDATE hitl_runs SET status = ?, updated_at = ? WHERE run_id = ?",
-                    (new_status, now, run_id)
+                    (new_status, now_str, run_id)
                 )
 
 

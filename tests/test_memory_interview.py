@@ -114,7 +114,7 @@ def test_hitl_optional_question_expiration_skips(test_memory_db_path):
 def test_next_monday_calculation():
     """Test get_next_monday_morning calculates correct next monday 09:00:00 JST."""
     jst = timezone(timedelta(hours=9))
-    # A Wednesday
+    # A Wednesday JST
     wed = datetime(2026, 7, 29, 12, 0, 0, tzinfo=jst)
     next_mon = get_next_monday_morning(wed)
     # Next Monday is 2026-08-03
@@ -124,6 +124,11 @@ def test_next_monday_calculation():
     mon_early = datetime(2026, 7, 27, 8, 0, 0, tzinfo=jst)
     next_mon_from_early = get_next_monday_morning(mon_early)
     assert next_mon_from_early == "2026-08-03T09:00:00+09:00"
+
+    # A non-JST timezone aware datetime such as UTC: Wednesday JST is still Wednesday UTC
+    utc_wed = datetime(2026, 7, 29, 3, 0, 0, tzinfo=timezone.utc)  # corresponds to 2026-07-29T12:00:00+09:00 JST
+    next_mon_from_utc = get_next_monday_morning(utc_wed)
+    assert next_mon_from_utc == "2026-08-03T09:00:00+09:00"
 
 
 def test_generate_interview_questions_idempotence(test_memory_db_path, monkeypatch):

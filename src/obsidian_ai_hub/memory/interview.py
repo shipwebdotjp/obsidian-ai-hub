@@ -34,9 +34,13 @@ def get_next_monday_morning(now: Optional[datetime] = None) -> str:
     Get the ISO-8601 string for the next Monday at 09:00:00 JST from now.
     """
     jst = timezone(timedelta(hours=9))
-    current = now or datetime.now(jst)
-    if not current.tzinfo:
-        current = current.replace(tzinfo=jst)
+    if now is None:
+        current = datetime.now(jst)
+    else:
+        if now.tzinfo is None:
+            current = now.replace(tzinfo=jst)
+        else:
+            current = now.astimezone(jst)
 
     # Calculate days to next Monday
     days_ahead = 7 - current.weekday()
@@ -46,6 +50,24 @@ def get_next_monday_morning(now: Optional[datetime] = None) -> str:
     next_monday = current + timedelta(days=days_ahead)
     next_monday = next_monday.replace(hour=9, minute=0, second=0, microsecond=0)
     return next_monday.isoformat()
+
+
+def _parse_llm_json_list(response: str) -> list[dict]:
+    """
+    Strip response, remove optional Markdown code fence, parse JSON,
+    and normalize non-list values to a list.
+    """
+    cleaned = response.strip()
+    if cleaned.startswith("```"):
+        lines = cleaned.splitlines()
+        if len(lines) >= 2:
+            if lines[0].startswith("```json") or lines[0].startswith("```"):
+                cleaned = "\n".join(lines[1:-1]).strip()
+
+    parsed = json.loads(cleaned)
+    if not isinstance(parsed, list):
+        parsed = [parsed]
+    return parsed
 
 
 def compile_approved_memories_for_interview(limit_tokens: int = 4000) -> list[dict]:
@@ -119,17 +141,8 @@ def generate_interview_questions(week_date_str: Optional[str] = None) -> None:
             temperature=0.2,
         ).strip()
 
-        # Clean code blocks
-        if response.startswith("```"):
-            lines = response.splitlines()
-            if len(lines) >= 2:
-                if lines[0].startswith("```json") or lines[0].startswith("```"):
-                    response = "\n".join(lines[1:-1]).strip()
-
         try:
-            questions_list = json.loads(response)
-            if not isinstance(questions_list, list):
-                questions_list = [questions_list]
+            questions_list = _parse_llm_json_list(response)
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse LLM response for interview questions as JSON. Response: {response}. Error: {e}")
             return
@@ -260,17 +273,8 @@ def apply_interview_answers(context: HitlContext) -> HitlResult:
             logger.error(f"LLM call failed for extracting candidate: {e}")
             return HitlResult.fail(f"LLM call failed: {e}")
 
-        # Clean code blocks
-        if response.startswith("```"):
-            lines = response.splitlines()
-            if len(lines) >= 2:
-                if lines[0].startswith("```json") or lines[0].startswith("```"):
-                    response = "\n".join(lines[1:-1]).strip()
-
         try:
-            extracted = json.loads(response)
-            if not isinstance(extracted, list):
-                extracted = [extracted]
+            extracted = _parse_llm_json_list(response)
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse LLM memory extract response as JSON. Response: {response}. Error: {e}")
             return HitlResult.fail(f"JSON decode failed for extract response: {e}")
@@ -278,6 +282,16 @@ def apply_interview_answers(context: HitlContext) -> HitlResult:
         for item in extracted:
             if not isinstance(item, dict) or not item.get("content"):
                 continue
+
+            # Safely normalize extraction_confidence
+            raw_confidence = item.get("extraction_confidence")
+            confidence = 0.90
+            if raw_confidence is not None:
+                try:
+                    confidence = float(raw_confidence)
+                except ValueError:
+                    logger.warning(f"Invalid extraction_confidence value '{raw_confidence}', falling back to 0.90")
+                    confidence = 0.90
 
             memory_id = generate_memory_id(week_end_str)
             cand = {
@@ -299,7 +313,7 @@ def apply_interview_answers(context: HitlContext) -> HitlResult:
                 "review_due_at": item.get("review_due_at"),
                 "stability": normalize_stability(item.get("stability"), default="tentative"),
                 "sensitivity": item.get("sensitivity", "personal"),
-                "extraction_confidence": float(item.get("extraction_confidence", 0.90)),
+                "extraction_confidence": confidence,
                 "supersedes": item.get("supersedes"),
                 "contradicts": item.get("contradicts") or [],
                 "provenance": {
@@ -350,15 +364,23 @@ def apply_interview_answers(context: HitlContext) -> HitlResult:
             if normalize_content(m.get("content", "")) == cand_norm
         ]
 
-        if exact_content_matches:
+        # Check in the current candidate-processing loop (including candidates already accepted in the same batch)
+        # to ensure subsequent exact-content checks see previously accepted same-batch candidates.
+        exact_batch_matches = [
+            m for m in final_candidates_to_save
+            if normalize_content(m.get("content", "")) == cand_norm
+        ]
+
+        if exact_content_matches or exact_batch_matches:
             cand["status"] = "rejected"
             cand["reviewed_by"] = "system"
             cand["reviewed_at"] = get_current_timestamp()
             cand["updated_at"] = get_current_timestamp()
 
-            matched_ids = [m["memory_id"] for m in exact_content_matches]
+            matched_ids = [m["memory_id"] for m in (exact_content_matches + exact_batch_matches)]
             exact_content_rejections.append((cand, matched_ids))
             final_candidates_to_save.append(cand)
+            existing_memories.append(cand)
             continue
 
         suggestions = run_deduplication(
@@ -367,9 +389,13 @@ def apply_interview_answers(context: HitlContext) -> HitlResult:
         if suggestions:
             cand["dedup_suggestions"] = suggestions
             candidates_to_assess.append(cand)
+            # Add to existing memories immediately so vector/assessment checks see it
+            existing_memories.append(cand)
         else:
             final_candidates_to_save.append(cand)
+            existing_memories.append(cand)
 
+    # Perform LLM assessment on the collected assessable candidates (which are already in existing_memories)
     perform_dedup_assessment_llm(candidates_to_assess, existing_memories)
     final_candidates_to_save.extend(candidates_to_assess)
 

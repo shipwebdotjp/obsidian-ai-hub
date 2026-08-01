@@ -50,9 +50,12 @@ def register_run_and_questions(
             if not isinstance(expires_at, str):
                 raise ValueError("expires_at must be an ISO 8601 datetime string")
             try:
-                datetime.fromisoformat(expires_at)
+                dt = datetime.fromisoformat(expires_at)
+                # Ensure UTC offset (timezone aware) is required
+                if dt.tzinfo is None:
+                    raise ValueError("expires_at must be a timezone-aware datetime with a UTC offset")
             except ValueError as e:
-                raise ValueError(f"Invalid ISO 8601 datetime format for expires_at '{expires_at}': {e}")
+                raise ValueError(f"Invalid ISO 8601 datetime format for expires_at '{expires_at}': {e}") from e
 
     close_conn = False
     if conn is None:

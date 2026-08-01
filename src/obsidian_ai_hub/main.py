@@ -460,10 +460,10 @@ def main():
         run_and_log(lambda: memory.extract_memories(args.week), "memory_extract", {"week": args.week})
         ran = True
     if args.memory_interview:
-        from obsidian_ai_hub.memory.interview import generate_interview_questions
+        from obsidian_ai_hub import memory
 
         run_and_log(
-            lambda: generate_interview_questions(args.memory_interview_week),
+            lambda: memory.generate_interview_questions(args.memory_interview_week),
             "memory_interview",
             {"week": args.memory_interview_week},
         )
