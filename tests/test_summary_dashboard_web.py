@@ -541,3 +541,65 @@ def test_project_notes_update_via_api(loopback_client, clean_summary_env):
         ]},
     )
     assert res.status_code == 400
+
+
+def test_summary_update_validation_and_not_found(loopback_client, clean_summary_env):
+    # Setup standard daily summary
+    summary_store.upsert_summary({
+        "period_type": "day",
+        "period_key": "2026-07-15",
+        "period_start": "2026-07-15",
+        "period_end": "2026-07-15",
+        "generated_at": "2026-07-15T22:00:00",
+        "summary": "Validation Test Day",
+        "keywords": [],
+        "mood": None,
+        "sleep_raw": None,
+        "sleep_hours": None,
+        "topics": [],
+        "people": [],
+        "items": [],
+    })
+    summary_id = summary_store.get_summary_by_period("day", "2026-07-15")["summary_id"]
+
+    # 1. Non-existent summary ID must return 404 FileNotFoundError
+    res = loopback_client.patch(
+        "/api/v1/summary-dashboard/summaries/nonexistent_id",
+        json={"summary": "Should be 404"}
+    )
+    assert res.status_code == 404
+    assert "summary not found" in res.json()["detail"]
+
+    # Insert a valid person to database
+    conn = memory.get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO people (person_id, normalized_name, display_name) VALUES ('peo_111', 'alice', 'Alice')"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    # 2. Duplicate person_id must return 400 validation error
+    res = loopback_client.patch(
+        f"/api/v1/summary-dashboard/summaries/{summary_id}",
+        json={"people": [
+            {"person_id": "peo_111", "note": "Duplicate 1"},
+            {"person_id": "peo_111", "note": "Duplicate 2"}
+        ]}
+    )
+    assert res.status_code == 400
+    assert "Duplicate person_id: peo_111" in res.json()["detail"]
+
+    # 3. Missing person_id in order must return 400 with first missing person_id
+    res = loopback_client.patch(
+        f"/api/v1/summary-dashboard/summaries/{summary_id}",
+        json={"people": [
+            {"person_id": "peo_111", "note": "Found"},
+            {"person_id": "peo_999", "note": "First missing"},
+            {"person_id": "peo_888", "note": "Second missing"}
+        ]}
+    )
+    assert res.status_code == 400
+    assert "Person not found: peo_999" in res.json()["detail"]

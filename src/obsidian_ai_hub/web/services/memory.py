@@ -29,23 +29,14 @@ def list_memories(
 
 
 def get_memory(memory_id: str) -> Optional[dict]:
-    conn = get_db_connection()
-    try:
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM memories WHERE memory_id = ?", (memory_id,))
-        row = cursor.fetchone()
-        if row is None:
-            return None
-        return memory.deserialize_memory(dict(row))
-    finally:
-        conn.close()
+    return memory.get_memory(memory_id)
 
 
 def get_events(memory_id: str) -> list[dict]:
     return memory.get_memory_events(memory_id)
 
 
-REVIEW_ACTIONS = {"approve", "reject", "edit"}
+REVIEW_ACTIONS = schemas.ALLOWED_ACTIONS | {"edit"}
 
 
 def review_memory(
@@ -72,7 +63,7 @@ def update_memory(memory_id: str, fields: dict) -> dict:
     return memory.update_memory_fields(memory_id, fields)
 
 
-def batch_review(memory_ids: list, action: str) -> dict:
+def batch_review(memory_ids: list[str], action: str) -> dict:
     if action not in schemas.ALLOWED_ACTIONS:
         raise ValueError("action must be approve/reject")
     return memory.batch_review_memories(memory_ids, action)

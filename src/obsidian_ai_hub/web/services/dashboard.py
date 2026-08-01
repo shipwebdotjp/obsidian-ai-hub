@@ -198,33 +198,18 @@ def get_dashboard_browse(
         selected_end = f"{selected_year}-12-31"
 
         # Month summaries in that year
-        conn = get_db_connection()
-        months_summaries = []
-        try:
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT * FROM summaries WHERE period_type = 'month' AND period_key LIKE ? ORDER BY period_key DESC",
-                (f"{selected_year}-%",),
-            )
-            rows = cursor.fetchall()
-            for r in rows:
-                months_summaries.append(
-                    summary_store.get_summary_by_id(r["summary_id"], conn=conn)
-                )
-        finally:
-            conn.close()
+        months_summaries = summary_store.get_summaries_by_period_range(
+            period_type="month",
+            start_key=f"{selected_year}-01",
+            end_key=f"{selected_year}-12",
+            desc=True,
+        )
 
         # Weeks overlapping that year
-        all_weeks = summary_store.list_summaries(period_type="week")
-        overlapping_weeks = []
-        for w in all_weeks:
-            p_start = w.get("period_start")
-            p_end = w.get("period_end")
-            if p_start and p_end:
-                if p_start <= selected_end and p_end >= selected_start:
-                    overlapping_weeks.append(w)
-
-        overlapping_weeks.sort(key=lambda x: x.get("period_key", ""), reverse=True)
+        overlapping_weeks = summary_store.get_overlapping_week_summaries(
+            start_date_str=selected_start,
+            end_date_str=selected_end,
+        )
 
         return {
             "selectable_years": selectable_years,
@@ -242,15 +227,10 @@ def get_dashboard_browse(
         selected_end = f"{month}-{last_day:02d}"
 
         # Weeks overlapping that month
-        all_weeks = summary_store.list_summaries(period_type="week")
-        overlapping_weeks = []
-        for w in all_weeks:
-            p_start = w.get("period_start")
-            p_end = w.get("period_end")
-            if p_start and p_end:
-                if p_start <= selected_end and p_end >= selected_start:
-                    overlapping_weeks.append(w)
-        overlapping_weeks.sort(key=lambda x: x.get("period_key", ""), reverse=True)
+        overlapping_weeks = summary_store.get_overlapping_week_summaries(
+            start_date_str=selected_start,
+            end_date_str=selected_end,
+        )
 
         # Days list with either daily summary or activity logs
         conn = get_db_connection()
@@ -258,13 +238,14 @@ def get_dashboard_browse(
         try:
             cursor = conn.cursor()
             # Daily summaries in that month
-            cursor.execute(
-                "SELECT * FROM summaries WHERE period_type = 'day' AND period_key LIKE ? ORDER BY period_key DESC",
-                (f"{month}-%",),
+            day_recs = summary_store.get_summaries_by_period_range(
+                period_type="day",
+                start_key=f"{month}-01",
+                end_key=f"{month}-{last_day:02d}",
+                desc=True,
+                conn=conn,
             )
-            rows = cursor.fetchall()
-            for r in rows:
-                day_rec = summary_store.get_summary_by_id(r["summary_id"], conn=conn)
+            for day_rec in day_recs:
                 k = day_rec["period_key"]
                 days_data[k] = {
                     "date": k,
@@ -295,21 +276,11 @@ def get_dashboard_browse(
 
         sorted_days = [days_data[k] for k in sorted(days_data.keys(), reverse=True)]
 
-        months_summaries = []
-        conn = get_db_connection()
-        try:
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT * FROM summaries WHERE period_type = 'month' AND period_key = ?",
-                (month,),
-            )
-            rows = cursor.fetchall()
-            for r in rows:
-                months_summaries.append(
-                    summary_store.get_summary_by_id(r["summary_id"], conn=conn)
-                )
-        finally:
-            conn.close()
+        months_summaries = summary_store.get_summaries_by_period_range(
+            period_type="month",
+            start_key=month,
+            end_key=month,
+        )
 
         return {
             "selectable_years": selectable_years,
@@ -377,21 +348,11 @@ def get_dashboard_stats(
     else:
         granularity = "month"
 
-    all_day_summaries = []
-    conn = get_db_connection()
-    try:
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT * FROM summaries WHERE period_type = 'day' AND period_key >= ? AND period_key <= ? ORDER BY period_key ASC",
-            (start_date_str, end_date_str),
-        )
-        rows = cursor.fetchall()
-        for r in rows:
-            all_day_summaries.append(
-                summary_store.get_summary_by_id(r["summary_id"], conn=conn)
-            )
-    finally:
-        conn.close()
+    all_day_summaries = summary_store.get_summaries_by_period_range(
+        period_type="day",
+        start_key=start_date_str,
+        end_key=end_date_str,
+    )
 
     topic_freq = {}
     keyword_freq = {}

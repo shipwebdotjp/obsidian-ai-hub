@@ -32,6 +32,20 @@ def load_all_memories() -> list[dict]:
         conn.close()
 
 
+def get_memory(memory_id: str) -> Optional[dict]:
+    conn = get_db_connection()
+    try:
+        with conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM memories WHERE memory_id = ?", (memory_id,))
+            row = cursor.fetchone()
+            if row is None:
+                return None
+            return deserialize_memory(dict(row))
+    finally:
+        conn.close()
+
+
 def save_all_memories(memories: list[dict]):
     """Replace the memories table with the provided list using upsert semantics.
 
