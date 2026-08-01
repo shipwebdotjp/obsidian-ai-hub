@@ -14,7 +14,7 @@ export default function VaultReportTab({
 }: VaultReportTabProps) {
   return (
     <div className="flex-1 border border-slate-200 bg-white rounded-lg p-5 overflow-y-auto space-y-6">
-      <div className="flex items-center justify-between border-b pb-3">
+      <div className="flex items-center justify-between border-b border-slate-200 pb-3">
         <div>
           <h2 className="text-sm font-bold text-slate-900">Vault同期 & 安全性レポート</h2>
           <p className="text-xs text-slate-500 mt-0.5">現在のVaultファイルを安全にスキャンし、不備や衝突、DBとの差分状況を検証します。</p>
@@ -22,7 +22,9 @@ export default function VaultReportTab({
         <button
           onClick={onSyncPeople}
           disabled={loading}
-          className="rounded bg-slate-950 px-4 py-2 text-xs font-semibold text-white hover:bg-slate-800 disabled:opacity-50"
+          className={`rounded bg-slate-900 px-4 py-2 text-xs font-semibold text-white hover:bg-slate-800 disabled:opacity-50 ${
+            loading ? "disabled:cursor-not-allowed" : "cursor-pointer"
+          }`}
         >
           {loading ? "同期中..." : "Vaultと人物同期を実行"}
         </button>

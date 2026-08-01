@@ -30,7 +30,6 @@ const MergePreviewDialog = forwardRef<HTMLDialogElement, MergePreviewDialogProps
     return (
       <dialog
         ref={ref}
-        onCancel={onCloseModal}
         onClose={onCloseModal}
         className="fixed inset-0 m-auto rounded-xl shadow-xl border border-slate-200 w-full max-w-2xl max-h-[85vh] p-0 overflow-hidden backdrop:bg-slate-900/60 backdrop:backdrop-blur-sm"
         role="dialog"
@@ -43,7 +42,7 @@ const MergePreviewDialog = forwardRef<HTMLDialogElement, MergePreviewDialogProps
             <h2 id="merge-dialog-title" className="text-sm font-bold text-slate-900">人物統合プレビューと確認</h2>
             <button
               onClick={onCloseModal}
-              className="text-slate-400 hover:text-slate-600 transition-colors text-xs"
+              className="text-slate-400 hover:text-slate-600 transition-colors text-xs cursor-pointer"
               aria-label="閉じる"
             >
               ✕
@@ -92,8 +91,8 @@ const MergePreviewDialog = forwardRef<HTMLDialogElement, MergePreviewDialogProps
                     <span>✅</span> 統合可能です。安全上の問題は検出されませんでした。
                   </div>
                 ) : (
-                  <div className="rounded-lg bg-red-50 p-3 text-red-800 border border-red-200 font-semibold flex items-center gap-1.5">
-                    <span>❌</span> 統合できません。
+                  <div className="rounded-lg bg-red-50 p-3 text-red-800 border border-red-200 font-semibold flex flex-col gap-1">
+                    <span className="flex items-center gap-1.5">❌ 統合できません。</span>
                     <div className="font-normal mt-1">{previewData.reason}</div>
                   </div>
                 )}
@@ -177,7 +176,7 @@ const MergePreviewDialog = forwardRef<HTMLDialogElement, MergePreviewDialogProps
           <div className="p-4 border-t border-slate-100 bg-slate-50 flex items-center justify-end gap-2 shrink-0">
             <button
               onClick={onCloseModal}
-              className="rounded border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+              className="rounded border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer"
               autoFocus
             >
               キャンセル
@@ -185,7 +184,9 @@ const MergePreviewDialog = forwardRef<HTMLDialogElement, MergePreviewDialogProps
             <button
               onClick={onExecuteMerge}
               disabled={loading || previewLoading || !previewData?.allowed}
-              className="rounded bg-slate-950 px-4 py-2 text-xs font-semibold text-white hover:bg-slate-800 disabled:opacity-50"
+              className={`rounded bg-blue-600 px-4 py-2 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50 ${
+                loading || previewLoading || !previewData?.allowed ? "disabled:cursor-not-allowed" : "cursor-pointer"
+              }`}
             >
               {loading ? "統合を実行中..." : "安全に統合を実行する"}
             </button>

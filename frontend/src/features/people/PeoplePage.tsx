@@ -7,7 +7,8 @@ import {
   PersonDetail,
   DuplicatesResponse,
   SyncPeopleResponse,
-  PeopleMergePreviewResponse
+  PeopleMergePreviewResponse,
+  PeopleError
 } from "./types";
 import * as peopleApi from "./peopleApi";
 
@@ -21,7 +22,37 @@ import DeletePersonDialog from "./DeletePersonDialog";
 
 type Tab = "candidates" | "list" | "duplicates" | "report";
 
+interface TabDefinition {
+  value: Tab;
+  label: string;
+  getCount: (candidatesCount: number, peopleCount: number, duplicatesCount: number) => number | string;
+}
+
+const TABS_CONFIG: TabDefinition[] = [
+  {
+    value: "candidates",
+    label: "未解決候補",
+    getCount: (cands) => cands,
+  },
+  {
+    value: "list",
+    label: "人物一覧",
+    getCount: (_, people) => people,
+  },
+  {
+    value: "duplicates",
+    label: "重複候補",
+    getCount: (_, __, dups) => dups,
+  },
+  {
+    value: "report",
+    label: "Vault入力レポート",
+    getCount: () => "",
+  },
+];
+
 export default function PeoplePage() {
+  // 1. All useState declarations grouped at the top
   const [activeTab, setActiveTab] = useState<Tab>("candidates");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -40,13 +71,13 @@ export default function PeoplePage() {
 
   // Form states
   const [targetPersonId, setTargetPersonId] = useState("");
-  const [resolveError, setResolveError] = useState<any | null>(null);
+  const [resolveError, setResolveError] = useState<PeopleError | null>(null);
   const [summaryAssignments, setSummaryAssignments] = useState<Record<string, string>>({});
 
   // Edit & Delete states
   const [editDisplayName, setEditDisplayName] = useState("");
   const [editAliasesText, setEditAliasesText] = useState("");
-  const [editError, setEditError] = useState<any | null>(null);
+  const [editError, setEditError] = useState<PeopleError | null>(null);
   const [editSuccess, setEditSuccess] = useState<string | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [personToDelete, setPersonToDelete] = useState<PersonDetail | null>(null);
@@ -57,8 +88,24 @@ export default function PeoplePage() {
 
   // Promote states
   const [promoteDisplayName, setPromoteDisplayName] = useState("");
-  const [promoteError, setPromoteError] = useState<any | null>(null);
+  const [promoteError, setPromoteError] = useState<PeopleError | null>(null);
 
+  // Merge modal & preview states
+  const [mergeToPersonId, setMergeToPersonId] = useState("");
+  const [showMergeModal, setShowMergeModal] = useState(false);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewData, setPreviewData] = useState<PeopleMergePreviewResponse | null>(null);
+  const [mergeFromPerson, setMergeFromPerson] = useState<Person | null>(null);
+  const [mergeToPerson, setMergeToPerson] = useState<Person | null>(null);
+  const [mergeModalError, setMergeModalError] = useState<string | null>(null);
+  const [mergeGuidance, setMergeGuidance] = useState<{ personId: string; personName: string } | null>(null);
+
+  // Refs
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const triggerRef = useRef<HTMLElement | null>(null);
+  const requestCounterRef = useRef(0);
+
+  // 2. All useEffect hooks and handler definitions defined after declarations
   useEffect(() => {
     setSummaryAssignments({});
     setPromoteDisplayName(selectedCandidate?.display_name || "");
@@ -72,6 +119,51 @@ export default function PeoplePage() {
   useEffect(() => {
     if (!selectedCandidate && !selectedPerson) setMobileDetailOpen(false);
   }, [selectedCandidate, selectedPerson]);
+
+  useEffect(() => {
+    if (showMergeModal && dialogRef.current) {
+      if (!dialogRef.current.open) {
+        dialogRef.current.showModal();
+      }
+    }
+  }, [showMergeModal]);
+
+  useEffect(() => {
+    loadAllData(true);
+  }, []);
+
+  const clearMessages = () => {
+    setError(null);
+    setSuccessMessage(null);
+    setResolveError(null);
+    setEditError(null);
+    setEditSuccess(null);
+  };
+
+  const loadAllData = async (shouldClearSuccess?: boolean) => {
+    setLoading(true);
+    setError(null);
+    setResolveError(null);
+    if (shouldClearSuccess !== false) {
+      setSuccessMessage(null);
+    }
+    try {
+      const [candsData, peopleData, dupsData, reportData] = await Promise.all([
+        peopleApi.fetchCandidates(),
+        peopleApi.fetchPeople(),
+        peopleApi.fetchDuplicates(),
+        peopleApi.fetchVaultReport(),
+      ]);
+      setCandidates(candsData);
+      setPeople(peopleData);
+      setDuplicates(dupsData);
+      setVaultReport(reportData);
+    } catch (e) {
+      setError("データの読み込みに失敗しました");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleAssignCandidateSummary = async (summaryId: string, assignedPersonId: string) => {
     if (!selectedCandidate || !assignedPersonId) return;
@@ -98,66 +190,6 @@ export default function PeoplePage() {
       setLoading(false);
     }
   };
-
-  // Merge modal & preview states
-  const [mergeToPersonId, setMergeToPersonId] = useState("");
-  const [showMergeModal, setShowMergeModal] = useState(false);
-  const [previewLoading, setPreviewLoading] = useState(false);
-  const [previewData, setPreviewData] = useState<PeopleMergePreviewResponse | null>(null);
-  const [mergeFromPerson, setMergeFromPerson] = useState<Person | null>(null);
-  const [mergeToPerson, setMergeToPerson] = useState<Person | null>(null);
-  const [mergeModalError, setMergeModalError] = useState<string | null>(null);
-  const [mergeGuidance, setMergeGuidance] = useState<{ personId: string; personName: string } | null>(null);
-
-  // Refs
-  const dialogRef = useRef<HTMLDialogElement>(null);
-  const triggerRef = useRef<HTMLElement | null>(null);
-  const requestCounterRef = useRef(0);
-
-  useEffect(() => {
-    if (showMergeModal && dialogRef.current) {
-      if (!dialogRef.current.open) {
-        dialogRef.current.showModal();
-      }
-    }
-  }, [showMergeModal]);
-
-  const clearMessages = () => {
-    setError(null);
-    setSuccessMessage(null);
-    setResolveError(null);
-    setEditError(null);
-    setEditSuccess(null);
-  };
-
-  const loadAllData = async (shouldClearSuccess?: any) => {
-    setLoading(true);
-    setError(null);
-    setResolveError(null);
-    if (shouldClearSuccess !== false) {
-      setSuccessMessage(null);
-    }
-    try {
-      const [candsData, peopleData, dupsData, reportData] = await Promise.all([
-        peopleApi.fetchCandidates(),
-        peopleApi.fetchPeople(),
-        peopleApi.fetchDuplicates(),
-        peopleApi.fetchVaultReport(),
-      ]);
-      setCandidates(candsData);
-      setPeople(peopleData);
-      setDuplicates(dupsData);
-      setVaultReport(reportData);
-    } catch (e) {
-      setError("データの読み込みに失敗しました");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    loadAllData(true);
-  }, []);
 
   const handleSelectCandidate = async (cand: PersonCandidate) => {
     clearMessages();
@@ -212,8 +244,8 @@ export default function PeoplePage() {
       await loadAllData(false);
     } catch (e: any) {
       if (e instanceof ApiError && e.status === 409) {
-        const detail = e.body?.detail;
-        setEditError(detail || e.message);
+        const detail = e.body?.detail as PeopleError;
+        setEditError(detail || { message: e.message });
         if (detail && (detail.conflict_type === "main_name_conflict" || detail.conflict_type === "alias_conflict")) {
           if (detail.existing_person_id && people.some(p => p.person_id === detail.existing_person_id)) {
             setMergeToPersonId(detail.existing_person_id);
@@ -221,7 +253,7 @@ export default function PeoplePage() {
           }
         }
       } else {
-        setEditError(e.message || "更新に失敗しました");
+        setEditError({ message: e.message || "更新に失敗しました" });
       }
     } finally {
       setLoading(false);
@@ -263,7 +295,7 @@ export default function PeoplePage() {
       await loadAllData(false);
     } catch (e: any) {
       if (e instanceof ApiError && e.status === 409) {
-        setResolveError(e.body?.detail || e.message);
+        setResolveError((e.body?.detail as PeopleError) || { message: e.message });
       } else {
         setError(e.message || "解決に失敗しました");
       }
@@ -372,7 +404,7 @@ export default function PeoplePage() {
       setEditAliasesText((result.aliases || []).map((al) => al.display_name).join("\n"));
     } catch (e: any) {
       if (e instanceof ApiError && e.status === 409) {
-        setPromoteError(e.body?.detail || e.message);
+        setPromoteError((e.body?.detail as PeopleError) || { message: e.message });
       } else {
         setError(e.message || "昇格に失敗しました");
       }
@@ -396,6 +428,8 @@ export default function PeoplePage() {
     }
   };
 
+  const duplicatesTotalCount = (duplicates?.vault_matches.length || 0) + (duplicates?.same_vault_id_groups.length || 0);
+
   return (
     <div className="flex h-full flex-col overflow-hidden bg-slate-50">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 p-4 sm:p-6 sm:pb-4">
@@ -408,7 +442,7 @@ export default function PeoplePage() {
         <button
           onClick={() => loadAllData()}
           disabled={loading}
-          className="rounded bg-slate-900 px-3 py-1.5 text-xs text-white hover:bg-slate-800 disabled:opacity-50"
+          className="rounded bg-slate-900 px-3 py-1.5 text-xs text-white hover:bg-slate-800 disabled:opacity-50 cursor-pointer"
         >
           {loading ? "更新中..." : "データを再読み込み"}
         </button>
@@ -427,48 +461,26 @@ export default function PeoplePage() {
           </div>
         )}
 
-        {/* Tabs */}
+        {/* Dynamic Tab Buttons Render */}
         <div className="flex shrink-0 space-x-1 overflow-x-auto whitespace-nowrap border-b border-slate-200">
-          <button
-            onClick={() => { setActiveTab("candidates"); clearMessages(); }}
-            className={`px-4 py-2 text-xs font-medium border-b-2 transition-colors ${
-              activeTab === "candidates"
-                ? "border-slate-900 text-slate-900 font-semibold"
-                : "border-transparent text-slate-500 hover:text-slate-700"
-            }`}
-          >
-            未解決候補 ({candidates.length})
-          </button>
-          <button
-            onClick={() => { setActiveTab("list"); clearMessages(); }}
-            className={`px-4 py-2 text-xs font-medium border-b-2 transition-colors ${
-              activeTab === "list"
-                ? "border-slate-900 text-slate-900 font-semibold"
-                : "border-transparent text-slate-500 hover:text-slate-700"
-            }`}
-          >
-            人物一覧 ({people.length})
-          </button>
-          <button
-            onClick={() => { setActiveTab("duplicates"); clearMessages(); }}
-            className={`px-4 py-2 text-xs font-medium border-b-2 transition-colors ${
-              activeTab === "duplicates"
-                ? "border-slate-900 text-slate-900 font-semibold"
-                : "border-transparent text-slate-500 hover:text-slate-700"
-            }`}
-          >
-            重複候補 ({(duplicates?.vault_matches.length || 0) + (duplicates?.same_vault_id_groups.length || 0)})
-          </button>
-          <button
-            onClick={() => { setActiveTab("report"); clearMessages(); }}
-            className={`px-4 py-2 text-xs font-medium border-b-2 transition-colors ${
-              activeTab === "report"
-                ? "border-slate-900 text-slate-900 font-semibold"
-                : "border-transparent text-slate-500 hover:text-slate-700"
-            }`}
-          >
-            Vault入力レポート
-          </button>
+          {TABS_CONFIG.map((tab) => {
+            const count = tab.getCount(candidates.length, people.length, duplicatesTotalCount);
+            const countSuffix = count !== "" ? ` (${count})` : "";
+            const isTabActive = activeTab === tab.value;
+            return (
+              <button
+                key={tab.value}
+                onClick={() => { setActiveTab(tab.value); clearMessages(); }}
+                className={`px-4 py-2 text-xs font-medium border-b-2 transition-colors cursor-pointer ${
+                  isTabActive
+                    ? "border-slate-900 text-slate-900 font-semibold"
+                    : "border-transparent text-slate-500 hover:text-slate-700"
+                }`}
+              >
+                {tab.label}{countSuffix}
+              </button>
+            );
+          })}
         </div>
 
         <div className="min-h-0 flex-1 flex flex-col gap-4 overflow-hidden lg:flex-row">

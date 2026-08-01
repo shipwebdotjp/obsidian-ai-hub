@@ -29,36 +29,34 @@ export default function DuplicatesTab({
           <p className="text-xs text-slate-400">一致する重複候補はありません。</p>
         ) : (
           <div className="space-y-3">
-            {duplicates.vault_matches.map((m) => (
-              <div key={m.unlinked_person.person_id} className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4 sm:flex-row sm:items-center sm:justify-between">
-                <div className="min-w-0 space-y-1">
-                  <div className="text-xs font-semibold text-red-700">未連携人物: {m.unlinked_person.display_name} (ID: {m.unlinked_person.person_id})</div>
-                  <div className="text-xs text-green-700 font-medium">Vault側の該当ノート: {m.vault_person.name} (Vault ID: {m.vault_person.id})</div>
-                  <div className="text-[10px] text-slate-400 font-mono break-all">ファイルパス: {m.vault_person.path}</div>
-                </div>
+            {duplicates.vault_matches.map((m) => {
+              const target = people.find((p) => p.vault_id === m.vault_person.id);
+              return (
+                <div key={m.unlinked_person.person_id} className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0 space-y-1">
+                    <div className="text-xs font-semibold text-red-700">未連携人物: {m.unlinked_person.display_name} (ID: {m.unlinked_person.person_id})</div>
+                    <div className="text-xs text-green-700 font-medium">Vault側の該当ノート: {m.vault_person.name} (Vault ID: {m.vault_person.id})</div>
+                    <div className="text-[10px] text-slate-400 font-mono break-all">ファイルパス: {m.vault_person.path}</div>
+                  </div>
 
-                <div className="flex shrink-0 gap-2">
-                  {/* Find corresponding master person_id in DB */}
-                  {(() => {
-                    const target = people.find((p) => p.vault_id === m.vault_person.id);
-                    if (target) {
-                      return (
-                        <button
-                          onClick={() => onTriggerMergePreview(m.unlinked_person, target)}
-                          disabled={loading}
-                          className="rounded bg-slate-950 px-3 py-1.5 text-xs text-white hover:bg-slate-800 disabled:opacity-50"
-                        >
-                          {target.display_name}へ統合
-                        </button>
-                      );
-                    }
-                    return (
-                      <span className="text-xs text-slate-400">統合先人物を準備中...</span>
-                    );
-                  })()}
+                  <div className="flex shrink-0 gap-2">
+                    {target ? (
+                      <button
+                        onClick={() => onTriggerMergePreview(m.unlinked_person, target)}
+                        disabled={loading}
+                        className={`rounded bg-blue-600 px-2 py-0.5 text-xs text-white hover:bg-blue-700 disabled:opacity-50 ${
+                          loading ? "disabled:cursor-not-allowed" : "cursor-pointer"
+                        }`}
+                      >
+                        {target.display_name}へ統合
+                      </button>
+                    ) : (
+                      <span className="text-xs text-slate-400 font-medium">統合先人物を準備中...</span>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
@@ -91,7 +89,9 @@ export default function DuplicatesTab({
                               key={other.person_id}
                               onClick={() => onTriggerMergePreview(other, p)}
                               disabled={loading}
-                              className="rounded border border-slate-300 bg-white px-2 py-1 text-[11px] text-slate-700 hover:bg-slate-50"
+                              className={`rounded border border-blue-600 bg-blue-600 px-2 py-0.5 text-xs text-white hover:bg-blue-700 disabled:opacity-50 ${
+                                loading ? "disabled:cursor-not-allowed" : "cursor-pointer"
+                              }`}
                             >
                               {other.display_name}をここに統合
                             </button>

@@ -1,5 +1,19 @@
 import { Person, PersonAlias } from "../../api/types";
 
+export interface PeopleError {
+  message: string;
+  conflict_type?: string;
+  existing_person_id?: string;
+  existing_person_name?: string;
+}
+
+export interface DeletePersonResponse {
+  success: boolean;
+  deleted_summary_people: number;
+  deleted_aliases: number;
+  deleted_assignments: number;
+}
+
 export interface AssociatedSummary {
   summary_id: string;
   period_type: string;

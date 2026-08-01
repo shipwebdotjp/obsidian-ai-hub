@@ -1,15 +1,15 @@
 import React from "react";
 import { Person } from "../../api/types";
-import { PersonCandidate, PersonCandidateDetail } from "./types";
+import { PersonCandidate, PersonCandidateDetail, PeopleError } from "./types";
 
 interface CandidateTabProps {
   candidates: PersonCandidate[];
   selectedCandidate: PersonCandidateDetail | null;
   people: Person[];
   targetPersonId: string;
-  resolveError: any | null;
+  resolveError: PeopleError | null;
   promoteDisplayName: string;
-  promoteError: any | null;
+  promoteError: PeopleError | null;
   summaryAssignments: Record<string, string>;
   loading: boolean;
   mobileDetailOpen: boolean;
@@ -55,20 +55,24 @@ export default function CandidateTab({
           <p className="text-xs text-slate-400">現在、未解決候補はありません。</p>
         ) : (
           <div className="space-y-2">
-            {candidates.map((cand) => (
-              <button
-                key={cand.candidate_id}
-                onClick={() => onSelectCandidate(cand)}
-                className={`w-full text-left p-2.5 rounded-lg border text-xs transition-all ${
-                  selectedCandidate?.candidate_id === cand.candidate_id
-                    ? "border-slate-900 bg-slate-50 font-medium"
-                    : "border-slate-200 hover:bg-slate-50"
-                }`}
-              >
-                <div>{cand.display_name}</div>
-                <div className="text-[10px] text-slate-400 mt-0.5">({cand.normalized_name})</div>
-              </button>
-            ))}
+            {candidates.map((cand) => {
+              const isSelected = selectedCandidate?.candidate_id === cand.candidate_id;
+              return (
+                <button
+                  key={cand.candidate_id}
+                  onClick={() => onSelectCandidate(cand)}
+                  data-selected={isSelected || undefined}
+                  className={`w-full text-left p-2.5 rounded-lg border text-xs transition-all cursor-pointer ${
+                    isSelected
+                      ? "border-slate-800 bg-slate-200 border-l-4 font-medium"
+                      : "border-slate-200 hover:bg-slate-50"
+                  }`}
+                >
+                  <div>{cand.display_name}</div>
+                  <div className="text-[10px] text-slate-400 mt-0.5">({cand.normalized_name})</div>
+                </button>
+              );
+            })}
           </div>
         )}
       </div>
@@ -84,7 +88,7 @@ export default function CandidateTab({
               type="button"
               onClick={() => setMobileDetailOpen(false)}
               aria-label="一覧に戻る"
-              className="rounded px-2 py-1 text-sm text-slate-600 hover:bg-slate-100"
+              className="rounded px-2 py-1 text-sm text-slate-600 hover:bg-slate-100 cursor-pointer"
             >
               ← 一覧
             </button>
@@ -114,9 +118,9 @@ export default function CandidateTab({
               {resolveError && (
                 <div className="rounded-lg bg-red-50 p-3 text-xs font-medium text-red-800 border border-red-200">
                   <div className="font-bold">
-                    {typeof resolveError === "object" ? resolveError.message : resolveError}
+                    {resolveError.message}
                   </div>
-                  {typeof resolveError === "object" && resolveError.conflict_type && (
+                  {resolveError.conflict_type && (
                     <div className="mt-1 text-[11px] text-red-600">
                       確定済みの人物: ID: {resolveError.existing_person_id} (名前: {resolveError.existing_person_name})
                     </div>
@@ -143,13 +147,17 @@ export default function CandidateTab({
                 <button
                   onClick={onResolveCandidate}
                   disabled={loading || !targetPersonId || selectedCandidate.assigned_summaries_count > 0}
-                  className="shrink-0 rounded bg-slate-900 px-4 py-1.5 text-xs text-white hover:bg-slate-800 disabled:opacity-50"
+                  className={`shrink-0 rounded bg-slate-900 px-4 py-1.5 text-xs text-white hover:bg-slate-800 disabled:opacity-50 ${
+                    loading || !targetPersonId || selectedCandidate.assigned_summaries_count > 0
+                      ? "disabled:cursor-not-allowed"
+                      : "cursor-pointer"
+                  }`}
                 >
                   解決
                 </button>
               </div>
               <p className="text-[10px] text-slate-400">
-                ※ 解決先 is, フロントマターに ID を持つ「Vault連携済み」の人物に制限されています。未解決候補を解決すると、確定別名として登録され、候補のサマリー履歴が自動で移管されます。すでに手動で個別割当を行っている候補は、グローバル解決（一括解決）が禁止されます。
+                ※ 解決先はフロントマターに ID を持つ「Vault連携済み」の人物に制限されています。未解決候補を解決すると、確定別名として登録され、候補のサマリー履歴が自動で移管されます。すでに手動で個別割当を行っている候補は、グローバル解決（一括解決）が禁止されます。
               </p>
             </div>
 
@@ -167,9 +175,9 @@ export default function CandidateTab({
               {promoteError && (
                 <div className="rounded-lg bg-red-50 p-3 text-xs font-medium text-red-800 border border-red-200">
                   <div className="font-bold">
-                    {typeof promoteError === "object" ? promoteError.message : promoteError}
+                    {promoteError.message}
                   </div>
-                  {typeof promoteError === "object" && promoteError.conflict_type && (
+                  {promoteError.conflict_type && (
                     <div className="mt-1 text-[11px] text-red-600">
                       競合の型: {promoteError.conflict_type}
                       {promoteError.existing_person_id && ` (競合人物ID: ${promoteError.existing_person_id}, 名前: ${promoteError.existing_person_name})`}
@@ -199,7 +207,11 @@ export default function CandidateTab({
                 <button
                   onClick={onPromoteCandidate}
                   disabled={loading || !promoteDisplayName.trim() || selectedCandidate.assigned_summaries_count > 0}
-                  className="shrink-0 rounded bg-blue-600 px-4 py-1.5 text-xs text-white hover:bg-blue-700 disabled:opacity-50"
+                  className={`shrink-0 rounded bg-blue-600 px-4 py-1.5 text-xs text-white hover:bg-blue-700 disabled:opacity-50 ${
+                    loading || !promoteDisplayName.trim() || selectedCandidate.assigned_summaries_count > 0
+                      ? "disabled:cursor-not-allowed"
+                      : "cursor-pointer"
+                  }`}
                 >
                   昇格
                 </button>
@@ -217,6 +229,7 @@ export default function CandidateTab({
                 <div className="border border-slate-100 rounded-lg overflow-hidden divide-y divide-slate-100">
                   {selectedCandidate.summaries.map((sum) => {
                     const assignedPersonId = summaryAssignments[sum.summary_id] || "";
+                    const isAssignDisabled = loading || !assignedPersonId;
                     return (
                       <div key={sum.summary_id} className="p-3 text-xs flex flex-col md:flex-row md:items-center justify-between gap-3">
                         <div className="flex-1">
@@ -241,9 +254,11 @@ export default function CandidateTab({
                           </select>
                           <button
                             onClick={() => onAssignCandidateSummary(sum.summary_id, assignedPersonId)}
-                            disabled={loading || !assignedPersonId}
+                            disabled={isAssignDisabled}
                             aria-label={`このサマリ (${sum.period_key}) に割当`}
-                            className="rounded bg-slate-900 px-3 py-1 text-xs text-white hover:bg-slate-800 disabled:opacity-50"
+                            className={`rounded bg-slate-900 px-3 py-1 text-xs text-white hover:bg-slate-800 disabled:opacity-50 ${
+                              isAssignDisabled ? "disabled:cursor-not-allowed" : "cursor-pointer"
+                            }`}
                           >
                             このサマリに割当
                           </button>

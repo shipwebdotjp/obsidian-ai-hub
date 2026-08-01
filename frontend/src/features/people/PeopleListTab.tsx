@@ -1,13 +1,13 @@
 import React from "react";
 import { Person, PersonAlias } from "../../api/types";
-import { PersonDetail } from "./types";
+import { PersonDetail, PeopleError } from "./types";
 
 interface PeopleListTabProps {
   people: Person[];
   selectedPerson: PersonDetail | null;
   editDisplayName: string;
   editAliasesText: string;
-  editError: any | null;
+  editError: PeopleError | null;
   editSuccess: string | null;
   mergeGuidance: { personId: string; personName: string } | null;
   mergeToPersonId: string;
@@ -57,34 +57,38 @@ export default function PeopleListTab({
           <p className="text-xs text-slate-400">現在、登録されている人物はいません。</p>
         ) : (
           <div className="space-y-2">
-            {people.map((p) => (
-              <button
-                key={p.person_id}
-                onClick={() => onSelectPerson(p)}
-                className={`w-full text-left p-2.5 rounded-lg border text-xs transition-all ${
-                  selectedPerson?.person_id === p.person_id
-                    ? "border-slate-900 bg-slate-50 font-medium"
-                    : "border-slate-200 hover:bg-slate-50"
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <span>{p.display_name}</span>
-                  {p.vault_id ? (
-                    <span className="bg-slate-100 text-slate-800 text-[9px] px-1.5 py-0.5 rounded-full font-mono">{p.vault_id}</span>
-                  ) : (
-                    <span className="bg-red-50 text-red-700 text-[9px] px-1.5 py-0.5 rounded-full">未連携</span>
-                  )}
-                </div>
-                <div className="flex items-center justify-between mt-1 text-[10px] text-slate-400">
-                  <span>サマリ: {p.summary_count ?? 0}件</span>
-                </div>
-                {p.aliases && p.aliases.length > 0 && (
-                  <div className="text-[10px] text-slate-400 mt-1">
-                    別名: {p.aliases.map((al) => al.display_name).join(", ")}
+            {people.map((p) => {
+              const isSelected = selectedPerson?.person_id === p.person_id;
+              return (
+                <button
+                  key={p.person_id}
+                  onClick={() => onSelectPerson(p)}
+                  data-selected={isSelected || undefined}
+                  className={`w-full text-left p-2.5 rounded-lg border text-xs transition-all cursor-pointer ${
+                    isSelected
+                      ? "border-slate-800 bg-slate-200 border-l-4 font-medium"
+                      : "border-slate-200 hover:bg-slate-50"
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span>{p.display_name}</span>
+                    {p.vault_id ? (
+                      <span className="bg-slate-100 text-slate-800 text-[9px] px-1.5 py-0.5 rounded-full font-mono">{p.vault_id}</span>
+                    ) : (
+                      <span className="bg-red-50 text-red-700 text-[9px] px-1.5 py-0.5 rounded-full">未連携</span>
+                    )}
                   </div>
-                )}
-              </button>
-            ))}
+                  <div className="flex items-center justify-between mt-1 text-[10px] text-slate-400">
+                    <span>サマリ: {p.summary_count ?? 0}件</span>
+                  </div>
+                  {p.aliases && p.aliases.length > 0 && (
+                    <div className="text-[10px] text-slate-400 mt-1">
+                      別名: {p.aliases.map((al) => al.display_name).join(", ")}
+                    </div>
+                  )}
+                </button>
+              );
+            })}
           </div>
         )}
       </div>
@@ -100,7 +104,7 @@ export default function PeopleListTab({
               type="button"
               onClick={() => setMobileDetailOpen(false)}
               aria-label="一覧に戻る"
-              className="rounded px-2 py-1 text-sm text-slate-600 hover:bg-slate-100"
+              className="rounded px-2 py-1 text-sm text-slate-600 hover:bg-slate-100 cursor-pointer"
             >
               ← 一覧
             </button>
@@ -128,7 +132,10 @@ export default function PeopleListTab({
                       {al.display_name}
                       <button
                         onClick={() => onTriggerAliasDelete(al)}
-                        className="text-slate-400 hover:text-red-600 transition-colors leading-none"
+                        disabled={loading}
+                        className={`text-slate-400 hover:text-red-600 transition-colors leading-none disabled:opacity-50 ${
+                          loading ? "disabled:cursor-not-allowed" : "cursor-pointer"
+                        }`}
                         aria-label={`別名「${al.display_name}」を削除`}
                       >
                         ×
@@ -146,9 +153,9 @@ export default function PeopleListTab({
                 {editError && (
                   <div className="rounded-lg bg-red-50 p-3 text-xs font-medium text-red-800 border border-red-200">
                     <div className="font-bold">
-                      {typeof editError === "object" ? editError.message : editError}
+                      {editError.message}
                     </div>
-                    {typeof editError === "object" && editError.conflict_type && (
+                    {editError.conflict_type && (
                       <div className="mt-1 text-[11px] text-red-600">
                         競合の型: {editError.conflict_type}
                         {editError.existing_person_id && ` (競合人物ID: ${editError.existing_person_id}, 名前: ${editError.existing_person_name})`}
@@ -195,7 +202,9 @@ export default function PeopleListTab({
                   <button
                     onClick={onUpdatePerson}
                     disabled={loading || !editDisplayName.trim()}
-                    className="rounded bg-slate-900 px-4 py-1.5 text-xs text-white hover:bg-slate-800 disabled:opacity-50"
+                    className={`rounded bg-slate-900 px-4 py-1.5 text-xs text-white hover:bg-slate-800 disabled:opacity-50 ${
+                      loading || !editDisplayName.trim() ? "disabled:cursor-not-allowed" : "cursor-pointer"
+                    }`}
                   >
                     変更内容を保存
                   </button>
@@ -213,7 +222,9 @@ export default function PeopleListTab({
                 <button
                   onClick={() => onTriggerDeleteConfirm(selectedPerson)}
                   disabled={loading}
-                  className="rounded bg-red-600 px-4 py-1.5 text-xs text-white hover:bg-red-700 disabled:opacity-50"
+                  className={`rounded bg-rose-800 px-4 py-1.5 text-xs text-white hover:bg-rose-900 disabled:opacity-50 ${
+                    loading ? "disabled:cursor-not-allowed" : "cursor-pointer"
+                  }`}
                 >
                   完全に削除する
                 </button>
@@ -246,7 +257,9 @@ export default function PeopleListTab({
                     }
                   }}
                   disabled={loading || !mergeToPersonId}
-                  className="shrink-0 rounded bg-slate-900 px-4 py-1.5 text-xs text-white hover:bg-slate-800 disabled:opacity-50"
+                  className={`shrink-0 rounded bg-blue-600 px-4 py-1.5 text-xs text-white hover:bg-blue-700 disabled:opacity-50 ${
+                    loading || !mergeToPersonId ? "disabled:cursor-not-allowed" : "cursor-pointer"
+                  }`}
                 >
                   統合プレビュー
                 </button>
