@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import date
 from unittest.mock import patch
 
+import pytest
+
 from obsidian_ai_hub.research import db as research_themes
 
 
@@ -115,3 +117,137 @@ def test_list_recent_activity_days():
     summaries = {e["summary"] for e in entries}
     assert "テストアクティビティ" in summaries
     assert "別のアクティビティ" in summaries
+
+
+def test_theme_defaults_have_empty_feedback():
+    rec = research_themes.create_theme(
+        theme="フィードバック既定テーマ", confidence=0.5, origin="auto_suggestion"
+    )
+    fetched = research_themes.get_theme(rec["theme_id"])
+    assert fetched["feedback_decision"] is None
+    assert fetched["feedback_reason"] is None
+    assert fetched["feedback_comment"] is None
+    assert fetched["feedback_at"] is None
+
+
+def test_set_theme_feedback_approve_saves_and_retrieves():
+    rec = research_themes.create_theme(
+        theme="フィードバック承認テーマ", confidence=0.5, origin="auto_suggestion"
+    )
+    updated = research_themes.set_theme_feedback(
+        rec["theme_id"],
+        status="approved",
+        decision="approved",
+        comment="方向性が良い",
+        reviewed_by="user",
+    )
+    assert updated is not None
+    assert updated["status"] == "approved"
+    assert updated["feedback_decision"] == "approved"
+    assert updated["feedback_reason"] is None
+    assert updated["feedback_comment"] == "方向性が良い"
+    assert updated["feedback_at"] is not None
+    assert updated["reviewed_at"] is not None
+    assert updated["reviewed_by"] == "user"
+
+    fetched = research_themes.get_theme(rec["theme_id"])
+    assert fetched["status"] == "approved"
+    assert fetched["feedback_decision"] == "approved"
+    assert fetched["feedback_comment"] == "方向性が良い"
+
+
+def test_set_theme_feedback_reject_with_reason():
+    rec = research_themes.create_theme(
+        theme="フィードバック却下テーマ", confidence=0.5, origin="auto_suggestion"
+    )
+    updated = research_themes.set_theme_feedback(
+        rec["theme_id"],
+        status="rejected",
+        decision="rejected",
+        reason="not_now",
+        comment="来月また検討",
+    )
+    assert updated["status"] == "rejected"
+    assert updated["feedback_decision"] == "rejected"
+    assert updated["feedback_reason"] == "not_now"
+    assert updated["feedback_comment"] == "来月また検討"
+    assert updated["feedback_at"] is not None
+
+
+def test_set_theme_feedback_invalid_values():
+    rec = research_themes.create_theme(theme="無効フィードバック", confidence=0.5)
+    with pytest.raises(ValueError):
+        research_themes.set_theme_feedback(
+            rec["theme_id"], status="approved", decision="unknown"
+        )
+    with pytest.raises(ValueError):
+        research_themes.set_theme_feedback(
+            rec["theme_id"], status="approved", decision="approved", reason="bogus"
+        )
+    with pytest.raises(ValueError):
+        research_themes.set_theme_feedback(
+            rec["theme_id"], status="bogus", decision="approved"
+        )
+    with pytest.raises(ValueError):
+        research_themes.set_theme_feedback(
+            rec["theme_id"], status="approved", decision="rejected"
+        )
+    with pytest.raises(ValueError):
+        research_themes.set_theme_feedback(
+            rec["theme_id"], status="rejected", decision="approved", reason="vague"
+        )
+
+
+def test_set_theme_feedback_invalid_values_leave_theme_untouched():
+    rec = research_themes.create_theme(
+        theme="無効フィードバック後も未変更", confidence=0.5
+    )
+    for kwargs in (
+        {"status": "approved", "decision": "rejected"},
+        {"status": "approved", "decision": "approved", "reason": "vague"},
+        {"status": "approved", "decision": "approved", "reason": "bogus"},
+    ):
+        with pytest.raises(ValueError):
+            research_themes.set_theme_feedback(rec["theme_id"], **kwargs)
+    fetched = research_themes.get_theme(rec["theme_id"])
+    assert fetched["status"] == "candidate"
+    assert fetched["feedback_decision"] is None
+    assert fetched["feedback_reason"] is None
+    assert fetched["feedback_at"] is None
+
+
+def test_set_theme_feedback_missing_theme_returns_none():
+    updated = research_themes.set_theme_feedback(
+        "rth_nonexistent", status="approved", decision="approved"
+    )
+    assert updated is None
+
+
+def test_list_theme_feedback_newest_first_and_limit():
+    for i in range(3):
+        rec = research_themes.create_theme(
+            theme=f"フィードバック一覧{i}",
+            confidence=0.5,
+            origin="auto_suggestion",
+        )
+        research_themes.set_theme_feedback(
+            rec["theme_id"],
+            status="rejected",
+            decision="rejected",
+            reason="other",
+            feedback_at=f"2026-01-0{i + 1}T10:00:00+09:00",
+        )
+
+    rows = research_themes.list_theme_feedback(limit=2)
+    assert len(rows) == 2
+    assert rows[0]["theme"] == "フィードバック一覧2"
+    assert rows[1]["theme"] == "フィードバック一覧1"
+    assert rows[0]["feedback_decision"] == "rejected"
+    assert rows[0]["feedback_reason"] == "other"
+
+    all_rows = research_themes.list_theme_feedback()
+    assert [r["theme"] for r in all_rows] == [
+        "フィードバック一覧2",
+        "フィードバック一覧1",
+        "フィードバック一覧0",
+    ]

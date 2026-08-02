@@ -48,6 +48,10 @@ RESEARCH_THEME_COLUMNS = [
     "reviewed_by",
     "origin",
     "hitl_run_id",
+    "feedback_decision",
+    "feedback_reason",
+    "feedback_comment",
+    "feedback_at",
 ]
 
 RESEARCH_JOB_COLUMNS = [
@@ -68,6 +72,10 @@ RESEARCH_JOB_COLUMNS = [
 ALLOWED_THEME_STATUS = frozenset({"candidate", "approved", "rejected", "duplicate"})
 ALLOWED_JOB_STATUS = frozenset({"pending", "running", "succeeded", "failed"})
 ALLOWED_KINDS = frozenset({"deep", "adjacent", "explore"})
+ALLOWED_FEEDBACK_DECISIONS = frozenset({"approved", "rejected"})
+ALLOWED_FEEDBACK_REASONS = frozenset(
+    {"not_interested", "low_utility", "vague", "duplicate", "not_now", "other"}
+)
 
 
 def _get_db():
@@ -164,6 +172,10 @@ def create_theme(
         "reviewed_by": None,
         "origin": origin,
         "hitl_run_id": hitl_run_id,
+        "feedback_decision": None,
+        "feedback_reason": None,
+        "feedback_comment": None,
+        "feedback_at": None,
     }
     db_row = serialize_theme(rec)
     columns = ", ".join(RESEARCH_THEME_COLUMNS)
@@ -316,6 +328,95 @@ def set_status(
                 return _execute_update(active_conn)
         else:
             return _execute_update(active_conn)
+
+
+def set_theme_feedback(
+    theme_id: str,
+    *,
+    status: str,
+    decision: str,
+    reason: Optional[str] = None,
+    comment: Optional[str] = None,
+    reviewed_by: str = "user",
+    feedback_at: Optional[str] = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> Optional[dict]:
+    """Update a theme's status and persist HITL feedback in a single DB operation.
+
+    `decision` is "approved" or "rejected"; `reason` is one of
+    ALLOWED_FEEDBACK_REASONS when the theme was rejected. This is only invoked
+    for auto-suggestion themes processed through the HITL confirmation.
+    """
+    if status not in ALLOWED_THEME_STATUS:
+        raise ValueError(f"Invalid status: {status}")
+    if decision not in ALLOWED_FEEDBACK_DECISIONS:
+        raise ValueError(f"Invalid feedback decision: {decision}")
+    expected_status = "approved" if decision == "approved" else "rejected"
+    if status != expected_status:
+        raise ValueError(f"Status {status} does not match decision {decision}")
+    if decision == "approved" and reason is not None:
+        raise ValueError("Feedback reason is only allowed for rejected themes")
+    if reason is not None and reason not in ALLOWED_FEEDBACK_REASONS:
+        raise ValueError(f"Invalid feedback reason: {reason}")
+    now = get_current_timestamp()
+    feedback_at = feedback_at or now
+
+    def _execute_update(c_conn):
+        cursor = c_conn.cursor()
+        cursor.execute(
+            "SELECT * FROM research_themes WHERE theme_id = ?", (theme_id,)
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        t = deserialize_theme(dict(row))
+        t["status"] = status
+        t["updated_at"] = now
+        t["reviewed_at"] = now
+        t["reviewed_by"] = reviewed_by
+        t["feedback_decision"] = decision
+        t["feedback_reason"] = reason
+        t["feedback_comment"] = comment
+        t["feedback_at"] = feedback_at
+        db_row = serialize_theme(t)
+        set_clause = ", ".join(
+            f"{c} = ?" for c in RESEARCH_THEME_COLUMNS if c != "theme_id"
+        )
+        values = [
+            db_row.get(c) for c in RESEARCH_THEME_COLUMNS if c != "theme_id"
+        ] + [theme_id]
+        c_conn.execute(
+            f"UPDATE research_themes SET {set_clause} WHERE theme_id = ?", values
+        )
+        return t
+
+    with auto_connection(conn) as (active_conn, is_generated):
+        if is_generated:
+            with active_conn:
+                return _execute_update(active_conn)
+        else:
+            return _execute_update(active_conn)
+
+
+def list_theme_feedback(
+    limit: int = 20,
+    conn: Optional[sqlite3.Connection] = None,
+) -> list[dict]:
+    """Return the most recent themes carrying HITL feedback (newest first)."""
+    with auto_connection(conn) as (active_conn, _):
+        cursor = active_conn.cursor()
+        cursor.execute(
+            """
+            SELECT theme, direction, feedback_decision, feedback_reason,
+                   feedback_comment, feedback_at
+            FROM research_themes
+            WHERE feedback_decision IS NOT NULL AND feedback_decision != ''
+            ORDER BY feedback_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        )
+        return [dict(row) for row in cursor.fetchall()]
 
 
 def create_job(theme_id: str, conn: Optional[sqlite3.Connection] = None) -> dict:

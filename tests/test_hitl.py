@@ -12,11 +12,11 @@ def test_hitl_db_migration_and_structure(test_memory_db_path):
     """Verify that the database migration correctly creates hitl_runs and hitl_questions tables with proper constraints."""
     conn = get_db_connection()
     try:
-        # Check database user_version is 16
+        # Check database user_version is 17
         cursor = conn.cursor()
         cursor.execute("PRAGMA user_version;")
         version = cursor.fetchone()[0]
-        assert version == 16
+        assert version == 17
 
         # Verify hitl_runs columns
         cursor.execute("PRAGMA table_info(hitl_runs);")
@@ -66,6 +66,9 @@ def test_hitl_db_migration_and_structure(test_memory_db_path):
         themes_cols = {row["name"]: row["type"] for row in cursor.fetchall()}
         assert "origin" in themes_cols, "v15: research_themes.origin"
         assert "hitl_run_id" in themes_cols, "v15: research_themes.hitl_run_id"
+        # v17 additions: HITL feedback fields
+        for col in ("feedback_decision", "feedback_reason", "feedback_comment", "feedback_at"):
+            assert col in themes_cols, f"v17: research_themes.{col}"
     finally:
         conn.close()
 

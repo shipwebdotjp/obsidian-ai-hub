@@ -99,8 +99,13 @@ def create_theme_and_research(
                         "title": "調査の実行",
                         "prompt": f"「{theme}」を調査しますか？",
                         "choices": [
-                            {"value": "approve", "label": "調査を実行する"},
-                            {"value": "reject", "label": "今回は見送る"}
+                            {"value": "approve", "label": "承認", "description": "テーマを調査し、結果をVaultに保存します。"},
+                            {"value": "reject:not_interested", "label": "却下: 関心外", "description": "この分野・目的に関心がない。"},
+                            {"value": "reject:low_utility", "label": "却下: 実用性不足", "description": "成果が実用的でないと感じる。"},
+                            {"value": "reject:vague", "label": "却下: 抽象的・不明確", "description": "テーマが抽象的で、調査内容が不明確。"},
+                            {"value": "reject:duplicate", "label": "却下: 既知・重複", "description": "すでに知っている・既存テーマと重複する。"},
+                            {"value": "reject:not_now", "label": "却下: 今は優先外", "description": "今は優先度が低い。30日間は同系統を抑制します。"},
+                            {"value": "reject:other", "label": "却下: その他", "description": "その他の理由。"}
                         ],
                         "is_required": 1,
                     }

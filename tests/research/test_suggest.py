@@ -5,6 +5,8 @@ from datetime import date, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from obsidian_ai_hub.research import suggest as suggest_research_theme
 
 
@@ -195,8 +197,13 @@ def test_main_creates_themes_and_researches(tmp_path: Path, monkeypatch, test_me
         assert len(questions) == 1
         assert questions[0]["question_key"] == "action"
         assert questions[0]["choices"] == [
-            {"value": "approve", "label": "調査を実行する"},
-            {"value": "reject", "label": "今回は見送る"}
+            {"value": "approve", "label": "承認", "description": "テーマを調査し、結果をVaultに保存します。"},
+            {"value": "reject:not_interested", "label": "却下: 関心外", "description": "この分野・目的に関心がない。"},
+            {"value": "reject:low_utility", "label": "却下: 実用性不足", "description": "成果が実用的でないと感じる。"},
+            {"value": "reject:vague", "label": "却下: 抽象的・不明確", "description": "テーマが抽象的で、調査内容が不明確。"},
+            {"value": "reject:duplicate", "label": "却下: 既知・重複", "description": "すでに知っている・既存テーマと重複する。"},
+            {"value": "reject:not_now", "label": "却下: 今は優先外", "description": "今は優先度が低い。30日間は同系統を抑制します。"},
+            {"value": "reject:other", "label": "却下: その他", "description": "その他の理由。"},
         ]
     finally:
         conn.close()
@@ -346,6 +353,10 @@ def test_suggestion_hitl_run_approve_with_comment_and_execute(tmp_path: Path, mo
         # Check theme is approved and job succeeded
         theme_obj = research_db.get_theme(theme_id, conn=conn)
         assert theme_obj["status"] == "approved"
+        assert theme_obj["feedback_decision"] == "approved"
+        assert theme_obj["feedback_reason"] is None
+        assert theme_obj["feedback_comment"] == "This is my special approval comment."
+        assert theme_obj["feedback_at"] is not None
 
     finally:
         conn.close()
@@ -559,3 +570,318 @@ def test_suggestion_hitl_run_handler_failure_records_failed_status(tmp_path: Pat
 
     finally:
         conn.close()
+
+
+REJECT_REASON_VALUES = [
+    "not_interested",
+    "low_utility",
+    "vague",
+    "duplicate",
+    "not_now",
+    "other",
+]
+
+
+@pytest.mark.parametrize("reason", REJECT_REASON_VALUES)
+def test_suggestion_hitl_run_reject_with_reason_saves_feedback(
+    tmp_path: Path, monkeypatch, test_memory_db_path, reason: str
+):
+    """Rejecting with each of the 6 reason choices saves status + feedback and skips research."""
+    from obsidian_ai_hub.database import get_db_connection
+    from obsidian_ai_hub import hitl
+    from obsidian_ai_hub.research import db as research_db
+    from obsidian_ai_hub.main import register_hitl_handlers
+
+    register_hitl_handlers()
+
+    conn = get_db_connection()
+    try:
+        theme_rec = research_db.create_theme(
+            theme=f"テスト却下理由_{reason}",
+            direction="方向",
+            kind="explore",
+            why_now="理由",
+            confidence=0.8,
+            status="candidate",
+            conn=conn,
+        )
+        theme_id = theme_rec["theme_id"]
+        run_id = f"hrun_reject_{reason}_{theme_id}"
+
+        questions_data = [
+            {
+                "question_key": "action",
+                "question_type": "select",
+                "display_text": "Approve?",
+                "choices": [
+                    "approve",
+                    "reject:not_interested",
+                    "reject:low_utility",
+                    "reject:vague",
+                    "reject:duplicate",
+                    "reject:not_now",
+                    "reject:other",
+                ],
+                "is_required": 1,
+            }
+        ]
+        hitl.register_run_and_questions(
+            run_id=run_id,
+            handler="research.run_approved_suggestion",
+            checkpoint=theme_id,
+            question_set_id="confirm_suggest",
+            questions_data=questions_data,
+            conn=conn,
+        )
+        hitl.submit_answer(
+            run_id,
+            "confirm_suggest",
+            "action",
+            {"value": f"reject:{reason}", "comment": "補足メモ"},
+            conn,
+        )
+
+        processed = hitl.dispatch_runs(conn)
+        assert processed == 1
+
+        theme_obj = research_db.get_theme(theme_id, conn=conn)
+        assert theme_obj["status"] == "rejected"
+        assert theme_obj["feedback_decision"] == "rejected"
+        assert theme_obj["feedback_reason"] == reason
+        assert theme_obj["feedback_comment"] == "補足メモ"
+        assert theme_obj["feedback_at"] is not None
+
+        job = research_db.latest_job(theme_id, conn=conn)
+        assert job is None
+    finally:
+        conn.close()
+
+
+def test_suggestion_hitl_run_reject_legacy_value_saves_feedback_without_reason(
+    tmp_path: Path, monkeypatch, test_memory_db_path
+):
+    """Legacy 'reject' scalar answer still rejects and records feedback without a reason."""
+    from obsidian_ai_hub.database import get_db_connection
+    from obsidian_ai_hub import hitl
+    from obsidian_ai_hub.research import db as research_db
+    from obsidian_ai_hub.main import register_hitl_handlers
+
+    register_hitl_handlers()
+
+    conn = get_db_connection()
+    try:
+        theme_rec = research_db.create_theme(
+            theme="テスト従来却下",
+            direction="方向",
+            kind="explore",
+            confidence=0.8,
+            status="candidate",
+            conn=conn,
+        )
+        theme_id = theme_rec["theme_id"]
+        run_id = f"hrun_legacy_reject_{theme_id}"
+
+        hitl.register_run_and_questions(
+            run_id=run_id,
+            handler="research.run_approved_suggestion",
+            checkpoint=theme_id,
+            question_set_id="confirm_suggest",
+            questions_data=[
+                {
+                    "question_key": "action",
+                    "question_type": "select",
+                    "display_text": "Approve?",
+                    "choices": ["approve", "reject"],
+                    "is_required": 1,
+                }
+            ],
+            conn=conn,
+        )
+        hitl.submit_answer(run_id, "confirm_suggest", "action", "reject", conn)
+
+        processed = hitl.dispatch_runs(conn)
+        assert processed == 1
+
+        theme_obj = research_db.get_theme(theme_id, conn=conn)
+        assert theme_obj["status"] == "rejected"
+        assert theme_obj["feedback_decision"] == "rejected"
+        assert theme_obj["feedback_reason"] is None
+        assert theme_obj["feedback_at"] is not None
+    finally:
+        conn.close()
+
+
+def test_suggestion_hitl_run_invalid_action_fails(tmp_path: Path, monkeypatch, test_memory_db_path):
+    """An unrecognized action value must fail the run without mutating the theme."""
+    from obsidian_ai_hub.database import get_db_connection
+    from obsidian_ai_hub import hitl
+    from obsidian_ai_hub.research import db as research_db
+    from obsidian_ai_hub.main import register_hitl_handlers
+
+    register_hitl_handlers()
+
+    conn = get_db_connection()
+    try:
+        theme_rec = research_db.create_theme(
+            theme="テスト無効アクション",
+            direction="方向",
+            kind="explore",
+            confidence=0.8,
+            status="candidate",
+            conn=conn,
+        )
+        theme_id = theme_rec["theme_id"]
+        run_id = f"hrun_invalid_action_{theme_id}"
+
+        hitl.register_run_and_questions(
+            run_id=run_id,
+            handler="research.run_approved_suggestion",
+            checkpoint=theme_id,
+            question_set_id="confirm_suggest",
+            questions_data=[
+                {
+                    "question_key": "action",
+                    "question_type": "select",
+                    "display_text": "Approve?",
+                    "choices": ["approve", "reject"],
+                    "is_required": 1,
+                }
+            ],
+            conn=conn,
+        )
+        hitl.submit_answer(run_id, "confirm_suggest", "action", "approve", conn)
+
+        # Rewrite the answer to an invalid value, simulating a malformed stored answer.
+        hitl.store.update_question_status_and_answer(
+            hitl.get_question(run_id, "confirm_suggest", "action", conn)["question_id"],
+            status="answered",
+            answer={"value": "bogus", "comment": None},
+            answered_at="2026-01-01T00:00:00+09:00",
+            conn=conn,
+        )
+
+        processed = hitl.dispatch_runs(conn)
+        assert processed == 1
+
+        run = hitl.get_run(run_id, conn)
+        assert run["status"] == "failed"
+        assert "Invalid action choice" in (run["error_message"] or "")
+
+        theme_obj = research_db.get_theme(theme_id, conn=conn)
+        assert theme_obj["status"] == "candidate"
+        assert theme_obj["feedback_decision"] is None
+    finally:
+        conn.close()
+
+
+def test_prompt_includes_feedback_and_not_now_suppression(
+    tmp_path: Path, monkeypatch, test_memory_db_path
+):
+    """The LLM prompt embeds approved/rejected feedback and splits not_now by the 30-day cooldown."""
+    today = date.today()
+    activity_root = tmp_path / "activity"
+    _write_activity_log(activity_root, today, ["フィードバックを反映した提案テスト"])
+    monkeypatch.setattr(suggest_research_theme.config, "ACTIVITY_PATH", activity_root)
+
+    from obsidian_ai_hub.research import db as research_db
+
+    approved = research_db.create_theme(
+        theme="承認済みテーマF",
+        direction="方向",
+        kind="deep",
+        origin="auto_suggestion",
+    )
+    research_db.set_theme_feedback(
+        approved["theme_id"],
+        status="approved",
+        decision="approved",
+        comment="方向性が良い",
+    )
+
+    recent = research_db.create_theme(
+        theme="今は優先外テーマF",
+        direction="方向",
+        kind="deep",
+        origin="auto_suggestion",
+    )
+    research_db.set_theme_feedback(
+        recent["theme_id"],
+        status="rejected",
+        decision="rejected",
+        reason="not_now",
+        comment="来月以降",
+    )
+
+    older = research_db.create_theme(
+        theme="過去の優先外テーマF",
+        direction="方向",
+        kind="deep",
+        origin="auto_suggestion",
+    )
+    older_date = (today - timedelta(days=40)).isoformat()
+    research_db.set_theme_feedback(
+        older["theme_id"],
+        status="rejected",
+        decision="rejected",
+        reason="not_now",
+        comment="旧記録",
+        feedback_at=f"{older_date}T10:00:00+09:00",
+    )
+
+    existing = suggest_research_theme._load_existing_db_themes()
+    feedbacks = suggest_research_theme._load_recent_feedback()
+    prompt_text = suggest_research_theme._build_llm_prompt(existing, feedbacks)
+
+    assert "承認: 承認済みテーマF" in prompt_text
+    assert "方向性が良い" in prompt_text
+    assert "却下(今は優先外): 今は優先外テーマF" in prompt_text
+    assert "直近30日以内の「今は優先外」却下" in prompt_text
+    assert "今は優先外テーマF" in prompt_text
+    assert "30日以上前の「今は優先外」却下" in prompt_text
+    assert "過去の優先外テーマF" in prompt_text
+    assert "来月以降" in prompt_text
+    assert "旧記録" in prompt_text
+
+
+def test_not_now_suppression_splits_recent_and_older():
+    """Only not_now rejections within the last 30 days are treated as suppression targets."""
+    today = date.today()
+    recent = suggest_research_theme._ThemeFeedback(
+        theme="最近の優先外",
+        decision="rejected",
+        reason="not_now",
+        feedback_at=today.isoformat() + "T10:00:00+09:00",
+    )
+    boundary = suggest_research_theme._ThemeFeedback(
+        theme="ちょうど30日前",
+        decision="rejected",
+        reason="not_now",
+        feedback_at=(today - timedelta(days=30)).isoformat() + "T10:00:00+09:00",
+    )
+    older = suggest_research_theme._ThemeFeedback(
+        theme="古い優先外",
+        decision="rejected",
+        reason="not_now",
+        feedback_at=(today - timedelta(days=40)).isoformat() + "T10:00:00+09:00",
+    )
+    non_not_now = suggest_research_theme._ThemeFeedback(
+        theme="関心外テーマ",
+        decision="rejected",
+        reason="not_interested",
+        feedback_at=today.isoformat() + "T10:00:00+09:00",
+    )
+
+    approved_block, rejected_block, recent_block, older_block = (
+        suggest_research_theme._build_feedback_blocks([recent, boundary, older, non_not_now])
+    )
+
+    assert "最近の優先外" in recent_block
+    assert "ちょうど30日前" in recent_block
+    assert "古い優先外" not in recent_block
+    assert "古い優先外" in older_block
+    assert "関心外テーマ" not in recent_block
+    assert "関心外テーマ" not in older_block
+    assert "却下(関心外): 関心外テーマ" in rejected_block
+    assert "最近の優先外" not in rejected_block
+    assert "ちょうど30日前" not in rejected_block
+    assert "古い優先外" not in rejected_block

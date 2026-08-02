@@ -462,6 +462,9 @@ def get_db_connection() -> sqlite3.Connection:
     if current_version <= 15:
         run_migration_v16(conn)
 
+    if current_version <= 16:
+        run_migration_v17(conn)
+
     return conn
 
 
@@ -536,6 +539,21 @@ def run_migration_v16(conn: sqlite3.Connection) -> None:
     except sqlite3.OperationalError as e:
         _ignore_duplicate_schema_object(e)
     conn.execute("PRAGMA user_version = 16;")
+    conn.commit()
+
+
+def run_migration_v17(conn: sqlite3.Connection) -> None:
+    """Run migration for version 17 (research_themes HITL feedback columns).
+
+    Feedback is only populated for auto_suggestion themes that flow through the
+    HITL confirmation (research.run_approved_suggestion).
+    """
+    for column in ("feedback_decision", "feedback_reason", "feedback_comment", "feedback_at"):
+        try:
+            conn.execute(f"ALTER TABLE research_themes ADD COLUMN {column} TEXT;")
+        except sqlite3.OperationalError as e:
+            _ignore_duplicate_schema_object(e)
+    conn.execute("PRAGMA user_version = 17;")
     conn.commit()
 
 

@@ -935,14 +935,41 @@ def run_approved_suggestion(ctx) -> "HitlResult":
     if not theme_id:
         return HitlResult.fail(f"Invalid or missing theme_id in checkpoint: {ctx.checkpoint}")
 
-    if answer == "reject":
-        db.set_status(theme_id, "rejected", reviewed_by="system", conn=ctx.conn)
-        return HitlResult.complete(checkpoint=json.dumps({**cp, "phase": "rejected"}))
-
-    if answer != "approve":
+    # Normalize the single-select action into approve/reject plus an optional
+    # rejection reason. Legacy scalar values ("approve" / "reject") stay valid.
+    status = None
+    decision = None
+    reason = None
+    if answer == "approve":
+        status = "approved"
+        decision = "approved"
+    elif answer == "reject":
+        status = "rejected"
+        decision = "rejected"
+    elif isinstance(answer, str) and answer.startswith("reject:"):
+        status = "rejected"
+        decision = "rejected"
+        reason = answer.split(":", 1)[1].strip()
+        if reason not in db.ALLOWED_FEEDBACK_REASONS:
+            reason = "other"
+    else:
         return HitlResult.fail(f"Invalid action choice: {answer}")
 
-    db.set_status(theme_id, "approved", reviewed_by="system", conn=ctx.conn)
+    # Save the theme status and the user feedback in the same DB operation.
+    saved = db.set_theme_feedback(
+        theme_id,
+        status=status,
+        decision=decision,
+        reason=reason,
+        comment=comment,
+        reviewed_by="user",
+        conn=ctx.conn,
+    )
+    if saved is None:
+        return HitlResult.fail(f"Theme {theme_id} not found when saving feedback")
+
+    if decision == "rejected":
+        return HitlResult.complete(checkpoint=json.dumps({**cp, "phase": "rejected"}))
 
     job_id = cp.get("job_id")
     phase = cp.get("phase", "awaiting_approval")

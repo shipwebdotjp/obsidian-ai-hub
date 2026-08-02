@@ -4,7 +4,8 @@ import json
 import logging
 import re
 from dataclasses import dataclass
-from typing import Sequence
+from datetime import date
+from typing import Optional, Sequence
 
 from obsidian_ai_hub.utils import config, llm_client, prompt
 
@@ -15,8 +16,22 @@ MAX_CONTEXT_NOTE_CHARS = 1200
 MAX_CONTEXT_NOTE_LINES = 48
 MAX_THEME_LENGTH = 80
 MAX_DIRECTION_LENGTH = 140
-LLM_CANDIDATE_COUNT = 1
+LLM_CANDIDATE_COUNT = 3
 ALLOWED_KINDS = ("deep", "adjacent", "explore")
+
+MAX_FEEDBACK_THEME_CHARS = 60
+MAX_FEEDBACK_COMMENT_CHARS = 100
+MAX_FEEDBACK_ITEMS = 20
+NOT_NOW_COOLDOWN_DAYS = 30
+
+FEEDBACK_REASON_LABELS = {
+    "not_interested": "関心外",
+    "low_utility": "実用性不足",
+    "vague": "抽象的・不明確",
+    "duplicate": "既知・重複",
+    "not_now": "今は優先外",
+    "other": "その他",
+}
 
 
 @dataclass(frozen=True)
@@ -24,6 +39,15 @@ class _ExistingThemeRef:
     theme: str
     status: str
     key: str  # normalized_key from DB
+
+
+@dataclass(frozen=True)
+class _ThemeFeedback:
+    theme: str
+    decision: str  # "approved" | "rejected"
+    reason: Optional[str] = None
+    comment: Optional[str] = None
+    feedback_at: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -106,16 +130,119 @@ def _build_existing_themes_block(themes: Sequence[_ExistingThemeRef]) -> str:
     return "\n".join(lines)
 
 
-def _build_llm_prompt(existing_themes: Sequence[_ExistingThemeRef]) -> str:
+def _load_recent_feedback() -> list[_ThemeFeedback]:
+    from obsidian_ai_hub.research import db
+
+    try:
+        rows = db.list_theme_feedback(limit=MAX_FEEDBACK_ITEMS)
+    except Exception:
+        logger.exception("Failed to load research theme feedback from DB")
+        return []
+
+    feedbacks: list[_ThemeFeedback] = []
+    for r in rows:
+        theme = (r.get("theme") or "").strip()
+        decision = r.get("feedback_decision") or ""
+        if not theme or decision not in ("approved", "rejected"):
+            continue
+        feedbacks.append(
+            _ThemeFeedback(
+                theme=theme,
+                decision=decision,
+                reason=r.get("feedback_reason"),
+                comment=r.get("feedback_comment"),
+                feedback_at=r.get("feedback_at"),
+            )
+        )
+    return feedbacks
+
+
+def _format_feedback_item(feedback: _ThemeFeedback) -> str:
+    if feedback.decision == "approved":
+        label = "承認"
+    else:
+        label = f"却下({FEEDBACK_REASON_LABELS.get(feedback.reason, 'その他')})"
+    theme = _truncate_text(feedback.theme, MAX_FEEDBACK_THEME_CHARS)
+    line = f"- {label}: {theme}"
+    if feedback.comment:
+        comment = _truncate_text(feedback.comment, MAX_FEEDBACK_COMMENT_CHARS)
+        line += f" / 補足: {comment}"
+    return line
+
+
+def _is_feedback_recent(feedback_at: Optional[str], days: int) -> bool:
+    """Whether a feedback recorded at feedback_at falls within the last `days` days."""
+    if not feedback_at:
+        return False
+    try:
+        recorded = date.fromisoformat(feedback_at[:10])
+    except ValueError:
+        return False
+    return (date.today() - recorded).days <= days
+
+
+def _build_feedback_blocks(
+    feedbacks: Sequence[_ThemeFeedback],
+) -> tuple[str, str, str, str]:
+    """Build prompt blocks for approved / rejected / not_now feedbacks.
+
+    Returns (approved_block, rejected_block, not_now_recent_block,
+    not_now_older_block). The not_now blocks split the '今は優先外' rejections by
+    the 30-day cooldown: recent ones suppress similar candidates, older ones may
+    be re-evaluated only with new activity evidence. 'not_now' items are kept
+    out of rejected_block so each block carries mutually exclusive items.
+    """
+    approved = [f for f in feedbacks if f.decision == "approved"]
+    rejected = [f for f in feedbacks if f.decision == "rejected"]
+
+    approved_block = (
+        "\n".join(_format_feedback_item(f) for f in approved) or "(none)"
+    )
+    rejected_block = (
+        "\n".join(_format_feedback_item(f) for f in rejected if f.reason != "not_now")
+        or "(none)"
+    )
+
+    not_now = [f for f in rejected if f.reason == "not_now"]
+    not_now_recent = [
+        f for f in not_now if _is_feedback_recent(f.feedback_at, NOT_NOW_COOLDOWN_DAYS)
+    ]
+    not_now_older = [
+        f for f in not_now if not _is_feedback_recent(f.feedback_at, NOT_NOW_COOLDOWN_DAYS)
+    ]
+    not_now_recent_block = (
+        "\n".join(_format_feedback_item(f) for f in not_now_recent) or "(none)"
+    )
+    not_now_older_block = (
+        "\n".join(_format_feedback_item(f) for f in not_now_older) or "(none)"
+    )
+    return approved_block, rejected_block, not_now_recent_block, not_now_older_block
+
+
+def _build_llm_prompt(
+    existing_themes: Sequence[_ExistingThemeRef],
+    feedbacks: Sequence[_ThemeFeedback],
+) -> str:
     context_pack = _build_context_pack()
     if not context_pack:
         return ""
+    (
+        approved_block,
+        rejected_block,
+        not_now_recent_block,
+        not_now_older_block,
+    ) = _build_feedback_blocks(feedbacks)
     return prompt.render_prompt(
         config.RESEARCH_THEME_GENERATION_PROMPT_PATH,
         {
             "LLM_CANDIDATE_COUNT": LLM_CANDIDATE_COUNT,
+            "NOT_NOW_COOLDOWN_DAYS": NOT_NOW_COOLDOWN_DAYS,
             "context_pack": context_pack,
             "existing_themes_block": _build_existing_themes_block(existing_themes),
+            "approved_feedback_block": approved_block,
+            "rejected_feedback_block": rejected_block,
+            "not_now_recent_block": not_now_recent_block,
+            "not_now_older_block": not_now_older_block,
         },
     )
 
@@ -207,7 +334,8 @@ def _build_llm_candidates(
     *,
     existing_themes: Sequence[_ExistingThemeRef],
 ) -> list[SuggestedResearchTheme]:
-    prompt_text = _build_llm_prompt(existing_themes)
+    feedbacks = _load_recent_feedback()
+    prompt_text = _build_llm_prompt(existing_themes, feedbacks)
     if not prompt_text:
         logger.warning("No activity context available")
         return []
