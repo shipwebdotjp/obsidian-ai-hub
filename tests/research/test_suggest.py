@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
+from obsidian_ai_hub.research import feedback
 from obsidian_ai_hub.research import suggest as suggest_research_theme
 
 
@@ -198,12 +199,7 @@ def test_main_creates_themes_and_researches(tmp_path: Path, monkeypatch, test_me
         assert questions[0]["question_key"] == "action"
         assert questions[0]["choices"] == [
             {"value": "approve", "label": "承認", "description": "テーマを調査し、結果をVaultに保存します。"},
-            {"value": "reject:not_interested", "label": "却下: 関心外", "description": "この分野・目的に関心がない。"},
-            {"value": "reject:low_utility", "label": "却下: 実用性不足", "description": "成果が実用的でないと感じる。"},
-            {"value": "reject:vague", "label": "却下: 抽象的・不明確", "description": "テーマが抽象的で、調査内容が不明確。"},
-            {"value": "reject:duplicate", "label": "却下: 既知・重複", "description": "すでに知っている・既存テーマと重複する。"},
-            {"value": "reject:not_now", "label": "却下: 今は優先外", "description": "今は優先度が低い。30日間は同系統を抑制します。"},
-            {"value": "reject:other", "label": "却下: その他", "description": "その他の理由。"},
+            *feedback.FEEDBACK_ACTION_CHOICES,
         ]
     finally:
         conn.close()
@@ -572,14 +568,7 @@ def test_suggestion_hitl_run_handler_failure_records_failed_status(tmp_path: Pat
         conn.close()
 
 
-REJECT_REASON_VALUES = [
-    "not_interested",
-    "low_utility",
-    "vague",
-    "duplicate",
-    "not_now",
-    "other",
-]
+REJECT_REASON_VALUES = sorted(feedback.ALLOWED_FEEDBACK_REASONS)
 
 
 @pytest.mark.parametrize("reason", REJECT_REASON_VALUES)
@@ -613,15 +602,7 @@ def test_suggestion_hitl_run_reject_with_reason_saves_feedback(
                 "question_key": "action",
                 "question_type": "select",
                 "display_text": "Approve?",
-                "choices": [
-                    "approve",
-                    "reject:not_interested",
-                    "reject:low_utility",
-                    "reject:vague",
-                    "reject:duplicate",
-                    "reject:not_now",
-                    "reject:other",
-                ],
+                "choices": ["approve", *(c["value"] for c in feedback.FEEDBACK_ACTION_CHOICES)],
                 "is_required": 1,
             }
         ]
@@ -706,6 +687,67 @@ def test_suggestion_hitl_run_reject_legacy_value_saves_feedback_without_reason(
         assert theme_obj["status"] == "rejected"
         assert theme_obj["feedback_decision"] == "rejected"
         assert theme_obj["feedback_reason"] is None
+        assert theme_obj["feedback_at"] is not None
+    finally:
+        conn.close()
+
+
+def test_suggestion_hitl_run_reject_unknown_reason_falls_back_to_other(
+    tmp_path: Path, monkeypatch, test_memory_db_path
+):
+    """An unknown reject:<reason> value is normalized to 'other' instead of failing."""
+    from obsidian_ai_hub.database import get_db_connection
+    from obsidian_ai_hub import hitl
+    from obsidian_ai_hub.research import db as research_db
+    from obsidian_ai_hub.main import register_hitl_handlers
+
+    register_hitl_handlers()
+
+    conn = get_db_connection()
+    try:
+        theme_rec = research_db.create_theme(
+            theme="テスト未知理由",
+            direction="方向",
+            kind="explore",
+            confidence=0.8,
+            status="candidate",
+            conn=conn,
+        )
+        theme_id = theme_rec["theme_id"]
+        run_id = f"hrun_unknown_reason_{theme_id}"
+
+        hitl.register_run_and_questions(
+            run_id=run_id,
+            handler="research.run_approved_suggestion",
+            checkpoint=theme_id,
+            question_set_id="confirm_suggest",
+            questions_data=[
+                {
+                    "question_key": "action",
+                    "question_type": "select",
+                    "display_text": "Approve?",
+                    "choices": ["approve", "reject:unrecognized_reason"],
+                    "is_required": 1,
+                }
+            ],
+            conn=conn,
+        )
+        hitl.submit_answer(
+            run_id,
+            "confirm_suggest",
+            "action",
+            {"value": "reject:unrecognized_reason", "comment": "その他理由メモ"},
+            conn,
+        )
+
+        processed = hitl.dispatch_runs(conn)
+        assert processed == 1
+
+        theme_obj = research_db.get_theme(theme_id, conn=conn)
+        assert theme_obj["status"] == "rejected"
+        assert theme_obj["feedback_decision"] == "rejected"
+        assert theme_obj["feedback_reason"] == "other"
+        assert theme_obj["feedback_comment"] == "その他理由メモ"
         assert theme_obj["feedback_at"] is not None
     finally:
         conn.close()
@@ -864,6 +906,18 @@ def test_not_now_suppression_splits_recent_and_older():
         reason="not_now",
         feedback_at=(today - timedelta(days=40)).isoformat() + "T10:00:00+09:00",
     )
+    no_date = suggest_research_theme._ThemeFeedback(
+        theme="日付なし",
+        decision="rejected",
+        reason="not_now",
+        feedback_at=None,
+    )
+    future = suggest_research_theme._ThemeFeedback(
+        theme="未来日付",
+        decision="rejected",
+        reason="not_now",
+        feedback_at=(today + timedelta(days=1)).isoformat() + "T10:00:00+09:00",
+    )
     non_not_now = suggest_research_theme._ThemeFeedback(
         theme="関心外テーマ",
         decision="rejected",
@@ -872,13 +926,19 @@ def test_not_now_suppression_splits_recent_and_older():
     )
 
     approved_block, rejected_block, recent_block, older_block = (
-        suggest_research_theme._build_feedback_blocks([recent, boundary, older, non_not_now])
+        suggest_research_theme._build_feedback_blocks(
+            [recent, boundary, older, no_date, future, non_not_now]
+        )
     )
 
     assert "最近の優先外" in recent_block
     assert "ちょうど30日前" in recent_block
     assert "古い優先外" not in recent_block
     assert "古い優先外" in older_block
+    assert "日付なし" not in recent_block
+    assert "日付なし" in older_block
+    assert "未来日付" not in recent_block
+    assert "未来日付" in older_block
     assert "関心外テーマ" not in recent_block
     assert "関心外テーマ" not in older_block
     assert "却下(関心外): 関心外テーマ" in rejected_block

@@ -11,6 +11,7 @@ from typing import Any, Optional
 from contextlib import contextmanager
 
 from obsidian_ai_hub.database import get_db_connection
+from obsidian_ai_hub.research import feedback
 from obsidian_ai_hub.utils.embeddings import cosine_similarity
 
 logger = logging.getLogger(__name__)
@@ -73,9 +74,7 @@ ALLOWED_THEME_STATUS = frozenset({"candidate", "approved", "rejected", "duplicat
 ALLOWED_JOB_STATUS = frozenset({"pending", "running", "succeeded", "failed"})
 ALLOWED_KINDS = frozenset({"deep", "adjacent", "explore"})
 ALLOWED_FEEDBACK_DECISIONS = frozenset({"approved", "rejected"})
-ALLOWED_FEEDBACK_REASONS = frozenset(
-    {"not_interested", "low_utility", "vague", "duplicate", "not_now", "other"}
-)
+ALLOWED_FEEDBACK_REASONS = feedback.ALLOWED_FEEDBACK_REASONS
 
 
 def _get_db():
@@ -403,6 +402,8 @@ def list_theme_feedback(
     conn: Optional[sqlite3.Connection] = None,
 ) -> list[dict]:
     """Return the most recent themes carrying HITL feedback (newest first)."""
+    if limit < 1:
+        raise ValueError(f"Invalid limit: {limit}")
     with auto_connection(conn) as (active_conn, _):
         cursor = active_conn.cursor()
         cursor.execute(
@@ -411,7 +412,7 @@ def list_theme_feedback(
                    feedback_comment, feedback_at
             FROM research_themes
             WHERE feedback_decision IS NOT NULL AND feedback_decision != ''
-            ORDER BY feedback_at DESC
+            ORDER BY feedback_at DESC, rowid DESC
             LIMIT ?
             """,
             (limit,),

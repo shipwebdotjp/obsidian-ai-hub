@@ -251,3 +251,10 @@ def test_list_theme_feedback_newest_first_and_limit():
         "フィードバック一覧1",
         "フィードバック一覧0",
     ]
+
+
+def test_list_theme_feedback_rejects_invalid_limit():
+    with pytest.raises(ValueError):
+        research_themes.list_theme_feedback(limit=0)
+    with pytest.raises(ValueError):
+        research_themes.list_theme_feedback(limit=-1)

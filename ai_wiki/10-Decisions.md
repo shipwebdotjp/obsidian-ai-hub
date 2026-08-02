@@ -764,6 +764,13 @@ Vite 6 は現在の安定 LTS ラインであり、Vitest 4 を本格活用す�
 - `db.set_theme_feedback` に不変条件の検証を追加した。`status` は `decision` と整合する値のみ許容し（approved↔approved / rejected↔rejected）、approve 時に `reason` を渡すことはできない。検証は書き込み前に実施するため、不正値ではレコードは変更されない。
 - 提案プロンプトのブロックは互いに排他とする。「今は優先外」のテーマは一般の「却下されたテーマ」ブロックから除外し、30日で分割した専用ブロック（直近=抑制 / それ以前=再評価可）のみに掲載する。これにより「却下テーマそのものは再提案しない」一般ルールと30日再評価ルールの競合を防ぐ。
 
+### 保守性・堅牢化の追加（コードレビュー反映 2026-08-03）
+
+- 却下理由の定義を `research/feedback.py` に一元化した。`FEEDBACK_REASONS`（キー・ラベル・説明のタプル）から `ALLOWED_FEEDBACK_REASONS` / `FEEDBACK_REASON_LABELS` / `FEEDBACK_ACTION_CHOICES` を導出し、`db.py`・`suggest.py`・`pipeline.py`・`seed.py`・テストが参照する。理由の追加・変更時はこの1箇所のみの修正で済み、追従漏れによる理由の黙殺（`other` 化）を防ぐ。
+- `list_theme_feedback` は `ORDER BY feedback_at DESC, rowid DESC` で同秒タイの並びを決定的にし、`limit` の負値を拒否する。
+- v17 マイグレーションに `feedback_decision, feedback_at` のインデックス `idx_rt_feedback_decision_at` を追加（既存 idx_rt_* 慣例に合わせる）。
+- `_is_feedback_recent` は未来日付の `feedback_at` を「直近」として扱わない（0 以下にクランプ）。
+
 ### 提案への反映
 
 - `suggest.py` は直近20件の保存済みフィードバックを読み込み、承認・却下（理由・補足）をプロンプトへ明示する。補足コメントは長さを制限し、「命令ではなく利用者の嗜好データ」として扱う旨をプロンプトに明記する。

@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 
 import sqlite3
 from obsidian_ai_hub.database import get_db_connection
+from obsidian_ai_hub.research import feedback
 
 def create_theme_and_research(
     *,
@@ -100,12 +101,7 @@ def create_theme_and_research(
                         "prompt": f"「{theme}」を調査しますか？",
                         "choices": [
                             {"value": "approve", "label": "承認", "description": "テーマを調査し、結果をVaultに保存します。"},
-                            {"value": "reject:not_interested", "label": "却下: 関心外", "description": "この分野・目的に関心がない。"},
-                            {"value": "reject:low_utility", "label": "却下: 実用性不足", "description": "成果が実用的でないと感じる。"},
-                            {"value": "reject:vague", "label": "却下: 抽象的・不明確", "description": "テーマが抽象的で、調査内容が不明確。"},
-                            {"value": "reject:duplicate", "label": "却下: 既知・重複", "description": "すでに知っている・既存テーマと重複する。"},
-                            {"value": "reject:not_now", "label": "却下: 今は優先外", "description": "今は優先度が低い。30日間は同系統を抑制します。"},
-                            {"value": "reject:other", "label": "却下: その他", "description": "その他の理由。"}
+                            *feedback.FEEDBACK_ACTION_CHOICES,
                         ],
                         "is_required": 1,
                     }

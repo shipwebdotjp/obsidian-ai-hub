@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Optional, Sequence
 
+from obsidian_ai_hub.research.feedback import FEEDBACK_REASON_LABELS
 from obsidian_ai_hub.utils import config, llm_client, prompt
 
 logger = logging.getLogger(__name__)
@@ -23,15 +24,6 @@ MAX_FEEDBACK_THEME_CHARS = 60
 MAX_FEEDBACK_COMMENT_CHARS = 100
 MAX_FEEDBACK_ITEMS = 20
 NOT_NOW_COOLDOWN_DAYS = 30
-
-FEEDBACK_REASON_LABELS = {
-    "not_interested": "関心外",
-    "low_utility": "実用性不足",
-    "vague": "抽象的・不明確",
-    "duplicate": "既知・重複",
-    "not_now": "今は優先外",
-    "other": "その他",
-}
 
 
 @dataclass(frozen=True)
@@ -178,7 +170,7 @@ def _is_feedback_recent(feedback_at: Optional[str], days: int) -> bool:
         recorded = date.fromisoformat(feedback_at[:10])
     except ValueError:
         return False
-    return (date.today() - recorded).days <= days
+    return 0 <= (date.today() - recorded).days <= days
 
 
 def _build_feedback_blocks(

@@ -553,6 +553,10 @@ def run_migration_v17(conn: sqlite3.Connection) -> None:
             conn.execute(f"ALTER TABLE research_themes ADD COLUMN {column} TEXT;")
         except sqlite3.OperationalError as e:
             _ignore_duplicate_schema_object(e)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_rt_feedback_decision_at "
+        "ON research_themes(feedback_decision, feedback_at);"
+    )
     conn.execute("PRAGMA user_version = 17;")
     conn.commit()
 
