@@ -380,7 +380,7 @@ def create_opencode_go_llm(model: str, temperature: float = 0.7, max_tokens: int
     if not api_key:
         raise RuntimeError("Environment variable OPENCODE_API_KEY is not set")
 
-    openai_prefixes = ("glm-", "kimi-", "deepseek-", "mimo-")
+    openai_prefixes = ("gpt-", "glm-", "kimi-", "deepseek-", "mimo-", "grok-")
     anthropic_prefixes = ("minimax-", "qwen3.7-", "qwen3.6-")
 
     if model.startswith(openai_prefixes):
@@ -391,6 +391,10 @@ def create_opencode_go_llm(model: str, temperature: float = 0.7, max_tokens: int
                 "langchain-openai is required for provider 'opencode_go' with OpenAI-compatible models. "
                 "Install with: pip install -U langchain-openai"
             )
+        options = {}
+        if model.startswith("gpt-"):
+            options["use_responses_api"] = True
+
         return ChatOpenAI(
             model=model,
             api_key=api_key,
@@ -398,6 +402,7 @@ def create_opencode_go_llm(model: str, temperature: float = 0.7, max_tokens: int
             temperature=temperature,
             max_tokens=max_tokens,
             max_retries=0,
+            **options,
         )
     elif model.startswith(anthropic_prefixes):
         try:

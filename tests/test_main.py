@@ -309,3 +309,27 @@ def test_cli_execution_logging_failure(monkeypatch, test_memory_db_path):
     assert detail["exception_type"] == "ValueError"
     assert "Sync failed" in detail["exception_message"]
     assert detail["traceback"] is not None
+
+
+def test_backup_failure_is_recorded_in_execution_log(monkeypatch, test_memory_db_path):
+    monkeypatch.setattr(sys, "argv", ["prog", "--backup"])
+
+    from obsidian_ai_hub.utils import execution_logger
+
+    error = RuntimeError(
+        "Backup failed:\nrsync failed for '/source' -> '/destination' "
+        "(exit 1): Permission denied"
+    )
+    with patch.object(main_module.do_backup, "main", side_effect=error):
+        try:
+            main_module.main()
+        except RuntimeError as exc:
+            assert exc is error
+
+    items, _ = execution_logger.list_execution_logs(kind="command")
+    detail = execution_logger.get_command_run_detail(items[0]["id"])
+    assert detail is not None
+    assert detail["command"] == "backup"
+    assert detail["status"] == "failed"
+    assert "rsync failed" in detail["exception_message"]
+    assert "Permission denied" in detail["exception_message"]

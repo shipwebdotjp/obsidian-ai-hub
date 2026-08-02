@@ -33,6 +33,32 @@ def test_opencode_go_openai_compatible_routing():
             )
 
 
+def test_opencode_go_gpt_models_use_responses_api():
+    with (
+        patch(
+            "obsidian_ai_hub.utils.llm_client.config.OPENCODE_API_KEY",
+            "test_opencode_key",
+        ),
+        patch("langchain_openai.ChatOpenAI") as mock_chat_openai,
+    ):
+        llm_client.create_langchain_llm(
+            provider="opencode_go",
+            model="gpt-5.6-terra",
+            temperature=0.5,
+            max_tokens=256,
+        )
+
+    mock_chat_openai.assert_called_once_with(
+        model="gpt-5.6-terra",
+        api_key="test_opencode_key",
+        base_url="https://opencode.ai/zen/go/v1",
+        temperature=0.5,
+        max_tokens=256,
+        max_retries=0,
+        use_responses_api=True,
+    )
+
+
 def test_opencode_go_anthropic_compatible_routing():
     """Verify that Anthropic-compatible model IDs correctly route to ChatAnthropic with proper arguments."""
     with (
