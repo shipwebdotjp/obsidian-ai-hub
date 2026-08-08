@@ -184,7 +184,7 @@ export default function ResearchDetailPanel({
       <div className="mt-6 space-x-2">
         {detail.status === "candidate" && detail.origin === "auto_suggestion" && detail.hitl_run_id && (
           <Link
-            to={ROUTES.HITL}
+            to={`${ROUTES.HITL}?run_id=${encodeURIComponent(detail.hitl_run_id)}`}
             className="inline-block rounded bg-blue-600 px-3 py-1.5 text-xs text-white hover:bg-blue-700 cursor-pointer"
           >
             HITLで回答

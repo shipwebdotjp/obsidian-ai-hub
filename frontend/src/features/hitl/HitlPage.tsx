@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   ApiError,
   listHitlRuns,
@@ -52,6 +53,8 @@ function getFormattedObserved(observedAt: string | undefined): string {
 }
 
 export default function HitlPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const runIdParam = searchParams.get("run_id");
   const [runs, setRuns] = useState<HitlRun[]>([]);
   const [total, setTotal] = useState(0);
   const [selectedRun, setSelectedRun] = useState<HitlRunDetail | null>(null);
@@ -122,8 +125,28 @@ export default function HitlPage() {
     }
   }, []);
 
+  // When arriving via a deep link (e.g. ?run_id=... from the research detail)
+  // or selecting a row, load the detail for the flagged run.
+  const loadDetailForParam = useCallback(() => {
+    if (runIdParam) {
+      void loadDetail(runIdParam);
+    }
+  }, [runIdParam, loadDetail]);
+
+  useEffect(() => {
+    loadDetailForParam();
+  }, [loadDetailForParam]);
+
   const handleSelectRun = (run: HitlRun) => {
-    void loadDetail(run.run_id);
+    if (run.run_id === selectedRun?.run_id) {
+      void loadDetail(run.run_id);
+      return;
+    }
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set("run_id", run.run_id);
+      return next;
+    }, { replace: true });
   };
 
   const handleSubmitAnswer = async (q: HitlQuestion) => {

@@ -1,4 +1,5 @@
 import { render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { describe, it, expect, vi } from "vitest";
 import ResearchDetailPanel from "./ResearchDetailPanel";
 
@@ -106,5 +107,34 @@ describe("ResearchDetailPanel", () => {
     });
 
     expect(screen.queryByText("Should not show")).toBeNull();
+  });
+
+  it("links to the HITL page with the run_id query param for pending auto-suggestions", async () => {
+    mockGetResearchTheme.mockResolvedValue({
+      theme_id: "test-3",
+      status: "candidate",
+      origin: "auto_suggestion",
+      hitl_run_id: "hrun-abc",
+      theme: "test",
+      normalized_key: "test",
+      related_theme_ids: [],
+      latest_job: {
+        job_id: "job-3",
+        status: "pending",
+      },
+    });
+
+    render(
+      <MemoryRouter>
+        <ResearchDetailPanel
+          themeId="test-3"
+          onChanged={vi.fn()}
+          notify={vi.fn()}
+        />
+      </MemoryRouter>
+    );
+
+    const link = await screen.findByRole("link", { name: "HITLで回答" });
+    expect(link).toHaveAttribute("href", "/hitl?run_id=hrun-abc");
   });
 });

@@ -1,5 +1,6 @@
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter, useSearchParams } from "react-router-dom";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import HitlPage from "./HitlPage";
 
@@ -106,6 +107,24 @@ const sampleDetail2 = {
   ],
 };
 
+function renderPage(initialEntries: string[] = ["/hitl"]) {
+  return render(
+    <MemoryRouter initialEntries={initialEntries}>
+      <HitlPage />
+    </MemoryRouter>
+  );
+}
+
+function RouterProbe({ children }: { children: React.ReactNode }) {
+  const [sp] = useSearchParams();
+  return (
+    <>
+      <div data-testid="probe-full-search">{sp.toString()}</div>
+      {children}
+    </>
+  );
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   mockListHitlRuns.mockResolvedValue(sampleRuns as any);
@@ -118,7 +137,7 @@ afterEach(() => {
 
 describe("HitlPage", () => {
   it("initial load fetches and lists hitl runs with default status pending_user", async () => {
-    render(<HitlPage />);
+    renderPage();
 
     await waitFor(() => {
       expect(mockListHitlRuns).toHaveBeenCalledWith({
@@ -133,7 +152,7 @@ describe("HitlPage", () => {
   });
 
   it("filters runs by status when dropdown changes", async () => {
-    render(<HitlPage />);
+    renderPage();
 
     await waitFor(() => {
       expect(screen.getByText("AIエージェントの未来")).toBeInTheDocument();
@@ -153,7 +172,7 @@ describe("HitlPage", () => {
   });
 
   it("selects a run and initializes question answers", async () => {
-    render(<HitlPage />);
+    renderPage();
 
     await waitFor(() => {
       expect(screen.getByText("AIエージェントの未来")).toBeInTheDocument();
@@ -178,7 +197,7 @@ describe("HitlPage", () => {
 
   it("initializes boolean questions to true by default", async () => {
     mockGetHitlRun.mockResolvedValue(sampleDetail2 as any);
-    render(<HitlPage />);
+    renderPage();
 
     await waitFor(() => {
       expect(screen.getByText("AIエージェントの未来")).toBeInTheDocument();
@@ -196,7 +215,7 @@ describe("HitlPage", () => {
   });
 
   it("validates required questions and prevents API call when empty", async () => {
-    render(<HitlPage />);
+    renderPage();
 
     await waitFor(() => {
       expect(screen.getByText("AIエージェントの未来")).toBeInTheDocument();
@@ -222,7 +241,7 @@ describe("HitlPage", () => {
   it("submits answer successfully and reloads run details", async () => {
     mockSubmitHitlAnswer.mockResolvedValue({ success: true });
 
-    render(<HitlPage />);
+    renderPage();
 
     await waitFor(() => {
       expect(screen.getByText("AIエージェントの未来")).toBeInTheDocument();
@@ -264,7 +283,7 @@ describe("HitlPage", () => {
   it("displays detail error if submitHitlAnswer fails with ApiError", async () => {
     mockSubmitHitlAnswer.mockRejectedValue(new ApiError(400, "Bad Request Answer"));
 
-    render(<HitlPage />);
+    renderPage();
 
     await waitFor(() => {
       expect(screen.getByText("AIエージェントの未来")).toBeInTheDocument();
@@ -292,7 +311,7 @@ describe("HitlPage", () => {
     const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
     mockCancelHitlRun.mockResolvedValue({ success: true });
 
-    render(<HitlPage />);
+    renderPage();
 
     await waitFor(() => {
       expect(screen.getByText("AIエージェントの未来")).toBeInTheDocument();
@@ -316,7 +335,7 @@ describe("HitlPage", () => {
   it("handles run cancellation confirmation (refusal)", async () => {
     const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
 
-    render(<HitlPage />);
+    renderPage();
 
     await waitFor(() => {
       expect(screen.getByText("AIエージェントの未来")).toBeInTheDocument();
@@ -333,5 +352,82 @@ describe("HitlPage", () => {
 
     expect(confirmSpy).toHaveBeenCalled();
     expect(mockCancelHitlRun).not.toHaveBeenCalled();
+  });
+
+  it("loads the detail pane for the run given by ?run_id= deep link", async () => {
+    mockGetHitlRun.mockResolvedValue(sampleDetail2 as any);
+    renderPage(["/hitl?run_id=hrun-2"]);
+
+    await waitFor(() => {
+      expect(mockGetHitlRun).toHaveBeenCalledWith("hrun-2");
+    });
+
+    expect(await screen.findByText("進めますか？")).toBeInTheDocument();
+  });
+
+  it("shows an error when the deep-linked run cannot be fetched", async () => {
+    mockGetHitlRun.mockRejectedValue(new ApiError(404, "Not Found"));
+
+    renderPage(["/hitl?run_id=missing"]);
+
+    await waitFor(() => {
+      expect(screen.getByText("Not Found")).toBeInTheDocument();
+    });
+  });
+
+  it("does not fetch detail on mount without a ?run_id= parameter", async () => {
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("AIエージェントの未来")).toBeInTheDocument();
+    });
+
+    expect(mockGetHitlRun).not.toHaveBeenCalled();
+  });
+
+  it("syncs the ?run_id= parameter to the URL when a row is selected", async () => {
+    render(
+      <MemoryRouter initialEntries={["/hitl?foo=bar"]}>
+        <RouterProbe>
+          <HitlPage />
+        </RouterProbe>
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("AIエージェントの未来")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText("AIエージェントの未来"));
+
+    await waitFor(() => {
+      const sp = new URLSearchParams(screen.getByTestId("probe-full-search").textContent || "");
+      expect(sp.get("run_id")).toBe("hrun-1");
+      expect(sp.get("foo")).toBe("bar");
+    });
+
+    await waitFor(() => {
+      expect(mockGetHitlRun).toHaveBeenCalledWith("hrun-1");
+    });
+  });
+
+  it("refetches the detail when the same selected row is clicked again", async () => {
+    renderPage();
+
+    const firstRow = () => screen.getAllByTestId("hitl-run-row")[0] as HTMLElement;
+    await waitFor(() => {
+      expect(screen.getByText("AIエージェントの未来")).toBeInTheDocument();
+    });
+
+    fireEvent.click(firstRow());
+    await waitFor(() => {
+      expect(mockGetHitlRun).toHaveBeenCalledTimes(1);
+    });
+
+    fireEvent.click(firstRow());
+    await waitFor(() => {
+      expect(mockGetHitlRun).toHaveBeenCalledTimes(2);
+    });
+    expect(mockGetHitlRun).toHaveBeenLastCalledWith("hrun-1");
   });
 });
