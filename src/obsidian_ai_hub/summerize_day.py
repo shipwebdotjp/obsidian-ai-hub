@@ -306,11 +306,9 @@ def upsert_summary_record(record: dict):
     """
     SQLite summaries テーブルにレコードをupsertする。
     """
-    try:
-        summary_store.upsert_summary(record)
-        logger.info(f"Daily summary upserted for {record.get('period_key')}")
-    except Exception as e:
-        logger.error(f"Failed to upsert daily summary: {e}")
+    result = summary_store.upsert_summary(record)
+    logger.info(f"Daily summary upserted for {record.get('period_key')}")
+    return result
 
 
 def load_activity_logs(target_date: datetime) -> list[dict]:
@@ -360,7 +358,7 @@ def load_conversation_logs(log_file_dir: str, target_date: datetime) -> list[dic
     return logs
 
 
-def summarize_day(target_date: datetime):
+def summarize_day(target_date: datetime) -> dict:
     """
     指定日のログをまとめ、構造化レコードの生成、SQLite保存、デイリーノートへの追記を行う。
     """
@@ -381,7 +379,7 @@ def summarize_day(target_date: datetime):
         raise ValueError("Failed to generate structured record: summary is missing or empty.")
 
     # 3. SQLiteへの保存 (永続化)
-    upsert_summary_record(structured_record)
+    return upsert_summary_record(structured_record)
 
     # 4. デイリーノートへの追記 (人間用表示) 260719: 人間の書いたものと、AIの書いたものを混ぜないためにデイリーノートへの追記は中止
     # if daily_file.exists():

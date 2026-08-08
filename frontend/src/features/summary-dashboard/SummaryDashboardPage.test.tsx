@@ -12,6 +12,7 @@ vi.mock("../../api/client", () => ({
   getEditOptions: vi.fn(),
   updateSummary: vi.fn(),
   deleteSummary: vi.fn(),
+  generateSummary: vi.fn(),
   listPeople: vi.fn(),
   ApiError: class ApiError extends Error {
     status: number;
@@ -30,6 +31,7 @@ import {
   getEditOptions,
   updateSummary,
   deleteSummary,
+  generateSummary,
   listPeople,
 } from "../../api/client";
 import type { DashboardStatsResponse } from "../../api/types";
@@ -41,6 +43,7 @@ const mockGetDashboardStats = vi.mocked(getDashboardStats);
 const mockGetEditOptions = vi.mocked(getEditOptions);
 const mockUpdateSummary = vi.mocked(updateSummary);
 const mockDeleteSummary = vi.mocked(deleteSummary);
+const mockGenerateSummary = vi.mocked(generateSummary);
 const mockListPeople = vi.mocked(listPeople);
 
 const sampleHomeResponse = {
@@ -103,6 +106,53 @@ it("renders dashboard and supports tab navigation", async () => {
   await waitFor(() => {
     expect(screen.getByRole("button", { name: "統計" })).toBeInTheDocument();
   });
+});
+
+it("opens a missing target and generates it", async () => {
+  mockGetDashboardBrowse.mockResolvedValue({
+    ...sampleBrowseResponse,
+    selected_month: "2026-07",
+    missing_summary_targets: [{
+      period_type: "day",
+      period_key: "2026-07-15",
+      period_start: "2026-07-15",
+      period_end: "2026-07-15",
+    }],
+  });
+  mockGenerateSummary.mockResolvedValue({
+    summary_id: "generated-1", period_type: "day", period_key: "2026-07-15",
+    summary: "Generated summary", keywords: [], topics: [], projects: [],
+    project_notes: [], project_candidates: [], people: [], mood: null,
+    sleep_raw: null, sleep_hours: null, items: [],
+  });
+
+  render(<SummaryDashboardPage />);
+  await userEvent.click(screen.getByRole("button", { name: "一覧" }));
+  await userEvent.click(await screen.findByText(/日次サマリ: 2026\/07\/15/));
+  await userEvent.click(screen.getByRole("button", { name: "日次サマリを作成" }));
+
+  await screen.findByText("Generated summary");
+  expect(mockGenerateSummary).toHaveBeenCalledWith({
+    period_type: "day", target_date: "2026-07-15",
+  });
+});
+
+it("asks before overwriting an existing summary during regeneration", async () => {
+  mockGetDashboardBrowse.mockResolvedValue({
+    ...sampleBrowseResponse,
+    selected_month: "2026-07",
+    days: [{ date: "2026-07-19", has_summary: true, summary_id: "summary-1", summary: "Old", topics: [] }],
+  });
+  mockGetDashboardSummary.mockResolvedValue({
+    summary_id: "summary-1", period_type: "day", period_key: "2026-07-19", summary: "Old",
+    keywords: [], topics: [], projects: [], project_notes: [], project_candidates: [], people: [], mood: null, sleep_raw: null, sleep_hours: null, items: [],
+  });
+  render(<SummaryDashboardPage />);
+  await userEvent.click(screen.getByRole("button", { name: "一覧" }));
+  await userEvent.click(await screen.findByText(/2026\/07\/19/));
+  await screen.findAllByText("Old");
+  await userEvent.click(screen.getByRole("button", { name: "再生成" }));
+  expect(screen.getByText(/手編集した内容も含め/)).toBeInTheDocument();
 });
 
 it("renders category heatmap in stats tab", async () => {

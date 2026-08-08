@@ -9,6 +9,7 @@ import {
   getEditOptions,
   updateSummary,
   deleteSummary,
+  generateSummary,
   listPeople,
 } from "../../api/client";
 import type {
@@ -20,6 +21,7 @@ import type {
   EditOptionsResponse,
   SummaryUpdatePayload,
   Person,
+  MissingSummaryTarget,
 } from "../../api/types";
 import { HomeTab } from "./HomeTab";
 import { BrowseTab } from "./BrowseTab";
@@ -48,6 +50,7 @@ export default function SummaryDashboardPage() {
   // Detail panel overlay/pane state
   const [selectedSummary, setSelectedSummary] = useState<SummaryDetail | null>(null);
   const [selectedDay, setSelectedDay] = useState<DashboardDayDetailsResponse | null>(null);
+  const [selectedMissingTarget, setSelectedMissingTarget] = useState<MissingSummaryTarget | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
@@ -58,6 +61,9 @@ export default function SummaryDashboardPage() {
   const [editSaving, setEditSaving] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showRegenerateConfirm, setShowRegenerateConfirm] = useState(false);
+  const [generationSaving, setGenerationSaving] = useState(false);
+  const [generationError, setGenerationError] = useState<string | null>(null);
   const [allPeople, setAllPeople] = useState<Person[]>([]);
   const [editOptions, setEditOptions] = useState<EditOptionsResponse | null>(null);
 
@@ -165,6 +171,7 @@ export default function SummaryDashboardPage() {
     setDetailError(null);
     setSelectedSummary(null);
     setSelectedDay(null); // Ensure BOTH are not populated at the same time
+    setSelectedMissingTarget(null);
     getDashboardSummary(summaryId)
       .then((res) => {
         if (reqId !== detailRequestRef.current) return;
@@ -186,6 +193,7 @@ export default function SummaryDashboardPage() {
     setDetailError(null);
     setSelectedSummary(null);
     setSelectedDay(null); // Ensure BOTH are not populated at the same time
+    setSelectedMissingTarget(null);
     getDashboardDayDetails(targetDate)
       .then((res) => {
         if (reqId !== detailRequestRef.current) return;
@@ -200,6 +208,44 @@ export default function SummaryDashboardPage() {
         if (reqId === detailRequestRef.current) setDetailLoading(false);
       });
   };
+
+  const openMissingTarget = (target: MissingSummaryTarget) => {
+    setSelectedSummary(null);
+    setSelectedDay(null);
+    setSelectedMissingTarget(target);
+    setDetailError(null);
+    setGenerationError(null);
+  };
+
+  const generateSelectedSummary = useCallback(async () => {
+    const target = selectedMissingTarget ?? (selectedSummary ? {
+      period_type: selectedSummary.period_type,
+      period_key: selectedSummary.period_key,
+      period_start: selectedSummary.period_start ?? selectedSummary.period_key,
+      period_end: selectedSummary.period_end ?? selectedSummary.period_key,
+    } : null);
+    if (!target) return;
+    setGenerationSaving(true);
+    setGenerationError(null);
+    try {
+      const result = await generateSummary(
+        target.period_type === "month"
+          ? { period_type: "month", target_month: target.period_key }
+          : { period_type: target.period_type, target_date: target.period_start },
+      );
+      setSelectedSummary(result);
+      setSelectedMissingTarget(null);
+      setSelectedDay(null);
+      setShowRegenerateConfirm(false);
+      loadHome();
+      loadBrowse(browseYear, browseMonth);
+    } catch (e) {
+      setGenerationError(e instanceof ApiError ? e.message : "サマリの生成に失敗しました。再試行してください。");
+      setShowRegenerateConfirm(false);
+    } finally {
+      setGenerationSaving(false);
+    }
+  }, [selectedMissingTarget, selectedSummary, loadHome, loadBrowse, browseYear, browseMonth]);
 
   // --- Edit handlers ---
   const startEditing = useCallback(async () => {
@@ -330,7 +376,7 @@ export default function SummaryDashboardPage() {
       setMobileDetailOpen(false);
       return;
     }
-    if (selectedSummary || selectedDay) {
+    if (selectedSummary || selectedDay || selectedMissingTarget) {
       setMobileDetailOpen(true);
     } else {
       setMobileDetailOpen(false);
@@ -373,6 +419,7 @@ export default function SummaryDashboardPage() {
                 setActiveSubTab("home");
                 setSelectedSummary(null);
                 setSelectedDay(null);
+                setSelectedMissingTarget(null);
               }}
               className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-all ${
                 activeTab === "home"
@@ -387,6 +434,7 @@ export default function SummaryDashboardPage() {
                 setActiveSubTab("browse");
                 setSelectedSummary(null);
                 setSelectedDay(null);
+                setSelectedMissingTarget(null);
               }}
               className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-all ${
                 activeTab === "browse"
@@ -401,6 +449,7 @@ export default function SummaryDashboardPage() {
                 setActiveSubTab("stats");
                 setSelectedSummary(null);
                 setSelectedDay(null);
+                setSelectedMissingTarget(null);
               }}
               className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-all ${
                 activeTab === "stats"
@@ -450,6 +499,12 @@ export default function SummaryDashboardPage() {
             onStartEdit={startEditing}
             onRequestDelete={() => setShowDeleteConfirm(true)}
             onShowDayDetail={showDayDetail}
+            selectedMissingTarget={selectedMissingTarget}
+            onOpenMissingTarget={openMissingTarget}
+            generationSaving={generationSaving}
+            generationError={generationError}
+            onGenerate={generateSelectedSummary}
+            onRequestRegenerate={() => setShowRegenerateConfirm(true)}
           />
         )}
 
@@ -494,6 +549,19 @@ export default function SummaryDashboardPage() {
               >
                 削除する
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showRegenerateConfirm && selectedSummary && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="rounded-xl bg-white p-6 shadow-xl max-w-sm w-full space-y-4">
+            <h3 className="text-sm font-bold text-slate-900">サマリを再生成</h3>
+            <p className="text-xs text-slate-600">手編集した内容も含め、現在のサマリを新しい生成結果で上書きします。続けますか？</p>
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setShowRegenerateConfirm(false)} className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 cursor-pointer">やめる</button>
+              <button onClick={generateSelectedSummary} disabled={generationSaving} className="rounded-md bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-700 disabled:opacity-50 cursor-pointer">{generationSaving ? "再生成中…" : "上書きして再生成"}</button>
             </div>
           </div>
         </div>

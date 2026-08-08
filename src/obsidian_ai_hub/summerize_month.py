@@ -245,7 +245,7 @@ def upsert_summary_record(record: dict):
     logger.info(f"Monthly summary upserted for {record.get('period_key')}")
 
 
-def summarize_month(target_date: datetime):
+def summarize_month(target_date: datetime) -> dict:
     logger.info("Summarizing month for date: %s", target_date.strftime("%Y-%m"))
 
     # 1. データの準備 (週次レコードのロード)
@@ -256,13 +256,10 @@ def summarize_month(target_date: datetime):
     # 2. 構造化レコードの生成
     structured_record = get_monthly_structured_record(target_date, weekly_records)
     if structured_record is None:
-        logger.error(
-            "Skipping persistence as monthly structured record generation failed"
-        )
-        return
+        raise ValueError("Failed to generate monthly structured record: summary is missing or empty.")
 
     # 3. SQLiteへの保存
-    upsert_summary_record(structured_record)
+    return upsert_summary_record(structured_record)
 
     # 4. 月次ノートへの書き込み 260719: 人間の書いたものと、AIの書いたものを混ぜないためにデイリーノートへの追記は中止
     # monthly_note = reader.get_monthly_note_content(target_date)

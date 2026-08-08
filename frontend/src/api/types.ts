@@ -309,6 +309,20 @@ export interface DashboardBrowseResponse {
   months: SummaryDetail[];
   weeks: SummaryDetail[];
   days: BrowseDayItem[];
+  missing_summary_targets?: MissingSummaryTarget[];
+}
+
+export interface MissingSummaryTarget {
+  period_type: SummaryPeriodType;
+  period_key: string;
+  period_start: string;
+  period_end: string;
+}
+
+export interface SummaryGenerateRequest {
+  period_type: SummaryPeriodType;
+  target_date?: string;
+  target_month?: string;
 }
 
 export interface DashboardDayDetailsResponse {

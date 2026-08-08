@@ -217,6 +217,80 @@ def test_dashboard_browse_month_level(loopback_client, clean_summary_env):
     assert data["days"][1]["summary"] == "Day 14"
 
 
+def test_dashboard_browse_lists_hierarchical_missing_targets(loopback_client, clean_summary_env):
+    from obsidian_ai_hub.utils import reader
+
+    # A daily note supplies recoverable day input; the resulting daily summary
+    # then makes its ISO week recoverable. A seeded weekly summary makes July
+    # recoverable as a month.
+    note = reader.get_daily_note_path(datetime(2026, 7, 15))
+    note.parent.mkdir(parents=True)
+    note.write_text("# input", encoding="utf-8")
+    _seed_day("2026-07-14", "Day 14")
+    _seed_week("2026-W28", "2026-07-06", "2026-07-12", "Week 28")
+
+    res = loopback_client.get("/api/v1/summary-dashboard/browse?month=2026-07")
+    assert res.status_code == 200
+    targets = res.json()["missing_summary_targets"]
+    assert [(t["period_type"], t["period_key"]) for t in targets] == [
+        ("day", "2026-07-15"),
+        ("week", "2026-W29"),
+        ("month", "2026-07"),
+    ]
+
+
+def test_dashboard_generate_summary_validates_and_returns_persisted_detail(
+    loopback_client, clean_summary_env, monkeypatch
+):
+    from obsidian_ai_hub.web.routes import dashboard as dashboard_route
+
+    generated = summary_store.upsert_summary(
+        {
+            "period_type": "day", "period_key": "2026-07-15",
+            "period_start": "2026-07-15", "period_end": "2026-07-15",
+            "summary": "Generated", "keywords": [], "topics": [], "projects": [],
+            "people": [], "items": [],
+        }
+    )
+    monkeypatch.setattr(
+        dashboard_route,
+        "generate_summary",
+        lambda *_args, **_kwargs: summary_store.get_summary_by_id(generated["summary_id"]),
+    )
+
+    invalid = loopback_client.post(
+        "/api/v1/summary-dashboard/summaries/generate",
+        json={"period_type": "day", "target_month": "2026-07"},
+    )
+    assert invalid.status_code == 400
+    res = loopback_client.post(
+        "/api/v1/summary-dashboard/summaries/generate",
+        json={"period_type": "day", "target_date": "2026-07-15"},
+    )
+    assert res.status_code == 200
+    assert res.json()["summary"] == "Generated"
+
+
+def test_dashboard_generate_does_not_return_old_summary_when_generation_fails(
+    loopback_client, clean_summary_env, monkeypatch
+):
+    from obsidian_ai_hub.summary.generation import SummaryGenerationError
+    from obsidian_ai_hub.web.routes import dashboard as dashboard_route
+
+    _seed_day("2026-07-15", "Old manual summary")
+    monkeypatch.setattr(
+        dashboard_route,
+        "generate_summary",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(SummaryGenerationError("bad LLM response")),
+    )
+    res = loopback_client.post(
+        "/api/v1/summary-dashboard/summaries/generate",
+        json={"period_type": "day", "target_date": "2026-07-15"},
+    )
+    assert res.status_code == 502
+    assert summary_store.get_summary_by_period("day", "2026-07-15")["summary"] == "Old manual summary"
+
+
 def test_dashboard_browse_validation_mismatch(loopback_client, clean_summary_env):
     res = loopback_client.get(
         "/api/v1/summary-dashboard/browse?year=2025&month=2026-07"

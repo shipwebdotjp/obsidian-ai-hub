@@ -4,6 +4,7 @@ import type {
   SummaryUpdatePayload,
   EditOptionsResponse,
   Person,
+  MissingSummaryTarget,
 } from "../../api/types";
 import { formatYmdWithDow } from "../../utils/date";
 import { EditSummaryForm } from "./EditSummaryForm";
@@ -28,6 +29,11 @@ export function DetailPanel({
   onStartEdit,
   onRequestDelete,
   onShowDayDetail,
+  selectedMissingTarget,
+  generationSaving,
+  generationError,
+  onGenerate,
+  onRequestRegenerate,
 }: {
   selectedSummary: SummaryDetail | null;
   selectedDay: DashboardDayDetailsResponse | null;
@@ -47,6 +53,11 @@ export function DetailPanel({
   onStartEdit: () => void;
   onRequestDelete: () => void;
   onShowDayDetail: (targetDate: string) => void;
+  selectedMissingTarget: MissingSummaryTarget | null;
+  generationSaving: boolean;
+  generationError: string | null;
+  onGenerate: () => void;
+  onRequestRegenerate: () => void;
 }) {
   return (
     <div
@@ -85,6 +96,9 @@ export function DetailPanel({
           {/* Edit/Delete buttons */}
           {!isEditing && (
             <div className="flex gap-2">
+              <button onClick={onRequestRegenerate} disabled={generationSaving} className="rounded-md border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-700 hover:bg-amber-100 disabled:opacity-50 cursor-pointer">
+                {generationSaving ? "再生成中…" : "再生成"}
+              </button>
               <button
                 onClick={onStartEdit}
                 className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 cursor-pointer"
@@ -244,6 +258,18 @@ export function DetailPanel({
         </div>
       )}
 
+      {selectedMissingTarget && !selectedSummary && !selectedDay && (
+        <div className="space-y-4">
+          <span className="rounded bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800 uppercase tracking-wider">未生成の{selectedMissingTarget.period_type === "day" ? "日次" : selectedMissingTarget.period_type === "week" ? "週次" : "月次"}サマリ</span>
+          <h2 className="text-lg font-bold text-slate-900">{formatPeriodKey(selectedMissingTarget.period_key, selectedMissingTarget.period_type)}</h2>
+          <p className="text-xs text-slate-600">入力データはありますが、サマリはまだ生成されていません。</p>
+          {generationError && <p className="rounded bg-red-50 px-3 py-2 text-xs text-red-600">{generationError}</p>}
+          <button onClick={onGenerate} disabled={generationSaving} className="rounded-lg bg-indigo-600 px-4 py-2.5 text-xs font-bold text-white hover:bg-indigo-700 disabled:opacity-50 cursor-pointer">
+            {generationSaving ? "生成中…" : `${selectedMissingTarget.period_type === "day" ? "日次" : selectedMissingTarget.period_type === "week" ? "週次" : "月次"}サマリを作成`}
+          </button>
+        </div>
+      )}
+
       {/* 2. Log-only Day Details view */}
       {selectedDay && (
         <div className="space-y-6">
@@ -321,7 +347,7 @@ export function DetailPanel({
         </div>
       )}
 
-      {!selectedSummary && !selectedDay && !detailLoading && (
+      {!selectedSummary && !selectedDay && !selectedMissingTarget && !detailLoading && (
         <div className="flex h-full flex-col items-center justify-center text-slate-400 text-xs">
           <p>一覧から項目を選択すると、詳細がここに表示されます。</p>
         </div>

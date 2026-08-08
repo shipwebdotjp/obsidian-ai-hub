@@ -15,6 +15,7 @@ import type {
   VaultSearchResponse,
   VaultFileResponse,
   SummaryDetail,
+  SummaryGenerateRequest,
   SummaryUpdatePayload,
   SummaryDeleteResponse,
   EditOptionsResponse,
@@ -360,6 +361,13 @@ export function getDashboardSummary(summaryId: string): Promise<SummaryDetail> {
   return request<SummaryDetail>(
     `/api/v1/summary-dashboard/summaries/${encodeURIComponent(summaryId)}`
   );
+}
+
+export function generateSummary(payload: SummaryGenerateRequest): Promise<SummaryDetail> {
+  return request<SummaryDetail>("/api/v1/summary-dashboard/summaries/generate", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }
 
 export function getDashboardDayDetails(targetDate: string): Promise<DashboardDayDetailsResponse> {

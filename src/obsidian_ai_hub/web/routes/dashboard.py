@@ -1,14 +1,40 @@
 import re
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from pydantic import ValidationError
 
 from obsidian_ai_hub.summary import store as summary_store
+from obsidian_ai_hub.summary.generation import SummaryGenerationError, generate_summary
 from obsidian_ai_hub.web import schemas, service
 from obsidian_ai_hub.web.routes.deps import require_loopback_or_token
 
 router = APIRouter()
+
+
+@router.post(
+    "/summary-dashboard/summaries/generate", response_model=schemas.SummaryDetail
+)
+def generate_dashboard_summary(
+    body: dict[str, Any] = Body(...),
+    _=Depends(require_loopback_or_token),
+):
+    try:
+        request = schemas.SummaryGenerateRequest.model_validate(body)
+        return generate_summary(
+            request.period_type,
+            target_date=request.target_date,
+            target_month=request.target_month,
+        )
+    except ValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except SummaryGenerationError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    except ValueError as e:
+        # LLM parse/validation failures are upstream generation failures; request
+        # shape errors were already rejected by the schema above.
+        raise HTTPException(status_code=502, detail=str(e))
 
 
 @router.get("/summary-dashboard/home", response_model=schemas.DashboardHomeResponse)

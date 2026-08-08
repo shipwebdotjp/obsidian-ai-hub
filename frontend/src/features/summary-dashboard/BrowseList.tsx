@@ -1,4 +1,4 @@
-import type { DashboardBrowseResponse } from "../../api/types";
+import type { DashboardBrowseResponse, MissingSummaryTarget } from "../../api/types";
 import { formatYmdWithDow } from "../../utils/date";
 import { formatPeriodKey } from "./utils";
 
@@ -12,6 +12,7 @@ export function BrowseList({
   error,
   onOpenSummary,
   onShowDayDetail,
+  onOpenMissingTarget,
 }: {
   year: string;
   month: string;
@@ -22,6 +23,7 @@ export function BrowseList({
   error: string | null;
   onOpenSummary: (summaryId: string) => void;
   onShowDayDetail: (targetDate: string) => void;
+  onOpenMissingTarget: (target: MissingSummaryTarget) => void;
 }) {
   return (
     <>
@@ -73,6 +75,19 @@ export function BrowseList({
         {error && <p className="p-4 text-xs text-red-600">{error}</p>}
         {data && (
           <>
+            {(data.missing_summary_targets?.length ?? 0) > 0 && (
+              <div className="p-4 border-b border-amber-100 bg-amber-50/40">
+                <h4 className="text-[10px] font-bold uppercase tracking-wider text-amber-700 mb-2">未生成のサマリ ({data.missing_summary_targets?.length ?? 0}件)</h4>
+                <div className="space-y-2">
+                  {(data.missing_summary_targets ?? []).map((target) => (
+                    <button key={`${target.period_type}-${target.period_key}`} onClick={() => onOpenMissingTarget(target)} className="w-full text-left rounded-lg border border-amber-200 bg-white p-3 hover:bg-amber-50 transition-all cursor-pointer">
+                      <span className="text-xs font-bold text-amber-800">{target.period_type === "day" ? "日次" : target.period_type === "week" ? "週次" : "月次"}サマリ: {formatPeriodKey(target.period_key, target.period_type)}</span>
+                      <p className="mt-1 text-[10px] text-amber-700">{formatYmdWithDow(target.period_start)} ～ {formatYmdWithDow(target.period_end)}</p>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             {/* Months summary items (only in Year-level browse) */}
             {data.months.length > 0 && (
               <div className="p-4">

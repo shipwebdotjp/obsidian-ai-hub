@@ -5,6 +5,7 @@ import type {
   SummaryUpdatePayload,
   EditOptionsResponse,
   Person,
+  MissingSummaryTarget,
 } from "../../api/types";
 import { BrowseList } from "./BrowseList";
 import { DetailPanel } from "./DetailPanel";
@@ -36,6 +37,12 @@ export function BrowseTab({
   onStartEdit,
   onRequestDelete,
   onShowDayDetail,
+  selectedMissingTarget,
+  onOpenMissingTarget,
+  generationSaving,
+  generationError,
+  onGenerate,
+  onRequestRegenerate,
 }: {
   year: string;
   month: string;
@@ -63,6 +70,12 @@ export function BrowseTab({
   onStartEdit: () => void;
   onRequestDelete: () => void;
   onShowDayDetail: (targetDate: string) => void;
+  selectedMissingTarget: MissingSummaryTarget | null;
+  onOpenMissingTarget: (target: MissingSummaryTarget) => void;
+  generationSaving: boolean;
+  generationError: string | null;
+  onGenerate: () => void;
+  onRequestRegenerate: () => void;
 }) {
   return (
     <div className="flex h-full flex-col lg:flex-row">
@@ -82,6 +95,7 @@ export function BrowseTab({
           error={error}
           onOpenSummary={onOpenSummary}
           onShowDayDetail={onShowDayDetail}
+          onOpenMissingTarget={onOpenMissingTarget}
         />
       </div>
 
@@ -105,6 +119,11 @@ export function BrowseTab({
         onStartEdit={onStartEdit}
         onRequestDelete={onRequestDelete}
         onShowDayDetail={onShowDayDetail}
+        selectedMissingTarget={selectedMissingTarget}
+        generationSaving={generationSaving}
+        generationError={generationError}
+        onGenerate={onGenerate}
+        onRequestRegenerate={onRequestRegenerate}
       />
     </div>
   );

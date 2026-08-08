@@ -70,7 +70,11 @@ def e2e_seed_scenario():
 
 @pytest.fixture(scope="module")
 def e2e_server_url(frontend_dist: Path, e2e_seed_scenario: list[str]) -> str:
-    from obsidian_ai_hub.testing.seed import seed_memory_demo_data, seed_hitl_demo_data
+    from obsidian_ai_hub.testing.seed import (
+        seed_memory_demo_data,
+        seed_hitl_demo_data,
+        seed_summary_recovery_demo_data,
+    )
     from obsidian_ai_hub import database
     from obsidian_ai_hub.utils import config as app_config
     from obsidian_ai_hub.web.app import create_app
@@ -95,6 +99,7 @@ def e2e_server_url(frontend_dist: Path, e2e_seed_scenario: list[str]) -> str:
     server: uvicorn.Server | None = None
     thread: threading.Thread | None = None
     workspace_cleaned = False
+    original_generate_summary = None
 
     try:
         # Explicitly run database migrations to prepare the schema
@@ -110,6 +115,25 @@ def e2e_server_url(frontend_dist: Path, e2e_seed_scenario: list[str]) -> str:
             seed_memory_demo_data()
         if "hitl" in e2e_seed_scenario:
             seed_hitl_demo_data()
+        if "summary_recovery" in e2e_seed_scenario:
+            seed_summary_recovery_demo_data()
+            # Keep the browser flow deterministic and isolated from external LLMs.
+            from obsidian_ai_hub.summary import store as summary_store
+            from obsidian_ai_hub.web.routes import dashboard as dashboard_route
+
+            original_generate_summary = dashboard_route.generate_summary
+
+            def deterministic_summary(*_args, **kwargs):
+                target_date = kwargs["target_date"]
+                created = summary_store.upsert_summary({
+                    "period_type": "day", "period_key": target_date,
+                    "period_start": target_date, "period_end": target_date,
+                    "summary": "E2E generated recovery summary", "keywords": [],
+                    "topics": [], "projects": [], "people": [], "items": [],
+                })
+                return summary_store.get_summary_by_id(created["summary_id"])
+
+            dashboard_route.generate_summary = deterministic_summary
 
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.bind(("127.0.0.1", 0))
@@ -158,6 +182,9 @@ def e2e_server_url(frontend_dist: Path, e2e_seed_scenario: list[str]) -> str:
             os.environ.pop("OBSIDIAN_AI_HUB_TESTING", None)
         app_config.MEMORY_SQLITE_PATH = orig_memory_path
         app_config.VAULT_PATH = orig_vault_path
+        if original_generate_summary is not None:
+            from obsidian_ai_hub.web.routes import dashboard as dashboard_route
+            dashboard_route.generate_summary = original_generate_summary
 
 
 # ---------------------------------------------------------------------------

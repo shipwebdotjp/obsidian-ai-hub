@@ -174,3 +174,15 @@ def seed_hitl_demo_data() -> None:
     finally:
         hitl.clear_handlers()
         conn2.close()
+
+
+def seed_summary_recovery_demo_data() -> None:
+    """Insert one input-only day for the summary recovery E2E workflow."""
+    ensure_test_mode()
+    from obsidian_ai_hub.activity import store as activity_store
+
+    activity_store.add_activity(
+        activity_date="2026-07-15",
+        occurred_at="2026-07-15T10:00:00",
+        summary="E2E recovery input",
+    )

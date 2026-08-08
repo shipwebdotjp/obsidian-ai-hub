@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Literal, Optional, Any
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -482,6 +483,32 @@ class DashboardBrowseResponse(BaseModel):
     months: list[SummaryDetail] = []
     weeks: list[SummaryDetail] = []
     days: list[BrowseDayItem] = []
+    missing_summary_targets: list["MissingSummaryTarget"] = []
+
+
+class MissingSummaryTarget(BaseModel):
+    period_type: Literal["day", "week", "month"]
+    period_key: str
+    period_start: str
+    period_end: str
+
+
+class SummaryGenerateRequest(BaseModel):
+    period_type: Literal["day", "week", "month"]
+    target_date: Optional[str] = None
+    target_month: Optional[str] = None
+
+    @model_validator(mode="after")
+    def validate_target(self):
+        if self.period_type in {"day", "week"}:
+            if not self.target_date or self.target_month is not None:
+                raise ValueError("day and week generation require target_date only")
+            datetime.strptime(self.target_date, "%Y-%m-%d")
+        else:
+            if not self.target_month or self.target_date is not None:
+                raise ValueError("month generation requires target_month only")
+            datetime.strptime(self.target_month, "%Y-%m")
+        return self
 
 
 class DashboardDayDetailsResponse(BaseModel):

@@ -13,6 +13,7 @@ import {
   setToken,
   submitHitlAnswer,
   updateSummary,
+  generateSummary,
 } from "./client";
 
 const TOKEN_KEY = "obsidian-ai-hub:review-token";
@@ -87,6 +88,14 @@ describe("api/client", () => {
   });
 
   describe("request building", () => {
+    it("generateSummary POSTs the selected period target", async () => {
+      fetchMock.mockResolvedValue(makeResponse({ body: { summary_id: "sum-1" } }));
+      await generateSummary({ period_type: "month", target_month: "2026-07" });
+      const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      expect(url).toBe("/api/v1/summary-dashboard/summaries/generate");
+      expect(init.method).toBe("POST");
+      expect(JSON.parse(init.body as string)).toEqual({ period_type: "month", target_month: "2026-07" });
+    });
     it("listMemories builds a query string and GETs /api/v1/memories", async () => {
       fetchMock.mockResolvedValue(
         makeResponse({ body: { items: [], total: 0 } }),

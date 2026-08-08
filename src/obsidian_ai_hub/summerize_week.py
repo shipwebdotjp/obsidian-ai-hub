@@ -225,11 +225,9 @@ def upsert_summary_record(record: dict):
     """
     SQLite summaries テーブルにレコードをupsertする。
     """
-    try:
-        summary_store.upsert_summary(record)
-        logger.info(f"Weekly summary upserted for {record.get('period_key')}")
-    except Exception as e:
-        logger.error(f"Failed to upsert weekly summary: {e}")
+    result = summary_store.upsert_summary(record)
+    logger.info(f"Weekly summary upserted for {record.get('period_key')}")
+    return result
 
 
 def _coerce_target_date(target_date: datetime | date_type | str | None) -> datetime:
@@ -244,7 +242,7 @@ def _coerce_target_date(target_date: datetime | date_type | str | None) -> datet
     raise TypeError(f"Unsupported target_date type: {type(target_date)!r}")
 
 
-def summarize_week(target_date: datetime | date_type | str | None = None):
+def summarize_week(target_date: datetime | date_type | str | None = None) -> dict:
     target_date = _coerce_target_date(target_date)
     logger.info("Summarizing week for date: %s", target_date.date())
 
@@ -256,13 +254,10 @@ def summarize_week(target_date: datetime | date_type | str | None = None):
     structured_record = get_weekly_structured_record(target_date, daily_records)
 
     if not structured_record.get("summary"):
-        logger.error(
-            "Failed to generate structured record; skipping persistence and weekly note update"
-        )
-        return
+        raise ValueError("Failed to generate weekly structured record: summary is missing or empty.")
 
     # 3. SQLiteへの保存
-    upsert_summary_record(structured_record)
+    return upsert_summary_record(structured_record)
 
     # 4. ウィークリーノートへの書き込み 260719: 人間の書いたものと、AIの書いたものを混ぜないためにデイリーノートへの追記は中止
     # weekly_note = reader.get_weekly_note_content(target_date)
