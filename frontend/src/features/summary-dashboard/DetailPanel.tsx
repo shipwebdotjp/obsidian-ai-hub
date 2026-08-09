@@ -207,6 +207,13 @@ export function DetailPanel({
                         {p.note && <span className="text-xs text-slate-400">{p.note}</span>}
                       </div>
                     ))}
+                    {selectedSummary.people.filter((p) => p.resolution_status === "rejected").map((p) => (
+                      <div key={p.candidate_id ?? p.name} className="flex items-start gap-2 opacity-80">
+                        <span className="inline-flex items-center justify-center px-1.5 h-4 rounded bg-rose-100 text-rose-800 text-[9px] font-bold flex-shrink-0 mt-0.5" title="却下済み" aria-label="却下済み">却下済み</span>
+                        <span className="text-xs text-rose-700 min-w-[80px] font-medium">{p.name}</span>
+                        {p.note && <span className="text-xs text-rose-500">{p.note}</span>}
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}

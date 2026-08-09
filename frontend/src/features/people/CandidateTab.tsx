@@ -21,6 +21,9 @@ interface CandidateTabProps {
   onPromoteCandidate: () => void;
   onChangeSummaryAssignment: (summaryId: string, personId: string) => void;
   onAssignCandidateSummary: (summaryId: string, assignedPersonId: string) => void;
+  onRejectCandidate?: (candidateId: string) => void;
+  onReopenCandidate?: (candidateId: string) => void;
+  isRejectedTab?: boolean;
 }
 
 export default function CandidateTab({
@@ -42,6 +45,9 @@ export default function CandidateTab({
   onPromoteCandidate,
   onChangeSummaryAssignment,
   onAssignCandidateSummary,
+  onRejectCandidate,
+  onReopenCandidate,
+  isRejectedTab = false,
 }: CandidateTabProps) {
   return (
     <>
@@ -50,9 +56,13 @@ export default function CandidateTab({
           mobileDetailOpen ? "hidden" : "flex"
         } lg:flex`}
       >
-        <h2 className="mb-3 text-sm font-semibold">未解決候補一覧</h2>
+        <h2 className="mb-3 text-sm font-semibold">
+          {isRejectedTab ? "却下済み候補一覧" : "未解決候補一覧"}
+        </h2>
         {candidates.length === 0 ? (
-          <p className="text-xs text-slate-400">現在、未解決候補はありません。</p>
+          <p className="text-xs text-slate-400">
+            {isRejectedTab ? "現在、却下済み候補はありません。" : "現在、未解決候補はありません。"}
+          </p>
         ) : (
           <div className="space-y-2">
             {candidates.map((cand) => {
@@ -99,13 +109,33 @@ export default function CandidateTab({
         )}
         {selectedCandidate ? (
           <div className="space-y-4">
-            <div>
-              <h2 className="text-base font-bold">{selectedCandidate.display_name}</h2>
-              <p className="text-xs text-slate-400">ID: {selectedCandidate.candidate_id} | 正規化名: {selectedCandidate.normalized_name}</p>
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-base font-bold">{selectedCandidate.display_name}</h2>
+                <p className="text-xs text-slate-400">ID: {selectedCandidate.candidate_id} | 正規化名: {selectedCandidate.normalized_name}</p>
+              </div>
+              {isRejectedTab ? (
+                <button
+                  onClick={() => onReopenCandidate && onReopenCandidate(selectedCandidate.candidate_id)}
+                  disabled={loading}
+                  className="rounded bg-indigo-600 px-3 py-1.5 text-xs text-white hover:bg-indigo-700 cursor-pointer disabled:opacity-50"
+                >
+                  再開
+                </button>
+              ) : (
+                <button
+                  onClick={() => onRejectCandidate && onRejectCandidate(selectedCandidate.candidate_id)}
+                  disabled={loading}
+                  className="rounded bg-rose-600 px-3 py-1.5 text-xs text-white hover:bg-rose-700 cursor-pointer disabled:opacity-50"
+                >
+                  却下
+                </button>
+              )}
             </div>
 
             {/* Resolve Panel */}
-            <div className="border border-slate-200 rounded-lg p-4 bg-slate-50 space-y-3">
+            {!isRejectedTab && (
+              <div className="border border-slate-200 rounded-lg p-4 bg-slate-50 space-y-3">
               <h3 className="text-xs font-bold text-slate-800">マスター人物と紐付け（一括解決）</h3>
 
               {selectedCandidate.assigned_summaries_count > 0 && (
@@ -160,9 +190,11 @@ export default function CandidateTab({
                 ※ 解決先はフロントマターに ID を持つ「Vault連携済み」の人物に制限されています。未解決候補を解決すると、確定別名として登録され、候補のサマリー履歴が自動で移管されます。すでに手動で個別割当を行っている候補は、グローバル解決（一括解決）が禁止されます。
               </p>
             </div>
+            )}
 
             {/* Promote to Unlinked Person Panel */}
-            <div className="border border-slate-200 rounded-lg p-4 bg-blue-50/50 space-y-3">
+            {!isRejectedTab && (
+              <div className="border border-slate-200 rounded-lg p-4 bg-blue-50/50 space-y-3">
               <h3 className="text-xs font-bold text-slate-800">未連携人物として昇格</h3>
 
               {selectedCandidate.assigned_summaries_count > 0 && (
@@ -220,6 +252,7 @@ export default function CandidateTab({
                 ※ 未連携人物として新規作成します。Vault連携は行われず、既存の未連携人物と同じ同期・統合ルールが適用されます。
               </p>
             </div>
+            )}
 
             <div>
               <h3 className="text-xs font-bold text-slate-700 mb-2">影響を受けるサマリ ({selectedCandidate.summaries.length})</h3>
@@ -236,33 +269,35 @@ export default function CandidateTab({
                           <div className="font-semibold">{sum.period_key} ({sum.period_type})</div>
                           {sum.note && <div className="text-slate-600 mt-1 font-mono bg-slate-50 p-1.5 rounded whitespace-pre-wrap">{sum.note}</div>}
                         </div>
-                        <div className="flex shrink-0 flex-wrap items-center gap-2 self-end md:self-center">
-                          <select
-                            value={assignedPersonId}
-                            onChange={(e) => onChangeSummaryAssignment(sum.summary_id, e.target.value)}
-                            aria-label={`割当先を選択 (${sum.period_key})`}
-                            className="rounded border border-slate-300 bg-white px-2 py-1 text-xs focus:border-slate-900 focus:outline-none"
-                          >
-                            <option value="">-- 割当先を選択 --</option>
-                            {people
-                              .filter((p) => p.vault_id !== null)
-                              .map((p) => (
-                                <option key={p.person_id} value={p.person_id}>
-                                  {p.display_name} ({p.vault_id})
-                                </option>
-                              ))}
-                          </select>
-                          <button
-                            onClick={() => onAssignCandidateSummary(sum.summary_id, assignedPersonId)}
-                            disabled={isAssignDisabled}
-                            aria-label={`このサマリ (${sum.period_key}) に割当`}
-                            className={`rounded bg-slate-900 px-3 py-1 text-xs text-white hover:bg-slate-800 disabled:opacity-50 ${
-                              isAssignDisabled ? "disabled:cursor-not-allowed" : "cursor-pointer"
-                            }`}
-                          >
-                            このサマリに割当
-                          </button>
-                        </div>
+                        {!isRejectedTab && (
+                          <div className="flex shrink-0 flex-wrap items-center gap-2 self-end md:self-center">
+                            <select
+                              value={assignedPersonId}
+                              onChange={(e) => onChangeSummaryAssignment(sum.summary_id, e.target.value)}
+                              aria-label={`割当先を選択 (${sum.period_key})`}
+                              className="rounded border border-slate-300 bg-white px-2 py-1 text-xs focus:border-slate-900 focus:outline-none"
+                            >
+                              <option value="">-- 割当先を選択 --</option>
+                              {people
+                                .filter((p) => p.vault_id !== null)
+                                .map((p) => (
+                                  <option key={p.person_id} value={p.person_id}>
+                                    {p.display_name} ({p.vault_id})
+                                  </option>
+                                ))}
+                            </select>
+                            <button
+                              onClick={() => onAssignCandidateSummary(sum.summary_id, assignedPersonId)}
+                              disabled={isAssignDisabled}
+                              aria-label={`このサマリ (${sum.period_key}) に割当`}
+                              className={`rounded bg-slate-900 px-3 py-1 text-xs text-white hover:bg-slate-800 disabled:opacity-50 ${
+                                isAssignDisabled ? "disabled:cursor-not-allowed" : "cursor-pointer"
+                              }`}
+                            >
+                              このサマリに割当
+                            </button>
+                          </div>
+                        )}
                       </div>
                     );
                   })}

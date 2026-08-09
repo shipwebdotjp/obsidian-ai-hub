@@ -834,7 +834,7 @@ def _load_summary_children(
     # Fetch unresolved candidates
     cursor.execute(
         """
-        SELECT pc.display_name, spc.note, spc.display_order, pc.candidate_id
+        SELECT pc.display_name, spc.note, spc.display_order, pc.candidate_id, pc.status
         FROM summary_person_candidates spc
         JOIN person_candidates pc ON spc.candidate_id = pc.candidate_id
         WHERE spc.summary_id = ?
@@ -846,7 +846,7 @@ def _load_summary_children(
             "name": r["display_name"],
             "note": r["note"],
             "display_order": r["display_order"],
-            "resolution_status": "unresolved",
+            "resolution_status": r["status"],
             "candidate_id": r["candidate_id"],
         }
         for r in cursor.fetchall()
@@ -968,7 +968,7 @@ def _attach_children_bulk(
     # Fetch unresolved
     cursor.execute(
         f"""
-        SELECT spc.summary_id, pc.display_name, spc.note, spc.display_order, pc.candidate_id
+        SELECT spc.summary_id, pc.display_name, spc.note, spc.display_order, pc.candidate_id, pc.status
         FROM summary_person_candidates spc
         JOIN person_candidates pc ON spc.candidate_id = pc.candidate_id
         WHERE spc.summary_id IN ({placeholders})
@@ -981,7 +981,7 @@ def _attach_children_bulk(
                 "name": row["display_name"],
                 "note": row["note"],
                 "display_order": row["display_order"],
-                "resolution_status": "unresolved",
+                "resolution_status": row["status"],
                 "candidate_id": row["candidate_id"],
             }
         )

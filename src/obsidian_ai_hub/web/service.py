@@ -52,10 +52,13 @@ from obsidian_ai_hub.web.services.people import (
     update_unlinked_person,
 )
 from obsidian_ai_hub.web.services.people_candidates import (
+    CandidateRejectedError,
     assign_candidate_summary,
     get_person_candidate_detail,
     list_person_candidates,
     promote_person_candidate,
+    reject_person_candidate,
+    reopen_person_candidate,
     resolve_person_candidate,
 )
 from obsidian_ai_hub.web.services.people_merge import (

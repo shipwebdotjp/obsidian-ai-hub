@@ -11,14 +11,60 @@ from obsidian_ai_hub.web.services.people import (
 )
 
 
-def list_person_candidates() -> list[dict[str, Any]]:
+class CandidateRejectedError(ValueError):
+    def __init__(self, message="却下済み候補を操作するには、先に再開してください。"):
+        super().__init__(message)
+
+
+def list_person_candidates(status: str = "unresolved") -> list[dict[str, Any]]:
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT candidate_id, display_name, normalized_name, status FROM person_candidates"
+            "SELECT candidate_id, display_name, normalized_name, status FROM person_candidates WHERE status = ?",
+            (status,)
         )
         return [dict(r) for r in cursor.fetchall()]
+    finally:
+        conn.close()
+
+
+def reject_person_candidate(candidate_id: str) -> bool:
+    conn = get_db_connection()
+    try:
+        with conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT candidate_id FROM person_candidates WHERE candidate_id = ?",
+                (candidate_id,),
+            )
+            if cursor.fetchone() is None:
+                raise FileNotFoundError("Candidate not found")
+            conn.execute(
+                "UPDATE person_candidates SET status = 'rejected' WHERE candidate_id = ?",
+                (candidate_id,),
+            )
+            return True
+    finally:
+        conn.close()
+
+
+def reopen_person_candidate(candidate_id: str) -> bool:
+    conn = get_db_connection()
+    try:
+        with conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT candidate_id FROM person_candidates WHERE candidate_id = ?",
+                (candidate_id,),
+            )
+            if cursor.fetchone() is None:
+                raise FileNotFoundError("Candidate not found")
+            conn.execute(
+                "UPDATE person_candidates SET status = 'unresolved' WHERE candidate_id = ?",
+                (candidate_id,),
+            )
+            return True
     finally:
         conn.close()
 
@@ -70,13 +116,15 @@ def assign_candidate_summary(
 
             # 1. Fetch candidate to identify normalized_name
             cursor.execute(
-                "SELECT candidate_id, display_name, normalized_name FROM person_candidates WHERE candidate_id = ?",
+                "SELECT candidate_id, display_name, normalized_name, status FROM person_candidates WHERE candidate_id = ?",
                 (candidate_id,),
             )
             cand_row = cursor.fetchone()
             if cand_row is None:
                 raise FileNotFoundError("Candidate not found")
             cand = dict(cand_row)
+            if cand["status"] == "rejected":
+                raise CandidateRejectedError()
             normalized_name = cand["normalized_name"]
 
             # 2. Check if candidate-summary link exists
@@ -181,6 +229,8 @@ def resolve_person_candidate(
             if cand_row is None:
                 raise ValueError("Candidate not found")
             cand = dict(cand_row)
+            if cand["status"] == "rejected":
+                raise CandidateRejectedError()
 
             # 1b. Check if there are any manual assignments for this candidate's normalized_name
             cursor.execute(
@@ -320,6 +370,8 @@ def promote_person_candidate(
             if cand_row is None:
                 raise FileNotFoundError("Candidate not found")
             cand = dict(cand_row)
+            if cand["status"] == "rejected":
+                raise CandidateRejectedError()
 
             # 2. Check if there are any manual assignments for this candidate's normalized_name
             cursor.execute(

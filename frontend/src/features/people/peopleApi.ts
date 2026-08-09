@@ -12,8 +12,16 @@ import {
 
 const PEOPLE_API = "/api/v1/people";
 
-export async function fetchCandidates(): Promise<PersonCandidate[]> {
-  return apiGet<PersonCandidate[]>(`${PEOPLE_API}/candidates`);
+export async function fetchCandidates(status: "unresolved" | "rejected" = "unresolved"): Promise<PersonCandidate[]> {
+  return apiGet<PersonCandidate[]>(`${PEOPLE_API}/candidates?status=${status}`);
+}
+
+export async function rejectCandidate(candidateId: string): Promise<void> {
+  await apiPost(`${PEOPLE_API}/candidates/${encodeURIComponent(candidateId)}/reject`, {});
+}
+
+export async function reopenCandidate(candidateId: string): Promise<void> {
+  await apiPost(`${PEOPLE_API}/candidates/${encodeURIComponent(candidateId)}/reopen`, {});
 }
 
 export async function fetchPeople(): Promise<Person[]> {

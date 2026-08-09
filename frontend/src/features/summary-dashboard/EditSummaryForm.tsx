@@ -119,6 +119,11 @@ export function EditSummaryForm({
     (p) => p.resolution_status === "unresolved"
   );
 
+  // Rejected candidates from original summary (read-only, preserved on save)
+  const rejectedCandidates = summary.people.filter(
+    (p) => p.resolution_status === "rejected"
+  );
+
   // Resolved people IDs currently selected
   const selectedPersonIds = new Set((form.people ?? []).map((p) => p.person_id));
 
@@ -275,6 +280,19 @@ export function EditSummaryForm({
                   <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-amber-200 text-amber-800 text-[9px] font-bold flex-shrink-0" title="未解決候補" aria-label="未解決候補">?</span>
                   <span className="text-xs text-slate-500">{c.name}</span>
                   {c.note && <span className="text-xs text-slate-400">{c.note}</span>}
+                </div>
+              ))}
+            </>
+          )}
+          {rejectedCandidates.length > 0 && (
+            <>
+              <div className="text-[10px] text-rose-400 mt-2">--- 却下済み候補 ---</div>
+              {rejectedCandidates.map((c) => (
+                <div key={c.candidate_id ?? c.name} className="flex items-center gap-2 opacity-80">
+                  <input type="checkbox" disabled className="h-3 w-3" />
+                  <span className="inline-flex items-center justify-center px-1.5 h-4 rounded bg-rose-100 text-rose-800 text-[9px] font-bold flex-shrink-0" title="却下済み" aria-label="却下済み">却下済み</span>
+                  <span className="text-xs text-rose-700 font-medium">{c.name}</span>
+                  {c.note && <span className="text-xs text-rose-500">{c.note}</span>}
                 </div>
               ))}
             </>

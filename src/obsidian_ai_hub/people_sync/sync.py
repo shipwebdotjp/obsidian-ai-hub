@@ -215,7 +215,7 @@ def sync_people_in_tx(
         # Step B: Match and migrate unresolved candidates
         placeholders = ", ".join("?" for _ in aliases_set)
         cursor.execute(
-            f"SELECT candidate_id, normalized_name FROM person_candidates WHERE normalized_name IN ({placeholders})",
+            f"SELECT candidate_id, normalized_name FROM person_candidates WHERE status = 'unresolved' AND normalized_name IN ({placeholders})",
             list(aliases_set),
         )
         candidates = cursor.fetchall()
