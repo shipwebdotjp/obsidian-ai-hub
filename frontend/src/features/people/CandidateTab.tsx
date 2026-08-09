@@ -118,7 +118,7 @@ export default function CandidateTab({
                 <button
                   onClick={() => onReopenCandidate && onReopenCandidate(selectedCandidate.candidate_id)}
                   disabled={loading}
-                  className="rounded bg-indigo-600 px-3 py-1.5 text-xs text-white hover:bg-indigo-700 cursor-pointer disabled:opacity-50"
+                  className="rounded bg-slate-900 px-3 py-1.5 text-xs text-white hover:bg-slate-800 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   再開
                 </button>
@@ -126,7 +126,7 @@ export default function CandidateTab({
                 <button
                   onClick={() => onRejectCandidate && onRejectCandidate(selectedCandidate.candidate_id)}
                   disabled={loading}
-                  className="rounded bg-rose-600 px-3 py-1.5 text-xs text-white hover:bg-rose-700 cursor-pointer disabled:opacity-50"
+                  className="rounded bg-rose-600 px-3 py-1.5 text-xs text-white hover:bg-rose-700 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   却下
                 </button>

@@ -508,7 +508,7 @@ export default function PeoplePage() {
             return (
               <button
                 key={tab.value}
-                onClick={() => { setActiveTab(tab.value); clearMessages(); }}
+                onClick={() => { setActiveTab(tab.value); setSelectedCandidate(null); clearMessages(); }}
                 className={`px-4 py-2 text-xs font-medium border-b-2 transition-colors cursor-pointer ${
                   isTabActive
                     ? "border-slate-900 text-slate-900 font-semibold"
