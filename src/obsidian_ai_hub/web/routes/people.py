@@ -1,5 +1,6 @@
 import logging
 
+from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from obsidian_ai_hub.web import schemas, service
@@ -21,8 +22,35 @@ def get_people(_=Depends(require_loopback_or_token)):
 
 
 @router.get("/people/candidates", response_model=list[schemas.PersonCandidate])
-def get_people_candidates(_=Depends(require_loopback_or_token)):
-    return service.list_person_candidates()
+def get_people_candidates(
+    status: Literal["unresolved", "rejected"] = Query("unresolved"),
+    _=Depends(require_loopback_or_token),
+):
+    return service.list_person_candidates(status=status)
+
+
+@router.post(
+    "/people/candidates/{candidate_id}/reject",
+    response_model=schemas.PersonActionResponse,
+)
+def reject_person_candidate(candidate_id: str, _=Depends(require_loopback_or_token)):
+    try:
+        service.reject_person_candidate(candidate_id)
+        return {"success": True}
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+
+
+@router.post(
+    "/people/candidates/{candidate_id}/reopen",
+    response_model=schemas.PersonActionResponse,
+)
+def reopen_person_candidate(candidate_id: str, _=Depends(require_loopback_or_token)):
+    try:
+        service.reopen_person_candidate(candidate_id)
+        return {"success": True}
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
 
 
 @router.get("/people/duplicates", response_model=schemas.DuplicatesResponse)
@@ -131,6 +159,11 @@ def assign_candidate_summary(
         return {"success": True}
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
+    except service.CandidateRejectedError as e:
+        raise HTTPException(
+            status_code=409,
+            detail={"message": str(e), "conflict_type": "candidate_rejected"},
+        ) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
@@ -147,6 +180,11 @@ def resolve_person_candidate(
     try:
         service.resolve_person_candidate(candidate_id, body.target_person_id)
         return {"success": True}
+    except service.CandidateRejectedError as e:
+        raise HTTPException(
+            status_code=409,
+            detail={"message": str(e), "conflict_type": "candidate_rejected"},
+        ) from e
     except service.AssignmentConflictError as e:
         raise HTTPException(
             status_code=409,
@@ -186,6 +224,11 @@ def promote_person_candidate(
         return service.promote_person_candidate(candidate_id, body.display_name)
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
+    except service.CandidateRejectedError as e:
+        raise HTTPException(
+            status_code=409,
+            detail={"message": str(e), "conflict_type": "candidate_rejected"},
+        ) from e
     except service.AssignmentConflictError as e:
         raise HTTPException(
             status_code=409,

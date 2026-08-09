@@ -20,12 +20,12 @@ import MergePreviewDialog from "./MergePreviewDialog";
 import DeleteAliasDialog from "./DeleteAliasDialog";
 import DeletePersonDialog from "./DeletePersonDialog";
 
-type Tab = "candidates" | "list" | "duplicates" | "report";
+type Tab = "candidates" | "rejected_candidates" | "list" | "duplicates" | "report";
 
 interface TabDefinition {
   value: Tab;
   label: string;
-  getCount: (candidatesCount: number, peopleCount: number, duplicatesCount: number) => number | string;
+  getCount: (candidatesCount: number, rejectedCandidatesCount: number, peopleCount: number, duplicatesCount: number) => number | string;
 }
 
 const TABS_CONFIG: TabDefinition[] = [
@@ -35,14 +35,19 @@ const TABS_CONFIG: TabDefinition[] = [
     getCount: (cands) => cands,
   },
   {
+    value: "rejected_candidates",
+    label: "却下済み候補",
+    getCount: (_, rejected) => rejected,
+  },
+  {
     value: "list",
     label: "人物一覧",
-    getCount: (_, people) => people,
+    getCount: (_, __, people) => people,
   },
   {
     value: "duplicates",
     label: "重複候補",
-    getCount: (_, __, dups) => dups,
+    getCount: (_, __, ___, dups) => dups,
   },
   {
     value: "report",
@@ -60,6 +65,7 @@ export default function PeoplePage() {
 
   // Data states
   const [candidates, setCandidates] = useState<PersonCandidate[]>([]);
+  const [rejectedCandidates, setRejectedCandidates] = useState<PersonCandidate[]>([]);
   const [people, setPeople] = useState<Person[]>([]);
   const [duplicates, setDuplicates] = useState<DuplicatesResponse | null>(null);
   const [vaultReport, setVaultReport] = useState<SyncPeopleResponse | null>(null);
@@ -148,18 +154,50 @@ export default function PeoplePage() {
       setSuccessMessage(null);
     }
     try {
-      const [candsData, peopleData, dupsData, reportData] = await Promise.all([
-        peopleApi.fetchCandidates(),
+      const [candsData, rejectedCandsData, peopleData, dupsData, reportData] = await Promise.all([
+        peopleApi.fetchCandidates("unresolved"),
+        peopleApi.fetchCandidates("rejected"),
         peopleApi.fetchPeople(),
         peopleApi.fetchDuplicates(),
         peopleApi.fetchVaultReport(),
       ]);
       setCandidates(candsData);
+      setRejectedCandidates(rejectedCandsData);
       setPeople(peopleData);
       setDuplicates(dupsData);
       setVaultReport(reportData);
     } catch (e) {
       setError("データの読み込みに失敗しました");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRejectCandidate = async (candId: string) => {
+    clearMessages();
+    setLoading(true);
+    try {
+      await peopleApi.rejectCandidate(candId);
+      setSuccessMessage("候補を却下しました。");
+      setSelectedCandidate(null);
+      await loadAllData(false);
+    } catch (e: any) {
+      setError(e.message || "却下に失敗しました");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleReopenCandidate = async (candId: string) => {
+    clearMessages();
+    setLoading(true);
+    try {
+      await peopleApi.reopenCandidate(candId);
+      setSuccessMessage("候補を再開しました。");
+      setSelectedCandidate(null);
+      await loadAllData(false);
+    } catch (e: any) {
+      setError(e.message || "再開に失敗しました");
     } finally {
       setLoading(false);
     }
@@ -464,13 +502,13 @@ export default function PeoplePage() {
         {/* Dynamic Tab Buttons Render */}
         <div className="flex shrink-0 space-x-1 overflow-x-auto whitespace-nowrap border-b border-slate-200">
           {TABS_CONFIG.map((tab) => {
-            const count = tab.getCount(candidates.length, people.length, duplicatesTotalCount);
+            const count = tab.getCount(candidates.length, rejectedCandidates.length, people.length, duplicatesTotalCount);
             const countSuffix = count !== "" ? ` (${count})` : "";
             const isTabActive = activeTab === tab.value;
             return (
               <button
                 key={tab.value}
-                onClick={() => { setActiveTab(tab.value); clearMessages(); }}
+                onClick={() => { setActiveTab(tab.value); setSelectedCandidate(null); clearMessages(); }}
                 className={`px-4 py-2 text-xs font-medium border-b-2 transition-colors cursor-pointer ${
                   isTabActive
                     ? "border-slate-900 text-slate-900 font-semibold"
@@ -506,6 +544,34 @@ export default function PeoplePage() {
                 setSummaryAssignments((prev) => ({ ...prev, [summaryId]: personId }))
               }
               onAssignCandidateSummary={handleAssignCandidateSummary}
+              onRejectCandidate={handleRejectCandidate}
+            />
+          )}
+
+          {activeTab === "rejected_candidates" && (
+            <CandidateTab
+              candidates={rejectedCandidates}
+              selectedCandidate={selectedCandidate}
+              people={people}
+              targetPersonId={targetPersonId}
+              resolveError={resolveError}
+              promoteDisplayName={promoteDisplayName}
+              promoteError={promoteError}
+              summaryAssignments={summaryAssignments}
+              loading={loading}
+              mobileDetailOpen={mobileDetailOpen}
+              setMobileDetailOpen={setMobileDetailOpen}
+              onSelectCandidate={handleSelectCandidate}
+              onChangeTargetPersonId={setTargetPersonId}
+              onResolveCandidate={handleResolveCandidate}
+              onChangePromoteDisplayName={setPromoteDisplayName}
+              onPromoteCandidate={handlePromoteCandidate}
+              onChangeSummaryAssignment={(summaryId, personId) =>
+                setSummaryAssignments((prev) => ({ ...prev, [summaryId]: personId }))
+              }
+              onAssignCandidateSummary={handleAssignCandidateSummary}
+              onReopenCandidate={handleReopenCandidate}
+              isRejectedTab={true}
             />
           )}
 

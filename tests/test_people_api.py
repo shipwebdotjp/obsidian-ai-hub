@@ -1169,3 +1169,215 @@ name: 鈴木健
     assert response.status_code == 200
     updated = response.json()
     assert updated["vault_id"] == "ken-suzuki"
+
+
+def test_reject_and_reopen_candidate_flow(test_memory_db_path, client):
+    """Test candidate rejection and reopening flow including 409 validation blocks."""
+    conn = memory.get_db_connection()
+    try:
+        summary_store.upsert_summary(
+            {
+                "period_type": "day",
+                "period_key": "2026-09-15",
+                "summary": "Met Tanaka",
+                "people": [{"name": "田中太郎"}],
+            },
+            conn=conn,
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    # 1. Fetch default unresolved candidates
+    response = client.get("/api/v1/people/candidates")
+    assert response.status_code == 200
+    cands = response.json()
+    assert len(cands) == 1
+    cand = cands[0]
+    assert cand["display_name"] == "田中太郎"
+    assert cand["status"] == "unresolved"
+    cand_id = cand["candidate_id"]
+
+    # Test invalid status query param (expecting 422 validation error)
+    response = client.get("/api/v1/people/candidates?status=invalid")
+    assert response.status_code == 422
+
+    # 2. Reject candidate
+    response = client.post(f"/api/v1/people/candidates/{cand_id}/reject")
+    assert response.status_code == 200
+    assert response.json() == {"success": True}
+
+    # Reject non-existent candidate -> 404
+    response = client.post("/api/v1/people/candidates/non_existent_cand_id/reject")
+    assert response.status_code == 404
+
+    # 3. Fetch default unresolved candidates -> should be empty
+    response = client.get("/api/v1/people/candidates")
+    assert response.status_code == 200
+    assert len(response.json()) == 0
+
+    # Fetch rejected candidates
+    response = client.get("/api/v1/people/candidates?status=rejected")
+    assert response.status_code == 200
+    rejected_cands = response.json()
+    assert len(rejected_cands) == 1
+    assert rejected_cands[0]["candidate_id"] == cand_id
+    assert rejected_cands[0]["status"] == "rejected"
+
+    # 4. Try resolve/promote/assign on rejected candidate -> Expect 409
+    # Try resolve
+    response = client.post(
+        f"/api/v1/people/candidates/{cand_id}/resolve",
+        json={"target_person_id": "some_person_id"},
+    )
+    assert response.status_code == 409
+    detail = response.json()["detail"]
+    assert detail["conflict_type"] == "candidate_rejected"
+    assert "再開" in detail["message"]
+
+    # Try promote
+    response = client.post(
+        f"/api/v1/people/candidates/{cand_id}/promote",
+        json={"display_name": "田中太郎"},
+    )
+    assert response.status_code == 409
+    assert response.json()["detail"]["conflict_type"] == "candidate_rejected"
+
+    # Try individual assign
+    response = client.post(
+        f"/api/v1/people/candidates/{cand_id}/summaries/2026-09-15/assign",
+        json={"target_person_id": "some_person_id"},
+    )
+    assert response.status_code == 409
+    assert response.json()["detail"]["conflict_type"] == "candidate_rejected"
+
+    # 5. Reopen candidate
+    response = client.post(f"/api/v1/people/candidates/{cand_id}/reopen")
+    assert response.status_code == 200
+    assert response.json() == {"success": True}
+
+    # Reopen non-existent -> 404
+    response = client.post("/api/v1/people/candidates/non_existent_cand_id/reopen")
+    assert response.status_code == 404
+
+    # 6. Verify back to unresolved list
+    response = client.get("/api/v1/people/candidates")
+    assert response.status_code == 200
+    assert len(response.json()) == 1
+    assert response.json()[0]["status"] == "unresolved"
+
+
+def test_rejected_candidate_summary_ingestion(test_memory_db_path, client):
+    """Test that summary ingestion preserves the rejected state, and summary detail returns resolution_status='rejected'."""
+    conn = memory.get_db_connection()
+    try:
+        inserted_sum = summary_store.upsert_summary(
+            {
+                "period_type": "day",
+                "period_key": "2026-09-20",
+                "summary": "Met Watanabe",
+                "people": [{"name": "渡辺一郎"}],
+            },
+            conn=conn,
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    summary_id = inserted_sum["summary_id"]
+
+    # Get candidate
+    response = client.get("/api/v1/people/candidates")
+    cand_id = response.json()[0]["candidate_id"]
+
+    # Reject candidate
+    client.post(f"/api/v1/people/candidates/{cand_id}/reject")
+
+    # Re-upsert/ingest summary with same person Watanabe
+    conn = memory.get_db_connection()
+    try:
+        summary_store.upsert_summary(
+            {
+                "period_type": "day",
+                "period_key": "2026-09-20",
+                "summary": "Met Watanabe again",
+                "people": [{"name": "渡辺一郎", "note": "Watanabe-san"}],
+            },
+            conn=conn,
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    # Candidate should still be rejected and have same ID
+    response = client.get("/api/v1/people/candidates?status=rejected")
+    assert len(response.json()) == 1
+    assert response.json()[0]["candidate_id"] == cand_id
+
+    # Summary details endpoint should return Watanabe with resolution_status='rejected'
+    response = client.get(f"/api/v1/summary-dashboard/summaries/{summary_id}")
+    assert response.status_code == 200
+    summary_data = response.json()
+    people_in_summary = summary_data["people"]
+    assert len(people_in_summary) == 1
+    watanabe = people_in_summary[0]
+    assert watanabe["name"] == "渡辺一郎"
+    assert watanabe["resolution_status"] == "rejected"
+
+
+def test_rejected_candidate_vault_sync_no_absorb(test_memory_db_path, tmp_path, monkeypatch, client):
+    """Test that a candidate with status='rejected' is not auto-absorbed during people sync when Vault alias matches."""
+    people_dir = tmp_path / "people"
+    people_dir.mkdir()
+    monkeypatch.setattr(app_config, "PEOPLE_PATH", people_dir)
+
+    conn = memory.get_db_connection()
+    try:
+        summary_store.upsert_summary(
+            {
+                "period_type": "day",
+                "period_key": "2026-09-22",
+                "summary": "Met Sato-san",
+                "people": [{"name": "佐藤さん"}],
+            },
+            conn=conn,
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    # Get candidate and reject
+    response = client.get("/api/v1/people/candidates")
+    cand_id = response.json()[0]["candidate_id"]
+    client.post(f"/api/v1/people/candidates/{cand_id}/reject")
+
+    # Create Vault note with matching alias for Sato-san
+    note_path = people_dir / "sato.md"
+    note_path.write_text(
+        """---
+id: satou-jiro
+name: 佐藤次郎
+aliases:
+  - 佐藤さん
+---
+""",
+        encoding="utf-8",
+    )
+
+    # Perform Sync
+    response = client.post("/api/v1/people/sync")
+    assert response.status_code == 200
+
+    # Candidate should NOT have been auto-absorbed/deleted
+    response = client.get("/api/v1/people/candidates?status=rejected")
+    assert len(response.json()) == 1
+    assert response.json()[0]["candidate_id"] == cand_id
+
+    # Sato should be created since there is a Vault note, but Sato-san (rejected) must not be migrated as an alias
+    response = client.get("/api/v1/people")
+    assert response.status_code == 200
+    people_list = response.json()
+    sato_records = [p for p in people_list if p["display_name"] == "佐藤次郎"]
+    assert len(sato_records) == 1
+    # Verify that '佐藤さん' is NOT in Sato's registered aliases
+    assert not any(alias["display_name"] == "佐藤さん" for alias in sato_records[0]["aliases"])
