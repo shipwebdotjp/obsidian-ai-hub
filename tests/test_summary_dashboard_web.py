@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 import pytest
 from fastapi.testclient import TestClient
 
@@ -233,6 +233,53 @@ def test_dashboard_browse_lists_hierarchical_missing_targets(loopback_client, cl
     assert res.status_code == 200
     targets = res.json()["missing_summary_targets"]
     assert [(t["period_type"], t["period_key"]) for t in targets] == [
+        ("day", "2026-07-15"),
+        ("week", "2026-W29"),
+        ("month", "2026-07"),
+    ]
+
+
+def test_missing_summary_targets_only_include_completed_periods(
+    clean_summary_env,
+):
+    from obsidian_ai_hub.utils import reader
+    from obsidian_ai_hub.web.services.dashboard import _missing_summary_targets
+
+    # Daily note input makes 2026-07-15 recoverable. Its existing daily
+    # summary makes W29 recoverable, while the existing W28 summary makes
+    # July recoverable as a month.
+    note = reader.get_daily_note_path(datetime(2026, 7, 15))
+    note.parent.mkdir(parents=True)
+    note.write_text("# input", encoding="utf-8")
+    _seed_day("2026-07-14", "Day 14")
+    _seed_week("2026-W28", "2026-07-06", "2026-07-12", "Week 28")
+
+    def target_keys(reference_date: date) -> list[tuple[str, str]]:
+        return [
+            (target["period_type"], target["period_key"])
+            for target in _missing_summary_targets(
+                "2026-07-01",
+                "2026-07-31",
+                include_days=True,
+                reference_date=reference_date,
+            )
+        ]
+
+    # A period remains unavailable on its final date.
+    assert target_keys(date(2026, 7, 15)) == []
+    assert target_keys(date(2026, 7, 16)) == [("day", "2026-07-15")]
+    assert target_keys(date(2026, 7, 19)) == [("day", "2026-07-15")]
+    assert target_keys(date(2026, 7, 20)) == [
+        ("day", "2026-07-15"),
+        ("week", "2026-W29"),
+    ]
+    assert target_keys(date(2026, 7, 31)) == [
+        ("day", "2026-07-15"),
+        ("week", "2026-W29"),
+    ]
+
+    # It becomes available the following day, retaining day → week → month order.
+    assert target_keys(date(2026, 8, 1)) == [
         ("day", "2026-07-15"),
         ("week", "2026-W29"),
         ("month", "2026-07"),

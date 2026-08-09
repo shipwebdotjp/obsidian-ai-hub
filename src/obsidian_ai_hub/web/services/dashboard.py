@@ -1,5 +1,5 @@
 import calendar
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any, Optional
 
 from obsidian_ai_hub.activity import store as activity_store
@@ -9,10 +9,17 @@ from obsidian_ai_hub.summary import store as summary_store
 from obsidian_ai_hub.utils import config, reader
 
 
-def _missing_summary_targets(selected_start: str, selected_end: str, include_days: bool) -> list[dict]:
-    """Return recoverable gaps, in dependency order, for the displayed range."""
+def _missing_summary_targets(
+    selected_start: str,
+    selected_end: str,
+    include_days: bool,
+    reference_date: date | None = None,
+) -> list[dict]:
+    """Return completed, recoverable gaps in dependency order for the displayed range."""
     start = datetime.strptime(selected_start, "%Y-%m-%d").date()
     end = datetime.strptime(selected_end, "%Y-%m-%d").date()
+    if reference_date is None:
+        reference_date = datetime.now().date()
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
@@ -38,7 +45,11 @@ def _missing_summary_targets(selected_start: str, selected_end: str, include_day
             has_note = reader.get_daily_note_path(datetime.combine(current, datetime.min.time())).exists()
             date_compact = current.strftime("%Y%m%d")
             has_conversation = config.AI_LOG_PATH.exists() and any(config.AI_LOG_PATH.glob(f"*@{date_compact}*.json"))
-            if key not in daily_keys and (key in activity_dates or has_note or has_conversation):
+            if (
+                current < reference_date
+                and key not in daily_keys
+                and (key in activity_dates or has_note or has_conversation)
+            ):
                 targets.append({"period_type": "day", "period_key": key, "period_start": key, "period_end": key})
             current += timedelta(days=1)
 
@@ -51,7 +62,11 @@ def _missing_summary_targets(selected_start: str, selected_end: str, include_day
         sunday = monday + timedelta(days=6)
         iso_year, iso_week, _ = day.isocalendar()
         key = f"{iso_year}-W{iso_week:02d}"
-        if key not in week_keys and key not in seen_weeks:
+        if (
+            sunday < reference_date
+            and key not in week_keys
+            and key not in seen_weeks
+        ):
             seen_weeks.add(key)
             targets.append({"period_type": "week", "period_key": key, "period_start": monday.isoformat(), "period_end": sunday.isoformat()})
 
@@ -71,7 +86,9 @@ def _missing_summary_targets(selected_start: str, selected_end: str, include_day
             continue
         year, month = map(int, key.split("-"))
         last = calendar.monthrange(year, month)[1]
-        targets.append({"period_type": "month", "period_key": key, "period_start": f"{key}-01", "period_end": f"{key}-{last:02d}"})
+        month_end = date(year, month, last)
+        if month_end < reference_date:
+            targets.append({"period_type": "month", "period_key": key, "period_start": f"{key}-01", "period_end": f"{key}-{last:02d}"})
     return targets
 
 
