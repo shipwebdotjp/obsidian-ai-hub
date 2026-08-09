@@ -430,4 +430,62 @@ describe("HitlPage", () => {
     });
     expect(mockGetHitlRun).toHaveBeenLastCalledWith("hrun-1");
   });
+
+  it("preserves drafts of other pending questions when one answer is submitted", async () => {
+    const sampleDetailFreeText = {
+      run_id: "hrun-ft",
+      handler: "dummy_handler",
+      status: "pending_user",
+      title: "Free Text",
+      display_title: "Free Text",
+      display_type: "進捗確認",
+      created_at: "2026-07-20T12:00:00Z",
+      questions: [
+        {
+          question_id: "q-f1",
+          question_key: "q1",
+          question_type: "text",
+          display_text: "質問1",
+          is_required: 0,
+          status: "pending",
+        },
+        {
+          question_id: "q-f2",
+          question_key: "q2",
+          question_type: "text",
+          display_text: "質問2",
+          is_required: 0,
+          status: "pending",
+        },
+      ],
+    };
+    mockGetHitlRun.mockResolvedValue(sampleDetailFreeText as any);
+    mockSubmitHitlAnswer.mockResolvedValue({ success: true });
+
+    renderPage(["/hitl?run_id=hrun-ft"]);
+
+    await waitFor(() => {
+      expect(screen.getAllByPlaceholderText("回答を入力してください…")).toHaveLength(2);
+    });
+
+    const answerTextareas = screen.getAllByPlaceholderText("回答を入力してください…");
+    fireEvent.change(answerTextareas[0], { target: { value: "first draft" } });
+    fireEvent.change(answerTextareas[1], { target: { value: "second draft" } });
+
+    const submitBtns = screen.getAllByRole("button", { name: "回答を送信" });
+    fireEvent.click(submitBtns[0]);
+
+    await waitFor(() => {
+      expect(mockSubmitHitlAnswer).toHaveBeenCalledWith("hrun-ft", "q1", "first draft", null);
+    });
+
+    // The detail is reloaded after submit; the untouched draft must survive.
+    await waitFor(() => {
+      expect(mockGetHitlRun).toHaveBeenCalledTimes(2);
+    });
+    await waitFor(() => {
+      const textareasAfterReload = screen.getAllByPlaceholderText("回答を入力してください…");
+      expect(textareasAfterReload[1]).toHaveValue("second draft");
+    });
+  });
 });

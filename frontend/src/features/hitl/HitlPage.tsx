@@ -100,15 +100,46 @@ export default function HitlPage() {
     };
   }, [reloadRuns]);
 
-  const loadDetail = useCallback(async (runId: string) => {
+  const loadDetail = useCallback(async (runId: string, preserveDrafts = false) => {
     setDetailLoading(true);
     setDetailError(null);
     setSuccessMessage(null);
-    setAnswers({});
-    setComments({});
     try {
       const detail = await getHitlRun(runId);
       setSelectedRun(detail);
+
+      if (preserveDrafts) {
+        // Keep in-progress drafts for questions that are still pending so a
+        // single answer submission does not wipe other typed answers.
+        const pendingKeys = new Set(
+          detail.questions
+            .filter((q) => q.status === "pending")
+            .map((q) => q.question_key)
+        );
+        setAnswers((prev) => {
+          const next: Record<string, any> = {};
+          detail.questions.forEach((q) => {
+            if (!pendingKeys.has(q.question_key)) return;
+            next[q.question_key] =
+              q.question_key in prev
+                ? prev[q.question_key]
+                : q.question_type === "boolean"
+                ? true
+                : "";
+          });
+          return next;
+        });
+        setComments((prev) => {
+          const next: Record<string, string> = {};
+          for (const key of pendingKeys) {
+            const val = prev[key];
+            if (val) next[key] = val;
+          }
+          return next;
+        });
+        return;
+      }
+
       // Initialize answer states for pending questions
       const initialAnswers: Record<string, any> = {};
       detail.questions.forEach((q) => {
@@ -117,6 +148,7 @@ export default function HitlPage() {
         }
       });
       setAnswers(initialAnswers);
+      setComments({});
     } catch (e) {
       setDetailError(e instanceof ApiError ? e.message : "詳細情報の取得に失敗しました");
       setSelectedRun(null);
@@ -173,8 +205,9 @@ export default function HitlPage() {
     try {
       await submitHitlAnswer(selectedRun.run_id, q.question_key, ansValue, commentVal);
       setSuccessMessage("回答を正常に送信しました。");
-      // Reload run detail to reflect updated questions and run status
-      await loadDetail(selectedRun.run_id);
+      // Reload run detail to reflect updated questions and run status,
+      // preserving in-progress drafts for the other pending questions.
+      await loadDetail(selectedRun.run_id, true);
       await reloadRuns();
     } catch (e) {
       setDetailError(e instanceof ApiError ? e.message : "回答の送信に失敗しました");
