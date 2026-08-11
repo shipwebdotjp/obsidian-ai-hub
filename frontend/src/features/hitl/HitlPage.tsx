@@ -34,9 +34,23 @@ interface MemoryMaintenanceContext {
   target_memories?: MaintMemory[];
 }
 
+interface ResearchSuggestionContext {
+  type: "research_suggestion";
+  theme?: string | null;
+  direction?: string | null;
+  why_now?: string | null;
+}
+
 function asMemoryMaintenanceContext(context: unknown): MemoryMaintenanceContext | null {
   if (context && typeof context === "object" && (context as any).type === "memory_maintenance") {
     return context as MemoryMaintenanceContext;
+  }
+  return null;
+}
+
+function asResearchSuggestionContext(context: unknown): ResearchSuggestionContext | null {
+  if (context && typeof context === "object" && (context as any).type === "research_suggestion") {
+    return context as ResearchSuggestionContext;
   }
   return null;
 }
@@ -555,6 +569,36 @@ export default function HitlPage() {
                                       })}
                                     </div>
                                   </div>
+                                </div>
+                              );
+                            }
+
+                            const currentResearchCtx = asResearchSuggestionContext(q.context);
+                            if (currentResearchCtx) {
+                              return (
+                                <div
+                                  data-testid="research-suggestion-context"
+                                  className="mt-3 space-y-3 rounded-lg border border-slate-200 bg-white p-4 text-xs text-slate-700"
+                                >
+                                  <h4 className="font-bold text-slate-700">提案内容</h4>
+                                  {currentResearchCtx.theme && (
+                                    <div>
+                                      <span className="font-bold text-slate-600">テーマ: </span>
+                                      <span className="text-slate-800">{currentResearchCtx.theme}</span>
+                                    </div>
+                                  )}
+                                  {currentResearchCtx.direction && (
+                                    <div>
+                                      <span className="font-bold text-slate-600">調査の方向: </span>
+                                      <span className="text-slate-800">{currentResearchCtx.direction}</span>
+                                    </div>
+                                  )}
+                                  {currentResearchCtx.why_now && (
+                                    <div>
+                                      <span className="font-bold text-slate-600">今調べる理由: </span>
+                                      <span className="text-slate-800 whitespace-pre-wrap">{currentResearchCtx.why_now}</span>
+                                    </div>
+                                  )}
                                 </div>
                               );
                             } else if (q.context != null) {

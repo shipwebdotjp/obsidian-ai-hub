@@ -201,6 +201,12 @@ def test_main_creates_themes_and_researches(tmp_path: Path, monkeypatch, test_me
             {"value": "approve", "label": "承認", "description": "テーマを調査し、結果をVaultに保存します。"},
             *feedback.FEEDBACK_ACTION_CHOICES,
         ]
+        assert questions[0]["context_json"] == {
+            "type": "research_suggestion",
+            "theme": "生成テーマA",
+            "direction": "方向A",
+            "why_now": "理由A",
+        }
     finally:
         conn.close()
 

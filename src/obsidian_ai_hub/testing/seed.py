@@ -95,6 +95,12 @@ def seed_hitl_demo_data() -> None:
                         *feedback.FEEDBACK_ACTION_CHOICES,
                     ],
                     "is_required": 1,
+                    "context_json": {
+                        "type": "research_suggestion",
+                        "theme": "AIエージェントの未来",
+                        "direction": "仕事と生活における実用的な活用方法を整理する",
+                        "why_now": "最近の活動で AI エージェント活用への関心が高まっているため",
+                    },
                 },
                 {
                     "question_key": "notes",

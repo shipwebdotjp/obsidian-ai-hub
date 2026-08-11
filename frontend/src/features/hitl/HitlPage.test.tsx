@@ -67,6 +67,12 @@ const sampleDetail1 = {
       question_key: "action",
       question_type: "select",
       display_text: "リサーチテーマを承認しますか？",
+      context: {
+        type: "research_suggestion",
+        theme: "AIエージェントの未来",
+        direction: "実務での活用方法を整理する",
+        why_now: "最近の業務で検討が必要になったため",
+      },
       choices: [
         { value: "approve", label: "調査を実行する", description: "承認してリサーチを実行します" },
         { value: "reject", label: "今回は見送る", description: "却下して見送ります" }
@@ -187,12 +193,38 @@ describe("HitlPage", () => {
     });
 
     // Check title and description render
-    expect(screen.getAllByText("AIエージェントの未来")).toHaveLength(2); // one in sidebar, one in detail top
+    expect(screen.getAllByText("AIエージェントの未来")).toHaveLength(3); // sidebar, detail heading, and suggestion context
     expect(screen.getByText("リサーチテーマを承認しますか？")).toBeInTheDocument();
+    expect(screen.getByTestId("research-suggestion-context")).toHaveTextContent("テーマ: AIエージェントの未来");
+    expect(screen.getByTestId("research-suggestion-context")).toHaveTextContent("調査の方向: 実務での活用方法を整理する");
+    expect(screen.getByTestId("research-suggestion-context")).toHaveTextContent("今調べる理由: 最近の業務で検討が必要になったため");
 
     // Verify select type choices render (using structured labels)
     expect(screen.getByText("調査を実行する")).toBeInTheDocument();
     expect(screen.getByText("今回は見送る")).toBeInTheDocument();
+  });
+
+  it("omits an empty why_now from research suggestion context", async () => {
+    mockGetHitlRun.mockResolvedValue({
+      ...sampleDetail1,
+      questions: [
+        {
+          ...sampleDetail1.questions[0],
+          context: {
+            type: "research_suggestion",
+            theme: "AIエージェントの未来",
+            direction: "実務での活用方法を整理する",
+            why_now: null,
+          },
+        },
+      ],
+    } as any);
+    renderPage(["/hitl?run_id=hrun-1"]);
+
+    const context = await screen.findByTestId("research-suggestion-context");
+    expect(context).toHaveTextContent("テーマ: AIエージェントの未来");
+    expect(context).toHaveTextContent("調査の方向: 実務での活用方法を整理する");
+    expect(context).not.toHaveTextContent("今調べる理由");
   });
 
   it("initializes boolean questions to true by default", async () => {
@@ -224,7 +256,7 @@ describe("HitlPage", () => {
     fireEvent.click(screen.getByText("AIエージェントの未来"));
 
     await waitFor(() => {
-      expect(screen.getAllByText("AIエージェントの未来")).toHaveLength(2);
+      expect(screen.getAllByText("AIエージェントの未来")).toHaveLength(3);
     });
 
     // Submit answer without choosing 'approve' or 'reject'
@@ -250,7 +282,7 @@ describe("HitlPage", () => {
     fireEvent.click(screen.getByText("AIエージェントの未来"));
 
     await waitFor(() => {
-      expect(screen.getAllByText("AIエージェントの未来")).toHaveLength(2);
+      expect(screen.getAllByText("AIエージェントの未来")).toHaveLength(3);
     });
 
     // Initial getHitlRun from row selection
@@ -292,7 +324,7 @@ describe("HitlPage", () => {
     fireEvent.click(screen.getByText("AIエージェントの未来"));
 
     await waitFor(() => {
-      expect(screen.getAllByText("AIエージェントの未来")).toHaveLength(2);
+      expect(screen.getAllByText("AIエージェントの未来")).toHaveLength(3);
     });
 
     // Choose 'approve'
@@ -320,7 +352,7 @@ describe("HitlPage", () => {
     fireEvent.click(screen.getByText("AIエージェントの未来"));
 
     await waitFor(() => {
-      expect(screen.getAllByText("AIエージェントの未来")).toHaveLength(2);
+      expect(screen.getAllByText("AIエージェントの未来")).toHaveLength(3);
     });
 
     const cancelBtn = screen.getByRole("button", { name: "実行全体をキャンセル" });
@@ -344,7 +376,7 @@ describe("HitlPage", () => {
     fireEvent.click(screen.getByText("AIエージェントの未来"));
 
     await waitFor(() => {
-      expect(screen.getAllByText("AIエージェントの未来")).toHaveLength(2);
+      expect(screen.getAllByText("AIエージェントの未来")).toHaveLength(3);
     });
 
     const cancelBtn = screen.getByRole("button", { name: "実行全体をキャンセル" });

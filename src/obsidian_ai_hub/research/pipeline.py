@@ -104,6 +104,12 @@ def create_theme_and_research(
                             *feedback.FEEDBACK_ACTION_CHOICES,
                         ],
                         "is_required": 1,
+                        "context_json": {
+                            "type": "research_suggestion",
+                            "theme": theme,
+                            "direction": direction,
+                            **({"why_now": why_now} if why_now else {}),
+                        },
                     }
                 ]
                 checkpoint = json.dumps({"theme_id": rec["theme_id"], "phase": "awaiting_approval"})
