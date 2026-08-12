@@ -6,6 +6,7 @@ import {
 } from "../../api/client";
 import type { TaskItem, CommandSegment } from "../../api/types";
 import { ApiError } from "../../api/client";
+import TokenPrompt from "../../components/TokenPrompt";
 
 const PRESET_OPTIONS = [
   { name: "Inbox merge", flag: "--merge-inbox" },
@@ -32,7 +33,8 @@ export default function TaskPage() {
   const [revision, setRevision] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [localhostBlock, setLocalhostBlock] = useState(false);
+  const [authRequired, setAuthRequired] = useState(false);
+  const [blocked, setBlocked] = useState(false);
 
   // Form State
   const [editingTask, setEditingTask] = useState<TaskItem | null>(null);
@@ -84,7 +86,8 @@ export default function TaskPage() {
   const fetchConfig = async () => {
     setLoading(true);
     setError(null);
-    setLocalhostBlock(false);
+    setAuthRequired(false);
+    setBlocked(false);
     try {
       const data = await getTaskConfig();
       setTasks(data.tasks);
@@ -92,8 +95,10 @@ export default function TaskPage() {
       setRevision(data.revision);
     } catch (e) {
       if (e instanceof ApiError) {
-        if (e.status === 403) {
-          setLocalhostBlock(true);
+        if (e.status === 401) {
+          setAuthRequired(true);
+        } else if (e.status === 403) {
+          setBlocked(true);
         } else {
           setError(e.message || "タスク設定の取得に失敗しました");
         }
@@ -372,7 +377,24 @@ export default function TaskPage() {
     }
   };
 
-  if (localhostBlock) {
+  if (authRequired) {
+    return (
+      <TokenPrompt
+        title="トークン認証（タスク管理）"
+        description={
+          <>
+            Tailscale tailnet 経由でタスク管理機能を利用するには
+            <code className="rounded bg-slate-100 px-1">OBSIDIAN_AI_HUB_API_TOKEN</code>{" "}
+            の値が必要です。
+          </>
+        }
+        validate={getTaskConfig}
+        onAuthenticated={() => fetchConfig()}
+      />
+    );
+  }
+
+  if (blocked) {
     return (
       <div className="flex h-full items-center justify-center bg-slate-50 p-6">
         <div className="max-w-lg space-y-4 rounded-2xl bg-white p-8 text-center shadow-lg border border-slate-200">
@@ -383,11 +405,14 @@ export default function TaskPage() {
           </div>
           <h1 className="text-xl font-bold text-slate-900">アクセス制限</h1>
           <p className="text-sm text-slate-600 leading-relaxed">
-            セキュリティ保護のため、タスク管理機能は localhost 経由でのみ利用可能です。
+            セキュリティ保護のため、タスク管理機能は localhost 経由、または
+            Tailscale tailnet 内（トークン認証付き）でのみ利用可能です。
             LAN や外部ネットワークからの編集・閲覧はブロックされています。
           </p>
           <div className="rounded-xl bg-slate-100 p-4 text-xs font-mono text-slate-500">
-            タスク管理はこの Mac 上で localhost 経由で開いてください。
+            タスク管理はこの Mac 上で localhost 経由で開くか、
+            <br />
+            Tailscale 内のホストで <code>OBSIDIAN_AI_HUB_API_TOKEN</code> を設定して開いてください。
           </div>
           <button
             type="button"

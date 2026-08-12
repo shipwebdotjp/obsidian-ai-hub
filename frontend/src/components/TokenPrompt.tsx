@@ -3,9 +3,17 @@ import { setToken, clearToken, listMemories, ApiError } from "../api/client";
 
 export interface TokenPromptProps {
   onAuthenticated: () => void;
+  validate?: () => Promise<unknown>;
+  title?: string;
+  description?: React.ReactNode;
 }
 
-export default function TokenPrompt({ onAuthenticated }: TokenPromptProps) {
+export default function TokenPrompt({
+  onAuthenticated,
+  validate,
+  title,
+  description,
+}: TokenPromptProps) {
   const [value, setValue] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -24,7 +32,11 @@ export default function TokenPrompt({ onAuthenticated }: TokenPromptProps) {
     setToken(value.trim());
     try {
       // Validate by calling a protected endpoint
-      await listMemories({ status: "candidate" });
+      if (validate) {
+        await validate();
+      } else {
+        await listMemories({ status: "candidate" });
+      }
       if (!isMounted.current) return;
       onAuthenticated();
     } catch (e) {
@@ -43,9 +55,15 @@ export default function TokenPrompt({ onAuthenticated }: TokenPromptProps) {
         onSubmit={submit}
         className="w-full max-w-md space-y-4 rounded-2xl bg-white p-6 shadow"
       >
-        <h1 className="text-lg font-semibold">トークン認証</h1>
+        <h1 className="text-lg font-semibold">{title ?? "トークン認証"}</h1>
         <p className="text-sm text-slate-600">
-          このサーバはループバック以外で動作しています。<code className="rounded bg-slate-100 px-1">MEMORY_REVIEW_API_TOKEN</code> の値を入力してください。
+          {description ?? (
+            <>
+              このサーバはループバック以外で動作しています。
+              <code className="rounded bg-slate-100 px-1">OBSIDIAN_AI_HUB_API_TOKEN</code>{" "}
+              の値を入力してください。
+            </>
+          )}
         </p>
         <label htmlFor="review-token" className="sr-only">
           API token

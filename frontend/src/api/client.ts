@@ -22,25 +22,27 @@ import type {
   Person,
 } from "./types";
 
-const TOKEN_KEY = "obsidian-ai-hub:review-token";
+const TOKEN_KEY = "obsidian-ai-hub:api-token";
 
 // TODO: migrate to httpOnly cookie once backend supports cookie-based auth
 // to prevent token exfiltration via XSS.
 
+export const AUTH_EXPIRED_EVENT = "auth:expired";
+
 export function getToken(): string {
-  return sessionStorage.getItem(TOKEN_KEY) || "";
+  return localStorage.getItem(TOKEN_KEY) || "";
 }
 
 export function setToken(token: string): void {
   if (token) {
-    sessionStorage.setItem(TOKEN_KEY, token);
+    localStorage.setItem(TOKEN_KEY, token);
   } else {
-    sessionStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(TOKEN_KEY);
   }
 }
 
 export function clearToken(): void {
-  sessionStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(TOKEN_KEY);
 }
 
 export class ApiError extends Error {
@@ -66,6 +68,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const res = await fetch(path, { ...init, headers });
   if (res.status === 401) {
     clearToken();
+    window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT));
     throw new ApiError(401, "Authentication failed. Please check your token.");
   }
   if (!res.ok) {
@@ -261,7 +264,11 @@ export function batchDeleteMemories(body: BatchDeleteRequest): Promise<BatchDele
   });
 }
 
-export async function health(): Promise<{ status: string; auth_required: boolean }> {
+export async function health(): Promise<{
+  status: string;
+  auth_required: boolean;
+  tailnet_tasks_allowed?: boolean;
+}> {
   return request("/health");
 }
 

@@ -259,6 +259,52 @@ Flex Message を使わないため、リッチなレイアウトは不可能だ�
    - YAML の書き換えは一時ファイルへの書き出しと `os.replace` によるアトミック置換とする。
    - 新規タスクの追加、無効から有効への変更、スケジュール定義の変更、コマンドの変更があった場合は、保存時刻を `last_run.json` の `last_run` に設定（アーム）し、次回以降の未来の予定枠から実行されるようにする（過去枠の遡及実行を抑止）。
 
+## タスク管理 Web UI (loopback または tailnet + トークン)
+
+| 項目 | 内容 |
+|------|------|
+| 決定日 | 2026-08-12 |
+| カテゴリ | タスク管理・セキュリティ |
+| 決定内容 | 「タスク管理 Web UI (localhost 専用)」を部分緩和し、Tailscale tailnet 内からのアクセスに限り、`OBSIDIAN_AI_HUB_API_TOKEN` の Bearer 認証と組み合わせてタスク管理 API の閲覧・編集を許可する。Funnel（インターネット公開）利用時の許可は明示的に禁止する。 |
+
+### 結論に至った経緯
+
+2026-07-21 の決定（本ファイル上の「タスク管理 Web UI (localhost 専用)」）は、タスク YAML 編集がローカルコマンド実行権限の委譲にあたるため、トークンを持っていても非ループバックからのアクセスを無条件 403 としていた。これは Web サーバーを LAN や外部に公開した場合の保険だった。
+
+実運用では Web サーバーは Tailscale Serve（`tcp:443 -> http://127.0.0.1:8765`）経由で tailnet 内にのみ公開されており、FastAPI には tailnet クライアントの IP（100.64.0.0/10 帯）がそのまま到達する。tailnet は Tailscale 認証済みデバイスのみが入れるゼロトラスト境界であり、さらに既存の `OBSIDIAN_AI_HUB_API_TOKEN` による Bearer 認証を併用すれば、ローカル実行権限の委譲リスクは受容可能な水準と判断した。
+
+### 仕組みの概要
+
+1. **許可条件:** `GET`/`PUT` `/api/v1/task-config` および `/task-config/preview` は、以下のいずれかを満たす場合のみ許可する。
+   - 接続元 IP がループバックアドレス（127.0.0.1, ::1, IPv4-mapped loopback）または testclient
+   - 接続元 IP が tailnet 帯（IPv4 `100.64.0.0/10` / IPv6 `fd7a:115c:a1e0::/48`）**かつ** `OBSIDIAN_AI_HUB_ALLOW_TAILNET_TASKS` が有効 **かつ** `OBSIDIAN_AI_HUB_API_TOKEN` の Bearer 検証が成功
+2. **明示有効化（fail-closed）:** `OBSIDIAN_AI_HUB_ALLOW_TAILNET_TASKS` 未設定（既定 0）では tailnet 経由の許可は発動しない。有効化時は `OBSIDIAN_AI_HUB_API_TOKEN` が必須で、未設定なら起動時に RuntimeError。
+3. **Funnel 禁止:** Tailscale Funnel（インターネット全体公開）はタスク管理 API の許可対象外。Funnel でアクセスした場合も外部 IP として 403 が返る（tailnet 帯の判定で除外されるため）。
+4. ループバック・テスト・YAML 保存の仕組み（プロセス間ロック・アトミック保存・アーム）は既存決定のまま変更しない。
+
+## Web サーバー環境変数の OBSIDIAN_AI_HUB_ プレフィックス統一
+
+| 項目 | 内容 |
+|------|------|
+| 決定日 | 2026-08-12 |
+| カテゴリ | 環境変数・命名 |
+| 決定内容 | Web サーバー関連の環境変数は「メモリレビュー専用」ではなくアプリ全体に影響するため、`MEMORY_REVIEW_*` を `OBSIDIAN_AI_HUB_*` に改名する。 |
+
+### 結論に至った経緯
+
+`MEMORY_REVIEW_API_TOKEN` は Web API 全体の認証、`MEMORY_REVIEW_HOST` / `PORT` / `CORS_ORIGINS` は Web サーバー全体のバインド・CORS 設定であり、メモリレビュー機能に限定されない。実態に合わせたプレフィックスへ統一した。
+
+### 変更対象（env var → 新名称）
+
+- `MEMORY_REVIEW_API_TOKEN` → `OBSIDIAN_AI_HUB_API_TOKEN`
+- `MEMORY_REVIEW_ALLOW_TAILNET_TASKS` → `OBSIDIAN_AI_HUB_ALLOW_TAILNET_TASKS`
+- `MEMORY_REVIEW_HOST` → `OBSIDIAN_AI_HUB_HOST`
+- `MEMORY_REVIEW_PORT` → `OBSIDIAN_AI_HUB_PORT`
+- `MEMORY_REVIEW_CORS_ORIGINS` → `OBSIDIAN_AI_HUB_CORS_ORIGINS`
+- `MEMORY_REVIEW_FRONTEND_DIST` → `OBSIDIAN_AI_HUB_FRONTEND_DIST`
+
+既存のテスト隔離変数（`OBSIDIAN_AI_HUB_TESTING` 等）と命名が揃い、`.env` および launchd plist は旧名に依存していないため設定変更は不要。
+
 ## 実行・LLMログ基盤と30日保持期限の導入
 
 | 項目 | 内容 |
@@ -825,3 +871,18 @@ Research 詳細から HITL に移動すると、従来はテーマを含む質�
 | 決定内容 | サイドメニューの「確認待ち」リンクに pending_user 件数のバッジを表示する。新規APIやグローバルステートは追加せず、Sidebar 内で `GET /api/v1/hitl/runs?status=pending_user&limit=1` を呼び出し `response.total` のみを表示する。 |
 
 バックエンド変更なしで済むよう既存APIを再利用する。データフロー層（react-query等）を持たないため、フェッチは `Sidebar` 内の `useEffect` に自己完結させ、`useLocation().pathname` を依存にルート遷移のたびに再取得する。これによりHITLページで回答送信後に別ページへ遷移すればバッジが更新される。0件時は非表示。スタイルは `pending_user` の既存パレット（`rounded-full bg-yellow-100 px-2 py-0.5 text-[10px] font-medium text-yellow-800`）に準拠し、E2EではなくVitestで表示・非表示を検証する。
+
+## トークンの localStorage 移行と設定画面
+
+| 項目 | 内容 |
+|------|------|
+| 決定日 | 2026-08-12 |
+| カテゴリ | フロントエンド・認証 |
+| 決定内容 | APIトークンの保存先を `sessionStorage` から `localStorage`（キー `obsidian-ai-hub:api-token`）に変更し、サイドバー下部に設定リンクを追加して設定画面（`/settings`）からトークンを保存・削除できるようにする。401 応答時は `auth:expired` イベントを発火し、App がトークン認証画面へ戻る。 |
+
+トークンをセッションをまたいで保持し、リクエストごとに `Authorization: Bearer` へ付与するため、保存先を `localStorage` へ変更した。設定UIはサイドバー下部の「設定」リンクから開き、パスワード入力で現在のトークンを表示する。保存時は `listMemories({status:"candidate"})` で検証し、失敗時はトークンを削除してエラーを表示する。トークン削除と401発生時は `auth:expired` イベントを `window.dispatchEvent` で通知し、App が認証必須サーバのときだけ `TokenPrompt` へ戻す（認証不要サーバでは何もしない）。
+
+- XSSによるトークン漏えいの余地が残るため、httpOnlyクッキーへの移行は引き続きTODOとする。
+- 初回認証は従来どおり `TokenPrompt` が担い、設定画面は認証後のトークン管理に使う。
+- E2Eは追加せず、Vitest（`client.test.ts`・`SettingsPage.test.tsx`・`App.test.tsx`）で検証する。
+

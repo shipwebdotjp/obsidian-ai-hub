@@ -65,7 +65,7 @@ npm-dev:
 	cd frontend && npm run dev
 
 serve:
-	uv run -m obsidian_ai_hub --serve --debug
+	OBSIDIAN_AI_HUB_ALLOW_TAILNET_TASKS=1 uv run -m obsidian_ai_hub --serve --debug
 
 # E2E 探索サーバー（Ctrl-C で停止）
 e2e-serve: build-web

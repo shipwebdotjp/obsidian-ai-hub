@@ -11,7 +11,8 @@ import PeoplePage from "./features/people/PeoplePage";
 import ProjectsPage from "./features/projects/ProjectsPage";
 import TaskPage from "./features/tasks/TaskPage";
 import ExecutionLogPage from "./features/execution-logs/ExecutionLogPage";
-import { health, ApiError } from "./api/client";
+import SettingsPage from "./features/settings/SettingsPage";
+import { health, ApiError, AUTH_EXPIRED_EVENT } from "./api/client";
 import { ROUTES } from "./constants/routes";
 
 export default function App() {
@@ -41,6 +42,14 @@ export default function App() {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  useEffect(() => {
+    const onAuthExpired = () => {
+      setAuthed((current) => (current ? false : current));
+    };
+    window.addEventListener(AUTH_EXPIRED_EVENT, onAuthExpired);
+    return () => window.removeEventListener(AUTH_EXPIRED_EVENT, onAuthExpired);
   }, []);
 
   useEffect(() => {
@@ -130,6 +139,7 @@ export default function App() {
           <Route path={ROUTES.PROJECTS} element={<ProjectsPage />} />
           <Route path={ROUTES.TASKS} element={<TaskPage />} />
           <Route path={ROUTES.EXECUTION_LOGS} element={<ExecutionLogPage />} />
+          <Route path={ROUTES.SETTINGS} element={<SettingsPage />} />
           <Route path="*" element={<Navigate to={ROUTES.MEMORIES} replace />} />
         </Routes>
       </main>

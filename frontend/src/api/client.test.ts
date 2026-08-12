@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ApiError,
+  AUTH_EXPIRED_EVENT,
   cancelHitlRun,
   clearToken,
   deleteMemory,
@@ -16,7 +17,7 @@ import {
   generateSummary,
 } from "./client";
 
-const TOKEN_KEY = "obsidian-ai-hub:review-token";
+const TOKEN_KEY = "obsidian-ai-hub:api-token";
 
 function makeResponse(options: {
   status?: number;
@@ -55,7 +56,7 @@ describe("api/client", () => {
   const fetchMock = vi.fn();
 
   beforeEach(() => {
-    sessionStorage.clear();
+    localStorage.clear();
     fetchMock.mockReset();
     vi.stubGlobal("fetch", fetchMock);
   });
@@ -69,21 +70,21 @@ describe("api/client", () => {
       expect(getToken()).toBe("");
     });
 
-    it("setToken stores the token in sessionStorage", () => {
+    it("setToken stores the token in localStorage", () => {
       setToken("abc123");
-      expect(sessionStorage.getItem(TOKEN_KEY)).toBe("abc123");
+      expect(localStorage.getItem(TOKEN_KEY)).toBe("abc123");
     });
 
     it("setToken('') removes the existing token", () => {
       setToken("abc123");
       setToken("");
-      expect(sessionStorage.getItem(TOKEN_KEY)).toBeNull();
+      expect(localStorage.getItem(TOKEN_KEY)).toBeNull();
     });
 
-    it("clearToken removes the token from sessionStorage", () => {
+    it("clearToken removes the token from localStorage", () => {
       setToken("abc123");
       clearToken();
-      expect(sessionStorage.getItem(TOKEN_KEY)).toBeNull();
+      expect(localStorage.getItem(TOKEN_KEY)).toBeNull();
     });
   });
 
@@ -286,7 +287,10 @@ describe("api/client", () => {
   });
 
   describe("error handling", () => {
-    it("throws ApiError(401) and clears the token on 401 responses", async () => {
+    it("throws ApiError(401), clears the token, and dispatches auth:expired on 401 responses", async () => {
+      const dispatchSpy = vi
+        .spyOn(window, "dispatchEvent")
+        .mockImplementation(() => true);
       setToken("expired");
       fetchMock.mockResolvedValue(makeResponse({ status: 401 }));
       await expect(listMemories({})).rejects.toMatchObject({
@@ -295,7 +299,11 @@ describe("api/client", () => {
       });
       const err = await listMemories({}).catch((e) => e);
       expect(err).toBeInstanceOf(ApiError);
-      expect(sessionStorage.getItem(TOKEN_KEY)).toBeNull();
+      expect(localStorage.getItem(TOKEN_KEY)).toBeNull();
+      expect(dispatchSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ type: AUTH_EXPIRED_EVENT }),
+      );
+      dispatchSpy.mockRestore();
     });
 
     it("extracts detail as a string from the error body", async () => {
