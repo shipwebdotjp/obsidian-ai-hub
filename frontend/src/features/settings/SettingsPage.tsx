@@ -16,6 +16,7 @@ export default function SettingsPage() {
   const isMounted = useRef(true);
 
   useEffect(() => {
+    isMounted.current = true;
     return () => {
       isMounted.current = false;
     };
@@ -44,6 +45,9 @@ export default function SettingsPage() {
   function handleClear() {
     if (!window.confirm("API トークンを削除しますか？")) return;
     clearToken();
+    setValue("");
+    setSaved(false);
+    setError(null);
     window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT));
   }
 

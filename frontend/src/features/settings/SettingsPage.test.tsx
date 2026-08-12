@@ -70,16 +70,19 @@ describe("SettingsPage", () => {
     });
   });
 
-  it("clears the token and dispatches auth:expired when トークンを削除 is clicked", async () => {
+  it("clears the token, resets the input, and dispatches auth:expired when トークンを削除 is clicked", async () => {
     const dispatchSpy = vi
       .spyOn(window, "dispatchEvent")
       .mockImplementation(() => true);
     vi.spyOn(window, "confirm").mockImplementation(() => true);
+    mockGetToken.mockReturnValue("existing-token");
     render(<SettingsPage />);
+    expect(screen.getByLabelText("API token")).toHaveValue("existing-token");
     await userEvent.click(
       screen.getByRole("button", { name: "トークンを削除" }),
     );
     expect(mockClearToken).toHaveBeenCalled();
+    expect(screen.getByLabelText("API token")).toHaveValue("");
     expect(dispatchSpy).toHaveBeenCalledWith(
       expect.objectContaining({ type: "auth:expired" }),
     );

@@ -4,7 +4,7 @@ PLIST=~/Library/LaunchAgents/jp.shipweb.obsidian-ai-hub.plist
 LABEL=jp.shipweb.obsidian-ai-hub
 DOMAIN=gui/$(shell id -u)
 
-.PHONY: install start stop restart reload enable disable status logs errorlogs build-web dev-web jules-setup
+.PHONY: install start stop restart reload enable disable status logs errorlogs build-web dev-web jules-setup serve serve-tailnet
 
 # インストール（初回のみ）
 install:
@@ -64,7 +64,12 @@ npm-build:
 npm-dev:
 	cd frontend && npm run dev
 
+# Web UI の開発サーバ（loopback のみ、トークン不要）
 serve:
+	uv run -m obsidian_ai_hub --serve --debug
+
+# Tailscale tailnet 経由の Web UI 開発サーバ（OBSIDIAN_AI_HUB_API_TOKEN が必須）
+serve-tailnet:
 	OBSIDIAN_AI_HUB_ALLOW_TAILNET_TASKS=1 uv run -m obsidian_ai_hub --serve --debug
 
 # E2E 探索サーバー（Ctrl-C で停止）

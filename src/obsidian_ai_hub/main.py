@@ -540,8 +540,8 @@ def main():
         import uvicorn
 
         if args.debug:
-            _os.environ.setdefault("OBSIDIAN_AI_HUB_HOST", host)
-            _os.environ.setdefault("OBSIDIAN_AI_HUB_PORT", str(port))
+            _os.environ["OBSIDIAN_AI_HUB_HOST"] = host
+            _os.environ["OBSIDIAN_AI_HUB_PORT"] = str(port)
             _os.environ.setdefault("OBSIDIAN_AI_HUB_API_TOKEN", token)
             if allow_tailnet:
                 _os.environ.setdefault("OBSIDIAN_AI_HUB_ALLOW_TAILNET_TASKS", "1")
