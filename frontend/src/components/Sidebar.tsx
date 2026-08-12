@@ -1,4 +1,6 @@
-import { NavLink } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { NavLink, useLocation } from "react-router-dom";
+import { listHitlRuns } from "../api/client";
 import { ROUTES } from "../constants/routes";
 
 interface SidebarProps {
@@ -8,10 +10,26 @@ interface SidebarProps {
 }
 
 export default function Sidebar({ open, onClose, id }: SidebarProps) {
+  const location = useLocation();
+  const [pendingCount, setPendingCount] = useState<number | null>(null);
   const linkClass = ({ isActive }: { isActive: boolean }) =>
     `block rounded px-3 py-2 text-sm ${
       isActive ? "bg-slate-900 text-white" : "text-slate-700 hover:bg-slate-200"
     }`;
+
+  useEffect(() => {
+    let cancelled = false;
+    listHitlRuns({ status: "pending_user", limit: 1 })
+      .then((res) => {
+        if (!cancelled) setPendingCount(res.total);
+      })
+      .catch(() => {
+        // Keep the current badge value; auth gating happens in App.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [location.pathname]);
   return (
     <aside
       id={id}
@@ -38,7 +56,17 @@ export default function Sidebar({ open, onClose, id }: SidebarProps) {
           リサーチ
         </NavLink>
         <NavLink to={ROUTES.HITL} className={linkClass} onClick={onClose}>
-          確認待ち
+          <span className="flex items-center justify-between">
+            <span>確認待ち</span>
+            {pendingCount !== null && pendingCount > 0 && (
+              <span
+                data-testid="hitl-pending-badge"
+                className="rounded-full bg-yellow-100 px-2 py-0.5 text-[10px] font-medium text-yellow-800"
+              >
+                {pendingCount}
+              </span>
+            )}
+          </span>
         </NavLink>
         <NavLink to={ROUTES.VAULT_SEARCH} className={linkClass} onClick={onClose}>
           Vault 検索

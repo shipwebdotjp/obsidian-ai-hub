@@ -3,11 +3,12 @@ import userEvent from "@testing-library/user-event";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import App from "./App";
-import { health, ApiError } from "./api/client";
+import { health, ApiError, listHitlRuns } from "./api/client";
 
 // Mock the API client
 vi.mock("./api/client", () => ({
   health: vi.fn(),
+  listHitlRuns: vi.fn(),
   ApiError: class ApiError extends Error {
     status: number;
     constructor(status: number, message: string) {
@@ -39,9 +40,11 @@ vi.mock("./components/TokenPrompt", () => ({
 }));
 
 const mockHealth = vi.mocked(health);
+const mockListHitlRuns = vi.mocked(listHitlRuns);
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockListHitlRuns.mockResolvedValue({ items: [], total: 0 });
 });
 
 describe("App", () => {
@@ -201,5 +204,39 @@ describe("App", () => {
         expect(screen.getByTestId(link.testId)).toBeInTheDocument();
       });
     }
+  });
+
+  it("shows a pending count badge on the 確認待ち link when pending runs exist", async () => {
+    mockHealth.mockResolvedValue({ status: "ok", auth_required: false });
+    mockListHitlRuns.mockResolvedValue({ items: [], total: 3 });
+    render(
+      <MemoryRouter initialEntries={["/memories"]}>
+        <App />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("page-memories")).toBeInTheDocument();
+    });
+    const badge = await screen.findByTestId("hitl-pending-badge");
+    expect(badge).toHaveTextContent("3");
+  });
+
+  it("hides the pending count badge when there are no pending runs", async () => {
+    mockHealth.mockResolvedValue({ status: "ok", auth_required: false });
+    mockListHitlRuns.mockResolvedValue({ items: [], total: 0 });
+    render(
+      <MemoryRouter initialEntries={["/memories"]}>
+        <App />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("page-memories")).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(mockListHitlRuns).toHaveBeenCalled();
+    });
+    expect(screen.queryByTestId("hitl-pending-badge")).not.toBeInTheDocument();
   });
 });
