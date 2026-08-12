@@ -119,6 +119,25 @@ def test_localhost_restriction(clean_task_env):
     assert "Forbidden" in res.json()["detail"]
 
 
+def test_localhost_restriction_tailnet(clean_task_env, monkeypatch):
+    from obsidian_ai_hub.web.app import create_app
+
+    monkeypatch.setenv("OBSIDIAN_AI_HUB_ALLOW_TAILNET_TASKS", "1")
+    app = create_app(host="127.0.0.1", port=0, token="secret-token")
+
+    # tailnet + valid token works
+    tailnet_client = TestClient(app, client=("100.73.5.87", 50000))
+    res = tailnet_client.get(
+        "/api/v1/task-config",
+        headers={"Authorization": "Bearer secret-token"},
+    )
+    assert res.status_code == 200
+
+    # tailnet without token is 401
+    res = tailnet_client.get("/api/v1/task-config")
+    assert res.status_code == 401
+
+
 def test_update_task_config_success_and_arming(clean_task_env, web_client):
     task_file, state_file = clean_task_env
 

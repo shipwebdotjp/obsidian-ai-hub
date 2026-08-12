@@ -37,7 +37,10 @@ Vitest を React の標準テスト層に格上げし、Playwright E2E を主要
 - [x] `frontend/src/api/client.test.ts` を新規作成 (26 テスト)。`globalThis.fetch` を
       `vi.stubGlobal` で差し替え、`api/client.ts` の `request` 関数の入出力を直接検証する。
       カバー範囲:
-      - **token 管理**: `getToken` / `setToken("")` / `clearToken` の `sessionStorage` 連携。
+      - **token 管理**: `getToken` / `setToken("")` / `clearToken` の `localStorage` 連携。
+        （2026-08-12 に `sessionStorage` → `localStorage` へ移行、キーは
+        `obsidian-ai-hub:api-token`。401 時に `auth:expired` イベントを発火し App が
+        TokenPrompt へ戻る。）
       - **リクエスト構築**: `listMemories` のクエリ文字列 (URL エンコード、空パラメータ省略、
         `+` エンコード)、`reviewMemory` の POST + JSON (action/new_content、省略時挙動)、
         特殊文字を含む `memoryId` の `encodeURIComponent` 動作、`submitHitlAnswer` の

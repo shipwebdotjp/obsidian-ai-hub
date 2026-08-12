@@ -19,45 +19,59 @@ LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
 # Populated at startup by main.py --serve. Default values are loopback + no token.
 HOST: str = DEFAULT_HOST
 PORT: int = DEFAULT_PORT
-TOKEN: str = os.getenv("MEMORY_REVIEW_API_TOKEN", "")
+TOKEN: str = os.getenv("OBSIDIAN_AI_HUB_API_TOKEN", "")
 TOKEN_REQUIRED: bool = False
+ALLOW_TAILNET_TASKS: bool = False
 
 FRONTEND_DIST = Path(
     os.getenv(
-        "MEMORY_REVIEW_FRONTEND_DIST",
+        "OBSIDIAN_AI_HUB_FRONTEND_DIST",
         Path(__file__).resolve().parents[3] / "frontend" / "dist",
     )
 )
 
 
 def _configure_security(host: str, token: str) -> None:
-    global HOST, PORT, TOKEN, TOKEN_REQUIRED
+    global HOST, PORT, TOKEN, TOKEN_REQUIRED, ALLOW_TAILNET_TASKS
     HOST = host
     TOKEN = token
     TOKEN_REQUIRED = host not in LOOPBACK_HOSTS
     if TOKEN_REQUIRED and not TOKEN:
         raise RuntimeError(
-            "MEMORY_REVIEW_API_TOKEN is required when the server is bound to a "
+            "OBSIDIAN_AI_HUB_API_TOKEN is required when the server is bound to a "
             "non-loopback address. Set it in the environment before launching."
         )
+    allow_tailnet = os.getenv("OBSIDIAN_AI_HUB_ALLOW_TAILNET_TASKS", "0").lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+    if allow_tailnet and not TOKEN:
+        raise RuntimeError(
+            "OBSIDIAN_AI_HUB_API_TOKEN is required when OBSIDIAN_AI_HUB_ALLOW_TAILNET_TASKS "
+            "is enabled. Tailnet access to the task management API is fail-closed "
+            "without a bearer token."
+        )
+    ALLOW_TAILNET_TASKS = allow_tailnet
 
 
 def create_app(
     host: str | None = None, port: int | None = None, token: str | None = None
 ) -> FastAPI:
     if host is None:
-        host = os.getenv("MEMORY_REVIEW_HOST", DEFAULT_HOST)
+        host = os.getenv("OBSIDIAN_AI_HUB_HOST", DEFAULT_HOST)
     if port is None:
-        port = int(os.getenv("MEMORY_REVIEW_PORT", str(DEFAULT_PORT)))
+        port = int(os.getenv("OBSIDIAN_AI_HUB_PORT", str(DEFAULT_PORT)))
     if token is None:
-        token = os.getenv("MEMORY_REVIEW_API_TOKEN", "")
+        token = os.getenv("OBSIDIAN_AI_HUB_API_TOKEN", "")
     _configure_security(host, token)
 
     app = FastAPI(title="obsidian-ai-hub Memory Review", version="0.1.0")
     app.add_middleware(
         CORSMiddleware,
         allow_origins=os.getenv(
-            "MEMORY_REVIEW_CORS_ORIGINS", "http://127.0.0.1:5173"
+            "OBSIDIAN_AI_HUB_CORS_ORIGINS", "http://127.0.0.1:5173"
         ).split(","),
         allow_credentials=True,
         allow_methods=["*"],
@@ -73,7 +87,11 @@ def create_app(
 
     @app.get("/health")
     def health():
-        return {"status": "ok", "auth_required": TOKEN_REQUIRED}
+        return {
+            "status": "ok",
+            "auth_required": TOKEN_REQUIRED,
+            "tailnet_tasks_allowed": ALLOW_TAILNET_TASKS,
+        }
 
     if FRONTEND_DIST.exists():
         assets_dir = FRONTEND_DIST / "assets"

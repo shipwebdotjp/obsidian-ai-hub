@@ -9,6 +9,7 @@ import { health, ApiError, listHitlRuns } from "./api/client";
 vi.mock("./api/client", () => ({
   health: vi.fn(),
   listHitlRuns: vi.fn(),
+  AUTH_EXPIRED_EVENT: "auth:expired",
   ApiError: class ApiError extends Error {
     status: number;
     constructor(status: number, message: string) {
@@ -28,6 +29,7 @@ vi.mock("./features/people/PeoplePage", () => ({ default: () => <div data-testid
 vi.mock("./features/projects/ProjectsPage", () => ({ default: () => <div data-testid="page-projects">ProjectsPage</div> }));
 vi.mock("./features/tasks/TaskPage", () => ({ default: () => <div data-testid="page-tasks">TaskPage</div> }));
 vi.mock("./features/execution-logs/ExecutionLogPage", () => ({ default: () => <div data-testid="page-execution-logs">ExecutionLogPage</div> }));
+vi.mock("./features/settings/SettingsPage", () => ({ default: () => <div data-testid="page-settings">SettingsPage</div> }));
 
 // Mock TokenPrompt to avoid token input rendering complexities
 vi.mock("./components/TokenPrompt", () => ({
@@ -103,6 +105,29 @@ describe("App", () => {
     await waitFor(() => {
       expect(screen.getByTestId("token-prompt")).toBeInTheDocument();
     });
+  });
+
+  it("returns to TokenPrompt when auth:expired is dispatched after authentication", async () => {
+    mockHealth.mockResolvedValue({ status: "ok", auth_required: true });
+    render(
+      <MemoryRouter>
+        <App />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("token-prompt")).toBeInTheDocument();
+    });
+    await userEvent.click(
+      screen.getByRole("button", { name: "Authenticate" }),
+    );
+    expect(screen.getByTestId("page-memories")).toBeInTheDocument();
+
+    fireEvent(window, new Event("auth:expired"));
+    await waitFor(() => {
+      expect(screen.getByTestId("token-prompt")).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId("page-memories")).not.toBeInTheDocument();
   });
 
   it("renders Connection Error screen when health check fails with non-401 error", async () => {
@@ -195,6 +220,7 @@ describe("App", () => {
       { name: "プロジェクト管理", testId: "page-projects" },
       { name: "タスク管理", testId: "page-tasks" },
       { name: "実行ログ", testId: "page-execution-logs" },
+      { name: "設定", testId: "page-settings" },
     ];
 
     for (const link of links) {

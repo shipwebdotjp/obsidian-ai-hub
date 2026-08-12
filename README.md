@@ -269,7 +269,7 @@ rejection to multiple selected candidates at once. The **Dashboard** page shows
 daily, weekly, and monthly summaries with filters and a detail panel.
 
 The server is local-only by default. If you intentionally make it available on
-your network with `--serve-host`, set `MEMORY_REVIEW_API_TOKEN` first.
+your network with `--serve-host`, set `OBSIDIAN_AI_HUB_API_TOKEN` first.
 Use `--serve-port` to override the default port (`8765`):
 
 ```bash
@@ -401,10 +401,10 @@ The runner understands `second`, `minute`, `hour`, `day`, and `weekday`. Missing
 
 Commands are executed without a shell. Plain argv-style commands are supported, and you can chain a directory change with `cd /path && ...`. Shell operators like pipes, redirects, and environment expansion are not interpreted.
 
-### Task Runner Web UI (Localhost Exclusive)
+### Task Runner Web UI (Loopback or Tailnet + Token)
 
 The Web UI provides a dedicated **Task Management** page where you can manage, add, edit, and disable tasks visually:
-- **Localhost Exclusive Security:** The configuration APIs (`GET`/`PUT` `/api/v1/task-config`) are strictly restricted to localhost. Any requests from non-loopback clients (LAN or public network) are rejected with `403 Forbidden` to prevent unauthorized execution of local commands.
+- **Access Control:** The configuration APIs (`GET`/`PUT` `/api/v1/task-config`) are restricted to loopback clients and, when `OBSIDIAN_AI_HUB_ALLOW_TAILNET_TASKS=1` is set, to Tailscale tailnet clients (IPv4 `100.64.0.0/10` and IPv6 `fd7a:115c:a1e0::/48`) that present a valid `OBSIDIAN_AI_HUB_API_TOKEN` Bearer token. Any other request (LAN or public network, including Tailscale Funnel) is rejected with `403 Forbidden` to prevent unauthorized execution of local commands. Tailnet access is disabled by default (fail-closed).
 - **Structure Validation:** ID uniqueness, valid cron ranges/values, relevant fields per schedule type, and command execution structures are validated prior to saving. Syntax/meaning errors return `422 Unprocessable Entity`.
 - **Atomic Operations & Optimistic Locking:** Settings are written atomically using temporary files and `os.replace` to prevent corruption. If multiple sessions try to modify configuration concurrently, the server throws `409 Conflict`, prompting you to refresh.
 - **No Retrospective Execution (Arming):** When you add a task, re-enable it, or modify its schedule/command, the task is "armed" with the current save time, preventing retrospective execution of past run frames.
