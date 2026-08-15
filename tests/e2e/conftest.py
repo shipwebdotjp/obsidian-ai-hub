@@ -3,6 +3,7 @@ import os
 import socket
 import threading
 import time
+import json
 from pathlib import Path
 
 import pytest
@@ -19,6 +20,8 @@ class _LogCapture(logging.Handler):
 
 server_log_capture = _LogCapture()
 server_log_capture.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+
+TEST_API_TOKEN = "test-api-token"
 
 
 @pytest.hookimpl(tryfirst=True, hookwrapper=True)
@@ -59,7 +62,8 @@ def frontend_dist() -> Path:
 @pytest.fixture(scope="module")
 def e2e_seed_scenario():
     """Override this module-scope fixture to specify which scenarios to seed.
-    Can be a list containing 'memory' and/or 'hitl'.
+    Can be a list containing 'memory', 'hitl', 'people', and/or
+    'summary_recovery'.
     """
     return ["memory"]
 
@@ -73,6 +77,7 @@ def e2e_server_url(frontend_dist: Path, e2e_seed_scenario: list[str]) -> str:
     from obsidian_ai_hub.testing.seed import (
         seed_memory_demo_data,
         seed_hitl_demo_data,
+        seed_people_demo_data,
         seed_summary_recovery_demo_data,
     )
     from obsidian_ai_hub import database
@@ -115,6 +120,8 @@ def e2e_server_url(frontend_dist: Path, e2e_seed_scenario: list[str]) -> str:
             seed_memory_demo_data()
         if "hitl" in e2e_seed_scenario:
             seed_hitl_demo_data()
+        if "people" in e2e_seed_scenario:
+            seed_people_demo_data()
         if "summary_recovery" in e2e_seed_scenario:
             seed_summary_recovery_demo_data()
             # Keep the browser flow deterministic and isolated from external LLMs.
@@ -139,7 +146,7 @@ def e2e_server_url(frontend_dist: Path, e2e_seed_scenario: list[str]) -> str:
             s.bind(("127.0.0.1", 0))
             port = s.getsockname()[1]
 
-        app = create_app(host="127.0.0.1", port=port, token="")
+        app = create_app(host="127.0.0.1", port=port, token=TEST_API_TOKEN)
         uvicorn_config = uvicorn.Config(
             app, host="127.0.0.1", port=port, log_level="info"
         )
@@ -214,6 +221,10 @@ def browser():
 @pytest.fixture
 def page(browser, request):
     context = browser.new_context()
+    context.add_init_script(
+        "localStorage.setItem('obsidian-ai-hub:api-token', %s)"
+        % json.dumps(TEST_API_TOKEN)
+    )
     context.tracing.start(screenshots=True, snapshots=True, sources=True)
     page = context.new_page()
     console_log: list[str] = []

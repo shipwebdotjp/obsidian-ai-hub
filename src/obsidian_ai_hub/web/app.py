@@ -14,14 +14,10 @@ logger = logging.getLogger(__name__)
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
 
-LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
-
-# Populated at startup by main.py --serve. Default values are loopback + no token.
+# Populated at startup by main.py --serve. Default port/host are loopback.
 HOST: str = DEFAULT_HOST
 PORT: int = DEFAULT_PORT
 TOKEN: str = os.getenv("OBSIDIAN_AI_HUB_API_TOKEN", "")
-TOKEN_REQUIRED: bool = False
-ALLOW_TAILNET_TASKS: bool = False
 
 FRONTEND_DIST = Path(
     os.getenv(
@@ -31,29 +27,15 @@ FRONTEND_DIST = Path(
 )
 
 
-def _configure_security(host: str, token: str) -> None:
-    global HOST, PORT, TOKEN, TOKEN_REQUIRED, ALLOW_TAILNET_TASKS
-    HOST = host
+def _configure_security(token: str) -> None:
+    global TOKEN
     TOKEN = token
-    TOKEN_REQUIRED = host not in LOOPBACK_HOSTS
-    if TOKEN_REQUIRED and not TOKEN:
+    if not TOKEN:
         raise RuntimeError(
-            "OBSIDIAN_AI_HUB_API_TOKEN is required when the server is bound to a "
-            "non-loopback address. Set it in the environment before launching."
+            "OBSIDIAN_AI_HUB_API_TOKEN is required to serve the web API. "
+            "Set it in the environment before launching. All API endpoints "
+            "require bearer-token authentication."
         )
-    allow_tailnet = os.getenv("OBSIDIAN_AI_HUB_ALLOW_TAILNET_TASKS", "0").lower() in (
-        "1",
-        "true",
-        "yes",
-        "on",
-    )
-    if allow_tailnet and not TOKEN:
-        raise RuntimeError(
-            "OBSIDIAN_AI_HUB_API_TOKEN is required when OBSIDIAN_AI_HUB_ALLOW_TAILNET_TASKS "
-            "is enabled. Tailnet access to the task management API is fail-closed "
-            "without a bearer token."
-        )
-    ALLOW_TAILNET_TASKS = allow_tailnet
 
 
 def create_app(
@@ -65,7 +47,7 @@ def create_app(
         port = int(os.getenv("OBSIDIAN_AI_HUB_PORT", str(DEFAULT_PORT)))
     if token is None:
         token = os.getenv("OBSIDIAN_AI_HUB_API_TOKEN", "")
-    _configure_security(host, token)
+    _configure_security(token)
 
     app = FastAPI(title="obsidian-ai-hub Memory Review", version="0.1.0")
     app.add_middleware(
@@ -89,8 +71,7 @@ def create_app(
     def health():
         return {
             "status": "ok",
-            "auth_required": TOKEN_REQUIRED,
-            "tailnet_tasks_allowed": ALLOW_TAILNET_TASKS,
+            "auth_required": True,
         }
 
     if FRONTEND_DIST.exists():

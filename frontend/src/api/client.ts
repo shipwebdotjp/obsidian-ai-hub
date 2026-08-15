@@ -267,7 +267,6 @@ export function batchDeleteMemories(body: BatchDeleteRequest): Promise<BatchDele
 export async function health(): Promise<{
   status: string;
   auth_required: boolean;
-  tailnet_tasks_allowed?: boolean;
 }> {
   return request("/health");
 }

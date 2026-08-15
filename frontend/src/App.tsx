@@ -12,7 +12,13 @@ import ProjectsPage from "./features/projects/ProjectsPage";
 import TaskPage from "./features/tasks/TaskPage";
 import ExecutionLogPage from "./features/execution-logs/ExecutionLogPage";
 import SettingsPage from "./features/settings/SettingsPage";
-import { health, ApiError, AUTH_EXPIRED_EVENT } from "./api/client";
+import {
+  health,
+  ApiError,
+  AUTH_EXPIRED_EVENT,
+  getToken,
+  listMemories,
+} from "./api/client";
 import { ROUTES } from "./constants/routes";
 
 export default function App() {
@@ -24,10 +30,41 @@ export default function App() {
   useEffect(() => {
     let cancelled = false;
     health()
-      .then((res) => {
+      .then(async (res) => {
         if (cancelled) return;
-        setNeedsToken(Boolean(res.auth_required));
-        setAuthed(!res.auth_required);
+        if (!res.auth_required) {
+          setNeedsToken(false);
+          setAuthed(true);
+          return;
+        }
+        // Auth is required: if a token is already stored (returning user /
+        // pre-injected), validate it and skip the token prompt.
+        if (getToken()) {
+          try {
+            await listMemories({ status: "candidate" });
+            if (cancelled) return;
+            setNeedsToken(true);
+            setAuthed(true);
+            return;
+          } catch (e) {
+            // request() already cleared the token on 401.
+            if (e instanceof ApiError && e.status === 401) {
+              // Invalid stored token: fall through to the token prompt.
+            } else {
+              // Server / connectivity problem is not an auth failure; surface
+              // the connection error and keep the stored token.
+              if (cancelled) return;
+              setAuthed(false);
+              setHealthError(
+                e instanceof ApiError ? e.message : "サーバーとの接続に失敗しました",
+              );
+              return;
+            }
+          }
+        }
+        if (cancelled) return;
+        setNeedsToken(true);
+        setAuthed(false);
       })
       .catch((e) => {
         if (cancelled) return;

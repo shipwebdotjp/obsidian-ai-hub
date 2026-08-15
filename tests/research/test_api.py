@@ -9,9 +9,9 @@ from obsidian_ai_hub.web.app import create_app
 
 
 @pytest.fixture
-def client():
-    app = create_app(host="127.0.0.1", port=8765, token="test-token")
-    return TestClient(app)
+def client(api_token, api_auth_headers):
+    app = create_app(host="127.0.0.1", port=8765, token=api_token)
+    return TestClient(app, headers=api_auth_headers)
 
 
 def _create_test_theme():
@@ -121,11 +121,17 @@ def test_invalid_status_filter(client):
     assert resp.status_code == 400
 
 
-def test_loopback_auth_bypass(client):
-    app = create_app(host="127.0.0.1", port=8765, token="")
-    bypass_client = TestClient(app)
-    resp = bypass_client.get("/api/v1/research-themes")
-    assert resp.status_code == 200
+def test_requires_auth_token(api_token):
+    app = create_app(host="127.0.0.1", port=8765, token=api_token)
+    missing_token = TestClient(app)
+    resp = missing_token.get("/api/v1/research-themes")
+    assert resp.status_code == 401
+
+    wrong_token = TestClient(
+        app, headers={"Authorization": "Bearer wrong-token"}
+    )
+    resp = wrong_token.get("/api/v1/research-themes")
+    assert resp.status_code == 401
 
 
 def test_run_research_theme_validation_error(client):

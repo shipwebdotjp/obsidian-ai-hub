@@ -4,7 +4,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from obsidian_ai_hub.web import schemas, service
-from obsidian_ai_hub.web.routes.deps import require_loopback_or_token
+from obsidian_ai_hub.web.routes.deps import require_bearer_token
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +17,7 @@ def list_memories(
     kind: Optional[str] = None,
     topic: Optional[str] = None,
     q: Optional[str] = None,
-    _=Depends(require_loopback_or_token),
+    _=Depends(require_bearer_token),
 ):
     if status_filter and status_filter not in schemas.ALLOWED_STATUS:
         raise HTTPException(
@@ -29,7 +29,7 @@ def list_memories(
 
 
 @router.get("/memories/{memory_id}", response_model=schemas.MemoryDetail)
-def get_memory(memory_id: str, _=Depends(require_loopback_or_token)):
+def get_memory(memory_id: str, _=Depends(require_bearer_token)):
     m = service.get_memory(memory_id)
     if m is None:
         raise HTTPException(status_code=404, detail="memory not found")
@@ -41,7 +41,7 @@ def get_memory(memory_id: str, _=Depends(require_loopback_or_token)):
 
 @router.post("/memories/{memory_id}/review", response_model=schemas.ReviewResponse)
 def review_memory(
-    memory_id: str, body: schemas.ReviewRequest, _=Depends(require_loopback_or_token)
+    memory_id: str, body: schemas.ReviewRequest, _=Depends(require_bearer_token)
 ):
     try:
         result = service.review_memory(memory_id, body.action, body.new_content)
@@ -55,7 +55,7 @@ def review_memory(
 
 @router.post("/memories/{memory_id}/edit", response_model=schemas.UpdateResponse)
 def edit_memory(
-    memory_id: str, body: schemas.EditRequest, _=Depends(require_loopback_or_token)
+    memory_id: str, body: schemas.EditRequest, _=Depends(require_bearer_token)
 ):
     payload = body.model_dump(exclude_none=True)
     if not payload:
@@ -72,7 +72,7 @@ def edit_memory(
 
 @router.post("/memories/batch-review", response_model=schemas.BatchReviewResponse)
 def batch_review(
-    body: schemas.BatchReviewRequest, _=Depends(require_loopback_or_token)
+    body: schemas.BatchReviewRequest, _=Depends(require_bearer_token)
 ):
     if not body.memory_ids:
         raise HTTPException(status_code=400, detail="memory_ids must not be empty")
@@ -87,7 +87,7 @@ def batch_review(
 def resolve_memory(
     candidate_id: str,
     body: schemas.ResolveRequest,
-    _=Depends(require_loopback_or_token),
+    _=Depends(require_bearer_token),
 ):
     try:
         cand, target = service.resolve_memory(
@@ -104,7 +104,7 @@ def resolve_memory(
 
 
 @router.delete("/memories/{memory_id}", response_model=schemas.DeleteResponse)
-def delete_memory(memory_id: str, _=Depends(require_loopback_or_token)):
+def delete_memory(memory_id: str, _=Depends(require_bearer_token)):
     result = service.delete_memory(memory_id)
     if not result.get("found"):
         raise HTTPException(status_code=404, detail="memory not found")
@@ -113,20 +113,20 @@ def delete_memory(memory_id: str, _=Depends(require_loopback_or_token)):
 
 @router.post("/memories/batch-delete", response_model=schemas.BatchDeleteResponse)
 def batch_delete(
-    body: schemas.BatchDeleteRequest, _=Depends(require_loopback_or_token)
+    body: schemas.BatchDeleteRequest, _=Depends(require_bearer_token)
 ):
     return service.batch_delete(body.memory_ids)
 
 
 @router.get("/memory-options", response_model=schemas.MemoryOptionsResponse)
-def get_memory_options(_=Depends(require_loopback_or_token)):
+def get_memory_options(_=Depends(require_bearer_token)):
     return service.get_memory_options()
 
 
 @router.post(
     "/copilot-profile/render", response_model=schemas.RenderCopilotProfileResponse
 )
-def render_copilot_profile(_=Depends(require_loopback_or_token)):
+def render_copilot_profile(_=Depends(require_bearer_token)):
     try:
         updated_files = service.render_copilot_profile()
         return {"updated_files": updated_files}

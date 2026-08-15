@@ -41,12 +41,12 @@ def clean_memory_env(tmp_path, monkeypatch):
 
 
 @pytest.fixture
-def loopback_client(clean_memory_env):
+def loopback_client(clean_memory_env, api_token, api_auth_headers):
     from fastapi.testclient import TestClient
     from obsidian_ai_hub.web.app import create_app
 
-    app = create_app(host="127.0.0.1", port=0, token="")
-    return TestClient(app)
+    app = create_app(host="127.0.0.1", port=0, token=api_token)
+    return TestClient(app, headers=api_auth_headers)
 
 
 def _seed(memory_id: str, status: str = "candidate", content: str = "本文") -> None:
@@ -90,7 +90,7 @@ def test_health(loopback_client):
     assert res.status_code == 200
     body = res.json()
     assert body["status"] == "ok"
-    assert body["auth_required"] is False
+    assert body["auth_required"] is True
 
 
 def test_list_and_detail(loopback_client):
@@ -234,9 +234,13 @@ def test_token_required_at_startup_for_non_loopback():
         web_app.create_app(host="0.0.0.0", port=0, token="")
 
 
-def test_serve_cli_starts_server():
-    from obsidian_ai_hub import main as cli_main
+def test_serve_cli_starts_server(monkeypatch):
     import uvicorn as _real_uvicorn
+    from obsidian_ai_hub import main as cli_main
+
+    # --serve now requires a bearer token unconditionally (even on loopback).
+    monkeypatch.setenv("OBSIDIAN_AI_HUB_API_TOKEN", "test-api-token")
+    monkeypatch.setenv("OBSIDIAN_AI_HUB_HOST", "127.0.0.1")
 
     # We patch uvicorn.run globally so that when main.py imports uvicorn
     # and calls uvicorn.run(...), it's intercepted.
@@ -257,16 +261,13 @@ def test_serve_host_without_serve_is_rejected():
         cli_main.main()
 
 
-def test_serve_loopback_no_token(monkeypatch):
-    """`--serve` with loopback host should not require a token."""
+def test_token_required_at_startup_even_loopback():
+    """create_app must fail at startup without a token, even on loopback."""
     from obsidian_ai_hub.web import app as web_app
 
-    monkeypatch.setattr(web_app, "HOST", "127.0.0.1")
-    monkeypatch.setattr(web_app, "TOKEN", "")
-    monkeypatch.setattr(web_app, "TOKEN_REQUIRED", False)
-
     with pytest.raises(RuntimeError):
-        web_app.create_app(host="0.0.0.0", port=0, token="")
+        web_app.create_app(host="127.0.0.1", port=0, token="")
+
 
 
 def test_resolve_memory_keep_both(loopback_client):

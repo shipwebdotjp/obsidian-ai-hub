@@ -521,21 +521,10 @@ def main():
         host = args.serve_host or _os.getenv("OBSIDIAN_AI_HUB_HOST", "127.0.0.1")
         port = args.serve_port or int(_os.getenv("OBSIDIAN_AI_HUB_PORT", "8765"))
         token = _os.getenv("OBSIDIAN_AI_HUB_API_TOKEN", "")
-        allow_tailnet = _os.getenv("OBSIDIAN_AI_HUB_ALLOW_TAILNET_TASKS", "0").lower() in (
-            "1",
-            "true",
-            "yes",
-            "on",
-        )
-        if host not in ("127.0.0.1", "::1", "localhost") and not token:
+        if not token:
             raise RuntimeError(
-                "OBSIDIAN_AI_HUB_API_TOKEN is required when binding to a non-loopback host."
-            )
-        if allow_tailnet and not token:
-            raise RuntimeError(
-                "OBSIDIAN_AI_HUB_API_TOKEN is required when OBSIDIAN_AI_HUB_ALLOW_TAILNET_TASKS "
-                "is enabled. Tailnet access to the task management API is fail-closed "
-                "without a bearer token."
+                "OBSIDIAN_AI_HUB_API_TOKEN is required to serve the web API. "
+                "All API endpoints require bearer-token authentication."
             )
         import uvicorn
 
@@ -543,8 +532,6 @@ def main():
             _os.environ["OBSIDIAN_AI_HUB_HOST"] = host
             _os.environ["OBSIDIAN_AI_HUB_PORT"] = str(port)
             _os.environ.setdefault("OBSIDIAN_AI_HUB_API_TOKEN", token)
-            if allow_tailnet:
-                _os.environ.setdefault("OBSIDIAN_AI_HUB_ALLOW_TAILNET_TASKS", "1")
             uvicorn.run(
                 "obsidian_ai_hub.web.app:create_app",
                 host=host,
@@ -559,8 +546,6 @@ def main():
             web_app.HOST = host
             web_app.PORT = port
             web_app.TOKEN = token
-            web_app.TOKEN_REQUIRED = host not in ("127.0.0.1", "::1", "localhost")
-            web_app.ALLOW_TAILNET_TASKS = allow_tailnet
             uvicorn.run(
                 web_app.create_app(host=host, port=port, token=token),
                 host=host,

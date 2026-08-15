@@ -251,12 +251,6 @@ def resolve_person_candidate(
                 raise ValueError("Target person not found")
             target = dict(target_row)
 
-            # Enforce target must be a Vault-linked person
-            if not target.get("vault_id"):
-                raise ValueError(
-                    "未連携人物への解決は許可されていません。解決先はVault連携済みの人物だけに制限されています。"
-                )
-
             normalized_name = cand["normalized_name"]
 
             # 3. Conflict check 1: person_aliases

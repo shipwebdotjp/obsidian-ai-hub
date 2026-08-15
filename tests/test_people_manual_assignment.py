@@ -11,9 +11,9 @@ from obsidian_ai_hub.web import service
 
 
 @pytest.fixture
-def client():
-    app = create_app()
-    return TestClient(app)
+def client(api_token, api_auth_headers):
+    app = create_app(host="127.0.0.1", port=0, token=api_token)
+    return TestClient(app, headers=api_auth_headers)
 
 
 def test_manual_assignment_flow(test_memory_db_path, client):

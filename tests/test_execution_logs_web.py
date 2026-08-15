@@ -6,9 +6,9 @@ from obsidian_ai_hub.utils import execution_logger
 
 
 @pytest.fixture
-def loopback_client(monkeypatch, test_memory_db_path):
-    app = create_app(host="127.0.0.1", port=0, token="")
-    return TestClient(app)
+def loopback_client(monkeypatch, test_memory_db_path, api_token, api_auth_headers):
+    app = create_app(host="127.0.0.1", port=0, token=api_token)
+    return TestClient(app, headers=api_auth_headers)
 
 
 def test_execution_logs_apis(loopback_client, test_memory_db_path):

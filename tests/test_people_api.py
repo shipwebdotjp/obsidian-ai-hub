@@ -10,9 +10,9 @@ from obsidian_ai_hub.web.app import create_app
 
 
 @pytest.fixture
-def client():
-    app = create_app()
-    return TestClient(app)
+def client(api_token, api_auth_headers):
+    app = create_app(host="127.0.0.1", port=0, token=api_token)
+    return TestClient(app, headers=api_auth_headers)
 
 
 def test_people_api_sync_and_list(test_memory_db_path, tmp_path, monkeypatch, client):
@@ -107,6 +107,102 @@ Suzuki Ken note.
     assert (
         len(p_detail["summaries"]) == 2
     )  # The 2 summaries from candidate 'ケン' are migrated!
+
+
+def test_people_resolve_to_unlinked_person(
+    test_memory_db_path, tmp_path, monkeypatch, client
+):
+    """A candidate can be globally resolved to an existing unlinked person."""
+    conn = memory.get_db_connection()
+    try:
+        conn.execute(
+            "INSERT INTO people (person_id, display_name, normalized_name, vault_id) VALUES (?, ?, ?, ?)",
+            ("peo_unlinked_ken", "鈴木健", "鈴木健", None),
+        )
+        summary_store.upsert_summary(
+            {
+                "period_type": "day",
+                "period_key": "2026-08-03",
+                "summary": "Met Ken",
+                "people": [{"name": "ケン", "note": "Ken's first note"}],
+            },
+            conn=conn,
+        )
+        summary_store.upsert_summary(
+            {
+                "period_type": "day",
+                "period_key": "2026-08-04",
+                "summary": "Met Ken again",
+                "people": [{"name": "ケン", "note": "Ken's second note"}],
+            },
+            conn=conn,
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    candidates = client.get("/api/v1/people/candidates").json()
+    matches = [
+        candidate["candidate_id"]
+        for candidate in candidates
+        if candidate["normalized_name"] == "ケン"
+    ]
+    assert matches, f"expected unresolved candidate 'ケン' in {candidates}"
+    candidate_id = matches[0]
+
+    response = client.post(
+        f"/api/v1/people/candidates/{candidate_id}/resolve",
+        json={"target_person_id": "peo_unlinked_ken"},
+    )
+    assert response.status_code == 200
+
+    response = client.get("/api/v1/people/peo_unlinked_ken")
+    assert response.status_code == 200
+    detail = response.json()
+    assert detail["vault_id"] is None
+    assert {alias["normalized_name"] for alias in detail["aliases"]} == {"ケン"}
+    assert detail["summary_count"] == 2
+    assert all(
+        candidate["candidate_id"] != candidate_id
+        for candidate in client.get("/api/v1/people/candidates").json()
+    )
+
+    # The confirmed alias resolves subsequent imports to the same unlinked person.
+    summary_store.upsert_summary(
+        {
+            "period_type": "day",
+            "period_key": "2026-08-05",
+            "summary": "Met Ken once more",
+            "people": [{"name": "ケン", "note": "Ken's third note"}],
+        }
+    )
+    conn = memory.get_db_connection()
+    try:
+        row = conn.execute(
+            """
+            SELECT sp.person_id
+            FROM summary_people sp
+            JOIN summaries s ON s.summary_id = sp.summary_id
+            WHERE s.period_type = ? AND s.period_key = ?
+            """,
+            ("day", "2026-08-05"),
+        ).fetchone()
+        assert row is not None
+        assert row["person_id"] == "peo_unlinked_ken"
+    finally:
+        conn.close()
+
+    # A later Vault note with the unlinked person's primary name upgrades it in place.
+    people_dir = tmp_path / "people"
+    people_dir.mkdir()
+    monkeypatch.setattr(app_config, "PEOPLE_PATH", people_dir)
+    (people_dir / "suzuki.md").write_text(
+        "---\nid: ken-suzuki\nname: 鈴木健\n---\n",
+        encoding="utf-8",
+    )
+    response = client.post("/api/v1/people/sync")
+    assert response.status_code == 200
+    assert client.get("/api/v1/people/peo_unlinked_ken").json()["vault_id"] == "ken-suzuki"
 
 
 def test_people_resolve_conflicts(test_memory_db_path, tmp_path, monkeypatch, client):

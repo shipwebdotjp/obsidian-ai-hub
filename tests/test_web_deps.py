@@ -1,139 +1,85 @@
 from fastapi.testclient import TestClient
 
 from obsidian_ai_hub.web.app import create_app
-from obsidian_ai_hub.web.routes.deps import _is_loopback_host, _is_tailnet_host
+
+TEST_API_TOKEN = "test-api-token"
 
 
-def test_is_loopback_host():
-    assert _is_loopback_host("127.0.0.1") is True
-    assert _is_loopback_host("::1") is True
-    assert _is_loopback_host("localhost") is True
-    assert _is_loopback_host("::ffff:127.0.0.1") is True
-    assert _is_loopback_host("::ffff:7f00:1") is True
-    assert _is_loopback_host("::FFFF:7F00:0001") is True
-    assert _is_loopback_host("testclient") is False
-    assert _is_loopback_host("192.168.1.5") is False
-    assert _is_loopback_host(None) is False
-    assert _is_loopback_host("") is False
+def bearer_headers(token: str = TEST_API_TOKEN) -> dict[str, str]:
+    return {"Authorization": f"Bearer {token}"}
 
 
-def test_is_tailnet_host():
-    assert _is_tailnet_host("100.64.0.0") is True
-    assert _is_tailnet_host("100.73.5.87") is True
-    assert _is_tailnet_host("100.127.255.255") is True
-    assert _is_tailnet_host("100.128.0.0") is False
-    assert _is_tailnet_host("100.63.255.255") is False
-    assert _is_tailnet_host("fd7a:115c:a1e0::1") is True
-    assert _is_tailnet_host("fd7a:115c:a1e0:ffff::1") is True
-    assert _is_tailnet_host("fd7a:115c:a1df::1") is False
-    assert _is_tailnet_host("fd7a:115c:a1e1::1") is False
-    assert _is_tailnet_host("192.168.1.5") is False
-    assert _is_tailnet_host("127.0.0.1") is False
-    assert _is_tailnet_host("localhost") is False
-    assert _is_tailnet_host("not-an-ip") is False
-    assert _is_tailnet_host(None) is False
+def _anon_client(host: str = "0.0.0.0", token: str = TEST_API_TOKEN):
+    """Client that does NOT send an Authorization header."""
+    app = create_app(host=host, port=0, token=token)
+    return TestClient(app)
 
 
-def test_require_loopback_or_token_allows_ipv4_mapped_loopback():
-    """IPv4-mapped IPv6 loopback must be exempt from token auth."""
-    app = create_app(host="0.0.0.0", port=0, token="secret-token")
-    client = TestClient(app, client=("::ffff:127.0.0.1", 50000))
+def test_requires_token_always_even_loopback():
+    """Even a loopback client must present a bearer token."""
+    app = create_app(host="127.0.0.1", port=0, token=TEST_API_TOKEN)
+    client = TestClient(app, client=("127.0.0.1", 50000))
     res = client.get("/api/v1/memories")
-    assert res.status_code in (200, 404)
+    assert res.status_code == 401
+    assert res.headers.get("www-authenticate") == "Bearer"
 
 
-def test_require_loopback_or_token_rejects_non_loopback():
-    app = create_app(host="0.0.0.0", port=0, token="secret-token")
-    client = TestClient(app, client=("192.168.1.5", 50000))
+def test_ipv4_mapped_loopback_without_token_rejected():
+    """IPv4-mapped IPv6 loopback must NOT bypass token auth."""
+    client = TestClient(
+        create_app(host="0.0.0.0", port=0, token=TEST_API_TOKEN),
+        client=("::ffff:127.0.0.1", 50000),
+    )
     res = client.get("/api/v1/memories")
     assert res.status_code == 401
 
 
-def test_require_localhost_allows_ipv4_mapped_loopback():
-    app = create_app(host="127.0.0.1", port=0, token="")
-    for client_host in ("::ffff:127.0.0.1", "::FFFF:7F00:1", "127.0.0.1"):
-        client = TestClient(app, client=(client_host, 50000))
-        res = client.get("/api/v1/task-config")
-        assert res.status_code == 200, client_host
-
-
-def test_require_localhost_rejects_lan():
-    app = create_app(host="127.0.0.1", port=0, token="")
-    client = TestClient(app, client=("192.168.1.5", 50000))
-    res = client.get("/api/v1/task-config")
-    assert res.status_code == 403
-
-
-def test_tailnet_allows_token_when_enabled(monkeypatch):
-    monkeypatch.setenv("OBSIDIAN_AI_HUB_ALLOW_TAILNET_TASKS", "1")
-    app = create_app(host="127.0.0.1", port=0, token="secret-token")
-    client = TestClient(app, client=("100.73.5.87", 50000))
-    res = client.get(
-        "/api/v1/task-config",
-        headers={"Authorization": "Bearer secret-token"},
+def test_valid_token_allowed():
+    app = create_app(host="0.0.0.0", port=0, token=TEST_API_TOKEN)
+    client = TestClient(
+        app, client=("192.168.1.5", 50000), headers=bearer_headers()
     )
+    res = client.get("/api/v1/memories?status=candidate")
     assert res.status_code == 200
 
 
-def test_tailnet_rejects_missing_token_when_enabled(monkeypatch):
-    monkeypatch.setenv("OBSIDIAN_AI_HUB_ALLOW_TAILNET_TASKS", "1")
-    app = create_app(host="127.0.0.1", port=0, token="secret-token")
-    client = TestClient(app, client=("100.73.5.87", 50000))
-    res = client.get("/api/v1/task-config")
+def test_missing_token_rejected():
+    client = _anon_client()
+    res = client.get("/api/v1/memories")
     assert res.status_code == 401
 
 
-def test_tailnet_rejects_bad_token_when_enabled(monkeypatch):
-    monkeypatch.setenv("OBSIDIAN_AI_HUB_ALLOW_TAILNET_TASKS", "1")
-    app = create_app(host="127.0.0.1", port=0, token="secret-token")
-    client = TestClient(app, client=("100.73.5.87", 50000))
-    res = client.get(
-        "/api/v1/task-config",
-        headers={"Authorization": "Bearer wrong-token"},
+def test_bad_token_rejected():
+    app = create_app(host="0.0.0.0", port=0, token=TEST_API_TOKEN)
+    client = TestClient(
+        app, client=("192.168.1.5", 50000), headers=bearer_headers("wrong")
     )
+    res = client.get("/api/v1/memories")
     assert res.status_code == 401
 
 
-def test_tailnet_rejects_when_disabled(monkeypatch):
-    monkeypatch.setenv("OBSIDIAN_AI_HUB_ALLOW_TAILNET_TASKS", "0")
-    app = create_app(host="127.0.0.1", port=0, token="secret-token")
-    client = TestClient(app, client=("100.73.5.87", 50000))
-    res = client.get(
-        "/api/v1/task-config",
-        headers={"Authorization": "Bearer secret-token"},
-    )
-    assert res.status_code == 403
+def test_all_routes_require_auth():
+    """Every registered API route must carry the bearer-token dependency."""
+    import obsidian_ai_hub.web.routes.deps as deps
+
+    app = create_app(host="0.0.0.0", port=0, token=TEST_API_TOKEN)
+    for route in app.routes:
+        path = getattr(route, "path", "")
+        if not path.startswith("/api/"):
+            continue
+        if not hasattr(route, "dependant"):
+            raise AssertionError(
+                f"route {path} is not a FastAPI route; cannot verify bearer-token coverage"
+            )
+        deps_of_route = route.dependant.dependencies
+        assert any(
+            d.call is deps.require_bearer_token for d in deps_of_route
+        ), f"route {path} lacks require_bearer_token"
 
 
-def test_tailnet_rejects_external_ip_with_token(monkeypatch):
-    monkeypatch.setenv("OBSIDIAN_AI_HUB_ALLOW_TAILNET_TASKS", "1")
-    app = create_app(host="127.0.0.1", port=0, token="secret-token")
-    for client_host in ("192.168.1.5", "8.8.8.8"):
-        client = TestClient(app, client=(client_host, 50000))
-        res = client.get(
-            "/api/v1/task-config",
-            headers={"Authorization": "Bearer secret-token"},
-        )
-        assert res.status_code == 403, client_host
-
-
-def test_tailnet_ipv6_allows_token(monkeypatch):
-    monkeypatch.setenv("OBSIDIAN_AI_HUB_ALLOW_TAILNET_TASKS", "1")
-    app = create_app(host="127.0.0.1", port=0, token="secret-token")
-    client = TestClient(app, client=("fd7a:115c:a1e0::1", 50000))
-    res = client.get(
-        "/api/v1/task-config",
-        headers={"Authorization": "Bearer secret-token"},
-    )
-    assert res.status_code == 200
-
-
-def test_allow_tailnet_requires_token_at_startup(monkeypatch):
-    monkeypatch.setenv("OBSIDIAN_AI_HUB_ALLOW_TAILNET_TASKS", "1")
-    monkeypatch.delenv("OBSIDIAN_AI_HUB_API_TOKEN", raising=False)
+def test_empty_token_rejected_at_startup():
+    """create_app must fail to start without any bearer token."""
     import pytest
-
-    from obsidian_ai_hub.web.app import create_app
 
     with pytest.raises(RuntimeError):
         create_app(host="127.0.0.1", port=0, token="")

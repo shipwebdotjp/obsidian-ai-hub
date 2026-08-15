@@ -9,9 +9,9 @@ from obsidian_ai_hub.web.app import create_app
 
 
 @pytest.fixture
-def client():
-    app = create_app()
-    return TestClient(app)
+def client(api_token, api_auth_headers):
+    app = create_app(host="127.0.0.1", port=0, token=api_token)
+    return TestClient(app, headers=api_auth_headers)
 
 
 def test_hitl_api_lifecycle(test_memory_db_path, client):

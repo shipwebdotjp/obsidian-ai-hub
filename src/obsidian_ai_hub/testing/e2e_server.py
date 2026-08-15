@@ -24,6 +24,9 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 
+E2E_SERVER_TOKEN = "test-api-token"
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="E2E exploration server")
     parser.add_argument("--host", default="127.0.0.1")
@@ -66,9 +69,10 @@ def main() -> None:
         print(f"Unknown seed scenario: {args.seed}", file=sys.stderr)
         sys.exit(1)
 
-    app = create_app(host=args.host, port=args.port, token="")
+    app = create_app(host=args.host, port=args.port, token=E2E_SERVER_TOKEN)
 
     print(f"\nE2E server: http://{args.host}:{args.port}", flush=True)
+    print(f"Bearer token: {E2E_SERVER_TOKEN}", flush=True)
     print("Press Ctrl-C to stop.\n", flush=True)
 
     uvicorn.run(

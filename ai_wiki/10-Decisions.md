@@ -886,3 +886,42 @@ Research 詳細から HITL に移動すると、従来はテーマを含む質�
 - 初回認証は従来どおり `TokenPrompt` が担い、設定画面は認証後のトークン管理に使う。
 - E2Eは追加せず、Vitest（`client.test.ts`・`SettingsPage.test.tsx`・`App.test.tsx`）で検証する。
 
+## 未連携人物への候補一括解決
+
+| 項目 | 内容 |
+|------|------|
+| 決定日 | 2026-08-14 |
+| カテゴリ | 人物管理・人物同定 |
+| 決定内容 | 未解決候補の一括解決先は、Vault連携済み人物だけでなく既存の未連携人物も許可する。 |
+
+候補の解決は候補表記をグローバルな確定別名として保存し、全サマリ参照を移管する操作である。未連携人物でも `person_aliases` とサマリ再取り込みの解決順は同じように機能するため、Vault ID の有無はシステム上の制約ではない。昇格と人物統合を別々に実行すると、後段の統合失敗時に昇格済み人物だけが残るため、既存の一括解決トランザクションを直接利用する。
+
+- 却下済み候補、文脈別手動割当済み候補、第三者の正規名・別名との衝突は、従来どおり拒否する。
+- 未連携人物への解決後にVaultが同じ表記を別人として主張した場合は、DB確定別名を優先して不一致をレポートする。未連携人物の主名とVaultノートの主名が一致すれば、既存同期により同じ人物レコードへVault IDを付与する。
+- UIは確認ダイアログを増やさず、未連携人物を選んだ場合の同期上の注意と、一括解決が将来の同表記にも適用されることを明示する。
+
+## Web API の Bearer 認証一元化（ループバック・tailnet 免除の廃止）
+
+| 項目 | 内容 |
+|------|------|
+| 決定日 | 2026-08-15 |
+| カテゴリ | Web API・認証・セキュリティ |
+| 決定内容 | Web API をインターネット公開可能にするため、認証を強化する。ループバック免除と tailnet 特例を全廃し、全エンドポイントで常に `Authorization: Bearer <token>` を強制する。 |
+
+### 結論に至った経緯
+
+Web API をインターネット公開するにあたり、従来の「ループバックは無条件許可」「tailnet は `ALLOW_TAILNET_TASKS` + token で許可」という境界は、接続元 IP に依存した判定であり公開時には意味をなさない。TLS はリバースプロキシ／トンネルで担保し、アプリは localhost bind 固定のまま、認証はすべてのクライアント（loopback・LAN・公開）で等しく単一の Bearer トークンに一本化する。これにより 2026-08-12 の「タスク管理 Web UI (loopback または tailnet + トークン)」決定は破棄・置換される。
+
+### 仕組みの概要
+
+1. **認証ヘルパー:** `web/routes/deps.py` は `require_bearer_token` に一本化。旧 `require_loopback_or_token` / `require_localhost_or_tailnet_token` / `require_localhost` と tailnet・loopback 判定ヘルパーは削除。`hmac.compare_digest` でトークンを検証し、失敗時は `401` + `WWW-Authenticate: Bearer`。
+2. **起動時の fail-closed:** `create_app(..., token="")`（トークン空）は host によらず `RuntimeError`。`--serve` も `OBSIDIAN_AI_HUB_API_TOKEN` 未設定なら起動失敗。`/health` は `auth_required: true` を固定で返す（未認証でも疎通確認可能）。
+3. **全ルーター:** 9 ルーターの全エンドポイントに `Depends(require_bearer_token)`。
+4. **tailnet 廃止:** `OBSIDIAN_AI_HUB_ALLOW_TAILNET_TASKS` とそれに関わる分岐は全削除。
+5. **フロントエンド:** `frontend/src/api/client.ts` が `localStorage`（キー `obsidian-ai-hub:api-token`）からトークンを読み `Authorization: Bearer` を付与。`auth_required` が true で保存済みトークンが有効な場合はトークンで自動認証し `TokenPrompt` をスキップする（401 の場合はトークンを削除して `TokenPrompt` へ戻す）。
+
+### トレードオフ
+
+- ループバックからの操作にもトークンが必須になるため、ローカル利用時の初期導線が増える。保存済みトークンの自動認証により、トークン設定後の再訪は `TokenPrompt` を経由しない。
+- トークンは `localStorage` に保持され XSS による漏えい余地が残るため、httpOnly クッキーへの移行は引き続き TODO。
+- テストでは実トークン（`tests/conftest.py` の `TEST_API_TOKEN`）を Bearer ヘッダーで渡し、E2E ではブラウザ `localStorage` にトークンを注入して認証済み状態を再現する。

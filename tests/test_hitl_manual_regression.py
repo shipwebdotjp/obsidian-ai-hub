@@ -14,14 +14,14 @@ def _count_hitl_runs(conn) -> int:
     return cursor.fetchone()[0]
 
 
-def test_web_manual_research_paths_do_not_create_hitl_runs(test_memory_db_path):
+def test_web_manual_research_paths_do_not_create_hitl_runs(test_memory_db_path, api_token, api_auth_headers):
     """Web research endpoints (run, rerun) must not create HITL runs."""
     conn = get_db_connection()
     try:
         assert _count_hitl_runs(conn) == 0
 
-        app = create_app()
-        client = TestClient(app)
+        app = create_app(token=api_token)
+        client = TestClient(app, headers=api_auth_headers)
 
         # Web POST /api/v1/research-themes/run — mock the service layer
         theme_mock = {

@@ -26,9 +26,9 @@ def clean_summary_env(tmp_path, monkeypatch):
 
 
 @pytest.fixture
-def loopback_client(clean_summary_env):
-    app = create_app(host="127.0.0.1", port=0, token="")
-    return TestClient(app)
+def loopback_client(clean_summary_env, api_token, api_auth_headers):
+    app = create_app(host="127.0.0.1", port=0, token=api_token)
+    return TestClient(app, headers=api_auth_headers)
 
 
 def _seed_day(

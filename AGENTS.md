@@ -40,6 +40,18 @@
 - Complete frontend work by running `make test-e2e`. Its diagnostic artifacts
   are written to `test-results/e2e/` on failure.
 
+## Code review (ocr)
+
+- Never let `ocr review` stream to the terminal. Always capture the full output
+  to a file from the very first run:
+  ```bash
+  ocr review --audience agent -b "..." > /tmp/ocr_review.txt 2>&1
+  ```
+  Then read the file with the Read tool.
+- If the terminal output is truncated or OCR reports "file truncated, re-run",
+  do NOT re-run the review. Simply redirect to a file as above and read it.
+
+
 ## Jules clean-clone & test environments
 
 - Jules runs in a clean-clone virtual machine where neither `.env`, local databases, nor `.env.test` exist.

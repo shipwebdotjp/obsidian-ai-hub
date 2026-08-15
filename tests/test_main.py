@@ -244,6 +244,7 @@ def test_debug_alone_does_not_raise_or_start_server(monkeypatch):
 
 def test_serve_without_debug_uses_no_reload_info_log(monkeypatch):
     monkeypatch.setattr(sys, "argv", ["prog", "--serve"])
+    monkeypatch.setenv("OBSIDIAN_AI_HUB_API_TOKEN", "test-api-token")
 
     with (
         patch("uvicorn.run") as mock_uvicorn,
@@ -259,6 +260,7 @@ def test_serve_without_debug_uses_no_reload_info_log(monkeypatch):
 
 def test_serve_with_debug_uses_reload_and_debug_log(monkeypatch):
     monkeypatch.setattr(sys, "argv", ["prog", "--serve", "--debug"])
+    monkeypatch.setenv("OBSIDIAN_AI_HUB_API_TOKEN", "test-api-token")
 
     with patch("uvicorn.run") as mock_uvicorn:
         main_module.main()

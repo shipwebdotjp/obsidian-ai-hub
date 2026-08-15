@@ -182,6 +182,48 @@ def seed_hitl_demo_data() -> None:
         conn2.close()
 
 
+def seed_people_demo_data() -> None:
+    """Seed an unlinked master and a candidate for the people-resolution E2E flow."""
+    ensure_test_mode()
+
+    from obsidian_ai_hub.summary import store as summary_store
+    from obsidian_ai_hub.web.services.people_candidates import (
+        list_person_candidates,
+        promote_person_candidate,
+    )
+
+    summary_store.upsert_summary(
+        {
+            "period_type": "day",
+            "period_key": "2026-08-01",
+            "summary": "E2E unlinked master setup",
+            "people": [{"name": "鈴木健", "note": "マスター人物の作成"}],
+        }
+    )
+    master_candidate = next(
+        (
+            candidate
+            for candidate in list_person_candidates()
+            if candidate["normalized_name"] == "鈴木健"
+        ),
+        None,
+    )
+    if master_candidate is None:
+        raise RuntimeError(
+            "seed_people_demo_data: no unresolved candidate found for 鈴木健"
+        )
+    promote_person_candidate(master_candidate["candidate_id"], "鈴木健")
+
+    summary_store.upsert_summary(
+        {
+            "period_type": "day",
+            "period_key": "2026-08-02",
+            "summary": "E2E unresolved candidate setup",
+            "people": [{"name": "ケン", "note": "候補のサマリメモ"}],
+        }
+    )
+
+
 def seed_summary_recovery_demo_data() -> None:
     """Insert one input-only day for the summary recovery E2E workflow."""
     ensure_test_mode()

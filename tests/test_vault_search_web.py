@@ -8,14 +8,14 @@ from obsidian_ai_hub.web.app import create_app
 
 
 @pytest.fixture
-def loopback_client(monkeypatch, tmp_path):
+def loopback_client(monkeypatch, tmp_path, api_token, api_auth_headers):
     from obsidian_ai_hub.utils import config
 
     vault_path = tmp_path / "vault"
     vault_path.mkdir(exist_ok=True)
     monkeypatch.setattr(config, "VAULT_PATH", vault_path)
-    app = create_app(host="127.0.0.1", port=0, token="")
-    return TestClient(app)
+    app = create_app(host="127.0.0.1", port=0, token=api_token)
+    return TestClient(app, headers=api_auth_headers)
 
 
 def _mock_search_results(items: list[dict]) -> str:

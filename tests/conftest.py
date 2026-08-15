@@ -16,6 +16,11 @@ _test_db_bootstrap_dir: tempfile.TemporaryDirectory[str] | None = None
 _original_memory_db_path: Path | None = None
 _original_env: dict[str, str | None] = {}
 
+# Shared bearer token used by tests to authenticate API requests. All web API
+# endpoints require bearer-token authentication, so tests pass this token to
+# create_app and send it in the Authorization header.
+TEST_API_TOKEN = "test-api-token"
+
 
 def pytest_configure(config: pytest.Config) -> None:
     """Keep collection-time imports away from the configured production DB."""
@@ -78,6 +83,18 @@ def test_memory_db_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path
     db_file = tmp_path / "memory.sqlite3"
     monkeypatch.setattr(app_config, "MEMORY_SQLITE_PATH", db_file)
     return db_file
+
+
+@pytest.fixture
+def api_token() -> str:
+    """Bearer token used to authenticate API requests in tests."""
+    return TEST_API_TOKEN
+
+
+@pytest.fixture
+def api_auth_headers(api_token: str) -> dict[str, str]:
+    """Authorization header carrying the shared test bearer token."""
+    return {"Authorization": f"Bearer {api_token}"}
 
 
 @pytest.fixture(autouse=True)

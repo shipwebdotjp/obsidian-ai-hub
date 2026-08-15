@@ -4,7 +4,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from obsidian_ai_hub.web import schemas, service
-from obsidian_ai_hub.web.routes.deps import require_loopback_or_token
+from obsidian_ai_hub.web.routes.deps import require_bearer_token
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +16,7 @@ def list_research_themes(
     status: Optional[str] = Query(None),
     job_status: Optional[str] = Query(None, alias="job_status"),
     q: Optional[str] = None,
-    _=Depends(require_loopback_or_token),
+    _=Depends(require_bearer_token),
 ):
     if status and status not in schemas.ALLOWED_RESEARCH_THEME_STATUS:
         raise HTTPException(
@@ -33,7 +33,7 @@ def list_research_themes(
 
 
 @router.get("/research-themes/{theme_id}", response_model=schemas.ResearchTheme)
-def get_research_theme(theme_id: str, _=Depends(require_loopback_or_token)):
+def get_research_theme(theme_id: str, _=Depends(require_bearer_token)):
     item = service.get_research_theme(theme_id)
     if item is None:
         raise HTTPException(status_code=404, detail="research theme not found")
@@ -41,7 +41,7 @@ def get_research_theme(theme_id: str, _=Depends(require_loopback_or_token)):
 
 
 @router.post("/research-themes/{theme_id}/rerun", response_model=schemas.ResearchJob)
-def rerun_research_theme(theme_id: str, _=Depends(require_loopback_or_token)):
+def rerun_research_theme(theme_id: str, _=Depends(require_bearer_token)):
     job = service.rerun_research_theme(theme_id)
     if job is None:
         raise HTTPException(status_code=404, detail="research theme not found")
@@ -55,7 +55,7 @@ def rerun_research_theme(theme_id: str, _=Depends(require_loopback_or_token)):
 )
 def run_research_theme(
     body: schemas.ResearchRunRequest,
-    _=Depends(require_loopback_or_token),
+    _=Depends(require_bearer_token),
 ):
     if not body.theme or not body.theme.strip():
         raise HTTPException(status_code=400, detail="Theme must not be empty or blank")

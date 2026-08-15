@@ -8,7 +8,7 @@ from pydantic import ValidationError
 from obsidian_ai_hub.summary import store as summary_store
 from obsidian_ai_hub.summary.generation import SummaryGenerationError, generate_summary
 from obsidian_ai_hub.web import schemas, service
-from obsidian_ai_hub.web.routes.deps import require_loopback_or_token
+from obsidian_ai_hub.web.routes.deps import require_bearer_token
 
 router = APIRouter()
 
@@ -18,7 +18,7 @@ router = APIRouter()
 )
 def generate_dashboard_summary(
     body: dict[str, Any] = Body(...),
-    _=Depends(require_loopback_or_token),
+    _=Depends(require_bearer_token),
 ):
     try:
         request = schemas.SummaryGenerateRequest.model_validate(body)
@@ -38,7 +38,7 @@ def generate_dashboard_summary(
 
 
 @router.get("/summary-dashboard/home", response_model=schemas.DashboardHomeResponse)
-def get_dashboard_home(_=Depends(require_loopback_or_token)):
+def get_dashboard_home(_=Depends(require_bearer_token)):
     return service.get_dashboard_home()
 
 
@@ -46,7 +46,7 @@ def get_dashboard_home(_=Depends(require_loopback_or_token)):
 def get_dashboard_browse(
     year: Optional[str] = Query(None),
     month: Optional[str] = Query(None),
-    _=Depends(require_loopback_or_token),
+    _=Depends(require_bearer_token),
 ):
     try:
         if year is not None:
@@ -65,14 +65,14 @@ def get_dashboard_browse(
 @router.get(
     "/summary-dashboard/edit-options", response_model=schemas.EditOptionsResponse
 )
-def get_edit_options(_=Depends(require_loopback_or_token)):
+def get_edit_options(_=Depends(require_bearer_token)):
     return service.get_edit_options()
 
 
 @router.get(
     "/summary-dashboard/summaries/{summary_id}", response_model=schemas.SummaryDetail
 )
-def get_dashboard_summary(summary_id: str, _=Depends(require_loopback_or_token)):
+def get_dashboard_summary(summary_id: str, _=Depends(require_bearer_token)):
     res = summary_store.get_summary_by_id(summary_id)
     if res is None:
         raise HTTPException(status_code=404, detail="summary not found")
@@ -85,7 +85,7 @@ def get_dashboard_summary(summary_id: str, _=Depends(require_loopback_or_token))
 def update_dashboard_summary(
     summary_id: str,
     body: schemas.SummaryUpdateRequest,
-    _=Depends(require_loopback_or_token),
+    _=Depends(require_bearer_token),
 ):
     try:
         result = service.update_summary_detail(summary_id, body)
@@ -102,7 +102,7 @@ def update_dashboard_summary(
 )
 def delete_dashboard_summary(
     summary_id: str,
-    _=Depends(require_loopback_or_token),
+    _=Depends(require_bearer_token),
 ):
     success = service.delete_summary_detail(summary_id)
     if not success:
@@ -114,7 +114,7 @@ def delete_dashboard_summary(
     "/summary-dashboard/days/{target_date}",
     response_model=schemas.DashboardDayDetailsResponse,
 )
-def get_dashboard_day_details(target_date: str, _=Depends(require_loopback_or_token)):
+def get_dashboard_day_details(target_date: str, _=Depends(require_bearer_token)):
     if not re.match(r"^\d{4}-\d{2}-\d{2}$", target_date):
         raise HTTPException(
             status_code=400, detail="Invalid date format. Use YYYY-MM-DD"
@@ -131,7 +131,7 @@ def get_dashboard_day_details(target_date: str, _=Depends(require_loopback_or_to
 def get_dashboard_stats(
     start_date: str = Query(..., min_length=10, max_length=10),
     end_date: str = Query(..., min_length=10, max_length=10),
-    _=Depends(require_loopback_or_token),
+    _=Depends(require_bearer_token),
 ):
     if not re.match(r"^\d{4}-\d{2}-\d{2}$", start_date) or not re.match(
         r"^\d{4}-\d{2}-\d{2}$", end_date

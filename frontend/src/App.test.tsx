@@ -3,12 +3,20 @@ import userEvent from "@testing-library/user-event";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import App from "./App";
-import { health, ApiError, listHitlRuns } from "./api/client";
+import {
+  health,
+  ApiError,
+  listHitlRuns,
+  getToken,
+  listMemories,
+} from "./api/client";
 
 // Mock the API client
 vi.mock("./api/client", () => ({
   health: vi.fn(),
   listHitlRuns: vi.fn(),
+  getToken: vi.fn(),
+  listMemories: vi.fn(),
   AUTH_EXPIRED_EVENT: "auth:expired",
   ApiError: class ApiError extends Error {
     status: number;
@@ -43,10 +51,14 @@ vi.mock("./components/TokenPrompt", () => ({
 
 const mockHealth = vi.mocked(health);
 const mockListHitlRuns = vi.mocked(listHitlRuns);
+const mockGetToken = vi.mocked(getToken);
+const mockListMemories = vi.mocked(listMemories);
 
 beforeEach(() => {
   vi.clearAllMocks();
   mockListHitlRuns.mockResolvedValue({ items: [], total: 0 });
+  mockGetToken.mockReturnValue("");
+  mockListMemories.mockResolvedValue({ items: [], total: 0 } as any);
 });
 
 describe("App", () => {
@@ -75,7 +87,7 @@ describe("App", () => {
     expect(screen.queryByTestId("token-prompt")).not.toBeInTheDocument();
   });
 
-  it("renders TokenPrompt when health check succeeds but auth is required", async () => {
+  it("renders TokenPrompt when health check succeeds but auth is required and no token is stored", async () => {
     mockHealth.mockResolvedValue({ status: "ok", auth_required: true });
     render(
       <MemoryRouter>
@@ -92,6 +104,54 @@ describe("App", () => {
     await userEvent.click(authButton);
 
     expect(screen.getByTestId("page-memories")).toBeInTheDocument();
+  });
+
+  it("auto-authenticates with a stored valid token and skips TokenPrompt", async () => {
+    mockHealth.mockResolvedValue({ status: "ok", auth_required: true });
+    mockGetToken.mockReturnValue("test-api-token");
+    mockListMemories.mockResolvedValue({ items: [], total: 0 } as any);
+    render(
+      <MemoryRouter>
+        <App />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("page-memories")).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId("token-prompt")).not.toBeInTheDocument();
+    expect(mockListMemories).toHaveBeenCalledWith({ status: "candidate" });
+  });
+
+  it("shows TokenPrompt when the stored token is rejected", async () => {
+    mockHealth.mockResolvedValue({ status: "ok", auth_required: true });
+    mockGetToken.mockReturnValue("stale-token");
+    mockListMemories.mockRejectedValue(new ApiError(401, "Unauthorized"));
+    render(
+      <MemoryRouter>
+        <App />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("token-prompt")).toBeInTheDocument();
+    });
+  });
+
+  it("shows the connection error screen (not TokenPrompt) when token validation fails with a non-401 error", async () => {
+    mockHealth.mockResolvedValue({ status: "ok", auth_required: true });
+    mockGetToken.mockReturnValue("valid-but-server-down");
+    mockListMemories.mockRejectedValue(new ApiError(500, "Server Error"));
+    render(
+      <MemoryRouter>
+        <App />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("接続エラー")).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId("token-prompt")).not.toBeInTheDocument();
   });
 
   it("renders TokenPrompt when health check fails with 401", async () => {

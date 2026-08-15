@@ -3,7 +3,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from obsidian_ai_hub.web import schemas, service
-from obsidian_ai_hub.web.routes.deps import require_loopback_or_token
+from obsidian_ai_hub.web.routes.deps import require_bearer_token
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +15,7 @@ def vault_search(
     q: str = Query(..., min_length=1),
     k: int = Query(10, ge=1, le=50),
     mode: str = Query("hybrid"),
-    _=Depends(require_loopback_or_token),
+    _=Depends(require_bearer_token),
 ):
     if mode not in schemas.ALLOWED_VAULT_SEARCH_MODES:
         raise HTTPException(
@@ -32,7 +32,7 @@ def vault_search(
 @router.get("/vault-file", response_model=schemas.VaultFileResponse)
 def get_vault_file(
     path: str = Query(..., min_length=1),
-    _=Depends(require_loopback_or_token),
+    _=Depends(require_bearer_token),
 ):
     try:
         return service.get_vault_file(path)

@@ -48,10 +48,10 @@ def clean_task_env(tmp_path, monkeypatch):
 
 
 @pytest.fixture
-def web_client(clean_task_env):
+def web_client(clean_task_env, api_token, api_auth_headers):
     from obsidian_ai_hub.web.app import create_app
-    app = create_app(host="127.0.0.1", port=0, token="")
-    return TestClient(app)
+    app = create_app(host="127.0.0.1", port=0, token=api_token)
+    return TestClient(app, headers=api_auth_headers)
 
 
 def test_get_task_config_empty(clean_task_env, web_client):
@@ -102,40 +102,24 @@ def test_get_task_config_with_preset_and_custom(clean_task_env, web_client):
     assert custom_task["next_run"] is not None
 
 
-def test_localhost_restriction(clean_task_env):
+def test_task_config_requires_token(clean_task_env, api_token):
     from obsidian_ai_hub.web.app import create_app
-    # Test client using client host parameter mock to simulate LAN access
-    app = create_app(host="127.0.0.1", port=0, token="")
+    # Even a loopback client without a token is rejected.
+    app = create_app(host="127.0.0.1", port=0, token=api_token)
     client = TestClient(app)
 
-    # loopback works
     res = client.get("/api/v1/task-config")
-    assert res.status_code == 200
-
-    # LAN / Non-localhost block
-    lan_client = TestClient(app, client=("192.168.1.5", 50000))
-    res = lan_client.get("/api/v1/task-config")
-    assert res.status_code == 403
-    assert "Forbidden" in res.json()["detail"]
-
-
-def test_localhost_restriction_tailnet(clean_task_env, monkeypatch):
-    from obsidian_ai_hub.web.app import create_app
-
-    monkeypatch.setenv("OBSIDIAN_AI_HUB_ALLOW_TAILNET_TASKS", "1")
-    app = create_app(host="127.0.0.1", port=0, token="secret-token")
-
-    # tailnet + valid token works
-    tailnet_client = TestClient(app, client=("100.73.5.87", 50000))
-    res = tailnet_client.get(
-        "/api/v1/task-config",
-        headers={"Authorization": "Bearer secret-token"},
-    )
-    assert res.status_code == 200
-
-    # tailnet without token is 401
-    res = tailnet_client.get("/api/v1/task-config")
     assert res.status_code == 401
+    assert res.json()["detail"] == "invalid or missing bearer token"
+
+    # A LAN client with a valid token is accepted.
+    lan_client = TestClient(
+        app,
+        client=("192.168.1.5", 50000),
+        headers={"Authorization": f"Bearer {api_token}"},
+    )
+    res = lan_client.get("/api/v1/task-config")
+    assert res.status_code == 200
 
 
 def test_update_task_config_success_and_arming(clean_task_env, web_client):

@@ -49,6 +49,8 @@ export default function CandidateTab({
   onReopenCandidate,
   isRejectedTab = false,
 }: CandidateTabProps) {
+  const selectedTarget = people.find((person) => person.person_id === targetPersonId);
+
   return (
     <>
       <div
@@ -136,7 +138,7 @@ export default function CandidateTab({
             {/* Resolve Panel */}
             {!isRejectedTab && (
               <div className="border border-slate-200 rounded-lg p-4 bg-slate-50 space-y-3">
-              <h3 className="text-xs font-bold text-slate-800">マスター人物と紐付け（一括解決）</h3>
+              <h3 className="text-xs font-bold text-slate-800">人物と紐付け（一括解決）</h3>
 
               {selectedCandidate.assigned_summaries_count > 0 && (
                 <div className="rounded-lg bg-amber-50 p-3 text-xs font-medium text-amber-800 border border-amber-200 space-y-1">
@@ -162,15 +164,15 @@ export default function CandidateTab({
                 <select
                   value={targetPersonId}
                   onChange={(e) => onChangeTargetPersonId(e.target.value)}
+                  aria-label="一括解決先の人物"
                   disabled={selectedCandidate.assigned_summaries_count > 0}
                   className="w-full rounded border border-slate-300 bg-white px-2.5 py-1.5 text-xs focus:border-slate-900 focus:outline-none disabled:bg-slate-100 disabled:text-slate-400 sm:flex-1"
                 >
-                  <option value="">-- 解決先のVault連携人物を選択してください --</option>
+                  <option value="">-- 解決先の人物を選択してください --</option>
                   {people
-                    .filter((p) => p.vault_id !== null)
                     .map((p) => (
                       <option key={p.person_id} value={p.person_id}>
-                        {p.display_name} ({p.vault_id})
+                        {p.display_name} {p.vault_id ? `(${p.vault_id})` : "(未連携)"}
                       </option>
                     ))}
                 </select>
@@ -186,8 +188,13 @@ export default function CandidateTab({
                   解決
                 </button>
               </div>
+              {selectedTarget?.vault_id === null && (
+                <div className="rounded bg-amber-50 p-2 text-[10px] text-amber-800 border border-amber-200">
+                  未連携人物へ解決します。後からVaultで同じ表記が別人物として登録されると、不一致レポートが表示される場合があります。
+                </div>
+              )}
               <p className="text-[10px] text-slate-400">
-                ※ 解決先はフロントマターに ID を持つ「Vault連携済み」の人物に制限されています。未解決候補を解決すると、確定別名として登録され、候補のサマリー履歴が自動で移管されます。すでに手動で個別割当を行っている候補は、グローバル解決（一括解決）が禁止されます。
+                ※ 未解決候補を解決すると、選択した人物の確定別名として登録され、候補のサマリー履歴と今後同じ表記が出たサマリが自動で紐付きます。すでに手動で個別割当を行っている候補は、グローバル解決（一括解決）が禁止されます。
               </p>
             </div>
             )}
