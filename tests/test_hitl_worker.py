@@ -22,7 +22,9 @@ from obsidian_ai_hub.hitl.service import (
     settle_run_outcome,
     submit_answer,
 )
+import threading
 from obsidian_ai_hub.hitl.store import get_run
+from obsidian_ai_hub.main import main
 from obsidian_ai_hub.hitl.worker import HeartbeatRunner, HitlWorker
 
 
@@ -228,12 +230,79 @@ def test_hitl_worker_full_integration(test_memory_db_path):
     assert executed_context["answers"]["q1"] == "hello_world"
 
 
-def test_hitl_worker_drain_on_signal(test_memory_db_path):
+def test_hitl_worker_drain_on_signal(test_memory_db_path, monkeypatch):
     """Test worker draining when signal received."""
+    import os
+    import signal
     conn = get_db_connection()
     worker = HitlWorker(worker_id="drain_worker", poll_interval=0.1)
-    worker.draining = True
 
-    # run_loop should immediately exit with status 0 when draining
+    # Trigger real signal inside setup_signal_handlers / run_loop
+    worker.setup_signal_handlers()
+    os.kill(os.getpid(), signal.SIGTERM)
+
     code = worker.run_loop(conn=conn)
     assert code == 0
+    assert worker.draining is True
+
+
+def test_main_cli_hitl_worker(monkeypatch):
+    """Test main() CLI invocation with --hitl-worker propagates worker exit code."""
+    called = {}
+
+    def mock_run_hitl_worker_cli():
+        called["run"] = True
+        return 0
+
+    monkeypatch.setattr("obsidian_ai_hub.hitl.worker.run_hitl_worker_cli", mock_run_hitl_worker_cli)
+    monkeypatch.setattr("sys.argv", ["obsidian_ai_hub", "--hitl-worker"])
+
+    with pytest.raises(SystemExit) as exc_info:
+        main()
+
+    assert exc_info.value.code == 0
+    assert called.get("run") is True
+
+
+def test_hitl_worker_loop_driven_run(test_memory_db_path):
+    """Test driving run_loop for an active ready_to_resume run."""
+    conn = get_db_connection()
+    run_id = "run_loop_driven"
+
+    def dummy_h(ctx: HitlContext) -> HitlResult:
+        return HitlResult.complete("cp_loop_done")
+
+    register_handler("dummy_h", dummy_h)
+
+    questions = [
+        {"question_key": "q1", "question_type": "text", "display_text": "Q1", "is_required": 1}
+    ]
+    register_run_and_questions(
+        run_id=run_id,
+        handler="dummy_h",
+        checkpoint=None,
+        question_set_id="set_1",
+        questions_data=questions,
+        title="Loop Driven",
+        display_type="test",
+        conn=conn,
+    )
+
+    submit_answer(run_id, "set_1", "q1", answer="loop_ans", conn=conn)
+
+    worker = HitlWorker(worker_id="loop_worker", poll_interval=0.05)
+
+    # Set draining to True after 0.2s in background thread so run_loop completes bounded execution
+    def _drain_later():
+        time.sleep(0.2)
+        worker.draining = True
+
+    t = threading.Thread(target=_drain_later, daemon=True)
+    t.start()
+
+    code = worker.run_loop(conn=conn)
+    assert code == 0
+
+    run = get_run(run_id, conn)
+    assert run["status"] == "completed"
+    assert run["checkpoint"] == "cp_loop_done"

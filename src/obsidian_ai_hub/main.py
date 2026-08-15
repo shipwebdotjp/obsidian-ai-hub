@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import logging
+import sys
 from datetime import datetime
 
 from obsidian_ai_hub import (
@@ -38,11 +39,9 @@ def register_hitl_handlers():
     from obsidian_ai_hub.research.runner import run_approved_suggestion
     from obsidian_ai_hub.memory.maintenance import run_approved_maintenance
     from obsidian_ai_hub.memory.interview import apply_interview_answers
-    from obsidian_ai_hub.calendar.hitl import add_approved_calendar_event
     register_handler("research.run_approved_suggestion", run_approved_suggestion)
     register_handler("memory.apply_maintenance_proposals", run_approved_maintenance)
     register_handler("memory.apply_interview_answers", apply_interview_answers)
-    register_handler("calendar.add_approved_event", add_approved_calendar_event)
 
 
 def main():
@@ -573,8 +572,8 @@ def main():
     if getattr(args, "hitl_worker", False):
         from obsidian_ai_hub.hitl.worker import run_hitl_worker_cli
 
-        run_hitl_worker_cli()
-        ran = True
+        exit_code = run_hitl_worker_cli()
+        sys.exit(exit_code)
     if getattr(args, "memory_maintain", False):
         from obsidian_ai_hub.memory.maintenance import run_maintenance_cli
 

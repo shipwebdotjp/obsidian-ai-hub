@@ -121,7 +121,12 @@ class HitlWorker:
         handler_name = run_record["handler"]
 
         # 1. Claim run
-        claimed = claim_run(run_id, self.worker_id, self.lease_duration, conn)
+        try:
+            claimed = claim_run(run_id, self.worker_id, self.lease_duration, conn)
+        except Exception as e:
+            logger.exception(f"Failed to claim run {run_id}: {e}")
+            return False
+
         if not claimed:
             logger.info(f"Could not claim run {run_id}, skipping.")
             return False
@@ -274,8 +279,7 @@ class HitlWorker:
                 conn.close()
 
 
-def run_hitl_worker_cli() -> None:
+def run_hitl_worker_cli() -> int:
     """CLI entrypoint for python -m obsidian_ai_hub --hitl-worker."""
     worker = HitlWorker()
-    code = worker.run_loop()
-    sys.exit(code)
+    return worker.run_loop()

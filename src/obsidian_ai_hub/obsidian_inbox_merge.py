@@ -198,7 +198,6 @@ def process_web_clips(urls: list[str], daily_file: Path, hour_str: str) -> None:
 @dataclass(frozen=True)
 class InboxClassification:
     category: str
-    calendar_event: dict | None = None
 
 
 def is_icloud_offloaded(file_path: Path) -> bool:
@@ -236,29 +235,9 @@ def wait_for_icloud_download(file_path: Path, timeout: int = 60) -> bool:
     return False
 
 
-def _parse_effective_dt(daily_file: Path, hour_str: str) -> datetime:
-    if re.match(r"^\d{4}-\d{2}-\d{2}$", daily_file.stem):
-        try:
-            return datetime.strptime(
-                f"{daily_file.stem} {hour_str}", "%Y-%m-%d %H:%M"
-            )
-        except ValueError:
-            pass
-    return datetime.now()
-
-
-def _build_classification_prompt(
-    content: str, effective_dt: datetime | None = None
-) -> str:
-    if effective_dt is None:
-        effective_dt = datetime.now()
+def _build_classification_prompt(content: str) -> str:
     return prompt.render_prompt(
-        config.INBOX_CLASSIFICATION_PROMPT_PATH,
-        {
-            "content": content,
-            "today": effective_dt.strftime("%Y-%m-%d"),
-            "created_at": effective_dt.strftime("%Y-%m-%d %H:%M"),
-        },
+        config.INBOX_CLASSIFICATION_PROMPT_PATH, {"content": content}
     )
 
 
@@ -289,45 +268,12 @@ def parse_classification_response(text: str) -> InboxClassification:
     if category == "memo":
         return InboxClassification(category="memo")
 
-    if category == "calendar":
-        event = payload.get("calendar_event")
-        if not isinstance(event, dict) or not event.get("title") or not event.get(
-            "start_time"
-        ):
-            raise ValueError(
-                "calendar category requires calendar_event with title and start_time"
-            )
-        _validate_calendar_event_times(event)
-        return InboxClassification(category="calendar", calendar_event=event)
-
     raise ValueError(f"Unknown classification category: {category}")
 
 
-def _validate_calendar_event_times(event: dict) -> None:
-    """
-    Validate that start_time/end_time parse as ISO datetimes so malformed LLM
-    output fails fast (falling back to memo) instead of creating an approval
-    run whose event cannot be added later.
-    """
-    for field in ("start_time", "end_time"):
-        value = event.get(field)
-        if value is None:
-            continue
-        if not isinstance(value, str):
-            raise ValueError(f"calendar_event.{field} must be a string")
-        try:
-            datetime.fromisoformat(value)
-        except ValueError as exc:
-            raise ValueError(
-                f"calendar_event.{field} is not a valid ISO datetime: {value!r}"
-            ) from exc
-
-
-def classify_inbox_content(
-    content: str, effective_dt: datetime | None = None
-) -> InboxClassification:
+def classify_inbox_content(content: str) -> InboxClassification:
     try:
-        rendered_prompt = _build_classification_prompt(content, effective_dt)
+        rendered_prompt = _build_classification_prompt(content)
         response = llm_client.generate_llm_response(
             provider=config.INBOX_CLASSIFICATION_PROVIDER,
             model=config.INBOX_CLASSIFICATION_MODEL,
@@ -366,24 +312,9 @@ def merge_content_into_daily_note(
         )
         return "location"
 
-    effective_dt = _parse_effective_dt(daily_file, hour_str)
-    classification = classify_inbox_content(content, effective_dt)
+    classification = classify_inbox_content(content)
     if classification.category == "research":
         add_research_theme.append_research_theme(content)
-    elif classification.category == "calendar" and classification.calendar_event:
-        try:
-            from obsidian_ai_hub.calendar import register_calendar_event_approval
-
-            run_id = register_calendar_event_approval(
-                content=content,
-                event=classification.calendar_event,
-            )
-            if run_id:
-                logger.info(
-                    "Registered calendar approval HITL run: %s", run_id
-                )
-        except Exception:
-            logger.exception("Failed to register calendar approval HITL run")
 
     subheader = "## 📝メモ"
     content_to_merge = f"- {hour_str} [{classification.category}] {content}"

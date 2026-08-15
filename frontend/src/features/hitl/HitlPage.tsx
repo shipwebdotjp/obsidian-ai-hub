@@ -41,17 +41,6 @@ interface ResearchSuggestionContext {
   why_now?: string | null;
 }
 
-interface CalendarEventContext {
-  type: "calendar_event";
-  event?: {
-    title?: string | null;
-    start_time?: string | null;
-    end_time?: string | null;
-    location?: string | null;
-  } | null;
-  content?: string | null;
-}
-
 function asMemoryMaintenanceContext(context: unknown): MemoryMaintenanceContext | null {
   if (context && typeof context === "object" && (context as any).type === "memory_maintenance") {
     return context as MemoryMaintenanceContext;
@@ -62,13 +51,6 @@ function asMemoryMaintenanceContext(context: unknown): MemoryMaintenanceContext 
 function asResearchSuggestionContext(context: unknown): ResearchSuggestionContext | null {
   if (context && typeof context === "object" && (context as any).type === "research_suggestion") {
     return context as ResearchSuggestionContext;
-  }
-  return null;
-}
-
-function asCalendarEventContext(context: unknown): CalendarEventContext | null {
-  if (context && typeof context === "object" && (context as any).type === "calendar_event") {
-    return context as CalendarEventContext;
   }
   return null;
 }
@@ -615,48 +597,6 @@ export default function HitlPage() {
                                     <div>
                                       <span className="font-bold text-slate-600">今調べる理由: </span>
                                       <span className="text-slate-800 whitespace-pre-wrap">{currentResearchCtx.why_now}</span>
-                                    </div>
-                                  )}
-                                </div>
-                              );
-                            }
-
-                            const currentCalendarCtx = asCalendarEventContext(q.context);
-                            if (currentCalendarCtx) {
-                              return (
-                                <div
-                                  data-testid="calendar-event-context"
-                                  className="mt-3 space-y-3 rounded-lg border border-slate-200 bg-white p-4 text-xs text-slate-700"
-                                >
-                                  <h4 className="font-bold text-slate-700">カレンダー登録内容</h4>
-                                  {currentCalendarCtx.event?.title && (
-                                    <div>
-                                      <span className="font-bold text-slate-600">タイトル: </span>
-                                      <span className="text-slate-800">{currentCalendarCtx.event.title}</span>
-                                    </div>
-                                  )}
-                                  {currentCalendarCtx.event?.start_time && (
-                                    <div>
-                                      <span className="font-bold text-slate-600">開始: </span>
-                                      <span className="text-slate-800">{currentCalendarCtx.event.start_time}</span>
-                                    </div>
-                                  )}
-                                  {currentCalendarCtx.event?.end_time && (
-                                    <div>
-                                      <span className="font-bold text-slate-600">終了: </span>
-                                      <span className="text-slate-800">{currentCalendarCtx.event.end_time}</span>
-                                    </div>
-                                  )}
-                                  {currentCalendarCtx.event?.location && (
-                                    <div>
-                                      <span className="font-bold text-slate-600">場所: </span>
-                                      <span className="text-slate-800">{currentCalendarCtx.event.location}</span>
-                                    </div>
-                                  )}
-                                  {currentCalendarCtx.content && (
-                                    <div>
-                                      <span className="font-bold text-slate-600">元の内容: </span>
-                                      <p className="mt-0.5 text-slate-800 leading-relaxed font-medium whitespace-pre-wrap">{currentCalendarCtx.content}</p>
                                     </div>
                                   )}
                                 </div>

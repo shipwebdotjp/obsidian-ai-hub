@@ -6,5 +6,4 @@
 - [フロントエンドのツールチェーンポリシー (Vite 6 + Vitest 4)](10-Decisions.md#フロントエンドのツールチェーンポリシー-vite-6--vitest-4)
 - [タスク管理 Web UI (loopback または tailnet + トークン)](10-Decisions.md#タスク管理-web-ui-loopback-または-tailnet--トークン)（2026-08-15 の [Bearer 認証一元化](10-Decisions.md#web-api-の-bearer-認証一元化ループバックtailnet-免除の廃止) で置換）
 - [LINE通知から既存Webフォームへ誘導するHITL v1](10-Decisions.md#line通知から既存webフォームへ誘導するhitl-v1)（2026-08-15）
-- [Inbox分類にカレンダー登録カテゴリとHITL承認を追加](10-Decisions.md#inbox分類にカレンダー登録カテゴリとhitl承認を追加)（2026-08-15）
 - [pytestプロセスからの本番シークレット遮断（conftest強制ENV=test）](10-Decisions.md#pytestプロセスからの本番シークレット遮断conftest強制envtest)（2026-08-15）

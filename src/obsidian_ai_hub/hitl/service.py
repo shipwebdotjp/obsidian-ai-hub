@@ -243,6 +243,9 @@ def renew_lease_heartbeat(
     Updates lease_expires_at to (now + extension_seconds).
     Returns True if update succeeded, False if condition failed.
     """
+    if extension_seconds <= 0:
+        raise ValueError("extension_seconds must be a positive integer")
+
     close_conn = False
     if conn is None:
         conn = get_db_connection()
@@ -311,8 +314,8 @@ def settle_run_outcome(
                 logger.error(f"Run {run_id} not found during settlement.")
                 return False
 
-            # Handle case where handler already re-suspended and cleared lease
-            if result_status == "re_suspended" and run["status"] != "running":
+            # Handle case where handler already re-suspended inside handler
+            if result_status == "re_suspended" and run["status"] == "pending_user":
                 logger.info(f"Run {run_id} was already re-suspended inside handler.")
                 return True
 
