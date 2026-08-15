@@ -3,6 +3,23 @@
 調査日: 2026-08-15  
 対象: 現行コードのみ。実装・設定・DBデータは変更していない。
 
+## 公開経路の設計決定（2026-08-15追記）
+
+WebhookとWeb UI／業務APIは同じ公開入口に置かず、次の経路に分離する。これは実装前の運用前提であり、現行コードにはまだ反映されていない。
+
+```text
+LINE Platform
+  └─ Tailscale Funnel: https://m1mbp.tail744355.ts.net/
+       └─ 専用 Nginx（127.0.0.1:8764）
+            └─ LINE Webhook API
+
+Web UI / API クライアント
+  └─ Tailscale Serve: https://aihub.tail744355.ts.net/
+       └─ FastAPI Web UI / 業務 API（127.0.0.1:8765）
+```
+
+Webhook経路ではLINEの署名検証を認証境界とし、Web UI／業務APIのBearer認証をWebhookへ流用しない。一方、Web UI／業務APIのBearer認証は接続元にかかわらず維持し、Tailscale Serveへの分離を理由に緩和しない。
+
 ## 1. 現在の処理フロー
 
 ### HITL の作成から実行まで
@@ -90,7 +107,7 @@ SQLiteの昨日の日次要約 + Daily Note の当日情報
 | `src/obsidian_ai_hub/notify_today_schedule.py` / `line_notification/builder.py` | 日次・週次要約とDaily NoteをLINE通知文へ組み立てる。 |
 | `src/obsidian_ai_hub/write_today_schedule.py` | Apple Calendar、Reminders、設定済み定期予定をDaily Noteに転記する。 |
 | `src/obsidian_ai_hub/handler/apple_reminders.py` / `handler/add_calendar_event.py` | AIツールからApple Reminders／Calendarへ書き込むmacOS EventKit連携。HITLとは未接続。 |
-| `src/obsidian_ai_hub/web/app.py` / `web/routes/deps.py` | FastAPIアプリ、現在のWeb API認証、静的UI配信。通常はloopback bindで、公開Webhook用の経路ではない。 |
+| `src/obsidian_ai_hub/web/app.py` / `web/routes/deps.py` | FastAPIアプリ、Web UI／業務APIのBearer認証、静的UI配信。採用予定の公開経路では`127.0.0.1:8765`をTailscale Serveへ接続する。LINE Webhook用のルートは未実装で、別のNginx公開経路から受ける。 |
 | `src/obsidian_ai_hub/database.py` | SQLite migration v13〜v17を含む共有DB初期化。HITLは `hitl_runs` と `hitl_questions` に保存される。 |
 
 ## 3. 共通化できそうな処理
@@ -132,13 +149,13 @@ LINEを「別の回答チャネル」として扱うなら、次の既存部品�
 
 - 受信payloadの署名検証、イベント種別の選別、許可送信者、再送、競合回答、選択肢マッピングを隔離DBで検証するテスト。
 - ログへchannel secret、access token、全文の個人情報を残さない方針と、失敗時に必要な相関IDの設計。
-- 外部公開するWebサーバー／リバースプロキシ／トンネルのTLS終端、ヘルスチェック、秘密情報注入、再起動運用。現行のWeb UIは既定で`127.0.0.1:8765`にbindする。
+- 採用済みの公開経路を運用へ反映すること。LINE用はTailscale Funnel（`https://m1mbp.tail744355.ts.net/`）から専用Nginx（`127.0.0.1:8764`）を経由し、Web UI／業務APIはTailscale Serve（`https://aihub.tail744355.ts.net/`）からFastAPI（`127.0.0.1:8765`）へ接続する。各経路のTLS終端、ヘルスチェック、秘密情報注入、再起動を整備する。
 
 ## 5. 常設ワーカー対応で不足しているもの
 
 現在の定期実行は「launchdが60秒ごとに`task_runner`を起動し、期限に該当する子プロセスを実行する」方式である。`--serve`のFastAPIは別途手動起動で、startup時には研究jobのstale cleanupのみを行い、HITL dispatcherやLINE Webhook workerを常駐起動しない。
 
-- Uvicorn/FastAPIを常設するプロセス管理（launchd、コンテナ、systemd等）と、Webhookを外部から到達可能にするHTTPS公開経路。
+- Uvicorn/FastAPI、LINE Webhook API、専用Nginxを常設するプロセス管理（launchd、コンテナ、systemd等）。Webhookの外部到達経路はTailscale Funnel → `127.0.0.1:8764` のNginxと確定している。
 - Webhook受信の即時ACKと、後続処理を分ける永続キュー。現状、SQLiteに「受信イベント」「通知outbox」「処理状態」を置くテーブルはない。
 - webhook handler、通知送信、HITL dispatcherをどのworkerが担うかの責務分割。dispatcherは現在CLIの同期処理で、handler内ではLLM・Vault・Calendar等の長い／外部副作用を伴う操作を行い得る。
 - 5分固定leaseの更新（heartbeat）または、長時間handlerに合わせたlease設計。今は実行中にleaseを延長しない。
@@ -162,8 +179,6 @@ LINEを「別の回答チャネル」として扱うなら、次の既存部品�
 7. 外部副作用を伴うhandler（調査結果のVault保存、メモリ更新、将来のCalendar／Reminders操作）について、LINE回答後の自動実行範囲、失敗時の再試行・人への通知・手動復旧をどうするか。
 8. 通知のSLAと失敗時の期待値。未送信／重複送信／Webhook再送をどこまで許容し、outbox再試行、期限前リマインダー、実行結果通知を必要とするか。
 9. 既存のmacOS EventKit連携をLINE回答から直接起動する予定があるか。現状のCalendar／RemindersはローカルmacOS権限を前提としており、Webhookを受ける常設プロセスの配置場所に依存する。
-10. 公開方式（固定ドメイン、リバースプロキシ、トンネル等）と、LINEが到達する入口をどこに置くか。これはWebhook URL、TLS、運用監視、Web UIを同居させるかに影響する。
-
 ## 参照した主な既存設計
 
 - `docs/hitl/plan.md`: HITL MVPの状態遷移、dispatcher、外部通知／Webhookを当時のMVP対象外とした範囲。

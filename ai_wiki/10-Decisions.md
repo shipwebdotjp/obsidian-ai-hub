@@ -925,3 +925,21 @@ Web API をインターネット公開するにあたり、従来の「ループ
 - ループバックからの操作にもトークンが必須になるため、ローカル利用時の初期導線が増える。保存済みトークンの自動認証により、トークン設定後の再訪は `TokenPrompt` を経由しない。
 - トークンは `localStorage` に保持され XSS による漏えい余地が残るため、httpOnly クッキーへの移行は引き続き TODO。
 - テストでは実トークン（`tests/conftest.py` の `TEST_API_TOKEN`）を Bearer ヘッダーで渡し、E2E ではブラウザ `localStorage` にトークンを注入して認証済み状態を再現する。
+
+## LINE Webhook と Web UI／業務APIの公開経路分離
+
+| 項目 | 内容 |
+|------|------|
+| 決定日 | 2026-08-15 |
+| カテゴリ | LINE・Web API・ネットワーク境界 |
+| 決定内容 | LINE WebhookはTailscale Funnel（`https://m1mbp.tail744355.ts.net/`）から専用Nginx（`127.0.0.1:8764`）を経由して公開する。Web UI／業務APIはTailscale Serve（`https://aihub.tail744355.ts.net/`）からFastAPI（`127.0.0.1:8765`）へ接続し、両経路を分離する。 |
+
+### 結論に至った経緯
+
+LINE PlatformからのWebhookは外部到達可能である必要がある一方、Web UI／業務APIを同じFunnel公開面に置く必要はない。Webhook専用のNginxを入口にすることで、LINEの署名検証をWebhook固有の認証境界として扱い、Web UI／業務APIはTailscale Serve経由の運用を維持する。
+
+### 仕組みの概要
+
+1. **Webhook経路:** `https://m1mbp.tail744355.ts.net/` のTailscale Funnelから、loopbackで待ち受けるNginx（`127.0.0.1:8764`）を経由してLINE Webhook APIへ渡す。Webhook APIはBearer tokenではなくLINE署名で検証する。
+2. **Web UI／業務API経路:** `https://aihub.tail744355.ts.net/` のTailscale Serveから、loopbackのFastAPI（`127.0.0.1:8765`）へ渡す。
+3. **認証を緩めない:** 2026-08-15のBearer認証一元化は維持する。Tailscale Serve経由であっても、Web UI／業務APIのBearer tokenは必須である。
