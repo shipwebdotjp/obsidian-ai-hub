@@ -5,7 +5,7 @@
 
 ## 公開経路の設計決定（2026-08-15追記）
 
-WebhookとWeb UI／業務APIは同じ公開入口に置かず、次の経路に分離する。これは実装前の運用前提であり、現行コードにはまだ反映されていない。
+WebhookとWeb UI／業務APIは同じ公開入口に置かず、次の経路に分離する。FastAPIにはLINE署名を検証して受信イベントを記録するWebhookルートを実装済みである。Funnel、専用Nginx、LINE ConsoleへのWebhook URL登録と常設運用は、引き続き運用側で整備する前提である。
 
 ```text
 LINE Platform
@@ -84,7 +84,9 @@ SQLiteの昨日の日次要約 + Daily Note の当日情報
               └─ LINE Push API（固定の LINE_TARGET_ID）
 ```
 
-既存のLINE機能は送信専用である。FastAPIにはLINE用の受信エンドポイントがなく、`LINE_MESSAGING_TOKEN` と `LINE_TARGET_ID` を使ってPush APIへテキストを送る。週次レビュー草案も同じPush送信関数を使う。Webhook、受信メッセージ、postback、reply token、署名検証は実装されていない。
+既存の通知機能は、`LINE_MESSAGING_TOKEN` と `LINE_TARGET_ID` を使うPush APIのテキスト送信である。週次レビュー草案も同じPush送信関数を使う。
+
+受信側では、`POST /api/v1/line/webhook` が生のrequest bodyに対する`X-Line-Signature`検証、許可済み`source.userId`の確認、メッセージ／postbackイベントの重複排除付き記録を行い、即時に応答する。HITL回答への変換、Reply API、postbackの解釈、受信イベントを処理するworkerは未実装である。
 
 ## 2. 主要ファイルと責務
 
@@ -107,7 +109,8 @@ SQLiteの昨日の日次要約 + Daily Note の当日情報
 | `src/obsidian_ai_hub/notify_today_schedule.py` / `line_notification/builder.py` | 日次・週次要約とDaily NoteをLINE通知文へ組み立てる。 |
 | `src/obsidian_ai_hub/write_today_schedule.py` | Apple Calendar、Reminders、設定済み定期予定をDaily Noteに転記する。 |
 | `src/obsidian_ai_hub/handler/apple_reminders.py` / `handler/add_calendar_event.py` | AIツールからApple Reminders／Calendarへ書き込むmacOS EventKit連携。HITLとは未接続。 |
-| `src/obsidian_ai_hub/web/app.py` / `web/routes/deps.py` | FastAPIアプリ、Web UI／業務APIのBearer認証、静的UI配信。採用予定の公開経路では`127.0.0.1:8765`をTailscale Serveへ接続する。LINE Webhook用のルートは未実装で、別のNginx公開経路から受ける。 |
+| `src/obsidian_ai_hub/web/app.py` / `web/routes/deps.py` | FastAPIアプリ、Web UI／業務APIのBearer認証、静的UI配信。`127.0.0.1:8765`はTailscale Serve経由でWeb UI／業務APIを提供する。 |
+| `src/obsidian_ai_hub/web/routes/line.py` / `line_webhook/store.py` | LINE Webhookの署名・送信者検証、受信イベントの重複排除付きSQLite記録、即時応答。HITL回答処理やReply APIは担当しない。 |
 | `src/obsidian_ai_hub/database.py` | SQLite migration v13〜v17を含む共有DB初期化。HITLは `hitl_runs` と `hitl_questions` に保存される。 |
 
 ## 3. 共通化できそうな処理
@@ -129,15 +132,16 @@ LINEを「別の回答チャネル」として扱うなら、次の既存部品�
 
 ### 受信・セキュリティ
 
-- LINE Webhook用の公開HTTPSエンドポイント、ルーティング、LINE ConsoleへのURL登録手順。
-- channel secretの設定項目と、**生のリクエストbody**に対する `X-Line-Signature` のHMAC検証。既存の`LINE_MESSAGING_TOKEN`はPush API用access tokenだけである。
-- Web APIのBearer／loopback認証とは別の、LINE署名を前提にした認証境界。現在のHITL APIを外部公開してWebhookから呼ぶ前提にはできない。
-- `source.userId`／groupId等を許可する送信者の認可、複数利用者を扱うなら利用者とHITL Runの所有者・宛先の永続的な対応付け。
-- WebhookイベントIDまたはイベント識別子を記録する受信重複排除。質問行の一次回答制御だけでは、同一イベントへの再返信や運用上の監査を扱えない。
+次は運用配備と、受信イベントをHITL回答へ安全に処理するアダプターが必要である。
+
+- LINE ConsoleへのWebhook URL登録、Tailscale Funnel → 専用Nginx → FastAPIの配備・ヘルスチェック・秘密情報注入・再起動手順。
+- 実装済みの`LINE_CHANNEL_SECRET`による生bodyの署名検証と`LINE_ALLOWED_USER_IDS`による送信者認可を、運用設定とテストで継続検証すること。WebhookはBearer認証を使わず、LINE署名を認証境界とする。
+- 複数利用者／グループを扱う場合の、利用者・Push宛先・HITL Run所有者の永続的な対応付け。現状は許可済みの個人送信者と固定`LINE_TARGET_ID`を前提とする。
+- 記録済みWebhookイベントを処理済みに進めるworkerと、HITL回答への正規化。受信重複排除は実装済みだが、同一イベントへの返信や回答処理の監査状態は未実装である。
 
 ### LINEの会話・通知
 
-- 質問登録・次ラウンド登録時に通知する仕組み。現状は`register_run_and_questions()`がDB登録だけを行い、外部通知を発火しない。なお2026-08-15のHITL v1では、`research/pipeline.py` がauto_suggestion登録コミット後に `line_notification.notify_research_suggestion` で通知を送るようになった（リサーチ承認のみ・ベストエフォート）。
+- **決定済み・実装対象:** 各登録処理のコミット後に、既存Webフォームへの深いリンクをLINE Pushで送る。対象は自動リサーチ提案、長期記憶保守の初回登録と再提案ラウンド、週次メモリインタビューである。現状の実装は自動リサーチ提案のみであり、残りの通知と共通通知APIの追加が次の作業となる。
 - 通知送信のoutbox／送信状態（宛先、質問set、作成時刻、送信試行、成功／失敗、LINE message ID等）。送信失敗時の再試行や、同じ質問の重複通知を抑える状態がない。
 - LINE用の質問renderer。現在のLINE送信はtextだけで、HITLのselect、boolean、自由記述、複数必須質問、任意質問、comment必須の表現規約が未定義。
 - 回答プロトコル。テキストの番号返信、Quick Reply、postback、Flex Messageのどれを使うか、および `run_id`・`question_key`・選択値を安全に識別する形式がない。
@@ -153,10 +157,10 @@ LINEを「別の回答チャネル」として扱うなら、次の既存部品�
 
 ## 5. 常設ワーカー対応で不足しているもの
 
-現在の定期実行は「launchdが60秒ごとに`task_runner`を起動し、期限に該当する子プロセスを実行する」方式である。`--serve`のFastAPIは別途手動起動で、startup時には研究jobのstale cleanupのみを行い、HITL dispatcherやLINE Webhook workerを常駐起動しない。
+現在の定期実行は「launchdが60秒ごとに`task_runner`を起動し、期限に該当する子プロセスを実行する」方式である。`--serve`のFastAPIは別途手動起動で、startup時には研究jobのstale cleanupのみを行う。LINE Webhookは受信イベントを記録して即時応答するが、HITL dispatcherや記録済みWebhookイベントを処理するworkerは常駐起動しない。
 
 - Uvicorn/FastAPI、LINE Webhook API、専用Nginxを常設するプロセス管理（launchd、コンテナ、systemd等）。Webhookの外部到達経路はTailscale Funnel → `127.0.0.1:8764` のNginxと確定している。
-- Webhook受信の即時ACKと、後続処理を分ける永続キュー。現状、SQLiteに「受信イベント」「通知outbox」「処理状態」を置くテーブルはない。
+- Webhook受信の即時ACKと後続処理の分離は、受信イベント記録まで実装済みである。次に、処理状態を持つworkerキュー、通知outbox、失敗復旧を設計する必要がある。
 - webhook handler、通知送信、HITL dispatcherをどのworkerが担うかの責務分割。dispatcherは現在CLIの同期処理で、handler内ではLLM・Vault・Calendar等の長い／外部副作用を伴う操作を行い得る。
 - 5分固定leaseの更新（heartbeat）または、長時間handlerに合わせたlease設計。今は実行中にleaseを延長しない。
 - 再試行ポリシー。dispatcherでhandler例外はRunを直ちに`failed`にしretry_countを増やすが、自動リトライ、backoff、dead-letter、失敗したLINE送受信の復旧はない。
@@ -170,16 +174,12 @@ LINEを「別の回答チャネル」として扱うなら、次の既存部品�
 
 次の判断が未確定であり、実装方針とデータモデルに影響する。
 
-1. LINEの利用者は単一の自分だけか、複数のユーザー／グループか。前者でも、`LINE_TARGET_ID`（Push宛先）と受信`source`の一致確認をどう初回登録するかが必要になる。
-2. 対象は全HITLタイプか、まずはリサーチ承認だけか。長期記憶保守は複数提案・再提案・必須コメント、週次インタビューは自由記述のため、最初のLINE UIの複雑さが大きく異なる。
-3. LINE上で回答を完結させるか、LINEは通知だけにしてWeb UIへの深いリンクを主導線にするか。前者はpostback／自由記述の状態管理が必要で、後者は外部アクセス時のWeb UI認証を解く必要がある。
-   - **決定（2026-08-15, HITL v1）:** 後者（LINEは通知専用、深いリンクが主導線）を採用した。自動リサーチ提案の承認Run登録コミット後に `OBSIDIAN_AI_HUB_WEB_URL`（Tailscale Serve `https://aihub.tail744355.ts.net`）を基底とする `/hitl?run_id=…` の深いリンク付き通知文をLINE Push APIで送る。選択・コメント・取消は既存Web UIのBearer認証・HITL回答処理で完結させる。詳細は `ai_wiki/10-Decisions.md` の「LINE通知から既存Webフォームへ誘導するHITL v1」を参照。
-4. 1つのRunの複数質問を、まとめて表示・一括送信するか、質問ごとに順番に送るか。現行コアは質問単位の回答保存であり、どちらにも対応できるが、LINE側の状態対応が異なる。
-5. 任意質問の扱いをLINEでどうするか。現行ではdispatcherがclaim時に未回答の任意質問を`skipped`にするため、必須回答の直後に任意回答を受ける猶予はない。
-6. 回答後、いつ実行するか。常設workerが即時dispatchするか、既存の30秒ポーリングを継続するか、重い処理は別キューに渡すか。
-7. 外部副作用を伴うhandler（調査結果のVault保存、メモリ更新、将来のCalendar／Reminders操作）について、LINE回答後の自動実行範囲、失敗時の再試行・人への通知・手動復旧をどうするか。
-8. 通知のSLAと失敗時の期待値。未送信／重複送信／Webhook再送をどこまで許容し、outbox再試行、期限前リマインダー、実行結果通知を必要とするか。
-9. 既存のmacOS EventKit連携をLINE回答から直接起動する予定があるか。現状のCalendar／RemindersはローカルmacOS権限を前提としており、Webhookを受ける常設プロセスの配置場所に依存する。
+1. LINEの利用者は単一の自分だけか、複数のユーザー／グループか。現状の固定`LINE_TARGET_ID`と許可済み個人送信者の前提を、複数利用者へどう拡張するか。
+2. LINE上で回答を完結させる必要が将来あるか。**現行決定は通知専用で、Web UIへの深いリンクを主導線とする。** 選択・コメント・取消は既存Web UIのBearer認証・HITL回答処理で完結させる。詳細は`ai_wiki/10-Decisions.md`の「LINE通知から既存Webフォームへ誘導するHITL v1」を参照。
+3. LINE回答を導入する場合、1つのRunの複数質問をまとめて表示・一括送信するか、質問ごとに順番に送るか。また、任意質問とコメント必須の扱いをどうするか。
+4. 通知のSLAと失敗時の期待値。未送信／重複送信／Webhook再送をどこまで許容し、outbox再試行、期限前リマインダー、実行結果通知を必要とするか。
+5. LINEから回答を受ける場合、回答後にいつ実行するか。常設workerが即時dispatchするか、既存のポーリングを継続するか、重い処理は別キューに渡すか。
+6. 外部副作用を伴うhandler（調査結果のVault保存、メモリ更新、将来のCalendar／Reminders操作）について、LINE回答後の自動実行範囲、失敗時の再試行・人への通知・手動復旧をどうするか。
 ## 参照した主な既存設計
 
 - `docs/hitl/plan.md`: HITL MVPの状態遷移、dispatcher、外部通知／Webhookを当時のMVP対象外とした範囲。
