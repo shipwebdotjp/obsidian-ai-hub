@@ -971,3 +971,26 @@ HITLの回答チャネルをLINE上で完結させるには、LINE Webhook、LIF
 - LINE上では回答を完結できない（通知を開いた先でWeb UIの認証と回答が必要）。
 - 通知はベストエフォートであり、送信失敗時の再試行・永続化がないため、通知漏れや再実行時の重複が起こり得る。
 - 回答後のdispatcher起動は既存Webと同じく後続作業とし、今回変更しない。
+
+## pytestプロセスからの本番シークレット遮断（conftest強制ENV=test）
+
+| 項目 | 内容 |
+|------|------|
+| 決定日 | 2026-08-15 |
+| カテゴリ | テスト基盤・セキュリティ |
+| 決定内容 | `tests/conftest.py` が import 直前に `ENV=test` を強制し、アプリ設定の `IS_TEST_ENV` を本番のテスト実行時にも有効にする。`_APP_ENV_VARS`（LINEトークン、APIキー等）はテストプロセスから剥がされ、本番 `.env` は読み込まれない。 |
+
+### 結論に至った経緯
+
+HITL v1 の `notify_research_suggestion` 追加後、`uv run pytest tests/`（`ENV=test` 指定なし）を実行したところ、実機のLINEへテスト由来の通知が1件送信された。`tests/conftest.py` は従来 `OAIHUB_SKIP_DOTENV=1` のみを設定し `ENV=test` を設定していなかったため、`config.IS_TEST_ENV` が `False` になり、`else` 分岐で本番 `.env`（実LINEシークレット）が読み込まれて `ALLOW_EXTERNAL_IN_TEST=True` になっていた。その結果 `test_main_creates_themes_and_researches` が呼ぶ `notify_research_suggestion` が実LINEのPush APIを叩いた。AGENTS.mdが要求する「テストは `ENV=test` で実行」を実行時に自動化できていなかったのが根本原因。
+
+### 仕組みの概要
+
+1. **強制:** `conftest.py` は `obsidian_ai_hub.utils.config` の import より前で、`ENV` が未設定なら `ENV=test` に設定する。これによりテストプロセスは常に `IS_TEST_ENV=True` となり、`_APP_ENV_VARS` の剥離と本番 `.env` の非読込が効く。`ENV` を明示指定した場合は上書きしない。
+2. **外部アクセス維持:** 既存スイートのうちApple Reminders/EventKit・LLMクライアント・YouTubeを実際に呼ぶ13件は `ensure_external_allowed` を通過して動いているため、import 後に `app_config.ALLOW_EXTERNAL_IN_TEST = True` で従来挙動を維持する。ただし `ENV=test` により実クレデンシャルは剥がれているため、実LINE・実LLM・実キーへの到達は不可能なままである（従来比で厳密に安全側）。
+3. **検証:** `uv run pytest tests/`（プレフィックスなし）で582件全通過。プロセス内で `config.LINE_MESSAGING_TOKEN` / `LINE_TARGET_ID` / `OBSIDIAN_AI_HUB_WEB_URL` が空であることを確認した。
+
+### トレードオフ
+
+- テストプロセスは `config.test.yml` を使用し、本番 `config.yml` の値を参照しない。依存するテストは各fixtureで必要な値を上書きする。
+- `ALLOW_EXTERNAL_IN_TEST` をスイート全体で有効化するため、`ensure_external_allowed` の遮断はテストプロセスでは働かないが、クレデンシャル非存在が一次防御となる。

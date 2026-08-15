@@ -2,6 +2,14 @@ import os
 
 os.environ.setdefault("OAIHUB_SKIP_DOTENV", "1")
 
+# Force the app config into isolated test mode before it is imported. Under
+# ENV=test, config pops all _APP_ENV_VARS (LINE tokens, API keys, etc.) and
+# never loads the production .env, so the pytest process cannot reach real
+# external credentials (e.g. the LINE Push API). Operators may still override
+# ENV explicitly.
+if not os.environ.get("ENV"):
+    os.environ["ENV"] = "test"
+
 import tempfile
 import sys
 from pathlib import Path
@@ -9,6 +17,13 @@ from unittest.mock import MagicMock
 
 import pytest
 from obsidian_ai_hub.utils import config as app_config
+
+# The suite contains tests that intentionally exercise external services
+# (Apple Reminders/EventKit, LLM clients, YouTube) by mocking the lower-level
+# clients. Re-enable the external-access guard so those tests keep working.
+# This is safe because config has already stripped real credentials from the
+# process under ENV=test.
+app_config.ALLOW_EXTERNAL_IN_TEST = True
 
 _TESTING_ENV = "OBSIDIAN_AI_HUB_TESTING"
 _PRODUCTION_DB_PATH_ENV = "OBSIDIAN_AI_HUB_TEST_PRODUCTION_DB_PATH"
