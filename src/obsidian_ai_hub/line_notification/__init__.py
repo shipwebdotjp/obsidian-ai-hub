@@ -8,6 +8,10 @@ from obsidian_ai_hub.line_notification.builder import (
     is_monday,
     prev_iso_week_key,
 )
+from obsidian_ai_hub.line_notification.hitl_run import (
+    build_hitl_run_text,
+    notify_hitl_run,
+)
 from obsidian_ai_hub.line_notification.suggestion import (
     build_research_suggestion_text,
     build_suggestion_link,
@@ -22,8 +26,10 @@ __all__ = [
     "build_week_summary_text",
     "build_research_suggestion_text",
     "build_suggestion_link",
+    "build_hitl_run_text",
     "format_summary_for_line",
     "is_monday",
+    "notify_hitl_run",
     "notify_research_suggestion",
     "prev_iso_week_key",
 ]

@@ -197,6 +197,25 @@ def generate_interview_questions(week_date_str: Optional[str] = None) -> None:
             display_type="interview",
         )
         logger.info(f"Successfully registered interview HITL run: {run_id}")
+
+        # The registration transaction above has committed. Notify via LINE as a
+        # best-effort push after commit and guard the whole call so a
+        # notification failure never fails the registration.
+        try:
+            from obsidian_ai_hub.line_notification import notify_hitl_run
+
+            notify_hitl_run(
+                kind="週次メモリインタビュー",
+                title="週次メモリインタビュー",
+                description=f"{week_start_str} 〜 {week_end_str} の振り返り質問",
+                run_id=run_id,
+            )
+        except Exception as exc:
+            logger.warning(
+                "LINE interview notification failed after commit for run %s: %s",
+                run_id,
+                type(exc).__name__,
+            )
     finally:
         conn.close()
 

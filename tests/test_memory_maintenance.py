@@ -491,6 +491,146 @@ def test_maintenance_snapshot_conflict_re_diagnose(mock_llm_response):
         conn.close()
 
 
+@patch("obsidian_ai_hub.line_notification.notify_hitl_run")
+def test_register_maintenance_hitl_run_notifies_initial_round(mock_notify):
+    """Initial maintenance registration sends one notification with round 1."""
+    conn = get_db_connection()
+    try:
+        conn.execute("DELETE FROM memories")
+        conn.execute("DELETE FROM hitl_runs")
+        conn.execute("DELETE FROM hitl_questions")
+
+        m1 = {
+            "schema_version": 1,
+            "memory_id": "mem_1",
+            "status": "approved",
+            "kind": "preference",
+            "content": "毎週日曜日に英会話をする",
+            "updated_at": "2026-07-20T00:00:00+09:00",
+        }
+        m2 = {
+            "schema_version": 1,
+            "memory_id": "mem_2",
+            "status": "approved",
+            "kind": "preference",
+            "content": "日曜は英会話スクールに行く",
+            "updated_at": "2026-07-21T00:00:00+09:00",
+        }
+        for m in (m1, m2):
+            conn.execute(
+                "INSERT INTO memories (schema_version, memory_id, status, kind, content, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (m["schema_version"], m["memory_id"], m["status"], m["kind"], m["content"], m["updated_at"])
+            )
+        conn.commit()
+
+        base_date = datetime(2026, 7, 25, tzinfo=timezone(timedelta(hours=9)))
+        memories_map = {"mem_1": m1, "mem_2": m2}
+        proposals = [
+            {
+                "action": "merge",
+                "main_id": "mem_1",
+                "absorbed_ids": ["mem_2"],
+                "reason": "英会話の重複",
+                "integrated_content": "毎週日曜日に英会話スクールに行って勉強する",
+            }
+        ]
+
+        run_id = register_maintenance_hitl_run(base_date, proposals, memories_map)
+        assert run_id is not None
+        mock_notify.assert_called_once()
+        kwargs = mock_notify.call_args.kwargs
+        assert kwargs["run_id"] == run_id
+        assert kwargs["round_number"] == 1
+        assert kwargs["kind"] == "長期記憶保守"
+    finally:
+        conn.close()
+
+
+@patch("obsidian_ai_hub.line_notification.notify_hitl_run")
+@patch("obsidian_ai_hub.utils.llm_client.generate_llm_response")
+def test_maintenance_reproposal_round_notifies(mock_llm_response, mock_notify):
+    """The feedback-triggered next round sends one notification with its round number."""
+    conn = get_db_connection()
+    try:
+        conn.execute("DELETE FROM memories")
+        conn.execute("DELETE FROM memory_events")
+        conn.execute("DELETE FROM hitl_runs")
+        conn.execute("DELETE FROM hitl_questions")
+
+        m1 = {
+            "schema_version": 1,
+            "memory_id": "mem_1",
+            "status": "approved",
+            "kind": "preference",
+            "content": "毎週日曜日に英会話をする",
+            "updated_at": "2026-07-20T00:00:00+09:00",
+        }
+        m2 = {
+            "schema_version": 1,
+            "memory_id": "mem_2",
+            "status": "approved",
+            "kind": "preference",
+            "content": "日曜は英会話スクールに行く",
+            "updated_at": "2026-07-21T00:00:00+09:00",
+        }
+        for m in (m1, m2):
+            conn.execute(
+                "INSERT INTO memories (schema_version, memory_id, status, kind, content, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (m["schema_version"], m["memory_id"], m["status"], m["kind"], m["content"], m["updated_at"])
+            )
+        conn.commit()
+
+        base_date = datetime(2026, 7, 25, tzinfo=timezone(timedelta(hours=9)))
+        memories_map = {"mem_1": m1, "mem_2": m2}
+        proposals = [
+            {
+                "action": "merge",
+                "main_id": "mem_1",
+                "absorbed_ids": ["mem_2"],
+                "reason": "英会話の重複",
+                "integrated_content": "毎週日曜日に英会話スクールに行って勉強する",
+            }
+        ]
+
+        run_id = register_maintenance_hitl_run(base_date, proposals, memories_map)
+        assert run_id is not None
+        mock_notify.assert_called_once()
+        assert mock_notify.call_args.kwargs["round_number"] == 1
+        mock_notify.reset_mock()
+
+        submit_answer(run_id, "round_1", "proposal_1", {"value": "feedback", "comment": "もっと自然な日本語に修正してください"})
+
+        mock_llm_response.return_value = json.dumps([
+            {
+                "action": "merge",
+                "main_id": "mem_1",
+                "absorbed_ids": ["mem_2"],
+                "reason": "フィードバックを反映し調整しました。",
+                "integrated_content": "毎週日曜日に英会話スクールへ行く",
+            }
+        ])
+
+        from obsidian_ai_hub.hitl.dispatcher import register_handler
+        register_handler("memory.apply_maintenance_proposals", run_approved_maintenance)
+
+        processed = dispatch_runs(conn)
+        assert processed == 1
+
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM hitl_runs WHERE run_id = ?", (run_id,))
+        run_row = dict(cursor.fetchone())
+        assert run_row["status"] == "pending_user"
+        assert run_row["active_question_set_id"] == "round_2"
+
+        mock_notify.assert_called_once()
+        kwargs = mock_notify.call_args.kwargs
+        assert kwargs["run_id"] == run_id
+        assert kwargs["round_number"] == 2
+        assert "再提案" in kwargs["description"]
+    finally:
+        conn.close()
+
+
 @patch("obsidian_ai_hub.utils.llm_client.generate_llm_response")
 def test_maintenance_feedback_creates_next_round(mock_llm_response):
     conn = get_db_connection()
@@ -579,5 +719,136 @@ def test_maintenance_feedback_creates_next_round(mock_llm_response):
         assert q["question_key"] == "proposal_1"
         assert "毎週日曜日に英会話スクールへ行く" in q["context_json"]
 
+    finally:
+        conn.close()
+
+
+@patch("obsidian_ai_hub.line_notification.notify_hitl_run", side_effect=RuntimeError("push down"))
+def test_register_maintenance_hitl_run_notify_failure_does_not_fail_registration(mock_notify):
+    """A raising notification must not fail the maintenance run registration."""
+    conn = get_db_connection()
+    try:
+        conn.execute("DELETE FROM memories")
+        conn.execute("DELETE FROM hitl_runs")
+        conn.execute("DELETE FROM hitl_questions")
+
+        m1 = {
+            "schema_version": 1,
+            "memory_id": "mem_1",
+            "status": "approved",
+            "kind": "preference",
+            "content": "毎週日曜日に英会話をする",
+            "updated_at": "2026-07-20T00:00:00+09:00",
+        }
+        m2 = {
+            "schema_version": 1,
+            "memory_id": "mem_2",
+            "status": "approved",
+            "kind": "preference",
+            "content": "日曜は英会話スクールに行く",
+            "updated_at": "2026-07-21T00:00:00+09:00",
+        }
+        for m in (m1, m2):
+            conn.execute(
+                "INSERT INTO memories (schema_version, memory_id, status, kind, content, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (m["schema_version"], m["memory_id"], m["status"], m["kind"], m["content"], m["updated_at"])
+            )
+        conn.commit()
+
+        base_date = datetime(2026, 7, 25, tzinfo=timezone(timedelta(hours=9)))
+        memories_map = {"mem_1": m1, "mem_2": m2}
+        proposals = [
+            {
+                "action": "merge",
+                "main_id": "mem_1",
+                "absorbed_ids": ["mem_2"],
+                "reason": "英会話の重複",
+                "integrated_content": "毎週日曜日に英会話スクールに行って勉強する",
+            }
+        ]
+
+        run_id = register_maintenance_hitl_run(base_date, proposals, memories_map)
+        assert run_id is not None
+        mock_notify.assert_called_once()
+
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM hitl_runs WHERE run_id = ?", (run_id,))
+        assert cursor.fetchone() is not None
+    finally:
+        conn.close()
+
+
+@patch("obsidian_ai_hub.line_notification.notify_hitl_run", side_effect=RuntimeError("push down"))
+@patch("obsidian_ai_hub.utils.llm_client.generate_llm_response")
+def test_maintenance_reproposal_notify_failure_does_not_fail_run(mock_llm_response, mock_notify):
+    """A raising notification during the next-round registration must not fail the run."""
+    conn = get_db_connection()
+    try:
+        conn.execute("DELETE FROM memories")
+        conn.execute("DELETE FROM memory_events")
+        conn.execute("DELETE FROM hitl_runs")
+        conn.execute("DELETE FROM hitl_questions")
+
+        m1 = {
+            "schema_version": 1,
+            "memory_id": "mem_1",
+            "status": "approved",
+            "kind": "preference",
+            "content": "毎週日曜日に英会話をする",
+            "updated_at": "2026-07-20T00:00:00+09:00",
+        }
+        m2 = {
+            "schema_version": 1,
+            "memory_id": "mem_2",
+            "status": "approved",
+            "kind": "preference",
+            "content": "日曜は英会話スクールに行く",
+            "updated_at": "2026-07-21T00:00:00+09:00",
+        }
+        for m in (m1, m2):
+            conn.execute(
+                "INSERT INTO memories (schema_version, memory_id, status, kind, content, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (m["schema_version"], m["memory_id"], m["status"], m["kind"], m["content"], m["updated_at"])
+            )
+        conn.commit()
+
+        base_date = datetime(2026, 7, 25, tzinfo=timezone(timedelta(hours=9)))
+        memories_map = {"mem_1": m1, "mem_2": m2}
+        proposals = [
+            {
+                "action": "merge",
+                "main_id": "mem_1",
+                "absorbed_ids": ["mem_2"],
+                "reason": "英会話の重複",
+                "integrated_content": "毎週日曜日に英会話スクールに行って勉強する",
+            }
+        ]
+
+        run_id = register_maintenance_hitl_run(base_date, proposals, memories_map)
+        assert run_id is not None
+
+        submit_answer(run_id, "round_1", "proposal_1", {"value": "feedback", "comment": "もっと自然な日本語に修正してください"})
+
+        mock_llm_response.return_value = json.dumps([
+            {
+                "action": "merge",
+                "main_id": "mem_1",
+                "absorbed_ids": ["mem_2"],
+                "reason": "フィードバックを反映し調整しました。",
+                "integrated_content": "毎週日曜日に英会話スクールへ行く",
+            }
+        ])
+
+        from obsidian_ai_hub.hitl.dispatcher import register_handler
+        register_handler("memory.apply_maintenance_proposals", run_approved_maintenance)
+
+        processed = dispatch_runs(conn)
+        assert processed == 1
+
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM hitl_runs WHERE run_id = ?", (run_id,))
+        run_row = dict(cursor.fetchone())
+        assert run_row["status"] == "pending_user"
+        assert run_row["active_question_set_id"] == "round_2"
     finally:
         conn.close()

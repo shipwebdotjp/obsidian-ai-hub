@@ -175,6 +175,41 @@ def test_generate_interview_questions_idempotence(test_memory_db_path, monkeypat
         conn.close()
 
 
+def test_generate_interview_questions_notifies_after_commit(test_memory_db_path, monkeypatch):
+    """Weekly interview registration sends one notification and skips on idempotent re-run."""
+    from unittest.mock import patch
+
+    mock_resp = json.dumps([
+        {
+            "question_key": "coffee_preference",
+            "title": "コーヒーの好み",
+            "prompt": "朝どのようなコーヒーを飲みますか？",
+            "context": {"category": "preference", "reasoning": "Test reasoning"}
+        }
+    ])
+    monkeypatch.setattr("obsidian_ai_hub.utils.llm_client.generate_llm_response", lambda *a, **kw: mock_resp)
+    monkeypatch.setattr(
+        "obsidian_ai_hub.memory.interview._load_weekly_memory_sources",
+        lambda start, end: ([{"date": "2026-07-27", "path": "daily/2026-07-27.md", "content": "## 📝メモ\n珈琲飲んだ。"}], [])
+    )
+
+    with patch("obsidian_ai_hub.line_notification.notify_hitl_run") as mock_notify:
+        generate_interview_questions("2026-07-30")
+
+        mock_notify.assert_called_once()
+        kwargs = mock_notify.call_args.kwargs
+        assert kwargs["run_id"] == "mem_interview_2026-W31"
+        assert kwargs["kind"] == "週次メモリインタビュー"
+        assert kwargs["title"] == "週次メモリインタビュー"
+        assert "2026-07-27" in kwargs["description"]
+        assert "2026-08-02" in kwargs["description"]
+
+        # Idempotent re-generation must not notify again.
+        mock_notify.reset_mock()
+        generate_interview_questions("2026-07-30")
+        mock_notify.assert_not_called()
+
+
 def test_apply_interview_answers_flow(test_memory_db_path, monkeypatch):
     """Test full interview answers processing flow with deduplication and DB saving."""
     conn = get_db_connection()

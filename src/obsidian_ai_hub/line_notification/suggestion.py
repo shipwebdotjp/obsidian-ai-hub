@@ -1,12 +1,9 @@
 from __future__ import annotations
 
-import logging
 from typing import Optional
 from urllib.parse import quote
 
-from obsidian_ai_hub.utils import config
-
-logger = logging.getLogger(__name__)
+from obsidian_ai_hub.line_notification.push import push_best_effort
 
 
 def build_suggestion_link(web_url: str, run_id: str) -> str:
@@ -51,25 +48,14 @@ def notify_research_suggestion(
     implemented: on recovery a notification may be missed, and on re-run it may
     be duplicated.
     """
-    token = line_token if line_token is not None else config.LINE_MESSAGING_TOKEN
-    target = line_target if line_target is not None else config.LINE_TARGET_ID
-    base_url = web_url if web_url is not None else config.OBSIDIAN_AI_HUB_WEB_URL
 
-    if not token or not target or not base_url:
-        logger.warning(
-            "LINE research-suggestion notification skipped: LINE token, target, "
-            "or Web URL is not configured"
-        )
-        return False
+    def _build(base_url: str) -> str:
+        return build_research_suggestion_text(theme, run_id, base_url)
 
-    try:
-        from obsidian_ai_hub.utils.line_messaging import send_line_push
-
-        text = build_research_suggestion_text(theme, run_id, base_url)
-        return send_line_push(token, target, text)
-    except Exception as exc:
-        logger.warning(
-            "LINE research-suggestion notification push failed: %s",
-            type(exc).__name__,
-        )
-        return False
+    return push_best_effort(
+        _build,
+        label="research-suggestion",
+        line_token=line_token,
+        line_target=line_target,
+        web_url=web_url,
+    )

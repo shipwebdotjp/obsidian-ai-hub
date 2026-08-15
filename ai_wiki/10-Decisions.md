@@ -950,7 +950,7 @@ LINE PlatformからのWebhookは外部到達可能である必要がある一方
 |------|------|
 | 決定日 | 2026-08-15 |
 | カテゴリ | LINE・HITL・通知 |
-| 決定内容 | LINE上で回答状態を管理せず、LINEは自動リサーチ提案の通知専用にする。通知リンクは既存の `/hitl?run_id=…` を開き、選択・自由コメント・取消は既存Web UIと同じBearer認証・HITL回答処理で完結させる。 |
+| 決定内容 | LINE上で回答状態を管理せず、LINEはHITL Runの通知専用にする。通知リンクは既存の `/hitl?run_id=…` を開き、選択・自由コメント・取消は既存Web UIと同じBearer認証・HITL回答処理で完結させる。通知対象は自動リサーチ提案、長期記憶保守の初回登録とフィードバック再提案ラウンド、週次メモリインタビューの3系統に拡張する。 |
 
 ### 結論に至った経緯
 
@@ -959,17 +959,18 @@ HITLの回答チャネルをLINE上で完結させるには、LINE Webhook、LIF
 ### 仕組みの概要
 
 1. **設定:** `OBSIDIAN_AI_HUB_WEB_URL` を追加し、Tailscale Serveの `https://aihub.tail744355.ts.net` を通知リンクの基底URLとする。URLには `run_id` 以外の秘密情報を含めない（BearerトークンはURL・LINE本文のどちらにも載せない）。
-2. **通知文組み立て:** `line_notification` に、リサーチ提案用の短い通知文と深いリンクを組み立てる内部ヘルパー（`build_research_suggestion_text` / `build_suggestion_link`）を追加する。`run_id` はURLエンコードする。
-3. **送信タイミング:** 自動リサーチ提案のRun・テーマ登録がDBコミットした**後**に、既存の `LINE_MESSAGING_TOKEN` / `LINE_TARGET_ID` とPush APIで通知を1回送る（`notify_research_suggestion`）。
-   - 通知対象は `origin=auto_suggestion` のリサーチ承認Runだけ。手動リサーチ、長期記憶保守、週次インタビュー、次ラウンド、完了・失敗通知は対象外。
-   - 設定不足・Push失敗はRun作成を失敗させず、秘密情報や通知本文を出さない警告ログだけを残す（ベストエフォート）。
-   - outbox、再送、送信済み永続化は作らない。障害復旧時に通知が漏れる、または再実行時に重複し得ることを許容する。
-4. **変更しない範囲:** Web UI・HITLコア・回答APIは変更しない。LINE Webhook、LIFF、Funnel、会話セッション、ワーカー自動再開は実装しない。
+2. **通知文組み立て:** `line_notification` に、任意のHITL Run向け通知文（種別・タイトル・説明・深いリンク）を組み立てる共通内部API（`build_hitl_run_text` / `notify_hitl_run`）と、リサーチ提案用の文面（`build_research_suggestion_text` / `build_suggestion_link` / `notify_research_suggestion`）を追加する。`run_id` はURLエンコードする。送信共通処理（設定解決・ベストエフォートPush・失敗時の秘密情報を含まない警告ログ）は `line_notification.push.push_best_effort` に集約し、全系統が再利用する。
+3. **送信タイミング:** 各登録処理のDBコミット**後**に、既存の `LINE_MESSAGING_TOKEN` / `LINE_TARGET_ID` とPush APIで通知を1回送る。
+   - **自動リサーチ提案:** `origin=auto_suggestion` のリサーチ承認Runだけ（`notify_research_suggestion`）。手動リサーチ、完了・失敗通知は対象外。
+   - **長期記憶保守:** 初回Run登録後に通知し、フィードバックから生成される次ラウンド（`round_2` 以降）も登録・コミット後に「再提案・ラウンド番号」が分かる文面で通知する（`notify_hitl_run`）。
+   - **週次メモリインタビュー:** Run登録後に、対象週の説明（期間）を含む通知を送る（`notify_hitl_run`）。
+   - 設定不足・Push失敗は登録処理を失敗させず、秘密情報や通知本文を出さない警告ログだけを残す（ベストエフォート）。outbox、再送、送信済み永続化は作らない。障害復旧時に通知が漏れる、または再実行時に重複し得ることを許容する。
+4. **変更しない範囲:** Web UI・HITLコア・回答API・dispatcher起動タイミングは変更しない。LINE Webhook、LIFF、Funnel、会話セッション、ワーカー自動再開は実装しない。
 
 ### トレードオフ
 
 - LINE上では回答を完結できない（通知を開いた先でWeb UIの認証と回答が必要）。
-- 通知はベストエフォートであり、送信失敗時の再試行・永続化がないため、通知漏れや再実行時の重複が起こり得る。
+- 通知はベストエフォートであり、送信失敗時の再試行・永続化がないため、通知漏れや再実行時の重複が起こり得る。この性質は3系統すべてと保守の再提案ラウンドに等しく適用される。
 - 回答後のdispatcher起動は既存Webと同じく後続作業とし、今回変更しない。
 
 ## pytestプロセスからの本番シークレット遮断（conftest強制ENV=test）

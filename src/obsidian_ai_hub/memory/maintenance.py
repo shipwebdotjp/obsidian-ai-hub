@@ -412,6 +412,11 @@ def register_maintenance_hitl_run(
         "applied_proposal_ids": [],
     })
 
+    description = (
+        f"基準日 {base_date.strftime('%Y-%m-%d')} の長期記憶定期診断に基づく、"
+        f"{len(proposals)}件 of メンテナンス提案です。"
+    )
+
     register_run_and_questions(
         run_id=run_id,
         handler="memory.apply_maintenance_proposals",
@@ -419,9 +424,29 @@ def register_maintenance_hitl_run(
         question_set_id=question_set_id,
         questions_data=questions_data,
         title="メモリ長期記憶 診断メンテナンス",
-        description=f"基準日 {base_date.strftime('%Y-%m-%d')} の長期記憶定期診断に基づく、{len(proposals)}件 of メンテナンス提案です。",
+        description=description,
         display_type="長期記憶保守",
     )
+
+    # The registration transaction above has committed. Notify via LINE as a
+    # best-effort push after commit and guard the whole call so a notification
+    # failure never propagates or fails the registration.
+    try:
+        from obsidian_ai_hub.line_notification import notify_hitl_run
+
+        notify_hitl_run(
+            kind="長期記憶保守",
+            title="メモリ長期記憶 診断メンテナンス",
+            description=description,
+            run_id=run_id,
+            round_number=1,
+        )
+    except Exception as exc:
+        logger.warning(
+            "LINE maintenance notification failed after commit for run %s: %s",
+            run_id,
+            type(exc).__name__,
+        )
 
     return run_id
 
@@ -717,6 +742,28 @@ def run_approved_maintenance(ctx: HitlContext) -> HitlResult:
             questions_data=questions_data,
             checkpoint=next_checkpoint,
         )
+
+        # register_next_questions committed the next-round run state. Notify via
+        # LINE as a best-effort push after commit; a failure must never fail the
+        # handler or the run.
+        try:
+            from obsidian_ai_hub.line_notification import notify_hitl_run
+
+            notify_hitl_run(
+                kind="長期記憶保守",
+                title="メモリ長期記憶 診断メンテナンス",
+                description=f"基準日 {base_date_str} の長期記憶定期診断に基づく再提案です。",
+                run_id=ctx.run_id,
+                round_number=next_round,
+            )
+        except Exception as exc:
+            logger.warning(
+                "LINE maintenance re-proposal notification failed after commit "
+                "for run %s (round %s): %s",
+                ctx.run_id,
+                next_round,
+                type(exc).__name__,
+            )
 
         return HitlResult.re_suspend(checkpoint=next_checkpoint)
 
