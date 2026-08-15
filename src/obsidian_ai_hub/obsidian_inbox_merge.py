@@ -237,29 +237,9 @@ def wait_for_icloud_download(file_path: Path, timeout: int = 60) -> bool:
     return False
 
 
-def _parse_effective_dt(daily_file: Path, hour_str: str) -> datetime:
-    if re.match(r"^\d{4}-\d{2}-\d{2}$", daily_file.stem):
-        try:
-            return datetime.strptime(
-                f"{daily_file.stem} {hour_str}", "%Y-%m-%d %H:%M"
-            )
-        except ValueError:
-            pass
-    return datetime.now()
-
-
-def _build_classification_prompt(
-    content: str, effective_dt: datetime | None = None
-) -> str:
-    if effective_dt is None:
-        effective_dt = datetime.now()
+def _build_classification_prompt(content: str) -> str:
     return prompt.render_prompt(
-        config.INBOX_CLASSIFICATION_PROMPT_PATH,
-        {
-            "content": content,
-            "today": effective_dt.strftime("%Y-%m-%d"),
-            "created_at": effective_dt.strftime("%Y-%m-%d %H:%M"),
-        },
+        config.INBOX_CLASSIFICATION_PROMPT_PATH, {"content": content}
     )
 
 
@@ -357,7 +337,7 @@ def classify_inbox_content(
     content: str, effective_dt: datetime | None = None
 ) -> InboxClassification:
     try:
-        rendered_prompt = _build_classification_prompt(content, effective_dt)
+        rendered_prompt = _build_classification_prompt(content)
         response = llm_client.generate_llm_response(
             provider=config.INBOX_CLASSIFICATION_PROVIDER,
             model=config.INBOX_CLASSIFICATION_MODEL,
@@ -396,8 +376,7 @@ def merge_content_into_daily_note(
         )
         return "location"
 
-    effective_dt = _parse_effective_dt(daily_file, hour_str)
-    classification = classify_inbox_content(content, effective_dt)
+    classification = classify_inbox_content(content)
     if classification.category == "research":
         add_research_theme.append_research_theme(content)
     elif classification.category == "calendar" and classification.calendar_event:

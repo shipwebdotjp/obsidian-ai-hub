@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import logging
+import sys
 from datetime import datetime
 
 from obsidian_ai_hub import (
@@ -295,6 +296,11 @@ def main():
         help="Atomically claim and execute eligible HITL runs",
     )
     parser.add_argument(
+        "--hitl-worker",
+        action="store_true",
+        help="Run resident HITL worker loop with heartbeat renewal and graceful draining",
+    )
+    parser.add_argument(
         "--memory-maintain",
         action="store_true",
         help="手動で承認済み長期記憶の保守・診断メンテナンスを実行",
@@ -567,6 +573,11 @@ def main():
 
         run_and_log(dispatch_runs, "hitl_dispatch", {})
         ran = True
+    if getattr(args, "hitl_worker", False):
+        from obsidian_ai_hub.hitl.worker import run_hitl_worker_cli
+
+        exit_code = run_hitl_worker_cli()
+        sys.exit(exit_code)
     if getattr(args, "memory_maintain", False):
         from obsidian_ai_hub.memory.maintenance import run_maintenance_cli
 

@@ -231,6 +231,145 @@ def register_run_and_questions(
             conn.close()
 
 
+def renew_lease_heartbeat(
+    run_id: str,
+    lease_owner: str,
+    extension_seconds: int = 300,
+    conn: Optional[sqlite3.Connection] = None,
+) -> bool:
+    """
+    Extend the lease of an actively running run if ownership and validity conditions are met.
+    Condition: status == 'running' AND lease_owner == lease_owner AND lease_expires_at >= now.
+    Updates lease_expires_at to (now + extension_seconds).
+    Returns True if update succeeded, False if condition failed.
+    """
+    if extension_seconds <= 0:
+        raise ValueError("extension_seconds must be a positive integer")
+
+    close_conn = False
+    if conn is None:
+        conn = get_db_connection()
+        close_conn = True
+
+    try:
+        with conn:
+            now = get_current_iso()
+            expires_dt = datetime.now(timezone(timedelta(hours=9))) + timedelta(
+                seconds=extension_seconds
+            )
+            new_lease_expires_at = expires_dt.isoformat()
+
+            sql = """
+                UPDATE hitl_runs
+                SET lease_expires_at = ?,
+                    updated_at = ?
+                WHERE run_id = ? AND
+                      status = 'running' AND
+                      lease_owner = ? AND
+                      lease_expires_at IS NOT NULL AND
+                      lease_expires_at >= ?
+            """
+            cursor = conn.cursor()
+            cursor.execute(sql, (new_lease_expires_at, now, run_id, lease_owner, now))
+            return cursor.rowcount > 0
+    except Exception as e:
+        logger.error(f"Heartbeat failed with exception for run {run_id}: {e}")
+        return False
+    finally:
+        if close_conn:
+            conn.close()
+
+
+def settle_run_outcome(
+    run_id: str,
+    lease_owner: str,
+    result_status: str,
+    checkpoint: Optional[str] = None,
+    error_message: Optional[str] = None,
+    is_worker_healthy: bool = True,
+    conn: Optional[sqlite3.Connection] = None,
+) -> bool:
+    """
+    Conditionally update the final result of a run execution.
+    Target statuses: 'completed', 'failed', 're_suspended'.
+    Requires is_worker_healthy to be True AND:
+      status == 'running' AND lease_owner == lease_owner AND lease_expires_at >= now
+    (Or for re_suspended if handler already set status != 'running' and cleared lease).
+    Returns True if outcome was committed, False if rejected/unhealthy.
+    """
+    if not is_worker_healthy:
+        logger.error(f"Worker is unhealthy; refusing to settle run outcome for {run_id}.")
+        return False
+
+    close_conn = False
+    if conn is None:
+        conn = get_db_connection()
+        close_conn = True
+
+    try:
+        with conn:
+            now = get_current_iso()
+            run = get_run(run_id, conn)
+            if run is None:
+                logger.error(f"Run {run_id} not found during settlement.")
+                return False
+
+            # Handle case where handler already re-suspended inside handler
+            if result_status == "re_suspended" and run["status"] == "pending_user":
+                logger.info(f"Run {run_id} was already re-suspended inside handler.")
+                return True
+
+            # Determine new status based on result_status
+            if result_status == "completed":
+                new_status = "completed"
+                new_err = None
+            elif result_status == "failed":
+                new_status = "failed"
+                new_err = error_message
+            elif result_status == "re_suspended":
+                new_status = "pending_user"
+                new_err = None
+            else:
+                logger.error(f"Invalid result status '{result_status}' for run {run_id}")
+                return False
+
+            new_checkpoint = checkpoint or run["checkpoint"]
+
+            sql = """
+                UPDATE hitl_runs
+                SET status = ?,
+                    checkpoint = ?,
+                    error_message = ?,
+                    lease_owner = NULL,
+                    lease_expires_at = NULL,
+                    updated_at = ?
+                WHERE run_id = ? AND
+                      status = 'running' AND
+                      lease_owner = ? AND
+                      lease_expires_at IS NOT NULL AND
+                      lease_expires_at >= ?
+            """
+            cursor = conn.cursor()
+            cursor.execute(
+                sql,
+                (new_status, new_checkpoint, new_err, now, run_id, lease_owner, now),
+            )
+            if cursor.rowcount == 0:
+                logger.error(
+                    f"Settlement conditional update failed for run {run_id} (lease expired or lost)."
+                )
+                return False
+
+            logger.info(f"Successfully settled run {run_id} with status {new_status}")
+            return True
+    except Exception as e:
+        logger.exception(f"Exception during settlement of run {run_id}: {e}")
+        return False
+    finally:
+        if close_conn:
+            conn.close()
+
+
 def submit_answer(
     run_id: str,
     question_set_id: str,

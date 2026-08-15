@@ -1048,3 +1048,33 @@ Inboxのメモ・音声転記に「明日までに本を返す」のようなTod
 - リマインダー登録は `add_reminder` が既存リマインダーを毎回新規作成するため完全な冪等ではなく、登録後のDB commit失敗時には重複登録の可能性が残る。`phase=added` チェックポイントで緩和するが、カレンダーと同様の限界を持つ。
 - 抽出した期限が誤っている場合、承認者は却下＋コメントで拾う前提。編集欄は設けない。
 - 分類・抽出は同一LLM呼び出しで行うため、`reminder` の形式不正時は例外を握って `memo` へフォールバックする（安全性優先）。`parse_classification_response` で title 必須と、due_date がISO日時としてパース可能であることを検証する。
+
+## SQLiteベースの常駐HITL Dispatcher Worker
+
+| 項目 | 内容 |
+|------|------|
+| 決定日 | 2026-08-16 |
+| カテゴリ | HITL・実行制御・ワーカー運用 |
+| 決定内容 | 専用LaunchAgent（`jp.shipweb.obsidian-ai-hub.hitl-worker`）で単一の常駐workerプロセスを運用し、5秒周期のポーリングとバックグラウンドHeartbeat、所有権付き条件確定、SIGTERM/SIGINTの優雅なドレインを導入する。 |
+
+### 結論に至った経緯
+
+Web UI や LINE からの回答入力後、HITL Run が `ready_to_resume` に遷移してから実行開始されるまでの最大遅延を5秒以内にするため、定期起動スケジューラ（毎分 dispatch）から常駐 worker への運用に移行した。外部キュー（Redis等）や新規スキーマは導入せず、既存の `hitl_runs.status = 'ready_to_resume'` と `lease_owner` / `lease_expires_at` を耐久キューとしてそのまま再利用する。
+
+### 仕組みの概要
+
+1. **常駐ワーカー・ループ (`HitlWorker`):**
+   - `python -m obsidian_ai_hub --hitl-worker` で起動。起動直後および5秒ごとに `process_expired_questions` と `get_eligible_runs` を実行し、Run を直列に処理する。
+2. **Heartbeat と所有権付き確定:**
+   - Run の claim 後、ハンドラー実行と並行してバックグラウンドスレッド (`HeartbeatRunner`) が専用の SQLite 接続を用いて 60 秒ごとに `lease_expires_at` を「現在時刻 + 5分」に延長する。
+   - 更新条件は `status = 'running'` かつ `lease_owner == worker_id` かつ `lease_expires_at >= now` である。
+   - Heartbeat が失敗（DBロック喪失や別プロセスによる上書き）した場合は worker を unhealthy とし、以後の Run は claim しない。
+   - ハンドラー終了後の結果確定 (`settle_run_outcome`) も同一の所有権・期限条件を満たし、かつ worker が healthy である場合のみコミットを許可する。満たさない場合は結果を保存せず、worker を exit code 1 で終了する。
+3. **優雅な停止 (SIGTERM / SIGINT Drain):**
+   - シグナル受信時は draining モードへ移行し、新規 Run の claim を停止する。
+   - 実行中の Run がある場合は Heartbeat を継続し、現在のハンドラーの完了と条件付き確定を待って正常終了（exit code 0）する。実行中 Run がなければ直ちに exit code 0 で終了する。
+4. **LaunchAgent 設定 (`jp.shipweb.obsidian-ai-hub.hitl-worker.plist`):**
+   - `RunAtLoad`, `KeepAlive`, `ExitTimeOut=360`, `ThrottleInterval=10`, `StandardOutPath`, `StandardErrorPath` を設定。
+   - `KeepAlive: true` のため、再配置・停止は `bootout` → `bootstrap` で行う。
+5. **手動復旧とスケジューラ:**
+   - `--hitl-dispatch` は手動復旧・障害調査用として維持する。二重実行を防ぐため `tasks/tasks.local.sample.yml` のサンプル設定では無効化（`enabled: false`）とし、注釈コメントを追加した。
