@@ -57,31 +57,53 @@ def record_webhook_event(
             }
 
         event_id = str(uuid.uuid4())
-        cur.execute(
-            """
-            INSERT INTO line_webhook_events (
-                event_id, dedup_key, webhook_event_id, event_type, status,
-                payload_json, delivery_count, received_at, last_received_at
-            ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
-            """,
-            (
-                event_id,
-                dedup_key,
-                webhook_event_id,
-                event_type,
-                status,
-                payload_json,
-                received_at,
-                received_at,
-            ),
-        )
-        conn.commit()
-        return {
-            "event_id": event_id,
-            "dedup_key": dedup_key,
-            "delivery_count": 1,
-            "duplicate": False,
-        }
+        try:
+            cur.execute(
+                """
+                INSERT INTO line_webhook_events (
+                    event_id, dedup_key, webhook_event_id, event_type, status,
+                    payload_json, delivery_count, received_at, last_received_at
+                ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
+                """,
+                (
+                    event_id,
+                    dedup_key,
+                    webhook_event_id,
+                    event_type,
+                    status,
+                    payload_json,
+                    received_at,
+                    received_at,
+                ),
+            )
+            conn.commit()
+            return {
+                "event_id": event_id,
+                "dedup_key": dedup_key,
+                "delivery_count": 1,
+                "duplicate": False,
+            }
+        except sqlite3.IntegrityError:
+            cur.execute(
+                """
+                UPDATE line_webhook_events
+                SET delivery_count = delivery_count + 1, last_received_at = ?
+                WHERE dedup_key = ?
+                """,
+                (received_at, dedup_key),
+            )
+            conn.commit()
+            cur.execute(
+                "SELECT event_id, delivery_count FROM line_webhook_events WHERE dedup_key = ?",
+                (dedup_key,),
+            )
+            existing_row = cur.fetchone()
+            return {
+                "event_id": existing_row["event_id"] if existing_row else event_id,
+                "dedup_key": dedup_key,
+                "delivery_count": existing_row["delivery_count"] if existing_row else 2,
+                "duplicate": True,
+            }
     finally:
         if close_conn:
             conn.close()

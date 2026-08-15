@@ -7,6 +7,7 @@ import os
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Request, Response, status
+from starlette.concurrency import run_in_threadpool
 
 from obsidian_ai_hub.line_webhook.store import record_webhook_event
 
@@ -33,6 +34,17 @@ async def line_webhook(request: Request) -> dict[str, str]:
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="LINE Webhook configuration is missing or incomplete",
         )
+
+    content_length = request.headers.get("content-length")
+    if content_length:
+        try:
+            if int(content_length) > 1_000_000:
+                raise HTTPException(
+                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    detail="LINE webhook payload too large",
+                )
+        except ValueError:
+            pass
 
     signature_header = request.headers.get("x-line-signature")
     if not signature_header:
@@ -65,14 +77,18 @@ async def line_webhook(request: Request) -> dict[str, str]:
     except Exception as e:
         logger.warning("Malformed LINE webhook payload received: %s", e)
         dedup_key = f"body:{body_sha256}:0"
-        record_webhook_event(
-            dedup_key=dedup_key,
-            webhook_event_id=None,
-            event_type=None,
-            status="malformed",
-            payload_json=None,
-            received_at=now_iso,
-        )
+        try:
+            await run_in_threadpool(
+                record_webhook_event,
+                dedup_key=dedup_key,
+                webhook_event_id=None,
+                event_type=None,
+                status="malformed",
+                payload_json=None,
+                received_at=now_iso,
+            )
+        except Exception as err:
+            logger.error("Failed to record malformed LINE webhook event: %s", err)
         return {"status": "ok"}
 
     events = data["events"]
@@ -113,13 +129,17 @@ async def line_webhook(request: Request) -> dict[str, str]:
 
         if is_text_message or is_postback:
             payload_json = json.dumps(event, ensure_ascii=False)
-            record_webhook_event(
-                dedup_key=dedup_key,
-                webhook_event_id=webhook_event_id,
-                event_type=event_type,
-                status="received",
-                payload_json=payload_json,
-                received_at=now_iso,
-            )
+            try:
+                await run_in_threadpool(
+                    record_webhook_event,
+                    dedup_key=dedup_key,
+                    webhook_event_id=webhook_event_id,
+                    event_type=event_type,
+                    status="received",
+                    payload_json=payload_json,
+                    received_at=now_iso,
+                )
+            except Exception as err:
+                logger.error("Failed to record LINE webhook event %s: %s", dedup_key, err)
 
     return {"status": "ok"}
