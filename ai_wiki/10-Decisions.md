@@ -995,3 +995,29 @@ HITL v1 の `notify_research_suggestion` 追加後、`uv run pytest tests/`（`E
 
 - テストプロセスは `config.test.yml` を使用し、本番 `config.yml` の値を参照しない。依存するテストは各fixtureで必要な値を上書きする。
 - `ALLOW_EXTERNAL_IN_TEST` をスイート全体で有効化するため、`ensure_external_allowed` の遮断はテストプロセスでは働かないが、クレデンシャル非存在が一次防御となる。
+
+## Inbox分類にカレンダー登録カテゴリとHITL承認を追加
+
+| 項目 | 内容 |
+|------|------|
+| 決定日 | 2026-08-15 |
+| カテゴリ | Inbox・HITL・カレンダー |
+| 決定内容 | Inbox分類（`research` / `memo`）に第3カテゴリ `calendar` を追加し、カレンダー登録すべき予定を検出する。`calendar` に分類された内容は、承認/却下のHITL Run（handler `calendar.add_approved_event`）へ登録し、承認後に既存の `add_calendar_event` ツールでmacOS Calendarへ登録する。Daily Noteにはメモ欄に `[calendar]` タグで記録し、承認結果に関わらず内容を失わない。 |
+
+### 結論に至った経緯
+
+Inboxのメモ・音声転記に「明日14時から歯医者」のような予定が混ざっており、Daily Noteへの記録だけではリマインドが効かない。自動でカレンダーに書くと誤登録のリスクがあるため、既存のHITL（承認フロー + `--hitl-dispatch` + LINE通知）を流用して人確認を挟むことにした。カレンダー登録は実カレンダーへの副作用を伴うため、デフォルトでHITL経由とし、抽出詳細（タイトル・開始/終了・場所）は `context_json` の専用表示（`calendar_event` 型）としてHITL画面に提示する。承認/却下のみとし編集欄は設けない（誤りは却下＋コメントで拾う）。
+
+### 仕組みの概要
+
+1. **分類プロンプト:** `config/prompts/inbox_classification.md` に `calendar` カテゴリを追加。相対日時（「明日」「来週」）を解決できるよう `${today}` / `${created_at}` を注入し、`calendar_event`（title / start_time / end_time / location）をJSONで返させる。
+2. **分類コード:** `obsidian_inbox_merge.py` の `InboxClassification` に `calendar_event` を追加し、`classify_inbox_content` は `effective_dt`（daily_file の日付 + hour_str）を受け取る。`merge_content_into_daily_note` が `category == "calendar"` のとき `calendar/hitl.py::register_calendar_event_approval` を呼ぶ。
+3. **HITL登録:** コンテンツ＋開始時刻のSHA-1ダイジェストによる決定的 run_id（`hrun_inbox_calendar_{sha1[:12]}`）で冪等に登録。開始時刻をハッシュに含めることで、同一テキストでも抽出日時が異なる予定は別Runになり、上書き衝突を防ぐ。checkpoint に `calendar_event`・元content・phaseを持ち、commit後に既存の `notify_hitl_run` でLINE通知（ベストエフォート）。
+4. **承認ハンドラ:** `calendar/hitl.py::add_approved_calendar_event`。却下は `phase=declined` でcomplete。承認時は `add_calendar_event.invoke(...)` を呼び、成功時 `phase=added` をcheckpointに含めた `HitlResult.complete` を返す。`phase=added` は handler 内で `update_checkpoint` せず、dispatcher の最終トランザクションで Run の status と同一トランザクション内に原子的に永続化する（handler 内の別個の非原子的書き込みによる二重登録窓を排除）。`phase=added` を再実行ガードに使い、部分失敗後の再dispatchで二重登録を防ぐ。登録は `main.py::register_hitl_handlers()` のコンポジションルートで行う。
+5. **UI:** `HitlPage.tsx` に `calendar_event` 型の `context_json` 専用表示ブロックを追加（`research_suggestion` と同パターン）。編集欄は設けず既存の承認/却下選択UIを使用。
+
+### トレードオフ
+
+- カレンダー登録は `add_calendar_event` が既存イベントを毎回新規作成するため完全な冪等ではなく、イベント追加後のDB commit失敗時には重複登録の可能性が残る。`phase=added` チェックポイントで緩和するが、research のVault保存と同様の限界を持つ。
+- 抽出した日時が誤っている場合、承認者は却下＋コメントで拾う前提。編集欄は設けない（HITL画面の複雑化を避ける）。
+- 分類・抽出は同一LLM呼び出しで行うため、`calendar_event` の形式不正時は例外を握って `memo` へフォールバックする（安全性優先）。`parse_classification_response` で title/start_time の必須と、start_time/end_time がISO日時としてパース可能であることを検証し、不正な予定のHITL Run生成を防ぐ。

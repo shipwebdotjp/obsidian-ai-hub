@@ -38,9 +38,11 @@ def register_hitl_handlers():
     from obsidian_ai_hub.research.runner import run_approved_suggestion
     from obsidian_ai_hub.memory.maintenance import run_approved_maintenance
     from obsidian_ai_hub.memory.interview import apply_interview_answers
+    from obsidian_ai_hub.calendar.hitl import add_approved_calendar_event
     register_handler("research.run_approved_suggestion", run_approved_suggestion)
     register_handler("memory.apply_maintenance_proposals", run_approved_maintenance)
     register_handler("memory.apply_interview_answers", apply_interview_answers)
+    register_handler("calendar.add_approved_event", add_approved_calendar_event)
 
 
 def main():
