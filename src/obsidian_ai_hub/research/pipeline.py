@@ -30,6 +30,8 @@ def create_theme_and_research(
         conn = get_db_connection()
         close_conn = True
 
+    suggestion_run_id: Optional[str] = None
+
     try:
         with conn:
             normalized = db.normalize_theme_key(theme)
@@ -131,22 +133,42 @@ def create_theme_and_research(
                     run_id,
                     theme,
                 )
-                return {"status": "candidate", "theme_id": rec["theme_id"], "hitl_run_id": run_id}
+                suggestion_run_id = run_id
 
     finally:
         if close_conn:
             conn.close()
 
-    if not is_suggestion:
+    if suggestion_run_id is not None:
+        # The transaction above has committed. Notify via LINE as a best-effort
+        # push after commit so the suggestion and HITL Run are always saved even
+        # if configuration is missing or the Push API fails. Guard the whole call
+        # so a notification failure never propagates after the commit.
         try:
-            _run_research(rec["theme_id"])
-        except Exception as exc:
-            logger.exception(
-                "Immediate research failed for theme %s: %s", rec["theme_id"], exc
-            )
+            from obsidian_ai_hub.line_notification import notify_research_suggestion
 
-        job = db.latest_job(rec["theme_id"])
-        return {"status": "candidate", "theme_id": rec["theme_id"], "job": job}
+            notify_research_suggestion(theme=theme, run_id=suggestion_run_id)
+        except Exception as exc:
+            logger.warning(
+                "LINE suggestion notification failed after commit for run %s: %s",
+                suggestion_run_id,
+                type(exc).__name__,
+            )
+        return {
+            "status": "candidate",
+            "theme_id": rec["theme_id"],
+            "hitl_run_id": suggestion_run_id,
+        }
+
+    try:
+        _run_research(rec["theme_id"])
+    except Exception as exc:
+        logger.exception(
+            "Immediate research failed for theme %s: %s", rec["theme_id"], exc
+        )
+
+    job = db.latest_job(rec["theme_id"])
+    return {"status": "candidate", "theme_id": rec["theme_id"], "job": job}
 
 
 def _run_research(theme_id: str) -> None:

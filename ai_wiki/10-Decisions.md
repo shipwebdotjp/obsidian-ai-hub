@@ -943,3 +943,31 @@ LINE PlatformからのWebhookは外部到達可能である必要がある一方
 1. **Webhook経路:** `https://m1mbp.tail744355.ts.net/` のTailscale Funnelから、loopbackで待ち受けるNginx（`127.0.0.1:8764`）を経由してLINE Webhook APIへ渡す。Webhook APIはBearer tokenではなくLINE署名で検証する。
 2. **Web UI／業務API経路:** `https://aihub.tail744355.ts.net/` のTailscale Serveから、loopbackのFastAPI（`127.0.0.1:8765`）へ渡す。
 3. **認証を緩めない:** 2026-08-15のBearer認証一元化は維持する。Tailscale Serve経由であっても、Web UI／業務APIのBearer tokenは必須である。
+
+## LINE通知から既存Webフォームへ誘導するHITL v1
+
+| 項目 | 内容 |
+|------|------|
+| 決定日 | 2026-08-15 |
+| カテゴリ | LINE・HITL・通知 |
+| 決定内容 | LINE上で回答状態を管理せず、LINEは自動リサーチ提案の通知専用にする。通知リンクは既存の `/hitl?run_id=…` を開き、選択・自由コメント・取消は既存Web UIと同じBearer認証・HITL回答処理で完結させる。 |
+
+### 結論に至った経緯
+
+HITLの回答チャネルをLINE上で完結させるには、LINE Webhook、LIFF、postback／自由記述の状態管理、会話セッション、常設workerが必要になり複雑度が高い。一方、`research/pipeline.py` は auto_suggestion テーマの承認Runを既にWeb向けHITLとして登録しており、フロントエンド `HitlPage.tsx` は `/hitl?run_id=…` の深いリンクを既に処理できる。そこでv1ではLINEを「通知専用」に絞り、選択・コメント・取消は既存Web UIへ誘導する。スマホはtailnet参加を前提とし、初回のみ既存のToken PromptでBearerトークンを入力、以後はブラウザのlocalStorage（`obsidian-ai-hub:api-token`）を使う。
+
+### 仕組みの概要
+
+1. **設定:** `OBSIDIAN_AI_HUB_WEB_URL` を追加し、Tailscale Serveの `https://aihub.tail744355.ts.net` を通知リンクの基底URLとする。URLには `run_id` 以外の秘密情報を含めない（BearerトークンはURL・LINE本文のどちらにも載せない）。
+2. **通知文組み立て:** `line_notification` に、リサーチ提案用の短い通知文と深いリンクを組み立てる内部ヘルパー（`build_research_suggestion_text` / `build_suggestion_link`）を追加する。`run_id` はURLエンコードする。
+3. **送信タイミング:** 自動リサーチ提案のRun・テーマ登録がDBコミットした**後**に、既存の `LINE_MESSAGING_TOKEN` / `LINE_TARGET_ID` とPush APIで通知を1回送る（`notify_research_suggestion`）。
+   - 通知対象は `origin=auto_suggestion` のリサーチ承認Runだけ。手動リサーチ、長期記憶保守、週次インタビュー、次ラウンド、完了・失敗通知は対象外。
+   - 設定不足・Push失敗はRun作成を失敗させず、秘密情報や通知本文を出さない警告ログだけを残す（ベストエフォート）。
+   - outbox、再送、送信済み永続化は作らない。障害復旧時に通知が漏れる、または再実行時に重複し得ることを許容する。
+4. **変更しない範囲:** Web UI・HITLコア・回答APIは変更しない。LINE Webhook、LIFF、Funnel、会話セッション、ワーカー自動再開は実装しない。
+
+### トレードオフ
+
+- LINE上では回答を完結できない（通知を開いた先でWeb UIの認証と回答が必要）。
+- 通知はベストエフォートであり、送信失敗時の再試行・永続化がないため、通知漏れや再実行時の重複が起こり得る。
+- 回答後のdispatcher起動は既存Webと同じく後続作業とし、今回変更しない。

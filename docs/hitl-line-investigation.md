@@ -137,7 +137,7 @@ LINEを「別の回答チャネル」として扱うなら、次の既存部品�
 
 ### LINEの会話・通知
 
-- 質問登録・次ラウンド登録時に通知する仕組み。現状は`register_run_and_questions()`がDB登録だけを行い、外部通知を発火しない。
+- 質問登録・次ラウンド登録時に通知する仕組み。現状は`register_run_and_questions()`がDB登録だけを行い、外部通知を発火しない。なお2026-08-15のHITL v1では、`research/pipeline.py` がauto_suggestion登録コミット後に `line_notification.notify_research_suggestion` で通知を送るようになった（リサーチ承認のみ・ベストエフォート）。
 - 通知送信のoutbox／送信状態（宛先、質問set、作成時刻、送信試行、成功／失敗、LINE message ID等）。送信失敗時の再試行や、同じ質問の重複通知を抑える状態がない。
 - LINE用の質問renderer。現在のLINE送信はtextだけで、HITLのselect、boolean、自由記述、複数必須質問、任意質問、comment必須の表現規約が未定義。
 - 回答プロトコル。テキストの番号返信、Quick Reply、postback、Flex Messageのどれを使うか、および `run_id`・`question_key`・選択値を安全に識別する形式がない。
@@ -173,6 +173,7 @@ LINEを「別の回答チャネル」として扱うなら、次の既存部品�
 1. LINEの利用者は単一の自分だけか、複数のユーザー／グループか。前者でも、`LINE_TARGET_ID`（Push宛先）と受信`source`の一致確認をどう初回登録するかが必要になる。
 2. 対象は全HITLタイプか、まずはリサーチ承認だけか。長期記憶保守は複数提案・再提案・必須コメント、週次インタビューは自由記述のため、最初のLINE UIの複雑さが大きく異なる。
 3. LINE上で回答を完結させるか、LINEは通知だけにしてWeb UIへの深いリンクを主導線にするか。前者はpostback／自由記述の状態管理が必要で、後者は外部アクセス時のWeb UI認証を解く必要がある。
+   - **決定（2026-08-15, HITL v1）:** 後者（LINEは通知専用、深いリンクが主導線）を採用した。自動リサーチ提案の承認Run登録コミット後に `OBSIDIAN_AI_HUB_WEB_URL`（Tailscale Serve `https://aihub.tail744355.ts.net`）を基底とする `/hitl?run_id=…` の深いリンク付き通知文をLINE Push APIで送る。選択・コメント・取消は既存Web UIのBearer認証・HITL回答処理で完結させる。詳細は `ai_wiki/10-Decisions.md` の「LINE通知から既存Webフォームへ誘導するHITL v1」を参照。
 4. 1つのRunの複数質問を、まとめて表示・一括送信するか、質問ごとに順番に送るか。現行コアは質問単位の回答保存であり、どちらにも対応できるが、LINE側の状態対応が異なる。
 5. 任意質問の扱いをLINEでどうするか。現行ではdispatcherがclaim時に未回答の任意質問を`skipped`にするため、必須回答の直後に任意回答を受ける猶予はない。
 6. 回答後、いつ実行するか。常設workerが即時dispatchするか、既存の30秒ポーリングを継続するか、重い処理は別キューに渡すか。

@@ -21,6 +21,7 @@ _APP_ENV_VARS = [
     "OBSIDIAN_AI_HUB_API_TOKEN",
     "OBSIDIAN_AI_HUB_HOST",
     "OBSIDIAN_AI_HUB_PORT",
+    "OBSIDIAN_AI_HUB_WEB_URL",
     "OBSIDIAN_AI_HUB_CORS_ORIGINS",
     "OPEN_WEB_UI_API_KEY",
     "OPEN_WEB_UI_BASE_URL",
@@ -202,6 +203,11 @@ LOCAL_MODEL_DIR = _optional_path("LOCAL_MODEL_DIR")
 LINE_TARGET_ID = os.getenv("LINE_TARGET_ID", "")
 LINE_MESSAGING_TOKEN = os.getenv("LINE_MESSAGING_TOKEN", "")
 APPLE_CALENDAR_NAME = os.getenv("APPLE_CALENDAR_NAME", "")
+
+# Public base URL for the Web UI / API, used as the base for LINE notification
+# deep links (e.g. Tailscale Serve https://aihub.tail744355.ts.net). Never
+# contains secrets such as the API token.
+OBSIDIAN_AI_HUB_WEB_URL = os.getenv("OBSIDIAN_AI_HUB_WEB_URL", "").rstrip("/")
 
 # Open Web UI Knowledge Base Sync
 OPEN_WEB_UI_BASE_URL = os.getenv("OPEN_WEB_UI_BASE_URL", "http://localhost:8080")
