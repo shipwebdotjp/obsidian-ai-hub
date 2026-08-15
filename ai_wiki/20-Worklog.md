@@ -4,6 +4,23 @@
 
 ## 次のセッションへの引き継ぎ（handoff）
 
+### 2026-08-15: Bearer 認証一元化 — 検証・OCR 完了済
+
+`feature/public-api-endpoint` の Bearer 認証変更（決定は `10-Decisions.md` 参照）のフォローアップとして、
+全 OCR 指摘対応後の再検証を完了した。
+
+- 非 E2E: `526 passed`（`test_health` 追加込み）。既知の環境依存失敗
+  （`test_apple_reminders.py`, `test_llm_client_*.py`, `test_youtube_webclip.py`）は除外。
+- Frontend: `npm --prefix frontend run build` OK、vitest `102 passed`（non-401 エラー処理テスト追加込み）。
+- E2E: `ENV=test uv run pytest -m e2e tests/e2e/ -q` → `7 passed`。
+- OCR（`--audience agent`）再実行: working copy の追加変更（fail-closed テスト追加後の `tests/test_main.py`）1 file、
+  `0 comments`。前回指摘はすべて対応済み。
+- OCR pending 指摘（CLI `--serve` fail-closed テスト不足）を対応:
+  `tests/test_main.py` に `test_serve_without_token_fails_closed` を追加。`test_main.py` は `24 passed`。
+
+残作業: なし（他に保留なし）。変更は未 commit（ユーザーが commit を依頼していない）。
+未追跡ファイル: `tests/e2e/test_people_scenario.py`, `docs/hitl-line-investigation.md`。
+
 ### 2026-08-01: ocr review で検出した既存問題（今回のリファクタで対応しない）
 
 `refactor/split-web-api`（web/api.py の routes 分割）完了後、ocr review で検出した問題のうち、

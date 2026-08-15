@@ -3,6 +3,8 @@ from __future__ import annotations
 import sys
 from unittest.mock import patch
 
+import pytest
+
 from obsidian_ai_hub import main as main_module
 
 
@@ -240,6 +242,14 @@ def test_debug_alone_does_not_raise_or_start_server(monkeypatch):
         main_module.main()
 
     mock_help.assert_called_once()
+
+
+def test_serve_without_token_fails_closed(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["prog", "--serve"])
+    monkeypatch.delenv("OBSIDIAN_AI_HUB_API_TOKEN", raising=False)
+
+    with pytest.raises(RuntimeError, match="OBSIDIAN_AI_HUB_API_TOKEN is required"):
+        main_module.main()
 
 
 def test_serve_without_debug_uses_no_reload_info_log(monkeypatch):
