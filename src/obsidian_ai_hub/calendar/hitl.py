@@ -59,6 +59,20 @@ def register_calendar_event_approval(
         else event_line
     )
 
+    # A completed run must not be re-registered: re-registration would reset
+    # the checkpoint to awaiting_approval and the status to ready_to_resume
+    # while preserving the already-submitted approve answer, so the next
+    # dispatch would re-add the event without a fresh approval.
+    from obsidian_ai_hub.hitl.store import get_run
+
+    existing = get_run(run_id)
+    if existing and existing.get("status") == "completed":
+        logger.info(
+            "Calendar approval run %s already completed; skipping re-registration",
+            run_id,
+        )
+        return run_id
+
     questions_data = [
         {
             "question_key": "action",

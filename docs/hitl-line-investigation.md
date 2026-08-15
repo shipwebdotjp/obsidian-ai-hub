@@ -108,7 +108,8 @@ SQLiteの昨日の日次要約 + Daily Note の当日情報
 | `src/obsidian_ai_hub/utils/line_messaging.py` | LINE Push APIのHTTP送信。Bearer tokenと最大5件のテキストメッセージを扱う。 |
 | `src/obsidian_ai_hub/notify_today_schedule.py` / `line_notification/builder.py` | 日次・週次要約とDaily NoteをLINE通知文へ組み立てる。 |
 | `src/obsidian_ai_hub/write_today_schedule.py` | Apple Calendar、Reminders、設定済み定期予定をDaily Noteに転記する。 |
-| `src/obsidian_ai_hub/handler/apple_reminders.py` / `handler/add_calendar_event.py` | AIツールからApple Reminders／Calendarへ書き込むmacOS EventKit連携。HITLとは未接続。 |
+| `src/obsidian_ai_hub/handler/apple_reminders.py` / `handler/add_calendar_event.py` | AIツールからApple Reminders／Calendarへ書き込むmacOS EventKit連携。Inbox分類からの予定・タスク登録は `calendar/hitl.py`・`reminders/hitl.py` 経由でHITLと接続。 |
+| `src/obsidian_ai_hub/reminders/hitl.py` | Inbox分類の `reminder` カテゴリに対する承認Run登録と、承認後の `add_reminder` 実行ハンドラ。 |
 | `src/obsidian_ai_hub/web/app.py` / `web/routes/deps.py` | FastAPIアプリ、Web UI／業務APIのBearer認証、静的UI配信。`127.0.0.1:8765`はTailscale Serve経由でWeb UI／業務APIを提供する。 |
 | `src/obsidian_ai_hub/web/routes/line.py` / `line_webhook/store.py` | LINE Webhookの署名・送信者検証、受信イベントの重複排除付きSQLite記録、即時応答。HITL回答処理やReply APIは担当しない。 |
 | `src/obsidian_ai_hub/database.py` | SQLite migration v13〜v17を含む共有DB初期化。HITLは `hitl_runs` と `hitl_questions` に保存される。 |

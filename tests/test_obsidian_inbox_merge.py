@@ -119,3 +119,188 @@ def test_repeated_calendar_merge_does_not_duplicate_approval_run(
     finally:
         conn.close()
     assert len(calendar_runs) == 1
+
+
+def test_merge_content_reminder_registers_hitl_and_keeps_memo(
+    tmp_path: Path, test_memory_db_path
+):
+    daily_file = tmp_path / "2026-05-09.md"
+    daily_file.write_text("# Daily\n## 📝メモ\n", encoding="utf-8")
+
+    with (
+        patch.object(
+            obsidian_inbox_merge.llm_client,
+            "generate_llm_response",
+            return_value=(
+                '{"category":"reminder","reminder":{'
+                '"title":"本の返却","due_date":"2026-05-15T18:00:00"}}'
+            ),
+        ),
+        patch.object(obsidian_inbox_merge.add_research_theme, "append_research_theme"),
+    ):
+        result = obsidian_inbox_merge.merge_content_into_daily_note(
+            "明日までに本を返す", daily_file, "08:30"
+        )
+
+    assert result == "reminder"
+    merged = daily_file.read_text(encoding="utf-8")
+    assert "# Daily" in merged
+    assert "## 📝メモ" in merged
+    assert "- 08:30 [reminder] 明日までに本を返す" in merged
+
+    from obsidian_ai_hub.database import get_db_connection
+    from obsidian_ai_hub.hitl.store import list_runs
+
+    conn = get_db_connection()
+    try:
+        runs, _ = list_runs(conn=conn)
+        reminder_runs = [
+            r for r in runs if r["handler"] == "reminders.add_approved_reminder"
+        ]
+    finally:
+        conn.close()
+    assert len(reminder_runs) == 1
+    assert reminder_runs[0]["status"] == "pending_user"
+
+
+def test_repeated_reminder_merge_does_not_duplicate_approval_run(
+    tmp_path: Path, test_memory_db_path
+):
+    daily_file = tmp_path / "2026-05-09.md"
+    daily_file.write_text("# Daily\n## 📝メモ\n", encoding="utf-8")
+
+    with patch.object(
+        obsidian_inbox_merge.llm_client,
+        "generate_llm_response",
+        return_value=(
+            '{"category":"reminder","reminder":{'
+            '"title":"本の返却","due_date":"2026-05-15T18:00:00"}}'
+        ),
+    ):
+        obsidian_inbox_merge.merge_content_into_daily_note(
+            "明日までに本を返す", daily_file, "08:30"
+        )
+        obsidian_inbox_merge.merge_content_into_daily_note(
+            "明日までに本を返す", daily_file, "08:30"
+        )
+
+    from obsidian_ai_hub.database import get_db_connection
+    from obsidian_ai_hub.hitl.store import list_runs
+
+    conn = get_db_connection()
+    try:
+        runs, _ = list_runs(conn=conn)
+        reminder_runs = [
+            r for r in runs if r["handler"] == "reminders.add_approved_reminder"
+        ]
+    finally:
+        conn.close()
+    assert len(reminder_runs) == 1
+
+
+def _count_reminder_runs() -> int:
+    from obsidian_ai_hub.database import get_db_connection
+    from obsidian_ai_hub.hitl.store import list_runs
+
+    conn = get_db_connection()
+    try:
+        runs, _ = list_runs(conn=conn)
+        reminder_runs = [
+            r for r in runs if r["handler"] == "reminders.add_approved_reminder"
+        ]
+    finally:
+        conn.close()
+    return len(reminder_runs)
+
+
+def test_merge_content_reminder_missing_title_falls_back_to_memo(
+    tmp_path: Path, test_memory_db_path
+):
+    daily_file = tmp_path / "2026-05-09.md"
+    daily_file.write_text("# Daily\n## 📝メモ\n", encoding="utf-8")
+
+    with patch.object(
+        obsidian_inbox_merge.llm_client,
+        "generate_llm_response",
+        return_value=(
+            '{"category":"reminder","reminder":{"due_date":"2026-05-15T18:00:00"}}'
+        ),
+    ):
+        result = obsidian_inbox_merge.merge_content_into_daily_note(
+            "明日までに本を返す", daily_file, "08:30"
+        )
+
+    assert result == "memo"
+    merged = daily_file.read_text(encoding="utf-8")
+    assert "[memo]" in merged
+    assert _count_reminder_runs() == 0
+
+
+def test_merge_content_reminder_invalid_due_date_falls_back_to_memo(
+    tmp_path: Path, test_memory_db_path
+):
+    daily_file = tmp_path / "2026-05-09.md"
+    daily_file.write_text("# Daily\n## 📝メモ\n", encoding="utf-8")
+
+    with patch.object(
+        obsidian_inbox_merge.llm_client,
+        "generate_llm_response",
+        return_value=(
+            '{"category":"reminder","reminder":{'
+            '"title":"本の返却","due_date":"not-a-date"}}'
+        ),
+    ):
+        result = obsidian_inbox_merge.merge_content_into_daily_note(
+            "明日までに本を返す", daily_file, "08:30"
+        )
+
+    assert result == "memo"
+    merged = daily_file.read_text(encoding="utf-8")
+    assert "[memo]" in merged
+    assert _count_reminder_runs() == 0
+
+
+def test_merge_content_reminder_non_string_due_date_falls_back_to_memo(
+    tmp_path: Path, test_memory_db_path
+):
+    daily_file = tmp_path / "2026-05-09.md"
+    daily_file.write_text("# Daily\n## 📝メモ\n", encoding="utf-8")
+
+    with patch.object(
+        obsidian_inbox_merge.llm_client,
+        "generate_llm_response",
+        return_value=(
+            '{"category":"reminder","reminder":{"title":"本の返却","due_date":123}}'
+        ),
+    ):
+        result = obsidian_inbox_merge.merge_content_into_daily_note(
+            "明日までに本を返す", daily_file, "08:30"
+        )
+
+    assert result == "memo"
+    merged = daily_file.read_text(encoding="utf-8")
+    assert "[memo]" in merged
+    assert _count_reminder_runs() == 0
+
+
+def test_merge_content_reminder_empty_due_date_is_accepted(
+    tmp_path: Path, test_memory_db_path
+):
+    daily_file = tmp_path / "2026-05-09.md"
+    daily_file.write_text("# Daily\n## 📝メモ\n", encoding="utf-8")
+
+    with patch.object(
+        obsidian_inbox_merge.llm_client,
+        "generate_llm_response",
+        return_value=(
+            '{"category":"reminder","reminder":{"title":"本の返却","due_date":""}}'
+        ),
+    ):
+        result = obsidian_inbox_merge.merge_content_into_daily_note(
+            "明日までに本を返す", daily_file, "08:30"
+        )
+
+    assert result == "reminder"
+    merged = daily_file.read_text(encoding="utf-8")
+    assert "[reminder]" in merged
+    assert _count_reminder_runs() == 1

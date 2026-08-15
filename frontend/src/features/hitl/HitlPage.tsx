@@ -52,6 +52,15 @@ interface CalendarEventContext {
   content?: string | null;
 }
 
+interface ReminderContext {
+  type: "reminder";
+  reminder?: {
+    title?: string | null;
+    due_date?: string | null;
+  } | null;
+  content?: string | null;
+}
+
 function asMemoryMaintenanceContext(context: unknown): MemoryMaintenanceContext | null {
   if (context && typeof context === "object" && (context as any).type === "memory_maintenance") {
     return context as MemoryMaintenanceContext;
@@ -69,6 +78,13 @@ function asResearchSuggestionContext(context: unknown): ResearchSuggestionContex
 function asCalendarEventContext(context: unknown): CalendarEventContext | null {
   if (context && typeof context === "object" && (context as any).type === "calendar_event") {
     return context as CalendarEventContext;
+  }
+  return null;
+}
+
+function asReminderContext(context: unknown): ReminderContext | null {
+  if (context && typeof context === "object" && (context as any).type === "reminder") {
+    return context as ReminderContext;
   }
   return null;
 }
@@ -657,6 +673,36 @@ export default function HitlPage() {
                                     <div>
                                       <span className="font-bold text-slate-600">元の内容: </span>
                                       <p className="mt-0.5 text-slate-800 leading-relaxed font-medium whitespace-pre-wrap">{currentCalendarCtx.content}</p>
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            }
+
+                            const currentReminderCtx = asReminderContext(q.context);
+                            if (currentReminderCtx) {
+                              return (
+                                <div
+                                  data-testid="reminder-context"
+                                  className="mt-3 space-y-3 rounded-lg border border-slate-200 bg-white p-4 text-xs text-slate-700"
+                                >
+                                  <h4 className="font-bold text-slate-700">リマインダー登録内容</h4>
+                                  {currentReminderCtx.reminder?.title && (
+                                    <div>
+                                      <span className="font-bold text-slate-600">タイトル: </span>
+                                      <span className="text-slate-800">{currentReminderCtx.reminder.title}</span>
+                                    </div>
+                                  )}
+                                  {currentReminderCtx.reminder?.due_date && (
+                                    <div>
+                                      <span className="font-bold text-slate-600">期限: </span>
+                                      <span className="text-slate-800">{currentReminderCtx.reminder.due_date}</span>
+                                    </div>
+                                  )}
+                                  {currentReminderCtx.content && (
+                                    <div>
+                                      <span className="font-bold text-slate-600">元の内容: </span>
+                                      <p className="mt-0.5 text-slate-800 leading-relaxed font-medium whitespace-pre-wrap">{currentReminderCtx.content}</p>
                                     </div>
                                   )}
                                 </div>

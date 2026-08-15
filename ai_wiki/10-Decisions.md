@@ -1021,3 +1021,30 @@ Inboxのメモ・音声転記に「明日14時から歯医者」のような予�
 - カレンダー登録は `add_calendar_event` が既存イベントを毎回新規作成するため完全な冪等ではなく、イベント追加後のDB commit失敗時には重複登録の可能性が残る。`phase=added` チェックポイントで緩和するが、research のVault保存と同様の限界を持つ。
 - 抽出した日時が誤っている場合、承認者は却下＋コメントで拾う前提。編集欄は設けない（HITL画面の複雑化を避ける）。
 - 分類・抽出は同一LLM呼び出しで行うため、`calendar_event` の形式不正時は例外を握って `memo` へフォールバックする（安全性優先）。`parse_classification_response` で title/start_time の必須と、start_time/end_time がISO日時としてパース可能であることを検証し、不正な予定のHITL Run生成を防ぐ。
+
+## Inbox分類にリマインダー登録カテゴリとHITL承認を追加
+
+| 項目 | 内容 |
+|------|------|
+| 決定日 | 2026-08-15 |
+| カテゴリ | Inbox・HITL・リマインダー |
+| 決定内容 | Inbox分類（`research` / `calendar` / `memo`）に第4カテゴリ `reminder` を追加し、リマインダー登録すべきタスク・やることを検出する。`reminder` に分類された内容は、承認/却下のHITL Run（handler `reminders.add_approved_reminder`）へ登録し、承認後に既存の `add_reminder` ツール（`handler/apple_reminders.py`）でApple Remindersへ登録する。Daily Noteにはメモ欄に `[reminder]` タグで記録し、承認結果に関わらず内容を失わない。 |
+
+### 結論に至った経緯
+
+Inboxのメモ・音声転記に「明日までに本を返す」のようなTodoが混ざっており、Daily Noteへの記録だけではリマインドが効かない。カレンダー登録（`calendar` カテゴリ）と同様の流れを踏襲し、実Remindersへの副作用を伴うためデフォルトでHITL経由とする。登録対象の抽出詳細（タイトル・期限）は `context_json` の専用表示（`reminder` 型）としてHITL画面に提示する。承認/却下のみとし編集欄は設けない（誤りは却下＋コメントで拾う）。
+
+### 仕組みの概要
+
+1. **分類プロンプト:** `config/prompts/inbox_classification.md` に `reminder` カテゴリを追加。Todo系内容（「〜しておく」「〜を忘れずに」「〜する必要がある」）を判定し、`reminder`（title 必須 / due_date 任意）をJSONで返させる。相対期限は `${today}` / `${created_at}` から `YYYY-MM-DDTHH:MM:SS` へ解決。
+2. **分類コード:** `obsidian_inbox_merge.py` の `InboxClassification` に `reminder` を追加し、`parse_classification_response` で title 必須・due_date のISOパース検証（`_validate_reminder_due_date`）。`merge_content_into_daily_note` が `category == "reminder"` のとき `reminders/hitl.py::register_reminder_approval` を呼ぶ。
+3. **HITL登録:** コンテンツ＋期限のSHA-1ダイジェストによる決定的 run_id（`hrun_inbox_reminder_{sha1[:12]}`）で冪等に登録。期限をハッシュに含めることで、同一テキストでも期限が異なるタスクは別Runになる。checkpoint に `reminder`・元content・phaseを持ち、commit後に既存の `notify_hitl_run` でLINE通知（ベストエフォート）。
+4. **承認ハンドラ:** `reminders/hitl.py::add_approved_reminder`。却下は `phase=declined` でcomplete。承認時は `add_reminder.invoke({"title":..., "due_date":...})` を呼び、成功時 `phase=added` をcheckpointに含めた `HitlResult.complete` を返す。`phase=added` はhandler内で更新せず、dispatcherの最終トランザクションでRun statusと同一トランザクション内に原子的に永続化する（二重登録窓を排除）。登録は `main.py::register_hitl_handlers()` のコンポジションルートで行う。
+5. **完了済みRunの再登録ガード:** `register_reminder_approval` は決定的 run_id を持つため、同じ内容の再マージで既存の完了済みRun（`status=completed`）が `register_run_and_questions` により `checkpoint=awaiting_approval` / `status=ready_to_resume` へ巻き戻され、既存のapprove回答が保持されたまま再dispatchで二重登録される問題があった。登録前に `get_run` で完了済みか確認し、完了済みなら再登録せず `run_id` を返すガードを追加した（`calendar/hitl.py` にも同一の潜伏バグがあるため同様に適用）。
+5. **UI:** `HitlPage.tsx` に `reminder` 型の `context_json` 専用表示ブロックを追加（`calendar_event` と同パターン）。編集欄は設けず既存の承認/却下選択UIを使用。
+
+### トレードオフ
+
+- リマインダー登録は `add_reminder` が既存リマインダーを毎回新規作成するため完全な冪等ではなく、登録後のDB commit失敗時には重複登録の可能性が残る。`phase=added` チェックポイントで緩和するが、カレンダーと同様の限界を持つ。
+- 抽出した期限が誤っている場合、承認者は却下＋コメントで拾う前提。編集欄は設けない。
+- 分類・抽出は同一LLM呼び出しで行うため、`reminder` の形式不正時は例外を握って `memo` へフォールバックする（安全性優先）。`parse_classification_response` で title 必須と、due_date がISO日時としてパース可能であることを検証する。

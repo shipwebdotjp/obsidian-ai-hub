@@ -109,6 +109,40 @@ def test_dispatch_approve_adds_calendar_event(test_memory_db_path, monkeypatch):
         conn.close()
 
 
+def test_reregister_after_completion_does_not_readd_calendar_event(
+    test_memory_db_path, monkeypatch
+):
+    register_hitl_handlers()
+    monkeypatch.setattr(config, "APPLE_CALENDAR_NAME", "Work")
+    run_id = register_calendar_event_approval(CONTENT, EVENT)
+
+    conn = get_db_connection()
+    try:
+        hitl.submit_answer(run_id, "confirm_calendar", "action", "approve", conn)
+        with patch.object(
+            add_calendar_event_module, "add_calendar_event"
+        ) as mock_tool:
+            mock_tool.invoke.return_value = SUCCESS_RESULT
+            hitl.dispatch_runs(conn)
+
+        # A repeated inbox merge re-registers the same deterministic run_id.
+        re_registered = register_calendar_event_approval(CONTENT, EVENT)
+        assert re_registered == run_id
+
+        with patch.object(
+            add_calendar_event_module, "add_calendar_event"
+        ) as mock_tool:
+            processed = hitl.dispatch_runs(conn)
+        assert processed == 0
+        mock_tool.invoke.assert_not_called()
+
+        run = hitl.get_run(run_id, conn)
+        assert run["status"] == "completed"
+        assert '"phase": "added"' in run["checkpoint"]
+    finally:
+        conn.close()
+
+
 def test_dispatch_decline_skips_calendar_add(test_memory_db_path):
     register_hitl_handlers()
     run_id = register_calendar_event_approval(CONTENT, EVENT)

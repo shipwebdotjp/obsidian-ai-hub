@@ -199,6 +199,7 @@ def process_web_clips(urls: list[str], daily_file: Path, hour_str: str) -> None:
 class InboxClassification:
     category: str
     calendar_event: dict | None = None
+    reminder: dict | None = None
 
 
 def is_icloud_offloaded(file_path: Path) -> bool:
@@ -300,6 +301,15 @@ def parse_classification_response(text: str) -> InboxClassification:
         _validate_calendar_event_times(event)
         return InboxClassification(category="calendar", calendar_event=event)
 
+    if category == "reminder":
+        reminder = payload.get("reminder")
+        if not isinstance(reminder, dict) or not str(reminder.get("title") or "").strip():
+            raise ValueError(
+                "reminder category requires reminder with a non-empty title"
+            )
+        _validate_reminder_due_date(reminder)
+        return InboxClassification(category="reminder", reminder=reminder)
+
     raise ValueError(f"Unknown classification category: {category}")
 
 
@@ -321,6 +331,26 @@ def _validate_calendar_event_times(event: dict) -> None:
             raise ValueError(
                 f"calendar_event.{field} is not a valid ISO datetime: {value!r}"
             ) from exc
+
+
+def _validate_reminder_due_date(reminder: dict) -> None:
+    """
+    Validate that due_date parses as an ISO datetime so malformed LLM output
+    fails fast (falling back to memo) instead of creating an approval run
+    whose reminder cannot be added later. A blank due_date is treated the same
+    as None (no due date), matching add_reminder and the reminder HITL helpers.
+    """
+    due_date = reminder.get("due_date")
+    if not due_date:
+        return
+    if not isinstance(due_date, str):
+        raise ValueError("reminder.due_date must be a string")
+    try:
+        datetime.fromisoformat(due_date)
+    except ValueError as exc:
+        raise ValueError(
+            f"reminder.due_date is not a valid ISO datetime: {due_date!r}"
+        ) from exc
 
 
 def classify_inbox_content(
@@ -384,6 +414,20 @@ def merge_content_into_daily_note(
                 )
         except Exception:
             logger.exception("Failed to register calendar approval HITL run")
+    elif classification.category == "reminder" and classification.reminder:
+        try:
+            from obsidian_ai_hub.reminders import register_reminder_approval
+
+            run_id = register_reminder_approval(
+                content=content,
+                reminder=classification.reminder,
+            )
+            if run_id:
+                logger.info(
+                    "Registered reminder approval HITL run: %s", run_id
+                )
+        except Exception:
+            logger.exception("Failed to register reminder approval HITL run")
 
     subheader = "## 📝メモ"
     content_to_merge = f"- {hour_str} [{classification.category}] {content}"
