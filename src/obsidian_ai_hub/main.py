@@ -295,6 +295,11 @@ def main():
         action="store_true",
         help="手動で承認済み長期記憶の保守・診断メンテナンスを実行",
     )
+    parser.add_argument(
+        "--cleanup-line-webhooks",
+        action="store_true",
+        help="30日経過したLINE Webhook受信記録をクリーンアップ",
+    )
     args = parser.parse_args()
     ran = False
 
@@ -562,6 +567,11 @@ def main():
         from obsidian_ai_hub.memory.maintenance import run_maintenance_cli
 
         run_and_log(run_maintenance_cli, "memory_maintain", {})
+        ran = True
+    if getattr(args, "cleanup_line_webhooks", False):
+        from obsidian_ai_hub.line_webhook.store import cleanup_old_events
+
+        run_and_log(lambda: cleanup_old_events(days=30), "cleanup_line_webhooks", {})
         ran = True
     if not ran:
         parser.print_help()

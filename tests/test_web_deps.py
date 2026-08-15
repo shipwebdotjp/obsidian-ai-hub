@@ -59,13 +59,13 @@ def test_bad_token_rejected():
 
 
 def test_all_routes_require_auth():
-    """Every registered API route must carry the bearer-token dependency."""
+    """Every registered API route (except /api/v1/line/webhook) must carry the bearer-token dependency."""
     import obsidian_ai_hub.web.routes.deps as deps
 
     app = create_app(host="0.0.0.0", port=0, token=TEST_API_TOKEN)
     for route in app.routes:
         path = getattr(route, "path", "")
-        if not path.startswith("/api/"):
+        if not path.startswith("/api/") or path == "/api/v1/line/webhook":
             continue
         if not hasattr(route, "dependant"):
             raise AssertionError(

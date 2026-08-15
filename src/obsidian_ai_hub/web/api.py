@@ -4,6 +4,7 @@ from obsidian_ai_hub.web.routes import (
     dashboard,
     execution_logs,
     hitl,
+    line,
     memory,
     people,
     projects,
@@ -14,6 +15,7 @@ from obsidian_ai_hub.web.routes import (
 
 router = APIRouter(prefix="/api/v1")
 
+router.include_router(line.router)
 router.include_router(memory.router)
 router.include_router(research.router)
 router.include_router(vault.router)

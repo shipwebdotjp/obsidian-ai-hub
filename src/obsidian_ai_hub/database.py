@@ -465,6 +465,9 @@ def get_db_connection() -> sqlite3.Connection:
     if current_version <= 16:
         run_migration_v17(conn)
 
+    if current_version <= 17:
+        run_migration_v18(conn)
+
     return conn
 
 
@@ -558,6 +561,31 @@ def run_migration_v17(conn: sqlite3.Connection) -> None:
         "ON research_themes(feedback_decision, feedback_at);"
     )
     conn.execute("PRAGMA user_version = 17;")
+    conn.commit()
+
+
+def run_migration_v18(conn: sqlite3.Connection) -> None:
+    """Run migration for version 18 (line_webhook_events table for LINE Webhook foundation)."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS line_webhook_events (
+            event_id TEXT PRIMARY KEY,
+            dedup_key TEXT UNIQUE NOT NULL,
+            webhook_event_id TEXT,
+            event_type TEXT,
+            status TEXT NOT NULL,
+            payload_json TEXT,
+            delivery_count INTEGER NOT NULL DEFAULT 1,
+            received_at TEXT NOT NULL,
+            last_received_at TEXT NOT NULL
+        );
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_line_webhook_received_at ON line_webhook_events(received_at);"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_line_webhook_dedup_key ON line_webhook_events(dedup_key);"
+    )
+    conn.execute("PRAGMA user_version = 18;")
     conn.commit()
 
 

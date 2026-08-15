@@ -40,6 +40,7 @@ PRESET_FLAGS = {
     "--suggest-research-theme": "Research suggestion",
     "--log-activity": "Activity log",
     "--hitl-dispatch": "HITL dispatch",
+    "--cleanup-line-webhooks": "LINE Webhook cleanup",
 }
 
 

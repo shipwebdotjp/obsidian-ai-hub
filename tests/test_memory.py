@@ -113,7 +113,7 @@ def test_db_initialization_and_indexes(clean_memory_env):
     cursor = conn.cursor()
     cursor.execute("PRAGMA user_version;")
     version = cursor.fetchone()[0]
-    assert version == 17
+    assert version == 18
 
     # Verify tables exist
     cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")

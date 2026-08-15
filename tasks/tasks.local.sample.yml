@@ -93,3 +93,11 @@
     type: minutely
     second: [0, 30]
   command: 'uv --directory /path/to/obsidian-daily-merge run -m obsidian_ai_hub --hitl-dispatch'
+
+- id: cleanup_line_webhooks_daily
+  enabled: true
+  schedule:
+    type: daily
+    hour: 3
+    minute: 15
+  command: 'uv --directory /path/to/obsidian-daily-merge run -m obsidian_ai_hub --cleanup-line-webhooks'
