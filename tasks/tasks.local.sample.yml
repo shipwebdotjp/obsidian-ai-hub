@@ -87,6 +87,9 @@
     minute: 0
   command: 'cd /path/to/project && python -m your_tool --flag "value"'
 
+# Note: Hitl dispatch should be handled by the resident LaunchAgent (jp.shipweb.obsidian-ai-hub.hitl-worker).
+# Do not enable hitl_dispatch_minutely when the resident worker is running.
+# --hitl-dispatch is retained for manual recovery and troubleshooting only.
 - id: hitl_dispatch_minutely
   enabled: false
   schedule:
