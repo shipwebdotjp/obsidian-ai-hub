@@ -21,3 +21,4 @@
 - [Inbox分類にカレンダー登録カテゴリとHITL承認を追加](10-Decisions-Integrations.md#inbox分類にカレンダー登録カテゴリとhitl承認を追加)（2026-08-15）
 - [Inbox分類にリマインダー登録カテゴリとHITL承認を追加](10-Decisions-Integrations.md#inbox分類にリマインダー登録カテゴリとhitl承認を追加)（2026-08-15）
 - [pytestプロセスからの本番シークレット遮断（conftest強制ENV=test）](10-Decisions-Testing.md#pytestプロセスからの本番シークレット遮断conftest強制envtest)（2026-08-15）
+- [HITLモバイル一覧詳細のスクロール修正（列フレックス min-height 問題）](10-Decisions-Web.md#hitlモバイル一覧詳細のスクロール修正列フレックス-min-height-問題)（2026-08-16）

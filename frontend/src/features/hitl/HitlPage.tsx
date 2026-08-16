@@ -106,6 +106,7 @@ export default function HitlPage() {
   const [runs, setRuns] = useState<HitlRun[]>([]);
   const [total, setTotal] = useState(0);
   const [selectedRun, setSelectedRun] = useState<HitlRunDetail | null>(null);
+  const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string>("pending_user");
   const [loading, setLoading] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -209,6 +210,7 @@ export default function HitlPage() {
   // or selecting a row, load the detail for the flagged run.
   const loadDetailForParam = useCallback(() => {
     if (runIdParam) {
+      setMobileDetailOpen(true);
       void loadDetail(runIdParam);
     }
   }, [runIdParam, loadDetail]);
@@ -216,6 +218,16 @@ export default function HitlPage() {
   useEffect(() => {
     loadDetailForParam();
   }, [loadDetailForParam]);
+
+  const handleBackToList = () => {
+    setMobileDetailOpen(false);
+    setSelectedRun(null);
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete("run_id");
+      return next;
+    }, { replace: true });
+  };
 
   const handleSelectRun = (run: HitlRun) => {
     if (run.run_id === selectedRun?.run_id) {
@@ -339,9 +351,9 @@ export default function HitlPage() {
   };
 
   return (
-    <div className="flex h-full flex-col bg-slate-50 lg:flex-row">
+    <div className="flex h-full flex-col overflow-hidden bg-slate-50 lg:flex-row">
       {/* Runs Side Panel */}
-      <div className="flex h-full w-full flex-col border-r border-slate-200 bg-white lg:w-80 shrink-0">
+      <div className={`h-full w-full min-h-0 border-r border-slate-200 bg-white lg:w-80 shrink-0 ${mobileDetailOpen ? "hidden" : "flex flex-col"} lg:flex lg:flex-col`}>
         <div className="border-b border-slate-200 p-4">
           <div className="flex items-center justify-between">
             <h1 className="text-base font-semibold text-slate-800">確認待ちタスク</h1>
@@ -425,7 +437,21 @@ export default function HitlPage() {
       </div>
 
       {/* Run Details Panel */}
-      <div className="min-w-0 flex-1 overflow-y-auto bg-slate-50 p-6">
+      <div className={`min-w-0 min-h-0 flex-1 overflow-hidden bg-slate-50 ${mobileDetailOpen ? "flex flex-col" : "hidden"} lg:flex lg:flex-col`}>
+        <div className="flex items-center gap-2 border-b border-slate-200 bg-white p-3 lg:hidden">
+          <button
+            type="button"
+            onClick={handleBackToList}
+            aria-label="一覧に戻る"
+            className="cursor-pointer rounded px-2 py-1 text-sm text-slate-600 hover:bg-slate-100"
+          >
+            ← 一覧
+          </button>
+          <span className="truncate text-sm font-semibold text-slate-700">
+            確認待ちタスク詳細
+          </span>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto p-6">
         {detailLoading && (
           <p className="text-sm text-slate-500">詳細情報を読み込み中…</p>
         )}
@@ -887,6 +913,7 @@ export default function HitlPage() {
             </div>
           )
         )}
+        </div>
       </div>
     </div>
   );

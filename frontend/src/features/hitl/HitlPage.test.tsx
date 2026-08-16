@@ -417,6 +417,44 @@ describe("HitlPage", () => {
     expect(mockGetHitlRun).not.toHaveBeenCalled();
   });
 
+  it("returns to the list from the mobile detail view via the back button", async () => {
+    render(
+      <MemoryRouter initialEntries={["/hitl?foo=bar"]}>
+        <RouterProbe>
+          <HitlPage />
+        </RouterProbe>
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("AIエージェントの未来")).toBeInTheDocument();
+    });
+    expect(screen.getByText("一覧から確認待ちタスクを選択してください。")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("AIエージェントの未来"));
+
+    await waitFor(() => {
+      const sp = new URLSearchParams(screen.getByTestId("probe-full-search").textContent || "");
+      expect(sp.get("run_id")).toBe("hrun-1");
+      expect(sp.get("foo")).toBe("bar");
+    });
+    await waitFor(() => {
+      expect(mockGetHitlRun).toHaveBeenCalledWith("hrun-1");
+    });
+    expect(screen.queryByText("一覧から確認待ちタスクを選択してください。")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "一覧に戻る" }));
+
+    await waitFor(() => {
+      const sp = new URLSearchParams(screen.getByTestId("probe-full-search").textContent || "");
+      expect(sp.has("run_id")).toBe(false);
+      expect(sp.get("foo")).toBe("bar");
+    });
+    await waitFor(() => {
+      expect(screen.getByText("一覧から確認待ちタスクを選択してください。")).toBeInTheDocument();
+    });
+  });
+
   it("syncs the ?run_id= parameter to the URL when a row is selected", async () => {
     render(
       <MemoryRouter initialEntries={["/hitl?foo=bar"]}>
