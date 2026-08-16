@@ -8,11 +8,11 @@ Vitest を React の標準テスト層に格上げし、Playwright E2E を主要
 - [x] `frontend/package.json` の Vite / Vitest / jsdom の組合せと `package-lock.json` の
       ネスト状況を再点検し、Vite 5 系維持のまま Vitest を動かすか、Vite を 6+ に揃えて
       Vitest 4 を正式採用するかを決定する。決定は本ドキュメント冒頭にリンクする ADR
-      (`ai_wiki/10-Decisions.md` への追記) として残す。
+      (`ai_wiki/10-Decisions-Testing.md` への追記) として残す。
       → Vite 6+ 揃えを採用。`frontend/package.json` の `vite` を `^6.0.0` に更新し、
       `overrides.vite: "^6.0.0"` を追加。lockfile 上の二重 Vite 状態 (root 5.4.21 +
       `node_modules/vitest/node_modules/vite@8.1.5`) を解消。ADR:
-      [`ai_wiki/10-Decisions.md`](../../ai_wiki/10-Decisions.md#フロントエンドのツールチェーンポリシー-vite-6--vitest-4)。
+      [`ai_wiki/10-Decisions-Testing.md`](../../ai_wiki/10-Decisions-Testing.md#フロントエンドのツールチェーンポリシー-vite-6--vitest-4)。
 - [x] CI 現状 (.github/workflows/pytest.yml) で Vitest・E2E が走っていないことを再確認し、
       着手前にステークホルダへ共有する。
       → `pytest.yml` のみが登録され、Node セットアップ・`npm ci`・`npm run build` なし。
@@ -160,7 +160,7 @@ Vitest を React の標準テスト層に格上げし、Playwright E2E を主要
 
 ## Phase 9: ドキュメントと ADR — 完了 (2026-07-24)
 
-- [x] `ai_wiki/10-Decisions.md` に「フロントエンドテストの Vitest 化と E2E テストの役割縮小
+- [x] `ai_wiki/10-Decisions-Testing.md` に「フロントエンドテストの Vitest 化と E2E テストの役割縮小
       (Phase 3〜5、および 7〜9)」と「E2E を重大なユーザーフローに限定する (Phase 7〜9
       追加検証)」の 2 件を ADR として追記。日付、カテゴリ、結論に至った経緯、トレードオフ
       (CI コスト、ローカル Vitest 拡張、MSW 不採用の理由) を含む。
@@ -189,6 +189,6 @@ Vitest を React の標準テスト層に格上げし、Playwright E2E を主要
       `MemoryList.test.tsx` (4) + `MemoryDetailPanel.test.tsx` (3) = 22 件でカバー。
       HITL 側: `HitlPage.test.tsx` 9 件でカバー。`api/client.test.ts` 26 件で API 契約
       も担保。
-- [x] `ai_wiki/10-Decisions.md` に ADR が追記されている。
+- [x] `ai_wiki/10-Decisions-Testing.md` に ADR が追記されている。
       → 「フロントエンドテストの Vitest 化と E2E テストの役割縮小 (Phase 3〜5、および 7〜9)」
       と「E2E を重大なユーザーフローに限定する (Phase 7〜9 追加検証)」の 2 件。

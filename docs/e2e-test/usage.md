@@ -11,7 +11,7 @@ We adhere to the strict philosophy of **limiting browser E2E tests only to criti
 - **E2E Tests (`make test-e2e`)**: Cover the major, critical user journeys—such as ensuring standard Memory approval cascades and that Human-in-the-Loop (HITL) answers/cancellations successfully persist. They serve to prevent critical, high-impact regression failures (e.g. data loss, unauthorized access, broken main navigation loops).
 - **Vitest Unit/Integration Tests**: Cover specific UI states, filter operations, dynamic form errors, debounce interactions, accessibility labels, and style details.
 
-For details on the split and post-reduction state, please read the decision log: [フロントエンドテストの Vitest 化と E2E テストの役割縮小 (Phase 3〜5、および 7〜9)](../../ai_wiki/10-Decisions.md).
+For details on the split and post-reduction state, please read the decision log: [フロントエンドテストの Vitest 化と E2E テストの役割縮小 (Phase 3〜5、および 7〜9)](../../ai_wiki/10-Decisions-Testing.md#フロントエンドテストの-vitest-化と-e2e-テストの役割縮小-phase-3〜5および-7〜9).
 
 ---
 

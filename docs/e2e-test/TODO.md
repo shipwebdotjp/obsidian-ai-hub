@@ -63,7 +63,7 @@
       `make test-e2e`.
 - [x] Document how agents inspect trace, screenshot, console, and server-log
       artifacts after a failure.
-- [x] Record this E2E architecture decision in `ai_wiki/10-Decisions.md` once
+- [x] Record this E2E architecture decision in `ai_wiki/10-Decisions-Testing.md` once
       the implementation is accepted.
 
 ## Later Domain Coverage

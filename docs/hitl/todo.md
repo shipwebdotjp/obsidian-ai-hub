@@ -60,7 +60,7 @@
   - `tests/test_hitl_composition.py::test_register_hitl_handlers_registers_research_handler`: handler registered at composition root
   - `tests/e2e/test_hitl_flow.py` (6 tests): sidebar nav, list/details, answer submit, cancel, status filter, optional autoskip in UI
 - [x] `uv run pytest tests/` と `make test-e2e` を実行する。
-- [x] durableな設計判断を `ai_wiki/10-Decisions.md` に記録する。
+- [x] durableな設計判断を `ai_wiki/00-Index.md` から適切な決定記録に記録する。
 
 ## MVP外
 

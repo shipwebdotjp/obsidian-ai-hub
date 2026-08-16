@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime
 from typing import Optional
 
@@ -21,6 +22,7 @@ try:
     from Foundation import (
         NSRunLoop,
         NSDate,
+        NSDateComponents,
         NSCalendar,
         NSCalendarUnitYear,
         NSCalendarUnitMonth,
@@ -103,17 +105,23 @@ def add_reminder(title: str, due_date: Optional[str] = None) -> str:
                 dt = datetime.fromisoformat(due_date)
 
                 calendar = NSCalendar.currentCalendar()
-                unit_flags = (
-                    NSCalendarUnitYear
-                    | NSCalendarUnitMonth
-                    | NSCalendarUnitDay
-                    | NSCalendarUnitHour
-                    | NSCalendarUnitMinute
-                    | NSCalendarUnitSecond
-                )
-                components = calendar.components_fromDate_(
-                    unit_flags, NSDate.dateWithTimeIntervalSince1970_(dt.timestamp())
-                )
+                if re.fullmatch(r"\d{4}-\d{2}-\d{2}", due_date):
+                    components = NSDateComponents.new()
+                    components.setYear_(dt.year)
+                    components.setMonth_(dt.month)
+                    components.setDay_(dt.day)
+                else:
+                    unit_flags = (
+                        NSCalendarUnitYear
+                        | NSCalendarUnitMonth
+                        | NSCalendarUnitDay
+                        | NSCalendarUnitHour
+                        | NSCalendarUnitMinute
+                        | NSCalendarUnitSecond
+                    )
+                    components = calendar.components_fromDate_(
+                        unit_flags, NSDate.dateWithTimeIntervalSince1970_(dt.timestamp())
+                    )
                 reminder.setDueDateComponents_(components)
             except ValueError:
                 return f"Error: Invalid due_date format: {due_date}. Use ISO format."

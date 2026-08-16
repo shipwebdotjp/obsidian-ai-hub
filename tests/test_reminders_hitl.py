@@ -101,6 +101,31 @@ def test_dispatch_approve_adds_reminder(test_memory_db_path):
         conn.close()
 
 
+def test_dispatch_approve_passes_through_date_only_due_date(test_memory_db_path):
+    register_hitl_handlers()
+    date_only_reminder = {**REMINDER, "due_date": "2026-05-15"}
+    run_id = register_reminder_approval(CONTENT, date_only_reminder)
+
+    conn = get_db_connection()
+    try:
+        hitl.submit_answer(run_id, "confirm_reminder", "action", "approve", conn)
+        with patch.object(apple_reminders_module, "add_reminder") as mock_tool:
+            mock_tool.invoke.return_value = SUCCESS_RESULT
+            processed = hitl.dispatch_runs(conn)
+        assert processed == 1
+        mock_tool.invoke.assert_called_once_with(
+            {
+                "title": "本の返却",
+                "due_date": "2026-05-15",
+            }
+        )
+        run = hitl.get_run(run_id, conn)
+        assert run["status"] == "completed"
+        assert '"phase": "added"' in run["checkpoint"]
+    finally:
+        conn.close()
+
+
 def test_reregister_after_completion_does_not_readd_reminder(test_memory_db_path):
     register_hitl_handlers()
     run_id = register_reminder_approval(CONTENT, REMINDER)

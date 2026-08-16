@@ -1,1080 +1,185 @@
 # アーキテクチャ決定記録
 
+決定記録は領域別に管理する。新しい決定は、[AI Wiki Index](00-Index.md) を参照して最も関係の深い記録へ追加する。
+
+このページは旧リンクの互換案内である。以下の見出しは移転前と同じアンカーを維持し、各決定の本文はリンク先にある。
+
 ## バックアップ失敗の実行ログ記録
 
-| 項目 | 内容 |
-|------|------|
-| 決定日 | 2026-08-02 |
-| カテゴリ | バックアップ・実行ログ |
-| 決定内容 | backup は rsync の失敗を `sys.exit()` で終了せず、同期元・同期先・終了コード・標準エラーを含む `BackupError` を送出し、CLI 実行ログを `failed` として完了させる |
-
-### 結論に至った経緯
-
-`SystemExit` は通常の `Exception` 捕捉を通らないため、CLI ラッパーの `finally` による `[END]` 出力だけが残り、`command_runs` が `running` のままになる。rsync の標準エラーも破棄されていたため、Web UI の実行ログだけでは失敗理由を確認できなかった。失敗した同期をすべて実行後に詳細を集約した例外として送出し、既存の例外ログ記録経路で保存する。
+[移転先: 10-Decisions-Architecture.md](10-Decisions-Architecture.md)
 
 ## OpenCode Go の GPT モデルは Responses API を使う
 
-| 項目 | 内容 |
-|------|------|
-| 決定日 | 2026-08-01 |
-| カテゴリ | LLM連携 |
-| 決定内容 | `provider: opencode_go` のうちモデルIDが `gpt-` で始まるものは OpenAI互換クライアントで処理し、`use_responses_api=True` を指定する |
-
-### 結論に至った経緯
-
-OpenCode Go 経由の GPT モデルも Responses API を必要とするため、同じ OpenAI互換ルーティングに含めたうえで GPT モデルに限って有効化する。他の OpenAI互換モデルと Anthropic互換モデルの既存API選択は変更しない。
+[移転先: 10-Decisions-Integrations.md](10-Decisions-Integrations.md)
 
 ## Web リサーチの OpenAI ツール呼び出しは Responses API を使う
 
-| 項目 | 内容 |
-|------|------|
-| 決定日 | 2026-07-19 |
-| カテゴリ | リサーチ・LLM連携 |
-| 決定内容 | `provider: openai` によるツール付き Web リサーチだけ、`ChatOpenAI` の `use_responses_api=True` を指定し、`store=False` とする |
-
-### 結論に至った経緯
-
-`gpt-5.6-terra` は Chat Completions API で reasoning を伴う function tools を受け付けず、
-`/v1/responses` を使うか `reasoning_effort='none'` を指定するよう 400 エラーで要求された。
-推論を無効化すると Web リサーチの品質を落とすため、Responses API を使用する。通常の LLM 呼び出し、
-deep リサーチ、OpenAI 互換の OpenCode Go 呼び出しには適用しないため、Responses API 非対応の
-プロバイダーやモデルへの影響を避ける。API 側にリサーチ内容を保持しないよう `store=False` を明示する。
+[移転先: 10-Decisions-Integrations.md](10-Decisions-Integrations.md)
 
 ## テスト環境隔離 (ENV=test)
 
-| 項目 | 内容 |
-|------|------|
-| 決定日 | 2026-07-18 |
-| カテゴリ | テスト環境隔離 |
-| 決定内容 | `ENV=test` 環境変数による完全隔離テストモードを導入する |
-
-### 結論に至った経緯
-
-既存の pytest によるテストは conftest.py の機構でデータベースアクセスを隔離しているが、CLI
-コマンドを直接 `uv run python -m ...` で実行するアドホックテストが本番データや外部サービスに
-アクセスするリスクがあった。本番環境変数や API キーを継承したままテスト実行されるのを防ぐ
-仕組みが必要。
-
-### 仕組みの概要
-
-1. `ENV=test` が設定されている場合、config.py のモジュール読込時に全アプリ固有の環境変数を
-   `os.environ` から削除する。
-2. `.env`（本番）は読まず、`.env.test` が存在すればそれを読む（pytest 実行時は
-   `OAIHUB_SKIP_DOTENV=1` によりスキップ）。
-3. 全書き込み先（VAULT_PATH, MEMORY_SQLITE_PATH, AI_LOG_PATH, その他）を
-   `tempfile.TemporaryDirectory` が作成する一時ワークスペース配下に設定する。
-4. `ensure_external_allowed()` 関数で外部アクセス（LLM API, LINE, YouTube, Calendar,
-   Reminders, Web 検索, Open Web UI）をブロック。`ALLOW_EXTERNAL_IN_TEST=1` でのみ許可。
-5. `config/config.test.yml` を設定ファイルとして使用。
-6. `tasks/tasks.test.yml`（空リスト）をタスク定義として使用。
+[移転先: 10-Decisions-Testing.md](10-Decisions-Testing.md)
 
 ## サマリ編集の上書きポリシー
 
-| 項目 | 内容 |
-|------|------|
-| 決定日 | 2026-07-18 |
-| カテゴリ | サマリーダッシュボード |
-| 決定内容 | ダッシュボード UI からの手動編集・削除は一時的なものであり、次回の自動再生成で上書きされる |
-
-### 結論に至った経緯
-
-サマリー生成パイプラインがソースオブトゥルースである。手動編集は再生成サイクルの間の
-quick correction を意図している。編集の発生源を追跡する仕組みは、パーソナルツールとして
-複雑性が高く、価値が薄い。
-
-### トレードオフ
-
-ユーザーは再生成後に編集を再適用する必要がある。再生成の頻度は予測可能で、編集は通常
-minor であるため、これは許容可能である。
+[移転先: 10-Decisions-Web.md](10-Decisions-Web.md)
 
 ## SQLite を LINE 日次通知時のサマリー正本とする
 
-| 項目 | 内容 |
-|------|------|
-| 決定日 | 2026-07-19 |
-| カテゴリ | 通知・サマリー参照 |
-| 決定内容 | LINE 通知における「昨日の要約」は Markdown ノートの `## AIによる要約` セクションを読まず、SQLite の summaries / summary_items を正本として取得する |
-
-### 結論に至った経緯
-
-日次サマリーは LLM 生成後、SQLite に保存される。従来はこれとは別に Markdown ノートにも同一内容を追記していたが、人間の記述と AI の記述を混在させないためにノートへの追記は 2026-07-19 に停止した。ノートへの追記停止後も通知処理 (`notify_today_schedule.py`) は依然としてノート上の `## AIによる要約` を読み取るコードが残っており、古いノートに残る stale な要約を参照し続けるリスクがあった。これを解消するため、通知時のサマリー取得元を SQLite に統一する。
-
-### トレードオフ
-
-SQLite がサマリーの唯一の正本となり、Markdown ファイルとの二重管理が解消される。Notification 送信前にサマリーが SQLite に存在しない場合は、今日のスケジュール情報のみが通知され、昨日の要約は省略される。古いノート上の `## AIによる要約` は参照されず放置されるが、人間の記述を汚染しないという方針と一貫する。
+[移転先: 10-Decisions-Integrations.md](10-Decisions-Integrations.md)
 
 ## 未連携人物の編集・人物削除とサマリ数順表示
 
-| 項目 | 内容 |
-|------|------|
-| 決定日 | 2026-07-18 |
-| カテゴリ | 人物管理 |
-| 決定内容 | 未連携人物のみを編集可能とし、削除はDBのみの完全削除（Vaultノートは削除しない）とする。また、旧主名変更時は別名として残さない。 |
-
-### 結論に至った経緯
-
-1. **Vault連携人物は編集不可とする方針:**
-   - Vault連携人物の表示名や確定別名をUIで直接編集できるようにすると、Vault側のMarkdownフロントマターとの間で不一致（ドリフト）が発生し、次回同期時に情報が上書きされて戻るなどの混乱を招く。そのため、編集操作は未連携人物（`vault_id` なし）にのみ制限する。
-2. **削除はDBのみでVaultノートを残す方針:**
-   - すべての人物（未連携・連携済み）に対して「DBからの完全削除」を提供する。
-   - Vault連携人物の場合、Vaultノート（Markdownファイル）自体は人が管理するソースオブトゥルースであるため、システムが勝手にファイルを削除することは避ける。
-   - 削除確認時に、Vaultノートが残るため、次回同期で再作成され得ることをUIで明確に明示することで、誤操作や期待値のズレを防ぐ。
-3. **未連携人物の主名変更時に旧主名を自動別名化しない方針:**
-   - 表示名の変更（タイポの修正など）を行った際、古い名前を自動で確定別名として残してしまうと、意図しない同定衝突（409）を誘発する。古い主名は自動別名化せず、完全に置換するシンプルな挙動を採用する。
+[移転先: 10-Decisions-People.md](10-Decisions-People.md)
 
 ## 人物編集競合時の統合自動提案
 
-| 項目 | 内容 |
-|------|------|
-| 決定日 | 2026-07-19 |
-| カテゴリ | 人物管理・UI |
-| 決定内容 | 未連携人物の編集で主名または別名の競合 (409) が発生した場合、エラー表示に統合案内を追加し、統合先セレクトに競合人物を自動選択する。統合は自動実行せず、利用者の明示操作（プレビュー→実行）に委ねる。 |
-
-### 結論に至った経緯
-
-編集中に主名重複 (main_name_conflict) または別名重複 (alias_conflict) で保存が409拒否された場合、競合相手は同一人物である可能性が高い。従来はエラーメッセージを表示するのみだったが、統合への導線がないため利用者が気付かず放置されるリスクがあった。競合人物を統合先セレクトに自動設定し、エラー内に案内を表示することで、統合プレビュー確認という安全なフローに誘導する。
-
-### トレードオフ
-
-自動設定はあくまで提案であり、利用者が別の統合先を選択したり、統合を全く行わないことも可能。保存に失敗した編集内容はフォームに残るため、主名を調整して再送信する選択肢も維持される。競合人物が人物一覧に存在しない場合は自動設定をスキップする。
+[移転先: 10-Decisions-People.md](10-Decisions-People.md)
 
 ## LINE 通知での複数テキストメッセージ送信
 
-| 項目 | 内容 |
-|------|------|
-| 決定日 | 2026-07-19 |
-| カテゴリ | 通知・LINE連携 |
-| 決定内容 | 月曜日の日次通知時に前週の週次要約を2件目のテキストメッセージとして同時送信する。Flex Message は使わず、LINE Push API の `messages` 配列に複数の `text` メッセージを入れて1回のAPI呼び出しで送信する。上限5メッセージを超えない入力だけを受け付ける。 |
-
-### 結論に至った経緯
-
-従来は `send_line_push()` が1テキストのみ対応していた。月曜日に週次要約も通知する要件を実現するため、複数テキストに対応した `send_line_push_messages()` を新設する。Flex Message の導入はオーバースペックであり、テキスト複数送信で十分に目的を達成できる。
-
-### 実装方針
-
-- `send_line_push_messages(token, to, message_texts)` は1〜5件の文字列リストを受け取り、各文字列を `{"type": "text", "text": ...}` に変換して1回のPush API呼び出しで送る。
-- 既存の `send_line_push()` は `send_line_push_messages()` への薄いラッパーとして維持する。
-- HTTP送信・認証ヘッダ・成功判定の共通処理は `_post_line_push()` に集約する。
-- 月曜判定と前週ISO週キー算出は日時指定可能な内部ヘルパー (`is_monday`, `prev_iso_week_key`) に分離する。
-
-### トレードオフ
-
-Flex Message を使わないため、リッチなレイアウトは不可能だが、テキストのみで十分な情報を伝えられる。週次未作成時は日次だけ、日次が空でも週次があれば週次だけ送ることで、欠損時も柔軟に対応する。
-
-### 補足: 要約ヘッダの文言変更
-
-`format_summary_for_line` を日次・週次で共有するため、要約ヘッダを「💡昨日の要約」から「💡要約」に変更した。ユーザ視点では日次通知のヘッダが「昨日の」修飾を失うが、関数共通化による見返りが大きく、月曜は日次と週次の2テキストが並ぶため文脈からどちらの要約か判別可能。
+[移転先: 10-Decisions-Integrations.md](10-Decisions-Integrations.md)
 
 ## 共有SQLiteの所有者はdatabase.py、長期記憶はmemoryパッケージ
 
-| 項目 | 内容 |
-|------|------|
-| 決定日 | 2026-07-20 |
-| カテゴリ | アーキテクチャ・分割 |
-| 決定内容 | 共有SQLiteの接続・マイグレーションは `obsidian_ai_hub.database` に集約し、長期記憶は `obsidian_ai_hub.memory` パッケージに分割する。`obsidian_ai_hub.memory` は公開APIのファサードとして維持する |
-
-### 結論に至った経緯
-
-旧 `memory.py`（約2,600行）は、長期記憶のライフサイクルに加えて、memories / research_themes / activity_logs / summaries / people など全ドメインが共有するSQLiteの初期化と v1–v8 マイグレーションを抱えていた。これにより、
-
-- summary / activity / research / people_sync が `from obsidian_ai_hub.memory import get_db_connection` に依存し、メモリ機能に間接的に引きずられる
-- LLMクライアントなどの重い依存が、SQLiteだけを利用するドメインにも伝播する
-- ファイルが肥大化し、見通しと保守性が悪化している
-
-という問題があった。LLM呼び出しを含むメモリ機能と、純粋なDB基盤を分離する必要がある。
-
-### 構造
-
-- `obsidian_ai_hub.database` — SQLite接続、テスト環境の本番DBガード、v1–v8 マイグレーション、スキーマ所有者。
-- `obsidian_ai_hub.utils.embeddings` — 遅延初期化されるSBERT埋め込みと `cosine_similarity`。研究ドメインからも直接利用される。
-- `obsidian_ai_hub.memory` パッケージ:
-  - `models` — カラム定数、ID/時刻生成、安定性検証、シリアライザ、マージヘルパ、EDITABLE_FIELDS。
-  - `store` — memories / events のCRUD、`log_memory_event`、`_prune_dedup_suggestions`。
-  - `dedup` — 完全一致 / ベクトル類似 / LLM による重複候補評価。
-  - `extraction` — 週範囲算出、ソース抽出、LLM抽出、保存。
-  - `review` — 承認 / 却下 / 編集 / 一括 / resolve / 削除のライフサイクル。
-  - `context` — 有効期限判定、expired 遷移、`compile_context`。
-  - `projection` — `approved.md` と copilot profile Markdown の生成。
-  - `__init__.py` — 公開APIのファサード。再エクスポートのみで、テストやCLI、Webからの `from obsidian_ai_hub import memory` を維持する。
-
-### 互換性
-
-- 既存の import パス `from obsidian_ai_hub import memory` および `from obsidian_ai_hub.memory import symbol` は維持される。
-- テストの monkeypatch 対象 (`obsidian_ai_hub.memory.llm_client`、`obsidian_ai_hub.memory.generate_memory_id` 等) は、ファサード経由の解決に変更することで互換性を保つ。
-- DBスキーマ・マイグレーション内容はバイト等価で、既存の本番DBはそのまま v8 までマイグレーションされる。
-- テストでは `test_memory_db_path` フィクスチャと `OBSIDIAN_AI_HUB_TESTING=1` による本番DB保護を引き続き利用する。
-
-### トレードオフ
-
-- ファサードを維持するため、 `obsidian_ai_hub.memory` の責務が依然として広範に見える。実装はサブパッケージに閉じているため、コードの見た目は改善している。
-- 依存方向は `models → stdlib`、`store → database + models`、`dedup / extraction / review / context / projection → 上位層` となり、循環importは存在しない。
-- `projection` だけは `approved.md` の書き出しをトリガするため `review` と `context` から逆参照される。import-time の循環を避けるため、`projection.project_approved_memories` の呼び出しはローカル import で行う。
+[移転先: 10-Decisions-Architecture.md](10-Decisions-Architecture.md)
 
 ## プロジェクト追跡機能の導入と設計
 
-| 項目 | 内容 |
-|------|------|
-| 決定日 | 2026-07-20 |
-| カテゴリ | プロジェクト管理 |
-| 決定内容 | ゴール・終了状態を持つ「プロジェクト」の1マスタ一元管理、数値ID化、日次でのLLMによる候補抽出・自動照合、週次・月次でのリンクの和集合による継承を導入する |
-
-### 結論に至った経緯
-
-1. **プロジェクト概念の定義と境界:**
-   - 「プロジェクト」は仕事・個人の境界を超え、同一マスタで一元管理される。inquiry (検討中・未着手)・active (進行中)・paused (保留中)・completed (完了)・cancelled (中止) の状態遷移を持ち、タグは持たない。
-   - LLMがプロジェクト候補を自動抽出する際、単発の雑務や継続習慣、一般的な関心領域と明確に区別し、「ゴールまたは終了状態を持つ取り組み」に限定する。
-
-2. **数値自動採番IDと既存リンク移行:**
-   - `projects.project_id` および `project_candidates.candidate_id` は SQLite の `INTEGER PRIMARY KEY` による自動採番を採用（AUTOINCREMENT は付与しない）。
-   - マイグレーション（スキーマバージョン 9）で、以前の未使用な文字列IDベース of `projects` / `summary_projects` は DROP & RE-CREATE して再構築した。
-   - 候補（candidate）を「新規正式プロジェクトとして承認」または「既存プロジェクトへ紐付け」する際は、過去に紐付いていた全要約リンク（`summary_project_candidates`）を正式プロジェクト（`summary_projects`）へ自動移管し、元の候補リンクは削除し、候補は `resolved`（解決済みアーカイブ）状態へと更新する。
-
-3. **却下済み候補の重複抑止:**
-   - 候補を却下（`rejected`）すると、対象候補に紐付いていた `summary_project_candidates` のリンクはすべて削除される（過去のサマリーにも表示しない）。
-   - 却下された候補レコードはDB内に `status = 'rejected'` として保持され、日次のLLM要約抽出で同じ正規化名を持つ候補が検出されても、サーバー側で保存せず無視（スキップ）する。
-   - 「却下候補の再開」を行うと、ステータスは `unresolved` に戻りインボックスに復帰する。
-
-4. **週次・月次での Union 継承（LLM非介在）:**
-   - 週次サマリーはLLMによる再判定を行わず、該当週に属する日次サマリが持つ `summary_projects`（正式プロジェクト）および `summary_project_candidates`（未解決候補）を収集し、和集合（Union）をとって継承保存する。
-   - 月次サマリーも同様に、該当月を覆う週次サマリのプロジェクト・候補リンクを和集合で継承する。
-   - すでに解決・却下された候補リンクは、自動的に除外または正式プロジェクトのリンクへと変換される。
+[移転先: 10-Decisions-Architecture.md](10-Decisions-Architecture.md)
 
 ## タスク管理 Web UI (localhost 専用)
 
-| 項目 | 内容 |
-|------|------|
-| 決定日 | 2026-07-21 |
-| カテゴリ | タスク管理・セキュリティ |
-| 決定内容 | タスク YAML の Web UI 編集機能は、セキュリティ上の理由から localhost 専用 (ループバック限定) の高権限機能とし、LAN経由のアクセスは無条件で 403 Forbidden とする。 |
-
-### 結論に至った経緯
-
-タスク configuration の Web UI 編集は、実質的にローカル実行権限を委譲する高権限の操作である。もし Web サーバー全体を LAN や外部に公開して他のデバイスから長期記憶レビューなどを行う場合でも、タスク管理機能だけは同一マシン（localhost）からのみ操作される必要がある。
-
-### 仕組みの概要
-
-1. **アクセス制限:** FastAPI エンドポイント `GET`/`PUT` `/api/v1/task-config` および `/task-config/preview` は、接続元の IP がループバックアドレス（127.0.0.1, ::1）または testclient でない場合、トークンの有無にかかわらず無条件で `403 Forbidden` を返却する。
-2. **プロセス間ロック:** `tasks/.task-config.lock` を共有の排他ファイルロック (`fcntl.flock`) として用い、YAML や `last_run.json` の読込・検証・書込操作を短時間のみ排他する。長時間にわたるタスクコマンドの実行中はロックを保持しないため、UI の描画や編集がブロックされない。
-3. **安全な保存とアーム（Arm）:**
-   - YAML の書き換えは一時ファイルへの書き出しと `os.replace` によるアトミック置換とする。
-   - 新規タスクの追加、無効から有効への変更、スケジュール定義の変更、コマンドの変更があった場合は、保存時刻を `last_run.json` の `last_run` に設定（アーム）し、次回以降の未来の予定枠から実行されるようにする（過去枠の遡及実行を抑止）。
+[移転先: 10-Decisions-Web.md](10-Decisions-Web.md)
 
 ## タスク管理 Web UI (loopback または tailnet + トークン)
 
-| 項目 | 内容 |
-|------|------|
-| 決定日 | 2026-08-12 |
-| カテゴリ | タスク管理・セキュリティ |
-| 決定内容 | 「タスク管理 Web UI (localhost 専用)」を部分緩和し、Tailscale tailnet 内からのアクセスに限り、`OBSIDIAN_AI_HUB_API_TOKEN` の Bearer 認証と組み合わせてタスク管理 API の閲覧・編集を許可する。Funnel（インターネット公開）利用時の許可は明示的に禁止する。 |
-
-### 結論に至った経緯
-
-2026-07-21 の決定（本ファイル上の「タスク管理 Web UI (localhost 専用)」）は、タスク YAML 編集がローカルコマンド実行権限の委譲にあたるため、トークンを持っていても非ループバックからのアクセスを無条件 403 としていた。これは Web サーバーを LAN や外部に公開した場合の保険だった。
-
-実運用では Web サーバーは Tailscale Serve（`tcp:443 -> http://127.0.0.1:8765`）経由で tailnet 内にのみ公開されており、FastAPI には tailnet クライアントの IP（100.64.0.0/10 帯）がそのまま到達する。tailnet は Tailscale 認証済みデバイスのみが入れるゼロトラスト境界であり、さらに既存の `OBSIDIAN_AI_HUB_API_TOKEN` による Bearer 認証を併用すれば、ローカル実行権限の委譲リスクは受容可能な水準と判断した。
-
-### 仕組みの概要
-
-1. **許可条件:** `GET`/`PUT` `/api/v1/task-config` および `/task-config/preview` は、以下のいずれかを満たす場合のみ許可する。
-   - 接続元 IP がループバックアドレス（127.0.0.1, ::1, IPv4-mapped loopback）または testclient
-   - 接続元 IP が tailnet 帯（IPv4 `100.64.0.0/10` / IPv6 `fd7a:115c:a1e0::/48`）**かつ** `OBSIDIAN_AI_HUB_ALLOW_TAILNET_TASKS` が有効 **かつ** `OBSIDIAN_AI_HUB_API_TOKEN` の Bearer 検証が成功
-2. **明示有効化（fail-closed）:** `OBSIDIAN_AI_HUB_ALLOW_TAILNET_TASKS` 未設定（既定 0）では tailnet 経由の許可は発動しない。有効化時は `OBSIDIAN_AI_HUB_API_TOKEN` が必須で、未設定なら起動時に RuntimeError。
-3. **Funnel 禁止:** Tailscale Funnel（インターネット全体公開）はタスク管理 API の許可対象外。Funnel でアクセスした場合も外部 IP として 403 が返る（tailnet 帯の判定で除外されるため）。
-4. ループバック・テスト・YAML 保存の仕組み（プロセス間ロック・アトミック保存・アーム）は既存決定のまま変更しない。
+[移転先: 10-Decisions-Web.md](10-Decisions-Web.md)
 
 ## Web サーバー環境変数の OBSIDIAN_AI_HUB_ プレフィックス統一
 
-| 項目 | 内容 |
-|------|------|
-| 決定日 | 2026-08-12 |
-| カテゴリ | 環境変数・命名 |
-| 決定内容 | Web サーバー関連の環境変数は「メモリレビュー専用」ではなくアプリ全体に影響するため、`MEMORY_REVIEW_*` を `OBSIDIAN_AI_HUB_*` に改名する。 |
-
-### 結論に至った経緯
-
-`MEMORY_REVIEW_API_TOKEN` は Web API 全体の認証、`MEMORY_REVIEW_HOST` / `PORT` / `CORS_ORIGINS` は Web サーバー全体のバインド・CORS 設定であり、メモリレビュー機能に限定されない。実態に合わせたプレフィックスへ統一した。
-
-### 変更対象（env var → 新名称）
-
-- `MEMORY_REVIEW_API_TOKEN` → `OBSIDIAN_AI_HUB_API_TOKEN`
-- `MEMORY_REVIEW_ALLOW_TAILNET_TASKS` → `OBSIDIAN_AI_HUB_ALLOW_TAILNET_TASKS`
-- `MEMORY_REVIEW_HOST` → `OBSIDIAN_AI_HUB_HOST`
-- `MEMORY_REVIEW_PORT` → `OBSIDIAN_AI_HUB_PORT`
-- `MEMORY_REVIEW_CORS_ORIGINS` → `OBSIDIAN_AI_HUB_CORS_ORIGINS`
-- `MEMORY_REVIEW_FRONTEND_DIST` → `OBSIDIAN_AI_HUB_FRONTEND_DIST`
-
-既存のテスト隔離変数（`OBSIDIAN_AI_HUB_TESTING` 等）と命名が揃い、`.env` および launchd plist は旧名に依存していないため設定変更は不要。
+[移転先: 10-Decisions-Architecture.md](10-Decisions-Architecture.md)
 
 ## 実行・LLMログ基盤と30日保持期限の導入
 
-| 項目 | 内容 |
-|------|------|
-| 決定日 | 2026-07-21 |
-| カテゴリ | 実行ログ・LLMログ |
-| 決定内容 | CLIの全アクションとLLMコールの履歴を共有SQLiteのスキーマバージョン10（`command_runs`, `llm_call_logs`）に保存し、30日経過レコードを書き込み時に自動クリーンアップする。 |
-
-### 結論に至った経緯
-
-1. **実行・LLMコールの透明性と診断性:**
-   - システム運用中のCLIアクションの実行ステータス（開始、成功、失敗、例外情報）および、各タスクが呼び出すLLM呼び出し（プロンプト、応答、温度、消費トークン、finish reason）を正確に記録・可視化し、Web UIでトラブルシューティングを行えるようにする。
-
-2. **30日間の保持期限とクリーンアップ:**
-   - LLMの入出力には個人メモや機密情報を含み得るため、長期間の肥大化を防ぎセキュリティ境界を守る観点から、保持期間は開始時刻から30日とする。
-   - 新規ログの書き込み（開始、成功、失敗時）トリガーでクリーンアップを自動実行し、外部キー制約（ON DELETE CASCADE）と整合するよう、先にLLMログを削除し、その後にコマンドログを削除する。
-
-3. **安全な伝播と不完全な応答の厳格化:**
-    - `ContextVar` を用いて、スレッド・非同期の境界をまたいで親 `run_id` を伝播する。CLI外からのLLM呼び出しは親なしの独立したLLMログとして記録される。
-    - 日次要約を含む要約機能において、LLMの不完全な応答（閉じフェンスがない、切り捨てられた不完全なJSONなど）は自動修復・部分的な保存を一切行わず、明確なエラー（ValueError）として例外を上位に伝播させ、コマンド全体を失敗として記録する。
+[移転先: 10-Decisions-Architecture.md](10-Decisions-Architecture.md)
 
 ## サマリダッシュボード統計タブの時間帯×カテゴリーヒートマップ
 
-| 項目 | 内容 |
-|------|------|
-| 決定日 | 2026-07-22 |
-| カテゴリ | ダッシュボード統計 |
-| 決定内容 | 統計タブに活動ログの `category` を用いた `時間帯 × カテゴリー` ヒートマップを追加する。母数は各時間帯のログ件数、セル値はその時刻内のカテゴリ構成比（%）とする。 |
-
-### 実装方針
-
-1. **データ元:** サマリートピックではなく `activity_logs.category` を使用する。
-2. **集計単位:** 30分カバー時間の配分問題を避けるため、活動ログ1件を1観測として扱う。
-3. **割合定義:** 時間帯内の構成比（各時刻の全ログを100%とし、カテゴリ別比率を出す）。
-4. **未分類ログ:** `category = null` は `その他` に合算する。
-5. **API:** 新規エンドポイントは作らず、既存 `GET /api/v1/summary-dashboard/stats` のレスポンスに `activity_categories` と `hourly_category_buckets` を追加する。
-6. **フロントエンド:** 既存の手書き SVG チャート群に加えて、横スクロール可能な HTML テーブルベースのヒートマップを描画する。濃淡は青系で0%が白、100%が最も濃い色。新しいチャートライブラリは追加しない。
-7. **カテゴリ定義:** `activity/categories.py` に固定9カテゴリを唯一の定義元として切り出した。`logging_activity.py` はそこから import する。
-
-### トレードオフ
-
-- 活動カバー時間ではなくログ件数を分母とするため、短時間に多数ログが集中すると実際の時間割合と乖離しうる。しかし重複カテゴリの時間配分ルールを導入する複雑さを回避でき、実装も単純である。
-- カテゴリが存在しない時間帯はゼロ埋めせず「データなし」表示とし、0%との混同を防ぐ。
+[移転先: 10-Decisions-Web.md](10-Decisions-Web.md)
 
 ## アクティビティログへの既存プロジェクト紐付け
 
-| 項目 | 内容 |
-|------|------|
-| 決定日 | 2026-07-22 |
-| カテゴリ | アクティビティログ・プロジェクト管理 |
-| 決定内容 | 新規アクティビティログを記録する際、LLMによる分類と同時に既存プロジェクトへの紐付け（0件または1件）を行う。 |
-
-### 結論に至った経緯
-
-アクティビティログと進行中のプロジェクトを関連付けることで、どのプロジェクトにどれだけの時間が使われているかをダッシュボード等で可視化・追跡できるようにする。
-
-### 実装・紐付け基準
-
-1. **紐付け基準と優先度:**
-   - 画面情報（前面アプリ名、ウィンドウタイトル）およびOCRテキストに**直接的かつ明確な根拠**がある場合のみ、既存プロジェクト（最大1件）に紐付ける。
-   - 曖昧な場合や該当するものがない場合は必ず `null`（未紐付け）とする。**「誤紐付けより未紐付けを優先」**する。
-   - この紐付けはLLMが推定した補助メタデータであり、正確な工数・進捗・プロジェクト実績の厳密な記録ではない。
-2. **対象プロジェクト:**
-   - LLMに提示する既存プロジェクトは、ステータスが `inquiry`, `active`, `paused` のプロジェクトのみとする。
-   - 完了・中止済みのプロジェクト、未解決プロジェクト候補、新規候補は紐付け対象外とする。
-3. **境界条件と遡及制限:**
-   - 新規アクティビティログの記録時のみ自動紐付けを適用し、新規プロジェクト候補の自動作成や過去の既存ログの一括遡及分類・補完は行わない。
+[移転先: 10-Decisions-Architecture.md](10-Decisions-Architecture.md)
 
 ## プロジェクト別活動メモの導入
 
-| 項目 | 内容 |
-|------|------|
-| 決定日 | 2026-07-22 |
-| カテゴリ | サマリーダッシュボード・プロジェクト管理 |
-| 決定内容 | サマリーに紐付く既存プロジェクトごとに簡潔な活動メモ（自由文）を記録・表示・編集できるようにする。日次はLLMが抽出、週次・月次はサブ期間のメモを根拠にLLMが期間別要約を生成する。 |
-
-### 詳細
-
-1. **データモデル:**
-   - `summary_projects` に `note TEXT` 列を追加（v12マイグレーション）。1サマリー・1既存プロジェクトにつき1つの自由文テキスト。
-   - APIレスポンスに `project_notes: [{project_id, display_name, note, display_order}]` を追加。既存の `projects: string[]` と `project_ids: int[]` は後方互換のため維持。
-
-2. **メモの所有と更新方針:**
-   - メモの所有先は各サマリーの `summary_projects.note`。プロジェクトマスタにはメモを持たせない。
-   - 日次プロンプトの `project_ids` 出力を `project_notes` に置換。LLMは既存プロジェクトごとに活動メモを抽出する。パーサーは存在するプロジェクトIDのみを受け入れ、空メモも許可する。
-   - サマリー保存・取得・更新時に `summary_projects.note` を読み書きする。再生成では当該サマリーのメモをLLM出力で置き換える（手編集も上書き）。
-
-3. **週次・月次要約:**
-   - プロジェクトリンク（ID）の和集合継承は従来通り `inherit_projects_and_candidates` が行う。
-   - 日次・週次の `project_notes` をプロンプトに渡し、LLM出力から継承済みプロジェクトだけの期間別要約メモを保存する。継承プロジェクトに含まれないIDの出力は無視する。
-   - 継承プロジェクトのうちLLMがメモを出力しなかったものは空文字とする。
-
-4. **編集API:**
-   - サマリー更新APIに `project_notes: [{project_id, note}]` を追加。編集できるのは既に紐付くプロジェクトのメモだけとし、未紐付けID・重複IDはエラーにする。
-   - プロジェクトの追加・削除はUIから行わない（現行通り）。
-
-5. **UI:**
-   - サマリーダッシュボード詳細でプロジェクトを「名称: 活動メモ」として表示。編集画面で人物メモと同様に編集可能。
-   - プロジェクト詳細画面の関連サマリー一覧に `note` を含め、時系列表示する。
-
-6. **対象外:**
-   - 未解決プロジェクト候補には活動メモを追加しない。
-   - プロジェクト候補の保存・解決・移管の挙動は変更しない。
-   - LINE通知のプロジェクト表示にはメモを追加しない。
-
-### トレードオフ
-
-編集は次回自動再生成で上書きされる（既存方針と同じ）。メモはあくまでLLM抽出の補助情報であり、正確なプロジェクト進捗記録を意図していない。
+[移転先: 10-Decisions-Web.md](10-Decisions-Web.md)
 
 ## Jules VM におけるテスト環境とセットアップの統一
 
-| 項目 | 内容 |
-|------|------|
-| 決定日 | 2026-07-22 |
-| カテゴリ | テスト環境・開発効率 |
-| 決定内容 | Jules VM用等の一時的なクリーンクローン環境向けに専用のセットアップ手段 `make jules-setup` を用意し、検証環境は `ENV=test` に統一して `ENV=jules` は廃止・使用禁止とする。 |
-
-### 結論に至った経緯
-
-JulesAgentによるコーディングと動作確認・テストを迅速かつ確実に実行するため、当初は専用の `ENV=jules` 等の環境追加が検討された。しかし、これを行うと新たな設定ファイル（`config.jules.yml` や `.env.jules`）や永続ディレクトリの管理コストが発生し、本番データへの誤書き込みリスク、またJules VMでのクリーンクローン直後のセットアップ難易度を上げる原因となっていた。
-すでに強固なテスト環境分離として用意されている `ENV=test`（一時SQLite、一時Vault、自動起動Uvicorn、Playwright）と、追跡済みの依存解決・フロントエンドビルドコマンド群を最大限に活用し、共通化するのが最もシンプルで安全であるとの結論に至った。
-
-### 仕組みの概要
-
-1. **セットアップの自動化 (`make jules-setup`):**
-   クリーンクローンされたVM環境において、以下の工程を一行で確実に自動実行できるMakefileターゲットを提供する。
-   - `uv sync --frozen --all-extras` (Python依存関係の厳密な同期)
-   - `npm --prefix frontend ci` (フロントエンド依存関係のインストール)
-   - `uv run playwright install --with-deps chromium` (Playwright向けChromiumバイナリの取得)
-2. **安全な Initial Setup スナップショット:**
-   Jules VMの「Initial Setup」ステップに `make jules-setup && ENV=test uv run pytest tests/` を登録。これにより、ローカル上の `.env` や既存の `dist/` ビルド、ローカルモデル・個人Vaultの存在を前提にせず、スナップショットを安定して作成する。
-3. **`ENV=test` の強制適用:**
-   `ENV=jules` は完全に廃止。探索サーバー (`e2e_server.py`) は親プロセスの `ENV` の値を継承せず、実行時に内部で `ENV=test` を強制セットするようにした。これにより、誤った設定で本番用の `.env` やデータベースにアクセスしてしまう事故を完全に防止する。
+[移転先: 10-Decisions-Testing.md](10-Decisions-Testing.md)
 
 ## HITL（Human-In-The-Loop）永続化モデルとコアサービスの実装
 
-| 項目 | 内容 |
-|------|------|
-| 決定日 | 2026-07-23 |
-| カテゴリ | HITL管理・データベース |
-| 決定内容 | SQLiteのスキーマをv13へ移行し、`hitl_runs` と `hitl_questions` テーブル、インデックス、および一意制約を追加。状態遷移・回答検証・アトミックなトランザクションを保証するストアとサービス層を実装する。 |
-
-### 結論に至った経緯
-
-1. **データベース・スキーマ設計 (v13):**
-   - 実行制御（Run）と、個々の対話（Question）を完全に分離して管理。
-   - `hitl_questions` 側で `(run_id, question_set_id, question_key)` の複合一意制約（UNIQUE）を定義し、同一質問セット内の重複登録を厳密に防止。
-   - インデックスとして、Runsの `status`、およびQuestions の `(run_id, question_set_id)` および `status` を追加して、待機・再開検索を高速化。
-
-2. **状態遷移と回答検証の保証:**
-   - 単一トランザクションによる整合性担保: `register_run_and_questions`、`submit_answer`、`cancel_run`、`claim_run` などの操作は、それぞれSQLite接続のトランザクションコンテキスト（`with conn:`）で囲み、状態更新をアトミックに実行する。
-   - 外部キー制約保護: 質問登録時は、まずRunの登録/更新を完了（`upsert_run`）させてから質問群をインサート（`insert_question`）することで、FK違反エラーを回避する。
-   - 回答の検証（選択肢の合致確認）と一回のみの回答制限（finalized状態でない場合のみ受付）を厳格に行う。
-
-3. **アトミックClaimと任意質問の自動スキップ:**
-   - `claim_run` 実行時、Runの状態が `'ready_to_resume'`（またはリース切れ）であることをアトミックに検証したうえで、同一トランザクション内で未回答の任意質問（`is_required = 0` 且つ `status = 'pending'`) をすべて一括して `'skipped'` に確定させ、Runのリース情報を設定して `'running'` 状態へ移行する。
-   - `cancel_run` 実行時には、active question setの待機中の質問を `'cancelled'` へと一括してステータス移行する。
+[移転先: 10-Decisions-HITL.md](10-Decisions-HITL.md)
 
 ## HITL 再開コントラクトとディスパッチャーの実装
 
-| 項目 | 内容 |
-|------|------|
-| 決定日 | 2026-07-23 |
-| カテゴリ | HITL管理・実行制御 |
-| 決定内容 | HITLの実行再開、再サスペンドのコントラクト（`HitlContext`, `HitlResult`）と、アトミックなポーリング・実行ディスパッチャーを導入する。 |
-
-### 結論に至った経緯
-
-1. **コンテキスト設計とドメイン疎結合 (`HitlContext` / `HitlResult`):**
-   - HITLコアモジュールが各個別ドメイン（リサーチ、サマリなど）に依存するのを防ぐため、ドメインからのインポートを排除した独立したイベント駆動のコントラクトを設計。
-   - 各ハンドラーは、現在状態を示す `checkpoint` と、ユーザー回答をまとめた `answers_by_question_key` に加え、同一トランザクション内で次回以降の質問票（次のサスペンド状態）を再登録可能なDBコネクション `conn` を含む `HitlContext` を受け取る。
-   - ハンドラーの返却値は `HitlResult` クラスとして表現し、`completed`（正常完了）、`failed`（実行失敗）、`re_suspended`（再中断、次の質問セットを登録済み）の3状態を明示的に返す設計とした。
-
-2. **原子性を担保したポーリングディスパッチャー (`dispatch_runs`):**
-   - 多重起動時やバックグラウンドでの安定実行のため、`status = 'ready_to_resume'` の Run および `status = 'running'` かつ lease 期限切れ（タイムアウト）の Run のみを対象にポーリング。
-   - ディスパッチャー実行時に `claim_run` を用いてアトミックにリースロックを確保し、他のワーカーとの競合を完全に排除する。
-   - 登録されたハンドラーが例外をスローした、または未登録だった場合は、それを安全にキャッチして DB 内のステータスを `failed` にマークし、エラーメッセージとリトライ回数をインクリメントして、リースを確実に解放する。
-
-3. **チェックポイントによる重複実行の安全性:**
-   - リース切れによって再度ポーリング・実行された場合、ハンドラーは `context.checkpoint` を参照してどこまで実行したかを確認できる。これにより、重複した副作用（外部API呼び出しやファイル書き出しなど）を防ぐべき冪等な制御ロジックをハンドラー側で柔軟に実現できるように設計。
-
-4. **コンポジションルートでのアセンブリ:**
-   - `src/obsidian_ai_hub/main.py` (アプリケーションのコンポジションルート) 内に `register_hitl_handlers()` を配置し、そこで必要な機能ハンドラーを登録するアプローチをとることで、コア（HITLモジュール）がドメイン層をインポートする逆流依存を完全に排除。
+[移転先: 10-Decisions-HITL.md](10-Decisions-HITL.md)
 
 ## HITL スキーマ v14 とテスト実行結果
 
-| 項目 | 内容 |
-|------|------|
-| 決定日 | 2026-07-23 |
-| カテゴリ | HITL テスト・検証 |
-| 決定内容 | スキーマバージョン v14 を採用し、テスト網羅性検証を完了。全既存テスト・新規追加テスト・E2E を通過。 |
-
-### スキーマ v14 への移行経緯
-
-- 設計ドキュメントでは v13 が想定されていたが、実装過程で user_version 14 に落ち着いた。
-- `tests/test_hitl.py::test_hitl_db_migration_and_structure` で `PRAGMA user_version = 14` を検証している。
-- v14 で定義されたカラム: `hitl_runs` (run_id, handler, status, checkpoint, active_question_set_id, lease_owner, lease_expires_at, retry_count, error_message, created_at, updated_at) および `hitl_questions` (question_id, run_id, question_set_id, question_key, status, question_type, display_text, choices, answer, is_required, expires_at, answered_at, created_at, updated_at)。
-
-### テスト網羅性
-
-セクション 5 の全項目を検証するテストを追加:
-- DB ロールバック (`test_register_run_and_questions_rollback_on_failure`)
-- CLI フラグ発火 (`test_dispatch_cli_flag_processes_runs`)
-- 複数 Run 同時 dispatch (`test_dispatch_processes_multiple_runs_in_single_call`)
-- 完全ライフサイクル (`test_full_happy_path_dispatch`)
-- API 認可 (`test_hitl_api_requires_token_when_not_loopback`)
-- ページネーションとフィルタ (`test_hitl_api_list_pagination_and_status_filter`)
-- Vault 出力冪等性 (`test_suggestion_hitl_run_approve_then_redispatch_idempotent`)
-- Handler 失敗復旧 (`test_suggestion_hitl_run_handler_failure_records_failed_status`)
-- 手動リサーチ経路が HITL を作らない回帰 (`test_web_manual_research_paths_do_not_create_hitl_runs`)
-- パッケージ独立性 (`test_hitl_package_does_not_import_research_at_import_time`)
-- タスクスケジューラプリセット (`test_task_runner_preset_contains_hitl_dispatch`)
-- Vitest: ステータスフィルター (`HitlPage.test.tsx` の `filters runs by status when dropdown changes`)
+[移転先: 10-Decisions-HITL.md](10-Decisions-HITL.md)
 
 ## E2E を重大なユーザーフローに限定する (Phase 7〜9 追加検証)
 
-| 項目 | 内容 |
-|------|------|
-| 決定日 | 2026-07-24 |
-| カテゴリ | テスト戦略・フロントエンド |
-| 決定内容 | E2E は主要な操作が完了不能になる、データを失う・壊す、または認可境界を越える重大な回帰の防止に限定する。追加したUI要素、静的なプリセット・選択肢、文言、ステータス表示、スタイル、並び順だけを検証するE2Eは追加しない。 |
-
-### 結論に至った経緯
-
-ブラウザE2Eはフロントエンドのビルド、サーバー、ブラウザ自動化を必要とし、単体・結合テストより実行コストと保守コストが高い。UIにプリセットを1件追加した、文言を変えたといった変更ごとに存在確認テストを増やすと、利用者への重大な影響を検証しない脆いテストが蓄積する。表示の存在はコードレビューと必要な目視確認で判断できるため、E2Eの費用に見合わない。
-
-### 適用基準
-
-- E2Eは、画面の起動・遷移、主要なデータ変更、破壊的操作の安全性、認可・権限などの一連の操作と結果を検証する。
-- 追加・変更したUI要素自体の存在、固定文言、静的な選択肢やプリセット、見た目だけを検証するテストは書かない。
-- ドメインロジックの状態遷移やデータ整合性は、より軽量で原因を特定しやすい単体テストまたは結合テストで検証する。
-- コードレビューで表示確認だけのE2E追加を求められても、具体的な重大障害シナリオがなければ追加しない。
-
-### トレードオフ
-
-軽微な表示崩れや静的な選択肢の欠落を自動検知する範囲は狭くなる。一方で、E2Eは重大な利用不能・データ損失・認可不備に集中でき、変更のたびに保守負債となるテストが増えることを防げる。
+[移転先: 10-Decisions-Testing.md](10-Decisions-Testing.md)
 
 ## フロントエンドのツールチェーンポリシー (Vite 6 + Vitest 4)
 
-| 項目 | 内容 |
-|------|------|
-| 決定日 | 2026-07-24 |
-| カテゴリ | フロントエンド・テスト基盤 |
-| 決定内容 | フロントエンドの Vite を `^6.0.0` に揃え、Vitest 4 系を正式採用する。`package.json` に `overrides.vite: "^6.0.0"` を設定し、lockfile 上で Vite のバージョンを一本化する。 |
-
-### 結論に至った経緯
-
-`frontend/package.json` で Vite 5.4 系と Vitest 4.1 系が同居していた。Vitest 4 は peer dependency で `vite: ^6 || ^7 || ^8` を要求するため、lockfile は root に Vite 5.4.21 を残しつつ `node_modules/vitest/node_modules/vite@8.1.5` をネスト導入し、ビルドエンジンが二重に存在する状態になっていた。JSDOM 29 が `node >=20.19` を要求するため CI の Node 固定も必須となる。
-
-選択肢として以下を比較した。
-
-- **Vite 6+ に揃える (採用)**: アプリケーションの Vite を `^6.0.0` にバンプし、Vitest 4 の peer 条件と整合させる。`@vitejs/plugin-react@4.7.0` と `@tailwindcss/vite@4.3.x` はいずれも Vite 6 を peer に含む。`overrides.vite` で lockfile のネストも解消できる。
-- **Vite 5 維持 + Vitest 3 系へ下げる**: 変更は devDependencies の vitest バージョンのみで小さいが、Vitest 4 の機能 (browser provider, expect API 改善) を活用できない。
-- **現状維持**: 動作はするが二重 Vite 状態が残り、依存解決の透明性が下がる。
-
-Vite 6 は現在の安定 LTS ラインであり、Vitest 4 を本格活用する前提で揃えるほうが将来コストが低いと判断した。
-
-### 適用範囲
-
-- `frontend/package.json` の `vite` を `^6.0.0` に固定する。
-- `frontend/package.json` に `overrides: { "vite": "^6.0.0" }` を追加し、lockfile 上で Vite のバージョンを一本化する。
-- CI における Node の最低バージョンを `>=20.19.0` とする (JSDOM 29 / Vitest 4 の engines 要件)。
-- `@vitejs/plugin-react@4.7.0` の `esbuild` 設定由来の deprecation 警告は動作に影響しないため、別フェーズで `oxc` 移行を検討する。
-
-### トレードオフ
-
-- Vite 5 → 6 の破壊的変更 (主に plugin API と環境変数) を将来踏む可能性は残るが、現状のプラグインは Vite 6 互換のため即時の修正は不要。
-- ローカル開発では `node_modules/vitest/node_modules/vite` 由来のビルドサイズ・型解決の不整合がなくなる。
-- Node バージョンを `>=20.19.0` に引き上げる必要があり、CI の Node セットアップを明示する。
+[移転先: 10-Decisions-Testing.md](10-Decisions-Testing.md)
 
 ## フロントエンドテストの Vitest 化と E2E テストの役割縮小 (Phase 3〜5、および 7〜9)
 
-| 項目 | 内容 |
-|------|------|
-| 決定日 | 2026-07-24 |
-| カテゴリ | フロントエンド・テスト戦略 |
-| 決定内容 | UIの表示状態、フィルター操作、非同期処理の競合、デバウンス、およびダイアログ制御は Vitest (React Testing Library) で網羅検証し、Playwright E2E は真に重要な結合ユーザーフローに限定して役割を縮小する。さらに Phase 7〜9 でシナリオベースに再編し、テスト・データのセットアップをクリーンにモジュール化する。 |
-
-### 結論に至った経緯
-
-以前のフロントエンドテストでは、微細なUIの変更や非同期処理の検証をすべて実ブラウザを通した Playwright E2E テスト（13件）に依存していた。しかし、E2Eは起動やシード、環境構築のオーバーヘッドが大きく動作が非常に遅いこと、また表示文言や見た目の些細な変化でテストが破損しやすいため、開発・メンテナンスコストを高めていた。
-
-表示や状態遷移は React 層（JSDOM）で確定的かつ軽量に検証できるため、Vitest + React Testing Library によるテスト層を標準に据える。
-
-### 変更点と役割分担
-
-1. **Vitest (React Testing Library) の拡充**:
-   - `App.tsx` の認証状態、健康チェック失敗、ルートリダイレクト、モバイルナビ、サイドバー遷移。
-   - `MemoryPage` / `MemoryList` / `MemoryDetailPanel` の初回ロード、フィルター連動、500msデバウンス、選択リセット、一意選択状態、レース条件抑止、詳細API失敗ハンドリング。
-   - `HitlPage` の初期ロード、フィルター、行選択、必須検証、回答送信、キャンセル確認ダイアログ。
-2. **Playwright E2E の縮小・再編 (Phase 7〜9 完了)**:
-   - 旧 E2E の 5 件のテストを、役割と関心に応じて 3 つのシナリオベースのファイル（1つのメモリシナリオ、2つの HITL シナリオ）へ整理統合。
-     - `test_memory_scenario.py` (メモリ承認・ロード関連)
-     - `test_hitl_answer_scenario.py` (HITL 回答送信フロー)
-     - `test_hitl_cancel_scenario.py` (HITL キャンセルフロー)
-   - `conftest.py` にモジュール単位でシードするシナリオを指定できるパラメータ化（`e2e_seed_scenario`）を導入。
-   - テストシードデータを DB 操作 API などでクリーンに構築する処理を `src/obsidian_ai_hub/testing/seed.py` の `seed_hitl_demo_data()` に集約し、テストファイル内の不透明な SQL べた書きを廃止。
-   - 結果として、E2Eは起動・SPAフォールバック・主要データ永続化を含む3つの高インパクト導線シナリオのみに限定・整理された。
-
-### トレードオフ
-
-- ローカルおよびCIでのテスト実行速度が飛躍的に向上した（E2E実行数の削減と高速なJSDOMテスト）。
-- 静的なアサーションによるテストの脆さが解消され、ロジック変更に対するリグレッション耐性が向上した。
-- シードシナリオが疎結合かつ構造化されたため、将来の追加の際も既存テストのシードとの干渉や無駄なオーバーヘッドが最小化される。
-- 実ブラウザでしか発生しない特殊なアセット崩れや一部ブラウザ仕様の不整合を網羅する範囲は狭まるが、目視およびレビュー、縮小後のコアE2Eで実質的な品質担保を補完する。
+[移転先: 10-Decisions-Testing.md](10-Decisions-Testing.md)
 
 ## 長期記憶の自動診断メンテナンスとHITL連携
 
-| 項目 | 内容 |
-|------|------|
-| 決定日 | 2026-07-31 |
-| カテゴリ | 長期記憶・HITL・保守 |
-| 決定内容 | 手動CLI `--memory-maintain` による長期記憶の自動保守診断と、独立したHITLハンドラ `memory.apply_maintenance_proposals` による段階的かつ冪等なDB適用を導入する |
-
-### 結論に至った経緯
-
-長期記憶（承認済みメモリ）は蓄積されるにつれて、情報の重複・古さ・矛盾が生じる。既存のHITLコア（`src/obsidian_ai_hub/hitl/`）にドメイン依存のクエリや適用ロジックを混入させることなく、疎結合かつ拡張性の高い形でメンテナンスを実現するために、ドメイン側（`src/obsidian_ai_hub/memory/maintenance.py`）にロジックを閉じ込めて実装する。
+[移転先: 10-Decisions-HITL.md](10-Decisions-HITL.md)
 
 ## PeoplePage 分割リファクタリング
 
-| 項目 | 内容 |
-|------|------|
-| 決定日 | 2026-07-31 |
-| カテゴリ | フロントエンド・人物管理 |
-| 決定内容 | 1,652行に肥大化した PeoplePage.tsx を、機能単位の内部コンポーネント（CandidateTab, PeopleListTab, DuplicatesTab, VaultReportTab, MergePreviewDialog 等）へ分割する。表示コンポーネントは状態を所有せず、親である PeoplePage がすべてのタブ、ダイアログ、選択状態、フォーム、通知および操作ハンドラを統括する。 |
-
-### 結論に至った経緯
-
-肥大化したコンポーネントの可読性、保守性を向上させるため、単一ファイル内の表示責務を機能（タブ・ダイアログ）単位で物理分割した。この際、各タブの表示や詳細切り替えなどの状態をサブコンポーネント内に閉じ込めてしまうと、タブ切り替え時や画面再読み込み時に選択された詳細状態、編集用フォームの入力値、統合提案などの状態が失われてしまい、ユーザー体験が著しく低下する。
-
-そのため、以下の基本構造を採用する：
-- **表示コンポーネントの制御化（無状態化）**: すべてのサブコンポーネントは、必要な値、表示状態（モバイル詳細表示の開閉、競合情報、エラー、ローディング）、および操作イベントのみをPropsとして親から受け取る「完全制御コンポーネント」とする。
-- **親ページによる操作と状態の統括**: 親である `PeoplePage.tsx` がすべての状態（選択された候補/人物、各フォームの入力値、統合プレビューリクエストの競合回避カウンタ等）を所有し、操作ハンドラを一元管理する。
-- **API通信の切り出し**: `features/people/peopleApi.ts` に各HTTPリクエストを名前付き関数として集約し、コンポーネントと通信・型の依存を整理する。
-
-これにより、既存の操作フローやタブ切り替え時の状態保持、モーダルのフォーカス制御、二重送信防止などの挙動を完全に維持したまま、保守性の高い分割構造を実現する。
-
-### 仕様および決定事項
-
-1. **診断とグルーピングの基準:**
-   - 承認済みメモリから、同一の `memory_key`、正規化本文の一致、および既存の埋め込み類似度閾値（`0.85`）以上の関連グループを形成する。
-   - `valid_until` や `review_due_at` の期限超過、または最新エビデンスの `observed_at`（ISO 8601 または YYYY-MM-DD をJSTに正規化）が基準日から180日以上前のものを、古さによる再評価（失効）候補に含める。エビデンス日付がない場合は古さによる失効候補にしない。
-
-2. **LLM診断プロンプトと構造化JSON (`config/prompts/memory_maintenance.md`):**
-   - 共通のプロンプトにて、初回診断・フィードバック・スナップショット不一致時の再診断を共通処理する（`input_mode` で動作を切り替え）。
-   - LLMには `merge`, `correct`, `expire`, `no_action` の構造化JSON配列のみを返却させる。根拠が不十分な場合は `correct` を提案せず `no_action` とする。
-   - `merge` / `correct` は正本ID（`main_id`）、吸収ID群（`absorbed_ids`）、統合後本文（`integrated_content`）、根拠（`reason`）を必須とし、対象メモリが提案内・複数提案内で重複しないことを検証する。
-
-3. **HITL Run 登録とチェックポイント (`memory.apply_maintenance_proposals`):**
-   - 1診断全体を1つの `HitlRun` に、各提案を1件の `HitlQuestion`（選択肢: 「適用」「見送り」「フィードバックして再提案」）として登録。
-   - 提案が0件の場合はRunを作らず終了する。
-   - チェックポイントには基準日、提案ラウンド、提案内容、対象ごとの `updated_at` スナップショット、適用済み提案IDリストを保持する。
-
-4. **安全かつ冪等なハンドラ適用ロジック:**
-   - 物理削除は行わず、歴史保持のために不要なメモリは `expired`、統合・訂正で吸収されたメモリは `superseded` に状態遷移させる。
-   - 適用前に対象メモリの最新の `updated_at` と登録時のスナップショットを検証し、不一致（競合）がある提案のみを最新状態で個別再診断する。
-   - 「フィードバックして再提案」が選択された場合はコメント入力を必須（UI・APIの両方でバリデーション）とし、元提案・コメント・最新状態をLLMに渡して該当提案だけを次のラウンド（`round_2` 等の新質問セット）として再提示する。
-   - 各提案はそれぞれ独立したトランザクションで確定され、正本には `maintenance_merged`/`maintenance_corrected`、吸収側には `maintenance_superseded` の専用の `memory_events` を記録。変更適用後はMarkdown投影（`approved.md`）を自動更新する。
+[移転先: 10-Decisions-People.md](10-Decisions-People.md)
 
 ## サマリダッシュボードのコンポーネント分割（ビュー抽出方式）
 
-| 項目 | 内容 |
-|------|------|
-| 決定日 | 2026-08-01 |
-| カテゴリ | フロントエンド・構成 |
-| 決定内容 | 肥大化した `SummaryDashboardPage.tsx`（約2,091行）を、タブ/パネル/フォーム/チャート単位のファイルに分割する。state・ローダー・ハンドラはコンテナに残し、ビューは props 経由で受け取るプレゼンテーショナル分割とする。 |
-
-### 構造
-
-- `SummaryDashboardPage.tsx` — コンテナ。全 state、APIローダー、編集/削除ハンドラ、エフェクト、ヘッダ/タブ切替、削除確認モーダル。
-- `utils.ts` — `PALETTE`, `groupSummaryItemsByKind`, `formatPeriodKey`。
-- `charts.tsx` — `SVGLineChart`, `SVGStackedBarChart`, `SVGCategoryHeatmap` を1ファイルに集約。
-- `EditSummaryForm.tsx` — 既存の `EditForm` を移設。
-- `HomeTab.tsx` / `BrowseTab.tsx` / `BrowseList.tsx` / `DetailPanel.tsx` / `StatsTab.tsx` — タブ・パネル単位のビュー。
-
-### 結論に至った経緯
-
-`projects`, `memories`, `research`, `vault-search` 各機能で確立済みの「コンテナ Page + ビュー別コンポーネント」パターン（props による受け渡し、カスタムフックなし）に合わせる。`selectedSummary` / `selectedDay` 等は Home→Browse 遷移（`goToBrowseForSummary`）やヘッダでクロスタブに共有されるため state はコンテナに残す。ロジックは一切変更せず純粋な移動・抽出のみとし、レース条件ガード（request ref 等）はコンテナに維持する。カスタムフックによる state カプセル化は変更範囲と回帰リスクが大きいため採用しない。
-
-### 検証
-
-- `npm --prefix frontend test`（Vitest 81件）全通過。`SummaryDashboardPage.test.tsx` は Page 経由のため分割後も回帰カバレッジを担保。
-- `npx --prefix frontend tsc -b` で型チェック通過。
-- 表示のみの変更のため E2E は追加しない（E2E 限定方針と整合）。
+[移転先: 10-Decisions-Web.md](10-Decisions-Web.md)
 
 ## Web サービス層の分割リファクタリング
 
-| 項目 | 内容 |
-|------|------|
-| 決定日 | 2026-08-01 |
-| カテゴリ | アーキテクチャ・構成 |
-| 決定内容 | 2,719行に肥大化した `src/obsidian_ai_hub/web/service.py` を、機能ドメイン単位のサブパッケージ `web/services/` に分割する。`web/service.py` は公開APIのファサード（再エクスポートのみ）として維持し、`api.py`・テスト・`summary/project_utils.py` の既存 import を変更せず互換性を保証する。 |
-
-### 構造
-
-- `services/memory.py` — 長期記憶（list/get/review/update/resolve/delete 等）。
-- `services/research.py` — リサーチテーマ（list/get/run/rerun）。
-- `services/vault.py` — Vault 検索・ファイル読み取り。
-- `services/dashboard.py` — ダッシュボード（home/browse/day/stats）と集計ヘルパ。
-- `services/projects.py` — プロジェクト・プロジェクト候補。`ProjectConflictError` を所有。
-- `services/people.py` — 人物 CRUD・別名編集。人物系コンフリクト例外（`AliasConflictError` 等）を所有。
-- `services/people_candidates.py` — 人物候補（list/detail/assign/resolve/promote）。
-- `services/people_merge.py` — 人物統合（verify/preview/merge）と重複候補検出。
-- `services/people_sync.py` — Vault 同期とレポート。
-- `services/summary.py` — サマリ編集オプション・詳細更新/削除。
-- `services/task_config.py` — タスク設定（get/update/preview）。`TaskConfigConflictError` を所有。
-- `services/execution_logs.py` — 実行ログ・LLM コール詳細。
-- `services/hitl.py` — HITL 実行一覧・回答・キャンセル。
-
-### 結論に至った経緯
-
-`service.py` は API ルーター `api.py` からモジュール全体を `service.X` として参照され、テストも `service.X`・パッチ（`obsidian_ai_hub.web.service.<func>`）・直接 import で同一モジュールに依存している。memory パッケージ分割で確立済みの「公開APIのファサードを維持する」パターンを踏襲し、`service.py` を再エクスポート専用にすることで、`api.py`・テスト・`summary/project_utils.py` を一切変更せずに分割できる。ロジックは一切変更せず純粋な移動・抽出のみとする。People 領域はさらに candidate / merge / sync で機能分割し、単一モジュールの肥大化（約1,150行）を回避する。
-
-### 検証
-
-- `uv run pytest tests/` を全通過させる。
-- lint 設定は存在しないため、テストにより回帰がないことを担保する。
+[移転先: 10-Decisions-Architecture.md](10-Decisions-Architecture.md)
 
 ## 週次メモリ質問の登録と材料
 
-| 項目 | 内容 |
-|------|------|
-| 決定日 | 2026-08-03 |
-| カテゴリ | 長期記憶・HITL・週次インタビュー |
-| 決定内容 | 直近完了週の記録と、4000トークンを上限とする有効な承認済みメモリから、最大3問の週次インタビュー質問を生成し、ISO週に基づく決定的なRun IDでHITLへ登録する。 |
-
-### 仕組みの概要
-
-1. **一意のRun IDと冪等性**:
-   - 登録されるRun IDは `mem_interview_{iso_year}-W{iso_week:02d}` のフォーマット（例: `mem_interview_2026-W30`）。
-   - すでにその週のRunが登録されている場合は、再生成や質問の上書きを行わず処理をスキップ（冪等性の担保）。
-2. **質問期限 (`expires_at`)**:
-   - 質問の期限は「翌週月曜朝 09:00:00 JST」に固定。相対日数（7日等）ではなく、生成日時より後に来る最初の月曜09:00 JSTを算出し、ISO 8601フォーマットで検証して保存する。
-3. **文脈制限**:
-   - 生成プロンプトに渡す「有効な承認済みメモリ」の上限は、既存の `MEMORY_CONTEXT_MAX_TOKENS`（800）とは独立させ、インタビュー機能専用に4000トークンとする。
+[移転先: 10-Decisions-HITL.md](10-Decisions-HITL.md)
 
 ## 汎用HITLの期限処理
 
-| 項目 | 内容 |
-|------|------|
-| 決定日 | 2026-08-03 |
-| カテゴリ | HITL・期限処理 |
-| 決定内容 | ディスパッチ処理実行時、事前に全ペンディング質問の期限超過を走査し、必須質問が期限切れならRun全体をキャンセル、任意質問なら当該質問をスキップ（skipped）にする。 |
-
-### 処理の挙動
-
-- `dispatch_runs` 実行の最初（Claim処理前）に `process_expired_questions(conn)` を実行する。
-- 期限切れの **必須（`is_required = 1`）質問** が1件でもある場合、そのRunを `cancelled` とし、アクティブセットの全ペンディング質問を `cancelled` にする。
-- 期限切れの **任意（`is_required = 0`）質問** のみの場合、対象質問のみを `skipped` に変更する。これによって必須質問のペンディングが残っていなければ、Runのステータスを自動的に `ready_to_resume` に引き上げる。
+[移転先: 10-Decisions-HITL.md](10-Decisions-HITL.md)
 
 ## インタビュー回答の処理とメモリ候補抽出
 
-| 項目 | 内容 |
-|------|------|
-| 決定日 | 2026-08-03 |
-| カテゴリ | 長期記憶・抽出・検証 |
-| 決定内容 | インタビューに全回答が集まった後、ディスパッチ契機で `memory.apply_interview_answers` ハンドラが各回答から最大1件のメモリ候補を抽出・重複判定し保存する。 |
-
-### 抽出と一括保存の挙動
-
-1. **All-or-NothingのLLM抽出**:
-   - 登録されたすべての質問に対する回答をループし、LLMに渡してメモリ候補を抽出する。
-   - LLM呼び出しの失敗やJSONパースエラーなどの予期される不具合があった場合は、部分的な候補保存を行わず、ログに詳細を記録した上で `HitlResult.fail` を返却し、Runを失敗状態にする。
-2. **コード側による確定根拠（provenance, evidence）の付与**:
-   - `evidence` には `path = "hitl://runs/{run_id}/questions/{question_key}"`、`quote = "ユーザーの回答原文"`、`observed_at` を設定。
-   - `provenance` には `extraction_method = "weekly_hitl_interview"` などの詳細メタデータをコード側で確実に設定する。
-3. **重複判定**:
-   - 抽出された各候補は、既存の抽出器と同様に「完全一致 normalized content による自動却下（rejected）」および「ベクトル類似度・LLMによる3ウェイ重複評価（dedup_suggestions）」を適用してからDBに保存する。
+[移転先: 10-Decisions-HITL.md](10-Decisions-HITL.md)
 
 ## リサーチテーマ提案へのフィードバック反映（v17）
 
-| 項目 | 内容 |
-|------|------|
-| 決定日 | 2026-08-03 |
-| カテゴリ | リサーチ・HITL・フィードバック |
-| 決定内容 | 承認・却下の結果、却下理由、任意コメントを `research_themes` にフィードバックとして永続化し、次回の3件提案プロンプトへ嗜好データとして渡す。 |
-
-### 経緯
-
-従来、auto_suggestion テーマの HITL 確認は approve / reject の2値だけで、却下理由や利用者の補足は次回提案に反映されなかった。同じ系統のテーマを繰り返し提案してしまう問題を、軽量なローカルフィードバック基盤（追加の外部学習は不要）で改善する。
-
-### データモデル（スキーマ v17）
-
-- `research_themes` に `feedback_decision`（approved / rejected）、`feedback_reason`、`feedback_comment`、`feedback_at` を追加。
-- フィードバックを持つのは HITL 確認を経る auto_suggestion テーマのみ。それ以外のテーマはフィールドが NULL のまま。
-
-### HITL の action 選択肢
-
-次の単一選択に変更。既存の任意コメント欄は補足理由として `feedback_comment` に保存する。
-
-- `approve`（承認）
-- `reject:not_interested`（却下: 関心外）
-- `reject:low_utility`（却下: 実用性不足）
-- `reject:vague`（却下: 抽象的・不明確）
-- `reject:duplicate`（却下: 既知・重複）
-- `reject:not_now`（却下: 今は優先外）
-- `reject:other`（却下: その他）
-
-`run_approved_suggestion` は選択値を承認/却下へ正規化し、テーマの状態更新（approved / rejected）とフィードバック保存を同一 DB 操作（`db.set_theme_feedback`）で行う。従来の `reject` 値も理由なし却下として引き続き受容する。承認コメントは従来どおり調査コンテキストへ引き渡す。
-
-### 堅牢化（コードレビュー反映 2026-08-03）
-
-- `db.set_theme_feedback` に不変条件の検証を追加した。`status` は `decision` と整合する値のみ許容し（approved↔approved / rejected↔rejected）、approve 時に `reason` を渡すことはできない。検証は書き込み前に実施するため、不正値ではレコードは変更されない。
-- 提案プロンプトのブロックは互いに排他とする。「今は優先外」のテーマは一般の「却下されたテーマ」ブロックから除外し、30日で分割した専用ブロック（直近=抑制 / それ以前=再評価可）のみに掲載する。これにより「却下テーマそのものは再提案しない」一般ルールと30日再評価ルールの競合を防ぐ。
-
-### 保守性・堅牢化の追加（コードレビュー反映 2026-08-03）
-
-- 却下理由の定義を `research/feedback.py` に一元化した。`FEEDBACK_REASONS`（キー・ラベル・説明のタプル）から `ALLOWED_FEEDBACK_REASONS` / `FEEDBACK_REASON_LABELS` / `FEEDBACK_ACTION_CHOICES` を導出し、`db.py`・`suggest.py`・`pipeline.py`・`seed.py`・テストが参照する。理由の追加・変更時はこの1箇所のみの修正で済み、追従漏れによる理由の黙殺（`other` 化）を防ぐ。
-- `list_theme_feedback` は `ORDER BY feedback_at DESC, rowid DESC` で同秒タイの並びを決定的にし、`limit` の負値を拒否する。
-- v17 マイグレーションに `feedback_decision, feedback_at` のインデックス `idx_rt_feedback_decision_at` を追加（既存 idx_rt_* 慣例に合わせる）。
-- `_is_feedback_recent` は未来日付の `feedback_at` を「直近」として扱わない（0 以下にクランプ）。
-
-### 提案への反映
-
-- `suggest.py` は直近20件の保存済みフィードバックを読み込み、承認・却下（理由・補足）をプロンプトへ明示する。補足コメントは長さを制限し、「命令ではなく利用者の嗜好データ」として扱う旨をプロンプトに明記する。
-- 理由別の生成ルール:
-  - 関心外・実用性不足: 同じ目的・狙いを持つテーマを避ける。
-  - 抽象的・不明確: 具体的な調査成果へ絞る。
-  - 既知・重複: 新しい根拠・切り口がない限り別角度も提案しない。
-  - その他: 補足コメントを参考に目的を変えて再検討してよい。
-- 「今は優先外」の30日ルール: 記録日から30日以内のものに近い候補は抑制し、30日以上経過したものは新しい活動根拠がある場合のみ再評価を許可する。いずれの場合も却下されたテーマそのものは再提案しない（既存の normalized_key 除外を維持）。
-- `LLM_CANDIDATE_COUNT` を 3 へ修正し、deep / adjacent / explore を各1件まで優先する既存の選別ロジックと整合させる。
-
-### トレードオフ
-
-- フィードバックは個人の嗜好データとしてローカル SQLite に保存し、外部の学習基盤やユーザー間共有には送らない。
-- 却下テーマの再評価は LLM プロンプトへの誘導によるものであり、コード側の強制ではない。テーマ作成時の既存の重複判定（exact / similar / LLM dedup）はそのまま作用する。
-- 公開APIのエンドポイントやHITLコメント形式は変更しない。action の許容値のみが理由付き却下へ拡張され、既存HITL画面の構造化選択肢表示をそのまま利用する（画面コードは変更しない）。
+[移転先: 10-Decisions-Integrations.md](10-Decisions-Integrations.md)
 
 ## リサーチ提案 HITL の説明スナップショット
 
-| 項目 | 内容 |
-|------|------|
-| 決定日 | 2026-08-11 |
-| カテゴリ | リサーチ・HITL・UI |
-| 決定内容 | 新規の auto_suggestion では、テーマ・調査方向・調査理由を action 質問の `context_json` にスナップショットとして保存し、HITL 画面で専用の提案説明として表示する。 |
-
-Research 詳細から HITL に移動すると、従来はテーマを含む質問文だけが表示され、提案時の方向性と背景を確認できなかった。HITL コアをリサーチ DB に依存させず、既存のドメイン固有コンテキスト拡張点を使うことで、回答時に必要な説明を質問と同じ時点の情報として保持する。
-
-- UI の表示ラベルは「テーマ」「調査の方向」「今調べる理由」とする。理由が空なら表示しない。
-- 過去の HITL Run は更新・補完しない。既存レコードの意味を変えず、新規提案だけに適用する。
-- API エンドポイントと DB マイグレーションは不要で、既存の HITL question context 契約の追加利用にとどめる。
-
-# 欠損サマリの手動回復
-
-一覧では、実際の入力データがあるのに未生成の日次サマリ、そこから導かれる週次サマリ、週次サマリから導かれる月次サマリを復旧対象として示す。日・週・月の順に手動生成できるようにし、既存サマリの再生成も同じAPIで upsert する。再生成は手編集を上書きするため、UIで明示的な確認を要求する。自動スケジューラの再試行方針はこの導線と分離して維持する。
+[移転先: 10-Decisions-Integrations.md](10-Decisions-Integrations.md)
 
 ## 未生成サマリは完了期間のみを提示する
 
-| 項目 | 内容 |
-|------|------|
-| 決定日 | 2026-08-09 |
-| カテゴリ | サマリダッシュボード・手動回復 |
-| 決定内容 | 未生成候補は既存の入力・依存関係の条件を満たし、かつ対象期間の終了日がアプリ実行環境の当日より前の場合にのみ表示する。 |
-
-日次は翌日から、ISO週次は日曜日の翌日から、月次は月末翌日から候補となる。これにより進行中の期間を未生成として促さず、完了後の手動回復だけを案内する。判定基準日は内部ヘルパーでのみ注入可能とし、通常のHTTP API、生成API、UI、スケジューラの契約は変更しない。
+[移転先: 10-Decisions-Web.md](10-Decisions-Web.md)
 
 ## サイドメニュー「確認待ち」の件数バッジ
 
-| 項目 | 内容 |
-|------|------|
-| 決定日 | 2026-08-12 |
-| カテゴリ | フロントエンド・UI |
-| 決定内容 | サイドメニューの「確認待ち」リンクに pending_user 件数のバッジを表示する。新規APIやグローバルステートは追加せず、Sidebar 内で `GET /api/v1/hitl/runs?status=pending_user&limit=1` を呼び出し `response.total` のみを表示する。 |
-
-バックエンド変更なしで済むよう既存APIを再利用する。データフロー層（react-query等）を持たないため、フェッチは `Sidebar` 内の `useEffect` に自己完結させ、`useLocation().pathname` を依存にルート遷移のたびに再取得する。これによりHITLページで回答送信後に別ページへ遷移すればバッジが更新される。0件時は非表示。スタイルは `pending_user` の既存パレット（`rounded-full bg-yellow-100 px-2 py-0.5 text-[10px] font-medium text-yellow-800`）に準拠し、E2EではなくVitestで表示・非表示を検証する。
+[移転先: 10-Decisions-Web.md](10-Decisions-Web.md)
 
 ## トークンの localStorage 移行と設定画面
 
-| 項目 | 内容 |
-|------|------|
-| 決定日 | 2026-08-12 |
-| カテゴリ | フロントエンド・認証 |
-| 決定内容 | APIトークンの保存先を `sessionStorage` から `localStorage`（キー `obsidian-ai-hub:api-token`）に変更し、サイドバー下部に設定リンクを追加して設定画面（`/settings`）からトークンを保存・削除できるようにする。401 応答時は `auth:expired` イベントを発火し、App がトークン認証画面へ戻る。 |
-
-トークンをセッションをまたいで保持し、リクエストごとに `Authorization: Bearer` へ付与するため、保存先を `localStorage` へ変更した。設定UIはサイドバー下部の「設定」リンクから開き、パスワード入力で現在のトークンを表示する。保存時は `listMemories({status:"candidate"})` で検証し、失敗時はトークンを削除してエラーを表示する。トークン削除と401発生時は `auth:expired` イベントを `window.dispatchEvent` で通知し、App が認証必須サーバのときだけ `TokenPrompt` へ戻す（認証不要サーバでは何もしない）。
-
-- XSSによるトークン漏えいの余地が残るため、httpOnlyクッキーへの移行は引き続きTODOとする。
-- 初回認証は従来どおり `TokenPrompt` が担い、設定画面は認証後のトークン管理に使う。
-- E2Eは追加せず、Vitest（`client.test.ts`・`SettingsPage.test.tsx`・`App.test.tsx`）で検証する。
+[移転先: 10-Decisions-Web.md](10-Decisions-Web.md)
 
 ## 未連携人物への候補一括解決
 
-| 項目 | 内容 |
-|------|------|
-| 決定日 | 2026-08-14 |
-| カテゴリ | 人物管理・人物同定 |
-| 決定内容 | 未解決候補の一括解決先は、Vault連携済み人物だけでなく既存の未連携人物も許可する。 |
-
-候補の解決は候補表記をグローバルな確定別名として保存し、全サマリ参照を移管する操作である。未連携人物でも `person_aliases` とサマリ再取り込みの解決順は同じように機能するため、Vault ID の有無はシステム上の制約ではない。昇格と人物統合を別々に実行すると、後段の統合失敗時に昇格済み人物だけが残るため、既存の一括解決トランザクションを直接利用する。
-
-- 却下済み候補、文脈別手動割当済み候補、第三者の正規名・別名との衝突は、従来どおり拒否する。
-- 未連携人物への解決後にVaultが同じ表記を別人として主張した場合は、DB確定別名を優先して不一致をレポートする。未連携人物の主名とVaultノートの主名が一致すれば、既存同期により同じ人物レコードへVault IDを付与する。
-- UIは確認ダイアログを増やさず、未連携人物を選んだ場合の同期上の注意と、一括解決が将来の同表記にも適用されることを明示する。
+[移転先: 10-Decisions-People.md](10-Decisions-People.md)
 
 ## Web API の Bearer 認証一元化（ループバック・tailnet 免除の廃止）
 
-| 項目 | 内容 |
-|------|------|
-| 決定日 | 2026-08-15 |
-| カテゴリ | Web API・認証・セキュリティ |
-| 決定内容 | Web API をインターネット公開可能にするため、認証を強化する。ループバック免除と tailnet 特例を全廃し、全エンドポイントで常に `Authorization: Bearer <token>` を強制する。 |
-
-### 結論に至った経緯
-
-Web API をインターネット公開するにあたり、従来の「ループバックは無条件許可」「tailnet は `ALLOW_TAILNET_TASKS` + token で許可」という境界は、接続元 IP に依存した判定であり公開時には意味をなさない。TLS はリバースプロキシ／トンネルで担保し、アプリは localhost bind 固定のまま、認証はすべてのクライアント（loopback・LAN・公開）で等しく単一の Bearer トークンに一本化する。これにより 2026-08-12 の「タスク管理 Web UI (loopback または tailnet + トークン)」決定は破棄・置換される。
-
-### 仕組みの概要
-
-1. **認証ヘルパー:** `web/routes/deps.py` は `require_bearer_token` に一本化。旧 `require_loopback_or_token` / `require_localhost_or_tailnet_token` / `require_localhost` と tailnet・loopback 判定ヘルパーは削除。`hmac.compare_digest` でトークンを検証し、失敗時は `401` + `WWW-Authenticate: Bearer`。
-2. **起動時の fail-closed:** `create_app(..., token="")`（トークン空）は host によらず `RuntimeError`。`--serve` も `OBSIDIAN_AI_HUB_API_TOKEN` 未設定なら起動失敗。`/health` は `auth_required: true` を固定で返す（未認証でも疎通確認可能）。
-3. **全ルーター:** 9 ルーターの全エンドポイントに `Depends(require_bearer_token)`。
-4. **tailnet 廃止:** `OBSIDIAN_AI_HUB_ALLOW_TAILNET_TASKS` とそれに関わる分岐は全削除。
-5. **フロントエンド:** `frontend/src/api/client.ts` が `localStorage`（キー `obsidian-ai-hub:api-token`）からトークンを読み `Authorization: Bearer` を付与。`auth_required` が true で保存済みトークンが有効な場合はトークンで自動認証し `TokenPrompt` をスキップする（401 の場合はトークンを削除して `TokenPrompt` へ戻す）。
-
-### トレードオフ
-
-- ループバックからの操作にもトークンが必須になるため、ローカル利用時の初期導線が増える。保存済みトークンの自動認証により、トークン設定後の再訪は `TokenPrompt` を経由しない。
-- トークンは `localStorage` に保持され XSS による漏えい余地が残るため、httpOnly クッキーへの移行は引き続き TODO。
-- テストでは実トークン（`tests/conftest.py` の `TEST_API_TOKEN`）を Bearer ヘッダーで渡し、E2E ではブラウザ `localStorage` にトークンを注入して認証済み状態を再現する。
+[移転先: 10-Decisions-Web.md](10-Decisions-Web.md)
 
 ## LINE Webhook と Web UI／業務APIの公開経路分離
 
-| 項目 | 内容 |
-|------|------|
-| 決定日 | 2026-08-15 |
-| カテゴリ | LINE・Web API・ネットワーク境界 |
-| 決定内容 | LINE WebhookはTailscale Funnel（`https://m1mbp.tail744355.ts.net/`）から専用Nginx（`127.0.0.1:8764`）を経由して公開する。Web UI／業務APIはTailscale Serve（`https://aihub.tail744355.ts.net/`）からFastAPI（`127.0.0.1:8765`）へ接続し、両経路を分離する。 |
-
-### 結論に至った経緯
-
-LINE PlatformからのWebhookは外部到達可能である必要がある一方、Web UI／業務APIを同じFunnel公開面に置く必要はない。Webhook専用のNginxを入口にすることで、LINEの署名検証をWebhook固有の認証境界として扱い、Web UI／業務APIはTailscale Serve経由の運用を維持する。
-
-### 仕組みの概要
-
-1. **Webhook経路:** `https://m1mbp.tail744355.ts.net/` のTailscale Funnelから、loopbackで待ち受けるNginx（`127.0.0.1:8764`）を経由してLINE Webhook APIへ渡す。Webhook APIはBearer tokenではなくLINE署名で検証する。
-2. **Web UI／業務API経路:** `https://aihub.tail744355.ts.net/` のTailscale Serveから、loopbackのFastAPI（`127.0.0.1:8765`）へ渡す。
-3. **認証を緩めない:** 2026-08-15のBearer認証一元化は維持する。Tailscale Serve経由であっても、Web UI／業務APIのBearer tokenは必須である。
+[移転先: 10-Decisions-Integrations.md](10-Decisions-Integrations.md)
 
 ## LINE通知から既存Webフォームへ誘導するHITL v1
 
-| 項目 | 内容 |
-|------|------|
-| 決定日 | 2026-08-15 |
-| カテゴリ | LINE・HITL・通知 |
-| 決定内容 | LINE上で回答状態を管理せず、LINEはHITL Runの通知専用にする。通知リンクは既存の `/hitl?run_id=…` を開き、選択・自由コメント・取消は既存Web UIと同じBearer認証・HITL回答処理で完結させる。通知対象は自動リサーチ提案、長期記憶保守の初回登録とフィードバック再提案ラウンド、週次メモリインタビューの3系統に拡張する。 |
-
-### 結論に至った経緯
-
-HITLの回答チャネルをLINE上で完結させるには、LINE Webhook、LIFF、postback／自由記述の状態管理、会話セッション、常設workerが必要になり複雑度が高い。一方、`research/pipeline.py` は auto_suggestion テーマの承認Runを既にWeb向けHITLとして登録しており、フロントエンド `HitlPage.tsx` は `/hitl?run_id=…` の深いリンクを既に処理できる。そこでv1ではLINEを「通知専用」に絞り、選択・コメント・取消は既存Web UIへ誘導する。スマホはtailnet参加を前提とし、初回のみ既存のToken PromptでBearerトークンを入力、以後はブラウザのlocalStorage（`obsidian-ai-hub:api-token`）を使う。
-
-### 仕組みの概要
-
-1. **設定:** `OBSIDIAN_AI_HUB_WEB_URL` を追加し、Tailscale Serveの `https://aihub.tail744355.ts.net` を通知リンクの基底URLとする。URLには `run_id` 以外の秘密情報を含めない（BearerトークンはURL・LINE本文のどちらにも載せない）。
-2. **通知文組み立て:** `line_notification` に、任意のHITL Run向け通知文（種別・タイトル・説明・深いリンク）を組み立てる共通内部API（`build_hitl_run_text` / `notify_hitl_run`）と、リサーチ提案用の文面（`build_research_suggestion_text` / `build_suggestion_link` / `notify_research_suggestion`）を追加する。`run_id` はURLエンコードする。送信共通処理（設定解決・ベストエフォートPush・失敗時の秘密情報を含まない警告ログ）は `line_notification.push.push_best_effort` に集約し、全系統が再利用する。
-3. **送信タイミング:** 各登録処理のDBコミット**後**に、既存の `LINE_MESSAGING_TOKEN` / `LINE_TARGET_ID` とPush APIで通知を1回送る。
-   - **自動リサーチ提案:** `origin=auto_suggestion` のリサーチ承認Runだけ（`notify_research_suggestion`）。手動リサーチ、完了・失敗通知は対象外。
-   - **長期記憶保守:** 初回Run登録後に通知し、フィードバックから生成される次ラウンド（`round_2` 以降）も登録・コミット後に「再提案・ラウンド番号」が分かる文面で通知する（`notify_hitl_run`）。
-   - **週次メモリインタビュー:** Run登録後に、対象週の説明（期間）を含む通知を送る（`notify_hitl_run`）。
-   - 設定不足・Push失敗は登録処理を失敗させず、秘密情報や通知本文を出さない警告ログだけを残す（ベストエフォート）。outbox、再送、送信済み永続化は作らない。障害復旧時に通知が漏れる、または再実行時に重複し得ることを許容する。
-4. **変更しない範囲:** Web UI・HITLコア・回答API・dispatcher起動タイミングは変更しない。LINE Webhook、LIFF、Funnel、会話セッション、ワーカー自動再開は実装しない。
-
-### トレードオフ
-
-- LINE上では回答を完結できない（通知を開いた先でWeb UIの認証と回答が必要）。
-- 通知はベストエフォートであり、送信失敗時の再試行・永続化がないため、通知漏れや再実行時の重複が起こり得る。この性質は3系統すべてと保守の再提案ラウンドに等しく適用される。
-- 回答後のdispatcher起動は既存Webと同じく後続作業とし、今回変更しない。
+[移転先: 10-Decisions-HITL.md](10-Decisions-HITL.md)
 
 ## pytestプロセスからの本番シークレット遮断（conftest強制ENV=test）
 
-| 項目 | 内容 |
-|------|------|
-| 決定日 | 2026-08-15 |
-| カテゴリ | テスト基盤・セキュリティ |
-| 決定内容 | `tests/conftest.py` が import 直前に `ENV=test` を強制し、アプリ設定の `IS_TEST_ENV` を本番のテスト実行時にも有効にする。`_APP_ENV_VARS`（LINEトークン、APIキー等）はテストプロセスから剥がされ、本番 `.env` は読み込まれない。 |
-
-### 結論に至った経緯
-
-HITL v1 の `notify_research_suggestion` 追加後、`uv run pytest tests/`（`ENV=test` 指定なし）を実行したところ、実機のLINEへテスト由来の通知が1件送信された。`tests/conftest.py` は従来 `OAIHUB_SKIP_DOTENV=1` のみを設定し `ENV=test` を設定していなかったため、`config.IS_TEST_ENV` が `False` になり、`else` 分岐で本番 `.env`（実LINEシークレット）が読み込まれて `ALLOW_EXTERNAL_IN_TEST=True` になっていた。その結果 `test_main_creates_themes_and_researches` が呼ぶ `notify_research_suggestion` が実LINEのPush APIを叩いた。AGENTS.mdが要求する「テストは `ENV=test` で実行」を実行時に自動化できていなかったのが根本原因。
-
-### 仕組みの概要
-
-1. **強制:** `conftest.py` は `obsidian_ai_hub.utils.config` の import より前で、`ENV` が未設定なら `ENV=test` に設定する。これによりテストプロセスは常に `IS_TEST_ENV=True` となり、`_APP_ENV_VARS` の剥離と本番 `.env` の非読込が効く。`ENV` を明示指定した場合は上書きしない。
-2. **外部アクセス維持:** 既存スイートのうちApple Reminders/EventKit・LLMクライアント・YouTubeを実際に呼ぶ13件は `ensure_external_allowed` を通過して動いているため、import 後に `app_config.ALLOW_EXTERNAL_IN_TEST = True` で従来挙動を維持する。ただし `ENV=test` により実クレデンシャルは剥がれているため、実LINE・実LLM・実キーへの到達は不可能なままである（従来比で厳密に安全側）。
-3. **検証:** `uv run pytest tests/`（プレフィックスなし）で582件全通過。プロセス内で `config.LINE_MESSAGING_TOKEN` / `LINE_TARGET_ID` / `OBSIDIAN_AI_HUB_WEB_URL` が空であることを確認した。
-
-### トレードオフ
-
-- テストプロセスは `config.test.yml` を使用し、本番 `config.yml` の値を参照しない。依存するテストは各fixtureで必要な値を上書きする。
-- `ALLOW_EXTERNAL_IN_TEST` をスイート全体で有効化するため、`ensure_external_allowed` の遮断はテストプロセスでは働かないが、クレデンシャル非存在が一次防御となる。
+[移転先: 10-Decisions-Testing.md](10-Decisions-Testing.md)
 
 ## Inbox分類にカレンダー登録カテゴリとHITL承認を追加
 
-| 項目 | 内容 |
-|------|------|
-| 決定日 | 2026-08-15 |
-| カテゴリ | Inbox・HITL・カレンダー |
-| 決定内容 | Inbox分類（`research` / `memo`）に第3カテゴリ `calendar` を追加し、カレンダー登録すべき予定を検出する。`calendar` に分類された内容は、承認/却下のHITL Run（handler `calendar.add_approved_event`）へ登録し、承認後に既存の `add_calendar_event` ツールでmacOS Calendarへ登録する。Daily Noteにはメモ欄に `[calendar]` タグで記録し、承認結果に関わらず内容を失わない。 |
-
-### 結論に至った経緯
-
-Inboxのメモ・音声転記に「明日14時から歯医者」のような予定が混ざっており、Daily Noteへの記録だけではリマインドが効かない。自動でカレンダーに書くと誤登録のリスクがあるため、既存のHITL（承認フロー + `--hitl-dispatch` + LINE通知）を流用して人確認を挟むことにした。カレンダー登録は実カレンダーへの副作用を伴うため、デフォルトでHITL経由とし、抽出詳細（タイトル・開始/終了・場所）は `context_json` の専用表示（`calendar_event` 型）としてHITL画面に提示する。承認/却下のみとし編集欄は設けない（誤りは却下＋コメントで拾う）。
-
-### 仕組みの概要
-
-1. **分類プロンプト:** `config/prompts/inbox_classification.md` に `calendar` カテゴリを追加。相対日時（「明日」「来週」）を解決できるよう `${today}` / `${created_at}` を注入し、`calendar_event`（title / start_time / end_time / location）をJSONで返させる。
-2. **分類コード:** `obsidian_inbox_merge.py` の `InboxClassification` に `calendar_event` を追加し、`classify_inbox_content` は `effective_dt`（daily_file の日付 + hour_str）を受け取る。`merge_content_into_daily_note` が `category == "calendar"` のとき `calendar/hitl.py::register_calendar_event_approval` を呼ぶ。
-3. **HITL登録:** コンテンツ＋開始時刻のSHA-1ダイジェストによる決定的 run_id（`hrun_inbox_calendar_{sha1[:12]}`）で冪等に登録。開始時刻をハッシュに含めることで、同一テキストでも抽出日時が異なる予定は別Runになり、上書き衝突を防ぐ。checkpoint に `calendar_event`・元content・phaseを持ち、commit後に既存の `notify_hitl_run` でLINE通知（ベストエフォート）。
-4. **承認ハンドラ:** `calendar/hitl.py::add_approved_calendar_event`。却下は `phase=declined` でcomplete。承認時は `add_calendar_event.invoke(...)` を呼び、成功時 `phase=added` をcheckpointに含めた `HitlResult.complete` を返す。`phase=added` は handler 内で `update_checkpoint` せず、dispatcher の最終トランザクションで Run の status と同一トランザクション内に原子的に永続化する（handler 内の別個の非原子的書き込みによる二重登録窓を排除）。`phase=added` を再実行ガードに使い、部分失敗後の再dispatchで二重登録を防ぐ。登録は `main.py::register_hitl_handlers()` のコンポジションルートで行う。
-5. **UI:** `HitlPage.tsx` に `calendar_event` 型の `context_json` 専用表示ブロックを追加（`research_suggestion` と同パターン）。編集欄は設けず既存の承認/却下選択UIを使用。
-
-### トレードオフ
-
-- カレンダー登録は `add_calendar_event` が既存イベントを毎回新規作成するため完全な冪等ではなく、イベント追加後のDB commit失敗時には重複登録の可能性が残る。`phase=added` チェックポイントで緩和するが、research のVault保存と同様の限界を持つ。
-- 抽出した日時が誤っている場合、承認者は却下＋コメントで拾う前提。編集欄は設けない（HITL画面の複雑化を避ける）。
-- 分類・抽出は同一LLM呼び出しで行うため、`calendar_event` の形式不正時は例外を握って `memo` へフォールバックする（安全性優先）。`parse_classification_response` で title/start_time の必須と、start_time/end_time がISO日時としてパース可能であることを検証し、不正な予定のHITL Run生成を防ぐ。
+[移転先: 10-Decisions-Integrations.md](10-Decisions-Integrations.md)
 
 ## Inbox分類にリマインダー登録カテゴリとHITL承認を追加
 
-| 項目 | 内容 |
-|------|------|
-| 決定日 | 2026-08-15 |
-| カテゴリ | Inbox・HITL・リマインダー |
-| 決定内容 | Inbox分類（`research` / `calendar` / `memo`）に第4カテゴリ `reminder` を追加し、リマインダー登録すべきタスク・やることを検出する。`reminder` に分類された内容は、承認/却下のHITL Run（handler `reminders.add_approved_reminder`）へ登録し、承認後に既存の `add_reminder` ツール（`handler/apple_reminders.py`）でApple Remindersへ登録する。Daily Noteにはメモ欄に `[reminder]` タグで記録し、承認結果に関わらず内容を失わない。 |
-
-### 結論に至った経緯
-
-Inboxのメモ・音声転記に「明日までに本を返す」のようなTodoが混ざっており、Daily Noteへの記録だけではリマインドが効かない。カレンダー登録（`calendar` カテゴリ）と同様の流れを踏襲し、実Remindersへの副作用を伴うためデフォルトでHITL経由とする。登録対象の抽出詳細（タイトル・期限）は `context_json` の専用表示（`reminder` 型）としてHITL画面に提示する。承認/却下のみとし編集欄は設けない（誤りは却下＋コメントで拾う）。
-
-### 仕組みの概要
-
-1. **分類プロンプト:** `config/prompts/inbox_classification.md` に `reminder` カテゴリを追加。Todo系内容（「〜しておく」「〜を忘れずに」「〜する必要がある」）を判定し、`reminder`（title 必須 / due_date 任意）をJSONで返させる。相対期限は `${today}` / `${created_at}` から `YYYY-MM-DDTHH:MM:SS` へ解決。
-2. **分類コード:** `obsidian_inbox_merge.py` の `InboxClassification` に `reminder` を追加し、`parse_classification_response` で title 必須・due_date のISOパース検証（`_validate_reminder_due_date`）。`merge_content_into_daily_note` が `category == "reminder"` のとき `reminders/hitl.py::register_reminder_approval` を呼ぶ。
-3. **HITL登録:** コンテンツ＋期限のSHA-1ダイジェストによる決定的 run_id（`hrun_inbox_reminder_{sha1[:12]}`）で冪等に登録。期限をハッシュに含めることで、同一テキストでも期限が異なるタスクは別Runになる。checkpoint に `reminder`・元content・phaseを持ち、commit後に既存の `notify_hitl_run` でLINE通知（ベストエフォート）。
-4. **承認ハンドラ:** `reminders/hitl.py::add_approved_reminder`。却下は `phase=declined` でcomplete。承認時は `add_reminder.invoke({"title":..., "due_date":...})` を呼び、成功時 `phase=added` をcheckpointに含めた `HitlResult.complete` を返す。`phase=added` はhandler内で更新せず、dispatcherの最終トランザクションでRun statusと同一トランザクション内に原子的に永続化する（二重登録窓を排除）。登録は `main.py::register_hitl_handlers()` のコンポジションルートで行う。
-5. **完了済みRunの再登録ガード:** `register_reminder_approval` は決定的 run_id を持つため、同じ内容の再マージで既存の完了済みRun（`status=completed`）が `register_run_and_questions` により `checkpoint=awaiting_approval` / `status=ready_to_resume` へ巻き戻され、既存のapprove回答が保持されたまま再dispatchで二重登録される問題があった。登録前に `get_run` で完了済みか確認し、完了済みなら再登録せず `run_id` を返すガードを追加した（`calendar/hitl.py` にも同一の潜伏バグがあるため同様に適用）。
-5. **UI:** `HitlPage.tsx` に `reminder` 型の `context_json` 専用表示ブロックを追加（`calendar_event` と同パターン）。編集欄は設けず既存の承認/却下選択UIを使用。
-
-### トレードオフ
-
-- リマインダー登録は `add_reminder` が既存リマインダーを毎回新規作成するため完全な冪等ではなく、登録後のDB commit失敗時には重複登録の可能性が残る。`phase=added` チェックポイントで緩和するが、カレンダーと同様の限界を持つ。
-- 抽出した期限が誤っている場合、承認者は却下＋コメントで拾う前提。編集欄は設けない。
-- 分類・抽出は同一LLM呼び出しで行うため、`reminder` の形式不正時は例外を握って `memo` へフォールバックする（安全性優先）。`parse_classification_response` で title 必須と、due_date がISO日時としてパース可能であることを検証する。
+[移転先: 10-Decisions-Integrations.md](10-Decisions-Integrations.md)
 
 ## SQLiteベースの常駐HITL Dispatcher Worker
 
-| 項目 | 内容 |
-|------|------|
-| 決定日 | 2026-08-16 |
-| カテゴリ | HITL・実行制御・ワーカー運用 |
-| 決定内容 | 専用LaunchAgent（`jp.shipweb.obsidian-ai-hub.hitl-worker`）で単一の常駐workerプロセスを運用し、5秒周期のポーリングとバックグラウンドHeartbeat、所有権付き条件確定、SIGTERM/SIGINTの優雅なドレインを導入する。 |
-
-### 結論に至った経緯
-
-Web UI や LINE からの回答入力後、HITL Run が `ready_to_resume` に遷移してから実行開始されるまでの最大遅延を5秒以内にするため、定期起動スケジューラ（毎分 dispatch）から常駐 worker への運用に移行した。外部キュー（Redis等）や新規スキーマは導入せず、既存の `hitl_runs.status = 'ready_to_resume'` と `lease_owner` / `lease_expires_at` を耐久キューとしてそのまま再利用する。
-
-### 仕組みの概要
-
-1. **常駐ワーカー・ループ (`HitlWorker`):**
-   - `python -m obsidian_ai_hub --hitl-worker` で起動。起動直後および5秒ごとに `process_expired_questions` と `get_eligible_runs` を実行し、Run を直列に処理する。
-2. **Heartbeat と所有権付き確定:**
-   - Run の claim 後、ハンドラー実行と並行してバックグラウンドスレッド (`HeartbeatRunner`) が専用の SQLite 接続を用いて 60 秒ごとに `lease_expires_at` を「現在時刻 + 5分」に延長する。
-   - 更新条件は `status = 'running'` かつ `lease_owner == worker_id` かつ `lease_expires_at >= now` である。
-   - Heartbeat が失敗（DBロック喪失や別プロセスによる上書き）した場合は worker を unhealthy とし、以後の Run は claim しない。
-   - ハンドラー終了後の結果確定 (`settle_run_outcome`) も同一の所有権・期限条件を満たし、かつ worker が healthy である場合のみコミットを許可する。満たさない場合は結果を保存せず、worker を exit code 1 で終了する。
-3. **優雅な停止 (SIGTERM / SIGINT Drain):**
-   - シグナル受信時は draining モードへ移行し、新規 Run の claim を停止する。
-   - 実行中の Run がある場合は Heartbeat を継続し、現在のハンドラーの完了と条件付き確定を待って正常終了（exit code 0）する。実行中 Run がなければ直ちに exit code 0 で終了する。
-4. **LaunchAgent 設定 (`jp.shipweb.obsidian-ai-hub.hitl-worker.plist`):**
-   - `RunAtLoad`, `KeepAlive`, `ExitTimeOut=360`, `ThrottleInterval=10`, `StandardOutPath`, `StandardErrorPath` を設定。
-   - `KeepAlive: true` のため、再配置・停止は `bootout` → `bootstrap` で行う。
-5. **手動復旧とスケジューラ:**
-   - `--hitl-dispatch` は手動復旧・障害調査用として維持する。二重実行を防ぐため `tasks/tasks.local.sample.yml` のサンプル設定では無効化（`enabled: false`）とし、注釈コメントを追加した。
+[移転先: 10-Decisions-HITL.md](10-Decisions-HITL.md)

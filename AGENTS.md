@@ -5,7 +5,8 @@
 - Before work that relies on prior product or architecture decisions, read
   [ai_wiki/00-Index.md](ai_wiki/00-Index.md).
 - Record durable implementation decisions, including their context and
-  rationale, in [ai_wiki/10-Decisions.md](ai_wiki/10-Decisions.md). Use
+  rationale, in the relevant decision record listed in
+  [ai_wiki/00-Index.md](ai_wiki/00-Index.md). Use
   [ai_wiki/20-Worklog.md](ai_wiki/20-Worklog.md) only for temporary progress
   notes and handoffs.
 

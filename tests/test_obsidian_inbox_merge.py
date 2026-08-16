@@ -1,9 +1,32 @@
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
 
 from obsidian_ai_hub import obsidian_inbox_merge
+
+
+def test_build_classification_prompt_includes_current_date():
+    rendered = obsidian_inbox_merge._build_classification_prompt(
+        "今月20日に歯医者",
+        effective_dt=datetime(2026, 8, 16, 9, 0, 0),
+    )
+
+    assert "基準日（今日）は `2026/8/16` です" in rendered
+    assert "今月20日に歯医者" in rendered
+
+
+def test_build_classification_prompt_requires_date_only_reminder_due_date():
+    rendered = obsidian_inbox_merge._build_classification_prompt(
+        "明日までに本を返す",
+        effective_dt=datetime(2026, 8, 16, 9, 0, 0),
+    )
+
+    assert "期限の時刻が明示されない場合は `YYYY-MM-DD`" in rendered
+    assert "時刻が明示される場合" in rendered
+    assert "`YYYY-MM-DDTHH:MM:SS`" in rendered
+    assert "開始時刻が不明なら `00:00:00` とする" in rendered
 
 
 def test_merge_content_into_daily_note_completes_successfully(tmp_path: Path):

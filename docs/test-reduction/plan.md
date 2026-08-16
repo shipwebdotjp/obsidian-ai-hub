@@ -1,7 +1,7 @@
 # テスト層再編プラン: Vitest 拡充と Playwright E2E 縮小
 
 > Phase 0 (ツールチェーンポリシー) 完了: 2026-07-24
-> 関連 ADR: [`ai_wiki/10-Decisions.md` の「フロントエンドのツールチェーンポリシー (Vite 6 + Vitest 4)」](../../ai_wiki/10-Decisions.md#フロントエンドのツールチェーンポリシー-vite-6--vitest-4)
+> 関連 ADR: [`ai_wiki/10-Decisions-Testing.md` の「フロントエンドのツールチェーンポリシー (Vite 6 + Vitest 4)」](../../ai_wiki/10-Decisions-Testing.md#フロントエンドのツールチェーンポリシー-vite-6--vitest-4)
 > 進行管理: [`todo.md`](./todo.md)
 
 ## 背景

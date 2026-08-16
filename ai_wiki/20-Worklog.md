@@ -1,12 +1,12 @@
 # Worklog
 
-一時的な進捗メモ・引き継ぎのみを記録する。恒久の決定は `10-Decisions.md` へ。
+一時的な進捗メモ・引き継ぎのみを記録する。恒久の決定は `00-Index.md` から適切な決定記録へ追加する。
 
 ## 次のセッションへの引き継ぎ（handoff）
 
 ### 2026-08-15: Bearer 認証一元化 — 検証・OCR 完了済
 
-`feature/public-api-endpoint` の Bearer 認証変更（決定は `10-Decisions.md` 参照）のフォローアップとして、
+`feature/public-api-endpoint` の Bearer 認証変更（決定は `10-Decisions-Web.md` 参照）のフォローアップとして、
 全 OCR 指摘対応後の再検証を完了した。
 
 - 非 E2E: `526 passed`（`test_health` 追加込み）。既知の環境依存失敗

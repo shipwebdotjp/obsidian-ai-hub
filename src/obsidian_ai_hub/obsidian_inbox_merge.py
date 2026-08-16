@@ -237,9 +237,16 @@ def wait_for_icloud_download(file_path: Path, timeout: int = 60) -> bool:
     return False
 
 
-def _build_classification_prompt(content: str) -> str:
+def _build_classification_prompt(
+    content: str, effective_dt: datetime | None = None
+) -> str:
+    current_dt = effective_dt or datetime.now().astimezone()
     return prompt.render_prompt(
-        config.INBOX_CLASSIFICATION_PROMPT_PATH, {"content": content}
+        config.INBOX_CLASSIFICATION_PROMPT_PATH,
+        {
+            "content": content,
+            "today": f"{current_dt.year}/{current_dt.month}/{current_dt.day}",
+        },
     )
 
 
@@ -337,7 +344,7 @@ def classify_inbox_content(
     content: str, effective_dt: datetime | None = None
 ) -> InboxClassification:
     try:
-        rendered_prompt = _build_classification_prompt(content)
+        rendered_prompt = _build_classification_prompt(content, effective_dt)
         response = llm_client.generate_llm_response(
             provider=config.INBOX_CLASSIFICATION_PROVIDER,
             model=config.INBOX_CLASSIFICATION_MODEL,
