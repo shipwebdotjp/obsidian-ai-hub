@@ -206,3 +206,20 @@
 - 新しい決定は `00-Index.md` を参照し、主な変更対象の領域の決定記録へ追加する。
 - 複数領域にまたがる場合も本文は1か所だけに置き、他の領域や索引からリンクする。
 - 新たな領域別記録が必要になった場合は、先に `00-Index.md` とこの運用ルールを更新する。
+
+## Inboxの準リアルタイム処理をHITLから分離したまま既存task runnerで毎分バッチ化
+
+| 項目 | 内容 |
+|------|------|
+| 決定日 | 2026-08-19 |
+| カテゴリ | アーキテクチャ・運用 / Inbox処理 |
+| 決定内容 | `merge_inbox` を `minutely` / `second: 0` に変更し、既存の LaunchAgent（`StartInterval: 60`）と `task_runner` の `fcntl` 単一実行ロックで毎分起動する。常駐worker・watchdog・FSEvents・launchd `WatchPaths` は導入しない。通常ファイルは `mtime` から5秒未満なら次回実行へ回し、iCloudオフロード済みファイルは既存のダウンロード要求と最大60秒待機を維持する。マージ・転記・分類が成功した場合のみ元ファイルを削除する。WhisperモデルはそのCLIプロセス内のみでロードし、終了時に解放する。HITL worker への統合せず、`10-Decisions-HITL.md` は変更しない。 |
+
+### 結論に至った経緯
+
+- **launchd `WatchPaths` を主トリガーにしない**: Appleのlaunchd資料（Creating Launch Daemons and Agents）に明記されている通り、`WatchPaths` はイベント欠落や不整合状態を許容する。Inbox処理を主トリガーにするには信頼性が不足するため、60秒間隔の `StartInterval` で毎分の `task_runner` 起動に乗せる。
+- **常駐worker・FSEvents を追加しない**: HITL worker は `KeepAlive` 常駐で応答責務を持ち、Inbox処理は冪等なバッチで十分準リアルタイム化できる。別workerを追加するとプロセス管理・依存・リソースが二重化し、HITLの責務境界を越える。
+- **既存 LaunchAgent と `task_runner` の単一実行ロックで十分**: `jp.shipweb.obsidian-ai-hub.plist` は `StartInterval: 60` で `task_runner` を起動済み。`task_runner.main()` は `RUNNER_LOCK_FILE` を `fcntl.LOCK_EX | LOCK_NB` で取得するため、長時間の音声転記中でも重複起動は抑止される。
+- **5秒猶予は mtime 基準の単一stat**: per-minute バッチが保存と同時刻で走った場合の軽い安全策として、`mtime + 5 > now` のとき処理・削除せず次回へ回す。待機や二重statは行わない。逐次書き込みの厳密検出は目的としない。
+- **削除は成功時のみ**: `os.remove` への置き換えにより、`is_icloud_offloaded` 待機失敗・読込失敗・転記失敗・マージ例外では元ファイルを残し、次回実行で再試行できるようにする。メモ分類フォールバックは成功として扱う（daily noteへ追記された=成功）。
+- **HITL分離**: calendar / reminder 分岐は HITL 承認runを登録するが、これは `10-Decisions-HITL.md` の既存責務であり、本決定のスコープ外。Inbox処理の起動方式のみを変更する。

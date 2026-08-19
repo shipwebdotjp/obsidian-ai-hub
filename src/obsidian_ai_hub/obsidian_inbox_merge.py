@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
 import subprocess
 import tempfile
@@ -423,154 +422,223 @@ def merge_content_into_daily_note(
     return classification.category
 
 
+# 最終更新からの猶予秒数: per-minute バッチが保存と同時刻で走った場合の安全策
+INBOX_FRESH_GRACE_SECONDS = 5
+
+
+def _ensure_daily_note(daily_file: Path) -> bool:
+    """
+    daily_file が無ければテンプレートから作成する。
+    失敗時は False を返す（呼び出し側はファイルを削除せず残す）。
+    """
+    if daily_file.exists():
+        return True
+    logger.info("Creating new daily note from template")
+    try:
+        template_content = config.TEMPLATE_PATH.read_text(encoding="utf-8")
+    except Exception:
+        logger.exception("Error reading template")
+        return False
+    daily_file.write_text(template_content, encoding="utf-8")
+    return True
+
+
+def _read_inbox_content(inbox_file: Path, ext: str) -> str | None:
+    """
+    Markdownはテキスト読込、音声はwhisperで転記して本文を返す。
+    失敗時は None（呼び出し側はファイルを削除せず残す）。
+    音声の一時ファイルは呼び出し側の finally で掃除する前提でパスを返す。
+    """
+    if ext in MARKDOWN_EXTENSIONS:
+        try:
+            return inbox_file.read_text(encoding="utf-8")
+        except Exception:
+            logger.exception("Error reading inbox file")
+            return None
+
+    if ext in AUDIO_EXTENSIONS:
+        logger.info("Transcribing audio file: %s", inbox_file.name)
+        try:
+            with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
+                tmp_path = Path(tmp.name)
+            with open(inbox_file, "rb") as src, open(tmp_path, "wb") as dst:
+                dst.write(src.read())
+
+            model = whisper.load_model("medium")  # または"medium", "small"
+            result = model.transcribe(tmp_path.as_posix(), language="ja")
+            raw_content = result["text"]
+            try:
+                rendered_prompt = prompt.render_prompt(
+                    config.INBOX_TRANSCRIPT_CORRECTION_PROMPT_PATH,
+                    {"raw_content": raw_content},
+                )
+                response = llm_client.generate_llm_response(
+                    provider=config.INBOX_AUDIO_CORRECTION_PROVIDER,
+                    model=config.INBOX_AUDIO_CORRECTION_MODEL,
+                    prompt=rendered_prompt,
+                    max_tokens=8192,
+                ).strip()
+            except Exception:
+                logger.exception("LLM correction failed, using raw content")
+                response = raw_content
+            content = response or raw_content
+            return content, tmp_path
+        except Exception:
+            logger.exception("Error transcribing audio file")
+            return None
+
+    return None
+
+
+def _resolve_daily_target(inbox_file: Path) -> tuple[Path, str] | None:
+    """
+    ファイルの birthtime から daily_file パスと hour_str を決定する。
+    失敗時は None。
+    """
+    try:
+        stat_info = inbox_file.stat()
+        try:
+            dt = datetime.fromtimestamp(stat_info.st_birthtime)
+        except (AttributeError, OSError):
+            dt = datetime.fromtimestamp(stat_info.st_mtime)
+    except OSError:
+        logger.exception("Error stating inbox file")
+        return None
+
+    if dt.hour < 9:
+        dt = dt - timedelta(days=1)
+
+    year = dt.strftime("%Y")
+    month = dt.strftime("%m")
+    day_str = dt.strftime("%Y-%m-%d")
+    hour_str = dt.strftime("%H:%M")
+
+    daily_dir = config.DAILY_PATH / year / month
+    try:
+        daily_dir.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        logger.exception("Failed to create daily note directory")
+        return None
+    return daily_dir / f"{day_str}.md", hour_str
+
+
+def process_inbox_file(inbox_file: Path, now: datetime | None = None) -> None:
+    """
+    Inbox 内の1ファイルを処理する。成功時のみ元ファイルを削除する。
+    失敗時は呼び出し側が次回実行で再試行できるようファイルを残す。
+    """
+    if now is None:
+        now = datetime.now()
+
+    if not inbox_file.is_file():
+        return
+
+    ext = inbox_file.suffix.lower()
+    if ext not in MARKDOWN_EXTENSIONS and ext not in AUDIO_EXTENSIONS:
+        return
+
+    # iCloud Driveでオンラインのままのファイルはダウンロードして待機
+    if is_icloud_offloaded(inbox_file):
+        logger.info("Downloading (iCloud online-only): %s", inbox_file.name)
+        try:
+            subprocess.run(
+                [
+                    "ditto",
+                    "-rsrc",
+                    inbox_file.as_posix(),
+                    inbox_file.with_suffix(inbox_file.suffix + ".tmp"),
+                ],
+                check=True,
+            )
+            inbox_file.unlink()
+            inbox_file.with_suffix(inbox_file.suffix + ".tmp").rename(inbox_file)
+            if not wait_for_icloud_download(inbox_file):
+                logger.warning(
+                    "Timeout waiting for iCloud download: %s", inbox_file.name
+                )
+                return
+        except (subprocess.CalledProcessError, FileNotFoundError, OSError):
+            logger.exception("Failed to download iCloud file: %s", inbox_file.name)
+            return
+
+    logger.info("Processing inbox file: %s", inbox_file.name)
+
+    # 通常ファイルは最終更新から5秒未満なら次回実行へ回す（二重stat・待機なし）
+    try:
+        stat_info = inbox_file.stat()
+    except OSError:
+        logger.exception("Error stating inbox file")
+        return
+
+    if stat_info.st_mtime + INBOX_FRESH_GRACE_SECONDS > now.timestamp():
+        logger.info(
+            "Deferring fresh inbox file (mtime within %ss): %s",
+            INBOX_FRESH_GRACE_SECONDS,
+            inbox_file.name,
+        )
+        return
+
+    # birthtime から daily_file を決定（macOS非対応なら mtime にフォールバック）
+    resolved = _resolve_daily_target(inbox_file)
+    if resolved is None:
+        return
+    daily_file, hour_str = resolved
+
+    if not _ensure_daily_note(daily_file):
+        return
+
+    # ファイル内容を読み込み（音声は tmp_path を返す）
+    tmp_path: Path | None = None
+    try:
+        content_result = _read_inbox_content(inbox_file, ext)
+        if isinstance(content_result, tuple):
+            content, tmp_path = content_result
+        elif content_result is None:
+            return
+        else:
+            content = content_result
+    finally:
+        if tmp_path is not None:
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except Exception:
+                logger.exception("Failed to clean up audio temp file")
+
+    try:
+        branch = merge_content_into_daily_note(content, daily_file, hour_str)
+    except Exception:
+        logger.exception("Failed to merge inbox content into daily note")
+        return
+
+    logger.info("Routed inbox content as: %s", branch)
+    if branch == "location":
+        logger.info("Merged content into daily note")
+    elif branch == "research":
+        logger.info("Added research content from inbox: %s", inbox_file.name)
+    else:
+        logger.info("Merged content into daily note")
+
+    try:
+        inbox_file.unlink()
+    except FileNotFoundError:
+        pass
+    except OSError:
+        logger.exception("Failed to remove processed inbox file")
+
+
 def main():
     if not config.INBOX_PATH.exists():
         logger.error("config.INBOX_PATH not found")
         return
 
-    # 現在の日付時刻を出力
-    # now = datetime.now()
-    # print(f"Current time: {now}")
-
-    # Inbox ディレクトリ内のファイルを処理
+    now = datetime.now()
     for inbox_file in config.INBOX_PATH.iterdir():
-        if not inbox_file.is_file():
-            continue
-
-        ext = inbox_file.suffix.lower()
-        if ext not in MARKDOWN_EXTENSIONS and ext not in AUDIO_EXTENSIONS:
-            continue
-
-        # iCloud Driveでオンラインのままのファイルはダウンロード
-        if is_icloud_offloaded(inbox_file):
-            logger.info("Downloading (iCloud online-only): %s", inbox_file.name)
-            try:
-                # subprocess.run(
-                #     ["xattr", "-d", "com.apple.quarantine", inbox_file.as_posix()],
-                #     check=True,
-                # )
-                subprocess.run(
-                    [
-                        "ditto",
-                        "-rsrc",
-                        inbox_file.as_posix(),
-                        inbox_file.with_suffix(inbox_file.suffix + ".tmp"),
-                    ],
-                    check=True,
-                )
-                inbox_file.unlink()
-                inbox_file.with_suffix(inbox_file.suffix + ".tmp").rename(inbox_file)
-                if not wait_for_icloud_download(inbox_file):
-                    logger.warning(
-                        "Timeout waiting for iCloud download: %s", inbox_file.name
-                    )
-                    continue
-            except (subprocess.CalledProcessError, FileNotFoundError, OSError):
-                logger.exception("Failed to download iCloud file: %s", inbox_file.name)
-                continue
-        else:
-            logger.info("Processing local file: %s", inbox_file.name)
-
-        logger.info("Processing inbox file: %s", inbox_file.name)
-
-        # ファイルの作成日時を取得（macOS対応）
         try:
-            stat_info = inbox_file.stat()
-            # Birth time（作成日時）を取得
-            dt = datetime.fromtimestamp(stat_info.st_birthtime)
-        except (AttributeError, OSError):
-            # st_birthtimeが存在しない場合は変更日時を使用
-            stat_info = inbox_file.stat()
-            dt = datetime.fromtimestamp(stat_info.st_mtime)
-
-        # 09:00以前なら前日に調整
-        if dt.hour < 9:
-            dt = dt - timedelta(days=1)
-
-        year = dt.strftime("%Y")
-        month = dt.strftime("%m")
-        day_str = dt.strftime("%Y-%m-%d")
-        hour_str = dt.strftime("%H:%M")
-
-        # Daily ノートのパスを決定し、必要ならディレクトリを作成
-        daily_dir = config.DAILY_PATH / year / month
-        daily_dir.mkdir(parents=True, exist_ok=True)
-        daily_file = daily_dir / f"{day_str}.md"
-
-        # Daily note が存在しない場合はテンプレートから作成
-        if not daily_file.exists():
-            logger.info("Creating new daily note from template")
-            try:
-                template_content = config.TEMPLATE_PATH.read_text(encoding="utf-8")
-            except Exception:
-                logger.exception("Error reading template")
-                continue
-            daily_file.write_text(template_content, encoding="utf-8")
-
-        # ファイル内容を読み込み
-        if ext in MARKDOWN_EXTENSIONS:
-            try:
-                content = inbox_file.read_text(encoding="utf-8")
-            except Exception:
-                logger.exception("Error reading inbox file")
-                continue
-        elif ext in AUDIO_EXTENSIONS:
-            try:
-                # 一時ファイルにコピーしてから処理（iCloud/ファイルロック問題の回避）
-                logger.info("Transcribing audio file: %s", inbox_file.name)
-                with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
-                    tmp_path = Path(tmp.name)
-                with open(inbox_file, "rb") as src, open(tmp_path, "wb") as dst:
-                    dst.write(src.read())
-
-                model = whisper.load_model("medium")  # または"medium", "small"
-                result = model.transcribe(tmp_path.as_posix(), language="ja")
-                raw_content = result["text"]
-                try:
-                    rendered_prompt = prompt.render_prompt(
-                        config.INBOX_TRANSCRIPT_CORRECTION_PROMPT_PATH,
-                        {"raw_content": raw_content},
-                    )
-                    response = llm_client.generate_llm_response(
-                        provider=config.INBOX_AUDIO_CORRECTION_PROVIDER,
-                        model=config.INBOX_AUDIO_CORRECTION_MODEL,
-                        prompt=rendered_prompt,
-                        max_tokens=8192,
-                    ).strip()
-                except Exception:
-                    logger.exception("LLM correction failed, using raw content")
-                    response = raw_content
-                content = response
-                if not content:
-                    content = raw_content
-            except Exception:
-                logger.exception("Error transcribing audio file")
-                if "tmp_path" in locals():
-                    try:
-                        tmp_path.unlink(missing_ok=True)
-                    except Exception:
-                        pass
-                continue
-
-        # 一時ファイルのクリーンアップ（オーディオ処理用）
-        if ext in AUDIO_EXTENSIONS and "tmp_path" in locals():
-            try:
-                tmp_path.unlink(missing_ok=True)
-            except Exception:
-                pass
-
-        branch = merge_content_into_daily_note(content, daily_file, hour_str)
-        logger.info("Routed inbox content as: %s", branch)
-        if branch == "location":
-            logger.info("Merged content into daily note")
-        elif branch == "research":
-            logger.info("Added research content from inbox: %s", inbox_file.name)
-        else:
-            logger.info("Merged content into daily note")
-
-        # 本番では削除するが、動作確認中はコメントアウト
-        os.remove(inbox_file)
-        # print(f"  Removed inbox file: {inbox_file.name}")
+            process_inbox_file(inbox_file, now=now)
+        except Exception:
+            logger.exception(
+                "Unexpected error processing inbox file: %s", inbox_file.name
+            )
 
 
 if __name__ == "__main__":

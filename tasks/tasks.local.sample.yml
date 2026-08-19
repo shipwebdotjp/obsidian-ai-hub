@@ -19,6 +19,18 @@
     second: [0, 30]
   command: 'echo "This runs every minute at 0 and 30 seconds"'
 
+# Per-minute Inbox merge. The task runner LaunchAgent already fires every 60s,
+# so inbox files are normally merged within ~1 minute of save.
+# Files updated within the last 5 seconds are deferred to the next run to
+# avoid racing with in-progress writes (the grace is a single stat check,
+# not a wait).
+- id: merge_inbox
+  enabled: true
+  schedule:
+    type: minutely
+    second: 0
+  command: 'uv --directory /path/to/obsidian-daily-merge run -m obsidian_ai_hub --merge-inbox'
+
 - id: sample_hourly_basic
   enabled: true
   schedule:

@@ -384,6 +384,15 @@ To create and send a weekly review draft on Sunday night, enable the
 weekly note must contain an empty `result::` line; the generated draft is saved
 immediately below it before the LINE Push notification is sent.
 
+For near-real-time Inbox processing, schedule `merge_inbox` with
+`type: minutely` and `second: 0`. The task runner LaunchAgent already fires
+every 60 seconds, so inbox files are usually merged within about a minute of
+save. Files whose `mtime` is within the last 5 seconds are deferred to the
+next run (a single stat check, no wait), which avoids racing with an
+in-progress write. iCloud-offloaded files are still downloaded and awaited up
+to 60 seconds, and Whisper is loaded only inside that CLI process and released
+when it exits.
+
 Each task entry uses this shape:
 
 ```yaml
