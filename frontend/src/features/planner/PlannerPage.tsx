@@ -20,6 +20,8 @@ interface Toast {
   kind: "info" | "error";
 }
 
+type ViewMode = "month" | "week";
+
 const WEEKDAYS = ["月", "火", "水", "木", "金", "土", "日"];
 
 function toISODate(d: Date): string {
@@ -36,10 +38,30 @@ function startOfWeek(d: Date): Date {
   return date;
 }
 
+function startOfMonth(d: Date): Date {
+  return new Date(d.getFullYear(), d.getMonth(), 1);
+}
+
+function addMonths(d: Date, n: number): Date {
+  return new Date(d.getFullYear(), d.getMonth() + n, 1);
+}
+
 function addDays(d: Date, n: number): Date {
   const date = new Date(d.getFullYear(), d.getMonth(), d.getDate());
   date.setDate(date.getDate() + n);
   return date;
+}
+
+function monthGridDays(anchor: Date): Date[] {
+  const first = startOfMonth(anchor);
+  const last = new Date(anchor.getFullYear(), anchor.getMonth() + 1, 0);
+  const gridStart = startOfWeek(first);
+  const gridEnd = addDays(startOfWeek(last), 6);
+  const days: Date[] = [];
+  for (let d = new Date(gridStart); d <= gridEnd; d = addDays(d, 1)) {
+    days.push(d);
+  }
+  return days;
 }
 
 function datePartOf(iso: string | null): string | null {
@@ -63,9 +85,16 @@ interface DayGroup {
 }
 
 function groupByDay(timeline: PlannerTimelineResponse, dayKey: string): DayGroup {
-  const appleEvents = timeline.apple_events.filter(
-    (e) => !e.all_day && datePartOf(e.start_time) === dayKey,
-  );
+  const appleEvents = timeline.apple_events.filter((e) => {
+    if (e.all_day) {
+      const s = datePartOf(e.start_time);
+      const en = datePartOf(e.end_time);
+      if (!s) return false;
+      if (en) return dayKey >= s && dayKey <= en;
+      return dayKey === s;
+    }
+    return datePartOf(e.start_time) === dayKey;
+  });
   const appleReminders = timeline.apple_reminders.filter(
     (r) => datePartOf(r.due_date) === dayKey,
   );
@@ -86,8 +115,84 @@ function errorMessage(e: unknown): string {
   return "エラーが発生しました";
 }
 
+function DayItems({
+  group,
+  selectedId,
+  onSelect,
+}: {
+  group: DayGroup;
+  selectedId: string | null;
+  onSelect: (id: string) => void;
+}) {
+  return (
+    <>
+      {group.appleEvents
+        .filter((e) => e.all_day)
+        .map((e, i) => (
+          <div
+            key={`ae-all-${i}`}
+            className="rounded bg-blue-200 px-2 py-1 text-xs font-medium text-blue-900"
+          >
+            ◐ {e.title}
+          </div>
+        ))}
+      {group.appleEvents
+        .filter((e) => !e.all_day)
+        .map((e, i) => (
+          <div
+            key={`ae-${i}`}
+            className="rounded bg-blue-100 px-2 py-1 text-xs text-blue-900"
+          >
+            <span className="font-medium">{timePartOf(e.start_time)}</span>{" "}
+            {e.title}
+          </div>
+        ))}
+      {group.appleReminders.map((r, i) => (
+        <div
+          key={`ar-${i}`}
+          className="rounded bg-blue-50 px-2 py-1 text-xs text-blue-800"
+        >
+          ⏰ {r.title}
+        </div>
+      ))}
+      {group.recurring.map((r, i) => (
+        <div
+          key={`rc-${i}`}
+          className="rounded bg-slate-100 px-2 py-1 text-xs text-slate-700"
+        >
+          🔁 {r.title}
+        </div>
+      ))}
+      {group.inbox.map((i) => (
+        <div
+          key={`in-${i.run_id}`}
+          className="rounded bg-amber-100 px-2 py-1 text-xs text-amber-900"
+        >
+          ⏳ {i.title}
+        </div>
+      ))}
+      {group.proposals.map((p) => (
+        <button
+          type="button"
+          key={p.proposal_id}
+          onClick={() => onSelect(p.proposal_id)}
+          data-testid="planner-proposal-chip"
+          className={`cursor-pointer rounded px-2 py-1 text-left text-xs text-purple-900 ${
+            selectedId === p.proposal_id
+              ? "bg-purple-700 text-white"
+              : "bg-purple-100 hover:bg-purple-200"
+          }`}
+        >
+          ✨ {p.title}
+        </button>
+      ))}
+    </>
+  );
+}
+
 export default function PlannerPage() {
-  const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()));
+  const [view, setView] = useState<ViewMode>("month");
+  const [anchor, setAnchor] = useState(() => startOfMonth(new Date()));
   const [timeline, setTimeline] = useState<PlannerTimelineResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -104,17 +209,31 @@ export default function PlannerPage() {
     }, 3500);
   }, []);
 
-  const weekEnd = useMemo(() => addDays(weekStart, 6), [weekStart]);
-  const days = useMemo(
-    () => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)),
-    [weekStart],
+  const isMonthView = view === "month";
+
+  const gridDays = useMemo(
+    () =>
+      isMonthView
+        ? monthGridDays(anchor)
+        : Array.from({ length: 7 }, (_, i) => addDays(anchor, i)),
+    [isMonthView, anchor],
   );
+  const rangeStart = gridDays[0];
+  const rangeEnd = gridDays[gridDays.length - 1];
+
+  const monthRows = useMemo(() => {
+    const rows: Date[][] = [];
+    for (let i = 0; i < gridDays.length; i += 7) {
+      rows.push(gridDays.slice(i, i + 7));
+    }
+    return rows;
+  }, [gridDays]);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    getPlannerTimeline(toISODate(weekStart), toISODate(weekEnd))
+    getPlannerTimeline(toISODate(rangeStart), toISODate(rangeEnd))
       .then((data) => {
         if (!cancelled) setTimeline(data);
       })
@@ -127,14 +246,28 @@ export default function PlannerPage() {
     return () => {
       cancelled = true;
     };
-  }, [weekStart, weekEnd, refreshKey]);
+  }, [rangeStart, rangeEnd, refreshKey]);
+
+  const handleViewChange = (next: ViewMode) => {
+    if (next === view) return;
+    setView(next);
+    setAnchor(
+      next === "month" ? startOfMonth(new Date()) : startOfWeek(new Date()),
+    );
+  };
+
+  const handlePrev = () =>
+    setAnchor(isMonthView ? addMonths(anchor, -1) : addDays(anchor, -7));
+  const handleNext = () =>
+    setAnchor(isMonthView ? addMonths(anchor, 1) : addDays(anchor, 7));
+  const handleToday = () =>
+    setAnchor(isMonthView ? startOfMonth(new Date()) : startOfWeek(new Date()));
 
   const selectedProposal = useMemo(
     () => timeline?.ai_proposals.find((p) => p.proposal_id === selectedId) ?? null,
     [timeline, selectedId],
   );
 
-  const allDayEvents = timeline?.apple_events.filter((e) => e.all_day) ?? [];
   const unscheduledProposals =
     timeline?.ai_proposals.filter(
       (p) => !datePartOf(p.kind === "calendar" ? p.start_time : p.due_date),
@@ -203,34 +336,63 @@ export default function PlannerPage() {
     <div className="flex h-full flex-col bg-slate-50">
       <header className="flex flex-wrap items-center gap-2 border-b border-slate-200 bg-white p-3 sm:gap-3 sm:p-4">
         <h1 className="text-base font-semibold">プランナー</h1>
+        <div className="flex items-center overflow-hidden rounded border border-slate-300 text-sm">
+          <button
+            type="button"
+            onClick={() => handleViewChange("month")}
+            aria-pressed={isMonthView}
+            className={`cursor-pointer px-3 py-1 ${
+              isMonthView
+                ? "bg-slate-900 text-white"
+                : "bg-white text-slate-700 hover:bg-slate-50"
+            }`}
+          >
+            月
+          </button>
+          <button
+            type="button"
+            onClick={() => handleViewChange("week")}
+            aria-pressed={!isMonthView}
+            className={`cursor-pointer px-3 py-1 ${
+              !isMonthView
+                ? "bg-slate-900 text-white"
+                : "bg-white text-slate-700 hover:bg-slate-50"
+            }`}
+          >
+            週
+          </button>
+        </div>
         <div className="flex items-center gap-1">
           <button
             type="button"
-            onClick={() => setWeekStart(addDays(weekStart, -7))}
-            aria-label="前の週"
+            onClick={handlePrev}
+            aria-label={isMonthView ? "前の月" : "前の週"}
             className="cursor-pointer rounded border border-slate-300 px-3 py-1 text-sm"
           >
             ‹
           </button>
           <button
             type="button"
-            onClick={() => setWeekStart(startOfWeek(new Date()))}
+            onClick={handleToday}
             className="cursor-pointer rounded border border-slate-300 px-3 py-1 text-sm"
           >
-            今週
+            {isMonthView ? "今日" : "今週"}
           </button>
           <button
             type="button"
-            onClick={() => setWeekStart(addDays(weekStart, 7))}
-            aria-label="次の週"
+            onClick={handleNext}
+            aria-label={isMonthView ? "次の月" : "次の週"}
             className="cursor-pointer rounded border border-slate-300 px-3 py-1 text-sm"
           >
             ›
           </button>
         </div>
         <span className="text-sm text-slate-600">
-          {toISODate(weekStart).replace(/-/g, "/")} 〜{" "}
-          {toISODate(weekEnd).replace(/-/g, "/")}
+          {isMonthView
+            ? `${anchor.getFullYear()}/${anchor.getMonth() + 1}`
+            : `${toISODate(rangeStart).replace(/-/g, "/")} 〜 ${toISODate(
+                rangeEnd,
+              ).replace(/-/g, "/")}`}
         </span>
         <div className="ml-auto flex gap-2">
           <button
@@ -271,103 +433,98 @@ export default function PlannerPage() {
             </div>
           ) : timeline ? (
             <div className="min-w-[720px] p-3">
-              {allDayEvents.length > 0 && (
-                <div className="mb-2 rounded border border-slate-200 bg-white p-2">
-                  <div className="mb-1 text-xs font-semibold text-slate-500">終日</div>
-                  <div className="flex flex-wrap gap-1">
-                    {allDayEvents.map((e, i) => (
-                      <span
-                        key={i}
-                        className="rounded bg-blue-100 px-2 py-0.5 text-xs text-blue-800"
+              {isMonthView ? (
+                <div className="flex flex-col gap-2">
+                  <div className="grid grid-cols-7 gap-2">
+                    {WEEKDAYS.map((w) => (
+                      <div
+                        key={w}
+                        className="py-1 text-center text-xs font-semibold text-slate-500"
                       >
-                        {e.title}
-                      </span>
+                        {w}
+                      </div>
                     ))}
                   </div>
+                  {monthRows.map((row, ri) => (
+                    <div key={ri} className="grid grid-cols-7 gap-2">
+                      {row.map((day) => {
+                        const key = toISODate(day);
+                        const group = groupByDay(timeline, key);
+                        const inMonth = day.getMonth() === anchor.getMonth();
+                        const today = isToday(day);
+                        return (
+                          <div
+                            key={key}
+                            className={`flex min-h-24 flex-col rounded border ${
+                              today ? "border-blue-400" : "border-slate-200"
+                            } ${inMonth ? "bg-white" : "bg-slate-100"}`}
+                          >
+                            <div
+                              className={`border-b border-slate-100 px-2 py-1 text-right text-xs ${
+                                today
+                                  ? "bg-blue-50 font-bold text-blue-700"
+                                  : inMonth
+                                    ? "text-slate-600"
+                                    : "text-slate-400"
+                              }`}
+                            >
+                              {day.getDate()}
+                            </div>
+                            <div className="flex max-h-32 flex-col gap-1 overflow-hidden p-1">
+                              <DayItems
+                                group={group}
+                                selectedId={selectedId}
+                                onSelect={setSelectedId}
+                              />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ))}
                 </div>
-              )}
-
-              <div className="grid grid-cols-7 gap-2">
-                {days.map((day, idx) => {
-                  const key = toISODate(day);
-                  const group = groupByDay(timeline, key);
-                  const today = isToday(day);
-                  return (
-                    <div
-                      key={key}
-                      className={`flex min-h-[420px] flex-col rounded border bg-white ${
-                        today ? "border-blue-400" : "border-slate-200"
-                      }`}
-                    >
+              ) : (
+                <div className="grid grid-cols-7 gap-2">
+                  {gridDays.map((day, idx) => {
+                    const key = toISODate(day);
+                    const group = groupByDay(timeline, key);
+                    const today = isToday(day);
+                    return (
                       <div
-                        className={`border-b border-slate-100 p-2 text-center text-xs font-semibold ${
-                          today ? "bg-blue-50 text-blue-700" : "text-slate-600"
+                        key={key}
+                        className={`flex min-h-[420px] flex-col rounded border bg-white ${
+                          today ? "border-blue-400" : "border-slate-200"
                         }`}
                       >
-                        <div>{WEEKDAYS[idx]}</div>
-                        <div>{day.getDate()}</div>
+                        <div
+                          className={`border-b border-slate-100 p-2 text-center text-xs font-semibold ${
+                            today ? "bg-blue-50 text-blue-700" : "text-slate-600"
+                          }`}
+                        >
+                          <div>{WEEKDAYS[idx]}</div>
+                          <div>{day.getDate()}</div>
+                        </div>
+                        <div className="flex flex-1 flex-col gap-1 overflow-y-auto p-1.5">
+                          <DayItems
+                            group={group}
+                            selectedId={selectedId}
+                            onSelect={setSelectedId}
+                          />
+                          {group.appleEvents.length === 0 &&
+                            group.appleReminders.length === 0 &&
+                            group.recurring.length === 0 &&
+                            group.inbox.length === 0 &&
+                            group.proposals.length === 0 && (
+                              <div className="text-center text-xs text-slate-300">
+                                -
+                              </div>
+                            )}
+                        </div>
                       </div>
-                      <div className="flex flex-1 flex-col gap-1 overflow-y-auto p-1.5">
-                        {group.appleEvents.map((e, i) => (
-                          <div
-                            key={`ae-${i}`}
-                            className="rounded bg-blue-100 px-2 py-1 text-xs text-blue-900"
-                          >
-                            <span className="font-medium">{timePartOf(e.start_time)}</span>{" "}
-                            {e.title}
-                          </div>
-                        ))}
-                        {group.appleReminders.map((r, i) => (
-                          <div
-                            key={`ar-${i}`}
-                            className="rounded bg-blue-50 px-2 py-1 text-xs text-blue-800"
-                          >
-                            ⏰ {r.title}
-                          </div>
-                        ))}
-                        {group.recurring.map((r, i) => (
-                          <div
-                            key={`rc-${i}`}
-                            className="rounded bg-slate-100 px-2 py-1 text-xs text-slate-700"
-                          >
-                            🔁 {r.title}
-                          </div>
-                        ))}
-                        {group.inbox.map((i) => (
-                          <div
-                            key={`in-${i.run_id}`}
-                            className="rounded bg-amber-100 px-2 py-1 text-xs text-amber-900"
-                          >
-                            ⏳ {i.title}
-                          </div>
-                        ))}
-                        {group.proposals.map((p) => (
-                          <button
-                            type="button"
-                            key={p.proposal_id}
-                            onClick={() => setSelectedId(p.proposal_id)}
-                            data-testid="planner-proposal-chip"
-                            className={`cursor-pointer rounded px-2 py-1 text-left text-xs text-purple-900 ${
-                              selectedId === p.proposal_id
-                                ? "bg-purple-700 text-white"
-                                : "bg-purple-100 hover:bg-purple-200"
-                            }`}
-                          >
-                            ✨ {p.title}
-                          </button>
-                        ))}
-                        {group.appleEvents.length === 0 &&
-                          group.appleReminders.length === 0 &&
-                          group.recurring.length === 0 &&
-                          group.inbox.length === 0 &&
-                          group.proposals.length === 0 && (
-                            <div className="text-center text-xs text-slate-300">-</div>
-                          )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+                    );
+                  })}
+                </div>
+              )}
 
               {unscheduledProposals.length > 0 && (
                 <div className="mt-2 rounded border border-slate-200 bg-white p-2">

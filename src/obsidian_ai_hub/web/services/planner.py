@@ -87,8 +87,8 @@ def get_planner_timeline(start_date: date, end_date: date) -> dict:
             apple_events.append(
                 {
                     "title": ev.get("title") or "",
-                    "start_time": None,
-                    "end_time": None,
+                    "start_time": ev.get("start"),
+                    "end_time": ev.get("end"),
                     "location": None,
                     "all_day": True,
                 }

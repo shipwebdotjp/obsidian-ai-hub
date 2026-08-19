@@ -25,7 +25,12 @@ def _fake_external(start_date, end_date):
                 "end": "2026-08-20T10:00:00",
                 "all_day": False,
             },
-            {"title": "終日予定", "all_day": True},
+            {
+                "title": "終日予定",
+                "all_day": True,
+                "start": "2026-08-20T00:00:00+09:00",
+                "end": "2026-08-20T00:00:00+09:00",
+            },
         ],
         "reminders": [{"title": "リマインダー", "due": "2026-08-20"}],
         "error": None,
@@ -71,6 +76,8 @@ def test_planner_timeline_merges_layers(test_memory_db_path, client):
     assert data["apple_events"][0]["title"] == "Appleイベント"
     assert data["apple_events"][0]["start_time"] == "2026-08-20T09:00:00"
     assert data["apple_events"][1]["all_day"] is True
+    assert data["apple_events"][1]["start_time"] == "2026-08-20T00:00:00+09:00"
+    assert data["apple_events"][1]["end_time"] == "2026-08-20T00:00:00+09:00"
     assert data["apple_reminders"][0]["title"] == "リマインダー"
     assert data["recurring_events"][0]["title"] == "定期掃除"
     assert data["recurring_events"][0]["date"] == "2026-08-20"

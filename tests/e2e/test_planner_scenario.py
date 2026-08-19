@@ -15,6 +15,9 @@ def test_planner_shows_seeded_proposals_and_edit_saves(
     page.goto(f"{e2e_server_url}/planner")
 
     expect(page.get_by_role("heading", name="プランナー")).to_be_visible()
+    expect(page.get_by_role("button", name="月", exact=True)).to_have_attribute(
+        "aria-pressed", "true"
+    )
 
     chip = page.get_by_test_id("planner-proposal-chip")
     expect(chip.filter(has_text="歯科検診")).to_be_visible()

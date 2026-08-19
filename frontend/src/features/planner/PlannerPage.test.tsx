@@ -1,4 +1,4 @@
-import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import PlannerPage from "./PlannerPage";
@@ -42,7 +42,7 @@ const sampleTimeline = {
       all_day: false,
       source: "apple",
     },
-    { title: "終日予定", start_time: null, end_time: null, location: null, all_day: true, source: "apple" },
+    { title: "終日予定", start_time: "2026-08-20T00:00:00", end_time: "2026-08-20T00:00:00", location: null, all_day: true, source: "apple" },
   ],
   apple_reminders: [{ title: "リマインダーA", due_date: "2026-08-20", source: "apple" }],
   apple_error: null,
@@ -92,19 +92,152 @@ afterEach(() => {
 });
 
 describe("PlannerPage", () => {
-  it("loads the week timeline and renders all layers", async () => {
+  const now = new Date();
+  const monthLabel = `${now.getFullYear()}/${now.getMonth() + 1}`;
+  const prevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const prevMonthLabel = `${prevMonth.getFullYear()}/${prevMonth.getMonth() + 1}`;
+  const fmt = (d: Date) =>
+    `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, "0")}/${String(
+      d.getDate(),
+    ).padStart(2, "0")}`;
+  const weekStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const dow = weekStart.getDay();
+  weekStart.setDate(weekStart.getDate() + (dow === 0 ? -6 : 1 - dow));
+  const weekEnd = new Date(weekStart);
+  weekEnd.setDate(weekEnd.getDate() + 6);
+  const weekLabel = `${fmt(weekStart)} 〜 ${fmt(weekEnd)}`;
+  const prevWeekEnd = new Date(weekStart);
+  prevWeekEnd.setDate(prevWeekEnd.getDate() - 1);
+  const prevWeekStart = new Date(prevWeekEnd);
+  prevWeekStart.setDate(prevWeekStart.getDate() - 6);
+  const prevWeekLabel = `${fmt(prevWeekStart)} 〜 ${fmt(prevWeekEnd)}`;
+
+  it("loads the default month timeline and renders all layers", async () => {
     render(<PlannerPage />);
 
     await waitFor(() => {
       expect(mockGetTimeline).toHaveBeenCalledTimes(1);
     });
 
+    expect(screen.getByRole("button", { name: "月" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByText(monthLabel)).toBeInTheDocument();
     expect(screen.getByText("Appleミーティング")).toBeInTheDocument();
-    expect(screen.getByText("終日予定")).toBeInTheDocument();
+    expect(screen.getByText("◐ 終日予定")).toBeInTheDocument();
     expect(screen.getByText(/リマインダーA/)).toBeInTheDocument();
     expect(screen.getByText(/定期掃除/)).toBeInTheDocument();
     expect(screen.getByText(/確認待ち予定/)).toBeInTheDocument();
     expect(screen.getByText(/歯科検診/)).toBeInTheDocument();
+  });
+
+  it("renders all-day events across the inclusive end date", async () => {
+    mockGetTimeline.mockResolvedValue({
+      ...sampleTimeline,
+      apple_events: [
+        {
+          title: "連休イベント",
+          start_time: "2026-08-20T00:00:00",
+          end_time: "2026-08-22T00:00:00",
+          location: null,
+          all_day: true,
+          source: "apple",
+        },
+      ],
+    } as any);
+    render(<PlannerPage />);
+
+    const cells = await screen.findAllByText("◐ 連休イベント");
+    expect(cells).toHaveLength(3);
+    expect(screen.queryByText("終日")).not.toBeInTheDocument();
+  });
+
+  it("shows a single-day all-day event once", async () => {
+    mockGetTimeline.mockResolvedValue({
+      ...sampleTimeline,
+      apple_events: [
+        {
+          title: "誕生日",
+          start_time: "2026-08-20T00:00:00",
+          end_time: "2026-08-20T00:00:00",
+          location: null,
+          all_day: true,
+          source: "apple",
+        },
+      ],
+    } as any);
+    render(<PlannerPage />);
+
+    const cells = await screen.findAllByText("◐ 誕生日");
+    expect(cells).toHaveLength(1);
+  });
+
+  it("navigates to the previous month and refetches", async () => {
+    const user = userEvent.setup();
+    render(<PlannerPage />);
+
+    await waitFor(() => {
+      expect(mockGetTimeline).toHaveBeenCalledTimes(1);
+    });
+
+    await user.click(screen.getByLabelText("前の月"));
+
+    await waitFor(() => {
+      expect(mockGetTimeline).toHaveBeenCalledTimes(2);
+    });
+    expect(screen.getByText(prevMonthLabel)).toBeInTheDocument();
+  });
+
+  it("switches to week view, shows the current week, and navigates", async () => {
+    const user = userEvent.setup();
+    render(<PlannerPage />);
+
+    await waitFor(() => {
+      expect(mockGetTimeline).toHaveBeenCalledTimes(1);
+    });
+
+    await user.click(screen.getByRole("button", { name: "週" }));
+
+    await waitFor(() => {
+      expect(mockGetTimeline).toHaveBeenCalledTimes(2);
+    });
+    expect(screen.getByRole("button", { name: "週" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByText(weekLabel)).toBeInTheDocument();
+    expect(screen.getByText(/歯科検診/)).toBeInTheDocument();
+
+    await user.click(screen.getByLabelText("前の週"));
+
+    await waitFor(() => {
+      expect(mockGetTimeline).toHaveBeenCalledTimes(3);
+    });
+    expect(screen.getByText(prevWeekLabel)).toBeInTheDocument();
+  });
+
+  it("switches back to month view and refetches", async () => {
+    const user = userEvent.setup();
+    render(<PlannerPage />);
+
+    await waitFor(() => {
+      expect(mockGetTimeline).toHaveBeenCalledTimes(1);
+    });
+
+    await user.click(screen.getByRole("button", { name: "週" }));
+    await waitFor(() => {
+      expect(mockGetTimeline).toHaveBeenCalledTimes(2);
+    });
+
+    await user.click(screen.getByRole("button", { name: "月" }));
+    await waitFor(() => {
+      expect(mockGetTimeline).toHaveBeenCalledTimes(3);
+    });
+    expect(screen.getByRole("button", { name: "月" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
   });
 
   it("opens the detail panel for a selected AI proposal and rejects it", async () => {
@@ -184,21 +317,6 @@ describe("PlannerPage", () => {
       expect(mockGenerate).toHaveBeenCalledTimes(1);
     });
     expect(await screen.findByText("AI提案を2件生成しました")).toBeInTheDocument();
-  });
-
-  it("navigates to the previous week and refetches", async () => {
-    const user = userEvent.setup();
-    render(<PlannerPage />);
-
-    await waitFor(() => {
-      expect(mockGetTimeline).toHaveBeenCalledTimes(1);
-    });
-
-    await user.click(screen.getByLabelText("前の週"));
-
-    await waitFor(() => {
-      expect(mockGetTimeline).toHaveBeenCalledTimes(2);
-    });
   });
 
   it("shows the apple error banner when present", async () => {

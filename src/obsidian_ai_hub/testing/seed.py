@@ -240,7 +240,7 @@ def seed_planner_demo_data() -> None:
     """Insert a few planner proposals for the planner playground E2E flow.
 
     Dates are computed relative to today so the seeded proposals land inside
-    the current-week view of the Planner page.
+    the current-month view (the Planner page default).
     """
     ensure_test_mode()
     from datetime import date, timedelta
@@ -248,22 +248,27 @@ def seed_planner_demo_data() -> None:
     from obsidian_ai_hub.planner.store import create_proposal
 
     today = date.today()
-    # Monday of the current week.
-    monday = today - timedelta(days=today.weekday())
+    # Two scheduled proposals land inside the current month so they are visible
+    # in the default month view even when the current week crosses a month
+    # boundary.
+    first_day = today
+    second_day = today + timedelta(days=1)
+    if second_day.month != today.month:
+        second_day = today - timedelta(days=1)
 
     proposals = [
         {
             "kind": "calendar",
             "title": "歯科検診",
-            "start_time": f"{monday + timedelta(days=1)}T10:00:00",
-            "end_time": f"{monday + timedelta(days=1)}T11:00:00",
+            "start_time": f"{first_day}T10:00:00",
+            "end_time": f"{first_day}T11:00:00",
             "location": "かもめ歯科",
             "rationale": "定期検診の案内が届いていたため",
         },
         {
             "kind": "reminder",
             "title": "図書館に本を返す",
-            "due_date": f"{monday + timedelta(days=2)}",
+            "due_date": f"{second_day}",
             "rationale": "借りた本の返却期限が近づいているため",
         },
         {

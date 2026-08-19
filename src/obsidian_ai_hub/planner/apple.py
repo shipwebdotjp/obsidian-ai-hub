@@ -99,8 +99,11 @@ def fetch_calendar_events(
 ) -> list[dict]:
     """Fetch calendar events in [start_date, end_date] as dicts.
 
-    All-day events are returned as {"title", "all_day": True}; timed events as
-    {"title", "start", "end"} with ISO timestamps in the given timezone.
+    All-day events are returned as {"title", "all_day": True, "start", "end"}
+    with ISO timestamps at midnight in the given timezone; `end` is the last
+    day's midnight (inclusive, matching EventKit's representation). Timed
+    events are {"title", "start", "end"} with ISO timestamps in the given
+    timezone.
     """
     config.ensure_external_allowed("Apple Calendar (EventKit)")
     if not EVENT_KIT_AVAILABLE:
@@ -137,16 +140,19 @@ def fetch_calendar_events(
         elif hasattr(e, "allDay"):
             is_all_day = bool(e.allDay())
 
-        if is_all_day:
-            out.append({"title": title, "all_day": True})
-            continue
-
         s = datetime.fromtimestamp(
             float(e.startDate().timeIntervalSince1970()), tz=tz
         ).isoformat()
         en = datetime.fromtimestamp(
             float(e.endDate().timeIntervalSince1970()), tz=tz
         ).isoformat()
+
+        if is_all_day:
+            out.append(
+                {"title": title, "all_day": True, "start": s, "end": en}
+            )
+            continue
+
         out.append({"title": title, "start": s, "end": en, "all_day": False})
 
     return out
