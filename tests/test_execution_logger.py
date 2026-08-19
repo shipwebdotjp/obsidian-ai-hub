@@ -78,9 +78,15 @@ def test_old_logs_cleanup(test_memory_db_path):
     finally:
         conn.close()
 
-    # Trigger a write which triggers cleanup
+    # Run a normal write first: it must NOT trigger cleanup
     run_id = str(uuid.uuid4())
     execution_logger.start_command_run(run_id, "trigger-cmd", {})
+    items, total = execution_logger.list_execution_logs()
+    ids = {item["id"] for item in items}
+    assert "old-run" in ids
+
+    # Daily maintenance task performs the cleanup explicitly
+    execution_logger.cleanup_old_logs_now(days=30)
 
     # Check database: old-run should be deleted, new-cmd and trigger-cmd should remain
     items, total = execution_logger.list_execution_logs()

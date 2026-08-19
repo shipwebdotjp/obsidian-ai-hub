@@ -8,6 +8,8 @@
 
     <key>ProgramArguments</key>
     <array>
+        <string>{{PWD}}/scripts/launchd_log_wrapper.sh</string>
+        <string>obsidian_hitl_worker</string>
         <string>{{PWD}}/.venv/bin/python3</string>
         <string>-m</string>
         <string>obsidian_ai_hub</string>
@@ -36,9 +38,9 @@
     <integer>10</integer>
 
     <key>StandardOutPath</key>
-    <string>/tmp/obsidian_hitl_worker.log</string>
+    <string>/dev/null</string>
 
     <key>StandardErrorPath</key>
-    <string>/tmp/obsidian_hitl_worker.err</string>
+    <string>/dev/null</string>
 </dict>
 </plist>

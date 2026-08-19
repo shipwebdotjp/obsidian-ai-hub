@@ -4,6 +4,24 @@
 
 ## 次のセッションへの引き継ぎ（handoff）
 
+### 2026-08-19: 1分間隔タスクのログ抑制（task_state + 日次クリーンアップ）実装済
+
+決定記録: `10-Decisions-Architecture.md`「1分間隔タスク向けのログ抑制（task_state 集計 + 日次クリーンアップ）」。
+
+実装完了・検証済:
+
+- バックエンド: スキーマv19 `task_state`、`upsert_task_state` / `suppress_command_run` / `list_task_states` / `cleanup_old_logs_now`、`merge_inbox` のカウント返却、`run_and_log` の `task_id` / `empty_result_predicate`、`--cleanup-execution-logs`、`cleanup_execution_logs_daily`(03:20)、`GET /api/v1/task-states`。
+- フロントエンド: 実行ログ画面の task-status パネル（30秒自動更新）。
+- launchd: `scripts/launchd_log_wrapper.sh`（1 MiB・7世代ローテーション）を両 plist の起動コマンドに適用、`StandardOut/ErrorPath` を `/dev/null` に変更。
+- 検証: `uv run pytest tests/` → `654 passed`（旧 `== 18` を主張していた 4 テストを `== 19` に更新）。Frontend `vitest` → `104 passed`、`npm run build` OK。E2E `make test-e2e` → `7 passed`。
+- lint: 新規ファイル（`tests/test_task_state.py`, `web/routes/task_states.py`, `web/services/task_states.py`）は `ruff` clean。`service.py` の F401 は既存のファサード再エクスポート由来（変更前 74 → 変更後 75、追加1件は同パターン）。
+
+残作業・注意:
+
+- 変更は未 commit（ユーザーが commit を依頼していない）。
+- 本番反映は未実施: plist 再ロード・`task_runner` 再起動はユーザー指示待ち。旧挙動（書き込み時クリーンアップ）は関数を残していないため、反映後に毎分空振りが `command_runs` に増えないことを確認する。
+- `make logs` 系ターゲットが `/tmp/obsidian_merge.log` `/tmp/obsidian_merge.err` を参照している場合、ラッパー経由後もパスは不変（確認済み不要だが、次回動作確認時に実在を確認）。
+
 ### 2026-08-15: Bearer 認証一元化 — 検証・OCR 完了済
 
 `feature/public-api-endpoint` の Bearer 認証変更（決定は `10-Decisions-Web.md` 参照）のフォローアップとして、

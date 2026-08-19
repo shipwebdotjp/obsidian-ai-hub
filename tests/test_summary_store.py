@@ -44,7 +44,7 @@ def test_schema_version_bump(test_memory_db_path):
     try:
         cursor = conn.cursor()
         cursor.execute("PRAGMA user_version;")
-        assert cursor.fetchone()[0] == 18
+        assert cursor.fetchone()[0] == 19
 
         cursor.execute(
             "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;"
@@ -61,6 +61,7 @@ def test_schema_version_bump(test_memory_db_path):
         assert "person_candidates" in tables
         assert "summary_person_candidates" in tables
         assert "summary_person_assignments" in tables
+        assert "task_state" in tables
     finally:
         conn.close()
 

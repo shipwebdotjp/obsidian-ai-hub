@@ -31,19 +31,166 @@ def mask_sensitive_dict(d: Any) -> Any:
     return d
 
 
-def cleanup_old_logs(conn) -> None:
+def cleanup_old_logs_now(days: int = 30) -> None:
+    """One-shot cleanup of execution/LLM logs older than `days`.
+
+    Opens its own connection so the daily maintenance task can invoke it
+    without any in-flight command run. Does not touch task_state.
     """
-    Deletes logs older than 30 days based on their started_at timestamp.
-    First deletes LLM logs, then command logs.
-    """
+    conn = get_db_connection()
     try:
-        cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
-        # Delete LLM call logs first
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
         conn.execute("DELETE FROM llm_call_logs WHERE started_at < ?", (cutoff,))
-        # Then delete command runs
         conn.execute("DELETE FROM command_runs WHERE started_at < ?", (cutoff,))
+        conn.commit()
     except Exception as e:
         logger.warning("Failed to clean up old logs: %s", e)
+    finally:
+        conn.close()
+
+
+def upsert_task_state(
+    task_id: str,
+    *,
+    result: Optional[Dict[str, Any]] = None,
+    error: Optional[Exception] = None,
+    now_iso: Optional[str] = None,
+) -> None:
+    """Upsert a single task_state row for a high-frequency task.
+
+    Three modes:
+    - Empty success (no work attempted): increment consecutive_empty_count,
+      keep last_processed_at, clear last_error_*.
+    - Non-empty success (work attempted): reset consecutive_empty_count to 0;
+      update last_processed_at only when processed > 0; refresh latest counts;
+      clear last_error_*.
+    - Failure (exception raised): update last_error_*; leave
+      consecutive_empty_count and last_processed_at unchanged.
+
+    `result` is the dict returned by the command (processed/skipped/failed).
+    """
+    conn = get_db_connection()
+    try:
+        now = now_iso or datetime.now(timezone.utc).isoformat()
+        processed = int((result or {}).get("processed", 0) or 0)
+        skipped = int((result or {}).get("skipped", 0) or 0)
+        failed = int((result or {}).get("failed", 0) or 0)
+        is_empty = processed == 0 and failed == 0
+        is_error = error is not None
+
+        # Current row, used only to derive increments/preserved fields. The
+        # write below is a single atomic upsert, so a concurrent first-write
+        # cannot raise IntegrityError on the primary key.
+        cur = conn.execute("SELECT * FROM task_state WHERE task_id = ?", (task_id,))
+        row = cur.fetchone()
+
+        if row is None:
+            if is_error:
+                consecutive_empty = 0
+                last_processed = None
+                last_error_at = now
+                last_error_msg = str(error)
+                last_error_type = type(error).__name__
+            elif is_empty:
+                consecutive_empty = 1
+                last_processed = None
+                last_error_at = None
+                last_error_msg = None
+                last_error_type = None
+            else:
+                consecutive_empty = 0
+                last_processed = now if processed > 0 else None
+                last_error_at = None
+                last_error_msg = None
+                last_error_type = None
+        else:
+            if is_error:
+                consecutive_empty = row["consecutive_empty_count"]
+                last_processed = row["last_processed_at"]
+                last_error_at = now
+                last_error_msg = str(error)
+                last_error_type = type(error).__name__
+            elif is_empty:
+                consecutive_empty = row["consecutive_empty_count"] + 1
+                last_processed = row["last_processed_at"]
+                last_error_at = None
+                last_error_msg = None
+                last_error_type = None
+            else:
+                consecutive_empty = 0
+                last_processed = now if processed > 0 else row["last_processed_at"]
+                last_error_at = None
+                last_error_msg = None
+                last_error_type = None
+
+        conn.execute(
+            """
+            INSERT INTO task_state (
+                task_id, last_check_at, consecutive_empty_count,
+                last_processed_at, last_error_at, last_error_message, last_error_type,
+                processed_count, skipped_count, failed_count, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(task_id) DO UPDATE SET
+                last_check_at = excluded.last_check_at,
+                consecutive_empty_count = excluded.consecutive_empty_count,
+                last_processed_at = excluded.last_processed_at,
+                last_error_at = excluded.last_error_at,
+                last_error_message = excluded.last_error_message,
+                last_error_type = excluded.last_error_type,
+                processed_count = excluded.processed_count,
+                skipped_count = excluded.skipped_count,
+                failed_count = excluded.failed_count,
+                updated_at = excluded.updated_at
+            """,
+            (
+                task_id, now, consecutive_empty,
+                last_processed, last_error_at, last_error_msg, last_error_type,
+                processed, skipped, failed, now,
+            ),
+        )
+        conn.commit()
+    except Exception as e:
+        logger.error("Failed to upsert task state: %s", e)
+    finally:
+        conn.close()
+
+
+def suppress_command_run(run_id: str) -> bool:
+    """Delete a command run that turned out to be an empty no-op run.
+
+    Removes the command_runs row and, via ON DELETE CASCADE, any child LLM
+    call logs. Refuses to delete when LLM call logs exist for the run, since
+    that indicates real work happened and the logs must be preserved.
+
+    Returns True when the run was suppressed.
+    """
+    conn = get_db_connection()
+    try:
+        cur = conn.execute(
+            "SELECT 1 FROM llm_call_logs WHERE run_id = ? LIMIT 1", (run_id,)
+        )
+        if cur.fetchone() is not None:
+            return False
+        conn.execute("DELETE FROM command_runs WHERE run_id = ?", (run_id,))
+        conn.commit()
+        return True
+    except Exception as e:
+        logger.error("Failed to suppress command run: %s", e)
+        return False
+    finally:
+        conn.close()
+
+
+def list_task_states() -> List[Dict[str, Any]]:
+    """Return all task_state rows ordered by most recent check first."""
+    conn = get_db_connection()
+    try:
+        cur = conn.execute(
+            "SELECT * FROM task_state ORDER BY last_check_at DESC"
+        )
+        return [dict(r) for r in cur.fetchall()]
+    finally:
+        conn.close()
 
 
 def start_command_run(run_id: str, command: str, args: Dict[str, Any]) -> None:
@@ -59,7 +206,6 @@ def start_command_run(run_id: str, command: str, args: Dict[str, Any]) -> None:
             """,
             (run_id, command, args_json, started_at),
         )
-        cleanup_old_logs(conn)
         conn.commit()
     except Exception as e:
         logger.error("Failed to start command run: %s", e)
@@ -86,7 +232,6 @@ def succeed_command_run(run_id: str, result: Any) -> None:
             """,
             (finished_at, summary, run_id),
         )
-        cleanup_old_logs(conn)
         conn.commit()
     except Exception as e:
         logger.error("Failed to succeed command run: %s", e)
@@ -111,7 +256,6 @@ def fail_command_run(run_id: str, exc: Exception) -> None:
             """,
             (finished_at, exc_type, exc_msg, tb_str, run_id),
         )
-        cleanup_old_logs(conn)
         conn.commit()
     except Exception as e:
         logger.error("Failed to fail command run: %s", e)
@@ -141,7 +285,6 @@ def start_llm_call(
             """,
             (call_id, run_id, provider, model, temperature, max_tokens, prompt, started_at),
         )
-        cleanup_old_logs(conn)
         conn.commit()
     except Exception as e:
         logger.error("Failed to start LLM call: %s", e)
@@ -169,7 +312,6 @@ def succeed_llm_call(
             """,
             (response, prompt_tokens, completion_tokens, total_tokens, finish_reason, finished_at, call_id),
         )
-        cleanup_old_logs(conn)
         conn.commit()
     except Exception as e:
         logger.error("Failed to succeed LLM call: %s", e)
@@ -194,7 +336,6 @@ def fail_llm_call(call_id: str, exc: Exception) -> None:
             """,
             (finished_at, exc_type, exc_msg, tb_str, call_id),
         )
-        cleanup_old_logs(conn)
         conn.commit()
     except Exception as e:
         logger.error("Failed to fail LLM call: %s", e)

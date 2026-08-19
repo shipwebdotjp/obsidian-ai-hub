@@ -101,6 +101,9 @@ from obsidian_ai_hub.web.services.task_config import (
     preview_command,
     update_task_config,
 )
+from obsidian_ai_hub.web.services.task_states import (
+    list_task_states,
+)
 from obsidian_ai_hub.web.services.vault import (
     get_vault_file,
     search_vault,

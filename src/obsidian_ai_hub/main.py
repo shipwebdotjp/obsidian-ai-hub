@@ -310,10 +310,16 @@ def main():
         action="store_true",
         help="30日経過したLINE Webhook受信記録をクリーンアップ",
     )
+    parser.add_argument(
+        "--cleanup-execution-logs",
+        action="store_true",
+        help="30日経過した実行ログ（command_runs / llm_call_logs）をクリーンアップ",
+    )
     args = parser.parse_args()
     ran = False
 
-    def run_and_log(fn, name: str, cmd_args: dict = None):
+    def run_and_log(fn, name: str, cmd_args: dict = None, task_id: str = None,
+                    empty_result_predicate=None):
         import uuid
         from obsidian_ai_hub.utils import execution_logger
 
@@ -325,10 +331,17 @@ def main():
         try:
             res = fn()
             execution_logger.succeed_command_run(run_id, res)
+            if task_id is not None:
+                is_empty = bool(empty_result_predicate(res)) if empty_result_predicate else False
+                if is_empty:
+                    execution_logger.suppress_command_run(run_id)
+                execution_logger.upsert_task_state(task_id, result=res if isinstance(res, dict) else None)
             return res
         except Exception as e:
             print(f"[ERROR] {name}: {type(e).__name__}")
             execution_logger.fail_command_run(run_id, e)
+            if task_id is not None:
+                execution_logger.upsert_task_state(task_id, error=e)
             raise
         finally:
             print(f"[END] {name} at {datetime.now().isoformat()}")
@@ -387,7 +400,15 @@ def main():
         research_kwargs["output_style"] = args.output_style
 
     if args.merge_inbox:
-        run_and_log(obsidian_inbox_merge.main, "merge_inbox", {})
+        run_and_log(
+            obsidian_inbox_merge.main,
+            "merge_inbox",
+            {},
+            task_id="merge_inbox",
+            empty_result_predicate=lambda r: bool(
+                r and r.get("processed", 0) == 0 and r.get("failed", 0) == 0
+            ),
+        )
         ran = True
     if args.write_today_schedule:
         run_and_log(write_today_schedule.main, "write_today_schedule", {})
@@ -587,6 +608,15 @@ def main():
         from obsidian_ai_hub.line_webhook.store import cleanup_old_events
 
         run_and_log(lambda: cleanup_old_events(days=30), "cleanup_line_webhooks", {})
+        ran = True
+    if getattr(args, "cleanup_execution_logs", False):
+        from obsidian_ai_hub.utils import execution_logger
+
+        run_and_log(
+            lambda: execution_logger.cleanup_old_logs_now(days=30),
+            "cleanup_execution_logs",
+            {},
+        )
         ran = True
     if not ran:
         parser.print_help()

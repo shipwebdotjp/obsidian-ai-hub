@@ -10,6 +10,7 @@ from obsidian_ai_hub.web.routes import (
     projects,
     research,
     task_config,
+    task_states,
     vault,
 )
 
@@ -24,4 +25,5 @@ router.include_router(projects.router)
 router.include_router(people.router)
 router.include_router(task_config.router)
 router.include_router(execution_logs.router)
+router.include_router(task_states.router)
 router.include_router(hitl.router)

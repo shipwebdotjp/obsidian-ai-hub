@@ -840,6 +840,26 @@ class LLMCallDetail(BaseModel):
     traceback: Optional[str] = None
 
 
+# --- Task State schemas ---
+
+class TaskState(BaseModel):
+    task_id: str
+    last_check_at: str
+    consecutive_empty_count: int
+    last_processed_at: Optional[str] = None
+    last_error_at: Optional[str] = None
+    last_error_message: Optional[str] = None
+    last_error_type: Optional[str] = None
+    processed_count: int
+    skipped_count: int
+    failed_count: int
+    updated_at: str
+
+
+class TaskStateListResponse(BaseModel):
+    items: list[TaskState]
+
+
 class TaskConfigResponse(BaseModel):
     tasks: list[TaskItem]
     filepath: str

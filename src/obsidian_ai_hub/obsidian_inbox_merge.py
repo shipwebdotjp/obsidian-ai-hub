@@ -522,20 +522,25 @@ def _resolve_daily_target(inbox_file: Path) -> tuple[Path, str] | None:
     return daily_dir / f"{day_str}.md", hour_str
 
 
-def process_inbox_file(inbox_file: Path, now: datetime | None = None) -> None:
+def process_inbox_file(inbox_file: Path, now: datetime | None = None) -> str:
     """
     Inbox 内の1ファイルを処理する。成功時のみ元ファイルを削除する。
     失敗時は呼び出し側が次回実行で再試行できるようファイルを残す。
+
+    返り値:
+        "processed" - 正常にマージした
+        "skipped"   - まだ処理しない（保存直後・iCloud未DL・対象外など）
+        "failed"    - 処理中にエラーが発生した
     """
     if now is None:
         now = datetime.now()
 
     if not inbox_file.is_file():
-        return
+        return "skipped"
 
     ext = inbox_file.suffix.lower()
     if ext not in MARKDOWN_EXTENSIONS and ext not in AUDIO_EXTENSIONS:
-        return
+        return "skipped"
 
     # iCloud Driveでオンラインのままのファイルはダウンロードして待機
     if is_icloud_offloaded(inbox_file):
@@ -556,10 +561,10 @@ def process_inbox_file(inbox_file: Path, now: datetime | None = None) -> None:
                 logger.warning(
                     "Timeout waiting for iCloud download: %s", inbox_file.name
                 )
-                return
+                return "skipped"
         except (subprocess.CalledProcessError, FileNotFoundError, OSError):
             logger.exception("Failed to download iCloud file: %s", inbox_file.name)
-            return
+            return "failed"
 
     logger.info("Processing inbox file: %s", inbox_file.name)
 
@@ -568,7 +573,7 @@ def process_inbox_file(inbox_file: Path, now: datetime | None = None) -> None:
         stat_info = inbox_file.stat()
     except OSError:
         logger.exception("Error stating inbox file")
-        return
+        return "failed"
 
     if stat_info.st_mtime + INBOX_FRESH_GRACE_SECONDS > now.timestamp():
         logger.info(
@@ -576,16 +581,16 @@ def process_inbox_file(inbox_file: Path, now: datetime | None = None) -> None:
             INBOX_FRESH_GRACE_SECONDS,
             inbox_file.name,
         )
-        return
+        return "skipped"
 
     # birthtime から daily_file を決定（macOS非対応なら mtime にフォールバック）
     resolved = _resolve_daily_target(inbox_file)
     if resolved is None:
-        return
+        return "failed"
     daily_file, hour_str = resolved
 
     if not _ensure_daily_note(daily_file):
-        return
+        return "failed"
 
     # ファイル内容を読み込み（音声は tmp_path を返す）
     tmp_path: Path | None = None
@@ -594,7 +599,7 @@ def process_inbox_file(inbox_file: Path, now: datetime | None = None) -> None:
         if isinstance(content_result, tuple):
             content, tmp_path = content_result
         elif content_result is None:
-            return
+            return "failed"
         else:
             content = content_result
     finally:
@@ -608,7 +613,7 @@ def process_inbox_file(inbox_file: Path, now: datetime | None = None) -> None:
         branch = merge_content_into_daily_note(content, daily_file, hour_str)
     except Exception:
         logger.exception("Failed to merge inbox content into daily note")
-        return
+        return "failed"
 
     logger.info("Routed inbox content as: %s", branch)
     if branch == "location":
@@ -625,20 +630,27 @@ def process_inbox_file(inbox_file: Path, now: datetime | None = None) -> None:
     except OSError:
         logger.exception("Failed to remove processed inbox file")
 
+    return "processed"
 
-def main():
+
+def main() -> dict:
     if not config.INBOX_PATH.exists():
         logger.error("config.INBOX_PATH not found")
-        return
+        return {"processed": 0, "skipped": 0, "failed": 0, "checked": 0}
 
+    counts = {"processed": 0, "skipped": 0, "failed": 0, "checked": 0}
     now = datetime.now()
     for inbox_file in config.INBOX_PATH.iterdir():
+        counts["checked"] += 1
         try:
-            process_inbox_file(inbox_file, now=now)
+            status = process_inbox_file(inbox_file, now=now)
         except Exception:
             logger.exception(
                 "Unexpected error processing inbox file: %s", inbox_file.name
             )
+            status = "failed"
+        counts[status] = counts.get(status, 0) + 1
+    return counts
 
 
 if __name__ == "__main__":

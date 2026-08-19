@@ -116,3 +116,11 @@
     hour: 3
     minute: 15
   command: 'uv --directory /path/to/obsidian-daily-merge run -m obsidian_ai_hub --cleanup-line-webhooks'
+
+- id: cleanup_execution_logs_daily
+  enabled: true
+  schedule:
+    type: daily
+    hour: 3
+    minute: 20
+  command: 'uv --directory /path/to/obsidian-daily-merge run -m obsidian_ai_hub --cleanup-execution-logs'

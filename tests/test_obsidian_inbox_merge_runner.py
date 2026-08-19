@@ -139,8 +139,9 @@ def test_process_inbox_file_read_failure_keeps_file(tmp_path: Path):
             obsidian_inbox_merge, "merge_content_into_daily_note"
         ) as mock_merge,
     ):
-        obsidian_inbox_merge.process_inbox_file(inbox_file, now=fixed_now)
+        status = obsidian_inbox_merge.process_inbox_file(inbox_file, now=fixed_now)
 
+    assert status == "failed", "read failure must be classified as failed, not skipped"
     mock_merge.assert_not_called()
     assert inbox_file.exists(), "read failure must leave the file in place"
 
@@ -156,6 +157,7 @@ def test_process_inbox_file_transcribe_failure_keeps_file_and_cleans_tmp(tmp_pat
     inbox_file.write_bytes(b"\x00")
 
     fixed_now = datetime(2026, 8, 19, 10, 0, 0)
+    _set_mtime(inbox_file, fixed_now - timedelta(seconds=60))
 
     def fail_load_model(*args, **kwargs):
         raise RuntimeError("simulated whisper failure")
@@ -167,8 +169,9 @@ def test_process_inbox_file_transcribe_failure_keeps_file_and_cleans_tmp(tmp_pat
             obsidian_inbox_merge, "merge_content_into_daily_note"
         ) as mock_merge,
     ):
-        obsidian_inbox_merge.process_inbox_file(inbox_file, now=fixed_now)
+        status = obsidian_inbox_merge.process_inbox_file(inbox_file, now=fixed_now)
 
+    assert status == "failed", "transcribe failure must be classified as failed, not skipped"
     mock_merge.assert_not_called()
     assert inbox_file.exists(), "transcribe failure must leave the file in place"
 

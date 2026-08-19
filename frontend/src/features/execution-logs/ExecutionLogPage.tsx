@@ -1,5 +1,12 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { apiGet } from "../../api/client";
+import { formatDateTime } from "../../utils/date";
+
+// Health/poll thresholds, tied to the 1-minute merge_inbox cadence.
+const TASK_STATE_POLL_MS = 30_000;
+const ERROR_WINDOW_MS = 60 * 60 * 1000; // last_error_at: show エラー for 1h
+const ACTIVE_WINDOW_MS = 3 * 60 * 1000; // last_check_at: actively running
+const RECENT_WINDOW_MS = 24 * 60 * 60 * 1000; // last_check_at: seen recently
 
 interface ExecutionLogItem {
   id: string;
@@ -9,6 +16,20 @@ interface ExecutionLogItem {
   started_at: string;
   finished_at?: string;
   summary?: string;
+}
+
+interface TaskState {
+  task_id: string;
+  last_check_at: string;
+  consecutive_empty_count: number;
+  last_processed_at: string | null;
+  last_error_at: string | null;
+  last_error_message: string | null;
+  last_error_type: string | null;
+  processed_count: number;
+  skipped_count: number;
+  failed_count: number;
+  updated_at: string;
 }
 
 interface ExecutionChildLLMCall {
@@ -69,6 +90,10 @@ export default function ExecutionLogPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Task state (aggregated status of high-frequency tasks)
+  const [taskStates, setTaskStates] = useState<TaskState[]>([]);
+  const [taskStatesError, setTaskStatesError] = useState(false);
+
   // Filters state
   const [kind, setKind] = useState<string>("");
   const [status, setStatus] = useState<string>("");
@@ -117,6 +142,24 @@ export default function ExecutionLogPage() {
   useEffect(() => {
     fetchLogs();
   }, [kind, status, command, fromDate, toDate, page]);
+
+  const fetchTaskStates = useCallback(async () => {
+    try {
+      const res = await apiGet<{ items: TaskState[] }>("/api/v1/task-states");
+      setTaskStates(res.items);
+      setTaskStatesError(false);
+    } catch (_) {
+      // Best-effort: the task-state panel must not block the log browsing, but
+      // a broken panel should be visible instead of silently vanishing.
+      setTaskStatesError(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchTaskStates();
+    const interval = setInterval(fetchTaskStates, TASK_STATE_POLL_MS);
+    return () => clearInterval(interval);
+  }, [fetchTaskStates]);
 
   // Fetch detail when selection changes
   useEffect(() => {
@@ -194,6 +237,27 @@ export default function ExecutionLogPage() {
     return "bg-sky-50 text-sky-700 border-sky-200";
   };
 
+  const isWithinMs = (iso: string | null | undefined, withinMs: number) => {
+    if (!iso) return false;
+    const t = new Date(iso).getTime();
+    return Number.isFinite(t) && Date.now() - t < withinMs;
+  };
+
+  const formatTs = (v: string | null | undefined) => (v ? formatDateTime(v) : "");
+
+  const getTaskStateHealth = (ts: TaskState) => {
+    if (isWithinMs(ts.last_error_at, ERROR_WINDOW_MS)) {
+      return { label: "エラー", className: "bg-rose-50 text-rose-700 border-rose-200" };
+    }
+    if (isWithinMs(ts.last_check_at, ACTIVE_WINDOW_MS)) {
+      return { label: "稼働中", className: "bg-emerald-50 text-emerald-700 border-emerald-200" };
+    }
+    if (isWithinMs(ts.last_check_at, RECENT_WINDOW_MS)) {
+      return { label: "直近あり", className: "bg-amber-50 text-amber-700 border-amber-200" };
+    }
+    return { label: "停止", className: "bg-slate-50 text-slate-500 border-slate-200" };
+  };
+
   const totalPages = Math.ceil(total / limit) || 1;
 
   return (
@@ -203,6 +267,62 @@ export default function ExecutionLogPage() {
         <h1 className="text-xl font-bold text-slate-900">実行ログ & LLMコール履歴</h1>
         <p className="text-xs text-slate-500 mt-1">過去30日間の CLI 実行ログおよび LLM コールの詳細履歴を閲覧できます（閲覧専用）</p>
       </div>
+
+      {/* Task Status Panel */}
+      {taskStates.length > 0 && (
+        <div className="shrink-0 border-b border-slate-200 bg-white px-6 py-3">
+          <div className="flex items-center gap-2 mb-2">
+            <h2 className="text-xs font-bold text-slate-600 uppercase tracking-wider">
+              タスク状態（空振りはログに出さずここに集計）
+            </h2>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {taskStates.map((ts) => {
+              const health = getTaskStateHealth(ts);
+              return (
+                <div
+                  key={ts.task_id}
+                  className="border border-slate-200 rounded p-3 flex flex-col gap-1.5"
+                >
+                  <div className="flex justify-between items-center gap-2">
+                    <span className="font-semibold text-slate-800 text-sm truncate">
+                      {ts.task_id}
+                    </span>
+                    <span className={`text-[10px] uppercase font-bold border px-1.5 py-0.5 rounded shrink-0 ${health.className}`}>
+                      {health.label}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-[11px] text-slate-600">
+                    <span className="text-slate-400">最終確認</span>
+                    <span>{formatTs(ts.last_check_at) || "-"}</span>
+                    <span className="text-slate-400">空振り連続</span>
+                    <span>{ts.consecutive_empty_count} 回</span>
+                    <span className="text-slate-400">最終処理</span>
+                    <span>{formatTs(ts.last_processed_at) || "-"}</span>
+                    <span className="text-slate-400">直近の処理/スキップ/失敗</span>
+                    <span>
+                      {ts.processed_count} / {ts.skipped_count} / {ts.failed_count}
+                    </span>
+                  </div>
+                  {ts.last_error_message && (
+                    <div className="text-[11px] text-rose-700 bg-rose-50 border border-rose-200 rounded px-2 py-1 break-all">
+                      {ts.last_error_type ? `${ts.last_error_type}: ` : ""}
+                      {ts.last_error_message}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+      {taskStatesError && (
+        <div className="shrink-0 border-b border-amber-200 bg-amber-50 px-6 py-2">
+          <p className="text-xs font-semibold text-amber-700">
+            タスク状態を取得できません（ログ閲覧は継続します）
+          </p>
+        </div>
+      )}
 
       {/* Filter and Filters Bar */}
       <div className="shrink-0 bg-white border-b border-slate-200 px-6 py-3 flex flex-wrap gap-4 items-center">

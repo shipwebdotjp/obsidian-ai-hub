@@ -223,3 +223,28 @@
 - **5秒猶予は mtime 基準の単一stat**: per-minute バッチが保存と同時刻で走った場合の軽い安全策として、`mtime + 5 > now` のとき処理・削除せず次回へ回す。待機や二重statは行わない。逐次書き込みの厳密検出は目的としない。
 - **削除は成功時のみ**: `os.remove` への置き換えにより、`is_icloud_offloaded` 待機失敗・読込失敗・転記失敗・マージ例外では元ファイルを残し、次回実行で再試行できるようにする。メモ分類フォールバックは成功として扱う（daily noteへ追記された=成功）。
 - **HITL分離**: calendar / reminder 分岐は HITL 承認runを登録するが、これは `10-Decisions-HITL.md` の既存責務であり、本決定のスコープ外。Inbox処理の起動方式のみを変更する。
+
+## 1分間隔タスク向けのログ抑制（task_state 集計 + 日次クリーンアップ）
+
+| 項目 | 内容 |
+|------|------|
+| 決定日 | 2026-08-19 |
+| カテゴリ | アーキテクチャ・運用 / 実行ログ |
+| 決定内容 | `merge_inbox` の空振り成功（処理0件かつ失敗0件）は `command_runs` に残さず、タスクごとの1行の集計状態 `task_state` へ upsert する。処理ありの成功・失敗・LLM呼び出しは従来どおり30日保持する。旧ログ削除は書き込み時の自動実行を廃止し、日次メンテナンス（`--cleanup-execution-logs` / `cleanup_execution_logs_daily` 03:20）へ寄せる。launchd の標準出力・標準エラーはラッパー経由でローテーションする（各1 MiB上限・7世代、launchd自身の出力先は `/dev/null`）。 |
+
+### 結論に至った経緯
+
+- **毎分実行の空振りが実行履歴を埋める**: `merge_inbox` は `minutely` で毎分実行されるが、Inboxが空の場合は実処理ゼロで成功する。従来はそのたびに `command_runs` に `succeeded` が書き込まれ、実行ログ・LLM履歴が不要な no-op で埋まっていた。
+- **「動いていること」と「最後に実データを処理したこと」を優先**: 空振りの個別追跡より、最終確認時刻・連続空振り回数・直近の処理時刻・直近エラーを集計状態として可視化する方を選ぶ。UI/API には `GET /api/v1/task-states` を追加し、実行ログ画面の上部パネルに表示する（30秒自動更新）。
+- **空振り判定は結果ベース**: 処理対象ファイルが存在しても全件スキップ（保存直後 mtime、iCloud未ダウンロード、対象外拡張子）なら実処理が発生していないため空振り扱いとする。判定は `processed == 0 AND failed == 0`。ただし `llm_call_logs` が存在する run は実処理が起きた可能性があるため `suppress_command_run` は削除を拒否する（防御的）。
+- **失敗・LLMログは従来どおり30日保持**: 例外が送出された run は必ず `failed` の `command_runs` を残し、`task_state.last_error_*` にも記録する。失敗は連続空振り回数を変更しない（空振りでも実処理でもない中間状態）。
+- **SQLiteの頻繁な削除を回避**: `cleanup_old_logs` は書き込み6箇所（command/LLM の start/succeed/fail）ごとに DELETE していた。日次1回のメンテナンスへ寄せ、30日超の `llm_call_logs` → `command_runs` を削除する。`task_state` は削除対象に含めない（現在状態であり保持する）。
+- **launchd ログの無制限増加を防止**: `StartInterval: 60` の launchd ジョブが書き出す `/tmp/obsidian_merge.log` 等は無制限に肥大していた。`scripts/launchd_log_wrapper.sh` を起動コマンドに挟み、起動時にサイズ確認して1 MiB・7世代でローテーションする。launchd 自身の `StandardOutPath` / `StandardErrorPath` は `/dev/null` にする。
+
+### 実装
+
+- スキーマバージョン19: `task_state` テーブル（`task_id` PK、`last_check_at`, `consecutive_empty_count`, `last_processed_at`, `last_error_at`, `last_error_message`, `last_error_type`, `processed_count`, `skipped_count`, `failed_count`, `updated_at`）。
+- `merge_inbox.main()` は `{"processed": int, "skipped": int, "failed": int, "checked": int}` を返す。`process_inbox_file()` は `"processed"` / `"skipped"` / `"failed"` を返す。
+- `run_and_log` に `task_id` / `empty_result_predicate` を追加。空振り時は `suppress_command_run`（CASCADE削除）→ `upsert_task_state`。非空時は通常の `succeed_command_run` + `upsert_task_state`。失敗時は `fail_command_run` + `upsert_task_state(error=...)`。
+- `cleanup_old_logs_now(days)` を日次メンテナンスから呼ぶ。`tasks.local.yml` / `tasks.local.sample.yml` に `cleanup_execution_logs_daily`（03:20）を追加。
+- 両 plist（base / hitl-worker）の `ProgramArguments` をラッパー経由に変更。

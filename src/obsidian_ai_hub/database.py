@@ -468,6 +468,9 @@ def get_db_connection() -> sqlite3.Connection:
     if current_version <= 17:
         run_migration_v18(conn)
 
+    if current_version <= 18:
+        run_migration_v19(conn)
+
     return conn
 
 
@@ -586,6 +589,33 @@ def run_migration_v18(conn: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS idx_line_webhook_dedup_key ON line_webhook_events(dedup_key);"
     )
     conn.execute("PRAGMA user_version = 18;")
+    conn.commit()
+
+
+def run_migration_v19(conn: sqlite3.Connection) -> None:
+    """Run migration for version 19 (task_state table for aggregated task status).
+
+    Task state aggregates per-task status for high-frequency scheduled commands
+    (e.g. minutely merge_inbox). Empty runs do not create command_runs rows;
+    instead their outcome is folded into a single task_state row so the
+    individual execution history is not flooded with no-op runs.
+    """
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS task_state (
+            task_id TEXT PRIMARY KEY,
+            last_check_at TEXT NOT NULL,
+            consecutive_empty_count INTEGER NOT NULL DEFAULT 0,
+            last_processed_at TEXT,
+            last_error_at TEXT,
+            last_error_message TEXT,
+            last_error_type TEXT,
+            processed_count INTEGER NOT NULL DEFAULT 0,
+            skipped_count INTEGER NOT NULL DEFAULT 0,
+            failed_count INTEGER NOT NULL DEFAULT 0,
+            updated_at TEXT NOT NULL
+        );
+    """)
+    conn.execute("PRAGMA user_version = 19;")
     conn.commit()
 
 
