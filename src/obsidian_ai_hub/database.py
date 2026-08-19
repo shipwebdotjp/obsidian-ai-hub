@@ -471,6 +471,9 @@ def get_db_connection() -> sqlite3.Connection:
     if current_version <= 18:
         run_migration_v19(conn)
 
+    if current_version <= 19:
+        run_migration_v20(conn)
+
     return conn
 
 
@@ -616,6 +619,50 @@ def run_migration_v19(conn: sqlite3.Connection) -> None:
         );
     """)
     conn.execute("PRAGMA user_version = 19;")
+    conn.commit()
+
+
+def run_migration_v20(conn: sqlite3.Connection) -> None:
+    """Run migration for version 20 (planner_proposals table for AI planner proposals).
+
+    AI proposals are low-to-medium confidence candidates ("you might want to
+    schedule/remind this") generated from the app's full context. They are the
+    source of truth for the Planner screen's AI proposal layer and never touch
+    the existing Inbox -> HITL -> Apple registration flow.
+
+    State machine: proposed -> promoted | rejected | expired.
+    The fingerprint partial unique index prevents duplicate active candidates
+    (proposed/promoted) while allowing a fresh proposal once a previous one is
+    rejected or expired.
+    """
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS planner_proposals (
+            proposal_id       TEXT PRIMARY KEY,
+            kind              TEXT NOT NULL,   -- 'calendar' | 'reminder'
+            title             TEXT NOT NULL,
+            start_time        TEXT,            -- ISO datetime (calendar)
+            end_time          TEXT,            -- ISO datetime (calendar)
+            location          TEXT,            -- (calendar)
+            due_date          TEXT,            -- ISO datetime or YYYY-MM-DD (reminder)
+            rationale         TEXT NOT NULL,   -- required generation rationale
+            generation_source TEXT NOT NULL,   -- e.g. 'daily_06:00'
+            status            TEXT NOT NULL,   -- proposed | promoted | rejected | expired
+            fingerprint       TEXT NOT NULL,
+            external_result   TEXT,            -- Apple write result on promotion
+            created_at        TEXT NOT NULL,
+            updated_at        TEXT NOT NULL,
+            expired_at        TEXT,
+            promoted_at       TEXT,
+            rejected_at       TEXT
+        );
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_pp_status ON planner_proposals(status);")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_pp_created_at ON planner_proposals(created_at);")
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_pp_active_fingerprint "
+        "ON planner_proposals(fingerprint) WHERE status IN ('proposed', 'promoted');"
+    )
+    conn.execute("PRAGMA user_version = 20;")
     conn.commit()
 
 

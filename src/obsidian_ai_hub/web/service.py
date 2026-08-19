@@ -72,6 +72,15 @@ from obsidian_ai_hub.web.services.people_sync import (
     get_vault_report_dynamic,
     sync_people,
 )
+from obsidian_ai_hub.web.services.planner import (
+    generate_planner_proposals,
+    get_planner_proposal,
+    get_planner_timeline,
+    list_planner_proposals,
+    promote_planner_proposal,
+    reject_planner_proposal,
+    update_planner_proposal,
+)
 from obsidian_ai_hub.web.services.projects import (
     ProjectConflictError,
     create_project,

@@ -149,6 +149,11 @@ def main():
         help="最近30日のノートから研究候補を生成して追記",
     )
     parser.add_argument(
+        "--generate-planner-proposals",
+        action="store_true",
+        help="AIプランナー提案を生成して planner_proposals に保存",
+    )
+    parser.add_argument(
         "--screenshot",
         action="store_true",
         help="macOSのスクリーンショットを撮影してInboxに保存",
@@ -466,6 +471,11 @@ def main():
         ran = True
     if args.suggest_research_theme:
         run_and_log(suggest_research_theme.main, "suggest_research_theme", {})
+        ran = True
+    if args.generate_planner_proposals:
+        from obsidian_ai_hub.planner.suggest import main as planner_suggest_main
+
+        run_and_log(planner_suggest_main, "generate_planner_proposals", {})
         ran = True
     if args.screenshot:
         run_and_log(lambda: take_screenshot.main(args.display), "take_screenshot", {"display": args.display})

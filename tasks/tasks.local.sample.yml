@@ -82,6 +82,15 @@
     minute: 15
   command: 'uv --directory /path/to/obsidian-daily-merge run -m obsidian_ai_hub --memory-extract'
 
+# Daily 06:00 AI planner proposal generation (low-to-medium confidence schedule/reminder candidates).
+- id: generate_planner_proposals_daily
+  enabled: false
+  schedule:
+    type: daily
+    hour: 6
+    minute: 0
+  command: 'uv --directory /path/to/obsidian-daily-merge run -m obsidian_ai_hub --generate-planner-proposals'
+
 - id: sample_monthly
   enabled: true
   schedule:

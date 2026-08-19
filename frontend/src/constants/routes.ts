@@ -8,5 +8,6 @@ export const ROUTES = {
   TASKS: "/tasks",
   EXECUTION_LOGS: "/execution-logs",
   HITL: "/hitl",
+  PLANNER: "/planner",
   SETTINGS: "/settings",
 } as const;

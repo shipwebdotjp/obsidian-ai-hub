@@ -11,6 +11,7 @@ import PeoplePage from "./features/people/PeoplePage";
 import ProjectsPage from "./features/projects/ProjectsPage";
 import TaskPage from "./features/tasks/TaskPage";
 import ExecutionLogPage from "./features/execution-logs/ExecutionLogPage";
+import PlannerPage from "./features/planner/PlannerPage";
 import SettingsPage from "./features/settings/SettingsPage";
 import {
   health,
@@ -176,6 +177,7 @@ export default function App() {
           <Route path={ROUTES.PROJECTS} element={<ProjectsPage />} />
           <Route path={ROUTES.TASKS} element={<TaskPage />} />
           <Route path={ROUTES.EXECUTION_LOGS} element={<ExecutionLogPage />} />
+          <Route path={ROUTES.PLANNER} element={<PlannerPage />} />
           <Route path={ROUTES.SETTINGS} element={<SettingsPage />} />
           <Route path="*" element={<Navigate to={ROUTES.MEMORIES} replace />} />
         </Routes>

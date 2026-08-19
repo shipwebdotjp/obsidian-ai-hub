@@ -336,7 +336,7 @@ def test_schema_verification_migration(test_memory_db_path):
     try:
         cursor = conn.cursor()
         cursor.execute("PRAGMA user_version;")
-        assert cursor.fetchone()[0] == 19
+        assert cursor.fetchone()[0] == 20
 
         # Ensure summary_person_assignments table exists with correct index
         cursor.execute(

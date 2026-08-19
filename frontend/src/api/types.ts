@@ -499,3 +499,87 @@ export interface HitlRunListResponse {
   items: HitlRun[];
   total: number;
 }
+
+export interface PlannerAppleEvent {
+  title: string;
+  start_time: string | null;
+  end_time: string | null;
+  location: string | null;
+  all_day: boolean;
+  source: string;
+}
+
+export interface PlannerAppleReminder {
+  title: string;
+  due_date: string | null;
+  source: string;
+}
+
+export interface PlannerRecurringItem {
+  title: string;
+  date: string;
+  category: number;
+  source: string;
+}
+
+export interface PlannerInboxPending {
+  run_id: string;
+  handler: string;
+  title: string;
+  kind: string;
+  start_time: string | null;
+  end_time: string | null;
+  location: string | null;
+  due_date: string | null;
+}
+
+export type PlannerProposalStatus = "proposed" | "promoted" | "rejected" | "expired";
+
+export interface PlannerProposal {
+  proposal_id: string;
+  kind: string;
+  title: string;
+  rationale: string;
+  generation_source: string;
+  status: PlannerProposalStatus;
+  fingerprint: string | null;
+  external_result: string | null;
+  start_time: string | null;
+  end_time: string | null;
+  location: string | null;
+  due_date: string | null;
+  created_at: string;
+  updated_at: string;
+  expired_at: string | null;
+  promoted_at: string | null;
+  rejected_at: string | null;
+}
+
+export interface PlannerTimelineResponse {
+  apple_events: PlannerAppleEvent[];
+  apple_reminders: PlannerAppleReminder[];
+  apple_error: string | null;
+  recurring_events: PlannerRecurringItem[];
+  inbox_pending: PlannerInboxPending[];
+  ai_proposals: PlannerProposal[];
+}
+
+export interface PlannerProposalListResponse {
+  items: PlannerProposal[];
+  total: number;
+}
+
+export interface PlannerProposalUpdatePayload {
+  title?: string;
+  rationale?: string;
+  kind?: string;
+  start_time?: string | null;
+  end_time?: string | null;
+  location?: string | null;
+  due_date?: string | null;
+}
+
+export interface PlannerGenerateResponse {
+  generated: number;
+  proposals: PlannerProposal[];
+}

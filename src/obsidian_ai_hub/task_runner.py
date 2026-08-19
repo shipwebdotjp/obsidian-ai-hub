@@ -38,6 +38,7 @@ PRESET_FLAGS = {
     "--review-draft": "Review draft",
     "--memory-extract": "Memory extract",
     "--suggest-research-theme": "Research suggestion",
+    "--generate-planner-proposals": "AIプランナー提案生成",
     "--log-activity": "Activity log",
     "--hitl-dispatch": "HITL dispatch",
     "--cleanup-line-webhooks": "LINE Webhook cleanup",

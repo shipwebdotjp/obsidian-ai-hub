@@ -20,6 +20,11 @@ import type {
   SummaryDeleteResponse,
   EditOptionsResponse,
   Person,
+  PlannerGenerateResponse,
+  PlannerProposal,
+  PlannerProposalListResponse,
+  PlannerProposalUpdatePayload,
+  PlannerTimelineResponse,
 } from "./types";
 
 const TOKEN_KEY = "obsidian-ai-hub:api-token";
@@ -419,6 +424,63 @@ export function deleteSummary(
 
 export function listPeople(): Promise<Person[]> {
   return request<Person[]>("/api/v1/people");
+}
+
+export function getPlannerTimeline(start: string, end: string): Promise<PlannerTimelineResponse> {
+  const qs = new URLSearchParams({ start, end }).toString();
+  return request<PlannerTimelineResponse>(`/api/v1/planner/timeline?${qs}`);
+}
+
+export function listPlannerProposals(params: {
+  status?: string;
+  kind?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<PlannerProposalListResponse> {
+  const sp = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== null && v !== "") sp.set(k, String(v));
+  }
+  const qs = sp.toString();
+  return request<PlannerProposalListResponse>(
+    `/api/v1/planner/proposals${qs ? `?${qs}` : ""}`,
+  );
+}
+
+export function getPlannerProposal(proposalId: string): Promise<PlannerProposal> {
+  return request<PlannerProposal>(
+    `/api/v1/planner/proposals/${encodeURIComponent(proposalId)}`,
+  );
+}
+
+export function updatePlannerProposal(
+  proposalId: string,
+  payload: PlannerProposalUpdatePayload,
+): Promise<PlannerProposal> {
+  return request<PlannerProposal>(
+    `/api/v1/planner/proposals/${encodeURIComponent(proposalId)}`,
+    { method: "PATCH", body: JSON.stringify(payload) },
+  );
+}
+
+export function rejectPlannerProposal(proposalId: string): Promise<PlannerProposal> {
+  return request<PlannerProposal>(
+    `/api/v1/planner/proposals/${encodeURIComponent(proposalId)}/reject`,
+    { method: "POST", body: JSON.stringify({}) },
+  );
+}
+
+export function promotePlannerProposal(proposalId: string): Promise<PlannerProposal> {
+  return request<PlannerProposal>(
+    `/api/v1/planner/proposals/${encodeURIComponent(proposalId)}/promote`,
+    { method: "POST" },
+  );
+}
+
+export function generatePlannerProposals(): Promise<PlannerGenerateResponse> {
+  return request<PlannerGenerateResponse>("/api/v1/planner/generate", {
+    method: "POST",
+  });
 }
 
 export function apiGet<T>(path: string): Promise<T> {

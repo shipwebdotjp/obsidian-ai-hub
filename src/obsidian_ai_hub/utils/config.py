@@ -47,6 +47,7 @@ _APP_ENV_VARS = [
     "INBOX_TRANSCRIPT_CORRECTION_PROMPT_PATH",
     "INBOX_WEB_SUMMARY_PROMPT_PATH",
     "INBOX_CLASSIFICATION_PROMPT_PATH",
+    "AI_PLANNER_PROMPT_PATH",
     "YOUTUBE_CHUNK_SUMMARY_PROMPT_PATH",
     "ALLOW_EXTERNAL_IN_TEST",
 ]
@@ -543,6 +544,16 @@ if RESEARCH_QUERY_GENERATION_PROMPT_PATH is None:
     RESEARCH_QUERY_GENERATION_PROMPT_PATH = (
         BASE_DIR / "config" / "prompts" / "research_query_generation.md"
     )
+
+AI_PLANNER_PROVIDER = str(
+    _config_value("llm", "planner", "provider", default="opencode_go")
+)
+AI_PLANNER_MODEL = str(
+    _config_value("llm", "planner", "model", default="gpt-5.6-luna")
+)
+AI_PLANNER_PROMPT_PATH = _config_optional_path("llm", "planner", "prompt_path")
+if AI_PLANNER_PROMPT_PATH is None:
+    AI_PLANNER_PROMPT_PATH = BASE_DIR / "config" / "prompts" / "ai_planner.md"
 
 if IS_TEST_ENV:
     AI_LOG_PATH = TEST_WORKSPACE / "vault" / "ai-log"

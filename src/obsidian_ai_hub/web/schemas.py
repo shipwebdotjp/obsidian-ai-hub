@@ -944,3 +944,100 @@ class HitlRunListResponse(BaseModel):
 class SubmitAnswerRequest(BaseModel):
     answer: Any
     comment: Optional[str] = None
+
+
+class PlannerAppleEvent(BaseModel):
+    title: str
+    start_time: Optional[str] = None
+    end_time: Optional[str] = None
+    location: Optional[str] = None
+    all_day: bool = False
+    source: str = "apple"
+
+
+class PlannerAppleReminder(BaseModel):
+    title: str
+    due_date: Optional[str] = None
+    source: str = "apple"
+
+
+class PlannerRecurringItem(BaseModel):
+    title: str
+    date: str
+    category: int
+    source: str = "recurring"
+
+
+class PlannerInboxPending(BaseModel):
+    run_id: str
+    handler: str
+    title: str
+    kind: str
+    start_time: Optional[str] = None
+    end_time: Optional[str] = None
+    location: Optional[str] = None
+    due_date: Optional[str] = None
+
+
+class PlannerProposal(BaseModel):
+    proposal_id: str
+    kind: str
+    title: str
+    rationale: str
+    generation_source: str
+    status: str
+    fingerprint: Optional[str] = None
+    external_result: Optional[str] = None
+    start_time: Optional[str] = None
+    end_time: Optional[str] = None
+    location: Optional[str] = None
+    due_date: Optional[str] = None
+    created_at: str
+    updated_at: str
+    expired_at: Optional[str] = None
+    promoted_at: Optional[str] = None
+    rejected_at: Optional[str] = None
+
+
+class PlannerTimelineResponse(BaseModel):
+    apple_events: list[PlannerAppleEvent]
+    apple_reminders: list[PlannerAppleReminder]
+    apple_error: Optional[str] = None
+    recurring_events: list[PlannerRecurringItem]
+    inbox_pending: list[PlannerInboxPending]
+    ai_proposals: list[PlannerProposal]
+
+
+class PlannerProposalListResponse(BaseModel):
+    items: list[PlannerProposal]
+    total: int
+
+
+class PlannerProposalUpdateRequest(BaseModel):
+    title: Optional[str] = None
+    rationale: Optional[str] = None
+    kind: Optional[Literal["calendar", "reminder"]] = None
+    start_time: Optional[str] = None
+    end_time: Optional[str] = None
+    location: Optional[str] = None
+    due_date: Optional[str] = None
+
+    @field_validator("start_time", "end_time", "due_date")
+    @classmethod
+    def _validate_iso_datetime(cls, v: Optional[str]) -> Optional[str]:
+        if v is None or not v.strip():
+            return None
+        try:
+            datetime.fromisoformat(v.strip())
+        except ValueError:
+            raise ValueError(f"Invalid ISO datetime: {v}")
+        return v.strip()
+
+
+class PlannerRejectRequest(BaseModel):
+    reason: Optional[str] = None
+
+
+class PlannerGenerateResponse(BaseModel):
+    generated: int
+    proposals: list[PlannerProposal]

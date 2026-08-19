@@ -232,3 +232,38 @@ Inboxのメモ・音声転記に「明日までに本を返す」のようなTod
 ### トレードオフ（日付精度）
 
 - 「8月20日まで」のように日付は読めるが時刻が明示されない入力を時刻なし期限として登録する一方、「0時」のように時刻が明示された入力は `00:00` の時刻付き期限として登録する。抽出精度は LLM 次第で変わるため、承認者は HITL 画面に表示される期限で確認する。
+
+## AIプランナー提案のプレイグラウンド（スキーマ v20）
+
+| 項目 | 内容 |
+|------|------|
+| 決定日 | 2026-08-19 |
+| カテゴリ | プランナー・LLM・カレンダー/リマインダー |
+| 決定内容 | Inbox→HITL→Apple登録の既存フローは変更せず、低〜中確信度のAI提案を `planner_proposals` に保存し、Web画面（プランナー）で人が編集・却下・昇格してAppleに登録する「プレイグラウンド」を追加する。 |
+
+### 結論に至った経緯
+
+Inbox分類は高確信度の予定・Todoを HITL 承認で登録するフローだが、そこまで確信度の高くない候補（「来週あたり検診に行くと良さそう」「本の返却期限が近い」）を登録する導線がなかった。LLM が生成した候補を直接 Apple に書くと誤登録リスクがあるため、低〜中確信度の提案は DB に保存し、専用 Web 画面で人が確認・編集してから昇格させる。既存の Inbox→HITL フローは意図的に変更しない（確信度の高い登録導線として維持）。
+
+### データモデル（スキーマ v20）
+
+- `planner_proposals` テーブル: `proposal_id`（`pp_` プレフィックスの決定的ID）/ `kind`（calendar / reminder）/ `title` / `start_time` / `end_time` / `location` / `due_date` / `rationale` / `generation_source` / `status`（proposed / promoted / rejected / expired）/ `fingerprint` / `created_at` / `updated_at`。
+- 状態遷移: `proposed → promoted | rejected | expired`。
+- `fingerprint = sha1(kind \x00 norm_title \x00 anchor)[:12]`（anchor = start_time or due_date）。部分ユニーク索引 `idx_pp_active_fingerprint WHERE status IN ('proposed','promoted')` で同一内容の重複提案を防ぐ。reject / expire で解放され、同じ内容を再提案できる。
+
+### 仕組みの概要
+
+1. **昇格は HITL を使わない:** planner は HITL Run を介さず、planner 専用 API の `POST /planner/proposals/{id}/promote` が直接 `promote_proposal` を呼ぶ。Apple への副作用を伴うため編集可能なプレイグラウンドとして扱い、既存 HITL フローを汚染しない。`register_hitl_handlers()` は変更しない。
+2. **Apple は外部システムとして扱う:** `planner/apple.py` が EventKit（PyObjC）経由でカレンダーとリマインダーを取得。SQLite には保存せず、表示範囲キー（`("apple", start, end)`）の60秒TTLインメモリキャッシュで負荷を抑える。EventKit 不可・失敗時は空リスト＋エラー表示で安全に縮退する。
+3. **コンテキスト7源:** Daily Note / 日次・週次サマリ / アクティビティ / リサーチ+フィードバック / プロジェクト / 長期記憶 / 未確認提案履歴。各ブロックは単独で失敗しても空文字へ縮退し、提案生成を止めない。
+4. **生成:** `--generate-planner-proposals`（daily 06:00 にタスクランナーで実行）。`planner/suggest.py` が `ai_planner.md` プロンプトで最大10件の候補（calendar / reminder）を JSON 生成し、`_validate_candidate` で検証して保存。既存の `llm_client.generate_llm_response` + `prompt.render_prompt`（`${name}` 形式）を再利用する。
+5. **定期ルール:** `config/recurring.yml` を正本とする読み取り専用の参照（`planner/recurring.py`）。ルール形式 `[[day_numbers], offset, name, category]`、`CAT_TASK=1` / `CAT_EVENT=2`。書き込み・UI 編集はしない（将来の管理画面を別途検討）。
+6. **UI:** `/planner` に週グリッド（月〜日）を表示し、Apple 予定・Apple リマインダー・定期イベント・Inbox 保留・AI 提案を4レイヤーで重ねる。日付未定の提案は「日付未定のAI提案」セクションに分離。詳細パネルでタイトル・種別・日時・場所・根拠を編集して保存できる。昇格・却下は詳細パネルから実行。
+7. **通知:** 生成後、新規提案の要約（件名＋種別＋日付、最大10件）を LINE にベストエフォート通知し、`/planner` へのリンクを添える。
+
+### トレードオフ
+
+- 昇格は HITL 承認を介さないため、既存 HITL フローの二重登録ガード（`phase=added`）は適用されない。昇格の原子性は「Apple 書き込み成功 → `transition_status('promoted')`」の順で担保し、Apple 書き込み失敗時は proposed のまま残す。Apple ツール自体は既存の `add_calendar_event` / `add_reminder` を再利用するため、登録 API の冪等性の限界は既存 HITL フローと同様に残る。
+- 編集は保存時に fingerprint を再計算するため、重複提案を避けつつユーザーが内容を自由に修正できる。
+- 提案の質は LLM とコンテキストに依存し、確信度の低い候補を含むため誤提案もあり得る。人が確認するプレイグラウンドとしての位置づけを維持する。
+- Apple データをキャッシュするため、他のプロセスが Apple を更新しても最短60秒は画面に反映されない。明示的な再読み込み・昇格成功・表示期間変更ではキャッシュを無効化する。

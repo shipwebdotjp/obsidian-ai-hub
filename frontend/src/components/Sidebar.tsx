@@ -86,6 +86,9 @@ export default function Sidebar({ open, onClose, id }: SidebarProps) {
         <NavLink to={ROUTES.EXECUTION_LOGS} className={linkClass} onClick={onClose}>
           実行ログ
         </NavLink>
+        <NavLink to={ROUTES.PLANNER} className={linkClass} onClick={onClose}>
+          プランナー
+        </NavLink>
       </nav>
       <div className="mt-auto border-t border-slate-200 pt-2">
         <NavLink to={ROUTES.SETTINGS} className={linkClass} onClick={onClose}>

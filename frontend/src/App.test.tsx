@@ -37,6 +37,7 @@ vi.mock("./features/people/PeoplePage", () => ({ default: () => <div data-testid
 vi.mock("./features/projects/ProjectsPage", () => ({ default: () => <div data-testid="page-projects">ProjectsPage</div> }));
 vi.mock("./features/tasks/TaskPage", () => ({ default: () => <div data-testid="page-tasks">TaskPage</div> }));
 vi.mock("./features/execution-logs/ExecutionLogPage", () => ({ default: () => <div data-testid="page-execution-logs">ExecutionLogPage</div> }));
+vi.mock("./features/planner/PlannerPage", () => ({ default: () => <div data-testid="page-planner">PlannerPage</div> }));
 vi.mock("./features/settings/SettingsPage", () => ({ default: () => <div data-testid="page-settings">SettingsPage</div> }));
 
 // Mock TokenPrompt to avoid token input rendering complexities
@@ -280,6 +281,7 @@ describe("App", () => {
       { name: "プロジェクト管理", testId: "page-projects" },
       { name: "タスク管理", testId: "page-tasks" },
       { name: "実行ログ", testId: "page-execution-logs" },
+      { name: "プランナー", testId: "page-planner" },
       { name: "設定", testId: "page-settings" },
     ];
 

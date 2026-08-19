@@ -62,7 +62,7 @@ def frontend_dist() -> Path:
 @pytest.fixture(scope="module")
 def e2e_seed_scenario():
     """Override this module-scope fixture to specify which scenarios to seed.
-    Can be a list containing 'memory', 'hitl', 'people', and/or
+    Can be a list containing 'memory', 'hitl', 'people', 'planner', and/or
     'summary_recovery'.
     """
     return ["memory"]
@@ -79,6 +79,7 @@ def e2e_server_url(frontend_dist: Path, e2e_seed_scenario: list[str]) -> str:
         seed_hitl_demo_data,
         seed_people_demo_data,
         seed_summary_recovery_demo_data,
+        seed_planner_demo_data,
     )
     from obsidian_ai_hub import database
     from obsidian_ai_hub.utils import config as app_config
@@ -124,7 +125,6 @@ def e2e_server_url(frontend_dist: Path, e2e_seed_scenario: list[str]) -> str:
             seed_people_demo_data()
         if "summary_recovery" in e2e_seed_scenario:
             seed_summary_recovery_demo_data()
-            # Keep the browser flow deterministic and isolated from external LLMs.
             from obsidian_ai_hub.summary import store as summary_store
             from obsidian_ai_hub.web.routes import dashboard as dashboard_route
 
@@ -141,6 +141,9 @@ def e2e_server_url(frontend_dist: Path, e2e_seed_scenario: list[str]) -> str:
                 return summary_store.get_summary_by_id(created["summary_id"])
 
             dashboard_route.generate_summary = deterministic_summary
+
+        if "planner" in e2e_seed_scenario:
+            seed_planner_demo_data()
 
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.bind(("127.0.0.1", 0))

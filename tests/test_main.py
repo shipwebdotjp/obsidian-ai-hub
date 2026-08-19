@@ -198,6 +198,17 @@ def test_suggest_research_theme_cli_calls_suggester(monkeypatch):
     mock_main.assert_called_once_with()
 
 
+def test_generate_planner_proposals_cli_calls_suggester(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["prog", "--generate-planner-proposals"])
+
+    from obsidian_ai_hub.planner import suggest as planner_suggest
+
+    with patch.object(planner_suggest, "main", return_value=[]) as mock_main:
+        main_module.main()
+
+    mock_main.assert_called_once_with()
+
+
 def test_add_research_theme_cli_calls_handler(monkeypatch):
     monkeypatch.setattr(
         sys, "argv", ["prog", "--add-research-theme", "--theme", "test theme"]

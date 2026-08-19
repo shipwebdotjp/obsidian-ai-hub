@@ -1,3 +1,4 @@
+import importlib
 import sys
 from unittest.mock import MagicMock, patch
 
@@ -11,6 +12,12 @@ sys.modules["Foundation"] = mock_foundation
 # Setup constants
 mock_eventkit.EKEntityTypeReminder = 1
 mock_eventkit.EKAuthorizationStatusAuthorized = 3
+
+# Reload the module under test so its EventKit/Foundation imports resolve to
+# the mocks even when an earlier test already imported the real modules.
+import obsidian_ai_hub.handler.apple_reminders as _apple_reminders_mod  # noqa: E402
+
+importlib.reload(_apple_reminders_mod)
 
 from obsidian_ai_hub.handler.apple_reminders import add_reminder  # noqa: E402
 
