@@ -92,6 +92,10 @@ def test_prompt_externalization_wiring(mock_dependencies):
         patch("obsidian_ai_hub.summerize_day.llm_client") as mock_llm,
         patch("obsidian_ai_hub.summerize_day.prompt") as mock_prompt,
         patch("obsidian_ai_hub.summerize_day.reader") as mock_reader,
+        patch(
+            "obsidian_ai_hub.summary.project_utils.get_active_projects_for_prompt",
+            return_value=[],
+        ),
     ):
         mock_reader.get_daily_note_path.return_value = Path("dummy.md")
         mock_prompt.render_prompt.return_value = "Rendered Prompt"
