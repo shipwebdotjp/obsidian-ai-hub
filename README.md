@@ -51,6 +51,14 @@ llm:
 2. make install
 3. make enable
 
+### install HITL worker to LaunchAgent (常駐 HITL ワーカー)
+1. make install-hitl-worker   # または bash ./install.sh hitl-worker
+2. make enable-hitl-worker
+3. make status-hitl-worker     # 動作確認
+4. ログ確認: make logs-hitl-worker / make errorlogs-hitl-worker
+
+両方まとめてインストールする場合: `make install-all`（`bash ./install.sh all`）
+
 ## Configuration
 
 Use the following split to keep the project OSS-friendly:

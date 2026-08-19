@@ -2,13 +2,23 @@
 
 PLIST=~/Library/LaunchAgents/jp.shipweb.obsidian-ai-hub.plist
 LABEL=jp.shipweb.obsidian-ai-hub
+HITL_PLIST=~/Library/LaunchAgents/jp.shipweb.obsidian-ai-hub.hitl-worker.plist
+HITL_LABEL=jp.shipweb.obsidian-ai-hub.hitl-worker
 DOMAIN=gui/$(shell id -u)
 
-.PHONY: install start stop restart reload enable disable status logs errorlogs build-web dev-web jules-setup serve
+.PHONY: install install-all install-hitl-worker start stop restart reload reload-hitl-worker enable enable-hitl-worker disable disable-hitl-worker status status-hitl-worker logs logs-hitl-worker errorlogs errorlogs-hitl-worker build-web dev-web jules-setup serve
 
 # インストール（初回のみ）
 install:
 	bash ./install.sh
+
+# 全サービスインストール
+install-all:
+	bash ./install.sh all
+
+# hitl-worker のみインストール
+install-hitl-worker:
+	bash ./install.sh hitl-worker
 
 # Jules VM用環境構築セットアップ
 jules-setup:
@@ -33,25 +43,50 @@ reload:
 	launchctl bootout $(DOMAIN) $(PLIST) || true
 	launchctl bootstrap $(DOMAIN) $(PLIST)
 
+# hitl-worker plist再読み込み
+reload-hitl-worker:
+	launchctl bootout $(DOMAIN) $(HITL_PLIST) || true
+	launchctl bootstrap $(DOMAIN) $(HITL_PLIST)
+
 # 有効化（自動起動ON）
 enable:
 	launchctl bootstrap $(DOMAIN) $(PLIST)
+
+# hitl-worker 有効化
+enable-hitl-worker:
+	launchctl bootstrap $(DOMAIN) $(HITL_PLIST)
 
 # 無効化（自動起動OFF）
 disable:
 	launchctl bootout $(DOMAIN) $(PLIST)
 
+# hitl-worker 無効化
+disable-hitl-worker:
+	launchctl bootout $(DOMAIN) $(HITL_PLIST)
+
 # 状態確認
 status:
 	launchctl list | grep $(LABEL) || true
+
+# hitl-worker 状態確認
+status-hitl-worker:
+	launchctl list | grep $(HITL_LABEL) || true
 
 # 標準ログ表示
 logs:
 	tail -f /tmp/obsidian_merge.log
 
+# hitl-worker 標準ログ表示
+logs-hitl-worker:
+	tail -f /tmp/obsidian_hitl_worker.log
+
 # エラーログ表示
 errorlogs:
 	tail -f /tmp/obsidian_merge.err
+
+# hitl-worker エラーログ表示
+errorlogs-hitl-worker:
+	tail -f /tmp/obsidian_hitl_worker.err
 
 # Memory Review Web UI のフロントエンドをビルド（dist を生成、CI 用は npm ci）
 build-web:
