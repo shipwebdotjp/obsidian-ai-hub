@@ -19,7 +19,7 @@
 ## Test data safety
 
 - Read [docs/testing.md](docs/testing.md) before work that can write data.
-- Run database-writing tests through `uv run pytest tests/`. Pytest redirects
+- Run database-writing tests through `uv run pytest tests/`; it redirects
   writable application paths and protects the production memory database.
 - Never use the configured production database for ad-hoc checks, test setup,
   or seed data. Use a new temporary SQLite path before calling database APIs.
@@ -28,35 +28,25 @@
 
 ## Frontend changes
 
-- When changing the frontend, verify the affected path against the seeded E2E
-  server. Limit E2E coverage in `tests/e2e/` to high-impact end-to-end user
-  workflows.
-- Add or update an E2E test only when a regression would prevent a primary task
-  from completing, lose or corrupt user data, or bypass an access boundary.
-- Do not add E2E tests solely for a UI addition or display change: this includes
-  static presets or options, individual controls, labels or other copy, status
-  text, styling, and ordering. Code review and visual verification are enough
-  for those changes. A review request to test that an isolated UI element
-  appears is not sufficient without a concrete high-impact failure scenario.
-- Complete frontend work by running `make test-e2e`. Its diagnostic artifacts
-  are written to `test-results/e2e/` on failure.
+- Do not add or update browser E2E tests in `tests/e2e/`, or run
+  `make test-e2e` as routine validation. Existing E2E tests are not a completion
+  criterion unless the user explicitly requests their use.
+- Verify affected screens manually. Add focused frontend unit tests or backend
+  integration tests when they usefully cover behavior; mocks are acceptable at
+  the frontend boundary.
 
 ## Code review (ocr)
 
-- Never let `ocr review` stream to the terminal. Always capture the full output
-  to a file from the very first run:
+- Never let `ocr review` stream to the terminal. Capture its full output from
+  the first run, then read the file:
   ```bash
   ocr review --audience agent -b "..." > /tmp/ocr_review.txt 2>&1
   ```
-  Then read the file with the Read tool.
-- If the terminal output is truncated or OCR reports "file truncated, re-run",
-  do NOT re-run the review. Simply redirect to a file as above and read it.
-
 
 ## Jules clean-clone & test environments
 
 - Jules runs in a clean-clone virtual machine where neither `.env`, local databases, nor `.env.test` exist.
-- Always run `make jules-setup` to install dependencies (Python packages, npm frontend dependencies, and Playwright Chromium browser dependencies) before executing tests in clean environments.
-- **NEVER use `ENV=jules`** or assume it exists. All automated test validation and exploration must run strictly under `ENV=test` (which is forced internally on exploration servers) to guarantee full isolation from production configurations and local databases.
-- `tests/conftest.py` forces `ENV=test` at import time, so `uv run pytest tests/` is isolated even without the prefix. This strips `_APP_ENV_VARS` (LINE tokens, API keys, etc.) and never loads the production `.env`, so tests can never reach real external credentials (e.g. LINE Push API).
-- The default setup step for Jules's Initial Setup snapshotting is: `make jules-setup && ENV=test uv run pytest tests/`
+- Before executing tests in a clean environment, run `make jules-setup`.
+- Use `ENV=test`, never `ENV=jules`, for automated tests and exploration.
+- `tests/conftest.py` enforces test isolation for `uv run pytest tests/` by
+  removing application secrets and preventing production `.env` loading.

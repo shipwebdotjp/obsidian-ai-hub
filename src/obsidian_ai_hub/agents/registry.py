@@ -44,10 +44,10 @@ class VaultReadFileInput(BaseModel):
 
 class CalendarReadInput(BaseModel):
     start_date: str = Field(
-        description="Start date in YYYY-MM-DD format (e.g. '2026-08-25')."
+        description="Start date in YYYY-MM-DD format (e.g. '2026-08-25'). Use the current date from system context to resolve relative dates like 'today'."
     )
     end_date: str = Field(
-        description="End date in YYYY-MM-DD format (e.g. '2026-08-26')."
+        description="End date in YYYY-MM-DD format (e.g. '2026-08-26'). Use the current date from system context."
     )
     calendar_name: Optional[str] = Field(
         default=None, description="Optional target calendar name."
@@ -56,10 +56,10 @@ class CalendarReadInput(BaseModel):
 
 class RemindersReadInput(BaseModel):
     start_date: str = Field(
-        description="Start date in YYYY-MM-DD format (e.g. '2026-08-25')."
+        description="Start date in YYYY-MM-DD format (e.g. '2026-08-25'). Use the current date from system context to resolve relative dates like 'today'."
     )
     end_date: str = Field(
-        description="End date in YYYY-MM-DD format (e.g. '2026-08-26')."
+        description="End date in YYYY-MM-DD format (e.g. '2026-08-26'). Use the current date from system context."
     )
 
 
@@ -109,7 +109,7 @@ def vault_read_file(relative_path: str) -> str:
 def calendar_read(
     start_date: str, end_date: str, calendar_name: Optional[str] = None
 ) -> str:
-    """Fetch Apple Calendar events within a start and end date range (YYYY-MM-DD)."""
+    """Fetch Apple Calendar events within a start and end date range (YYYY-MM-DD). Use current date from system prompt for relative dates."""
     try:
         s_date = date.fromisoformat(start_date)
         e_date = date.fromisoformat(end_date)
@@ -124,7 +124,7 @@ def calendar_read(
 
 @tool(args_schema=RemindersReadInput)
 def reminders_read(start_date: str, end_date: str) -> str:
-    """Fetch incomplete Apple Reminders due within a start and end date range (YYYY-MM-DD)."""
+    """Fetch incomplete Apple Reminders due within a start and end date range (YYYY-MM-DD). Use current date from system prompt for relative dates."""
     try:
         s_date = date.fromisoformat(start_date)
         e_date = date.fromisoformat(end_date)

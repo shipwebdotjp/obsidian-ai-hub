@@ -50,6 +50,8 @@ _APP_ENV_VARS = [
     "AI_PLANNER_PROMPT_PATH",
     "YOUTUBE_CHUNK_SUMMARY_PROMPT_PATH",
     "ALLOW_EXTERNAL_IN_TEST",
+    "AGENT_PROVIDER",
+    "AGENT_MODEL",
 ]
 
 if IS_TEST_ENV:
@@ -554,6 +556,14 @@ AI_PLANNER_MODEL = str(
 AI_PLANNER_PROMPT_PATH = _config_optional_path("llm", "planner", "prompt_path")
 if AI_PLANNER_PROMPT_PATH is None:
     AI_PLANNER_PROMPT_PATH = BASE_DIR / "config" / "prompts" / "ai_planner.md"
+
+# AI Agent default provider/model (used when agent has no provider/model set)
+AGENT_PROVIDER = str(
+    _env_or_config("AGENT_PROVIDER", "llm", "agent", "provider", default="openai")
+)
+AGENT_MODEL = str(
+    _env_or_config("AGENT_MODEL", "llm", "agent", "model", default="gpt-4o")
+)
 
 if IS_TEST_ENV:
     AI_LOG_PATH = TEST_WORKSPACE / "vault" / "ai-log"

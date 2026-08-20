@@ -5,7 +5,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from datetime import datetime, timedelta
 from typing import Any, AsyncGenerator, Dict, List, Optional, Sequence
+from zoneinfo import ZoneInfo
 
 from langchain_core.messages import (
     AIMessage,
@@ -68,9 +70,14 @@ async def generate_agent_stream(
     user_content: str,
     max_iterations: int = 3,
     max_history_messages: int = 20,
+    now: Optional[datetime] = None,
 ) -> AsyncGenerator[str, None]:
     """
     Execute LLM tool loop for agent conversation and yield SSE events.
+
+    Args:
+        now: Current datetime for prompt context (JST). If None, uses
+             datetime.now(Asia/Tokyo). Injected for test determinism.
 
     Yields:
       - text: {"type": "text", "delta": "..."}
@@ -89,7 +96,29 @@ async def generate_agent_stream(
     tools_by_name = {t.name: t for t in active_tools}
 
     # Prepare system & history messages (bounded by max_history_messages)
-    system_text = f"{SYSTEM_SAFETY_PROMPT}\n\nAgent System Prompt:\n{agent.get('system_prompt', '')}"
+    # Inject current time (JST) so LLM can resolve relative dates correctly
+    jst = ZoneInfo("Asia/Tokyo")
+    if now is not None:
+        if now.tzinfo is None:
+            now_jst = now.replace(tzinfo=jst)
+        else:
+            now_jst = now.astimezone(jst)
+    else:
+        now_jst = datetime.now(jst)
+    today_str = now_jst.date().isoformat()
+    tomorrow_str = (now_jst.date() + timedelta(days=1)).isoformat()
+    current_time_block = (
+        "Current time context (must use for all date calculations):\n"
+        f"- Now (JST, Asia/Tokyo): {now_jst.isoformat()} ({now_jst.strftime('%A')})\n"
+        f"- Today: {today_str}\n"
+        f"- Tomorrow: {tomorrow_str}\n"
+        "- Timezone: Asia/Tokyo (JST, UTC+9)\n"
+        "When user says 'today/tomorrow/this week/今週/明日/今日', resolve relative to the above. "
+        "For calendar_read/reminders_read use YYYY-MM-DD based on this current date."
+    )
+    system_text = (
+        f"{SYSTEM_SAFETY_PROMPT}\n\n{current_time_block}\n\nAgent System Prompt:\n{agent.get('system_prompt', '')}"
+    )
     langchain_messages: List[BaseMessage] = [SystemMessage(content=system_text)]
 
     recent_history = (

@@ -54,6 +54,10 @@ llm:
   #   provider: opencode_go
   #   model: deepseek-v3  # OpenAI-compatible model
   #   # model: qwen3.7-72b  # Anthropic-compatible model
+  # AI Agent default (used when agent's provider/model is empty)
+  agent:
+    provider: openai
+    model: gpt-4o
   inbox_audio_correction:
     provider: ollama
     model: gpt-oss:120b-cloud
