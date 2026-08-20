@@ -23,7 +23,8 @@ from typing import Any, Callable, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
 from langchain_core.tools import BaseTool, tool
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+from typing import Literal
 
 from obsidian_ai_hub.calendar.hitl import register_calendar_event_approval
 from obsidian_ai_hub.handler.obsidian_vault_retriever import search_obsidian_vault
@@ -45,6 +46,16 @@ EXPECTED_TOOL_EXCEPTIONS = (
     TypeError,
     PermissionError,
 )
+
+ALLOWED_MEMORY_KINDS = (
+    "preference",
+    "decision_policy",
+    "fact",
+    "commitment",
+    "pattern",
+    "episode",
+)
+_MEMORY_KEY_PATTERN = r"^[a-z0-9-]{1,64}$"
 
 _RECURRING_TZ = ZoneInfo("Asia/Tokyo")
 
@@ -170,6 +181,154 @@ class ReminderCreateProposalInput(BaseModel):
         default=None,
         description="Detailed background, notes, or rationale for the reminder.",
     )
+
+
+class MemorySearchInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    query: str = Field(
+        description="検索クエリ。ユーザーの嗜好や事実に関するキーワードを日本語で要約（例: '返信の文体の好み'）。"
+    )
+    kind: Optional[Literal[
+        "preference",
+        "decision_policy",
+        "fact",
+        "commitment",
+        "pattern",
+        "episode",
+    ]] = Field(
+        default=None,
+        description="絞り込み: preference|decision_policy|fact|commitment|pattern|episode のいずれか。",
+    )
+    limit: int = Field(
+        default=5,
+        ge=1,
+        le=10,
+        description="最大返却件数 (1-10)。省略時は5。",
+    )
+
+
+class MemoryProposeInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    content: str = Field(
+        description="記憶する内容本文。日本語で1文、具体的かつ検証可能に（例: '朝会では結論から先に述べる簡潔な報告を好む'）。推測は不可。"
+    )
+    kind: Literal[
+        "preference",
+        "decision_policy",
+        "fact",
+        "commitment",
+        "pattern",
+        "episode",
+    ] = Field(
+        description="種別: preference|decision_policy|fact|commitment|pattern|episode のいずれか。"
+    )
+    memory_key: Optional[str] = Field(
+        default=None,
+        pattern=_MEMORY_KEY_PATTERN,
+        description="任意の技術的キー（英数字とハイフンのみ、1-64文字）。省略時は空文字で保存。日本語の translit は行わない。",
+    )
+    topics: Optional[List[str]] = Field(
+        default=None,
+        description="既存トピック候補からのみ。なければ省略。例: ['ソフトウェア開発']",
+    )
+    tags: Optional[List[str]] = Field(
+        default=None,
+        description="任意のタグ配列。省略可。",
+    )
+    evidence_quote: Optional[str] = Field(
+        default=None,
+        description="現在のユーザ発話からの引用。省略可。サーバが検証し、不一致なら発話全体を根拠として保存する。",
+    )
+    rationale: Optional[str] = Field(
+        default=None,
+        description="なぜ記憶すべきかの簡潔な理由。レビュー画面の provenance に保存される。",
+    )
+
+
+# --- Memory Tool Factories (require trusted context) ---
+
+
+def _sanitize_unexpected_error(exc: Exception) -> str:
+    """Return a generic, sanitized message for unexpected tool failures.
+
+    Unexpected DB/IO errors can leak paths, SQL, or other internals. Keep
+    detail in the server log (via logger.exception at the call site) and
+    return a Japanese, user-safe message for the LLM/end user.
+    """
+    return "ツール実行中に予期しないエラーが発生しました。しばらく待って再試行してください。"
+
+
+def _make_memory_search_tool(trusted_ctx: Optional[Dict[str, Any]] = None) -> BaseTool:
+    """Create a memory_search tool. trusted_ctx is kept for symmetry but not required for read."""
+
+    @tool(args_schema=MemorySearchInput)
+    def memory_search(
+        query: str, kind: Optional[str] = None, limit: int = 5
+    ) -> str:
+        """承認済み長期記憶（approved）を検索します。ユーザーの嗜好や過去の事実が関係する質問では、回答を生成する前に必ず本ツールを呼び出し、返却された content を根拠として回答に反映してください。結果が空ならその旨を述べて一般的な回答をしてください。推測で補完しないこと。"""
+        try:
+            from obsidian_ai_hub.memory.agent_tools import search_memories
+
+            res = search_memories(query=query, kind=kind, limit=limit)
+            return json.dumps(res, ensure_ascii=False)
+        except ValueError as exc:
+            logger.warning("memory_search validation failed: %s", exc)
+            return json.dumps({"error": str(exc)}, ensure_ascii=False)
+        except Exception:
+            logger.exception("memory_search failed")
+            return json.dumps({"error": _sanitize_unexpected_error(Exception())}, ensure_ascii=False)
+
+    # Give stable name for LLM tool calling (overrides function name)
+    memory_search.name = "memory_search"  # type: ignore[attr-defined]
+    return memory_search
+
+
+def _make_memory_propose_tool(
+    trusted_ctx: Optional[Dict[str, Any]] = None,
+) -> BaseTool:
+    """Create a memory_propose tool bound to a trusted execution context."""
+
+    @tool(args_schema=MemoryProposeInput)
+    def memory_propose(
+        content: str,
+        kind: str,
+        memory_key: Optional[str] = None,
+        topics: Optional[List[str]] = None,
+        tags: Optional[List[str]] = None,
+        evidence_quote: Optional[str] = None,
+        rationale: Optional[str] = None,
+    ) -> str:
+        """ユーザーが嗜好・事実・方針を明示した内容を長期記憶候補として保存します。推測で作成せず、ユーザーの発話に明確な根拠がある場合のみ呼び出してください。保存された候補はメモリ画面で人間が確認・編集・承認します。stability は自動的に tentative として保存されます。1ターンに1件まで。"""
+        if trusted_ctx is None:
+            return json.dumps(
+                {"error": "memory_propose はエージェント実行コンテキストが無いため呼び出せません"},
+                ensure_ascii=False,
+            )
+        try:
+            from obsidian_ai_hub.memory.agent_tools import create_memory_candidate
+
+            res = create_memory_candidate(
+                content=content,
+                kind=kind,
+                memory_key=memory_key,
+                topics=topics,
+                tags=tags,
+                evidence_quote=evidence_quote,
+                rationale=rationale,
+                trusted_ctx=trusted_ctx,
+            )
+            return json.dumps(res, ensure_ascii=False)
+        except ValueError as exc:
+            logger.warning("memory_propose validation failed: %s", exc)
+            return json.dumps({"error": str(exc)}, ensure_ascii=False)
+        except Exception:
+            logger.exception("memory_propose failed")
+            return json.dumps({"error": _sanitize_unexpected_error(Exception())}, ensure_ascii=False)
+
+    memory_propose.name = "memory_propose"  # type: ignore[attr-defined]
+    return memory_propose
 
 
 # --- Tool Implementations ---
@@ -383,6 +542,20 @@ TOOL_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "description": "リマインダーへのタスク追加をユーザーへ承認申請（HITL）します。",
         "get_tool": lambda: reminder_create_proposal,
     },
+    "memory_search": {
+        "tool_id": "memory_search",
+        "name": "長期記憶検索",
+        "description": "承認済み長期記憶（approved）を検索します。ユーザーの嗜好や過去の事実が関係する質問では回答前に必ず呼び出し、結果の content を根拠として回答に反映してください。",
+        "get_tool": lambda: _make_memory_search_tool(),
+        "get_tool_with_context": lambda ctx: _make_memory_search_tool(ctx),
+    },
+    "memory_propose": {
+        "tool_id": "memory_propose",
+        "name": "長期記憶候補作成",
+        "description": "ユーザーが嗜好・事実・方針を明示した内容を長期記憶候補（candidate）として保存します。推測で作成せず、明確な根拠がある場合のみ呼び出してください。保存後はメモリ画面で人間が承認します。",
+        "get_tool": lambda: _make_memory_propose_tool(None),
+        "get_tool_with_context": lambda ctx: _make_memory_propose_tool(ctx),
+    },
 }
 
 
@@ -413,5 +586,46 @@ def resolve_tools(tool_ids: Sequence[str]) -> List[BaseTool]:
             logger.warning("Requested tool_id '%s' is not in server registry; skipping", tid)
             continue
         tool_obj = meta["get_tool"]()
+        tools.append(tool_obj)
+    return tools
+
+
+def resolve_tools_with_context(
+    tool_ids: Sequence[str], trusted_ctx: Dict[str, Any]
+) -> List[BaseTool]:
+    """Like resolve_tools but binds trusted execution context to context-aware tools.
+
+    Tools that define ``get_tool_with_context`` receive the trusted_ctx
+    (agent_id, session_id, run_id, etc.) and can embed it in their closure
+    without exposing it to the LLM.
+
+    The trusted_ctx snapshot is shallow-copied per tool so the binding cannot
+    be mutated after this function returns (callers may reuse the dict across
+    runs or async tasks).
+    """
+    tools: List[BaseTool] = []
+    seen = set()
+    for tid in tool_ids:
+        if not tid or tid in seen:
+            continue
+        seen.add(tid)
+        meta = TOOL_DEFINITIONS.get(tid)
+        if not meta:
+            logger.warning("Requested tool_id '%s' is not in server registry; skipping", tid)
+            continue
+        if "get_tool_with_context" in meta:
+            # Copy the snapshot so the tool closure cannot observe later
+            # mutations to the caller's dict.
+            ctx_snapshot = dict(trusted_ctx) if trusted_ctx is not None else {}
+            try:
+                tool_obj = meta["get_tool_with_context"](ctx_snapshot)  # type: ignore[operator]
+            except Exception as exc:
+                # Re-raise so mis-bound trusted_ctx / broken factories are
+                # visible. The runtime caller may choose to fall back to
+                # resolve_tools if it wants degraded behavior.
+                logger.exception("Failed to create contextual tool %s: %s", tid, exc)
+                raise
+        else:
+            tool_obj = meta["get_tool"]()
         tools.append(tool_obj)
     return tools

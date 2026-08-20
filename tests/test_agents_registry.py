@@ -10,7 +10,7 @@ from obsidian_ai_hub.hitl.store import get_run
 def test_list_available_tools():
     tools = registry.list_available_tools()
     tool_ids = [t["tool_id"] for t in tools]
-    expected_ids = [
+    expected_ids = {
         "web_search",
         "web_extract",
         "vault_search",
@@ -19,8 +19,11 @@ def test_list_available_tools():
         "reminders_read",
         "calendar_create_proposal",
         "reminder_create_proposal",
-    ]
-    assert tool_ids == expected_ids
+        "memory_search",
+        "memory_propose",
+    }
+    # Order is not contractual; assert membership instead.
+    assert set(tool_ids) == expected_ids
 
 
 def test_resolve_tools():

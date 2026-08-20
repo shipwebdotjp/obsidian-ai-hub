@@ -595,6 +595,10 @@ MEMORY_CONTEXT_MAX_TOKENS = int(
     _config_value("memory", "context_max_tokens", default=800)
 )
 
+MEMORY_AGENT_CONTEXT_MAX_TOKENS = int(
+    _config_value("memory", "agent_context_max_tokens", default=400)
+)
+
 # Memory Interview Configuration
 MEMORY_INTERVIEW_PROVIDER = _config_value("memory", "interview", "provider")
 MEMORY_INTERVIEW_MODEL = _config_value("memory", "interview", "model")
