@@ -583,3 +583,59 @@ export interface PlannerGenerateResponse {
   generated: number;
   proposals: PlannerProposal[];
 }
+
+// --- AI Agent types ---
+
+export interface Agent {
+  agent_id: string;
+  name: string;
+  system_prompt: string;
+  provider: string | null;
+  model: string | null;
+  tool_ids: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AgentTool {
+  tool_id: string;
+  name: string;
+  description: string;
+}
+
+export interface AgentSession {
+  session_id: string;
+  agent_id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AgentMessage {
+  message_id: string;
+  session_id: string;
+  sequence: number;
+  role: "user" | "assistant";
+  content: string;
+  created_at: string;
+}
+
+export interface AgentRun {
+  run_id: string;
+  session_id: string;
+  user_message_id: string;
+  assistant_message_id: string | null;
+  status: "running" | "succeeded" | "failed";
+  used_tools: string[];
+  created_hitl_run_ids: string[];
+  error_message: string | null;
+  started_at: string;
+  finished_at: string | null;
+}
+
+export interface AgentSessionDetailResponse {
+  session: AgentSession;
+  agent: Agent;
+  messages: AgentMessage[];
+  runs: AgentRun[];
+}

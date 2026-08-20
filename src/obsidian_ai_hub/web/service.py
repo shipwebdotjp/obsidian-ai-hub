@@ -5,6 +5,19 @@ Re-exports all service functions from the feature subpackage to preserve the
 ``summary/project_utils.py``. No logic lives here.
 """
 
+from obsidian_ai_hub.web.services.agents import (
+    create_agent,
+    create_session,
+    delete_agent,
+    delete_session,
+    get_agent,
+    get_session_detail,
+    list_agent_tools,
+    list_agents,
+    list_sessions,
+    stream_session_message,
+    update_agent,
+)
 from obsidian_ai_hub.web.services.dashboard import (
     find_selectable_years,
     get_dashboard_browse,

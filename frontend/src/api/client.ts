@@ -25,6 +25,12 @@ import type {
   PlannerProposalListResponse,
   PlannerProposalUpdatePayload,
   PlannerTimelineResponse,
+  Agent,
+  AgentTool,
+  AgentSession,
+  AgentMessage,
+  AgentRun,
+  AgentSessionDetailResponse,
 } from "./types";
 
 const TOKEN_KEY = "obsidian-ai-hub:api-token";
@@ -481,6 +487,171 @@ export function generatePlannerProposals(): Promise<PlannerGenerateResponse> {
   return request<PlannerGenerateResponse>("/api/v1/planner/generate", {
     method: "POST",
   });
+}
+
+// --- AI Agent APIs ---
+
+export function listAgents(): Promise<{ agents: Agent[] }> {
+  return request<{ agents: Agent[] }>("/api/v1/agents");
+}
+
+export function createAgent(payload: {
+  name: string;
+  system_prompt: string;
+  tool_ids?: string[];
+  provider?: string;
+  model?: string;
+}): Promise<{ agent: Agent }> {
+  return request<{ agent: Agent }>("/api/v1/agents", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function getAgent(agentId: string): Promise<{ agent: Agent }> {
+  return request<{ agent: Agent }>(`/api/v1/agents/${encodeURIComponent(agentId)}`);
+}
+
+export function updateAgent(
+  agentId: string,
+  payload: {
+    name?: string;
+    system_prompt?: string;
+    tool_ids?: string[];
+    provider?: string;
+    model?: string;
+  },
+): Promise<{ agent: Agent }> {
+  return request<{ agent: Agent }>(`/api/v1/agents/${encodeURIComponent(agentId)}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteAgent(agentId: string): Promise<{ success: boolean }> {
+  return request<{ success: boolean }>(`/api/v1/agents/${encodeURIComponent(agentId)}`, {
+    method: "DELETE",
+  });
+}
+
+export function listAgentTools(): Promise<{ tools: AgentTool[] }> {
+  return request<{ tools: AgentTool[] }>("/api/v1/agent-tools");
+}
+
+export function listAgentSessions(agentId: string): Promise<{ sessions: AgentSession[] }> {
+  return request<{ sessions: AgentSession[] }>(
+    `/api/v1/agents/${encodeURIComponent(agentId)}/sessions`,
+  );
+}
+
+export function createAgentSession(
+  agentId: string,
+  payload?: { title?: string },
+): Promise<{ session: AgentSession }> {
+  return request<{ session: AgentSession }>(
+    `/api/v1/agents/${encodeURIComponent(agentId)}/sessions`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload || {}),
+    },
+  );
+}
+
+export function getAgentSessionDetail(
+  sessionId: string,
+): Promise<AgentSessionDetailResponse> {
+  return request<AgentSessionDetailResponse>(
+    `/api/v1/agent-sessions/${encodeURIComponent(sessionId)}`,
+  );
+}
+
+export function deleteAgentSession(sessionId: string): Promise<{ success: boolean }> {
+  return request<{ success: boolean }>(
+    `/api/v1/agent-sessions/${encodeURIComponent(sessionId)}`,
+    { method: "DELETE" },
+  );
+}
+
+export async function streamAgentMessage(
+  sessionId: string,
+  content: string,
+  onEvent: (event: any) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const headers = new Headers();
+  headers.set("Content-Type", "application/json");
+  headers.set("Accept", "text/event-stream");
+  const token = getToken();
+  if (token) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+
+  const response = await fetch(
+    `/api/v1/agent-sessions/${encodeURIComponent(sessionId)}/messages/stream`,
+    {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ content }),
+      signal,
+    },
+  );
+
+  if (response.status === 401) {
+    clearToken();
+    window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT));
+    throw new ApiError(401, "Authentication failed.");
+  }
+
+  if (!response.ok) {
+    let detail = response.statusText;
+    try {
+      const errJson = await response.json();
+      if (errJson && errJson.detail) detail = errJson.detail;
+    } catch (_) {}
+    throw new ApiError(response.status, detail);
+  }
+
+  if (!response.body) {
+    throw new Error("ReadableStream not supported by response body.");
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder("utf-8");
+  let buffer = "";
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    const lines = buffer.split("\n\n");
+    buffer = lines.pop() || "";
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (trimmed.startsWith("data: ")) {
+        const jsonStr = trimmed.slice(6).trim();
+        if (jsonStr) {
+          try {
+            const parsed = JSON.parse(jsonStr);
+            onEvent(parsed);
+          } catch (e) {
+            console.error("Failed to parse SSE data line:", jsonStr, e);
+          }
+        }
+      }
+    }
+  }
+
+  if (buffer.trim().startsWith("data: ")) {
+    const jsonStr = buffer.trim().slice(6).trim();
+    if (jsonStr) {
+      try {
+        const parsed = JSON.parse(jsonStr);
+        onEvent(parsed);
+      } catch (_) {}
+    }
+  }
 }
 
 export function apiGet<T>(path: string): Promise<T> {
