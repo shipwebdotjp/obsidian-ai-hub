@@ -240,3 +240,24 @@ HITL ページ（`frontend/src/features/hitl/HitlPage.tsx`）は従来 `lg:flex-
 - Frontend Vitest 103 passed、`tsc -b` クリーン。
 - 以降の新規2ペイン画面は同構成を踏襲する。
 
+## Web AI エージェント v1 の Web API / React UI 実装と動作契約
+
+| 項目 | 内容 |
+|------|------|
+| 決定日 | 2026-08-20 |
+| カテゴリ | Web API・フロントエンド・AIエージェント |
+| 決定内容 | エージェント管理・会話ストリーミング API (`/api/v1/agents`, `/api/v1/agent-tools`, `/api/v1/agent-sessions/*`) と `/agents` 画面を実装する。全 API は Bearer 認証を必須とし、応答は Fetch ReadableStream で SSE 解析し、HITL Run 作成時は承認待ち画面へのリンクを描画する。 |
+
+### 詳細
+
+1. **データモデル・永続化 (schema v21):**
+   - SQLite スキーマ v21: `agents`, `agent_sessions`, `agent_messages`, `agent_runs` テーブルを作成。
+   - 削除カスケード (`ON DELETE CASCADE`): セッション削除でメッセージ・実行記録を回収し、エージェント削除で配下セッションすべてを回収する。
+
+2. **ツールレジストリと安全境界:**
+   - 固定8ツール (`web_search`, `web_extract`, `vault_search`, `vault_read_file`, `calendar_read`, `reminders_read`, `calendar_create_proposal`, `reminder_create_proposal`) のみを公開。
+   - カレンダー／リマインダーの新規作成提案は直接書き込まず、既存の HITL Run 登録ラッパーを介して `pending_user` 状態の HITL Run を登録する。
+
+3. **SSE ストリーミングと UI 契約:**
+   - `POST /api/v1/agent-sessions/{session_id}/messages/stream` エンドポイントが Bearer 認証付き Fetch ReadableStream を経由して `text` (逐次トークン), `done` (確定メッセージとHITL Run ID群), `error` イベントを送信する。
+   - UI は `done` イベントで `hitl_run_ids` を受け取った場合、「承認待ちの登録申請が作成されました」のアラートと `/hitl` へのリンクを描画する。

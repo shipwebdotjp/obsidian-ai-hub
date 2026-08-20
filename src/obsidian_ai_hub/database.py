@@ -474,6 +474,9 @@ def get_db_connection() -> sqlite3.Connection:
     if current_version <= 19:
         run_migration_v20(conn)
 
+    if current_version <= 20:
+        run_migration_v21(conn)
+
     return conn
 
 
@@ -619,6 +622,67 @@ def run_migration_v19(conn: sqlite3.Connection) -> None:
         );
     """)
     conn.execute("PRAGMA user_version = 19;")
+    conn.commit()
+
+
+def run_migration_v21(conn: sqlite3.Connection) -> None:
+    """Run migration for version 21 (AI agent tables: agents, agent_sessions, agent_messages, agent_runs)."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS agents (
+            agent_id TEXT PRIMARY KEY,
+            name TEXT UNIQUE NOT NULL,
+            system_prompt TEXT NOT NULL,
+            provider TEXT,
+            model TEXT,
+            tool_ids_json TEXT NOT NULL DEFAULT '[]',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS agent_sessions (
+            session_id TEXT PRIMARY KEY,
+            agent_id TEXT NOT NULL,
+            title TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY(agent_id) REFERENCES agents(agent_id) ON DELETE CASCADE
+        );
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS agent_messages (
+            message_id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            sequence INTEGER NOT NULL,
+            role TEXT NOT NULL,
+            content TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY(session_id) REFERENCES agent_sessions(session_id) ON DELETE CASCADE,
+            UNIQUE(session_id, sequence)
+        );
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS agent_runs (
+            run_id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            user_message_id TEXT NOT NULL,
+            assistant_message_id TEXT,
+            status TEXT NOT NULL,
+            used_tools_json TEXT NOT NULL DEFAULT '[]',
+            created_hitl_run_ids_json TEXT NOT NULL DEFAULT '[]',
+            error_message TEXT,
+            started_at TEXT NOT NULL,
+            finished_at TEXT,
+            FOREIGN KEY(session_id) REFERENCES agent_sessions(session_id) ON DELETE CASCADE,
+            FOREIGN KEY(user_message_id) REFERENCES agent_messages(message_id) ON DELETE CASCADE,
+            FOREIGN KEY(assistant_message_id) REFERENCES agent_messages(message_id) ON DELETE CASCADE
+        );
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_agent_sessions_agent_id ON agent_sessions(agent_id);")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_agent_messages_session_seq ON agent_messages(session_id, sequence);")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_agent_runs_session_id ON agent_runs(session_id);")
+
+    conn.execute("PRAGMA user_version = 21;")
     conn.commit()
 
 

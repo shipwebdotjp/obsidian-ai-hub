@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from obsidian_ai_hub.web.routes import (
+    agents,
     dashboard,
     execution_logs,
     hitl,
@@ -17,6 +18,7 @@ from obsidian_ai_hub.web.routes import (
 
 router = APIRouter(prefix="/api/v1")
 
+router.include_router(agents.router)
 router.include_router(line.router)
 router.include_router(memory.router)
 router.include_router(research.router)
