@@ -1,4 +1,17 @@
-"""Server tool registry and safety boundaries for AI agents."""
+"""Safe, shared LLM-tool catalog and allowlist for configurable agents.
+
+This module is the only tool-resolution entry point for user-configurable or
+otherwise general-purpose agents.  Callers persist and select stable tool IDs,
+then use :func:`resolve_tools` to obtain only the explicitly approved
+``BaseTool`` adapters.
+
+``handler`` modules implement lower-level integrations and can include direct
+external side effects used by HITL handlers or Planner promotion.  They are not
+an agent-tool catalog: never expose a handler merely because it is decorated
+with ``@tool``.  Fixed internal workflows, such as web research, may import a
+small, compile-time read-only tool set directly when that narrower contract is
+part of the workflow.
+"""
 
 from __future__ import annotations
 

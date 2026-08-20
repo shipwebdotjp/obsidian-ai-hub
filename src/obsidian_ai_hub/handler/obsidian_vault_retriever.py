@@ -1,7 +1,7 @@
 import json
 import logging
 
-from langchain.tools import tool
+from langchain_core.tools import tool
 
 from obsidian_ai_hub.sync_valut import build_vault_search_index
 

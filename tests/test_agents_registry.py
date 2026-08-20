@@ -1,6 +1,7 @@
 import json
 from unittest.mock import patch
 import pytest
+from langchain_core.tools import BaseTool
 
 from obsidian_ai_hub.agents import registry
 from obsidian_ai_hub.hitl.store import get_run
@@ -31,6 +32,15 @@ def test_resolve_tools():
     assert len(resolved) == 2
     assert "web_search" in names
     assert "calendar_read" in names
+
+
+def test_resolve_tools_returns_core_tools_and_excludes_direct_apple_writes():
+    resolved = registry.resolve_tools(
+        ["vault_search", "add_calendar_event", "add_reminder"]
+    )
+
+    assert [tool.name for tool in resolved] == ["search_obsidian_vault"]
+    assert all(isinstance(tool, BaseTool) for tool in resolved)
 
 
 def test_calendar_create_proposal():

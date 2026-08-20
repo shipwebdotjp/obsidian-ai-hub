@@ -236,6 +236,10 @@ def test_web_research_uses_its_own_provider_and_model():
 
     assert mock_response.call_args.kwargs["provider"] == "web-provider"
     assert mock_response.call_args.kwargs["model"] == "web-model"
+    assert [tool.name for tool in mock_response.call_args.kwargs["tools"]] == [
+        "web_search",
+        "web_extract",
+    ]
 
 
 def test_gpt_researcher_environment_uses_config_and_restores_prior_values(monkeypatch):

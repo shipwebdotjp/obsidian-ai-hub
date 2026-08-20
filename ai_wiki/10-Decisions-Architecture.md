@@ -32,6 +32,31 @@
 - 既存の `add_calendar_event` / `add_reminder` は作成専用で、更新・削除には安全な対象識別子と追加の承認設計が必要なため対象外とする。
 - 実行ログは会話削除まで保持するため、個人データを含む点を UI で明示し、セッション削除で回収できるようにする。
 
+## LLM ツールの共有入口と内部ワークフローの分離
+
+| 項目 | 内容 |
+|------|------|
+| 決定日 | 2026-08-20 |
+| カテゴリ | AIエージェント・ツール境界 |
+| 決定内容 | ユーザー設定可能または汎用のエージェントは `agents.registry.resolve_tools()` を唯一のツール解決入口とする。固定用途の内部 LLM ワークフローは、用途に必要な read-only `BaseTool` をコード上で明示して渡せる。 |
+
+### 結論に至った経緯
+
+`handler/` には Web / Vault の read-only アダプタだけでなく、HITL 承認後や Planner 昇格から使う Apple 直接書込みツールもある。これを一般的な agent tool の正本にすると、将来のエージェントが直接書込みを誤って公開し、HITL 境界を迂回できる。
+
+一方、`research/runner.py` の Web 調査は、`web_search` と `web_extract` だけを使う固定・read-only の内部ワークフローであり、ユーザー設定可能なエージェントの tool ID・実行履歴・HITL Run 記録を必要としない。共有化のためだけに registry を経由させる必要はない。
+
+### 構造と運用
+
+- ドメイン処理は domain package に置く。Apple 直接書込みは HITL 承認後または Planner 昇格だけが呼び、新しい直接書込み API を LLM `@tool` として追加しない。
+- `BaseTool` は LLM 境界のアダプタとし、Pydantic 入力スキーマ、引数上限、安定した JSON 結果を持たせる。LangChain の tool API は `langchain_core.tools` に統一する。
+- 設定可能なエージェントは安定した tool ID のみを保存し、registry の allowlist から解決する。直接 Apple 書込みは registry に登録しない。
+- `generate_llm_response_with_tools()` は同期の汎用 tool executor に留める。HITL、権限、allowlist、実行履歴の記録は呼出側の policy layer が所有する。
+
+### トレードオフ
+
+- 高レベル tool adapter と tool loop は現時点で一つの実利用者しかないため、`agents/tools.py` や共通 executor は追加しない。第二利用者が、同一の高レベル adapter または構造化された tool 実行結果を必要とした時点で抽出を再検討する。
+
 ## バックアップ失敗の実行ログ記録
 
 | 項目 | 内容 |
