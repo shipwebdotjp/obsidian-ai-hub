@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Sequence
 from datetime import date
 from typing import Any, Callable, Dict, List, Optional
 
@@ -22,6 +23,14 @@ from obsidian_ai_hub.reminders.hitl import register_reminder_approval
 from obsidian_ai_hub.web.services.vault import get_vault_file
 
 logger = logging.getLogger(__name__)
+
+EXPECTED_TOOL_EXCEPTIONS = (
+    FileNotFoundError,
+    ValueError,
+    KeyError,
+    TypeError,
+    PermissionError,
+)
 
 
 # --- Input Schemas ---
@@ -91,8 +100,8 @@ def vault_read_file(relative_path: str) -> str:
     try:
         res = get_vault_file(relative_path)
         return json.dumps(res, ensure_ascii=False)
-    except Exception as exc:
-        logger.exception("vault_read_file failed")
+    except EXPECTED_TOOL_EXCEPTIONS as exc:
+        logger.warning("vault_read_file failed: %s", exc)
         return json.dumps({"error": str(exc)}, ensure_ascii=False)
 
 
@@ -108,8 +117,8 @@ def calendar_read(
             s_date, e_date, calendar_name=calendar_name
         )
         return json.dumps({"events": events}, ensure_ascii=False)
-    except Exception as exc:
-        logger.exception("calendar_read failed")
+    except EXPECTED_TOOL_EXCEPTIONS as exc:
+        logger.warning("calendar_read failed: %s", exc)
         return json.dumps({"error": str(exc)}, ensure_ascii=False)
 
 
@@ -121,8 +130,8 @@ def reminders_read(start_date: str, end_date: str) -> str:
         e_date = date.fromisoformat(end_date)
         reminders = fetch_incomplete_reminders(s_date, e_date)
         return json.dumps({"reminders": reminders}, ensure_ascii=False)
-    except Exception as exc:
-        logger.exception("reminders_read failed")
+    except EXPECTED_TOOL_EXCEPTIONS as exc:
+        logger.warning("reminders_read failed: %s", exc)
         return json.dumps({"error": str(exc)}, ensure_ascii=False)
 
 
@@ -162,8 +171,8 @@ def calendar_create_proposal(
             },
             ensure_ascii=False,
         )
-    except Exception as exc:
-        logger.exception("calendar_create_proposal failed")
+    except EXPECTED_TOOL_EXCEPTIONS as exc:
+        logger.warning("calendar_create_proposal failed: %s", exc)
         return json.dumps({"error": str(exc)}, ensure_ascii=False)
 
 
@@ -197,8 +206,8 @@ def reminder_create_proposal(
             },
             ensure_ascii=False,
         )
-    except Exception as exc:
-        logger.exception("reminder_create_proposal failed")
+    except EXPECTED_TOOL_EXCEPTIONS as exc:
+        logger.warning("reminder_create_proposal failed: %s", exc)
         return json.dumps({"error": str(exc)}, ensure_ascii=False)
 
 

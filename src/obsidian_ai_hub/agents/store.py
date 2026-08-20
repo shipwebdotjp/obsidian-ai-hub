@@ -31,6 +31,18 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _validate_tool_ids(tool_ids: Sequence[str]) -> list[str]:
+    from obsidian_ai_hub.agents.registry import TOOL_DEFINITIONS
+
+    valid = []
+    for tid in tool_ids:
+        if tid not in TOOL_DEFINITIONS:
+            raise ValueError(f"Unknown tool ID: '{tid}'")
+        if tid not in valid:
+            valid.append(tid)
+    return valid
+
+
 def _row_to_agent(row: sqlite3.Row) -> dict[str, Any]:
     tool_ids = []
     if row["tool_ids_json"]:
@@ -117,7 +129,7 @@ def create_agent(
 
     clean_provider = provider.strip() if provider and provider.strip() else None
     clean_model = model.strip() if model and model.strip() else None
-    valid_tool_ids = list(tool_ids) if tool_ids else []
+    valid_tool_ids = _validate_tool_ids(tool_ids or [])
 
     agent_id = f"agent_{uuid.uuid4().hex[:12]}"
     now = _now_iso()
@@ -219,7 +231,7 @@ def update_agent(
         )
 
         valid_tool_ids = (
-            list(tool_ids) if tool_ids is not None else existing["tool_ids"]
+            _validate_tool_ids(tool_ids) if tool_ids is not None else existing["tool_ids"]
         )
         tool_ids_json = json.dumps(valid_tool_ids, ensure_ascii=False)
         now = _now_iso()
@@ -458,20 +470,13 @@ def complete_run(
             ) + 1
 
             assistant_msg_id = f"amsg_{uuid.uuid4().hex[:12]}"
-            active_conn.execute(
-                """
-                INSERT INTO agent_messages (message_id, session_id, sequence, role, content, created_at)
-                VALUES (?, ?, ?, 'assistant', ?, ?)
-                """,
-                (assistant_msg_id, session_id, next_seq, assistant_content, now),
-            )
 
-            active_conn.execute(
+            cursor_update = active_conn.execute(
                 """
                 UPDATE agent_runs
                 SET assistant_message_id = ?, status = 'succeeded', used_tools_json = ?,
                     created_hitl_run_ids_json = ?, finished_at = ?
-                WHERE run_id = ?
+                WHERE run_id = ? AND status = 'running'
                 """,
                 (
                     assistant_msg_id,
@@ -480,6 +485,16 @@ def complete_run(
                     now,
                     run_id,
                 ),
+            )
+            if cursor_update.rowcount == 0:
+                raise ValueError(f"Run '{run_id}' is not in 'running' state.")
+
+            active_conn.execute(
+                """
+                INSERT INTO agent_messages (message_id, session_id, sequence, role, content, created_at)
+                VALUES (?, ?, ?, 'assistant', ?, ?)
+                """,
+                (assistant_msg_id, session_id, next_seq, assistant_content, now),
             )
 
             active_conn.execute(
@@ -518,7 +533,7 @@ def fail_run(
                     """
                     UPDATE agent_runs
                     SET status = 'failed', error_message = ?, finished_at = ?
-                    WHERE run_id = ?
+                    WHERE run_id = ? AND status = 'running'
                     """,
                     (error_message, now, run_id),
                 )
@@ -527,7 +542,7 @@ def fail_run(
                 """
                 UPDATE agent_runs
                 SET status = 'failed', error_message = ?, finished_at = ?
-                WHERE run_id = ?
+                WHERE run_id = ? AND status = 'running'
                 """,
                 (error_message, now, run_id),
             )

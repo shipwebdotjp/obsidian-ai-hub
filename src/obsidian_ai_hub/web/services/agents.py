@@ -102,7 +102,7 @@ async def stream_session_message(
         raise FileNotFoundError(f"Session '{session_id}' not found.")
     agent = get_agent(session["agent_id"])
 
-    user_msg, run = store.start_user_run(session_id, content)
+    _user_msg, run = store.start_user_run(session_id, content)
     history_messages = store.list_messages(session_id)
 
     async for chunk in runtime.generate_agent_stream(

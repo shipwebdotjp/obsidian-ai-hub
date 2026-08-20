@@ -171,7 +171,18 @@ describe("AgentsPage", () => {
             content: "カレンダーへの登録申請を作成しました。",
             created_at: new Date().toISOString(),
           },
-          run: { status: "succeeded" },
+          run: {
+            run_id: "arun_1",
+            session_id: sessionId,
+            user_message_id: "msg_2",
+            assistant_message_id: "msg_3",
+            status: "succeeded",
+            used_tools: [],
+            created_hitl_run_ids: ["hrun_inbox_calendar_999"],
+            error_message: null,
+            started_at: "",
+            finished_at: "",
+          },
           hitl_run_ids: ["hrun_inbox_calendar_999"],
         });
       }
@@ -195,7 +206,8 @@ describe("AgentsPage", () => {
       expect(mockStreamMessage).toHaveBeenCalledWith(
         "asess_456",
         "明日10時にミーティングを入れて",
-        expect.any(Function)
+        expect.any(Function),
+        expect.any(Object)
       );
     });
 
@@ -203,5 +215,40 @@ describe("AgentsPage", () => {
       await screen.findByText("承認待ちの登録申請が作成されました")
     ).toBeInTheDocument();
     expect(screen.getByText("→ 確認待ち画面へ移動する")).toBeInTheDocument();
+  });
+
+  it("displays error message when streaming receives an error event", async () => {
+    const user = userEvent.setup();
+
+    mockStreamMessage.mockImplementation(
+      async (sessionId, content, onEvent) => {
+        onEvent({
+          type: "error",
+          error: "ストリーミングエラーが発生しました。",
+        });
+      }
+    );
+
+    render(
+      <MemoryRouter>
+        <AgentsPage />
+      </MemoryRouter>
+    );
+
+    expect(
+      await screen.findByText("こんにちは！何かお手伝いできますか？")
+    ).toBeInTheDocument();
+
+    const input = screen.getByPlaceholderText("メッセージを入力…");
+    await user.type(input, "テストメッセージ");
+    await user.click(screen.getByRole("button", { name: "送信" }));
+
+    expect(
+      await screen.findByText("ストリーミングエラーが発生しました。")
+    ).toBeInTheDocument();
+
+    // Type new text to verify input is not disabled by streaming
+    await user.type(input, "再試行");
+    expect(screen.getByRole("button", { name: "送信" })).not.toBeDisabled();
   });
 });

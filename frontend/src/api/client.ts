@@ -31,6 +31,7 @@ import type {
   AgentMessage,
   AgentRun,
   AgentSessionDetailResponse,
+  AgentStreamEvent,
 } from "./types";
 
 const TOKEN_KEY = "obsidian-ai-hub:api-token";
@@ -572,10 +573,25 @@ export function deleteAgentSession(sessionId: string): Promise<{ success: boolea
   );
 }
 
+function parseSseLine(line: string, onEvent: (event: AgentStreamEvent) => void): void {
+  const trimmed = line.trim();
+  if (trimmed.startsWith("data: ")) {
+    const jsonStr = trimmed.slice(6).trim();
+    if (jsonStr) {
+      try {
+        const parsed = JSON.parse(jsonStr) as AgentStreamEvent;
+        onEvent(parsed);
+      } catch (e) {
+        console.error("Failed to parse SSE data line:", jsonStr, e);
+      }
+    }
+  }
+}
+
 export async function streamAgentMessage(
   sessionId: string,
   content: string,
-  onEvent: (event: any) => void,
+  onEvent: (event: AgentStreamEvent) => void,
   signal?: AbortSignal,
 ): Promise<void> {
   const headers = new Headers();
@@ -628,29 +644,12 @@ export async function streamAgentMessage(
     buffer = lines.pop() || "";
 
     for (const line of lines) {
-      const trimmed = line.trim();
-      if (trimmed.startsWith("data: ")) {
-        const jsonStr = trimmed.slice(6).trim();
-        if (jsonStr) {
-          try {
-            const parsed = JSON.parse(jsonStr);
-            onEvent(parsed);
-          } catch (e) {
-            console.error("Failed to parse SSE data line:", jsonStr, e);
-          }
-        }
-      }
+      parseSseLine(line, onEvent);
     }
   }
 
-  if (buffer.trim().startsWith("data: ")) {
-    const jsonStr = buffer.trim().slice(6).trim();
-    if (jsonStr) {
-      try {
-        const parsed = JSON.parse(jsonStr);
-        onEvent(parsed);
-      } catch (_) {}
-    }
+  if (buffer.trim()) {
+    parseSseLine(buffer, onEvent);
   }
 }
 

@@ -84,8 +84,8 @@ def create_agent(req: CreateAgentRequest) -> Dict[str, Any]:
     except ValueError as e:
         msg = str(e)
         if "already exists" in msg:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=msg)
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=msg)
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=msg) from e
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=msg) from e
 
 
 @router.get("/agents/{agent_id}")
@@ -94,7 +94,7 @@ def get_agent(agent_id: str) -> Dict[str, Any]:
         agent = agent_service.get_agent(agent_id)
         return {"agent": agent}
     except FileNotFoundError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
 
 
 @router.patch("/agents/{agent_id}")
@@ -110,12 +110,12 @@ def update_agent(agent_id: str, req: UpdateAgentRequest) -> Dict[str, Any]:
         )
         return {"agent": agent}
     except FileNotFoundError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
     except ValueError as e:
         msg = str(e)
         if "already exists" in msg:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=msg)
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=msg)
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=msg) from e
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=msg) from e
 
 
 @router.delete("/agents/{agent_id}")
@@ -124,7 +124,7 @@ def delete_agent(agent_id: str) -> Dict[str, Any]:
         agent_service.delete_agent(agent_id)
         return {"success": True}
     except FileNotFoundError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
 
 
 # --- Session Routes ---
@@ -136,7 +136,7 @@ def list_sessions(agent_id: str) -> Dict[str, Any]:
         sessions = agent_service.list_sessions(agent_id)
         return {"sessions": sessions}
     except FileNotFoundError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
 
 
 @router.post("/agents/{agent_id}/sessions", status_code=status.HTTP_201_CREATED)
@@ -145,7 +145,7 @@ def create_session(agent_id: str, req: CreateSessionRequest) -> Dict[str, Any]:
         session = agent_service.create_session(agent_id, title=req.title)
         return {"session": session}
     except FileNotFoundError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
 
 
 @router.get("/agent-sessions/{session_id}")
@@ -154,7 +154,7 @@ def get_session_detail(session_id: str) -> Dict[str, Any]:
         detail = agent_service.get_session_detail(session_id)
         return detail
     except FileNotFoundError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
 
 
 @router.delete("/agent-sessions/{session_id}")
@@ -163,7 +163,7 @@ def delete_session(session_id: str) -> Dict[str, Any]:
         agent_service.delete_session(session_id)
         return {"success": True}
     except FileNotFoundError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
 
 
 # --- Conversation SSE Streaming Route ---
@@ -182,10 +182,22 @@ async def stream_session_message(
 
     try:
         stream_gen = agent_service.stream_session_message(session_id, content)
-        return StreamingResponse(stream_gen, media_type="text/event-stream")
+        first_chunk = await stream_gen.__anext__()
     except FileNotFoundError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
-        )
+        ) from e
+    except StopAsyncIteration:
+        async def empty_gen():
+            return
+            yield
+        return StreamingResponse(empty_gen(), media_type="text/event-stream")
+
+    async def full_gen():
+        yield first_chunk
+        async for chunk in stream_gen:
+            yield chunk
+
+    return StreamingResponse(full_gen(), media_type="text/event-stream")

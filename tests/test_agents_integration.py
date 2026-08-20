@@ -66,14 +66,12 @@ async def test_schedule_assistant_integration():
             history_messages=[user_msg],
             user_content="明日10時にチーム会議を入れてください",
         ):
-            events.append(event_str)
+            if event_str.startswith("data: "):
+                data_json = json.loads(event_str[6:].strip())
+                events.append(data_json)
 
-    # Verify stream events
-    done_event = [
-        json.loads(e.replace("data: ", "").strip())
-        for e in events
-        if "done" in e
-    ][0]
+    # Find done event
+    done_event = next(e for e in events if e.get("type") == "done")
 
     assert done_event["type"] == "done"
     assert len(done_event["hitl_run_ids"]) == 1

@@ -161,3 +161,35 @@ def test_stream_message_sse_api(client, auth_headers):
         assert "type" in body
         assert "APIからの応答テスト" in body
         assert "done" in body
+
+
+def test_stream_message_errors(client, auth_headers):
+    # Non-existent session -> 404
+    res = client.post(
+        "/api/v1/agent-sessions/non_existent_session/messages/stream",
+        json={"content": "テスト発話"},
+        headers=auth_headers,
+    )
+    assert res.status_code == 404
+
+    # Empty content -> 400
+    agent_res = client.post(
+        "/api/v1/agents",
+        json={"name": "Empty Stream Agent", "system_prompt": "Prompt"},
+        headers=auth_headers,
+    )
+    agent_id = agent_res.json()["agent"]["agent_id"]
+
+    sess_res = client.post(
+        f"/api/v1/agents/{agent_id}/sessions",
+        json={},
+        headers=auth_headers,
+    )
+    session_id = sess_res.json()["session"]["session_id"]
+
+    res_empty = client.post(
+        f"/api/v1/agent-sessions/{session_id}/messages/stream",
+        json={"content": "   "},
+        headers=auth_headers,
+    )
+    assert res_empty.status_code == 400

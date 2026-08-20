@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from typing import Any, AsyncGenerator, Dict, List, Optional, Sequence
@@ -66,6 +67,7 @@ async def generate_agent_stream(
     history_messages: Sequence[Dict[str, Any]],
     user_content: str,
     max_iterations: int = 3,
+    max_history_messages: int = 20,
 ) -> AsyncGenerator[str, None]:
     """
     Execute LLM tool loop for agent conversation and yield SSE events.
@@ -73,7 +75,7 @@ async def generate_agent_stream(
     Yields:
       - text: {"type": "text", "delta": "..."}
       - done: {"type": "done", "message": ..., "run": ..., "hitl_run_ids": [...]}
-      - error: {"type": "error", "error": "..."}
+      - error: {"type": "error", "error": "...", "run_id": "..."}
     """
     run_id = run["run_id"]
     default_provider = getattr(config, "AGENT_PROVIDER", None) or "openai"
@@ -86,14 +88,20 @@ async def generate_agent_stream(
     active_tools = registry.resolve_tools(tool_ids)
     tools_by_name = {t.name: t for t in active_tools}
 
-    # Prepare system & history messages
+    # Prepare system & history messages (bounded by max_history_messages)
     system_text = f"{SYSTEM_SAFETY_PROMPT}\n\nAgent System Prompt:\n{agent.get('system_prompt', '')}"
     langchain_messages: List[BaseMessage] = [SystemMessage(content=system_text)]
 
-    for m in history_messages:
+    recent_history = (
+        history_messages[-max_history_messages:]
+        if len(history_messages) > max_history_messages
+        else history_messages
+    )
+
+    for m in recent_history:
         role = m.get("role")
         content = m.get("content", "")
-        # Skip current user message if it is already passed separately in history
+        # Skip current user message if passed separately
         if m.get("message_id") == run.get("user_message_id"):
             continue
         if role == "user":
@@ -130,7 +138,8 @@ async def generate_agent_stream(
         while iterations < max_iterations:
             iterations += 1
 
-            ai_msg = _logged_invoke(
+            ai_msg = await asyncio.to_thread(
+                _logged_invoke,
                 llm_with_tools,
                 langchain_messages,
                 provider,
@@ -156,7 +165,9 @@ async def generate_agent_stream(
                         used_tools.append(tname)
 
                     try:
-                        result = tools_by_name[tname].invoke(targs)
+                        result = await asyncio.to_thread(
+                            tools_by_name[tname].invoke, targs
+                        )
                     except Exception as texc:
                         logger.exception("Error executing tool '%s'", tname)
                         result = json.dumps({"error": str(texc)}, ensure_ascii=False)
@@ -181,7 +192,8 @@ async def generate_agent_stream(
 
         if not final_ai_msg:
             # Final fallback call after max iterations
-            final_ai_msg = _logged_invoke(
+            final_ai_msg = await asyncio.to_thread(
+                _logged_invoke,
                 llm,
                 langchain_messages,
                 provider,
@@ -198,7 +210,8 @@ async def generate_agent_stream(
             yield _format_sse({"type": "text", "delta": final_text})
 
         # Complete run in DB
-        asst_msg, completed_run = store.complete_run(
+        asst_msg, completed_run = await asyncio.to_thread(
+            store.complete_run,
             run_id=run_id,
             assistant_content=final_text,
             used_tools=used_tools,
@@ -216,7 +229,17 @@ async def generate_agent_stream(
         )
 
     except Exception as exc:
-        logger.exception("Error during agent streaming execution")
+        logger.exception("Error during agent streaming execution for run_id %s", run_id)
         error_msg = str(exc)
-        store.fail_run(run_id, error_msg)
-        yield _format_sse({"type": "error", "error": error_msg})
+        try:
+            await asyncio.to_thread(store.fail_run, run_id, error_msg)
+        except Exception:
+            logger.exception("Failed to mark run %s as failed in store", run_id)
+
+        yield _format_sse(
+            {
+                "type": "error",
+                "error": "AIエージェントの実行中にエラーが発生しました。",
+                "run_id": run_id,
+            }
+        )

@@ -639,3 +639,8 @@ export interface AgentSessionDetailResponse {
   messages: AgentMessage[];
   runs: AgentRun[];
 }
+
+export type AgentStreamEvent =
+  | { type: "text"; delta: string }
+  | { type: "done"; message: AgentMessage; run: AgentRun; hitl_run_ids: string[] }
+  | { type: "error"; error: string; run_id?: string };

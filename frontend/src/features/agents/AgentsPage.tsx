@@ -16,6 +16,7 @@ import type {
   Agent,
   AgentMessage,
   AgentSession,
+  AgentStreamEvent,
   AgentTool,
 } from "../../api/types";
 import { ROUTES } from "../../constants/routes";
@@ -54,6 +55,7 @@ export default function AgentsPage() {
   const [formModel, setFormModel] = useState("");
   const [formToolIds, setFormToolIds] = useState<string[]>([]);
   const [formError, setFormError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   // Chat stream state
   const [inputText, setInputText] = useState("");
@@ -67,6 +69,7 @@ export default function AgentsPage() {
   const [sessionToDelete, setSessionToDelete] = useState<AgentSession | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   // Load agents & catalog tools on mount
   useEffect(() => {
@@ -74,6 +77,7 @@ export default function AgentsPage() {
   }, []);
 
   const loadAgentsAndTools = async () => {
+    setActionError(null);
     try {
       const [agRes, toolRes] = await Promise.all([
         listAgents(),
@@ -85,12 +89,19 @@ export default function AgentsPage() {
         setSelectedAgentId(agRes.agents[0].agent_id);
       }
     } catch (e: any) {
-      console.error("Failed to load agents/tools:", e);
+      setActionError(e.message || "エージェントまたはツールの読み込みに失敗しました。");
     }
   };
 
   // Load sessions when selected agent changes
   useEffect(() => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    setIsStreaming(false);
+    setStreamingText("");
+
     if (!selectedAgentId) {
       setSessions([]);
       setSelectedSessionId(null);
@@ -101,6 +112,7 @@ export default function AgentsPage() {
   }, [selectedAgentId]);
 
   const loadSessions = async (agentId: string) => {
+    setActionError(null);
     try {
       const res = await listAgentSessions(agentId);
       setSessions(res.sessions);
@@ -110,13 +122,20 @@ export default function AgentsPage() {
         setSelectedSessionId(null);
         setMessages([]);
       }
-    } catch (e) {
-      console.error("Failed to load sessions:", e);
+    } catch (e: any) {
+      setActionError(e.message || "会話履歴の読み込みに失敗しました。");
     }
   };
 
   // Load session detail messages when session changes
   useEffect(() => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    setIsStreaming(false);
+    setStreamingText("");
+
     if (!selectedSessionId) {
       setMessages([]);
       return;
@@ -126,14 +145,36 @@ export default function AgentsPage() {
   }, [selectedSessionId]);
 
   const loadSessionDetail = async (sessionId: string) => {
+    setActionError(null);
     try {
       const detail = await getAgentSessionDetail(sessionId);
       setMessages(detail.messages);
       setChatError(null);
-    } catch (e) {
-      console.error("Failed to load session detail:", e);
+    } catch (e: any) {
+      setChatError(e.message || "セッション詳細の読み込みに失敗しました。");
     }
   };
+
+  // Modal ESC listener
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setAgentToDelete(null);
+        setSessionToDelete(null);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
+  // Cleanup abort controller on unmount
+  useEffect(() => {
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
+  }, []);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView?.({ behavior: "smooth" });
@@ -151,6 +192,7 @@ export default function AgentsPage() {
     setFormModel("");
     setFormToolIds([]);
     setFormError(null);
+    setActionError(null);
   };
 
   const handleOpenEditForm = (agent: Agent) => {
@@ -162,6 +204,7 @@ export default function AgentsPage() {
     setFormModel(agent.model || "");
     setFormToolIds(agent.tool_ids || []);
     setFormError(null);
+    setActionError(null);
   };
 
   const handleApplyTemplate = () => {
@@ -175,6 +218,7 @@ export default function AgentsPage() {
   const handleSaveAgent = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError(null);
+    setActionError(null);
     try {
       if (isCreatingAgent) {
         const res = await createAgent({
@@ -207,6 +251,7 @@ export default function AgentsPage() {
 
   const handleDeleteAgentConfirm = async () => {
     if (!agentToDelete) return;
+    setActionError(null);
     try {
       await deleteAgent(agentToDelete.agent_id);
       const remaining = agents.filter((a) => a.agent_id !== agentToDelete.agent_id);
@@ -216,24 +261,27 @@ export default function AgentsPage() {
         setSelectedAgentId(remaining.length > 0 ? remaining[0].agent_id : null);
       }
     } catch (e: any) {
-      alert("削除に失敗しました: " + e.message);
+      setActionError("エージェントの削除に失敗しました: " + e.message);
+      setAgentToDelete(null);
     }
   };
 
   // Session Actions
   const handleCreateSession = async () => {
     if (!selectedAgentId) return;
+    setActionError(null);
     try {
       const res = await createAgentSession(selectedAgentId);
       setSessions([res.session, ...sessions]);
       setSelectedSessionId(res.session.session_id);
     } catch (e: any) {
-      alert("セッション作成に失敗しました: " + e.message);
+      setActionError("セッション作成に失敗しました: " + e.message);
     }
   };
 
   const handleDeleteSessionConfirm = async () => {
     if (!sessionToDelete) return;
+    setActionError(null);
     try {
       await deleteAgentSession(sessionToDelete.session_id);
       const remaining = sessions.filter(
@@ -245,7 +293,8 @@ export default function AgentsPage() {
         setSelectedSessionId(remaining.length > 0 ? remaining[0].session_id : null);
       }
     } catch (e: any) {
-      alert("セッション削除に失敗しました: " + e.message);
+      setActionError("セッション削除に失敗しました: " + e.message);
+      setSessionToDelete(null);
     }
   };
 
@@ -261,6 +310,12 @@ export default function AgentsPage() {
     setIsStreaming(true);
     setStreamingText("");
 
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     // Optimistically push user message to UI
     const tempUserMsg: AgentMessage = {
       message_id: `temp_${Date.now()}`,
@@ -273,23 +328,28 @@ export default function AgentsPage() {
     setMessages((prev) => [...prev, tempUserMsg]);
 
     try {
-      await streamAgentMessage(selectedSessionId, userText, (event: any) => {
-        if (event.type === "text") {
-          setStreamingText((prev) => prev + event.delta);
-        } else if (event.type === "done") {
-          setIsStreaming(false);
-          setStreamingText("");
-          // Replace messages list with server confirmed messages
-          loadSessionDetail(selectedSessionId);
-          if (event.hitl_run_ids && event.hitl_run_ids.length > 0) {
-            setHitlLinks(event.hitl_run_ids);
+      await streamAgentMessage(
+        selectedSessionId,
+        userText,
+        (event: AgentStreamEvent) => {
+          if (event.type === "text") {
+            setStreamingText((prev) => prev + event.delta);
+          } else if (event.type === "done") {
+            setIsStreaming(false);
+            setStreamingText("");
+            loadSessionDetail(selectedSessionId);
+            if (event.hitl_run_ids && event.hitl_run_ids.length > 0) {
+              setHitlLinks(event.hitl_run_ids);
+            }
+          } else if (event.type === "error") {
+            setIsStreaming(false);
+            setChatError(event.error || "エラーが発生しました。");
           }
-        } else if (event.type === "error") {
-          setIsStreaming(false);
-          setChatError(event.error || "エラーが発生しました。");
-        }
-      });
+        },
+        controller.signal
+      );
     } catch (err: any) {
+      if (err.name === "AbortError") return;
       setIsStreaming(false);
       setChatError(err.message || "メッセージの送信に失敗しました。");
     }
@@ -304,11 +364,16 @@ export default function AgentsPage() {
           <button
             type="button"
             onClick={handleOpenCreateForm}
-            className="rounded bg-slate-900 px-2.5 py-1 text-xs text-white hover:bg-slate-800"
+            className="rounded cursor-pointer bg-slate-900 px-2.5 py-1 text-xs text-white hover:bg-slate-800"
           >
             ＋ 新規作成
           </button>
         </div>
+        {actionError && (
+          <div className="m-2 rounded-lg bg-red-50 p-2 text-xs text-red-600">
+            {actionError}
+          </div>
+        )}
         <div className="flex-1 overflow-y-auto p-2 space-y-1">
           {agents.length === 0 ? (
             <p className="p-3 text-center text-xs text-slate-500">
@@ -324,7 +389,7 @@ export default function AgentsPage() {
                   setIsCreatingAgent(false);
                   setIsEditingAgent(false);
                 }}
-                className={`w-full rounded-lg px-3 py-2 text-left text-xs transition ${
+                className={`w-full cursor-pointer rounded-lg px-3 py-2 text-left text-xs transition ${
                   selectedAgentId === agent.agent_id &&
                   !isCreatingAgent &&
                   !isEditingAgent
@@ -357,7 +422,7 @@ export default function AgentsPage() {
                 <button
                   type="button"
                   onClick={handleApplyTemplate}
-                  className="rounded border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-700 hover:bg-indigo-100"
+                  className="rounded cursor-pointer border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-700 hover:bg-indigo-100"
                 >
                   予定アシスタントテンプレートを適用
                 </button>
@@ -452,7 +517,7 @@ export default function AgentsPage() {
                                 );
                               }
                             }}
-                            className="mt-0.5"
+                            className="mt-0.5 cursor-pointer"
                           />
                           <div>
                             <span className="font-semibold text-slate-800">
@@ -475,13 +540,13 @@ export default function AgentsPage() {
                       setIsCreatingAgent(false);
                       setIsEditingAgent(false);
                     }}
-                    className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
+                    className="rounded cursor-pointer border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
                   >
                     キャンセル
                   </button>
                   <button
                     type="submit"
-                    className="rounded bg-slate-900 px-4 py-1.5 text-xs text-white hover:bg-slate-800 font-medium"
+                    className="rounded cursor-pointer bg-slate-900 px-4 py-1.5 text-xs text-white hover:bg-slate-800 font-medium"
                   >
                     保存する
                   </button>
@@ -506,14 +571,14 @@ export default function AgentsPage() {
                 <button
                   type="button"
                   onClick={() => handleOpenEditForm(activeAgent)}
-                  className="rounded border border-slate-300 bg-white px-2.5 py-1 text-xs text-slate-700 hover:bg-slate-50"
+                  className="rounded cursor-pointer border border-slate-300 bg-white px-2.5 py-1 text-xs text-slate-700 hover:bg-slate-50"
                 >
                   設定編集
                 </button>
                 <button
                   type="button"
                   onClick={() => setAgentToDelete(activeAgent)}
-                  className="rounded border border-red-200 bg-red-50 px-2.5 py-1 text-xs text-red-600 hover:bg-red-100"
+                  className="rounded cursor-pointer border border-red-200 bg-red-50 px-2.5 py-1 text-xs text-red-600 hover:bg-red-100"
                 >
                   削除
                 </button>
@@ -537,7 +602,7 @@ export default function AgentsPage() {
                   <button
                     type="button"
                     onClick={() => setSelectedSessionId(s.session_id)}
-                    className="truncate max-w-[120px]"
+                    className="truncate max-w-[120px] cursor-pointer"
                   >
                     {s.title}
                   </button>
@@ -547,7 +612,7 @@ export default function AgentsPage() {
                       e.stopPropagation();
                       setSessionToDelete(s);
                     }}
-                    className="text-[10px] opacity-60 hover:opacity-100"
+                    className="text-[10px] opacity-60 hover:opacity-100 cursor-pointer"
                     aria-label="会話削除"
                   >
                     ✕
@@ -557,7 +622,7 @@ export default function AgentsPage() {
               <button
                 type="button"
                 onClick={handleCreateSession}
-                className="rounded-full border border-dashed border-slate-400 px-2.5 py-1 text-xs text-slate-600 hover:bg-white shrink-0"
+                className="rounded-full cursor-pointer border border-dashed border-slate-400 px-2.5 py-1 text-xs text-slate-600 hover:bg-white shrink-0"
               >
                 ＋ 新しい会話
               </button>
@@ -610,7 +675,7 @@ export default function AgentsPage() {
                   </p>
                   <Link
                     to={ROUTES.HITL}
-                    className="inline-flex items-center gap-1 font-semibold text-yellow-900 underline hover:text-yellow-700"
+                    className="inline-flex items-center gap-1 font-semibold text-yellow-900 underline hover:text-yellow-700 cursor-pointer"
                   >
                     → 確認待ち画面へ移動する
                   </Link>
@@ -642,12 +707,12 @@ export default function AgentsPage() {
                     ? "メッセージを入力…"
                     : "上の「＋ 新しい会話」をクリックしてください"
                 }
-                className="flex-1 rounded-lg border border-slate-300 p-2 text-xs focus:border-slate-500 focus:outline-none disabled:bg-slate-100"
+                className="flex-1 rounded-lg border border-slate-300 p-2 text-xs focus:border-slate-500 focus:outline-none disabled:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed"
               />
               <button
                 type="submit"
                 disabled={isStreaming || !inputText.trim() || !selectedSessionId}
-                className="rounded-lg bg-slate-900 px-4 py-2 text-xs font-medium text-white hover:bg-slate-800 disabled:opacity-50"
+                className="rounded-lg bg-slate-900 px-4 py-2 text-xs font-medium text-white hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
               >
                 送信
               </button>
@@ -663,8 +728,16 @@ export default function AgentsPage() {
 
       {/* Delete Agent Modal */}
       {agentToDelete && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
-          <div className="w-full max-w-sm rounded-xl bg-white p-5 shadow-lg space-y-3">
+        <div
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setAgentToDelete(null)}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-sm rounded-xl bg-white p-5 shadow-lg space-y-3"
+          >
             <h4 className="text-sm font-semibold text-slate-900">
               エージェントの削除確認
             </h4>
@@ -676,14 +749,14 @@ export default function AgentsPage() {
               <button
                 type="button"
                 onClick={() => setAgentToDelete(null)}
-                className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
+                className="rounded cursor-pointer border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
               >
                 キャンセル
               </button>
               <button
                 type="button"
                 onClick={handleDeleteAgentConfirm}
-                className="rounded bg-red-600 px-3 py-1.5 text-xs text-white hover:bg-red-700 font-medium"
+                className="rounded cursor-pointer bg-red-600 px-3 py-1.5 text-xs text-white hover:bg-red-700 font-medium"
               >
                 削除する
               </button>
@@ -694,8 +767,16 @@ export default function AgentsPage() {
 
       {/* Delete Session Modal */}
       {sessionToDelete && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
-          <div className="w-full max-w-sm rounded-xl bg-white p-5 shadow-lg space-y-3">
+        <div
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setSessionToDelete(null)}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-sm rounded-xl bg-white p-5 shadow-lg space-y-3"
+          >
             <h4 className="text-sm font-semibold text-slate-900">
               会話履歴の削除確認
             </h4>
@@ -707,14 +788,14 @@ export default function AgentsPage() {
               <button
                 type="button"
                 onClick={() => setSessionToDelete(null)}
-                className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
+                className="rounded cursor-pointer border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
               >
                 キャンセル
               </button>
               <button
                 type="button"
                 onClick={handleDeleteSessionConfirm}
-                className="rounded bg-red-600 px-3 py-1.5 text-xs text-white hover:bg-red-700 font-medium"
+                className="rounded cursor-pointer bg-red-600 px-3 py-1.5 text-xs text-white hover:bg-red-700 font-medium"
               >
                 削除する
               </button>
