@@ -11,6 +11,10 @@
 - [テスト・開発環境](10-Decisions-Testing.md)
 - [人物同定・人物管理](10-Decisions-People.md)
 
+## 用語集
+
+- [ドメイン用語集](30-Glossary.md)
+
 ## 主要な決定
 
 - [テスト層再編プラン (Phase 0 完了)](../docs/test-reduction/plan.md)

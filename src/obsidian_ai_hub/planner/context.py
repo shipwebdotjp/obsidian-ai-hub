@@ -1,10 +1,10 @@
 """Full-app context aggregation for AI planner proposal generation.
 
 There is no single context aggregator in the app today, so the planner builds
-its own pack from seven sources: recent daily notes, day/week summaries,
-activity logs, research themes + feedback, active projects, long-term memory,
-and previous planner proposal outcomes. Each block degrades gracefully to an
-empty string when its source fails.
+its own pack from recent daily notes, day/week summaries, activity logs,
+research themes + feedback, active projects, long-term memory, and the
+authoritative upcoming schedule. Each block degrades gracefully to an empty
+string when its source fails.
 """
 
 from __future__ import annotations
@@ -12,12 +12,15 @@ from __future__ import annotations
 import logging
 from datetime import date, timedelta
 
+from obsidian_ai_hub.planner import apple, recurring
+
 logger = logging.getLogger(__name__)
 
 RECENT_DAYS = 7
 ACTIVITY_DAYS = 30
 MAX_NOTE_CHARS = 800
 MAX_BLOCK_ITEMS = 30
+SCHEDULE_CONTEXT_DAYS = 30
 
 
 def _truncate_text(text: str, max_chars: int) -> str:
@@ -175,6 +178,76 @@ def _build_memory_block() -> str:
     return text.strip()
 
 
+def _build_authoritative_schedule_block(
+    reference_date: date | None = None,
+) -> str:
+    """Format upcoming Apple and configured recurring items for the LLM.
+
+    Apple Calendar and Reminders are fetched live through the planner's
+    short-lived cache. Configured recurring items are expanded from their
+    read-only source of truth. Neither source is persisted as part of proposal
+    generation.
+    """
+    start_date = reference_date or date.today()
+    end_date = start_date + timedelta(days=SCHEDULE_CONTEXT_DAYS - 1)
+
+    try:
+        external = apple.get_external_data(start_date, end_date) or {}
+    except Exception:
+        logger.exception("Failed to load Apple schedule for planner context")
+        external = {}
+
+    try:
+        recurring_items = recurring.expand_recurring(start_date, end_date)
+    except Exception:
+        logger.exception("Failed to expand recurring schedule for planner context")
+        recurring_items = []
+
+    apple_events = external.get("calendar_events", []) or []
+    apple_reminders = external.get("reminders", []) or []
+    if not apple_events and not apple_reminders and not recurring_items:
+        return ""
+
+    lines = [
+        "## 今後30日間の正本スケジュール"
+        f"（{start_date.isoformat()}〜{end_date.isoformat()}）"
+    ]
+
+    if apple_events:
+        lines.append("### Apple Calendar")
+        for event in apple_events[:MAX_BLOCK_ITEMS]:
+            title = _truncate_text(str(event.get("title") or ""), 200)
+            if not title:
+                continue
+            start = event.get("start") or "日時未設定"
+            end = event.get("end") or ""
+            timing = str(start) if not end else f"{start}〜{end}"
+            all_day = " / 終日" if event.get("all_day") else ""
+            lines.append(f"- {timing}{all_day} | {title}")
+
+    if apple_reminders:
+        lines.append("### Apple Reminders")
+        for reminder in apple_reminders[:MAX_BLOCK_ITEMS]:
+            title = _truncate_text(str(reminder.get("title") or ""), 200)
+            if not title:
+                continue
+            due = reminder.get("due") or "期限未設定"
+            lines.append(f"- {due} | {title}")
+
+    if recurring_items:
+        lines.append("### CONFIG 定期予定")
+        for item in recurring_items[:MAX_BLOCK_ITEMS]:
+            title = _truncate_text(str(item.get("title") or ""), 200)
+            if not title:
+                continue
+            item_date = item.get("date")
+            day = item_date.isoformat() if isinstance(item_date, date) else str(item_date)
+            kind = "タスク" if item.get("kind") == "task" else "予定"
+            lines.append(f"- {day} / {kind} | {title}")
+
+    return "\n".join(lines)
+
+
 def build_planner_context_pack() -> str:
     blocks = [
         _build_daily_notes_block(),
@@ -183,6 +256,7 @@ def build_planner_context_pack() -> str:
         _build_research_block(),
         _build_projects_block(),
         _build_memory_block(),
+        _build_authoritative_schedule_block(),
     ]
     return "\n\n".join(b for b in blocks if b)
 

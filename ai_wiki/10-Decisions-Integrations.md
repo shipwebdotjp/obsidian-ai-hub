@@ -255,11 +255,19 @@ Inbox分類は高確信度の予定・Todoを HITL 承認で登録するフロ�
 
 1. **昇格は HITL を使わない:** planner は HITL Run を介さず、planner 専用 API の `POST /planner/proposals/{id}/promote` が直接 `promote_proposal` を呼ぶ。Apple への副作用を伴うため編集可能なプレイグラウンドとして扱い、既存 HITL フローを汚染しない。`register_hitl_handlers()` は変更しない。
 2. **Apple は外部システムとして扱う:** `planner/apple.py` が EventKit（PyObjC）経由でカレンダーとリマインダーを取得。SQLite には保存せず、表示範囲キー（`("apple", start, end)`）の60秒TTLインメモリキャッシュで負荷を抑える。EventKit 不可・失敗時は空リスト＋エラー表示で安全に縮退する。
-3. **コンテキスト7源:** Daily Note / 日次・週次サマリ / アクティビティ / リサーチ+フィードバック / プロジェクト / 長期記憶 / 未確認提案履歴。各ブロックは単独で失敗しても空文字へ縮退し、提案生成を止めない。
+3. **コンテキスト8源:** Daily Note / 日次・週次サマリ / アクティビティ / リサーチ+フィードバック / プロジェクト / 長期記憶 / 今後30日間の正本スケジュール / 未確認提案履歴。各ブロックは単独で失敗しても空文字へ縮退し、提案生成を止めない。
 4. **生成:** `--generate-planner-proposals`（daily 06:00 にタスクランナーで実行）。`planner/suggest.py` が `ai_planner.md` プロンプトで最大10件の候補（calendar / reminder）を JSON 生成し、`_validate_candidate` で検証して保存。既存の `llm_client.generate_llm_response` + `prompt.render_prompt`（`${name}` 形式）を再利用する。
-5. **定期ルール:** `config/recurring.yml` を正本とする読み取り専用の参照（`planner/recurring.py`）。ルール形式 `[[day_numbers], offset, name, category]`、`CAT_TASK=1` / `CAT_EVENT=2`。書き込み・UI 編集はしない（将来の管理画面を別途検討）。
+5. **定期ルール:** 設定の `regularly_weekday_events` / `regularly_date_events` を正本とする読み取り専用の参照（`planner/recurring.py`）。`CAT_TASK=1` / `CAT_EVENT=2`。書き込み・UI 編集はしない（将来の管理画面を別途検討）。
 6. **UI:** `/planner` に週グリッド（月〜日）を表示し、Apple 予定・Apple リマインダー・定期イベント・Inbox 保留・AI 提案を4レイヤーで重ねる。日付未定の提案は「日付未定のAI提案」セクションに分離。詳細パネルでタイトル・種別・日時・場所・根拠を編集して保存できる。昇格・却下は詳細パネルから実行。
 7. **通知:** 生成後、新規提案の要約（件名＋種別＋日付、最大10件）を LINE にベストエフォート通知し、`/planner` へのリンクを添える。
+
+### 提案生成時の正本スケジュール参照（2026-08-20 追記）
+
+提案生成は、生成日を含む30日間について、Apple Calendar・未完了Apple Reminders・`regularly_weekday_events` / `regularly_date_events` から展開したCONFIG定期予定を、既存のLLMコンテキストに読み取り専用で含める。Apple は既存のEventKit取得・60秒キャッシュと `APPLE_CALENDAR_NAME` フィルターをそのまま利用し、定期予定は既存のCONFIG正本から展開する。これらを保存したり、提案生成でAppleへ書き込んだりはしない。
+
+プロンプトでは、正本スケジュールと実質同じ提案を避け、時刻指定の候補を既存の時刻指定予定と重複させないよう指示する。これは生成時の制約であり、提案候補を機械的に棄却する新しい衝突判定は導入しないため、従来どおり人がプレイグラウンドで最終確認・編集する。
+
+Apple取得が失敗・利用不能の場合は、Apple項目だけを空としてログへ記録し、定期予定および他のコンテキストを用いて生成を継続する。
 
 ### トレードオフ
 

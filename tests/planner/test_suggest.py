@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import date
 from unittest.mock import patch
 
 from obsidian_ai_hub.activity import store as activity_store_mod
@@ -98,6 +99,95 @@ def test_build_planner_context_pack_degrades_gracefully():
 
     assert isinstance(pack, str)
     assert "## 直近のDaily Note" not in pack
+
+
+def test_build_authoritative_schedule_block_includes_apple_and_recurring():
+    reference_date = date(2026, 8, 20)
+    with (
+        patch.object(
+            context.apple,
+            "get_external_data",
+            return_value={
+                "calendar_events": [
+                    {
+                        "title": "顧客ミーティング",
+                        "start": "2026-08-21T09:00:00+09:00",
+                        "end": "2026-08-21T10:00:00+09:00",
+                        "all_day": False,
+                    },
+                    {
+                        "title": "休暇",
+                        "start": "2026-08-22T00:00:00+09:00",
+                        "end": "2026-08-22T00:00:00+09:00",
+                        "all_day": True,
+                    },
+                ],
+                "reminders": [{"title": "本を返す", "due": "2026-08-23"}],
+                "error": None,
+            },
+        ) as mock_external_data,
+        patch.object(
+            context.recurring,
+            "expand_recurring",
+            return_value=[
+                {
+                    "title": "月次処理",
+                    "date": date(2026, 8, 25),
+                    "kind": "task",
+                }
+            ],
+        ) as mock_expand_recurring,
+    ):
+        block = context._build_authoritative_schedule_block(reference_date)
+
+    expected_end_date = date(2026, 9, 18)
+    mock_external_data.assert_called_once_with(reference_date, expected_end_date)
+    mock_expand_recurring.assert_called_once_with(reference_date, expected_end_date)
+    assert "2026-08-20〜2026-09-18" in block
+    assert "### Apple Calendar" in block
+    assert "2026-08-21T09:00:00+09:00〜2026-08-21T10:00:00+09:00" in block
+    assert "休暇" in block
+    assert "終日" in block
+    assert "### Apple Reminders" in block
+    assert "2026-08-23 | 本を返す" in block
+    assert "### CONFIG 定期予定" in block
+    assert "2026-08-25 / タスク | 月次処理" in block
+
+
+def test_build_authoritative_schedule_block_keeps_recurring_when_apple_fails():
+    reference_date = date(2026, 8, 20)
+    with (
+        patch.object(context.apple, "get_external_data", side_effect=RuntimeError("boom")),
+        patch.object(
+            context.recurring,
+            "expand_recurring",
+            return_value=[
+                {
+                    "title": "定例会",
+                    "date": date(2026, 8, 21),
+                    "kind": "event",
+                }
+            ],
+        ),
+    ):
+        block = context._build_authoritative_schedule_block(reference_date)
+
+    assert "Apple Calendar" not in block
+    assert "Apple Reminders" not in block
+    assert "2026-08-21 / 予定 | 定例会" in block
+
+
+def test_build_llm_prompt_instructs_schedule_deduplication_and_conflict_avoidance():
+    with patch.object(
+        suggest.context,
+        "build_planner_context_pack",
+        return_value="## 今後30日間の正本スケジュール\n- 既存予定",
+    ):
+        prompt_text = suggest._build_llm_prompt()
+
+    assert "正本スケジュール" in prompt_text
+    assert "実質同じ内容の候補は出さない" in prompt_text
+    assert "重複しない時刻" in prompt_text
 
 
 def test_build_excluded_inbox_items_lists_pending_calendar_reminder():
