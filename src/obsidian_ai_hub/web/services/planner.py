@@ -120,6 +120,9 @@ def get_planner_timeline(start_date: date, end_date: date) -> dict:
                 "title": item["title"],
                 "date": item["date"].isoformat(),
                 "category": item["category"],
+                "start_time": item.get("start_time"),
+                "end_time": item.get("end_time"),
+                "all_day": item.get("all_day", True),
             }
             for item in recurring_items
         ],

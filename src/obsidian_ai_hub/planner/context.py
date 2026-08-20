@@ -243,6 +243,19 @@ def _build_authoritative_schedule_block(
             item_date = item.get("date")
             day = item_date.isoformat() if isinstance(item_date, date) else str(item_date)
             kind = "タスク" if item.get("kind") == "task" else "予定"
+            if not item.get("all_day") and item.get("start_time"):
+                try:
+                    from datetime import datetime
+
+                    start_hm = datetime.fromisoformat(str(item["start_time"])).strftime("%H:%M")
+                    end_hm = ""
+                    if item.get("end_time"):
+                        end_hm = datetime.fromisoformat(str(item["end_time"])).strftime("%H:%M")
+                    timing = f"{start_hm}~{end_hm}" if end_hm else start_hm
+                    lines.append(f"- {day} {timing} / {kind} | {title}")
+                    continue
+                except ValueError:
+                    pass
             lines.append(f"- {day} / {kind} | {title}")
 
     return "\n".join(lines)

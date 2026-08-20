@@ -155,14 +155,21 @@ function DayItems({
           ⏰ {r.title}
         </div>
       ))}
-      {group.recurring.map((r, i) => (
-        <div
-          key={`rc-${i}`}
-          className="rounded bg-slate-100 px-2 py-1 text-xs text-slate-700"
-        >
-          🔁 {r.title}
-        </div>
-      ))}
+      {group.recurring.map((r, i) => {
+        const timeLabel =
+          !r.all_day && r.start_time
+            ? `${timePartOf(r.start_time)}${r.end_time ? `~${timePartOf(r.end_time)}` : ""} `
+            : "";
+        return (
+          <div
+            key={`rc-${i}`}
+            className="rounded bg-slate-100 px-2 py-1 text-xs text-slate-700"
+          >
+            🔁 {timeLabel}
+            {r.title}
+          </div>
+        );
+      })}
       {group.inbox.map((i) => (
         <div
           key={`in-${i.run_id}`}

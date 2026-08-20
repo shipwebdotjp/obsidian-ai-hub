@@ -8,14 +8,19 @@ never be edited, rejected, or promoted to Apple.
 
 from __future__ import annotations
 
-from datetime import date, timedelta
-from typing import Any, List
+import logging
+from datetime import date, datetime, time, timedelta
+from typing import Any, List, Optional
+from zoneinfo import ZoneInfo
 
 from obsidian_ai_hub.utils import config
+
+logger = logging.getLogger(__name__)
 
 CAT_TASK = 1
 CAT_EVENT = 2
 WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"]
+DEFAULT_TZ = ZoneInfo("Asia/Tokyo")
 
 
 def get_weekday_rule_dates(
@@ -92,11 +97,60 @@ def _matches_date_rule(target_day: date, rule: list) -> bool:
     return is_date_in_list(target, target_dates)
 
 
+def _parse_time_str(value: Any) -> Optional[time]:
+    """Parse HH:MM or HH:MM:SS into time object, or None for empty/invalid."""
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        return None
+    s = value.strip()
+    if not s:
+        return None
+    for fmt in ("%H:%M:%S", "%H:%M"):
+        try:
+            dt = datetime.strptime(s, fmt)
+            return time(dt.hour, dt.minute, dt.second)
+        except ValueError:
+            continue
+    logger.warning("Invalid recurring time format '%s', expected HH:MM", value)
+    return None
+
+
+def _build_recurring_times(
+    current: date, start_raw: Any, end_raw: Any
+) -> tuple[Optional[str], Optional[str], bool]:
+    """Return (start_iso, end_iso, all_day) for a recurring item on `current`.
+
+    - start_raw / end_raw: rule[5] / rule[6] (may be missing)
+    - all_day = True when start time is None
+    - ISO strings are in Asia/Tokyo (e.g. 2026-08-20T10:00:00+09:00)
+    """
+    start_t = _parse_time_str(start_raw)
+    if start_t is None:
+        return None, None, True
+    end_t = _parse_time_str(end_raw)
+    # If end is invalid but raw was provided, drop it and keep start only
+    start_dt = datetime.combine(current, start_t).replace(tzinfo=DEFAULT_TZ)
+    start_iso = start_dt.isoformat()
+    if end_t is None:
+        return start_iso, None, False
+    end_dt = datetime.combine(current, end_t).replace(tzinfo=DEFAULT_TZ)
+    # Keep end even if earlier than start (e.g. overnight is not expected for recurring);
+    # caller can decide to display as-is. Do not swap.
+    return start_iso, end_dt.isoformat(), False
+
+
 def expand_recurring(start_date: date, end_date: date) -> list[dict]:
     """Expand recurring config rules into concrete items for [start, end].
 
     Each returned dict has: title, date (date object), category (CAT_TASK /
-    CAT_EVENT), kind ('task' | 'event'), and source='recurring'.
+    CAT_EVENT), kind ('task' | 'event'), source='recurring',
+    plus start_time/end_time (ISO str or None) and all_day (bool).
+
+    Rule formats (time extension at tail, backward compatible):
+      regularly_weekday_events: [[nth], [weekdays], offset, title, category, start_time?, end_time?]
+      regularly_date_events:    [[dates], offset, title, category, start_time?, end_time?]
+    start_time/end_time: "HH:MM" or "HH:MM:SS" or None. Omitted/None => all-day.
     """
     if start_date > end_date:
         return []
@@ -115,6 +169,9 @@ def expand_recurring(start_date: date, end_date: date) -> list[dict]:
             except (IndexError, TypeError):
                 continue
             if _matches_weekday_rule(current, rule):
+                start_raw = rule[5] if len(rule) > 5 else None
+                end_raw = rule[6] if len(rule) > 6 else None
+                start_iso, end_iso, all_day = _build_recurring_times(current, start_raw, end_raw)
                 items.append(
                     {
                         "title": event_name,
@@ -122,6 +179,9 @@ def expand_recurring(start_date: date, end_date: date) -> list[dict]:
                         "category": category,
                         "kind": "task" if category == CAT_TASK else "event",
                         "source": "recurring",
+                        "start_time": start_iso,
+                        "end_time": end_iso,
+                        "all_day": all_day,
                     }
                 )
 
@@ -132,6 +192,9 @@ def expand_recurring(start_date: date, end_date: date) -> list[dict]:
             except (IndexError, TypeError):
                 continue
             if _matches_date_rule(current, rule):
+                start_raw = rule[4] if len(rule) > 4 else None
+                end_raw = rule[5] if len(rule) > 5 else None
+                start_iso, end_iso, all_day = _build_recurring_times(current, start_raw, end_raw)
                 items.append(
                     {
                         "title": event_name,
@@ -139,6 +202,9 @@ def expand_recurring(start_date: date, end_date: date) -> list[dict]:
                         "category": category,
                         "kind": "task" if category == CAT_TASK else "event",
                         "source": "recurring",
+                        "start_time": start_iso,
+                        "end_time": end_iso,
+                        "all_day": all_day,
                     }
                 )
 

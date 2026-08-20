@@ -127,6 +127,9 @@ def test_expand_recurring_date_rule_last_day(monkeypatch):
             "category": 1,
             "kind": "task",
             "source": "recurring",
+            "start_time": None,
+            "end_time": None,
+            "all_day": True,
         }
     ]
 

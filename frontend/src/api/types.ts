@@ -520,6 +520,9 @@ export interface PlannerRecurringItem {
   date: string;
   category: number;
   source: string;
+  start_time: string | null;
+  end_time: string | null;
+  all_day: boolean;
 }
 
 export interface PlannerInboxPending {

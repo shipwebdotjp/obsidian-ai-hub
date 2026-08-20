@@ -966,6 +966,9 @@ class PlannerRecurringItem(BaseModel):
     date: str
     category: int
     source: str = "recurring"
+    start_time: Optional[str] = None
+    end_time: Optional[str] = None
+    all_day: bool = True
 
 
 class PlannerInboxPending(BaseModel):

@@ -23,6 +23,7 @@ from EventKit import (
 )
 from Foundation import NSRunLoop, NSDate
 
+from obsidian_ai_hub.planner import recurring
 from obsidian_ai_hub.utils import config, reader
 
 logger = logging.getLogger(__name__)
@@ -203,15 +204,43 @@ def _format_events_to_lines(events: List[Dict[str, Any]]) -> List[str]:
         s = ev.get("start")
         e = ev.get("end")
         if s and isinstance(s, str):
-            start_str = datetime.fromisoformat(s).strftime("%H:%M")
+            try:
+                start_str = datetime.fromisoformat(s).strftime("%H:%M")
+            except ValueError:
+                start_str = s
             if e and isinstance(e, str):
-                end_str = datetime.fromisoformat(e).strftime("%H:%M")
+                try:
+                    end_str = datetime.fromisoformat(e).strftime("%H:%M")
+                except ValueError:
+                    end_str = e
                 lines.append(f"{title} {start_str}~{end_str}")
             else:
                 lines.append(f"{title} {start_str}")
         else:
             lines.append(title)
     return lines
+
+
+def _format_recurring_item(item: Dict[str, Any]) -> str:
+    """Format a recurring item (from expand_recurring) for daily note."""
+    title = item.get("title") or ""
+    if item.get("all_day"):
+        return title
+    s = item.get("start_time")
+    e = item.get("end_time")
+    if s and isinstance(s, str):
+        try:
+            start_str = datetime.fromisoformat(s).strftime("%H:%M")
+        except ValueError:
+            return title
+        if e and isinstance(e, str):
+            try:
+                end_str = datetime.fromisoformat(e).strftime("%H:%M")
+            except ValueError:
+                return f"{title} {start_str}"
+            return f"{title} {start_str}~{end_str}"
+        return f"{title} {start_str}"
+    return title
 
 
 def get_weekday_rule_dates(
@@ -287,38 +316,18 @@ def main() -> int:
     if calendar_events:
         events.extend(_format_events_to_lines(calendar_events))
 
-    for event in config.REGULARLY_WEEKDAY_EVENTS:
-        number_ofdays = event[0]
-        days_string = event[1]
-        day_offset = event[2]
-        event_name = event[3]
-        category = event[4]
-
-        days_number = [WEEKDAYS.index(d) for d in days_string]
-        target_day = date(now.year, now.month, now.day) - timedelta(days=day_offset)
-
-        target_dates = get_weekday_rule_dates(target_day, days_number, number_ofdays)
-        if is_date_in_list(target_day, target_dates):
-            if category == CAT_EVENT:
-                events.append(event_name)
-            else:
-                tasks.append(event_name)
-
-    for event in config.REGULARLY_DATE_EVENTS:
-        number_ofdates = event[0]
-        day_offset = event[1]
-        event_name = event[2]
-        category = event[3]
-
-        target_day = date(now.year, now.month, now.day) - timedelta(days=day_offset)
-
-        target_dates = get_monthday_rule_dates(target_day, number_ofdates)
-
-        if is_date_in_list(target_day, target_dates):
-            if category == CAT_EVENT:
-                events.append(event_name)
-            else:
-                tasks.append(event_name)
+    # Recurring config events (unified via planner.recurring, now with time support)
+    try:
+        recurring_items = recurring.expand_recurring(today_date, today_date)
+    except Exception:
+        logger.exception("Failed to expand recurring events for today")
+        recurring_items = []
+    for item in recurring_items:
+        formatted = _format_recurring_item(item)
+        if item.get("kind") == "event":
+            events.append(formatted)
+        else:
+            tasks.append(formatted)
 
     reminder_events = _fetch_apple_reminders(today_date, today_date)
     if reminder_events:
