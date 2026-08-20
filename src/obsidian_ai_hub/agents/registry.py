@@ -5,8 +5,9 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Sequence
-from datetime import date
+from datetime import date, datetime, time
 from typing import Any, Callable, Dict, List, Optional
+from zoneinfo import ZoneInfo
 
 from langchain_core.tools import BaseTool, tool
 from pydantic import BaseModel, Field
@@ -31,6 +32,73 @@ EXPECTED_TOOL_EXCEPTIONS = (
     TypeError,
     PermissionError,
 )
+
+_RECURRING_TZ = ZoneInfo("Asia/Tokyo")
+
+
+def _recurring_to_calendar_events(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Convert recurring expand items (kind==event) to calendar event dicts."""
+    out: List[Dict[str, Any]] = []
+    for item in items:
+        if item.get("kind") != "event":
+            continue
+        title = str(item.get("title") or "")
+        if not title:
+            continue
+        if item.get("all_day"):
+            # all-day: midnight JST on that date
+            d = item.get("date")
+            if not isinstance(d, date):
+                continue
+            start_iso = datetime.combine(d, time.min).replace(tzinfo=_RECURRING_TZ).isoformat()
+            end_iso = datetime.combine(d, time.min).replace(tzinfo=_RECURRING_TZ).isoformat()
+            out.append(
+                {
+                    "title": title,
+                    "all_day": True,
+                    "start": start_iso,
+                    "end": end_iso,
+                    "source": "recurring",
+                }
+            )
+        else:
+            start_iso = item.get("start_time")
+            if not start_iso:
+                continue
+            out.append(
+                {
+                    "title": title,
+                    "start": start_iso,
+                    "end": item.get("end_time"),
+                    "all_day": False,
+                    "source": "recurring",
+                }
+            )
+    return out
+
+
+def _recurring_to_reminders(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Convert recurring expand items (kind==task) to reminder dicts."""
+    out: List[Dict[str, Any]] = []
+    for item in items:
+        if item.get("kind") != "task":
+            continue
+        title = str(item.get("title") or "")
+        if not title:
+            continue
+        if item.get("all_day"):
+            d = item.get("date")
+            if not isinstance(d, date):
+                continue
+            # date-only for all-day tasks
+            out.append({"title": title, "due": d.isoformat(), "source": "recurring"})
+        else:
+            # timed task: use start_time as due
+            due = item.get("start_time")
+            if not due:
+                continue
+            out.append({"title": title, "due": due, "source": "recurring"})
+    return out
 
 
 # --- Input Schemas ---
@@ -109,13 +177,34 @@ def vault_read_file(relative_path: str) -> str:
 def calendar_read(
     start_date: str, end_date: str, calendar_name: Optional[str] = None
 ) -> str:
-    """Fetch Apple Calendar events within a start and end date range (YYYY-MM-DD). Use current date from system prompt for relative dates."""
+    """Fetch Apple Calendar and recurring config events within a start and end date range (YYYY-MM-DD). Use current date from system prompt for relative dates."""
     try:
         s_date = date.fromisoformat(start_date)
         e_date = date.fromisoformat(end_date)
-        events = fetch_calendar_events(
-            s_date, e_date, calendar_name=calendar_name
-        )
+        try:
+            events = fetch_calendar_events(
+                s_date, e_date, calendar_name=calendar_name
+            )
+        except Exception as exc:
+            # Apple fetch may fail (e.g. not on macOS, ImportError); degrade to empty but still include recurring
+            logger.warning("calendar_read Apple fetch failed, continuing with recurring only: %s", exc)
+            events = []
+        # Merge recurring config events (kind==event) for the same range
+        try:
+            from obsidian_ai_hub.planner.recurring import expand_recurring
+
+            recurring_items = expand_recurring(s_date, e_date)
+            recurring_events = _recurring_to_calendar_events(recurring_items)
+            if recurring_events:
+                # Append and sort by start time (all-day first by midnight)
+                events = list(events) + recurring_events
+                try:
+                    events.sort(key=lambda e: e.get("start") or "")
+                except Exception:
+                    pass
+        except Exception as rexc:
+            logger.warning("calendar_read recurring merge failed: %s", rexc)
+
         return json.dumps({"events": events}, ensure_ascii=False)
     except EXPECTED_TOOL_EXCEPTIONS as exc:
         logger.warning("calendar_read failed: %s", exc)
@@ -124,11 +213,30 @@ def calendar_read(
 
 @tool(args_schema=RemindersReadInput)
 def reminders_read(start_date: str, end_date: str) -> str:
-    """Fetch incomplete Apple Reminders due within a start and end date range (YYYY-MM-DD). Use current date from system prompt for relative dates."""
+    """Fetch incomplete Apple Reminders and recurring config tasks due within a start and end date range (YYYY-MM-DD). Use current date from system prompt for relative dates."""
     try:
         s_date = date.fromisoformat(start_date)
         e_date = date.fromisoformat(end_date)
-        reminders = fetch_incomplete_reminders(s_date, e_date)
+        try:
+            reminders = fetch_incomplete_reminders(s_date, e_date)
+        except Exception as exc:
+            logger.warning("reminders_read Apple fetch failed, continuing with recurring only: %s", exc)
+            reminders = []
+        # Merge recurring config tasks (kind==task) for the same range
+        try:
+            from obsidian_ai_hub.planner.recurring import expand_recurring
+
+            recurring_items = expand_recurring(s_date, e_date)
+            recurring_reminders = _recurring_to_reminders(recurring_items)
+            if recurring_reminders:
+                reminders = list(reminders) + recurring_reminders
+                try:
+                    reminders.sort(key=lambda r: r.get("due") or "")
+                except Exception:
+                    pass
+        except Exception as rexc:
+            logger.warning("reminders_read recurring merge failed: %s", rexc)
+
         return json.dumps({"reminders": reminders}, ensure_ascii=False)
     except EXPECTED_TOOL_EXCEPTIONS as exc:
         logger.warning("reminders_read failed: %s", exc)
@@ -241,13 +349,13 @@ TOOL_DEFINITIONS: Dict[str, Dict[str, Any]] = {
     "calendar_read": {
         "tool_id": "calendar_read",
         "name": "カレンダー読取",
-        "description": "Apple カレンダーの予定を取得します。",
+        "description": "Apple カレンダーと定期予定（config.yml）の予定を取得します。",
         "get_tool": lambda: calendar_read,
     },
     "reminders_read": {
         "tool_id": "reminders_read",
         "name": "リマインダー読取",
-        "description": "Apple リマインダーの未完了タスクを取得します。",
+        "description": "Apple リマインダーと定期タスク（config.yml）の未完了タスクを取得します。",
         "get_tool": lambda: reminders_read,
     },
     "calendar_create_proposal": {
