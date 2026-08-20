@@ -139,7 +139,8 @@ async def test_agent_stream_error_handling():
     assert len(events) == 1
     error_payload = json.loads(events[0].replace("data: ", "").strip())
     assert error_payload["type"] == "error"
-    assert "API key invalid" in error_payload["error"]
+    assert error_payload["error"] == "AIエージェントの実行中にエラーが発生しました。"
+    assert error_payload["run_id"] == run["run_id"]
 
     db_run = store.get_run(run["run_id"])
     assert db_run["status"] == "failed"

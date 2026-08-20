@@ -471,6 +471,14 @@ def complete_run(
 
             assistant_msg_id = f"amsg_{uuid.uuid4().hex[:12]}"
 
+            active_conn.execute(
+                """
+                INSERT INTO agent_messages (message_id, session_id, sequence, role, content, created_at)
+                VALUES (?, ?, ?, 'assistant', ?, ?)
+                """,
+                (assistant_msg_id, session_id, next_seq, assistant_content, now),
+            )
+
             cursor_update = active_conn.execute(
                 """
                 UPDATE agent_runs
@@ -488,14 +496,6 @@ def complete_run(
             )
             if cursor_update.rowcount == 0:
                 raise ValueError(f"Run '{run_id}' is not in 'running' state.")
-
-            active_conn.execute(
-                """
-                INSERT INTO agent_messages (message_id, session_id, sequence, role, content, created_at)
-                VALUES (?, ?, ?, 'assistant', ?, ?)
-                """,
-                (assistant_msg_id, session_id, next_seq, assistant_content, now),
-            )
 
             active_conn.execute(
                 "UPDATE agent_sessions SET updated_at = ? WHERE session_id = ?;",
