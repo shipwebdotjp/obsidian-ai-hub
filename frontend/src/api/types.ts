@@ -623,6 +623,17 @@ export interface AgentMessage {
   created_at: string;
 }
 
+export interface AgentToolCall {
+  id: string;
+  tool_name: string;
+  args: Record<string, unknown>;
+  result: string;
+  hitl_run_id?: string | null;
+  status: "succeeded" | "failed";
+  error?: string | null;
+  iteration: number;
+}
+
 export interface AgentRun {
   run_id: string;
   session_id: string;
@@ -631,6 +642,7 @@ export interface AgentRun {
   status: "running" | "succeeded" | "failed";
   used_tools: string[];
   created_hitl_run_ids: string[];
+  tool_calls?: AgentToolCall[];
   error_message: string | null;
   started_at: string;
   finished_at: string | null;
@@ -645,5 +657,5 @@ export interface AgentSessionDetailResponse {
 
 export type AgentStreamEvent =
   | { type: "text"; delta: string }
-  | { type: "done"; message: AgentMessage; run: AgentRun; hitl_run_ids: string[] }
+  | { type: "done"; message: AgentMessage; run: AgentRun; hitl_run_ids: string[]; tool_calls?: AgentToolCall[] }
   | { type: "error"; error: string; run_id?: string };

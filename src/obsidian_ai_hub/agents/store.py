@@ -98,6 +98,20 @@ def _row_to_run(row: sqlite3.Row) -> dict[str, Any]:
         except (json.JSONDecodeError, TypeError):
             created_hitl_run_ids = []
 
+    tool_calls: list[dict[str, Any]] = []
+    # tool_calls_json added in v22; tolerate missing column on pre-migration rows
+    try:
+        raw = row["tool_calls_json"]  # type: ignore[index]
+    except (IndexError, KeyError, ValueError):
+        raw = None
+    if raw:
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, list):
+                tool_calls = parsed
+        except (json.JSONDecodeError, TypeError):
+            tool_calls = []
+
     return {
         "run_id": row["run_id"],
         "session_id": row["session_id"],
@@ -106,6 +120,7 @@ def _row_to_run(row: sqlite3.Row) -> dict[str, Any]:
         "status": row["status"],
         "used_tools": used_tools,
         "created_hitl_run_ids": created_hitl_run_ids,
+        "tool_calls": tool_calls,
         "error_message": row["error_message"],
         "started_at": row["started_at"],
         "finished_at": row["finished_at"],
@@ -447,6 +462,7 @@ def complete_run(
     assistant_content: str,
     used_tools: Sequence[str] | None = None,
     created_hitl_run_ids: Sequence[str] | None = None,
+    tool_calls: Sequence[dict[str, Any]] | None = None,
     conn: Optional[sqlite3.Connection] = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     with auto_connection(conn) as (active_conn, is_generated):
@@ -458,6 +474,8 @@ def complete_run(
         now = _now_iso()
         tools_list = list(used_tools) if used_tools else []
         hitl_ids = list(created_hitl_run_ids) if created_hitl_run_ids else []
+        tool_calls_list = list(tool_calls) if tool_calls else []
+        tool_calls_json = json.dumps(tool_calls_list, ensure_ascii=False)
 
         def _execute_transaction():
             cursor = active_conn.execute(
@@ -479,21 +497,43 @@ def complete_run(
                 (assistant_msg_id, session_id, next_seq, assistant_content, now),
             )
 
-            cursor_update = active_conn.execute(
-                """
-                UPDATE agent_runs
-                SET assistant_message_id = ?, status = 'succeeded', used_tools_json = ?,
-                    created_hitl_run_ids_json = ?, finished_at = ?
-                WHERE run_id = ? AND status = 'running'
-                """,
-                (
-                    assistant_msg_id,
-                    json.dumps(tools_list, ensure_ascii=False),
-                    json.dumps(hitl_ids, ensure_ascii=False),
-                    now,
-                    run_id,
-                ),
-            )
+            # tool_calls_json column added in v22; fall back gracefully on old DBs
+            try:
+                cursor_update = active_conn.execute(
+                    """
+                    UPDATE agent_runs
+                    SET assistant_message_id = ?, status = 'succeeded', used_tools_json = ?,
+                        created_hitl_run_ids_json = ?, tool_calls_json = ?, finished_at = ?
+                    WHERE run_id = ? AND status = 'running'
+                    """,
+                    (
+                        assistant_msg_id,
+                        json.dumps(tools_list, ensure_ascii=False),
+                        json.dumps(hitl_ids, ensure_ascii=False),
+                        tool_calls_json,
+                        now,
+                        run_id,
+                    ),
+                )
+            except sqlite3.OperationalError as e:
+                if "no such column: tool_calls_json" in str(e):
+                    cursor_update = active_conn.execute(
+                        """
+                        UPDATE agent_runs
+                        SET assistant_message_id = ?, status = 'succeeded', used_tools_json = ?,
+                            created_hitl_run_ids_json = ?, finished_at = ?
+                        WHERE run_id = ? AND status = 'running'
+                        """,
+                        (
+                            assistant_msg_id,
+                            json.dumps(tools_list, ensure_ascii=False),
+                            json.dumps(hitl_ids, ensure_ascii=False),
+                            now,
+                            run_id,
+                        ),
+                    )
+                else:
+                    raise
             if cursor_update.rowcount == 0:
                 raise ValueError(f"Run '{run_id}' is not in 'running' state.")
 

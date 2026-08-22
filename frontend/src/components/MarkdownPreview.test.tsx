@@ -39,4 +39,20 @@ describe("MarkdownPreview", () => {
     render(<MarkdownPreview content={"> quoted text"} />);
     expect(screen.getByText("quoted text")).toBeInTheDocument();
   });
+
+  it("strips javascript: and data: hrefs to prevent XSS", () => {
+    const { container } = render(
+      <MarkdownPreview
+        content={
+          "[click](javascript:alert(1)) and [data](data:text/html,<script>alert(1)</script>) and [vbs](vbscript:msgbox(1))"
+        }
+      />
+    );
+    // No anchor with a javascript:/data:/vbscript: href should be rendered.
+    const anchors = container.querySelectorAll("a");
+    for (const a of Array.from(anchors)) {
+      const href = a.getAttribute("href") ?? "";
+      expect(/^(javascript|data|vbscript|file):/i.test(href)).toBe(false);
+    }
+  });
 });

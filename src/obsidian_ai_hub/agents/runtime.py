@@ -190,6 +190,9 @@ async def generate_agent_stream(
 
     used_tools: List[str] = []
     created_hitl_run_ids: List[str] = []
+    tool_call_records: List[Dict[str, Any]] = []
+    # Truncate large tool results to keep DB row bounded (vault/calendar dumps can be large)
+    _TOOL_RESULT_MAX_CHARS = 20000
 
     try:
         llm = create_langchain_llm(
@@ -230,6 +233,14 @@ async def generate_agent_stream(
                 targs = call["args"]
                 tcall_id = call.get("id", f"call_{tname}")
 
+                # Prepare record scaffold
+                record: Dict[str, Any] = {
+                    "id": tcall_id,
+                    "tool_name": tname,
+                    "args": targs,
+                    "iteration": iterations,
+                }
+
                 if tname in tools_by_name:
                     if tname not in used_tools:
                         used_tools.append(tname)
@@ -238,24 +249,62 @@ async def generate_agent_stream(
                         result = await asyncio.to_thread(
                             tools_by_name[tname].invoke, targs
                         )
+                        result_str = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
+                        status = "succeeded"
+                        error_msg = None
                     except Exception as texc:
                         logger.exception("Error executing tool '%s'", tname)
-                        result = json.dumps({"error": str(texc)}, ensure_ascii=False)
+                        result_str = json.dumps({"error": str(texc)}, ensure_ascii=False)
+                        status = "failed"
+                        error_msg = str(texc)
 
-                    hitl_id = _extract_hitl_run_id(result)
+                    hitl_id = _extract_hitl_run_id(result_str)
                     if hitl_id and hitl_id not in created_hitl_run_ids:
                         created_hitl_run_ids.append(hitl_id)
 
+                    # Keep the full result for the LLM (avoids feeding it broken
+                    # JSON / cut surrogate pairs) and truncate only for DB persistence.
+                    stored_result = result_str
+                    if len(stored_result) > _TOOL_RESULT_MAX_CHARS:
+                        # Use encode/decode round-trip to avoid splitting multi-byte
+                        # characters mid-codepoint.
+                        stored_result = (
+                            stored_result[:_TOOL_RESULT_MAX_CHARS]
+                            .encode("utf-8", errors="ignore")
+                            .decode("utf-8", errors="ignore")
+                            + "\n…(truncated)"
+                        )
+
+                    record.update(
+                        {
+                            "result": stored_result,
+                            "hitl_run_id": hitl_id,
+                            "status": status,
+                            "error": error_msg,
+                        }
+                    )
+                    tool_call_records.append(record)
+
                     langchain_messages.append(
                         ToolMessage(
-                            content=result if isinstance(result, str) else json.dumps(result, ensure_ascii=False),
+                            content=result_str,
                             tool_call_id=tcall_id,
                         )
                     )
                 else:
+                    err_result = json.dumps({"error": f"Unknown tool '{tname}'"}, ensure_ascii=False)
+                    record.update(
+                        {
+                            "result": err_result,
+                            "hitl_run_id": None,
+                            "status": "failed",
+                            "error": f"Unknown tool '{tname}'",
+                        }
+                    )
+                    tool_call_records.append(record)
                     langchain_messages.append(
                         ToolMessage(
-                            content=json.dumps({"error": f"Unknown tool '{tname}'"}, ensure_ascii=False),
+                            content=err_result,
                             tool_call_id=tcall_id,
                         )
                     )
@@ -286,6 +335,7 @@ async def generate_agent_stream(
             assistant_content=final_text,
             used_tools=used_tools,
             created_hitl_run_ids=created_hitl_run_ids,
+            tool_calls=tool_call_records,
         )
 
         # Yield done event
@@ -295,6 +345,7 @@ async def generate_agent_stream(
                 "message": asst_msg,
                 "run": completed_run,
                 "hitl_run_ids": created_hitl_run_ids,
+                "tool_calls": tool_call_records,
             }
         )
 

@@ -1,6 +1,19 @@
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
+// Allow only http(s) and protocol-relative/in-app links; block javascript:, data:,
+// vbscript:, file: etc. so LLM/tool-generated Markdown cannot execute scripts.
+function safeHref(href: unknown): string | undefined {
+  if (typeof href !== "string") return undefined;
+  const trimmed = href.trim();
+  if (!trimmed) return undefined;
+  if (/^javascript:/i.test(trimmed)) return undefined;
+  if (/^data:/i.test(trimmed)) return undefined;
+  if (/^vbscript:/i.test(trimmed)) return undefined;
+  if (/^file:/i.test(trimmed)) return undefined;
+  return trimmed;
+}
+
 const markdownComponents = {
   h1: ({ node, ...props }: any) => <h1 className="text-xl font-bold text-slate-900 mt-6 mb-2 border-b border-slate-200 pb-1" {...props} />,
   h2: ({ node, ...props }: any) => <h2 className="text-lg font-semibold text-slate-900 mt-5 mb-2" {...props} />,
@@ -42,10 +55,15 @@ const markdownComponents = {
   th: ({ node, ...props }: any) => <th className="px-3 py-2 text-left font-semibold border-b border-slate-200" {...props} />,
   td: ({ node, ...props }: any) => <td className="px-3 py-2 text-slate-600" {...props} />,
   a: ({ node, href, children, ...props }: any) => {
-    const isExternal = href?.startsWith("http://") || href?.startsWith("https://");
+    const safe = safeHref(href);
+    if (safe === undefined) {
+      // Render as plain text (no clickable anchor) to neutralize XSS payloads.
+      return <span className="text-slate-500">{children}</span>;
+    }
+    const isExternal = safe.startsWith("http://") || safe.startsWith("https://");
     return (
       <a
-        href={href}
+        href={safe}
         className="text-indigo-600 hover:text-indigo-800 underline break-all"
         target={isExternal ? "_blank" : undefined}
         rel={isExternal ? "noopener noreferrer" : undefined}

@@ -251,4 +251,110 @@ describe("AgentsPage", () => {
     await user.type(input, "再試行");
     expect(screen.getByRole("button", { name: "送信" })).not.toBeDisabled();
   });
+
+  it("opens the session referenced by ?session_id=... on deep link", async () => {
+    const otherAgent = {
+      ...sampleAgent,
+      agent_id: "agent_999",
+      name: "別エージェント",
+    };
+    const otherSession = {
+      ...sampleSession,
+      session_id: "asess_777",
+      agent_id: "agent_999",
+      title: "ディープリンク先",
+    };
+
+    mockListAgents.mockResolvedValue({ agents: [sampleAgent, otherAgent] });
+    mockListSessions.mockImplementation(async (agentId: string) => {
+      if (agentId === "agent_999") {
+        return { sessions: [otherSession] };
+      }
+      return { sessions: [sampleSession] };
+    });
+    mockGetSessionDetail.mockResolvedValue({
+      session: otherSession,
+      agent: otherAgent,
+      messages: [
+        {
+          message_id: "msg_dl_1",
+          session_id: "asess_777",
+          sequence: 1,
+          role: "user",
+          content: "ディープリンク経由で開きました",
+          created_at: "2026-08-20T00:00:00Z",
+        },
+        {
+          message_id: "msg_dl_2",
+          session_id: "asess_777",
+          sequence: 2,
+          role: "assistant",
+          content: "ディープリンク応答",
+          created_at: "2026-08-20T00:00:01Z",
+        },
+      ],
+      runs: [],
+    });
+
+    render(
+      <MemoryRouter initialEntries={["/agents?session_id=asess_777"]}>
+        <AgentsPage />
+      </MemoryRouter>
+    );
+
+    // The deep-link target agent should be resolved, not the first agent
+    await waitFor(() => {
+      expect(mockGetSessionDetail).toHaveBeenCalledWith("asess_777");
+    });
+    expect(
+      await screen.findByText("ディープリンク応答")
+    ).toBeInTheDocument();
+    // The other agent's session should appear in the session bar
+    expect(screen.getByText("ディープリンク先")).toBeInTheDocument();
+  });
+
+  it("falls back to first agent when the deep-link session does not exist", async () => {
+    mockGetSessionDetail.mockImplementation(async (sessionId: string) => {
+      if (sessionId === "asess_missing") {
+        throw Object.assign(new Error("not found"), { status: 404 });
+      }
+      return {
+        session: sampleSession,
+        agent: sampleAgent,
+        messages: [
+          {
+            message_id: "msg_1",
+            session_id: "asess_456",
+            sequence: 1,
+            role: "user",
+            content: "こんにちは",
+            created_at: "2026-08-20T00:00:00Z",
+          },
+          {
+            message_id: "msg_2",
+            session_id: "asess_456",
+            sequence: 2,
+            role: "assistant",
+            content: "こんにちは！何かお手伝いできますか？",
+            created_at: "2026-08-20T00:00:01Z",
+          },
+        ],
+        runs: [],
+      };
+    });
+
+    render(
+      <MemoryRouter initialEntries={["/agents?session_id=asess_missing"]}>
+        <AgentsPage />
+      </MemoryRouter>
+    );
+
+    // Falls back to first agent, normal load should complete
+    await waitFor(() => {
+      expect(mockGetSessionDetail).toHaveBeenCalledWith("asess_missing");
+    });
+    expect(
+      await screen.findByText("こんにちは！何かお手伝いできますか？")
+    ).toBeInTheDocument();
+  });
 });

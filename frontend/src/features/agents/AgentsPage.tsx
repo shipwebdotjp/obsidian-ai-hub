@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import {
   createAgent,
   createAgentSession,
@@ -15,11 +15,15 @@ import {
 import type {
   Agent,
   AgentMessage,
+  AgentRun,
   AgentSession,
   AgentStreamEvent,
   AgentTool,
+  AgentToolCall,
 } from "../../api/types";
 import { ROUTES } from "../../constants/routes";
+import MarkdownPreview from "../../components/MarkdownPreview";
+import { formatDateTime } from "../../utils/date";
 
 const SCHEDULE_ASSISTANT_TEMPLATE = {
   name: "予定アシスタント",
@@ -45,6 +49,7 @@ export default function AgentsPage() {
   const [sessions, setSessions] = useState<AgentSession[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<AgentMessage[]>([]);
+  const [runs, setRuns] = useState<AgentRun[]>([]);
 
   // Agent form state
   const [isEditingAgent, setIsEditingAgent] = useState(false);
@@ -63,6 +68,8 @@ export default function AgentsPage() {
   const [streamingText, setStreamingText] = useState("");
   const [hitlLinks, setHitlLinks] = useState<string[]>([]);
   const [chatError, setChatError] = useState<string | null>(null);
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
+  const copyResetRef = useRef<number | null>(null);
 
   // Modal delete targets
   const [agentToDelete, setAgentToDelete] = useState<Agent | null>(null);
@@ -70,6 +77,12 @@ export default function AgentsPage() {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+
+  const [searchParams, setSearchParams] = useSearchParams();
+  const sessionIdParam = searchParams.get("session_id");
+  // Holds the session_id to honor after sessions are loaded for the resolved agent.
+  // Cleared after consumption so subsequent agent switches do not re-select it.
+  const pendingSessionIdRef = useRef<string | null>(null);
 
   // Load agents & catalog tools on mount
   useEffect(() => {
@@ -85,6 +98,29 @@ export default function AgentsPage() {
       ]);
       setAgents(agRes.agents);
       setAvailableTools(toolRes.tools);
+
+      // Deep link: resolve the agent from the URL's session_id, then let the
+      // selectedAgentId effect load the session list and consume pendingSessionIdRef.
+      if (sessionIdParam) {
+        pendingSessionIdRef.current = sessionIdParam;
+        try {
+          const detail = await getAgentSessionDetail(sessionIdParam);
+          setSelectedAgentId(detail.agent.agent_id);
+          return;
+        } catch {
+          // Stale or invalid session_id: fall back to first agent and clear the param.
+          pendingSessionIdRef.current = null;
+          setSearchParams(
+            (prev) => {
+              const next = new URLSearchParams(prev);
+              next.delete("session_id");
+              return next;
+            },
+            { replace: true },
+          );
+        }
+      }
+
       if (agRes.agents.length > 0 && !selectedAgentId) {
         setSelectedAgentId(agRes.agents[0].agent_id);
       }
@@ -116,12 +152,33 @@ export default function AgentsPage() {
     try {
       const res = await listAgentSessions(agentId);
       setSessions(res.sessions);
-      if (res.sessions.length > 0) {
+      const target = pendingSessionIdRef.current;
+      if (target && res.sessions.some((s) => s.session_id === target)) {
+        setSelectedSessionId(target);
+      } else if (target) {
+        // Target session does not belong to this agent: drop it and fall back.
+        pendingSessionIdRef.current = null;
+        setSearchParams(
+          (prev) => {
+            const next = new URLSearchParams(prev);
+            next.delete("session_id");
+            return next;
+          },
+          { replace: true },
+        );
+        if (res.sessions.length > 0) {
+          setSelectedSessionId(res.sessions[0].session_id);
+        } else {
+          setSelectedSessionId(null);
+          setMessages([]);
+        }
+      } else if (res.sessions.length > 0) {
         setSelectedSessionId(res.sessions[0].session_id);
       } else {
         setSelectedSessionId(null);
         setMessages([]);
       }
+      pendingSessionIdRef.current = null;
     } catch (e: any) {
       setActionError(e.message || "会話履歴の読み込みに失敗しました。");
     }
@@ -149,6 +206,7 @@ export default function AgentsPage() {
     try {
       const detail = await getAgentSessionDetail(sessionId);
       setMessages(detail.messages);
+      setRuns(detail.runs || []);
       setChatError(null);
     } catch (e: any) {
       setChatError(e.message || "セッション詳細の読み込みに失敗しました。");
@@ -181,6 +239,16 @@ export default function AgentsPage() {
   }, [messages, streamingText]);
 
   const activeAgent = agents.find((a) => a.agent_id === selectedAgentId);
+
+  // Memoize assistant_message_id -> run so O(N*M) lookup becomes O(N) per render.
+  // `runs` is replaced wholesale by setRuns, so a single useMemo key is enough.
+  const runsByMessageId = useMemo(() => {
+    const map = new Map<string, AgentRun>();
+    for (const r of runs) {
+      if (r.assistant_message_id) map.set(r.assistant_message_id, r);
+    }
+    return map;
+  }, [runs]);
 
   // Agent Form Actions
   const handleOpenCreateForm = () => {
@@ -274,6 +342,14 @@ export default function AgentsPage() {
       const res = await createAgentSession(selectedAgentId);
       setSessions([res.session, ...sessions]);
       setSelectedSessionId(res.session.session_id);
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.set("session_id", res.session.session_id);
+          return next;
+        },
+        { replace: true },
+      );
     } catch (e: any) {
       setActionError("セッション作成に失敗しました: " + e.message);
     }
@@ -281,6 +357,7 @@ export default function AgentsPage() {
 
   const handleDeleteSessionConfirm = async () => {
     if (!sessionToDelete) return;
+    const wasSelected = selectedSessionId === sessionToDelete.session_id;
     setActionError(null);
     try {
       await deleteAgentSession(sessionToDelete.session_id);
@@ -289,14 +366,61 @@ export default function AgentsPage() {
       );
       setSessions(remaining);
       setSessionToDelete(null);
-      if (selectedSessionId === sessionToDelete.session_id) {
-        setSelectedSessionId(remaining.length > 0 ? remaining[0].session_id : null);
+      if (wasSelected) {
+        const nextId = remaining.length > 0 ? remaining[0].session_id : null;
+        setSelectedSessionId(nextId);
+        if (nextId) {
+          setSearchParams(
+            (prev) => {
+              const next = new URLSearchParams(prev);
+              next.set("session_id", nextId);
+              return next;
+            },
+            { replace: true },
+          );
+        } else {
+          setSearchParams(
+            (prev) => {
+              const next = new URLSearchParams(prev);
+              next.delete("session_id");
+              return next;
+            },
+            { replace: true },
+          );
+        }
       }
     } catch (e: any) {
       setActionError("セッション削除に失敗しました: " + e.message);
       setSessionToDelete(null);
     }
   };
+
+  const handleCopyMessage = async (content: string, messageId: string) => {
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopiedMessageId(messageId);
+      if (copyResetRef.current !== null) {
+        window.clearTimeout(copyResetRef.current);
+      }
+      copyResetRef.current = window.setTimeout(() => {
+        setCopiedMessageId((current) => (current === messageId ? null : current));
+        copyResetRef.current = null;
+      }, 2000);
+    } catch (err) {
+      console.error("Failed to copy message:", err);
+    }
+  };
+
+  // Cleanup pending copy-feedback timer on unmount to avoid state updates
+  // on an unmounted component.
+  useEffect(() => {
+    return () => {
+      if (copyResetRef.current !== null) {
+        window.clearTimeout(copyResetRef.current);
+        copyResetRef.current = null;
+      }
+    };
+  }, []);
 
   // Send Message & Stream Response
   const handleSendMessage = async (e: React.FormEvent) => {
@@ -388,6 +512,15 @@ export default function AgentsPage() {
                   setSelectedAgentId(agent.agent_id);
                   setIsCreatingAgent(false);
                   setIsEditingAgent(false);
+                  // Switching agents invalidates the current session; clear the URL param.
+                  setSearchParams(
+                    (prev) => {
+                      const next = new URLSearchParams(prev);
+                      next.delete("session_id");
+                      return next;
+                    },
+                    { replace: true },
+                  );
                 }}
                 className={`w-full cursor-pointer rounded-lg px-3 py-2 text-left text-xs transition ${
                   selectedAgentId === agent.agent_id &&
@@ -601,7 +734,17 @@ export default function AgentsPage() {
                 >
                   <button
                     type="button"
-                    onClick={() => setSelectedSessionId(s.session_id)}
+                    onClick={() => {
+                      setSelectedSessionId(s.session_id);
+                      setSearchParams(
+                        (prev) => {
+                          const next = new URLSearchParams(prev);
+                          next.set("session_id", s.session_id);
+                          return next;
+                        },
+                        { replace: true },
+                      );
+                    }}
                     className="truncate max-w-[120px] cursor-pointer"
                   >
                     {s.title}
@@ -635,31 +778,161 @@ export default function AgentsPage() {
                   メッセージを入力して会話を開始してください。
                 </div>
               ) : (
-                messages.map((m) => (
-                  <div
-                    key={m.message_id}
-                    className={`flex ${
-                      m.role === "user" ? "justify-end" : "justify-start"
-                    }`}
-                  >
-                    <div
-                      className={`max-w-xl rounded-2xl px-4 py-2.5 text-xs shadow-sm whitespace-pre-wrap ${
-                        m.role === "user"
-                          ? "bg-slate-900 text-white"
-                          : "bg-white border border-slate-200 text-slate-800"
-                      }`}
-                    >
-                      {m.content}
+                messages.map((m) => {
+                  const relatedRun =
+                    m.role === "assistant"
+                      ? runsByMessageId.get(m.message_id) ?? null
+                      : null;
+                  const toolCalls: AgentToolCall[] = relatedRun?.tool_calls || [];
+                  const isAssistant = m.role === "assistant";
+                  return (
+                    <div key={m.message_id} className="space-y-1">
+                      {/* Tool calls (chronological: before the assistant's final response) */}
+                      {toolCalls.length > 0 && (
+                        <div className="flex justify-start">
+                          <div className="max-w-xl w-full space-y-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                            <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                              ツール呼び出し {toolCalls.length}件
+                            </div>
+                            {toolCalls.map((tc) => (
+                              <details
+                                key={tc.id}
+                                className="rounded border border-slate-200 bg-white text-xs overflow-hidden group"
+                              >
+                                <summary className="cursor-pointer list-none flex items-center justify-between gap-2 px-3 py-1.5 bg-slate-50 hover:bg-slate-100">
+                                  <span className="flex items-center gap-1.5 min-w-0">
+                                    <span className="font-semibold truncate text-slate-800">{tc.tool_name}</span>
+                                    <span
+                                      className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold border ${
+                                        tc.status === "succeeded"
+                                          ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                          : "bg-rose-50 text-rose-700 border-rose-200"
+                                      }`}
+                                    >
+                                      {tc.status === "succeeded" ? "成功" : "失敗"}
+                                    </span>
+                                    {tc.hitl_run_id && (
+                                      <span className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-1 truncate">
+                                        HITL: {tc.hitl_run_id}
+                                      </span>
+                                    )}
+                                  </span>
+                                  <span className="text-[10px] text-slate-400 group-open:rotate-180 transition-transform shrink-0">▼</span>
+                                </summary>
+                                <div className="border-t border-slate-200 p-3 space-y-2 bg-white">
+                                  <div>
+                                    <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">引数</div>
+                                    <pre className="max-h-40 overflow-auto rounded bg-slate-50 border border-slate-200 p-2 text-[11px] font-mono whitespace-pre-wrap break-all">
+                                      {(() => {
+                                        try {
+                                          return JSON.stringify(tc.args, null, 2);
+                                        } catch {
+                                          return String(tc.args);
+                                        }
+                                      })()}
+                                    </pre>
+                                  </div>
+                                  <div>
+                                    <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">結果</div>
+                                    <pre className="max-h-64 overflow-auto rounded bg-slate-50 border border-slate-200 p-2 text-[11px] font-mono whitespace-pre-wrap break-all">
+                                      {tc.result || "-"}
+                                    </pre>
+                                  </div>
+                                  {tc.error && (
+                                    <div className="text-[11px] text-rose-700 bg-rose-50 border border-rose-200 rounded px-2 py-1 break-all">
+                                      {tc.error}
+                                    </div>
+                                  )}
+                                </div>
+                              </details>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {/* Message bubble (user: plain text, assistant: Markdown) */}
+                      <div
+                        className={`flex ${
+                          m.role === "user" ? "justify-end" : "justify-start"
+                        }`}
+                      >
+                        <div
+                          className={`max-w-xl rounded-2xl px-4 py-2.5 text-xs shadow-sm ${
+                            isAssistant
+                              ? "bg-white border border-slate-200 text-slate-800"
+                              : "bg-slate-900 text-white whitespace-pre-wrap"
+                          }`}
+                        >
+                          {isAssistant ? (
+                            <MarkdownPreview content={m.content} />
+                          ) : (
+                            m.content
+                          )}
+                        </div>
+                      </div>
+                      {/* Footer: copy button + timestamp */}
+                      <div
+                        className={`flex items-center gap-2 text-[10px] text-slate-400 ${
+                          m.role === "user" ? "justify-end" : "justify-start"
+                        }`}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => handleCopyMessage(m.content, m.message_id)}
+                          className="inline-flex items-center gap-1 cursor-pointer rounded px-1.5 py-0.5 hover:bg-slate-100 hover:text-slate-600 transition"
+                          aria-label="メッセージをコピー"
+                          data-testid={`copy-message-${m.message_id}`}
+                        >
+                          {copiedMessageId === m.message_id ? (
+                            <>
+                              <svg
+                                className="h-3.5 w-3.5 text-emerald-600"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                                aria-hidden="true"
+                              >
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  strokeWidth={2}
+                                  d="M5 13l4 4L19 7"
+                                />
+                              </svg>
+                              <span className="text-emerald-700">コピーしました</span>
+                            </>
+                          ) : (
+                            <svg
+                              className="h-3.5 w-3.5"
+                              fill="none"
+                              viewBox="0 0 24 24"
+                              stroke="currentColor"
+                              aria-hidden="true"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h12a2 2 0 002-2V7a2 2 0 00-2-2h-2M8 5a2 2 0 002 2h4a2 2 0 002-2M8 5a2 2 0 012-2h4a2 2 0 012 2"
+                              />
+                            </svg>
+                          )}
+                        </button>
+                        <span aria-label="送信時刻">{formatDateTime(m.created_at)}</span>
+                      </div>
                     </div>
-                  </div>
-                ))
+                  );
+                })
               )}
 
               {/* Live Streaming Response Chunk */}
               {isStreaming && (
                 <div className="flex justify-start">
-                  <div className="max-w-xl rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-xs text-slate-800 shadow-sm whitespace-pre-wrap">
-                    {streamingText || "考え中…"}
+                  <div className="max-w-xl rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-xs text-slate-800 shadow-sm">
+                    {streamingText ? (
+                      <MarkdownPreview content={streamingText} />
+                    ) : (
+                      "考え中…"
+                    )}
                   </div>
                 </div>
               )}

@@ -477,6 +477,9 @@ def get_db_connection() -> sqlite3.Connection:
     if current_version <= 20:
         run_migration_v21(conn)
 
+    if current_version <= 21:
+        run_migration_v22(conn)
+
     return conn
 
 
@@ -683,6 +686,18 @@ def run_migration_v21(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_agent_runs_session_id ON agent_runs(session_id);")
 
     conn.execute("PRAGMA user_version = 21;")
+    conn.commit()
+
+
+def run_migration_v22(conn: sqlite3.Connection) -> None:
+    """Run migration for version 22 (agent_runs.tool_calls_json for detailed tool call history)."""
+    try:
+        conn.execute(
+            "ALTER TABLE agent_runs ADD COLUMN tool_calls_json TEXT NOT NULL DEFAULT '[]';"
+        )
+    except sqlite3.OperationalError as e:
+        _ignore_duplicate_schema_object(e)
+    conn.execute("PRAGMA user_version = 22;")
     conn.commit()
 
 
