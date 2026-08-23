@@ -305,3 +305,35 @@
 - `run_and_log` に `task_id` / `empty_result_predicate` を追加。空振り時は `suppress_command_run`（CASCADE削除）→ `upsert_task_state`。非空時は通常の `succeed_command_run` + `upsert_task_state`。失敗時は `fail_command_run` + `upsert_task_state(error=...)`。
 - `cleanup_old_logs_now(days)` を日次メンテナンスから呼ぶ。`tasks.local.yml` / `tasks.local.sample.yml` に `cleanup_execution_logs_daily`（03:20）を追加。
 - 両 plist（base / hitl-worker）の `ProgramArguments` をラッパー経由に変更。
+
+## AI エージェントのカスタムツール・プラグイン機構
+
+| 項目 | 内容 |
+|------|------|
+| 決定日 | 2026-08-23 |
+| カテゴリ | AIエージェント・拡張性 |
+| 決定内容 | AI エージェントが利用できるツールを、利用者がローカルの Python ファイルで拡張できるプラグイン機構を導入する。配置先は `~/.config/obsidian-ai-hub/plugins/tools/*.py`（環境変数 `OBSIDIAN_AI_HUB_PLUGINS_DIR` / `config.yml: plugins.tools_dir` で上書き可）。Web UI でのコード編集・DB 保存は行わず、ファイル配置のみとする。対象エージェントは `agents.registry` を経由する AI エージェントのみで、リサーチエージェントの固定ワークフローは対象外。 |
+
+### 結論に至った経緯
+
+- 利用者から「AI エージェントやリサーチエージェントで使えるツールを登録できないか」「Python 関数をプラグインディレクトリに置けば自動ロードされる仕組みや Web UI で登録できると良いのでは」という要望があった。
+- `agents.registry.resolve_tools()` はユーザー設定可能なエージェントの**唯一のツール解決入口**という決定（2026-08-20）を維持する必要がある。任意のツール実装や直接 Apple 書込みを LLM が公開すると HITL 境界を迂回できる。
+- 検討した手法:
+  - A. プラグインディレクトリ自動ロード（ファイルシステム）
+  - B. Web UI → DB に Python コード保存 → 実行時 `exec`
+  - C. Web UI エディタ → プラグインディレクトリへ書出し
+  - D. 宣言的ツール合成（コードなし）
+  - E. MCP サーバ統合
+- B は DB 行からの任意コード実行（RCE）、Jules クリーンクローン（DB 無し）との非互換、コードレビュー困難のため不採用。C は A の亜種として将来的に検討余地を残すが、Web サーバのファイル書込み権限と権限境界の複雑化を初期導入で避けるため見送り。D は再設定のみで新規能力追加ができない。E は外部サービス連携として補完的だが、今回の「Python 関数を置く」要望の主軸は A で満たせる。
+
+### 構造と運用
+
+- `utils/config.py`: `PLUGINS_TOOLS_DIR` を追加。`_APP_ENV_VARS` に `OBSIDIAN_AI_HUB_PLUGINS_DIR` を加え、テスト時（`ENV=test`）は `TEST_WORKSPACE/plugins/tools` へ退避。`tests/conftest.py` の autouse sandbox でも `tmp_path/plugins/tools` へ退避し、前後で `registry.reload_plugins()` により隔離（762 tests passed で検証）。
+- `agents/registry.py`: `_BUILTIN_TOOL_DEFINITIONS` を正本とし、`TOOL_DEFINITIONS` はそのコピーにプラグインをマージした公開カタログ。`_load_plugins_into()` は `PLUGINS_TOOLS_DIR/*.py` をアルファベット順に `importlib.util.spec_from_file_location` でロード。各ファイルは `register() -> dict` または `TOOL_DEFINITIONS` dict を公開し、エントリは `{tool_id, name, description, get_tool, [get_tool_with_context]}` の形。`tool_id` は `custom:` プレフィックスを強制（無ければ自動付与、`^custom:[a-z0-9][a-z0-9_-]{0,63}$`）。`name`/`description` は空でないこと、`get_tool` は callable であることを検証。衝突ポリシー: 組込み ID は常に勝利、プラグイン間は先頭ファイル勝利（警告ログ）。1 ファイルの壊れは `logger.exception` で記録しスキップするプラグイン分離とし、サーバ起動や他プラグインを止めない（`AGENTS.md: Do not mask unexpected failures` の「プラグイン分離は想定された拡張の失敗」として明記）。`reload_plugins()` は `TOOL_DEFINITIONS` を同一 dict オブジェクトのまま再構築するテスト/手動向け API。`list_available_tools()` / `resolve_tools*()` / `store._validate_tool_ids` は `TOOL_DEFINITIONS` をそのまま見るため Web UI・API は無変更でカスタムツールが `GET /api/v1/agent-tools` のチェックボックスに現れる。
+- プラグインはローカルファイル＝アプリと同信頼レベル（利用者が既にマシンを管理）。エージェントへの割当ては利用者が明示選択するまで無効なため、新たな RCE ベクタを追加しない。
+- リサーチエージェント（`research/runner.py`）は固定 read-only ワークフローとして `web_search` / `web_extract` を直接 import する現行を維持し、プラグイン対象外。
+
+### トレードオフ
+
+- 起動時に eager load するため、プラグイン追加後はサーバ再起動が必要。ファイル監視や hot reload は初期導入では行わない（Inbox の `WatchPaths` 非採用と同じ哲学）。
+- プラグイン契約の違反（`tool_id` 不正、`get_tool` 非 callable 等）は警告ログでスキップされ、利用者はログで原因を確認する必要がある。

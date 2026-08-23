@@ -52,6 +52,7 @@ _APP_ENV_VARS = [
     "ALLOW_EXTERNAL_IN_TEST",
     "AGENT_PROVIDER",
     "AGENT_MODEL",
+    "OBSIDIAN_AI_HUB_PLUGINS_DIR",
 ]
 
 if IS_TEST_ENV:
@@ -672,3 +673,16 @@ if IS_TEST_ENV:
     VAULT_INDEX_CHROMA_PATH = TEST_WORKSPACE / "vault-index" / "chroma"
     TASK_RUN_STATE_PATH = TEST_WORKSPACE / "last_run.json"
     KNOWLEDGE_SYNC_STATE_PATH = TEST_WORKSPACE / "knowledge_sync_state.json"
+    PLUGINS_TOOLS_DIR = TEST_WORKSPACE / "plugins" / "tools"
+else:
+    _plugins_dir_raw = _env_or_config(
+        "OBSIDIAN_AI_HUB_PLUGINS_DIR", "plugins", "tools_dir"
+    )
+    if _plugins_dir_raw:
+        PLUGINS_TOOLS_DIR = Path(str(_plugins_dir_raw)).expanduser()
+    else:
+        PLUGINS_TOOLS_DIR = Path(
+            "~/.config/obsidian-ai-hub/plugins/tools"
+        ).expanduser()
+
+

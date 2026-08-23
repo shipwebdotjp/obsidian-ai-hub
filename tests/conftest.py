@@ -194,3 +194,31 @@ def _filesystem_sandbox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(app_config, "VAULT_INDEX_SQLITE_PATH", tmp_path / "vault-index" / "search.sqlite")
     monkeypatch.setattr(app_config, "VAULT_INDEX_CHROMA_PATH", tmp_path / "vault-index" / "chroma")
     monkeypatch.setattr(app_config, "LOCAL_MODEL_DIR", tmp_path / "local-models")
+    monkeypatch.setattr(app_config, "PLUGINS_TOOLS_DIR", tmp_path / "plugins" / "tools")
+    # Ensure plugin registry is reset for this test's isolated directory.
+    # The directory does not exist yet (no plugins), so the reload is a no-op
+    # and leaves only built-ins.  Tests that create plugins must call
+    # registry.reload_plugins() after writing files.
+    try:
+        from obsidian_ai_hub.agents.registry import reload_plugins
+
+        reload_plugins()
+    except Exception:
+        pass
+    yield
+    # Clear any custom tools that the test may have loaded so they do not
+    # leak to the next test (the per-test tmp_path will be discarded).
+    try:
+        from obsidian_ai_hub.agents.registry import TOOL_DEFINITIONS, _BUILTIN_TOOL_IDS
+
+        for tid in list(TOOL_DEFINITIONS.keys()):
+            if tid not in _BUILTIN_TOOL_IDS:
+                TOOL_DEFINITIONS.pop(tid, None)
+        # Remove cached plugin modules so the next test gets a fresh import.
+        import sys
+
+        for name in list(sys.modules.keys()):
+            if name.startswith("_oaih_plugin_"):
+                sys.modules.pop(name, None)
+    except Exception:
+        pass

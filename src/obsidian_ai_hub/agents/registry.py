@@ -15,10 +15,14 @@ part of the workflow.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import logging
+import re
+import sys
 from collections.abc import Sequence
 from datetime import date, datetime, time
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
@@ -38,6 +42,19 @@ from obsidian_ai_hub.reminders.hitl import register_reminder_approval
 from obsidian_ai_hub.web.services.vault import get_vault_file
 
 logger = logging.getLogger(__name__)
+
+# Plugin tools: user-supplied ``BaseTool`` adapters loaded from
+# ``~/.config/obsidian-ai-hub/plugins/tools/*.py`` (configurable via
+# ``OBSIDIAN_AI_HUB_PLUGINS_DIR`` / ``plugins.tools_dir``).
+# Each plugin file must expose either a ``register() -> dict`` function or a
+# module-level ``TOOL_DEFINITIONS`` dict with the same shape as
+# ``_BUILTIN_TOOL_DEFINITIONS``.  Plugin ``tool_id`` values must be prefixed
+# with ``custom:`` (auto-prefixed if omitted) so built-ins can never be
+# shadowed.
+PLUGIN_TOOL_ID_PREFIX = "custom:"
+_PLUGIN_TOOL_ID_RE = r"^custom:[a-z0-9][a-z0-9_-]{0,63}$"
+_BUILTIN_TOOL_IDS: set[str] = set()  # populated after _BUILTIN_TOOL_DEFINITIONS
+_PLUGIN_TOOL_ID_RE_COMPILED = re.compile(_PLUGIN_TOOL_ID_RE)
 
 EXPECTED_TOOL_EXCEPTIONS = (
     FileNotFoundError,
@@ -493,7 +510,7 @@ def reminder_create_proposal(
 
 # --- Tool Registry Definition ---
 
-TOOL_DEFINITIONS: Dict[str, Dict[str, Any]] = {
+_BUILTIN_TOOL_DEFINITIONS: Dict[str, Dict[str, Any]] = {
     "web_search": {
         "tool_id": "web_search",
         "name": "Web検索",
@@ -557,6 +574,207 @@ TOOL_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "get_tool_with_context": lambda ctx: _make_memory_propose_tool(ctx),
     },
 }
+
+_BUILTIN_TOOL_IDS = set(_BUILTIN_TOOL_DEFINITIONS.keys())
+
+# The public catalog.  Built-ins are copied into this dict and then plugin
+# tools (``custom:*``) are merged in place.  Mutated in place on reload so
+# existing ``from ... import TOOL_DEFINITIONS`` references stay valid.
+TOOL_DEFINITIONS: Dict[str, Dict[str, Any]] = dict(_BUILTIN_TOOL_DEFINITIONS)
+
+
+def _normalize_plugin_tool_id(raw_id: str) -> str:
+    """Ensure a plugin tool_id is ``custom:``-prefixed."""
+    tid = (raw_id or "").strip()
+    if not tid:
+        return ""
+    if tid.startswith(PLUGIN_TOOL_ID_PREFIX):
+        return tid
+    # Auto-prefix; sanitize by lowercasing + replacing invalid chars already
+    # handled by the caller. The prefix guarantees built-ins can never be
+    # shadowed.
+    return f"{PLUGIN_TOOL_ID_PREFIX}{tid}"
+
+
+def _validate_plugin_entry(tool_id: str, meta: Dict[str, Any]) -> Optional[str]:
+    """Return an error string if *meta* is invalid, else ``None``."""
+    if not tool_id or not _PLUGIN_TOOL_ID_RE_COMPILED.match(tool_id):
+        return f"tool_id '{tool_id}' must match { _PLUGIN_TOOL_ID_RE }"
+    name = meta.get("name")
+    if not isinstance(name, str) or not name.strip():
+        return f"tool '{tool_id}' missing non-empty 'name'"
+    desc = meta.get("description")
+    if not isinstance(desc, str) or not desc.strip():
+        return f"tool '{tool_id}' missing non-empty 'description'"
+    get_tool = meta.get("get_tool")
+    if not callable(get_tool):
+        return f"tool '{tool_id}' missing callable 'get_tool'"
+    gctx = meta.get("get_tool_with_context")
+    if gctx is not None and not callable(gctx):
+        return f"tool '{tool_id}' has non-callable 'get_tool_with_context'"
+    return None
+
+
+def _load_plugins_into(target: Dict[str, Dict[str, Any]]) -> int:
+    """Scan ``PLUGINS_TOOLS_DIR`` and merge plugin definitions into *target*.
+
+    Each ``*.py`` file may expose ``register() -> dict`` or a module-level
+    ``TOOL_DEFINITIONS`` dict.  Loaded ``tool_id`` values are normalized to
+    the ``custom:`` namespace.  Built-in IDs win unconditionally; among
+    plugins the first file (alphabetical) wins.
+
+    One broken plugin file never prevents other plugins or the server from
+    starting: the failure is logged with a full traceback and that file is
+    skipped.  This is deliberate plugin isolation (``AGENTS.md``'s
+    ``Do not mask unexpected failures`` applies to unexpected *application*
+    failures, not to user-supplied extension files).
+    """
+    try:
+        from obsidian_ai_hub.utils import config as _cfg
+
+        plugins_dir = Path(_cfg.PLUGINS_TOOLS_DIR)
+    except Exception as exc:
+        logger.warning("Could not resolve PLUGINS_TOOLS_DIR, skipping plugin load: %s", exc)
+        return 0
+
+    if not plugins_dir.exists() or not plugins_dir.is_dir():
+        return 0
+
+    loaded = 0
+    # Deterministic order: alphabetical by filename
+    try:
+        candidates = sorted(plugins_dir.glob("*.py"))
+    except Exception as exc:
+        logger.warning("Failed to list plugin directory %s: %s", plugins_dir, exc)
+        return 0
+
+    for file_path in candidates:
+        stem = file_path.stem
+        # Skip private / dunder files
+        if stem.startswith("_") or stem.startswith("."):
+            continue
+        module_name = f"_oaih_plugin_{stem}"
+        # Avoid stale module on reload
+        if module_name in sys.modules:
+            # Remove so the fresh file contents are re-executed.  A previous
+            # broken import may have left a half-initialised entry.
+            sys.modules.pop(module_name, None)
+        spec = importlib.util.spec_from_file_location(module_name, file_path)
+        if spec is None or spec.loader is None:
+            logger.warning("Skipping plugin file with no import spec: %s", file_path)
+            continue
+        module = importlib.util.module_from_spec(spec)
+        try:
+            spec.loader.exec_module(module)  # type: ignore[union-attr]
+        except Exception:
+            logger.exception("Failed to load plugin file %s (skipping)", file_path)
+            # Ensure half-initialised module does not linger
+            sys.modules.pop(module_name, None)
+            continue
+        # Keep the successfully loaded module cached so reload can find it.
+        sys.modules[module_name] = module
+
+        # Discover definitions
+        raw_defs: Optional[Dict[str, Dict[str, Any]]] = None
+        if hasattr(module, "register") and callable(getattr(module, "register")):
+            try:
+                result = module.register()  # type: ignore[attr-defined]
+            except Exception:
+                logger.exception("Plugin %s register() raised (skipping)", file_path)
+                continue
+            if not isinstance(result, dict):
+                logger.warning("Plugin %s register() must return dict, got %s (skipping)", file_path, type(result).__name__)
+                continue
+            raw_defs = result
+        elif hasattr(module, "TOOL_DEFINITIONS"):
+            td = getattr(module, "TOOL_DEFINITIONS")
+            if not isinstance(td, dict):
+                logger.warning("Plugin %s TOOL_DEFINITIONS must be dict, got %s (skipping)", file_path, type(td).__name__)
+                continue
+            raw_defs = td
+        else:
+            logger.warning(
+                "Plugin %s exposes neither register() nor TOOL_DEFINITIONS (skipping). "
+                "Define register() -> dict or TOOL_DEFINITIONS dict.",
+                file_path,
+            )
+            continue
+
+        for raw_key, meta in raw_defs.items():
+            if not isinstance(meta, dict):
+                logger.warning("Plugin %s entry '%s' must be dict, got %s (skipping entry)", file_path, raw_key, type(meta).__name__)
+                continue
+            # Prefer the entry's own tool_id, fall back to the dict key
+            raw_tid = str(meta.get("tool_id") or raw_key or "").strip()
+            norm_tid = _normalize_plugin_tool_id(raw_tid)
+            if not norm_tid:
+                logger.warning("Plugin %s entry '%s' has empty tool_id (skipping entry)", file_path, raw_key)
+                continue
+            # Reflect the normalized id back into the meta copy so resolve
+            # sees the canonical key.
+            normalized_meta: Dict[str, Any] = dict(meta)
+            normalized_meta["tool_id"] = norm_tid
+            # Validate shape
+            err = _validate_plugin_entry(norm_tid, normalized_meta)
+            if err:
+                logger.warning("Plugin %s entry '%s' invalid: %s (skipping entry)", file_path, raw_key, err)
+                continue
+            # Collision policy: built-ins win; first plugin wins
+            if norm_tid in target:
+                if norm_tid in _BUILTIN_TOOL_IDS:
+                    logger.warning(
+                        "Plugin %s tool_id '%s' collides with built-in tool; skipping (built-in wins)",
+                        file_path,
+                        norm_tid,
+                    )
+                else:
+                    logger.warning(
+                        "Plugin %s tool_id '%s' collides with earlier plugin; skipping (first wins)",
+                        file_path,
+                        norm_tid,
+                    )
+                continue
+            target[norm_tid] = normalized_meta
+            loaded += 1
+            logger.info("Registered plugin tool '%s' from %s", norm_tid, file_path.name)
+
+    if loaded:
+        logger.info("Loaded %d plugin tool(s) from %s", loaded, plugins_dir)
+    return loaded
+
+
+def reload_plugins() -> int:
+    """Rebuild :data:`TOOL_DEFINITIONS` from built-ins plus current plugin files.
+
+    Mutates the existing dict object in place so ``from ... import
+    TOOL_DEFINITIONS`` references remain valid.  Returns the number of plugin
+    tools loaded.  Intended for tests and manual refresh; the server loads
+    plugins eagerly at import.
+    """
+    # Remove custom entries, keep built-ins
+    for tid in list(TOOL_DEFINITIONS.keys()):
+        if tid not in _BUILTIN_TOOL_IDS:
+            TOOL_DEFINITIONS.pop(tid, None)
+    # Also remove any stale ``_oaih_plugin_*`` modules so the next scan
+    # re-executes the file.  Broken files that were skipped left no entry.
+    for name in list(sys.modules.keys()):
+        if name.startswith("_oaih_plugin_"):
+            sys.modules.pop(name, None)
+    # Ensure built-ins are present (in case a test did patch.dict(..., clear=True))
+    for tid, meta in _BUILTIN_TOOL_DEFINITIONS.items():
+        TOOL_DEFINITIONS.setdefault(tid, meta)
+    return _load_plugins_into(TOOL_DEFINITIONS)
+
+
+# Eager load at import.  An absent directory is a no-op; a broken file is
+# logged and skipped without aborting import.
+try:
+    _load_plugins_into(TOOL_DEFINITIONS)
+except Exception:
+    # Defensive: a catastrophic loader bug must never prevent the registry
+    # from being importable (built-ins remain usable).  The traceback is
+    # preserved for diagnosis.
+    logger.exception("Unexpected error during eager plugin load (continuing with built-ins only)")
 
 
 def list_available_tools() -> List[Dict[str, Any]]:
