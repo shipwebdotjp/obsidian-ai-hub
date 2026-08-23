@@ -655,7 +655,21 @@ export interface AgentSessionDetailResponse {
   runs: AgentRun[];
 }
 
+export interface AgentLiveToolCall {
+  id: string;
+  tool_name: string;
+  args: Record<string, unknown>;
+  result: string;
+  hitl_run_id?: string | null;
+  status: "running" | "succeeded" | "failed";
+  error?: string | null;
+  iteration: number;
+}
+
 export type AgentStreamEvent =
+  | { type: "thinking"; iteration: number }
+  | { type: "tool_call_start"; call_id: string; tool_name: string; args: Record<string, unknown>; iteration: number }
+  | { type: "tool_call_end"; call_id: string; tool_name: string; status: "succeeded" | "failed"; result: string; hitl_run_id?: string | null; error?: string | null; iteration: number }
   | { type: "text"; delta: string }
   | { type: "done"; message: AgentMessage; run: AgentRun; hitl_run_ids: string[]; tool_calls?: AgentToolCall[] }
   | { type: "error"; error: string; run_id?: string };

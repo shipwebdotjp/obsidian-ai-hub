@@ -59,6 +59,13 @@ def _extract_hitl_run_id(tool_result: Any) -> Optional[str]:
     return None
 
 
+def _truncate(text: str, limit: int, suffix: str) -> str:
+    """Truncate text at code-point boundary; str slicing is already safe."""
+    if len(text) <= limit:
+        return text
+    return text[:limit] + suffix
+
+
 def _format_sse(data: Dict[str, Any]) -> str:
     """Format data dict as SSE string payload."""
     return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
@@ -82,6 +89,9 @@ async def generate_agent_stream(
              datetime.now(Asia/Tokyo). Injected for test determinism.
 
     Yields:
+      - thinking: {"type": "thinking", "iteration": int}
+      - tool_call_start: {"type": "tool_call_start", "call_id": str, "tool_name": str, "args": dict, "iteration": int}
+      - tool_call_end: {"type": "tool_call_end", "call_id": str, "tool_name": str, "status": str, "result": str, "hitl_run_id": str|None, "error": str|None, "iteration": int}
       - text: {"type": "text", "delta": "..."}
       - done: {"type": "done", "message": ..., "run": ..., "hitl_run_ids": [...]}
       - error: {"type": "error", "error": "...", "run_id": "..."}
@@ -193,6 +203,9 @@ async def generate_agent_stream(
     tool_call_records: List[Dict[str, Any]] = []
     # Truncate large tool results to keep DB row bounded (vault/calendar dumps can be large)
     _TOOL_RESULT_MAX_CHARS = 20000
+    # Live SSE truncation for tool_call_end events (smaller to keep payload light;
+    # persisted DB value uses _TOOL_RESULT_MAX_CHARS and is loaded on done)
+    _LIVE_RESULT_MAX_CHARS = 2000
 
     try:
         llm = create_langchain_llm(
@@ -210,6 +223,8 @@ async def generate_agent_stream(
 
         while iterations < max_iterations:
             iterations += 1
+
+            yield _format_sse({"type": "thinking", "iteration": iterations})
 
             ai_msg = await asyncio.to_thread(
                 _logged_invoke,
@@ -233,6 +248,17 @@ async def generate_agent_stream(
                 targs = call["args"]
                 tcall_id = call.get("id", f"call_{tname}")
 
+                # Notify frontend that tool execution is starting
+                yield _format_sse(
+                    {
+                        "type": "tool_call_start",
+                        "call_id": tcall_id,
+                        "tool_name": tname,
+                        "args": targs,
+                        "iteration": iterations,
+                    }
+                )
+
                 # Prepare record scaffold
                 record: Dict[str, Any] = {
                     "id": tcall_id,
@@ -240,77 +266,133 @@ async def generate_agent_stream(
                     "args": targs,
                     "iteration": iterations,
                 }
+                end_emitted = False
 
-                if tname in tools_by_name:
-                    if tname not in used_tools:
-                        used_tools.append(tname)
+                try:
+                    if tname in tools_by_name:
+                        if tname not in used_tools:
+                            used_tools.append(tname)
 
-                    try:
-                        result = await asyncio.to_thread(
-                            tools_by_name[tname].invoke, targs
+                        try:
+                            result = await asyncio.to_thread(
+                                tools_by_name[tname].invoke, targs
+                            )
+                            result_str = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
+                            status = "succeeded"
+                            error_msg = None
+                        except Exception as texc:
+                            logger.exception("Error executing tool '%s'", tname)
+                            result_str = json.dumps({"error": str(texc)}, ensure_ascii=False)
+                            status = "failed"
+                            error_msg = str(texc)
+
+                        hitl_id = _extract_hitl_run_id(result_str)
+                        if hitl_id and hitl_id not in created_hitl_run_ids:
+                            created_hitl_run_ids.append(hitl_id)
+
+                        # Truncate separately for DB and live view (single-sourced helper)
+                        stored_result = _truncate(result_str, _TOOL_RESULT_MAX_CHARS, "\n…(truncated)")
+                        live_result = _truncate(result_str, _LIVE_RESULT_MAX_CHARS, "\n…(truncated for live view)")
+
+                        record.update(
+                            {
+                                "result": stored_result,
+                                "hitl_run_id": hitl_id,
+                                "status": status,
+                                "error": error_msg,
+                            }
                         )
-                        result_str = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
-                        status = "succeeded"
-                        error_msg = None
-                    except Exception as texc:
-                        logger.exception("Error executing tool '%s'", tname)
-                        result_str = json.dumps({"error": str(texc)}, ensure_ascii=False)
-                        status = "failed"
-                        error_msg = str(texc)
+                        tool_call_records.append(record)
 
-                    hitl_id = _extract_hitl_run_id(result_str)
-                    if hitl_id and hitl_id not in created_hitl_run_ids:
-                        created_hitl_run_ids.append(hitl_id)
-
-                    # Keep the full result for the LLM (avoids feeding it broken
-                    # JSON / cut surrogate pairs) and truncate only for DB persistence.
-                    stored_result = result_str
-                    if len(stored_result) > _TOOL_RESULT_MAX_CHARS:
-                        # Use encode/decode round-trip to avoid splitting multi-byte
-                        # characters mid-codepoint.
-                        stored_result = (
-                            stored_result[:_TOOL_RESULT_MAX_CHARS]
-                            .encode("utf-8", errors="ignore")
-                            .decode("utf-8", errors="ignore")
-                            + "\n…(truncated)"
+                        yield _format_sse(
+                            {
+                                "type": "tool_call_end",
+                                "call_id": tcall_id,
+                                "tool_name": tname,
+                                "status": status,
+                                "result": live_result,
+                                "hitl_run_id": hitl_id,
+                                "error": error_msg,
+                                "iteration": iterations,
+                            }
                         )
+                        end_emitted = True
 
-                    record.update(
-                        {
-                            "result": stored_result,
-                            "hitl_run_id": hitl_id,
-                            "status": status,
-                            "error": error_msg,
-                        }
-                    )
-                    tool_call_records.append(record)
-
+                        langchain_messages.append(
+                            ToolMessage(
+                                content=result_str,
+                                tool_call_id=tcall_id,
+                            )
+                        )
+                    else:
+                        err_result = json.dumps({"error": f"Unknown tool '{tname}'"}, ensure_ascii=False)
+                        record.update(
+                            {
+                                "result": err_result,
+                                "hitl_run_id": None,
+                                "status": "failed",
+                                "error": f"Unknown tool '{tname}'",
+                            }
+                        )
+                        tool_call_records.append(record)
+                        yield _format_sse(
+                            {
+                                "type": "tool_call_end",
+                                "call_id": tcall_id,
+                                "tool_name": tname,
+                                "status": "failed",
+                                "result": err_result,
+                                "hitl_run_id": None,
+                                "error": f"Unknown tool '{tname}'",
+                                "iteration": iterations,
+                            }
+                        )
+                        end_emitted = True
+                        langchain_messages.append(
+                            ToolMessage(
+                                content=err_result,
+                                tool_call_id=tcall_id,
+                            )
+                        )
+                except Exception as per_exc:
+                    # Ensure lifecycle closure: frontend would otherwise keep `running` forever
+                    logger.exception("Unexpected error in tool lifecycle for '%s' (call_id=%s)", tname, tcall_id)
+                    err_str = str(per_exc)
+                    fallback_result = json.dumps({"error": err_str}, ensure_ascii=False)
+                    # If record not yet persisted, persist a minimal failed entry
+                    if not any(r.get("id") == tcall_id for r in tool_call_records):
+                        record.update(
+                            {
+                                "result": fallback_result,
+                                "hitl_run_id": None,
+                                "status": "failed",
+                                "error": err_str,
+                            }
+                        )
+                        tool_call_records.append(record)
+                    if not end_emitted:
+                        yield _format_sse(
+                            {
+                                "type": "tool_call_end",
+                                "call_id": tcall_id,
+                                "tool_name": tname,
+                                "status": "failed",
+                                "result": fallback_result,
+                                "hitl_run_id": None,
+                                "error": err_str,
+                                "iteration": iterations,
+                            }
+                        )
                     langchain_messages.append(
                         ToolMessage(
-                            content=result_str,
-                            tool_call_id=tcall_id,
-                        )
-                    )
-                else:
-                    err_result = json.dumps({"error": f"Unknown tool '{tname}'"}, ensure_ascii=False)
-                    record.update(
-                        {
-                            "result": err_result,
-                            "hitl_run_id": None,
-                            "status": "failed",
-                            "error": f"Unknown tool '{tname}'",
-                        }
-                    )
-                    tool_call_records.append(record)
-                    langchain_messages.append(
-                        ToolMessage(
-                            content=err_result,
+                            content=fallback_result,
                             tool_call_id=tcall_id,
                         )
                     )
 
         if not final_ai_msg:
             # Final fallback call after max iterations
+            yield _format_sse({"type": "thinking", "iteration": max_iterations + 1})
             final_ai_msg = await asyncio.to_thread(
                 _logged_invoke,
                 llm,

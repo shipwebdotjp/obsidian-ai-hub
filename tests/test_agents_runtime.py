@@ -33,18 +33,25 @@ async def test_agent_stream_simple_response():
         ):
             events.append(event)
 
-    assert len(events) == 2
+    payloads = [json.loads(e.removeprefix("data: ").strip()) for e in events]
+    thinking = [p for p in payloads if p["type"] == "thinking"]
+    text_events = [p for p in payloads if p["type"] == "text"]
+    done_events = [p for p in payloads if p["type"] == "done"]
 
-    # Parse text event
-    text_payload = json.loads(events[0].replace("data: ", "").strip())
-    assert text_payload["type"] == "text"
-    assert "こんにちは" in text_payload["delta"]
+    assert len(thinking) == 1
+    assert thinking[0]["iteration"] == 1
+    assert len(text_events) == 1
+    assert "こんにちは" in text_events[0]["delta"]
+    assert len(done_events) == 1
 
-    # Parse done event
-    done_payload = json.loads(events[1].replace("data: ", "").strip())
-    assert done_payload["type"] == "done"
+    done_payload = done_events[0]
     assert done_payload["message"]["role"] == "assistant"
     assert done_payload["run"]["status"] == "succeeded"
+
+    # Verify ordering: thinking -> text -> done
+    assert payloads[0]["type"] == "thinking"
+    assert payloads[1]["type"] == "text"
+    assert payloads[2]["type"] == "done"
 
     # Verify DB
     db_run = store.get_run(run["run_id"])
@@ -100,10 +107,29 @@ async def test_agent_stream_with_tool_call():
         ):
             events.append(event)
 
-    done_payload = json.loads(events[-1].replace("data: ", "").strip())
-    assert done_payload["type"] == "done"
+    payloads = [json.loads(e.removeprefix("data: ").strip()) for e in events]
+    done_payload = next(p for p in payloads if p["type"] == "done")
     assert len(done_payload["hitl_run_ids"]) == 1
     assert done_payload["hitl_run_ids"][0].startswith("hrun_inbox_calendar_")
+
+    # Verify streaming progress events
+    thinking = [p for p in payloads if p["type"] == "thinking"]
+    starts = [p for p in payloads if p["type"] == "tool_call_start"]
+    ends = [p for p in payloads if p["type"] == "tool_call_end"]
+    # Two thinking events (iteration 1 before tool call, iteration 2 before final answer)
+    assert len(thinking) == 2
+    assert thinking[0]["iteration"] == 1
+    assert thinking[1]["iteration"] == 2
+    assert len(starts) == 1
+    assert starts[0]["tool_name"] == "calendar_create_proposal"
+    assert starts[0]["call_id"] == "call_123"
+    assert len(ends) == 1
+    assert ends[0]["tool_name"] == "calendar_create_proposal"
+    assert ends[0]["status"] == "succeeded"
+    assert ends[0]["call_id"] == "call_123"
+    # Ordering: thinking(1) -> start -> end -> thinking(2) -> text -> done
+    types = [p["type"] for p in payloads]
+    assert types == ["thinking", "tool_call_start", "tool_call_end", "thinking", "text", "done"]
 
     db_run = store.get_run(run["run_id"])
     assert db_run["used_tools"] == ["calendar_create_proposal"]
@@ -136,9 +162,13 @@ async def test_agent_stream_error_handling():
         ):
             events.append(event)
 
-    assert len(events) == 1
-    error_payload = json.loads(events[0].replace("data: ", "").strip())
-    assert error_payload["type"] == "error"
+    payloads = [json.loads(e.removeprefix("data: ").strip()) for e in events]
+    # thinking is emitted before the failing invoke, then error
+    assert len(payloads) == 2
+    assert payloads[0]["type"] == "thinking"
+    assert payloads[0]["iteration"] == 1
+    assert payloads[1]["type"] == "error"
+    error_payload = payloads[1]
     assert error_payload["error"] == "AIエージェントの実行中にエラーが発生しました。"
     assert error_payload["run_id"] == run["run_id"]
 

@@ -261,3 +261,38 @@ HITL ページ（`frontend/src/features/hitl/HitlPage.tsx`）は従来 `lg:flex-
 3. **SSE ストリーミングと UI 契約:**
    - `POST /api/v1/agent-sessions/{session_id}/messages/stream` エンドポイントが Bearer 認証付き Fetch ReadableStream を経由して `text` (逐次トークン), `done` (確定メッセージとHITL Run ID群), `error` イベントを送信する。
    - UI は `done` イベントで `hitl_run_ids` を受け取った場合、「承認待ちの登録申請が作成されました」のアラートと `/hitl` へのリンクを描画する。
+
+## Web AI エージェントの逐次進捗表示（SSE thinking/tool_call_start/tool_call_end）
+
+| 項目 | 内容 |
+|------|------|
+| 決定日 | 2026-08-23 |
+| カテゴリ | Web API・フロントエンド・AIエージェント |
+| 決定内容 | `/agents` 会話ストリーミングで「考え中」に代えて、LLM思考中・ツール呼び出し開始/終了を逐次 SSE イベントとして送出し、フロントエンドでライブ進捗パネル（思考インジケータ＋ツール呼び出し一覧＋結果）として描画する。LLMトークンの逐次ストリーミング（Phase 3）は見送る。 |
+
+### 背景
+
+v1 では `generate_agent_stream()` がツールループ中一切イベントを送らず、最後に `text` と `done` を一括送信していた。フロントエンドは長時間 `考え中…` のままとなり、ツール呼び出しも永続化後の再読込でしか表示されなかった。
+
+### 仕様
+
+1. **新規 SSE イベント型（既存 `text`/`done`/`error` に追加、破壊的変更なし）:**
+   - `thinking` — 各 LLM invoke 直前に送出。`{"type":"thinking","iteration":int}`。最終フォールバック invoke 前も含む。
+   - `tool_call_start` — ツール実行直前に送出。`{"type":"tool_call_start","call_id":str,"tool_name":str,"args":dict,"iteration":int}`
+   - `tool_call_end` — ツール実行直後に送出。`{"type":"tool_call_end","call_id":str,"tool_name":str,"status":"succeeded"|"failed","result":str,"hitl_run_id":str|null,"error":str|null,"iteration":int}`。`result` はライブ表示用の軽量化として 2000 字で切り詰め（DB 永続化は 20000 字のまま、末尾に `…(truncated for live view)` を付与）。未知ツールの場合も `tool_call_end`（failed）を必ず送出する。
+2. **バックエンド実装 (`src/obsidian_ai_hub/agents/runtime.py:194`):**
+   - 定数 `_LIVE_RESULT_MAX_CHARS = 2000` を新設。`stored_result`（DB 用、20000 字）からさらに 2000 字へ二次切り詰めして `live_result` を生成。
+   - `while iterations < max_iterations` 内の各 invoke 前とフォールバック invoke 前に `thinking` を yield。
+   - `for call in tool_calls` 内で `tool_call_start` → invoke → `tool_call_end` の順に yield。
+3. **フロントエンド契約 (`frontend/src/api/types.ts:658` / `frontend/src/features/agents/AgentsPage.tsx:65`):**
+   - `AgentLiveToolCall`（`status: "running"|"succeeded"|"failed"`）と拡張 `AgentStreamEvent` 型を追加。
+   - `streamingToolCalls` / `streamingPhase` / `streamingIteration` を state として保持。`thinking`/`tool_call_start`/`tool_call_end` をハンドルし、ストリーミング中は既存の永続化済みツール表示と同 UI（`<details>`）でライブ進捗パネルを描画する（`running` は amber バッジ＋スピナー、`succeeded`/`failed` は emerald/rose バッジ）。フェーズ表示は「LLMが考え中…」「ツール実行中…」のアニメーション付きインジケータ。
+   - `done` でライブ state をクリアし `loadSessionDetail()` で確定データに切替。セッション/エージェント切替時もライブ state をクリア。
+   - スクロール追従は `streamingToolCalls` / `streamingPhase` の変化でも発火する。
+4. **トークンストリーミング（Phase 3）を今回見送る理由:**
+   - `llm.invoke()` → `llm.stream()` 切替は `tool_call_chunks` の蓄積、`execution_logger` 対応、共有 `_logged_invoke` への影響など回帰範囲が広い。ツール進捗の可視化だけで UX の主要課題（「考え中」の真っ暗時間）は解消できるため、Phase 1+2 に絞る。
+
+### 検証
+
+- `uv run pytest tests/test_agents_runtime.py` の単純応答テストは `thinking`→`text`→`done` の順序と件数を検証、ツール呼び出しテストは `thinking`/`tool_call_start`/`tool_call_end` の順序と内容を検証。
+- 既存の `done` 型フィルタで探すテスト（`tests/test_agents_integration.py` / `tests/test_memory_agent_tools.py`）は追加イベントに影響されないことを確認。

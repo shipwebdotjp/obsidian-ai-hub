@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import {
   createAgent,
@@ -14,6 +14,7 @@ import {
 } from "../../api/client";
 import type {
   Agent,
+  AgentLiveToolCall,
   AgentMessage,
   AgentRun,
   AgentSession,
@@ -41,6 +42,15 @@ const SCHEDULE_ASSISTANT_TEMPLATE = {
   ],
 };
 
+// keep in sync with runtime.py _LIVE_RESULT_MAX_CHARS (DB is 20000)
+const LIVE_RESULT_MAX_CHARS = 2000;
+
+const LIVE_STATUS_CONFIG: Record<AgentLiveToolCall["status"], { label: string; cls: string }> = {
+  succeeded: { label: "成功", cls: "bg-emerald-50 text-emerald-700 border-emerald-200" },
+  failed: { label: "失敗", cls: "bg-rose-50 text-rose-700 border-rose-200" },
+  running: { label: "実行中…", cls: "bg-amber-50 text-amber-700 border-amber-200" },
+};
+
 export default function AgentsPage() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [availableTools, setAvailableTools] = useState<AgentTool[]>([]);
@@ -66,6 +76,9 @@ export default function AgentsPage() {
   const [inputText, setInputText] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingText, setStreamingText] = useState("");
+  const [streamingToolCalls, setStreamingToolCalls] = useState<AgentLiveToolCall[]>([]);
+  const [streamingPhase, setStreamingPhase] = useState<"thinking" | "tool_running" | null>(null);
+  const [streamingIteration, setStreamingIteration] = useState<number | null>(null);
   const [hitlLinks, setHitlLinks] = useState<string[]>([]);
   const [chatError, setChatError] = useState<string | null>(null);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
@@ -77,6 +90,17 @@ export default function AgentsPage() {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+
+  const resetStreamingState = useCallback(() => {
+    setIsStreaming(false);
+    setStreamingText("");
+    setStreamingToolCalls([]);
+    setStreamingPhase(null);
+    setStreamingIteration(null);
+  }, []);
+
+  const getLiveStatusLabel = (s: AgentLiveToolCall["status"]): string => LIVE_STATUS_CONFIG[s].label;
+  const getLiveStatusClass = (s: AgentLiveToolCall["status"]): string => LIVE_STATUS_CONFIG[s].cls;
 
   const [searchParams, setSearchParams] = useSearchParams();
   const sessionIdParam = searchParams.get("session_id");
@@ -135,8 +159,7 @@ export default function AgentsPage() {
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
     }
-    setIsStreaming(false);
-    setStreamingText("");
+    resetStreamingState();
 
     if (!selectedAgentId) {
       setSessions([]);
@@ -190,8 +213,7 @@ export default function AgentsPage() {
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
     }
-    setIsStreaming(false);
-    setStreamingText("");
+    resetStreamingState();
 
     if (!selectedSessionId) {
       setMessages([]);
@@ -236,7 +258,7 @@ export default function AgentsPage() {
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView?.({ behavior: "smooth" });
-  }, [messages, streamingText]);
+  }, [messages, streamingText, streamingToolCalls, streamingPhase, streamingIteration]);
 
   const activeAgent = agents.find((a) => a.agent_id === selectedAgentId);
 
@@ -433,6 +455,9 @@ export default function AgentsPage() {
     setHitlLinks([]);
     setIsStreaming(true);
     setStreamingText("");
+    setStreamingToolCalls([]);
+    setStreamingPhase("thinking");
+    setStreamingIteration(null);
 
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
@@ -456,26 +481,75 @@ export default function AgentsPage() {
         selectedSessionId,
         userText,
         (event: AgentStreamEvent) => {
-          if (event.type === "text") {
+          if (event.type === "thinking") {
+            setStreamingPhase("thinking");
+            setStreamingIteration(event.iteration);
+          } else if (event.type === "tool_call_start") {
+            setStreamingIteration(event.iteration);
+            if (!event.call_id || !event.tool_name) return;
+            setStreamingPhase("tool_running");
+            setStreamingToolCalls((prev) => {
+              if (prev.some((tc) => tc.id === event.call_id)) return prev;
+              return [
+                ...prev,
+                {
+                  id: event.call_id,
+                  tool_name: event.tool_name,
+                  args: event.args ?? {},
+                  result: "",
+                  status: "running",
+                  hitl_run_id: null,
+                  error: null,
+                  iteration: event.iteration,
+                },
+              ];
+            });
+          } else if (event.type === "tool_call_end") {
+            setStreamingIteration(event.iteration);
+            setStreamingToolCalls((prev) =>
+              prev.map((tc) =>
+                tc.id === event.call_id
+                  ? {
+                      ...tc,
+                      result: event.result,
+                      status: event.status,
+                      hitl_run_id: event.hitl_run_id ?? null,
+                      error: event.error ?? null,
+                    }
+                  : tc
+              )
+            );
+            // Avoid nested setState inside updater (React anti-pattern).
+            // Derive phase from whether any tool remains running. Since updater is async,
+            // use simple "thinking" here; rapid parallel calls will be covered by next
+            // tool_call_end / thinking events without stale closure.
+            setStreamingPhase("thinking");
+          } else if (event.type === "text") {
             setStreamingText((prev) => prev + event.delta);
+            setStreamingPhase(null);
           } else if (event.type === "done") {
-            setIsStreaming(false);
-            setStreamingText("");
+            resetStreamingState();
             loadSessionDetail(selectedSessionId);
             if (event.hitl_run_ids && event.hitl_run_ids.length > 0) {
               setHitlLinks(event.hitl_run_ids);
             }
           } else if (event.type === "error") {
-            setIsStreaming(false);
+            resetStreamingState();
             setChatError(event.error || "エラーが発生しました。");
           }
         },
         controller.signal
       );
-    } catch (err: any) {
-      if (err.name === "AbortError") return;
-      setIsStreaming(false);
-      setChatError(err.message || "メッセージの送信に失敗しました。");
+    } catch (err: unknown) {
+      const isAbort =
+        (err instanceof DOMException && err.name === "AbortError") ||
+        (typeof err === "object" && err !== null && "name" in err && (err as { name: string }).name === "AbortError");
+      if (isAbort) {
+        resetStreamingState();
+        return;
+      }
+      resetStreamingState();
+      setChatError(err instanceof Error ? err.message : "メッセージの送信に失敗しました。");
     }
   };
 
@@ -926,13 +1000,112 @@ export default function AgentsPage() {
 
               {/* Live Streaming Response Chunk */}
               {isStreaming && (
-                <div className="flex justify-start">
-                  <div className="max-w-xl rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-xs text-slate-800 shadow-sm">
-                    {streamingText ? (
-                      <MarkdownPreview content={streamingText} />
-                    ) : (
-                      "考え中…"
-                    )}
+                <div className="space-y-3">
+                  {(streamingPhase || streamingToolCalls.length > 0) && (
+                    <div className="flex justify-start">
+                      <div className="max-w-xl w-full space-y-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                        {streamingPhase === "thinking" && streamingToolCalls.length === 0 && (
+                          <div className="flex items-center gap-2 text-xs text-slate-600">
+                            <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-blue-500" />
+                            LLMが考え中…{streamingIteration ? ` (iter ${streamingIteration})` : ""}
+                          </div>
+                        )}
+                        {streamingPhase === "thinking" && streamingToolCalls.length > 0 && (
+                          <div className="flex items-center gap-2 text-[11px] text-slate-500">
+                            <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-blue-500" />
+                            ツール結果を踏まえて次の応答を生成中…
+                          </div>
+                        )}
+                        {streamingPhase === "tool_running" && (
+                          <div className="flex items-center gap-2 text-xs text-amber-700">
+                            <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-amber-500" />
+                            ツールを実行中…
+                          </div>
+                        )}
+                        {streamingToolCalls.length > 0 && (
+                          <>
+                            <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                              ツール呼び出し {streamingToolCalls.length}件
+                            </div>
+                            {streamingToolCalls.map((tc) => (
+                              <details
+                                key={tc.id}
+                                className="rounded border border-slate-200 bg-white text-xs overflow-hidden group"
+                              >
+                                <summary className="cursor-pointer list-none flex items-center justify-between gap-2 px-3 py-1.5 bg-slate-50 hover:bg-slate-100">
+                                  <span className="flex items-center gap-1.5 min-w-0">
+                                    <span className="font-semibold truncate text-slate-800">{tc.tool_name}</span>
+                                    <span
+                                      className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold border ${getLiveStatusClass(tc.status)}`}
+                                    >
+                                      {getLiveStatusLabel(tc.status)}
+                                    </span>
+                                    {tc.hitl_run_id && (
+                                      <span className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-1 truncate">
+                                        HITL: {tc.hitl_run_id}
+                                      </span>
+                                    )}
+                                  </span>
+                                  <span className="text-[10px] text-slate-400 group-open:rotate-180 transition-transform shrink-0">▼</span>
+                                </summary>
+                                <div className="border-t border-slate-200 p-3 space-y-2 bg-white">
+                                  <div>
+                                    <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">引数</div>
+                                    <pre className="max-h-40 overflow-auto rounded bg-slate-50 border border-slate-200 p-2 text-[11px] font-mono whitespace-pre-wrap break-all">
+                                      {(() => {
+                                        try {
+                                          return JSON.stringify(tc.args, null, 2);
+                                        } catch {
+                                          return String(tc.args);
+                                        }
+                                      })()}
+                                    </pre>
+                                  </div>
+                                  {tc.status !== "running" && (
+                                    <div>
+                                      <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">結果</div>
+                                      <pre className="max-h-64 overflow-auto rounded bg-slate-50 border border-slate-200 p-2 text-[11px] font-mono whitespace-pre-wrap break-all">
+                                        {(tc.result && tc.result.length > LIVE_RESULT_MAX_CHARS ? tc.result.slice(0, LIVE_RESULT_MAX_CHARS) + "\n…(truncated for live view)" : tc.result) || "-"}
+                                      </pre>
+                                    </div>
+                                  )}
+                                  {tc.status === "running" && (
+                                    <div className="flex items-center gap-2 text-[11px] text-amber-700">
+                                      <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-amber-300 border-t-amber-600" />
+                                      実行中…
+                                    </div>
+                                  )}
+                                  {tc.error && (
+                                    <div className="text-[11px] text-rose-700 bg-rose-50 border border-rose-200 rounded px-2 py-1 break-all">
+                                      {tc.error}
+                                    </div>
+                                  )}
+                                </div>
+                              </details>
+                            ))}
+                          </>
+                        )}
+                        {streamingToolCalls.length === 0 && streamingPhase && (
+                          <div className="text-[11px] text-slate-400">ツール呼び出しを準備中…</div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                  <div className="flex justify-start">
+                    <div className="max-w-xl rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-xs text-slate-800 shadow-sm">
+                      {streamingText ? (
+                        <MarkdownPreview content={streamingText} />
+                      ) : streamingPhase === "thinking" ? (
+                        <span className="flex items-center gap-2 text-slate-500">
+                          <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-slate-300 border-t-slate-600" />
+                          考え中…
+                        </span>
+                      ) : streamingPhase === "tool_running" ? (
+                        <span className="text-slate-500">ツールの実行結果を待っています…</span>
+                      ) : (
+                        "考え中…"
+                      )}
+                    </div>
                   </div>
                 </div>
               )}
