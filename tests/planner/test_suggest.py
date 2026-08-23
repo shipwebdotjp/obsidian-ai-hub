@@ -208,7 +208,14 @@ def test_build_excluded_inbox_items_lists_pending_calendar_reminder():
     assert "記憶インタビュー" not in text
 
 
-def test_build_existing_proposals_block_lists_promoted_and_rejected():
+def test_build_existing_proposals_block_lists_proposed_promoted_and_rejected():
+    store.create_proposal(
+        kind="calendar",
+        title="週次振り返り",
+        rationale="根拠",
+        generation_source="daily_06:00",
+        start_time="2026-08-27T09:00:00",
+    )
     promoted = store.create_proposal(
         kind="calendar",
         title="歯科検診",
@@ -228,8 +235,10 @@ def test_build_existing_proposals_block_lists_promoted_and_rejected():
 
     text = context.build_existing_proposals_block()
 
+    assert "[proposed]" in text
     assert "[promoted]" in text
     assert "[rejected]" in text
+    assert "週次振り返り" in text
     assert "歯科検診" in text
     assert "本を返す" in text
 

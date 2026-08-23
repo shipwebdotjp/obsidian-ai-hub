@@ -303,11 +303,15 @@ def build_excluded_inbox_items() -> str:
 
 
 def build_existing_proposals_block() -> str:
-    """Summarize recent promoted/rejected proposals to avoid re-proposing them."""
+    """Summarize recent proposed/promoted/rejected proposals to avoid re-proposing them.
+
+    `proposed` (pending, neither approved nor rejected) is included so the LLM
+    does not waste slots re-generating items the user is still deliberating on.
+    """
     from obsidian_ai_hub.planner import store
 
     lines: list[str] = []
-    for status in ("promoted", "rejected"):
+    for status in ("proposed", "promoted", "rejected"):
         try:
             proposals = store.list_proposals(status=status, limit=15)
         except Exception:

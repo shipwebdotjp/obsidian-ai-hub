@@ -19,12 +19,26 @@ vi.mock("../../api/client", () => ({
   },
 }));
 
+// Spy on date formatters while keeping the real implementation as the default,
+// so new tests can assert call args / render output deterministically without
+// breaking unrelated tests that rely on the real formatting.
+vi.mock("../../utils/date", async () => {
+  const actual = await vi.importActual<typeof import("../../utils/date")>("../../utils/date");
+  return {
+    formatDateTime: vi.fn(actual.formatDateTime),
+    formatYmdWithDow: vi.fn(actual.formatYmdWithDow),
+  };
+});
+
 import { listHitlRuns, getHitlRun, submitHitlAnswer, cancelHitlRun, ApiError } from "../../api/client";
+import { formatDateTime, formatYmdWithDow } from "../../utils/date";
 
 const mockListHitlRuns = vi.mocked(listHitlRuns);
 const mockGetHitlRun = vi.mocked(getHitlRun);
 const mockSubmitHitlAnswer = vi.mocked(submitHitlAnswer);
 const mockCancelHitlRun = vi.mocked(cancelHitlRun);
+const mockFormatDateTime = vi.mocked(formatDateTime);
+const mockFormatYmdWithDow = vi.mocked(formatYmdWithDow);
 
 const sampleRuns = {
   items: [
@@ -556,6 +570,128 @@ describe("HitlPage", () => {
     await waitFor(() => {
       const textareasAfterReload = screen.getAllByPlaceholderText("回答を入力してください…");
       expect(textareasAfterReload[1]).toHaveValue("second draft");
+    });
+  });
+
+  describe("calendar/reminder context rendering", () => {
+    const calendarContext = {
+      type: "calendar_event",
+      event: {
+        title: "MTG",
+        start_time: "2026-08-22T09:00:00Z",
+        end_time: "2026-08-22T10:00:00Z",
+        location: "Room A",
+      },
+      content: "Discuss plans",
+    } as any;
+
+    it("renders calendar event start/end times via formatDateTime", async () => {
+      mockGetHitlRun.mockResolvedValue({
+        ...sampleDetail1,
+        questions: [
+          {
+            ...sampleDetail1.questions[0],
+            context: calendarContext,
+          },
+        ],
+      } as any);
+
+      renderPage();
+      await waitFor(() => {
+        expect(screen.getByText("AIエージェントの未来")).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByText("AIエージェントの未来"));
+
+      const ctx = await screen.findByTestId("calendar-event-context");
+      expect(ctx).toHaveTextContent("タイトル: MTG");
+      expect(mockFormatDateTime).toHaveBeenCalledWith("2026-08-22T09:00:00Z");
+      expect(mockFormatDateTime).toHaveBeenCalledWith("2026-08-22T10:00:00Z");
+      expect(ctx).toHaveTextContent(/開始: 2026\/08\/22\(土\) \d{2}:\d{2}/);
+      expect(ctx).toHaveTextContent(/終了: 2026\/08\/22\(土\) \d{2}:\d{2}/);
+      expect(ctx).toHaveTextContent("場所: Room A");
+      expect(ctx).toHaveTextContent("元の内容: Discuss plans");
+    });
+
+    it("renders reminder due_date as YMD via formatYmdWithDow", async () => {
+      mockGetHitlRun.mockResolvedValue({
+        ...sampleDetail1,
+        questions: [
+          {
+            ...sampleDetail1.questions[0],
+            context: {
+              type: "reminder",
+              reminder: { title: "Pay bills", due_date: "2026-08-22" },
+              content: "Don't forget",
+            },
+          },
+        ],
+      } as any);
+
+      renderPage();
+      await waitFor(() => {
+        expect(screen.getByText("AIエージェントの未来")).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByText("AIエージェントの未来"));
+
+      const ctx = await screen.findByTestId("reminder-context");
+      expect(ctx).toHaveTextContent("タイトル: Pay bills");
+      expect(mockFormatYmdWithDow).toHaveBeenCalledWith("2026-08-22");
+      expect(mockFormatDateTime).not.toHaveBeenCalledWith("2026-08-22");
+      expect(ctx).toHaveTextContent("期限: 2026/08/22(土)");
+      expect(ctx).toHaveTextContent("元の内容: Don't forget");
+    });
+
+    it("renders reminder due_date via formatDateTime when value is not YMD-shaped", async () => {
+      mockGetHitlRun.mockResolvedValue({
+        ...sampleDetail1,
+        questions: [
+          {
+            ...sampleDetail1.questions[0],
+            context: {
+              type: "reminder",
+              reminder: { title: "Call", due_date: "2026-08-22T09:00:00Z" },
+            },
+          },
+        ],
+      } as any);
+
+      renderPage();
+      await waitFor(() => {
+        expect(screen.getByText("AIエージェントの未来")).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByText("AIエージェントの未来"));
+
+      const ctx = await screen.findByTestId("reminder-context");
+      expect(mockFormatDateTime).toHaveBeenCalledWith("2026-08-22T09:00:00Z");
+      expect(mockFormatYmdWithDow).not.toHaveBeenCalled();
+      expect(ctx).toHaveTextContent(/期限: 2026\/08\/22\(土\) \d{2}:\d{2}/);
+    });
+
+    it("omits the date row when start_time/end_time/due_date are missing", async () => {
+      mockGetHitlRun.mockResolvedValue({
+        ...sampleDetail1,
+        questions: [
+          {
+            ...sampleDetail1.questions[0],
+            context: {
+              type: "calendar_event",
+              event: { title: "MTG", start_time: undefined, end_time: null, location: null },
+            },
+          },
+        ],
+      } as any);
+
+      renderPage();
+      await waitFor(() => {
+        expect(screen.getByText("AIエージェントの未来")).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByText("AIエージェントの未来"));
+
+      const ctx = await screen.findByTestId("calendar-event-context");
+      expect(ctx).toHaveTextContent("タイトル: MTG");
+      expect(ctx).not.toHaveTextContent("開始:");
+      expect(ctx).not.toHaveTextContent("終了:");
+      expect(mockFormatDateTime).not.toHaveBeenCalledWith(expect.stringMatching(/^2026-08-22/));
     });
   });
 });

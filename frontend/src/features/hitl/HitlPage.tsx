@@ -100,6 +100,29 @@ function getFormattedObserved(observedAt: string | undefined): string {
   return dt || "";
 }
 
+function LabeledDateField({
+  label,
+  value,
+  allowYmdOnly = false,
+}: {
+  label: string;
+  value?: string | null;
+  allowYmdOnly?: boolean;
+}) {
+  if (!value) return null;
+  const formatted =
+    allowYmdOnly && /^\d{4}-\d{2}-\d{2}$/.test(value)
+      ? formatYmdWithDow(value)
+      : formatDateTime(value);
+  if (!formatted) return null;
+  return (
+    <div>
+      <span className="font-bold text-slate-600">{label}: </span>
+      <span className="text-slate-800">{formatted}</span>
+    </div>
+  );
+}
+
 export default function HitlPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const runIdParam = searchParams.get("run_id");
@@ -677,18 +700,8 @@ export default function HitlPage() {
                                       <span className="text-slate-800">{currentCalendarCtx.event.title}</span>
                                     </div>
                                   )}
-                                  {currentCalendarCtx.event?.start_time && (
-                                    <div>
-                                      <span className="font-bold text-slate-600">開始: </span>
-                                      <span className="text-slate-800">{currentCalendarCtx.event.start_time}</span>
-                                    </div>
-                                  )}
-                                  {currentCalendarCtx.event?.end_time && (
-                                    <div>
-                                      <span className="font-bold text-slate-600">終了: </span>
-                                      <span className="text-slate-800">{currentCalendarCtx.event.end_time}</span>
-                                    </div>
-                                  )}
+                                  <LabeledDateField label="開始" value={currentCalendarCtx.event?.start_time} />
+                                  <LabeledDateField label="終了" value={currentCalendarCtx.event?.end_time} />
                                   {currentCalendarCtx.event?.location && (
                                     <div>
                                       <span className="font-bold text-slate-600">場所: </span>
@@ -719,12 +732,11 @@ export default function HitlPage() {
                                       <span className="text-slate-800">{currentReminderCtx.reminder.title}</span>
                                     </div>
                                   )}
-                                  {currentReminderCtx.reminder?.due_date && (
-                                    <div>
-                                      <span className="font-bold text-slate-600">期限: </span>
-                                      <span className="text-slate-800">{currentReminderCtx.reminder.due_date}</span>
-                                    </div>
-                                  )}
+                                  <LabeledDateField
+                                    label="期限"
+                                    value={currentReminderCtx.reminder?.due_date}
+                                    allowYmdOnly
+                                  />
                                   {currentReminderCtx.content && (
                                     <div>
                                       <span className="font-bold text-slate-600">元の内容: </span>
