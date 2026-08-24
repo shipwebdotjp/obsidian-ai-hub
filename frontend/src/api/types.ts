@@ -656,20 +656,24 @@ export interface AgentSessionDetailResponse {
 }
 
 export interface AgentLiveToolCall {
+  /** Stable identity for the live panel; call_key takes precedence when present. */
   id: string;
+  call_id?: string;
+  call_key?: string;
   tool_name: string;
   args: Record<string, unknown>;
   result: string;
   hitl_run_id?: string | null;
-  status: "running" | "succeeded" | "failed";
+  status: "preparing" | "running" | "succeeded" | "failed";
   error?: string | null;
   iteration: number;
 }
 
 export type AgentStreamEvent =
   | { type: "thinking"; iteration: number }
-  | { type: "tool_call_start"; call_id: string; tool_name: string; args: Record<string, unknown>; iteration: number }
-  | { type: "tool_call_end"; call_id: string; tool_name: string; status: "succeeded" | "failed"; result: string; hitl_run_id?: string | null; error?: string | null; iteration: number }
+  | { type: "tool_call_detected"; call_key: string; tool_name: string; iteration: number }
+  | { type: "tool_call_start"; call_id: string; call_key?: string; tool_name: string; args: Record<string, unknown>; iteration: number }
+  | { type: "tool_call_end"; call_id: string; call_key?: string; tool_name: string; status: "succeeded" | "failed"; result: string; hitl_run_id?: string | null; error?: string | null; iteration: number }
   | { type: "text"; delta: string }
   | { type: "done"; message: AgentMessage; run: AgentRun; hitl_run_ids: string[]; tool_calls?: AgentToolCall[] }
   | { type: "error"; error: string; run_id?: string };

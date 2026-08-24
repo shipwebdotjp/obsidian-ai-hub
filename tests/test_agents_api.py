@@ -2,7 +2,7 @@ import json
 from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessageChunk
 
 from obsidian_ai_hub.web.app import create_app
 
@@ -143,8 +143,12 @@ def test_stream_message_sse_api(client, auth_headers):
     session_id = sess_res.json()["session"]["session_id"]
 
     mock_llm = MagicMock()
-    mock_ai_msg = AIMessage(content="APIからの応答テスト")
-    mock_llm.invoke.return_value = mock_ai_msg
+
+    async def astream(_messages):
+        yield AIMessageChunk(content="APIからの")
+        yield AIMessageChunk(content="応答テスト")
+
+    mock_llm.astream.side_effect = astream
     mock_llm.bind_tools.return_value = mock_llm
 
     with patch(
@@ -157,10 +161,24 @@ def test_stream_message_sse_api(client, auth_headers):
         )
         assert res.status_code == 200
         assert "text/event-stream" in res.headers["content-type"]
-        body = res.text
-        assert "type" in body
-        assert "APIからの応答テスト" in body
-        assert "done" in body
+        payloads = [
+            json.loads(line.removeprefix("data: "))
+            for line in res.text.splitlines()
+            if line.startswith("data: ")
+        ]
+        assert [payload["type"] for payload in payloads] == [
+            "thinking",
+            "text",
+            "text",
+            "done",
+        ]
+        assert (
+            "".join(
+                payload["delta"] for payload in payloads if payload["type"] == "text"
+            )
+            == "APIからの応答テスト"
+        )
+        assert payloads[-1]["message"]["content"] == "APIからの応答テスト"
 
 
 def test_stream_message_errors(client, auth_headers):

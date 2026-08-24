@@ -4,10 +4,12 @@ import mimetypes
 import os
 import time
 from pathlib import Path
-from typing import Any, Sequence, Tuple, Optional
+from typing import Any, AsyncGenerator, Sequence, Tuple, Optional
 import logging
 
 from langchain_core.messages import (
+    AIMessage,
+    AIMessageChunk,
     HumanMessage,
     ToolMessage,
     BaseMessage,
@@ -53,16 +55,19 @@ def _with_exponential_backoff(
     raise RuntimeError("LLM request failed unexpectedly")
 
 
-def _content_to_text(content: Any) -> str:
-    """
-    LangChain の AIMessage.content は str のこともあれば、
-    provider によって list[dict] 形式になることもあるため、文字列化する。
+def _content_to_stream_delta(content: Any) -> str:
+    """Return displayable message content without changing token boundaries.
+
+    Unlike :func:`_content_to_text`, this helper deliberately preserves leading
+    and trailing whitespace.  A streamed chunk can be a single space or a
+    punctuation suffix, so trimming it would make the live response differ
+    from the final persisted response.
     """
     if content is None:
         return ""
 
     if isinstance(content, str):
-        return content.strip()
+        return content
 
     if isinstance(content, list):
         parts: list[str] = []
@@ -71,11 +76,19 @@ def _content_to_text(content: Any) -> str:
                 parts.append(item)
             elif isinstance(item, dict):
                 text = item.get("text")
-                if text:
+                if text is not None:
                     parts.append(str(text))
-        return "".join(parts).strip()
+        return "".join(parts)
 
-    return str(content).strip()
+    return str(content)
+
+
+def _content_to_text(content: Any) -> str:
+    """
+    LangChain の AIMessage.content は str のこともあれば、
+    provider によって list[dict] 形式になることもあるため、文字列化する。
+    """
+    return _content_to_stream_delta(content).strip()
 
 
 def _prepare_messages(
@@ -130,7 +143,9 @@ def _prepare_messages(
     return messages
 
 
-def _extract_llm_metadata(message: Any) -> Tuple[Optional[int], Optional[int], Optional[int], Optional[str]]:
+def _extract_llm_metadata(
+    message: Any,
+) -> Tuple[Optional[int], Optional[int], Optional[int], Optional[str]]:
     prompt_tokens = None
     completion_tokens = None
     total_tokens = None
@@ -147,7 +162,12 @@ def _extract_llm_metadata(message: Any) -> Tuple[Optional[int], Optional[int], O
     meta = getattr(message, "response_metadata", None) or {}
     if isinstance(meta, dict):
         finish_reason = meta.get("finish_reason")
-        if not finish_reason and "choices" in meta and isinstance(meta["choices"], list) and len(meta["choices"]) > 0:
+        if (
+            not finish_reason
+            and "choices" in meta
+            and isinstance(meta["choices"], list)
+            and len(meta["choices"]) > 0
+        ):
             choice = meta["choices"][0]
             if isinstance(choice, dict):
                 finish_reason = choice.get("finish_reason")
@@ -155,9 +175,13 @@ def _extract_llm_metadata(message: Any) -> Tuple[Optional[int], Optional[int], O
         token_usage = meta.get("token_usage")
         if isinstance(token_usage, dict):
             if prompt_tokens is None:
-                prompt_tokens = token_usage.get("prompt_tokens") or token_usage.get("input_tokens")
+                prompt_tokens = token_usage.get("prompt_tokens") or token_usage.get(
+                    "input_tokens"
+                )
             if completion_tokens is None:
-                completion_tokens = token_usage.get("completion_tokens") or token_usage.get("output_tokens")
+                completion_tokens = token_usage.get(
+                    "completion_tokens"
+                ) or token_usage.get("output_tokens")
             if total_tokens is None:
                 total_tokens = token_usage.get("total_tokens")
 
@@ -169,7 +193,12 @@ def _extract_llm_metadata(message: Any) -> Tuple[Optional[int], Optional[int], O
         except (ValueError, TypeError):
             return None
 
-    return safe_int(prompt_tokens), safe_int(completion_tokens), safe_int(total_tokens), finish_reason
+    return (
+        safe_int(prompt_tokens),
+        safe_int(completion_tokens),
+        safe_int(total_tokens),
+        finish_reason,
+    )
 
 
 def _logged_invoke(
@@ -199,7 +228,9 @@ def _logged_invoke(
 
     try:
         message = llm.invoke(messages)
-        prompt_tokens, completion_tokens, total_tokens, finish_reason = _extract_llm_metadata(message)
+        prompt_tokens, completion_tokens, total_tokens, finish_reason = (
+            _extract_llm_metadata(message)
+        )
         response_text = _content_to_text(message.content)
 
         if finish_reason == "length":
@@ -222,6 +253,95 @@ def _logged_invoke(
         return message
     except Exception as e:
         execution_logger.fail_llm_call(call_id, e)
+        raise
+
+
+def _ai_message_from_chunk(chunk: AIMessageChunk) -> AIMessage:
+    """Convert an aggregated stream chunk into the normal agent message type."""
+    payload = chunk.model_dump()
+    payload["type"] = "ai"
+    return AIMessage(**payload)
+
+
+async def _logged_astream(
+    llm: Any,
+    messages: list,
+    provider: str,
+    model: str,
+    temperature: float,
+    max_tokens: int,
+    prompt_for_log: str,
+) -> AsyncGenerator[AIMessageChunk, None]:
+    """Stream an LLM call while recording the same execution-log lifecycle.
+
+    The caller receives each ``AIMessageChunk`` immediately.  This wrapper
+    independently aggregates those chunks so the execution log is completed
+    with the final content, usage and finish reason only after the provider
+    stream has finished successfully.
+    """
+    import uuid
+    from obsidian_ai_hub.utils import execution_logger
+
+    call_id = str(uuid.uuid4())
+    run_id = execution_logger.current_run_id.get()
+
+    execution_logger.start_llm_call(
+        call_id=call_id,
+        run_id=run_id,
+        provider=provider,
+        model=model,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        prompt=prompt_for_log,
+    )
+
+    aggregate: AIMessageChunk | None = None
+    try:
+        try:
+            stream = llm.astream(messages)
+        except AttributeError as exc:
+            raise RuntimeError(
+                f"LLM provider '{provider}' model '{model}' does not support async token streaming."
+            ) from exc
+
+        async for chunk in stream:
+            if not isinstance(chunk, AIMessageChunk):
+                raise RuntimeError(
+                    f"LLM provider '{provider}' model '{model}' returned an unsupported stream chunk "
+                    f"type: {type(chunk).__name__}."
+                )
+            aggregate = chunk if aggregate is None else aggregate + chunk
+            yield chunk
+
+        if aggregate is None:
+            raise RuntimeError(
+                f"LLM provider '{provider}' model '{model}' completed without an AI message chunk."
+            )
+
+        prompt_tokens, completion_tokens, total_tokens, finish_reason = (
+            _extract_llm_metadata(aggregate)
+        )
+        response_text = _content_to_stream_delta(aggregate.content)
+
+        if finish_reason == "length":
+            logger.warning(
+                "LLM output was truncated (finish_reason=length): provider=%s model=%s "
+                "max_tokens=%s; the response may be incomplete.",
+                provider,
+                model,
+                max_tokens,
+            )
+
+        execution_logger.succeed_llm_call(
+            call_id=call_id,
+            response=response_text,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+            finish_reason=finish_reason,
+        )
+    except Exception as exc:
+        execution_logger.fail_llm_call(call_id, exc)
         raise
 
 
@@ -251,7 +371,9 @@ def generate_llm_response(
     )
 
     def _call() -> str:
-        message = _logged_invoke(llm, messages, provider, model, temperature, max_tokens, prompt)
+        message = _logged_invoke(
+            llm, messages, provider, model, temperature, max_tokens, prompt
+        )
         logger.info(f"LLM response: {message}")
         return _content_to_text(message.content)
 
@@ -299,7 +421,15 @@ def generate_llm_response_with_tools(
         iterations += 1
 
         def _call():
-            return _logged_invoke(llm_with_tools, messages, provider, model, temperature, max_tokens, prompt)
+            return _logged_invoke(
+                llm_with_tools,
+                messages,
+                provider,
+                model,
+                temperature,
+                max_tokens,
+                prompt,
+            )
 
         ai_msg = _with_exponential_backoff(_call)
         messages.append(ai_msg)
@@ -327,7 +457,9 @@ def generate_llm_response_with_tools(
     # If we reached max_iterations and the last message still requested tool calls,
     # we need one final LLM call without tool binding to get a summary response.
     def _final_call():
-        return _logged_invoke(llm, messages, provider, model, temperature, max_tokens, prompt)
+        return _logged_invoke(
+            llm, messages, provider, model, temperature, max_tokens, prompt
+        )
 
     final_ai_msg = _with_exponential_backoff(_final_call)
     return _content_to_text(final_ai_msg.content)

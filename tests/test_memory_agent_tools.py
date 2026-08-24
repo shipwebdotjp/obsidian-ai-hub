@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessageChunk
 
 from obsidian_ai_hub import memory
 from obsidian_ai_hub.agents import registry, store
@@ -377,21 +377,33 @@ async def test_runtime_propose_uses_server_trusted_ctx_not_llm_args():
     # LLM tries to fabricate session_id etc. by including extra args
     # (it cannot, because schema is extra="forbid"). Here we just inject
     # an evidence_quote that is NOT in user_content and verify fallback.
-    ai_tool = AIMessage(content="", tool_calls=[{
-        "name": "memory_propose",
-        "args": {
-            "content": "早起きが好き",
-            "kind": "preference",
-            "evidence_quote": "夜更かしをする",
-        },
-        "id": "call_1",
-    }])
-    ai_final = AIMessage(content="done")
     mock_llm = MagicMock()
-    mock_llm.invoke.side_effect = [ai_tool, ai_final]
+
+    async def astream(_messages):
+        if mock_llm.astream.call_count == 1:
+            yield AIMessageChunk(
+                content="",
+                tool_call_chunks=[
+                    {
+                        "name": "memory_propose",
+                        "args": (
+                            '{"content":"早起きが好き","kind":"preference",'
+                            '"evidence_quote":"夜更かしをする"}'
+                        ),
+                        "id": "call_1",
+                        "index": 0,
+                    }
+                ],
+            )
+        else:
+            yield AIMessageChunk(content="done")
+
+    mock_llm.astream.side_effect = astream
     mock_llm.bind_tools.return_value = mock_llm
 
-    with patch("obsidian_ai_hub.agents.runtime.create_langchain_llm", return_value=mock_llm):
+    with patch(
+        "obsidian_ai_hub.agents.runtime.create_langchain_llm", return_value=mock_llm
+    ):
         from obsidian_ai_hub.agents import runtime
         async for _ in runtime.generate_agent_stream(
             agent, session, run, [user_msg], "私は早起きが好き"

@@ -49,7 +49,19 @@ const LIVE_STATUS_CONFIG: Record<AgentLiveToolCall["status"], { label: string; c
   succeeded: { label: "成功", cls: "bg-emerald-50 text-emerald-700 border-emerald-200" },
   failed: { label: "失敗", cls: "bg-rose-50 text-rose-700 border-rose-200" },
   running: { label: "実行中…", cls: "bg-amber-50 text-amber-700 border-amber-200" },
+  preparing: { label: "準備中…", cls: "bg-blue-50 text-blue-700 border-blue-200" },
 };
+
+function matchesLiveToolCall(
+  toolCall: AgentLiveToolCall,
+  callKey?: string,
+  callId?: string,
+): boolean {
+  return (
+    (Boolean(callKey) && (toolCall.call_key === callKey || toolCall.id === callKey)) ||
+    (Boolean(callId) && (toolCall.call_id === callId || toolCall.id === callId))
+  );
+}
 
 export default function AgentsPage() {
   const [agents, setAgents] = useState<Agent[]>([]);
@@ -77,7 +89,7 @@ export default function AgentsPage() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingText, setStreamingText] = useState("");
   const [streamingToolCalls, setStreamingToolCalls] = useState<AgentLiveToolCall[]>([]);
-  const [streamingPhase, setStreamingPhase] = useState<"thinking" | "tool_running" | null>(null);
+  const [streamingPhase, setStreamingPhase] = useState<"thinking" | "tool_preparing" | "tool_running" | null>(null);
   const [streamingIteration, setStreamingIteration] = useState<number | null>(null);
   const [hitlLinks, setHitlLinks] = useState<string[]>([]);
   const [chatError, setChatError] = useState<string | null>(null);
@@ -90,14 +102,44 @@ export default function AgentsPage() {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const streamGenerationRef = useRef(0);
+  const streamingTextBufferRef = useRef("");
+  const streamingTextFrameRef = useRef<number | null>(null);
+
+  const invalidatePendingStreamingText = useCallback(() => {
+    streamGenerationRef.current += 1;
+    streamingTextBufferRef.current = "";
+    if (streamingTextFrameRef.current !== null) {
+      window.cancelAnimationFrame(streamingTextFrameRef.current);
+      streamingTextFrameRef.current = null;
+    }
+  }, []);
+
+  const enqueueStreamingText = useCallback((delta: string, generation: number) => {
+    if (generation !== streamGenerationRef.current) return;
+    streamingTextBufferRef.current += delta;
+    if (streamingTextFrameRef.current !== null) return;
+
+    streamingTextFrameRef.current = window.requestAnimationFrame(() => {
+      streamingTextFrameRef.current = null;
+      if (generation !== streamGenerationRef.current) return;
+
+      const bufferedText = streamingTextBufferRef.current;
+      streamingTextBufferRef.current = "";
+      if (bufferedText) {
+        setStreamingText((previous) => previous + bufferedText);
+      }
+    });
+  }, []);
 
   const resetStreamingState = useCallback(() => {
+    invalidatePendingStreamingText();
     setIsStreaming(false);
     setStreamingText("");
     setStreamingToolCalls([]);
     setStreamingPhase(null);
     setStreamingIteration(null);
-  }, []);
+  }, [invalidatePendingStreamingText]);
 
   const getLiveStatusLabel = (s: AgentLiveToolCall["status"]): string => LIVE_STATUS_CONFIG[s].label;
   const getLiveStatusClass = (s: AgentLiveToolCall["status"]): string => LIVE_STATUS_CONFIG[s].cls;
@@ -253,14 +295,22 @@ export default function AgentsPage() {
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
       }
+      invalidatePendingStreamingText();
     };
-  }, []);
+  }, [invalidatePendingStreamingText]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView?.({ behavior: "smooth" });
   }, [messages, streamingText, streamingToolCalls, streamingPhase, streamingIteration]);
 
   const activeAgent = agents.find((a) => a.agent_id === selectedAgentId);
+  const displayedStreamingPhase = streamingToolCalls.some(
+    (toolCall) => toolCall.status === "running"
+  )
+    ? "tool_running"
+    : streamingToolCalls.some((toolCall) => toolCall.status === "preparing")
+      ? "tool_preparing"
+      : streamingPhase;
 
   // Memoize assistant_message_id -> run so O(N*M) lookup becomes O(N) per render.
   // `runs` is replaced wholesale by setRuns, so a single useMemo key is enough.
@@ -449,7 +499,16 @@ export default function AgentsPage() {
     e.preventDefault();
     if (!selectedSessionId || !inputText.trim() || isStreaming) return;
 
+    const streamSessionId = selectedSessionId;
     const userText = inputText.trim();
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    invalidatePendingStreamingText();
+    const streamGeneration = streamGenerationRef.current;
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     setInputText("");
     setChatError(null);
     setHitlLinks([]);
@@ -459,16 +518,10 @@ export default function AgentsPage() {
     setStreamingPhase("thinking");
     setStreamingIteration(null);
 
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
-    const controller = new AbortController();
-    abortControllerRef.current = controller;
-
     // Optimistically push user message to UI
     const tempUserMsg: AgentMessage = {
       message_id: `temp_${Date.now()}`,
-      session_id: selectedSessionId,
+      session_id: streamSessionId,
       sequence: messages.length + 1,
       role: "user",
       content: userText,
@@ -476,79 +529,153 @@ export default function AgentsPage() {
     };
     setMessages((prev) => [...prev, tempUserMsg]);
 
+    const isCurrentStream = () => (
+      streamGeneration === streamGenerationRef.current &&
+      abortControllerRef.current === controller
+    );
+    let receivedTerminalEvent = false;
+
     try {
       await streamAgentMessage(
-        selectedSessionId,
+        streamSessionId,
         userText,
         (event: AgentStreamEvent) => {
+          if (!isCurrentStream()) return;
+
           if (event.type === "thinking") {
             setStreamingPhase("thinking");
             setStreamingIteration(event.iteration);
-          } else if (event.type === "tool_call_start") {
+          } else if (event.type === "tool_call_detected") {
+            if (!event.call_key || !event.tool_name) return;
+            setStreamingPhase("tool_preparing");
             setStreamingIteration(event.iteration);
-            if (!event.call_id || !event.tool_name) return;
-            setStreamingPhase("tool_running");
-            setStreamingToolCalls((prev) => {
-              if (prev.some((tc) => tc.id === event.call_id)) return prev;
+            setStreamingToolCalls((previous) => {
+              if (previous.some((toolCall) => matchesLiveToolCall(toolCall, event.call_key))) {
+                return previous;
+              }
               return [
-                ...prev,
+                ...previous,
                 {
-                  id: event.call_id,
+                  id: event.call_key,
+                  call_key: event.call_key,
                   tool_name: event.tool_name,
-                  args: event.args ?? {},
+                  args: {},
                   result: "",
-                  status: "running",
+                  status: "preparing",
                   hitl_run_id: null,
                   error: null,
                   iteration: event.iteration,
                 },
               ];
             });
+          } else if (event.type === "tool_call_start") {
+            setStreamingIteration(event.iteration);
+            if (!event.call_id || !event.tool_name) return;
+            setStreamingPhase("tool_running");
+            setStreamingToolCalls((previous) => {
+              const existingIndex = previous.findIndex((toolCall) =>
+                matchesLiveToolCall(toolCall, event.call_key, event.call_id)
+              );
+              const existing = existingIndex >= 0 ? previous[existingIndex] : undefined;
+              const nextToolCall: AgentLiveToolCall = {
+                id: existing?.id ?? event.call_key ?? event.call_id,
+                call_id: event.call_id,
+                call_key: event.call_key ?? existing?.call_key,
+                tool_name: event.tool_name,
+                args: event.args ?? {},
+                result: existing?.result ?? "",
+                status: "running",
+                hitl_run_id: existing?.hitl_run_id ?? null,
+                error: null,
+                iteration: event.iteration,
+              };
+              if (existingIndex >= 0) {
+                return previous.map((toolCall, index) =>
+                  index === existingIndex ? nextToolCall : toolCall
+                );
+              }
+              return [
+                ...previous,
+                nextToolCall,
+              ];
+            });
           } else if (event.type === "tool_call_end") {
             setStreamingIteration(event.iteration);
-            setStreamingToolCalls((prev) =>
-              prev.map((tc) =>
-                tc.id === event.call_id
+            setStreamingToolCalls((previous) => {
+              const existingIndex = previous.findIndex((toolCall) =>
+                matchesLiveToolCall(toolCall, event.call_key, event.call_id)
+              );
+              if (existingIndex < 0) {
+                return [
+                  ...previous,
+                  {
+                    id: event.call_key ?? event.call_id,
+                    call_id: event.call_id,
+                    call_key: event.call_key,
+                    tool_name: event.tool_name,
+                    args: {},
+                    result: event.result,
+                    status: event.status,
+                    hitl_run_id: event.hitl_run_id ?? null,
+                    error: event.error ?? null,
+                    iteration: event.iteration,
+                  },
+                ];
+              }
+              return previous.map((toolCall, index) =>
+                index === existingIndex
                   ? {
-                      ...tc,
+                      ...toolCall,
+                      call_id: event.call_id,
+                      call_key: event.call_key ?? toolCall.call_key,
+                      tool_name: event.tool_name,
                       result: event.result,
                       status: event.status,
                       hitl_run_id: event.hitl_run_id ?? null,
                       error: event.error ?? null,
+                      iteration: event.iteration,
                     }
-                  : tc
-              )
-            );
-            // Avoid nested setState inside updater (React anti-pattern).
-            // Derive phase from whether any tool remains running. Since updater is async,
-            // use simple "thinking" here; rapid parallel calls will be covered by next
-            // tool_call_end / thinking events without stale closure.
+                  : toolCall
+              );
+            });
             setStreamingPhase("thinking");
           } else if (event.type === "text") {
-            setStreamingText((prev) => prev + event.delta);
+            enqueueStreamingText(event.delta, streamGeneration);
             setStreamingPhase(null);
           } else if (event.type === "done") {
+            receivedTerminalEvent = true;
             resetStreamingState();
-            loadSessionDetail(selectedSessionId);
+            abortControllerRef.current = null;
+            loadSessionDetail(streamSessionId);
             if (event.hitl_run_ids && event.hitl_run_ids.length > 0) {
               setHitlLinks(event.hitl_run_ids);
             }
           } else if (event.type === "error") {
+            receivedTerminalEvent = true;
             resetStreamingState();
+            abortControllerRef.current = null;
             setChatError(event.error || "エラーが発生しました。");
           }
         },
         controller.signal
       );
+      if (isCurrentStream() && !receivedTerminalEvent) {
+        resetStreamingState();
+        abortControllerRef.current = null;
+        setChatError("応答ストリームが完了前に終了しました。");
+      }
     } catch (err: unknown) {
+      if (!isCurrentStream()) return;
       const isAbort =
         (err instanceof DOMException && err.name === "AbortError") ||
         (typeof err === "object" && err !== null && "name" in err && (err as { name: string }).name === "AbortError");
       if (isAbort) {
         resetStreamingState();
+        abortControllerRef.current = null;
         return;
       }
       resetStreamingState();
+      abortControllerRef.current = null;
       setChatError(err instanceof Error ? err.message : "メッセージの送信に失敗しました。");
     }
   };
@@ -1001,22 +1128,28 @@ export default function AgentsPage() {
               {/* Live Streaming Response Chunk */}
               {isStreaming && (
                 <div className="space-y-3">
-                  {(streamingPhase || streamingToolCalls.length > 0) && (
+                  {(displayedStreamingPhase || streamingToolCalls.length > 0) && (
                     <div className="flex justify-start">
                       <div className="max-w-xl w-full space-y-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
-                        {streamingPhase === "thinking" && streamingToolCalls.length === 0 && (
+                        {displayedStreamingPhase === "thinking" && streamingToolCalls.length === 0 && (
                           <div className="flex items-center gap-2 text-xs text-slate-600">
                             <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-blue-500" />
                             LLMが考え中…{streamingIteration ? ` (iter ${streamingIteration})` : ""}
                           </div>
                         )}
-                        {streamingPhase === "thinking" && streamingToolCalls.length > 0 && (
+                        {displayedStreamingPhase === "thinking" && streamingToolCalls.length > 0 && (
                           <div className="flex items-center gap-2 text-[11px] text-slate-500">
                             <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-blue-500" />
                             ツール結果を踏まえて次の応答を生成中…
                           </div>
                         )}
-                        {streamingPhase === "tool_running" && (
+                        {displayedStreamingPhase === "tool_preparing" && (
+                          <div className="flex items-center gap-2 text-xs text-blue-700">
+                            <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-blue-500" />
+                            ツール呼び出しを準備中…
+                          </div>
+                        )}
+                        {displayedStreamingPhase === "tool_running" && (
                           <div className="flex items-center gap-2 text-xs text-amber-700">
                             <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-amber-500" />
                             ツールを実行中…
@@ -1049,25 +1182,34 @@ export default function AgentsPage() {
                                   <span className="text-[10px] text-slate-400 group-open:rotate-180 transition-transform shrink-0">▼</span>
                                 </summary>
                                 <div className="border-t border-slate-200 p-3 space-y-2 bg-white">
-                                  <div>
-                                    <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">引数</div>
-                                    <pre className="max-h-40 overflow-auto rounded bg-slate-50 border border-slate-200 p-2 text-[11px] font-mono whitespace-pre-wrap break-all">
-                                      {(() => {
-                                        try {
-                                          return JSON.stringify(tc.args, null, 2);
-                                        } catch {
-                                          return String(tc.args);
-                                        }
-                                      })()}
-                                    </pre>
-                                  </div>
-                                  {tc.status !== "running" && (
-                                    <div>
-                                      <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">結果</div>
-                                      <pre className="max-h-64 overflow-auto rounded bg-slate-50 border border-slate-200 p-2 text-[11px] font-mono whitespace-pre-wrap break-all">
-                                        {(tc.result && tc.result.length > LIVE_RESULT_MAX_CHARS ? tc.result.slice(0, LIVE_RESULT_MAX_CHARS) + "\n…(truncated for live view)" : tc.result) || "-"}
-                                      </pre>
+                                  {tc.status === "preparing" ? (
+                                    <div className="flex items-center gap-2 text-[11px] text-blue-700">
+                                      <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-blue-200 border-t-blue-600" />
+                                      ツール呼び出しを準備中…
                                     </div>
+                                  ) : (
+                                    <>
+                                      <div>
+                                        <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">引数</div>
+                                        <pre className="max-h-40 overflow-auto rounded bg-slate-50 border border-slate-200 p-2 text-[11px] font-mono whitespace-pre-wrap break-all">
+                                          {(() => {
+                                            try {
+                                              return JSON.stringify(tc.args, null, 2);
+                                            } catch {
+                                              return String(tc.args);
+                                            }
+                                          })()}
+                                        </pre>
+                                      </div>
+                                      {tc.status !== "running" && (
+                                        <div>
+                                          <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">結果</div>
+                                          <pre className="max-h-64 overflow-auto rounded bg-slate-50 border border-slate-200 p-2 text-[11px] font-mono whitespace-pre-wrap break-all">
+                                            {(tc.result && tc.result.length > LIVE_RESULT_MAX_CHARS ? tc.result.slice(0, LIVE_RESULT_MAX_CHARS) + "\n…(truncated for live view)" : tc.result) || "-"}
+                                          </pre>
+                                        </div>
+                                      )}
+                                    </>
                                   )}
                                   {tc.status === "running" && (
                                     <div className="flex items-center gap-2 text-[11px] text-amber-700">
@@ -1085,7 +1227,7 @@ export default function AgentsPage() {
                             ))}
                           </>
                         )}
-                        {streamingToolCalls.length === 0 && streamingPhase && (
+                        {streamingToolCalls.length === 0 && displayedStreamingPhase === "tool_preparing" && (
                           <div className="text-[11px] text-slate-400">ツール呼び出しを準備中…</div>
                         )}
                       </div>
@@ -1095,12 +1237,14 @@ export default function AgentsPage() {
                     <div className="max-w-xl rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-xs text-slate-800 shadow-sm">
                       {streamingText ? (
                         <MarkdownPreview content={streamingText} />
-                      ) : streamingPhase === "thinking" ? (
+                      ) : displayedStreamingPhase === "thinking" ? (
                         <span className="flex items-center gap-2 text-slate-500">
                           <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-slate-300 border-t-slate-600" />
                           考え中…
                         </span>
-                      ) : streamingPhase === "tool_running" ? (
+                      ) : displayedStreamingPhase === "tool_preparing" ? (
+                        <span className="text-slate-500">ツール呼び出しを準備しています…</span>
+                      ) : displayedStreamingPhase === "tool_running" ? (
                         <span className="text-slate-500">ツールの実行結果を待っています…</span>
                       ) : (
                         "考え中…"

@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 
 from langchain_core.messages import (
     AIMessage,
+    AIMessageChunk,
     BaseMessage,
     HumanMessage,
     SystemMessage,
@@ -20,8 +21,9 @@ from langchain_core.messages import (
 from obsidian_ai_hub.agents import registry, store
 from obsidian_ai_hub.utils import config
 from obsidian_ai_hub.utils.llm_client import (
-    _content_to_text,
-    _logged_invoke,
+    _ai_message_from_chunk,
+    _content_to_stream_delta,
+    _logged_astream,
     create_langchain_llm,
 )
 
@@ -71,6 +73,189 @@ def _format_sse(data: Dict[str, Any]) -> str:
     return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
+def _tool_chunk_value(chunk: Any, key: str) -> Any:
+    """Read a LangChain ``ToolCallChunk`` field without parsing its args."""
+    if isinstance(chunk, dict):
+        return chunk.get(key)
+    return getattr(chunk, key, None)
+
+
+def _tool_chunk_index(chunk: Any) -> Optional[int]:
+    """Return a provider tool-call index when it is a valid integer."""
+    index = _tool_chunk_value(chunk, "index")
+    if isinstance(index, int) and not isinstance(index, bool):
+        return index
+    return None
+
+
+def _call_key(iteration: int, index: int) -> str:
+    """Stable live-only identity for a provider tool-call stream."""
+    return f"{iteration}:{index}"
+
+
+async def _stream_llm_turn(
+    llm: Any,
+    messages: List[BaseMessage],
+    provider: str,
+    model: str,
+    iteration: int,
+    prompt_for_log: str,
+) -> AsyncGenerator[tuple[str, Any], None]:
+    """Yield live text/tool-detection events, then one aggregated AI message.
+
+    Tool-call chunks are used only to identify a call for the UI.  Their JSON
+    arguments are never parsed here; execution is based exclusively on the
+    fully aggregated ``AIMessage.tool_calls`` emitted at the end.
+    """
+    aggregate: Optional[AIMessageChunk] = None
+    detected_call_keys: set[str] = set()
+
+    async for chunk in _logged_astream(
+        llm,
+        messages,
+        provider,
+        model,
+        temperature=0.7,
+        max_tokens=4096,
+        prompt_for_log=prompt_for_log,
+    ):
+        aggregate = chunk if aggregate is None else aggregate + chunk
+
+        delta = _content_to_stream_delta(chunk.content)
+        if delta:
+            yield "text", delta
+
+        for tool_chunk in getattr(chunk, "tool_call_chunks", None) or []:
+            index = _tool_chunk_index(tool_chunk)
+            name = _tool_chunk_value(tool_chunk, "name")
+            if index is None or not isinstance(name, str) or not name:
+                continue
+
+            call_key = _call_key(iteration, index)
+            if call_key not in detected_call_keys:
+                detected_call_keys.add(call_key)
+                yield (
+                    "tool_call_detected",
+                    {
+                        "type": "tool_call_detected",
+                        "call_key": call_key,
+                        "tool_name": name,
+                        "iteration": iteration,
+                    },
+                )
+
+    if aggregate is None:
+        # _logged_astream normally raises this itself.  Keeping this guard at
+        # the conversion boundary makes the invariant explicit for callers.
+        raise RuntimeError("LLM stream completed without an AI message chunk.")
+
+    yield "complete", _ai_message_from_chunk(aggregate)
+
+
+def _validated_tool_calls(
+    ai_msg: AIMessage,
+    tools_by_name: Dict[str, Any],
+    iteration: int,
+) -> List[Dict[str, Any]]:
+    """Validate complete tool calls before any tool is allowed to execute.
+
+    ``AIMessage.tool_calls`` is LangChain's completed, parsed representation.
+    Raw ``tool_call_chunks`` are inspected only for completeness and stable
+    call-key matching; partial JSON is never interpreted by this application.
+    """
+    raw_tool_chunks = list(getattr(ai_msg, "tool_call_chunks", None) or [])
+    invalid_tool_calls = list(getattr(ai_msg, "invalid_tool_calls", None) or [])
+    if invalid_tool_calls:
+        raise ValueError("LLM returned an invalid or incomplete tool call.")
+
+    raw_tool_calls = list(getattr(ai_msg, "tool_calls", None) or [])
+    if not raw_tool_calls:
+        if raw_tool_chunks:
+            raise ValueError("LLM returned an incomplete tool call.")
+        return []
+
+    call_keys: List[Optional[str]] = [None] * len(raw_tool_calls)
+    if raw_tool_chunks:
+        indexes: List[int] = []
+        for chunk in raw_tool_chunks:
+            index = _tool_chunk_index(chunk)
+            if index is None:
+                raise ValueError(
+                    "LLM returned a tool-call chunk without a provider index."
+                )
+            raw_args = _tool_chunk_value(chunk, "args")
+            if not isinstance(raw_args, str):
+                raise ValueError(
+                    "LLM returned tool-call arguments in an unsupported format."
+                )
+            try:
+                # LangChain can expose a partial-json fallback as ``args: {}``
+                # even after a malformed stream has ended.  This check only
+                # establishes completion; execution still uses tool_calls.
+                if not isinstance(json.loads(raw_args), dict):
+                    raise ValueError("LLM returned non-object tool-call arguments.")
+            except json.JSONDecodeError as exc:
+                raise ValueError(
+                    "LLM returned invalid or incomplete tool-call JSON."
+                ) from exc
+            indexes.append(index)
+
+        if len(set(indexes)) != len(indexes) or len(indexes) != len(raw_tool_calls):
+            raise ValueError(
+                "LLM returned an incomplete or ambiguous tool call stream."
+            )
+        call_keys = [_call_key(iteration, index) for index in indexes]
+
+    # First reject duplicate provider IDs.  Missing IDs are assigned below,
+    # after all complete calls have passed validation.
+    seen_ids: set[str] = set()
+    for call in raw_tool_calls:
+        if not isinstance(call, dict):
+            raise ValueError("LLM returned a malformed tool call.")
+        call_id = call.get("id")
+        if call_id is None or call_id == "":
+            continue
+        if not isinstance(call_id, str) or call_id in seen_ids:
+            raise ValueError("LLM returned duplicate or invalid tool-call IDs.")
+        seen_ids.add(call_id)
+
+    validated_calls: List[Dict[str, Any]] = []
+    for position, raw_call in enumerate(raw_tool_calls):
+        name = raw_call.get("name")
+        args = raw_call.get("args")
+        if not isinstance(name, str) or not name:
+            raise ValueError("LLM returned a tool call without a name.")
+        if name not in tools_by_name:
+            raise ValueError(f"LLM requested an unavailable tool: {name}")
+        if not isinstance(args, dict):
+            raise ValueError(f"LLM returned non-object arguments for tool '{name}'.")
+
+        call_id = raw_call.get("id")
+        if call_id is None or call_id == "":
+            provider_index = (
+                call_keys[position].split(":", 1)[1]
+                if call_keys[position]
+                else str(position)
+            )
+            call_id = f"call_{iteration}_{provider_index}"
+            suffix = 1
+            while call_id in seen_ids:
+                call_id = f"call_{iteration}_{provider_index}_{suffix}"
+                suffix += 1
+            seen_ids.add(call_id)
+
+        validated_calls.append(
+            {
+                "name": name,
+                "args": args,
+                "id": call_id,
+                "call_key": call_keys[position],
+            }
+        )
+
+    return validated_calls
+
+
 async def generate_agent_stream(
     agent: Dict[str, Any],
     session: Dict[str, Any],
@@ -90,8 +275,9 @@ async def generate_agent_stream(
 
     Yields:
       - thinking: {"type": "thinking", "iteration": int}
-      - tool_call_start: {"type": "tool_call_start", "call_id": str, "tool_name": str, "args": dict, "iteration": int}
-      - tool_call_end: {"type": "tool_call_end", "call_id": str, "tool_name": str, "status": str, "result": str, "hitl_run_id": str|None, "error": str|None, "iteration": int}
+      - tool_call_detected: {"type": "tool_call_detected", "call_key": str, "tool_name": str, "iteration": int}
+      - tool_call_start: {"type": "tool_call_start", "call_id": str, "call_key": str|None, "tool_name": str, "args": dict, "iteration": int}
+      - tool_call_end: {"type": "tool_call_end", "call_id": str, "call_key": str|None, "tool_name": str, "status": str, "result": str, "hitl_run_id": str|None, "error": str|None, "iteration": int}
       - text: {"type": "text", "delta": "..."}
       - done: {"type": "done", "message": ..., "run": ..., "hitl_run_ids": [...]}
       - error: {"type": "error", "error": "...", "run_id": "..."}
@@ -154,12 +340,8 @@ async def generate_agent_stream(
         try:
             from obsidian_ai_hub.memory.context import compile_agent_context
 
-            budget = getattr(
-                config, "MEMORY_AGENT_CONTEXT_MAX_TOKENS", 400
-            )
-            mem_ctx = await asyncio.to_thread(
-                compile_agent_context, budget, now_jst
-            )
+            budget = getattr(config, "MEMORY_AGENT_CONTEXT_MAX_TOKENS", 400)
+            mem_ctx = await asyncio.to_thread(compile_agent_context, budget, now_jst)
             if mem_ctx.get("context"):
                 memory_block = mem_ctx["context"]
         except Exception as exc:
@@ -220,195 +402,163 @@ async def generate_agent_stream(
 
         iterations = 0
         final_ai_msg: Optional[AIMessage] = None
+        streamed_text_parts: List[str] = []
 
         while iterations < max_iterations:
             iterations += 1
 
             yield _format_sse({"type": "thinking", "iteration": iterations})
 
-            ai_msg = await asyncio.to_thread(
-                _logged_invoke,
+            ai_msg: Optional[AIMessage] = None
+            async for stream_event, stream_value in _stream_llm_turn(
                 llm_with_tools,
                 langchain_messages,
                 provider,
                 model,
-                temperature=0.7,
-                max_tokens=4096,
-                prompt_for_log=user_content,
-            )
+                iterations,
+                user_content,
+            ):
+                if stream_event == "text":
+                    streamed_text_parts.append(stream_value)
+                    yield _format_sse({"type": "text", "delta": stream_value})
+                elif stream_event == "tool_call_detected":
+                    yield _format_sse(stream_value)
+                elif stream_event == "complete":
+                    ai_msg = stream_value
+
+            if ai_msg is None:
+                raise RuntimeError("LLM stream did not produce a completed AI message.")
             langchain_messages.append(ai_msg)
 
-            tool_calls = getattr(ai_msg, "tool_calls", None)
+            tool_calls = _validated_tool_calls(ai_msg, tools_by_name, iterations)
             if not tool_calls:
                 final_ai_msg = ai_msg
                 break
 
+            # Every call is fully validated before the first tool can run.  In
+            # particular, this prevents a valid first call from running when a
+            # later streamed call is malformed or requests an unavailable tool.
             for call in tool_calls:
                 tname = call["name"]
                 targs = call["args"]
-                tcall_id = call.get("id", f"call_{tname}")
+                tcall_id = call["id"]
+                call_key = call["call_key"]
 
-                # Notify frontend that tool execution is starting
-                yield _format_sse(
-                    {
-                        "type": "tool_call_start",
-                        "call_id": tcall_id,
-                        "tool_name": tname,
-                        "args": targs,
-                        "iteration": iterations,
-                    }
-                )
+                start_event: Dict[str, Any] = {
+                    "type": "tool_call_start",
+                    "call_id": tcall_id,
+                    "tool_name": tname,
+                    "args": targs,
+                    "iteration": iterations,
+                }
+                if call_key is not None:
+                    start_event["call_key"] = call_key
+                yield _format_sse(start_event)
 
-                # Prepare record scaffold
                 record: Dict[str, Any] = {
                     "id": tcall_id,
                     "tool_name": tname,
                     "args": targs,
                     "iteration": iterations,
                 }
-                end_emitted = False
-
                 try:
-                    if tname in tools_by_name:
-                        if tname not in used_tools:
-                            used_tools.append(tname)
-
-                        try:
-                            result = await asyncio.to_thread(
-                                tools_by_name[tname].invoke, targs
-                            )
-                            result_str = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
-                            status = "succeeded"
-                            error_msg = None
-                        except Exception as texc:
-                            logger.exception("Error executing tool '%s'", tname)
-                            result_str = json.dumps({"error": str(texc)}, ensure_ascii=False)
-                            status = "failed"
-                            error_msg = str(texc)
-
-                        hitl_id = _extract_hitl_run_id(result_str)
-                        if hitl_id and hitl_id not in created_hitl_run_ids:
-                            created_hitl_run_ids.append(hitl_id)
-
-                        # Truncate separately for DB and live view (single-sourced helper)
-                        stored_result = _truncate(result_str, _TOOL_RESULT_MAX_CHARS, "\n…(truncated)")
-                        live_result = _truncate(result_str, _LIVE_RESULT_MAX_CHARS, "\n…(truncated for live view)")
-
-                        record.update(
-                            {
-                                "result": stored_result,
-                                "hitl_run_id": hitl_id,
-                                "status": status,
-                                "error": error_msg,
-                            }
-                        )
-                        tool_call_records.append(record)
-
-                        yield _format_sse(
-                            {
-                                "type": "tool_call_end",
-                                "call_id": tcall_id,
-                                "tool_name": tname,
-                                "status": status,
-                                "result": live_result,
-                                "hitl_run_id": hitl_id,
-                                "error": error_msg,
-                                "iteration": iterations,
-                            }
-                        )
-                        end_emitted = True
-
-                        langchain_messages.append(
-                            ToolMessage(
-                                content=result_str,
-                                tool_call_id=tcall_id,
-                            )
-                        )
-                    else:
-                        err_result = json.dumps({"error": f"Unknown tool '{tname}'"}, ensure_ascii=False)
-                        record.update(
-                            {
-                                "result": err_result,
-                                "hitl_run_id": None,
-                                "status": "failed",
-                                "error": f"Unknown tool '{tname}'",
-                            }
-                        )
-                        tool_call_records.append(record)
-                        yield _format_sse(
-                            {
-                                "type": "tool_call_end",
-                                "call_id": tcall_id,
-                                "tool_name": tname,
-                                "status": "failed",
-                                "result": err_result,
-                                "hitl_run_id": None,
-                                "error": f"Unknown tool '{tname}'",
-                                "iteration": iterations,
-                            }
-                        )
-                        end_emitted = True
-                        langchain_messages.append(
-                            ToolMessage(
-                                content=err_result,
-                                tool_call_id=tcall_id,
-                            )
-                        )
-                except Exception as per_exc:
-                    # Ensure lifecycle closure: frontend would otherwise keep `running` forever
-                    logger.exception("Unexpected error in tool lifecycle for '%s' (call_id=%s)", tname, tcall_id)
-                    err_str = str(per_exc)
-                    fallback_result = json.dumps({"error": err_str}, ensure_ascii=False)
-                    # If record not yet persisted, persist a minimal failed entry
-                    if not any(r.get("id") == tcall_id for r in tool_call_records):
-                        record.update(
-                            {
-                                "result": fallback_result,
-                                "hitl_run_id": None,
-                                "status": "failed",
-                                "error": err_str,
-                            }
-                        )
-                        tool_call_records.append(record)
-                    if not end_emitted:
-                        yield _format_sse(
-                            {
-                                "type": "tool_call_end",
-                                "call_id": tcall_id,
-                                "tool_name": tname,
-                                "status": "failed",
-                                "result": fallback_result,
-                                "hitl_run_id": None,
-                                "error": err_str,
-                                "iteration": iterations,
-                            }
-                        )
-                    langchain_messages.append(
-                        ToolMessage(
-                            content=fallback_result,
-                            tool_call_id=tcall_id,
-                        )
+                    result = await asyncio.to_thread(tools_by_name[tname].invoke, targs)
+                    result_str = (
+                        result
+                        if isinstance(result, str)
+                        else json.dumps(result, ensure_ascii=False)
                     )
+                    status = "succeeded"
+                    error_msg = None
+                except Exception as tool_exc:
+                    logger.exception("Error executing tool '%s'", tname)
+                    result_str = json.dumps(
+                        {"error": str(tool_exc)}, ensure_ascii=False
+                    )
+                    status = "failed"
+                    error_msg = str(tool_exc)
+
+                if tname not in used_tools:
+                    used_tools.append(tname)
+
+                hitl_id = _extract_hitl_run_id(result_str)
+                if hitl_id and hitl_id not in created_hitl_run_ids:
+                    created_hitl_run_ids.append(hitl_id)
+
+                stored_result = _truncate(
+                    result_str, _TOOL_RESULT_MAX_CHARS, "\n…(truncated)"
+                )
+                live_result = _truncate(
+                    result_str,
+                    _LIVE_RESULT_MAX_CHARS,
+                    "\n…(truncated for live view)",
+                )
+                record.update(
+                    {
+                        "result": stored_result,
+                        "hitl_run_id": hitl_id,
+                        "status": status,
+                        "error": error_msg,
+                    }
+                )
+                tool_call_records.append(record)
+
+                end_event: Dict[str, Any] = {
+                    "type": "tool_call_end",
+                    "call_id": tcall_id,
+                    "tool_name": tname,
+                    "status": status,
+                    "result": live_result,
+                    "hitl_run_id": hitl_id,
+                    "error": error_msg,
+                    "iteration": iterations,
+                }
+                if call_key is not None:
+                    end_event["call_key"] = call_key
+                yield _format_sse(end_event)
+
+                langchain_messages.append(
+                    ToolMessage(
+                        content=result_str,
+                        tool_call_id=tcall_id,
+                    )
+                )
 
         if not final_ai_msg:
             # Final fallback call after max iterations
             yield _format_sse({"type": "thinking", "iteration": max_iterations + 1})
-            final_ai_msg = await asyncio.to_thread(
-                _logged_invoke,
+            fallback_iteration = max_iterations + 1
+            async for stream_event, stream_value in _stream_llm_turn(
                 llm,
                 langchain_messages,
                 provider,
                 model,
-                temperature=0.7,
-                max_tokens=4096,
-                prompt_for_log=user_content,
-            )
+                fallback_iteration,
+                user_content,
+            ):
+                if stream_event == "text":
+                    streamed_text_parts.append(stream_value)
+                    yield _format_sse({"type": "text", "delta": stream_value})
+                elif stream_event == "tool_call_detected":
+                    yield _format_sse(stream_value)
+                elif stream_event == "complete":
+                    final_ai_msg = stream_value
 
-        final_text = _content_to_text(final_ai_msg.content)
+            if final_ai_msg is None:
+                raise RuntimeError(
+                    "Final LLM stream did not produce a completed AI message."
+                )
+            if (
+                getattr(final_ai_msg, "tool_calls", None)
+                or getattr(final_ai_msg, "invalid_tool_calls", None)
+                or getattr(final_ai_msg, "tool_call_chunks", None)
+            ):
+                raise RuntimeError("Final fallback LLM turn returned a tool call.")
 
-        # Stream text chunk
-        if final_text:
-            yield _format_sse({"type": "text", "delta": final_text})
+        # The client has already received each non-empty delta.  Persisting
+        # exactly their concatenation keeps live Markdown, done.message and DB
+        # content identical, including any text emitted before a tool call.
+        final_text = "".join(streamed_text_parts)
 
         # Complete run in DB
         asst_msg, completed_run = await asyncio.to_thread(

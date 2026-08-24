@@ -191,6 +191,16 @@ describe("PlannerPage", () => {
 
   it("switches to week view, shows the current week, and navigates", async () => {
     const user = userEvent.setup();
+    const currentDay = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    mockGetTimeline.mockResolvedValue({
+      ...sampleTimeline,
+      ai_proposals: [
+        {
+          ...sampleTimeline.ai_proposals[0],
+          start_time: `${currentDay}T10:00:00`,
+        },
+      ],
+    } as any);
     render(<PlannerPage />);
 
     await waitFor(() => {

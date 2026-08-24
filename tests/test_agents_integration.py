@@ -1,9 +1,9 @@
 import json
 from unittest.mock import MagicMock, patch
 import pytest
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessageChunk
 
-from obsidian_ai_hub.agents import registry, runtime, store
+from obsidian_ai_hub.agents import runtime, store
 from obsidian_ai_hub.hitl.store import get_run
 
 
@@ -28,35 +28,41 @@ async def test_schedule_assistant_integration():
     # Mock calendar read
     mock_events = [{"title": "既存予定", "start": "2026-08-25T09:00:00+09:00"}]
 
-    # Step 1: LLM calls calendar_create_proposal
-    ai_msg_1 = AIMessage(
-        content="",
-        tool_calls=[
-            {
-                "name": "calendar_create_proposal",
-                "args": {
-                    "title": "チーム会議",
-                    "start_time": "2026-08-25T10:00:00+09:00",
-                    "content": "明日10時にチーム会議を入れてください",
-                },
-                "id": "call_prop_1",
-            }
-        ],
-    )
-    # Step 2: LLM responds to user
-    ai_msg_2 = AIMessage(
-        content="チーム会議の予定追加申請（HITL）を作成しました。"
-    )
-
     mock_llm = MagicMock()
-    mock_llm.invoke.side_effect = [ai_msg_1, ai_msg_2]
+
+    async def astream(_messages):
+        if mock_llm.astream.call_count == 1:
+            yield AIMessageChunk(
+                content="",
+                tool_call_chunks=[
+                    {
+                        "name": "calendar_create_proposal",
+                        "args": (
+                            '{"title":"チーム会議","start_time":'
+                            '"2026-08-25T10:00:00+09:00","content":'
+                            '"明日10時にチーム会議を入れてください"}'
+                        ),
+                        "id": "call_prop_1",
+                        "index": 0,
+                    }
+                ],
+            )
+        else:
+            yield AIMessageChunk(
+                content="チーム会議の予定追加申請（HITL）を作成しました。"
+            )
+
+    mock_llm.astream.side_effect = astream
     mock_llm.bind_tools.return_value = mock_llm
 
-    with patch(
-        "obsidian_ai_hub.agents.runtime.create_langchain_llm", return_value=mock_llm
-    ), patch(
-        "obsidian_ai_hub.agents.registry.fetch_calendar_events",
-        return_value=mock_events,
+    with (
+        patch(
+            "obsidian_ai_hub.agents.runtime.create_langchain_llm", return_value=mock_llm
+        ),
+        patch(
+            "obsidian_ai_hub.agents.registry.fetch_calendar_events",
+            return_value=mock_events,
+        ),
     ):
         events = []
         async for event_str in runtime.generate_agent_stream(

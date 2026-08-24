@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -356,5 +356,152 @@ describe("AgentsPage", () => {
     expect(
       await screen.findByText("こんにちは！何かお手伝いできますか？")
     ).toBeInTheDocument();
+  });
+
+  it("batches token rendering per frame and keeps tool preparation and stale frames safe", async () => {
+    const user = userEvent.setup();
+    const callbacks = new Map<number, FrameRequestCallback>();
+    let nextFrameId = 1;
+    const originalRequestAnimationFrame = window.requestAnimationFrame;
+    const originalCancelAnimationFrame = window.cancelAnimationFrame;
+    const requestAnimationFrame = vi.fn((callback: FrameRequestCallback) => {
+      const frameId = nextFrameId;
+      nextFrameId += 1;
+      callbacks.set(frameId, callback);
+      return frameId;
+    });
+    const cancelAnimationFrame = vi.fn((frameId: number) => {
+      callbacks.delete(frameId);
+    });
+    Object.defineProperty(window, "requestAnimationFrame", {
+      configurable: true,
+      value: requestAnimationFrame,
+    });
+    Object.defineProperty(window, "cancelAnimationFrame", {
+      configurable: true,
+      value: cancelAnimationFrame,
+    });
+
+    let emitStreamEvent: ((event: any) => void) | null = null;
+    let finishStream!: () => void;
+    mockStreamMessage.mockImplementation(
+      async (_sessionId, _content, onEvent) => {
+        emitStreamEvent = onEvent;
+        await new Promise<void>((resolve) => {
+          finishStream = resolve;
+        });
+      }
+    );
+
+    try {
+      render(
+        <MemoryRouter>
+          <AgentsPage />
+        </MemoryRouter>
+      );
+
+      const input = await screen.findByPlaceholderText("メッセージを入力…");
+      await user.type(input, "ストリーミングを試す");
+      await user.click(screen.getByRole("button", { name: "送信" }));
+      await waitFor(() => expect(emitStreamEvent).not.toBeNull());
+      const emit = emitStreamEvent!;
+
+      act(() => {
+        emit({
+          type: "tool_call_detected",
+          call_key: "1:0",
+          tool_name: "vault_search",
+          iteration: 1,
+        });
+      });
+      expect(screen.getAllByText("準備中…").length).toBeGreaterThan(0);
+      expect(screen.queryByText("引数")).not.toBeInTheDocument();
+
+      act(() => {
+        emit({
+          type: "tool_call_start",
+          call_id: "call_1",
+          call_key: "1:0",
+          tool_name: "vault_search",
+          args: { query: "予定" },
+          iteration: 1,
+        });
+      });
+      expect(screen.getAllByText("実行中…").length).toBeGreaterThan(0);
+
+      act(() => {
+        emit({
+          type: "tool_call_end",
+          call_id: "call_1",
+          call_key: "1:0",
+          tool_name: "vault_search",
+          status: "succeeded",
+          result: "検索結果",
+          hitl_run_id: null,
+          error: null,
+          iteration: 1,
+        });
+      });
+      expect(screen.getByText("成功")).toBeInTheDocument();
+
+      act(() => {
+        emit({ type: "text", delta: "token-one " });
+        emit({ type: "text", delta: "token-two" });
+      });
+      expect(requestAnimationFrame).toHaveBeenCalledTimes(1);
+      expect(screen.queryByText("token-one token-two")).not.toBeInTheDocument();
+
+      act(() => {
+        const queuedCallbacks = [...callbacks.values()];
+        callbacks.clear();
+        queuedCallbacks.forEach((callback) => callback(0));
+      });
+      expect(await screen.findByText("token-one token-two")).toBeInTheDocument();
+
+      act(() => emit({ type: "text", delta: "stale-token" }));
+      const staleFrame = [...callbacks.values()][0];
+      expect(staleFrame).toBeDefined();
+
+      act(() => {
+        emit({
+          type: "done",
+          message: {
+            message_id: "msg_stream_done",
+            session_id: sampleSession.session_id,
+            sequence: 4,
+            role: "assistant",
+            content: "確定済み本文",
+            created_at: new Date().toISOString(),
+          },
+          run: {
+            run_id: "arun_stream_done",
+            session_id: sampleSession.session_id,
+            user_message_id: "msg_stream_user",
+            assistant_message_id: "msg_stream_done",
+            status: "succeeded",
+            used_tools: ["vault_search"],
+            created_hitl_run_ids: [],
+            error_message: null,
+            started_at: "",
+            finished_at: "",
+          },
+          hitl_run_ids: [],
+        });
+      });
+      expect(cancelAnimationFrame).toHaveBeenCalled();
+      act(() => staleFrame!(0));
+      expect(screen.queryByText("stale-token")).not.toBeInTheDocument();
+
+      finishStream();
+    } finally {
+      Object.defineProperty(window, "requestAnimationFrame", {
+        configurable: true,
+        value: originalRequestAnimationFrame,
+      });
+      Object.defineProperty(window, "cancelAnimationFrame", {
+        configurable: true,
+        value: originalCancelAnimationFrame,
+      });
+    }
   });
 });

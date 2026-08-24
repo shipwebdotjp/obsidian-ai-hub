@@ -1,13 +1,53 @@
 import json
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
-import pytest
-from langchain_core.messages import AIMessage
 
-from obsidian_ai_hub.agents import registry, runtime, store
+import pytest
+from langchain_core.messages import AIMessage, AIMessageChunk
+
+from obsidian_ai_hub.agents import runtime, store
+from obsidian_ai_hub.utils import execution_logger
+
+
+def _configure_astream(mock_llm: MagicMock, turns: list[object]) -> None:
+    """Configure sequential async LLM turns from chunk lists or exceptions."""
+    remaining_turns = iter(turns)
+
+    async def astream(_messages):
+        turn = next(remaining_turns)
+        if isinstance(turn, BaseException):
+            raise turn
+        for chunk in turn:
+            if isinstance(chunk, BaseException):
+                raise chunk
+            yield chunk
+
+    mock_llm.astream.side_effect = astream
+
+
+def _payloads(events: list[str]) -> list[dict]:
+    return [json.loads(event.removeprefix("data: ").strip()) for event in events]
+
+
+def test_validated_tool_calls_rejects_duplicate_provider_ids():
+    message = AIMessage(
+        content="",
+        tool_calls=[
+            {"name": "web_search", "args": {"query": "one"}, "id": "call_same"},
+            {"name": "vault_search", "args": {"query": "two"}, "id": "call_same"},
+        ],
+    )
+
+    with pytest.raises(ValueError, match="duplicate"):
+        runtime._validated_tool_calls(
+            message,
+            {"web_search": object(), "vault_search": object()},
+            iteration=1,
+        )
 
 
 @pytest.mark.anyio
-async def test_agent_stream_simple_response():
+async def test_agent_stream_sends_text_chunks_in_order_and_persists_exact_content():
     agent = store.create_agent(
         name="Stream Agent",
         system_prompt="Helpful assistant",
@@ -16,51 +56,74 @@ async def test_agent_stream_simple_response():
     user_msg, run = store.start_user_run(session["session_id"], "こんにちは")
 
     mock_llm = MagicMock()
-    mock_ai_msg = AIMessage(content="こんにちは！お手伝いできることはありますか？")
-    mock_llm.invoke.return_value = mock_ai_msg
+    _configure_astream(
+        mock_llm,
+        [
+            [
+                AIMessageChunk(content="こんにちは"),
+                AIMessageChunk(
+                    content="！お手伝いできますか？",
+                    response_metadata={
+                        "finish_reason": "stop",
+                        "token_usage": {
+                            "prompt_tokens": 10,
+                            "completion_tokens": 20,
+                            "total_tokens": 30,
+                        },
+                    },
+                ),
+            ]
+        ],
+    )
     mock_llm.bind_tools.return_value = mock_llm
 
     with patch(
         "obsidian_ai_hub.agents.runtime.create_langchain_llm", return_value=mock_llm
     ):
-        events = []
-        async for event in runtime.generate_agent_stream(
-            agent=agent,
-            session=session,
-            run=run,
-            history_messages=[user_msg],
-            user_content="こんにちは",
-        ):
-            events.append(event)
+        events = [
+            event
+            async for event in runtime.generate_agent_stream(
+                agent=agent,
+                session=session,
+                run=run,
+                history_messages=[user_msg],
+                user_content="こんにちは",
+            )
+        ]
 
-    payloads = [json.loads(e.removeprefix("data: ").strip()) for e in events]
-    thinking = [p for p in payloads if p["type"] == "thinking"]
-    text_events = [p for p in payloads if p["type"] == "text"]
-    done_events = [p for p in payloads if p["type"] == "done"]
+    payloads = _payloads(events)
+    text_events = [payload for payload in payloads if payload["type"] == "text"]
+    done_payload = next(payload for payload in payloads if payload["type"] == "done")
+    final_text = "".join(payload["delta"] for payload in text_events)
 
-    assert len(thinking) == 1
-    assert thinking[0]["iteration"] == 1
-    assert len(text_events) == 1
-    assert "こんにちは" in text_events[0]["delta"]
-    assert len(done_events) == 1
-
-    done_payload = done_events[0]
-    assert done_payload["message"]["role"] == "assistant"
+    assert [payload["type"] for payload in payloads] == [
+        "thinking",
+        "text",
+        "text",
+        "done",
+    ]
+    assert final_text == "こんにちは！お手伝いできますか？"
+    assert done_payload["message"]["content"] == final_text
     assert done_payload["run"]["status"] == "succeeded"
 
-    # Verify ordering: thinking -> text -> done
-    assert payloads[0]["type"] == "thinking"
-    assert payloads[1]["type"] == "text"
-    assert payloads[2]["type"] == "done"
-
-    # Verify DB
     db_run = store.get_run(run["run_id"])
     assert db_run["status"] == "succeeded"
-    assert db_run["assistant_message_id"] == done_payload["message"]["message_id"]
+    persisted_message = store.get_message(done_payload["message"]["message_id"])
+    assert persisted_message["content"] == final_text
+
+    logs, total = execution_logger.list_execution_logs(kind="llm")
+    assert total == 1
+    log = execution_logger.get_llm_call_detail(logs[0]["id"])
+    assert log["status"] == "succeeded"
+    assert log["response"] == final_text
+    assert log["prompt_tokens"] == 10
+    assert log["completion_tokens"] == 20
+    assert log["total_tokens"] == 30
+    assert log["finish_reason"] == "stop"
 
 
 @pytest.mark.anyio
-async def test_agent_stream_with_tool_call():
+async def test_agent_stream_detects_and_executes_a_completed_tool_call():
     agent = store.create_agent(
         name="Tool Agent",
         system_prompt="Schedule manager",
@@ -71,65 +134,92 @@ async def test_agent_stream_with_tool_call():
         session["session_id"], "8月25日10時に会議の予定を入れて"
     )
 
-    # First invoke returns tool_call
-    ai_tool_msg = AIMessage(
-        content="",
-        tool_calls=[
-            {
-                "name": "calendar_create_proposal",
-                "args": {
-                    "title": "会議",
-                    "start_time": "2026-08-25T10:00:00+09:00",
-                },
-                "id": "call_123",
-            }
+    mock_llm = MagicMock()
+    _configure_astream(
+        mock_llm,
+        [
+            [
+                AIMessageChunk(
+                    content="",
+                    tool_call_chunks=[
+                        {
+                            "name": "calendar_create_proposal",
+                            "args": '{"title":"会議","start_time":"2026-08-25T10:00:00+09:00"',
+                            "id": "call_123",
+                            "index": 0,
+                        }
+                    ],
+                ),
+                AIMessageChunk(
+                    content="",
+                    tool_call_chunks=[
+                        {
+                            "name": None,
+                            "args": "}",
+                            "id": None,
+                            "index": 0,
+                        }
+                    ],
+                ),
+            ],
+            [
+                AIMessageChunk(content="カレンダーへの"),
+                AIMessageChunk(content="予定追加申請（HITL）を作成しました。"),
+            ],
         ],
     )
-    # Second invoke returns final answer text
-    ai_final_msg = AIMessage(
-        content="カレンダーへの予定追加申請（HITL）を作成しました。"
-    )
-
-    mock_llm = MagicMock()
-    mock_llm.invoke.side_effect = [ai_tool_msg, ai_final_msg]
     mock_llm.bind_tools.return_value = mock_llm
 
     with patch(
         "obsidian_ai_hub.agents.runtime.create_langchain_llm", return_value=mock_llm
     ):
-        events = []
-        async for event in runtime.generate_agent_stream(
-            agent=agent,
-            session=session,
-            run=run,
-            history_messages=[user_msg],
-            user_content="8月25日10時に会議の予定を入れて",
-        ):
-            events.append(event)
+        events = [
+            event
+            async for event in runtime.generate_agent_stream(
+                agent=agent,
+                session=session,
+                run=run,
+                history_messages=[user_msg],
+                user_content="8月25日10時に会議の予定を入れて",
+            )
+        ]
 
-    payloads = [json.loads(e.removeprefix("data: ").strip()) for e in events]
-    done_payload = next(p for p in payloads if p["type"] == "done")
+    payloads = _payloads(events)
+    detected = [
+        payload for payload in payloads if payload["type"] == "tool_call_detected"
+    ]
+    starts = [payload for payload in payloads if payload["type"] == "tool_call_start"]
+    ends = [payload for payload in payloads if payload["type"] == "tool_call_end"]
+    done_payload = next(payload for payload in payloads if payload["type"] == "done")
+
+    assert [payload["type"] for payload in payloads] == [
+        "thinking",
+        "tool_call_detected",
+        "tool_call_start",
+        "tool_call_end",
+        "thinking",
+        "text",
+        "text",
+        "done",
+    ]
+    assert detected == [
+        {
+            "type": "tool_call_detected",
+            "call_key": "1:0",
+            "tool_name": "calendar_create_proposal",
+            "iteration": 1,
+        }
+    ]
+    assert starts[0]["call_id"] == "call_123"
+    assert starts[0]["call_key"] == detected[0]["call_key"]
+    assert ends[0]["call_key"] == detected[0]["call_key"]
+    assert ends[0]["status"] == "succeeded"
+    assert (
+        done_payload["message"]["content"]
+        == "カレンダーへの予定追加申請（HITL）を作成しました。"
+    )
     assert len(done_payload["hitl_run_ids"]) == 1
     assert done_payload["hitl_run_ids"][0].startswith("hrun_inbox_calendar_")
-
-    # Verify streaming progress events
-    thinking = [p for p in payloads if p["type"] == "thinking"]
-    starts = [p for p in payloads if p["type"] == "tool_call_start"]
-    ends = [p for p in payloads if p["type"] == "tool_call_end"]
-    # Two thinking events (iteration 1 before tool call, iteration 2 before final answer)
-    assert len(thinking) == 2
-    assert thinking[0]["iteration"] == 1
-    assert thinking[1]["iteration"] == 2
-    assert len(starts) == 1
-    assert starts[0]["tool_name"] == "calendar_create_proposal"
-    assert starts[0]["call_id"] == "call_123"
-    assert len(ends) == 1
-    assert ends[0]["tool_name"] == "calendar_create_proposal"
-    assert ends[0]["status"] == "succeeded"
-    assert ends[0]["call_id"] == "call_123"
-    # Ordering: thinking(1) -> start -> end -> thinking(2) -> text -> done
-    types = [p["type"] for p in payloads]
-    assert types == ["thinking", "tool_call_start", "tool_call_end", "thinking", "text", "done"]
 
     db_run = store.get_run(run["run_id"])
     assert db_run["used_tools"] == ["calendar_create_proposal"]
@@ -137,7 +227,186 @@ async def test_agent_stream_with_tool_call():
 
 
 @pytest.mark.anyio
-async def test_agent_stream_error_handling():
+async def test_agent_stream_validates_all_interleaved_tool_chunks_before_execution():
+    agent = store.create_agent(
+        name="Interleaved Tool Agent",
+        system_prompt="Use tools",
+        tool_ids=["web_search", "vault_search"],
+    )
+    session = store.create_session(agent["agent_id"])
+    user_msg, run = store.start_user_run(session["session_id"], "do both")
+
+    stream_finished = False
+    calls: list[tuple[str, dict]] = []
+
+    def first_invoke(args):
+        assert stream_finished
+        calls.append(("web_search", args))
+        return "first result"
+
+    def second_invoke(args):
+        assert stream_finished
+        calls.append(("vault_search", args))
+        return "second result"
+
+    first_tool = SimpleNamespace(
+        name="web_search", invoke=MagicMock(side_effect=first_invoke)
+    )
+    second_tool = SimpleNamespace(
+        name="vault_search", invoke=MagicMock(side_effect=second_invoke)
+    )
+
+    mock_llm = MagicMock()
+
+    async def astream(_messages):
+        nonlocal stream_finished
+        turn = mock_llm.astream.call_count
+        if turn == 1:
+            yield AIMessageChunk(
+                content="",
+                tool_call_chunks=[
+                    {
+                        "name": "web_search",
+                        "args": '{"value":',
+                        "id": None,
+                        "index": 0,
+                    }
+                ],
+            )
+            yield AIMessageChunk(
+                content="",
+                tool_call_chunks=[
+                    {
+                        "name": "vault_search",
+                        "args": '{"value":',
+                        "id": "call_second",
+                        "index": 1,
+                    }
+                ],
+            )
+            yield AIMessageChunk(
+                content="",
+                tool_call_chunks=[
+                    {
+                        "name": None,
+                        "args": "1}",
+                        "id": None,
+                        "index": 0,
+                    }
+                ],
+            )
+            yield AIMessageChunk(
+                content="",
+                tool_call_chunks=[
+                    {
+                        "name": None,
+                        "args": "2}",
+                        "id": None,
+                        "index": 1,
+                    }
+                ],
+            )
+            stream_finished = True
+        else:
+            yield AIMessageChunk(content="both complete")
+
+    mock_llm.astream.side_effect = astream
+    mock_llm.bind_tools.return_value = mock_llm
+
+    with (
+        patch(
+            "obsidian_ai_hub.agents.runtime.create_langchain_llm", return_value=mock_llm
+        ),
+        patch(
+            "obsidian_ai_hub.agents.runtime.registry.resolve_tools_with_context",
+            return_value=[first_tool, second_tool],
+        ),
+    ):
+        events = [
+            event
+            async for event in runtime.generate_agent_stream(
+                agent=agent,
+                session=session,
+                run=run,
+                history_messages=[user_msg],
+                user_content="do both",
+            )
+        ]
+
+    payloads = _payloads(events)
+    starts = [payload for payload in payloads if payload["type"] == "tool_call_start"]
+    assert [payload["call_key"] for payload in starts] == ["1:0", "1:1"]
+    assert starts[0]["call_id"] == "call_1_0"
+    assert starts[1]["call_id"] == "call_second"
+    assert calls == [("web_search", {"value": 1}), ("vault_search", {"value": 2})]
+    assert payloads[-1]["type"] == "done"
+
+
+@pytest.mark.anyio
+async def test_agent_stream_rejects_invalid_tool_chunks_without_execution_or_hitl():
+    agent = store.create_agent(
+        name="Invalid Tool Agent",
+        system_prompt="Use tools",
+        tool_ids=["web_search"],
+    )
+    session = store.create_session(agent["agent_id"])
+    user_msg, run = store.start_user_run(session["session_id"], "unsafe")
+    safe_tool = SimpleNamespace(
+        name="web_search", invoke=MagicMock(return_value="should not run")
+    )
+
+    mock_llm = MagicMock()
+    _configure_astream(
+        mock_llm,
+        [
+            [
+                AIMessageChunk(
+                    content="",
+                    tool_call_chunks=[
+                        {
+                            "name": "web_search",
+                            "args": "{not valid json",
+                            "id": "call_bad",
+                            "index": 0,
+                        }
+                    ],
+                )
+            ]
+        ],
+    )
+    mock_llm.bind_tools.return_value = mock_llm
+
+    with (
+        patch(
+            "obsidian_ai_hub.agents.runtime.create_langchain_llm", return_value=mock_llm
+        ),
+        patch(
+            "obsidian_ai_hub.agents.runtime.registry.resolve_tools_with_context",
+            return_value=[safe_tool],
+        ),
+    ):
+        events = [
+            event
+            async for event in runtime.generate_agent_stream(
+                agent=agent,
+                session=session,
+                run=run,
+                history_messages=[user_msg],
+                user_content="unsafe",
+            )
+        ]
+
+    payloads = _payloads(events)
+    safe_tool.invoke.assert_not_called()
+    assert not [payload for payload in payloads if payload["type"] == "tool_call_start"]
+    assert payloads[-1]["type"] == "error"
+    db_run = store.get_run(run["run_id"])
+    assert db_run["status"] == "failed"
+    assert db_run["created_hitl_run_ids"] == []
+
+
+@pytest.mark.anyio
+async def test_agent_stream_error_handling_marks_run_and_llm_log_failed():
     agent = store.create_agent(
         name="Error Agent",
         system_prompt="Error tester",
@@ -146,32 +415,34 @@ async def test_agent_stream_error_handling():
     user_msg, run = store.start_user_run(session["session_id"], "テスト")
 
     mock_llm = MagicMock()
-    mock_llm.invoke.side_effect = RuntimeError("API key invalid")
+    _configure_astream(mock_llm, [RuntimeError("API key invalid")])
     mock_llm.bind_tools.return_value = mock_llm
 
     with patch(
         "obsidian_ai_hub.agents.runtime.create_langchain_llm", return_value=mock_llm
     ):
-        events = []
-        async for event in runtime.generate_agent_stream(
-            agent=agent,
-            session=session,
-            run=run,
-            history_messages=[user_msg],
-            user_content="テスト",
-        ):
-            events.append(event)
+        events = [
+            event
+            async for event in runtime.generate_agent_stream(
+                agent=agent,
+                session=session,
+                run=run,
+                history_messages=[user_msg],
+                user_content="テスト",
+            )
+        ]
 
-    payloads = [json.loads(e.removeprefix("data: ").strip()) for e in events]
-    # thinking is emitted before the failing invoke, then error
-    assert len(payloads) == 2
-    assert payloads[0]["type"] == "thinking"
-    assert payloads[0]["iteration"] == 1
-    assert payloads[1]["type"] == "error"
-    error_payload = payloads[1]
-    assert error_payload["error"] == "AIエージェントの実行中にエラーが発生しました。"
-    assert error_payload["run_id"] == run["run_id"]
+    payloads = _payloads(events)
+    assert [payload["type"] for payload in payloads] == ["thinking", "error"]
+    assert payloads[1]["run_id"] == run["run_id"]
 
     db_run = store.get_run(run["run_id"])
     assert db_run["status"] == "failed"
     assert "API key invalid" in db_run["error_message"]
+
+    logs, total = execution_logger.list_execution_logs(kind="llm")
+    assert total == 1
+    log = execution_logger.get_llm_call_detail(logs[0]["id"])
+    assert log["status"] == "failed"
+    assert log["exception_type"] == "RuntimeError"
+    assert "API key invalid" in log["exception_message"]

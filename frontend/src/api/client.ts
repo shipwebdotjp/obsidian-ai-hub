@@ -573,18 +573,43 @@ export function deleteAgentSession(sessionId: string): Promise<{ success: boolea
   );
 }
 
-function parseSseLine(line: string, onEvent: (event: AgentStreamEvent) => void): void {
-  const trimmed = line.trim();
-  if (trimmed.startsWith("data: ")) {
-    const jsonStr = trimmed.slice(6).trim();
-    if (jsonStr) {
-      try {
-        const parsed = JSON.parse(jsonStr) as AgentStreamEvent;
-        onEvent(parsed);
-      } catch (e) {
-        console.error("Failed to parse SSE data line:", jsonStr, e);
-      }
-    }
+/** Parse one complete SSE event block, including CRLF and multiline data. */
+export function parseAgentSseEvent(
+  eventBlock: string,
+  onEvent: (event: AgentStreamEvent) => void,
+): void {
+  const dataLines: string[] = [];
+  for (const line of eventBlock.split(/\r?\n/)) {
+    if (line.startsWith(":")) continue;
+    if (!line.startsWith("data:")) continue;
+
+    let data = line.slice(5);
+    if (data.startsWith(" ")) data = data.slice(1);
+    dataLines.push(data);
+  }
+
+  if (dataLines.length === 0) return;
+
+  const jsonStr = dataLines.join("\n");
+  try {
+    const parsed = JSON.parse(jsonStr) as AgentStreamEvent;
+    onEvent(parsed);
+  } catch (e) {
+    console.error("Failed to parse SSE event:", jsonStr, e);
+  }
+}
+
+function drainAgentSseEvents(
+  buffer: string,
+  onEvent: (event: AgentStreamEvent) => void,
+): string {
+  let remainder = buffer;
+  while (true) {
+    const separator = /\r?\n\r?\n/.exec(remainder);
+    if (!separator || separator.index === undefined) return remainder;
+
+    parseAgentSseEvent(remainder.slice(0, separator.index), onEvent);
+    remainder = remainder.slice(separator.index + separator[0].length);
   }
 }
 
@@ -639,17 +664,15 @@ export async function streamAgentMessage(
     const { value, done } = await reader.read();
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
-
-    const lines = buffer.split("\n\n");
-    buffer = lines.pop() || "";
-
-    for (const line of lines) {
-      parseSseLine(line, onEvent);
-    }
+    buffer = drainAgentSseEvents(buffer, onEvent);
   }
 
+  // Flush an incomplete UTF-8 sequence retained by TextDecoder, then parse
+  // the final event even when a proxy omitted its trailing blank line.
+  buffer += decoder.decode();
+  buffer = drainAgentSseEvents(buffer, onEvent);
   if (buffer.trim()) {
-    parseSseLine(buffer, onEvent);
+    parseAgentSseEvent(buffer, onEvent);
   }
 }
 

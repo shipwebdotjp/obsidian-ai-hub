@@ -296,3 +296,40 @@ v1 では `generate_agent_stream()` がツールループ中一切イベント�
 
 - `uv run pytest tests/test_agents_runtime.py` の単純応答テストは `thinking`→`text`→`done` の順序と件数を検証、ツール呼び出しテストは `thinking`/`tool_call_start`/`tool_call_end` の順序と内容を検証。
 - 既存の `done` 型フィルタで探すテスト（`tests/test_agents_integration.py` / `tests/test_memory_agent_tools.py`）は追加イベントに影響されないことを確認。
+
+## Web AI エージェントのトークンストリーミングと安全なツール集約
+
+| 項目 | 内容 |
+|------|------|
+| 決定日 | 2026-08-24 |
+| カテゴリ | Web API・フロントエンド・AIエージェント |
+| 決定内容 | エージェントの全 LLM ターンを LangChain `astream()` で処理し、到着順の本文差分を SSE で配信する。同時にツール呼び出しはチャンク完結後にのみ検証・実行し、UI はフレーム単位で本文を反映する。 |
+
+### 背景
+
+2026-08-23 の逐次進捗表示では、ツール進捗だけを先行して可視化し、本文トークンの逐次表示は保留していた。待機時間をさらに明確にするには本文も即時表示する必要がある一方、provider ごとの差異があるツール引数チャンクを途中で解釈すると、未完結または不正な呼び出しを実行する危険がある。
+
+### 仕様
+
+1. **本文・実行ログの整合性**
+   - 各 LLM ターンは `_logged_astream()` を通し、空でない本文差分を `text` SSE として到着順に送る。
+   - `AIMessageChunk` は `+` で集約して通常の `AIMessage` に変換する。LLM 実行ログはストリーム完了時に集約済み本文、usage、finish reason を記録し、例外時は failed とする。
+   - assistant 本文は送信済み全差分の連結値を保存する。これによりライブ Markdown、`done.message.content`、SQLite の内容が一致し、ツール前の中間本文も失われない。
+
+2. **ツールチャンクの安全境界**
+   - `tool_call_chunks` は `iteration:index` の `call_key` で追跡し、名前を初めて得た時点で `tool_call_detected` SSE を送る。`tool_call_start` と `tool_call_end` の `call_key` は optional とし、既存クライアントとの互換性を保つ。
+   - 生のチャンク引数は実行用に復元しない。集約後の `tool_calls` だけを実引数として採用し、生 JSON は完結した object であることの検証に限る。
+   - すべての call を、object 引数・allowlist 名・一意 ID として検証してから、既存順序で実行する。ID 欠落時はサーバーが一意な ID を採番する。不正 JSON、未完結、未知ツール、重複 ID はツール実行・HITL 登録を行わず run を failed にする。
+
+3. **SSE クライアントと描画**
+   - Fetch `ReadableStream` は行単位ではなく SSE イベント単位で解析する。`TextDecoder` のストリーム復号と CRLF 対応により、任意の byte 境界や UTF-8 分割でも JSON を壊さない。
+   - `/agents` は本文差分を `requestAnimationFrame` ごとにまとめて Markdown へ反映する。完了・失敗・abort・エージェント/セッション切替時には保留フレームを無効化し、古いストリームが再表示されないようにする。
+   - ライブツール表示は「準備中 → 実行中 → 成功/失敗」。準備中は部分引数を表示せず、`tool_call_start` 後の確定した構造化引数だけを詳細表示する。
+
+4. **provider の扱い**
+   - 既存の provider を同じ API パスで扱う。async token stream またはツール呼び出しを提供できないモデルは、provider 側の明確な実行失敗として run を failed にする。取消・再接続・バックグラウンド継続の扱いは変更しない。
+
+### 検証
+
+- Python の runtime/API テストで本文差分の順序・DB/`done` 整合、実行ログの usage/失敗、分割・交互ツールチャンク、ID 採番、不正 JSON の非実行を確認する。
+- Vitest で CRLF/UTF-8 分割の SSE 解析、rAF 集約、準備中から完了までのツール表示、完了後の stale frame 抑止を確認する。
