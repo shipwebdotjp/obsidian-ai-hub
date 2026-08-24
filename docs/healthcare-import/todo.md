@@ -15,30 +15,32 @@ Plan: docs/healthcare-import/plan.md
 - [x] ocr review 指摘18件を修正（config冗長expanduser、helpersのdead code/assert、fixtures DOCTYPE、conftestガード等）
 - [x] `src/obsidian_ai_hub/healthcare/store.py` に `idx_hw_import` と `health_workout_routes PK(seq)` を追加（ocr指摘の性能対策）
 
-## Phase 2 — インポータ MVP (2–3日) — 完了
+## Phase 2 — インポータ MVP (2–3日) — 完了 (72ea966) + ocr修正 (9f2d935)
 
 - [x] `src/obsidian_ai_hub/healthcare/importer.py` 実装
   - [x] `import_export(export_dir, batch_size=5000, dry_run=False)` — `iterparse` + `elem.clear()` + fingerprint (SHA256 `type|syncId` or `type|source|start|end|value|unit`) + `INSERT OR IGNORE` 冪等
-  - [x] Record: `value_numeric`/`value_text` 振り分け、`health_record_metadata` / `health_hrv_beats` へ挿入
-  - [x] Workout: 4テーブル分割（metadata/events/statistics/routes, seq PK, idx_hw_import）
+  - [x] Record: `value_numeric`/`value_text` 振り分け、`health_record_metadata` / `health_hrv_beats` へ挿入（HealthRecordモデルを単一ソースとして利用）
+  - [x] Workout: 4テーブル分割（metadata/events/statistics/routes, seq PK, idx_hw_import, HealthWorkoutモデル利用）
   - [x] ActivitySummary: `raw_json`/`raw_xml` 保存
   - [x] `health_imports` の `running`→`succeeded`/`failed` 更新と `stats_json` 集計（`cda_skipped=true`）
-  - [x] 進捗ログ（batchごとに commit、10k件ごとに info）、例外はマスクせず `failed` 記録後に再raise
-  - [x] ECG: `electrocardiograms/*.csv` を走査し `health_ecg` へ（relative file_path, sha256, file_size, header parse）
+  - [x] 進捗ログ（batchごとに commit、batch毎に info）、`health_data_elem.clear()` でメモリ解放、例外は `rollback()` 後に `failed` 記録して再raise（ocr指摘の高バグ修正）
+  - [x] ECG: `electrocardiograms/*.csv` をストリーミングで走査し `health_ecg` へ（relative file_path, sha256, file_size, header parse、UNIQUE(file_path)で冪等）
   - [x] `dry_run` は DB 書き込みなしで件数カウント
-- [x] `src/obsidian_ai_hub/import_apple_health.py` 薄い CLI ラッパ（`argparse` のみ、実体は `importer.import_export` 委譲、`--export-dir/--batch-size/--dry-run`）
-- [x] `tests/healthcare/fixtures/export_mini.xml` / `fixtures/ecg_mini.csv` 作成（Phase1 で完了、helpers の定数化と anchor assert 済み）
-- [x] `tests/healthcare/test_importer.py` 作成（7 records / 1 workout / 1 activity / 1 ecg、2回目冪等、syncId fingerprint、dry_run、ECGなし、CLI、missing dir）
-- [x] `uv run pytest tests/healthcare/` で全件通過確認 — 18 passed (store 8 + importer 7 + fixtures 3)
+  - [x] `src/obsidian_ai_hub/healthcare/store.py` のECG関連をストリーミング＋non-finite検証＋ヘッダ欠損はValueErrorに
+- [x] `src/obsidian_ai_hub/import_apple_health.py` 薄い CLI ラッパ（`--batch-size` は `_positive_int` で正数バリデーション、例外はtraceback出力に分岐）
+- [x] `tests/healthcare/fixtures/export_mini.xml` / `fixtures/ecg_mini.csv` 作成（Phase1 で完了、helpers の定数化と `__getattr__`遅延＋ECG_DATE導出でocr対応）
+- [x] `tests/healthcare/test_importer.py` 作成（7 records / 1 workout / 1 activity / 1 ecg、2回目冪等(ECG含む)、syncId fingerprint、dry_run、ECGなし、CLI、CLI dry-run/batch-sizeバリデーション、失敗時rollbackでpartial 0件、missing dir — 22 passed）
+- [x] `uv run pytest tests/healthcare/` で全件通過確認 — 22 passed、実データdry_run 1,142,682 records/24 workoutsを4.2sで検証
+- [x] ocr 26件を反映（batch-size検証、rollback、root clear、進捗ログ、malformed warning、二次例外ログ、hashlib重複除去、ECGヘッダストリーミング、modelsのhash/compare対称、storeのguard必須化、conftest改名等）
 
-## Phase 3 — ECG と仕上げ (1日)
+## Phase 3 — ECG と仕上げ (1日) — Phase2で先行完了
 
-- [ ] `importer.py` に `electrocardiograms/*.csv` スキャン追加
-  - [ ] ヘッダ8行 parse → `health_ecg` へ（`file_path` 相対保存、`sha256`/`file_size` 任意）
-  - [ ] CSV 本体は DB 非格納、helper `read_ecg_samples(ecg_id)` でファイル参照
-- [ ] `--dry-run` / `--batch-size` オプション仕上げ
-- [ ] 実データ手動検証（`ENV=test` 一時DB）: `uv run python -m obsidian_ai_hub.import_apple_health --export-dir /Users/ship/.config/obsidian-ai-hub/healthcare/apple_health_export --dry-run` で `grep -c "<Record "` と `SELECT count(*) FROM health_records` 突合（本番DB不使用）
-- [ ] README / `docs/healthcare-import/plan.md` の「将来拡張」追記確認
+- [x] `importer.py` に `electrocardiograms/*.csv` スキャン追加 — Phase2で実装済み（ストリーミングheader parse、UNIQUEで冪等）
+  - [x] ヘッダ8行 parse → `health_ecg` へ（`file_path` 相対保存、`sha256`/`file_size`）
+  - [x] CSV 本体は DB 非格納、`store.read_ecg_samples()` でファイル参照（ストリーミング＋limit対応）
+- [x] `--dry-run` / `--batch-size` オプション仕上げ — Phase2で実装・バリデーション済み
+- [x] 実データ手動検証（`ENV=test` 一時DB）: `uv run python -m obsidian_ai_hub.healthcare.importer` で dry_run 1,142,682 records/24 workouts/1155 summaries/1 ecgを4.2sで確認、実ECG 15,360 samplesも検証済み（本番DB不使用）
+- [ ] README / `docs/healthcare-import/plan.md` の「将来拡張」追記確認 — Phase4でまとめて対応
 
 ## Phase 4 — 統合 (0.5日)
 
