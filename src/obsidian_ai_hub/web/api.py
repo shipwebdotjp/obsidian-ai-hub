@@ -4,6 +4,7 @@ from obsidian_ai_hub.web.routes import (
     agents,
     dashboard,
     execution_logs,
+    healthcare,
     hitl,
     line,
     memory,
@@ -31,3 +32,4 @@ router.include_router(execution_logs.router)
 router.include_router(task_states.router)
 router.include_router(hitl.router)
 router.include_router(planner.router)
+router.include_router(healthcare.router)

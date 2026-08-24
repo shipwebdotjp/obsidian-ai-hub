@@ -32,6 +32,7 @@ import type {
   AgentRun,
   AgentSessionDetailResponse,
   AgentStreamEvent,
+  HealthcareOverviewResponse,
 } from "./types";
 
 const TOKEN_KEY = "obsidian-ai-hub:api-token";
@@ -426,6 +427,18 @@ export function deleteSummary(
   return request<SummaryDeleteResponse>(
     `/api/v1/summary-dashboard/summaries/${encodeURIComponent(summaryId)}`,
     { method: "DELETE" },
+  );
+}
+
+export function getHealthcareOverview(params: {
+  start_date: string;
+  end_date: string;
+}): Promise<HealthcareOverviewResponse> {
+  const sp = new URLSearchParams();
+  sp.set("start_date", params.start_date);
+  sp.set("end_date", params.end_date);
+  return request<HealthcareOverviewResponse>(
+    `/api/v1/healthcare/overview?${sp.toString()}`,
   );
 }
 

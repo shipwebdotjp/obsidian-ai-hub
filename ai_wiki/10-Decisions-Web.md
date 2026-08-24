@@ -333,3 +333,49 @@ v1 では `generate_agent_stream()` がツールループ中一切イベント�
 
 - Python の runtime/API テストで本文差分の順序・DB/`done` 整合、実行ログの usage/失敗、分割・交互ツールチャンク、ID 採番、不正 JSON の非実行を確認する。
 - Vitest で CRLF/UTF-8 分割の SSE 解析、rAF 集約、準備中から完了までのツール表示、完了後の stale frame 抑止を確認する。
+
+## ヘルスケア可視化ダッシュボード v1（小倍数・オンザフライ集計）
+
+| 項目 | 内容 |
+|------|------|
+| 決定日 | 2026-08-24 |
+| カテゴリ | ヘルスケア・Web API・フロントエンド |
+| 決定内容 | `/healthcare` に Quantity 型の9指標（歩数・心拍数・安静時心拍・HRV・アクティブ/基礎エネルギー・距離・上階数・エクササイズ時間）の日次推移を small-multiples（1指標1カード＋ラインチャート）で概観できるダッシュボードを追加。集計は分離DB `healthcare.sqlite3` へのオンザフライ SQL、チャートはヘルスケア専用の手書き SVG。 |
+
+### 背景
+
+`docs/healthcare-import/plan.md` で `health_daily_metrics` VIEW は将来拡張扱いだった。v1 ではまず「一定期間ごとの各数値推移をグラフで概観」したいという要求を満たすため、スキーマ変更なしで `health_records` を直接 GROUP BY する方式を採用する。
+
+### 仕様
+
+1. **データソースと集計方式（オンザフライ）**
+   - `healthcare/queries.py::get_daily_aggregates` が `health_records` を `substr(start_date,1,10)` で日次 GROUP BY し `AVG/MIN/MAX/SUM/COUNT` を返す。`idx_hr_type_start(type,start_date)` に対し `type = ? AND start_date >= ? AND start_date < ?` の範囲スキャンで活用する。
+   - `web/services/healthcare.py::get_healthcare_overview` は curated 9指標をループして日次集計を取得し、Python 側で granularity（≤60d→day / ≤366d→week / それ以上→month）へロールアップする。week は ISO 週（`Wxx`）、month は `YYYY/MM`。バケットは連続生成しデータ無しは `value:null` で欠損を明示。`latest_value` は最新非null バケット、`delta_pct` は直前非null との比率。
+   - `health_daily_metrics` VIEW / refresh job は性能要件が出るまで導入しない。API 契約（`{start_date,end_date,granularity,metrics[].buckets[]}`）は VIEW 導入後も互換を保てる。
+
+2. **API**
+   - `GET /api/v1/healthcare/overview?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD`。`require_bearer_token` 必須、`ValueError→400`、`401` は deps 一元。日付は `YYYY-MM-DD` 正規表現と `datetime.strptime` で厳密検証、`duration>3660→400`。`web/schemas.py` に `HealthcareOverviewResponse / HealthcareMetricSeries / HealthcareBucket` を追加。
+
+3. **Curated 指標（Phase 1 は Quantity のみ）**
+   - `steps (sum, count)` / `heart_rate (avg, count/min)` / `resting_heart_rate (avg)` / `hrv (avg, ms)` / `active_energy (sum, kcal)` / `basal_energy (sum, kcal)` / `distance (sum, km)` / `flights (sum, count)` / `exercise_time (sum, min)`。Category 型（`SleepAnalysis` / `AppleStandHour`）は期間計算が必要なため Phase 2 に繰越。
+
+4. **フロントエンド**
+   - `frontend/src/features/healthcare/` — `HealthcarePage.tsx`（コンテナ。preset 7/30/90/年/期間指定、`requestRef` 競合ガード）、`MetricCard.tsx`（最新値・前回比・件数表示。`formatMetricValue` で指標別桁数）、`charts.tsx`（`HealthcareTrendChart`。手書き SVG、Yドメインは `min/max` から pad→0クランプ、null での polyline 分割、Xラベル間引き、sr-only table で a11y）。`summary-dashboard/charts.tsx` は流用せず専用実装とし回帰を回避。
+   - ルーティング: `constants/routes.ts::HEALTHCARE`、`App.tsx` に `<Route>`、`Sidebar.tsx` に `ヘルスケア` NavLink（`summary-dashboard` の直後）。
+   - APIクライアント: `api/client.ts::getHealthcareOverview`、`api/types.ts` に `HealthcareOverviewResponse` 等。
+   - 空データ時は `uv run python -m obsidian_ai_hub.import_apple_health --export-dir <dir>` への誘導をカードグリッド下に表示。
+
+5. **レイアウト**
+   - ページ全体 `bg-slate-50`、ヘッダ `bg-white border-b`、フィルタバー `rounded-xl border bg-white shadow-sm`（`StatsTab.tsx:41` と同スタイル）。カードは `grid-cols-1 md:grid-cols-2 xl:grid-cols-3` の small-multiples。モバイルは1列、xlで3列。
+
+### トレードオフ
+
+- 110万 Record でも `(type,start_date)` インデックスで単一 type の範囲スキャンは効率的。30日×1指標=数千行の GROUP BY は sub-second、1年でも week に緩和される。事前集計 VIEW を持たないため書き込み不要だが、範囲が極めて広い場合や多指標同時取得は N (=9) 回の SELECT が発生。将来ボトルネックになれば `IN (types)` の単一クエリ化 or `health_daily_metrics` VIEW へ切替可能。
+- 別実装のチャートは軽微な重複を許容するかわりに `summary-dashboard` への回帰リスクを排除。DRY より feature 隔離を優先（`AGENTS.md` の薄いラッパー方針と整合）。
+- Category 型を v1 で除外したため睡眠・スタンド時間は表示されない。Phase 2 で `start_date/end_date` の期間差分集計を追加予定。
+
+### 検証
+
+- `uv run pytest tests/healthcare/test_queries.py tests/test_healthcare_web.py`（日次集計・week/month ロールアップ・平均/合計分岐・空DB・認証/バリデーション）。
+- `npm --prefix frontend test -- src/features/healthcare/HealthcarePage.test.tsx`（描画・loading/error・preset遷移・空状態・最新値/delta・custom期間適用）。
+- `npm --prefix frontend test` 138 passed、`uv run pytest tests/ 800 passed`、 `npx --prefix frontend tsc --project frontend/tsconfig.json --noEmit` クリーン。

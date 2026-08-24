@@ -546,6 +546,41 @@ class DashboardStatsResponse(BaseModel):
     hourly_category_buckets: list[HourlyCategoryBucket] = []
 
 
+# --- Healthcare Dashboard schemas ---
+
+
+class HealthcareBucket(BaseModel):
+    key: str
+    display_label: str
+    start_date: str
+    end_date: str
+    value: Optional[float] = None
+    avg: Optional[float] = None
+    min: Optional[float] = None
+    max: Optional[float] = None
+    sum: Optional[float] = None
+    count: int = 0
+
+
+class HealthcareMetricSeries(BaseModel):
+    key: str
+    label: str
+    type: str
+    unit: str
+    aggregation: Literal["sum", "avg"]
+    latest_value: Optional[float] = None
+    previous_value: Optional[float] = None
+    delta_pct: Optional[float] = None
+    buckets: list[HealthcareBucket] = Field(default_factory=list)
+
+
+class HealthcareOverviewResponse(BaseModel):
+    start_date: str
+    end_date: str
+    granularity: Literal["day", "week", "month"]
+    metrics: list[HealthcareMetricSeries] = Field(default_factory=list)
+
+
 # --- People Management schemas ---
 
 

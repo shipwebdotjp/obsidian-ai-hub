@@ -360,6 +360,40 @@ export interface DashboardStatsResponse {
   hourly_category_buckets: HourlyCategoryBucket[];
 }
 
+// --- Healthcare types ---
+
+export interface HealthcareBucket {
+  key: string;
+  display_label: string;
+  start_date: string;
+  end_date: string;
+  value: number | null;
+  avg: number | null;
+  min: number | null;
+  max: number | null;
+  sum: number | null;
+  count: number;
+}
+
+export interface HealthcareMetricSeries {
+  key: string;
+  label: string;
+  type: string;
+  unit: string;
+  aggregation: "sum" | "avg";
+  latest_value: number | null;
+  previous_value: number | null;
+  delta_pct: number | null;
+  buckets: HealthcareBucket[];
+}
+
+export interface HealthcareOverviewResponse {
+  start_date: string;
+  end_date: string;
+  granularity: "day" | "week" | "month";
+  metrics: HealthcareMetricSeries[];
+}
+
 // --- Summary Edit/Delete types ---
 
 export interface SummaryItemInput {
