@@ -88,7 +88,7 @@ export default function HealthcarePage() {
     <div className="flex h-full flex-col bg-slate-50">
       <div className="shrink-0 border-b border-slate-200 bg-white px-6 py-4">
         <h1 className="text-lg font-bold text-slate-900">ヘルスケア</h1>
-        <p className="mt-1 text-xs text-slate-500">一定期間の生体指標の推移を概観できます。Quantity 型（歩数・心拍・エネルギーなど）を日次で集計しています。</p>
+        <p className="mt-1 text-xs text-slate-500">一定期間の生体指標の推移を概観できます。Quantity 型（歩数・心拍・エネルギーなど）と Category 型（睡眠・スタンド）を日次で集計しています。</p>
       </div>
 
       <div className="flex-1 overflow-y-auto p-6 space-y-6">

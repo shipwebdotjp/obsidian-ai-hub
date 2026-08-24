@@ -379,3 +379,44 @@ v1 では `generate_agent_stream()` がツールループ中一切イベント�
 - `uv run pytest tests/healthcare/test_queries.py tests/test_healthcare_web.py`（日次集計・week/month ロールアップ・平均/合計分岐・空DB・認証/バリデーション）。
 - `npm --prefix frontend test -- src/features/healthcare/HealthcarePage.test.tsx`（描画・loading/error・preset遷移・空状態・最新値/delta・custom期間適用）。
 - `npm --prefix frontend test` 138 passed、`uv run pytest tests/ 800 passed`、 `npx --prefix frontend tsc --project frontend/tsconfig.json --noEmit` クリーン。
+
+## ヘルスケアダッシュボード v2（睡眠・スタンド Category 対応）
+
+| 項目 | 内容 |
+|------|------|
+| 決定日 | 2026-08-24 |
+| カテゴリ | ヘルスケア・Web API・フロントエンド |
+| 決定内容 | Category 型の睡眠・スタンドをダッシュボードに追加。睡眠は `HKCategoryTypeIdentifierSleepAnalysis` の Asleep 系 `value_text` の `start/end` 期間を時間換算して日次合計、スタンドは `HKCategoryTypeIdentifierAppleStandHour` の `Stood` 件数を時間換算して日次合計する。 |
+
+### 背景
+
+v1 は Quantity 型（`value_numeric`）のみで、もっとも要望の高い睡眠時間とスタンド時間が未対応だった。Category 型は `value_numeric IS NULL` で `value_text/start/end` からの導出が必要なため別途実装が必要。
+
+### 仕様
+
+1. **バックエンド `healthcare/queries.py`**
+   - `_parse_health_datetime(s)` — `"%Y-%m-%d %H:%M:%S %z"` を主とし `fromisoformat` へのフォールバックで `2026-08-20 23:00:00 +0900` / `T` 区切り / `+09:00` を吸収。失敗は `None` で行スキップ。
+   - `get_daily_category_durations(conn, type_, start_date, end_date, allowed_values)` — `type = ? AND start_date >= ? AND start_date < ?` で取得後、Python で `(end-start).total_seconds()/3600` を `substr(start_date,1,10)` の開始日バケットへ加算。`allowed_values` で `InBed/Awake` を除外し Asleep 系のみを合計。`0 < delta <=48h` のみ採用し負値や異常値を除外。
+   - `get_daily_stand_counts(conn, start_date, end_date)` — `value_text='HKCategoryValueAppleStandHourStood'` を `COUNT(*) GROUP BY substr(start_date,1,10)` で集計。1レコード=1時間として扱う。
+   - いずれも sparse（データ無し日は欠落）で返す。`list_available_types` 等は変更なし。
+
+2. **バックエンド `web/services/healthcare.py`**
+   - `CURATED_METRICS` に `sleep (h, sum)` と `stand_hours (h, sum)` を追加し計11指標。`_SLEEP_ALLOWED_VALUES`（Asleep/Core/Deep/REM/Unspec の5値）を定義。
+   - Quantity 9指標は従来どおり `get_daily_aggregates_multi` で1クエリ集約。Category 2指標は個別に `get_daily_category_durations` / `get_daily_stand_counts` を呼び、日次 dict を `{day: {"sum": hrs, "count":1,…}}` に変換して既存のバケットロールアップ（`_bucket_key_for_date`）へ流用。週・月では日次合計の合算となり、週バケットは `52.5h`（7日×7.5h）のように正しく集計される。
+
+3. **フロントエンド**
+   - `MetricCard.tsx` の `PALETTE` に `sleep: #0ea5e9 / stand_hours: #84cc16` を追加。`formatMetricValue` で `sleep/stand_hours` は `toFixed(1)`、単位 `h`。
+   - `HealthcarePage.tsx` の説明文を「Quantity 型と Category 型（睡眠・スタンド）」に更新。
+   - チャートは既存 `HealthcareTrendChart` を流用。睡眠は 0–9h、スタンドは 0–12h の Y ドメインで描画される。
+
+### トレードオフ
+
+- 睡眠の帰属は `start_date` の日付（夜の開始日）に固定。23:00–07:00 の睡眠は開始日へ 8h として計上し、日跨ぎの案分は行わない。日次で概観する用途では十分で、案分の複雑さを回避。
+- `get_daily_category_durations` は SQL 集計ではなく Python で期間計算するため、1年で睡眠~2k行・スタンド~3k行程度だがいずれも軽量。将来行数が増えてもインデックス `idx_hr_type_start` の範囲スキャンで賄える。
+- 新たに2クエリ（睡眠・スタンド）がリクエスト毎に追加されるが、Category は件数が少なく N+1 の影響は軽微。将来的に `health_daily_metrics` VIEW へ移行する際は API 契約を維持したまま置換可能。
+
+### 検証
+
+- `uv run pytest tests/healthcare/test_queries.py::test_category_sleep_and_stand` — InBed を除外して AsleepCore 7h50m=7.83h が 2026-08-20 に集計されること、stand 1h、週次 52.5h の合算を確認。
+- `tests/test_healthcare_web.py` の `len(metrics)==11` と `sleep/stand_hours` キー存在、`HealthcarePage` の表示は既存 Vitest で回帰確認。
+- `uv run pytest tests/ 800 passed` 維持、`npx --prefix frontend tsc --noEmit` クリーン。

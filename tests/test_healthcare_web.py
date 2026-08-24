@@ -34,9 +34,13 @@ def test_healthcare_overview_success(healthcare_client):
     assert data["start_date"] == "2026-08-15"
     assert data["end_date"] == "2026-08-21"
     assert data["granularity"] == "day"
-    assert len(data["metrics"]) == 9
+    assert len(data["metrics"]) == 11
     # success path should populate latest_value for seeded data (mini export has 2026-08-20)
     assert any(m["latest_value"] is not None for m in data["metrics"])
+    #睡眠・スタンドも含まれる
+    keys = {m["key"] for m in data["metrics"]}
+    assert "sleep" in keys
+    assert "stand_hours" in keys
     # Each metric should have buckets length = 7 for day granularity 7 days
     for m in data["metrics"]:
         assert "key" in m

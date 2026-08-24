@@ -1,7 +1,7 @@
 """Healthcare overview service — on-the-fly aggregation over healthcare.sqlite3.
 
-Phase 1: curated Quantity types only (value_numeric). Category types (sleep/stand)
-require duration computation and are deferred.
+Phase 2 adds Category types (sleep/stand) with duration/count derived from
+start_date/end_date/value_text.
 """
 
 from __future__ import annotations
@@ -12,7 +12,17 @@ from datetime import date, datetime, timedelta
 from obsidian_ai_hub.healthcare import queries as hc_queries
 from obsidian_ai_hub.healthcare.store import get_healthcare_db_connection
 
-# Curated metrics for Phase 1: Quantity types only.
+# Curated metrics: Phase 1 Quantity + Phase 2 Category (sleep/stand).
+# Category metrics are derived from start_date/end_date/value_text durations
+# rather than value_numeric.
+_SLEEP_ALLOWED_VALUES: set[str] = {
+    "HKCategoryValueSleepAnalysisAsleep",
+    "HKCategoryValueSleepAnalysisAsleepCore",
+    "HKCategoryValueSleepAnalysisAsleepDeep",
+    "HKCategoryValueSleepAnalysisAsleepREM",
+    "HKCategoryValueSleepAnalysisAsleepUnspecified",
+}
+
 CURATED_METRICS: list[dict[str, str]] = [
     {
         "key": "steps",
@@ -75,6 +85,20 @@ CURATED_METRICS: list[dict[str, str]] = [
         "label": "エクササイズ時間",
         "type": "HKQuantityTypeIdentifierAppleExerciseTime",
         "unit": "min",
+        "aggregation": "sum",
+    },
+    {
+        "key": "sleep",
+        "label": "睡眠時間",
+        "type": "HKCategoryTypeIdentifierSleepAnalysis",
+        "unit": "h",
+        "aggregation": "sum",
+    },
+    {
+        "key": "stand_hours",
+        "label": "スタンド時間",
+        "type": "HKCategoryTypeIdentifierAppleStandHour",
+        "unit": "h",
         "aggregation": "sum",
     },
 ]
@@ -171,10 +195,11 @@ def get_healthcare_overview(
 
     conn = get_healthcare_db_connection()
     try:
-        # Single grouped query for all curated types to avoid N+1 scans.
+        # Single grouped query for Quantity metrics to avoid N+1 scans.
+        quantity_types = [m["type"] for m in CURATED_METRICS if m["key"] not in ("sleep", "stand_hours")]
         daily_by_type = hc_queries.get_daily_aggregates_multi(
             conn,
-            types=[m["type"] for m in CURATED_METRICS],
+            types=quantity_types,
             start_date=start_date_str,
             end_date=end_date_str,
         )
@@ -182,7 +207,30 @@ def get_healthcare_overview(
         for mdef in CURATED_METRICS:
             type_ = mdef["type"]
             aggregation = mdef["aggregation"]
-            daily = daily_by_type.get(type_, {})
+            key = mdef["key"]
+            if key == "sleep":
+                # Category: sum of Asleep durations (hours) per start day.
+                daily_hours = hc_queries.get_daily_category_durations(
+                    conn,
+                    type_=type_,
+                    start_date=start_date_str,
+                    end_date=end_date_str,
+                    allowed_values=_SLEEP_ALLOWED_VALUES,
+                )
+                daily = {
+                    day: {"sum": hrs, "count": 1, "avg": hrs, "min": hrs, "max": hrs}
+                    for day, hrs in daily_hours.items()
+                }
+            elif key == "stand_hours":
+                daily_counts = hc_queries.get_daily_stand_counts(
+                    conn, start_date=start_date_str, end_date=end_date_str
+                )
+                daily = {
+                    day: {"sum": float(cnt), "count": cnt, "avg": float(cnt), "min": float(cnt), "max": float(cnt)}
+                    for day, cnt in daily_counts.items()
+                }
+            else:
+                daily = daily_by_type.get(type_, {})
             # Accumulate per bucket: need sum/count/min/max per bucket to allow
             # both sum and avg rollups.
             accum: dict[str, dict] = {}

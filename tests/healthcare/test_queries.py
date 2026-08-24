@@ -125,7 +125,7 @@ def test_healthcare_overview_day_granularity(test_healthcare_db_path: Path, tmp_
     assert resp["granularity"] == "day"
     assert resp["start_date"] == "2026-08-01"
     assert resp["end_date"] == "2026-08-05"
-    assert len(resp["metrics"]) == 9
+    assert len(resp["metrics"]) == 11
     steps = next(m for m in resp["metrics"] if m["key"] == "steps")
     assert len(steps["buckets"]) == 5
     # Values should be 1000,2000,3000,4000,5000
@@ -226,8 +226,112 @@ def test_healthcare_overview_empty_db(test_healthcare_db_path: Path):
 
     resp = get_healthcare_overview("2026-08-01", "2026-08-07")
     assert resp["granularity"] == "day"
-    assert len(resp["metrics"]) == 9
+    assert len(resp["metrics"]) == 11
     for m in resp["metrics"]:
         assert all(b["value"] is None for b in m["buckets"])
         assert m["latest_value"] is None
         assert m["delta_pct"] is None
+
+
+def test_category_sleep_and_stand(test_healthcare_db_path: Path, tmp_path: Path):
+    helpers = _helpers()
+    export_dir = helpers.write_mini_export(tmp_path)
+    from obsidian_ai_hub.healthcare.importer import import_export
+
+    import_export(export_dir)
+    from obsidian_ai_hub.web.services.healthcare import get_healthcare_overview
+
+    # Mini export has SleepAnalysis: InBed 23:00-07:00 (8h) and AsleepCore 23:05-06:55 (7h50m)
+    # and AppleStandHour 09:00-10:00 on 2026-08-20. Sleep total should be ~7.83h on 2026-08-20,
+    # stand 1h on same day. Query a range that includes that day.
+    resp = get_healthcare_overview("2026-08-19", "2026-08-21")
+    sleep = next(m for m in resp["metrics"] if m["key"] == "sleep")
+    stand = next(m for m in resp["metrics"] if m["key"] == "stand_hours")
+    # 2026-08-20 is middle bucket (index 1)
+    assert len(sleep["buckets"]) == 3
+    # Sleep on 2026-08-20: AsleepCore only (InBed is filtered out)
+    # 23:05 to 06:55 next day = 7h50m = 7.833...h, assigned to start day 2026-08-20
+    assert sleep["buckets"][1]["value"] == pytest.approx(7.833, abs=0.02)
+    assert sleep["buckets"][0]["value"] is None
+    assert sleep["buckets"][2]["value"] is None
+    assert stand["buckets"][1]["value"] == pytest.approx(1.0)
+    assert stand["buckets"][0]["value"] is None
+
+
+def test_category_sleep_filters_asleep_only(test_healthcare_db_path: Path, tmp_path: Path):
+    helpers = _helpers()
+    export_dir = helpers.write_mini_export(tmp_path)
+    from obsidian_ai_hub.healthcare.importer import import_export
+    from obsidian_ai_hub.healthcare.store import get_healthcare_db_connection
+    from obsidian_ai_hub.healthcare.queries import get_daily_category_durations
+
+    res = import_export(export_dir)
+    import_id = res["import_id"]
+    # Add an InBed-only record on 2026-08-22 (should be filtered out for sleep)
+    conn = get_healthcare_db_connection()
+    try:
+        sd = "2026-08-22 23:00:00 +0900"
+        ed = "2026-08-23 07:00:00 +0900"
+        conn.execute(
+            "INSERT OR IGNORE INTO health_records (import_id,type,value_text,value_numeric,unit,source_name,start_date,end_date,fingerprint) VALUES (?,?,?,?,?,?,?,?,?)",
+            (
+                import_id,
+                "HKCategoryTypeIdentifierSleepAnalysis",
+                "HKCategoryValueSleepAnalysisInBed",
+                None,
+                None,
+                "TestWatch",
+                sd,
+                ed,
+                _fp("HKCategoryTypeIdentifierSleepAnalysis", "TestWatch", sd, ed, "HKCategoryValueSleepAnalysisInBed", "", "inbed-22"),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    from obsidian_ai_hub.healthcare.queries import get_daily_category_durations
+    from obsidian_ai_hub.web.services.healthcare import _SLEEP_ALLOWED_VALUES
+
+    conn = get_healthcare_db_connection()
+    try:
+        # InBed should be ignored when filtering to asleep only
+        filtered = get_daily_category_durations(
+            conn,
+            type_="HKCategoryTypeIdentifierSleepAnalysis",
+            start_date="2026-08-22",
+            end_date="2026-08-22",
+            allowed_values=_SLEEP_ALLOWED_VALUES,
+        )
+        assert filtered == {}  # no asleep on that day
+        unfiltered = get_daily_category_durations(
+            conn,
+            type_="HKCategoryTypeIdentifierSleepAnalysis",
+            start_date="2026-08-22",
+            end_date="2026-08-22",
+            allowed_values=None,
+        )
+        # Unfiltered includes InBed 8h
+        assert unfiltered["2026-08-22"] == pytest.approx(8.0)
+    finally:
+        conn.close()
+
+
+def test_category_stand_counts(test_healthcare_db_path: Path, tmp_path: Path):
+    helpers = _helpers()
+    export_dir = helpers.write_mini_export(tmp_path)
+    from obsidian_ai_hub.healthcare.importer import import_export
+    from obsidian_ai_hub.healthcare.queries import get_daily_stand_counts
+
+    import_export(export_dir)
+    from obsidian_ai_hub.healthcare.store import get_healthcare_db_connection
+
+    conn = get_healthcare_db_connection()
+    try:
+        # Mini has 1 stand record on 2026-08-20
+        m = get_daily_stand_counts(conn, start_date="2026-08-20", end_date="2026-08-20")
+        assert m["2026-08-20"] == 1
+        m2 = get_daily_stand_counts(conn, start_date="2026-08-21", end_date="2026-08-21")
+        assert m2 == {}
+    finally:
+        conn.close()

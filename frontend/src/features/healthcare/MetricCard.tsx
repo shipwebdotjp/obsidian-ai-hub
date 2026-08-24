@@ -11,6 +11,8 @@ const PALETTE: Record<string, string> = {
   distance: "#10b981",
   flights: "#6366f1",
   exercise_time: "#14b8a6",
+  sleep: "#0ea5e9",
+  stand_hours: "#84cc16",
 };
 
 export function formatMetricValue(value: number | null, key: string): string {
@@ -25,9 +27,10 @@ export function formatMetricValue(value: number | null, key: string): string {
     case "heart_rate":
     case "resting_heart_rate":
     case "hrv":
-      return value.toFixed(1);
     case "active_energy":
     case "basal_energy":
+    case "sleep":
+    case "stand_hours":
       return value.toFixed(1);
     default:
       return value.toLocaleString("ja-JP", { maximumFractionDigits: 1 });
