@@ -16,16 +16,33 @@ Usage:
 from __future__ import annotations
 
 import textwrap
+from functools import lru_cache
 from pathlib import Path
 
 _FIXTURE_DIR = Path(__file__).parent / "fixtures"
 
-MINI_EXPORT_XML = (_FIXTURE_DIR / "export_mini.xml").read_text(encoding="utf-8")
-MINI_ECG_CSV = (_FIXTURE_DIR / "ecg_mini.csv").read_text(encoding="utf-8")
-
+ECG_DATE = "2026-08-20"
 ECG_SUBDIR = "electrocardiograms"
-ECG_FILENAME = "ecg_2026-08-20.csv"
-ECG_RECORDED_AT = "2026-08-20 08:22:18 +0900"
+ECG_FILENAME = f"ecg_{ECG_DATE}.csv"
+ECG_RECORDED_AT = f"{ECG_DATE} 08:22:18 +0900"
+
+
+@lru_cache(maxsize=1)
+def _mini_export_xml() -> str:
+    return (_FIXTURE_DIR / "export_mini.xml").read_text(encoding="utf-8")
+
+
+@lru_cache(maxsize=1)
+def _mini_ecg_csv() -> str:
+    return (_FIXTURE_DIR / "ecg_mini.csv").read_text(encoding="utf-8")
+
+
+def __getattr__(name: str) -> str:
+    if name == "MINI_EXPORT_XML":
+        return _mini_export_xml()
+    if name == "MINI_ECG_CSV":
+        return _mini_ecg_csv()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def write_mini_export(
@@ -48,7 +65,7 @@ def write_mini_export(
     export_dir = base / subdir
     export_dir.mkdir(parents=True, exist_ok=True)
 
-    xml = MINI_EXPORT_XML
+    xml = _mini_export_xml()
     if extra_records_xml:
         if xml.count("</HealthData>") != 1:
             raise ValueError("fixture export_mini.xml must contain exactly one </HealthData>")
@@ -59,7 +76,7 @@ def write_mini_export(
     if include_ecg:
         ecg_dir = export_dir / ECG_SUBDIR
         ecg_dir.mkdir(parents=True, exist_ok=True)
-        (ecg_dir / ECG_FILENAME).write_text(MINI_ECG_CSV, encoding="utf-8")
+        (ecg_dir / ECG_FILENAME).write_text(_mini_ecg_csv(), encoding="utf-8")
 
     return export_dir
 
@@ -67,7 +84,7 @@ def write_mini_export(
 def write_ecg_csv(
     dest: Path,
     *,
-    recorded_at: str = "2026-08-20 08:22:18 +0900",
+    recorded_at: str = ECG_RECORDED_AT,
     classification: str = "洞調律",
     sample_rate_hz: int = 512,
     samples: list[float] | None = None,

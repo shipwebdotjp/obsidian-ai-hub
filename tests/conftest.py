@@ -45,9 +45,7 @@ def pytest_configure(config: pytest.Config) -> None:
     global _original_healthcare_db_path, _original_env
 
     _original_memory_db_path = Path(app_config.MEMORY_SQLITE_PATH)
-    _original_healthcare_db_path = None
-    if hasattr(app_config, "HEALTHCARE_SQLITE_PATH"):
-        _original_healthcare_db_path = Path(app_config.HEALTHCARE_SQLITE_PATH)
+    _original_healthcare_db_path = Path(app_config.HEALTHCARE_SQLITE_PATH)
     _original_env = {
         _TESTING_ENV: os.environ.get(_TESTING_ENV),
         _PRODUCTION_DB_PATH_ENV: os.environ.get(_PRODUCTION_DB_PATH_ENV),
@@ -67,8 +65,7 @@ def pytest_configure(config: pytest.Config) -> None:
             _original_healthcare_db_path.expanduser().resolve()
         )
     app_config.MEMORY_SQLITE_PATH = bootstrap_db
-    if hasattr(app_config, "HEALTHCARE_SQLITE_PATH"):
-        app_config.HEALTHCARE_SQLITE_PATH = Path(_test_db_bootstrap_dir.name) / "healthcare.sqlite3"
+    app_config.HEALTHCARE_SQLITE_PATH = Path(_test_db_bootstrap_dir.name) / "healthcare.sqlite3"
 
 
 def pytest_unconfigure(config: pytest.Config) -> None:
@@ -77,7 +74,7 @@ def pytest_unconfigure(config: pytest.Config) -> None:
 
     if _original_memory_db_path is not None:
         app_config.MEMORY_SQLITE_PATH = _original_memory_db_path
-    if _original_healthcare_db_path is not None and hasattr(app_config, "HEALTHCARE_SQLITE_PATH"):
+    if _original_healthcare_db_path is not None:
         app_config.HEALTHCARE_SQLITE_PATH = _original_healthcare_db_path
     for name, value in _original_env.items():
         if value is None:
@@ -136,8 +133,9 @@ def api_auth_headers(api_token: str) -> dict[str, str]:
 
 
 @pytest.fixture(autouse=True)
-def _isolate_memory_db(test_memory_db_path: Path, test_healthcare_db_path: Path):
+def _isolate_sqlite_dbs(test_memory_db_path: Path, test_healthcare_db_path: Path):
     """Use temporary SQLite files for every test that touches memory/healthcare DBs."""
+    # Keep the tests/e2e/conftest.py override name in sync when renaming.
     yield
 
 

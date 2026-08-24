@@ -21,15 +21,19 @@ def _assert_test_healthcare_is_not_production(db_path: Path) -> None:
     """Reject the configured production healthcare DB while pytest isolation is active."""
     if os.getenv("OBSIDIAN_AI_HUB_TESTING") != "1":
         return
-    # Generic production path (set by conftest for memory DB) plus
-    # healthcare-specific one. Either matching triggers the guard.
-    for env_name in (
-        "OBSIDIAN_AI_HUB_TEST_PRODUCTION_HEALTHCARE_DB_PATH",
-        "OBSIDIAN_AI_HUB_TEST_PRODUCTION_DB_PATH",
-    ):
-        production_path = os.getenv(env_name)
-        if not production_path:
-            continue
+    production_paths = [
+        value
+        for name in (
+            "OBSIDIAN_AI_HUB_TEST_PRODUCTION_HEALTHCARE_DB_PATH",
+            "OBSIDIAN_AI_HUB_TEST_PRODUCTION_DB_PATH",
+        )
+        if (value := os.getenv(name))
+    ]
+    if not production_paths:
+        raise RuntimeError(
+            "OBSIDIAN_AI_HUB_TEST_PRODUCTION_HEALTHCARE_DB_PATH is required in test mode"
+        )
+    for production_path in production_paths:
         if db_path.expanduser().resolve() == Path(production_path).expanduser().resolve():
             raise RuntimeError(
                 "Refusing to open the production healthcare database while tests are running"
@@ -85,6 +89,14 @@ def get_healthcare_db_connection() -> sqlite3.Connection:
             f"Healthcare DB version {current_version} is newer than code "
             f"version {HEALTHCARE_SCHEMA_VERSION}"
         )
+
+    # Ensure v1 indexes exist for DBs created before incremental index additions
+    # (idempotent for new DBs). Covers ocr指摘の性能対策とECG冪等。
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_hw_import ON health_workouts(import_id);")
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_health_ecg_file_path ON health_ecg(file_path);"
+    )
+    conn.commit()
 
     return conn
 
@@ -221,6 +233,7 @@ def _create_schema_v1(conn: sqlite3.Connection) -> None:
         );
     """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_health_ecg_import ON health_ecg(import_id);")
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_health_ecg_file_path ON health_ecg(file_path);")
 
 
 # Helpers for import flow (kept here to avoid importer importing store internals)
@@ -273,47 +286,54 @@ def read_ecg_samples(ecg_file_path: Path, *, limit: int | None = None) -> list[f
     Samples start after the line '単位,µV'. Each sample is one value per line.
     Malformed sample rows raise ValueError instead of being silently skipped,
     because silent truncation would corrupt medical waveform data.
+    Streams line-by-line so `limit` avoids buffering the whole waveform.
     """
-    text = ecg_file_path.read_text(encoding="utf-8-sig", errors="replace")
-    lines = text.splitlines()
-    start_idx = None
-    for i, line in enumerate(lines):
-        if line.strip().startswith("単位") or "µV" in line:
-            start_idx = i + 1
-            break
-    if start_idx is None:
-        return []
+    import math
+
     samples: list[float] = []
-    # Collect non-empty lines after header
-    candidate_lines: list[str] = []
-    for line in lines[start_idx:]:
-        s = line.strip().strip('"').strip("'")
-        if not s:
-            continue
-        candidate_lines.append(s)
-    if not candidate_lines:
-        return []
-    # Find first numeric line; everything before it is still header (e.g. 'リード,リードI')
-    first_numeric = None
-    for idx, s in enumerate(candidate_lines):
-        try:
-            float(s)
-            first_numeric = idx
-            break
-        except ValueError:
-            continue
-    if first_numeric is None:
-        return []
-    for s in candidate_lines[first_numeric:]:
-        # Samples are strictly one value per line; do not strip commas that would
-        # merge digits across fields. Comma-containing lines are malformed.
-        if "," in s:
-            raise ValueError(f"Malformed ECG sample row in {ecg_file_path}: {s!r} (unexpected comma)")
-        try:
-            v = float(s)
-        except ValueError as exc:
-            raise ValueError(f"Malformed ECG sample row in {ecg_file_path}: {s!r}") from exc
-        samples.append(v)
-        if limit is not None and len(samples) >= limit:
-            break
+    found_header = False
+    in_samples = False
+
+    with ecg_file_path.open(encoding="utf-8-sig", errors="replace") as fh:
+        for raw_line in fh:
+            line = raw_line.strip()
+            if not found_header:
+                if line.startswith("単位") or "µV" in line:
+                    found_header = True
+                continue
+            s = line.strip().strip('"').strip("'")
+            if not s:
+                continue
+            if not in_samples:
+                try:
+                    v = float(s)
+                    if not math.isfinite(v):
+                        raise ValueError
+                    in_samples = True
+                except ValueError:
+                    continue
+            else:
+                if "," in s:
+                    raise ValueError(
+                        f"Malformed ECG sample row in {ecg_file_path}: {s!r} (unexpected comma)"
+                    )
+                try:
+                    v = float(s)
+                except ValueError as exc:
+                    raise ValueError(
+                        f"Malformed ECG sample row in {ecg_file_path}: {s!r}"
+                    ) from exc
+                if not math.isfinite(v):
+                    raise ValueError(f"Non-finite ECG sample row in {ecg_file_path}: {s!r}")
+            samples.append(v)
+            if limit is not None and len(samples) >= limit:
+                break
+
+    if not found_header:
+        raise ValueError(
+            f"ECG sample header ('単位,µV') not found in {ecg_file_path}; "
+            "refusing to return an empty waveform"
+        )
+    if not samples:
+        raise ValueError(f"No numeric ECG samples found in {ecg_file_path}")
     return samples

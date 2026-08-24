@@ -10,6 +10,16 @@ from obsidian_ai_hub.healthcare.importer import import_export
 from obsidian_ai_hub.utils import config
 
 
+def _positive_int(value: str) -> int:
+    try:
+        n = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"invalid int value: {value!r}") from None
+    if n <= 0:
+        raise argparse.ArgumentTypeError(f"--batch-size must be a positive integer, got {value}")
+    return n
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Import Apple Health export into healthcare.sqlite3")
     p.add_argument(
@@ -20,7 +30,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--batch-size",
-        type=int,
+        type=_positive_int,
         default=5000,
         help="Commit batch size (default: %(default)s)",
     )
@@ -60,6 +70,8 @@ if __name__ == "__main__":
     except FileNotFoundError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         sys.exit(1)
-    except Exception as exc:
-        print(f"Error: {type(exc).__name__}: {exc}", file=sys.stderr)
+    except Exception:
+        import traceback
+
+        traceback.print_exc(file=sys.stderr)
         sys.exit(1)

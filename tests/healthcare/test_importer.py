@@ -92,6 +92,7 @@ def test_idempotent_second_import(test_healthcare_db_path: Path, tmp_path: Path)
     try:
         assert conn.execute("SELECT COUNT(*) FROM health_records").fetchone()[0] == 7
         assert conn.execute("SELECT COUNT(*) FROM health_workouts").fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM health_ecg").fetchone()[0] == 1
         assert conn.execute("SELECT COUNT(*) FROM health_imports").fetchone()[0] == 2
         assert conn.execute("SELECT COUNT(*) FROM health_imports WHERE status='succeeded'").fetchone()[0] == 2
     finally:
@@ -191,3 +192,73 @@ def test_missing_export_dir_raises(tmp_path: Path):
     empty_dir.mkdir()
     with pytest.raises(FileNotFoundError, match="export.xml not found"):
         import_export(empty_dir)
+
+
+def test_cli_dry_run(tmp_path: Path):
+    helpers = _helpers()
+    export_dir = helpers.write_mini_export(tmp_path)
+
+    from obsidian_ai_hub.healthcare.store import get_healthcare_db_connection
+    from obsidian_ai_hub.import_apple_health import main
+
+    result = main(["--export-dir", str(export_dir), "--dry-run"])
+    assert result["dry_run"] is True
+    assert result["records"] == 7
+    conn = get_healthcare_db_connection()
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM health_imports").fetchone()[0] == 0
+    finally:
+        conn.close()
+
+
+def test_cli_batch_size_validation(tmp_path: Path):
+    from obsidian_ai_hub.import_apple_health import build_parser
+
+    parser = build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--batch-size", "0"])
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--batch-size", "-5"])
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--batch-size", "notanint"])
+
+
+def test_failed_import_rollback(test_healthcare_db_path: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    helpers = _helpers()
+    export_dir = helpers.write_mini_export(tmp_path)
+
+    from obsidian_ai_hub.healthcare import importer as imp_mod
+    from obsidian_ai_hub.healthcare.store import get_healthcare_db_connection
+
+    orig_handle = imp_mod._handle_record
+
+    call_count = {"n": 0}
+
+    def failing_handle(elem, import_id, conn):
+        call_count["n"] += 1
+        if call_count["n"] == 3:
+            raise RuntimeError("injected failure on 3rd record")
+        return orig_handle(elem, import_id, conn)
+
+    monkeypatch.setattr(imp_mod, "_handle_record", failing_handle)
+
+    with pytest.raises(RuntimeError, match="injected failure"):
+        imp_mod.import_export(export_dir)
+
+    conn = get_healthcare_db_connection()
+    try:
+        # No partial rows should be committed; only the failed import row remains
+        assert conn.execute("SELECT COUNT(*) FROM health_records").fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM health_record_metadata").fetchone()[0] == 0
+        row = conn.execute("SELECT status, error FROM health_imports").fetchone()
+        assert row is not None
+        assert row["status"] == "failed"
+        assert "injected failure" in (row["error"] or "")
+
+        # Subsequent successful import should succeed and create rows
+        monkeypatch.setattr(imp_mod, "_handle_record", orig_handle)
+        result = imp_mod.import_export(export_dir)
+        assert result["records"] == 7
+        assert conn.execute("SELECT COUNT(*) FROM health_records").fetchone()[0] == 7
+    finally:
+        conn.close()

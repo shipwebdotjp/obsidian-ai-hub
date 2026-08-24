@@ -19,7 +19,9 @@ class HealthRecord:
     start_date: str
     end_date: str
     fingerprint: str
-    metadata: tuple[tuple[str, str], ...] = field(default_factory=tuple, hash=False)
+    metadata: tuple[tuple[str, str], ...] = field(
+        default_factory=tuple, compare=False, hash=False
+    )
 
 
 @dataclass(frozen=True)
@@ -41,4 +43,6 @@ class HealthWorkout:
     fingerprint: str
     # Workout metadata is stored in health_workout_metadata; kept symmetrical
     # with HealthRecord.metadata but optional for import symmetry.
-    metadata: tuple[tuple[str, str], ...] = field(default_factory=tuple, hash=False)
+    metadata: tuple[tuple[str, str], ...] = field(
+        default_factory=tuple, compare=False, hash=False
+    )

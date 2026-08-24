@@ -22,6 +22,9 @@ def test_mini_fixtures_exist():
     assert "HKWorkoutActivityTypeCycling" in xml
     assert "ActivitySummary" in xml
     assert "HeartRateVariabilityMetadataList" in xml
+    ecg_csv = (fixtures / "ecg_mini.csv").read_text(encoding="utf-8")
+    assert "リードI" in ecg_csv
+    assert "µV" in ecg_csv
 
 
 def test_helpers_generate_isolated_export(tmp_path: Path):
@@ -53,3 +56,26 @@ def test_helpers_write_ecg_csv(tmp_path: Path):
     assert "リードI" in txt
     non_empty = [line for line in txt.splitlines() if line.strip()]
     assert non_empty[-3:] == ["1.0", "2.0", "3.0"]
+
+
+def test_write_mini_export_rejects_malformed_base_fixture(tmp_path: Path, monkeypatch):
+    import pytest
+
+    helpers = _load_helpers()
+    # Patch the cached fixture content to a malformed version without </HealthData>
+    monkeypatch.setattr(helpers, "_mini_export_xml", lambda: "<HealthData><Record/></HealthData")
+    # The helper's internal check looks for exactly one </HealthData>; with 0 or 2 it would raise,
+    # but our monkeypatched content has 1 — so we test the branch that would raise by
+    # temporarily making the base fixture miss the anchor
+    # To trigger the ValueError, patch the cached content to have no closing tag
+    monkeypatch.setattr(helpers, "_mini_export_xml", lambda: "<HealthData></HealthData><HealthData></HealthData>")
+    import pytest as _pytest
+
+    # Actually test the helper's guard by calling with extra_records that would trigger the count check
+    # The current implementation checks xml.count("</HealthData>") != 1
+    # So a base with 2 occurrences should raise
+    try:
+        helpers.write_mini_export(tmp_path, extra_records_xml="<Record/>")
+        assert False, "expected ValueError"
+    except ValueError as exc:
+        assert "exactly one" in str(exc)

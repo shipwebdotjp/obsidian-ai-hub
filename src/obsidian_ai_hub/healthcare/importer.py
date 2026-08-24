@@ -17,6 +17,7 @@ from datetime import datetime
 from pathlib import Path
 from xml.etree.ElementTree import iterparse
 
+from obsidian_ai_hub.healthcare.models import HealthRecord, HealthWorkout
 from obsidian_ai_hub.healthcare.store import (
     create_import_row,
     finish_import_row,
@@ -77,54 +78,52 @@ def _parse_ecg_csv_header(csv_path: Path) -> dict:
     Returns dict with recorded_at, classification, symptoms, software_version,
     device, sample_rate_hz, lead, unit. Missing fields are None.
     """
-    # Use csv module to handle quoted fields correctly
-    text = csv_path.read_text(encoding="utf-8-sig", errors="replace")
-    # The header is the first ~15 lines before samples; parse line-by-line with csv
     fields: dict[str, str | None] = {}
-    for raw_line in text.splitlines():
-        if not raw_line.strip():
-            continue
-        # Stop at samples: a line that is a single float with no comma
-        stripped = raw_line.strip().strip('"').strip("'")
-        if "," not in raw_line:
-            # Could be sample line; check if numeric
+    with csv_path.open(encoding="utf-8-sig", errors="replace") as fh:
+        for raw_line in fh:
+            if not raw_line.strip():
+                continue
+            # Stop at samples: a line that is a single float with no comma
+            stripped = raw_line.strip().strip('"').strip("'")
+            if "," not in raw_line:
+                # Could be sample line; check if numeric
+                try:
+                    float(stripped)
+                    # First sample encountered -> header done
+                    break
+                except ValueError:
+                    pass
+            # Parse as CSV row with 2 columns (key,value)
             try:
-                float(stripped)
-                # First sample encountered -> header done
-                break
-            except ValueError:
-                pass
-        # Parse as CSV row with 2 columns (key,value)
-        try:
-            row = next(csv.reader([raw_line]))
-        except Exception:
-            continue
-        if len(row) < 2:
-            continue
-        key = row[0].strip()
-        val = row[1].strip() if len(row) > 1 else ""
-        # Join remaining columns if any (should not happen for header)
-        if len(row) > 2:
-            val = ",".join(row[1:]).strip()
-        val = val.strip('"').strip("'")
-        if key == "記録日":
-            fields["recorded_at"] = val or None
-        elif key == "分類":
-            fields["classification"] = val or None
-        elif key == "症状":
-            fields["symptoms"] = val or None
-        elif key == "ソフトウェアバージョン":
-            fields["software_version"] = val or None
-        elif key == "デバイス":
-            fields["device"] = val or None
-        elif key == "サンプルレート":
-            # e.g. "512ヘルツ"
-            num = "".join(ch for ch in val if ch.isdigit())
-            fields["sample_rate_hz"] = int(num) if num else None
-        elif key == "リード":
-            fields["lead"] = val or None
-        elif key == "単位":
-            fields["unit"] = val or None
+                row = next(csv.reader([raw_line]))
+            except Exception:
+                continue
+            if len(row) < 2:
+                continue
+            key = row[0].strip()
+            val = row[1].strip() if len(row) > 1 else ""
+            # Join remaining columns if any (should not happen for header)
+            if len(row) > 2:
+                val = ",".join(row[1:]).strip()
+            val = val.strip('"').strip("'")
+            if key == "記録日":
+                fields["recorded_at"] = val or None
+            elif key == "分類":
+                fields["classification"] = val or None
+            elif key == "症状":
+                fields["symptoms"] = val or None
+            elif key == "ソフトウェアバージョン":
+                fields["software_version"] = val or None
+            elif key == "デバイス":
+                fields["device"] = val or None
+            elif key == "サンプルレート":
+                # e.g. "512ヘルツ"
+                num = "".join(ch for ch in val if ch.isdigit())
+                fields["sample_rate_hz"] = int(num) if num else None
+            elif key == "リード":
+                fields["lead"] = val or None
+            elif key == "単位":
+                fields["unit"] = val or None
     return {
         "recorded_at": fields.get("recorded_at"),
         "classification": fields.get("classification"),
@@ -228,6 +227,9 @@ def import_export(
     except Exception as exc:
         # Mark as failed, then propagate (no masking)
         try:
+            # Discard partial uncommitted inserts so a failed import does not
+            # persist half-written rows that later re-imports skip via dedup.
+            conn.rollback()
             finished_at = datetime.now().isoformat()
             finish_import_row(
                 conn,
@@ -239,8 +241,7 @@ def import_export(
             )
             conn.commit()
         except Exception:
-            # If even the failure marking fails, let original exception propagate
-            pass
+            logger.exception("Failed to mark import %s as failed", import_id)
         raise
     finally:
         if close_conn:
@@ -296,11 +297,13 @@ def _stream_import(
 
     # For batch commit tracking
     pending_commits = 0
+    health_data_elem = None
 
     context = iterparse(str(export_xml), events=("start", "end"))
     for event, elem in context:
         if event == "start" and elem.tag == "HealthData":
             header["locale"] = elem.get("locale")
+            health_data_elem = elem
         elif event == "end":
             if elem.tag == "ExportDate":
                 header["export_date"] = elem.get("value")
@@ -339,12 +342,18 @@ def _stream_import(
             if pending_commits >= batch_size:
                 conn.commit()
                 pending_commits = 0
-                if (counts["records"] + counts["workouts"]) % 10000 == 0:
-                    logger.info(
-                        "Import progress: records=%s workouts=%s",
-                        counts["records"],
-                        counts["workouts"],
-                    )
+                logger.info(
+                    "Import progress: records=%s workouts=%s activity_summaries=%s",
+                    counts["records"],
+                    counts["workouts"],
+                    counts["activity_summaries"],
+                )
+                # Drop accumulated empty shells to bound memory on huge exports.
+                if health_data_elem is not None:
+                    health_data_elem.clear()
+                    # Re-set locale so later log/header logic doesn't lose it
+                    if header["locale"]:
+                        health_data_elem.set("locale", header["locale"])
 
     if pending_commits:
         conn.commit()
@@ -363,6 +372,7 @@ def _handle_record(elem, import_id: str, conn: sqlite3.Connection) -> tuple[bool
     attrib = elem.attrib
     type_ = attrib.get("type")
     if not type_:
+        logger.warning("Skipping Record without type attribute (import %s)", import_id)
         return (False, 0, 0)
     source_name = attrib.get("sourceName", "")
     source_version = attrib.get("sourceVersion")
@@ -419,6 +429,23 @@ def _handle_record(elem, import_id: str, conn: sqlite3.Connection) -> tuple[bool
         value_numeric = None
         value_text = value
 
+    # Build model as single source of truth for the INSERT column list
+    record = HealthRecord(
+        import_id=import_id,
+        type=type_,
+        value_text=value_text,
+        value_numeric=value_numeric,
+        unit=unit,
+        source_name=source_name,
+        source_version=source_version,
+        device_raw=device_raw,
+        creation_date=creation_date,
+        start_date=start_date,
+        end_date=end_date,
+        fingerprint=fingerprint,
+        metadata=tuple(metadata),
+    )
+
     cur = conn.cursor()
     cur.execute(
         """
@@ -427,18 +454,18 @@ def _handle_record(elem, import_id: str, conn: sqlite3.Connection) -> tuple[bool
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
-            import_id,
-            type_,
-            value_text,
-            value_numeric,
-            unit,
-            source_name,
-            source_version,
-            device_raw,
-            creation_date,
-            start_date,
-            end_date,
-            fingerprint,
+            record.import_id,
+            record.type,
+            record.value_text,
+            record.value_numeric,
+            record.unit,
+            record.source_name,
+            record.source_version,
+            record.device_raw,
+            record.creation_date,
+            record.start_date,
+            record.end_date,
+            record.fingerprint,
         ),
     )
     if cur.rowcount == 0:
@@ -465,6 +492,7 @@ def _handle_workout(elem, import_id: str, conn: sqlite3.Connection) -> bool:
     attrib = elem.attrib
     activity_type = attrib.get("workoutActivityType")
     if not activity_type:
+        logger.warning("Skipping Workout without workoutActivityType (import %s)", import_id)
         return False
     duration = _parse_float(attrib.get("duration"))
     duration_unit = attrib.get("durationUnit")
@@ -487,6 +515,34 @@ def _handle_workout(elem, import_id: str, conn: sqlite3.Connection) -> bool:
         end_date=end_date,
     )
 
+    # Collect metadata for model
+    workout_metadata: list[tuple[str, str]] = []
+    for child in elem:
+        if child.tag == "MetadataEntry":
+            k = child.get("key", "")
+            v = child.get("value", "")
+            if k:
+                workout_metadata.append((k, v))
+
+    workout = HealthWorkout(
+        import_id=import_id,
+        activity_type=activity_type,
+        duration=duration,
+        duration_unit=duration_unit,
+        total_distance=total_distance,
+        total_distance_unit=total_distance_unit,
+        total_energy_burned=total_energy,
+        total_energy_burned_unit=total_energy_unit,
+        source_name=source_name,
+        source_version=source_version,
+        device_raw=device_raw,
+        creation_date=creation_date,
+        start_date=start_date,
+        end_date=end_date,
+        fingerprint=fingerprint,
+        metadata=tuple(workout_metadata),
+    )
+
     cur = conn.cursor()
     cur.execute(
         """
@@ -495,21 +551,21 @@ def _handle_workout(elem, import_id: str, conn: sqlite3.Connection) -> bool:
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
-            import_id,
-            activity_type,
-            duration,
-            duration_unit,
-            total_distance,
-            total_distance_unit,
-            total_energy,
-            total_energy_unit,
-            source_name,
-            source_version,
-            device_raw,
-            creation_date,
-            start_date,
-            end_date,
-            fingerprint,
+            workout.import_id,
+            workout.activity_type,
+            workout.duration,
+            workout.duration_unit,
+            workout.total_distance,
+            workout.total_distance_unit,
+            workout.total_energy_burned,
+            workout.total_energy_burned_unit,
+            workout.source_name,
+            workout.source_version,
+            workout.device_raw,
+            workout.creation_date,
+            workout.start_date,
+            workout.end_date,
+            workout.fingerprint,
         ),
     )
     if cur.rowcount == 0:
@@ -585,12 +641,13 @@ def _handle_activity_summary(elem, import_id: str, conn: sqlite3.Connection) -> 
     attrib = dict(elem.attrib)
     date_components = attrib.get("dateComponents")
     if not date_components:
+        logger.warning("Skipping ActivitySummary without dateComponents (import %s)", import_id)
         return False
     # Store raw XML and JSON
     try:
-        import xml.etree.ElementTree as ET
+        from xml.etree.ElementTree import tostring as _tostring
 
-        raw_xml = ET.tostring(elem, encoding="unicode")
+        raw_xml = _tostring(elem, encoding="unicode")
     except Exception:
         raw_xml = str(attrib)
     raw_json = json.dumps(attrib, ensure_ascii=False)
@@ -620,8 +677,6 @@ def _handle_ecg_files(export_dir: Path, import_id: str, conn: sqlite3.Connection
         # sha256 of file
         sha256 = None
         try:
-            import hashlib
-
             h = hashlib.sha256()
             with open(csv_path, "rb") as f:
                 for chunk in iter(lambda: f.read(8192), b""):
@@ -637,7 +692,7 @@ def _handle_ecg_files(export_dir: Path, import_id: str, conn: sqlite3.Connection
         cur = conn.cursor()
         cur.execute(
             """
-            INSERT INTO health_ecg
+            INSERT OR IGNORE INTO health_ecg
                 (import_id, file_path, file_name, recorded_at, classification, symptoms, software_version, device, sample_rate_hz, lead, unit, sha256, file_size)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
