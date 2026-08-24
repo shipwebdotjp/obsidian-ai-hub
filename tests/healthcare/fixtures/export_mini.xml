@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<HealthData locale="ja_JP">
+ <ExportDate value="2026-08-24 17:11:51 +0900"/>
+ <Me HKCharacteristicTypeIdentifierDateOfBirth="1985-10-27" HKCharacteristicTypeIdentifierBiologicalSex="HKBiologicalSexMale" HKCharacteristicTypeIdentifierBloodType="HKBloodTypeNotSet" HKCharacteristicTypeIdentifierFitzpatrickSkinType="HKFitzpatrickSkinTypeNotSet" HKCharacteristicTypeIdentifierCardioFitnessMedicationsUse="HKCardioFitnessMedicationsUseNotSet"/>
+ <!-- Quantity: HeartRate with metadata -->
+ <Record type="HKQuantityTypeIdentifierHeartRate" sourceName="TestWatch" sourceVersion="11.4" unit="count/min" creationDate="2026-08-20 08:00:00 +0900" startDate="2026-08-20 08:00:00 +0900" endDate="2026-08-20 08:01:00 +0900" value="72">
+  <MetadataEntry key="HKMetadataKeySyncIdentifier" value="sync-hr-001"/>
+  <MetadataEntry key="HKMetadataKeySyncVersion" value="1"/>
+ </Record>
+ <!-- Quantity: StepCount -->
+ <Record type="HKQuantityTypeIdentifierStepCount" sourceName="TestWatch" sourceVersion="11.4" unit="count" creationDate="2026-08-20 08:05:00 +0900" startDate="2026-08-20 08:05:00 +0900" endDate="2026-08-20 08:06:00 +0900" value="120"/>
+ <!-- Quantity: ActiveEnergyBurned -->
+ <Record type="HKQuantityTypeIdentifierActiveEnergyBurned" sourceName="TestWatch" sourceVersion="11.4" unit="kcal" creationDate="2026-08-20 08:10:00 +0900" startDate="2026-08-20 08:10:00 +0900" endDate="2026-08-20 08:11:00 +0900" value="5.2"/>
+ <!-- Quantity: HRVSDNN with beats -->
+ <Record type="HKQuantityTypeIdentifierHeartRateVariabilitySDNN" sourceName="TestWatch" sourceVersion="11.4" unit="ms" creationDate="2026-08-20 09:00:00 +0900" startDate="2026-08-20 08:59:00 +0900" endDate="2026-08-20 09:00:00 +0900" value="45.7">
+  <MetadataEntry key="HKAlgorithmVersion" value="2"/>
+  <HeartRateVariabilityMetadataList>
+   <InstantaneousBeatsPerMinute bpm="72" time="08:59:01.10"/>
+   <InstantaneousBeatsPerMinute bpm="70" time="08:59:02.20"/>
+  </HeartRateVariabilityMetadataList>
+ </Record>
+ <!-- Category: SleepAnalysis (InBed + AsleepCore) -->
+ <Record type="HKCategoryTypeIdentifierSleepAnalysis" sourceName="TestWatch" sourceVersion="11.4" creationDate="2026-08-21 07:00:00 +0900" startDate="2026-08-20 23:00:00 +0900" endDate="2026-08-21 07:00:00 +0900" value="HKCategoryValueSleepAnalysisInBed"/>
+ <Record type="HKCategoryTypeIdentifierSleepAnalysis" sourceName="TestWatch" sourceVersion="11.4" creationDate="2026-08-21 07:00:00 +0900" startDate="2026-08-20 23:05:00 +0900" endDate="2026-08-21 06:55:00 +0900" value="HKCategoryValueSleepAnalysisAsleepCore"/>
+ <!-- Category: AppleStandHour -->
+ <Record type="HKCategoryTypeIdentifierAppleStandHour" sourceName="TestWatch" sourceVersion="11.4" creationDate="2026-08-20 10:00:00 +0900" startDate="2026-08-20 09:00:00 +0900" endDate="2026-08-20 10:00:00 +0900" value="HKCategoryValueAppleStandHourStood"/>
+ <!-- Workout: Cycling with events/statistics/route -->
+ <Workout workoutActivityType="HKWorkoutActivityTypeCycling" duration="13.2" durationUnit="min" totalDistance="4.2" totalDistanceUnit="km" totalEnergyBurned="60" totalEnergyBurnedUnit="kcal" sourceName="TestWatch" sourceVersion="11.4" creationDate="2026-08-20 09:56:52 +0900" startDate="2026-08-20 09:43:37 +0900" endDate="2026-08-20 09:56:50 +0900">
+  <MetadataEntry key="HKIndoorWorkout" value="0"/>
+  <MetadataEntry key="HKTimeZone" value="Asia/Tokyo"/>
+  <WorkoutEvent type="HKWorkoutEventTypeSegment" date="2026-08-20 09:43:37 +0900" duration="3.25" durationUnit="min"/>
+  <WorkoutStatistics type="HKQuantityTypeIdentifierHeartRate" startDate="2026-08-20 09:43:37 +0900" endDate="2026-08-20 09:56:50 +0900" average="125" minimum="88" maximum="139" unit="count/min"/>
+  <WorkoutStatistics type="HKQuantityTypeIdentifierActiveEnergyBurned" startDate="2026-08-20 09:43:37 +0900" endDate="2026-08-20 09:56:50 +0900" sum="60.8" unit="kcal"/>
+  <WorkoutRoute sourceName="TestWatch" sourceVersion="11.4" creationDate="2026-08-20 09:56:52 +0900" startDate="2026-08-20 09:43:37 +0900" endDate="2026-08-20 09:56:50 +0900">
+   <FileReference path="workout-routes/route_2026-08-20.gpx"/>
+  </WorkoutRoute>
+ </Workout>
+ <!-- ActivitySummary -->
+ <ActivitySummary dateComponents="2026-08-20" activeEnergyBurned="320" activeEnergyBurnedGoal="400" activeEnergyBurnedUnit="kcal" appleExerciseTime="22" appleExerciseTimeGoal="30" appleExerciseTimeUnit="min" appleStandHours="8" appleStandHoursGoal="12"/>
+</HealthData>
