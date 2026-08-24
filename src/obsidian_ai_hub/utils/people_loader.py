@@ -10,6 +10,21 @@ from obsidian_ai_hub.summary.store import normalize_entity_name
 
 logger = logging.getLogger(__name__)
 
+# YAMLError is not a subclass of ValueError/OSError/TypeError, so it needs
+# explicit handling to avoid aborting the whole vault scan on a single bad file.
+try:
+    import yaml as _yaml_for_loader  # type: ignore
+
+    _YAML_ERROR_TUPLE: tuple[type[BaseException], ...] = (_yaml_for_loader.YAMLError,)
+except ImportError:
+    _YAML_ERROR_TUPLE = ()
+
+_PEOPLE_NOTE_SCAN_EXCEPTS: tuple[type[BaseException], ...] = (
+    OSError,
+    ValueError,
+    TypeError,
+) + _YAML_ERROR_TUPLE
+
 
 class PersonNote(TypedDict):
     id: str
@@ -225,6 +240,36 @@ def load_people_notes_with_report() -> tuple[dict[str, PersonNote], dict[str, An
                 normalized_to_note[norm_alias] = safe_note
 
     return normalized_to_note, report
+
+
+def find_person_note_path_by_vault_id(vault_id: str) -> Optional[Path]:
+    """Find a single person note file by its frontmatter ``id`` (vault_id).
+
+    Lightweight single-note lookup that stops at the first matching file.
+    Unlike :func:`load_people_notes_with_report`, it does not perform the full
+    4-stage validation pipeline or build collision reports. Used by the
+    ``people_get`` agent tool to avoid re-parsing every person note on each
+    invocation.
+    """
+    if not vault_id or not isinstance(vault_id, str):
+        return None
+    stripped_vault_id = vault_id.strip()
+    if not stripped_vault_id:
+        return None
+    people_path = app_config.PEOPLE_PATH
+    if not people_path or not people_path.exists() or not people_path.is_dir():
+        return None
+    # Iterate lazily; avoid sorted() which forces full enumeration + sort.
+    for path in people_path.rglob("*.md"):
+        try:
+            content = path.read_text(encoding="utf-8")
+            fm = parse_frontmatter(content)
+            pid = fm.get("id")
+            if isinstance(pid, str) and pid.strip() == stripped_vault_id:
+                return path
+        except _PEOPLE_NOTE_SCAN_EXCEPTS:
+            continue
+    return None
 
 
 def load_and_validate_people_notes() -> dict[str, PersonNote]:

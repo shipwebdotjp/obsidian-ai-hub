@@ -264,6 +264,28 @@ class MemoryProposeInput(BaseModel):
     )
 
 
+class PeopleSearchInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    query: str = Field(
+        description="検索クエリ。人物名または別名の一部（例: '山田', 'ヤマダ'）。正規化後に部分一致で検索する。",
+    )
+    limit: int = Field(
+        default=10,
+        ge=1,
+        le=20,
+        description="最大返却件数 (1-20)。省略時は10。",
+    )
+
+
+class PersonGetInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    person_id: str = Field(
+        description="人物ID（例: 'peo_xxx'）。people_search の結果の person_id を指定する。",
+    )
+
+
 # --- Memory Tool Factories (require trusted context) ---
 
 
@@ -346,6 +368,43 @@ def _make_memory_propose_tool(
 
     memory_propose.name = "memory_propose"  # type: ignore[attr-defined]
     return memory_propose
+
+
+# --- People vault-note helper ---
+
+
+def _resolve_person_vault_note(vault_id: str) -> Optional[Dict[str, Any]]:
+    """Resolve vault_id (frontmatter id) to a Vault person note's content.
+
+    Uses a lightweight single-note lookup (stops at first matching ``id``) to
+    avoid re-parsing every person note on each ``people_get`` invocation.
+    Returns ``{\"relative_path\": str, \"content\": str}`` or ``None`` if not
+    found. Gracefully skips on any I/O or loader failure.
+    """
+    try:
+        from obsidian_ai_hub.utils import config as app_config
+        from obsidian_ai_hub.utils.people_loader import find_person_note_path_by_vault_id
+
+        target_path = find_person_note_path_by_vault_id(vault_id)
+        if target_path is None or not target_path.is_file():
+            return None
+        # Verify containment before reading to avoid disclosing arbitrary files via symlink.
+        try:
+            resolved = target_path.resolve()
+            vault_root = Path(app_config.VAULT_PATH).resolve()
+            rel = str(resolved.relative_to(vault_root))
+        except ValueError:
+            logger.warning("people_get: vault note %s is outside VAULT_PATH; skipping", target_path)
+            return None
+        try:
+            content = resolved.read_text(encoding="utf-8")
+        except OSError as exc:
+            logger.warning("people_get: failed to read vault note %s: %s", resolved, exc)
+            return None
+        return {"relative_path": rel, "content": content}
+    except Exception as exc:
+        logger.warning("people_get: vault note resolution failed for vault_id=%s: %s", vault_id, exc)
+        return None
 
 
 # --- Tool Implementations ---
@@ -508,6 +567,45 @@ def reminder_create_proposal(
         return json.dumps({"error": str(exc)}, ensure_ascii=False)
 
 
+@tool(args_schema=PeopleSearchInput)
+def people_search(query: str, limit: int = 10) -> str:
+    """確定済み人物（people + person_aliases）を名前・別名の部分一致で検索します。未解決候補は除外。"""
+    try:
+        from obsidian_ai_hub.web.services.people import search_people
+
+        res = search_people(query=query, limit=limit)
+        return json.dumps(res, ensure_ascii=False)
+    except EXPECTED_TOOL_EXCEPTIONS as exc:
+        logger.warning("people_search failed: %s", exc)
+        return json.dumps({"error": str(exc)}, ensure_ascii=False)
+    except Exception as exc:
+        logger.exception("people_search failed")
+        return json.dumps({"error": _sanitize_unexpected_error(exc)}, ensure_ascii=False)
+
+
+@tool(args_schema=PersonGetInput)
+def people_get(person_id: str) -> str:
+    """人物IDから詳細（別名、関連サマリ、件数）を取得します。vault_idがある場合はVault人物ノートの本文も付与します。"""
+    try:
+        from obsidian_ai_hub.web.services.people import get_person_detail
+
+        detail = get_person_detail(person_id)
+        if detail is None:
+            return json.dumps({"error": "人物が見つかりません"}, ensure_ascii=False)
+        vault_id = detail.get("vault_id")
+        if vault_id:
+            vault_note = _resolve_person_vault_note(str(vault_id))
+            if vault_note is not None:
+                detail["vault_note"] = vault_note
+        return json.dumps(detail, ensure_ascii=False)
+    except EXPECTED_TOOL_EXCEPTIONS as exc:
+        logger.warning("people_get failed: %s", exc)
+        return json.dumps({"error": str(exc)}, ensure_ascii=False)
+    except Exception as exc:
+        logger.exception("people_get failed")
+        return json.dumps({"error": _sanitize_unexpected_error(exc)}, ensure_ascii=False)
+
+
 # --- Tool Registry Definition ---
 
 _BUILTIN_TOOL_DEFINITIONS: Dict[str, Dict[str, Any]] = {
@@ -572,6 +670,18 @@ _BUILTIN_TOOL_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "description": "ユーザーが嗜好・事実・方針を明示した内容を長期記憶候補（candidate）として保存します。推測で作成せず、明確な根拠がある場合のみ呼び出してください。保存後はメモリ画面で人間が承認します。",
         "get_tool": lambda: _make_memory_propose_tool(None),
         "get_tool_with_context": lambda ctx: _make_memory_propose_tool(ctx),
+    },
+    "people_search": {
+        "tool_id": "people_search",
+        "name": "人物検索",
+        "description": "確定済み人物を名前・別名の部分一致で検索します（未解決候補は除外）。people_get と組み合わせて詳細を取得できます。",
+        "get_tool": lambda: people_search,
+    },
+    "people_get": {
+        "tool_id": "people_get",
+        "name": "人物詳細取得",
+        "description": "人物IDから詳細（別名、関連サマリ、件数）を取得します。vault_idがある場合はVault人物ノートの本文（vault_note）も付与します。",
+        "get_tool": lambda: people_get,
     },
 }
 
