@@ -125,6 +125,49 @@ def _bucket_key_for_date(d: date, granularity: str) -> str:
     return d.strftime("%Y-%m")
 
 
+def _daily_values_for_metric(
+    conn,
+    mdef: dict[str, str],
+    start_date_str: str,
+    end_date_str: str,
+) -> dict[str, float]:
+    """Return per-day scalar value for a single metric (forced daily).
+
+    For Quantity metrics the value is ``sum`` if aggregation==sum else ``avg``.
+    For Category metrics (sleep/stand) the value is total hours per day.
+    """
+    cat = mdef.get("category")
+    if cat == "sleep_duration":
+        daily_hours = hc_queries.get_daily_category_durations(
+            conn,
+            type_=mdef["type"],
+            start_date=start_date_str,
+            end_date=end_date_str,
+            allowed_values=_SLEEP_ALLOWED_VALUES,
+        )
+        return daily_hours
+    if cat == "stand_count":
+        daily_counts = hc_queries.get_daily_stand_counts(
+            conn, start_date=start_date_str, end_date=end_date_str
+        )
+        return {day: float(cnt) for day, cnt in daily_counts.items()}
+    # Quantity
+    daily_agg = hc_queries.get_daily_aggregates(
+        conn, type_=mdef["type"], start_date=start_date_str, end_date=end_date_str
+    )
+    out: dict[str, float] = {}
+    agg = mdef["aggregation"]
+    for day, v in daily_agg.items():
+        # get_daily_aggregates only emits days with at least one record, so
+        # v["sum"]/v["avg"] are always non-None for present keys. Alignment
+        # across metrics is handled by the caller's common_days intersection.
+        if agg == "sum":
+            out[day] = float(v["sum"])
+        else:
+            out[day] = float(v["avg"])
+    return out
+
+
 def get_healthcare_overview(
     start_date_str: str,
     end_date_str: str,
@@ -348,6 +391,92 @@ def get_healthcare_overview(
             "end_date": end_date_str,
             "granularity": granularity,
             "metrics": metrics_out,
+        }
+    finally:
+        conn.close()
+
+
+def get_healthcare_correlation(
+    metric_x_key: str,
+    metric_y_key: str,
+    start_date_str: str,
+    end_date_str: str,
+) -> dict:
+    """Return daily paired values and Pearson correlation for two metrics.
+
+    Always uses daily granularity regardless of range length so the scatter
+    has maximal points. Raises ValueError on invalid input.
+    """
+    # Validate metric keys
+    by_key = {m["key"]: m for m in CURATED_METRICS}
+    if metric_x_key not in by_key:
+        raise ValueError(f"Unknown metric_x: {metric_x_key}")
+    if metric_y_key not in by_key:
+        raise ValueError(f"Unknown metric_y: {metric_y_key}")
+
+    start_date = _validate_date_str(start_date_str)
+    end_date = _validate_date_str(end_date_str)
+    if start_date > end_date:
+        raise ValueError("start_date must be before or equal to end_date")
+    duration = (end_date - start_date).days + 1
+    if duration > 3660:
+        raise ValueError("Date range exceeds maximum limit of 10 years (3660 days)")
+
+    mx = by_key[metric_x_key]
+    my = by_key[metric_y_key]
+
+    conn = get_healthcare_db_connection()
+    try:
+        x_map = _daily_values_for_metric(conn, mx, start_date_str, end_date_str)
+        y_map = _daily_values_for_metric(conn, my, start_date_str, end_date_str)
+
+        common_days = sorted(set(x_map.keys()) & set(y_map.keys()))
+        points = [{"date": d, "x": x_map[d], "y": y_map[d]} for d in common_days]
+
+        n = len(points)
+        pearson_r: float | None = None
+        slope: float | None = None
+        intercept: float | None = None
+
+        if n >= 2:
+            xs = [p["x"] for p in points]
+            ys = [p["y"] for p in points]
+            mean_x = sum(xs) / n
+            mean_y = sum(ys) / n
+            num = sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys))
+            den_x = sum((x - mean_x) ** 2 for x in xs)
+            den_y = sum((y - mean_y) ** 2 for y in ys)
+            # Pearson
+            den = (den_x * den_y) ** 0.5
+            if den != 0:
+                pearson_r = num / den
+                # Clamp to [-1,1] for floating errors
+                if pearson_r > 1:
+                    pearson_r = 1.0
+                elif pearson_r < -1:
+                    pearson_r = -1.0
+            # Regression y = slope*x + intercept
+            if den_x != 0:
+                slope = num / den_x
+                intercept = mean_y - slope * mean_x
+
+        return {
+            "metric_x": metric_x_key,
+            "metric_y": metric_y_key,
+            "x_label": mx["label"],
+            "y_label": my["label"],
+            "x_unit": mx["unit"],
+            "y_unit": my["unit"],
+            "x_type": mx["type"],
+            "y_type": my["type"],
+            "start_date": start_date_str,
+            "end_date": end_date_str,
+            "granularity": "day",
+            "n": n,
+            "pearson_r": pearson_r,
+            "regression_slope": slope,
+            "regression_intercept": intercept,
+            "points": points,
         }
     finally:
         conn.close()

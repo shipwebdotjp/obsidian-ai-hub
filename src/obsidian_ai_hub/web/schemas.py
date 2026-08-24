@@ -581,6 +581,31 @@ class HealthcareOverviewResponse(BaseModel):
     metrics: list[HealthcareMetricSeries] = Field(default_factory=list)
 
 
+class HealthcareCorrelationPoint(BaseModel):
+    date: str
+    x: float
+    y: float
+
+
+class HealthcareCorrelationResponse(BaseModel):
+    metric_x: str
+    metric_y: str
+    x_label: str
+    y_label: str
+    x_unit: str
+    y_unit: str
+    x_type: str
+    y_type: str
+    start_date: str
+    end_date: str
+    granularity: Literal["day"] = "day"
+    n: int
+    pearson_r: Optional[float] = None
+    regression_slope: Optional[float] = None
+    regression_intercept: Optional[float] = None
+    points: list[HealthcareCorrelationPoint] = Field(default_factory=list)
+
+
 # --- People Management schemas ---
 
 

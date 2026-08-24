@@ -23,3 +23,20 @@ def get_healthcare_overview(
         return hc_service.get_healthcare_overview(start_date, end_date)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get(
+    "/healthcare/correlation",
+    response_model=schemas.HealthcareCorrelationResponse,
+)
+def get_healthcare_correlation(
+    metric_x: str = Query(..., min_length=1, description="Curated metric key for X axis"),
+    metric_y: str = Query(..., min_length=1, description="Curated metric key for Y axis"),
+    start_date: str = Query(..., min_length=10, max_length=10),
+    end_date: str = Query(..., min_length=10, max_length=10),
+    _=Depends(require_bearer_token),
+):
+    try:
+        return hc_service.get_healthcare_correlation(metric_x, metric_y, start_date, end_date)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))

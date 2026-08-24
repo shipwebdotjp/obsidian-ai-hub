@@ -394,6 +394,31 @@ export interface HealthcareOverviewResponse {
   metrics: HealthcareMetricSeries[];
 }
 
+export interface HealthcareCorrelationPoint {
+  date: string;
+  x: number;
+  y: number;
+}
+
+export interface HealthcareCorrelationResponse {
+  metric_x: string;
+  metric_y: string;
+  x_label: string;
+  y_label: string;
+  x_unit: string;
+  y_unit: string;
+  x_type: string;
+  y_type: string;
+  start_date: string;
+  end_date: string;
+  granularity: "day";
+  n: number;
+  pearson_r: number | null;
+  regression_slope: number | null;
+  regression_intercept: number | null;
+  points: HealthcareCorrelationPoint[];
+}
+
 // --- Summary Edit/Delete types ---
 
 export interface SummaryItemInput {

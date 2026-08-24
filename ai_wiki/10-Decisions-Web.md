@@ -420,3 +420,45 @@ v1 は Quantity 型（`value_numeric`）のみで、もっとも要望の高い�
 - `uv run pytest tests/healthcare/test_queries.py::test_category_sleep_and_stand` — InBed を除外して AsleepCore 7h50m=7.83h が 2026-08-20 に集計されること、stand 1h、週次 52.5h の合算を確認。
 - `tests/test_healthcare_web.py` の `len(metrics)==11` と `sleep/stand_hours` キー存在、`HealthcarePage` の表示は既存 Vitest で回帰確認。
 - `uv run pytest tests/ 800 passed` 維持、`npx --prefix frontend tsc --noEmit` クリーン。
+
+## ヘルスケアダッシュボード v3（相関散布図・専用エンドポイント）
+
+| 項目 | 内容 |
+|------|------|
+| 決定日 | 2026-08-24 |
+| カテゴリ | ヘルスケア・Web API・フロントエンド |
+| 決定内容 | `/healthcare` に「推移 / 相関」タブを追加。相関タブで2指標の日次ペアを散布図（X/Y 異単位対応）+ Pearson 相関係数 + 回帰直線で可視化する。相関は専用エンドポイント `GET /healthcare/correlation` で強制日次で取得しサーバー側で統計計算する。 |
+
+### 背景
+
+v2 までの推移グリッドでは各指標の時系列は見えるが指標間の関係は読み取れない。「歩数が多い日は睡眠が短いか」等の仮説検証のため、2指標の日次値をペアにした散布図が欲しい。既存 overview の粒度（>60日で週別）は散布のポイント数を減らすため相関用には日次を強制したい。
+
+### 仕様
+
+1. **バックエンド `web/schemas.py`**
+   - `HealthcareCorrelationPoint {date, x, y}` / `HealthcareCorrelationResponse {metric_x, metric_y, x_label/y_label, x_unit/y_unit, x_type/y_type, start_date, end_date, granularity="day", n, pearson_r, regression_slope, regression_intercept, points[]}` を追加。`pearson_r/slope/intercept` は `n<2` や分散0で `null`。
+
+2. **バックエンド `web/services/healthcare.py`**
+   - `_daily_values_for_metric(conn, mdef, start, end)` — curated metric の日次スカラーを返すヘルパ。Quantity は `get_daily_aggregates` の `sum`（aggregation sum）/`avg`（aggregation avg）、Category は `get_daily_category_durations`（睡眠は Asleep 4値の時間合計）/`get_daily_stand_counts`（スタンドは Stood 件数）をそのまま日次値とする。
+   - `get_healthcare_correlation(metric_x_key, metric_y_key, start, end)` — `CURATED_METRICS` から key→def を解決（未知は `ValueError→400`）、`_validate_date_str` と `duration>3660` を共有、日次 dict を両指標で取得し `set(x) & set(y)` の共通日でソートして `points` 化。`n>=2` のみ Pearson `r = Σ((xi-x̄)(yi-ȳ))/sqrt(Σ(xi-x̄)²Σ(yi-ȳ)²)` と回帰 `slope = Σ((xi-x̄)(yi-ȳ))/Σ(xi-x̄)², intercept = ȳ - slope·x̄` を計算。分母0は `null` にフォールバックし `r` は `[-1,1]` にクランプ。
+
+3. **バックエンド `web/routes/healthcare.py`**
+   - `GET /healthcare/correlation?metric_x=&metric_y=&start_date=&end_date=` 追加。Bearer 認証、`ValueError→400`。既存 overview は変更なし。
+
+4. **フロントエンド**
+   - `api/types.ts` / `api/client.ts` に `HealthcareCorrelationResponse` と `getHealthcareCorrelation` を追加。
+   - `features/healthcare/HealthcareScatterChart.tsx`（新規） — 手書き SVG。X/Y 各スケールに `xPad/yPad`（range 12%）と0クランプ、グリッド3本、点 `<circle>`、回帰直線 `<line strokeDasharray="6 4">`、軸タイトル、sr-only `<table>`。ヘッダに `r` と強弱ラベル（|r|>=0.7 強/0.4 中/0.2 弱）、`n`、回帰式を表示。空は「両方が揃った日がありません」。
+   - `HealthcarePage.tsx` に `activeTab: "trend"|"correlation"` と `corrMetricX/corrMetricY/corrData/corrLoading/corrError` を追加。タブヘッダ、相関タブに X/Y `<select>`（`data.metrics` から生成、初期値 X=steps/Y=sleep）、散布図セクションを追加。期間 preset/カスタムは `load` と `loadCorrelation` の両方を発火。`requestRef/corrRequestRef` で競合ガード。
+
+### トレードオフ
+
+- 専用エンドポイントは overview と分離され相関計算をサーバーに集約できる。前端末は描画のみでよく、長期間でも常に日次ポイントを最大化（365日×1点/日）。代わりに `n=0/1` では統計量が `null` になることを UI で明示する必要がある。
+- 既存 overview を流用する案はバックエンド不要だが、90日以上で週別になりポイントが激減し相関の診断力が落ちる。`force_daily` param 案は11指標全取得の無駄が大きい。専用エンドポイントが最もクリーン。
+- UI は2指標選択の単一散布に絞り、全ペア行列は Phase 3b に回す。11×11 行列は一覧性は高いが実装量が増え、まず単一散布で相関の読み解き方を確立する。
+
+### 検証
+
+- `uv run pytest tests/test_healthcare_web.py::test_healthcare_correlation_success` — steps 3000+500*i と sleep 6+0.5*i の5日間で `n=5, r≈1.0, slope≈0.001` を検証。空・単一点・未知 metric の 400 も検証。
+- `npm --prefix frontend test -- src/features/healthcare/HealthcareScatterChart.test.tsx` — 点描画・回帰線・Pearson 表示・空状態・負の相関。
+- `HealthcarePage.test.tsx` に相関タブ切替と `getHealthcareCorrelation` 呼び出しを検証。
+- `uv run pytest tests/ 807 passed`、`npm --prefix frontend test` 143 passed、`tsc --noEmit` クリーン。

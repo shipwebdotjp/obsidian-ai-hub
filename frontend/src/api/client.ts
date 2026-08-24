@@ -33,6 +33,7 @@ import type {
   AgentSessionDetailResponse,
   AgentStreamEvent,
   HealthcareOverviewResponse,
+  HealthcareCorrelationResponse,
 } from "./types";
 
 const TOKEN_KEY = "obsidian-ai-hub:api-token";
@@ -439,6 +440,22 @@ export function getHealthcareOverview(params: {
   sp.set("end_date", params.end_date);
   return request<HealthcareOverviewResponse>(
     `/api/v1/healthcare/overview?${sp.toString()}`,
+  );
+}
+
+export function getHealthcareCorrelation(params: {
+  metric_x: string;
+  metric_y: string;
+  start_date: string;
+  end_date: string;
+}): Promise<HealthcareCorrelationResponse> {
+  const sp = new URLSearchParams();
+  sp.set("metric_x", params.metric_x);
+  sp.set("metric_y", params.metric_y);
+  sp.set("start_date", params.start_date);
+  sp.set("end_date", params.end_date);
+  return request<HealthcareCorrelationResponse>(
+    `/api/v1/healthcare/correlation?${sp.toString()}`,
   );
 }
 

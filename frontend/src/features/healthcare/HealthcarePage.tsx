@@ -1,9 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ApiError, getHealthcareOverview } from "../../api/client";
-import type { HealthcareOverviewResponse } from "../../api/types";
+import { ApiError, getHealthcareCorrelation, getHealthcareOverview } from "../../api/client";
+import type { HealthcareCorrelationResponse, HealthcareOverviewResponse } from "../../api/types";
+import { HealthcareScatterChart } from "./HealthcareScatterChart";
 import { MetricCard } from "./MetricCard";
 
 type Preset = "7" | "30" | "90" | "year" | "custom";
+type MetricKey = HealthcareOverviewResponse["metrics"][number]["key"];
+const DEFAULT_CORR_X: MetricKey = "steps";
+const DEFAULT_CORR_Y: MetricKey = "sleep";
 
 function toISODate(d: Date): string {
   const y = d.getFullYear();
@@ -19,14 +23,21 @@ function subtractDaysISO(days: number): string {
 }
 
 export default function HealthcarePage() {
+  const [activeTab, setActiveTab] = useState<"trend" | "correlation">("trend");
   const [preset, setPreset] = useState<Preset>("30");
   const [startDate, setStartDate] = useState(() => subtractDaysISO(29));
   const [endDate, setEndDate] = useState(() => toISODate(new Date()));
   const [data, setData] = useState<HealthcareOverviewResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [corrMetricX, setCorrMetricX] = useState<MetricKey>(DEFAULT_CORR_X);
+  const [corrMetricY, setCorrMetricY] = useState<MetricKey>(DEFAULT_CORR_Y);
+  const [corrData, setCorrData] = useState<HealthcareCorrelationResponse | null>(null);
+  const [corrLoading, setCorrLoading] = useState(false);
+  const [corrError, setCorrError] = useState<string | null>(null);
 
   const requestRef = useRef(0);
+  const corrRequestRef = useRef(0);
 
   const load = useCallback((start: string, end: string) => {
     const reqId = ++requestRef.current;
@@ -46,10 +57,33 @@ export default function HealthcarePage() {
       });
   }, []);
 
+  const loadCorrelation = useCallback((start: string, end: string, mx: string, my: string) => {
+    const reqId = ++corrRequestRef.current;
+    setCorrLoading(true);
+    setCorrError(null);
+    getHealthcareCorrelation({ metric_x: mx, metric_y: my, start_date: start, end_date: end })
+      .then((res) => {
+        if (reqId !== corrRequestRef.current) return;
+        setCorrData(res);
+      })
+      .catch((e) => {
+        if (reqId !== corrRequestRef.current) return;
+        setCorrError(e instanceof ApiError ? e.message : "相関データの取得に失敗しました");
+      })
+      .finally(() => {
+        if (reqId === corrRequestRef.current) setCorrLoading(false);
+      });
+  }, []);
+
   useEffect(() => {
     load(startDate, endDate);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (activeTab !== "correlation") return;
+    loadCorrelation(startDate, endDate, corrMetricX, corrMetricY);
+  }, [activeTab, startDate, endDate, corrMetricX, corrMetricY, loadCorrelation]);
 
   const handlePreset = (p: Preset) => {
     setPreset(p);
@@ -67,22 +101,29 @@ export default function HealthcarePage() {
     setStartDate(start);
     setEndDate(end);
     load(start, end);
+    // correlation data is re-fetched by the activeTab/date useEffect
   };
 
   const handleApplyCustom = () => {
     if (!startDate || !endDate) {
-      setError("開始日と終了日を指定してください");
+      const msg = "開始日と終了日を指定してください";
+      if (activeTab === "correlation") setCorrError(msg);
+      else setError(msg);
       return;
     }
     if (startDate > endDate) {
-      setError("開始日は終了日以前を指定してください");
+      const msg = "開始日は終了日以前を指定してください";
+      if (activeTab === "correlation") setCorrError(msg);
+      else setError(msg);
       return;
     }
     setPreset("custom");
     load(startDate, endDate);
+    // correlation data is re-fetched by the activeTab/date useEffect
   };
 
   const hasAnyData = data?.metrics.some((m) => m.buckets.some((b) => b.value !== null)) ?? false;
+  const metricOptions = data?.metrics ?? [];
 
   return (
     <div className="flex h-full flex-col bg-slate-50">
@@ -153,40 +194,128 @@ export default function HealthcarePage() {
           </div>
         </div>
 
-        {loading && <p className="text-sm text-slate-500">ヘルスケアデータをロード中…</p>}
-        {error && <p className="text-sm text-red-600">{error}</p>}
+        {/* Tab nav */}
+        <div className="flex gap-1 border-b border-slate-200">
+          <button
+            onClick={() => setActiveTab("trend")}
+            className={`rounded-t px-4 py-2 text-sm font-semibold ${activeTab === "trend" ? "border-b-2 border-slate-900 bg-white text-slate-900" : "text-slate-500 hover:bg-slate-100"} cursor-pointer`}
+          >
+            推移
+          </button>
+          <button
+            onClick={() => setActiveTab("correlation")}
+            className={`rounded-t px-4 py-2 text-sm font-semibold ${activeTab === "correlation" ? "border-b-2 border-slate-900 bg-white text-slate-900" : "text-slate-500 hover:bg-slate-100"} cursor-pointer`}
+          >
+            相関
+          </button>
+        </div>
 
-        {data && !loading && !error && (
+        {activeTab === "trend" && (
           <>
-            <div className="flex items-center justify-between">
-              <p className="text-xs text-slate-500">
-                {data.start_date} ～ {data.end_date}
-                <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600">
-                  {data.granularity === "day" ? "日別" : data.granularity === "week" ? "週別" : "月別"}
-                </span>
-              </p>
-              {!hasAnyData && (
-                <p className="text-xs text-amber-600">
-                  この期間のデータがありません。Apple Health の export をインポートすると表示されます。
-                </p>
-              )}
-            </div>
+            {loading && <p className="text-sm text-slate-500">ヘルスケアデータをロード中…</p>}
+            {error && <p className="text-sm text-red-600">{error}</p>}
 
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-              {data.metrics.map((m) => (
-                <MetricCard key={m.key} metric={m} />
-              ))}
-            </div>
+            {data && !loading && !error && (
+              <>
+                <div className="flex items-center justify-between">
+                  <p className="text-xs text-slate-500">
+                    {data.start_date} ～ {data.end_date}
+                    <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600">
+                      {data.granularity === "day" ? "日別" : data.granularity === "week" ? "週別" : "月別"}
+                    </span>
+                  </p>
+                  {!hasAnyData && (
+                    <p className="text-xs text-amber-600">
+                      この期間のデータがありません。Apple Health の export をインポートすると表示されます。
+                    </p>
+                  )}
+                </div>
 
-            {!hasAnyData && (
-              <div className="rounded-xl border border-dashed border-slate-300 bg-white p-8 text-center">
-                <p className="text-sm font-semibold text-slate-700">ヘルスケアデータがまだありません</p>
-                <p className="mt-1 text-xs text-slate-500">
-                  <code className="rounded bg-slate-100 px-1 py-0.5">uv run python -m obsidian_ai_hub.main --import-apple-health --healthcare-export-dir &lt;dir&gt;</code> で取り込んでください。
-                </p>
-              </div>
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+                  {data.metrics.map((m) => (
+                    <MetricCard key={m.key} metric={m} />
+                  ))}
+                </div>
+
+                {!hasAnyData && (
+                  <div className="rounded-xl border border-dashed border-slate-300 bg-white p-8 text-center">
+                    <p className="text-sm font-semibold text-slate-700">ヘルスケアデータがまだありません</p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      <code className="rounded bg-slate-100 px-1 py-0.5">uv run python -m obsidian_ai_hub.main --import-apple-health --healthcare-export-dir &lt;dir&gt;</code> で取り込んでください。
+                    </p>
+                  </div>
+                )}
+              </>
             )}
           </>
+        )}
+
+        {activeTab === "correlation" && (
+          <div className="space-y-4">
+            <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+              <h3 className="text-sm font-bold text-slate-800">相関散布図</h3>
+              <p className="mt-1 text-xs text-slate-500">2つの指標の日次値をペアにし、散布図と Pearson 相関係数・回帰直線で相関を概観します（常に日次、両方が揃った日のみプロット）。</p>
+              <div className="mt-3 flex flex-wrap items-center gap-3 text-xs">
+                <label className="flex items-center gap-1.5">
+                  <span className="font-semibold text-slate-600">X軸</span>
+                  <select
+                    value={corrMetricX}
+                    onChange={(e) => setCorrMetricX(e.target.value as MetricKey)}
+                    className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs focus:border-blue-500 focus:outline-none cursor-pointer"
+                    aria-label="X軸メトリック"
+                  >
+                    {metricOptions.length > 0 ? (
+                      metricOptions.map((m) => (
+                        <option key={m.key} value={m.key} disabled={m.key === corrMetricY}>
+                          {m.label} ({m.unit})
+                        </option>
+                      ))
+                    ) : (
+                      <>
+                        <option value="steps">歩数 (count)</option>
+                        <option value="sleep">睡眠時間 (h)</option>
+                      </>
+                    )}
+                  </select>
+                </label>
+                <label className="flex items-center gap-1.5">
+                  <span className="font-semibold text-slate-600">Y軸</span>
+                  <select
+                    value={corrMetricY}
+                    onChange={(e) => setCorrMetricY(e.target.value as MetricKey)}
+                    className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs focus:border-blue-500 focus:outline-none cursor-pointer"
+                    aria-label="Y軸メトリック"
+                  >
+                    {metricOptions.length > 0 ? (
+                      metricOptions.map((m) => (
+                        <option key={m.key} value={m.key} disabled={m.key === corrMetricX}>
+                          {m.label} ({m.unit})
+                        </option>
+                      ))
+                    ) : (
+                      <>
+                        <option value="sleep">睡眠時間 (h)</option>
+                        <option value="steps">歩数 (count)</option>
+                      </>
+                    )}
+                  </select>
+                </label>
+              </div>
+            </div>
+
+            {corrLoading && <p className="text-sm text-slate-500">相関データをロード中…</p>}
+            {corrError && <p className="text-sm text-red-600">{corrError}</p>}
+
+            {corrData && !corrLoading && !corrError && (
+              <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                <HealthcareScatterChart data={corrData} />
+              </div>
+            )}
+
+            {!corrLoading && !corrError && !corrData && (
+              <p className="text-sm text-slate-500">期間と2指標を選択すると散布図が表示されます。</p>
+            )}
+          </div>
         )}
       </div>
     </div>

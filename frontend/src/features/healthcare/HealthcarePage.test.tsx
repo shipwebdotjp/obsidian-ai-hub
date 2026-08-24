@@ -5,6 +5,7 @@ import HealthcarePage from "./HealthcarePage";
 
 vi.mock("../../api/client", () => ({
   getHealthcareOverview: vi.fn(),
+  getHealthcareCorrelation: vi.fn(),
   ApiError: class ApiError extends Error {
     status: number;
     constructor(status: number, message: string) {
@@ -14,10 +15,11 @@ vi.mock("../../api/client", () => ({
   },
 }));
 
-import { getHealthcareOverview } from "../../api/client";
-import type { HealthcareOverviewResponse } from "../../api/types";
+import { getHealthcareCorrelation, getHealthcareOverview } from "../../api/client";
+import type { HealthcareCorrelationResponse, HealthcareOverviewResponse } from "../../api/types";
 
 const mockGetOverview = vi.mocked(getHealthcareOverview);
+const mockGetCorrelation = vi.mocked(getHealthcareCorrelation);
 
 function makeBucket(key: string, display_label: string, value: number | null) {
   return {
@@ -107,9 +109,33 @@ const emptyOverview: HealthcareOverviewResponse = {
   ],
 };
 
+const sampleCorrelation: HealthcareCorrelationResponse = {
+  metric_x: "steps",
+  metric_y: "sleep",
+  x_label: "歩数",
+  y_label: "睡眠時間",
+  x_unit: "count",
+  y_unit: "h",
+  x_type: "HKQuantityTypeIdentifierStepCount",
+  y_type: "HKCategoryTypeIdentifierSleepAnalysis",
+  start_date: "2026-08-01",
+  end_date: "2026-08-07",
+  granularity: "day",
+  n: 3,
+  pearson_r: 0.9,
+  regression_slope: 0.001,
+  regression_intercept: 3,
+  points: [
+    { date: "2026-08-01", x: 3000, y: 6 },
+    { date: "2026-08-02", x: 4000, y: 7 },
+    { date: "2026-08-03", x: 5000, y: 8 },
+  ],
+};
+
 describe("HealthcarePage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockGetCorrelation.mockResolvedValue(sampleCorrelation);
   });
 
   it("renders title and loads data on mount", async () => {
@@ -180,5 +206,18 @@ describe("HealthcarePage", () => {
     const lastCall = mockGetOverview.mock.calls[1]![0] as { start_date: string; end_date: string };
     expect(lastCall.start_date).toBe("2026-07-01");
     expect(lastCall.end_date).toBe("2026-07-31");
+  });
+
+  it("switches to correlation tab and shows scatter", async () => {
+    mockGetOverview.mockResolvedValue(sampleOverview);
+    render(<HealthcarePage />);
+    await waitFor(() => expect(mockGetOverview).toHaveBeenCalled());
+    const user = userEvent.setup();
+    await user.click(screen.getByText("相関"));
+    await waitFor(() => expect(mockGetCorrelation).toHaveBeenCalled());
+    expect(await screen.findByText(/相関散布図/)).toBeInTheDocument();
+    expect(screen.getByLabelText("X軸メトリック")).toBeInTheDocument();
+    expect(screen.getByLabelText("Y軸メトリック")).toBeInTheDocument();
+    expect(await screen.findByText(/r = 0.90/)).toBeInTheDocument();
   });
 });
