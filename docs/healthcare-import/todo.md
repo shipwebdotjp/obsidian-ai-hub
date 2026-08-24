@@ -1,17 +1,19 @@
 # TODO: Apple Health Import
 Plan: docs/healthcare-import/plan.md
 
-## Phase 1 — 基盤 (1–2日)
+## Phase 1 — 基盤 (1–2日) — 完了 (745eb4d)
 
-- [ ] `src/obsidian_ai_hub/utils/config.py` に `HEALTHCARE_SQLITE_PATH` / `HEALTHCARE_EXPORT_DIR` 追加（`VAULT_INDEX_SQLITE_PATH` パターン踏襲、`ENV=test` 時は `TEST_WORKSPACE` 配下）
-- [ ] `src/obsidian_ai_hub/healthcare/` パッケージ雛形作成
-  - [ ] `store.py`: `get_healthcare_db_connection()`（`PRAGMA foreign_keys/journal_mode=WAL/busy_timeout`）、`init_schema()` で v1 DDL 実行、`PRAGMA user_version=1`
-  - [ ] `models.py`: dataclass / TypedDict 型定義
-  - [ ] `config.py`: 再export（任意）
-- [ ] `tests/conftest.py` に `_isolate_healthcare_db` autouse fixture 追加 + `_filesystem_sandbox` で `HEALTHCARE_SQLITE_PATH` リダイレクト
-- [ ] `store.py` に本番パス保護ガード（`database.py:10` `_assert_test_db_is_not_production` 同型）追加
-- [ ] `tests/healthcare/test_store.py` 作成（WAL/UNIQUE 制約の基本検証）
-- [ ] `uv run pytest tests/healthcare/test_store.py` で隔離動作確認
+- [x] `src/obsidian_ai_hub/utils/config.py` に `HEALTHCARE_SQLITE_PATH` / `HEALTHCARE_EXPORT_DIR` 追加（`VAULT_INDEX_SQLITE_PATH` パターン踏襲、`ENV=test` 時は `TEST_WORKSPACE` 配下）
+- [x] `src/obsidian_ai_hub/healthcare/` パッケージ雛形作成
+  - [x] `store.py`: `get_healthcare_db_connection()`（`PRAGMA foreign_keys/journal_mode=WAL/busy_timeout`）、`init_schema()` で v1 DDL 実行、`PRAGMA user_version=1`
+  - [x] `models.py`: dataclass / TypedDict 型定義（frozen + hash 対応、metadata tuple）
+  - [x] `config.py`: 再export（`utils/config.py` で一元管理のため不要と判断）
+- [x] `tests/conftest.py` に `_isolate_healthcare_db` autouse fixture 追加 + `_filesystem_sandbox` で `HEALTHCARE_EXPORT_DIR` リダイレクト（`HEALTHCARE_SQLITE_PATH` は `test_healthcare_db_path` 経由に一本化、ocr指摘で重複排除）
+- [x] `store.py` に本番パス保護ガード（`database.py:10` `_assert_test_db_is_not_production` 同型 + MEMORY 分離ガード）追加 — ocr指摘で try/except の silent swallow を除去
+- [x] `tests/healthcare/test_store.py` 作成（WAL/UNIQUE/ cascade / ECG read 検証、ocr指摘で ECG は malformed を ValueError に）
+- [x] `uv run pytest tests/healthcare/test_store.py` で隔離動作確認 — 11 passed
+- [x] ocr review 指摘18件を修正（config冗長expanduser、helpersのdead code/assert、fixtures DOCTYPE、conftestガード等）
+- [x] `src/obsidian_ai_hub/healthcare/store.py` に `idx_hw_import` と `health_workout_routes PK(seq)` を追加（ocr指摘の性能対策）
 
 ## Phase 2 — インポータ MVP (2–3日)
 
