@@ -15,8 +15,9 @@ from obsidian_ai_hub.healthcare.store import get_healthcare_db_connection
 # Curated metrics: Phase 1 Quantity + Phase 2 Category (sleep/stand).
 # Category metrics are derived from start_date/end_date/value_text durations
 # rather than value_numeric.
+# Prefer detailed stages only; drop the umbrella Asleep to avoid
+# double-counting when both umbrella + stages exist for overlapping intervals.
 _SLEEP_ALLOWED_VALUES: set[str] = {
-    "HKCategoryValueSleepAnalysisAsleep",
     "HKCategoryValueSleepAnalysisAsleepCore",
     "HKCategoryValueSleepAnalysisAsleepDeep",
     "HKCategoryValueSleepAnalysisAsleepREM",
@@ -93,6 +94,7 @@ CURATED_METRICS: list[dict[str, str]] = [
         "type": "HKCategoryTypeIdentifierSleepAnalysis",
         "unit": "h",
         "aggregation": "sum",
+        "category": "sleep_duration",
     },
     {
         "key": "stand_hours",
@@ -100,6 +102,7 @@ CURATED_METRICS: list[dict[str, str]] = [
         "type": "HKCategoryTypeIdentifierAppleStandHour",
         "unit": "h",
         "aggregation": "sum",
+        "category": "stand_count",
     },
 ]
 
@@ -196,7 +199,7 @@ def get_healthcare_overview(
     conn = get_healthcare_db_connection()
     try:
         # Single grouped query for Quantity metrics to avoid N+1 scans.
-        quantity_types = [m["type"] for m in CURATED_METRICS if m["key"] not in ("sleep", "stand_hours")]
+        quantity_types = [m["type"] for m in CURATED_METRICS if "category" not in m]
         daily_by_type = hc_queries.get_daily_aggregates_multi(
             conn,
             types=quantity_types,
@@ -207,9 +210,7 @@ def get_healthcare_overview(
         for mdef in CURATED_METRICS:
             type_ = mdef["type"]
             aggregation = mdef["aggregation"]
-            key = mdef["key"]
-            if key == "sleep":
-                # Category: sum of Asleep durations (hours) per start day.
+            if mdef.get("category") == "sleep_duration":
                 daily_hours = hc_queries.get_daily_category_durations(
                     conn,
                     type_=type_,
@@ -221,12 +222,12 @@ def get_healthcare_overview(
                     day: {"sum": hrs, "count": 1, "avg": hrs, "min": hrs, "max": hrs}
                     for day, hrs in daily_hours.items()
                 }
-            elif key == "stand_hours":
+            elif mdef.get("category") == "stand_count":
                 daily_counts = hc_queries.get_daily_stand_counts(
                     conn, start_date=start_date_str, end_date=end_date_str
                 )
                 daily = {
-                    day: {"sum": float(cnt), "count": cnt, "avg": float(cnt), "min": float(cnt), "max": float(cnt)}
+                    day: {"sum": float(cnt), "count": 1, "avg": float(cnt), "min": float(cnt), "max": float(cnt)}
                     for day, cnt in daily_counts.items()
                 }
             else:

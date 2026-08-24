@@ -262,8 +262,9 @@ def test_category_sleep_filters_asleep_only(test_healthcare_db_path: Path, tmp_p
     helpers = _helpers()
     export_dir = helpers.write_mini_export(tmp_path)
     from obsidian_ai_hub.healthcare.importer import import_export
-    from obsidian_ai_hub.healthcare.store import get_healthcare_db_connection
     from obsidian_ai_hub.healthcare.queries import get_daily_category_durations
+    from obsidian_ai_hub.healthcare.store import get_healthcare_db_connection
+    from obsidian_ai_hub.web.services.healthcare import _SLEEP_ALLOWED_VALUES
 
     res = import_export(export_dir)
     import_id = res["import_id"]
@@ -290,8 +291,6 @@ def test_category_sleep_filters_asleep_only(test_healthcare_db_path: Path, tmp_p
     finally:
         conn.close()
 
-    from obsidian_ai_hub.healthcare.queries import get_daily_category_durations
-    from obsidian_ai_hub.web.services.healthcare import _SLEEP_ALLOWED_VALUES
 
     conn = get_healthcare_db_connection()
     try:

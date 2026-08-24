@@ -164,20 +164,9 @@ def _parse_health_datetime(s: str) -> datetime | None:
             return datetime.strptime(s, fmt)
         except ValueError:
             continue
-    # Fallback: ISO with T separator or without timezone
+    # Python >=3.11 fromisoformat tolerates colon-less offsets like "+0900".
     try:
-        # fromisoformat handles "YYYY-MM-DD HH:MM:SS+09:00" if colon in tz
-        # but export uses "+0900" without colon; try inserting colon.
-        if len(s) >= 5 and s[-5] in ("+", "-") and s[-2:].isdigit():
-            # already with colon? fromisoformat tolerates
-            return datetime.fromisoformat(s)
-    except ValueError:
-        pass
-    try:
-        # Normalize "+0900" -> "+09:00" for fromisoformat
-        if len(s) > 6 and s[-5] in ("+", "-") and s[-4:].isdigit():
-            s2 = s[:-2] + ":" + s[-2:]
-            return datetime.fromisoformat(s2)
+        return datetime.fromisoformat(s)
     except ValueError:
         pass
     return None
@@ -223,7 +212,8 @@ def get_daily_category_durations(
         (type_, start_date, end_next),
     )
     out: dict[str, float] = {}
-    for row in cur.fetchall():
+    # Iterate lazily to avoid materializing the full result set at once.
+    for row in cur:
         day = row[0]
         start_s = row[1]
         end_s = row[2]
@@ -234,11 +224,17 @@ def get_daily_category_durations(
         end_dt = _parse_health_datetime(end_s)
         if start_dt is None or end_dt is None:
             continue
-        # Ensure timezone awareness doesn't break subtraction; both have same tz
-        # if present, otherwise naive subtraction is fine.
+        # Normalize: if exactly one side is tz-aware, assume the naive side
+        # carries the same offset so subtraction never raises.
+        if (start_dt.tzinfo is None) != (end_dt.tzinfo is None):
+            ref = start_dt if start_dt.tzinfo is not None else end_dt
+            if start_dt.tzinfo is None:
+                start_dt = start_dt.replace(tzinfo=ref.tzinfo)
+            else:
+                end_dt = end_dt.replace(tzinfo=ref.tzinfo)
         try:
             delta = (end_dt - start_dt).total_seconds()
-        except Exception:
+        except TypeError:
             continue
         if delta <= 0 or delta > 24 * 3600 * 2:  # guard against bogus >2 days
             # Skip zero/negative or implausibly long segments; do not mask

@@ -395,14 +395,14 @@ v1 は Quantity 型（`value_numeric`）のみで、もっとも要望の高い�
 ### 仕様
 
 1. **バックエンド `healthcare/queries.py`**
-   - `_parse_health_datetime(s)` — `"%Y-%m-%d %H:%M:%S %z"` を主とし `fromisoformat` へのフォールバックで `2026-08-20 23:00:00 +0900` / `T` 区切り / `+09:00` を吸収。失敗は `None` で行スキップ。
-   - `get_daily_category_durations(conn, type_, start_date, end_date, allowed_values)` — `type = ? AND start_date >= ? AND start_date < ?` で取得後、Python で `(end-start).total_seconds()/3600` を `substr(start_date,1,10)` の開始日バケットへ加算。`allowed_values` で `InBed/Awake` を除外し Asleep 系のみを合計。`0 < delta <=48h` のみ採用し負値や異常値を除外。
+   - `_parse_health_datetime(s)` — `"%Y-%m-%d %H:%M:%S %z"` を主とし `fromisoformat`（Python 3.11+ は `+0900` も許容）への単一フォールバックで `2026-08-20 23:00:00 +0900` / `T` 区切りを吸収。失敗は `None` で行スキップ（OCR で冗長な `:` 挿入分岐を削除）。
+   - `get_daily_category_durations(conn, type_, start_date, end_date, allowed_values)` — `type = ? AND start_date >= ? AND start_date < ?` で取得後、カーソルを遅延イテレーション（`for row in cur:`）し Python で `(end-start).total_seconds()/3600` を `substr(start_date,1,10)` の開始日バケットへ加算。片方のみ tz-aware な場合は同一 offset を付与して `TypeError` を回避（`except TypeError` に限定）。`allowed_values` で `InBed/Awake` を除外し Asleep 系のみを合計。`0 < delta <=48h` のみ採用。
    - `get_daily_stand_counts(conn, start_date, end_date)` — `value_text='HKCategoryValueAppleStandHourStood'` を `COUNT(*) GROUP BY substr(start_date,1,10)` で集計。1レコード=1時間として扱う。
-   - いずれも sparse（データ無し日は欠落）で返す。`list_available_types` 等は変更なし。
+   - いずれも sparse（データ無し日は欠落）で返す。
 
 2. **バックエンド `web/services/healthcare.py`**
-   - `CURATED_METRICS` に `sleep (h, sum)` と `stand_hours (h, sum)` を追加し計11指標。`_SLEEP_ALLOWED_VALUES`（Asleep/Core/Deep/REM/Unspec の5値）を定義。
-   - Quantity 9指標は従来どおり `get_daily_aggregates_multi` で1クエリ集約。Category 2指標は個別に `get_daily_category_durations` / `get_daily_stand_counts` を呼び、日次 dict を `{day: {"sum": hrs, "count":1,…}}` に変換して既存のバケットロールアップ（`_bucket_key_for_date`）へ流用。週・月では日次合計の合算となり、週バケットは `52.5h`（7日×7.5h）のように正しく集計される。
+   - `CURATED_METRICS` に `sleep (h, sum, category=sleep_duration)` と `stand_hours (h, sum, category=stand_count)` を追加し計11指標。`_SLEEP_ALLOWED_VALUES` は詳細 stage のみ `AsleepCore/Deep/REM/Unspec` の4値とし、umbrella の `Asleep` は詳細と重複期間で二重計上するリスクがあるため除外（OCR 指摘反映）。
+   - Quantity 9指標は従来どおり `get_daily_aggregates_multi` で1クエリ集約。Category 2指標は `category` フラグで分岐し `get_daily_category_durations` / `get_daily_stand_counts` を呼び、日次 dict を `{day: {"sum": hrs, "count":1,…}}` に変換して既存のバケットロールアップ（`_bucket_key_for_date`）へ流用（`stand_hours` は `count=1` per day に統一し `sleep` と一貫）。週・月では日次合計の合算となり、週バケットは `52.5h`（7日×7.5h）のように正しく集計される。
 
 3. **フロントエンド**
    - `MetricCard.tsx` の `PALETTE` に `sleep: #0ea5e9 / stand_hours: #84cc16` を追加。`formatMetricValue` で `sleep/stand_hours` は `toFixed(1)`、単位 `h`。
