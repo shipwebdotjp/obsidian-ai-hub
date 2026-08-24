@@ -15,19 +15,21 @@ Plan: docs/healthcare-import/plan.md
 - [x] ocr review 指摘18件を修正（config冗長expanduser、helpersのdead code/assert、fixtures DOCTYPE、conftestガード等）
 - [x] `src/obsidian_ai_hub/healthcare/store.py` に `idx_hw_import` と `health_workout_routes PK(seq)` を追加（ocr指摘の性能対策）
 
-## Phase 2 — インポータ MVP (2–3日)
+## Phase 2 — インポータ MVP (2–3日) — 完了
 
-- [ ] `src/obsidian_ai_hub/healthcare/importer.py` 実装
-  - [ ] `import_export(export_dir, batch_size=5000, dry_run=False)` — `iterparse` + `elem.clear()` + fingerprint (SHA256 `type|syncId` or `type|source|start|end|value|unit`) + `INSERT OR IGNORE` 冪等
-  - [ ] Record: `value_numeric`/`value_text` 振り分け、`health_record_metadata` / `health_hrv_beats` へ `executemany`
-  - [ ] Workout: 4テーブル分割（metadata/events/statistics/routes）
-  - [ ] ActivitySummary: `raw_json`/`raw_xml` 保存
-  - [ ] `health_imports` の `running`→`succeeded`/`failed` 更新と `stats_json` 集計
-  - [ ] 進捗ログ（10k件ごと）、例外はマスクせず素通し
-- [ ] `src/obsidian_ai_hub/import_apple_health.py` 薄い CLI ラッパ（`argparse` のみ、実体は `importer.import_export` 委譲）
-- [ ] `tests/healthcare/fixtures/export_mini.xml` / `fixtures/ecg_mini.csv` 作成
-- [ ] `tests/healthcare/test_importer.py` 作成（件数検証、2回目冪等、ECG は `file_path` のみ）
-- [ ] `uv run pytest tests/healthcare/` で全件通過確認
+- [x] `src/obsidian_ai_hub/healthcare/importer.py` 実装
+  - [x] `import_export(export_dir, batch_size=5000, dry_run=False)` — `iterparse` + `elem.clear()` + fingerprint (SHA256 `type|syncId` or `type|source|start|end|value|unit`) + `INSERT OR IGNORE` 冪等
+  - [x] Record: `value_numeric`/`value_text` 振り分け、`health_record_metadata` / `health_hrv_beats` へ挿入
+  - [x] Workout: 4テーブル分割（metadata/events/statistics/routes, seq PK, idx_hw_import）
+  - [x] ActivitySummary: `raw_json`/`raw_xml` 保存
+  - [x] `health_imports` の `running`→`succeeded`/`failed` 更新と `stats_json` 集計（`cda_skipped=true`）
+  - [x] 進捗ログ（batchごとに commit、10k件ごとに info）、例外はマスクせず `failed` 記録後に再raise
+  - [x] ECG: `electrocardiograms/*.csv` を走査し `health_ecg` へ（relative file_path, sha256, file_size, header parse）
+  - [x] `dry_run` は DB 書き込みなしで件数カウント
+- [x] `src/obsidian_ai_hub/import_apple_health.py` 薄い CLI ラッパ（`argparse` のみ、実体は `importer.import_export` 委譲、`--export-dir/--batch-size/--dry-run`）
+- [x] `tests/healthcare/fixtures/export_mini.xml` / `fixtures/ecg_mini.csv` 作成（Phase1 で完了、helpers の定数化と anchor assert 済み）
+- [x] `tests/healthcare/test_importer.py` 作成（7 records / 1 workout / 1 activity / 1 ecg、2回目冪等、syncId fingerprint、dry_run、ECGなし、CLI、missing dir）
+- [x] `uv run pytest tests/healthcare/` で全件通過確認 — 18 passed (store 8 + importer 7 + fixtures 3)
 
 ## Phase 3 — ECG と仕上げ (1日)
 

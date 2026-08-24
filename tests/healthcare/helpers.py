@@ -5,12 +5,12 @@ tests/healthcare/fixtures/ for golden-file reference, but most tests
 should generate isolated copies under tmp_path via these helpers to
 avoid cross-test pollution — following tests/test_migrate_*.py pattern.
 
-Usage (store-only until importer lands):
+Usage:
     helpers = _load_helpers()  # see test_fixtures_smoke.py
     export_dir = helpers.write_mini_export(tmp_path)
     # -> tmp_path/export/export.xml + tmp_path/export/electrocardiograms/ecg_2026-08-20.csv
-    from obsidian_ai_hub.healthcare.store import get_healthcare_db_connection
-    # importer (obsidian_ai_hub.healthcare.importer) is planned for Phase 2
+    from obsidian_ai_hub.healthcare.importer import import_export
+    result = import_export(export_dir)
 """
 
 from __future__ import annotations
