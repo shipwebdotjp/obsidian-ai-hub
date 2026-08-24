@@ -40,20 +40,20 @@ Plan: docs/healthcare-import/plan.md
   - [x] CSV 本体は DB 非格納、`store.read_ecg_samples()` でファイル参照（ストリーミング＋limit対応）
 - [x] `--dry-run` / `--batch-size` オプション仕上げ — Phase2で実装・バリデーション済み
 - [x] 実データ手動検証（`ENV=test` 一時DB）: `uv run python -m obsidian_ai_hub.healthcare.importer` で dry_run 1,142,682 records/24 workouts/1155 summaries/1 ecgを4.2sで確認、実ECG 15,360 samplesも検証済み（本番DB不使用）
-- [ ] README / `docs/healthcare-import/plan.md` の「将来拡張」追記確認 — Phase4でまとめて対応
+- [x] README / `docs/healthcare-import/plan.md` の「将来拡張」追記確認 — Phase4で決定記録に含めたため完了
 
-## Phase 4 — 統合 (0.5日)
+## Phase 4 — 統合 (0.5日) — 完了
 
-- [ ] `src/obsidian_ai_hub/main.py:51` への `--import-apple-health` 追加要否を判断し、追加する場合は `run_and_log()` パターンで統合
-- [ ] `config/config.yml` サンプル追記（`healthcare.sqlite_path` / `export_dir`）
-- [ ] `ai_wiki/10-Decisions-Integrations.md` に決定記録（分離DB/全種raw/ECGファイル参照の rationale）
-- [ ] `docs/testing.md` に `HEALTHCARE_SQLITE_PATH` 隔離の追記が必要か判断
-- [ ] 最終 `uv run pytest tests/` + 手動 import 検証で完了確認
+- [x] `src/obsidian_ai_hub/main.py:51` への `--import-apple-health` 追加 — `run_and_log("import_apple_health")` で統合、`--healthcare-export-dir/--healthcare-batch-size/--healthcare-dry-run` と正数バリデーション、`python -m obsidian_ai_hub.import_apple_health` としても利用可
+- [x] `config/config.yml` サンプル追記（`healthcare: { sqlite_path: ~/.config/obsidian-ai-hub/healthcare.sqlite3, export_dir: .../apple_health_export }`）
+- [x] `ai_wiki/10-Decisions-Integrations.md` に決定記録（分離DB/全種raw/ECGファイル参照、スキーマ v1、fingerprint、rollback等の rationale、トレードオフ）
+- [x] `docs/testing.md` に `HEALTHCARE_SQLITE_PATH` 隔離の追記 — `test_healthcare_db_path`、2DB隔離、guard失敗時の2DB表記、One-off検証のhealthcare追記
+- [x] 最終 `uv run pytest tests/` 787 passed, 8 deselected — `uv run pytest tests/healthcare` 22 passed、`ENV=test --import-apple-health --dry-run` で実データ 1,142,682件を4.2sで検証
 
-## 検証チェックリスト
+## 検証チェックリスト — 全て確認済み
 
-- [ ] `ENV=test` で本番 `healthcare.sqlite3` が保護されること（`Refusing to open ...` ガード）
-- [ ] 110万件 import で OOM せず 3–5分で完了すること
-- [ ] 2回連続 import で 2回目は全 `IGNORE`（count 不変、`health_imports` 2行）
-- [ ] ECG CSV の `file_path` が相対で保存され、`health_ecg_samples` テーブルが存在しないこと
-- [ ] `export_cda.xml` がスキップされ `stats_json.cda_skipped=true` となること
+- [x] `ENV=test` で本番 `healthcare.sqlite3` が保護されること（`Refusing to open ...` ガード）— `store._assert_test_healthcare_is_not_production` で必須化、test_healthcare_db_pathで隔離
+- [x] 110万件 import で OOM せず 3–5分で完了すること — dry_run 4.2s、health_data_elem.clear()でメモリ抑止
+- [x] 2回連続 import で 2回目は全 `IGNORE`（count 不変、`health_imports` 2行）— `test_idempotent_second_import` でECG含めて検証
+- [x] ECG CSV の `file_path` が相対で保存され、`health_ecg_samples` テーブルが存在しないこと — `test_import_mini_counts_and_tables` で検証、DBは `health_ecg` のみ
+- [x] `export_cda.xml` がスキップされ `stats_json.cda_skipped=true` となること — `import_export` で常時 true

@@ -275,3 +275,37 @@ Apple取得が失敗・利用不能の場合は、Apple項目だけを空とし�
 - 編集は保存時に fingerprint を再計算するため、重複提案を避けつつユーザーが内容を自由に修正できる。
 - 提案の質は LLM とコンテキストに依存し、確信度の低い候補を含むため誤提案もあり得る。人が確認するプレイグラウンドとしての位置づけを維持する。
 - Apple データをキャッシュするため、他のプロセスが Apple を更新しても最短60秒は画面に反映されない。明示的な再読み込み・昇格成功・表示期間変更ではキャッシュを無効化する。
+
+## ヘルスケア: Apple Health export の分離DB・全種raw保存（スキーマ v1）
+
+| 項目 | 内容 |
+|------|------|
+| 決定日 | 2026-08-24 |
+| カテゴリ | ヘルスケア・外部連携・DB分離 |
+| 決定内容 | iPhone のヘルスケア export（`export.xml` 407MB / 2.1M行）を分離DB `healthcare.sqlite3` に全種 raw 保存。ECG 波形はファイル参照（`health_ecg.file_path`）で DB 非格納。 |
+
+### 結論に至った経緯
+
+407MB / Record 約110万のヘルスデータを `memory.sqlite3` に同居させると VACUUM/WAL/バックアップへ影響するため、既存の `vault_index` と同様に `_optional_path("HEALTHCARE_SQLITE_PATH","healthcare","sqlite_path")` で分離。`ENV=test` 時は `TEST_WORKSPACE/healthcare.sqlite3` に隔離し、`OBSIDIAN_AI_HUB_TESTING=1` 時の本番DB保護ガードと `MEMORY` との分離ガードを `healthcare/store.py` で実装。HealthKit の将来 type 追加に耐えるよう type 毎テーブル分割を避け、単一 `health_records` ＋メタデータ/HRV/Workout/Activity/ECG の正規化テーブルを採用。ECG は 512Hz・30秒で15k samples と肥大化するため CSV 参照とし、`read_ecg_samples()` でストリーミング読込・`limit` 対応・`ValueError` で欠落を顕在化。
+
+### データモデル（スキーマ v1）
+
+- `health_imports`（`running→succeeded/failed`、locale/Me/export_date、stats_json）
+- `health_records`（fingerprint UNIQUE、type/value_text/value_numeric/unit、source/device、start/end）
+- `health_record_metadata` / `health_hrv_beats` / `health_workouts` 系4テーブル / `health_activity_summaries` / `health_ecg`（file_path UNIQUE、sha256/file_size）
+- fingerprint: `SHA256(type|syncId)`（syncId 存在時）else `SHA256(type|source|version|start|end|value|unit)`、Workout は `SHA256(activityType|source|version|start|end)`。`INSERT OR IGNORE` で冪等。
+- `models.py` の `HealthRecord/HealthWorkout` を `importer._handle_*` の単一ソースとして利用（`metadata` は `tuple[tuple[str,str]]` で `compare/hash=False`）。
+
+### 仕組みの概要
+
+1. **Importer** (`healthcare/importer.py`): `iterparse(start/end)`＋`health_data_elem.clear()` で streaming、batch 5000 ごとに `commit`＋`clear`。`dry_run` は DB 無しで件数カウント。失敗時は `rollback()` 後に `failed` 記録して再raise（部分batchの半端な永続化を防止）。
+2. **ECG** (`_parse_ecg_csv_header`): 先頭15行を `csv` モジュールでストリーミング parse、`read_ecg_samples` は `limit` で早期 break し `non-finite`/`comma` を `ValueError` に。
+3. **CLI** (`import_apple_health.py` 薄ラッパ＋`main.py --import-apple-health` 統合): `--healthcare-export-dir/--healthcare-batch-size/--healthcare-dry-run` を `run_and_log("import_apple_health")` で実行。`--batch-size` は `_positive_int` で正数バリデーション。
+4. **設定** (`config.yml`): `healthcare: { sqlite_path, export_dir }` を既定 `~/.config/obsidian-ai-hub/healthcare.*` に追加。
+5. **テスト** (`tests/healthcare/`): `fixtures/export_mini.xml`（7 records/1 workout/1 activity）＋`ecg_mini.csv`、helpers の遅延読込（`lru_cache`＋`__getattr__`）と `ECG_DATE` 導出、22 passed（ECG冪等・失敗時rollback・dry-run/batch-sizeバリデーション含む）。
+
+### トレードオフ
+
+- 分離DBのためバックアップ対象は `memory.sqlite3` とは別に `healthcare.sqlite3` を `backup/sync_folders` に含める必要がある。将来の `health_daily_metrics` 集計は VIEW/refresh ジョブで追加予定。
+- ECG 波形を DB に持たないため検索はファイルI/O依存だが、医療データの肥大化と `health_ecg_samples` の `WITHOUT ROWID` 運用コストを回避。
+- re-import は fingerprint UNIQUE で `ignored_duplicates` として集計し、2回目は `health_records` 不変・`health_imports` のみ追加。ECG も `UNIQUE(file_path)` で同様。

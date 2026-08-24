@@ -27,3 +27,4 @@
 - [pytestプロセスからの本番シークレット遮断（conftest強制ENV=test）](10-Decisions-Testing.md#pytestプロセスからの本番シークレット遮断conftest強制envtest)（2026-08-15）
 - [HITLモバイル一覧詳細のスクロール修正（列フレックス min-height 問題）](10-Decisions-Web.md#hitlモバイル一覧詳細のスクロール修正列フレックス-min-height-問題)（2026-08-16）
 - [AIプランナー提案のプレイグラウンド（スキーマ v20）](10-Decisions-Integrations.md#aiプランナー提案のプレイグラウンドスキーマ-v20)（2026-08-19）
+- [ヘルスケア: Apple Health export の分離DB・全種raw保存（スキーマ v1）](10-Decisions-Integrations.md#ヘルスケア-apple-health-export-の分離db全種raw保存スキーマ-v1)（2026-08-24）
