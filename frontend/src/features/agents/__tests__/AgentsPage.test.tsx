@@ -111,7 +111,7 @@ afterEach(() => {
 });
 
 describe("AgentsPage", () => {
-  it("renders agents and loads session messages", async () => {
+  it("renders split layout with upper agents section and lower conversation history section", async () => {
     render(
       <MemoryRouter>
         <AgentsPage />
@@ -123,10 +123,45 @@ describe("AgentsPage", () => {
       expect(mockListTools).toHaveBeenCalled();
     });
 
+    expect(screen.getByText("AIエージェント")).toBeInTheDocument();
+    expect(screen.getByText("会話履歴")).toBeInTheDocument();
     expect(screen.getAllByText("予定アシスタント")[0]).toBeInTheDocument();
+    expect(await screen.findByText("明日の予定")).toBeInTheDocument();
     expect(
       await screen.findByText("こんにちは！何かお手伝いできますか？")
     ).toBeInTheDocument();
+  });
+
+  it("displays empty conversation history message when agent has no sessions", async () => {
+    mockListSessions.mockResolvedValue({ sessions: [] });
+
+    render(
+      <MemoryRouter>
+        <AgentsPage />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(mockListAgents).toHaveBeenCalled();
+    });
+
+    expect(screen.getByText("会話履歴がありません")).toBeInTheDocument();
+  });
+
+  it("displays unselected message when no agent is selected", async () => {
+    mockListAgents.mockResolvedValue({ agents: [] });
+
+    render(
+      <MemoryRouter>
+        <AgentsPage />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(mockListAgents).toHaveBeenCalled();
+    });
+
+    expect(screen.getByText("エージェントを選択してください")).toBeInTheDocument();
   });
 
   it("applies the Schedule Assistant template in creation form", async () => {

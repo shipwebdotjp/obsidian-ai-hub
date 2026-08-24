@@ -682,62 +682,136 @@ export default function AgentsPage() {
 
   return (
     <div className="flex h-full flex-col bg-slate-50 lg:flex-row">
-      {/* Left Pane: Agent List */}
-      <div className="flex w-full flex-col border-r border-slate-200 bg-white lg:w-64">
-        <div className="flex items-center justify-between border-b border-slate-200 p-3">
-          <h2 className="text-sm font-semibold text-slate-900">AIエージェント</h2>
-          <button
-            type="button"
-            onClick={handleOpenCreateForm}
-            className="rounded cursor-pointer bg-slate-900 px-2.5 py-1 text-xs text-white hover:bg-slate-800"
-          >
-            ＋ 新規作成
-          </button>
-        </div>
-        {actionError && (
-          <div className="m-2 rounded-lg bg-red-50 p-2 text-xs text-red-600">
-            {actionError}
+      {/* Left Pane: Split Upper (Agent List) & Lower (Conversation History) */}
+      <div className="flex w-full flex-col border-r border-slate-200 bg-white lg:w-64 shrink-0">
+        {/* Upper Section: AI Agent List */}
+        <div className="flex flex-1 flex-col min-h-0 border-b border-slate-200">
+          <div className="flex items-center justify-between border-b border-slate-200 p-3 bg-slate-50/50">
+            <h2 className="text-xs font-semibold text-slate-900 uppercase tracking-wider">AIエージェント</h2>
+            <button
+              type="button"
+              onClick={handleOpenCreateForm}
+              className="rounded cursor-pointer bg-slate-900 px-2 py-1 text-[11px] text-white hover:bg-slate-800"
+            >
+              ＋ 新規作成
+            </button>
           </div>
-        )}
-        <div className="flex-1 overflow-y-auto p-2 space-y-1">
-          {agents.length === 0 ? (
-            <p className="p-3 text-center text-xs text-slate-500">
-              エージェントが登録されていません。
-            </p>
-          ) : (
-            agents.map((agent) => (
-              <button
-                key={agent.agent_id}
-                type="button"
-                onClick={() => {
-                  setSelectedAgentId(agent.agent_id);
-                  setIsCreatingAgent(false);
-                  setIsEditingAgent(false);
-                  // Switching agents invalidates the current session; clear the URL param.
-                  setSearchParams(
-                    (prev) => {
-                      const next = new URLSearchParams(prev);
-                      next.delete("session_id");
-                      return next;
-                    },
-                    { replace: true },
-                  );
-                }}
-                className={`w-full cursor-pointer rounded-lg px-3 py-2 text-left text-xs transition ${
-                  selectedAgentId === agent.agent_id &&
-                  !isCreatingAgent &&
-                  !isEditingAgent
-                    ? "bg-slate-900 text-white font-medium"
-                    : "text-slate-700 hover:bg-slate-100"
-                }`}
-              >
-                <div className="truncate font-semibold">{agent.name}</div>
-                <div className="truncate text-[10px] opacity-75">
-                  {agent.tool_ids.length} ツール | {agent.provider || "既定"}
-                </div>
-              </button>
-            ))
+          {actionError && (
+            <div className="m-2 rounded-lg bg-red-50 p-2 text-xs text-red-600">
+              {actionError}
+            </div>
           )}
+          <div className="flex-1 overflow-y-auto p-2 space-y-1">
+            {agents.length === 0 ? (
+              <p className="p-3 text-center text-xs text-slate-500">
+                エージェントが登録されていません。
+              </p>
+            ) : (
+              agents.map((agent) => (
+                <button
+                  key={agent.agent_id}
+                  type="button"
+                  onClick={() => {
+                    setSelectedAgentId(agent.agent_id);
+                    setIsCreatingAgent(false);
+                    setIsEditingAgent(false);
+                    // Switching agents invalidates the current session; clear the URL param.
+                    setSearchParams(
+                      (prev) => {
+                        const next = new URLSearchParams(prev);
+                        next.delete("session_id");
+                        return next;
+                      },
+                      { replace: true },
+                    );
+                  }}
+                  className={`w-full cursor-pointer rounded-lg px-3 py-2 text-left text-xs transition ${
+                    selectedAgentId === agent.agent_id &&
+                    !isCreatingAgent &&
+                    !isEditingAgent
+                      ? "bg-slate-900 text-white font-medium"
+                      : "text-slate-700 hover:bg-slate-100"
+                  }`}
+                >
+                  <div className="truncate font-semibold">{agent.name}</div>
+                  <div className="truncate text-[10px] opacity-75">
+                    {agent.tool_ids.length} ツール | {agent.provider || "既定"}
+                  </div>
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+
+        {/* Lower Section: Conversation History List */}
+        <div className="flex flex-1 flex-col min-h-0">
+          <div className="flex items-center justify-between border-b border-slate-200 p-3 bg-slate-50/50">
+            <h3 className="text-xs font-semibold text-slate-900 uppercase tracking-wider">会話履歴</h3>
+            {selectedAgentId && (
+              <button
+                type="button"
+                onClick={handleCreateSession}
+                className="rounded cursor-pointer border border-slate-300 bg-white px-2 py-1 text-[11px] text-slate-700 hover:bg-slate-100"
+              >
+                ＋ 新しい会話
+              </button>
+            )}
+          </div>
+          <div className="flex-1 overflow-y-auto p-2 space-y-1">
+            {!selectedAgentId ? (
+              <p className="p-3 text-center text-xs text-slate-400">
+                エージェントを選択してください
+              </p>
+            ) : sessions.length === 0 ? (
+              <p className="p-3 text-center text-xs text-slate-400">
+                会話履歴がありません
+              </p>
+            ) : (
+              sessions.map((s) => (
+                <div
+                  key={s.session_id}
+                  className={`group flex items-center justify-between rounded-lg px-3 py-2 text-xs transition ${
+                    selectedSessionId === s.session_id
+                      ? "bg-slate-900 text-white font-medium"
+                      : "text-slate-700 hover:bg-slate-100"
+                  }`}
+                >
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedSessionId(s.session_id);
+                      setSearchParams(
+                        (prev) => {
+                          const next = new URLSearchParams(prev);
+                          next.set("session_id", s.session_id);
+                          return next;
+                        },
+                        { replace: true },
+                      );
+                    }}
+                    className="truncate text-left cursor-pointer flex-1 min-w-0 mr-1"
+                  >
+                    <div className="truncate font-medium">{s.title}</div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSessionToDelete(s);
+                    }}
+                    className={`text-[10px] p-0.5 rounded cursor-pointer transition ${
+                      selectedSessionId === s.session_id
+                        ? "text-slate-300 hover:text-white hover:bg-slate-800"
+                        : "text-slate-400 hover:text-slate-700 hover:bg-slate-200"
+                    }`}
+                    aria-label="会話削除"
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
         </div>
       </div>
 
@@ -917,59 +991,6 @@ export default function AgentsPage() {
                   削除
                 </button>
               </div>
-            </div>
-
-            {/* Sessions Bar */}
-            <div className="flex items-center gap-2 border-b border-slate-200 bg-slate-100 px-4 py-2 overflow-x-auto">
-              <span className="text-[11px] font-medium text-slate-500 shrink-0">
-                会話履歴:
-              </span>
-              {sessions.map((s) => (
-                <div
-                  key={s.session_id}
-                  className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-xs transition ${
-                    selectedSessionId === s.session_id
-                      ? "bg-slate-900 text-white font-medium"
-                      : "bg-white text-slate-700 border border-slate-200 hover:bg-slate-50"
-                  }`}
-                >
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedSessionId(s.session_id);
-                      setSearchParams(
-                        (prev) => {
-                          const next = new URLSearchParams(prev);
-                          next.set("session_id", s.session_id);
-                          return next;
-                        },
-                        { replace: true },
-                      );
-                    }}
-                    className="truncate max-w-[120px] cursor-pointer"
-                  >
-                    {s.title}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setSessionToDelete(s);
-                    }}
-                    className="text-[10px] opacity-60 hover:opacity-100 cursor-pointer"
-                    aria-label="会話削除"
-                  >
-                    ✕
-                  </button>
-                </div>
-              ))}
-              <button
-                type="button"
-                onClick={handleCreateSession}
-                className="rounded-full cursor-pointer border border-dashed border-slate-400 px-2.5 py-1 text-xs text-slate-600 hover:bg-white shrink-0"
-              >
-                ＋ 新しい会話
-              </button>
             </div>
 
             {/* Chat Messages View */}
@@ -1295,7 +1316,7 @@ export default function AgentsPage() {
                 placeholder={
                   selectedSessionId
                     ? "メッセージを入力…"
-                    : "上の「＋ 新しい会話」をクリックしてください"
+                    : "左側の「＋ 新しい会話」をクリックして会話を開始してください"
                 }
                 className="flex-1 rounded-lg border border-slate-300 p-2 text-xs focus:border-slate-500 focus:outline-none disabled:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed"
               />
