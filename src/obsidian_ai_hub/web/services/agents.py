@@ -99,14 +99,24 @@ def delete_session(session_id: str) -> bool:
 
 
 async def stream_session_message(
-    session_id: str, content: str
+    session_id: str,
+    content: str,
+    images: Optional[List[Dict[str, Any]]] = None,
 ) -> AsyncGenerator[str, None]:
     session = store.get_session(session_id)
     if not session:
         raise FileNotFoundError(f"Session '{session_id}' not found.")
     agent = get_agent(session["agent_id"])
 
-    _user_msg, run = store.start_user_run(session_id, content)
+    normalized_attachments: List[Dict[str, Any]] = []
+    if images:
+        for item in images:
+            if isinstance(item, dict):
+                normalized_attachments.append(item)
+
+    _user_msg, run = store.start_user_run(
+        session_id, content, attachments=normalized_attachments or None
+    )
     history_messages = store.list_messages(session_id)
 
     async for chunk in runtime.generate_agent_stream(
@@ -115,6 +125,7 @@ async def stream_session_message(
         run=run,
         history_messages=history_messages,
         user_content=content,
+        attachments=normalized_attachments or None,
     ):
         yield chunk
 

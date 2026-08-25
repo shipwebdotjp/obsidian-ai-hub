@@ -29,6 +29,7 @@ import type {
   AgentTool,
   AgentSession,
   AgentMessage,
+  AgentMessageAttachment,
   AgentRun,
   AgentSessionDetailResponse,
   AgentStreamEvent,
@@ -696,6 +697,7 @@ export async function streamAgentMessage(
   content: string,
   onEvent: (event: AgentStreamEvent) => void,
   signal?: AbortSignal,
+  attachments?: AgentMessageAttachment[],
 ): Promise<void> {
   const headers = new Headers();
   headers.set("Content-Type", "application/json");
@@ -705,12 +707,21 @@ export async function streamAgentMessage(
     headers.set("Authorization", `Bearer ${token}`);
   }
 
+  const body: Record<string, unknown> = { content };
+  if (attachments && attachments.length > 0) {
+    body.images = attachments.map((att) => ({
+      name: att.name,
+      mime_type: att.mime_type,
+      data: att.data,
+    }));
+  }
+
   const response = await fetch(
     `/api/v1/agent-sessions/${encodeURIComponent(sessionId)}/messages/stream`,
     {
       method: "POST",
       headers,
-      body: JSON.stringify({ content }),
+      body: JSON.stringify(body),
       signal,
     },
   );

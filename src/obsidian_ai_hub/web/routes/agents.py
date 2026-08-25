@@ -82,8 +82,64 @@ class CreateSessionRequest(BaseModel):
     title: Optional[str] = Field(default=None, description="Session title")
 
 
+# Limits for inline image attachments to keep requests bounded and avoid
+# surprising provider payloads. ``data`` is the base64 payload body WITHOUT
+# the ``data:<mime>;base64,`` prefix; the route restores the data URL when
+# passing the attachment to the runtime, which then embeds it as a multimodal
+# LangChain HumanMessage block.
+MAX_AGENT_IMAGE_COUNT = 5
+MAX_AGENT_IMAGE_BYTES = 8 * 1024 * 1024  # raw bytes per image (~10.6MB encoded)
+
+
+class ImageAttachmentRequest(BaseModel):
+    name: str = Field(..., min_length=1, description="Original file name")
+    mime_type: str = Field(..., description="MIME type (must start with 'image/')")
+    data: str = Field(..., description="Base64-encoded image bytes (no prefix)")
+
+    model_config = {"extra": "forbid"}
+
+
+def _decode_base64_payload(data: str) -> bytes:
+    import base64
+
+    try:
+        return base64.b64decode(data, validate=True)
+    except (ValueError, TypeError) as exc:
+        raise ValueError("Attachment data is not valid base64.") from exc
+
+
+def _validate_images(images: List[ImageAttachmentRequest]) -> List[Dict[str, Any]]:
+    if len(images) > MAX_AGENT_IMAGE_COUNT:
+        raise ValueError(
+            f"At most {MAX_AGENT_IMAGE_COUNT} images can be attached to one message."
+        )
+    validated: List[Dict[str, Any]] = []
+    for idx, image in enumerate(images):
+        if not image.mime_type.lower().startswith("image/"):
+            raise ValueError(
+                f"Attachment #{idx + 1} ({image.name}) must have an 'image/*' MIME type."
+            )
+        raw = _decode_base64_payload(image.data)
+        if len(raw) > MAX_AGENT_IMAGE_BYTES:
+            raise ValueError(
+                f"Attachment #{idx + 1} ({image.name}) exceeds the {MAX_AGENT_IMAGE_BYTES // (1024 * 1024)}MB limit."
+            )
+        validated.append(
+            {
+                "name": image.name,
+                "mime_type": image.mime_type,
+                "data": image.data,
+            }
+        )
+    return validated
+
+
 class StreamMessageRequest(BaseModel):
     content: str = Field(..., description="User message text")
+    images: List[ImageAttachmentRequest] = Field(
+        default_factory=list,
+        description="Optional list of inline image attachments (base64 payloads).",
+    )
 
 
 # --- Static Catalog Routes ---
@@ -278,14 +334,23 @@ async def stream_session_message(
     session_id: str, req: StreamMessageRequest
 ) -> StreamingResponse:
     content = req.content.strip() if req.content else ""
-    if not content:
+    try:
+        validated_images = _validate_images(req.images)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+
+    # Empty user text is allowed only when at least one image attachment is
+    # present — purely empty requests are still rejected.
+    if not content and not validated_images:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Message content must not be empty.",
         )
 
     try:
-        stream_gen = agent_service.stream_session_message(session_id, content)
+        stream_gen = agent_service.stream_session_message(
+            session_id, content, images=validated_images or None
+        )
         first_chunk = await stream_gen.__anext__()
     except FileNotFoundError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e

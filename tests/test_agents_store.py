@@ -157,3 +157,67 @@ def test_cascade_deletions():
         (session["session_id"],),
     )
     assert cursor.fetchone()[0] == 0
+
+
+def test_migration_v24_adds_attachments_column():
+    conn = get_db_connection()
+    cursor = conn.execute("PRAGMA user_version;")
+    version = cursor.fetchone()[0]
+    assert version >= 24
+
+    cursor = conn.execute("PRAGMA table_info(agent_messages);")
+    columns = {row[1] for row in cursor.fetchall()}
+    assert "attachments_json" in columns
+
+
+def test_message_attachments_round_trip():
+    agent = store.create_agent(name="Attachment Agent", system_prompt="Prompt")
+    session = store.create_session(agent["agent_id"])
+
+    attachments = [
+        {
+            "name": "photo.png",
+            "mime_type": "image/png",
+            "data": "iVBORw0KGgoAAAANSUhEUg==",
+        },
+        {
+            "name": "scan.jpg",
+            "mime_type": "image/jpeg",
+            "data": "/9j/4AAQSkZJRgABAQ==",
+        },
+    ]
+    user_msg, _ = store.start_user_run(
+        session["session_id"], "この画像を見て", attachments=attachments
+    )
+    assert user_msg["attachments"] == attachments
+
+    messages = store.list_messages(session["session_id"])
+    assert len(messages) == 1
+    assert messages[0]["attachments"] == attachments
+
+
+def test_message_without_attachments_defaults_to_empty_list():
+    agent = store.create_agent(name="No Attachment Agent", system_prompt="Prompt")
+    session = store.create_session(agent["agent_id"])
+    user_msg, _ = store.start_user_run(session["session_id"], "テキストだけ")
+    assert user_msg["attachments"] == []
+
+
+def test_image_only_message_uses_placeholder_title():
+    agent = store.create_agent(name="Image-Only Agent", system_prompt="Prompt")
+    session = store.create_session(agent["agent_id"])
+    attachments = [{"name": "img.png", "mime_type": "image/png", "data": "AAAA"}]
+    user_msg, _ = store.start_user_run(
+        session["session_id"], "", attachments=attachments
+    )
+    assert user_msg["content"] == ""
+    assert user_msg["attachments"] == attachments
+    auto_titled = store.get_session(session["session_id"])
+    assert auto_titled["title"] == "画像を送りました"
+
+
+def test_truly_empty_message_is_rejected():
+    agent = store.create_agent(name="Empty Empty Agent", system_prompt="Prompt")
+    session = store.create_session(agent["agent_id"])
+    with pytest.raises(ValueError, match="empty"):
+        store.start_user_run(session["session_id"], "   ")

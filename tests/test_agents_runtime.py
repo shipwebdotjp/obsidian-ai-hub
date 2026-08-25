@@ -446,3 +446,156 @@ async def test_agent_stream_error_handling_marks_run_and_llm_log_failed():
     assert log["status"] == "failed"
     assert log["exception_type"] == "RuntimeError"
     assert "API key invalid" in log["exception_message"]
+
+
+@pytest.mark.anyio
+async def test_agent_stream_sends_image_blocks_for_current_and_history_messages():
+    """Multimodal: attachments on the current turn AND on a prior user turn
+    must both reach the LLM as image_url content blocks."""
+    agent = store.create_agent(
+        name="Vision Agent",
+        system_prompt="Analyze images",
+    )
+    session = store.create_session(agent["agent_id"])
+
+    prior_attachments = [
+        {
+            "name": "prior.png",
+            "mime_type": "image/png",
+            "data": "aGVsbG8K",
+        }
+    ]
+    # Seed a prior user + assistant exchange that included an attachment on
+    # the user turn, so we can verify the history HumanMessage is also rebuilt
+    # as multimodal on the next turn.
+    prior_msg, prior_run = store.start_user_run(
+        session["session_id"],
+        "前の画像",
+        attachments=prior_attachments,
+    )
+    store.complete_run(
+        prior_run["run_id"],
+        assistant_content="これは前の画像ですね。",
+    )
+
+    captured_messages: list = []
+    mock_llm = MagicMock()
+
+    async def astream(messages):
+        captured_messages.extend(messages)
+        yield AIMessageChunk(content="今回と前の両方見ました")
+
+    mock_llm.astream.side_effect = astream
+    mock_llm.bind_tools.return_value = mock_llm
+
+    current_attachments = [
+        {
+            "name": "current.png",
+            "mime_type": "image/png",
+            "data": "d29ybGQK",
+        }
+    ]
+
+    history = store.list_messages(session["session_id"])
+    user_msg, run = store.start_user_run(
+        session["session_id"], "今の画像", attachments=current_attachments
+    )
+
+    with patch(
+        "obsidian_ai_hub.agents.runtime.create_langchain_llm", return_value=mock_llm
+    ):
+        events = [
+            event
+            async for event in runtime.generate_agent_stream(
+                agent=agent,
+                session=session,
+                run=run,
+                history_messages=history,
+                user_content="今の画像",
+                attachments=current_attachments,
+            )
+        ]
+
+    payloads = _payloads(events)
+    assert payloads[-1]["type"] == "done"
+
+    # SystemMessage + prior HumanMessage (with image) + prior AIMessage +
+    # current HumanMessage (with image) = 4 messages
+    langchain_user_messages = [
+        m for m in captured_messages if m.__class__.__name__ == "HumanMessage"
+    ]
+    assert len(langchain_user_messages) == 2
+
+    prior_blocked = langchain_user_messages[0].content
+    current_blocked = langchain_user_messages[1].content
+
+    assert isinstance(prior_blocked, list)
+    assert any(
+        block.get("type") == "image_url"
+        and "data:image/png;base64,aGVsbG8K" in block["image_url"]["url"]
+        for block in prior_blocked
+    )
+
+    assert isinstance(current_blocked, list)
+    assert any(
+        block.get("type") == "image_url"
+        and "data:image/png;base64,d29ybGQK" in block["image_url"]["url"]
+        for block in current_blocked
+    )
+
+
+@pytest.mark.anyio
+async def test_agent_stream_drops_attachments_for_local_provider():
+    """The 'local' provider has no vision support; attachments should be
+    omitted from the HumanMessage and a warning logged, matching the existing
+    llm_client behaviour."""
+    agent = store.create_agent(
+        name="Local Agent",
+        system_prompt="Local provider",
+        provider="local",
+        model="",
+    )
+    session = store.create_session(agent["agent_id"])
+
+    captured_messages: list = []
+    mock_llm = MagicMock()
+
+    async def astream(messages):
+        captured_messages.extend(messages)
+        yield AIMessageChunk(content="ローカル応答")
+
+    mock_llm.astream.side_effect = astream
+    mock_llm.bind_tools.return_value = mock_llm
+
+    attachments = [
+        {"name": "img.png", "mime_type": "image/png", "data": "Zm9v"}
+    ]
+    user_msg, run = store.start_user_run(
+        session["session_id"], "テキスト質問", attachments=attachments
+    )
+
+    # We patch create_langchain_llm so the local branch is bypassed, but the
+    # runtime's _build_user_message still consults agent["provider"] for the
+    # multimodal decision.
+    with patch(
+        "obsidian_ai_hub.agents.runtime.create_langchain_llm", return_value=mock_llm
+    ):
+        events = [
+            event
+            async for event in runtime.generate_agent_stream(
+                agent=agent,
+                session=session,
+                run=run,
+                history_messages=[user_msg],
+                user_content="テキスト質問",
+                attachments=attachments,
+            )
+        ]
+
+    assert _payloads(events)[-1]["type"] == "done"
+
+    user_message = next(
+        m for m in captured_messages if m.__class__.__name__ == "HumanMessage"
+    )
+    assert isinstance(user_message.content, str)
+    assert user_message.content == "テキスト質問"

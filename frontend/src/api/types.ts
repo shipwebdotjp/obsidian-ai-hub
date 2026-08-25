@@ -691,12 +691,19 @@ export interface AgentSession {
   updated_at: string;
 }
 
+export interface AgentMessageAttachment {
+  name: string;
+  mime_type: string;
+  data: string;
+}
+
 export interface AgentMessage {
   message_id: string;
   session_id: string;
   sequence: number;
   role: "user" | "assistant";
   content: string;
+  attachments?: AgentMessageAttachment[];
   created_at: string;
 }
 

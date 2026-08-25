@@ -20,6 +20,7 @@ import type {
   Agent,
   AgentLiveToolCall,
   AgentMessage,
+  AgentMessageAttachment,
   AgentPromptTemplate,
   AgentRun,
   AgentSession,
@@ -34,6 +35,17 @@ import { formatDateTime } from "../../utils/date";
 
 // keep in sync with runtime.py _LIVE_RESULT_MAX_CHARS (DB is 20000)
 const LIVE_RESULT_MAX_CHARS = 2000;
+
+const MAX_AGENT_IMAGES = 5;
+const MAX_AGENT_IMAGE_BYTES = 8 * 1024 * 1024;
+
+interface PendingAttachment {
+  previewUrl: string;
+  name: string;
+  mime_type: string;
+  data: string;
+  size: number;
+}
 
 const LIVE_STATUS_CONFIG: Record<AgentLiveToolCall["status"], { label: string; cls: string }> = {
   succeeded: { label: "成功", cls: "bg-emerald-50 text-emerald-700 border-emerald-200" },
@@ -99,6 +111,10 @@ export default function AgentsPage() {
   const [chatError, setChatError] = useState<string | null>(null);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const copyResetRef = useRef<number | null>(null);
+  const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
+  const [attachmentReadsPending, setAttachmentReadsPending] = useState(0);
+  const [isDragOver, setIsDragOver] = useState(false);
+  const imageInputRef = useRef<HTMLInputElement | null>(null);
 
   // Modal delete targets
   const [agentToDelete, setAgentToDelete] = useState<Agent | null>(null);
@@ -263,10 +279,18 @@ export default function AgentsPage() {
 
     if (!selectedSessionId) {
       setMessages([]);
+      setPendingAttachments([]);
+      if (imageInputRef.current) {
+        imageInputRef.current.value = "";
+      }
       return;
     }
     loadSessionDetail(selectedSessionId);
     setHitlLinks([]);
+    setPendingAttachments([]);
+    if (imageInputRef.current) {
+      imageInputRef.current.value = "";
+    }
   }, [selectedSessionId]);
 
   const loadSessionDetail = async (sessionId: string) => {
@@ -508,6 +532,126 @@ export default function AgentsPage() {
     }
   };
 
+  // Image attachment helpers
+  const readFileAsDataUrl = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result;
+        if (typeof result === "string") {
+          resolve(result);
+        } else {
+          reject(new Error("ファイルの読み込みに失敗しました。"));
+        }
+      };
+      reader.onerror = () => reject(new Error("ファイルの読み込みに失敗しました。"));
+      reader.readAsDataURL(file);
+    });
+
+  const handleFilesSelected = async (files: FileList | File[] | null) => {
+    if (!files || files.length === 0) return;
+    const incoming = Array.from(files);
+    const accepted: File[] = [];
+    for (const file of incoming) {
+      if (!file.type || !file.type.startsWith("image/")) {
+        setChatError(`画像ファイル以外は添付できません: ${file.name || "ファイル"}`);
+        return;
+      }
+      if (file.size > MAX_AGENT_IMAGE_BYTES) {
+        setChatError(
+          `${file.name || "ファイル"} はサイズ上限(${Math.floor(MAX_AGENT_IMAGE_BYTES / (1024 * 1024))}MB)を超えています。`
+        );
+        return;
+      }
+      accepted.push(file);
+    }
+    setPendingAttachments((prev) => {
+      const remainingSlots = MAX_AGENT_IMAGES - prev.length;
+      if (remainingSlots <= 0) {
+        setChatError(`画像は最大${MAX_AGENT_IMAGES}枚まで添付できます。`);
+        return prev;
+      }
+      const limited = accepted.slice(0, remainingSlots);
+      if (accepted.length > limited.length) {
+        setChatError(
+          `画像は最大${MAX_AGENT_IMAGES}枚まで添付できます。超過分は無視されます。`
+        );
+      }
+      setAttachmentReadsPending((count) => count + 1);
+      void Promise.all(
+        limited.map(async (file) => {
+          try {
+            const dataUrl = await readFileAsDataUrl(file);
+            const base64 = dataUrl.includes(",") ? dataUrl.split(",")[1] : "";
+            return {
+              previewUrl: dataUrl,
+              name: file.name || "image.png",
+              mime_type: file.type,
+              data: base64,
+              size: file.size,
+            } satisfies PendingAttachment;
+          } catch {
+            setChatError(`画像の読み込みに失敗しました: ${file.name || "ファイル"}`);
+            return null;
+          }
+        })
+      ).then((results) => {
+        const valid = results.filter((r): r is PendingAttachment => r !== null);
+        if (valid.length > 0) {
+          setPendingAttachments((current) => [...current, ...valid]);
+        }
+        setAttachmentReadsPending((count) => Math.max(0, count - 1));
+      });
+      return prev;
+    });
+  };
+
+  const handleRemoveAttachment = (index: number) => {
+    setPendingAttachments((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const handleFormDragOver = (e: React.DragEvent<HTMLFormElement>) => {
+    if (!activeAgent || !selectedSessionId || isStreaming) return;
+    if (!e.dataTransfer.types.includes("Files")) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+    setIsDragOver(true);
+  };
+
+  const handleFormDragLeave = (e: React.DragEvent<HTMLFormElement>) => {
+    if (
+      e.relatedTarget instanceof Node &&
+      e.currentTarget.contains(e.relatedTarget)
+    ) {
+      return;
+    }
+    setIsDragOver(false);
+  };
+
+  const handleFormDrop = (e: React.DragEvent<HTMLFormElement>) => {
+    if (!activeAgent || !selectedSessionId || isStreaming) return;
+    if (!e.dataTransfer.files || e.dataTransfer.files.length === 0) return;
+    e.preventDefault();
+    setIsDragOver(false);
+    void handleFilesSelected(e.dataTransfer.files);
+  };
+
+  const handleInputPaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    if (!activeAgent || !selectedSessionId || isStreaming) return;
+    const items = e.clipboardData?.items;
+    if (!items || items.length === 0) return;
+    const files: File[] = [];
+    for (const item of Array.from(items)) {
+      if (item.kind === "file" && item.type.startsWith("image/")) {
+        const file = item.getAsFile();
+        if (file) files.push(file);
+      }
+    }
+    if (files.length === 0) return;
+    e.preventDefault();
+    void handleFilesSelected(files);
+  };
+
   // Session Actions
   const handleCreateSession = async () => {
     if (!selectedAgentId) return;
@@ -598,10 +742,15 @@ export default function AgentsPage() {
 
   // Send Message & Stream Response
   const submitMessage = async () => {
-    if (!selectedSessionId || !inputText.trim() || isStreaming) return;
+    if (!selectedSessionId || (!inputText.trim() && pendingAttachments.length === 0) || isStreaming) return;
 
     const streamSessionId = selectedSessionId;
     const userText = inputText.trim();
+    const attachmentsSnapshot = pendingAttachments.map<AgentMessageAttachment>((att) => ({
+      name: att.name,
+      mime_type: att.mime_type,
+      data: att.data,
+    }));
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
@@ -611,6 +760,10 @@ export default function AgentsPage() {
     abortControllerRef.current = controller;
 
     setInputText("");
+    setPendingAttachments([]);
+    if (imageInputRef.current) {
+      imageInputRef.current.value = "";
+    }
     setChatError(null);
     setHitlLinks([]);
     setIsStreaming(true);
@@ -626,6 +779,7 @@ export default function AgentsPage() {
       sequence: messages.length + 1,
       role: "user",
       content: userText,
+      attachments: attachmentsSnapshot.length > 0 ? attachmentsSnapshot : undefined,
       created_at: new Date().toISOString(),
     };
     setMessages((prev) => [...prev, tempUserMsg]);
@@ -758,7 +912,8 @@ export default function AgentsPage() {
             setChatError(event.error || "エラーが発生しました。");
           }
         },
-        controller.signal
+        controller.signal,
+        attachmentsSnapshot.length > 0 ? attachmentsSnapshot : undefined
       );
       if (isCurrentStream() && !receivedTerminalEvent) {
         resetStreamingState();
@@ -1360,7 +1515,21 @@ export default function AgentsPage() {
                           {isAssistant ? (
                             <MarkdownPreview content={m.content} />
                           ) : (
-                            m.content
+                            <div className="space-y-2">
+                              {m.attachments && m.attachments.length > 0 && (
+                                <div className="flex flex-wrap gap-1.5">
+                                  {m.attachments.map((att, attIndex) => (
+                                    <img
+                                      key={`${att.name}-${attIndex}`}
+                                      src={`data:${att.mime_type};base64,${att.data}`}
+                                      alt={att.name}
+                                      className="max-h-40 max-w-[12rem] rounded border border-slate-700 object-cover"
+                                    />
+                                  ))}
+                                </div>
+                              )}
+                              {m.content && <div>{m.content}</div>}
+                            </div>
                           )}
                         </div>
                       </div>
@@ -1579,8 +1748,47 @@ export default function AgentsPage() {
             {/* Input Footer */}
             <form
               onSubmit={handleSendMessage}
-              className="border-t border-slate-200 bg-white p-3 flex gap-2 items-center relative"
+              onDragEnter={handleFormDragOver}
+              onDragOver={handleFormDragOver}
+              onDragLeave={handleFormDragLeave}
+              onDrop={handleFormDrop}
+              className="border-t border-slate-200 bg-white p-3 flex flex-col gap-2 relative"
             >
+              {isDragOver && (
+                <div
+                  className="absolute inset-1 z-20 flex items-center justify-center rounded-lg border-2 border-dashed border-blue-600 bg-blue-600/10 pointer-events-none"
+                  data-testid="agent-drop-overlay"
+                >
+                  <span className="rounded bg-blue-600 px-3 py-1 text-xs font-medium text-white">
+                    ここに画像をドロップ
+                  </span>
+                </div>
+              )}
+              {pendingAttachments.length > 0 && (
+                <div className="flex flex-wrap gap-2 border border-slate-200 rounded-lg p-2 bg-slate-50/50" aria-label="送信前の添付画像">
+                  {pendingAttachments.map((att, index) => (
+                    <div
+                      key={`${att.name}-${index}`}
+                      className="relative h-16 w-16 rounded border border-slate-300 overflow-hidden bg-white"
+                    >
+                      <img
+                        src={att.previewUrl}
+                        alt={att.name}
+                        className="h-full w-full object-cover"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveAttachment(index)}
+                        className="absolute top-0 right-0 inline-flex h-4 w-4 items-center justify-center rounded-bl bg-slate-900/80 text-[10px] text-white hover:bg-slate-900 cursor-pointer"
+                        aria-label={`${att.name} を取り除く`}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="flex gap-2 items-center">
               <div className="relative">
                 <button
                   type="button"
@@ -1612,23 +1820,56 @@ export default function AgentsPage() {
                   </div>
                 )}
               </div>
+              <input
+                ref={imageInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                data-testid="agent-image-input"
+                className="hidden"
+                onChange={(e) => {
+                  void handleFilesSelected(e.target.files);
+                }}
+              />
+              <button
+                type="button"
+                disabled={
+                  !activeAgent ||
+                  !selectedSessionId ||
+                  isStreaming ||
+                  attachmentReadsPending > 0 ||
+                  pendingAttachments.length >= MAX_AGENT_IMAGES
+                }
+                onClick={() => imageInputRef.current?.click()}
+                className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                aria-label="画像を添付"
+              >
+                {attachmentReadsPending > 0 ? "読込中…" : "画像"}
+              </button>
               <textarea
                 ref={chatInputRef}
                 rows={1}
                 value={inputText}
                 onChange={(e) => setInputText(e.target.value)}
                 onKeyDown={handleInputKeyDown}
+                onPaste={handleInputPaste}
                 disabled={isStreaming || !selectedSessionId}
                 placeholder={inputPlaceholder}
                 className="flex-1 resize-none rounded-lg border border-slate-300 p-2 text-xs leading-relaxed focus:border-slate-500 focus:outline-none disabled:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed"
               />
               <button
                 type="submit"
-                disabled={isStreaming || !inputText.trim() || !selectedSessionId}
+                disabled={
+                  isStreaming ||
+                  attachmentReadsPending > 0 ||
+                  (!inputText.trim() && pendingAttachments.length === 0) ||
+                  !selectedSessionId
+                }
                 className="rounded-lg bg-slate-900 px-4 py-2 text-xs font-medium text-white hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
               >
                 送信
               </button>
+              </div>
             </form>
           </div>
         ) : (

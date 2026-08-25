@@ -462,3 +462,75 @@ v2 までの推移グリッドでは各指標の時系列は見えるが指標�
 - `npm --prefix frontend test -- src/features/healthcare/HealthcareScatterChart.test.tsx` — 点描画・回帰線・Pearson 表示・空状態・負の相関。
 - `HealthcarePage.test.tsx` に相関タブ切替と `getHealthcareCorrelation` 呼び出しを検証。
 - `uv run pytest tests/ 807 passed`、`npm --prefix frontend test` 143 passed、`tsc --noEmit` クリーン。
+
+## エージェント会話への画像添付（マルチモーダル LLM 渡し）
+
+| 項目 | 内容 |
+|------|------|
+| 決定日 | 2026-08-25 |
+| カテゴリ | AI エージェント・Web UI |
+| 決定内容 | AgentsPage のチャット入力からローカル画像ファイルを添付し、LLM にマルチモーダル入力として渡す。画像はメッセージ履歴に永続化し、後続ターンでも LLM に再提示する。 |
+
+### 結論に至った経緯
+
+`llm_client.py` の `_prepare_messages` は既にマルチモーダル対応だったが、agent runtime（`runtime.py`）は system + 履歴 + 現在テキストで `HumanMessage(content=text)` を組み立てる経路のため、エージェントチャットに限っては LLM に画像を渡せていなかった。ChatGPT のように、ユーザーが手元の画像について会話したいユースケースが実用上あるため、軽量に実装する。
+
+### 設計
+
+- **送信方式**: 既存の `POST /agent-sessions/{id}/messages/stream` を JSON のまま拡張し、ボディを `{content, images: [{name, mime_type, data(base64)}]}` とする。`images` 省略時は従来動作で完全な後方互換。
+- **永続化先**: `agent_messages.attachments_json TEXT NOT NULL DEFAULT '[]'`（migration v24）に `{name, mime_type, data}` の JSON 配列を保存する。ディスクストアは複雑性が高く不要。SQLite の TEXT 列に base64 そのまま保存する既存パターン（`used_tools_json` / `tool_calls_json` / `advanced_params_json`）に揃える。
+- **runtime のマルチモーダル化**: `_build_user_message(provider, text, attachments)` を新設。`provider != "local"` なら `[text, ...image_url data:URL ブロック]` のリストを返し、`local`（llama-cpp）は画像非対応なのでテキストにフォールバックして warning をログする（既存 `llm_client` 挙動と一貫）。履歴の user メッセージも同じヘルパで再構築するため、後続ターンでも画像が LLM に届く。
+- **上限**: 1 メッセージ 5 枚 / 1 枚 8MB（base64 含む）。`mime_type` は `image/*` のみ許可。バリデーション違反は 400。
+- **UI**: AgentsPage に「画像」ボタン + 非表示 `<input accept="image/*" multiple>`。FileReader で dataURL 化し、`{name, mime_type, data, size, previewUrl}` を `PendingAttachment[]` に保持。送信前プレビュー行にサムネイル＋個別 ✕ ボタン。送信後クリア、楽観 user bubble と履歴 user bubble 両方にサムネイルを表示。
+- **Phase 2 以降**: ドラッグ&ドロップ対応（入力フォームへの DnD、クリップボード貼付け対応）を別途計画。
+
+### トレードオフ
+
+- 永続化により、長大化したセッションで SQLite のサイズが大きくなり得る。1 枚 8MB 上限で現実的な線引きをする。
+- 各ターンで履歴の user メッセージ（attachments 込み）を再送するため、画像は LLM トークン消費にも影響する。ChatGPT 同様、画像付き会話の自然な挙動として受け入れる。
+- base64 の JSON ペイロードは multipart より約 33% 増。個人用途では十分小さく、エンドポイント契約の変更なしで済む点を優先して JSON を採用。
+- 画像の実体検証（ピクセル数や正確な MIME）は緩め（`image/*` プレフィックスチェック + サイズ上限のみ）。悪意ある payload は業務用途ではないため深掘りしない。
+
+### 検証
+
+- backend: `uv run pytest tests/` 837 passed。新規 — `test_agents_api.py` の画像付与・MIME 不正・枚数上限・base64 不正の 4 ケース、`test_agents_store.py` の `attachments_json` 列追加と round trip、`test_agents_runtime.py` の現在ターン＋履歴の両方が LLM に `image_url` ブロックとして届くことと、`local` プロバイダで画像が無視されること（警告ログ）。
+- frontend: `npm --prefix frontend test` 150 passed（既存 148 + 新規 2 — `client.test.ts` の `images` フィールドJSON化、`AgentsPage.test.tsx` の添付フロー + 非画像ファイルの拒否）、`tsc -b && vite build` クリーン。
+- 手動確認: AgentsPage で画像添付→サムネイル→送信→履歴再表示で再表示されること、後続ターンで画像が文脈として LLM に届くこと。
+- **画像のみ送信（テキスト空）も許可**: `start_user_run` / route の空コンテンツ禁止を撤廃し、image が 1 枚以上あれば text 空でも送れる。送信後のセッションタイトル自動付与では `画像を送りました` をフォールバックに使用。フロントの送信ボタンは「添付あり OR テキストあり」で活性化。
+- **読み込み中ガード**: フロントで `attachmentReadsPending` カウンタを持ち、FileReader の read 中は「画像」ボタンに「読込中…」を出して非活性化、送信ボタンも非活性化して read 完了前の送信によるロスを防ぐ。
+- **MIME 不正 attachment の安全な無視**: `_build_user_message` が空 `mime_type`/空 `data` のブロックを `application/octet-stream` フォールバックで送ってしまっていた。LLM 非互換なブロックを送らないために該当 attachment を skip + warning ログに変更。
+- 最終: `uv run pytest tests/` 841 passed、`npm --prefix frontend test` 151 passed、`tsc --noEmit` クリーン。
+
+### Phase 2: ドラッグ&ドロップ + クリップボード貼付け
+
+| 項目 | 内容 |
+|------|------|
+| 決定日 | 2026-08-25 |
+| カテゴリ | AI エージェント・Web UI |
+| 決定内容 | AgentsPage のチャット入力に DnD / ペースト経由の画像添付を追加。バックエンド・DB 変更ゼロで Phase 1 の `handleFilesSelected` パイプラインを再利用する。 |
+
+### 結論に至った経緯
+
+スクリーンショットやエクスプローラからのドロップでも同じ UX を提供したい。両経路とも最終的に `File` の配列になり既存の `handleFilesSelected` がそのまま使えるため、同一フェーズで実装する。共有部分は多い（上限検証、`attachmentReadsPending`、プレビュー、送信）。分割すると同じ箇所を2回触ることになり、ドリフトのリスクが高い。
+
+### 設計
+
+- **DnD**: 入力 `<form>` に `onDragEnter/onDragOver/onDragLeave/onDrop` を付与。`e.dataTransfer.types.includes("Files")` をガードとして、誤ドラッグ（テキストや URL の選択ドラッグ等）で反応しないようにする。`dropEffect = "copy"` を設定。`isDragOver` state で「ここに画像をドロップ」オーバーレイ（form 内の絶対配置、z-index で既存プレビューより上、`pointer-events: none`）を表示。`dragleave` のフリッカは `relatedTarget` が `currentTarget` 内のとき無視して抑制。
+- **Paste**: `<textarea>` の `onPaste` で `clipboardData.items` を走査し、`kind === "file"` かつ `type.startsWith("image/")` の item を `getAsFile()` で `File[]` に変換して `handleFilesSelected` に渡す。画像 item が 1 つでもあれば `e.preventDefault()`（テキストのみの場合は何もしず、ブラウザ既定の動作を保持）。
+- **共通化**: `handleFilesSelected` のシグネチャを `FileList | File[] | null` に拡張（中身は `Array.from(files)` で共通化）。`PendingAttachment.name` を `file.name || "image.png"` にフォールバック（ペースト画像は name が空になり得る）。
+- **ガード**: `isStreaming` / `selectedSessionId` 未選択 / `activeAgent` 未選択時は DnD と paste を無視。
+- **テスト**: `fireEvent.drop` と `fireEvent.paste` を `dataTransfer` / `clipboardData` を直接注入して実行（`userEvent.upload` の `accept` フィルタ問題を回避）。
+
+### トレードオフ
+
+- `dataTransfer.types` ガードがあるため外部アプリからのテキストドラッグ（例: URL）などを誤って処理しない。選択テキストの drag-drop は no-op になる。
+- `dragleave` の `relatedTarget` 判定は単純実装。子要素が多数ある複雑なレイアウトでフリッカが出る場合は `dragenter`/`dragleave` カウンタ方式に切替（Phase 3 以降）。
+- Safari の paste は一部 `getAsFile()` が画像を返さないケースがあり、その場合は添付されない（テキストに影響なし）。`navigator.clipboard.read()`（要権限）対応は Phase 3 候補。
+- 画像のリサイズ/圧縮は未実装（8MB 上限の超過はエラー）。`canvas` で縮小してから base64 化する Phase 3 を検討。
+
+### 検証
+
+- `npm --prefix frontend test` 155 passed（Phase 1 末 151 から +4 件: DnD 画像添付成功、非画像 drop 拒否、画像 paste 添付成功、テキストのみ paste の no-op）。
+- `tsc --noEmit` クリーン、`vite build` クリーン。
+- バックエンド変更なしのため `pytest` は今回未実行。
+- 手動確認: 入力フォームへの画像 drop、スクリーンショットを Ctrl+V で paste、テキスト paste が従来どおり動作、ストリーミング中は両方無効。

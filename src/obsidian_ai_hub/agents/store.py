@@ -133,12 +133,26 @@ def _row_to_session(row: sqlite3.Row) -> dict[str, Any]:
 
 
 def _row_to_message(row: sqlite3.Row) -> dict[str, Any]:
+    attachments: list[dict[str, Any]] = []
+    # attachments_json added in v24; tolerate missing column on pre-migration rows
+    try:
+        raw = row["attachments_json"]  # type: ignore[index]
+    except (IndexError, KeyError, ValueError):
+        raw = None
+    if raw:
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, list):
+                attachments = [item for item in parsed if isinstance(item, dict)]
+        except (json.JSONDecodeError, TypeError):
+            attachments = []
     return {
         "message_id": row["message_id"],
         "session_id": row["session_id"],
         "sequence": row["sequence"],
         "role": row["role"],
         "content": row["content"],
+        "attachments": attachments,
         "created_at": row["created_at"],
     }
 
@@ -545,10 +559,26 @@ def list_messages(session_id: str, conn: Optional[sqlite3.Connection] = None) ->
 def start_user_run(
     session_id: str,
     content: str,
+    attachments: Optional[Sequence[dict[str, Any]]] = None,
     conn: Optional[sqlite3.Connection] = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     clean_content = content.strip() if content else ""
-    if not clean_content:
+    attachments_list: list[dict[str, Any]] = []
+    if attachments:
+        for item in attachments:
+            if isinstance(item, dict):
+                attachments_list.append(item)
+        if attachments_list:
+            try:
+                attachments_json = json.dumps(attachments_list, ensure_ascii=False)
+            except (TypeError, ValueError):
+                attachments_json = "[]"
+        else:
+            attachments_json = "[]"
+    else:
+        attachments_json = "[]"
+    # Empty user text is allowed only when at least one attachment is present.
+    if not clean_content and not attachments_list:
         raise ValueError("Message content must not be empty.")
 
     with auto_connection(conn) as (active_conn, is_generated):
@@ -569,13 +599,25 @@ def start_user_run(
             ) + 1
 
             message_id = f"amsg_{uuid.uuid4().hex[:12]}"
-            active_conn.execute(
-                """
-                INSERT INTO agent_messages (message_id, session_id, sequence, role, content, created_at)
-                VALUES (?, ?, ?, 'user', ?, ?)
-                """,
-                (message_id, session_id, next_seq, clean_content, now),
-            )
+            try:
+                active_conn.execute(
+                    """
+                    INSERT INTO agent_messages (message_id, session_id, sequence, role, content, attachments_json, created_at)
+                    VALUES (?, ?, ?, 'user', ?, ?, ?)
+                    """,
+                    (message_id, session_id, next_seq, clean_content, attachments_json, now),
+                )
+            except sqlite3.OperationalError as e:
+                if "no such column: attachments_json" in str(e):
+                    active_conn.execute(
+                        """
+                        INSERT INTO agent_messages (message_id, session_id, sequence, role, content, created_at)
+                        VALUES (?, ?, ?, 'user', ?, ?)
+                        """,
+                        (message_id, session_id, next_seq, clean_content, now),
+                    )
+                else:
+                    raise
 
             run_id = f"arun_{uuid.uuid4().hex[:12]}"
             active_conn.execute(
@@ -590,7 +632,10 @@ def start_user_run(
             )
 
             if session["title"] == "新しい会話" and next_seq == 1:
-                title_summary = clean_content[:30].replace("\n", " ")
+                # Empty user text (image-only) gets a placeholder title so the
+                # session does not keep the default "新しい会話" label.
+                title_source = clean_content or "画像を送りました"
+                title_summary = title_source[:30].replace("\n", " ")
                 active_conn.execute(
                     "UPDATE agent_sessions SET title = ?, updated_at = ? WHERE session_id = ?;",
                     (title_summary, now, session_id),

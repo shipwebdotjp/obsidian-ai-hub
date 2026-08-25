@@ -49,4 +49,41 @@ describe("streamAgentMessage", () => {
       expect.objectContaining({ type: "done" }),
     ]);
   });
+
+  it("serializes attachments as the 'images' field in the JSON body", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      status: 200,
+      ok: true,
+      body: streamFromByteChunks([]),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await streamAgentMessage("s1", "look at this", () => {}, undefined, [
+      { name: "a.png", mime_type: "image/png", data: "BASE64A" },
+    ]);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toContain("/agent-sessions/s1/messages/stream");
+    const body = JSON.parse((init as RequestInit).body as string);
+    expect(body.content).toBe("look at this");
+    expect(body.images).toEqual([
+      { name: "a.png", mime_type: "image/png", data: "BASE64A" },
+    ]);
+  });
+
+  it("omits 'images' when no attachments are provided", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      status: 200,
+      ok: true,
+      body: streamFromByteChunks([]),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await streamAgentMessage("s1", "hi", () => {});
+
+    const [, init] = fetchMock.mock.calls[0];
+    const body = JSON.parse((init as RequestInit).body as string);
+    expect(body).toEqual({ content: "hi" });
+  });
 });

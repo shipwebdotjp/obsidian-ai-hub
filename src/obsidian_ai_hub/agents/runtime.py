@@ -93,6 +93,49 @@ def _call_key(iteration: int, index: int) -> str:
     return f"{iteration}:{index}"
 
 
+def _build_user_message(
+    provider: str,
+    text: str,
+    attachments: Optional[Sequence[Dict[str, Any]]] = None,
+) -> HumanMessage:
+    """Build a ``HumanMessage`` for a user turn, including multimodal blocks.
+
+    For non-``local`` providers with attachments, the message becomes a list
+    of content blocks (text + image data URLs) so OpenAI/Gemini/Ollama see the
+    images.  For ``local`` (llama-cpp) the provider has no vision support and
+    attachments are dropped with a warning, matching
+    ``llm_client._prepare_messages`` behaviour.
+    """
+    safe_text = text or ""
+    if not attachments:
+        return HumanMessage(content=safe_text)
+
+    if provider == "local":
+        logger.warning(
+            "Provider 'local' does not support multimodal input; dropping %d "
+            "attachment(s) from this user turn.",
+            len(attachments),
+        )
+        return HumanMessage(content=safe_text)
+
+    blocks: list[Dict[str, Any]] = [{"type": "text", "text": safe_text}]
+    for att in attachments:
+        mime_type = (att.get("mime_type") or "").strip()
+        data = (att.get("data") or "").strip()
+        if not mime_type or not data:
+            # Skip malformed attachments instead of feeding the LLM a
+            # bogus ``application/octet-stream`` block.
+            logger.warning("Skipping attachment with missing mime_type or data.")
+            continue
+        blocks.append(
+            {
+                "type": "image_url",
+                "image_url": {"url": f"data:{mime_type};base64,{data}"},
+            }
+        )
+    return HumanMessage(content=blocks)
+
+
 async def _stream_llm_turn(
     llm: Any,
     messages: List[BaseMessage],
@@ -263,6 +306,7 @@ async def generate_agent_stream(
     run: Dict[str, Any],
     history_messages: Sequence[Dict[str, Any]],
     user_content: str,
+    attachments: Optional[Sequence[Dict[str, Any]]] = None,
     max_iterations: int = 10,
     max_history_messages: int = 20,
     now: Optional[datetime] = None,
@@ -368,11 +412,19 @@ async def generate_agent_stream(
         if m.get("message_id") == run.get("user_message_id"):
             continue
         if role == "user":
-            langchain_messages.append(HumanMessage(content=content))
+            langchain_messages.append(
+                _build_user_message(
+                    provider,
+                    content,
+                    m.get("attachments") if isinstance(m.get("attachments"), list) else None,
+                )
+            )
         elif role == "assistant":
             langchain_messages.append(AIMessage(content=content))
 
-    langchain_messages.append(HumanMessage(content=user_content))
+    langchain_messages.append(
+        _build_user_message(provider, user_content, attachments)
+    )
 
     openai_options = {}
     if provider == "openai":
