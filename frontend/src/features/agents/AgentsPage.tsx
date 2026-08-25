@@ -32,6 +32,17 @@ import { ROUTES } from "../../constants/routes";
 import { useChatSendMode } from "../settings/chatSendMode";
 import MarkdownPreview from "../../components/MarkdownPreview";
 import { formatDateTime } from "../../utils/date";
+import {
+  ChevronLeft,
+  ChevronRight,
+  FileText,
+  Image as ImageIcon,
+  Plus,
+  SendHorizontal,
+  Settings,
+  Trash2,
+  X,
+} from "lucide-react";
 
 // keep in sync with runtime.py _LIVE_RESULT_MAX_CHARS (DB is 20000)
 const LIVE_RESULT_MAX_CHARS = 2000;
@@ -113,6 +124,7 @@ export default function AgentsPage() {
   // Prompt template state (per-agent)
   const [promptTemplates, setPromptTemplates] = useState<AgentPromptTemplate[]>([]);
   const [templateSelectorOpen, setTemplateSelectorOpen] = useState(false);
+  const [plusMenuOpen, setPlusMenuOpen] = useState(false);
   const [templateFormName, setTemplateFormName] = useState("");
   const [templateFormContent, setTemplateFormContent] = useState("");
   const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
@@ -136,6 +148,7 @@ export default function AgentsPage() {
   const [attachmentReadsPending, setAttachmentReadsPending] = useState(0);
   const [isDragOver, setIsDragOver] = useState(false);
   const imageInputRef = useRef<HTMLInputElement | null>(null);
+  const plusMenuRef = useRef<HTMLDivElement | null>(null);
 
   // Modal delete targets
   const [agentToDelete, setAgentToDelete] = useState<Agent | null>(null);
@@ -434,6 +447,20 @@ export default function AgentsPage() {
     }, 200);
     return () => window.clearTimeout(timer);
   }, [inputText, pendingAttachments, selectedSessionId, saveDraft, clearDraft]);
+
+  // Close the plus menu and template selector when clicking outside of them.
+  useEffect(() => {
+    if (!plusMenuOpen && !templateSelectorOpen) return;
+    const onClick = (e: MouseEvent) => {
+      if (!(e.target instanceof Node)) return;
+      if (plusMenuRef.current && !plusMenuRef.current.contains(e.target)) {
+        setPlusMenuOpen(false);
+        setTemplateSelectorOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [plusMenuOpen, templateSelectorOpen]);
 
   // Modal / drawer ESC listener
   useEffect(() => {
@@ -1286,7 +1313,7 @@ export default function AgentsPage() {
                     }`}
                     aria-label="会話削除"
                   >
-                    ✕
+                    <X className="h-3 w-3" />
                   </button>
                 </div>
               ))
@@ -1314,7 +1341,7 @@ export default function AgentsPage() {
                 label="サイドバーを閉じる"
                 onClick={() => setLeftPaneOpen(false)}
               >
-                ✕
+                <X className="h-4 w-4" />
               </SidebarIconButton>
             </div>
             {sidebarContent}
@@ -1336,7 +1363,7 @@ export default function AgentsPage() {
               label="サイドバーを畳む"
               onClick={() => setLeftPaneCollapsed(true)}
             >
-              ◀
+              <ChevronLeft className="h-4 w-4" />
             </SidebarIconButton>
           </div>
           {sidebarContent}
@@ -1350,21 +1377,33 @@ export default function AgentsPage() {
           <div className="flex-1 overflow-y-auto p-6">
             <div className="mx-auto max-w-2xl rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
               <div className="mb-4 flex items-center justify-between">
-                <h3 className="text-base font-semibold text-slate-900">
-                  {isCreatingAgent
-                    ? "新規エージェント作成"
-                    : "エージェント設定編集"}
-                </h3>
+                <div className="flex items-center gap-2">
+                  {isEditingAgent && activeAgent && (
+                    <button
+                      type="button"
+                      onClick={() => setAgentToDelete(activeAgent)}
+                      className="inline-flex h-7 w-7 items-center justify-center rounded text-rose-600 hover:bg-rose-50 cursor-pointer"
+                      aria-label="エージェントを削除"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  )}
+                  <h3 className="text-base font-semibold text-slate-900">
+                    {isCreatingAgent
+                      ? "新規エージェント作成"
+                      : "エージェント設定編集"}
+                  </h3>
+                </div>
                 <button
                   type="button"
                   onClick={() => {
                     setIsCreatingAgent(false);
                     setIsEditingAgent(false);
                   }}
-                  className="cursor-pointer rounded p-1 text-lg leading-none text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                  className="inline-flex h-7 w-7 items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-slate-700 cursor-pointer"
                   aria-label="閉じる"
                 >
-                  ✕
+                  <X className="h-4 w-4" />
                 </button>
               </div>
 
@@ -1650,10 +1689,10 @@ export default function AgentsPage() {
                   <button
                     type="button"
                     onClick={() => setLeftPaneCollapsed(false)}
-                    className="hidden rounded border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700 hover:bg-slate-50 cursor-pointer lg:inline-flex"
+                    className="hidden h-8 w-8 items-center justify-center rounded border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 cursor-pointer lg:inline-flex"
                     aria-label="サイドバーを展開"
                   >
-                    ▶
+                    <ChevronRight className="h-4 w-4" />
                   </button>
                 )}
                 <div className="min-w-0">
@@ -1669,16 +1708,10 @@ export default function AgentsPage() {
                 <button
                   type="button"
                   onClick={() => handleOpenEditForm(activeAgent)}
-                  className="rounded cursor-pointer border border-slate-300 bg-white px-2.5 py-1 text-xs text-slate-700 hover:bg-slate-50"
+                  className="inline-flex h-8 w-8 items-center justify-center rounded border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 cursor-pointer"
+                  aria-label="設定編集"
                 >
-                  設定編集
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setAgentToDelete(activeAgent)}
-                  className="rounded cursor-pointer border border-red-200 bg-red-50 px-2.5 py-1 text-xs text-red-600 hover:bg-red-100"
-                >
-                  削除
+                  <Settings className="h-4 w-4" />
                 </button>
               </div>
             </div>
@@ -2044,70 +2077,13 @@ export default function AgentsPage() {
                         className="absolute top-0 right-0 inline-flex h-4 w-4 items-center justify-center rounded-bl bg-slate-900/80 text-[10px] text-white hover:bg-slate-900 cursor-pointer"
                         aria-label={`${att.name} を取り除く`}
                       >
-                        ✕
+                        <X className="h-3 w-3" />
                       </button>
                     </div>
                   ))}
                 </div>
               )}
-              <div className="flex gap-2 items-center">
-              <div className="relative">
-                <button
-                  type="button"
-                  disabled={!activeAgent || promptTemplates.length === 0}
-                  onClick={() => setTemplateSelectorOpen((v) => !v)}
-                  className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
-                  aria-label="プロンプトテンプレートを選択"
-                >
-                  テンプレート
-                </button>
-                {templateSelectorOpen && promptTemplates.length > 0 && (
-                  <div className="absolute bottom-full left-0 mb-2 w-72 max-h-64 overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg z-10">
-                    <div className="p-2 border-b border-slate-100 text-[11px] font-medium text-slate-500">
-                      登録済みテンプレート（選択で入力を置き換え）
-                    </div>
-                    {promptTemplates.map((t) => (
-                      <button
-                        key={t.template_id}
-                        type="button"
-                        onClick={() => handleSelectTemplate(t.content)}
-                        className="w-full text-left px-3 py-2 text-xs hover:bg-slate-50 border-b border-slate-50 last:border-0"
-                      >
-                        <div className="font-medium text-slate-800 truncate">{t.name}</div>
-                        <div className="text-[11px] text-slate-500 line-clamp-2 whitespace-pre-wrap break-words">
-                          {t.content.length > 80 ? t.content.slice(0, 80) + "…" : t.content}
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-              <input
-                ref={imageInputRef}
-                type="file"
-                accept="image/*"
-                multiple
-                data-testid="agent-image-input"
-                className="hidden"
-                onChange={(e) => {
-                  void handleFilesSelected(e.target.files);
-                }}
-              />
-              <button
-                type="button"
-                disabled={
-                  !activeAgent ||
-                  !selectedSessionId ||
-                  isStreaming ||
-                  attachmentReadsPending > 0 ||
-                  pendingAttachments.length >= MAX_AGENT_IMAGES
-                }
-                onClick={() => imageInputRef.current?.click()}
-                className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
-                aria-label="画像を添付"
-              >
-                {attachmentReadsPending > 0 ? "読込中…" : "画像"}
-              </button>
+              {/* Row 1: textarea */}
               <textarea
                 ref={chatInputRef}
                 rows={1}
@@ -2117,20 +2093,112 @@ export default function AgentsPage() {
                 onPaste={handleInputPaste}
                 disabled={isStreaming || !selectedSessionId}
                 placeholder={inputPlaceholder}
-                className="flex-1 resize-none rounded-lg border border-slate-300 p-2 text-xs leading-relaxed focus:border-slate-500 focus:outline-none disabled:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full resize-none rounded-lg border border-slate-300 p-2 text-xs leading-relaxed focus:border-slate-500 focus:outline-none disabled:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed"
               />
-              <button
-                type="submit"
-                disabled={
-                  isStreaming ||
-                  attachmentReadsPending > 0 ||
-                  (!inputText.trim() && pendingAttachments.length === 0) ||
-                  !selectedSessionId
-                }
-                className="rounded-lg bg-slate-900 px-4 py-2 text-xs font-medium text-white hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-              >
-                送信
-              </button>
+              {/* Row 2: tools + model + send */}
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <div ref={plusMenuRef} className="relative">
+                    <button
+                      type="button"
+                      disabled={!activeAgent || !selectedSessionId || isStreaming}
+                      onClick={() => {
+                        setPlusMenuOpen((v) => !v);
+                        setTemplateSelectorOpen(false);
+                      }}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                      aria-label="追加メニュー"
+                    >
+                      <Plus className="h-4 w-4" />
+                    </button>
+                    {plusMenuOpen && (
+                      <div className="absolute bottom-full left-0 mb-2 w-48 rounded-lg border border-slate-200 bg-white shadow-lg z-10 overflow-hidden">
+                        <button
+                          type="button"
+                          disabled={promptTemplates.length === 0}
+                          onClick={() => {
+                            setTemplateSelectorOpen(true);
+                            setPlusMenuOpen(false);
+                          }}
+                          className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                          <FileText className="h-3.5 w-3.5 text-slate-500" />
+                          テンプレート
+                        </button>
+                        <button
+                          type="button"
+                          disabled={
+                            !activeAgent ||
+                            !selectedSessionId ||
+                            isStreaming ||
+                            attachmentReadsPending > 0 ||
+                            pendingAttachments.length >= MAX_AGENT_IMAGES
+                          }
+                          onClick={() => {
+                            imageInputRef.current?.click();
+                            setPlusMenuOpen(false);
+                          }}
+                          className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                          <ImageIcon className="h-3.5 w-3.5 text-slate-500" />
+                          {attachmentReadsPending > 0 ? "読込中…" : "画像アップロード"}
+                        </button>
+                      </div>
+                    )}
+                    {templateSelectorOpen && promptTemplates.length > 0 && (
+                      <div
+                        data-testid="agent-template-selector"
+                        className="absolute bottom-full left-0 mb-2 w-72 max-h-64 overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg z-10"
+                      >
+                        <div className="p-2 border-b border-slate-100 text-[11px] font-medium text-slate-500">
+                          登録済みテンプレート（選択で入力を置き換え）
+                        </div>
+                        {promptTemplates.map((t) => (
+                          <button
+                            key={t.template_id}
+                            type="button"
+                            onClick={() => handleSelectTemplate(t.content)}
+                            className="w-full text-left px-3 py-2 text-xs hover:bg-slate-50 border-b border-slate-50 last:border-0"
+                          >
+                            <div className="font-medium text-slate-800 truncate">{t.name}</div>
+                            <div className="text-[11px] text-slate-500 line-clamp-2 whitespace-pre-wrap break-words">
+                              {t.content.length > 80 ? t.content.slice(0, 80) + "…" : t.content}
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    <input
+                      ref={imageInputRef}
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      data-testid="agent-image-input"
+                      className="hidden"
+                      onChange={(e) => {
+                        void handleFilesSelected(e.target.files);
+                      }}
+                    />
+                  </div>
+                  {activeAgent && (
+                    <span className="text-[11px] text-slate-400 truncate max-w-[12rem]">
+                      {activeAgent.model || activeAgent.provider || "既定"}
+                    </span>
+                  )}
+                </div>
+                <button
+                  type="submit"
+                  disabled={
+                    isStreaming ||
+                    attachmentReadsPending > 0 ||
+                    (!inputText.trim() && pendingAttachments.length === 0) ||
+                    !selectedSessionId
+                  }
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-slate-900 text-white hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                  aria-label="送信"
+                >
+                  <SendHorizontal className="h-4 w-4" />
+                </button>
               </div>
             </form>
           </div>
@@ -2142,10 +2210,11 @@ export default function AgentsPage() {
               <button
                 type="button"
                 onClick={() => setLeftPaneCollapsed(false)}
-                className="hidden rounded border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50 cursor-pointer lg:inline-flex"
+                className="hidden items-center gap-1 rounded border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50 cursor-pointer lg:inline-flex"
                 aria-label="サイドバーを展開"
               >
-                ▶ エージェントを選択
+                <ChevronRight className="h-3.5 w-3.5" />
+                エージェントを選択
               </button>
             )}
             <button

@@ -14,6 +14,10 @@ vi.mock("../../../api/client", () => ({
   createAgentSession: vi.fn(),
   getAgentSessionDetail: vi.fn(),
   deleteAgentSession: vi.fn(),
+  listPromptTemplates: vi.fn(),
+  createPromptTemplate: vi.fn(),
+  updatePromptTemplate: vi.fn(),
+  deletePromptTemplate: vi.fn(),
   streamAgentMessage: vi.fn(),
   ApiError: class ApiError extends Error {
     status: number;
@@ -34,6 +38,7 @@ import {
   createAgentSession,
   getAgentSessionDetail,
   deleteAgentSession,
+  listPromptTemplates,
   streamAgentMessage,
 } from "../../../api/client";
 
@@ -42,6 +47,7 @@ const mockListTools = vi.mocked(listAgentTools);
 const mockCreateAgent = vi.mocked(createAgent);
 const mockListSessions = vi.mocked(listAgentSessions);
 const mockGetSessionDetail = vi.mocked(getAgentSessionDetail);
+const mockListTemplates = vi.mocked(listPromptTemplates);
 const mockStreamMessage = vi.mocked(streamAgentMessage);
 
 const sampleAgent = {
@@ -82,6 +88,7 @@ beforeEach(() => {
   mockListAgents.mockResolvedValue({ agents: [sampleAgent] });
   mockListTools.mockResolvedValue({ tools: sampleTools });
   mockListSessions.mockResolvedValue({ sessions: [sampleSession] });
+  mockListTemplates.mockResolvedValue({ templates: [] });
   mockGetSessionDetail.mockResolvedValue({
     session: sampleSession,
     agent: sampleAgent,
@@ -1034,5 +1041,108 @@ describe("AgentsPage", () => {
     await waitFor(() => {
       expect(localStorage.getItem("agent-draft:asess_456")).toBeNull();
     });
+  });
+
+  it("renders a two-row input footer with plus menu and send icon", async () => {
+    render(
+      <MemoryRouter>
+        <AgentsPage />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(mockGetSessionDetail).toHaveBeenCalled();
+    });
+
+    const plusButton = screen.getByRole("button", { name: "追加メニュー" });
+    expect(plusButton).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "送信" })).toBeInTheDocument();
+    expect(screen.getByText("既定")).toBeInTheDocument();
+  });
+
+  it("opens the plus menu and shows template and image upload options", async () => {
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <AgentsPage />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(mockGetSessionDetail).toHaveBeenCalled();
+    });
+
+    await user.click(screen.getByRole("button", { name: "追加メニュー" }));
+    expect(screen.getByRole("button", { name: "テンプレート" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "画像アップロード" })).toBeInTheDocument();
+  });
+
+  it("opens the template selector from the plus menu", async () => {
+    const user = userEvent.setup();
+    mockListTemplates.mockResolvedValue({
+      templates: [
+        {
+          template_id: "tpl_1",
+          agent_id: "agent_123",
+          name: "挨拶",
+          content: "こんにちは、何かお手伝いできますか？",
+          display_order: 0,
+          created_at: "2026-08-20T00:00:00Z",
+          updated_at: "2026-08-20T00:00:00Z",
+        },
+      ],
+    });
+
+    render(
+      <MemoryRouter>
+        <AgentsPage />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(mockListTemplates).toHaveBeenCalled();
+    });
+
+    await user.click(screen.getByRole("button", { name: "追加メニュー" }));
+    const templateButton = screen.getByRole("button", { name: "テンプレート" });
+    expect(templateButton).not.toBeDisabled();
+    await user.click(templateButton);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("agent-template-selector")).toBeInTheDocument();
+    });
+    const selector = screen.getByTestId("agent-template-selector");
+    expect(within(selector).getByText(/登録済みテンプレート/)).toBeInTheDocument();
+    expect(within(selector).getByText("挨拶")).toBeInTheDocument();
+  });
+
+  it("shows a settings gear icon in the agent header", async () => {
+    render(
+      <MemoryRouter>
+        <AgentsPage />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(mockGetSessionDetail).toHaveBeenCalled();
+    });
+
+    expect(screen.getByRole("button", { name: "設定編集" })).toBeInTheDocument();
+  });
+
+  it("shows a trash icon in the edit form when editing an agent", async () => {
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <AgentsPage />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(mockGetSessionDetail).toHaveBeenCalled();
+    });
+
+    await user.click(screen.getByRole("button", { name: "設定編集" }));
+    expect(screen.getByRole("button", { name: "エージェントを削除" })).toBeInTheDocument();
   });
 });
