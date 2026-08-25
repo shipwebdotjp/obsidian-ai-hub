@@ -299,6 +299,103 @@ export default function AgentsPage() {
     }
   };
 
+  const loadSessionDetail = async (sessionId: string) => {
+    setActionError(null);
+    try {
+      const detail = await getAgentSessionDetail(sessionId);
+      setMessages(detail.messages);
+      setRuns(detail.runs || []);
+      setChatError(null);
+    } catch (e: unknown) {
+      const message =
+        e instanceof Error ? e.message : "セッション詳細の読み込みに失敗しました。";
+      setChatError(message);
+    }
+  };
+
+  // Draft persistence helpers
+  const getDraftKey = useCallback((sessionId: string) => `agent-draft:${sessionId}`, []);
+
+  const loadDraft = useCallback(
+    (sessionId: string) => {
+      try {
+        const raw = localStorage.getItem(getDraftKey(sessionId));
+        if (!raw) {
+          setInputText("");
+          setPendingAttachments([]);
+          return;
+        }
+        const draft = JSON.parse(raw) as {
+          text?: string;
+          attachments?: Array<Omit<PendingAttachment, "previewUrl">>;
+          savedAt?: string;
+        };
+        setInputText(draft.text || "");
+        const validAttachments = (draft.attachments ?? []).filter(
+          (att): att is { name: string; mime_type: string; data: string; size: number } =>
+            Boolean(att && att.mime_type && att.data)
+        );
+        if (validAttachments.length > 0) {
+          setPendingAttachments(
+            validAttachments.map((att) => ({
+              ...att,
+              previewUrl: `data:${att.mime_type};base64,${att.data}`,
+            }))
+          );
+        } else {
+          setPendingAttachments([]);
+        }
+      } catch {
+        // Corrupt or unreadable draft: start fresh.
+        setInputText("");
+        setPendingAttachments([]);
+      }
+    },
+    [getDraftKey]
+  );
+
+  const clearDraft = useCallback(
+    (sessionId: string) => {
+      try {
+        localStorage.removeItem(getDraftKey(sessionId));
+      } catch {
+        // ignore
+      }
+    },
+    [getDraftKey]
+  );
+
+  const DRAFT_SIZE_LIMIT = 4_000_000; // ~4MB to stay under typical localStorage quotas.
+
+  const saveDraft = useCallback(
+    (sessionId: string, text: string, attachments: PendingAttachment[]) => {
+      try {
+        const draft = {
+          text,
+          attachments: attachments.map((att) => ({
+            name: att.name,
+            mime_type: att.mime_type,
+            data: att.data,
+            size: att.size,
+          })),
+          savedAt: new Date().toISOString(),
+        };
+        const serialized = JSON.stringify(draft);
+        if (serialized.length > DRAFT_SIZE_LIMIT) {
+          // Drop the draft rather than silently failing on quota.
+          clearDraft(sessionId);
+          setChatError("下書きが大きすぎて保存できません（画像を減らしてください）。");
+          return;
+        }
+        localStorage.setItem(getDraftKey(sessionId), serialized);
+      } catch (e) {
+        // QuotaExceeded or private mode: don't block typing.
+        console.error("Failed to save draft:", e);
+      }
+    },
+    [getDraftKey, clearDraft]
+  );
+
   // Load session detail messages when session changes
   useEffect(() => {
     if (abortControllerRef.current) {
@@ -309,6 +406,7 @@ export default function AgentsPage() {
 
     if (!selectedSessionId) {
       setMessages([]);
+      setInputText("");
       setPendingAttachments([]);
       if (imageInputRef.current) {
         imageInputRef.current.value = "";
@@ -317,23 +415,25 @@ export default function AgentsPage() {
     }
     loadSessionDetail(selectedSessionId);
     setHitlLinks([]);
-    setPendingAttachments([]);
+    loadDraft(selectedSessionId);
     if (imageInputRef.current) {
       imageInputRef.current.value = "";
     }
-  }, [selectedSessionId]);
+  }, [selectedSessionId, loadDraft]);
 
-  const loadSessionDetail = async (sessionId: string) => {
-    setActionError(null);
-    try {
-      const detail = await getAgentSessionDetail(sessionId);
-      setMessages(detail.messages);
-      setRuns(detail.runs || []);
-      setChatError(null);
-    } catch (e: any) {
-      setChatError(e.message || "セッション詳細の読み込みに失敗しました。");
+  // Auto-save draft (text + attachments) with a 200ms debounce.
+  useEffect(() => {
+    if (!selectedSessionId) return;
+    const hasContent = inputText.trim().length > 0 || pendingAttachments.length > 0;
+    if (!hasContent) {
+      clearDraft(selectedSessionId);
+      return;
     }
-  };
+    const timer = window.setTimeout(() => {
+      saveDraft(selectedSessionId, inputText, pendingAttachments);
+    }, 200);
+    return () => window.clearTimeout(timer);
+  }, [inputText, pendingAttachments, selectedSessionId, saveDraft, clearDraft]);
 
   // Modal / drawer ESC listener
   useEffect(() => {
@@ -852,6 +952,7 @@ export default function AgentsPage() {
 
     setInputText("");
     setPendingAttachments([]);
+    clearDraft(streamSessionId);
     if (imageInputRef.current) {
       imageInputRef.current.value = "";
     }

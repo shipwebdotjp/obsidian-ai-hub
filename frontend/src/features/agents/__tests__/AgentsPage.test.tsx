@@ -78,6 +78,7 @@ const sampleSession = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  localStorage.clear();
   mockListAgents.mockResolvedValue({ agents: [sampleAgent] });
   mockListTools.mockResolvedValue({ tools: sampleTools });
   mockListSessions.mockResolvedValue({ sessions: [sampleSession] });
@@ -939,5 +940,99 @@ describe("AgentsPage", () => {
     ).not.toBeInTheDocument();
     // send button stays disabled because nothing was attached.
     expect(screen.getByRole("button", { name: "送信" })).toBeDisabled();
+  });
+
+  it("auto-saves input text as a draft after a debounce", async () => {
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <AgentsPage />
+      </MemoryRouter>
+    );
+
+    const input = await screen.findByPlaceholderText(/^メッセージを入力/);
+    await user.type(input, "下書き保存テスト");
+
+    expect(localStorage.getItem("agent-draft:asess_456")).toBeNull();
+    await act(() => new Promise((resolve) => window.setTimeout(resolve, 250)));
+
+    const saved = JSON.parse(localStorage.getItem("agent-draft:asess_456") || "{}");
+    expect(saved.text).toBe("下書き保存テスト");
+    expect(saved.attachments).toEqual([]);
+  });
+
+  it("loads a saved draft when the session is selected", async () => {
+    localStorage.setItem(
+      "agent-draft:asess_456",
+      JSON.stringify({
+        text: "復元される下書き",
+        attachments: [],
+        savedAt: new Date().toISOString(),
+      })
+    );
+
+    render(
+      <MemoryRouter>
+        <AgentsPage />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(mockGetSessionDetail).toHaveBeenCalled();
+    });
+
+    const input = screen.getByPlaceholderText(/^メッセージを入力/) as HTMLTextAreaElement;
+    await waitFor(() => {
+      expect(input.value).toBe("復元される下書き");
+    });
+  });
+
+  it("clears the draft after a message is sent successfully", async () => {
+    const user = userEvent.setup();
+    mockStreamMessage.mockImplementation(
+      async (sessionId, content, onEvent) => {
+        onEvent({ type: "text", delta: "送信完了" });
+        onEvent({
+          type: "done",
+          message: {
+            message_id: "msg_clear_draft",
+            session_id: sessionId,
+            sequence: 3,
+            role: "assistant",
+            content: "送信完了",
+            created_at: new Date().toISOString(),
+          },
+          run: {
+            run_id: "arun_clear_draft",
+            session_id: sessionId,
+            user_message_id: "msg_clear_draft_user",
+            assistant_message_id: "msg_clear_draft",
+            status: "succeeded",
+            used_tools: [],
+            created_hitl_run_ids: [],
+            error_message: null,
+            started_at: "",
+            finished_at: "",
+          },
+          hitl_run_ids: [],
+        });
+      }
+    );
+
+    render(
+      <MemoryRouter>
+        <AgentsPage />
+      </MemoryRouter>
+    );
+
+    const input = await screen.findByPlaceholderText(/^メッセージを入力/);
+    await user.type(input, "クリアされる下書き");
+    await act(() => new Promise((resolve) => window.setTimeout(resolve, 250)));
+    expect(localStorage.getItem("agent-draft:asess_456")).not.toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "送信" }));
+    await waitFor(() => {
+      expect(localStorage.getItem("agent-draft:asess_456")).toBeNull();
+    });
   });
 });
