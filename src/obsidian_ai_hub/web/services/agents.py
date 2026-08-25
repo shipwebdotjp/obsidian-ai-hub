@@ -2,9 +2,16 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from obsidian_ai_hub.agents import registry, runtime, store
+
+
+def _pinned_at_value(pinned: Optional[bool]) -> Optional[str]:
+    if pinned is None:
+        return None
+    return datetime.now(timezone.utc).isoformat() if pinned else None
 
 
 def list_agents() -> List[Dict[str, Any]]:
@@ -44,8 +51,9 @@ def update_agent(
     provider: Optional[str] = None,
     model: Optional[str] = None,
     advanced_params: Optional[Dict[str, Any]] = None,
+    pinned: Optional[bool] = None,
 ) -> Dict[str, Any]:
-    return store.update_agent(
+    kwargs: Dict[str, Any] = dict(
         agent_id=agent_id,
         name=name,
         system_prompt=system_prompt,
@@ -54,6 +62,9 @@ def update_agent(
         model=model,
         advanced_params=advanced_params,
     )
+    if pinned is not None:
+        kwargs["pinned_at"] = _pinned_at_value(pinned)
+    return store.update_agent(**kwargs)
 
 
 def delete_agent(agent_id: str) -> bool:
@@ -89,6 +100,25 @@ def get_session_detail(session_id: str) -> Dict[str, Any]:
         "messages": messages,
         "runs": runs,
     }
+
+
+def update_session(
+    session_id: str,
+    title: Optional[str] = None,
+    pinned: Optional[bool] = None,
+) -> Dict[str, Any]:
+    kwargs: Dict[str, Any] = dict(session_id=session_id)
+    if title is not None:
+        kwargs["title"] = title
+    if pinned is not None:
+        kwargs["pinned_at"] = _pinned_at_value(pinned)
+    # Detect if no update field was supplied
+    if "title" not in kwargs and "pinned_at" not in kwargs:
+        session = store.get_session(session_id)
+        if not session:
+            raise FileNotFoundError(f"Session '{session_id}' not found.")
+        return session
+    return store.update_session(**kwargs)
 
 
 def delete_session(session_id: str) -> bool:

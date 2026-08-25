@@ -555,6 +555,7 @@ export function updateAgent(
     provider?: string;
     model?: string;
     advanced_params?: { max_tokens?: number; reasoning?: { effort?: string } } | null;
+    pinned?: boolean;
   },
 ): Promise<{ agent: Agent }> {
   return request<{ agent: Agent }>(`/api/v1/agents/${encodeURIComponent(agentId)}`, {
@@ -604,6 +605,19 @@ export function deleteAgentSession(sessionId: string): Promise<{ success: boolea
   return request<{ success: boolean }>(
     `/api/v1/agent-sessions/${encodeURIComponent(sessionId)}`,
     { method: "DELETE" },
+  );
+}
+
+export function updateAgentSession(
+  sessionId: string,
+  payload: { title?: string; pinned?: boolean },
+): Promise<{ session: AgentSession }> {
+  return request<{ session: AgentSession }>(
+    `/api/v1/agent-sessions/${encodeURIComponent(sessionId)}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    },
   );
 }
 

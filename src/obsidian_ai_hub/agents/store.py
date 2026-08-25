@@ -109,6 +109,10 @@ def _row_to_agent(row: sqlite3.Row) -> dict[str, Any]:
         except (json.JSONDecodeError, TypeError):
             tool_ids = []
     advanced_params = _advanced_params_from_row(row)
+    try:
+        pinned_at = row["pinned_at"]  # type: ignore[index]
+    except (IndexError, KeyError, ValueError):
+        pinned_at = None
     return {
         "agent_id": row["agent_id"],
         "name": row["name"],
@@ -117,16 +121,22 @@ def _row_to_agent(row: sqlite3.Row) -> dict[str, Any]:
         "model": row["model"],
         "tool_ids": tool_ids,
         "advanced_params": advanced_params,
+        "pinned_at": pinned_at,
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
     }
 
 
 def _row_to_session(row: sqlite3.Row) -> dict[str, Any]:
+    try:
+        pinned_at = row["pinned_at"]  # type: ignore[index]
+    except (IndexError, KeyError, ValueError):
+        pinned_at = None
     return {
         "session_id": row["session_id"],
         "agent_id": row["agent_id"],
         "title": row["title"],
+        "pinned_at": pinned_at,
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
     }
@@ -317,7 +327,15 @@ def create_agent(
 
 def list_agents(conn: Optional[sqlite3.Connection] = None) -> list[dict[str, Any]]:
     with auto_connection(conn) as (active_conn, _):
-        cursor = active_conn.execute("SELECT * FROM agents ORDER BY created_at DESC;")
+        try:
+            cursor = active_conn.execute(
+                "SELECT * FROM agents ORDER BY (pinned_at IS NOT NULL) DESC, pinned_at DESC, updated_at DESC;"
+            )
+        except sqlite3.OperationalError as e:
+            if "no such column: pinned_at" in str(e):
+                cursor = active_conn.execute("SELECT * FROM agents ORDER BY created_at DESC;")
+            else:
+                raise
         return [_row_to_agent(row) for row in cursor.fetchall()]
 
 
@@ -330,6 +348,9 @@ def get_agent(agent_id: str, conn: Optional[sqlite3.Connection] = None) -> dict[
         return _row_to_agent(row)
 
 
+_PINNED_AT_UNSET: Any = object()
+
+
 def update_agent(
     agent_id: str,
     name: Optional[str] = None,
@@ -338,6 +359,7 @@ def update_agent(
     provider: Optional[str] = None,
     model: Optional[str] = None,
     advanced_params: Optional[dict[str, Any]] = None,
+    pinned_at: Any = _PINNED_AT_UNSET,
     conn: Optional[sqlite3.Connection] = None,
 ) -> dict[str, Any]:
     with auto_connection(conn) as (active_conn, is_generated):
@@ -376,6 +398,10 @@ def update_agent(
         else:
             advanced_params_norm = _normalize_advanced_params(advanced_params)
         advanced_params_json = json.dumps(advanced_params_norm, ensure_ascii=False)
+        if pinned_at is _PINNED_AT_UNSET:
+            clean_pinned_at = existing.get("pinned_at")
+        else:
+            clean_pinned_at = pinned_at
         now = _now_iso()
 
         try:
@@ -385,7 +411,7 @@ def update_agent(
                         active_conn.execute(
                             """
                             UPDATE agents
-                            SET name = ?, system_prompt = ?, provider = ?, model = ?, tool_ids_json = ?, advanced_params_json = ?, updated_at = ?
+                            SET name = ?, system_prompt = ?, provider = ?, model = ?, tool_ids_json = ?, advanced_params_json = ?, pinned_at = ?, updated_at = ?
                             WHERE agent_id = ?
                             """,
                             (
@@ -395,12 +421,54 @@ def update_agent(
                                 clean_model,
                                 tool_ids_json,
                                 advanced_params_json,
+                                clean_pinned_at,
                                 now,
                                 agent_id,
                             ),
                         )
                     except sqlite3.OperationalError as e:
-                        if "no such column: advanced_params_json" in str(e):
+                        msg = str(e)
+                        if "no such column: pinned_at" in msg:
+                            # Fallback for pre-v25 DBs: retry without pinned_at column
+                            try:
+                                active_conn.execute(
+                                    """
+                                    UPDATE agents
+                                    SET name = ?, system_prompt = ?, provider = ?, model = ?, tool_ids_json = ?, advanced_params_json = ?, updated_at = ?
+                                    WHERE agent_id = ?
+                                    """,
+                                    (
+                                        clean_name,
+                                        clean_prompt,
+                                        clean_provider,
+                                        clean_model,
+                                        tool_ids_json,
+                                        advanced_params_json,
+                                        now,
+                                        agent_id,
+                                    ),
+                                )
+                            except sqlite3.OperationalError as e2:
+                                if "no such column: advanced_params_json" in str(e2):
+                                    active_conn.execute(
+                                        """
+                                        UPDATE agents
+                                        SET name = ?, system_prompt = ?, provider = ?, model = ?, tool_ids_json = ?, updated_at = ?
+                                        WHERE agent_id = ?
+                                        """,
+                                        (
+                                            clean_name,
+                                            clean_prompt,
+                                            clean_provider,
+                                            clean_model,
+                                            tool_ids_json,
+                                            now,
+                                            agent_id,
+                                        ),
+                                    )
+                                else:
+                                    raise
+                        elif "no such column: advanced_params_json" in msg:
                             active_conn.execute(
                                 """
                                 UPDATE agents
@@ -424,7 +492,7 @@ def update_agent(
                     active_conn.execute(
                         """
                         UPDATE agents
-                        SET name = ?, system_prompt = ?, provider = ?, model = ?, tool_ids_json = ?, advanced_params_json = ?, updated_at = ?
+                        SET name = ?, system_prompt = ?, provider = ?, model = ?, tool_ids_json = ?, advanced_params_json = ?, pinned_at = ?, updated_at = ?
                         WHERE agent_id = ?
                         """,
                         (
@@ -434,12 +502,53 @@ def update_agent(
                             clean_model,
                             tool_ids_json,
                             advanced_params_json,
+                            clean_pinned_at,
                             now,
                             agent_id,
                         ),
                     )
                 except sqlite3.OperationalError as e:
-                    if "no such column: advanced_params_json" in str(e):
+                    msg = str(e)
+                    if "no such column: pinned_at" in msg:
+                        try:
+                            active_conn.execute(
+                                """
+                                UPDATE agents
+                                SET name = ?, system_prompt = ?, provider = ?, model = ?, tool_ids_json = ?, advanced_params_json = ?, updated_at = ?
+                                WHERE agent_id = ?
+                                """,
+                                (
+                                    clean_name,
+                                    clean_prompt,
+                                    clean_provider,
+                                    clean_model,
+                                    tool_ids_json,
+                                    advanced_params_json,
+                                    now,
+                                    agent_id,
+                                ),
+                            )
+                        except sqlite3.OperationalError as e2:
+                            if "no such column: advanced_params_json" in str(e2):
+                                active_conn.execute(
+                                    """
+                                    UPDATE agents
+                                    SET name = ?, system_prompt = ?, provider = ?, model = ?, tool_ids_json = ?, updated_at = ?
+                                    WHERE agent_id = ?
+                                    """,
+                                    (
+                                        clean_name,
+                                        clean_prompt,
+                                        clean_provider,
+                                        clean_model,
+                                        tool_ids_json,
+                                        now,
+                                        agent_id,
+                                    ),
+                                )
+                            else:
+                                raise
+                    elif "no such column: advanced_params_json" in msg:
                         active_conn.execute(
                             """
                             UPDATE agents
@@ -514,10 +623,19 @@ def create_session(
 
 def list_sessions(agent_id: str, conn: Optional[sqlite3.Connection] = None) -> list[dict[str, Any]]:
     with auto_connection(conn) as (active_conn, _):
-        cursor = active_conn.execute(
-            "SELECT * FROM agent_sessions WHERE agent_id = ? ORDER BY updated_at DESC;",
-            (agent_id,),
-        )
+        try:
+            cursor = active_conn.execute(
+                "SELECT * FROM agent_sessions WHERE agent_id = ? ORDER BY (pinned_at IS NOT NULL) DESC, pinned_at DESC, updated_at DESC;",
+                (agent_id,),
+            )
+        except sqlite3.OperationalError as e:
+            if "no such column: pinned_at" in str(e):
+                cursor = active_conn.execute(
+                    "SELECT * FROM agent_sessions WHERE agent_id = ? ORDER BY updated_at DESC;",
+                    (agent_id,),
+                )
+            else:
+                raise
         return [_row_to_session(row) for row in cursor.fetchall()]
 
 
@@ -530,6 +648,61 @@ def get_session(session_id: str, conn: Optional[sqlite3.Connection] = None) -> d
         if not row:
             return None
         return _row_to_session(row)
+
+
+def update_session(
+    session_id: str,
+    title: Optional[str] = None,
+    pinned_at: Any = _PINNED_AT_UNSET,
+    conn: Optional[sqlite3.Connection] = None,
+) -> dict[str, Any]:
+    with auto_connection(conn) as (active_conn, is_generated):
+        existing = get_session(session_id, conn=active_conn)
+        if not existing:
+            raise FileNotFoundError(f"Session '{session_id}' not found.")
+
+        clean_title = title.strip() if title is not None else existing["title"]
+        if not clean_title:
+            raise ValueError("Session title must not be empty.")
+
+        if pinned_at is _PINNED_AT_UNSET:
+            clean_pinned_at = existing.get("pinned_at")
+        else:
+            clean_pinned_at = pinned_at
+
+        now = _now_iso()
+
+        if is_generated:
+            with active_conn:
+                try:
+                    active_conn.execute(
+                        "UPDATE agent_sessions SET title = ?, pinned_at = ?, updated_at = ? WHERE session_id = ?;",
+                        (clean_title, clean_pinned_at, now, session_id),
+                    )
+                except sqlite3.OperationalError as e:
+                    if "no such column: pinned_at" in str(e):
+                        active_conn.execute(
+                            "UPDATE agent_sessions SET title = ?, updated_at = ? WHERE session_id = ?;",
+                            (clean_title, now, session_id),
+                        )
+                    else:
+                        raise
+        else:
+            try:
+                active_conn.execute(
+                    "UPDATE agent_sessions SET title = ?, pinned_at = ?, updated_at = ? WHERE session_id = ?;",
+                    (clean_title, clean_pinned_at, now, session_id),
+                )
+            except sqlite3.OperationalError as e:
+                if "no such column: pinned_at" in str(e):
+                    active_conn.execute(
+                        "UPDATE agent_sessions SET title = ?, updated_at = ? WHERE session_id = ?;",
+                        (clean_title, now, session_id),
+                    )
+                else:
+                    raise
+
+        return get_session(session_id, conn=active_conn)  # type: ignore[return-value]
 
 
 def delete_session(session_id: str, conn: Optional[sqlite3.Connection] = None) -> bool:

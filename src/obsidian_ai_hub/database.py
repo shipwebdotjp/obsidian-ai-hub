@@ -486,6 +486,9 @@ def get_db_connection() -> sqlite3.Connection:
     if current_version <= 23:
         run_migration_v24(conn)
 
+    if current_version <= 24:
+        run_migration_v25(conn)
+
     return conn
 
 
@@ -761,6 +764,25 @@ def run_migration_v24(conn: sqlite3.Connection) -> None:
     except sqlite3.OperationalError as e:
         _ignore_duplicate_schema_object(e)
     conn.execute("PRAGMA user_version = 24;")
+    conn.commit()
+
+
+def run_migration_v25(conn: sqlite3.Connection) -> None:
+    """Run migration for version 25 (agents/agents_sessions pinned_at).
+
+    Adds ``pinned_at TEXT`` (ISO-8601, nullable) to both tables. Null means
+    unpinned; a timestamp means pinned. Used to sort pinned items first
+    (pinned_at DESC) in list queries.
+    """
+    try:
+        conn.execute("ALTER TABLE agents ADD COLUMN pinned_at TEXT;")
+    except sqlite3.OperationalError as e:
+        _ignore_duplicate_schema_object(e)
+    try:
+        conn.execute("ALTER TABLE agent_sessions ADD COLUMN pinned_at TEXT;")
+    except sqlite3.OperationalError as e:
+        _ignore_duplicate_schema_object(e)
+    conn.execute("PRAGMA user_version = 25;")
     conn.commit()
 
 

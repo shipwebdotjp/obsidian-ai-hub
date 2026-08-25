@@ -14,6 +14,7 @@ import {
   listPromptTemplates,
   streamAgentMessage,
   updateAgent,
+  updateAgentSession,
   updatePromptTemplate,
 } from "../../api/client";
 import type {
@@ -37,6 +38,7 @@ import {
   ChevronRight,
   FileText,
   Image as ImageIcon,
+  Pin,
   Plus,
   SendHorizontal,
   Settings,
@@ -96,6 +98,36 @@ const SidebarIconButton = React.forwardRef<
     </button>
   );
 });
+
+function getPinButtonClass(pinned: boolean, active: boolean): string {
+  if (pinned) return "text-amber-500";
+  if (active) return "text-slate-300 hover:text-white hover:bg-slate-800";
+  return "text-slate-400 hover:text-slate-700 hover:bg-slate-200";
+}
+
+function PinButton({
+  pinned,
+  active,
+  onToggle,
+  label,
+}: {
+  pinned: boolean;
+  active: boolean;
+  onToggle: (e: React.MouseEvent) => void;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded cursor-pointer transition ${getPinButtonClass(pinned, active)}`}
+      aria-label={label}
+      aria-pressed={pinned}
+    >
+      <Pin className={`h-3.5 w-3.5 ${pinned ? "fill-amber-400 text-amber-500" : ""}`} />
+    </button>
+  );
+}
 
 export default function AgentsPage() {
   const [agents, setAgents] = useState<Agent[]>([]);
@@ -690,6 +722,34 @@ export default function AgentsPage() {
     }
   };
 
+  const handleToggleAgentPin = async (agent: Agent, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setActionError(null);
+    try {
+      await updateAgent(agent.agent_id, { pinned: !agent.pinned_at });
+      const res = await listAgents();
+      setAgents(res.agents);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "ピン留めの更新に失敗しました。";
+      setActionError(message);
+    }
+  };
+
+  const handleToggleSessionPin = async (session: AgentSession, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setActionError(null);
+    try {
+      await updateAgentSession(session.session_id, { pinned: !session.pinned_at });
+      if (selectedAgentId) {
+        const res = await listAgentSessions(selectedAgentId);
+        setSessions(res.sessions);
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "ピン留めの更新に失敗しました。";
+      setActionError(message);
+    }
+  };
+
   // Image attachment helpers
   const readFileAsDataUrl = (file: File): Promise<string> =>
     new Promise((resolve, reject) => {
@@ -1213,9 +1273,18 @@ export default function AgentsPage() {
               </p>
             ) : (
               agents.map((agent) => (
-                <button
+                <div
                   key={agent.agent_id}
-                  type="button"
+                  className={`group flex items-center justify-between rounded-lg px-3 py-2 text-xs transition ${
+                    selectedAgentId === agent.agent_id &&
+                    !isCreatingAgent &&
+                    !isEditingAgent
+                      ? "bg-slate-900 text-white font-medium"
+                      : "text-slate-700 hover:bg-slate-100"
+                  }`}
+                >
+                  <button
+                    type="button"
                     onClick={() => {
                       setSelectedAgentId(agent.agent_id);
                       setIsCreatingAgent(false);
@@ -1231,19 +1300,20 @@ export default function AgentsPage() {
                         { replace: true },
                       );
                     }}
-                  className={`w-full cursor-pointer rounded-lg px-3 py-2 text-left text-xs transition ${
-                    selectedAgentId === agent.agent_id &&
-                    !isCreatingAgent &&
-                    !isEditingAgent
-                      ? "bg-slate-900 text-white font-medium"
-                      : "text-slate-700 hover:bg-slate-100"
-                  }`}
-                >
-                  <div className="truncate font-semibold">{agent.name}</div>
-                  <div className="truncate text-[10px] opacity-75">
-                    {agent.tool_ids.length} ツール | {agent.provider || "既定"}
-                  </div>
-                </button>
+                    className="flex-1 text-left cursor-pointer min-w-0"
+                  >
+                    <div className="truncate font-semibold">{agent.name}</div>
+                    <div className="truncate text-[10px] opacity-75">
+                      {agent.tool_ids.length} ツール | {agent.provider || "既定"}
+                    </div>
+                  </button>
+                  <PinButton
+                    pinned={!!agent.pinned_at}
+                    active={selectedAgentId === agent.agent_id && !isCreatingAgent && !isEditingAgent}
+                    onToggle={(e) => handleToggleAgentPin(agent, e)}
+                    label={agent.pinned_at ? "ピン留めを解除" : "ピン留めする"}
+                  />
+                </div>
               ))
             )}
           </div>
@@ -1300,6 +1370,12 @@ export default function AgentsPage() {
                   >
                     <div className="truncate font-medium">{s.title}</div>
                   </button>
+                  <PinButton
+                    pinned={!!s.pinned_at}
+                    active={selectedSessionId === s.session_id}
+                    onToggle={(e) => handleToggleSessionPin(s, e)}
+                    label={s.pinned_at ? "ピン留めを解除" : "ピン留めする"}
+                  />
                   <button
                     type="button"
                     onClick={(e) => {

@@ -65,6 +65,7 @@ class UpdateAgentRequest(BaseModel):
     advanced_params: Optional[AdvancedParamsRequest] = Field(
         default=None, description="Advanced LLM params (max_tokens, reasoning.effort)"
     )
+    pinned: Optional[bool] = Field(default=None, description="Pin state for the agent")
 
 
 class CreatePromptTemplateRequest(BaseModel):
@@ -80,6 +81,11 @@ class UpdatePromptTemplateRequest(BaseModel):
 
 class CreateSessionRequest(BaseModel):
     title: Optional[str] = Field(default=None, description="Session title")
+
+
+class UpdateSessionRequest(BaseModel):
+    title: Optional[str] = Field(default=None, description="Session title")
+    pinned: Optional[bool] = Field(default=None, description="Pin state for the session")
 
 
 # Limits for inline image attachments to keep requests bounded and avoid
@@ -196,6 +202,7 @@ def update_agent(agent_id: str, req: UpdateAgentRequest) -> Dict[str, Any]:
         adv = None
         if "advanced_params" in req.model_fields_set:
             adv = req.advanced_params.model_dump(exclude_none=True) if req.advanced_params else {}
+        pinned = req.pinned if "pinned" in req.model_fields_set else None
         agent = agent_service.update_agent(
             agent_id=agent_id,
             name=req.name,
@@ -204,6 +211,7 @@ def update_agent(agent_id: str, req: UpdateAgentRequest) -> Dict[str, Any]:
             provider=req.provider,
             model=req.model,
             advanced_params=adv,
+            pinned=pinned,
         )
         return {"agent": agent}
     except FileNotFoundError as e:
@@ -252,6 +260,22 @@ def get_session_detail(session_id: str) -> Dict[str, Any]:
         return detail
     except FileNotFoundError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+
+
+@router.patch("/agent-sessions/{session_id}")
+def update_session(session_id: str, req: UpdateSessionRequest) -> Dict[str, Any]:
+    try:
+        pinned = req.pinned if "pinned" in req.model_fields_set else None
+        session = agent_service.update_session(
+            session_id=session_id,
+            title=req.title,
+            pinned=pinned,
+        )
+        return {"session": session}
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
 
 
 @router.delete("/agent-sessions/{session_id}")

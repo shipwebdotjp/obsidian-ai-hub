@@ -18,6 +18,7 @@ vi.mock("../../../api/client", () => ({
   createPromptTemplate: vi.fn(),
   updatePromptTemplate: vi.fn(),
   deletePromptTemplate: vi.fn(),
+  updateAgentSession: vi.fn(),
   streamAgentMessage: vi.fn(),
   ApiError: class ApiError extends Error {
     status: number;
@@ -39,6 +40,7 @@ import {
   getAgentSessionDetail,
   deleteAgentSession,
   listPromptTemplates,
+  updateAgentSession,
   streamAgentMessage,
 } from "../../../api/client";
 
@@ -48,6 +50,8 @@ const mockCreateAgent = vi.mocked(createAgent);
 const mockListSessions = vi.mocked(listAgentSessions);
 const mockGetSessionDetail = vi.mocked(getAgentSessionDetail);
 const mockListTemplates = vi.mocked(listPromptTemplates);
+const mockUpdateAgent = vi.mocked(updateAgent);
+const mockUpdateSession = vi.mocked(updateAgentSession);
 const mockStreamMessage = vi.mocked(streamAgentMessage);
 
 const sampleAgent = {
@@ -89,6 +93,8 @@ beforeEach(() => {
   mockListTools.mockResolvedValue({ tools: sampleTools });
   mockListSessions.mockResolvedValue({ sessions: [sampleSession] });
   mockListTemplates.mockResolvedValue({ templates: [] });
+  mockUpdateAgent.mockResolvedValue({ agent: sampleAgent });
+  mockUpdateSession.mockResolvedValue({ session: sampleSession });
   mockGetSessionDetail.mockResolvedValue({
     session: sampleSession,
     agent: sampleAgent,
@@ -1144,5 +1150,92 @@ describe("AgentsPage", () => {
 
     await user.click(screen.getByRole("button", { name: "設定編集" }));
     expect(screen.getByRole("button", { name: "エージェントを削除" })).toBeInTheDocument();
+  });
+
+  it("toggles agent pin when the pin button is clicked and reloads the agent list", async () => {
+    const user = userEvent.setup();
+    const pinnedAgent = { ...sampleAgent, pinned_at: "2026-08-25T00:00:00Z" };
+
+    mockUpdateAgent.mockResolvedValue({ agent: pinnedAgent });
+    // After pin, listAgents returns the pinned agent
+    mockListAgents
+      .mockResolvedValueOnce({ agents: [sampleAgent] })
+      .mockResolvedValueOnce({ agents: [pinnedAgent] });
+
+    render(
+      <MemoryRouter>
+        <AgentsPage />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(mockListAgents).toHaveBeenCalled();
+    });
+
+    const pinButtons = screen.getAllByRole("button", { name: "ピン留めする" });
+    const pinButton = pinButtons[0];
+    expect(pinButton).toHaveAttribute("aria-pressed", "false");
+
+    await user.click(pinButton);
+
+    await waitFor(() => {
+      expect(mockUpdateAgent).toHaveBeenCalledWith("agent_123", { pinned: true });
+    });
+
+    await waitFor(() => {
+      expect(mockListAgents).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it("toggles session pin when the pin button is clicked and reloads the session list", async () => {
+    const user = userEvent.setup();
+    const pinnedSession = { ...sampleSession, pinned_at: "2026-08-25T00:00:00Z" };
+
+    mockUpdateSession.mockResolvedValue({ session: pinnedSession });
+    mockListSessions
+      .mockResolvedValueOnce({ sessions: [sampleSession] })
+      .mockResolvedValueOnce({ sessions: [pinnedSession] });
+
+    render(
+      <MemoryRouter>
+        <AgentsPage />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(mockListSessions).toHaveBeenCalled();
+    });
+
+    // The session row has a pin button with aria-label "ピン留めする"
+    const sessionPinButtons = screen.getAllByRole("button", { name: "ピン留めする" });
+    // First is agent pin, second is session pin
+    const sessionPinButton = sessionPinButtons[1] || sessionPinButtons[0];
+    await user.click(sessionPinButton);
+
+    await waitFor(() => {
+      expect(mockUpdateSession).toHaveBeenCalledWith("asess_456", { pinned: true });
+    });
+
+    await waitFor(() => {
+      expect(mockListSessions).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it("shows pinned state on the pin button when agent is pinned", async () => {
+    const pinnedAgent = { ...sampleAgent, pinned_at: "2026-08-25T00:00:00Z" };
+    mockListAgents.mockResolvedValue({ agents: [pinnedAgent] });
+
+    render(
+      <MemoryRouter>
+        <AgentsPage />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(mockListAgents).toHaveBeenCalled();
+    });
+
+    const pinButton = screen.getByRole("button", { name: "ピン留めを解除" });
+    expect(pinButton).toHaveAttribute("aria-pressed", "true");
   });
 });

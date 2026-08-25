@@ -673,6 +673,7 @@ export interface Agent {
   model: string | null;
   tool_ids: string[];
   advanced_params?: AgentAdvancedParams | null;
+  pinned_at?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -687,6 +688,7 @@ export interface AgentSession {
   session_id: string;
   agent_id: string;
   title: string;
+  pinned_at?: string | null;
   created_at: string;
   updated_at: string;
 }
