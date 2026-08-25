@@ -16,22 +16,28 @@ SQLite can create or modify it.
 
 ## Database-writing tests
 
-Every test is automatically given an isolated `MEMORY_SQLITE_PATH` and a
-Vault workspace under `tmp_path`. Request `test_memory_db_path` only when the
-test needs the path for an assertion, explicit setup explanation, or fixture
-composition — it is not required for isolation.
+Every test is automatically given an isolated `MEMORY_SQLITE_PATH`,
+`HEALTHCARE_SQLITE_PATH` and a Vault workspace under `tmp_path`. Request
+`test_memory_db_path` / `test_healthcare_db_path` only when the test needs the
+path for an assertion, explicit setup explanation, or fixture composition — it
+is not required for isolation. Healthcare uses a separate DB
+(`healthcare.sqlite3` v1, `health_imports`/`health_records`/`health_ecg` etc.)
+and the same `OBSIDIAN_AI_HUB_TESTING=1` guard as memory.
 
 Use the application APIs to seed and inspect test records.
-- Keep vault, activity, and research output under pytest's `tmp_path`.
+- Keep vault, activity, research and healthcare export output under pytest's `tmp_path`.
 - Execute the test through pytest. Do not manually invoke a test function or
   copy its setup into `uv run python -`; doing so bypasses pytest isolation.
 
 ## One-off verification
 
 If a manual database experiment is unavoidable, create a new temporary
-directory and set `config.MEMORY_SQLITE_PATH` to a SQLite file inside it before
-calling any database API. Prefer adding a focused pytest test instead. Never
-use the configured production database for a test, reproduction, or seed data.
+directory and set `config.MEMORY_SQLITE_PATH` (or `HEALTHCARE_SQLITE_PATH` for
+healthcare) to a SQLite file inside it before calling any database API. Prefer
+adding a focused pytest test instead. Never use the configured production
+database for a test, reproduction, or seed data. For healthcare manual checks,
+use `ENV=test` with an explicit `--healthcare-export-dir` pointing at a
+temporary copy of `export.xml` (see `docs/healthcare-import/plan.md`).
 
 ## ブラウザ E2E の扱い
 
@@ -65,10 +71,13 @@ def e2e_seed_scenario() -> list[str]:
 ## When the safety guard fails
 
 `Refusing to open the production memory database while tests are running`
+(and `Refusing to open the production healthcare database while tests are running`)
 means a test or fixture selected the database path that was configured before
-pytest started. Change that code to use `test_memory_db_path` or `tmp_path`;
-do not disable the guard. Production records found during an investigation are
-out of scope for test cleanup and require explicit authorization to change.
+pytest started. Change that code to use `test_memory_db_path` /
+`test_healthcare_db_path` or `tmp_path`; do not disable the guard. Production
+records found during an investigation are out of scope for test cleanup and
+require explicit authorization to change. `HEALTHCARE_SQLITE_PATH` must never
+equal `MEMORY_SQLITE_PATH` (separate DB, enforced in `healthcare/store.py`).
 
 ## ENV=test による CLI テスト
 

@@ -53,6 +53,8 @@ _APP_ENV_VARS = [
     "AGENT_PROVIDER",
     "AGENT_MODEL",
     "OBSIDIAN_AI_HUB_PLUGINS_DIR",
+    "HEALTHCARE_SQLITE_PATH",
+    "HEALTHCARE_EXPORT_DIR",
 ]
 
 if IS_TEST_ENV:
@@ -666,6 +668,30 @@ if MEMORY_RENDERER_PROMPT_PATH is None:
 # Task runner and knowledge sync state files
 TASK_RUN_STATE_PATH = BASE_DIR / "tasks" / "last_run.json"
 KNOWLEDGE_SYNC_STATE_PATH = BASE_DIR / "tasks" / "knowledge_sync_state.json"
+
+# Healthcare (separate DB, never co-located with memory.sqlite3)
+_HEALTHCARE_SQLITE_PATH_RAW = _optional_path(
+    "HEALTHCARE_SQLITE_PATH", "healthcare", "sqlite_path"
+)
+_HEALTHCARE_EXPORT_DIR_RAW = _optional_path(
+    "HEALTHCARE_EXPORT_DIR", "healthcare", "export_dir"
+)
+if IS_TEST_ENV:
+    HEALTHCARE_SQLITE_PATH = TEST_WORKSPACE / "healthcare.sqlite3"
+    HEALTHCARE_EXPORT_DIR = TEST_WORKSPACE / "healthcare_export"
+else:
+    if _HEALTHCARE_SQLITE_PATH_RAW is not None:
+        HEALTHCARE_SQLITE_PATH = _HEALTHCARE_SQLITE_PATH_RAW
+    else:
+        HEALTHCARE_SQLITE_PATH = Path(
+            "~/.config/obsidian-ai-hub/healthcare.sqlite3"
+        ).expanduser()
+    if _HEALTHCARE_EXPORT_DIR_RAW is not None:
+        HEALTHCARE_EXPORT_DIR = _HEALTHCARE_EXPORT_DIR_RAW
+    else:
+        HEALTHCARE_EXPORT_DIR = Path(
+            "~/.config/obsidian-ai-hub/healthcare/apple_health_export"
+        ).expanduser()
 
 if IS_TEST_ENV:
     LOCAL_MODEL_DIR = TEST_WORKSPACE / "local-models"

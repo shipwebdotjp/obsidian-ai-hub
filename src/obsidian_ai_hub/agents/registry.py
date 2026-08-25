@@ -264,6 +264,67 @@ class MemoryProposeInput(BaseModel):
     )
 
 
+class PeopleSearchInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    query: str = Field(
+        description="検索クエリ。人物名または別名の一部（例: '山田', 'ヤマダ'）。正規化後に部分一致で検索する。",
+    )
+    limit: int = Field(
+        default=10,
+        ge=1,
+        le=20,
+        description="最大返却件数 (1-20)。省略時は10。",
+    )
+
+
+class PersonGetInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    person_id: str = Field(
+        description="人物ID（例: 'peo_xxx'）。people_search の結果の person_id を指定する。",
+    )
+
+
+class ProjectSearchInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    query: str = Field(
+        default="",
+        description="検索クエリ。プロジェクト名の一部（例: 'AI Hub'）。空文字で全件取得。部分一致で検索する。",
+    )
+    domain: Optional[Literal["work", "personal"]] = Field(
+        default=None,
+        description="絞り込み: work|personal のいずれか。省略時は全ドメイン。",
+    )
+    status: Optional[Literal[
+        "inquiry",
+        "active",
+        "paused",
+        "completed",
+        "cancelled",
+    ]] = Field(
+        default=None,
+        description="絞り込み: inquiry|active|paused|completed|cancelled のいずれか。省略時は全ステータス。",
+    )
+    limit: int = Field(
+        default=10,
+        ge=1,
+        le=20,
+        strict=True,
+        description="最大返却件数 (1-20)。省略時は10。",
+    )
+
+
+class ProjectGetInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    project_id: int = Field(
+        strict=True,
+        description="プロジェクトID（例: 1）。project_search の結果の project_id を指定する。",
+    )
+
+
 # --- Memory Tool Factories (require trusted context) ---
 
 
@@ -346,6 +407,43 @@ def _make_memory_propose_tool(
 
     memory_propose.name = "memory_propose"  # type: ignore[attr-defined]
     return memory_propose
+
+
+# --- People vault-note helper ---
+
+
+def _resolve_person_vault_note(vault_id: str) -> Optional[Dict[str, Any]]:
+    """Resolve vault_id (frontmatter id) to a Vault person note's content.
+
+    Uses a lightweight single-note lookup (stops at first matching ``id``) to
+    avoid re-parsing every person note on each ``people_get`` invocation.
+    Returns ``{\"relative_path\": str, \"content\": str}`` or ``None`` if not
+    found. Gracefully skips on any I/O or loader failure.
+    """
+    try:
+        from obsidian_ai_hub.utils import config as app_config
+        from obsidian_ai_hub.utils.people_loader import find_person_note_path_by_vault_id
+
+        target_path = find_person_note_path_by_vault_id(vault_id)
+        if target_path is None or not target_path.is_file():
+            return None
+        # Verify containment before reading to avoid disclosing arbitrary files via symlink.
+        try:
+            resolved = target_path.resolve()
+            vault_root = Path(app_config.VAULT_PATH).resolve()
+            rel = str(resolved.relative_to(vault_root))
+        except ValueError:
+            logger.warning("people_get: vault note %s is outside VAULT_PATH; skipping", target_path)
+            return None
+        try:
+            content = resolved.read_text(encoding="utf-8")
+        except OSError as exc:
+            logger.warning("people_get: failed to read vault note %s: %s", resolved, exc)
+            return None
+        return {"relative_path": rel, "content": content}
+    except Exception as exc:
+        logger.warning("people_get: vault note resolution failed for vault_id=%s: %s", vault_id, exc)
+        return None
 
 
 # --- Tool Implementations ---
@@ -508,6 +606,100 @@ def reminder_create_proposal(
         return json.dumps({"error": str(exc)}, ensure_ascii=False)
 
 
+@tool(args_schema=PeopleSearchInput)
+def people_search(query: str, limit: int = 10) -> str:
+    """確定済み人物（people + person_aliases）を名前・別名の部分一致で検索します。未解決候補は除外。"""
+    try:
+        from obsidian_ai_hub.web.services.people import search_people
+
+        res = search_people(query=query, limit=limit)
+        return json.dumps(res, ensure_ascii=False)
+    except EXPECTED_TOOL_EXCEPTIONS as exc:
+        logger.warning("people_search failed: %s", exc)
+        return json.dumps({"error": str(exc)}, ensure_ascii=False)
+    except Exception as exc:
+        logger.exception("people_search failed")
+        return json.dumps({"error": _sanitize_unexpected_error(exc)}, ensure_ascii=False)
+
+
+@tool(args_schema=PersonGetInput)
+def people_get(person_id: str) -> str:
+    """人物IDから詳細（別名、関連サマリ、件数）を取得します。vault_idがある場合はVault人物ノートの本文も付与します。"""
+    try:
+        from obsidian_ai_hub.web.services.people import get_person_detail
+
+        detail = get_person_detail(person_id)
+        if detail is None:
+            return json.dumps({"error": "人物が見つかりません"}, ensure_ascii=False)
+        vault_id = detail.get("vault_id")
+        if vault_id:
+            vault_note = _resolve_person_vault_note(str(vault_id))
+            if vault_note is not None:
+                detail["vault_note"] = vault_note
+        return json.dumps(detail, ensure_ascii=False)
+    except EXPECTED_TOOL_EXCEPTIONS as exc:
+        logger.warning("people_get failed: %s", exc)
+        return json.dumps({"error": str(exc)}, ensure_ascii=False)
+    except Exception as exc:
+        logger.exception("people_get failed")
+        return json.dumps({"error": _sanitize_unexpected_error(exc)}, ensure_ascii=False)
+
+
+@tool(args_schema=ProjectSearchInput)
+def project_search(
+    query: str = "",
+    domain: Optional[Literal["work", "personal"]] = None,
+    status: Optional[Literal[
+        "inquiry",
+        "active",
+        "paused",
+        "completed",
+        "cancelled",
+    ]] = None,
+    limit: int = 10,
+) -> str:
+    """確定済みプロジェクトを名前の部分一致で検索します。未解決候補は含みません。空クエリでは全件を対象に domain/status で絞り込みます。project_get と組み合わせて詳細を取得できます。"""
+    try:
+        from obsidian_ai_hub.web.services.projects import search_projects
+
+        res = search_projects(query=query, domain=domain, status=status, limit=limit)
+        return json.dumps(res, ensure_ascii=False)
+    except EXPECTED_TOOL_EXCEPTIONS as exc:
+        logger.warning("project_search failed: %s", exc)
+        return json.dumps({"error": str(exc)}, ensure_ascii=False)
+    except Exception as exc:
+        logger.exception("project_search failed")
+        return json.dumps({"error": _sanitize_unexpected_error(exc)}, ensure_ascii=False)
+
+
+@tool(args_schema=ProjectGetInput)
+def project_get(project_id: int) -> str:
+    """プロジェクトIDから詳細（サマリ紐付け、件数、project_path 等）を取得します。サマリは最新20件に制限して返します。"""
+    try:
+        from obsidian_ai_hub.web.services.projects import get_project_detail
+
+        detail = get_project_detail(project_id)
+        if detail is None:
+            return json.dumps({"error": "プロジェクトが見つかりません"}, ensure_ascii=False)
+        # Truncate summaries to latest 20 (get_project_detail already sorted newest first)
+        summaries = detail.get("summaries") or []
+        detail["summaries"] = summaries
+        total = detail.get("summary_count", len(summaries))
+        if len(summaries) > 20:
+            detail["summaries"] = summaries[:20]
+            detail["summaries_truncated"] = True
+        else:
+            detail["summaries_truncated"] = False
+        detail["summary_count"] = total
+        return json.dumps(detail, ensure_ascii=False)
+    except EXPECTED_TOOL_EXCEPTIONS as exc:
+        logger.warning("project_get failed: %s", exc)
+        return json.dumps({"error": str(exc)}, ensure_ascii=False)
+    except Exception as exc:
+        logger.exception("project_get failed")
+        return json.dumps({"error": _sanitize_unexpected_error(exc)}, ensure_ascii=False)
+
+
 # --- Tool Registry Definition ---
 
 _BUILTIN_TOOL_DEFINITIONS: Dict[str, Dict[str, Any]] = {
@@ -572,6 +764,30 @@ _BUILTIN_TOOL_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "description": "ユーザーが嗜好・事実・方針を明示した内容を長期記憶候補（candidate）として保存します。推測で作成せず、明確な根拠がある場合のみ呼び出してください。保存後はメモリ画面で人間が承認します。",
         "get_tool": lambda: _make_memory_propose_tool(None),
         "get_tool_with_context": lambda ctx: _make_memory_propose_tool(ctx),
+    },
+    "people_search": {
+        "tool_id": "people_search",
+        "name": "人物検索",
+        "description": "確定済み人物を名前・別名の部分一致で検索します（未解決候補は除外）。people_get と組み合わせて詳細を取得できます。",
+        "get_tool": lambda: people_search,
+    },
+    "people_get": {
+        "tool_id": "people_get",
+        "name": "人物詳細取得",
+        "description": "人物IDから詳細（別名、関連サマリ、件数）を取得します。vault_idがある場合はVault人物ノートの本文（vault_note）も付与します。",
+        "get_tool": lambda: people_get,
+    },
+    "project_search": {
+        "tool_id": "project_search",
+        "name": "プロジェクト検索",
+        "description": "確定済みプロジェクトを名前の部分一致で検索します（未解決候補は除外）。空クエリでは全件を対象に domain/status で絞り込みます。project_get と組み合わせて詳細を取得できます。",
+        "get_tool": lambda: project_search,
+    },
+    "project_get": {
+        "tool_id": "project_get",
+        "name": "プロジェクト詳細取得",
+        "description": "プロジェクトIDから詳細（サマリ紐付け、件数、project_path 等）を取得します。サマリは最新20件に制限して返します。",
+        "get_tool": lambda: project_get,
     },
 }
 

@@ -262,7 +262,7 @@ async def generate_agent_stream(
     run: Dict[str, Any],
     history_messages: Sequence[Dict[str, Any]],
     user_content: str,
-    max_iterations: int = 3,
+    max_iterations: int = 10,
     max_history_messages: int = 20,
     now: Optional[datetime] = None,
 ) -> AsyncGenerator[str, None]:

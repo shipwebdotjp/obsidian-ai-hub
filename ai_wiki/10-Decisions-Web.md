@@ -333,3 +333,132 @@ v1 では `generate_agent_stream()` がツールループ中一切イベント�
 
 - Python の runtime/API テストで本文差分の順序・DB/`done` 整合、実行ログの usage/失敗、分割・交互ツールチャンク、ID 採番、不正 JSON の非実行を確認する。
 - Vitest で CRLF/UTF-8 分割の SSE 解析、rAF 集約、準備中から完了までのツール表示、完了後の stale frame 抑止を確認する。
+
+## ヘルスケア可視化ダッシュボード v1（小倍数・オンザフライ集計）
+
+| 項目 | 内容 |
+|------|------|
+| 決定日 | 2026-08-24 |
+| カテゴリ | ヘルスケア・Web API・フロントエンド |
+| 決定内容 | `/healthcare` に Quantity 型の9指標（歩数・心拍数・安静時心拍・HRV・アクティブ/基礎エネルギー・距離・上階数・エクササイズ時間）の日次推移を small-multiples（1指標1カード＋ラインチャート）で概観できるダッシュボードを追加。集計は分離DB `healthcare.sqlite3` へのオンザフライ SQL、チャートはヘルスケア専用の手書き SVG。 |
+
+### 背景
+
+`docs/healthcare-import/plan.md` で `health_daily_metrics` VIEW は将来拡張扱いだった。v1 ではまず「一定期間ごとの各数値推移をグラフで概観」したいという要求を満たすため、スキーマ変更なしで `health_records` を直接 GROUP BY する方式を採用する。
+
+### 仕様
+
+1. **データソースと集計方式（オンザフライ）**
+   - `healthcare/queries.py::get_daily_aggregates` が `health_records` を `substr(start_date,1,10)` で日次 GROUP BY し `AVG/MIN/MAX/SUM/COUNT` を返す。`idx_hr_type_start(type,start_date)` に対し `type = ? AND start_date >= ? AND start_date < ?` の範囲スキャンで活用する。
+   - `web/services/healthcare.py::get_healthcare_overview` は curated 9指標をループして日次集計を取得し、Python 側で granularity（≤60d→day / ≤366d→week / それ以上→month）へロールアップする。week は ISO 週（`Wxx`）、month は `YYYY/MM`。バケットは連続生成しデータ無しは `value:null` で欠損を明示。`latest_value` は最新非null バケット、`delta_pct` は直前非null との比率。
+   - `health_daily_metrics` VIEW / refresh job は性能要件が出るまで導入しない。API 契約（`{start_date,end_date,granularity,metrics[].buckets[]}`）は VIEW 導入後も互換を保てる。
+
+2. **API**
+   - `GET /api/v1/healthcare/overview?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD`。`require_bearer_token` 必須、`ValueError→400`、`401` は deps 一元。日付は `YYYY-MM-DD` 正規表現と `datetime.strptime` で厳密検証、`duration>3660→400`。`web/schemas.py` に `HealthcareOverviewResponse / HealthcareMetricSeries / HealthcareBucket` を追加。
+
+3. **Curated 指標（Phase 1 は Quantity のみ）**
+   - `steps (sum, count)` / `heart_rate (avg, count/min)` / `resting_heart_rate (avg)` / `hrv (avg, ms)` / `active_energy (sum, kcal)` / `basal_energy (sum, kcal)` / `distance (sum, km)` / `flights (sum, count)` / `exercise_time (sum, min)`。Category 型（`SleepAnalysis` / `AppleStandHour`）は期間計算が必要なため Phase 2 に繰越。
+
+4. **フロントエンド**
+   - `frontend/src/features/healthcare/` — `HealthcarePage.tsx`（コンテナ。preset 7/30/90/年/期間指定、`requestRef` 競合ガード）、`MetricCard.tsx`（最新値・前回比・件数表示。`formatMetricValue` で指標別桁数）、`charts.tsx`（`HealthcareTrendChart`。手書き SVG、Yドメインは `min/max` から pad→0クランプ、null での polyline 分割、Xラベル間引き、sr-only table で a11y）。`summary-dashboard/charts.tsx` は流用せず専用実装とし回帰を回避。
+   - ルーティング: `constants/routes.ts::HEALTHCARE`、`App.tsx` に `<Route>`、`Sidebar.tsx` に `ヘルスケア` NavLink（`summary-dashboard` の直後）。
+   - APIクライアント: `api/client.ts::getHealthcareOverview`、`api/types.ts` に `HealthcareOverviewResponse` 等。
+   - 空データ時は `uv run python -m obsidian_ai_hub.import_apple_health --export-dir <dir>` への誘導をカードグリッド下に表示。
+
+5. **レイアウト**
+   - ページ全体 `bg-slate-50`、ヘッダ `bg-white border-b`、フィルタバー `rounded-xl border bg-white shadow-sm`（`StatsTab.tsx:41` と同スタイル）。カードは `grid-cols-1 md:grid-cols-2 xl:grid-cols-3` の small-multiples。モバイルは1列、xlで3列。
+
+### トレードオフ
+
+- 110万 Record でも `(type,start_date)` インデックスで単一 type の範囲スキャンは効率的。30日×1指標=数千行の GROUP BY は sub-second、1年でも week に緩和される。事前集計 VIEW を持たないため書き込み不要だが、範囲が極めて広い場合や多指標同時取得は N (=9) 回の SELECT が発生。将来ボトルネックになれば `IN (types)` の単一クエリ化 or `health_daily_metrics` VIEW へ切替可能。
+- 別実装のチャートは軽微な重複を許容するかわりに `summary-dashboard` への回帰リスクを排除。DRY より feature 隔離を優先（`AGENTS.md` の薄いラッパー方針と整合）。
+- Category 型を v1 で除外したため睡眠・スタンド時間は表示されない。Phase 2 で `start_date/end_date` の期間差分集計を追加予定。
+
+### 検証
+
+- `uv run pytest tests/healthcare/test_queries.py tests/test_healthcare_web.py`（日次集計・week/month ロールアップ・平均/合計分岐・空DB・認証/バリデーション）。
+- `npm --prefix frontend test -- src/features/healthcare/HealthcarePage.test.tsx`（描画・loading/error・preset遷移・空状態・最新値/delta・custom期間適用）。
+- `npm --prefix frontend test` 138 passed、`uv run pytest tests/ 800 passed`、 `npx --prefix frontend tsc --project frontend/tsconfig.json --noEmit` クリーン。
+
+## ヘルスケアダッシュボード v2（睡眠・スタンド Category 対応）
+
+| 項目 | 内容 |
+|------|------|
+| 決定日 | 2026-08-24 |
+| カテゴリ | ヘルスケア・Web API・フロントエンド |
+| 決定内容 | Category 型の睡眠・スタンドをダッシュボードに追加。睡眠は `HKCategoryTypeIdentifierSleepAnalysis` の Asleep 系 `value_text` の `start/end` 期間を時間換算して日次合計、スタンドは `HKCategoryTypeIdentifierAppleStandHour` の `Stood` 件数を時間換算して日次合計する。 |
+
+### 背景
+
+v1 は Quantity 型（`value_numeric`）のみで、もっとも要望の高い睡眠時間とスタンド時間が未対応だった。Category 型は `value_numeric IS NULL` で `value_text/start/end` からの導出が必要なため別途実装が必要。
+
+### 仕様
+
+1. **バックエンド `healthcare/queries.py`**
+   - `_parse_health_datetime(s)` — `"%Y-%m-%d %H:%M:%S %z"` を主とし `fromisoformat`（Python 3.11+ は `+0900` も許容）への単一フォールバックで `2026-08-20 23:00:00 +0900` / `T` 区切りを吸収。失敗は `None` で行スキップ（OCR で冗長な `:` 挿入分岐を削除）。
+   - `get_daily_category_durations(conn, type_, start_date, end_date, allowed_values)` — `type = ? AND start_date >= ? AND start_date < ?` で取得後、カーソルを遅延イテレーション（`for row in cur:`）し Python で `(end-start).total_seconds()/3600` を `substr(start_date,1,10)` の開始日バケットへ加算。片方のみ tz-aware な場合は同一 offset を付与して `TypeError` を回避（`except TypeError` に限定）。`allowed_values` で `InBed/Awake` を除外し Asleep 系のみを合計。`0 < delta <=48h` のみ採用。
+   - `get_daily_stand_counts(conn, start_date, end_date)` — `value_text='HKCategoryValueAppleStandHourStood'` を `COUNT(*) GROUP BY substr(start_date,1,10)` で集計。1レコード=1時間として扱う。
+   - いずれも sparse（データ無し日は欠落）で返す。
+
+2. **バックエンド `web/services/healthcare.py`**
+   - `CURATED_METRICS` に `sleep (h, sum, category=sleep_duration)` と `stand_hours (h, sum, category=stand_count)` を追加し計11指標。`_SLEEP_ALLOWED_VALUES` は詳細 stage のみ `AsleepCore/Deep/REM/Unspec` の4値とし、umbrella の `Asleep` は詳細と重複期間で二重計上するリスクがあるため除外（OCR 指摘反映）。
+   - Quantity 9指標は従来どおり `get_daily_aggregates_multi` で1クエリ集約。Category 2指標は `category` フラグで分岐し `get_daily_category_durations` / `get_daily_stand_counts` を呼び、日次 dict を `{day: {"sum": hrs, "count":1,…}}` に変換して既存のバケットロールアップ（`_bucket_key_for_date`）へ流用（`stand_hours` は `count=1` per day に統一し `sleep` と一貫）。週・月では日次合計の合算となり、週バケットは `52.5h`（7日×7.5h）のように正しく集計される。
+
+3. **フロントエンド**
+   - `MetricCard.tsx` の `PALETTE` に `sleep: #0ea5e9 / stand_hours: #84cc16` を追加。`formatMetricValue` で `sleep/stand_hours` は `toFixed(1)`、単位 `h`。
+   - `HealthcarePage.tsx` の説明文を「Quantity 型と Category 型（睡眠・スタンド）」に更新。
+   - チャートは既存 `HealthcareTrendChart` を流用。睡眠は 0–9h、スタンドは 0–12h の Y ドメインで描画される。
+
+### トレードオフ
+
+- 睡眠の帰属は `start_date` の日付（夜の開始日）に固定。23:00–07:00 の睡眠は開始日へ 8h として計上し、日跨ぎの案分は行わない。日次で概観する用途では十分で、案分の複雑さを回避。
+- `get_daily_category_durations` は SQL 集計ではなく Python で期間計算するため、1年で睡眠~2k行・スタンド~3k行程度だがいずれも軽量。将来行数が増えてもインデックス `idx_hr_type_start` の範囲スキャンで賄える。
+- 新たに2クエリ（睡眠・スタンド）がリクエスト毎に追加されるが、Category は件数が少なく N+1 の影響は軽微。将来的に `health_daily_metrics` VIEW へ移行する際は API 契約を維持したまま置換可能。
+
+### 検証
+
+- `uv run pytest tests/healthcare/test_queries.py::test_category_sleep_and_stand` — InBed を除外して AsleepCore 7h50m=7.83h が 2026-08-20 に集計されること、stand 1h、週次 52.5h の合算を確認。
+- `tests/test_healthcare_web.py` の `len(metrics)==11` と `sleep/stand_hours` キー存在、`HealthcarePage` の表示は既存 Vitest で回帰確認。
+- `uv run pytest tests/ 800 passed` 維持、`npx --prefix frontend tsc --noEmit` クリーン。
+
+## ヘルスケアダッシュボード v3（相関散布図・専用エンドポイント）
+
+| 項目 | 内容 |
+|------|------|
+| 決定日 | 2026-08-24 |
+| カテゴリ | ヘルスケア・Web API・フロントエンド |
+| 決定内容 | `/healthcare` に「推移 / 相関」タブを追加。相関タブで2指標の日次ペアを散布図（X/Y 異単位対応）+ Pearson 相関係数 + 回帰直線で可視化する。相関は専用エンドポイント `GET /healthcare/correlation` で強制日次で取得しサーバー側で統計計算する。 |
+
+### 背景
+
+v2 までの推移グリッドでは各指標の時系列は見えるが指標間の関係は読み取れない。「歩数が多い日は睡眠が短いか」等の仮説検証のため、2指標の日次値をペアにした散布図が欲しい。既存 overview の粒度（>60日で週別）は散布のポイント数を減らすため相関用には日次を強制したい。
+
+### 仕様
+
+1. **バックエンド `web/schemas.py`**
+   - `HealthcareCorrelationPoint {date, x, y}` / `HealthcareCorrelationResponse {metric_x, metric_y, x_label/y_label, x_unit/y_unit, x_type/y_type, start_date, end_date, granularity="day", n, pearson_r, regression_slope, regression_intercept, points[]}` を追加。`pearson_r/slope/intercept` は `n<2` や分散0で `null`。
+
+2. **バックエンド `web/services/healthcare.py`**
+   - `_daily_values_for_metric(conn, mdef, start, end)` — curated metric の日次スカラーを返すヘルパ。Quantity は `get_daily_aggregates` の `sum`（aggregation sum）/`avg`（aggregation avg）、Category は `get_daily_category_durations`（睡眠は Asleep 4値の時間合計）/`get_daily_stand_counts`（スタンドは Stood 件数）をそのまま日次値とする。
+   - `get_healthcare_correlation(metric_x_key, metric_y_key, start, end)` — `CURATED_METRICS` から key→def を解決（未知は `ValueError→400`）、`_validate_date_str` と `duration>3660` を共有、日次 dict を両指標で取得し `set(x) & set(y)` の共通日でソートして `points` 化。`n>=2` のみ Pearson `r = Σ((xi-x̄)(yi-ȳ))/sqrt(Σ(xi-x̄)²Σ(yi-ȳ)²)` と回帰 `slope = Σ((xi-x̄)(yi-ȳ))/Σ(xi-x̄)², intercept = ȳ - slope·x̄` を計算。分母0は `null` にフォールバックし `r` は `[-1,1]` にクランプ。
+
+3. **バックエンド `web/routes/healthcare.py`**
+   - `GET /healthcare/correlation?metric_x=&metric_y=&start_date=&end_date=` 追加。Bearer 認証、`ValueError→400`。既存 overview は変更なし。
+
+4. **フロントエンド**
+   - `api/types.ts` / `api/client.ts` に `HealthcareCorrelationResponse` と `getHealthcareCorrelation` を追加。
+   - `features/healthcare/HealthcareScatterChart.tsx`（新規） — 手書き SVG。X/Y 各スケールに `xPad/yPad`（range 12%）と0クランプ、グリッド3本、点 `<circle>`、回帰直線 `<line strokeDasharray="6 4">`、軸タイトル、sr-only `<table>`。ヘッダに `r` と強弱ラベル（|r|>=0.7 強/0.4 中/0.2 弱）、`n`、回帰式を表示。空は「両方が揃った日がありません」。
+   - `HealthcarePage.tsx` に `activeTab: "trend"|"correlation"` と `corrMetricX/corrMetricY/corrData/corrLoading/corrError` を追加。タブヘッダ、相関タブに X/Y `<select>`（`data.metrics` から生成、初期値 X=steps/Y=sleep）、散布図セクションを追加。期間 preset/カスタムは `load` と `loadCorrelation` の両方を発火。`requestRef/corrRequestRef` で競合ガード。
+
+### トレードオフ
+
+- 専用エンドポイントは overview と分離され相関計算をサーバーに集約できる。前端末は描画のみでよく、長期間でも常に日次ポイントを最大化（365日×1点/日）。代わりに `n=0/1` では統計量が `null` になることを UI で明示する必要がある。
+- 既存 overview を流用する案はバックエンド不要だが、90日以上で週別になりポイントが激減し相関の診断力が落ちる。`force_daily` param 案は11指標全取得の無駄が大きい。専用エンドポイントが最もクリーン。
+- UI は2指標選択の単一散布に絞り、全ペア行列は Phase 3b に回す。11×11 行列は一覧性は高いが実装量が増え、まず単一散布で相関の読み解き方を確立する。
+
+### 検証
+
+- `uv run pytest tests/test_healthcare_web.py::test_healthcare_correlation_success` — steps 3000+500*i と sleep 6+0.5*i の5日間で `n=5, r≈1.0, slope≈0.001` を検証。空・単一点・未知 metric の 400 も検証。
+- `npm --prefix frontend test -- src/features/healthcare/HealthcareScatterChart.test.tsx` — 点描画・回帰線・Pearson 表示・空状態・負の相関。
+- `HealthcarePage.test.tsx` に相関タブ切替と `getHealthcareCorrelation` 呼び出しを検証。
+- `uv run pytest tests/ 807 passed`、`npm --prefix frontend test` 143 passed、`tsc --noEmit` クリーン。

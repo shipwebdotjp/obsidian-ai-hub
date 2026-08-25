@@ -77,6 +77,9 @@ export default function Sidebar({ open, onClose, id }: SidebarProps) {
         <NavLink to={ROUTES.SUMMARY_DASHBOARD} className={linkClass} onClick={onClose}>
           サマリダッシュボード
         </NavLink>
+        <NavLink to={ROUTES.HEALTHCARE} className={linkClass} onClick={onClose}>
+          ヘルスケア
+        </NavLink>
         <NavLink to={ROUTES.PEOPLE} className={linkClass} onClick={onClose}>
           人物管理
         </NavLink>

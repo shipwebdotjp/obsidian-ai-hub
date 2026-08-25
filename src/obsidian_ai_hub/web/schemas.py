@@ -546,6 +546,66 @@ class DashboardStatsResponse(BaseModel):
     hourly_category_buckets: list[HourlyCategoryBucket] = []
 
 
+# --- Healthcare Dashboard schemas ---
+
+
+class HealthcareBucket(BaseModel):
+    key: str
+    display_label: str
+    start_date: str
+    end_date: str
+    value: Optional[float] = None
+    avg: Optional[float] = None
+    min: Optional[float] = None
+    max: Optional[float] = None
+    sum: Optional[float] = None
+    count: int = 0
+
+
+class HealthcareMetricSeries(BaseModel):
+    key: str
+    label: str
+    type: str
+    unit: str
+    aggregation: Literal["sum", "avg"]
+    latest_value: Optional[float] = None
+    previous_value: Optional[float] = None
+    delta_pct: Optional[float] = None
+    buckets: list[HealthcareBucket] = Field(default_factory=list)
+
+
+class HealthcareOverviewResponse(BaseModel):
+    start_date: str
+    end_date: str
+    granularity: Literal["day", "week", "month"]
+    metrics: list[HealthcareMetricSeries] = Field(default_factory=list)
+
+
+class HealthcareCorrelationPoint(BaseModel):
+    date: str
+    x: float
+    y: float
+
+
+class HealthcareCorrelationResponse(BaseModel):
+    metric_x: str
+    metric_y: str
+    x_label: str
+    y_label: str
+    x_unit: str
+    y_unit: str
+    x_type: str
+    y_type: str
+    start_date: str
+    end_date: str
+    granularity: Literal["day"] = "day"
+    n: int
+    pearson_r: Optional[float] = None
+    regression_slope: Optional[float] = None
+    regression_intercept: Optional[float] = None
+    points: list[HealthcareCorrelationPoint] = Field(default_factory=list)
+
+
 # --- People Management schemas ---
 
 

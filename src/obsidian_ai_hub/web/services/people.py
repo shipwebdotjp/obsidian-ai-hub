@@ -1,6 +1,9 @@
 from typing import Any, Optional
 
 from obsidian_ai_hub.database import get_db_connection
+from obsidian_ai_hub.summary.store import normalize_entity_name
+
+LIKE_ESCAPE_CHAR = "\\"
 
 
 # --- Custom Exception classes for Conflict checks ---
@@ -34,6 +37,73 @@ class VaultLinkedPersonError(ValueError):
 
 
 # --- People Management services ---
+
+
+def search_people(query: str, limit: int = 10) -> dict[str, Any]:
+    """Search confirmed people (people + person_aliases) by name substring.
+
+    Matches against normalized display_name and any normalized alias. Confirmed
+    people only; unresolved candidates (person_candidates) are excluded.
+
+    Returns ``{"people": [...]}`` where each item has
+    ``person_id, display_name, normalized_name, vault_id, aliases, summary_count``.
+    Sorted by exact-match priority, then summary_count desc, display_name asc.
+    """
+    if not isinstance(query, str) or not query.strip():
+        raise ValueError("query must be a non-empty string")
+    if limit < 1 or limit > 20:
+        raise ValueError("limit must be between 1 and 20")
+
+    norm_query = normalize_entity_name(query)
+    if not norm_query:
+        raise ValueError("query must be a non-empty string")
+
+    escaped = (
+        norm_query.replace(LIKE_ESCAPE_CHAR, LIKE_ESCAPE_CHAR * 2)
+        .replace("%", LIKE_ESCAPE_CHAR + "%")
+        .replace("_", LIKE_ESCAPE_CHAR + "_")
+    )
+    like_pat = f"%{escaped}%"
+
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            f"""
+            SELECT p.person_id, p.display_name, p.normalized_name, p.vault_id,
+                   COUNT(DISTINCT sp.summary_id) AS summary_count,
+                   MAX(CASE WHEN p.normalized_name = ? OR a.normalized_name = ? THEN 1 ELSE 0 END) AS exact_priority
+            FROM people p
+            LEFT JOIN summary_people sp ON p.person_id = sp.person_id
+            LEFT JOIN person_aliases a ON a.person_id = p.person_id
+            WHERE p.normalized_name LIKE ? ESCAPE '{LIKE_ESCAPE_CHAR}' OR a.normalized_name LIKE ? ESCAPE '{LIKE_ESCAPE_CHAR}'
+            GROUP BY p.person_id, p.display_name, p.normalized_name, p.vault_id
+            ORDER BY exact_priority DESC, summary_count DESC, p.display_name ASC
+            LIMIT ?
+            """,
+            (norm_query, norm_query, like_pat, like_pat, limit),
+        )
+        matched = [dict(r) for r in cursor.fetchall()]
+        # Remove helper column and bulk-fetch aliases for the matched set
+        for p in matched:
+            p.pop("exact_priority", None)
+        if matched:
+            person_ids = [p["person_id"] for p in matched]
+            placeholders = ", ".join("?" for _ in person_ids)
+            cursor.execute(
+                f"SELECT person_id, normalized_name, display_name FROM person_aliases WHERE person_id IN ({placeholders})",
+                person_ids,
+            )
+            alias_map: dict[str, list[dict[str, Any]]] = {}
+            for row in cursor.fetchall():
+                alias_map.setdefault(row["person_id"], []).append(
+                    {"normalized_name": row["normalized_name"], "display_name": row["display_name"]}
+                )
+            for p in matched:
+                p["aliases"] = alias_map.get(p["person_id"], [])
+        return {"people": matched}
+    finally:
+        conn.close()
 
 
 def list_people() -> list[dict[str, Any]]:

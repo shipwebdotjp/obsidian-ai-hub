@@ -39,6 +39,11 @@ def _isolate_memory_db():
 
 
 @pytest.fixture(autouse=True)
+def _isolate_sqlite_dbs():
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _filesystem_sandbox():
     yield
 

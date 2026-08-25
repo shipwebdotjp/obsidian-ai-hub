@@ -320,6 +320,28 @@ def main():
         action="store_true",
         help="30日経過した実行ログ（command_runs / llm_call_logs）をクリーンアップ",
     )
+    parser.add_argument(
+        "--import-apple-health",
+        action="store_true",
+        help="Apple Health exportをhealthcare.sqlite3にインポート（分離DB・全種raw・ECGファイル参照）",
+    )
+    parser.add_argument(
+        "--healthcare-export-dir",
+        type=str,
+        default=None,
+        help="--import-apple-healthで使用するexportディレクトリ（既定: config healthcare.export_dir）",
+    )
+    parser.add_argument(
+        "--healthcare-batch-size",
+        type=int,
+        default=None,
+        help="--import-apple-healthのコミットバッチ件数（既定: 5000）",
+    )
+    parser.add_argument(
+        "--healthcare-dry-run",
+        action="store_true",
+        help="--import-apple-healthでDB書き込みせず件数カウントのみ",
+    )
     args = parser.parse_args()
     ran = False
 
@@ -397,6 +419,10 @@ def main():
         parser.error("--memory-compile requires --for PURPOSE")
     if args.for_purpose and not args.memory_compile:
         parser.error("--for requires --memory-compile")
+    if (args.healthcare_export_dir or args.healthcare_batch_size is not None or args.healthcare_dry_run) and not args.import_apple_health:
+        parser.error("--healthcare-* requires --import-apple-health")
+    if args.healthcare_batch_size is not None and args.healthcare_batch_size <= 0:
+        parser.error("--healthcare-batch-size must be a positive integer")
 
     research_kwargs = {}
     if args.context is not None:
@@ -626,6 +652,25 @@ def main():
             lambda: execution_logger.cleanup_old_logs_now(days=30),
             "cleanup_execution_logs",
             {},
+        )
+        ran = True
+    if getattr(args, "import_apple_health", False):
+        from pathlib import Path as _Path
+
+        from obsidian_ai_hub.healthcare.importer import import_export
+        from obsidian_ai_hub.utils import config as _hc_config
+
+        export_dir = _Path(args.healthcare_export_dir).expanduser() if args.healthcare_export_dir else _Path(_hc_config.HEALTHCARE_EXPORT_DIR)
+        batch_size = args.healthcare_batch_size if args.healthcare_batch_size is not None else 5000
+        dry_run = bool(args.healthcare_dry_run)
+
+        def _healthcare_main():
+            return import_export(export_dir, batch_size=batch_size, dry_run=dry_run)
+
+        run_and_log(
+            _healthcare_main,
+            "import_apple_health",
+            {"export_dir": str(export_dir), "batch_size": batch_size, "dry_run": dry_run},
         )
         ran = True
     if not ran:

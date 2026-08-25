@@ -27,8 +27,10 @@ app_config.ALLOW_EXTERNAL_IN_TEST = True
 
 _TESTING_ENV = "OBSIDIAN_AI_HUB_TESTING"
 _PRODUCTION_DB_PATH_ENV = "OBSIDIAN_AI_HUB_TEST_PRODUCTION_DB_PATH"
+_PRODUCTION_HEALTHCARE_DB_PATH_ENV = "OBSIDIAN_AI_HUB_TEST_PRODUCTION_HEALTHCARE_DB_PATH"
 _test_db_bootstrap_dir: tempfile.TemporaryDirectory[str] | None = None
 _original_memory_db_path: Path | None = None
+_original_healthcare_db_path: Path | None = None
 _original_env: dict[str, str | None] = {}
 
 # Shared bearer token used by tests to authenticate API requests. All web API
@@ -39,12 +41,15 @@ TEST_API_TOKEN = "test-api-token"
 
 def pytest_configure(config: pytest.Config) -> None:
     """Keep collection-time imports away from the configured production DB."""
-    global _test_db_bootstrap_dir, _original_memory_db_path, _original_env
+    global _test_db_bootstrap_dir, _original_memory_db_path
+    global _original_healthcare_db_path, _original_env
 
     _original_memory_db_path = Path(app_config.MEMORY_SQLITE_PATH)
+    _original_healthcare_db_path = Path(app_config.HEALTHCARE_SQLITE_PATH)
     _original_env = {
         _TESTING_ENV: os.environ.get(_TESTING_ENV),
         _PRODUCTION_DB_PATH_ENV: os.environ.get(_PRODUCTION_DB_PATH_ENV),
+        _PRODUCTION_HEALTHCARE_DB_PATH_ENV: os.environ.get(_PRODUCTION_HEALTHCARE_DB_PATH_ENV),
     }
     _test_db_bootstrap_dir = tempfile.TemporaryDirectory(
         prefix="obsidian-ai-hub-pytest-"
@@ -55,7 +60,12 @@ def pytest_configure(config: pytest.Config) -> None:
     os.environ[_PRODUCTION_DB_PATH_ENV] = str(
         _original_memory_db_path.expanduser().resolve()
     )
+    if _original_healthcare_db_path is not None:
+        os.environ[_PRODUCTION_HEALTHCARE_DB_PATH_ENV] = str(
+            _original_healthcare_db_path.expanduser().resolve()
+        )
     app_config.MEMORY_SQLITE_PATH = bootstrap_db
+    app_config.HEALTHCARE_SQLITE_PATH = Path(_test_db_bootstrap_dir.name) / "healthcare.sqlite3"
 
 
 def pytest_unconfigure(config: pytest.Config) -> None:
@@ -64,6 +74,8 @@ def pytest_unconfigure(config: pytest.Config) -> None:
 
     if _original_memory_db_path is not None:
         app_config.MEMORY_SQLITE_PATH = _original_memory_db_path
+    if _original_healthcare_db_path is not None:
+        app_config.HEALTHCARE_SQLITE_PATH = _original_healthcare_db_path
     for name, value in _original_env.items():
         if value is None:
             os.environ.pop(name, None)
@@ -101,6 +113,14 @@ def test_memory_db_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path
 
 
 @pytest.fixture
+def test_healthcare_db_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Healthcare DB isolated to the current test (mirrors test_memory_db_path)."""
+    db_file = tmp_path / "healthcare.sqlite3"
+    monkeypatch.setattr(app_config, "HEALTHCARE_SQLITE_PATH", db_file)
+    return db_file
+
+
+@pytest.fixture
 def api_token() -> str:
     """Bearer token used to authenticate API requests in tests."""
     return TEST_API_TOKEN
@@ -113,8 +133,9 @@ def api_auth_headers(api_token: str) -> dict[str, str]:
 
 
 @pytest.fixture(autouse=True)
-def _isolate_memory_db(test_memory_db_path: Path):
-    """Use a temporary SQLite file for every test that touches the memory DB."""
+def _isolate_sqlite_dbs(test_memory_db_path: Path, test_healthcare_db_path: Path):
+    """Use temporary SQLite files for every test that touches memory/healthcare DBs."""
+    # Keep the tests/e2e/conftest.py override name in sync when renaming.
     yield
 
 
@@ -195,6 +216,10 @@ def _filesystem_sandbox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(app_config, "VAULT_INDEX_CHROMA_PATH", tmp_path / "vault-index" / "chroma")
     monkeypatch.setattr(app_config, "LOCAL_MODEL_DIR", tmp_path / "local-models")
     monkeypatch.setattr(app_config, "PLUGINS_TOOLS_DIR", tmp_path / "plugins" / "tools")
+    # HEALTHCARE_SQLITE_PATH is isolated per test via test_healthcare_db_path
+    # fixture (autouse via _isolate_memory_db); only the export dir needs patching here.
+    if hasattr(app_config, "HEALTHCARE_EXPORT_DIR"):
+        monkeypatch.setattr(app_config, "HEALTHCARE_EXPORT_DIR", tmp_path / "healthcare_export")
     # Ensure plugin registry is reset for this test's isolated directory.
     # The directory does not exist yet (no plugins), so the reload is a no-op
     # and leaves only built-ins.  Tests that create plugins must call

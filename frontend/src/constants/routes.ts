@@ -4,6 +4,7 @@ export const ROUTES = {
   AGENTS: "/agents",
   VAULT_SEARCH: "/vault-search",
   SUMMARY_DASHBOARD: "/summary-dashboard",
+  HEALTHCARE: "/healthcare",
   PEOPLE: "/people",
   PROJECTS: "/projects",
   TASKS: "/tasks",
