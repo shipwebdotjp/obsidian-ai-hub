@@ -286,6 +286,45 @@ class PersonGetInput(BaseModel):
     )
 
 
+class ProjectSearchInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    query: str = Field(
+        default="",
+        description="検索クエリ。プロジェクト名の一部（例: 'AI Hub'）。空文字で全件取得。部分一致で検索する。",
+    )
+    domain: Optional[Literal["work", "personal"]] = Field(
+        default=None,
+        description="絞り込み: work|personal のいずれか。省略時は全ドメイン。",
+    )
+    status: Optional[Literal[
+        "inquiry",
+        "active",
+        "paused",
+        "completed",
+        "cancelled",
+    ]] = Field(
+        default=None,
+        description="絞り込み: inquiry|active|paused|completed|cancelled のいずれか。省略時は全ステータス。",
+    )
+    limit: int = Field(
+        default=10,
+        ge=1,
+        le=20,
+        strict=True,
+        description="最大返却件数 (1-20)。省略時は10。",
+    )
+
+
+class ProjectGetInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    project_id: int = Field(
+        strict=True,
+        description="プロジェクトID（例: 1）。project_search の結果の project_id を指定する。",
+    )
+
+
 # --- Memory Tool Factories (require trusted context) ---
 
 
@@ -606,6 +645,61 @@ def people_get(person_id: str) -> str:
         return json.dumps({"error": _sanitize_unexpected_error(exc)}, ensure_ascii=False)
 
 
+@tool(args_schema=ProjectSearchInput)
+def project_search(
+    query: str = "",
+    domain: Optional[Literal["work", "personal"]] = None,
+    status: Optional[Literal[
+        "inquiry",
+        "active",
+        "paused",
+        "completed",
+        "cancelled",
+    ]] = None,
+    limit: int = 10,
+) -> str:
+    """確定済みプロジェクトを名前の部分一致で検索します。未解決候補は含みません。空クエリでは全件を対象に domain/status で絞り込みます。project_get と組み合わせて詳細を取得できます。"""
+    try:
+        from obsidian_ai_hub.web.services.projects import search_projects
+
+        res = search_projects(query=query, domain=domain, status=status, limit=limit)
+        return json.dumps(res, ensure_ascii=False)
+    except EXPECTED_TOOL_EXCEPTIONS as exc:
+        logger.warning("project_search failed: %s", exc)
+        return json.dumps({"error": str(exc)}, ensure_ascii=False)
+    except Exception as exc:
+        logger.exception("project_search failed")
+        return json.dumps({"error": _sanitize_unexpected_error(exc)}, ensure_ascii=False)
+
+
+@tool(args_schema=ProjectGetInput)
+def project_get(project_id: int) -> str:
+    """プロジェクトIDから詳細（サマリ紐付け、件数、project_path 等）を取得します。サマリは最新20件に制限して返します。"""
+    try:
+        from obsidian_ai_hub.web.services.projects import get_project_detail
+
+        detail = get_project_detail(project_id)
+        if detail is None:
+            return json.dumps({"error": "プロジェクトが見つかりません"}, ensure_ascii=False)
+        # Truncate summaries to latest 20 (get_project_detail already sorted newest first)
+        summaries = detail.get("summaries") or []
+        detail["summaries"] = summaries
+        total = detail.get("summary_count", len(summaries))
+        if len(summaries) > 20:
+            detail["summaries"] = summaries[:20]
+            detail["summaries_truncated"] = True
+        else:
+            detail["summaries_truncated"] = False
+        detail["summary_count"] = total
+        return json.dumps(detail, ensure_ascii=False)
+    except EXPECTED_TOOL_EXCEPTIONS as exc:
+        logger.warning("project_get failed: %s", exc)
+        return json.dumps({"error": str(exc)}, ensure_ascii=False)
+    except Exception as exc:
+        logger.exception("project_get failed")
+        return json.dumps({"error": _sanitize_unexpected_error(exc)}, ensure_ascii=False)
+
+
 # --- Tool Registry Definition ---
 
 _BUILTIN_TOOL_DEFINITIONS: Dict[str, Dict[str, Any]] = {
@@ -682,6 +776,18 @@ _BUILTIN_TOOL_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "name": "人物詳細取得",
         "description": "人物IDから詳細（別名、関連サマリ、件数）を取得します。vault_idがある場合はVault人物ノートの本文（vault_note）も付与します。",
         "get_tool": lambda: people_get,
+    },
+    "project_search": {
+        "tool_id": "project_search",
+        "name": "プロジェクト検索",
+        "description": "確定済みプロジェクトを名前の部分一致で検索します（未解決候補は除外）。空クエリでは全件を対象に domain/status で絞り込みます。project_get と組み合わせて詳細を取得できます。",
+        "get_tool": lambda: project_search,
+    },
+    "project_get": {
+        "tool_id": "project_get",
+        "name": "プロジェクト詳細取得",
+        "description": "プロジェクトIDから詳細（サマリ紐付け、件数、project_path 等）を取得します。サマリは最新20件に制限して返します。",
+        "get_tool": lambda: project_get,
     },
 }
 

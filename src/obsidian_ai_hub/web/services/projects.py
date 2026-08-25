@@ -40,6 +40,108 @@ def deserialize_candidate(row: dict | sqlite3.Row) -> dict:
     return c
 
 
+LIKE_ESCAPE_CHAR = "\\"
+
+_ALLOWED_PROJECT_DOMAINS = {"work", "personal"}
+_ALLOWED_PROJECT_STATUSES = {"inquiry", "active", "paused", "completed", "cancelled"}
+
+
+def search_projects(
+    query: str = "",
+    domain: Optional[str] = None,
+    status: Optional[str] = None,
+    limit: int = 10,
+) -> dict[str, list[dict]]:
+    """Search confirmed projects by display_name substring.
+
+    Only confirmed projects (``projects`` table) are returned; candidates are
+    excluded.  ``query`` is optional — when empty, all projects matching
+    ``domain``/``status`` are returned.  Sorting: exact-match priority,
+    ``summary_count`` desc, ``display_name`` asc.
+
+    Returns ``{"projects": [...]}`` where each item is a deserialized project
+    row enriched with ``summary_count``.
+    """
+    if not isinstance(query, str):
+        raise ValueError("query must be a string")
+    if domain is not None and domain not in _ALLOWED_PROJECT_DOMAINS:
+        raise ValueError(f"domain must be one of {sorted(_ALLOWED_PROJECT_DOMAINS)}")
+    if status is not None and status not in _ALLOWED_PROJECT_STATUSES:
+        raise ValueError(f"status must be one of {sorted(_ALLOWED_PROJECT_STATUSES)}")
+    if type(limit) is not int or limit < 1 or limit > 20:
+        raise ValueError("limit must be between 1 and 20")
+
+    from obsidian_ai_hub.summary.store import normalize_entity_name
+
+    # Whitespace-only queries are intentional: they are treated as empty and
+    # return all projects (domain/status filters still apply), matching the
+    # tool's "empty query returns all" contract.
+    norm_query = normalize_entity_name(query) if query.strip() else ""
+    like_pat: Optional[str] = None
+    if norm_query:
+        escaped = (
+            norm_query.replace(LIKE_ESCAPE_CHAR, LIKE_ESCAPE_CHAR * 2)
+            .replace("%", LIKE_ESCAPE_CHAR + "%")
+            .replace("_", LIKE_ESCAPE_CHAR + "_")
+        )
+        like_pat = f"%{escaped}%"
+
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        if norm_query:
+            sql = f"""
+                SELECT p.*, COUNT(DISTINCT sp.summary_id) AS summary_count,
+                       MAX(CASE WHEN p.normalized_name = ? THEN 1 ELSE 0 END) AS exact_priority
+                FROM projects p
+                LEFT JOIN summary_projects sp ON p.project_id = sp.project_id
+                WHERE p.normalized_name LIKE ? ESCAPE '{LIKE_ESCAPE_CHAR}'
+            """
+            params: list = [norm_query, like_pat]
+            if domain:
+                sql += " AND p.domain = ?"
+                params.append(domain)
+            if status:
+                sql += " AND p.status = ?"
+                params.append(status)
+            sql += """
+                GROUP BY p.project_id
+                ORDER BY exact_priority DESC, summary_count DESC, p.display_name ASC
+                LIMIT ?
+            """
+            params.append(limit)
+            cursor.execute(sql, params)
+        else:
+            sql = """
+                SELECT p.*, COUNT(DISTINCT sp.summary_id) AS summary_count
+                FROM projects p
+                LEFT JOIN summary_projects sp ON p.project_id = sp.project_id
+                WHERE 1=1
+            """
+            params = []
+            if domain:
+                sql += " AND p.domain = ?"
+                params.append(domain)
+            if status:
+                sql += " AND p.status = ?"
+                params.append(status)
+            sql += """
+                GROUP BY p.project_id
+                ORDER BY summary_count DESC, p.display_name ASC
+                LIMIT ?
+            """
+            params.append(limit)
+            cursor.execute(sql, params)
+
+        rows = [deserialize_project(dict(r)) for r in cursor.fetchall()]
+        # Remove helper column if present
+        for r in rows:
+            r.pop("exact_priority", None)
+        return {"projects": rows}
+    finally:
+        conn.close()
+
+
 def list_projects(
     domain: Optional[str] = None,
     status: Optional[str] = None,

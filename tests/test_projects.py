@@ -403,3 +403,83 @@ def test_project_detail_includes_notes(test_memory_db_path):
     summary = detail["summaries"][0]
     assert summary["period_key"] == "2026-07-28"
     assert summary.get("note") == "Project activity memo"
+
+
+def test_search_projects(test_memory_db_path):
+    from obsidian_ai_hub.web.services.projects import search_projects
+
+    # Validation branches
+    with pytest.raises(ValueError, match="domain"):
+        search_projects(query="test", domain="invalid")
+    with pytest.raises(ValueError, match="status"):
+        search_projects(query="test", status="invalid")
+    with pytest.raises(ValueError, match="limit"):
+        search_projects(query="test", limit=0)
+    with pytest.raises(ValueError, match="limit"):
+        search_projects(query="test", limit=21)
+    with pytest.raises(ValueError, match="limit"):
+        search_projects(query="test", limit=True)  # bool is not int
+    with pytest.raises(ValueError, match="query"):
+        search_projects(query=123)  # type: ignore[arg-type]
+
+    # Setup projects
+    p_ai = service.create_project(schemas.ProjectCreateRequest(display_name="AI", domain="work", status="active"))
+    p_hub = service.create_project(schemas.ProjectCreateRequest(display_name="AI Hub", domain="work", status="active"))
+    p_blog = service.create_project(schemas.ProjectCreateRequest(display_name="Blog Project", domain="personal", status="active"))
+    p_percent = service.create_project(schemas.ProjectCreateRequest(display_name="Test%Project", domain="work", status="active"))
+
+    # Give p_hub higher summary_count
+    for i in range(3):
+        summary_store.upsert_summary(
+            {
+                "period_type": "day",
+                "period_key": f"2026-08-{10+i:02d}",
+                "summary": f"hub {i}",
+                "project_ids": [p_hub["project_id"]],
+            }
+        )
+
+    # Empty query returns all matching (domain/status filters still apply)
+    all_res = search_projects(query="", limit=20)
+    assert len(all_res["projects"]) >= 4
+    # whitespace-only treated as empty
+    ws_res = search_projects(query="   ", limit=20)
+    assert len(ws_res["projects"]) == len(all_res["projects"])
+
+    # Normalized substring match
+    res = search_projects(query="ai hub", limit=10)
+    assert any(p["display_name"] == "AI Hub" for p in res["projects"])
+    assert not any(p["display_name"] == "Blog Project" for p in res["projects"])
+
+    # Domain filter
+    res_domain = search_projects(query="", domain="personal", limit=20)
+    assert all(p["domain"] == "personal" for p in res_domain["projects"])
+
+    # Status filter
+    # Add a paused project to ensure filter works
+    service.create_project(schemas.ProjectCreateRequest(display_name="Paused Proj", domain="work", status="paused"))
+    res_paused = search_projects(query="", status="paused", limit=20)
+    assert all(p["status"] == "paused" for p in res_paused["projects"])
+
+    # Exact-match priority: "AI" should be first despite lower summary_count than "AI Hub"
+    res_exact = search_projects(query="AI", limit=10)
+    assert res_exact["projects"][0]["display_name"] == "AI"
+
+    # Summary_count desc ordering for non-exact query (empty query)
+    res_order = search_projects(query="", limit=20)
+    # AI Hub has 3 summaries, should be before others with 0
+    hub_idx = next(i for i, p in enumerate(res_order["projects"]) if p["display_name"] == "AI Hub")
+    blog_idx = next(i for i, p in enumerate(res_order["projects"]) if p["display_name"] == "Blog Project")
+    assert hub_idx < blog_idx
+
+    # LIKE escaping: literal % should match only Test%Project
+    res_percent = search_projects(query="Test%", limit=10)
+    assert any(p["display_name"] == "Test%Project" for p in res_percent["projects"])
+    res_no_wildcard = search_projects(query="TestProject", limit=10)
+    assert not any(p["display_name"] == "Test%Project" for p in res_no_wildcard["projects"])
+    # Underscore and backslash escaping
+    p_under = service.create_project(schemas.ProjectCreateRequest(display_name="A_B Project", domain="work", status="active"))
+    res_under = search_projects(query="A_B", limit=10)
+    assert any(p["display_name"] == "A_B Project" for p in res_under["projects"])
+    res_under_no = search_projects(query="AXB", limit=10)
+    assert not any(p["display_name"] == "A_B Project" for p in res_under_no["projects"])
