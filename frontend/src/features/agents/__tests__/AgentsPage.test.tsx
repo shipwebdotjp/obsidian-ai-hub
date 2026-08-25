@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -808,6 +808,110 @@ describe("AgentsPage", () => {
         [{ name: "image.png", mime_type: "image/png", data: "UEFT" }]
       );
     });
+  });
+
+  it("opens the mobile sidebar drawer from the chat header", async () => {
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <AgentsPage />
+      </MemoryRouter>
+    );
+
+    expect(
+      await screen.findByText("こんにちは！何かお手伝いできますか？")
+    ).toBeInTheDocument();
+
+    const openButton = screen.getByRole("button", { name: "エージェントと会話を選択" });
+    await user.click(openButton);
+
+    // The mobile drawer renders the sidebar content.
+    const closeButton = screen.getByRole("button", { name: "サイドバーを閉じる" });
+    const drawer = closeButton.closest("div[class*=\"fixed\"]");
+    expect(drawer).not.toBeNull();
+    expect(within(drawer as HTMLElement).getByText("AIエージェント")).toBeInTheDocument();
+    expect(within(drawer as HTMLElement).getByText("会話履歴")).toBeInTheDocument();
+  });
+
+  it("closes the mobile sidebar drawer when the close button is pressed", async () => {
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <AgentsPage />
+      </MemoryRouter>
+    );
+
+    expect(
+      await screen.findByText("こんにちは！何かお手伝いできますか？")
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "エージェントと会話を選択" }));
+    expect(screen.getByRole("button", { name: "サイドバーを閉じる" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "サイドバーを閉じる" }));
+    expect(screen.queryByRole("button", { name: "サイドバーを閉じる" })).not.toBeInTheDocument();
+  });
+
+  it("collapses and expands the desktop left pane", async () => {
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <AgentsPage />
+      </MemoryRouter>
+    );
+
+    expect(
+      await screen.findByText("こんにちは！何かお手伝いできますか？")
+    ).toBeInTheDocument();
+
+    expect(screen.getByText("AIエージェント")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "サイドバーを畳む" }));
+    expect(screen.queryByText("AIエージェント")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "サイドバーを展開" }));
+    expect(screen.getByText("AIエージェント")).toBeInTheDocument();
+  });
+
+  it("shows a mobile open button on the empty state when no agent exists", async () => {
+    mockListAgents.mockResolvedValue({ agents: [] });
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <AgentsPage />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(mockListAgents).toHaveBeenCalled();
+    });
+
+    const openButton = screen.getByRole("button", { name: "エージェントを選択" });
+    await user.click(openButton);
+    expect(screen.getByRole("button", { name: "サイドバーを閉じる" })).toBeInTheDocument();
+  });
+
+  it("shows a desktop expand button on the empty state when the sidebar is collapsed", async () => {
+    mockListAgents.mockResolvedValue({ agents: [] });
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <AgentsPage />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(mockListAgents).toHaveBeenCalled();
+    });
+
+    // Collapse the sidebar first.
+    await user.click(screen.getByRole("button", { name: "サイドバーを畳む" }));
+    expect(screen.queryByText("AIエージェント")).not.toBeInTheDocument();
+
+    // The empty state offers a desktop-visible expand control.
+    const expandButton = screen.getByRole("button", { name: "サイドバーを展開" });
+    await user.click(expandButton);
+    expect(screen.getByText("AIエージェント")).toBeInTheDocument();
   });
 
   it("ignores text-only clipboard pastes", async () => {

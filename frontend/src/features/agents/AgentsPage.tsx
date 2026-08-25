@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import {
   createAgent,
@@ -39,6 +39,10 @@ const LIVE_RESULT_MAX_CHARS = 2000;
 const MAX_AGENT_IMAGES = 5;
 const MAX_AGENT_IMAGE_BYTES = 8 * 1024 * 1024;
 
+// Tailwind v4 default `lg` breakpoint is 1024px. Used to keep JS behavior
+// (e.g. body scroll lock) in sync with the responsive drawer visibility.
+const LG_BREAKPOINT = 1024;
+
 interface PendingAttachment {
   previewUrl: string;
   name: string;
@@ -64,6 +68,23 @@ function matchesLiveToolCall(
     (Boolean(callId) && (toolCall.call_id === callId || toolCall.id === callId))
   );
 }
+
+const SidebarIconButton = React.forwardRef<
+  HTMLButtonElement,
+  { label: string; onClick: () => void; children: ReactNode }
+>(function SidebarIconButton({ label, onClick, children }, ref) {
+  return (
+    <button
+      ref={ref}
+      type="button"
+      onClick={onClick}
+      className="rounded p-1 text-slate-500 hover:bg-slate-100 cursor-pointer"
+      aria-label={label}
+    >
+      {children}
+    </button>
+  );
+});
 
 export default function AgentsPage() {
   const [agents, setAgents] = useState<Agent[]>([]);
@@ -120,7 +141,16 @@ export default function AgentsPage() {
   const [agentToDelete, setAgentToDelete] = useState<Agent | null>(null);
   const [sessionToDelete, setSessionToDelete] = useState<AgentSession | null>(null);
 
+  // Mobile / desktop pane layout state.
+  // `leftPaneOpen` controls the mobile-only overlay drawer; on desktop the
+  // sidebar is rendered independently and these handlers are harmless no-ops.
+  const [leftPaneOpen, setLeftPaneOpen] = useState(false);
+  const [leftPaneCollapsed, setLeftPaneCollapsed] = useState(false);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const mobileDrawerCloseRef = useRef<HTMLButtonElement>(null);
+  const mobileDrawerRef = useRef<HTMLDivElement>(null);
+  const mobileDrawerTriggerRef = useRef<HTMLButtonElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const streamGenerationRef = useRef(0);
   const streamingTextBufferRef = useRef("");
@@ -305,12 +335,13 @@ export default function AgentsPage() {
     }
   };
 
-  // Modal ESC listener
+  // Modal / drawer ESC listener
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         setAgentToDelete(null);
         setSessionToDelete(null);
+        setLeftPaneOpen(false);
       }
     };
     window.addEventListener("keydown", handleKeyDown);
@@ -740,6 +771,66 @@ export default function AgentsPage() {
     };
   }, []);
 
+  // Move focus into the mobile drawer when it opens and restore it to the
+  // trigger button when the drawer closes. Also trap Tab focus inside the drawer.
+  useEffect(() => {
+    if (leftPaneOpen) {
+      mobileDrawerCloseRef.current?.focus();
+
+      const drawer = mobileDrawerRef.current;
+      if (!drawer) return;
+
+      const focusableSelector =
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+      const onKeyDown = (e: KeyboardEvent) => {
+        if (e.key !== "Tab") return;
+        const focusable = Array.from(
+          drawer.querySelectorAll<HTMLElement>(focusableSelector)
+        ).filter((el) => !el.hasAttribute("disabled") && el.offsetParent !== null);
+        if (focusable.length === 0) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      };
+      drawer.addEventListener("keydown", onKeyDown);
+      return () => {
+        drawer.removeEventListener("keydown", onKeyDown);
+        mobileDrawerTriggerRef.current?.focus();
+      };
+    }
+  }, [leftPaneOpen]);
+
+  // Lock body scroll only while the mobile sidebar drawer is actually visible.
+  useEffect(() => {
+    if (!leftPaneOpen) return;
+    // Tailwind `lg` breakpoint is min-width: 1024px, so the drawer is only
+    // shown below that width. Keep scroll-lock in sync with that breakpoint.
+    if (typeof window.matchMedia !== "function") return;
+    const mql = window.matchMedia(`(max-width: ${LG_BREAKPOINT - 1}px)`);
+    if (!mql.matches) return;
+    const original = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onChange = (e: MediaQueryListEvent) => {
+      document.body.style.overflow = e.matches ? "hidden" : original;
+    };
+    if (typeof mql.addEventListener === "function") {
+      mql.addEventListener("change", onChange);
+      return () => {
+        mql.removeEventListener("change", onChange);
+        document.body.style.overflow = original;
+      };
+    }
+    return () => {
+      document.body.style.overflow = original;
+    };
+  }, [leftPaneOpen]);
+
   // Send Message & Stream Response
   const submitMessage = async () => {
     if (!selectedSessionId || (!inputText.trim() && pendingAttachments.length === 0) || isStreaming) return;
@@ -967,10 +1058,9 @@ export default function AgentsPage() {
       ? "メッセージを入力…（Enterで送信 / Shift+Enterで改行）"
       : "メッセージを入力…（Enterで改行 / Ctrl+Enterで送信）";
 
-  return (
-    <div className="flex h-full flex-col bg-slate-50 lg:flex-row">
-      {/* Left Pane: Split Upper (Agent List) & Lower (Conversation History) */}
-      <div className="flex w-full flex-col border-r border-slate-200 bg-white lg:w-64 shrink-0">
+  const sidebarContent = (
+    <>
+
         {/* Upper Section: AI Agent List */}
         <div className="flex flex-1 flex-col min-h-0 border-b border-slate-200">
           <div className="flex items-center justify-between border-b border-slate-200 p-3 bg-slate-50/50">
@@ -998,20 +1088,21 @@ export default function AgentsPage() {
                 <button
                   key={agent.agent_id}
                   type="button"
-                  onClick={() => {
-                    setSelectedAgentId(agent.agent_id);
-                    setIsCreatingAgent(false);
-                    setIsEditingAgent(false);
-                    // Switching agents invalidates the current session; clear the URL param.
-                    setSearchParams(
-                      (prev) => {
-                        const next = new URLSearchParams(prev);
-                        next.delete("session_id");
-                        return next;
-                      },
-                      { replace: true },
-                    );
-                  }}
+                    onClick={() => {
+                      setSelectedAgentId(agent.agent_id);
+                      setIsCreatingAgent(false);
+                      setIsEditingAgent(false);
+                      setLeftPaneOpen(false);
+                      // Switching agents invalidates the current session; clear the URL param.
+                      setSearchParams(
+                        (prev) => {
+                          const next = new URLSearchParams(prev);
+                          next.delete("session_id");
+                          return next;
+                        },
+                        { replace: true },
+                      );
+                    }}
                   className={`w-full cursor-pointer rounded-lg px-3 py-2 text-left text-xs transition ${
                     selectedAgentId === agent.agent_id &&
                     !isCreatingAgent &&
@@ -1065,17 +1156,18 @@ export default function AgentsPage() {
                 >
                   <button
                     type="button"
-                    onClick={() => {
-                      setSelectedSessionId(s.session_id);
-                      setSearchParams(
-                        (prev) => {
-                          const next = new URLSearchParams(prev);
-                          next.set("session_id", s.session_id);
-                          return next;
-                        },
-                        { replace: true },
-                      );
-                    }}
+                      onClick={() => {
+                        setSelectedSessionId(s.session_id);
+                        setLeftPaneOpen(false);
+                        setSearchParams(
+                          (prev) => {
+                            const next = new URLSearchParams(prev);
+                            next.set("session_id", s.session_id);
+                            return next;
+                          },
+                          { replace: true },
+                        );
+                      }}
                     className="truncate text-left cursor-pointer flex-1 min-w-0 mr-1"
                   >
                     <div className="truncate font-medium">{s.title}</div>
@@ -1100,7 +1192,55 @@ export default function AgentsPage() {
             )}
           </div>
         </div>
-      </div>
+    </>
+  );
+
+  return (
+    <div className="flex h-full flex-col bg-slate-50 lg:flex-row">
+      {/* Mobile overlay drawer */}
+      {leftPaneOpen && (
+        <div
+          ref={mobileDrawerRef}
+          className="fixed inset-0 z-50 flex lg:hidden"
+          role="dialog"
+          aria-modal="true"
+          aria-label="エージェントと会話"
+        >
+          <div className="flex h-full w-64 flex-col border-r border-slate-200 bg-white">
+            <div className="flex items-center justify-end border-b border-slate-200 p-2">
+              <SidebarIconButton
+                ref={mobileDrawerCloseRef}
+                label="サイドバーを閉じる"
+                onClick={() => setLeftPaneOpen(false)}
+              >
+                ✕
+              </SidebarIconButton>
+            </div>
+            {sidebarContent}
+          </div>
+          <button
+            type="button"
+            aria-label="オーバーレイを閉じる"
+            onClick={() => setLeftPaneOpen(false)}
+            className="min-w-0 flex-1 bg-slate-900/40"
+          />
+        </div>
+      )}
+
+      {/* Desktop collapsible left pane */}
+      {!leftPaneCollapsed && (
+        <div className="hidden h-full w-64 shrink-0 flex-col border-r border-slate-200 bg-white lg:flex">
+          <div className="flex items-center justify-end border-b border-slate-200 p-2">
+            <SidebarIconButton
+              label="サイドバーを畳む"
+              onClick={() => setLeftPaneCollapsed(true)}
+            >
+              ◀
+            </SidebarIconButton>
+          </div>
+          {sidebarContent}
+        </div>
+      )}
 
       {/* Main Content Area */}
       <div className="flex flex-1 flex-col overflow-hidden">
@@ -1395,13 +1535,34 @@ export default function AgentsPage() {
           <div className="flex flex-1 flex-col overflow-hidden">
             {/* Header */}
             <div className="flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3">
-              <div>
-                <h3 className="text-sm font-semibold text-slate-900">
-                  {activeAgent.name}
-                </h3>
-                <p className="text-[11px] text-slate-500 truncate max-w-lg">
-                  {activeAgent.system_prompt}
-                </p>
+              <div className="flex items-center gap-2 min-w-0">
+                <button
+                  ref={mobileDrawerTriggerRef}
+                  type="button"
+                  onClick={() => setLeftPaneOpen(true)}
+                  className="rounded border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700 hover:bg-slate-50 cursor-pointer lg:hidden"
+                  aria-label="エージェントと会話を選択"
+                >
+                  エージェント / 会話
+                </button>
+                {leftPaneCollapsed && (
+                  <button
+                    type="button"
+                    onClick={() => setLeftPaneCollapsed(false)}
+                    className="hidden rounded border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700 hover:bg-slate-50 cursor-pointer lg:inline-flex"
+                    aria-label="サイドバーを展開"
+                  >
+                    ▶
+                  </button>
+                )}
+                <div className="min-w-0">
+                  <h3 className="text-sm font-semibold text-slate-900">
+                    {activeAgent.name}
+                  </h3>
+                  <p className="text-[11px] text-slate-500 truncate max-w-lg">
+                    {activeAgent.system_prompt}
+                  </p>
+                </div>
               </div>
               <div className="flex items-center gap-2">
                 <button
@@ -1874,8 +2035,25 @@ export default function AgentsPage() {
           </div>
         ) : (
           /* Empty State */
-          <div className="flex h-full items-center justify-center text-xs text-slate-500">
-            左側のメニューからエージェントを選択するか、「＋ 新規作成」ボタンを押してください。
+          <div className="flex h-full flex-col items-center justify-center gap-3 text-xs text-slate-500">
+            <p>左側のメニューからエージェントを選択するか、「＋ 新規作成」ボタンを押してください。</p>
+            {leftPaneCollapsed && (
+              <button
+                type="button"
+                onClick={() => setLeftPaneCollapsed(false)}
+                className="hidden rounded border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50 cursor-pointer lg:inline-flex"
+                aria-label="サイドバーを展開"
+              >
+                ▶ エージェントを選択
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setLeftPaneOpen(true)}
+              className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50 cursor-pointer lg:hidden"
+            >
+              エージェントを選択
+            </button>
           </div>
         )}
       </div>
