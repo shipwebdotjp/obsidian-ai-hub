@@ -43,6 +43,64 @@ def _validate_tool_ids(tool_ids: Sequence[str]) -> list[str]:
     return valid
 
 
+def _normalize_advanced_params(raw: Any) -> dict[str, Any]:
+    """Normalize user-supplied advanced_params to the stored shape.
+
+    Stored shape: {"max_tokens": int, "reasoning": {"effort": str}}
+    No range checks; only structural sanitization. Empty/invalid values are dropped.
+    """
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, Any] = {}
+    # max_tokens: accept int-like value
+    if "max_tokens" in raw:
+        val = raw["max_tokens"]
+        if val is not None and val != "":
+            try:
+                # Allow string numbers from JSON/form
+                iv = int(val)  # type: ignore[arg-type]
+                out["max_tokens"] = iv
+            except (ValueError, TypeError):
+                # Invalid value: drop silently (API validation will have rejected
+                # non-int via Pydantic if sent strictly; this is for loose storage)
+                pass
+    # reasoning.effort: free text in phase 1
+    if "reasoning" in raw and isinstance(raw["reasoning"], dict):
+        effort = raw["reasoning"].get("effort")
+        if isinstance(effort, str):
+            clean = effort.strip()
+            if clean:
+                out["reasoning"] = {"effort": clean}
+    # Also accept flat reasoning_effort for backward/looser input shape
+    elif "reasoning_effort" in raw and isinstance(raw["reasoning_effort"], str):
+        clean = raw["reasoning_effort"].strip()
+        if clean:
+            out["reasoning"] = {"effort": clean}
+    return out
+
+
+def _advanced_params_from_row(row: sqlite3.Row) -> dict[str, Any]:
+    try:
+        raw_json = row["advanced_params_json"]  # type: ignore[index]
+    except (IndexError, KeyError, ValueError):
+        return {}
+    if not raw_json:
+        return {}
+    try:
+        parsed = json.loads(raw_json)
+    except (json.JSONDecodeError, TypeError):
+        return {}
+    normalized = _normalize_advanced_params(parsed)
+    # If stored value was already normalized, return as-is but ensure shape
+    # If raw_json contained extra keys, normalized will have dropped them
+    return normalized
+
+
+def _advanced_params_to_json(params: Any) -> str:
+    normalized = _normalize_advanced_params(params if params is not None else {})
+    return json.dumps(normalized, ensure_ascii=False)
+
+
 def _row_to_agent(row: sqlite3.Row) -> dict[str, Any]:
     tool_ids = []
     if row["tool_ids_json"]:
@@ -50,6 +108,7 @@ def _row_to_agent(row: sqlite3.Row) -> dict[str, Any]:
             tool_ids = json.loads(row["tool_ids_json"])
         except (json.JSONDecodeError, TypeError):
             tool_ids = []
+    advanced_params = _advanced_params_from_row(row)
     return {
         "agent_id": row["agent_id"],
         "name": row["name"],
@@ -57,6 +116,7 @@ def _row_to_agent(row: sqlite3.Row) -> dict[str, Any]:
         "provider": row["provider"],
         "model": row["model"],
         "tool_ids": tool_ids,
+        "advanced_params": advanced_params,
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
     }
@@ -133,6 +193,7 @@ def create_agent(
     tool_ids: Sequence[str] | None = None,
     provider: Optional[str] = None,
     model: Optional[str] = None,
+    advanced_params: dict[str, Any] | None = None,
     conn: Optional[sqlite3.Connection] = None,
 ) -> dict[str, Any]:
     clean_name = (name or "").strip()
@@ -149,15 +210,56 @@ def create_agent(
     agent_id = f"agent_{uuid.uuid4().hex[:12]}"
     now = _now_iso()
     tool_ids_json = json.dumps(valid_tool_ids, ensure_ascii=False)
+    advanced_params_json = _advanced_params_to_json(advanced_params)
 
     with auto_connection(conn) as (active_conn, is_generated):
         try:
             if is_generated:
                 with active_conn:
+                    try:
+                        active_conn.execute(
+                            """
+                            INSERT INTO agents (agent_id, name, system_prompt, provider, model, tool_ids_json, advanced_params_json, created_at, updated_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            """,
+                            (
+                                agent_id,
+                                clean_name,
+                                clean_prompt,
+                                clean_provider,
+                                clean_model,
+                                tool_ids_json,
+                                advanced_params_json,
+                                now,
+                                now,
+                            ),
+                        )
+                    except sqlite3.OperationalError as e:
+                        if "no such column: advanced_params_json" in str(e):
+                            active_conn.execute(
+                                """
+                                INSERT INTO agents (agent_id, name, system_prompt, provider, model, tool_ids_json, created_at, updated_at)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                                """,
+                                (
+                                    agent_id,
+                                    clean_name,
+                                    clean_prompt,
+                                    clean_provider,
+                                    clean_model,
+                                    tool_ids_json,
+                                    now,
+                                    now,
+                                ),
+                            )
+                        else:
+                            raise
+            else:
+                try:
                     active_conn.execute(
                         """
-                        INSERT INTO agents (agent_id, name, system_prompt, provider, model, tool_ids_json, created_at, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        INSERT INTO agents (agent_id, name, system_prompt, provider, model, tool_ids_json, advanced_params_json, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             agent_id,
@@ -166,27 +268,31 @@ def create_agent(
                             clean_provider,
                             clean_model,
                             tool_ids_json,
+                            advanced_params_json,
                             now,
                             now,
                         ),
                     )
-            else:
-                active_conn.execute(
-                    """
-                    INSERT INTO agents (agent_id, name, system_prompt, provider, model, tool_ids_json, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        agent_id,
-                        clean_name,
-                        clean_prompt,
-                        clean_provider,
-                        clean_model,
-                        tool_ids_json,
-                        now,
-                        now,
-                    ),
-                )
+                except sqlite3.OperationalError as e:
+                    if "no such column: advanced_params_json" in str(e):
+                        active_conn.execute(
+                            """
+                            INSERT INTO agents (agent_id, name, system_prompt, provider, model, tool_ids_json, created_at, updated_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                            """,
+                            (
+                                agent_id,
+                                clean_name,
+                                clean_prompt,
+                                clean_provider,
+                                clean_model,
+                                tool_ids_json,
+                                now,
+                                now,
+                            ),
+                        )
+                    else:
+                        raise
         except sqlite3.IntegrityError as e:
             if "UNIQUE constraint failed" in str(e):
                 raise ValueError(f"Agent with name '{clean_name}' already exists.") from e
@@ -217,6 +323,7 @@ def update_agent(
     tool_ids: Optional[Sequence[str]] = None,
     provider: Optional[str] = None,
     model: Optional[str] = None,
+    advanced_params: Optional[dict[str, Any]] = None,
     conn: Optional[sqlite3.Connection] = None,
 ) -> dict[str, Any]:
     with auto_connection(conn) as (active_conn, is_generated):
@@ -249,15 +356,61 @@ def update_agent(
             _validate_tool_ids(tool_ids) if tool_ids is not None else existing["tool_ids"]
         )
         tool_ids_json = json.dumps(valid_tool_ids, ensure_ascii=False)
+        # advanced_params: None means keep existing; otherwise normalize and store
+        if advanced_params is None:
+            advanced_params_norm = existing.get("advanced_params", {})
+        else:
+            advanced_params_norm = _normalize_advanced_params(advanced_params)
+        advanced_params_json = json.dumps(advanced_params_norm, ensure_ascii=False)
         now = _now_iso()
 
         try:
             if is_generated:
                 with active_conn:
+                    try:
+                        active_conn.execute(
+                            """
+                            UPDATE agents
+                            SET name = ?, system_prompt = ?, provider = ?, model = ?, tool_ids_json = ?, advanced_params_json = ?, updated_at = ?
+                            WHERE agent_id = ?
+                            """,
+                            (
+                                clean_name,
+                                clean_prompt,
+                                clean_provider,
+                                clean_model,
+                                tool_ids_json,
+                                advanced_params_json,
+                                now,
+                                agent_id,
+                            ),
+                        )
+                    except sqlite3.OperationalError as e:
+                        if "no such column: advanced_params_json" in str(e):
+                            active_conn.execute(
+                                """
+                                UPDATE agents
+                                SET name = ?, system_prompt = ?, provider = ?, model = ?, tool_ids_json = ?, updated_at = ?
+                                WHERE agent_id = ?
+                                """,
+                                (
+                                    clean_name,
+                                    clean_prompt,
+                                    clean_provider,
+                                    clean_model,
+                                    tool_ids_json,
+                                    now,
+                                    agent_id,
+                                ),
+                            )
+                        else:
+                            raise
+            else:
+                try:
                     active_conn.execute(
                         """
                         UPDATE agents
-                        SET name = ?, system_prompt = ?, provider = ?, model = ?, tool_ids_json = ?, updated_at = ?
+                        SET name = ?, system_prompt = ?, provider = ?, model = ?, tool_ids_json = ?, advanced_params_json = ?, updated_at = ?
                         WHERE agent_id = ?
                         """,
                         (
@@ -266,27 +419,31 @@ def update_agent(
                             clean_provider,
                             clean_model,
                             tool_ids_json,
+                            advanced_params_json,
                             now,
                             agent_id,
                         ),
                     )
-            else:
-                active_conn.execute(
-                    """
-                    UPDATE agents
-                    SET name = ?, system_prompt = ?, provider = ?, model = ?, tool_ids_json = ?, updated_at = ?
-                    WHERE agent_id = ?
-                    """,
-                    (
-                        clean_name,
-                        clean_prompt,
-                        clean_provider,
-                        clean_model,
-                        tool_ids_json,
-                        now,
-                        agent_id,
-                    ),
-                )
+                except sqlite3.OperationalError as e:
+                    if "no such column: advanced_params_json" in str(e):
+                        active_conn.execute(
+                            """
+                            UPDATE agents
+                            SET name = ?, system_prompt = ?, provider = ?, model = ?, tool_ids_json = ?, updated_at = ?
+                            WHERE agent_id = ?
+                            """,
+                            (
+                                clean_name,
+                                clean_prompt,
+                                clean_provider,
+                                clean_model,
+                                tool_ids_json,
+                                now,
+                                agent_id,
+                            ),
+                        )
+                    else:
+                        raise
         except sqlite3.IntegrityError as e:
             if "UNIQUE constraint failed" in str(e):
                 raise ValueError(f"Agent with name '{clean_name}' already exists.") from e
@@ -617,3 +774,149 @@ def list_runs(session_id: str, conn: Optional[sqlite3.Connection] = None) -> lis
             (session_id,),
         )
         return [_row_to_run(row) for row in cursor.fetchall()]
+
+
+# --- Prompt Template Store ---
+
+
+def _row_to_template(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "template_id": row["template_id"],
+        "agent_id": row["agent_id"],
+        "name": row["name"],
+        "content": row["content"],
+        "display_order": row["display_order"],
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+    }
+
+
+def list_prompt_templates(
+    agent_id: str, conn: Optional[sqlite3.Connection] = None
+) -> list[dict[str, Any]]:
+    with auto_connection(conn) as (active_conn, _):
+        # Verify agent exists; if not, return empty (route will handle 404 separately)
+        cursor = active_conn.execute(
+            "SELECT * FROM agent_prompt_templates WHERE agent_id = ? ORDER BY display_order ASC, created_at ASC;",
+            (agent_id,),
+        )
+        return [_row_to_template(row) for row in cursor.fetchall()]
+
+
+def get_prompt_template(
+    template_id: str, conn: Optional[sqlite3.Connection] = None
+) -> dict[str, Any] | None:
+    with auto_connection(conn) as (active_conn, _):
+        cursor = active_conn.execute(
+            "SELECT * FROM agent_prompt_templates WHERE template_id = ?;",
+            (template_id,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+        return _row_to_template(row)
+
+
+def create_prompt_template(
+    agent_id: str,
+    name: str,
+    content: str,
+    conn: Optional[sqlite3.Connection] = None,
+) -> dict[str, Any]:
+    clean_name = (name or "").strip()
+    clean_content = (content or "").strip()
+    if not clean_name:
+        raise ValueError("Template name must not be empty.")
+    if not clean_content:
+        raise ValueError("Template content must not be empty.")
+
+    with auto_connection(conn) as (active_conn, is_generated):
+        agent = get_agent(agent_id, conn=active_conn)
+        if not agent:
+            raise FileNotFoundError(f"Agent '{agent_id}' not found.")
+
+        cursor = active_conn.execute(
+            "SELECT COALESCE(MAX(display_order), -1) + 1 FROM agent_prompt_templates WHERE agent_id = ?;",
+            (agent_id,),
+        )
+        next_order = cursor.fetchone()[0]
+        template_id = f"atmpl_{uuid.uuid4().hex[:12]}"
+        now = _now_iso()
+
+        def _insert():
+            active_conn.execute(
+                """
+                INSERT INTO agent_prompt_templates (template_id, agent_id, name, content, display_order, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (template_id, agent_id, clean_name, clean_content, next_order, now, now),
+            )
+
+        if is_generated:
+            with active_conn:
+                _insert()
+        else:
+            _insert()
+
+        return get_prompt_template(template_id, conn=active_conn)  # type: ignore[return-value]
+
+
+def update_prompt_template(
+    template_id: str,
+    name: Optional[str] = None,
+    content: Optional[str] = None,
+    display_order: Optional[int] = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> dict[str, Any]:
+    with auto_connection(conn) as (active_conn, is_generated):
+        existing = get_prompt_template(template_id, conn=active_conn)
+        if not existing:
+            raise FileNotFoundError(f"Template '{template_id}' not found.")
+
+        clean_name = name.strip() if name is not None else existing["name"]
+        if not clean_name:
+            raise ValueError("Template name must not be empty.")
+
+        clean_content = content.strip() if content is not None else existing["content"]
+        if not clean_content:
+            raise ValueError("Template content must not be empty.")
+
+        clean_order = display_order if display_order is not None else existing["display_order"]
+        now = _now_iso()
+
+        def _update():
+            active_conn.execute(
+                """
+                UPDATE agent_prompt_templates
+                SET name = ?, content = ?, display_order = ?, updated_at = ?
+                WHERE template_id = ?
+                """,
+                (clean_name, clean_content, clean_order, now, template_id),
+            )
+
+        if is_generated:
+            with active_conn:
+                _update()
+        else:
+            _update()
+
+        return get_prompt_template(template_id, conn=active_conn)  # type: ignore[return-value]
+
+
+def delete_prompt_template(
+    template_id: str, conn: Optional[sqlite3.Connection] = None
+) -> bool:
+    with auto_connection(conn) as (active_conn, is_generated):
+        if is_generated:
+            with active_conn:
+                cursor = active_conn.execute(
+                    "DELETE FROM agent_prompt_templates WHERE template_id = ?;",
+                    (template_id,),
+                )
+                return cursor.rowcount > 0
+        else:
+            cursor = active_conn.execute(
+                "DELETE FROM agent_prompt_templates WHERE template_id = ?;",
+                (template_id,),
+            )
+            return cursor.rowcount > 0

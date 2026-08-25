@@ -164,32 +164,6 @@ describe("AgentsPage", () => {
     expect(screen.getByText("エージェントを選択してください")).toBeInTheDocument();
   });
 
-  it("applies the Schedule Assistant template in creation form", async () => {
-    const user = userEvent.setup();
-    render(
-      <MemoryRouter>
-        <AgentsPage />
-      </MemoryRouter>
-    );
-
-    await waitFor(() => {
-      expect(screen.getAllByText("予定アシスタント")[0]).toBeInTheDocument();
-    });
-
-    await user.click(screen.getByText("＋ 新規作成"));
-
-    expect(screen.getByText("新規エージェント作成")).toBeInTheDocument();
-
-    await user.click(
-      screen.getByRole("button", {
-        name: "予定アシスタントテンプレートを適用",
-      })
-    );
-
-    const nameInput = screen.getByPlaceholderText("例: 予定アシスタント");
-    expect(nameInput).toHaveValue("予定アシスタント");
-  });
-
   it("sends message and handles streaming and HITL proposal link", async () => {
     const user = userEvent.setup();
 
@@ -233,7 +207,7 @@ describe("AgentsPage", () => {
       await screen.findByText("こんにちは！何かお手伝いできますか？")
     ).toBeInTheDocument();
 
-    const input = screen.getByPlaceholderText("メッセージを入力…");
+    const input = screen.getByPlaceholderText(/^メッセージを入力/);
     await user.type(input, "明日10時にミーティングを入れて");
     await user.click(screen.getByRole("button", { name: "送信" }));
 
@@ -274,7 +248,7 @@ describe("AgentsPage", () => {
       await screen.findByText("こんにちは！何かお手伝いできますか？")
     ).toBeInTheDocument();
 
-    const input = screen.getByPlaceholderText("メッセージを入力…");
+    const input = screen.getByPlaceholderText(/^メッセージを入力/);
     await user.type(input, "テストメッセージ");
     await user.click(screen.getByRole("button", { name: "送信" }));
 
@@ -435,7 +409,7 @@ describe("AgentsPage", () => {
         </MemoryRouter>
       );
 
-      const input = await screen.findByPlaceholderText("メッセージを入力…");
+      const input = await screen.findByPlaceholderText(/^メッセージを入力/);
       await user.type(input, "ストリーミングを試す");
       await user.click(screen.getByRole("button", { name: "送信" }));
       await waitFor(() => expect(emitStreamEvent).not.toBeNull());

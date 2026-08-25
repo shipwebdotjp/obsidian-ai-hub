@@ -100,6 +100,7 @@ async def _stream_llm_turn(
     model: str,
     iteration: int,
     prompt_for_log: str,
+    max_tokens: int = 4096,
 ) -> AsyncGenerator[tuple[str, Any], None]:
     """Yield live text/tool-detection events, then one aggregated AI message.
 
@@ -116,7 +117,7 @@ async def _stream_llm_turn(
         provider,
         model,
         temperature=0.7,
-        max_tokens=4096,
+        max_tokens=max_tokens,
         prompt_for_log=prompt_for_log,
     ):
         aggregate = chunk if aggregate is None else aggregate + chunk
@@ -380,6 +381,34 @@ async def generate_agent_stream(
             "store": False,
         }
 
+    # Resolve advanced params: max_tokens (single UI field, mapped by create_langchain_llm)
+    # and reasoning.effort (free text in phase 1).
+    adv = agent.get("advanced_params") or {}
+    # Support both nested {"reasoning": {"effort": ...}} and flat {"reasoning_effort": ...}
+    # normalized store always uses nested, but tolerate either for resilience.
+    reasoning_effort: Optional[str] = None
+    if isinstance(adv, dict):
+        reasoning_cfg = adv.get("reasoning")
+        if isinstance(reasoning_cfg, dict):
+            val = reasoning_cfg.get("effort")
+            if isinstance(val, str) and val.strip():
+                reasoning_effort = val.strip()
+        elif isinstance(adv.get("reasoning_effort"), str) and adv["reasoning_effort"].strip():
+            reasoning_effort = adv["reasoning_effort"].strip()  # type: ignore[index]
+    # Range is not constrained per product requirement (phase 1)
+    max_tokens_val = 4096
+    if isinstance(adv, dict) and "max_tokens" in adv:
+        try:
+            mt = adv["max_tokens"]
+            if mt is not None and str(mt).strip() != "":
+                parsed = int(mt)  # type: ignore[arg-type]
+                if parsed >= 1:
+                    max_tokens_val = parsed
+                else:
+                    logger.warning("advanced_params.max_tokens %r <= 0, falling back to 4096", mt)
+        except (ValueError, TypeError):
+            logger.warning("Invalid advanced_params.max_tokens %r, falling back to 4096", adv.get("max_tokens"))
+
     used_tools: List[str] = []
     created_hitl_run_ids: List[str] = []
     tool_call_records: List[Dict[str, Any]] = []
@@ -394,7 +423,8 @@ async def generate_agent_stream(
             provider=provider,
             model=model,
             temperature=0.7,
-            max_tokens=4096,
+            max_tokens=max_tokens_val,
+            reasoning_effort=reasoning_effort,
             **openai_options,
         )
 
@@ -417,6 +447,7 @@ async def generate_agent_stream(
                 model,
                 iterations,
                 user_content,
+                max_tokens_val,
             ):
                 if stream_event == "text":
                     streamed_text_parts.append(stream_value)
@@ -535,6 +566,7 @@ async def generate_agent_stream(
                 model,
                 fallback_iteration,
                 user_content,
+                max_tokens_val,
             ):
                 if stream_event == "text":
                     streamed_text_parts.append(stream_value)

@@ -59,6 +59,17 @@ llm:
 
 両方まとめてインストールする場合: `make install-all`（`bash ./install.sh all`）
 
+### HITL commands
+
+The HITL (Human-in-the-Loop) system processes queued runs that require user
+input or approval. Use `--hitl-dispatch` for a one-shot scan, or `--hitl-worker`
+to run the resident worker loop (used by the LaunchAgent).
+
+```bash
+python -m obsidian_ai_hub --hitl-dispatch
+python -m obsidian_ai_hub --hitl-worker
+```
+
 ## Configuration
 
 Use the following split to keep the project OSS-friendly:
@@ -112,20 +123,25 @@ python -m obsidian_ai_hub --review-draft
 python -m obsidian_ai_hub --review-draft --review-week-date 2026-07-12
 python -m obsidian_ai_hub --backup
 python -m obsidian_ai_hub --sync-vault
+python -m obsidian_ai_hub --sync-people
 python -m obsidian_ai_hub --screenshot
 ```
 
 The vault sync command indexes the full `VAULT_PATH` tree into `md-hybrid-search` and stores its SQLite/Chroma data outside the vault by default.
 
+The `--sync-people` command merges unresolved person candidates and old duplicate `people` rows into the canonical person record that corresponds to each vault person note (based on `aliases` metadata).
+
 ### Additional CLI commands
 
 Generate a monthly review for the previous month, or select a month with
-`YYYY-MM`. A daily review uses the current daily note.
+`YYYY-MM`. A daily review uses the current daily note; pass `--day-date` to
+pick a specific date.
 
 ```bash
 python -m obsidian_ai_hub --summerize-month
 python -m obsidian_ai_hub --summerize-month --month 2026-07
 python -m obsidian_ai_hub --summerize-day
+python -m obsidian_ai_hub --summerize-day --day-date 2026-07-15
 ```
 
 The following commands notify today's schedule, synchronize the vault with the
@@ -135,6 +151,17 @@ configured Open WebUI knowledge base, or fully rebuild the vault-search index:
 python -m obsidian_ai_hub --notify-today-schedule
 python -m obsidian_ai_hub --sync-knowledge
 python -m obsidian_ai_hub --rebuild-vault
+```
+
+### Planner commands
+
+Generate AI planner proposals (calendar events or reminders) from recent notes,
+summaries, and schedule context. Proposals are saved to the `planner_proposals`
+table and a LINE notification is sent. A human must act on them via the Planner
+screen; nothing is written to Apple Calendar/Reminders automatically.
+
+```bash
+python -m obsidian_ai_hub --generate-planner-proposals
 ```
 
 ### Research commands
@@ -186,6 +213,16 @@ python -m obsidian_ai_hub --vault-search --query "project planning" \
   --k 5 --search-mode hybrid --json
 ```
 
+### Cleanup commands
+
+Delete old records to keep the database compact. Both commands remove entries
+older than 30 days.
+
+```bash
+python -m obsidian_ai_hub --cleanup-line-webhooks
+python -m obsidian_ai_hub --cleanup-execution-logs
+```
+
 ## Long-Term Memory
 
 Long-term memory lets the assistant retain useful, reviewed information from
@@ -228,6 +265,17 @@ than treating the confidence score as an approval recommendation. The model is
 instructed not to invent facts, to treat note contents as data rather than
 instructions, and not to turn a one-off event into a permanent preference or
 habit. A `pattern` requires evidence from at least two distinct days.
+
+### Generate interview questions
+
+Generate personalized interview questions from the selected week's daily notes.
+Answers are collected via LINE or the Web UI and converted into memory
+candidates automatically.
+
+```bash
+uv run -m obsidian_ai_hub --memory-interview
+uv run -m obsidian_ai_hub --memory-interview --memory-interview-week 2026-07-13
+```
 
 ### Review candidates with the CLI
 
@@ -323,6 +371,17 @@ When you run `--make-target`, the compiled memory context is automatically
 added to the LLM prompt. Other commands do not automatically use long-term
 memory yet.
 
+### Maintain approved memories
+
+Run a diagnostic maintenance pass on all approved long-term memories. The
+command groups memories by key, exact content, or vector similarity, then uses
+an LLM to propose merge, correct, or expire actions. Proposals are registered
+as a HITL run for review.
+
+```bash
+uv run -m obsidian_ai_hub --memory-maintain
+```
+
 ### Generate Copilot instructions (Explanation document)
 
 You can summarize all currently valid, approved memories using an LLM to generate or completely replace the profile instruction files for Copilot.
@@ -372,6 +431,63 @@ memory:
 
 When the extractor settings are omitted, the daily-target LLM provider and
 model are used.
+
+## Healthcare Data
+
+Apple Health (HealthKit) data is stored in a dedicated SQLite database,
+separate from the main memory database. This keeps the main database compact
+and avoids impacting VACUUM/backup operations.
+
+### Data location
+
+The healthcare database is stored at:
+
+```
+~/.config/obsidian-ai-hub/healthcare.sqlite3
+```
+
+Override with `HEALTHCARE_SQLITE_PATH` environment variable or
+`healthcare.sqlite_path` in `config/config.yml`.
+
+### Import Apple Health data
+
+1. On your iPhone, open the Health app → tap your profile → **Export All Health
+   Data**.
+2. Unzip the exported file to a directory (e.g.,
+   `~/.config/obsidian-ai-hub/healthcare/apple_health_export`).
+3. Run the import command:
+
+```bash
+python -m obsidian_ai_hub --import-apple-health
+```
+
+Specify a custom export directory or batch size:
+
+```bash
+python -m obsidian_ai_hub --import-apple-health \
+  --healthcare-export-dir /path/to/apple_health_export \
+  --healthcare-batch-size 10000
+```
+
+Preview the import without writing to the database:
+
+```bash
+python -m obsidian_ai_hub --import-apple-health --healthcare-dry-run
+```
+
+### Configuration
+
+Add to `config/config.yml`:
+
+```yaml
+healthcare:
+  sqlite_path: /Users/you/.config/obsidian-ai-hub/healthcare.sqlite3
+  export_dir: /Users/you/.config/obsidian-ai-hub/healthcare/apple_health_export
+```
+
+Or use environment variables: `HEALTHCARE_SQLITE_PATH`, `HEALTHCARE_EXPORT_DIR`.
+
+The import is idempotent; re-running it will not duplicate records.
 
 ## Task Runner
 

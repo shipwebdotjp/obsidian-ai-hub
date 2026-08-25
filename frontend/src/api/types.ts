@@ -648,6 +648,23 @@ export interface PlannerGenerateResponse {
 
 // --- AI Agent types ---
 
+export interface AgentAdvancedParams {
+  max_tokens?: number | null;
+  reasoning?: {
+    effort?: string | null;
+  } | null;
+}
+
+export interface AgentPromptTemplate {
+  template_id: string;
+  agent_id: string;
+  name: string;
+  content: string;
+  display_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Agent {
   agent_id: string;
   name: string;
@@ -655,6 +672,7 @@ export interface Agent {
   provider: string | null;
   model: string | null;
   tool_ids: string[];
+  advanced_params?: AgentAdvancedParams | null;
   created_at: string;
   updated_at: string;
 }

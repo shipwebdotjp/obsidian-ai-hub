@@ -7,12 +7,14 @@ import {
   ApiError,
   AUTH_EXPIRED_EVENT,
 } from "../../api/client";
+import { useChatSendMode } from "./chatSendMode";
 
 export default function SettingsPage() {
   const [value, setValue] = useState(getToken());
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [sendMode, setSendMode] = useChatSendMode();
   const isMounted = useRef(true);
 
   useEffect(() => {
@@ -112,6 +114,34 @@ export default function SettingsPage() {
             </button>
           </div>
         </form>
+        <section className="w-full max-w-xl space-y-3 rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div>
+            <h2 className="text-base font-semibold text-slate-900">チャット入力の送信方法</h2>
+            <p className="mt-1 text-sm text-slate-600">
+              メッセージ入力欄での Enter キーの動作を選択します。
+            </p>
+          </div>
+          <div className="space-y-2">
+            <label className="flex items-center gap-2 text-sm text-slate-700">
+              <input
+                type="radio"
+                checked={sendMode === "enter"}
+                onChange={() => setSendMode("enter")}
+                className="cursor-pointer"
+              />
+              Enter で送信（Shift+Enter で改行）
+            </label>
+            <label className="flex items-center gap-2 text-sm text-slate-700">
+              <input
+                type="radio"
+                checked={sendMode === "newline"}
+                onChange={() => setSendMode("newline")}
+                className="cursor-pointer"
+              />
+              Enter で改行（Ctrl/Cmd+Enter で送信）
+            </label>
+          </div>
+        </section>
       </div>
     </div>
   );

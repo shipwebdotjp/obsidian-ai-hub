@@ -17,6 +17,7 @@ def create_agent(
     tool_ids: Optional[List[str]] = None,
     provider: Optional[str] = None,
     model: Optional[str] = None,
+    advanced_params: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     return store.create_agent(
         name=name,
@@ -24,6 +25,7 @@ def create_agent(
         tool_ids=tool_ids or [],
         provider=provider,
         model=model,
+        advanced_params=advanced_params or {},
     )
 
 
@@ -41,6 +43,7 @@ def update_agent(
     tool_ids: Optional[List[str]] = None,
     provider: Optional[str] = None,
     model: Optional[str] = None,
+    advanced_params: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     return store.update_agent(
         agent_id=agent_id,
@@ -49,6 +52,7 @@ def update_agent(
         tool_ids=tool_ids,
         provider=provider,
         model=model,
+        advanced_params=advanced_params,
     )
 
 
@@ -113,3 +117,42 @@ async def stream_session_message(
         user_content=content,
     ):
         yield chunk
+
+
+# --- Prompt Templates ---
+
+
+def list_prompt_templates(agent_id: str) -> List[Dict[str, Any]]:
+    get_agent(agent_id)
+    return store.list_prompt_templates(agent_id)
+
+
+def create_prompt_template(
+    agent_id: str, name: str, content: str
+) -> Dict[str, Any]:
+    return store.create_prompt_template(agent_id, name, content)
+
+
+def get_prompt_template(template_id: str) -> Dict[str, Any]:
+    tmpl = store.get_prompt_template(template_id)
+    if not tmpl:
+        raise FileNotFoundError(f"Template '{template_id}' not found.")
+    return tmpl
+
+
+def update_prompt_template(
+    template_id: str,
+    name: Optional[str] = None,
+    content: Optional[str] = None,
+    display_order: Optional[int] = None,
+) -> Dict[str, Any]:
+    return store.update_prompt_template(
+        template_id, name=name, content=content, display_order=display_order
+    )
+
+
+def delete_prompt_template(template_id: str) -> bool:
+    deleted = store.delete_prompt_template(template_id)
+    if not deleted:
+        raise FileNotFoundError(f"Template '{template_id}' not found.")
+    return True

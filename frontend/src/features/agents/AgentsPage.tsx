@@ -3,19 +3,24 @@ import { Link, useSearchParams } from "react-router-dom";
 import {
   createAgent,
   createAgentSession,
+  createPromptTemplate,
   deleteAgent,
   deleteAgentSession,
+  deletePromptTemplate,
   getAgentSessionDetail,
   listAgents,
   listAgentSessions,
   listAgentTools,
+  listPromptTemplates,
   streamAgentMessage,
   updateAgent,
+  updatePromptTemplate,
 } from "../../api/client";
 import type {
   Agent,
   AgentLiveToolCall,
   AgentMessage,
+  AgentPromptTemplate,
   AgentRun,
   AgentSession,
   AgentStreamEvent,
@@ -23,24 +28,9 @@ import type {
   AgentToolCall,
 } from "../../api/types";
 import { ROUTES } from "../../constants/routes";
+import { useChatSendMode } from "../settings/chatSendMode";
 import MarkdownPreview from "../../components/MarkdownPreview";
 import { formatDateTime } from "../../utils/date";
-
-const SCHEDULE_ASSISTANT_TEMPLATE = {
-  name: "予定アシスタント",
-  system_prompt:
-    "あなたはユーザーの予定・リマインダー・メモを整理し、次に行うべきアクションをわかりやすく助言する予定アシスタントです。必要に応じてカレンダーやリマインダーを読み取り、作成提案を行います。",
-  provider: "",
-  model: "",
-  tool_ids: [
-    "calendar_read",
-    "reminders_read",
-    "calendar_create_proposal",
-    "reminder_create_proposal",
-    "vault_search",
-    "vault_read_file",
-  ],
-};
 
 // keep in sync with runtime.py _LIVE_RESULT_MAX_CHARS (DB is 20000)
 const LIVE_RESULT_MAX_CHARS = 2000;
@@ -81,11 +71,25 @@ export default function AgentsPage() {
   const [formProvider, setFormProvider] = useState("");
   const [formModel, setFormModel] = useState("");
   const [formToolIds, setFormToolIds] = useState<string[]>([]);
+  const [formMaxTokens, setFormMaxTokens] = useState<string>("");
+  const [formReasoningEffort, setFormReasoningEffort] = useState<string>("");
+  const [isAdvancedOpen, setIsAdvancedOpen] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
+  // Prompt template state (per-agent)
+  const [promptTemplates, setPromptTemplates] = useState<AgentPromptTemplate[]>([]);
+  const [templateSelectorOpen, setTemplateSelectorOpen] = useState(false);
+  const [templateFormName, setTemplateFormName] = useState("");
+  const [templateFormContent, setTemplateFormContent] = useState("");
+  const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
+  const [templateError, setTemplateError] = useState<string | null>(null);
+  const [templateLoading, setTemplateLoading] = useState(false);
+
   // Chat stream state
   const [inputText, setInputText] = useState("");
+  const [chatSendMode] = useChatSendMode();
+  const chatInputRef = useRef<HTMLTextAreaElement>(null);
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingText, setStreamingText] = useState("");
   const [streamingToolCalls, setStreamingToolCalls] = useState<AgentLiveToolCall[]>([]);
@@ -322,6 +326,77 @@ export default function AgentsPage() {
     return map;
   }, [runs]);
 
+  const loadPromptTemplates = useCallback(async (agentId: string) => {
+    setTemplateLoading(true);
+    try {
+      const res = await listPromptTemplates(agentId);
+      setPromptTemplates(res.templates);
+    } catch {
+      // Templates are optional; keep previous state on error.
+    } finally {
+      setTemplateLoading(false);
+    }
+  }, []);
+
+  const handleSelectTemplate = (content: string) => {
+    setInputText(content);
+    setTemplateSelectorOpen(false);
+  };
+
+  // Load templates for active chat agent (when not editing/creating)
+  useEffect(() => {
+    if (!activeAgent || isCreatingAgent || isEditingAgent) return;
+    void loadPromptTemplates(activeAgent.agent_id);
+  }, [activeAgent?.agent_id, isCreatingAgent, isEditingAgent, loadPromptTemplates]);
+
+  const handleCreateOrUpdateTemplate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedAgentId) return;
+    setTemplateError(null);
+    try {
+      if (editingTemplateId) {
+        const res = await updatePromptTemplate(editingTemplateId, {
+          name: templateFormName,
+          content: templateFormContent,
+        });
+        setPromptTemplates((prev) => prev.map((t) => (t.template_id === editingTemplateId ? res.template : t)));
+        setEditingTemplateId(null);
+      } else {
+        const res = await createPromptTemplate(selectedAgentId, {
+          name: templateFormName,
+          content: templateFormContent,
+        });
+        setPromptTemplates((prev) => [...prev, res.template]);
+      }
+      setTemplateFormName("");
+      setTemplateFormContent("");
+    } catch (err: any) {
+      setTemplateError(err.message || "テンプレートの保存に失敗しました。");
+    }
+  };
+
+  const handleDeleteTemplate = async (templateId: string) => {
+    setTemplateError(null);
+    try {
+      await deletePromptTemplate(templateId);
+      setPromptTemplates((prev) => prev.filter((t) => t.template_id !== templateId));
+      if (editingTemplateId === templateId) {
+        setEditingTemplateId(null);
+        setTemplateFormName("");
+        setTemplateFormContent("");
+      }
+    } catch (err: any) {
+      setTemplateError(err.message || "テンプレートの削除に失敗しました。");
+    }
+  };
+
+  const handleEditTemplate = (t: AgentPromptTemplate) => {
+    setEditingTemplateId(t.template_id);
+    setTemplateFormName(t.name);
+    setTemplateFormContent(t.content);
+    setTemplateError(null);
+  };
+
   // Agent Form Actions
   const handleOpenCreateForm = () => {
     setIsCreatingAgent(true);
@@ -331,8 +406,16 @@ export default function AgentsPage() {
     setFormProvider("");
     setFormModel("");
     setFormToolIds([]);
+    setFormMaxTokens("");
+    setFormReasoningEffort("");
+    setIsAdvancedOpen(false);
     setFormError(null);
     setActionError(null);
+    setPromptTemplates([]);
+    setTemplateFormName("");
+    setTemplateFormContent("");
+    setEditingTemplateId(null);
+    setTemplateError(null);
   };
 
   const handleOpenEditForm = (agent: Agent) => {
@@ -343,22 +426,39 @@ export default function AgentsPage() {
     setFormProvider(agent.provider || "");
     setFormModel(agent.model || "");
     setFormToolIds(agent.tool_ids || []);
+    const adv = agent.advanced_params ?? {};
+    setFormMaxTokens(adv.max_tokens != null ? String(adv.max_tokens) : "");
+    setFormReasoningEffort(adv.reasoning?.effort ?? "");
+    setIsAdvancedOpen(Boolean(adv.max_tokens != null || adv.reasoning?.effort));
     setFormError(null);
     setActionError(null);
+    setTemplateFormName("");
+    setTemplateFormContent("");
+    setEditingTemplateId(null);
+    setTemplateError(null);
+    // Load templates for this agent
+    void loadPromptTemplates(agent.agent_id);
   };
 
-  const handleApplyTemplate = () => {
-    setFormName(SCHEDULE_ASSISTANT_TEMPLATE.name);
-    setFormPrompt(SCHEDULE_ASSISTANT_TEMPLATE.system_prompt);
-    setFormProvider(SCHEDULE_ASSISTANT_TEMPLATE.provider);
-    setFormModel(SCHEDULE_ASSISTANT_TEMPLATE.model);
-    setFormToolIds(SCHEDULE_ASSISTANT_TEMPLATE.tool_ids);
+  const buildAdvancedParams = (): { max_tokens?: number; reasoning?: { effort?: string } } => {
+    const params: { max_tokens?: number; reasoning?: { effort?: string } } = {};
+    const mt = formMaxTokens.trim();
+    if (mt !== "") {
+      const n = Number(mt);
+      if (!Number.isNaN(n) && n > 0) params.max_tokens = Math.trunc(n);
+    }
+    const re = formReasoningEffort.trim();
+    if (re !== "") {
+      params.reasoning = { effort: re };
+    }
+    return params;
   };
 
   const handleSaveAgent = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError(null);
     setActionError(null);
+    const advanced_params = buildAdvancedParams();
     try {
       if (isCreatingAgent) {
         const res = await createAgent({
@@ -367,6 +467,7 @@ export default function AgentsPage() {
           provider: formProvider || undefined,
           model: formModel || undefined,
           tool_ids: formToolIds,
+          advanced_params: Object.keys(advanced_params).length ? advanced_params : undefined,
         });
         setAgents([res.agent, ...agents]);
         setSelectedAgentId(res.agent.agent_id);
@@ -377,6 +478,7 @@ export default function AgentsPage() {
           provider: formProvider,
           model: formModel,
           tool_ids: formToolIds,
+          advanced_params,
         });
         setAgents(
           agents.map((a) => (a.agent_id === selectedAgentId ? res.agent : a))
@@ -495,8 +597,7 @@ export default function AgentsPage() {
   }, []);
 
   // Send Message & Stream Response
-  const handleSendMessage = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const submitMessage = async () => {
     if (!selectedSessionId || !inputText.trim() || isStreaming) return;
 
     const streamSessionId = selectedSessionId;
@@ -680,6 +781,37 @@ export default function AgentsPage() {
     }
   };
 
+  const handleSendMessage = (e: React.FormEvent) => {
+    e.preventDefault();
+    void submitMessage();
+  };
+
+  const handleInputKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+    if (chatSendMode === "enter") {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        void submitMessage();
+      }
+    } else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      void submitMessage();
+    }
+  };
+
+  useEffect(() => {
+    const el = chatInputRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+  }, [inputText]);
+
+  const inputPlaceholder = !selectedSessionId
+    ? "左側の「＋ 新しい会話」をクリックして会話を開始してください"
+    : chatSendMode === "enter"
+      ? "メッセージを入力…（Enterで送信 / Shift+Enterで改行）"
+      : "メッセージを入力…（Enterで改行 / Ctrl+Enterで送信）";
+
   return (
     <div className="flex h-full flex-col bg-slate-50 lg:flex-row">
       {/* Left Pane: Split Upper (Agent List) & Lower (Conversation History) */}
@@ -829,10 +961,14 @@ export default function AgentsPage() {
                 </h3>
                 <button
                   type="button"
-                  onClick={handleApplyTemplate}
-                  className="rounded cursor-pointer border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-700 hover:bg-indigo-100"
+                  onClick={() => {
+                    setIsCreatingAgent(false);
+                    setIsEditingAgent(false);
+                  }}
+                  className="cursor-pointer rounded p-1 text-lg leading-none text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                  aria-label="閉じる"
                 >
-                  予定アシスタントテンプレートを適用
+                  ✕
                 </button>
               </div>
 
@@ -901,6 +1037,49 @@ export default function AgentsPage() {
                   ※ Provider / Model が空欄の場合はアプリ全体の既定LLM設定が自動適用されます。
                 </p>
 
+                <details
+                  open={isAdvancedOpen}
+                  onToggle={(e) => setIsAdvancedOpen((e.target as HTMLDetailsElement).open)}
+                  className="rounded-md border border-slate-200 bg-slate-50/50"
+                >
+                  <summary className="cursor-pointer list-none flex items-center justify-between px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50">
+                    <span>高度なパラメーター</span>
+                    <span className="text-[10px] text-slate-400">{isAdvancedOpen ? "▲" : "▼"}</span>
+                  </summary>
+                  <div className="border-t border-slate-200 bg-white p-3 space-y-3">
+                    <div>
+                      <label className="block font-medium text-slate-700 mb-1">
+                        最大トークン数 (max_tokens / max_output_tokens)
+                      </label>
+                      <input
+                        type="number"
+                        value={formMaxTokens}
+                        onChange={(e) => setFormMaxTokens(e.target.value)}
+                        placeholder="例: 4096 (空欄で既定値)"
+                        className="w-full rounded-md border border-slate-300 p-2 text-xs focus:border-slate-500 focus:outline-none"
+                      />
+                      <p className="mt-1 text-[10px] text-slate-500">
+                        OpenAI は Responses API では max_output_tokens、Chat Completions では max_completion_tokens へ、Ollama では num_predict へ自動マッピングされます。
+                      </p>
+                    </div>
+                    <div>
+                      <label className="block font-medium text-slate-700 mb-1">
+                        reasoning.effort
+                      </label>
+                      <input
+                        type="text"
+                        value={formReasoningEffort}
+                        onChange={(e) => setFormReasoningEffort(e.target.value)}
+                        placeholder="例: low / medium / high (空欄で既定値)"
+                        className="w-full rounded-md border border-slate-300 p-2 text-xs focus:border-slate-500 focus:outline-none"
+                      />
+                      <p className="mt-1 text-[10px] text-slate-500">
+                        OpenAI/opencode_go では reasoning_effort、Ollama では reasoning へマッピングされます。
+                      </p>
+                    </div>
+                  </div>
+                </details>
+
                 <div>
                   <label className="block font-medium text-slate-700 mb-2">
                     利用可能ツール選択
@@ -941,6 +1120,8 @@ export default function AgentsPage() {
                   </div>
                 </div>
 
+
+
                 <div className="flex justify-end gap-2 pt-2">
                   <button
                     type="button"
@@ -960,6 +1141,98 @@ export default function AgentsPage() {
                   </button>
                 </div>
               </form>
+              {isEditingAgent && selectedAgentId && (
+                <div className="mt-4 rounded-md border border-slate-200 bg-white p-3 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <label className="block font-medium text-slate-700">
+                      プロンプトテンプレート
+                    </label>
+                    <span className="text-[10px] text-slate-500">
+                      {templateLoading ? "読込中…" : `${promptTemplates.length}件`}
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-slate-500">
+                    エージェントごとに登録した定型プロンプト。チャット入力欄で呼び出して置き換えます。
+                  </p>
+                  {templateError && (
+                    <div className="rounded bg-red-50 p-2 text-[11px] text-red-600">{templateError}</div>
+                  )}
+                  {promptTemplates.length > 0 && (
+                    <div className="space-y-1 max-h-48 overflow-y-auto border border-slate-100 rounded p-2">
+                      {promptTemplates.map((t) => (
+                        <div
+                          key={t.template_id}
+                          className={`flex items-start justify-between gap-2 rounded p-2 text-xs ${editingTemplateId === t.template_id ? "bg-indigo-50 border border-indigo-200" : "bg-slate-50 border border-slate-200"}`}
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="font-semibold truncate text-slate-800">{t.name}</div>
+                            <div className="text-[11px] text-slate-600 whitespace-pre-wrap break-words line-clamp-2">{t.content}</div>
+                          </div>
+                          <div className="flex shrink-0 gap-1">
+                            <button
+                              type="button"
+                              onClick={() => handleEditTemplate(t)}
+                              className="rounded cursor-pointer bg-white border border-slate-300 px-2 py-1 text-[10px] hover:bg-slate-50"
+                            >
+                              編集
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteTemplate(t.template_id)}
+                              className="rounded cursor-pointer bg-white border border-red-200 px-2 py-1 text-[10px] text-red-600 hover:bg-red-50"
+                            >
+                              削除
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <form onSubmit={handleCreateOrUpdateTemplate} className="space-y-2 border-t border-slate-100 pt-3">
+                    <div className="text-[11px] font-medium text-slate-700">
+                      {editingTemplateId ? "テンプレートを編集" : "テンプレートを追加"}
+                    </div>
+                    <input
+                      type="text"
+                      value={templateFormName}
+                      onChange={(e) => setTemplateFormName(e.target.value)}
+                      placeholder="テンプレート名"
+                      className="w-full rounded-md border border-slate-300 p-2 text-xs focus:border-slate-500 focus:outline-none"
+                      required
+                    />
+                    <textarea
+                      rows={3}
+                      value={templateFormContent}
+                      onChange={(e) => setTemplateFormContent(e.target.value)}
+                      placeholder="テンプレート本文"
+                      className="w-full rounded-md border border-slate-300 p-2 text-xs focus:border-slate-500 focus:outline-none"
+                      required
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        type="submit"
+                        className="rounded cursor-pointer bg-slate-900 px-3 py-1.5 text-xs text-white hover:bg-slate-800"
+                      >
+                        {editingTemplateId ? "更新" : "追加"}
+                      </button>
+                      {editingTemplateId && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingTemplateId(null);
+                            setTemplateFormName("");
+                            setTemplateFormContent("");
+                            setTemplateError(null);
+                          }}
+                          className="rounded cursor-pointer border border-slate-300 bg-white px-3 py-1.5 text-xs hover:bg-slate-50"
+                        >
+                          キャンセル
+                        </button>
+                      )}
+                    </div>
+                  </form>
+                </div>
+              )}
             </div>
           </div>
         ) : activeAgent ? (
@@ -1306,19 +1579,48 @@ export default function AgentsPage() {
             {/* Input Footer */}
             <form
               onSubmit={handleSendMessage}
-              className="border-t border-slate-200 bg-white p-3 flex gap-2"
+              className="border-t border-slate-200 bg-white p-3 flex gap-2 items-center relative"
             >
-              <input
-                type="text"
+              <div className="relative">
+                <button
+                  type="button"
+                  disabled={!activeAgent || promptTemplates.length === 0}
+                  onClick={() => setTemplateSelectorOpen((v) => !v)}
+                  className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                  aria-label="プロンプトテンプレートを選択"
+                >
+                  テンプレート
+                </button>
+                {templateSelectorOpen && promptTemplates.length > 0 && (
+                  <div className="absolute bottom-full left-0 mb-2 w-72 max-h-64 overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg z-10">
+                    <div className="p-2 border-b border-slate-100 text-[11px] font-medium text-slate-500">
+                      登録済みテンプレート（選択で入力を置き換え）
+                    </div>
+                    {promptTemplates.map((t) => (
+                      <button
+                        key={t.template_id}
+                        type="button"
+                        onClick={() => handleSelectTemplate(t.content)}
+                        className="w-full text-left px-3 py-2 text-xs hover:bg-slate-50 border-b border-slate-50 last:border-0"
+                      >
+                        <div className="font-medium text-slate-800 truncate">{t.name}</div>
+                        <div className="text-[11px] text-slate-500 line-clamp-2 whitespace-pre-wrap break-words">
+                          {t.content.length > 80 ? t.content.slice(0, 80) + "…" : t.content}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <textarea
+                ref={chatInputRef}
+                rows={1}
                 value={inputText}
                 onChange={(e) => setInputText(e.target.value)}
+                onKeyDown={handleInputKeyDown}
                 disabled={isStreaming || !selectedSessionId}
-                placeholder={
-                  selectedSessionId
-                    ? "メッセージを入力…"
-                    : "左側の「＋ 新しい会話」をクリックして会話を開始してください"
-                }
-                className="flex-1 rounded-lg border border-slate-300 p-2 text-xs focus:border-slate-500 focus:outline-none disabled:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                placeholder={inputPlaceholder}
+                className="flex-1 resize-none rounded-lg border border-slate-300 p-2 text-xs leading-relaxed focus:border-slate-500 focus:outline-none disabled:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed"
               />
               <button
                 type="submit"

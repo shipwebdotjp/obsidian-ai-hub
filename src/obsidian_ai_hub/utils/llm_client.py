@@ -473,6 +473,7 @@ def create_langchain_llm(
     *,
     use_responses_api: bool | None = None,
     store: bool | None = None,
+    reasoning_effort: str | None = None,
 ):
     """
     provider 名から LangChain の ChatModel / LLM を生成する。
@@ -482,31 +483,53 @@ def create_langchain_llm(
     - ollama: ChatOllama
     - local: LlamaCpp
     - opencode_go: ChatOpenAI / ChatAnthropic
+
+    max_tokens: ChatOpenAI では alias により max_completion_tokens /
+      Responses API では max_output_tokens へ自動マッピングされる。
+      Ollama では num_predict へマッピングされる。
+    reasoning_effort: ChatOpenAI では reasoning_effort (Responses APIでは
+      reasoning.effort へ正規化)、Ollama では reasoning へマッピング。
     """
+    cleaned_effort = reasoning_effort.strip() if isinstance(reasoning_effort, str) and reasoning_effort.strip() else None
+
     if provider == "openai":
-        openai_options = {}
+        openai_options: dict[str, Any] = {}
         if use_responses_api is not None:
             openai_options["use_responses_api"] = use_responses_api
         if store is not None:
             openai_options["store"] = store
+        if cleaned_effort is not None:
+            openai_options["reasoning_effort"] = cleaned_effort
         return create_openai_llm(model, temperature, max_tokens, **openai_options)
 
     if provider == "gemini":
         return create_gemini_llm(model, temperature, max_tokens)
 
     if provider == "ollama":
-        return create_ollama_llm(model, temperature, max_tokens)
+        ollama_options: dict[str, Any] = {}
+        if cleaned_effort is not None:
+            ollama_options["reasoning"] = cleaned_effort
+        return create_ollama_llm(model, temperature, max_tokens, **ollama_options)
 
     if provider == "local":
         return create_local_llama_llm(model, temperature, max_tokens)
 
     if provider == "opencode_go":
-        return create_opencode_go_llm(model, temperature, max_tokens)
+        opencode_options: dict[str, Any] = {}
+        if cleaned_effort is not None:
+            opencode_options["reasoning_effort"] = cleaned_effort
+        return create_opencode_go_llm(model, temperature, max_tokens, **opencode_options)
 
     raise ValueError(f"Unknown provider: {provider}")
 
 
-def create_opencode_go_llm(model: str, temperature: float = 0.7, max_tokens: int = 512):
+def create_opencode_go_llm(
+    model: str,
+    temperature: float = 0.7,
+    max_tokens: int = 512,
+    *,
+    reasoning_effort: str | None = None,
+):
     """OpenCode Go 用 LangChain ChatModel を返す。"""
     api_key = config.OPENCODE_API_KEY
     if not api_key:
@@ -523,9 +546,11 @@ def create_opencode_go_llm(model: str, temperature: float = 0.7, max_tokens: int
                 "langchain-openai is required for provider 'opencode_go' with OpenAI-compatible models. "
                 "Install with: pip install -U langchain-openai"
             )
-        options = {}
+        options: dict[str, Any] = {}
         if model.startswith("gpt-"):
             options["use_responses_api"] = True
+        if reasoning_effort is not None:
+            options["reasoning_effort"] = reasoning_effort
 
         return ChatOpenAI(
             model=model,
@@ -563,6 +588,7 @@ def create_openai_llm(
     *,
     use_responses_api: bool | None = None,
     store: bool | None = None,
+    reasoning_effort: str | None = None,
 ):
     """OpenAI 用 LangChain ChatModel を返す。"""
     try:
@@ -577,11 +603,13 @@ def create_openai_llm(
     if not api_key:
         raise RuntimeError("Environment variable OPENAI_API_KEY is not set")
 
-    options = {}
+    options: dict[str, Any] = {}
     if use_responses_api is not None:
         options["use_responses_api"] = use_responses_api
     if store is not None:
         options["store"] = store
+    if reasoning_effort is not None:
+        options["reasoning_effort"] = reasoning_effort
 
     return ChatOpenAI(
         model=model,
@@ -616,7 +644,13 @@ def create_gemini_llm(model: str, temperature: float = 0.7, max_tokens: int = 51
     )
 
 
-def create_ollama_llm(model: str, temperature: float = 0.7, max_tokens: int = 512):
+def create_ollama_llm(
+    model: str,
+    temperature: float = 0.7,
+    max_tokens: int = 512,
+    *,
+    reasoning: str | bool | None = None,
+):
     """Ollama 用 LangChain ChatModel を返す。"""
     try:
         from langchain_ollama import ChatOllama
@@ -626,11 +660,18 @@ def create_ollama_llm(model: str, temperature: float = 0.7, max_tokens: int = 51
             "Install with: pip install -U langchain-ollama"
         )
 
+    options: dict[str, Any] = {}
+    if reasoning is not None:
+        cleaned = reasoning.strip() if isinstance(reasoning, str) else reasoning
+        if cleaned:
+            options["reasoning"] = cleaned
+
     return ChatOllama(
         model=model,
         temperature=temperature,
         num_predict=max_tokens,
         validate_model_on_init=True,
+        **options,
     )
 
 

@@ -480,6 +480,12 @@ def get_db_connection() -> sqlite3.Connection:
     if current_version <= 21:
         run_migration_v22(conn)
 
+    if current_version <= 22:
+        run_migration_v23(conn)
+
+    if current_version <= 23:
+        run_migration_v24(conn)
+
     return conn
 
 
@@ -638,6 +644,7 @@ def run_migration_v21(conn: sqlite3.Connection) -> None:
             provider TEXT,
             model TEXT,
             tool_ids_json TEXT NOT NULL DEFAULT '[]',
+            advanced_params_json TEXT NOT NULL DEFAULT '{}',
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         );
@@ -698,6 +705,62 @@ def run_migration_v22(conn: sqlite3.Connection) -> None:
     except sqlite3.OperationalError as e:
         _ignore_duplicate_schema_object(e)
     conn.execute("PRAGMA user_version = 22;")
+    conn.commit()
+
+
+def run_migration_v23(conn: sqlite3.Connection) -> None:
+    """Run migration for version 23 (agent advanced params + prompt templates).
+
+    - agents.advanced_params_json: JSON for max_tokens and reasoning.effort.
+      Stored as {"max_tokens": int, "reasoning": {"effort": str}}.
+      Single `max_tokens` value is mapped by LangChain to max_completion_tokens
+      or max_output_tokens (Responses API) and to num_predict (Ollama).
+    - agent_prompt_templates: per-agent named prompt snippets, inserted by
+      replacing the chat input when selected. Phase 1 is plain text only;
+      variable expansion is deferred to phase 2.
+    """
+    try:
+        conn.execute(
+            "ALTER TABLE agents ADD COLUMN advanced_params_json TEXT NOT NULL DEFAULT '{}';"
+        )
+    except sqlite3.OperationalError as e:
+        _ignore_duplicate_schema_object(e)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS agent_prompt_templates (
+            template_id TEXT PRIMARY KEY,
+            agent_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            content TEXT NOT NULL,
+            display_order INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY(agent_id) REFERENCES agents(agent_id) ON DELETE CASCADE
+        );
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_apt_agent_order ON agent_prompt_templates(agent_id, display_order);"
+    )
+    conn.execute("PRAGMA user_version = 23;")
+    conn.commit()
+
+
+def run_migration_v24(conn: sqlite3.Connection) -> None:
+    """Run migration for version 24 (agent_messages.attachments_json for multimodal chat).
+
+    Stores user-uploaded image attachments as a JSON array of
+    ``{"name": str, "mime_type": str, "data": str (base64 data URL body)}``
+    records so they can be replayed to the LLM in subsequent turns and shown
+    back to the user in the chat history. Empty list ``'[]'`` means no images.
+    Mirrors the additive patterns used for ``agent_runs.tool_calls_json``
+    (v22) and ``agents.advanced_params_json`` (v23).
+    """
+    try:
+        conn.execute(
+            "ALTER TABLE agent_messages ADD COLUMN attachments_json TEXT NOT NULL DEFAULT '[]';"
+        )
+    except sqlite3.OperationalError as e:
+        _ignore_duplicate_schema_object(e)
+    conn.execute("PRAGMA user_version = 24;")
     conn.commit()
 
 

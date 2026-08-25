@@ -34,6 +34,7 @@ import type {
   AgentStreamEvent,
   HealthcareOverviewResponse,
   HealthcareCorrelationResponse,
+  AgentPromptTemplate,
 } from "./types";
 
 const TOKEN_KEY = "obsidian-ai-hub:api-token";
@@ -532,6 +533,7 @@ export function createAgent(payload: {
   tool_ids?: string[];
   provider?: string;
   model?: string;
+  advanced_params?: { max_tokens?: number; reasoning?: { effort?: string } } | null;
 }): Promise<{ agent: Agent }> {
   return request<{ agent: Agent }>("/api/v1/agents", {
     method: "POST",
@@ -551,6 +553,7 @@ export function updateAgent(
     tool_ids?: string[];
     provider?: string;
     model?: string;
+    advanced_params?: { max_tokens?: number; reasoning?: { effort?: string } } | null;
   },
 ): Promise<{ agent: Agent }> {
   return request<{ agent: Agent }>(`/api/v1/agents/${encodeURIComponent(agentId)}`, {
@@ -599,6 +602,51 @@ export function getAgentSessionDetail(
 export function deleteAgentSession(sessionId: string): Promise<{ success: boolean }> {
   return request<{ success: boolean }>(
     `/api/v1/agent-sessions/${encodeURIComponent(sessionId)}`,
+    { method: "DELETE" },
+  );
+}
+
+export function listPromptTemplates(agentId: string): Promise<{ templates: AgentPromptTemplate[] }> {
+  return request<{ templates: AgentPromptTemplate[] }>(
+    `/api/v1/agents/${encodeURIComponent(agentId)}/prompt-templates`,
+  );
+}
+
+export function createPromptTemplate(
+  agentId: string,
+  payload: { name: string; content: string },
+): Promise<{ template: AgentPromptTemplate }> {
+  return request<{ template: AgentPromptTemplate }>(
+    `/api/v1/agents/${encodeURIComponent(agentId)}/prompt-templates`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export function getPromptTemplate(templateId: string): Promise<{ template: AgentPromptTemplate }> {
+  return request<{ template: AgentPromptTemplate }>(
+    `/api/v1/agent-prompt-templates/${encodeURIComponent(templateId)}`,
+  );
+}
+
+export function updatePromptTemplate(
+  templateId: string,
+  payload: { name?: string; content?: string; display_order?: number },
+): Promise<{ template: AgentPromptTemplate }> {
+  return request<{ template: AgentPromptTemplate }>(
+    `/api/v1/agent-prompt-templates/${encodeURIComponent(templateId)}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export function deletePromptTemplate(templateId: string): Promise<{ success: boolean }> {
+  return request<{ success: boolean }>(
+    `/api/v1/agent-prompt-templates/${encodeURIComponent(templateId)}`,
     { method: "DELETE" },
   );
 }

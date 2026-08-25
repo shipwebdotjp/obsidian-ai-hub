@@ -309,3 +309,33 @@ Apple取得が失敗・利用不能の場合は、Apple項目だけを空とし�
 - 分離DBのためバックアップ対象は `memory.sqlite3` とは別に `healthcare.sqlite3` を `backup/sync_folders` に含める必要がある。将来の `health_daily_metrics` 集計は VIEW/refresh ジョブで追加予定。
 - ECG 波形を DB に持たないため検索はファイルI/O依存だが、医療データの肥大化と `health_ecg_samples` の `WITHOUT ROWID` 運用コストを回避。
 - re-import は fingerprint UNIQUE で `ignored_duplicates` として集計し、2回目は `health_records` 不変・`health_imports` のみ追加。ECG も `UNIQUE(file_path)` で同様。
+
+## AIエージェントの高度なパラメーターとプロンプトテンプレート（スキーマ v23）
+
+| 項目 | 内容 |
+|------|------|
+| 決定日 | 2026-08-25 |
+| カテゴリ | LLM連携・Web UI |
+| 決定内容 | エージェント単位に `max_tokens` / `reasoning.effort` を `agents.advanced_params_json` で保持。`max_tokens` は UI で1フィールド（max_completion_tokens / max_output_tokens の区別を隠蔽）。`reasoning.effort` はフェーズ1では自由入力。プロンプトテンプレートは `agent_prompt_templates` でエージェント単位に管理し、チャット入力欄で選択すると入力を置き換える。フェーズ1はプレーンテキスト固定、変数展開はフェーズ2以降。 |
+
+### 結論に至った経緯
+
+OpenAI Responses API は `max_output_tokens`、Chat Completions は `max_completion_tokens`、Ollama は `num_predict` と名称が異なるが実質同一。UI では1つの「最大トークン数」として統一し、LangChain `ChatOpenAI(max_tokens=...)` のエイリアス機構と Responses API 時の自動 `max_output_tokens` 変換を活用。`reasoning.effort` も `ChatOpenAI(reasoning_effort=...)` が Responses API 時に `reasoning.effort` へ正規化されることを確認。Ollama のみ `num_predict` / `reasoning` へ明示マッピングする。
+
+### データモデル（スキーマ v23）
+
+- `agents.advanced_params_json TEXT NOT NULL DEFAULT '{}'`：`{"max_tokens": int, "reasoning": {"effort": str}}`。範囲制限は設けず、構造のみサニタイズ。欠損列の既存DBでは `try/except` で `{}` にフォールバック。
+- `agent_prompt_templates`：`template_id` / `agent_id` FK CASCADE / `name` / `content` / `display_order` / `created_at` / `updated_at`。索引 `idx_apt_agent_order(agent_id, display_order)`。
+- API：`advanced_params` は `AdvancedParamsRequest{max_tokens?: int, reasoning?: {effort?: string}}`、`prompt-templates` は `GET/POST /agents/{id}/prompt-templates` と `GET/PATCH/DELETE /agent-prompt-templates/{id}`。
+- 実行時：`agents/runtime.py` で `advanced_params` を解釈し `create_langchain_llm(provider, model, max_tokens, reasoning_effort)` へ渡す。provider 別マッピングは `utils/llm_client.py` に集約（openai/opencode_go → `reasoning_effort`、ollama → `reasoning`、gemini/local は無視）。
+
+### 仕組みの概要
+
+1. **UI（`AgentsPage.tsx`）**：エージェント編集フォームに「高度なパラメーター」折り畳み（`<details>`、既定で閉）。`max_tokens` は数値入力、`reasoning.effort` は自由入力。保存時に `buildAdvancedParams()` で `{max_tokens?: int, reasoning?: {effort}}` を構築。プロンプトテンプレート管理は編集時のみ表示（追加・編集・削除）、チャット入力欄の「テンプレート」ボタンでドロップダウンを表示し選択で入力を置き換え。
+2. **将来拡張**：変数展開（例 `{{今日の日付}}`）はフェーズ2へ延期。AI側はまだ何もしない。
+
+### トレードオフ
+
+- 1フィールドで `max_tokens` を統一したため、Responses API の `max_output_tokens` との厳密な差異を UI で意識できないが、LangChain の吸収により実用上の問題はなく複雑性を下げられる。
+- `reasoning.effort` を自由入力にしたため無効値を送る可能性があるが、provider 側のエラーは `runtime` の例外として `fail_run` へ集約され、DB への永続化は防がれる。
+- プロンプトテンプレートの並び替えは `display_order` で管理するが、フェーズ1ではドラッグ並替えは提供せず追加順のみ。

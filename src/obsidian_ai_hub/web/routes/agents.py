@@ -20,6 +20,23 @@ router = APIRouter(dependencies=[Depends(require_bearer_token)])
 # --- Request Schemas ---
 
 
+class ReasoningParamsRequest(BaseModel):
+    effort: Optional[str] = Field(default=None, description="reasoning.effort (e.g. low/medium/high)")
+
+    model_config = {"extra": "forbid"}
+
+
+class AdvancedParamsRequest(BaseModel):
+    max_tokens: Optional[int] = Field(
+        default=None, ge=1, description="max_tokens (mapped to max_output_tokens/max_completion_tokens/num_predict by provider)"
+    )
+    reasoning: Optional[ReasoningParamsRequest] = Field(
+        default=None, description="Reasoning config"
+    )
+
+    model_config = {"extra": "forbid"}
+
+
 class CreateAgentRequest(BaseModel):
     name: str = Field(..., description="Agent display name")
     system_prompt: str = Field(..., description="System instructions for the agent")
@@ -30,6 +47,9 @@ class CreateAgentRequest(BaseModel):
         default=None, description="LLM provider override"
     )
     model: Optional[str] = Field(default=None, description="LLM model override")
+    advanced_params: Optional[AdvancedParamsRequest] = Field(
+        default=None, description="Advanced LLM params (max_tokens, reasoning.effort)"
+    )
 
 
 class UpdateAgentRequest(BaseModel):
@@ -42,6 +62,20 @@ class UpdateAgentRequest(BaseModel):
     )
     provider: Optional[str] = Field(default=None, description="LLM provider")
     model: Optional[str] = Field(default=None, description="LLM model")
+    advanced_params: Optional[AdvancedParamsRequest] = Field(
+        default=None, description="Advanced LLM params (max_tokens, reasoning.effort)"
+    )
+
+
+class CreatePromptTemplateRequest(BaseModel):
+    name: str = Field(..., description="Template name")
+    content: str = Field(..., description="Template content (plain text)")
+
+
+class UpdatePromptTemplateRequest(BaseModel):
+    name: Optional[str] = Field(default=None, description="Template name")
+    content: Optional[str] = Field(default=None, description="Template content")
+    display_order: Optional[int] = Field(default=None, description="Display order")
 
 
 class CreateSessionRequest(BaseModel):
@@ -73,12 +107,14 @@ def list_agents() -> Dict[str, Any]:
 @router.post("/agents", status_code=status.HTTP_201_CREATED)
 def create_agent(req: CreateAgentRequest) -> Dict[str, Any]:
     try:
+        adv = req.advanced_params.model_dump(exclude_none=True) if req.advanced_params else None
         agent = agent_service.create_agent(
             name=req.name,
             system_prompt=req.system_prompt,
             tool_ids=req.tool_ids,
             provider=req.provider,
             model=req.model,
+            advanced_params=adv,
         )
         return {"agent": agent}
     except ValueError as e:
@@ -100,6 +136,10 @@ def get_agent(agent_id: str) -> Dict[str, Any]:
 @router.patch("/agents/{agent_id}")
 def update_agent(agent_id: str, req: UpdateAgentRequest) -> Dict[str, Any]:
     try:
+        # Use model_fields_set to detect explicit null vs absent for advanced_params
+        adv = None
+        if "advanced_params" in req.model_fields_set:
+            adv = req.advanced_params.model_dump(exclude_none=True) if req.advanced_params else {}
         agent = agent_service.update_agent(
             agent_id=agent_id,
             name=req.name,
@@ -107,6 +147,7 @@ def update_agent(agent_id: str, req: UpdateAgentRequest) -> Dict[str, Any]:
             tool_ids=req.tool_ids,
             provider=req.provider,
             model=req.model,
+            advanced_params=adv,
         )
         return {"agent": agent}
     except FileNotFoundError as e:
@@ -161,6 +202,69 @@ def get_session_detail(session_id: str) -> Dict[str, Any]:
 def delete_session(session_id: str) -> Dict[str, Any]:
     try:
         agent_service.delete_session(session_id)
+        return {"success": True}
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+
+
+# --- Prompt Template Routes ---
+
+
+@router.get("/agents/{agent_id}/prompt-templates")
+def list_prompt_templates(agent_id: str) -> Dict[str, Any]:
+    try:
+        templates = agent_service.list_prompt_templates(agent_id)
+        return {"templates": templates}
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+
+
+@router.post(
+    "/agents/{agent_id}/prompt-templates", status_code=status.HTTP_201_CREATED
+)
+def create_prompt_template(
+    agent_id: str, req: CreatePromptTemplateRequest
+) -> Dict[str, Any]:
+    try:
+        tmpl = agent_service.create_prompt_template(agent_id, req.name, req.content)
+        return {"template": tmpl}
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+
+
+@router.get("/agent-prompt-templates/{template_id}")
+def get_prompt_template(template_id: str) -> Dict[str, Any]:
+    try:
+        tmpl = agent_service.get_prompt_template(template_id)
+        return {"template": tmpl}
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+
+
+@router.patch("/agent-prompt-templates/{template_id}")
+def update_prompt_template(
+    template_id: str, req: UpdatePromptTemplateRequest
+) -> Dict[str, Any]:
+    try:
+        tmpl = agent_service.update_prompt_template(
+            template_id,
+            name=req.name,
+            content=req.content,
+            display_order=req.display_order,
+        )
+        return {"template": tmpl}
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+
+
+@router.delete("/agent-prompt-templates/{template_id}")
+def delete_prompt_template(template_id: str) -> Dict[str, Any]:
+    try:
+        agent_service.delete_prompt_template(template_id)
         return {"success": True}
     except FileNotFoundError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
