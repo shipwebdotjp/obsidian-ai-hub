@@ -187,3 +187,7 @@
 ## Web AI エージェントの `/` コマンドパレット（プロンプトテンプレート呼び出し）
 
 [移転先: 10-Decisions-Web.md](10-Decisions-Web.md)
+
+## AI エージェントの任意シェル実行（run_shell）と権限付与方針
+
+[移転先: 10-Decisions-Architecture.md](10-Decisions-Architecture.md)

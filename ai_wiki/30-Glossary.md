@@ -23,3 +23,7 @@
 ## Agent Skills (スキル)
 
 エージェントが参照・利用できる手順書（`SKILL.md`）、補助テキストリソース、および直結スクリプトの集まり。1次ルート（`~/.agents/skills`）および2次ルート（`agent_skills.root` / `OBSIDIAN_AI_HUB_SKILLS_DIR`）から自動発見・インデックス化され、同名 Skill は2次ルートが優先される。エージェントが `skills` ツールを選択した際、`load_skill`（手順書取得）、`read_skill_resource`（リソース読取）、`run_skill_script`（スクリプト直接実行）の3ツールに展開される。
+
+## 任意シェル実行 (run_shell)
+
+`agents.registry` にネイティブツールとして登録されたシェルコマンド実行機能。任意シェル実行は有効化したエージェントへアプリ権限で直接与える。エージェント編集画面で明示選択された場合のみ利用可能であり、HITL なしで実行され、`exit_code` / `stdout` / `stderr` / `timeout` を構造化 JSON で返す。

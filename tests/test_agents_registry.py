@@ -1,5 +1,7 @@
 import json
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
+import subprocess
+import signal
 import pytest
 from langchain_core.tools import BaseTool
 
@@ -25,7 +27,8 @@ def test_list_available_tools():
         "people_get",
         "project_search",
         "project_get",
-            "skills",
+        "skills",
+        "run_shell",
     }
     # Order is not contractual; assert membership instead.
     assert set(tool_ids) == expected_ids
@@ -443,3 +446,65 @@ def test_project_get_validation():
     # non-numeric string must be rejected
     with pytest.raises(ValidationError):
         registry.project_get.invoke({"project_id": "abc"})
+
+
+def test_run_shell_success():
+    res_str = registry.run_shell.invoke({"command": "echo Hello Shell"})
+    res = json.loads(res_str)
+    assert res["exit_code"] == 0
+    assert "Hello Shell" in res["stdout"]
+    assert res["stderr"] == ""
+    assert res["timeout"] is False
+
+
+def test_run_shell_env_and_cwd():
+    import os
+    from obsidian_ai_hub.utils.config import BASE_DIR
+
+    res_str = registry.run_shell.invoke({"command": "pwd"})
+    res = json.loads(res_str)
+    assert res["exit_code"] == 0
+    assert str(BASE_DIR) in res["stdout"]
+
+    os.environ["TEST_RUN_SHELL_ENV_VAR"] = "shell_test_value"
+    try:
+        res_env_str = registry.run_shell.invoke({"command": "echo $TEST_RUN_SHELL_ENV_VAR"})
+        res_env = json.loads(res_env_str)
+        assert "shell_test_value" in res_env["stdout"]
+    finally:
+        os.environ.pop("TEST_RUN_SHELL_ENV_VAR", None)
+
+
+def test_run_shell_truncation():
+    # Generate stdout and stderr longer than 20,000 characters
+    cmd = "python3 -c 'import sys; print(\"A\" * 25000); print(\"B\" * 25000, file=sys.stderr)'"
+    res_str = registry.run_shell.invoke({"command": cmd})
+    res = json.loads(res_str)
+    assert res["exit_code"] == 0
+    assert len(res["stdout"]) < 21000
+    assert res["stdout"].startswith("A" * 20000)
+    assert res["stdout"].endswith("\n...(truncated)")
+    assert len(res["stderr"]) < 21000
+    assert res["stderr"].startswith("B" * 20000)
+    assert res["stderr"].endswith("\n...(truncated)")
+
+
+def test_run_shell_timeout():
+    with patch("obsidian_ai_hub.agents.registry.os.killpg") as mock_killpg:
+        # We mock communication timeout on Popen
+        with patch("subprocess.Popen") as mock_popen_cls:
+            mock_proc = MagicMock()
+            mock_proc.pid = 12345
+            mock_proc.communicate.side_effect = [
+                subprocess.TimeoutExpired(cmd="sleep 100", timeout=600),
+                ("partial stdout", "partial stderr"),
+            ]
+            mock_popen_cls.return_value = mock_proc
+
+            res_str = registry.run_shell.invoke({"command": "sleep 100"})
+            res = json.loads(res_str)
+            assert res["exit_code"] == -1
+            assert res["timeout"] is True
+            assert res["stdout"] == "partial stdout"
+            assert res["stderr"] == "partial stderr"
+            mock_killpg.assert_called_once_with(12345, signal.SIGKILL)
