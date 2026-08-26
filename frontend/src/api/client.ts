@@ -28,6 +28,7 @@ import type {
   Agent,
   AgentTool,
   AgentSession,
+  AgentMessageSearchResult,
   AgentMessage,
   AgentMessageAttachment,
   AgentRun,
@@ -577,6 +578,15 @@ export function listAgentTools(): Promise<{ tools: AgentTool[] }> {
 export function listAgentSessions(agentId: string): Promise<{ sessions: AgentSession[] }> {
   return request<{ sessions: AgentSession[] }>(
     `/api/v1/agents/${encodeURIComponent(agentId)}/sessions`,
+  );
+}
+
+export function searchAgentMessages(
+  query: string,
+): Promise<{ results: AgentMessageSearchResult[] }> {
+  const params = new URLSearchParams({ q: query });
+  return request<{ results: AgentMessageSearchResult[] }>(
+    `/api/v1/agent-sessions/search?${params.toString()}`,
   );
 }
 

@@ -253,6 +253,14 @@ def create_session(agent_id: str, req: CreateSessionRequest) -> Dict[str, Any]:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
 
 
+@router.get("/agent-sessions/search")
+def search_session_messages(q: str) -> Dict[str, Any]:
+    try:
+        return {"results": agent_service.search_messages(q)}
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+
+
 @router.get("/agent-sessions/{session_id}")
 def get_session_detail(session_id: str) -> Dict[str, Any]:
     try:

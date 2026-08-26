@@ -25,6 +25,9 @@ def test_agent_endpoints_require_auth(client):
     res = client.get("/api/v1/agent-tools")
     assert res.status_code == 401
 
+    res = client.get("/api/v1/agent-sessions/search?q=test")
+    assert res.status_code == 401
+
 
 def test_list_agent_tools(client, auth_headers):
     res = client.get("/api/v1/agent-tools", headers=auth_headers)
@@ -125,6 +128,49 @@ def test_session_crud_flow(client, auth_headers):
 
     res = client.get(f"/api/v1/agent-sessions/{session_id}", headers=auth_headers)
     assert res.status_code == 404
+
+
+def test_search_agent_messages_across_agents(client, auth_headers):
+    from obsidian_ai_hub.agents import store
+
+    first_agent = client.post(
+        "/api/v1/agents",
+        json={"name": "Search API First", "system_prompt": "Prompt"},
+        headers=auth_headers,
+    ).json()["agent"]
+    second_agent = client.post(
+        "/api/v1/agents",
+        json={"name": "Search API Second", "system_prompt": "Prompt"},
+        headers=auth_headers,
+    ).json()["agent"]
+    first_session = client.post(
+        f"/api/v1/agents/{first_agent['agent_id']}/sessions",
+        json={"title": "第一会話"},
+        headers=auth_headers,
+    ).json()["session"]
+    second_session = client.post(
+        f"/api/v1/agents/{second_agent['agent_id']}/sessions",
+        json={"title": "第二会話"},
+        headers=auth_headers,
+    ).json()["session"]
+    first_message, _ = store.start_user_run(first_session["session_id"], "共通の検索語")
+    second_message, _ = store.start_user_run(second_session["session_id"], "共通の検索語です")
+
+    res = client.get("/api/v1/agent-sessions/search?q=%E5%85%B1%E9%80%9A", headers=auth_headers)
+
+    assert res.status_code == 200
+    results = res.json()["results"]
+    assert {item["message_id"] for item in results} == {
+        first_message["message_id"],
+        second_message["message_id"],
+    }
+    assert {item["agent_name"] for item in results} == {
+        "Search API First",
+        "Search API Second",
+    }
+
+    blank = client.get("/api/v1/agent-sessions/search?q=%20%20", headers=auth_headers)
+    assert blank.status_code == 400
 
 
 def test_stream_message_sse_api(client, auth_headers):

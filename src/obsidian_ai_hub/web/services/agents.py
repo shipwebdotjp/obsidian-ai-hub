@@ -83,6 +83,10 @@ def list_sessions(agent_id: str) -> List[Dict[str, Any]]:
     return store.list_sessions(agent_id)
 
 
+def search_messages(query: str) -> List[Dict[str, Any]]:
+    return store.search_messages(query)
+
+
 def create_session(agent_id: str, title: Optional[str] = None) -> Dict[str, Any]:
     return store.create_session(agent_id, title=title)
 

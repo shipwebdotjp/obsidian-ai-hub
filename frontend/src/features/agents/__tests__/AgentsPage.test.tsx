@@ -11,6 +11,7 @@ vi.mock("../../../api/client", () => ({
   updateAgent: vi.fn(),
   deleteAgent: vi.fn(),
   listAgentSessions: vi.fn(),
+  searchAgentMessages: vi.fn(),
   createAgentSession: vi.fn(),
   getAgentSessionDetail: vi.fn(),
   deleteAgentSession: vi.fn(),
@@ -36,6 +37,7 @@ import {
   updateAgent,
   deleteAgent,
   listAgentSessions,
+  searchAgentMessages,
   createAgentSession,
   getAgentSessionDetail,
   deleteAgentSession,
@@ -48,6 +50,7 @@ const mockListAgents = vi.mocked(listAgents);
 const mockListTools = vi.mocked(listAgentTools);
 const mockCreateAgent = vi.mocked(createAgent);
 const mockListSessions = vi.mocked(listAgentSessions);
+const mockSearchMessages = vi.mocked(searchAgentMessages);
 const mockGetSessionDetail = vi.mocked(getAgentSessionDetail);
 const mockListTemplates = vi.mocked(listPromptTemplates);
 const mockUpdateAgent = vi.mocked(updateAgent);
@@ -92,6 +95,7 @@ beforeEach(() => {
   mockListAgents.mockResolvedValue({ agents: [sampleAgent] });
   mockListTools.mockResolvedValue({ tools: sampleTools });
   mockListSessions.mockResolvedValue({ sessions: [sampleSession] });
+  mockSearchMessages.mockResolvedValue({ results: [] });
   mockListTemplates.mockResolvedValue({ templates: [] });
   mockUpdateAgent.mockResolvedValue({ agent: sampleAgent });
   mockUpdateSession.mockResolvedValue({ session: sampleSession });
@@ -160,6 +164,90 @@ describe("AgentsPage", () => {
     });
 
     expect(screen.getByText("会話履歴がありません")).toBeInTheDocument();
+  });
+
+  it("searches messages across agents and opens the exact matching message", async () => {
+    const user = userEvent.setup();
+    const otherAgent = {
+      ...sampleAgent,
+      agent_id: "agent_999",
+      name: "リサーチアシスタント",
+    };
+    const otherSession = {
+      ...sampleSession,
+      session_id: "asess_999",
+      agent_id: otherAgent.agent_id,
+      title: "横断検索の会話",
+    };
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+      configurable: true,
+      value: scrollIntoView,
+    });
+
+    mockListAgents.mockResolvedValue({ agents: [sampleAgent, otherAgent] });
+    mockListSessions.mockImplementation(async (agentId) => ({
+      sessions: agentId === otherAgent.agent_id ? [otherSession] : [sampleSession],
+    }));
+    mockSearchMessages.mockResolvedValue({
+      results: [
+        {
+          agent_id: otherAgent.agent_id,
+          agent_name: otherAgent.name,
+          session_id: otherSession.session_id,
+          session_title: otherSession.title,
+          session_updated_at: otherSession.updated_at,
+          message_id: "msg_other_hit",
+          role: "assistant",
+          snippet: "横断検索で見つかった回答です",
+          created_at: otherSession.updated_at,
+        },
+      ],
+    });
+    mockGetSessionDetail.mockImplementation(async (sessionId) => {
+      if (sessionId === otherSession.session_id) {
+        return {
+          session: otherSession,
+          agent: otherAgent,
+          messages: [
+            {
+              message_id: "msg_other_hit",
+              session_id: otherSession.session_id,
+              sequence: 1,
+              role: "assistant",
+              content: "横断検索で見つかった回答です",
+              created_at: otherSession.updated_at,
+            },
+          ],
+          runs: [],
+        };
+      }
+      return {
+        session: sampleSession,
+        agent: sampleAgent,
+        messages: [],
+        runs: [],
+      };
+    });
+
+    render(
+      <MemoryRouter>
+        <AgentsPage />
+      </MemoryRouter>
+    );
+
+    await user.type(await screen.findByRole("searchbox", { name: "会話履歴を検索" }), "横断検索");
+    await act(() => new Promise((resolve) => window.setTimeout(resolve, 220)));
+
+    expect(mockSearchMessages).toHaveBeenCalledWith("横断検索");
+    const result = await screen.findByTestId("agent-message-search-result-msg_other_hit");
+    expect(within(result).getByText("リサーチアシスタント")).toBeInTheDocument();
+    await user.click(result);
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-message-id="msg_other_hit"]')).toBeInTheDocument();
+      expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "center" });
+    });
   });
 
   it("displays unselected message when no agent is selected", async () => {

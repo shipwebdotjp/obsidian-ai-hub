@@ -12,6 +12,7 @@ import {
   listAgentSessions,
   listAgentTools,
   listPromptTemplates,
+  searchAgentMessages,
   streamAgentMessage,
   updateAgent,
   updateAgentSession,
@@ -22,6 +23,7 @@ import type {
   AgentLiveToolCall,
   AgentMessage,
   AgentMessageAttachment,
+  AgentMessageSearchResult,
   AgentPromptTemplate,
   AgentRun,
   AgentSession,
@@ -138,6 +140,11 @@ export default function AgentsPage() {
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<AgentMessage[]>([]);
   const [runs, setRuns] = useState<AgentRun[]>([]);
+  const [loadedSessionId, setLoadedSessionId] = useState<string | null>(null);
+  const [sessionSearchQuery, setSessionSearchQuery] = useState("");
+  const [sessionSearchResults, setSessionSearchResults] = useState<AgentMessageSearchResult[]>([]);
+  const [isSessionSearchLoading, setIsSessionSearchLoading] = useState(false);
+  const [sessionSearchError, setSessionSearchError] = useState<string | null>(null);
 
   // Agent form state
   const [isEditingAgent, setIsEditingAgent] = useState(false);
@@ -200,6 +207,8 @@ export default function AgentsPage() {
   const streamGenerationRef = useRef(0);
   const streamingTextBufferRef = useRef("");
   const streamingTextFrameRef = useRef<number | null>(null);
+  const messageElementRefs = useRef(new Map<string, HTMLDivElement>());
+  const pendingSearchTargetRef = useRef<{ sessionId: string; messageId: string } | null>(null);
 
   const invalidatePendingStreamingText = useCallback(() => {
     streamGenerationRef.current += 1;
@@ -302,6 +311,7 @@ export default function AgentsPage() {
       setSessions([]);
       setSelectedSessionId(null);
       setMessages([]);
+      setLoadedSessionId(null);
       return;
     }
     loadSessions(selectedAgentId);
@@ -350,6 +360,7 @@ export default function AgentsPage() {
       const detail = await getAgentSessionDetail(sessionId);
       setMessages(detail.messages);
       setRuns(detail.runs || []);
+      setLoadedSessionId(sessionId);
       setChatError(null);
     } catch (e: unknown) {
       const message =
@@ -451,6 +462,7 @@ export default function AgentsPage() {
 
     if (!selectedSessionId) {
       setMessages([]);
+      setLoadedSessionId(null);
       setInputText("");
       setPendingAttachments([]);
       if (imageInputRef.current) {
@@ -458,6 +470,7 @@ export default function AgentsPage() {
       }
       return;
     }
+    setLoadedSessionId(null);
     loadSessionDetail(selectedSessionId);
     setHitlLinks([]);
     loadDraft(selectedSessionId);
@@ -465,6 +478,53 @@ export default function AgentsPage() {
       imageInputRef.current.value = "";
     }
   }, [selectedSessionId, loadDraft]);
+
+  useEffect(() => {
+    const query = sessionSearchQuery.trim();
+    if (!query) {
+      setSessionSearchResults([]);
+      setSessionSearchError(null);
+      setIsSessionSearchLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setIsSessionSearchLoading(true);
+    setSessionSearchError(null);
+    const timer = window.setTimeout(() => {
+      void searchAgentMessages(query)
+        .then((res) => {
+          if (!cancelled) setSessionSearchResults(res.results);
+        })
+        .catch((error: unknown) => {
+          if (!cancelled) {
+            setSessionSearchResults([]);
+            setSessionSearchError(
+              error instanceof Error ? error.message : "会話履歴の検索に失敗しました。",
+            );
+          }
+        })
+        .finally(() => {
+          if (!cancelled) setIsSessionSearchLoading(false);
+        });
+    }, 200);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [sessionSearchQuery]);
+
+  useEffect(() => {
+    const target = pendingSearchTargetRef.current;
+    if (!target || loadedSessionId !== target.sessionId) return;
+
+    const messageElement = messageElementRefs.current.get(target.messageId);
+    if (messageElement) {
+      messageElement.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+    pendingSearchTargetRef.current = null;
+  }, [loadedSessionId, messages]);
 
   // Auto-save draft (text + attachments) with a 200ms debounce.
   useEffect(() => {
@@ -889,6 +949,38 @@ export default function AgentsPage() {
     } catch (e: any) {
       setActionError("セッション作成に失敗しました: " + e.message);
     }
+  };
+
+  const handleSelectSearchResult = (result: AgentMessageSearchResult) => {
+    const isCurrentSession =
+      selectedSessionId === result.session_id && loadedSessionId === result.session_id;
+    if (isCurrentSession) {
+      setLeftPaneOpen(false);
+      messageElementRefs.current
+        .get(result.message_id)
+        ?.scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
+    }
+
+    pendingSearchTargetRef.current = {
+      sessionId: result.session_id,
+      messageId: result.message_id,
+    };
+    // The session list reloads when the agent changes. Reuse the existing
+    // deep-link target so that reload cannot replace this search selection.
+    pendingSessionIdRef.current =
+      result.agent_id === selectedAgentId ? null : result.session_id;
+    setSelectedAgentId(result.agent_id);
+    setSelectedSessionId(result.session_id);
+    setLeftPaneOpen(false);
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.set("session_id", result.session_id);
+        return next;
+      },
+      { replace: true },
+    );
   };
 
   const handleDeleteSessionConfirm = async () => {
@@ -1333,8 +1425,48 @@ export default function AgentsPage() {
               </button>
             )}
           </div>
+          <div className="border-b border-slate-200 p-2">
+            <input
+              type="search"
+              value={sessionSearchQuery}
+              onChange={(e) => setSessionSearchQuery(e.target.value)}
+              placeholder="すべての会話を検索"
+              aria-label="会話履歴を検索"
+              className="w-full rounded border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-800 placeholder:text-slate-400 focus:border-slate-500 focus:outline-none"
+            />
+          </div>
           <div className="flex-1 overflow-y-auto p-2 space-y-1">
-            {!selectedAgentId ? (
+            {sessionSearchQuery.trim() ? (
+              isSessionSearchLoading ? (
+                <p className="p-3 text-center text-xs text-slate-400">検索中…</p>
+              ) : sessionSearchError ? (
+                <p className="p-3 text-center text-xs text-rose-600">{sessionSearchError}</p>
+              ) : sessionSearchResults.length === 0 ? (
+                <p className="p-3 text-center text-xs text-slate-400">該当するメッセージはありません</p>
+              ) : (
+                sessionSearchResults.map((result) => (
+                  <button
+                    key={result.message_id}
+                    type="button"
+                    onClick={() => handleSelectSearchResult(result)}
+                    data-testid={`agent-message-search-result-${result.message_id}`}
+                    className="w-full rounded px-3 py-2 text-left text-xs text-slate-700 transition hover:bg-slate-100 cursor-pointer"
+                  >
+                    <div className="flex items-center gap-1 truncate text-[10px] text-slate-500">
+                      <span className="font-semibold text-slate-700">{result.agent_name}</span>
+                      <span aria-hidden="true">/</span>
+                      <span className="truncate">{result.session_title}</span>
+                    </div>
+                    <div className="mt-0.5 line-clamp-2 break-words text-slate-800">
+                      <span className="mr-1 text-[10px] text-slate-500">
+                        {result.role === "user" ? "ユーザー:" : "アシスタント:"}
+                      </span>
+                      {result.snippet}
+                    </div>
+                  </button>
+                ))
+              )
+            ) : !selectedAgentId ? (
               <p className="p-3 text-center text-xs text-slate-400">
                 エージェントを選択してください
               </p>
@@ -1807,7 +1939,18 @@ export default function AgentsPage() {
                   const toolCalls: AgentToolCall[] = relatedRun?.tool_calls || [];
                   const isAssistant = m.role === "assistant";
                   return (
-                    <div key={m.message_id} className="space-y-1">
+                    <div
+                      key={m.message_id}
+                      ref={(element) => {
+                        if (element) {
+                          messageElementRefs.current.set(m.message_id, element);
+                        } else {
+                          messageElementRefs.current.delete(m.message_id);
+                        }
+                      }}
+                      data-message-id={m.message_id}
+                      className="space-y-1"
+                    >
                       {/* Tool calls (chronological: before the assistant's final response) */}
                       {toolCalls.length > 0 && (
                         <div className="flex justify-start">

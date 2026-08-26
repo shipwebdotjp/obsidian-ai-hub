@@ -639,6 +639,88 @@ def list_sessions(agent_id: str, conn: Optional[sqlite3.Connection] = None) -> l
         return [_row_to_session(row) for row in cursor.fetchall()]
 
 
+_SESSION_SEARCH_LIMIT = 100
+_SESSION_SEARCH_SNIPPET_RADIUS = 72
+
+
+def _escape_like_query(query: str) -> str:
+    """Escape user input so LIKE remains a literal substring search."""
+    return query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def _make_search_snippet(content: str, query: str) -> str:
+    """Return a compact, whitespace-normalized excerpt around a matching term."""
+    normalized = " ".join(content.split())
+    if not normalized:
+        return ""
+
+    match_at = normalized.casefold().find(query.casefold())
+    if match_at < 0:
+        return normalized[: _SESSION_SEARCH_SNIPPET_RADIUS * 2].rstrip() + (
+            "…" if len(normalized) > _SESSION_SEARCH_SNIPPET_RADIUS * 2 else ""
+        )
+
+    start = max(0, match_at - _SESSION_SEARCH_SNIPPET_RADIUS)
+    end = min(len(normalized), match_at + len(query) + _SESSION_SEARCH_SNIPPET_RADIUS)
+    prefix = "…" if start else ""
+    suffix = "…" if end < len(normalized) else ""
+    return f"{prefix}{normalized[start:end]}{suffix}"
+
+
+def search_messages(
+    query: str,
+    conn: Optional[sqlite3.Connection] = None,
+    limit: int = _SESSION_SEARCH_LIMIT,
+) -> list[dict[str, Any]]:
+    """Search persisted conversation messages across every agent.
+
+    The current personal-use scale does not warrant an FTS table.  Keep the
+    query literal (rather than treating '%' and '_' as wildcards) so the UI
+    behaves like a normal substring search.
+    """
+    clean_query = (query or "").strip()
+    if not clean_query:
+        raise ValueError("Search query must not be empty.")
+
+    with auto_connection(conn) as (active_conn, _):
+        cursor = active_conn.execute(
+            """
+            SELECT
+                agents.agent_id,
+                agents.name AS agent_name,
+                agent_sessions.session_id,
+                agent_sessions.title AS session_title,
+                agent_sessions.updated_at AS session_updated_at,
+                agent_messages.message_id,
+                agent_messages.role,
+                agent_messages.content,
+                agent_messages.created_at
+            FROM agent_messages
+            INNER JOIN agent_sessions
+                ON agent_sessions.session_id = agent_messages.session_id
+            INNER JOIN agents ON agents.agent_id = agent_sessions.agent_id
+            WHERE agent_messages.content LIKE ? ESCAPE '\\'
+            ORDER BY agent_sessions.updated_at DESC, agent_messages.sequence DESC
+            LIMIT ?;
+            """,
+            (f"%{_escape_like_query(clean_query)}%", limit),
+        )
+        return [
+            {
+                "agent_id": row["agent_id"],
+                "agent_name": row["agent_name"],
+                "session_id": row["session_id"],
+                "session_title": row["session_title"],
+                "session_updated_at": row["session_updated_at"],
+                "message_id": row["message_id"],
+                "role": row["role"],
+                "snippet": _make_search_snippet(row["content"], clean_query),
+                "created_at": row["created_at"],
+            }
+            for row in cursor.fetchall()
+        ]
+
+
 def get_session(session_id: str, conn: Optional[sqlite3.Connection] = None) -> dict[str, Any] | None:
     with auto_connection(conn) as (active_conn, _):
         cursor = active_conn.execute(

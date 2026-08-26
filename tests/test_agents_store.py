@@ -221,3 +221,39 @@ def test_truly_empty_message_is_rejected():
     session = store.create_session(agent["agent_id"])
     with pytest.raises(ValueError, match="empty"):
         store.start_user_run(session["session_id"], "   ")
+
+
+def test_search_messages_across_agents_returns_message_results_and_literal_query():
+    first_agent = store.create_agent(name="Search First", system_prompt="Prompt")
+    second_agent = store.create_agent(name="Search Second", system_prompt="Prompt")
+    first_session = store.create_session(first_agent["agent_id"], title="最初の会話")
+    second_session = store.create_session(second_agent["agent_id"], title="次の会話")
+
+    first_message, _ = store.start_user_run(
+        first_session["session_id"], "横断検索で確認する進捗 100%_完了"
+    )
+    second_message, _ = store.start_user_run(
+        second_session["session_id"], "別エージェントからも横断検索できます"
+    )
+
+    results = store.search_messages("横断検索")
+
+    assert {item["message_id"] for item in results} == {
+        first_message["message_id"],
+        second_message["message_id"],
+    }
+    first_result = next(
+        item for item in results if item["message_id"] == first_message["message_id"]
+    )
+    assert first_result["agent_id"] == first_agent["agent_id"]
+    assert first_result["agent_name"] == "Search First"
+    assert first_result["session_title"] == "最初の会話"
+    assert "横断検索" in first_result["snippet"]
+
+    literal_results = store.search_messages("%_")
+    assert [item["message_id"] for item in literal_results] == [
+        first_message["message_id"]
+    ]
+
+    with pytest.raises(ValueError, match="must not be empty"):
+        store.search_messages("   ")

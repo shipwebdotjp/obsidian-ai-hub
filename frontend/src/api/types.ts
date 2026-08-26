@@ -693,6 +693,18 @@ export interface AgentSession {
   updated_at: string;
 }
 
+export interface AgentMessageSearchResult {
+  agent_id: string;
+  agent_name: string;
+  session_id: string;
+  session_title: string;
+  session_updated_at: string;
+  message_id: string;
+  role: "user" | "assistant";
+  snippet: string;
+  created_at: string;
+}
+
 export interface AgentMessageAttachment {
   name: string;
   mime_type: string;
