@@ -705,6 +705,7 @@ async def generate_agent_stream(
 
         # Trigger initial session title generation if this is the first complete turn
         session_id = session.get("session_id")
+        session_title_updated: Optional[str] = None
         if session_id and not session.get("title_is_edited"):
             try:
                 session_msgs = await asyncio.to_thread(store.list_messages, session_id)
@@ -722,6 +723,7 @@ async def generate_agent_stream(
                             title=new_title,
                             is_user_edit=False,
                         )
+                        session_title_updated = new_title
             except Exception as title_exc:
                 logger.warning(
                     "Failed to generate session title for session %s: %s",
@@ -729,16 +731,26 @@ async def generate_agent_stream(
                     title_exc,
                 )
 
+        if session_id and not session_title_updated:
+            try:
+                latest_sess = await asyncio.to_thread(store.get_session, session_id)
+                if latest_sess and latest_sess.get("title") != session.get("title"):
+                    session_title_updated = latest_sess.get("title")
+            except Exception:
+                pass
+
         # Yield done event
-        yield _format_sse(
-            {
-                "type": "done",
-                "message": asst_msg,
-                "run": completed_run,
-                "hitl_run_ids": created_hitl_run_ids,
-                "tool_calls": tool_call_records,
-            }
-        )
+        done_payload: Dict[str, Any] = {
+            "type": "done",
+            "message": asst_msg,
+            "run": completed_run,
+            "hitl_run_ids": created_hitl_run_ids,
+            "tool_calls": tool_call_records,
+        }
+        if session_title_updated:
+            done_payload["session_title"] = session_title_updated
+
+        yield _format_sse(done_payload)
 
     except Exception as exc:
         logger.exception("Error during agent streaming execution for run_id %s", run_id)

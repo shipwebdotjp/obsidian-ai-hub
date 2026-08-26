@@ -773,5 +773,5 @@ export type AgentStreamEvent =
   | { type: "tool_call_start"; call_id: string; call_key?: string; tool_name: string; args: Record<string, unknown>; iteration: number }
   | { type: "tool_call_end"; call_id: string; call_key?: string; tool_name: string; status: "succeeded" | "failed"; result: string; hitl_run_id?: string | null; error?: string | null; iteration: number }
   | { type: "text"; delta: string }
-  | { type: "done"; message: AgentMessage; run: AgentRun; hitl_run_ids: string[]; tool_calls?: AgentToolCall[] }
+  | { type: "done"; message: AgentMessage; run: AgentRun; hitl_run_ids: string[]; tool_calls?: AgentToolCall[]; session_title?: string }
   | { type: "error"; error: string; run_id?: string };

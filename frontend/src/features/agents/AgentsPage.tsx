@@ -40,6 +40,8 @@ import {
   ChevronRight,
   FileText,
   Image as ImageIcon,
+  MoreVertical,
+  Pencil,
   Pin,
   Plus,
   SendHorizontal,
@@ -220,9 +222,13 @@ export default function AgentsPage() {
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const plusMenuRef = useRef<HTMLDivElement | null>(null);
 
-  // Modal delete targets
+  // Modal targets & session action menu
   const [agentToDelete, setAgentToDelete] = useState<Agent | null>(null);
   const [sessionToDelete, setSessionToDelete] = useState<AgentSession | null>(null);
+  const [activeSessionMenuId, setActiveSessionMenuId] = useState<string | null>(null);
+  const [sessionToEditTitle, setSessionToEditTitle] = useState<AgentSession | null>(null);
+  const [editTitleText, setEditTitleText] = useState("");
+  const [editTitleError, setEditTitleError] = useState<string | null>(null);
 
   // Mobile / desktop pane layout state.
   // `leftPaneOpen` controls the mobile-only overlay drawer; on desktop the
@@ -591,12 +597,31 @@ export default function AgentsPage() {
       if (e.key === "Escape") {
         setAgentToDelete(null);
         setSessionToDelete(null);
+        setSessionToEditTitle(null);
+        setActiveSessionMenuId(null);
         setLeftPaneOpen(false);
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
+
+  // Close active session menu when clicking outside
+  useEffect(() => {
+    if (!activeSessionMenuId) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (e.target instanceof Node) {
+        const menus = document.querySelectorAll("[data-session-menu]");
+        let inside = false;
+        menus.forEach((menu) => {
+          if (menu.contains(e.target as Node)) inside = true;
+        });
+        if (!inside) setActiveSessionMenuId(null);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [activeSessionMenuId]);
 
   // Cleanup abort controller on unmount
   useEffect(() => {
@@ -847,6 +872,40 @@ export default function AgentsPage() {
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "ピン留めの更新に失敗しました。";
       setActionError(message);
+    }
+  };
+
+  const handleOpenEditTitle = (session: AgentSession) => {
+    setSessionToEditTitle(session);
+    setEditTitleText(session.title);
+    setEditTitleError(null);
+    setActiveSessionMenuId(null);
+  };
+
+  const handleSaveSessionTitle = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!sessionToEditTitle) return;
+    const cleanTitle = editTitleText.trim();
+    if (!cleanTitle) {
+      setEditTitleError("会話タイトルを入力してください。");
+      return;
+    }
+    setEditTitleError(null);
+    try {
+      const res = await updateAgentSession(sessionToEditTitle.session_id, {
+        title: cleanTitle,
+      });
+      setSessions((prev) =>
+        prev.map((s) => (s.session_id === res.session.session_id ? res.session : s))
+      );
+      setSessionToEditTitle(null);
+      if (selectedAgentId) {
+        await loadSessions(selectedAgentId);
+      }
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error ? err.message : "会話タイトルの更新に失敗しました。";
+      setEditTitleError(message);
     }
   };
 
@@ -1328,6 +1387,17 @@ export default function AgentsPage() {
             resetStreamingState();
             abortControllerRef.current = null;
             loadSessionDetail(streamSessionId);
+            if (event.session_title) {
+              const updatedTitle = event.session_title;
+              setSessions((prev) =>
+                prev.map((s) =>
+                  s.session_id === streamSessionId ? { ...s, title: updatedTitle } : s
+                )
+              );
+            }
+            if (selectedAgentId) {
+              loadSessions(selectedAgentId);
+            }
             if (event.hitl_run_ids && event.hitl_run_ids.length > 0) {
               setHitlLinks(event.hitl_run_ids);
             }
@@ -1574,7 +1644,7 @@ export default function AgentsPage() {
               sessions.map((s) => (
                 <div
                   key={s.session_id}
-                  className={`group flex items-center justify-between rounded-lg px-3 py-2 text-xs transition ${
+                  className={`group relative flex items-center justify-between rounded-lg px-3 py-2 text-xs transition ${
                     selectedSessionId === s.session_id
                       ? "bg-slate-900 text-white font-medium"
                       : "text-slate-700 hover:bg-slate-100"
@@ -1582,43 +1652,86 @@ export default function AgentsPage() {
                 >
                   <button
                     type="button"
-                      onClick={() => {
-                        setSelectedSessionId(s.session_id);
-                        setLeftPaneOpen(false);
-                        setSearchParams(
-                          (prev) => {
-                            const next = new URLSearchParams(prev);
-                            next.set("session_id", s.session_id);
-                            return next;
-                          },
-                          { replace: true },
+                    onClick={() => {
+                      setSelectedSessionId(s.session_id);
+                      setLeftPaneOpen(false);
+                      setSearchParams(
+                        (prev) => {
+                          const next = new URLSearchParams(prev);
+                          next.set("session_id", s.session_id);
+                          return next;
+                        },
+                        { replace: true },
+                      );
+                    }}
+                    className="truncate text-left cursor-pointer flex-1 min-w-0 mr-1 flex items-center gap-1.5"
+                  >
+                    {s.pinned_at && (
+                      <Pin className="h-3 w-3 shrink-0 fill-amber-400 text-amber-500" />
+                    )}
+                    <span className="truncate font-medium">{s.title}</span>
+                  </button>
+                  <div className="relative shrink-0" data-session-menu>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setActiveSessionMenuId((current) =>
+                          current === s.session_id ? null : s.session_id
                         );
                       }}
-                    className="truncate text-left cursor-pointer flex-1 min-w-0 mr-1"
-                  >
-                    <div className="truncate font-medium">{s.title}</div>
-                  </button>
-                  <PinButton
-                    pinned={!!s.pinned_at}
-                    active={selectedSessionId === s.session_id}
-                    onToggle={(e) => handleToggleSessionPin(s, e)}
-                    label={s.pinned_at ? "ピン留めを解除" : "ピン留めする"}
-                  />
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setSessionToDelete(s);
-                    }}
-                    className={`text-[10px] p-0.5 rounded cursor-pointer transition ${
-                      selectedSessionId === s.session_id
-                        ? "text-slate-300 hover:text-white hover:bg-slate-800"
-                        : "text-slate-400 hover:text-slate-700 hover:bg-slate-200"
-                    }`}
-                    aria-label="会話削除"
-                  >
-                    <X className="h-3 w-3" />
-                  </button>
+                      className={`inline-flex h-6 w-6 items-center justify-center rounded cursor-pointer transition ${
+                        selectedSessionId === s.session_id
+                          ? "text-slate-300 hover:text-white hover:bg-slate-800"
+                          : "text-slate-400 hover:text-slate-700 hover:bg-slate-200"
+                      }`}
+                      aria-label="操作メニュー"
+                      aria-expanded={activeSessionMenuId === s.session_id}
+                    >
+                      <MoreVertical className="h-3.5 w-3.5" />
+                    </button>
+                    {activeSessionMenuId === s.session_id && (
+                      <div className="absolute right-0 top-full mt-1 z-30 w-36 rounded-lg border border-slate-200 bg-white py-1 shadow-lg text-slate-700 text-xs">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            setActiveSessionMenuId(null);
+                            handleToggleSessionPin(s, e);
+                          }}
+                          className="flex w-full items-center gap-2 px-3 py-1.5 hover:bg-slate-100 text-left cursor-pointer"
+                          aria-label={s.pinned_at ? "会話のピン留めを解除" : "会話をピン留めする"}
+                        >
+                          <Pin className={`h-3.5 w-3.5 ${s.pinned_at ? "fill-amber-400 text-amber-500" : "text-slate-500"}`} />
+                          {s.pinned_at ? "ピン留め解除" : "ピン留め"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleOpenEditTitle(s);
+                          }}
+                          className="flex w-full items-center gap-2 px-3 py-1.5 hover:bg-slate-100 text-left cursor-pointer"
+                          aria-label="会話タイトルを変更"
+                        >
+                          <Pencil className="h-3.5 w-3.5 text-slate-500" />
+                          タイトル変更
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setActiveSessionMenuId(null);
+                            setSessionToDelete(s);
+                          }}
+                          className="flex w-full items-center gap-2 px-3 py-1.5 hover:bg-rose-50 text-rose-600 text-left cursor-pointer"
+                          aria-label="会話を削除"
+                        >
+                          <Trash2 className="h-3.5 w-3.5 text-rose-500" />
+                          削除
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
               ))
             )}
@@ -2608,6 +2721,57 @@ export default function AgentsPage() {
                 削除する
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Session Title Modal */}
+      {sessionToEditTitle && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="edit-session-title-dialog-heading"
+          onClick={() => setSessionToEditTitle(null)}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-sm rounded-xl bg-white p-5 shadow-lg space-y-3"
+          >
+            <h4 id="edit-session-title-dialog-heading" className="text-sm font-semibold text-slate-900">
+              会話タイトルの変更
+            </h4>
+            {editTitleError && (
+              <div className="rounded-lg bg-red-50 p-2.5 text-xs text-red-600">
+                {editTitleError}
+              </div>
+            )}
+            <form onSubmit={handleSaveSessionTitle} className="space-y-3">
+              <input
+                type="text"
+                required
+                value={editTitleText}
+                onChange={(e) => setEditTitleText(e.target.value)}
+                placeholder="会話タイトルを入力"
+                className="w-full rounded-md border border-slate-300 p-2 text-xs focus:border-slate-500 focus:outline-none"
+                autoFocus
+              />
+              <div className="flex justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setSessionToEditTitle(null)}
+                  className="rounded cursor-pointer border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
+                >
+                  キャンセル
+                </button>
+                <button
+                  type="submit"
+                  className="rounded cursor-pointer bg-slate-900 px-3 py-1.5 text-xs text-white hover:bg-slate-800 font-medium"
+                >
+                  保存する
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

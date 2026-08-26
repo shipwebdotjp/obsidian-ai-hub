@@ -1275,7 +1275,7 @@ describe("AgentsPage", () => {
     });
   });
 
-  it("toggles session pin when the pin button is clicked and reloads the session list", async () => {
+  it("toggles session pin via the three-dot menu and reloads the session list", async () => {
     const user = userEvent.setup();
     const pinnedSession = { ...sampleSession, pinned_at: "2026-08-25T00:00:00Z" };
 
@@ -1294,11 +1294,11 @@ describe("AgentsPage", () => {
       expect(mockListSessions).toHaveBeenCalled();
     });
 
-    // The session row has a pin button with aria-label "ピン留めする"
-    const sessionPinButtons = screen.getAllByRole("button", { name: "ピン留めする" });
-    // First is agent pin, second is session pin
-    const sessionPinButton = sessionPinButtons[1] || sessionPinButtons[0];
-    await user.click(sessionPinButton);
+    const menuButton = screen.getByRole("button", { name: "操作メニュー" });
+    await user.click(menuButton);
+
+    const pinMenuItem = screen.getByRole("button", { name: "会話をピン留めする" });
+    await user.click(pinMenuItem);
 
     await waitFor(() => {
       expect(mockUpdateSession).toHaveBeenCalledWith("asess_456", { pinned: true });
@@ -1306,6 +1306,133 @@ describe("AgentsPage", () => {
 
     await waitFor(() => {
       expect(mockListSessions).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it("edits session title via the three-dot menu and updates the list display", async () => {
+    const user = userEvent.setup();
+    const updatedSession = { ...sampleSession, title: "更新後の会議タイトル" };
+
+    mockUpdateSession.mockResolvedValue({ session: updatedSession });
+    mockListSessions
+      .mockResolvedValueOnce({ sessions: [sampleSession] })
+      .mockResolvedValueOnce({ sessions: [updatedSession] });
+
+    render(
+      <MemoryRouter>
+        <AgentsPage />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(mockListSessions).toHaveBeenCalled();
+    });
+
+    const menuButton = screen.getByRole("button", { name: "操作メニュー" });
+    await user.click(menuButton);
+
+    const editMenuItem = screen.getByRole("button", { name: "会話タイトルを変更" });
+    await user.click(editMenuItem);
+
+    const dialog = screen.getByRole("dialog", { name: "会話タイトルの変更" });
+    expect(dialog).toBeInTheDocument();
+
+    const titleInput = screen.getByPlaceholderText("会話タイトルを入力");
+    await user.clear(titleInput);
+    await user.type(titleInput, "更新後の会議タイトル");
+
+    const saveButton = screen.getByRole("button", { name: "保存する" });
+    await user.click(saveButton);
+
+    await waitFor(() => {
+      expect(mockUpdateSession).toHaveBeenCalledWith("asess_456", {
+        title: "更新後の会議タイトル",
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("更新後の会議タイトル")).toBeInTheDocument();
+    });
+  });
+
+  it("opens deletion modal from the three-dot menu and deletes session", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <MemoryRouter>
+        <AgentsPage />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(mockListSessions).toHaveBeenCalled();
+    });
+
+    const menuButton = screen.getByRole("button", { name: "操作メニュー" });
+    await user.click(menuButton);
+
+    const deleteMenuItem = screen.getByRole("button", { name: "会話を削除" });
+    await user.click(deleteMenuItem);
+
+    expect(screen.getByText("会話履歴の削除確認")).toBeInTheDocument();
+  });
+
+  it("updates session title in the list without page reload when SSE done event returns session_title", async () => {
+    const user = userEvent.setup();
+    const autoTitle = "自動生成されたタイトル";
+    const autoTitleSession = { ...sampleSession, title: autoTitle };
+
+    mockListSessions.mockImplementation(async () => ({
+      sessions: [autoTitleSession],
+    }));
+
+    mockStreamMessage.mockImplementation(
+      async (sessionId, content, onEvent) => {
+        onEvent({ type: "text", delta: "応答テキスト" });
+        onEvent({
+          type: "done",
+          message: {
+            message_id: "msg_3",
+            session_id: sessionId,
+            sequence: 3,
+            role: "assistant",
+            content: "応答テキスト",
+            created_at: new Date().toISOString(),
+          },
+          run: {
+            run_id: "arun_auto_title",
+            session_id: sessionId,
+            user_message_id: "msg_2",
+            assistant_message_id: "msg_3",
+            status: "succeeded",
+            used_tools: [],
+            created_hitl_run_ids: [],
+            error_message: null,
+            started_at: "",
+            finished_at: "",
+          },
+          hitl_run_ids: [],
+          session_title: autoTitle,
+        });
+      }
+    );
+
+    render(
+      <MemoryRouter>
+        <AgentsPage />
+      </MemoryRouter>
+    );
+
+    expect(
+      await screen.findByText("こんにちは！何かお手伝いできますか？")
+    ).toBeInTheDocument();
+
+    const input = screen.getByPlaceholderText(/^メッセージを入力/);
+    await user.type(input, "新しいトピックについて");
+    await user.click(screen.getByRole("button", { name: "送信" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("自動生成されたタイトル")).toBeInTheDocument();
     });
   });
 
