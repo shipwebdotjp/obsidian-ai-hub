@@ -107,6 +107,9 @@ llm:
       model: gpt-5.4
       prompt_path: /path/to/your/config/prompts/research_theme_generation.md
 
+agent_skills:
+  root: /path/to/your/skills
+
 research:
   default_output_style: long
   context:

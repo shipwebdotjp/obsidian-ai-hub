@@ -34,6 +34,7 @@ from obsidian_ai_hub.calendar.hitl import register_calendar_event_approval
 from obsidian_ai_hub.handler.obsidian_vault_retriever import search_obsidian_vault
 from obsidian_ai_hub.handler.web_extract import web_extract
 from obsidian_ai_hub.handler.web_search import web_search
+from obsidian_ai_hub.agents.skills import create_skill_tools
 from obsidian_ai_hub.planner.apple import (
     fetch_calendar_events,
     fetch_incomplete_reminders,
@@ -789,6 +790,12 @@ _BUILTIN_TOOL_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "description": "プロジェクトIDから詳細（サマリ紐付け、件数、project_path 等）を取得します。サマリは最新20件に制限して返します。",
         "get_tool": lambda: project_get,
     },
+    "skills": {
+        "tool_id": "skills",
+        "name": "Agent Skills",
+        "description": "Agent Skills (SKILL.md / リソース参照 / スクリプト直接実行) を有効化します。",
+        "get_tools": lambda: create_skill_tools(),
+    },
 }
 
 _BUILTIN_TOOL_IDS = set(_BUILTIN_TOOL_DEFINITIONS.keys())
@@ -1019,8 +1026,15 @@ def resolve_tools(tool_ids: Sequence[str]) -> List[BaseTool]:
         if not meta:
             logger.warning("Requested tool_id '%s' is not in server registry; skipping", tid)
             continue
-        tool_obj = meta["get_tool"]()
-        tools.append(tool_obj)
+        if "get_tools" in meta and callable(meta["get_tools"]):
+            multi_tools = meta["get_tools"]()
+            if isinstance(multi_tools, list):
+                tools.extend(multi_tools)
+            else:
+                tools.append(multi_tools)
+        elif "get_tool" in meta and callable(meta["get_tool"]):
+            tool_obj = meta["get_tool"]()
+            tools.append(tool_obj)
     return tools
 
 
@@ -1047,19 +1061,32 @@ def resolve_tools_with_context(
         if not meta:
             logger.warning("Requested tool_id '%s' is not in server registry; skipping", tid)
             continue
-        if "get_tool_with_context" in meta:
-            # Copy the snapshot so the tool closure cannot observe later
-            # mutations to the caller's dict.
+        if "get_tools_with_context" in meta and callable(meta["get_tools_with_context"]):
+            ctx_snapshot = dict(trusted_ctx) if trusted_ctx is not None else {}
+            try:
+                multi_tools = meta["get_tools_with_context"](ctx_snapshot)
+                if isinstance(multi_tools, list):
+                    tools.extend(multi_tools)
+                else:
+                    tools.append(multi_tools)
+            except Exception as exc:
+                logger.exception("Failed to create contextual tools %s: %s", tid, exc)
+                raise
+        elif "get_tools" in meta and callable(meta["get_tools"]):
+            multi_tools = meta["get_tools"]()
+            if isinstance(multi_tools, list):
+                tools.extend(multi_tools)
+            else:
+                tools.append(multi_tools)
+        elif "get_tool_with_context" in meta and callable(meta["get_tool_with_context"]):
             ctx_snapshot = dict(trusted_ctx) if trusted_ctx is not None else {}
             try:
                 tool_obj = meta["get_tool_with_context"](ctx_snapshot)  # type: ignore[operator]
+                tools.append(tool_obj)
             except Exception as exc:
-                # Re-raise so mis-bound trusted_ctx / broken factories are
-                # visible. The runtime caller may choose to fall back to
-                # resolve_tools if it wants degraded behavior.
                 logger.exception("Failed to create contextual tool %s: %s", tid, exc)
                 raise
-        else:
+        elif "get_tool" in meta and callable(meta["get_tool"]):
             tool_obj = meta["get_tool"]()
-        tools.append(tool_obj)
+            tools.append(tool_obj)
     return tools
