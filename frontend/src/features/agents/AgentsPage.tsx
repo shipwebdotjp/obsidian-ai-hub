@@ -66,6 +66,35 @@ interface PendingAttachment {
   size: number;
 }
 
+export function filterCommandPaletteTemplates(
+  templates: AgentPromptTemplate[],
+  inputText: string,
+): AgentPromptTemplate[] {
+  if (!inputText.startsWith("/")) return [];
+  const rawQuery = inputText.slice(1);
+  const explicitMatch = rawQuery.match(/^template\s+(.*)/i);
+  const query = (explicitMatch ? explicitMatch[1] : rawQuery).trim();
+  const lowerQuery = query.toLowerCase();
+
+  if (!lowerQuery) {
+    return templates.slice(0, 8);
+  }
+
+  const startsWithMatches: AgentPromptTemplate[] = [];
+  const includesMatches: AgentPromptTemplate[] = [];
+
+  for (const t of templates) {
+    const lowerName = t.name.toLowerCase();
+    if (lowerName.startsWith(lowerQuery)) {
+      startsWithMatches.push(t);
+    } else if (lowerName.includes(lowerQuery)) {
+      includesMatches.push(t);
+    }
+  }
+
+  return [...startsWithMatches, ...includesMatches].slice(0, 8);
+}
+
 const LIVE_STATUS_CONFIG: Record<AgentLiveToolCall["status"], { label: string; cls: string }> = {
   succeeded: { label: "成功", cls: "bg-emerald-50 text-emerald-700 border-emerald-200" },
   failed: { label: "失敗", cls: "bg-rose-50 text-rose-700 border-rose-200" },
@@ -174,6 +203,8 @@ export default function AgentsPage() {
   const [inputText, setInputText] = useState("");
   const [chatSendMode] = useChatSendMode();
   const chatInputRef = useRef<HTMLTextAreaElement>(null);
+  const [isCommandPaletteDismissed, setIsCommandPaletteDismissed] = useState(false);
+  const [paletteSelectedIndex, setPaletteSelectedIndex] = useState(0);
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingText, setStreamingText] = useState("");
   const [streamingToolCalls, setStreamingToolCalls] = useState<AgentLiveToolCall[]>([]);
@@ -615,7 +646,31 @@ export default function AgentsPage() {
   const handleSelectTemplate = (content: string) => {
     setInputText(content);
     setTemplateSelectorOpen(false);
+    setPlusMenuOpen(false);
+    setIsCommandPaletteDismissed(false);
+    setTimeout(() => {
+      chatInputRef.current?.focus();
+    }, 0);
   };
+
+  useEffect(() => {
+    if (!inputText.startsWith("/")) {
+      setIsCommandPaletteDismissed(false);
+    }
+    setPaletteSelectedIndex(0);
+  }, [inputText]);
+
+  const isPaletteActive =
+    Boolean(activeAgent) &&
+    Boolean(selectedSessionId) &&
+    !isStreaming &&
+    inputText.startsWith("/") &&
+    !isCommandPaletteDismissed;
+
+  const paletteCandidates = useMemo(
+    () => (isPaletteActive ? filterCommandPaletteTemplates(promptTemplates, inputText) : []),
+    [isPaletteActive, promptTemplates, inputText],
+  );
 
   // Load templates for active chat agent (when not editing/creating)
   useEffect(() => {
@@ -1314,6 +1369,47 @@ export default function AgentsPage() {
 
   const handleInputKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+
+    if (isPaletteActive) {
+      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        void submitMessage();
+        return;
+      }
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        if (
+          paletteCandidates.length > 0 &&
+          paletteSelectedIndex >= 0 &&
+          paletteSelectedIndex < paletteCandidates.length
+        ) {
+          handleSelectTemplate(paletteCandidates[paletteSelectedIndex].content);
+        }
+        return;
+      }
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        if (paletteCandidates.length > 0) {
+          setPaletteSelectedIndex((prev) => (prev + 1) % paletteCandidates.length);
+        }
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        if (paletteCandidates.length > 0) {
+          setPaletteSelectedIndex(
+            (prev) => (prev - 1 + paletteCandidates.length) % paletteCandidates.length,
+          );
+        }
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setIsCommandPaletteDismissed(true);
+        return;
+      }
+    }
+
     if (chatSendMode === "enter") {
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
@@ -2300,6 +2396,36 @@ export default function AgentsPage() {
                       </button>
                     </div>
                   ))}
+                </div>
+              )}
+              {/* Command Palette directly above textarea */}
+              {isPaletteActive && (
+                <div
+                  data-testid="agent-command-palette"
+                  className="absolute bottom-full left-3 right-3 mb-2 max-h-64 overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg z-20"
+                >
+                  {paletteCandidates.length === 0 ? (
+                    <div className="p-3 text-center text-xs text-slate-400">
+                      該当するテンプレートがありません
+                    </div>
+                  ) : (
+                    paletteCandidates.map((t, index) => (
+                      <button
+                        key={t.template_id}
+                        type="button"
+                        onClick={() => handleSelectTemplate(t.content)}
+                        onMouseEnter={() => setPaletteSelectedIndex(index)}
+                        className={`w-full text-left px-3 py-2 text-xs border-b border-slate-50 last:border-0 cursor-pointer ${
+                          index === paletteSelectedIndex ? "bg-slate-100 font-medium" : "hover:bg-slate-50"
+                        }`}
+                      >
+                        <div className="font-medium text-slate-800 truncate">{t.name}</div>
+                        <div className="text-[11px] text-slate-500 line-clamp-2 whitespace-pre-wrap break-words">
+                          {t.content.length > 80 ? t.content.slice(0, 80) + "…" : t.content}
+                        </div>
+                      </button>
+                    ))
+                  )}
                 </div>
               )}
               {/* Row 1: textarea */}

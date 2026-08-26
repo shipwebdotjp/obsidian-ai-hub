@@ -1326,4 +1326,201 @@ describe("AgentsPage", () => {
     const pinButton = screen.getByRole("button", { name: "ピン留めを解除" });
     expect(pinButton).toHaveAttribute("aria-pressed", "true");
   });
+
+  describe("Command Palette (/ command)", () => {
+    const sampleTemplates = [
+      {
+        template_id: "tpl_1",
+        agent_id: "agent_123",
+        name: "挨拶テンプレート",
+        content: "こんにちは！お世話になっております。",
+        display_order: 0,
+        created_at: "2026-08-20T00:00:00Z",
+        updated_at: "2026-08-20T00:00:00Z",
+      },
+      {
+        template_id: "tpl_2",
+        agent_id: "agent_123",
+        name: "template 週次報告",
+        content: "今週の進捗報告をお送りします。",
+        display_order: 1,
+        created_at: "2026-08-20T00:00:00Z",
+        updated_at: "2026-08-20T00:00:00Z",
+      },
+      {
+        template_id: "tpl_3",
+        agent_id: "agent_123",
+        name: "ミーティング準備",
+        content: "アジェンダと資料を準備しました。",
+        display_order: 2,
+        created_at: "2026-08-20T00:00:00Z",
+        updated_at: "2026-08-20T00:00:00Z",
+      },
+    ];
+
+    beforeEach(() => {
+      mockListTemplates.mockResolvedValue({ templates: sampleTemplates });
+    });
+
+    it("opens palette and displays all templates (max 8) when input starts with '/' alone", async () => {
+      const user = userEvent.setup();
+      render(
+        <MemoryRouter>
+          <AgentsPage />
+        </MemoryRouter>
+      );
+
+      const input = await screen.findByPlaceholderText(/^メッセージを入力/);
+      await user.type(input, "/");
+
+      const palette = await screen.findByTestId("agent-command-palette");
+      expect(palette).toBeInTheDocument();
+      expect(within(palette).getByText("挨拶テンプレート")).toBeInTheDocument();
+      expect(within(palette).getByText("template 週次報告")).toBeInTheDocument();
+      expect(within(palette).getByText("ミーティング準備")).toBeInTheDocument();
+    });
+
+    it("filters candidates with short form /name, explicit form /template name, and /template without space", async () => {
+      const user = userEvent.setup();
+      render(
+        <MemoryRouter>
+          <AgentsPage />
+        </MemoryRouter>
+      );
+
+      const input = await screen.findByPlaceholderText(/^メッセージを入力/);
+
+      // Short form filtering: /挨拶
+      await user.type(input, "/挨拶");
+      const paletteShort = await screen.findByTestId("agent-command-palette");
+      expect(within(paletteShort).getByText("挨拶テンプレート")).toBeInTheDocument();
+      expect(within(paletteShort).queryByText("ミーティング準備")).not.toBeInTheDocument();
+
+      // Explicit form filtering: /template 週次
+      await user.clear(input);
+      await user.type(input, "/template 週次");
+      const paletteExplicit = await screen.findByTestId("agent-command-palette");
+      expect(within(paletteExplicit).getByText("template 週次報告")).toBeInTheDocument();
+      expect(within(paletteExplicit).queryByText("挨拶テンプレート")).not.toBeInTheDocument();
+
+      // /template without trailing space treats 'template' as name filter
+      await user.clear(input);
+      await user.type(input, "/template");
+      const paletteTemplateNoSpace = await screen.findByTestId("agent-command-palette");
+      expect(within(paletteTemplateNoSpace).getByText("template 週次報告")).toBeInTheDocument();
+      expect(within(paletteTemplateNoSpace).queryByText("ミーティング準備")).not.toBeInTheDocument();
+
+      // No match shows empty state
+      await user.clear(input);
+      await user.type(input, "/xyz_no_match");
+      const paletteEmpty = await screen.findByTestId("agent-command-palette");
+      expect(within(paletteEmpty).getByText("該当するテンプレートがありません")).toBeInTheDocument();
+    });
+
+    it("selects candidate on click, replacing input text with template body and keeping focus in textarea", async () => {
+      const user = userEvent.setup();
+      render(
+        <MemoryRouter>
+          <AgentsPage />
+        </MemoryRouter>
+      );
+
+      const input = (await screen.findByPlaceholderText(/^メッセージを入力/)) as HTMLTextAreaElement;
+      await user.type(input, "/");
+
+      const palette = await screen.findByTestId("agent-command-palette");
+      await user.click(within(palette).getByText("挨拶テンプレート"));
+
+      expect(input.value).toBe("こんにちは！お世話になっております。");
+      expect(screen.queryByTestId("agent-command-palette")).not.toBeInTheDocument();
+      expect(document.activeElement).toBe(input);
+    });
+
+    it("supports ArrowUp/ArrowDown wrap-around, Enter selecting without sending, and Escape closing", async () => {
+      const user = userEvent.setup();
+      render(
+        <MemoryRouter>
+          <AgentsPage />
+        </MemoryRouter>
+      );
+
+      const input = (await screen.findByPlaceholderText(/^メッセージを入力/)) as HTMLTextAreaElement;
+      await user.type(input, "/");
+
+      await screen.findByTestId("agent-command-palette");
+
+      // Initially index 0 ("挨拶テンプレート") is selected.
+      // ArrowDown -> index 1 ("template 週次報告")
+      fireEvent.keyDown(input, { key: "ArrowDown" });
+      // ArrowDown -> index 2 ("ミーティング準備")
+      fireEvent.keyDown(input, { key: "ArrowDown" });
+      // ArrowDown -> wraps around to index 0 ("挨拶テンプレート")
+      fireEvent.keyDown(input, { key: "ArrowDown" });
+      // ArrowUp -> wraps around to index 2 ("ミーティング準備")
+      fireEvent.keyDown(input, { key: "ArrowUp" });
+
+      // Enter selects highlighted candidate (index 2: "ミーティング準備")
+      fireEvent.keyDown(input, { key: "Enter" });
+
+      expect(input.value).toBe("アジェンダと資料を準備しました。");
+      expect(mockStreamMessage).not.toHaveBeenCalled();
+      expect(screen.queryByTestId("agent-command-palette")).not.toBeInTheDocument();
+
+      // Escape closes palette
+      await user.clear(input);
+      await user.type(input, "/");
+      expect(await screen.findByTestId("agent-command-palette")).toBeInTheDocument();
+
+      fireEvent.keyDown(input, { key: "Escape" });
+      expect(screen.queryByTestId("agent-command-palette")).not.toBeInTheDocument();
+    });
+
+    it("immediately sends input when Ctrl+Enter is pressed while palette is open", async () => {
+      const user = userEvent.setup();
+      render(
+        <MemoryRouter>
+          <AgentsPage />
+        </MemoryRouter>
+      );
+
+      const input = await screen.findByPlaceholderText(/^メッセージを入力/);
+      await user.type(input, "/hello");
+
+      expect(await screen.findByTestId("agent-command-palette")).toBeInTheDocument();
+
+      fireEvent.keyDown(input, { key: "Enter", ctrlKey: true });
+
+      await waitFor(() => {
+        expect(mockStreamMessage).toHaveBeenCalledWith(
+          "asess_456",
+          "/hello",
+          expect.any(Function),
+          expect.any(Object),
+          undefined
+        );
+      });
+    });
+
+    it("confirms existing '+ -> template' entry point continues to work", async () => {
+      const user = userEvent.setup();
+      render(
+        <MemoryRouter>
+          <AgentsPage />
+        </MemoryRouter>
+      );
+
+      await waitFor(() => {
+        expect(mockGetSessionDetail).toHaveBeenCalled();
+      });
+
+      await user.click(screen.getByRole("button", { name: "追加メニュー" }));
+      await user.click(screen.getByRole("button", { name: "テンプレート" }));
+
+      const selector = await screen.findByTestId("agent-template-selector");
+      await user.click(within(selector).getByText("挨拶テンプレート"));
+
+      const input = screen.getByPlaceholderText(/^メッセージを入力/) as HTMLTextAreaElement;
+      expect(input.value).toBe("こんにちは！お世話になっております。");
+    });
+  });
 });
