@@ -183,3 +183,7 @@
 ## SQLiteベースの常駐HITL Dispatcher Worker
 
 [移転先: 10-Decisions-HITL.md](10-Decisions-HITL.md)
+
+## Web AI エージェントの `/` コマンドパレット（プロンプトテンプレート呼び出し）
+
+[移転先: 10-Decisions-Web.md](10-Decisions-Web.md)
