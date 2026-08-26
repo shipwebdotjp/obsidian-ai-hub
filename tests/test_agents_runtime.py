@@ -599,3 +599,80 @@ async def test_agent_stream_drops_attachments_for_local_provider():
     )
     assert isinstance(user_message.content, str)
     assert user_message.content == "テキスト質問"
+
+
+def test_generate_session_title_truncates_and_cleans():
+    with patch(
+        "obsidian_ai_hub.agents.runtime.generate_llm_response",
+        return_value='  "Pythonの基本学習について"  ',
+    ):
+        title = runtime.generate_session_title("Pythonを学びたい", "Pythonの基礎から学びましょう")
+        assert title == "Pythonの基本学習について"
+
+
+@pytest.mark.anyio
+async def test_agent_stream_generates_title_only_on_initial_turn():
+    agent = store.create_agent(
+        name="Title Generation Agent",
+        system_prompt="Helpful assistant",
+    )
+    session = store.create_session(agent["agent_id"])
+    user_msg, run = store.start_user_run(session["session_id"], "最初の質問")
+
+    mock_llm = MagicMock()
+    _configure_astream(
+        mock_llm,
+        [[AIMessageChunk(content="最初の回答")]],
+    )
+    mock_llm.bind_tools.return_value = mock_llm
+
+    with (
+        patch(
+            "obsidian_ai_hub.agents.runtime.create_langchain_llm", return_value=mock_llm
+        ),
+        patch(
+            "obsidian_ai_hub.agents.runtime.generate_session_title",
+            return_value="自動生成会話タイトル",
+        ) as mock_gen_title,
+    ):
+        # 1st Turn
+        events = [
+            event
+            async for event in runtime.generate_agent_stream(
+                agent=agent,
+                session=session,
+                run=run,
+                history_messages=[user_msg],
+                user_content="最初の質問",
+            )
+        ]
+        assert mock_gen_title.call_count == 1
+        kwargs = mock_gen_title.call_args.kwargs
+        assert kwargs["user_content"] == "最初の質問"
+        assert kwargs.get("assistant_content") == "最初の回答"
+        updated_session = store.get_session(session["session_id"])
+        assert updated_session["title"] == "自動生成会話タイトル"
+
+        # 2nd Turn
+        mock_gen_title.reset_mock()
+        user_msg_2, run_2 = store.start_user_run(session["session_id"], "2回目の質問")
+        history = store.list_messages(session["session_id"])
+        _configure_astream(
+            mock_llm,
+            [[AIMessageChunk(content="2回目の回答")]],
+        )
+
+        events_2 = [
+            event
+            async for event in runtime.generate_agent_stream(
+                agent=agent,
+                session=session,
+                run=run_2,
+                history_messages=history,
+                user_content="2回目の質問",
+            )
+        ]
+        # Title generation should NOT be called on 2nd turn
+        assert mock_gen_title.call_count == 0
+        final_session = store.get_session(session["session_id"])
+        assert final_session["title"] == "自動生成会話タイトル"

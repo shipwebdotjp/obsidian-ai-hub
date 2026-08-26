@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any, AsyncGenerator, Dict, List, Optional, Sequence
 from zoneinfo import ZoneInfo
 
@@ -25,7 +26,9 @@ from obsidian_ai_hub.utils.llm_client import (
     _content_to_stream_delta,
     _logged_astream,
     create_langchain_llm,
+    generate_llm_response,
 )
+from obsidian_ai_hub.utils.prompt import render_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +94,52 @@ def _tool_chunk_index(chunk: Any) -> Optional[int]:
 def _call_key(iteration: int, index: int) -> str:
     """Stable live-only identity for a provider tool-call stream."""
     return f"{iteration}:{index}"
+
+
+def generate_session_title(
+    user_content: str,
+    assistant_content: str,
+    provider: Optional[str] = None,
+    model: Optional[str] = None,
+    prompt_path: Optional[Any] = None,
+) -> str:
+    """Generate a short session title based on initial user and assistant exchange.
+
+    Uses specified or configured provider, model, and prompt template.
+    Returns clean title string (max 30 chars).
+    """
+    prov = (provider or "").strip() or getattr(config, "AGENT_TITLE_GENERATION_PROVIDER", "openai")
+    mdl = (model or "").strip() or getattr(config, "AGENT_TITLE_GENERATION_MODEL", "gpt-5.4")
+    raw_path = prompt_path or getattr(config, "AGENT_TITLE_PROMPT_PATH", None)
+    tmpl_path = Path(raw_path) if raw_path is not None else None
+
+    if tmpl_path is None or not tmpl_path.exists():
+        # Fallback inline template if file is missing
+        prompt = (
+            "ユーザーとアシスタントの最初の会話に基づいて、15文字前後の短い日本語タイトルを1つ作成してください。"
+            "タイトル以外の余計な文字を含めないでください。\n\n"
+            f"ユーザー: {user_content}\nアシスタント: {assistant_content}"
+        )
+    else:
+        ctx = {
+            "user_message": user_content,
+            "assistant_message": assistant_content,
+        }
+        prompt = render_prompt(tmpl_path, ctx)
+
+    raw_title = generate_llm_response(
+        provider=prov,
+        model=mdl,
+        prompt=prompt,
+        temperature=0.7,
+        max_tokens=256,
+    )
+
+    clean = raw_title.strip().strip('"\'「」')
+    # If LLM produces multi-line response, take the first non-empty line
+    lines = [line.strip() for line in clean.splitlines() if line.strip()]
+    first_line = lines[0] if lines else clean
+    return _truncate(first_line, 30, "")
 
 
 def _build_user_message(
@@ -653,6 +702,32 @@ async def generate_agent_stream(
             created_hitl_run_ids=created_hitl_run_ids,
             tool_calls=tool_call_records,
         )
+
+        # Trigger initial session title generation if this is the first complete turn
+        session_id = session.get("session_id")
+        if session_id and not session.get("title_is_edited"):
+            try:
+                session_msgs = await asyncio.to_thread(store.list_messages, session_id)
+                # First user+assistant turn completed when total stored messages == 2
+                if len(session_msgs) == 2:
+                    new_title = await asyncio.to_thread(
+                        generate_session_title,
+                        user_content=user_content,
+                        assistant_content=final_text,
+                    )
+                    if new_title:
+                        await asyncio.to_thread(
+                            store.update_session_title,
+                            session_id=session_id,
+                            title=new_title,
+                            is_user_edit=False,
+                        )
+            except Exception as title_exc:
+                logger.warning(
+                    "Failed to generate session title for session %s: %s",
+                    session_id,
+                    title_exc,
+                )
 
         # Yield done event
         yield _format_sse(

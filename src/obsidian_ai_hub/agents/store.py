@@ -132,10 +132,15 @@ def _row_to_session(row: sqlite3.Row) -> dict[str, Any]:
         pinned_at = row["pinned_at"]  # type: ignore[index]
     except (IndexError, KeyError, ValueError):
         pinned_at = None
+    try:
+        title_is_edited = bool(row["title_is_edited"])  # type: ignore[index]
+    except (IndexError, KeyError, ValueError):
+        title_is_edited = False
     return {
         "session_id": row["session_id"],
         "agent_id": row["agent_id"],
         "title": row["title"],
+        "title_is_edited": title_is_edited,
         "pinned_at": pinned_at,
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
@@ -732,6 +737,59 @@ def get_session(session_id: str, conn: Optional[sqlite3.Connection] = None) -> d
         return _row_to_session(row)
 
 
+def update_session_title(
+    session_id: str,
+    title: str,
+    is_user_edit: bool = False,
+    conn: Optional[sqlite3.Connection] = None,
+) -> dict[str, Any]:
+    """Update session title.
+
+    If is_user_edit is False (auto-generation), skip update if title_is_edited is True.
+    If is_user_edit is True, update title and set title_is_edited = 1.
+    """
+    clean_title = title.strip() if title else ""
+    if not clean_title:
+        raise ValueError("Session title must not be empty.")
+
+    with auto_connection(conn) as (active_conn, is_generated):
+        existing = get_session(session_id, conn=active_conn)
+        if not existing:
+            raise FileNotFoundError(f"Session '{session_id}' not found.")
+
+        # Only user-edited titles are protected here; auto-generation (is_user_edit=False)
+        # relies on the caller (runtime) to fire only on the first turn.
+        if not is_user_edit and existing.get("title_is_edited"):
+            # Title was explicitly edited by user; do not overwrite
+            return existing
+
+        new_is_edited = 1 if is_user_edit else 0
+        now = _now_iso()
+
+        def _do_update():
+            try:
+                active_conn.execute(
+                    "UPDATE agent_sessions SET title = ?, title_is_edited = ?, updated_at = ? WHERE session_id = ?;",
+                    (clean_title, new_is_edited, now, session_id),
+                )
+            except sqlite3.OperationalError as e:
+                if "no such column: title_is_edited" in str(e):
+                    active_conn.execute(
+                        "UPDATE agent_sessions SET title = ?, updated_at = ? WHERE session_id = ?;",
+                        (clean_title, now, session_id),
+                    )
+                else:
+                    raise
+
+        if is_generated:
+            with active_conn:
+                _do_update()
+        else:
+            _do_update()
+
+        return get_session(session_id, conn=active_conn)  # type: ignore[return-value]
+
+
 def update_session(
     session_id: str,
     title: Optional[str] = None,
@@ -743,9 +801,12 @@ def update_session(
         if not existing:
             raise FileNotFoundError(f"Session '{session_id}' not found.")
 
+        is_title_edited = title is not None
         clean_title = title.strip() if title is not None else existing["title"]
         if not clean_title:
             raise ValueError("Session title must not be empty.")
+
+        title_is_edited_val = 1 if (is_title_edited or existing.get("title_is_edited")) else 0
 
         if pinned_at is _PINNED_AT_UNSET:
             clean_pinned_at = existing.get("pinned_at")
@@ -754,35 +815,44 @@ def update_session(
 
         now = _now_iso()
 
-        if is_generated:
-            with active_conn:
+        def _do_update():
+            sql_parts = ["title = ?", "title_is_edited = ?", "pinned_at = ?", "updated_at = ?"]
+            params: list[Any] = [clean_title, title_is_edited_val, clean_pinned_at, now, session_id]
+            optional_cols = {"title_is_edited": title_is_edited_val, "pinned_at": clean_pinned_at}
+
+            while True:
                 try:
                     active_conn.execute(
-                        "UPDATE agent_sessions SET title = ?, pinned_at = ?, updated_at = ? WHERE session_id = ?;",
-                        (clean_title, clean_pinned_at, now, session_id),
+                        f"UPDATE agent_sessions SET {', '.join(sql_parts)} WHERE session_id = ?;",
+                        tuple(params),
                     )
+                    break
                 except sqlite3.OperationalError as e:
-                    if "no such column: pinned_at" in str(e):
-                        active_conn.execute(
-                            "UPDATE agent_sessions SET title = ?, updated_at = ? WHERE session_id = ?;",
-                            (clean_title, now, session_id),
-                        )
-                    else:
+                    msg = str(e)
+                    dropped = False
+                    for col in list(optional_cols.keys()):
+                        if f"no such column: {col}" in msg:
+                            val_to_remove = optional_cols[col]
+                            sql_parts = [p for p in sql_parts if not p.startswith(f"{col} = ?")]
+                            # Remove the matching parameter value from params
+                            new_params = []
+                            removed = False
+                            for p in params:
+                                if not removed and p is val_to_remove:
+                                    removed = True
+                                else:
+                                    new_params.append(p)
+                            params = new_params
+                            del optional_cols[col]
+                            dropped = True
+                    if not dropped:
                         raise
+
+        if is_generated:
+            with active_conn:
+                _do_update()
         else:
-            try:
-                active_conn.execute(
-                    "UPDATE agent_sessions SET title = ?, pinned_at = ?, updated_at = ? WHERE session_id = ?;",
-                    (clean_title, clean_pinned_at, now, session_id),
-                )
-            except sqlite3.OperationalError as e:
-                if "no such column: pinned_at" in str(e):
-                    active_conn.execute(
-                        "UPDATE agent_sessions SET title = ?, updated_at = ? WHERE session_id = ?;",
-                        (clean_title, now, session_id),
-                    )
-                else:
-                    raise
+            _do_update()
 
         return get_session(session_id, conn=active_conn)  # type: ignore[return-value]
 
