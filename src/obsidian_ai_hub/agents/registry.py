@@ -30,7 +30,11 @@ from langchain_core.tools import BaseTool, tool
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from typing import Literal
 
+import os
+import signal
+import subprocess
 from obsidian_ai_hub.calendar.hitl import register_calendar_event_approval
+from obsidian_ai_hub.utils.config import BASE_DIR
 from obsidian_ai_hub.handler.obsidian_vault_retriever import search_obsidian_vault
 from obsidian_ai_hub.handler.web_extract import web_extract
 from obsidian_ai_hub.handler.web_search import web_search
@@ -323,6 +327,14 @@ class ProjectGetInput(BaseModel):
     project_id: int = Field(
         strict=True,
         description="プロジェクトID（例: 1）。project_search の結果の project_id を指定する。",
+    )
+
+
+class RunShellInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    command: str = Field(
+        description="実行するシェルコマンド文字列。",
     )
 
 
@@ -701,6 +713,67 @@ def project_get(project_id: int) -> str:
         return json.dumps({"error": _sanitize_unexpected_error(exc)}, ensure_ascii=False)
 
 
+@tool(args_schema=RunShellInput)
+def run_shell(command: str) -> str:
+    """シェルコマンドを実行し、終了コード、標準出力、標準エラー、タイムアウト有無を構造化JSONで返します。"""
+    timeout_seconds = 600
+    max_output_chars = 20000
+
+    env = os.environ.copy()
+    try:
+        proc = subprocess.Popen(
+            command,
+            shell=True,
+            cwd=BASE_DIR,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=True,
+        )
+        try:
+            stdout, stderr = proc.communicate(timeout=timeout_seconds)
+            is_timeout = False
+            exit_code = proc.returncode
+        except subprocess.TimeoutExpired:
+            is_timeout = True
+            exit_code = -1
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            stdout, stderr = proc.communicate()
+
+        stdout = stdout or ""
+        stderr = stderr or ""
+
+        if len(stdout) > max_output_chars:
+            stdout = stdout[:max_output_chars] + "\n...(truncated)"
+        if len(stderr) > max_output_chars:
+            stderr = stderr[:max_output_chars] + "\n...(truncated)"
+
+        return json.dumps(
+            {
+                "exit_code": exit_code,
+                "stdout": stdout,
+                "stderr": stderr,
+                "timeout": is_timeout,
+            },
+            ensure_ascii=False,
+        )
+    except Exception as exc:
+        logger.exception("run_shell failed")
+        return json.dumps(
+            {
+                "exit_code": -1,
+                "stdout": "",
+                "stderr": str(exc),
+                "timeout": False,
+            },
+            ensure_ascii=False,
+        )
+
+
 # --- Tool Registry Definition ---
 
 _BUILTIN_TOOL_DEFINITIONS: Dict[str, Dict[str, Any]] = {
@@ -795,6 +868,12 @@ _BUILTIN_TOOL_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "name": "Agent Skills",
         "description": "Agent Skills (SKILL.md / リソース参照 / スクリプト直接実行) を有効化します。",
         "get_tools": lambda: create_skill_tools(),
+    },
+    "run_shell": {
+        "tool_id": "run_shell",
+        "name": "任意シェル実行",
+        "description": "リポジトリルートをカレントディレクトリとしてシェルコマンドを実行します。",
+        "get_tool": lambda: run_shell,
     },
 }
 
