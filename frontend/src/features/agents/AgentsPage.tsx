@@ -647,7 +647,7 @@ export default function AgentsPage() {
     setInputText(content);
     setTemplateSelectorOpen(false);
     setPlusMenuOpen(false);
-    setIsCommandPaletteDismissed(false);
+    setIsCommandPaletteDismissed(true);
     setTimeout(() => {
       chatInputRef.current?.focus();
     }, 0);

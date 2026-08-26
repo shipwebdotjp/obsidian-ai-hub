@@ -1436,6 +1436,35 @@ describe("AgentsPage", () => {
       expect(document.activeElement).toBe(input);
     });
 
+    it("reliably closes command palette when selecting a template whose content starts with '/'", async () => {
+      const user = userEvent.setup();
+      const slashTemplate = {
+        template_id: "tpl_slash",
+        agent_id: "agent_123",
+        name: "Slash Content Template",
+        content: "/slash_command_content",
+        display_order: 0,
+        created_at: "2026-08-20T00:00:00Z",
+        updated_at: "2026-08-20T00:00:00Z",
+      };
+      mockListTemplates.mockResolvedValue({ templates: [slashTemplate] });
+
+      render(
+        <MemoryRouter>
+          <AgentsPage />
+        </MemoryRouter>
+      );
+
+      const input = (await screen.findByPlaceholderText(/^メッセージを入力/)) as HTMLTextAreaElement;
+      await user.type(input, "/");
+
+      const palette = await screen.findByTestId("agent-command-palette");
+      await user.click(within(palette).getByText("Slash Content Template"));
+
+      expect(input.value).toBe("/slash_command_content");
+      expect(screen.queryByTestId("agent-command-palette")).not.toBeInTheDocument();
+    });
+
     it("supports ArrowUp/ArrowDown wrap-around, Enter selecting without sending, and Escape closing", async () => {
       const user = userEvent.setup();
       render(
