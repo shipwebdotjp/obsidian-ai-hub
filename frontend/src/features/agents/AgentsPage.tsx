@@ -1450,14 +1450,14 @@ export default function AgentsPage() {
                     type="button"
                     onClick={() => handleSelectSearchResult(result)}
                     data-testid={`agent-message-search-result-${result.message_id}`}
-                    className="w-full rounded px-3 py-2 text-left text-xs text-slate-700 transition hover:bg-slate-100 cursor-pointer"
+                    className="block w-full rounded px-3 py-2 text-left text-xs text-slate-700 transition hover:bg-slate-100 cursor-pointer"
                   >
                     <div className="flex items-center gap-1 truncate text-[10px] text-slate-500">
                       <span className="font-semibold text-slate-700">{result.agent_name}</span>
                       <span aria-hidden="true">/</span>
                       <span className="truncate">{result.session_title}</span>
                     </div>
-                    <div className="mt-0.5 line-clamp-2 break-words text-slate-800">
+                    <div className="mt-0.5 max-h-8 overflow-hidden break-words text-slate-800 leading-4">
                       <span className="mr-1 text-[10px] text-slate-500">
                         {result.role === "user" ? "ユーザー:" : "アシスタント:"}
                       </span>
