@@ -65,9 +65,6 @@ llm:
   agent:
     provider: openai
     model: gpt-4o
-
-agent_skills:
-  root: /path/to/your/skills
   inbox_audio_correction:
     provider: ollama
     model: gpt-oss:120b-cloud
@@ -109,6 +106,9 @@ agent_skills:
       provider: openai
       model: gpt-5.4
       prompt_path: /path/to/your/config/prompts/research_theme_generation.md
+
+agent_skills:
+  root: /path/to/your/skills
 
 research:
   default_output_style: long

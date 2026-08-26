@@ -67,7 +67,7 @@ def _parse_skill_md(skill_md_path: Path) -> Optional[Tuple[str, str, str]]:
     """
     try:
         content = skill_md_path.read_text(encoding="utf-8")
-    except Exception as exc:
+    except (OSError, UnicodeDecodeError) as exc:
         logger.warning("Failed to read %s: %s", skill_md_path, exc)
         return None
 
@@ -85,7 +85,7 @@ def _parse_skill_md(skill_md_path: Path) -> Optional[Tuple[str, str, str]]:
 
     try:
         meta = yaml.safe_load(raw_yaml)
-    except Exception as exc:
+    except yaml.YAMLError as exc:
         logger.warning("SKILL.md at %s has invalid YAML frontmatter: %s", skill_md_path, exc)
         return None
 
@@ -128,7 +128,7 @@ def discover_skills(
 
         try:
             entries = sorted(root.iterdir())
-        except Exception as exc:
+        except OSError as exc:
             logger.warning("Failed to list skills root %s: %s", root, exc)
             return
 
@@ -482,9 +482,10 @@ def create_skill_tools(index: Optional[SkillIndex] = None) -> List[BaseTool]:
         return _read_skill_resource_impl(name, relative_path, frozen_index)
 
     @tool(args_schema=RunSkillScriptInput)
-    def run_skill_script(name: str, relative_path: str, args: List[str] = []) -> str:
+    def run_skill_script(name: str, relative_path: str, args: Optional[List[str]] = None) -> str:
         """Run an executable shebang script under scripts/ for a skill directly."""
-        return _run_skill_script_impl(name, relative_path, args, frozen_index)
+        actual_args = args if args is not None else []
+        return _run_skill_script_impl(name, relative_path, actual_args, frozen_index)
 
     load_skill.name = "load_skill"  # type: ignore[attr-defined]
     read_skill_resource.name = "read_skill_resource"  # type: ignore[attr-defined]
