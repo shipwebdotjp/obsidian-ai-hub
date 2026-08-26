@@ -660,7 +660,6 @@ def run_migration_v21(conn: sqlite3.Connection) -> None:
             session_id TEXT PRIMARY KEY,
             agent_id TEXT NOT NULL,
             title TEXT NOT NULL,
-            title_is_edited INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
             FOREIGN KEY(agent_id) REFERENCES agents(agent_id) ON DELETE CASCADE

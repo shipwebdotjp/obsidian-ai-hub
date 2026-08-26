@@ -757,11 +757,13 @@ def update_session_title(
         if not existing:
             raise FileNotFoundError(f"Session '{session_id}' not found.")
 
+        # Only user-edited titles are protected here; auto-generation (is_user_edit=False)
+        # relies on the caller (runtime) to fire only on the first turn.
         if not is_user_edit and existing.get("title_is_edited"):
             # Title was explicitly edited by user; do not overwrite
             return existing
 
-        new_is_edited = 1 if (is_user_edit or existing.get("title_is_edited")) else 0
+        new_is_edited = 1 if is_user_edit else 0
         now = _now_iso()
 
         def _do_update():
@@ -814,32 +816,37 @@ def update_session(
         now = _now_iso()
 
         def _do_update():
-            try:
-                active_conn.execute(
-                    "UPDATE agent_sessions SET title = ?, title_is_edited = ?, pinned_at = ?, updated_at = ? WHERE session_id = ?;",
-                    (clean_title, title_is_edited_val, clean_pinned_at, now, session_id),
-                )
-            except sqlite3.OperationalError as e:
-                msg = str(e)
-                if "no such column: title_is_edited" in msg or "no such column: pinned_at" in msg:
-                    # Fallback for schema variants
-                    sql_parts = ["title = ?"]
-                    params: list[Any] = [clean_title]
-                    if "no such column: title_is_edited" not in msg:
-                        sql_parts.append("title_is_edited = ?")
-                        params.append(title_is_edited_val)
-                    if "no such column: pinned_at" not in msg:
-                        sql_parts.append("pinned_at = ?")
-                        params.append(clean_pinned_at)
-                    sql_parts.append("updated_at = ?")
-                    params.append(now)
-                    params.append(session_id)
+            sql_parts = ["title = ?", "title_is_edited = ?", "pinned_at = ?", "updated_at = ?"]
+            params: list[Any] = [clean_title, title_is_edited_val, clean_pinned_at, now, session_id]
+            optional_cols = {"title_is_edited": title_is_edited_val, "pinned_at": clean_pinned_at}
+
+            while True:
+                try:
                     active_conn.execute(
                         f"UPDATE agent_sessions SET {', '.join(sql_parts)} WHERE session_id = ?;",
                         tuple(params),
                     )
-                else:
-                    raise
+                    break
+                except sqlite3.OperationalError as e:
+                    msg = str(e)
+                    dropped = False
+                    for col in list(optional_cols.keys()):
+                        if f"no such column: {col}" in msg:
+                            val_to_remove = optional_cols[col]
+                            sql_parts = [p for p in sql_parts if not p.startswith(f"{col} = ?")]
+                            # Remove the matching parameter value from params
+                            new_params = []
+                            removed = False
+                            for p in params:
+                                if not removed and p is val_to_remove:
+                                    removed = True
+                                else:
+                                    new_params.append(p)
+                            params = new_params
+                            del optional_cols[col]
+                            dropped = True
+                    if not dropped:
+                        raise
 
         if is_generated:
             with active_conn:

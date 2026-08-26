@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any, AsyncGenerator, Dict, List, Optional, Sequence
 from zoneinfo import ZoneInfo
 
@@ -109,7 +110,8 @@ def generate_session_title(
     """
     prov = (provider or "").strip() or getattr(config, "AGENT_TITLE_GENERATION_PROVIDER", "openai")
     mdl = (model or "").strip() or getattr(config, "AGENT_TITLE_GENERATION_MODEL", "gpt-5.4")
-    tmpl_path = prompt_path or getattr(config, "AGENT_TITLE_PROMPT_PATH", None)
+    raw_path = prompt_path or getattr(config, "AGENT_TITLE_PROMPT_PATH", None)
+    tmpl_path = Path(raw_path) if raw_path is not None else None
 
     if tmpl_path is None or not tmpl_path.exists():
         # Fallback inline template if file is missing
@@ -703,7 +705,7 @@ async def generate_agent_stream(
 
         # Trigger initial session title generation if this is the first complete turn
         session_id = session.get("session_id")
-        if session_id:
+        if session_id and not session.get("title_is_edited"):
             try:
                 session_msgs = await asyncio.to_thread(store.list_messages, session_id)
                 # First user+assistant turn completed when total stored messages == 2

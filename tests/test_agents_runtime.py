@@ -647,6 +647,9 @@ async def test_agent_stream_generates_title_only_on_initial_turn():
             )
         ]
         assert mock_gen_title.call_count == 1
+        kwargs = mock_gen_title.call_args.kwargs
+        assert kwargs["user_content"] == "最初の質問"
+        assert kwargs.get("assistant_content") == "最初の回答"
         updated_session = store.get_session(session["session_id"])
         assert updated_session["title"] == "自動生成会話タイトル"
 

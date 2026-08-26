@@ -255,6 +255,10 @@ def test_update_session_title_and_edited_flag():
     assert updated["title"] == "PATCH編集タイトル"
     assert updated["title_is_edited"] is True
 
+    # Empty/whitespace title must be rejected (boundary condition)
+    with pytest.raises(ValueError, match="empty"):
+        store.update_session_title(session["session_id"], "   ")
+
 
 def test_search_messages_across_agents_returns_message_results_and_literal_query():
     first_agent = store.create_agent(name="Search First", system_prompt="Prompt")
