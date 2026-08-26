@@ -568,6 +568,19 @@ AGENT_MODEL = str(
     _env_or_config("AGENT_MODEL", "llm", "agent", "model", default="gpt-4o")
 )
 
+# AI Agent session title generation LLM config & prompt
+AGENT_TITLE_GENERATION_PROVIDER = str(
+    _config_value("llm", "agent_title_generation", "provider", default="openai")
+)
+AGENT_TITLE_GENERATION_MODEL = str(
+    _config_value("llm", "agent_title_generation", "model", default="gpt-5.4")
+)
+AGENT_TITLE_PROMPT_PATH = _config_optional_path(
+    "llm", "agent_title_generation", "prompt_path"
+)
+if AGENT_TITLE_PROMPT_PATH is None:
+    AGENT_TITLE_PROMPT_PATH = BASE_DIR / "config" / "prompts" / "agent_title.md"
+
 if IS_TEST_ENV:
     AI_LOG_PATH = TEST_WORKSPACE / "vault" / "ai-log"
 else:
