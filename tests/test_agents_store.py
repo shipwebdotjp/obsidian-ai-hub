@@ -223,6 +223,39 @@ def test_truly_empty_message_is_rejected():
         store.start_user_run(session["session_id"], "   ")
 
 
+def test_update_session_title_and_edited_flag():
+    agent = store.create_agent(name="Title Test Agent", system_prompt="Prompt")
+    session = store.create_session(agent["agent_id"], title="新しい会話")
+
+    assert session["title_is_edited"] is False
+
+    # Auto title update (is_user_edit=False)
+    auto_session = store.update_session_title(
+        session["session_id"], "自動生成タイトル", is_user_edit=False
+    )
+    assert auto_session["title"] == "自動生成タイトル"
+    assert auto_session["title_is_edited"] is False
+
+    # User edit title (is_user_edit=True)
+    user_session = store.update_session_title(
+        session["session_id"], "ユーザー編集タイトル", is_user_edit=True
+    )
+    assert user_session["title"] == "ユーザー編集タイトル"
+    assert user_session["title_is_edited"] is True
+
+    # Overwriting attempt via auto title (is_user_edit=False) should be ignored
+    ignored_session = store.update_session_title(
+        session["session_id"], "自動上書きしようとするタイトル", is_user_edit=False
+    )
+    assert ignored_session["title"] == "ユーザー編集タイトル"
+    assert ignored_session["title_is_edited"] is True
+
+    # User edit via update_session
+    updated = store.update_session(session["session_id"], title="PATCH編集タイトル")
+    assert updated["title"] == "PATCH編集タイトル"
+    assert updated["title_is_edited"] is True
+
+
 def test_search_messages_across_agents_returns_message_results_and_literal_query():
     first_agent = store.create_agent(name="Search First", system_prompt="Prompt")
     second_agent = store.create_agent(name="Search Second", system_prompt="Prompt")

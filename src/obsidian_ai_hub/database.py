@@ -489,6 +489,9 @@ def get_db_connection() -> sqlite3.Connection:
     if current_version <= 24:
         run_migration_v25(conn)
 
+    if current_version <= 25:
+        run_migration_v26(conn)
+
     return conn
 
 
@@ -657,6 +660,7 @@ def run_migration_v21(conn: sqlite3.Connection) -> None:
             session_id TEXT PRIMARY KEY,
             agent_id TEXT NOT NULL,
             title TEXT NOT NULL,
+            title_is_edited INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
             FOREIGN KEY(agent_id) REFERENCES agents(agent_id) ON DELETE CASCADE
@@ -783,6 +787,23 @@ def run_migration_v25(conn: sqlite3.Connection) -> None:
     except sqlite3.OperationalError as e:
         _ignore_duplicate_schema_object(e)
     conn.execute("PRAGMA user_version = 25;")
+    conn.commit()
+
+
+def run_migration_v26(conn: sqlite3.Connection) -> None:
+    """Run migration for version 26 (agent_sessions title_is_edited flag).
+
+    Adds ``title_is_edited INTEGER NOT NULL DEFAULT 0`` to ``agent_sessions``.
+    Flag is set to 1 when a user explicitly edits the title, preventing subsequent
+    auto-title generations from overwriting the user-chosen title.
+    """
+    try:
+        conn.execute(
+            "ALTER TABLE agent_sessions ADD COLUMN title_is_edited INTEGER NOT NULL DEFAULT 0;"
+        )
+    except sqlite3.OperationalError as e:
+        _ignore_duplicate_schema_object(e)
+    conn.execute("PRAGMA user_version = 26;")
     conn.commit()
 
 
