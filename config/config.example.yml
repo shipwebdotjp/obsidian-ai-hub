@@ -65,6 +65,9 @@ llm:
   agent:
     provider: openai
     model: gpt-4o
+
+agent_skills:
+  root: /path/to/your/skills
   inbox_audio_correction:
     provider: ollama
     model: gpt-oss:120b-cloud

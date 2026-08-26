@@ -19,3 +19,7 @@
 ## 書込み提案
 
 カレンダーまたはリマインダーへの新規作成を求めるエージェントのツール呼び出し。直接の副作用ではなく既存の HITL Run を作成し、承認後にだけ Apple のデータを変更する。
+
+## Agent Skills (スキル)
+
+エージェントが参照・利用できる手順書（`SKILL.md`）、補助テキストリソース、および直結スクリプトの集まり。1次ルート（`~/.agents/skills`）および2次ルート（`agent_skills.root` / `OBSIDIAN_AI_HUB_SKILLS_DIR`）から自動発見・インデックス化され、同名 Skill は2次ルートが優先される。エージェントが `skills` ツールを選択した際、`load_skill`（手順書取得）、`read_skill_resource`（リソース読取）、`run_skill_script`（スクリプト直接実行）の3ツールに展開される。

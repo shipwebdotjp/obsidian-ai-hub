@@ -53,6 +53,7 @@ _APP_ENV_VARS = [
     "AGENT_PROVIDER",
     "AGENT_MODEL",
     "OBSIDIAN_AI_HUB_PLUGINS_DIR",
+    "OBSIDIAN_AI_HUB_SKILLS_DIR",
     "HEALTHCARE_SQLITE_PATH",
     "HEALTHCARE_EXPORT_DIR",
 ]
@@ -713,7 +714,19 @@ if IS_TEST_ENV:
     TASK_RUN_STATE_PATH = TEST_WORKSPACE / "last_run.json"
     KNOWLEDGE_SYNC_STATE_PATH = TEST_WORKSPACE / "knowledge_sync_state.json"
     PLUGINS_TOOLS_DIR = TEST_WORKSPACE / "plugins" / "tools"
+    AGENT_SKILLS_PRIMARY_ROOT = TEST_WORKSPACE / "primary_skills"
+    AGENT_SKILLS_ROOT = TEST_WORKSPACE / "skills"
 else:
+    AGENT_SKILLS_PRIMARY_ROOT = Path("~/.agents/skills").expanduser()
+    _skills_dir_raw = _env_or_config(
+        "OBSIDIAN_AI_HUB_SKILLS_DIR", "agent_skills", "root"
+    )
+    if _skills_dir_raw:
+        AGENT_SKILLS_ROOT = Path(str(_skills_dir_raw)).expanduser()
+    else:
+        AGENT_SKILLS_ROOT = Path(
+            "~/.config/obsidian-ai-hub/skills"
+        ).expanduser()
     _plugins_dir_raw = _env_or_config(
         "OBSIDIAN_AI_HUB_PLUGINS_DIR", "plugins", "tools_dir"
     )
