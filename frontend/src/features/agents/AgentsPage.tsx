@@ -1644,9 +1644,11 @@ export default function AgentsPage() {
               sessions.map((s) => (
                 <div
                   key={s.session_id}
+                  data-testid="memory-row"
+                  data-selected={selectedSessionId === s.session_id ? "true" : "false"}
                   className={`group relative flex items-center justify-between rounded-lg px-3 py-2 text-xs transition ${
                     selectedSessionId === s.session_id
-                      ? "bg-slate-900 text-white font-medium"
+                      ? "bg-slate-200 border-l-4 border-slate-800 text-slate-900 font-medium"
                       : "text-slate-700 hover:bg-slate-100"
                   }`}
                 >
@@ -1682,7 +1684,7 @@ export default function AgentsPage() {
                       }}
                       className={`inline-flex h-6 w-6 items-center justify-center rounded cursor-pointer transition ${
                         selectedSessionId === s.session_id
-                          ? "text-slate-300 hover:text-white hover:bg-slate-800"
+                          ? "text-slate-700 hover:text-slate-900 hover:bg-slate-300"
                           : "text-slate-400 hover:text-slate-700 hover:bg-slate-200"
                       }`}
                       aria-label="操作メニュー"
@@ -1691,17 +1693,17 @@ export default function AgentsPage() {
                       <MoreVertical className="h-3.5 w-3.5" />
                     </button>
                     {activeSessionMenuId === s.session_id && (
-                      <div className="absolute right-0 top-full mt-1 z-30 w-36 rounded-lg border border-slate-200 bg-white py-1 shadow-lg text-slate-700 text-xs">
+                      <div className="absolute right-0 top-full mt-1 z-30 w-36 rounded-lg border border-slate-200 bg-white p-1 shadow-lg text-xs space-y-1">
                         <button
                           type="button"
                           onClick={(e) => {
                             setActiveSessionMenuId(null);
                             handleToggleSessionPin(s, e);
                           }}
-                          className="flex w-full items-center gap-2 px-3 py-1.5 hover:bg-slate-100 text-left cursor-pointer"
+                          className="flex w-full items-center gap-2 px-3 py-1.5 bg-slate-900 text-white hover:bg-slate-800 rounded text-left cursor-pointer"
                           aria-label={s.pinned_at ? "会話のピン留めを解除" : "会話をピン留めする"}
                         >
-                          <Pin className={`h-3.5 w-3.5 ${s.pinned_at ? "fill-amber-400 text-amber-500" : "text-slate-500"}`} />
+                          <Pin className={`h-3.5 w-3.5 ${s.pinned_at ? "fill-amber-400 text-amber-300" : "text-white"}`} />
                           {s.pinned_at ? "ピン留め解除" : "ピン留め"}
                         </button>
                         <button
@@ -1710,10 +1712,10 @@ export default function AgentsPage() {
                             e.stopPropagation();
                             handleOpenEditTitle(s);
                           }}
-                          className="flex w-full items-center gap-2 px-3 py-1.5 hover:bg-slate-100 text-left cursor-pointer"
+                          className="flex w-full items-center gap-2 px-3 py-1.5 bg-slate-900 text-white hover:bg-slate-800 rounded text-left cursor-pointer"
                           aria-label="会話タイトルを変更"
                         >
-                          <Pencil className="h-3.5 w-3.5 text-slate-500" />
+                          <Pencil className="h-3.5 w-3.5 text-white" />
                           タイトル変更
                         </button>
                         <button
@@ -1723,10 +1725,10 @@ export default function AgentsPage() {
                             setActiveSessionMenuId(null);
                             setSessionToDelete(s);
                           }}
-                          className="flex w-full items-center gap-2 px-3 py-1.5 hover:bg-rose-50 text-rose-600 text-left cursor-pointer"
+                          className="flex w-full items-center gap-2 px-3 py-1.5 bg-rose-800 text-white hover:bg-rose-900 rounded text-left cursor-pointer"
                           aria-label="会話を削除"
                         >
-                          <Trash2 className="h-3.5 w-3.5 text-rose-500" />
+                          <Trash2 className="h-3.5 w-3.5 text-white" />
                           削除
                         </button>
                       </div>

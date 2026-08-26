@@ -1382,9 +1382,9 @@ describe("AgentsPage", () => {
     const autoTitle = "自動生成されたタイトル";
     const autoTitleSession = { ...sampleSession, title: autoTitle };
 
-    mockListSessions.mockImplementation(async () => ({
-      sessions: [autoTitleSession],
-    }));
+    mockListSessions
+      .mockResolvedValueOnce({ sessions: [sampleSession] })
+      .mockResolvedValue({ sessions: [autoTitleSession] });
 
     mockStreamMessage.mockImplementation(
       async (sessionId, content, onEvent) => {
@@ -1426,6 +1426,7 @@ describe("AgentsPage", () => {
     expect(
       await screen.findByText("こんにちは！何かお手伝いできますか？")
     ).toBeInTheDocument();
+    expect(screen.getByText("明日の予定")).toBeInTheDocument();
 
     const input = screen.getByPlaceholderText(/^メッセージを入力/);
     await user.type(input, "新しいトピックについて");

@@ -736,8 +736,14 @@ async def generate_agent_stream(
                 latest_sess = await asyncio.to_thread(store.get_session, session_id)
                 if latest_sess and latest_sess.get("title") != session.get("title"):
                     session_title_updated = latest_sess.get("title")
-            except Exception:
-                pass
+            except (KeyError, FileNotFoundError):
+                logger.debug("Session %s not found when checking title update.", session_id)
+            except Exception as get_sess_exc:
+                logger.warning(
+                    "Unexpected error fetching session %s during title sync: %s",
+                    session_id,
+                    get_sess_exc,
+                )
 
         # Yield done event
         done_payload: Dict[str, Any] = {
