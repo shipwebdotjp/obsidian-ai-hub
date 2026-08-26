@@ -742,7 +742,11 @@ def run_shell(command: str) -> str:
                 os.killpg(proc.pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
-            stdout, stderr = proc.communicate()
+            try:
+                stdout, stderr = proc.communicate(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                stdout, stderr = proc.communicate()
 
         stdout = stdout or ""
         stderr = stderr or ""
@@ -761,17 +765,9 @@ def run_shell(command: str) -> str:
             },
             ensure_ascii=False,
         )
-    except Exception as exc:
+    except Exception:
         logger.exception("run_shell failed")
-        return json.dumps(
-            {
-                "exit_code": -1,
-                "stdout": "",
-                "stderr": str(exc),
-                "timeout": False,
-            },
-            ensure_ascii=False,
-        )
+        raise
 
 
 # --- Tool Registry Definition ---
