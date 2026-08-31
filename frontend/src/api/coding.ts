@@ -50,9 +50,17 @@ export interface CodingSessionDetail {
 
 export type CodingSseEvent =
   | { event: "start"; run_id: string; is_dirty: boolean; dirty_summary: string | null }
-  | { event: "orchestrator_chunk"; text: string }
-  | { event: "worker_start"; backend: string; prompt: string }
-  | { event: "worker_done"; output: string; exit_code: number; error: string | null }
+  | { event: "orchestrator_start"; phase: "initial" | "review" }
+  | { event: "orchestrator_message"; phase: "initial" | "review"; message: CodingMessage }
+  | { event: "worker_start"; attempt: number; backend: string; prompt: string }
+  | {
+      event: "worker_done";
+      attempt: number;
+      message: CodingMessage;
+      exit_code: number;
+      error: string | null;
+      session_recreated?: boolean;
+    }
   | { event: "done"; run_id: string; status: string }
   | { event: "cancelled"; message: string }
   | { event: "error"; message: string };

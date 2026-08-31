@@ -171,8 +171,12 @@ def test_coding_api_endpoints(test_project):
     assert detail["messages"] == []
 
     # 4. Stream message with mocked orchestrator and CLI worker
-    async def mock_stream_response(*args, **kwargs):
-        yield "解析結果です。\n<cli_request>\npytest\n</cli_request>"
+    async def mock_generate_response(*args, **kwargs):
+        # 1st call: request CLI, 2nd call: report completion
+        history = kwargs.get("history", [])
+        if any(h.get("role") == "worker" for h in history):
+            return "テスト成功を確認しました。完了です。"
+        return "解析結果です。\n<cli_request>\npytest\n</cli_request>"
 
     mock_cli_res = backend.CodingBackendResult(
         external_session_id="th_123",
@@ -181,8 +185,8 @@ def test_coding_api_endpoints(test_project):
     )
 
     with patch(
-        "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.stream_response",
-        side_effect=mock_stream_response,
+        "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response",
+        side_effect=mock_generate_response,
     ), patch(
         "obsidian_ai_hub.coding.backend.CodexCliBackend.execute",
         return_value=mock_cli_res,
@@ -194,7 +198,8 @@ def test_coding_api_endpoints(test_project):
         )
         assert res.status_code == 200
         text = res.text
-        assert "orchestrator_chunk" in text
+        assert "orchestrator_start" in text
+        assert "orchestrator_message" in text
         assert "worker_start" in text
         assert "worker_done" in text
         assert "done" in text
@@ -202,7 +207,11 @@ def test_coding_api_endpoints(test_project):
     # Verify updated detail
     res = client.get(f"/api/v1/coding/sessions/{sid}", headers=headers)
     detail = res.json()
-    assert len(detail["messages"]) == 3  # user, orchestrator, worker
+    assert len(detail["messages"]) == 4  # user, orchestrator #1, worker, orchestrator #2
+    assert detail["messages"][0]["role"] == "user"
+    assert detail["messages"][1]["role"] == "orchestrator"
+    assert detail["messages"][2]["role"] == "worker"
+    assert detail["messages"][3]["role"] == "orchestrator"
     assert detail["session"]["external_session_id"] == "th_123"
 
     # 5. Delete session
@@ -342,8 +351,11 @@ def test_opencode_stream_session_recreated_notification(test_project):
     # Set old external_session_id
     store.update_session_external_id(sid, "ses_old999")
 
-    async def mock_stream_response(*args, **kwargs):
-        yield "解析結果です。\n<cli_request>\nopencode run test\n</cli_request>"
+    async def mock_generate_response(*args, **kwargs):
+        history = kwargs.get("history", [])
+        if any(h.get("role") == "worker" for h in history):
+            return "確認しました。"
+        return "解析結果です。\n<cli_request>\nopencode run test\n</cli_request>"
 
     mock_cli_res = backend.CodingBackendResult(
         external_session_id="ses_new888",
@@ -353,8 +365,8 @@ def test_opencode_stream_session_recreated_notification(test_project):
     )
 
     with patch(
-        "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.stream_response",
-        side_effect=mock_stream_response,
+        "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response",
+        side_effect=mock_generate_response,
     ), patch(
         "obsidian_ai_hub.coding.backend.OpenCodeCliBackend.execute",
         return_value=mock_cli_res,
@@ -534,8 +546,11 @@ def test_codex_stream_session_recreated_notification(test_project):
 
     store.update_session_external_id(sid, "th_old999")
 
-    async def mock_stream_response(*args, **kwargs):
-        yield "解析結果です。\n<cli_request>\ncodex exec test\n</cli_request>"
+    async def mock_generate_response(*args, **kwargs):
+        history = kwargs.get("history", [])
+        if any(h.get("role") == "worker" for h in history):
+            return "確認完了。"
+        return "解析結果です。\n<cli_request>\ncodex exec test\n</cli_request>"
 
     mock_cli_res = backend.CodingBackendResult(
         external_session_id="th_new888",
@@ -545,8 +560,8 @@ def test_codex_stream_session_recreated_notification(test_project):
     )
 
     with patch(
-        "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.stream_response",
-        side_effect=mock_stream_response,
+        "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response",
+        side_effect=mock_generate_response,
     ), patch(
         "obsidian_ai_hub.coding.backend.CodexCliBackend.execute",
         return_value=mock_cli_res,
@@ -569,3 +584,118 @@ def test_codex_stream_session_recreated_notification(test_project):
     # Verify notice in worker message for Codex
     worker_msg = next(m for m in detail["messages"] if m["role"] == "worker")
     assert "前の Codex セッションが見つからなかったため、新しいセッションへ切り替えて続行しました。" in worker_msg["content"]
+
+
+def test_coding_turn_max_cli_iterations_cap(test_project):
+    """Test that CLI execution is capped at MAX_CLI_ITERATIONS (3 times) per turn."""
+    app = create_app(token="test-token")
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer test-token"}
+
+    res = client.post(
+        "/api/v1/coding/sessions",
+        headers=headers,
+        json={
+            "project_id": test_project["project_id"],
+            "backend": "codex",
+            "title": "Max Iterations Session",
+        },
+    )
+    sid = res.json()["session_id"]
+
+    # Orchestrator always asks for CLI execution
+    async def mock_generate_response(*args, **kwargs):
+        return "まだ作業が必要です。\n<cli_request>\npytest --fix\n</cli_request>"
+
+    mock_cli_res = backend.CodingBackendResult(
+        external_session_id="th_max123",
+        output="Execution attempt done",
+        exit_code=0,
+    )
+
+    with patch(
+        "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response",
+        side_effect=mock_generate_response,
+    ), patch(
+        "obsidian_ai_hub.coding.backend.CodexCliBackend.execute",
+        return_value=mock_cli_res,
+    ) as mock_exec:
+        res = client.post(
+            f"/api/v1/coding/sessions/{sid}/messages/stream",
+            headers=headers,
+            json={"content": "無限ループを検証してください"},
+        )
+        assert res.status_code == 200
+        # CLI backend should be executed exactly 3 times
+        assert mock_exec.call_count == 3
+
+    # Check session detail messages
+    detail_res = client.get(f"/api/v1/coding/sessions/{sid}", headers=headers)
+    detail = detail_res.json()
+    messages = detail["messages"]
+
+    # Total 8 messages: 1 user, 3x (orch + worker) = 6, 1 final orch with ceiling notice
+    assert len(messages) == 8
+    final_orch_msg = messages[-1]
+    assert final_orch_msg["role"] == "orchestrator"
+    assert "自動実行上限（3回）に達したため実行していません" in final_orch_msg["content"]
+
+
+def test_coding_turn_non_zero_exit_code_passed_to_review(test_project):
+    """Test that a non-zero exit code CLI output is passed to orchestrator review rather than instantly failing."""
+    app = create_app(token="test-token")
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer test-token"}
+
+    res = client.post(
+        "/api/v1/coding/sessions",
+        headers=headers,
+        json={
+            "project_id": test_project["project_id"],
+            "backend": "codex",
+            "title": "Error Recovery Session",
+        },
+    )
+    sid = res.json()["session_id"]
+
+    async def mock_generate_response(*args, **kwargs):
+        history = kwargs.get("history", [])
+        worker_msgs = [h for h in history if h.get("role") == "worker"]
+        if not worker_msgs:
+            return "実行します。\n<cli_request>\npython script.py\n</cli_request>"
+        # Review phase receives worker error message
+        assert "SyntaxError" in worker_msgs[0]["content"]
+        return "エラーが発生したため原因を説明します。文法エラーを修正してください。"
+
+    mock_cli_res = backend.CodingBackendResult(
+        external_session_id="th_err123",
+        output="SyntaxError: invalid syntax on line 4",
+        exit_code=1,
+        error_message="Command failed with exit code 1",
+    )
+
+    with patch(
+        "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response",
+        side_effect=mock_generate_response,
+    ), patch(
+        "obsidian_ai_hub.coding.backend.CodexCliBackend.execute",
+        return_value=mock_cli_res,
+    ):
+        res = client.post(
+            f"/api/v1/coding/sessions/{sid}/messages/stream",
+            headers=headers,
+            json={"content": "スクリプトを実行してください"},
+        )
+        assert res.status_code == 200
+        text = res.text
+        assert 'status": "completed"' in text
+
+    detail_res = client.get(f"/api/v1/coding/sessions/{sid}", headers=headers)
+    detail = detail_res.json()
+    messages = detail["messages"]
+    assert len(messages) == 4  # user, orch request, worker error, orch final report
+    assert messages[0]["role"] == "user"
+    assert messages[1]["role"] == "orchestrator"
+    assert messages[2]["role"] == "worker"
+    assert messages[3]["role"] == "orchestrator"
+    assert "SyntaxError" in messages[2]["content"]

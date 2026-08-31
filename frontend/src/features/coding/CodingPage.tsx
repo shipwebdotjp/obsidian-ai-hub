@@ -38,9 +38,10 @@ export default function CodingPage() {
   // Chat input and streaming state
   const [inputContent, setInputContent] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
-  const [streamingOrchestratorText, setStreamingOrchestratorText] = useState("");
+  const [activePhaseText, setActivePhaseText] = useState<string | null>(null);
   const [workerState, setWorkerState] = useState<{
     status: "idle" | "running" | "done";
+    attempt?: number;
     backend?: string;
     output?: string;
     error?: string | null;
@@ -48,12 +49,12 @@ export default function CodingPage() {
 
   const messageEndRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll on new messages / chunks
+  // Auto-scroll on new messages / phase change
   useEffect(() => {
     if (typeof messageEndRef.current?.scrollIntoView === "function") {
       messageEndRef.current.scrollIntoView({ behavior: "smooth" });
     }
-  }, [messages, streamingOrchestratorText, workerState]);
+  }, [messages, activePhaseText, workerState]);
 
   // Load projects on mount
   useEffect(() => {
@@ -171,13 +172,14 @@ export default function CodingPage() {
     const promptText = inputContent.trim();
     setInputContent("");
     setIsStreaming(true);
-    setStreamingOrchestratorText("");
+    setActivePhaseText("依頼を検討中...");
     setWorkerState({ status: "idle" });
     setError(null);
 
     // Optimistically add user message to list
+    const tempUserMsgId = `temp_${Date.now()}`;
     const tempUserMsg: CodingMessage = {
-      message_id: `temp_${Date.now()}`,
+      message_id: tempUserMsgId,
       session_id: selectedSessionId,
       sequence: messages.length + 1,
       role: "user",
@@ -185,8 +187,6 @@ export default function CodingPage() {
       created_at: new Date().toISOString(),
     };
     setMessages((prev) => [...prev, tempUserMsg]);
-
-    let orchAccumulated = "";
 
     try {
       await streamCodingMessage(selectedSessionId, promptText, (event: CodingSseEvent) => {
@@ -203,38 +203,58 @@ export default function CodingPage() {
             started_at: new Date().toISOString(),
             finished_at: null,
           });
-        } else if (event.event === "orchestrator_chunk") {
-          orchAccumulated += event.text;
-          setStreamingOrchestratorText(orchAccumulated);
+        } else if (event.event === "orchestrator_start") {
+          setActivePhaseText(
+            event.phase === "initial" ? "依頼を検討中..." : "CLI結果を確認中..."
+          );
+        } else if (event.event === "orchestrator_message") {
+          setActivePhaseText(null);
+          setMessages((prev) => {
+            if (prev.some((m) => m.message_id === event.message.message_id)) return prev;
+            return [...prev, event.message];
+          });
         } else if (event.event === "worker_start") {
+          setActivePhaseText(null);
           setWorkerState({
             status: "running",
+            attempt: event.attempt,
             backend: event.backend,
           });
         } else if (event.event === "worker_done") {
           setWorkerState({
             status: "done",
-            output: event.output,
+            attempt: event.attempt,
+            output: event.message.content,
             error: event.error,
+          });
+          setMessages((prev) => {
+            if (prev.some((m) => m.message_id === event.message.message_id)) return prev;
+            return [...prev, event.message];
           });
         } else if (event.event === "cancelled") {
           setError("キャンセルされました");
+          setActivePhaseText(null);
+          setWorkerState({ status: "idle" });
         } else if (event.event === "error") {
           setError(event.message);
+          setActivePhaseText(null);
+          setWorkerState({ status: "idle" });
         } else if (event.event === "done") {
           setIsStreaming(false);
-          setStreamingOrchestratorText("");
+          setActivePhaseText(null);
           setWorkerState({ status: "idle" });
-          // Reload full session state
+          // Reload full session state to ensure complete synchronization
           loadSessionDetail(selectedSessionId);
         }
       });
     } catch (err: any) {
       setError(err.message || "メッセージの送信に失敗しました");
       setInputContent(promptText);
-      setMessages((prev) => prev.filter((m) => m.message_id !== tempUserMsg.message_id));
+      setMessages((prev) => prev.filter((m) => m.message_id !== tempUserMsgId));
     } finally {
       setIsStreaming(false);
+      setActivePhaseText(null);
+      setWorkerState({ status: "idle" });
     }
   };
 
@@ -503,15 +523,11 @@ export default function CodingPage() {
               {/* Streaming state UI */}
               {isStreaming && (
                 <div className="space-y-3">
-                  {streamingOrchestratorText && (
+                  {activePhaseText && (
                     <div className="flex justify-start">
-                      <div className="max-w-2xl rounded-2xl bg-white border border-slate-200 p-4 text-xs text-slate-800 shadow-sm">
-                        <div className="mb-1 text-[10px] font-semibold text-slate-400 uppercase">
-                          AI Orchestrator (入力中...)
-                        </div>
-                        <p className="whitespace-pre-wrap leading-relaxed">
-                          {streamingOrchestratorText}
-                        </p>
+                      <div className="rounded-xl bg-white border border-slate-200 p-3 text-xs text-slate-700 shadow-sm flex items-center gap-2">
+                        <span className="inline-block h-2 w-2 animate-ping rounded-full bg-slate-600" />
+                        <span>AI Orchestrator: {activePhaseText}</span>
                       </div>
                     </div>
                   )}
@@ -520,7 +536,7 @@ export default function CodingPage() {
                     <div className="flex justify-start">
                       <div className="rounded-xl bg-slate-800 p-3 text-xs text-slate-200 font-mono flex items-center gap-2">
                         <span className="inline-block h-2 w-2 animate-ping rounded-full bg-emerald-400" />
-                        CLIワーカー ({workerState.backend}) 実行中...
+                        CLIワーカー {workerState.attempt ? `(${workerState.attempt}回目)` : ""} ({workerState.backend}) 実行中...
                       </div>
                     </div>
                   )}
