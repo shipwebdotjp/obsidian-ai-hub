@@ -80,6 +80,48 @@ def test_get_research_theme(client):
     assert data["latest_job"] is not None
 
 
+def test_research_theme_duplicate_reference_in_list_and_detail(client):
+    from obsidian_ai_hub.research import db as research_themes
+
+    target = research_themes.create_theme(theme="重複先のテーマ")
+    duplicate = research_themes.create_theme(
+        theme="重複したテーマ",
+        status="duplicate",
+        duplicate_of_theme_id=target["theme_id"],
+    )
+
+    list_response = client.get("/api/v1/research-themes")
+    assert list_response.status_code == 200
+    list_item = next(
+        item
+        for item in list_response.json()["items"]
+        if item["theme_id"] == duplicate["theme_id"]
+    )
+    assert list_item["duplicate_of_theme_id"] == target["theme_id"]
+    assert list_item["duplicate_of_theme"] == {
+        "theme_id": target["theme_id"],
+        "theme": "重複先のテーマ",
+    }
+
+    detail_response = client.get(f"/api/v1/research-themes/{duplicate['theme_id']}")
+    assert detail_response.status_code == 200
+    assert detail_response.json()["duplicate_of_theme"] == list_item["duplicate_of_theme"]
+
+
+def test_research_theme_missing_duplicate_reference_is_null(client):
+    from obsidian_ai_hub.research import db as research_themes
+
+    duplicate = research_themes.create_theme(
+        theme="重複先が不在のテーマ",
+        status="duplicate",
+        duplicate_of_theme_id="rth_missing",
+    )
+
+    response = client.get(f"/api/v1/research-themes/{duplicate['theme_id']}")
+    assert response.status_code == 200
+    assert response.json()["duplicate_of_theme"] is None
+
+
 def test_get_research_theme_not_found(client):
     resp = client.get("/api/v1/research-themes/nonexistent")
     assert resp.status_code == 404

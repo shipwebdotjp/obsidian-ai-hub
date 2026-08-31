@@ -24,6 +24,7 @@ export default function ResearchPage() {
   const [selectedTheme, setSelectedTheme] = useState<ResearchTheme | null>(null);
   const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [detailRefreshKey, setDetailRefreshKey] = useState(0);
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   // Modal State
@@ -57,6 +58,17 @@ export default function ResearchPage() {
       setToasts((prev) => prev.filter((t) => t.id !== id));
     }, 3500);
   }, []);
+
+  const openTheme = useCallback(async (themeId: string) => {
+    try {
+      const theme = await getResearchTheme(themeId);
+      setSelectedTheme(theme);
+      setMobileDetailOpen(true);
+    } catch (e) {
+      const msg = e instanceof ApiError ? e.message : "テーマ詳細の取得に失敗しました";
+      notify(msg, "error");
+    }
+  }, [notify]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -129,6 +141,7 @@ export default function ResearchPage() {
 
             if (selectedTheme?.theme_id === job.themeId) {
               setSelectedTheme(latestTheme);
+              setDetailRefreshKey((v) => v + 1);
             }
 
             handleRefresh();
@@ -252,6 +265,7 @@ export default function ResearchPage() {
               setSelectedTheme(t);
               setMobileDetailOpen(true);
             }}
+            onOpenTheme={openTheme}
             refreshKey={refreshKey}
             notify={notify}
           />
@@ -277,9 +291,10 @@ export default function ResearchPage() {
           <div className="min-h-0 flex-1 overflow-hidden">
             {selectedTheme ? (
               <ResearchDetailPanel
-                key={selectedTheme.theme_id + "-" + (selectedTheme.latest_job?.status || "")}
                 themeId={selectedTheme.theme_id}
+                refreshKey={detailRefreshKey}
                 onChanged={onChanged}
+                onOpenTheme={openTheme}
                 notify={notify}
               />
             ) : (

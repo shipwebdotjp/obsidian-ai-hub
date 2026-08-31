@@ -7,13 +7,17 @@ import { ROUTES } from "../../constants/routes";
 
 export interface ResearchDetailPanelProps {
   themeId: string;
+  refreshKey?: number;
   onChanged: (theme: ResearchTheme | null) => void;
+  onOpenTheme: (themeId: string) => void;
   notify: (msg: string, kind?: "info" | "error") => void;
 }
 
 export default function ResearchDetailPanel({
   themeId,
+  refreshKey = 0,
   onChanged,
+  onOpenTheme,
   notify,
 }: ResearchDetailPanelProps) {
   const [detail, setDetail] = useState<ResearchTheme | null>(null);
@@ -42,7 +46,7 @@ export default function ResearchDetailPanel({
       .finally(() => {
         if (currentFetchId === fetchIdRef.current) setLoading(false);
       });
-  }, [themeId]);
+  }, [themeId, refreshKey]);
 
   useEffect(() => {
     if (!detail?.related_theme_ids.length) {
@@ -137,7 +141,18 @@ export default function ResearchDetailPanel({
         <>
           <h2 className="mt-4 text-sm font-semibold text-amber-700">重複情報</h2>
           <div className="mt-1 rounded border border-amber-200 bg-amber-50 p-3 text-sm">
-            <div>重複先: {detail.duplicate_of_theme_id}</div>
+            {detail.duplicate_of_theme ? (
+              <button
+                type="button"
+                onClick={() => onOpenTheme(detail.duplicate_of_theme!.theme_id)}
+                aria-label={`重複先テーマ「${detail.duplicate_of_theme.theme}」を開く`}
+                className="text-left text-amber-800 underline cursor-pointer hover:text-amber-950"
+              >
+                重複先: {detail.duplicate_of_theme.theme}
+              </button>
+            ) : (
+              <div>重複先テーマは見つかりません (ID: {detail.duplicate_of_theme_id})</div>
+            )}
             {detail.duplicate_reason && <div className="mt-1 text-xs">理由: {detail.duplicate_reason}</div>}
           </div>
         </>

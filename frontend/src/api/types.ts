@@ -132,6 +132,11 @@ export interface ResearchJob {
   finished_at?: string;
 }
 
+export interface ResearchThemeReference {
+  theme_id: string;
+  theme: string;
+}
+
 export interface ResearchTheme {
   theme_id: string;
   status: ResearchStatus;
@@ -142,6 +147,7 @@ export interface ResearchTheme {
   confidence?: number;
   normalized_key: string;
   duplicate_of_theme_id?: string;
+  duplicate_of_theme?: ResearchThemeReference | null;
   duplicate_reason?: string;
   related_theme_ids: string[];
   created_at?: string;

@@ -127,6 +127,14 @@ def deserialize_theme(row: dict) -> dict:
             t["related_theme_ids"] = []
     else:
         t["related_theme_ids"] = []
+    duplicate_theme_name = t.pop("duplicate_of_theme_name", None)
+    if t.get("duplicate_of_theme_id") and duplicate_theme_name is not None:
+        t["duplicate_of_theme"] = {
+            "theme_id": t["duplicate_of_theme_id"],
+            "theme": duplicate_theme_name,
+        }
+    else:
+        t["duplicate_of_theme"] = None
     return t
 
 
@@ -198,7 +206,16 @@ def create_theme(
 def get_theme(theme_id: str, conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
     with auto_connection(conn) as (active_conn, _):
         cursor = active_conn.cursor()
-        cursor.execute("SELECT * FROM research_themes WHERE theme_id = ?", (theme_id,))
+        cursor.execute(
+            """
+            SELECT rt.*, duplicate_theme.theme AS duplicate_of_theme_name
+            FROM research_themes rt
+            LEFT JOIN research_themes duplicate_theme
+              ON duplicate_theme.theme_id = rt.duplicate_of_theme_id
+            WHERE rt.theme_id = ?
+            """,
+            (theme_id,),
+        )
         row = cursor.fetchone()
         if row is None:
             return None
@@ -236,8 +253,11 @@ def list_themes(
             f"""
             SELECT rt.*, rj.job_id AS latest_job_id, rj.status AS job_status,
                    rj.generated_title, rj.mode, rj.error,
-                   rj.started_at AS job_started_at, rj.finished_at AS job_finished_at
+                   rj.started_at AS job_started_at, rj.finished_at AS job_finished_at,
+                   duplicate_theme.theme AS duplicate_of_theme_name
             FROM research_themes rt
+            LEFT JOIN research_themes duplicate_theme
+              ON duplicate_theme.theme_id = rt.duplicate_of_theme_id
             LEFT JOIN research_jobs rj ON rj.job_id = (
                 SELECT rj2.job_id FROM research_jobs rj2
                 WHERE rj2.theme_id = rt.theme_id

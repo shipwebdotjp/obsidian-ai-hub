@@ -1,4 +1,5 @@
 import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { describe, it, expect, vi } from "vitest";
 import ResearchDetailPanel from "./ResearchDetailPanel";
@@ -57,6 +58,7 @@ describe("ResearchDetailPanel", () => {
       <ResearchDetailPanel
         themeId="test-1"
         onChanged={vi.fn()}
+        onOpenTheme={vi.fn()}
         notify={vi.fn()}
       />
     );
@@ -98,6 +100,7 @@ describe("ResearchDetailPanel", () => {
       <ResearchDetailPanel
         themeId="test-2"
         onChanged={vi.fn()}
+        onOpenTheme={vi.fn()}
         notify={vi.fn()}
       />
     );
@@ -129,6 +132,7 @@ describe("ResearchDetailPanel", () => {
         <ResearchDetailPanel
           themeId="test-3"
           onChanged={vi.fn()}
+          onOpenTheme={vi.fn()}
           notify={vi.fn()}
         />
       </MemoryRouter>
@@ -136,5 +140,37 @@ describe("ResearchDetailPanel", () => {
 
     const link = await screen.findByRole("link", { name: "HITLで回答" });
     expect(link).toHaveAttribute("href", "/hitl?run_id=hrun-abc");
+  });
+
+  it("shows the duplicate target theme and opens it", async () => {
+    mockGetResearchTheme.mockResolvedValue({
+      theme_id: "test-duplicate",
+      status: "duplicate",
+      theme: "重複したテーマ",
+      normalized_key: "duplicate",
+      duplicate_of_theme_id: "test-target",
+      duplicate_of_theme: {
+        theme_id: "test-target",
+        theme: "重複先のテーマ",
+      },
+      related_theme_ids: [],
+    });
+    const onOpenTheme = vi.fn();
+
+    render(
+      <ResearchDetailPanel
+        themeId="test-duplicate"
+        onChanged={vi.fn()}
+        onOpenTheme={onOpenTheme}
+        notify={vi.fn()}
+      />
+    );
+
+    const target = await screen.findByRole("button", {
+      name: "重複先テーマ「重複先のテーマ」を開く",
+    });
+    await userEvent.click(target);
+
+    expect(onOpenTheme).toHaveBeenCalledWith("test-target");
   });
 });

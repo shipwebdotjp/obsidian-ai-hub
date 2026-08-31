@@ -12,6 +12,7 @@ export interface ResearchListProps {
   status: string;
   query: string;
   onSelect: (theme: ResearchTheme) => void;
+  onOpenTheme: (themeId: string) => void;
   refreshKey: number;
   notify: (msg: string, kind?: "info" | "error") => void;
 }
@@ -20,6 +21,7 @@ export default function ResearchList({
   status,
   query,
   onSelect,
+  onOpenTheme,
   refreshKey,
   notify,
 }: ResearchListProps) {
@@ -130,11 +132,6 @@ export default function ResearchList({
                       </span>
                     )}
                     {job && jobStatusBadge(job.status)}
-                    {t.duplicate_of_theme_id && (
-                      <span className="text-[10px] text-amber-700">
-                        重複先: {t.duplicate_of_theme_id}
-                      </span>
-                    )}
                     {t.related_theme_ids.length > 0 && (
                       <span className="text-[10px] text-blue-700">
                         related: {t.related_theme_ids.length}
@@ -142,6 +139,20 @@ export default function ResearchList({
                     )}
                   </div>
                 </button>
+                {t.duplicate_of_theme ? (
+                  <button
+                    type="button"
+                    onClick={() => onOpenTheme(t.duplicate_of_theme!.theme_id)}
+                    aria-label={`重複先テーマ「${t.duplicate_of_theme.theme}」を開く`}
+                    className="mt-1 text-left text-[10px] text-amber-700 underline cursor-pointer hover:text-amber-900"
+                  >
+                    重複先: {t.duplicate_of_theme.theme}
+                  </button>
+                ) : t.duplicate_of_theme_id ? (
+                  <div className="mt-1 text-[10px] text-amber-700">
+                    重複先テーマは見つかりません (ID: {t.duplicate_of_theme_id})
+                  </div>
+                ) : null}
               </div>
               {t.status === "candidate" && t.origin === "auto_suggestion" && t.hitl_run_id && (
                 <div className="flex flex-col gap-1 shrink-0">

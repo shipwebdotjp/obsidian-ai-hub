@@ -236,6 +236,11 @@ class ResearchJob(BaseModel):
     finished_at: Optional[str] = None
 
 
+class ResearchThemeReference(BaseModel):
+    theme_id: str
+    theme: str
+
+
 class ResearchTheme(BaseModel):
     theme_id: str
     status: str
@@ -246,6 +251,7 @@ class ResearchTheme(BaseModel):
     confidence: Optional[float] = None
     normalized_key: str
     duplicate_of_theme_id: Optional[str] = None
+    duplicate_of_theme: Optional[ResearchThemeReference] = None
     duplicate_reason: Optional[str] = None
     related_theme_ids: list[str] = []
     created_at: Optional[str] = None
