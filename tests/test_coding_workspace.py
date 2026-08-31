@@ -209,3 +209,171 @@ def test_coding_api_endpoints(test_project):
     res = client.delete(f"/api/v1/coding/sessions/{sid}", headers=headers)
     assert res.status_code == 200
     assert res.json()["status"] == "deleted"
+
+
+def test_opencode_backend_initial_run(test_project):
+    """Test initial OpenCode run without external_session_id."""
+    be = backend.OpenCodeCliBackend()
+
+    # Mock _run_subprocess
+    json_output = '{"session_id": "ses_abc123", "text": "Execution completed"}'
+    with patch.object(be, "_run_subprocess", return_value=(0, json_output, "", False)) as mock_run:
+        res = be.execute(test_project["repo_path"], "hello")
+        assert res.external_session_id == "ses_abc123"
+        assert res.output == "Execution completed"
+        assert res.exit_code == 0
+        assert not res.session_recreated
+
+        # Check argv passed to _run_subprocess: should not contain --session
+        argv = mock_run.call_args[0][0]
+        assert "--session" not in argv
+        assert "--format" in argv
+        assert "json" in argv
+
+
+def test_opencode_backend_continuation_run(test_project):
+    """Test OpenCode continuation run with external_session_id."""
+    be = backend.OpenCodeCliBackend()
+
+    json_output = '{"session_id": "ses_abc123", "text": "Continuation response"}'
+    with patch.object(be, "_run_subprocess", return_value=(0, json_output, "", False)) as mock_run:
+        res = be.execute(test_project["repo_path"], "next prompt", external_session_id="ses_abc123")
+        assert res.external_session_id == "ses_abc123"
+        assert res.output == "Continuation response"
+        assert not res.session_recreated
+
+        # Check argv passed to _run_subprocess: should contain --session ses_abc123
+        argv = mock_run.call_args[0][0]
+        assert "--session" in argv
+        sess_idx = argv.index("--session")
+        assert argv[sess_idx + 1] == "ses_abc123"
+
+
+def test_opencode_backend_session_not_found_recovery(test_project):
+    """Test OpenCode recovery when Session not found occurs on continuation."""
+    be = backend.OpenCodeCliBackend()
+
+    # First run returns Session not found
+    error_output = "\x1b[31mError: Session not found\x1b[0m"
+    # Second run (retry) succeeds with new ses_new456
+    retry_json_output = '{"session_id": "ses_new456", "text": "Recovered response"}'
+
+    with patch.object(
+        be,
+        "_run_subprocess",
+        side_effect=[
+            (1, error_output, "", False),  # 1st call fails with Session not found
+            (0, retry_json_output, "", False),  # 2nd call (retry) succeeds
+        ],
+    ) as mock_run:
+        res = be.execute(test_project["repo_path"], "retry prompt", external_session_id="ses_old123")
+        assert res.external_session_id == "ses_new456"
+        assert res.output == "Recovered response"
+        assert res.exit_code == 0
+        assert res.session_recreated is True
+
+        assert mock_run.call_count == 2
+        # First call has --session ses_old123
+        argv1 = mock_run.call_args_list[0][0][0]
+        assert "--session" in argv1
+        # Second call has no --session
+        argv2 = mock_run.call_args_list[1][0][0]
+        assert "--session" not in argv2
+
+
+def test_opencode_backend_session_not_found_retry_failure(test_project):
+    """Test OpenCode when retry after Session not found also fails."""
+    be = backend.OpenCodeCliBackend()
+
+    error_output = "Session not found"
+    retry_error_output = "Network error on retry"
+
+    with patch.object(
+        be,
+        "_run_subprocess",
+        side_effect=[
+            (1, error_output, "", False),
+            (1, "", retry_error_output, False),
+        ],
+    ):
+        res = be.execute(test_project["repo_path"], "prompt", external_session_id="ses_old123")
+        assert res.external_session_id is None
+        assert res.exit_code == 1
+        assert res.error_message == retry_error_output
+        assert res.session_recreated is True
+
+
+def test_opencode_backend_other_errors_do_not_retry(test_project):
+    """Test that non-'Session not found' errors do not trigger retry."""
+    be = backend.OpenCodeCliBackend()
+
+    with patch.object(
+        be,
+        "_run_subprocess",
+        return_value=(1, "", "Syntax error in script", False),
+    ) as mock_run:
+        res = be.execute(test_project["repo_path"], "prompt", external_session_id="ses_old123")
+        assert res.external_session_id == "ses_old123"
+        assert res.exit_code == 1
+        assert res.error_message == "Syntax error in script"
+        assert res.session_recreated is False
+        assert mock_run.call_count == 1
+
+
+def test_opencode_stream_session_recreated_notification(test_project):
+    """Test integration flow when session is recreated and notifications are included in SSE/messages."""
+    app = create_app(token="test-token")
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer test-token"}
+
+    # Create OpenCode session
+    res = client.post(
+        "/api/v1/coding/sessions",
+        headers=headers,
+        json={
+            "project_id": test_project["project_id"],
+            "backend": "opencode",
+            "title": "OpenCode Recovery Session",
+        },
+    )
+    assert res.status_code == 200
+    sid = res.json()["session_id"]
+
+    # Set old external_session_id
+    store.update_session_external_id(sid, "ses_old999")
+
+    async def mock_stream_response(*args, **kwargs):
+        yield "解析結果です。\n<cli_request>\nopencode run test\n</cli_request>"
+
+    mock_cli_res = backend.CodingBackendResult(
+        external_session_id="ses_new888",
+        output="Refactored code",
+        exit_code=0,
+        session_recreated=True,
+    )
+
+    with patch(
+        "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.stream_response",
+        side_effect=mock_stream_response,
+    ), patch(
+        "obsidian_ai_hub.coding.backend.OpenCodeCliBackend.execute",
+        return_value=mock_cli_res,
+    ):
+        res = client.post(
+            f"/api/v1/coding/sessions/{sid}/messages/stream",
+            headers=headers,
+            json={"content": "コードを修正してください"},
+        )
+        assert res.status_code == 200
+        text = res.text
+        assert "worker_done" in text
+        assert '"session_recreated": true' in text
+
+    # Verify updated session external_session_id
+    detail_res = client.get(f"/api/v1/coding/sessions/{sid}", headers=headers)
+    detail = detail_res.json()
+    assert detail["session"]["external_session_id"] == "ses_new888"
+
+    # Verify notice in worker message
+    worker_msg = next(m for m in detail["messages"] if m["role"] == "worker")
+    assert "前の OpenCode セッションが見つからなかったため、新しいセッションへ切り替えて続行しました。" in worker_msg["content"]
