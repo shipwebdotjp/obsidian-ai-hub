@@ -16,6 +16,12 @@ from obsidian_ai_hub.coding.orchestrator import CodingOrchestrator, parse_cli_re
 logger = logging.getLogger(__name__)
 JST = ZoneInfo("Asia/Tokyo")
 
+MAX_CLI_ITERATIONS = 3
+CLI_LIMIT_REACHED_NOTICE = (
+    "追加のCLI実行が必要と判断されましたが、このメッセージ内での自動実行上限（3回）に達したため実行していません。"
+    "続行する場合は、作業を継続するよう指示してください。"
+)
+
 # Lock per normalized repo_path to prevent concurrent execution on the same Git repo
 _REPO_LOCKS: Dict[str, threading.Lock] = {}
 _REPO_LOCKS_GUARD = threading.Lock()
@@ -102,67 +108,88 @@ async def run_coding_turn_stream(
 
         yield f"data: {json.dumps({'event': 'start', 'run_id': run_id, 'is_dirty': is_dirty, 'dirty_summary': dirty_summary}, ensure_ascii=False)}\n\n"
 
-        # Fetch history
-        raw_history = store.list_messages(session_id)
-        # Exclude the newly added user message from history argument
-        history = [
-            {"role": m["role"], "content": m["content"]}
-            for m in raw_history
-            if m["message_id"] != user_msg_id
-        ]
-
-        # Call orchestrator
         orchestrator = CodingOrchestrator()
-        full_orch_response = ""
-
-        try:
-            async for token in orchestrator.stream_response(
-                history=history,
-                new_user_message=user_prompt,
-                repo_path=canonical_repo,
-                backend_name=backend_name,
-            ):
-                if cancel_event.is_set():
-                    break
-                full_orch_response += token
-                yield f"data: {json.dumps({'event': 'orchestrator_chunk', 'text': token}, ensure_ascii=False)}\n\n"
-        except Exception as exc:
-            logger.exception("Error during orchestrator streaming")
-            store.update_run(
-                run_id,
-                status="failed",
-                error_message=f"Orchestrator error: {str(exc)}",
-                finished_at=datetime.now(JST).isoformat(),
-            )
-            yield f"data: {json.dumps({'event': 'error', 'message': f'オーケストレーター実行エラー: {str(exc)}'}, ensure_ascii=False)}\n\n"
-            return
-
-        if cancel_event.is_set():
-            store.update_run(
-                run_id,
-                status="cancelled",
-                error_message="User cancelled during orchestrator phase",
-                finished_at=datetime.now(JST).isoformat(),
-            )
-            yield f"data: {json.dumps({'event': 'cancelled', 'message': 'キャンセルされました'}, ensure_ascii=False)}\n\n"
-            return
-
-        clean_orch_text, cli_prompt = parse_cli_request(full_orch_response)
-
-        # Save orchestrator message
-        orch_msg = store.add_message(session_id, role="orchestrator", content=clean_orch_text)
-        orch_msg_id = orch_msg["message_id"]
-        store.update_run(run_id, orchestrator_message_id=orch_msg_id)
-
-        worker_msg_id = None
+        cli_count = 0
         final_status = "completed"
-        if cli_prompt and not cancel_event.is_set():
-            yield f"data: {json.dumps({'event': 'worker_start', 'backend': backend_name, 'prompt': cli_prompt}, ensure_ascii=False)}\n\n"
 
-            # Execute worker CLI in thread pool to not block event loop
+        while True:
+            if cancel_event.is_set():
+                store.update_run(
+                    run_id,
+                    status="cancelled",
+                    error_message="User cancelled execution",
+                    finished_at=datetime.now(JST).isoformat(),
+                )
+                yield f"data: {json.dumps({'event': 'cancelled', 'message': 'キャンセルされました'}, ensure_ascii=False)}\n\n"
+                return
+
+            phase = "initial" if cli_count == 0 else "review"
+            yield f"data: {json.dumps({'event': 'orchestrator_start', 'phase': phase}, ensure_ascii=False)}\n\n"
+
+            # Fetch up-to-date message history for orchestrator context
+            raw_history = store.list_messages(session_id)
+            history = [
+                {"role": m["role"], "content": m["content"]}
+                for m in raw_history
+            ]
+
+            try:
+                full_orch_response = await orchestrator.generate_response(
+                    history=history,
+                    repo_path=canonical_repo,
+                    backend_name=backend_name,
+                )
+            except Exception as exc:
+                logger.exception("Error during orchestrator execution")
+                store.update_run(
+                    run_id,
+                    status="failed",
+                    error_message=f"Orchestrator error: {str(exc)}",
+                    finished_at=datetime.now(JST).isoformat(),
+                )
+                yield f"data: {json.dumps({'event': 'error', 'message': f'オーケストレーター実行エラー: {str(exc)}'}, ensure_ascii=False)}\n\n"
+                return
+
+            if cancel_event.is_set():
+                store.update_run(
+                    run_id,
+                    status="cancelled",
+                    error_message="User cancelled execution",
+                    finished_at=datetime.now(JST).isoformat(),
+                )
+                yield f"data: {json.dumps({'event': 'cancelled', 'message': 'キャンセルされました'}, ensure_ascii=False)}\n\n"
+                return
+
+            clean_orch_text, cli_prompt = parse_cli_request(full_orch_response)
+
+            # Check maximum autonomous CLI limit ceiling
+            if cli_count >= MAX_CLI_ITERATIONS:
+                if cli_prompt:
+                    cli_prompt = None
+                    if clean_orch_text:
+                        clean_orch_text = f"{clean_orch_text}\n\n{CLI_LIMIT_REACHED_NOTICE}"
+                    else:
+                        clean_orch_text = CLI_LIMIT_REACHED_NOTICE
+
+            # Save orchestrator message
+            orch_msg = store.add_message(session_id, role="orchestrator", content=clean_orch_text)
+            orch_msg_id = orch_msg["message_id"]
+            store.update_run(run_id, orchestrator_message_id=orch_msg_id)
+
+            yield f"data: {json.dumps({'event': 'orchestrator_message', 'phase': phase, 'message': orch_msg}, ensure_ascii=False)}\n\n"
+
+            if not cli_prompt or cancel_event.is_set():
+                break
+
+            cli_count += 1
+            yield f"data: {json.dumps({'event': 'worker_start', 'attempt': cli_count, 'backend': backend_name, 'prompt': cli_prompt}, ensure_ascii=False)}\n\n"
+
+            # Execute worker CLI in thread pool
             try:
                 cli_backend = backend.get_backend(backend_name)
-                ext_sess_id = session.get("external_session_id")
+                # Re-fetch session to get current external_session_id
+                current_session = store.get_session(session_id)
+                ext_sess_id = current_session.get("external_session_id") if current_session else None
 
                 loop = asyncio.get_running_loop()
                 cli_result: backend.CodingBackendResult = await loop.run_in_executor(
@@ -208,9 +235,6 @@ async def run_coding_turn_stream(
                 )
                 worker_msg_id = worker_msg["message_id"]
 
-                if cli_result.exit_code != 0:
-                    final_status = "failed"
-
                 store.update_run(
                     run_id,
                     worker_message_id=worker_msg_id,
@@ -219,7 +243,8 @@ async def run_coding_turn_stream(
 
                 worker_done_data = {
                     'event': 'worker_done',
-                    'output': worker_output,
+                    'attempt': cli_count,
+                    'message': worker_msg,
                     'exit_code': cli_result.exit_code,
                     'error': cli_result.error_message,
                     'session_recreated': cli_result.session_recreated,

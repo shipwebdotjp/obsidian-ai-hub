@@ -117,9 +117,47 @@ describe("CodingPage", () => {
     vi.mocked(codingApi.streamCodingMessage).mockImplementation(
       async (_sessionId, _content, onEvent) => {
         onEvent({ event: "start", run_id: "crun_999", is_dirty: false, dirty_summary: null });
-        onEvent({ event: "orchestrator_chunk", text: "オーケストレーター応答" });
-        onEvent({ event: "worker_start", backend: "codex", prompt: "codex test" });
-        onEvent({ event: "worker_done", output: "Worker finished", exit_code: 0, error: null });
+        onEvent({ event: "orchestrator_start", phase: "initial" });
+        onEvent({
+          event: "orchestrator_message",
+          phase: "initial",
+          message: {
+            message_id: "cmsg_orch1",
+            session_id: "cses_111",
+            sequence: 3,
+            role: "orchestrator",
+            content: "オーケストレーター判断1",
+            created_at: "2026-01-01T00:02:00Z",
+          },
+        });
+        onEvent({ event: "worker_start", attempt: 1, backend: "codex", prompt: "codex test" });
+        onEvent({
+          event: "worker_done",
+          attempt: 1,
+          message: {
+            message_id: "cmsg_work1",
+            session_id: "cses_111",
+            sequence: 4,
+            role: "worker",
+            content: "Worker output text",
+            created_at: "2026-01-01T00:03:00Z",
+          },
+          exit_code: 0,
+          error: null,
+        });
+        onEvent({ event: "orchestrator_start", phase: "review" });
+        onEvent({
+          event: "orchestrator_message",
+          phase: "review",
+          message: {
+            message_id: "cmsg_orch2",
+            session_id: "cses_111",
+            sequence: 5,
+            role: "orchestrator",
+            content: "オーケストレーター最終報告",
+            created_at: "2026-01-01T00:04:00Z",
+          },
+        });
         onEvent({ event: "done", run_id: "crun_999", status: "completed" });
       },
     );
