@@ -356,30 +356,34 @@
   - `run_skill_script`: `scripts/` 配下の実行可能かつ shebang（`#!`）を持つスクリプトのみを `subprocess`（shell=False）で直接実行する。`cwd` は Skill ディレクトリとし、引数は文字列配列のみ（最大20件）。`stdout` / `stderr` は各20,000文字で切り捨て、タイムアウト60秒を設けて構造化 JSON で結果を返す。
 - **直接実行境界 (Direct-exec trust boundary)**: スクリプト実行に HITL ゲートは適用しない。エージェント作成・編集時に利用者が `skills` を選択することが直接実行権限を与える意図とみなされる。
 
-## OpenCode 会話と外部 CLI セッションの自動切替・復旧方針
+## コーディング CLI (OpenCode / Codex) 会話と外部 CLI セッションの自動切替・復旧方針
 
 | 項目 | 内容 |
 |------|------|
-| 決定日 | 2026-08-27 |
-| カテゴリ | コーディングワークスペース・OpenCode CLI |
-| 決定内容 | 画面上のコーディング会話（`coding_sessions`）と外部 OpenCode CLI セッション（`ses_…`）を 1 対 1 に固定せず、DB には直近で利用可能だった外部 ID を 1 件だけ保持する。`Session not found` 検出時は自動的に新規セッションへ一度だけ切り替えて継続実行し、新 ID を DB へ上書き保存する。過去セッション一覧保持や手動選択機能は導入しない。 |
+| 決定日 | 2026-08-27 (Codex拡張: 2026-08-28) |
+| カテゴリ | コーディングワークスペース・OpenCode / Codex CLI |
+| 決定内容 | 画面上のコーディング会話（`coding_sessions`）と外部 CLI セッション（`ses_…` または Codex thread ID）を 1 対 1 に固定せず、DB には直近で利用可能だった外部 ID を 1 件だけ保持する。`Session not found` または `thread not found` 検出時は自動的に新規セッション/threadへ一度だけ切り替えて継続実行し、新 ID を DB へ上書き保存する。過去セッション一覧保持や手動選択機能は導入しない。 |
 
 ### 結論に至った経緯
 
-OpenCode CLI のセッションは外部で有効期限切れ・削除される場合がある。会話画面と外部セッションを厳密に 1 対 1 に固定すると、セッション失効時にユーザーの会話が中断・エラーとなり、手動での再作成・やり直しが必要となる。
+OpenCode および Codex CLI の外部セッション/thread は外部で有効期限切れ・削除される場合がある。会話画面と外部セッションを厳密に 1 対 1 に固定すると、セッション失効時にユーザーの会話が中断・エラーとなり、手動での再作成・やり直しが必要となる。
 
 会話のコンテキストは `coding_messages` テーブルに保持されているため、外部 CLI セッションが失効しても新セッションで同じ指示を再実行することで会話を円滑に継続できる。
 
-### 構造と自動切替
+### 構造と自動切替 (OpenCode CLI / Codex CLI)
 
-- **初回実行**: `--session` を付与せず `opencode run --format json <prompt>` を実行し、返却された JSON から実セッション ID（`ses_…`）を取得・保存する。アプリ側でランダムな `opencode_sess_…` は生成しない。
-- **継続実行**: 保存済みの外部 ID が存在する場合は `opencode run --format json --session <ses_…> <prompt>` を実行する。
+- **初回実行**:
+  - OpenCode: `--session` を付与せず `opencode run --format json <prompt>` を実行し、返却された JSON から実セッション ID（`ses_…`）を取得・保存する。
+  - Codex: `codex exec --json --sandbox workspace-write <prompt>` を実行し、`thread.started` JSONL イベントの `thread_id` を実 ID として取得・保存する（`--session` は使用しない）。
+- **継続実行**:
+  - OpenCode: 保存済みの外部 ID が存在する場合は `opencode run --format json --session <ses_…> <prompt>` を実行する。
+  - Codex: 保存済みの外部 ID が存在する場合は `codex exec resume --json <thread_id> <prompt>` を実行する。
 - **失効検出と復旧（1度限りのリトライ）**:
-  - ANSI 装飾を除去した出力に `Session not found` が含まれる場合のみ、`--session` 指定なしで一度だけ自動再実行する。
-  - 再実行成功時は新しい `ses_…` で `coding_sessions.external_session_id` を上書きする。
-  - 再実行失敗時は `external_session_id` を `NULL` にクリアし、次回の指示で新規セッションとして試行できるようにする。
+  - ANSI 装飾を除去した出力/エラーイベントに `Session not found` または `thread not found` が含まれる場合のみ、初回実行形式（ID指定なし）で一度だけ自動再実行する。
+  - 再実行成功時は新しい ID で `coding_sessions.external_session_id` を上書きし、`session_recreated=true` とする。
+  - 再実行失敗時は `external_session_id` を `NULL` にクリアし、`session_recreated=false` としてエラーを返し、次回の指示で新規セッションとして試行できるようにする。
 - **通知とコンテキスト伝達**:
-  - 復旧が発生した場合は、`worker_done` SSE イベントに `session_recreated: true` を含め、保存される worker メッセージの冒頭にセッション切替通知を記録する。これにより、次のオーケストレーターターンにもセッションが切替された状態が伝わる。
+  - 復旧が発生した場合は、`worker_done` SSE イベントに `session_recreated: true` を含め、保存される worker メッセージの冒頭にバックエンドに応じたセッション切替通知（`前の Codex セッションが見つからなかったため…` / `前の OpenCode セッションが見つからなかったため…`）を記録する。これにより、次のオーケストレーターターンにもセッションが切替された状態が伝わる。
 
 ## AI エージェントの任意シェル実行（run_shell）と権限付与方針
 

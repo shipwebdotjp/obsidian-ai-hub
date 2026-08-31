@@ -185,6 +185,84 @@ class _BaseSubprocessBackend(CodingBackend):
 class CodexCliBackend(_BaseSubprocessBackend):
     """Codex CLI backend adapter."""
 
+    @staticmethod
+    def _strip_ansi(text: str) -> str:
+        """Strip ANSI escape sequences from text."""
+        ansi_regex = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
+        return ansi_regex.sub("", text)
+
+    @staticmethod
+    def _parse_codex_json_output(
+        stdout: str, stderr: str
+    ) -> tuple[Optional[str], str, Optional[str]]:
+        """Parse Codex CLI JSON Lines output.
+
+        Extracts thread ID (from thread.started event) and agent_message text
+        (from item.completed events).
+        Returns (thread_id, agent_message_text, json_error_message).
+        """
+        import json
+
+        extracted_thread_id = None
+        agent_messages: list[str] = []
+        json_errors: list[str] = []
+
+        combined = stdout + "\n" + stderr if stderr else stdout
+        for line in combined.splitlines():
+            line_str = line.strip()
+            if not line_str:
+                continue
+            if line_str.startswith("{") and line_str.endswith("}"):
+                try:
+                    data = json.loads(line_str)
+                    if isinstance(data, dict):
+                        event_type = data.get("type")
+
+                        # 1. Thread ID extraction
+                        if event_type == "thread.started":
+                            if "thread_id" in data and isinstance(data["thread_id"], str):
+                                extracted_thread_id = data["thread_id"]
+                            elif "thread" in data and isinstance(data["thread"], dict):
+                                thread_obj = data["thread"]
+                                if "id" in thread_obj and isinstance(thread_obj["id"], str):
+                                    extracted_thread_id = thread_obj["id"]
+
+                        # Fallback for thread_id if present in top level
+                        if not extracted_thread_id and "thread_id" in data and isinstance(data["thread_id"], str):
+                            extracted_thread_id = data["thread_id"]
+
+                        # 2. Agent message extraction
+                        if event_type == "item.completed":
+                            item = data.get("item")
+                            if isinstance(item, dict):
+                                item_type = item.get("type")
+                                if item_type == "agent_message":
+                                    txt = item.get("text")
+                                    if isinstance(txt, str) and txt:
+                                        agent_messages.append(txt)
+                                elif "agent_message" in item and isinstance(item["agent_message"], dict):
+                                    msg_obj = item["agent_message"]
+                                    txt = msg_obj.get("text")
+                                    if isinstance(txt, str) and txt:
+                                        agent_messages.append(txt)
+
+                        # 3. JSON Error event extraction
+                        if event_type == "error":
+                            msg = data.get("message") or data.get("error")
+                            if isinstance(msg, str) and msg:
+                                json_errors.append(msg)
+                        elif "error" in data and isinstance(data["error"], str) and data["error"]:
+                            json_errors.append(data["error"])
+
+                except json.JSONDecodeError:
+                    pass
+
+        # Return the last non-empty agent_message as final output, or fallback to stdout/stderr
+        output_text = agent_messages[-1] if agent_messages else (stdout.strip() or stderr.strip())
+        json_error_msg = "\n".join(json_errors).strip() if json_errors else None
+
+        return extracted_thread_id, output_text, json_error_msg
+
     def execute(
         self,
         repo_path: str,
@@ -194,54 +272,109 @@ class CodexCliBackend(_BaseSubprocessBackend):
         timeout: int = 600,
     ) -> CodingBackendResult:
         exe_path = CODING_CODEX_CLI_PATH or "codex"
-        argv = [exe_path]
 
-        sess_id = external_session_id or f"codex_sess_{uuid.uuid4().hex[:12]}"
-
-        if external_session_id:
-            argv.extend(["--session", external_session_id])
-        else:
-            argv.extend(["--session", sess_id])
-
-        argv.extend(["exec", prompt])
-
-        try:
-            exit_code, stdout, stderr, cancelled = self._run_subprocess(
+        def _run_cmd(thread_id_opt: Optional[str]):
+            argv = [exe_path, "exec"]
+            if thread_id_opt:
+                argv.extend(["resume", "--json", thread_id_opt, prompt])
+            else:
+                argv.extend(["--json", "--sandbox", "workspace-write", prompt])
+            return self._run_subprocess(
                 argv, cwd=repo_path, cancel_event=cancel_event, timeout=timeout
             )
+
+        try:
+            exit_code, stdout, stderr, cancelled = _run_cmd(external_session_id)
         except Exception as exc:
             logger.exception("Failed to execute Codex CLI")
             return CodingBackendResult(
-                external_session_id=sess_id,
+                external_session_id=external_session_id,
                 output="",
                 exit_code=-1,
                 error_message=str(exc),
                 cancelled=False,
             )
 
+        extracted_thread_id, parsed_text, json_err = self._parse_codex_json_output(stdout, stderr)
+        current_thread_id = extracted_thread_id or external_session_id
+
         if cancelled:
             return CodingBackendResult(
-                external_session_id=sess_id,
-                output=stdout,
+                external_session_id=current_thread_id,
+                output=parsed_text,
                 exit_code=exit_code,
                 error_message="Cancelled by user or timed out",
                 cancelled=True,
             )
 
-        # Extract session ID if printed in stdout/stderr if different
-        m = re.search(r"session[_-]?id[:=]\s*([a-zA-Z0-9_-]+)", stdout + stderr)
-        if m:
-            sess_id = m.group(1)
+        clean_combined = self._strip_ansi(stdout + "\n" + stderr + "\n" + (json_err or ""))
 
-        output = stdout if stdout else stderr
-        err_msg = None if exit_code == 0 else (stderr or f"Exit code {exit_code}")
+        # Check for Session not found or thread not found when external_session_id was provided
+        if external_session_id and (
+            "session not found" in clean_combined.lower()
+            or "thread not found" in clean_combined.lower()
+        ):
+            logger.warning(
+                "Codex thread '%s' not found. Retrying once with a new thread...",
+                external_session_id,
+            )
+            try:
+                r_exit, r_stdout, r_stderr, r_cancelled = _run_cmd(None)
+            except Exception as exc:
+                logger.exception("Failed during Codex retry execution")
+                return CodingBackendResult(
+                    external_session_id=None,
+                    output="",
+                    exit_code=-1,
+                    error_message=f"Retry failed: {str(exc)}",
+                    cancelled=False,
+                    session_recreated=False,
+                )
+
+            r_thread_id, r_text, r_json_err = self._parse_codex_json_output(r_stdout, r_stderr)
+
+            if r_cancelled:
+                return CodingBackendResult(
+                    external_session_id=None,
+                    output=r_text,
+                    exit_code=r_exit,
+                    error_message="Cancelled by user or timed out during retry",
+                    cancelled=True,
+                    session_recreated=False,
+                )
+
+            if r_exit != 0:
+                err_msg = r_stderr or r_json_err or f"Exit code {r_exit}"
+                return CodingBackendResult(
+                    external_session_id=None,
+                    output=r_text,
+                    exit_code=r_exit,
+                    error_message=err_msg,
+                    cancelled=False,
+                    session_recreated=False,
+                )
+
+            return CodingBackendResult(
+                external_session_id=r_thread_id,
+                output=r_text,
+                exit_code=0,
+                error_message=None,
+                cancelled=False,
+                session_recreated=True,
+            )
+
+        # Normal completion (initial or valid continuation)
+        err_msg = None
+        if exit_code != 0:
+            err_msg = stderr or json_err or f"Exit code {exit_code}"
 
         return CodingBackendResult(
-            external_session_id=sess_id,
-            output=output,
+            external_session_id=current_thread_id,
+            output=parsed_text,
             exit_code=exit_code,
             error_message=err_msg,
             cancelled=False,
+            session_recreated=False,
         )
 
 
