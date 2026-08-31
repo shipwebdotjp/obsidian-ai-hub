@@ -191,8 +191,12 @@ async def run_coding_turn_stream(
                     return
 
                 worker_output = cli_result.output
-                notice_prefix = "前の OpenCode セッションが見つからなかったため、新しいセッションへ切り替えて続行しました。"
-                if cli_result.session_recreated and backend_name == "opencode":
+                if cli_result.session_recreated:
+                    if backend_name == "codex":
+                        notice_prefix = "前の Codex セッションが見つからなかったため、新しいセッションへ切り替えて続行しました。"
+                    else:
+                        notice_prefix = "前の OpenCode セッションが見つからなかったため、新しいセッションへ切り替えて続行しました。"
+
                     if worker_output:
                         worker_output = f"{notice_prefix}\n\n{worker_output}"
                     else:

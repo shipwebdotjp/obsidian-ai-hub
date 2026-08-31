@@ -175,7 +175,7 @@ def test_coding_api_endpoints(test_project):
         yield "解析結果です。\n<cli_request>\npytest\n</cli_request>"
 
     mock_cli_res = backend.CodingBackendResult(
-        external_session_id="ext_123",
+        external_session_id="th_123",
         output="1 passed in 0.01s",
         exit_code=0,
     )
@@ -203,7 +203,7 @@ def test_coding_api_endpoints(test_project):
     res = client.get(f"/api/v1/coding/sessions/{sid}", headers=headers)
     detail = res.json()
     assert len(detail["messages"]) == 3  # user, orchestrator, worker
-    assert detail["session"]["external_session_id"] == "ext_123"
+    assert detail["session"]["external_session_id"] == "th_123"
 
     # 5. Delete session
     res = client.delete(f"/api/v1/coding/sessions/{sid}", headers=headers)
@@ -377,3 +377,195 @@ def test_opencode_stream_session_recreated_notification(test_project):
     # Verify notice in worker message
     worker_msg = next(m for m in detail["messages"] if m["role"] == "worker")
     assert "前の OpenCode セッションが見つからなかったため、新しいセッションへ切り替えて続行しました。" in worker_msg["content"]
+
+
+def test_codex_backend_initial_run(test_project):
+    """Test initial Codex run without external_session_id."""
+    be = backend.CodexCliBackend()
+
+    json_lines = [
+        '{"type": "thread.started", "thread_id": "th_abc123"}',
+        '{"type": "item.completed", "item": {"type": "agent_message", "text": "Initial answer from Codex"}}',
+    ]
+    stdout_data = "\n".join(json_lines)
+
+    with patch.object(be, "_run_subprocess", return_value=(0, stdout_data, "", False)) as mock_run:
+        res = be.execute(test_project["repo_path"], "hello codex")
+        assert res.external_session_id == "th_abc123"
+        assert res.output == "Initial answer from Codex"
+        assert res.exit_code == 0
+        assert not res.session_recreated
+
+        argv = mock_run.call_args[0][0]
+        assert "--session" not in argv
+        assert "exec" in argv
+        assert "--json" in argv
+        assert "--sandbox" in argv
+        assert "workspace-write" in argv
+
+
+def test_codex_backend_continuation_run(test_project):
+    """Test Codex continuation run with thread ID using resume."""
+    be = backend.CodexCliBackend()
+
+    json_lines = [
+        '{"type": "item.completed", "item": {"agent_message": {"text": "Continuation response from Codex"}}}',
+    ]
+    stdout_data = "\n".join(json_lines)
+
+    with patch.object(be, "_run_subprocess", return_value=(0, stdout_data, "", False)) as mock_run:
+        res = be.execute(test_project["repo_path"], "next codex prompt", external_session_id="th_abc123")
+        assert res.external_session_id == "th_abc123"
+        assert res.output == "Continuation response from Codex"
+        assert not res.session_recreated
+
+        argv = mock_run.call_args[0][0]
+        assert "--session" not in argv
+        assert "resume" in argv
+        assert "--json" in argv
+        assert "th_abc123" in argv
+
+
+def test_codex_backend_session_not_found_recovery(test_project):
+    """Test Codex recovery when thread not found occurs on resume."""
+    be = backend.CodexCliBackend()
+
+    error_output = "Error: Thread not found"
+    retry_json_lines = [
+        '{"type": "thread.started", "thread_id": "th_new456"}',
+        '{"type": "item.completed", "item": {"type": "agent_message", "text": "Recovered codex response"}}',
+    ]
+    retry_stdout = "\n".join(retry_json_lines)
+
+    with patch.object(
+        be,
+        "_run_subprocess",
+        side_effect=[
+            (1, "", error_output, False),  # 1st call fails
+            (0, retry_stdout, "", False),  # 2nd call (retry) succeeds
+        ],
+    ) as mock_run:
+        res = be.execute(test_project["repo_path"], "retry prompt", external_session_id="th_old123")
+        assert res.external_session_id == "th_new456"
+        assert res.output == "Recovered codex response"
+        assert res.exit_code == 0
+        assert res.session_recreated is True
+
+        assert mock_run.call_count == 2
+        argv1 = mock_run.call_args_list[0][0][0]
+        assert "resume" in argv1
+        argv2 = mock_run.call_args_list[1][0][0]
+        assert "resume" not in argv2
+        assert "--sandbox" in argv2
+
+
+def test_codex_backend_session_not_found_retry_failure(test_project):
+    """Test Codex when retry after session/thread not found also fails."""
+    be = backend.CodexCliBackend()
+
+    error_output = "Thread not found"
+    retry_error_output = "Execution failed on retry"
+
+    with patch.object(
+        be,
+        "_run_subprocess",
+        side_effect=[
+            (1, "", error_output, False),
+            (1, "", retry_error_output, False),
+        ],
+    ):
+        res = be.execute(test_project["repo_path"], "prompt", external_session_id="th_old123")
+        assert res.external_session_id is None
+        assert res.exit_code == 1
+        assert res.error_message == retry_error_output
+        assert res.session_recreated is False
+
+
+def test_codex_backend_other_errors_do_not_retry(test_project):
+    """Test that non-'Thread not found' errors do not trigger retry."""
+    be = backend.CodexCliBackend()
+
+    with patch.object(
+        be,
+        "_run_subprocess",
+        return_value=(1, "", "Syntax error in prompt", False),
+    ) as mock_run:
+        res = be.execute(test_project["repo_path"], "prompt", external_session_id="th_old123")
+        assert res.external_session_id == "th_old123"
+        assert res.exit_code == 1
+        assert res.error_message == "Syntax error in prompt"
+        assert res.session_recreated is False
+        assert mock_run.call_count == 1
+
+
+def test_codex_backend_cancellation_retains_thread_id(test_project):
+    """Test that thread_id extracted before cancellation is preserved."""
+    be = backend.CodexCliBackend()
+
+    json_lines = [
+        '{"type": "thread.started", "thread_id": "th_cancelled789"}',
+    ]
+    stdout_data = "\n".join(json_lines)
+
+    with patch.object(be, "_run_subprocess", return_value=(-1, stdout_data, "", True)):
+        res = be.execute(test_project["repo_path"], "cancelled prompt")
+        assert res.external_session_id == "th_cancelled789"
+        assert res.cancelled is True
+
+
+def test_codex_stream_session_recreated_notification(test_project):
+    """Test integration flow when Codex session is recreated."""
+    app = create_app(token="test-token")
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer test-token"}
+
+    # Create Codex session
+    res = client.post(
+        "/api/v1/coding/sessions",
+        headers=headers,
+        json={
+            "project_id": test_project["project_id"],
+            "backend": "codex",
+            "title": "Codex Recovery Session",
+        },
+    )
+    assert res.status_code == 200
+    sid = res.json()["session_id"]
+
+    store.update_session_external_id(sid, "th_old999")
+
+    async def mock_stream_response(*args, **kwargs):
+        yield "解析結果です。\n<cli_request>\ncodex exec test\n</cli_request>"
+
+    mock_cli_res = backend.CodingBackendResult(
+        external_session_id="th_new888",
+        output="Codex refactored code",
+        exit_code=0,
+        session_recreated=True,
+    )
+
+    with patch(
+        "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.stream_response",
+        side_effect=mock_stream_response,
+    ), patch(
+        "obsidian_ai_hub.coding.backend.CodexCliBackend.execute",
+        return_value=mock_cli_res,
+    ):
+        res = client.post(
+            f"/api/v1/coding/sessions/{sid}/messages/stream",
+            headers=headers,
+            json={"content": "コードを修正してください"},
+        )
+        assert res.status_code == 200
+        text = res.text
+        assert "worker_done" in text
+        assert '"session_recreated": true' in text
+
+    # Verify updated session external_session_id
+    detail_res = client.get(f"/api/v1/coding/sessions/{sid}", headers=headers)
+    detail = detail_res.json()
+    assert detail["session"]["external_session_id"] == "th_new888"
+
+    # Verify notice in worker message for Codex
+    worker_msg = next(m for m in detail["messages"] if m["role"] == "worker")
+    assert "前の Codex セッションが見つからなかったため、新しいセッションへ切り替えて続行しました。" in worker_msg["content"]
