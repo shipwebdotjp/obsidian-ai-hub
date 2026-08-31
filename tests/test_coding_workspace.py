@@ -215,8 +215,8 @@ def test_opencode_backend_initial_run(test_project):
     """Test initial OpenCode run without external_session_id."""
     be = backend.OpenCodeCliBackend()
 
-    # Mock _run_subprocess
-    json_output = '{"session_id": "ses_abc123", "text": "Execution completed"}'
+    # Mock _run_subprocess with actual OpenCode event shape (sessionID and part.type == 'text')
+    json_output = '{"sessionID": "ses_abc123", "part": {"type": "text", "text": "Execution completed"}}'
     with patch.object(be, "_run_subprocess", return_value=(0, json_output, "", False)) as mock_run:
         res = be.execute(test_project["repo_path"], "hello")
         assert res.external_session_id == "ses_abc123"

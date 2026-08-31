@@ -261,6 +261,8 @@ class OpenCodeCliBackend(_BaseSubprocessBackend):
         Extracts session ID (e.g. ses_...) and combines text contents.
         If non-JSON output, returns (extracted_session_id, raw_output).
         """
+        import json
+
         extracted_session_id = None
         text_parts: list[str] = []
 
@@ -271,20 +273,34 @@ class OpenCodeCliBackend(_BaseSubprocessBackend):
                 continue
             if line_str.startswith("{") and line_str.endswith("}"):
                 try:
-                    import json
-
                     data = json.loads(line_str)
                     if isinstance(data, dict):
                         # Extract session ID from top level or nested fields
-                        if "session_id" in data and data["session_id"]:
+                        if "sessionID" in data and data["sessionID"]:
+                            extracted_session_id = str(data["sessionID"])
+                        elif "session_id" in data and data["session_id"]:
                             extracted_session_id = str(data["session_id"])
                         elif "session" in data and isinstance(data["session"], dict) and "id" in data["session"]:
                             extracted_session_id = str(data["session"]["id"])
                         elif "sessionId" in data and data["sessionId"]:
                             extracted_session_id = str(data["sessionId"])
 
-                        # Extract text message content
-                        if "text" in data and isinstance(data["text"], str):
+                        # Extract text message content from nested part objects or direct fields
+                        if "part" in data and isinstance(data["part"], dict):
+                            part = data["part"]
+                            if part.get("type") == "text":
+                                if "text" in part and isinstance(part["text"], str):
+                                    text_parts.append(part["text"])
+                                elif "content" in part and isinstance(part["content"], str):
+                                    text_parts.append(part["content"])
+                        elif "parts" in data and isinstance(data["parts"], list):
+                            for part in data["parts"]:
+                                if isinstance(part, dict) and part.get("type") == "text":
+                                    if "text" in part and isinstance(part["text"], str):
+                                        text_parts.append(part["text"])
+                                    elif "content" in part and isinstance(part["content"], str):
+                                        text_parts.append(part["content"])
+                        elif "text" in data and isinstance(data["text"], str):
                             text_parts.append(data["text"])
                         elif "content" in data and isinstance(data["content"], str):
                             text_parts.append(data["content"])
@@ -294,7 +310,7 @@ class OpenCodeCliBackend(_BaseSubprocessBackend):
                                 text_parts.append(msg)
                             elif isinstance(msg, dict) and "content" in msg:
                                 text_parts.append(str(msg["content"]))
-                except Exception:
+                except json.JSONDecodeError:
                     pass
 
         # Fallback session ID extraction if not found in structured JSON
