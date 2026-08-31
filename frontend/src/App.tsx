@@ -5,6 +5,7 @@ import TokenPrompt from "./components/TokenPrompt";
 import MemoryPage from "./features/memories/MemoryPage";
 import ResearchPage from "./features/research/ResearchPage";
 import AgentsPage from "./features/agents/AgentsPage";
+import CodingPage from "./features/coding/CodingPage";
 import HitlPage from "./features/hitl/HitlPage";
 import VaultSearchPage from "./features/vault-search/VaultSearchPage";
 import SummaryDashboardPage from "./features/summary-dashboard/SummaryDashboardPage";
@@ -173,6 +174,7 @@ export default function App() {
           <Route path={ROUTES.MEMORIES} element={<MemoryPage />} />
           <Route path={ROUTES.RESEARCH} element={<ResearchPage />} />
           <Route path={ROUTES.AGENTS} element={<AgentsPage />} />
+          <Route path={ROUTES.CODING} element={<CodingPage />} />
           <Route path={ROUTES.HITL} element={<HitlPage />} />
           <Route path={ROUTES.VAULT_SEARCH} element={<VaultSearchPage />} />
           <Route path={ROUTES.SUMMARY_DASHBOARD} element={<SummaryDashboardPage />} />

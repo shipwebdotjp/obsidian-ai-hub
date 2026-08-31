@@ -492,6 +492,9 @@ def get_db_connection() -> sqlite3.Connection:
     if current_version <= 25:
         run_migration_v26(conn)
 
+    if current_version <= 26:
+        run_migration_v27(conn)
+
     return conn
 
 
@@ -803,6 +806,59 @@ def run_migration_v26(conn: sqlite3.Connection) -> None:
     except sqlite3.OperationalError as e:
         _ignore_duplicate_schema_object(e)
     conn.execute("PRAGMA user_version = 26;")
+    conn.commit()
+
+
+def run_migration_v27(conn: sqlite3.Connection) -> None:
+    """Run migration for version 27 (Dedicated coding workspace: coding_sessions, coding_messages, coding_runs)."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS coding_sessions (
+            session_id TEXT PRIMARY KEY,
+            project_id INTEGER NOT NULL,
+            backend TEXT NOT NULL,
+            repo_path TEXT NOT NULL,
+            external_session_id TEXT,
+            title TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY(project_id) REFERENCES projects(project_id) ON DELETE CASCADE
+        );
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS coding_messages (
+            message_id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            sequence INTEGER NOT NULL,
+            role TEXT NOT NULL,
+            content TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY(session_id) REFERENCES coding_sessions(session_id) ON DELETE CASCADE,
+            UNIQUE(session_id, sequence)
+        );
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS coding_runs (
+            run_id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            user_message_id TEXT NOT NULL,
+            orchestrator_message_id TEXT,
+            worker_message_id TEXT,
+            status TEXT NOT NULL,
+            dirty_tree_at_start TEXT,
+            error_message TEXT,
+            started_at TEXT NOT NULL,
+            finished_at TEXT,
+            FOREIGN KEY(session_id) REFERENCES coding_sessions(session_id) ON DELETE CASCADE,
+            FOREIGN KEY(user_message_id) REFERENCES coding_messages(message_id) ON DELETE CASCADE,
+            FOREIGN KEY(orchestrator_message_id) REFERENCES coding_messages(message_id) ON DELETE CASCADE,
+            FOREIGN KEY(worker_message_id) REFERENCES coding_messages(message_id) ON DELETE CASCADE
+        );
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_coding_sessions_project_id ON coding_sessions(project_id);")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_coding_messages_session_seq ON coding_messages(session_id, sequence);")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_coding_runs_session_id ON coding_runs(session_id);")
+
+    conn.execute("PRAGMA user_version = 27;")
     conn.commit()
 
 

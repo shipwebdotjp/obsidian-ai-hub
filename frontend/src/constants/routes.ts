@@ -2,6 +2,7 @@ export const ROUTES = {
   MEMORIES: "/memories",
   RESEARCH: "/research",
   AGENTS: "/agents",
+  CODING: "/coding",
   VAULT_SEARCH: "/vault-search",
   SUMMARY_DASHBOARD: "/summary-dashboard",
   HEALTHCARE: "/healthcare",

@@ -232,6 +232,24 @@ export interface SummaryProjectNoteInput {
   note: string;
 }
 
+export interface Project {
+  project_id: number;
+  normalized_name: string;
+  display_name: string;
+  domain: "work" | "personal";
+  status: "inquiry" | "active" | "paused" | "completed" | "cancelled";
+  goal?: string | null;
+  description?: string | null;
+  keywords: string[];
+  start_date?: string | null;
+  target_date?: string | null;
+  completed_date?: string | null;
+  project_path?: string | null;
+  reference_url?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface ProjectCandidate {
   candidate_id: number;
   display_name: string;
