@@ -8,6 +8,7 @@ import re
 import signal
 import subprocess
 import threading
+import time
 import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -126,8 +127,8 @@ class _BaseSubprocessBackend(CodingBackend):
             try:
                 for line in iter(pipe.readline, ""):
                     container.append(line)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("Error reading subprocess pipe: %s", exc)
             finally:
                 pipe.close()
 
@@ -138,11 +139,8 @@ class _BaseSubprocessBackend(CodingBackend):
         t_out.start()
         t_err.start()
 
-        start_time = threading.Event()
-        start_time.wait(0.01)
-
+        start_time = time.monotonic()
         poll_interval = 0.2
-        elapsed = 0.0
 
         while proc.poll() is None:
             if cancel_event and cancel_event.is_set():
@@ -153,6 +151,7 @@ class _BaseSubprocessBackend(CodingBackend):
                     pass
                 break
 
+            elapsed = time.monotonic() - start_time
             if elapsed >= timeout:
                 cancelled = True
                 try:
@@ -161,16 +160,17 @@ class _BaseSubprocessBackend(CodingBackend):
                     pass
                 break
 
-            cancel_event_triggered = cancel_event.wait(poll_interval) if cancel_event else False
-            if cancel_event_triggered:
-                cancelled = True
-                try:
-                    os.killpg(proc.pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
-                break
-
-            elapsed += poll_interval
+            if cancel_event:
+                cancel_event_triggered = cancel_event.wait(poll_interval)
+                if cancel_event_triggered:
+                    cancelled = True
+                    try:
+                        os.killpg(proc.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    break
+            else:
+                time.sleep(poll_interval)
 
         proc.wait()
         t_out.join(timeout=1.0)

@@ -38,7 +38,7 @@ def list_coding_projects(_=Depends(require_bearer_token)):
             try:
                 repo_path = backend.validate_git_repo(project_path)
                 is_valid = True
-            except Exception as exc:
+            except ValueError as exc:
                 error_msg = str(exc)
         else:
             error_msg = "プロジェクトの project_path が設定されていません"

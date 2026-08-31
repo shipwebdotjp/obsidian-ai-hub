@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import AsyncGenerator, Dict, List, Optional, Tuple
+from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from obsidian_ai_hub.utils.llm_client import create_langchain_llm

@@ -155,6 +155,7 @@ async def run_coding_turn_stream(
         store.update_run(run_id, orchestrator_message_id=orch_msg_id)
 
         worker_msg_id = None
+        final_status = "completed"
         if cli_prompt and not cancel_event.is_set():
             yield f"data: {json.dumps({'event': 'worker_start', 'backend': backend_name, 'prompt': cli_prompt}, ensure_ascii=False)}\n\n"
 
@@ -195,6 +196,9 @@ async def run_coding_turn_stream(
                 )
                 worker_msg_id = worker_msg["message_id"]
 
+                if cli_result.exit_code != 0:
+                    final_status = "failed"
+
                 store.update_run(
                     run_id,
                     worker_message_id=worker_msg_id,
@@ -214,15 +218,15 @@ async def run_coding_turn_stream(
                 yield f"data: {json.dumps({'event': 'error', 'message': f'CLIワーカー実行エラー: {str(exc)}'}, ensure_ascii=False)}\n\n"
                 return
 
-        # Complete run successfully
+        # Update final run status
         now_iso = datetime.now(JST).isoformat()
         store.update_run(
             run_id,
-            status="completed",
+            status=final_status,
             finished_at=now_iso,
         )
 
-        yield f"data: {json.dumps({'event': 'done', 'run_id': run_id, 'status': 'completed'}, ensure_ascii=False)}\n\n"
+        yield f"data: {json.dumps({'event': 'done', 'run_id': run_id, 'status': final_status}, ensure_ascii=False)}\n\n"
 
     finally:
         with _JOBS_GUARD:

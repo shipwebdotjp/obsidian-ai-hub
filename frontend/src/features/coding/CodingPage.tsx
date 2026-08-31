@@ -231,6 +231,8 @@ export default function CodingPage() {
       });
     } catch (err: any) {
       setError(err.message || "メッセージの送信に失敗しました");
+      setInputContent(promptText);
+      setMessages((prev) => prev.filter((m) => m.message_id !== tempUserMsg.message_id));
     } finally {
       setIsStreaming(false);
     }
@@ -319,7 +321,7 @@ export default function CodingPage() {
               type="button"
               disabled={!selectedProjectItem.is_valid_git_repo}
               onClick={() => setIsNewSessionModalOpen(true)}
-              className="rounded bg-slate-900 px-2.5 py-1 text-xs font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+              className="rounded bg-slate-900 px-2.5 py-1 text-xs font-medium text-white hover:bg-slate-800 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 disabled:bg-slate-300"
               title={
                 !selectedProjectItem.is_valid_git_repo
                   ? "Gitリポジトリが無効なためセッションを作成できません"
@@ -351,14 +353,16 @@ export default function CodingPage() {
             <div className="space-y-1">
               {sessions.map((sess) => {
                 const isSelected = sess.session_id === selectedSessionId;
+                const dateStr = sess.created_at ? new Date(sess.created_at).toLocaleDateString() : "";
                 return (
                   <div
                     key={sess.session_id}
+                    data-selected={isSelected}
                     onClick={() => setSelectedSessionId(sess.session_id)}
                     className={`group flex cursor-pointer items-center justify-between rounded px-3 py-2 text-xs transition-colors ${
                       isSelected
-                        ? "bg-slate-200 font-medium text-slate-900"
-                        : "text-slate-700 hover:bg-slate-100"
+                        ? "bg-slate-200 border-l-4 border-slate-800 font-medium text-slate-900"
+                        : "text-slate-700 hover:bg-slate-50"
                     }`}
                   >
                     <div className="min-w-0 flex-1">
@@ -367,14 +371,18 @@ export default function CodingPage() {
                         <span className="uppercase font-semibold text-slate-600">
                           {sess.backend}
                         </span>
-                        <span>•</span>
-                        <span>{new Date(sess.created_at).toLocaleDateString()}</span>
+                        {dateStr && (
+                          <>
+                            <span>•</span>
+                            <span>{dateStr}</span>
+                          </>
+                        )}
                       </div>
                     </div>
                     <button
                       type="button"
                       onClick={(e) => handleDeleteSession(sess.session_id, e)}
-                      className="ml-2 hidden rounded p-1 text-slate-400 hover:bg-slate-300 hover:text-slate-700 group-hover:block"
+                      className="ml-2 hidden rounded p-1 text-slate-400 hover:bg-slate-300 hover:text-slate-700 group-hover:block cursor-pointer"
                       title="削除"
                     >
                       ✕
@@ -424,7 +432,7 @@ export default function CodingPage() {
                 <button
                   type="button"
                   onClick={handleCancelRun}
-                  className="rounded bg-red-600 px-3 py-1 text-xs font-medium text-white hover:bg-red-700"
+                  className="rounded bg-rose-600 px-3 py-1 text-xs font-medium text-white hover:bg-rose-700 cursor-pointer"
                 >
                   キャンセル
                 </button>
@@ -562,7 +570,7 @@ export default function CodingPage() {
                   disabled={
                     !inputContent.trim() || isStreaming || currentRun?.status === "running"
                   }
-                  className="rounded-lg bg-slate-900 px-4 text-xs font-medium text-white hover:bg-slate-800 disabled:bg-slate-300"
+                  className="rounded bg-slate-900 px-4 text-xs font-medium text-white hover:bg-slate-800 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 disabled:bg-slate-300"
                 >
                   送信
                 </button>
@@ -633,7 +641,7 @@ export default function CodingPage() {
               <button
                 type="button"
                 onClick={() => setIsNewSessionModalOpen(false)}
-                className="rounded-lg px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-100"
+                className="rounded px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-100 cursor-pointer"
               >
                 キャンセル
               </button>
@@ -641,7 +649,7 @@ export default function CodingPage() {
                 type="button"
                 disabled={creatingSession}
                 onClick={handleCreateSession}
-                className="rounded-lg bg-slate-900 px-4 py-1.5 text-xs font-medium text-white hover:bg-slate-800 disabled:bg-slate-300"
+                className="rounded bg-slate-900 px-4 py-1.5 text-xs font-medium text-white hover:bg-slate-800 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 disabled:bg-slate-300"
               >
                 {creatingSession ? "作成中..." : "作成"}
               </button>

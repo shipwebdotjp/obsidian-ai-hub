@@ -112,4 +112,74 @@ describe("CodingPage", () => {
       expect(codingApi.createCodingSession).toHaveBeenCalledWith(1, "codex", "新セッション2");
     });
   });
+
+  it("handles message streaming lifecycle and refetches session detail on completion", async () => {
+    vi.mocked(codingApi.streamCodingMessage).mockImplementation(
+      async (_sessionId, _content, onEvent) => {
+        onEvent({ event: "start", run_id: "crun_999", is_dirty: false, dirty_summary: null });
+        onEvent({ event: "orchestrator_chunk", text: "オーケストレーター応答" });
+        onEvent({ event: "worker_start", backend: "codex", prompt: "codex test" });
+        onEvent({ event: "worker_done", output: "Worker finished", exit_code: 0, error: null });
+        onEvent({ event: "done", run_id: "crun_999", status: "completed" });
+      },
+    );
+
+    render(<CodingPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Test App")).toBeInTheDocument();
+    });
+
+    const textarea = screen.getByPlaceholderText("指示・質問を入力 (Cmd+Enterで送信)...");
+    fireEvent.change(textarea, { target: { value: "テスト実行してください" } });
+
+    const sendBtn = screen.getByRole("button", { name: "送信" });
+    fireEvent.click(sendBtn);
+
+    await waitFor(() => {
+      expect(codingApi.streamCodingMessage).toHaveBeenCalledWith(
+        "cses_111",
+        "テスト実行してください",
+        expect.any(Function),
+      );
+      expect(codingApi.getCodingSessionDetail).toHaveBeenCalledWith("cses_111");
+    });
+  });
+
+  it("allows cancelling active run", async () => {
+    vi.mocked(codingApi.getCodingSessionDetail).mockResolvedValue({
+      session: mockSession,
+      messages: [],
+      active_run: {
+        run_id: "crun_active",
+        session_id: "cses_111",
+        user_message_id: "cmsg_1",
+        orchestrator_message_id: null,
+        worker_message_id: null,
+        status: "running",
+        dirty_tree_at_start: null,
+        error_message: null,
+        started_at: "2026-01-01T00:00:00Z",
+        finished_at: null,
+      },
+      latest_run: null,
+    });
+    vi.mocked(codingApi.cancelCodingRun).mockResolvedValue({
+      status: "cancel_signalled",
+      run_id: "crun_active",
+    });
+
+    render(<CodingPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("キャンセル")).toBeInTheDocument();
+    });
+
+    const cancelBtn = screen.getByRole("button", { name: "キャンセル" });
+    fireEvent.click(cancelBtn);
+
+    await waitFor(() => {
+      expect(codingApi.cancelCodingRun).toHaveBeenCalledWith("crun_active");
+    });
+  });
 });
