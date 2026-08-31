@@ -89,6 +89,7 @@ Use the following split to keep the project OSS-friendly:
 - vault index storage paths and embedder model name
 - LLM provider/model selections and optional prompt overrides via `llm.<name>`
 - research behavior and deep-research (GPT Researcher) settings via `research`
+- coding workspace orchestrator and CLI agent paths via `coding`
 
 Research provider/model selection is configured only in `config/config.yml`.
 Keep provider credentials such as `OPENAI_API_KEY`, `TAVILY_API_KEY`, and
@@ -110,6 +111,34 @@ llm:
     provider: opencode_go
     model: deepseek-v3
 ```
+
+### Coding Workspace Configuration
+
+The coding workspace (`/coding` in the Web UI) uses a two-layer architecture:
+an LLM orchestrator that plans and an external coding CLI agent (Codex/OpenCode)
+that executes file edits and tests.
+
+Configure it in `config/config.yml` under `coding`. Environment variables override
+the YAML values if set.
+
+```yaml
+coding:
+  orchestrator:
+    provider: openai        # openai | ollama | gemini | opencode_go | local
+    model: gpt-5.6-terra    # any model supported by the provider
+  cli:
+    codex_path: /path/to/your/codex        # default: codex (on PATH)
+    opencode_path: /path/to/your/opencode  # default: opencode (on PATH)
+```
+
+Settings:
+
+- `coding.orchestrator.provider` (`CODING_ORCHESTRATOR_PROVIDER`): LLM provider for the orchestrator. Default `openai`.
+- `coding.orchestrator.model` (`CODING_ORCHESTRATOR_MODEL`): Model ID for the orchestrator. Default `gpt-5.6-terra`.
+- `coding.cli.codex_path` (`CODING_CODEX_CLI_PATH`): Absolute path or binary name for the Codex CLI. Default `codex`.
+- `coding.cli.opencode_path` (`CODING_OPENCODE_CLI_PATH`): Absolute path or binary name for the OpenCode CLI. Default `opencode`.
+
+See `config/config.example.yml` for a complete example.
 
 ## Usage
 
