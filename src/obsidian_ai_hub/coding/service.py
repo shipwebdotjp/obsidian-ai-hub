@@ -128,10 +128,10 @@ async def run_coding_turn_stream(
 
             # Fetch up-to-date message history for orchestrator context
             raw_history = store.list_messages(session_id)
-            history = [
-                {"role": m["role"], "content": m["content"]}
-                for m in raw_history
-            ]
+            history = []
+            for m in raw_history:
+                msg_dict = {"role": m["role"], "content": m["content"]}
+                history.append(msg_dict)
 
             try:
                 full_orch_response = await orchestrator.generate_response(
@@ -178,7 +178,17 @@ async def run_coding_turn_stream(
 
             yield f"data: {json.dumps({'event': 'orchestrator_message', 'phase': phase, 'message': orch_msg}, ensure_ascii=False)}\n\n"
 
-            if not cli_prompt or cancel_event.is_set():
+            if cancel_event.is_set():
+                store.update_run(
+                    run_id,
+                    status="cancelled",
+                    error_message="User cancelled execution",
+                    finished_at=datetime.now(JST).isoformat(),
+                )
+                yield f"data: {json.dumps({'event': 'cancelled', 'message': 'キャンセルされました'}, ensure_ascii=False)}\n\n"
+                return
+
+            if not cli_prompt:
                 break
 
             cli_count += 1

@@ -83,9 +83,9 @@ class CodingOrchestrator:
             elif role == "orchestrator":
                 msgs.append(AIMessage(content=content))
             elif role == "worker":
-                # Worker response provided as system/context observation
+                # Worker response provided as user/human observation (untrusted external data)
                 msgs.append(
-                    SystemMessage(content=f"【CLIワーカーの実行結果（観測情報）】\n{content}")
+                    HumanMessage(content=f"【CLIワーカーの実行結果（観測情報）】\n{content}")
                 )
 
         return msgs

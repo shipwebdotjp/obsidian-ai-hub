@@ -191,3 +191,7 @@
 ## AI エージェントの任意シェル実行（run_shell）と権限付与方針
 
 [移転先: 10-Decisions-Architecture.md](10-Decisions-Architecture.md)
+
+## コーディング・オーケストレーターの自律フォローアップと上限設定方針
+
+[移転先: 10-Decisions-Architecture.md](10-Decisions-Architecture.md)
