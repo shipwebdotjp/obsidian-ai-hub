@@ -56,6 +56,10 @@ _APP_ENV_VARS = [
     "OBSIDIAN_AI_HUB_SKILLS_DIR",
     "HEALTHCARE_SQLITE_PATH",
     "HEALTHCARE_EXPORT_DIR",
+    "CODING_ORCHESTRATOR_PROVIDER",
+    "CODING_ORCHESTRATOR_MODEL",
+    "CODING_CODEX_CLI_PATH",
+    "CODING_OPENCODE_CLI_PATH",
 ]
 
 if IS_TEST_ENV:
@@ -581,6 +585,20 @@ AGENT_TITLE_PROMPT_PATH = _config_optional_path(
 )
 if AGENT_TITLE_PROMPT_PATH is None:
     AGENT_TITLE_PROMPT_PATH = BASE_DIR / "config" / "prompts" / "agent_title.md"
+
+# Coding Orchestrator & CLI config
+CODING_ORCHESTRATOR_PROVIDER = str(
+    _env_or_config("CODING_ORCHESTRATOR_PROVIDER", "coding", "orchestrator", "provider", default="openai")
+)
+CODING_ORCHESTRATOR_MODEL = str(
+    _env_or_config("CODING_ORCHESTRATOR_MODEL", "coding", "orchestrator", "model", default="gpt-4o")
+)
+CODING_CODEX_CLI_PATH = str(
+    _env_or_config("CODING_CODEX_CLI_PATH", "coding", "cli", "codex_path", default="codex")
+)
+CODING_OPENCODE_CLI_PATH = str(
+    _env_or_config("CODING_OPENCODE_CLI_PATH", "coding", "cli", "opencode_path", default="opencode")
+)
 
 if IS_TEST_ENV:
     AI_LOG_PATH = TEST_WORKSPACE / "vault" / "ai-log"

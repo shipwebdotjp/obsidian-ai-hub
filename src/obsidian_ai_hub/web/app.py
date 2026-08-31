@@ -64,8 +64,10 @@ def create_app(
     @app.on_event("startup")
     def on_startup():
         from obsidian_ai_hub.research.runner import cleanup_stale_jobs
+        from obsidian_ai_hub.coding.store import mark_interrupted_runs_on_startup
 
         cleanup_stale_jobs()
+        mark_interrupted_runs_on_startup()
 
     @app.get("/health")
     def health():

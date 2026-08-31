@@ -58,6 +58,9 @@ export default function Sidebar({ open, onClose, id }: SidebarProps) {
         <NavLink to={ROUTES.AGENTS} className={linkClass} onClick={onClose}>
           AIエージェント
         </NavLink>
+        <NavLink to={ROUTES.CODING} className={linkClass} onClick={onClose}>
+          コーディング
+        </NavLink>
         <NavLink to={ROUTES.HITL} className={linkClass} onClick={onClose}>
           <span className="flex items-center justify-between">
             <span>確認待ち</span>
