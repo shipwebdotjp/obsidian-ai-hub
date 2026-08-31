@@ -175,7 +175,7 @@ async def run_coding_turn_stream(
                     ),
                 )
 
-                if cli_result.external_session_id:
+                if cli_result.session_recreated or cli_result.external_session_id != ext_sess_id:
                     store.update_session_external_id(
                         session_id, cli_result.external_session_id
                     )
@@ -190,9 +190,17 @@ async def run_coding_turn_stream(
                     yield f"data: {json.dumps({'event': 'cancelled', 'message': 'CLI実行がキャンセルされました'}, ensure_ascii=False)}\n\n"
                     return
 
+                worker_output = cli_result.output
+                notice_prefix = "前の OpenCode セッションが見つからなかったため、新しいセッションへ切り替えて続行しました。"
+                if cli_result.session_recreated and backend_name == "opencode":
+                    if worker_output:
+                        worker_output = f"{notice_prefix}\n\n{worker_output}"
+                    else:
+                        worker_output = notice_prefix
+
                 # Save worker output message
                 worker_msg = store.add_message(
-                    session_id, role="worker", content=cli_result.output
+                    session_id, role="worker", content=worker_output
                 )
                 worker_msg_id = worker_msg["message_id"]
 
@@ -205,7 +213,14 @@ async def run_coding_turn_stream(
                     error_message=cli_result.error_message,
                 )
 
-                yield f"data: {json.dumps({'event': 'worker_done', 'output': cli_result.output, 'exit_code': cli_result.exit_code, 'error': cli_result.error_message}, ensure_ascii=False)}\n\n"
+                worker_done_data = {
+                    'event': 'worker_done',
+                    'output': worker_output,
+                    'exit_code': cli_result.exit_code,
+                    'error': cli_result.error_message,
+                    'session_recreated': cli_result.session_recreated,
+                }
+                yield f"data: {json.dumps(worker_done_data, ensure_ascii=False)}\n\n"
 
             except Exception as exc:
                 logger.exception("Error during CLI worker execution")

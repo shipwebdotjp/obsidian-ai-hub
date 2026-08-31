@@ -100,7 +100,7 @@ def list_sessions_by_project(project_id: int) -> List[Dict[str, Any]]:
     return [dict(r) for r in rows]
 
 
-def update_session_external_id(session_id: str, external_session_id: str) -> None:
+def update_session_external_id(session_id: str, external_session_id: Optional[str]) -> None:
     """Update external_session_id for a session."""
     conn = get_db_connection()
     now = _now_iso()
