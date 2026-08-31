@@ -570,7 +570,7 @@ AGENT_PROVIDER = str(
     _env_or_config("AGENT_PROVIDER", "llm", "agent", "provider", default="openai")
 )
 AGENT_MODEL = str(
-    _env_or_config("AGENT_MODEL", "llm", "agent", "model", default="gpt-4o")
+    _env_or_config("AGENT_MODEL", "llm", "agent", "model", default="gpt-5.6-terra")
 )
 
 # AI Agent session title generation LLM config & prompt
@@ -591,7 +591,7 @@ CODING_ORCHESTRATOR_PROVIDER = str(
     _env_or_config("CODING_ORCHESTRATOR_PROVIDER", "coding", "orchestrator", "provider", default="openai")
 )
 CODING_ORCHESTRATOR_MODEL = str(
-    _env_or_config("CODING_ORCHESTRATOR_MODEL", "coding", "orchestrator", "model", default="gpt-4o")
+    _env_or_config("CODING_ORCHESTRATOR_MODEL", "coding", "orchestrator", "model", default="gpt-5.6-terra")
 )
 CODING_CODEX_CLI_PATH = str(
     _env_or_config("CODING_CODEX_CLI_PATH", "coding", "cli", "codex_path", default="codex")
