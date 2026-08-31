@@ -13,6 +13,11 @@ import {
   type CodingRun,
   type CodingSseEvent,
 } from "../../api/coding";
+import {
+  getChatInputPlaceholder,
+  shouldSendOnEnter,
+  useChatSendMode,
+} from "../settings/chatSendMode";
 
 export default function CodingPage() {
   const [projects, setProjects] = useState<CodingProjectItem[]>([]);
@@ -37,6 +42,7 @@ export default function CodingPage() {
 
   // Chat input and streaming state
   const [inputContent, setInputContent] = useState("");
+  const [chatSendMode] = useChatSendMode();
   const [isStreaming, setIsStreaming] = useState(false);
   const [activePhaseText, setActivePhaseText] = useState<string | null>(null);
   const [workerState, setWorkerState] = useState<{
@@ -165,8 +171,7 @@ export default function CodingPage() {
     }
   };
 
-  const handleSendMessage = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const executeSend = async () => {
     if (!selectedSessionId || !inputContent.trim() || isStreaming) return;
 
     const promptText = inputContent.trim();
@@ -257,6 +262,20 @@ export default function CodingPage() {
       setWorkerState({ status: "idle" });
     }
   };
+
+  const handleSendMessage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await executeSend();
+  };
+
+  const handleInputKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (shouldSendOnEnter(e, chatSendMode)) {
+      e.preventDefault();
+      void executeSend();
+    }
+  };
+
+  const codingPlaceholder = getChatInputPlaceholder(chatSendMode, "指示・質問を入力");
 
   const handleCancelRun = async () => {
     const runId = activeRun?.run_id || latestRun?.run_id;
@@ -571,13 +590,8 @@ export default function CodingPage() {
                   rows={2}
                   value={inputContent}
                   onChange={(e) => setInputContent(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                      e.preventDefault();
-                      handleSendMessage(e);
-                    }
-                  }}
-                  placeholder="指示・質問を入力 (Cmd+Enterで送信)..."
+                  onKeyDown={handleInputKeyDown}
+                  placeholder={codingPlaceholder}
                   disabled={isStreaming || currentRun?.status === "running"}
                   className="flex-1 resize-none rounded-lg border border-slate-300 p-2 text-xs focus:border-slate-800 focus:outline-none disabled:bg-slate-100"
                 />

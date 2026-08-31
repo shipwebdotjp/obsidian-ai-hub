@@ -43,6 +43,7 @@ const mockSession: codingApi.CodingSession = {
 describe("CodingPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.clear();
     vi.mocked(codingApi.listCodingProjects).mockResolvedValue([mockProjectItem]);
     vi.mocked(codingApi.listCodingSessions).mockResolvedValue([mockSession]);
     vi.mocked(codingApi.getCodingSessionDetail).mockResolvedValue({
@@ -168,7 +169,9 @@ describe("CodingPage", () => {
       expect(screen.getByText("Test App")).toBeInTheDocument();
     });
 
-    const textarea = screen.getByPlaceholderText("指示・質問を入力 (Cmd+Enterで送信)...");
+    const textarea = screen.getByPlaceholderText(
+      "指示・質問を入力…（Enterで送信 / Shift+Enterで改行）",
+    );
     fireEvent.change(textarea, { target: { value: "テスト実行してください" } });
 
     const sendBtn = screen.getByRole("button", { name: "送信" });
@@ -219,5 +222,81 @@ describe("CodingPage", () => {
     await waitFor(() => {
       expect(codingApi.cancelCodingRun).toHaveBeenCalledWith("crun_active");
     });
+  });
+
+  it("shows mode-aware placeholder for 'enter' and 'newline'", async () => {
+    render(<CodingPage />);
+    await waitFor(() => expect(screen.getByText("Test App")).toBeInTheDocument());
+    expect(
+      screen.getByPlaceholderText("指示・質問を入力…（Enterで送信 / Shift+Enterで改行）"),
+    ).toBeInTheDocument();
+
+    localStorage.setItem("obsidian-ai-hub:chat-send-mode", "newline");
+    window.dispatchEvent(new Event("chat-send-mode-changed"));
+
+    await waitFor(() =>
+      expect(
+        screen.getByPlaceholderText("指示・質問を入力…（Enterで改行 / Ctrl+Enterで送信）"),
+      ).toBeInTheDocument(),
+    );
+  });
+
+  it("sends on Enter when mode is 'enter', but not on Shift+Enter", async () => {
+    vi.mocked(codingApi.streamCodingMessage).mockResolvedValue(undefined);
+    render(<CodingPage />);
+    await waitFor(() => expect(screen.getByText("Test App")).toBeInTheDocument());
+    const textarea = screen.getByPlaceholderText(
+      "指示・質問を入力…（Enterで送信 / Shift+Enterで改行）",
+    );
+    fireEvent.change(textarea, { target: { value: "enter-send" } });
+    fireEvent.keyDown(textarea, { key: "Enter", shiftKey: false });
+    await waitFor(() => expect(codingApi.streamCodingMessage).toHaveBeenCalled());
+
+    vi.mocked(codingApi.streamCodingMessage).mockClear();
+    fireEvent.change(textarea, { target: { value: "shift-enter" } });
+    fireEvent.keyDown(textarea, { key: "Enter", shiftKey: true });
+    await waitFor(() => new Promise((r) => setTimeout(r, 50)));
+    expect(codingApi.streamCodingMessage).not.toHaveBeenCalled();
+  });
+
+  it("does not send on plain Enter when mode is 'newline', but sends on Ctrl+Enter and Cmd+Enter", async () => {
+    localStorage.setItem("obsidian-ai-hub:chat-send-mode", "newline");
+    vi.mocked(codingApi.streamCodingMessage).mockResolvedValue(undefined);
+    render(<CodingPage />);
+    await waitFor(() =>
+      expect(
+        screen.getByPlaceholderText("指示・質問を入力…（Enterで改行 / Ctrl+Enterで送信）"),
+      ).toBeInTheDocument(),
+    );
+    const textarea = screen.getByPlaceholderText(
+      "指示・質問を入力…（Enterで改行 / Ctrl+Enterで送信）",
+    );
+
+    fireEvent.change(textarea, { target: { value: "no-send" } });
+    fireEvent.keyDown(textarea, { key: "Enter", shiftKey: false });
+    await waitFor(() => new Promise((r) => setTimeout(r, 30)));
+    expect(codingApi.streamCodingMessage).not.toHaveBeenCalled();
+
+    fireEvent.change(textarea, { target: { value: "ctrl-send" } });
+    fireEvent.keyDown(textarea, { key: "Enter", ctrlKey: true });
+    await waitFor(() => expect(codingApi.streamCodingMessage).toHaveBeenCalled());
+    vi.mocked(codingApi.streamCodingMessage).mockClear();
+
+    fireEvent.change(textarea, { target: { value: "meta-send" } });
+    fireEvent.keyDown(textarea, { key: "Enter", metaKey: true });
+    await waitFor(() => expect(codingApi.streamCodingMessage).toHaveBeenCalled());
+  });
+
+  it("does not send while composing (IME via keyCode 229)", async () => {
+    vi.mocked(codingApi.streamCodingMessage).mockResolvedValue(undefined);
+    render(<CodingPage />);
+    await waitFor(() => expect(screen.getByText("Test App")).toBeInTheDocument());
+    const textarea = screen.getByPlaceholderText(
+      "指示・質問を入力…（Enterで送信 / Shift+Enterで改行）",
+    );
+    fireEvent.change(textarea, { target: { value: "composing" } });
+    fireEvent.keyDown(textarea, { key: "Enter", keyCode: 229 } as any);
+    await waitFor(() => new Promise((r) => setTimeout(r, 30)));
+    expect(codingApi.streamCodingMessage).not.toHaveBeenCalled();
   });
 });

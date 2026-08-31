@@ -14,6 +14,27 @@ export function setChatSendMode(mode: ChatSendMode): void {
   window.dispatchEvent(new Event(CHANGED_EVENT_NAME));
 }
 
+export function shouldSendOnEnter(
+  e: React.KeyboardEvent<HTMLTextAreaElement>,
+  mode: ChatSendMode,
+): boolean {
+  if (e.nativeEvent.isComposing || e.keyCode === 229) return false;
+  if (e.key !== "Enter") return false;
+  if (mode === "enter") {
+    return !e.shiftKey;
+  }
+  return Boolean(e.metaKey || e.ctrlKey);
+}
+
+export function getChatInputPlaceholder(
+  mode: ChatSendMode,
+  prefix = "メッセージを入力",
+): string {
+  return mode === "enter"
+    ? `${prefix}…（Enterで送信 / Shift+Enterで改行）`
+    : `${prefix}…（Enterで改行 / Ctrl+Enterで送信）`;
+}
+
 export function useChatSendMode(): [ChatSendMode, (mode: ChatSendMode) => void] {
   const [mode, setMode] = useState<ChatSendMode>(getChatSendMode);
 

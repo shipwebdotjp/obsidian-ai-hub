@@ -32,7 +32,7 @@ import type {
   AgentToolCall,
 } from "../../api/types";
 import { ROUTES } from "../../constants/routes";
-import { useChatSendMode } from "../settings/chatSendMode";
+import { getChatInputPlaceholder, shouldSendOnEnter, useChatSendMode } from "../settings/chatSendMode";
 import MarkdownPreview from "../../components/MarkdownPreview";
 import { formatDateTime } from "../../utils/date";
 import {
@@ -1480,12 +1480,7 @@ export default function AgentsPage() {
       }
     }
 
-    if (chatSendMode === "enter") {
-      if (e.key === "Enter" && !e.shiftKey) {
-        e.preventDefault();
-        void submitMessage();
-      }
-    } else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+    if (shouldSendOnEnter(e, chatSendMode)) {
       e.preventDefault();
       void submitMessage();
     }
@@ -1500,9 +1495,7 @@ export default function AgentsPage() {
 
   const inputPlaceholder = !selectedSessionId
     ? "左側の「＋ 新しい会話」をクリックして会話を開始してください"
-    : chatSendMode === "enter"
-      ? "メッセージを入力…（Enterで送信 / Shift+Enterで改行）"
-      : "メッセージを入力…（Enterで改行 / Ctrl+Enterで送信）";
+    : getChatInputPlaceholder(chatSendMode);
 
   const sidebarContent = (
     <>
