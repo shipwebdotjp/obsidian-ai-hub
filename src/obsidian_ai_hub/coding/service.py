@@ -108,7 +108,8 @@ async def run_coding_turn_stream(
 
         yield f"data: {json.dumps({'event': 'start', 'run_id': run_id, 'is_dirty': is_dirty, 'dirty_summary': dirty_summary}, ensure_ascii=False)}\n\n"
 
-        orchestrator = CodingOrchestrator()
+        effective_tool_ids = store.get_effective_session_tool_ids(session_id)
+        orchestrator = CodingOrchestrator(tool_ids=effective_tool_ids)
         cli_count = 0
         final_status = "completed"
 

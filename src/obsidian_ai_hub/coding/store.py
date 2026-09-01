@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
+from obsidian_ai_hub.agents import registry
 from obsidian_ai_hub.database import get_db_connection
 
 JST = ZoneInfo("Asia/Tokyo")
@@ -36,12 +38,121 @@ def mark_interrupted_runs_on_startup() -> int:
     return count
 
 
+def get_all_available_tool_ids() -> List[str]:
+    """Return all registered tool IDs."""
+    return [t["tool_id"] for t in registry.list_available_tools()]
+
+
+def get_user_default_tool_ids(conn=None) -> List[str]:
+    """Retrieve user default tool IDs from coding_settings.
+
+    If setting is missing or invalid, falls back to all available tool IDs.
+    """
+    close_conn = False
+    if conn is None:
+        conn = get_db_connection()
+        close_conn = True
+
+    cursor = conn.execute(
+        "SELECT setting_value FROM coding_settings WHERE setting_key = 'default_tool_ids'"
+    )
+    row = cursor.fetchone()
+    if close_conn:
+        conn.close()
+
+    if row and row["setting_value"]:
+        try:
+            val = json.loads(row["setting_value"])
+            if isinstance(val, list):
+                all_tools = set(get_all_available_tool_ids())
+                return [t for t in val if isinstance(t, str) and t in all_tools]
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    return get_all_available_tool_ids()
+
+
+def update_user_default_tool_ids(tool_ids: List[str]) -> List[str]:
+    """Validate and save user default tool IDs in coding_settings."""
+    all_tools = set(get_all_available_tool_ids())
+    clean_ids = [t for t in tool_ids if isinstance(t, str) and t in all_tools]
+
+    conn = get_db_connection()
+    now = _now_iso()
+    conn.execute(
+        """
+        INSERT INTO coding_settings (setting_key, setting_value, updated_at)
+        VALUES ('default_tool_ids', ?, ?)
+        ON CONFLICT(setting_key) DO UPDATE SET
+            setting_value = excluded.setting_value,
+            updated_at = excluded.updated_at
+        """,
+        (json.dumps(clean_ids, ensure_ascii=False), now),
+    )
+    conn.commit()
+    conn.close()
+    return clean_ids
+
+
+def get_session_tool_ids(session_id: str, conn=None) -> Optional[List[str]]:
+    """Get explicitly configured tool_ids for a session, or None if unconfigured."""
+    session = get_session(session_id, conn=conn)
+    if not session or session.get("tool_ids_json") is None:
+        return None
+
+    try:
+        val = json.loads(session["tool_ids_json"])
+        if isinstance(val, list):
+            all_tools = set(get_all_available_tool_ids())
+            return [t for t in val if isinstance(t, str) and t in all_tools]
+    except (json.JSONDecodeError, TypeError):
+        pass
+
+    return None
+
+
+def get_effective_session_tool_ids(session_id: str, conn=None) -> List[str]:
+    """Get active tool_ids for a session (custom session setting if present, else user defaults)."""
+    session_tools = get_session_tool_ids(session_id, conn=conn)
+    if session_tools is not None:
+        return session_tools
+    return get_user_default_tool_ids(conn=conn)
+
+
+def update_session_tool_ids(session_id: str, tool_ids: Optional[List[str]]) -> Optional[List[str]]:
+    """Update custom tool_ids for a session. If tool_ids is None, resets to user default (sets tool_ids_json = NULL)."""
+    conn = get_db_connection()
+    now = _now_iso()
+
+    if tool_ids is None:
+        conn.execute(
+            "UPDATE coding_sessions SET tool_ids_json = NULL, updated_at = ? WHERE session_id = ?",
+            (now, session_id),
+        )
+        conn.commit()
+        conn.close()
+        return None
+
+    all_tools = set(get_all_available_tool_ids())
+    clean_ids = [t for t in tool_ids if isinstance(t, str) and t in all_tools]
+    val_json = json.dumps(clean_ids, ensure_ascii=False)
+
+    conn.execute(
+        "UPDATE coding_sessions SET tool_ids_json = ?, updated_at = ? WHERE session_id = ?",
+        (val_json, now, session_id),
+    )
+    conn.commit()
+    conn.close()
+    return clean_ids
+
+
 def create_session(
     project_id: int,
     backend: str,
     repo_path: str,
     title: str = "新しいコーディングセッション",
     external_session_id: Optional[str] = None,
+    tool_ids: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """Create a new coding session."""
     conn = get_db_connection()
@@ -53,13 +164,21 @@ def create_session(
 
     session_id = f"cses_{uuid.uuid4().hex[:12]}"
     now = _now_iso()
+
+    if tool_ids is None:
+        tool_ids_json = None
+    else:
+        all_tools = set(get_all_available_tool_ids())
+        clean_ids = [t for t in tool_ids if isinstance(t, str) and t in all_tools]
+        tool_ids_json = json.dumps(clean_ids, ensure_ascii=False)
+
     conn.execute(
         """
         INSERT INTO coding_sessions (
-            session_id, project_id, backend, repo_path, external_session_id, title, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            session_id, project_id, backend, repo_path, external_session_id, title, tool_ids_json, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (session_id, project_id, backend, repo_path, external_session_id, title, now, now),
+        (session_id, project_id, backend, repo_path, external_session_id, title, tool_ids_json, now, now),
     )
     conn.commit()
 

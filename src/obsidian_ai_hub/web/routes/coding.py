@@ -1,11 +1,12 @@
 """FastAPI router for dedicated coding workspace."""
 
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from obsidian_ai_hub.agents import registry
 from obsidian_ai_hub.coding import backend, service as coding_service, store as coding_store
 from obsidian_ai_hub.web import service as web_service
 from obsidian_ai_hub.web.routes.deps import require_bearer_token
@@ -17,10 +18,47 @@ class SessionCreateRequest(BaseModel):
     project_id: int
     backend: str = Field(description="'codex' or 'opencode'")
     title: Optional[str] = Field(default=None)
+    tool_ids: Optional[List[str]] = Field(default=None, description="Optional custom tool IDs for session")
+
+
+class UpdateToolsRequest(BaseModel):
+    tool_ids: List[str] = Field(description="List of tool IDs to enable")
+
+
+class UpdateSessionToolsRequest(BaseModel):
+    tool_ids: Optional[List[str]] = Field(default=None, description="List of tool IDs, or None to reset to user default")
 
 
 class MessageStreamRequest(BaseModel):
     content: str
+
+
+@router.get("/defaults")
+def get_coding_defaults(_=Depends(require_bearer_token)):
+    """Get global user default tool settings and available tools for coding workspace."""
+    default_ids = coding_store.get_user_default_tool_ids()
+    available_tools = registry.list_available_tools()
+    return {
+        "default_tool_ids": default_ids,
+        "available_tools": available_tools,
+    }
+
+
+@router.put("/defaults")
+def update_coding_defaults(body: UpdateToolsRequest, _=Depends(require_bearer_token)):
+    """Update global user default tool settings for coding workspace."""
+    updated_ids = coding_store.update_user_default_tool_ids(body.tool_ids)
+    available_tools = registry.list_available_tools()
+    return {
+        "default_tool_ids": updated_ids,
+        "available_tools": available_tools,
+    }
+
+
+@router.get("/tools")
+def list_available_coding_tools(_=Depends(require_bearer_token)):
+    """List all available tools in registry."""
+    return {"tools": registry.list_available_tools()}
 
 
 @router.get("/git-status")
@@ -114,15 +152,31 @@ def create_session(
             backend=b_name,
             repo_path=canonical_repo,
             title=session_title,
+            tool_ids=body.tool_ids,
         )
         return session
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
 
+@router.put("/sessions/{session_id}/tools")
+def update_session_tools(
+    session_id: str,
+    body: UpdateSessionToolsRequest,
+    _=Depends(require_bearer_token),
+):
+    """Update custom tool settings for a coding session, or reset to defaults if tool_ids is None."""
+    session = coding_store.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="セッションが見つかりません")
+
+    coding_store.update_session_tool_ids(session_id, body.tool_ids)
+    return get_session_detail(session_id)
+
+
 @router.get("/sessions/{session_id}")
 def get_session_detail(session_id: str, _=Depends(require_bearer_token)):
-    """Get session details along with message history and active/latest run state."""
+    """Get session details along with effective tool settings, message history and active/latest run state."""
     session = coding_store.get_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="セッションが見つかりません")
@@ -130,9 +184,15 @@ def get_session_detail(session_id: str, _=Depends(require_bearer_token)):
     messages = coding_store.list_messages(session_id)
     active_run = coding_store.get_active_run_for_session(session_id)
     latest_run = coding_store.get_latest_run_for_session(session_id)
+    effective_tool_ids = coding_store.get_effective_session_tool_ids(session_id)
+    has_custom = session.get("tool_ids_json") is not None
+    available_tools = registry.list_available_tools()
 
     return {
         "session": session,
+        "effective_tool_ids": effective_tool_ids,
+        "has_custom_tools": has_custom,
+        "available_tools": available_tools,
         "messages": messages,
         "active_run": active_run,
         "latest_run": latest_run,
