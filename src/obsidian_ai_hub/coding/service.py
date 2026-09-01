@@ -251,6 +251,9 @@ async def run_coding_turn_stream(
                     error_message=cli_result.error_message,
                 )
 
+                # Compute up-to-date git status after CLI execution
+                git_status = backend.get_git_status(canonical_repo)
+
                 worker_done_data = {
                     'event': 'worker_done',
                     'attempt': cli_count,
@@ -258,6 +261,7 @@ async def run_coding_turn_stream(
                     'exit_code': cli_result.exit_code,
                     'error': cli_result.error_message,
                     'session_recreated': cli_result.session_recreated,
+                    'git_status': git_status,
                 }
                 yield f"data: {json.dumps(worker_done_data, ensure_ascii=False)}\n\n"
 
@@ -280,7 +284,14 @@ async def run_coding_turn_stream(
             finished_at=now_iso,
         )
 
-        yield f"data: {json.dumps({'event': 'done', 'run_id': run_id, 'status': final_status}, ensure_ascii=False)}\n\n"
+        git_status = backend.get_git_status(canonical_repo)
+        done_data = {
+            'event': 'done',
+            'run_id': run_id,
+            'status': final_status,
+            'git_status': git_status,
+        }
+        yield f"data: {json.dumps(done_data, ensure_ascii=False)}\n\n"
 
     finally:
         with _JOBS_GUARD:

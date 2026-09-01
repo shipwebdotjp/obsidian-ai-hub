@@ -16,11 +16,22 @@ router = APIRouter(prefix="/coding", tags=["coding"])
 class SessionCreateRequest(BaseModel):
     project_id: int
     backend: str = Field(description="'codex' or 'opencode'")
-    title: Optional[str] = Field(default="新しいコーディングセッション")
+    title: Optional[str] = Field(default=None)
 
 
 class MessageStreamRequest(BaseModel):
     content: str
+
+
+@router.get("/git-status")
+def get_git_status(repo_path: str, _=Depends(require_bearer_token)):
+    """Get git status information for a repository path."""
+    try:
+        canonical_repo = backend.validate_git_repo(repo_path)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    return backend.get_git_status(canonical_repo)
 
 
 @router.get("/projects")
@@ -94,12 +105,15 @@ def create_session(
             detail="バックエンドは 'codex' または 'opencode' を指定してください",
         )
 
+    clean_title = (body.title or "").strip()
+    session_title = clean_title if clean_title else "新しいコーディングセッション"
+
     try:
         session = coding_store.create_session(
             project_id=body.project_id,
             backend=b_name,
             repo_path=canonical_repo,
-            title=body.title or "新しいコーディングセッション",
+            title=session_title,
         )
         return session
     except ValueError as exc:

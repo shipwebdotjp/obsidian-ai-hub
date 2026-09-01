@@ -7,11 +7,13 @@ import {
   deleteCodingSession,
   cancelCodingRun,
   streamCodingMessage,
+  getGitStatus,
   type CodingProjectItem,
   type CodingSession,
   type CodingMessage,
   type CodingRun,
   type CodingSseEvent,
+  type GitStatus,
 } from "../../api/coding";
 import MarkdownPreview from "../../components/MarkdownPreview";
 import {
@@ -29,6 +31,7 @@ export default function CodingPage() {
   const [messages, setMessages] = useState<CodingMessage[]>([]);
   const [activeRun, setActiveRun] = useState<CodingRun | null>(null);
   const [latestRun, setLatestRun] = useState<CodingRun | null>(null);
+  const [gitStatus, setGitStatus] = useState<GitStatus | null>(null);
 
   const [loadingProjects, setLoadingProjects] = useState(true);
   const [loadingSessions, setLoadingSessions] = useState(false);
@@ -125,6 +128,15 @@ export default function CodingPage() {
     loadSessionDetail(selectedSessionId);
   }, [selectedSessionId]);
 
+  const fetchGitStatus = async (repoPath: string) => {
+    try {
+      const status = await getGitStatus(repoPath);
+      setGitStatus(status);
+    } catch (_) {
+      // Non-fatal if git status fails
+    }
+  };
+
   const loadSessionDetail = async (sessionId: string) => {
     setLoadingMessages(true);
     try {
@@ -132,6 +144,9 @@ export default function CodingPage() {
       setMessages(data.messages);
       setActiveRun(data.active_run);
       setLatestRun(data.latest_run);
+      if (data.session.repo_path) {
+        fetchGitStatus(data.session.repo_path);
+      }
     } catch (e: any) {
       setError(e.message || "セッション詳細の取得に失敗しました");
     } finally {
@@ -233,6 +248,9 @@ export default function CodingPage() {
             output: event.message.content,
             error: event.error,
           });
+          if (event.git_status) {
+            setGitStatus(event.git_status);
+          }
           setMessages((prev) => {
             if (prev.some((m) => m.message_id === event.message.message_id)) return prev;
             return [...prev, event.message];
@@ -249,6 +267,15 @@ export default function CodingPage() {
           setIsStreaming(false);
           setActivePhaseText(null);
           setWorkerState({ status: "idle" });
+          if (event.git_status) {
+            setGitStatus(event.git_status);
+          }
+          if (event.session_title) {
+            const newTitle = event.session_title;
+            setSessions((prev) =>
+              prev.map((s) => (s.session_id === selectedSessionId ? { ...s, title: newTitle } : s))
+            );
+          }
           // Reload full session state to ensure complete synchronization
           loadSessionDetail(selectedSessionId);
         }
@@ -460,11 +487,27 @@ export default function CodingPage() {
             <div className="flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3">
               <div>
                 <h1 className="text-sm font-semibold text-slate-800">{selectedSession.title}</h1>
-                <div className="mt-0.5 flex items-center gap-2 text-[11px] text-slate-500">
+                <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
                   <span className="rounded bg-slate-100 px-1.5 py-0.5 font-medium uppercase text-slate-700">
                     {selectedSession.backend}
                   </span>
                   <span>{selectedSession.repo_path}</span>
+                  {gitStatus && (
+                    <div className="flex items-center gap-1.5 border-l border-slate-200 pl-2">
+                      <span className="font-mono font-medium text-slate-700">
+                        {gitStatus.branch || "detached"}
+                      </span>
+                      <span className="font-mono text-slate-600" title="ahead / behind">
+                        ↑{gitStatus.ahead} ↓{gitStatus.behind}
+                      </span>
+                      <span className="font-mono text-emerald-600 font-medium">
+                        +{gitStatus.insertions}
+                      </span>
+                      <span className="font-mono text-rose-600 font-medium">
+                        -{gitStatus.deletions}
+                      </span>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -629,7 +672,7 @@ export default function CodingPage() {
                   type="text"
                   value={newSessionTitle}
                   onChange={(e) => setNewSessionTitle(e.target.value)}
-                  placeholder="例: リファクタリング作業"
+                  placeholder="自動生成 (空欄可) / 例: リファクタリング作業"
                   className="mt-1 w-full rounded-md border border-slate-300 px-3 py-1.5 text-xs focus:border-slate-800 focus:outline-none"
                 />
               </div>
