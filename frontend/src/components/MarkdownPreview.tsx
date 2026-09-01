@@ -14,7 +14,7 @@ function safeHref(href: unknown): string | undefined {
   return trimmed;
 }
 
-const markdownComponents = {
+const lightComponents = {
   h1: ({ node, ...props }: any) => <h1 className="text-xl font-bold text-slate-900 mt-6 mb-2 border-b border-slate-200 pb-1" {...props} />,
   h2: ({ node, ...props }: any) => <h2 className="text-lg font-semibold text-slate-900 mt-5 mb-2" {...props} />,
   h3: ({ node, ...props }: any) => <h3 className="text-base font-semibold text-slate-800 mt-4 mb-2" {...props} />,
@@ -57,7 +57,6 @@ const markdownComponents = {
   a: ({ node, href, children, ...props }: any) => {
     const safe = safeHref(href);
     if (safe === undefined) {
-      // Render as plain text (no clickable anchor) to neutralize XSS payloads.
       return <span className="text-slate-500">{children}</span>;
     }
     const isExternal = safe.startsWith("http://") || safe.startsWith("https://");
@@ -72,17 +71,79 @@ const markdownComponents = {
         {children}
       </a>
     );
-  }
+  },
+};
+
+const darkComponents = {
+  h1: ({ node, ...props }: any) => <h1 className="text-xl font-bold text-slate-100 mt-6 mb-2 border-b border-slate-700 pb-1" {...props} />,
+  h2: ({ node, ...props }: any) => <h2 className="text-lg font-semibold text-slate-100 mt-5 mb-2" {...props} />,
+  h3: ({ node, ...props }: any) => <h3 className="text-base font-semibold text-slate-100 mt-4 mb-2" {...props} />,
+  h4: ({ node, ...props }: any) => <h4 className="text-sm font-semibold text-slate-100 mt-3 mb-1" {...props} />,
+  p: ({ node, ...props }: any) => <p className="text-sm text-slate-100 my-2 leading-relaxed break-words" {...props} />,
+  ul: ({ node, ...props }: any) => <ul className="list-disc pl-5 my-2 space-y-1 text-sm text-slate-100" {...props} />,
+  ol: ({ node, ...props }: any) => <ol className="list-decimal pl-5 my-2 space-y-1 text-sm text-slate-100" {...props} />,
+  li: ({ node, ...props }: any) => <li className="text-sm text-slate-100" {...props} />,
+  blockquote: ({ node, ...props }: any) => (
+    <blockquote className="border-l-4 border-slate-600 bg-slate-800/60 pl-4 py-1 pr-2 my-2 text-slate-300 italic rounded-r" {...props} />
+  ),
+  pre: ({ node, ...props }: any) => (
+    <pre className="bg-slate-800 border border-slate-700 rounded p-3 my-2 overflow-x-auto text-xs font-mono text-slate-100" {...props} />
+  ),
+  code: ({ node, inline, className, children, ...props }: any) => {
+    const isInline = !className;
+    if (isInline) {
+      return (
+        <code className="bg-slate-700 text-slate-100 px-1.5 py-0.5 rounded text-xs font-mono border border-slate-600" {...props}>
+          {children}
+        </code>
+      );
+    }
+    return (
+      <code className={className} {...props}>
+        {children}
+      </code>
+    );
+  },
+  table: ({ node, ...props }: any) => (
+    <div className="overflow-x-auto my-4 rounded border border-slate-700">
+      <table className="min-w-full divide-y divide-slate-700 text-sm text-slate-100" {...props} />
+    </div>
+  ),
+  thead: ({ node, ...props }: any) => <thead className="bg-slate-800 text-xs text-slate-300 uppercase font-medium" {...props} />,
+  tbody: ({ node, ...props }: any) => <tbody className="divide-y divide-slate-700" {...props} />,
+  tr: ({ node, ...props }: any) => <tr className="hover:bg-slate-800/50" {...props} />,
+  th: ({ node, ...props }: any) => <th className="px-3 py-2 text-left font-semibold border-b border-slate-600 text-slate-100" {...props} />,
+  td: ({ node, ...props }: any) => <td className="px-3 py-2 text-slate-300" {...props} />,
+  a: ({ node, href, children, ...props }: any) => {
+    const safe = safeHref(href);
+    if (safe === undefined) {
+      return <span className="text-slate-400">{children}</span>;
+    }
+    const isExternal = safe.startsWith("http://") || safe.startsWith("https://");
+    return (
+      <a
+        href={safe}
+        className="text-sky-400 hover:text-sky-300 underline break-all"
+        target={isExternal ? "_blank" : undefined}
+        rel={isExternal ? "noopener noreferrer" : undefined}
+        {...props}
+      >
+        {children}
+      </a>
+    );
+  },
 };
 
 export interface MarkdownPreviewProps {
   content: string;
+  variant?: "light" | "dark";
 }
 
-export default function MarkdownPreview({ content }: MarkdownPreviewProps) {
+export default function MarkdownPreview({ content, variant = "light" }: MarkdownPreviewProps) {
+  const components = variant === "dark" ? darkComponents : lightComponents;
   return (
-    <div className="prose prose-slate max-w-none">
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+    <div className={variant === "dark" ? "max-w-none" : "prose prose-slate max-w-none"}>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
         {content}
       </ReactMarkdown>
     </div>

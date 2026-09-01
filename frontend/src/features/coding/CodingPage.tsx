@@ -13,6 +13,7 @@ import {
   type CodingRun,
   type CodingSseEvent,
 } from "../../api/coding";
+import MarkdownPreview from "../../components/MarkdownPreview";
 import {
   getChatInputPlaceholder,
   shouldSendOnEnter,
@@ -515,7 +516,7 @@ export default function CodingPage() {
                           <div className="mb-1 text-[10px] font-semibold text-slate-400 uppercase">
                             AI Orchestrator
                           </div>
-                          <p className="whitespace-pre-wrap leading-relaxed">{msg.content}</p>
+                          <MarkdownPreview content={msg.content} />
                         </div>
                       </div>
                     )}
@@ -528,8 +529,8 @@ export default function CodingPage() {
                               <span>CLI Worker 最終返答 ({selectedSession.backend})</span>
                               <span className="text-slate-400 text-[10px]">クリックで展開/折りたたみ</span>
                             </summary>
-                            <div className="p-4 font-mono text-[11px] whitespace-pre-wrap overflow-x-auto max-h-96">
-                              {msg.content}
+                            <div className="p-4 overflow-x-auto max-h-96">
+                              <MarkdownPreview content={msg.content} variant="dark" />
                             </div>
                           </details>
                         </div>
