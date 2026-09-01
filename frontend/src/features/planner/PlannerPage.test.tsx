@@ -83,34 +83,40 @@ const sampleTimeline = {
 };
 
 beforeEach(() => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  vi.setSystemTime(new Date("2026-08-20T00:00:00"));
   vi.clearAllMocks();
   mockGetTimeline.mockResolvedValue(sampleTimeline as any);
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
 describe("PlannerPage", () => {
-  const now = new Date();
-  const monthLabel = `${now.getFullYear()}/${now.getMonth() + 1}`;
-  const prevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  const prevMonthLabel = `${prevMonth.getFullYear()}/${prevMonth.getMonth() + 1}`;
-  const fmt = (d: Date) =>
-    `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, "0")}/${String(
-      d.getDate(),
-    ).padStart(2, "0")}`;
-  const weekStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const dow = weekStart.getDay();
-  weekStart.setDate(weekStart.getDate() + (dow === 0 ? -6 : 1 - dow));
-  const weekEnd = new Date(weekStart);
-  weekEnd.setDate(weekEnd.getDate() + 6);
-  const weekLabel = `${fmt(weekStart)} 〜 ${fmt(weekEnd)}`;
-  const prevWeekEnd = new Date(weekStart);
-  prevWeekEnd.setDate(prevWeekEnd.getDate() - 1);
-  const prevWeekStart = new Date(prevWeekEnd);
-  prevWeekStart.setDate(prevWeekStart.getDate() - 6);
-  const prevWeekLabel = `${fmt(prevWeekStart)} 〜 ${fmt(prevWeekEnd)}`;
+  const getDates = () => {
+    const now = new Date();
+    const monthLabel = `${now.getFullYear()}/${now.getMonth() + 1}`;
+    const prevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const prevMonthLabel = `${prevMonth.getFullYear()}/${prevMonth.getMonth() + 1}`;
+    const fmt = (d: Date) =>
+      `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, "0")}/${String(
+        d.getDate(),
+      ).padStart(2, "0")}`;
+    const weekStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const dow = weekStart.getDay();
+    weekStart.setDate(weekStart.getDate() + (dow === 0 ? -6 : 1 - dow));
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekEnd.getDate() + 6);
+    const weekLabel = `${fmt(weekStart)} 〜 ${fmt(weekEnd)}`;
+    const prevWeekEnd = new Date(weekStart);
+    prevWeekEnd.setDate(prevWeekEnd.getDate() - 1);
+    const prevWeekStart = new Date(prevWeekEnd);
+    prevWeekStart.setDate(prevWeekStart.getDate() - 6);
+    const prevWeekLabel = `${fmt(prevWeekStart)} 〜 ${fmt(prevWeekEnd)}`;
+    return { now, monthLabel, prevMonthLabel, weekLabel, prevWeekLabel };
+  };
 
   it("loads the default month timeline and renders all layers", async () => {
     render(<PlannerPage />);
@@ -119,6 +125,7 @@ describe("PlannerPage", () => {
       expect(mockGetTimeline).toHaveBeenCalledTimes(1);
     });
 
+    const { monthLabel } = getDates();
     expect(screen.getByRole("button", { name: "月" })).toHaveAttribute(
       "aria-pressed",
       "true",
@@ -183,6 +190,7 @@ describe("PlannerPage", () => {
 
     await user.click(screen.getByLabelText("前の月"));
 
+    const { prevMonthLabel } = getDates();
     await waitFor(() => {
       expect(mockGetTimeline).toHaveBeenCalledTimes(2);
     });
@@ -190,6 +198,7 @@ describe("PlannerPage", () => {
   });
 
   it("switches to week view, shows the current week, and navigates", async () => {
+    const { now, weekLabel, prevWeekLabel } = getDates();
     const user = userEvent.setup();
     const currentDay = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
     mockGetTimeline.mockResolvedValue({
