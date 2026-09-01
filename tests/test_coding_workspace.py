@@ -2,7 +2,7 @@
 
 import os
 import subprocess
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -699,3 +699,145 @@ def test_coding_turn_non_zero_exit_code_passed_to_review(test_project):
     assert messages[2]["role"] == "worker"
     assert messages[3]["role"] == "orchestrator"
     assert "SyntaxError" in messages[2]["content"]
+
+
+def test_coding_tools_and_user_defaults(test_project):
+    pid = test_project["project_id"]
+    repo = test_project["repo_path"]
+
+    # 1. Test get_user_default_tool_ids fallback to all tools when unconfigured
+    all_tools = store.get_all_available_tool_ids()
+    defaults = store.get_user_default_tool_ids()
+    assert set(defaults) == set(all_tools)
+
+    # 2. Update user default tools
+    custom_defaults = ["web_search", "vault_search"]
+    saved_defaults = store.update_user_default_tool_ids(custom_defaults)
+    assert saved_defaults == custom_defaults
+
+    # Verify updated default tool IDs
+    fetched_defaults = store.get_user_default_tool_ids()
+    assert fetched_defaults == custom_defaults
+
+    # 3. Create session without explicit tool_ids -> initial session tools should inherit user defaults
+    session1 = store.create_session(pid, "codex", repo, title="Default Tools Session")
+    sid1 = session1["session_id"]
+    eff_tools1 = store.get_effective_session_tool_ids(sid1)
+    assert eff_tools1 == custom_defaults
+
+    # 4. Create session with explicit custom tool_ids
+    custom_session_tools = ["run_shell"]
+    session2 = store.create_session(pid, "codex", repo, title="Custom Tools Session", tool_ids=custom_session_tools)
+    sid2 = session2["session_id"]
+    eff_tools2 = store.get_effective_session_tool_ids(sid2)
+    assert eff_tools2 == custom_session_tools
+
+    # 5. Update session tool_ids
+    store.update_session_tool_ids(sid1, ["web_extract", "people_search"])
+    eff_tools1_updated = store.get_effective_session_tool_ids(sid1)
+    assert eff_tools1_updated == ["web_extract", "people_search"]
+
+    # 6. Reset session tool_ids to user defaults (set to None)
+    store.update_session_tool_ids(sid1, None)
+    eff_tools1_reset = store.get_effective_session_tool_ids(sid1)
+    assert eff_tools1_reset == custom_defaults
+
+
+def test_coding_tools_api_endpoints(test_project):
+    app = create_app(token="test-token")
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer test-token"}
+
+    # 1. GET /coding/defaults
+    res = client.get("/api/v1/coding/defaults", headers=headers)
+    assert res.status_code == 200
+    data = res.json()
+    assert "default_tool_ids" in data
+    assert "available_tools" in data
+
+    # 2. PUT /coding/defaults
+    new_defaults = ["web_search", "web_extract"]
+    res = client.put("/api/v1/coding/defaults", headers=headers, json={"tool_ids": new_defaults})
+    assert res.status_code == 200
+    assert res.json()["default_tool_ids"] == new_defaults
+
+    # 3. Create session
+    res = client.post(
+        "/api/v1/coding/sessions",
+        headers=headers,
+        json={
+            "project_id": test_project["project_id"],
+            "backend": "codex",
+            "title": "Tools Session",
+        },
+    )
+    assert res.status_code == 200
+    sid = res.json()["session_id"]
+
+    # Check GET /coding/sessions/{session_id} includes effective tools
+    res = client.get(f"/api/v1/coding/sessions/{sid}", headers=headers)
+    assert res.status_code == 200
+    detail = res.json()
+    assert detail["effective_tool_ids"] == new_defaults
+    assert detail["has_custom_tools"] is True  # created with initial user defaults
+
+    # 4. PUT /coding/sessions/{session_id}/tools
+    res = client.put(
+        f"/api/v1/coding/sessions/{sid}/tools",
+        headers=headers,
+        json={"tool_ids": ["run_shell"]},
+    )
+    assert res.status_code == 200
+    updated_detail = res.json()
+    assert updated_detail["effective_tool_ids"] == ["run_shell"]
+    assert updated_detail["has_custom_tools"] is True
+
+    # 5. Reset session tools to defaults (tool_ids: null)
+    res = client.put(
+        f"/api/v1/coding/sessions/{sid}/tools",
+        headers=headers,
+        json={"tool_ids": None},
+    )
+    assert res.status_code == 200
+    reset_detail = res.json()
+    assert reset_detail["effective_tool_ids"] == new_defaults
+    assert reset_detail["has_custom_tools"] is False
+
+
+@pytest.mark.anyio
+async def test_orchestrator_tool_restriction(test_project):
+    """Test that Orchestrator binds only permitted tools and respects tool restrictions."""
+    from obsidian_ai_hub.coding.orchestrator import CodingOrchestrator
+
+    # Case A: empty tool_ids -> bind_tools is not called / no tools available
+    orch_empty = CodingOrchestrator(tool_ids=[])
+
+    mock_ai_msg = MagicMock()
+    mock_ai_msg.content = "No tools used."
+    mock_ai_msg.tool_calls = []
+
+    with patch("obsidian_ai_hub.coding.orchestrator.create_langchain_llm") as mock_create_llm:
+        mock_llm = MagicMock()
+        mock_llm.ainvoke = AsyncMock(return_value=mock_ai_msg)
+        mock_create_llm.return_value = mock_llm
+
+        resp = await orch_empty.generate_response([], test_project["repo_path"], "codex")
+        assert resp == "No tools used."
+        mock_llm.bind_tools.assert_not_called()
+
+    # Case B: specified tool_ids -> bind_tools receives only permitted BaseTools
+    orch_permitted = CodingOrchestrator(tool_ids=["web_search"])
+    with patch("obsidian_ai_hub.coding.orchestrator.create_langchain_llm") as mock_create_llm:
+        mock_llm = MagicMock()
+        mock_llm_with_tools = MagicMock()
+        mock_llm_with_tools.ainvoke = AsyncMock(return_value=mock_ai_msg)
+        mock_llm.bind_tools.return_value = mock_llm_with_tools
+        mock_create_llm.return_value = mock_llm
+
+        resp = await orch_permitted.generate_response([], test_project["repo_path"], "codex")
+        assert resp == "No tools used."
+        mock_llm.bind_tools.assert_called_once()
+        bound_tools = mock_llm.bind_tools.call_args[0][0]
+        tool_names = [t.name for t in bound_tools]
+        assert "web_search" in tool_names
+        assert "run_shell" not in tool_names

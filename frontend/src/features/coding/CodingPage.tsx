@@ -8,12 +8,18 @@ import {
   cancelCodingRun,
   streamCodingMessage,
   getGitStatus,
+  getCodingDefaults,
+  updateCodingDefaults,
+  updateCodingSessionTools,
   type CodingProjectItem,
   type CodingSession,
   type CodingMessage,
   type CodingRun,
   type CodingSseEvent,
   type GitStatus,
+  type CodingTool,
+  type CodingDefaults,
+  type CodingSessionDetail,
 } from "../../api/coding";
 import MarkdownPreview from "../../components/MarkdownPreview";
 import { formatDateTime } from "../../utils/date";
@@ -29,6 +35,7 @@ export default function CodingPage() {
   const [sessions, setSessions] = useState<CodingSession[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
 
+  const [sessionDetail, setSessionDetail] = useState<CodingSessionDetail | null>(null);
   const [messages, setMessages] = useState<CodingMessage[]>([]);
   const [activeRun, setActiveRun] = useState<CodingRun | null>(null);
   const [latestRun, setLatestRun] = useState<CodingRun | null>(null);
@@ -44,6 +51,18 @@ export default function CodingPage() {
   const [newSessionBackend, setNewSessionBackend] = useState<"codex" | "opencode">("codex");
   const [newSessionTitle, setNewSessionTitle] = useState("");
   const [creatingSession, setCreatingSession] = useState(false);
+
+  // Conversation tool settings modal state
+  const [isSessionSettingsOpen, setIsSessionSettingsOpen] = useState(false);
+  const [sessionSelectedTools, setSessionSelectedTools] = useState<string[]>([]);
+  const [savingSessionTools, setSavingSessionTools] = useState(false);
+
+  // User default tool settings modal state
+  const [isUserDefaultsOpen, setIsUserDefaultsOpen] = useState(false);
+  const [userDefaults, setUserDefaults] = useState<CodingDefaults | null>(null);
+  const [userDefaultsSelectedTools, setUserDefaultsSelectedTools] = useState<string[]>([]);
+  const [loadingUserDefaults, setLoadingUserDefaults] = useState(false);
+  const [savingUserDefaults, setSavingUserDefaults] = useState(false);
 
   // Chat input and streaming state
   const [inputContent, setInputContent] = useState("");
@@ -175,19 +194,82 @@ export default function CodingPage() {
     setLoadingMessages(true);
     try {
       const data = await getCodingSessionDetail(sessionId);
+      setSessionDetail(data);
       setMessages(data.messages);
       setActiveRun(data.active_run);
       setLatestRun(data.latest_run);
+      setSessionSelectedTools(data.effective_tool_ids);
       if (data.session.repo_path) {
         fetchGitStatus(data.session.repo_path, sessionId);
       } else {
         setGitStatus(null);
       }
     } catch (e: any) {
+      setSessionDetail(null);
       setGitStatus(null);
       setError(e.message || "セッション詳細の取得に失敗しました");
     } finally {
       setLoadingMessages(false);
+    }
+  };
+
+  const handleSaveSessionTools = async () => {
+    if (!selectedSessionId) return;
+    setSavingSessionTools(true);
+    try {
+      const updated = await updateCodingSessionTools(selectedSessionId, sessionSelectedTools);
+      setSessionDetail(updated);
+      setSessionSelectedTools(updated.effective_tool_ids);
+      setIsSessionSettingsOpen(false);
+    } catch (e: any) {
+      setError(e.message || "会話ツールの保存に失敗しました");
+    } finally {
+      setSavingSessionTools(false);
+    }
+  };
+
+  const handleResetSessionTools = async () => {
+    if (!selectedSessionId) return;
+    setSavingSessionTools(true);
+    try {
+      const updated = await updateCodingSessionTools(selectedSessionId, null);
+      setSessionDetail(updated);
+      setSessionSelectedTools(updated.effective_tool_ids);
+      setIsSessionSettingsOpen(false);
+    } catch (e: any) {
+      setError(e.message || "会話ツールのリセットに失敗しました");
+    } finally {
+      setSavingSessionTools(false);
+    }
+  };
+
+  const handleOpenUserDefaults = async () => {
+    setIsUserDefaultsOpen(true);
+    setLoadingUserDefaults(true);
+    try {
+      const data = await getCodingDefaults();
+      setUserDefaults(data);
+      setUserDefaultsSelectedTools(data.default_tool_ids);
+    } catch (e: any) {
+      setError(e.message || "ユーザー既定値の取得に失敗しました");
+    } finally {
+      setLoadingUserDefaults(false);
+    }
+  };
+
+  const handleSaveUserDefaults = async () => {
+    setSavingUserDefaults(true);
+    try {
+      const updated = await updateCodingDefaults(userDefaultsSelectedTools);
+      setUserDefaults(updated);
+      setIsUserDefaultsOpen(false);
+      if (selectedSessionId) {
+        await loadSessionDetail(selectedSessionId);
+      }
+    } catch (e: any) {
+      setError(e.message || "ユーザー既定値の保存に失敗しました");
+    } finally {
+      setSavingUserDefaults(false);
     }
   };
 
@@ -420,21 +502,31 @@ export default function CodingPage() {
       <div className="flex w-72 flex-col border-r border-slate-200 bg-white">
         <div className="flex items-center justify-between border-b border-slate-200 p-3">
           <h2 className="text-sm font-semibold text-slate-800">セッション</h2>
-          {selectedProjectItem && (
+          <div className="flex items-center gap-1.5">
             <button
               type="button"
-              disabled={!selectedProjectItem.is_valid_git_repo}
-              onClick={() => setIsNewSessionModalOpen(true)}
-              className="rounded bg-slate-900 px-2.5 py-1 text-xs font-medium text-white hover:bg-slate-800 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 disabled:bg-slate-300"
-              title={
-                !selectedProjectItem.is_valid_git_repo
-                  ? "Gitリポジトリが無効なためセッションを作成できません"
-                  : "新規セッション作成"
-              }
+              onClick={handleOpenUserDefaults}
+              className="rounded border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700 hover:bg-slate-50 cursor-pointer"
+              title="ユーザー既定の利用可能ツール設定"
             >
-              + 新規
+              既定設定
             </button>
-          )}
+            {selectedProjectItem && (
+              <button
+                type="button"
+                disabled={!selectedProjectItem.is_valid_git_repo}
+                onClick={() => setIsNewSessionModalOpen(true)}
+                className="rounded bg-slate-900 px-2.5 py-1 text-xs font-medium text-white hover:bg-slate-800 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 disabled:bg-slate-300"
+                title={
+                  !selectedProjectItem.is_valid_git_repo
+                    ? "Gitリポジトリが無効なためセッションを作成できません"
+                    : "新規セッション作成"
+                }
+              >
+                + 新規
+              </button>
+            )}
+          </div>
         </div>
 
         {selectedProjectItem && !selectedProjectItem.is_valid_git_repo && (
@@ -523,7 +615,18 @@ export default function CodingPage() {
             {/* Header */}
             <div className="flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3">
               <div>
-                <h1 className="text-sm font-semibold text-slate-800">{selectedSession.title}</h1>
+                <div className="flex items-center gap-2">
+                  <h1 className="text-sm font-semibold text-slate-800">{selectedSession.title}</h1>
+                  {sessionDetail?.has_custom_tools ? (
+                    <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800">
+                      会話固有ツール設定
+                    </span>
+                  ) : (
+                    <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600">
+                      既定ツール適用
+                    </span>
+                  )}
+                </div>
                 <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
                   <span className="rounded bg-slate-100 px-1.5 py-0.5 font-medium uppercase text-slate-700">
                     {selectedSession.backend}
@@ -548,15 +651,29 @@ export default function CodingPage() {
                 </div>
               </div>
 
-              {currentRun && currentRun.status === "running" && (
+              <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={handleCancelRun}
-                  className="rounded bg-rose-600 px-3 py-1 text-xs font-medium text-white hover:bg-rose-700 cursor-pointer"
+                  onClick={() => {
+                    if (sessionDetail) {
+                      setSessionSelectedTools(sessionDetail.effective_tool_ids);
+                    }
+                    setIsSessionSettingsOpen(true);
+                  }}
+                  className="rounded border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 cursor-pointer"
                 >
-                  キャンセル
+                  会話設定 ⚙
                 </button>
-              )}
+                {currentRun && currentRun.status === "running" && (
+                  <button
+                    type="button"
+                    onClick={handleCancelRun}
+                    className="rounded bg-rose-600 px-3 py-1 text-xs font-medium text-white hover:bg-rose-700 cursor-pointer"
+                  >
+                    キャンセル
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Dirty tree warning banner if run started with uncommitted changes */}
@@ -784,6 +901,207 @@ export default function CodingPage() {
           </>
         )}
       </div>
+
+      {/* Conversation Settings Modal */}
+      {isSessionSettingsOpen && sessionDetail && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
+          <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl max-h-[90vh] flex flex-col">
+            <h3 className="text-base font-semibold text-slate-900">会話の利用可能ツール設定</h3>
+            <p className="mt-1 text-xs text-slate-500">
+              オーケストレーターがこの会話で呼び出せるツールを選択してください。
+              未選択のツールは呼び出せなくなります。
+            </p>
+
+            <div className="mt-3 flex items-center justify-between border-b border-slate-200 pb-2 text-xs">
+              <span className="text-slate-600 font-medium">
+                選択中: {sessionSelectedTools.length} / {sessionDetail.available_tools.length} 個
+              </span>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setSessionSelectedTools(sessionDetail.available_tools.map((t) => t.tool_id))
+                  }
+                  className="text-slate-600 hover:text-slate-900 text-[11px] underline"
+                >
+                  全選択
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSessionSelectedTools([])}
+                  className="text-slate-600 hover:text-slate-900 text-[11px] underline"
+                >
+                  全解除
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-3 flex-1 overflow-y-auto space-y-2 pr-1">
+              {sessionDetail.available_tools.map((tool) => {
+                const isChecked = sessionSelectedTools.includes(tool.tool_id);
+                return (
+                  <label
+                    key={tool.tool_id}
+                    className={`flex items-start gap-3 rounded-lg border p-2.5 text-xs cursor-pointer transition-colors ${
+                      isChecked
+                        ? "border-slate-800 bg-slate-50 text-slate-900"
+                        : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isChecked}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setSessionSelectedTools((prev) => [...prev, tool.tool_id]);
+                        } else {
+                          setSessionSelectedTools((prev) =>
+                            prev.filter((tid) => tid !== tool.tool_id)
+                          );
+                        }
+                      }}
+                      className="mt-0.5 rounded border-slate-300 text-slate-900 focus:ring-slate-800 cursor-pointer"
+                    />
+                    <div>
+                      <div className="font-semibold text-slate-800">
+                        {tool.name} <span className="text-[10px] text-slate-400 font-mono">({tool.tool_id})</span>
+                      </div>
+                      <div className="mt-0.5 text-[11px] text-slate-500">{tool.description}</div>
+                    </div>
+                  </label>
+                );
+              })}
+            </div>
+
+            <div className="mt-6 flex items-center justify-between border-t border-slate-200 pt-4">
+              <button
+                type="button"
+                disabled={savingSessionTools || !sessionDetail.has_custom_tools}
+                onClick={handleResetSessionTools}
+                className="rounded px-3 py-1.5 text-xs font-medium text-rose-700 hover:bg-rose-50 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                title="既定ツール設定へリセット"
+              >
+                既定値に戻す
+              </button>
+
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsSessionSettingsOpen(false)}
+                  className="rounded px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-100 cursor-pointer"
+                >
+                  キャンセル
+                </button>
+                <button
+                  type="button"
+                  disabled={savingSessionTools}
+                  onClick={handleSaveSessionTools}
+                  className="rounded bg-slate-900 px-4 py-1.5 text-xs font-medium text-white hover:bg-slate-800 cursor-pointer disabled:opacity-50"
+                >
+                  {savingSessionTools ? "保存中..." : "保存"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* User Default Tools Modal */}
+      {isUserDefaultsOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
+          <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl max-h-[90vh] flex flex-col">
+            <h3 className="text-base font-semibold text-slate-900">ユーザー既定の利用可能ツール設定</h3>
+            <p className="mt-1 text-xs text-slate-500">
+              新規会話作成時にデフォルトで許可されるツールセットを設定します。
+            </p>
+
+            {loadingUserDefaults ? (
+              <div className="py-8 text-center text-xs text-slate-500">読み込み中...</div>
+            ) : userDefaults ? (
+              <>
+                <div className="mt-3 flex items-center justify-between border-b border-slate-200 pb-2 text-xs">
+                  <span className="text-slate-600 font-medium">
+                    選択中: {userDefaultsSelectedTools.length} / {userDefaults.available_tools.length} 個
+                  </span>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setUserDefaultsSelectedTools(userDefaults.available_tools.map((t) => t.tool_id))
+                      }
+                      className="text-slate-600 hover:text-slate-900 text-[11px] underline"
+                    >
+                      全選択
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setUserDefaultsSelectedTools([])}
+                      className="text-slate-600 hover:text-slate-900 text-[11px] underline"
+                    >
+                      全解除
+                    </button>
+                  </div>
+                </div>
+
+                <div className="mt-3 flex-1 overflow-y-auto space-y-2 pr-1">
+                  {userDefaults.available_tools.map((tool) => {
+                    const isChecked = userDefaultsSelectedTools.includes(tool.tool_id);
+                    return (
+                      <label
+                        key={tool.tool_id}
+                        className={`flex items-start gap-3 rounded-lg border p-2.5 text-xs cursor-pointer transition-colors ${
+                          isChecked
+                            ? "border-slate-800 bg-slate-50 text-slate-900"
+                            : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setUserDefaultsSelectedTools((prev) => [...prev, tool.tool_id]);
+                            } else {
+                              setUserDefaultsSelectedTools((prev) =>
+                                prev.filter((tid) => tid !== tool.tool_id)
+                              );
+                            }
+                          }}
+                          className="mt-0.5 rounded border-slate-300 text-slate-900 focus:ring-slate-800 cursor-pointer"
+                        />
+                        <div>
+                          <div className="font-semibold text-slate-800">
+                            {tool.name} <span className="text-[10px] text-slate-400 font-mono">({tool.tool_id})</span>
+                          </div>
+                          <div className="mt-0.5 text-[11px] text-slate-500">{tool.description}</div>
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>
+
+                <div className="mt-6 flex justify-end gap-2 border-t border-slate-200 pt-4">
+                  <button
+                    type="button"
+                    onClick={() => setIsUserDefaultsOpen(false)}
+                    className="rounded px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-100 cursor-pointer"
+                  >
+                    キャンセル
+                  </button>
+                  <button
+                    type="button"
+                    disabled={savingUserDefaults}
+                    onClick={handleSaveUserDefaults}
+                    className="rounded bg-slate-900 px-4 py-1.5 text-xs font-medium text-white hover:bg-slate-800 cursor-pointer disabled:opacity-50"
+                  >
+                    {savingUserDefaults ? "保存中..." : "既定値として保存"}
+                  </button>
+                </div>
+              </>
+            ) : null}
+          </div>
+        </div>
+      )}
 
       {/* New Session Modal */}
       {isNewSessionModalOpen && (

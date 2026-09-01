@@ -182,6 +182,13 @@ export function batchReview(body: BatchReviewRequest): Promise<BatchReviewRespon
   });
 }
 
+export function apiPut<T>(path: string, body: any): Promise<T> {
+  return request<T>(path, {
+    method: "PUT",
+    body: JSON.stringify(body),
+  });
+}
+
 // --- HITL client functions ---
 
 import type {

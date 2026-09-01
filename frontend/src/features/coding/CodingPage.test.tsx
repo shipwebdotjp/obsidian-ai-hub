@@ -12,6 +12,9 @@ vi.mock("../../api/coding", () => ({
   cancelCodingRun: vi.fn(),
   streamCodingMessage: vi.fn(),
   getGitStatus: vi.fn(),
+  getCodingDefaults: vi.fn(),
+  updateCodingDefaults: vi.fn(),
+  updateCodingSessionTools: vi.fn(),
 }));
 
 const mockProjectItem: codingApi.CodingProjectItem = {
@@ -56,6 +59,13 @@ describe("CodingPage", () => {
     vi.mocked(codingApi.listCodingSessions).mockResolvedValue([mockSession]);
     vi.mocked(codingApi.getCodingSessionDetail).mockResolvedValue({
       session: mockSession,
+      effective_tool_ids: ["web_search", "vault_search"],
+      has_custom_tools: false,
+      available_tools: [
+        { tool_id: "web_search", name: "Web検索", description: "Tavily検索" },
+        { tool_id: "vault_search", name: "Vault検索", description: "Vault内検索" },
+        { tool_id: "run_shell", name: "任意シェル実行", description: "シェル実行" },
+      ],
       messages: [
         {
           message_id: "cmsg_1",
@@ -158,6 +168,12 @@ describe("CodingPage", () => {
         ...mockSession,
         title: "CLI生成タイトル",
       },
+      effective_tool_ids: ["web_search", "vault_search"],
+      has_custom_tools: false,
+      available_tools: [
+        { tool_id: "web_search", name: "Web検索", description: "Tavily検索" },
+        { tool_id: "vault_search", name: "Vault検索", description: "Vault内検索" },
+      ],
       messages: [],
       active_run: null,
       latest_run: null,
@@ -258,6 +274,12 @@ describe("CodingPage", () => {
   it("allows cancelling active run", async () => {
     vi.mocked(codingApi.getCodingSessionDetail).mockResolvedValue({
       session: mockSession,
+      effective_tool_ids: ["web_search", "vault_search"],
+      has_custom_tools: false,
+      available_tools: [
+        { tool_id: "web_search", name: "Web検索", description: "Tavily検索" },
+        { tool_id: "vault_search", name: "Vault検索", description: "Vault内検索" },
+      ],
       messages: [],
       active_run: {
         run_id: "crun_active",
@@ -366,5 +388,73 @@ describe("CodingPage", () => {
     fireEvent.keyDown(textarea, { key: "Enter", keyCode: 229 } as any);
     await waitFor(() => new Promise((r) => setTimeout(r, 30)));
     expect(codingApi.streamCodingMessage).not.toHaveBeenCalled();
+  });
+
+  it("opens conversation settings modal and updates session tools", async () => {
+    vi.mocked(codingApi.updateCodingSessionTools).mockResolvedValue({
+      session: mockSession,
+      effective_tool_ids: ["web_search"],
+      has_custom_tools: true,
+      available_tools: [
+        { tool_id: "web_search", name: "Web検索", description: "Tavily検索" },
+        { tool_id: "vault_search", name: "Vault検索", description: "Vault内検索" },
+        { tool_id: "run_shell", name: "任意シェル実行", description: "シェル実行" },
+      ],
+      messages: [],
+      active_run: null,
+      latest_run: null,
+    });
+
+    render(<CodingPage />);
+    await waitFor(() => expect(screen.getByText("会話設定 ⚙")).toBeInTheDocument());
+
+    const settingsBtn = screen.getByRole("button", { name: "会話設定 ⚙" });
+    fireEvent.click(settingsBtn);
+
+    expect(screen.getByText("会話の利用可能ツール設定")).toBeInTheDocument();
+
+    const saveBtn = screen.getByRole("button", { name: "保存" });
+    fireEvent.click(saveBtn);
+
+    await waitFor(() => {
+      expect(codingApi.updateCodingSessionTools).toHaveBeenCalledWith(
+        "cses_111",
+        ["web_search", "vault_search"],
+      );
+    });
+  });
+
+  it("opens user default tools modal and updates defaults", async () => {
+    vi.mocked(codingApi.getCodingDefaults).mockResolvedValue({
+      default_tool_ids: ["web_search", "vault_search"],
+      available_tools: [
+        { tool_id: "web_search", name: "Web検索", description: "Tavily検索" },
+        { tool_id: "vault_search", name: "Vault検索", description: "Vault内検索" },
+      ],
+    });
+    vi.mocked(codingApi.updateCodingDefaults).mockResolvedValue({
+      default_tool_ids: ["web_search"],
+      available_tools: [
+        { tool_id: "web_search", name: "Web検索", description: "Tavily検索" },
+        { tool_id: "vault_search", name: "Vault検索", description: "Vault内検索" },
+      ],
+    });
+
+    render(<CodingPage />);
+    await waitFor(() => expect(screen.getByText("既定設定")).toBeInTheDocument());
+
+    const defaultsBtn = screen.getByRole("button", { name: "既定設定" });
+    fireEvent.click(defaultsBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText("ユーザー既定の利用可能ツール設定")).toBeInTheDocument();
+    });
+
+    const saveBtn = screen.getByRole("button", { name: "既定値として保存" });
+    fireEvent.click(saveBtn);
+
+    await waitFor(() => {
+      expect(codingApi.updateCodingDefaults).toHaveBeenCalledWith(["web_search", "vault_search"]);
+    });
   });
 });

@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 import re
+import uuid
 from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from obsidian_ai_hub.agents import registry
 from obsidian_ai_hub.utils.llm_client import create_langchain_llm
 from obsidian_ai_hub.utils.config import (
     CODING_ORCHESTRATOR_MODEL,
@@ -57,9 +61,11 @@ class CodingOrchestrator:
         self,
         provider: str = CODING_ORCHESTRATOR_PROVIDER,
         model: str = CODING_ORCHESTRATOR_MODEL,
+        tool_ids: Optional[List[str]] = None,
     ):
         self.provider = provider
         self.model = model
+        self.tool_ids = tool_ids
 
     def _build_messages(
         self,
@@ -100,20 +106,79 @@ class CodingOrchestrator:
         llm = create_langchain_llm(provider=self.provider, model=self.model, temperature=0.7)
         messages = self._build_messages(history, repo_path, backend_name)
 
+        # Resolve permitted tools
+        if self.tool_ids is None:
+            resolved_tool_ids = registry.list_available_tools()
+            target_ids = [t["tool_id"] for t in resolved_tool_ids]
+        else:
+            target_ids = self.tool_ids
+
+        trusted_ctx = {
+            "repo_path": repo_path,
+            "backend_name": backend_name,
+        }
+
         try:
+            allowed_tools = registry.resolve_tools_with_context(target_ids, trusted_ctx)
+        except Exception:
+            allowed_tools = registry.resolve_tools(target_ids)
+
+        tools_by_name = {t.name: t for t in allowed_tools}
+        llm_with_tools = llm.bind_tools(allowed_tools) if allowed_tools else llm
+
+        try:
+            iterations = 0
+            max_tool_iterations = 5
+
+            while iterations < max_tool_iterations:
+                iterations += 1
+                res = await llm_with_tools.ainvoke(messages)
+                messages.append(res)
+
+                tool_calls = getattr(res, "tool_calls", None)
+                if not tool_calls:
+                    content = getattr(res, "content", "")
+                    if isinstance(content, str):
+                        return content
+                    elif isinstance(content, list):
+                        text_parts = []
+                        for part in content:
+                            if isinstance(part, dict) and part.get("type") == "text":
+                                text_parts.append(part.get("text", ""))
+                            elif isinstance(part, str):
+                                text_parts.append(part)
+                        return "".join(text_parts)
+                    return str(content)
+
+                # Execute tool calls
+                for tc in tool_calls:
+                    tname = tc.get("name")
+                    targs = tc.get("args", {})
+                    tcall_id = tc.get("id") or f"call_{uuid.uuid4().hex[:8]}"
+
+                    if tname in tools_by_name:
+                        tool_obj = tools_by_name[tname]
+                        tool_res = await asyncio.to_thread(tool_obj.invoke, targs)
+                        result_str = (
+                            tool_res
+                            if isinstance(tool_res, str)
+                            else json.dumps(tool_res, ensure_ascii=False)
+                        )
+                    else:
+                        result_str = json.dumps({"error": f"Tool '{tname}' is not permitted or unknown"}, ensure_ascii=False)
+
+                    messages.append(
+                        ToolMessage(
+                            content=result_str,
+                            tool_call_id=tcall_id,
+                        )
+                    )
+
+            # Fallback if max_tool_iterations reached
             res = await llm.ainvoke(messages)
             content = getattr(res, "content", "")
-            if isinstance(content, str):
-                return content
-            elif isinstance(content, list):
-                text_parts = []
-                for part in content:
-                    if isinstance(part, dict) and part.get("type") == "text":
-                        text_parts.append(part.get("text", ""))
-                    elif isinstance(part, str):
-                        text_parts.append(part)
-                return "".join(text_parts)
-            return str(content)
+            return content if isinstance(content, str) else str(content)
+
         except Exception as exc:
             logger.exception("Orchestrator generation failed")
             raise exc

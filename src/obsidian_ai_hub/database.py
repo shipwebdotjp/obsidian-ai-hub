@@ -495,6 +495,9 @@ def get_db_connection() -> sqlite3.Connection:
     if current_version <= 26:
         run_migration_v27(conn)
 
+    if current_version <= 27:
+        run_migration_v28(conn)
+
     return conn
 
 
@@ -859,6 +862,27 @@ def run_migration_v27(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_coding_runs_session_id ON coding_runs(session_id);")
 
     conn.execute("PRAGMA user_version = 27;")
+    conn.commit()
+
+
+def run_migration_v28(conn: sqlite3.Connection) -> None:
+    """Run migration for version 28 (coding_sessions.tool_ids_json and coding_settings table)."""
+    try:
+        conn.execute(
+            "ALTER TABLE coding_sessions ADD COLUMN tool_ids_json TEXT;"
+        )
+    except sqlite3.OperationalError as e:
+        _ignore_duplicate_schema_object(e)
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS coding_settings (
+            setting_key TEXT PRIMARY KEY,
+            setting_value TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+    """)
+
+    conn.execute("PRAGMA user_version = 28;")
     conn.commit()
 
 

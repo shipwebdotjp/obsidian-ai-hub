@@ -1,5 +1,16 @@
-import { apiGet, apiPost, apiDelete, getToken, clearToken, AUTH_EXPIRED_EVENT, ApiError } from "./client";
+import { apiGet, apiPost, apiPut, apiDelete, getToken, clearToken, AUTH_EXPIRED_EVENT, ApiError } from "./client";
 import type { Project } from "./types";
+
+export interface CodingTool {
+  tool_id: string;
+  name: string;
+  description: string;
+}
+
+export interface CodingDefaults {
+  default_tool_ids: string[];
+  available_tools: CodingTool[];
+}
 
 export interface GitStatus {
   branch: string;
@@ -23,6 +34,7 @@ export interface CodingSession {
   repo_path: string;
   external_session_id: string | null;
   title: string;
+  tool_ids_json?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -51,6 +63,9 @@ export interface CodingRun {
 
 export interface CodingSessionDetail {
   session: CodingSession;
+  effective_tool_ids: string[];
+  has_custom_tools: boolean;
+  available_tools: CodingTool[];
   messages: CodingMessage[];
   active_run: CodingRun | null;
   latest_run: CodingRun | null;
@@ -86,15 +101,34 @@ export function listCodingSessions(projectId: number): Promise<CodingSession[]> 
   return apiGet<CodingSession[]>(`/api/v1/coding/sessions?project_id=${projectId}`);
 }
 
+export function getCodingDefaults(): Promise<CodingDefaults> {
+  return apiGet<CodingDefaults>("/api/v1/coding/defaults");
+}
+
+export function updateCodingDefaults(toolIds: string[]): Promise<CodingDefaults> {
+  return apiPut<CodingDefaults>("/api/v1/coding/defaults", { tool_ids: toolIds });
+}
+
+export function updateCodingSessionTools(
+  sessionId: string,
+  toolIds: string[] | null,
+): Promise<CodingSessionDetail> {
+  return apiPut<CodingSessionDetail>(`/api/v1/coding/sessions/${encodeURIComponent(sessionId)}/tools`, {
+    tool_ids: toolIds,
+  });
+}
+
 export function createCodingSession(
   projectId: number,
   backend: string,
   title?: string,
+  toolIds?: string[],
 ): Promise<CodingSession> {
   return apiPost<CodingSession>("/api/v1/coding/sessions", {
     project_id: projectId,
     backend,
     title,
+    tool_ids: toolIds,
   });
 }
 
