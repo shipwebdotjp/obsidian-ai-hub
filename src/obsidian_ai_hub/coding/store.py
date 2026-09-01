@@ -166,12 +166,11 @@ def create_session(
     now = _now_iso()
 
     if tool_ids is None:
-        init_tool_ids = get_user_default_tool_ids(conn=conn)
+        tool_ids_json = None
     else:
         all_tools = set(get_all_available_tool_ids())
-        init_tool_ids = [t for t in tool_ids if isinstance(t, str) and t in all_tools]
-
-    tool_ids_json = json.dumps(init_tool_ids, ensure_ascii=False)
+        clean_ids = [t for t in tool_ids if isinstance(t, str) and t in all_tools]
+        tool_ids_json = json.dumps(clean_ids, ensure_ascii=False)
 
     conn.execute(
         """

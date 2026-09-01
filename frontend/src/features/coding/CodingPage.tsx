@@ -246,11 +246,15 @@ export default function CodingPage() {
   const handleOpenUserDefaults = async () => {
     setIsUserDefaultsOpen(true);
     setLoadingUserDefaults(true);
+    setUserDefaults(null);
+    setUserDefaultsSelectedTools([]);
     try {
       const data = await getCodingDefaults();
       setUserDefaults(data);
       setUserDefaultsSelectedTools(data.default_tool_ids);
     } catch (e: any) {
+      setUserDefaults(null);
+      setUserDefaultsSelectedTools([]);
       setError(e.message || "ユーザー既定値の取得に失敗しました");
     } finally {
       setLoadingUserDefaults(false);
@@ -506,7 +510,7 @@ export default function CodingPage() {
             <button
               type="button"
               onClick={handleOpenUserDefaults}
-              className="rounded border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700 hover:bg-slate-50 cursor-pointer"
+              className="rounded border border-slate-300 bg-white px-3 py-1 text-sm text-slate-700 hover:bg-slate-50 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               title="ユーザー既定の利用可能ツール設定"
             >
               既定設定
@@ -516,7 +520,7 @@ export default function CodingPage() {
                 type="button"
                 disabled={!selectedProjectItem.is_valid_git_repo}
                 onClick={() => setIsNewSessionModalOpen(true)}
-                className="rounded bg-slate-900 px-2.5 py-1 text-xs font-medium text-white hover:bg-slate-800 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 disabled:bg-slate-300"
+                className="rounded bg-slate-900 px-3 py-1 text-sm font-medium text-white hover:bg-slate-800 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
                 title={
                   !selectedProjectItem.is_valid_git_repo
                     ? "Gitリポジトリが無効なためセッションを作成できません"
@@ -655,12 +659,12 @@ export default function CodingPage() {
                 <button
                   type="button"
                   onClick={() => {
-                    if (sessionDetail) {
+                    if (sessionDetail && sessionDetail.session.session_id === selectedSessionId) {
                       setSessionSelectedTools(sessionDetail.effective_tool_ids);
+                      setIsSessionSettingsOpen(true);
                     }
-                    setIsSessionSettingsOpen(true);
                   }}
-                  className="rounded border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 cursor-pointer"
+                  className="rounded border border-slate-300 bg-white px-3 py-1 text-sm font-medium text-slate-700 hover:bg-slate-50 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   会話設定 ⚙
                 </button>
@@ -996,7 +1000,7 @@ export default function CodingPage() {
                   type="button"
                   disabled={savingSessionTools}
                   onClick={handleSaveSessionTools}
-                  className="rounded bg-slate-900 px-4 py-1.5 text-xs font-medium text-white hover:bg-slate-800 cursor-pointer disabled:opacity-50"
+                  className="rounded bg-blue-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-blue-700 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {savingSessionTools ? "保存中..." : "保存"}
                 </button>
@@ -1092,7 +1096,7 @@ export default function CodingPage() {
                     type="button"
                     disabled={savingUserDefaults}
                     onClick={handleSaveUserDefaults}
-                    className="rounded bg-slate-900 px-4 py-1.5 text-xs font-medium text-white hover:bg-slate-800 cursor-pointer disabled:opacity-50"
+                    className="rounded bg-blue-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-blue-700 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {savingUserDefaults ? "保存中..." : "既定値として保存"}
                   </button>
@@ -1172,7 +1176,7 @@ export default function CodingPage() {
                 type="button"
                 disabled={creatingSession}
                 onClick={handleCreateSession}
-                className="rounded bg-slate-900 px-4 py-1.5 text-xs font-medium text-white hover:bg-slate-800 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 disabled:bg-slate-300"
+                className="rounded bg-blue-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-blue-700 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {creatingSession ? "作成中..." : "作成"}
               </button>

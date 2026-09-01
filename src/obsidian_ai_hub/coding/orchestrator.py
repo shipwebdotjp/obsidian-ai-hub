@@ -118,10 +118,7 @@ class CodingOrchestrator:
             "backend_name": backend_name,
         }
 
-        try:
-            allowed_tools = registry.resolve_tools_with_context(target_ids, trusted_ctx)
-        except Exception:
-            allowed_tools = registry.resolve_tools(target_ids)
+        allowed_tools = registry.resolve_tools_with_context(target_ids, trusted_ctx)
 
         tools_by_name = {t.name: t for t in allowed_tools}
         llm_with_tools = llm.bind_tools(allowed_tools) if allowed_tools else llm
