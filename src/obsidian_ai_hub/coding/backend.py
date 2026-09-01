@@ -501,7 +501,7 @@ class OpenCodeCliBackend(_BaseSubprocessBackend):
                 parsed = json.loads(raw_perm)
                 if isinstance(parsed, dict):
                     perm_dict = parsed
-            except Exception:
+            except json.JSONDecodeError:
                 pass
 
         perm_dict["external_directory"] = "deny"

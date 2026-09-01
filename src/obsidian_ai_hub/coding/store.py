@@ -391,7 +391,7 @@ def _format_run(run_dict: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     if diag_str:
         try:
             r["diagnostics"] = json.loads(diag_str)
-        except Exception:
+        except (json.JSONDecodeError, TypeError):
             r["diagnostics"] = None
     else:
         r["diagnostics"] = None
