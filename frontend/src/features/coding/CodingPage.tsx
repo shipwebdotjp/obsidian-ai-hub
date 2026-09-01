@@ -119,6 +119,7 @@ export default function CodingPage() {
 
   // Load messages & run details when selected session changes
   useEffect(() => {
+    setGitStatus(null);
     if (!selectedSessionId) {
       setMessages([]);
       setActiveRun(null);
@@ -128,12 +129,16 @@ export default function CodingPage() {
     loadSessionDetail(selectedSessionId);
   }, [selectedSessionId]);
 
-  const fetchGitStatus = async (repoPath: string) => {
+  const fetchGitStatus = async (repoPath: string, targetSessionId: string) => {
     try {
       const status = await getGitStatus(repoPath);
-      setGitStatus(status);
+      if (selectedSessionId === targetSessionId) {
+        setGitStatus(status);
+      }
     } catch (_) {
-      // Non-fatal if git status fails
+      if (selectedSessionId === targetSessionId) {
+        setGitStatus(null);
+      }
     }
   };
 
@@ -145,9 +150,12 @@ export default function CodingPage() {
       setActiveRun(data.active_run);
       setLatestRun(data.latest_run);
       if (data.session.repo_path) {
-        fetchGitStatus(data.session.repo_path);
+        fetchGitStatus(data.session.repo_path, sessionId);
+      } else {
+        setGitStatus(null);
       }
     } catch (e: any) {
+      setGitStatus(null);
       setError(e.message || "セッション詳細の取得に失敗しました");
     } finally {
       setLoadingMessages(false);

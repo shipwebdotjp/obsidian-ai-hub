@@ -111,7 +111,7 @@ def get_git_status(repo_path: str | Path) -> dict:
             )
             if rev_proc.returncode == 0:
                 branch = rev_proc.stdout.strip()
-    except Exception as exc:
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError) as exc:
         logger.warning("Failed to get git branch for '%s': %s", repo_path, exc)
 
     # 2. Ahead / Behind counts against upstream branch
@@ -127,7 +127,7 @@ def get_git_status(repo_path: str | Path) -> dict:
             if len(parts) == 2:
                 behind = int(parts[0])
                 ahead = int(parts[1])
-    except Exception as exc:
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError) as exc:
         logger.debug("Failed to get ahead/behind count for '%s': %s", repo_path, exc)
 
     # 3. Diff line counts (insertions / deletions) across staged and unstaged changes
@@ -155,7 +155,7 @@ def get_git_status(repo_path: str | Path) -> dict:
                         insertions += int(ins_str)
                     if del_str.isdigit():
                         deletions += int(del_str)
-    except Exception as exc:
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError) as exc:
         logger.warning("Failed to get git diff numstat for '%s': %s", repo_path, exc)
 
     return {
