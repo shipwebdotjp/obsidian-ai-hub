@@ -14,6 +14,7 @@ import {
   type CodingSseEvent,
 } from "../../api/coding";
 import MarkdownPreview from "../../components/MarkdownPreview";
+import { formatDateTime } from "../../utils/date";
 import {
   getChatInputPlaceholder,
   shouldSendOnEnter,
@@ -54,7 +55,35 @@ export default function CodingPage() {
     error?: string | null;
   }>({ status: "idle" });
 
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
+  const copyResetRef = useRef<number | null>(null);
+
   const messageEndRef = useRef<HTMLDivElement>(null);
+
+  const handleCopyMessage = async (content: string, messageId: string) => {
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopiedMessageId(messageId);
+      if (copyResetRef.current !== null) {
+        window.clearTimeout(copyResetRef.current);
+      }
+      copyResetRef.current = window.setTimeout(() => {
+        setCopiedMessageId((current) => (current === messageId ? null : current));
+        copyResetRef.current = null;
+      }, 2000);
+    } catch (err) {
+      console.error("Failed to copy message:", err);
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      if (copyResetRef.current !== null) {
+        window.clearTimeout(copyResetRef.current);
+        copyResetRef.current = null;
+      }
+    };
+  }, []);
 
   // Auto-scroll on new messages / phase change
   useEffect(() => {
@@ -511,30 +540,124 @@ export default function CodingPage() {
                     )}
 
                     {msg.role === "orchestrator" && (
-                      <div className="flex justify-start">
-                        <div className="max-w-2xl rounded-2xl bg-white border border-slate-200 p-4 text-xs text-slate-800 shadow-sm">
-                          <div className="mb-1 text-[10px] font-semibold text-slate-400 uppercase">
-                            AI Orchestrator
+                      <>
+                        <div className="flex justify-start">
+                          <div className="max-w-2xl rounded-2xl bg-white border border-slate-200 p-4 text-xs text-slate-800 shadow-sm">
+                            <div className="mb-1 text-[10px] font-semibold text-slate-400 uppercase">
+                              AI Orchestrator
+                            </div>
+                            <MarkdownPreview content={msg.content} />
                           </div>
-                          <MarkdownPreview content={msg.content} />
                         </div>
-                      </div>
+                        <div className="flex items-center gap-2 text-[10px] text-slate-400 justify-start">
+                          <button
+                            type="button"
+                            onClick={() => handleCopyMessage(msg.content, msg.message_id)}
+                            className="inline-flex items-center gap-1 cursor-pointer rounded px-1.5 py-0.5 hover:bg-slate-100 hover:text-slate-600 transition"
+                            aria-label="メッセージをコピー"
+                            data-testid={`copy-message-${msg.message_id}`}
+                          >
+                            {copiedMessageId === msg.message_id ? (
+                              <>
+                                <svg
+                                  className="h-3.5 w-3.5 text-emerald-600"
+                                  fill="none"
+                                  viewBox="0 0 24 24"
+                                  stroke="currentColor"
+                                  aria-hidden="true"
+                                >
+                                  <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    strokeWidth={2}
+                                    d="M5 13l4 4L19 7"
+                                  />
+                                </svg>
+                                <span className="text-emerald-700">コピーしました</span>
+                              </>
+                            ) : (
+                              <svg
+                                className="h-3.5 w-3.5"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                                aria-hidden="true"
+                              >
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  strokeWidth={2}
+                                  d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h12a2 2 0 002-2V7a2 2 0 00-2-2h-2M8 5a2 2 0 002 2h4a2 2 0 002-2M8 5a2 2 0 012-2h4a2 2 0 012 2"
+                                />
+                              </svg>
+                            )}
+                          </button>
+                          <span aria-label="送信時刻">{formatDateTime(msg.created_at)}</span>
+                        </div>
+                      </>
                     )}
 
                     {msg.role === "worker" && (
-                      <div className="flex justify-start">
-                        <div className="w-full max-w-2xl">
-                          <details className="rounded-xl border border-slate-200 bg-slate-900 text-slate-100 text-xs shadow-sm overflow-hidden group">
-                            <summary className="flex cursor-pointer items-center justify-between px-4 py-2.5 bg-slate-800 font-mono text-[11px] hover:bg-slate-700">
-                              <span>CLI Worker 最終返答 ({selectedSession.backend})</span>
-                              <span className="text-slate-400 text-[10px]">クリックで展開/折りたたみ</span>
-                            </summary>
-                            <div className="p-4 overflow-x-auto max-h-96">
-                              <MarkdownPreview content={msg.content} variant="dark" />
-                            </div>
-                          </details>
+                      <>
+                        <div className="flex justify-start">
+                          <div className="w-full max-w-2xl">
+                            <details className="rounded-xl border border-slate-200 bg-slate-900 text-slate-100 text-xs shadow-sm overflow-hidden group">
+                              <summary className="flex cursor-pointer items-center justify-between px-4 py-2.5 bg-slate-800 font-mono text-[11px] hover:bg-slate-700">
+                                <span>CLI Worker 最終返答 ({selectedSession.backend})</span>
+                                <span className="text-slate-400 text-[10px]">クリックで展開/折りたたみ</span>
+                              </summary>
+                              <div className="p-4 overflow-x-auto max-h-96">
+                                <MarkdownPreview content={msg.content} variant="dark" />
+                              </div>
+                            </details>
+                          </div>
                         </div>
-                      </div>
+                        <div className="flex items-center gap-2 text-[10px] text-slate-400 justify-start">
+                          <button
+                            type="button"
+                            onClick={() => handleCopyMessage(msg.content, msg.message_id)}
+                            className="inline-flex items-center gap-1 cursor-pointer rounded px-1.5 py-0.5 hover:bg-slate-100 hover:text-slate-600 transition"
+                            aria-label="メッセージをコピー"
+                            data-testid={`copy-message-${msg.message_id}`}
+                          >
+                            {copiedMessageId === msg.message_id ? (
+                              <>
+                                <svg
+                                  className="h-3.5 w-3.5 text-emerald-600"
+                                  fill="none"
+                                  viewBox="0 0 24 24"
+                                  stroke="currentColor"
+                                  aria-hidden="true"
+                                >
+                                  <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    strokeWidth={2}
+                                    d="M5 13l4 4L19 7"
+                                  />
+                                </svg>
+                                <span className="text-emerald-700">コピーしました</span>
+                              </>
+                            ) : (
+                              <svg
+                                className="h-3.5 w-3.5"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                                aria-hidden="true"
+                              >
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  strokeWidth={2}
+                                  d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h12a2 2 0 002-2V7a2 2 0 00-2-2h-2M8 5a2 2 0 002 2h4a2 2 0 002-2M8 5a2 2 0 012-2h4a2 2 0 012 2"
+                                />
+                              </svg>
+                            )}
+                          </button>
+                          <span aria-label="送信時刻">{formatDateTime(msg.created_at)}</span>
+                        </div>
+                      </>
                     )}
                   </div>
                 ))
