@@ -79,6 +79,94 @@ def check_dirty_tree(repo_path: str | Path) -> tuple[bool, str]:
         return False, ""
 
 
+def get_git_status(repo_path: str | Path) -> dict:
+    """Get Git status information (branch, ahead/behind counts, diff line counts).
+
+    Returns dict with keys: branch, ahead, behind, insertions, deletions.
+    """
+    path = Path(repo_path).expanduser().resolve()
+    branch = ""
+    ahead = 0
+    behind = 0
+    insertions = 0
+    deletions = 0
+
+    # 1. Branch name
+    try:
+        proc = subprocess.run(
+            ["git", "branch", "--show-current"],
+            cwd=path,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        branch = proc.stdout.strip()
+        if not branch:
+            # Fallback to commit SHA / HEAD description if detached
+            rev_proc = subprocess.run(
+                ["git", "rev-parse", "--short", "HEAD"],
+                cwd=path,
+                capture_output=True,
+                text=True,
+            )
+            if rev_proc.returncode == 0:
+                branch = rev_proc.stdout.strip()
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError) as exc:
+        logger.warning("Failed to get git branch for '%s': %s", repo_path, exc)
+
+    # 2. Ahead / Behind counts against upstream branch
+    try:
+        proc = subprocess.run(
+            ["git", "rev-list", "--left-right", "--count", "@{upstream}...HEAD"],
+            cwd=path,
+            capture_output=True,
+            text=True,
+        )
+        if proc.returncode == 0 and proc.stdout.strip():
+            parts = proc.stdout.strip().split()
+            if len(parts) == 2:
+                behind = int(parts[0])
+                ahead = int(parts[1])
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError) as exc:
+        logger.debug("Failed to get ahead/behind count for '%s': %s", repo_path, exc)
+
+    # 3. Diff line counts (insertions / deletions) across staged and unstaged changes
+    try:
+        proc = subprocess.run(
+            ["git", "diff", "HEAD", "--numstat"],
+            cwd=path,
+            capture_output=True,
+            text=True,
+        )
+        if proc.returncode != 0:
+            proc = subprocess.run(
+                ["git", "diff", "--numstat"],
+                cwd=path,
+                capture_output=True,
+                text=True,
+            )
+
+        if proc.returncode == 0 and proc.stdout.strip():
+            for line in proc.stdout.strip().splitlines():
+                parts = line.split("\t")
+                if len(parts) >= 2:
+                    ins_str, del_str = parts[0], parts[1]
+                    if ins_str.isdigit():
+                        insertions += int(ins_str)
+                    if del_str.isdigit():
+                        deletions += int(del_str)
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError) as exc:
+        logger.warning("Failed to get git diff numstat for '%s': %s", repo_path, exc)
+
+    return {
+        "branch": branch,
+        "ahead": ahead,
+        "behind": behind,
+        "insertions": insertions,
+        "deletions": deletions,
+    }
+
+
 class CodingBackend(ABC):
     """Abstract interface for CLI coding execution backends."""
 

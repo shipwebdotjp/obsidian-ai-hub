@@ -1,6 +1,14 @@
 import { apiGet, apiPost, apiDelete, getToken, clearToken, AUTH_EXPIRED_EVENT, ApiError } from "./client";
 import type { Project } from "./types";
 
+export interface GitStatus {
+  branch: string;
+  ahead: number;
+  behind: number;
+  insertions: number;
+  deletions: number;
+}
+
 export interface CodingProjectItem {
   project: Project;
   is_valid_git_repo: boolean;
@@ -60,10 +68,15 @@ export type CodingSseEvent =
       exit_code: number;
       error: string | null;
       session_recreated?: boolean;
+      git_status?: GitStatus;
     }
-  | { event: "done"; run_id: string; status: string }
+  | { event: "done"; run_id: string; status: string; git_status?: GitStatus; session_title?: string }
   | { event: "cancelled"; message: string }
   | { event: "error"; message: string };
+
+export function getGitStatus(repoPath: string): Promise<GitStatus> {
+  return apiGet<GitStatus>(`/api/v1/coding/git-status?repo_path=${encodeURIComponent(repoPath)}`);
+}
 
 export function listCodingProjects(): Promise<CodingProjectItem[]> {
   return apiGet<CodingProjectItem[]>("/api/v1/coding/projects");

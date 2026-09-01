@@ -11,6 +11,7 @@ vi.mock("../../api/coding", () => ({
   deleteCodingSession: vi.fn(),
   cancelCodingRun: vi.fn(),
   streamCodingMessage: vi.fn(),
+  getGitStatus: vi.fn(),
 }));
 
 const mockProjectItem: codingApi.CodingProjectItem = {
@@ -44,6 +45,13 @@ describe("CodingPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
+    vi.mocked(codingApi.getGitStatus).mockResolvedValue({
+      branch: "main",
+      ahead: 2,
+      behind: 1,
+      insertions: 15,
+      deletions: 3,
+    });
     vi.mocked(codingApi.listCodingProjects).mockResolvedValue([mockProjectItem]);
     vi.mocked(codingApi.listCodingSessions).mockResolvedValue([mockSession]);
     vi.mocked(codingApi.getCodingSessionDetail).mockResolvedValue({
@@ -85,11 +93,30 @@ describe("CodingPage", () => {
     });
   });
 
-  it("opens new session modal and creates a session", async () => {
+  it("displays git status in header and refreshes upon receiving SSE response", async () => {
+    vi.mocked(codingApi.getGitStatus).mockResolvedValueOnce({
+      branch: "feature/test",
+      ahead: 1,
+      behind: 0,
+      insertions: 5,
+      deletions: 2,
+    });
+
+    render(<CodingPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("feature/test")).toBeInTheDocument();
+      expect(screen.getByText("↑1 ↓0")).toBeInTheDocument();
+      expect(screen.getByText("+5")).toBeInTheDocument();
+      expect(screen.getByText("-2")).toBeInTheDocument();
+    });
+  });
+
+  it("opens new session modal and creates a session without manually entering a title", async () => {
     vi.mocked(codingApi.createCodingSession).mockResolvedValue({
       ...mockSession,
       session_id: "cses_222",
-      title: "新セッション2",
+      title: "新しいコーディングセッション",
     });
 
     render(<CodingPage />);
@@ -103,14 +130,55 @@ describe("CodingPage", () => {
 
     expect(screen.getByText("新規コーディングセッション作成")).toBeInTheDocument();
 
-    const titleInput = screen.getByPlaceholderText("例: リファクタリング作業");
-    fireEvent.change(titleInput, { target: { value: "新セッション2" } });
-
+    // Do not fill in title input
     const submitBtn = screen.getByRole("button", { name: "作成" });
     fireEvent.click(submitBtn);
 
     await waitFor(() => {
-      expect(codingApi.createCodingSession).toHaveBeenCalledWith(1, "codex", "新セッション2");
+      expect(codingApi.createCodingSession).toHaveBeenCalledWith(1, "codex", undefined);
+    });
+  });
+
+  it("updates session title when coding CLI response event contains session_title", async () => {
+    vi.mocked(codingApi.streamCodingMessage).mockImplementation(
+      async (_sessionId, _content, onEvent) => {
+        onEvent({ event: "start", run_id: "crun_999", is_dirty: false, dirty_summary: null });
+        onEvent({
+          event: "done",
+          run_id: "crun_999",
+          status: "completed",
+          session_title: "CLI生成タイトル",
+        });
+      },
+    );
+
+    // Mock getCodingSessionDetail to reflect updated session title on refetch
+    vi.mocked(codingApi.getCodingSessionDetail).mockResolvedValue({
+      session: {
+        ...mockSession,
+        title: "CLI生成タイトル",
+      },
+      messages: [],
+      active_run: null,
+      latest_run: null,
+    });
+
+    render(<CodingPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Test App")).toBeInTheDocument();
+    });
+
+    const textarea = screen.getByPlaceholderText(
+      "指示・質問を入力…（Enterで送信 / Shift+Enterで改行）",
+    );
+    fireEvent.change(textarea, { target: { value: "タイトル生成" } });
+
+    const sendBtn = screen.getByRole("button", { name: "送信" });
+    fireEvent.click(sendBtn);
+
+    await waitFor(() => {
+      expect(screen.getAllByText("CLI生成タイトル").length).toBeGreaterThan(0);
     });
   });
 
