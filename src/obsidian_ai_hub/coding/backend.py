@@ -19,6 +19,8 @@ from obsidian_ai_hub.utils.config import (
     CODING_CODEX_CLI_PATH,
     CODING_OPENCODE_CLI_PATH,
     CODING_OPENCODE_AUTO_APPROVE,
+    CODING_OPENCODE_MODEL,
+    CODING_OPENCODE_VARIANT,
 )
 
 logger = logging.getLogger(__name__)
@@ -32,6 +34,7 @@ class CodingBackendResult:
     error_message: Optional[str] = None
     cancelled: bool = False
     session_recreated: bool = False
+    diagnostics: Optional[dict] = None
 
 
 def validate_git_repo(repo_path: str | Path) -> str:
@@ -191,6 +194,7 @@ class _BaseSubprocessBackend(CodingBackend):
         self,
         argv: list[str],
         cwd: str,
+        env: Optional[dict] = None,
         cancel_event: Optional[threading.Event] = None,
         timeout: int = 600,
     ) -> tuple[int, str, str, bool]:
@@ -198,11 +202,11 @@ class _BaseSubprocessBackend(CodingBackend):
 
         Returns (exit_code, stdout, stderr, cancelled).
         """
-        env = os.environ.copy()
+        proc_env = env if env is not None else os.environ.copy()
         proc = subprocess.Popen(
             argv,
             cwd=cwd,
-            env=env,
+            env=proc_env,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -476,28 +480,71 @@ class OpenCodeCliBackend(_BaseSubprocessBackend):
         ansi_regex = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
         return ansi_regex.sub("", text)
 
-    @staticmethod
-    def _parse_opencode_json_output(stdout: str, stderr: str) -> tuple[Optional[str], str]:
-        """Parse OpenCode CLI JSON Lines output.
+    @classmethod
+    def _prepare_opencode_env(cls, repo_path: str) -> dict[str, str]:
+        """Construct isolated subprocess environment for OpenCode CLI execution."""
+        env = os.environ.copy()
+        # Set canonical Git root path for PWD
+        env["PWD"] = repo_path
 
-        Extracts session ID (e.g. ses_...) and combines text contents.
-        If non-JSON output, returns (extracted_session_id, raw_output).
+        # Strip parent server authentication tokens
+        env.pop("OPENCODE_SERVER_PASSWORD", None)
+        env.pop("OPENCODE_SERVER_USERNAME", None)
+
+        # Parse and merge OPENCODE_PERMISSION to enforce external_directory: deny
+        import json
+
+        perm_dict = {}
+        raw_perm = env.get("OPENCODE_PERMISSION")
+        if raw_perm:
+            try:
+                parsed = json.loads(raw_perm)
+                if isinstance(parsed, dict):
+                    perm_dict = parsed
+            except Exception:
+                pass
+
+        perm_dict["external_directory"] = "deny"
+        env["OPENCODE_PERMISSION"] = json.dumps(perm_dict, ensure_ascii=False)
+        return env
+
+    @classmethod
+    def _parse_opencode_json_details(
+        cls, stdout: str, stderr: str
+    ) -> tuple[Optional[str], str, int, int, Optional[str], bool]:
+        """Parse OpenCode CLI JSON Lines output for text, session ID, tool stats, and errors.
+
+        Returns (extracted_session_id, output_text, tool_call_count, tool_failure_count, structured_error, auto_rejected_permission).
         """
         import json
 
         extracted_session_id = None
         text_parts: list[str] = []
+        tool_call_count = 0
+        tool_failure_count = 0
+        structured_errors: list[str] = []
+        auto_rejected_permission = False
 
         combined = stdout + "\n" + stderr if stderr else stdout
+
         for line in combined.splitlines():
             line_str = line.strip()
             if not line_str:
                 continue
+
+            # Check for permission rejection strings in raw lines
+            if "external_directory" in line_str and ("deny" in line_str or "denied" in line_str or "rejected" in line_str):
+                auto_rejected_permission = True
+            elif "permission denied" in line_str.lower() or "auto-rejected" in line_str.lower():
+                auto_rejected_permission = True
+
             if line_str.startswith("{") and line_str.endswith("}"):
                 try:
                     data = json.loads(line_str)
                     if isinstance(data, dict):
-                        # Extract session ID from top level or nested fields
+                        event_type = str(data.get("type", ""))
+
+                        # 1. Session ID extraction
                         if "sessionID" in data and data["sessionID"]:
                             extracted_session_id = str(data["sessionID"])
                         elif "session_id" in data and data["session_id"]:
@@ -507,21 +554,32 @@ class OpenCodeCliBackend(_BaseSubprocessBackend):
                         elif "sessionId" in data and data["sessionId"]:
                             extracted_session_id = str(data["sessionId"])
 
-                        # Extract text message content from nested part objects or direct fields
+                        # 2. Text message content
                         if "part" in data and isinstance(data["part"], dict):
                             part = data["part"]
-                            if part.get("type") == "text":
+                            ptype = part.get("type")
+                            if ptype == "text":
                                 if "text" in part and isinstance(part["text"], str):
                                     text_parts.append(part["text"])
                                 elif "content" in part and isinstance(part["content"], str):
                                     text_parts.append(part["content"])
+                            elif ptype in ("tool_use", "tool_call", "tool_execution"):
+                                tool_call_count += 1
+                                if part.get("error") or part.get("status") in ("failed", "error"):
+                                    tool_failure_count += 1
                         elif "parts" in data and isinstance(data["parts"], list):
                             for part in data["parts"]:
-                                if isinstance(part, dict) and part.get("type") == "text":
-                                    if "text" in part and isinstance(part["text"], str):
-                                        text_parts.append(part["text"])
-                                    elif "content" in part and isinstance(part["content"], str):
-                                        text_parts.append(part["content"])
+                                if isinstance(part, dict):
+                                    ptype = part.get("type")
+                                    if ptype == "text":
+                                        if "text" in part and isinstance(part["text"], str):
+                                            text_parts.append(part["text"])
+                                        elif "content" in part and isinstance(part["content"], str):
+                                            text_parts.append(part["content"])
+                                    elif ptype in ("tool_use", "tool_call", "tool_execution"):
+                                        tool_call_count += 1
+                                        if part.get("error") or part.get("status") in ("failed", "error"):
+                                            tool_failure_count += 1
                         elif "text" in data and isinstance(data["text"], str):
                             text_parts.append(data["text"])
                         elif "content" in data and isinstance(data["content"], str):
@@ -532,6 +590,31 @@ class OpenCodeCliBackend(_BaseSubprocessBackend):
                                 text_parts.append(msg)
                             elif isinstance(msg, dict) and "content" in msg:
                                 text_parts.append(str(msg["content"]))
+
+                        # 3. Direct Tool Events
+                        if event_type in ("tool_use", "tool_call", "tool_exec"):
+                            tool_call_count += 1
+                            if data.get("error") or data.get("status") in ("failed", "error") or data.get("is_error"):
+                                tool_failure_count += 1
+
+                        # 4. Error Event Extraction
+                        if event_type == "error":
+                            err_obj = data.get("error")
+                            if isinstance(err_obj, dict):
+                                err_msg = err_obj.get("message") or str(err_obj)
+                            else:
+                                err_msg = str(err_obj or data.get("message") or "Unknown error event")
+                            structured_errors.append(err_msg)
+                            if "permission" in err_msg.lower() or "denied" in err_msg.lower() or "rejected" in err_msg.lower():
+                                auto_rejected_permission = True
+
+                        elif "error" in data and data["error"]:
+                            err_val = data["error"]
+                            if isinstance(err_val, str):
+                                structured_errors.append(err_val)
+                            elif isinstance(err_val, dict):
+                                structured_errors.append(err_val.get("message") or str(err_val))
+
                 except json.JSONDecodeError:
                     pass
 
@@ -542,7 +625,16 @@ class OpenCodeCliBackend(_BaseSubprocessBackend):
                 extracted_session_id = m.group(1)
 
         output_text = "\n".join(text_parts).strip() if text_parts else stdout.strip() or stderr.strip()
-        return extracted_session_id, output_text
+        structured_error = "\n".join(structured_errors).strip() if structured_errors else None
+
+        return (
+            extracted_session_id,
+            output_text,
+            tool_call_count,
+            tool_failure_count,
+            structured_error,
+            auto_rejected_permission,
+        )
 
     def execute(
         self,
@@ -553,38 +645,94 @@ class OpenCodeCliBackend(_BaseSubprocessBackend):
         timeout: int = 600,
     ) -> CodingBackendResult:
         exe_path = CODING_OPENCODE_CLI_PATH or "opencode"
+        canonical_repo = validate_git_repo(repo_path)
+        env = self._prepare_opencode_env(canonical_repo)
 
         def _run_cmd(sess_id_opt: Optional[str]):
-            argv = [exe_path, "run", "--format", "json"]
+            argv = [exe_path, "run", "--format", "json", "--dir", canonical_repo]
             if CODING_OPENCODE_AUTO_APPROVE:
                 argv.append("--auto")
+            if CODING_OPENCODE_MODEL:
+                argv.extend(["--model", CODING_OPENCODE_MODEL])
+            if CODING_OPENCODE_VARIANT:
+                argv.extend(["--variant", CODING_OPENCODE_VARIANT])
             if sess_id_opt:
                 argv.extend(["--session", sess_id_opt])
             argv.append(prompt)
             return self._run_subprocess(
-                argv, cwd=repo_path, cancel_event=cancel_event, timeout=timeout
+                argv, cwd=canonical_repo, env=env, cancel_event=cancel_event, timeout=timeout
             )
+
+        def _build_diagnostics(
+            req_sess: Optional[str],
+            ret_sess: Optional[str],
+            tool_calls: int,
+            tool_fails: int,
+            struct_err: Optional[str],
+            auto_rej: bool,
+            exit_code: int,
+        ) -> dict:
+            return {
+                "cwd": canonical_repo,
+                "requested_session_id": req_sess,
+                "returned_session_id": ret_sess,
+                "tool_call_count": tool_calls,
+                "tool_failure_count": tool_fails,
+                "structured_error": struct_err,
+                "auto_rejected_permission": auto_rej,
+                "exit_code": exit_code,
+                "model": CODING_OPENCODE_MODEL or "既定（Global default）",
+                "variant": CODING_OPENCODE_VARIANT or "なし",
+            }
 
         try:
             exit_code, stdout, stderr, cancelled = _run_cmd(external_session_id)
         except Exception as exc:
             logger.exception("Failed to execute OpenCode CLI")
+            diag = _build_diagnostics(
+                external_session_id,
+                None,
+                0,
+                0,
+                str(exc),
+                False,
+                -1,
+            )
             return CodingBackendResult(
                 external_session_id=external_session_id,
                 output="",
                 exit_code=-1,
                 error_message=str(exc),
                 cancelled=False,
+                diagnostics=diag,
             )
 
+        (
+            extracted_sess_id,
+            parsed_text,
+            tool_calls,
+            tool_fails,
+            struct_err,
+            auto_rej,
+        ) = self._parse_opencode_json_details(stdout, stderr)
+
         if cancelled:
-            _, parsed_text = self._parse_opencode_json_output(stdout, stderr)
+            diag = _build_diagnostics(
+                external_session_id,
+                extracted_sess_id or external_session_id,
+                tool_calls,
+                tool_fails,
+                struct_err,
+                auto_rej,
+                exit_code,
+            )
             return CodingBackendResult(
                 external_session_id=external_session_id,
                 output=parsed_text,
                 exit_code=exit_code,
                 error_message="Cancelled by user or timed out",
                 cancelled=True,
+                diagnostics=diag,
             )
 
         clean_combined = self._strip_ansi(stdout + "\n" + stderr)
@@ -599,6 +747,15 @@ class OpenCodeCliBackend(_BaseSubprocessBackend):
                 r_exit, r_stdout, r_stderr, r_cancelled = _run_cmd(None)
             except Exception as exc:
                 logger.exception("Failed during OpenCode retry execution")
+                diag = _build_diagnostics(
+                    external_session_id,
+                    None,
+                    0,
+                    0,
+                    f"Retry failed: {str(exc)}",
+                    False,
+                    -1,
+                )
                 return CodingBackendResult(
                     external_session_id=None,
                     output="",
@@ -606,10 +763,28 @@ class OpenCodeCliBackend(_BaseSubprocessBackend):
                     error_message=f"Retry failed: {str(exc)}",
                     cancelled=False,
                     session_recreated=True,
+                    diagnostics=diag,
                 )
 
+            (
+                r_sess_id,
+                r_text,
+                r_tool_calls,
+                r_tool_fails,
+                r_struct_err,
+                r_auto_rej,
+            ) = self._parse_opencode_json_details(r_stdout, r_stderr)
+
             if r_cancelled:
-                _, r_text = self._parse_opencode_json_output(r_stdout, r_stderr)
+                diag = _build_diagnostics(
+                    None,
+                    r_sess_id,
+                    r_tool_calls,
+                    r_tool_fails,
+                    r_struct_err,
+                    r_auto_rej,
+                    r_exit,
+                )
                 return CodingBackendResult(
                     external_session_id=None,
                     output=r_text,
@@ -617,33 +792,42 @@ class OpenCodeCliBackend(_BaseSubprocessBackend):
                     error_message="Cancelled by user or timed out during retry",
                     cancelled=True,
                     session_recreated=True,
+                    diagnostics=diag,
                 )
 
-            if r_exit != 0:
-                _, r_text = self._parse_opencode_json_output(r_stdout, r_stderr)
-                return CodingBackendResult(
-                    external_session_id=None,
-                    output=r_text,
-                    exit_code=r_exit,
-                    error_message=r_stderr or f"Exit code {r_exit}",
-                    cancelled=False,
-                    session_recreated=True,
-                )
+            err_msg = r_stderr or r_struct_err or (f"Exit code {r_exit}" if r_exit != 0 else None)
+            diag = _build_diagnostics(
+                None,
+                r_sess_id,
+                r_tool_calls,
+                r_tool_fails,
+                r_struct_err,
+                r_auto_rej,
+                r_exit,
+            )
 
-            r_sess_id, r_text = self._parse_opencode_json_output(r_stdout, r_stderr)
             return CodingBackendResult(
                 external_session_id=r_sess_id,
                 output=r_text,
-                exit_code=0,
-                error_message=None,
+                exit_code=r_exit,
+                error_message=err_msg,
                 cancelled=False,
                 session_recreated=True,
+                diagnostics=diag,
             )
 
         # Normal completion (initial or valid continuation)
-        extracted_sess_id, parsed_text = self._parse_opencode_json_output(stdout, stderr)
         final_sess_id = extracted_sess_id or external_session_id
-        err_msg = None if exit_code == 0 else (stderr or f"Exit code {exit_code}")
+        err_msg = struct_err or stderr or (f"Exit code {exit_code}" if exit_code != 0 else None)
+        diag = _build_diagnostics(
+            external_session_id,
+            final_sess_id,
+            tool_calls,
+            tool_fails,
+            struct_err,
+            auto_rej,
+            exit_code,
+        )
 
         return CodingBackendResult(
             external_session_id=final_sess_id,
@@ -652,6 +836,7 @@ class OpenCodeCliBackend(_BaseSubprocessBackend):
             error_message=err_msg,
             cancelled=False,
             session_recreated=False,
+            diagnostics=diag,
         )
 
 

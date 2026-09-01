@@ -207,11 +207,12 @@ def test_coding_api_endpoints(test_project):
     # Verify updated detail
     res = client.get(f"/api/v1/coding/sessions/{sid}", headers=headers)
     detail = res.json()
-    assert len(detail["messages"]) == 4  # user, orchestrator #1, worker, orchestrator #2
+    assert len(detail["messages"]) == 5  # user, orchestrator #1, cli_request, worker, orchestrator #2
     assert detail["messages"][0]["role"] == "user"
     assert detail["messages"][1]["role"] == "orchestrator"
-    assert detail["messages"][2]["role"] == "worker"
-    assert detail["messages"][3]["role"] == "orchestrator"
+    assert detail["messages"][2]["role"] == "cli_request"
+    assert detail["messages"][3]["role"] == "worker"
+    assert detail["messages"][4]["role"] == "orchestrator"
     assert detail["session"]["external_session_id"] == "th_123"
 
     # 5. Delete session
@@ -232,6 +233,9 @@ def test_opencode_backend_initial_run(test_project):
         assert res.output == "Execution completed"
         assert res.exit_code == 0
         assert not res.session_recreated
+        assert res.diagnostics is not None
+        assert res.diagnostics["cwd"] == os.path.realpath(test_project["repo_path"])
+        assert res.diagnostics["returned_session_id"] == "ses_abc123"
 
         # Check argv passed to _run_subprocess: should not contain --session
         argv = mock_run.call_args[0][0]
@@ -239,6 +243,31 @@ def test_opencode_backend_initial_run(test_project):
         assert "--format" in argv
         assert "json" in argv
         assert "--auto" in argv
+        assert "--dir" in argv
+        dir_idx = argv.index("--dir")
+        assert argv[dir_idx + 1] == os.path.realpath(test_project["repo_path"])
+
+
+def test_opencode_backend_environment_isolation(test_project):
+    """Test PWD canonicalization and OPENCODE_SERVER_* stripping."""
+    be = backend.OpenCodeCliBackend()
+    canonical_repo = backend.validate_git_repo(test_project["repo_path"])
+
+    with patch.dict(
+        os.environ,
+        {
+            "PWD": "/wrong/parent/dir",
+            "OPENCODE_SERVER_PASSWORD": "secret_password",
+            "OPENCODE_SERVER_USERNAME": "secret_user",
+            "OPENCODE_PERMISSION": '{"file_read": "allow"}',
+        },
+    ):
+        env = be._prepare_opencode_env(canonical_repo)
+        assert env["PWD"] == canonical_repo
+        assert "OPENCODE_SERVER_PASSWORD" not in env
+        assert "OPENCODE_SERVER_USERNAME" not in env
+        assert '"external_directory": "deny"' in env["OPENCODE_PERMISSION"]
+        assert '"file_read": "allow"' in env["OPENCODE_PERMISSION"]
 
 
 def test_opencode_backend_auto_flag_respects_config(test_project):
@@ -664,9 +693,9 @@ def test_coding_turn_max_cli_iterations_cap(test_project):
     detail = detail_res.json()
     messages = detail["messages"]
 
-    # 1 user, one orchestrator/worker pair per CLI call, then a final
+    # 1 user, (orchestrator, cli_request, worker) triplet per CLI call, then a final
     # orchestrator message that reports the limit.
-    assert len(messages) == 2 * service.MAX_CLI_ITERATIONS + 2
+    assert len(messages) == 3 * service.MAX_CLI_ITERATIONS + 2
     final_orch_msg = messages[-1]
     assert final_orch_msg["role"] == "orchestrator"
     assert service.CLI_LIMIT_REACHED_NOTICE in final_orch_msg["content"]
@@ -724,12 +753,13 @@ def test_coding_turn_non_zero_exit_code_passed_to_review(test_project):
     detail_res = client.get(f"/api/v1/coding/sessions/{sid}", headers=headers)
     detail = detail_res.json()
     messages = detail["messages"]
-    assert len(messages) == 4  # user, orch request, worker error, orch final report
+    assert len(messages) == 5  # user, orch request, cli_request, worker error, orch final report
     assert messages[0]["role"] == "user"
     assert messages[1]["role"] == "orchestrator"
-    assert messages[2]["role"] == "worker"
-    assert messages[3]["role"] == "orchestrator"
-    assert "SyntaxError" in messages[2]["content"]
+    assert messages[2]["role"] == "cli_request"
+    assert messages[3]["role"] == "worker"
+    assert messages[4]["role"] == "orchestrator"
+    assert "SyntaxError" in messages[3]["content"]
 
 
 def test_coding_tools_and_user_defaults(test_project):

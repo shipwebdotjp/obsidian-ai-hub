@@ -345,6 +345,7 @@ def update_run(
     status: Optional[str] = None,
     error_message: Optional[str] = None,
     finished_at: Optional[str] = None,
+    diagnostics_json: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Update run fields."""
     conn = get_db_connection()
@@ -366,6 +367,9 @@ def update_run(
     if finished_at is not None:
         updates.append("finished_at = ?")
         params.append(finished_at)
+    if diagnostics_json is not None:
+        updates.append("diagnostics_json = ?")
+        params.append(diagnostics_json)
 
     if updates:
         sql = f"UPDATE coding_runs SET {', '.join(updates)} WHERE run_id = ?"
@@ -377,6 +381,21 @@ def update_run(
     conn.close()
     assert run is not None
     return run
+
+
+def _format_run(run_dict: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not run_dict:
+        return None
+    r = dict(run_dict)
+    diag_str = r.get("diagnostics_json")
+    if diag_str:
+        try:
+            r["diagnostics"] = json.loads(diag_str)
+        except Exception:
+            r["diagnostics"] = None
+    else:
+        r["diagnostics"] = None
+    return r
 
 
 def get_run(run_id: str, conn=None) -> Optional[Dict[str, Any]]:
@@ -393,7 +412,7 @@ def get_run(run_id: str, conn=None) -> Optional[Dict[str, Any]]:
 
     if not row:
         return None
-    return dict(row)
+    return _format_run(dict(row))
 
 
 def get_active_run_for_session(session_id: str) -> Optional[Dict[str, Any]]:
@@ -407,7 +426,7 @@ def get_active_run_for_session(session_id: str) -> Optional[Dict[str, Any]]:
     conn.close()
     if not row:
         return None
-    return dict(row)
+    return _format_run(dict(row))
 
 
 def get_latest_run_for_session(session_id: str) -> Optional[Dict[str, Any]]:
@@ -421,4 +440,4 @@ def get_latest_run_for_session(session_id: str) -> Optional[Dict[str, Any]]:
     conn.close()
     if not row:
         return None
-    return dict(row)
+    return _format_run(dict(row))
