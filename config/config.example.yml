@@ -139,8 +139,8 @@ vault_index:
 
 # Coding workspace: orchestrator LLM and CLI agents (Codex / OpenCode)
 # Environment variables CODING_ORCHESTRATOR_PROVIDER, CODING_ORCHESTRATOR_MODEL,
-# CODING_CODEX_CLI_PATH, CODING_OPENCODE_CLI_PATH override these values if set.
-# Defaults: orchestrator provider=openai, model=gpt-5.6-terra, cli paths=codex/opencode on PATH.
+# CODING_CODEX_CLI_PATH, CODING_OPENCODE_CLI_PATH, CODING_OPENCODE_AUTO_APPROVE override these values if set.
+# Defaults: orchestrator provider=openai, model=gpt-5.6-terra, cli paths=codex/opencode on PATH, opencode_auto_approve=true.
 coding:
   orchestrator:
     provider: openai
@@ -150,6 +150,7 @@ coding:
   cli:
     codex_path: /path/to/your/codex
     opencode_path: /path/to/your/opencode
+    opencode_auto_approve: true  # --auto for non-interactive app (auto-approve unless explicitly denied)
 
 youtube:
   transcript_languages: [ja, en]

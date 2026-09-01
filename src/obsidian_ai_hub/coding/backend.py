@@ -18,6 +18,7 @@ from typing import Optional
 from obsidian_ai_hub.utils.config import (
     CODING_CODEX_CLI_PATH,
     CODING_OPENCODE_CLI_PATH,
+    CODING_OPENCODE_AUTO_APPROVE,
 )
 
 logger = logging.getLogger(__name__)
@@ -555,6 +556,8 @@ class OpenCodeCliBackend(_BaseSubprocessBackend):
 
         def _run_cmd(sess_id_opt: Optional[str]):
             argv = [exe_path, "run", "--format", "json"]
+            if CODING_OPENCODE_AUTO_APPROVE:
+                argv.append("--auto")
             if sess_id_opt:
                 argv.extend(["--session", sess_id_opt])
             argv.append(prompt)

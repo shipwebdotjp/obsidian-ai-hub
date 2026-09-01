@@ -238,6 +238,37 @@ def test_opencode_backend_initial_run(test_project):
         assert "--session" not in argv
         assert "--format" in argv
         assert "json" in argv
+        assert "--auto" in argv
+
+
+def test_opencode_backend_auto_flag_respects_config(test_project):
+    """Test --auto is omitted when CODING_OPENCODE_AUTO_APPROVE is False."""
+    be = backend.OpenCodeCliBackend()
+    json_output = '{"sessionID": "ses_abc123", "part": {"type": "text", "text": "ok"}}'
+    with patch("obsidian_ai_hub.coding.backend.CODING_OPENCODE_AUTO_APPROVE", False):
+        with patch.object(be, "_run_subprocess", return_value=(0, json_output, "", False)) as mock_run:
+            be.execute(test_project["repo_path"], "hello")
+            argv = mock_run.call_args[0][0]
+            assert "--auto" not in argv
+    with patch("obsidian_ai_hub.coding.backend.CODING_OPENCODE_AUTO_APPROVE", True):
+        with patch.object(be, "_run_subprocess", return_value=(0, json_output, "", False)) as mock_run:
+            be.execute(test_project["repo_path"], "hello")
+            argv = mock_run.call_args[0][0]
+            assert "--auto" in argv
+
+
+def test_opencode_backend_does_not_affect_codex_backend(test_project):
+    """Ensure Codex backend is unaffected by OpenCode auto-approve flag."""
+    be = backend.CodexCliBackend()
+    json_lines = [
+        '{"type": "thread.started", "thread_id": "th_abc123"}',
+        '{"type": "item.completed", "item": {"type": "agent_message", "text": "hi"}}',
+    ]
+    stdout_data = "\n".join(json_lines)
+    with patch.object(be, "_run_subprocess", return_value=(0, stdout_data, "", False)) as mock_run:
+        be.execute(test_project["repo_path"], "hello codex")
+        argv = mock_run.call_args[0][0]
+        assert "--auto" not in argv
 
 
 def test_opencode_backend_continuation_run(test_project):
@@ -587,7 +618,7 @@ def test_codex_stream_session_recreated_notification(test_project):
 
 
 def test_coding_turn_max_cli_iterations_cap(test_project):
-    """Test that CLI execution is capped at MAX_CLI_ITERATIONS (3 times) per turn."""
+    """Test that CLI execution is capped at the configured per-turn limit."""
     app = create_app(token="test-token")
     client = TestClient(app)
     headers = {"Authorization": "Bearer test-token"}
@@ -626,19 +657,19 @@ def test_coding_turn_max_cli_iterations_cap(test_project):
             json={"content": "無限ループを検証してください"},
         )
         assert res.status_code == 200
-        # CLI backend should be executed exactly 3 times
-        assert mock_exec.call_count == 3
+        assert mock_exec.call_count == service.MAX_CLI_ITERATIONS
 
     # Check session detail messages
     detail_res = client.get(f"/api/v1/coding/sessions/{sid}", headers=headers)
     detail = detail_res.json()
     messages = detail["messages"]
 
-    # Total 8 messages: 1 user, 3x (orch + worker) = 6, 1 final orch with ceiling notice
-    assert len(messages) == 8
+    # 1 user, one orchestrator/worker pair per CLI call, then a final
+    # orchestrator message that reports the limit.
+    assert len(messages) == 2 * service.MAX_CLI_ITERATIONS + 2
     final_orch_msg = messages[-1]
     assert final_orch_msg["role"] == "orchestrator"
-    assert "自動実行上限（3回）に達したため実行していません" in final_orch_msg["content"]
+    assert service.CLI_LIMIT_REACHED_NOTICE in final_orch_msg["content"]
 
 
 def test_coding_turn_non_zero_exit_code_passed_to_review(test_project):

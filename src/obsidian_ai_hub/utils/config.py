@@ -60,6 +60,7 @@ _APP_ENV_VARS = [
     "CODING_ORCHESTRATOR_MODEL",
     "CODING_CODEX_CLI_PATH",
     "CODING_OPENCODE_CLI_PATH",
+    "CODING_OPENCODE_AUTO_APPROVE",
 ]
 
 if IS_TEST_ENV:
@@ -599,6 +600,18 @@ CODING_CODEX_CLI_PATH = str(
 CODING_OPENCODE_CLI_PATH = str(
     _env_or_config("CODING_OPENCODE_CLI_PATH", "coding", "cli", "opencode_path", default="opencode")
 )
+_CODING_OPENCODE_AUTO_APPROVE_RAW = _env_or_config(
+    "CODING_OPENCODE_AUTO_APPROVE", "coding", "cli", "opencode_auto_approve", default=True
+)
+if isinstance(_CODING_OPENCODE_AUTO_APPROVE_RAW, str):
+    CODING_OPENCODE_AUTO_APPROVE = _CODING_OPENCODE_AUTO_APPROVE_RAW.lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+else:
+    CODING_OPENCODE_AUTO_APPROVE = bool(_CODING_OPENCODE_AUTO_APPROVE_RAW)
 
 if IS_TEST_ENV:
     AI_LOG_PATH = TEST_WORKSPACE / "vault" / "ai-log"
