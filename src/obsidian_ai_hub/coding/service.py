@@ -16,9 +16,9 @@ from obsidian_ai_hub.coding.orchestrator import CodingOrchestrator, parse_cli_re
 logger = logging.getLogger(__name__)
 JST = ZoneInfo("Asia/Tokyo")
 
-MAX_CLI_ITERATIONS = 3
+MAX_CLI_ITERATIONS = 50
 CLI_LIMIT_REACHED_NOTICE = (
-    "追加のCLI実行が必要と判断されましたが、このメッセージ内での自動実行上限（3回）に達したため実行していません。"
+    "追加のCLI実行が必要と判断されましたが、このメッセージ内での自動実行上限（50回）に達したため実行していません。"
     "続行する場合は、作業を継続するよう指示してください。"
 )
 

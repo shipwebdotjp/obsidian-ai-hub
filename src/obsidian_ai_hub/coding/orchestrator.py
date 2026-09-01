@@ -103,7 +103,7 @@ class CodingOrchestrator:
         backend_name: str,
     ) -> str:
         """Generate complete orchestrator response string asynchronously."""
-        llm = create_langchain_llm(provider=self.provider, model=self.model, temperature=0.7)
+        llm = create_langchain_llm(provider=self.provider, model=self.model, temperature=0.7, max_tokens=8192,use_responses_api=True)
         messages = self._build_messages(history, repo_path, backend_name)
 
         # Resolve permitted tools
@@ -192,7 +192,7 @@ class CodingOrchestrator:
         if new_user_message:
             full_history.append({"role": "user", "content": new_user_message})
 
-        llm = create_langchain_llm(provider=self.provider, model=self.model, temperature=0.7)
+        llm = create_langchain_llm(provider=self.provider, model=self.model, temperature=0.7, max_tokens=8192, use_responses_api=True)
         messages = self._build_messages(full_history, repo_path, backend_name)
 
         try:
