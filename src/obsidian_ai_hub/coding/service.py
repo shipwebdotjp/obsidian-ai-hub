@@ -22,6 +22,20 @@ CLI_LIMIT_REACHED_NOTICE = (
     "続行する場合は、作業を継続するよう指示してください。"
 )
 
+DEFAULT_CODING_SESSION_TITLE = "新しいコーディングセッション"
+
+
+def _should_update_coding_title(current_title: Optional[str]) -> bool:
+    """Return True only if title is auto-generated / unset and safe to overwrite.
+
+    Overwrite only when title equals the default placeholder or is empty.
+    This prevents destroying user-supplied titles.
+    """
+    if not current_title:
+        return True
+    stripped = current_title.strip()
+    return stripped == "" or stripped == DEFAULT_CODING_SESSION_TITLE
+
 # Lock per normalized repo_path to prevent concurrent execution on the same Git repo
 _REPO_LOCKS: Dict[str, threading.Lock] = {}
 _REPO_LOCKS_GUARD = threading.Lock()
@@ -289,6 +303,27 @@ async def run_coding_turn_stream(
                 yield f"data: {json.dumps({'event': 'error', 'message': f'CLIワーカー実行エラー: {str(exc)}'}, ensure_ascii=False)}\n\n"
                 return
 
+        # Attempt OpenCode external session title sync (safe post-turn hook)
+        session_title_updated: Optional[str] = None
+        if backend_name == "opencode":
+            try:
+                cur_sess = store.get_session(session_id)
+                if cur_sess and cur_sess.get("external_session_id"):
+                    ext_id = cur_sess.get("external_session_id")
+                    cur_title = cur_sess.get("title")
+                    if _should_update_coding_title(cur_title):
+                        fetched_title = backend.OpenCodeCliBackend.fetch_opencode_session_title(ext_id)
+                        if fetched_title and fetched_title != cur_title:
+                            store.update_session_title(session_id, fetched_title)
+                            session_title_updated = fetched_title
+                            logger.info(
+                                "Updated coding session %s title from OpenCode export: %s",
+                                session_id,
+                                fetched_title,
+                            )
+            except Exception as exc:
+                logger.warning("Failed to sync OpenCode title for session %s: %s", session_id, exc)
+
         # Update final run status
         now_iso = datetime.now(JST).isoformat()
         store.update_run(
@@ -304,6 +339,8 @@ async def run_coding_turn_stream(
             'status': final_status,
             'git_status': git_status,
         }
+        if session_title_updated:
+            done_data['session_title'] = session_title_updated
         yield f"data: {json.dumps(done_data, ensure_ascii=False)}\n\n"
 
     finally:

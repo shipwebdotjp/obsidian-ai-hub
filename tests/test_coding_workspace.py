@@ -865,6 +865,214 @@ def test_coding_tools_api_endpoints(test_project):
     assert reset_detail["has_custom_tools"] is False
 
 
+def test_opencode_extract_title_from_export_json():
+    be = backend.OpenCodeCliBackend()
+    # Valid title
+    assert be._extract_title_from_export_json('{"info": {"title": "git push結果報告"}}') == "git push結果報告"
+    # Whitespace trimmed
+    assert be._extract_title_from_export_json('{"info": {"title": "  hello  "}}') == "hello"
+    # Empty after strip
+    assert be._extract_title_from_export_json('{"info": {"title": "   "}}') is None
+    # Missing title
+    assert be._extract_title_from_export_json('{"info": {}}') is None
+    # Missing info
+    assert be._extract_title_from_export_json('{"other": 123}') is None
+    # Invalid JSON
+    assert be._extract_title_from_export_json('not json') is None
+    # Non-dict root
+    assert be._extract_title_from_export_json('[]') is None
+    # Title not string
+    assert be._extract_title_from_export_json('{"info": {"title": 123}}') is None
+
+
+def test_opencode_fetch_title_success_and_failures():
+    be = backend.OpenCodeCliBackend()
+    valid_json = '{"info": {"title": "Fetched Title"}}'
+    # Success
+    with patch("obsidian_ai_hub.coding.backend.subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0, stdout=valid_json, stderr="")
+        assert be.fetch_opencode_session_title("ses_abc123") == "Fetched Title"
+        mock_run.assert_called_once()
+        assert mock_run.call_args[0][0][0] in ("opencode", backend.CODING_OPENCODE_CLI_PATH)
+        assert "export" in mock_run.call_args[0][0]
+        assert "ses_abc123" in mock_run.call_args[0][0]
+    # Non-zero exit -> None
+    with patch("obsidian_ai_hub.coding.backend.subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="not found")
+        assert be.fetch_opencode_session_title("ses_bad") is None
+    # Empty stdout -> None
+    with patch("obsidian_ai_hub.coding.backend.subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0, stdout="   ", stderr="")
+        assert be.fetch_opencode_session_title("ses_abc") is None
+    # Invalid JSON -> None
+    with patch("obsidian_ai_hub.coding.backend.subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0, stdout="not json", stderr="")
+        assert be.fetch_opencode_session_title("ses_abc") is None
+    # Empty title -> None
+    with patch("obsidian_ai_hub.coding.backend.subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0, stdout='{"info": {"title": "  "}}', stderr="")
+        assert be.fetch_opencode_session_title("ses_abc") is None
+    # Timeout -> None
+    import subprocess as sp
+
+    with patch("obsidian_ai_hub.coding.backend.subprocess.run", side_effect=sp.TimeoutExpired(cmd="opencode export", timeout=5)):
+        assert be.fetch_opencode_session_title("ses_abc") is None
+    # None / empty input
+    assert be.fetch_opencode_session_title("") is None
+    assert be.fetch_opencode_session_title(None) is None  # type: ignore[arg-type]
+
+
+def test_opencode_title_sync_updates_default_title(test_project):
+    """Title sync should update default title via export and emit session_title in done event."""
+    app = create_app(token="test-token")
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer test-token"}
+
+    # Create session with default title
+    res = client.post(
+        "/api/v1/coding/sessions",
+        headers=headers,
+        json={"project_id": test_project["project_id"], "backend": "opencode", "title": "新しいコーディングセッション"},
+    )
+    assert res.status_code == 200
+    sid = res.json()["session_id"]
+    assert res.json()["title"] == "新しいコーディングセッション"
+
+    async def mock_generate_response(*args, **kwargs):
+        history = kwargs.get("history", [])
+        if any(h.get("role") == "worker" for h in history):
+            return "完了しました。"
+        return "解析結果です。\n<cli_request>\nopencode run test\n</cli_request>"
+
+    mock_cli_res = backend.CodingBackendResult(
+        external_session_id="ses_fetch123",
+        output="worker output",
+        exit_code=0,
+    )
+
+    with patch(
+        "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response",
+        side_effect=mock_generate_response,
+    ), patch(
+        "obsidian_ai_hub.coding.backend.OpenCodeCliBackend.execute",
+        return_value=mock_cli_res,
+    ), patch(
+        "obsidian_ai_hub.coding.backend.OpenCodeCliBackend.fetch_opencode_session_title",
+        return_value="git push結果報告",
+    ) as mock_fetch:
+        res = client.post(
+            f"/api/v1/coding/sessions/{sid}/messages/stream",
+            headers=headers,
+            json={"content": "タイトル取得テスト"},
+        )
+        assert res.status_code == 200
+        text = res.text
+        assert '"session_title": "git push結果報告"' in text
+        mock_fetch.assert_called_once_with("ses_fetch123")
+
+    detail = client.get(f"/api/v1/coding/sessions/{sid}", headers=headers).json()
+    assert detail["session"]["title"] == "git push結果報告"
+    assert detail["session"]["external_session_id"] == "ses_fetch123"
+
+
+def test_opencode_title_sync_does_not_overwrite_custom_title(test_project):
+    """Custom user title must not be overwritten by export title."""
+    app = create_app(token="test-token")
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer test-token"}
+
+    res = client.post(
+        "/api/v1/coding/sessions",
+        headers=headers,
+        json={"project_id": test_project["project_id"], "backend": "opencode", "title": "My Custom Title"},
+    )
+    sid = res.json()["session_id"]
+    assert res.json()["title"] == "My Custom Title"
+
+    async def mock_generate_response(*args, **kwargs):
+        history = kwargs.get("history", [])
+        if any(h.get("role") == "worker" for h in history):
+            return "完了しました。"
+        return "解析\n<cli_request>\nopencode test\n</cli_request>"
+
+    mock_cli_res = backend.CodingBackendResult(
+        external_session_id="ses_custom999",
+        output="out",
+        exit_code=0,
+    )
+
+    with patch(
+        "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response",
+        side_effect=mock_generate_response,
+    ), patch(
+        "obsidian_ai_hub.coding.backend.OpenCodeCliBackend.execute",
+        return_value=mock_cli_res,
+    ), patch(
+        "obsidian_ai_hub.coding.backend.OpenCodeCliBackend.fetch_opencode_session_title",
+        return_value="Exported Title Should Not Win",
+    ) as mock_fetch:
+        res = client.post(
+            f"/api/v1/coding/sessions/{sid}/messages/stream",
+            headers=headers,
+            json={"content": "カスタムタイトル保持テスト"},
+        )
+        assert res.status_code == 200
+        # done event should NOT contain session_title when not updated
+        assert '"session_title"' not in res.text
+        mock_fetch.assert_not_called()
+
+    detail = client.get(f"/api/v1/coding/sessions/{sid}", headers=headers).json()
+    assert detail["session"]["title"] == "My Custom Title"
+
+
+def test_opencode_title_sync_skips_on_fetch_failure(test_project):
+    """Fetch failure / empty title must not break turn and must not update title."""
+    app = create_app(token="test-token")
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer test-token"}
+
+    res = client.post(
+        "/api/v1/coding/sessions",
+        headers=headers,
+        json={"project_id": test_project["project_id"], "backend": "opencode", "title": "新しいコーディングセッション"},
+    )
+    sid = res.json()["session_id"]
+
+    async def mock_generate_response(*args, **kwargs):
+        history = kwargs.get("history", [])
+        if any(h.get("role") == "worker" for h in history):
+            return "完了しました。"
+        return "x\n<cli_request>\nopencode test\n</cli_request>"
+
+    mock_cli_res = backend.CodingBackendResult(
+        external_session_id="ses_fail123",
+        output="out",
+        exit_code=0,
+    )
+
+    with patch(
+        "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response",
+        side_effect=mock_generate_response,
+    ), patch(
+        "obsidian_ai_hub.coding.backend.OpenCodeCliBackend.execute",
+        return_value=mock_cli_res,
+    ), patch(
+        "obsidian_ai_hub.coding.backend.OpenCodeCliBackend.fetch_opencode_session_title",
+        return_value=None,
+    ):
+        res = client.post(
+            f"/api/v1/coding/sessions/{sid}/messages/stream",
+            headers=headers,
+            json={"content": "失敗時スキップテスト"},
+        )
+        assert res.status_code == 200
+        assert '"session_title"' not in res.text
+
+    detail = client.get(f"/api/v1/coding/sessions/{sid}", headers=headers).json()
+    # Title remains default because fetch returned None
+    assert detail["session"]["title"] == "新しいコーディングセッション"
+
+
 @pytest.mark.anyio
 async def test_orchestrator_tool_restriction(test_project):
     """Test that Orchestrator binds only permitted tools and respects tool restrictions."""

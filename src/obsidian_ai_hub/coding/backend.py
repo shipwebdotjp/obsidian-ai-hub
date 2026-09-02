@@ -471,6 +471,9 @@ class CodexCliBackend(_BaseSubprocessBackend):
         )
 
 
+DEFAULT_CODING_SESSION_TITLE = "新しいコーディングセッション"
+
+
 class OpenCodeCliBackend(_BaseSubprocessBackend):
     """OpenCode CLI backend adapter."""
 
@@ -479,6 +482,68 @@ class OpenCodeCliBackend(_BaseSubprocessBackend):
         """Strip ANSI escape sequences from text."""
         ansi_regex = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
         return ansi_regex.sub("", text)
+
+    @staticmethod
+    def _extract_title_from_export_json(json_str: str) -> Optional[str]:
+        """Safely extract info.title from `opencode export` JSON output.
+
+        Returns stripped title if present and non-empty, otherwise None.
+        Never raises.
+        """
+        import json
+
+        try:
+            data = json.loads(json_str)
+        except (json.JSONDecodeError, TypeError):
+            return None
+        if not isinstance(data, dict):
+            return None
+        info = data.get("info")
+        if not isinstance(info, dict):
+            return None
+        title = info.get("title")
+        if not isinstance(title, str):
+            return None
+        stripped = title.strip()
+        return stripped if stripped else None
+
+    @staticmethod
+    def fetch_opencode_session_title(session_id: str) -> Optional[str]:
+        """Fetch OpenCode external session title via `opencode export`.
+
+        Uses `opencode export <session_id>` and extracts info.title.
+        Returns None on any failure, empty title, JSON error, or missing field.
+        Never raises.
+        """
+        if not session_id or not isinstance(session_id, str):
+            return None
+        exe_path = CODING_OPENCODE_CLI_PATH or "opencode"
+        try:
+            proc = subprocess.run(
+                [exe_path, "export", session_id],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if proc.returncode != 0:
+                logger.debug(
+                    "opencode export failed for session %s (exit %s): %s",
+                    session_id,
+                    proc.returncode,
+                    proc.stderr.strip()[:500] if proc.stderr else "",
+                )
+                return None
+            # stdout contains JSON, stderr contains "Exporting session: ..." header
+            stdout = proc.stdout.strip()
+            if not stdout:
+                return None
+            return OpenCodeCliBackend._extract_title_from_export_json(stdout)
+        except subprocess.TimeoutExpired:
+            logger.warning("opencode export timed out for session %s", session_id)
+            return None
+        except Exception as exc:
+            logger.debug("Failed to fetch opencode session title for %s: %s", session_id, exc)
+            return None
 
     @classmethod
     def _prepare_opencode_env(cls, repo_path: str) -> dict[str, str]:
