@@ -48,6 +48,9 @@ export default function CodingPage() {
 
   // Mobile drawer state
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
+  const drawerCloseBtnRef = useRef<HTMLButtonElement>(null);
+  const drawerTriggerBtnRef = useRef<HTMLButtonElement>(null);
+  const mobileDrawerRef = useRef<HTMLDivElement>(null);
 
   // New session modal state
   const [isNewSessionModalOpen, setIsNewSessionModalOpen] = useState(false);
@@ -117,16 +120,43 @@ export default function CodingPage() {
     }
   }, [messages, activePhaseText, workerState]);
 
-  // Close mobile drawer on ESC key
+  // Mobile drawer focus management & trap
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        setMobileDrawerOpen(false);
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
+    if (mobileDrawerOpen) {
+      drawerCloseBtnRef.current?.focus();
+
+      const drawer = mobileDrawerRef.current;
+      if (!drawer) return;
+
+      const focusableSelector =
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+      const onKeyDown = (e: KeyboardEvent) => {
+        if (e.key === "Escape") {
+          setMobileDrawerOpen(false);
+          return;
+        }
+        if (e.key !== "Tab") return;
+        const focusable = Array.from(
+          drawer.querySelectorAll<HTMLElement>(focusableSelector)
+        ).filter((el) => !el.hasAttribute("disabled") && el.offsetParent !== null);
+        if (focusable.length === 0) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      };
+      window.addEventListener("keydown", onKeyDown);
+      return () => {
+        window.removeEventListener("keydown", onKeyDown);
+        drawerTriggerBtnRef.current?.focus();
+      };
+    }
+  }, [mobileDrawerOpen]);
 
   // Load projects on mount
   useEffect(() => {
@@ -472,6 +502,7 @@ export default function CodingPage() {
       {/* Mobile Drawer Overlay */}
       {mobileDrawerOpen && (
         <div
+          ref={mobileDrawerRef}
           className="fixed inset-0 z-50 flex lg:hidden"
           role="dialog"
           aria-modal="true"
@@ -483,6 +514,7 @@ export default function CodingPage() {
                 プロジェクト & セッション
               </h2>
               <button
+                ref={drawerCloseBtnRef}
                 type="button"
                 onClick={() => setMobileDrawerOpen(false)}
                 className="rounded p-1 text-slate-500 hover:bg-slate-200 cursor-pointer"
@@ -511,7 +543,7 @@ export default function CodingPage() {
                           onClick={() => {
                             setSelectedProjectId(item.project.project_id);
                           }}
-                          className={`w-full rounded px-2.5 py-1.5 text-left text-xs transition-colors ${
+                          className={`w-full rounded px-2.5 py-1.5 text-left text-xs transition-colors cursor-pointer ${
                             isSelected
                               ? "bg-slate-900 font-medium text-white"
                               : "text-slate-700 hover:bg-slate-100"
@@ -568,20 +600,23 @@ export default function CodingPage() {
                     {sessions.map((sess) => {
                       const isSelected = sess.session_id === selectedSessionId;
                       return (
-                        <div
+                        <button
                           key={sess.session_id}
+                          type="button"
+                          data-testid="memory-row"
+                          data-selected={isSelected}
                           onClick={() => {
                             setSelectedSessionId(sess.session_id);
                             setMobileDrawerOpen(false);
                           }}
-                          className={`flex cursor-pointer items-center justify-between rounded px-2.5 py-2 text-xs transition-colors ${
+                          className={`w-full flex cursor-pointer items-center justify-between rounded px-2.5 py-2 text-left text-xs transition-colors ${
                             isSelected
                               ? "bg-slate-200 border-l-4 border-slate-800 font-medium text-slate-900"
                               : "text-slate-700 hover:bg-slate-50"
                           }`}
                         >
                           <div className="min-w-0 flex-1 truncate">{sess.title}</div>
-                        </div>
+                        </button>
                       );
                     })}
                   </div>
@@ -593,7 +628,7 @@ export default function CodingPage() {
             type="button"
             aria-label="オーバーレイを閉じる"
             onClick={() => setMobileDrawerOpen(false)}
-            className="flex-1 bg-slate-900/40"
+            className="flex-1 bg-slate-900/40 cursor-pointer"
           />
         </div>
       )}
@@ -769,9 +804,10 @@ export default function CodingPage() {
               <div className="min-w-0 flex-1 mr-2">
                 <div className="flex items-center gap-2 flex-wrap">
                   <button
+                    ref={drawerTriggerBtnRef}
                     type="button"
                     onClick={() => setMobileDrawerOpen(true)}
-                    className="rounded border border-slate-300 bg-white px-2 py-0.5 text-xs font-medium text-slate-700 hover:bg-slate-50 cursor-pointer lg:hidden shrink-0"
+                    className="rounded border border-slate-300 bg-white px-3 py-1 text-sm font-medium text-slate-700 hover:bg-slate-50 cursor-pointer lg:hidden shrink-0"
                     aria-label="プロジェクト / セッションを選択"
                   >
                     プロジェクト / セッション
