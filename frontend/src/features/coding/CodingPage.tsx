@@ -601,7 +601,7 @@ export default function CodingPage() {
       </div>
 
       {/* Pane 3: Conversation */}
-      <div className="flex flex-1 flex-col overflow-hidden bg-slate-50">
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-slate-50">
         {error && (
           <div className="bg-red-50 p-3 text-xs text-red-700 border-b border-red-200 flex items-center justify-between">
             <span>{error}</span>
@@ -696,7 +696,7 @@ export default function CodingPage() {
             )}
 
             {/* Message Area */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            <div className="flex-1 overflow-y-auto p-4 space-y-4 min-w-0">
               {loadingMessages ? (
                 <div className="text-center text-xs text-slate-500 py-8">
                   会話履歴読み込み中...
@@ -707,19 +707,21 @@ export default function CodingPage() {
                 </div>
               ) : (
                 messages.map((msg) => (
-                  <div key={msg.message_id} className="space-y-1">
+                  <div key={msg.message_id} className="space-y-1 min-w-0">
                     {msg.role === "user" && (
-                      <div className="flex justify-end">
-                        <div className="max-w-2xl rounded-2xl bg-slate-900 px-4 py-2.5 text-xs text-white">
-                          <p className="whitespace-pre-wrap">{msg.content}</p>
+                      <div className="flex min-w-0 justify-end">
+                        <div className="max-w-2xl min-w-0 overflow-hidden rounded-2xl bg-slate-900 px-4 py-2.5 text-xs text-white [overflow-wrap:anywhere]">
+                          <p className="whitespace-pre-wrap wrap-anywhere break-words [overflow-wrap:anywhere] [word-break:break-word]">
+                            {msg.content}
+                          </p>
                         </div>
                       </div>
                     )}
 
                     {msg.role === "orchestrator" && (
                       <>
-                        <div className="flex justify-start">
-                          <div className="max-w-2xl rounded-2xl bg-white border border-slate-200 p-4 text-xs text-slate-800 shadow-sm">
+                        <div className="flex min-w-0 justify-start">
+                          <div className="max-w-2xl min-w-0 overflow-hidden rounded-2xl bg-white border border-slate-200 p-4 text-xs text-slate-800 shadow-sm [overflow-wrap:anywhere]">
                             <div className="mb-1 text-[10px] font-semibold text-slate-400 uppercase">
                               AI Orchestrator
                             </div>
@@ -776,9 +778,9 @@ export default function CodingPage() {
 
                     {msg.role === "cli_request" && (
                       <>
-                        <div className="flex justify-start">
+                        <div className="flex min-w-0 justify-start">
                           <div
-                            className="w-full max-w-2xl rounded-2xl bg-blue-50 border border-blue-200 p-4 text-xs text-blue-950 shadow-sm"
+                            className="w-full max-w-2xl min-w-0 overflow-hidden rounded-2xl bg-blue-50 border border-blue-200 p-4 text-xs text-blue-950 shadow-sm [overflow-wrap:anywhere]"
                             data-testid="cli-request-card"
                           >
                             <div className="mb-1.5 text-[10px] font-bold text-blue-800 uppercase flex items-center gap-1.5">
@@ -787,7 +789,7 @@ export default function CodingPage() {
                                 常時表示
                               </span>
                             </div>
-                            <pre className="whitespace-pre-wrap font-mono text-xs leading-relaxed overflow-x-auto text-blue-900 bg-blue-100/50 p-3 rounded-lg border border-blue-200/60">
+                            <pre className="whitespace-pre-wrap font-mono text-xs leading-relaxed overflow-x-auto text-blue-900 bg-blue-100/50 p-3 rounded-lg border border-blue-200/60 min-w-0 max-w-full [overflow-wrap:anywhere] wrap-anywhere break-words">
                               {msg.content}
                             </pre>
                           </div>
@@ -842,14 +844,14 @@ export default function CodingPage() {
 
                     {msg.role === "worker" && (
                       <>
-                        <div className="flex justify-start">
-                          <div className="w-full max-w-2xl">
-                            <details className="rounded-xl border border-slate-200 bg-slate-900 text-slate-100 text-xs shadow-sm overflow-hidden group">
+                        <div className="flex min-w-0 justify-start">
+                          <div className="w-full max-w-2xl min-w-0">
+                            <details className="rounded-xl border border-slate-200 bg-slate-900 text-slate-100 text-xs shadow-sm overflow-hidden group min-w-0">
                               <summary className="flex cursor-pointer items-center justify-between px-4 py-2.5 bg-slate-800 font-mono text-[11px] hover:bg-slate-700">
                                 <span>CLI Worker 最終返答 ({selectedSession.backend})</span>
                                 <span className="text-slate-400 text-[10px]">クリックで展開/折りたたみ</span>
                               </summary>
-                              <div className="p-4 overflow-x-auto max-h-96 border-b border-slate-800">
+                              <div className="p-4 overflow-x-auto max-h-96 border-b border-slate-800 min-w-0 [overflow-wrap:anywhere]">
                                 <MarkdownPreview content={msg.content} variant="dark" />
                               </div>
 
