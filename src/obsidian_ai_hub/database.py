@@ -498,6 +498,9 @@ def get_db_connection() -> sqlite3.Connection:
     if current_version <= 27:
         run_migration_v28(conn)
 
+    if current_version <= 28:
+        run_migration_v29(conn)
+
     return conn
 
 
@@ -883,6 +886,19 @@ def run_migration_v28(conn: sqlite3.Connection) -> None:
     """)
 
     conn.execute("PRAGMA user_version = 28;")
+    conn.commit()
+
+
+def run_migration_v29(conn: sqlite3.Connection) -> None:
+    """Run migration for version 29 (coding_runs.diagnostics_json TEXT column)."""
+    try:
+        conn.execute(
+            "ALTER TABLE coding_runs ADD COLUMN diagnostics_json TEXT;"
+        )
+    except sqlite3.OperationalError as e:
+        _ignore_duplicate_schema_object(e)
+
+    conn.execute("PRAGMA user_version = 29;")
     conn.commit()
 
 

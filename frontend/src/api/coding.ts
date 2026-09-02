@@ -39,11 +39,24 @@ export interface CodingSession {
   updated_at: string;
 }
 
+export interface CodingDiagnostics {
+  cwd: string;
+  requested_session_id: string | null;
+  returned_session_id: string | null;
+  tool_call_count: number;
+  tool_failure_count: number;
+  structured_error: string | null;
+  auto_rejected_permission: boolean;
+  exit_code: number;
+  model: string;
+  variant: string;
+}
+
 export interface CodingMessage {
   message_id: string;
   session_id: string;
   sequence: number;
-  role: "user" | "orchestrator" | "worker";
+  role: "user" | "orchestrator" | "cli_request" | "worker";
   content: string;
   created_at: string;
 }
@@ -59,6 +72,8 @@ export interface CodingRun {
   error_message: string | null;
   started_at: string;
   finished_at: string | null;
+  diagnostics_json?: string | null;
+  diagnostics?: CodingDiagnostics | null;
 }
 
 export interface CodingSessionDetail {
@@ -75,6 +90,7 @@ export type CodingSseEvent =
   | { event: "start"; run_id: string; is_dirty: boolean; dirty_summary: string | null }
   | { event: "orchestrator_start"; phase: "initial" | "review" }
   | { event: "orchestrator_message"; phase: "initial" | "review"; message: CodingMessage }
+  | { event: "cli_request"; message: CodingMessage }
   | { event: "worker_start"; attempt: number; backend: string; prompt: string }
   | {
       event: "worker_done";
@@ -84,6 +100,7 @@ export type CodingSseEvent =
       error: string | null;
       session_recreated?: boolean;
       git_status?: GitStatus;
+      diagnostics?: CodingDiagnostics | null;
     }
   | { event: "done"; run_id: string; status: string; git_status?: GitStatus; session_title?: string }
   | { event: "cancelled"; message: string }

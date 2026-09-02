@@ -195,3 +195,7 @@
 ## コーディング・オーケストレーターの自律フォローアップと上限設定方針
 
 [移転先: 10-Decisions-Architecture.md](10-Decisions-Architecture.md)
+
+## OpenCode CLI 実行環境固定、権限制限、指示永続化、および診断記録方針
+
+[移転先: 10-Decisions-Architecture.md](10-Decisions-Architecture.md)

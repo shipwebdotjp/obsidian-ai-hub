@@ -192,6 +192,10 @@ async def run_coding_turn_stream(
             if not cli_prompt:
                 break
 
+            # Save cli_request message for history & UI dedicated card
+            cli_req_msg = store.add_message(session_id, role="cli_request", content=cli_prompt)
+            yield f"data: {json.dumps({'event': 'cli_request', 'message': cli_req_msg}, ensure_ascii=False)}\n\n"
+
             cli_count += 1
             yield f"data: {json.dumps({'event': 'worker_start', 'attempt': cli_count, 'backend': backend_name, 'prompt': cli_prompt}, ensure_ascii=False)}\n\n"
 
@@ -246,10 +250,17 @@ async def run_coding_turn_stream(
                 )
                 worker_msg_id = worker_msg["message_id"]
 
+                diag_json_str = (
+                    json.dumps(cli_result.diagnostics, ensure_ascii=False)
+                    if cli_result.diagnostics
+                    else None
+                )
+
                 store.update_run(
                     run_id,
                     worker_message_id=worker_msg_id,
                     error_message=cli_result.error_message,
+                    diagnostics_json=diag_json_str,
                 )
 
                 # Compute up-to-date git status after CLI execution
@@ -263,6 +274,7 @@ async def run_coding_turn_stream(
                     'error': cli_result.error_message,
                     'session_recreated': cli_result.session_recreated,
                     'git_status': git_status,
+                    'diagnostics': cli_result.diagnostics,
                 }
                 yield f"data: {json.dumps(worker_done_data, ensure_ascii=False)}\n\n"
 

@@ -357,6 +357,11 @@ export default function CodingPage() {
             if (prev.some((m) => m.message_id === event.message.message_id)) return prev;
             return [...prev, event.message];
           });
+        } else if (event.event === "cli_request") {
+          setMessages((prev) => {
+            if (prev.some((m) => m.message_id === event.message.message_id)) return prev;
+            return [...prev, event.message];
+          });
         } else if (event.event === "worker_start") {
           setActivePhaseText(null);
           setWorkerState({
@@ -769,6 +774,72 @@ export default function CodingPage() {
                       </>
                     )}
 
+                    {msg.role === "cli_request" && (
+                      <>
+                        <div className="flex justify-start">
+                          <div
+                            className="w-full max-w-2xl rounded-2xl bg-blue-50 border border-blue-200 p-4 text-xs text-blue-950 shadow-sm"
+                            data-testid="cli-request-card"
+                          >
+                            <div className="mb-1.5 text-[10px] font-bold text-blue-800 uppercase flex items-center gap-1.5">
+                              <span>🤖 CLI Workerへの指示</span>
+                              <span className="rounded bg-blue-100 px-1.5 py-0.2 font-mono text-[9px] text-blue-700">
+                                常時表示
+                              </span>
+                            </div>
+                            <pre className="whitespace-pre-wrap font-mono text-xs leading-relaxed overflow-x-auto text-blue-900 bg-blue-100/50 p-3 rounded-lg border border-blue-200/60">
+                              {msg.content}
+                            </pre>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 text-[10px] text-slate-400 justify-start">
+                          <button
+                            type="button"
+                            onClick={() => handleCopyMessage(msg.content, msg.message_id)}
+                            className="inline-flex items-center gap-1 cursor-pointer rounded px-1.5 py-0.5 hover:bg-slate-100 hover:text-slate-600 transition"
+                            aria-label="指示内容をコピー"
+                            data-testid={`copy-message-${msg.message_id}`}
+                          >
+                            {copiedMessageId === msg.message_id ? (
+                              <>
+                                <svg
+                                  className="h-3.5 w-3.5 text-emerald-600"
+                                  fill="none"
+                                  viewBox="0 0 24 24"
+                                  stroke="currentColor"
+                                  aria-hidden="true"
+                                >
+                                  <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    strokeWidth={2}
+                                    d="M5 13l4 4L19 7"
+                                  />
+                                </svg>
+                                <span className="text-emerald-700">コピーしました</span>
+                              </>
+                            ) : (
+                              <svg
+                                className="h-3.5 w-3.5"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                                aria-hidden="true"
+                              >
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  strokeWidth={2}
+                                  d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h12a2 2 0 002-2V7a2 2 0 00-2-2h-2M8 5a2 2 0 002 2h4a2 2 0 002-2M8 5a2 2 0 012-2h4a2 2 0 012 2"
+                                />
+                              </svg>
+                            )}
+                          </button>
+                          <span aria-label="送信時刻">{formatDateTime(msg.created_at)}</span>
+                        </div>
+                      </>
+                    )}
+
                     {msg.role === "worker" && (
                       <>
                         <div className="flex justify-start">
@@ -778,9 +849,62 @@ export default function CodingPage() {
                                 <span>CLI Worker 最終返答 ({selectedSession.backend})</span>
                                 <span className="text-slate-400 text-[10px]">クリックで展開/折りたたみ</span>
                               </summary>
-                              <div className="p-4 overflow-x-auto max-h-96">
+                              <div className="p-4 overflow-x-auto max-h-96 border-b border-slate-800">
                                 <MarkdownPreview content={msg.content} variant="dark" />
                               </div>
+
+                              {/* Diagnostics Details */}
+                              {currentRun?.diagnostics && (
+                                <div
+                                  className="p-3 bg-slate-950 font-mono text-[11px] space-y-1.5 border-t border-slate-800 text-slate-300"
+                                  data-testid="worker-diagnostics"
+                                >
+                                  <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                                    🔍 実行診断情報 (Diagnostics)
+                                  </div>
+                                  <div className="grid grid-cols-1 gap-1 pl-1">
+                                    <div>
+                                      <span className="text-slate-500">作業ディレクトリ (cwd): </span>
+                                      <span className="text-slate-200 select-all">{currentRun.diagnostics.cwd}</span>
+                                    </div>
+                                    <div>
+                                      <span className="text-slate-500">要求セッションID: </span>
+                                      <span className="text-slate-200 select-all">
+                                        {currentRun.diagnostics.requested_session_id || "なし（新規起動）"}
+                                      </span>
+                                    </div>
+                                    <div>
+                                      <span className="text-slate-500">返却セッションID: </span>
+                                      <span className="text-slate-200 select-all">
+                                        {currentRun.diagnostics.returned_session_id || "なし"}
+                                      </span>
+                                    </div>
+                                    <div>
+                                      <span className="text-slate-500">ツール実行数: </span>
+                                      <span className="text-slate-200">
+                                        {currentRun.diagnostics.tool_call_count}回 (失敗: {currentRun.diagnostics.tool_failure_count}回)
+                                      </span>
+                                    </div>
+                                    <div>
+                                      <span className="text-slate-500">モデル/variant: </span>
+                                      <span className="text-slate-200">
+                                        {currentRun.diagnostics.model} / {currentRun.diagnostics.variant}
+                                      </span>
+                                    </div>
+                                    {currentRun.diagnostics.auto_rejected_permission && (
+                                      <div className="text-amber-400 font-semibold">
+                                        ⚠️ 権限制限により選択リポジトリ外への操作が自動拒否されました
+                                      </div>
+                                    )}
+                                    {currentRun.diagnostics.structured_error && (
+                                      <div className="text-rose-400">
+                                        <span className="text-rose-500">構造化エラー: </span>
+                                        {currentRun.diagnostics.structured_error}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
                             </details>
                           </div>
                         </div>
@@ -822,7 +946,7 @@ export default function CodingPage() {
                                   strokeLinecap="round"
                                   strokeLinejoin="round"
                                   strokeWidth={2}
-                                  d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h12a2 2 0 002-2V7a2 2 0 00-2-2h-2M8 5a2 2 0 002 2h4a2 2 0 002-2M8 5a2 2 0 012-2h4a2 2 0 012 2"
+                                  d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h12a2 2 0 002-2V7a2 2 0 00-2-2h-2M8 5a2 2 0 012-2h4a2 2 0 012 2"
                                 />
                               </svg>
                             )}

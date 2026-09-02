@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { vi, describe, it, expect, beforeEach } from "vitest";
 import CodingPage from "./CodingPage";
 import * as codingApi from "../../api/coding";
@@ -100,6 +100,81 @@ describe("CodingPage", () => {
       expect(screen.getByText("Test App")).toBeInTheDocument();
       expect(screen.getAllByText("新規セッション").length).toBeGreaterThan(0);
       expect(screen.getByText("こんにちは！何かお手伝いしましょうか？")).toBeInTheDocument();
+    });
+  });
+
+  it("renders dedicated card for cli_request role and diagnostics in worker card", async () => {
+    vi.mocked(codingApi.getCodingSessionDetail).mockResolvedValue({
+      session: mockSession,
+      effective_tool_ids: ["web_search", "vault_search"],
+      has_custom_tools: false,
+      available_tools: [
+        { tool_id: "web_search", name: "Web検索", description: "Tavily検索" },
+        { tool_id: "vault_search", name: "Vault検索", description: "Vault内検索" },
+      ],
+      messages: [
+        {
+          message_id: "cmsg_1",
+          session_id: "cses_111",
+          sequence: 1,
+          role: "user",
+          content: "コード調査をして",
+          created_at: "2026-01-01T00:00:00Z",
+        },
+        {
+          message_id: "cmsg_2",
+          session_id: "cses_111",
+          sequence: 2,
+          role: "cli_request",
+          content: "git status && pytest",
+          created_at: "2026-01-01T00:01:00Z",
+        },
+        {
+          message_id: "cmsg_3",
+          session_id: "cses_111",
+          sequence: 3,
+          role: "worker",
+          content: "1 passed",
+          created_at: "2026-01-01T00:02:00Z",
+        },
+      ],
+      active_run: null,
+      latest_run: {
+        run_id: "crun_diag",
+        session_id: "cses_111",
+        user_message_id: "cmsg_1",
+        orchestrator_message_id: null,
+        worker_message_id: "cmsg_3",
+        status: "completed",
+        dirty_tree_at_start: null,
+        error_message: null,
+        started_at: "2026-01-01T00:00:00Z",
+        finished_at: "2026-01-01T00:02:00Z",
+        diagnostics: {
+          cwd: "/app/test_repo",
+          requested_session_id: "ses_req123",
+          returned_session_id: "ses_ret456",
+          tool_call_count: 3,
+          tool_failure_count: 0,
+          structured_error: null,
+          auto_rejected_permission: false,
+          exit_code: 0,
+          model: "既定（Global default）",
+          variant: "なし",
+        },
+      },
+    });
+
+    render(<CodingPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("cli-request-card")).toBeInTheDocument();
+      expect(screen.getByText("git status && pytest")).toBeInTheDocument();
+      const diagCard = screen.getByTestId("worker-diagnostics");
+      expect(diagCard).toBeInTheDocument();
+      expect(within(diagCard).getByText("/app/test_repo")).toBeInTheDocument();
+      expect(screen.getByText("ses_req123")).toBeInTheDocument();
+      expect(screen.getByText("ses_ret456")).toBeInTheDocument();
     });
   });
 
