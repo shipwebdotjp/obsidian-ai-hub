@@ -888,38 +888,162 @@ def test_opencode_extract_title_from_export_json():
 def test_opencode_fetch_title_success_and_failures():
     be = backend.OpenCodeCliBackend()
     valid_json = '{"info": {"title": "Fetched Title"}}'
-    # Success
+    # Success (file-based stdout)
     with patch("obsidian_ai_hub.coding.backend.subprocess.run") as mock_run:
-        mock_run.return_value = MagicMock(returncode=0, stdout=valid_json, stderr="")
+        def _write_valid(cmd, stdout=None, stderr=None, text=None, timeout=None):
+            if stdout is not None and hasattr(stdout, "write"):
+                stdout.write(valid_json)
+            return MagicMock(returncode=0, stderr="")
+
+        mock_run.side_effect = _write_valid
         assert be.fetch_opencode_session_title("ses_abc123") == "Fetched Title"
         mock_run.assert_called_once()
         assert mock_run.call_args[0][0][0] in ("opencode", backend.CODING_OPENCODE_CLI_PATH)
         assert "export" in mock_run.call_args[0][0]
         assert "ses_abc123" in mock_run.call_args[0][0]
-    # Non-zero exit -> None
+        # Must use file handle for stdout, not PIPE/capture_output
+        assert "stdout" in mock_run.call_args[1]
+        assert mock_run.call_args[1]["stdout"] is not subprocess.PIPE
+        assert mock_run.call_args[1].get("capture_output") is not True
+        assert mock_run.call_args[1].get("timeout") == 10
+
+    # Large JSON (~200KB) must also be handled via file without truncation
+    large_payload = "x" * 200_000
+    large_json = '{"info": {"title": "Large Title"}, "payload": "' + large_payload + '"}'
     with patch("obsidian_ai_hub.coding.backend.subprocess.run") as mock_run:
-        mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="not found")
-        assert be.fetch_opencode_session_title("ses_bad") is None
-    # Empty stdout -> None
+        def _write_large(cmd, stdout=None, stderr=None, text=None, timeout=None):
+            if stdout is not None and hasattr(stdout, "write"):
+                stdout.write(large_json)
+            return MagicMock(returncode=0, stderr="")
+
+        mock_run.side_effect = _write_large
+        # _extract will succeed on the large payload's title (leading JSON part)
+        # we patch extract to verify file content length is large
+        with patch.object(backend.OpenCodeCliBackend, "_extract_title_from_export_json", return_value="Large Title") as mock_extract:
+            assert be.fetch_opencode_session_title("ses_large") == "Large Title"
+            # confirm file content was large (extract called with large string)
+            assert mock_extract.call_args is not None
+            assert len(mock_extract.call_args[0][0]) > 100_000
+            assert mock_run.call_args[1]["stdout"] is not subprocess.PIPE
+
+    # Non-zero exit -> None with warning
     with patch("obsidian_ai_hub.coding.backend.subprocess.run") as mock_run:
-        mock_run.return_value = MagicMock(returncode=0, stdout="   ", stderr="")
-        assert be.fetch_opencode_session_title("ses_abc") is None
-    # Invalid JSON -> None
+        mock_run.return_value = MagicMock(returncode=1, stderr="not found")
+        with patch("obsidian_ai_hub.coding.backend.logger.warning") as mock_warn:
+            assert be.fetch_opencode_session_title("ses_bad") is None
+            assert mock_warn.call_count == 1
+            assert "non_zero_exit" in str(mock_warn.call_args)
+    # Empty stdout -> None with warning
     with patch("obsidian_ai_hub.coding.backend.subprocess.run") as mock_run:
-        mock_run.return_value = MagicMock(returncode=0, stdout="not json", stderr="")
-        assert be.fetch_opencode_session_title("ses_abc") is None
-    # Empty title -> None
+        def _write_empty(cmd, stdout=None, stderr=None, text=None, timeout=None):
+            if stdout is not None and hasattr(stdout, "write"):
+                stdout.write("   ")
+            return MagicMock(returncode=0, stderr="")
+
+        mock_run.side_effect = _write_empty
+        with patch("obsidian_ai_hub.coding.backend.logger.warning") as mock_warn:
+            assert be.fetch_opencode_session_title("ses_abc") is None
+            assert "empty_output" in str(mock_warn.call_args)
+    # Invalid JSON -> None with warning
     with patch("obsidian_ai_hub.coding.backend.subprocess.run") as mock_run:
-        mock_run.return_value = MagicMock(returncode=0, stdout='{"info": {"title": "  "}}', stderr="")
-        assert be.fetch_opencode_session_title("ses_abc") is None
-    # Timeout -> None
+        def _write_invalid(cmd, stdout=None, stderr=None, text=None, timeout=None):
+            if stdout is not None and hasattr(stdout, "write"):
+                stdout.write("not json")
+            return MagicMock(returncode=0, stderr="")
+
+        mock_run.side_effect = _write_invalid
+        with patch("obsidian_ai_hub.coding.backend.logger.warning") as mock_warn:
+            assert be.fetch_opencode_session_title("ses_abc") is None
+            assert "json_parse_or_missing_title" in str(mock_warn.call_args)
+    # Empty title -> None with warning
+    with patch("obsidian_ai_hub.coding.backend.subprocess.run") as mock_run:
+        def _write_empty_title(cmd, stdout=None, stderr=None, text=None, timeout=None):
+            if stdout is not None and hasattr(stdout, "write"):
+                stdout.write('{"info": {"title": "  "}}')
+            return MagicMock(returncode=0, stderr="")
+
+        mock_run.side_effect = _write_empty_title
+        with patch("obsidian_ai_hub.coding.backend.logger.warning") as mock_warn:
+            assert be.fetch_opencode_session_title("ses_abc") is None
+            assert "json_parse_or_missing_title" in str(mock_warn.call_args)
+    # Timeout -> None with warning
     import subprocess as sp
 
-    with patch("obsidian_ai_hub.coding.backend.subprocess.run", side_effect=sp.TimeoutExpired(cmd="opencode export", timeout=5)):
-        assert be.fetch_opencode_session_title("ses_abc") is None
+    with patch("obsidian_ai_hub.coding.backend.subprocess.run", side_effect=sp.TimeoutExpired(cmd="opencode export", timeout=10)):
+        with patch("obsidian_ai_hub.coding.backend.logger.warning") as mock_warn:
+            assert be.fetch_opencode_session_title("ses_abc") is None
+            assert "timeout" in str(mock_warn.call_args).lower()
     # None / empty input
     assert be.fetch_opencode_session_title("") is None
     assert be.fetch_opencode_session_title(None) is None  # type: ignore[arg-type]
+
+
+def test_opencode_fetch_title_tempfile_cleanup_on_success_and_failure(tmp_path):
+    """Ensure temp file is cleaned up on success, non-zero exit, and invalid JSON."""
+    be = backend.OpenCodeCliBackend()
+    import tempfile
+    import pathlib
+
+    # Track created temp files via NamedTemporaryFile mock
+    created_paths = []
+
+    orig_ntf = tempfile.NamedTemporaryFile
+
+    def tracking_ntf(*args, **kwargs):
+        kwargs["delete"] = False
+        tf = orig_ntf(*args, **kwargs)
+        created_paths.append(pathlib.Path(tf.name))
+        return tf
+
+    valid_json = '{"info": {"title": "Cleanup Title"}}'
+
+    with patch("tempfile.NamedTemporaryFile", side_effect=tracking_ntf):
+        with patch("obsidian_ai_hub.coding.backend.subprocess.run") as mock_run:
+            def _write(cmd, stdout=None, stderr=None, text=None, timeout=None):
+                if stdout is not None and hasattr(stdout, "write"):
+                    stdout.write(valid_json)
+                return MagicMock(returncode=0, stderr="")
+
+            mock_run.side_effect = _write
+            assert be.fetch_opencode_session_title("ses_ok") == "Cleanup Title"
+            assert len(created_paths) == 1
+            assert not created_paths[0].exists(), "temp file should be removed after success"
+
+    created_paths.clear()
+    with patch("tempfile.NamedTemporaryFile", side_effect=tracking_ntf):
+        with patch("obsidian_ai_hub.coding.backend.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=1, stderr="error")
+            assert be.fetch_opencode_session_title("ses_fail") is None
+            assert len(created_paths) == 1
+            assert not created_paths[0].exists(), "temp file should be removed after non-zero exit"
+
+    created_paths.clear()
+    with patch("tempfile.NamedTemporaryFile", side_effect=tracking_ntf):
+        with patch("obsidian_ai_hub.coding.backend.subprocess.run") as mock_run:
+            def _write_bad(cmd, stdout=None, stderr=None, text=None, timeout=None):
+                if stdout is not None and hasattr(stdout, "write"):
+                    stdout.write("not json")
+                return MagicMock(returncode=0, stderr="")
+
+            mock_run.side_effect = _write_bad
+            assert be.fetch_opencode_session_title("ses_bad_json") is None
+            assert len(created_paths) == 1
+            assert not created_paths[0].exists(), "temp file should be removed after invalid JSON"
+
+
+def test_opencode_fetch_title_never_uses_capture_output():
+    """Regression: stdout must be a file handle, never PIPE/capture_output."""
+    be = backend.OpenCodeCliBackend()
+    with patch("obsidian_ai_hub.coding.backend.subprocess.run") as mock_run:
+        def _write(cmd, stdout=None, stderr=None, text=None, timeout=None, capture_output=None):
+            assert capture_output is not True, "capture_output=True must not be used (pipe truncation)"
+            assert stdout is not subprocess.PIPE, "stdout=PIPE must not be used"
+            assert stdout is not None and hasattr(stdout, "write"), "stdout must be file handle"
+            stdout.write('{"info": {"title": "No Pipe"}}')
+            return MagicMock(returncode=0, stderr="")
+
+        mock_run.side_effect = _write
+        assert be.fetch_opencode_session_title("ses_nopipe") == "No Pipe"
 
 
 def test_opencode_title_sync_updates_default_title(test_project):

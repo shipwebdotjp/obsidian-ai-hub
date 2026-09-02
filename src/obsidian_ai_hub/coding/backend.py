@@ -512,38 +512,97 @@ class OpenCodeCliBackend(_BaseSubprocessBackend):
         """Fetch OpenCode external session title via `opencode export`.
 
         Uses `opencode export <session_id>` and extracts info.title.
+        Uses a temporary file for stdout to avoid pipe truncation on large
+        export JSON (opencode 1.18.26 truncates pipe output at ~64KB).
         Returns None on any failure, empty title, JSON error, or missing field.
-        Never raises.
+        Never raises. Never logs export body or full title.
         """
         if not session_id or not isinstance(session_id, str):
             return None
         exe_path = CODING_OPENCODE_CLI_PATH or "opencode"
+        import tempfile
+
+        tmp_path: Optional[Path] = None
         try:
-            proc = subprocess.run(
-                [exe_path, "export", session_id],
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
+            # Create temp file for stdout (not deleted on close, manual cleanup)
+            with tempfile.NamedTemporaryFile(mode="w+", delete=False, suffix=".json", encoding="utf-8") as tmp:
+                tmp_path = Path(tmp.name)
+
+            # stdout -> file, stderr -> PIPE (small header like "Exporting session: ...")
+            with open(tmp_path, "w", encoding="utf-8") as out_file:
+                proc = subprocess.run(
+                    [exe_path, "export", session_id],
+                    stdout=out_file,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    timeout=10,
+                )
+
+            stderr_snippet = ""
+            if proc.stderr:
+                stderr_snippet = proc.stderr.strip()[:500]
+
             if proc.returncode != 0:
-                logger.debug(
-                    "opencode export failed for session %s (exit %s): %s",
+                logger.warning(
+                    "opencode export failed for session %s: category=non_zero_exit returncode=%s stderr=%.500s",
                     session_id,
                     proc.returncode,
-                    proc.stderr.strip()[:500] if proc.stderr else "",
+                    stderr_snippet,
                 )
                 return None
-            # stdout contains JSON, stderr contains "Exporting session: ..." header
-            stdout = proc.stdout.strip()
-            if not stdout:
+
+            # Read exported JSON from temp file
+            try:
+                stdout = tmp_path.read_text(encoding="utf-8").strip()
+            except Exception as exc:
+                logger.warning(
+                    "opencode export failed for session %s: category=file_read_error error=%s returncode=%s stderr=%.500s",
+                    session_id,
+                    exc,
+                    proc.returncode,
+                    stderr_snippet,
+                )
                 return None
-            return OpenCodeCliBackend._extract_title_from_export_json(stdout)
+
+            if not stdout:
+                logger.warning(
+                    "opencode export failed for session %s: category=empty_output returncode=%s stderr=%.500s output_size=0",
+                    session_id,
+                    proc.returncode,
+                    stderr_snippet,
+                )
+                return None
+
+            title = OpenCodeCliBackend._extract_title_from_export_json(stdout)
+            if title is None:
+                logger.warning(
+                    "opencode export failed for session %s: category=json_parse_or_missing_title returncode=%s stderr=%.500s output_size=%s",
+                    session_id,
+                    proc.returncode,
+                    stderr_snippet,
+                    len(stdout),
+                )
+                return None
+            return title
         except subprocess.TimeoutExpired:
-            logger.warning("opencode export timed out for session %s", session_id)
+            logger.warning(
+                "opencode export failed for session %s: category=timeout timeout=10s",
+                session_id,
+            )
             return None
         except Exception as exc:
-            logger.debug("Failed to fetch opencode session title for %s: %s", session_id, exc)
+            logger.warning(
+                "opencode export failed for session %s: category=exception error=%s",
+                session_id,
+                exc,
+            )
             return None
+        finally:
+            if tmp_path is not None:
+                try:
+                    tmp_path.unlink(missing_ok=True)
+                except Exception:
+                    pass
 
     @classmethod
     def _prepare_opencode_env(cls, repo_path: str) -> dict[str, str]:
