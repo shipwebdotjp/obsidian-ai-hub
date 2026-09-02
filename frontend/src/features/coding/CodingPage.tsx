@@ -46,6 +46,9 @@ export default function CodingPage() {
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Mobile drawer state
+  const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
+
   // New session modal state
   const [isNewSessionModalOpen, setIsNewSessionModalOpen] = useState(false);
   const [newSessionBackend, setNewSessionBackend] = useState<"codex" | "opencode">("codex");
@@ -113,6 +116,17 @@ export default function CodingPage() {
       messageEndRef.current.scrollIntoView({ behavior: "smooth" });
     }
   }, [messages, activePhaseText, workerState]);
+
+  // Close mobile drawer on ESC key
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setMobileDrawerOpen(false);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
 
   // Load projects on mount
   useEffect(() => {
@@ -455,8 +469,137 @@ export default function CodingPage() {
 
   return (
     <div className="flex h-full w-full overflow-hidden bg-slate-50">
+      {/* Mobile Drawer Overlay */}
+      {mobileDrawerOpen && (
+        <div
+          className="fixed inset-0 z-50 flex lg:hidden"
+          role="dialog"
+          aria-modal="true"
+          aria-label="プロジェクトとセッションの選択"
+        >
+          <div className="flex h-full w-80 max-w-[85vw] flex-col border-r border-slate-200 bg-white shadow-xl">
+            <div className="flex items-center justify-between border-b border-slate-200 p-3 bg-slate-50">
+              <h2 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
+                プロジェクト & セッション
+              </h2>
+              <button
+                type="button"
+                onClick={() => setMobileDrawerOpen(false)}
+                className="rounded p-1 text-slate-500 hover:bg-slate-200 cursor-pointer"
+                aria-label="サイドバーを閉じる"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto divide-y divide-slate-200">
+              {/* Mobile Project Selector Section */}
+              <div className="p-3">
+                <div className="mb-2 text-[11px] font-semibold text-slate-500 uppercase">
+                  プロジェクト選択
+                </div>
+                {loadingProjects ? (
+                  <div className="p-2 text-xs text-slate-500">読み込み中...</div>
+                ) : (
+                  <div className="space-y-1">
+                    {projects.map((item) => {
+                      const isSelected = item.project.project_id === selectedProjectId;
+                      return (
+                        <button
+                          key={item.project.project_id}
+                          type="button"
+                          onClick={() => {
+                            setSelectedProjectId(item.project.project_id);
+                          }}
+                          className={`w-full rounded px-2.5 py-1.5 text-left text-xs transition-colors ${
+                            isSelected
+                              ? "bg-slate-900 font-medium text-white"
+                              : "text-slate-700 hover:bg-slate-100"
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="truncate">{item.project.display_name}</span>
+                            <span
+                              className={`ml-1 rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                                item.is_valid_git_repo
+                                  ? isSelected
+                                    ? "bg-slate-700 text-slate-200"
+                                    : "bg-emerald-100 text-emerald-800"
+                                  : "bg-amber-100 text-amber-800"
+                              }`}
+                            >
+                              {item.is_valid_git_repo ? "Git OK" : "無効"}
+                            </span>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Mobile Sessions Section */}
+              <div className="p-3">
+                <div className="mb-2 flex items-center justify-between">
+                  <span className="text-[11px] font-semibold text-slate-500 uppercase">
+                    セッション一覧
+                  </span>
+                  {selectedProjectItem && (
+                    <button
+                      type="button"
+                      disabled={!selectedProjectItem.is_valid_git_repo}
+                      onClick={() => {
+                        setIsNewSessionModalOpen(true);
+                        setMobileDrawerOpen(false);
+                      }}
+                      className="rounded bg-slate-900 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-slate-800 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      + 新規
+                    </button>
+                  )}
+                </div>
+
+                {loadingSessions ? (
+                  <div className="p-2 text-xs text-slate-500">セッション読み込み中...</div>
+                ) : sessions.length === 0 ? (
+                  <div className="p-2 text-xs text-slate-500">セッションがありません</div>
+                ) : (
+                  <div className="space-y-1">
+                    {sessions.map((sess) => {
+                      const isSelected = sess.session_id === selectedSessionId;
+                      return (
+                        <div
+                          key={sess.session_id}
+                          onClick={() => {
+                            setSelectedSessionId(sess.session_id);
+                            setMobileDrawerOpen(false);
+                          }}
+                          className={`flex cursor-pointer items-center justify-between rounded px-2.5 py-2 text-xs transition-colors ${
+                            isSelected
+                              ? "bg-slate-200 border-l-4 border-slate-800 font-medium text-slate-900"
+                              : "text-slate-700 hover:bg-slate-50"
+                          }`}
+                        >
+                          <div className="min-w-0 flex-1 truncate">{sess.title}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+          <button
+            type="button"
+            aria-label="オーバーレイを閉じる"
+            onClick={() => setMobileDrawerOpen(false)}
+            className="flex-1 bg-slate-900/40"
+          />
+        </div>
+      )}
+
       {/* Pane 1: Project List */}
-      <div className="flex w-64 flex-col border-r border-slate-200 bg-white">
+      <div className="hidden lg:flex w-64 flex-col border-r border-slate-200 bg-white">
         <div className="border-b border-slate-200 p-3">
           <h2 className="text-sm font-semibold text-slate-800">プロジェクト</h2>
         </div>
@@ -508,7 +651,7 @@ export default function CodingPage() {
       </div>
 
       {/* Pane 2: Session List */}
-      <div className="flex w-72 flex-col border-r border-slate-200 bg-white">
+      <div className="hidden lg:flex w-72 flex-col border-r border-slate-200 bg-white">
         <div className="flex items-center justify-between border-b border-slate-200 p-3">
           <h2 className="text-sm font-semibold text-slate-800">セッション</h2>
           <div className="flex items-center gap-1.5">
@@ -623,9 +766,17 @@ export default function CodingPage() {
           <>
             {/* Header */}
             <div className="flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3">
-              <div>
-                <div className="flex items-center gap-2">
-                  <h1 className="text-sm font-semibold text-slate-800">{selectedSession.title}</h1>
+              <div className="min-w-0 flex-1 mr-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={() => setMobileDrawerOpen(true)}
+                    className="rounded border border-slate-300 bg-white px-2 py-0.5 text-xs font-medium text-slate-700 hover:bg-slate-50 cursor-pointer lg:hidden shrink-0"
+                    aria-label="プロジェクト / セッションを選択"
+                  >
+                    プロジェクト / セッション
+                  </button>
+                  <h1 className="text-sm font-semibold text-slate-800 truncate">{selectedSession.title}</h1>
                   {sessionDetail?.has_custom_tools ? (
                     <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800">
                       会話固有ツール設定
@@ -687,12 +838,17 @@ export default function CodingPage() {
 
             {/* Dirty tree warning banner if run started with uncommitted changes */}
             {currentRun?.dirty_tree_at_start && (
-              <div className="bg-amber-50 px-4 py-2 text-xs text-amber-800 border-b border-amber-200">
-                <span className="font-semibold">⚠️ 開始時に未コミットの変更があります:</span>
-                <pre className="mt-1 max-h-20 overflow-y-auto text-[10px] font-mono bg-amber-100/50 p-1.5 rounded">
-                  {currentRun.dirty_tree_at_start}
-                </pre>
-              </div>
+              <details className="bg-amber-50 text-xs text-amber-800 border-b border-amber-200">
+                <summary className="cursor-pointer px-4 py-2 font-semibold hover:bg-amber-100/60 flex items-center justify-between">
+                  <span>⚠️ 開始時に未コミットの変更があります</span>
+                  <span className="text-[10px] text-amber-700 font-normal">クリックで展開/折りたたみ</span>
+                </summary>
+                <div className="px-4 pb-2">
+                  <pre className="mt-1 max-h-32 overflow-y-auto text-[10px] font-mono bg-amber-100/50 p-1.5 rounded">
+                    {currentRun.dirty_tree_at_start}
+                  </pre>
+                </div>
+              </details>
             )}
 
             {/* Message Area */}
@@ -779,19 +935,23 @@ export default function CodingPage() {
                     {msg.role === "cli_request" && (
                       <>
                         <div className="flex min-w-0 justify-start">
-                          <div
-                            className="w-full max-w-2xl min-w-0 overflow-hidden rounded-2xl bg-blue-50 border border-blue-200 p-4 text-xs text-blue-950 shadow-sm [overflow-wrap:anywhere]"
-                            data-testid="cli-request-card"
-                          >
-                            <div className="mb-1.5 text-[10px] font-bold text-blue-800 uppercase flex items-center gap-1.5">
-                              <span>🤖 CLI Workerへの指示</span>
-                              <span className="rounded bg-blue-100 px-1.5 py-0.2 font-mono text-[9px] text-blue-700">
-                                常時表示
-                              </span>
-                            </div>
-                            <pre className="whitespace-pre-wrap font-mono text-xs leading-relaxed overflow-x-auto text-blue-900 bg-blue-100/50 p-3 rounded-lg border border-blue-200/60 min-w-0 max-w-full [overflow-wrap:anywhere] wrap-anywhere break-words">
-                              {msg.content}
-                            </pre>
+                          <div className="w-full max-w-2xl min-w-0">
+                            <details
+                              className="rounded-xl border border-blue-200 bg-blue-50 text-xs text-blue-950 shadow-sm overflow-hidden group min-w-0"
+                              data-testid="cli-request-card"
+                            >
+                              <summary className="flex cursor-pointer items-center justify-between px-4 py-2.5 bg-blue-100/80 font-mono text-[11px] text-blue-950 font-semibold hover:bg-blue-100">
+                                <span className="flex items-center gap-1.5">
+                                  <span>🤖 CLI Workerへの指示</span>
+                                </span>
+                                <span className="text-blue-700 text-[10px] font-normal">クリックで展開/折りたたみ</span>
+                              </summary>
+                              <div className="p-4 overflow-x-auto max-h-80 border-t border-blue-200/60 min-w-0 [overflow-wrap:anywhere]">
+                                <pre className="whitespace-pre-wrap font-mono text-xs leading-relaxed text-blue-900 bg-blue-100/50 p-3 rounded-lg border border-blue-200/60 min-w-0 max-w-full [overflow-wrap:anywhere] wrap-anywhere break-words">
+                                  {msg.content}
+                                </pre>
+                              </div>
+                            </details>
                           </div>
                         </div>
                         <div className="flex items-center gap-2 text-[10px] text-slate-400 justify-start">

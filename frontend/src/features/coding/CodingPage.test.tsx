@@ -532,4 +532,49 @@ describe("CodingPage", () => {
       expect(codingApi.updateCodingDefaults).toHaveBeenCalledWith(["web_search", "vault_search"]);
     });
   });
+
+  it("opens mobile drawer and allows selecting projects and sessions", async () => {
+    render(<CodingPage />);
+    await waitFor(() => expect(screen.getByText("Test App")).toBeInTheDocument());
+
+    const mobileBtn = screen.getByRole("button", { name: "プロジェクト / セッションを選択" });
+    fireEvent.click(mobileBtn);
+
+    expect(screen.getByRole("dialog", { name: "プロジェクトとセッションの選択" })).toBeInTheDocument();
+
+    const closeBtn = screen.getByRole("button", { name: "サイドバーを閉じる" });
+    fireEvent.click(closeBtn);
+
+    expect(screen.queryByRole("dialog", { name: "プロジェクトとセッションの選択" })).not.toBeInTheDocument();
+  });
+
+  it("renders collapsible dirty tree banner when uncommitted changes exist", async () => {
+    vi.mocked(codingApi.getCodingSessionDetail).mockResolvedValue({
+      session: mockSession,
+      effective_tool_ids: ["web_search"],
+      has_custom_tools: false,
+      available_tools: [],
+      messages: [],
+      active_run: {
+        run_id: "crun_dirty",
+        session_id: "cses_111",
+        user_message_id: "cmsg_1",
+        orchestrator_message_id: null,
+        worker_message_id: null,
+        status: "running",
+        dirty_tree_at_start: " M src/App.tsx\n?? untracked.txt",
+        error_message: null,
+        started_at: "2026-01-01T00:00:00Z",
+        finished_at: null,
+      },
+      latest_run: null,
+    });
+
+    render(<CodingPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("⚠️ 開始時に未コミットの変更があります")).toBeInTheDocument();
+      expect(screen.getByText(/M src\/App\.tsx/)).toBeInTheDocument();
+    });
+  });
 });
