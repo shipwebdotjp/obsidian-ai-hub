@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import logging
+import sqlite3
 import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -13,9 +15,27 @@ from obsidian_ai_hub.database import get_db_connection
 
 JST = ZoneInfo("Asia/Tokyo")
 
+logger = logging.getLogger(__name__)
+
 
 def _now_iso() -> str:
     return datetime.now(JST).isoformat()
+
+
+def _has_run_id_column(conn: sqlite3.Connection) -> bool:
+    """Return True if coding_messages.run_id column exists (v30+).
+
+    Centralizes PRAGMA introspection and handles sqlite3.Error explicitly
+    instead of silently hiding DB errors. Used by both write and read paths
+    to avoid duplicated schema checks.
+    """
+    try:
+        cur = conn.execute("PRAGMA table_info(coding_messages)")
+        cols = [r["name"] for r in cur.fetchall()]
+        return "run_id" in cols
+    except sqlite3.Error as exc:
+        logger.warning("Failed to inspect coding_messages schema: %s", exc)
+        return False
 
 
 def mark_interrupted_runs_on_startup() -> int:
@@ -119,7 +139,9 @@ def get_effective_session_tool_ids(session_id: str, conn=None) -> List[str]:
     return get_user_default_tool_ids(conn=conn)
 
 
-def update_session_tool_ids(session_id: str, tool_ids: Optional[List[str]]) -> Optional[List[str]]:
+def update_session_tool_ids(
+    session_id: str, tool_ids: Optional[List[str]]
+) -> Optional[List[str]]:
     """Update custom tool_ids for a session. If tool_ids is None, resets to user default (sets tool_ids_json = NULL)."""
     conn = get_db_connection()
     now = _now_iso()
@@ -157,7 +179,9 @@ def create_session(
     """Create a new coding session."""
     conn = get_db_connection()
     # Verify project exists
-    cursor = conn.execute("SELECT project_id FROM projects WHERE project_id = ?", (project_id,))
+    cursor = conn.execute(
+        "SELECT project_id FROM projects WHERE project_id = ?", (project_id,)
+    )
     if not cursor.fetchone():
         conn.close()
         raise ValueError(f"Project with id {project_id} does not exist")
@@ -179,7 +203,17 @@ def create_session(
             session_id, project_id, backend, repo_path, external_session_id, title, tool_ids_json, created_at, updated_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (session_id, project_id, backend, repo_path, external_session_id, title, tool_ids_json, now, now),
+        (
+            session_id,
+            project_id,
+            backend,
+            repo_path,
+            external_session_id,
+            title,
+            tool_ids_json,
+            now,
+            now,
+        ),
     )
     conn.commit()
 
@@ -220,7 +254,9 @@ def list_sessions_by_project(project_id: int) -> List[Dict[str, Any]]:
     return [dict(r) for r in rows]
 
 
-def update_session_external_id(session_id: str, external_session_id: Optional[str]) -> None:
+def update_session_external_id(
+    session_id: str, external_session_id: Optional[str]
+) -> None:
     """Update external_session_id for a session."""
     conn = get_db_connection()
     now = _now_iso()
@@ -247,15 +283,28 @@ def update_session_title(session_id: str, title: str) -> None:
 def delete_session(session_id: str) -> bool:
     """Delete a coding session."""
     conn = get_db_connection()
-    cursor = conn.execute("DELETE FROM coding_sessions WHERE session_id = ?", (session_id,))
+    cursor = conn.execute(
+        "DELETE FROM coding_sessions WHERE session_id = ?", (session_id,)
+    )
     conn.commit()
     count = cursor.rowcount
     conn.close()
     return count > 0
 
 
-def add_message(session_id: str, role: str, content: str) -> Dict[str, Any]:
-    """Add a message to a session."""
+def add_message(
+    session_id: str, role: str, content: str, run_id: Optional[str] = None
+) -> Dict[str, Any]:
+    """Add a message to a session.
+
+    run_id is optional and, when provided (e.g., for worker messages), links the
+    message to a specific coding run for post-hoc tracing. Column added in v30;
+    ignored if migration not yet applied (fallback to without column).
+
+    v30以降: coding_messages.run_id 列が正の関連（canonical）。junction への
+    二重書き込みは不要のため行わない。migration前DBでは junction フォールバックで
+    関連付けを維持する。
+    """
     conn = get_db_connection()
     message_id = f"cmsg_{uuid.uuid4().hex[:12]}"
     now = _now_iso()
@@ -266,14 +315,84 @@ def add_message(session_id: str, role: str, content: str) -> Dict[str, Any]:
     )
     seq = cursor.fetchone()[0]
 
-    conn.execute(
-        """
-        INSERT INTO coding_messages (
-            message_id, session_id, sequence, role, content, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?)
-        """,
-        (message_id, session_id, seq, role, content, now),
-    )
+    # v30以降は run_id 列が唯一の正とする。列有無は helper で判定し重複 introspection を避ける。
+    has_run_id_col = _has_run_id_column(conn)
+
+    if has_run_id_col and run_id is not None:
+        try:
+            conn.execute(
+                """
+                INSERT INTO coding_messages (
+                    message_id, session_id, sequence, role, content, created_at, run_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (message_id, session_id, seq, role, content, now, run_id),
+            )
+        except sqlite3.IntegrityError as exc:
+            # Invalid run_id (FK violation) must not be silently hidden;
+            # surface the inconsistency for caller handling.
+            logger.error(
+                "Integrity error inserting coding_messages %s with run_id %s: %s",
+                message_id,
+                run_id,
+                exc,
+            )
+            conn.close()
+            raise
+        except sqlite3.Error as exc:
+            logger.error(
+                "DB error inserting coding_messages %s with run_id %s: %s",
+                message_id,
+                run_id,
+                exc,
+            )
+            conn.close()
+            raise
+    else:
+        conn.execute(
+            """
+            INSERT INTO coding_messages (
+                message_id, session_id, sequence, role, content, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (message_id, session_id, seq, role, content, now),
+        )
+        # Fallback for legacy DB without column: still record linkage via junction table if provided
+        # migration前は junction が唯一の追跡手段のため、失敗時は警告で継続せず例外を伝播して run を failed にできるようにする
+        if run_id is not None:
+            try:
+                # Ensure junction table exists; create lazily if missing
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS coding_run_worker_messages (
+                        run_id TEXT NOT NULL,
+                        message_id TEXT NOT NULL,
+                        seq INTEGER NOT NULL,
+                        PRIMARY KEY (run_id, message_id),
+                        FOREIGN KEY(run_id) REFERENCES coding_runs(run_id) ON DELETE CASCADE,
+                        FOREIGN KEY(message_id) REFERENCES coding_messages(message_id) ON DELETE CASCADE
+                    )
+                    """
+                )
+                # Insert with seq auto
+                cur2 = conn.execute(
+                    "SELECT COALESCE(MAX(seq), 0) + 1 FROM coding_run_worker_messages WHERE run_id = ?",
+                    (run_id,),
+                )
+                jseq = cur2.fetchone()[0]
+                conn.execute(
+                    "INSERT OR IGNORE INTO coding_run_worker_messages (run_id, message_id, seq) VALUES (?, ?, ?)",
+                    (run_id, message_id, jseq),
+                )
+            except sqlite3.Error as exc:
+                logger.error(
+                    "Failed to record junction linkage for message %s run %s: %s",
+                    message_id,
+                    run_id,
+                    exc,
+                )
+                conn.close()
+                raise
     conn.execute(
         "UPDATE coding_sessions SET updated_at = ? WHERE session_id = ?",
         (now, session_id),
@@ -381,6 +500,107 @@ def update_run(
     conn.close()
     assert run is not None
     return run
+
+
+def append_run_worker_message(run_id: str, message_id: str) -> None:
+    """Persist ordered linkage between run and worker message for P1-2 (idempotent).
+
+    v30以降は coding_messages.run_id 列が唯一の正であり、junction への二重書き込みは
+    不要のため行わない。migration前（列不存在）のみ junction で関連付けを行う。
+    いずれの経路でも DB エラーは sqlite3.Error として明示的にログし、呼び出し元へ
+    例外を伝播して run を failed に遷移させられるようにする。
+    """
+    conn = get_db_connection()
+    try:
+        has_run_id_col = _has_run_id_column(conn)
+        # v30以降は add_message 側で run_id 列へ既に書き込み済みのため冗長呼び出しは不要
+        if has_run_id_col:
+            return
+
+        # migration前互換: junction でのみ追跡
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS coding_run_worker_messages (
+                run_id TEXT NOT NULL,
+                message_id TEXT NOT NULL,
+                seq INTEGER NOT NULL,
+                PRIMARY KEY (run_id, message_id),
+                FOREIGN KEY(run_id) REFERENCES coding_runs(run_id) ON DELETE CASCADE,
+                FOREIGN KEY(message_id) REFERENCES coding_messages(message_id) ON DELETE CASCADE
+            )
+            """
+        )
+        cur = conn.execute(
+            "SELECT COALESCE(MAX(seq), 0) + 1 FROM coding_run_worker_messages WHERE run_id = ?",
+            (run_id,),
+        )
+        jseq = cur.fetchone()[0]
+        try:
+            conn.execute(
+                "INSERT OR IGNORE INTO coding_run_worker_messages (run_id, message_id, seq) VALUES (?, ?, ?)",
+                (run_id, message_id, jseq),
+            )
+            conn.commit()
+        except sqlite3.Error as exc:
+            logger.error(
+                "Failed to append junction linkage run %s message %s (has_run_id_col=%s): %s",
+                run_id,
+                message_id,
+                has_run_id_col,
+                exc,
+            )
+            raise
+    finally:
+        conn.close()
+
+
+def list_worker_messages_for_run(run_id: str) -> List[Dict[str, Any]]:
+    """List all worker messages belonging to a run in creation order.
+
+    v30以降は coding_messages.run_id 列を優先して取得し、行が存在すればそれを
+    正とする。存在しない場合のみ junction テーブルへフォールバックする
+    （migration前互換）。
+    """
+    conn = get_db_connection()
+    try:
+        # Prefer run_id column on coding_messages if available (helperで重複排除)
+        if _has_run_id_column(conn):
+            try:
+                cur2 = conn.execute(
+                    "SELECT * FROM coding_messages WHERE run_id = ? ORDER BY sequence ASC",
+                    (run_id,),
+                )
+                rows = cur2.fetchall()
+                if rows:
+                    return [dict(r) for r in rows]
+            except sqlite3.Error as exc:
+                logger.warning(
+                    "Failed to query coding_messages by run_id %s: %s", run_id, exc
+                )
+        # Fallback to junction table
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS coding_run_worker_messages (
+                run_id TEXT NOT NULL,
+                message_id TEXT NOT NULL,
+                seq INTEGER NOT NULL,
+                PRIMARY KEY (run_id, message_id),
+                FOREIGN KEY(run_id) REFERENCES coding_runs(run_id) ON DELETE CASCADE,
+                FOREIGN KEY(message_id) REFERENCES coding_messages(message_id) ON DELETE CASCADE
+            )
+            """
+        )
+        cur = conn.execute(
+            """
+            SELECT cm.* FROM coding_messages cm
+            JOIN coding_run_worker_messages j ON j.message_id = cm.message_id
+            WHERE j.run_id = ? ORDER BY j.seq ASC
+            """,
+            (run_id,),
+        )
+        return [dict(r) for r in cur.fetchall()]
+    finally:
+        conn.close()
 
 
 def _format_run(run_dict: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:

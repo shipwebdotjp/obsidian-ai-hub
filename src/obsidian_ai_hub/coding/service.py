@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import sqlite3
 import threading
 from datetime import datetime
 from typing import AsyncGenerator, Dict, Optional, Tuple
@@ -35,6 +36,7 @@ def _should_update_coding_title(current_title: Optional[str]) -> bool:
         return True
     stripped = current_title.strip()
     return stripped == "" or stripped == DEFAULT_CODING_SESSION_TITLE
+
 
 # Lock per normalized repo_path to prevent concurrent execution on the same Git repo
 _REPO_LOCKS: Dict[str, threading.Lock] = {}
@@ -126,6 +128,8 @@ async def run_coding_turn_stream(
         orchestrator = CodingOrchestrator(tool_ids=effective_tool_ids)
         cli_count = 0
         final_status = "completed"
+        # Track in-memory external session id for this turn (P0-1: carry recreated id to next iteration)
+        current_external_id = session.get("external_session_id") if session else None
 
         while True:
             if cancel_event.is_set():
@@ -182,12 +186,16 @@ async def run_coding_turn_stream(
                 if cli_prompt:
                     cli_prompt = None
                     if clean_orch_text:
-                        clean_orch_text = f"{clean_orch_text}\n\n{CLI_LIMIT_REACHED_NOTICE}"
+                        clean_orch_text = (
+                            f"{clean_orch_text}\n\n{CLI_LIMIT_REACHED_NOTICE}"
+                        )
                     else:
                         clean_orch_text = CLI_LIMIT_REACHED_NOTICE
 
             # Save orchestrator message
-            orch_msg = store.add_message(session_id, role="orchestrator", content=clean_orch_text)
+            orch_msg = store.add_message(
+                session_id, role="orchestrator", content=clean_orch_text
+            )
             orch_msg_id = orch_msg["message_id"]
             store.update_run(run_id, orchestrator_message_id=orch_msg_id)
 
@@ -207,7 +215,9 @@ async def run_coding_turn_stream(
                 break
 
             # Save cli_request message for history & UI dedicated card
-            cli_req_msg = store.add_message(session_id, role="cli_request", content=cli_prompt)
+            cli_req_msg = store.add_message(
+                session_id, role="cli_request", content=cli_prompt
+            )
             yield f"data: {json.dumps({'event': 'cli_request', 'message': cli_req_msg}, ensure_ascii=False)}\n\n"
 
             cli_count += 1
@@ -216,25 +226,46 @@ async def run_coding_turn_stream(
             # Execute worker CLI in thread pool
             try:
                 cli_backend = backend.get_backend(backend_name)
-                # Re-fetch session to get current external_session_id
-                current_session = store.get_session(session_id)
-                ext_sess_id = current_session.get("external_session_id") if current_session else None
+                # P0-1: Keep in-memory recreated ID as priority within the same turn.
+                # The turn's conversation continuity (recreated ses_...) outranks concurrent
+                # external DB updates. Only adopt DB value when this turn has not yet
+                # established one (first iteration with pre-existing session) or explicitly
+                # on the first iteration to pick up updates made before the turn started.
+                # Re-fetch from DB only if in-memory is stale (e.g., concurrent update outside turn)
+                db_session = store.get_session(session_id)
+                db_ext = db_session.get("external_session_id") if db_session else None
+                if (
+                    db_ext != current_external_id
+                    and current_external_id is None
+                    and db_ext is not None
+                ):
+                    # Adopt DB value if this turn hasn't yet set one (first iteration with pre-existing session)
+                    current_external_id = db_ext
+                elif db_ext != current_external_id and cli_count == 1:
+                    # Prefer DB on first iteration (cli_count is 1 after increment) to pick up external updates prior to turn
+                    current_external_id = db_ext
+                ext_sess_id = current_external_id
 
                 loop = asyncio.get_running_loop()
                 cli_result: backend.CodingBackendResult = await loop.run_in_executor(
                     None,
-                    lambda: cli_backend.execute(
+                    lambda s=ext_sess_id: cli_backend.execute(
                         repo_path=canonical_repo,
                         prompt=cli_prompt,
-                        external_session_id=ext_sess_id,
+                        external_session_id=s,
                         cancel_event=cancel_event,
                     ),
                 )
 
-                if cli_result.session_recreated or cli_result.external_session_id != ext_sess_id:
+                if (
+                    cli_result.session_recreated
+                    or cli_result.external_session_id != ext_sess_id
+                ):
                     store.update_session_external_id(
                         session_id, cli_result.external_session_id
                     )
+                    # Update in-memory id so next <cli_request> in same turn uses recreated id (P0-1)
+                    current_external_id = cli_result.external_session_id
 
                 if cli_result.cancelled:
                     store.update_run(
@@ -258,9 +289,9 @@ async def run_coding_turn_stream(
                     else:
                         worker_output = notice_prefix
 
-                # Save worker output message
+                # Save worker output message (P1-2: link to run via run_id)
                 worker_msg = store.add_message(
-                    session_id, role="worker", content=worker_output
+                    session_id, role="worker", content=worker_output, run_id=run_id
                 )
                 worker_msg_id = worker_msg["message_id"]
 
@@ -276,19 +307,34 @@ async def run_coding_turn_stream(
                     error_message=cli_result.error_message,
                     diagnostics_json=diag_json_str,
                 )
+                # P1-2: v30以降は coding_messages.run_id が唯一の正のため junction 二重書き込みは不要。
+                # add_message(..., run_id=...) で既に紐付け済み。migration前（列不存在）時のみ
+                # junction で追跡する。判定は store._has_run_id_column に委譲するが、
+                # 冗長呼び出し自体は store側で早期returnする。DBエラーは握りつぶさず伝播させ、
+                # 外側の except Exception で run を failed に遷移させる。
+                try:
+                    store.append_run_worker_message(run_id, worker_msg_id)
+                except sqlite3.Error as exc:  # pragma: no cover - DB整合性エラーは明確にログし伝播
+                    logger.error(
+                        "Failed to persist worker message linkage for run %s message %s: %s",
+                        run_id,
+                        worker_msg_id,
+                        exc,
+                    )
+                    raise
 
                 # Compute up-to-date git status after CLI execution
                 git_status = backend.get_git_status(canonical_repo)
 
                 worker_done_data = {
-                    'event': 'worker_done',
-                    'attempt': cli_count,
-                    'message': worker_msg,
-                    'exit_code': cli_result.exit_code,
-                    'error': cli_result.error_message,
-                    'session_recreated': cli_result.session_recreated,
-                    'git_status': git_status,
-                    'diagnostics': cli_result.diagnostics,
+                    "event": "worker_done",
+                    "attempt": cli_count,
+                    "message": worker_msg,
+                    "exit_code": cli_result.exit_code,
+                    "error": cli_result.error_message,
+                    "session_recreated": cli_result.session_recreated,
+                    "git_status": git_status,
+                    "diagnostics": cli_result.diagnostics,
                 }
                 yield f"data: {json.dumps(worker_done_data, ensure_ascii=False)}\n\n"
 
@@ -312,7 +358,11 @@ async def run_coding_turn_stream(
                     ext_id = cur_sess.get("external_session_id")
                     cur_title = cur_sess.get("title")
                     if _should_update_coding_title(cur_title):
-                        fetched_title = backend.OpenCodeCliBackend.fetch_opencode_session_title(ext_id)
+                        fetched_title = (
+                            backend.OpenCodeCliBackend.fetch_opencode_session_title(
+                                ext_id
+                            )
+                        )
                         if fetched_title and fetched_title != cur_title:
                             store.update_session_title(session_id, fetched_title)
                             session_title_updated = fetched_title
@@ -322,7 +372,9 @@ async def run_coding_turn_stream(
                                 fetched_title,
                             )
             except Exception as exc:
-                logger.warning("Failed to sync OpenCode title for session %s: %s", session_id, exc)
+                logger.warning(
+                    "Failed to sync OpenCode title for session %s: %s", session_id, exc
+                )
 
         # Update final run status
         now_iso = datetime.now(JST).isoformat()
@@ -334,17 +386,17 @@ async def run_coding_turn_stream(
 
         git_status = backend.get_git_status(canonical_repo)
         done_data = {
-            'event': 'done',
-            'run_id': run_id,
-            'status': final_status,
-            'git_status': git_status,
+            "event": "done",
+            "run_id": run_id,
+            "status": final_status,
+            "git_status": git_status,
         }
         if session_title_updated:
-            done_data['session_title'] = session_title_updated
+            done_data["session_title"] = session_title_updated
         yield f"data: {json.dumps(done_data, ensure_ascii=False)}\n\n"
 
     finally:
         with _JOBS_GUARD:
-            if 'run_id' in locals():
+            if "run_id" in locals():
                 _RUNNING_JOBS.pop(run_id, None)
         repo_lock.release()

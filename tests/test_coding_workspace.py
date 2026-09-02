@@ -1234,3 +1234,551 @@ async def test_orchestrator_tool_restriction(test_project):
         tool_names = [t.name for t in bound_tools]
         assert "web_search" in tool_names
         assert "run_shell" not in tool_names
+
+
+# --- P0/P1 regression tests for session recreation carry-over & diagnostics ---
+
+
+def test_opencode_backend_session_not_found_case_insensitive(test_project):
+    """P0-3: lower-case 'session not found' must trigger retry."""
+    be = backend.OpenCodeCliBackend()
+    error_output = "Error: session not found (lower case)"
+    retry_json = '{"sessionID": "ses_new_ci", "part": {"type": "text", "text": "recovered ci"}}'
+    with patch.object(
+        be,
+        "_run_subprocess",
+        side_effect=[
+            (1, error_output, "", False),
+            (0, retry_json, "", False),
+        ],
+    ) as mock_run:
+        res = be.execute(test_project["repo_path"], "prompt", external_session_id="ses_old_ci")
+        assert res.session_recreated is True
+        assert res.external_session_id == "ses_new_ci"
+        assert mock_run.call_count == 2
+
+
+def test_opencode_backend_session_not_found_diagnostics_preserves_old_id(test_project):
+    """P0-2: diagnostics must keep requested old id, new id, recreated flag, first attempt snippet."""
+    be = backend.OpenCodeCliBackend()
+    first_stderr = "Error: Session not found for ses_old123 " + "x" * 600  # >500 chars
+    retry_json = '{"sessionID": "ses_new456", "part": {"type": "text", "text": "ok"}}'
+    with patch.object(
+        be,
+        "_run_subprocess",
+        side_effect=[
+            (1, "", first_stderr, False),
+            (0, retry_json, "", False),
+        ],
+    ):
+        res = be.execute(test_project["repo_path"], "prompt", external_session_id="ses_old123")
+        assert res.session_recreated is True
+        diag = res.diagnostics
+        assert diag is not None
+        assert diag["requested_session_id"] == "ses_old123"
+        assert diag["returned_session_id"] == "ses_new456"
+        assert diag["session_recreated"] is True
+        assert diag["first_attempt_exit_code"] == 1
+        # snippet is truncated to 500 and does not contain prompt (prompt is not in stderr)
+        assert "first_attempt_stderr_snippet" in diag
+        assert len(diag["first_attempt_stderr_snippet"]) <= 500
+        assert "Session not found" in diag["first_attempt_stderr_snippet"] or "session not found" in diag["first_attempt_stderr_snippet"].lower()
+        assert diag["exit_code"] == 0
+
+
+def test_opencode_backend_missing_session_id_flag(test_project):
+    """P1-1: initial success without ses_... must set missing_session_id and warn."""
+    be = backend.OpenCodeCliBackend()
+    # Valid JSON but no session id anywhere (no ses_ in output)
+    json_output = '{"part": {"type": "text", "text": "hello without session"}}'
+    with patch.object(be, "_run_subprocess", return_value=(0, json_output, "", False)):
+        with patch.object(backend.logger, "warning") as mock_warn:
+            res = be.execute(test_project["repo_path"], "hello")
+            assert res.exit_code == 0
+            assert res.diagnostics is not None
+            assert res.diagnostics.get("missing_session_id") is True
+            # Warning should have been emitted
+            assert mock_warn.call_count >= 1
+            assert any("missing_session_id" in str(c) or "without session id" in str(c).lower() for c in mock_warn.call_args_list)
+
+
+def test_opencode_diagnostics_normal_has_session_recreated_false(test_project):
+    """Ensure normal path includes session_recreated=False for backward compat."""
+    be = backend.OpenCodeCliBackend()
+    json_output = '{"sessionID": "ses_abc999", "part": {"type": "text", "text": "ok"}}'
+    with patch.object(be, "_run_subprocess", return_value=(0, json_output, "", False)):
+        res = be.execute(test_project["repo_path"], "hello")
+        assert res.diagnostics is not None
+        assert res.diagnostics["session_recreated"] is False
+        assert res.diagnostics["requested_session_id"] is None
+        assert res.diagnostics["returned_session_id"] == "ses_abc999"
+
+
+def test_coding_turn_carries_recreated_session_id_to_next_cli(test_project):
+    """P0-1: after Session not found recreation, next CLI in same turn must use new external id."""
+    app = create_app(token="test-token")
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer test-token"}
+    res = client.post(
+        "/api/v1/coding/sessions",
+        headers=headers,
+        json={"project_id": test_project["project_id"], "backend": "opencode", "title": "Carryover"},
+    )
+    assert res.status_code == 200
+    sid = res.json()["session_id"]
+    store.update_session_external_id(sid, "ses_old_carry")
+
+    # Orchestrator will request two CLI executions in same turn
+    async def mock_gen(*args, **kwargs):
+        history = kwargs.get("history", [])
+        worker_count = sum(1 for h in history if h.get("role") == "worker")
+        if worker_count == 0:
+            return "first\n<cli_request>\nfirst cli\n</cli_request>"
+        elif worker_count == 1:
+            return "second\n<cli_request>\nsecond cli\n</cli_request>"
+        else:
+            return "done"
+
+    # First CLI recreates session, second should receive new id
+    first_res = backend.CodingBackendResult(
+        external_session_id="ses_new_carry",
+        output="first out",
+        exit_code=0,
+        session_recreated=True,
+        diagnostics={
+            "cwd": test_project["repo_path"],
+            "requested_session_id": "ses_old_carry",
+            "returned_session_id": "ses_new_carry",
+            "tool_call_count": 1,
+            "tool_failure_count": 0,
+            "structured_error": None,
+            "auto_rejected_permission": False,
+            "exit_code": 0,
+            "model": "test",
+            "variant": "なし",
+            "session_recreated": True,
+            "first_attempt_exit_code": 1,
+            "first_attempt_stderr_snippet": "Session not found",
+        },
+    )
+    second_res = backend.CodingBackendResult(
+        external_session_id="ses_new_carry",
+        output="second out",
+        exit_code=0,
+        session_recreated=False,
+        diagnostics={
+            "cwd": test_project["repo_path"],
+            "requested_session_id": "ses_new_carry",
+            "returned_session_id": "ses_new_carry",
+            "tool_call_count": 1,
+            "tool_failure_count": 0,
+            "structured_error": None,
+            "auto_rejected_permission": False,
+            "exit_code": 0,
+            "model": "test",
+            "variant": "なし",
+            "session_recreated": False,
+        },
+    )
+
+    with patch(
+        "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response",
+        side_effect=mock_gen,
+    ), patch("obsidian_ai_hub.coding.backend.OpenCodeCliBackend.execute") as mock_exec:
+        mock_exec.side_effect = [first_res, second_res]
+        res = client.post(
+            f"/api/v1/coding/sessions/{sid}/messages/stream",
+            headers=headers,
+            json={"content": "carryover test"},
+        )
+        assert res.status_code == 200
+        text = res.text
+        assert text.count("worker_done") == 2
+        # Verify backend was called with correct session ids
+        assert mock_exec.call_count == 2
+        first_call_kwargs = mock_exec.call_args_list[0][1]
+        second_call_kwargs = mock_exec.call_args_list[1][1]
+        # first call uses old id, second uses new id
+        assert first_call_kwargs["external_session_id"] == "ses_old_carry"
+        assert second_call_kwargs["external_session_id"] == "ses_new_carry"
+
+    # DB must have been updated to new id
+    detail = client.get(f"/api/v1/coding/sessions/{sid}", headers=headers).json()
+    assert detail["session"]["external_session_id"] == "ses_new_carry"
+
+
+def test_worker_messages_not_orphaned_within_same_run(test_project):
+    """P1-2: multiple worker messages in same run must remain traceable."""
+    app = create_app(token="test-token")
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer test-token"}
+    res = client.post(
+        "/api/v1/coding/sessions",
+        headers=headers,
+        json={"project_id": test_project["project_id"], "backend": "opencode", "title": "Multi Worker"},
+    )
+    sid = res.json()["session_id"]
+
+    async def mock_gen(*args, **kwargs):
+        history = kwargs.get("history", [])
+        workers = [h for h in history if h.get("role") == "worker"]
+        if len(workers) == 0:
+            return "a\n<cli_request>\ncli1\n</cli_request>"
+        elif len(workers) == 1:
+            return "b\n<cli_request>\ncli2\n</cli_request>"
+        else:
+            return "final"
+
+    r1 = backend.CodingBackendResult(external_session_id="ses_m1", output="o1", exit_code=0, diagnostics={"cwd": test_project["repo_path"], "requested_session_id": None, "returned_session_id": "ses_m1", "tool_call_count": 0, "tool_failure_count": 0, "structured_error": None, "auto_rejected_permission": False, "exit_code": 0, "model": "test", "variant": "なし", "session_recreated": False})
+    r2 = backend.CodingBackendResult(external_session_id="ses_m1", output="o2", exit_code=0, diagnostics={"cwd": test_project["repo_path"], "requested_session_id": "ses_m1", "returned_session_id": "ses_m1", "tool_call_count": 0, "tool_failure_count": 0, "structured_error": None, "auto_rejected_permission": False, "exit_code": 0, "model": "test", "variant": "なし", "session_recreated": False})
+
+    with patch(
+        "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response",
+        side_effect=mock_gen,
+    ), patch("obsidian_ai_hub.coding.backend.OpenCodeCliBackend.execute", side_effect=[r1, r2]):
+        res = client.post(
+            f"/api/v1/coding/sessions/{sid}/messages/stream",
+            headers=headers,
+            json={"content": "multi"},
+        )
+        assert res.status_code == 200
+
+    detail = client.get(f"/api/v1/coding/sessions/{sid}", headers=headers).json()
+    messages = [m for m in detail["messages"] if m["role"] == "worker"]
+    assert len(messages) == 2
+    # run_id should be same for both workers (single run)
+    run_id = detail["latest_run"]["run_id"]
+    # Check store helper returns both
+    worker_list = store.list_worker_messages_for_run(run_id)
+    assert len(worker_list) == 2
+    # Also check coding_messages.run_id column via direct query (if migration applied)
+    from obsidian_ai_hub.database import get_db_connection
+
+    conn = get_db_connection()
+    try:
+        cur = conn.execute("PRAGMA table_info(coding_messages)")
+        cols = [r["name"] for r in cur.fetchall()]
+        if "run_id" in cols:
+            cur2 = conn.execute("SELECT count(*) as c FROM coding_messages WHERE run_id = ?", (run_id,))
+            assert cur2.fetchone()["c"] == 2
+            # v30以降は二重書き込みしないため junction は 0
+            cur3 = conn.execute("SELECT count(*) as c FROM coding_run_worker_messages WHERE run_id = ?", (run_id,))
+            assert cur3.fetchone()["c"] == 0
+        else:
+            # migration前は junction のみ
+            cur3 = conn.execute("SELECT count(*) as c FROM coding_run_worker_messages WHERE run_id = ?", (run_id,))
+            assert cur3.fetchone()["c"] == 2
+    finally:
+        conn.close()
+
+
+def test_worker_messages_fallback_via_junction_when_no_run_id_column(test_project):
+    """migration前互換: run_id列がない場合はjunctionで全件追跡できる."""
+    # Force fallback path by mocking helper to return False
+    with patch("obsidian_ai_hub.coding.store._has_run_id_column", return_value=False):
+        # create session/run via real store
+        from obsidian_ai_hub.coding import store as s
+
+        session = s.create_session(
+            project_id=test_project["project_id"],
+            backend="opencode",
+            repo_path=test_project["repo_path"],
+            title="FallbackCheck",
+        )
+        sid = session["session_id"]
+        # create a dummy user message to anchor run
+        umsg = s.add_message(sid, role="user", content="hello")
+        run = s.create_run(sid, user_message_id=umsg["message_id"])
+        rid = run["run_id"]
+        # add two worker messages via fallback path (junction)
+        w1 = s.add_message(sid, role="worker", content="w1", run_id=rid)
+        w2 = s.add_message(sid, role="worker", content="w2", run_id=rid)
+        # list via helper should return both despite messages.run_id being NULL in this mocked path
+        lst = s.list_worker_messages_for_run(rid)
+        # Note: list_worker_messages_for_run also uses _has_run_id_column, so mock affects its preference
+        # need to keep mock active to force junction read
+        assert len(lst) == 2
+        assert {m["message_id"] for m in lst} == {w1["message_id"], w2["message_id"]}
+
+    # also verify real v30 path still works after mock context exits
+    from obsidian_ai_hub.database import get_db_connection
+
+    conn = get_db_connection()
+    try:
+        cur = conn.execute("PRAGMA table_info(coding_messages)")
+        cols2 = [r["name"] for r in cur.fetchall()]
+        assert "run_id" in cols2
+    finally:
+        conn.close()
+
+
+def test_worker_messages_junction_failure_propagates_exception(test_project):
+    """migration前: junction書き込み失敗は例外として伝播し、握りつぶされない."""
+    import sqlite3
+
+    from obsidian_ai_hub.coding import store as s
+    from obsidian_ai_hub.database import get_db_connection as real_get_conn
+
+    # add_message fallback path propagates junction error
+    with patch("obsidian_ai_hub.coding.store._has_run_id_column", return_value=False):
+        session = s.create_session(
+            project_id=test_project["project_id"],
+            backend="opencode",
+            repo_path=test_project["repo_path"],
+            title="FailureCheck",
+        )
+        sid = session["session_id"]
+        umsg = s.add_message(sid, role="user", content="hello2")
+        run = s.create_run(sid, user_message_id=umsg["message_id"])
+        rid = run["run_id"]
+
+        with patch("obsidian_ai_hub.coding.store.get_db_connection") as mock_get_conn:
+
+            class ConnProxy:
+                def __init__(self, real):
+                    self._real = real
+
+                def execute(self, sql, params=()):
+                    if "coding_run_worker_messages" in sql and "INSERT" in sql:
+                        raise sqlite3.OperationalError("injected junction failure")
+                    return self._real.execute(sql, params)
+
+                def __getattr__(self, name):
+                    return getattr(self._real, name)
+
+            def fake_conn_factory():
+                return ConnProxy(real_get_conn())
+
+            mock_get_conn.side_effect = fake_conn_factory
+            try:
+                s.add_message(sid, role="worker", content="should fail", run_id=rid)
+                assert False, "expected sqlite3.Error not raised"
+            except sqlite3.Error as exc:
+                assert "injected junction failure" in str(exc)
+
+    # append_run_worker_message also propagates
+    with patch("obsidian_ai_hub.coding.store._has_run_id_column", return_value=False):
+        session2 = s.create_session(
+            project_id=test_project["project_id"],
+            backend="opencode",
+            repo_path=test_project["repo_path"],
+            title="FailureCheck2",
+        )
+        sid2 = session2["session_id"]
+        umsg2 = s.add_message(sid2, role="user", content="hello3")
+        run2 = s.create_run(sid2, user_message_id=umsg2["message_id"])
+        rid2 = run2["run_id"]
+        w = s.add_message(sid2, role="worker", content="w", run_id=rid2)
+        with patch("obsidian_ai_hub.coding.store.get_db_connection") as mock_get_conn2:
+
+            class ConnProxy2:
+                def __init__(self, real):
+                    self._real = real
+
+                def execute(self, sql, params=()):
+                    if "coding_run_worker_messages" in sql and "INSERT" in sql:
+                        raise sqlite3.OperationalError("injected append failure")
+                    return self._real.execute(sql, params)
+
+                def __getattr__(self, name):
+                    return getattr(self._real, name)
+
+            def fake_conn_factory2():
+                return ConnProxy2(real_get_conn())
+
+            mock_get_conn2.side_effect = fake_conn_factory2
+            try:
+                s.append_run_worker_message(rid2, w["message_id"])
+                assert False, "expected sqlite3.Error not raised"
+            except sqlite3.Error as exc2:
+                assert "injected append failure" in str(exc2)
+
+
+# --- Fix for OpenCode "session not found" false positive (minimal spec) ---
+
+
+def test_opencode_backend_false_positive_tool_output_ignored_on_success(test_project):
+    """Regression: exit 0 + tool output containing 'session not found' must NOT trigger fallback."""
+    be = backend.OpenCodeCliBackend()
+    # Valid sessionID plus a JSON tool line whose output contains the literal
+    # that previously caused false positive (backend.py itself).
+    success_json = (
+        '{"sessionID": "ses_old123", "part": {"type": "text", "text": "normal output"}}\n'
+        '{"type": "tool", "tool": "read", "part": {"type": "tool", "output": "src/obsidian_ai_hub/coding/backend.py line 956: if \\"session not found\\" in clean_combined.lower()"}}'
+    )
+    with patch.object(
+        be, "_run_subprocess", return_value=(0, success_json, "", False)
+    ) as mock_run:
+        res = be.execute(test_project["repo_path"], "prompt", external_session_id="ses_old123")
+        assert mock_run.call_count == 1
+        assert res.session_recreated is False
+        assert res.external_session_id == "ses_old123"
+        assert res.exit_code == 0
+        # fallback_trigger must not be set on normal path
+        assert res.diagnostics is not None
+        assert "fallback_trigger" not in res.diagnostics
+        assert res.diagnostics["requested_session_id"] == "ses_old123"
+        assert res.diagnostics["returned_session_id"] == "ses_old123"
+
+
+def test_opencode_backend_false_positive_stdout_plain_ignored_on_success(test_project):
+    """Regression: plain stdout containing 'session not found' with exit 0 must NOT fallback."""
+    be = backend.OpenCodeCliBackend()
+    success_json = (
+        '{"sessionID": "ses_old123", "part": {"type": "text", "text": "Session not found is mentioned in docs but run succeeded"}}'
+    )
+    # Even if stdout plain line contains the phrase outside JSON, exit 0 prevents fallback.
+    # Construct stdout where a non-JSON line contains phrase.
+    mixed_stdout = success_json + "\nSession not found in prior analysis (plain line)"
+    with patch.object(
+        be, "_run_subprocess", return_value=(0, mixed_stdout, "", False)
+    ) as mock_run:
+        res = be.execute(test_project["repo_path"], "prompt", external_session_id="ses_old123")
+        assert mock_run.call_count == 1
+        assert res.session_recreated is False
+        assert res.exit_code == 0
+
+
+def test_opencode_backend_true_session_not_found_via_structured_error(test_project):
+    """True not-found via structured_error: exit !=0 + JSON error event triggers retry."""
+    be = backend.OpenCodeCliBackend()
+    # structured_error is produced from JSON line with type error
+    error_json = '{"type": "error", "error": "Session not found: ses_old123"}'
+    retry_json = '{"sessionID": "ses_new999", "part": {"type": "text", "text": "recovered via structured"}}'
+    with patch.object(
+        be,
+        "_run_subprocess",
+        side_effect=[
+            (1, error_json, "", False),
+            (0, retry_json, "", False),
+        ],
+    ) as mock_run:
+        res = be.execute(test_project["repo_path"], "prompt", external_session_id="ses_old123")
+        assert mock_run.call_count == 2
+        assert res.session_recreated is True
+        assert res.external_session_id == "ses_new999"
+        assert res.exit_code == 0
+        assert res.diagnostics is not None
+        assert res.diagnostics["fallback_trigger"] == "structured_error"
+        assert res.diagnostics["first_attempt_exit_code"] == 1
+        assert "Session not found" in res.diagnostics["first_attempt_stderr_snippet"]
+        # ensure retry used no --session
+        argv2 = mock_run.call_args_list[1][0][0]
+        assert "--session" not in argv2
+
+
+def test_opencode_backend_true_session_not_found_via_stderr(test_project):
+    """True not-found via stderr: exit !=0 + stderr contains phrase triggers retry."""
+    be = backend.OpenCodeCliBackend()
+    first_stderr = "Error: Session not found for ses_old123"
+    retry_json = '{"sessionID": "ses_new888", "part": {"type": "text", "text": "recovered via stderr"}}'
+    with patch.object(
+        be,
+        "_run_subprocess",
+        side_effect=[
+            (1, "", first_stderr, False),
+            (0, retry_json, "", False),
+        ],
+    ) as mock_run:
+        res = be.execute(test_project["repo_path"], "prompt", external_session_id="ses_old123")
+        assert mock_run.call_count == 2
+        assert res.session_recreated is True
+        assert res.external_session_id == "ses_new888"
+        assert res.diagnostics["fallback_trigger"] == "stderr"
+        assert res.diagnostics["first_attempt_exit_code"] == 1
+
+
+def test_codex_backend_false_positive_tool_output_ignored_on_success(test_project):
+    """Codex: exit 0 + JSON tool output containing 'thread not found' must NOT trigger fallback."""
+    be = backend.CodexCliBackend()
+    success_json = (
+        '{"type": "thread.started", "thread_id": "th_old123"}\n'
+        '{"type": "tool", "tool": "read", "output": "if \\"thread not found\\" in clean_combined"}'
+    )
+    with patch.object(
+        be, "_run_subprocess", return_value=(0, success_json, "", False)
+    ) as mock_run:
+        res = be.execute(test_project["repo_path"], "prompt", external_session_id="th_old123")
+        assert mock_run.call_count == 1
+        assert res.session_recreated is False
+        assert res.external_session_id == "th_old123"
+        assert res.exit_code == 0
+
+
+def test_coding_turn_picks_up_external_session_id_updated_before_first_cli(test_project):
+    """High回帰: 初回CLI直前にDBが更新された場合、到達不能だった cli_count==0 分岐が cli_count==1 で正しくDB値を採用すること."""
+    app = create_app(token="test-token")
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer test-token"}
+    res = client.post(
+        "/api/v1/coding/sessions",
+        headers=headers,
+        json={"project_id": test_project["project_id"], "backend": "opencode", "title": "ExternalIdSync"},
+    )
+    assert res.status_code == 200
+    sid = res.json()["session_id"]
+    # 初期外部IDを古い値でセット
+    store.update_session_external_id(sid, "ses_old_external")
+
+    async def mock_gen(*args, **kwargs):
+        history = kwargs.get("history", [])
+        if any(h.get("role") == "worker" for h in history):
+            return "完了しました。"
+        return "解析\n<cli_request>\nfirst cli\n</cli_request>"
+
+    # DB更新を模擬: ターン開始後の初回 store.get_session 呼び出しで新しいIDを返す
+    real_get_session = store.get_session
+    call_count = {"n": 0}
+
+    def fake_get_session(session_id, conn=None):
+        # session_id が対象のときのみ介入、それ以外は素通し
+        if session_id != sid:
+            return real_get_session(session_id, conn=conn)
+        call_count["n"] += 1
+        sess = real_get_session(session_id, conn=conn)
+        if sess is None:
+            return None
+        # 1回目: run_coding_turn_stream の冒頭 session 取得 -> 古いIDのまま
+        if call_count["n"] == 1:
+            sess = dict(sess)
+            sess["external_session_id"] = "ses_old_external"
+            return sess
+        # 2回目以降: 初回CLI直前の db_session 取得 -> 新しいID
+        sess = dict(sess)
+        sess["external_session_id"] = "ses_new_external"
+        return sess
+
+    mock_result = backend.CodingBackendResult(
+        external_session_id="ses_new_external",
+        output="ok after sync",
+        exit_code=0,
+        diagnostics={
+            "cwd": test_project["repo_path"],
+            "requested_session_id": "ses_new_external",
+            "returned_session_id": "ses_new_external",
+            "tool_call_count": 0,
+            "tool_failure_count": 0,
+            "structured_error": None,
+            "auto_rejected_permission": False,
+            "exit_code": 0,
+            "model": "test",
+            "variant": "なし",
+            "session_recreated": False,
+        },
+    )
+
+    with patch(
+        "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response",
+        side_effect=mock_gen,
+    ), patch("obsidian_ai_hub.coding.store.get_session", side_effect=fake_get_session), patch(
+        "obsidian_ai_hub.coding.backend.OpenCodeCliBackend.execute", return_value=mock_result
+    ) as mock_exec:
+        res = client.post(
+            f"/api/v1/coding/sessions/{sid}/messages/stream",
+            headers=headers,
+            json={"content": "外部ID同期テスト"},
+        )
+        assert res.status_code == 200
+        # backend にはDB更新後の新しいIDが渡されていること（到達不能バグでは古いIDが渡る）
+        assert mock_exec.call_count == 1
+        assert mock_exec.call_args[1]["external_session_id"] == "ses_new_external"

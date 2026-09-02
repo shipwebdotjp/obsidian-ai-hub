@@ -131,9 +131,15 @@ def run_migration_v9(conn: sqlite3.Connection) -> None:
     """)
 
     # 6. Create indexes
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_sp_project_id ON summary_projects(project_id);")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_spc_candidate_id ON summary_project_candidates(candidate_id);")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_pc_normalized_name ON project_candidates(normalized_name);")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_sp_project_id ON summary_projects(project_id);"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_spc_candidate_id ON summary_project_candidates(candidate_id);"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_pc_normalized_name ON project_candidates(normalized_name);"
+    )
 
     conn.execute("PRAGMA user_version = 9;")
     conn.commit()
@@ -501,6 +507,9 @@ def get_db_connection() -> sqlite3.Connection:
     if current_version <= 28:
         run_migration_v29(conn)
 
+    if current_version <= 29:
+        run_migration_v30(conn)
+
     return conn
 
 
@@ -511,7 +520,9 @@ def run_migration_v14(conn: sqlite3.Connection) -> None:
     except sqlite3.OperationalError:
         pass
     try:
-        conn.execute("ALTER TABLE research_jobs ADD COLUMN is_published INTEGER NOT NULL DEFAULT 0;")
+        conn.execute(
+            "ALTER TABLE research_jobs ADD COLUMN is_published INTEGER NOT NULL DEFAULT 0;"
+        )
     except sqlite3.OperationalError:
         pass
     conn.execute("PRAGMA user_version = 14;")
@@ -539,7 +550,9 @@ def run_migration_v15(conn: sqlite3.Connection) -> None:
         _ignore_duplicate_schema_object(e)
     # hitl_questions: add sequence, title, prompt, context_json
     try:
-        conn.execute("ALTER TABLE hitl_questions ADD COLUMN sequence INTEGER NOT NULL DEFAULT 0;")
+        conn.execute(
+            "ALTER TABLE hitl_questions ADD COLUMN sequence INTEGER NOT NULL DEFAULT 0;"
+        )
     except sqlite3.OperationalError as e:
         _ignore_duplicate_schema_object(e)
     try:
@@ -554,7 +567,9 @@ def run_migration_v15(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE hitl_questions ADD COLUMN context_json TEXT;")
     except sqlite3.OperationalError as e:
         _ignore_duplicate_schema_object(e)
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_hitl_questions_set_seq ON hitl_questions(run_id, question_set_id, sequence);")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_hitl_questions_set_seq ON hitl_questions(run_id, question_set_id, sequence);"
+    )
     # research_themes: add origin and hitl_run_id
     try:
         conn.execute("ALTER TABLE research_themes ADD COLUMN origin TEXT;")
@@ -584,7 +599,12 @@ def run_migration_v17(conn: sqlite3.Connection) -> None:
     Feedback is only populated for auto_suggestion themes that flow through the
     HITL confirmation (research.run_approved_suggestion).
     """
-    for column in ("feedback_decision", "feedback_reason", "feedback_comment", "feedback_at"):
+    for column in (
+        "feedback_decision",
+        "feedback_reason",
+        "feedback_comment",
+        "feedback_at",
+    ):
         try:
             conn.execute(f"ALTER TABLE research_themes ADD COLUMN {column} TEXT;")
         except sqlite3.OperationalError as e:
@@ -703,9 +723,15 @@ def run_migration_v21(conn: sqlite3.Connection) -> None:
             FOREIGN KEY(assistant_message_id) REFERENCES agent_messages(message_id) ON DELETE CASCADE
         );
     """)
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_agent_sessions_agent_id ON agent_sessions(agent_id);")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_agent_messages_session_seq ON agent_messages(session_id, sequence);")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_agent_runs_session_id ON agent_runs(session_id);")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_agent_sessions_agent_id ON agent_sessions(agent_id);"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_agent_messages_session_seq ON agent_messages(session_id, sequence);"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_agent_runs_session_id ON agent_runs(session_id);"
+    )
 
     conn.execute("PRAGMA user_version = 21;")
     conn.commit()
@@ -860,9 +886,15 @@ def run_migration_v27(conn: sqlite3.Connection) -> None:
             FOREIGN KEY(worker_message_id) REFERENCES coding_messages(message_id) ON DELETE CASCADE
         );
     """)
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_coding_sessions_project_id ON coding_sessions(project_id);")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_coding_messages_session_seq ON coding_messages(session_id, sequence);")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_coding_runs_session_id ON coding_runs(session_id);")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_coding_sessions_project_id ON coding_sessions(project_id);"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_coding_messages_session_seq ON coding_messages(session_id, sequence);"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_coding_runs_session_id ON coding_runs(session_id);"
+    )
 
     conn.execute("PRAGMA user_version = 27;")
     conn.commit()
@@ -871,9 +903,7 @@ def run_migration_v27(conn: sqlite3.Connection) -> None:
 def run_migration_v28(conn: sqlite3.Connection) -> None:
     """Run migration for version 28 (coding_sessions.tool_ids_json and coding_settings table)."""
     try:
-        conn.execute(
-            "ALTER TABLE coding_sessions ADD COLUMN tool_ids_json TEXT;"
-        )
+        conn.execute("ALTER TABLE coding_sessions ADD COLUMN tool_ids_json TEXT;")
     except sqlite3.OperationalError as e:
         _ignore_duplicate_schema_object(e)
 
@@ -892,13 +922,52 @@ def run_migration_v28(conn: sqlite3.Connection) -> None:
 def run_migration_v29(conn: sqlite3.Connection) -> None:
     """Run migration for version 29 (coding_runs.diagnostics_json TEXT column)."""
     try:
-        conn.execute(
-            "ALTER TABLE coding_runs ADD COLUMN diagnostics_json TEXT;"
-        )
+        conn.execute("ALTER TABLE coding_runs ADD COLUMN diagnostics_json TEXT;")
     except sqlite3.OperationalError as e:
         _ignore_duplicate_schema_object(e)
 
     conn.execute("PRAGMA user_version = 29;")
+    conn.commit()
+
+
+def run_migration_v30(conn: sqlite3.Connection) -> None:
+    """Run migration for version 30 (P1-2 worker message orphan fix).
+
+    - Adds coding_messages.run_id (nullable FK) to link each message to its run.
+    - Creates junction table coding_run_worker_messages for ordered history
+      when multiple worker messages belong to one run (previously only last was kept
+      via coding_runs.worker_message_id). Dual-write ensures backward compatibility:
+      existing code reading worker_message_id still sees last message, while
+      new code can list all via run_id.
+    """
+    try:
+        conn.execute(
+            "ALTER TABLE coding_messages ADD COLUMN run_id TEXT REFERENCES coding_runs(run_id) ON DELETE SET NULL;"
+        )
+    except sqlite3.OperationalError as e:
+        _ignore_duplicate_schema_object(e)
+    try:
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_coding_messages_run_id ON coding_messages(run_id);"
+        )
+    except sqlite3.OperationalError as e:
+        _ignore_duplicate_schema_object(e)
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS coding_run_worker_messages (
+            run_id TEXT NOT NULL,
+            message_id TEXT NOT NULL,
+            seq INTEGER NOT NULL,
+            PRIMARY KEY (run_id, message_id),
+            FOREIGN KEY(run_id) REFERENCES coding_runs(run_id) ON DELETE CASCADE,
+            FOREIGN KEY(message_id) REFERENCES coding_messages(message_id) ON DELETE CASCADE
+        );
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_crw_run_seq ON coding_run_worker_messages(run_id, seq);"
+    )
+    conn.execute("PRAGMA user_version = 30;")
     conn.commit()
 
 
@@ -936,8 +1005,12 @@ def run_migration_v20(conn: sqlite3.Connection) -> None:
             rejected_at       TEXT
         );
     """)
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_pp_status ON planner_proposals(status);")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_pp_created_at ON planner_proposals(created_at);")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_pp_status ON planner_proposals(status);"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_pp_created_at ON planner_proposals(created_at);"
+    )
     conn.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_pp_active_fingerprint "
         "ON planner_proposals(fingerprint) WHERE status IN ('proposed', 'promoted');"
@@ -983,9 +1056,15 @@ def run_migration_v13(conn: sqlite3.Connection) -> None:
             UNIQUE(run_id, question_set_id, question_key)
         );
     """)
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_hitl_runs_status ON hitl_runs(status);")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_hitl_questions_run_set ON hitl_questions(run_id, question_set_id);")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_hitl_questions_status ON hitl_questions(status);")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_hitl_runs_status ON hitl_runs(status);"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_hitl_questions_run_set ON hitl_questions(run_id, question_set_id);"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_hitl_questions_status ON hitl_questions(status);"
+    )
     conn.execute("PRAGMA user_version = 13;")
     conn.commit()
 
@@ -1029,9 +1108,15 @@ def run_migration_v10(conn: sqlite3.Connection) -> None:
             FOREIGN KEY(run_id) REFERENCES command_runs(run_id) ON DELETE CASCADE
         );
     """)
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_command_runs_status_started ON command_runs(status, started_at DESC);")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_llm_call_logs_status_started ON llm_call_logs(status, started_at DESC);")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_llm_call_logs_run_id_started ON llm_call_logs(run_id, started_at);")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_command_runs_status_started ON command_runs(status, started_at DESC);"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_llm_call_logs_status_started ON llm_call_logs(status, started_at DESC);"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_llm_call_logs_run_id_started ON llm_call_logs(run_id, started_at);"
+    )
     conn.execute("PRAGMA user_version = 10;")
     conn.commit()
 
@@ -1050,8 +1135,6 @@ def run_migration_v11(conn: sqlite3.Connection) -> None:
 
 def run_migration_v12(conn: sqlite3.Connection) -> None:
     """Add note column to summary_projects for per-project activity notes."""
-    conn.execute(
-        "ALTER TABLE summary_projects ADD COLUMN note TEXT;"
-    )
+    conn.execute("ALTER TABLE summary_projects ADD COLUMN note TEXT;")
     conn.execute("PRAGMA user_version = 12;")
     conn.commit()
