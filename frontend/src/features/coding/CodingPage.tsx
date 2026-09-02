@@ -169,8 +169,13 @@ export default function CodingPage() {
     try {
       const data = await listCodingProjects();
       setProjects(data);
-      if (data.length > 0 && selectedProjectId === null) {
-        setSelectedProjectId(data[0].project.project_id);
+      const valid = data.filter((item) => item.is_valid_git_repo === true);
+      if (valid.length > 0) {
+        if (selectedProjectId === null || !valid.some((v) => v.project.project_id === selectedProjectId)) {
+          setSelectedProjectId(valid[0].project.project_id);
+        }
+      } else {
+        setSelectedProjectId(null);
       }
     } catch (e: any) {
       setError(e.message || "プロジェクト一覧の取得に失敗しました");
@@ -490,7 +495,8 @@ export default function CodingPage() {
     }
   };
 
-  const selectedProjectItem = projects.find(
+  const validProjects = projects.filter((p) => p.is_valid_git_repo === true);
+  const selectedProjectItem = validProjects.find(
     (p) => p.project.project_id === selectedProjectId,
   );
   const selectedSession = sessions.find((s) => s.session_id === selectedSessionId);
@@ -532,9 +538,11 @@ export default function CodingPage() {
                 </div>
                 {loadingProjects ? (
                   <div className="p-2 text-xs text-slate-500">読み込み中...</div>
+                ) : validProjects.length === 0 ? (
+                  <div className="p-2 text-xs text-slate-500">プロジェクトがありません</div>
                 ) : (
                   <div className="space-y-1">
-                    {projects.map((item) => {
+                    {validProjects.map((item) => {
                       const isSelected = item.project.project_id === selectedProjectId;
                       return (
                         <button
@@ -549,20 +557,7 @@ export default function CodingPage() {
                               : "text-slate-700 hover:bg-slate-100"
                           }`}
                         >
-                          <div className="flex items-center justify-between">
-                            <span className="truncate">{item.project.display_name}</span>
-                            <span
-                              className={`ml-1 rounded px-1.5 py-0.5 text-[10px] font-medium ${
-                                item.is_valid_git_repo
-                                  ? isSelected
-                                    ? "bg-slate-700 text-slate-200"
-                                    : "bg-emerald-100 text-emerald-800"
-                                  : "bg-amber-100 text-amber-800"
-                              }`}
-                            >
-                              {item.is_valid_git_repo ? "Git OK" : "無効"}
-                            </span>
-                          </div>
+                          <span className="truncate">{item.project.display_name}</span>
                         </button>
                       );
                     })}
@@ -579,12 +574,11 @@ export default function CodingPage() {
                   {selectedProjectItem && (
                     <button
                       type="button"
-                      disabled={!selectedProjectItem.is_valid_git_repo}
                       onClick={() => {
                         setIsNewSessionModalOpen(true);
                         setMobileDrawerOpen(false);
                       }}
-                      className="rounded bg-slate-900 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-slate-800 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+                      className="rounded bg-slate-900 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-slate-800 cursor-pointer"
                     >
                       + 新規
                     </button>
@@ -641,11 +635,11 @@ export default function CodingPage() {
         <div className="flex-1 overflow-y-auto p-2">
           {loadingProjects ? (
             <div className="p-3 text-xs text-slate-500">読み込み中...</div>
-          ) : projects.length === 0 ? (
+          ) : validProjects.length === 0 ? (
             <div className="p-3 text-xs text-slate-500">プロジェクトがありません</div>
           ) : (
             <div className="space-y-1">
-              {projects.map((item) => {
+              {validProjects.map((item) => {
                 const isSelected = item.project.project_id === selectedProjectId;
                 return (
                   <button
@@ -658,20 +652,7 @@ export default function CodingPage() {
                         : "text-slate-700 hover:bg-slate-100"
                     }`}
                   >
-                    <div className="flex items-center justify-between">
-                      <span className="truncate">{item.project.display_name}</span>
-                      <span
-                        className={`ml-1 rounded px-1.5 py-0.5 text-[10px] font-medium ${
-                          item.is_valid_git_repo
-                            ? isSelected
-                              ? "bg-slate-700 text-slate-200"
-                              : "bg-emerald-100 text-emerald-800"
-                            : "bg-amber-100 text-amber-800"
-                        }`}
-                      >
-                        {item.is_valid_git_repo ? "Git OK" : "無効"}
-                      </span>
-                    </div>
+                    <span className="truncate">{item.project.display_name}</span>
                     {item.project.domain && (
                       <div className={`mt-0.5 text-[10px] ${isSelected ? "text-slate-300" : "text-slate-400"}`}>
                         {item.project.domain} • {item.project.status}
@@ -701,14 +682,9 @@ export default function CodingPage() {
             {selectedProjectItem && (
               <button
                 type="button"
-                disabled={!selectedProjectItem.is_valid_git_repo}
                 onClick={() => setIsNewSessionModalOpen(true)}
-                className="rounded bg-slate-900 px-3 py-1 text-sm font-medium text-white hover:bg-slate-800 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
-                title={
-                  !selectedProjectItem.is_valid_git_repo
-                    ? "Gitリポジトリが無効なためセッションを作成できません"
-                    : "新規セッション作成"
-                }
+                className="rounded bg-slate-900 px-3 py-1 text-sm font-medium text-white hover:bg-slate-800 cursor-pointer"
+                title="新規セッション作成"
               >
                 + 新規
               </button>
@@ -716,14 +692,6 @@ export default function CodingPage() {
           </div>
         </div>
 
-        {selectedProjectItem && !selectedProjectItem.is_valid_git_repo && (
-          <div className="m-2 rounded bg-amber-50 p-2.5 text-xs text-amber-800 border border-amber-200">
-            <strong>Gitリポジトリが無効です</strong>
-            <p className="mt-1 text-[11px]">
-              {selectedProjectItem.error_message || "project_path がGitルートではありません"}
-            </p>
-          </div>
-        )}
 
         <div className="flex-1 overflow-y-auto p-2">
           {loadingSessions ? (
