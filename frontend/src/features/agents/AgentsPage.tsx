@@ -381,7 +381,12 @@ export default function AgentsPage() {
           setMessages([]);
         }
       } else if (res.sessions.length > 0) {
-        setSelectedSessionId(res.sessions[0].session_id);
+        setSelectedSessionId((prev) => {
+          if (prev && res.sessions.some((s) => s.session_id === prev)) {
+            return prev;
+          }
+          return res.sessions[0].session_id;
+        });
       } else {
         setSelectedSessionId(null);
         setMessages([]);

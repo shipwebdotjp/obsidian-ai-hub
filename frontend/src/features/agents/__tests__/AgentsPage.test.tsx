@@ -1437,6 +1437,150 @@ describe("AgentsPage", () => {
     });
   });
 
+  it("keeps current session selected after stream completes even when session list order changes (regression)", async () => {
+    const user = userEvent.setup();
+    const otherSession = {
+      ...sampleSession,
+      session_id: "asess_789",
+      title: "別の会話",
+      pinned_at: null,
+      updated_at: "2026-08-20T00:00:00Z",
+    };
+    const pinnedSession = {
+      ...sampleSession,
+      session_id: "asess_999",
+      title: "ピン留めされた会話",
+      pinned_at: "2026-08-25T00:00:00Z",
+      updated_at: "2026-08-25T00:00:00Z",
+    };
+
+    // Initial load: selected is sampleSession (first)
+    mockListSessions
+      .mockResolvedValueOnce({ sessions: [sampleSession, otherSession] })
+      // After stream, pinned session appears first due to ordering
+      .mockResolvedValue({ sessions: [pinnedSession, sampleSession, otherSession] });
+
+    // Ensure detail for stream session returns consistent messages
+    mockGetSessionDetail.mockImplementation(async (sessionId: string) => {
+      if (sessionId === sampleSession.session_id) {
+        return {
+          session: sampleSession,
+          agent: sampleAgent,
+          messages: [
+            {
+              message_id: "msg_1",
+              session_id: sampleSession.session_id,
+              sequence: 1,
+              role: "user",
+              content: "こんにちは",
+              created_at: "2026-08-20T00:00:00Z",
+            },
+            {
+              message_id: "msg_2",
+              session_id: sampleSession.session_id,
+              sequence: 2,
+              role: "assistant",
+              content: "こんにちは！何かお手伝いできますか？",
+              created_at: "2026-08-20T00:00:01Z",
+            },
+            {
+              message_id: "msg_3",
+              session_id: sampleSession.session_id,
+              sequence: 3,
+              role: "assistant",
+              content: "ストリーム完了後の確定本文",
+              created_at: new Date().toISOString(),
+            },
+          ],
+          runs: [],
+        };
+      }
+      if (sessionId === pinnedSession.session_id) {
+        return {
+          session: pinnedSession,
+          agent: sampleAgent,
+          messages: [
+            {
+              message_id: "msg_pinned_1",
+              session_id: pinnedSession.session_id,
+              sequence: 1,
+              role: "assistant",
+              content: "ピン留め会話の内容",
+              created_at: "2026-08-25T00:00:00Z",
+            },
+          ],
+          runs: [],
+        };
+      }
+      return {
+        session: otherSession,
+        agent: sampleAgent,
+        messages: [],
+        runs: [],
+      };
+    });
+
+    mockStreamMessage.mockImplementation(
+      async (sessionId, _content, onEvent) => {
+        onEvent({ type: "text", delta: "応答" });
+        onEvent({
+          type: "done",
+          message: {
+            message_id: "msg_3",
+            session_id: sessionId,
+            sequence: 3,
+            role: "assistant",
+            content: "ストリーム完了後の確定本文",
+            created_at: new Date().toISOString(),
+          },
+          run: {
+            run_id: "arun_stream_regression",
+            session_id: sessionId,
+            user_message_id: "msg_2",
+            assistant_message_id: "msg_3",
+            status: "succeeded",
+            used_tools: [],
+            created_hitl_run_ids: [],
+            error_message: null,
+            started_at: "",
+            finished_at: "",
+          },
+          hitl_run_ids: [],
+        });
+      }
+    );
+
+    render(
+      <MemoryRouter>
+        <AgentsPage />
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByText("こんにちは！何かお手伝いできますか？")).toBeInTheDocument();
+    // Verify initial selection is sampleSession
+    expect(screen.getByText("明日の予定").closest('[data-selected="true"]')).not.toBeNull();
+
+    const input = screen.getByPlaceholderText(/^メッセージを入力/);
+    await user.type(input, "テスト");
+    await user.click(screen.getByRole("button", { name: "送信" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("ストリーム完了後の確定本文")).toBeInTheDocument();
+    });
+
+    // After stream, the pinned session is now first, but selection must stay on original
+    await waitFor(() => {
+      expect(mockListSessions).toHaveBeenCalledTimes(2);
+    });
+    // Pinned session exists in list but must NOT be selected
+    const pinnedRow = screen.getByText("ピン留めされた会話").closest('[data-selected]');
+    expect(pinnedRow?.getAttribute("data-selected")).toBe("false");
+    const selectedRow = screen.getByText("明日の予定").closest('[data-selected]');
+    expect(selectedRow?.getAttribute("data-selected")).toBe("true");
+    // Ensure pinned conversation content is not shown
+    expect(screen.queryByText("ピン留め会話の内容")).not.toBeInTheDocument();
+  });
+
   it("shows pinned state on the pin button when agent is pinned", async () => {
     const pinnedAgent = { ...sampleAgent, pinned_at: "2026-08-25T00:00:00Z" };
     mockListAgents.mockResolvedValue({ agents: [pinnedAgent] });
