@@ -325,6 +325,33 @@ def main():
         action="store_true",
         help="Apple Health exportをhealthcare.sqlite3にインポート（分離DB・全種raw・ECGファイル参照）",
     )
+    # AI Agent Chat command
+    parser.add_argument(
+        "--agent-chat",
+        action="store_true",
+        help="AI エージェントへ1ターンメッセージを送信し会話・実行記録を永続化",
+    )
+    parser.add_argument(
+        "--agent-id",
+        type=str,
+        help="--agent-chat で使用する対象エージェントID (必須)",
+    )
+    parser.add_argument(
+        "--agent-prompt",
+        type=str,
+        help="--agent-chat で送信するメッセージ本文。未指定時は標準入力全文を使用",
+    )
+    parser.add_argument(
+        "--resume-session",
+        type=str,
+        help="--agent-chat で再開する既存セッションID (任意)",
+    )
+    parser.add_argument(
+        "--agent-output",
+        choices=("text", "json"),
+        default="text",
+        help="--agent-chat の出力形式 (既定: text)",
+    )
     parser.add_argument(
         "--healthcare-export-dir",
         type=str,
@@ -364,6 +391,13 @@ def main():
                     execution_logger.suppress_command_run(run_id)
                 execution_logger.upsert_task_state(task_id, result=res if isinstance(res, dict) else None)
             return res
+        except SystemExit as e:
+            if e.code is not None and e.code != 0:
+                print(f"[ERROR] {name}: SystemExit({e.code})")
+                execution_logger.fail_command_run(run_id, e)
+                if task_id is not None:
+                    execution_logger.upsert_task_state(task_id, error=e)
+            raise
         except Exception as e:
             print(f"[ERROR] {name}: {type(e).__name__}")
             execution_logger.fail_command_run(run_id, e)
@@ -373,6 +407,49 @@ def main():
         finally:
             print(f"[END] {name} at {datetime.now().isoformat()}")
             execution_logger.current_run_id.reset(token)
+
+    if getattr(args, "agent_chat", False):
+        if not args.agent_id:
+            parser.error("--agent-chat requires --agent-id AGENT_ID")
+
+        other_action_flags = [
+            args.merge_inbox,
+            args.make_target,
+            args.write_today_schedule,
+            args.summerize_week,
+            args.review_draft,
+            args.summerize_month,
+            args.summerize_day,
+            args.backup,
+            args.notify_today_schedule,
+            args.sync_knowledge,
+            args.sync_vault,
+            args.sync_people,
+            args.rebuild_vault,
+            args.research_agent,
+            args.add_research_theme,
+            args.suggest_research_theme,
+            args.generate_planner_proposals,
+            args.screenshot,
+            args.scan_line_inbox,
+            args.log_activity,
+            args.vault_search,
+            args.memory_extract,
+            args.memory_interview,
+            args.memory_review,
+            args.memory_delete,
+            args.memory_compile,
+            getattr(args, "render_copilot_profile", False),
+            args.serve,
+            args.hitl_dispatch,
+            getattr(args, "hitl_worker", False),
+            getattr(args, "memory_maintain", False),
+            getattr(args, "cleanup_line_webhooks", False),
+            getattr(args, "cleanup_execution_logs", False),
+            getattr(args, "import_apple_health", False),
+        ]
+        if any(other_action_flags):
+            parser.error("--agent-chat cannot be combined with other execution flags")
 
     if args.research_agent and args.add_research_theme:
         parser.error("--research-agent and --add-research-theme cannot be combined")
@@ -671,6 +748,24 @@ def main():
             _healthcare_main,
             "import_apple_health",
             {"export_dir": str(export_dir), "batch_size": batch_size, "dry_run": dry_run},
+        )
+        ran = True
+    if getattr(args, "agent_chat", False):
+        from obsidian_ai_hub.agents.cli import main_agent_chat
+
+        run_and_log(
+            lambda: main_agent_chat(
+                agent_id=args.agent_id,
+                prompt=args.agent_prompt,
+                resume_session=args.resume_session,
+                output_format=args.agent_output,
+            ),
+            "agent_chat",
+            {
+                "agent_id": args.agent_id,
+                "resume_session": args.resume_session,
+                "output_format": args.agent_output,
+            },
         )
         ran = True
     if not ran:

@@ -141,10 +141,11 @@ async def stream_session_message(
     content: str,
     images: Optional[List[Dict[str, Any]]] = None,
 ) -> AsyncGenerator[str, None]:
+    from obsidian_ai_hub.agents.service import prepare_session_turn
+
     session = store.get_session(session_id)
     if not session:
         raise FileNotFoundError(f"Session '{session_id}' not found.")
-    agent = get_agent(session["agent_id"])
 
     normalized_attachments: List[Dict[str, Any]] = []
     if images:
@@ -152,10 +153,12 @@ async def stream_session_message(
             if isinstance(item, dict):
                 normalized_attachments.append(item)
 
-    _user_msg, run = store.start_user_run(
-        session_id, content, attachments=normalized_attachments or None
+    session, agent, run, history_messages = prepare_session_turn(
+        agent_id=session["agent_id"],
+        prompt=content,
+        resume_session_id=session_id,
+        attachments=normalized_attachments or None,
     )
-    history_messages = store.list_messages(session_id)
 
     async for chunk in runtime.generate_agent_stream(
         agent=agent,

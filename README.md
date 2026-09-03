@@ -250,6 +250,26 @@ older than 30 days.
 ```bash
 python -m obsidian_ai_hub --cleanup-line-webhooks
 python -m obsidian_ai_hub --cleanup-execution-logs
+
+### AI Agent Chat CLI
+
+Send a single-turn message to an existing AI agent, creating or resuming a session and persisting conversation history and run records.
+
+```bash
+# New conversation session with an agent
+python -m obsidian_ai_hub --agent-chat --agent-id agent_1234567890ab --agent-prompt "こんにちは"
+
+# Read prompt from stdin
+cat prompt.txt | python -m obsidian_ai_hub --agent-chat --agent-id agent_1234567890ab
+
+# Resume an existing conversation session
+python -m obsidian_ai_hub --agent-chat --agent-id agent_1234567890ab \
+  --resume-session asess_1234567890ab --agent-prompt "前回の続きを教えてください"
+
+# Output single JSON object on completion
+python -m obsidian_ai_hub --agent-chat --agent-id agent_1234567890ab \
+  --agent-prompt "要約してください" --agent-output json
+```
 ```
 
 ## Long-Term Memory
