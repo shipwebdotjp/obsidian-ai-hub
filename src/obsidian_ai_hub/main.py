@@ -391,6 +391,13 @@ def main():
                     execution_logger.suppress_command_run(run_id)
                 execution_logger.upsert_task_state(task_id, result=res if isinstance(res, dict) else None)
             return res
+        except SystemExit as e:
+            if e.code is not None and e.code != 0:
+                print(f"[ERROR] {name}: SystemExit({e.code})")
+                execution_logger.fail_command_run(run_id, e)
+                if task_id is not None:
+                    execution_logger.upsert_task_state(task_id, error=e)
+            raise
         except Exception as e:
             print(f"[ERROR] {name}: {type(e).__name__}")
             execution_logger.fail_command_run(run_id, e)
