@@ -23,7 +23,7 @@ import {
   type CodingSessionDetail,
 } from "../../api/coding";
 import MarkdownPreview from "../../components/MarkdownPreview";
-import { formatDateTime } from "../../utils/date";
+import { formatDateTime, formatYmdWithDow } from "../../utils/date";
 import {
   getChatInputPlaceholder,
   shouldSendOnEnter,
@@ -660,7 +660,7 @@ export default function CodingPage() {
             <button
               type="button"
               onClick={() => setLeftPaneCollapsed(true)}
-              className="rounded p-1 text-slate-500 hover:bg-slate-100 cursor-pointer"
+              className="rounded p-1 bg-slate-900 text-white hover:bg-slate-800 cursor-pointer"
               aria-label="サイドバーを畳む"
             >
               <ChevronLeft className="h-4 w-4" />
@@ -712,7 +712,7 @@ export default function CodingPage() {
                 <button
                   type="button"
                   onClick={handleOpenUserDefaults}
-                  className="rounded border border-slate-300 bg-white px-2 py-1 text-[11px] text-slate-700 hover:bg-slate-100 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="rounded border border-slate-300 bg-slate-900 text-white px-2 py-1 text-[11px] hover:bg-slate-800 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                   title="ユーザー既定の利用可能ツール設定"
                 >
                   既定設定
@@ -721,7 +721,7 @@ export default function CodingPage() {
                   <button
                     type="button"
                     onClick={() => setIsNewSessionModalOpen(true)}
-                    className="rounded bg-slate-900 px-2 py-1 text-[11px] font-medium text-white hover:bg-slate-800 cursor-pointer"
+                    className="rounded bg-blue-600 px-3 py-1 text-sm font-medium text-white hover:bg-blue-700 cursor-pointer"
                     title="新規セッション作成"
                   >
                     + 新規
@@ -740,12 +740,21 @@ export default function CodingPage() {
               ) : (
                 sessions.map((sess) => {
                   const isSelected = sess.session_id === selectedSessionId;
-                  const dateStr = sess.created_at ? new Date(sess.created_at).toLocaleDateString() : "";
+                  const dateStr = sess.created_at ? formatYmdWithDow(sess.created_at.slice(0, 10)) : "";
                   return (
                     <div
                       key={sess.session_id}
+                      data-testid="memory-row"
                       data-selected={isSelected}
+                      role="button"
+                      tabIndex={0}
                       onClick={() => setSelectedSessionId(sess.session_id)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          setSelectedSessionId(sess.session_id);
+                        }
+                      }}
                       className={`group flex cursor-pointer items-center justify-between rounded px-3 py-2 text-xs transition-colors ${
                         isSelected
                           ? "bg-slate-200 border-l-4 border-slate-800 font-medium text-slate-900"
@@ -805,7 +814,7 @@ export default function CodingPage() {
               <button
                 type="button"
                 onClick={() => setLeftPaneCollapsed(false)}
-                className="hidden items-center gap-1 rounded border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50 cursor-pointer lg:inline-flex"
+                className="hidden items-center gap-1 rounded border border-slate-300 bg-slate-900 text-white px-3 py-1.5 text-xs hover:bg-slate-800 cursor-pointer lg:inline-flex"
                 aria-label="サイドバーを展開"
               >
                 <ChevronRight className="h-3.5 w-3.5" />
@@ -839,7 +848,7 @@ export default function CodingPage() {
                     <button
                       type="button"
                       onClick={() => setLeftPaneCollapsed(false)}
-                      className="hidden h-8 w-8 items-center justify-center rounded border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 cursor-pointer lg:inline-flex shrink-0"
+                      className="hidden h-8 w-8 items-center justify-center rounded border border-slate-300 bg-slate-900 text-white hover:bg-slate-800 cursor-pointer lg:inline-flex shrink-0"
                       aria-label="サイドバーを展開"
                     >
                       <ChevronRight className="h-4 w-4" />
