@@ -29,6 +29,7 @@ import {
   shouldSendOnEnter,
   useChatSendMode,
 } from "../settings/chatSendMode";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 
 export default function CodingPage() {
   const [projects, setProjects] = useState<CodingProjectItem[]>([]);
@@ -47,7 +48,8 @@ export default function CodingPage() {
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Mobile drawer state
+  // Desktop left pane collapse & mobile drawer state
+  const [leftPaneCollapsed, setLeftPaneCollapsed] = useState(false);
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
   const drawerCloseBtnRef = useRef<HTMLButtonElement>(null);
   const drawerTriggerBtnRef = useRef<HTMLButtonElement>(null);
@@ -651,124 +653,135 @@ export default function CodingPage() {
         </div>
       )}
 
-      {/* Pane 1: Project List */}
-      <div className="hidden lg:flex w-64 flex-col border-r border-slate-200 bg-white">
-        <div className="border-b border-slate-200 p-3">
-          <h2 className="text-sm font-semibold text-slate-800">プロジェクト</h2>
-        </div>
-        <div className="flex-1 overflow-y-auto p-2">
-          {loadingProjects ? (
-            <div className="p-3 text-xs text-slate-500">読み込み中...</div>
-          ) : validProjects.length === 0 ? (
-            <div className="p-3 text-xs text-slate-500">プロジェクトがありません</div>
-          ) : (
-            <div className="space-y-1">
-              {validProjects.map((item) => {
-                const isSelected = item.project.project_id === selectedProjectId;
-                return (
-                  <button
-                    key={item.project.project_id}
-                    type="button"
-                    onClick={() => setSelectedProjectId(item.project.project_id)}
-                    className={`w-full rounded px-3 py-2 text-left text-xs transition-colors ${
-                      isSelected
-                        ? "bg-slate-900 font-medium text-white"
-                        : "text-slate-700 hover:bg-slate-100"
-                    }`}
-                  >
-                    <span className="truncate">{item.project.display_name}</span>
-                    {item.project.domain && (
-                      <div className={`mt-0.5 text-[10px] ${isSelected ? "text-slate-300" : "text-slate-400"}`}>
-                        {item.project.domain} • {item.project.status}
-                      </div>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Pane 2: Session List */}
-      <div className="hidden lg:flex w-72 flex-col border-r border-slate-200 bg-white">
-        <div className="flex items-center justify-between border-b border-slate-200 p-3">
-          <h2 className="text-sm font-semibold text-slate-800">セッション</h2>
-          <div className="flex items-center gap-1.5">
+      {/* Desktop Collapsible Left Pane */}
+      {!leftPaneCollapsed && (
+        <div className="hidden h-full w-64 shrink-0 flex-col border-r border-slate-200 bg-white lg:flex">
+          <div className="flex items-center justify-end border-b border-slate-200 p-2">
             <button
               type="button"
-              onClick={handleOpenUserDefaults}
-              className="rounded border border-slate-300 bg-white px-3 py-1 text-sm text-slate-700 hover:bg-slate-50 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-              title="ユーザー既定の利用可能ツール設定"
+              onClick={() => setLeftPaneCollapsed(true)}
+              className="rounded p-1 text-slate-500 hover:bg-slate-100 cursor-pointer"
+              aria-label="サイドバーを畳む"
             >
-              既定設定
+              <ChevronLeft className="h-4 w-4" />
             </button>
-            {selectedProjectItem && (
-              <button
-                type="button"
-                onClick={() => setIsNewSessionModalOpen(true)}
-                className="rounded bg-slate-900 px-3 py-1 text-sm font-medium text-white hover:bg-slate-800 cursor-pointer"
-                title="新規セッション作成"
-              >
-                + 新規
-              </button>
-            )}
+          </div>
+
+          {/* Upper Section: Project List */}
+          <div className="flex flex-1 flex-col min-h-0 border-b border-slate-200">
+            <div className="flex items-center justify-between border-b border-slate-200 p-3 bg-slate-50/50">
+              <h2 className="text-xs font-semibold text-slate-900 uppercase tracking-wider">プロジェクト</h2>
+            </div>
+            <div className="flex-1 overflow-y-auto p-2 space-y-1">
+              {loadingProjects ? (
+                <div className="p-3 text-xs text-slate-500">読み込み中...</div>
+              ) : validProjects.length === 0 ? (
+                <div className="p-3 text-xs text-slate-500">プロジェクトがありません</div>
+              ) : (
+                validProjects.map((item) => {
+                  const isSelected = item.project.project_id === selectedProjectId;
+                  return (
+                    <button
+                      key={item.project.project_id}
+                      type="button"
+                      onClick={() => setSelectedProjectId(item.project.project_id)}
+                      className={`w-full rounded px-3 py-2 text-left text-xs transition-colors cursor-pointer ${
+                        isSelected
+                          ? "bg-slate-900 font-medium text-white"
+                          : "text-slate-700 hover:bg-slate-100"
+                      }`}
+                    >
+                      <span className="truncate">{item.project.display_name}</span>
+                      {item.project.domain && (
+                        <div className={`mt-0.5 text-[10px] ${isSelected ? "text-slate-300" : "text-slate-400"}`}>
+                          {item.project.domain} • {item.project.status}
+                        </div>
+                      )}
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          </div>
+
+          {/* Lower Section: Session List */}
+          <div className="flex flex-1 flex-col min-h-0">
+            <div className="flex items-center justify-between border-b border-slate-200 p-3 bg-slate-50/50">
+              <h2 className="text-xs font-semibold text-slate-900 uppercase tracking-wider">セッション</h2>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={handleOpenUserDefaults}
+                  className="rounded border border-slate-300 bg-white px-2 py-1 text-[11px] text-slate-700 hover:bg-slate-100 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  title="ユーザー既定の利用可能ツール設定"
+                >
+                  既定設定
+                </button>
+                {selectedProjectItem && (
+                  <button
+                    type="button"
+                    onClick={() => setIsNewSessionModalOpen(true)}
+                    className="rounded bg-slate-900 px-2 py-1 text-[11px] font-medium text-white hover:bg-slate-800 cursor-pointer"
+                    title="新規セッション作成"
+                  >
+                    + 新規
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-2 space-y-1">
+              {loadingSessions ? (
+                <div className="p-3 text-xs text-slate-500">セッション読み込み中...</div>
+              ) : sessions.length === 0 ? (
+                <div className="p-3 text-xs text-slate-500">
+                  セッションがありません。「+ 新規」から作成してください。
+                </div>
+              ) : (
+                sessions.map((sess) => {
+                  const isSelected = sess.session_id === selectedSessionId;
+                  const dateStr = sess.created_at ? new Date(sess.created_at).toLocaleDateString() : "";
+                  return (
+                    <div
+                      key={sess.session_id}
+                      data-selected={isSelected}
+                      onClick={() => setSelectedSessionId(sess.session_id)}
+                      className={`group flex cursor-pointer items-center justify-between rounded px-3 py-2 text-xs transition-colors ${
+                        isSelected
+                          ? "bg-slate-200 border-l-4 border-slate-800 font-medium text-slate-900"
+                          : "text-slate-700 hover:bg-slate-50"
+                      }`}
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate font-medium">{sess.title}</div>
+                        <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-slate-500">
+                          <span className="uppercase font-semibold text-slate-600">
+                            {sess.backend}
+                          </span>
+                          {dateStr && (
+                            <>
+                              <span>•</span>
+                              <span>{dateStr}</span>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={(e) => handleDeleteSession(sess.session_id, e)}
+                        className="ml-2 hidden rounded p-1 text-slate-400 hover:bg-slate-300 hover:text-slate-700 group-hover:block cursor-pointer"
+                        title="削除"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  );
+                })
+              )}
+            </div>
           </div>
         </div>
-
-
-        <div className="flex-1 overflow-y-auto p-2">
-          {loadingSessions ? (
-            <div className="p-3 text-xs text-slate-500">セッション読み込み中...</div>
-          ) : sessions.length === 0 ? (
-            <div className="p-3 text-xs text-slate-500">
-              セッションがありません。「+ 新規」から作成してください。
-            </div>
-          ) : (
-            <div className="space-y-1">
-              {sessions.map((sess) => {
-                const isSelected = sess.session_id === selectedSessionId;
-                const dateStr = sess.created_at ? new Date(sess.created_at).toLocaleDateString() : "";
-                return (
-                  <div
-                    key={sess.session_id}
-                    data-selected={isSelected}
-                    onClick={() => setSelectedSessionId(sess.session_id)}
-                    className={`group flex cursor-pointer items-center justify-between rounded px-3 py-2 text-xs transition-colors ${
-                      isSelected
-                        ? "bg-slate-200 border-l-4 border-slate-800 font-medium text-slate-900"
-                        : "text-slate-700 hover:bg-slate-50"
-                    }`}
-                  >
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate font-medium">{sess.title}</div>
-                      <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-slate-500">
-                        <span className="uppercase font-semibold text-slate-600">
-                          {sess.backend}
-                        </span>
-                        {dateStr && (
-                          <>
-                            <span>•</span>
-                            <span>{dateStr}</span>
-                          </>
-                        )}
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={(e) => handleDeleteSession(sess.session_id, e)}
-                      className="ml-2 hidden rounded p-1 text-slate-400 hover:bg-slate-300 hover:text-slate-700 group-hover:block cursor-pointer"
-                      title="削除"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      </div>
+      )}
 
       {/* Pane 3: Conversation */}
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-slate-50">
@@ -786,8 +799,26 @@ export default function CodingPage() {
         )}
 
         {!selectedSession ? (
-          <div className="flex flex-1 items-center justify-center text-xs text-slate-400">
-            セッションを選択するか、新規セッションを作成してください
+          <div className="flex flex-1 flex-col items-center justify-center gap-3 text-xs text-slate-400">
+            <p>セッションを選択するか、新規セッションを作成してください</p>
+            {leftPaneCollapsed && (
+              <button
+                type="button"
+                onClick={() => setLeftPaneCollapsed(false)}
+                className="hidden items-center gap-1 rounded border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50 cursor-pointer lg:inline-flex"
+                aria-label="サイドバーを展開"
+              >
+                <ChevronRight className="h-3.5 w-3.5" />
+                プロジェクト / セッションを選択
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setMobileDrawerOpen(true)}
+              className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50 cursor-pointer lg:hidden"
+            >
+              プロジェクト / セッションを選択
+            </button>
           </div>
         ) : (
           <>
@@ -804,6 +835,16 @@ export default function CodingPage() {
                   >
                     プロジェクト / セッション
                   </button>
+                  {leftPaneCollapsed && (
+                    <button
+                      type="button"
+                      onClick={() => setLeftPaneCollapsed(false)}
+                      className="hidden h-8 w-8 items-center justify-center rounded border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 cursor-pointer lg:inline-flex shrink-0"
+                      aria-label="サイドバーを展開"
+                    >
+                      <ChevronRight className="h-4 w-4" />
+                    </button>
+                  )}
                   <h1 className="text-sm font-semibold text-slate-800 truncate">{selectedSession.title}</h1>
                   {sessionDetail?.has_custom_tools ? (
                     <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800">

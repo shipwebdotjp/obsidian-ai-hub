@@ -95,13 +95,55 @@ describe("CodingPage", () => {
     window.HTMLElement.prototype.scrollIntoView = vi.fn();
   });
 
-  it("renders 3 panes and displays projects, sessions, and messages", async () => {
+  it("renders 2 panes and displays projects, sessions, and messages", async () => {
     render(<CodingPage />);
 
     await waitFor(() => {
       expect(screen.getByText("Test App")).toBeInTheDocument();
       expect(screen.getAllByText("新規セッション").length).toBeGreaterThan(0);
       expect(screen.getByText("こんにちは！何かお手伝いしましょうか？")).toBeInTheDocument();
+    });
+  });
+
+  it("collapses left pane when collapse button is clicked and expands when expand button is clicked", async () => {
+    render(<CodingPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Test App")).toBeInTheDocument();
+    });
+
+    const collapseBtn = screen.getByRole("button", { name: "サイドバーを畳む" });
+    fireEvent.click(collapseBtn);
+
+    expect(screen.queryByText("プロジェクト")).not.toBeInTheDocument();
+
+    const expandBtn = screen.getByRole("button", { name: "サイドバーを展開" });
+    fireEvent.click(expandBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText("プロジェクト")).toBeInTheDocument();
+    });
+  });
+
+  it("allows expanding left pane even when no session is selected", async () => {
+    vi.mocked(codingApi.listCodingSessions).mockResolvedValue([]);
+
+    render(<CodingPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Test App")).toBeInTheDocument();
+    });
+
+    const collapseBtn = screen.getByRole("button", { name: "サイドバーを畳む" });
+    fireEvent.click(collapseBtn);
+
+    expect(screen.getByText("セッションを選択するか、新規セッションを作成してください")).toBeInTheDocument();
+
+    const expandBtn = screen.getByRole("button", { name: "サイドバーを展開" });
+    fireEvent.click(expandBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText("プロジェクト")).toBeInTheDocument();
     });
   });
 
