@@ -8,6 +8,7 @@ from obsidian_ai_hub.utils import accessibility, config, img2text, llm_client, p
 from obsidian_ai_hub.activity.categories import ACTIVITY_CATEGORIES
 from obsidian_ai_hub.activity.store import add_activity, get_latest_activity_by_date
 from obsidian_ai_hub.summary.project_utils import get_active_projects_for_prompt
+from obsidian_ai_hub.activity.clipboard import get_sanitized_clipboard_text
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +91,9 @@ def main():
     except Exception as e:
         logger.warning(f"Failed to fetch last activity log for duplication check: {e}")
 
+    # 1.6 クリップボード文脈の取得（重複チェック通過後に1度だけ取得・マスキング処理）
+    clipboard_text = get_sanitized_clipboard_text()
+
     # 2. 各ディスプレイのスクリーンショット保存
     # YYYY/MM/DD
     date_path = now.strftime("%Y/%m/%d")
@@ -161,6 +165,7 @@ def main():
                 "app_name": app_name,
                 "window_title": window_title,
                 "ocr_text_combined": ocr_text_combined,
+                "clipboard_text": clipboard_text,
                 "projects_str": projects_str,
             },
         )
