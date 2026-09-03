@@ -187,12 +187,13 @@ def update_session_tools(
 
 @router.get("/sessions/{session_id}")
 def get_session_detail(session_id: str, _=Depends(require_bearer_token)):
-    """Get session details along with effective tool settings, message history and active/latest run state."""
+    """Get session details along with effective tool settings, message history, tool calls, and active/latest run state."""
     session = coding_store.get_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="セッションが見つかりません")
 
     messages = coding_store.list_messages(session_id)
+    tool_calls = coding_store.list_orchestrator_tool_calls_for_session(session_id)
     active_run = coding_store.get_active_run_for_session(session_id)
     latest_run = coding_store.get_latest_run_for_session(session_id)
     effective_tool_ids = coding_store.get_effective_session_tool_ids(session_id)
@@ -205,6 +206,7 @@ def get_session_detail(session_id: str, _=Depends(require_bearer_token)):
         "has_custom_tools": has_custom,
         "available_tools": available_tools,
         "messages": messages,
+        "orchestrator_tool_calls": tool_calls,
         "active_run": active_run,
         "latest_run": latest_run,
     }

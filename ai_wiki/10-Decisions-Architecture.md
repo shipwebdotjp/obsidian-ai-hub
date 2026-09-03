@@ -537,6 +537,42 @@ Web UI のコーディングワークスペースは SSE で逐次進捗を配�
 - **終了コード**: 成功 `0`、引数・入力不正（`parser.error`） `2`、セッション/プロジェクト未発見・Git不正・Orchestrator失敗・ロック競合等の実行時失敗 `1`。
 - **共存**: 既存 CLI の `--json` は `--vault-search` でも使われるため、coding 以外の既存挙動は変えない。`prompt_args` は coding 未指定時は無視される。
 
+## Coding Orchestrator のツール呼び出し可視化・永続化
+
+| 項目 | 内容 |
+|------|------|
+| 決定日 | 2026-09-07 |
+| カテゴリ | コーディングワークスペース・オーケストレーター・ツール可視化・永続化 |
+| 決定内容 | Coding Orchestrator のアプリ内ツール呼び出しループを非同期イベントジェネレーター (`generate_response_events`) に分離し、構造化イベント (`detected`, `start`, `end`) の生成、リアルタイム SSE 配信、および SQLite (`coding_orchestrator_tool_calls`, マイグレーション v32) への永続化を行う。AI Agents 画面と同等の折りたたみカードで結果・引数・状態を表示し、メッセージに紐付かない中断・失敗呼び出しは「中断したオーケストレーター処理」としてユーザー依頼直下に表示する。 |
+
+### 結論に至った経緯
+
+Coding Orchestrator がアプリ内ツール（Vault 検索、Web 検索、Skills など）を実行する際、従来は画面上にツールの詳細な実行状態（準備中、実行中、成功、失敗）や引数・結果が可視化されず、最終的なオーケストレーターテキスト応答のみが表示されていた。また、サーバー再起動やユーザーキャンセルで処理が途中で中断・失敗した場合、実行されたツール呼び出しの履歴が保存されず、後からトレースできない課題があった。
+
+AI Agents 画面で確立されたツール呼び出しのライブ表示・履歴永続化と同等のユーザー体験をコーディングワークスペースにも適用し、デバッグ性・透過性を向上させる。
+
+### データモデルとイベント構造
+
+1. **DB マイグレーション v32 (`coding_orchestrator_tool_calls`)**:
+   - カラム: `call_id` (PK, UUID), `run_id` (FK), `phase` ('initial' | 'review'), `phase_turn` (1, 2..N), `iteration` (1..5), `call_index` (0..), `call_key` (`"{phase_turn}:{iteration}:{call_index}"`), `orchestrator_message_id` (FK, NULL可), `tool_name`, `args_json`, `result`, `status` ('running' | 'succeeded' | 'failed' | 'interrupted'), `error`, `provider_call_id`, `started_at`, `finished_at`
+   - インデックス: `idx_cotc_run_id`, `idx_cotc_message_id`
+   - `coding_messages.run_id` を全ロール (user, orchestrator, cli_request, worker) で関連付け、`list_worker_messages_for_run` は `role = 'worker'` で絞り込んで後方互換性を維持。
+
+2. **呼び出し識別子とキー設計**:
+   - `call_id`: アプリ側で常に UUID (`cotc_...`) を採番し安定した主キーとする。LLM からの ID は `provider_call_id` として保持。
+   - `call_key`: ライブ表示の突合用に `"{phase_turn}:{iteration}:{call_index}"` 形式のキーを使用。
+
+3. **切り捨て (Truncation) 制御**:
+   - LLM へ渡す `ToolMessage` には完全な結果文字列を使用する。
+   - DB 保存用は最大 20,000 文字 (`...（保存表示用に省略）` を含む)。
+   - ライブ SSE 配信用は最大 2,000 文字 (`...（ライブ表示用に省略）` を含む)。
+
+### UIおよび表示制御
+
+- オーケストレーターメッセージに紐付くツール呼び出しは、応答テキストの直上に collapsible カードで表示する。
+- 最終メッセージが生成される前に中断・失敗したツール呼び出しは、対応する User Message の直下に「中断したオーケストレーター処理」という見出しの折りたたみカードとして表示する。
+- サーバー再起動時に `running` 状態で残った tool calls は `coding_runs` と同様に `interrupted` へ更新する。
+
 ## AI エージェントによるサブエージェント委譲 (agent_delegate)
 
 | 項目 | 内容 |
