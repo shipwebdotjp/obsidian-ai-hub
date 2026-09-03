@@ -418,7 +418,7 @@ def _make_agent_delegate_tool(
                 parent_trusted_ctx=trusted_ctx,
             )
             return json.dumps(res, ensure_ascii=False)
-        except Exception as exc:
+        except Exception:
             logger.exception("agent_delegate failed")
             return json.dumps(
                 {
@@ -429,7 +429,7 @@ def _make_agent_delegate_tool(
                     "final_answer": None,
                     "used_tools": [],
                     "created_hitl_run_ids": [],
-                    "error": f"委譲処理で予期しないエラーが発生しました: {str(exc)}",
+                    "error": _sanitize_unexpected_error(Exception()),
                 },
                 ensure_ascii=False,
             )

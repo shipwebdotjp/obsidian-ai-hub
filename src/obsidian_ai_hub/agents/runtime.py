@@ -420,8 +420,11 @@ def execute_subagent_core(
                 )
 
         if not final_answer:
-            final_ai_msg = llm.invoke(langchain_messages)
-            final_answer = str(final_ai_msg.content or "")
+            if langchain_messages and isinstance(langchain_messages[-1], AIMessage):
+                final_answer = str(langchain_messages[-1].content or "")
+            else:
+                final_ai_msg = llm.invoke(langchain_messages)
+                final_answer = str(final_ai_msg.content or "")
 
         return {
             "status": "succeeded",
@@ -434,7 +437,7 @@ def execute_subagent_core(
             "error": None,
         }
 
-    except Exception as exc:
+    except Exception:
         logger.exception("Error during subagent execution for agent %s", target_agent_id)
         return {
             "status": "failed",
@@ -444,7 +447,7 @@ def execute_subagent_core(
             "final_answer": None,
             "used_tools": child_used_tools,
             "created_hitl_run_ids": child_created_hitl_run_ids,
-            "error": f"子エージェントの実行中にエラーが発生しました: {str(exc)}",
+            "error": "子エージェントの実行中にエラーが発生しました。しばらく待って再試行してください。",
         }
 
 

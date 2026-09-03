@@ -1976,7 +1976,7 @@ export default function AgentsPage() {
                 </div>
 
                 {formToolIds.includes("agent_delegate") && (
-                  <div className="rounded-md border border-slate-200 bg-slate-50/50 p-3">
+                  <div className="rounded-md border border-slate-200 bg-white p-3">
                     <label className="block font-medium text-slate-700 mb-1">
                       許可する委譲先エージェント
                     </label>
@@ -2003,7 +2003,9 @@ export default function AgentsPage() {
                             return (
                               <label
                                 key={target.agent_id}
-                                className="flex items-center gap-2 text-xs cursor-pointer hover:bg-slate-50 p-1 rounded"
+                                className={`flex items-center gap-2 text-xs cursor-pointer p-1 rounded ${
+                                  isChecked ? "bg-slate-100" : "hover:bg-slate-50"
+                                }`}
                               >
                                 <input
                                   type="checkbox"
