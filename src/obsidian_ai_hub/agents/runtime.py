@@ -496,7 +496,7 @@ def generate_session_title(
     Returns clean title string (max 30 chars).
     """
     prov = (provider or "").strip() or getattr(config, "AGENT_TITLE_GENERATION_PROVIDER", "openai")
-    mdl = (model or "").strip() or getattr(config, "AGENT_TITLE_GENERATION_MODEL", "gpt-5.4")
+    mdl = (model or "").strip() or getattr(config, "AGENT_TITLE_GENERATION_MODEL", "gpt-5.4-mini")
     raw_path = prompt_path or getattr(config, "AGENT_TITLE_PROMPT_PATH", None)
     tmpl_path = Path(raw_path) if raw_path is not None else None
 
