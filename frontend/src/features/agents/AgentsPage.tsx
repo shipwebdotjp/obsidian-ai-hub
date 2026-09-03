@@ -217,6 +217,9 @@ export default function AgentsPage() {
   const [chatError, setChatError] = useState<string | null>(null);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const copyResetRef = useRef<number | null>(null);
+  const [copiedAgentId, setCopiedAgentId] = useState(false);
+  const [agentIdCopyError, setAgentIdCopyError] = useState<string | null>(null);
+  const agentIdCopyResetRef = useRef<number | null>(null);
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
   const [attachmentReadsPending, setAttachmentReadsPending] = useState(0);
   const [isDragOver, setIsDragOver] = useState(false);
@@ -794,6 +797,8 @@ export default function AgentsPage() {
     setIsAdvancedOpen(Boolean(adv.max_tokens != null || adv.reasoning?.effort));
     setFormError(null);
     setActionError(null);
+    setCopiedAgentId(false);
+    setAgentIdCopyError(null);
     setTemplateFormName("");
     setTemplateFormContent("");
     setEditingTemplateId(null);
@@ -1166,6 +1171,35 @@ export default function AgentsPage() {
     }
   };
 
+  const handleCopyAgentId = async () => {
+    if (!selectedAgentId) return;
+    setAgentIdCopyError(null);
+    try {
+      if (
+        typeof navigator === "undefined" ||
+        !navigator.clipboard ||
+        typeof navigator.clipboard.writeText !== "function"
+      ) {
+        throw new Error("clipboard unavailable");
+      }
+      await navigator.clipboard.writeText(selectedAgentId);
+      setCopiedAgentId(true);
+      if (agentIdCopyResetRef.current !== null) {
+        window.clearTimeout(agentIdCopyResetRef.current);
+      }
+      agentIdCopyResetRef.current = window.setTimeout(() => {
+        setCopiedAgentId(false);
+        agentIdCopyResetRef.current = null;
+      }, 2000);
+    } catch (err) {
+      console.error("Failed to copy agent ID:", err);
+      setCopiedAgentId(false);
+      setAgentIdCopyError(
+        "IDのコピーに失敗しました。手動で選択してコピーしてください。",
+      );
+    }
+  };
+
   // Cleanup pending copy-feedback timer on unmount to avoid state updates
   // on an unmounted component.
   useEffect(() => {
@@ -1174,8 +1208,22 @@ export default function AgentsPage() {
         window.clearTimeout(copyResetRef.current);
         copyResetRef.current = null;
       }
+      if (agentIdCopyResetRef.current !== null) {
+        window.clearTimeout(agentIdCopyResetRef.current);
+        agentIdCopyResetRef.current = null;
+      }
     };
   }, []);
+
+  // Reset the agent-ID copy feedback when the target agent changes.
+  useEffect(() => {
+    setCopiedAgentId(false);
+    setAgentIdCopyError(null);
+    if (agentIdCopyResetRef.current !== null) {
+      window.clearTimeout(agentIdCopyResetRef.current);
+      agentIdCopyResetRef.current = null;
+    }
+  }, [selectedAgentId]);
 
   // Move focus into the mobile drawer when it opens and restore it to the
   // trigger button when the drawer closes. Also trap Tab focus inside the drawer.
@@ -1839,6 +1887,83 @@ export default function AgentsPage() {
               )}
 
               <form onSubmit={handleSaveAgent} className="space-y-4 text-xs">
+                {isEditingAgent && (
+                  <div>
+                    <span className="block font-medium text-slate-700 mb-1">
+                      エージェントID（CLI用）
+                    </span>
+                    {selectedAgentId ? (
+                      <>
+                        <div className="flex items-center gap-2">
+                          <code
+                            data-testid="agent-id-value"
+                            className="min-w-0 flex-1 truncate rounded-md border border-slate-200 bg-slate-50 px-2 py-1.5 font-mono text-[11px] text-slate-800"
+                          >
+                            {selectedAgentId}
+                          </code>
+                          <button
+                            type="button"
+                            onClick={handleCopyAgentId}
+                            className="inline-flex shrink-0 items-center gap-1 cursor-pointer rounded border border-slate-300 bg-white px-2 py-1 text-[11px] text-slate-700 hover:bg-slate-50"
+                            aria-label="エージェントIDをコピー"
+                            title="エージェントIDをコピー"
+                            data-testid="copy-agent-id"
+                          >
+                            {copiedAgentId ? (
+                              <>
+                                <svg
+                                  className="h-3.5 w-3.5 text-emerald-600"
+                                  fill="none"
+                                  viewBox="0 0 24 24"
+                                  stroke="currentColor"
+                                  aria-hidden="true"
+                                >
+                                  <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    strokeWidth={2}
+                                    d="M5 13l4 4L19 7"
+                                  />
+                                </svg>
+                                <span className="text-emerald-700">コピーしました</span>
+                              </>
+                            ) : (
+                              <>
+                                <svg
+                                  className="h-3.5 w-3.5"
+                                  fill="none"
+                                  viewBox="0 0 24 24"
+                                  stroke="currentColor"
+                                  aria-hidden="true"
+                                >
+                                  <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    strokeWidth={2}
+                                    d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h12a2 2 0 002-2V7a2 2 0 00-2-2h-2M8 5a2 2 0 002 2h4a2 2 0 002-2M8 5a2 2 0 012-2h4a2 2 0 012 2"
+                                  />
+                                </svg>
+                                <span>コピー</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+                        <p className="mt-1 text-[10px] text-slate-500">
+                          CLI の --agent-chat で指定するIDです（例: --agent-id {selectedAgentId}）。
+                        </p>
+                        {agentIdCopyError && (
+                          <p role="alert" className="mt-1 text-[11px] text-red-600">
+                            {agentIdCopyError}
+                          </p>
+                        )}
+                      </>
+                    ) : (
+                      <p className="text-[11px] text-slate-500">
+                        IDを取得できませんでした。
+                      </p>
+                    )}
+                  </div>
+                )}
                 <div>
                   <label className="block font-medium text-slate-700 mb-1">
                     エージェント名 <span className="text-red-500">*</span>

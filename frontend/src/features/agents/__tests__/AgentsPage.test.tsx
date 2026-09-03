@@ -1863,4 +1863,107 @@ describe("AgentsPage", () => {
     expect(screen.getByText("許可する委譲先エージェント")).toBeInTheDocument();
     expect(screen.getAllByText("サブワーカー").length).toBeGreaterThanOrEqual(2);
   });
+
+  describe("エージェントID（CLI用）の表示とコピー", () => {
+    const originalClipboard = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+
+    afterEach(() => {
+      if (originalClipboard) {
+        Object.defineProperty(navigator, "clipboard", originalClipboard);
+      } else {
+        // @ts-expect-error - restore jsdom default (no clipboard)
+        delete navigator.clipboard;
+      }
+    });
+
+    async function openEditForm(user: ReturnType<typeof userEvent.setup>) {
+      render(
+        <MemoryRouter>
+          <AgentsPage />
+        </MemoryRouter>
+      );
+      await waitFor(() => {
+        expect(mockGetSessionDetail).toHaveBeenCalled();
+      });
+      await user.click(screen.getByRole("button", { name: "設定編集" }));
+      expect(screen.getByText("エージェント設定編集")).toBeInTheDocument();
+    }
+
+    it("shows the agent ID with a copy button and copies it to the clipboard", async () => {
+      const user = userEvent.setup();
+      const writeText = vi.fn().mockResolvedValue(undefined);
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: { writeText },
+      });
+
+      await openEditForm(user);
+
+      expect(screen.getByText("エージェントID（CLI用）")).toBeInTheDocument();
+      expect(screen.getByTestId("agent-id-value")).toHaveTextContent("agent_123");
+
+      const copyButton = screen.getByRole("button", { name: "エージェントIDをコピー" });
+      expect(copyButton).toHaveAttribute("title", "エージェントIDをコピー");
+
+      await user.click(copyButton);
+
+      await waitFor(() => {
+        expect(writeText).toHaveBeenCalledWith("agent_123");
+      });
+      expect(await screen.findByText("コピーしました")).toBeInTheDocument();
+    });
+
+    it("shows an error message when copying the agent ID fails", async () => {
+      const user = userEvent.setup();
+      const writeText = vi.fn().mockRejectedValue(new Error("denied"));
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: { writeText },
+      });
+
+      await openEditForm(user);
+
+      await user.click(screen.getByRole("button", { name: "エージェントIDをコピー" }));
+
+      await waitFor(() => {
+        expect(writeText).toHaveBeenCalledWith("agent_123");
+      });
+      expect(
+        await screen.findByText("IDのコピーに失敗しました。手動で選択してコピーしてください。")
+      ).toBeInTheDocument();
+    });
+
+    it("shows an error message when the clipboard API is unavailable", async () => {
+      const user = userEvent.setup();
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: undefined,
+      });
+
+      await openEditForm(user);
+
+      await user.click(screen.getByRole("button", { name: "エージェントIDをコピー" }));
+
+      expect(
+        await screen.findByText("IDのコピーに失敗しました。手動で選択してコピーしてください。")
+      ).toBeInTheDocument();
+    });
+
+    it("does not show the agent ID copy UI in the create form", async () => {
+      const user = userEvent.setup();
+      render(
+        <MemoryRouter>
+          <AgentsPage />
+        </MemoryRouter>
+      );
+      await waitFor(() => {
+        expect(mockGetSessionDetail).toHaveBeenCalled();
+      });
+
+      await user.click(screen.getAllByRole("button", { name: "＋ 新規作成" })[0]);
+      expect(screen.getByText("新規エージェント作成")).toBeInTheDocument();
+      expect(screen.queryByText("エージェントID（CLI用）")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("copy-agent-id")).not.toBeInTheDocument();
+    });
+  });
 });
