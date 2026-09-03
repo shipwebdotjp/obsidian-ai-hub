@@ -69,6 +69,28 @@ def mark_interrupted_runs_on_startup() -> int:
     return count
 
 
+def mark_running_tool_calls_interrupted_for_run(
+    run_id: str, error: str = "User cancelled execution"
+) -> int:
+    """Mark any running tool calls for a run as interrupted."""
+    conn = get_db_connection()
+    now = _now_iso()
+    cursor = conn.execute(
+        """
+        UPDATE coding_orchestrator_tool_calls
+        SET status = 'interrupted',
+            finished_at = ?,
+            error = ?
+        WHERE run_id = ? AND status = 'running'
+        """,
+        (now, error, run_id),
+    )
+    count = cursor.rowcount
+    conn.commit()
+    conn.close()
+    return count
+
+
 def create_orchestrator_tool_call(
     call_id: str,
     run_id: str,

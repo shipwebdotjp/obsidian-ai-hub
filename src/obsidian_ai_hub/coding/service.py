@@ -137,6 +137,7 @@ async def run_coding_turn_stream(
         phase_turn = 0
         while True:
             if cancel_event.is_set():
+                store.mark_running_tool_calls_interrupted_for_run(run_id, error="User cancelled execution")
                 store.update_run(
                     run_id,
                     status="cancelled",
@@ -167,6 +168,7 @@ async def run_coding_turn_stream(
                     phase_turn=phase_turn,
                 ):
                     if cancel_event.is_set():
+                        store.mark_running_tool_calls_interrupted_for_run(run_id, error="User cancelled execution")
                         store.update_run(
                             run_id,
                             status="cancelled",
@@ -317,6 +319,7 @@ async def run_coding_turn_stream(
                     current_external_id = cli_result.external_session_id
 
                 if cli_result.cancelled:
+                    store.mark_running_tool_calls_interrupted_for_run(run_id, error="User cancelled CLI execution")
                     store.update_run(
                         run_id,
                         status="cancelled",
