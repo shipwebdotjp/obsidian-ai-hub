@@ -334,6 +334,65 @@ def test_cli_execution_logging_failure(monkeypatch, test_memory_db_path):
     assert detail["traceback"] is not None
 
 
+def test_agent_chat_cli_requires_agent_id(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["prog", "--agent-chat"])
+
+    with patch("argparse.ArgumentParser.error") as mock_error:
+        mock_error.side_effect = SystemExit
+        with patch.object(sys, "exit"):
+            try:
+                main_module.main()
+            except SystemExit:
+                pass
+        mock_error.assert_called_once()
+        assert "--agent-chat requires --agent-id AGENT_ID" in mock_error.call_args[0][0]
+
+
+def test_agent_chat_cli_disallows_other_execution_flags(monkeypatch):
+    monkeypatch.setattr(
+        sys, "argv", ["prog", "--agent-chat", "--agent-id", "agent_123", "--sync-vault"]
+    )
+
+    with patch("argparse.ArgumentParser.error") as mock_error:
+        mock_error.side_effect = SystemExit
+        with patch.object(sys, "exit"):
+            try:
+                main_module.main()
+            except SystemExit:
+                pass
+        mock_error.assert_called_once()
+        assert "--agent-chat cannot be combined" in mock_error.call_args[0][0]
+
+
+def test_agent_chat_cli_delegates_to_cli_module(monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "prog",
+            "--agent-chat",
+            "--agent-id",
+            "agent_123",
+            "--agent-prompt",
+            "Hello",
+            "--agent-output",
+            "json",
+        ],
+    )
+
+    from obsidian_ai_hub.agents import cli as agent_cli
+
+    with patch.object(agent_cli, "main_agent_chat", return_value=None) as mock_chat:
+        main_module.main()
+
+    mock_chat.assert_called_once_with(
+        agent_id="agent_123",
+        prompt="Hello",
+        resume_session=None,
+        output_format="json",
+    )
+
+
 def test_backup_failure_is_recorded_in_execution_log(monkeypatch, test_memory_db_path):
     monkeypatch.setattr(sys, "argv", ["prog", "--backup"])
 
