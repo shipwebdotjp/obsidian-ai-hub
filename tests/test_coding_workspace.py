@@ -865,6 +865,40 @@ def test_coding_tools_api_endpoints(test_project):
     assert reset_detail["has_custom_tools"] is False
 
 
+def test_coding_config_endpoint(test_project, monkeypatch):
+    app = create_app(token="test-token")
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer test-token"}
+
+    from obsidian_ai_hub.utils import config
+
+    # default should be opencode (or codex if config overridden) - ensure normalized
+    res = client.get("/api/v1/coding/config", headers=headers)
+    assert res.status_code == 200
+    assert res.json()["default_backend"] in ("codex", "opencode")
+
+    # codex via config
+    monkeypatch.setattr(config, "CODING_DEFAULT_BACKEND", "codex")
+    res = client.get("/api/v1/coding/config", headers=headers)
+    assert res.status_code == 200
+    assert res.json()["default_backend"] == "codex"
+
+    # whitespace and uppercase normalized
+    monkeypatch.setattr(config, "CODING_DEFAULT_BACKEND", "  CODEX ")
+    res = client.get("/api/v1/coding/config", headers=headers)
+    assert res.json()["default_backend"] == "codex"
+
+    # invalid falls back to opencode
+    monkeypatch.setattr(config, "CODING_DEFAULT_BACKEND", "invalid_backend")
+    res = client.get("/api/v1/coding/config", headers=headers)
+    assert res.json()["default_backend"] == "opencode"
+
+    # opencode explicit
+    monkeypatch.setattr(config, "CODING_DEFAULT_BACKEND", "opencode")
+    res = client.get("/api/v1/coding/config", headers=headers)
+    assert res.json()["default_backend"] == "opencode"
+
+
 def test_opencode_extract_title_from_export_json():
     be = backend.OpenCodeCliBackend()
     # Valid title

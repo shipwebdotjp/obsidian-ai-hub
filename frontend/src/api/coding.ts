@@ -12,6 +12,10 @@ export interface CodingDefaults {
   available_tools: CodingTool[];
 }
 
+export interface CodingConfig {
+  default_backend: "codex" | "opencode";
+}
+
 export interface GitStatus {
   branch: string;
   ahead: number;
@@ -120,6 +124,10 @@ export function listCodingSessions(projectId: number): Promise<CodingSession[]> 
 
 export function getCodingDefaults(): Promise<CodingDefaults> {
   return apiGet<CodingDefaults>("/api/v1/coding/defaults");
+}
+
+export function getCodingConfig(): Promise<CodingConfig> {
+  return apiGet<CodingConfig>("/api/v1/coding/config");
 }
 
 export function updateCodingDefaults(toolIds: string[]): Promise<CodingDefaults> {

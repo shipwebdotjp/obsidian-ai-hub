@@ -139,9 +139,10 @@ vault_index:
 
 # Coding workspace: orchestrator LLM and CLI agents (Codex / OpenCode)
 # Environment variables CODING_ORCHESTRATOR_PROVIDER, CODING_ORCHESTRATOR_MODEL,
-# CODING_CODEX_CLI_PATH, CODING_OPENCODE_CLI_PATH, CODING_OPENCODE_AUTO_APPROVE override these values if set.
-# Defaults: orchestrator provider=openai, model=gpt-5.6-terra, cli paths=codex/opencode on PATH, opencode_auto_approve=true.
+# CODING_CODEX_CLI_PATH, CODING_OPENCODE_CLI_PATH, CODING_OPENCODE_AUTO_APPROVE, CODING_DEFAULT_BACKEND override these values if set.
+# Defaults: orchestrator provider=openai, model=gpt-5.6-terra, cli paths=codex/opencode on PATH, opencode_auto_approve=true, default_backend=opencode.
 coding:
+  default_backend: opencode  # codex or opencode (used for --coding new sessions when backend not specified)
   orchestrator:
     provider: openai
     model: gpt-5.6-terra

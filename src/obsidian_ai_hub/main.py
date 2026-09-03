@@ -344,7 +344,7 @@ def main():
     parser.add_argument(
         "--resume-session",
         type=str,
-        help="--agent-chat で再開する既存セッションID (任意)",
+        help="--agent-chat / --coding で再開する既存セッションID (任意)",
     )
     parser.add_argument(
         "--agent-output",
@@ -368,6 +368,23 @@ def main():
         "--healthcare-dry-run",
         action="store_true",
         help="--import-apple-healthでDB書き込みせず件数カウントのみ",
+    )
+    parser.add_argument(
+        "--coding",
+        action="store_true",
+        help="Coding Orchestratorを単発CLIで実行（新規は --project-id 必須、再開は --resume-session）",
+    )
+    parser.add_argument(
+        "--project-id",
+        type=int,
+        dest="project_id",
+        default=None,
+        help="--coding 新規セッションで使用するプロジェクトID",
+    )
+    parser.add_argument(
+        "prompt_args",
+        nargs="*",
+        help="プロンプト本文（複数可、 --coding で使用。空白で結合、stdin併用時は \\n\\nで連結）",
     )
     args = parser.parse_args()
     ran = False
@@ -500,6 +517,15 @@ def main():
         parser.error("--healthcare-* requires --import-apple-health")
     if args.healthcare_batch_size is not None and args.healthcare_batch_size <= 0:
         parser.error("--healthcare-batch-size must be a positive integer")
+
+    if getattr(args, "coding", False):
+        if getattr(args, "resume_session", None) and getattr(args, "project_id", None) is not None:
+            parser.error("--project-id と --resume-session は併用できません")
+        if not getattr(args, "resume_session", None) and getattr(args, "project_id", None) is None:
+            parser.error("--coding では新規セッション時に --project-id が必要です")
+
+    if getattr(args, "prompt_args", None) and not getattr(args, "coding", False):
+        parser.error(f"unexpected positional arguments: {' '.join(args.prompt_args)}")
 
     research_kwargs = {}
     if args.context is not None:
@@ -766,6 +792,40 @@ def main():
                 "resume_session": args.resume_session,
                 "output_format": args.agent_output,
             },
+        )
+        ran = True
+    if getattr(args, "coding", False):
+        # Combine positional prompt_args and non-TTY stdin per spec
+        pos_text = " ".join(getattr(args, "prompt_args", []) or []).strip()
+        stdin_text = ""
+        if not sys.stdin.isatty():
+            try:
+                stdin_text = sys.stdin.read() or ""
+            except Exception:
+                stdin_text = ""
+            if stdin_text.strip() == "":
+                stdin_text = ""
+            else:
+                stdin_text = stdin_text.strip()
+        if pos_text and stdin_text:
+            prompt = pos_text + "\n\n" + stdin_text
+        elif pos_text:
+            prompt = pos_text
+        elif stdin_text:
+            prompt = stdin_text
+        else:
+            prompt = ""
+        if not prompt.strip():
+            parser.error("--coding プロンプトが空です。位置引数またはstdinでプロンプトを指定してください")
+        # Coding has its own execution_logger handling and stdout/stderr contract,
+        # so do not use run_and_log (which prints [START]/[END] to stdout).
+        from obsidian_ai_hub.coding.cli import main_coding
+
+        main_coding(
+            project_id=getattr(args, "project_id", None),
+            resume_session=getattr(args, "resume_session", None),
+            prompt=prompt,
+            json_output=bool(getattr(args, "json", False)),
         )
         ran = True
     if not ran:

@@ -415,3 +415,163 @@ def test_backup_failure_is_recorded_in_execution_log(monkeypatch, test_memory_db
     assert detail["status"] == "failed"
     assert "rsync failed" in detail["exception_message"]
     assert "Permission denied" in detail["exception_message"]
+
+
+# --- Coding CLI tests ---
+
+def test_coding_new_session_delegates_to_cli_module(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["prog", "--coding", "--project-id", "42", "hello", "world"])
+
+    from obsidian_ai_hub.coding import cli as coding_cli
+
+    with patch.object(coding_cli, "main_coding", return_value=None) as mock_coding:
+        main_module.main()
+
+    mock_coding.assert_called_once()
+    kwargs = mock_coding.call_args[1]
+    assert kwargs["project_id"] == 42
+    assert kwargs["resume_session"] is None
+    assert kwargs["prompt"] == "hello world"
+    assert kwargs["json_output"] is False
+
+
+def test_coding_resume_session_delegates_without_project_id(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["prog", "--coding", "--resume-session", "cses_abc123", "続きの作業"])
+
+    from obsidian_ai_hub.coding import cli as coding_cli
+
+    with patch.object(coding_cli, "main_coding", return_value=None) as mock_coding:
+        main_module.main()
+
+    mock_coding.assert_called_once()
+    kwargs = mock_coding.call_args[1]
+    assert kwargs["project_id"] is None
+    assert kwargs["resume_session"] == "cses_abc123"
+    assert kwargs["prompt"] == "続きの作業"
+
+
+def test_coding_rejects_both_project_and_resume(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["prog", "--coding", "--project-id", "1", "--resume-session", "cses_xxx", "prompt"])
+
+    with patch("argparse.ArgumentParser.error") as mock_error:
+        mock_error.side_effect = SystemExit(2)
+        try:
+            main_module.main()
+        except SystemExit as e:
+            assert e.code == 2
+        mock_error.assert_called_once()
+        assert "併用できません" in mock_error.call_args[0][0]
+
+
+def test_coding_new_requires_project_id(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["prog", "--coding", "prompt text"])
+
+    with patch("argparse.ArgumentParser.error") as mock_error:
+        mock_error.side_effect = SystemExit(2)
+        try:
+            main_module.main()
+        except SystemExit as e:
+            assert e.code == 2
+        mock_error.assert_called_once()
+        assert "--project-id が必要" in mock_error.call_args[0][0]
+
+
+def test_coding_positional_plus_stdin_combined(monkeypatch):
+    import io
+
+    stdin_data = "stdin line1\nstdin line2\n"
+    fake_stdin = io.StringIO(stdin_data)
+    fake_stdin.isatty = lambda: False  # type: ignore[attr-defined]
+    monkeypatch.setattr(sys, "stdin", fake_stdin)
+    monkeypatch.setattr(sys, "argv", ["prog", "--coding", "--project-id", "42", "pos1", "pos2"])
+
+    from obsidian_ai_hub.coding import cli as coding_cli
+
+    with patch.object(coding_cli, "main_coding", return_value=None) as mock_coding:
+        main_module.main()
+
+    mock_coding.assert_called_once()
+    kwargs = mock_coding.call_args[1]
+    # positional joined with space, then \n\n + stdin
+    assert kwargs["prompt"] == "pos1 pos2\n\nstdin line1\nstdin line2"
+
+
+def test_coding_stdin_only_when_not_tty(monkeypatch):
+    import io
+
+    stdin_data = "only stdin\n"
+    fake_stdin = io.StringIO(stdin_data)
+    fake_stdin.isatty = lambda: False  # type: ignore[attr-defined]
+    monkeypatch.setattr(sys, "stdin", fake_stdin)
+    monkeypatch.setattr(sys, "argv", ["prog", "--coding", "--project-id", "42"])
+
+    from obsidian_ai_hub.coding import cli as coding_cli
+
+    with patch.object(coding_cli, "main_coding", return_value=None) as mock_coding:
+        main_module.main()
+
+    kwargs = mock_coding.call_args[1]
+    assert kwargs["prompt"] == "only stdin"
+
+
+def test_coding_empty_prompt_rejected(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["prog", "--coding", "--project-id", "42"])
+    # Ensure stdin is TTY so no read
+    import io
+
+    fake_stdin = io.StringIO("")
+    fake_stdin.isatty = lambda: True  # type: ignore[attr-defined]
+    monkeypatch.setattr(sys, "stdin", fake_stdin)
+
+    with patch("argparse.ArgumentParser.error") as mock_error:
+        mock_error.side_effect = SystemExit(2)
+        try:
+            main_module.main()
+        except SystemExit as e:
+            assert e.code == 2
+        mock_error.assert_called_once()
+        assert "プロンプトが空" in mock_error.call_args[0][0]
+
+
+def test_coding_whitespace_prompt_rejected(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["prog", "--coding", "--project-id", "42", "   "])
+    import io
+
+    fake_stdin = io.StringIO("   \n")
+    fake_stdin.isatty = lambda: False  # type: ignore[attr-defined]
+    monkeypatch.setattr(sys, "stdin", fake_stdin)
+
+    with patch("argparse.ArgumentParser.error") as mock_error:
+        mock_error.side_effect = SystemExit(2)
+        try:
+            main_module.main()
+        except SystemExit as e:
+            assert e.code == 2
+        mock_error.assert_called_once()
+
+
+def test_non_coding_positional_rejected(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["prog", "--sync-vault", "unexpected_arg"])
+
+    with patch("argparse.ArgumentParser.error") as mock_error:
+        mock_error.side_effect = SystemExit(2)
+        try:
+            main_module.main()
+        except SystemExit as e:
+            assert e.code == 2
+        mock_error.assert_called_once()
+        assert "unexpected positional arguments" in mock_error.call_args[0][0]
+        assert "unexpected_arg" in mock_error.call_args[0][0]
+
+
+def test_non_coding_multiple_positional_rejected(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["prog", "--sync-vault", "a", "b"])
+
+    with patch("argparse.ArgumentParser.error") as mock_error:
+        mock_error.side_effect = SystemExit(2)
+        try:
+            main_module.main()
+        except SystemExit as e:
+            assert e.code == 2
+        mock_error.assert_called_once()
+        assert "unexpected positional arguments" in mock_error.call_args[0][0]

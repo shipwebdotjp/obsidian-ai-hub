@@ -9,6 +9,7 @@ import {
   streamCodingMessage,
   getGitStatus,
   getCodingDefaults,
+  getCodingConfig,
   updateCodingDefaults,
   updateCodingSessionTools,
   type CodingProjectItem,
@@ -54,9 +55,10 @@ export default function CodingPage() {
 
   // New session modal state
   const [isNewSessionModalOpen, setIsNewSessionModalOpen] = useState(false);
-  const [newSessionBackend, setNewSessionBackend] = useState<"codex" | "opencode">("codex");
+  const [newSessionBackend, setNewSessionBackend] = useState<"codex" | "opencode">("opencode");
   const [newSessionTitle, setNewSessionTitle] = useState("");
   const [creatingSession, setCreatingSession] = useState(false);
+  const backendManuallySelected = useRef(false);
 
   // Conversation tool settings modal state
   const [isSessionSettingsOpen, setIsSessionSettingsOpen] = useState(false);
@@ -161,6 +163,28 @@ export default function CodingPage() {
   // Load projects on mount
   useEffect(() => {
     loadProjects();
+  }, []);
+
+  // Fetch default backend from server config (fallback opencode, preserve manual selection)
+  useEffect(() => {
+    let cancelled = false;
+    const fetchDefaultBackend = async () => {
+      try {
+        const cfg = await getCodingConfig();
+        const backend = cfg.default_backend;
+        if (!cancelled && !backendManuallySelected.current && (backend === "codex" || backend === "opencode")) {
+          setNewSessionBackend(backend);
+        }
+      } catch {
+        if (!cancelled && !backendManuallySelected.current) {
+          setNewSessionBackend("opencode");
+        }
+      }
+    };
+    fetchDefaultBackend();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const loadProjects = async () => {
@@ -1427,7 +1451,10 @@ export default function CodingPage() {
                 <div className="mt-2 grid grid-cols-2 gap-3">
                   <button
                     type="button"
-                    onClick={() => setNewSessionBackend("codex")}
+                    onClick={() => {
+                      backendManuallySelected.current = true;
+                      setNewSessionBackend("codex");
+                    }}
                     className={`rounded-lg border p-3 text-left text-xs transition-colors ${
                       newSessionBackend === "codex"
                         ? "border-slate-900 bg-slate-900 text-white"
@@ -1440,7 +1467,10 @@ export default function CodingPage() {
 
                   <button
                     type="button"
-                    onClick={() => setNewSessionBackend("opencode")}
+                    onClick={() => {
+                      backendManuallySelected.current = true;
+                      setNewSessionBackend("opencode");
+                    }}
                     className={`rounded-lg border p-3 text-left text-xs transition-colors ${
                       newSessionBackend === "opencode"
                         ? "border-slate-900 bg-slate-900 text-white"

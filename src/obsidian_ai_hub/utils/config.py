@@ -63,6 +63,7 @@ _APP_ENV_VARS = [
     "CODING_OPENCODE_AUTO_APPROVE",
     "CODING_OPENCODE_MODEL",
     "CODING_OPENCODE_VARIANT",
+    "CODING_DEFAULT_BACKEND",
 ]
 
 if IS_TEST_ENV:
@@ -581,7 +582,7 @@ AGENT_TITLE_GENERATION_PROVIDER = str(
     _config_value("llm", "agent_title_generation", "provider", default="openai")
 )
 AGENT_TITLE_GENERATION_MODEL = str(
-    _config_value("llm", "agent_title_generation", "model", default="gpt-5.4")
+    _config_value("llm", "agent_title_generation", "model", default="gpt-5.4-mini")
 )
 AGENT_TITLE_PROMPT_PATH = _config_optional_path(
     "llm", "agent_title_generation", "prompt_path"
@@ -626,6 +627,17 @@ CODING_OPENCODE_VARIANT = _env_or_config(
 )
 if CODING_OPENCODE_VARIANT:
     CODING_OPENCODE_VARIANT = str(CODING_OPENCODE_VARIANT)
+
+CODING_DEFAULT_BACKEND = str(
+    _env_or_config("CODING_DEFAULT_BACKEND", "coding", "default_backend", default="opencode")
+).strip().lower()
+if CODING_DEFAULT_BACKEND not in ("codex", "opencode"):
+    import logging
+
+    logging.getLogger(__name__).warning(
+        f"Invalid CODING_DEFAULT_BACKEND '{CODING_DEFAULT_BACKEND}' (expected 'codex' or 'opencode'), falling back to 'opencode'"
+    )
+    CODING_DEFAULT_BACKEND = "opencode"
 
 if IS_TEST_ENV:
     AI_LOG_PATH = TEST_WORKSPACE / "vault" / "ai-log"

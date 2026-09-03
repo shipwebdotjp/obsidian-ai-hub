@@ -27,3 +27,7 @@
 ## 任意シェル実行 (run_shell)
 
 `agents.registry` にネイティブツールとして登録されたシェルコマンド実行機能。任意シェル実行は有効化したエージェントへアプリ権限で直接与える。エージェント編集画面で明示選択された場合のみ利用可能であり、HITL なしで実行され、`exit_code` / `stdout` / `stderr` / `timeout` を構造化 JSON で返す。
+
+## Coding 単発CLI
+
+`python -m obsidian_ai_hub --coding` による Coding Orchestrator の非対話・単発実行形態。位置引数（複数可）と非TTY stdin を `"\n\n"` で結合した1プロンプトを、`coding_sessions`（新規は `--project-id`、再開は `--resume-session`）へ1ターン送信し、 `coding_messages / coding_runs` に永続化する。通常は最終 orchestrator 応答のみを `stdout`、セッション・run・git_status・進捗は `stderr`、 `--json` 指定時は最終結果の単一JSON（`ok / response / session / run`）を `stdout` に出力する。

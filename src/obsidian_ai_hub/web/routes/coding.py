@@ -55,6 +55,17 @@ def update_coding_defaults(body: UpdateToolsRequest, _=Depends(require_bearer_to
     }
 
 
+@router.get("/config")
+def get_coding_config(_=Depends(require_bearer_token)):
+    """Get coding workspace config (default backend)."""
+    from obsidian_ai_hub.utils.config import CODING_DEFAULT_BACKEND
+
+    backend = str(CODING_DEFAULT_BACKEND).strip().lower() if isinstance(CODING_DEFAULT_BACKEND, str) else "opencode"
+    if backend not in ("codex", "opencode"):
+        backend = "opencode"
+    return {"default_backend": backend}
+
+
 @router.get("/tools")
 def list_available_coding_tools(_=Depends(require_bearer_token)):
     """List all available tools in registry."""

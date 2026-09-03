@@ -513,6 +513,30 @@ Web UI だけでなく、シェルスクリプトや外部自動化から既存�
 - **テキスト出力モード (`--agent-output text`)**: 応答本文トークンを逐次 `stdout` へ出力してパイプ利用を維持し、メタ情報（`[session]`, `[run]`, `[tool_start]`, `[tool_end]`, `[hitl]`）は `stderr` へ人間可読形式で出力する。
 - **JSON出力モード (`--agent-output json`)**: 途中進捗を表示せず、完了時に `{session, message, run, hitl_run_ids, tool_calls}` の単一 JSON オブジェクトを `stdout` へ出力する。`session` には初回ターン完了後の自動生成タイトルが反映された最新状態を含める。
 
+## Coding Orchestrator 単発CLI (--coding)
+
+| 項目 | 内容 |
+|------|------|
+| 決定日 | 2026-09-06 |
+| カテゴリ | コーディングワークスペース・CLI・オーケストレーター |
+| 決定内容 | `python -m obsidian_ai_hub --coding` を追加し、Coding Orchestrator へ1プロンプトを非対話・単発で送信して `coding_sessions / coding_messages / coding_runs` を永続化する。新規は `--project-id ID` 必須、再開は `--resume-session SESSION_ID` で既存 `coding_sessions` から `project_id / repo_path / backend` を解決する。両者の併用は禁止し `parser.error`（終了コード2）とする。プロンプトは位置引数を複数許可し `空白` で結合、非TTY stdin があれば `\n\n` で連結、空白のみは空と扱い、結果が空なら `parser.error` で待機せず終了する。backend は CLI 引数として公開せず、新規は `CODING_DEFAULT_BACKEND`（環境変数 `CODING_DEFAULT_BACKEND` / `config.yml:coding.default_backend`、未指定時 `opencode`、有効値 `codex`/`opencode`のみ、不正時は作成せず）を、再開は保存済み backend を使う。タイトルは CLI で指定せずサービスの既定 `新しいコーディングセッション` と Codex/Opencode の自動生成（デフォルト時のみ）に委ねる。`coding/service.run_coding_turn_stream` の SSE を CLI 適応層 (`coding/cli.py`) で消費し、最終 orchestrator 応答と run / git_status / session を構造化する。|
+
+### 結論に至った経緯
+
+Web UI のコーディングワークスペースは SSE で逐次進捗を配信するが、シェルスクリプトや外部自動化からは単発で完了まで待機して結果だけを得たいニーズがある。Web 実装の SSE 契約（`start / orchestrator_start / orchestrator_message / cli_request / worker_start / worker_done / done / error / cancelled`）を推測で解釈せず実際に確認して適応層で安全に集約し、store / backend の公開 API（`create_session / get_session / validate_git_repo / run_coding_turn_stream`）を再利用することで Web と CLI の処理重複と権限・ログ不整合を避ける。main は薄いラッパー方針を尊重し、CLI ロジックは `coding/cli.py` に分離する。
+
+### 構造と出力契約
+
+- **入力**: 位置引数 `prompt_args`（`nargs="*"`）を `' '.join()` し、非TTY stdin があれば `stdin.read().strip()` を `\n\n` で連結。TTY なら stdin を読まずハングさせない。
+- **新規セッション**: `web.services.projects.get_project_detail` でプロジェクト解決、 `backend.validate_git_repo` で Git 検証、 `store.create_session(project_id, backend=CODING_DEFAULT_BACKEND, repo_path, title=DEFAULT_CODING_SESSION_TITLE)` で作成。`CODING_DEFAULT_BACKEND` は `utils/config` で `CODING_DEFAULT_BACKEND`/`coding.default_backend` から読込、未指定時 `opencode`、有効値 `codex`/`opencode`以外はログ警告の上 `opencode` にフォールバックしつつ `cli` 側で再検証して不正時は `ValueError` で作成しない。`project_path` 未設定・Git不正も ValueError として扱う。
+- **Web画面の初期選択**: `GET /api/v1/coding/config`（`utils/config.CODING_DEFAULT_BACKEND` 検証済み、`codex`/`opencode`のみ）を `frontend/src/api/coding.ts:getCodingConfig` 経由で `CodingPage.tsx` がマウント時に取得。`newSessionBackend` 初期値はフォールバック `opencode`、非同期取得完了時に手動選択（`backendManuallySelected`）がなければサーバ値で更新。取得失敗・未取得時は `opencode` のまま。直接 `config.yml` 読込は行わない。
+- **再開セッション**: `store.get_session(session_id)` で存在検証と `project_id / repo_path / backend` 解決。セッション消失は `FileNotFoundError`。
+- **実行**: `asyncio.run(_collect_coding_result)` で `run_coding_turn_stream` の SSE を `data:` 行ごとに `json.loads` して `start / orchestrator_message / worker_done / done / error` を集約。外部 CLI セッション消失時の「一度再作成して継続」は既存 `backend` の `session_recreated` 機構をそのまま利用する。
+- **通常出力 (`--json` 無し)**: `stdout` には最終 orchestrator 応答本文のみ（末尾改行付与）。`session_id / title / run_id / git_status / 進捗・診断 / 失敗情報` は `stderr` へ人間可読（`[session]`, `[run]`, `[git_status]`, `[worker_done]` 等）で出力。既存 `run_and_log` の `stdout` ログを避けるため coding 専用に `execution_logger.start/succeed/fail_command_run` を直接呼ぶが `ContextVar` と 30日保持の整合は保つ。
+- **JSON出力 (`--json`)**: `stdout` に最終的に1個だけ JSON オブジェクトを出力し進捗は混ぜない。成功時は `{ok:true, response, session:{id,project_id,title}, run:{id,status,git_status}}`、失敗時は `{ok:false, error:{type,message}, session, run}`。`error.type` は `ProjectNotFound / SessionNotFound / GitRepoInvalid / RepoBusy / OrchestratorError` 等の安定文字列。JSONモードの通常エラー詳細は `stderr` に重複出力しない。致命的で JSON 生成不可能な障害のみ最小限 `stderr`。
+- **終了コード**: 成功 `0`、引数・入力不正（`parser.error`） `2`、セッション/プロジェクト未発見・Git不正・Orchestrator失敗・ロック競合等の実行時失敗 `1`。
+- **共存**: 既存 CLI の `--json` は `--vault-search` でも使われるため、coding 以外の既存挙動は変えない。`prompt_args` は coding 未指定時は無視される。
+
 ## AI エージェントによるサブエージェント委譲 (agent_delegate)
 
 | 項目 | 内容 |
