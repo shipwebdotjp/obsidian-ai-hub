@@ -20,6 +20,27 @@ from obsidian_ai_hub.utils import config
 
 logger = logging.getLogger(__name__)
 
+OPENCODE_SESSION_HEADER = "x-opencode-session"
+OPENCODE_SESSION_ID_FALLBACK = "obsidian-ai-hub"
+
+
+def _opencode_default_headers(
+    extra: dict[str, Any] | None = None,
+) -> dict[str, str]:
+    """OpenCode Go 用の default_headers を返す。
+
+    安全で安定した識別子のみを使い、APIキー・ユーザー入力・プロンプト・
+    個人情報は含めない。呼び出し側の既存 default_headers は保持し、
+    不足分としてセッションヘッダーを補う。
+    """
+    session_id = (
+        str(getattr(config, "OPENCODE_SESSION_ID", "") or "").strip()
+        or OPENCODE_SESSION_ID_FALLBACK
+    )
+    merged = dict(extra or {})
+    merged.setdefault(OPENCODE_SESSION_HEADER, session_id)
+    return merged
+
 
 def _is_network_error(exc: Exception) -> bool:
     """
@@ -529,6 +550,7 @@ def create_opencode_go_llm(
     max_tokens: int = 512,
     *,
     reasoning_effort: str | None = None,
+    default_headers: dict[str, Any] | None = None,
 ):
     """OpenCode Go 用 LangChain ChatModel を返す。"""
     api_key = config.OPENCODE_API_KEY
@@ -551,6 +573,7 @@ def create_opencode_go_llm(
             options["use_responses_api"] = True
         if reasoning_effort is not None:
             options["reasoning_effort"] = reasoning_effort
+        options["default_headers"] = _opencode_default_headers(default_headers)
 
         return ChatOpenAI(
             model=model,

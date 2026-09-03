@@ -13,6 +13,7 @@ _APP_ENV_VARS = [
     "GEMINI_API_KEY",
     "TAVILY_API_KEY",
     "OPENCODE_API_KEY",
+    "OPENCODE_SESSION_ID",
     "LINE_MESSAGING_TOKEN",
     "LINE_TARGET_ID",
     "LINE_TOKEN",
@@ -163,6 +164,14 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
 OPENCODE_API_KEY = os.getenv("OPENCODE_API_KEY")
+# OpenCode Go へ送る安定したセッション識別子。APIキー・個人情報・プロンプトは
+# 含めない。環境変数 OPENCODE_SESSION_ID または config.yml の
+# opencode_go.session_id で上書き可能。
+OPENCODE_SESSION_ID = str(
+    _env_or_config(
+        "OPENCODE_SESSION_ID", "opencode_go", "session_id", default="obsidian-ai-hub"
+    )
+).strip() or "obsidian-ai-hub"
 
 if IS_TEST_ENV:
     VAULT_PATH = TEST_WORKSPACE / "vault"

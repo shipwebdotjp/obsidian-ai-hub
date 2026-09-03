@@ -30,6 +30,7 @@ def test_opencode_go_openai_compatible_routing():
                 temperature=0.5,
                 max_tokens=256,
                 max_retries=0,
+                default_headers={"x-opencode-session": "obsidian-ai-hub"},
             )
 
 
@@ -56,6 +57,7 @@ def test_opencode_go_gpt_models_use_responses_api():
         max_tokens=256,
         max_retries=0,
         use_responses_api=True,
+        default_headers={"x-opencode-session": "obsidian-ai-hub"},
     )
 
 
@@ -198,3 +200,87 @@ def test_generate_llm_response_with_tools_keeps_non_openai_default():
         temperature=0.7,
         max_tokens=16384,
     )
+
+
+def test_opencode_go_sends_session_header_without_network():
+    """ChatOpenAI に x-opencode-session が default_headers で渡される。"""
+    with (
+        patch(
+            "obsidian_ai_hub.utils.llm_client.config.OPENCODE_API_KEY",
+            "test_opencode_key",
+        ),
+        patch(
+            "obsidian_ai_hub.utils.llm_client.config.OPENCODE_SESSION_ID",
+            "obsidian-ai-hub",
+        ),
+        patch("langchain_openai.ChatOpenAI") as mock_chat_openai,
+    ):
+        llm_client.create_opencode_go_llm(model="deepseek-v3")
+
+    _, kwargs = mock_chat_openai.call_args
+    assert kwargs["default_headers"] == {"x-opencode-session": "obsidian-ai-hub"}
+    mock_chat_openai.assert_called_once()
+
+
+def test_opencode_go_merges_existing_default_headers():
+    """呼び出し側の既存 default_headers を消さずにマージする。"""
+    with (
+        patch(
+            "obsidian_ai_hub.utils.llm_client.config.OPENCODE_API_KEY",
+            "test_opencode_key",
+        ),
+        patch(
+            "obsidian_ai_hub.utils.llm_client.config.OPENCODE_SESSION_ID",
+            "obsidian-ai-hub",
+        ),
+        patch("langchain_openai.ChatOpenAI") as mock_chat_openai,
+    ):
+        llm_client.create_opencode_go_llm(
+            model="deepseek-v3",
+            default_headers={"x-custom": "keep-me"},
+        )
+
+    _, kwargs = mock_chat_openai.call_args
+    assert kwargs["default_headers"] == {
+        "x-custom": "keep-me",
+        "x-opencode-session": "obsidian-ai-hub",
+    }
+
+
+def test_opencode_go_session_id_override():
+    """OPENCODE_SESSION_ID 上書きがヘッダー値に反映される。"""
+    with (
+        patch(
+            "obsidian_ai_hub.utils.llm_client.config.OPENCODE_API_KEY",
+            "test_opencode_key",
+        ),
+        patch(
+            "obsidian_ai_hub.utils.llm_client.config.OPENCODE_SESSION_ID",
+            "custom-session",
+        ),
+        patch("langchain_openai.ChatOpenAI") as mock_chat_openai,
+    ):
+        llm_client.create_opencode_go_llm(model="gpt-5.6-terra")
+
+    _, kwargs = mock_chat_openai.call_args
+    assert kwargs["default_headers"]["x-opencode-session"] == "custom-session"
+
+
+def test_opencode_go_session_header_contains_no_secrets():
+    """ヘッダー値に APIキー・プロンプト・個人情報を含めない。"""
+    secret_key = "test_opencode_key_secret"
+    prompt = "user prompt with PII alice@example.com"
+    with (
+        patch(
+            "obsidian_ai_hub.utils.llm_client.config.OPENCODE_API_KEY",
+            secret_key,
+        ),
+        patch("langchain_openai.ChatOpenAI") as mock_chat_openai,
+    ):
+        llm_client.create_opencode_go_llm(model="deepseek-v3")
+
+    _, kwargs = mock_chat_openai.call_args
+    session_value = kwargs["default_headers"]["x-opencode-session"]
+    assert secret_key not in session_value
+    assert prompt not in session_value
+    assert session_value == "obsidian-ai-hub"

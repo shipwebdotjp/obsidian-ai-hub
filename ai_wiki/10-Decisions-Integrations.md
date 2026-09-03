@@ -1,5 +1,17 @@
 # 外部連携の決定記録
 
+## OpenCode Go へ x-opencode-session ヘッダーを送る
+
+| 項目 | 内容 |
+|------|------|
+| 決定日 | 2026-09-03 |
+| カテゴリ | LLM連携 |
+| 決定内容 | `provider: opencode_go` の OpenAI互換経路（`ChatOpenAI`、base_url `https://opencode.ai/zen/go/v1`）に `default_headers={"x-opencode-session": OPENCODE_SESSION_ID}` を付与する |
+
+### 結論に至った経緯
+
+OpenCode Go 向け OpenAI/Python クライアント生成は `utils/llm_client.py::create_opencode_go_llm` の `ChatOpenAI` のみで、直接の `OpenAI`/`AsyncOpenAI` 生成や Hermes 依存はない。`ChatOpenAI(default_headers=...)` は配下の同期・非同期 OpenAI クライアント双方へ同一値を渡すため、1か所の指定で両経路を満たす。値は固定の安定識別子 `obsidian-ai-hub` を既定とし、環境変数 `OPENCODE_SESSION_ID` または `config.yml` の `opencode_go.session_id` で上書き可能にする。APIキー・ユーザー入力・プロンプト・個人情報は含めない。既存 `default_headers` がある場合は `setdefault` でマージし、消さない。
+
 ## OpenCode Go の GPT モデルは Responses API を使う
 
 | 項目 | 内容 |
