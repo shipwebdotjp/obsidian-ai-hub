@@ -43,6 +43,9 @@ class CreateAgentRequest(BaseModel):
     tool_ids: Optional[List[str]] = Field(
         default_factory=list, description="List of enabled tool IDs"
     )
+    delegate_agent_ids: Optional[List[str]] = Field(
+        default_factory=list, description="List of allowed delegate target agent IDs"
+    )
     provider: Optional[str] = Field(
         default=None, description="LLM provider override"
     )
@@ -59,6 +62,9 @@ class UpdateAgentRequest(BaseModel):
     )
     tool_ids: Optional[List[str]] = Field(
         default=None, description="List of enabled tool IDs"
+    )
+    delegate_agent_ids: Optional[List[str]] = Field(
+        default=None, description="List of allowed delegate target agent IDs"
     )
     provider: Optional[str] = Field(default=None, description="LLM provider")
     model: Optional[str] = Field(default=None, description="LLM model")
@@ -174,6 +180,7 @@ def create_agent(req: CreateAgentRequest) -> Dict[str, Any]:
             name=req.name,
             system_prompt=req.system_prompt,
             tool_ids=req.tool_ids,
+            delegate_agent_ids=req.delegate_agent_ids,
             provider=req.provider,
             model=req.model,
             advanced_params=adv,
@@ -208,6 +215,7 @@ def update_agent(agent_id: str, req: UpdateAgentRequest) -> Dict[str, Any]:
             name=req.name,
             system_prompt=req.system_prompt,
             tool_ids=req.tool_ids,
+            delegate_agent_ids=req.delegate_agent_ids,
             provider=req.provider,
             model=req.model,
             advanced_params=adv,

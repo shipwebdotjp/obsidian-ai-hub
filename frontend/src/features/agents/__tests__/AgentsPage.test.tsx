@@ -1680,4 +1680,43 @@ describe("AgentsPage", () => {
       expect(input.value).toBe("こんにちは！お世話になっております。");
     });
   });
+
+  it("renders delegate target agent selector when agent_delegate tool is checked", async () => {
+    const user = userEvent.setup();
+    const otherAgent = {
+      ...sampleAgent,
+      agent_id: "agent_888",
+      name: "サブワーカー",
+    };
+    const delegateTool = {
+      tool_id: "agent_delegate",
+      name: "エージェント委譲",
+      description: "別エージェントにタスクを委譲します",
+    };
+
+    mockListAgents.mockResolvedValue({ agents: [sampleAgent, otherAgent] });
+    mockListTools.mockResolvedValue({ tools: [...sampleTools, delegateTool] });
+
+    render(
+      <MemoryRouter>
+        <AgentsPage />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(mockGetSessionDetail).toHaveBeenCalled();
+    });
+
+    await user.click(screen.getByRole("button", { name: "設定編集" }));
+
+    // Check agent_delegate checkbox
+    const delegateCheckbox = screen.getByRole("checkbox", { name: /エージェント委譲/i });
+    expect(delegateCheckbox).not.toBeChecked();
+
+    await user.click(delegateCheckbox);
+
+    // Section "許可する委譲先エージェント" should appear with target agent "サブワーカー"
+    expect(screen.getByText("許可する委譲先エージェント")).toBeInTheDocument();
+    expect(screen.getAllByText("サブワーカー").length).toBeGreaterThanOrEqual(2);
+  });
 });

@@ -45,6 +45,34 @@ def _validate_tool_ids(tool_ids: Sequence[str]) -> list[str]:
     return valid
 
 
+def _validate_delegate_agent_ids(
+    delegate_agent_ids: Sequence[str] | None,
+    self_agent_id: Optional[str],
+    conn: sqlite3.Connection,
+) -> list[str]:
+    if not delegate_agent_ids:
+        return []
+
+    valid: list[str] = []
+    for target_id in delegate_agent_ids:
+        if not isinstance(target_id, str):
+            continue
+        clean_id = target_id.strip()
+        if not clean_id:
+            continue
+        if self_agent_id and clean_id == self_agent_id:
+            raise ValueError("Agent cannot set itself as a delegate target.")
+        if clean_id in valid:
+            continue
+
+        cursor = conn.execute("SELECT 1 FROM agents WHERE agent_id = ?;", (clean_id,))
+        if not cursor.fetchone():
+            raise ValueError(f"Delegate target agent '{clean_id}' does not exist.")
+        valid.append(clean_id)
+
+    return valid
+
+
 def _normalize_advanced_params(raw: Any) -> dict[str, Any]:
     """Normalize user-supplied advanced_params to the stored shape.
 
@@ -110,6 +138,16 @@ def _row_to_agent(row: sqlite3.Row) -> dict[str, Any]:
             tool_ids = json.loads(row["tool_ids_json"])
         except (json.JSONDecodeError, TypeError):
             tool_ids = []
+    delegate_agent_ids = []
+    try:
+        raw_del = row["delegate_agent_ids_json"]  # type: ignore[index]
+        if raw_del:
+            parsed_del = json.loads(raw_del)
+            if isinstance(parsed_del, list):
+                delegate_agent_ids = [str(x) for x in parsed_del if isinstance(x, str)]
+    except (IndexError, KeyError, ValueError, json.JSONDecodeError, TypeError):
+        delegate_agent_ids = []
+
     advanced_params = _advanced_params_from_row(row)
     try:
         pinned_at = row["pinned_at"]  # type: ignore[index]
@@ -122,6 +160,7 @@ def _row_to_agent(row: sqlite3.Row) -> dict[str, Any]:
         "provider": row["provider"],
         "model": row["model"],
         "tool_ids": tool_ids,
+        "delegate_agent_ids": delegate_agent_ids,
         "advanced_params": advanced_params,
         "pinned_at": pinned_at,
         "created_at": row["created_at"],
@@ -222,6 +261,7 @@ def create_agent(
     name: str,
     system_prompt: str,
     tool_ids: Sequence[str] | None = None,
+    delegate_agent_ids: Sequence[str] | None = None,
     provider: Optional[str] = None,
     model: Optional[str] = None,
     advanced_params: dict[str, Any] | None = None,
@@ -244,9 +284,34 @@ def create_agent(
     advanced_params_json = _advanced_params_to_json(advanced_params)
 
     with auto_connection(conn) as (active_conn, is_generated):
-        try:
-            if is_generated:
-                with active_conn:
+        valid_delegate_ids = _validate_delegate_agent_ids(
+            delegate_agent_ids, self_agent_id=agent_id, conn=active_conn
+        )
+        delegate_ids_json = json.dumps(valid_delegate_ids, ensure_ascii=False)
+
+        def _do_insert():
+            try:
+                active_conn.execute(
+                    """
+                    INSERT INTO agents (agent_id, name, system_prompt, provider, model, tool_ids_json, advanced_params_json, delegate_agent_ids_json, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        agent_id,
+                        clean_name,
+                        clean_prompt,
+                        clean_provider,
+                        clean_model,
+                        tool_ids_json,
+                        advanced_params_json,
+                        delegate_ids_json,
+                        now,
+                        now,
+                    ),
+                )
+            except sqlite3.OperationalError as e:
+                msg = str(e)
+                if "delegate_agent_ids_json" in msg:
                     try:
                         active_conn.execute(
                             """
@@ -265,8 +330,8 @@ def create_agent(
                                 now,
                             ),
                         )
-                    except sqlite3.OperationalError as e:
-                        if "no such column: advanced_params_json" in str(e):
+                    except sqlite3.OperationalError as e2:
+                        if "advanced_params_json" in str(e2):
                             active_conn.execute(
                                 """
                                 INSERT INTO agents (agent_id, name, system_prompt, provider, model, tool_ids_json, created_at, updated_at)
@@ -285,12 +350,11 @@ def create_agent(
                             )
                         else:
                             raise
-            else:
-                try:
+                elif "advanced_params_json" in msg:
                     active_conn.execute(
                         """
-                        INSERT INTO agents (agent_id, name, system_prompt, provider, model, tool_ids_json, advanced_params_json, created_at, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        INSERT INTO agents (agent_id, name, system_prompt, provider, model, tool_ids_json, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             agent_id,
@@ -299,31 +363,19 @@ def create_agent(
                             clean_provider,
                             clean_model,
                             tool_ids_json,
-                            advanced_params_json,
                             now,
                             now,
                         ),
                     )
-                except sqlite3.OperationalError as e:
-                    if "no such column: advanced_params_json" in str(e):
-                        active_conn.execute(
-                            """
-                            INSERT INTO agents (agent_id, name, system_prompt, provider, model, tool_ids_json, created_at, updated_at)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                            """,
-                            (
-                                agent_id,
-                                clean_name,
-                                clean_prompt,
-                                clean_provider,
-                                clean_model,
-                                tool_ids_json,
-                                now,
-                                now,
-                            ),
-                        )
-                    else:
-                        raise
+                else:
+                    raise
+
+        try:
+            if is_generated:
+                with active_conn:
+                    _do_insert()
+            else:
+                _do_insert()
         except sqlite3.IntegrityError as e:
             if "UNIQUE constraint failed" in str(e):
                 raise ValueError(f"Agent with name '{clean_name}' already exists.") from e
@@ -363,6 +415,7 @@ def update_agent(
     name: Optional[str] = None,
     system_prompt: Optional[str] = None,
     tool_ids: Optional[Sequence[str]] = None,
+    delegate_agent_ids: Optional[Sequence[str]] = None,
     provider: Optional[str] = None,
     model: Optional[str] = None,
     advanced_params: Optional[dict[str, Any]] = None,
@@ -399,6 +452,15 @@ def update_agent(
             _validate_tool_ids(tool_ids) if tool_ids is not None else existing["tool_ids"]
         )
         tool_ids_json = json.dumps(valid_tool_ids, ensure_ascii=False)
+
+        if delegate_agent_ids is not None:
+            valid_delegate_ids = _validate_delegate_agent_ids(
+                delegate_agent_ids, self_agent_id=agent_id, conn=active_conn
+            )
+        else:
+            valid_delegate_ids = existing.get("delegate_agent_ids", [])
+        delegate_ids_json = json.dumps(valid_delegate_ids, ensure_ascii=False)
+
         # advanced_params: None means keep existing; otherwise normalize and store
         if advanced_params is None:
             advanced_params_norm = existing.get("advanced_params", {})
@@ -411,9 +473,30 @@ def update_agent(
             clean_pinned_at = pinned_at
         now = _now_iso()
 
-        try:
-            if is_generated:
-                with active_conn:
+        def _do_update():
+            try:
+                active_conn.execute(
+                    """
+                    UPDATE agents
+                    SET name = ?, system_prompt = ?, provider = ?, model = ?, tool_ids_json = ?, advanced_params_json = ?, delegate_agent_ids_json = ?, pinned_at = ?, updated_at = ?
+                    WHERE agent_id = ?
+                    """,
+                    (
+                        clean_name,
+                        clean_prompt,
+                        clean_provider,
+                        clean_model,
+                        tool_ids_json,
+                        advanced_params_json,
+                        delegate_ids_json,
+                        clean_pinned_at,
+                        now,
+                        agent_id,
+                    ),
+                )
+            except sqlite3.OperationalError as e:
+                msg = str(e)
+                if "delegate_agent_ids_json" in msg:
                     try:
                         active_conn.execute(
                             """
@@ -433,49 +516,48 @@ def update_agent(
                                 agent_id,
                             ),
                         )
-                    except sqlite3.OperationalError as e:
-                        msg = str(e)
-                        if "no such column: pinned_at" in msg:
-                            # Fallback for pre-v25 DBs: retry without pinned_at column
-                            try:
-                                active_conn.execute(
-                                    """
-                                    UPDATE agents
-                                    SET name = ?, system_prompt = ?, provider = ?, model = ?, tool_ids_json = ?, advanced_params_json = ?, updated_at = ?
-                                    WHERE agent_id = ?
-                                    """,
-                                    (
-                                        clean_name,
-                                        clean_prompt,
-                                        clean_provider,
-                                        clean_model,
-                                        tool_ids_json,
-                                        advanced_params_json,
-                                        now,
-                                        agent_id,
-                                    ),
-                                )
-                            except sqlite3.OperationalError as e2:
-                                if "no such column: advanced_params_json" in str(e2):
-                                    active_conn.execute(
-                                        """
-                                        UPDATE agents
-                                        SET name = ?, system_prompt = ?, provider = ?, model = ?, tool_ids_json = ?, updated_at = ?
-                                        WHERE agent_id = ?
-                                        """,
-                                        (
-                                            clean_name,
-                                            clean_prompt,
-                                            clean_provider,
-                                            clean_model,
-                                            tool_ids_json,
-                                            now,
-                                            agent_id,
-                                        ),
-                                    )
-                                else:
-                                    raise
-                        elif "no such column: advanced_params_json" in msg:
+                    except sqlite3.OperationalError as e2:
+                        if "no such column: pinned_at" in str(e2):
+                            active_conn.execute(
+                                """
+                                UPDATE agents
+                                SET name = ?, system_prompt = ?, provider = ?, model = ?, tool_ids_json = ?, advanced_params_json = ?, updated_at = ?
+                                WHERE agent_id = ?
+                                """,
+                                (
+                                    clean_name,
+                                    clean_prompt,
+                                    clean_provider,
+                                    clean_model,
+                                    tool_ids_json,
+                                    advanced_params_json,
+                                    now,
+                                    agent_id,
+                                ),
+                            )
+                        else:
+                            raise
+                elif "no such column: pinned_at" in msg:
+                    try:
+                        active_conn.execute(
+                            """
+                            UPDATE agents
+                            SET name = ?, system_prompt = ?, provider = ?, model = ?, tool_ids_json = ?, advanced_params_json = ?, updated_at = ?
+                            WHERE agent_id = ?
+                            """,
+                            (
+                                clean_name,
+                                clean_prompt,
+                                clean_provider,
+                                clean_model,
+                                tool_ids_json,
+                                advanced_params_json,
+                                now,
+                                agent_id,
+                            ),
+                        )
+                    except sqlite3.OperationalError as e2:
+                        if "no such column: advanced_params_json" in str(e2):
                             active_conn.execute(
                                 """
                                 UPDATE agents
@@ -494,12 +576,11 @@ def update_agent(
                             )
                         else:
                             raise
-            else:
-                try:
+                elif "no such column: advanced_params_json" in msg:
                     active_conn.execute(
                         """
                         UPDATE agents
-                        SET name = ?, system_prompt = ?, provider = ?, model = ?, tool_ids_json = ?, advanced_params_json = ?, pinned_at = ?, updated_at = ?
+                        SET name = ?, system_prompt = ?, provider = ?, model = ?, tool_ids_json = ?, updated_at = ?
                         WHERE agent_id = ?
                         """,
                         (
@@ -508,72 +589,19 @@ def update_agent(
                             clean_provider,
                             clean_model,
                             tool_ids_json,
-                            advanced_params_json,
-                            clean_pinned_at,
                             now,
                             agent_id,
                         ),
                     )
-                except sqlite3.OperationalError as e:
-                    msg = str(e)
-                    if "no such column: pinned_at" in msg:
-                        try:
-                            active_conn.execute(
-                                """
-                                UPDATE agents
-                                SET name = ?, system_prompt = ?, provider = ?, model = ?, tool_ids_json = ?, advanced_params_json = ?, updated_at = ?
-                                WHERE agent_id = ?
-                                """,
-                                (
-                                    clean_name,
-                                    clean_prompt,
-                                    clean_provider,
-                                    clean_model,
-                                    tool_ids_json,
-                                    advanced_params_json,
-                                    now,
-                                    agent_id,
-                                ),
-                            )
-                        except sqlite3.OperationalError as e2:
-                            if "no such column: advanced_params_json" in str(e2):
-                                active_conn.execute(
-                                    """
-                                    UPDATE agents
-                                    SET name = ?, system_prompt = ?, provider = ?, model = ?, tool_ids_json = ?, updated_at = ?
-                                    WHERE agent_id = ?
-                                    """,
-                                    (
-                                        clean_name,
-                                        clean_prompt,
-                                        clean_provider,
-                                        clean_model,
-                                        tool_ids_json,
-                                        now,
-                                        agent_id,
-                                    ),
-                                )
-                            else:
-                                raise
-                    elif "no such column: advanced_params_json" in msg:
-                        active_conn.execute(
-                            """
-                            UPDATE agents
-                            SET name = ?, system_prompt = ?, provider = ?, model = ?, tool_ids_json = ?, updated_at = ?
-                            WHERE agent_id = ?
-                            """,
-                            (
-                                clean_name,
-                                clean_prompt,
-                                clean_provider,
-                                clean_model,
-                                tool_ids_json,
-                                now,
-                                agent_id,
-                            ),
-                        )
-                    else:
-                        raise
+                else:
+                    raise
+
+        try:
+            if is_generated:
+                with active_conn:
+                    _do_update()
+            else:
+                _do_update()
         except sqlite3.IntegrityError as e:
             if "UNIQUE constraint failed" in str(e):
                 raise ValueError(f"Agent with name '{clean_name}' already exists.") from e
@@ -584,13 +612,42 @@ def update_agent(
 
 def delete_agent(agent_id: str, conn: Optional[sqlite3.Connection] = None) -> bool:
     with auto_connection(conn) as (active_conn, is_generated):
+        def _execute_delete():
+            cursor = active_conn.execute("DELETE FROM agents WHERE agent_id = ?;", (agent_id,))
+            if cursor.rowcount == 0:
+                return False
+
+            # Remove agent_id from delegate_agent_ids_json of remaining agents
+            try:
+                rows = active_conn.execute(
+                    "SELECT agent_id, delegate_agent_ids_json FROM agents;"
+                ).fetchall()
+                now = _now_iso()
+                for row in rows:
+                    raw = row["delegate_agent_ids_json"]
+                    if not raw:
+                        continue
+                    try:
+                        d_ids = json.loads(raw)
+                    except (json.JSONDecodeError, TypeError):
+                        continue
+                    if isinstance(d_ids, list) and agent_id in d_ids:
+                        new_ids = [x for x in d_ids if x != agent_id]
+                        new_json = json.dumps(new_ids, ensure_ascii=False)
+                        active_conn.execute(
+                            "UPDATE agents SET delegate_agent_ids_json = ?, updated_at = ? WHERE agent_id = ?;",
+                            (new_json, now, row["agent_id"]),
+                        )
+            except sqlite3.OperationalError as e:
+                if "no such column: delegate_agent_ids_json" not in str(e):
+                    raise
+            return True
+
         if is_generated:
             with active_conn:
-                cursor = active_conn.execute("DELETE FROM agents WHERE agent_id = ?;", (agent_id,))
-                return cursor.rowcount > 0
+                return _execute_delete()
         else:
-            cursor = active_conn.execute("DELETE FROM agents WHERE agent_id = ?;", (agent_id,))
-            return cursor.rowcount > 0
+            return _execute_delete()
 
 
 def create_session(
