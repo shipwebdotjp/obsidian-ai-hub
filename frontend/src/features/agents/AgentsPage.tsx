@@ -185,6 +185,7 @@ export default function AgentsPage() {
   const [formProvider, setFormProvider] = useState("");
   const [formModel, setFormModel] = useState("");
   const [formToolIds, setFormToolIds] = useState<string[]>([]);
+  const [formDelegateAgentIds, setFormDelegateAgentIds] = useState<string[]>([]);
   const [formMaxTokens, setFormMaxTokens] = useState<string>("");
   const [formReasoningEffort, setFormReasoningEffort] = useState<string>("");
   const [isAdvancedOpen, setIsAdvancedOpen] = useState(false);
@@ -760,6 +761,7 @@ export default function AgentsPage() {
     setFormProvider("");
     setFormModel("");
     setFormToolIds([]);
+    setFormDelegateAgentIds([]);
     setFormMaxTokens("");
     setFormReasoningEffort("");
     setIsAdvancedOpen(false);
@@ -780,6 +782,7 @@ export default function AgentsPage() {
     setFormProvider(agent.provider || "");
     setFormModel(agent.model || "");
     setFormToolIds(agent.tool_ids || []);
+    setFormDelegateAgentIds(agent.delegate_agent_ids || []);
     const adv = agent.advanced_params ?? {};
     setFormMaxTokens(adv.max_tokens != null ? String(adv.max_tokens) : "");
     setFormReasoningEffort(adv.reasoning?.effort ?? "");
@@ -813,6 +816,9 @@ export default function AgentsPage() {
     setFormError(null);
     setActionError(null);
     const advanced_params = buildAdvancedParams();
+    const isDelegateSelected = formToolIds.includes("agent_delegate");
+    const delegate_agent_ids = isDelegateSelected ? formDelegateAgentIds : [];
+
     try {
       if (isCreatingAgent) {
         const res = await createAgent({
@@ -821,6 +827,7 @@ export default function AgentsPage() {
           provider: formProvider || undefined,
           model: formModel || undefined,
           tool_ids: formToolIds,
+          delegate_agent_ids,
           advanced_params: Object.keys(advanced_params).length ? advanced_params : undefined,
         });
         setAgents([res.agent, ...agents]);
@@ -832,6 +839,7 @@ export default function AgentsPage() {
           provider: formProvider,
           model: formModel,
           tool_ids: formToolIds,
+          delegate_agent_ids,
           advanced_params,
         });
         setAgents(
@@ -1966,6 +1974,67 @@ export default function AgentsPage() {
                     })}
                   </div>
                 </div>
+
+                {formToolIds.includes("agent_delegate") && (
+                  <div className="rounded-md border border-slate-200 bg-slate-50/50 p-3">
+                    <label className="block font-medium text-slate-700 mb-1">
+                      許可する委譲先エージェント
+                    </label>
+                    <p className="text-[10px] text-slate-500 mb-2">
+                      このエージェントが agent_delegate ツールで委譲できる別エージェントを選択してください（自身を除く）。
+                    </p>
+                    {(() => {
+                      const otherAgents = agents.filter(
+                        (a) => !isEditingAgent || a.agent_id !== selectedAgentId
+                      );
+                      if (otherAgents.length === 0) {
+                        return (
+                          <p className="text-[11px] text-slate-400 italic">
+                            委譲可能な他のエージェントが登録されていません。
+                          </p>
+                        );
+                      }
+                      return (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 border border-slate-200 bg-white rounded-md p-2 max-h-36 overflow-y-auto">
+                          {otherAgents.map((target) => {
+                            const isChecked = formDelegateAgentIds.includes(
+                              target.agent_id
+                            );
+                            return (
+                              <label
+                                key={target.agent_id}
+                                className="flex items-center gap-2 text-xs cursor-pointer hover:bg-slate-50 p-1 rounded"
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={isChecked}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setFormDelegateAgentIds([
+                                        ...formDelegateAgentIds,
+                                        target.agent_id,
+                                      ]);
+                                    } else {
+                                      setFormDelegateAgentIds(
+                                        formDelegateAgentIds.filter(
+                                          (id) => id !== target.agent_id
+                                        )
+                                      );
+                                    }
+                                  }}
+                                  className="cursor-pointer"
+                                />
+                                <span className="font-semibold text-slate-800">
+                                  {target.name}
+                                </span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
 
 
 

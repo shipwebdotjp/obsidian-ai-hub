@@ -696,6 +696,7 @@ export interface Agent {
   provider: string | null;
   model: string | null;
   tool_ids: string[];
+  delegate_agent_ids?: string[];
   advanced_params?: AgentAdvancedParams | null;
   pinned_at?: string | null;
   created_at: string;

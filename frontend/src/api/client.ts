@@ -540,6 +540,7 @@ export function createAgent(payload: {
   name: string;
   system_prompt: string;
   tool_ids?: string[];
+  delegate_agent_ids?: string[];
   provider?: string;
   model?: string;
   advanced_params?: { max_tokens?: number; reasoning?: { effort?: string } } | null;
@@ -560,6 +561,7 @@ export function updateAgent(
     name?: string;
     system_prompt?: string;
     tool_ids?: string[];
+    delegate_agent_ids?: string[];
     provider?: string;
     model?: string;
     advanced_params?: { max_tokens?: number; reasoning?: { effort?: string } } | null;

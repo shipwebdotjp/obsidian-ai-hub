@@ -29,6 +29,7 @@ def test_list_available_tools():
         "project_get",
         "skills",
         "run_shell",
+        "agent_delegate",
     }
     # Order is not contractual; assert membership instead.
     assert set(tool_ids) == expected_ids

@@ -510,6 +510,9 @@ def get_db_connection() -> sqlite3.Connection:
     if current_version <= 29:
         run_migration_v30(conn)
 
+    if current_version <= 30:
+        run_migration_v31(conn)
+
     return conn
 
 
@@ -680,6 +683,7 @@ def run_migration_v21(conn: sqlite3.Connection) -> None:
             model TEXT,
             tool_ids_json TEXT NOT NULL DEFAULT '[]',
             advanced_params_json TEXT NOT NULL DEFAULT '{}',
+            delegate_agent_ids_json TEXT NOT NULL DEFAULT '[]',
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         );
@@ -927,6 +931,18 @@ def run_migration_v29(conn: sqlite3.Connection) -> None:
         _ignore_duplicate_schema_object(e)
 
     conn.execute("PRAGMA user_version = 29;")
+    conn.commit()
+
+
+def run_migration_v31(conn: sqlite3.Connection) -> None:
+    """Run migration for version 31 (agents.delegate_agent_ids_json for subagent delegation)."""
+    try:
+        conn.execute(
+            "ALTER TABLE agents ADD COLUMN delegate_agent_ids_json TEXT NOT NULL DEFAULT '[]';"
+        )
+    except sqlite3.OperationalError as e:
+        _ignore_duplicate_schema_object(e)
+    conn.execute("PRAGMA user_version = 31;")
     conn.commit()
 
 

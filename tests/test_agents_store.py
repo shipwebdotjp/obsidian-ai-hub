@@ -294,3 +294,36 @@ def test_search_messages_across_agents_returns_message_results_and_literal_query
 
     with pytest.raises(ValueError, match="must not be empty"):
         store.search_messages("   ")
+
+
+def test_agent_delegate_agent_ids_crud_and_deletion():
+    child1 = store.create_agent(name="Child Agent 1", system_prompt="Prompt")
+    child2 = store.create_agent(name="Child Agent 2", system_prompt="Prompt")
+
+    # Parent agent with delegates
+    parent = store.create_agent(
+        name="Parent Agent",
+        system_prompt="Parent prompt",
+        delegate_agent_ids=[child1["agent_id"], child2["agent_id"]],
+    )
+    assert parent["delegate_agent_ids"] == [child1["agent_id"], child2["agent_id"]]
+
+    # Non-existent delegation target is rejected
+    with pytest.raises(ValueError, match="does not exist"):
+        store.create_agent(
+            name="Bad Target Agent",
+            system_prompt="Prompt",
+            delegate_agent_ids=["agent_fake12345"],
+        )
+
+    # Self delegation rejection
+    with pytest.raises(ValueError, match="cannot set itself"):
+        store.update_agent(
+            parent["agent_id"],
+            delegate_agent_ids=[parent["agent_id"]],
+        )
+
+    # Delete child1 -> child1 automatically removed from parent's delegate_agent_ids
+    store.delete_agent(child1["agent_id"])
+    updated_parent = store.get_agent(parent["agent_id"])
+    assert updated_parent["delegate_agent_ids"] == [child2["agent_id"]]
