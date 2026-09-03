@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within, act } from "@testing-library/react";
 import { vi, describe, it, expect, beforeEach } from "vitest";
 import CodingPage from "./CodingPage";
 import * as codingApi from "../../api/coding";
@@ -49,6 +49,7 @@ describe("CodingPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
+    sessionStorage.clear();
     vi.mocked(codingApi.getGitStatus).mockResolvedValue({
       branch: "main",
       ahead: 2,
@@ -720,8 +721,7 @@ describe("CodingPage", () => {
     expect(screen.queryByRole("dialog", { name: "プロジェクトとセッションの選択" })).not.toBeInTheDocument();
   });
 
-  it("renders collapsible dirty tree banner when uncommitted changes exist", async () => {
-    vi.mocked(codingApi.getCodingSessionDetail).mockResolvedValue({
+  it("renders collapsible dirty tree banner when uncommitted changes exist", async () => {    vi.mocked(codingApi.getCodingSessionDetail).mockResolvedValue({
       session: mockSession,
       effective_tool_ids: ["web_search"],
       has_custom_tools: false,
@@ -748,5 +748,178 @@ describe("CodingPage", () => {
       expect(screen.getByText("⚠️ 開始時に未コミットの変更があります")).toBeInTheDocument();
       expect(screen.getByText(/M src\/App\.tsx/)).toBeInTheDocument();
     });
+  });
+
+  it("saves the prompt draft per session and restores it on session switch", async () => {
+    const secondSession: codingApi.CodingSession = {
+      ...mockSession,
+      session_id: "cses_222",
+      title: "2つ目のセッション",
+    };
+    vi.mocked(codingApi.listCodingSessions).mockResolvedValue([mockSession, secondSession]);
+    vi.mocked(codingApi.getCodingSessionDetail).mockImplementation(async (sessionId: string) => ({
+      session: sessionId === secondSession.session_id ? secondSession : mockSession,
+      effective_tool_ids: ["web_search", "vault_search"],
+      has_custom_tools: false,
+      available_tools: [],
+      messages: [],
+      active_run: null,
+      latest_run: null,
+    }));
+
+    render(<CodingPage />);
+    await waitFor(() => expect(screen.getByText("Test App")).toBeInTheDocument());
+
+    const textarea = screen.getByPlaceholderText(
+      "指示・質問を入力…（Enterで送信 / Shift+Enterで改行）",
+    ) as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: "Aの下書き" } });
+    await act(() => new Promise((r) => setTimeout(r, 650)));
+    expect(sessionStorage.getItem("oaih:prompt-draft:coding:cses_111")).toBe("Aの下書き");
+
+    // Switch to B: A's content must not leak, B starts empty.
+    fireEvent.click(screen.getByText("2つ目のセッション"));
+    await waitFor(() => expect(textarea.value).toBe(""));
+
+    fireEvent.change(textarea, { target: { value: "Bの下書き" } });
+    await act(() => new Promise((r) => setTimeout(r, 650)));
+
+    // Switch back to A: A's draft is restored, then B's as well.
+    fireEvent.click(screen.getAllByText("新規セッション")[0]);
+    await waitFor(() => expect(textarea.value).toBe("Aの下書き"));
+
+    fireEvent.click(screen.getByText("2つ目のセッション"));
+    await waitFor(() => expect(textarea.value).toBe("Bの下書き"));
+  });
+
+  it("flushes an unsaved draft to the old session on quick switch", async () => {
+    const secondSession: codingApi.CodingSession = {
+      ...mockSession,
+      session_id: "cses_222",
+      title: "2つ目のセッション",
+    };
+    vi.mocked(codingApi.listCodingSessions).mockResolvedValue([mockSession, secondSession]);
+    vi.mocked(codingApi.getCodingSessionDetail).mockImplementation(async (sessionId: string) => ({
+      session: sessionId === secondSession.session_id ? secondSession : mockSession,
+      effective_tool_ids: ["web_search", "vault_search"],
+      has_custom_tools: false,
+      available_tools: [],
+      messages: [],
+      active_run: null,
+      latest_run: null,
+    }));
+
+    render(<CodingPage />);
+    await waitFor(() => expect(screen.getByText("Test App")).toBeInTheDocument());
+
+    const textarea = screen.getByPlaceholderText(
+      "指示・質問を入力…（Enterで送信 / Shift+Enterで改行）",
+    ) as HTMLTextAreaElement;
+    // Switch before the debounce fires: the pending text must land on A, not B.
+    fireEvent.change(textarea, { target: { value: "Aの未保存入力" } });
+    fireEvent.click(screen.getByText("2つ目のセッション"));
+    await act(() => new Promise((r) => setTimeout(r, 650)));
+
+    expect(sessionStorage.getItem("oaih:prompt-draft:coding:cses_111")).toBe("Aの未保存入力");
+    expect(sessionStorage.getItem("oaih:prompt-draft:coding:cses_222")).toBeNull();
+  });
+
+  it("clears the session draft after a successful send", async () => {
+    vi.mocked(codingApi.streamCodingMessage).mockImplementation(
+      async (_sessionId, _content, onEvent) => {
+        onEvent({ event: "start", run_id: "crun_999", is_dirty: false, dirty_summary: null });
+        onEvent({ event: "done", run_id: "crun_999", status: "completed" });
+      },
+    );
+
+    render(<CodingPage />);
+    await waitFor(() => expect(screen.getByText("Test App")).toBeInTheDocument());
+
+    const textarea = screen.getByPlaceholderText(
+      "指示・質問を入力…（Enterで送信 / Shift+Enterで改行）",
+    ) as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: "送信する下書き" } });
+    await act(() => new Promise((r) => setTimeout(r, 650)));
+    expect(sessionStorage.getItem("oaih:prompt-draft:coding:cses_111")).toBe("送信する下書き");
+
+    fireEvent.click(screen.getByRole("button", { name: "送信" }));
+    await waitFor(() => {
+      expect(sessionStorage.getItem("oaih:prompt-draft:coding:cses_111")).toBeNull();
+      expect(textarea.value).toBe("");
+    });
+  });
+
+  it("keeps the pre-send text as the session draft when send fails", async () => {
+    vi.mocked(codingApi.streamCodingMessage).mockRejectedValue(new Error("送信失敗"));
+
+    render(<CodingPage />);
+    await waitFor(() => expect(screen.getByText("Test App")).toBeInTheDocument());
+
+    const textarea = screen.getByPlaceholderText(
+      "指示・質問を入力…（Enterで送信 / Shift+Enterで改行）",
+    ) as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: "失敗しても残る下書き" } });
+    await act(() => new Promise((r) => setTimeout(r, 650)));
+
+    fireEvent.click(screen.getByRole("button", { name: "送信" }));
+    await waitFor(() => {
+      expect(textarea.value).toBe("失敗しても残る下書き");
+      expect(sessionStorage.getItem("oaih:prompt-draft:coding:cses_111")).toBe(
+        "失敗しても残る下書き",
+      );
+    });
+  });
+
+  it("does not touch session B when A's send completes after switching", async () => {
+    const secondSession: codingApi.CodingSession = {
+      ...mockSession,
+      session_id: "cses_222",
+      title: "2つ目のセッション",
+    };
+    vi.mocked(codingApi.listCodingSessions).mockResolvedValue([mockSession, secondSession]);
+    vi.mocked(codingApi.getCodingSessionDetail).mockImplementation(async (sessionId: string) => ({
+      session: sessionId === secondSession.session_id ? secondSession : mockSession,
+      effective_tool_ids: ["web_search", "vault_search"],
+      has_custom_tools: false,
+      available_tools: [],
+      messages: [],
+      active_run: null,
+      latest_run: null,
+    }));
+    let capturedOnEvent: ((event: codingApi.CodingSseEvent) => void) | null = null;
+    vi.mocked(codingApi.streamCodingMessage).mockImplementation(
+      (_sessionId, _content, onEvent) => {
+        capturedOnEvent = onEvent;
+        return new Promise(() => {});
+      },
+    );
+
+    render(<CodingPage />);
+    await waitFor(() => expect(screen.getByText("Test App")).toBeInTheDocument());
+
+    const textarea = screen.getByPlaceholderText(
+      "指示・質問を入力…（Enterで送信 / Shift+Enterで改行）",
+    ) as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: "Aの送信文" } });
+    await act(() => new Promise((r) => setTimeout(r, 650)));
+
+    fireEvent.click(screen.getByRole("button", { name: "送信" }));
+    // Switch to B while A's stream is still running.
+    fireEvent.click(screen.getByText("2つ目のセッション"));
+    await waitFor(() => expect(textarea.value).toBe(""));
+
+    fireEvent.change(textarea, { target: { value: "Bの入力中" } });
+    await act(() => new Promise((r) => setTimeout(r, 650)));
+    expect(sessionStorage.getItem("oaih:prompt-draft:coding:cses_222")).toBe("Bの入力中");
+
+    // A's stream completes while viewing B.
+    await act(async () => {
+      capturedOnEvent?.({ event: "done", run_id: "crun_999", status: "completed" });
+    });
+
+    // B's input and draft are untouched; only A's draft is deleted.
+    expect(textarea.value).toBe("Bの入力中");
+    expect(sessionStorage.getItem("oaih:prompt-draft:coding:cses_222")).toBe("Bの入力中");
+    expect(sessionStorage.getItem("oaih:prompt-draft:coding:cses_111")).toBeNull();
   });
 });

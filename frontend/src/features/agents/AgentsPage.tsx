@@ -32,6 +32,8 @@ import type {
   AgentToolCall,
 } from "../../api/types";
 import { ROUTES } from "../../constants/routes";
+import { useSessionPromptDraft } from "../../hooks/useSessionPromptDraft";
+import { useAgentImageDraft } from "./useAgentImageDraft";
 import { getChatInputPlaceholder, shouldSendOnEnter, useChatSendMode } from "../settings/chatSendMode";
 import MarkdownPreview from "../../components/MarkdownPreview";
 import { formatDateTime } from "../../utils/date";
@@ -203,7 +205,15 @@ export default function AgentsPage() {
   const [templateLoading, setTemplateLoading] = useState(false);
 
   // Chat stream state
-  const [inputText, setInputText] = useState("");
+  // プロンプト下書きはセッションごとに sessionStorage へデバウンス保存・復元する。
+  // 保存対象は入力テキストのみ（添付画像・APIキー等の秘密情報は含めない）。
+  const {
+    draft: inputText,
+    setDraft: setInputText,
+    setLocalDraft: setPromptInputLocal,
+    saveDraftFor: savePromptDraftFor,
+    removeDraftFor: removePromptDraftFor,
+  } = useSessionPromptDraft("agents", selectedSessionId);
   const [chatSendMode] = useChatSendMode();
   const chatInputRef = useRef<HTMLTextAreaElement>(null);
   const [isCommandPaletteDismissed, setIsCommandPaletteDismissed] = useState(false);
@@ -225,6 +235,19 @@ export default function AgentsPage() {
   const [isDragOver, setIsDragOver] = useState(false);
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const plusMenuRef = useRef<HTMLDivElement | null>(null);
+  // 添付画像の下書きはセッションごとに localStorage へデバウンス保存・復元する。
+  // テキスト下書きとはキー・保存先を分離し、同一Agentsセッションに対応付ける。
+  const {
+    saveImageDraftFor,
+    removeImageDraftFor,
+    setLocalAttachments,
+  } = useAgentImageDraft(
+    selectedSessionId,
+    pendingAttachments,
+    setPendingAttachments,
+    inputText,
+    () => setChatError("下書きが大きすぎて保存できません（画像を減らしてください）。"),
+  );
 
   // Modal targets & session action menu
   const [agentToDelete, setAgentToDelete] = useState<Agent | null>(null);
@@ -415,89 +438,6 @@ export default function AgentsPage() {
     }
   };
 
-  // Draft persistence helpers
-  const getDraftKey = useCallback((sessionId: string) => `agent-draft:${sessionId}`, []);
-
-  const loadDraft = useCallback(
-    (sessionId: string) => {
-      try {
-        const raw = localStorage.getItem(getDraftKey(sessionId));
-        if (!raw) {
-          setInputText("");
-          setPendingAttachments([]);
-          return;
-        }
-        const draft = JSON.parse(raw) as {
-          text?: string;
-          attachments?: Array<Omit<PendingAttachment, "previewUrl">>;
-          savedAt?: string;
-        };
-        setInputText(draft.text || "");
-        const validAttachments = (draft.attachments ?? []).filter(
-          (att): att is { name: string; mime_type: string; data: string; size: number } =>
-            Boolean(att && att.mime_type && att.data)
-        );
-        if (validAttachments.length > 0) {
-          setPendingAttachments(
-            validAttachments.map((att) => ({
-              ...att,
-              previewUrl: `data:${att.mime_type};base64,${att.data}`,
-            }))
-          );
-        } else {
-          setPendingAttachments([]);
-        }
-      } catch {
-        // Corrupt or unreadable draft: start fresh.
-        setInputText("");
-        setPendingAttachments([]);
-      }
-    },
-    [getDraftKey]
-  );
-
-  const clearDraft = useCallback(
-    (sessionId: string) => {
-      try {
-        localStorage.removeItem(getDraftKey(sessionId));
-      } catch {
-        // ignore
-      }
-    },
-    [getDraftKey]
-  );
-
-  const DRAFT_SIZE_LIMIT = 4_000_000; // ~4MB to stay under typical localStorage quotas.
-
-  const saveDraft = useCallback(
-    (sessionId: string, text: string, attachments: PendingAttachment[]) => {
-      try {
-        const draft = {
-          text,
-          attachments: attachments.map((att) => ({
-            name: att.name,
-            mime_type: att.mime_type,
-            data: att.data,
-            size: att.size,
-          })),
-          savedAt: new Date().toISOString(),
-        };
-        const serialized = JSON.stringify(draft);
-        if (serialized.length > DRAFT_SIZE_LIMIT) {
-          // Drop the draft rather than silently failing on quota.
-          clearDraft(sessionId);
-          setChatError("下書きが大きすぎて保存できません（画像を減らしてください）。");
-          return;
-        }
-        localStorage.setItem(getDraftKey(sessionId), serialized);
-      } catch (e) {
-        // QuotaExceeded or private mode: don't block typing.
-        console.error("Failed to save draft:", e);
-      }
-    },
-    [getDraftKey, clearDraft]
-  );
-
   // Load session detail messages when session changes
   useEffect(() => {
     if (abortControllerRef.current) {
@@ -510,7 +450,6 @@ export default function AgentsPage() {
       setMessages([]);
       setLoadedSessionId(null);
       setInputText("");
-      setPendingAttachments([]);
       if (imageInputRef.current) {
         imageInputRef.current.value = "";
       }
@@ -519,11 +458,11 @@ export default function AgentsPage() {
     setLoadedSessionId(null);
     loadSessionDetail(selectedSessionId);
     setHitlLinks([]);
-    loadDraft(selectedSessionId);
+    // 入力テキスト・添付画像の下書きは各 hook がセッション切替時に復元する。
     if (imageInputRef.current) {
       imageInputRef.current.value = "";
     }
-  }, [selectedSessionId, loadDraft]);
+  }, [selectedSessionId]);
 
   useEffect(() => {
     const query = sessionSearchQuery.trim();
@@ -571,20 +510,6 @@ export default function AgentsPage() {
     }
     pendingSearchTargetRef.current = null;
   }, [loadedSessionId, messages]);
-
-  // Auto-save draft (text + attachments) with a 200ms debounce.
-  useEffect(() => {
-    if (!selectedSessionId) return;
-    const hasContent = inputText.trim().length > 0 || pendingAttachments.length > 0;
-    if (!hasContent) {
-      clearDraft(selectedSessionId);
-      return;
-    }
-    const timer = window.setTimeout(() => {
-      saveDraft(selectedSessionId, inputText, pendingAttachments);
-    }, 200);
-    return () => window.clearTimeout(timer);
-  }, [inputText, pendingAttachments, selectedSessionId, saveDraft, clearDraft]);
 
   // Close the plus menu and template selector when clicking outside of them.
   useEffect(() => {
@@ -1291,11 +1216,14 @@ export default function AgentsPage() {
 
     const streamSessionId = selectedSessionId;
     const userText = inputText.trim();
+    const sendText = inputText;
     const attachmentsSnapshot = pendingAttachments.map<AgentMessageAttachment>((att) => ({
       name: att.name,
       mime_type: att.mime_type,
       data: att.data,
     }));
+    // 失敗時の画像復元用に previewUrl・size を含む完全なスナップショットを保持する。
+    const attachmentsSnapshotFull = pendingAttachments.map((att) => ({ ...att }));
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
@@ -1304,9 +1232,12 @@ export default function AgentsPage() {
     const controller = new AbortController();
     abortControllerRef.current = controller;
 
-    setInputText("");
-    setPendingAttachments([]);
-    clearDraft(streamSessionId);
+    // 送信前のテキスト・画像は下書きとして確定保存する。入力欄だけ一時クリアし、
+    // storage の削除は送信成功確定時まで行わない。
+    savePromptDraftFor(streamSessionId, sendText);
+    saveImageDraftFor(streamSessionId, sendText, attachmentsSnapshotFull);
+    setPromptInputLocal("");
+    setLocalAttachments([]);
     if (imageInputRef.current) {
       imageInputRef.current.value = "";
     }
@@ -1335,6 +1266,21 @@ export default function AgentsPage() {
       abortControllerRef.current === controller
     );
     let receivedTerminalEvent = false;
+    // 送信成功確定時のみ対象セッションの下書きを削除する。
+    // isCurrentStream() 配下でのみ呼ぶため、切替先セッションへは波及しない。
+    const finalizeSendSuccess = () => {
+      removePromptDraftFor(streamSessionId);
+      removeImageDraftFor(streamSessionId);
+      setPromptInputLocal("");
+      setLocalAttachments([]);
+    };
+    // 失敗・中断時は送信前のテキスト・画像を対象セッションの下書きと入力へ戻す。
+    const restoreSendText = () => {
+      savePromptDraftFor(streamSessionId, sendText);
+      setPromptInputLocal(sendText);
+      saveImageDraftFor(streamSessionId, sendText, attachmentsSnapshotFull);
+      setLocalAttachments(attachmentsSnapshotFull);
+    };
 
     try {
       await streamAgentMessage(
@@ -1445,6 +1391,7 @@ export default function AgentsPage() {
             setStreamingPhase(null);
           } else if (event.type === "done") {
             receivedTerminalEvent = true;
+            finalizeSendSuccess();
             resetStreamingState();
             abortControllerRef.current = null;
             loadSessionDetail(streamSessionId);
@@ -1464,6 +1411,7 @@ export default function AgentsPage() {
             }
           } else if (event.type === "error") {
             receivedTerminalEvent = true;
+            restoreSendText();
             resetStreamingState();
             abortControllerRef.current = null;
             setChatError(event.error || "エラーが発生しました。");
@@ -1473,6 +1421,7 @@ export default function AgentsPage() {
         attachmentsSnapshot.length > 0 ? attachmentsSnapshot : undefined
       );
       if (isCurrentStream() && !receivedTerminalEvent) {
+        restoreSendText();
         resetStreamingState();
         abortControllerRef.current = null;
         setChatError("応答ストリームが完了前に終了しました。");
@@ -1487,6 +1436,7 @@ export default function AgentsPage() {
         abortControllerRef.current = null;
         return;
       }
+      restoreSendText();
       resetStreamingState();
       abortControllerRef.current = null;
       setChatError(err instanceof Error ? err.message : "メッセージの送信に失敗しました。");

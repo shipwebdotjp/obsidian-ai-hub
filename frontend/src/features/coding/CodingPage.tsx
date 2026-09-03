@@ -24,6 +24,7 @@ import {
 } from "../../api/coding";
 import MarkdownPreview from "../../components/MarkdownPreview";
 import { formatDateTime, formatYmdWithDow } from "../../utils/date";
+import { useSessionPromptDraft } from "../../hooks/useSessionPromptDraft";
 import {
   getChatInputPlaceholder,
   shouldSendOnEnter,
@@ -75,7 +76,20 @@ export default function CodingPage() {
   const [savingUserDefaults, setSavingUserDefaults] = useState(false);
 
   // Chat input and streaming state
-  const [inputContent, setInputContent] = useState("");
+  // プロンプト下書きはセッションごとに sessionStorage へデバウンス保存・復元する。
+  const {
+    draft: inputContent,
+    setDraft: setInputContent,
+    setLocalDraft: setPromptInputLocal,
+    saveDraftFor: savePromptDraftFor,
+    removeDraftFor: removePromptDraftFor,
+  } = useSessionPromptDraft("coding", selectedSessionId);
+  // 非同期の送信完了・失敗処理が、切替先セッションの入力・下書きへ波及しない
+  // よう、現在選択中セッションを ref で追跡する。
+  const selectedSessionIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    selectedSessionIdRef.current = selectedSessionId;
+  }, [selectedSessionId]);
   const [chatSendMode] = useChatSendMode();
   const [isStreaming, setIsStreaming] = useState(false);
   const [activePhaseText, setActivePhaseText] = useState<string | null>(null);
@@ -388,18 +402,40 @@ export default function CodingPage() {
   const executeSend = async () => {
     if (!selectedSessionId || !inputContent.trim() || isStreaming) return;
 
+    const sendSessionId = selectedSessionId;
+    const sendText = inputContent;
     const promptText = inputContent.trim();
-    setInputContent("");
+    // 送信前のテキストは下書きとして確定保存する。入力欄だけ一時クリアし、
+    // storage の削除は送信成功確定時まで行わない。
+    savePromptDraftFor(sendSessionId, sendText);
+    setPromptInputLocal("");
     setIsStreaming(true);
     setActivePhaseText("依頼を検討中...");
     setWorkerState({ status: "idle" });
     setError(null);
 
+    // 送信成功確定時のみ対象セッションの下書きを削除する。切替先にいる場合は
+    // 入力状態へ触れず、対象セッションの storage のみ削除する。
+    const finalizeSendSuccess = () => {
+      removePromptDraftFor(sendSessionId);
+      if (selectedSessionIdRef.current === sendSessionId) {
+        setPromptInputLocal("");
+      }
+    };
+    // 失敗・キャンセル時は送信前テキストを対象セッションの下書きへ戻す。
+    // 切替先にいる場合は入力状態へ触れない。
+    const restoreSendText = () => {
+      savePromptDraftFor(sendSessionId, sendText);
+      if (selectedSessionIdRef.current === sendSessionId) {
+        setPromptInputLocal(sendText);
+      }
+    };
+
     // Optimistically add user message to list
     const tempUserMsgId = `temp_${Date.now()}`;
     const tempUserMsg: CodingMessage = {
       message_id: tempUserMsgId,
-      session_id: selectedSessionId,
+      session_id: sendSessionId,
       sequence: messages.length + 1,
       role: "user",
       content: promptText,
@@ -408,7 +444,7 @@ export default function CodingPage() {
     setMessages((prev) => [...prev, tempUserMsg]);
 
     try {
-      await streamCodingMessage(selectedSessionId, promptText, (event: CodingSseEvent) => {
+      await streamCodingMessage(sendSessionId, promptText, (event: CodingSseEvent) => {
         if (event.event === "start") {
           setActiveRun({
             run_id: event.run_id,
@@ -459,14 +495,17 @@ export default function CodingPage() {
             return [...prev, event.message];
           });
         } else if (event.event === "cancelled") {
+          restoreSendText();
           setError("キャンセルされました");
           setActivePhaseText(null);
           setWorkerState({ status: "idle" });
         } else if (event.event === "error") {
+          restoreSendText();
           setError(event.message);
           setActivePhaseText(null);
           setWorkerState({ status: "idle" });
         } else if (event.event === "done") {
+          finalizeSendSuccess();
           setIsStreaming(false);
           setActivePhaseText(null);
           setWorkerState({ status: "idle" });
@@ -485,7 +524,7 @@ export default function CodingPage() {
       });
     } catch (err: any) {
       setError(err.message || "メッセージの送信に失敗しました");
-      setInputContent(promptText);
+      restoreSendText();
       setMessages((prev) => prev.filter((m) => m.message_id !== tempUserMsgId));
     } finally {
       setIsStreaming(false);

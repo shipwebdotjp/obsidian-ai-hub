@@ -92,6 +92,7 @@ const sampleSession = {
 beforeEach(() => {
   vi.clearAllMocks();
   localStorage.clear();
+  sessionStorage.clear();
   mockListAgents.mockResolvedValue({ agents: [sampleAgent] });
   mockListTools.mockResolvedValue({ tools: sampleTools });
   mockListSessions.mockResolvedValue({ sessions: [sampleSession] });
@@ -1054,23 +1055,16 @@ describe("AgentsPage", () => {
     const input = await screen.findByPlaceholderText(/^メッセージを入力/);
     await user.type(input, "下書き保存テスト");
 
-    expect(localStorage.getItem("agent-draft:asess_456")).toBeNull();
-    await act(() => new Promise((resolve) => window.setTimeout(resolve, 250)));
+    expect(sessionStorage.getItem("oaih:prompt-draft:agents:asess_456")).toBeNull();
+    await act(() => new Promise((resolve) => window.setTimeout(resolve, 650)));
 
-    const saved = JSON.parse(localStorage.getItem("agent-draft:asess_456") || "{}");
-    expect(saved.text).toBe("下書き保存テスト");
-    expect(saved.attachments).toEqual([]);
+    expect(sessionStorage.getItem("oaih:prompt-draft:agents:asess_456")).toBe(
+      "下書き保存テスト",
+    );
   });
 
   it("loads a saved draft when the session is selected", async () => {
-    localStorage.setItem(
-      "agent-draft:asess_456",
-      JSON.stringify({
-        text: "復元される下書き",
-        attachments: [],
-        savedAt: new Date().toISOString(),
-      })
-    );
+    sessionStorage.setItem("oaih:prompt-draft:agents:asess_456", "復元される下書き");
 
     render(
       <MemoryRouter>
@@ -1128,13 +1122,341 @@ describe("AgentsPage", () => {
 
     const input = await screen.findByPlaceholderText(/^メッセージを入力/);
     await user.type(input, "クリアされる下書き");
-    await act(() => new Promise((resolve) => window.setTimeout(resolve, 250)));
-    expect(localStorage.getItem("agent-draft:asess_456")).not.toBeNull();
+    await act(() => new Promise((resolve) => window.setTimeout(resolve, 650)));
+    expect(sessionStorage.getItem("oaih:prompt-draft:agents:asess_456")).not.toBeNull();
 
     await user.click(screen.getByRole("button", { name: "送信" }));
     await waitFor(() => {
-      expect(localStorage.getItem("agent-draft:asess_456")).toBeNull();
+      expect(sessionStorage.getItem("oaih:prompt-draft:agents:asess_456")).toBeNull();
     });
+  });
+
+  it("keeps the pre-send text as the session draft when send fails", async () => {
+    const user = userEvent.setup();
+    mockStreamMessage.mockRejectedValue(new Error("送信失敗"));
+
+    render(
+      <MemoryRouter>
+        <AgentsPage />
+      </MemoryRouter>
+    );
+
+    const input = (await screen.findByPlaceholderText(
+      /^メッセージを入力/,
+    )) as HTMLTextAreaElement;
+    await user.type(input, "失敗しても残る下書き");
+    await act(() => new Promise((resolve) => window.setTimeout(resolve, 650)));
+
+    await user.click(screen.getByRole("button", { name: "送信" }));
+    await waitFor(() => {
+      expect(input.value).toBe("失敗しても残る下書き");
+      expect(sessionStorage.getItem("oaih:prompt-draft:agents:asess_456")).toBe(
+        "失敗しても残る下書き",
+      );
+    });
+  });
+
+  it("does not touch session B when A's stream ends after switching", async () => {
+    const user = userEvent.setup();
+    const secondSession = { ...sampleSession, session_id: "asess_789", title: "別の会話" };
+    mockListSessions.mockResolvedValue({ sessions: [sampleSession, secondSession] });
+    mockGetSessionDetail.mockImplementation(async (sessionId: string) => ({
+      session: sessionId === secondSession.session_id ? secondSession : sampleSession,
+      agent: sampleAgent,
+      messages: [],
+      runs: [],
+    }));
+    let capturedOnEvent: ((event: never) => void) | null = null;
+    mockStreamMessage.mockImplementation(
+      (_sessionId: string, _content: string, onEvent: (event: never) => void) => {
+        capturedOnEvent = onEvent;
+        return new Promise(() => {}) as unknown as Promise<void>;
+      },
+    );
+
+    render(
+      <MemoryRouter>
+        <AgentsPage />
+      </MemoryRouter>
+    );
+
+    const input = (await screen.findByPlaceholderText(
+      /^メッセージを入力/,
+    )) as HTMLTextAreaElement;
+    await user.type(input, "Aの送信文");
+    await act(() => new Promise((resolve) => window.setTimeout(resolve, 650)));
+
+    await user.click(screen.getByRole("button", { name: "送信" }));
+    // Switch to B while A's stream is still running (this aborts A's stream).
+    await user.click(screen.getByText("別の会話"));
+    await waitFor(() => {
+      expect(input.value).toBe("");
+    });
+
+    await user.type(input, "Bの入力中");
+    await act(() => new Promise((resolve) => window.setTimeout(resolve, 650)));
+    expect(sessionStorage.getItem("oaih:prompt-draft:agents:asess_789")).toBe("Bの入力中");
+
+    // A's stale stream event must not affect B; A's draft stays (never deleted).
+    await act(async () => {
+      capturedOnEvent?.({
+        type: "done",
+        message: {
+          message_id: "msg_stale",
+          session_id: "asess_456",
+          sequence: 3,
+          role: "assistant",
+          content: "stale",
+          created_at: new Date().toISOString(),
+        },
+        run: {
+          run_id: "arun_stale",
+          session_id: "asess_456",
+          user_message_id: "msg_stale_user",
+          assistant_message_id: "msg_stale",
+          status: "succeeded",
+          used_tools: [],
+          created_hitl_run_ids: [],
+          error_message: null,
+          started_at: "",
+          finished_at: "",
+        },
+        hitl_run_ids: [],
+      } as never);
+    });
+
+    expect(input.value).toBe("Bの入力中");
+    expect(sessionStorage.getItem("oaih:prompt-draft:agents:asess_789")).toBe("Bの入力中");
+    expect(sessionStorage.getItem("oaih:prompt-draft:agents:asess_456")).toBe("Aの送信文");
+  });
+
+  it("keeps per-session drafts separated when switching sessions", async () => {
+    const user = userEvent.setup();
+    const secondSession = { ...sampleSession, session_id: "asess_789", title: "別の会話" };
+    mockListSessions.mockResolvedValue({ sessions: [sampleSession, secondSession] });
+    mockGetSessionDetail.mockImplementation(async (sessionId: string) => ({
+      session: sessionId === secondSession.session_id ? secondSession : sampleSession,
+      agent: sampleAgent,
+      messages: [],
+      runs: [],
+    }));
+
+    render(
+      <MemoryRouter>
+        <AgentsPage />
+      </MemoryRouter>
+    );
+
+    const input = (await screen.findByPlaceholderText(
+      /^メッセージを入力/,
+    )) as HTMLTextAreaElement;
+    await user.type(input, "Aの下書き");
+    await act(() => new Promise((resolve) => window.setTimeout(resolve, 650)));
+    expect(sessionStorage.getItem("oaih:prompt-draft:agents:asess_456")).toBe("Aの下書き");
+
+    // Switch to B: A's content must not leak into B, and B starts empty.
+    await user.click(screen.getByText("別の会話"));
+    await waitFor(() => {
+      expect(input.value).toBe("");
+    });
+
+    await user.type(input, "Bの下書き");
+    await act(() => new Promise((resolve) => window.setTimeout(resolve, 650)));
+
+    // Switch back to A: A's draft is restored.
+    await user.click(screen.getByText("明日の予定"));
+    await waitFor(() => {
+      expect(input.value).toBe("Aの下書き");
+    });
+
+    // And back to B: B's draft is restored.
+    await user.click(screen.getByText("別の会話"));
+    await waitFor(() => {
+      expect(input.value).toBe("Bの下書き");
+    });
+  });
+
+  it("saves attached images per session and restores them without mixing", async () => {
+    const user = userEvent.setup();
+    const secondSession = { ...sampleSession, session_id: "asess_789", title: "別の会話" };
+    mockListSessions.mockResolvedValue({ sessions: [sampleSession, secondSession] });
+    mockGetSessionDetail.mockImplementation(async (sessionId: string) => ({
+      session: sessionId === secondSession.session_id ? secondSession : sampleSession,
+      agent: sampleAgent,
+      messages: [],
+      runs: [],
+    }));
+
+    render(
+      <MemoryRouter>
+        <AgentsPage />
+      </MemoryRouter>
+    );
+
+    await screen.findByPlaceholderText(/^メッセージを入力/);
+    const file = new File([new Uint8Array([0x41, 0x42, 0x43])], "a-image.png", {
+      type: "image/png",
+    });
+    const fileInput = screen.getByTestId("agent-image-input") as HTMLInputElement;
+    await user.upload(fileInput, file);
+    expect(await screen.findByAltText("a-image.png")).toBeInTheDocument();
+
+    await act(() => new Promise((resolve) => window.setTimeout(resolve, 650)));
+    const savedA = JSON.parse(window.localStorage.getItem("agent-draft:asess_456") || "{}");
+    expect(savedA.attachments).toEqual([
+      { name: "a-image.png", mime_type: "image/png", data: "QUJD", size: 3 },
+    ]);
+
+    // Switch to B: A's image must not leak into B.
+    await user.click(screen.getByText("別の会話"));
+    await waitFor(() => {
+      expect(screen.queryByAltText("a-image.png")).not.toBeInTheDocument();
+    });
+    expect(window.localStorage.getItem("agent-draft:asess_789")).toBeNull();
+
+    // Switch back to A: A's image draft is restored.
+    await user.click(screen.getByText("明日の予定"));
+    expect(await screen.findByAltText("a-image.png")).toBeInTheDocument();
+  });
+
+  function seedImageDraft(sessionId: string, name = "seed.png") {
+    window.localStorage.setItem(
+      `agent-draft:${sessionId}`,
+      JSON.stringify({
+        text: "",
+        attachments: [{ name, mime_type: "image/png", data: "QUJD", size: 3 }],
+        savedAt: new Date().toISOString(),
+      }),
+    );
+  }
+
+  function doneEvent(sessionId: string) {
+    return {
+      type: "done",
+      message: {
+        message_id: `msg_done_${sessionId}`,
+        session_id: sessionId,
+        sequence: 3,
+        role: "assistant",
+        content: "送信完了",
+        created_at: new Date().toISOString(),
+      },
+      run: {
+        run_id: `arun_done_${sessionId}`,
+        session_id: sessionId,
+        user_message_id: `msg_done_${sessionId}_user`,
+        assistant_message_id: `msg_done_${sessionId}`,
+        status: "succeeded",
+        used_tools: [],
+        created_hitl_run_ids: [],
+        error_message: null,
+        started_at: "",
+        finished_at: "",
+      },
+      hitl_run_ids: [],
+    } as never;
+  }
+
+  it("deletes the image draft only after a successful send", async () => {
+    const user = userEvent.setup();
+    seedImageDraft("asess_456");
+    mockStreamMessage.mockImplementation(async (_sessionId, _content, onEvent) => {
+      onEvent(doneEvent("asess_456"));
+    });
+
+    render(
+      <MemoryRouter>
+        <AgentsPage />
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByAltText("seed.png")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "送信" }));
+
+    await waitFor(() => {
+      expect(window.localStorage.getItem("agent-draft:asess_456")).toBeNull();
+    });
+    expect(screen.queryByAltText("seed.png")).not.toBeInTheDocument();
+  });
+
+  it("keeps the image draft when send fails", async () => {
+    const user = userEvent.setup();
+    seedImageDraft("asess_456");
+    mockStreamMessage.mockRejectedValue(new Error("送信失敗"));
+
+    render(
+      <MemoryRouter>
+        <AgentsPage />
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByAltText("seed.png")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "送信" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("送信失敗")).toBeInTheDocument();
+    });
+    const kept = JSON.parse(window.localStorage.getItem("agent-draft:asess_456") || "{}");
+    expect(kept.attachments).toEqual([
+      { name: "seed.png", mime_type: "image/png", data: "QUJD", size: 3 },
+    ]);
+    // The draft preview row (not the optimistic message) shows the image again.
+    expect(
+      within(screen.getByLabelText("送信前の添付画像")).getByAltText("seed.png"),
+    ).toBeInTheDocument();
+  });
+
+  it("does not touch session B images when A's send ends after switching", async () => {
+    const user = userEvent.setup();
+    const secondSession = { ...sampleSession, session_id: "asess_789", title: "別の会話" };
+    mockListSessions.mockResolvedValue({ sessions: [sampleSession, secondSession] });
+    mockGetSessionDetail.mockImplementation(async (sessionId: string) => ({
+      session: sessionId === secondSession.session_id ? secondSession : sampleSession,
+      agent: sampleAgent,
+      messages: [],
+      runs: [],
+    }));
+    seedImageDraft("asess_456", "a-image.png");
+    let capturedOnEvent: ((event: never) => void) | null = null;
+    mockStreamMessage.mockImplementation(
+      (_sessionId: string, _content: string, onEvent: (event: never) => void) => {
+        capturedOnEvent = onEvent;
+        return new Promise(() => {}) as unknown as Promise<void>;
+      },
+    );
+
+    render(
+      <MemoryRouter>
+        <AgentsPage />
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByAltText("a-image.png")).toBeInTheDocument();
+    const input = screen.getByPlaceholderText(/^メッセージを入力/);
+    await user.click(screen.getByRole("button", { name: "送信" }));
+
+    // Switch to B while A's stream is still running (this aborts A's stream).
+    await user.click(screen.getByText("別の会話"));
+    await waitFor(() => {
+      expect(screen.queryByAltText("a-image.png")).not.toBeInTheDocument();
+    });
+    expect(input).toHaveValue("");
+
+    // A's stale completion must not affect B; A's image draft stays.
+    await act(async () => {
+      capturedOnEvent?.(doneEvent("asess_456"));
+    });
+    expect(screen.queryByAltText("a-image.png")).not.toBeInTheDocument();
+    expect(input).toHaveValue("");
+    expect(window.localStorage.getItem("agent-draft:asess_789")).toBeNull();
+    const keptA = JSON.parse(window.localStorage.getItem("agent-draft:asess_456") || "{}");
+    expect(keptA.attachments).toEqual([
+      { name: "a-image.png", mime_type: "image/png", data: "QUJD", size: 3 },
+    ]);
+
+    // Switch back to A: A's image draft is restored.
+    await user.click(screen.getByText("明日の予定"));
+    expect(await screen.findByAltText("a-image.png")).toBeInTheDocument();
   });
 
   it("renders a two-row input footer with plus menu and send icon", async () => {
