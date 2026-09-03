@@ -21,7 +21,10 @@ import {
   type CodingTool,
   type CodingDefaults,
   type CodingSessionDetail,
+  type CodingOrchestratorToolCall,
+  type CodingLiveToolCall,
 } from "../../api/coding";
+import { useMemo } from "react";
 import MarkdownPreview from "../../components/MarkdownPreview";
 import { formatDateTime, formatYmdWithDow } from "../../utils/date";
 import { useSessionPromptDraft } from "../../hooks/useSessionPromptDraft";
@@ -93,6 +96,7 @@ export default function CodingPage() {
   const [chatSendMode] = useChatSendMode();
   const [isStreaming, setIsStreaming] = useState(false);
   const [activePhaseText, setActivePhaseText] = useState<string | null>(null);
+  const [streamingToolCalls, setStreamingToolCalls] = useState<CodingLiveToolCall[]>([]);
   const [workerState, setWorkerState] = useState<{
     status: "idle" | "running" | "done";
     attempt?: number;
@@ -136,7 +140,40 @@ export default function CodingPage() {
     if (typeof messageEndRef.current?.scrollIntoView === "function") {
       messageEndRef.current.scrollIntoView({ behavior: "smooth" });
     }
-  }, [messages, activePhaseText, workerState]);
+  }, [messages, activePhaseText, streamingToolCalls, workerState]);
+
+  const toolCallsByMessageId = useMemo(() => {
+    const map = new Map<string, CodingOrchestratorToolCall[]>();
+    if (!sessionDetail?.orchestrator_tool_calls) return map;
+    for (const tc of sessionDetail.orchestrator_tool_calls) {
+      if (tc.orchestrator_message_id) {
+        const list = map.get(tc.orchestrator_message_id) || [];
+        list.push(tc);
+        map.set(tc.orchestrator_message_id, list);
+      }
+    }
+    return map;
+  }, [sessionDetail?.orchestrator_tool_calls]);
+
+  const unassociatedToolCallsByRunId = useMemo(() => {
+    const map = new Map<string, CodingOrchestratorToolCall[]>();
+    if (!sessionDetail?.orchestrator_tool_calls) return map;
+    for (const tc of sessionDetail.orchestrator_tool_calls) {
+      if (!tc.orchestrator_message_id && tc.run_id) {
+        const list = map.get(tc.run_id) || [];
+        list.push(tc);
+        map.set(tc.run_id, list);
+      }
+    }
+    return map;
+  }, [sessionDetail?.orchestrator_tool_calls]);
+
+  const getRunIdForUserMessage = (msg: CodingMessage): string | null => {
+    if (msg.run_id) return msg.run_id;
+    if (activeRun && activeRun.user_message_id === msg.message_id) return activeRun.run_id;
+    if (latestRun && latestRun.user_message_id === msg.message_id) return latestRun.run_id;
+    return null;
+  };
 
   // Mobile drawer focus management & trap
   useEffect(() => {
@@ -411,6 +448,7 @@ export default function CodingPage() {
     setPromptInputLocal("");
     setIsStreaming(true);
     setActivePhaseText("依頼を検討中...");
+    setStreamingToolCalls([]);
     setWorkerState({ status: "idle" });
     setError(null);
 
@@ -462,8 +500,96 @@ export default function CodingPage() {
           setActivePhaseText(
             event.phase === "initial" ? "依頼を検討中..." : "CLI結果を確認中..."
           );
+        } else if (event.event === "orchestrator_tool_call_detected") {
+          setStreamingToolCalls((prev) => {
+            if (prev.some((tc) => tc.call_key === event.call_key || tc.id === event.call_key)) {
+              return prev;
+            }
+            return [
+              ...prev,
+              {
+                id: event.call_key,
+                call_key: event.call_key,
+                tool_name: event.tool_name,
+                args: {},
+                result: "",
+                status: "preparing",
+                phase: event.phase,
+                phase_turn: event.phase_turn,
+                iteration: event.iteration,
+                call_index: event.call_index,
+              },
+            ];
+          });
+        } else if (event.event === "orchestrator_tool_call_start") {
+          setStreamingToolCalls((prev) => {
+            const idx = prev.findIndex(
+              (tc) => tc.call_key === event.call_key || tc.call_id === event.call_id || tc.id === event.call_key
+            );
+            const existing = idx >= 0 ? prev[idx] : undefined;
+            const updated: CodingLiveToolCall = {
+              id: existing?.id || event.call_id,
+              call_id: event.call_id,
+              call_key: event.call_key,
+              tool_name: event.tool_name,
+              args: event.args || {},
+              result: existing?.result || "",
+              status: "running",
+              phase: event.phase,
+              phase_turn: event.phase_turn,
+              iteration: event.iteration,
+              call_index: event.call_index,
+            };
+            if (idx >= 0) {
+              return prev.map((tc, i) => (i === idx ? updated : tc));
+            }
+            return [...prev, updated];
+          });
+        } else if (event.event === "orchestrator_tool_call_end") {
+          setStreamingToolCalls((prev) => {
+            const idx = prev.findIndex(
+              (tc) => tc.call_id === event.call_id || tc.call_key === event.call_key || tc.id === event.call_key
+            );
+            if (idx >= 0) {
+              return prev.map((tc, i) =>
+                i === idx
+                  ? {
+                      ...tc,
+                      call_id: event.call_id,
+                      call_key: event.call_key,
+                      tool_name: event.tool_name,
+                      status: event.status,
+                      result: event.result,
+                      error: event.error || null,
+                      phase: event.phase,
+                      phase_turn: event.phase_turn,
+                      iteration: event.iteration,
+                      call_index: event.call_index,
+                    }
+                  : tc
+              );
+            }
+            return [
+              ...prev,
+              {
+                id: event.call_id,
+                call_id: event.call_id,
+                call_key: event.call_key,
+                tool_name: event.tool_name,
+                args: {},
+                result: event.result,
+                status: event.status,
+                error: event.error || null,
+                phase: event.phase,
+                phase_turn: event.phase_turn,
+                iteration: event.iteration,
+                call_index: event.call_index,
+              },
+            ];
+          });
         } else if (event.event === "orchestrator_message") {
           setActivePhaseText(null);
+          setStreamingToolCalls([]);
           setMessages((prev) => {
             if (prev.some((m) => m.message_id === event.message.message_id)) return prev;
             return [...prev, event.message];
@@ -529,6 +655,7 @@ export default function CodingPage() {
     } finally {
       setIsStreaming(false);
       setActivePhaseText(null);
+      setStreamingToolCalls([]);
       setWorkerState({ status: "idle" });
     }
   };
@@ -982,17 +1109,154 @@ export default function CodingPage() {
                 messages.map((msg) => (
                   <div key={msg.message_id} className="space-y-1 min-w-0">
                     {msg.role === "user" && (
-                      <div className="flex min-w-0 justify-end">
-                        <div className="max-w-2xl min-w-0 overflow-hidden rounded-2xl bg-slate-900 px-4 py-2.5 text-xs text-white [overflow-wrap:anywhere]">
-                          <p className="whitespace-pre-wrap wrap-anywhere break-words [overflow-wrap:anywhere] [word-break:break-word]">
-                            {msg.content}
-                          </p>
+                      <>
+                        <div className="flex min-w-0 justify-end">
+                          <div className="max-w-2xl min-w-0 overflow-hidden rounded-2xl bg-slate-900 px-4 py-2.5 text-xs text-white [overflow-wrap:anywhere]">
+                            <p className="whitespace-pre-wrap wrap-anywhere break-words [overflow-wrap:anywhere] [word-break:break-word]">
+                              {msg.content}
+                            </p>
+                          </div>
                         </div>
-                      </div>
+                        {(() => {
+                          const userRunId = getRunIdForUserMessage(msg);
+                          const unassociatedToolCalls = userRunId
+                            ? unassociatedToolCallsByRunId.get(userRunId) || []
+                            : [];
+                          if (unassociatedToolCalls.length === 0) return null;
+                          return (
+                            <div className="flex justify-start my-1.5 min-w-0">
+                              <div className="max-w-2xl w-full min-w-0 space-y-1.5 rounded-xl border border-amber-200 bg-amber-50/50 px-3 py-2">
+                                <div className="text-[10px] font-bold uppercase tracking-wider text-amber-800">
+                                  中断したオーケストレーター処理 ({unassociatedToolCalls.length}件)
+                                </div>
+                                {unassociatedToolCalls.map((tc) => (
+                                  <details
+                                    key={tc.call_id}
+                                    className="rounded border border-amber-200 bg-white text-xs overflow-hidden group"
+                                  >
+                                    <summary className="cursor-pointer list-none flex items-center justify-between gap-2 px-3 py-1.5 bg-amber-50/80 hover:bg-amber-100/80">
+                                      <span className="flex items-center gap-1.5 min-w-0">
+                                        <span className="font-semibold truncate text-slate-800">{tc.tool_name}</span>
+                                        <span
+                                          className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold border ${
+                                            tc.status === "succeeded"
+                                              ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                              : tc.status === "failed"
+                                              ? "bg-rose-50 text-rose-700 border-rose-200"
+                                              : "bg-amber-100 text-amber-800 border-amber-300"
+                                          }`}
+                                        >
+                                          {tc.status === "succeeded"
+                                            ? "成功"
+                                            : tc.status === "failed"
+                                            ? "失敗"
+                                            : "中断"}
+                                        </span>
+                                      </span>
+                                      <span className="text-[10px] text-slate-400 group-open:rotate-180 transition-transform shrink-0">▼</span>
+                                    </summary>
+                                    <div className="border-t border-amber-200 p-3 space-y-2 bg-white">
+                                      <div>
+                                        <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">引数</div>
+                                        <pre className="max-h-40 overflow-auto rounded bg-slate-50 border border-slate-200 p-2 text-[11px] font-mono whitespace-pre-wrap break-all">
+                                          {(() => {
+                                            try {
+                                              return JSON.stringify(tc.args, null, 2);
+                                            } catch {
+                                              return String(tc.args);
+                                            }
+                                          })()}
+                                        </pre>
+                                      </div>
+                                      <div>
+                                        <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">結果</div>
+                                        <pre className="max-h-64 overflow-auto rounded bg-slate-50 border border-slate-200 p-2 text-[11px] font-mono whitespace-pre-wrap break-all">
+                                          {tc.result || "-"}
+                                        </pre>
+                                      </div>
+                                      {tc.error && (
+                                        <div className="text-[11px] text-rose-700 bg-rose-50 border border-rose-200 rounded px-2 py-1 break-all">
+                                          {tc.error}
+                                        </div>
+                                      )}
+                                    </div>
+                                  </details>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        })()}
+                      </>
                     )}
 
                     {msg.role === "orchestrator" && (
                       <>
+                        {(() => {
+                          const toolCalls = toolCallsByMessageId.get(msg.message_id) || [];
+                          if (toolCalls.length === 0) return null;
+                          return (
+                            <div className="flex justify-start my-1.5 min-w-0">
+                              <div className="max-w-2xl w-full min-w-0 space-y-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                                <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                                  ツール呼び出し {toolCalls.length}件
+                                </div>
+                                {toolCalls.map((tc) => (
+                                  <details
+                                    key={tc.call_id}
+                                    className="rounded border border-slate-200 bg-white text-xs overflow-hidden group"
+                                  >
+                                    <summary className="cursor-pointer list-none flex items-center justify-between gap-2 px-3 py-1.5 bg-slate-50 hover:bg-slate-100">
+                                      <span className="flex items-center gap-1.5 min-w-0">
+                                        <span className="font-semibold truncate text-slate-800">{tc.tool_name}</span>
+                                        <span
+                                          className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold border ${
+                                            tc.status === "succeeded"
+                                              ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                              : tc.status === "failed"
+                                              ? "bg-rose-50 text-rose-700 border-rose-200"
+                                              : "bg-amber-50 text-amber-700 border-amber-200"
+                                          }`}
+                                        >
+                                          {tc.status === "succeeded"
+                                            ? "成功"
+                                            : tc.status === "failed"
+                                            ? "失敗"
+                                            : "中断"}
+                                        </span>
+                                      </span>
+                                      <span className="text-[10px] text-slate-400 group-open:rotate-180 transition-transform shrink-0">▼</span>
+                                    </summary>
+                                    <div className="border-t border-slate-200 p-3 space-y-2 bg-white">
+                                      <div>
+                                        <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">引数</div>
+                                        <pre className="max-h-40 overflow-auto rounded bg-slate-50 border border-slate-200 p-2 text-[11px] font-mono whitespace-pre-wrap break-all">
+                                          {(() => {
+                                            try {
+                                              return JSON.stringify(tc.args, null, 2);
+                                            } catch {
+                                              return String(tc.args);
+                                            }
+                                          })()}
+                                        </pre>
+                                      </div>
+                                      <div>
+                                        <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">結果</div>
+                                        <pre className="max-h-64 overflow-auto rounded bg-slate-50 border border-slate-200 p-2 text-[11px] font-mono whitespace-pre-wrap break-all">
+                                          {tc.result || "-"}
+                                        </pre>
+                                      </div>
+                                      {tc.error && (
+                                        <div className="text-[11px] text-rose-700 bg-rose-50 border border-rose-200 rounded px-2 py-1 break-all">
+                                          {tc.error}
+                                        </div>
+                                      )}
+                                    </div>
+                                  </details>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        })()}
                         <div className="flex min-w-0 justify-start">
                           <div className="max-w-2xl min-w-0 overflow-hidden rounded-2xl bg-white border border-slate-200 p-4 text-xs text-slate-800 shadow-sm [overflow-wrap:anywhere]">
                             <div className="mb-1 text-[10px] font-semibold text-slate-400 uppercase">
@@ -1241,6 +1505,90 @@ export default function CodingPage() {
               {/* Streaming state UI */}
               {isStreaming && (
                 <div className="space-y-3">
+                  {streamingToolCalls.length > 0 && (
+                    <div className="flex justify-start min-w-0">
+                      <div className="max-w-2xl w-full min-w-0 space-y-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                        <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                          ツール呼び出し {streamingToolCalls.length}件
+                        </div>
+                        {streamingToolCalls.map((tc) => (
+                          <details
+                            key={tc.id}
+                            className="rounded border border-slate-200 bg-white text-xs overflow-hidden group"
+                          >
+                            <summary className="cursor-pointer list-none flex items-center justify-between gap-2 px-3 py-1.5 bg-slate-50 hover:bg-slate-100">
+                              <span className="flex items-center gap-1.5 min-w-0">
+                                <span className="font-semibold truncate text-slate-800">{tc.tool_name}</span>
+                                <span
+                                  className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold border ${
+                                    tc.status === "succeeded"
+                                      ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                      : tc.status === "failed"
+                                      ? "bg-rose-50 text-rose-700 border-rose-200"
+                                      : tc.status === "running"
+                                      ? "bg-amber-50 text-amber-700 border-amber-200"
+                                      : "bg-blue-50 text-blue-700 border-blue-200"
+                                  }`}
+                                >
+                                  {tc.status === "succeeded"
+                                    ? "成功"
+                                    : tc.status === "failed"
+                                    ? "失敗"
+                                    : tc.status === "running"
+                                    ? "実行中…"
+                                    : "準備中…"}
+                                </span>
+                              </span>
+                              <span className="text-[10px] text-slate-400 group-open:rotate-180 transition-transform shrink-0">▼</span>
+                            </summary>
+                            <div className="border-t border-slate-200 p-3 space-y-2 bg-white">
+                              {tc.status === "preparing" ? (
+                                <div className="flex items-center gap-2 text-[11px] text-blue-700">
+                                  <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-blue-200 border-t-blue-600" />
+                                  ツール呼び出しを準備中…
+                                </div>
+                              ) : (
+                                <>
+                                  <div>
+                                    <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">引数</div>
+                                    <pre className="max-h-40 overflow-auto rounded bg-slate-50 border border-slate-200 p-2 text-[11px] font-mono whitespace-pre-wrap break-all">
+                                      {(() => {
+                                        try {
+                                          return JSON.stringify(tc.args, null, 2);
+                                        } catch {
+                                          return String(tc.args);
+                                        }
+                                      })()}
+                                    </pre>
+                                  </div>
+                                  {tc.status !== "running" && (
+                                    <div>
+                                      <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">結果</div>
+                                      <pre className="max-h-64 overflow-auto rounded bg-slate-50 border border-slate-200 p-2 text-[11px] font-mono whitespace-pre-wrap break-all">
+                                        {tc.result || "-"}
+                                      </pre>
+                                    </div>
+                                  )}
+                                </>
+                              )}
+                              {tc.status === "running" && (
+                                <div className="flex items-center gap-2 text-[11px] text-amber-700">
+                                  <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-amber-300 border-t-amber-600" />
+                                  実行中…
+                                </div>
+                              )}
+                              {tc.error && (
+                                <div className="text-[11px] text-rose-700 bg-rose-50 border border-rose-200 rounded px-2 py-1 break-all">
+                                  {tc.error}
+                                </div>
+                              )}
+                            </div>
+                          </details>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                   {activePhaseText && (
                     <div className="flex justify-start">
                       <div className="rounded-xl bg-white border border-slate-200 p-3 text-xs text-slate-700 shadow-sm flex items-center gap-2">

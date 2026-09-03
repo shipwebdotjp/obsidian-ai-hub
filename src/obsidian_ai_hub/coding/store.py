@@ -40,7 +40,7 @@ def _has_run_id_column(conn: sqlite3.Connection) -> bool:
 
 
 def mark_interrupted_runs_on_startup() -> int:
-    """Mark any lingering 'running' runs as 'interrupted' on startup."""
+    """Mark any lingering 'running' runs and tool calls as 'interrupted' on startup."""
     conn = get_db_connection()
     now = _now_iso()
     cursor = conn.execute(
@@ -54,9 +54,214 @@ def mark_interrupted_runs_on_startup() -> int:
         (now,),
     )
     count = cursor.rowcount
+    conn.execute(
+        """
+        UPDATE coding_orchestrator_tool_calls
+        SET status = 'interrupted',
+            finished_at = ?,
+            error = 'Interrupted due to server restart'
+        WHERE status = 'running'
+        """,
+        (now,),
+    )
     conn.commit()
     conn.close()
     return count
+
+
+def create_orchestrator_tool_call(
+    call_id: str,
+    run_id: str,
+    phase: str,
+    phase_turn: int,
+    iteration: int,
+    call_index: int,
+    call_key: str,
+    tool_name: str,
+    args: Dict[str, Any] | str,
+    provider_call_id: Optional[str] = None,
+    orchestrator_message_id: Optional[str] = None,
+    status: str = "running",
+) -> Dict[str, Any]:
+    """Create a running orchestrator tool call record."""
+    conn = get_db_connection()
+    now = _now_iso()
+    args_json = args if isinstance(args, str) else json.dumps(args, ensure_ascii=False)
+
+    conn.execute(
+        """
+        INSERT INTO coding_orchestrator_tool_calls (
+            call_id, run_id, phase, phase_turn, iteration, call_index, call_key,
+            orchestrator_message_id, tool_name, args_json, status, provider_call_id, started_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            call_id,
+            run_id,
+            phase,
+            phase_turn,
+            iteration,
+            call_index,
+            call_key,
+            orchestrator_message_id,
+            tool_name,
+            args_json,
+            status,
+            provider_call_id,
+            now,
+        ),
+    )
+    conn.commit()
+    conn.close()
+    return get_orchestrator_tool_call(call_id) or {}
+
+
+def update_orchestrator_tool_call(
+    call_id: str,
+    status: str,
+    result: Optional[str] = None,
+    error: Optional[str] = None,
+    orchestrator_message_id: Optional[str] = None,
+    finished_at: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """Update orchestrator tool call status, result, error, or message linkage."""
+    conn = get_db_connection()
+    now = finished_at or _now_iso()
+    updates = ["status = ?", "finished_at = ?"]
+    params = [status, now]
+
+    if result is not None:
+        updates.append("result = ?")
+        params.append(result)
+    if error is not None:
+        updates.append("error = ?")
+        params.append(error)
+    if orchestrator_message_id is not None:
+        updates.append("orchestrator_message_id = ?")
+        params.append(orchestrator_message_id)
+
+    params.append(call_id)
+    sql = f"UPDATE coding_orchestrator_tool_calls SET {', '.join(updates)} WHERE call_id = ?"
+    conn.execute(sql, tuple(params))
+    conn.commit()
+    conn.close()
+    return get_orchestrator_tool_call(call_id)
+
+
+def associate_orchestrator_tool_calls_with_message(
+    run_id: str,
+    phase_turn: int,
+    orchestrator_message_id: str,
+) -> int:
+    """Link pending tool calls for (run_id, phase_turn) to the created orchestrator message."""
+    conn = get_db_connection()
+    cursor = conn.execute(
+        """
+        UPDATE coding_orchestrator_tool_calls
+        SET orchestrator_message_id = ?
+        WHERE run_id = ? AND phase_turn = ? AND orchestrator_message_id IS NULL
+        """,
+        (orchestrator_message_id, run_id, phase_turn),
+    )
+    count = cursor.rowcount
+    conn.commit()
+    conn.close()
+    return count
+
+
+def get_orchestrator_tool_call(
+    call_id: str, conn=None
+) -> Optional[Dict[str, Any]]:
+    """Get orchestrator tool call record by call_id."""
+    close_conn = False
+    if conn is None:
+        conn = get_db_connection()
+        close_conn = True
+
+    cursor = conn.execute(
+        "SELECT * FROM coding_orchestrator_tool_calls WHERE call_id = ?", (call_id,)
+    )
+    row = cursor.fetchone()
+    if close_conn:
+        conn.close()
+
+    if not row:
+        return None
+    d = dict(row)
+    if d.get("args_json"):
+        try:
+            d["args"] = json.loads(d["args_json"])
+        except (json.JSONDecodeError, TypeError):
+            d["args"] = {}
+    else:
+        d["args"] = {}
+    return d
+
+
+def list_orchestrator_tool_calls_for_run(
+    run_id: str, conn=None
+) -> List[Dict[str, Any]]:
+    """List all orchestrator tool calls for a run."""
+    close_conn = False
+    if conn is None:
+        conn = get_db_connection()
+        close_conn = True
+
+    cursor = conn.execute(
+        """
+        SELECT * FROM coding_orchestrator_tool_calls
+        WHERE run_id = ?
+        ORDER BY phase_turn ASC, iteration ASC, call_index ASC
+        """,
+        (run_id,),
+    )
+    rows = cursor.fetchall()
+    if close_conn:
+        conn.close()
+
+    res = []
+    for r in rows:
+        d = dict(r)
+        if d.get("args_json"):
+            try:
+                d["args"] = json.loads(d["args_json"])
+            except (json.JSONDecodeError, TypeError):
+                d["args"] = {}
+        else:
+            d["args"] = {}
+        res.append(d)
+    return res
+
+
+def list_orchestrator_tool_calls_for_session(
+    session_id: str,
+) -> List[Dict[str, Any]]:
+    """List all orchestrator tool calls for a session across runs."""
+    conn = get_db_connection()
+    cursor = conn.execute(
+        """
+        SELECT tc.* FROM coding_orchestrator_tool_calls tc
+        JOIN coding_runs r ON r.run_id = tc.run_id
+        WHERE r.session_id = ?
+        ORDER BY tc.phase_turn ASC, tc.iteration ASC, tc.call_index ASC
+        """,
+        (session_id,),
+    )
+    rows = cursor.fetchall()
+    conn.close()
+
+    res = []
+    for r in rows:
+        d = dict(r)
+        if d.get("args_json"):
+            try:
+                d["args"] = json.loads(d["args_json"])
+            except (json.JSONDecodeError, TypeError):
+                d["args"] = {}
+        else:
+            d["args"] = {}
+        res.append(d)
+    return res
 
 
 def get_all_available_tool_ids() -> List[str]:
@@ -349,6 +554,18 @@ def delete_session(session_id: str) -> bool:
     return count > 0
 
 
+def update_message_run_id(message_id: str, run_id: str) -> None:
+    """Link a message to a run_id."""
+    conn = get_db_connection()
+    if _has_run_id_column(conn):
+        conn.execute(
+            "UPDATE coding_messages SET run_id = ? WHERE message_id = ?",
+            (run_id, message_id),
+        )
+        conn.commit()
+    conn.close()
+
+
 def add_message(
     session_id: str, role: str, content: str, run_id: Optional[str] = None
 ) -> Dict[str, Any]:
@@ -624,7 +841,7 @@ def list_worker_messages_for_run(run_id: str) -> List[Dict[str, Any]]:
         if _has_run_id_column(conn):
             try:
                 cur2 = conn.execute(
-                    "SELECT * FROM coding_messages WHERE run_id = ? ORDER BY sequence ASC",
+                    "SELECT * FROM coding_messages WHERE run_id = ? AND role = 'worker' ORDER BY sequence ASC",
                     (run_id,),
                 )
                 rows = cur2.fetchall()

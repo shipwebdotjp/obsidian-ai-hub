@@ -63,6 +63,42 @@ export interface CodingMessage {
   role: "user" | "orchestrator" | "cli_request" | "worker";
   content: string;
   created_at: string;
+  run_id?: string | null;
+}
+
+export interface CodingOrchestratorToolCall {
+  call_id: string;
+  run_id: string;
+  phase: "initial" | "review";
+  phase_turn: number;
+  iteration: number;
+  call_index: number;
+  call_key: string;
+  orchestrator_message_id?: string | null;
+  tool_name: string;
+  args: Record<string, unknown>;
+  args_json?: string;
+  result?: string | null;
+  status: "running" | "succeeded" | "failed" | "interrupted";
+  error?: string | null;
+  provider_call_id?: string | null;
+  started_at: string;
+  finished_at?: string | null;
+}
+
+export interface CodingLiveToolCall {
+  id: string;
+  call_id?: string;
+  call_key?: string;
+  tool_name: string;
+  args: Record<string, unknown>;
+  result: string;
+  status: "preparing" | "running" | "succeeded" | "failed";
+  error?: string | null;
+  phase?: "initial" | "review";
+  phase_turn?: number;
+  iteration?: number;
+  call_index?: number;
 }
 
 export interface CodingRun {
@@ -86,13 +122,47 @@ export interface CodingSessionDetail {
   has_custom_tools: boolean;
   available_tools: CodingTool[];
   messages: CodingMessage[];
+  orchestrator_tool_calls?: CodingOrchestratorToolCall[];
   active_run: CodingRun | null;
   latest_run: CodingRun | null;
 }
 
 export type CodingSseEvent =
   | { event: "start"; run_id: string; is_dirty: boolean; dirty_summary: string | null }
-  | { event: "orchestrator_start"; phase: "initial" | "review" }
+  | { event: "orchestrator_start"; phase: "initial" | "review"; phase_turn?: number }
+  | {
+      event: "orchestrator_tool_call_detected";
+      call_key: string;
+      tool_name: string;
+      phase: "initial" | "review";
+      phase_turn: number;
+      iteration: number;
+      call_index: number;
+    }
+  | {
+      event: "orchestrator_tool_call_start";
+      call_id: string;
+      call_key: string;
+      tool_name: string;
+      args: Record<string, unknown>;
+      phase: "initial" | "review";
+      phase_turn: number;
+      iteration: number;
+      call_index: number;
+    }
+  | {
+      event: "orchestrator_tool_call_end";
+      call_id: string;
+      call_key: string;
+      tool_name: string;
+      status: "succeeded" | "failed";
+      result: string;
+      error?: string | null;
+      phase: "initial" | "review";
+      phase_turn: number;
+      iteration: number;
+      call_index: number;
+    }
   | { event: "orchestrator_message"; phase: "initial" | "review"; message: CodingMessage }
   | { event: "cli_request"; message: CodingMessage }
   | { event: "worker_start"; attempt: number; backend: string; prompt: string }

@@ -513,6 +513,9 @@ def get_db_connection() -> sqlite3.Connection:
     if current_version <= 30:
         run_migration_v31(conn)
 
+    if current_version <= 31:
+        run_migration_v32(conn)
+
     return conn
 
 
@@ -943,6 +946,40 @@ def run_migration_v31(conn: sqlite3.Connection) -> None:
     except sqlite3.OperationalError as e:
         _ignore_duplicate_schema_object(e)
     conn.execute("PRAGMA user_version = 31;")
+    conn.commit()
+
+
+def run_migration_v32(conn: sqlite3.Connection) -> None:
+    """Run migration for version 32 (coding_orchestrator_tool_calls table for Coding Orchestrator tool history)."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS coding_orchestrator_tool_calls (
+            call_id TEXT PRIMARY KEY,
+            run_id TEXT NOT NULL,
+            phase TEXT NOT NULL,
+            phase_turn INTEGER NOT NULL,
+            iteration INTEGER NOT NULL,
+            call_index INTEGER NOT NULL,
+            call_key TEXT NOT NULL,
+            orchestrator_message_id TEXT,
+            tool_name TEXT NOT NULL,
+            args_json TEXT NOT NULL,
+            result TEXT,
+            status TEXT NOT NULL,
+            error TEXT,
+            provider_call_id TEXT,
+            started_at TEXT NOT NULL,
+            finished_at TEXT,
+            FOREIGN KEY(run_id) REFERENCES coding_runs(run_id) ON DELETE CASCADE,
+            FOREIGN KEY(orchestrator_message_id) REFERENCES coding_messages(message_id) ON DELETE SET NULL
+        );
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_cotc_run_id ON coding_orchestrator_tool_calls(run_id);"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_cotc_message_id ON coding_orchestrator_tool_calls(orchestrator_message_id);"
+    )
+    conn.execute("PRAGMA user_version = 32;")
     conn.commit()
 
 

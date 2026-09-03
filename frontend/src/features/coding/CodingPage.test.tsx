@@ -922,4 +922,193 @@ describe("CodingPage", () => {
     expect(sessionStorage.getItem("oaih:prompt-draft:coding:cses_222")).toBe("Bの入力中");
     expect(sessionStorage.getItem("oaih:prompt-draft:coding:cses_111")).toBeNull();
   });
+
+  it("renders live orchestrator tool call states during streaming", async () => {
+    let capturedOnEvent: ((event: codingApi.CodingSseEvent) => void) | null = null;
+    vi.mocked(codingApi.streamCodingMessage).mockImplementation(
+      (_sessionId, _content, onEvent) => {
+        capturedOnEvent = onEvent;
+        return new Promise(() => {});
+      },
+    );
+
+    render(<CodingPage />);
+    await waitFor(() => expect(screen.getByText("Test App")).toBeInTheDocument());
+
+    const textarea = screen.getByPlaceholderText(
+      "指示・質問を入力…（Enterで送信 / Shift+Enterで改行）",
+    );
+    fireEvent.change(textarea, { target: { value: "ツール実行テスト" } });
+    fireEvent.click(screen.getByRole("button", { name: "送信" }));
+
+    // 1. Detected event -> "準備中…"
+    act(() => {
+      capturedOnEvent?.({
+        event: "orchestrator_tool_call_detected",
+        call_key: "1:1:0",
+        tool_name: "web_search",
+        phase: "initial",
+        phase_turn: 1,
+        iteration: 1,
+        call_index: 0,
+      });
+    });
+    expect(screen.getByText("web_search")).toBeInTheDocument();
+    expect(screen.getByText("準備中…")).toBeInTheDocument();
+
+    // 2. Start event -> "実行中…"
+    act(() => {
+      capturedOnEvent?.({
+        event: "orchestrator_tool_call_start",
+        call_id: "cotc_live1",
+        call_key: "1:1:0",
+        tool_name: "web_search",
+        args: { query: "vitest test" },
+        phase: "initial",
+        phase_turn: 1,
+        iteration: 1,
+        call_index: 0,
+      });
+    });
+    expect(screen.getAllByText("実行中…").length).toBeGreaterThan(0);
+
+    // 3. End event -> "成功"
+    act(() => {
+      capturedOnEvent?.({
+        event: "orchestrator_tool_call_end",
+        call_id: "cotc_live1",
+        call_key: "1:1:0",
+        tool_name: "web_search",
+        status: "succeeded",
+        result: "検索完了結果",
+        phase: "initial",
+        phase_turn: 1,
+        iteration: 1,
+        call_index: 0,
+      });
+    });
+    expect(screen.getByText("成功")).toBeInTheDocument();
+    expect(screen.getByText("検索完了結果")).toBeInTheDocument();
+  });
+
+  it("renders persisted orchestrator tool calls attached to orchestrator message", async () => {
+    vi.mocked(codingApi.getCodingSessionDetail).mockResolvedValue({
+      session: mockSession,
+      effective_tool_ids: ["web_search"],
+      has_custom_tools: false,
+      available_tools: [
+        { tool_id: "web_search", name: "Web検索", description: "Tavily検索" },
+      ],
+      messages: [
+        {
+          message_id: "cmsg_u1",
+          session_id: "cses_111",
+          sequence: 1,
+          role: "user",
+          content: "Web検索して",
+          created_at: "2026-01-01T00:00:00Z",
+          run_id: "crun_100",
+        },
+        {
+          message_id: "cmsg_o1",
+          session_id: "cses_111",
+          sequence: 2,
+          role: "orchestrator",
+          content: "検索結果をまとめました",
+          created_at: "2026-01-01T00:01:00Z",
+          run_id: "crun_100",
+        },
+      ],
+      orchestrator_tool_calls: [
+        {
+          call_id: "cotc_persisted1",
+          run_id: "crun_100",
+          phase: "initial",
+          phase_turn: 1,
+          iteration: 1,
+          call_index: 0,
+          call_key: "1:1:0",
+          orchestrator_message_id: "cmsg_o1",
+          tool_name: "web_search",
+          args: { query: "obsidian ai hub" },
+          result: "保存済み検索結果",
+          status: "succeeded",
+          started_at: "2026-01-01T00:00:30Z",
+        },
+      ],
+      active_run: null,
+      latest_run: null,
+    });
+
+    render(<CodingPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("ツール呼び出し 1件")).toBeInTheDocument();
+      expect(screen.getByText("web_search")).toBeInTheDocument();
+      expect(screen.getByText("成功")).toBeInTheDocument();
+      expect(screen.getByText("保存済み検索結果")).toBeInTheDocument();
+    });
+  });
+
+  it("renders unassociated interrupted or failed tool calls under '中断したオーケストレーター処理'", async () => {
+    vi.mocked(codingApi.getCodingSessionDetail).mockResolvedValue({
+      session: mockSession,
+      effective_tool_ids: ["run_shell"],
+      has_custom_tools: false,
+      available_tools: [
+        { tool_id: "run_shell", name: "任意シェル実行", description: "シェル実行" },
+      ],
+      messages: [
+        {
+          message_id: "cmsg_u2",
+          session_id: "cses_111",
+          sequence: 1,
+          role: "user",
+          content: "コマンド実行して",
+          created_at: "2026-01-01T00:00:00Z",
+          run_id: "crun_interrupted",
+        },
+      ],
+      orchestrator_tool_calls: [
+        {
+          call_id: "cotc_interrupted1",
+          run_id: "crun_interrupted",
+          phase: "initial",
+          phase_turn: 1,
+          iteration: 1,
+          call_index: 0,
+          call_key: "1:1:0",
+          orchestrator_message_id: null,
+          tool_name: "run_shell",
+          args: { command: "ls -la" },
+          result: null,
+          status: "interrupted",
+          error: "Interrupted due to server restart",
+          started_at: "2026-01-01T00:00:30Z",
+        },
+      ],
+      active_run: null,
+      latest_run: {
+        run_id: "crun_interrupted",
+        session_id: "cses_111",
+        user_message_id: "cmsg_u2",
+        orchestrator_message_id: null,
+        worker_message_id: null,
+        status: "interrupted",
+        dirty_tree_at_start: null,
+        error_message: "Interrupted due to server restart",
+        started_at: "2026-01-01T00:00:00Z",
+        finished_at: "2026-01-01T00:01:00Z",
+      },
+    });
+
+    render(<CodingPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("中断したオーケストレーター処理 (1件)")).toBeInTheDocument();
+      expect(screen.getByText("run_shell")).toBeInTheDocument();
+      expect(screen.getByText("中断")).toBeInTheDocument();
+      expect(screen.getByText("Interrupted due to server restart")).toBeInTheDocument();
+    });
+  });
 });
