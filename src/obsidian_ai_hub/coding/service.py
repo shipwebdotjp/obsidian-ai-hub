@@ -11,6 +11,7 @@ from datetime import datetime
 from typing import AsyncGenerator, Dict, Optional, Tuple
 from zoneinfo import ZoneInfo
 
+from obsidian_ai_hub.agents import runtime as agents_runtime
 from obsidian_ai_hub.coding import backend, store
 from obsidian_ai_hub.coding.orchestrator import CodingOrchestrator, parse_cli_request
 
@@ -128,6 +129,7 @@ async def run_coding_turn_stream(
         orchestrator = CodingOrchestrator(tool_ids=effective_tool_ids)
         cli_count = 0
         final_status = "completed"
+        codex_title_source: Optional[str] = None
         # Track in-memory external session id for this turn (P0-1: carry recreated id to next iteration)
         current_external_id = session.get("external_session_id") if session else None
 
@@ -278,6 +280,10 @@ async def run_coding_turn_stream(
                     return
 
                 worker_output = cli_result.output
+                if backend_name == "codex" and codex_title_source is None:
+                    # Use the first Codex response, matching AI Agents' initial-turn
+                    # title generation semantics rather than querying Codex for a title.
+                    codex_title_source = worker_output
                 if cli_result.session_recreated:
                     if backend_name == "codex":
                         notice_prefix = "前の Codex セッションが見つからなかったため、新しいセッションへ切り替えて続行しました。"
@@ -349,9 +355,33 @@ async def run_coding_turn_stream(
                 yield f"data: {json.dumps({'event': 'error', 'message': f'CLIワーカー実行エラー: {str(exc)}'}, ensure_ascii=False)}\n\n"
                 return
 
-        # Attempt OpenCode external session title sync (safe post-turn hook)
+        # Generate a Codex title through the app's standard AI Agents title LLM.
+        # Codex CLI does not provide a title retrieval API, so never query it for one.
         session_title_updated: Optional[str] = None
-        if backend_name == "opencode":
+        if backend_name == "codex" and codex_title_source is not None:
+            try:
+                cur_sess = store.get_session(session_id)
+                if cur_sess and _should_update_coding_title(cur_sess.get("title")):
+                    generated_title = await asyncio.to_thread(
+                        agents_runtime.generate_session_title,
+                        user_content=user_prompt,
+                        assistant_content=codex_title_source,
+                    )
+                    if generated_title and generated_title != cur_sess.get("title"):
+                        store.update_session_title(session_id, generated_title)
+                        session_title_updated = generated_title
+                        logger.info(
+                            "Updated coding session %s title with AI Agents title generator",
+                            session_id,
+                        )
+            except Exception as exc:
+                # A title is auxiliary metadata and must not fail the Codex run.
+                logger.warning(
+                    "Failed to generate Codex title for session %s: %s", session_id, exc
+                )
+
+        # Attempt OpenCode external session title sync (safe post-turn hook)
+        elif backend_name == "opencode":
             try:
                 cur_sess = store.get_session(session_id)
                 if cur_sess and cur_sess.get("external_session_id"):

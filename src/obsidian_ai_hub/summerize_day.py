@@ -6,6 +6,7 @@ from pathlib import Path
 
 from obsidian_ai_hub.activity.store import get_activities_by_date
 from obsidian_ai_hub.research import db as research_db
+from obsidian_ai_hub.summary.day_context import load_daily_session_overviews
 from obsidian_ai_hub.summary import store as summary_store
 from obsidian_ai_hub.utils import config, reader, extracter, llm_client, prompt
 from obsidian_ai_hub.utils.topics import (
@@ -38,6 +39,8 @@ def get_daily_structured_record(
     daily_content: str,
     logs: list[dict],
     activity_logs: list[dict],
+    agent_session_overviews: list[dict] | None = None,
+    coding_session_overviews: list[dict] | None = None,
 ) -> dict:
     """
     指定された日付の情報を構造化データとして生成。
@@ -120,6 +123,12 @@ def get_daily_structured_record(
                 ),
                 "EXISTING_PROJECTS": json.dumps(
                     existing_projects, ensure_ascii=False, indent=2
+                ),
+                "AI_AGENT_SESSION_OVERVIEWS": json.dumps(
+                    agent_session_overviews or [], ensure_ascii=False, indent=2
+                ),
+                "CODING_SESSION_OVERVIEWS": json.dumps(
+                    coding_session_overviews or [], ensure_ascii=False, indent=2
                 ),
             },
         )
@@ -369,10 +378,18 @@ def summarize_day(target_date: datetime) -> dict:
     # 1. ログのロード
     logs = load_conversation_logs(config.AI_LOG_PATH, target_date)
     activity_logs = load_activity_logs(target_date)
+    agent_session_overviews, coding_session_overviews = load_daily_session_overviews(
+        target_date
+    )
 
     # 2. 構造化レコードの生成
     structured_record = get_daily_structured_record(
-        target_date, daily_content, logs, activity_logs
+        target_date,
+        daily_content,
+        logs,
+        activity_logs,
+        agent_session_overviews,
+        coding_session_overviews,
     )
 
     if not structured_record.get("summary"):

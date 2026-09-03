@@ -1197,6 +1197,150 @@ def test_opencode_title_sync_skips_on_fetch_failure(test_project):
     assert detail["session"]["title"] == "新しいコーディングセッション"
 
 
+@pytest.mark.parametrize(
+    ("title", "expected"),
+    [
+        (None, True),
+        ("", True),
+        ("   ", True),
+        (service.DEFAULT_CODING_SESSION_TITLE, True),
+        ("ユーザー指定のタイトル", False),
+    ],
+)
+def test_coding_title_generation_eligibility(title, expected):
+    assert service._should_update_coding_title(title) is expected
+
+
+def test_codex_title_generation_updates_default_title(test_project):
+    """Codex default titles use the app's AI Agents title generator."""
+    app = create_app(token="test-token")
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer test-token"}
+    res = client.post(
+        "/api/v1/coding/sessions",
+        headers=headers,
+        json={"project_id": test_project["project_id"], "backend": "codex"},
+    )
+    sid = res.json()["session_id"]
+
+    async def mock_generate_response(*args, **kwargs):
+        history = kwargs.get("history", [])
+        if any(h.get("role") == "worker" for h in history):
+            return "完了しました。"
+        return "解析結果です。\n<cli_request>\ncodex exec test\n</cli_request>"
+
+    mock_cli_res = backend.CodingBackendResult(
+        external_session_id="thread_123", output="Codex worker output", exit_code=0
+    )
+    with patch(
+        "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response",
+        side_effect=mock_generate_response,
+    ), patch(
+        "obsidian_ai_hub.coding.backend.CodexCliBackend.execute", return_value=mock_cli_res
+    ), patch(
+        "obsidian_ai_hub.agents.runtime.generate_session_title",
+        return_value="Codex生成タイトル",
+    ) as mock_title:
+        res = client.post(
+            f"/api/v1/coding/sessions/{sid}/messages/stream",
+            headers=headers,
+            json={"content": "Codexで実装して"},
+        )
+
+    assert res.status_code == 200
+    assert '"session_title": "Codex生成タイトル"' in res.text
+    mock_title.assert_called_once_with(
+        user_content="Codexで実装して", assistant_content="Codex worker output"
+    )
+    detail = client.get(f"/api/v1/coding/sessions/{sid}", headers=headers).json()
+    assert detail["session"]["title"] == "Codex生成タイトル"
+
+
+def test_codex_title_generation_preserves_explicit_title(test_project):
+    """Codex title generation must not overwrite a user-supplied title."""
+    app = create_app(token="test-token")
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer test-token"}
+    res = client.post(
+        "/api/v1/coding/sessions",
+        headers=headers,
+        json={
+            "project_id": test_project["project_id"],
+            "backend": "codex",
+            "title": "ユーザー指定のタイトル",
+        },
+    )
+    sid = res.json()["session_id"]
+
+    async def mock_generate_response(*args, **kwargs):
+        if any(h.get("role") == "worker" for h in kwargs.get("history", [])):
+            return "完了しました。"
+        return "解析\n<cli_request>\ncodex exec test\n</cli_request>"
+
+    with patch(
+        "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response",
+        side_effect=mock_generate_response,
+    ), patch(
+        "obsidian_ai_hub.coding.backend.CodexCliBackend.execute",
+        return_value=backend.CodingBackendResult(
+            external_session_id="thread_456", output="worker output", exit_code=0
+        ),
+    ), patch("obsidian_ai_hub.agents.runtime.generate_session_title") as mock_title:
+        res = client.post(
+            f"/api/v1/coding/sessions/{sid}/messages/stream",
+            headers=headers,
+            json={"content": "実装して"},
+        )
+
+    assert res.status_code == 200
+    assert '"session_title"' not in res.text
+    mock_title.assert_not_called()
+    detail = client.get(f"/api/v1/coding/sessions/{sid}", headers=headers).json()
+    assert detail["session"]["title"] == "ユーザー指定のタイトル"
+
+
+def test_codex_title_generation_failure_does_not_fail_turn(test_project):
+    """A title LLM failure leaves the default title and completes the Codex turn."""
+    app = create_app(token="test-token")
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer test-token"}
+    res = client.post(
+        "/api/v1/coding/sessions",
+        headers=headers,
+        json={"project_id": test_project["project_id"], "backend": "codex"},
+    )
+    sid = res.json()["session_id"]
+
+    async def mock_generate_response(*args, **kwargs):
+        if any(h.get("role") == "worker" for h in kwargs.get("history", [])):
+            return "完了しました。"
+        return "解析\n<cli_request>\ncodex exec test\n</cli_request>"
+
+    with patch(
+        "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response",
+        side_effect=mock_generate_response,
+    ), patch(
+        "obsidian_ai_hub.coding.backend.CodexCliBackend.execute",
+        return_value=backend.CodingBackendResult(
+            external_session_id="thread_789", output="worker output", exit_code=0
+        ),
+    ), patch(
+        "obsidian_ai_hub.agents.runtime.generate_session_title",
+        side_effect=RuntimeError("title LLM unavailable"),
+    ):
+        res = client.post(
+            f"/api/v1/coding/sessions/{sid}/messages/stream",
+            headers=headers,
+            json={"content": "実装して"},
+        )
+
+    assert res.status_code == 200
+    assert '"event": "done"' in res.text
+    assert '"session_title"' not in res.text
+    detail = client.get(f"/api/v1/coding/sessions/{sid}", headers=headers).json()
+    assert detail["session"]["title"] == "新しいコーディングセッション"
+
+
 @pytest.mark.anyio
 async def test_orchestrator_tool_restriction(test_project):
     """Test that Orchestrator binds only permitted tools and respects tool restrictions."""

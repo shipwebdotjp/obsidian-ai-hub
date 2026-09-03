@@ -6,7 +6,8 @@ import json
 import logging
 import sqlite3
 import uuid
-from datetime import datetime
+from collections import Counter
+from datetime import date, datetime
 from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
@@ -252,6 +253,62 @@ def list_sessions_by_project(project_id: int) -> List[Dict[str, Any]]:
     rows = cursor.fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def _is_on_jst_date(value: str | None, target_date: date) -> bool:
+    if not value:
+        return False
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=JST)
+    return parsed.astimezone(JST).date() == target_date
+
+
+def list_daily_session_overviews(target_date: date) -> List[Dict[str, Any]]:
+    """Return metadata-only overviews for coding sessions started on a JST date."""
+    conn = get_db_connection()
+    try:
+        session_rows = conn.execute(
+            """
+            SELECT coding_sessions.session_id, coding_sessions.project_id,
+                   coding_sessions.backend, coding_sessions.title,
+                   coding_sessions.created_at, projects.display_name AS project_name
+            FROM coding_sessions
+            INNER JOIN projects ON projects.project_id = coding_sessions.project_id
+            ORDER BY coding_sessions.created_at ASC
+            """
+        ).fetchall()
+
+        overviews = []
+        for session in session_rows:
+            if not _is_on_jst_date(session["created_at"], target_date):
+                continue
+            runs = conn.execute(
+                """
+                SELECT status, started_at FROM coding_runs
+                WHERE session_id = ?
+                """,
+                (session["session_id"],),
+            ).fetchall()
+            status_counts = Counter(
+                row["status"]
+                for row in runs
+                if _is_on_jst_date(row["started_at"], target_date)
+            )
+            overviews.append(
+                {
+                    "project_id": session["project_id"],
+                    "project_name": session["project_name"],
+                    "session_title": session["title"],
+                    "backend": session["backend"],
+                    "started_at": session["created_at"],
+                    "run_count": sum(status_counts.values()),
+                    "run_status_counts": dict(sorted(status_counts.items())),
+                }
+            )
+        return overviews
+    finally:
+        conn.close()
 
 
 def update_session_external_id(

@@ -10,6 +10,7 @@ from obsidian_ai_hub.summerize_day import (
     get_daily_structured_record,
     format_structured_record_as_markdown,
 )
+from obsidian_ai_hub.summary.day_context import load_daily_session_overviews
 
 
 @pytest.fixture
@@ -296,6 +297,109 @@ def test_get_daily_structured_record_passes_activity_rankings(
         ["Git", 1],
         ["Email", 1],
     ]
+
+
+def test_load_daily_session_overviews_uses_jst_start_date_and_metadata(
+    monkeypatch, test_memory_db_path
+):
+    from obsidian_ai_hub.agents import store as agent_store
+    from obsidian_ai_hub.coding import store as coding_store
+    from obsidian_ai_hub.web.schemas import ProjectCreateRequest
+    from obsidian_ai_hub.web.services.projects import create_project
+
+    target = datetime(2023, 10, 27)
+
+    agent_now = {"value": "2023-10-26T15:30:00+00:00"}  # 10/27 00:30 JST
+    monkeypatch.setattr(agent_store, "_now_iso", lambda: agent_now["value"])
+    agent = agent_store.create_agent("日次テストエージェント", "テスト用")
+    included_agent_session = agent_store.create_session(agent["agent_id"], "相談セッション")
+    user_message, agent_run = agent_store.start_user_run(
+        included_agent_session["session_id"], "本文はコンテキストに含めない"
+    )
+    agent_store.complete_run(agent_run["run_id"], "この応答も含めない")
+
+    agent_now["value"] = "2023-10-26T14:30:00+00:00"  # 10/26 23:30 JST
+    excluded_agent_session = agent_store.create_session(agent["agent_id"], "前日開始")
+    agent_now["value"] = "2023-10-27T01:00:00+00:00"
+    agent_store.start_user_run(excluded_agent_session["session_id"], "当日活動だが除外")
+
+    project = create_project(ProjectCreateRequest(display_name="日次集計プロジェクト"))
+    coding_now = {"value": "2023-10-27T09:00:00+09:00"}
+    monkeypatch.setattr(coding_store, "_now_iso", lambda: coding_now["value"])
+    included_coding_session = coding_store.create_session(
+        project["project_id"], "codex", "/private/repo", title="実装セッション"
+    )
+    coding_message = coding_store.add_message(
+        included_coding_session["session_id"], "user", "本文はコンテキストに含めない"
+    )
+    coding_run = coding_store.create_run(
+        included_coding_session["session_id"], coding_message["message_id"]
+    )
+    coding_store.update_run(coding_run["run_id"], status="completed")
+
+    coding_now["value"] = "2023-10-26T23:00:00+09:00"
+    excluded_coding_session = coding_store.create_session(
+        project["project_id"], "opencode", "/private/old", title="前日開始"
+    )
+    coding_now["value"] = "2023-10-27T10:00:00+09:00"
+    excluded_message = coding_store.add_message(
+        excluded_coding_session["session_id"], "user", "当日活動だが除外"
+    )
+    coding_store.create_run(excluded_coding_session["session_id"], excluded_message["message_id"])
+
+    agent_overviews, coding_overviews = load_daily_session_overviews(target)
+
+    assert agent_overviews == [
+        {
+            "agent_name": "日次テストエージェント",
+            "session_title": "相談セッション",
+            "started_at": "2023-10-26T15:30:00+00:00",
+            "message_count": 2,
+            "user_message_count": 1,
+            "assistant_message_count": 1,
+            "run_status_counts": {"succeeded": 1},
+        }
+    ]
+    assert coding_overviews == [
+        {
+            "project_id": project["project_id"],
+            "project_name": "日次集計プロジェクト",
+            "session_title": "実装セッション",
+            "backend": "codex",
+            "started_at": "2023-10-27T09:00:00+09:00",
+            "run_count": 1,
+            "run_status_counts": {"completed": 1},
+        }
+    ]
+    assert "本文はコンテキストに含めない" not in json.dumps(
+        [agent_overviews, coding_overviews], ensure_ascii=False
+    )
+
+
+@patch("obsidian_ai_hub.summerize_day.prompt.render_prompt")
+@patch("obsidian_ai_hub.summerize_day.llm_client.generate_llm_response")
+@patch("obsidian_ai_hub.summerize_day.extracter.get_frontmatter_value")
+def test_get_daily_structured_record_passes_session_overviews(
+    mock_fm, mock_llm, mock_render, mock_config
+):
+    mock_fm.return_value = None
+    mock_llm.return_value = json.dumps({"summary": "Test Summary"})
+    mock_render.return_value = "Rendered Prompt"
+    agent_overviews = [{"agent_name": "助手", "session_title": "相談", "message_count": 2}]
+    coding_overviews = [{"project_name": "Hub", "session_title": "実装", "run_count": 1}]
+
+    get_daily_structured_record(
+        datetime(2023, 10, 27),
+        "Content",
+        [],
+        [],
+        agent_overviews,
+        coding_overviews,
+    )
+
+    context = mock_render.call_args[0][1]
+    assert json.loads(context["AI_AGENT_SESSION_OVERVIEWS"]) == agent_overviews
+    assert json.loads(context["CODING_SESSION_OVERVIEWS"]) == coding_overviews
 
 
 @patch("obsidian_ai_hub.summerize_day.prompt.render_prompt")

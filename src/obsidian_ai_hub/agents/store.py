@@ -5,9 +5,11 @@ from __future__ import annotations
 import json
 import sqlite3
 import uuid
+from collections import Counter
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any, Generator, Optional, Sequence
+from zoneinfo import ZoneInfo
 
 from obsidian_ai_hub.database import get_db_connection
 
@@ -642,6 +644,72 @@ def list_sessions(agent_id: str, conn: Optional[sqlite3.Connection] = None) -> l
             else:
                 raise
         return [_row_to_session(row) for row in cursor.fetchall()]
+
+
+def _is_on_jst_date(value: str | None, target_date: date) -> bool:
+    if not value:
+        return False
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(ZoneInfo("Asia/Tokyo")).date() == target_date
+
+
+def list_daily_session_overviews(target_date: date) -> list[dict[str, Any]]:
+    """Return metadata-only overviews for agent sessions started on a JST date."""
+    with auto_connection() as (conn, _):
+        session_rows = conn.execute(
+            """
+            SELECT agent_sessions.session_id, agent_sessions.title,
+                   agent_sessions.created_at, agents.name AS agent_name
+            FROM agent_sessions
+            INNER JOIN agents ON agents.agent_id = agent_sessions.agent_id
+            ORDER BY agent_sessions.created_at ASC
+            """
+        ).fetchall()
+
+        overviews = []
+        for session in session_rows:
+            if not _is_on_jst_date(session["created_at"], target_date):
+                continue
+
+            messages = conn.execute(
+                """
+                SELECT role, created_at FROM agent_messages
+                WHERE session_id = ?
+                """,
+                (session["session_id"],),
+            ).fetchall()
+            runs = conn.execute(
+                """
+                SELECT status, started_at FROM agent_runs
+                WHERE session_id = ?
+                """,
+                (session["session_id"],),
+            ).fetchall()
+
+            message_counts = Counter(
+                row["role"]
+                for row in messages
+                if _is_on_jst_date(row["created_at"], target_date)
+            )
+            status_counts = Counter(
+                row["status"]
+                for row in runs
+                if _is_on_jst_date(row["started_at"], target_date)
+            )
+            overviews.append(
+                {
+                    "agent_name": session["agent_name"],
+                    "session_title": session["title"],
+                    "started_at": session["created_at"],
+                    "message_count": sum(message_counts.values()),
+                    "user_message_count": message_counts["user"],
+                    "assistant_message_count": message_counts["assistant"],
+                    "run_status_counts": dict(sorted(status_counts.items())),
+                }
+            )
+        return overviews
 
 
 _SESSION_SEARCH_LIMIT = 100

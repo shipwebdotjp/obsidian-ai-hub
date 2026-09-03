@@ -514,9 +514,6 @@ class CodexCliBackend(_BaseSubprocessBackend):
         )
 
 
-DEFAULT_CODING_SESSION_TITLE = "新しいコーディングセッション"
-
-
 class OpenCodeCliBackend(_BaseSubprocessBackend):
     """OpenCode CLI backend adapter."""
 
