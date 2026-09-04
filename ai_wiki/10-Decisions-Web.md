@@ -712,3 +712,25 @@ AgentsPage と共通のデザインパターンを採用し、PC幅での情報�
 - **API**: `POST /agent-sessions/{id}/runs`・`POST /coding/sessions/{id}/runs`（202＋`Idempotency-Key`再送は同一run、本文差分は409）、`GET /agent-runs/{id}/events`・`GET /coding/runs/{id}/events`（`Last-Event-ID`→`event_id > cursor`昇順replay＋15s heartbeat＋terminal close、`id:`付き）、`POST /agent-runs/{id}/cancel`・`POST /coding/runs/{id}/cancel`（`cancelling`経由）。旧 `POST .../messages/stream` は削除し、`agents/cli.py`／`coding/cli.py` は内部 generator を維持した。
 - **フロント**: `api/runSse.ts:subscribeRunEvents`（Fetch＋`Last-Event-ID`＋指数バックオフ、terminal／401／明示cancel時は再接続しない、at-least-once重複除去）、`run-sse:{domain}:{run_id}:last-event-id` のみを `sessionStorage` に保持。Agents／Coding 両Pageで開始→即購読、active run初期復元（event fold→購読）、アンマウント／切替は購読Abortのみ、取消ボタンだけが cancel API を呼ぶ。Coding に `session_id` URL選択を追加し、Agent の既存 deep link を維持した。
 - **検証**: `tests/test_run_sse_*.py`（冪等・replay・切断継続・取消・startup/shutdown・CLI取消・repo lock維持）、Vitest（`runSse.test.ts`、Agents／Coding再接続・重複排除・URL復元）、`uv run pytest tests/` 1009 passed（E2E 1件は本件と無関係な既存 people 失敗）、Vitest 284 passed、`tsc --noEmit` clean。
+
+## Agents の最終表示会話の復元（localStorage）
+
+| 項目 | 内容 |
+|------|------|
+| 決定日 | 2026-09-04 |
+| カテゴリ | AI エージェント・Web UI |
+| 決定内容 | `/agents` を `session_id` なしで開いたとき、同一ブラウザプロファイル内で最後に表示対象となった会話セッションを復元する。保存先は `localStorage`（キー `obsidian-ai-hub:agents-last-viewed-session:v1`、値 `{"session_id": "...", "savedAt": "..."}`）とする。有効な deep link を最優先し、無効値は安全に消去して先頭会話へ無言フォールバックする。 |
+
+### 設計判断
+
+- **localStorage を選ぶ理由:** 復元対象は「ブラウザ再起動後も維持する」最終表示であり、タブ寿命の `sessionStorage`（プロンプト下書き・SSEカーソル）では寿命が足りない。既存の `localStorage` 利用（APIトークン・送信モード・Vault検索履歴・画像下書き）の命名（`obsidian-ai-hub:` 接頭辞＋`:v1` 版管理）と防御方針（例外を投げず無視）に合わせる。
+- **値形式:** 会話IDだけなら生文字列で足りるが、`agent-draft` と同じ JSON オブジェクト形状にしておくことで、将来の拡張（agent 解決補助など）をキー移行なしで吸収できる。`session_id` は snake_case で URL パラメータ名と一致させる。
+- **deep link 優先と履歴維持:** `?session_id=` がある場合は既存の解決・検証順序をそのまま使い、保存値は参照しない。URL同期は `replace: true` を維持し、戻る／進むでの会話切替は今回導入しない。
+- **無効値の扱いの分離:** deep link 無効時は URL パラメータ削除（現行維持）、保存値無効時は保存値消去と、いずれも先頭会話へ無言フォールバックする。原因・扱いを混同しないよう `pendingSessionIdRef` の由来（deep link／保存値）を ref で区別する。フォールバック先があればそれを新しい最終表示会話として保存する。
+- **認証境界:** 接続先・ワークスペース識別子は Agents に存在しないため、保存値はグローバル一意な `session_id` を基準とする。認証変更後も保存値は残してよく、取得時の既存検証（404等）でアクセス不能なら上記のとおり消去・フォールバックする。
+- **保存タイミングと競合:** 保存は詳細取得の成功時ではなく「選択・表示対象の確定時」とし、取得競合で古いリクエスト結果が後着した場合は `selectedSessionIdRef` 照合で保存しない。ストレージ例外時は通知・ブロックせず従来の先頭フォールバックに劣化する。
+
+### 検証
+
+- Vitest（`lastViewedSession.test.ts` 7件、キー・JSON往復・破損・例外耐性）、`AgentsPage.test.tsx` に復元8件（同一agent復元・別agent復元・deep link優先・無効時消去＋フォールバック保存・ストレージ例外・一覧選択保存・deep link保存・新規作成保存）。
+- フロント Vitest 全体 304 passed、`tsc --noEmit` clean。

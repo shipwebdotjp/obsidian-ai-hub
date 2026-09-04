@@ -3,6 +3,10 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import AgentsPage from "../AgentsPage";
+import {
+  LAST_VIEWED_SESSION_STORAGE_KEY,
+  readLastViewedSessionId,
+} from "../lastViewedSession";
 
 vi.mock("../../../api/client", () => ({
   listAgents: vi.fn(),
@@ -71,6 +75,14 @@ const mockUpdateSession = vi.mocked(updateAgentSession);
 const mockStartRun = vi.mocked(startAgentRun);
 const mockSubscribeRun = vi.mocked(subscribeAgentRunEvents);
 const mockCancelRun = vi.mocked(cancelAgentRun);
+const mockCreateSession = vi.mocked(createAgentSession);
+
+function seedLastViewedSession(sessionId: string): void {
+  window.localStorage.setItem(
+    LAST_VIEWED_SESSION_STORAGE_KEY,
+    JSON.stringify({ session_id: sessionId, savedAt: "2026-09-05T00:00:00.000Z" }),
+  );
+}
 
 function mockRunSuccess(opts: {
   runId?: string;
@@ -2416,6 +2428,278 @@ describe("AgentsPage", () => {
       expect(screen.getByText("新規エージェント作成")).toBeInTheDocument();
       expect(screen.queryByText("エージェントID（CLI用）")).not.toBeInTheDocument();
       expect(screen.queryByTestId("copy-agent-id")).not.toBeInTheDocument();
+    });
+  });
+
+  describe("最終表示会話の復元", () => {
+    const secondSession = {
+      ...sampleSession,
+      session_id: "asess_789",
+      title: "別の会話",
+    };
+
+    function mockTwoSessions() {
+      mockListSessions.mockResolvedValue({ sessions: [sampleSession, secondSession] });
+      mockGetSessionDetail.mockImplementation(async (sessionId: string) => ({
+        session: sessionId === secondSession.session_id ? secondSession : sampleSession,
+        agent: sampleAgent,
+        messages: [
+          {
+            message_id: `msg_${sessionId}`,
+            session_id: sessionId,
+            sequence: 1,
+            role: "user",
+            content: sessionId === secondSession.session_id ? "Bの本文" : "Aの本文",
+            created_at: "2026-08-20T00:00:00Z",
+          },
+        ],
+        runs: [],
+      }));
+    }
+
+    it("restores the stored session when /agents has no session_id", async () => {
+      mockTwoSessions();
+      seedLastViewedSession("asess_789");
+
+      render(
+        <MemoryRouter initialEntries={["/agents"]}>
+          <AgentsPage />
+        </MemoryRouter>
+      );
+
+      expect(await screen.findByText("Bの本文")).toBeInTheDocument();
+      await waitFor(() => {
+        expect(mockGetSessionDetail).toHaveBeenCalledWith("asess_789");
+      });
+    });
+
+    it("restores a stored session that belongs to another agent", async () => {
+      const otherAgent = {
+        ...sampleAgent,
+        agent_id: "agent_999",
+        name: "別エージェント",
+      };
+      const otherSession = {
+        ...sampleSession,
+        session_id: "asess_777",
+        agent_id: "agent_999",
+        title: "別agentの会話",
+      };
+      mockListAgents.mockResolvedValue({ agents: [sampleAgent, otherAgent] });
+      mockListSessions.mockImplementation(async (agentId: string) => ({
+        sessions: agentId === "agent_999" ? [otherSession] : [sampleSession],
+      }));
+      mockGetSessionDetail.mockImplementation(async (sessionId: string) => {
+        if (sessionId === otherSession.session_id) {
+          return {
+            session: otherSession,
+            agent: otherAgent,
+            messages: [
+              {
+                message_id: "msg_other_1",
+                session_id: otherSession.session_id,
+                sequence: 1,
+                role: "assistant",
+                content: "別agentの応答",
+                created_at: "2026-08-20T00:00:01Z",
+              },
+            ],
+            runs: [],
+          };
+        }
+        return {
+          session: sampleSession,
+          agent: sampleAgent,
+          messages: [],
+          runs: [],
+        };
+      });
+      seedLastViewedSession("asess_777");
+
+      render(
+        <MemoryRouter initialEntries={["/agents"]}>
+          <AgentsPage />
+        </MemoryRouter>
+      );
+
+      expect(await screen.findByText("別agentの応答")).toBeInTheDocument();
+      await waitFor(() => {
+        expect(mockGetSessionDetail).toHaveBeenCalledWith("asess_777");
+      });
+      expect(screen.getByText("別agentの会話")).toBeInTheDocument();
+    });
+
+    it("prefers a valid deep link over the stored session", async () => {
+      mockTwoSessions();
+      seedLastViewedSession("asess_789");
+
+      render(
+        <MemoryRouter initialEntries={["/agents?session_id=asess_456"]}>
+          <AgentsPage />
+        </MemoryRouter>
+      );
+
+      expect(await screen.findByText("Aの本文")).toBeInTheDocument();
+      await waitFor(() => {
+        expect(readLastViewedSessionId()).toBe("asess_456");
+      });
+    });
+
+    it("erases an invalid stored session and falls back to the first session", async () => {
+      mockGetSessionDetail.mockImplementation(async (sessionId: string) => {
+        if (sessionId === "asess_missing") {
+          throw Object.assign(new Error("not found"), { status: 404 });
+        }
+        return {
+          session: sampleSession,
+          agent: sampleAgent,
+          messages: [
+            {
+              message_id: "msg_1",
+              session_id: "asess_456",
+              sequence: 1,
+              role: "user",
+              content: "こんにちは",
+              created_at: "2026-08-20T00:00:00Z",
+            },
+            {
+              message_id: "msg_2",
+              session_id: "asess_456",
+              sequence: 2,
+              role: "assistant",
+              content: "こんにちは！何かお手伝いできますか？",
+              created_at: "2026-08-20T00:00:01Z",
+            },
+          ],
+          runs: [],
+        };
+      });
+      seedLastViewedSession("asess_missing");
+
+      render(
+        <MemoryRouter initialEntries={["/agents"]}>
+          <AgentsPage />
+        </MemoryRouter>
+      );
+
+      await waitFor(() => {
+        expect(mockGetSessionDetail).toHaveBeenCalledWith("asess_missing");
+      });
+      expect(
+        await screen.findByText("こんにちは！何かお手伝いできますか？")
+      ).toBeInTheDocument();
+      // The invalid stored value is erased and the fallback is stored instead.
+      await waitFor(() => {
+        expect(readLastViewedSessionId()).toBe("asess_456");
+      });
+    });
+
+    it("falls back to the first session when last-viewed storage access fails", async () => {
+      const origGet = window.localStorage.getItem.bind(window.localStorage);
+      const origSet = window.localStorage.setItem.bind(window.localStorage);
+      const origRemove = window.localStorage.removeItem.bind(window.localStorage);
+      const getSpy = vi
+        .spyOn(window.localStorage, "getItem")
+        .mockImplementation((key: string) => {
+          if (key === LAST_VIEWED_SESSION_STORAGE_KEY) throw new Error("denied");
+          return origGet(key);
+        });
+      const setSpy = vi
+        .spyOn(window.localStorage, "setItem")
+        .mockImplementation((key: string, value: string) => {
+          if (key === LAST_VIEWED_SESSION_STORAGE_KEY) throw new Error("denied");
+          return origSet(key, value);
+        });
+      const removeSpy = vi
+        .spyOn(window.localStorage, "removeItem")
+        .mockImplementation((key: string) => {
+          if (key === LAST_VIEWED_SESSION_STORAGE_KEY) throw new Error("denied");
+          return origRemove(key);
+        });
+      try {
+        render(
+          <MemoryRouter initialEntries={["/agents"]}>
+            <AgentsPage />
+          </MemoryRouter>
+        );
+
+        expect(
+          await screen.findByText("こんにちは！何かお手伝いできますか？")
+        ).toBeInTheDocument();
+      } finally {
+        getSpy.mockRestore();
+        setSpy.mockRestore();
+        removeSpy.mockRestore();
+      }
+    });
+
+    it("saves the session when it is selected from the list", async () => {
+      const user = userEvent.setup();
+      mockTwoSessions();
+
+      render(
+        <MemoryRouter initialEntries={["/agents"]}>
+          <AgentsPage />
+        </MemoryRouter>
+      );
+
+      await waitFor(() => {
+        expect(readLastViewedSessionId()).toBe("asess_456");
+      });
+
+      await user.click(screen.getByText("別の会話"));
+
+      await waitFor(() => {
+        expect(readLastViewedSessionId()).toBe("asess_789");
+      });
+    });
+
+    it("saves the session when it is opened via a valid deep link", async () => {
+      mockTwoSessions();
+
+      render(
+        <MemoryRouter initialEntries={["/agents?session_id=asess_789"]}>
+          <AgentsPage />
+        </MemoryRouter>
+      );
+
+      expect(await screen.findByText("Bの本文")).toBeInTheDocument();
+      await waitFor(() => {
+        expect(readLastViewedSessionId()).toBe("asess_789");
+      });
+    });
+
+    it("saves the session when a new conversation is created", async () => {
+      const user = userEvent.setup();
+      const created = { ...sampleSession, session_id: "asess_new", title: "新しい会話" };
+      mockCreateSession.mockResolvedValue({ session: created });
+      mockGetSessionDetail.mockImplementation(async (sessionId: string) => {
+        if (sessionId === created.session_id) {
+          return { session: created, agent: sampleAgent, messages: [], runs: [] };
+        }
+        return {
+          session: sampleSession,
+          agent: sampleAgent,
+          messages: [],
+          runs: [],
+        };
+      });
+
+      render(
+        <MemoryRouter initialEntries={["/agents"]}>
+          <AgentsPage />
+        </MemoryRouter>
+      );
+
+      await screen.findByText("明日の予定");
+      await user.click(screen.getByRole("button", { name: "＋ 新しい会話" }));
+
+      await waitFor(() => {
+        expect(mockCreateSession).toHaveBeenCalled();
+      });
+      await waitFor(() => {
+        expect(readLastViewedSessionId()).toBe("asess_new");
+      });
     });
   });
 });

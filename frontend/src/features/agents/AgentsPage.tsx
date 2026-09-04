@@ -43,6 +43,11 @@ import type {
 import { ROUTES } from "../../constants/routes";
 import { useSessionPromptDraft } from "../../hooks/useSessionPromptDraft";
 import { useAgentImageDraft } from "./useAgentImageDraft";
+import {
+  clearLastViewedSessionId,
+  readLastViewedSessionId,
+  writeLastViewedSessionId,
+} from "./lastViewedSession";
 import { getChatInputPlaceholder, shouldSendOnEnter, useChatSendMode } from "../settings/chatSendMode";
 import MarkdownPreview from "../../components/MarkdownPreview";
 import { WaitingRunQuestionCard, WaitingRunStatusPanel, waitForHitlSettled, type ActiveWaitingRun, type QuestionItem, toQuestionItems } from "../../components/InConversationQuestionCard";
@@ -338,6 +343,13 @@ export default function AgentsPage() {
   // Holds the session_id to honor after sessions are loaded for the resolved agent.
   // Cleared after consumption so subsequent agent switches do not re-select it.
   const pendingSessionIdRef = useRef<string | null>(null);
+  // Origin of the pending session_id: deep links use the URL param, storage
+  // restores use localStorage. Invalid IDs are handled per origin (URL param
+  // removal vs. stored value erasure) so the two causes are never confused.
+  const pendingSourceRef = useRef<"deeplink" | "storage" | null>(null);
+  // Storage-restore target until its detail load settles. Used to erase an
+  // unrestorable stored value and fall back without touching normal selections.
+  const storageRestoreIdRef = useRef<string | null>(null);
 
   // Load agents & catalog tools on mount
   useEffect(() => {
@@ -356,8 +368,11 @@ export default function AgentsPage() {
 
       // Deep link: resolve the agent from the URL's session_id, then let the
       // selectedAgentId effect load the session list and consume pendingSessionIdRef.
+      // A valid deep link always wins; the stored last-viewed session is only
+      // used when the URL has no session_id.
       if (sessionIdParam) {
         pendingSessionIdRef.current = sessionIdParam;
+        pendingSourceRef.current = "deeplink";
         try {
           const detail = await getAgentSessionDetail(sessionIdParam);
           setSelectedAgentId(detail.agent.agent_id);
@@ -365,6 +380,7 @@ export default function AgentsPage() {
         } catch {
           // Stale or invalid session_id: fall back to first agent and clear the param.
           pendingSessionIdRef.current = null;
+          pendingSourceRef.current = null;
           setSearchParams(
             (prev) => {
               const next = new URLSearchParams(prev);
@@ -373,6 +389,28 @@ export default function AgentsPage() {
             },
             { replace: true },
           );
+        }
+      } else {
+        // ID-less entry: restore the last-viewed session from localStorage.
+        // Validate existence and resolve the owning agent exactly like a deep
+        // link so cross-agent restores open the right agent. Storage failures
+        // or invalid values silently fall through to the first agent.
+        const storedSessionId = readLastViewedSessionId();
+        if (storedSessionId) {
+          pendingSessionIdRef.current = storedSessionId;
+          pendingSourceRef.current = "storage";
+          try {
+            const detail = await getAgentSessionDetail(storedSessionId);
+            storageRestoreIdRef.current = storedSessionId;
+            setSelectedAgentId(detail.agent.agent_id);
+            return;
+          } catch {
+            // Unrestorable stored value: erase it and fall back to first agent.
+            clearLastViewedSessionId();
+            pendingSessionIdRef.current = null;
+            pendingSourceRef.current = null;
+            storageRestoreIdRef.current = null;
+          }
         }
       }
 
@@ -408,19 +446,28 @@ export default function AgentsPage() {
       const res = await listAgentSessions(agentId);
       setSessions(res.sessions);
       const target = pendingSessionIdRef.current;
+      const targetSource = pendingSourceRef.current;
       if (target && res.sessions.some((s) => s.session_id === target)) {
         setSelectedSessionId(target);
       } else if (target) {
         // Target session does not belong to this agent: drop it and fall back.
         pendingSessionIdRef.current = null;
-        setSearchParams(
-          (prev) => {
-            const next = new URLSearchParams(prev);
-            next.delete("session_id");
-            return next;
-          },
-          { replace: true },
-        );
+        pendingSourceRef.current = null;
+        if (targetSource === "storage") {
+          // Stored session is gone from this agent: erase it. There is no URL
+          // param to clean on an ID-less entry.
+          clearLastViewedSessionId();
+          storageRestoreIdRef.current = null;
+        } else {
+          setSearchParams(
+            (prev) => {
+              const next = new URLSearchParams(prev);
+              next.delete("session_id");
+              return next;
+            },
+            { replace: true },
+          );
+        }
         if (res.sessions.length > 0) {
           setSelectedSessionId(res.sessions[0].session_id);
         } else {
@@ -439,6 +486,7 @@ export default function AgentsPage() {
         setMessages([]);
       }
       pendingSessionIdRef.current = null;
+      pendingSourceRef.current = null;
     } catch (e: any) {
       setActionError(e.message || "会話履歴の読み込みに失敗しました。");
     }
@@ -448,6 +496,15 @@ export default function AgentsPage() {
     setActionError(null);
     try {
       const detail = await getAgentSessionDetail(sessionId);
+      // The selection is confirmed: this session is actually displayed, so
+      // record it as the last-viewed session. Skip stale responses that
+      // arrived after the user moved to another session.
+      if (selectedSessionIdRef.current === sessionId) {
+        writeLastViewedSessionId(sessionId);
+      }
+      if (storageRestoreIdRef.current === sessionId) {
+        storageRestoreIdRef.current = null;
+      }
       setMessages(detail.messages);
       const sessionRuns = detail.runs || [];
       setRuns(sessionRuns);
@@ -475,6 +532,21 @@ export default function AgentsPage() {
         setActiveWaitingRun(null);
       }
     } catch (e: unknown) {
+      // A storage-restored session that no longer loads is unrestorable:
+      // erase the stored value and silently fall back to the first session,
+      // mirroring the invalid deep-link fallback. Normal selections keep the
+      // existing error display.
+      if (storageRestoreIdRef.current === sessionId) {
+        storageRestoreIdRef.current = null;
+        clearLastViewedSessionId();
+        if (sessions.length > 0) {
+          setSelectedSessionId(sessions[0].session_id);
+        } else {
+          setSelectedSessionId(null);
+          setMessages([]);
+        }
+        return;
+      }
       const message =
         e instanceof Error ? e.message : "セッション詳細の読み込みに失敗しました。";
       setChatError(message);
@@ -1184,6 +1256,9 @@ export default function AgentsPage() {
     // deep-link target so that reload cannot replace this search selection.
     pendingSessionIdRef.current =
       result.agent_id === selectedAgentId ? null : result.session_id;
+    // Search origin is neither a deep link nor a storage restore; keep the
+    // existing invalid-target handling (URL param cleanup).
+    pendingSourceRef.current = null;
     setSelectedAgentId(result.agent_id);
     setSelectedSessionId(result.session_id);
     setLeftPaneOpen(false);
