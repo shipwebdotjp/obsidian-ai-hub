@@ -6,6 +6,7 @@ import {
   createPromptTemplate,
   deleteAgent,
   deleteAgentSession,
+  cancelAgentRun,
   cancelHitlRun,
   deletePromptTemplate,
   getAgentSessionDetail,
@@ -16,11 +17,17 @@ import {
   listAgentTools,
   listPromptTemplates,
   searchAgentMessages,
-  streamAgentMessage,
+  startAgentRun,
+  subscribeAgentRunEvents,
   updateAgent,
   updateAgentSession,
   updatePromptTemplate,
 } from "../../api/client";
+import {
+  loadLastAppliedId,
+  saveLastAppliedId,
+  type RunSseEnvelope,
+} from "../../api/runSse";
 import type {
   Agent,
   AgentLiveToolCall,
@@ -30,7 +37,6 @@ import type {
   AgentPromptTemplate,
   AgentRun,
   AgentSession,
-  AgentStreamEvent,
   AgentTool,
   AgentToolCall,
 } from "../../api/types";
@@ -281,6 +287,10 @@ export default function AgentsPage() {
   const streamingTextFrameRef = useRef<number | null>(null);
   const messageElementRefs = useRef(new Map<string, HTMLDivElement>());
   const pendingSearchTargetRef = useRef<{ sessionId: string; messageId: string } | null>(null);
+  // Reconnectable run subscription state (docs/run-sse).
+  // AbortController here aborts only the subscription; it never cancels the run.
+  const activeRunIdRef = useRef<string | null>(null);
+  const lastAppliedEventIdRef = useRef(0);
 
   const invalidatePendingStreamingText = useCallback(() => {
     streamGenerationRef.current += 1;
@@ -467,11 +477,13 @@ export default function AgentsPage() {
   };
 
   // Load session detail messages when session changes
+  // Subscription-only abort: switching sessions never cancels the run.
   useEffect(() => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
     }
+    activeRunIdRef.current = null;
     resetStreamingState();
 
     if (!selectedSessionId) {
@@ -491,6 +503,66 @@ export default function AgentsPage() {
       imageInputRef.current.value = "";
     }
   }, [selectedSessionId]);
+
+  // Initial-load active-run restore: fold persisted events then follow live.
+  // Server event log is the source of truth; sessionStorage is only a cache.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!selectedSessionId || loadedSessionId !== selectedSessionId) return;
+    if (isStreaming || abortControllerRef.current || activeRunIdRef.current) return;
+    const active = runs.find((r) =>
+      ["queued", "running", "cancelling"].includes(r.status),
+    );
+    if (!active) return;
+    const runId = active.run_id;
+    const sessionIdAtResume = selectedSessionId;
+    const cached = loadLastAppliedId("agent", runId);
+    setIsStreaming(true);
+    setStreamingText("");
+    setStreamingToolCalls([]);
+    setStreamingPhase("thinking");
+    setStreamingIteration(null);
+    setChatError(null);
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    const generation = streamGenerationRef.current;
+    const isCurrent = () =>
+      generation === streamGenerationRef.current &&
+      abortControllerRef.current === controller &&
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      sessionIdAtResume === selectedSessionId;
+    lastAppliedEventIdRef.current = cached;
+    activeRunIdRef.current = runId;
+    void (async () => {
+      try {
+        await subscribeAgentRunEvents(runId, {
+          lastEventId: cached,
+          signal: controller.signal,
+          onEnvelope: (envelope) =>
+            handleRunEnvelope(envelope, {
+              streamSessionId: sessionIdAtResume,
+              streamGeneration: generation,
+              isCurrentStream: isCurrent,
+              finalizeSendSuccess: () => {},
+              restoreSendText: () => {},
+            }),
+        });
+      } catch {
+        // Abort or network: keep run alive; detail reload syncs state.
+      } finally {
+        if (abortControllerRef.current === controller) {
+          abortControllerRef.current = null;
+          activeRunIdRef.current = null;
+          setIsStreaming(false);
+          setStreamingPhase(null);
+          if (sessionIdAtResume === selectedSessionId) {
+            void loadSessionDetail(sessionIdAtResume);
+          }
+        }
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runs, loadedSessionId, selectedSessionId]);
 
   useEffect(() => {
     const query = sessionSearchQuery.trim();
@@ -1238,10 +1310,251 @@ export default function AgentsPage() {
     };
   }, [leftPaneOpen]);
 
-  // Send Message & Stream Response
-  const submitMessage = async () => {
-    if (!selectedSessionId || (!inputText.trim() && pendingAttachments.length === 0) || isStreaming) return;
+  // --- Reconnectable run subscription (docs/run-sse) ---
+  // Server event log is the source of truth; sessionStorage caches only the
+  // last applied event id. Abort here stops only the subscription, never the run.
+  const handleRunEnvelope = useCallback(
+    (
+      envelope: RunSseEnvelope,
+      ctx: {
+        streamSessionId: string;
+        streamGeneration: number;
+        isCurrentStream: () => boolean;
+        finalizeSendSuccess: () => void;
+        restoreSendText: () => void;
+      },
+    ) => {
+      if (!ctx.isCurrentStream()) return;
+      // At-least-once: ignore re-sent IDs.
+      if (envelope.eventId <= lastAppliedEventIdRef.current) return;
+      lastAppliedEventIdRef.current = envelope.eventId;
+      const runId = activeRunIdRef.current;
+      if (runId) saveLastAppliedId("agent", runId, envelope.eventId);
 
+      const data = envelope.data as Record<string, unknown> & {
+        type?: string;
+        iteration?: number;
+        call_key?: string;
+        call_id?: string;
+        tool_name?: string;
+        args?: Record<string, unknown>;
+        result?: string;
+        status?: AgentLiveToolCall["status"];
+        hitl_run_id?: string | null;
+        error?: string | null;
+        delta?: string;
+        hitl_run_id2?: never;
+        question_set_id?: string;
+        questions?: QuestionItem[];
+        message?: AgentMessage;
+        run?: AgentRun;
+        hitl_run_ids?: string[];
+        tool_calls?: AgentToolCall[];
+        session_title?: string;
+        error_message?: string;
+      };
+      const type = String(data.type ?? "");
+      if (type === "thinking") {
+        setStreamingPhase("thinking");
+        if (typeof data.iteration === "number") setStreamingIteration(data.iteration);
+      } else if (type === "tool_call_detected") {
+        const callKey = String(data.call_key ?? "");
+        const toolName = String(data.tool_name ?? "");
+        if (!callKey || !toolName) return;
+        setStreamingPhase("tool_preparing");
+        if (typeof data.iteration === "number") setStreamingIteration(data.iteration);
+        setStreamingToolCalls((previous) => {
+          if (previous.some((toolCall) => matchesLiveToolCall(toolCall, callKey))) {
+            return previous;
+          }
+          return [
+            ...previous,
+            {
+              id: callKey,
+              call_key: callKey,
+              tool_name: toolName,
+              args: {},
+              result: "",
+              status: "preparing",
+              hitl_run_id: null,
+              error: null,
+              iteration: typeof data.iteration === "number" ? data.iteration : 0,
+            },
+          ];
+        });
+      } else if (type === "tool_call_start") {
+        const callId = String(data.call_id ?? "");
+        const toolName = String(data.tool_name ?? "");
+        if (!callId || !toolName) return;
+        if (typeof data.iteration === "number") setStreamingIteration(data.iteration);
+        setStreamingPhase("tool_running");
+        setStreamingToolCalls((previous) => {
+          const callKey = typeof data.call_key === "string" ? data.call_key : undefined;
+          const existingIndex = previous.findIndex((toolCall) =>
+            matchesLiveToolCall(toolCall, callKey, callId),
+          );
+          const existing = existingIndex >= 0 ? previous[existingIndex] : undefined;
+          const nextToolCall: AgentLiveToolCall = {
+            id: existing?.id ?? callKey ?? callId,
+            call_id: callId,
+            call_key: callKey ?? existing?.call_key,
+            tool_name: toolName,
+            args: (data.args as Record<string, unknown>) ?? {},
+            result: existing?.result ?? "",
+            status: "running",
+            hitl_run_id: existing?.hitl_run_id ?? null,
+            error: null,
+            iteration: typeof data.iteration === "number" ? data.iteration : (existing?.iteration ?? 0),
+          };
+          if (existingIndex >= 0) {
+            return previous.map((toolCall, index) =>
+              index === existingIndex ? nextToolCall : toolCall,
+            );
+          }
+          return [...previous, nextToolCall];
+        });
+      } else if (type === "tool_call_end") {
+        if (typeof data.iteration === "number") setStreamingIteration(data.iteration);
+        setStreamingToolCalls((previous) => {
+          const callKey = typeof data.call_key === "string" ? data.call_key : undefined;
+          const callId = typeof data.call_id === "string" ? data.call_id : undefined;
+          const existingIndex = previous.findIndex((toolCall) =>
+            matchesLiveToolCall(toolCall, callKey, callId),
+          );
+          const status = (data.status as AgentLiveToolCall["status"]) ?? "succeeded";
+          if (existingIndex < 0) {
+            return [
+              ...previous,
+              {
+                id: (callKey ?? callId ?? "") as string,
+                call_id: callId,
+                call_key: callKey,
+                tool_name: String(data.tool_name ?? ""),
+                args: {},
+                result: String(data.result ?? ""),
+                status,
+                hitl_run_id: (data.hitl_run_id as string | null) ?? null,
+                error: (data.error as string | null) ?? null,
+                iteration: typeof data.iteration === "number" ? data.iteration : 0,
+              },
+            ];
+          }
+          return previous.map((toolCall, index) =>
+            index === existingIndex
+              ? {
+                  ...toolCall,
+                  call_id: callId ?? toolCall.call_id,
+                  call_key: callKey ?? toolCall.call_key,
+                  tool_name: String(data.tool_name ?? toolCall.tool_name),
+                  result: String(data.result ?? ""),
+                  status,
+                  hitl_run_id: (data.hitl_run_id as string | null) ?? null,
+                  error: (data.error as string | null) ?? null,
+                  iteration: typeof data.iteration === "number" ? data.iteration : toolCall.iteration,
+                }
+              : toolCall,
+          );
+        });
+        setStreamingPhase("thinking");
+      } else if (type === "text_append") {
+        enqueueStreamingText(String(data.delta ?? ""), ctx.streamGeneration);
+        setStreamingPhase(null);
+      } else if (type === "user_question") {
+        ctx.finalizeSendSuccess();
+        resetStreamingState();
+        abortControllerRef.current = null;
+        activeRunIdRef.current = null;
+        const hitlRunId = String(data.hitl_run_id ?? "");
+        const questions = Array.isArray(data.questions)
+          ? (data.questions as QuestionItem[])
+          : [];
+        if (hitlRunId) setActiveWaitingRun({ hitlRunId, questions });
+        void loadSessionDetail(ctx.streamSessionId);
+      } else if (type === "done") {
+        ctx.finalizeSendSuccess();
+        resetStreamingState();
+        abortControllerRef.current = null;
+        activeRunIdRef.current = null;
+        void loadSessionDetail(ctx.streamSessionId);
+        const sessionTitle = typeof data.session_title === "string" ? data.session_title : undefined;
+        if (sessionTitle) {
+          setSessions((prev) =>
+            prev.map((s) =>
+              s.session_id === ctx.streamSessionId ? { ...s, title: sessionTitle } : s,
+            ),
+          );
+        }
+        if (selectedAgentId) void loadSessions(selectedAgentId);
+        const hitlIds = Array.isArray(data.hitl_run_ids) ? (data.hitl_run_ids as string[]) : [];
+        if (hitlIds.length > 0) setHitlLinks(hitlIds);
+      } else if (type === "error") {
+        ctx.restoreSendText();
+        resetStreamingState();
+        abortControllerRef.current = null;
+        activeRunIdRef.current = null;
+        setChatError(String(data.error ?? data.error_message ?? "エラーが発生しました。"));
+      } else if (type === "cancelled") {
+        ctx.restoreSendText();
+        resetStreamingState();
+        abortControllerRef.current = null;
+        activeRunIdRef.current = null;
+        setChatError("キャンセルされました");
+      }
+    },
+    [
+      enqueueStreamingText,
+      loadSessions,
+      resetStreamingState,
+      selectedAgentId,
+    ],
+  );
+
+  const subscribeToAgentRun = useCallback(
+    async (
+      runId: string,
+      streamSessionId: string,
+      fromEventId: number,
+      ctx: {
+        streamGeneration: number;
+        isCurrentStream: () => boolean;
+        finalizeSendSuccess: () => void;
+        restoreSendText: () => void;
+      },
+    ) => {
+      lastAppliedEventIdRef.current = fromEventId;
+      activeRunIdRef.current = runId;
+      const controller = abortControllerRef.current;
+      try {
+        await subscribeAgentRunEvents(runId, {
+          lastEventId: fromEventId,
+          signal: controller?.signal,
+          onEnvelope: (envelope) =>
+            handleRunEnvelope(envelope, {
+              streamSessionId,
+              streamGeneration: ctx.streamGeneration,
+              isCurrentStream: ctx.isCurrentStream,
+              finalizeSendSuccess: ctx.finalizeSendSuccess,
+              restoreSendText: ctx.restoreSendText,
+            }),
+        });
+      } catch (err: unknown) {
+        if (!ctx.isCurrentStream()) return;
+        const isAbort =
+          (err instanceof DOMException && err.name === "AbortError") ||
+          (typeof err === "object" &&
+            err !== null &&
+            "name" in err &&
+            (err as { name: string }).name === "AbortError");
+        if (isAbort) return;
+        throw err;
+      }
+    },
+    [handleRunEnvelope],
+  );
+
+  const submitMessageViaRun = async () => {
+    if (!selectedSessionId || (!inputText.trim() && pendingAttachments.length === 0) || isStreaming)
+      return;
     const streamSessionId = selectedSessionId;
     const userText = inputText.trim();
     const sendText = inputText;
@@ -1250,25 +1563,18 @@ export default function AgentsPage() {
       mime_type: att.mime_type,
       data: att.data,
     }));
-    // 失敗時の画像復元用に previewUrl・size を含む完全なスナップショットを保持する。
     const attachmentsSnapshotFull = pendingAttachments.map((att) => ({ ...att }));
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
+    if (abortControllerRef.current) abortControllerRef.current.abort();
     invalidatePendingStreamingText();
     const streamGeneration = streamGenerationRef.current;
     const controller = new AbortController();
     abortControllerRef.current = controller;
 
-    // 送信前のテキスト・画像は下書きとして確定保存する。入力欄だけ一時クリアし、
-    // storage の削除は送信成功確定時まで行わない。
     savePromptDraftFor(streamSessionId, sendText);
     saveImageDraftFor(streamSessionId, sendText, attachmentsSnapshotFull);
     setPromptInputLocal("");
     setLocalAttachments([]);
-    if (imageInputRef.current) {
-      imageInputRef.current.value = "";
-    }
+    if (imageInputRef.current) imageInputRef.current.value = "";
     setChatError(null);
     setHitlLinks([]);
     setIsStreaming(true);
@@ -1277,7 +1583,6 @@ export default function AgentsPage() {
     setStreamingPhase("thinking");
     setStreamingIteration(null);
 
-    // Optimistically push user message to UI
     const tempUserMsg: AgentMessage = {
       message_id: `temp_${Date.now()}`,
       session_id: streamSessionId,
@@ -1289,20 +1594,15 @@ export default function AgentsPage() {
     };
     setMessages((prev) => [...prev, tempUserMsg]);
 
-    const isCurrentStream = () => (
+    const isCurrentStream = () =>
       streamGeneration === streamGenerationRef.current &&
-      abortControllerRef.current === controller
-    );
-    let receivedTerminalEvent = false;
-    // 送信成功確定時のみ対象セッションの下書きを削除する。
-    // isCurrentStream() 配下でのみ呼ぶため、切替先セッションへは波及しない。
+      abortControllerRef.current === controller;
     const finalizeSendSuccess = () => {
       removePromptDraftFor(streamSessionId);
       removeImageDraftFor(streamSessionId);
       setPromptInputLocal("");
       setLocalAttachments([]);
     };
-    // 失敗・中断時は送信前のテキスト・画像を対象セッションの下書きと入力へ戻す。
     const restoreSendText = () => {
       savePromptDraftFor(streamSessionId, sendText);
       setPromptInputLocal(sendText);
@@ -1310,156 +1610,50 @@ export default function AgentsPage() {
       setLocalAttachments(attachmentsSnapshotFull);
     };
 
+    const idempotencyKey =
+      typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    let runId: string;
     try {
-      await streamAgentMessage(
+      const started = await startAgentRun(
         streamSessionId,
-        userText,
-        (event: AgentStreamEvent) => {
-          if (!isCurrentStream()) return;
-
-          if (event.type === "thinking") {
-            setStreamingPhase("thinking");
-            setStreamingIteration(event.iteration);
-          } else if (event.type === "tool_call_detected") {
-            if (!event.call_key || !event.tool_name) return;
-            setStreamingPhase("tool_preparing");
-            setStreamingIteration(event.iteration);
-            setStreamingToolCalls((previous) => {
-              if (previous.some((toolCall) => matchesLiveToolCall(toolCall, event.call_key))) {
-                return previous;
-              }
-              return [
-                ...previous,
-                {
-                  id: event.call_key,
-                  call_key: event.call_key,
-                  tool_name: event.tool_name,
-                  args: {},
-                  result: "",
-                  status: "preparing",
-                  hitl_run_id: null,
-                  error: null,
-                  iteration: event.iteration,
-                },
-              ];
-            });
-          } else if (event.type === "tool_call_start") {
-            setStreamingIteration(event.iteration);
-            if (!event.call_id || !event.tool_name) return;
-            setStreamingPhase("tool_running");
-            setStreamingToolCalls((previous) => {
-              const existingIndex = previous.findIndex((toolCall) =>
-                matchesLiveToolCall(toolCall, event.call_key, event.call_id)
-              );
-              const existing = existingIndex >= 0 ? previous[existingIndex] : undefined;
-              const nextToolCall: AgentLiveToolCall = {
-                id: existing?.id ?? event.call_key ?? event.call_id,
-                call_id: event.call_id,
-                call_key: event.call_key ?? existing?.call_key,
-                tool_name: event.tool_name,
-                args: event.args ?? {},
-                result: existing?.result ?? "",
-                status: "running",
-                hitl_run_id: existing?.hitl_run_id ?? null,
-                error: null,
-                iteration: event.iteration,
-              };
-              if (existingIndex >= 0) {
-                return previous.map((toolCall, index) =>
-                  index === existingIndex ? nextToolCall : toolCall
-                );
-              }
-              return [
-                ...previous,
-                nextToolCall,
-              ];
-            });
-          } else if (event.type === "tool_call_end") {
-            setStreamingIteration(event.iteration);
-            setStreamingToolCalls((previous) => {
-              const existingIndex = previous.findIndex((toolCall) =>
-                matchesLiveToolCall(toolCall, event.call_key, event.call_id)
-              );
-              if (existingIndex < 0) {
-                return [
-                  ...previous,
-                  {
-                    id: event.call_key ?? event.call_id,
-                    call_id: event.call_id,
-                    call_key: event.call_key,
-                    tool_name: event.tool_name,
-                    args: {},
-                    result: event.result,
-                    status: event.status,
-                    hitl_run_id: event.hitl_run_id ?? null,
-                    error: event.error ?? null,
-                    iteration: event.iteration,
-                  },
-                ];
-              }
-              return previous.map((toolCall, index) =>
-                index === existingIndex
-                  ? {
-                      ...toolCall,
-                      call_id: event.call_id,
-                      call_key: event.call_key ?? toolCall.call_key,
-                      tool_name: event.tool_name,
-                      result: event.result,
-                      status: event.status,
-                      hitl_run_id: event.hitl_run_id ?? null,
-                      error: event.error ?? null,
-                      iteration: event.iteration,
-                    }
-                  : toolCall
-              );
-            });
-            setStreamingPhase("thinking");
-          } else if (event.type === "text") {
-            enqueueStreamingText(event.delta, streamGeneration);
-            setStreamingPhase(null);
-          } else if (event.type === "user_question") {
-            receivedTerminalEvent = true;
-            finalizeSendSuccess();
-            resetStreamingState();
-            abortControllerRef.current = null;
-            setActiveWaitingRun({ hitlRunId: event.hitl_run_id, questions: event.questions });
-            loadSessionDetail(streamSessionId);
-          } else if (event.type === "done") {
-            receivedTerminalEvent = true;
-            finalizeSendSuccess();
-            resetStreamingState();
-            abortControllerRef.current = null;
-            loadSessionDetail(streamSessionId);
-            if (event.session_title) {
-              const updatedTitle = event.session_title;
-              setSessions((prev) =>
-                prev.map((s) =>
-                  s.session_id === streamSessionId ? { ...s, title: updatedTitle } : s
-                )
-              );
-            }
-            if (selectedAgentId) {
-              loadSessions(selectedAgentId);
-            }
-            if (event.hitl_run_ids && event.hitl_run_ids.length > 0) {
-              setHitlLinks(event.hitl_run_ids);
-            }
-          } else if (event.type === "error") {
-            receivedTerminalEvent = true;
-            restoreSendText();
-            resetStreamingState();
-            abortControllerRef.current = null;
-            setChatError(event.error || "エラーが発生しました。");
-          }
+        {
+          content: userText,
+          images: attachmentsSnapshot.length > 0 ? attachmentsSnapshot : undefined,
         },
-        controller.signal,
-        attachmentsSnapshot.length > 0 ? attachmentsSnapshot : undefined
+        idempotencyKey,
       );
-      if (isCurrentStream() && !receivedTerminalEvent) {
-        restoreSendText();
-        resetStreamingState();
-        abortControllerRef.current = null;
-        setChatError("応答ストリームが完了前に終了しました。");
+      if (!isCurrentStream()) return;
+      runId = started.run.run_id;
+    } catch (err: unknown) {
+      if (!isCurrentStream()) return;
+      restoreSendText();
+      resetStreamingState();
+      abortControllerRef.current = null;
+      setChatError(err instanceof Error ? err.message : "メッセージの送信に失敗しました。");
+      return;
+    }
+
+    try {
+      await subscribeToAgentRun(runId, streamSessionId, 0, {
+        streamGeneration,
+        isCurrentStream,
+        finalizeSendSuccess,
+        restoreSendText,
+      });
+      if (isCurrentStream()) {
+        // subscribeRunEvents returns after terminal or waiting_user pause.
+        // If still streaming without terminal, reload to sync (e.g. waiting).
+        const stillActive = activeRunIdRef.current === runId;
+        if (stillActive) {
+          // Terminal handlers already cleared activeRunId; if still set, the
+          // stream paused (waiting_user) or closed early: sync detail.
+          resetStreamingState();
+          abortControllerRef.current = null;
+          activeRunIdRef.current = null;
+          void loadSessionDetail(streamSessionId);
+        }
       }
     } catch (err: unknown) {
       if (!isCurrentStream()) return;
@@ -1467,20 +1661,33 @@ export default function AgentsPage() {
         (err instanceof DOMException && err.name === "AbortError") ||
         (typeof err === "object" && err !== null && "name" in err && (err as { name: string }).name === "AbortError");
       if (isAbort) {
+        // Unmount/session-switch aborts only the subscription; run continues.
         resetStreamingState();
         abortControllerRef.current = null;
+        activeRunIdRef.current = null;
         return;
       }
       restoreSendText();
       resetStreamingState();
       abortControllerRef.current = null;
+      activeRunIdRef.current = null;
       setChatError(err instanceof Error ? err.message : "メッセージの送信に失敗しました。");
     }
   };
 
+  const handleCancelAgentRun = useCallback(async () => {
+    const runId = activeRunIdRef.current;
+    if (!runId) return;
+    try {
+      await cancelAgentRun(runId);
+    } catch (e) {
+      setChatError(e instanceof Error ? e.message : "キャンセルの送信に失敗しました。");
+    }
+  }, []);
+
   const handleSendMessage = (e: React.FormEvent) => {
     e.preventDefault();
-    void submitMessage();
+    void submitMessageViaRun();
   };
 
   const handleInputKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -1489,7 +1696,7 @@ export default function AgentsPage() {
     if (isPaletteActive) {
       if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
-        void submitMessage();
+        void submitMessageViaRun();
         return;
       }
       if (e.key === "Enter" && !e.shiftKey) {
@@ -1528,7 +1735,7 @@ export default function AgentsPage() {
 
     if (shouldSendOnEnter(e, chatSendMode)) {
       e.preventDefault();
-      void submitMessage();
+      void submitMessageViaRun();
     }
   };
 
@@ -2857,6 +3064,16 @@ export default function AgentsPage() {
                     </span>
                   )}
                 </div>
+                {isStreaming && (
+                  <button
+                    type="button"
+                    onClick={() => void handleCancelAgentRun()}
+                    className="inline-flex h-8 items-center rounded-lg bg-rose-600 px-3 text-xs font-medium text-white hover:bg-rose-700 cursor-pointer"
+                    aria-label="実行をキャンセル"
+                  >
+                    キャンセル
+                  </button>
+                )}
                 <button
                   type="submit"
                   disabled={

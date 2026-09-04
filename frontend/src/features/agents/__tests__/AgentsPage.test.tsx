@@ -20,7 +20,9 @@ vi.mock("../../../api/client", () => ({
   updatePromptTemplate: vi.fn(),
   deletePromptTemplate: vi.fn(),
   updateAgentSession: vi.fn(),
-  streamAgentMessage: vi.fn(),
+  startAgentRun: vi.fn(),
+  cancelAgentRun: vi.fn(),
+  subscribeAgentRunEvents: vi.fn(),
   ApiError: class ApiError extends Error {
     status: number;
     constructor(status: number, message: string) {
@@ -29,6 +31,15 @@ vi.mock("../../../api/client", () => ({
     }
   },
 }));
+
+vi.mock("../../../api/runSse", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../api/runSse")>();
+  return {
+    ...actual,
+    loadLastAppliedId: vi.fn(() => 0),
+    saveLastAppliedId: vi.fn(),
+  };
+});
 
 import {
   listAgents,
@@ -43,7 +54,9 @@ import {
   deleteAgentSession,
   listPromptTemplates,
   updateAgentSession,
-  streamAgentMessage,
+  startAgentRun,
+  cancelAgentRun,
+  subscribeAgentRunEvents,
 } from "../../../api/client";
 
 const mockListAgents = vi.mocked(listAgents);
@@ -55,7 +68,70 @@ const mockGetSessionDetail = vi.mocked(getAgentSessionDetail);
 const mockListTemplates = vi.mocked(listPromptTemplates);
 const mockUpdateAgent = vi.mocked(updateAgent);
 const mockUpdateSession = vi.mocked(updateAgentSession);
-const mockStreamMessage = vi.mocked(streamAgentMessage);
+const mockStartRun = vi.mocked(startAgentRun);
+const mockSubscribeRun = vi.mocked(subscribeAgentRunEvents);
+const mockCancelRun = vi.mocked(cancelAgentRun);
+
+function mockRunSuccess(opts: {
+  runId?: string;
+  sessionId?: string;
+  envelopes?: { eventId: number; data: Record<string, unknown> }[];
+} = {}) {
+  const runId = opts.runId ?? "arun_1";
+  const sessionId = opts.sessionId ?? "asess_456";
+  mockStartRun.mockResolvedValue({
+    run: {
+      run_id: runId,
+      session_id: sessionId,
+      user_message_id: "msg_user",
+      assistant_message_id: null,
+      status: "queued",
+      hitl_run_id: null,
+      used_tools: [],
+      created_hitl_run_ids: [],
+      error_message: null,
+      started_at: "",
+      finished_at: null,
+    },
+  });
+  const envelopes = opts.envelopes ?? [
+    { eventId: 1, data: { type: "text_append", delta: "ok" } },
+    {
+      eventId: 2,
+      data: {
+        type: "done",
+        message: {
+          message_id: "msg_3",
+          session_id: sessionId,
+          sequence: 3,
+          role: "assistant",
+          content: "ok",
+          created_at: new Date().toISOString(),
+        },
+        run: {
+          run_id: runId,
+          session_id: sessionId,
+          user_message_id: "msg_user",
+          assistant_message_id: "msg_3",
+          status: "succeeded",
+          hitl_run_id: null,
+          used_tools: [],
+          created_hitl_run_ids: [],
+          error_message: null,
+          started_at: "",
+          finished_at: "",
+        },
+        hitl_run_ids: [],
+      },
+    },
+  ];
+  mockSubscribeRun.mockImplementation(async (_rid, subOpts) => {
+    for (const env of envelopes) {
+      (subOpts as { onEnvelope: (e: unknown) => void }).onEnvelope(env);
+    }
+  });
+  return { runId, sessionId };
+}
 
 const sampleAgent = {
   agent_id: "agent_123",
@@ -91,6 +167,8 @@ const sampleSession = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockStartRun.mockReset();
+  mockSubscribeRun.mockReset();
   localStorage.clear();
   sessionStorage.clear();
   mockListAgents.mockResolvedValue({ agents: [sampleAgent] });
@@ -270,36 +348,39 @@ describe("AgentsPage", () => {
   it("sends message and handles streaming and HITL proposal link", async () => {
     const user = userEvent.setup();
 
-    mockStreamMessage.mockImplementation(
-      async (sessionId, content, onEvent) => {
-        onEvent({ type: "text", delta: "カレンダーへの登録申請を作成" });
-        onEvent({
-          type: "done",
-          message: {
-            message_id: "msg_3",
-            session_id: sessionId,
-            sequence: 3,
-            role: "assistant",
-            content: "カレンダーへの登録申請を作成しました。",
-            created_at: new Date().toISOString(),
+    mockRunSuccess({
+      envelopes: [
+        { eventId: 1, data: { type: "text_append", delta: "カレンダーへの登録申請を作成" } },
+        {
+          eventId: 2,
+          data: {
+            type: "done",
+            message: {
+              message_id: "msg_3",
+              session_id: "asess_456",
+              sequence: 3,
+              role: "assistant",
+              content: "カレンダーへの登録申請を作成しました。",
+              created_at: new Date().toISOString(),
+            },
+            run: {
+              run_id: "arun_1",
+              session_id: "asess_456",
+              user_message_id: "msg_2",
+              assistant_message_id: "msg_3",
+              status: "succeeded",
+              hitl_run_id: null,
+              used_tools: [],
+              created_hitl_run_ids: ["hrun_inbox_calendar_999"],
+              error_message: null,
+              started_at: "",
+              finished_at: "",
+            },
+            hitl_run_ids: ["hrun_inbox_calendar_999"],
           },
-          run: {
-            run_id: "arun_1",
-            session_id: sessionId,
-            user_message_id: "msg_2",
-            assistant_message_id: "msg_3",
-            status: "succeeded",
-            hitl_run_id: null,
-            used_tools: [],
-            created_hitl_run_ids: ["hrun_inbox_calendar_999"],
-            error_message: null,
-            started_at: "",
-            finished_at: "",
-          },
-          hitl_run_ids: ["hrun_inbox_calendar_999"],
-        });
-      }
-    );
+        },
+      ],
+    });
 
     render(
       <MemoryRouter>
@@ -316,12 +397,10 @@ describe("AgentsPage", () => {
     await user.click(screen.getByRole("button", { name: "送信" }));
 
     await waitFor(() => {
-      expect(mockStreamMessage).toHaveBeenCalledWith(
+      expect(mockStartRun).toHaveBeenCalledWith(
         "asess_456",
-        "明日10時にミーティングを入れて",
-        expect.any(Function),
-        expect.any(Object),
-        undefined
+        expect.objectContaining({ content: "明日10時にミーティングを入れて" }),
+        expect.any(String),
       );
     });
 
@@ -334,14 +413,11 @@ describe("AgentsPage", () => {
   it("displays error message when streaming receives an error event", async () => {
     const user = userEvent.setup();
 
-    mockStreamMessage.mockImplementation(
-      async (sessionId, content, onEvent) => {
-        onEvent({
-          type: "error",
-          error: "ストリーミングエラーが発生しました。",
-        });
-      }
-    );
+    mockRunSuccess({
+      envelopes: [
+        { eventId: 1, data: { type: "error", error: "ストリーミングエラーが発生しました。" } },
+      ],
+    });
 
     render(
       <MemoryRouter>
@@ -496,16 +572,34 @@ describe("AgentsPage", () => {
       value: cancelAnimationFrame,
     });
 
-    let emitStreamEvent: ((event: any) => void) | null = null;
-    let finishStream!: () => void;
-    mockStreamMessage.mockImplementation(
-      async (_sessionId, _content, onEvent) => {
-        emitStreamEvent = onEvent;
-        await new Promise<void>((resolve) => {
-          finishStream = resolve;
-        });
-      }
-    );
+    let emitEnvelope: ((env: { eventId: number; data: Record<string, unknown> }) => void) | null =
+      null;
+    let finishSubscribe!: () => void;
+    mockStartRun.mockResolvedValue({
+      run: {
+        run_id: "arun_stream_done",
+        session_id: sampleSession.session_id,
+        user_message_id: "msg_stream_user",
+        assistant_message_id: null,
+        status: "queued",
+        hitl_run_id: null,
+        used_tools: [],
+        created_hitl_run_ids: [],
+        error_message: null,
+        started_at: "",
+        finished_at: null,
+      },
+    });
+    mockSubscribeRun.mockImplementation(async (_runId, subOpts) => {
+      emitEnvelope = (
+        subOpts as {
+          onEnvelope: (e: { eventId: number; data: Record<string, unknown> }) => void;
+        }
+      ).onEnvelope;
+      await new Promise<void>((resolve) => {
+        finishSubscribe = resolve;
+      });
+    });
 
     try {
       render(
@@ -517,8 +611,11 @@ describe("AgentsPage", () => {
       const input = await screen.findByPlaceholderText(/^メッセージを入力/);
       await user.type(input, "ストリーミングを試す");
       await user.click(screen.getByRole("button", { name: "送信" }));
-      await waitFor(() => expect(emitStreamEvent).not.toBeNull());
-      const emit = emitStreamEvent!;
+      await waitFor(() => expect(emitEnvelope).not.toBeNull());
+      let nextEventId = 1;
+      const emit = (data: Record<string, unknown>) => {
+        emitEnvelope!({ eventId: nextEventId++, data });
+      };
 
       act(() => {
         emit({
@@ -559,8 +656,8 @@ describe("AgentsPage", () => {
       expect(screen.getByText("成功")).toBeInTheDocument();
 
       act(() => {
-        emit({ type: "text", delta: "token-one " });
-        emit({ type: "text", delta: "token-two" });
+        emit({ type: "text_append", delta: "token-one " });
+        emit({ type: "text_append", delta: "token-two" });
       });
       expect(requestAnimationFrame).toHaveBeenCalledTimes(1);
       expect(screen.queryByText("token-one token-two")).not.toBeInTheDocument();
@@ -572,7 +669,7 @@ describe("AgentsPage", () => {
       });
       expect(await screen.findByText("token-one token-two")).toBeInTheDocument();
 
-      act(() => emit({ type: "text", delta: "stale-token" }));
+      act(() => emit({ type: "text_append", delta: "stale-token" }));
       const staleFrame = [...callbacks.values()][0];
       expect(staleFrame).toBeDefined();
 
@@ -606,7 +703,7 @@ describe("AgentsPage", () => {
       act(() => staleFrame!(0));
       expect(screen.queryByText("stale-token")).not.toBeInTheDocument();
 
-      finishStream();
+      finishSubscribe();
     } finally {
       Object.defineProperty(window, "requestAnimationFrame", {
         configurable: true,
@@ -619,42 +716,42 @@ describe("AgentsPage", () => {
     }
   });
 
-  it("attaches an image file, shows preview, and passes attachments to streamAgentMessage", async () => {
+  it("attaches an image file, shows preview, and passes attachments to startAgentRun", async () => {
     const user = userEvent.setup();
 
-    mockStreamMessage.mockImplementation(
-      async (sessionId, content, onEvent, _signal, attachments) => {
-        expect(content).toBe("この画像を見て");
-        expect(attachments).toEqual([
-          { name: "pixel.png", mime_type: "image/png", data: "QUJD" },
-        ]);
-        onEvent({
-          type: "done",
-          message: {
-            message_id: "msg_img_done",
-            session_id: sessionId,
-            sequence: 4,
-            role: "assistant",
-            content: "画像を見ました",
-            created_at: new Date().toISOString(),
+    mockRunSuccess({
+      envelopes: [
+        { eventId: 1, data: { type: "text_append", delta: "画像を見ました" } },
+        {
+          eventId: 2,
+          data: {
+            type: "done",
+            message: {
+              message_id: "msg_img_done",
+              session_id: "asess_456",
+              sequence: 4,
+              role: "assistant",
+              content: "画像を見ました",
+              created_at: new Date().toISOString(),
+            },
+            run: {
+              run_id: "arun_img_done",
+              session_id: "asess_456",
+              user_message_id: "msg_img_user",
+              assistant_message_id: "msg_img_done",
+              status: "succeeded",
+              hitl_run_id: null,
+              used_tools: [],
+              created_hitl_run_ids: [],
+              error_message: null,
+              started_at: "",
+              finished_at: "",
+            },
+            hitl_run_ids: [],
           },
-          run: {
-            run_id: "arun_img_done",
-            session_id: sessionId,
-            user_message_id: "msg_img_user",
-            assistant_message_id: "msg_img_done",
-            status: "succeeded",
-            hitl_run_id: null,
-            used_tools: [],
-            created_hitl_run_ids: [],
-            error_message: null,
-            started_at: "",
-            finished_at: "",
-          },
-          hitl_run_ids: [],
-        });
-      }
-    );
+        },
+      ],
+    });
 
     render(
       <MemoryRouter>
@@ -682,14 +779,13 @@ describe("AgentsPage", () => {
     await user.click(screen.getByRole("button", { name: "送信" }));
 
     await waitFor(() => {
-      expect(mockStreamMessage).toHaveBeenCalledWith(
+      expect(mockStartRun).toHaveBeenCalledWith(
         "asess_456",
-        "この画像を見て",
-        expect.any(Function),
-        expect.any(Object),
-        [
-          { name: "pixel.png", mime_type: "image/png", data: "QUJD" },
-        ]
+        expect.objectContaining({
+          content: "この画像を見て",
+          images: [{ name: "pixel.png", mime_type: "image/png", data: "QUJD" }],
+        }),
+        expect.any(String)
       );
     });
 
@@ -699,14 +795,7 @@ describe("AgentsPage", () => {
 
   it("allows sending with only an attachment and no text", async () => {
     const user = userEvent.setup();
-    mockStreamMessage.mockImplementation(
-      async (sessionId, content, _onEvent, _signal, attachments) => {
-        expect(content).toBe("");
-        expect(attachments).toEqual([
-          { name: "pixel.png", mime_type: "image/png", data: "QUJD" },
-        ]);
-      }
-    );
+    mockRunSuccess();
 
     render(
       <MemoryRouter>
@@ -732,12 +821,13 @@ describe("AgentsPage", () => {
     await user.click(screen.getByRole("button", { name: "送信" }));
 
     await waitFor(() => {
-      expect(mockStreamMessage).toHaveBeenCalledWith(
+      expect(mockStartRun).toHaveBeenCalledWith(
         "asess_456",
-        "",
-        expect.any(Function),
-        expect.any(Object),
-        [{ name: "pixel.png", mime_type: "image/png", data: "QUJD" }]
+        expect.objectContaining({
+          content: "",
+          images: [{ name: "pixel.png", mime_type: "image/png", data: "QUJD" }],
+        }),
+        expect.any(String)
       );
     });
   });
@@ -775,17 +865,10 @@ describe("AgentsPage", () => {
     ).toBeInTheDocument();
   });
 
-  it("attaches a dropped file, shows preview, and passes attachments to streamAgentMessage", async () => {
+  it("attaches a dropped file, shows preview, and passes attachments to startAgentRun", async () => {
     const user = userEvent.setup();
 
-    mockStreamMessage.mockImplementation(
-      async (sessionId, content, _onEvent, _signal, attachments) => {
-        expect(content).toBe("drop して確認");
-        expect(attachments).toEqual([
-          { name: "dropped.png", mime_type: "image/png", data: "UkZT" },
-        ]);
-      }
-    );
+    mockRunSuccess();
 
     render(
       <MemoryRouter>
@@ -819,12 +902,13 @@ describe("AgentsPage", () => {
     await user.click(screen.getByRole("button", { name: "送信" }));
 
     await waitFor(() => {
-      expect(mockStreamMessage).toHaveBeenCalledWith(
+      expect(mockStartRun).toHaveBeenCalledWith(
         "asess_456",
-        "drop して確認",
-        expect.any(Function),
-        expect.any(Object),
-        [{ name: "dropped.png", mime_type: "image/png", data: "UkZT" }]
+        expect.objectContaining({
+          content: "drop して確認",
+          images: [{ name: "dropped.png", mime_type: "image/png", data: "UkZT" }],
+        }),
+        expect.any(String)
       );
     });
   });
@@ -860,14 +944,7 @@ describe("AgentsPage", () => {
   it("attaches an image pasted from the clipboard into the textarea", async () => {
     const user = userEvent.setup();
 
-    mockStreamMessage.mockImplementation(
-      async (sessionId, content, _onEvent, _signal, attachments) => {
-        expect(content).toBe("これは？");
-        expect(attachments).toEqual([
-          { name: "image.png", mime_type: "image/png", data: "UEFT" },
-        ]);
-      }
-    );
+    mockRunSuccess();
 
     render(
       <MemoryRouter>
@@ -905,12 +982,13 @@ describe("AgentsPage", () => {
     await user.click(screen.getByRole("button", { name: "送信" }));
 
     await waitFor(() => {
-      expect(mockStreamMessage).toHaveBeenCalledWith(
+      expect(mockStartRun).toHaveBeenCalledWith(
         "asess_456",
-        "これは？",
-        expect.any(Function),
-        expect.any(Object),
-        [{ name: "image.png", mime_type: "image/png", data: "UEFT" }]
+        expect.objectContaining({
+          content: "これは？",
+          images: [{ name: "image.png", mime_type: "image/png", data: "UEFT" }],
+        }),
+        expect.any(String)
       );
     });
   });
@@ -1086,36 +1164,39 @@ describe("AgentsPage", () => {
 
   it("clears the draft after a message is sent successfully", async () => {
     const user = userEvent.setup();
-    mockStreamMessage.mockImplementation(
-      async (sessionId, content, onEvent) => {
-        onEvent({ type: "text", delta: "送信完了" });
-        onEvent({
-          type: "done",
-          message: {
-            message_id: "msg_clear_draft",
-            session_id: sessionId,
-            sequence: 3,
-            role: "assistant",
-            content: "送信完了",
-            created_at: new Date().toISOString(),
+    mockRunSuccess({
+      envelopes: [
+        { eventId: 1, data: { type: "text_append", delta: "送信完了" } },
+        {
+          eventId: 2,
+          data: {
+            type: "done",
+            message: {
+              message_id: "msg_clear_draft",
+              session_id: "asess_456",
+              sequence: 3,
+              role: "assistant",
+              content: "送信完了",
+              created_at: new Date().toISOString(),
+            },
+            run: {
+              run_id: "arun_clear_draft",
+              session_id: "asess_456",
+              user_message_id: "msg_clear_draft_user",
+              assistant_message_id: "msg_clear_draft",
+              status: "succeeded",
+              hitl_run_id: null,
+              used_tools: [],
+              created_hitl_run_ids: [],
+              error_message: null,
+              started_at: "",
+              finished_at: "",
+            },
+            hitl_run_ids: [],
           },
-          run: {
-            run_id: "arun_clear_draft",
-            session_id: sessionId,
-            user_message_id: "msg_clear_draft_user",
-            assistant_message_id: "msg_clear_draft",
-            status: "succeeded",
-            hitl_run_id: null,
-            used_tools: [],
-            created_hitl_run_ids: [],
-            error_message: null,
-            started_at: "",
-            finished_at: "",
-          },
-          hitl_run_ids: [],
-        });
-      }
-    );
+        },
+      ],
+    });
 
     render(
       <MemoryRouter>
@@ -1136,7 +1217,7 @@ describe("AgentsPage", () => {
 
   it("keeps the pre-send text as the session draft when send fails", async () => {
     const user = userEvent.setup();
-    mockStreamMessage.mockRejectedValue(new Error("送信失敗"));
+    mockStartRun.mockRejectedValue(new Error("送信失敗"));
 
     render(
       <MemoryRouter>
@@ -1169,13 +1250,27 @@ describe("AgentsPage", () => {
       messages: [],
       runs: [],
     }));
-    let capturedOnEvent: ((event: never) => void) | null = null;
-    mockStreamMessage.mockImplementation(
-      (_sessionId: string, _content: string, onEvent: (event: never) => void) => {
-        capturedOnEvent = onEvent;
-        return new Promise(() => {}) as unknown as Promise<void>;
+    mockStartRun.mockResolvedValue({
+      run: {
+        run_id: "arun_stale",
+        session_id: "asess_456",
+        user_message_id: "msg_stale_user",
+        assistant_message_id: null,
+        status: "queued",
+        hitl_run_id: null,
+        used_tools: [],
+        created_hitl_run_ids: [],
+        error_message: null,
+        started_at: "",
+        finished_at: null,
       },
-    );
+    });
+    let capturedOnEnvelope: ((env: { eventId: number; data: Record<string, unknown> }) => void) | null =
+      null;
+    mockSubscribeRun.mockImplementation(async (_runId: string, opts: unknown) => {
+      capturedOnEnvelope = (opts as { onEnvelope: typeof capturedOnEnvelope }).onEnvelope;
+      return new Promise(() => {}) as unknown as Promise<void>;
+    });
 
     render(
       <MemoryRouter>
@@ -1200,10 +1295,12 @@ describe("AgentsPage", () => {
     await act(() => new Promise((resolve) => window.setTimeout(resolve, 650)));
     expect(sessionStorage.getItem("oaih:prompt-draft:agents:asess_789")).toBe("Bの入力中");
 
-    // A's stale stream event must not affect B; A's draft stays (never deleted).
+    // A's stale run event must not affect B; A's draft stays (never deleted).
     await act(async () => {
-      capturedOnEvent?.({
-        type: "done",
+      capturedOnEnvelope?.({
+        eventId: 1,
+        data: {
+          type: "done",
         message: {
           message_id: "msg_stale",
           session_id: "asess_456",
@@ -1224,8 +1321,9 @@ describe("AgentsPage", () => {
           started_at: "",
           finished_at: "",
         },
-        hitl_run_ids: [],
-      } as never);
+          hitl_run_ids: [],
+        },
+      });
     });
 
     expect(input.value).toBe("Bの入力中");
@@ -1363,8 +1461,13 @@ describe("AgentsPage", () => {
   it("deletes the image draft only after a successful send", async () => {
     const user = userEvent.setup();
     seedImageDraft("asess_456");
-    mockStreamMessage.mockImplementation(async (_sessionId, _content, onEvent) => {
-      onEvent(doneEvent("asess_456"));
+    mockRunSuccess({
+      envelopes: [
+        {
+          eventId: 1,
+          data: doneEvent("asess_456") as unknown as Record<string, unknown>,
+        },
+      ],
     });
 
     render(
@@ -1385,7 +1488,7 @@ describe("AgentsPage", () => {
   it("keeps the image draft when send fails", async () => {
     const user = userEvent.setup();
     seedImageDraft("asess_456");
-    mockStreamMessage.mockRejectedValue(new Error("送信失敗"));
+    mockStartRun.mockRejectedValue(new Error("送信失敗"));
 
     render(
       <MemoryRouter>
@@ -1420,13 +1523,27 @@ describe("AgentsPage", () => {
       runs: [],
     }));
     seedImageDraft("asess_456", "a-image.png");
-    let capturedOnEvent: ((event: never) => void) | null = null;
-    mockStreamMessage.mockImplementation(
-      (_sessionId: string, _content: string, onEvent: (event: never) => void) => {
-        capturedOnEvent = onEvent;
-        return new Promise(() => {}) as unknown as Promise<void>;
+    mockStartRun.mockResolvedValue({
+      run: {
+        run_id: "arun_stale_img",
+        session_id: "asess_456",
+        user_message_id: "msg_stale_img_user",
+        assistant_message_id: null,
+        status: "queued",
+        hitl_run_id: null,
+        used_tools: [],
+        created_hitl_run_ids: [],
+        error_message: null,
+        started_at: "",
+        finished_at: null,
       },
-    );
+    });
+    let capturedOnEnvelope: ((env: { eventId: number; data: Record<string, unknown> }) => void) | null =
+      null;
+    mockSubscribeRun.mockImplementation(async (_runId: string, opts: unknown) => {
+      capturedOnEnvelope = (opts as { onEnvelope: typeof capturedOnEnvelope }).onEnvelope;
+      return new Promise(() => {}) as unknown as Promise<void>;
+    });
 
     render(
       <MemoryRouter>
@@ -1447,7 +1564,10 @@ describe("AgentsPage", () => {
 
     // A's stale completion must not affect B; A's image draft stays.
     await act(async () => {
-      capturedOnEvent?.(doneEvent("asess_456"));
+      capturedOnEnvelope?.({
+        eventId: 1,
+        data: doneEvent("asess_456") as unknown as Record<string, unknown>,
+      });
     });
     expect(screen.queryByAltText("a-image.png")).not.toBeInTheDocument();
     expect(input).toHaveValue("");
@@ -1711,37 +1831,40 @@ describe("AgentsPage", () => {
       .mockResolvedValueOnce({ sessions: [sampleSession] })
       .mockResolvedValue({ sessions: [autoTitleSession] });
 
-    mockStreamMessage.mockImplementation(
-      async (sessionId, content, onEvent) => {
-        onEvent({ type: "text", delta: "応答テキスト" });
-        onEvent({
-          type: "done",
-          message: {
-            message_id: "msg_3",
-            session_id: sessionId,
-            sequence: 3,
-            role: "assistant",
-            content: "応答テキスト",
-            created_at: new Date().toISOString(),
+    mockRunSuccess({
+      envelopes: [
+        { eventId: 1, data: { type: "text_append", delta: "応答テキスト" } },
+        {
+          eventId: 2,
+          data: {
+            type: "done",
+            message: {
+              message_id: "msg_3",
+              session_id: "asess_456",
+              sequence: 3,
+              role: "assistant",
+              content: "応答テキスト",
+              created_at: new Date().toISOString(),
+            },
+            run: {
+              run_id: "arun_auto_title",
+              session_id: "asess_456",
+              user_message_id: "msg_2",
+              assistant_message_id: "msg_3",
+              status: "succeeded",
+              hitl_run_id: null,
+              used_tools: [],
+              created_hitl_run_ids: [],
+              error_message: null,
+              started_at: "",
+              finished_at: "",
+            },
+            hitl_run_ids: [],
+            session_title: autoTitle,
           },
-          run: {
-            run_id: "arun_auto_title",
-            session_id: sessionId,
-            user_message_id: "msg_2",
-            assistant_message_id: "msg_3",
-            status: "succeeded",
-            hitl_run_id: null,
-            used_tools: [],
-            created_hitl_run_ids: [],
-            error_message: null,
-            started_at: "",
-            finished_at: "",
-          },
-          hitl_run_ids: [],
-          session_title: autoTitle,
-        });
-      }
-    );
+        },
+      ],
+    });
 
     render(
       <MemoryRouter>
@@ -1846,36 +1969,39 @@ describe("AgentsPage", () => {
       };
     });
 
-    mockStreamMessage.mockImplementation(
-      async (sessionId, _content, onEvent) => {
-        onEvent({ type: "text", delta: "応答" });
-        onEvent({
-          type: "done",
-          message: {
-            message_id: "msg_3",
-            session_id: sessionId,
-            sequence: 3,
-            role: "assistant",
-            content: "ストリーム完了後の確定本文",
-            created_at: new Date().toISOString(),
+    mockRunSuccess({
+      envelopes: [
+        { eventId: 1, data: { type: "text_append", delta: "応答" } },
+        {
+          eventId: 2,
+          data: {
+            type: "done",
+            message: {
+              message_id: "msg_3",
+              session_id: "asess_456",
+              sequence: 3,
+              role: "assistant",
+              content: "ストリーム完了後の確定本文",
+              created_at: new Date().toISOString(),
+            },
+            run: {
+              run_id: "arun_stream_regression",
+              session_id: "asess_456",
+              user_message_id: "msg_2",
+              assistant_message_id: "msg_3",
+              status: "succeeded",
+              hitl_run_id: null,
+              used_tools: [],
+              created_hitl_run_ids: [],
+              error_message: null,
+              started_at: "",
+              finished_at: "",
+            },
+            hitl_run_ids: [],
           },
-          run: {
-            run_id: "arun_stream_regression",
-            session_id: sessionId,
-            user_message_id: "msg_2",
-            assistant_message_id: "msg_3",
-            status: "succeeded",
-            hitl_run_id: null,
-            used_tools: [],
-            created_hitl_run_ids: [],
-            error_message: null,
-            started_at: "",
-            finished_at: "",
-          },
-          hitl_run_ids: [],
-        });
-      }
-    );
+        },
+      ],
+    });
 
     render(
       <MemoryRouter>
@@ -2091,7 +2217,7 @@ describe("AgentsPage", () => {
       fireEvent.keyDown(input, { key: "Enter" });
 
       expect(input.value).toBe("アジェンダと資料を準備しました。");
-      expect(mockStreamMessage).not.toHaveBeenCalled();
+      expect(mockStartRun).not.toHaveBeenCalled();
       expect(screen.queryByTestId("agent-command-palette")).not.toBeInTheDocument();
 
       // Escape closes palette
@@ -2105,6 +2231,7 @@ describe("AgentsPage", () => {
 
     it("immediately sends input when Ctrl+Enter is pressed while palette is open", async () => {
       const user = userEvent.setup();
+      mockRunSuccess();
       render(
         <MemoryRouter>
           <AgentsPage />
@@ -2119,12 +2246,10 @@ describe("AgentsPage", () => {
       fireEvent.keyDown(input, { key: "Enter", ctrlKey: true });
 
       await waitFor(() => {
-        expect(mockStreamMessage).toHaveBeenCalledWith(
+        expect(mockStartRun).toHaveBeenCalledWith(
           "asess_456",
-          "/hello",
-          expect.any(Function),
-          expect.any(Object),
-          undefined
+          expect.objectContaining({ content: "/hello" }),
+          expect.any(String)
         );
       });
     });

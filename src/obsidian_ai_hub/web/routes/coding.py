@@ -1,8 +1,9 @@
 """FastAPI router for dedicated coding workspace."""
 
+import asyncio
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -29,7 +30,7 @@ class UpdateSessionToolsRequest(BaseModel):
     tool_ids: Optional[List[str]] = Field(default=None, description="List of tool IDs, or None to reset to user default")
 
 
-class MessageStreamRequest(BaseModel):
+class StartCodingRunRequest(BaseModel):
     content: str
 
 
@@ -215,49 +216,149 @@ def get_session_detail(session_id: str, _=Depends(require_bearer_token)):
 @router.delete("/sessions/{session_id}")
 def delete_session(session_id: str, _=Depends(require_bearer_token)):
     """Delete a coding session."""
-    deleted = coding_store.delete_session(session_id)
+    try:
+        deleted = coding_store.delete_session(session_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
     if not deleted:
         raise HTTPException(status_code=404, detail="セッションが見つかりません")
     return {"status": "deleted", "session_id": session_id}
 
 
-@router.post("/sessions/{session_id}/messages/stream")
-async def stream_message(
+@router.post("/sessions/{session_id}/runs", status_code=202)
+def start_coding_run(
     session_id: str,
-    body: MessageStreamRequest,
+    body: StartCodingRunRequest,
     _=Depends(require_bearer_token),
+    idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
 ):
-    """Send user message and stream orchestrator / worker responses via SSE."""
+    """Queue a coding run and return 202 with the run (reconnectable SSE)."""
+    from obsidian_ai_hub.runs.instance import get_instance_id
+
     session = coding_store.get_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="セッションが見つかりません")
-
-    if not body.content.strip():
+    if not (body.content or "").strip():
         raise HTTPException(status_code=400, detail="メッセージ本文が空です")
-
-    # Check if a run is already active
-    active_run = coding_store.get_active_run_for_session(session_id)
-    if active_run:
-        raise HTTPException(
-            status_code=409,
-            detail="このセッションでは既に別の実行が進行中です",
+    try:
+        _, run = coding_store.start_queued_run(
+            session_id=session_id,
+            content=body.content,
+            idempotency_key=idempotency_key,
+            created_instance_id=get_instance_id(),
         )
+        return {"run": run}
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except ValueError as exc:
+        msg = str(exc)
+        if "conflict" in msg.lower() or "active" in msg.lower() or "進行中" in msg:
+            raise HTTPException(status_code=409, detail=msg)
+        raise HTTPException(status_code=400, detail=msg)
 
-    return StreamingResponse(
-        coding_service.run_coding_turn_stream(session_id, body.content),
-        media_type="text/event-stream",
+
+@router.get("/runs/{run_id}/events")
+async def subscribe_coding_run_events(
+    run_id: str,
+    request: Request,
+    _=Depends(require_bearer_token),
+    last_event_id: Optional[str] = Query(default=None, alias="last_event_id"),
+    last_event_id_header: Optional[str] = Header(default=None, alias="Last-Event-ID"),
+):
+    """Replay coding event log (event_id > cursor) then follow until terminal."""
+    from obsidian_ai_hub.runs.events import (
+        format_sse,
+        heartbeat_sse,
+        is_terminal_event,
+        parse_last_event_id,
     )
+
+    run = coding_store.get_run(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="実行が見つかりません")
+    raw_cursor = last_event_id_header if last_event_id_header is not None else last_event_id
+    cursor = parse_last_event_id(raw_cursor)
+
+    async def event_gen():
+        nonlocal cursor
+        idle_cycles = 0
+        terminal_empty_polls = 0
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                events = await asyncio.to_thread(
+                    coding_store.list_run_events, run_id, cursor, 200
+                )
+                if events:
+                    idle_cycles = 0
+                    terminal_empty_polls = 0
+                    for ev in events:
+                        eid = int(ev["event_id"])
+                        payload = dict(ev.get("payload") or {})
+                        payload.setdefault("event", ev.get("event_type"))
+                        yield format_sse(eid, payload)
+                        cursor = eid
+                        if is_terminal_event(str(ev.get("event_type") or ""), payload):
+                            return
+                    current = await asyncio.to_thread(coding_store.get_run, run_id)
+                    if current is not None and str(current.get("status")) in (
+                        "completed",
+                        "failed",
+                        "cancelled",
+                        "interrupted",
+                    ):
+                        last_type = str(events[-1].get("event_type") or "")
+                        last_payload = dict(events[-1].get("payload") or {})
+                        if is_terminal_event(last_type, last_payload):
+                            return
+                else:
+                    current = await asyncio.to_thread(coding_store.get_run, run_id)
+                    if current is not None and str(current.get("status")) in (
+                        "completed",
+                        "failed",
+                        "cancelled",
+                        "interrupted",
+                    ):
+                        terminal_empty_polls += 1
+                        if terminal_empty_polls >= 10:
+                            return
+                    else:
+                        terminal_empty_polls = 0
+                    if current is not None and str(current.get("status")) == "waiting_user":
+                        return
+                    idle_cycles += 1
+                    if idle_cycles >= 30:
+                        idle_cycles = 0
+                        yield heartbeat_sse()
+                try:
+                    await asyncio.wait_for(asyncio.sleep(0.5), timeout=0.5)
+                except asyncio.CancelledError:
+                    break
+        except asyncio.CancelledError:
+            return
+
+    return StreamingResponse(event_gen(), media_type="text/event-stream")
 
 
 @router.post("/runs/{run_id}/cancel")
 def cancel_run(run_id: str, _=Depends(require_bearer_token)):
-    """Cancel an active run."""
+    """Request cancellation for a queued/running/waiting run (same state contract)."""
     run = coding_store.get_run(run_id)
     if not run:
         raise HTTPException(status_code=404, detail="実行が見つかりません")
 
-    if run["status"] != "running":
-        return {"status": "not_running", "run_id": run_id, "current_status": run["status"]}
+    status = str(run.get("status") or "")
+    if status in ("completed", "failed", "cancelled", "interrupted"):
+        return {"run": run, "status": "not_running", "run_id": run_id, "current_status": status}
 
-    cancelled = coding_service.cancel_active_run(run_id)
-    return {"status": "cancel_signalled" if cancelled else "not_found", "run_id": run_id}
+    try:
+        updated = coding_store.request_cancel_run(run_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    # Notify the owning worker (CLI process group stop); the worker holds the
+    # repo lock and cancel registration until CLI completes.
+    coding_service.cancel_active_run(run_id)
+    return {"run": updated, "status": "cancel_signalled", "run_id": run_id}

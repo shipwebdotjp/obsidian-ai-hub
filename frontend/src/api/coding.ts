@@ -101,13 +101,23 @@ export interface CodingLiveToolCall {
   call_index?: number;
 }
 
+export type CodingRunStatus =
+  | "queued"
+  | "running"
+  | "cancelling"
+  | "waiting_user"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "interrupted";
+
 export interface CodingRun {
   run_id: string;
   session_id: string;
   user_message_id: string;
   orchestrator_message_id: string | null;
   worker_message_id: string | null;
-  status: "running" | "completed" | "failed" | "cancelled" | "interrupted" | "waiting_user";
+  status: CodingRunStatus;
   hitl_run_id: string | null;
   dirty_tree_at_start: string | null;
   error_message: string | null;
@@ -238,91 +248,62 @@ export function deleteCodingSession(sessionId: string): Promise<{ status: string
   );
 }
 
-export function cancelCodingRun(runId: string): Promise<{ status: string; run_id: string }> {
-  return apiPost<{ status: string; run_id: string }>(
+export function cancelCodingRun(runId: string): Promise<{ status: string; run_id: string; run?: CodingRun }> {
+  return apiPost<{ status: string; run_id: string; run?: CodingRun }>(
     `/api/v1/coding/runs/${encodeURIComponent(runId)}/cancel`,
     {},
   );
 }
 
-export async function streamCodingMessage(
+export function startCodingRun(
   sessionId: string,
   content: string,
-  onEvent: (event: CodingSseEvent) => void,
-  signal?: AbortSignal,
-): Promise<void> {
+  idempotencyKey?: string,
+): Promise<{ run: CodingRun }> {
   const headers = new Headers();
   headers.set("Content-Type", "application/json");
-  headers.set("Accept", "text/event-stream");
   const token = getToken();
-  if (token) {
-    headers.set("Authorization", `Bearer ${token}`);
-  }
-
-  const response = await fetch(
-    `/api/v1/coding/sessions/${encodeURIComponent(sessionId)}/messages/stream`,
-    {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ content }),
-      signal,
-    },
-  );
-
-  if (response.status === 401) {
-    clearToken();
-    window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT));
-    throw new ApiError(401, "Authentication failed.");
-  }
-
-  if (!response.ok) {
-    let detail = response.statusText;
-    try {
-      const errJson = await response.json();
-      if (errJson && errJson.detail) detail = errJson.detail;
-    } catch (_) {}
-    throw new ApiError(response.status, detail);
-  }
-
-  if (!response.body) {
-    throw new Error("ReadableStream not supported by response body.");
-  }
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder("utf-8");
-  let buffer = "";
-
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-
-    let remainder = buffer;
-    while (true) {
-      const separator = /\r?\n\r?\n/.exec(remainder);
-      if (!separator || separator.index === undefined) break;
-
-      const eventBlock = remainder.slice(0, separator.index);
-      remainder = remainder.slice(separator.index + separator[0].length);
-
-      const dataLines: string[] = [];
-      for (const line of eventBlock.split(/\r?\n/)) {
-        if (line.startsWith("data:")) {
-          let data = line.slice(5);
-          if (data.startsWith(" ")) data = data.slice(1);
-          dataLines.push(data);
-        }
-      }
-
-      if (dataLines.length > 0) {
-        try {
-          const parsed = JSON.parse(dataLines.join("\n")) as CodingSseEvent;
-          onEvent(parsed);
-        } catch (e) {
-          console.error("Failed to parse SSE event:", eventBlock, e);
-        }
-      }
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  if (idempotencyKey) headers.set("Idempotency-Key", idempotencyKey);
+  return fetch(`/api/v1/coding/sessions/${encodeURIComponent(sessionId)}/runs`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ content }),
+  }).then(async (res) => {
+    if (res.status === 401) {
+      clearToken();
+      window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT));
+      throw new ApiError(401, "Authentication failed.");
     }
-    buffer = remainder;
-  }
+    if (!res.ok) {
+      let detail = res.statusText;
+      try {
+        const errJson = await res.json();
+        if (errJson?.detail) detail = errJson.detail;
+      } catch {}
+      throw new ApiError(res.status, detail);
+    }
+    return (await res.json()) as { run: CodingRun };
+  });
+}
+
+export async function subscribeCodingRunEvents(
+  runId: string,
+  opts: {
+    lastEventId: number;
+    signal?: AbortSignal;
+    onEnvelope: (envelope: import("./runSse").RunSseEnvelope) => void;
+  },
+): Promise<void> {
+  const { subscribeRunEvents } = await import("./runSse");
+  return subscribeRunEvents({
+    url: `/api/v1/coding/runs/${encodeURIComponent(runId)}/events`,
+    lastEventId: opts.lastEventId,
+    signal: opts.signal,
+    onEnvelope: opts.onEnvelope,
+    isTerminal: (envelope) => {
+      const type = String(envelope.data["event"] ?? envelope.data["type"] ?? "");
+      return type === "done" || type === "error" || type === "cancelled";
+    },
+  });
 }

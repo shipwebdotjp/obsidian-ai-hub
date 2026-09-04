@@ -6,16 +6,19 @@ Re-exports all service functions from the feature subpackage to preserve the
 """
 
 from obsidian_ai_hub.web.services.agents import (
+    cancel_run,
     create_agent,
     create_session,
     delete_agent,
     delete_session,
     get_agent,
+    get_run,
     get_session_detail,
     list_agent_tools,
     list_agents,
+    list_run_events,
     list_sessions,
-    stream_session_message,
+    start_run,
     update_agent,
 )
 from obsidian_ai_hub.web.services.dashboard import (

@@ -1,4 +1,5 @@
 import { render, screen, fireEvent, waitFor, within, act } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { vi, describe, it, expect, beforeEach } from "vitest";
 import CodingPage from "./CodingPage";
 import * as codingApi from "../../api/coding";
@@ -10,7 +11,8 @@ vi.mock("../../api/coding", () => ({
   getCodingSessionDetail: vi.fn(),
   deleteCodingSession: vi.fn(),
   cancelCodingRun: vi.fn(),
-  streamCodingMessage: vi.fn(),
+  startCodingRun: vi.fn(),
+  subscribeCodingRunEvents: vi.fn(),
   getGitStatus: vi.fn(),
   getCodingDefaults: vi.fn(),
   getCodingConfig: vi.fn(),
@@ -45,6 +47,50 @@ const mockSession: codingApi.CodingSession = {
   updated_at: "2026-01-01T00:00:00Z",
 };
 
+function mockCodingRun(overrides: Partial<codingApi.CodingRun> = {}): codingApi.CodingRun {
+  return {
+    run_id: "crun_1",
+    session_id: "cses_111",
+    user_message_id: "cmsg_1",
+    orchestrator_message_id: null,
+    worker_message_id: null,
+    status: "queued",
+    hitl_run_id: null,
+    dirty_tree_at_start: null,
+    error_message: null,
+    started_at: "2026-01-01T00:00:00Z",
+    finished_at: null,
+    ...overrides,
+  };
+}
+
+type Envelope = { eventId: number; data: Record<string, unknown> };
+
+function mockStartSubscribeSuccess(
+  envelopes: Envelope[],
+  opts: { runId?: string; sessionId?: string } = {},
+) {
+  const runId = opts.runId ?? "crun_999";
+  const sessionId = opts.sessionId ?? "cses_111";
+  vi.mocked(codingApi.startCodingRun).mockResolvedValue({
+    run: mockCodingRun({ run_id: runId, session_id: sessionId, status: "queued" }),
+  });
+  vi.mocked(codingApi.subscribeCodingRunEvents).mockImplementation(async (_runId, subOpts) => {
+    for (const env of envelopes) {
+      (subOpts as { onEnvelope: (e: Envelope) => void }).onEnvelope(env);
+    }
+  });
+  return { runId, sessionId };
+}
+
+function renderPage(initialEntries: string[] = ["/coding"]) {
+  return render(
+    <MemoryRouter initialEntries={initialEntries}>
+      <CodingPage />
+    </MemoryRouter>,
+  );
+}
+
 describe("CodingPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -60,6 +106,7 @@ describe("CodingPage", () => {
     vi.mocked(codingApi.getCodingConfig).mockResolvedValue({ default_backend: "opencode" });
     vi.mocked(codingApi.listCodingProjects).mockResolvedValue([mockProjectItem]);
     vi.mocked(codingApi.listCodingSessions).mockResolvedValue([mockSession]);
+    vi.mocked(codingApi.subscribeCodingRunEvents).mockResolvedValue(undefined);
     vi.mocked(codingApi.getCodingSessionDetail).mockResolvedValue({
       session: mockSession,
       effective_tool_ids: ["web_search", "vault_search"],
@@ -98,7 +145,7 @@ describe("CodingPage", () => {
   });
 
   it("renders 2 panes and displays projects, sessions, and messages", async () => {
-    render(<CodingPage />);
+    renderPage();
 
     await waitFor(() => {
       expect(screen.getByText("Test App")).toBeInTheDocument();
@@ -108,7 +155,7 @@ describe("CodingPage", () => {
   });
 
   it("collapses left pane when collapse button is clicked and expands when expand button is clicked", async () => {
-    render(<CodingPage />);
+    renderPage();
 
     await waitFor(() => {
       expect(screen.getByText("Test App")).toBeInTheDocument();
@@ -130,7 +177,7 @@ describe("CodingPage", () => {
   it("allows expanding left pane even when no session is selected", async () => {
     vi.mocked(codingApi.listCodingSessions).mockResolvedValue([]);
 
-    render(<CodingPage />);
+    renderPage();
 
     await waitFor(() => {
       expect(screen.getByText("Test App")).toBeInTheDocument();
@@ -213,7 +260,7 @@ describe("CodingPage", () => {
       orchestrator_tool_calls: [],
     });
 
-    render(<CodingPage />);
+    renderPage();
 
     await waitFor(() => {
       expect(screen.getByTestId("cli-request-card")).toBeInTheDocument();
@@ -235,7 +282,7 @@ describe("CodingPage", () => {
       deletions: 2,
     });
 
-    render(<CodingPage />);
+    renderPage();
 
     await waitFor(() => {
       expect(screen.getByText("feature/test")).toBeInTheDocument();
@@ -252,7 +299,7 @@ describe("CodingPage", () => {
       title: "新しいコーディングセッション",
     });
 
-    render(<CodingPage />);
+    renderPage();
 
     await waitFor(() => {
       expect(screen.getByText("Test App")).toBeInTheDocument();
@@ -281,7 +328,7 @@ describe("CodingPage", () => {
       backend: "codex",
     });
 
-    render(<CodingPage />);
+    renderPage();
 
     await waitFor(() => {
       expect(screen.getByText("Test App")).toBeInTheDocument();
@@ -312,7 +359,7 @@ describe("CodingPage", () => {
       backend: "opencode",
     });
 
-    render(<CodingPage />);
+    renderPage();
 
     await waitFor(() => {
       expect(screen.getByText("Test App")).toBeInTheDocument();
@@ -342,7 +389,7 @@ describe("CodingPage", () => {
       backend: "codex",
     });
 
-    render(<CodingPage />);
+    renderPage();
 
     await waitFor(() => {
       expect(screen.getByText("Test App")).toBeInTheDocument();
@@ -378,7 +425,7 @@ describe("CodingPage", () => {
       backend: "opencode",
     });
 
-    render(<CodingPage />);
+    renderPage();
 
     await waitFor(() => {
       expect(screen.getByText("Test App")).toBeInTheDocument();
@@ -401,17 +448,10 @@ describe("CodingPage", () => {
   });
 
   it("updates session title when coding CLI response event contains session_title", async () => {
-    vi.mocked(codingApi.streamCodingMessage).mockImplementation(
-      async (_sessionId, _content, onEvent) => {
-        onEvent({ event: "start", run_id: "crun_999", is_dirty: false, dirty_summary: null });
-        onEvent({
-          event: "done",
-          run_id: "crun_999",
-          status: "completed",
-          session_title: "CLI生成タイトル",
-        });
-      },
-    );
+    mockStartSubscribeSuccess([
+      { eventId: 1, data: { event: "orchestrator_start", phase: "initial" } },
+      { eventId: 2, data: { event: "done", run_id: "crun_999", status: "completed", session_title: "CLI生成タイトル" } },
+    ]);
 
     // Mock getCodingSessionDetail to reflect updated session title on refetch
     vi.mocked(codingApi.getCodingSessionDetail).mockResolvedValue({
@@ -431,7 +471,7 @@ describe("CodingPage", () => {
       orchestrator_tool_calls: [],
     });
 
-    render(<CodingPage />);
+    renderPage();
 
     await waitFor(() => {
       expect(screen.getByText("Test App")).toBeInTheDocument();
@@ -451,11 +491,11 @@ describe("CodingPage", () => {
   });
 
   it("handles message streaming lifecycle and refetches session detail on completion", async () => {
-    vi.mocked(codingApi.streamCodingMessage).mockImplementation(
-      async (_sessionId, _content, onEvent) => {
-        onEvent({ event: "start", run_id: "crun_999", is_dirty: false, dirty_summary: null });
-        onEvent({ event: "orchestrator_start", phase: "initial" });
-        onEvent({
+    mockStartSubscribeSuccess([
+      { eventId: 1, data: { event: "orchestrator_start", phase: "initial" } },
+      {
+        eventId: 2,
+        data: {
           event: "orchestrator_message",
           phase: "initial",
           message: {
@@ -466,9 +506,12 @@ describe("CodingPage", () => {
             content: "オーケストレーター判断1",
             created_at: "2026-01-01T00:02:00Z",
           },
-        });
-        onEvent({ event: "worker_start", attempt: 1, backend: "codex", prompt: "codex test" });
-        onEvent({
+        },
+      },
+      { eventId: 3, data: { event: "worker_start", attempt: 1, backend: "codex", prompt: "codex test" } },
+      {
+        eventId: 4,
+        data: {
           event: "worker_done",
           attempt: 1,
           message: {
@@ -481,9 +524,12 @@ describe("CodingPage", () => {
           },
           exit_code: 0,
           error: null,
-        });
-        onEvent({ event: "orchestrator_start", phase: "review" });
-        onEvent({
+        },
+      },
+      { eventId: 5, data: { event: "orchestrator_start", phase: "review" } },
+      {
+        eventId: 6,
+        data: {
           event: "orchestrator_message",
           phase: "review",
           message: {
@@ -494,12 +540,12 @@ describe("CodingPage", () => {
             content: "オーケストレーター最終報告",
             created_at: "2026-01-01T00:04:00Z",
           },
-        });
-        onEvent({ event: "done", run_id: "crun_999", status: "completed" });
+        },
       },
-    );
+      { eventId: 7, data: { event: "done", run_id: "crun_999", status: "completed" } },
+    ]);
 
-    render(<CodingPage />);
+    renderPage();
 
     await waitFor(() => {
       expect(screen.getByText("Test App")).toBeInTheDocument();
@@ -514,10 +560,14 @@ describe("CodingPage", () => {
     fireEvent.click(sendBtn);
 
     await waitFor(() => {
-      expect(codingApi.streamCodingMessage).toHaveBeenCalledWith(
+      expect(codingApi.startCodingRun).toHaveBeenCalledWith(
         "cses_111",
         "テスト実行してください",
-        expect.any(Function),
+        expect.any(String),
+      );
+      expect(codingApi.subscribeCodingRunEvents).toHaveBeenCalledWith(
+        "crun_999",
+        expect.objectContaining({ lastEventId: 0 }),
       );
       expect(codingApi.getCodingSessionDetail).toHaveBeenCalledWith("cses_111");
     });
@@ -553,8 +603,10 @@ describe("CodingPage", () => {
       status: "cancel_signalled",
       run_id: "crun_active",
     });
+    // Active-run restore subscribes in the background; keep it pending.
+    vi.mocked(codingApi.subscribeCodingRunEvents).mockImplementation(() => new Promise(() => {}));
 
-    render(<CodingPage />);
+    renderPage();
 
     await waitFor(() => {
       expect(screen.getByText("キャンセル")).toBeInTheDocument();
@@ -569,7 +621,7 @@ describe("CodingPage", () => {
   });
 
   it("shows mode-aware placeholder for 'enter' and 'newline'", async () => {
-    render(<CodingPage />);
+    renderPage();
     await waitFor(() => expect(screen.getByText("Test App")).toBeInTheDocument());
     expect(
       screen.getByPlaceholderText("指示・質問を入力…（Enterで送信 / Shift+Enterで改行）"),
@@ -586,27 +638,27 @@ describe("CodingPage", () => {
   });
 
   it("sends on Enter when mode is 'enter', but not on Shift+Enter", async () => {
-    vi.mocked(codingApi.streamCodingMessage).mockResolvedValue(undefined);
-    render(<CodingPage />);
+    mockStartSubscribeSuccess([{ eventId: 1, data: { event: "done", run_id: "crun_999", status: "completed" } }]);
+    renderPage();
     await waitFor(() => expect(screen.getByText("Test App")).toBeInTheDocument());
     const textarea = screen.getByPlaceholderText(
       "指示・質問を入力…（Enterで送信 / Shift+Enterで改行）",
     );
     fireEvent.change(textarea, { target: { value: "enter-send" } });
     fireEvent.keyDown(textarea, { key: "Enter", shiftKey: false });
-    await waitFor(() => expect(codingApi.streamCodingMessage).toHaveBeenCalled());
+    await waitFor(() => expect(codingApi.startCodingRun).toHaveBeenCalled());
 
-    vi.mocked(codingApi.streamCodingMessage).mockClear();
+    vi.mocked(codingApi.startCodingRun).mockClear();
     fireEvent.change(textarea, { target: { value: "shift-enter" } });
     fireEvent.keyDown(textarea, { key: "Enter", shiftKey: true });
     await waitFor(() => new Promise((r) => setTimeout(r, 50)));
-    expect(codingApi.streamCodingMessage).not.toHaveBeenCalled();
+    expect(codingApi.startCodingRun).not.toHaveBeenCalled();
   });
 
   it("does not send on plain Enter when mode is 'newline', but sends on Ctrl+Enter and Cmd+Enter", async () => {
     localStorage.setItem("obsidian-ai-hub:chat-send-mode", "newline");
-    vi.mocked(codingApi.streamCodingMessage).mockResolvedValue(undefined);
-    render(<CodingPage />);
+    mockStartSubscribeSuccess([{ eventId: 1, data: { event: "done", run_id: "crun_999", status: "completed" } }]);
+    renderPage();
     await waitFor(() =>
       expect(
         screen.getByPlaceholderText("指示・質問を入力…（Enterで改行 / Ctrl+Enterで送信）"),
@@ -619,21 +671,21 @@ describe("CodingPage", () => {
     fireEvent.change(textarea, { target: { value: "no-send" } });
     fireEvent.keyDown(textarea, { key: "Enter", shiftKey: false });
     await waitFor(() => new Promise((r) => setTimeout(r, 30)));
-    expect(codingApi.streamCodingMessage).not.toHaveBeenCalled();
+    expect(codingApi.startCodingRun).not.toHaveBeenCalled();
 
     fireEvent.change(textarea, { target: { value: "ctrl-send" } });
     fireEvent.keyDown(textarea, { key: "Enter", ctrlKey: true });
-    await waitFor(() => expect(codingApi.streamCodingMessage).toHaveBeenCalled());
-    vi.mocked(codingApi.streamCodingMessage).mockClear();
+    await waitFor(() => expect(codingApi.startCodingRun).toHaveBeenCalled());
+    vi.mocked(codingApi.startCodingRun).mockClear();
 
     fireEvent.change(textarea, { target: { value: "meta-send" } });
     fireEvent.keyDown(textarea, { key: "Enter", metaKey: true });
-    await waitFor(() => expect(codingApi.streamCodingMessage).toHaveBeenCalled());
+    await waitFor(() => expect(codingApi.startCodingRun).toHaveBeenCalled());
   });
 
   it("does not send while composing (IME via keyCode 229)", async () => {
-    vi.mocked(codingApi.streamCodingMessage).mockResolvedValue(undefined);
-    render(<CodingPage />);
+    vi.mocked(codingApi.startCodingRun).mockResolvedValue({ run: mockCodingRun() });
+    renderPage();
     await waitFor(() => expect(screen.getByText("Test App")).toBeInTheDocument());
     const textarea = screen.getByPlaceholderText(
       "指示・質問を入力…（Enterで送信 / Shift+Enterで改行）",
@@ -641,7 +693,7 @@ describe("CodingPage", () => {
     fireEvent.change(textarea, { target: { value: "composing" } });
     fireEvent.keyDown(textarea, { key: "Enter", keyCode: 229 } as any);
     await waitFor(() => new Promise((r) => setTimeout(r, 30)));
-    expect(codingApi.streamCodingMessage).not.toHaveBeenCalled();
+    expect(codingApi.startCodingRun).not.toHaveBeenCalled();
   });
 
   it("opens conversation settings modal and updates session tools", async () => {
@@ -660,7 +712,7 @@ describe("CodingPage", () => {
       orchestrator_tool_calls: [],
     });
 
-    render(<CodingPage />);
+    renderPage();
     await waitFor(() => expect(screen.getByText("会話設定 ⚙")).toBeInTheDocument());
 
     const settingsBtn = screen.getByRole("button", { name: "会話設定 ⚙" });
@@ -695,7 +747,7 @@ describe("CodingPage", () => {
       ],
     });
 
-    render(<CodingPage />);
+    renderPage();
     await waitFor(() => expect(screen.getByText("既定設定")).toBeInTheDocument());
 
     const defaultsBtn = screen.getByRole("button", { name: "既定設定" });
@@ -714,7 +766,7 @@ describe("CodingPage", () => {
   });
 
   it("opens mobile drawer and allows selecting projects and sessions", async () => {
-    render(<CodingPage />);
+    renderPage();
     await waitFor(() => expect(screen.getByText("Test App")).toBeInTheDocument());
 
     const mobileBtn = screen.getByRole("button", { name: "プロジェクト / セッションを選択" });
@@ -750,8 +802,9 @@ describe("CodingPage", () => {
       latest_run: null,
       orchestrator_tool_calls: [],
     });
+    vi.mocked(codingApi.subscribeCodingRunEvents).mockImplementation(() => new Promise(() => {}));
 
-    render(<CodingPage />);
+    renderPage();
 
     await waitFor(() => {
       expect(screen.getByText("⚠️ 開始時に未コミットの変更があります")).toBeInTheDocument();
@@ -777,7 +830,7 @@ describe("CodingPage", () => {
       orchestrator_tool_calls: [],
     }));
 
-    render(<CodingPage />);
+    renderPage();
     await waitFor(() => expect(screen.getByText("Test App")).toBeInTheDocument());
 
     const textarea = screen.getByPlaceholderText(
@@ -820,7 +873,7 @@ describe("CodingPage", () => {
       orchestrator_tool_calls: [],
     }));
 
-    render(<CodingPage />);
+    renderPage();
     await waitFor(() => expect(screen.getByText("Test App")).toBeInTheDocument());
 
     const textarea = screen.getByPlaceholderText(
@@ -836,14 +889,11 @@ describe("CodingPage", () => {
   });
 
   it("clears the session draft after a successful send", async () => {
-    vi.mocked(codingApi.streamCodingMessage).mockImplementation(
-      async (_sessionId, _content, onEvent) => {
-        onEvent({ event: "start", run_id: "crun_999", is_dirty: false, dirty_summary: null });
-        onEvent({ event: "done", run_id: "crun_999", status: "completed" });
-      },
-    );
+    mockStartSubscribeSuccess([
+      { eventId: 1, data: { event: "done", run_id: "crun_999", status: "completed" } },
+    ]);
 
-    render(<CodingPage />);
+    renderPage();
     await waitFor(() => expect(screen.getByText("Test App")).toBeInTheDocument());
 
     const textarea = screen.getByPlaceholderText(
@@ -861,9 +911,9 @@ describe("CodingPage", () => {
   });
 
   it("keeps the pre-send text as the session draft when send fails", async () => {
-    vi.mocked(codingApi.streamCodingMessage).mockRejectedValue(new Error("送信失敗"));
+    vi.mocked(codingApi.startCodingRun).mockRejectedValue(new Error("送信失敗"));
 
-    render(<CodingPage />);
+    renderPage();
     await waitFor(() => expect(screen.getByText("Test App")).toBeInTheDocument());
 
     const textarea = screen.getByPlaceholderText(
@@ -898,15 +948,18 @@ describe("CodingPage", () => {
       latest_run: null,
       orchestrator_tool_calls: [],
     }));
-    let capturedOnEvent: ((event: codingApi.CodingSseEvent) => void) | null = null;
-    vi.mocked(codingApi.streamCodingMessage).mockImplementation(
-      (_sessionId, _content, onEvent) => {
-        capturedOnEvent = onEvent;
+    let capturedOnEnvelope: ((envelope: Envelope) => void) | null = null;
+    vi.mocked(codingApi.startCodingRun).mockResolvedValue({
+      run: mockCodingRun({ run_id: "crun_999", session_id: "cses_111" }),
+    });
+    vi.mocked(codingApi.subscribeCodingRunEvents).mockImplementation(
+      (_runId, opts) => {
+        capturedOnEnvelope = (opts as { onEnvelope: (e: Envelope) => void }).onEnvelope;
         return new Promise(() => {});
       },
     );
 
-    render(<CodingPage />);
+    renderPage();
     await waitFor(() => expect(screen.getByText("Test App")).toBeInTheDocument());
 
     const textarea = screen.getByPlaceholderText(
@@ -916,6 +969,7 @@ describe("CodingPage", () => {
     await act(() => new Promise((r) => setTimeout(r, 650)));
 
     fireEvent.click(screen.getByRole("button", { name: "送信" }));
+    await waitFor(() => expect(capturedOnEnvelope).not.toBeNull());
     // Switch to B while A's stream is still running.
     fireEvent.click(screen.getByText("2つ目のセッション"));
     await waitFor(() => expect(textarea.value).toBe(""));
@@ -926,7 +980,7 @@ describe("CodingPage", () => {
 
     // A's stream completes while viewing B.
     await act(async () => {
-      capturedOnEvent?.({ event: "done", run_id: "crun_999", status: "completed" });
+      capturedOnEnvelope?.({ eventId: 1, data: { event: "done", run_id: "crun_999", status: "completed" } });
     });
 
     // B's input and draft are untouched; only A's draft is deleted.
@@ -936,15 +990,18 @@ describe("CodingPage", () => {
   });
 
   it("renders live orchestrator tool call states during streaming", async () => {
-    let capturedOnEvent: ((event: codingApi.CodingSseEvent) => void) | null = null;
-    vi.mocked(codingApi.streamCodingMessage).mockImplementation(
-      (_sessionId, _content, onEvent) => {
-        capturedOnEvent = onEvent;
+    let capturedOnEnvelope: ((envelope: Envelope) => void) | null = null;
+    vi.mocked(codingApi.startCodingRun).mockResolvedValue({
+      run: mockCodingRun({ run_id: "crun_live", session_id: "cses_111" }),
+    });
+    vi.mocked(codingApi.subscribeCodingRunEvents).mockImplementation(
+      (_runId, opts) => {
+        capturedOnEnvelope = (opts as { onEnvelope: (e: Envelope) => void }).onEnvelope;
         return new Promise(() => {});
       },
     );
 
-    render(<CodingPage />);
+    renderPage();
     await waitFor(() => expect(screen.getByText("Test App")).toBeInTheDocument());
 
     const textarea = screen.getByPlaceholderText(
@@ -952,17 +1009,21 @@ describe("CodingPage", () => {
     );
     fireEvent.change(textarea, { target: { value: "ツール実行テスト" } });
     fireEvent.click(screen.getByRole("button", { name: "送信" }));
+    await waitFor(() => expect(capturedOnEnvelope).not.toBeNull());
 
     // 1. Detected event -> "準備中…"
     act(() => {
-      capturedOnEvent?.({
-        event: "orchestrator_tool_call_detected",
-        call_key: "1:1:0",
-        tool_name: "web_search",
-        phase: "initial",
-        phase_turn: 1,
-        iteration: 1,
-        call_index: 0,
+      capturedOnEnvelope?.({
+        eventId: 1,
+        data: {
+          event: "orchestrator_tool_call_detected",
+          call_key: "1:1:0",
+          tool_name: "web_search",
+          phase: "initial",
+          phase_turn: 1,
+          iteration: 1,
+          call_index: 0,
+        },
       });
     });
     expect(screen.getByText("web_search")).toBeInTheDocument();
@@ -970,33 +1031,39 @@ describe("CodingPage", () => {
 
     // 2. Start event -> "実行中…"
     act(() => {
-      capturedOnEvent?.({
-        event: "orchestrator_tool_call_start",
-        call_id: "cotc_live1",
-        call_key: "1:1:0",
-        tool_name: "web_search",
-        args: { query: "vitest test" },
-        phase: "initial",
-        phase_turn: 1,
-        iteration: 1,
-        call_index: 0,
+      capturedOnEnvelope?.({
+        eventId: 2,
+        data: {
+          event: "orchestrator_tool_call_start",
+          call_id: "cotc_live1",
+          call_key: "1:1:0",
+          tool_name: "web_search",
+          args: { query: "vitest test" },
+          phase: "initial",
+          phase_turn: 1,
+          iteration: 1,
+          call_index: 0,
+        },
       });
     });
     expect(screen.getAllByText("実行中…").length).toBeGreaterThan(0);
 
     // 3. End event -> "成功"
     act(() => {
-      capturedOnEvent?.({
-        event: "orchestrator_tool_call_end",
-        call_id: "cotc_live1",
-        call_key: "1:1:0",
-        tool_name: "web_search",
-        status: "succeeded",
-        result: "検索完了結果",
-        phase: "initial",
-        phase_turn: 1,
-        iteration: 1,
-        call_index: 0,
+      capturedOnEnvelope?.({
+        eventId: 3,
+        data: {
+          event: "orchestrator_tool_call_end",
+          call_id: "cotc_live1",
+          call_key: "1:1:0",
+          tool_name: "web_search",
+          status: "succeeded",
+          result: "検索完了結果",
+          phase: "initial",
+          phase_turn: 1,
+          iteration: 1,
+          call_index: 0,
+        },
       });
     });
     expect(screen.getByText("成功")).toBeInTheDocument();
@@ -1052,7 +1119,7 @@ describe("CodingPage", () => {
       latest_run: null,
     });
 
-    render(<CodingPage />);
+    renderPage();
 
     await waitFor(() => {
       expect(screen.getByText("ツール呼び出し 1件")).toBeInTheDocument();
@@ -1115,7 +1182,7 @@ describe("CodingPage", () => {
       },
     });
 
-    render(<CodingPage />);
+    renderPage();
 
     await waitFor(() => {
       expect(screen.getByText("中断したオーケストレーター処理 (1件)")).toBeInTheDocument();
@@ -1123,5 +1190,236 @@ describe("CodingPage", () => {
       expect(screen.getByText("中断")).toBeInTheDocument();
       expect(screen.getByText("Interrupted due to server restart")).toBeInTheDocument();
     });
+  });
+
+  it("does not cancel the run on session switch or unmount (aborts subscription only)", async () => {
+    const secondSession: codingApi.CodingSession = {
+      ...mockSession,
+      session_id: "cses_222",
+      title: "2つ目のセッション",
+    };
+    vi.mocked(codingApi.listCodingSessions).mockResolvedValue([mockSession, secondSession]);
+    vi.mocked(codingApi.getCodingSessionDetail).mockImplementation(async (sessionId: string) => ({
+      session: sessionId === secondSession.session_id ? secondSession : mockSession,
+      effective_tool_ids: [],
+      has_custom_tools: false,
+      available_tools: [],
+      messages: [],
+      active_run: null,
+      latest_run: null,
+      orchestrator_tool_calls: [],
+    }));
+    vi.mocked(codingApi.startCodingRun).mockResolvedValue({
+      run: mockCodingRun({ run_id: "crun_nc", session_id: "cses_111" }),
+    });
+    let capturedSignal: AbortSignal | null = null;
+    vi.mocked(codingApi.subscribeCodingRunEvents).mockImplementation((_runId, opts) => {
+      capturedSignal = (opts as { signal?: AbortSignal }).signal ?? null;
+      return new Promise(() => {});
+    });
+    vi.mocked(codingApi.cancelCodingRun).mockResolvedValue({ status: "cancel_signalled", run_id: "crun_nc" });
+
+    const { unmount } = renderPage();
+    await waitFor(() => expect(screen.getByText("Test App")).toBeInTheDocument());
+    const textarea = screen.getByPlaceholderText(
+      "指示・質問を入力…（Enterで送信 / Shift+Enterで改行）",
+    );
+    fireEvent.change(textarea, { target: { value: "キャンセルしない送信" } });
+    fireEvent.click(screen.getByRole("button", { name: "送信" }));
+    await waitFor(() => expect(capturedSignal).not.toBeNull());
+
+    // Session switch aborts subscription but never calls cancel API.
+    fireEvent.click(screen.getByText("2つ目のセッション"));
+    await waitFor(() => expect(capturedSignal?.aborted).toBe(true));
+    expect(codingApi.cancelCodingRun).not.toHaveBeenCalled();
+
+    unmount();
+    expect(codingApi.cancelCodingRun).not.toHaveBeenCalled();
+  });
+
+  it("resubscribes with cached Last-Event-ID and saves progress to sessionStorage", async () => {
+    sessionStorage.setItem("run-sse:coding:crun_active:last-event-id", "3");
+    vi.mocked(codingApi.getCodingSessionDetail).mockResolvedValue({
+      session: mockSession,
+      effective_tool_ids: [],
+      has_custom_tools: false,
+      available_tools: [],
+      messages: [],
+      active_run: mockCodingRun({ run_id: "crun_active", session_id: "cses_111", status: "running" }),
+      latest_run: null,
+      orchestrator_tool_calls: [],
+    });
+    let seenLastEventId: number | null = null;
+    let capturedOnEnvelope: ((e: Envelope) => void) | null = null;
+    vi.mocked(codingApi.subscribeCodingRunEvents).mockImplementation(async (_runId, opts) => {
+      seenLastEventId = (opts as { lastEventId: number }).lastEventId;
+      capturedOnEnvelope = (opts as { onEnvelope: (e: Envelope) => void }).onEnvelope;
+      capturedOnEnvelope({
+        eventId: 4,
+        data: {
+          event: "orchestrator_message",
+          phase: "initial",
+          message: {
+            message_id: "cmsg_restored",
+            session_id: "cses_111",
+            sequence: 3,
+            role: "orchestrator",
+            content: "復元された判断",
+            created_at: "2026-01-01T00:02:00Z",
+          },
+        },
+      });
+      // Keep the live subscription open so the restore finally-block does not
+      // reload detail and wipe the folded message.
+      await new Promise(() => {});
+    });
+
+    renderPage();
+
+    await waitFor(() => expect(seenLastEventId).toBe(3));
+    expect(await screen.findByText("復元された判断")).toBeInTheDocument();
+    expect(sessionStorage.getItem("run-sse:coding:crun_active:last-event-id")).toBe("4");
+  });
+
+  it("ignores duplicate eventId (at-least-once redelivery)", async () => {
+    let capturedOnEnvelope: ((e: Envelope) => void) | null = null;
+    vi.mocked(codingApi.startCodingRun).mockResolvedValue({
+      run: mockCodingRun({ run_id: "crun_dup", session_id: "cses_111" }),
+    });
+    vi.mocked(codingApi.subscribeCodingRunEvents).mockImplementation((_runId, opts) => {
+      capturedOnEnvelope = (opts as { onEnvelope: (e: Envelope) => void }).onEnvelope;
+      return new Promise(() => {});
+    });
+
+    renderPage();
+    await waitFor(() => expect(screen.getByText("Test App")).toBeInTheDocument());
+    const textarea = screen.getByPlaceholderText(
+      "指示・質問を入力…（Enterで送信 / Shift+Enterで改行）",
+    );
+    fireEvent.change(textarea, { target: { value: "重複テスト" } });
+    fireEvent.click(screen.getByRole("button", { name: "送信" }));
+    await waitFor(() => expect(capturedOnEnvelope).not.toBeNull());
+
+    const msg = {
+      message_id: "cmsg_dup",
+      session_id: "cses_111",
+      sequence: 10,
+      role: "orchestrator" as const,
+      content: "重複しない本文",
+      created_at: "2026-01-01T00:02:00Z",
+    };
+    act(() => {
+      capturedOnEnvelope?.({ eventId: 1, data: { event: "orchestrator_message", phase: "initial", message: msg } });
+      capturedOnEnvelope?.({ eventId: 1, data: { event: "orchestrator_message", phase: "initial", message: msg } });
+    });
+    expect(screen.getAllByText("重複しない本文")).toHaveLength(1);
+  });
+
+  it("restores an active run on reload by folding replayed events", async () => {
+    vi.mocked(codingApi.getCodingSessionDetail).mockResolvedValue({
+      session: mockSession,
+      effective_tool_ids: [],
+      has_custom_tools: false,
+      available_tools: [],
+      messages: [
+        {
+          message_id: "cmsg_1",
+          session_id: "cses_111",
+          sequence: 1,
+          role: "user",
+          content: "再読込前の依頼",
+          created_at: "2026-01-01T00:00:00Z",
+        },
+      ],
+      active_run: mockCodingRun({ run_id: "crun_reload", session_id: "cses_111", status: "running" }),
+      latest_run: null,
+      orchestrator_tool_calls: [],
+    });
+    vi.mocked(codingApi.subscribeCodingRunEvents).mockImplementation(async (_runId, opts) => {
+      const onEnvelope = (opts as { onEnvelope: (e: Envelope) => void }).onEnvelope;
+      onEnvelope({
+        eventId: 1,
+        data: {
+          event: "orchestrator_tool_call_detected",
+          call_key: "1:1:0",
+          tool_name: "web_search",
+          phase: "initial",
+          phase_turn: 1,
+          iteration: 1,
+          call_index: 0,
+        },
+      });
+      onEnvelope({ eventId: 2, data: { event: "worker_start", attempt: 1, backend: "codex", prompt: "p" } });
+      onEnvelope({
+        eventId: 3,
+        data: {
+          event: "orchestrator_message",
+          phase: "initial",
+          message: {
+            message_id: "cmsg_reload_orch",
+            session_id: "cses_111",
+            sequence: 2,
+            role: "orchestrator",
+            content: "リロード復元の判断",
+            created_at: "2026-01-01T00:01:00Z",
+          },
+        },
+      });
+      // Keep the live subscription open so the restore finally-block does not
+      // reload detail and wipe the folded state.
+      await new Promise(() => {});
+    });
+
+    renderPage();
+
+    expect(await screen.findByText("リロード復元の判断")).toBeInTheDocument();
+    expect(codingApi.subscribeCodingRunEvents).toHaveBeenCalledWith(
+      "crun_reload",
+      expect.objectContaining({ lastEventId: 0 }),
+    );
+  });
+
+  it("selects the session from ?session_id= when it belongs to listed sessions", async () => {
+    const secondSession: codingApi.CodingSession = {
+      ...mockSession,
+      session_id: "cses_222",
+      title: "2つ目のセッション",
+    };
+    vi.mocked(codingApi.listCodingSessions).mockResolvedValue([mockSession, secondSession]);
+    vi.mocked(codingApi.getCodingSessionDetail).mockImplementation(async (sessionId: string) => ({
+      session: sessionId === secondSession.session_id ? secondSession : mockSession,
+      effective_tool_ids: [],
+      has_custom_tools: false,
+      available_tools: [],
+      messages: [
+        {
+          message_id: `msg_${sessionId}`,
+          session_id: sessionId,
+          sequence: 1,
+          role: "user",
+          content: sessionId === secondSession.session_id ? "Bの本文" : "Aの本文",
+          created_at: "2026-01-01T00:00:00Z",
+        },
+      ],
+      active_run: null,
+      latest_run: null,
+      orchestrator_tool_calls: [],
+    }));
+
+    renderPage(["/coding?session_id=cses_222"]);
+
+    await waitFor(() => {
+      expect(codingApi.getCodingSessionDetail).toHaveBeenCalledWith("cses_222");
+    });
+    expect(await screen.findByText("Bの本文")).toBeInTheDocument();
+  });
+
+  it("falls back to the first session when ?session_id= does not belong to listed sessions", async () => {
+    renderPage(["/coding?session_id=cses_missing"]);
+
+    await waitFor(() => {
+      expect(codingApi.getCodingSessionDetail).toHaveBeenCalledWith("cses_111");
+    });
+    expect(await screen.findByText("こんにちは！何かお手伝いしましょうか？")).toBeInTheDocument();
   });
 });

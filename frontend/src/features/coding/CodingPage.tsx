@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   listCodingProjects,
   listCodingSessions,
@@ -6,7 +7,8 @@ import {
   getCodingSessionDetail,
   deleteCodingSession,
   cancelCodingRun,
-  streamCodingMessage,
+  startCodingRun,
+  subscribeCodingRunEvents,
   getGitStatus,
   getCodingDefaults,
   getCodingConfig,
@@ -16,7 +18,6 @@ import {
   type CodingSession,
   type CodingMessage,
   type CodingRun,
-  type CodingSseEvent,
   type GitStatus,
   type CodingTool,
   type CodingDefaults,
@@ -24,7 +25,11 @@ import {
   type CodingOrchestratorToolCall,
   type CodingLiveToolCall,
 } from "../../api/coding";
-import { useMemo } from "react";
+import {
+  loadLastAppliedId,
+  saveLastAppliedId,
+  type RunSseEnvelope,
+} from "../../api/runSse";
 import MarkdownPreview from "../../components/MarkdownPreview";
 import { WaitingRunQuestionCard, type QuestionItem, toQuestionItems } from "../../components/InConversationQuestionCard";
 import { getHitlRun, submitHitlAnswer, cancelHitlRun } from "../../api/client";
@@ -99,6 +104,12 @@ export default function CodingPage() {
   useEffect(() => {
     selectedSessionIdRef.current = selectedSessionId;
   }, [selectedSessionId]);
+  // Reconnectable run subscription state (docs/run-sse).
+  // AbortController here aborts only the subscription; it never cancels the run.
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const activeRunIdRef = useRef<string | null>(null);
+  const lastAppliedEventIdRef = useRef(0);
+  const [searchParams, setSearchParams] = useSearchParams();
   const [chatSendMode] = useChatSendMode();
   const [isStreaming, setIsStreaming] = useState(false);
   const [activePhaseText, setActivePhaseText] = useState<string | null>(null);
@@ -267,6 +278,32 @@ export default function CodingPage() {
     }
   };
 
+  const syncSessionUrl = useCallback(
+    (sessionId: string | null) => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          if (sessionId) {
+            next.set("session_id", sessionId);
+          } else {
+            next.delete("session_id");
+          }
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
+
+  const selectSession = useCallback(
+    (sessionId: string | null) => {
+      setSelectedSessionId(sessionId);
+      syncSessionUrl(sessionId);
+    },
+    [syncSessionUrl],
+  );
+
   // Load sessions when selected project changes
   useEffect(() => {
     if (selectedProjectId === null) {
@@ -275,6 +312,7 @@ export default function CodingPage() {
       return;
     }
     loadSessions(selectedProjectId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedProjectId]);
 
   const loadSessions = async (projectId: number) => {
@@ -283,9 +321,22 @@ export default function CodingPage() {
       const data = await listCodingSessions(projectId);
       setSessions(data);
       if (data.length > 0) {
-        setSelectedSessionId(data[0].session_id);
+        const urlSessionId = searchParams.get("session_id");
+        if (urlSessionId && data.some((s) => s.session_id === urlSessionId)) {
+          setSelectedSessionId(urlSessionId);
+        } else {
+          const fallback = data[0].session_id;
+          setSelectedSessionId(fallback);
+          if (urlSessionId && !data.some((s) => s.session_id === urlSessionId)) {
+            // Stale deep link: drop it so back-navigation does not re-select it.
+            syncSessionUrl(null);
+          } else if (!urlSessionId) {
+            syncSessionUrl(fallback);
+          }
+        }
       } else {
         setSelectedSessionId(null);
+        syncSessionUrl(null);
         setMessages([]);
         setActiveRun(null);
         setLatestRun(null);
@@ -297,8 +348,19 @@ export default function CodingPage() {
     }
   };
 
-  // Load messages & run details when selected session changes
+  // Load messages & run details when selected session changes.
+  // Subscription-only abort: switching sessions never cancels the run.
   useEffect(() => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    activeRunIdRef.current = null;
+    lastAppliedEventIdRef.current = 0;
+    setIsStreaming(false);
+    setActivePhaseText(null);
+    setStreamingToolCalls([]);
+    setWorkerState({ status: "idle" });
     setGitStatus(null);
     if (!selectedSessionId) {
       setMessages([]);
@@ -307,7 +369,19 @@ export default function CodingPage() {
       return;
     }
     loadSessionDetail(selectedSessionId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedSessionId]);
+
+  // Cleanup subscription on unmount (never cancels the run).
+  useEffect(() => {
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+        abortControllerRef.current = null;
+      }
+      activeRunIdRef.current = null;
+    };
+  }, []);
 
   const fetchGitStatus = async (repoPath: string, targetSessionId: string) => {
     try {
@@ -362,6 +436,276 @@ export default function CodingPage() {
       setLoadingMessages(false);
     }
   };
+
+  // --- Reconnectable run subscription (docs/run-sse) ---
+  // Server event log is the source of truth; sessionStorage caches only the
+  // last applied event id. Abort here stops only the subscription, never the run.
+  const handleRunEnvelope = useCallback(
+    (
+      envelope: RunSseEnvelope,
+      ctx: {
+        streamSessionId: string;
+        finalizeSendSuccess: () => void;
+        restoreSendText: () => void;
+      },
+    ) => {
+      // At-least-once: ignore re-sent IDs. Track progress even when viewing
+      // another session so a later resume can continue from the right cursor.
+      if (envelope.eventId <= lastAppliedEventIdRef.current) return;
+      lastAppliedEventIdRef.current = envelope.eventId;
+      const runId = activeRunIdRef.current;
+      if (runId) saveLastAppliedId("coding", runId, envelope.eventId);
+      const isCurrentSession = selectedSessionIdRef.current === ctx.streamSessionId;
+
+      const data = envelope.data as Record<string, unknown> & {
+        event?: string;
+        type?: string;
+        phase?: "initial" | "review";
+        call_key?: string;
+        call_id?: string;
+        tool_name?: string;
+        args?: Record<string, unknown>;
+        result?: string;
+        status?: string;
+        error?: string | null;
+        message?: string;
+        attempt?: number;
+        backend?: string;
+        prompt?: string;
+        exit_code?: number;
+        git_status?: GitStatus;
+        session_title?: string;
+        run_id?: string;
+      };
+      const type = String(data.event ?? data.type ?? "");
+      const asMessage = (v: unknown): CodingMessage | null => {
+        if (!v || typeof v !== "object") return null;
+        const m = v as Record<string, unknown>;
+        if (typeof m.message_id !== "string" || typeof m.content !== "string") return null;
+        return v as CodingMessage;
+      };
+      if (type === "cancelled") {
+        // Draft restore must happen even when switched (targets sendSessionId);
+        // UI updates must not leak to the switched session.
+        ctx.restoreSendText();
+        if (!isCurrentSession) return;
+        setError(String(data.message ?? "キャンセルされました"));
+        setIsStreaming(false);
+        setActivePhaseText(null);
+        setWorkerState({ status: "idle" });
+        abortControllerRef.current = null;
+        activeRunIdRef.current = null;
+        return;
+      } else if (type === "error") {
+        ctx.restoreSendText();
+        if (!isCurrentSession) return;
+        setError(String(data.message ?? "エラーが発生しました"));
+        setIsStreaming(false);
+        setActivePhaseText(null);
+        setWorkerState({ status: "idle" });
+        abortControllerRef.current = null;
+        activeRunIdRef.current = null;
+        return;
+      } else if (type === "done") {
+        ctx.finalizeSendSuccess();
+        if (!isCurrentSession) return;
+        setIsStreaming(false);
+        setActivePhaseText(null);
+        setWorkerState({ status: "idle" });
+        abortControllerRef.current = null;
+        activeRunIdRef.current = null;
+        if (data.git_status && typeof data.git_status === "object") {
+          setGitStatus(data.git_status as GitStatus);
+        }
+        if (typeof data.session_title === "string" && data.session_title) {
+          const newTitle = data.session_title;
+          const sid = ctx.streamSessionId;
+          setSessions((prev) => prev.map((s) => (s.session_id === sid ? { ...s, title: newTitle } : s)));
+        }
+        void loadSessionDetail(ctx.streamSessionId);
+        return;
+      }
+      if (!isCurrentSession) return;
+      if (type === "orchestrator_start") {
+        setActivePhaseText(data.phase === "review" ? "CLI結果を確認中..." : "依頼を検討中...");
+      } else if (type === "orchestrator_tool_call_detected") {
+        const callKey = String(data.call_key ?? "");
+        const toolName = String(data.tool_name ?? "");
+        if (!callKey || !toolName) return;
+        setStreamingToolCalls((prev) => {
+          if (prev.some((tc) => tc.call_key === callKey || tc.id === callKey)) return prev;
+          return [
+            ...prev,
+            {
+              id: callKey,
+              call_key: callKey,
+              tool_name: toolName,
+              args: {},
+              result: "",
+              status: "preparing",
+              phase: data.phase,
+              phase_turn: typeof data.phase_turn === "number" ? (data.phase_turn as number) : undefined,
+              iteration: typeof data.iteration === "number" ? (data.iteration as number) : undefined,
+              call_index: typeof data.call_index === "number" ? (data.call_index as number) : undefined,
+            },
+          ];
+        });
+      } else if (type === "orchestrator_tool_call_start") {
+        const callKey = String(data.call_key ?? "");
+        const callId = String(data.call_id ?? "");
+        const toolName = String(data.tool_name ?? "");
+        if ((!callKey && !callId) || !toolName) return;
+        setStreamingToolCalls((prev) => {
+          const idx = prev.findIndex(
+            (tc) => (callKey && (tc.call_key === callKey || tc.id === callKey)) || (callId && tc.call_id === callId),
+          );
+          const existing = idx >= 0 ? prev[idx] : undefined;
+          const updated: CodingLiveToolCall = {
+            id: existing?.id || callId || callKey,
+            call_id: callId || existing?.call_id,
+            call_key: callKey || existing?.call_key,
+            tool_name: toolName,
+            args: data.args ?? {},
+            result: existing?.result || "",
+            status: "running",
+            phase: (data.phase as "initial" | "review") ?? existing?.phase,
+            phase_turn: typeof data.phase_turn === "number" ? (data.phase_turn as number) : existing?.phase_turn,
+            iteration: typeof data.iteration === "number" ? (data.iteration as number) : existing?.iteration,
+            call_index: typeof data.call_index === "number" ? (data.call_index as number) : existing?.call_index,
+          };
+          if (idx >= 0) return prev.map((tc, i) => (i === idx ? updated : tc));
+          return [...prev, updated];
+        });
+      } else if (type === "orchestrator_tool_call_end") {
+        const callKey = String(data.call_key ?? "");
+        const callId = String(data.call_id ?? "");
+        if (!callKey && !callId) return;
+        setStreamingToolCalls((prev) => {
+          const idx = prev.findIndex(
+            (tc) => (callId && (tc.call_id === callId || tc.id === callId)) || (callKey && (tc.call_key === callKey || tc.id === callKey)),
+          );
+          const status = (data.status === "failed" ? "failed" : "succeeded") as "succeeded" | "failed";
+          if (idx >= 0) {
+            return prev.map((tc, i) =>
+              i === idx
+                ? {
+                    ...tc,
+                    call_id: callId || tc.call_id,
+                    call_key: callKey || tc.call_key,
+                    tool_name: String(data.tool_name ?? tc.tool_name),
+                    status,
+                    result: String(data.result ?? ""),
+                    error: (data.error as string | null) ?? null,
+                    phase: (data.phase as "initial" | "review") ?? tc.phase,
+                    phase_turn: typeof data.phase_turn === "number" ? (data.phase_turn as number) : tc.phase_turn,
+                    iteration: typeof data.iteration === "number" ? (data.iteration as number) : tc.iteration,
+                    call_index: typeof data.call_index === "number" ? (data.call_index as number) : tc.call_index,
+                  }
+                : tc,
+            );
+          }
+          return [
+            ...prev,
+            {
+              id: callId || callKey,
+              call_id: callId || undefined,
+              call_key: callKey || undefined,
+              tool_name: String(data.tool_name ?? ""),
+              args: {},
+              result: String(data.result ?? ""),
+              status,
+              error: (data.error as string | null) ?? null,
+              phase: data.phase,
+              phase_turn: typeof data.phase_turn === "number" ? (data.phase_turn as number) : undefined,
+              iteration: typeof data.iteration === "number" ? (data.iteration as number) : undefined,
+              call_index: typeof data.call_index === "number" ? (data.call_index as number) : undefined,
+            },
+          ];
+        });
+      } else if (type === "orchestrator_message") {
+        const msg = asMessage((data as Record<string, unknown>).message);
+        setActivePhaseText(null);
+        setStreamingToolCalls([]);
+        if (msg) {
+          setMessages((prev) => (prev.some((m) => m.message_id === msg.message_id) ? prev : [...prev, msg]));
+        }
+      } else if (type === "cli_request") {
+        const msg = asMessage((data as Record<string, unknown>).message);
+        if (msg) {
+          setMessages((prev) => (prev.some((m) => m.message_id === msg.message_id) ? prev : [...prev, msg]));
+        }
+      } else if (type === "worker_start") {
+        setActivePhaseText(null);
+        setWorkerState({
+          status: "running",
+          attempt: typeof data.attempt === "number" ? data.attempt : undefined,
+          backend: typeof data.backend === "string" ? data.backend : undefined,
+        });
+      } else if (type === "worker_done") {
+        const msg = asMessage((data as Record<string, unknown>).message);
+        setWorkerState({
+          status: "done",
+          attempt: typeof data.attempt === "number" ? data.attempt : undefined,
+          output: msg ? msg.content : undefined,
+          error: (data.error as string | null) ?? null,
+        });
+        if (data.git_status && typeof data.git_status === "object") {
+          setGitStatus(data.git_status as GitStatus);
+        }
+        if (msg) {
+          setMessages((prev) => (prev.some((m) => m.message_id === msg.message_id) ? prev : [...prev, msg]));
+        }
+      }
+    },
+    [],
+  );
+
+  // Initial-load active-run restore: fold persisted events then follow live.
+  // Server event log is the source of truth; sessionStorage is only a cache.
+  useEffect(() => {
+    if (!selectedSessionId || !activeRun) return;
+    if (isStreaming || abortControllerRef.current || activeRunIdRef.current) return;
+    if (!["queued", "running", "cancelling"].includes(activeRun.status)) return;
+    const runId = activeRun.run_id;
+    const sessionIdAtResume = selectedSessionId;
+    const cached = loadLastAppliedId("coding", runId);
+    setIsStreaming(true);
+    setActivePhaseText("依頼を検討中...");
+    setStreamingToolCalls([]);
+    setWorkerState({ status: "idle" });
+    setError(null);
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    lastAppliedEventIdRef.current = cached;
+    activeRunIdRef.current = runId;
+    void (async () => {
+      try {
+        await subscribeCodingRunEvents(runId, {
+          lastEventId: cached,
+          signal: controller.signal,
+          onEnvelope: (envelope) =>
+            handleRunEnvelope(envelope, {
+              streamSessionId: sessionIdAtResume,
+              finalizeSendSuccess: () => {},
+              restoreSendText: () => {},
+            }),
+        });
+      } catch {
+        // Abort or network: keep run alive; detail reload syncs state.
+      } finally {
+        if (abortControllerRef.current === controller) {
+          abortControllerRef.current = null;
+          activeRunIdRef.current = null;
+          setIsStreaming(false);
+          setActivePhaseText(null);
+          if (selectedSessionIdRef.current === sessionIdAtResume) {
+            void loadSessionDetail(sessionIdAtResume);
+          }
+        }
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeRun, selectedSessionId]);
 
   const handleSaveSessionTools = async () => {
     if (!selectedSessionId) return;
@@ -439,7 +783,7 @@ export default function CodingPage() {
       setIsNewSessionModalOpen(false);
       setNewSessionTitle("");
       await loadSessions(selectedProjectId);
-      setSelectedSessionId(session.session_id);
+      selectSession(session.session_id);
     } catch (e: any) {
       setError(e.message || "セッションの作成に失敗しました");
     } finally {
@@ -466,6 +810,13 @@ export default function CodingPage() {
     const sendSessionId = selectedSessionId;
     const sendText = inputContent;
     const promptText = inputContent.trim();
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    const isCurrent = () =>
+      selectedSessionIdRef.current === sendSessionId && abortControllerRef.current === controller;
     // 送信前のテキストは下書きとして確定保存する。入力欄だけ一時クリアし、
     // storage の削除は送信成功確定時まで行わない。
     savePromptDraftFor(sendSessionId, sendText);
@@ -505,183 +856,75 @@ export default function CodingPage() {
     };
     setMessages((prev) => [...prev, tempUserMsg]);
 
+    const idempotencyKey =
+      typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    let runId: string;
     try {
-      await streamCodingMessage(sendSessionId, promptText, (event: CodingSseEvent) => {
-        if (event.event === "start") {
-          setActiveRun({
-            run_id: event.run_id,
-            session_id: selectedSessionId,
-            user_message_id: tempUserMsg.message_id,
-            orchestrator_message_id: null,
-            worker_message_id: null,
-            status: "running",
-            hitl_run_id: null,
-            dirty_tree_at_start: event.dirty_summary,
-            error_message: null,
-            started_at: new Date().toISOString(),
-            finished_at: null,
-          });
-        } else if (event.event === "orchestrator_start") {
-          setActivePhaseText(
-            event.phase === "initial" ? "依頼を検討中..." : "CLI結果を確認中..."
-          );
-        } else if (event.event === "orchestrator_tool_call_detected") {
-          setStreamingToolCalls((prev) => {
-            if (prev.some((tc) => tc.call_key === event.call_key || tc.id === event.call_key)) {
-              return prev;
-            }
-            return [
-              ...prev,
-              {
-                id: event.call_key,
-                call_key: event.call_key,
-                tool_name: event.tool_name,
-                args: {},
-                result: "",
-                status: "preparing",
-                phase: event.phase,
-                phase_turn: event.phase_turn,
-                iteration: event.iteration,
-                call_index: event.call_index,
-              },
-            ];
-          });
-        } else if (event.event === "orchestrator_tool_call_start") {
-          setStreamingToolCalls((prev) => {
-            const idx = prev.findIndex(
-              (tc) => tc.call_key === event.call_key || tc.call_id === event.call_id || tc.id === event.call_key
-            );
-            const existing = idx >= 0 ? prev[idx] : undefined;
-            const updated: CodingLiveToolCall = {
-              id: existing?.id || event.call_id,
-              call_id: event.call_id,
-              call_key: event.call_key,
-              tool_name: event.tool_name,
-              args: event.args || {},
-              result: existing?.result || "",
-              status: "running",
-              phase: event.phase,
-              phase_turn: event.phase_turn,
-              iteration: event.iteration,
-              call_index: event.call_index,
-            };
-            if (idx >= 0) {
-              return prev.map((tc, i) => (i === idx ? updated : tc));
-            }
-            return [...prev, updated];
-          });
-        } else if (event.event === "orchestrator_tool_call_end") {
-          setStreamingToolCalls((prev) => {
-            const idx = prev.findIndex(
-              (tc) => tc.call_id === event.call_id || tc.call_key === event.call_key || tc.id === event.call_key
-            );
-            if (idx >= 0) {
-              return prev.map((tc, i) =>
-                i === idx
-                  ? {
-                      ...tc,
-                      call_id: event.call_id,
-                      call_key: event.call_key,
-                      tool_name: event.tool_name,
-                      status: event.status,
-                      result: event.result,
-                      error: event.error || null,
-                      phase: event.phase,
-                      phase_turn: event.phase_turn,
-                      iteration: event.iteration,
-                      call_index: event.call_index,
-                    }
-                  : tc
-              );
-            }
-            return [
-              ...prev,
-              {
-                id: event.call_id,
-                call_id: event.call_id,
-                call_key: event.call_key,
-                tool_name: event.tool_name,
-                args: {},
-                result: event.result,
-                status: event.status,
-                error: event.error || null,
-                phase: event.phase,
-                phase_turn: event.phase_turn,
-                iteration: event.iteration,
-                call_index: event.call_index,
-              },
-            ];
-          });
-        } else if (event.event === "orchestrator_message") {
-          setActivePhaseText(null);
-          setStreamingToolCalls([]);
-          setMessages((prev) => {
-            if (prev.some((m) => m.message_id === event.message.message_id)) return prev;
-            return [...prev, event.message];
-          });
-        } else if (event.event === "cli_request") {
-          setMessages((prev) => {
-            if (prev.some((m) => m.message_id === event.message.message_id)) return prev;
-            return [...prev, event.message];
-          });
-        } else if (event.event === "worker_start") {
-          setActivePhaseText(null);
-          setWorkerState({
-            status: "running",
-            attempt: event.attempt,
-            backend: event.backend,
-          });
-        } else if (event.event === "worker_done") {
-          setWorkerState({
-            status: "done",
-            attempt: event.attempt,
-            output: event.message.content,
-            error: event.error,
-          });
-          if (event.git_status) {
-            setGitStatus(event.git_status);
-          }
-          setMessages((prev) => {
-            if (prev.some((m) => m.message_id === event.message.message_id)) return prev;
-            return [...prev, event.message];
-          });
-        } else if (event.event === "cancelled") {
-          restoreSendText();
-          setError("キャンセルされました");
-          setActivePhaseText(null);
-          setWorkerState({ status: "idle" });
-        } else if (event.event === "error") {
-          restoreSendText();
-          setError(event.message);
-          setActivePhaseText(null);
-          setWorkerState({ status: "idle" });
-        } else if (event.event === "done") {
-          finalizeSendSuccess();
-          setIsStreaming(false);
-          setActivePhaseText(null);
-          setWorkerState({ status: "idle" });
-          if (event.git_status) {
-            setGitStatus(event.git_status);
-          }
-          if (event.session_title) {
-            const newTitle = event.session_title;
-            setSessions((prev) =>
-              prev.map((s) => (s.session_id === selectedSessionId ? { ...s, title: newTitle } : s))
-            );
-          }
-          // Reload full session state to ensure complete synchronization
-          loadSessionDetail(selectedSessionId);
-        }
-      });
+      const started = await startCodingRun(sendSessionId, promptText, idempotencyKey);
+      if (!isCurrent()) return;
+      runId = started.run.run_id;
+      setActiveRun(started.run);
     } catch (err: any) {
+      if (!isCurrent()) return;
       setError(err.message || "メッセージの送信に失敗しました");
       restoreSendText();
       setMessages((prev) => prev.filter((m) => m.message_id !== tempUserMsgId));
-    } finally {
       setIsStreaming(false);
       setActivePhaseText(null);
       setStreamingToolCalls([]);
       setWorkerState({ status: "idle" });
+      if (abortControllerRef.current === controller) {
+        abortControllerRef.current = null;
+        activeRunIdRef.current = null;
+      }
+      return;
+    }
+
+    // Immediately subscribe from 0 (server log has events between start and subscribe).
+    lastAppliedEventIdRef.current = 0;
+    activeRunIdRef.current = runId;
+    try {
+      await subscribeCodingRunEvents(runId, {
+        lastEventId: 0,
+        signal: controller.signal,
+        onEnvelope: (envelope) =>
+          handleRunEnvelope(envelope, {
+            streamSessionId: sendSessionId,
+            finalizeSendSuccess,
+            restoreSendText,
+          }),
+      });
+      if (isCurrent() && activeRunIdRef.current === runId) {
+        // subscribeRunEvents returns after terminal or waiting pause.
+        // Terminal handlers already cleared activeRunId; if still set, the
+        // stream paused or closed early: sync detail.
+        abortControllerRef.current = null;
+        activeRunIdRef.current = null;
+        setIsStreaming(false);
+        setActivePhaseText(null);
+        void loadSessionDetail(sendSessionId);
+      }
+    } catch (err: any) {
+      if (!isCurrent()) return;
+      const isAbort =
+        (err instanceof DOMException && err.name === "AbortError") ||
+        (typeof err === "object" && err !== null && "name" in err && (err as { name: string }).name === "AbortError");
+      if (isAbort) {
+        // Unmount/session-switch aborts only the subscription; run continues.
+        return;
+      }
+      setError(err.message || "メッセージの送信に失敗しました");
+      restoreSendText();
+      setIsStreaming(false);
+      setActivePhaseText(null);
+      setStreamingToolCalls([]);
+      setWorkerState({ status: "idle" });
+      if (abortControllerRef.current === controller) {
+        abortControllerRef.current = null;
+        activeRunIdRef.current = null;
+      }
     }
   };
 
@@ -700,7 +943,7 @@ export default function CodingPage() {
   const codingPlaceholder = getChatInputPlaceholder(chatSendMode, "指示・質問を入力");
 
   const handleCancelRun = async () => {
-    const runId = activeRun?.run_id || latestRun?.run_id;
+    const runId = activeRunIdRef.current || activeRun?.run_id || latestRun?.run_id;
     if (!runId) return;
     try {
       await cancelCodingRun(runId);
@@ -817,7 +1060,7 @@ export default function CodingPage() {
                           data-testid="memory-row"
                           data-selected={isSelected}
                           onClick={() => {
-                            setSelectedSessionId(sess.session_id);
+                            selectSession(sess.session_id);
                             setMobileDrawerOpen(false);
                           }}
                           className={`w-full flex cursor-pointer items-center justify-between rounded px-2.5 py-2 text-left text-xs transition-colors ${
@@ -939,11 +1182,11 @@ export default function CodingPage() {
                       data-selected={isSelected}
                       role="button"
                       tabIndex={0}
-                      onClick={() => setSelectedSessionId(sess.session_id)}
+                      onClick={() => selectSession(sess.session_id)}
                       onKeyDown={(e) => {
                         if (e.key === "Enter" || e.key === " ") {
                           e.preventDefault();
-                          setSelectedSessionId(sess.session_id);
+                          selectSession(sess.session_id);
                         }
                       }}
                       className={`group flex cursor-pointer items-center justify-between rounded px-3 py-2 text-xs transition-colors ${

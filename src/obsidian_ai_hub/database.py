@@ -519,6 +519,12 @@ def get_db_connection() -> sqlite3.Connection:
     if current_version <= 32:
         run_migration_v33(conn)
 
+    if current_version <= 33:
+        run_migration_v34(conn)
+
+    if current_version <= 34:
+        run_migration_v35(conn)
+
     return conn
 
 
@@ -999,6 +1005,135 @@ def run_migration_v33(conn: sqlite3.Connection) -> None:
         _ignore_duplicate_schema_object(e)
 
     conn.execute("PRAGMA user_version = 33;")
+    conn.commit()
+
+
+def run_migration_v34(conn: sqlite3.Connection) -> None:
+    """Run migration for version 34 (reconnectable run execution + SSE event log).
+
+    - Adds ownership/idempotency columns to agent_runs and coding_runs:
+      idempotency_key, idempotency_hash, created_instance_id, worker_instance_id.
+    - Adds agent_run_events / coding_run_events tables with AUTOINCREMENT
+      event_id cursor, run_id FK, event_type, payload_json, created_at.
+    - Adds run-scoped cursor index and session-scoped idempotency partial
+      unique index.
+    """
+    for table in ("agent_runs", "coding_runs"):
+        for column in (
+            "idempotency_key TEXT",
+            "idempotency_hash TEXT",
+            "created_instance_id TEXT",
+            "worker_instance_id TEXT",
+        ):
+            try:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {column};")
+            except sqlite3.OperationalError as e:
+                _ignore_duplicate_schema_object(e)
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS agent_run_events (
+            event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id TEXT NOT NULL,
+            event_type TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY(run_id) REFERENCES agent_runs(run_id) ON DELETE CASCADE
+        );
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS coding_run_events (
+            event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id TEXT NOT NULL,
+            event_type TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY(run_id) REFERENCES coding_runs(run_id) ON DELETE CASCADE
+        );
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_agent_run_events_run "
+        "ON agent_run_events(run_id, event_id);"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_coding_run_events_run "
+        "ON coding_run_events(run_id, event_id);"
+    )
+    # Session-scoped idempotency: same key resend returns first run.
+    # Partial unique index keeps legacy NULL rows unrestricted.
+    try:
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_runs_session_idem "
+            "ON agent_runs(session_id, idempotency_key) "
+            "WHERE idempotency_key IS NOT NULL;"
+        )
+    except sqlite3.OperationalError as e:
+        _ignore_duplicate_schema_object(e)
+    try:
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_coding_runs_session_idem "
+            "ON coding_runs(session_id, idempotency_key) "
+            "WHERE idempotency_key IS NOT NULL;"
+        )
+    except sqlite3.OperationalError as e:
+        _ignore_duplicate_schema_object(e)
+    conn.execute("PRAGMA user_version = 34;")
+    conn.commit()
+
+
+def _quote_list(values: tuple[str, ...]) -> str:
+    return ",".join(f"'{v}'" for v in values)
+
+
+def run_migration_v35(conn: sqlite3.Connection) -> None:
+    """Run migration for version 35 (single active run per session).
+
+    Enforces the plan's session active-run invariant atomically with partial
+    unique indexes, closing the SELECT-then-INSERT race for concurrent
+    POST /runs with different idempotency keys. Pre-existing duplicates are
+    interrupted (newest non-terminal kept) before the index is created.
+    Partial-index predicates inline literals (SQLite forbids bound params).
+    """
+    for table, terminal in (
+        ("agent_runs", ("succeeded", "failed", "cancelled", "interrupted")),
+        ("coding_runs", ("completed", "failed", "cancelled", "interrupted")),
+    ):
+        quoted = _quote_list(terminal)
+        try:
+            # Keep newest non-terminal per session; interrupt the rest.
+            conn.execute(
+                f"""
+                UPDATE {table} SET status = 'interrupted',
+                    error_message = COALESCE(error_message, 'Interrupted (duplicate active run)'),
+                    finished_at = COALESCE(finished_at, datetime('now'))
+                WHERE rowid IN (
+                    SELECT rowid FROM (
+                        SELECT rowid,
+                            ROW_NUMBER() OVER (
+                                PARTITION BY session_id ORDER BY started_at DESC, rowid DESC
+                            ) AS rn
+                        FROM {table}
+                        WHERE status NOT IN ({quoted})
+                    ) WHERE rn > 1
+                );
+                """
+            )
+        except sqlite3.OperationalError as e:
+            # Older SQLite without window functions: fall back to index attempt;
+            # app-level guard still applies for personal single-process use.
+            if "no such function" not in str(e).lower() and "near" not in str(e):
+                raise
+        try:
+            conn.execute(
+                f"CREATE UNIQUE INDEX IF NOT EXISTS idx_{table}_single_active "
+                f"ON {table}(session_id) "
+                f"WHERE status NOT IN ({quoted});"
+            )
+        except sqlite3.OperationalError as e:
+            _ignore_duplicate_schema_object(e)
+    conn.execute("PRAGMA user_version = 35;")
     conn.commit()
 
 

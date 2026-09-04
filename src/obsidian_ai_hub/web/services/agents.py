@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, AsyncGenerator, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
-from obsidian_ai_hub.agents import registry, runtime, store
+from obsidian_ai_hub.agents import registry, store
 
 
 def _pinned_at_value(pinned: Optional[bool]) -> Optional[str]:
@@ -102,11 +102,13 @@ def get_session_detail(session_id: str) -> Dict[str, Any]:
     agent = get_agent(session["agent_id"])
     messages = store.list_messages(session_id)
     runs = store.list_runs(session_id)
+    active_run = store.get_active_run_for_session(session_id)
     return {
         "session": session,
         "agent": agent,
         "messages": messages,
         "runs": runs,
+        "active_run": active_run,
     }
 
 
@@ -136,39 +138,53 @@ def delete_session(session_id: str) -> bool:
     return True
 
 
-async def stream_session_message(
+def start_run(
     session_id: str,
     content: str,
     images: Optional[List[Dict[str, Any]]] = None,
-) -> AsyncGenerator[str, None]:
-    from obsidian_ai_hub.agents.service import prepare_session_turn
+    idempotency_key: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Queue an agent run and return it (202 contract)."""
+    from obsidian_ai_hub.runs.instance import get_instance_id
 
     session = store.get_session(session_id)
     if not session:
         raise FileNotFoundError(f"Session '{session_id}' not found.")
-
-    normalized_attachments: List[Dict[str, Any]] = []
+    normalized: List[Dict[str, Any]] = []
     if images:
         for item in images:
             if isinstance(item, dict):
-                normalized_attachments.append(item)
-
-    session, agent, run, history_messages = prepare_session_turn(
-        agent_id=session["agent_id"],
-        prompt=content,
-        resume_session_id=session_id,
-        attachments=normalized_attachments or None,
+                normalized.append(item)
+    _, run = store.start_queued_run(
+        session_id=session_id,
+        content=content,
+        attachments=normalized or None,
+        idempotency_key=idempotency_key,
+        created_instance_id=get_instance_id(),
     )
+    return run
 
-    async for chunk in runtime.generate_agent_stream(
-        agent=agent,
-        session=session,
-        run=run,
-        history_messages=history_messages,
-        user_content=content,
-        attachments=normalized_attachments or None,
-    ):
-        yield chunk
+
+def cancel_run(run_id: str) -> Dict[str, Any]:
+    run = store.get_run(run_id)
+    if not run:
+        raise FileNotFoundError(f"Run '{run_id}' not found.")
+    return store.request_cancel_run(run_id)
+
+
+def get_run(run_id: str) -> Dict[str, Any]:
+    run = store.get_run(run_id)
+    if not run:
+        raise FileNotFoundError(f"Run '{run_id}' not found.")
+    return run
+
+
+def list_run_events(
+    run_id: str, after_id: int = 0, limit: int = 500
+) -> List[Dict[str, Any]]:
+    if store.get_run(run_id) is None:
+        raise FileNotFoundError(f"Run '{run_id}' not found.")
+    return store.list_run_events(run_id, after_id=after_id, limit=limit)
 
 
 # --- Prompt Templates ---

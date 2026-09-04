@@ -1,5 +1,6 @@
 import logging
 import os
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -49,7 +50,35 @@ def create_app(
         token = os.getenv("OBSIDIAN_AI_HUB_API_TOKEN", "")
     _configure_security(token)
 
-    app = FastAPI(title="obsidian-ai-hub Memory Review", version="0.1.0")
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        from obsidian_ai_hub.research.runner import cleanup_stale_jobs
+
+        try:
+            cleanup_stale_jobs()
+        except Exception:
+            logger.exception("Research stale-job cleanup failed")
+
+        # Pytest isolation (ENV=test) must not start background workers nor
+        # touch recovery; tests drive execute_* explicitly.
+        try:
+            from obsidian_ai_hub.utils import config as app_config
+
+            is_test = bool(getattr(app_config, "IS_TEST_ENV", False))
+        except Exception:
+            is_test = False
+        if is_test:
+            yield
+            return
+
+        from obsidian_ai_hub.runs.manager import run_worker_lifespan
+
+        async with run_worker_lifespan():
+            yield
+
+    app = FastAPI(
+        title="obsidian-ai-hub Memory Review", version="0.1.0", lifespan=lifespan
+    )
     app.add_middleware(
         CORSMiddleware,
         allow_origins=os.getenv(
@@ -60,14 +89,6 @@ def create_app(
         allow_headers=["*"],
     )
     app.include_router(api_router)
-
-    @app.on_event("startup")
-    def on_startup():
-        from obsidian_ai_hub.research.runner import cleanup_stale_jobs
-        from obsidian_ai_hub.coding.store import mark_interrupted_runs_on_startup
-
-        cleanup_stale_jobs()
-        mark_interrupted_runs_on_startup()
 
     @app.get("/health")
     def health():

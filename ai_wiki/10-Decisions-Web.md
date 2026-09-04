@@ -688,3 +688,27 @@ AgentsPage と共通のデザインパターンを採用し、PC幅での情報�
 ### 検証
 
 - `uv run pytest tests/` 985件通過、`tsc --noEmit` 通過、フロント Vitest 247件通過。
+
+## ブラウザ接続から分離したRun実行と再接続可能SSE
+
+| 項目 | 内容 |
+|------|------|
+| 決定日 | 2026-09-04 |
+| カテゴリ | Web API・AIエージェント・コーディングワークスペース |
+| 決定内容 | `/agents` と `/coding` のLLM／CLI実行をHTTP SSE応答から分離する。開始APIがSQLiteへrunを作成し、同一FastAPIプロセス内の常駐ワーカーが実行する。SSEは永続イベントの再生・追従だけを担い、`Last-Event-ID`以降のイベントを再接続時に配信する。ブラウザ断・画面遷移・再読込では実行を継続するが、サーバー再起動後は未完了runを`interrupted`として自動再実行しない。 |
+
+### 設計判断
+
+- **正本とカーソル**: Agent／Codingごとのrun event tableに、単調増加`event_id`、run ID、種別、payloadを保存する。`sessionStorage`は最終適用event IDのUXキャッシュだけであり、復元の正本はSQLiteである。購読は `event_id > Last-Event-ID` を昇順で繰り返し、SSEの`id:`にも同じIDを設定する。配送はat-least-onceで、クライアントはID重複を除去する。
+- **本文契約**: LLM本文の`text_append.delta`は追加文字列であり、全文ではない。SQLite書込みは250msまたは約4KB単位へ集約するが、保存済みdeltaの連結で画面を再構築できる。
+- **切断の境界**: 旧`POST .../messages/stream`のようにHTTP generator内で実行するWeb経路を残さない。subscriberの切断は購読generatorだけを停止し、run・cancel event・ワーカー実行には触れない。明示キャンセルだけが実行を停止する。
+- **起動時中断の安全性**: プロセス存続中exclusive lockとrunの`instance_id`所有情報を使う。lockを保持する生存中プロセスがある場合、新プロセスはワーカー起動も`interrupted`化も行わない。lock取得後にのみ、停止済み前インスタンス所有の非終端runを中断する。これはFastAPIプロセスの生死を対象とし、強制終了後のCLI子プロセス残留は自動再実行で隠さず、別途安全に扱う。
+- **運用範囲**: 個人利用の単一ホスト・単一ASGI workerを前提にし、Redis／Temporal／別プロセスキューは導入しない。詳細仕様と実装チェックリストは [docs/run-sse](../docs/run-sse/README.md) を正とする。
+
+### 実装結果（2026-09-04）
+
+- **永続化**: `database.py:run_migration_v34` で `agent_runs`／`coding_runs` に `idempotency_key`／`idempotency_hash`／`created_instance_id`／`worker_instance_id`、`agent_run_events`／`coding_run_events`（`event_id AUTOINCREMENT`＋`(run_id, event_id)` index＋session内idempotency部分unique）を追加し、v35でsession単一active部分unique（`single_active`）を追加して同時開始レースをDBで直列化。状態遷移は `agents/store.py:AGENT_*`、`coding/store.py:CODING_*` に集約し、`queued`／`running`／`cancelling`／`waiting_user` を非終端、Agent `succeeded`／Coding `completed`＋`failed`／`cancelled`／`interrupted` を終端、遷移は `WHERE status=?` 条件更新で行消失を防止とした。
+- **ワーカー**: `runs/agent_worker.py:execute_agent_run`、`runs/coding_worker.py:execute_coding_run` が `queued` claim後に既存 LLM／オーケストレーター／CLI を実行し、`text_append`（250ms／約4KB集約、`runs/events.py:TextAggregator`）を含む進捗を event log へ追記。`runs/manager.py:run_worker_lifespan` が FastAPI lifespan で Agent／Coding 各1本を起動し、`runs/instance.py:RunWorkerLock`（SQLite隣接lockファイル＋`fcntl.flock`）保持時のみ startup／shutdown recovery を行う。Coding は CLI 完了まで repo lock と cancel 登録を保持する。
+- **API**: `POST /agent-sessions/{id}/runs`・`POST /coding/sessions/{id}/runs`（202＋`Idempotency-Key`再送は同一run、本文差分は409）、`GET /agent-runs/{id}/events`・`GET /coding/runs/{id}/events`（`Last-Event-ID`→`event_id > cursor`昇順replay＋15s heartbeat＋terminal close、`id:`付き）、`POST /agent-runs/{id}/cancel`・`POST /coding/runs/{id}/cancel`（`cancelling`経由）。旧 `POST .../messages/stream` は削除し、`agents/cli.py`／`coding/cli.py` は内部 generator を維持した。
+- **フロント**: `api/runSse.ts:subscribeRunEvents`（Fetch＋`Last-Event-ID`＋指数バックオフ、terminal／401／明示cancel時は再接続しない、at-least-once重複除去）、`run-sse:{domain}:{run_id}:last-event-id` のみを `sessionStorage` に保持。Agents／Coding 両Pageで開始→即購読、active run初期復元（event fold→購読）、アンマウント／切替は購読Abortのみ、取消ボタンだけが cancel API を呼ぶ。Coding に `session_id` URL選択を追加し、Agent の既存 deep link を維持した。
+- **検証**: `tests/test_run_sse_*.py`（冪等・replay・切断継続・取消・startup/shutdown・CLI取消・repo lock維持）、Vitest（`runSse.test.ts`、Agents／Coding再接続・重複排除・URL復元）、`uv run pytest tests/` 1009 passed（E2E 1件は本件と無関係な既存 people 失敗）、Vitest 284 passed、`tsc --noEmit` clean。

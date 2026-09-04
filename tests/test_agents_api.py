@@ -1,8 +1,5 @@
-import json
-from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
-from langchain_core.messages import AIMessageChunk
 
 from obsidian_ai_hub.web.app import create_app
 
@@ -173,179 +170,67 @@ def test_search_agent_messages_across_agents(client, auth_headers):
     assert blank.status_code == 400
 
 
-def test_stream_message_sse_api(client, auth_headers):
-    agent_res = client.post(
+def _make_run_session(client, auth_headers, name="Run Agent"):
+    agent_id = client.post(
         "/api/v1/agents",
-        json={"name": "Stream Agent API", "system_prompt": "Prompt"},
+        json={"name": name, "system_prompt": "Prompt"},
         headers=auth_headers,
-    )
-    agent_id = agent_res.json()["agent"]["agent_id"]
-
-    sess_res = client.post(
-        f"/api/v1/agents/{agent_id}/sessions",
-        json={},
-        headers=auth_headers,
-    )
-    session_id = sess_res.json()["session"]["session_id"]
-
-    mock_llm = MagicMock()
-
-    async def astream(_messages):
-        yield AIMessageChunk(content="APIからの")
-        yield AIMessageChunk(content="応答テスト")
-
-    mock_llm.astream.side_effect = astream
-    mock_llm.bind_tools.return_value = mock_llm
-
-    with patch(
-        "obsidian_ai_hub.agents.runtime.create_langchain_llm", return_value=mock_llm
-    ):
-        res = client.post(
-            f"/api/v1/agent-sessions/{session_id}/messages/stream",
-            json={"content": "テスト発話"},
-            headers=auth_headers,
-        )
-        assert res.status_code == 200
-        assert "text/event-stream" in res.headers["content-type"]
-        payloads = [
-            json.loads(line.removeprefix("data: "))
-            for line in res.text.splitlines()
-            if line.startswith("data: ")
-        ]
-        assert [payload["type"] for payload in payloads] == [
-            "thinking",
-            "text",
-            "text",
-            "done",
-        ]
-        assert (
-            "".join(
-                payload["delta"] for payload in payloads if payload["type"] == "text"
-            )
-            == "APIからの応答テスト"
-        )
-        assert payloads[-1]["message"]["content"] == "APIからの応答テスト"
+    ).json()["agent"]["agent_id"]
+    session_id = client.post(
+        f"/api/v1/agents/{agent_id}/sessions", json={}, headers=auth_headers
+    ).json()["session"]["session_id"]
+    return session_id
 
 
-def test_stream_message_errors(client, auth_headers):
-    # Non-existent session -> 404
+def test_start_run_errors(client, auth_headers):
     res = client.post(
-        "/api/v1/agent-sessions/non_existent_session/messages/stream",
-        json={"content": "テスト発話"},
+        "/api/v1/agent-sessions/non_existent_session/runs",
+        json={"content": "hi"},
         headers=auth_headers,
     )
     assert res.status_code == 404
 
-    # Empty content -> 400
-    agent_res = client.post(
-        "/api/v1/agents",
-        json={"name": "Empty Stream Agent", "system_prompt": "Prompt"},
-        headers=auth_headers,
-    )
-    agent_id = agent_res.json()["agent"]["agent_id"]
-
-    sess_res = client.post(
-        f"/api/v1/agents/{agent_id}/sessions",
-        json={},
-        headers=auth_headers,
-    )
-    session_id = sess_res.json()["session"]["session_id"]
-
+    session_id = _make_run_session(client, auth_headers, "Empty Run Agent")
     res_empty = client.post(
-        f"/api/v1/agent-sessions/{session_id}/messages/stream",
+        f"/api/v1/agent-sessions/{session_id}/runs",
         json={"content": "   "},
         headers=auth_headers,
     )
     assert res_empty.status_code == 400
 
 
-def test_stream_message_with_images_persists_attachments(client, auth_headers):
+def test_start_run_with_images_persists_attachments(client, auth_headers):
     import base64
 
-    agent_res = client.post(
-        "/api/v1/agents",
-        json={"name": "Image Stream Agent", "system_prompt": "Prompt"},
-        headers=auth_headers,
-    )
-    agent_id = agent_res.json()["agent"]["agent_id"]
-
-    sess_res = client.post(
-        f"/api/v1/agents/{agent_id}/sessions",
-        json={},
-        headers=auth_headers,
-    )
-    session_id = sess_res.json()["session"]["session_id"]
-
+    session_id = _make_run_session(client, auth_headers, "Image Run Agent")
     image_b64 = base64.b64decode(
-        # 1x1 transparent PNG
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVQYV2NgAAIAAAUAAen63NgAAAAASUVORK5CYII="
     )
     encoded = base64.b64encode(image_b64).decode("ascii")
-
-    mock_llm = MagicMock()
-
-    async def astream(messages):
-        # Confirm a multimodal HumanMessage is fed to the model
-        assert len(messages) >= 2
-        user_msg = messages[-1]
-        assert isinstance(user_msg.content, list)
-        types = [item.get("type") for item in user_msg.content]
-        assert "image_url" in types
-        yield AIMessageChunk(content="画像を確認しました")
-
-    mock_llm.astream.side_effect = astream
-    mock_llm.bind_tools.return_value = mock_llm
-
-    payload = {
-        "content": "この画像は?",
-        "images": [
-            {"name": "pixel.png", "mime_type": "image/png", "data": encoded},
-        ],
-    }
-
-    with patch(
-        "obsidian_ai_hub.agents.runtime.create_langchain_llm", return_value=mock_llm
-    ):
-        res = client.post(
-            f"/api/v1/agent-sessions/{session_id}/messages/stream",
-            json=payload,
-            headers=auth_headers,
-        )
-        assert res.status_code == 200
-
+    res = client.post(
+        f"/api/v1/agent-sessions/{session_id}/runs",
+        json={
+            "content": "この画像は?",
+            "images": [{"name": "pixel.png", "mime_type": "image/png", "data": encoded}],
+        },
+        headers=auth_headers,
+    )
+    assert res.status_code == 202
     detail = client.get(
         f"/api/v1/agent-sessions/{session_id}", headers=auth_headers
     ).json()
-    assert len(detail["messages"]) == 2
-    user_message = next(m for m in detail["messages"] if m["role"] == "user")
-    assert user_message["content"] == "この画像は?"
-    assert len(user_message["attachments"]) == 1
-    assert user_message["attachments"][0]["name"] == "pixel.png"
-    assert user_message["attachments"][0]["mime_type"] == "image/png"
-    assert user_message["attachments"][0]["data"] == encoded
+    # Queued run already persisted the user message with attachments.
+    assert len(detail["messages"]) == 1
+    assert detail["messages"][0]["attachments"][0]["name"] == "pixel.png"
 
 
-def test_stream_message_rejects_non_image_mime(client, auth_headers):
-    agent_res = client.post(
-        "/api/v1/agents",
-        json={"name": "Bad Mime Agent", "system_prompt": "Prompt"},
-        headers=auth_headers,
-    )
-    agent_id = agent_res.json()["agent"]["agent_id"]
-    sess_res = client.post(
-        f"/api/v1/agents/{agent_id}/sessions",
-        json={},
-        headers=auth_headers,
-    )
-    session_id = sess_res.json()["session"]["session_id"]
-
+def test_start_run_rejects_non_image_mime(client, auth_headers):
+    session_id = _make_run_session(client, auth_headers, "Bad Mime Run Agent")
     res = client.post(
-        f"/api/v1/agent-sessions/{session_id}/messages/stream",
+        f"/api/v1/agent-sessions/{session_id}/runs",
         json={
             "content": "ファイルを送ります",
-            "images": [
-                {"name": "doc.pdf", "mime_type": "application/pdf", "data": "AAAA"},
-            ],
+            "images": [{"name": "doc.pdf", "mime_type": "application/pdf", "data": "AAAA"}],
         },
         headers=auth_headers,
     )
@@ -353,26 +238,13 @@ def test_stream_message_rejects_non_image_mime(client, auth_headers):
     assert "image/*" in res.json()["detail"]
 
 
-def test_stream_message_rejects_too_many_images(client, auth_headers):
-    agent_res = client.post(
-        "/api/v1/agents",
-        json={"name": "Too Many Images Agent", "system_prompt": "Prompt"},
-        headers=auth_headers,
-    )
-    agent_id = agent_res.json()["agent"]["agent_id"]
-    sess_res = client.post(
-        f"/api/v1/agents/{agent_id}/sessions",
-        json={},
-        headers=auth_headers,
-    )
-    session_id = sess_res.json()["session"]["session_id"]
-
+def test_start_run_rejects_too_many_images(client, auth_headers):
+    session_id = _make_run_session(client, auth_headers, "Too Many Run Agent")
     images = [
-        {"name": f"img{i}.png", "mime_type": "image/png", "data": "AAAA"}
-        for i in range(6)
+        {"name": f"img{i}.png", "mime_type": "image/png", "data": "AAAA"} for i in range(6)
     ]
     res = client.post(
-        f"/api/v1/agent-sessions/{session_id}/messages/stream",
+        f"/api/v1/agent-sessions/{session_id}/runs",
         json={"content": "まとめて", "images": images},
         headers=auth_headers,
     )
@@ -380,27 +252,13 @@ def test_stream_message_rejects_too_many_images(client, auth_headers):
     assert "5" in res.json()["detail"]
 
 
-def test_stream_message_rejects_invalid_base64(client, auth_headers):
-    agent_res = client.post(
-        "/api/v1/agents",
-        json={"name": "Bad B64 Agent", "system_prompt": "Prompt"},
-        headers=auth_headers,
-    )
-    agent_id = agent_res.json()["agent"]["agent_id"]
-    sess_res = client.post(
-        f"/api/v1/agents/{agent_id}/sessions",
-        json={},
-        headers=auth_headers,
-    )
-    session_id = sess_res.json()["session"]["session_id"]
-
+def test_start_run_rejects_invalid_base64(client, auth_headers):
+    session_id = _make_run_session(client, auth_headers, "Bad B64 Run Agent")
     res = client.post(
-        f"/api/v1/agent-sessions/{session_id}/messages/stream",
+        f"/api/v1/agent-sessions/{session_id}/runs",
         json={
             "content": "壊れた画像",
-            "images": [
-                {"name": "bad.png", "mime_type": "image/png", "data": "!!!not-base64!!!"},
-            ],
+            "images": [{"name": "bad.png", "mime_type": "image/png", "data": "!!!not-base64!!!"}],
         },
         headers=auth_headers,
     )
@@ -408,77 +266,29 @@ def test_stream_message_rejects_invalid_base64(client, auth_headers):
     assert "base64" in res.json()["detail"].lower()
 
 
-def test_stream_message_with_only_images_is_allowed(client, auth_headers):
-    """An image-only message (empty user text + images) must succeed and
-    persist the attachment, instead of 400'ing the request."""
+def test_start_run_with_only_images_is_allowed(client, auth_headers):
     import base64
 
-    agent_res = client.post(
-        "/api/v1/agents",
-        json={"name": "Image-Only Agent", "system_prompt": "Prompt"},
-        headers=auth_headers,
-    )
-    agent_id = agent_res.json()["agent"]["agent_id"]
-    sess_res = client.post(
-        f"/api/v1/agents/{agent_id}/sessions",
-        json={},
-        headers=auth_headers,
-    )
-    session_id = sess_res.json()["session"]["session_id"]
-
+    session_id = _make_run_session(client, auth_headers, "Image-Only Run Agent")
     image_b64 = base64.b64decode(
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVQYV2NgAAIAAAUAAen63NgAAAAASUVORK5CYII="
     )
     encoded = base64.b64encode(image_b64).decode("ascii")
-
-    mock_llm = MagicMock()
-
-    async def astream(messages):
-        yield AIMessageChunk(content="了解しました")
-
-    mock_llm.astream.side_effect = astream
-    mock_llm.bind_tools.return_value = mock_llm
-
-    with patch(
-        "obsidian_ai_hub.agents.runtime.create_langchain_llm", return_value=mock_llm
-    ):
-        res = client.post(
-            f"/api/v1/agent-sessions/{session_id}/messages/stream",
-            json={
-                "content": "",
-                "images": [
-                    {"name": "pixel.png", "mime_type": "image/png", "data": encoded},
-                ],
-            },
-            headers=auth_headers,
-        )
-        assert res.status_code == 200
-
-    detail = client.get(
-        f"/api/v1/agent-sessions/{session_id}", headers=auth_headers
-    ).json()
-    assert len(detail["messages"]) == 2
-    user_message = next(m for m in detail["messages"] if m["role"] == "user")
-    assert user_message["content"] == ""
-    assert len(user_message["attachments"]) == 1
-
-
-def test_stream_message_rejects_fully_empty_payload(client, auth_headers):
-    agent_res = client.post(
-        "/api/v1/agents",
-        json={"name": "Empty Empty Agent", "system_prompt": "Prompt"},
-        headers=auth_headers,
-    )
-    agent_id = agent_res.json()["agent"]["agent_id"]
-    sess_res = client.post(
-        f"/api/v1/agents/{agent_id}/sessions",
-        json={},
-        headers=auth_headers,
-    )
-    session_id = sess_res.json()["session"]["session_id"]
-
     res = client.post(
-        f"/api/v1/agent-sessions/{session_id}/messages/stream",
+        f"/api/v1/agent-sessions/{session_id}/runs",
+        json={
+            "content": "",
+            "images": [{"name": "pixel.png", "mime_type": "image/png", "data": encoded}],
+        },
+        headers=auth_headers,
+    )
+    assert res.status_code == 202
+
+
+def test_start_run_rejects_fully_empty_payload(client, auth_headers):
+    session_id = _make_run_session(client, auth_headers, "Empty Empty Run Agent")
+    res = client.post(
+        f"/api/v1/agent-sessions/{session_id}/runs",
         json={"content": "   ", "images": []},
         headers=auth_headers,
     )

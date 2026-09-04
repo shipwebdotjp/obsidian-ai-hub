@@ -23,6 +23,38 @@ def _now_iso() -> str:
     return datetime.now(JST).isoformat()
 
 
+CODING_NON_TERMINAL_STATUSES = frozenset({"queued", "running", "cancelling", "waiting_user"})
+CODING_TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled", "interrupted"})
+CODING_ALLOWED_TRANSITIONS: dict[str, frozenset[str]] = {
+    "queued": frozenset({"running", "cancelling", "interrupted", "failed"}),
+    "running": frozenset(
+        {"completed", "failed", "cancelled", "cancelling", "waiting_user", "interrupted"}
+    ),
+    "cancelling": frozenset({"cancelled", "failed", "interrupted", "completed"}),
+    "waiting_user": frozenset(
+        {"running", "completed", "failed", "cancelled", "interrupted", "cancelling"}
+    ),
+}
+
+CODING_EVENT_TYPES = frozenset(
+    {
+        "orchestrator_start",
+        "orchestrator_tool_call_detected",
+        "orchestrator_tool_call_start",
+        "orchestrator_tool_call_end",
+        "orchestrator_message",
+        "cli_request",
+        "worker_start",
+        "worker_done",
+        "text_append",
+        "user_question",
+        "done",
+        "error",
+        "cancelled",
+    }
+)
+
+
 def _has_run_id_column(conn: sqlite3.Connection) -> bool:
     """Return True if coding_messages.run_id column exists (v30+).
 
@@ -37,6 +69,39 @@ def _has_run_id_column(conn: sqlite3.Connection) -> bool:
     except sqlite3.Error as exc:
         logger.warning("Failed to inspect coding_messages schema: %s", exc)
         return False
+
+
+def _has_column(conn: sqlite3.Connection, table: str, column: str) -> bool:
+    try:
+        cur = conn.execute(f"PRAGMA table_info({table})")
+        return any(r["name"] == column for r in cur.fetchall())
+    except sqlite3.Error as exc:
+        logger.warning("Failed to inspect %s schema: %s", table, exc)
+        return False
+
+
+def is_coding_terminal(status: str) -> bool:
+    return status in CODING_TERMINAL_STATUSES
+
+
+def is_coding_non_terminal(status: str) -> bool:
+    return status in CODING_NON_TERMINAL_STATUSES
+
+
+def _validate_coding_transition(from_status: str, to_status: str) -> None:
+    if from_status == to_status:
+        return
+    allowed = CODING_ALLOWED_TRANSITIONS.get(from_status, frozenset())
+    if to_status not in allowed:
+        raise ValueError(
+            f"Coding run transition '{from_status}' -> '{to_status}' is not allowed."
+        )
+
+
+def compute_idempotency_hash(content: str) -> str:
+    import hashlib
+
+    return hashlib.sha256((content or "").encode("utf-8")).hexdigest()
 
 
 def mark_interrupted_runs_on_startup() -> int:
@@ -573,15 +638,40 @@ def update_session_title(session_id: str, title: str) -> None:
 
 
 def delete_session(session_id: str) -> bool:
-    """Delete a coding session."""
+    """Delete a coding session (refuses when a non-terminal run exists)."""
     conn = get_db_connection()
-    cursor = conn.execute(
-        "DELETE FROM coding_sessions WHERE session_id = ?", (session_id,)
-    )
-    conn.commit()
-    count = cursor.rowcount
-    conn.close()
-    return count > 0
+    try:
+        active = get_active_run_for_session(session_id)
+        if active is not None:
+            raise ValueError(
+                f"Session '{session_id}' has an active run "
+                f"('{active['run_id']}' status={active['status']}); cancel it first."
+            )
+        cursor = conn.execute(
+            "DELETE FROM coding_sessions WHERE session_id = ?", (session_id,)
+        )
+        conn.commit()
+        count = cursor.rowcount
+        return count > 0
+    finally:
+        conn.close()
+
+
+def get_run_by_idempotency(session_id: str, idempotency_key: str) -> Optional[Dict[str, Any]]:
+    conn = get_db_connection()
+    try:
+        if not _has_column(conn, "coding_runs", "idempotency_key"):
+            return None
+        cur = conn.execute(
+            "SELECT * FROM coding_runs WHERE session_id = ? AND idempotency_key = ?;",
+            (session_id, idempotency_key),
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        return _format_run(dict(row))
+    finally:
+        conn.close()
 
 
 def update_message_run_id(message_id: str, run_id: str) -> None:
@@ -940,17 +1030,21 @@ def get_run(run_id: str, conn=None) -> Optional[Dict[str, Any]]:
 
 
 def get_active_run_for_session(session_id: str) -> Optional[Dict[str, Any]]:
-    """Get the currently running run for a session if any."""
+    """Get the currently active (non-terminal) run for a session if any."""
     conn = get_db_connection()
-    cursor = conn.execute(
-        "SELECT * FROM coding_runs WHERE session_id = ? AND status = 'running' ORDER BY started_at DESC LIMIT 1",
-        (session_id,),
-    )
-    row = cursor.fetchone()
-    conn.close()
-    if not row:
-        return None
-    return _format_run(dict(row))
+    try:
+        placeholders = ",".join("?" for _ in CODING_NON_TERMINAL_STATUSES)
+        cursor = conn.execute(
+            f"SELECT * FROM coding_runs WHERE session_id = ? AND status IN ({placeholders}) "
+            "ORDER BY started_at DESC LIMIT 1",
+            (session_id, *sorted(CODING_NON_TERMINAL_STATUSES)),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+        return _format_run(dict(row))
+    finally:
+        conn.close()
 
 
 def get_latest_run_for_session(session_id: str) -> Optional[Dict[str, Any]]:
@@ -965,3 +1059,394 @@ def get_latest_run_for_session(session_id: str) -> Optional[Dict[str, Any]]:
     if not row:
         return None
     return _format_run(dict(row))
+
+
+def start_queued_run(
+    session_id: str,
+    content: str,
+    idempotency_key: Optional[str] = None,
+    idempotency_hash: Optional[str] = None,
+    created_instance_id: Optional[str] = None,
+) -> tuple[Dict[str, Any], Dict[str, Any]]:
+    """Queue a coding run with idempotency and active-run guard."""
+    clean_content = (content or "").strip()
+    if not clean_content:
+        raise ValueError("Message content must not be empty.")
+    clean_key = (idempotency_key or "").strip() or None
+    if clean_key is not None and idempotency_hash is None:
+        idempotency_hash = compute_idempotency_hash(clean_content)
+    elif clean_key is None:
+        idempotency_hash = None
+
+    conn = get_db_connection()
+    try:
+        session = get_session(session_id, conn=conn)
+        if not session:
+            raise FileNotFoundError(f"Session '{session_id}' not found.")
+        has_idem = _has_column(conn, "coding_runs", "idempotency_key")
+        if clean_key is not None and has_idem:
+            cur = conn.execute(
+                "SELECT * FROM coding_runs WHERE session_id = ? AND idempotency_key = ?;",
+                (session_id, clean_key),
+            )
+            row = cur.fetchone()
+            if row is not None:
+                existing = _format_run(dict(row))
+                assert existing is not None
+                if (existing.get("idempotency_hash") or None) != (idempotency_hash or None):
+                    raise ValueError(
+                        f"Idempotency key conflict for session '{session_id}'."
+                    )
+                user_msg = get_message(str(existing["user_message_id"]))
+                assert user_msg is not None
+                return user_msg, existing
+
+        placeholders = ",".join("?" for _ in CODING_NON_TERMINAL_STATUSES)
+        cur = conn.execute(
+            f"SELECT run_id FROM coding_runs WHERE session_id = ? AND status IN ({placeholders}) LIMIT 1;",
+            (session_id, *sorted(CODING_NON_TERMINAL_STATUSES)),
+        )
+        if cur.fetchone() is not None:
+            raise ValueError(
+                f"Session '{session_id}' already has an active run; cancel it first."
+            )
+        try:
+            user_msg = add_message(session_id, role="user", content=clean_content)
+        except Exception:
+            conn.close()
+            # add_message manages its own connection; reopen for run insert
+            conn = get_db_connection()
+            raise
+        # add_message committed + closed its own conn; our conn may be stale for
+        # sequence but run insert uses fresh transaction below.
+        user_msg_id = user_msg["message_id"]
+        run_id = f"crun_{uuid.uuid4().hex[:12]}"
+        now = _now_iso()
+        try:
+            if has_idem:
+                conn.execute(
+                    """
+                    INSERT INTO coding_runs (
+                        run_id, session_id, user_message_id, status, dirty_tree_at_start,
+                        started_at, idempotency_key, idempotency_hash,
+                        created_instance_id, worker_instance_id
+                    ) VALUES (?, ?, ?, 'queued', NULL, ?, ?, ?, ?, NULL)
+                    """,
+                    (
+                        run_id,
+                        session_id,
+                        user_msg_id,
+                        now,
+                        clean_key,
+                        idempotency_hash,
+                        created_instance_id,
+                    ),
+                )
+            else:
+                conn.execute(
+                    """
+                    INSERT INTO coding_runs (
+                        run_id, session_id, user_message_id, status, dirty_tree_at_start, started_at
+                    ) VALUES (?, ?, ?, 'queued', NULL, ?)
+                    """,
+                    (run_id, session_id, user_msg_id, now),
+                )
+            conn.commit()
+        except sqlite3.IntegrityError as e:
+            msg_text = str(e)
+            if "UNIQUE" in msg_text and "single_active" in msg_text:
+                conn.rollback()
+                raise ValueError(
+                    f"Session '{session_id}' already has an active run; cancel it first."
+                ) from e
+            if clean_key is not None and "UNIQUE" in msg_text:
+                conn.rollback()
+                existing = get_run_by_idempotency(session_id, clean_key)
+                if existing is not None:
+                    if (existing.get("idempotency_hash") or None) != (
+                        idempotency_hash or None
+                    ):
+                        raise ValueError(
+                            f"Idempotency key conflict for session '{session_id}'."
+                        ) from e
+                    umsg = get_message(str(existing["user_message_id"]))
+                    assert umsg is not None
+                    return umsg, existing
+            raise
+        # Link user message to run when column exists (best effort, non-fatal
+        # for queue path if FK races; worker re-checks).
+        try:
+            if _has_run_id_column(conn):
+                conn.execute(
+                    "UPDATE coding_messages SET run_id = ? WHERE message_id = ?;",
+                    (run_id, user_msg_id),
+                )
+                conn.commit()
+        except sqlite3.Error as exc:
+            logger.warning("Failed to link queued user message %s: %s", user_msg_id, exc)
+        run = get_run(run_id, conn=conn)
+        assert run is not None
+        return user_msg, run
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def claim_queued_run(worker_instance_id: str) -> Optional[Dict[str, Any]]:
+    conn = get_db_connection()
+    try:
+        cur = conn.execute(
+            "SELECT * FROM coding_runs WHERE status = 'queued' ORDER BY started_at ASC LIMIT 1;"
+        )
+        row = cur.fetchone()
+        if row is None:
+            return None
+        run_id = row["run_id"]
+        if _has_column(conn, "coding_runs", "worker_instance_id"):
+            cur2 = conn.execute(
+                "UPDATE coding_runs SET status = 'running', worker_instance_id = ? "
+                "WHERE run_id = ? AND status = 'queued';",
+                (worker_instance_id, run_id),
+            )
+        else:
+            cur2 = conn.execute(
+                "UPDATE coding_runs SET status = 'running' WHERE run_id = ? AND status = 'queued';",
+                (run_id,),
+            )
+        if cur2.rowcount == 0:
+            conn.rollback()
+            return None
+        conn.commit()
+        return get_run(run_id, conn=conn)
+    finally:
+        conn.close()
+
+
+def transition_run_status(
+    run_id: str, to_status: str, error_message: Optional[str] = None, finished: bool = False
+) -> Dict[str, Any]:
+    conn = get_db_connection()
+    try:
+        run = get_run(run_id, conn=conn)
+        if not run:
+            raise FileNotFoundError(f"Run '{run_id}' not found.")
+        from_status = str(run["status"])
+        _validate_coding_transition(from_status, to_status)
+        if from_status == to_status:
+            return run
+        now = _now_iso()
+        if finished:
+            cur = conn.execute(
+                "UPDATE coding_runs SET status = ?, error_message = COALESCE(?, error_message), finished_at = ? "
+                "WHERE run_id = ? AND status = ?;",
+                (to_status, error_message, now, run_id, from_status),
+            )
+        elif error_message is not None:
+            cur = conn.execute(
+                "UPDATE coding_runs SET status = ? , error_message = ? WHERE run_id = ? AND status = ?;",
+                (to_status, error_message, run_id, from_status),
+            )
+        else:
+            cur = conn.execute(
+                "UPDATE coding_runs SET status = ? WHERE run_id = ? AND status = ?;",
+                (to_status, run_id, from_status),
+            )
+        if cur.rowcount == 0:
+            current = get_run(run_id, conn=conn)
+            raise ValueError(
+                f"Coding run '{run_id}' changed concurrently "
+                f"(expected '{from_status}', now '{(current or {}).get('status')}')."
+            )
+        conn.commit()
+        updated = get_run(run_id, conn=conn)
+        assert updated is not None
+        return updated
+    finally:
+        conn.close()
+
+
+def request_cancel_run(run_id: str) -> Dict[str, Any]:
+    conn = get_db_connection()
+    try:
+        run = get_run(run_id, conn=conn)
+        if not run:
+            raise FileNotFoundError(f"Run '{run_id}' not found.")
+        status = str(run["status"])
+        if status in CODING_TERMINAL_STATUSES:
+            return run
+        if status == "cancelling":
+            return run
+        _validate_coding_transition(status, "cancelling")
+        conn.execute(
+            "UPDATE coding_runs SET status = 'cancelling' WHERE run_id = ?;",
+            (run_id,),
+        )
+        conn.commit()
+        updated = get_run(run_id, conn=conn)
+        assert updated is not None
+        return updated
+    finally:
+        conn.close()
+
+
+def mark_other_instances_interrupted(current_instance_id: str) -> int:
+    conn = get_db_connection()
+    try:
+        now = _now_iso()
+        has_worker = _has_column(conn, "coding_runs", "worker_instance_id")
+        has_created = _has_column(conn, "coding_runs", "created_instance_id")
+        placeholders = ",".join("?" for _ in CODING_NON_TERMINAL_STATUSES)
+        base = list(sorted(CODING_NON_TERMINAL_STATUSES))
+        if has_worker and has_created:
+            cur = conn.execute(
+                f"UPDATE coding_runs SET status = 'interrupted', "
+                "error_message = COALESCE(error_message, 'Interrupted due to server restart'), "
+                "finished_at = COALESCE(finished_at, ?) "
+                f"WHERE status IN ({placeholders}) AND NOT "
+                "(COALESCE(worker_instance_id, '') = ? OR COALESCE(created_instance_id, '') = ?);",
+                (now, *base, current_instance_id, current_instance_id),
+            )
+        else:
+            cur = conn.execute(
+                f"UPDATE coding_runs SET status = 'interrupted', "
+                "error_message = COALESCE(error_message, 'Interrupted due to server restart'), "
+                "finished_at = COALESCE(finished_at, ?) "
+                f"WHERE status IN ({placeholders});",
+                (now, *base),
+            )
+        conn.execute(
+            f"UPDATE coding_orchestrator_tool_calls SET status = 'interrupted', "
+            "finished_at = COALESCE(finished_at, ?), "
+            "error = COALESCE(error, 'Interrupted due to server restart') "
+            "WHERE status = 'running';",
+            (now,),
+        )
+        conn.commit()
+        return cur.rowcount
+    finally:
+        conn.close()
+
+
+def mark_own_runs_interrupted(owner_instance_id: str) -> int:
+    conn = get_db_connection()
+    try:
+        now = _now_iso()
+        has_worker = _has_column(conn, "coding_runs", "worker_instance_id")
+        has_created = _has_column(conn, "coding_runs", "created_instance_id")
+        placeholders = ",".join("?" for _ in CODING_NON_TERMINAL_STATUSES)
+        base = list(sorted(CODING_NON_TERMINAL_STATUSES))
+        if has_worker and has_created:
+            cur = conn.execute(
+                f"UPDATE coding_runs SET status = 'interrupted', "
+                "error_message = COALESCE(error_message, 'Interrupted'), "
+                "finished_at = COALESCE(finished_at, ?) "
+                f"WHERE status IN ({placeholders}) AND "
+                "(worker_instance_id = ? OR (worker_instance_id IS NULL AND created_instance_id = ?));",
+                (now, *base, owner_instance_id, owner_instance_id),
+            )
+        elif has_created:
+            cur = conn.execute(
+                f"UPDATE coding_runs SET status = 'interrupted', "
+                "error_message = COALESCE(error_message, 'Interrupted'), "
+                "finished_at = COALESCE(finished_at, ?) "
+                f"WHERE status IN ({placeholders}) AND created_instance_id = ?;",
+                (now, *base, owner_instance_id),
+            )
+        else:
+            cur = conn.execute(
+                f"UPDATE coding_runs SET status = 'interrupted', "
+                "error_message = COALESCE(error_message, 'Interrupted'), "
+                "finished_at = COALESCE(finished_at, ?) "
+                f"WHERE status IN ({placeholders});",
+                (now, *base),
+            )
+        conn.commit()
+        return cur.rowcount
+    finally:
+        conn.close()
+
+
+def append_run_event(
+    run_id: str, event_type: str, payload: Dict[str, Any]
+) -> int:
+    if event_type not in CODING_EVENT_TYPES:
+        raise ValueError(f"Unknown coding event type: '{event_type}'")
+    conn = get_db_connection()
+    try:
+        if get_run(run_id, conn=conn) is None:
+            raise FileNotFoundError(f"Run '{run_id}' not found.")
+        import datetime as _dt
+
+        now = _dt.datetime.now(JST).isoformat()
+        payload_json = json.dumps(payload, ensure_ascii=False)
+        cur = conn.execute(
+            "INSERT INTO coding_run_events (run_id, event_type, payload_json, created_at) "
+            "VALUES (?, ?, ?, ?);",
+            (run_id, event_type, payload_json, now),
+        )
+        conn.commit()
+        return int(cur.lastrowid or 0)
+    finally:
+        conn.close()
+
+
+def list_run_events(
+    run_id: str, after_id: int = 0, limit: int = 500
+) -> List[Dict[str, Any]]:
+    conn = get_db_connection()
+    try:
+        try:
+            cur = conn.execute(
+                "SELECT event_id, run_id, event_type, payload_json, created_at "
+                "FROM coding_run_events WHERE run_id = ? AND event_id > ? "
+                "ORDER BY event_id ASC LIMIT ?;",
+                (run_id, after_id, limit),
+            )
+        except sqlite3.OperationalError as e:
+            if "no such table" in str(e):
+                return []
+            raise
+        out: List[Dict[str, Any]] = []
+        for row in cur.fetchall():
+            try:
+                payload = json.loads(row["payload_json"]) if row["payload_json"] else {}
+            except (json.JSONDecodeError, TypeError):
+                payload = {}
+            out.append(
+                {
+                    "event_id": row["event_id"],
+                    "run_id": row["run_id"],
+                    "event_type": row["event_type"],
+                    "payload": payload,
+                    "created_at": row["created_at"],
+                }
+            )
+        return out
+    finally:
+        conn.close()
+
+
+def purge_old_run_events(retention_days: int = 7) -> int:
+    import datetime as _dt
+
+    cutoff = (_dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(days=retention_days)).isoformat()
+    conn = get_db_connection()
+    try:
+        placeholders = ",".join("?" for _ in CODING_TERMINAL_STATUSES)
+        try:
+            cur = conn.execute(
+                f"DELETE FROM coding_run_events WHERE run_id IN ("
+                f"SELECT run_id FROM coding_runs WHERE status IN ({placeholders}) "
+                f"AND finished_at IS NOT NULL AND finished_at < ?);",
+                (*sorted(CODING_TERMINAL_STATUSES), cutoff),
+            )
+            conn.commit()
+            return cur.rowcount
+        except sqlite3.OperationalError as e:
+            if "no such table" in str(e):
+                return 0
+            raise
+    finally:
+        conn.close()

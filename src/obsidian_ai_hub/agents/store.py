@@ -216,6 +216,67 @@ def _row_to_message(row: sqlite3.Row) -> dict[str, Any]:
     }
 
 
+AGENT_NON_TERMINAL_STATUSES = frozenset({"queued", "running", "cancelling", "waiting_user"})
+AGENT_TERMINAL_STATUSES = frozenset({"succeeded", "failed", "cancelled", "interrupted"})
+AGENT_ALLOWED_TRANSITIONS: dict[str, frozenset[str]] = {
+    "queued": frozenset({"running", "cancelling", "interrupted", "failed"}),
+    "running": frozenset(
+        {"succeeded", "failed", "cancelled", "cancelling", "waiting_user", "interrupted"}
+    ),
+    "cancelling": frozenset({"cancelled", "failed", "interrupted", "succeeded"}),
+    "waiting_user": frozenset(
+        {"running", "succeeded", "failed", "cancelled", "interrupted", "cancelling"}
+    ),
+}
+
+AGENT_EVENT_TYPES = frozenset(
+    {
+        "thinking",
+        "tool_call_detected",
+        "tool_call_start",
+        "tool_call_end",
+        "text_append",
+        "user_question",
+        "done",
+        "error",
+        "cancelled",
+    }
+)
+
+
+def _safe_row_get(row: sqlite3.Row, key: str) -> Any | None:
+    try:
+        return row[key]  # type: ignore[index]
+    except (IndexError, KeyError, ValueError):
+        return None
+
+
+def _has_column(conn: sqlite3.Connection, table: str, column: str) -> bool:
+    try:
+        cur = conn.execute(f"PRAGMA table_info({table})")
+        return any(r["name"] == column for r in cur.fetchall())
+    except sqlite3.Error:
+        return False
+
+
+def is_agent_terminal(status: str) -> bool:
+    return status in AGENT_TERMINAL_STATUSES
+
+
+def is_agent_non_terminal(status: str) -> bool:
+    return status in AGENT_NON_TERMINAL_STATUSES
+
+
+def _validate_agent_transition(from_status: str, to_status: str) -> None:
+    if from_status == to_status:
+        return
+    allowed = AGENT_ALLOWED_TRANSITIONS.get(from_status, frozenset())
+    if to_status not in allowed:
+        raise ValueError(
+            f"Agent run transition '{from_status}' -> '{to_status}' is not allowed."
+        )
+
+
 def _row_to_run(row: sqlite3.Row) -> dict[str, Any]:
     used_tools = []
     if row["used_tools_json"]:
@@ -263,6 +324,10 @@ def _row_to_run(row: sqlite3.Row) -> dict[str, Any]:
         "error_message": row["error_message"],
         "started_at": row["started_at"],
         "finished_at": row["finished_at"],
+        "idempotency_key": _safe_row_get(row, "idempotency_key"),
+        "idempotency_hash": _safe_row_get(row, "idempotency_hash"),
+        "created_instance_id": _safe_row_get(row, "created_instance_id"),
+        "worker_instance_id": _safe_row_get(row, "worker_instance_id"),
     }
 
 
@@ -991,19 +1056,61 @@ def update_session(
         return get_session(session_id, conn=active_conn)  # type: ignore[return-value]
 
 
+def get_active_run_for_session(
+    session_id: str, conn: Optional[sqlite3.Connection] = None
+) -> dict[str, Any] | None:
+    """Return the non-terminal run for a session, if any (newest first)."""
+    with auto_connection(conn) as (active_conn, _):
+        placeholders = ",".join("?" for _ in AGENT_NON_TERMINAL_STATUSES)
+        cursor = active_conn.execute(
+            f"SELECT * FROM agent_runs WHERE session_id = ? AND status IN ({placeholders}) "
+            "ORDER BY started_at DESC LIMIT 1;",
+            (session_id, *sorted(AGENT_NON_TERMINAL_STATUSES)),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+        return _row_to_run(row)
+
+
+def get_run_by_idempotency(
+    session_id: str,
+    idempotency_key: str,
+    conn: Optional[sqlite3.Connection] = None,
+) -> dict[str, Any] | None:
+    with auto_connection(conn) as (active_conn, _):
+        if not _has_column(active_conn, "agent_runs", "idempotency_key"):
+            return None
+        cursor = active_conn.execute(
+            "SELECT * FROM agent_runs WHERE session_id = ? AND idempotency_key = ?;",
+            (session_id, idempotency_key),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+        return _row_to_run(row)
+
+
 def delete_session(session_id: str, conn: Optional[sqlite3.Connection] = None) -> bool:
     with auto_connection(conn) as (active_conn, is_generated):
-        if is_generated:
-            with active_conn:
-                cursor = active_conn.execute(
-                    "DELETE FROM agent_sessions WHERE session_id = ?;", (session_id,)
-                )
-                return cursor.rowcount > 0
-        else:
+        active = get_active_run_for_session(session_id, conn=active_conn)
+        if active is not None:
+            raise ValueError(
+                f"Session '{session_id}' has an active run "
+                f"('{active['run_id']}' status={active['status']}); cancel it first."
+            )
+
+        def _do_delete() -> bool:
             cursor = active_conn.execute(
                 "DELETE FROM agent_sessions WHERE session_id = ?;", (session_id,)
             )
             return cursor.rowcount > 0
+
+        if is_generated:
+            with active_conn:
+                return _do_delete()
+        else:
+            return _do_delete()
 
 
 def list_messages(session_id: str, conn: Optional[sqlite3.Connection] = None) -> list[dict[str, Any]]:
@@ -1326,6 +1433,490 @@ def list_runs(session_id: str, conn: Optional[sqlite3.Connection] = None) -> lis
             (session_id,),
         )
         return [_row_to_run(row) for row in cursor.fetchall()]
+
+
+def compute_idempotency_hash(content: str, attachments_json: str = "[]") -> str:
+    import hashlib
+
+    h = hashlib.sha256()
+    h.update((content or "").encode("utf-8"))
+    h.update(b"\x00")
+    h.update((attachments_json or "[]").encode("utf-8"))
+    return h.hexdigest()
+
+
+def start_queued_run(
+    session_id: str,
+    content: str,
+    attachments: Optional[Sequence[dict[str, Any]]] = None,
+    idempotency_key: Optional[str] = None,
+    idempotency_hash: Optional[str] = None,
+    created_instance_id: Optional[str] = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Queue a new agent run with idempotency and active-run guard.
+
+    Same idempotency_key resend returns the first run without double save.
+    Different body with same key raises ValueError containing 'conflict'.
+    Active non-terminal run in the session raises ValueError containing 'active'.
+    """
+    clean_content = content.strip() if content else ""
+    attachments_list: list[dict[str, Any]] = []
+    if attachments:
+        for item in attachments:
+            if isinstance(item, dict):
+                attachments_list.append(item)
+    try:
+        attachments_json = json.dumps(attachments_list, ensure_ascii=False)
+    except (TypeError, ValueError):
+        attachments_json = "[]"
+        attachments_list = []
+    if not clean_content and not attachments_list:
+        raise ValueError("Message content must not be empty.")
+    clean_key = (idempotency_key or "").strip() or None
+    if clean_key is not None and idempotency_hash is None:
+        idempotency_hash = compute_idempotency_hash(clean_content, attachments_json)
+    elif clean_key is None:
+        idempotency_hash = None
+
+    with auto_connection(conn) as (active_conn, is_generated):
+        session = get_session(session_id, conn=active_conn)
+        if not session:
+            raise FileNotFoundError(f"Session '{session_id}' not found.")
+
+        has_idem_cols = _has_column(active_conn, "agent_runs", "idempotency_key")
+
+        def _execute() -> tuple[str, str]:
+            # Idempotent replay first: same key returns first run.
+            if clean_key is not None and has_idem_cols:
+                cur = active_conn.execute(
+                    "SELECT * FROM agent_runs WHERE session_id = ? AND idempotency_key = ?;",
+                    (session_id, clean_key),
+                )
+                existing_row = cur.fetchone()
+                if existing_row is not None:
+                    existing = _row_to_run(existing_row)
+                    if (existing.get("idempotency_hash") or None) != (
+                        idempotency_hash or None
+                    ):
+                        raise ValueError(
+                            f"Idempotency key conflict for session '{session_id}'."
+                        )
+                    return str(existing["user_message_id"]), str(existing["run_id"])
+
+            # Active-run guard.
+            placeholders = ",".join("?" for _ in AGENT_NON_TERMINAL_STATUSES)
+            cur = active_conn.execute(
+                f"SELECT run_id FROM agent_runs WHERE session_id = ? AND status IN ({placeholders}) LIMIT 1;",
+                (session_id, *sorted(AGENT_NON_TERMINAL_STATUSES)),
+            )
+            if cur.fetchone() is not None:
+                raise ValueError(
+                    f"Session '{session_id}' already has an active run; cancel it first."
+                )
+
+            now = _now_iso()
+            cur = active_conn.execute(
+                "SELECT MAX(sequence) FROM agent_messages WHERE session_id = ?;",
+                (session_id,),
+            )
+            max_seq_row = cur.fetchone()
+            next_seq = (
+                max_seq_row[0] if max_seq_row and max_seq_row[0] is not None else 0
+            ) + 1
+            message_id = f"amsg_{uuid.uuid4().hex[:12]}"
+            try:
+                active_conn.execute(
+                    """
+                    INSERT INTO agent_messages (message_id, session_id, sequence, role, content, attachments_json, created_at)
+                    VALUES (?, ?, ?, 'user', ?, ?, ?)
+                    """,
+                    (message_id, session_id, next_seq, clean_content, attachments_json, now),
+                )
+            except sqlite3.OperationalError as e:
+                if "no such column: attachments_json" in str(e):
+                    active_conn.execute(
+                        """
+                        INSERT INTO agent_messages (message_id, session_id, sequence, role, content, created_at)
+                        VALUES (?, ?, ?, 'user', ?, ?)
+                        """,
+                        (message_id, session_id, next_seq, clean_content, now),
+                    )
+                else:
+                    raise
+            run_id = f"arun_{uuid.uuid4().hex[:12]}"
+            if has_idem_cols:
+                active_conn.execute(
+                    """
+                    INSERT INTO agent_runs (
+                        run_id, session_id, user_message_id, assistant_message_id, status,
+                        used_tools_json, created_hitl_run_ids_json, error_message, started_at, finished_at,
+                        idempotency_key, idempotency_hash, created_instance_id, worker_instance_id
+                    )
+                    VALUES (?, ?, ?, NULL, 'queued', '[]', '[]', NULL, ?, NULL, ?, ?, ?, NULL)
+                    """,
+                    (
+                        run_id,
+                        session_id,
+                        message_id,
+                        now,
+                        clean_key,
+                        idempotency_hash,
+                        created_instance_id,
+                    ),
+                )
+            else:
+                active_conn.execute(
+                    """
+                    INSERT INTO agent_runs (
+                        run_id, session_id, user_message_id, assistant_message_id, status,
+                        used_tools_json, created_hitl_run_ids_json, error_message, started_at, finished_at
+                    )
+                    VALUES (?, ?, ?, NULL, 'queued', '[]', '[]', NULL, ?, NULL)
+                    """,
+                    (run_id, session_id, message_id, now),
+                )
+            if session["title"] == "新しい会話" and next_seq == 1:
+                title_source = clean_content or "画像を送りました"
+                title_summary = title_source[:30].replace("\n", " ")
+                active_conn.execute(
+                    "UPDATE agent_sessions SET title = ?, updated_at = ? WHERE session_id = ?;",
+                    (title_summary, now, session_id),
+                )
+            else:
+                active_conn.execute(
+                    "UPDATE agent_sessions SET updated_at = ? WHERE session_id = ?;",
+                    (now, session_id),
+                )
+            return message_id, run_id
+
+        try:
+            if is_generated:
+                with active_conn:
+                    msg_id, r_id = _execute()
+            else:
+                msg_id, r_id = _execute()
+        except sqlite3.IntegrityError as e:
+            msg_text = str(e)
+            # Idempotency race: same key inserted concurrently.
+            if clean_key is not None and "UNIQUE" in msg_text and "single_active" not in msg_text:
+                existing = get_run_by_idempotency(session_id, clean_key, conn=active_conn)
+                if existing is not None:
+                    if (existing.get("idempotency_hash") or None) != (
+                        idempotency_hash or None
+                    ):
+                        raise ValueError(
+                            f"Idempotency key conflict for session '{session_id}'."
+                        ) from e
+                    msg = get_message(existing["user_message_id"], conn=active_conn)
+                    return msg, existing  # type: ignore[return-value]
+            # Single-active partial index race: concurrent start won.
+            if "UNIQUE" in msg_text and "single_active" in msg_text:
+                raise ValueError(
+                    f"Session '{session_id}' already has an active run; cancel it first."
+                ) from e
+            raise
+
+        msg = get_message(msg_id, conn=active_conn)
+        run = get_run(r_id, conn=active_conn)
+        return msg, run  # type: ignore[return-value]
+
+
+def claim_queued_run(
+    worker_instance_id: str, conn: Optional[sqlite3.Connection] = None
+) -> dict[str, Any] | None:
+    """Claim the oldest queued run for this worker (queued -> running)."""
+    with auto_connection(conn) as (active_conn, is_generated):
+        def _execute() -> dict[str, Any] | None:
+            cur = active_conn.execute(
+                "SELECT * FROM agent_runs WHERE status = 'queued' ORDER BY started_at ASC LIMIT 1;"
+            )
+            row = cur.fetchone()
+            if row is None:
+                return None
+            run_id = row["run_id"]
+            has_worker_col = _has_column(active_conn, "agent_runs", "worker_instance_id")
+            if has_worker_col:
+                cur2 = active_conn.execute(
+                    "UPDATE agent_runs SET status = 'running', worker_instance_id = ? "
+                    "WHERE run_id = ? AND status = 'queued';",
+                    (worker_instance_id, run_id),
+                )
+            else:
+                cur2 = active_conn.execute(
+                    "UPDATE agent_runs SET status = 'running' WHERE run_id = ? AND status = 'queued';",
+                    (run_id,),
+                )
+            if cur2.rowcount == 0:
+                return None
+            return get_run(run_id, conn=active_conn)
+
+        if is_generated:
+            with active_conn:
+                return _execute()
+        else:
+            return _execute()
+
+
+def transition_run_status(
+    run_id: str,
+    to_status: str,
+    error_message: Optional[str] = None,
+    finished: bool = False,
+    conn: Optional[sqlite3.Connection] = None,
+) -> dict[str, Any]:
+    with auto_connection(conn) as (active_conn, is_generated):
+        run = get_run(run_id, conn=active_conn)
+        if not run:
+            raise FileNotFoundError(f"Run '{run_id}' not found.")
+        from_status = str(run["status"])
+        _validate_agent_transition(from_status, to_status)
+        if from_status == to_status:
+            return run
+        now = _now_iso()
+
+        def _do() -> None:
+            if finished:
+                cur = active_conn.execute(
+                    "UPDATE agent_runs SET status = ?, error_message = COALESCE(?, error_message), finished_at = ? "
+                    "WHERE run_id = ? AND status = ?;",
+                    (to_status, error_message, now, run_id, from_status),
+                )
+            elif error_message is not None:
+                cur = active_conn.execute(
+                    "UPDATE agent_runs SET status = ?, error_message = ? WHERE run_id = ? AND status = ?;",
+                    (to_status, error_message, run_id, from_status),
+                )
+            else:
+                cur = active_conn.execute(
+                    "UPDATE agent_runs SET status = ? WHERE run_id = ? AND status = ?;",
+                    (to_status, run_id, from_status),
+                )
+            if cur.rowcount == 0:
+                current = get_run(run_id, conn=active_conn)
+                raise ValueError(
+                    f"Agent run '{run_id}' changed concurrently "
+                    f"(expected '{from_status}', now '{(current or {}).get('status')}')."
+                )
+
+        if is_generated:
+            with active_conn:
+                _do()
+        else:
+            _do()
+        return get_run(run_id, conn=active_conn)  # type: ignore[return-value]
+
+
+def request_cancel_run(
+    run_id: str, conn: Optional[sqlite3.Connection] = None
+) -> dict[str, Any]:
+    with auto_connection(conn) as (active_conn, is_generated):
+        run = get_run(run_id, conn=active_conn)
+        if not run:
+            raise FileNotFoundError(f"Run '{run_id}' not found.")
+        status = str(run["status"])
+        if status in AGENT_TERMINAL_STATUSES:
+            return run
+        if status == "cancelling":
+            return run
+        _validate_agent_transition(status, "cancelling")
+
+        def _do() -> None:
+            active_conn.execute(
+                "UPDATE agent_runs SET status = 'cancelling' WHERE run_id = ?;",
+                (run_id,),
+            )
+
+        if is_generated:
+            with active_conn:
+                _do()
+        else:
+            _do()
+        return get_run(run_id, conn=active_conn)  # type: ignore[return-value]
+
+
+def mark_runs_interrupted(
+    only_mine: bool = False,
+    owner_instance_id: Optional[str] = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> int:
+    """Mark non-terminal runs as interrupted.
+
+    Shutdown recovery: with only_mine=True interrupts only runs owned by
+    owner_instance_id. Without owner filter interrupts all non-terminal runs.
+    Returns affected row count.
+    """
+    with auto_connection(conn) as (active_conn, is_generated):
+        now = _now_iso()
+        placeholders = ",".join("?" for _ in AGENT_NON_TERMINAL_STATUSES)
+        params: list[Any] = list(sorted(AGENT_NON_TERMINAL_STATUSES))
+
+        sql = (
+            f"UPDATE agent_runs SET status = 'interrupted', "
+            f"error_message = COALESCE(error_message, 'Interrupted'), finished_at = COALESCE(finished_at, ?) "
+            f"WHERE status IN ({placeholders})"
+        )
+        full_params: list[Any] = [now, *params]
+        if only_mine and owner_instance_id is not None:
+            has_worker = _has_column(active_conn, "agent_runs", "worker_instance_id")
+            has_created = _has_column(active_conn, "agent_runs", "created_instance_id")
+            if has_worker and has_created:
+                sql += " AND (worker_instance_id = ? OR (worker_instance_id IS NULL AND created_instance_id = ?))"
+                full_params.extend([owner_instance_id, owner_instance_id])
+            elif has_created:
+                sql += " AND created_instance_id = ?"
+                full_params.append(owner_instance_id)
+
+        def _do() -> int:
+            cur = active_conn.execute(sql, tuple(full_params))
+            # Also interrupt events? Events are immutable log; terminal event
+            # is appended by caller transactionally when possible.
+            return cur.rowcount
+
+        if is_generated:
+            with active_conn:
+                count = _do()
+        else:
+            count = _do()
+        return count
+
+
+def mark_other_instances_interrupted(
+    current_instance_id: str, conn: Optional[sqlite3.Connection] = None
+) -> int:
+    """Startup recovery: interrupt non-terminal runs not owned by current instance.
+
+    NULL-safe: COALESCE treats missing ownership as not-owned, so orphaned
+    queued runs from a dead process are also interrupted.
+    """
+    with auto_connection(conn) as (active_conn, is_generated):
+        now = _now_iso()
+        has_worker = _has_column(active_conn, "agent_runs", "worker_instance_id")
+        has_created = _has_column(active_conn, "agent_runs", "created_instance_id")
+        placeholders = ",".join("?" for _ in AGENT_NON_TERMINAL_STATUSES)
+        base_params = list(sorted(AGENT_NON_TERMINAL_STATUSES))
+        if has_worker and has_created:
+            sql = (
+                f"UPDATE agent_runs SET status = 'interrupted', "
+                "error_message = COALESCE(error_message, 'Interrupted due to server restart'), "
+                "finished_at = COALESCE(finished_at, ?) "
+                f"WHERE status IN ({placeholders}) AND NOT "
+                "(COALESCE(worker_instance_id, '') = ? OR COALESCE(created_instance_id, '') = ?)"
+            )
+            params = [now, *base_params, current_instance_id, current_instance_id]
+        else:
+            sql = (
+                f"UPDATE agent_runs SET status = 'interrupted', "
+                "error_message = COALESCE(error_message, 'Interrupted due to server restart'), "
+                "finished_at = COALESCE(finished_at, ?) "
+                f"WHERE status IN ({placeholders})"
+            )
+            params = [now, *base_params]
+
+        def _do() -> int:
+            cur = active_conn.execute(sql, tuple(params))
+            return cur.rowcount
+
+        if is_generated:
+            with active_conn:
+                return _do()
+        else:
+            return _do()
+
+
+def append_run_event(
+    run_id: str,
+    event_type: str,
+    payload: dict[str, Any],
+    conn: Optional[sqlite3.Connection] = None,
+) -> int:
+    if event_type not in AGENT_EVENT_TYPES:
+        raise ValueError(f"Unknown agent event type: '{event_type}'")
+    # Ensure parent run exists before appending (FK safety + clearer error).
+    with auto_connection(conn) as (active_conn, is_generated):
+        if get_run(run_id, conn=active_conn) is None:
+            raise FileNotFoundError(f"Run '{run_id}' not found.")
+        now = _now_iso()
+        payload_json = json.dumps(payload, ensure_ascii=False)
+
+        def _do() -> int:
+            cur = active_conn.execute(
+                "INSERT INTO agent_run_events (run_id, event_type, payload_json, created_at) "
+                "VALUES (?, ?, ?, ?);",
+                (run_id, event_type, payload_json, now),
+            )
+            return int(cur.lastrowid or 0)
+
+        if is_generated:
+            with active_conn:
+                return _do()
+        else:
+            return _do()
+
+
+def list_run_events(
+    run_id: str,
+    after_id: int = 0,
+    limit: int = 500,
+    conn: Optional[sqlite3.Connection] = None,
+) -> list[dict[str, Any]]:
+    with auto_connection(conn) as (active_conn, _):
+        try:
+            cursor = active_conn.execute(
+                "SELECT event_id, run_id, event_type, payload_json, created_at "
+                "FROM agent_run_events WHERE run_id = ? AND event_id > ? "
+                "ORDER BY event_id ASC LIMIT ?;",
+                (run_id, after_id, limit),
+            )
+        except sqlite3.OperationalError as e:
+            if "no such table" in str(e):
+                return []
+            raise
+        out: list[dict[str, Any]] = []
+        for row in cursor.fetchall():
+            try:
+                payload = json.loads(row["payload_json"]) if row["payload_json"] else {}
+            except (json.JSONDecodeError, TypeError):
+                payload = {}
+            out.append(
+                {
+                    "event_id": row["event_id"],
+                    "run_id": row["run_id"],
+                    "event_type": row["event_type"],
+                    "payload": payload,
+                    "created_at": row["created_at"],
+                }
+            )
+        return out
+
+
+def purge_old_run_events(retention_days: int = 7, conn: Optional[sqlite3.Connection] = None) -> int:
+    """Delete event rows for terminal runs finished more than retention_days ago."""
+    from datetime import timedelta
+
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat()
+    with auto_connection(conn) as (active_conn, is_generated):
+        placeholders = ",".join("?" for _ in AGENT_TERMINAL_STATUSES)
+
+        def _do() -> int:
+            try:
+                cur = active_conn.execute(
+                    f"DELETE FROM agent_run_events WHERE run_id IN ("
+                    f"SELECT run_id FROM agent_runs WHERE status IN ({placeholders}) "
+                    f"AND finished_at IS NOT NULL AND finished_at < ?);",
+                    (*sorted(AGENT_TERMINAL_STATUSES), cutoff),
+                )
+                return cur.rowcount
+            except sqlite3.OperationalError as e:
+                if "no such table" in str(e):
+                    return 0
+                raise
+
+        if is_generated:
+            with active_conn:
+                return _do()
+        else:
+            return _do()
 
 
 # --- Prompt Template Store ---

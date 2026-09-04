@@ -33,7 +33,6 @@ import type {
   AgentMessageAttachment,
   AgentRun,
   AgentSessionDetailResponse,
-  AgentStreamEvent,
   HealthcareOverviewResponse,
   HealthcareCorrelationResponse,
   AgentPromptTemplate,
@@ -685,119 +684,6 @@ export function deletePromptTemplate(templateId: string): Promise<{ success: boo
   );
 }
 
-/** Parse one complete SSE event block, including CRLF and multiline data. */
-export function parseAgentSseEvent(
-  eventBlock: string,
-  onEvent: (event: AgentStreamEvent) => void,
-): void {
-  const dataLines: string[] = [];
-  for (const line of eventBlock.split(/\r?\n/)) {
-    if (line.startsWith(":")) continue;
-    if (!line.startsWith("data:")) continue;
-
-    let data = line.slice(5);
-    if (data.startsWith(" ")) data = data.slice(1);
-    dataLines.push(data);
-  }
-
-  if (dataLines.length === 0) return;
-
-  const jsonStr = dataLines.join("\n");
-  try {
-    const parsed = JSON.parse(jsonStr) as AgentStreamEvent;
-    onEvent(parsed);
-  } catch (e) {
-    console.error("Failed to parse SSE event:", jsonStr, e);
-  }
-}
-
-function drainAgentSseEvents(
-  buffer: string,
-  onEvent: (event: AgentStreamEvent) => void,
-): string {
-  let remainder = buffer;
-  while (true) {
-    const separator = /\r?\n\r?\n/.exec(remainder);
-    if (!separator || separator.index === undefined) return remainder;
-
-    parseAgentSseEvent(remainder.slice(0, separator.index), onEvent);
-    remainder = remainder.slice(separator.index + separator[0].length);
-  }
-}
-
-export async function streamAgentMessage(
-  sessionId: string,
-  content: string,
-  onEvent: (event: AgentStreamEvent) => void,
-  signal?: AbortSignal,
-  attachments?: AgentMessageAttachment[],
-): Promise<void> {
-  const headers = new Headers();
-  headers.set("Content-Type", "application/json");
-  headers.set("Accept", "text/event-stream");
-  const token = getToken();
-  if (token) {
-    headers.set("Authorization", `Bearer ${token}`);
-  }
-
-  const body: Record<string, unknown> = { content };
-  if (attachments && attachments.length > 0) {
-    body.images = attachments.map((att) => ({
-      name: att.name,
-      mime_type: att.mime_type,
-      data: att.data,
-    }));
-  }
-
-  const response = await fetch(
-    `/api/v1/agent-sessions/${encodeURIComponent(sessionId)}/messages/stream`,
-    {
-      method: "POST",
-      headers,
-      body: JSON.stringify(body),
-      signal,
-    },
-  );
-
-  if (response.status === 401) {
-    clearToken();
-    window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT));
-    throw new ApiError(401, "Authentication failed.");
-  }
-
-  if (!response.ok) {
-    let detail = response.statusText;
-    try {
-      const errJson = await response.json();
-      if (errJson && errJson.detail) detail = errJson.detail;
-    } catch (_) {}
-    throw new ApiError(response.status, detail);
-  }
-
-  if (!response.body) {
-    throw new Error("ReadableStream not supported by response body.");
-  }
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder("utf-8");
-  let buffer = "";
-
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    buffer = drainAgentSseEvents(buffer, onEvent);
-  }
-
-  // Flush an incomplete UTF-8 sequence retained by TextDecoder, then parse
-  // the final event even when a proxy omitted its trailing blank line.
-  buffer += decoder.decode();
-  buffer = drainAgentSseEvents(buffer, onEvent);
-  if (buffer.trim()) {
-    parseAgentSseEvent(buffer, onEvent);
-  }
-}
-
 export function apiGet<T>(path: string): Promise<T> {
   return request<T>(path);
 }
@@ -806,5 +692,79 @@ export function apiPost<T>(path: string, body: any): Promise<T> {
   return request<T>(path, {
     method: "POST",
     body: JSON.stringify(body),
+  });
+}
+
+// --- Reconnectable Run APIs (docs/run-sse) ---
+
+export function startAgentRun(
+  sessionId: string,
+  payload: { content: string; images?: AgentMessageAttachment[] },
+  idempotencyKey?: string,
+): Promise<{ run: import("./types").AgentRun }> {
+  const headers = new Headers();
+  headers.set("Content-Type", "application/json");
+  const token = getToken();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  if (idempotencyKey) headers.set("Idempotency-Key", idempotencyKey);
+  const body: Record<string, unknown> = { content: payload.content };
+  if (payload.images && payload.images.length > 0) {
+    body.images = payload.images.map((att) => ({
+      name: att.name,
+      mime_type: att.mime_type,
+      data: att.data,
+    }));
+  }
+  return fetch(`/api/v1/agent-sessions/${encodeURIComponent(sessionId)}/runs`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(body),
+  }).then(async (res) => {
+    if (res.status === 401) {
+      clearToken();
+      window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT));
+      throw new ApiError(401, "Authentication failed.");
+    }
+    if (!res.ok) {
+      let detail = res.statusText;
+      try {
+        const errJson = await res.json();
+        if (errJson?.detail) detail = errJson.detail;
+      } catch {}
+      throw new ApiError(res.status, detail);
+    }
+    return (await res.json()) as { run: import("./types").AgentRun };
+  });
+}
+
+export function cancelAgentRun(
+  runId: string,
+): Promise<{ run: import("./types").AgentRun }> {
+  return request<{ run: import("./types").AgentRun }>(
+    `/api/v1/agent-runs/${encodeURIComponent(runId)}/cancel`,
+    { method: "POST", body: JSON.stringify({}) },
+  );
+}
+
+export async function subscribeAgentRunEvents(
+  runId: string,
+  opts: {
+    lastEventId: number;
+    signal?: AbortSignal;
+    onEnvelope: (envelope: import("./runSse").RunSseEnvelope) => void;
+  },
+): Promise<void> {
+  const { subscribeRunEvents } = await import("./runSse");
+  return subscribeRunEvents({
+    url: `/api/v1/agent-runs/${encodeURIComponent(runId)}/events`,
+    lastEventId: opts.lastEventId,
+    signal: opts.signal,
+    onEnvelope: opts.onEnvelope,
+    isTerminal: (envelope) => {
+      const type = String(
+        envelope.data["type"] ?? envelope.data["event"] ?? "",
+      );
+      return type === "done" || type === "error" || type === "cancelled";
+    },
   });
 }

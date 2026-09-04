@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -144,14 +145,6 @@ def _validate_images(images: List[ImageAttachmentRequest]) -> List[Dict[str, Any
             }
         )
     return validated
-
-
-class StreamMessageRequest(BaseModel):
-    content: str = Field(..., description="User message text")
-    images: List[ImageAttachmentRequest] = Field(
-        default_factory=list,
-        description="Optional list of inline image attachments (base64 payloads).",
-    )
 
 
 # --- Static Catalog Routes ---
@@ -301,6 +294,9 @@ def delete_session(session_id: str) -> Dict[str, Any]:
         return {"success": True}
     except FileNotFoundError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+    except ValueError as e:
+        # Active run guard: require explicit cancel first.
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e)) from e
 
 
 # --- Prompt Template Routes ---
@@ -366,47 +362,153 @@ def delete_prompt_template(template_id: str) -> Dict[str, Any]:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
 
 
-# --- Conversation SSE Streaming Route ---
+# --- Reconnectable Run Routes (docs/run-sse) ---
 
 
-@router.post("/agent-sessions/{session_id}/messages/stream")
-async def stream_session_message(
-    session_id: str, req: StreamMessageRequest
-) -> StreamingResponse:
+class StartAgentRunRequest(BaseModel):
+    content: str = Field(..., description="User message text")
+    images: List[ImageAttachmentRequest] = Field(
+        default_factory=list,
+        description="Optional list of inline image attachments (base64 payloads).",
+    )
+
+
+@router.post("/agent-sessions/{session_id}/runs", status_code=status.HTTP_202_ACCEPTED)
+def start_agent_run(
+    session_id: str,
+    req: StartAgentRunRequest,
+    idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
+) -> Dict[str, Any]:
     content = req.content.strip() if req.content else ""
     try:
         validated_images = _validate_images(req.images)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
-
-    # Empty user text is allowed only when at least one image attachment is
-    # present — purely empty requests are still rejected.
     if not content and not validated_images:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Message content must not be empty.",
         )
-
     try:
-        stream_gen = agent_service.stream_session_message(
-            session_id, content, images=validated_images or None
+        run = agent_service.start_run(
+            session_id,
+            content,
+            images=validated_images or None,
+            idempotency_key=idempotency_key,
         )
-        first_chunk = await stream_gen.__anext__()
+        return {"run": run}
     except FileNotFoundError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
-        ) from e
-    except StopAsyncIteration:
-        async def empty_gen():
+        msg = str(e)
+        if "conflict" in msg.lower():
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=msg) from e
+        if "active" in msg.lower():
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=msg) from e
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=msg) from e
+
+
+@router.get("/agent-runs/{run_id}/events")
+async def subscribe_agent_run_events(
+    run_id: str,
+    request: Request,
+    last_event_id: Optional[str] = Query(default=None, alias="last_event_id"),
+    last_event_id_header: Optional[str] = Header(default=None, alias="Last-Event-ID"),
+) -> StreamingResponse:
+    from obsidian_ai_hub.agents import store as agent_store
+    from obsidian_ai_hub.runs.events import (
+        format_sse,
+        heartbeat_sse,
+        is_terminal_event,
+        parse_last_event_id,
+    )
+
+    try:
+        run = agent_service.get_run(run_id)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+
+    raw_cursor = last_event_id_header if last_event_id_header is not None else last_event_id
+    cursor = parse_last_event_id(raw_cursor)
+
+    async def event_gen():
+        nonlocal cursor
+        # Client sends last *applied* ID; server replays event_id > cursor.
+        # Worker writes terminal status before the terminal event, so a poll
+        # in that window must not close before the event lands (grace polls).
+        idle_cycles = 0
+        terminal_empty_polls = 0
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                events = await asyncio.to_thread(
+                    agent_store.list_run_events, run_id, cursor, 200
+                )
+                if events:
+                    idle_cycles = 0
+                    terminal_empty_polls = 0
+                    for ev in events:
+                        eid = int(ev["event_id"])
+                        payload = dict(ev.get("payload") or {})
+                        # Ensure type field present for frontend folding.
+                        payload.setdefault("type", ev.get("event_type"))
+                        yield format_sse(eid, payload)
+                        cursor = eid
+                        if is_terminal_event(str(ev.get("event_type") or ""), payload):
+                            return
+                    # After replay, check terminal run with terminal event.
+                    current = await asyncio.to_thread(agent_store.get_run, run_id)
+                    if current is not None and str(current.get("status")) in (
+                        "succeeded",
+                        "failed",
+                        "cancelled",
+                        "interrupted",
+                    ):
+                        last_type = str(events[-1].get("event_type") or "")
+                        last_payload = dict(events[-1].get("payload") or {})
+                        if is_terminal_event(last_type, last_payload):
+                            return
+                else:
+                    current = await asyncio.to_thread(agent_store.get_run, run_id)
+                    if current is not None and str(current.get("status")) in (
+                        "succeeded",
+                        "failed",
+                        "cancelled",
+                        "interrupted",
+                    ):
+                        # Grace period for the terminal event (status lands
+                        # first). History remains via detail API after expiry.
+                        terminal_empty_polls += 1
+                        if terminal_empty_polls >= 10:
+                            return
+                    else:
+                        terminal_empty_polls = 0
+                    # waiting_user pauses with user_question as last event;
+                    # keep the stream open briefly then close so the client
+                    # does not poll forever (it will resubscribe on demand).
+                    if current is not None and str(current.get("status")) == "waiting_user":
+                        return
+                    idle_cycles += 1
+                    # ~15s heartbeat (0.5s * 30).
+                    if idle_cycles >= 30:
+                        idle_cycles = 0
+                        yield heartbeat_sse()
+                try:
+                    await asyncio.wait_for(asyncio.sleep(0.5), timeout=0.5)
+                except asyncio.CancelledError:
+                    break
+        except asyncio.CancelledError:
+            # Subscriber disconnect must not mutate the run.
             return
-            yield
-        return StreamingResponse(empty_gen(), media_type="text/event-stream")
 
-    async def full_gen():
-        yield first_chunk
-        async for chunk in stream_gen:
-            yield chunk
+    return StreamingResponse(event_gen(), media_type="text/event-stream")
 
-    return StreamingResponse(full_gen(), media_type="text/event-stream")
+
+@router.post("/agent-runs/{run_id}/cancel")
+def cancel_agent_run(run_id: str) -> Dict[str, Any]:
+    try:
+        run = agent_service.cancel_run(run_id)
+        return {"run": run}
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e

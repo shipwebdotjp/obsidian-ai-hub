@@ -759,12 +759,22 @@ export interface AgentToolCall {
   iteration: number;
 }
 
+export type AgentRunStatus =
+  | "queued"
+  | "running"
+  | "cancelling"
+  | "waiting_user"
+  | "succeeded"
+  | "failed"
+  | "cancelled"
+  | "interrupted";
+
 export interface AgentRun {
   run_id: string;
   session_id: string;
   user_message_id: string;
   assistant_message_id: string | null;
-  status: "running" | "succeeded" | "failed" | "waiting_user";
+  status: AgentRunStatus;
   hitl_run_id: string | null;
   used_tools: string[];
   created_hitl_run_ids: string[];
@@ -772,6 +782,7 @@ export interface AgentRun {
   error_message: string | null;
   started_at: string;
   finished_at: string | null;
+  idempotency_key?: string | null;
 }
 
 export interface AgentSessionDetailResponse {
@@ -779,6 +790,24 @@ export interface AgentSessionDetailResponse {
   agent: Agent;
   messages: AgentMessage[];
   runs: AgentRun[];
+  active_run?: AgentRun | null;
+}
+
+export type AgentRunEventType =
+  | "thinking"
+  | "tool_call_detected"
+  | "tool_call_start"
+  | "tool_call_end"
+  | "text_append"
+  | "user_question"
+  | "done"
+  | "error"
+  | "cancelled";
+
+export interface AgentRunEvent {
+  event_id: number;
+  event_type: AgentRunEventType;
+  payload: Record<string, unknown>;
 }
 
 export interface AgentLiveToolCall {
