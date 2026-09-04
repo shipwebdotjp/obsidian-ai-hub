@@ -734,3 +734,20 @@ AgentsPage と共通のデザインパターンを採用し、PC幅での情報�
 
 - Vitest（`lastViewedSession.test.ts` 7件、キー・JSON往復・破損・例外耐性）、`AgentsPage.test.tsx` に復元8件（同一agent復元・別agent復元・deep link優先・無効時消去＋フォールバック保存・ストレージ例外・一覧選択保存・deep link保存・新規作成保存）。
 - フロント Vitest 全体 304 passed、`tsc --noEmit` clean。
+
+## Coding 左ペイン操作のデザイン統一（Agents画面との一貫性向上）
+
+| 項目 | 内容 |
+|------|------|
+| 決定日 | 2026-09-04 |
+| カテゴリ | コーディング・Web UI |
+| 決定内容 | CodingPage.tsx のPC左ペインの「サイドバーを畳む」ボタンおよびセッション一覧ヘッダーの「既定設定」ボタンのスタイルを AI エージェント画面（AgentsPage.tsx）のトーン＆マナーへ統一する。 |
+
+### 結論に至った経緯
+
+AgentsPage と CodingPage の左ペイン構造は共通のレイアウトを採用しているが、ボタンのスタイルクラス（背景色・文字色・余白）が不一致だった。左ペイン畳み込みボタンをダーク背景から白地背景向けのグレーアイコン・淡いホバー背景（`text-slate-500 hover:bg-slate-100`）へ、セッション一覧の「既定設定」ボタンを枠線付き白背景（`border border-slate-300 bg-white text-slate-700 hover:bg-slate-50`）へ統一し、高さ・余白・文字サイズ（`px-3 py-1 text-sm font-medium`）を「+ 新規」ボタンと一致させることで操作感の一貫性を向上させた。
+
+### 検証
+
+- Frontend Vitest (`CodingPage.test.tsx`) でボタンのスタイルクラスおよび既存の開閉・設定操作を検証し、全テスト通過。
+- `tsc -b` 型チェックおよび `vite build` クリーン通過。

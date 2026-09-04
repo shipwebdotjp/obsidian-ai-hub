@@ -1189,7 +1189,7 @@ export default function CodingPage() {
             <button
               type="button"
               onClick={() => setLeftPaneCollapsed(true)}
-              className="rounded p-1 bg-slate-900 text-white hover:bg-slate-800 cursor-pointer"
+              className="rounded p-1 text-slate-500 hover:bg-slate-100 cursor-pointer"
               aria-label="サイドバーを畳む"
             >
               <ChevronLeft className="h-4 w-4" />
@@ -1241,7 +1241,7 @@ export default function CodingPage() {
                 <button
                   type="button"
                   onClick={handleOpenUserDefaults}
-                  className="rounded border border-slate-300 bg-slate-900 text-white px-2 py-1 text-[11px] hover:bg-slate-800 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="rounded border border-slate-300 bg-white px-3 py-1 text-sm font-medium text-slate-700 hover:bg-slate-50 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                   title="ユーザー既定の利用可能ツール設定"
                 >
                   既定設定

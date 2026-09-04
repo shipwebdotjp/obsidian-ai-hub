@@ -170,6 +170,7 @@ describe("CodingPage", () => {
     });
 
     const collapseBtn = screen.getByRole("button", { name: "サイドバーを畳む" });
+    expect(collapseBtn).toHaveClass("text-slate-500", "hover:bg-slate-100");
     fireEvent.click(collapseBtn);
 
     expect(screen.queryByText("プロジェクト")).not.toBeInTheDocument();
@@ -180,6 +181,20 @@ describe("CodingPage", () => {
     await waitFor(() => {
       expect(screen.getByText("プロジェクト")).toBeInTheDocument();
     });
+  });
+
+  it("renders '既定設定' and '+ 新規' buttons with matching sizing and styling", async () => {
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("Test App")).toBeInTheDocument();
+    });
+
+    const defaultsBtn = screen.getByRole("button", { name: "既定設定" });
+    const newSessionBtn = screen.getByRole("button", { name: "+ 新規" });
+
+    expect(defaultsBtn).toHaveClass("border", "border-slate-300", "bg-white", "text-slate-700", "hover:bg-slate-50", "px-3", "py-1", "text-sm", "font-medium");
+    expect(newSessionBtn).toHaveClass("px-3", "py-1", "text-sm", "font-medium");
   });
 
   it("allows expanding left pane even when no session is selected", async () => {
