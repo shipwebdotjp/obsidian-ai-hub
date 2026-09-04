@@ -90,6 +90,11 @@ def clear_handlers() -> None:
     _registry.clear()
 
 
+def list_handler_names() -> List[str]:
+    """Return sorted registered handler names (for startup diagnostics)."""
+    return sorted(_registry.keys())
+
+
 def get_eligible_runs(conn: sqlite3.Connection) -> List[Dict[str, Any]]:
     """Fetch Runs ready to resume or running but with an expired lease."""
     sql = """

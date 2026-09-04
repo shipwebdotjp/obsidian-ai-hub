@@ -45,7 +45,7 @@ import { useSessionPromptDraft } from "../../hooks/useSessionPromptDraft";
 import { useAgentImageDraft } from "./useAgentImageDraft";
 import { getChatInputPlaceholder, shouldSendOnEnter, useChatSendMode } from "../settings/chatSendMode";
 import MarkdownPreview from "../../components/MarkdownPreview";
-import { WaitingRunQuestionCard, type QuestionItem, toQuestionItems } from "../../components/InConversationQuestionCard";
+import { WaitingRunQuestionCard, WaitingRunStatusPanel, waitForHitlSettled, type ActiveWaitingRun, type QuestionItem, toQuestionItems } from "../../components/InConversationQuestionCard";
 import { formatDateTime } from "../../utils/date";
 import {
   ChevronLeft,
@@ -183,10 +183,7 @@ export default function AgentsPage() {
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<AgentMessage[]>([]);
   const [runs, setRuns] = useState<AgentRun[]>([]);
-  const [activeWaitingRun, setActiveWaitingRun] = useState<{
-    hitlRunId: string;
-    questions: QuestionItem[];
-  } | null>(null);
+  const [activeWaitingRun, setActiveWaitingRun] = useState<ActiveWaitingRun | null>(null);
   const [loadedSessionId, setLoadedSessionId] = useState<string | null>(null);
   const [sessionSearchQuery, setSessionSearchQuery] = useState("");
   const [sessionSearchResults, setSessionSearchResults] = useState<AgentMessageSearchResult[]>([]);
@@ -282,6 +279,12 @@ export default function AgentsPage() {
   const mobileDrawerRef = useRef<HTMLDivElement>(null);
   const mobileDrawerTriggerRef = useRef<HTMLButtonElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  // Async question-card operations must not leak into the newly selected
+  // session after a switch; track the current selection in a ref.
+  const selectedSessionIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    selectedSessionIdRef.current = selectedSessionId;
+  }, [selectedSessionId]);
   const streamGenerationRef = useRef(0);
   const streamingTextBufferRef = useRef("");
   const streamingTextFrameRef = useRef<number | null>(null);
@@ -460,6 +463,8 @@ export default function AgentsPage() {
           setActiveWaitingRun({
             hitlRunId: waitingRun.hitl_run_id,
             questions: activeQuestions,
+            hitlStatus: (hitlDetail.status as string | null) ?? null,
+            hitlError: (hitlDetail.error_message as string | null) ?? null,
           });
         } catch (e: unknown) {
           console.error("Failed to load HITL question set", e);
@@ -473,6 +478,58 @@ export default function AgentsPage() {
       const message =
         e instanceof Error ? e.message : "セッション詳細の読み込みに失敗しました。";
       setChatError(message);
+    }
+  };
+
+  // Submit answers sequentially so a partial failure surfaces instead of
+  // silently leaving questions pending. Skip state updates when the selection
+  // moved to another session mid-operation (its own detail load owns the UI).
+  const handleSubmitWaitingAnswers = async (
+    waiting: ActiveWaitingRun,
+    answers: Record<string, { value: string; comment?: string }>,
+  ) => {
+    const opSessionId = selectedSessionId;
+    const opHitlRunId = waiting.hitlRunId;
+    try {
+      for (const [qKey, ans] of Object.entries(answers)) {
+        await submitHitlAnswer(opHitlRunId, qKey, ans.value, ans.comment);
+      }
+      if (selectedSessionIdRef.current !== opSessionId) return;
+      // Switch to the resume-pending panel immediately so the answered
+      // choices never linger as an empty card frame.
+      setActiveWaitingRun({ hitlRunId: opHitlRunId, questions: [], hitlStatus: "ready_to_resume" });
+      // Wait for HITL dispatch to settle before reloading; the active-run
+      // restore then resubscribes the same run ID from the existing cursor.
+      const settled = await waitForHitlSettled(opHitlRunId);
+      if (selectedSessionIdRef.current !== opSessionId) return;
+      if (settled) {
+        setActiveWaitingRun((prev) =>
+          prev && prev.hitlRunId === opHitlRunId
+            ? { hitlRunId: opHitlRunId, questions: [], hitlStatus: settled.status }
+            : prev,
+        );
+      }
+      if (opSessionId) {
+        await loadSessionDetail(opSessionId);
+      }
+    } catch (e: any) {
+      if (selectedSessionIdRef.current !== opSessionId) return;
+      setChatError(e.message || "回答の送信に失敗しました");
+    }
+  };
+
+  const handleCancelWaitingRun = async (waiting: ActiveWaitingRun) => {
+    const opSessionId = selectedSessionId;
+    try {
+      await cancelHitlRun(waiting.hitlRunId);
+      if (selectedSessionIdRef.current !== opSessionId) return;
+      setActiveWaitingRun(null);
+      if (opSessionId) {
+        await loadSessionDetail(opSessionId);
+      }
+    } catch (e: any) {
+      if (selectedSessionIdRef.current !== opSessionId) return;
+      setChatError(e.message || "質問の取消に失敗しました");
     }
   };
 
@@ -669,7 +726,7 @@ export default function AgentsPage() {
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView?.({ behavior: "smooth" });
-  }, [messages, streamingText, streamingToolCalls, streamingPhase, streamingIteration]);
+  }, [messages, streamingText, streamingToolCalls, streamingPhase, streamingIteration, activeWaitingRun]);
 
   const activeAgent = agents.find((a) => a.agent_id === selectedAgentId);
   const displayedStreamingPhase = streamingToolCalls.some(
@@ -1468,7 +1525,7 @@ export default function AgentsPage() {
         const questions = Array.isArray(data.questions)
           ? (data.questions as QuestionItem[])
           : [];
-        if (hitlRunId) setActiveWaitingRun({ hitlRunId, questions });
+        if (hitlRunId) setActiveWaitingRun({ hitlRunId, questions, hitlStatus: "pending_user" });
         void loadSessionDetail(ctx.streamSessionId);
       } else if (type === "done") {
         ctx.finalizeSendSuccess();
@@ -2699,44 +2756,23 @@ export default function AgentsPage() {
                 })
               )}
 
-              {/* In-Conversation Active Question Card */}
-              {activeWaitingRun && (
+              {/* In-Conversation Active Question Card (message flow bottom) */}
+              {activeWaitingRun && activeWaitingRun.questions.length > 0 && (
                 <WaitingRunQuestionCard
                   key={activeWaitingRun.hitlRunId}
                   hitlRunId={activeWaitingRun.hitlRunId}
                   questions={activeWaitingRun.questions}
-                  onSubmit={async (answers) => {
-                    // Submit sequentially so partial failures surface.
-                    try {
-                      for (const [qKey, ans] of Object.entries(answers)) {
-                        await submitHitlAnswer(
-                          activeWaitingRun.hitlRunId,
-                          qKey,
-                          ans.value,
-                          ans.comment
-                        );
-                      }
-                      setActiveWaitingRun(null);
-                      if (selectedSessionId) {
-                        // Reload detail; the active-run restore resubscribes the
-                        // same run ID from the existing cursor in order.
-                        await loadSessionDetail(selectedSessionId);
-                      }
-                    } catch (e: any) {
-                      setChatError(e.message || "回答の送信に失敗しました");
-                    }
-                  }}
-                  onCancel={async () => {
-                    try {
-                      await cancelHitlRun(activeWaitingRun.hitlRunId);
-                      setActiveWaitingRun(null);
-                      if (selectedSessionId) {
-                        await loadSessionDetail(selectedSessionId);
-                      }
-                    } catch (e: any) {
-                      setChatError(e.message || "質問の取消に失敗しました");
-                    }
-                  }}
+                  onSubmit={(answers) => handleSubmitWaitingAnswers(activeWaitingRun, answers)}
+                  onCancel={() => handleCancelWaitingRun(activeWaitingRun)}
+                />
+              )}
+              {activeWaitingRun && activeWaitingRun.questions.length === 0 && (
+                <WaitingRunStatusPanel
+                  key={`${activeWaitingRun.hitlRunId}-status`}
+                  hitlRunId={activeWaitingRun.hitlRunId}
+                  status={activeWaitingRun.hitlStatus}
+                  errorMessage={activeWaitingRun.hitlError}
+                  onCancel={() => handleCancelWaitingRun(activeWaitingRun)}
                 />
               )}
 

@@ -150,9 +150,14 @@ async def execute_coding_run(run_id: str) -> None:
         effective_tool_ids = store.get_effective_session_tool_ids(session_id)
         orchestrator = CodingOrchestrator(tool_ids=effective_tool_ids)
         # Resume progress (cli_count/phase_turn) from prior HITL checkpoint when present.
+        # A corrupt prior fails the run instead of silently dropping answers.
         from obsidian_ai_hub.coding.ask_user_flow import restore_coding_progress
 
-        cli_count, phase_turn = restore_coding_progress(run.get("hitl_run_id"))
+        try:
+            cli_count, phase_turn = restore_coding_progress(run.get("hitl_run_id"))
+        except Exception as exc:
+            _fail(f"Prior HITL checkpoint unreadable: {exc}")
+            return
         final_status = "completed"
         codex_title_source: Optional[str] = None
         current_external_id = session.get("external_session_id")

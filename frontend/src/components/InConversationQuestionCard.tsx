@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { getHitlRun } from '../api/client';
 
 export interface ChoiceOption {
   value: string;
@@ -30,6 +31,115 @@ export interface PendingQuestionSource {
   status?: string;
   choices?: Array<{ value: string; label: string; description?: string }> | null;
 }
+
+/** Active waiting-run state shared by Agents/Coding pages (status drives empty-state UI). */
+export interface ActiveWaitingRun {
+  hitlRunId: string;
+  questions: QuestionItem[];
+  /** HITL run status (e.g. pending_user, ready_to_resume, completed, failed, cancelled) or null when live. */
+  hitlStatus: string | null;
+  /** HITL run error_message for failed runs (recovery guidance). */
+  hitlError?: string | null;
+}
+
+/** HITL terminal statuses: polling stops when one is reached. */
+const HITL_SETTLED_STATUSES = new Set(["completed", "failed", "cancelled"]);
+
+/**
+ * Poll a HITL run until it settles (completed/failed/cancelled) or times out.
+ * Used after answer submission so the UI reloads once dispatch finished
+ * instead of flashing an empty question frame. Never throws: returns the
+ * last seen detail (or null) on timeout/error.
+ */
+export async function waitForHitlSettled(
+  hitlRunId: string,
+  opts: { intervalMs?: number; timeoutMs?: number } = {},
+): Promise<{ status: string } | null> {
+  const intervalMs = opts.intervalMs ?? 1000;
+  const timeoutMs = opts.timeoutMs ?? 20000;
+  const deadline = Date.now() + timeoutMs;
+  let last: { status: string } | null = null;
+  for (;;) {
+    try {
+      const detail = await getHitlRun(hitlRunId);
+      last = detail;
+      if (HITL_SETTLED_STATUSES.has(String(detail?.status ?? ""))) return last;
+    } catch {
+      // Transient read failure: retry until timeout.
+    }
+    if (Date.now() >= deadline) return last;
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+}
+
+export interface WaitingRunStatusPanelProps {
+  hitlRunId: string;
+  /** HITL run status; null/pending-ish means answers accepted, resume pending. */
+  status: string | null;
+  errorMessage?: string | null;
+  onCancel: () => Promise<void>;
+}
+
+/**
+ * Non-interactive status panel shown when a waiting run has no pending
+ * questions (answers already submitted, or the HITL run failed). Replaces
+ * the empty question-card frame so title/ID/buttons never linger alone.
+ */
+export const WaitingRunStatusPanel: React.FC<WaitingRunStatusPanelProps> = ({
+  hitlRunId,
+  status,
+  errorMessage,
+  onCancel,
+}) => {
+  const [isCancelling, setIsCancelling] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const failed = status === "failed" || status === "cancelled";
+
+  const handleCancel = async () => {
+    if (isCancelling) return;
+    setIsCancelling(true);
+    setError(null);
+    try {
+      await onCancel();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : '取消処理中にエラーが発生しました。');
+      setIsCancelling(false);
+    }
+  };
+
+  return (
+    <div className={`my-4 p-4 border rounded-lg shadow-sm ${failed ? "border-rose-300 bg-rose-50/50" : "border-amber-300 bg-amber-50/50"}`}>
+      <div className={`flex items-center justify-between mb-2 pb-2 border-b ${failed ? "border-rose-200" : "border-amber-200"}`}>
+        <span className={`font-semibold text-sm flex items-center gap-2 ${failed ? "text-rose-900" : "text-amber-900"}`}>
+          <span>{failed ? "⚠️ 確認処理に失敗しました" : "❓ 回答送信済み・再開待ち"}</span>
+        </span>
+        <span className="text-xs text-amber-700 font-mono">ID: {hitlRunId}</span>
+      </div>
+      {failed ? (
+        <p className="text-xs text-rose-800">
+          質問の処理が中断されました{errorMessage ? `（${errorMessage}）` : ""}。セッションの待機を解除するには「取消」を押し、内容を確認して再送してください。
+        </p>
+      ) : (
+        <p className="text-xs text-amber-800">
+          回答を受け付けました。実行の再開を待っています…（自動で再開しない場合はページを再読み込みしてください）
+        </p>
+      )}
+      {error && (
+        <p className="text-xs text-red-600 font-medium mt-2">{error}</p>
+      )}
+      <div className="flex items-center justify-end gap-3 pt-2">
+        <button
+          type="button"
+          onClick={handleCancel}
+          disabled={isCancelling}
+          className="px-3 py-1.5 text-xs font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded disabled:opacity-50 cursor-pointer"
+        >
+          {isCancelling ? '取消中…' : '取消'}
+        </button>
+      </div>
+    </div>
+  );
+};
 
 /** Map HITL API questions to card items: keep pending only, tolerate null choices. */
 export function toQuestionItems(questions: PendingQuestionSource[]): QuestionItem[] {

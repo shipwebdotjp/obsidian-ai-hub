@@ -408,6 +408,141 @@ async def test_agent_invalid_questions_bounce_without_hitl(agent_setup):
 
 
 @pytest.mark.anyio
+async def test_agent_handler_does_not_requeue_cancelled_run(agent_setup):
+    """Handler completes HITL but leaves a concurrently cancelled parent cancelled."""
+    agent, session = agent_setup
+    _, run = agent_store.start_queued_run(session["session_id"], "取消競合テスト")
+    run_id = run["run_id"]
+    choices = [{"value": "a", "label": "A"}]
+
+    mock_llm = MagicMock()
+    _configure_astream(mock_llm, [[_ask_chunk("call_cr", "q1", "質問?", choices)]])
+    mock_llm.bind_tools.return_value = mock_llm
+    with patch("obsidian_ai_hub.agents.runtime.create_langchain_llm", return_value=mock_llm):
+        await execute_agent_run(run_id)
+    hitl_id = agent_store.get_run(run_id)["hitl_run_id"]
+    assert agent_store.get_run(run_id)["status"] == "waiting_user"
+
+    # Concurrent cancel lands before the HITL worker runs the handler.
+    agent_store.transition_run_status(run_id, "cancelled", finished=True)
+
+    cp = hitl_store.get_run(hitl_id)["checkpoint"]
+    ctx = HitlContext(run_id=hitl_id, checkpoint=cp, answers_by_question_key={"q1": "a"}, conn=None,
+                      raw_answers_by_question_key={"q1": {"value": "a", "comment": None}})
+    res = handle_agent_ask_user(ctx)
+    assert res.status == "completed"
+    assert agent_store.get_run(run_id)["status"] == "cancelled"
+
+
+@pytest.mark.anyio
+async def test_agent_corrupt_checkpoint_fails_run(agent_setup):
+    """Unreadable HITL checkpoint fails the run instead of dropping answers silently."""
+    from obsidian_ai_hub.database import get_db_connection
+
+    agent, session = agent_setup
+    _, run = agent_store.start_queued_run(session["session_id"], "破損テスト")
+    run_id = run["run_id"]
+    choices = [{"value": "a", "label": "A"}]
+
+    mock_llm = MagicMock()
+    _configure_astream(mock_llm, [[_ask_chunk("call_b1", "q1", "質問?", choices)]])
+    mock_llm.bind_tools.return_value = mock_llm
+    with patch("obsidian_ai_hub.agents.runtime.create_langchain_llm", return_value=mock_llm):
+        await execute_agent_run(run_id)
+    hitl_id = agent_store.get_run(run_id)["hitl_run_id"]
+
+    hitl_service.submit_answer(run_id=hitl_id, question_set_id="qset_1", question_key="q1", answer={"value": "a", "comment": None})
+    ctx = HitlContext(run_id=hitl_id, checkpoint=hitl_store.get_run(hitl_id)["checkpoint"],
+                      answers_by_question_key={"q1": "a"}, conn=None,
+                      raw_answers_by_question_key={"q1": {"value": "a", "comment": None}})
+    res = handle_agent_ask_user(ctx)
+    hitl_service.update_checkpoint(hitl_id, res.checkpoint)
+    assert agent_store.get_run(run_id)["status"] == "queued"
+
+    conn = get_db_connection()
+    try:
+        conn.execute("UPDATE hitl_runs SET checkpoint = ? WHERE run_id = ?", ("{invalid-json", hitl_id))
+        conn.commit()
+    finally:
+        conn.close()
+
+    mock_llm2 = MagicMock()
+    mock_llm2.bind_tools.return_value = mock_llm2
+    with patch("obsidian_ai_hub.agents.runtime.create_langchain_llm", return_value=mock_llm2):
+        await execute_agent_run(run_id)
+    assert agent_store.get_run(run_id)["status"] == "failed"
+
+
+@pytest.mark.anyio
+async def test_coding_handler_does_not_requeue_cancelled_run(coding_setup):
+    """Coding handler completes HITL but leaves a concurrently cancelled parent cancelled."""
+    session = coding_setup
+    _, run = coding_store.start_queued_run(session["session_id"], "取消競合テスト")
+    run_id = run["run_id"]
+
+    ask = MagicMock()
+    ask.content = "確認です。"
+    ask.tool_calls = [
+        {"name": "ask_user",
+         "args": {"questions": [{"question_id": "q1", "question": "Q?", "choices": [{"value": "a", "label": "A"}]}]},
+         "id": "c_cc_1"},
+    ]
+    with patch("obsidian_ai_hub.coding.orchestrator.create_langchain_llm", side_effect=_coding_llm_factory([ask])):
+        await execute_coding_run(run_id)
+    hitl_id = coding_store.get_run(run_id)["hitl_run_id"]
+    assert coding_store.get_run(run_id)["status"] == "waiting_user"
+
+    coding_store.transition_run_status(run_id, "cancelled", finished=True)
+
+    cp = hitl_store.get_run(hitl_id)["checkpoint"]
+    ctx = HitlContext(run_id=hitl_id, checkpoint=cp, answers_by_question_key={"q1": "a"}, conn=None,
+                      raw_answers_by_question_key={"q1": {"value": "a", "comment": None}})
+    res = handle_coding_ask_user(ctx)
+    assert res.status == "completed"
+    assert coding_store.get_run(run_id)["status"] == "cancelled"
+
+
+@pytest.mark.anyio
+async def test_coding_corrupt_prior_checkpoint_fails_run(coding_setup):
+    """Unreadable prior checkpoint fails the coding run instead of dropping answers."""
+    from obsidian_ai_hub.database import get_db_connection
+
+    session = coding_setup
+    _, run = coding_store.start_queued_run(session["session_id"], "破損テスト")
+    run_id = run["run_id"]
+
+    ask = MagicMock()
+    ask.content = "確認です。"
+    ask.tool_calls = [
+        {"name": "ask_user",
+         "args": {"questions": [{"question_id": "q1", "question": "Q?", "choices": [{"value": "a", "label": "A"}]}]},
+         "id": "c_cb_1"},
+    ]
+    with patch("obsidian_ai_hub.coding.orchestrator.create_langchain_llm", side_effect=_coding_llm_factory([ask])):
+        await execute_coding_run(run_id)
+    hitl_id = coding_store.get_run(run_id)["hitl_run_id"]
+
+    hitl_service.submit_answer(run_id=hitl_id, question_set_id="qset_1", question_key="q1", answer={"value": "a", "comment": None})
+    ctx = HitlContext(run_id=hitl_id, checkpoint=hitl_store.get_run(hitl_id)["checkpoint"],
+                      answers_by_question_key={"q1": "a"}, conn=None,
+                      raw_answers_by_question_key={"q1": {"value": "a", "comment": None}})
+    res = handle_coding_ask_user(ctx)
+    hitl_service.update_checkpoint(hitl_id, res.checkpoint)
+    assert coding_store.get_run(run_id)["status"] == "queued"
+
+    conn = get_db_connection()
+    try:
+        conn.execute("UPDATE hitl_runs SET checkpoint = ? WHERE run_id = ?", ("{invalid-json", hitl_id))
+        conn.commit()
+    finally:
+        conn.close()
+
+    with patch("obsidian_ai_hub.coding.orchestrator.create_langchain_llm", side_effect=_coding_llm_factory([])):
+        await execute_coding_run(run_id)
+    assert coding_store.get_run(run_id)["status"] == "failed"
+
+
+@pytest.mark.anyio
 async def test_agent_second_question_accumulates_history(agent_setup):
     """Two ask_user rounds accumulate qa_history and inject both answers on resume."""
     from obsidian_ai_hub.agents.ask_user import build_resume_turns

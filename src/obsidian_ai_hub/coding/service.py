@@ -7,6 +7,7 @@ import json
 import logging
 import sqlite3
 import threading
+import uuid
 from datetime import datetime
 from typing import AsyncGenerator, Dict, Optional, Tuple
 from zoneinfo import ZoneInfo

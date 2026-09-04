@@ -90,8 +90,19 @@ def handle_agent_ask_user(ctx: HitlContext) -> HitlResult:
     new_checkpoint = json.dumps(merged, ensure_ascii=False)
 
     # Resume Agent run by transitioning from waiting_user to queued while keeping hitl_run_id
-    # NOTE: best-effort two-phase commit with the HITL dispatcher (see Decisions-HITL).
-    agent_store.update_run_hitl(run_id=run_id, status="queued", hitl_run_id=ctx.run_id)
+    # NOTE: best-effort two-phase commit with the HITL dispatcher (see Decisions-HITL):
+    # the dispatcher persists new_checkpoint after this handler returns.
+    # Skip the requeue when the parent already left waiting_user (e.g. concurrently
+    # cancelled) so a cancel is never overwritten back to queued. Best-effort
+    # read-then-write; a missing row proceeds to update (which raises observably).
+    cur = agent_store.get_run(run_id)
+    if cur is None or cur.get("status") == "waiting_user":
+        agent_store.update_run_hitl(run_id=run_id, status="queued", hitl_run_id=ctx.run_id)
+    else:
+        logger.warning(
+            "Agent run %s is %s, not requeueing after HITL %s.",
+            run_id, cur.get("status"), ctx.run_id,
+        )
 
     return HitlResult.complete(checkpoint=new_checkpoint)
 
@@ -111,7 +122,17 @@ def handle_coding_ask_user(ctx: HitlContext) -> HitlResult:
     new_checkpoint = json.dumps(merged, ensure_ascii=False)
 
     # Update coding run status from waiting_user to queued while keeping hitl_run_id
-    # NOTE: best-effort two-phase commit with the HITL dispatcher (see Decisions-HITL).
-    coding_store.update_run(run_id=run_id, status="queued", hitl_run_id=ctx.run_id)
+    # NOTE: best-effort two-phase commit with the HITL dispatcher (see Decisions-HITL):
+    # the dispatcher persists new_checkpoint after this handler returns.
+    # Skip the requeue when the parent already left waiting_user (e.g. concurrently
+    # cancelled) so a cancel is never overwritten back to queued.
+    cur = coding_store.get_run(run_id)
+    if cur is None or cur.get("status") == "waiting_user":
+        coding_store.update_run(run_id=run_id, status="queued", hitl_run_id=ctx.run_id)
+    else:
+        logger.warning(
+            "Coding run %s is %s, not requeueing after HITL %s.",
+            run_id, cur.get("status"), ctx.run_id,
+        )
 
     return HitlResult.complete(checkpoint=new_checkpoint)

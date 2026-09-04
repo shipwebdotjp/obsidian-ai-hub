@@ -31,7 +31,7 @@ import {
   type RunSseEnvelope,
 } from "../../api/runSse";
 import MarkdownPreview from "../../components/MarkdownPreview";
-import { WaitingRunQuestionCard, type QuestionItem, toQuestionItems } from "../../components/InConversationQuestionCard";
+import { WaitingRunQuestionCard, WaitingRunStatusPanel, waitForHitlSettled, type ActiveWaitingRun, type QuestionItem, toQuestionItems } from "../../components/InConversationQuestionCard";
 import { getHitlRun, submitHitlAnswer, cancelHitlRun } from "../../api/client";
 import { formatDateTime, formatYmdWithDow } from "../../utils/date";
 import { useSessionPromptDraft } from "../../hooks/useSessionPromptDraft";
@@ -52,10 +52,7 @@ export default function CodingPage() {
   const [messages, setMessages] = useState<CodingMessage[]>([]);
   const [activeRun, setActiveRun] = useState<CodingRun | null>(null);
   const [latestRun, setLatestRun] = useState<CodingRun | null>(null);
-  const [activeWaitingRun, setActiveWaitingRun] = useState<{
-    hitlRunId: string;
-    questions: QuestionItem[];
-  } | null>(null);
+  const [activeWaitingRun, setActiveWaitingRun] = useState<ActiveWaitingRun | null>(null);
   const [gitStatus, setGitStatus] = useState<GitStatus | null>(null);
 
   const [loadingProjects, setLoadingProjects] = useState(true);
@@ -152,12 +149,12 @@ export default function CodingPage() {
     };
   }, []);
 
-  // Auto-scroll on new messages / phase change
+  // Auto-scroll on new messages / phase change / waiting-run change
   useEffect(() => {
     if (typeof messageEndRef.current?.scrollIntoView === "function") {
       messageEndRef.current.scrollIntoView({ behavior: "smooth" });
     }
-  }, [messages, activePhaseText, streamingToolCalls, workerState]);
+  }, [messages, activePhaseText, streamingToolCalls, workerState, activeWaitingRun]);
 
   const toolCallsByMessageId = useMemo(() => {
     const map = new Map<string, CodingOrchestratorToolCall[]>();
@@ -414,6 +411,8 @@ export default function CodingPage() {
           setActiveWaitingRun({
             hitlRunId: lRun.hitl_run_id,
             questions: toQuestionItems(hitlDetail.questions || []),
+            hitlStatus: (hitlDetail.status as string | null) ?? null,
+            hitlError: (hitlDetail.error_message as string | null) ?? null,
           });
         } catch (e) {
           console.error("Failed to load HITL run:", e);
@@ -434,6 +433,59 @@ export default function CodingPage() {
       setError(e.message || "セッション詳細の取得に失敗しました");
     } finally {
       setLoadingMessages(false);
+    }
+  };
+
+  // Submit answers sequentially so a partial failure surfaces instead of
+  // silently leaving questions pending. Skip state updates when the selection
+  // moved to another session mid-operation (its own detail load owns the UI).
+  const handleSubmitWaitingAnswers = async (
+    waiting: ActiveWaitingRun,
+    answers: Record<string, { value: string; comment?: string }>,
+  ) => {
+    const opSessionId = selectedSessionId;
+    const opHitlRunId = waiting.hitlRunId;
+    try {
+      for (const [qKey, ans] of Object.entries(answers)) {
+        await submitHitlAnswer(opHitlRunId, qKey, ans.value, ans.comment);
+      }
+      if (selectedSessionIdRef.current !== opSessionId) return;
+      // Switch to the resume-pending panel immediately so the answered
+      // choices never linger as an empty card frame.
+      setActiveWaitingRun({ hitlRunId: opHitlRunId, questions: [], hitlStatus: "ready_to_resume" });
+      // Wait for HITL dispatch to settle before reloading; the active-run
+      // restore effect then resubscribes the same run ID from the existing
+      // event cursor, replaying user_question then post-resume events in order.
+      const settled = await waitForHitlSettled(opHitlRunId);
+      if (selectedSessionIdRef.current !== opSessionId) return;
+      if (settled) {
+        setActiveWaitingRun((prev) =>
+          prev && prev.hitlRunId === opHitlRunId
+            ? { hitlRunId: opHitlRunId, questions: [], hitlStatus: settled.status }
+            : prev,
+        );
+      }
+      if (opSessionId) {
+        await loadSessionDetail(opSessionId);
+      }
+    } catch (e: any) {
+      if (selectedSessionIdRef.current !== opSessionId) return;
+      setError(e.message || "回答の送信に失敗しました");
+    }
+  };
+
+  const handleCancelWaitingRun = async (waiting: ActiveWaitingRun) => {
+    const opSessionId = selectedSessionId;
+    try {
+      await cancelHitlRun(waiting.hitlRunId);
+      if (selectedSessionIdRef.current !== opSessionId) return;
+      setActiveWaitingRun(null);
+      if (opSessionId) {
+        await loadSessionDetail(opSessionId);
+      }
+    } catch (e: any) {
+      if (selectedSessionIdRef.current !== opSessionId) return;
+      setError(e.message || "質問の取消に失敗しました");
     }
   };
 
@@ -518,7 +570,7 @@ export default function CodingPage() {
         const questions = Array.isArray(data.questions)
           ? (data.questions as QuestionItem[])
           : [];
-        if (hitlRunId) setActiveWaitingRun({ hitlRunId, questions });
+        if (hitlRunId) setActiveWaitingRun({ hitlRunId, questions, hitlStatus: "pending_user" });
         void loadSessionDetail(ctx.streamSessionId);
         return;
       } else if (type === "done") {
@@ -1380,48 +1432,6 @@ export default function CodingPage() {
 
             {/* Message Area */}
             <div className="flex-1 overflow-y-auto p-4 space-y-4 min-w-0">
-              {/* In-Conversation Active Question Card */}
-              {activeWaitingRun && (
-                <WaitingRunQuestionCard
-                  key={activeWaitingRun.hitlRunId}
-                  hitlRunId={activeWaitingRun.hitlRunId}
-                  questions={activeWaitingRun.questions}
-                  onSubmit={async (answers) => {
-                    // Submit each answer sequentially so a partial failure
-                    // surfaces instead of silently leaving questions pending.
-                    try {
-                      for (const [qKey, ans] of Object.entries(answers)) {
-                        await submitHitlAnswer(
-                          activeWaitingRun.hitlRunId,
-                          qKey,
-                          ans.value,
-                          ans.comment
-                        );
-                      }
-                      setActiveWaitingRun(null);
-                      if (selectedSessionId) {
-                        // Reload detail; the active-run restore effect resubscribes
-                        // the same run ID from the existing event cursor, replaying
-                        // user_question then post-resume events in order.
-                        await loadSessionDetail(selectedSessionId);
-                      }
-                    } catch (e: any) {
-                      setError(e.message || "回答の送信に失敗しました");
-                    }
-                  }}
-                  onCancel={async () => {
-                    try {
-                      await cancelHitlRun(activeWaitingRun.hitlRunId);
-                      setActiveWaitingRun(null);
-                      if (selectedSessionId) {
-                        await loadSessionDetail(selectedSessionId);
-                      }
-                    } catch (e: any) {
-                      setError(e.message || "質問の取消に失敗しました");
-                    }
-                  }}
-                />
-              )}
               {loadingMessages ? (
                 <div className="text-center text-xs text-slate-500 py-8">
                   会話履歴読み込み中...
@@ -1950,6 +1960,26 @@ export default function CodingPage() {
                     {currentRun.error_message && ` (${currentRun.error_message})`}
                   </span>
                 </div>
+              )}
+
+              {/* In-Conversation Active Question Card (message flow bottom) */}
+              {activeWaitingRun && activeWaitingRun.questions.length > 0 && (
+                <WaitingRunQuestionCard
+                  key={activeWaitingRun.hitlRunId}
+                  hitlRunId={activeWaitingRun.hitlRunId}
+                  questions={activeWaitingRun.questions}
+                  onSubmit={(answers) => handleSubmitWaitingAnswers(activeWaitingRun, answers)}
+                  onCancel={() => handleCancelWaitingRun(activeWaitingRun)}
+                />
+              )}
+              {activeWaitingRun && activeWaitingRun.questions.length === 0 && (
+                <WaitingRunStatusPanel
+                  key={`${activeWaitingRun.hitlRunId}-status`}
+                  hitlRunId={activeWaitingRun.hitlRunId}
+                  status={activeWaitingRun.hitlStatus}
+                  errorMessage={activeWaitingRun.hitlError}
+                  onCancel={() => handleCancelWaitingRun(activeWaitingRun)}
+                />
               )}
 
               <div ref={messageEndRef} />

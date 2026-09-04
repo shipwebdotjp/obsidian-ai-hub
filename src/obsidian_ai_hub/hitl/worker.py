@@ -15,6 +15,7 @@ from obsidian_ai_hub.hitl.dispatcher import (
     HitlResult,
     get_eligible_runs,
     get_handler,
+    list_handler_names,
     process_expired_questions,
 )
 from obsidian_ai_hub.hitl.service import (
@@ -136,7 +137,11 @@ class HitlWorker:
         # 2. Check handler registration
         handler = get_handler(handler_name)
         if not handler:
-            err_msg = f"Handler '{handler_name}' is not registered."
+            err_msg = (
+                f"Handler '{handler_name}' is not registered. "
+                f"Registered: {list_handler_names() or '(none)'} "
+                "(restart the worker if handlers were added after it started)."
+            )
             logger.error(err_msg)
             settled = settle_run_outcome(
                 run_id=run_id,
@@ -230,6 +235,7 @@ class HitlWorker:
         """
         self.setup_signal_handlers()
         logger.info(f"Starting HITL worker loop ({self.worker_id})")
+        logger.info(f"Registered HITL handlers: {list_handler_names() or '(none)'})")
 
         close_conn = False
         if conn is None:

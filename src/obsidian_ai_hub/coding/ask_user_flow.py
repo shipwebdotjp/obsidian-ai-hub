@@ -3,38 +3,32 @@
 from __future__ import annotations
 
 import json
-import logging
 from typing import Any, Dict, List, Optional, Tuple
-
-logger = logging.getLogger(__name__)
 
 
 def load_prior_history_sync(prior_hitl_run_id: Optional[str]) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """Load carried history and resume state from a prior HITL checkpoint (sync).
 
-    Returns (qa_history, resume_state). Empty on missing/invalid checkpoints;
-    callers log the cause. Never raises for malformed prior state so a
-    corrupted audit trail does not block a new interruption.
+    Returns ([], {}) only when there is no prior HITL run (first question).
+    A present-but-unreadable prior (missing row/checkpoint, invalid JSON,
+    non-dict data, DB errors) raises so callers fail the run instead of
+    silently dropping already-given answers.
     """
     if not prior_hitl_run_id:
         return [], {}
-    try:
-        from obsidian_ai_hub.hitl import store as hitl_store
+    from obsidian_ai_hub.hitl import store as hitl_store
 
-        prior_hitl = hitl_store.get_run(prior_hitl_run_id)
-        if not prior_hitl or not prior_hitl.get("checkpoint"):
-            return [], {}
-        prior_cp = json.loads(prior_hitl["checkpoint"])
-        if not isinstance(prior_cp, dict):
-            return [], {}
-        from obsidian_ai_hub.agents.ask_user import carry_history_for_new_checkpoint
+    prior_hitl = hitl_store.get_run(prior_hitl_run_id)
+    if not prior_hitl or not prior_hitl.get("checkpoint"):
+        raise RuntimeError(f"Prior HITL checkpoint missing for {prior_hitl_run_id}.")
+    prior_cp = json.loads(prior_hitl["checkpoint"])
+    if not isinstance(prior_cp, dict):
+        raise RuntimeError(f"Prior HITL checkpoint invalid for {prior_hitl_run_id}.")
+    from obsidian_ai_hub.agents.ask_user import carry_history_for_new_checkpoint
 
-        hist = carry_history_for_new_checkpoint(prior_cp)
-        rs = prior_cp.get("resume_state")
-        return hist, rs if isinstance(rs, dict) else {}
-    except Exception as exc:
-        logger.warning("Failed to carry HITL history from %s: %s", prior_hitl_run_id, exc)
-        return [], {}
+    hist = carry_history_for_new_checkpoint(prior_cp)
+    rs = prior_cp.get("resume_state")
+    return hist, rs if isinstance(rs, dict) else {}
 
 
 def build_coding_checkpoint(

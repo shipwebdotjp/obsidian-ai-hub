@@ -1446,20 +1446,27 @@ describe("CodingPage", () => {
       latest_run: waitingRun,
       orchestrator_tool_calls: [],
     });
-    vi.mocked(clientApi.getHitlRun).mockResolvedValue({
-      run_id: "hitl_ask_123",
-      questions: [
-        {
-          question_key: "q1",
-          display_text: "確認質問1",
-          choices: [
-            { value: "opt1", label: "選択肢1" },
-            { value: "opt2", label: "選択肢2" },
-          ],
-          is_required: 1,
-        },
-      ],
-    } as any);
+    vi.mocked(clientApi.getHitlRun)
+      .mockResolvedValueOnce({
+        run_id: "hitl_ask_123",
+        status: "pending_user",
+        questions: [
+          {
+            question_key: "q1",
+            display_text: "確認質問1",
+            choices: [
+              { value: "opt1", label: "選択肢1" },
+              { value: "opt2", label: "選択肢2" },
+            ],
+            is_required: 1,
+          },
+        ],
+      } as any)
+      .mockResolvedValue({
+        run_id: "hitl_ask_123",
+        status: "completed",
+        questions: [],
+      } as any);
     vi.mocked(clientApi.submitHitlAnswer).mockResolvedValue({} as any);
 
     renderPage();
@@ -1502,20 +1509,27 @@ describe("CodingPage", () => {
       latest_run: waitingRun,
       orchestrator_tool_calls: [],
     });
-    vi.mocked(clientApi.getHitlRun).mockResolvedValue({
-      run_id: "hitl_ask_other",
-      questions: [
-        {
-          question_key: "q1",
-          display_text: "確認質問other",
-          choices: [
-            { value: "opt1", label: "選択肢1" },
-            { value: "other", label: "その他（自由入力）" },
-          ],
-          is_required: 1,
-        },
-      ],
-    } as any);
+    vi.mocked(clientApi.getHitlRun)
+      .mockResolvedValueOnce({
+        run_id: "hitl_ask_other",
+        status: "pending_user",
+        questions: [
+          {
+            question_key: "q1",
+            display_text: "確認質問other",
+            choices: [
+              { value: "opt1", label: "選択肢1" },
+              { value: "other", label: "その他（自由入力）" },
+            ],
+            is_required: 1,
+          },
+        ],
+      } as any)
+      .mockResolvedValue({
+        run_id: "hitl_ask_other",
+        status: "completed",
+        questions: [],
+      } as any);
     vi.mocked(clientApi.submitHitlAnswer).mockResolvedValue({} as any);
     vi.mocked(clientApi.cancelHitlRun).mockResolvedValue({} as any);
 
@@ -1547,6 +1561,96 @@ describe("CodingPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "取消" }));
     await waitFor(() => {
       expect(clientApi.cancelHitlRun).toHaveBeenCalledWith("hitl_ask_other");
+    });
+  });
+
+  it("shows resume-pending panel instead of an empty card when no questions are pending", async () => {
+    const waitingRun = mockCodingRun({
+      run_id: "crun_waiting_done",
+      status: "waiting_user",
+      hitl_run_id: "hitl_ask_done",
+    });
+    vi.mocked(codingApi.getCodingSessionDetail).mockResolvedValue({
+      session: mockSession,
+      effective_tool_ids: ["web_search"],
+      has_custom_tools: false,
+      available_tools: [],
+      messages: [],
+      active_run: null,
+      latest_run: waitingRun,
+      orchestrator_tool_calls: [],
+    });
+    vi.mocked(clientApi.getHitlRun).mockResolvedValue({
+      run_id: "hitl_ask_done",
+      status: "ready_to_resume",
+      questions: [
+        {
+          question_key: "q1",
+          display_text: "回答済み質問",
+          status: "answered",
+          choices: [{ value: "opt1", label: "選択肢1" }],
+          is_required: 1,
+        },
+      ],
+    } as any);
+    vi.mocked(clientApi.cancelHitlRun).mockResolvedValue({} as any);
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText(/回答送信済み・再開待ち/)).toBeInTheDocument();
+    });
+    // No empty question frame: submit button must not exist.
+    expect(screen.queryByRole("button", { name: "回答を送信" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+    await waitFor(() => {
+      expect(clientApi.cancelHitlRun).toHaveBeenCalledWith("hitl_ask_done");
+    });
+  });
+
+  it("shows failure notice with recovery cancel when the HITL run failed", async () => {
+    const waitingRun = mockCodingRun({
+      run_id: "crun_waiting_failed",
+      status: "waiting_user",
+      hitl_run_id: "hitl_ask_failed",
+    });
+    vi.mocked(codingApi.getCodingSessionDetail).mockResolvedValue({
+      session: mockSession,
+      effective_tool_ids: ["web_search"],
+      has_custom_tools: false,
+      available_tools: [],
+      messages: [],
+      active_run: null,
+      latest_run: waitingRun,
+      orchestrator_tool_calls: [],
+    });
+    vi.mocked(clientApi.getHitlRun).mockResolvedValue({
+      run_id: "hitl_ask_failed",
+      status: "failed",
+      error_message: "Handler 'coding.ask_user' is not registered.",
+      questions: [
+        {
+          question_key: "q1",
+          display_text: "回答済み質問",
+          status: "answered",
+          choices: [{ value: "opt1", label: "選択肢1" }],
+          is_required: 1,
+        },
+      ],
+    } as any);
+    vi.mocked(clientApi.cancelHitlRun).mockResolvedValue({} as any);
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText(/確認処理に失敗しました/)).toBeInTheDocument();
+    });
+    expect(screen.queryByRole("button", { name: "回答を送信" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+    await waitFor(() => {
+      expect(clientApi.cancelHitlRun).toHaveBeenCalledWith("hitl_ask_failed");
     });
   });
 });

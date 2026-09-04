@@ -250,3 +250,8 @@ Web UI や LINE からの回答入力後、HITL Run が `ready_to_resume` に遷
     - checkpoint の読込失敗・回答欠落は警告継続せず、当該 Run を `failed`（Agent: `fail_run`＋error SSE、Coding: `failed`＋error イベント）にして回答喪失の幻覚続行を防ぐ。
     - 選択肢検証は厳格化し、空 choices・空 value/label・予約値 `other` の使用は HITL を作らず ToolMessage エラーで LLM に再試行させる。
 
+ 8. **常駐HITLワーカーの運用注意と回答API内dispatch見送り:**
+    - 2026-09-04 の実障害: `coding.ask_user` 登録（10:38コミット）より前に起動した常駐ワーカー（08:46起動）が回答済み Run を claim し、`Handler 'coding.ask_user' is not registered` で HITL Run を `failed` に落とし、親 Coding Run が `waiting_user` のまま永久放置された。回答自体は保存されていたが再開されず、フロントには空の質問枠だけが残った。
+    - 教訓として、ハンドラ追加・変更時は常駐ワーカーの再起動（`make reload-hitl-worker`）を必須とする。ワーカーは起動時に登録済みハンドラ名一覧をINFOログへ出力し、「未登録」エラー時は登録済み一覧と再起動促しをエラーメッセージへ含める。
+    - 回答API内での `dispatch_runs()` inline実行は今回見送る。理由: (1) Webサーバープロセスは `register_hitl_handlers()` を呼んでおらず、inline化には lifespan への登録追加が別途必要、(2) 回答→再開の責務境界を常駐ワーカー側に一本化し Web リクエストの遅延・二重実行面を増やさない、(3) 再評価条件は「常駐ワーカー停止中の取りこぼしが再発した場合」とする。
+

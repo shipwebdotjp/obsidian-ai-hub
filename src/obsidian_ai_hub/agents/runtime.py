@@ -1108,18 +1108,15 @@ async def generate_agent_stream(
                 prior_history: List[Dict[str, Any]] = []
                 prior_hitl_id = run.get("hitl_run_id")
                 if prior_hitl_id:
-                    try:
-                        from obsidian_ai_hub.hitl import store as _hitl_store
+                    # Corrupt prior history must fail the run (outer except
+                    # triggers fail_run) rather than silently dropping answers.
+                    from obsidian_ai_hub.hitl import store as _hitl_store
 
-                        prior_hitl = await asyncio.to_thread(_hitl_store.get_run, prior_hitl_id)
-                        if prior_hitl and prior_hitl.get("checkpoint"):
-                            prior_cp = json.loads(prior_hitl["checkpoint"])
-                            if isinstance(prior_cp, dict):
-                                prior_history = carry_history_for_new_checkpoint(prior_cp)
-                    except Exception as prior_exc:
-                        logger.warning(
-                            "Failed to carry HITL history for run %s: %s", run_id, prior_exc
-                        )
+                    prior_hitl = await asyncio.to_thread(_hitl_store.get_run, prior_hitl_id)
+                    if prior_hitl and prior_hitl.get("checkpoint"):
+                        prior_cp = json.loads(prior_hitl["checkpoint"])
+                        if isinstance(prior_cp, dict):
+                            prior_history = carry_history_for_new_checkpoint(prior_cp)
 
                 # Checkpoint saved to HITL run
                 checkpoint_data = {
