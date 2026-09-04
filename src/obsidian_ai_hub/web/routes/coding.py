@@ -187,7 +187,7 @@ def update_session_tools(
 
 @router.get("/sessions/{session_id}")
 def get_session_detail(session_id: str, _=Depends(require_bearer_token)):
-    """Get session details along with effective tool settings, message history and active/latest run state."""
+    """Get session details along with effective tool settings, message history, tool calls, and active/latest run state."""
     session = coding_store.get_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="セッションが見つかりません")

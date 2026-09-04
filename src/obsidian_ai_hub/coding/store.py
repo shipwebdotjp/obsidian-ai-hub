@@ -766,7 +766,6 @@ def update_run(
     orchestrator_message_id: Optional[str] = None,
     worker_message_id: Optional[str] = None,
     status: Optional[str] = None,
-    hitl_run_id: Optional[str] = None,
     error_message: Optional[str] = None,
     finished_at: Optional[str] = None,
     diagnostics_json: Optional[str] = None,
@@ -785,9 +784,6 @@ def update_run(
     if status is not None:
         updates.append("status = ?")
         params.append(status)
-    if hitl_run_id is not None:
-        updates.append("hitl_run_id = ?")
-        params.append(hitl_run_id)
     if error_message is not None:
         updates.append("error_message = ?")
         params.append(error_message)
@@ -801,21 +797,8 @@ def update_run(
     if updates:
         sql = f"UPDATE coding_runs SET {', '.join(updates)} WHERE run_id = ?"
         params.append(run_id)
-        try:
-            conn.execute(sql, tuple(params))
-            conn.commit()
-        except sqlite3.OperationalError as e:
-            if "no such column: hitl_run_id" in str(e) and hitl_run_id is not None:
-                hitl_pos = updates.index("hitl_run_id = ?")
-                updates.pop(hitl_pos)
-                params.pop(hitl_pos)
-                params[-1] = run_id
-                if updates:
-                    sql = f"UPDATE coding_runs SET {', '.join(updates)} WHERE run_id = ?"
-                    conn.execute(sql, tuple(params))
-                    conn.commit()
-            else:
-                raise
+        conn.execute(sql, tuple(params))
+        conn.commit()
 
     run = get_run(run_id, conn=conn)
     conn.close()

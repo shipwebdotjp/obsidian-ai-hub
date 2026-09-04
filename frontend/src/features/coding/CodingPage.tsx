@@ -24,10 +24,10 @@ import {
   type CodingOrchestratorToolCall,
   type CodingLiveToolCall,
 } from "../../api/coding";
-import { getHitlRun, submitHitlAnswer, cancelHitlRun } from "../../api/client";
-import { WaitingRunQuestionCard, type QuestionItem, toQuestionItems } from "../../components/InConversationQuestionCard";
 import { useMemo } from "react";
 import MarkdownPreview from "../../components/MarkdownPreview";
+import { WaitingRunQuestionCard, type QuestionItem, toQuestionItems } from "../../components/InConversationQuestionCard";
+import { getHitlRun, submitHitlAnswer, cancelHitlRun } from "../../api/client";
 import { formatDateTime, formatYmdWithDow } from "../../utils/date";
 import { useSessionPromptDraft } from "../../hooks/useSessionPromptDraft";
 import {
@@ -337,10 +337,9 @@ export default function CodingPage() {
       if (lRun && lRun.status === "waiting_user" && lRun.hitl_run_id) {
         try {
           const hitlDetail = await getHitlRun(lRun.hitl_run_id);
-          const activeQuestions = toQuestionItems(hitlDetail.questions || []);
           setActiveWaitingRun({
             hitlRunId: lRun.hitl_run_id,
-            questions: activeQuestions,
+            questions: toQuestionItems(hitlDetail.questions || []),
           });
         } catch (e) {
           console.error("Failed to load HITL run:", e);
@@ -1196,14 +1195,14 @@ export default function CodingPage() {
                                         <span className="font-semibold truncate text-slate-800">{tc.tool_name}</span>
                                         <span
                                           className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold border ${
-                                            tc.status === "completed"
+                                            tc.status === "succeeded"
                                               ? "bg-emerald-50 text-emerald-700 border-emerald-200"
                                               : tc.status === "failed"
                                               ? "bg-rose-50 text-rose-700 border-rose-200"
                                               : "bg-amber-100 text-amber-800 border-amber-300"
                                           }`}
                                         >
-                                          {tc.status === "completed"
+                                          {tc.status === "succeeded"
                                             ? "成功"
                                             : tc.status === "failed"
                                             ? "失敗"
@@ -1267,14 +1266,14 @@ export default function CodingPage() {
                                         <span className="font-semibold truncate text-slate-800">{tc.tool_name}</span>
                                         <span
                                           className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold border ${
-                                            tc.status === "completed"
+                                            tc.status === "succeeded"
                                               ? "bg-emerald-50 text-emerald-700 border-emerald-200"
                                               : tc.status === "failed"
                                               ? "bg-rose-50 text-rose-700 border-rose-200"
                                               : "bg-amber-50 text-amber-700 border-amber-200"
                                           }`}
                                         >
-                                          {tc.status === "completed"
+                                          {tc.status === "succeeded"
                                             ? "成功"
                                             : tc.status === "failed"
                                             ? "失敗"
@@ -1578,7 +1577,7 @@ export default function CodingPage() {
                                 <span className="font-semibold truncate text-slate-800">{tc.tool_name}</span>
                                 <span
                                   className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold border ${
-                                    tc.status === "completed"
+                                    tc.status === "succeeded"
                                       ? "bg-emerald-50 text-emerald-700 border-emerald-200"
                                       : tc.status === "failed"
                                       ? "bg-rose-50 text-rose-700 border-rose-200"
@@ -1587,7 +1586,7 @@ export default function CodingPage() {
                                       : "bg-blue-50 text-blue-700 border-blue-200"
                                   }`}
                                 >
-                                  {tc.status === "completed"
+                                  {tc.status === "succeeded"
                                     ? "成功"
                                     : tc.status === "failed"
                                     ? "失敗"
