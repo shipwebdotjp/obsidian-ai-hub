@@ -198,6 +198,7 @@ def get_session_detail(session_id: str, _=Depends(require_bearer_token)):
     effective_tool_ids = coding_store.get_effective_session_tool_ids(session_id)
     has_custom = session.get("tool_ids_json") is not None
     available_tools = registry.list_available_tools()
+    orchestrator_tool_calls = coding_store.list_orchestrator_tool_calls_for_session(session_id)
 
     return {
         "session": session,
@@ -207,6 +208,7 @@ def get_session_detail(session_id: str, _=Depends(require_bearer_token)):
         "messages": messages,
         "active_run": active_run,
         "latest_run": latest_run,
+        "orchestrator_tool_calls": orchestrator_tool_calls,
     }
 
 

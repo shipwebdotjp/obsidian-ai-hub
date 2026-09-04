@@ -6,8 +6,11 @@ import {
   createPromptTemplate,
   deleteAgent,
   deleteAgentSession,
+  cancelHitlRun,
   deletePromptTemplate,
   getAgentSessionDetail,
+  getHitlRun,
+  submitHitlAnswer,
   listAgents,
   listAgentSessions,
   listAgentTools,
@@ -36,6 +39,7 @@ import { useSessionPromptDraft } from "../../hooks/useSessionPromptDraft";
 import { useAgentImageDraft } from "./useAgentImageDraft";
 import { getChatInputPlaceholder, shouldSendOnEnter, useChatSendMode } from "../settings/chatSendMode";
 import MarkdownPreview from "../../components/MarkdownPreview";
+import { WaitingRunQuestionCard, type QuestionItem, toQuestionItems } from "../../components/InConversationQuestionCard";
 import { formatDateTime } from "../../utils/date";
 import {
   ChevronLeft,
@@ -173,6 +177,10 @@ export default function AgentsPage() {
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<AgentMessage[]>([]);
   const [runs, setRuns] = useState<AgentRun[]>([]);
+  const [activeWaitingRun, setActiveWaitingRun] = useState<{
+    hitlRunId: string;
+    questions: QuestionItem[];
+  } | null>(null);
   const [loadedSessionId, setLoadedSessionId] = useState<string | null>(null);
   const [sessionSearchQuery, setSessionSearchQuery] = useState("");
   const [sessionSearchResults, setSessionSearchResults] = useState<AgentMessageSearchResult[]>([]);
@@ -428,9 +436,29 @@ export default function AgentsPage() {
     try {
       const detail = await getAgentSessionDetail(sessionId);
       setMessages(detail.messages);
-      setRuns(detail.runs || []);
+      const sessionRuns = detail.runs || [];
+      setRuns(sessionRuns);
       setLoadedSessionId(sessionId);
       setChatError(null);
+
+      // Check if latest run is waiting_user and fetch its active question set
+      const waitingRun = [...sessionRuns].reverse().find((r) => r.status === "waiting_user");
+      if (waitingRun && waitingRun.hitl_run_id) {
+        try {
+          const hitlDetail = await getHitlRun(waitingRun.hitl_run_id);
+          const activeQuestions = toQuestionItems(hitlDetail.questions || []);
+          setActiveWaitingRun({
+            hitlRunId: waitingRun.hitl_run_id,
+            questions: activeQuestions,
+          });
+        } catch (e: unknown) {
+          console.error("Failed to load HITL question set", e);
+          setActiveWaitingRun(null);
+          setChatError(e instanceof Error ? e.message : "確認質問の読み込みに失敗しました。");
+        }
+      } else {
+        setActiveWaitingRun(null);
+      }
     } catch (e: unknown) {
       const message =
         e instanceof Error ? e.message : "セッション詳細の読み込みに失敗しました。";
@@ -1389,6 +1417,13 @@ export default function AgentsPage() {
           } else if (event.type === "text") {
             enqueueStreamingText(event.delta, streamGeneration);
             setStreamingPhase(null);
+          } else if (event.type === "user_question") {
+            receivedTerminalEvent = true;
+            finalizeSendSuccess();
+            resetStreamingState();
+            abortControllerRef.current = null;
+            setActiveWaitingRun({ hitlRunId: event.hitl_run_id, questions: event.questions });
+            loadSessionDetail(streamSessionId);
           } else if (event.type === "done") {
             receivedTerminalEvent = true;
             finalizeSendSuccess();
@@ -2455,6 +2490,38 @@ export default function AgentsPage() {
                     </div>
                   );
                 })
+              )}
+
+              {/* In-Conversation Active Question Card */}
+              {activeWaitingRun && (
+                <WaitingRunQuestionCard
+                  key={activeWaitingRun.hitlRunId}
+                  hitlRunId={activeWaitingRun.hitlRunId}
+                  questions={activeWaitingRun.questions}
+                  onSubmit={async (answers) => {
+                    await Promise.all(
+                      Object.entries(answers).map(([qKey, ans]) =>
+                        submitHitlAnswer(
+                          activeWaitingRun.hitlRunId,
+                          qKey,
+                          ans.value,
+                          ans.comment
+                        )
+                      )
+                    );
+                    setActiveWaitingRun(null);
+                    if (selectedSessionId) {
+                      loadSessionDetail(selectedSessionId);
+                    }
+                  }}
+                  onCancel={async () => {
+                    await cancelHitlRun(activeWaitingRun.hitlRunId);
+                    setActiveWaitingRun(null);
+                    if (selectedSessionId) {
+                      loadSessionDetail(selectedSessionId);
+                    }
+                  }}
+                />
               )}
 
               {/* Live Streaming Response Chunk */}

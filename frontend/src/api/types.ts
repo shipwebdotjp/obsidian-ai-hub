@@ -1,3 +1,5 @@
+import type { QuestionItem } from "../components/InConversationQuestionCard";
+
 export type Stability = "stable" | "tentative" | "explicitly_settled";
 
 export type MemoryStatus = "candidate" | "approved" | "rejected" | "expired" | "superseded";
@@ -762,7 +764,8 @@ export interface AgentRun {
   session_id: string;
   user_message_id: string;
   assistant_message_id: string | null;
-  status: "running" | "succeeded" | "failed";
+  status: "running" | "succeeded" | "failed" | "waiting_user";
+  hitl_run_id: string | null;
   used_tools: string[];
   created_hitl_run_ids: string[];
   tool_calls?: AgentToolCall[];
@@ -798,5 +801,6 @@ export type AgentStreamEvent =
   | { type: "tool_call_start"; call_id: string; call_key?: string; tool_name: string; args: Record<string, unknown>; iteration: number }
   | { type: "tool_call_end"; call_id: string; call_key?: string; tool_name: string; status: "succeeded" | "failed"; result: string; hitl_run_id?: string | null; error?: string | null; iteration: number }
   | { type: "text"; delta: string }
+  | { type: "user_question"; hitl_run_id: string; question_set_id: string; questions: QuestionItem[] }
   | { type: "done"; message: AgentMessage; run: AgentRun; hitl_run_ids: string[]; tool_calls?: AgentToolCall[]; session_title?: string }
   | { type: "error"; error: string; run_id?: string };

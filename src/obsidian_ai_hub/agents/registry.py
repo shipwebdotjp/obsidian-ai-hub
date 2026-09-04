@@ -940,6 +940,12 @@ _BUILTIN_TOOL_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "get_tool": lambda: _make_agent_delegate_tool(None),
         "get_tool_with_context": lambda ctx: _make_agent_delegate_tool(ctx),
     },
+    "ask_user": {
+        "tool_id": "ask_user",
+        "name": "会話内質問",
+        "description": "会話内でユーザーに1つまたは複数の質問（要件定義、確認事項、選択肢）を行います。",
+        "get_tool": lambda: __import__("obsidian_ai_hub.agents.ask_user", fromlist=["ask_user"]).ask_user,
+    },
 }
 
 _BUILTIN_TOOL_IDS = set(_BUILTIN_TOOL_DEFINITIONS.keys())

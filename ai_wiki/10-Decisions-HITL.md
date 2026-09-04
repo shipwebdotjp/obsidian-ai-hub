@@ -202,3 +202,32 @@ Web UI や LINE からの回答入力後、HITL Run が `ready_to_resume` に遷
 5. **手動復旧とスケジューラ:**
    - `--hitl-dispatch` は手動復旧・障害調査用として維持する。二重実行を防ぐため `tasks/tasks.local.sample.yml` のサンプル設定では無効化（`enabled: false`）とし、注釈コメントを追加した。
 
+## 会話内 ask_user HITL（複数質問対応）
+
+| 項目 | 内容 |
+|------|------|
+| 決定日 | 2026-09-04 |
+| カテゴリ | Agents・Coding Workspace・対話制御 |
+| 決定内容 | Agents および Coding の上位オーケストレーターが要件確認を行える常時有効なシステムツール `ask_user` を追加し、既存HITLの永続化・回答・worker再開を流用して耐久的な中断・再開フローを導入する。 |
+
+### 結論に至った経緯
+
+1. **常時有効なシステムツール方針:**
+   - `ask_user` は Agents および Coding オーケストレーターで常時有効なシステムツールとして登録する（UI上での無効化不可）。
+   - 引数は `questions` 配列とし、各質問に安定した質問ID (`question_id`)、質問文、選択肢リスト (`choices`) を持たせる。
+   - 固定選択肢として `{"value": "other", label: "その他（自由入力）"}` を自動付与し、選択時は自由入力テキストを必須とする。`"other"` は予約値とし、通常選択肢の `value` としての使用を禁止する。
+   - CLIワーカー（Codex/OpenCode）の対話化、および `--agent-chat` / `--coding` などの非対話CLI経路は対象外とする。
+
+2. **単一呼出し制限:**
+   - 1回のLLMターンで `ask_user` と他ツールが混在した場合はいずれのツールも実行せず、全 tool call ID に対して「`ask_user` は単独で呼び出し、複数質問は `questions` 配列へまとめる」旨の ToolMessage エラーを返し、次のLLMターンで再要求させる。
+
+3. **耐久的な中断・チェックポイントと再開:**
+   - 質問時、Run のステータスを `waiting_user` に遷移させ、現在の tool call ID、会話履歴、実行設定、質問内容を HITL checkpoint へ保存する。
+   - terminal `user_question` SSE イベントを発行し、待機中は同一セッションへの新規送信を拒否する。
+   - 回答時は既存HITL回答API (`submit_answer`) を使用し、HITL workerが `agents.ask_user` または `coding.ask_user` ハンドラー経由でチェックポイントから再開する。
+   - LLMへは `{"answers": {"<question_id>": {"selection": "<選択値>", "text": "<入力またはnull>"}}}` の構造化 ToolMessage として回答を返す。
+   - ユーザーによる取消時は、HITL Run と元の Agent/Coding Run の双方を `cancelled` に更新する。
+
+4. **共通UIコンポーネント (`WaitingRunQuestionCard`):**
+   - `AgentsPage`、`CodingPage`、`HitlPage` で共有する質問カード `WaitingRunQuestionCard` を導入し、ラジオ選択・「その他」条件付きテキストエリア・送信・取消・処理中/エラー表示を統一的に提供する。
+

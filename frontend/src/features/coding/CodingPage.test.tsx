@@ -89,6 +89,7 @@ describe("CodingPage", () => {
       ],
       active_run: null,
       latest_run: null,
+      orchestrator_tool_calls: [],
     });
   });
 
@@ -189,6 +190,7 @@ describe("CodingPage", () => {
         session_id: "cses_111",
         user_message_id: "cmsg_1",
         orchestrator_message_id: null,
+        hitl_run_id: null,
         worker_message_id: "cmsg_3",
         status: "completed",
         dirty_tree_at_start: null,
@@ -208,6 +210,7 @@ describe("CodingPage", () => {
           variant: "なし",
         },
       },
+      orchestrator_tool_calls: [],
     });
 
     render(<CodingPage />);
@@ -425,6 +428,7 @@ describe("CodingPage", () => {
       messages: [],
       active_run: null,
       latest_run: null,
+      orchestrator_tool_calls: [],
     });
 
     render(<CodingPage />);
@@ -534,6 +538,7 @@ describe("CodingPage", () => {
         session_id: "cses_111",
         user_message_id: "cmsg_1",
         orchestrator_message_id: null,
+        hitl_run_id: null,
         worker_message_id: null,
         status: "running",
         dirty_tree_at_start: null,
@@ -542,6 +547,7 @@ describe("CodingPage", () => {
         finished_at: null,
       },
       latest_run: null,
+      orchestrator_tool_calls: [],
     });
     vi.mocked(codingApi.cancelCodingRun).mockResolvedValue({
       status: "cancel_signalled",
@@ -651,6 +657,7 @@ describe("CodingPage", () => {
       messages: [],
       active_run: null,
       latest_run: null,
+      orchestrator_tool_calls: [],
     });
 
     render(<CodingPage />);
@@ -732,6 +739,7 @@ describe("CodingPage", () => {
         session_id: "cses_111",
         user_message_id: "cmsg_1",
         orchestrator_message_id: null,
+        hitl_run_id: null,
         worker_message_id: null,
         status: "running",
         dirty_tree_at_start: " M src/App.tsx\n?? untracked.txt",
@@ -740,6 +748,7 @@ describe("CodingPage", () => {
         finished_at: null,
       },
       latest_run: null,
+      orchestrator_tool_calls: [],
     });
 
     render(<CodingPage />);
@@ -765,6 +774,7 @@ describe("CodingPage", () => {
       messages: [],
       active_run: null,
       latest_run: null,
+      orchestrator_tool_calls: [],
     }));
 
     render(<CodingPage />);
@@ -807,6 +817,7 @@ describe("CodingPage", () => {
       messages: [],
       active_run: null,
       latest_run: null,
+      orchestrator_tool_calls: [],
     }));
 
     render(<CodingPage />);
@@ -885,6 +896,7 @@ describe("CodingPage", () => {
       messages: [],
       active_run: null,
       latest_run: null,
+      orchestrator_tool_calls: [],
     }));
     let capturedOnEvent: ((event: codingApi.CodingSseEvent) => void) | null = null;
     vi.mocked(codingApi.streamCodingMessage).mockImplementation(

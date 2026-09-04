@@ -85,6 +85,12 @@ async def run_coding_turn_stream(
         yield f"data: {json.dumps({'event': 'error', 'message': 'Session not found'})}\n\n"
         return
 
+    # Block submission if active run in waiting_user status exists
+    latest_run = store.get_latest_run_for_session(session_id)
+    if latest_run and latest_run.get("status") == "waiting_user":
+        yield f"data: {json.dumps({'event': 'error', 'message': 'Session is waiting for user input on an active question'})}\n\n"
+        return
+
     repo_path = session["repo_path"]
     backend_name = session["backend"]
 
@@ -119,6 +125,7 @@ async def run_coding_turn_stream(
             dirty_tree_at_start=dirty_summary,
         )
         run_id = run["run_id"]
+        store.update_message_run_id(user_msg_id, run_id)
 
         with _JOBS_GUARD:
             _RUNNING_JOBS[run_id] = (cancel_event, canonical_repo)
@@ -133,8 +140,10 @@ async def run_coding_turn_stream(
         # Track in-memory external session id for this turn (P0-1: carry recreated id to next iteration)
         current_external_id = session.get("external_session_id") if session else None
 
+        phase_turn = 0
         while True:
             if cancel_event.is_set():
+                store.mark_running_tool_calls_interrupted_for_run(run_id, error="User cancelled execution")
                 store.update_run(
                     run_id,
                     status="cancelled",
@@ -144,8 +153,9 @@ async def run_coding_turn_stream(
                 yield f"data: {json.dumps({'event': 'cancelled', 'message': 'キャンセルされました'}, ensure_ascii=False)}\n\n"
                 return
 
+            phase_turn += 1
             phase = "initial" if cli_count == 0 else "review"
-            yield f"data: {json.dumps({'event': 'orchestrator_start', 'phase': phase}, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps({'event': 'orchestrator_start', 'phase': phase, 'phase_turn': phase_turn}, ensure_ascii=False)}\n\n"
 
             # Fetch up-to-date message history for orchestrator context
             raw_history = store.list_messages(session_id)
@@ -154,14 +164,59 @@ async def run_coding_turn_stream(
                 msg_dict = {"role": m["role"], "content": m["content"]}
                 history.append(msg_dict)
 
+            full_orch_response = ""
             try:
-                full_orch_response = await orchestrator.generate_response(
+                async for event in orchestrator.generate_response_events(
                     history=history,
                     repo_path=canonical_repo,
                     backend_name=backend_name,
-                )
+                    phase=phase,
+                    phase_turn=phase_turn,
+                ):
+                    if cancel_event.is_set():
+                        store.mark_running_tool_calls_interrupted_for_run(run_id, error="User cancelled execution")
+                        store.update_run(
+                            run_id,
+                            status="cancelled",
+                            error_message="User cancelled execution",
+                            finished_at=datetime.now(JST).isoformat(),
+                        )
+                        yield f"data: {json.dumps({'event': 'cancelled', 'message': 'キャンセルされました'}, ensure_ascii=False)}\n\n"
+                        return
+
+                    evt_type = event.get("type")
+                    if evt_type == "detected":
+                        yield f"data: {json.dumps({'event': 'orchestrator_tool_call_detected', 'call_key': event['call_key'], 'tool_name': event['tool_name'], 'phase': phase, 'phase_turn': phase_turn, 'iteration': event['iteration'], 'call_index': event['call_index']}, ensure_ascii=False)}\n\n"
+                    elif evt_type == "start":
+                        store.create_orchestrator_tool_call(
+                            call_id=event["call_id"],
+                            run_id=run_id,
+                            phase=phase,
+                            phase_turn=phase_turn,
+                            iteration=event["iteration"],
+                            call_index=event["call_index"],
+                            call_key=event["call_key"],
+                            tool_name=event["tool_name"],
+                            args=event["args"],
+                            provider_call_id=event.get("provider_call_id"),
+                            status="running",
+                        )
+                        yield f"data: {json.dumps({'event': 'orchestrator_tool_call_start', 'call_id': event['call_id'], 'call_key': event['call_key'], 'tool_name': event['tool_name'], 'args': event['args'], 'phase': phase, 'phase_turn': phase_turn, 'iteration': event['iteration'], 'call_index': event['call_index']}, ensure_ascii=False)}\n\n"
+                    elif evt_type == "end":
+                        store.update_orchestrator_tool_call(
+                            call_id=event["call_id"],
+                            status=event["status"],
+                            result=event.get("full_result", ""),
+                            error=event.get("error"),
+                        )
+                        yield f"data: {json.dumps({'event': 'orchestrator_tool_call_end', 'call_id': event['call_id'], 'call_key': event['call_key'], 'tool_name': event['tool_name'], 'status': event['status'], 'result': event['result'], 'error': event.get('error'), 'phase': phase, 'phase_turn': phase_turn, 'iteration': event['iteration'], 'call_index': event['call_index']}, ensure_ascii=False)}\n\n"
+                    elif evt_type == "text":
+                        full_orch_response = event.get("content", "")
             except Exception as exc:
                 logger.exception("Error during orchestrator execution")
+                store.mark_running_tool_calls_interrupted_for_run(
+                    run_id, error=f"Orchestrator error: {str(exc)}"
+                )
                 store.update_run(
                     run_id,
                     status="failed",
@@ -196,10 +251,13 @@ async def run_coding_turn_stream(
 
             # Save orchestrator message
             orch_msg = store.add_message(
-                session_id, role="orchestrator", content=clean_orch_text
+                session_id, role="orchestrator", content=clean_orch_text, run_id=run_id
             )
             orch_msg_id = orch_msg["message_id"]
             store.update_run(run_id, orchestrator_message_id=orch_msg_id)
+            store.associate_orchestrator_tool_calls_with_message(
+                run_id, phase_turn, orch_msg_id
+            )
 
             yield f"data: {json.dumps({'event': 'orchestrator_message', 'phase': phase, 'message': orch_msg}, ensure_ascii=False)}\n\n"
 
@@ -218,7 +276,7 @@ async def run_coding_turn_stream(
 
             # Save cli_request message for history & UI dedicated card
             cli_req_msg = store.add_message(
-                session_id, role="cli_request", content=cli_prompt
+                session_id, role="cli_request", content=cli_prompt, run_id=run_id
             )
             yield f"data: {json.dumps({'event': 'cli_request', 'message': cli_req_msg}, ensure_ascii=False)}\n\n"
 
@@ -270,6 +328,7 @@ async def run_coding_turn_stream(
                     current_external_id = cli_result.external_session_id
 
                 if cli_result.cancelled:
+                    store.mark_running_tool_calls_interrupted_for_run(run_id, error="User cancelled CLI execution")
                     store.update_run(
                         run_id,
                         status="cancelled",

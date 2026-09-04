@@ -669,3 +669,22 @@ AgentsPage と共通のデザインパターンを採用し、PC幅での情報�
 
 - Frontend Vitest（`CodingPage.test.tsx`）で2ペイン描画、畳み込み・復帰動作、セッション未選択状態での復帰動作を含め21件全テスト通過。
 - `tsc -b` 型チェック通過。
+
+## Coding Orchestratorのイベント駆動ツール可視化契約（generate_response_events）
+
+| 項目 | 内容 |
+|------|------|
+| 決定日 | 2026-09-04 |
+| カテゴリ | コーディング・Web UI |
+| 決定内容 | `CodingOrchestrator` は `generate_response_events` で `detected/start/end/text` の構造化イベントを yield し、`service.py` がSSE転送と `coding_orchestrator_tool_calls` への永続化を行う。ツール呼び出し状態語彙は `running/completed/failed/interrupted (+cancelled)` に統一し、フロントの成功判定は `completed` を見る。 |
+
+### 設計と理由
+
+- 旧 `generate_response`（文字列一括返却）ではツール実行中の進捗がUIに出せず、jules反映版 `service.py` が要求する `generate_response_events` が未実装で11件のテストが失敗していた。`agents/runtime.py` の detected→start→end パターンを踏襲し、既存 `generate_response` は互換ラッパーとして残す。
+- フォールバック採番の `call_id`/`call_key` は `phase_turn` でスコープする（`call_{phase_turn}_{iteration}_{call_index}`）。`service.py` は `phase_turn` ごとに呼び出すため、素の iteration 連番では2ターン目に PRIMARY KEY 衝突する。
+- `GET /coding/sessions/{id}` は `orchestrator_tool_calls`（`list_orchestrator_tool_calls_for_session`）を含める。含めないと CodingPage の永続ツール表示が常に空になる。
+- `CodingRun`/`AgentRun` の `hitl_run_id` と `waiting_user` 状態を API 型に含め、ask_user 系 HITL ハンドラは `HitlResult` 契約（dispatcher/worker が要求）を満たす。
+
+### 検証
+
+- `uv run pytest tests/` 985件通過、`tsc --noEmit` 通過、フロント Vitest 247件通過。

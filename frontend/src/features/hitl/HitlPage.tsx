@@ -8,6 +8,7 @@ import {
   cancelHitlRun,
 } from "../../api/client";
 import type { HitlRun, HitlRunDetail, HitlQuestion } from "../../api/types";
+import { WaitingRunQuestionCard, toQuestionItems } from "../../components/InConversationQuestionCard";
 import { formatDateTime, formatYmdWithDow } from "../../utils/date";
 
 interface MaintEvidence {
@@ -548,11 +549,43 @@ export default function HitlPage() {
               </div>
             )}
 
-            {/* Question Set List */}
-            <div className="mt-8 space-y-6">
-            <h3 className="text-sm font-bold text-slate-700 border-l-4 border-slate-700 pl-2">
-              質問
-            </h3>
+            {/* Dedicated Question Card rendering for in-conversation questions */}
+            {selectedRun.display_type === "in_conversation_question" && (
+              <div className="mt-6">
+                <WaitingRunQuestionCard
+                  key={selectedRun.run_id}
+                  hitlRunId={selectedRun.run_id}
+                  questions={toQuestionItems(selectedRun.questions)}
+                  disabled={!["pending_user", "ready_to_resume"].includes(selectedRun.status)}
+                  onSubmit={async (answers) => {
+                    try {
+                      await Promise.all(
+                        Object.entries(answers).map(([qKey, ans]) =>
+                          submitHitlAnswer(selectedRun.run_id, qKey, ans.value, ans.comment)
+                        )
+                      );
+                      await loadDetail(selectedRun.run_id, true);
+                      await reloadRuns();
+                    } catch (e) {
+                      setDetailError(e instanceof Error ? e.message : "回答の送信に失敗しました");
+                      throw e;
+                    }
+                  }}
+                  onCancel={async () => {
+                    await cancelHitlRun(selectedRun.run_id);
+                    await loadDetail(selectedRun.run_id);
+                    await reloadRuns();
+                  }}
+                />
+              </div>
+            )}
+
+            {/* Standard Question Set List */}
+            {selectedRun.display_type !== "in_conversation_question" && (
+              <div className="mt-8 space-y-6">
+              <h3 className="text-sm font-bold text-slate-700 border-l-4 border-slate-700 pl-2">
+                質問
+              </h3>
 
               <div className="space-y-4">
                 {selectedRun.questions.map((q) => {
@@ -917,6 +950,7 @@ export default function HitlPage() {
                 })}
               </div>
             </div>
+            )}
           </div>
         ) : (
           !detailLoading && (

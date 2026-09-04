@@ -6,7 +6,6 @@ import asyncio
 import json
 import logging
 import re
-import uuid
 from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
@@ -18,6 +17,29 @@ from obsidian_ai_hub.utils.config import (
 )
 
 logger = logging.getLogger(__name__)
+
+_TOOL_RESULT_MAX_CHARS = 20000
+_LIVE_RESULT_MAX_CHARS = 2000
+
+
+def _truncate_result(text: str, limit: int, suffix: str = "\n…(truncated)") -> str:
+    if len(text) <= limit:
+        return text
+    return text[:limit] + suffix
+
+
+def _extract_text_content(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        text_parts = []
+        for part in content:
+            if isinstance(part, dict) and part.get("type") == "text":
+                text_parts.append(part.get("text", ""))
+            elif isinstance(part, str):
+                text_parts.append(part)
+        return "".join(text_parts)
+    return str(content)
 
 SYSTEM_PROMPT = """あなたはGitリポジトリの分析・編集・構築を行う専用コーディングワークスペースの上位AIエージェント（オーケストレーター）です。
 ユーザーからの要求を理解し、必要に応じて裏で控えるコーディングCLIワーカー（Codex/OpenCode）に作業を指示し、結果をまとめてユーザーへ回答します。
@@ -105,13 +127,16 @@ class CodingOrchestrator:
 
         return msgs
 
-    async def generate_response(
+    async def _prepare_llm(
         self,
         history: List[Dict[str, str]],
         repo_path: str,
         backend_name: str,
-    ) -> str:
-        """Generate complete orchestrator response string asynchronously."""
+    ) -> Tuple[Any, Any, Dict[str, Any]]:
+        """Resolve tools/skills and build LLM messages.
+
+        Returns (messages, llm_with_tools, tools_by_name).
+        """
         # Resolve permitted tools (needed before skills_block to know if skills enabled)
         if self.tool_ids is None:
             resolved_tool_ids = registry.list_available_tools()
@@ -177,6 +202,36 @@ class CodingOrchestrator:
 
         tools_by_name = {t.name: t for t in allowed_tools}
         llm_with_tools = llm.bind_tools(allowed_tools) if allowed_tools else llm
+        return messages, llm_with_tools, tools_by_name
+
+    async def generate_response_events(
+        self,
+        history: List[Dict[str, str]],
+        repo_path: str,
+        backend_name: str,
+        phase: str = "initial",
+        phase_turn: int = 1,
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """Generate orchestrator response, yielding structured tool/text events.
+
+        Event shapes (consumed by coding.service):
+        - detected: {"type": "detected", "call_key": str, "tool_name": str,
+                     "iteration": int, "call_index": int}
+        - start: {"type": "start", "call_id": str, "call_key": str,
+                  "tool_name": str, "args": dict, "provider_call_id": str|None,
+                  "iteration": int, "call_index": int}
+        - end: {"type": "end", "call_id": str, "call_key": str,
+                "tool_name": str, "status": str, "result": str (live, truncated),
+                "full_result": str, "error": str|None,
+                "iteration": int, "call_index": int}
+        - text: {"type": "text", "content": str}
+
+        phase/phase_turn are accepted for API compatibility with the service
+        layer and are not used in prompt construction.
+        """
+        messages, llm_with_tools, tools_by_name = await self._prepare_llm(
+            history, repo_path, backend_name
+        )
 
         try:
             iterations = 0
@@ -189,35 +244,64 @@ class CodingOrchestrator:
 
                 tool_calls = getattr(res, "tool_calls", None)
                 if not tool_calls:
-                    content = getattr(res, "content", "")
-                    if isinstance(content, str):
-                        return content
-                    elif isinstance(content, list):
-                        text_parts = []
-                        for part in content:
-                            if isinstance(part, dict) and part.get("type") == "text":
-                                text_parts.append(part.get("text", ""))
-                            elif isinstance(part, str):
-                                text_parts.append(part)
-                        return "".join(text_parts)
-                    return str(content)
+                    yield {"type": "text", "content": _extract_text_content(getattr(res, "content", ""))}
+                    return
 
-                # Execute tool calls
-                for tc in tool_calls:
+                # Execute tool calls (validated inline; unexpected shapes raise)
+                for call_index, tc in enumerate(tool_calls):
+                    if not isinstance(tc, dict):
+                        raise ValueError("LLM returned a malformed tool call.")
                     tname = tc.get("name")
                     targs = tc.get("args", {})
-                    tcall_id = tc.get("id") or f"call_{uuid.uuid4().hex[:8]}"
+                    if not isinstance(tname, str) or not tname:
+                        raise ValueError("LLM returned a tool call without a name.")
+                    if not isinstance(targs, dict):
+                        raise ValueError(f"LLM returned non-object arguments for tool '{tname}'.")
+                    provider_call_id = tc.get("id")
+                    # Scope fallback IDs by phase_turn: service.py calls this once
+                    # per phase_turn and call_id is the store PRIMARY KEY, so a
+                    # bare iteration/call_index pair would collide on turn 2+.
+                    tcall_id = provider_call_id or f"call_{phase_turn}_{iterations}_{call_index}"
+                    call_key = f"{phase_turn}:{iterations}:{call_index}"
+
+                    yield {
+                        "type": "detected",
+                        "call_key": call_key,
+                        "tool_name": tname,
+                        "iteration": iterations,
+                        "call_index": call_index,
+                    }
+                    yield {
+                        "type": "start",
+                        "call_id": tcall_id,
+                        "call_key": call_key,
+                        "tool_name": tname,
+                        "args": targs,
+                        "provider_call_id": provider_call_id,
+                        "iteration": iterations,
+                        "call_index": call_index,
+                    }
 
                     if tname in tools_by_name:
                         tool_obj = tools_by_name[tname]
-                        tool_res = await asyncio.to_thread(tool_obj.invoke, targs)
-                        result_str = (
-                            tool_res
-                            if isinstance(tool_res, str)
-                            else json.dumps(tool_res, ensure_ascii=False)
-                        )
+                        try:
+                            tool_res = await asyncio.to_thread(tool_obj.invoke, targs)
+                            result_str = (
+                                tool_res
+                                if isinstance(tool_res, str)
+                                else json.dumps(tool_res, ensure_ascii=False)
+                            )
+                            status = "completed"
+                            error_msg = None
+                        except Exception as tool_exc:
+                            logger.exception("Error executing tool '%s'", tname)
+                            result_str = json.dumps({"error": str(tool_exc)}, ensure_ascii=False)
+                            status = "failed"
+                            error_msg = str(tool_exc)
                     else:
                         result_str = json.dumps({"error": f"Tool '{tname}' is not permitted or unknown"}, ensure_ascii=False)
+                        status = "failed"
+                        error_msg = f"Tool '{tname}' is not permitted or unknown"
 
                     messages.append(
                         ToolMessage(
@@ -226,14 +310,47 @@ class CodingOrchestrator:
                         )
                     )
 
+                    yield {
+                        "type": "end",
+                        "call_id": tcall_id,
+                        "call_key": call_key,
+                        "tool_name": tname,
+                        "status": status,
+                        "result": _truncate_result(result_str, _LIVE_RESULT_MAX_CHARS),
+                        "full_result": _truncate_result(result_str, _TOOL_RESULT_MAX_CHARS),
+                        "error": error_msg,
+                        "iteration": iterations,
+                        "call_index": call_index,
+                    }
+
             # Fallback if max_tool_iterations reached
+            llm = create_langchain_llm(provider=self.provider, model=self.model, temperature=0.7, max_tokens=8192, use_responses_api=True)
             res = await llm.ainvoke(messages)
-            content = getattr(res, "content", "")
-            return content if isinstance(content, str) else str(content)
+            yield {"type": "text", "content": _extract_text_content(getattr(res, "content", ""))}
 
         except Exception as exc:
             logger.exception("Orchestrator generation failed")
             raise exc
+
+    async def generate_response(
+        self,
+        history: List[Dict[str, str]],
+        repo_path: str,
+        backend_name: str,
+    ) -> str:
+        """Generate complete orchestrator response string asynchronously.
+
+        Backwards-compatibility wrapper over generate_response_events.
+        """
+        content = ""
+        async for event in self.generate_response_events(
+            history=history,
+            repo_path=repo_path,
+            backend_name=backend_name,
+        ):
+            if event.get("type") == "text":
+                content = event.get("content", "")
+        return content
 
     async def stream_response(
         self,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 import uuid
 from collections import Counter
@@ -12,6 +13,8 @@ from typing import Any, Generator, Optional, Sequence
 from zoneinfo import ZoneInfo
 
 from obsidian_ai_hub.database import get_db_connection
+
+logger = logging.getLogger(__name__)
 
 
 @contextmanager
@@ -242,12 +245,18 @@ def _row_to_run(row: sqlite3.Row) -> dict[str, Any]:
         except (json.JSONDecodeError, TypeError):
             tool_calls = []
 
+    try:
+        hitl_run_id = row["hitl_run_id"]  # type: ignore[index]
+    except (IndexError, KeyError, ValueError):
+        hitl_run_id = None
+
     return {
         "run_id": row["run_id"],
         "session_id": row["session_id"],
         "user_message_id": row["user_message_id"],
         "assistant_message_id": row["assistant_message_id"],
         "status": row["status"],
+        "hitl_run_id": hitl_run_id,
         "used_tools": used_tools,
         "created_hitl_run_ids": created_hitl_run_ids,
         "tool_calls": tool_calls,
@@ -1205,6 +1214,54 @@ def complete_run(
         msg = get_message(asst_msg_id, conn=active_conn)
         updated_run = get_run(run_id, conn=active_conn)
         return msg, updated_run  # type: ignore[return-value]
+
+
+def update_run_hitl(
+    run_id: str,
+    status: str,
+    hitl_run_id: Optional[str] = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> dict[str, Any]:
+    """Update run status and optional hitl_run_id link (e.g. for waiting_user or cancelled)."""
+    with auto_connection(conn) as (active_conn, is_generated):
+        run = get_run(run_id, conn=active_conn)
+        if not run:
+            raise FileNotFoundError(f"Run '{run_id}' not found.")
+
+        def _do_update():
+            try:
+                active_conn.execute(
+                    """
+                    UPDATE agent_runs
+                    SET status = ?, hitl_run_id = ?
+                    WHERE run_id = ?
+                    """,
+                    (status, hitl_run_id, run_id),
+                )
+            except sqlite3.OperationalError as e:
+                if "no such column: hitl_run_id" in str(e):
+                    logger.warning(
+                        "agent_runs.hitl_run_id missing; run %s status updated but HITL link dropped. Run migration v33.",
+                        run_id,
+                    )
+                    active_conn.execute(
+                        """
+                        UPDATE agent_runs
+                        SET status = ?
+                        WHERE run_id = ?
+                        """,
+                        (status, run_id),
+                    )
+                else:
+                    raise
+
+        if is_generated:
+            with active_conn:
+                _do_update()
+        else:
+            _do_update()
+
+        return get_run(run_id, conn=active_conn)  # type: ignore[return-value]
 
 
 def fail_run(

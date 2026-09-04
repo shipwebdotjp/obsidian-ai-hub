@@ -63,6 +63,7 @@ export interface CodingMessage {
   role: "user" | "orchestrator" | "cli_request" | "worker";
   content: string;
   created_at: string;
+  run_id?: string | null;
 }
 
 export interface CodingRun {
@@ -71,13 +72,56 @@ export interface CodingRun {
   user_message_id: string;
   orchestrator_message_id: string | null;
   worker_message_id: string | null;
-  status: "running" | "completed" | "failed" | "cancelled" | "interrupted";
+  status: "running" | "completed" | "failed" | "cancelled" | "interrupted" | "waiting_user";
+  hitl_run_id: string | null;
   dirty_tree_at_start: string | null;
   error_message: string | null;
   started_at: string;
   finished_at: string | null;
   diagnostics_json?: string | null;
   diagnostics?: CodingDiagnostics | null;
+}
+
+export type CodingOrchestratorToolCallStatus =
+  | "running"
+  | "completed"
+  | "failed"
+  | "interrupted"
+  | "cancelled";
+
+export interface CodingOrchestratorToolCall {
+  call_id: string;
+  run_id: string;
+  phase: string;
+  phase_turn: number;
+  iteration: number;
+  call_index: number;
+  call_key: string;
+  orchestrator_message_id: string | null;
+  tool_name: string;
+  args: Record<string, unknown>;
+  args_json?: string;
+  result: string | null;
+  status: CodingOrchestratorToolCallStatus;
+  error: string | null;
+  provider_call_id: string | null;
+  started_at: string;
+  finished_at: string | null;
+}
+
+export interface CodingLiveToolCall {
+  id: string;
+  call_id?: string;
+  call_key: string;
+  tool_name: string;
+  args: Record<string, unknown>;
+  result: string;
+  status: CodingOrchestratorToolCallStatus | "preparing" | "running";
+  error?: string | null;
+  phase: string;
+  phase_turn: number;
+  iteration: number;
+  call_index: number;
 }
 
 export interface CodingSessionDetail {
@@ -88,11 +132,45 @@ export interface CodingSessionDetail {
   messages: CodingMessage[];
   active_run: CodingRun | null;
   latest_run: CodingRun | null;
+  orchestrator_tool_calls: CodingOrchestratorToolCall[];
 }
 
 export type CodingSseEvent =
   | { event: "start"; run_id: string; is_dirty: boolean; dirty_summary: string | null }
-  | { event: "orchestrator_start"; phase: "initial" | "review" }
+  | { event: "orchestrator_start"; phase: "initial" | "review"; phase_turn?: number }
+  | {
+      event: "orchestrator_tool_call_detected";
+      call_key: string;
+      tool_name: string;
+      phase: string;
+      phase_turn: number;
+      iteration: number;
+      call_index: number;
+    }
+  | {
+      event: "orchestrator_tool_call_start";
+      call_id: string;
+      call_key: string;
+      tool_name: string;
+      args: Record<string, unknown>;
+      phase: string;
+      phase_turn: number;
+      iteration: number;
+      call_index: number;
+    }
+  | {
+      event: "orchestrator_tool_call_end";
+      call_id: string;
+      call_key: string;
+      tool_name: string;
+      status: CodingOrchestratorToolCallStatus;
+      result: string;
+      error: string | null;
+      phase: string;
+      phase_turn: number;
+      iteration: number;
+      call_index: number;
+    }
   | { event: "orchestrator_message"; phase: "initial" | "review"; message: CodingMessage }
   | { event: "cli_request"; message: CodingMessage }
   | { event: "worker_start"; attempt: number; backend: string; prompt: string }

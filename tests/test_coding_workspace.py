@@ -12,6 +12,24 @@ from obsidian_ai_hub.coding.orchestrator import parse_cli_request
 from obsidian_ai_hub.web.app import create_app
 
 
+def _events_from_text_fn(text_fn):
+    """Adapt an old-style text mock into a generate_response_events mock.
+
+    text_fn: async callable(*args, **kwargs) -> str. Returns a sync function
+    suitable as patch side_effect for generate_response_events, yielding a
+    single {"type": "text"} event per call.
+    """
+
+    def _mock(*args, **kwargs):
+        async def _gen():
+            text = await text_fn(*args, **kwargs)
+            yield {"type": "text", "content": text}
+
+        return _gen()
+
+    return _mock
+
+
 @pytest.fixture
 def test_project(tmp_path):
     """Create a dummy project in DB pointing to a real Git repo."""
@@ -185,8 +203,8 @@ def test_coding_api_endpoints(test_project):
     )
 
     with patch(
-        "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response",
-        side_effect=mock_generate_response,
+        "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response_events",
+        side_effect=_events_from_text_fn(mock_generate_response),
     ), patch(
         "obsidian_ai_hub.coding.backend.CodexCliBackend.execute",
         return_value=mock_cli_res,
@@ -219,6 +237,85 @@ def test_coding_api_endpoints(test_project):
     res = client.delete(f"/api/v1/coding/sessions/{sid}", headers=headers)
     assert res.status_code == 200
     assert res.json()["status"] == "deleted"
+
+
+def test_coding_turn_persists_orchestrator_tool_calls(test_project):
+    """Orchestrator tool events are forwarded as SSE and persisted to store."""
+    app = create_app(token="test-token")
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer test-token"}
+
+    res = client.post(
+        "/api/v1/coding/sessions",
+        headers=headers,
+        json={
+            "project_id": test_project["project_id"],
+            "backend": "codex",
+            "title": "Tool Call Persistence",
+        },
+    )
+    assert res.status_code == 200
+    sid = res.json()["session_id"]
+
+    def mock_events(*args, **kwargs):
+        async def _gen():
+            yield {
+                "type": "detected",
+                "call_key": "1:0",
+                "tool_name": "web_search",
+                "iteration": 1,
+                "call_index": 0,
+            }
+            yield {
+                "type": "start",
+                "call_id": "call_1_0",
+                "call_key": "1:0",
+                "tool_name": "web_search",
+                "args": {"query": "pytest"},
+                "provider_call_id": "prov_1",
+                "iteration": 1,
+                "call_index": 0,
+            }
+            yield {
+                "type": "end",
+                "call_id": "call_1_0",
+                "call_key": "1:0",
+                "tool_name": "web_search",
+                "status": "completed",
+                "result": "ok",
+                "full_result": "ok",
+                "error": None,
+                "iteration": 1,
+                "call_index": 0,
+            }
+            yield {"type": "text", "content": "調査完了です。"}
+
+        return _gen()
+
+    with patch(
+        "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response_events",
+        side_effect=mock_events,
+    ):
+        res = client.post(
+            f"/api/v1/coding/sessions/{sid}/messages/stream",
+            headers=headers,
+            json={"content": "ツールを実行してください"},
+        )
+        assert res.status_code == 200
+        text = res.text
+        assert "orchestrator_tool_call_start" in text
+        assert "orchestrator_tool_call_end" in text
+        assert "orchestrator_message" in text
+        assert '"status": "completed"' in text
+
+    detail = client.get(f"/api/v1/coding/sessions/{sid}", headers=headers).json()
+    run_id = detail["latest_run"]["run_id"]
+    calls = store.list_orchestrator_tool_calls_for_run(run_id)
+    assert len(calls) == 1
+    assert calls[0]["call_id"] == "call_1_0"
+    assert calls[0]["tool_name"] == "web_search"
+    assert calls[0]["status"] == "completed"
+    assert calls[0]["orchestrator_message_id"] is not None
 
 
 def test_opencode_backend_initial_run(test_project):
@@ -425,8 +522,8 @@ def test_opencode_stream_session_recreated_notification(test_project):
     )
 
     with patch(
-        "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response",
-        side_effect=mock_generate_response,
+        "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response_events",
+        side_effect=_events_from_text_fn(mock_generate_response),
     ), patch(
         "obsidian_ai_hub.coding.backend.OpenCodeCliBackend.execute",
         return_value=mock_cli_res,
@@ -620,8 +717,8 @@ def test_codex_stream_session_recreated_notification(test_project):
     )
 
     with patch(
-        "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response",
-        side_effect=mock_generate_response,
+        "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response_events",
+        side_effect=_events_from_text_fn(mock_generate_response),
     ), patch(
         "obsidian_ai_hub.coding.backend.CodexCliBackend.execute",
         return_value=mock_cli_res,
@@ -674,8 +771,8 @@ def test_coding_turn_max_cli_iterations_cap(test_project):
     )
 
     with patch(
-        "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response",
-        side_effect=mock_generate_response,
+        "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response_events",
+        side_effect=_events_from_text_fn(mock_generate_response),
     ), patch(
         "obsidian_ai_hub.coding.backend.CodexCliBackend.execute",
         return_value=mock_cli_res,
@@ -735,8 +832,8 @@ def test_coding_turn_non_zero_exit_code_passed_to_review(test_project):
     )
 
     with patch(
-        "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response",
-        side_effect=mock_generate_response,
+        "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response_events",
+        side_effect=_events_from_text_fn(mock_generate_response),
     ), patch(
         "obsidian_ai_hub.coding.backend.CodexCliBackend.execute",
         return_value=mock_cli_res,
@@ -1109,8 +1206,8 @@ def test_opencode_title_sync_updates_default_title(test_project):
     )
 
     with patch(
-        "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response",
-        side_effect=mock_generate_response,
+        "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response_events",
+        side_effect=_events_from_text_fn(mock_generate_response),
     ), patch(
         "obsidian_ai_hub.coding.backend.OpenCodeCliBackend.execute",
         return_value=mock_cli_res,
@@ -1160,8 +1257,8 @@ def test_opencode_title_sync_does_not_overwrite_custom_title(test_project):
     )
 
     with patch(
-        "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response",
-        side_effect=mock_generate_response,
+        "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response_events",
+        side_effect=_events_from_text_fn(mock_generate_response),
     ), patch(
         "obsidian_ai_hub.coding.backend.OpenCodeCliBackend.execute",
         return_value=mock_cli_res,
@@ -1209,8 +1306,8 @@ def test_opencode_title_sync_skips_on_fetch_failure(test_project):
     )
 
     with patch(
-        "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response",
-        side_effect=mock_generate_response,
+        "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response_events",
+        side_effect=_events_from_text_fn(mock_generate_response),
     ), patch(
         "obsidian_ai_hub.coding.backend.OpenCodeCliBackend.execute",
         return_value=mock_cli_res,
@@ -1267,8 +1364,8 @@ def test_codex_title_generation_updates_default_title(test_project):
         external_session_id="thread_123", output="Codex worker output", exit_code=0
     )
     with patch(
-        "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response",
-        side_effect=mock_generate_response,
+        "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response_events",
+        side_effect=_events_from_text_fn(mock_generate_response),
     ), patch(
         "obsidian_ai_hub.coding.backend.CodexCliBackend.execute", return_value=mock_cli_res
     ), patch(
@@ -1312,8 +1409,8 @@ def test_codex_title_generation_preserves_explicit_title(test_project):
         return "解析\n<cli_request>\ncodex exec test\n</cli_request>"
 
     with patch(
-        "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response",
-        side_effect=mock_generate_response,
+        "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response_events",
+        side_effect=_events_from_text_fn(mock_generate_response),
     ), patch(
         "obsidian_ai_hub.coding.backend.CodexCliBackend.execute",
         return_value=backend.CodingBackendResult(
@@ -1351,8 +1448,8 @@ def test_codex_title_generation_failure_does_not_fail_turn(test_project):
         return "解析\n<cli_request>\ncodex exec test\n</cli_request>"
 
     with patch(
-        "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response",
-        side_effect=mock_generate_response,
+        "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response_events",
+        side_effect=_events_from_text_fn(mock_generate_response),
     ), patch(
         "obsidian_ai_hub.coding.backend.CodexCliBackend.execute",
         return_value=backend.CodingBackendResult(
@@ -1560,8 +1657,8 @@ def test_coding_turn_carries_recreated_session_id_to_next_cli(test_project):
     )
 
     with patch(
-        "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response",
-        side_effect=mock_gen,
+        "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response_events",
+        side_effect=_events_from_text_fn(mock_gen),
     ), patch("obsidian_ai_hub.coding.backend.OpenCodeCliBackend.execute") as mock_exec:
         mock_exec.side_effect = [first_res, second_res]
         res = client.post(
@@ -1611,8 +1708,8 @@ def test_worker_messages_not_orphaned_within_same_run(test_project):
     r2 = backend.CodingBackendResult(external_session_id="ses_m1", output="o2", exit_code=0, diagnostics={"cwd": test_project["repo_path"], "requested_session_id": "ses_m1", "returned_session_id": "ses_m1", "tool_call_count": 0, "tool_failure_count": 0, "structured_error": None, "auto_rejected_permission": False, "exit_code": 0, "model": "test", "variant": "なし", "session_recreated": False})
 
     with patch(
-        "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response",
-        side_effect=mock_gen,
+        "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response_events",
+        side_effect=_events_from_text_fn(mock_gen),
     ), patch("obsidian_ai_hub.coding.backend.OpenCodeCliBackend.execute", side_effect=[r1, r2]):
         res = client.post(
             f"/api/v1/coding/sessions/{sid}/messages/stream",
@@ -1637,7 +1734,10 @@ def test_worker_messages_not_orphaned_within_same_run(test_project):
         cur = conn.execute("PRAGMA table_info(coding_messages)")
         cols = [r["name"] for r in cur.fetchall()]
         if "run_id" in cols:
-            cur2 = conn.execute("SELECT count(*) as c FROM coding_messages WHERE run_id = ?", (run_id,))
+            cur2 = conn.execute(
+                "SELECT count(*) as c FROM coding_messages WHERE run_id = ? AND role = 'worker'",
+                (run_id,),
+            )
             assert cur2.fetchone()["c"] == 2
             # v30以降は二重書き込みしないため junction は 0
             cur3 = conn.execute("SELECT count(*) as c FROM coding_run_worker_messages WHERE run_id = ?", (run_id,))
@@ -1946,8 +2046,8 @@ def test_coding_turn_picks_up_external_session_id_updated_before_first_cli(test_
     )
 
     with patch(
-        "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response",
-        side_effect=mock_gen,
+        "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response_events",
+        side_effect=_events_from_text_fn(mock_gen),
     ), patch("obsidian_ai_hub.coding.store.get_session", side_effect=fake_get_session), patch(
         "obsidian_ai_hub.coding.backend.OpenCodeCliBackend.execute", return_value=mock_result
     ) as mock_exec:

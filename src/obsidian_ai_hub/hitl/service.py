@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import sqlite3
 from datetime import datetime, timezone, timedelta
@@ -483,6 +484,7 @@ def cancel_run(
 ) -> None:
     """
     Cancel a run and mark all of its pending active questions as cancelled.
+    Also sync status to associated Agent or Coding run if checkpoint contains run_id.
     """
     close_conn = False
     if conn is None:
@@ -505,6 +507,35 @@ def cancel_run(
                 bulk_update_questions_status_by_set(
                     run_id, active_set_id, from_status="pending", to_status="cancelled", conn=conn
                 )
+
+            # Sync cancellation to associated Agent or Coding run
+            raw_cp = run.get("checkpoint")
+            if raw_cp:
+                try:
+                    cp = json.loads(raw_cp)
+                    domain = cp.get("domain")
+                    assoc_run_id = cp.get("run_id")
+                    if domain == "agent" and assoc_run_id:
+                        from obsidian_ai_hub.agents import store as agent_store
+                        agent_store.update_run_hitl(run_id=assoc_run_id, status="cancelled", hitl_run_id=None, conn=conn)
+                    elif domain == "coding" and assoc_run_id:
+                        # Same-connection atomic update (a separate store call would
+                        # open its own connection and risk "database is locked").
+                        # update_run() ignores hitl_run_id=None, so clear it here.
+                        try:
+                            conn.execute(
+                                "UPDATE coding_runs SET status = ?, hitl_run_id = NULL WHERE run_id = ?",
+                                ("cancelled", assoc_run_id),
+                            )
+                        except sqlite3.OperationalError as col_exc:
+                            if "no such column: hitl_run_id" not in str(col_exc):
+                                raise
+                            conn.execute(
+                                "UPDATE coding_runs SET status = ? WHERE run_id = ?",
+                                ("cancelled", assoc_run_id),
+                            )
+                except Exception as exc:
+                    logger.warning(f"Failed to sync cancellation to associated run: {exc}")
     finally:
         if close_conn:
             conn.close()

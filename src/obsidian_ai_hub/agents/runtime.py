@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, AsyncGenerator, Dict, List, Optional, Sequence
@@ -985,6 +986,137 @@ async def generate_agent_stream(
             if not tool_calls:
                 final_ai_msg = ai_msg
                 break
+
+            # Enforce single-tool call rule for ask_user
+            ask_user_calls = [c for c in tool_calls if c["name"] == "ask_user"]
+            if ask_user_calls and len(tool_calls) > 1:
+                # Returned error ToolMessage to all call IDs urging single ask_user invocation
+                for call in tool_calls:
+                    langchain_messages.append(
+                        ToolMessage(
+                            content=json.dumps(
+                                {
+                                    "error": "ask_user は単独で呼び出し、複数質問は questions 配列へまとめてください。"
+                                },
+                                ensure_ascii=False,
+                            ),
+                            tool_call_id=call["id"],
+                        )
+                    )
+                continue
+
+            # Check if single call is ask_user
+            if len(tool_calls) == 1 and tool_calls[0]["name"] == "ask_user":
+                ask_call = tool_calls[0]
+                q_items = ask_call["args"].get("questions", [])
+
+                # Validate LLM-produced questions before creating the HITL run:
+                # an empty/invalid set would flip the run to waiting_user with no
+                # answerable questions (unresolvable). Bounce back as tool error.
+                _ask_user_error: Optional[str] = None
+                if not isinstance(q_items, list) or not q_items:
+                    _ask_user_error = "ask_user requires a non-empty questions array."
+                else:
+                    _seen_qids: set[str] = set()
+                    for _qi, _q in enumerate(q_items):
+                        if not isinstance(_q, dict):
+                            _ask_user_error = f"ask_user questions[{_qi}] must be an object."
+                            break
+                        _qid = str(_q.get("question_id") or "").strip()
+                        _qtext = str(_q.get("question") or "").strip()
+                        if not _qid or not _qtext:
+                            _ask_user_error = (
+                                f"ask_user questions[{_qi}] requires non-empty "
+                                "question_id and question."
+                            )
+                            break
+                        if _qid in _seen_qids:
+                            _ask_user_error = f"Duplicate question_id '{_qid}' in ask_user call."
+                            break
+                        _seen_qids.add(_qid)
+                        _ch = _q.get("choices", [])
+                        if not isinstance(_ch, list) or not all(isinstance(_c, dict) for _c in _ch):
+                            _ask_user_error = (
+                                f"ask_user questions[{_qi}] choices must be a list of objects."
+                            )
+                            break
+                if _ask_user_error is not None:
+                    langchain_messages.append(
+                        ToolMessage(
+                            content=json.dumps({"error": _ask_user_error}, ensure_ascii=False),
+                            tool_call_id=ask_call["id"],
+                        )
+                    )
+                    continue
+
+                # Register HITL Run and Questions
+                hitl_run_id = f"hitl_ask_{uuid.uuid4().hex[:12]}"
+                question_set_id = "qset_1"
+                questions_data = []
+
+                from obsidian_ai_hub.agents.ask_user import normalize_question_choices
+                from obsidian_ai_hub.hitl.service import register_run_and_questions
+
+                for idx, q_item in enumerate(q_items):
+                    q_id = q_item.get("question_id", f"q_{idx+1}")
+                    q_text = q_item.get("question", "")
+                    raw_choices = q_item.get("choices", [])
+                    norm_choices = normalize_question_choices(
+                        raw_choices if isinstance(raw_choices, list) else []
+                    )
+                    questions_data.append(
+                        {
+                            "question_key": q_id,
+                            "question_type": "single_choice",
+                            "display_text": q_text,
+                            "choices": norm_choices,
+                            "is_required": 1,
+                            "sequence": idx,
+                        }
+                    )
+
+                # Checkpoint saved to HITL run
+                checkpoint_data = {
+                    "domain": "agent",
+                    "agent_id": agent.get("agent_id"),
+                    "session_id": session.get("session_id"),
+                    "run_id": run_id,
+                    "user_content": user_content,
+                    "tool_call_id": ask_call["id"],
+                    "questions": questions_data,
+                    "iterations": iterations,
+                }
+
+                await asyncio.to_thread(
+                    register_run_and_questions,
+                    run_id=hitl_run_id,
+                    handler="agents.ask_user",
+                    checkpoint=json.dumps(checkpoint_data, ensure_ascii=False),
+                    question_set_id=question_set_id,
+                    questions_data=questions_data,
+                    title="会話内の要件確認",
+                    description=f"Agent '{agent.get('name')}' からの確認質問",
+                    display_type="in_conversation_question",
+                )
+
+                # Update agent run status to waiting_user and link hitl_run_id
+                await asyncio.to_thread(
+                    store.update_run_hitl,
+                    run_id=run_id,
+                    status="waiting_user",
+                    hitl_run_id=hitl_run_id,
+                )
+
+                # Emit user_question terminal SSE event
+                yield _format_sse(
+                    {
+                        "type": "user_question",
+                        "hitl_run_id": hitl_run_id,
+                        "question_set_id": question_set_id,
+                        "questions": questions_data,
+                    }
+                )
+                return
 
             # Every call is fully validated before the first tool can run.  In
             # particular, this prevents a valid first call from running when a

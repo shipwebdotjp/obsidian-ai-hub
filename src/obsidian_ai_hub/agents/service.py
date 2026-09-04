@@ -47,6 +47,13 @@ def prepare_session_turn(
         session = store.create_session(agent_id)
 
     session_id = session["session_id"]
+
+    # Block new message submission if there is an active run in waiting_user status
+    runs = store.list_runs(session_id)
+    active_waiting = [r for r in runs if r.get("status") == "waiting_user"]
+    if active_waiting:
+        raise ValueError(f"Session '{session_id}' is waiting for user input on an active question.")
+
     _user_msg, run = store.start_user_run(
         session_id=session_id,
         content=prompt,
