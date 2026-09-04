@@ -17,8 +17,10 @@ def test_resolve_candidate_to_unlinked_person(
     expect(page.get_by_role("heading", name="人物同定・管理")).to_be_visible()
 
     page.get_by_role("button", name="ケン").click()
-    target_select = page.get_by_label("一括解決先の人物")
-    target_select.select_option(label="鈴木健 (未連携)")
+    target_box = page.get_by_label("一括解決先の人物")
+    target_box.click()
+    target_box.fill("鈴木健")
+    page.get_by_role("option", name="鈴木健 (未連携)").click()
     page.get_by_role("button", name="解決", exact=True).click()
 
     expect(page.get_by_text("候補「ケン」を解決しました。")).to_be_visible()

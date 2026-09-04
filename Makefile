@@ -93,7 +93,7 @@ build-web:
 	cd frontend && npm ci && npm run build
 
 npm-build:
-	cd frontend && npm install && npm run build
+	cd frontend && npm run build
 
 # Memory Review Web UI の開発サーバ（Vite + FastAPI を別portで起動する想定）
 npm-dev:

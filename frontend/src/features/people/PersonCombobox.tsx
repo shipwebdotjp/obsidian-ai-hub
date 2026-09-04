@@ -187,7 +187,6 @@ export default function PersonCombobox({
         <ul
           id={listboxId}
           role="listbox"
-          aria-label={ariaLabel}
           className="absolute z-10 mt-1 max-h-56 w-full overflow-y-auto rounded border border-slate-300 bg-white py-1 shadow-lg"
         >
           {filtered.length === 0 ? (
