@@ -231,6 +231,135 @@ def build_resume_turns(cp: Dict[str, Any]) -> List[Dict[str, Any]]:
     return turns
 
 
+def _normalize_answers_dict(raw: Any) -> Dict[str, Dict[str, Any]]:
+    """Normalize raw answer dictionary into {question_id: {"selection": str, "text": Optional[str]}}."""
+    if not isinstance(raw, dict):
+        return {}
+    if "answers" in raw and isinstance(raw["answers"], dict):
+        target = raw["answers"]
+    else:
+        target = raw
+
+    out: Dict[str, Dict[str, Any]] = {}
+    for q_id, val in target.items():
+        if isinstance(val, dict):
+            sel = val.get("selection") or val.get("value")
+            txt = val.get("text") or val.get("comment")
+        else:
+            sel = str(val) if val is not None else None
+            txt = None
+
+        if sel is not None:
+            out[str(q_id)] = {
+                "selection": str(sel),
+                "text": str(txt) if (str(sel) == RESERVED_CHOICE_VALUE and txt is not None) else None,
+            }
+    return out
+
+
+def extract_session_ask_user_history(runs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Extract ask_user answer history across runs for a session.
+
+    Filters for completed/answered ask_user rounds, matching each round with its
+    parent user_message_id, hitl_run_id, tool_call_id, and ordered QA items.
+    Excluded: non-ask_user HITL runs, unanswered rounds, and cancelled questions.
+    """
+    import json
+    from obsidian_ai_hub.hitl import store as hitl_store
+
+    history: List[Dict[str, Any]] = []
+    for r in runs:
+        user_message_id = r.get("user_message_id")
+        hitl_run_id = r.get("hitl_run_id")
+        if not user_message_id or not hitl_run_id:
+            continue
+
+        hitl_run = hitl_store.get_run(hitl_run_id)
+        if not hitl_run:
+            continue
+
+        handler = hitl_run.get("handler")
+        if handler not in ("agents.ask_user", "coding.ask_user"):
+            continue
+
+        raw_cp = hitl_run.get("checkpoint")
+        if not raw_cp:
+            continue
+
+        try:
+            cp = json.loads(raw_cp)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            continue
+
+        if not isinstance(cp, dict):
+            continue
+
+        qa_hist = extract_qa_history(cp)
+        for entry in qa_hist:
+            tool_call_id = entry.get("tool_call_id")
+            ask_user_args = entry.get("ask_user_args") or {}
+            raw_answers = entry.get("answers")
+            if not tool_call_id or raw_answers is None:
+                continue
+
+            answers_dict = _normalize_answers_dict(raw_answers)
+            if not answers_dict:
+                continue
+
+            q_list = ask_user_args.get("questions")
+            if not isinstance(q_list, list):
+                continue
+
+            items: List[Dict[str, Any]] = []
+            for q in q_list:
+                if not isinstance(q, dict):
+                    continue
+                qid = str(q.get("question_id") or q.get("question_key") or "").strip()
+                qtext = str(q.get("question") or q.get("display_text") or "").strip()
+                raw_choices = q.get("choices")
+                norm_choices = normalize_question_choices(
+                    raw_choices if isinstance(raw_choices, list) else []
+                )
+
+                ans = answers_dict.get(qid)
+                if not ans:
+                    continue
+
+                sel_val = ans.get("selection")
+                if not sel_val:
+                    continue
+
+                sel_label = sel_val
+                for c in norm_choices:
+                    if c.get("value") == sel_val:
+                        sel_label = str(c.get("label") or sel_val)
+                        break
+
+                text_val = ans.get("text") if sel_val == RESERVED_CHOICE_VALUE else None
+
+                items.append(
+                    {
+                        "question_id": qid,
+                        "question": qtext,
+                        "selected_value": sel_val,
+                        "selected_label": sel_label,
+                        "text": text_val,
+                    }
+                )
+
+            if items:
+                history.append(
+                    {
+                        "user_message_id": user_message_id,
+                        "hitl_run_id": hitl_run_id,
+                        "tool_call_id": tool_call_id,
+                        "items": items,
+                    }
+                )
+
+    return history
+
+
 def carry_history_for_new_checkpoint(prior_cp: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Carry accumulated history into a new interruption checkpoint."""
     if not isinstance(prior_cp, dict):

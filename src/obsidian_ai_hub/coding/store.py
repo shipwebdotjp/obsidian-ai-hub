@@ -1036,6 +1036,18 @@ def get_run(run_id: str, conn=None) -> Optional[Dict[str, Any]]:
     return _format_run(dict(row))
 
 
+def list_runs_for_session(session_id: str) -> List[Dict[str, Any]]:
+    """List all coding_runs for a session ordered by started_at ASC."""
+    conn = get_db_connection()
+    cursor = conn.execute(
+        "SELECT * FROM coding_runs WHERE session_id = ? ORDER BY started_at ASC",
+        (session_id,),
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return [r for r in (_format_run(dict(row)) for row in rows) if r is not None]
+
+
 def get_active_run_for_session(session_id: str) -> Optional[Dict[str, Any]]:
     """Get the currently active (non-terminal) run for a session if any."""
     conn = get_db_connection()

@@ -32,6 +32,7 @@ import {
 } from "../../api/runSse";
 import MarkdownPreview from "../../components/MarkdownPreview";
 import { WaitingRunQuestionCard, WaitingRunStatusPanel, waitForHitlSettled, type ActiveWaitingRun, type QuestionItem, toQuestionItems } from "../../components/InConversationQuestionCard";
+import { AnsweredRequirementCard } from "../../components/AnsweredRequirementCard";
 import { getHitlRun, submitHitlAnswer, cancelHitlRun } from "../../api/client";
 import { formatDateTime, formatYmdWithDow } from "../../utils/date";
 import { useSessionPromptDraft } from "../../hooks/useSessionPromptDraft";
@@ -1452,6 +1453,14 @@ export default function CodingPage() {
                             </p>
                           </div>
                         </div>
+                        {sessionDetail?.ask_user_answer_history
+                          ?.filter((round) => round.user_message_id === msg.message_id)
+                          .map((round) => (
+                            <AnsweredRequirementCard
+                              key={`${round.hitl_run_id}-${round.tool_call_id}`}
+                              round={round}
+                            />
+                          ))}
                         {(() => {
                           const userRunId = getRunIdForUserMessage(msg);
                           const unassociatedToolCalls = userRunId
