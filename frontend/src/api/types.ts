@@ -785,12 +785,28 @@ export interface AgentRun {
   idempotency_key?: string | null;
 }
 
+export interface AskUserAnswerItem {
+  question_id: string;
+  question: string;
+  selected_value: string;
+  selected_label: string;
+  text?: string | null;
+}
+
+export interface AskUserAnswerRound {
+  user_message_id: string;
+  hitl_run_id: string;
+  tool_call_id: string;
+  items: AskUserAnswerItem[];
+}
+
 export interface AgentSessionDetailResponse {
   session: AgentSession;
   agent: Agent;
   messages: AgentMessage[];
   runs: AgentRun[];
   active_run?: AgentRun | null;
+  ask_user_answer_history?: AskUserAnswerRound[];
 }
 
 export type AgentRunEventType =

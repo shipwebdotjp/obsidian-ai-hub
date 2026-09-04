@@ -96,6 +96,8 @@ def create_session(agent_id: str, title: Optional[str] = None) -> Dict[str, Any]
 
 
 def get_session_detail(session_id: str) -> Dict[str, Any]:
+    from obsidian_ai_hub.agents.ask_user import extract_session_ask_user_history
+
     session = store.get_session(session_id)
     if not session:
         raise FileNotFoundError(f"Session '{session_id}' not found.")
@@ -103,12 +105,14 @@ def get_session_detail(session_id: str) -> Dict[str, Any]:
     messages = store.list_messages(session_id)
     runs = store.list_runs(session_id)
     active_run = store.get_active_run_for_session(session_id)
+    ask_user_answer_history = extract_session_ask_user_history(runs)
     return {
         "session": session,
         "agent": agent,
         "messages": messages,
         "runs": runs,
         "active_run": active_run,
+        "ask_user_answer_history": ask_user_answer_history,
     }
 
 

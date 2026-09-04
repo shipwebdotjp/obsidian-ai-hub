@@ -1,5 +1,5 @@
 import { apiGet, apiPost, apiPut, apiDelete, getToken, clearToken, AUTH_EXPIRED_EVENT, ApiError } from "./client";
-import type { Project } from "./types";
+import type { Project, AskUserAnswerRound } from "./types";
 import type { QuestionItem } from "../components/InConversationQuestionCard";
 
 export interface CodingTool {
@@ -137,6 +137,7 @@ export interface CodingSessionDetail {
   orchestrator_tool_calls?: CodingOrchestratorToolCall[];
   active_run: CodingRun | null;
   latest_run: CodingRun | null;
+  ask_user_answer_history?: AskUserAnswerRound[];
 }
 
 export type CodingSseEvent =

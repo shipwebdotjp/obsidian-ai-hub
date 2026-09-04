@@ -51,6 +51,7 @@ import {
 import { getChatInputPlaceholder, shouldSendOnEnter, useChatSendMode } from "../settings/chatSendMode";
 import MarkdownPreview from "../../components/MarkdownPreview";
 import { WaitingRunQuestionCard, WaitingRunStatusPanel, waitForHitlSettled, type ActiveWaitingRun, type QuestionItem, toQuestionItems } from "../../components/InConversationQuestionCard";
+import { AnsweredRequirementCard } from "../../components/AnsweredRequirementCard";
 import { formatDateTime } from "../../utils/date";
 import {
   ChevronLeft,
@@ -188,6 +189,7 @@ export default function AgentsPage() {
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<AgentMessage[]>([]);
   const [runs, setRuns] = useState<AgentRun[]>([]);
+  const [answerHistory, setAnswerHistory] = useState<import("../../api/types").AskUserAnswerRound[]>([]);
   const [activeWaitingRun, setActiveWaitingRun] = useState<ActiveWaitingRun | null>(null);
   const [loadedSessionId, setLoadedSessionId] = useState<string | null>(null);
   const [sessionSearchQuery, setSessionSearchQuery] = useState("");
@@ -508,6 +510,7 @@ export default function AgentsPage() {
       setMessages(detail.messages);
       const sessionRuns = detail.runs || [];
       setRuns(sessionRuns);
+      setAnswerHistory(detail.ask_user_answer_history || []);
       setLoadedSessionId(sessionId);
       setChatError(null);
 
@@ -2667,19 +2670,22 @@ export default function AgentsPage() {
                       : null;
                   const toolCalls: AgentToolCall[] = relatedRun?.tool_calls || [];
                   const isAssistant = m.role === "assistant";
+                  const userRounds = m.role === "user"
+                    ? answerHistory.filter((h) => h.user_message_id === m.message_id)
+                    : [];
                   return (
-                    <div
-                      key={m.message_id}
-                      ref={(element) => {
-                        if (element) {
-                          messageElementRefs.current.set(m.message_id, element);
-                        } else {
-                          messageElementRefs.current.delete(m.message_id);
-                        }
-                      }}
-                      data-message-id={m.message_id}
-                      className="space-y-1"
-                    >
+                    <React.Fragment key={m.message_id}>
+                      <div
+                        ref={(element) => {
+                          if (element) {
+                            messageElementRefs.current.set(m.message_id, element);
+                          } else {
+                            messageElementRefs.current.delete(m.message_id);
+                          }
+                        }}
+                        data-message-id={m.message_id}
+                        className="space-y-1"
+                      >
                       {/* Tool calls (chronological: before the assistant's final response) */}
                       {toolCalls.length > 0 && (
                         <div className="flex justify-start">
@@ -2826,7 +2832,11 @@ export default function AgentsPage() {
                         </button>
                         <span aria-label="送信時刻">{formatDateTime(m.created_at)}</span>
                       </div>
-                    </div>
+                      </div>
+                      {userRounds.map((round) => (
+                        <AnsweredRequirementCard key={`${round.hitl_run_id}-${round.tool_call_id}`} round={round} />
+                      ))}
+                    </React.Fragment>
                   );
                 })
               )}

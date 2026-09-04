@@ -189,6 +189,8 @@ def update_session_tools(
 @router.get("/sessions/{session_id}")
 def get_session_detail(session_id: str, _=Depends(require_bearer_token)):
     """Get session details along with effective tool settings, message history, tool calls, and active/latest run state."""
+    from obsidian_ai_hub.agents.ask_user import extract_session_ask_user_history
+
     session = coding_store.get_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="セッションが見つかりません")
@@ -196,10 +198,12 @@ def get_session_detail(session_id: str, _=Depends(require_bearer_token)):
     messages = coding_store.list_messages(session_id)
     active_run = coding_store.get_active_run_for_session(session_id)
     latest_run = coding_store.get_latest_run_for_session(session_id)
+    runs = coding_store.list_runs_for_session(session_id)
     effective_tool_ids = coding_store.get_effective_session_tool_ids(session_id)
     has_custom = session.get("tool_ids_json") is not None
     available_tools = registry.list_available_tools()
     orchestrator_tool_calls = coding_store.list_orchestrator_tool_calls_for_session(session_id)
+    ask_user_answer_history = extract_session_ask_user_history(runs)
 
     return {
         "session": session,
@@ -207,9 +211,11 @@ def get_session_detail(session_id: str, _=Depends(require_bearer_token)):
         "has_custom_tools": has_custom,
         "available_tools": available_tools,
         "messages": messages,
+        "runs": runs,
         "active_run": active_run,
         "latest_run": latest_run,
         "orchestrator_tool_calls": orchestrator_tool_calls,
+        "ask_user_answer_history": ask_user_answer_history,
     }
 
 
