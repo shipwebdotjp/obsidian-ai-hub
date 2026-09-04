@@ -26,11 +26,11 @@ def _parse_coding_sse(text: str):
     for line in text.splitlines():
         if line.startswith("id:"):
             try:
-                cur_id = int(line[len("id:"):].strip())
+                cur_id = int(line[len("id:") :].strip())
             except ValueError:
                 cur_id = None
         elif line.startswith("data:"):
-            raw = line[len("data:"):].strip()
+            raw = line[len("data:") :].strip()
             try:
                 payload = json.loads(raw)
             except json.JSONDecodeError:
@@ -58,9 +58,7 @@ def test_project(tmp_path):
     # Create an initial commit so git status works cleanly
     (git_repo / "README.md").write_text("# Test Repo\n", encoding="utf-8")
     subprocess.run(["git", "add", "."], cwd=git_repo, check=True)
-    subprocess.run(
-        ["git", "commit", "-m", "Initial commit"], cwd=git_repo, check=True
-    )
+    subprocess.run(["git", "commit", "-m", "Initial commit"], cwd=git_repo, check=True)
 
     from obsidian_ai_hub.database import get_db_connection
 
@@ -222,12 +220,15 @@ def test_coding_api_endpoints(test_project):
     assert res.status_code == 202
     run_id = res.json()["run"]["run_id"]
 
-    with patch(
-        "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response",
-        side_effect=mock_generate_response,
-    ), patch(
-        "obsidian_ai_hub.coding.backend.CodexCliBackend.execute",
-        return_value=mock_cli_res,
+    with (
+        patch(
+            "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response",
+            side_effect=mock_generate_response,
+        ),
+        patch(
+            "obsidian_ai_hub.coding.backend.CodexCliBackend.execute",
+            return_value=mock_cli_res,
+        ),
     ):
         asyncio.run(execute_coding_run(run_id))
 
@@ -244,7 +245,9 @@ def test_coding_api_endpoints(test_project):
     # Verify updated detail
     res = client.get(f"/api/v1/coding/sessions/{sid}", headers=headers)
     detail = res.json()
-    assert len(detail["messages"]) == 5  # user, orchestrator #1, cli_request, worker, orchestrator #2
+    assert (
+        len(detail["messages"]) == 5
+    )  # user, orchestrator #1, cli_request, worker, orchestrator #2
     assert detail["messages"][0]["role"] == "user"
     assert detail["messages"][1]["role"] == "orchestrator"
     assert detail["messages"][2]["role"] == "cli_request"
@@ -264,7 +267,9 @@ def test_opencode_backend_initial_run(test_project):
 
     # Mock _run_subprocess with actual OpenCode event shape (sessionID and part.type == 'text')
     json_output = '{"sessionID": "ses_abc123", "part": {"type": "text", "text": "Execution completed"}}'
-    with patch.object(be, "_run_subprocess", return_value=(0, json_output, "", False)) as mock_run:
+    with patch.object(
+        be, "_run_subprocess", return_value=(0, json_output, "", False)
+    ) as mock_run:
         res = be.execute(test_project["repo_path"], "hello")
         assert res.external_session_id == "ses_abc123"
         assert res.output == "Execution completed"
@@ -312,12 +317,16 @@ def test_opencode_backend_auto_flag_respects_config(test_project):
     be = backend.OpenCodeCliBackend()
     json_output = '{"sessionID": "ses_abc123", "part": {"type": "text", "text": "ok"}}'
     with patch("obsidian_ai_hub.coding.backend.CODING_OPENCODE_AUTO_APPROVE", False):
-        with patch.object(be, "_run_subprocess", return_value=(0, json_output, "", False)) as mock_run:
+        with patch.object(
+            be, "_run_subprocess", return_value=(0, json_output, "", False)
+        ) as mock_run:
             be.execute(test_project["repo_path"], "hello")
             argv = mock_run.call_args[0][0]
             assert "--auto" not in argv
     with patch("obsidian_ai_hub.coding.backend.CODING_OPENCODE_AUTO_APPROVE", True):
-        with patch.object(be, "_run_subprocess", return_value=(0, json_output, "", False)) as mock_run:
+        with patch.object(
+            be, "_run_subprocess", return_value=(0, json_output, "", False)
+        ) as mock_run:
             be.execute(test_project["repo_path"], "hello")
             argv = mock_run.call_args[0][0]
             assert "--auto" in argv
@@ -331,7 +340,9 @@ def test_opencode_backend_does_not_affect_codex_backend(test_project):
         '{"type": "item.completed", "item": {"type": "agent_message", "text": "hi"}}',
     ]
     stdout_data = "\n".join(json_lines)
-    with patch.object(be, "_run_subprocess", return_value=(0, stdout_data, "", False)) as mock_run:
+    with patch.object(
+        be, "_run_subprocess", return_value=(0, stdout_data, "", False)
+    ) as mock_run:
         be.execute(test_project["repo_path"], "hello codex")
         argv = mock_run.call_args[0][0]
         assert "--auto" not in argv
@@ -342,8 +353,12 @@ def test_opencode_backend_continuation_run(test_project):
     be = backend.OpenCodeCliBackend()
 
     json_output = '{"session_id": "ses_abc123", "text": "Continuation response"}'
-    with patch.object(be, "_run_subprocess", return_value=(0, json_output, "", False)) as mock_run:
-        res = be.execute(test_project["repo_path"], "next prompt", external_session_id="ses_abc123")
+    with patch.object(
+        be, "_run_subprocess", return_value=(0, json_output, "", False)
+    ) as mock_run:
+        res = be.execute(
+            test_project["repo_path"], "next prompt", external_session_id="ses_abc123"
+        )
         assert res.external_session_id == "ses_abc123"
         assert res.output == "Continuation response"
         assert not res.session_recreated
@@ -372,7 +387,9 @@ def test_opencode_backend_session_not_found_recovery(test_project):
             (0, retry_json_output, "", False),  # 2nd call (retry) succeeds
         ],
     ) as mock_run:
-        res = be.execute(test_project["repo_path"], "retry prompt", external_session_id="ses_old123")
+        res = be.execute(
+            test_project["repo_path"], "retry prompt", external_session_id="ses_old123"
+        )
         assert res.external_session_id == "ses_new456"
         assert res.output == "Recovered response"
         assert res.exit_code == 0
@@ -402,7 +419,9 @@ def test_opencode_backend_session_not_found_retry_failure(test_project):
             (1, "", retry_error_output, False),
         ],
     ):
-        res = be.execute(test_project["repo_path"], "prompt", external_session_id="ses_old123")
+        res = be.execute(
+            test_project["repo_path"], "prompt", external_session_id="ses_old123"
+        )
         assert res.external_session_id is None
         assert res.exit_code == 1
         assert res.error_message == retry_error_output
@@ -418,7 +437,9 @@ def test_opencode_backend_other_errors_do_not_retry(test_project):
         "_run_subprocess",
         return_value=(1, "", "Syntax error in script", False),
     ) as mock_run:
-        res = be.execute(test_project["repo_path"], "prompt", external_session_id="ses_old123")
+        res = be.execute(
+            test_project["repo_path"], "prompt", external_session_id="ses_old123"
+        )
         assert res.external_session_id == "ses_old123"
         assert res.exit_code == 1
         assert res.error_message == "Syntax error in script"
@@ -469,12 +490,15 @@ def test_opencode_stream_session_recreated_notification(test_project):
     assert res.status_code == 202
     run_id = res.json()["run"]["run_id"]
 
-    with patch(
-        "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response",
-        side_effect=mock_generate_response,
-    ), patch(
-        "obsidian_ai_hub.coding.backend.OpenCodeCliBackend.execute",
-        return_value=mock_cli_res,
+    with (
+        patch(
+            "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response",
+            side_effect=mock_generate_response,
+        ),
+        patch(
+            "obsidian_ai_hub.coding.backend.OpenCodeCliBackend.execute",
+            return_value=mock_cli_res,
+        ),
     ):
         asyncio.run(execute_coding_run(run_id))
 
@@ -494,7 +518,10 @@ def test_opencode_stream_session_recreated_notification(test_project):
 
     # Verify notice in worker message
     worker_msg = next(m for m in detail["messages"] if m["role"] == "worker")
-    assert "前の OpenCode セッションが見つからなかったため、新しいセッションへ切り替えて続行しました。" in worker_msg["content"]
+    assert (
+        "前の OpenCode セッションが見つからなかったため、新しいセッションへ切り替えて続行しました。"
+        in worker_msg["content"]
+    )
 
 
 def test_codex_backend_initial_run(test_project):
@@ -507,7 +534,9 @@ def test_codex_backend_initial_run(test_project):
     ]
     stdout_data = "\n".join(json_lines)
 
-    with patch.object(be, "_run_subprocess", return_value=(0, stdout_data, "", False)) as mock_run:
+    with patch.object(
+        be, "_run_subprocess", return_value=(0, stdout_data, "", False)
+    ) as mock_run:
         res = be.execute(test_project["repo_path"], "hello codex")
         assert res.external_session_id == "th_abc123"
         assert res.output == "Initial answer from Codex"
@@ -531,8 +560,14 @@ def test_codex_backend_continuation_run(test_project):
     ]
     stdout_data = "\n".join(json_lines)
 
-    with patch.object(be, "_run_subprocess", return_value=(0, stdout_data, "", False)) as mock_run:
-        res = be.execute(test_project["repo_path"], "next codex prompt", external_session_id="th_abc123")
+    with patch.object(
+        be, "_run_subprocess", return_value=(0, stdout_data, "", False)
+    ) as mock_run:
+        res = be.execute(
+            test_project["repo_path"],
+            "next codex prompt",
+            external_session_id="th_abc123",
+        )
         assert res.external_session_id == "th_abc123"
         assert res.output == "Continuation response from Codex"
         assert not res.session_recreated
@@ -563,7 +598,9 @@ def test_codex_backend_session_not_found_recovery(test_project):
             (0, retry_stdout, "", False),  # 2nd call (retry) succeeds
         ],
     ) as mock_run:
-        res = be.execute(test_project["repo_path"], "retry prompt", external_session_id="th_old123")
+        res = be.execute(
+            test_project["repo_path"], "retry prompt", external_session_id="th_old123"
+        )
         assert res.external_session_id == "th_new456"
         assert res.output == "Recovered codex response"
         assert res.exit_code == 0
@@ -592,7 +629,9 @@ def test_codex_backend_session_not_found_retry_failure(test_project):
             (1, "", retry_error_output, False),
         ],
     ):
-        res = be.execute(test_project["repo_path"], "prompt", external_session_id="th_old123")
+        res = be.execute(
+            test_project["repo_path"], "prompt", external_session_id="th_old123"
+        )
         assert res.external_session_id is None
         assert res.exit_code == 1
         assert res.error_message == retry_error_output
@@ -608,7 +647,9 @@ def test_codex_backend_other_errors_do_not_retry(test_project):
         "_run_subprocess",
         return_value=(1, "", "Syntax error in prompt", False),
     ) as mock_run:
-        res = be.execute(test_project["repo_path"], "prompt", external_session_id="th_old123")
+        res = be.execute(
+            test_project["repo_path"], "prompt", external_session_id="th_old123"
+        )
         assert res.external_session_id == "th_old123"
         assert res.exit_code == 1
         assert res.error_message == "Syntax error in prompt"
@@ -673,12 +714,15 @@ def test_codex_stream_session_recreated_notification(test_project):
     assert res.status_code == 202
     run_id = res.json()["run"]["run_id"]
 
-    with patch(
-        "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response",
-        side_effect=mock_generate_response,
-    ), patch(
-        "obsidian_ai_hub.coding.backend.CodexCliBackend.execute",
-        return_value=mock_cli_res,
+    with (
+        patch(
+            "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response",
+            side_effect=mock_generate_response,
+        ),
+        patch(
+            "obsidian_ai_hub.coding.backend.CodexCliBackend.execute",
+            return_value=mock_cli_res,
+        ),
     ):
         asyncio.run(execute_coding_run(run_id))
 
@@ -698,7 +742,10 @@ def test_codex_stream_session_recreated_notification(test_project):
 
     # Verify notice in worker message for Codex
     worker_msg = next(m for m in detail["messages"] if m["role"] == "worker")
-    assert "前の Codex セッションが見つからなかったため、新しいセッションへ切り替えて続行しました。" in worker_msg["content"]
+    assert (
+        "前の Codex セッションが見つからなかったため、新しいセッションへ切り替えて続行しました。"
+        in worker_msg["content"]
+    )
 
 
 def test_coding_turn_max_cli_iterations_cap(test_project):
@@ -736,13 +783,16 @@ def test_coding_turn_max_cli_iterations_cap(test_project):
     assert res.status_code == 202
     run_id = res.json()["run"]["run_id"]
 
-    with patch(
-        "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response",
-        side_effect=mock_generate_response,
-    ), patch(
-        "obsidian_ai_hub.coding.backend.CodexCliBackend.execute",
-        return_value=mock_cli_res,
-    ) as mock_exec:
+    with (
+        patch(
+            "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response",
+            side_effect=mock_generate_response,
+        ),
+        patch(
+            "obsidian_ai_hub.coding.backend.CodexCliBackend.execute",
+            return_value=mock_cli_res,
+        ) as mock_exec,
+    ):
         asyncio.run(execute_coding_run(run_id))
         assert mock_exec.call_count == service.MAX_CLI_ITERATIONS
 
@@ -800,12 +850,15 @@ def test_coding_turn_non_zero_exit_code_passed_to_review(test_project):
     assert res.status_code == 202
     run_id = res.json()["run"]["run_id"]
 
-    with patch(
-        "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response",
-        side_effect=mock_generate_response,
-    ), patch(
-        "obsidian_ai_hub.coding.backend.CodexCliBackend.execute",
-        return_value=mock_cli_res,
+    with (
+        patch(
+            "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response",
+            side_effect=mock_generate_response,
+        ),
+        patch(
+            "obsidian_ai_hub.coding.backend.CodexCliBackend.execute",
+            return_value=mock_cli_res,
+        ),
     ):
         asyncio.run(execute_coding_run(run_id))
 
@@ -821,7 +874,9 @@ def test_coding_turn_non_zero_exit_code_passed_to_review(test_project):
     detail_res = client.get(f"/api/v1/coding/sessions/{sid}", headers=headers)
     detail = detail_res.json()
     messages = detail["messages"]
-    assert len(messages) == 5  # user, orch request, cli_request, worker error, orch final report
+    assert (
+        len(messages) == 5
+    )  # user, orch request, cli_request, worker error, orch final report
     assert messages[0]["role"] == "user"
     assert messages[1]["role"] == "orchestrator"
     assert messages[2]["role"] == "cli_request"
@@ -856,7 +911,9 @@ def test_coding_tools_and_user_defaults(test_project):
 
     # 4. Create session with explicit custom tool_ids
     custom_session_tools = ["run_shell"]
-    session2 = store.create_session(pid, "codex", repo, title="Custom Tools Session", tool_ids=custom_session_tools)
+    session2 = store.create_session(
+        pid, "codex", repo, title="Custom Tools Session", tool_ids=custom_session_tools
+    )
     sid2 = session2["session_id"]
     eff_tools2 = store.get_effective_session_tool_ids(sid2)
     assert eff_tools2 == custom_session_tools
@@ -886,7 +943,9 @@ def test_coding_tools_api_endpoints(test_project):
 
     # 2. PUT /coding/defaults
     new_defaults = ["web_search", "web_extract"]
-    res = client.put("/api/v1/coding/defaults", headers=headers, json={"tool_ids": new_defaults})
+    res = client.put(
+        "/api/v1/coding/defaults", headers=headers, json={"tool_ids": new_defaults}
+    )
     assert res.status_code == 200
     assert res.json()["default_tool_ids"] == new_defaults
 
@@ -933,6 +992,53 @@ def test_coding_tools_api_endpoints(test_project):
     assert reset_detail["has_custom_tools"] is False
 
 
+def test_coding_session_title_update_api(test_project):
+    app = create_app(token="test-token")
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer test-token"}
+
+    res = client.post(
+        "/api/v1/coding/sessions",
+        headers=headers,
+        json={
+            "project_id": test_project["project_id"],
+            "backend": "codex",
+            "title": "Before Title",
+        },
+    )
+    assert res.status_code == 200
+    sid = res.json()["session_id"]
+
+    # Update title (trims whitespace) and persists on refetch
+    res = client.put(
+        f"/api/v1/coding/sessions/{sid}",
+        headers=headers,
+        json={"title": "  After Title  "},
+    )
+    assert res.status_code == 200
+    assert res.json()["session"]["title"] == "After Title"
+
+    res = client.get(f"/api/v1/coding/sessions/{sid}", headers=headers)
+    assert res.status_code == 200
+    assert res.json()["session"]["title"] == "After Title"
+
+    # Blank-only title is rejected
+    res = client.put(
+        f"/api/v1/coding/sessions/{sid}",
+        headers=headers,
+        json={"title": "   "},
+    )
+    assert res.status_code == 400
+
+    # Unknown session returns 404
+    res = client.put(
+        "/api/v1/coding/sessions/cses_missing",
+        headers=headers,
+        json={"title": "New Title"},
+    )
+    assert res.status_code == 404
+
+
 def test_coding_config_endpoint(test_project, monkeypatch):
     app = create_app(token="test-token")
     client = TestClient(app)
@@ -970,9 +1076,15 @@ def test_coding_config_endpoint(test_project, monkeypatch):
 def test_opencode_extract_title_from_export_json():
     be = backend.OpenCodeCliBackend()
     # Valid title
-    assert be._extract_title_from_export_json('{"info": {"title": "git push結果報告"}}') == "git push結果報告"
+    assert (
+        be._extract_title_from_export_json('{"info": {"title": "git push結果報告"}}')
+        == "git push結果報告"
+    )
     # Whitespace trimmed
-    assert be._extract_title_from_export_json('{"info": {"title": "  hello  "}}') == "hello"
+    assert (
+        be._extract_title_from_export_json('{"info": {"title": "  hello  "}}')
+        == "hello"
+    )
     # Empty after strip
     assert be._extract_title_from_export_json('{"info": {"title": "   "}}') is None
     # Missing title
@@ -980,9 +1092,9 @@ def test_opencode_extract_title_from_export_json():
     # Missing info
     assert be._extract_title_from_export_json('{"other": 123}') is None
     # Invalid JSON
-    assert be._extract_title_from_export_json('not json') is None
+    assert be._extract_title_from_export_json("not json") is None
     # Non-dict root
-    assert be._extract_title_from_export_json('[]') is None
+    assert be._extract_title_from_export_json("[]") is None
     # Title not string
     assert be._extract_title_from_export_json('{"info": {"title": 123}}') is None
 
@@ -992,6 +1104,7 @@ def test_opencode_fetch_title_success_and_failures():
     valid_json = '{"info": {"title": "Fetched Title"}}'
     # Success (file-based stdout)
     with patch("obsidian_ai_hub.coding.backend.subprocess.run") as mock_run:
+
         def _write_valid(cmd, stdout=None, stderr=None, text=None, timeout=None):
             if stdout is not None and hasattr(stdout, "write"):
                 stdout.write(valid_json)
@@ -1000,7 +1113,10 @@ def test_opencode_fetch_title_success_and_failures():
         mock_run.side_effect = _write_valid
         assert be.fetch_opencode_session_title("ses_abc123") == "Fetched Title"
         mock_run.assert_called_once()
-        assert mock_run.call_args[0][0][0] in ("opencode", backend.CODING_OPENCODE_CLI_PATH)
+        assert mock_run.call_args[0][0][0] in (
+            "opencode",
+            backend.CODING_OPENCODE_CLI_PATH,
+        )
         assert "export" in mock_run.call_args[0][0]
         assert "ses_abc123" in mock_run.call_args[0][0]
         # Must use file handle for stdout, not PIPE/capture_output
@@ -1011,8 +1127,11 @@ def test_opencode_fetch_title_success_and_failures():
 
     # Large JSON (~200KB) must also be handled via file without truncation
     large_payload = "x" * 200_000
-    large_json = '{"info": {"title": "Large Title"}, "payload": "' + large_payload + '"}'
+    large_json = (
+        '{"info": {"title": "Large Title"}, "payload": "' + large_payload + '"}'
+    )
     with patch("obsidian_ai_hub.coding.backend.subprocess.run") as mock_run:
+
         def _write_large(cmd, stdout=None, stderr=None, text=None, timeout=None):
             if stdout is not None and hasattr(stdout, "write"):
                 stdout.write(large_json)
@@ -1021,7 +1140,11 @@ def test_opencode_fetch_title_success_and_failures():
         mock_run.side_effect = _write_large
         # _extract will succeed on the large payload's title (leading JSON part)
         # we patch extract to verify file content length is large
-        with patch.object(backend.OpenCodeCliBackend, "_extract_title_from_export_json", return_value="Large Title") as mock_extract:
+        with patch.object(
+            backend.OpenCodeCliBackend,
+            "_extract_title_from_export_json",
+            return_value="Large Title",
+        ) as mock_extract:
             assert be.fetch_opencode_session_title("ses_large") == "Large Title"
             # confirm file content was large (extract called with large string)
             assert mock_extract.call_args is not None
@@ -1037,6 +1160,7 @@ def test_opencode_fetch_title_success_and_failures():
             assert "non_zero_exit" in str(mock_warn.call_args)
     # Empty stdout -> None with warning
     with patch("obsidian_ai_hub.coding.backend.subprocess.run") as mock_run:
+
         def _write_empty(cmd, stdout=None, stderr=None, text=None, timeout=None):
             if stdout is not None and hasattr(stdout, "write"):
                 stdout.write("   ")
@@ -1048,6 +1172,7 @@ def test_opencode_fetch_title_success_and_failures():
             assert "empty_output" in str(mock_warn.call_args)
     # Invalid JSON -> None with warning
     with patch("obsidian_ai_hub.coding.backend.subprocess.run") as mock_run:
+
         def _write_invalid(cmd, stdout=None, stderr=None, text=None, timeout=None):
             if stdout is not None and hasattr(stdout, "write"):
                 stdout.write("not json")
@@ -1059,6 +1184,7 @@ def test_opencode_fetch_title_success_and_failures():
             assert "json_parse_or_missing_title" in str(mock_warn.call_args)
     # Empty title -> None with warning
     with patch("obsidian_ai_hub.coding.backend.subprocess.run") as mock_run:
+
         def _write_empty_title(cmd, stdout=None, stderr=None, text=None, timeout=None):
             if stdout is not None and hasattr(stdout, "write"):
                 stdout.write('{"info": {"title": "  "}}')
@@ -1071,7 +1197,10 @@ def test_opencode_fetch_title_success_and_failures():
     # Timeout -> None with warning
     import subprocess as sp
 
-    with patch("obsidian_ai_hub.coding.backend.subprocess.run", side_effect=sp.TimeoutExpired(cmd="opencode export", timeout=10)):
+    with patch(
+        "obsidian_ai_hub.coding.backend.subprocess.run",
+        side_effect=sp.TimeoutExpired(cmd="opencode export", timeout=10),
+    ):
         with patch("obsidian_ai_hub.coding.backend.logger.warning") as mock_warn:
             assert be.fetch_opencode_session_title("ses_abc") is None
             assert "timeout" in str(mock_warn.call_args).lower()
@@ -1101,6 +1230,7 @@ def test_opencode_fetch_title_tempfile_cleanup_on_success_and_failure(tmp_path):
 
     with patch("tempfile.NamedTemporaryFile", side_effect=tracking_ntf):
         with patch("obsidian_ai_hub.coding.backend.subprocess.run") as mock_run:
+
             def _write(cmd, stdout=None, stderr=None, text=None, timeout=None):
                 if stdout is not None and hasattr(stdout, "write"):
                     stdout.write(valid_json)
@@ -1109,7 +1239,9 @@ def test_opencode_fetch_title_tempfile_cleanup_on_success_and_failure(tmp_path):
             mock_run.side_effect = _write
             assert be.fetch_opencode_session_title("ses_ok") == "Cleanup Title"
             assert len(created_paths) == 1
-            assert not created_paths[0].exists(), "temp file should be removed after success"
+            assert not created_paths[0].exists(), (
+                "temp file should be removed after success"
+            )
 
     created_paths.clear()
     with patch("tempfile.NamedTemporaryFile", side_effect=tracking_ntf):
@@ -1117,11 +1249,14 @@ def test_opencode_fetch_title_tempfile_cleanup_on_success_and_failure(tmp_path):
             mock_run.return_value = MagicMock(returncode=1, stderr="error")
             assert be.fetch_opencode_session_title("ses_fail") is None
             assert len(created_paths) == 1
-            assert not created_paths[0].exists(), "temp file should be removed after non-zero exit"
+            assert not created_paths[0].exists(), (
+                "temp file should be removed after non-zero exit"
+            )
 
     created_paths.clear()
     with patch("tempfile.NamedTemporaryFile", side_effect=tracking_ntf):
         with patch("obsidian_ai_hub.coding.backend.subprocess.run") as mock_run:
+
             def _write_bad(cmd, stdout=None, stderr=None, text=None, timeout=None):
                 if stdout is not None and hasattr(stdout, "write"):
                     stdout.write("not json")
@@ -1130,17 +1265,26 @@ def test_opencode_fetch_title_tempfile_cleanup_on_success_and_failure(tmp_path):
             mock_run.side_effect = _write_bad
             assert be.fetch_opencode_session_title("ses_bad_json") is None
             assert len(created_paths) == 1
-            assert not created_paths[0].exists(), "temp file should be removed after invalid JSON"
+            assert not created_paths[0].exists(), (
+                "temp file should be removed after invalid JSON"
+            )
 
 
 def test_opencode_fetch_title_never_uses_capture_output():
     """Regression: stdout must be a file handle, never PIPE/capture_output."""
     be = backend.OpenCodeCliBackend()
     with patch("obsidian_ai_hub.coding.backend.subprocess.run") as mock_run:
-        def _write(cmd, stdout=None, stderr=None, text=None, timeout=None, capture_output=None):
-            assert capture_output is not True, "capture_output=True must not be used (pipe truncation)"
+
+        def _write(
+            cmd, stdout=None, stderr=None, text=None, timeout=None, capture_output=None
+        ):
+            assert capture_output is not True, (
+                "capture_output=True must not be used (pipe truncation)"
+            )
             assert stdout is not subprocess.PIPE, "stdout=PIPE must not be used"
-            assert stdout is not None and hasattr(stdout, "write"), "stdout must be file handle"
+            assert stdout is not None and hasattr(stdout, "write"), (
+                "stdout must be file handle"
+            )
             stdout.write('{"info": {"title": "No Pipe"}}')
             return MagicMock(returncode=0, stderr="")
 
@@ -1158,7 +1302,11 @@ def test_opencode_title_sync_updates_default_title(test_project):
     res = client.post(
         "/api/v1/coding/sessions",
         headers=headers,
-        json={"project_id": test_project["project_id"], "backend": "opencode", "title": "新しいコーディングセッション"},
+        json={
+            "project_id": test_project["project_id"],
+            "backend": "opencode",
+            "title": "新しいコーディングセッション",
+        },
     )
     assert res.status_code == 200
     sid = res.json()["session_id"]
@@ -1184,16 +1332,20 @@ def test_opencode_title_sync_updates_default_title(test_project):
     assert res.status_code == 202
     run_id = res.json()["run"]["run_id"]
 
-    with patch(
-        "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response",
-        side_effect=mock_generate_response,
-    ), patch(
-        "obsidian_ai_hub.coding.backend.OpenCodeCliBackend.execute",
-        return_value=mock_cli_res,
-    ), patch(
-        "obsidian_ai_hub.coding.backend.OpenCodeCliBackend.fetch_opencode_session_title",
-        return_value="git push結果報告",
-    ) as mock_fetch:
+    with (
+        patch(
+            "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response",
+            side_effect=mock_generate_response,
+        ),
+        patch(
+            "obsidian_ai_hub.coding.backend.OpenCodeCliBackend.execute",
+            return_value=mock_cli_res,
+        ),
+        patch(
+            "obsidian_ai_hub.coding.backend.OpenCodeCliBackend.fetch_opencode_session_title",
+            return_value="git push結果報告",
+        ) as mock_fetch,
+    ):
         asyncio.run(execute_coding_run(run_id))
         mock_fetch.assert_called_once_with("ses_fetch123")
 
@@ -1203,7 +1355,9 @@ def test_opencode_title_sync_updates_default_title(test_project):
     assert '"session_title": "git push結果報告"' in text
     _, payloads = _parse_coding_sse(text)
     done_payloads = [p for _, p, e in payloads if e == "done"]
-    assert done_payloads and done_payloads[-1].get("session_title") == "git push結果報告"
+    assert (
+        done_payloads and done_payloads[-1].get("session_title") == "git push結果報告"
+    )
 
     detail = client.get(f"/api/v1/coding/sessions/{sid}", headers=headers).json()
     assert detail["session"]["title"] == "git push結果報告"
@@ -1219,7 +1373,11 @@ def test_opencode_title_sync_does_not_overwrite_custom_title(test_project):
     res = client.post(
         "/api/v1/coding/sessions",
         headers=headers,
-        json={"project_id": test_project["project_id"], "backend": "opencode", "title": "My Custom Title"},
+        json={
+            "project_id": test_project["project_id"],
+            "backend": "opencode",
+            "title": "My Custom Title",
+        },
     )
     sid = res.json()["session_id"]
     assert res.json()["title"] == "My Custom Title"
@@ -1244,16 +1402,20 @@ def test_opencode_title_sync_does_not_overwrite_custom_title(test_project):
     assert res.status_code == 202
     run_id = res.json()["run"]["run_id"]
 
-    with patch(
-        "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response",
-        side_effect=mock_generate_response,
-    ), patch(
-        "obsidian_ai_hub.coding.backend.OpenCodeCliBackend.execute",
-        return_value=mock_cli_res,
-    ), patch(
-        "obsidian_ai_hub.coding.backend.OpenCodeCliBackend.fetch_opencode_session_title",
-        return_value="Exported Title Should Not Win",
-    ) as mock_fetch:
+    with (
+        patch(
+            "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response",
+            side_effect=mock_generate_response,
+        ),
+        patch(
+            "obsidian_ai_hub.coding.backend.OpenCodeCliBackend.execute",
+            return_value=mock_cli_res,
+        ),
+        patch(
+            "obsidian_ai_hub.coding.backend.OpenCodeCliBackend.fetch_opencode_session_title",
+            return_value="Exported Title Should Not Win",
+        ) as mock_fetch,
+    ):
         asyncio.run(execute_coding_run(run_id))
         mock_fetch.assert_not_called()
 
@@ -1275,7 +1437,11 @@ def test_opencode_title_sync_skips_on_fetch_failure(test_project):
     res = client.post(
         "/api/v1/coding/sessions",
         headers=headers,
-        json={"project_id": test_project["project_id"], "backend": "opencode", "title": "新しいコーディングセッション"},
+        json={
+            "project_id": test_project["project_id"],
+            "backend": "opencode",
+            "title": "新しいコーディングセッション",
+        },
     )
     sid = res.json()["session_id"]
 
@@ -1299,15 +1465,19 @@ def test_opencode_title_sync_skips_on_fetch_failure(test_project):
     assert res.status_code == 202
     run_id = res.json()["run"]["run_id"]
 
-    with patch(
-        "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response",
-        side_effect=mock_generate_response,
-    ), patch(
-        "obsidian_ai_hub.coding.backend.OpenCodeCliBackend.execute",
-        return_value=mock_cli_res,
-    ), patch(
-        "obsidian_ai_hub.coding.backend.OpenCodeCliBackend.fetch_opencode_session_title",
-        return_value=None,
+    with (
+        patch(
+            "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response",
+            side_effect=mock_generate_response,
+        ),
+        patch(
+            "obsidian_ai_hub.coding.backend.OpenCodeCliBackend.execute",
+            return_value=mock_cli_res,
+        ),
+        patch(
+            "obsidian_ai_hub.coding.backend.OpenCodeCliBackend.fetch_opencode_session_title",
+            return_value=None,
+        ),
     ):
         asyncio.run(execute_coding_run(run_id))
 
@@ -1363,15 +1533,20 @@ def test_codex_title_generation_updates_default_title(test_project):
     assert res.status_code == 202
     run_id = res.json()["run"]["run_id"]
 
-    with patch(
-        "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response",
-        side_effect=mock_generate_response,
-    ), patch(
-        "obsidian_ai_hub.coding.backend.CodexCliBackend.execute", return_value=mock_cli_res
-    ), patch(
-        "obsidian_ai_hub.agents.runtime.generate_session_title",
-        return_value="Codex生成タイトル",
-    ) as mock_title:
+    with (
+        patch(
+            "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response",
+            side_effect=mock_generate_response,
+        ),
+        patch(
+            "obsidian_ai_hub.coding.backend.CodexCliBackend.execute",
+            return_value=mock_cli_res,
+        ),
+        patch(
+            "obsidian_ai_hub.agents.runtime.generate_session_title",
+            return_value="Codex生成タイトル",
+        ) as mock_title,
+    ):
         asyncio.run(execute_coding_run(run_id))
 
     res = client.get(f"/api/v1/coding/runs/{run_id}/events", headers=headers)
@@ -1379,7 +1554,9 @@ def test_codex_title_generation_updates_default_title(test_project):
     assert '"session_title": "Codex生成タイトル"' in res.text
     _, payloads = _parse_coding_sse(res.text)
     done_payloads = [p for _, p, e in payloads if e == "done"]
-    assert done_payloads and done_payloads[-1].get("session_title") == "Codex生成タイトル"
+    assert (
+        done_payloads and done_payloads[-1].get("session_title") == "Codex生成タイトル"
+    )
     mock_title.assert_called_once_with(
         user_content="Codexで実装して", assistant_content="Codex worker output"
     )
@@ -1416,15 +1593,19 @@ def test_codex_title_generation_preserves_explicit_title(test_project):
     assert res.status_code == 202
     run_id = res.json()["run"]["run_id"]
 
-    with patch(
-        "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response",
-        side_effect=mock_generate_response,
-    ), patch(
-        "obsidian_ai_hub.coding.backend.CodexCliBackend.execute",
-        return_value=backend.CodingBackendResult(
-            external_session_id="thread_456", output="worker output", exit_code=0
+    with (
+        patch(
+            "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response",
+            side_effect=mock_generate_response,
         ),
-    ), patch("obsidian_ai_hub.agents.runtime.generate_session_title") as mock_title:
+        patch(
+            "obsidian_ai_hub.coding.backend.CodexCliBackend.execute",
+            return_value=backend.CodingBackendResult(
+                external_session_id="thread_456", output="worker output", exit_code=0
+            ),
+        ),
+        patch("obsidian_ai_hub.agents.runtime.generate_session_title") as mock_title,
+    ):
         asyncio.run(execute_coding_run(run_id))
 
     res = client.get(f"/api/v1/coding/runs/{run_id}/events", headers=headers)
@@ -1460,17 +1641,21 @@ def test_codex_title_generation_failure_does_not_fail_turn(test_project):
     assert res.status_code == 202
     run_id = res.json()["run"]["run_id"]
 
-    with patch(
-        "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response",
-        side_effect=mock_generate_response,
-    ), patch(
-        "obsidian_ai_hub.coding.backend.CodexCliBackend.execute",
-        return_value=backend.CodingBackendResult(
-            external_session_id="thread_789", output="worker output", exit_code=0
+    with (
+        patch(
+            "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response",
+            side_effect=mock_generate_response,
         ),
-    ), patch(
-        "obsidian_ai_hub.agents.runtime.generate_session_title",
-        side_effect=RuntimeError("title LLM unavailable"),
+        patch(
+            "obsidian_ai_hub.coding.backend.CodexCliBackend.execute",
+            return_value=backend.CodingBackendResult(
+                external_session_id="thread_789", output="worker output", exit_code=0
+            ),
+        ),
+        patch(
+            "obsidian_ai_hub.agents.runtime.generate_session_title",
+            side_effect=RuntimeError("title LLM unavailable"),
+        ),
     ):
         asyncio.run(execute_coding_run(run_id))
 
@@ -1496,7 +1681,9 @@ async def test_orchestrator_tool_restriction(test_project):
     mock_ai_msg.content = "No tools used."
     mock_ai_msg.tool_calls = []
 
-    with patch("obsidian_ai_hub.coding.orchestrator.create_langchain_llm") as mock_create_llm:
+    with patch(
+        "obsidian_ai_hub.coding.orchestrator.create_langchain_llm"
+    ) as mock_create_llm:
         mock_llm = MagicMock()
         mock_with = MagicMock()
         mock_with.ainvoke = AsyncMock(return_value=mock_ai_msg)
@@ -1504,7 +1691,9 @@ async def test_orchestrator_tool_restriction(test_project):
         mock_llm.ainvoke = AsyncMock(return_value=mock_ai_msg)
         mock_create_llm.return_value = mock_llm
 
-        resp = await orch_empty.generate_response([], test_project["repo_path"], "codex")
+        resp = await orch_empty.generate_response(
+            [], test_project["repo_path"], "codex"
+        )
         assert resp == "No tools used."
         mock_llm.bind_tools.assert_called_once()
         bound_tools = mock_llm.bind_tools.call_args[0][0]
@@ -1512,14 +1701,18 @@ async def test_orchestrator_tool_restriction(test_project):
 
     # Case B: specified tool_ids -> bind_tools receives only permitted BaseTools
     orch_permitted = CodingOrchestrator(tool_ids=["web_search"])
-    with patch("obsidian_ai_hub.coding.orchestrator.create_langchain_llm") as mock_create_llm:
+    with patch(
+        "obsidian_ai_hub.coding.orchestrator.create_langchain_llm"
+    ) as mock_create_llm:
         mock_llm = MagicMock()
         mock_llm_with_tools = MagicMock()
         mock_llm_with_tools.ainvoke = AsyncMock(return_value=mock_ai_msg)
         mock_llm.bind_tools.return_value = mock_llm_with_tools
         mock_create_llm.return_value = mock_llm
 
-        resp = await orch_permitted.generate_response([], test_project["repo_path"], "codex")
+        resp = await orch_permitted.generate_response(
+            [], test_project["repo_path"], "codex"
+        )
         assert resp == "No tools used."
         mock_llm.bind_tools.assert_called_once()
         bound_tools = mock_llm.bind_tools.call_args[0][0]
@@ -1535,7 +1728,9 @@ def test_opencode_backend_session_not_found_case_insensitive(test_project):
     """P0-3: lower-case 'session not found' must trigger retry."""
     be = backend.OpenCodeCliBackend()
     error_output = "Error: session not found (lower case)"
-    retry_json = '{"sessionID": "ses_new_ci", "part": {"type": "text", "text": "recovered ci"}}'
+    retry_json = (
+        '{"sessionID": "ses_new_ci", "part": {"type": "text", "text": "recovered ci"}}'
+    )
     with patch.object(
         be,
         "_run_subprocess",
@@ -1544,7 +1739,9 @@ def test_opencode_backend_session_not_found_case_insensitive(test_project):
             (0, retry_json, "", False),
         ],
     ) as mock_run:
-        res = be.execute(test_project["repo_path"], "prompt", external_session_id="ses_old_ci")
+        res = be.execute(
+            test_project["repo_path"], "prompt", external_session_id="ses_old_ci"
+        )
         assert res.session_recreated is True
         assert res.external_session_id == "ses_new_ci"
         assert mock_run.call_count == 2
@@ -1563,7 +1760,9 @@ def test_opencode_backend_session_not_found_diagnostics_preserves_old_id(test_pr
             (0, retry_json, "", False),
         ],
     ):
-        res = be.execute(test_project["repo_path"], "prompt", external_session_id="ses_old123")
+        res = be.execute(
+            test_project["repo_path"], "prompt", external_session_id="ses_old123"
+        )
         assert res.session_recreated is True
         diag = res.diagnostics
         assert diag is not None
@@ -1574,7 +1773,10 @@ def test_opencode_backend_session_not_found_diagnostics_preserves_old_id(test_pr
         # snippet is truncated to 500 and does not contain prompt (prompt is not in stderr)
         assert "first_attempt_stderr_snippet" in diag
         assert len(diag["first_attempt_stderr_snippet"]) <= 500
-        assert "Session not found" in diag["first_attempt_stderr_snippet"] or "session not found" in diag["first_attempt_stderr_snippet"].lower()
+        assert (
+            "Session not found" in diag["first_attempt_stderr_snippet"]
+            or "session not found" in diag["first_attempt_stderr_snippet"].lower()
+        )
         assert diag["exit_code"] == 0
 
 
@@ -1591,7 +1793,10 @@ def test_opencode_backend_missing_session_id_flag(test_project):
             assert res.diagnostics.get("missing_session_id") is True
             # Warning should have been emitted
             assert mock_warn.call_count >= 1
-            assert any("missing_session_id" in str(c) or "without session id" in str(c).lower() for c in mock_warn.call_args_list)
+            assert any(
+                "missing_session_id" in str(c) or "without session id" in str(c).lower()
+                for c in mock_warn.call_args_list
+            )
 
 
 def test_opencode_diagnostics_normal_has_session_recreated_false(test_project):
@@ -1614,7 +1819,11 @@ def test_coding_turn_carries_recreated_session_id_to_next_cli(test_project):
     res = client.post(
         "/api/v1/coding/sessions",
         headers=headers,
-        json={"project_id": test_project["project_id"], "backend": "opencode", "title": "Carryover"},
+        json={
+            "project_id": test_project["project_id"],
+            "backend": "opencode",
+            "title": "Carryover",
+        },
     )
     assert res.status_code == 200
     sid = res.json()["session_id"]
@@ -1681,10 +1890,13 @@ def test_coding_turn_carries_recreated_session_id_to_next_cli(test_project):
     assert res.status_code == 202
     run_id = res.json()["run"]["run_id"]
 
-    with patch(
-        "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response",
-        side_effect=mock_gen,
-    ), patch("obsidian_ai_hub.coding.backend.OpenCodeCliBackend.execute") as mock_exec:
+    with (
+        patch(
+            "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response",
+            side_effect=mock_gen,
+        ),
+        patch("obsidian_ai_hub.coding.backend.OpenCodeCliBackend.execute") as mock_exec,
+    ):
         mock_exec.side_effect = [first_res, second_res]
         asyncio.run(execute_coding_run(run_id))
         # Verify backend was called with correct session ids
@@ -1713,7 +1925,11 @@ def test_worker_messages_not_orphaned_within_same_run(test_project):
     res = client.post(
         "/api/v1/coding/sessions",
         headers=headers,
-        json={"project_id": test_project["project_id"], "backend": "opencode", "title": "Multi Worker"},
+        json={
+            "project_id": test_project["project_id"],
+            "backend": "opencode",
+            "title": "Multi Worker",
+        },
     )
     sid = res.json()["session_id"]
 
@@ -1727,8 +1943,42 @@ def test_worker_messages_not_orphaned_within_same_run(test_project):
         else:
             return "final"
 
-    r1 = backend.CodingBackendResult(external_session_id="ses_m1", output="o1", exit_code=0, diagnostics={"cwd": test_project["repo_path"], "requested_session_id": None, "returned_session_id": "ses_m1", "tool_call_count": 0, "tool_failure_count": 0, "structured_error": None, "auto_rejected_permission": False, "exit_code": 0, "model": "test", "variant": "なし", "session_recreated": False})
-    r2 = backend.CodingBackendResult(external_session_id="ses_m1", output="o2", exit_code=0, diagnostics={"cwd": test_project["repo_path"], "requested_session_id": "ses_m1", "returned_session_id": "ses_m1", "tool_call_count": 0, "tool_failure_count": 0, "structured_error": None, "auto_rejected_permission": False, "exit_code": 0, "model": "test", "variant": "なし", "session_recreated": False})
+    r1 = backend.CodingBackendResult(
+        external_session_id="ses_m1",
+        output="o1",
+        exit_code=0,
+        diagnostics={
+            "cwd": test_project["repo_path"],
+            "requested_session_id": None,
+            "returned_session_id": "ses_m1",
+            "tool_call_count": 0,
+            "tool_failure_count": 0,
+            "structured_error": None,
+            "auto_rejected_permission": False,
+            "exit_code": 0,
+            "model": "test",
+            "variant": "なし",
+            "session_recreated": False,
+        },
+    )
+    r2 = backend.CodingBackendResult(
+        external_session_id="ses_m1",
+        output="o2",
+        exit_code=0,
+        diagnostics={
+            "cwd": test_project["repo_path"],
+            "requested_session_id": "ses_m1",
+            "returned_session_id": "ses_m1",
+            "tool_call_count": 0,
+            "tool_failure_count": 0,
+            "structured_error": None,
+            "auto_rejected_permission": False,
+            "exit_code": 0,
+            "model": "test",
+            "variant": "なし",
+            "session_recreated": False,
+        },
+    )
 
     res = client.post(
         f"/api/v1/coding/sessions/{sid}/runs",
@@ -1738,10 +1988,16 @@ def test_worker_messages_not_orphaned_within_same_run(test_project):
     assert res.status_code == 202
     run_id = res.json()["run"]["run_id"]
 
-    with patch(
-        "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response",
-        side_effect=mock_gen,
-    ), patch("obsidian_ai_hub.coding.backend.OpenCodeCliBackend.execute", side_effect=[r1, r2]):
+    with (
+        patch(
+            "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response",
+            side_effect=mock_gen,
+        ),
+        patch(
+            "obsidian_ai_hub.coding.backend.OpenCodeCliBackend.execute",
+            side_effect=[r1, r2],
+        ),
+    ):
         asyncio.run(execute_coding_run(run_id))
 
     res = client.get(f"/api/v1/coding/runs/{run_id}/events", headers=headers)
@@ -1765,16 +2021,27 @@ def test_worker_messages_not_orphaned_within_same_run(test_project):
         cur = conn.execute("PRAGMA table_info(coding_messages)")
         cols = [r["name"] for r in cur.fetchall()]
         if "run_id" in cols:
-            cur2 = conn.execute("SELECT count(*) as c FROM coding_messages WHERE run_id = ? AND role = 'worker'", (run_id,))
+            cur2 = conn.execute(
+                "SELECT count(*) as c FROM coding_messages WHERE run_id = ? AND role = 'worker'",
+                (run_id,),
+            )
             assert cur2.fetchone()["c"] == 2
-            cur_all = conn.execute("SELECT count(*) as c FROM coding_messages WHERE run_id = ?", (run_id,))
+            cur_all = conn.execute(
+                "SELECT count(*) as c FROM coding_messages WHERE run_id = ?", (run_id,)
+            )
             assert cur_all.fetchone()["c"] == 8
             # v30以降は二重書き込みしないため junction は 0
-            cur3 = conn.execute("SELECT count(*) as c FROM coding_run_worker_messages WHERE run_id = ?", (run_id,))
+            cur3 = conn.execute(
+                "SELECT count(*) as c FROM coding_run_worker_messages WHERE run_id = ?",
+                (run_id,),
+            )
             assert cur3.fetchone()["c"] == 0
         else:
             # migration前は junction のみ
-            cur3 = conn.execute("SELECT count(*) as c FROM coding_run_worker_messages WHERE run_id = ?", (run_id,))
+            cur3 = conn.execute(
+                "SELECT count(*) as c FROM coding_run_worker_messages WHERE run_id = ?",
+                (run_id,),
+            )
             assert cur3.fetchone()["c"] == 2
     finally:
         conn.close()
@@ -1917,7 +2184,9 @@ def test_opencode_backend_false_positive_tool_output_ignored_on_success(test_pro
     with patch.object(
         be, "_run_subprocess", return_value=(0, success_json, "", False)
     ) as mock_run:
-        res = be.execute(test_project["repo_path"], "prompt", external_session_id="ses_old123")
+        res = be.execute(
+            test_project["repo_path"], "prompt", external_session_id="ses_old123"
+        )
         assert mock_run.call_count == 1
         assert res.session_recreated is False
         assert res.external_session_id == "ses_old123"
@@ -1932,16 +2201,16 @@ def test_opencode_backend_false_positive_tool_output_ignored_on_success(test_pro
 def test_opencode_backend_false_positive_stdout_plain_ignored_on_success(test_project):
     """Regression: plain stdout containing 'session not found' with exit 0 must NOT fallback."""
     be = backend.OpenCodeCliBackend()
-    success_json = (
-        '{"sessionID": "ses_old123", "part": {"type": "text", "text": "Session not found is mentioned in docs but run succeeded"}}'
-    )
+    success_json = '{"sessionID": "ses_old123", "part": {"type": "text", "text": "Session not found is mentioned in docs but run succeeded"}}'
     # Even if stdout plain line contains the phrase outside JSON, exit 0 prevents fallback.
     # Construct stdout where a non-JSON line contains phrase.
     mixed_stdout = success_json + "\nSession not found in prior analysis (plain line)"
     with patch.object(
         be, "_run_subprocess", return_value=(0, mixed_stdout, "", False)
     ) as mock_run:
-        res = be.execute(test_project["repo_path"], "prompt", external_session_id="ses_old123")
+        res = be.execute(
+            test_project["repo_path"], "prompt", external_session_id="ses_old123"
+        )
         assert mock_run.call_count == 1
         assert res.session_recreated is False
         assert res.exit_code == 0
@@ -1961,7 +2230,9 @@ def test_opencode_backend_true_session_not_found_via_structured_error(test_proje
             (0, retry_json, "", False),
         ],
     ) as mock_run:
-        res = be.execute(test_project["repo_path"], "prompt", external_session_id="ses_old123")
+        res = be.execute(
+            test_project["repo_path"], "prompt", external_session_id="ses_old123"
+        )
         assert mock_run.call_count == 2
         assert res.session_recreated is True
         assert res.external_session_id == "ses_new999"
@@ -1988,7 +2259,9 @@ def test_opencode_backend_true_session_not_found_via_stderr(test_project):
             (0, retry_json, "", False),
         ],
     ) as mock_run:
-        res = be.execute(test_project["repo_path"], "prompt", external_session_id="ses_old123")
+        res = be.execute(
+            test_project["repo_path"], "prompt", external_session_id="ses_old123"
+        )
         assert mock_run.call_count == 2
         assert res.session_recreated is True
         assert res.external_session_id == "ses_new888"
@@ -2006,14 +2279,18 @@ def test_codex_backend_false_positive_tool_output_ignored_on_success(test_projec
     with patch.object(
         be, "_run_subprocess", return_value=(0, success_json, "", False)
     ) as mock_run:
-        res = be.execute(test_project["repo_path"], "prompt", external_session_id="th_old123")
+        res = be.execute(
+            test_project["repo_path"], "prompt", external_session_id="th_old123"
+        )
         assert mock_run.call_count == 1
         assert res.session_recreated is False
         assert res.external_session_id == "th_old123"
         assert res.exit_code == 0
 
 
-def test_coding_turn_picks_up_external_session_id_updated_before_first_cli(test_project):
+def test_coding_turn_picks_up_external_session_id_updated_before_first_cli(
+    test_project,
+):
     """High回帰: 初回CLI直前にDBが更新された場合、到達不能だった cli_count==0 分岐が cli_count==1 で正しくDB値を採用すること."""
     app = create_app(token="test-token")
     client = TestClient(app)
@@ -2021,7 +2298,11 @@ def test_coding_turn_picks_up_external_session_id_updated_before_first_cli(test_
     res = client.post(
         "/api/v1/coding/sessions",
         headers=headers,
-        json={"project_id": test_project["project_id"], "backend": "opencode", "title": "ExternalIdSync"},
+        json={
+            "project_id": test_project["project_id"],
+            "backend": "opencode",
+            "title": "ExternalIdSync",
+        },
     )
     assert res.status_code == 200
     sid = res.json()["session_id"]
@@ -2083,12 +2364,17 @@ def test_coding_turn_picks_up_external_session_id_updated_before_first_cli(test_
     assert res.status_code == 202
     run_id = res.json()["run"]["run_id"]
 
-    with patch(
-        "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response",
-        side_effect=mock_gen,
-    ), patch("obsidian_ai_hub.coding.store.get_session", side_effect=fake_get_session), patch(
-        "obsidian_ai_hub.coding.backend.OpenCodeCliBackend.execute", return_value=mock_result
-    ) as mock_exec:
+    with (
+        patch(
+            "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response",
+            side_effect=mock_gen,
+        ),
+        patch("obsidian_ai_hub.coding.store.get_session", side_effect=fake_get_session),
+        patch(
+            "obsidian_ai_hub.coding.backend.OpenCodeCliBackend.execute",
+            return_value=mock_result,
+        ) as mock_exec,
+    ):
         asyncio.run(execute_coding_run(run_id))
         # backend にはDB更新後の新しいIDが渡されていること（到達不能バグでは古いIDが渡る）
         assert mock_exec.call_count == 1
@@ -2108,7 +2394,11 @@ async def test_orchestrator_tool_call_event_generation(test_project):
     orchestrator = CodingOrchestrator(tool_ids=["web_search"])
 
     # Mock tool call in LLM response
-    mock_tc = {"name": "web_search", "args": {"query": "test query"}, "id": "call_llm_123"}
+    mock_tc = {
+        "name": "web_search",
+        "args": {"query": "test query"},
+        "id": "call_llm_123",
+    }
     mock_res1 = MagicMock()
     mock_res1.tool_calls = [mock_tc]
     mock_res2 = MagicMock()
@@ -2124,12 +2414,23 @@ async def test_orchestrator_tool_call_event_generation(test_project):
     mock_tool.name = "web_search"
     mock_tool.invoke.return_value = "A" * 25000  # Truncation test (> 20000 chars)
 
-    with patch("obsidian_ai_hub.coding.orchestrator.create_langchain_llm", return_value=mock_llm), \
-         patch("obsidian_ai_hub.agents.registry.resolve_tools_with_context", return_value=[mock_tool]):
-
+    with (
+        patch(
+            "obsidian_ai_hub.coding.orchestrator.create_langchain_llm",
+            return_value=mock_llm,
+        ),
+        patch(
+            "obsidian_ai_hub.agents.registry.resolve_tools_with_context",
+            return_value=[mock_tool],
+        ),
+    ):
         events = []
         async for evt in orchestrator.generate_response_events(
-            history=[], repo_path=test_project["repo_path"], backend_name="opencode", phase="initial", phase_turn=1
+            history=[],
+            repo_path=test_project["repo_path"],
+            backend_name="opencode",
+            phase="initial",
+            phase_turn=1,
         ):
             events.append(evt)
 
@@ -2181,13 +2482,24 @@ async def test_orchestrator_tool_call_exception_handling(test_project):
     mock_tool.name = "web_search"
     mock_tool.invoke.side_effect = RuntimeError("Tool execution crashed")
 
-    with patch("obsidian_ai_hub.coding.orchestrator.create_langchain_llm", return_value=mock_llm), \
-         patch("obsidian_ai_hub.agents.registry.resolve_tools_with_context", return_value=[mock_tool]):
-
+    with (
+        patch(
+            "obsidian_ai_hub.coding.orchestrator.create_langchain_llm",
+            return_value=mock_llm,
+        ),
+        patch(
+            "obsidian_ai_hub.agents.registry.resolve_tools_with_context",
+            return_value=[mock_tool],
+        ),
+    ):
         events = []
         with pytest.raises(RuntimeError, match="Tool execution crashed"):
             async for evt in orchestrator.generate_response_events(
-                history=[], repo_path=test_project["repo_path"], backend_name="opencode", phase="initial", phase_turn=1
+                history=[],
+                repo_path=test_project["repo_path"],
+                backend_name="opencode",
+                phase="initial",
+                phase_turn=1,
             ):
                 events.append(evt)
 

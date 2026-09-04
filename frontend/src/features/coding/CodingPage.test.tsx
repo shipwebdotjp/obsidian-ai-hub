@@ -25,6 +25,7 @@ vi.mock("../../api/coding", () => ({
   getCodingConfig: vi.fn(),
   updateCodingDefaults: vi.fn(),
   updateCodingSessionTools: vi.fn(),
+  updateCodingSessionTitle: vi.fn(),
 }));
 
 const mockProjectItem: codingApi.CodingProjectItem = {
@@ -736,6 +737,75 @@ describe("CodingPage", () => {
         ["web_search", "vault_search"],
       );
     });
+  });
+
+  it("updates session title from conversation settings modal", async () => {
+    const updatedSession = { ...mockSession, title: "更新後タイトル" };
+    vi.mocked(codingApi.updateCodingSessionTitle).mockResolvedValue({
+      session: updatedSession,
+      effective_tool_ids: ["web_search", "vault_search"],
+      has_custom_tools: false,
+      available_tools: [
+        { tool_id: "web_search", name: "Web検索", description: "Tavily検索" },
+        { tool_id: "vault_search", name: "Vault検索", description: "Vault内検索" },
+      ],
+      messages: [],
+      active_run: null,
+      latest_run: null,
+      orchestrator_tool_calls: [],
+    });
+    vi.mocked(codingApi.updateCodingSessionTools).mockResolvedValue({
+      session: updatedSession,
+      effective_tool_ids: ["web_search", "vault_search"],
+      has_custom_tools: false,
+      available_tools: [
+        { tool_id: "web_search", name: "Web検索", description: "Tavily検索" },
+        { tool_id: "vault_search", name: "Vault検索", description: "Vault内検索" },
+      ],
+      messages: [],
+      active_run: null,
+      latest_run: null,
+      orchestrator_tool_calls: [],
+    });
+
+    renderPage();
+    await waitFor(() => expect(screen.getByText("会話設定 ⚙")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "会話設定 ⚙" }));
+
+    const titleInput = screen.getByLabelText("セッションタイトル");
+    expect(titleInput).toHaveValue("新規セッション");
+    fireEvent.change(titleInput, { target: { value: "更新後タイトル" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+
+    await waitFor(() => {
+      expect(codingApi.updateCodingSessionTitle).toHaveBeenCalledWith(
+        "cses_111",
+        "更新後タイトル",
+      );
+    });
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "更新後タイトル" })).toBeInTheDocument();
+    });
+  });
+
+  it("rejects blank-only session title in conversation settings modal", async () => {
+    renderPage();
+    await waitFor(() => expect(screen.getByText("会話設定 ⚙")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "会話設定 ⚙" }));
+
+    const titleInput = screen.getByLabelText("セッションタイトル");
+    fireEvent.change(titleInput, { target: { value: "   " } });
+
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("セッションタイトルを入力してください")).toBeInTheDocument();
+    });
+    expect(codingApi.updateCodingSessionTitle).not.toHaveBeenCalled();
+    expect(codingApi.updateCodingSessionTools).not.toHaveBeenCalled();
   });
 
   it("opens user default tools modal and updates defaults", async () => {

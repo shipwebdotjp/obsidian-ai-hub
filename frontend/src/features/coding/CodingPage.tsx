@@ -14,6 +14,7 @@ import {
   getCodingConfig,
   updateCodingDefaults,
   updateCodingSessionTools,
+  updateCodingSessionTitle,
   type CodingProjectItem,
   type CodingSession,
   type CodingMessage,
@@ -78,6 +79,7 @@ export default function CodingPage() {
   // Conversation tool settings modal state
   const [isSessionSettingsOpen, setIsSessionSettingsOpen] = useState(false);
   const [sessionSelectedTools, setSessionSelectedTools] = useState<string[]>([]);
+  const [sessionTitleDraft, setSessionTitleDraft] = useState("");
   const [savingSessionTools, setSavingSessionTools] = useState(false);
 
   // User default tool settings modal state
@@ -777,11 +779,33 @@ export default function CodingPage() {
 
   const handleSaveSessionTools = async () => {
     if (!selectedSessionId) return;
+    const trimmedTitle = sessionTitleDraft.trim();
+    if (!trimmedTitle) {
+      setError("セッションタイトルを入力してください");
+      return;
+    }
     setSavingSessionTools(true);
     try {
+      const currentTitle = sessionDetail?.session.title ?? selectedSession?.title ?? "";
+      if (trimmedTitle !== currentTitle) {
+        try {
+          const titled = await updateCodingSessionTitle(selectedSessionId, trimmedTitle);
+          setSessionDetail(titled);
+          setSessionSelectedTools(titled.effective_tool_ids);
+          setSessions((prev) =>
+            prev.map((s) => (s.session_id === selectedSessionId ? { ...s, title: titled.session.title } : s)),
+          );
+        } catch (e: any) {
+          setError(e.message || "セッションタイトルの保存に失敗しました");
+          return;
+        }
+      }
       const updated = await updateCodingSessionTools(selectedSessionId, sessionSelectedTools);
       setSessionDetail(updated);
       setSessionSelectedTools(updated.effective_tool_ids);
+      setSessions((prev) =>
+        prev.map((s) => (s.session_id === selectedSessionId ? { ...s, title: updated.session.title } : s)),
+      );
       setIsSessionSettingsOpen(false);
     } catch (e: any) {
       setError(e.message || "会話ツールの保存に失敗しました");
@@ -797,6 +821,9 @@ export default function CodingPage() {
       const updated = await updateCodingSessionTools(selectedSessionId, null);
       setSessionDetail(updated);
       setSessionSelectedTools(updated.effective_tool_ids);
+      setSessions((prev) =>
+        prev.map((s) => (s.session_id === selectedSessionId ? { ...s, title: updated.session.title } : s)),
+      );
       setIsSessionSettingsOpen(false);
     } catch (e: any) {
       setError(e.message || "会話ツールのリセットに失敗しました");
@@ -1397,6 +1424,7 @@ export default function CodingPage() {
                   onClick={() => {
                     if (sessionDetail && sessionDetail.session.session_id === selectedSessionId) {
                       setSessionSelectedTools(sessionDetail.effective_tool_ids);
+                      setSessionTitleDraft(sessionDetail.session.title ?? "");
                       setIsSessionSettingsOpen(true);
                     }
                   }}
@@ -2031,6 +2059,24 @@ export default function CodingPage() {
               未選択のツールは呼び出せなくなります。
             </p>
 
+            <div className="mt-4">
+              <label
+                htmlFor="coding-session-title"
+                className="block text-xs font-medium text-slate-700"
+              >
+                セッションタイトル
+              </label>
+              <input
+                id="coding-session-title"
+                type="text"
+                value={sessionTitleDraft}
+                onChange={(e) => setSessionTitleDraft(e.target.value)}
+                placeholder="セッションタイトルを入力"
+                disabled={savingSessionTools}
+                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-1.5 text-xs focus:border-slate-800 focus:outline-none disabled:bg-slate-100"
+              />
+            </div>
+
             <div className="mt-3 flex items-center justify-between border-b border-slate-200 pb-2 text-xs">
               <span className="text-slate-600 font-medium">
                 選択中: {sessionSelectedTools.length} / {sessionDetail.available_tools.length} 個
@@ -2055,13 +2101,13 @@ export default function CodingPage() {
               </div>
             </div>
 
-            <div className="mt-3 flex-1 overflow-y-auto space-y-2 pr-1">
+            <div className="mt-3 flex-1 overflow-y-auto space-y-1.5 pr-1">
               {sessionDetail.available_tools.map((tool) => {
                 const isChecked = sessionSelectedTools.includes(tool.tool_id);
                 return (
                   <label
                     key={tool.tool_id}
-                    className={`flex items-start gap-3 rounded-lg border p-2.5 text-xs cursor-pointer transition-colors ${
+                    className={`flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-xs cursor-pointer transition-colors ${
                       isChecked
                         ? "border-slate-800 bg-slate-50 text-slate-900"
                         : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
@@ -2079,14 +2125,11 @@ export default function CodingPage() {
                           );
                         }
                       }}
-                      className="mt-0.5 rounded border-slate-300 text-slate-900 focus:ring-slate-800 cursor-pointer"
+                      className="rounded border-slate-300 text-slate-900 focus:ring-slate-800 cursor-pointer"
                     />
-                    <div>
-                      <div className="font-semibold text-slate-800">
-                        {tool.name} <span className="text-[10px] text-slate-400 font-mono">({tool.tool_id})</span>
-                      </div>
-                      <div className="mt-0.5 text-[11px] text-slate-500">{tool.description}</div>
-                    </div>
+                    <span className="font-semibold text-slate-800">
+                      {tool.name} <span className="text-[10px] text-slate-400 font-mono">({tool.tool_id})</span>
+                    </span>
                   </label>
                 );
               })}
@@ -2162,13 +2205,13 @@ export default function CodingPage() {
                   </div>
                 </div>
 
-                <div className="mt-3 flex-1 overflow-y-auto space-y-2 pr-1">
+                <div className="mt-3 flex-1 overflow-y-auto space-y-1.5 pr-1">
                   {userDefaults.available_tools.map((tool) => {
                     const isChecked = userDefaultsSelectedTools.includes(tool.tool_id);
                     return (
                       <label
                         key={tool.tool_id}
-                        className={`flex items-start gap-3 rounded-lg border p-2.5 text-xs cursor-pointer transition-colors ${
+                        className={`flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-xs cursor-pointer transition-colors ${
                           isChecked
                             ? "border-slate-800 bg-slate-50 text-slate-900"
                             : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
@@ -2186,14 +2229,11 @@ export default function CodingPage() {
                               );
                             }
                           }}
-                          className="mt-0.5 rounded border-slate-300 text-slate-900 focus:ring-slate-800 cursor-pointer"
+                          className="rounded border-slate-300 text-slate-900 focus:ring-slate-800 cursor-pointer"
                         />
-                        <div>
-                          <div className="font-semibold text-slate-800">
-                            {tool.name} <span className="text-[10px] text-slate-400 font-mono">({tool.tool_id})</span>
-                          </div>
-                          <div className="mt-0.5 text-[11px] text-slate-500">{tool.description}</div>
-                        </div>
+                        <span className="font-semibold text-slate-800">
+                          {tool.name} <span className="text-[10px] text-slate-400 font-mono">({tool.tool_id})</span>
+                        </span>
                       </label>
                     );
                   })}

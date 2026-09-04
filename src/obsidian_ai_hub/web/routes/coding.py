@@ -8,7 +8,11 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from obsidian_ai_hub.agents import registry
-from obsidian_ai_hub.coding import backend, service as coding_service, store as coding_store
+from obsidian_ai_hub.coding import (
+    backend,
+    service as coding_service,
+    store as coding_store,
+)
 from obsidian_ai_hub.web import service as web_service
 from obsidian_ai_hub.web.routes.deps import require_bearer_token
 
@@ -19,7 +23,9 @@ class SessionCreateRequest(BaseModel):
     project_id: int
     backend: str = Field(description="'codex' or 'opencode'")
     title: Optional[str] = Field(default=None)
-    tool_ids: Optional[List[str]] = Field(default=None, description="Optional custom tool IDs for session")
+    tool_ids: Optional[List[str]] = Field(
+        default=None, description="Optional custom tool IDs for session"
+    )
 
 
 class UpdateToolsRequest(BaseModel):
@@ -27,7 +33,13 @@ class UpdateToolsRequest(BaseModel):
 
 
 class UpdateSessionToolsRequest(BaseModel):
-    tool_ids: Optional[List[str]] = Field(default=None, description="List of tool IDs, or None to reset to user default")
+    tool_ids: Optional[List[str]] = Field(
+        default=None, description="List of tool IDs, or None to reset to user default"
+    )
+
+
+class UpdateSessionTitleRequest(BaseModel):
+    title: str = Field(description="New session title")
 
 
 class StartCodingRunRequest(BaseModel):
@@ -61,7 +73,11 @@ def get_coding_config(_=Depends(require_bearer_token)):
     """Get coding workspace config (default backend)."""
     from obsidian_ai_hub.utils.config import CODING_DEFAULT_BACKEND
 
-    backend = str(CODING_DEFAULT_BACKEND).strip().lower() if isinstance(CODING_DEFAULT_BACKEND, str) else "opencode"
+    backend = (
+        str(CODING_DEFAULT_BACKEND).strip().lower()
+        if isinstance(CODING_DEFAULT_BACKEND, str)
+        else "opencode"
+    )
     if backend not in ("codex", "opencode"):
         backend = "opencode"
     return {"default_backend": backend}
@@ -171,6 +187,28 @@ def create_session(
         raise HTTPException(status_code=400, detail=str(exc))
 
 
+@router.put("/sessions/{session_id}")
+def update_session_title(
+    session_id: str,
+    body: UpdateSessionTitleRequest,
+    _=Depends(require_bearer_token),
+):
+    """Update a coding session title."""
+    session = coding_store.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="セッションが見つかりません")
+
+    try:
+        coding_store.update_session_title(session_id, body.title)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=404, detail="セッションが見つかりません"
+        ) from exc
+    return get_session_detail(session_id)
+
+
 @router.put("/sessions/{session_id}/tools")
 def update_session_tools(
     session_id: str,
@@ -202,7 +240,9 @@ def get_session_detail(session_id: str, _=Depends(require_bearer_token)):
     effective_tool_ids = coding_store.get_effective_session_tool_ids(session_id)
     has_custom = session.get("tool_ids_json") is not None
     available_tools = registry.list_available_tools()
-    orchestrator_tool_calls = coding_store.list_orchestrator_tool_calls_for_session(session_id)
+    orchestrator_tool_calls = coding_store.list_orchestrator_tool_calls_for_session(
+        session_id
+    )
     ask_user_answer_history = extract_session_ask_user_history(runs)
 
     return {
@@ -282,7 +322,9 @@ async def subscribe_coding_run_events(
     run = coding_store.get_run(run_id)
     if not run:
         raise HTTPException(status_code=404, detail="実行が見つかりません")
-    raw_cursor = last_event_id_header if last_event_id_header is not None else last_event_id
+    raw_cursor = (
+        last_event_id_header if last_event_id_header is not None else last_event_id
+    )
     cursor = parse_last_event_id(raw_cursor)
 
     async def event_gen():
@@ -331,7 +373,10 @@ async def subscribe_coding_run_events(
                             return
                     else:
                         terminal_empty_polls = 0
-                    if current is not None and str(current.get("status")) == "waiting_user":
+                    if (
+                        current is not None
+                        and str(current.get("status")) == "waiting_user"
+                    ):
                         return
                     idle_cycles += 1
                     if idle_cycles >= 30:
@@ -356,7 +401,12 @@ def cancel_run(run_id: str, _=Depends(require_bearer_token)):
 
     status = str(run.get("status") or "")
     if status in ("completed", "failed", "cancelled", "interrupted"):
-        return {"run": run, "status": "not_running", "run_id": run_id, "current_status": status}
+        return {
+            "run": run,
+            "status": "not_running",
+            "run_id": run_id,
+            "current_status": status,
+        }
 
     try:
         updated = coding_store.request_cancel_run(run_id)

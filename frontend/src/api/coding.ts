@@ -227,6 +227,15 @@ export function updateCodingSessionTools(
   });
 }
 
+export function updateCodingSessionTitle(
+  sessionId: string,
+  title: string,
+): Promise<CodingSessionDetail> {
+  return apiPut<CodingSessionDetail>(`/api/v1/coding/sessions/${encodeURIComponent(sessionId)}`, {
+    title,
+  });
+}
+
 export function createCodingSession(
   projectId: number,
   backend: string,

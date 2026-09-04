@@ -23,16 +23,35 @@ def _now_iso() -> str:
     return datetime.now(JST).isoformat()
 
 
-CODING_NON_TERMINAL_STATUSES = frozenset({"queued", "running", "cancelling", "waiting_user"})
-CODING_TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled", "interrupted"})
+CODING_NON_TERMINAL_STATUSES = frozenset(
+    {"queued", "running", "cancelling", "waiting_user"}
+)
+CODING_TERMINAL_STATUSES = frozenset(
+    {"completed", "failed", "cancelled", "interrupted"}
+)
 CODING_ALLOWED_TRANSITIONS: dict[str, frozenset[str]] = {
     "queued": frozenset({"running", "cancelling", "interrupted", "failed"}),
     "running": frozenset(
-        {"completed", "failed", "cancelled", "cancelling", "waiting_user", "interrupted"}
+        {
+            "completed",
+            "failed",
+            "cancelled",
+            "cancelling",
+            "waiting_user",
+            "interrupted",
+        }
     ),
     "cancelling": frozenset({"cancelled", "failed", "interrupted", "completed"}),
     "waiting_user": frozenset(
-        {"running", "completed", "failed", "cancelled", "interrupted", "cancelling", "queued"}
+        {
+            "running",
+            "completed",
+            "failed",
+            "cancelled",
+            "interrupted",
+            "cancelling",
+            "queued",
+        }
     ),
 }
 
@@ -176,7 +195,9 @@ def create_orchestrator_tool_call(
     conn = get_db_connection()
     try:
         now = _now_iso()
-        args_json = args if isinstance(args, str) else json.dumps(args, ensure_ascii=False)
+        args_json = (
+            args if isinstance(args, str) else json.dumps(args, ensure_ascii=False)
+        )
 
         conn.execute(
             """
@@ -264,9 +285,7 @@ def associate_orchestrator_tool_calls_with_message(
         conn.close()
 
 
-def get_orchestrator_tool_call(
-    call_id: str, conn=None
-) -> Optional[Dict[str, Any]]:
+def get_orchestrator_tool_call(call_id: str, conn=None) -> Optional[Dict[str, Any]]:
     """Get orchestrator tool call record by call_id."""
     close_conn = False
     if conn is None:
@@ -627,14 +646,25 @@ def update_session_external_id(
 
 def update_session_title(session_id: str, title: str) -> None:
     """Update session title."""
+    clean_title = (title or "").strip()
+    if not clean_title:
+        raise ValueError("セッションタイトルを入力してください")
     conn = get_db_connection()
-    now = _now_iso()
-    conn.execute(
-        "UPDATE coding_sessions SET title = ?, updated_at = ? WHERE session_id = ?",
-        (title, now, session_id),
-    )
-    conn.commit()
-    conn.close()
+    try:
+        cursor = conn.execute(
+            "SELECT session_id FROM coding_sessions WHERE session_id = ?",
+            (session_id,),
+        )
+        if not cursor.fetchone():
+            raise FileNotFoundError(f"Session '{session_id}' not found.")
+        now = _now_iso()
+        conn.execute(
+            "UPDATE coding_sessions SET title = ?, updated_at = ? WHERE session_id = ?",
+            (clean_title, now, session_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def delete_session(session_id: str) -> bool:
@@ -657,7 +687,9 @@ def delete_session(session_id: str) -> bool:
         conn.close()
 
 
-def get_run_by_idempotency(session_id: str, idempotency_key: str) -> Optional[Dict[str, Any]]:
+def get_run_by_idempotency(
+    session_id: str, idempotency_key: str
+) -> Optional[Dict[str, Any]]:
     conn = get_db_connection()
     try:
         if not _has_column(conn, "coding_runs", "idempotency_key"):
@@ -1112,7 +1144,9 @@ def start_queued_run(
             if row is not None:
                 existing = _format_run(dict(row))
                 assert existing is not None
-                if (existing.get("idempotency_hash") or None) != (idempotency_hash or None):
+                if (existing.get("idempotency_hash") or None) != (
+                    idempotency_hash or None
+                ):
                     raise ValueError(
                         f"Idempotency key conflict for session '{session_id}'."
                     )
@@ -1202,7 +1236,9 @@ def start_queued_run(
                 )
                 conn.commit()
         except sqlite3.Error as exc:
-            logger.warning("Failed to link queued user message %s: %s", user_msg_id, exc)
+            logger.warning(
+                "Failed to link queued user message %s: %s", user_msg_id, exc
+            )
         run = get_run(run_id, conn=conn)
         assert run is not None
         return user_msg, run
@@ -1244,7 +1280,10 @@ def claim_queued_run(worker_instance_id: str) -> Optional[Dict[str, Any]]:
 
 
 def transition_run_status(
-    run_id: str, to_status: str, error_message: Optional[str] = None, finished: bool = False
+    run_id: str,
+    to_status: str,
+    error_message: Optional[str] = None,
+    finished: bool = False,
 ) -> Dict[str, Any]:
     conn = get_db_connection()
     try:
@@ -1336,7 +1375,7 @@ def mark_other_instances_interrupted(current_instance_id: str) -> int:
                 (now, *base),
             )
         conn.execute(
-            f"UPDATE coding_orchestrator_tool_calls SET status = 'interrupted', "
+            "UPDATE coding_orchestrator_tool_calls SET status = 'interrupted', "
             "finished_at = COALESCE(finished_at, ?), "
             "error = COALESCE(error, 'Interrupted due to server restart') "
             "WHERE status = 'running';",
@@ -1387,9 +1426,7 @@ def mark_own_runs_interrupted(owner_instance_id: str) -> int:
         conn.close()
 
 
-def append_run_event(
-    run_id: str, event_type: str, payload: Dict[str, Any]
-) -> int:
+def append_run_event(run_id: str, event_type: str, payload: Dict[str, Any]) -> int:
     if event_type not in CODING_EVENT_TYPES:
         raise ValueError(f"Unknown coding event type: '{event_type}'")
     conn = get_db_connection()
@@ -1450,7 +1487,9 @@ def list_run_events(
 def purge_old_run_events(retention_days: int = 7) -> int:
     import datetime as _dt
 
-    cutoff = (_dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(days=retention_days)).isoformat()
+    cutoff = (
+        _dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(days=retention_days)
+    ).isoformat()
     conn = get_db_connection()
     try:
         placeholders = ",".join("?" for _ in CODING_TERMINAL_STATUSES)
