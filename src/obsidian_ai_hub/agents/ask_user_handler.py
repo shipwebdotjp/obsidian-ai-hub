@@ -8,6 +8,7 @@ import sqlite3
 from typing import Any, Dict, Optional
 
 from obsidian_ai_hub.agents import store as agent_store
+from obsidian_ai_hub.agents.ask_user import append_answer_to_history
 from obsidian_ai_hub.coding import store as coding_store
 from obsidian_ai_hub.database import get_db_connection
 from obsidian_ai_hub.hitl.dispatcher import HitlContext, HitlResult
@@ -85,12 +86,14 @@ def handle_agent_ask_user(ctx: HitlContext) -> HitlResult:
 
     formatted_answers = _format_answers(ctx.raw_answers_by_question_key)
 
-    # Resume Agent run by transitioning from waiting_user back to succeeded
-    agent_store.update_run_hitl(run_id=run_id, status="succeeded", hitl_run_id=None)
+    merged = append_answer_to_history(cp, tool_call_id, cp.get("ask_user_args") or {}, formatted_answers)
+    new_checkpoint = json.dumps(merged, ensure_ascii=False)
 
-    merged = dict(cp)
-    merged["answers"] = formatted_answers
-    return HitlResult.complete(checkpoint=json.dumps(merged, ensure_ascii=False))
+    # Resume Agent run by transitioning from waiting_user to queued while keeping hitl_run_id
+    # NOTE: best-effort two-phase commit with the HITL dispatcher (see Decisions-HITL).
+    agent_store.update_run_hitl(run_id=run_id, status="queued", hitl_run_id=ctx.run_id)
+
+    return HitlResult.complete(checkpoint=new_checkpoint)
 
 
 def handle_coding_ask_user(ctx: HitlContext) -> HitlResult:
@@ -98,15 +101,17 @@ def handle_coding_ask_user(ctx: HitlContext) -> HitlResult:
     cp = _load_checkpoint(ctx, "Coding")
 
     run_id = cp.get("run_id")
-    if not run_id:
-        raise ValueError("Checkpoint missing run_id.")
+    tool_call_id = cp.get("tool_call_id")
+    if not run_id or not tool_call_id:
+        raise ValueError("Checkpoint missing run_id or tool_call_id.")
 
     formatted_answers = _format_answers(ctx.raw_answers_by_question_key)
 
-    # Update coding run status back from waiting_user to completed
-    coding_store.update_run(run_id=run_id, status="completed")
-    _clear_coding_hitl_link(run_id)
+    merged = append_answer_to_history(cp, tool_call_id, cp.get("ask_user_args") or {}, formatted_answers)
+    new_checkpoint = json.dumps(merged, ensure_ascii=False)
 
-    merged = dict(cp)
-    merged["answers"] = formatted_answers
-    return HitlResult.complete(checkpoint=json.dumps(merged, ensure_ascii=False))
+    # Update coding run status from waiting_user to queued while keeping hitl_run_id
+    # NOTE: best-effort two-phase commit with the HITL dispatcher (see Decisions-HITL).
+    coding_store.update_run(run_id=run_id, status="queued", hitl_run_id=ctx.run_id)
+
+    return HitlResult.complete(checkpoint=new_checkpoint)

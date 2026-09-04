@@ -231,3 +231,22 @@ Web UI や LINE からの回答入力後、HITL Run が `ready_to_resume` に遷
 4. **共通UIコンポーネント (`WaitingRunQuestionCard`):**
    - `AgentsPage`、`CodingPage`、`HitlPage` で共有する質問カード `WaitingRunQuestionCard` を導入し、ラジオ選択・「その他」条件付きテキストエリア・送信・取消・処理中/エラー表示を統一的に提供する。
 
+ 5. **完全修復とQueued再開ライフサイクル:**
+    - 通常ツールとしてそのまま完了扱いする動作を廃止し、Agents と Coding Workspace の双方で呼出しを確実に事前捕捉する。
+    - 回答後は新しい会話や新しいRunを作らず、元の Run を `queued` 状態へ復帰させて同一 Run ID で再開する。
+    - `hitl_run_id` は元 Run に保持され、再開時にチェックポイント（ドメイン、元Run ID、session ID、tool call ID、引数、質問、プロバイダ・モデル・ツール構成等の実行設定）の復元に利用する。
+    - バックグラウンドワーカーは再キューされた Run を検出すると、LLM文脈へ保存済み `ask_user` の AIMessage と構造化された ToolMessage（`{"answers": {"<q_id>": {"selection": ..., "text": ...}}}`）を注入し、中断直後のターンから同一 Run で続行する。
+    - 再開後に再度 `ask_user` が呼ばれた場合は、同じ Run ID のまま新たな HITL Run を作成し、`hitl_run_id` を最新値へ更新して再び `waiting_user` で待機する。
+    - 取消時は HITL Run および元 Run を共に `cancelled` に更新し、再開キューへは投入しない。`hitl_run_id` は取消時も保持し、完了済み質問の監査・追跡に利用する。
+    - 新規DBスキーマの追加は一切行わず、既存の HITL チェックポイントと `hitl_run_id` 紐付けのみで耐久的な再開情報を保持する。
+
+ 6. **回答確定のベストエフォート2段階コミット:**
+    - HITL Run の完了確定（dispatcher）と元 Run の `queued` 復帰（`agents.ask_user` / `coding.ask_user` ハンドラ）は同一トランザクションにせず、別トランザクションのベストエフォート2段階とする。dispatcher 改修の影響を避けるための判断。
+    - HITL確定だけ成功した場合は次回 dispatch で再試行でき、元 Run の `queued` 化だけ成功した場合も再回答で上書きできる。いずれも運用ログで検出可能とする。
+
+ 7. **多ラウンド累積と状態復元（v2 checkpoint）:**
+    - checkpoint に `qa_history`（各回の tool_call_id・引数・整形回答）と `resume_state`（Agent: iterations・used_tools・created_hitl_run_ids・tool_call_records、Coding: cli_count・phase・phase_turn）を追加する。v1 checkpoint は単一回答として読替える後方互換とする。
+    - 再開時は `qa_history` 全件を順に AIMessage＋ToolMessage として注入し、進捗カウンタを復元して中断直後のターンから続行する。二度目の質問では旧履歴を新 checkpoint へ引継ぐ。
+    - checkpoint の読込失敗・回答欠落は警告継続せず、当該 Run を `failed`（Agent: `fail_run`＋error SSE、Coding: `failed`＋error イベント）にして回答喪失の幻覚続行を防ぐ。
+    - 選択肢検証は厳格化し、空 choices・空 value/label・予約値 `other` の使用は HITL を作らず ToolMessage エラーで LLM に再試行させる。
+

@@ -2706,26 +2706,35 @@ export default function AgentsPage() {
                   hitlRunId={activeWaitingRun.hitlRunId}
                   questions={activeWaitingRun.questions}
                   onSubmit={async (answers) => {
-                    await Promise.all(
-                      Object.entries(answers).map(([qKey, ans]) =>
-                        submitHitlAnswer(
+                    // Submit sequentially so partial failures surface.
+                    try {
+                      for (const [qKey, ans] of Object.entries(answers)) {
+                        await submitHitlAnswer(
                           activeWaitingRun.hitlRunId,
                           qKey,
                           ans.value,
                           ans.comment
-                        )
-                      )
-                    );
-                    setActiveWaitingRun(null);
-                    if (selectedSessionId) {
-                      loadSessionDetail(selectedSessionId);
+                        );
+                      }
+                      setActiveWaitingRun(null);
+                      if (selectedSessionId) {
+                        // Reload detail; the active-run restore resubscribes the
+                        // same run ID from the existing cursor in order.
+                        await loadSessionDetail(selectedSessionId);
+                      }
+                    } catch (e: any) {
+                      setChatError(e.message || "回答の送信に失敗しました");
                     }
                   }}
                   onCancel={async () => {
-                    await cancelHitlRun(activeWaitingRun.hitlRunId);
-                    setActiveWaitingRun(null);
-                    if (selectedSessionId) {
-                      loadSessionDetail(selectedSessionId);
+                    try {
+                      await cancelHitlRun(activeWaitingRun.hitlRunId);
+                      setActiveWaitingRun(null);
+                      if (selectedSessionId) {
+                        await loadSessionDetail(selectedSessionId);
+                      }
+                    } catch (e: any) {
+                      setChatError(e.message || "質問の取消に失敗しました");
                     }
                   }}
                 />

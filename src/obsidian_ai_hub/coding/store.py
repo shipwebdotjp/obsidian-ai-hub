@@ -32,7 +32,7 @@ CODING_ALLOWED_TRANSITIONS: dict[str, frozenset[str]] = {
     ),
     "cancelling": frozenset({"cancelled", "failed", "interrupted", "completed"}),
     "waiting_user": frozenset(
-        {"running", "completed", "failed", "cancelled", "interrupted", "cancelling"}
+        {"running", "completed", "failed", "cancelled", "interrupted", "cancelling", "queued"}
     ),
 }
 
@@ -851,6 +851,9 @@ def create_run(
     return run
 
 
+_HITL_UNSET: Any = object()
+
+
 def update_run(
     run_id: str,
     orchestrator_message_id: Optional[str] = None,
@@ -859,6 +862,7 @@ def update_run(
     error_message: Optional[str] = None,
     finished_at: Optional[str] = None,
     diagnostics_json: Optional[str] = None,
+    hitl_run_id: Any = _HITL_UNSET,
 ) -> Dict[str, Any]:
     """Update run fields."""
     conn = get_db_connection()
@@ -883,6 +887,9 @@ def update_run(
     if diagnostics_json is not None:
         updates.append("diagnostics_json = ?")
         params.append(diagnostics_json)
+    if hitl_run_id is not _HITL_UNSET:
+        updates.append("hitl_run_id = ?")
+        params.append(hitl_run_id)
 
     if updates:
         sql = f"UPDATE coding_runs SET {', '.join(updates)} WHERE run_id = ?"

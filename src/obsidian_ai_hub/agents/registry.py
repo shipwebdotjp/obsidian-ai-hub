@@ -1151,9 +1151,11 @@ except Exception:
 
 
 def list_available_tools() -> List[Dict[str, Any]]:
-    """Return catalog metadata for all registered tools."""
+    """Return catalog metadata for user-configurable tools (excluding system tools like ask_user)."""
     catalog = []
     for tool_id, meta in TOOL_DEFINITIONS.items():
+        if tool_id == "ask_user":
+            continue
         catalog.append(
             {
                 "tool_id": tool_id,

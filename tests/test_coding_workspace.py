@@ -1498,12 +1498,17 @@ async def test_orchestrator_tool_restriction(test_project):
 
     with patch("obsidian_ai_hub.coding.orchestrator.create_langchain_llm") as mock_create_llm:
         mock_llm = MagicMock()
+        mock_with = MagicMock()
+        mock_with.ainvoke = AsyncMock(return_value=mock_ai_msg)
+        mock_llm.bind_tools.return_value = mock_with
         mock_llm.ainvoke = AsyncMock(return_value=mock_ai_msg)
         mock_create_llm.return_value = mock_llm
 
         resp = await orch_empty.generate_response([], test_project["repo_path"], "codex")
         assert resp == "No tools used."
-        mock_llm.bind_tools.assert_not_called()
+        mock_llm.bind_tools.assert_called_once()
+        bound_tools = mock_llm.bind_tools.call_args[0][0]
+        assert [t.name for t in bound_tools] == ["ask_user"]
 
     # Case B: specified tool_ids -> bind_tools receives only permitted BaseTools
     orch_permitted = CodingOrchestrator(tool_ids=["web_search"])

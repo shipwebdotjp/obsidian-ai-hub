@@ -1,5 +1,6 @@
 import { apiGet, apiPost, apiPut, apiDelete, getToken, clearToken, AUTH_EXPIRED_EVENT, ApiError } from "./client";
 import type { Project } from "./types";
+import type { QuestionItem } from "../components/InConversationQuestionCard";
 
 export interface CodingTool {
   tool_id: string;
@@ -188,6 +189,7 @@ export type CodingSseEvent =
       diagnostics?: CodingDiagnostics | null;
     }
   | { event: "done"; run_id: string; status: string; git_status?: GitStatus; session_title?: string }
+  | { event: "user_question"; hitl_run_id: string; question_set_id: string; questions: QuestionItem[] }
   | { event: "cancelled"; message: string }
   | { event: "error"; message: string };
 
@@ -301,6 +303,9 @@ export async function subscribeCodingRunEvents(
     lastEventId: opts.lastEventId,
     signal: opts.signal,
     onEnvelope: opts.onEnvelope,
+    // done/error/cancelled close the stream. waiting_user (user_question)
+    // pauses via server disconnect; the caller resubscribes the same run ID
+    // from the existing event cursor after the answer to replay in order.
     isTerminal: (envelope) => {
       const type = String(envelope.data["event"] ?? envelope.data["type"] ?? "");
       return type === "done" || type === "error" || type === "cancelled";

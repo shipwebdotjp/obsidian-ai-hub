@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import threading
+import uuid
 from datetime import datetime
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
@@ -148,7 +149,10 @@ async def execute_coding_run(run_id: str) -> None:
 
         effective_tool_ids = store.get_effective_session_tool_ids(session_id)
         orchestrator = CodingOrchestrator(tool_ids=effective_tool_ids)
-        cli_count = 0
+        # Resume progress (cli_count/phase_turn) from prior HITL checkpoint when present.
+        from obsidian_ai_hub.coding.ask_user_flow import restore_coding_progress
+
+        cli_count, phase_turn = restore_coding_progress(run.get("hitl_run_id"))
         final_status = "completed"
         codex_title_source: Optional[str] = None
         current_external_id = session.get("external_session_id")
@@ -157,7 +161,6 @@ async def execute_coding_run(run_id: str) -> None:
         user_msg = store.get_message(str(run.get("user_message_id") or ""))
         user_prompt = str((user_msg or {}).get("content") or "")
 
-        phase_turn = 0
         while True:
             if _is_cancelling() or cancel_event.is_set():
                 try:
@@ -196,6 +199,7 @@ async def execute_coding_run(run_id: str) -> None:
                     backend_name=backend_name,
                     phase=phase,
                     phase_turn=phase_turn,
+                    hitl_run_id=run.get("hitl_run_id"),
                 ):
                     if _is_cancelling() or cancel_event.is_set():
                         try:
@@ -293,6 +297,63 @@ async def execute_coding_run(run_id: str) -> None:
                             )
                         except Exception:
                             logger.exception("append end failed %s", run_id)
+                    elif evt_type == "user_question":
+                        ask_call = event.get("ask_call", {})
+                        questions_data = event.get("questions", [])
+                        hitl_run_id = f"hitl_ask_{uuid.uuid4().hex[:12]}"
+                        question_set_id = "qset_1"
+
+                        from obsidian_ai_hub.coding.ask_user_flow import (
+                            build_coding_checkpoint,
+                            load_prior_history_sync,
+                        )
+
+                        prior_history, _ = await asyncio.to_thread(
+                            load_prior_history_sync, run.get("hitl_run_id")
+                        )
+                        checkpoint_data = build_coding_checkpoint(
+                            session_id=session_id,
+                            run_id=run_id,
+                            user_prompt=user_prompt,
+                            repo_path=canonical_repo,
+                            backend_name=backend_name,
+                            ask_call=ask_call,
+                            questions_data=questions_data,
+                            phase=phase,
+                            phase_turn=phase_turn,
+                            cli_count=cli_count,
+                            tool_ids=effective_tool_ids,
+                            provider=orchestrator.provider,
+                            model=orchestrator.model,
+                            prior_history=prior_history,
+                        )
+
+                        from obsidian_ai_hub.hitl.service import register_run_and_questions
+
+                        register_run_and_questions(
+                            run_id=hitl_run_id,
+                            handler="coding.ask_user",
+                            checkpoint=json.dumps(checkpoint_data, ensure_ascii=False),
+                            question_set_id=question_set_id,
+                            questions_data=questions_data,
+                            title="会話内の要件確認",
+                            description="Coding Orchestrator からの確認質問",
+                            display_type="in_conversation_question",
+                        )
+
+                        store.update_run(
+                            run_id,
+                            status="waiting_user",
+                            hitl_run_id=hitl_run_id,
+                        )
+
+                        user_question_payload = {
+                            "hitl_run_id": hitl_run_id,
+                            "question_set_id": question_set_id,
+                            "questions": questions_data,
+                        }
+                        store.append_run_event(run_id, "user_question", user_question_payload)
+                        return
                     elif evt_type == "text":
                         full_orch_response = event.get("content", "")
             except Exception as exc:

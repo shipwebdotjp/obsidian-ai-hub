@@ -106,8 +106,17 @@ async def test_orchestrator_no_skills_block_when_disabled(tmp_path, monkeypatch)
     def fake_create_llm(*args, **kwargs):
         mock_llm = MagicMock()
 
-        # For [] tool_ids, bind_tools should not be called
-        mock_llm.bind_tools = MagicMock()
+        def fake_bind_tools(tools):
+            mock_with = MagicMock()
+
+            async def fake_ainvoke(messages):
+                captured["system_content"] = messages[0].content if messages else ""
+                return mock_ai_msg
+
+            mock_with.ainvoke = fake_ainvoke
+            return mock_with
+
+        mock_llm.bind_tools.side_effect = fake_bind_tools
         async def fake_ainvoke(messages):
             captured["system_content"] = messages[0].content if messages else ""
             return mock_ai_msg

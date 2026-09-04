@@ -770,7 +770,9 @@ async def generate_agent_stream(
 
     provider = (agent.get("provider") or "").strip() or default_provider
     model = (agent.get("model") or "").strip() or default_model
-    tool_ids = agent.get("tool_ids") or []
+    tool_ids = list(agent.get("tool_ids") or [])
+    if "ask_user" not in tool_ids:
+        tool_ids.append("ask_user")
 
     # Prepare current time (JST) so LLM can resolve relative dates correctly
     jst = ZoneInfo("Asia/Tokyo")
@@ -895,6 +897,72 @@ async def generate_agent_stream(
         _build_user_message(provider, user_content, attachments)
     )
 
+    hitl_run_id = run.get("hitl_run_id")
+    start_iterations = 0
+    resumed_used_tools: Optional[List[str]] = None
+    resumed_hitl_ids: Optional[List[str]] = None
+    resumed_records: Optional[List[Dict[str, Any]]] = None
+    if hitl_run_id:
+        from obsidian_ai_hub.hitl import store as hitl_store
+
+        hitl_run = await asyncio.to_thread(hitl_store.get_run, hitl_run_id)
+        if not hitl_run or not hitl_run.get("checkpoint"):
+            raise RuntimeError(f"HITL checkpoint missing for run {run_id}.")
+        try:
+            cp = json.loads(hitl_run["checkpoint"])
+        except (json.JSONDecodeError, TypeError, ValueError) as exc:
+            raise RuntimeError(f"Invalid HITL checkpoint for run {run_id}.") from exc
+        if not isinstance(cp, dict):
+            raise RuntimeError(f"Invalid HITL checkpoint for run {run_id}.")
+        from obsidian_ai_hub.agents.ask_user import build_resume_turns
+
+        turns = build_resume_turns(cp)
+        if not turns:
+            raise RuntimeError(f"HITL checkpoint has no answers for run {run_id}.")
+        for turn in turns:
+            langchain_messages.append(
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {
+                            "name": "ask_user",
+                            "args": turn["ask_user_args"],
+                            "id": turn["tool_call_id"],
+                        }
+                    ],
+                )
+            )
+            langchain_messages.append(
+                ToolMessage(
+                    content=json.dumps(turn["payload"], ensure_ascii=False),
+                    tool_call_id=turn["tool_call_id"],
+                )
+            )
+        rs = cp.get("resume_state") if isinstance(cp.get("resume_state"), dict) else None
+        if rs is not None:
+            try:
+                start_iterations = int(rs.get("iterations") or 0)
+            except (TypeError, ValueError):
+                start_iterations = 0
+            if isinstance(rs.get("used_tools"), list):
+                resumed_used_tools = [str(t) for t in rs["used_tools"]]
+            if isinstance(rs.get("created_hitl_run_ids"), list):
+                resumed_hitl_ids = [str(t) for t in rs["created_hitl_run_ids"]]
+            if isinstance(rs.get("tool_call_records"), list):
+                resumed_records = [r for r in rs["tool_call_records"] if isinstance(r, dict)]
+        else:
+            # Backward compatible v1 checkpoints (top-level progress fields).
+            try:
+                start_iterations = int(cp.get("iterations") or 0)
+            except (TypeError, ValueError):
+                start_iterations = 0
+            if isinstance(cp.get("used_tools"), list):
+                resumed_used_tools = [str(t) for t in cp["used_tools"]]
+            if isinstance(cp.get("created_hitl_run_ids"), list):
+                resumed_hitl_ids = [str(t) for t in cp["created_hitl_run_ids"]]
+            if isinstance(cp.get("tool_call_records"), list):
+                resumed_records = [r for r in cp["tool_call_records"] if isinstance(r, dict)]
+
     openai_options = {}
     if provider == "openai":
         openai_options = {
@@ -930,9 +998,9 @@ async def generate_agent_stream(
         except (ValueError, TypeError):
             logger.warning("Invalid advanced_params.max_tokens %r, falling back to 4096", adv.get("max_tokens"))
 
-    used_tools: List[str] = []
-    created_hitl_run_ids: List[str] = []
-    tool_call_records: List[Dict[str, Any]] = []
+    used_tools: List[str] = list(resumed_used_tools) if resumed_used_tools else []
+    created_hitl_run_ids: List[str] = list(resumed_hitl_ids) if resumed_hitl_ids else []
+    tool_call_records: List[Dict[str, Any]] = list(resumed_records) if resumed_records else []
     # Truncate large tool results to keep DB row bounded (vault/calendar dumps can be large)
     _TOOL_RESULT_MAX_CHARS = 20000
     # Live SSE truncation for tool_call_end events (smaller to keep payload light;
@@ -951,7 +1019,7 @@ async def generate_agent_stream(
 
         llm_with_tools = llm.bind_tools(active_tools) if active_tools else llm
 
-        iterations = 0
+        iterations = start_iterations
         final_ai_msg: Optional[AIMessage] = None
         streamed_text_parts: List[str] = []
 
@@ -1013,33 +1081,9 @@ async def generate_agent_stream(
                 # Validate LLM-produced questions before creating the HITL run:
                 # an empty/invalid set would flip the run to waiting_user with no
                 # answerable questions (unresolvable). Bounce back as tool error.
-                _ask_user_error: Optional[str] = None
-                if not isinstance(q_items, list) or not q_items:
-                    _ask_user_error = "ask_user requires a non-empty questions array."
-                else:
-                    _seen_qids: set[str] = set()
-                    for _qi, _q in enumerate(q_items):
-                        if not isinstance(_q, dict):
-                            _ask_user_error = f"ask_user questions[{_qi}] must be an object."
-                            break
-                        _qid = str(_q.get("question_id") or "").strip()
-                        _qtext = str(_q.get("question") or "").strip()
-                        if not _qid or not _qtext:
-                            _ask_user_error = (
-                                f"ask_user questions[{_qi}] requires non-empty "
-                                "question_id and question."
-                            )
-                            break
-                        if _qid in _seen_qids:
-                            _ask_user_error = f"Duplicate question_id '{_qid}' in ask_user call."
-                            break
-                        _seen_qids.add(_qid)
-                        _ch = _q.get("choices", [])
-                        if not isinstance(_ch, list) or not all(isinstance(_c, dict) for _c in _ch):
-                            _ask_user_error = (
-                                f"ask_user questions[{_qi}] choices must be a list of objects."
-                            )
-                            break
+                from obsidian_ai_hub.agents.ask_user import validate_ask_user_questions
+
+                _ask_user_error = validate_ask_user_questions(q_items)
                 if _ask_user_error is not None:
                     langchain_messages.append(
                         ToolMessage(
@@ -1052,28 +1096,30 @@ async def generate_agent_stream(
                 # Register HITL Run and Questions
                 hitl_run_id = f"hitl_ask_{uuid.uuid4().hex[:12]}"
                 question_set_id = "qset_1"
-                questions_data = []
 
-                from obsidian_ai_hub.agents.ask_user import normalize_question_choices
+                from obsidian_ai_hub.agents.ask_user import (
+                    build_questions_data,
+                    carry_history_for_new_checkpoint,
+                )
                 from obsidian_ai_hub.hitl.service import register_run_and_questions
 
-                for idx, q_item in enumerate(q_items):
-                    q_id = q_item.get("question_id", f"q_{idx+1}")
-                    q_text = q_item.get("question", "")
-                    raw_choices = q_item.get("choices", [])
-                    norm_choices = normalize_question_choices(
-                        raw_choices if isinstance(raw_choices, list) else []
-                    )
-                    questions_data.append(
-                        {
-                            "question_key": q_id,
-                            "question_type": "single_choice",
-                            "display_text": q_text,
-                            "choices": norm_choices,
-                            "is_required": 1,
-                            "sequence": idx,
-                        }
-                    )
+                questions_data = build_questions_data(q_items)
+
+                prior_history: List[Dict[str, Any]] = []
+                prior_hitl_id = run.get("hitl_run_id")
+                if prior_hitl_id:
+                    try:
+                        from obsidian_ai_hub.hitl import store as _hitl_store
+
+                        prior_hitl = await asyncio.to_thread(_hitl_store.get_run, prior_hitl_id)
+                        if prior_hitl and prior_hitl.get("checkpoint"):
+                            prior_cp = json.loads(prior_hitl["checkpoint"])
+                            if isinstance(prior_cp, dict):
+                                prior_history = carry_history_for_new_checkpoint(prior_cp)
+                    except Exception as prior_exc:
+                        logger.warning(
+                            "Failed to carry HITL history for run %s: %s", run_id, prior_exc
+                        )
 
                 # Checkpoint saved to HITL run
                 checkpoint_data = {
@@ -1083,8 +1129,23 @@ async def generate_agent_stream(
                     "run_id": run_id,
                     "user_content": user_content,
                     "tool_call_id": ask_call["id"],
+                    "ask_user_args": ask_call["args"],
                     "questions": questions_data,
+                    "qa_history": prior_history,
+                    "resume_state": {
+                        "iterations": iterations,
+                        "used_tools": used_tools,
+                        "created_hitl_run_ids": created_hitl_run_ids,
+                        "tool_call_records": tool_call_records,
+                    },
                     "iterations": iterations,
+                    "provider": provider,
+                    "model": model,
+                    "tool_ids": tool_ids,
+                    "advanced_params": adv,
+                    "used_tools": used_tools,
+                    "created_hitl_run_ids": created_hitl_run_ids,
+                    "tool_call_records": tool_call_records,
                 }
 
                 await asyncio.to_thread(

@@ -3,6 +3,13 @@ import { MemoryRouter } from "react-router-dom";
 import { vi, describe, it, expect, beforeEach } from "vitest";
 import CodingPage from "./CodingPage";
 import * as codingApi from "../../api/coding";
+import * as clientApi from "../../api/client";
+
+vi.mock("../../api/client", () => ({
+  getHitlRun: vi.fn(),
+  submitHitlAnswer: vi.fn(),
+  cancelHitlRun: vi.fn(),
+}));
 
 vi.mock("../../api/coding", () => ({
   listCodingProjects: vi.fn(),
@@ -1421,5 +1428,125 @@ describe("CodingPage", () => {
       expect(codingApi.getCodingSessionDetail).toHaveBeenCalledWith("cses_111");
     });
     expect(await screen.findByText("こんにちは！何かお手伝いしましょうか？")).toBeInTheDocument();
+  });
+
+  it("renders WaitingRunQuestionCard when latest_run is waiting_user and allows answering", async () => {
+    const waitingRun = mockCodingRun({
+      run_id: "crun_waiting",
+      status: "waiting_user",
+      hitl_run_id: "hitl_ask_123",
+    });
+    vi.mocked(codingApi.getCodingSessionDetail).mockResolvedValue({
+      session: mockSession,
+      effective_tool_ids: ["web_search"],
+      has_custom_tools: false,
+      available_tools: [],
+      messages: [],
+      active_run: null,
+      latest_run: waitingRun,
+      orchestrator_tool_calls: [],
+    });
+    vi.mocked(clientApi.getHitlRun).mockResolvedValue({
+      run_id: "hitl_ask_123",
+      questions: [
+        {
+          question_key: "q1",
+          display_text: "確認質問1",
+          choices: [
+            { value: "opt1", label: "選択肢1" },
+            { value: "opt2", label: "選択肢2" },
+          ],
+          is_required: 1,
+        },
+      ],
+    } as any);
+    vi.mocked(clientApi.submitHitlAnswer).mockResolvedValue({} as any);
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(clientApi.getHitlRun).toHaveBeenCalledWith("hitl_ask_123");
+      expect(screen.getByText("確認質問1")).toBeInTheDocument();
+      expect(screen.getByText("選択肢1")).toBeInTheDocument();
+    });
+
+    const radio = screen.getByLabelText("選択肢1");
+    fireEvent.click(radio);
+
+    const submitBtn = screen.getByRole("button", { name: "回答を送信" });
+    fireEvent.click(submitBtn);
+
+    await waitFor(() => {
+      expect(clientApi.submitHitlAnswer).toHaveBeenCalledWith(
+        "hitl_ask_123",
+        "q1",
+        "opt1",
+        undefined,
+      );
+    });
+  });
+
+  it("submits free-text via other choice and supports cancel", async () => {
+    const waitingRun = mockCodingRun({
+      run_id: "crun_waiting_other",
+      status: "waiting_user",
+      hitl_run_id: "hitl_ask_other",
+    });
+    vi.mocked(codingApi.getCodingSessionDetail).mockResolvedValue({
+      session: mockSession,
+      effective_tool_ids: ["web_search"],
+      has_custom_tools: false,
+      available_tools: [],
+      messages: [],
+      active_run: null,
+      latest_run: waitingRun,
+      orchestrator_tool_calls: [],
+    });
+    vi.mocked(clientApi.getHitlRun).mockResolvedValue({
+      run_id: "hitl_ask_other",
+      questions: [
+        {
+          question_key: "q1",
+          display_text: "確認質問other",
+          choices: [
+            { value: "opt1", label: "選択肢1" },
+            { value: "other", label: "その他（自由入力）" },
+          ],
+          is_required: 1,
+        },
+      ],
+    } as any);
+    vi.mocked(clientApi.submitHitlAnswer).mockResolvedValue({} as any);
+    vi.mocked(clientApi.cancelHitlRun).mockResolvedValue({} as any);
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("確認質問other")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByLabelText("その他（自由入力）"));
+    fireEvent.click(screen.getByRole("button", { name: "回答を送信" }));
+    // other without text is rejected client-side.
+    expect(await screen.findByText("「その他」を選択した場合はテキストを入力してください。")).toBeInTheDocument();
+    expect(clientApi.submitHitlAnswer).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByPlaceholderText("具体的な内容を入力してください（必須）"), {
+      target: { value: "カスタム希望" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "回答を送信" }));
+    await waitFor(() => {
+      expect(clientApi.submitHitlAnswer).toHaveBeenCalledWith(
+        "hitl_ask_other",
+        "q1",
+        "other",
+        "カスタム希望",
+      );
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+    await waitFor(() => {
+      expect(clientApi.cancelHitlRun).toHaveBeenCalledWith("hitl_ask_other");
+    });
   });
 });

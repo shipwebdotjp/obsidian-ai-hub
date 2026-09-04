@@ -506,6 +506,21 @@ export default function CodingPage() {
         abortControllerRef.current = null;
         activeRunIdRef.current = null;
         return;
+      } else if (type === "user_question") {
+        ctx.finalizeSendSuccess();
+        if (!isCurrentSession) return;
+        setIsStreaming(false);
+        setActivePhaseText(null);
+        setWorkerState({ status: "idle" });
+        abortControllerRef.current = null;
+        activeRunIdRef.current = null;
+        const hitlRunId = String(data.hitl_run_id ?? "");
+        const questions = Array.isArray(data.questions)
+          ? (data.questions as QuestionItem[])
+          : [];
+        if (hitlRunId) setActiveWaitingRun({ hitlRunId, questions });
+        void loadSessionDetail(ctx.streamSessionId);
+        return;
       } else if (type === "done") {
         ctx.finalizeSendSuccess();
         if (!isCurrentSession) return;
@@ -1372,26 +1387,37 @@ export default function CodingPage() {
                   hitlRunId={activeWaitingRun.hitlRunId}
                   questions={activeWaitingRun.questions}
                   onSubmit={async (answers) => {
-                    await Promise.all(
-                      Object.entries(answers).map(([qKey, ans]) =>
-                        submitHitlAnswer(
+                    // Submit each answer sequentially so a partial failure
+                    // surfaces instead of silently leaving questions pending.
+                    try {
+                      for (const [qKey, ans] of Object.entries(answers)) {
+                        await submitHitlAnswer(
                           activeWaitingRun.hitlRunId,
                           qKey,
                           ans.value,
                           ans.comment
-                        )
-                      )
-                    );
-                    setActiveWaitingRun(null);
-                    if (selectedSessionId) {
-                      loadSessionDetail(selectedSessionId);
+                        );
+                      }
+                      setActiveWaitingRun(null);
+                      if (selectedSessionId) {
+                        // Reload detail; the active-run restore effect resubscribes
+                        // the same run ID from the existing event cursor, replaying
+                        // user_question then post-resume events in order.
+                        await loadSessionDetail(selectedSessionId);
+                      }
+                    } catch (e: any) {
+                      setError(e.message || "回答の送信に失敗しました");
                     }
                   }}
                   onCancel={async () => {
-                    await cancelHitlRun(activeWaitingRun.hitlRunId);
-                    setActiveWaitingRun(null);
-                    if (selectedSessionId) {
-                      loadSessionDetail(selectedSessionId);
+                    try {
+                      await cancelHitlRun(activeWaitingRun.hitlRunId);
+                      setActiveWaitingRun(null);
+                      if (selectedSessionId) {
+                        await loadSessionDetail(selectedSessionId);
+                      }
+                    } catch (e: any) {
+                      setError(e.message || "質問の取消に失敗しました");
                     }
                   }}
                 />

@@ -133,6 +133,7 @@ class CodingOrchestrator:
         backend_name: str,
         phase: str = "initial",
         phase_turn: int = 1,
+        hitl_run_id: Optional[str] = None,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """Generate orchestrator events (detected, start, end for tool calls, text for response)."""
         # Check if generate_response was patched or overridden (e.g. in legacy tests)
@@ -159,7 +160,10 @@ class CodingOrchestrator:
             resolved_tool_ids = registry.list_available_tools()
             target_ids = [t["tool_id"] for t in resolved_tool_ids]
         else:
-            target_ids = self.tool_ids
+            target_ids = list(self.tool_ids)
+
+        if "ask_user" not in target_ids:
+            target_ids.append("ask_user")
 
         # Conditional skills catalog injection
         skills_block: Optional[str] = None
@@ -200,6 +204,43 @@ class CodingOrchestrator:
         messages = self._build_messages(
             history, repo_path, backend_name, skills_block=skills_block
         )
+
+        if hitl_run_id:
+            from obsidian_ai_hub.hitl import store as hitl_store
+
+            hitl_run = await asyncio.to_thread(hitl_store.get_run, hitl_run_id)
+            if not hitl_run or not hitl_run.get("checkpoint"):
+                raise RuntimeError(f"HITL checkpoint missing for coding run {hitl_run_id}.")
+            try:
+                cp = json.loads(hitl_run["checkpoint"])
+            except (json.JSONDecodeError, TypeError, ValueError) as exc:
+                raise RuntimeError("Invalid HITL checkpoint for coding run.") from exc
+            if not isinstance(cp, dict):
+                raise RuntimeError("Invalid HITL checkpoint for coding run.")
+            from obsidian_ai_hub.agents.ask_user import build_resume_turns
+
+            turns = build_resume_turns(cp)
+            if not turns:
+                raise RuntimeError("HITL checkpoint has no answers for coding run.")
+            for turn in turns:
+                messages.append(
+                    AIMessage(
+                        content="",
+                        tool_calls=[
+                            {
+                                "name": "ask_user",
+                                "args": turn["ask_user_args"],
+                                "id": turn["tool_call_id"],
+                            }
+                        ],
+                    )
+                )
+                messages.append(
+                    ToolMessage(
+                        content=json.dumps(turn["payload"], ensure_ascii=False),
+                        tool_call_id=turn["tool_call_id"],
+                    )
+                )
 
         trusted_ctx = {
             "repo_path": repo_path,
@@ -252,6 +293,54 @@ class CodingOrchestrator:
                         final_text = str(content)
 
                     yield {"type": "text", "content": final_text}
+                    return
+
+                # Enforce single-tool call rule for ask_user
+                ask_user_calls = [tc for tc in tool_calls if tc.get("name") == "ask_user"]
+                if ask_user_calls and len(tool_calls) > 1:
+                    for tc in tool_calls:
+                        tcall_id = tc.get("id") or f"call_{iteration}_{tc.get('name')}"
+                        messages.append(
+                            ToolMessage(
+                                content=json.dumps(
+                                    {
+                                        "error": "ask_user は単独で呼び出し、複数質問は questions 配列へまとめてください。"
+                                    },
+                                    ensure_ascii=False,
+                                ),
+                                tool_call_id=tcall_id,
+                            )
+                        )
+                    continue
+
+                if len(tool_calls) == 1 and tool_calls[0].get("name") == "ask_user":
+                    ask_call = tool_calls[0]
+                    q_items = ask_call.get("args", {}).get("questions", [])
+
+                    from obsidian_ai_hub.agents.ask_user import validate_ask_user_questions
+
+                    _ask_user_error = validate_ask_user_questions(q_items)
+                    if _ask_user_error is not None:
+                        messages.append(
+                            ToolMessage(
+                                content=json.dumps({"error": _ask_user_error}, ensure_ascii=False),
+                                tool_call_id=ask_call.get("id") or f"call_{iteration}_ask_user",
+                            )
+                        )
+                        continue
+
+                    from obsidian_ai_hub.agents.ask_user import build_questions_data
+
+                    questions_data = build_questions_data(q_items)
+
+                    yield {
+                        "type": "user_question",
+                        "ask_call": ask_call,
+                        "questions": questions_data,
+                        "phase": phase,
+                        "phase_turn": phase_turn,
+                        "iteration": iteration,
+                    }
                     return
 
                 # Yield 'detected' event for all tool calls in this iteration

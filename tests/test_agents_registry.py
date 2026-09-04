@@ -30,10 +30,10 @@ def test_list_available_tools():
         "skills",
         "run_shell",
         "agent_delegate",
-            "ask_user",
     }
     # Order is not contractual; assert membership instead.
     assert set(tool_ids) == expected_ids
+    assert "ask_user" not in tool_ids
 
 
 def test_resolve_tools():

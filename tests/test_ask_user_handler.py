@@ -4,7 +4,11 @@ from obsidian_ai_hub.hitl.dispatcher import HitlContext, HitlResult
 from obsidian_ai_hub.agents.ask_user_handler import handle_agent_ask_user, handle_coding_ask_user
 
 def test_handle_agent_ask_user_formatting(monkeypatch):
-    monkeypatch.setattr("obsidian_ai_hub.agents.store.update_run_hitl", lambda **kwargs: None)
+    updated = {}
+    def mock_update_run_hitl(**kwargs):
+        updated.update(kwargs)
+
+    monkeypatch.setattr("obsidian_ai_hub.agents.store.update_run_hitl", mock_update_run_hitl)
     cp = {
         "domain": "agent",
         "run_id": "arun_123",
@@ -23,16 +27,17 @@ def test_handle_agent_ask_user_formatting(monkeypatch):
     res = handle_agent_ask_user(ctx)
     assert isinstance(res, HitlResult)
     assert res.status == "completed"
+    assert updated == {"run_id": "arun_123", "status": "queued", "hitl_run_id": "hitl_123"}
     persisted = json.loads(res.checkpoint)
     assert persisted["answers"]["q1"] == {"selection": "opt1", "text": None}
     assert persisted["answers"]["q2"] == {"selection": "other", "text": "Custom details"}
 
 def test_handle_coding_ask_user_formatting(monkeypatch):
-    monkeypatch.setattr("obsidian_ai_hub.coding.store.update_run", lambda **kwargs: None)
-    monkeypatch.setattr(
-        "obsidian_ai_hub.agents.ask_user_handler._clear_coding_hitl_link",
-        lambda run_id: None,
-    )
+    updated = {}
+    def mock_update_run(**kwargs):
+        updated.update(kwargs)
+
+    monkeypatch.setattr("obsidian_ai_hub.coding.store.update_run", mock_update_run)
     cp = {
         "domain": "coding",
         "run_id": "crun_123",
@@ -50,5 +55,6 @@ def test_handle_coding_ask_user_formatting(monkeypatch):
     res = handle_coding_ask_user(ctx)
     assert isinstance(res, HitlResult)
     assert res.status == "completed"
+    assert updated == {"run_id": "crun_123", "status": "queued", "hitl_run_id": "hitl_456"}
     persisted = json.loads(res.checkpoint)
     assert persisted["answers"]["q1"] == {"selection": "opt2", "text": None}

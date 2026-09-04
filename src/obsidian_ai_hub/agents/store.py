@@ -225,7 +225,7 @@ AGENT_ALLOWED_TRANSITIONS: dict[str, frozenset[str]] = {
     ),
     "cancelling": frozenset({"cancelled", "failed", "interrupted", "succeeded"}),
     "waiting_user": frozenset(
-        {"running", "succeeded", "failed", "cancelled", "interrupted", "cancelling"}
+        {"running", "succeeded", "failed", "cancelled", "interrupted", "cancelling", "queued"}
     ),
 }
 

@@ -508,7 +508,8 @@ def cancel_run(
                     run_id, active_set_id, from_status="pending", to_status="cancelled", conn=conn
                 )
 
-            # Sync cancellation to associated Agent or Coding run
+            # Sync cancellation to associated Agent or Coding run.
+            # Keep hitl_run_id for audit/traceability of completed questions.
             raw_cp = run.get("checkpoint")
             if raw_cp:
                 try:
@@ -517,15 +518,14 @@ def cancel_run(
                     assoc_run_id = cp.get("run_id")
                     if domain == "agent" and assoc_run_id:
                         from obsidian_ai_hub.agents import store as agent_store
-                        agent_store.update_run_hitl(run_id=assoc_run_id, status="cancelled", hitl_run_id=None, conn=conn)
+                        agent_store.update_run_hitl(run_id=assoc_run_id, status="cancelled", hitl_run_id=run_id, conn=conn)
                     elif domain == "coding" and assoc_run_id:
                         # Same-connection atomic update (a separate store call would
                         # open its own connection and risk "database is locked").
-                        # update_run() ignores hitl_run_id=None, so clear it here.
                         try:
                             conn.execute(
-                                "UPDATE coding_runs SET status = ?, hitl_run_id = NULL WHERE run_id = ?",
-                                ("cancelled", assoc_run_id),
+                                "UPDATE coding_runs SET status = ?, hitl_run_id = ? WHERE run_id = ?",
+                                ("cancelled", run_id, assoc_run_id),
                             )
                         except sqlite3.OperationalError as col_exc:
                             if "no such column: hitl_run_id" not in str(col_exc):
