@@ -495,7 +495,7 @@ async def subscribe_agent_run_events(
                         idle_cycles = 0
                         yield heartbeat_sse()
                 try:
-                    await asyncio.wait_for(asyncio.sleep(0.5), timeout=0.5)
+                    await asyncio.sleep(0.5)
                 except asyncio.CancelledError:
                     break
         except asyncio.CancelledError:
