@@ -268,7 +268,7 @@ class CodingOrchestrator:
 
         try:
             iteration = 0
-            max_tool_iterations = 5
+            max_tool_iterations = 20
 
             while iteration < max_tool_iterations:
                 iteration += 1
