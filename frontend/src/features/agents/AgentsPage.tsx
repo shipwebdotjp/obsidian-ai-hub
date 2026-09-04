@@ -1240,6 +1240,19 @@ export default function AgentsPage() {
     }
   };
 
+  const handleSelectSession = (sessionId: string) => {
+    setSelectedSessionId(sessionId);
+    setLeftPaneOpen(false);
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.set("session_id", sessionId);
+        return next;
+      },
+      { replace: true },
+    );
+  };
+
   const handleSelectSearchResult = (result: AgentMessageSearchResult) => {
     const isCurrentSession =
       selectedSessionId === result.session_id && loadedSessionId === result.session_id;
@@ -2027,7 +2040,14 @@ export default function AgentsPage() {
                   key={s.session_id}
                   data-testid="memory-row"
                   data-selected={selectedSessionId === s.session_id ? "true" : "false"}
-                  className={`group relative flex items-center justify-between rounded-lg px-3 py-2 text-xs transition ${
+                  onClick={(e) => {
+                    // 行内の操作メニューからのクリックでは選択処理を行わない。
+                    if ((e.target as HTMLElement).closest("[data-session-menu]")) {
+                      return;
+                    }
+                    handleSelectSession(s.session_id);
+                  }}
+                  className={`group relative flex items-center justify-between rounded-lg px-3 py-2 text-xs transition cursor-pointer ${
                     selectedSessionId === s.session_id
                       ? "bg-slate-200 border-l-4 border-slate-800 text-slate-900 font-medium"
                       : "text-slate-700 hover:bg-slate-100"
@@ -2035,19 +2055,12 @@ export default function AgentsPage() {
                 >
                   <button
                     type="button"
-                    onClick={() => {
-                      setSelectedSessionId(s.session_id);
-                      setLeftPaneOpen(false);
-                      setSearchParams(
-                        (prev) => {
-                          const next = new URLSearchParams(prev);
-                          next.set("session_id", s.session_id);
-                          return next;
-                        },
-                        { replace: true },
-                      );
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleSelectSession(s.session_id);
                     }}
-                    className="truncate text-left cursor-pointer flex-1 min-w-0 mr-1 flex items-center gap-1.5"
+                    aria-label={`会話「${s.title}」を開く`}
+                    className="truncate text-left cursor-pointer flex-1 min-w-0 mr-1 flex items-center gap-1.5 rounded focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-slate-500"
                   >
                     {s.pinned_at && (
                       <Pin className="h-3 w-3 shrink-0 fill-amber-400 text-amber-500" />

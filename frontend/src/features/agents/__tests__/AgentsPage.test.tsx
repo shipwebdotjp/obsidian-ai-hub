@@ -2046,6 +2046,67 @@ describe("AgentsPage", () => {
     expect(screen.queryByText("ピン留め会話の内容")).not.toBeInTheDocument();
   });
 
+  it("selects a session when clicking anywhere on the row including padding", async () => {
+    const user = userEvent.setup();
+    const secondSession = { ...sampleSession, session_id: "asess_789", title: "別の会話" };
+    mockListSessions.mockResolvedValue({ sessions: [sampleSession, secondSession] });
+    mockGetSessionDetail.mockImplementation(async (sessionId: string) => ({
+      session: sessionId === secondSession.session_id ? secondSession : sampleSession,
+      agent: sampleAgent,
+      messages: [
+        {
+          message_id: `msg_${sessionId}`,
+          session_id: sessionId,
+          sequence: 1,
+          role: "user",
+          content: sessionId === secondSession.session_id ? "Bの本文" : "Aの本文",
+          created_at: "2026-08-20T00:00:00Z",
+        },
+      ],
+      runs: [],
+    }));
+
+    render(
+      <MemoryRouter>
+        <AgentsPage />
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByText("Aの本文")).toBeInTheDocument();
+
+    const rows = screen.getAllByTestId("memory-row");
+    expect(rows).toHaveLength(2);
+    const secondRow = rows[1];
+    // 外枠は button の入れ子を避けるため div のままであること。
+    expect(secondRow.tagName).toBe("DIV");
+    expect(secondRow.querySelector(":scope button button")).toBeNull();
+    // タイトルボタンはキーボード操作のためフォーカス可能であること。
+    const titleButton = within(secondRow as HTMLElement).getByRole("button", {
+      name: "会話「別の会話」を開く",
+    });
+    expect(titleButton).toBeInTheDocument();
+
+    // 余白を含む行全体のクリックで選択・遷移すること。
+    fireEvent.click(secondRow);
+
+    await waitFor(() => {
+      expect(screen.getByText("Bの本文")).toBeInTheDocument();
+    });
+    expect(secondRow.getAttribute("data-selected")).toBe("true");
+    expect(rows[0].getAttribute("data-selected")).toBe("false");
+
+    // 行内の操作メニューボタンのクリックでは選択が切り替わらないこと。
+    const firstRowMenuButton = within(rows[0] as HTMLElement).getByRole("button", {
+      name: "操作メニュー",
+    });
+    await user.click(firstRowMenuButton);
+    await waitFor(() => {
+      expect(screen.getByText("Bの本文")).toBeInTheDocument();
+    });
+    expect(rows[0].getAttribute("data-selected")).toBe("false");
+    expect(secondRow.getAttribute("data-selected")).toBe("true");
+  });
+
   it("shows pinned state on the pin button when agent is pinned", async () => {
     const pinnedAgent = { ...sampleAgent, pinned_at: "2026-08-25T00:00:00Z" };
     mockListAgents.mockResolvedValue({ agents: [pinnedAgent] });
