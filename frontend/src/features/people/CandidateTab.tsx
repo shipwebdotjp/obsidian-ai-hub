@@ -1,6 +1,7 @@
 import React from "react";
 import { Person } from "../../api/types";
 import { PersonCandidate, PersonCandidateDetail, PeopleError } from "./types";
+import PersonCombobox from "./PersonCombobox";
 
 interface CandidateTabProps {
   candidates: PersonCandidate[];
@@ -161,21 +162,13 @@ export default function CandidateTab({
               )}
 
               <div className="flex flex-col gap-2 sm:flex-row">
-                <select
+                <PersonCombobox
+                  people={people}
                   value={targetPersonId}
-                  onChange={(e) => onChangeTargetPersonId(e.target.value)}
-                  aria-label="一括解決先の人物"
+                  onChange={onChangeTargetPersonId}
                   disabled={selectedCandidate.assigned_summaries_count > 0}
-                  className="w-full rounded border border-slate-300 bg-white px-2.5 py-1.5 text-xs focus:border-slate-900 focus:outline-none disabled:bg-slate-100 disabled:text-slate-400 sm:flex-1"
-                >
-                  <option value="">-- 解決先の人物を選択してください --</option>
-                  {people
-                    .map((p) => (
-                      <option key={p.person_id} value={p.person_id}>
-                        {p.display_name} {p.vault_id ? `(${p.vault_id})` : "(未連携)"}
-                      </option>
-                    ))}
-                </select>
+                  ariaLabel="一括解決先の人物"
+                />
                 <button
                   onClick={onResolveCandidate}
                   disabled={loading || !targetPersonId || selectedCandidate.assigned_summaries_count > 0}

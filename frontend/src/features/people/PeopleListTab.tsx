@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useMemo, useState } from "react";
 import { Person, PersonAlias } from "../../api/types";
 import { PersonDetail, PeopleError } from "./types";
 
@@ -45,6 +45,22 @@ export default function PeopleListTab({
   onTriggerMergePreview,
   onTriggerAliasDelete,
 }: PeopleListTabProps) {
+  const [nameQuery, setNameQuery] = useState("");
+
+  const filteredPeople = useMemo(() => {
+    const query = nameQuery.trim().toLowerCase();
+    if (query.length === 0) return people;
+    // 検索対象: 主たる名前（表示名・正規化名）＋別名（表示名・正規化名）。
+    // vault_id は検索対象外。
+    return people.filter((person) =>
+      [
+        person.display_name,
+        person.normalized_name,
+        ...(person.aliases ?? []).flatMap((alias) => [alias.display_name, alias.normalized_name]),
+      ].some((text) => text.toLowerCase().includes(query)),
+    );
+  }, [people, nameQuery]);
+
   return (
     <>
       <div
@@ -53,11 +69,21 @@ export default function PeopleListTab({
         } lg:flex`}
       >
         <h2 className="mb-3 text-sm font-semibold">登録人物一覧</h2>
+        <input
+          type="search"
+          value={nameQuery}
+          onChange={(e) => setNameQuery(e.target.value)}
+          aria-label="人物名で検索"
+          placeholder="名前で検索"
+          className="mb-3 w-full rounded border border-slate-300 px-2.5 py-1.5 text-xs focus:border-slate-900 focus:outline-none"
+        />
         {people.length === 0 ? (
           <p className="text-xs text-slate-400">現在、登録されている人物はいません。</p>
+        ) : filteredPeople.length === 0 ? (
+          <p className="text-xs text-slate-400">検索条件に一致する人物はいません。</p>
         ) : (
           <div className="space-y-2">
-            {people.map((p) => {
+            {filteredPeople.map((p) => {
               const isSelected = selectedPerson?.person_id === p.person_id;
               return (
                 <button
