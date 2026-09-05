@@ -694,4 +694,168 @@ describe("HitlPage", () => {
       expect(mockFormatDateTime).not.toHaveBeenCalledWith(expect.stringMatching(/^2026-08-22/));
     });
   });
+
+  describe("in_conversation_question (ASK) handling", () => {
+    it("displays 'ASK' badge instead of 'in_conversation_question' in both list and detail header", async () => {
+      mockListHitlRuns.mockResolvedValue({
+        items: [
+          {
+            run_id: "hrun-ask-1",
+            handler: "agents.ask_user",
+            status: "completed",
+            created_at: "2026-09-05T10:00:00Z",
+            title: "会話内要件確認",
+            display_title: "会話内要件確認",
+            display_type: "in_conversation_question",
+          },
+        ],
+        total: 1,
+      } as any);
+      mockGetHitlRun.mockResolvedValue({
+        run_id: "hrun-ask-1",
+        handler: "agents.ask_user",
+        status: "completed",
+        title: "会話内要件確認",
+        display_title: "会話内要件確認",
+        display_type: "in_conversation_question",
+        questions: [
+          {
+            question_id: "q-1",
+            question_key: "target",
+            display_text: "対象範囲を選択してください",
+            choices: [{ value: "backend", label: "バックエンド" }],
+            answer: { value: "backend" },
+            status: "answered",
+          },
+        ],
+      } as any);
+
+      renderPage(["/hitl?run_id=hrun-ask-1"]);
+
+      await waitFor(() => {
+        expect(screen.getAllByText("会話内要件確認").length).toBeGreaterThanOrEqual(1);
+      });
+
+      // Both list badge and detail badge should show "ASK"
+      const askBadges = screen.getAllByText("ASK");
+      expect(askBadges.length).toBeGreaterThanOrEqual(2);
+      expect(screen.queryByText("in_conversation_question")).not.toBeInTheDocument();
+    });
+
+    it("renders answered in-conversation question as read-only card and omits empty question form", async () => {
+      mockListHitlRuns.mockResolvedValue({ items: [], total: 0 } as any);
+      mockGetHitlRun.mockResolvedValue({
+        run_id: "hrun-ask-completed",
+        handler: "agents.ask_user",
+        status: "completed",
+        title: "要件ヒアリング",
+        display_title: "要件ヒアリング",
+        display_type: "in_conversation_question",
+        questions: [
+          {
+            question_id: "q-1",
+            question_key: "scope",
+            display_text: "対象範囲を選択してください",
+            choices: [
+              { value: "backend", label: "バックエンド" },
+              { value: "other", label: "その他（自由入力）" },
+            ],
+            answer: { value: "other", comment: "クラウドインフラを含む" },
+            status: "answered",
+          },
+        ],
+      } as any);
+
+      renderPage(["/hitl?run_id=hrun-ask-completed"]);
+
+      await waitFor(() => {
+        expect(screen.getByTestId("answered-in-conversation-card")).toBeInTheDocument();
+      });
+
+      expect(screen.getByText("✅ 回答済み要件確認")).toBeInTheDocument();
+      expect(screen.getByText("対象範囲を選択してください")).toBeInTheDocument();
+      expect(screen.getByText("その他（自由入力）")).toBeInTheDocument();
+      expect(screen.getByText("クラウドインフラを含む")).toBeInTheDocument();
+
+      // Ensure no unanswered form (WaitingRunQuestionCard) is rendered
+      expect(screen.queryByText("回答を送信")).not.toBeInTheDocument();
+      expect(screen.queryByText("要件確認・選択のお願い")).not.toBeInTheDocument();
+    });
+
+    it("renders answered history for ready_to_resume, failed, and cancelled runs", async () => {
+      for (const st of ["ready_to_resume", "failed", "cancelled"]) {
+        mockGetHitlRun.mockResolvedValue({
+          run_id: `hrun-ask-${st}`,
+          handler: "agents.ask_user",
+          status: st,
+          title: "テスト",
+          display_title: "テスト",
+          display_type: "in_conversation_question",
+          questions: [
+            {
+              question_id: "q-1",
+              question_key: "target",
+              display_text: "テスト質問",
+              choices: [{ value: "v1", label: "ラベル1" }],
+              answer: { value: "v1" },
+              status: "answered",
+            },
+          ],
+        } as any);
+
+        const { unmount } = renderPage([`/hitl?run_id=hrun-ask-${st}`]);
+
+        await waitFor(() => {
+          expect(screen.getByTestId("answered-in-conversation-card")).toBeInTheDocument();
+        });
+        expect(screen.getByText("ラベル1")).toBeInTheDocument();
+
+        unmount();
+      }
+    });
+
+    it("renders answered history first and pending form below when questions are mixed", async () => {
+      mockGetHitlRun.mockResolvedValue({
+        run_id: "hrun-ask-mixed",
+        handler: "agents.ask_user",
+        status: "pending_user",
+        title: "複数質問",
+        display_title: "複数質問",
+        display_type: "in_conversation_question",
+        questions: [
+          {
+            question_id: "q-1",
+            question_key: "q1",
+            display_text: "質問1（完了）",
+            choices: [{ value: "opt1", label: "選択肢1" }],
+            answer: { value: "opt1" },
+            status: "answered",
+          },
+          {
+            question_id: "q-2",
+            question_key: "q2",
+            display_text: "質問2（未回答）",
+            choices: [{ value: "optA", label: "選択肢A" }],
+            status: "pending",
+          },
+        ],
+      } as any);
+
+      renderPage(["/hitl?run_id=hrun-ask-mixed"]);
+
+      await waitFor(() => {
+        expect(screen.getByTestId("answered-in-conversation-card")).toBeInTheDocument();
+      });
+
+      // Answered card content
+      expect(screen.getByText("質問1（完了）")).toBeInTheDocument();
+      expect(screen.getByText("選択肢1")).toBeInTheDocument();
+
+      // Pending question form content
+      expect(screen.getByText(/要件確認・選択のお願い/)).toBeInTheDocument();
+      expect(screen.getByText("質問2（未回答）")).toBeInTheDocument();
+      expect(screen.getByText("選択肢A")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "回答を送信" })).toBeInTheDocument();
+    });
+  });
 });
