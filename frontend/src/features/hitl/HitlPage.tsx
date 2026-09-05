@@ -90,6 +90,12 @@ function asReminderContext(context: unknown): ReminderContext | null {
   return null;
 }
 
+function displayTypeLabel(dt: string | null | undefined): string {
+  if (!dt) return "";
+  if (dt === "in_conversation_question") return "ASK";
+  return dt;
+}
+
 function getFormattedObserved(observedAt: string | undefined): string {
   if (!observedAt) return "";
   const cleanYmd = observedAt.substring(0, 10);
@@ -435,7 +441,7 @@ export default function HitlPage() {
                   <div className="flex items-center gap-1.5 truncate mr-2">
                     {r.display_type && (
                       <span className="rounded bg-indigo-50 text-indigo-700 border border-indigo-100 px-1.5 py-0.5 text-[10px] font-medium shrink-0">
-                        {r.display_type}
+                        {displayTypeLabel(r.display_type)}
                       </span>
                     )}
                     <span className="text-xs font-semibold text-slate-800 truncate" title={r.display_title || r.title || "確認待ちタスク"}>
@@ -499,7 +505,7 @@ export default function HitlPage() {
                 <div className="flex items-center gap-2 flex-wrap">
                   {selectedRun.display_type && (
                     <span className="rounded bg-indigo-50 text-indigo-700 border border-indigo-100 px-2 py-0.5 text-[10px] font-bold">
-                      {selectedRun.display_type}
+                      {displayTypeLabel(selectedRun.display_type)}
                     </span>
                   )}
                   <h2 className="text-lg font-semibold text-slate-800">{selectedRun.display_title || selectedRun.title || "確認待ちタスク"}</h2>
@@ -550,35 +556,96 @@ export default function HitlPage() {
             )}
 
             {/* Dedicated Question Card rendering for in-conversation questions */}
-            {selectedRun.display_type === "in_conversation_question" && (
-              <div className="mt-6">
-                <WaitingRunQuestionCard
-                  key={selectedRun.run_id}
-                  hitlRunId={selectedRun.run_id}
-                  questions={toQuestionItems(selectedRun.questions)}
-                  disabled={!["pending_user", "ready_to_resume"].includes(selectedRun.status)}
-                  onSubmit={async (answers) => {
-                    try {
-                      await Promise.all(
-                        Object.entries(answers).map(([qKey, ans]) =>
-                          submitHitlAnswer(selectedRun.run_id, qKey, ans.value, ans.comment)
-                        )
-                      );
-                      await loadDetail(selectedRun.run_id, true);
-                      await reloadRuns();
-                    } catch (e) {
-                      setDetailError(e instanceof Error ? e.message : "回答の送信に失敗しました");
-                      throw e;
-                    }
-                  }}
-                  onCancel={async () => {
-                    await cancelHitlRun(selectedRun.run_id);
-                    await loadDetail(selectedRun.run_id);
-                    await reloadRuns();
-                  }}
-                />
-              </div>
-            )}
+            {selectedRun.display_type === "in_conversation_question" && (() => {
+              const answeredQuestions = selectedRun.questions.filter((q) => q.status === "answered");
+              const pendingQuestions = selectedRun.questions.filter((q) => !q.status || q.status === "pending");
+
+              return (
+                <div className="mt-6 space-y-4">
+                  {answeredQuestions.length > 0 && (
+                    <div
+                      data-testid="answered-in-conversation-card"
+                      className="my-3 p-4 border border-emerald-300 bg-emerald-50/50 rounded shadow-sm"
+                    >
+                      <div className="flex items-center justify-between mb-3 border-b border-emerald-200 pb-2">
+                        <span className="font-semibold text-emerald-900 text-sm flex items-center gap-2">
+                          <span>✅ 回答済み要件確認</span>
+                        </span>
+                        <span className="text-xs text-emerald-700 font-mono">ID: {selectedRun.run_id}</span>
+                      </div>
+
+                      <div className="space-y-3">
+                        {answeredQuestions.map((q, idx) => {
+                          const label = getAnswerLabel(q);
+                          const comment = getAnswerComment(q);
+                          const qText = q.display_text || q.prompt || q.title || q.question_key;
+                          let val: any = q.answer;
+                          if (q.answer && typeof q.answer === "object" && "value" in q.answer) {
+                            val = q.answer.value;
+                          }
+
+                          return (
+                            <div key={q.question_id || q.question_key} className="bg-white p-3 rounded border border-emerald-200">
+                              <p className="text-sm font-medium text-slate-800 mb-1.5">
+                                {answeredQuestions.length > 1 ? `${idx + 1}. ` : ''}{qText}
+                              </p>
+                              <div className="text-sm text-slate-700 flex items-start gap-1.5 pl-1">
+                                <span className="font-semibold text-emerald-700 shrink-0">選択:</span>
+                                <span className="font-medium text-slate-900">{label}</span>
+                              </div>
+                              {val === "other" && comment && (
+                                <div className="mt-2 pl-3 border-l-2 border-emerald-400 bg-emerald-50/30 py-1 pr-2 rounded-r">
+                                  <p className="text-xs text-emerald-800 font-semibold mb-0.5">自由入力本文:</p>
+                                  <p className="text-sm text-slate-800 whitespace-pre-wrap">{comment}</p>
+                                </div>
+                              )}
+                              {val !== "other" && comment && (
+                                <div className="mt-2 pl-3 border-l-2 border-emerald-400 bg-emerald-50/30 py-1 pr-2 rounded-r">
+                                  <p className="text-xs text-emerald-800 font-semibold mb-0.5">コメント:</p>
+                                  <p className="text-sm text-slate-800 whitespace-pre-wrap">{comment}</p>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {pendingQuestions.length > 0 && (
+                    <WaitingRunQuestionCard
+                      key={selectedRun.run_id}
+                      hitlRunId={selectedRun.run_id}
+                      questions={toQuestionItems(pendingQuestions)}
+                      disabled={!["pending_user", "ready_to_resume"].includes(selectedRun.status)}
+                      onSubmit={async (answers) => {
+                        const entries = Object.entries(answers);
+                        const results = await Promise.allSettled(
+                          entries.map(([qKey, ans]) =>
+                            submitHitlAnswer(selectedRun.run_id, qKey, ans.value, ans.comment)
+                          )
+                        );
+                        await loadDetail(selectedRun.run_id, true);
+                        await reloadRuns();
+
+                        const rejections = results.filter((r): r is PromiseRejectedResult => r.status === "rejected");
+                        if (rejections.length > 0) {
+                          const firstErr = rejections[0].reason;
+                          const msg = firstErr instanceof Error ? firstErr.message : "一部の回答の送信に失敗しました";
+                          setDetailError(msg);
+                          throw new Error(msg);
+                        }
+                      }}
+                      onCancel={async () => {
+                        await cancelHitlRun(selectedRun.run_id);
+                        await loadDetail(selectedRun.run_id);
+                        await reloadRuns();
+                      }}
+                    />
+                  )}
+                </div>
+              );
+            })()}
 
             {/* Standard Question Set List */}
             {selectedRun.display_type !== "in_conversation_question" && (
