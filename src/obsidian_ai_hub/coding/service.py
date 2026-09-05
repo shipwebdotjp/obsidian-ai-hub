@@ -184,6 +184,8 @@ async def run_coding_turn_stream(
                     hitl_run_id=run.get("hitl_run_id"),
                     selected_skill_name=selected_skill_name,
                     frozen_skill_index=frozen_skill_index,
+                    session_id=session_id,
+                    current_run_id=run_id,
                 ):
                     if cancel_event.is_set():
                         store.mark_running_tool_calls_interrupted_for_run(run_id, error="User cancelled execution")

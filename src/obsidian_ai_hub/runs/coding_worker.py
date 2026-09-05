@@ -225,6 +225,8 @@ async def execute_coding_run(run_id: str) -> None:
                     hitl_run_id=run.get("hitl_run_id"),
                     selected_skill_name=selected_skill_name,
                     frozen_skill_index=frozen_skill_index,
+                    session_id=session_id,
+                    current_run_id=run_id,
                 ):
                     if _is_cancelling() or cancel_event.is_set():
                         try:
