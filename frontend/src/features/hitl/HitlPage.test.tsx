@@ -814,7 +814,7 @@ describe("HitlPage", () => {
       }
     });
 
-    it("renders answered history first and pending form below when questions are mixed", async () => {
+    it("renders answered history first and pending form below when questions are mixed, verifying DOM order", async () => {
       mockGetHitlRun.mockResolvedValue({
         run_id: "hrun-ask-mixed",
         handler: "agents.ask_user",
@@ -847,15 +847,107 @@ describe("HitlPage", () => {
         expect(screen.getByTestId("answered-in-conversation-card")).toBeInTheDocument();
       });
 
+      const answeredCard = screen.getByTestId("answered-in-conversation-card");
+      const pendingFormHeader = screen.getByText(/要件確認・選択のお願い/);
+
+      // Verify DOM order: answeredCard precedes pendingFormHeader
+      expect(
+        Boolean(answeredCard.compareDocumentPosition(pendingFormHeader) & Node.DOCUMENT_POSITION_FOLLOWING)
+      ).toBe(true);
+
       // Answered card content
       expect(screen.getByText("質問1（完了）")).toBeInTheDocument();
       expect(screen.getByText("選択肢1")).toBeInTheDocument();
 
       // Pending question form content
-      expect(screen.getByText(/要件確認・選択のお願い/)).toBeInTheDocument();
       expect(screen.getByText("質問2（未回答）")).toBeInTheDocument();
       expect(screen.getByText("選択肢A")).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "回答を送信" })).toBeInTheDocument();
+    });
+
+    it("treats questions with unset status as pending alongside explicitly marked 'pending'", async () => {
+      mockGetHitlRun.mockResolvedValue({
+        run_id: "hrun-ask-unset-status",
+        handler: "agents.ask_user",
+        status: "pending_user",
+        title: "ステータス未設定質問",
+        display_title: "ステータス未設定質問",
+        display_type: "in_conversation_question",
+        questions: [
+          {
+            question_id: "q-unset",
+            question_key: "q_unset",
+            display_text: "ステータス未設定の質問",
+            choices: [{ value: "val1", label: "選択肢1" }],
+            status: undefined, // unset status
+          },
+        ],
+      } as any);
+
+      renderPage(["/hitl?run_id=hrun-ask-unset-status"]);
+
+      await waitFor(() => {
+        expect(screen.getByText("ステータス未設定の質問")).toBeInTheDocument();
+      });
+      expect(screen.getByText(/要件確認・選択のお願い/)).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "回答を送信" })).toBeInTheDocument();
+    });
+
+    it("executes loadDetail and reloadRuns via Promise.allSettled even when partial submissions fail", async () => {
+      const multiDetail = {
+        run_id: "hrun-ask-multi-submit",
+        handler: "agents.ask_user",
+        status: "pending_user",
+        title: "複数一括回答",
+        display_title: "複数一括回答",
+        display_type: "in_conversation_question",
+        questions: [
+          {
+            question_id: "q-1",
+            question_key: "q1",
+            display_text: "質問1",
+            choices: [{ value: "a", label: "A" }],
+            status: "pending",
+          },
+          {
+            question_id: "q-2",
+            question_key: "q2",
+            display_text: "質問2",
+            choices: [{ value: "b", label: "B" }],
+            status: "pending",
+          },
+        ],
+      };
+      mockGetHitlRun.mockImplementation(async (id) => {
+        if (id === "hrun-ask-multi-submit") return multiDetail as any;
+        return sampleDetail1 as any;
+      });
+
+      // First submit succeeds, second fails
+      mockSubmitHitlAnswer
+        .mockResolvedValueOnce({ success: true } as any)
+        .mockRejectedValueOnce(new Error("q2 submit failed"));
+
+      renderPage(["/hitl?run_id=hrun-ask-multi-submit"]);
+
+      await waitFor(() => {
+        expect(screen.getByText(/質問1/)).toBeInTheDocument();
+      });
+
+      // Select both choices
+      fireEvent.click(screen.getByText("A"));
+      fireEvent.click(screen.getByText("B"));
+
+      // Click submit
+      fireEvent.click(screen.getByRole("button", { name: "回答を送信" }));
+
+      // Ensure loadDetail and reloadRuns were still executed despite partial failure
+      await waitFor(() => {
+        expect(mockGetHitlRun).toHaveBeenCalledTimes(2);
+      });
+      await waitFor(() => {
+        expect(screen.getAllByText("q2 submit failed").length).toBeGreaterThanOrEqual(1);
+      });
     });
   });
 });

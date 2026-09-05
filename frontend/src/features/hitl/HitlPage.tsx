@@ -558,14 +558,14 @@ export default function HitlPage() {
             {/* Dedicated Question Card rendering for in-conversation questions */}
             {selectedRun.display_type === "in_conversation_question" && (() => {
               const answeredQuestions = selectedRun.questions.filter((q) => q.status === "answered");
-              const pendingQuestions = selectedRun.questions.filter((q) => q.status === "pending");
+              const pendingQuestions = selectedRun.questions.filter((q) => !q.status || q.status === "pending");
 
               return (
                 <div className="mt-6 space-y-4">
                   {answeredQuestions.length > 0 && (
                     <div
                       data-testid="answered-in-conversation-card"
-                      className="my-3 p-4 border border-emerald-300 bg-emerald-50/50 rounded-lg shadow-sm"
+                      className="my-3 p-4 border border-emerald-300 bg-emerald-50/50 rounded shadow-sm"
                     >
                       <div className="flex items-center justify-between mb-3 border-b border-emerald-200 pb-2">
                         <span className="font-semibold text-emerald-900 text-sm flex items-center gap-2">
@@ -619,17 +619,21 @@ export default function HitlPage() {
                       questions={toQuestionItems(pendingQuestions)}
                       disabled={!["pending_user", "ready_to_resume"].includes(selectedRun.status)}
                       onSubmit={async (answers) => {
-                        try {
-                          await Promise.all(
-                            Object.entries(answers).map(([qKey, ans]) =>
-                              submitHitlAnswer(selectedRun.run_id, qKey, ans.value, ans.comment)
-                            )
-                          );
-                          await loadDetail(selectedRun.run_id, true);
-                          await reloadRuns();
-                        } catch (e) {
-                          setDetailError(e instanceof Error ? e.message : "回答の送信に失敗しました");
-                          throw e;
+                        const entries = Object.entries(answers);
+                        const results = await Promise.allSettled(
+                          entries.map(([qKey, ans]) =>
+                            submitHitlAnswer(selectedRun.run_id, qKey, ans.value, ans.comment)
+                          )
+                        );
+                        await loadDetail(selectedRun.run_id, true);
+                        await reloadRuns();
+
+                        const rejections = results.filter((r): r is PromiseRejectedResult => r.status === "rejected");
+                        if (rejections.length > 0) {
+                          const firstErr = rejections[0].reason;
+                          const msg = firstErr instanceof Error ? firstErr.message : "一部の回答の送信に失敗しました";
+                          setDetailError(msg);
+                          throw new Error(msg);
                         }
                       }}
                       onCancel={async () => {
