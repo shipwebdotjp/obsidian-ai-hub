@@ -4,9 +4,20 @@
 
 - Before work that relies on prior product or architecture decisions, read
   [ai_wiki/00-Index.md](ai_wiki/00-Index.md).
-- Record durable implementation decisions, including their context and
-  rationale, in the relevant decision record listed in
-  [ai_wiki/00-Index.md](ai_wiki/00-Index.md). Use
+- Create or update a decision record (ADR) only for decisions with a high
+  cost of revisiting them; importance alone is not a criterion. An ADR is a
+  candidate when it satisfies at least two of the following:
+  - **Difficulty of change:** changing it later would require data migration,
+    broad modifications, or materially affect users.
+  - **Cross-cutting impact:** it affects multiple modules, agents, or teams.
+  - **Alternatives:** realistic options were compared.
+  - **Need to re-explain:** code alone would not convey why the choice was
+    made.
+  - **External constraints:** security, personal data, cost, contracts, or
+    API constraints apply.
+  - **Likely recurring disagreement:** the same discussion is likely to recur.
+- For an ADR candidate, record the context and rationale in the relevant
+  decision record listed in [ai_wiki/00-Index.md](ai_wiki/00-Index.md). Use
   [ai_wiki/20-Worklog.md](ai_wiki/20-Worklog.md) only for temporary progress
   notes and handoffs.
 

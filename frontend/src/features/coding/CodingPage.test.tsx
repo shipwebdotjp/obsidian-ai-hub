@@ -26,6 +26,7 @@ vi.mock("../../api/coding", () => ({
   updateCodingDefaults: vi.fn(),
   updateCodingSessionTools: vi.fn(),
   updateCodingSessionTitle: vi.fn(),
+  getSlashCandidates: vi.fn(),
 }));
 
 const mockProjectItem: codingApi.CodingProjectItem = {
@@ -110,6 +111,10 @@ describe("CodingPage", () => {
       behind: 1,
       insertions: 15,
       deletions: 3,
+    });
+    vi.mocked(codingApi.getSlashCandidates).mockResolvedValue({
+      candidates: [{ kind: "skill", name: "pdftomd", description: "PDF to MD" }],
+      has_skills_tool: true,
     });
     vi.mocked(codingApi.getCodingConfig).mockResolvedValue({ default_backend: "opencode" });
     vi.mocked(codingApi.listCodingProjects).mockResolvedValue([mockProjectItem]);
@@ -587,12 +592,63 @@ describe("CodingPage", () => {
         "cses_111",
         "テスト実行してください",
         expect.any(String),
+        null,
       );
       expect(codingApi.subscribeCodingRunEvents).toHaveBeenCalledWith(
         "crun_999",
         expect.objectContaining({ lastEventId: 0 }),
       );
       expect(codingApi.getCodingSessionDetail).toHaveBeenCalledWith("cses_111");
+    });
+  });
+
+  it("triggers slash palette on typing / and sends selected skill with prompt text", async () => {
+    mockStartSubscribeSuccess([
+      { eventId: 1, data: { event: "done", run_id: "crun_slash", status: "completed" } },
+    ]);
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("Test App")).toBeInTheDocument();
+    });
+
+    const textarea = screen.getByPlaceholderText(
+      "指示・質問を入力…（Enterで送信 / Shift+Enterで改行）",
+    );
+
+    // Type / to show slash candidates
+    fireEvent.change(textarea, { target: { value: "/" } });
+
+    await waitFor(() => {
+      expect(screen.getByText("/pdftomd")).toBeInTheDocument();
+      expect(screen.getByText("PDF to MD")).toBeInTheDocument();
+    });
+
+    // Click candidate
+    fireEvent.click(screen.getByText("/pdftomd"));
+
+    // Chip appears and input is cleared
+    await waitFor(() => {
+      const chipText = screen.getByText("/pdftomd");
+      expect(chipText.parentElement).toHaveClass("text-blue-800");
+      expect(textarea).toHaveValue("");
+    });
+
+    // Enter prompt text
+    fireEvent.change(textarea, { target: { value: "PDFを変換してください" } });
+
+    // Send
+    const sendBtn = screen.getByRole("button", { name: "送信" });
+    fireEvent.click(sendBtn);
+
+    await waitFor(() => {
+      expect(codingApi.startCodingRun).toHaveBeenCalledWith(
+        "cses_111",
+        "PDFを変換してください",
+        expect.any(String),
+        { kind: "skill", name: "pdftomd" },
+      );
     });
   });
 

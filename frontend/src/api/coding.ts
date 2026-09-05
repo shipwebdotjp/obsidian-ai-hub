@@ -112,6 +112,22 @@ export type CodingRunStatus =
   | "cancelled"
   | "interrupted";
 
+export interface SlashInvocation {
+  kind: "skill";
+  name: string;
+}
+
+export interface SlashCandidate {
+  kind: "skill";
+  name: string;
+  description: string;
+}
+
+export interface SlashCandidatesResponse {
+  candidates: SlashCandidate[];
+  has_skills_tool: boolean;
+}
+
 export interface CodingRun {
   run_id: string;
   session_id: string;
@@ -126,6 +142,7 @@ export interface CodingRun {
   finished_at: string | null;
   diagnostics_json?: string | null;
   diagnostics?: CodingDiagnostics | null;
+  slash_invocation?: SlashInvocation | null;
 }
 
 export interface CodingSessionDetail {
@@ -137,6 +154,7 @@ export interface CodingSessionDetail {
   orchestrator_tool_calls?: CodingOrchestratorToolCall[];
   active_run: CodingRun | null;
   latest_run: CodingRun | null;
+  runs?: CodingRun[];
   ask_user_answer_history?: AskUserAnswerRound[];
 }
 
@@ -267,10 +285,17 @@ export function cancelCodingRun(runId: string): Promise<{ status: string; run_id
   );
 }
 
+export function getSlashCandidates(sessionId: string): Promise<SlashCandidatesResponse> {
+  return apiGet<SlashCandidatesResponse>(
+    `/api/v1/coding/sessions/${encodeURIComponent(sessionId)}/slash-candidates`,
+  );
+}
+
 export function startCodingRun(
   sessionId: string,
   content: string,
   idempotencyKey?: string,
+  slashInvocation?: SlashInvocation | null,
 ): Promise<{ run: CodingRun }> {
   const headers = new Headers();
   headers.set("Content-Type", "application/json");
@@ -280,7 +305,10 @@ export function startCodingRun(
   return fetch(`/api/v1/coding/sessions/${encodeURIComponent(sessionId)}/runs`, {
     method: "POST",
     headers,
-    body: JSON.stringify({ content }),
+    body: JSON.stringify({
+      content,
+      slash_invocation: slashInvocation ?? null,
+    }),
   }).then(async (res) => {
     if (res.status === 401) {
       clearToken();

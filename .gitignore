@@ -27,7 +27,7 @@ vite_output.log
 /daily/
 memory.sqlite3
 server_output.log
-
+e2e_server.log
 .env.test
 
 # E2E test artifacts

@@ -28,11 +28,31 @@ SCRIPT_TIMEOUT_SECONDS = 60
 class SkillInfo:
     """Metadata and file location of an indexed skill."""
 
-    def __init__(self, name: str, description: str, skill_dir: Path, skill_md_path: Path):
+    def __init__(
+        self,
+        name: str,
+        description: str,
+        skill_dir: Path,
+        skill_md_path: Path,
+        body: Optional[str] = None,
+    ):
         self.name = name
         self.description = description
         self.skill_dir = skill_dir
         self.skill_md_path = skill_md_path
+        # Body captured once at discovery to avoid re-parse TOCTOU between
+        # validation (get_skill) and injection (body access).
+        self._cached_body: Optional[str] = body
+
+    @property
+    def body(self) -> str:
+        """Return the body content of SKILL.md captured at discovery."""
+        if self._cached_body is not None:
+            return self._cached_body
+        parsed = _parse_skill_md(self.skill_md_path)
+        if not parsed:
+            return ""
+        return parsed[2]
 
 
 class SkillIndex:
@@ -41,11 +61,19 @@ class SkillIndex:
     def __init__(self, skills: Dict[str, SkillInfo]):
         self.skills: Dict[str, SkillInfo] = skills
 
+    def get_skill(self, name: str) -> Optional[SkillInfo]:
+        """Get skill info by name."""
+        return self.skills.get(name)
+
+    def list_skills(self) -> List[SkillInfo]:
+        """List all indexed skills sorted by name."""
+        return sorted(self.skills.values(), key=lambda s: s.name)
+
     def get_catalog_summary(self) -> List[Dict[str, str]]:
         """Return name and short description for prompt catalog."""
         return [
             {"name": info.name, "description": info.description}
-            for info in sorted(self.skills.values(), key=lambda s: s.name)
+            for info in self.list_skills()
         ]
 
 
@@ -154,7 +182,7 @@ def discover_skills(
             if parsed is None:
                 continue
 
-            name, description, _ = parsed
+            name, description, body = parsed
 
             if name in seen_names_in_root:
                 logger.warning("Duplicate skill name '%s' in same root %s; skipping entry %s", name, root, entry)
@@ -171,6 +199,7 @@ def discover_skills(
                 description=description,
                 skill_dir=entry,
                 skill_md_path=skill_md,
+                body=body,
             )
 
     # Scan primary first, then secondary (secondary overwrites primary if same name)

@@ -15,6 +15,9 @@ import {
   updateCodingDefaults,
   updateCodingSessionTools,
   updateCodingSessionTitle,
+  getSlashCandidates,
+  type SlashCandidate,
+  type SlashInvocation,
   type CodingProjectItem,
   type CodingSession,
   type CodingMessage,
@@ -125,6 +128,12 @@ export default function CodingPage() {
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const copyResetRef = useRef<number | null>(null);
 
+  // Slash invocation candidate state
+  const [slashInvocation, setSlashInvocation] = useState<SlashInvocation | null>(null);
+  const [slashCandidates, setSlashCandidates] = useState<SlashCandidate[]>([]);
+  const [hasSkillsTool, setHasSkillsTool] = useState(true);
+  const [slashPaletteIndex, setSlashPaletteIndex] = useState(0);
+
   const messageEndRef = useRef<HTMLDivElement>(null);
 
   const handleCopyMessage = async (content: string, messageId: string) => {
@@ -191,6 +200,14 @@ export default function CodingPage() {
     if (latestRun && latestRun.user_message_id === msg.message_id) return latestRun.run_id;
     return null;
   };
+
+  const runById = useMemo(() => {
+    const m = new Map<string, CodingRun>();
+    for (const r of sessionDetail?.runs ?? []) m.set(r.run_id, r);
+    if (activeRun) m.set(activeRun.run_id, activeRun);
+    if (latestRun) m.set(latestRun.run_id, latestRun);
+    return m;
+  }, [sessionDetail?.runs, activeRun, latestRun]);
 
   // Mobile drawer focus management & trap
   useEffect(() => {
@@ -362,13 +379,28 @@ export default function CodingPage() {
     setStreamingToolCalls([]);
     setWorkerState({ status: "idle" });
     setGitStatus(null);
+    setSlashInvocation(null);
     if (!selectedSessionId) {
       setMessages([]);
       setActiveRun(null);
       setLatestRun(null);
+      setSlashCandidates([]);
+      setHasSkillsTool(true);
       return;
     }
     loadSessionDetail(selectedSessionId);
+    const requestSessionId = selectedSessionId;
+    getSlashCandidates(requestSessionId)
+      .then((res) => {
+        if (selectedSessionIdRef.current !== requestSessionId) return;
+        setSlashCandidates(res.candidates);
+        setHasSkillsTool(res.has_skills_tool);
+      })
+      .catch(() => {
+        if (selectedSessionIdRef.current !== requestSessionId) return;
+        setSlashCandidates([]);
+        setHasSkillsTool(true);
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedSessionId]);
 
@@ -777,8 +809,23 @@ export default function CodingPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeRun, selectedSessionId]);
 
+  const refreshSlashCandidates = async (sessionId: string) => {
+    try {
+      const res = await getSlashCandidates(sessionId);
+      if (selectedSessionIdRef.current !== sessionId) return;
+      setSlashCandidates(res.candidates);
+      setHasSkillsTool(res.has_skills_tool);
+      if (!res.has_skills_tool) setSlashInvocation(null);
+    } catch {
+      if (selectedSessionIdRef.current !== sessionId) return;
+      setSlashCandidates([]);
+      setHasSkillsTool(true);
+    }
+  };
+
   const handleSaveSessionTools = async () => {
     if (!selectedSessionId) return;
+    const opSessionId = selectedSessionId;
     const trimmedTitle = sessionTitleDraft.trim();
     if (!trimmedTitle) {
       setError("セッションタイトルを入力してください");
@@ -789,25 +836,30 @@ export default function CodingPage() {
       const currentTitle = sessionDetail?.session.title ?? selectedSession?.title ?? "";
       if (trimmedTitle !== currentTitle) {
         try {
-          const titled = await updateCodingSessionTitle(selectedSessionId, trimmedTitle);
+          const titled = await updateCodingSessionTitle(opSessionId, trimmedTitle);
+          if (selectedSessionIdRef.current !== opSessionId) return;
           setSessionDetail(titled);
           setSessionSelectedTools(titled.effective_tool_ids);
           setSessions((prev) =>
-            prev.map((s) => (s.session_id === selectedSessionId ? { ...s, title: titled.session.title } : s)),
+            prev.map((s) => (s.session_id === opSessionId ? { ...s, title: titled.session.title } : s)),
           );
         } catch (e: any) {
+          if (selectedSessionIdRef.current !== opSessionId) return;
           setError(e.message || "セッションタイトルの保存に失敗しました");
           return;
         }
       }
-      const updated = await updateCodingSessionTools(selectedSessionId, sessionSelectedTools);
+      const updated = await updateCodingSessionTools(opSessionId, sessionSelectedTools);
+      if (selectedSessionIdRef.current !== opSessionId) return;
       setSessionDetail(updated);
       setSessionSelectedTools(updated.effective_tool_ids);
       setSessions((prev) =>
-        prev.map((s) => (s.session_id === selectedSessionId ? { ...s, title: updated.session.title } : s)),
+        prev.map((s) => (s.session_id === opSessionId ? { ...s, title: updated.session.title } : s)),
       );
       setIsSessionSettingsOpen(false);
+      await refreshSlashCandidates(opSessionId);
     } catch (e: any) {
+      if (selectedSessionIdRef.current !== opSessionId) return;
       setError(e.message || "会話ツールの保存に失敗しました");
     } finally {
       setSavingSessionTools(false);
@@ -816,15 +868,18 @@ export default function CodingPage() {
 
   const handleResetSessionTools = async () => {
     if (!selectedSessionId) return;
+    const opSessionId = selectedSessionId;
     setSavingSessionTools(true);
     try {
-      const updated = await updateCodingSessionTools(selectedSessionId, null);
+      const updated = await updateCodingSessionTools(opSessionId, null);
+      if (selectedSessionIdRef.current !== opSessionId) return;
       setSessionDetail(updated);
       setSessionSelectedTools(updated.effective_tool_ids);
       setSessions((prev) =>
-        prev.map((s) => (s.session_id === selectedSessionId ? { ...s, title: updated.session.title } : s)),
+        prev.map((s) => (s.session_id === opSessionId ? { ...s, title: updated.session.title } : s)),
       );
       setIsSessionSettingsOpen(false);
+      await refreshSlashCandidates(opSessionId);
     } catch (e: any) {
       setError(e.message || "会話ツールのリセットに失敗しました");
     } finally {
@@ -905,6 +960,7 @@ export default function CodingPage() {
     const sendSessionId = selectedSessionId;
     const sendText = inputContent;
     const promptText = inputContent.trim();
+    const currentSlashInv = slashInvocation;
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
@@ -957,10 +1013,16 @@ export default function CodingPage() {
         : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
     let runId: string;
     try {
-      const started = await startCodingRun(sendSessionId, promptText, idempotencyKey);
+      const started = await startCodingRun(
+        sendSessionId,
+        promptText,
+        idempotencyKey,
+        currentSlashInv,
+      );
       if (!isCurrent()) return;
       runId = started.run.run_id;
       setActiveRun(started.run);
+      setSlashInvocation(null);
     } catch (err: any) {
       if (!isCurrent()) return;
       setError(err.message || "メッセージの送信に失敗しました");
@@ -1028,7 +1090,57 @@ export default function CodingPage() {
     await executeSend();
   };
 
+  const slashQuery = useMemo(() => {
+    if (slashInvocation) return null;
+    return inputContent.startsWith("/") ? inputContent.slice(1) : null;
+  }, [inputContent, slashInvocation]);
+
+  const filteredCandidates = useMemo(() => {
+    if (slashQuery === null) return [];
+    const q = slashQuery.toLowerCase();
+    return slashCandidates.filter((c) => c.name.toLowerCase().includes(q));
+  }, [slashCandidates, slashQuery]);
+
+  const showSlashPalette = slashQuery !== null;
+
+  useEffect(() => {
+    setSlashPaletteIndex(0);
+  }, [slashQuery, slashCandidates]);
+
+  const handleSelectCandidate = (cand: SlashCandidate) => {
+    setSlashInvocation({ kind: "skill", name: cand.name });
+    setInputContent("");
+  };
+
   const handleInputKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (showSlashPalette) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setInputContent("");
+        return;
+      }
+      if (hasSkillsTool && filteredCandidates.length > 0) {
+        if (e.key === "ArrowDown") {
+          e.preventDefault();
+          setSlashPaletteIndex((prev) => (prev + 1) % filteredCandidates.length);
+          return;
+        }
+        if (e.key === "ArrowUp") {
+          e.preventDefault();
+          setSlashPaletteIndex((prev) => (prev - 1 + filteredCandidates.length) % filteredCandidates.length);
+          return;
+        }
+        if (e.key === "Enter") {
+          e.preventDefault();
+          const selected = filteredCandidates[slashPaletteIndex];
+          if (selected) {
+            handleSelectCandidate(selected);
+          }
+          return;
+        }
+      }
+    }
+
     if (shouldSendOnEnter(e, chatSendMode)) {
       e.preventDefault();
       void executeSend();
@@ -1474,7 +1586,19 @@ export default function CodingPage() {
                   <div key={msg.message_id} className="space-y-1 min-w-0">
                     {msg.role === "user" && (
                       <>
-                        <div className="flex min-w-0 justify-end">
+                        <div className="flex flex-col items-end min-w-0">
+                          {(() => {
+                            const uRunId = getRunIdForUserMessage(msg);
+                            const uRun = uRunId ? runById.get(uRunId) ?? null : null;
+                            if (uRun?.slash_invocation) {
+                              return (
+                                <div className="mb-1 inline-flex items-center gap-1 rounded bg-blue-100 px-2 py-0.5 text-[10px] font-semibold text-blue-800">
+                                  <span>/{uRun.slash_invocation.name}</span>
+                                </div>
+                              );
+                            }
+                            return null;
+                          })()}
                           <div className="max-w-2xl min-w-0 overflow-hidden rounded-2xl bg-slate-900 px-4 py-2.5 text-xs text-white [overflow-wrap:anywhere]">
                             <p className="whitespace-pre-wrap wrap-anywhere break-words [overflow-wrap:anywhere] [word-break:break-word]">
                               {msg.content}
@@ -2023,7 +2147,58 @@ export default function CodingPage() {
             </div>
 
             {/* Input Form */}
-            <div className="border-t border-slate-200 bg-white p-3">
+            <div className="border-t border-slate-200 bg-white p-3 relative">
+              {/* Candidate Palette Popover */}
+              {showSlashPalette && (
+                <div className="absolute bottom-full left-3 mb-1 z-20 w-80 max-h-60 overflow-y-auto rounded-lg border border-slate-200 bg-white p-1 shadow-lg text-xs">
+                  {!hasSkillsTool ? (
+                    <div className="p-2 text-slate-500 text-center">
+                      skills ツールが無効なためスキルコマンドは利用できません
+                    </div>
+                  ) : filteredCandidates.length === 0 ? (
+                    <div className="p-2 text-slate-500 text-center">
+                      一致するスキルが見つかりません
+                    </div>
+                  ) : (
+                    filteredCandidates.map((cand, idx) => {
+                      const isSelected = idx === slashPaletteIndex;
+                      return (
+                        <button
+                          key={cand.name}
+                          type="button"
+                          onClick={() => handleSelectCandidate(cand)}
+                          className={`w-full text-left px-2.5 py-1.5 rounded flex flex-col gap-0.5 cursor-pointer ${
+                            isSelected ? "bg-slate-100 text-slate-900 font-medium" : "text-slate-700 hover:bg-slate-50"
+                          }`}
+                        >
+                          <div className="font-semibold text-slate-800">/{cand.name}</div>
+                          {cand.description && (
+                            <div className="text-[10px] text-slate-500 truncate">{cand.description}</div>
+                          )}
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+              )}
+
+              {/* Selected Skill Chip */}
+              {slashInvocation && (
+                <div className="mb-2 flex items-center gap-1.5">
+                  <span className="inline-flex items-center gap-1 rounded bg-blue-100 px-2.5 py-1 text-xs font-semibold text-blue-800 border border-blue-200">
+                    <span>/{slashInvocation.name}</span>
+                    <button
+                      type="button"
+                      onClick={() => setSlashInvocation(null)}
+                      className="ml-1 rounded hover:bg-blue-200 p-0.5 text-blue-600 hover:text-blue-900 cursor-pointer"
+                      title="スキル選択を解除"
+                    >
+                      ✕
+                    </button>
+                  </span>
+                </div>
+              )}
+
               <form onSubmit={handleSendMessage} className="flex gap-2">
                 <textarea
                   rows={2}

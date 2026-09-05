@@ -148,6 +148,24 @@ async def execute_coding_run(run_id: str) -> None:
             return
 
         effective_tool_ids = store.get_effective_session_tool_ids(session_id)
+        slash_inv = run.get("slash_invocation")
+        selected_skill_name: Optional[str] = None
+        frozen_skill_index = None
+
+        if slash_inv and isinstance(slash_inv, dict) and slash_inv.get("kind") == "skill":
+            if "skills" not in effective_tool_ids:
+                _fail("skills ツールが無効なセッションではスキルを呼び出せません")
+                return
+
+            from obsidian_ai_hub.agents.skills import discover_skills
+
+            frozen_skill_index = await asyncio.to_thread(discover_skills)
+            s_name = slash_inv.get("name")
+            if not frozen_skill_index.get_skill(s_name):
+                _fail(f"指定されたスキル '{s_name}' は存在しません")
+                return
+            selected_skill_name = s_name
+
         orchestrator = CodingOrchestrator(tool_ids=effective_tool_ids)
         # Resume progress (cli_count/phase_turn) from prior HITL checkpoint when present.
         # A corrupt prior fails the run instead of silently dropping answers.
@@ -205,6 +223,8 @@ async def execute_coding_run(run_id: str) -> None:
                     phase=phase,
                     phase_turn=phase_turn,
                     hitl_run_id=run.get("hitl_run_id"),
+                    selected_skill_name=selected_skill_name,
+                    frozen_skill_index=frozen_skill_index,
                 ):
                     if _is_cancelling() or cancel_event.is_set():
                         try:

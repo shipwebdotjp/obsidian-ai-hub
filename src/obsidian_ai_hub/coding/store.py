@@ -117,10 +117,18 @@ def _validate_coding_transition(from_status: str, to_status: str) -> None:
         )
 
 
-def compute_idempotency_hash(content: str) -> str:
+def compute_idempotency_hash(content: str, slash_invocation: Optional[Dict[str, Any]] = None) -> str:
     import hashlib
 
-    return hashlib.sha256((content or "").encode("utf-8")).hexdigest()
+    if slash_invocation is None:
+        # Legacy compat: runs queued before slash support hashed raw content.
+        return hashlib.sha256((content or "").encode("utf-8")).hexdigest()
+    payload = {
+        "content": (content or "").strip(),
+        "slash_invocation": slash_invocation,
+    }
+    dumped = json.dumps(payload, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(dumped.encode("utf-8")).hexdigest()
 
 
 def mark_interrupted_runs_on_startup() -> int:
@@ -1048,6 +1056,15 @@ def _format_run(run_dict: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
             r["diagnostics"] = None
     else:
         r["diagnostics"] = None
+
+    slash_str = r.get("slash_invocation_json")
+    if slash_str:
+        try:
+            r["slash_invocation"] = json.loads(slash_str)
+        except (json.JSONDecodeError, TypeError):
+            r["slash_invocation"] = None
+    else:
+        r["slash_invocation"] = None
     return r
 
 
@@ -1118,6 +1135,7 @@ def start_queued_run(
     idempotency_key: Optional[str] = None,
     idempotency_hash: Optional[str] = None,
     created_instance_id: Optional[str] = None,
+    slash_invocation: Optional[Dict[str, Any]] = None,
 ) -> tuple[Dict[str, Any], Dict[str, Any]]:
     """Queue a coding run with idempotency and active-run guard."""
     clean_content = (content or "").strip()
@@ -1125,9 +1143,11 @@ def start_queued_run(
         raise ValueError("Message content must not be empty.")
     clean_key = (idempotency_key or "").strip() or None
     if clean_key is not None and idempotency_hash is None:
-        idempotency_hash = compute_idempotency_hash(clean_content)
+        idempotency_hash = compute_idempotency_hash(clean_content, slash_invocation)
     elif clean_key is None:
         idempotency_hash = None
+
+    slash_json = json.dumps(slash_invocation, ensure_ascii=False) if slash_invocation else None
 
     conn = get_db_connection()
     try:
@@ -1175,8 +1195,31 @@ def start_queued_run(
         user_msg_id = user_msg["message_id"]
         run_id = f"crun_{uuid.uuid4().hex[:12]}"
         now = _now_iso()
+        has_slash_col = _has_column(conn, "coding_runs", "slash_invocation_json")
         try:
-            if has_idem:
+            if has_idem and has_slash_col:
+                conn.execute(
+                    """
+                    INSERT INTO coding_runs (
+                        run_id, session_id, user_message_id, status, dirty_tree_at_start,
+                        started_at, idempotency_key, idempotency_hash,
+                        created_instance_id, worker_instance_id, slash_invocation_json
+                    ) VALUES (?, ?, ?, 'queued', NULL, ?, ?, ?, ?, NULL, ?)
+                    """,
+                    (
+                        run_id,
+                        session_id,
+                        user_msg_id,
+                        now,
+                        clean_key,
+                        idempotency_hash,
+                        created_instance_id,
+                        slash_json,
+                    ),
+                )
+            elif has_idem:
+                if slash_invocation is not None:
+                    raise ValueError("slash_invocation requires slash_invocation_json column (run migration v36).")
                 conn.execute(
                     """
                     INSERT INTO coding_runs (
@@ -1196,6 +1239,8 @@ def start_queued_run(
                     ),
                 )
             else:
+                if slash_invocation is not None:
+                    raise ValueError("slash_invocation requires slash_invocation_json column (run migration v36).")
                 conn.execute(
                     """
                     INSERT INTO coding_runs (

@@ -134,6 +134,12 @@ async def run_coding_turn_stream(
         yield f"data: {json.dumps({'event': 'start', 'run_id': run_id, 'is_dirty': is_dirty, 'dirty_summary': dirty_summary}, ensure_ascii=False)}\n\n"
 
         effective_tool_ids = store.get_effective_session_tool_ids(session_id)
+        # Single-shot CLI path owns no slash invocation: store.create_run()
+        # never persists slash_invocation_json. Slash skills are handled by
+        # the queued path (start_queued_run + coding_worker).
+        selected_skill_name: Optional[str] = None
+        frozen_skill_index = None
+
         orchestrator = CodingOrchestrator(tool_ids=effective_tool_ids)
         # Resume progress (cli_count/phase_turn) from prior HITL checkpoint when present.
         from obsidian_ai_hub.coding.ask_user_flow import restore_coding_progress
@@ -176,6 +182,8 @@ async def run_coding_turn_stream(
                     phase=phase,
                     phase_turn=phase_turn,
                     hitl_run_id=run.get("hitl_run_id"),
+                    selected_skill_name=selected_skill_name,
+                    frozen_skill_index=frozen_skill_index,
                 ):
                     if cancel_event.is_set():
                         store.mark_running_tool_calls_interrupted_for_run(run_id, error="User cancelled execution")

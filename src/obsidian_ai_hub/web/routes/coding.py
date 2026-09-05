@@ -5,6 +5,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
+from typing import Literal
 from pydantic import BaseModel, Field
 
 from obsidian_ai_hub.agents import registry
@@ -42,8 +43,14 @@ class UpdateSessionTitleRequest(BaseModel):
     title: str = Field(description="New session title")
 
 
+class SlashInvocationModel(BaseModel):
+    kind: Literal["skill"]
+    name: str
+
+
 class StartCodingRunRequest(BaseModel):
     content: str
+    slash_invocation: Optional[SlashInvocationModel] = None
 
 
 @router.get("/defaults")
@@ -271,6 +278,40 @@ def delete_session(session_id: str, _=Depends(require_bearer_token)):
     return {"status": "deleted", "session_id": session_id}
 
 
+@router.get("/sessions/{session_id}/slash-candidates")
+def get_slash_candidates(session_id: str, _=Depends(require_bearer_token)):
+    """Get slash invocation candidates for a coding session."""
+    session = coding_store.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="セッションが見つかりません")
+
+    effective_tools = coding_store.get_effective_session_tool_ids(session_id)
+    has_skills = "skills" in effective_tools
+
+    candidates: list[dict[str, Any]] = []
+    if has_skills:
+        try:
+            from obsidian_ai_hub.agents.skills import discover_skills
+
+            index = discover_skills()
+            for skill in index.list_skills():
+                candidates.append(
+                    {
+                        "kind": "skill",
+                        "name": skill.name,
+                        "description": skill.description,
+                    }
+                )
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning("Failed to discover skills for slash candidates: %s", exc)
+
+    return {
+        "candidates": candidates,
+        "has_skills_tool": has_skills,
+    }
+
+
 @router.post("/sessions/{session_id}/runs", status_code=202)
 def start_coding_run(
     session_id: str,
@@ -286,12 +327,32 @@ def start_coding_run(
         raise HTTPException(status_code=404, detail="セッションが見つかりません")
     if not (body.content or "").strip():
         raise HTTPException(status_code=400, detail="メッセージ本文が空です")
+
+    slash_dict = body.slash_invocation.model_dump() if body.slash_invocation else None
+    if slash_dict and slash_dict.get("kind") == "skill":
+        effective_tools = coding_store.get_effective_session_tool_ids(session_id)
+        if "skills" not in effective_tools:
+            raise HTTPException(
+                status_code=400,
+                detail="skills ツールが無効なセッションではスキルを呼び出せません",
+            )
+        from obsidian_ai_hub.agents.skills import discover_skills
+
+        index = discover_skills()
+        skill_name = slash_dict["name"]
+        if not index.get_skill(skill_name):
+            raise HTTPException(
+                status_code=400,
+                detail=f"指定されたスキル '{skill_name}' は存在しません",
+            )
+
     try:
         _, run = coding_store.start_queued_run(
             session_id=session_id,
             content=body.content,
             idempotency_key=idempotency_key,
             created_instance_id=get_instance_id(),
+            slash_invocation=slash_dict,
         )
         return {"run": run}
     except FileNotFoundError as exc:
