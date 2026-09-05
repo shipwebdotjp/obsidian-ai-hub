@@ -294,3 +294,129 @@ def test_start_run_rejects_fully_empty_payload(client, auth_headers):
     )
     assert res.status_code == 400
     assert "empty" in res.json()["detail"].lower()
+
+
+def test_get_slash_candidates_endpoint(client, auth_headers, tmp_path, monkeypatch):
+    primary_root = tmp_path / "primary_skills"
+    primary_root.mkdir()
+    skill_dir = primary_root / "test_skill"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: test_skill\ndescription: Test Skill Desc\n---\nBody",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("obsidian_ai_hub.utils.config.AGENT_SKILLS_PRIMARY_ROOT", primary_root)
+    monkeypatch.setattr("obsidian_ai_hub.utils.config.AGENT_SKILLS_ROOT", tmp_path / "sec_empty")
+
+    # Agent without skills tool
+    agent_no_skills = client.post(
+        "/api/v1/agents",
+        json={"name": "No Skills Agent", "system_prompt": "Prompt"},
+        headers=auth_headers,
+    ).json()["agent"]
+    session_no_skills = client.post(
+        f"/api/v1/agents/{agent_no_skills['agent_id']}/sessions",
+        json={},
+        headers=auth_headers,
+    ).json()["session"]
+
+    res = client.get(
+        f"/api/v1/agent-sessions/{session_no_skills['session_id']}/slash-candidates",
+        headers=auth_headers,
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert data["has_skills_tool"] is False
+    assert data["candidates"] == []
+
+    # Agent with skills tool
+    agent_with_skills = client.post(
+        "/api/v1/agents",
+        json={"name": "With Skills Agent", "system_prompt": "Prompt", "tool_ids": ["skills"]},
+        headers=auth_headers,
+    ).json()["agent"]
+    session_with_skills = client.post(
+        f"/api/v1/agents/{agent_with_skills['agent_id']}/sessions",
+        json={},
+        headers=auth_headers,
+    ).json()["session"]
+
+    res = client.get(
+        f"/api/v1/agent-sessions/{session_with_skills['session_id']}/slash-candidates",
+        headers=auth_headers,
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert data["has_skills_tool"] is True
+    assert len(data["candidates"]) == 1
+    assert data["candidates"][0]["kind"] == "skill"
+    assert data["candidates"][0]["name"] == "test_skill"
+    assert data["candidates"][0]["description"] == "Test Skill Desc"
+
+
+def test_start_run_validation_for_slash_invocation(client, auth_headers, tmp_path, monkeypatch):
+    primary_root = tmp_path / "primary_skills"
+    primary_root.mkdir()
+    skill_dir = primary_root / "valid_skill"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: valid_skill\ndescription: Valid Skill\n---\nBody",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("obsidian_ai_hub.utils.config.AGENT_SKILLS_PRIMARY_ROOT", primary_root)
+    monkeypatch.setattr("obsidian_ai_hub.utils.config.AGENT_SKILLS_ROOT", tmp_path / "sec_empty")
+
+    agent_no_skills = client.post(
+        "/api/v1/agents",
+        json={"name": "No Skills Run Agent", "system_prompt": "Prompt"},
+        headers=auth_headers,
+    ).json()["agent"]
+    sess_no_skills = client.post(
+        f"/api/v1/agents/{agent_no_skills['agent_id']}/sessions", json={}, headers=auth_headers
+    ).json()["session"]["session_id"]
+
+    # 1. Reject when agent doesn't have skills tool enabled
+    res = client.post(
+        f"/api/v1/agent-sessions/{sess_no_skills}/runs",
+        json={
+            "content": "do this",
+            "slash_invocation": {"kind": "skill", "name": "valid_skill"},
+        },
+        headers=auth_headers,
+    )
+    assert res.status_code == 400
+    assert "skills" in res.json()["detail"].lower()
+
+    agent_skills = client.post(
+        "/api/v1/agents",
+        json={"name": "Skills Run Agent", "system_prompt": "Prompt", "tool_ids": ["skills"]},
+        headers=auth_headers,
+    ).json()["agent"]
+    sess_skills = client.post(
+        f"/api/v1/agents/{agent_skills['agent_id']}/sessions", json={}, headers=auth_headers
+    ).json()["session"]["session_id"]
+
+    # 2. Reject unknown skill
+    res = client.post(
+        f"/api/v1/agent-sessions/{sess_skills}/runs",
+        json={
+            "content": "do this",
+            "slash_invocation": {"kind": "skill", "name": "unknown_skill"},
+        },
+        headers=auth_headers,
+    )
+    assert res.status_code == 400
+    assert "unknown_skill" in res.json()["detail"]
+
+    # 3. Accept valid skill
+    res = client.post(
+        f"/api/v1/agent-sessions/{sess_skills}/runs",
+        json={
+            "content": "do this",
+            "slash_invocation": {"kind": "skill", "name": "valid_skill"},
+        },
+        headers=auth_headers,
+    )
+    assert res.status_code == 202
+    run = res.json()["run"]
+    assert run["slash_invocation"] == {"kind": "skill", "name": "valid_skill"}

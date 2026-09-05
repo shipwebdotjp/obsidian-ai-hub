@@ -926,6 +926,7 @@ _BUILTIN_TOOL_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "name": "Agent Skills",
         "description": "Agent Skills (SKILL.md / リソース参照 / スクリプト直接実行) を有効化します。",
         "get_tools": lambda: create_skill_tools(),
+        "get_tools_with_context": lambda ctx: create_skill_tools(ctx.get("skill_index") if isinstance(ctx, dict) else None),
     },
     "run_shell": {
         "tool_id": "run_shell",

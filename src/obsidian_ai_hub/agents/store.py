@@ -311,6 +311,14 @@ def _row_to_run(row: sqlite3.Row) -> dict[str, Any]:
     except (IndexError, KeyError, ValueError):
         hitl_run_id = None
 
+    slash_invocation = None
+    try:
+        raw_slash = row["slash_invocation_json"]  # type: ignore[index]
+        if raw_slash:
+            slash_invocation = json.loads(raw_slash)
+    except (IndexError, KeyError, ValueError, json.JSONDecodeError, TypeError):
+        slash_invocation = None
+
     return {
         "run_id": row["run_id"],
         "session_id": row["session_id"],
@@ -318,6 +326,7 @@ def _row_to_run(row: sqlite3.Row) -> dict[str, Any]:
         "assistant_message_id": row["assistant_message_id"],
         "status": row["status"],
         "hitl_run_id": hitl_run_id,
+        "slash_invocation": slash_invocation,
         "used_tools": used_tools,
         "created_hitl_run_ids": created_hitl_run_ids,
         "tool_calls": tool_calls,
@@ -1435,13 +1444,23 @@ def list_runs(session_id: str, conn: Optional[sqlite3.Connection] = None) -> lis
         return [_row_to_run(row) for row in cursor.fetchall()]
 
 
-def compute_idempotency_hash(content: str, attachments_json: str = "[]") -> str:
+def compute_idempotency_hash(
+    content: str,
+    attachments_json: str = "[]",
+    slash_invocation: Optional[dict[str, Any]] = None,
+) -> str:
     import hashlib
 
     h = hashlib.sha256()
     h.update((content or "").encode("utf-8"))
     h.update(b"\x00")
     h.update((attachments_json or "[]").encode("utf-8"))
+    if slash_invocation:
+        h.update(b"\x00")
+        canonical_slash = json.dumps(
+            slash_invocation, sort_keys=True, ensure_ascii=False
+        )
+        h.update(canonical_slash.encode("utf-8"))
     return h.hexdigest()
 
 
@@ -1452,6 +1471,7 @@ def start_queued_run(
     idempotency_key: Optional[str] = None,
     idempotency_hash: Optional[str] = None,
     created_instance_id: Optional[str] = None,
+    slash_invocation: Optional[dict[str, Any]] = None,
     conn: Optional[sqlite3.Connection] = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Queue a new agent run with idempotency and active-run guard.
@@ -1475,9 +1495,15 @@ def start_queued_run(
         raise ValueError("Message content must not be empty.")
     clean_key = (idempotency_key or "").strip() or None
     if clean_key is not None and idempotency_hash is None:
-        idempotency_hash = compute_idempotency_hash(clean_content, attachments_json)
+        idempotency_hash = compute_idempotency_hash(clean_content, attachments_json, slash_invocation)
     elif clean_key is None:
         idempotency_hash = None
+
+    slash_invocation_json = (
+        json.dumps(slash_invocation, ensure_ascii=False)
+        if slash_invocation
+        else None
+    )
 
     with auto_connection(conn) as (active_conn, is_generated):
         session = get_session(session_id, conn=active_conn)
@@ -1485,6 +1511,7 @@ def start_queued_run(
             raise FileNotFoundError(f"Session '{session_id}' not found.")
 
         has_idem_cols = _has_column(active_conn, "agent_runs", "idempotency_key")
+        has_slash_col = _has_column(active_conn, "agent_runs", "slash_invocation_json")
 
         def _execute() -> tuple[str, str]:
             # Idempotent replay first: same key returns first run.
@@ -1545,7 +1572,29 @@ def start_queued_run(
                 else:
                     raise
             run_id = f"arun_{uuid.uuid4().hex[:12]}"
-            if has_idem_cols:
+            if has_idem_cols and has_slash_col:
+                active_conn.execute(
+                    """
+                    INSERT INTO agent_runs (
+                        run_id, session_id, user_message_id, assistant_message_id, status,
+                        used_tools_json, created_hitl_run_ids_json, error_message, started_at, finished_at,
+                        idempotency_key, idempotency_hash, created_instance_id, worker_instance_id,
+                        slash_invocation_json
+                    )
+                    VALUES (?, ?, ?, NULL, 'queued', '[]', '[]', NULL, ?, NULL, ?, ?, ?, NULL, ?)
+                    """,
+                    (
+                        run_id,
+                        session_id,
+                        message_id,
+                        now,
+                        clean_key,
+                        idempotency_hash,
+                        created_instance_id,
+                        slash_invocation_json,
+                    ),
+                )
+            elif has_idem_cols:
                 active_conn.execute(
                     """
                     INSERT INTO agent_runs (

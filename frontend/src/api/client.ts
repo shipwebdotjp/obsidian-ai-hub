@@ -639,6 +639,14 @@ export function updateAgentSession(
   );
 }
 
+export function getAgentSlashCandidates(
+  sessionId: string,
+): Promise<import("./types").AgentSlashCandidatesResponse> {
+  return request<import("./types").AgentSlashCandidatesResponse>(
+    `/api/v1/agent-sessions/${encodeURIComponent(sessionId)}/slash-candidates`,
+  );
+}
+
 export function listPromptTemplates(agentId: string): Promise<{ templates: AgentPromptTemplate[] }> {
   return request<{ templates: AgentPromptTemplate[] }>(
     `/api/v1/agents/${encodeURIComponent(agentId)}/prompt-templates`,
@@ -699,7 +707,11 @@ export function apiPost<T>(path: string, body: any): Promise<T> {
 
 export function startAgentRun(
   sessionId: string,
-  payload: { content: string; images?: AgentMessageAttachment[] },
+  payload: {
+    content: string;
+    images?: AgentMessageAttachment[];
+    slash_invocation?: import("./types").SlashInvocation | null;
+  },
   idempotencyKey?: string,
 ): Promise<{ run: import("./types").AgentRun }> {
   const headers = new Headers();
@@ -714,6 +726,9 @@ export function startAgentRun(
       mime_type: att.mime_type,
       data: att.data,
     }));
+  }
+  if (payload.slash_invocation) {
+    body.slash_invocation = payload.slash_invocation;
   }
   return fetch(`/api/v1/agent-sessions/${encodeURIComponent(sessionId)}/runs`, {
     method: "POST",

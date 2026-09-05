@@ -142,11 +142,34 @@ def delete_session(session_id: str) -> bool:
     return True
 
 
+def get_slash_candidates(session_id: str) -> Dict[str, Any]:
+    session = store.get_session(session_id)
+    if not session:
+        raise FileNotFoundError(f"Session '{session_id}' not found.")
+    agent = store.get_agent(session["agent_id"])
+    if not agent:
+        raise FileNotFoundError(f"Agent '{session['agent_id']}' not found.")
+
+    tool_ids = agent.get("tool_ids") or []
+    if "skills" not in tool_ids:
+        return {"candidates": [], "has_skills_tool": False}
+
+    from obsidian_ai_hub.agents.skills import discover_skills
+
+    index = discover_skills()
+    candidates = [
+        {"kind": "skill", "name": s.name, "description": s.description}
+        for s in index.list_skills()
+    ]
+    return {"candidates": candidates, "has_skills_tool": True}
+
+
 def start_run(
     session_id: str,
     content: str,
     images: Optional[List[Dict[str, Any]]] = None,
     idempotency_key: Optional[str] = None,
+    slash_invocation: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Queue an agent run and return it (202 contract)."""
     from obsidian_ai_hub.runs.instance import get_instance_id
@@ -165,6 +188,7 @@ def start_run(
         attachments=normalized or None,
         idempotency_key=idempotency_key,
         created_instance_id=get_instance_id(),
+        slash_invocation=slash_invocation,
     )
     return run
 

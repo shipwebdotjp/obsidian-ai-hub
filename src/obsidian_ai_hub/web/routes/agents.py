@@ -112,6 +112,13 @@ class ImageAttachmentRequest(BaseModel):
     model_config = {"extra": "forbid"}
 
 
+class SlashInvocationRequest(BaseModel):
+    kind: str = Field(..., description="Invocation kind ('skill')")
+    name: str = Field(..., min_length=1, description="Target name (e.g. skill name)")
+
+    model_config = {"extra": "forbid"}
+
+
 def _decode_base64_payload(data: str) -> bytes:
     import base64
 
@@ -271,6 +278,14 @@ def get_session_detail(session_id: str) -> Dict[str, Any]:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
 
 
+@router.get("/agent-sessions/{session_id}/slash-candidates")
+def get_slash_candidates(session_id: str) -> Dict[str, Any]:
+    try:
+        return agent_service.get_slash_candidates(session_id)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+
+
 @router.patch("/agent-sessions/{session_id}")
 def update_session(session_id: str, req: UpdateSessionRequest) -> Dict[str, Any]:
     try:
@@ -371,6 +386,9 @@ class StartAgentRunRequest(BaseModel):
         default_factory=list,
         description="Optional list of inline image attachments (base64 payloads).",
     )
+    slash_invocation: Optional[SlashInvocationRequest] = Field(
+        default=None, description="Optional slash invocation"
+    )
 
 
 @router.post("/agent-sessions/{session_id}/runs", status_code=status.HTTP_202_ACCEPTED)
@@ -389,12 +407,39 @@ def start_agent_run(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Message content must not be empty.",
         )
+
+    slash_inv = req.slash_invocation.model_dump() if req.slash_invocation else None
+    if slash_inv:
+        if slash_inv.get("kind") != "skill":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Kind must be 'skill'.",
+            )
+        try:
+            session = agent_service.get_session_detail(session_id)["session"]
+            agent = agent_service.get_agent(session["agent_id"])
+            if "skills" not in agent.get("tool_ids", []):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="skills ツールが無効なエージェントです。",
+                )
+            from obsidian_ai_hub.agents.skills import discover_skills
+            skill_index = discover_skills()
+            if not skill_index.get_skill(slash_inv["name"]):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Skill '{slash_inv['name']}' は存在しません。",
+                )
+        except FileNotFoundError as e:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+
     try:
         run = agent_service.start_run(
             session_id,
             content,
             images=validated_images or None,
             idempotency_key=idempotency_key,
+            slash_invocation=slash_inv,
         )
         return {"run": run}
     except FileNotFoundError as e:
