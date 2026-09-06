@@ -226,14 +226,6 @@ def test_dto_relation_validations():
     )
     assert rel.subject_person_id == "peo_1"
 
-    # Reject self-relation
-    with pytest.raises(ValidationError):
-        PersonRelationCreateRequest(
-            subject_person_id="peo_1",
-            object_person_id="peo_1",
-            relation_type_id="rlt_builtin_friend",
-        )
-
     # Reject invalid date order
     with pytest.raises(ValidationError):
         PersonRelationCreateRequest(
@@ -256,19 +248,22 @@ def test_dto_person_delete_response_extended_fields():
         deleted_aliases=2,
         deleted_assignments=3,
     )
-    assert resp.deleted_relations == 0
-    assert resp.deleted_evidence == 0
+    assert resp.deleted_subject_relations == 0
+    assert resp.deleted_object_relations == 0
+    assert resp.deleted_relation_evidence == 0
 
     resp_with_relations = PersonDeleteResponse(
         success=True,
         deleted_summary_people=1,
         deleted_aliases=2,
         deleted_assignments=3,
-        deleted_relations=4,
-        deleted_evidence=5,
+        deleted_subject_relations=2,
+        deleted_object_relations=2,
+        deleted_relation_evidence=5,
     )
-    assert resp_with_relations.deleted_relations == 4
-    assert resp_with_relations.deleted_evidence == 5
+    assert resp_with_relations.deleted_subject_relations == 2
+    assert resp_with_relations.deleted_object_relations == 2
+    assert resp_with_relations.deleted_relation_evidence == 5
 
 
 def test_regression_person_detail_and_ai_registry_unchanged():

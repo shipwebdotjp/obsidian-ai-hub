@@ -89,6 +89,22 @@ from obsidian_ai_hub.web.services.people_sync import (
     get_vault_report_dynamic,
     sync_people,
 )
+from obsidian_ai_hub.web.services.person_relations import (
+    InactiveRelationTypeError,
+    InvalidDateError,
+    SelfRelationError,
+    SlugConflictError,
+    add_relation_evidence,
+    create_person_relation,
+    create_person_relation_type,
+    delete_person_relation,
+    delete_relation_evidence,
+    list_person_relation_types,
+    list_person_relations_for_person,
+    update_person_relation,
+    update_person_relation_type,
+    update_relation_evidence,
+)
 from obsidian_ai_hub.web.services.planner import (
     generate_planner_proposals,
     get_planner_proposal,

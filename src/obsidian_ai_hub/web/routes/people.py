@@ -1,7 +1,7 @@
 import logging
 
-from typing import Literal
-from fastapi import APIRouter, Depends, HTTPException, Query
+from typing import Literal, Optional
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
 from obsidian_ai_hub.web import schemas, service
 from obsidian_ai_hub.web.routes.deps import require_bearer_token
@@ -300,3 +300,226 @@ def sync_people(_=Depends(require_bearer_token)):
     except Exception:
         logger.exception("Failed to sync people")
         raise HTTPException(status_code=500, detail="Failed to sync people")
+
+
+# --- Person Relation Types Routes ---
+
+
+@router.get("/person-relation-types", response_model=list[schemas.PersonRelationType])
+def list_person_relation_types(_=Depends(require_bearer_token)):
+    return service.list_person_relation_types()
+
+
+@router.post(
+    "/person-relation-types",
+    response_model=schemas.PersonRelationType,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_person_relation_type(
+    body: schemas.PersonRelationTypeCreateRequest,
+    _=Depends(require_bearer_token),
+):
+    try:
+        return service.create_person_relation_type(
+            slug=body.slug,
+            forward_label=body.forward_label,
+            reverse_label=body.reverse_label,
+            directionality=body.directionality,
+            description=body.description,
+        )
+    except service.SlugConflictError as e:
+        raise HTTPException(
+            status_code=409,
+            detail={"message": str(e), "conflict_type": "slug_conflict"},
+        ) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.patch(
+    "/person-relation-types/{relation_type_id}",
+    response_model=schemas.PersonRelationType,
+)
+def update_person_relation_type(
+    relation_type_id: str,
+    body: schemas.PersonRelationTypeUpdateRequest,
+    _=Depends(require_bearer_token),
+):
+    try:
+        return service.update_person_relation_type(
+            relation_type_id,
+            forward_label=body.forward_label,
+            reverse_label=body.reverse_label,
+            description=body.description,
+            is_active=body.is_active,
+        )
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+# --- Person Relations Routes ---
+
+
+@router.get(
+    "/people/{person_id}/relations",
+    response_model=list[schemas.PersonRelation],
+)
+def list_person_relations_for_person(
+    person_id: str,
+    status: Optional[Literal["upcoming", "active", "ended", "undated"]] = Query(None),
+    _=Depends(require_bearer_token),
+):
+    try:
+        return service.list_person_relations_for_person(person_id, status_filter=status)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.post(
+    "/people/{person_id}/relations",
+    response_model=schemas.RelationDuplicateMergeResponse,
+)
+def create_person_relation(
+    person_id: str,
+    body: schemas.PersonRelationCreateRequest,
+    response: Response,
+    _=Depends(require_bearer_token),
+):
+    try:
+        rel, action = service.create_person_relation(
+            person_id=person_id,
+            subject_person_id=body.subject_person_id,
+            object_person_id=body.object_person_id,
+            relation_type_id=body.relation_type_id,
+            started_on=body.started_on,
+            ended_on=body.ended_on,
+            note=body.note,
+            initial_evidence=[ev.model_dump() for ev in body.initial_evidence],
+        )
+        if action == "created":
+            response.status_code = status.HTTP_201_CREATED
+        else:
+            response.status_code = status.HTTP_200_OK
+        return {"action": action, "relation": rel}
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except service.SelfRelationError as e:
+        raise HTTPException(
+            status_code=409,
+            detail={"message": str(e), "conflict_type": "self_relation"},
+        ) from e
+    except service.InactiveRelationTypeError as e:
+        raise HTTPException(
+            status_code=409,
+            detail={"message": str(e), "conflict_type": "inactive_relation_type"},
+        ) from e
+    except (ValueError, service.InvalidDateError) as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.patch(
+    "/person-relations/{relation_id}",
+    response_model=schemas.RelationDuplicateMergeResponse,
+)
+def update_person_relation(
+    relation_id: str,
+    body: schemas.PersonRelationUpdateRequest,
+    _=Depends(require_bearer_token),
+):
+    try:
+        rel, action = service.update_person_relation(
+            relation_id,
+            started_on=body.started_on,
+            ended_on=body.ended_on,
+            note=body.note,
+        )
+        return {"action": action, "relation": rel}
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except (ValueError, service.InvalidDateError) as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.delete(
+    "/person-relations/{relation_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def delete_person_relation(
+    relation_id: str,
+    _=Depends(require_bearer_token),
+):
+    try:
+        service.delete_person_relation(relation_id)
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+
+
+# --- Person Relation Evidence Routes ---
+
+
+@router.post(
+    "/person-relations/{relation_id}/evidence",
+    response_model=schemas.PersonRelation,
+    status_code=status.HTTP_201_CREATED,
+)
+def add_relation_evidence(
+    relation_id: str,
+    body: schemas.PersonRelationEvidenceCreateRequest,
+    _=Depends(require_bearer_token),
+):
+    try:
+        return service.add_relation_evidence(
+            relation_id,
+            source_type=body.source_type,
+            source_ref=body.source_ref,
+            quote=body.quote,
+            note=body.note,
+            observed_at=body.observed_at,
+        )
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except (ValueError, service.InvalidDateError) as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.patch(
+    "/person-relation-evidence/{evidence_id}",
+    response_model=schemas.PersonRelation,
+)
+def update_relation_evidence(
+    evidence_id: str,
+    body: schemas.PersonRelationEvidenceUpdateRequest,
+    _=Depends(require_bearer_token),
+):
+    try:
+        return service.update_relation_evidence(
+            evidence_id,
+            source_ref=body.source_ref,
+            quote=body.quote,
+            note=body.note,
+            observed_at=body.observed_at,
+        )
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except (ValueError, service.InvalidDateError) as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.delete(
+    "/person-relation-evidence/{evidence_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def delete_relation_evidence(
+    evidence_id: str,
+    _=Depends(require_bearer_token),
+):
+    try:
+        service.delete_relation_evidence(evidence_id)
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e

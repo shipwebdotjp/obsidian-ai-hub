@@ -658,6 +658,9 @@ class RelationCounts(BaseModel):
     summaries: int
     aliases: int
     assignments: int
+    subject_relations: int = 0
+    object_relations: int = 0
+    evidence: int = 0
 
 
 class PersonDetail(Person):
@@ -1301,10 +1304,6 @@ class PersonRelationCreateRequest(BaseModel):
 
     @model_validator(mode="after")
     def _validate_relation_request(self) -> "PersonRelationCreateRequest":
-        if self.subject_person_id == self.object_person_id:
-            raise ValueError(
-                "Self-relations are not allowed (subject_person_id must not equal object_person_id)"
-            )
         if self.started_on and self.ended_on:
             s_date = datetime.strptime(self.started_on, "%Y-%m-%d")
             e_date = datetime.strptime(self.ended_on, "%Y-%m-%d")
@@ -1339,5 +1338,5 @@ class PersonRelationListResponse(BaseModel):
 
 
 class RelationDuplicateMergeResponse(BaseModel):
-    action: Literal["created", "merged_into_existing"]
+    action: Literal["created", "updated", "merged_into_existing"]
     relation: PersonRelation
