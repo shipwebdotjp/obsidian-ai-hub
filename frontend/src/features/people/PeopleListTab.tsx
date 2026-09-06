@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { Person, PersonAlias } from "../../api/types";
-import { PersonDetail, PeopleError } from "./types";
+import { PersonDetail, PeopleError, PersonRelation, PersonRelationType, RelationStatus } from "./types";
+import PersonRelationsSection from "./PersonRelationsSection";
 
 interface PeopleListTabProps {
   people: Person[];
@@ -22,6 +23,13 @@ interface PeopleListTabProps {
   onChangeMergeToPersonId: (id: string) => void;
   onTriggerMergePreview: (from: Person, to: Person) => void;
   onTriggerAliasDelete: (alias: PersonAlias) => void;
+  personRelations?: PersonRelation[];
+  relationTypes?: PersonRelationType[];
+  relationStatusFilter?: RelationStatus | "all";
+  onRelationStatusFilterChange?: (status: RelationStatus | "all") => void;
+  onOpenCreateRelationModal?: () => void;
+  onOpenEditRelationModal?: (relation: PersonRelation) => void;
+  onDeleteRelation?: (relationId: string) => Promise<void>;
 }
 
 export default function PeopleListTab({
@@ -44,6 +52,13 @@ export default function PeopleListTab({
   onChangeMergeToPersonId,
   onTriggerMergePreview,
   onTriggerAliasDelete,
+  personRelations = [],
+  relationTypes = [],
+  relationStatusFilter = "all",
+  onRelationStatusFilterChange = () => {},
+  onOpenCreateRelationModal = () => {},
+  onOpenEditRelationModal = () => {},
+  onDeleteRelation = async () => {},
 }: PeopleListTabProps) {
   const [nameQuery, setNameQuery] = useState("");
 
@@ -294,6 +309,18 @@ export default function PeopleListTab({
                 ※ 統合元（この人物）のサマリー履歴や別名はすべて統合先にマージされ、統合元は削除されます。異なる Vault ID を持つ人物同士の統合や、連携済みから未連携への統合は拒否されます。
               </p>
             </div>
+
+            {/* Person Relations Section */}
+            <PersonRelationsSection
+              currentPerson={selectedPerson}
+              relations={personRelations}
+              peopleList={people}
+              statusFilter={relationStatusFilter}
+              onStatusFilterChange={onRelationStatusFilterChange}
+              onOpenCreateModal={onOpenCreateRelationModal}
+              onOpenEditModal={onOpenEditRelationModal}
+              onDeleteRelation={onDeleteRelation}
+            />
 
             <div>
               <h3 className="text-xs font-bold text-slate-700 mb-2">紐づくサマリ ({selectedPerson.summaries.length})</h3>

@@ -178,11 +178,38 @@ def get_person_detail(person_id: str) -> Optional[dict[str, Any]]:
         )
         assignments_count = cursor.fetchone()[0]
 
+        cursor.execute(
+            "SELECT COUNT(*) FROM person_relations WHERE subject_person_id = ?",
+            (person_id,),
+        )
+        subject_relations_count = cursor.fetchone()[0]
+
+        cursor.execute(
+            "SELECT COUNT(*) FROM person_relations WHERE object_person_id = ?",
+            (person_id,),
+        )
+        object_relations_count = cursor.fetchone()[0]
+
+        cursor.execute(
+            """
+            SELECT COUNT(*) FROM person_relation_evidence
+            WHERE relation_id IN (
+                SELECT relation_id FROM person_relations
+                WHERE subject_person_id = ? OR object_person_id = ?
+            )
+            """,
+            (person_id, person_id),
+        )
+        evidence_count = cursor.fetchone()[0]
+
         p["summary_count"] = summaries_count
         p["relation_counts"] = {
             "summaries": summaries_count,
             "aliases": aliases_count,
             "assignments": assignments_count,
+            "subject_relations": subject_relations_count,
+            "object_relations": object_relations_count,
+            "evidence": evidence_count,
         }
 
         return p

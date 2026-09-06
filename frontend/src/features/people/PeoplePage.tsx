@@ -20,12 +20,32 @@ import MergePreviewDialog from "./MergePreviewDialog";
 import DeleteAliasDialog from "./DeleteAliasDialog";
 import DeletePersonDialog from "./DeletePersonDialog";
 
-type Tab = "candidates" | "rejected_candidates" | "list" | "duplicates" | "report";
+import {
+  PersonRelationType,
+  PersonRelation,
+  RelationStatus,
+  PersonRelationTypeCreateRequest,
+  PersonRelationTypeUpdateRequest,
+  PersonRelationCreateRequest,
+  PersonRelationUpdateRequest,
+  PersonRelationEvidenceCreateRequest,
+  PersonRelationEvidenceUpdateRequest
+} from "./types";
+import RelationTypesTab from "./RelationTypesTab";
+import RelationFormModal from "./RelationFormModal";
+
+type Tab = "candidates" | "rejected_candidates" | "list" | "relation_types" | "duplicates" | "report";
 
 interface TabDefinition {
   value: Tab;
   label: string;
-  getCount: (candidatesCount: number, rejectedCandidatesCount: number, peopleCount: number, duplicatesCount: number) => number | string;
+  getCount: (
+    candidatesCount: number,
+    rejectedCandidatesCount: number,
+    peopleCount: number,
+    duplicatesCount: number,
+    typesCount: number
+  ) => number | string;
 }
 
 const TABS_CONFIG: TabDefinition[] = [
@@ -43,6 +63,11 @@ const TABS_CONFIG: TabDefinition[] = [
     value: "list",
     label: "人物一覧",
     getCount: (_, __, people) => people,
+  },
+  {
+    value: "relation_types",
+    label: "関係タイプ",
+    getCount: (_, __, ___, ____, types) => types,
   },
   {
     value: "duplicates",
@@ -69,6 +94,13 @@ export default function PeoplePage() {
   const [people, setPeople] = useState<Person[]>([]);
   const [duplicates, setDuplicates] = useState<DuplicatesResponse | null>(null);
   const [vaultReport, setVaultReport] = useState<SyncPeopleResponse | null>(null);
+  const [relationTypes, setRelationTypes] = useState<PersonRelationType[]>([]);
+
+  // Person relations state
+  const [personRelations, setPersonRelations] = useState<PersonRelation[]>([]);
+  const [relationStatusFilter, setRelationStatusFilter] = useState<RelationStatus | "all">("all");
+  const [showRelationModal, setShowRelationModal] = useState(false);
+  const [editingRelation, setEditingRelation] = useState<PersonRelation | null>(null);
 
   // Selected details
   const [selectedCandidate, setSelectedCandidate] = useState<PersonCandidateDetail | null>(null);
@@ -154,22 +186,34 @@ export default function PeoplePage() {
       setSuccessMessage(null);
     }
     try {
-      const [candsData, rejectedCandsData, peopleData, dupsData, reportData] = await Promise.all([
+      const [candsData, rejectedCandsData, peopleData, dupsData, reportData, typesData] = await Promise.all([
         peopleApi.fetchCandidates("unresolved"),
         peopleApi.fetchCandidates("rejected"),
         peopleApi.fetchPeople(),
         peopleApi.fetchDuplicates(),
         peopleApi.fetchVaultReport(),
+        peopleApi.fetchPersonRelationTypes(),
       ]);
       setCandidates(candsData);
       setRejectedCandidates(rejectedCandsData);
       setPeople(peopleData);
       setDuplicates(dupsData);
       setVaultReport(reportData);
+      setRelationTypes(typesData);
     } catch (e) {
       setError("データの読み込みに失敗しました");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadPersonRelations = async (personId: string, filter?: RelationStatus | "all") => {
+    try {
+      const statusParam = filter && filter !== "all" ? filter : undefined;
+      const data = await peopleApi.fetchPersonRelations(personId, statusParam);
+      setPersonRelations(data);
+    } catch (e) {
+      // Failed loading relations
     }
   };
 
@@ -253,8 +297,105 @@ export default function PeoplePage() {
       setMobileDetailOpen(true);
       setEditDisplayName(data.display_name);
       setEditAliasesText((data.aliases || []).map((al) => al.display_name).join("\n"));
+      await loadPersonRelations(p.person_id, relationStatusFilter);
     } catch (e) {
       setError("人物の詳細の取得に失敗しました");
+    }
+  };
+
+  const handleRelationStatusFilterChange = async (status: RelationStatus | "all") => {
+    setRelationStatusFilter(status);
+    if (selectedPerson) {
+      await loadPersonRelations(selectedPerson.person_id, status);
+    }
+  };
+
+  const handleCreateRelationType = async (req: PersonRelationTypeCreateRequest) => {
+    await peopleApi.createPersonRelationType(req);
+    setSuccessMessage(`関係タイプ「${req.slug}」を作成しました。`);
+    await loadAllData(false);
+  };
+
+  const handleUpdateRelationType = async (relationTypeId: string, req: PersonRelationTypeUpdateRequest) => {
+    const updated = await peopleApi.updatePersonRelationType(relationTypeId, req);
+    setSuccessMessage(`関係タイプ「${updated.slug}」を更新しました。`);
+    await loadAllData(false);
+  };
+
+  const handleCreateRelation = async (req: PersonRelationCreateRequest) => {
+    if (!selectedPerson) return;
+    const res = await peopleApi.createPersonRelation(selectedPerson.person_id, req);
+    if (res.action === "merged_into_existing") {
+      setSuccessMessage("既存の同一人物間関係が存在するため、内容および根拠を重複統合しました。");
+    } else {
+      setSuccessMessage("新しい人物間関係を作成しました。");
+    }
+    await loadAllData(false);
+    const updatedDetail = await peopleApi.fetchPersonDetail(selectedPerson.person_id);
+    setSelectedPerson(updatedDetail);
+    await loadPersonRelations(selectedPerson.person_id, relationStatusFilter);
+  };
+
+  const handleUpdateRelation = async (relationId: string, req: PersonRelationUpdateRequest) => {
+    if (!selectedPerson) return;
+    const res = await peopleApi.updatePersonRelation(relationId, req);
+    if (res.action === "merged_into_existing") {
+      setSuccessMessage("期間の変更により既存関係と一致したため、関係を統合しました。");
+    } else {
+      setSuccessMessage("人物間関係を更新しました。");
+    }
+    await loadAllData(false);
+    const updatedDetail = await peopleApi.fetchPersonDetail(selectedPerson.person_id);
+    setSelectedPerson(updatedDetail);
+    await loadPersonRelations(selectedPerson.person_id, relationStatusFilter);
+  };
+
+  const handleDeleteRelation = async (relationId: string) => {
+    if (!selectedPerson) return;
+    await peopleApi.deletePersonRelation(relationId);
+    setSuccessMessage("人物間関係を削除しました。");
+    await loadAllData(false);
+    const updatedDetail = await peopleApi.fetchPersonDetail(selectedPerson.person_id);
+    setSelectedPerson(updatedDetail);
+    await loadPersonRelations(selectedPerson.person_id, relationStatusFilter);
+  };
+
+  const handleAddRelationEvidence = async (relationId: string, req: PersonRelationEvidenceCreateRequest) => {
+    if (!selectedPerson) return;
+    await peopleApi.addRelationEvidence(relationId, req);
+    setSuccessMessage("根拠 (Evidence) を追加しました。");
+    await loadPersonRelations(selectedPerson.person_id, relationStatusFilter);
+    if (editingRelation && editingRelation.relation_id === relationId) {
+      const updatedRel = (await peopleApi.fetchPersonRelations(selectedPerson.person_id)).find(
+        (r) => r.relation_id === relationId
+      );
+      if (updatedRel) setEditingRelation(updatedRel);
+    }
+  };
+
+  const handleUpdateRelationEvidence = async (evidenceId: string, req: PersonRelationEvidenceUpdateRequest) => {
+    if (!selectedPerson) return;
+    await peopleApi.updateRelationEvidence(evidenceId, req);
+    setSuccessMessage("根拠 (Evidence) を更新しました。");
+    await loadPersonRelations(selectedPerson.person_id, relationStatusFilter);
+    if (editingRelation) {
+      const updatedRel = (await peopleApi.fetchPersonRelations(selectedPerson.person_id)).find(
+        (r) => r.relation_id === editingRelation.relation_id
+      );
+      if (updatedRel) setEditingRelation(updatedRel);
+    }
+  };
+
+  const handleDeleteRelationEvidence = async (evidenceId: string) => {
+    if (!selectedPerson) return;
+    await peopleApi.deleteRelationEvidence(evidenceId);
+    setSuccessMessage("根拠 (Evidence) を削除しました。");
+    await loadPersonRelations(selectedPerson.person_id, relationStatusFilter);
+    if (editingRelation) {
+      const updatedRel = (await peopleApi.fetchPersonRelations(selectedPerson.person_id)).find(
+        (r) => r.relation_id === editingRelation.relation_id
+      );
+      if (updatedRel) setEditingRelation(updatedRel);
     }
   };
 
@@ -502,7 +643,7 @@ export default function PeoplePage() {
         {/* Dynamic Tab Buttons Render */}
         <div className="flex shrink-0 space-x-1 overflow-x-auto whitespace-nowrap border-b border-slate-200">
           {TABS_CONFIG.map((tab) => {
-            const count = tab.getCount(candidates.length, rejectedCandidates.length, people.length, duplicatesTotalCount);
+            const count = tab.getCount(candidates.length, rejectedCandidates.length, people.length, duplicatesTotalCount, relationTypes.length);
             const countSuffix = count !== "" ? ` (${count})` : "";
             const isTabActive = activeTab === tab.value;
             return (
@@ -522,6 +663,18 @@ export default function PeoplePage() {
         </div>
 
         <div className="min-h-0 flex-1 flex flex-col gap-4 overflow-hidden lg:flex-row">
+          {activeTab === "relation_types" && (
+            <div className="w-full overflow-y-auto rounded-lg border border-slate-200 bg-white p-6">
+              <RelationTypesTab
+                types={relationTypes}
+                loading={loading}
+                error={error}
+                onCreateType={handleCreateRelationType}
+                onUpdateType={handleUpdateRelationType}
+              />
+            </div>
+          )}
+
           {activeTab === "candidates" && (
             <CandidateTab
               candidates={candidates}
@@ -602,6 +755,19 @@ export default function PeoplePage() {
                 setAliasToDelete(al);
                 setShowAliasDeleteConfirm(true);
               }}
+              personRelations={personRelations}
+              relationTypes={relationTypes}
+              relationStatusFilter={relationStatusFilter}
+              onRelationStatusFilterChange={handleRelationStatusFilterChange}
+              onOpenCreateRelationModal={() => {
+                setEditingRelation(null);
+                setShowRelationModal(true);
+              }}
+              onOpenEditRelationModal={(rel) => {
+                setEditingRelation(rel);
+                setShowRelationModal(true);
+              }}
+              onDeleteRelation={handleDeleteRelation}
             />
           )}
 
@@ -658,6 +824,24 @@ export default function PeoplePage() {
               setShowDeleteConfirm(false);
             }}
             onConfirm={handleExecuteDelete}
+          />
+        )}
+
+        {showRelationModal && selectedPerson && (
+          <RelationFormModal
+            currentPersonId={selectedPerson.person_id}
+            relationToEdit={editingRelation}
+            types={relationTypes}
+            peopleList={people}
+            onClose={() => {
+              setShowRelationModal(false);
+              setEditingRelation(null);
+            }}
+            onCreate={handleCreateRelation}
+            onUpdate={handleUpdateRelation}
+            onAddEvidence={handleAddRelationEvidence}
+            onUpdateEvidence={handleUpdateRelationEvidence}
+            onDeleteEvidence={handleDeleteRelationEvidence}
           />
         )}
       </div>

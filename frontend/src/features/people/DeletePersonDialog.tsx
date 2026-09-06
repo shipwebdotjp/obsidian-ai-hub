@@ -58,7 +58,7 @@ export default function DeletePersonDialog({
               </div>
               <p className="text-[11px] leading-normal text-orange-800">
                 この人物は Vault ノート（ID: <code>{personToDelete.vault_id}</code>）と連携しています。DB から完全に削除されますが、Vault ノート自体は削除されません。
-                そのため、<strong>次回の同期（Sync）を実行した際に、この人物が再びデータベース上に再作成される可能性</strong>があります。
+                そのため、<strong>次回の同期（Sync）を実行した際に、この人物が再びデータベース上に再作成される可能性</strong>がありますが、<strong>登録されていた関係（リレーション）および根拠は復元されません</strong>。
               </p>
             </div>
           ) : (
@@ -78,6 +78,9 @@ export default function DeletePersonDialog({
               <div>・紐づくサマリ: <strong className="text-slate-900">{personToDelete.relation_counts.summaries}</strong> 件</div>
               <div>・別名 (aliases): <strong className="text-slate-900">{personToDelete.relation_counts.aliases}</strong> 件</div>
               <div>・手動個別割当: <strong className="text-slate-900">{personToDelete.relation_counts.assignments}</strong> 件</div>
+              <div>・発信リレーション: <strong className="text-slate-900">{personToDelete.relation_counts.subject_relations ?? 0}</strong> 件</div>
+              <div>・受信リレーション: <strong className="text-slate-900">{personToDelete.relation_counts.object_relations ?? 0}</strong> 件</div>
+              <div>・根拠 (evidence): <strong className="text-slate-900">{personToDelete.relation_counts.evidence ?? 0}</strong> 件</div>
             </div>
           )}
         </div>

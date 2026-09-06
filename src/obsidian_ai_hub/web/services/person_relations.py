@@ -5,7 +5,14 @@ from datetime import datetime
 from typing import Any, Literal, Optional, Tuple
 from zoneinfo import ZoneInfo
 
+from obsidian_ai_hub.database import get_db_connection
+
 JST = ZoneInfo("Asia/Tokyo")
+
+
+class SlugConflictError(ValueError):
+    def __init__(self, message="Conflict: relation_type slug already exists"):
+        super().__init__(message)
 
 
 class InactiveRelationTypeError(ValueError):
@@ -582,3 +589,341 @@ def transfer_person_relations_on_merge(
                 "UPDATE person_relations SET subject_person_id = ?, object_person_id = ?, updated_at = ? WHERE relation_id = ?",
                 (new_subj, new_obj, now_iso, r_id),
             )
+
+
+# --- Public Service Functions (Managing DB connection/transaction) ---
+
+
+def list_person_relation_types() -> list[dict[str, Any]]:
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT relation_type_id, slug, forward_label, reverse_label, directionality,
+                   description, is_builtin, is_active, created_at, updated_at
+            FROM person_relation_types
+            ORDER BY is_builtin DESC, slug ASC
+            """
+        )
+        rows = cursor.fetchall()
+        return [
+            {
+                "relation_type_id": r["relation_type_id"],
+                "slug": r["slug"],
+                "forward_label": r["forward_label"],
+                "reverse_label": r["reverse_label"],
+                "directionality": r["directionality"],
+                "description": r["description"],
+                "is_builtin": bool(r["is_builtin"]),
+                "is_active": bool(r["is_active"]),
+                "created_at": r["created_at"],
+                "updated_at": r["updated_at"],
+            }
+            for r in rows
+        ]
+    finally:
+        conn.close()
+
+
+def create_person_relation_type(
+    slug: str,
+    forward_label: str,
+    reverse_label: str,
+    directionality: Literal["directed", "symmetric"],
+    description: Optional[str] = None,
+) -> dict[str, Any]:
+    slug_clean = slug.strip()
+    f_label = forward_label.strip()
+    r_label = reverse_label.strip()
+    if not slug_clean or not f_label or not r_label:
+        raise ValueError("slug, forward_label, and reverse_label must not be empty")
+    if directionality not in ("directed", "symmetric"):
+        raise ValueError("directionality must be 'directed' or 'symmetric'")
+
+    conn = get_db_connection()
+    try:
+        with conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT relation_type_id FROM person_relation_types WHERE slug = ?", (slug_clean,))
+            if cursor.fetchone() is not None:
+                raise SlugConflictError(f"Relation type slug already exists: {slug_clean}")
+
+            type_id = f"rlt_{uuid.uuid4().hex}"
+            now_iso = datetime.now(JST).isoformat()
+            cursor.execute(
+                """
+                INSERT INTO person_relation_types (
+                    relation_type_id, slug, forward_label, reverse_label, directionality,
+                    description, is_builtin, is_active, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, 0, 1, ?, ?)
+                """,
+                (type_id, slug_clean, f_label, r_label, directionality, description, now_iso, now_iso),
+            )
+            cursor.execute(
+                """
+                SELECT relation_type_id, slug, forward_label, reverse_label, directionality,
+                       description, is_builtin, is_active, created_at, updated_at
+                FROM person_relation_types WHERE relation_type_id = ?
+                """,
+                (type_id,),
+            )
+            r = dict(cursor.fetchone())
+            r["is_builtin"] = bool(r["is_builtin"])
+            r["is_active"] = bool(r["is_active"])
+            return r
+    finally:
+        conn.close()
+
+
+def update_person_relation_type(
+    relation_type_id: str,
+    forward_label: Optional[str] = None,
+    reverse_label: Optional[str] = None,
+    description: Optional[str] = None,
+    is_active: Optional[bool] = None,
+) -> dict[str, Any]:
+    conn = get_db_connection()
+    try:
+        with conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT relation_type_id, forward_label, reverse_label, description, is_active "
+                "FROM person_relation_types WHERE relation_type_id = ?",
+                (relation_type_id,),
+            )
+            row = cursor.fetchone()
+            if row is None:
+                raise FileNotFoundError(f"Relation type not found: {relation_type_id}")
+            curr = dict(row)
+
+            new_f = forward_label.strip() if forward_label is not None else curr["forward_label"]
+            new_r = reverse_label.strip() if reverse_label is not None else curr["reverse_label"]
+            if not new_f or not new_r:
+                raise ValueError("forward_label and reverse_label must not be empty")
+
+            new_desc = description if description is not None else curr["description"]
+            new_active = int(is_active) if is_active is not None else curr["is_active"]
+            now_iso = datetime.now(JST).isoformat()
+
+            cursor.execute(
+                """
+                UPDATE person_relation_types
+                SET forward_label = ?, reverse_label = ?, description = ?, is_active = ?, updated_at = ?
+                WHERE relation_type_id = ?
+                """,
+                (new_f, new_r, new_desc, new_active, now_iso, relation_type_id),
+            )
+
+            cursor.execute(
+                """
+                SELECT relation_type_id, slug, forward_label, reverse_label, directionality,
+                       description, is_builtin, is_active, created_at, updated_at
+                FROM person_relation_types WHERE relation_type_id = ?
+                """,
+                (relation_type_id,),
+            )
+            r = dict(cursor.fetchone())
+            r["is_builtin"] = bool(r["is_builtin"])
+            r["is_active"] = bool(r["is_active"])
+            return r
+    finally:
+        conn.close()
+
+
+def list_person_relations_for_person(
+    person_id: str, status_filter: Optional[str] = None
+) -> list[dict[str, Any]]:
+    if status_filter and status_filter not in ("upcoming", "active", "ended", "undated"):
+        raise ValueError(f"Invalid status filter: {status_filter}")
+
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT person_id FROM people WHERE person_id = ?", (person_id,))
+        if cursor.fetchone() is None:
+            raise FileNotFoundError(f"Person not found: {person_id}")
+
+        cursor.execute(
+            "SELECT relation_id FROM person_relations WHERE subject_person_id = ? OR object_person_id = ? "
+            "ORDER BY created_at DESC",
+            (person_id, person_id),
+        )
+        rel_ids = [r["relation_id"] for r in cursor.fetchall()]
+
+        results = []
+        for r_id in rel_ids:
+            rel = get_person_relation_by_id_in_tx(cursor, r_id)
+            if status_filter and rel["status"] != status_filter:
+                continue
+            results.append(rel)
+        return results
+    finally:
+        conn.close()
+
+
+def create_person_relation(
+    person_id: str,
+    subject_person_id: str,
+    object_person_id: str,
+    relation_type_id: str,
+    started_on: Optional[str] = None,
+    ended_on: Optional[str] = None,
+    note: Optional[str] = None,
+    initial_evidence: Optional[list[dict[str, Any]]] = None,
+) -> tuple[dict[str, Any], Literal["created", "merged_into_existing"]]:
+    if person_id not in (subject_person_id, object_person_id):
+        raise ValueError("URL person_id must match either subject_person_id or object_person_id")
+
+    conn = get_db_connection()
+    try:
+        with conn:
+            cursor = conn.cursor()
+            # Verify subject and object people exist
+            cursor.execute("SELECT person_id FROM people WHERE person_id = ?", (subject_person_id,))
+            if cursor.fetchone() is None:
+                raise FileNotFoundError(f"Person not found: {subject_person_id}")
+            cursor.execute("SELECT person_id FROM people WHERE person_id = ?", (object_person_id,))
+            if cursor.fetchone() is None:
+                raise FileNotFoundError(f"Person not found: {object_person_id}")
+
+            return create_person_relation_in_tx(
+                cursor,
+                subject_person_id=subject_person_id,
+                object_person_id=object_person_id,
+                relation_type_id=relation_type_id,
+                started_on=started_on,
+                ended_on=ended_on,
+                note=note,
+                initial_evidence=initial_evidence,
+            )
+    finally:
+        conn.close()
+
+
+def update_person_relation(
+    relation_id: str,
+    started_on: Optional[str] = None,
+    ended_on: Optional[str] = None,
+    note: Optional[str] = None,
+) -> tuple[dict[str, Any], Literal["updated", "merged_into_existing"]]:
+    conn = get_db_connection()
+    try:
+        with conn:
+            cursor = conn.cursor()
+            return update_person_relation_in_tx(
+                cursor,
+                relation_id=relation_id,
+                started_on=started_on,
+                ended_on=ended_on,
+                note=note,
+            )
+    finally:
+        conn.close()
+
+
+def delete_person_relation(relation_id: str) -> None:
+    conn = get_db_connection()
+    try:
+        with conn:
+            cursor = conn.cursor()
+            delete_person_relation_in_tx(cursor, relation_id)
+    finally:
+        conn.close()
+
+
+def add_relation_evidence(
+    relation_id: str,
+    source_type: str = "manual",
+    source_ref: Optional[str] = None,
+    quote: Optional[str] = None,
+    note: Optional[str] = None,
+    observed_at: Optional[str] = None,
+) -> dict[str, Any]:
+    if source_type != "manual":
+        raise ValueError("source_type must be 'manual'")
+    if observed_at is not None:
+        validate_dates(observed_at, None)
+
+    conn = get_db_connection()
+    try:
+        with conn:
+            cursor = conn.cursor()
+            rel = get_person_relation_by_id_in_tx(cursor, relation_id)
+            now_iso = datetime.now(JST).isoformat()
+            deduplicate_and_add_evidence(
+                cursor,
+                relation_id,
+                [
+                    {
+                        "source_type": source_type,
+                        "source_ref": source_ref,
+                        "quote": quote,
+                        "note": note,
+                        "observed_at": observed_at,
+                    }
+                ],
+                now_iso,
+            )
+            return get_person_relation_by_id_in_tx(cursor, relation_id)
+    finally:
+        conn.close()
+
+
+def update_relation_evidence(
+    evidence_id: str,
+    source_ref: Optional[str] = None,
+    quote: Optional[str] = None,
+    note: Optional[str] = None,
+    observed_at: Optional[str] = None,
+) -> dict[str, Any]:
+    if observed_at is not None:
+        validate_dates(observed_at, None)
+
+    conn = get_db_connection()
+    try:
+        with conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT evidence_id, relation_id, source_ref, quote, note, observed_at "
+                "FROM person_relation_evidence WHERE evidence_id = ?",
+                (evidence_id,),
+            )
+            row = cursor.fetchone()
+            if row is None:
+                raise FileNotFoundError(f"Relation evidence not found: {evidence_id}")
+            ev = dict(row)
+
+            now_iso = datetime.now(JST).isoformat()
+            new_ref = source_ref if source_ref is not None else ev["source_ref"]
+            new_quote = quote if quote is not None else ev["quote"]
+            new_note = note if note is not None else ev["note"]
+            new_obs = observed_at if observed_at is not None else ev["observed_at"]
+
+            cursor.execute(
+                """
+                UPDATE person_relation_evidence
+                SET source_ref = ?, quote = ?, note = ?, observed_at = ?, updated_at = ?
+                WHERE evidence_id = ?
+                """,
+                (new_ref, new_quote, new_note, new_obs, now_iso, evidence_id),
+            )
+            return get_person_relation_by_id_in_tx(cursor, ev["relation_id"])
+    finally:
+        conn.close()
+
+
+def delete_relation_evidence(evidence_id: str) -> None:
+    conn = get_db_connection()
+    try:
+        with conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT evidence_id FROM person_relation_evidence WHERE evidence_id = ?",
+                (evidence_id,),
+            )
+            if cursor.fetchone() is None:
+                raise FileNotFoundError(f"Relation evidence not found: {evidence_id}")
+            cursor.execute("DELETE FROM person_relation_evidence WHERE evidence_id = ?", (evidence_id,))
+    finally:
+        conn.close()
