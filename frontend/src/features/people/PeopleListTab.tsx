@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { Person, PersonAlias } from "../../api/types";
-import { PersonDetail, PeopleError, PersonRelation, PersonRelationType, RelationStatus } from "./types";
+import { PersonDetail, PeopleError, PersonRelation, RelationStatus } from "./types";
 import PersonRelationsSection from "./PersonRelationsSection";
 
 interface PeopleListTabProps {
@@ -24,7 +24,6 @@ interface PeopleListTabProps {
   onTriggerMergePreview: (from: Person, to: Person) => void;
   onTriggerAliasDelete: (alias: PersonAlias) => void;
   personRelations?: PersonRelation[];
-  relationTypes?: PersonRelationType[];
   relationStatusFilter?: RelationStatus | "all";
   onRelationStatusFilterChange?: (status: RelationStatus | "all") => void;
   onOpenCreateRelationModal?: () => void;
@@ -53,7 +52,6 @@ export default function PeopleListTab({
   onTriggerMergePreview,
   onTriggerAliasDelete,
   personRelations = [],
-  relationTypes = [],
   relationStatusFilter = "all",
   onRelationStatusFilterChange = () => {},
   onOpenCreateRelationModal = () => {},

@@ -2,7 +2,7 @@ import re
 import sqlite3
 import uuid
 from datetime import datetime
-from typing import Any, Literal, Optional, Tuple
+from typing import Any, Literal, Optional
 from zoneinfo import ZoneInfo
 
 from obsidian_ai_hub.database import get_db_connection
@@ -267,7 +267,8 @@ def get_person_relation_by_id_in_tx(
         """
         SELECT r.relation_id, r.subject_person_id, r.object_person_id, r.relation_type_id,
                r.started_on, r.ended_on, r.note, r.created_at, r.updated_at,
-               t.slug, t.forward_label, t.reverse_label, t.directionality, t.description, t.is_builtin, t.is_active
+               t.slug, t.forward_label, t.reverse_label, t.directionality, t.description, t.is_builtin, t.is_active,
+               t.created_at AS type_created_at, t.updated_at AS type_updated_at
         FROM person_relations r
         JOIN person_relation_types t ON r.relation_type_id = t.relation_type_id
         WHERE r.relation_id = ?
@@ -288,8 +289,8 @@ def get_person_relation_by_id_in_tx(
         "description": rel_dict["description"],
         "is_builtin": bool(rel_dict["is_builtin"]),
         "is_active": bool(rel_dict["is_active"]),
-        "created_at": rel_dict["created_at"],
-        "updated_at": rel_dict["updated_at"],
+        "created_at": rel_dict["type_created_at"],
+        "updated_at": rel_dict["type_updated_at"],
     }
 
     cursor.execute(
@@ -849,7 +850,8 @@ def add_relation_evidence(
     try:
         with conn:
             cursor = conn.cursor()
-            rel = get_person_relation_by_id_in_tx(cursor, relation_id)
+            # Existence check (raises FileNotFoundError for unknown IDs).
+            get_person_relation_by_id_in_tx(cursor, relation_id)
             now_iso = datetime.now(JST).isoformat()
             deduplicate_and_add_evidence(
                 cursor,

@@ -9,7 +9,6 @@ from obsidian_ai_hub.database import get_db_connection
 from obsidian_ai_hub.utils.people_loader import load_people_notes_with_report
 from obsidian_ai_hub.summary.store import normalize_entity_name
 from obsidian_ai_hub.web.services.person_relations import (
-    SelfRelationError,
     preview_person_relation_merge,
     transfer_person_relations_on_merge,
 )

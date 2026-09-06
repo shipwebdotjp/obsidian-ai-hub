@@ -207,13 +207,16 @@ export default function PeoplePage() {
     }
   };
 
-  const loadPersonRelations = async (personId: string, filter?: RelationStatus | "all") => {
+  // Always fetch the full relation list; status filtering is done client-side
+  // in PersonRelationsSection so counts stay consistent.
+  const loadPersonRelations = async (personId: string): Promise<PersonRelation[]> => {
     try {
-      const statusParam = filter && filter !== "all" ? filter : undefined;
-      const data = await peopleApi.fetchPersonRelations(personId, statusParam);
+      const data = await peopleApi.fetchPersonRelations(personId);
       setPersonRelations(data);
-    } catch (e) {
-      // Failed loading relations
+      return data;
+    } catch {
+      setError("関係の読み込みに失敗しました");
+      return [];
     }
   };
 
@@ -297,17 +300,14 @@ export default function PeoplePage() {
       setMobileDetailOpen(true);
       setEditDisplayName(data.display_name);
       setEditAliasesText((data.aliases || []).map((al) => al.display_name).join("\n"));
-      await loadPersonRelations(p.person_id, relationStatusFilter);
+      await loadPersonRelations(p.person_id);
     } catch (e) {
       setError("人物の詳細の取得に失敗しました");
     }
   };
 
-  const handleRelationStatusFilterChange = async (status: RelationStatus | "all") => {
+  const handleRelationStatusFilterChange = (status: RelationStatus | "all") => {
     setRelationStatusFilter(status);
-    if (selectedPerson) {
-      await loadPersonRelations(selectedPerson.person_id, status);
-    }
   };
 
   const handleCreateRelationType = async (req: PersonRelationTypeCreateRequest) => {
@@ -333,7 +333,7 @@ export default function PeoplePage() {
     await loadAllData(false);
     const updatedDetail = await peopleApi.fetchPersonDetail(selectedPerson.person_id);
     setSelectedPerson(updatedDetail);
-    await loadPersonRelations(selectedPerson.person_id, relationStatusFilter);
+    await loadPersonRelations(selectedPerson.person_id);
   };
 
   const handleUpdateRelation = async (relationId: string, req: PersonRelationUpdateRequest) => {
@@ -347,26 +347,31 @@ export default function PeoplePage() {
     await loadAllData(false);
     const updatedDetail = await peopleApi.fetchPersonDetail(selectedPerson.person_id);
     setSelectedPerson(updatedDetail);
-    await loadPersonRelations(selectedPerson.person_id, relationStatusFilter);
+    await loadPersonRelations(selectedPerson.person_id);
   };
 
   const handleDeleteRelation = async (relationId: string) => {
     if (!selectedPerson) return;
-    await peopleApi.deletePersonRelation(relationId);
-    setSuccessMessage("人物間関係を削除しました。");
-    await loadAllData(false);
-    const updatedDetail = await peopleApi.fetchPersonDetail(selectedPerson.person_id);
-    setSelectedPerson(updatedDetail);
-    await loadPersonRelations(selectedPerson.person_id, relationStatusFilter);
+    if (!window.confirm("この人物間関係を削除しますか？この操作は取り消せません。")) return;
+    try {
+      await peopleApi.deletePersonRelation(relationId);
+      setSuccessMessage("人物間関係を削除しました。");
+      await loadAllData(false);
+      const updatedDetail = await peopleApi.fetchPersonDetail(selectedPerson.person_id);
+      setSelectedPerson(updatedDetail);
+      await loadPersonRelations(selectedPerson.person_id);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "人物間関係の削除に失敗しました");
+    }
   };
 
   const handleAddRelationEvidence = async (relationId: string, req: PersonRelationEvidenceCreateRequest) => {
     if (!selectedPerson) return;
     await peopleApi.addRelationEvidence(relationId, req);
     setSuccessMessage("根拠 (Evidence) を追加しました。");
-    await loadPersonRelations(selectedPerson.person_id, relationStatusFilter);
+    const data = await loadPersonRelations(selectedPerson.person_id);
     if (editingRelation && editingRelation.relation_id === relationId) {
-      const updatedRel = (await peopleApi.fetchPersonRelations(selectedPerson.person_id)).find(
+      const updatedRel = data.find(
         (r) => r.relation_id === relationId
       );
       if (updatedRel) setEditingRelation(updatedRel);
@@ -377,9 +382,9 @@ export default function PeoplePage() {
     if (!selectedPerson) return;
     await peopleApi.updateRelationEvidence(evidenceId, req);
     setSuccessMessage("根拠 (Evidence) を更新しました。");
-    await loadPersonRelations(selectedPerson.person_id, relationStatusFilter);
+    const data = await loadPersonRelations(selectedPerson.person_id);
     if (editingRelation) {
-      const updatedRel = (await peopleApi.fetchPersonRelations(selectedPerson.person_id)).find(
+      const updatedRel = data.find(
         (r) => r.relation_id === editingRelation.relation_id
       );
       if (updatedRel) setEditingRelation(updatedRel);
@@ -390,9 +395,9 @@ export default function PeoplePage() {
     if (!selectedPerson) return;
     await peopleApi.deleteRelationEvidence(evidenceId);
     setSuccessMessage("根拠 (Evidence) を削除しました。");
-    await loadPersonRelations(selectedPerson.person_id, relationStatusFilter);
+    const data = await loadPersonRelations(selectedPerson.person_id);
     if (editingRelation) {
-      const updatedRel = (await peopleApi.fetchPersonRelations(selectedPerson.person_id)).find(
+      const updatedRel = data.find(
         (r) => r.relation_id === editingRelation.relation_id
       );
       if (updatedRel) setEditingRelation(updatedRel);
@@ -756,7 +761,6 @@ export default function PeoplePage() {
                 setShowAliasDeleteConfirm(true);
               }}
               personRelations={personRelations}
-              relationTypes={relationTypes}
               relationStatusFilter={relationStatusFilter}
               onRelationStatusFilterChange={handleRelationStatusFilterChange}
               onOpenCreateRelationModal={() => {

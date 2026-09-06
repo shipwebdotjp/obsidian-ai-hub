@@ -1,11 +1,8 @@
-from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
 from obsidian_ai_hub import memory
 from obsidian_ai_hub.web.app import create_app
-
-AUTH_HEADERS = {"Authorization": "Bearer test-token"}
 
 
 @pytest.fixture

@@ -17,7 +17,6 @@ from obsidian_ai_hub.web.schemas import (
     PersonRelationTypeCreateRequest,
     PersonRelationTypeUpdateRequest,
     PersonRelationUpdateRequest,
-    RelationDuplicateMergeResponse,
 )
 
 

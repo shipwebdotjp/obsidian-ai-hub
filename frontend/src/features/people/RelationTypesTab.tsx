@@ -72,8 +72,8 @@ export default function RelationTypesTab({
         description: createDescription.trim() || null,
       });
       setShowCreateModal(false);
-    } catch (err: any) {
-      setCreateError(err?.message || "関係タイプの作成に失敗しました。");
+    } catch (err: unknown) {
+      setCreateError(err instanceof Error ? err.message : "関係タイプの作成に失敗しました。");
     } finally {
       setSubmittingCreate(false);
     }
@@ -96,8 +96,8 @@ export default function RelationTypesTab({
         is_active: editIsActive,
       });
       setEditingType(null);
-    } catch (err: any) {
-      setEditError(err?.message || "関係タイプの更新に失敗しました。");
+    } catch (err: unknown) {
+      setEditError(err instanceof Error ? err.message : "関係タイプの更新に失敗しました。");
     } finally {
       setSubmittingEdit(false);
     }

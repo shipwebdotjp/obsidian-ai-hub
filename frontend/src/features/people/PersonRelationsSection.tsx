@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { Person } from "../../api/types";
 import { PersonDetail, PersonRelation, RelationStatus } from "./types";
 import RelationEvidenceSection from "./RelationEvidenceSection";
@@ -45,8 +45,11 @@ export default function PersonRelationsSection({
     });
   };
 
-  const peopleMap = new Map<string, Person>();
-  peopleList.forEach((p) => peopleMap.set(p.person_id, p));
+  const peopleMap = useMemo(() => {
+    const map = new Map<string, Person>();
+    peopleList.forEach((p) => map.set(p.person_id, p));
+    return map;
+  }, [peopleList]);
 
   // Filtered relations
   const displayedRelations =

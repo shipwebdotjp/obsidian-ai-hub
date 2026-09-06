@@ -100,7 +100,7 @@ const MergePreviewDialog = forwardRef<HTMLDialogElement, MergePreviewDialogProps
                 {previewData.allowed && (
                   <>
                     {/* Aliases, Summaries & Relations Migration Counts */}
-                    <div className="grid grid-cols-3 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                       <div className="border border-slate-100 p-3 rounded-lg bg-white">
                         <div className="font-bold text-slate-800">移管されるサマリー</div>
                         <div className="text-lg font-extrabold text-slate-900 mt-1">{previewData.transferred_summaries_count} <span className="text-xs font-normal text-slate-500">件</span></div>

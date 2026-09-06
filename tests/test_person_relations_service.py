@@ -1,14 +1,13 @@
 import pytest
 from obsidian_ai_hub.database import get_db_connection
+from obsidian_ai_hub.utils import config
 from obsidian_ai_hub.web.services.person_relations import (
     InactiveRelationTypeError,
     InvalidDateError,
     SelfRelationError,
     compute_relation_status,
     create_person_relation_in_tx,
-    delete_person_relation_in_tx,
     get_person_relation_by_id_in_tx,
-    update_person_relation_in_tx,
 )
 from obsidian_ai_hub.web.services.people import delete_person
 from obsidian_ai_hub.web.services.people_merge import (
@@ -17,8 +16,7 @@ from obsidian_ai_hub.web.services.people_merge import (
     preview_people_merge,
 )
 from obsidian_ai_hub.people_sync.sync import sync_people_in_tx
-from obsidian_ai_hub.web.services.people_sync import sync_people, get_vault_report_dynamic
-from obsidian_ai_hub.agents.registry import _BUILTIN_TOOL_DEFINITIONS
+from obsidian_ai_hub.agents.registry import list_available_tools
 
 
 def setup_test_people(conn):
@@ -38,7 +36,7 @@ def test_relation_status_calculation():
 
 def test_relation_crud_and_validation(tmp_path, monkeypatch):
     db_file = tmp_path / "test_rel.db"
-    monkeypatch.setenv("MEMORY_SQLITE_PATH", str(db_file))
+    monkeypatch.setattr(config, "MEMORY_SQLITE_PATH", db_file)
 
     conn = get_db_connection()
     setup_test_people(conn)
@@ -115,7 +113,7 @@ def test_relation_crud_and_validation(tmp_path, monkeypatch):
 
 def test_person_deletion_with_relations(tmp_path, monkeypatch):
     db_file = tmp_path / "test_del.db"
-    monkeypatch.setenv("MEMORY_SQLITE_PATH", str(db_file))
+    monkeypatch.setattr(config, "MEMORY_SQLITE_PATH", db_file)
 
     conn = get_db_connection()
     setup_test_people(conn)
@@ -149,7 +147,7 @@ def test_person_deletion_with_relations(tmp_path, monkeypatch):
 
 def test_manual_person_merge_and_self_relation_conflict(tmp_path, monkeypatch):
     db_file = tmp_path / "test_merge.db"
-    monkeypatch.setenv("MEMORY_SQLITE_PATH", str(db_file))
+    monkeypatch.setattr(config, "MEMORY_SQLITE_PATH", db_file)
 
     conn = get_db_connection()
     setup_test_people(conn)
@@ -185,7 +183,7 @@ def test_manual_person_merge_and_self_relation_conflict(tmp_path, monkeypatch):
 
 def test_vault_sync_automatic_merge_and_self_relation_skip(tmp_path, monkeypatch):
     db_file = tmp_path / "test_sync.db"
-    monkeypatch.setenv("MEMORY_SQLITE_PATH", str(db_file))
+    monkeypatch.setattr(config, "MEMORY_SQLITE_PATH", db_file)
 
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -224,15 +222,15 @@ def test_vault_sync_automatic_merge_and_self_relation_skip(tmp_path, monkeypatch
 
 
 def test_ai_tool_registry_non_exposure():
-    # Verify that no relation tool is exposed in built-in tools
-    tool_names = [tool_def.get("name") if isinstance(tool_def, dict) else getattr(tool_def, "name", str(tool_def)) for tool_def in _BUILTIN_TOOL_DEFINITIONS]
-    for name in tool_names:
-        assert "relation" not in name
+    # Verify that no relation tool is exposed in the public tool catalog.
+    available_tools = list_available_tools()
+    relation_tools = [t for t in available_tools if "relation" in t["tool_id"].lower()]
+    assert len(relation_tools) == 0
 
 
 def test_merge_people_rollback_on_error_leaves_no_partial_transfers(tmp_path, monkeypatch):
     db_file = tmp_path / "test_rollback.db"
-    monkeypatch.setenv("MEMORY_SQLITE_PATH", str(db_file))
+    monkeypatch.setattr(config, "MEMORY_SQLITE_PATH", db_file)
 
     conn = get_db_connection()
     setup_test_people(conn)
@@ -266,3 +264,29 @@ def test_merge_people_rollback_on_error_leaves_no_partial_transfers(tmp_path, mo
     assert rel_rows[0][0] == "peo_1"
     assert rel_rows[0][1] == "peo_2"
     conn2.close()
+
+
+def test_relation_detail_returns_relation_type_timestamps(tmp_path, monkeypatch):
+    db_file = tmp_path / "test_type_ts.db"
+    monkeypatch.setattr(config, "MEMORY_SQLITE_PATH", db_file)
+
+    conn = get_db_connection()
+    setup_test_people(conn)
+    cursor = conn.cursor()
+
+    rel, action = create_person_relation_in_tx(
+        cursor, "peo_1", "peo_2", "rlt_builtin_parent-child"
+    )
+    assert action == "created"
+    conn.commit()
+
+    cursor.execute(
+        "SELECT created_at, updated_at FROM person_relation_types "
+        "WHERE relation_type_id = 'rlt_builtin_parent-child'"
+    )
+    type_row = cursor.fetchone()
+
+    fetched = get_person_relation_by_id_in_tx(cursor, rel["relation_id"])
+    assert fetched["relation_type"]["created_at"] == type_row["created_at"]
+    assert fetched["relation_type"]["updated_at"] == type_row["updated_at"]
+    conn.close()

@@ -3,6 +3,7 @@ import PersonCombobox from "./PersonCombobox";
 import { Person } from "../../api/types";
 import {
   PersonRelation,
+  PersonRelationEvidence,
   PersonRelationType,
   PersonRelationCreateRequest,
   PersonRelationUpdateRequest,
@@ -80,6 +81,7 @@ export default function RelationFormModal({
 
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [evidenceSubmitting, setEvidenceSubmitting] = useState(false);
 
   useEffect(() => {
     if (relationToEdit) {
@@ -89,8 +91,21 @@ export default function RelationFormModal({
       setStartedOn(relationToEdit.started_on || "");
       setEndedOn(relationToEdit.ended_on || "");
       setNote(relationToEdit.note || "");
+    } else {
+      // Fill defaults when types/people arrive after mount; never overwrite user input.
+      if (!selectedTypeId && activeTypes.length > 0) {
+        setSelectedTypeId(activeTypes[0].relation_type_id);
+      }
+      if (!subjectPersonId) {
+        setSubjectPersonId(currentPersonId);
+      }
+      if (!objectPersonId) {
+        const fallback = peopleList.find((p) => p.person_id !== currentPersonId)?.person_id || "";
+        if (fallback) setObjectPersonId(fallback);
+      }
     }
-  }, [relationToEdit]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [relationToEdit, types, currentPersonId, peopleList]);
 
   const selectedType = types.find((t) => t.relation_type_id === selectedTypeId);
 
@@ -109,6 +124,10 @@ export default function RelationFormModal({
       }
       if (subjectPersonId === objectPersonId) {
         setFormError("自分自身との関係（自己関係）を登録することはできません。");
+        return;
+      }
+      if (subjectPersonId !== currentPersonId && objectPersonId !== currentPersonId) {
+        setFormError("いずれか一方の端点に現在表示中の人物を含めてください。");
         return;
       }
     }
@@ -149,16 +168,21 @@ export default function RelationFormModal({
         });
       }
       onClose();
-    } catch (err: any) {
-      setFormError(err?.message || "関係の保存に失敗しました。");
+    } catch (err: unknown) {
+      setFormError(err instanceof Error ? err.message : "関係の保存に失敗しました。");
     } finally {
       setSubmitting(false);
     }
   };
 
   const handleCreateNewEvidence = async () => {
-    if (!relationToEdit) return;
+    if (!relationToEdit || evidenceSubmitting) return;
+    if (!newEvQuote.trim() && !newEvSourceRef.trim() && !newEvNote.trim() && !newEvObservedAt.trim()) {
+      setFormError("根拠を登録するにはいずれかの項目を入力してください。");
+      return;
+    }
     setFormError(null);
+    setEvidenceSubmitting(true);
     try {
       await onAddEvidence(relationToEdit.relation_id, {
         source_type: "manual",
@@ -172,12 +196,14 @@ export default function RelationFormModal({
       setNewEvSourceRef("");
       setNewEvNote("");
       setNewEvObservedAt("");
-    } catch (err: any) {
-      setFormError(err?.message || "根拠の追加に失敗しました。");
+    } catch (err: unknown) {
+      setFormError(err instanceof Error ? err.message : "根拠の追加に失敗しました。");
+    } finally {
+      setEvidenceSubmitting(false);
     }
   };
 
-  const startEditEvidence = (ev: any) => {
+  const startEditEvidence = (ev: PersonRelationEvidence) => {
     setEditingEvidenceId(ev.evidence_id);
     setEditEvQuote(ev.quote || "");
     setEditEvSourceRef(ev.source_ref || "");
@@ -186,7 +212,9 @@ export default function RelationFormModal({
   };
 
   const handleSaveEditedEvidence = async (evidenceId: string) => {
+    if (evidenceSubmitting) return;
     setFormError(null);
+    setEvidenceSubmitting(true);
     try {
       await onUpdateEvidence(evidenceId, {
         quote: editEvQuote.trim() || null,
@@ -195,17 +223,24 @@ export default function RelationFormModal({
         observed_at: editEvObservedAt.trim() || null,
       });
       setEditingEvidenceId(null);
-    } catch (err: any) {
-      setFormError(err?.message || "根拠の更新に失敗しました。");
+    } catch (err: unknown) {
+      setFormError(err instanceof Error ? err.message : "根拠の更新に失敗しました。");
+    } finally {
+      setEvidenceSubmitting(false);
     }
   };
 
   const handleDeleteEvidenceClick = async (evidenceId: string) => {
+    if (evidenceSubmitting) return;
+    if (!window.confirm("この根拠を削除しますか？この操作は取り消せません。")) return;
     setFormError(null);
+    setEvidenceSubmitting(true);
     try {
       await onDeleteEvidence(evidenceId);
-    } catch (err: any) {
-      setFormError(err?.message || "根拠の削除に失敗しました。");
+    } catch (err: unknown) {
+      setFormError(err instanceof Error ? err.message : "根拠の削除に失敗しました。");
+    } finally {
+      setEvidenceSubmitting(false);
     }
   };
 
@@ -245,18 +280,24 @@ export default function RelationFormModal({
                   <label className="block font-semibold text-slate-700 mb-1">
                     関係タイプ <span className="text-red-500">*</span>
                   </label>
-                  <select
-                    value={selectedTypeId}
-                    onChange={(e) => setSelectedTypeId(e.target.value)}
-                    className="w-full rounded border border-slate-300 p-2 text-xs focus:ring-2 focus:ring-slate-800 focus:outline-none"
-                    required
-                  >
-                    {activeTypes.map((t) => (
-                      <option key={t.relation_type_id} value={t.relation_type_id}>
-                        {t.forward_label} / {t.reverse_label} ({t.slug})
-                      </option>
-                    ))}
-                  </select>
+                  {activeTypes.length === 0 ? (
+                    <p className="text-[11px] text-slate-500">
+                      有効な関係タイプがありません。先に「関係タイプ」タブでタイプを作成・有効化してください。
+                    </p>
+                  ) : (
+                    <select
+                      value={selectedTypeId}
+                      onChange={(e) => setSelectedTypeId(e.target.value)}
+                      className="w-full rounded border border-slate-300 p-2 text-xs focus:ring-2 focus:ring-slate-800 focus:outline-none"
+                      required
+                    >
+                      {activeTypes.map((t) => (
+                        <option key={t.relation_type_id} value={t.relation_type_id}>
+                          {t.forward_label} / {t.reverse_label} ({t.slug})
+                        </option>
+                      ))}
+                    </select>
+                  )}
                 </div>
 
                 {/* Endpoints Selection */}
@@ -325,7 +366,9 @@ export default function RelationFormModal({
                     <div className="text-[11px] text-slate-600 pt-1 border-t border-slate-200">
                       構造プレビュー:{" "}
                       <strong className="text-slate-900">{subjectPerson.display_name}</strong>{" "}
-                      — {selectedType?.forward_label} →{" "}
+                      {selectedType?.directionality === "symmetric" ? "⇄" : "—"}{" "}
+                      {selectedType?.forward_label}{" "}
+                      {selectedType?.directionality === "symmetric" ? "⇄" : "→"}{" "}
                       <strong className="text-slate-900">{objectPerson.display_name}</strong>
                     </div>
                   )}
@@ -513,7 +556,8 @@ export default function RelationFormModal({
                     <button
                       type="button"
                       onClick={handleCreateNewEvidence}
-                      className="px-3 py-1 rounded bg-blue-700 font-semibold text-white hover:bg-blue-800 cursor-pointer"
+                      disabled={evidenceSubmitting}
+                      className="px-3 py-1 rounded bg-blue-700 font-semibold text-white hover:bg-blue-800 disabled:opacity-50 cursor-pointer"
                     >
                       追加保存
                     </button>
@@ -522,11 +566,11 @@ export default function RelationFormModal({
               )}
 
               {/* Evidence Items List */}
-              {relationToEdit.evidence.length === 0 ? (
+              {(relationToEdit.evidence || []).length === 0 ? (
                 <p className="text-slate-400 italic text-[11px]">根拠データはありません。</p>
               ) : (
                 <div className="space-y-2">
-                  {relationToEdit.evidence.map((ev) =>
+                  {(relationToEdit.evidence || []).map((ev) =>
                     editingEvidenceId === ev.evidence_id ? (
                       /* Edit Evidence Inline Form */
                       <div
@@ -583,7 +627,8 @@ export default function RelationFormModal({
                           <button
                             type="button"
                             onClick={() => handleSaveEditedEvidence(ev.evidence_id)}
-                            className="px-3 py-1 rounded bg-amber-700 font-semibold text-white hover:bg-amber-800 cursor-pointer"
+                            disabled={evidenceSubmitting}
+                            className="px-3 py-1 rounded bg-amber-700 font-semibold text-white hover:bg-amber-800 disabled:opacity-50 cursor-pointer"
                           >
                             更新保存
                           </button>
@@ -614,7 +659,8 @@ export default function RelationFormModal({
                           <button
                             type="button"
                             onClick={() => handleDeleteEvidenceClick(ev.evidence_id)}
-                            className="px-2 py-0.5 text-[11px] font-semibold text-rose-700 hover:text-rose-900 border border-rose-200 bg-rose-50 rounded cursor-pointer"
+                            disabled={evidenceSubmitting}
+                            className="px-2 py-0.5 text-[11px] font-semibold text-rose-700 hover:text-rose-900 border border-rose-200 bg-rose-50 rounded disabled:opacity-50 cursor-pointer"
                           >
                             削除
                           </button>
@@ -640,7 +686,7 @@ export default function RelationFormModal({
           <button
             type="submit"
             form="relation-form"
-            disabled={submitting}
+            disabled={submitting || (!isEditing && activeTypes.length === 0)}
             className="rounded bg-slate-800 px-4 py-2 text-xs font-semibold text-white hover:bg-slate-700 disabled:opacity-50 cursor-pointer"
           >
             {submitting ? "保存中..." : isEditing ? "関係を更新" : "関係を作成"}

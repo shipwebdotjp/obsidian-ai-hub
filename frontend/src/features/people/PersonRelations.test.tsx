@@ -8,6 +8,7 @@ beforeEach(() => {
 import RelationTypesTab from "./RelationTypesTab";
 import PersonRelationsSection from "./PersonRelationsSection";
 import DeletePersonDialog from "./DeletePersonDialog";
+import RelationFormModal from "./RelationFormModal";
 import { PersonRelationType, PersonRelation, PersonDetail } from "./types";
 
 describe("Person Relations UI Components", () => {
@@ -152,5 +153,47 @@ describe("Person Relations UI Components", () => {
     expect(screen.getByText(/発信リレーション:/i)).toBeInTheDocument();
     expect(screen.getByText(/受信リレーション:/i)).toBeInTheDocument();
     expect(screen.getByText(/根拠 \(evidence\):/i)).toBeInTheDocument();
+  });
+
+  test("RelationFormModal rejects relations detached from the current person", async () => {
+    const onCreate = vi.fn();
+    const mockPeopleList = [
+      { person_id: "peo_taro", display_name: "山田 太郎", normalized_name: "山田太郎", vault_id: null, aliases: [], summary_count: 1 },
+      { person_id: "peo_hanako", display_name: "鈴木 花子", normalized_name: "鈴木花子", vault_id: null, aliases: [], summary_count: 1 },
+      { person_id: "peo_jiro", display_name: "佐藤 次郎", normalized_name: "佐藤次郎", vault_id: null, aliases: [], summary_count: 1 },
+    ];
+
+    render(
+      <RelationFormModal
+        currentPersonId="peo_taro"
+        relationToEdit={null}
+        types={mockTypes}
+        peopleList={mockPeopleList}
+        onClose={vi.fn()}
+        onCreate={onCreate}
+        onUpdate={vi.fn()}
+        onAddEvidence={vi.fn()}
+        onUpdateEvidence={vi.fn()}
+        onDeleteEvidence={vi.fn()}
+      />
+    );
+
+    // Default endpoints are peo_taro -> peo_hanako. Switch subject to peo_jiro
+    // so neither endpoint is the current person.
+    const subjectInput = screen.getByPlaceholderText("発信人物を選択...");
+    fireEvent.focus(subjectInput);
+    const optionLabel = await screen.findByText("佐藤 次郎", { exact: false });
+    const option = optionLabel.closest("li");
+    expect(option).not.toBeNull();
+    fireEvent.click(option!);
+
+    fireEvent.click(screen.getByText("関係を作成"));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("いずれか一方の端点に現在表示中の人物を含めてください。")
+      ).toBeInTheDocument();
+    });
+    expect(onCreate).not.toHaveBeenCalled();
   });
 });
