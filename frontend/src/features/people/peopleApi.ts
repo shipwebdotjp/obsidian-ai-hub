@@ -16,8 +16,7 @@ import {
   PersonRelationUpdateRequest,
   PersonRelationEvidenceCreateRequest,
   PersonRelationEvidenceUpdateRequest,
-  RelationDuplicateMergeResponse,
-  RelationStatus
+  RelationDuplicateMergeResponse
 } from "./types";
 
 const PEOPLE_API = "/api/v1/people";
@@ -148,12 +147,9 @@ export async function updatePersonRelationType(
 }
 
 export async function fetchPersonRelations(
-  personId: string,
-  status?: RelationStatus
+  personId: string
 ): Promise<PersonRelation[]> {
-  const url = status
-    ? `${PEOPLE_API}/${encodeURIComponent(personId)}/relations?status=${encodeURIComponent(status)}`
-    : `${PEOPLE_API}/${encodeURIComponent(personId)}/relations`;
+  const url = `${PEOPLE_API}/${encodeURIComponent(personId)}/relations`;
   return apiGet<PersonRelation[]>(url);
 }
 

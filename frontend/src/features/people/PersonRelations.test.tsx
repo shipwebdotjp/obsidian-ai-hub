@@ -332,4 +332,84 @@ describe("Person Relations UI Components", () => {
     expect(screen.getByText("自己関係違反")).toBeInTheDocument();
     expect(screen.getByText("(期間未設定)")).toBeInTheDocument();
   });
+
+  test("RelationFormModal rejects empty evidence in edit mode", async () => {
+    const onAddEvidence = vi.fn();
+    const onUpdateEvidence = vi.fn();
+    const relationToEdit: PersonRelation = {
+      relation_id: "rel_1",
+      subject_person_id: "peo_taro",
+      object_person_id: "peo_hanako",
+      relation_type_id: "rlt_parent",
+      started_on: null,
+      ended_on: null,
+      note: null,
+      status: "active",
+      created_at: "2026-01-01T00:00:00",
+      updated_at: "2026-01-01T00:00:00",
+      relation_type: mockTypes[0],
+      evidence: [
+        {
+          evidence_id: "rle_1",
+          relation_id: "rel_1",
+          source_type: "manual",
+          source_ref: null,
+          quote: "既存の引用",
+          note: "既存メモ",
+          observed_at: null,
+          created_at: "2026-01-01T00:00:00",
+          updated_at: "2026-01-01T00:00:00",
+        },
+      ],
+    };
+    const mockPeopleList = [
+      { person_id: "peo_taro", display_name: "山田 太郎", normalized_name: "山田太郎", vault_id: null, aliases: [], summary_count: 1 },
+      { person_id: "peo_hanako", display_name: "鈴木 花子", normalized_name: "鈴木花子", vault_id: null, aliases: [], summary_count: 1 },
+    ];
+
+    const { container } = render(
+      <RelationFormModal
+        currentPersonId="peo_taro"
+        relationToEdit={relationToEdit}
+        types={mockTypes}
+        peopleList={mockPeopleList}
+        onClose={vi.fn()}
+        onCreate={vi.fn()}
+        onUpdate={vi.fn()}
+        onAddEvidence={onAddEvidence}
+        onUpdateEvidence={onUpdateEvidence}
+        onDeleteEvidence={vi.fn()}
+      />
+    );
+
+    // Empty add-form is rejected.
+    fireEvent.click(screen.getByText("＋ 根拠を追加"));
+    fireEvent.click(screen.getByText("追加保存"));
+    await waitFor(() => {
+      expect(
+        screen.getByText("根拠を登録するにはいずれかの項目を入力してください。")
+      ).toBeInTheDocument();
+    });
+    expect(onAddEvidence).not.toHaveBeenCalled();
+
+    // Clearing every field of an existing evidence and saving is rejected too.
+    fireEvent.click(screen.getByText("編集", { selector: "button" }));
+    await waitFor(() => {
+      expect(screen.getByText("根拠の編集")).toBeInTheDocument();
+    });
+    const textInputs = container.querySelectorAll(
+      'div[class*="bg-amber-50"] input[type="text"]'
+    );
+    expect(textInputs.length).toBeGreaterThan(0);
+    textInputs.forEach((input) => {
+      fireEvent.change(input, { target: { value: "" } });
+    });
+    fireEvent.click(screen.getByText("更新保存"));
+    await waitFor(() => {
+      expect(
+        screen.getAllByText("根拠を登録するにはいずれかの項目を入力してください。").length
+      ).toBeGreaterThan(0);
+    });
+    expect(onUpdateEvidence).not.toHaveBeenCalled();
+  });
 });

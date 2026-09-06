@@ -213,19 +213,19 @@ export default function PeoplePage() {
   // in PersonRelationsSection so counts stay consistent.
   // The request id guards against rapid person switching: a stale fetch
   // resolving after a newer one must not overwrite the current list.
-  // Returns null on failure (error already surfaced) so callers can skip
-  // their success messages instead of showing success + error together.
-  // Returns an empty array (not null) when superseded by a newer request.
+  // Returns null on failure AND when superseded (both already surfaced or
+  // moot), so callers can skip their success messages in those cases.
+  // A legitimately empty list is `[]`, never null.
   const relationsRequestRef = useRef(0);
   const loadPersonRelations = async (personId: string): Promise<PersonRelation[] | null> => {
     const reqId = ++relationsRequestRef.current;
     try {
       const data = await peopleApi.fetchPersonRelations(personId);
-      if (reqId !== relationsRequestRef.current) return [];
+      if (reqId !== relationsRequestRef.current) return null;
       setPersonRelations(data);
       return data;
     } catch {
-      if (reqId !== relationsRequestRef.current) return [];
+      if (reqId !== relationsRequestRef.current) return null;
       setError("関係の読み込みに失敗しました");
       return null;
     }

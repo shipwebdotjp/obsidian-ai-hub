@@ -24,6 +24,26 @@ interface RelationFormModalProps {
   onDeleteEvidence: (evidenceId: string) => Promise<void>;
 }
 
+interface EvidenceDraft {
+  quote: string;
+  sourceRef: string;
+  note: string;
+  observedAt: string;
+}
+
+function toEvidenceFields(draft: EvidenceDraft) {
+  return {
+    quote: draft.quote.trim() || null,
+    source_ref: draft.sourceRef.trim() || null,
+    note: draft.note.trim() || null,
+    observed_at: draft.observedAt.trim() || null,
+  };
+}
+
+function isEvidenceDraftEmpty(draft: EvidenceDraft): boolean {
+  return !draft.quote.trim() && !draft.sourceRef.trim() && !draft.note.trim() && !draft.observedAt.trim();
+}
+
 export default function RelationFormModal({
   currentPersonId,
   relationToEdit,
@@ -176,14 +196,17 @@ export default function RelationFormModal({
           note: note.trim() || null,
         });
       } else {
+        const initialDraft: EvidenceDraft = {
+          quote: evQuote,
+          sourceRef: evSourceRef,
+          note: evNote,
+          observedAt: evObservedAt,
+        };
         const initialEvList: PersonRelationEvidenceCreateRequest[] = [];
-        if (evQuote.trim() || evSourceRef.trim() || evNote.trim() || evObservedAt.trim()) {
+        if (!isEvidenceDraftEmpty(initialDraft)) {
           initialEvList.push({
             source_type: "manual",
-            quote: evQuote.trim() || null,
-            source_ref: evSourceRef.trim() || null,
-            note: evNote.trim() || null,
-            observed_at: evObservedAt.trim() || null,
+            ...toEvidenceFields(initialDraft),
           });
         }
 
@@ -207,7 +230,13 @@ export default function RelationFormModal({
 
   const handleCreateNewEvidence = async () => {
     if (!relationToEdit || evidenceSubmitting) return;
-    if (!newEvQuote.trim() && !newEvSourceRef.trim() && !newEvNote.trim() && !newEvObservedAt.trim()) {
+    const draft: EvidenceDraft = {
+      quote: newEvQuote,
+      sourceRef: newEvSourceRef,
+      note: newEvNote,
+      observedAt: newEvObservedAt,
+    };
+    if (isEvidenceDraftEmpty(draft)) {
       setFormError("根拠を登録するにはいずれかの項目を入力してください。");
       return;
     }
@@ -216,10 +245,7 @@ export default function RelationFormModal({
     try {
       await onAddEvidence(relationToEdit.relation_id, {
         source_type: "manual",
-        quote: newEvQuote.trim() || null,
-        source_ref: newEvSourceRef.trim() || null,
-        note: newEvNote.trim() || null,
-        observed_at: newEvObservedAt.trim() || null,
+        ...toEvidenceFields(draft),
       });
       setShowAddEvidenceForm(false);
       setNewEvQuote("");
@@ -243,15 +269,20 @@ export default function RelationFormModal({
 
   const handleSaveEditedEvidence = async (evidenceId: string) => {
     if (evidenceSubmitting) return;
+    const draft: EvidenceDraft = {
+      quote: editEvQuote,
+      sourceRef: editEvSourceRef,
+      note: editEvNote,
+      observedAt: editEvObservedAt,
+    };
+    if (isEvidenceDraftEmpty(draft)) {
+      setFormError("根拠を登録するにはいずれかの項目を入力してください。");
+      return;
+    }
     setFormError(null);
     setEvidenceSubmitting(true);
     try {
-      await onUpdateEvidence(evidenceId, {
-        quote: editEvQuote.trim() || null,
-        source_ref: editEvSourceRef.trim() || null,
-        note: editEvNote.trim() || null,
-        observed_at: editEvObservedAt.trim() || null,
-      });
+      await onUpdateEvidence(evidenceId, toEvidenceFields(draft));
       setEditingEvidenceId(null);
     } catch (err: unknown) {
       setFormError(err instanceof Error ? err.message : "根拠の更新に失敗しました。");
