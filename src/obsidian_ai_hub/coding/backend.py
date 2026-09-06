@@ -182,7 +182,7 @@ class CodingBackend(ABC):
         prompt: str,
         external_session_id: Optional[str] = None,
         cancel_event: Optional[threading.Event] = None,
-        timeout: Optional[int] = None,
+        timeout: int = 600,
     ) -> CodingBackendResult:
         """Execute CLI command inside repo_path."""
         pass
@@ -197,13 +197,9 @@ class _BaseSubprocessBackend(CodingBackend):
         cwd: str,
         env: Optional[dict] = None,
         cancel_event: Optional[threading.Event] = None,
-        timeout: Optional[int] = None,
+        timeout: int = 600,
     ) -> tuple[int, str, str, bool]:
         """Run process with group signal termination on cancel/timeout.
-
-        ``timeout`` is ``None`` for no time limit (CLI worker runs until
-        completion or explicit user cancel). When set, exceeding it kills
-        the process group and reports ``cancelled=True``.
 
         Returns (exit_code, stdout, stderr, cancelled).
         """
@@ -251,7 +247,7 @@ class _BaseSubprocessBackend(CodingBackend):
                 break
 
             elapsed = time.monotonic() - start_time
-            if timeout is not None and elapsed >= timeout:
+            if elapsed >= timeout:
                 cancelled = True
                 try:
                     os.killpg(proc.pid, signal.SIGKILL)
@@ -383,7 +379,7 @@ class CodexCliBackend(_BaseSubprocessBackend):
         prompt: str,
         external_session_id: Optional[str] = None,
         cancel_event: Optional[threading.Event] = None,
-        timeout: Optional[int] = None,
+        timeout: int = 600,
     ) -> CodingBackendResult:
         exe_path = CODING_CODEX_CLI_PATH or "codex"
 
@@ -419,11 +415,7 @@ class CodexCliBackend(_BaseSubprocessBackend):
                 external_session_id=current_thread_id,
                 output=parsed_text,
                 exit_code=exit_code,
-                error_message=(
-                    "Cancelled by user or timed out"
-                    if timeout is not None
-                    else "Cancelled by user"
-                ),
+                error_message="Cancelled by user or timed out",
                 cancelled=True,
             )
 
@@ -482,11 +474,7 @@ class CodexCliBackend(_BaseSubprocessBackend):
                     external_session_id=None,
                     output=r_text,
                     exit_code=r_exit,
-                    error_message=(
-                        "Cancelled by user or timed out during retry"
-                        if timeout is not None
-                        else "Cancelled by user during retry"
-                    ),
+                    error_message="Cancelled by user or timed out during retry",
                     cancelled=True,
                     session_recreated=False,
                 )
@@ -865,7 +853,7 @@ class OpenCodeCliBackend(_BaseSubprocessBackend):
         prompt: str,
         external_session_id: Optional[str] = None,
         cancel_event: Optional[threading.Event] = None,
-        timeout: Optional[int] = None,
+        timeout: int = 600,
     ) -> CodingBackendResult:
         exe_path = CODING_OPENCODE_CLI_PATH or "opencode"
         canonical_repo = validate_git_repo(repo_path)
@@ -977,11 +965,7 @@ class OpenCodeCliBackend(_BaseSubprocessBackend):
                 external_session_id=external_session_id,
                 output=parsed_text,
                 exit_code=exit_code,
-                error_message=(
-                    "Cancelled by user or timed out"
-                    if timeout is not None
-                    else "Cancelled by user"
-                ),
+                error_message="Cancelled by user or timed out",
                 cancelled=True,
                 diagnostics=diag,
             )
@@ -1089,11 +1073,7 @@ class OpenCodeCliBackend(_BaseSubprocessBackend):
                     external_session_id=None,
                     output=r_text,
                     exit_code=r_exit,
-                    error_message=(
-                        "Cancelled by user or timed out during retry"
-                        if timeout is not None
-                        else "Cancelled by user during retry"
-                    ),
+                    error_message="Cancelled by user or timed out during retry",
                     cancelled=True,
                     session_recreated=True,
                     diagnostics=diag,
