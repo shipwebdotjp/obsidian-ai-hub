@@ -228,3 +228,41 @@ def test_ai_tool_registry_non_exposure():
     tool_names = [tool_def.get("name") if isinstance(tool_def, dict) else getattr(tool_def, "name", str(tool_def)) for tool_def in _BUILTIN_TOOL_DEFINITIONS]
     for name in tool_names:
         assert "relation" not in name
+
+
+def test_merge_people_rollback_on_error_leaves_no_partial_transfers(tmp_path, monkeypatch):
+    db_file = tmp_path / "test_rollback.db"
+    monkeypatch.setenv("MEMORY_SQLITE_PATH", str(db_file))
+
+    conn = get_db_connection()
+    setup_test_people(conn)
+    cursor = conn.cursor()
+
+    # peo_1 -> peo_2 (parent-child)
+    create_person_relation_in_tx(
+        cursor, "peo_1", "peo_2", "rlt_builtin_parent-child", note="Original peo_1 rel"
+    )
+    # peo_3 -> peo_1 (friend) -> if we attempt to merge peo_1 into peo_3:
+    # peo_1 -> peo_2 would attempt to become peo_3 -> peo_2.
+    # BUT if peo_1 -> peo_1 also exists (self-relation), merging peo_1 into peo_3 would attempt peo_3 -> peo_3 which is self-relation conflict!
+    # Let's create peo_3 -> peo_1 (parent-child). If we merge peo_1 into peo_3, peo_3 -> peo_1 becomes peo_3 -> peo_3 (self-relation).
+    create_person_relation_in_tx(cursor, "peo_3", "peo_1", "rlt_builtin_parent-child")
+    conn.commit()
+
+    # Attempting to merge peo_1 into peo_3 must fail with SelfRelationConflictError
+    with pytest.raises(SelfRelationConflictError):
+        merge_people("peo_1", "peo_3")
+
+    # Verify atomic rollback: peo_1 and peo_3 still exist, and peo_1's relations are untouched!
+    conn2 = get_db_connection()
+    c2 = conn2.cursor()
+    c2.execute("SELECT person_id FROM people WHERE person_id IN ('peo_1', 'peo_3')")
+    p_ids = {r[0] for r in c2.fetchall()}
+    assert p_ids == {"peo_1", "peo_3"}
+
+    c2.execute("SELECT subject_person_id, object_person_id FROM person_relations WHERE subject_person_id = 'peo_1'")
+    rel_rows = c2.fetchall()
+    assert len(rel_rows) == 1
+    assert rel_rows[0][0] == "peo_1"
+    assert rel_rows[0][1] == "peo_2"
+    conn2.close()

@@ -213,3 +213,55 @@ def test_unauthenticated_requests_rejected(seed_people_data, api_token):
 
     res = unauth_client.get("/api/v1/people/peo_taro/relations")
     assert res.status_code == 401
+
+
+def test_nonexistent_ids_return_404(seed_people_data, client):
+    # 1. Nonexistent person GET relations -> 404
+    res = client.get("/api/v1/people/peo_nonexistent/relations")
+    assert res.status_code == 404
+
+    # 2. Nonexistent person POST relations -> 404
+    res = client.get("/api/v1/person-relation-types")
+    type_id = res.json()[0]["relation_type_id"]
+    res = client.post(
+        "/api/v1/people/peo_nonexistent/relations",
+        json={
+            "subject_person_id": "peo_nonexistent",
+            "object_person_id": "peo_hanako",
+            "relation_type_id": type_id,
+        },
+    )
+    assert res.status_code == 404
+
+    # 3. Nonexistent relation PATCH / DELETE -> 404
+    res = client.patch(
+        "/api/v1/person-relations/rel_nonexistent",
+        json={"note": "updated note"},
+    )
+    assert res.status_code == 404
+
+    res = client.delete("/api/v1/person-relations/rel_nonexistent")
+    assert res.status_code == 404
+
+    # 4. Nonexistent relation type PATCH -> 404
+    res = client.patch(
+        "/api/v1/person-relation-types/rlt_nonexistent",
+        json={"description": "updated"},
+    )
+    assert res.status_code == 404
+
+    # 5. Nonexistent relation evidence POST / PATCH / DELETE -> 404
+    res = client.post(
+        "/api/v1/person-relations/rel_nonexistent/evidence",
+        json={"source_type": "manual", "quote": "test"},
+    )
+    assert res.status_code == 404
+
+    res = client.patch(
+        "/api/v1/person-relation-evidence/evi_nonexistent",
+        json={"quote": "test"},
+    )
+    assert res.status_code == 404
+
+    res = client.delete("/api/v1/person-relation-evidence/evi_nonexistent")
+    assert res.status_code == 404
