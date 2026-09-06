@@ -436,6 +436,7 @@ def update_person_relation(
             started_on=body.started_on,
             ended_on=body.ended_on,
             note=body.note,
+            provided=body.model_fields_set,
         )
         return {"action": action, "relation": rel}
     except FileNotFoundError as e:
@@ -503,6 +504,7 @@ def update_relation_evidence(
             quote=body.quote,
             note=body.note,
             observed_at=body.observed_at,
+            provided=body.model_fields_set,
         )
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e

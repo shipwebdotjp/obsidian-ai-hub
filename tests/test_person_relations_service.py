@@ -8,6 +8,8 @@ from obsidian_ai_hub.web.services.person_relations import (
     compute_relation_status,
     create_person_relation_in_tx,
     get_person_relation_by_id_in_tx,
+    update_person_relation,
+    update_relation_evidence,
 )
 from obsidian_ai_hub.web.services.people import delete_person
 from obsidian_ai_hub.web.services.people_merge import (
@@ -289,4 +291,58 @@ def test_relation_detail_returns_relation_type_timestamps(tmp_path, monkeypatch)
     fetched = get_person_relation_by_id_in_tx(cursor, rel["relation_id"])
     assert fetched["relation_type"]["created_at"] == type_row["created_at"]
     assert fetched["relation_type"]["updated_at"] == type_row["updated_at"]
+    conn.close()
+
+
+def test_update_clears_fields_with_explicit_null(tmp_path, monkeypatch):
+    db_file = tmp_path / "test_clear.db"
+    monkeypatch.setattr(config, "MEMORY_SQLITE_PATH", db_file)
+
+    conn = get_db_connection()
+    setup_test_people(conn)
+    cursor = conn.cursor()
+
+    rel, _ = create_person_relation_in_tx(
+        cursor,
+        "peo_1",
+        "peo_2",
+        "rlt_builtin_parent-child",
+        started_on="2025-01-01",
+        ended_on="2025-12-31",
+        note="to clear",
+        initial_evidence=[{"source_type": "manual", "quote": "q", "note": "n"}],
+    )
+    conn.commit()
+    ev_id = rel["evidence"][0]["evidence_id"]
+
+    # Explicit None with field names provided clears to NULL; omitted stays.
+    updated, action = update_person_relation(
+        rel["relation_id"],
+        started_on=None,
+        note=None,
+        provided={"started_on", "note"},
+    )
+    assert action == "updated"
+    assert updated["started_on"] is None
+    assert updated["note"] is None
+    assert updated["ended_on"] == "2025-12-31"
+
+    # Legacy path without `provided` keeps previous behavior (None keeps).
+    updated2, _ = update_person_relation(rel["relation_id"], note="new note")
+    assert updated2["note"] == "new note"
+    assert updated2["started_on"] is None
+    assert updated2["ended_on"] == "2025-12-31"
+
+    # Evidence fields follow the same rule.
+    update_relation_evidence(ev_id, quote=None, provided={"quote"})
+    conn2 = get_db_connection()
+    c2 = conn2.cursor()
+    c2.execute(
+        "SELECT quote, note FROM person_relation_evidence WHERE evidence_id = ?",
+        (ev_id,),
+    )
+    row = c2.fetchone()
+    assert row["quote"] is None
+    assert row["note"] == "n"
+    conn2.close()
     conn.close()

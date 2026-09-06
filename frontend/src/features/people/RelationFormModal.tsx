@@ -83,6 +83,12 @@ export default function RelationFormModal({
   const [submitting, setSubmitting] = useState(false);
   const [evidenceSubmitting, setEvidenceSubmitting] = useState(false);
   const syncedRelationIdRef = useRef<string | null>(null);
+  // Per-field init flags: distinguish "not yet initialized" (autofill when
+  // types/people arrive late) from "user explicitly cleared" (never refill).
+  // Initialized from mount-time values; the modal unmounts on close.
+  const didInitTypeRef = useRef(selectedTypeId !== "");
+  const didInitSubjectRef = useRef(subjectPersonId !== "");
+  const didInitObjectRef = useRef(objectPersonId !== "");
 
   useEffect(() => {
     if (relationToEdit) {
@@ -110,16 +116,22 @@ export default function RelationFormModal({
       setNote(relationToEdit.note || "");
     } else {
       syncedRelationIdRef.current = null;
-      // Fill defaults when types/people arrive after mount; never overwrite user input.
-      if (!selectedTypeId && activeTypes.length > 0) {
+      // Fill defaults when types/people arrive after mount; never overwrite
+      // user input or undo an explicit user clear.
+      if (!selectedTypeId && activeTypes.length > 0 && !didInitTypeRef.current) {
         setSelectedTypeId(activeTypes[0].relation_type_id);
+        didInitTypeRef.current = true;
       }
-      if (!subjectPersonId) {
+      if (!subjectPersonId && !didInitSubjectRef.current) {
         setSubjectPersonId(currentPersonId);
+        didInitSubjectRef.current = true;
       }
-      if (!objectPersonId) {
+      if (!objectPersonId && !didInitObjectRef.current) {
         const fallback = peopleList.find((p) => p.person_id !== currentPersonId)?.person_id || "";
-        if (fallback) setObjectPersonId(fallback);
+        if (fallback) {
+          setObjectPersonId(fallback);
+          didInitObjectRef.current = true;
+        }
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

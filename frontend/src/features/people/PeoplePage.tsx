@@ -344,17 +344,19 @@ export default function PeoplePage() {
     if (!selectedPerson) return;
     const personId = selectedPerson.person_id;
     const res = await peopleApi.createPersonRelation(personId, req);
-    if (res.action === "merged_into_existing") {
-      setSuccessMessage("既存の同一人物間関係が存在するため、内容および根拠を重複統合しました。");
-    } else {
-      setSuccessMessage("新しい人物間関係を作成しました。");
-    }
+    // Set the success message only after the reload succeeds so a reload
+    // failure never leaves contradictory success + error banners.
+    const successMsg =
+      res.action === "merged_into_existing"
+        ? "既存の同一人物間関係が存在するため、内容および根拠を重複統合しました。"
+        : "新しい人物間関係を作成しました。";
     try {
       await loadAllData(false);
       const updatedDetail = await peopleApi.fetchPersonDetail(personId);
       if (selectedPersonIdRef.current !== personId) return;
       setSelectedPerson(updatedDetail);
       await loadPersonRelations(personId);
+      setSuccessMessage(successMsg);
     } catch (e) {
       if (selectedPersonIdRef.current !== personId) return;
       setError(e instanceof Error ? e.message : "詳細の再読み込みに失敗しました");
@@ -365,17 +367,17 @@ export default function PeoplePage() {
     if (!selectedPerson) return;
     const personId = selectedPerson.person_id;
     const res = await peopleApi.updatePersonRelation(relationId, req);
-    if (res.action === "merged_into_existing") {
-      setSuccessMessage("期間の変更により既存関係と一致したため、関係を統合しました。");
-    } else {
-      setSuccessMessage("人物間関係を更新しました。");
-    }
+    const successMsg =
+      res.action === "merged_into_existing"
+        ? "期間の変更により既存関係と一致したため、関係を統合しました。"
+        : "人物間関係を更新しました。";
     try {
       await loadAllData(false);
       const updatedDetail = await peopleApi.fetchPersonDetail(personId);
       if (selectedPersonIdRef.current !== personId) return;
       setSelectedPerson(updatedDetail);
       await loadPersonRelations(personId);
+      setSuccessMessage(successMsg);
     } catch (e) {
       if (selectedPersonIdRef.current !== personId) return;
       setError(e instanceof Error ? e.message : "詳細の再読み込みに失敗しました");
@@ -387,12 +389,12 @@ export default function PeoplePage() {
     const personId = selectedPerson.person_id;
     try {
       await peopleApi.deletePersonRelation(relationId);
-      setSuccessMessage("人物間関係を削除しました。");
       await loadAllData(false);
       const updatedDetail = await peopleApi.fetchPersonDetail(personId);
       if (selectedPersonIdRef.current !== personId) return;
       setSelectedPerson(updatedDetail);
       await loadPersonRelations(personId);
+      setSuccessMessage("人物間関係を削除しました。");
     } catch (e) {
       if (selectedPersonIdRef.current !== personId) return;
       setError(e instanceof Error ? e.message : "人物間関係の削除に失敗しました");
@@ -403,7 +405,6 @@ export default function PeoplePage() {
     if (!selectedPerson) return;
     const personId = selectedPerson.person_id;
     await peopleApi.addRelationEvidence(relationId, req);
-    setSuccessMessage("根拠 (Evidence) を追加しました。");
     const data = await loadPersonRelations(personId);
     if (selectedPersonIdRef.current !== personId) return;
     if (editingRelation && editingRelation.relation_id === relationId) {
@@ -412,13 +413,13 @@ export default function PeoplePage() {
       );
       if (updatedRel) setEditingRelation(updatedRel);
     }
+    setSuccessMessage("根拠 (Evidence) を追加しました。");
   };
 
   const handleUpdateRelationEvidence = async (evidenceId: string, req: PersonRelationEvidenceUpdateRequest) => {
     if (!selectedPerson) return;
     const personId = selectedPerson.person_id;
     await peopleApi.updateRelationEvidence(evidenceId, req);
-    setSuccessMessage("根拠 (Evidence) を更新しました。");
     const data = await loadPersonRelations(personId);
     if (selectedPersonIdRef.current !== personId) return;
     if (editingRelation) {
@@ -427,13 +428,13 @@ export default function PeoplePage() {
       );
       if (updatedRel) setEditingRelation(updatedRel);
     }
+    setSuccessMessage("根拠 (Evidence) を更新しました。");
   };
 
   const handleDeleteRelationEvidence = async (evidenceId: string) => {
     if (!selectedPerson) return;
     const personId = selectedPerson.person_id;
     await peopleApi.deleteRelationEvidence(evidenceId);
-    setSuccessMessage("根拠 (Evidence) を削除しました。");
     const data = await loadPersonRelations(personId);
     if (selectedPersonIdRef.current !== personId) return;
     if (editingRelation) {
@@ -442,6 +443,7 @@ export default function PeoplePage() {
       );
       if (updatedRel) setEditingRelation(updatedRel);
     }
+    setSuccessMessage("根拠 (Evidence) を削除しました。");
   };
 
   const handleUpdatePerson = async () => {

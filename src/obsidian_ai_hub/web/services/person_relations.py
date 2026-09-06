@@ -1,6 +1,7 @@
 import re
 import sqlite3
 import uuid
+from collections.abc import Collection
 from datetime import datetime
 from typing import Any, Literal, Optional
 from zoneinfo import ZoneInfo
@@ -324,11 +325,25 @@ def update_person_relation_in_tx(
     started_on: Optional[str] = None,
     ended_on: Optional[str] = None,
     note: Optional[str] = None,
+    provided: Collection[str] | None = None,
 ) -> tuple[dict[str, Any], Literal["updated", "merged_into_existing"]]:
+    """Update dates/note of a relation.
+
+    ``provided`` holds the field names explicitly supplied by the caller
+    (e.g. ``body.model_fields_set``). When given, an explicit ``None``
+    clears the field to NULL; omitted fields keep their current value.
+    When ``None`` (legacy direct calls), ``None`` keeps the current value.
+    """
     current_rel = get_person_relation_by_id_in_tx(cursor, relation_id)
 
-    new_started_on = started_on if started_on is not None else current_rel["started_on"]
-    new_ended_on = ended_on if ended_on is not None else current_rel["ended_on"]
+    if provided is None:
+        new_started_on = started_on if started_on is not None else current_rel["started_on"]
+        new_ended_on = ended_on if ended_on is not None else current_rel["ended_on"]
+        merged_note = note if note is not None else current_rel["note"]
+    else:
+        new_started_on = started_on if "started_on" in provided else current_rel["started_on"]
+        new_ended_on = ended_on if "ended_on" in provided else current_rel["ended_on"]
+        merged_note = note if "note" in provided else current_rel["note"]
     validate_dates(new_started_on, new_ended_on)
 
     now_iso = datetime.now(JST).isoformat()
@@ -356,7 +371,8 @@ def update_person_relation_in_tx(
 
     if target_collision is not None:
         surviving_id = target_collision["relation_id"]
-        merged_note = concatenate_notes(target_collision["note"], note or current_rel["note"])
+        incoming_note = note if (provided is None or "note" in provided) else current_rel["note"]
+        merged_note = concatenate_notes(target_collision["note"], incoming_note or current_rel["note"])
 
         cursor.execute(
             "UPDATE person_relations SET note = ?, updated_at = ? WHERE relation_id = ?",
@@ -377,8 +393,7 @@ def update_person_relation_in_tx(
         surviving_rel = get_person_relation_by_id_in_tx(cursor, surviving_id)
         return surviving_rel, "merged_into_existing"
 
-    # Standard update
-    merged_note = note if note is not None else current_rel["note"]
+    # Standard update (merged_note already resolved above, honoring `provided`)
     cursor.execute(
         "UPDATE person_relations SET started_on = ?, ended_on = ?, note = ?, updated_at = ? WHERE relation_id = ?",
         (new_started_on, new_ended_on, merged_note, now_iso, relation_id),
@@ -807,6 +822,7 @@ def update_person_relation(
     started_on: Optional[str] = None,
     ended_on: Optional[str] = None,
     note: Optional[str] = None,
+    provided: Collection[str] | None = None,
 ) -> tuple[dict[str, Any], Literal["updated", "merged_into_existing"]]:
     conn = get_db_connection()
     try:
@@ -818,6 +834,7 @@ def update_person_relation(
                 started_on=started_on,
                 ended_on=ended_on,
                 note=note,
+                provided=provided,
             )
     finally:
         conn.close()
@@ -878,7 +895,13 @@ def update_relation_evidence(
     quote: Optional[str] = None,
     note: Optional[str] = None,
     observed_at: Optional[str] = None,
+    provided: Collection[str] | None = None,
 ) -> dict[str, Any]:
+    """Update evidence fields.
+
+    ``provided`` holds explicitly supplied field names (see
+    ``update_person_relation_in_tx``): explicit ``None`` clears to NULL.
+    """
     if observed_at is not None:
         validate_dates(observed_at, None)
 
@@ -897,10 +920,16 @@ def update_relation_evidence(
             ev = dict(row)
 
             now_iso = datetime.now(JST).isoformat()
-            new_ref = source_ref if source_ref is not None else ev["source_ref"]
-            new_quote = quote if quote is not None else ev["quote"]
-            new_note = note if note is not None else ev["note"]
-            new_obs = observed_at if observed_at is not None else ev["observed_at"]
+            if provided is None:
+                new_ref = source_ref if source_ref is not None else ev["source_ref"]
+                new_quote = quote if quote is not None else ev["quote"]
+                new_note = note if note is not None else ev["note"]
+                new_obs = observed_at if observed_at is not None else ev["observed_at"]
+            else:
+                new_ref = source_ref if "source_ref" in provided else ev["source_ref"]
+                new_quote = quote if "quote" in provided else ev["quote"]
+                new_note = note if "note" in provided else ev["note"]
+                new_obs = observed_at if "observed_at" in provided else ev["observed_at"]
 
             cursor.execute(
                 """
