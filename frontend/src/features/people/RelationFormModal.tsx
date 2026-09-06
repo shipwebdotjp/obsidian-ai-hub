@@ -277,8 +277,8 @@ export default function RelationFormModal({
                         </label>
                         <PersonCombobox
                           people={peopleList}
-                          selectedPersonId={subjectPersonId}
-                          onSelect={setSubjectPersonId}
+                          value={subjectPersonId}
+                          onChange={setSubjectPersonId}
                           placeholder="発信人物を選択..."
                         />
                       </div>
@@ -288,8 +288,8 @@ export default function RelationFormModal({
                         </label>
                         <PersonCombobox
                           people={peopleList}
-                          selectedPersonId={objectPersonId}
-                          onSelect={setObjectPersonId}
+                          value={objectPersonId}
+                          onChange={setObjectPersonId}
                           placeholder="相手人物を選択..."
                         />
                       </div>
@@ -302,8 +302,8 @@ export default function RelationFormModal({
                         </label>
                         <PersonCombobox
                           people={peopleList}
-                          selectedPersonId={subjectPersonId}
-                          onSelect={setSubjectPersonId}
+                          value={subjectPersonId}
+                          onChange={setSubjectPersonId}
                           placeholder="人物Aを選択..."
                         />
                       </div>
@@ -313,8 +313,8 @@ export default function RelationFormModal({
                         </label>
                         <PersonCombobox
                           people={peopleList}
-                          selectedPersonId={objectPersonId}
-                          onSelect={setObjectPersonId}
+                          value={objectPersonId}
+                          onChange={setObjectPersonId}
                           placeholder="人物Bを選択..."
                         />
                       </div>

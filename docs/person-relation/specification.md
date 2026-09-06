@@ -203,19 +203,20 @@ PATCH  /api/v1/person-relation-types/{relation_type_id}
 - AI 公開（relation 用ツール、LLM による自動抽出、`people_get` への関係付与）。
 - 人物以外（プロジェクト・トピック等）を含む汎用グラフ。
 
-## 12. 未確定事項
+## 12. 確定事項（旧未確定事項）
 
-設計上まだ選択余地がある事項。仕様本文と混同せず、実装計画・チェックリストで解消する。
+本仕様の設計決定事項および確定内容（Phase 1〜4で全決定済み）。
 
-### 12.1 実装開始前に決めるもの
+### 12.1 初期設計決定事項
 
-- 初期組み込み型の具体的なセット（型数・slug・表示名・方向性）。
-- `source_type` の初期 allowlist（v1 は `manual` のみか、将来用の予約値を含むか）。
-- 重複統合時のレスポンス表現（`created` / `merged_into_existing` を HTTP 200 / 201 / 409 のどれで表現するか）。
-- 関係タイプ作成・編集を同じ人物画面で行うか、管理画面を設けるか。
+- **初期組み込み型セット**: 計25件の組み込み型（`rlt_builtin_<slug>`）をマイグレーション v38 で自動投入済み（家族・親族6件、仕事・組織8件、教育・指導4件、社交・友人4件、援助・取引3件）。
+- **`source_type` の初期 allowlist**: v1 では手動入力 `manual` のみを許可し、Pydantic / DB CHECK 制約で検証・固定。
+- **重複統合時のレスポンス表現**: 新規作成時は `HTTP 201 Created`（`action="created"`）、意味的重複統合時は `HTTP 200 OK`（`action="merged_into_existing"`）を返却。自己関係化や非活性型使用は `HTTP 409 Conflict` で拒否。
+- **関係タイプ作成・編集 UI の配置**: 人物画面（`PeoplePage`）内の専用タブ「関係タイプ」として統合配置。
 
-### 12.2 実装中に安全に決められるもの
+### 12.2 実装確定事項
 
-- 重複時の note 統合フォーマット（改行連結か、区切り線入りか。既存 `consolidate_summary_links()` の `"\n"` 連結が候補）。
-- 関係一覧の既定フィルター（全件か active のみか）。
-- 型 slug の変更可否（推奨は作成後不変。変更可とする場合の参照更新範囲）。
+- **重複時の note 統合フォーマット**: 改行連結（`\n`）を採用（既存 `consolidate_summary_links()` パターンを共通継承）。
+- **関係一覧の既定フィルター**: 全件表示（`status` クエリ非指定時）とし、UI 上で `upcoming` / `active` / `ended` / `undated` のタブ切り替えフィルタを提供。
+- **型 slug の変更可否**: `slug` は作成後不変（Immutable）。更新 API では `forward_label`, `reverse_label`, `description`, `is_active` のみ更新可。
+- **期間基準日**: 日本標準時（Asia/Tokyo JST）の本日日付を基準に `upcoming / active / ended / undated` を動的算出。
