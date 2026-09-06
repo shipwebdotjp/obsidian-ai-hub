@@ -32,6 +32,13 @@ export default function PersonRelationsSection({
   onDeleteRelation,
 }: PersonRelationsSectionProps) {
   const [expandedRelationIds, setExpandedRelationIds] = useState<Set<string>>(new Set());
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const handleDeleteClick = (relationId: string) => {
+    if (deletingId !== null) return;
+    setDeletingId(relationId);
+    void onDeleteRelation(relationId).finally(() => setDeletingId(null));
+  };
 
   const toggleExpand = (relationId: string) => {
     setExpandedRelationIds((prev) => {
@@ -114,7 +121,7 @@ export default function PersonRelationsSection({
                     const isSubject = rel.subject_person_id === currentPerson.person_id;
                     const otherPersonId = isSubject ? rel.object_person_id : rel.subject_person_id;
                     const otherPerson = peopleMap.get(otherPersonId);
-                    const otherPersonName = otherPerson ? otherPerson.display_name : otherPersonId;
+                    const otherPersonName = otherPerson ? otherPerson.display_name : "不明な人物";
 
                     const labelText = isSubject
                       ? rel.relation_type?.forward_label || "関係あり"
@@ -129,7 +136,7 @@ export default function PersonRelationsSection({
                             <div className="flex items-center gap-1.5 text-xs font-bold text-slate-900">
                               <span className="text-slate-600 font-semibold">{labelText}</span>
                               <span className="text-slate-400">—</span>
-                              <span className="text-slate-900 font-bold underline decoration-slate-300">
+                              <span className="text-slate-900 font-bold underline decoration-slate-300" title={otherPerson ? undefined : otherPersonId}>
                                 {otherPersonName}
                               </span>
                             </div>
@@ -160,8 +167,9 @@ export default function PersonRelationsSection({
                               編集
                             </button>
                             <button
-                              onClick={() => onDeleteRelation(rel.relation_id)}
-                              className="px-2.5 py-1 text-xs font-semibold text-rose-700 border border-rose-200 bg-rose-50 hover:bg-rose-100 rounded cursor-pointer"
+                              onClick={() => handleDeleteClick(rel.relation_id)}
+                              disabled={deletingId === rel.relation_id}
+                              className="px-2.5 py-1 text-xs font-semibold text-rose-700 border border-rose-200 bg-rose-50 hover:bg-rose-100 disabled:opacity-50 rounded cursor-pointer"
                             >
                               削除
                             </button>

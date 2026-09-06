@@ -5,8 +5,9 @@ interface RelationEvidenceSectionProps {
   evidence: PersonRelationEvidence[];
 }
 
-export default function RelationEvidenceSection({ evidence }: RelationEvidenceSectionProps) {
-  if (evidence.length === 0) {
+export default function RelationEvidenceSection({ evidence = [] }: RelationEvidenceSectionProps) {
+  const items = evidence ?? [];
+  if (items.length === 0) {
     return (
       <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-400 italic text-[11px]">
         この関係に登録されている根拠 (Evidence) はありません。
@@ -18,7 +19,7 @@ export default function RelationEvidenceSection({ evidence }: RelationEvidenceSe
     <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg space-y-2">
       <div className="text-[11px] font-bold text-slate-700">登録根拠 (Evidence)</div>
       <div className="space-y-1.5">
-        {evidence.map((ev) => (
+        {items.map((ev) => (
           <div
             key={ev.evidence_id}
             className="p-2 bg-white border border-slate-200 rounded text-xs text-slate-700 space-y-0.5"

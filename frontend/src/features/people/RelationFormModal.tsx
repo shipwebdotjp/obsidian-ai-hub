@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import PersonCombobox from "./PersonCombobox";
 import { Person } from "../../api/types";
 import {
@@ -82,9 +82,14 @@ export default function RelationFormModal({
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [evidenceSubmitting, setEvidenceSubmitting] = useState(false);
+  const syncedRelationIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (relationToEdit) {
+      // Avoid wiping in-progress edits when unrelated props (e.g. peopleList
+      // refreshed by loadAllData) change while the modal stays open.
+      if (syncedRelationIdRef.current === relationToEdit.relation_id) return;
+      syncedRelationIdRef.current = relationToEdit.relation_id;
       setSelectedTypeId(relationToEdit.relation_type_id);
       setSubjectPersonId(relationToEdit.subject_person_id);
       setObjectPersonId(relationToEdit.object_person_id);
@@ -92,6 +97,7 @@ export default function RelationFormModal({
       setEndedOn(relationToEdit.ended_on || "");
       setNote(relationToEdit.note || "");
     } else {
+      syncedRelationIdRef.current = null;
       // Fill defaults when types/people arrive after mount; never overwrite user input.
       if (!selectedTypeId && activeTypes.length > 0) {
         setSelectedTypeId(activeTypes[0].relation_type_id);

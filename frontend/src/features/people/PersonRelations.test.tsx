@@ -9,6 +9,7 @@ import RelationTypesTab from "./RelationTypesTab";
 import PersonRelationsSection from "./PersonRelationsSection";
 import DeletePersonDialog from "./DeletePersonDialog";
 import RelationFormModal from "./RelationFormModal";
+import RelationEvidenceSection from "./RelationEvidenceSection";
 import { PersonRelationType, PersonRelation, PersonDetail } from "./types";
 
 describe("Person Relations UI Components", () => {
@@ -195,5 +196,19 @@ describe("Person Relations UI Components", () => {
       ).toBeInTheDocument();
     });
     expect(onCreate).not.toHaveBeenCalled();
+  });
+
+  test("RelationEvidenceSection renders empty state for nullish evidence", () => {
+    const { rerender } = render(
+      <RelationEvidenceSection evidence={null as unknown as []} />
+    );
+    expect(
+      screen.getByText("この関係に登録されている根拠 (Evidence) はありません。")
+    ).toBeInTheDocument();
+
+    rerender(<RelationEvidenceSection evidence={undefined as unknown as []} />);
+    expect(
+      screen.getByText("この関係に登録されている根拠 (Evidence) はありません。")
+    ).toBeInTheDocument();
   });
 });
