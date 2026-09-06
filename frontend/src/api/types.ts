@@ -769,6 +769,24 @@ export type AgentRunStatus =
   | "cancelled"
   | "interrupted";
 
+export interface SlashInvocation {
+  kind: "skill";
+  name: string;
+}
+
+export interface SlashCandidate {
+  kind: "skill" | "template";
+  name: string;
+  description: string;
+  template_id?: string;
+  content?: string;
+}
+
+export interface AgentSlashCandidatesResponse {
+  candidates: SlashCandidate[];
+  has_skills_tool: boolean;
+}
+
 export interface AgentRun {
   run_id: string;
   session_id: string;
@@ -776,6 +794,7 @@ export interface AgentRun {
   assistant_message_id: string | null;
   status: AgentRunStatus;
   hitl_run_id: string | null;
+  slash_invocation?: SlashInvocation | null;
   used_tools: string[];
   created_hitl_run_ids: string[];
   tool_calls?: AgentToolCall[];

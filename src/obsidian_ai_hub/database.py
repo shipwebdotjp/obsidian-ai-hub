@@ -49,6 +49,15 @@ def run_migration_v36(db: sqlite3.Connection) -> None:
     db.commit()
 
 
+def run_migration_v37(db: sqlite3.Connection) -> None:
+    try:
+        db.execute("ALTER TABLE agent_runs ADD COLUMN slash_invocation_json TEXT")
+    except sqlite3.OperationalError as e:
+        _ignore_duplicate_schema_object(e)
+    db.execute("PRAGMA user_version = 37")
+    db.commit()
+
+
 def run_migration_v8(conn: sqlite3.Connection) -> None:
     """Run the migration schema upgrade for version 8 (summary_person_assignments table)."""
     conn.execute("""
@@ -536,6 +545,9 @@ def get_db_connection() -> sqlite3.Connection:
 
     if current_version <= 35:
         run_migration_v36(conn)
+
+    if current_version <= 36:
+        run_migration_v37(conn)
 
     return conn
 

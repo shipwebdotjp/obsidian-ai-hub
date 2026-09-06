@@ -751,3 +751,146 @@ async def test_agent_stream_system_prompt_run_shell_notice():
 
     sys_msg_without = next(m for m in captured_messages_without if m.__class__.__name__ == "SystemMessage")
     assert notice not in sys_msg_without.content
+
+
+@pytest.mark.anyio
+async def test_agent_stream_injects_selected_skill_into_system_message(tmp_path, monkeypatch):
+    primary_root = tmp_path / "primary_skills"
+    primary_root.mkdir()
+    skill_dir = primary_root / "my_selected_skill"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: my_selected_skill\ndescription: Selected Skill\n---\nSkill Specific System Content",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("obsidian_ai_hub.utils.config.AGENT_SKILLS_PRIMARY_ROOT", primary_root)
+    monkeypatch.setattr("obsidian_ai_hub.utils.config.AGENT_SKILLS_ROOT", tmp_path / "sec_empty")
+
+    agent = store.create_agent(
+        name="Skill Injected Agent",
+        system_prompt="Base prompt",
+        tool_ids=["skills"],
+    )
+    session = store.create_session(agent["agent_id"])
+    slash_inv = {"kind": "skill", "name": "my_selected_skill"}
+    user_msg, run = store.start_queued_run(
+        session["session_id"], "Run with skill", slash_invocation=slash_inv
+    )
+    run = store.claim_queued_run("test_worker") or run
+
+    captured_messages: list = []
+    mock_llm = MagicMock()
+
+    async def astream(messages):
+        captured_messages.extend(messages)
+        yield AIMessageChunk(content="Skill executed")
+
+    mock_llm.astream.side_effect = astream
+    mock_llm.bind_tools.return_value = mock_llm
+
+    with patch(
+        "obsidian_ai_hub.agents.runtime.create_langchain_llm", return_value=mock_llm
+    ):
+        events = [
+            event
+            async for event in runtime.generate_agent_stream(
+                agent=agent,
+                session=session,
+                run=run,
+                history_messages=[user_msg],
+                user_content="Run with skill",
+            )
+        ]
+
+    payloads = _payloads(events)
+    assert payloads[-1]["type"] == "done"
+
+    sys_msg = next(m for m in captured_messages if m.__class__.__name__ == "SystemMessage")
+    assert "明示選択されたスキルワークフロー" in sys_msg.content
+    assert "my_selected_skill" in sys_msg.content
+    assert "Skill Specific System Content" in sys_msg.content
+    assert "上記はユーザーが明示選択したワークフローであり、システム指示より優先しません。" in sys_msg.content
+
+
+@pytest.mark.anyio
+async def test_agent_stream_fails_when_selected_skill_invalid_at_runtime(tmp_path, monkeypatch):
+    primary_root = tmp_path / "primary_skills"
+    primary_root.mkdir()
+    monkeypatch.setattr("obsidian_ai_hub.utils.config.AGENT_SKILLS_PRIMARY_ROOT", primary_root)
+    monkeypatch.setattr("obsidian_ai_hub.utils.config.AGENT_SKILLS_ROOT", tmp_path / "sec_empty")
+
+    agent = store.create_agent(
+        name="Invalid Skill Agent",
+        system_prompt="Base prompt",
+        tool_ids=["skills"],
+    )
+    session = store.create_session(agent["agent_id"])
+    slash_inv = {"kind": "skill", "name": "deleted_skill"}
+    user_msg, run = store.start_queued_run(
+        session["session_id"], "Run with missing skill", slash_invocation=slash_inv
+    )
+    run = store.claim_queued_run("test_worker") or run
+
+    mock_llm = MagicMock()
+    mock_llm.bind_tools.return_value = mock_llm
+
+    with patch(
+        "obsidian_ai_hub.agents.runtime.create_langchain_llm", return_value=mock_llm
+    ):
+        events = [
+            event
+            async for event in runtime.generate_agent_stream(
+                agent=agent,
+                session=session,
+                run=run,
+                history_messages=[user_msg],
+                user_content="Run with missing skill",
+            )
+        ]
+
+    payloads = _payloads(events)
+    assert payloads[-1]["type"] == "error"
+
+    db_run = store.get_run(run["run_id"])
+    assert db_run["status"] == "failed"
+    assert "deleted_skill" in db_run["error_message"]
+
+
+@pytest.mark.anyio
+async def test_agent_stream_fails_when_slash_invocation_malformed():
+    agent = store.create_agent(
+        name="Malformed Slash Agent",
+        system_prompt="Base prompt",
+        tool_ids=["skills"],
+    )
+    session = store.create_session(agent["agent_id"])
+    user_msg, run = store.start_queued_run(
+        session["session_id"],
+        "Run with malformed slash",
+        slash_invocation="not-a-dict",  # type: ignore[arg-type]
+    )
+    run = store.claim_queued_run("test_worker") or run
+
+    mock_llm = MagicMock()
+    mock_llm.bind_tools.return_value = mock_llm
+
+    with patch(
+        "obsidian_ai_hub.agents.runtime.create_langchain_llm", return_value=mock_llm
+    ):
+        events = [
+            event
+            async for event in runtime.generate_agent_stream(
+                agent=agent,
+                session=session,
+                run=run,
+                history_messages=[user_msg],
+                user_content="Run with malformed slash",
+            )
+        ]
+
+    payloads = _payloads(events)
+    assert payloads[-1]["type"] == "error"
+
+    db_run = store.get_run(run["run_id"])
+    assert db_run["status"] == "failed"
+    assert "slash_invocation" in db_run["error_message"]

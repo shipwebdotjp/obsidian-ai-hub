@@ -2212,7 +2212,7 @@ describe("AgentsPage", () => {
       await user.clear(input);
       await user.type(input, "/xyz_no_match");
       const paletteEmpty = await screen.findByTestId("agent-command-palette");
-      expect(within(paletteEmpty).getByText("該当するテンプレートがありません")).toBeInTheDocument();
+      expect(within(paletteEmpty).getByText("該当する候補がありません")).toBeInTheDocument();
     });
 
     it("selects candidate on click, replacing input text with template body and keeping focus in textarea", async () => {
