@@ -211,4 +211,75 @@ describe("Person Relations UI Components", () => {
       screen.getByText("この関係に登録されている根拠 (Evidence) はありません。")
     ).toBeInTheDocument();
   });
+
+  test("PersonRelationsSection collapses expanded relations on person change", () => {
+    const personA: PersonDetail = {
+      person_id: "peo_taro",
+      display_name: "山田 太郎",
+      normalized_name: "山田太郎",
+      vault_id: null,
+      aliases: [],
+      summary_count: 0,
+      summaries: [],
+      relation_counts: {
+        summaries: 0,
+        aliases: 0,
+        assignments: 0,
+        subject_relations: 1,
+        object_relations: 0,
+        evidence: 1,
+      },
+    };
+    const personB: PersonDetail = { ...personA, person_id: "peo_jiro", display_name: "佐藤 次郎" };
+    const relations: PersonRelation[] = [
+      {
+        relation_id: "rel_1",
+        subject_person_id: "peo_taro",
+        object_person_id: "peo_hanako",
+        relation_type_id: "rlt_parent",
+        started_on: null,
+        ended_on: null,
+        note: null,
+        status: "active",
+        created_at: "2026-01-01T00:00:00",
+        updated_at: "2026-01-01T00:00:00",
+        relation_type: mockTypes[0],
+        evidence: [
+          {
+            evidence_id: "rle_1",
+            relation_id: "rel_1",
+            source_type: "manual",
+            source_ref: null,
+            quote: "展開確認用の引用",
+            note: null,
+            observed_at: null,
+            created_at: "2026-01-01T00:00:00",
+            updated_at: "2026-01-01T00:00:00",
+          },
+        ],
+      },
+    ];
+    const mockPeopleList = [
+      { person_id: "peo_taro", display_name: "山田 太郎", normalized_name: "山田太郎", vault_id: null, aliases: [], summary_count: 1 },
+      { person_id: "peo_hanako", display_name: "鈴木 花子", normalized_name: "鈴木花子", vault_id: null, aliases: [], summary_count: 1 },
+    ];
+    const sectionProps = {
+      relations,
+      peopleList: mockPeopleList,
+      statusFilter: "all" as const,
+      onStatusFilterChange: vi.fn(),
+      onOpenCreateModal: vi.fn(),
+      onOpenEditModal: vi.fn(),
+      onDeleteRelation: vi.fn(),
+    };
+
+    const { rerender } = render(
+      <PersonRelationsSection currentPerson={personA} {...sectionProps} />
+    );
+    fireEvent.click(screen.getByText("根拠 (1)", { exact: false }));
+    expect(screen.getByText("展開確認用の引用", { exact: false })).toBeInTheDocument();
+
+    rerender(<PersonRelationsSection currentPerson={personB} {...sectionProps} />);
+    expect(screen.queryByText("展開確認用の引用", { exact: false })).not.toBeInTheDocument();
+  });
 });

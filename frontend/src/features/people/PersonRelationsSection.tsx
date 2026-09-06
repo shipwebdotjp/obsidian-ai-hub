@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Person } from "../../api/types";
 import { PersonDetail, PersonRelation, RelationStatus } from "./types";
 import RelationEvidenceSection from "./RelationEvidenceSection";
@@ -32,12 +32,24 @@ export default function PersonRelationsSection({
   onDeleteRelation,
 }: PersonRelationsSectionProps) {
   const [expandedRelationIds, setExpandedRelationIds] = useState<Set<string>>(new Set());
-  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
+
+  // Drop expanded/deleting state from previously viewed persons.
+  useEffect(() => {
+    setExpandedRelationIds(new Set());
+    setDeletingIds(new Set());
+  }, [currentPerson.person_id]);
 
   const handleDeleteClick = (relationId: string) => {
-    if (deletingId !== null) return;
-    setDeletingId(relationId);
-    void onDeleteRelation(relationId).finally(() => setDeletingId(null));
+    if (deletingIds.has(relationId)) return;
+    setDeletingIds((prev) => new Set(prev).add(relationId));
+    void onDeleteRelation(relationId).finally(() =>
+      setDeletingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(relationId);
+        return next;
+      })
+    );
   };
 
   const toggleExpand = (relationId: string) => {
@@ -168,7 +180,7 @@ export default function PersonRelationsSection({
                             </button>
                             <button
                               onClick={() => handleDeleteClick(rel.relation_id)}
-                              disabled={deletingId === rel.relation_id}
+                              disabled={deletingIds.has(rel.relation_id)}
                               className="px-2.5 py-1 text-xs font-semibold text-rose-700 border border-rose-200 bg-rose-50 hover:bg-rose-100 disabled:opacity-50 rounded cursor-pointer"
                             >
                               削除

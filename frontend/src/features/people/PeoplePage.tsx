@@ -210,13 +210,14 @@ export default function PeoplePage() {
   // Always fetch the full relation list; status filtering is done client-side
   // in PersonRelationsSection so counts stay consistent.
   // The request id guards against rapid person switching: a stale fetch
-  // resolving after a newer one must not overwrite the current list.
+  // resolving after a newer one must not overwrite the current list, nor
+  // feed an outdated snapshot back to callers (e.g. setEditingRelation).
   const relationsRequestRef = useRef(0);
   const loadPersonRelations = async (personId: string): Promise<PersonRelation[]> => {
     const reqId = ++relationsRequestRef.current;
     try {
       const data = await peopleApi.fetchPersonRelations(personId);
-      if (reqId !== relationsRequestRef.current) return data;
+      if (reqId !== relationsRequestRef.current) return [];
       setPersonRelations(data);
       return data;
     } catch {
@@ -225,6 +226,11 @@ export default function PeoplePage() {
       return [];
     }
   };
+
+  // Mirrors the currently selected person for staleness guards: detail
+  // fetches resolving after a person switch must not overwrite the new
+  // selection (same race as the relation list above).
+  const selectedPersonIdRef = useRef<string | null>(null);
 
   const handleRejectCandidate = async (candId: string) => {
     clearMessages();
@@ -303,14 +309,17 @@ export default function PeoplePage() {
     // Clear the previous person's relations immediately so stale data
     // is never shown while the new person's data loads.
     setPersonRelations([]);
+    selectedPersonIdRef.current = p.person_id;
     try {
       const data = await peopleApi.fetchPersonDetail(p.person_id);
+      if (selectedPersonIdRef.current !== p.person_id) return;
       setSelectedPerson(data);
       setMobileDetailOpen(true);
       setEditDisplayName(data.display_name);
       setEditAliasesText((data.aliases || []).map((al) => al.display_name).join("\n"));
       await loadPersonRelations(p.person_id);
     } catch (e) {
+      if (selectedPersonIdRef.current !== p.person_id) return;
       setError("人物の詳細の取得に失敗しました");
     }
   };
@@ -333,7 +342,8 @@ export default function PeoplePage() {
 
   const handleCreateRelation = async (req: PersonRelationCreateRequest) => {
     if (!selectedPerson) return;
-    const res = await peopleApi.createPersonRelation(selectedPerson.person_id, req);
+    const personId = selectedPerson.person_id;
+    const res = await peopleApi.createPersonRelation(personId, req);
     if (res.action === "merged_into_existing") {
       setSuccessMessage("既存の同一人物間関係が存在するため、内容および根拠を重複統合しました。");
     } else {
@@ -341,16 +351,19 @@ export default function PeoplePage() {
     }
     try {
       await loadAllData(false);
-      const updatedDetail = await peopleApi.fetchPersonDetail(selectedPerson.person_id);
+      const updatedDetail = await peopleApi.fetchPersonDetail(personId);
+      if (selectedPersonIdRef.current !== personId) return;
       setSelectedPerson(updatedDetail);
-      await loadPersonRelations(selectedPerson.person_id);
+      await loadPersonRelations(personId);
     } catch (e) {
+      if (selectedPersonIdRef.current !== personId) return;
       setError(e instanceof Error ? e.message : "詳細の再読み込みに失敗しました");
     }
   };
 
   const handleUpdateRelation = async (relationId: string, req: PersonRelationUpdateRequest) => {
     if (!selectedPerson) return;
+    const personId = selectedPerson.person_id;
     const res = await peopleApi.updatePersonRelation(relationId, req);
     if (res.action === "merged_into_existing") {
       setSuccessMessage("期間の変更により既存関係と一致したため、関係を統合しました。");
@@ -359,25 +372,30 @@ export default function PeoplePage() {
     }
     try {
       await loadAllData(false);
-      const updatedDetail = await peopleApi.fetchPersonDetail(selectedPerson.person_id);
+      const updatedDetail = await peopleApi.fetchPersonDetail(personId);
+      if (selectedPersonIdRef.current !== personId) return;
       setSelectedPerson(updatedDetail);
-      await loadPersonRelations(selectedPerson.person_id);
+      await loadPersonRelations(personId);
     } catch (e) {
+      if (selectedPersonIdRef.current !== personId) return;
       setError(e instanceof Error ? e.message : "詳細の再読み込みに失敗しました");
     }
   };
 
   const handleDeleteRelation = async (relationId: string) => {
     if (!selectedPerson) return;
+    const personId = selectedPerson.person_id;
     if (!window.confirm("この人物間関係を削除しますか？この操作は取り消せません。")) return;
     try {
       await peopleApi.deletePersonRelation(relationId);
       setSuccessMessage("人物間関係を削除しました。");
       await loadAllData(false);
-      const updatedDetail = await peopleApi.fetchPersonDetail(selectedPerson.person_id);
+      const updatedDetail = await peopleApi.fetchPersonDetail(personId);
+      if (selectedPersonIdRef.current !== personId) return;
       setSelectedPerson(updatedDetail);
-      await loadPersonRelations(selectedPerson.person_id);
+      await loadPersonRelations(personId);
     } catch (e) {
+      if (selectedPersonIdRef.current !== personId) return;
       setError(e instanceof Error ? e.message : "人物間関係の削除に失敗しました");
     }
   };

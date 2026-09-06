@@ -392,11 +392,11 @@ export default function RelationFormModal({
                 <div>
                   端点構造:{" "}
                   <strong className="text-slate-900">
-                    {peopleList.find((p) => p.person_id === relationToEdit?.subject_person_id)?.display_name}
+                    {peopleList.find((p) => p.person_id === relationToEdit?.subject_person_id)?.display_name ?? "不明な人物"}
                   </strong>{" "}
                   →{" "}
                   <strong className="text-slate-900">
-                    {peopleList.find((p) => p.person_id === relationToEdit?.object_person_id)?.display_name}
+                    {peopleList.find((p) => p.person_id === relationToEdit?.object_person_id)?.display_name ?? "不明な人物"}
                   </strong>
                 </div>
                 <p className="text-[11px] text-slate-400 mt-1">※ 両端点および関係タイプは作成後変更できません。</p>
