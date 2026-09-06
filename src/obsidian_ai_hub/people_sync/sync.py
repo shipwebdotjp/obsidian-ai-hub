@@ -8,6 +8,10 @@ from typing import Any, Dict
 from obsidian_ai_hub.database import get_db_connection
 from obsidian_ai_hub.utils.people_loader import load_people_notes_with_report
 from obsidian_ai_hub.summary.store import normalize_entity_name
+from obsidian_ai_hub.web.services.person_relations import (
+    preview_person_relation_merge,
+    transfer_person_relations_on_merge,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +97,8 @@ def get_db_vault_conflicts_report(
 
 def sync_people_in_tx(
     conn: sqlite3.Connection, people_notes_map: Dict[str, Any]
-) -> None:
+) -> list[dict[str, Any]]:
+    skipped_relation_merges = []
     # 1. Group notes by note ID (since map is normalized_name -> PersonNote, multiple keys map to same dict)
     seen_note_ids = set()
     unique_notes = []
@@ -169,6 +174,10 @@ def sync_people_in_tx(
         needs_final_update = False
         final_update_args = ()
         final_update_sql = ""
+        # Old duplicates skipped due to self-relation conflict keep their
+        # people row (and normalized_name). Track them so the final rename
+        # below can be skipped instead of violating UNIQUE(normalized_name).
+        skipped_old_person_ids: set[str] = set()
 
         if row is not None:
             target_person_id = row[0]
@@ -296,21 +305,63 @@ def sync_people_in_tx(
 
         # Step C: Match and migrate old duplicate 'people' records (vault_id IS NULL)
         cursor.execute(
-            f"SELECT person_id FROM people WHERE vault_id IS NULL AND normalized_name IN ({placeholders})",
+            f"SELECT person_id, display_name FROM people WHERE vault_id IS NULL AND normalized_name IN ({placeholders})",
             list(aliases_set),
         )
         old_people = cursor.fetchall()
 
         for old_p_row in old_people:
             old_person_id = old_p_row["person_id"]
+            old_display_name = old_p_row["display_name"]
 
             if old_person_id == target_person_id:
+                continue
+
+            # Check if migrating this person causes a self-relation
+            rel_preview = preview_person_relation_merge(
+                cursor, old_person_id, target_person_id
+            )
+            if rel_preview["self_relation_conflicts_count"] > 0:
+                logger.warning(
+                    "Skipping auto-merge of person '%s' (%s -> %s) due to self-relation conflict",
+                    old_display_name,
+                    old_person_id,
+                    target_person_id,
+                )
+                skipped_items = [
+                    {
+                        "relation_id": imp["relation_id"],
+                        "relation_type_slug": imp["relation_type_slug"],
+                        "other_person_id": imp["other_person_id"],
+                        "other_person_name": imp["other_person_name"],
+                        "started_on": imp["started_on"],
+                        "ended_on": imp["ended_on"],
+                    }
+                    for imp in rel_preview["relation_impacts"]
+                    if imp["result_type"] == "self_relation_conflict"
+                ]
+                skipped_relation_merges.append(
+                    {
+                        "from_person_id": old_person_id,
+                        "from_person_name": old_display_name,
+                        "to_person_id": target_person_id,
+                        "to_person_name": vault_name,
+                        "reason": "統合により自己関係が発生するため自動統合をスキップしました。",
+                        "skipped_relations": skipped_items,
+                    }
+                )
+                skipped_old_person_ids.add(old_person_id)
                 continue
 
             logger.info(
                 "Migrating old duplicate person (id=%s) to target person_id=%s",
                 old_person_id,
                 target_person_id,
+            )
+
+            # Transfer relations safely
+            transfer_person_relations_on_merge(
+                cursor, old_person_id, target_person_id
             )
 
             cursor.execute(
@@ -359,8 +410,32 @@ def sync_people_in_tx(
 
             conn.execute("DELETE FROM people WHERE person_id = ?", (old_person_id,))
 
+        if needs_final_update and skipped_old_person_ids:
+            # All Step-A branches rename the target to normalized_vault_name.
+            # A skipped duplicate still holds its normalized_name row, so
+            # applying the rename would violate UNIQUE(people.normalized_name)
+            # and roll back the whole sync. Skip only the final rename here;
+            # the skip record above and all completed merges stay intact.
+            skip_placeholders = ", ".join("?" for _ in skipped_old_person_ids)
+            cursor.execute(
+                f"SELECT person_id FROM people WHERE normalized_name = ? AND person_id IN ({skip_placeholders})",
+                (normalized_vault_name, *skipped_old_person_ids),
+            )
+            blocker = cursor.fetchone()
+            if blocker is not None:
+                logger.warning(
+                    "Skipping final rename of person '%s' (%s) to normalized_name '%s' because skipped duplicate '%s' still holds that name (self-relation conflict)",
+                    vault_name,
+                    target_person_id,
+                    normalized_vault_name,
+                    blocker[0],
+                )
+                needs_final_update = False
+
         if needs_final_update:
             conn.execute(final_update_sql, final_update_args)
+
+    return skipped_relation_merges
 
 
 def log_vault_report_to_cli(

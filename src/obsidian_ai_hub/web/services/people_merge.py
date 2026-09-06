@@ -4,6 +4,19 @@ from typing import Any, Optional
 from obsidian_ai_hub.database import get_db_connection
 from obsidian_ai_hub.people_sync.sync import merge_display_orders
 from obsidian_ai_hub.utils.people_loader import load_people_notes_with_report
+from obsidian_ai_hub.web.services.person_relations import (
+    SelfRelationError,
+    preview_person_relation_merge,
+    transfer_person_relations_on_merge,
+)
+
+
+class SelfRelationConflictError(ValueError):
+    def __init__(
+        self,
+        message="統合により自己関係が発生するため実行できません。",
+    ):
+        super().__init__(message)
 
 
 def get_duplicate_candidates() -> dict[str, Any]:
@@ -289,15 +302,28 @@ def verify_people_merge(
                 }
             )
 
+    # 7. Build Person Relations Preview
+    rel_preview = preview_person_relation_merge(cursor, from_person_id, to_person_id)
+
+    allowed = True
+    reason = "統合可能です。"
+    if rel_preview["self_relation_conflicts_count"] > 0:
+        allowed = False
+        reason = "統合により自己関係が発生するため実行できません。"
+
     return {
-        "allowed": True,
-        "reason": "統合可能です。",
+        "allowed": allowed,
+        "reason": reason,
         "from_person": from_p,
         "to_person": to_p,
         "transferred_summaries_count": len(from_links),
         "transferred_aliases_count": len(alias_transfers),
+        "transferred_relations_count": rel_preview["transferred_relations_count"],
+        "merged_relations_count": rel_preview["merged_relations_count"],
+        "self_relation_conflicts_count": rel_preview["self_relation_conflicts_count"],
         "alias_transfers": alias_transfers,
         "merged_summaries": merged_summaries,
+        "relation_impacts": rel_preview["relation_impacts"],
     }
 
 
@@ -322,9 +348,17 @@ def merge_people(from_person_id: str, to_person_id: str) -> bool:
             # Verify before merge
             preview = verify_people_merge(cursor, from_person_id, to_person_id)
             if not preview["allowed"]:
+                if preview.get("self_relation_conflicts_count", 0) > 0:
+                    raise SelfRelationConflictError()
                 raise ValueError(preview["reason"])
 
             from_p = preview["from_person"]
+
+            # 1b. Transfer person relations (will re-verify self-relation in tx)
+            try:
+                transfer_person_relations_on_merge(cursor, from_person_id, to_person_id)
+            except SelfRelationError as e:
+                raise SelfRelationConflictError() from e
 
             # 2. Migrate summary links
             cursor.execute(

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 
 from obsidian_ai_hub.utils import config
@@ -55,6 +56,122 @@ def run_migration_v37(db: sqlite3.Connection) -> None:
     except sqlite3.OperationalError as e:
         _ignore_duplicate_schema_object(e)
     db.execute("PRAGMA user_version = 37")
+    db.commit()
+
+
+BUILTIN_RELATION_TYPES = [
+    ("parent-child", "directed", "親である", "子である"),
+    ("spouse", "symmetric", "夫婦である", "夫婦である"),
+    ("partner", "symmetric", "パートナーである", "パートナーである"),
+    ("sibling", "symmetric", "きょうだいである", "きょうだいである"),
+    ("guardian-of", "directed", "保護者である", "被保護者である"),
+    ("cohabitant", "symmetric", "同居している", "同居している"),
+    ("neighbor", "symmetric", "隣人である", "隣人である"),
+    ("roommate", "symmetric", "ルームメイトである", "ルームメイトである"),
+    ("supervises", "directed", "監督している", "監督されている"),
+    ("reports-to", "directed", "報告している", "報告を受けている"),
+    ("colleague", "symmetric", "同僚である", "同僚である"),
+    ("mentor-of", "directed", "メンターである", "メンティーである"),
+    ("client-of", "directed", "クライアントである", "サービスを提供している"),
+    ("friend", "symmetric", "友人である", "友人である"),
+    ("best-friend", "symmetric", "親友である", "親友である"),
+    ("acquaintance", "symmetric", "知人である", "知人である"),
+    ("adversary", "symmetric", "対立している", "対立している"),
+    ("estranged", "symmetric", "疎遠である", "疎遠である"),
+    ("supports", "directed", "支援している", "支援を受けている"),
+    ("cares-for", "directed", "世話をしている", "世話を受けている"),
+    ("assists", "directed", "援助している", "援助を受けている"),
+    ("respects", "directed", "尊敬している", "尊敬されている"),
+    ("trusts", "directed", "信頼している", "信頼されている"),
+    ("likes", "directed", "好意を抱いている", "好意を抱かれている"),
+    ("dislikes", "directed", "嫌っている", "嫌われている"),
+]
+
+
+def run_migration_v38(db: sqlite3.Connection) -> None:
+    """Run migration for version 38 (person_relation_types, person_relations, person_relation_evidence tables)."""
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS person_relation_types (
+            relation_type_id TEXT PRIMARY KEY,
+            slug TEXT NOT NULL UNIQUE,
+            forward_label TEXT NOT NULL,
+            reverse_label TEXT NOT NULL,
+            directionality TEXT NOT NULL CHECK (directionality IN ('directed', 'symmetric')),
+            description TEXT,
+            is_builtin INTEGER NOT NULL DEFAULT 0,
+            is_active INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+    """)
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS person_relations (
+            relation_id TEXT PRIMARY KEY,
+            subject_person_id TEXT NOT NULL REFERENCES people(person_id) ON DELETE CASCADE,
+            object_person_id TEXT NOT NULL REFERENCES people(person_id) ON DELETE CASCADE,
+            relation_type_id TEXT NOT NULL REFERENCES person_relation_types(relation_type_id) ON DELETE RESTRICT,
+            started_on TEXT,
+            ended_on TEXT,
+            note TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            CHECK (subject_person_id != object_person_id),
+            CHECK (started_on IS NULL OR ended_on IS NULL OR started_on <= ended_on)
+        );
+    """)
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS person_relation_evidence (
+            evidence_id TEXT PRIMARY KEY,
+            relation_id TEXT NOT NULL REFERENCES person_relations(relation_id) ON DELETE CASCADE,
+            source_type TEXT NOT NULL CHECK (source_type = 'manual'),
+            source_ref TEXT,
+            quote TEXT,
+            note TEXT,
+            observed_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+    """)
+
+    db.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_person_relations_unique_period "
+        "ON person_relations (relation_type_id, subject_person_id, object_person_id, COALESCE(started_on, ''), COALESCE(ended_on, ''));"
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_person_relations_subject ON person_relations(subject_person_id);"
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_person_relations_object ON person_relations(object_person_id);"
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_person_relations_type ON person_relations(relation_type_id);"
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_person_relation_evidence_relation ON person_relation_evidence(relation_id);"
+    )
+
+    now = datetime.now(timezone.utc).isoformat()
+    for slug, directionality, forward_label, reverse_label in BUILTIN_RELATION_TYPES:
+        relation_type_id = f"rlt_builtin_{slug}"
+        db.execute(
+            """
+            INSERT INTO person_relation_types (
+                relation_type_id, slug, forward_label, reverse_label,
+                directionality, is_builtin, is_active, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, 1, 1, ?, ?)
+            ON CONFLICT(relation_type_id) DO UPDATE SET
+                slug=excluded.slug,
+                forward_label=excluded.forward_label,
+                reverse_label=excluded.reverse_label,
+                directionality=excluded.directionality,
+                is_builtin=1,
+                is_active=1,
+                updated_at=excluded.updated_at
+            """,
+            (relation_type_id, slug, forward_label, reverse_label, directionality, now, now),
+        )
+
+    db.execute("PRAGMA user_version = 38")
     db.commit()
 
 
@@ -548,6 +665,9 @@ def get_db_connection() -> sqlite3.Connection:
 
     if current_version <= 36:
         run_migration_v37(conn)
+
+    if current_version <= 37:
+        run_migration_v38(conn)
 
     return conn
 
