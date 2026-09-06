@@ -42,6 +42,9 @@ export default function PersonRelationsSection({
 
   const handleDeleteClick = (relationId: string) => {
     if (deletingIds.has(relationId)) return;
+    // Confirm before acquiring the lock so a cancelled delete never
+    // flickers the button into the disabled state.
+    if (!window.confirm("この人物間関係を削除しますか？この操作は取り消せません。")) return;
     setDeletingIds((prev) => new Set(prev).add(relationId));
     void onDeleteRelation(relationId).finally(() =>
       setDeletingIds((prev) => {

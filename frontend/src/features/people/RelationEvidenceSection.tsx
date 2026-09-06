@@ -5,7 +5,9 @@ interface RelationEvidenceSectionProps {
   evidence: PersonRelationEvidence[];
 }
 
-export default function RelationEvidenceSection({ evidence = [] }: RelationEvidenceSectionProps) {
+export default function RelationEvidenceSection({ evidence }: RelationEvidenceSectionProps) {
+  // Default parameter alone does not cover explicit null, so keep the
+  // single nullish fallback here (callers also defend with `|| []`).
   const items = evidence ?? [];
   if (items.length === 0) {
     return (

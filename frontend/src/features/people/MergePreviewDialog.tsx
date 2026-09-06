@@ -130,36 +130,6 @@ const MergePreviewDialog = forwardRef<HTMLDialogElement, MergePreviewDialogProps
                       </div>
                     </div>
 
-                    {/* Relation impacts details */}
-                    {previewData.relation_impacts && previewData.relation_impacts.length > 0 && (
-                      <div className="space-y-2">
-                        <div className="font-bold text-slate-800 flex items-center gap-1">
-                          <span>🔁</span> 人物間関係 (Relations) の移管・統合影響一覧 ({previewData.relation_impacts.length} 件)
-                        </div>
-                        <div className="border border-slate-200 rounded-lg overflow-hidden divide-y divide-slate-100 font-mono text-[11px] max-h-40 overflow-y-auto bg-white">
-                          {previewData.relation_impacts.map((imp) => (
-                            <div key={imp.relation_id} className="p-2.5 flex items-center justify-between gap-2">
-                              <div>
-                                <span className="font-bold text-slate-900">{imp.other_person_name}</span> との「{imp.relation_type_forward_label}」
-                                <span className="text-slate-400 text-[10px] ml-2">({imp.started_on || "未指定"} ～ {imp.ended_on || "現在"})</span>
-                              </div>
-                              <div>
-                                {imp.result_type === "transferred" && (
-                                  <span className="px-2 py-0.5 bg-blue-50 text-blue-700 font-semibold border border-blue-200 rounded text-[10px]">端点移管</span>
-                                )}
-                                {imp.result_type === "merged_into_existing" && (
-                                  <span className="px-2 py-0.5 bg-purple-50 text-purple-700 font-semibold border border-purple-200 rounded text-[10px]">重複統合</span>
-                                )}
-                                {imp.result_type === "self_relation_conflict" && (
-                                  <span className="px-2 py-0.5 bg-red-50 text-red-700 font-semibold border border-red-200 rounded text-[10px]">自己関係違反</span>
-                                )}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
                     {/* Same summary note consolidation details */}
                     {previewData.merged_summaries.length > 0 && (
                       <div className="space-y-2">
@@ -194,6 +164,38 @@ const MergePreviewDialog = forwardRef<HTMLDialogElement, MergePreviewDialogProps
                       </div>
                     )}
                   </>
+                )}
+
+                {/* Relation impacts details: rendered outside the allowed
+                    block so blockers stay visible even when the merge is
+                    rejected (e.g. self-relation conflicts). */}
+                {previewData.relation_impacts && previewData.relation_impacts.length > 0 && (
+                  <div className="space-y-2">
+                    <div className="font-bold text-slate-800 flex items-center gap-1">
+                      <span>🔁</span> 人物間関係 (Relations) の{previewData.allowed ? "移管・統合影響一覧" : "統合阻害要因"} ({previewData.relation_impacts.length} 件)
+                    </div>
+                    <div className="border border-slate-200 rounded-lg overflow-hidden divide-y divide-slate-100 font-mono text-[11px] max-h-40 overflow-y-auto bg-white">
+                      {previewData.relation_impacts.map((imp) => (
+                        <div key={imp.relation_id} className="p-2.5 flex items-center justify-between gap-2">
+                          <div>
+                            <span className="font-bold text-slate-900">{imp.other_person_name}</span> との「{imp.relation_type_forward_label}」
+                            <span className="text-slate-400 text-[10px] ml-2">{imp.started_on || imp.ended_on ? `(${imp.started_on || "未指定"} ～ ${imp.ended_on || "現在"})` : "(期間未設定)"}</span>
+                          </div>
+                          <div>
+                            {imp.result_type === "transferred" && (
+                              <span className="px-2 py-0.5 bg-blue-50 text-blue-700 font-semibold border border-blue-200 rounded text-[10px]">端点移管</span>
+                            )}
+                            {imp.result_type === "merged_into_existing" && (
+                              <span className="px-2 py-0.5 bg-purple-50 text-purple-700 font-semibold border border-purple-200 rounded text-[10px]">重複統合</span>
+                            )}
+                            {imp.result_type === "self_relation_conflict" && (
+                              <span className="px-2 py-0.5 bg-red-50 text-red-700 font-semibold border border-red-200 rounded text-[10px]">自己関係違反</span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 )}
               </div>
             )}

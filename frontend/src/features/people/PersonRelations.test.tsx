@@ -10,6 +10,7 @@ import PersonRelationsSection from "./PersonRelationsSection";
 import DeletePersonDialog from "./DeletePersonDialog";
 import RelationFormModal from "./RelationFormModal";
 import RelationEvidenceSection from "./RelationEvidenceSection";
+import MergePreviewDialog from "./MergePreviewDialog";
 import { PersonRelationType, PersonRelation, PersonDetail } from "./types";
 
 describe("Person Relations UI Components", () => {
@@ -281,5 +282,54 @@ describe("Person Relations UI Components", () => {
 
     rerender(<PersonRelationsSection currentPerson={personB} {...sectionProps} />);
     expect(screen.queryByText("展開確認用の引用", { exact: false })).not.toBeInTheDocument();
+  });
+
+  test("MergePreviewDialog shows relation impacts even when merge is blocked", () => {
+    const fromPerson = { person_id: "peo_old", display_name: "旧 記録", normalized_name: "旧記録", vault_id: null, aliases: [], summary_count: 0 };
+    const toPerson = { person_id: "peo_target", display_name: "対象 人物", normalized_name: "対象人物", vault_id: null, aliases: [], summary_count: 0 };
+
+    render(
+      <MergePreviewDialog
+        mergeFromPerson={fromPerson}
+        mergeToPerson={toPerson}
+        previewLoading={false}
+        previewData={{
+          allowed: false,
+          reason: "統合により自己関係が発生するため実行できません。",
+          from_person: fromPerson,
+          to_person: toPerson,
+          transferred_summaries_count: 0,
+          transferred_aliases_count: 0,
+          transferred_relations_count: 0,
+          merged_relations_count: 0,
+          self_relation_conflicts_count: 1,
+          alias_transfers: [],
+          merged_summaries: [],
+          relation_impacts: [
+            {
+              relation_id: "rel_1",
+              other_person_id: "peo_target",
+              other_person_name: "対象 人物",
+              relation_type_id: "rlt_parent",
+              relation_type_slug: "parent-child",
+              relation_type_forward_label: "親である",
+              relation_type_reverse_label: "子である",
+              started_on: null,
+              ended_on: null,
+              result_type: "self_relation_conflict",
+              surviving_relation_id: null,
+            },
+          ],
+        }}
+        mergeModalError={null}
+        loading={false}
+        onCloseModal={vi.fn()}
+        onExecuteMerge={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("統合阻害要因", { exact: false })).toBeInTheDocument();
+    expect(screen.getByText("自己関係違反")).toBeInTheDocument();
+    expect(screen.getByText("(期間未設定)")).toBeInTheDocument();
   });
 });

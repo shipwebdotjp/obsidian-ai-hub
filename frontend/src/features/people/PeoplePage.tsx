@@ -385,7 +385,6 @@ export default function PeoplePage() {
   const handleDeleteRelation = async (relationId: string) => {
     if (!selectedPerson) return;
     const personId = selectedPerson.person_id;
-    if (!window.confirm("この人物間関係を削除しますか？この操作は取り消せません。")) return;
     try {
       await peopleApi.deletePersonRelation(relationId);
       setSuccessMessage("人物間関係を削除しました。");
@@ -402,9 +401,11 @@ export default function PeoplePage() {
 
   const handleAddRelationEvidence = async (relationId: string, req: PersonRelationEvidenceCreateRequest) => {
     if (!selectedPerson) return;
+    const personId = selectedPerson.person_id;
     await peopleApi.addRelationEvidence(relationId, req);
     setSuccessMessage("根拠 (Evidence) を追加しました。");
-    const data = await loadPersonRelations(selectedPerson.person_id);
+    const data = await loadPersonRelations(personId);
+    if (selectedPersonIdRef.current !== personId) return;
     if (editingRelation && editingRelation.relation_id === relationId) {
       const updatedRel = data.find(
         (r) => r.relation_id === relationId
@@ -415,9 +416,11 @@ export default function PeoplePage() {
 
   const handleUpdateRelationEvidence = async (evidenceId: string, req: PersonRelationEvidenceUpdateRequest) => {
     if (!selectedPerson) return;
+    const personId = selectedPerson.person_id;
     await peopleApi.updateRelationEvidence(evidenceId, req);
     setSuccessMessage("根拠 (Evidence) を更新しました。");
-    const data = await loadPersonRelations(selectedPerson.person_id);
+    const data = await loadPersonRelations(personId);
+    if (selectedPersonIdRef.current !== personId) return;
     if (editingRelation) {
       const updatedRel = data.find(
         (r) => r.relation_id === editingRelation.relation_id
@@ -428,9 +431,11 @@ export default function PeoplePage() {
 
   const handleDeleteRelationEvidence = async (evidenceId: string) => {
     if (!selectedPerson) return;
+    const personId = selectedPerson.person_id;
     await peopleApi.deleteRelationEvidence(evidenceId);
     setSuccessMessage("根拠 (Evidence) を削除しました。");
-    const data = await loadPersonRelations(selectedPerson.person_id);
+    const data = await loadPersonRelations(personId);
+    if (selectedPersonIdRef.current !== personId) return;
     if (editingRelation) {
       const updatedRel = data.find(
         (r) => r.relation_id === editingRelation.relation_id

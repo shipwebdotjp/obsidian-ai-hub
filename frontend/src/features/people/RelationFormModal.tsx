@@ -90,6 +90,18 @@ export default function RelationFormModal({
       // refreshed by loadAllData) change while the modal stays open.
       if (syncedRelationIdRef.current === relationToEdit.relation_id) return;
       syncedRelationIdRef.current = relationToEdit.relation_id;
+      // Reset evidence UI from the previously edited relation, if any.
+      setShowAddEvidenceForm(false);
+      setEditingEvidenceId(null);
+      setNewEvQuote("");
+      setNewEvSourceRef("");
+      setNewEvNote("");
+      setNewEvObservedAt("");
+      setEditEvQuote("");
+      setEditEvSourceRef("");
+      setEditEvNote("");
+      setEditEvObservedAt("");
+      setFormError(null);
       setSelectedTypeId(relationToEdit.relation_type_id);
       setSubjectPersonId(relationToEdit.subject_person_id);
       setObjectPersonId(relationToEdit.object_person_id);
