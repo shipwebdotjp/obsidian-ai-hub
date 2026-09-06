@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Person } from "../../api/types";
 import { PersonDetail, PersonRelation, RelationStatus } from "./types";
+import { formatYmdWithDow } from "../../utils/date";
 import RelationEvidenceSection from "./RelationEvidenceSection";
 
 interface PersonRelationsSectionProps {
@@ -20,6 +21,22 @@ const STATUS_GROUPS: { key: RelationStatus; label: string; badgeColor: string }[
   { key: "undated", label: "期間不明 (Undated)", badgeColor: "bg-purple-50 text-purple-700 border-purple-200" },
   { key: "ended", label: "終了 (Ended)", badgeColor: "bg-slate-100 text-slate-600 border-slate-200" },
 ];
+
+function isValidYmd(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(`${value}T00:00:00`);
+  return (
+    date.getFullYear() === year && date.getMonth() + 1 === month && date.getDate() === day
+  );
+}
+
+// formatYmdWithDow returns invalid input unchanged, so validate first and
+// hide null/empty/invalid values per project convention.
+export function formatPeriodDate(value: string | null | undefined): string {
+  if (!value || !isValidYmd(value)) return "";
+  return formatYmdWithDow(value);
+}
 
 export default function PersonRelationsSection({
   currentPerson,
@@ -105,7 +122,7 @@ export default function PersonRelationsSection({
 
           <button
             onClick={onOpenCreateModal}
-            className="rounded bg-slate-800 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-700 cursor-pointer"
+            className="rounded bg-blue-600 px-3 py-1 text-sm font-semibold text-white hover:bg-blue-700 cursor-pointer"
           >
             ＋ 関係を追加
           </button>
@@ -157,13 +174,17 @@ export default function PersonRelationsSection({
                             </div>
 
                             <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-500">
-                              {(rel.started_on || rel.ended_on) ? (
-                                <div>
-                                  期間: {rel.started_on || "未指定"} ～ {rel.ended_on || "現在"}
-                                </div>
-                              ) : (
-                                <div>期間: 未設定</div>
-                              )}
+                              {(() => {
+                                const startText = formatPeriodDate(rel.started_on);
+                                const endText = formatPeriodDate(rel.ended_on);
+                                return startText || endText ? (
+                                  <div>
+                                    期間: {startText || "未指定"} ～ {endText || "現在"}
+                                  </div>
+                                ) : (
+                                  <div>期間: 未設定</div>
+                                );
+                              })()}
                               {rel.note && <div>メモ: {rel.note}</div>}
                             </div>
                           </div>
@@ -171,20 +192,22 @@ export default function PersonRelationsSection({
                           <div className="flex items-center gap-2 shrink-0">
                             <button
                               onClick={() => toggleExpand(rel.relation_id)}
-                              className="px-2.5 py-1 text-xs font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded cursor-pointer border border-slate-200"
+                              className="px-2 py-0.5 text-xs font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded cursor-pointer border border-slate-200"
                             >
                               根拠 ({rel.evidence ? rel.evidence.length : 0}) {isExpanded ? "▲" : "▼"}
                             </button>
                             <button
                               onClick={() => onOpenEditModal(rel)}
-                              className="px-2.5 py-1 text-xs font-semibold text-slate-700 border border-slate-300 bg-white hover:bg-slate-100 rounded cursor-pointer"
+                              className="px-2 py-0.5 text-xs font-semibold text-slate-700 border border-slate-300 bg-white hover:bg-slate-100 rounded cursor-pointer"
                             >
                               編集
                             </button>
                             <button
                               onClick={() => handleDeleteClick(rel.relation_id)}
                               disabled={deletingIds.has(rel.relation_id)}
-                              className="px-2.5 py-1 text-xs font-semibold text-rose-700 border border-rose-200 bg-rose-50 hover:bg-rose-100 disabled:opacity-50 rounded cursor-pointer"
+                              className={`px-2 py-0.5 text-xs font-semibold text-white bg-rose-800 hover:bg-rose-900 disabled:opacity-50 rounded ${
+                                deletingIds.has(rel.relation_id) ? "disabled:cursor-not-allowed" : "cursor-pointer"
+                              }`}
                             >
                               削除
                             </button>

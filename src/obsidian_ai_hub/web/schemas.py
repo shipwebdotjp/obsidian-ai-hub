@@ -1142,8 +1142,8 @@ class PlannerProposalUpdateRequest(BaseModel):
             return None
         try:
             datetime.fromisoformat(v.strip())
-        except ValueError:
-            raise ValueError(f"Invalid ISO datetime: {v}")
+        except ValueError as exc:
+            raise ValueError(f"Invalid ISO datetime: {v}") from exc
         return v.strip()
 
 
@@ -1171,8 +1171,8 @@ def _validate_yyyy_mm_dd_or_none(v: Optional[str]) -> Optional[str]:
         raise ValueError("Date must be in YYYY-MM-DD format")
     try:
         datetime.strptime(v, "%Y-%m-%d")
-    except ValueError:
-        raise ValueError("Date must be in YYYY-MM-DD format")
+    except ValueError as exc:
+        raise ValueError("Date must be in YYYY-MM-DD format") from exc
     return v
 
 
@@ -1252,6 +1252,17 @@ class PersonRelationEvidenceCreateRequest(BaseModel):
         if v != "manual":
             raise ValueError("source_type must be 'manual'")
         return v
+
+    @model_validator(mode="after")
+    def _reject_empty_evidence(self) -> "PersonRelationEvidenceCreateRequest":
+        if not any(
+            (v or "").strip()
+            for v in (self.source_ref, self.quote, self.note, self.observed_at)
+        ):
+            raise ValueError(
+                "At least one of source_ref, quote, note, or observed_at is required"
+            )
+        return self
 
     @field_validator("observed_at")
     @classmethod

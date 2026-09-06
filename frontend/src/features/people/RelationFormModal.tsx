@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import PersonCombobox from "./PersonCombobox";
+import { useNativeDialog } from "./useNativeDialog";
 import { Person } from "../../api/types";
 import {
   PersonRelation,
@@ -309,12 +310,25 @@ export default function RelationFormModal({
   const subjectPerson = peopleList.find((p) => p.person_id === subjectPersonId);
   const objectPerson = peopleList.find((p) => p.person_id === objectPersonId);
 
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  useNativeDialog(dialogRef, onClose);
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 overflow-y-auto">
-      <div className="bg-white rounded-xl border border-slate-200 shadow-xl max-w-lg w-full my-8 overflow-hidden flex flex-col max-h-[90vh]">
+    <dialog
+      ref={dialogRef}
+      onClose={onClose}
+      onKeyDown={(e) => {
+        if (e.key === "Escape") onClose();
+      }}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="relation-form-dialog-title"
+      className="m-auto w-full max-w-lg rounded-xl border border-slate-200 shadow-xl p-0 backdrop:bg-slate-900/60 backdrop:backdrop-blur-sm max-h-[90vh]"
+    >
+      <div className="bg-white rounded-xl overflow-hidden flex flex-col max-h-[90vh]">
         {/* Header */}
         <div className="p-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center shrink-0">
-          <h3 className="text-sm font-bold text-slate-800">
+          <h3 id="relation-form-dialog-title" className="text-sm font-bold text-slate-800">
             {isEditing ? "関係の編集" : "新規関係の作成"}
           </h3>
           <button
@@ -349,6 +363,7 @@ export default function RelationFormModal({
                     <select
                       value={selectedTypeId}
                       onChange={(e) => setSelectedTypeId(e.target.value)}
+                      data-autofocus
                       className="w-full rounded border border-slate-300 p-2 text-xs focus:ring-2 focus:ring-slate-800 focus:outline-none"
                       required
                     >
@@ -754,6 +769,6 @@ export default function RelationFormModal({
           </button>
         </div>
       </div>
-    </div>
+    </dialog>
   );
 }

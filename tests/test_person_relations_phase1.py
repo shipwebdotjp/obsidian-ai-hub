@@ -45,7 +45,7 @@ def test_migration_v38_creates_tables_and_seeds_builtin_types(test_memory_db_pat
         assert len(builtin_rows) == len(BUILTIN_RELATION_TYPES)
 
         for row in builtin_rows:
-            rt_id, slug, f_label, r_label, directionality, is_builtin, is_active = row
+            rt_id, slug, _f_label, _r_label, directionality, is_builtin, is_active = row
             assert rt_id == f"rlt_builtin_{slug}"
             assert is_builtin == 1
             assert is_active == 1
@@ -212,6 +212,24 @@ def test_dto_evidence_validations():
     # Update request observed_at validation
     with pytest.raises(ValidationError):
         PersonRelationEvidenceUpdateRequest(observed_at="invalid-date")
+
+    # Reject content-free evidence (all None / empty / whitespace-only)
+    with pytest.raises(ValidationError):
+        PersonRelationEvidenceCreateRequest()
+    with pytest.raises(ValidationError):
+        PersonRelationEvidenceCreateRequest(source_type="manual")
+    with pytest.raises(ValidationError):
+        PersonRelationEvidenceCreateRequest(quote="", note="   ")
+    with pytest.raises(ValidationError):
+        PersonRelationEvidenceCreateRequest(
+            source_ref=None, quote=" ", note="", observed_at=None
+        )
+
+    # A single valid field (even padded) is accepted
+    single = PersonRelationEvidenceCreateRequest(note="  有効メモ  ")
+    assert single.note == "  有効メモ  "
+    mixed = PersonRelationEvidenceCreateRequest(quote="q", note=None, source_ref="")
+    assert mixed.quote == "q"
 
 
 def test_dto_relation_validations():

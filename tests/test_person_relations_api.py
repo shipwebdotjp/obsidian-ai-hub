@@ -262,3 +262,45 @@ def test_nonexistent_ids_return_404(seed_people_data, client):
 
     res = client.delete("/api/v1/person-relation-evidence/evi_nonexistent")
     assert res.status_code == 404
+
+
+def test_empty_evidence_rejected(seed_people_data, client):
+    res = client.get("/api/v1/person-relation-types")
+    types = res.json()
+    parent_type = next(t for t in types if t["slug"] == "parent-child")
+    type_id = parent_type["relation_type_id"]
+
+    rel_create_req = {
+        "subject_person_id": "peo_taro",
+        "object_person_id": "peo_hanako",
+        "relation_type_id": type_id,
+    }
+    res = client.post("/api/v1/people/peo_taro/relations", json=rel_create_req)
+    assert res.status_code == 201
+    rel_id = res.json()["relation"]["relation_id"]
+
+    # All-None / blank / whitespace-only evidence is rejected with 422.
+    for bad_evidence in (
+        {},
+        {"source_type": "manual"},
+        {"source_type": "manual", "quote": "", "note": "   "},
+    ):
+        res = client.post(
+            f"/api/v1/person-relations/{rel_id}/evidence", json=bad_evidence
+        )
+        assert res.status_code == 422
+
+    # A single valid field is accepted.
+    res = client.post(
+        f"/api/v1/person-relations/{rel_id}/evidence",
+        json={"source_type": "manual", "quote": "  有効な引用  "},
+    )
+    assert res.status_code == 201
+    assert len(res.json()["evidence"]) == 1
+
+    # Empty initial evidence on relation creation is rejected with 422.
+    bad_create_req = dict(
+        rel_create_req, initial_evidence=[{"source_type": "manual"}]
+    )
+    res = client.post("/api/v1/people/peo_taro/relations", json=bad_create_req)
+    assert res.status_code == 422

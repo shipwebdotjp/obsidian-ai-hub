@@ -28,11 +28,11 @@
 ### 3.1 組み込み型とユーザー定義型
 
 - システムが初期提供する組み込み型（`is_builtin=true`）と、利用者が後から作成するユーザー定義型（`is_builtin=false`）を許容する。
-- 初期組み込み型の具体的なセットは未確定（「12. 未確定事項」参照）。候補: 親子、雇用、援助、敵対、対称型1件。
+- 初期組み込み型は計25件をマイグレーション v38 で自動投入する（「12.1 初期設計決定事項」参照）。
 
 ### 3.2 識別子と表示
 
-- 各タイプは不変 ID（`relation_type_id`、例: `rlt_xxx`）と一意な slug（例: `parent-child`）を持つ。slug は作成後不変を推奨（未確定事項参照）。
+- 各タイプは不変 ID（`relation_type_id`、例: `rlt_xxx`）と一意な slug（例: `parent-child`）を持つ。slug は作成後不変とする（「12.2 実装確定事項」参照）。
 - `directed`（有向）と `symmetric`（対称）を扱う。方向性は `directionality` 列で保持する。
 - 正方向表示名（forward label）と逆方向表示名（reverse label）を持つ。
   - directed の例: 正方向「親である」／逆方向「子である」、正方向「雇っている」／逆方向「雇われている」、正方向「援助している」／逆方向「援助されている」。
@@ -41,9 +41,9 @@
 
 ### 3.3 ライフサイクル
 
-- 使用中タイプ（少なくとも1件の Person Relation が参照）は削除不可とする。
-- 非活性化されたタイプ（`is_active=false`）は、既存関係の表示には使えるが、新規作成には使えない。
-- `directionality` は使用開始後（参照する関係が1件でも存在する状態）に変更不可とする。未使用の間は変更可能とするかは実装時に定める。
+- 関係タイプの削除 API は提供しない（`DELETE /api/v1/person-relation-types/...` は存在しない）。使用中か否かにかかわらず API 経由の削除は不可とし、運用は非活性化で行う。
+- 非活性化されたタイプ（`is_active=false`）は、既存関係の表示には使えるが、新規作成には使えない。非活性化は `PATCH /api/v1/person-relation-types/{relation_type_id}` に `is_active: false` を渡して行う。
+- `directionality` は作成後に変更不可とする。更新 API（`PATCH /api/v1/person-relation-types/{relation_type_id}`）は `directionality` を受け付けず、`forward_label` / `reverse_label` / `description` / `is_active` のみ更新可能とする。
 - 表記類似だけで型を自動統合しない。別 slug の型の統合は v1 対象外の手動操作とし、自動マージ機能は作らない。
 
 ## 4. 関係の方向
@@ -125,7 +125,7 @@ POST   /api/v1/person-relation-types
 PATCH  /api/v1/person-relation-types/{relation_type_id}
 ```
 
-- 関係タイプの削除・非活性化の表現（`DELETE` とするか `PATCH is_active=false` のみとするか）は実装計画で確定する。本仕様では「使用中タイプの削除は禁止」「原則非活性化」のみを制約とする。
+- 関係タイプの削除 API は提供せず、非活性化は `PATCH /api/v1/person-relation-types/{relation_type_id}` に `is_active: false` を渡して行う（実装確定）。
 - 既存人物詳細 DTO（`PersonDetail`）には関係を追加せず、relation 専用 API を使う。人物詳細の肥大化と `people_get` への波及を避ける。
 - 既存 `people_get`（`agents/registry.py`）の出力は変更しない。
 - relation 用 AI ツールを登録しない。`agents/registry.py:_BUILTIN_TOOL_DEFINITIONS` に追加しないことをテストで保証する。

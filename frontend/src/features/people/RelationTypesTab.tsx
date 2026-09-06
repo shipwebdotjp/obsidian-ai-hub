@@ -1,5 +1,6 @@
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import { PersonRelationType, PersonRelationTypeCreateRequest, PersonRelationTypeUpdateRequest } from "./types";
+import { useNativeDialog } from "./useNativeDialog";
 
 interface RelationTypesTabProps {
   types: PersonRelationType[];
@@ -35,6 +36,13 @@ export default function RelationTypesTab({
   const [editIsActive, setEditIsActive] = useState(true);
   const [editError, setEditError] = useState<string | null>(null);
   const [submittingEdit, setSubmittingEdit] = useState(false);
+
+  const createDialogRef = useRef<HTMLDialogElement>(null);
+  const editDialogRef = useRef<HTMLDialogElement>(null);
+  const closeCreateModal = () => setShowCreateModal(false);
+  const closeEditModal = () => setEditingType(null);
+  useNativeDialog(createDialogRef, closeCreateModal, showCreateModal);
+  useNativeDialog(editDialogRef, closeEditModal, editingType !== null);
 
   const openCreateModal = () => {
     setCreateSlug("");
@@ -201,13 +209,24 @@ export default function RelationTypesTab({
 
       {/* Create Modal */}
       {showCreateModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
-          <div className="bg-white rounded-xl border border-slate-200 shadow-xl max-w-md w-full overflow-hidden">
+        <dialog
+          ref={createDialogRef}
+          onClose={closeCreateModal}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") closeCreateModal();
+          }}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="relation-type-create-dialog-title"
+          className="m-auto w-full max-w-md rounded-xl border border-slate-200 shadow-xl p-0 backdrop:bg-slate-900/60 backdrop:backdrop-blur-sm"
+        >
+          <div className="bg-white rounded-xl overflow-hidden">
             <div className="p-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
-              <h3 className="text-sm font-bold text-slate-800">新規関係タイプの追加</h3>
+              <h3 id="relation-type-create-dialog-title" className="text-sm font-bold text-slate-800">新規関係タイプの追加</h3>
               <button
                 onClick={() => setShowCreateModal(false)}
                 className="text-slate-400 hover:text-slate-600 text-xs cursor-pointer"
+                aria-label="閉じる"
               >
                 ✕
               </button>
@@ -227,6 +246,7 @@ export default function RelationTypesTab({
                   value={createSlug}
                   onChange={(e) => setCreateSlug(e.target.value)}
                   placeholder="例: parent-child, mentor-mentee"
+                  data-autofocus
                   className="w-full rounded border border-slate-300 p-2 font-mono text-xs focus:ring-2 focus:ring-slate-800 focus:outline-none"
                   required
                 />
@@ -306,20 +326,31 @@ export default function RelationTypesTab({
               </div>
             </form>
           </div>
-        </div>
+        </dialog>
       )}
 
       {/* Edit Modal */}
       {editingType && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
-          <div className="bg-white rounded-xl border border-slate-200 shadow-xl max-w-md w-full overflow-hidden">
+        <dialog
+          ref={editDialogRef}
+          onClose={closeEditModal}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") closeEditModal();
+          }}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="relation-type-edit-dialog-title"
+          className="m-auto w-full max-w-md rounded-xl border border-slate-200 shadow-xl p-0 backdrop:bg-slate-900/60 backdrop:backdrop-blur-sm"
+        >
+          <div className="bg-white rounded-xl overflow-hidden">
             <div className="p-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
-              <h3 className="text-sm font-bold text-slate-800">
+              <h3 id="relation-type-edit-dialog-title" className="text-sm font-bold text-slate-800">
                 関係タイプの編集: <span className="font-mono text-slate-900">{editingType.slug}</span>
               </h3>
               <button
                 onClick={() => setEditingType(null)}
                 className="text-slate-400 hover:text-slate-600 text-xs cursor-pointer"
+                aria-label="閉じる"
               >
                 ✕
               </button>
@@ -345,6 +376,7 @@ export default function RelationTypesTab({
                     type="text"
                     value={editForward}
                     onChange={(e) => setEditForward(e.target.value)}
+                    data-autofocus
                     className="w-full rounded border border-slate-300 p-2 text-xs focus:ring-2 focus:ring-slate-800 focus:outline-none"
                     required
                   />
@@ -404,7 +436,7 @@ export default function RelationTypesTab({
               </div>
             </form>
           </div>
-        </div>
+        </dialog>
       )}
     </div>
   );

@@ -127,6 +127,19 @@ def _normalize_evidence_tuple(
     )
 
 
+def _is_empty_evidence(ev: dict[str, Any]) -> bool:
+    """True when all four evidence content fields are None or blank.
+
+    Mirrors the ``PersonRelationEvidenceCreateRequest`` model validator so
+    direct service calls (which bypass schema validation) get the same
+    protection without duplicating the rule.
+    """
+    return not any(
+        (ev.get(field) or "").strip()
+        for field in ("source_ref", "quote", "note", "observed_at")
+    )
+
+
 def deduplicate_and_add_evidence(
     cursor: sqlite3.Cursor,
     target_relation_id: str,
@@ -147,6 +160,10 @@ def deduplicate_and_add_evidence(
 
     added_count = 0
     for ev in evidence_list:
+        # Never persist (or transfer) content-free rows, including legacy
+        # empty rows that predate validation.
+        if _is_empty_evidence(ev):
+            continue
         norm_tup = _normalize_evidence_tuple(
             ev.get("source_type", "manual"),
             ev.get("source_ref"),
@@ -193,6 +210,11 @@ def create_person_relation_in_tx(
     initial_evidence: Optional[list[dict[str, Any]]] = None,
 ) -> tuple[dict[str, Any], Literal["created", "merged_into_existing"]]:
     validate_dates(started_on, ended_on)
+
+    if initial_evidence and any(_is_empty_evidence(ev) for ev in initial_evidence):
+        raise ValueError(
+            "At least one of source_ref, quote, note, or observed_at is required"
+        )
 
     norm_subj, norm_obj, rel_type = normalize_endpoints(
         cursor, relation_type_id, subject_person_id, object_person_id
@@ -863,6 +885,17 @@ def add_relation_evidence(
         raise ValueError("source_type must be 'manual'")
     if observed_at is not None:
         validate_dates(observed_at, None)
+    if _is_empty_evidence(
+        {
+            "source_ref": source_ref,
+            "quote": quote,
+            "note": note,
+            "observed_at": observed_at,
+        }
+    ):
+        raise ValueError(
+            "At least one of source_ref, quote, note, or observed_at is required"
+        )
 
     conn = get_db_connection()
     try:

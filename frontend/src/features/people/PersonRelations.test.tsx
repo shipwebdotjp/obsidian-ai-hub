@@ -11,6 +11,7 @@ import DeletePersonDialog from "./DeletePersonDialog";
 import RelationFormModal from "./RelationFormModal";
 import RelationEvidenceSection from "./RelationEvidenceSection";
 import MergePreviewDialog from "./MergePreviewDialog";
+import { formatPeriodDate } from "./PersonRelationsSection";
 import { PersonRelationType, PersonRelation, PersonDetail } from "./types";
 
 describe("Person Relations UI Components", () => {
@@ -331,6 +332,71 @@ describe("Person Relations UI Components", () => {
     expect(screen.getByText("統合阻害要因", { exact: false })).toBeInTheDocument();
     expect(screen.getByText("自己関係違反")).toBeInTheDocument();
     expect(screen.getByText("(期間未設定)")).toBeInTheDocument();
+  });
+
+  test("formatPeriodDate hides null, empty, and invalid dates", () => {
+    expect(formatPeriodDate("2020-01-01")).toBe("2020/01/01(水)");
+    expect(formatPeriodDate("2020-12-31")).toBe("2020/12/31(木)");
+    expect(formatPeriodDate(null)).toBe("");
+    expect(formatPeriodDate(undefined)).toBe("");
+    expect(formatPeriodDate("")).toBe("");
+    expect(formatPeriodDate("2024-02-30")).toBe("");
+    expect(formatPeriodDate("2020/01/01")).toBe("");
+    expect(formatPeriodDate("not-a-date")).toBe("");
+  });
+
+  test("PersonRelationsSection renders start-only, end-only, and unset periods", () => {
+    const currentPerson: PersonDetail = {
+      person_id: "peo_taro",
+      display_name: "山田 太郎",
+      normalized_name: "山田太郎",
+      vault_id: null,
+      aliases: [],
+      summary_count: 0,
+      summaries: [],
+      relation_counts: {
+        summaries: 0,
+        aliases: 0,
+        assignments: 0,
+        subject_relations: 3,
+        object_relations: 0,
+        evidence: 0,
+      },
+    };
+    const baseRelation = {
+      relation_type_id: "rlt_parent",
+      note: null,
+      created_at: "2026-01-01T00:00:00",
+      updated_at: "2026-01-01T00:00:00",
+      relation_type: mockTypes[0],
+      evidence: [],
+    };
+    const relations: PersonRelation[] = [
+      { ...baseRelation, relation_id: "rel_both", subject_person_id: "peo_taro", object_person_id: "peo_hanako", started_on: "2020-01-01", ended_on: "2020-12-31", status: "ended" },
+      { ...baseRelation, relation_id: "rel_start", subject_person_id: "peo_taro", object_person_id: "peo_hanako", started_on: "2020-01-01", ended_on: null, status: "active" },
+      { ...baseRelation, relation_id: "rel_end", subject_person_id: "peo_taro", object_person_id: "peo_hanako", started_on: null, ended_on: "2020-12-31", status: "ended" },
+    ];
+    const mockPeopleList = [
+      { person_id: "peo_taro", display_name: "山田 太郎", normalized_name: "山田太郎", vault_id: null, aliases: [], summary_count: 1 },
+      { person_id: "peo_hanako", display_name: "鈴木 花子", normalized_name: "鈴木花子", vault_id: null, aliases: [], summary_count: 1 },
+    ];
+
+    render(
+      <PersonRelationsSection
+        currentPerson={currentPerson}
+        relations={relations}
+        peopleList={mockPeopleList}
+        statusFilter="all"
+        onStatusFilterChange={vi.fn()}
+        onOpenCreateModal={vi.fn()}
+        onOpenEditModal={vi.fn()}
+        onDeleteRelation={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("期間: 2020/01/01(水) ～ 2020/12/31(木)")).toBeInTheDocument();
+    expect(screen.getByText("期間: 2020/01/01(水) ～ 現在")).toBeInTheDocument();
+    expect(screen.getByText("期間: 未指定 ～ 2020/12/31(木)")).toBeInTheDocument();
   });
 
   test("RelationFormModal rejects empty evidence in edit mode", async () => {

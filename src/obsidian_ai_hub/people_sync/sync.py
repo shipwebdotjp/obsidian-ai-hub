@@ -174,6 +174,10 @@ def sync_people_in_tx(
         needs_final_update = False
         final_update_args = ()
         final_update_sql = ""
+        # Old duplicates skipped due to self-relation conflict keep their
+        # people row (and normalized_name). Track them so the final rename
+        # below can be skipped instead of violating UNIQUE(normalized_name).
+        skipped_old_person_ids: set[str] = set()
 
         if row is not None:
             target_person_id = row[0]
@@ -346,6 +350,7 @@ def sync_people_in_tx(
                         "skipped_relations": skipped_items,
                     }
                 )
+                skipped_old_person_ids.add(old_person_id)
                 continue
 
             logger.info(
@@ -404,6 +409,28 @@ def sync_people_in_tx(
                     )
 
             conn.execute("DELETE FROM people WHERE person_id = ?", (old_person_id,))
+
+        if needs_final_update and skipped_old_person_ids:
+            # All Step-A branches rename the target to normalized_vault_name.
+            # A skipped duplicate still holds its normalized_name row, so
+            # applying the rename would violate UNIQUE(people.normalized_name)
+            # and roll back the whole sync. Skip only the final rename here;
+            # the skip record above and all completed merges stay intact.
+            skip_placeholders = ", ".join("?" for _ in skipped_old_person_ids)
+            cursor.execute(
+                f"SELECT person_id FROM people WHERE normalized_name = ? AND person_id IN ({skip_placeholders})",
+                (normalized_vault_name, *skipped_old_person_ids),
+            )
+            blocker = cursor.fetchone()
+            if blocker is not None:
+                logger.warning(
+                    "Skipping final rename of person '%s' (%s) to normalized_name '%s' because skipped duplicate '%s' still holds that name (self-relation conflict)",
+                    vault_name,
+                    target_person_id,
+                    normalized_vault_name,
+                    blocker[0],
+                )
+                needs_final_update = False
 
         if needs_final_update:
             conn.execute(final_update_sql, final_update_args)

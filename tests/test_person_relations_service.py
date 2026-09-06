@@ -8,6 +8,7 @@ from obsidian_ai_hub.web.services.person_relations import (
     compute_relation_status,
     create_person_relation_in_tx,
     get_person_relation_by_id_in_tx,
+    add_relation_evidence,
     update_person_relation,
     update_relation_evidence,
 )
@@ -104,7 +105,7 @@ def test_relation_crud_and_validation(tmp_path, monkeypatch):
 
     # 6. Symmetric relation endpoint normalization
     # peo_2 > peo_1, so subject should be normalized to peo_1, object to peo_2
-    rel_sym, action_sym = create_person_relation_in_tx(
+    rel_sym, _action_sym = create_person_relation_in_tx(
         cursor, "peo_2", "peo_1", "rlt_builtin_friend"
     )
     assert rel_sym["subject_person_id"] == "peo_1"
@@ -122,12 +123,12 @@ def test_person_deletion_with_relations(tmp_path, monkeypatch):
     cursor = conn.cursor()
 
     # peo_1 -> peo_2 (directed parent-child: subject peo_1, object peo_2)
-    rel_sub, _ = create_person_relation_in_tx(
+    _rel_sub, _ = create_person_relation_in_tx(
         cursor, "peo_1", "peo_2", "rlt_builtin_parent-child", initial_evidence=[{"quote": "e1"}]
     )
     # peo_1 -> peo_3 (directed supervises: subject peo_1, object peo_3 -> wait, peo_3 -> peo_1 friend is symmetric so endpoints get normalized peo_1 < peo_3!)
     # Let's use a directed relation peo_3 -> peo_1 (reports-to) so peo_1 is object
-    rel_obj, _ = create_person_relation_in_tx(
+    _rel_obj, _ = create_person_relation_in_tx(
         cursor, "peo_3", "peo_1", "rlt_builtin_reports-to", initial_evidence=[{"quote": "e2"}]
     )
     conn.commit()
@@ -220,6 +221,51 @@ def test_vault_sync_automatic_merge_and_self_relation_skip(tmp_path, monkeypatch
     # Verify peo_old is NOT deleted because merge was skipped
     cursor.execute("SELECT person_id FROM people WHERE person_id = 'peo_old'")
     assert cursor.fetchone() is not None
+    conn.close()
+
+
+def test_vault_sync_self_relation_skip_blocks_final_rename(tmp_path, monkeypatch):
+    """A self-relation-conflict skip must not crash the final rename.
+
+    peo_old keeps normalized_name 'taro'; the vault-linked target would be
+    renamed to the same value, violating UNIQUE(people.normalized_name).
+    Sync must record the skip, keep both rows and the relation, and skip
+    only the final rename instead of raising IntegrityError.
+    """
+    db_file = tmp_path / "test_sync_skip_rename.db"
+    monkeypatch.setattr(config, "MEMORY_SQLITE_PATH", db_file)
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("INSERT INTO people (person_id, normalized_name, display_name, vault_id) VALUES ('peo_T', 'taro_old', 'Old Name', 'v1')")
+    cursor.execute("INSERT INTO people (person_id, normalized_name, display_name, vault_id) VALUES ('peo_O', 'taro', 'Taro', NULL)")
+    create_person_relation_in_tx(cursor, "peo_O", "peo_T", "rlt_builtin_friend")
+    conn.commit()
+
+    notes_map = {
+        "taro": {
+            "id": "v1",
+            "name": "Taro",
+            "aliases": [],
+            "file_path": "People/Taro.md",
+        }
+    }
+
+    skipped = sync_people_in_tx(conn, notes_map)
+    conn.commit()
+
+    assert len(skipped) == 1
+    assert skipped[0]["from_person_id"] == "peo_O"
+    assert skipped[0]["to_person_id"] == "peo_T"
+
+    # Both rows survive; the target rename is skipped, the relation is kept.
+    cursor.execute("SELECT normalized_name FROM people WHERE person_id = 'peo_T'")
+    assert cursor.fetchone()[0] == "taro_old"
+    cursor.execute("SELECT normalized_name FROM people WHERE person_id = 'peo_O'")
+    assert cursor.fetchone()[0] == "taro"
+    cursor.execute("SELECT COUNT(*) FROM person_relations")
+    assert cursor.fetchone()[0] == 1
     conn.close()
 
 
@@ -387,4 +433,39 @@ def test_update_clear_with_collision_keeps_survivor_note(tmp_path, monkeypatch):
     assert merged["started_on"] == "2025-01-01"
     assert "survivor note" in (merged["note"] or "")
     assert "absorbed note" not in (merged["note"] or "")
+    conn.close()
+
+
+def test_empty_evidence_rejected_at_service_boundary(tmp_path, monkeypatch):
+    db_file = tmp_path / "test_empty_ev.db"
+    monkeypatch.setattr(config, "MEMORY_SQLITE_PATH", db_file)
+
+    conn = get_db_connection()
+    setup_test_people(conn)
+    cursor = conn.cursor()
+
+    rel, _ = create_person_relation_in_tx(
+        cursor, "peo_1", "peo_2", "rlt_builtin_parent-child"
+    )
+    conn.commit()
+
+    # Direct service calls reject content-free evidence.
+    with pytest.raises(ValueError):
+        add_relation_evidence(rel["relation_id"])
+    with pytest.raises(ValueError):
+        add_relation_evidence(
+            rel["relation_id"], quote="   ", note="", source_ref=None
+        )
+    with pytest.raises(ValueError):
+        create_person_relation_in_tx(
+            cursor,
+            "peo_1",
+            "peo_3",
+            "rlt_builtin_friend",
+            initial_evidence=[{"source_type": "manual"}],
+        )
+
+    # A single valid field is accepted through the same boundary.
+    created = add_relation_evidence(rel["relation_id"], note="n")
+    assert len(created["evidence"]) == 1
     conn.close()
