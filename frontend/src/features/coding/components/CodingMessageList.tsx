@@ -47,6 +47,8 @@ interface CodingMessageListProps {
   ) => Promise<void>;
   onCancelWaitingRun: (waiting: ActiveWaitingRun) => Promise<void>;
   messageEndRef: RefObject<HTMLDivElement>;
+  scrollContainerRef?: RefObject<HTMLDivElement>;
+  onScrollMessages?: () => void;
   backend: string;
 }
 
@@ -68,6 +70,8 @@ export function CodingMessageList({
   onSubmitWaitingAnswers,
   onCancelWaitingRun,
   messageEndRef,
+  scrollContainerRef,
+  onScrollMessages,
   backend,
 }: CodingMessageListProps) {
   const toolCallsByMessageId = useMemo(
@@ -89,8 +93,17 @@ export function CodingMessageList({
     // relative: contains absolutely-positioned descendants (e.g. sr-only
     // toggle labels) inside this scroll container so they never extend the
     // document's scrollable overflow (outer page scrollbar).
-    <div className="flex-1 overflow-y-auto p-4 space-y-4 min-w-0 relative">
-      {loadingMessages ? (
+    <div
+      ref={scrollContainerRef}
+      onScroll={onScrollMessages}
+      className="flex-1 overflow-y-auto p-4 space-y-4 min-w-0 relative"
+    >
+      {loadingMessages && messages.length > 0 && (
+        <div className="text-center text-[11px] text-slate-400" aria-live="polite">
+          会話履歴を更新中...
+        </div>
+      )}
+      {loadingMessages && messages.length === 0 && !isStreaming ? (
         <div className="text-center text-xs text-slate-500 py-8">
           会話履歴読み込み中...
         </div>

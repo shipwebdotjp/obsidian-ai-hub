@@ -163,6 +163,56 @@ describe("CodingMessageList bubbles", () => {
     }
   });
 
+  it("再読み込み中も既存メッセージを維持し高さを潰さない", () => {
+    render(
+      <CodingMessageList
+        {...baseProps}
+        messages={[message({ message_id: "u1", content: "維持される本文" })]}
+        loadingMessages
+        onCopyMessage={vi.fn()}
+      />,
+    );
+
+    // 一覧を空プレースホルダに置き換えず、既存メッセージを残す
+    expect(screen.getByText("維持される本文")).toBeInTheDocument();
+    expect(screen.queryByText("会話履歴読み込み中...")).not.toBeInTheDocument();
+    expect(screen.getByText("会話履歴を更新中...")).toBeInTheDocument();
+  });
+
+  it("初回読み込み（メッセージなし）のみ全面プレースホルダを出す", () => {
+    render(
+      <CodingMessageList
+        {...baseProps}
+        messages={[]}
+        loadingMessages
+        onCopyMessage={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("会話履歴読み込み中...")).toBeInTheDocument();
+  });
+
+  it("スクロールコンテナのrefとonScrollを受け付ける", () => {
+    const scrollContainerRef = { current: null };
+    const onScrollMessages = vi.fn();
+    const { container } = render(
+      <CodingMessageList
+        {...baseProps}
+        messages={[message({ message_id: "u1" })]}
+        onCopyMessage={vi.fn()}
+        scrollContainerRef={scrollContainerRef}
+        onScrollMessages={onScrollMessages}
+      />,
+    );
+
+    const scroller = container.querySelector("div.flex-1.overflow-y-auto");
+    expect(scroller).not.toBeNull();
+    if (scroller) {
+      fireEvent.scroll(scroller);
+      expect(onScrollMessages).toHaveBeenCalledTimes(1);
+    }
+  });
+
   it("メッセージ一覧がrelativeな独立スクロール領域である", () => {
     const { container } = render(
       <CodingMessageList

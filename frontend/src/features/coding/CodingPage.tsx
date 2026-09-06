@@ -202,6 +202,8 @@ export default function CodingPage() {
               onSubmitWaitingAnswers={detail.handleSubmitWaitingAnswers}
               onCancelWaitingRun={detail.handleCancelWaitingRun}
               messageEndRef={ui.messageEndRef}
+              scrollContainerRef={ui.scrollContainerRef}
+              onScrollMessages={ui.handleMessageScroll}
               backend={selectedSession.backend}
             />
 

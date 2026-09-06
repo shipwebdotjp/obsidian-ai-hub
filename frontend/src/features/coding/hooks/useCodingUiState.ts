@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { CodingLiveToolCall, CodingMessage } from "../../../api/coding";
 import type { ActiveWaitingRun } from "../../../components/InConversationQuestionCard";
 
@@ -29,6 +29,26 @@ export function useCodingUiState({
   const copyResetRef = useRef<number | null>(null);
 
   const messageEndRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  // onScroll で更新される追従フラグ。レンダー後の scrollHeight 変化に
+  // 左右されず、ユーザーが下端付近にいたかどうかを安定して判定する。
+  const stickToBottomRef = useRef(true);
+
+  const handleMessageScroll = useCallback(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    const distanceFromBottom =
+      container.scrollHeight - container.scrollTop - container.clientHeight;
+    stickToBottomRef.current = distanceFromBottom <= 200;
+  }, []);
+
+  const scrollToBottomIfStuck = useCallback(() => {
+    const container = scrollContainerRef.current;
+    if (!container || typeof container.scrollTo !== "function") return;
+    if (!stickToBottomRef.current) return;
+    // scrollIntoView は先祖スクロール全体へ波及するため使わない。
+    container.scrollTo({ top: container.scrollHeight, behavior: "auto" });
+  }, []);
 
   const handleCopyMessage = async (content: string, messageId: string) => {
     try {
@@ -57,22 +77,16 @@ export function useCodingUiState({
 
   // Auto-scroll on new messages / phase change / waiting-run change
   // Only when already near the bottom so reading history isn't yanked.
+  // stickToBottomRef は onScroll でのみ更新し、DOM 高さ変化後の
+  // scrollTop クランプに引きずられないようにする。
   useEffect(() => {
-    const el = messageEndRef.current;
-    if (!el || typeof el.scrollIntoView !== "function") return;
-    const container = el.parentElement;
-    if (container) {
-      const distanceFromBottom =
-        container.scrollHeight - container.scrollTop - container.clientHeight;
-      if (distanceFromBottom > 200) return;
-    }
-    el.scrollIntoView({ behavior: "auto", block: "end" });
-  }, [messages, activePhaseText, streamingToolCalls, workerState, activeWaitingRun]);
+    scrollToBottomIfStuck();
+  }, [messages, activePhaseText, streamingToolCalls, workerState, activeWaitingRun, scrollToBottomIfStuck]);
 
   // Mobile drawer focus management & trap
   useEffect(() => {
     if (mobileDrawerOpen) {
-      drawerCloseBtnRef.current?.focus();
+      drawerCloseBtnRef.current?.focus({ preventScroll: true });
 
       const drawer = mobileDrawerRef.current;
       if (!drawer) return;
@@ -93,16 +107,16 @@ export function useCodingUiState({
         const last = focusable[focusable.length - 1];
         if (e.shiftKey && document.activeElement === first) {
           e.preventDefault();
-          last.focus();
+          last.focus({ preventScroll: true });
         } else if (!e.shiftKey && document.activeElement === last) {
           e.preventDefault();
-          first.focus();
+          first.focus({ preventScroll: true });
         }
       };
       window.addEventListener("keydown", onKeyDown);
       return () => {
         window.removeEventListener("keydown", onKeyDown);
-        drawerTriggerBtnRef.current?.focus();
+        drawerTriggerBtnRef.current?.focus({ preventScroll: true });
       };
     }
   }, [mobileDrawerOpen]);
@@ -118,5 +132,8 @@ export function useCodingUiState({
     copiedMessageId,
     handleCopyMessage,
     messageEndRef,
+    scrollContainerRef,
+    handleMessageScroll,
+    scrollToBottomIfStuck,
   };
 }
