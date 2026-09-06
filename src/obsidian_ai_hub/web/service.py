@@ -78,6 +78,7 @@ from obsidian_ai_hub.web.services.people_candidates import (
     resolve_person_candidate,
 )
 from obsidian_ai_hub.web.services.people_merge import (
+    SelfRelationConflictError,
     consolidate_summary_links,
     get_duplicate_candidates,
     merge_people,

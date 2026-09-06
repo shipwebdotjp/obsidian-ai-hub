@@ -272,6 +272,11 @@ def merge_people(
     try:
         service.merge_people(body.from_person_id, body.to_person_id)
         return {"success": True}
+    except service.SelfRelationConflictError as e:
+        raise HTTPException(
+            status_code=409,
+            detail={"message": str(e), "conflict_type": "self_relation"},
+        ) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

@@ -675,8 +675,9 @@ class PersonDeleteResponse(BaseModel):
     deleted_summary_people: int
     deleted_aliases: int
     deleted_assignments: int
-    deleted_relations: int = 0
-    deleted_evidence: int = 0
+    deleted_subject_relations: int = 0
+    deleted_object_relations: int = 0
+    deleted_relation_evidence: int = 0
 
 
 class PersonActionResponse(BaseModel):
@@ -711,12 +712,31 @@ class DuplicatesResponse(BaseModel):
     same_vault_id_groups: list[DuplicateSameVaultIdGroup] = []
 
 
+class SkippedRelationItem(BaseModel):
+    relation_id: str
+    relation_type_slug: str
+    other_person_id: str
+    other_person_name: str
+    started_on: Optional[str] = None
+    ended_on: Optional[str] = None
+
+
+class SkippedRelationMerge(BaseModel):
+    from_person_id: str
+    from_person_name: str
+    to_person_id: str
+    to_person_name: str
+    reason: str
+    skipped_relations: list[SkippedRelationItem] = []
+
+
 class SyncPeopleResponse(BaseModel):
     # True when a sync was actually applied (POST /people/sync); False for the
     # read-only vault report (GET /people/vault-report), which never syncs.
     synced: bool
     loader_report: dict[str, Any]
     db_conflicts: dict[str, Any]
+    skipped_relation_merges: list[SkippedRelationMerge] = []
 
 
 class MergedSummaryPreview(BaseModel):
@@ -734,6 +754,20 @@ class AliasTransferPreview(BaseModel):
     display_name: str
 
 
+class RelationImpactItem(BaseModel):
+    relation_id: str
+    other_person_id: str
+    other_person_name: str
+    relation_type_id: str
+    relation_type_slug: str
+    relation_type_forward_label: str
+    relation_type_reverse_label: str
+    started_on: Optional[str] = None
+    ended_on: Optional[str] = None
+    result_type: Literal["transferred", "merged_into_existing", "self_relation_conflict"]
+    surviving_relation_id: Optional[str] = None
+
+
 class PeopleMergePreviewResponse(BaseModel):
     allowed: bool
     reason: Optional[str] = None
@@ -741,8 +775,12 @@ class PeopleMergePreviewResponse(BaseModel):
     to_person: Optional[Person] = None
     transferred_summaries_count: int
     transferred_aliases_count: int
+    transferred_relations_count: int = 0
+    merged_relations_count: int = 0
+    self_relation_conflicts_count: int = 0
     alias_transfers: list[AliasTransferPreview] = []
     merged_summaries: list[MergedSummaryPreview] = []
+    relation_impacts: list[RelationImpactItem] = []
 
 
 # --- Project Management Schemas ---
