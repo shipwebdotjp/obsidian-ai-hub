@@ -371,8 +371,9 @@ def update_person_relation_in_tx(
 
     if target_collision is not None:
         surviving_id = target_collision["relation_id"]
-        incoming_note = note if (provided is None or "note" in provided) else current_rel["note"]
-        merged_note = concatenate_notes(target_collision["note"], incoming_note or current_rel["note"])
+        # merged_note already honors `provided` (explicit None -> NULL);
+        # never resurrect cleared text from the absorbed relation here.
+        merged_note = concatenate_notes(target_collision["note"], merged_note)
 
         cursor.execute(
             "UPDATE person_relations SET note = ?, updated_at = ? WHERE relation_id = ?",

@@ -346,3 +346,45 @@ def test_update_clears_fields_with_explicit_null(tmp_path, monkeypatch):
     assert row["note"] == "n"
     conn2.close()
     conn.close()
+
+
+def test_update_clear_with_collision_keeps_survivor_note(tmp_path, monkeypatch):
+    db_file = tmp_path / "test_clear_collision.db"
+    monkeypatch.setattr(config, "MEMORY_SQLITE_PATH", db_file)
+
+    conn = get_db_connection()
+    setup_test_people(conn)
+    cursor = conn.cursor()
+
+    rel1, _ = create_person_relation_in_tx(
+        cursor,
+        "peo_1",
+        "peo_2",
+        "rlt_builtin_parent-child",
+        started_on="2025-01-01",
+        note="survivor note",
+    )
+    rel2, _ = create_person_relation_in_tx(
+        cursor,
+        "peo_1",
+        "peo_2",
+        "rlt_builtin_parent-child",
+        started_on="2025-02-01",
+        note="absorbed note",
+    )
+    conn.commit()
+
+    # Moving rel2 onto rel1's period with an explicit note clear merges
+    # into rel1 without resurrecting the cleared text.
+    merged, action = update_person_relation(
+        rel2["relation_id"],
+        started_on="2025-01-01",
+        note=None,
+        provided={"started_on", "note"},
+    )
+    assert action == "merged_into_existing"
+    assert merged["relation_id"] == rel1["relation_id"]
+    assert merged["started_on"] == "2025-01-01"
+    assert "survivor note" in (merged["note"] or "")
+    assert "absorbed note" not in (merged["note"] or "")
+    conn.close()

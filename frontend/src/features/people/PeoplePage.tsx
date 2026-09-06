@@ -178,7 +178,7 @@ export default function PeoplePage() {
     setEditSuccess(null);
   };
 
-  const loadAllData = async (shouldClearSuccess?: boolean) => {
+  const loadAllData = async (shouldClearSuccess?: boolean): Promise<boolean> => {
     setLoading(true);
     setError(null);
     setResolveError(null);
@@ -200,8 +200,10 @@ export default function PeoplePage() {
       setDuplicates(dupsData);
       setVaultReport(reportData);
       setRelationTypes(typesData);
+      return true;
     } catch (e) {
       setError("データの読み込みに失敗しました");
+      return false;
     } finally {
       setLoading(false);
     }
@@ -210,10 +212,12 @@ export default function PeoplePage() {
   // Always fetch the full relation list; status filtering is done client-side
   // in PersonRelationsSection so counts stay consistent.
   // The request id guards against rapid person switching: a stale fetch
-  // resolving after a newer one must not overwrite the current list, nor
-  // feed an outdated snapshot back to callers (e.g. setEditingRelation).
+  // resolving after a newer one must not overwrite the current list.
+  // Returns null on failure (error already surfaced) so callers can skip
+  // their success messages instead of showing success + error together.
+  // Returns an empty array (not null) when superseded by a newer request.
   const relationsRequestRef = useRef(0);
-  const loadPersonRelations = async (personId: string): Promise<PersonRelation[]> => {
+  const loadPersonRelations = async (personId: string): Promise<PersonRelation[] | null> => {
     const reqId = ++relationsRequestRef.current;
     try {
       const data = await peopleApi.fetchPersonRelations(personId);
@@ -223,7 +227,7 @@ export default function PeoplePage() {
     } catch {
       if (reqId !== relationsRequestRef.current) return [];
       setError("関係の読み込みに失敗しました");
-      return [];
+      return null;
     }
   };
 
@@ -330,14 +334,16 @@ export default function PeoplePage() {
 
   const handleCreateRelationType = async (req: PersonRelationTypeCreateRequest) => {
     await peopleApi.createPersonRelationType(req);
+    const reloaded = await loadAllData(false);
+    if (!reloaded) return;
     setSuccessMessage(`関係タイプ「${req.slug}」を作成しました。`);
-    await loadAllData(false);
   };
 
   const handleUpdateRelationType = async (relationTypeId: string, req: PersonRelationTypeUpdateRequest) => {
     const updated = await peopleApi.updatePersonRelationType(relationTypeId, req);
+    const reloaded = await loadAllData(false);
+    if (!reloaded) return;
     setSuccessMessage(`関係タイプ「${updated.slug}」を更新しました。`);
-    await loadAllData(false);
   };
 
   const handleCreateRelation = async (req: PersonRelationCreateRequest) => {
@@ -351,11 +357,13 @@ export default function PeoplePage() {
         ? "既存の同一人物間関係が存在するため、内容および根拠を重複統合しました。"
         : "新しい人物間関係を作成しました。";
     try {
-      await loadAllData(false);
+      const reloaded = await loadAllData(false);
       const updatedDetail = await peopleApi.fetchPersonDetail(personId);
       if (selectedPersonIdRef.current !== personId) return;
       setSelectedPerson(updatedDetail);
-      await loadPersonRelations(personId);
+      const relations = await loadPersonRelations(personId);
+      if (selectedPersonIdRef.current !== personId) return;
+      if (!reloaded || relations === null) return;
       setSuccessMessage(successMsg);
     } catch (e) {
       if (selectedPersonIdRef.current !== personId) return;
@@ -372,11 +380,13 @@ export default function PeoplePage() {
         ? "期間の変更により既存関係と一致したため、関係を統合しました。"
         : "人物間関係を更新しました。";
     try {
-      await loadAllData(false);
+      const reloaded = await loadAllData(false);
       const updatedDetail = await peopleApi.fetchPersonDetail(personId);
       if (selectedPersonIdRef.current !== personId) return;
       setSelectedPerson(updatedDetail);
-      await loadPersonRelations(personId);
+      const relations = await loadPersonRelations(personId);
+      if (selectedPersonIdRef.current !== personId) return;
+      if (!reloaded || relations === null) return;
       setSuccessMessage(successMsg);
     } catch (e) {
       if (selectedPersonIdRef.current !== personId) return;
@@ -389,11 +399,13 @@ export default function PeoplePage() {
     const personId = selectedPerson.person_id;
     try {
       await peopleApi.deletePersonRelation(relationId);
-      await loadAllData(false);
+      const reloaded = await loadAllData(false);
       const updatedDetail = await peopleApi.fetchPersonDetail(personId);
       if (selectedPersonIdRef.current !== personId) return;
       setSelectedPerson(updatedDetail);
-      await loadPersonRelations(personId);
+      const relations = await loadPersonRelations(personId);
+      if (selectedPersonIdRef.current !== personId) return;
+      if (!reloaded || relations === null) return;
       setSuccessMessage("人物間関係を削除しました。");
     } catch (e) {
       if (selectedPersonIdRef.current !== personId) return;
@@ -407,6 +419,7 @@ export default function PeoplePage() {
     await peopleApi.addRelationEvidence(relationId, req);
     const data = await loadPersonRelations(personId);
     if (selectedPersonIdRef.current !== personId) return;
+    if (data === null) return;
     if (editingRelation && editingRelation.relation_id === relationId) {
       const updatedRel = data.find(
         (r) => r.relation_id === relationId
@@ -422,6 +435,7 @@ export default function PeoplePage() {
     await peopleApi.updateRelationEvidence(evidenceId, req);
     const data = await loadPersonRelations(personId);
     if (selectedPersonIdRef.current !== personId) return;
+    if (data === null) return;
     if (editingRelation) {
       const updatedRel = data.find(
         (r) => r.relation_id === editingRelation.relation_id
@@ -437,6 +451,7 @@ export default function PeoplePage() {
     await peopleApi.deleteRelationEvidence(evidenceId);
     const data = await loadPersonRelations(personId);
     if (selectedPersonIdRef.current !== personId) return;
+    if (data === null) return;
     if (editingRelation) {
       const updatedRel = data.find(
         (r) => r.relation_id === editingRelation.relation_id
