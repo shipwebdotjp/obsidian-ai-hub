@@ -6,6 +6,7 @@ import type {
   CodingSessionDetail,
 } from "../../../api/coding";
 import MarkdownPreview from "../../../components/MarkdownPreview";
+import { CopyMessageButton } from "../../../components/CopyMessageButton";
 import {
   WaitingRunQuestionCard,
   WaitingRunStatusPanel,
@@ -85,7 +86,10 @@ export function CodingMessageList({
   );
 
   return (
-    <div className="flex-1 overflow-y-auto p-4 space-y-4 min-w-0">
+    // relative: contains absolutely-positioned descendants (e.g. sr-only
+    // toggle labels) inside this scroll container so they never extend the
+    // document's scrollable overflow (outer page scrollbar).
+    <div className="flex-1 overflow-y-auto p-4 space-y-4 min-w-0 relative">
       {loadingMessages ? (
         <div className="text-center text-xs text-slate-500 py-8">
           会話履歴読み込み中...
@@ -117,6 +121,15 @@ export function CodingMessageList({
                       {msg.content}
                     </p>
                   </div>
+                </div>
+                <div className="flex items-center gap-2 text-[10px] text-slate-400 justify-end">
+                  <CopyMessageButton
+                    content={msg.content}
+                    messageId={msg.message_id}
+                    copiedMessageId={copiedMessageId}
+                    onCopy={onCopyMessage}
+                  />
+                  <span aria-label="送信時刻">{formatDateTime(msg.created_at)}</span>
                 </div>
                 {sessionDetail?.ask_user_answer_history
                   ?.filter((round) => round.user_message_id === msg.message_id)
@@ -275,48 +288,12 @@ export function CodingMessageList({
                   </div>
                 </div>
                 <div className="flex items-center gap-2 text-[10px] text-slate-400 justify-start">
-                  <button
-                    type="button"
-                    onClick={() => onCopyMessage(msg.content, msg.message_id)}
-                    className="inline-flex items-center gap-1 cursor-pointer rounded px-1.5 py-0.5 hover:bg-slate-100 hover:text-slate-600 transition"
-                    aria-label="メッセージをコピー"
-                    data-testid={`copy-message-${msg.message_id}`}
-                  >
-                    {copiedMessageId === msg.message_id ? (
-                      <>
-                        <svg
-                          className="h-3.5 w-3.5 text-emerald-600"
-                          fill="none"
-                          viewBox="0 0 24 24"
-                          stroke="currentColor"
-                          aria-hidden="true"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M5 13l4 4L19 7"
-                          />
-                        </svg>
-                        <span className="text-emerald-700">コピーしました</span>
-                      </>
-                    ) : (
-                      <svg
-                        className="h-3.5 w-3.5"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                        aria-hidden="true"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h12a2 2 0 002-2V7a2 2 0 00-2-2h-2M8 5a2 2 0 002 2h4a2 2 0 002-2M8 5a2 2 0 012-2h4a2 2 0 012 2"
-                        />
-                      </svg>
-                    )}
-                  </button>
+                  <CopyMessageButton
+                    content={msg.content}
+                    messageId={msg.message_id}
+                    copiedMessageId={copiedMessageId}
+                    onCopy={onCopyMessage}
+                  />
                   <span aria-label="送信時刻">{formatDateTime(msg.created_at)}</span>
                 </div>
               </>
@@ -332,9 +309,13 @@ export function CodingMessageList({
                     >
                       <summary className="flex cursor-pointer items-center justify-between px-4 py-2.5 bg-blue-100/80 font-mono text-[11px] text-blue-950 font-semibold hover:bg-blue-100">
                         <span className="flex items-center gap-1.5">
-                          <span>🤖 CLI Workerへの指示</span>
+                          <span>CLI Workerへの指示</span>
                         </span>
-                        <span className="text-blue-700 text-[10px] font-normal">クリックで展開/折りたたみ</span>
+                        <span className="text-blue-700 text-[10px] font-normal" aria-hidden="true">
+                          <span className="group-open:hidden">▼</span>
+                          <span className="hidden group-open:inline">▲</span>
+                        </span>
+                        <span className="sr-only">クリックで展開/折りたたみ</span>
                       </summary>
                       <div className="p-4 overflow-x-auto max-h-80 border-t border-blue-200/60 min-w-0 [overflow-wrap:anywhere]">
                         <pre className="whitespace-pre-wrap font-mono text-xs leading-relaxed text-blue-900 bg-blue-100/50 p-3 rounded-lg border border-blue-200/60 min-w-0 max-w-full [overflow-wrap:anywhere] wrap-anywhere break-words">
@@ -345,48 +326,13 @@ export function CodingMessageList({
                   </div>
                 </div>
                 <div className="flex items-center gap-2 text-[10px] text-slate-400 justify-start">
-                  <button
-                    type="button"
-                    onClick={() => onCopyMessage(msg.content, msg.message_id)}
-                    className="inline-flex items-center gap-1 cursor-pointer rounded px-1.5 py-0.5 hover:bg-slate-100 hover:text-slate-600 transition"
-                    aria-label="指示内容をコピー"
-                    data-testid={`copy-message-${msg.message_id}`}
-                  >
-                    {copiedMessageId === msg.message_id ? (
-                      <>
-                        <svg
-                          className="h-3.5 w-3.5 text-emerald-600"
-                          fill="none"
-                          viewBox="0 0 24 24"
-                          stroke="currentColor"
-                          aria-hidden="true"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M5 13l4 4L19 7"
-                          />
-                        </svg>
-                        <span className="text-emerald-700">コピーしました</span>
-                      </>
-                    ) : (
-                      <svg
-                        className="h-3.5 w-3.5"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                        aria-hidden="true"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002-2V7a2 2 0 00-2-2h-2M8 5a2 2 0 002 2h4a2 2 0 002-2M8 5a2 2 0 012-2h4a2 2 0 012 2"
-                        />
-                      </svg>
-                    )}
-                  </button>
+                  <CopyMessageButton
+                    content={msg.content}
+                    messageId={msg.message_id}
+                    copiedMessageId={copiedMessageId}
+                    onCopy={onCopyMessage}
+                    ariaLabel="指示内容をコピー"
+                  />
                   <span aria-label="送信時刻">{formatDateTime(msg.created_at)}</span>
                 </div>
               </>
@@ -399,7 +345,11 @@ export function CodingMessageList({
                     <details className="rounded-xl border border-slate-200 bg-slate-900 text-slate-100 text-xs shadow-sm overflow-hidden group min-w-0">
                       <summary className="flex cursor-pointer items-center justify-between px-4 py-2.5 bg-slate-800 font-mono text-[11px] hover:bg-slate-700">
                         <span>CLI Worker 最終返答 ({backend})</span>
-                        <span className="text-slate-400 text-[10px]">クリックで展開/折りたたみ</span>
+                        <span className="text-slate-400 text-[10px]" aria-hidden="true">
+                          <span className="group-open:hidden">▼</span>
+                          <span className="hidden group-open:inline">▲</span>
+                        </span>
+                        <span className="sr-only">クリックで展開/折りたたみ</span>
                       </summary>
                       <div className="p-4 overflow-x-auto max-h-96 border-b border-slate-800 min-w-0 [overflow-wrap:anywhere]">
                         <MarkdownPreview content={msg.content} variant="dark" />
@@ -466,48 +416,12 @@ export function CodingMessageList({
                   </div>
                 </div>
                 <div className="flex items-center gap-2 text-[10px] text-slate-400 justify-start">
-                  <button
-                    type="button"
-                    onClick={() => onCopyMessage(msg.content, msg.message_id)}
-                    className="inline-flex items-center gap-1 cursor-pointer rounded px-1.5 py-0.5 hover:bg-slate-100 hover:text-slate-600 transition"
-                    aria-label="メッセージをコピー"
-                    data-testid={`copy-message-${msg.message_id}`}
-                  >
-                    {copiedMessageId === msg.message_id ? (
-                      <>
-                        <svg
-                          className="h-3.5 w-3.5 text-emerald-600"
-                          fill="none"
-                          viewBox="0 0 24 24"
-                          stroke="currentColor"
-                          aria-hidden="true"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M5 13l4 4L19 7"
-                          />
-                        </svg>
-                        <span className="text-emerald-700">コピーしました</span>
-                      </>
-                    ) : (
-                      <svg
-                        className="h-3.5 w-3.5"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                        aria-hidden="true"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002-2V7a2 2 0 00-2-2h-2M8 5a2 2 0 002 2h4a2 2 0 002-2M8 5a2 2 0 012-2h4a2 2 0 012 2"
-                        />
-                      </svg>
-                    )}
-                  </button>
+                  <CopyMessageButton
+                    content={msg.content}
+                    messageId={msg.message_id}
+                    copiedMessageId={copiedMessageId}
+                    onCopy={onCopyMessage}
+                  />
                   <span aria-label="送信時刻">{formatDateTime(msg.created_at)}</span>
                 </div>
               </>

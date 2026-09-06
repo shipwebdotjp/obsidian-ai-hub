@@ -20,6 +20,13 @@ interface UseAgentsUiStateOptions {
   setAgentToDelete: React.Dispatch<React.SetStateAction<Agent | null>>;
   setSessionToDelete: React.Dispatch<React.SetStateAction<AgentSession | null>>;
   setSessionToEditTitle: React.Dispatch<React.SetStateAction<AgentSession | null>>;
+  agentToDelete: Agent | null;
+  sessionToDelete: AgentSession | null;
+  sessionToEditTitle: AgentSession | null;
+  /** エージェント作成/編集フォームが開いているか（Escapeで閉じる対象）。 */
+  isFormOpen: boolean;
+  /** フォームを閉じる（キャンセルと同じ状態遷移）。 */
+  onCloseForm: () => void;
 }
 
 /** ペイン開閉・ドロワー・スクロール・グローバルキー操作など表示状態を管理する。 */
@@ -35,6 +42,11 @@ export function useAgentsUiState({
   setAgentToDelete,
   setSessionToDelete,
   setSessionToEditTitle,
+  agentToDelete,
+  sessionToDelete,
+  sessionToEditTitle,
+  isFormOpen,
+  onCloseForm,
 }: UseAgentsUiStateOptions) {
   // Mobile / desktop pane layout state.
   // `leftPaneOpen` controls the mobile-only overlay drawer; on desktop the
@@ -107,20 +119,35 @@ export function useAgentsUiState({
     };
   }, [leftPaneOpen]);
 
-  // Modal / drawer ESC listener
+  // Modal / drawer / agent-form ESC listener.
+  // Priority: closable overlays (delete modals, title modal, session menu,
+  // mobile drawer) first with the existing behavior; the agent create/edit
+  // form only when nothing else handles Escape. IME composition is ignored
+  // so conversion is never cancelled by this listener.
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
+      if (e.key !== "Escape" || e.isComposing) return;
+      if (
+        agentToDelete !== null ||
+        sessionToDelete !== null ||
+        sessionToEditTitle !== null ||
+        activeSessionMenuId !== null ||
+        leftPaneOpen
+      ) {
         setAgentToDelete(null);
         setSessionToDelete(null);
         setSessionToEditTitle(null);
         setActiveSessionMenuId(null);
         setLeftPaneOpen(false);
+        return;
+      }
+      if (isFormOpen) {
+        onCloseForm();
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [setActiveSessionMenuId, setAgentToDelete, setSessionToDelete, setSessionToEditTitle]);
+  }, [agentToDelete, sessionToDelete, sessionToEditTitle, activeSessionMenuId, leftPaneOpen, isFormOpen, onCloseForm, setActiveSessionMenuId, setAgentToDelete, setSessionToDelete, setSessionToEditTitle]);
 
   // Close active session menu when clicking outside
   useEffect(() => {

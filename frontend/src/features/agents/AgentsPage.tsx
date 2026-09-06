@@ -119,6 +119,11 @@ export default function AgentsPage() {
     setAgentToDelete: catalog.setAgentToDelete,
     setSessionToDelete: sessions.setSessionToDelete,
     setSessionToEditTitle: sessions.setSessionToEditTitle,
+    agentToDelete: catalog.agentToDelete,
+    sessionToDelete: sessions.sessionToDelete,
+    sessionToEditTitle: sessions.sessionToEditTitle,
+    isFormOpen: catalog.isCreatingAgent || catalog.isEditingAgent,
+    onCloseForm: catalog.closeAgentForm,
   });
 
   // Load sessions when selected agent changes

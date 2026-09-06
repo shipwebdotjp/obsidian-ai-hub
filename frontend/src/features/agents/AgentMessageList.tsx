@@ -1,6 +1,5 @@
 import React, { useMemo, type MutableRefObject, type RefObject } from "react";
 import { Link } from "react-router-dom";
-import { Copy } from "lucide-react";
 import type {
   AgentLiveToolCall,
   AgentMessage,
@@ -10,6 +9,7 @@ import type {
 } from "../../api/types";
 import { ROUTES } from "../../constants/routes";
 import MarkdownPreview from "../../components/MarkdownPreview";
+import { CopyMessageButton } from "../../components/CopyMessageButton";
 import {
   WaitingRunQuestionCard,
   WaitingRunStatusPanel,
@@ -220,35 +220,12 @@ export function AgentMessageList({
                   m.role === "user" ? "justify-end" : "justify-start"
                 }`}
               >
-                <button
-                  type="button"
-                  onClick={() => onCopyMessage(m.content, m.message_id)}
-                  className="inline-flex items-center gap-1 cursor-pointer rounded px-1.5 py-0.5 hover:bg-slate-100 hover:text-slate-600 transition"
-                  aria-label="メッセージをコピー"
-                  data-testid={`copy-message-${m.message_id}`}
-                >
-                  {copiedMessageId === m.message_id ? (
-                    <>
-                      <svg
-                        className="h-3.5 w-3.5 text-emerald-600"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                        aria-hidden="true"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M5 13l4 4L19 7"
-                        />
-                      </svg>
-                      <span className="text-emerald-700">コピーしました</span>
-                    </>
-                  ) : (
-                    <Copy className="h-3.5 w-3.5" aria-hidden="true" />
-                  )}
-                </button>
+                <CopyMessageButton
+                  content={m.content}
+                  messageId={m.message_id}
+                  copiedMessageId={copiedMessageId}
+                  onCopy={onCopyMessage}
+                />
                 <span aria-label="送信時刻">{formatDateTime(m.created_at)}</span>
               </div>
               </div>

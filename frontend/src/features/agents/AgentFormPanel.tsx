@@ -1,4 +1,5 @@
-import { Copy, Trash2, X } from "lucide-react";
+import { Trash2, X } from "lucide-react";
+import { ClipboardIcon } from "../../components/ClipboardIcon";
 import { AGENT_DELEGATE_TOOL_ID } from "./agentViewUtils";
 import type {
   Agent,
@@ -178,7 +179,7 @@ export function AgentFormPanel({
                         </>
                       ) : (
                         <>
-                          <Copy className="h-3.5 w-3.5" aria-hidden="true" />
+                          <ClipboardIcon />
                           <span>コピー</span>
                         </>
                       )}
