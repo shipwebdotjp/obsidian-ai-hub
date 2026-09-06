@@ -1,4 +1,5 @@
 from datetime import datetime
+import re
 from typing import Literal, Optional, Any
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -674,6 +675,8 @@ class PersonDeleteResponse(BaseModel):
     deleted_summary_people: int
     deleted_aliases: int
     deleted_assignments: int
+    deleted_relations: int = 0
+    deleted_evidence: int = 0
 
 
 class PersonActionResponse(BaseModel):
@@ -1110,3 +1113,193 @@ class PlannerRejectRequest(BaseModel):
 class PlannerGenerateResponse(BaseModel):
     generated: int
     proposals: list[PlannerProposal]
+
+
+# --- Person Relation schemas ---
+
+RelationStatus = Literal["upcoming", "active", "ended", "undated"]
+
+
+def _validate_yyyy_mm_dd_or_none(v: Optional[str]) -> Optional[str]:
+    if v is None:
+        return None
+    v = v.strip()
+    if not v:
+        return None
+    if not re.match(r"^\d{4}-\d{2}-\d{2}$", v):
+        raise ValueError("Date must be in YYYY-MM-DD format")
+    try:
+        datetime.strptime(v, "%Y-%m-%d")
+    except ValueError:
+        raise ValueError("Date must be in YYYY-MM-DD format")
+    return v
+
+
+class PersonRelationType(BaseModel):
+    relation_type_id: str
+    slug: str
+    forward_label: str
+    reverse_label: str
+    directionality: Literal["directed", "symmetric"]
+    description: Optional[str] = None
+    is_builtin: bool
+    is_active: bool
+    created_at: str
+    updated_at: str
+
+
+class PersonRelationTypeCreateRequest(BaseModel):
+    slug: str
+    forward_label: str
+    reverse_label: str
+    directionality: Literal["directed", "symmetric"]
+    description: Optional[str] = None
+
+    @field_validator("slug", "forward_label", "reverse_label")
+    @classmethod
+    def _validate_non_empty(cls, v: str) -> str:
+        s = v.strip()
+        if not s:
+            raise ValueError("Field must not be empty")
+        return s
+
+
+class PersonRelationTypeUpdateRequest(BaseModel):
+    forward_label: Optional[str] = None
+    reverse_label: Optional[str] = None
+    description: Optional[str] = None
+    is_active: Optional[bool] = None
+
+    @field_validator("forward_label", "reverse_label")
+    @classmethod
+    def _validate_non_empty_if_present(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        s = v.strip()
+        if not s:
+            raise ValueError("Field must not be empty")
+        return s
+
+
+class PersonRelationTypeListResponse(BaseModel):
+    items: list[PersonRelationType]
+    total: int
+
+
+class PersonRelationEvidence(BaseModel):
+    evidence_id: str
+    relation_id: str
+    source_type: Literal["manual"] = "manual"
+    source_ref: Optional[str] = None
+    quote: Optional[str] = None
+    note: Optional[str] = None
+    observed_at: Optional[str] = None
+    created_at: str
+    updated_at: str
+
+
+class PersonRelationEvidenceCreateRequest(BaseModel):
+    source_type: Literal["manual"] = "manual"
+    source_ref: Optional[str] = None
+    quote: Optional[str] = None
+    note: Optional[str] = None
+    observed_at: Optional[str] = None
+
+    @field_validator("source_type")
+    @classmethod
+    def _validate_source_type_manual(cls, v: str) -> str:
+        if v != "manual":
+            raise ValueError("source_type must be 'manual'")
+        return v
+
+    @field_validator("observed_at")
+    @classmethod
+    def _validate_observed_at(cls, v: Optional[str]) -> Optional[str]:
+        return _validate_yyyy_mm_dd_or_none(v)
+
+
+class PersonRelationEvidenceUpdateRequest(BaseModel):
+    source_ref: Optional[str] = None
+    quote: Optional[str] = None
+    note: Optional[str] = None
+    observed_at: Optional[str] = None
+
+    @field_validator("observed_at")
+    @classmethod
+    def _validate_observed_at(cls, v: Optional[str]) -> Optional[str]:
+        return _validate_yyyy_mm_dd_or_none(v)
+
+
+class PersonRelation(BaseModel):
+    relation_id: str
+    subject_person_id: str
+    object_person_id: str
+    relation_type_id: str
+    started_on: Optional[str] = None
+    ended_on: Optional[str] = None
+    note: Optional[str] = None
+    status: Literal["upcoming", "active", "ended", "undated"]
+    created_at: str
+    updated_at: str
+    evidence: list[PersonRelationEvidence] = Field(default_factory=list)
+    relation_type: Optional[PersonRelationType] = None
+
+
+class PersonRelationCreateRequest(BaseModel):
+    subject_person_id: str
+    object_person_id: str
+    relation_type_id: str
+    started_on: Optional[str] = None
+    ended_on: Optional[str] = None
+    note: Optional[str] = None
+    initial_evidence: list[PersonRelationEvidenceCreateRequest] = Field(
+        default_factory=list
+    )
+
+    @field_validator("started_on", "ended_on")
+    @classmethod
+    def _validate_dates(cls, v: Optional[str]) -> Optional[str]:
+        return _validate_yyyy_mm_dd_or_none(v)
+
+    @model_validator(mode="after")
+    def _validate_relation_request(self) -> "PersonRelationCreateRequest":
+        if self.subject_person_id == self.object_person_id:
+            raise ValueError(
+                "Self-relations are not allowed (subject_person_id must not equal object_person_id)"
+            )
+        if self.started_on and self.ended_on:
+            s_date = datetime.strptime(self.started_on, "%Y-%m-%d")
+            e_date = datetime.strptime(self.ended_on, "%Y-%m-%d")
+            if s_date > e_date:
+                raise ValueError("started_on must be less than or equal to ended_on")
+        return self
+
+
+class PersonRelationUpdateRequest(BaseModel):
+    started_on: Optional[str] = None
+    ended_on: Optional[str] = None
+    note: Optional[str] = None
+
+    @field_validator("started_on", "ended_on")
+    @classmethod
+    def _validate_dates(cls, v: Optional[str]) -> Optional[str]:
+        return _validate_yyyy_mm_dd_or_none(v)
+
+    @model_validator(mode="after")
+    def _validate_dates_order(self) -> "PersonRelationUpdateRequest":
+        if self.started_on and self.ended_on:
+            s_date = datetime.strptime(self.started_on, "%Y-%m-%d")
+            e_date = datetime.strptime(self.ended_on, "%Y-%m-%d")
+            if s_date > e_date:
+                raise ValueError("started_on must be less than or equal to ended_on")
+        return self
+
+
+class PersonRelationListResponse(BaseModel):
+    items: list[PersonRelation]
+    total: int
+
+
+class RelationDuplicateMergeResponse(BaseModel):
+    action: Literal["created", "merged_into_existing"]
+    relation: PersonRelation
