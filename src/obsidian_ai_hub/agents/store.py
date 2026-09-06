@@ -1595,6 +1595,8 @@ def start_queued_run(
                     ),
                 )
             elif has_idem_cols:
+                if slash_invocation is not None:
+                    raise ValueError("slash_invocation requires slash_invocation_json column (run migration v37).")
                 active_conn.execute(
                     """
                     INSERT INTO agent_runs (
@@ -1615,6 +1617,8 @@ def start_queued_run(
                     ),
                 )
             else:
+                if slash_invocation is not None:
+                    raise ValueError("slash_invocation requires slash_invocation_json column (run migration v37).")
                 active_conn.execute(
                     """
                     INSERT INTO agent_runs (

@@ -988,6 +988,20 @@ async def generate_agent_stream(
             "now": now_jst,
         }
 
+        # Pre-discover skills so skill tools bind to the same frozen index
+        # used for the catalog summary below. resolve_tools_with_context()
+        # shallow-copies trusted_ctx per tool, so setting skill_index after
+        # resolving would be invisible to the tools (double discovery).
+        pre_discovered_skill_index = None
+        if "skills" in tool_ids:
+            try:
+                from obsidian_ai_hub.agents.skills import discover_skills as _pre_discover_skills
+
+                pre_discovered_skill_index = await asyncio.to_thread(_pre_discover_skills)
+                trusted_ctx["skill_index"] = pre_discovered_skill_index
+            except (OSError, ImportError) as exc:
+                logger.warning(f"Failed to pre-discover skills catalog: {exc}")
+
         # Use context-aware resolver so memory_propose can capture trusted IDs
         try:
             active_tools = registry.resolve_tools_with_context(tool_ids, trusted_ctx)
@@ -1018,13 +1032,18 @@ async def generate_agent_stream(
         skills_block = ""
         selected_skill_block = ""
         slash_inv = run.get("slash_invocation")
+        if slash_inv is not None and not isinstance(slash_inv, dict):
+            raise ValueError("slash_invocation の形式が不正です。")
 
         if "skills" in tool_ids:
             try:
                 from obsidian_ai_hub.agents.skills import discover_skills
 
-                skill_index = await asyncio.to_thread(discover_skills)
-                trusted_ctx["skill_index"] = skill_index
+                if pre_discovered_skill_index is not None:
+                    skill_index = pre_discovered_skill_index
+                else:
+                    skill_index = await asyncio.to_thread(discover_skills)
+                    trusted_ctx["skill_index"] = skill_index
                 summary = skill_index.get_catalog_summary()
                 if summary:
                     lines = [

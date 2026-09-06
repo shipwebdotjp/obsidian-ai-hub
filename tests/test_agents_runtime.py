@@ -854,3 +854,43 @@ async def test_agent_stream_fails_when_selected_skill_invalid_at_runtime(tmp_pat
     db_run = store.get_run(run["run_id"])
     assert db_run["status"] == "failed"
     assert "deleted_skill" in db_run["error_message"]
+
+
+@pytest.mark.anyio
+async def test_agent_stream_fails_when_slash_invocation_malformed():
+    agent = store.create_agent(
+        name="Malformed Slash Agent",
+        system_prompt="Base prompt",
+        tool_ids=["skills"],
+    )
+    session = store.create_session(agent["agent_id"])
+    user_msg, run = store.start_queued_run(
+        session["session_id"],
+        "Run with malformed slash",
+        slash_invocation="not-a-dict",  # type: ignore[arg-type]
+    )
+    run = store.claim_queued_run("test_worker") or run
+
+    mock_llm = MagicMock()
+    mock_llm.bind_tools.return_value = mock_llm
+
+    with patch(
+        "obsidian_ai_hub.agents.runtime.create_langchain_llm", return_value=mock_llm
+    ):
+        events = [
+            event
+            async for event in runtime.generate_agent_stream(
+                agent=agent,
+                session=session,
+                run=run,
+                history_messages=[user_msg],
+                user_content="Run with malformed slash",
+            )
+        ]
+
+    payloads = _payloads(events)
+    assert payloads[-1]["type"] == "error"
+
+    db_run = store.get_run(run["run_id"])
+    assert db_run["status"] == "failed"
+    assert "slash_invocation" in db_run["error_message"]

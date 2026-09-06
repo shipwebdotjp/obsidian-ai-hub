@@ -36,6 +36,8 @@ import type {
   HealthcareOverviewResponse,
   HealthcareCorrelationResponse,
   AgentPromptTemplate,
+  SlashInvocation,
+  AgentSlashCandidatesResponse,
 } from "./types";
 
 const TOKEN_KEY = "obsidian-ai-hub:api-token";
@@ -641,8 +643,8 @@ export function updateAgentSession(
 
 export function getAgentSlashCandidates(
   sessionId: string,
-): Promise<import("./types").AgentSlashCandidatesResponse> {
-  return request<import("./types").AgentSlashCandidatesResponse>(
+): Promise<AgentSlashCandidatesResponse> {
+  return request<AgentSlashCandidatesResponse>(
     `/api/v1/agent-sessions/${encodeURIComponent(sessionId)}/slash-candidates`,
   );
 }
@@ -710,10 +712,10 @@ export function startAgentRun(
   payload: {
     content: string;
     images?: AgentMessageAttachment[];
-    slash_invocation?: import("./types").SlashInvocation | null;
+    slash_invocation?: SlashInvocation | null;
   },
   idempotencyKey?: string,
-): Promise<{ run: import("./types").AgentRun }> {
+): Promise<{ run: AgentRun }> {
   const headers = new Headers();
   headers.set("Content-Type", "application/json");
   const token = getToken();

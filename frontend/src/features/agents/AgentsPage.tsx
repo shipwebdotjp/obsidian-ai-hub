@@ -125,29 +125,6 @@ export function filterSlashCandidates(
   return [...startsWith, ...includes].slice(0, 16);
 }
 
-export function filterCommandPaletteTemplates(
-  templates: AgentPromptTemplate[],
-  inputText: string,
-): AgentPromptTemplate[] {
-  const normCandidates: SlashCandidate[] = templates.map((t) => ({
-    kind: "template",
-    name: t.name,
-    description: t.content,
-    template_id: t.template_id,
-    content: t.content,
-  }));
-  const filtered = filterSlashCandidates(normCandidates, inputText);
-  return filtered.map((c) => ({
-    template_id: c.template_id || "",
-    agent_id: "",
-    name: c.name,
-    content: c.content || c.description,
-    display_order: 0,
-    created_at: "",
-    updated_at: "",
-  }));
-}
-
 const LIVE_STATUS_CONFIG: Record<AgentLiveToolCall["status"], { label: string; cls: string }> = {
   succeeded: { label: "成功", cls: "bg-emerald-50 text-emerald-700 border-emerald-200" },
   failed: { label: "失敗", cls: "bg-rose-50 text-rose-700 border-rose-200" },
@@ -248,6 +225,7 @@ export default function AgentsPage() {
   // Prompt template & slash candidates state
   const [promptTemplates, setPromptTemplates] = useState<AgentPromptTemplate[]>([]);
   const [serverCandidates, setServerCandidates] = useState<SlashCandidate[]>([]);
+  const [hasSkillsTool, setHasSkillsTool] = useState(true);
   const [selectedSkill, setSelectedSkill] = useState<SlashInvocation | null>(null);
   const [templateSelectorOpen, setTemplateSelectorOpen] = useState(false);
   const [plusMenuOpen, setPlusMenuOpen] = useState(false);
@@ -879,18 +857,25 @@ export default function AgentsPage() {
   const loadSlashCandidates = useCallback(async (sessionId: string) => {
     try {
       const res = await getAgentSlashCandidates(sessionId);
+      if (selectedSessionIdRef.current !== sessionId) return;
       setServerCandidates(res.candidates || []);
+      setHasSkillsTool(res.has_skills_tool);
+      if (!res.has_skills_tool) setSelectedSkill(null);
     } catch {
+      if (selectedSessionIdRef.current !== sessionId) return;
       setServerCandidates([]);
+      setHasSkillsTool(true);
     }
   }, []);
 
   useEffect(() => {
     if (!selectedSessionId) {
       setServerCandidates([]);
+      setHasSkillsTool(true);
       setSelectedSkill(null);
       return;
     }
+    setServerCandidates([]);
     void loadSlashCandidates(selectedSessionId);
     setSelectedSkill(null);
   }, [selectedSessionId, loadSlashCandidates]);
@@ -951,12 +936,21 @@ export default function AgentsPage() {
     [filteredCandidates],
   );
 
+  // Visual order is grouped (skills, then templates). Keyboard navigation
+  // and highlight must follow visual order, not the interleaved relevance
+  // order of filteredCandidates.
+  const paletteOrderedCandidates = useMemo(
+    () => [...skillCandidates, ...templateCandidates],
+    [skillCandidates, templateCandidates],
+  );
+
   const handleSelectCandidate = (candidate: SlashCandidate) => {
     if (candidate.kind === "skill") {
       setSelectedSkill({ kind: "skill", name: candidate.name });
       setInputText("");
       setIsCommandPaletteDismissed(true);
     } else if (candidate.kind === "template") {
+      setSelectedSkill(null);
       setInputText(candidate.content || "");
       setTemplateSelectorOpen(false);
       setPlusMenuOpen(false);
@@ -1805,7 +1799,7 @@ export default function AgentsPage() {
   );
 
   const submitMessageViaRun = async () => {
-    if (!selectedSessionId || (!inputText.trim() && pendingAttachments.length === 0) || isStreaming)
+    if (!selectedSessionId || (!inputText.trim() && pendingAttachments.length === 0 && !selectedSkill) || isStreaming)
       return;
     const streamSessionId = selectedSessionId;
     const userText = inputText.trim();
@@ -1959,26 +1953,26 @@ export default function AgentsPage() {
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
         if (
-          filteredCandidates.length > 0 &&
+          paletteOrderedCandidates.length > 0 &&
           paletteSelectedIndex >= 0 &&
-          paletteSelectedIndex < filteredCandidates.length
+          paletteSelectedIndex < paletteOrderedCandidates.length
         ) {
-          handleSelectCandidate(filteredCandidates[paletteSelectedIndex]);
+          handleSelectCandidate(paletteOrderedCandidates[paletteSelectedIndex]);
         }
         return;
       }
       if (e.key === "ArrowDown") {
         e.preventDefault();
-        if (filteredCandidates.length > 0) {
-          setPaletteSelectedIndex((prev) => (prev + 1) % filteredCandidates.length);
+        if (paletteOrderedCandidates.length > 0) {
+          setPaletteSelectedIndex((prev) => (prev + 1) % paletteOrderedCandidates.length);
         }
         return;
       }
       if (e.key === "ArrowUp") {
         e.preventDefault();
-        if (filteredCandidates.length > 0) {
+        if (paletteOrderedCandidates.length > 0) {
           setPaletteSelectedIndex(
-            (prev) => (prev - 1 + filteredCandidates.length) % filteredCandidates.length,
+            (prev) => (prev - 1 + paletteOrderedCandidates.length) % paletteOrderedCandidates.length,
           );
         }
         return;
@@ -3229,13 +3223,13 @@ export default function AgentsPage() {
                     </div>
                   ) : (
                     <div>
-                      {skillCandidates.length > 0 && (
+                      {hasSkillsTool && skillCandidates.length > 0 && (
                         <div>
                           <div className="bg-slate-50 px-3 py-1 text-[10px] font-semibold text-slate-500 uppercase tracking-wider border-b border-slate-100">
                             スキル
                           </div>
                           {skillCandidates.map((c) => {
-                            const flatIndex = filteredCandidates.indexOf(c);
+                            const flatIndex = paletteOrderedCandidates.indexOf(c);
                             return (
                               <button
                                 key={`skill-${c.name}`}
@@ -3263,7 +3257,7 @@ export default function AgentsPage() {
                             テンプレート
                           </div>
                           {templateCandidates.map((c) => {
-                            const flatIndex = filteredCandidates.indexOf(c);
+                            const flatIndex = paletteOrderedCandidates.indexOf(c);
                             return (
                               <button
                                 key={`template-${c.template_id || c.name}`}
@@ -3405,7 +3399,7 @@ export default function AgentsPage() {
                   disabled={
                     isStreaming ||
                     attachmentReadsPending > 0 ||
-                    (!inputText.trim() && pendingAttachments.length === 0) ||
+                    (!inputText.trim() && pendingAttachments.length === 0 && !selectedSkill) ||
                     !selectedSessionId
                   }
                   className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-slate-900 text-white hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"

@@ -775,7 +775,7 @@ export interface SlashInvocation {
 }
 
 export interface SlashCandidate {
-  kind: "skill" | "template" | "command";
+  kind: "skill" | "template";
   name: string;
   description: string;
   template_id?: string;
