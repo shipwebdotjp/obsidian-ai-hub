@@ -39,3 +39,19 @@
 ## Coding 単発CLI
 
 `python -m obsidian_ai_hub --coding` による Coding Orchestrator の非対話・単発実行形態。位置引数（複数可）と非TTY stdin を `"\n\n"` で結合した1プロンプトを、`coding_sessions`（新規は `--project-id`、再開は `--resume-session`）へ1ターン送信し、 `coding_messages / coding_runs` に永続化する。通常は最終 orchestrator 応答のみを `stdout`、セッション・run・git_status・進捗は `stderr`、 `--json` 指定時は最終結果の単一JSON（`ok / response / session / run`）を `stdout` に出力する。
+
+## Relation Type (関係タイプ)
+
+2人物間の関係性の分類・方向性・表示ラベル（正方向・逆方向）を定義する台帳レコード（`person_relation_types`）。組み込み型（25件）および利用者が作成するカスタム型が存在し、一意な `slug`、`directionality` (`directed` / `symmetric`)、`forward_label` / `reverse_label` を持つ。
+
+## Person Relation (人物間リレーション本体)
+
+特定の2人物間で、ある Relation Type が成立しているという継続的な状態・構造の主張レコード（`person_relations`）。有向型では正方向（`subject` → `object`）、対称型では端点辞書順に正規化保存される。期間（`started_on` / `ended_on`）とメモ（`note`）を保持し、同一5要素（型・両端点・開始日・終了日）の重複は1件に統合される。
+
+## Relation Evidence (根拠)
+
+特定の Person Relation を登録・採用した根拠情報レコード（`person_relation_evidence`）。1つのリレーションに対して0件以上登録され、由来源種別（`source_type`）、引用文（`quote`）、参照先（`source_ref`）、補足メモ（`note`）、および観測日（`observed_at`）を保持する。
+
+## Person Event / Action (人物イベント／アクション)
+
+特定時点または期間に発生した単発の出来事や行為（例: 「資金を援助した」）。継続的な関係状態である Person Relation（例: 「援助関係にある」）とは区別される概念であり、v1 対象外として将来の拡張領域に位置づけられる。

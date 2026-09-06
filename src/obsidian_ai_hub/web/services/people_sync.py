@@ -18,7 +18,7 @@ def sync_people() -> dict[str, Any]:
             # 2. Sync safe part
             from obsidian_ai_hub.people_sync.sync import sync_people_in_tx
 
-            sync_people_in_tx(conn, people_notes_map)
+            skipped_relation_merges = sync_people_in_tx(conn, people_notes_map)
 
             # Return reports
             clean_loader_report = {
@@ -33,6 +33,7 @@ def sync_people() -> dict[str, Any]:
                 "synced": True,
                 "loader_report": clean_loader_report,
                 "db_conflicts": db_conflicts,
+                "skipped_relation_merges": skipped_relation_merges,
             }
     finally:
         conn.close()
@@ -57,6 +58,7 @@ def get_vault_report_dynamic() -> dict[str, Any]:
             "synced": False,
             "loader_report": clean_loader_report,
             "db_conflicts": db_conflicts,
+            "skipped_relation_merges": [],
         }
     finally:
         conn.close()

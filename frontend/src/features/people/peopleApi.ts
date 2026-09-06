@@ -7,10 +7,22 @@ import {
   DuplicatesResponse,
   SyncPeopleResponse,
   PeopleMergePreviewResponse,
-  DeletePersonResponse
+  DeletePersonResponse,
+  PersonRelationType,
+  PersonRelationTypeCreateRequest,
+  PersonRelationTypeUpdateRequest,
+  PersonRelation,
+  PersonRelationCreateRequest,
+  PersonRelationUpdateRequest,
+  PersonRelationEvidenceCreateRequest,
+  PersonRelationEvidenceUpdateRequest,
+  RelationDuplicateMergeResponse
 } from "./types";
 
 const PEOPLE_API = "/api/v1/people";
+const RELATION_TYPES_API = "/api/v1/person-relation-types";
+const RELATIONS_API = "/api/v1/person-relations";
+const EVIDENCE_API = "/api/v1/person-relation-evidence";
 
 export async function fetchCandidates(status: "unresolved" | "rejected" = "unresolved"): Promise<PersonCandidate[]> {
   return apiGet<PersonCandidate[]>(`${PEOPLE_API}/candidates?status=${status}`);
@@ -115,4 +127,64 @@ export async function promoteCandidate(
 
 export async function syncPeople(): Promise<SyncPeopleResponse> {
   return apiPost<SyncPeopleResponse>(`${PEOPLE_API}/sync`, {});
+}
+
+export async function fetchPersonRelationTypes(): Promise<PersonRelationType[]> {
+  return apiGet<PersonRelationType[]>(RELATION_TYPES_API);
+}
+
+export async function createPersonRelationType(
+  req: PersonRelationTypeCreateRequest
+): Promise<PersonRelationType> {
+  return apiPost<PersonRelationType>(RELATION_TYPES_API, req);
+}
+
+export async function updatePersonRelationType(
+  relationTypeId: string,
+  req: PersonRelationTypeUpdateRequest
+): Promise<PersonRelationType> {
+  return apiPatch<PersonRelationType>(`${RELATION_TYPES_API}/${encodeURIComponent(relationTypeId)}`, req);
+}
+
+export async function fetchPersonRelations(
+  personId: string
+): Promise<PersonRelation[]> {
+  const url = `${PEOPLE_API}/${encodeURIComponent(personId)}/relations`;
+  return apiGet<PersonRelation[]>(url);
+}
+
+export async function createPersonRelation(
+  personId: string,
+  req: PersonRelationCreateRequest
+): Promise<RelationDuplicateMergeResponse> {
+  return apiPost<RelationDuplicateMergeResponse>(`${PEOPLE_API}/${encodeURIComponent(personId)}/relations`, req);
+}
+
+export async function updatePersonRelation(
+  relationId: string,
+  req: PersonRelationUpdateRequest
+): Promise<RelationDuplicateMergeResponse> {
+  return apiPatch<RelationDuplicateMergeResponse>(`${RELATIONS_API}/${encodeURIComponent(relationId)}`, req);
+}
+
+export async function deletePersonRelation(relationId: string): Promise<void> {
+  await apiDelete(`${RELATIONS_API}/${encodeURIComponent(relationId)}`);
+}
+
+export async function addRelationEvidence(
+  relationId: string,
+  req: PersonRelationEvidenceCreateRequest
+): Promise<PersonRelation> {
+  return apiPost<PersonRelation>(`${RELATIONS_API}/${encodeURIComponent(relationId)}/evidence`, req);
+}
+
+export async function updateRelationEvidence(
+  evidenceId: string,
+  req: PersonRelationEvidenceUpdateRequest
+): Promise<PersonRelation> {
+  return apiPatch<PersonRelation>(`${EVIDENCE_API}/${encodeURIComponent(evidenceId)}`, req);
+}
+
+export async function deleteRelationEvidence(evidenceId: string): Promise<void> {
+  await apiDelete(`${EVIDENCE_API}/${encodeURIComponent(evidenceId)}`);
 }

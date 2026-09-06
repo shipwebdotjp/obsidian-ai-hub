@@ -20,12 +20,32 @@ import MergePreviewDialog from "./MergePreviewDialog";
 import DeleteAliasDialog from "./DeleteAliasDialog";
 import DeletePersonDialog from "./DeletePersonDialog";
 
-type Tab = "candidates" | "rejected_candidates" | "list" | "duplicates" | "report";
+import {
+  PersonRelationType,
+  PersonRelation,
+  RelationStatus,
+  PersonRelationTypeCreateRequest,
+  PersonRelationTypeUpdateRequest,
+  PersonRelationCreateRequest,
+  PersonRelationUpdateRequest,
+  PersonRelationEvidenceCreateRequest,
+  PersonRelationEvidenceUpdateRequest
+} from "./types";
+import RelationTypesTab from "./RelationTypesTab";
+import RelationFormModal from "./RelationFormModal";
+
+type Tab = "candidates" | "rejected_candidates" | "list" | "relation_types" | "duplicates" | "report";
 
 interface TabDefinition {
   value: Tab;
   label: string;
-  getCount: (candidatesCount: number, rejectedCandidatesCount: number, peopleCount: number, duplicatesCount: number) => number | string;
+  getCount: (
+    candidatesCount: number,
+    rejectedCandidatesCount: number,
+    peopleCount: number,
+    duplicatesCount: number,
+    typesCount: number
+  ) => number | string;
 }
 
 const TABS_CONFIG: TabDefinition[] = [
@@ -43,6 +63,11 @@ const TABS_CONFIG: TabDefinition[] = [
     value: "list",
     label: "人物一覧",
     getCount: (_, __, people) => people,
+  },
+  {
+    value: "relation_types",
+    label: "関係タイプ",
+    getCount: (_, __, ___, ____, types) => types,
   },
   {
     value: "duplicates",
@@ -69,6 +94,13 @@ export default function PeoplePage() {
   const [people, setPeople] = useState<Person[]>([]);
   const [duplicates, setDuplicates] = useState<DuplicatesResponse | null>(null);
   const [vaultReport, setVaultReport] = useState<SyncPeopleResponse | null>(null);
+  const [relationTypes, setRelationTypes] = useState<PersonRelationType[]>([]);
+
+  // Person relations state
+  const [personRelations, setPersonRelations] = useState<PersonRelation[]>([]);
+  const [relationStatusFilter, setRelationStatusFilter] = useState<RelationStatus | "all">("all");
+  const [showRelationModal, setShowRelationModal] = useState(false);
+  const [editingRelation, setEditingRelation] = useState<PersonRelation | null>(null);
 
   // Selected details
   const [selectedCandidate, setSelectedCandidate] = useState<PersonCandidateDetail | null>(null);
@@ -146,7 +178,7 @@ export default function PeoplePage() {
     setEditSuccess(null);
   };
 
-  const loadAllData = async (shouldClearSuccess?: boolean) => {
+  const loadAllData = async (shouldClearSuccess?: boolean): Promise<boolean> => {
     setLoading(true);
     setError(null);
     setResolveError(null);
@@ -154,24 +186,55 @@ export default function PeoplePage() {
       setSuccessMessage(null);
     }
     try {
-      const [candsData, rejectedCandsData, peopleData, dupsData, reportData] = await Promise.all([
+      const [candsData, rejectedCandsData, peopleData, dupsData, reportData, typesData] = await Promise.all([
         peopleApi.fetchCandidates("unresolved"),
         peopleApi.fetchCandidates("rejected"),
         peopleApi.fetchPeople(),
         peopleApi.fetchDuplicates(),
         peopleApi.fetchVaultReport(),
+        peopleApi.fetchPersonRelationTypes(),
       ]);
       setCandidates(candsData);
       setRejectedCandidates(rejectedCandsData);
       setPeople(peopleData);
       setDuplicates(dupsData);
       setVaultReport(reportData);
+      setRelationTypes(typesData);
+      return true;
     } catch (e) {
       setError("データの読み込みに失敗しました");
+      return false;
     } finally {
       setLoading(false);
     }
   };
+
+  // Always fetch the full relation list; status filtering is done client-side
+  // in PersonRelationsSection so counts stay consistent.
+  // The request id guards against rapid person switching: a stale fetch
+  // resolving after a newer one must not overwrite the current list.
+  // Returns null on failure AND when superseded (both already surfaced or
+  // moot), so callers can skip their success messages in those cases.
+  // A legitimately empty list is `[]`, never null.
+  const relationsRequestRef = useRef(0);
+  const loadPersonRelations = async (personId: string): Promise<PersonRelation[] | null> => {
+    const reqId = ++relationsRequestRef.current;
+    try {
+      const data = await peopleApi.fetchPersonRelations(personId);
+      if (reqId !== relationsRequestRef.current) return null;
+      setPersonRelations(data);
+      return data;
+    } catch {
+      if (reqId !== relationsRequestRef.current) return null;
+      setError("関係の読み込みに失敗しました");
+      return null;
+    }
+  };
+
+  // Mirrors the currently selected person for staleness guards: detail
+  // fetches resolving after a person switch must not overwrite the new
+  // selection (same race as the relation list above).
+  const selectedPersonIdRef = useRef<string | null>(null);
 
   const handleRejectCandidate = async (candId: string) => {
     clearMessages();
@@ -247,15 +310,155 @@ export default function PeoplePage() {
     setMergeGuidance(null);
     setEditError(null);
     setEditSuccess(null);
+    // Clear the previous person's relations immediately so stale data
+    // is never shown while the new person's data loads.
+    setPersonRelations([]);
+    selectedPersonIdRef.current = p.person_id;
     try {
       const data = await peopleApi.fetchPersonDetail(p.person_id);
+      if (selectedPersonIdRef.current !== p.person_id) return;
       setSelectedPerson(data);
       setMobileDetailOpen(true);
       setEditDisplayName(data.display_name);
       setEditAliasesText((data.aliases || []).map((al) => al.display_name).join("\n"));
+      await loadPersonRelations(p.person_id);
     } catch (e) {
+      if (selectedPersonIdRef.current !== p.person_id) return;
       setError("人物の詳細の取得に失敗しました");
     }
+  };
+
+  const handleRelationStatusFilterChange = (status: RelationStatus | "all") => {
+    setRelationStatusFilter(status);
+  };
+
+  const handleCreateRelationType = async (req: PersonRelationTypeCreateRequest) => {
+    await peopleApi.createPersonRelationType(req);
+    const reloaded = await loadAllData(false);
+    if (!reloaded) return;
+    setSuccessMessage(`関係タイプ「${req.slug}」を作成しました。`);
+  };
+
+  const handleUpdateRelationType = async (relationTypeId: string, req: PersonRelationTypeUpdateRequest) => {
+    const updated = await peopleApi.updatePersonRelationType(relationTypeId, req);
+    const reloaded = await loadAllData(false);
+    if (!reloaded) return;
+    setSuccessMessage(`関係タイプ「${updated.slug}」を更新しました。`);
+  };
+
+  const handleCreateRelation = async (req: PersonRelationCreateRequest) => {
+    if (!selectedPerson) return;
+    const personId = selectedPerson.person_id;
+    const res = await peopleApi.createPersonRelation(personId, req);
+    // Set the success message only after the reload succeeds so a reload
+    // failure never leaves contradictory success + error banners.
+    const successMsg =
+      res.action === "merged_into_existing"
+        ? "既存の同一人物間関係が存在するため、内容および根拠を重複統合しました。"
+        : "新しい人物間関係を作成しました。";
+    try {
+      const reloaded = await loadAllData(false);
+      const updatedDetail = await peopleApi.fetchPersonDetail(personId);
+      if (selectedPersonIdRef.current !== personId) return;
+      setSelectedPerson(updatedDetail);
+      const relations = await loadPersonRelations(personId);
+      if (selectedPersonIdRef.current !== personId) return;
+      if (!reloaded || relations === null) return;
+      setSuccessMessage(successMsg);
+    } catch (e) {
+      if (selectedPersonIdRef.current !== personId) return;
+      setError(e instanceof Error ? e.message : "詳細の再読み込みに失敗しました");
+    }
+  };
+
+  const handleUpdateRelation = async (relationId: string, req: PersonRelationUpdateRequest) => {
+    if (!selectedPerson) return;
+    const personId = selectedPerson.person_id;
+    const res = await peopleApi.updatePersonRelation(relationId, req);
+    const successMsg =
+      res.action === "merged_into_existing"
+        ? "期間の変更により既存関係と一致したため、関係を統合しました。"
+        : "人物間関係を更新しました。";
+    try {
+      const reloaded = await loadAllData(false);
+      const updatedDetail = await peopleApi.fetchPersonDetail(personId);
+      if (selectedPersonIdRef.current !== personId) return;
+      setSelectedPerson(updatedDetail);
+      const relations = await loadPersonRelations(personId);
+      if (selectedPersonIdRef.current !== personId) return;
+      if (!reloaded || relations === null) return;
+      setSuccessMessage(successMsg);
+    } catch (e) {
+      if (selectedPersonIdRef.current !== personId) return;
+      setError(e instanceof Error ? e.message : "詳細の再読み込みに失敗しました");
+    }
+  };
+
+  const handleDeleteRelation = async (relationId: string) => {
+    if (!selectedPerson) return;
+    const personId = selectedPerson.person_id;
+    try {
+      await peopleApi.deletePersonRelation(relationId);
+      const reloaded = await loadAllData(false);
+      const updatedDetail = await peopleApi.fetchPersonDetail(personId);
+      if (selectedPersonIdRef.current !== personId) return;
+      setSelectedPerson(updatedDetail);
+      const relations = await loadPersonRelations(personId);
+      if (selectedPersonIdRef.current !== personId) return;
+      if (!reloaded || relations === null) return;
+      setSuccessMessage("人物間関係を削除しました。");
+    } catch (e) {
+      if (selectedPersonIdRef.current !== personId) return;
+      setError(e instanceof Error ? e.message : "人物間関係の削除に失敗しました");
+    }
+  };
+
+  const handleAddRelationEvidence = async (relationId: string, req: PersonRelationEvidenceCreateRequest) => {
+    if (!selectedPerson) return;
+    const personId = selectedPerson.person_id;
+    await peopleApi.addRelationEvidence(relationId, req);
+    const data = await loadPersonRelations(personId);
+    if (selectedPersonIdRef.current !== personId) return;
+    if (data === null) return;
+    if (editingRelation && editingRelation.relation_id === relationId) {
+      const updatedRel = data.find(
+        (r) => r.relation_id === relationId
+      );
+      if (updatedRel) setEditingRelation(updatedRel);
+    }
+    setSuccessMessage("根拠 (Evidence) を追加しました。");
+  };
+
+  const handleUpdateRelationEvidence = async (evidenceId: string, req: PersonRelationEvidenceUpdateRequest) => {
+    if (!selectedPerson) return;
+    const personId = selectedPerson.person_id;
+    await peopleApi.updateRelationEvidence(evidenceId, req);
+    const data = await loadPersonRelations(personId);
+    if (selectedPersonIdRef.current !== personId) return;
+    if (data === null) return;
+    if (editingRelation) {
+      const updatedRel = data.find(
+        (r) => r.relation_id === editingRelation.relation_id
+      );
+      if (updatedRel) setEditingRelation(updatedRel);
+    }
+    setSuccessMessage("根拠 (Evidence) を更新しました。");
+  };
+
+  const handleDeleteRelationEvidence = async (evidenceId: string) => {
+    if (!selectedPerson) return;
+    const personId = selectedPerson.person_id;
+    await peopleApi.deleteRelationEvidence(evidenceId);
+    const data = await loadPersonRelations(personId);
+    if (selectedPersonIdRef.current !== personId) return;
+    if (data === null) return;
+    if (editingRelation) {
+      const updatedRel = data.find(
+        (r) => r.relation_id === editingRelation.relation_id
+      );
+      if (updatedRel) setEditingRelation(updatedRel);
+    }
+    setSuccessMessage("根拠 (Evidence) を削除しました。");
   };
 
   const handleUpdatePerson = async () => {
@@ -502,7 +705,7 @@ export default function PeoplePage() {
         {/* Dynamic Tab Buttons Render */}
         <div className="flex shrink-0 space-x-1 overflow-x-auto whitespace-nowrap border-b border-slate-200">
           {TABS_CONFIG.map((tab) => {
-            const count = tab.getCount(candidates.length, rejectedCandidates.length, people.length, duplicatesTotalCount);
+            const count = tab.getCount(candidates.length, rejectedCandidates.length, people.length, duplicatesTotalCount, relationTypes.length);
             const countSuffix = count !== "" ? ` (${count})` : "";
             const isTabActive = activeTab === tab.value;
             return (
@@ -522,6 +725,18 @@ export default function PeoplePage() {
         </div>
 
         <div className="min-h-0 flex-1 flex flex-col gap-4 overflow-hidden lg:flex-row">
+          {activeTab === "relation_types" && (
+            <div className="w-full overflow-y-auto rounded-lg border border-slate-200 bg-white p-6">
+              <RelationTypesTab
+                types={relationTypes}
+                loading={loading}
+                error={error}
+                onCreateType={handleCreateRelationType}
+                onUpdateType={handleUpdateRelationType}
+              />
+            </div>
+          )}
+
           {activeTab === "candidates" && (
             <CandidateTab
               candidates={candidates}
@@ -602,6 +817,18 @@ export default function PeoplePage() {
                 setAliasToDelete(al);
                 setShowAliasDeleteConfirm(true);
               }}
+              personRelations={personRelations}
+              relationStatusFilter={relationStatusFilter}
+              onRelationStatusFilterChange={handleRelationStatusFilterChange}
+              onOpenCreateRelationModal={() => {
+                setEditingRelation(null);
+                setShowRelationModal(true);
+              }}
+              onOpenEditRelationModal={(rel) => {
+                setEditingRelation(rel);
+                setShowRelationModal(true);
+              }}
+              onDeleteRelation={handleDeleteRelation}
             />
           )}
 
@@ -658,6 +885,24 @@ export default function PeoplePage() {
               setShowDeleteConfirm(false);
             }}
             onConfirm={handleExecuteDelete}
+          />
+        )}
+
+        {showRelationModal && selectedPerson && (
+          <RelationFormModal
+            currentPersonId={selectedPerson.person_id}
+            relationToEdit={editingRelation}
+            types={relationTypes}
+            peopleList={people}
+            onClose={() => {
+              setShowRelationModal(false);
+              setEditingRelation(null);
+            }}
+            onCreate={handleCreateRelation}
+            onUpdate={handleUpdateRelation}
+            onAddEvidence={handleAddRelationEvidence}
+            onUpdateEvidence={handleUpdateRelationEvidence}
+            onDeleteEvidence={handleDeleteRelationEvidence}
           />
         )}
       </div>

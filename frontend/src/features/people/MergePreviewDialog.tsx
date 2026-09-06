@@ -99,25 +99,34 @@ const MergePreviewDialog = forwardRef<HTMLDialogElement, MergePreviewDialogProps
 
                 {previewData.allowed && (
                   <>
-                    {/* Aliases & Summaries Migration Counts */}
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="border border-slate-100 p-3 rounded-lg">
+                    {/* Aliases, Summaries & Relations Migration Counts */}
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div className="border border-slate-100 p-3 rounded-lg bg-white">
                         <div className="font-bold text-slate-800">移管されるサマリー</div>
                         <div className="text-lg font-extrabold text-slate-900 mt-1">{previewData.transferred_summaries_count} <span className="text-xs font-normal text-slate-500">件</span></div>
-                        <div className="text-[10px] text-slate-400 mt-1">※ 統合元に紐付いていたすべてのサマリー履歴が統合先へ移管されます。</div>
+                        <div className="text-[10px] text-slate-400 mt-1">サマリー参照の自動マージ</div>
                       </div>
-                      <div className="border border-slate-100 p-3 rounded-lg">
-                        <div className="font-bold text-slate-800">移管・一本化される別名</div>
+                      <div className="border border-slate-100 p-3 rounded-lg bg-white">
+                        <div className="font-bold text-slate-800">移管される別名</div>
                         <div className="text-lg font-extrabold text-slate-900 mt-1">{previewData.transferred_aliases_count} <span className="text-xs font-normal text-slate-500">件</span></div>
                         {previewData.alias_transfers.length > 0 && (
-                          <div className="flex flex-wrap gap-1.5 mt-1.5">
+                          <div className="flex flex-wrap gap-1 mt-1">
                             {previewData.alias_transfers.map((al) => (
-                              <span key={al.normalized_name} className="bg-slate-100 text-slate-800 text-[10px] px-1.5 py-0.5 rounded border">
+                              <span key={al.normalized_name} className="bg-slate-100 text-slate-800 text-[9px] px-1 py-0.5 rounded border">
                                 {al.display_name}
                               </span>
                             ))}
                           </div>
                         )}
+                      </div>
+                      <div className="border border-slate-100 p-3 rounded-lg bg-white">
+                        <div className="font-bold text-slate-800">影響を受ける関係辺</div>
+                        <div className="text-lg font-extrabold text-slate-900 mt-1">
+                          {(previewData.transferred_relations_count ?? 0) + (previewData.merged_relations_count ?? 0)} <span className="text-xs font-normal text-slate-500">件</span>
+                        </div>
+                        <div className="text-[10px] text-slate-400 mt-1">
+                          移管: {previewData.transferred_relations_count ?? 0}件 / 重複統合: {previewData.merged_relations_count ?? 0}件
+                        </div>
                       </div>
                     </div>
 
@@ -155,6 +164,38 @@ const MergePreviewDialog = forwardRef<HTMLDialogElement, MergePreviewDialogProps
                       </div>
                     )}
                   </>
+                )}
+
+                {/* Relation impacts details: rendered outside the allowed
+                    block so blockers stay visible even when the merge is
+                    rejected (e.g. self-relation conflicts). */}
+                {previewData.relation_impacts && previewData.relation_impacts.length > 0 && (
+                  <div className="space-y-2">
+                    <div className="font-bold text-slate-800 flex items-center gap-1">
+                      <span>🔁</span> 人物間関係 (Relations) の{previewData.allowed ? "移管・統合影響一覧" : "統合阻害要因"} ({previewData.relation_impacts.length} 件)
+                    </div>
+                    <div className="border border-slate-200 rounded-lg overflow-hidden divide-y divide-slate-100 font-mono text-[11px] max-h-40 overflow-y-auto bg-white">
+                      {previewData.relation_impacts.map((imp) => (
+                        <div key={imp.relation_id} className="p-2.5 flex items-center justify-between gap-2">
+                          <div>
+                            <span className="font-bold text-slate-900">{imp.other_person_name}</span> との「{imp.relation_type_forward_label}」
+                            <span className="text-slate-400 text-[10px] ml-2">{imp.started_on || imp.ended_on ? `(${imp.started_on || "未指定"} ～ ${imp.ended_on || "現在"})` : "(期間未設定)"}</span>
+                          </div>
+                          <div>
+                            {imp.result_type === "transferred" && (
+                              <span className="px-2 py-0.5 bg-blue-50 text-blue-700 font-semibold border border-blue-200 rounded text-[10px]">端点移管</span>
+                            )}
+                            {imp.result_type === "merged_into_existing" && (
+                              <span className="px-2 py-0.5 bg-purple-50 text-purple-700 font-semibold border border-purple-200 rounded text-[10px]">重複統合</span>
+                            )}
+                            {imp.result_type === "self_relation_conflict" && (
+                              <span className="px-2 py-0.5 bg-red-50 text-red-700 font-semibold border border-red-200 rounded text-[10px]">自己関係違反</span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 )}
               </div>
             )}
