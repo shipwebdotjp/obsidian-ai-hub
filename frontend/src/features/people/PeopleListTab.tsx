@@ -165,14 +165,14 @@ export default function PeopleListTab({
                   <p className="text-xs text-slate-500 mt-1">Vault 接続ID: <code className="bg-slate-100 px-1 rounded">{selectedPerson.vault_id}</code></p>
                 )}
               </div>
-              <div className="flex items-center gap-1 shrink-0">
+              <div className="flex items-center gap-1.5 shrink-0">
                 <button
                   type="button"
                   onClick={() => onTriggerMergeModal(selectedPerson)}
                   disabled={loading}
                   title="この人物を別の人物へ統合"
                   aria-label="この人物を別の人物へ統合"
-                  className="p-1.5 text-slate-600 hover:text-blue-600 hover:bg-slate-100 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                  className="flex items-center gap-1 rounded bg-blue-600 px-3 py-1 text-sm text-white hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                 >
                   <GitMerge className="w-4 h-4" />
                 </button>
@@ -182,7 +182,7 @@ export default function PeopleListTab({
                   disabled={loading}
                   title="この人物を完全に削除"
                   aria-label="この人物を完全に削除"
-                  className="p-1.5 text-red-600 hover:text-red-700 hover:bg-red-50 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                  className="flex items-center gap-1 rounded bg-rose-800 px-3 py-1 text-sm text-white hover:bg-rose-900 transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                 >
                   <Trash2 className="w-4 h-4" />
                 </button>
