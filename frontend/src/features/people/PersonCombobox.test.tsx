@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import PersonCombobox from "./PersonCombobox";
@@ -123,6 +123,38 @@ describe("PersonCombobox", () => {
     await user.type(input, "鈴木");
     await user.keyboard("{ArrowDown}{Enter}");
     expect(onChange).toHaveBeenCalledWith("p3");
+  });
+
+  it("IME変換確定のEnter（isComposing）では候補を選択しない", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(<PersonCombobox people={people} value="" onChange={onChange} />);
+    const input = screen.getByRole("combobox", { name: "一括解決先の人物" });
+
+    await user.click(input);
+    await user.type(input, "山田");
+    expect(screen.getByRole("listbox")).toHaveTextContent("山田太郎");
+
+    const composingEvent = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+    Object.defineProperty(composingEvent, "isComposing", { value: true });
+    fireEvent(input, composingEvent);
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.getByRole("listbox")).toBeInTheDocument();
+  });
+
+  it("IME変換確定のEnter（keyCode 229）では候補を選択しない", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(<PersonCombobox people={people} value="" onChange={onChange} />);
+    const input = screen.getByRole("combobox", { name: "一括解決先の人物" });
+
+    await user.click(input);
+    await user.type(input, "山田");
+    expect(screen.getByRole("listbox")).toHaveTextContent("山田太郎");
+
+    fireEvent.keyDown(input, { key: "Enter", keyCode: 229 });
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.getByRole("listbox")).toBeInTheDocument();
   });
 
   it("Escapeでドロップダウンを閉じる", async () => {

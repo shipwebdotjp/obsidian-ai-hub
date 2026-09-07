@@ -72,9 +72,7 @@ export default function RelationFormModal({
     relationToEdit ? relationToEdit.subject_person_id : currentPersonId
   );
   const [objectPersonId, setObjectPersonId] = useState(
-    relationToEdit
-      ? relationToEdit.object_person_id
-      : peopleList.find((p) => p.person_id !== currentPersonId)?.person_id || ""
+    relationToEdit ? relationToEdit.object_person_id : ""
   );
   const [startedOn, setStartedOn] = useState(relationToEdit?.started_on || "");
   const [endedOn, setEndedOn] = useState(relationToEdit?.ended_on || "");
@@ -109,7 +107,9 @@ export default function RelationFormModal({
   // Initialized from mount-time values; the modal unmounts on close.
   const didInitTypeRef = useRef(selectedTypeId !== "");
   const didInitSubjectRef = useRef(subjectPersonId !== "");
-  const didInitObjectRef = useRef(objectPersonId !== "");
+  // 受信側（人物B）は意図的に未選択で開始し、遅延到着時も自動補完しない。
+  // 編集モードでは relationToEdit の同期が真実の情報源となる。
+  const didInitObjectRef = useRef(true);
 
   useEffect(() => {
     if (relationToEdit) {
@@ -147,18 +147,20 @@ export default function RelationFormModal({
         setSubjectPersonId(currentPersonId);
         didInitSubjectRef.current = true;
       }
-      if (!objectPersonId && !didInitObjectRef.current) {
-        const fallback = peopleList.find((p) => p.person_id !== currentPersonId)?.person_id || "";
-        if (fallback) {
-          setObjectPersonId(fallback);
-          didInitObjectRef.current = true;
-        }
-      }
+      // 受信側（人物B）は未選択のままにする。ユーザーが明示的に選択する。
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [relationToEdit, types, currentPersonId, peopleList]);
 
   const selectedType = types.find((t) => t.relation_type_id === selectedTypeId);
+
+  const handleSwapEndpoints = () => {
+    setSubjectPersonId(objectPersonId);
+    setObjectPersonId(subjectPersonId);
+    // 明示的なユーザー操作として扱い、遅延到着時の自動補完で上書きしない。
+    didInitSubjectRef.current = true;
+    didInitObjectRef.current = true;
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -398,6 +400,17 @@ export default function RelationFormModal({
                           onChange={setSubjectPersonId}
                           placeholder="発信人物を選択..."
                         />
+                      </div>
+                      <div className="flex justify-center">
+                        <button
+                          type="button"
+                          onClick={handleSwapEndpoints}
+                          aria-label="発信側と受信側を入れ替え"
+                          title="発信側と受信側を入れ替え"
+                          className="px-2 py-0.5 text-xs font-semibold text-slate-600 border border-slate-300 bg-white rounded hover:bg-slate-100 cursor-pointer"
+                        >
+                          ⇅ 入れ替え
+                        </button>
                       </div>
                       <div>
                         <label className="block text-[11px] font-semibold text-slate-600 mb-1">

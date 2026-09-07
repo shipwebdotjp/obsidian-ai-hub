@@ -113,6 +113,7 @@ export default function PersonCombobox({
         setActiveIndex((prev) => (prev - 1 + filtered.length) % filtered.length);
       }
     } else if (event.key === "Enter") {
+      if (event.nativeEvent.isComposing || event.keyCode === 229) return;
       if (open && clampedActiveIndex >= 0 && filtered[clampedActiveIndex]) {
         event.preventDefault();
         commitSelection(filtered[clampedActiveIndex].person_id);

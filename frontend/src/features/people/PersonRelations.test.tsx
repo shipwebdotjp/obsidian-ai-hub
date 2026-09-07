@@ -181,8 +181,15 @@ describe("Person Relations UI Components", () => {
       />
     );
 
-    // Default endpoints are peo_taro -> peo_hanako. Switch subject to peo_jiro
-    // so neither endpoint is the current person.
+    // 受信側は初期状態で未選択のため、先に peo_hanako を選択する。
+    // その後 subject を peo_jiro に切り替え、両端点とも現在の人物でなくする。
+    const objectInput = screen.getByPlaceholderText("相手人物を選択...");
+    fireEvent.focus(objectInput);
+    const hanakoLabel = await screen.findByText("鈴木 花子", { exact: false });
+    const hanakoOption = hanakoLabel.closest("li");
+    expect(hanakoOption).not.toBeNull();
+    fireEvent.click(hanakoOption!);
+
     const subjectInput = screen.getByPlaceholderText("発信人物を選択...");
     fireEvent.focus(subjectInput);
     const optionLabel = await screen.findByText("佐藤 次郎", { exact: false });
@@ -198,6 +205,114 @@ describe("Person Relations UI Components", () => {
       ).toBeInTheDocument();
     });
     expect(onCreate).not.toHaveBeenCalled();
+  });
+
+  test("RelationFormModal swaps directed endpoints via swap button", async () => {
+    const mockPeopleList = [
+      { person_id: "peo_taro", display_name: "山田 太郎", normalized_name: "山田太郎", vault_id: null, aliases: [], summary_count: 1 },
+      { person_id: "peo_hanako", display_name: "鈴木 花子", normalized_name: "鈴木花子", vault_id: null, aliases: [], summary_count: 1 },
+    ];
+
+    render(
+      <RelationFormModal
+        currentPersonId="peo_taro"
+        relationToEdit={null}
+        types={mockTypes}
+        peopleList={mockPeopleList}
+        onClose={vi.fn()}
+        onCreate={vi.fn()}
+        onUpdate={vi.fn()}
+        onAddEvidence={vi.fn()}
+        onUpdateEvidence={vi.fn()}
+        onDeleteEvidence={vi.fn()}
+      />
+    );
+
+    const subjectInput = screen.getByPlaceholderText("発信人物を選択...") as HTMLInputElement;
+    const objectInput = screen.getByPlaceholderText("相手人物を選択...") as HTMLInputElement;
+    // 受信側は初期状態で未選択。
+    expect(subjectInput.value).toContain("山田 太郎");
+    expect(objectInput.value).toBe("");
+
+    // 受信側に鈴木 花子を選択してから入れ替える。
+    fireEvent.focus(objectInput);
+    const hanakoLabel = await screen.findByText("鈴木 花子", { exact: false });
+    const hanakoOption = hanakoLabel.closest("li");
+    expect(hanakoOption).not.toBeNull();
+    fireEvent.click(hanakoOption!);
+    expect(objectInput.value).toContain("鈴木 花子");
+
+    fireEvent.click(screen.getByRole("button", { name: "発信側と受信側を入れ替え", hidden: true }));
+
+    expect(subjectInput.value).toContain("鈴木 花子");
+    expect(objectInput.value).toContain("山田 太郎");
+  });
+
+  test("RelationFormModal starts with object endpoint unselected", () => {
+    const mockPeopleList = [
+      { person_id: "peo_taro", display_name: "山田 太郎", normalized_name: "山田太郎", vault_id: null, aliases: [], summary_count: 1 },
+      { person_id: "peo_hanako", display_name: "鈴木 花子", normalized_name: "鈴木花子", vault_id: null, aliases: [], summary_count: 1 },
+    ];
+
+    render(
+      <RelationFormModal
+        currentPersonId="peo_taro"
+        relationToEdit={null}
+        types={mockTypes}
+        peopleList={mockPeopleList}
+        onClose={vi.fn()}
+        onCreate={vi.fn()}
+        onUpdate={vi.fn()}
+        onAddEvidence={vi.fn()}
+        onUpdateEvidence={vi.fn()}
+        onDeleteEvidence={vi.fn()}
+      />
+    );
+
+    // 有向: 発信側は現在の人物、受信側は未選択。
+    expect((screen.getByPlaceholderText("発信人物を選択...") as HTMLInputElement).value).toContain("山田 太郎");
+    expect((screen.getByPlaceholderText("相手人物を選択...") as HTMLInputElement).value).toBe("");
+  });
+
+  test("RelationFormModal hides swap button for symmetric types", () => {
+    const symmetricTypes: PersonRelationType[] = [
+      {
+        relation_type_id: "rlt_sym",
+        slug: "sym",
+        forward_label: "同僚",
+        reverse_label: "同僚",
+        directionality: "symmetric",
+        description: null,
+        is_builtin: false,
+        is_active: true,
+        created_at: "2026-01-01T00:00:00",
+        updated_at: "2026-01-01T00:00:00",
+      },
+    ];
+    const mockPeopleList = [
+      { person_id: "peo_taro", display_name: "山田 太郎", normalized_name: "山田太郎", vault_id: null, aliases: [], summary_count: 1 },
+      { person_id: "peo_hanako", display_name: "鈴木 花子", normalized_name: "鈴木花子", vault_id: null, aliases: [], summary_count: 1 },
+    ];
+
+    render(
+      <RelationFormModal
+        currentPersonId="peo_taro"
+        relationToEdit={null}
+        types={symmetricTypes}
+        peopleList={mockPeopleList}
+        onClose={vi.fn()}
+        onCreate={vi.fn()}
+        onUpdate={vi.fn()}
+        onAddEvidence={vi.fn()}
+        onUpdateEvidence={vi.fn()}
+        onDeleteEvidence={vi.fn()}
+      />
+    );
+
+    expect(screen.queryByRole("button", { name: "発信側と受信側を入れ替え", hidden: true })).not.toBeInTheDocument();
+    // 対称型でも人物Bは初期状態で未選択。
+    expect((screen.getByPlaceholderText("人物Aを選択...") as HTMLInputElement).value).toContain("山田 太郎");
+    expect((screen.getByPlaceholderText("人物Bを選択...") as HTMLInputElement).value).toBe("");
   });
 
   test("RelationEvidenceSection renders empty state for nullish evidence", () => {
