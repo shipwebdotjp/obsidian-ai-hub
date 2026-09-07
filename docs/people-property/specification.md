@@ -33,8 +33,8 @@
 
 - 値は JSON blob ではなく、人物・属性定義・期間を持つ専用テーブルに型別列で保存する。
 - 型別列は `value_text`、`value_date`、`value_number`、`value_boolean`、`option_id` とし、各レコードで定義の型に対応する値列だけを使用する。
-- `date` は `YYYY-MM-DD` の文字列、`number` は数値列、`boolean` は SQLite の `0/1`、`select` は選択肢 ID で保存する。API は日付を文字列、真偽を boolean、選択肢を正規キー/表示情報として返す。
-- `valid_from` と `valid_until` は任意の `YYYY-MM-DD`。両端を期間に含み、開始日が終了日より後なら拒否する。
+- `date` は `YYYY-MM-DD` の文字列、`number` は数値列、`boolean` は SQLite の `0/1`、`select` は選択肢 ID で保存する。API は日付を文字列、真偽を boolean、選択肢を正規キー/表示情報として返す。Vault入力では `YYYY/MM/DD`（月日の1桁表記可）も受け付け、`YYYY-MM-DD` に自動変換して保存する。
+- `valid_from` と `valid_until` は任意の `YYYY-MM-DD`。両端を期間に含み、開始日が終了日より後なら拒否する。Vault入力では値と同様に `YYYY/MM/DD`（月日の1桁表記可）も受け付け、`YYYY-MM-DD` に自動変換する。
 - 単数属性は、異なる値同士の閉区間/開放区間を含む期間重複を拒否する。完全に同一の値と期間は重複保存しない。
 - 将来の検索に備え、属性定義・型別値・期間を対象にしたインデックスを作る。v1 はこれらを検索 API/UI に公開しない。
 

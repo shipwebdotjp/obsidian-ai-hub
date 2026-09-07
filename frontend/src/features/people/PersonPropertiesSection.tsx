@@ -165,6 +165,10 @@ export default function PersonPropertiesSection({
   };
 
   const renderValueDisplay = (pv: PersonPropertyValue) => {
+    if (pv.data_type === "date") {
+      const raw = pv.value_date ?? (typeof pv.value === "string" ? pv.value : null);
+      return formatPeriodDate(raw) || "—";
+    }
     if (pv.data_type === "boolean") {
       return pv.value_boolean ? "はい (True)" : "いいえ (False)";
     }
@@ -213,32 +217,34 @@ export default function PersonPropertiesSection({
                   <div className="flex items-center gap-2">
                     <span className="font-bold text-slate-900">{pv.property_display_name}</span>
                     <span className="font-mono text-[10px] text-slate-400">({pv.property_key})</span>
+                  </div>
+                  <div className="flex items-center gap-1">
                     {isVault ? (
                       <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-800 border border-amber-300">
-                        Vault正本 (読取専用)
+                        Vault
                       </span>
                     ) : (
                       <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                        DB専用
+                        DB
                       </span>
                     )}
+                    {!isVault && (
+                      <>
+                        <button
+                          onClick={() => openEditModal(pv)}
+                          className="px-2 py-0.5 text-[11px] font-semibold text-slate-700 border border-slate-300 rounded hover:bg-slate-100 cursor-pointer"
+                        >
+                          編集
+                        </button>
+                        <button
+                          onClick={() => openDeleteModal(pv)}
+                          className="px-2 py-0.5 text-[11px] font-semibold text-red-600 border border-red-200 rounded hover:bg-red-50 cursor-pointer"
+                        >
+                          削除
+                        </button>
+                      </>
+                    )}
                   </div>
-                  {!isVault && (
-                    <div className="flex items-center gap-1">
-                      <button
-                        onClick={() => openEditModal(pv)}
-                        className="px-2 py-0.5 text-[11px] font-semibold text-slate-700 border border-slate-300 rounded hover:bg-slate-100 cursor-pointer"
-                      >
-                        編集
-                      </button>
-                      <button
-                        onClick={() => openDeleteModal(pv)}
-                        className="px-2 py-0.5 text-[11px] font-semibold text-red-600 border border-red-200 rounded hover:bg-red-50 cursor-pointer"
-                      >
-                        削除
-                      </button>
-                    </div>
-                  )}
                 </div>
 
                 <div className="font-medium text-slate-900 text-sm pt-0.5">
@@ -262,12 +268,6 @@ export default function PersonPropertiesSection({
                   <div className="text-[11px] text-slate-600 bg-slate-50/80 p-1.5 rounded border border-slate-100 mt-1">
                     {pv.note}
                   </div>
-                )}
-
-                {isVault && (
-                  <p className="text-[10px] text-amber-700 font-medium pt-1">
-                    ※ Vaultノートを編集して人物同期を行ってください。
-                  </p>
                 )}
               </div>
             );

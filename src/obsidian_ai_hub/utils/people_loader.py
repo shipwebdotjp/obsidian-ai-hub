@@ -49,7 +49,11 @@ def normalize_date_str(val: Any) -> str:
                 return v
             except ValueError as e:
                 raise ValueError(f"Invalid date: {val}") from e
-            return v
+        if re.match(r"^\d{4}/\d{1,2}/\d{1,2}$", v):
+            try:
+                return datetime.strptime(v, "%Y/%m/%d").strftime("%Y-%m-%d")
+            except ValueError as e:
+                raise ValueError(f"Invalid date: {val}") from e
     raise ValueError(f"Invalid date format: {val}")
 
 
