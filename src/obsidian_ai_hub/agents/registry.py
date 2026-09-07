@@ -699,9 +699,10 @@ def people_search(query: str, limit: int = 10) -> str:
 
 @tool(args_schema=PersonGetInput)
 def people_get(person_id: str) -> str:
-    """人物IDから詳細（別名、関連サマリ、件数）を取得します。vault_idがある場合はVault人物ノートの本文も付与します。"""
+    """人物IDから詳細（別名、全属性値、関連サマリ、件数）を取得します。属性値（properties）にはDB/Vault正本問わず期間付き履歴や複数値を含む全属性値が含まれます。vault_idがある場合はVault人物ノートの本文（vault_note）も付与します。"""
     try:
         from obsidian_ai_hub.web.services.people import get_person_detail
+        from obsidian_ai_hub.web.services.person_properties import get_person_properties_for_ai
 
         detail = get_person_detail(person_id)
         if detail is None:
@@ -711,6 +712,13 @@ def people_get(person_id: str) -> str:
             vault_note = _resolve_person_vault_note(str(vault_id))
             if vault_note is not None:
                 detail["vault_note"] = vault_note
+
+        try:
+            detail["properties"] = get_person_properties_for_ai(person_id)
+        except Exception as p_exc:
+            logger.warning("people_get: failed to fetch properties for person_id=%s: %s", person_id, p_exc)
+            detail["properties"] = []
+
         return json.dumps(detail, ensure_ascii=False)
     except EXPECTED_TOOL_EXCEPTIONS as exc:
         logger.warning("people_get failed: %s", exc)
@@ -906,7 +914,7 @@ _BUILTIN_TOOL_DEFINITIONS: Dict[str, Dict[str, Any]] = {
     "people_get": {
         "tool_id": "people_get",
         "name": "人物詳細取得",
-        "description": "人物IDから詳細（別名、関連サマリ、件数）を取得します。vault_idがある場合はVault人物ノートの本文（vault_note）も付与します。",
+        "description": "人物IDから詳細（別名、全属性値・履歴、関連サマリ、件数）を取得します。vault_idがある場合はVault人物ノートの本文（vault_note）も付与します。",
         "get_tool": lambda: people_get,
     },
     "project_search": {
