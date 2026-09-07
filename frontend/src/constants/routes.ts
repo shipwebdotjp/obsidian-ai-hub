@@ -10,6 +10,8 @@ export const ROUTES = {
   PROJECTS: "/projects",
   TASKS: "/tasks",
   EXECUTION_LOGS: "/execution-logs",
+  EXECUTION_LOGS_LOGS: "/execution-logs/logs",
+  EXECUTION_LOGS_TASK_STATES: "/execution-logs/task-states",
   HITL: "/hitl",
   PLANNER: "/planner",
   SETTINGS: "/settings",
