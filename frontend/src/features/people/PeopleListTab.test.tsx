@@ -142,3 +142,56 @@ describe("PeopleListTab 検索ボックス", () => {
     expect(within(button).getByText("Alice Tanaka")).toBeInTheDocument();
   });
 });
+
+describe("PeopleListTab 詳細ヘッダーと危険操作アイコン", () => {
+  const selectedPerson = {
+    ...people[0],
+    summaries: [],
+    relation_counts: { summaries: 0, aliases: 0, assignments: 0 },
+  };
+
+  it("ヘッダーに統合・削除アイコンボタンが正確なアクセシブル名で表示される", () => {
+    const onTriggerMergeModal = vi.fn();
+    const onTriggerDeleteConfirm = vi.fn();
+
+    renderTab({ selectedPerson, onTriggerMergeModal, onTriggerDeleteConfirm });
+
+    const mergeBtn = screen.getByRole("button", { name: "この人物を別の人物へ統合" });
+    const deleteBtn = screen.getByRole("button", { name: "この人物を完全に削除" });
+
+    expect(mergeBtn).toBeInTheDocument();
+    expect(mergeBtn).toHaveAttribute("title", "この人物を別の人物へ統合");
+    expect(deleteBtn).toBeInTheDocument();
+    expect(deleteBtn).toHaveAttribute("title", "この人物を完全に削除");
+  });
+
+  it("アイコンボタンをクリックすると対応するハンドラが呼ばれる", async () => {
+    const user = userEvent.setup();
+    const onTriggerMergeModal = vi.fn();
+    const onTriggerDeleteConfirm = vi.fn();
+
+    renderTab({ selectedPerson, onTriggerMergeModal, onTriggerDeleteConfirm });
+
+    await user.click(screen.getByRole("button", { name: "この人物を別の人物へ統合" }));
+    expect(onTriggerMergeModal).toHaveBeenCalledWith(selectedPerson);
+
+    await user.click(screen.getByRole("button", { name: "この人物を完全に削除" }));
+    expect(onTriggerDeleteConfirm).toHaveBeenCalledWith(selectedPerson);
+  });
+
+  it("loading 時はヘッダーのアイコンボタンが disabled になる", () => {
+    renderTab({ selectedPerson, loading: true });
+
+    expect(screen.getByRole("button", { name: "この人物を別の人物へ統合" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "この人物を完全に削除" })).toBeDisabled();
+  });
+
+  it("詳細ペインに常設の完全削除・統合セクションが表示されない", () => {
+    renderTab({ selectedPerson });
+
+    expect(screen.queryByText("人物の完全削除 (危険操作)")).not.toBeInTheDocument();
+    expect(screen.queryByText("この人物を別の人物へ統合")).not.toBeInTheDocument();
+    expect(screen.queryByText("完全に削除する")).not.toBeInTheDocument();
+    expect(screen.queryByText("統合プレビュー")).not.toBeInTheDocument();
+  });
+});

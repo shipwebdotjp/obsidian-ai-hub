@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from "react";
+import { GitMerge, Trash2 } from "lucide-react";
 import { Person, PersonAlias } from "../../api/types";
 import { PersonDetail, PeopleError, PersonRelation, RelationStatus } from "./types";
 import PersonRelationsSection from "./PersonRelationsSection";
@@ -11,7 +12,7 @@ interface PeopleListTabProps {
   editError: PeopleError | null;
   editSuccess: string | null;
   mergeGuidance: { personId: string; personName: string } | null;
-  mergeToPersonId: string;
+  mergeToPersonId?: string;
   loading: boolean;
   mobileDetailOpen: boolean;
   setMobileDetailOpen: (open: boolean) => void;
@@ -20,8 +21,9 @@ interface PeopleListTabProps {
   onChangeEditAliasesText: (text: string) => void;
   onUpdatePerson: () => void;
   onTriggerDeleteConfirm: (p: PersonDetail) => void;
-  onChangeMergeToPersonId: (id: string) => void;
-  onTriggerMergePreview: (from: Person, to: Person) => void;
+  onTriggerMergeModal?: (p: PersonDetail) => void;
+  onChangeMergeToPersonId?: (id: string) => void;
+  onTriggerMergePreview?: (from: Person, to: Person) => void;
   onTriggerAliasDelete: (alias: PersonAlias) => void;
   personRelations?: PersonRelation[];
   relationStatusFilter?: RelationStatus | "all";
@@ -39,7 +41,7 @@ export default function PeopleListTab({
   editError,
   editSuccess,
   mergeGuidance,
-  mergeToPersonId,
+  mergeToPersonId = "",
   loading,
   mobileDetailOpen,
   setMobileDetailOpen,
@@ -48,8 +50,9 @@ export default function PeopleListTab({
   onChangeEditAliasesText,
   onUpdatePerson,
   onTriggerDeleteConfirm,
-  onChangeMergeToPersonId,
-  onTriggerMergePreview,
+  onTriggerMergeModal = () => {},
+  onChangeMergeToPersonId = () => {},
+  onTriggerMergePreview = () => {},
   onTriggerAliasDelete,
   personRelations = [],
   relationStatusFilter = "all",
@@ -154,12 +157,36 @@ export default function PeopleListTab({
         )}
         {selectedPerson ? (
           <div className="space-y-4">
-            <div>
-              <h2 className="text-base font-bold">{selectedPerson.display_name}</h2>
-              <p className="text-xs text-slate-400">ID: {selectedPerson.person_id} | 正規化名: {selectedPerson.normalized_name}</p>
-              {selectedPerson.vault_id && (
-                <p className="text-xs text-slate-500 mt-1">Vault 接続ID: <code className="bg-slate-100 px-1 rounded">{selectedPerson.vault_id}</code></p>
-              )}
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <h2 className="text-base font-bold">{selectedPerson.display_name}</h2>
+                <p className="text-xs text-slate-400">ID: {selectedPerson.person_id} | 正規化名: {selectedPerson.normalized_name}</p>
+                {selectedPerson.vault_id && (
+                  <p className="text-xs text-slate-500 mt-1">Vault 接続ID: <code className="bg-slate-100 px-1 rounded">{selectedPerson.vault_id}</code></p>
+                )}
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => onTriggerMergeModal(selectedPerson)}
+                  disabled={loading}
+                  title="この人物を別の人物へ統合"
+                  aria-label="この人物を別の人物へ統合"
+                  className="flex items-center gap-1 rounded bg-blue-600 px-3 py-1 text-sm text-white hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                >
+                  <GitMerge className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onTriggerDeleteConfirm(selectedPerson)}
+                  disabled={loading}
+                  title="この人物を完全に削除"
+                  aria-label="この人物を完全に削除"
+                  className="flex items-center gap-1 rounded bg-rose-800 px-3 py-1 text-sm text-white hover:bg-rose-900 transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
             </div>
 
             {selectedPerson.aliases && selectedPerson.aliases.length > 0 && (
@@ -250,63 +277,6 @@ export default function PeopleListTab({
                 </div>
               </div>
             )}
-
-            {/* Complete Deletion Section */}
-            <div className="border border-red-200 rounded-lg p-4 bg-red-50/50 space-y-3">
-              <h3 className="text-xs font-bold text-red-800">人物の完全削除 (危険操作)</h3>
-              <p className="text-[10px] text-red-600 leading-normal">
-                この操作を実行すると、人物データ本体に加えて、3つの関連テーブル（サマリ紐づき、確定別名、文脈別手動割当）からも関連行が完全に削除されます。サマリ本体や、Vault内のMarkdownファイル自体は削除されません。
-              </p>
-              <div className="flex justify-end">
-                <button
-                  onClick={() => onTriggerDeleteConfirm(selectedPerson)}
-                  disabled={loading}
-                  className={`rounded bg-rose-800 px-4 py-1.5 text-xs text-white hover:bg-rose-900 disabled:opacity-50 ${
-                    loading ? "disabled:cursor-not-allowed" : "cursor-pointer"
-                  }`}
-                >
-                  完全に削除する
-                </button>
-              </div>
-            </div>
-
-            {/* Merge with another person section */}
-            <div className="border border-slate-200 rounded-lg p-4 bg-slate-50 space-y-3">
-              <h3 className="text-xs font-bold text-slate-800">この人物を別の人物へ統合</h3>
-              <div className="flex flex-col gap-2 sm:flex-row">
-                <select
-                  value={mergeToPersonId}
-                  onChange={(e) => onChangeMergeToPersonId(e.target.value)}
-                  className="w-full rounded border border-slate-300 bg-white px-2.5 py-1.5 text-xs focus:border-slate-900 focus:outline-none sm:flex-1"
-                >
-                  <option value="">-- 統合先（残す）の人物を選択してください --</option>
-                  {people
-                    .filter((p) => p.person_id !== selectedPerson.person_id)
-                    .map((p) => (
-                      <option key={p.person_id} value={p.person_id}>
-                        {p.display_name} {p.vault_id ? `(${p.vault_id})` : "(未連携)"}
-                      </option>
-                    ))}
-                </select>
-                <button
-                  onClick={() => {
-                    const target = people.find((p) => p.person_id === mergeToPersonId);
-                    if (target) {
-                      onTriggerMergePreview(selectedPerson, target);
-                    }
-                  }}
-                  disabled={loading || !mergeToPersonId}
-                  className={`shrink-0 rounded bg-blue-600 px-4 py-1.5 text-xs text-white hover:bg-blue-700 disabled:opacity-50 ${
-                    loading || !mergeToPersonId ? "disabled:cursor-not-allowed" : "cursor-pointer"
-                  }`}
-                >
-                  統合プレビュー
-                </button>
-              </div>
-              <p className="text-[10px] text-slate-400">
-                ※ 統合元（この人物）のサマリー履歴や別名はすべて統合先にマージされ、統合元は削除されます。異なる Vault ID を持つ人物同士の統合や、連携済みから未連携への統合は拒否されます。
-              </p>
-            </div>
 
             {/* Person Relations Section */}
             <PersonRelationsSection
