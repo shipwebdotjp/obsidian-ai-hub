@@ -449,20 +449,18 @@ def process_single_webclip(
     # Fall back to the extracted title (or URL-derived title) when missing.
     filename_title = normalized.get("file_title") or title
     if existing_file:
-        target_path = get_unique_webclip_path(category_folder, filename_title, exclude_path=existing_file)
+        # Keep the existing path to preserve Obsidian links.
+        # Metadata/body are updated, but no rename or category move occurs.
+        target_path = existing_file
     else:
         target_path = get_unique_webclip_path(category_folder, filename_title)
 
-    # Ensure output directory exists and write the new file first.
-    # Only delete the old file after the new file is fully written, so a
-    # mkdir/write failure preserves the existing webclip.
+    # Ensure output directory exists
     target_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Build markdown content
     md_content = build_webclip_markdown(frontmatter, raw_content or "")
     target_path.write_text(md_content, encoding="utf-8")
-    if existing_file and target_path.resolve() != existing_file.resolve():
-        existing_file.unlink(missing_ok=True)
     logger.info(f"Saved webclip to {target_path}")
 
     # 6. Generate Daily Note link format
