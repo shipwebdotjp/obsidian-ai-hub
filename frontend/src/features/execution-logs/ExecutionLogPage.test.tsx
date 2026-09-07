@@ -55,70 +55,20 @@ const sampleCommandDetail = {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mockApiGet.mockImplementation((path: string) => {
-    if (path.includes("/task-states")) {
-      return Promise.resolve({ items: [] });
-    }
+  mockApiGet.mockImplementation((_path: string) => {
     return Promise.resolve(sampleListResponse);
   });
 });
 
-it("renders log items in the list", async () => {
+it("renders log items in the list and does not fetch task states", async () => {
   render(<ExecutionLogPage />);
 
   await waitFor(() => {
     expect(screen.getByText("make_target")).toBeInTheDocument();
   });
   expect(screen.getByText("gpt-4o-mini")).toBeInTheDocument();
-});
-
-it("renders task state panel with aggregated status", async () => {
-  mockApiGet.mockImplementation((path: string) => {
-    if (path.includes("/task-states")) {
-      return Promise.resolve({
-        items: [
-          {
-            task_id: "merge_inbox",
-            last_check_at: new Date().toISOString(),
-            consecutive_empty_count: 3,
-            last_processed_at: new Date(Date.now() - 3600_000).toISOString(),
-            last_error_at: null,
-            last_error_message: null,
-            last_error_type: null,
-            processed_count: 0,
-            skipped_count: 0,
-            failed_count: 0,
-            updated_at: new Date().toISOString(),
-          },
-        ],
-      });
-    }
-    return Promise.resolve(sampleListResponse);
-  });
-
-  render(<ExecutionLogPage />);
-
-  await waitFor(() => {
-    expect(screen.getByText("merge_inbox")).toBeInTheDocument();
-  });
-  expect(screen.getByText("3 回")).toBeInTheDocument();
-  expect(screen.getByText("0 / 0 / 0")).toBeInTheDocument();
-});
-
-it("shows a warning when task-state fetch fails", async () => {
-  mockApiGet.mockImplementation((path: string) => {
-    if (path.includes("/task-states")) {
-      return Promise.reject(new Error("network down"));
-    }
-    return Promise.resolve(sampleListResponse);
-  });
-
-  render(<ExecutionLogPage />);
-
-  await waitFor(() => {
-    expect(screen.getByText("タスク状態を取得できません（ログ閲覧は継続します）")).toBeInTheDocument();
-  });
-  expect(screen.getByText("make_target")).toBeInTheDocument();
+  expect(screen.queryByText("タスク状態")).not.toBeInTheDocument();
+  expect(mockApiGet).not.toHaveBeenCalledWith("/api/v1/task-states");
 });
 
 it("shows detail prompt on desktop when list says to select", async () => {
@@ -186,17 +136,13 @@ it("shows a full-text search box", async () => {
     expect(screen.getByText("make_target")).toBeInTheDocument();
   });
   expect(screen.getByText("全文検索")).toBeInTheDocument();
-  expect(screen.queryByText("コマンド・モデル検索")).not.toBeInTheDocument();
   expect(
     screen.getByPlaceholderText("e.g. プロンプト本文、引数、エラー文言")
   ).toBeInTheDocument();
 });
 
 it("sends q param and resets to the first page on input", async () => {
-  mockApiGet.mockImplementation((path: string) => {
-    if (path.includes("/task-states")) {
-      return Promise.resolve({ items: [] });
-    }
+  mockApiGet.mockImplementation((_path: string) => {
     return Promise.resolve({ items: [sampleCommandItem], total: 120 });
   });
   render(<ExecutionLogPage />);

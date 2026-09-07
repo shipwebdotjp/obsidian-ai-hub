@@ -14,6 +14,7 @@ import PeoplePage from "./features/people/PeoplePage";
 import ProjectsPage from "./features/projects/ProjectsPage";
 import TaskPage from "./features/tasks/TaskPage";
 import ExecutionLogPage from "./features/execution-logs/ExecutionLogPage";
+import TaskStatePage from "./features/execution-logs/TaskStatePage";
 import PlannerPage from "./features/planner/PlannerPage";
 import SettingsPage from "./features/settings/SettingsPage";
 import {
@@ -182,7 +183,9 @@ export default function App() {
           <Route path={ROUTES.PEOPLE} element={<PeoplePage />} />
           <Route path={ROUTES.PROJECTS} element={<ProjectsPage />} />
           <Route path={ROUTES.TASKS} element={<TaskPage />} />
-          <Route path={ROUTES.EXECUTION_LOGS} element={<ExecutionLogPage />} />
+          <Route path={ROUTES.EXECUTION_LOGS} element={<Navigate to={ROUTES.EXECUTION_LOGS_LOGS} replace />} />
+          <Route path={ROUTES.EXECUTION_LOGS_LOGS} element={<ExecutionLogPage />} />
+          <Route path={ROUTES.EXECUTION_LOGS_TASK_STATES} element={<TaskStatePage />} />
           <Route path={ROUTES.PLANNER} element={<PlannerPage />} />
           <Route path={ROUTES.SETTINGS} element={<SettingsPage />} />
           <Route path="*" element={<Navigate to={ROUTES.MEMORIES} replace />} />

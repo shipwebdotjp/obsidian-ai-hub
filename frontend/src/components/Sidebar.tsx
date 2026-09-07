@@ -17,6 +17,15 @@ export default function Sidebar({ open, onClose, id }: SidebarProps) {
       isActive ? "bg-slate-900 text-white" : "text-slate-700 hover:bg-slate-200"
     }`;
 
+  const isExecutionLogsActive = location.pathname.startsWith("/execution-logs");
+  const [logsMenuOpen, setLogsMenuOpen] = useState(() => isExecutionLogsActive);
+
+  useEffect(() => {
+    if (location.pathname.startsWith("/execution-logs")) {
+      setLogsMenuOpen(true);
+    }
+  }, [location.pathname]);
+
   useEffect(() => {
     let cancelled = false;
     listHitlRuns({ status: "pending_user", limit: 1 })
@@ -92,9 +101,37 @@ export default function Sidebar({ open, onClose, id }: SidebarProps) {
         <NavLink to={ROUTES.TASKS} className={linkClass} onClick={onClose}>
           タスク管理
         </NavLink>
-        <NavLink to={ROUTES.EXECUTION_LOGS} className={linkClass} onClick={onClose}>
-          実行ログ
-        </NavLink>
+        <div>
+          <button
+            type="button"
+            onClick={() => setLogsMenuOpen((prev) => !prev)}
+            aria-expanded={logsMenuOpen}
+            className={`flex w-full items-center justify-between rounded px-3 py-2 text-sm text-slate-700 hover:bg-slate-200 ${
+              isExecutionLogsActive ? "font-semibold text-slate-900" : ""
+            }`}
+          >
+            <span>実行ログ</span>
+            <span className="text-xs text-slate-400">{logsMenuOpen ? "▼" : "▶"}</span>
+          </button>
+          {logsMenuOpen && (
+            <div className="ml-3 mt-1 space-y-1 border-l-2 border-slate-200 pl-2">
+              <NavLink
+                to={ROUTES.EXECUTION_LOGS_LOGS}
+                className={linkClass}
+                onClick={onClose}
+              >
+                ログ
+              </NavLink>
+              <NavLink
+                to={ROUTES.EXECUTION_LOGS_TASK_STATES}
+                className={linkClass}
+                onClick={onClose}
+              >
+                タスク状態
+              </NavLink>
+            </div>
+          )}
+        </div>
         <NavLink to={ROUTES.PLANNER} className={linkClass} onClick={onClose}>
           プランナー
         </NavLink>

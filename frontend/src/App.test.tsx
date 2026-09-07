@@ -37,6 +37,7 @@ vi.mock("./features/people/PeoplePage", () => ({ default: () => <div data-testid
 vi.mock("./features/projects/ProjectsPage", () => ({ default: () => <div data-testid="page-projects">ProjectsPage</div> }));
 vi.mock("./features/tasks/TaskPage", () => ({ default: () => <div data-testid="page-tasks">TaskPage</div> }));
 vi.mock("./features/execution-logs/ExecutionLogPage", () => ({ default: () => <div data-testid="page-execution-logs">ExecutionLogPage</div> }));
+vi.mock("./features/execution-logs/TaskStatePage", () => ({ default: () => <div data-testid="page-task-states">TaskStatePage</div> }));
 vi.mock("./features/planner/PlannerPage", () => ({ default: () => <div data-testid="page-planner">PlannerPage</div> }));
 vi.mock("./features/settings/SettingsPage", () => ({ default: () => <div data-testid="page-settings">SettingsPage</div> }));
 
@@ -219,6 +220,66 @@ describe("App", () => {
     });
   });
 
+  it("redirects legacy /execution-logs to /execution-logs/logs", async () => {
+    mockHealth.mockResolvedValue({ status: "ok", auth_required: false });
+    render(
+      <MemoryRouter initialEntries={["/execution-logs"]}>
+        <App />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("page-execution-logs")).toBeInTheDocument();
+    });
+  });
+
+  it("renders /execution-logs/task-states", async () => {
+    mockHealth.mockResolvedValue({ status: "ok", auth_required: false });
+    render(
+      <MemoryRouter initialEntries={["/execution-logs/task-states"]}>
+        <App />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("page-task-states")).toBeInTheDocument();
+    });
+  });
+
+  it("expands execution logs sidebar menu and allows navigating to child routes", async () => {
+    mockHealth.mockResolvedValue({ status: "ok", auth_required: false });
+    render(
+      <MemoryRouter initialEntries={["/memories"]}>
+        <App />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("page-memories")).toBeInTheDocument();
+    });
+
+    // Parent "実行ログ" button
+    const toggleBtn = screen.getByRole("button", { name: /実行ログ/ });
+    expect(screen.queryByRole("link", { name: "ログ" })).not.toBeInTheDocument();
+
+    // Click to expand
+    await userEvent.click(toggleBtn);
+    expect(screen.getByRole("link", { name: "ログ" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "タスク状態" })).toBeInTheDocument();
+
+    // Click タスク状態
+    await userEvent.click(screen.getByRole("link", { name: "タスク状態" }));
+    await waitFor(() => {
+      expect(screen.getByTestId("page-task-states")).toBeInTheDocument();
+    });
+
+    // Click ログ
+    await userEvent.click(screen.getByRole("link", { name: "ログ" }));
+    await waitFor(() => {
+      expect(screen.getByTestId("page-execution-logs")).toBeInTheDocument();
+    });
+  });
+
   it("manages mobile navigation menu (open/close and Esc key)", async () => {
     mockHealth.mockResolvedValue({ status: "ok", auth_required: false });
     render(
@@ -280,7 +341,6 @@ describe("App", () => {
       { name: "人物管理", testId: "page-people" },
       { name: "プロジェクト管理", testId: "page-projects" },
       { name: "タスク管理", testId: "page-tasks" },
-      { name: "実行ログ", testId: "page-execution-logs" },
       { name: "プランナー", testId: "page-planner" },
       { name: "設定", testId: "page-settings" },
     ];
