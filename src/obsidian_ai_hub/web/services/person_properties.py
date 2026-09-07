@@ -966,6 +966,60 @@ def create_property_definition(
         conn.close()
 
 
+def get_person_properties_for_ai(person_id: str) -> list[dict[str, Any]]:
+    """Return minimal person property projection for AI tools.
+
+    Includes key, display_name, data_type, value, valid_from, valid_until.
+    Sorted by definition key ASC, then created_at ASC.
+    Returns [] if no properties exist.
+    """
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT d.key, d.display_name, d.data_type,
+                   v.value_text, v.value_date, v.value_number, v.value_boolean,
+                   o.option_key, v.valid_from, v.valid_until, v.created_at
+            FROM person_property_values v
+            JOIN person_property_definitions d ON v.property_definition_id = d.property_definition_id
+            LEFT JOIN person_property_options o ON v.option_id = o.option_id
+            WHERE v.person_id = ?
+            ORDER BY d.key ASC, v.created_at ASC
+            """,
+            (person_id,),
+        )
+        rows = cursor.fetchall()
+        result = []
+        for r in rows:
+            data_type = r["data_type"]
+            val = None
+            if data_type == "text":
+                val = r["value_text"]
+            elif data_type == "date":
+                val = r["value_date"]
+            elif data_type == "number":
+                val = r["value_number"]
+            elif data_type == "boolean":
+                val = bool(r["value_boolean"]) if r["value_boolean"] is not None else None
+            elif data_type == "select":
+                val = r["option_key"]
+
+            result.append(
+                {
+                    "key": r["key"],
+                    "display_name": r["display_name"],
+                    "data_type": data_type,
+                    "value": val,
+                    "valid_from": r["valid_from"],
+                    "valid_until": r["valid_until"],
+                }
+            )
+        return result
+    finally:
+        conn.close()
+
+
 def update_property_definition(
     property_definition_id: str,
     display_name: Optional[str] = None,
