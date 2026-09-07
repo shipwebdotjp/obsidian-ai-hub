@@ -669,6 +669,9 @@ def get_db_connection() -> sqlite3.Connection:
     if current_version <= 37:
         run_migration_v38(conn)
 
+    if current_version <= 38:
+        run_migration_v39(conn)
+
     return conn
 
 
@@ -774,6 +777,95 @@ def run_migration_v17(conn: sqlite3.Connection) -> None:
     )
     conn.execute("PRAGMA user_version = 17;")
     conn.commit()
+
+
+def run_migration_v39(db: sqlite3.Connection) -> None:
+    """Run migration for version 39 (person property definitions, options, aliases, and values)."""
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS person_property_definitions (
+            property_definition_id TEXT PRIMARY KEY,
+            key TEXT NOT NULL UNIQUE,
+            display_name TEXT NOT NULL,
+            data_type TEXT NOT NULL CHECK (data_type IN ('text', 'date', 'number', 'boolean', 'select')),
+            cardinality TEXT NOT NULL CHECK (cardinality IN ('single', 'multiple')),
+            source_type TEXT NOT NULL CHECK (source_type IN ('database', 'vault')),
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+    """)
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS person_property_definition_aliases (
+            alias_id TEXT PRIMARY KEY,
+            property_definition_id TEXT NOT NULL REFERENCES person_property_definitions(property_definition_id) ON DELETE CASCADE,
+            alias_key TEXT NOT NULL UNIQUE,
+            created_at TEXT NOT NULL
+        );
+    """)
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS person_property_options (
+            option_id TEXT PRIMARY KEY,
+            property_definition_id TEXT NOT NULL REFERENCES person_property_definitions(property_definition_id) ON DELETE CASCADE,
+            option_key TEXT NOT NULL,
+            display_name TEXT NOT NULL,
+            display_order INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE (property_definition_id, option_key)
+        );
+    """)
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS person_property_option_aliases (
+            alias_id TEXT PRIMARY KEY,
+            option_id TEXT NOT NULL REFERENCES person_property_options(option_id) ON DELETE CASCADE,
+            alias_value TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            UNIQUE (option_id, alias_value)
+        );
+    """)
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS person_property_values (
+            property_value_id TEXT PRIMARY KEY,
+            person_id TEXT NOT NULL REFERENCES people(person_id) ON DELETE CASCADE,
+            property_definition_id TEXT NOT NULL REFERENCES person_property_definitions(property_definition_id) ON DELETE CASCADE,
+            source_type TEXT NOT NULL CHECK (source_type IN ('database', 'vault')),
+            value_text TEXT,
+            value_date TEXT,
+            value_number REAL,
+            value_boolean INTEGER CHECK (value_boolean IS NULL OR value_boolean IN (0, 1)),
+            option_id TEXT REFERENCES person_property_options(option_id) ON DELETE RESTRICT,
+            valid_from TEXT,
+            valid_until TEXT,
+            note TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            CHECK (valid_from IS NULL OR valid_until IS NULL OR valid_from <= valid_until)
+        );
+    """)
+
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_ppv_person ON person_property_values(person_id);"
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_ppv_definition ON person_property_values(property_definition_id);"
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_ppv_def_text_period ON person_property_values(property_definition_id, value_text, valid_from, valid_until);"
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_ppv_def_date_period ON person_property_values(property_definition_id, value_date, valid_from, valid_until);"
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_ppv_def_number_period ON person_property_values(property_definition_id, value_number, valid_from, valid_until);"
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_ppv_def_bool_period ON person_property_values(property_definition_id, value_boolean, valid_from, valid_until);"
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_ppv_def_option_period ON person_property_values(property_definition_id, option_id, valid_from, valid_until);"
+    )
+
+    db.execute("PRAGMA user_version = 39")
+    db.commit()
 
 
 def run_migration_v18(conn: sqlite3.Connection) -> None:

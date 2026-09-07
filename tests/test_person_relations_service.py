@@ -210,7 +210,7 @@ def test_vault_sync_automatic_merge_and_self_relation_skip(tmp_path, monkeypatch
     }
 
     # Execute sync in tx
-    skipped = sync_people_in_tx(conn, notes_map)
+    skipped, _ = sync_people_in_tx(conn, notes_map)
     conn.commit()
 
     assert len(skipped) == 1
@@ -252,7 +252,7 @@ def test_vault_sync_self_relation_skip_blocks_final_rename(tmp_path, monkeypatch
         }
     }
 
-    skipped = sync_people_in_tx(conn, notes_map)
+    skipped, _ = sync_people_in_tx(conn, notes_map)
     conn.commit()
 
     assert len(skipped) == 1

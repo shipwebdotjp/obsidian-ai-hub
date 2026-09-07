@@ -15,6 +15,7 @@ export interface DeletePersonResponse {
   deleted_subject_relations?: number;
   deleted_object_relations?: number;
   deleted_relation_evidence?: number;
+  deleted_property_values?: number;
 }
 
 export interface AssociatedSummary {
@@ -70,6 +71,51 @@ export interface DuplicatesResponse {
   same_vault_id_groups: DuplicateSameVaultIdGroup[];
 }
 
+export interface SkippedRelationItem {
+  relation_id: string;
+  relation_type_slug: string;
+  other_person_id: string;
+  other_person_name: string;
+  started_on: string | null;
+  ended_on: string | null;
+}
+
+export interface SkippedRelationMerge {
+  from_person_id: string;
+  from_person_name: string;
+  to_person_id: string;
+  to_person_name: string;
+  reason: string;
+  skipped_relations: SkippedRelationItem[];
+}
+
+export interface InvalidPropertyItem {
+  person_id: string;
+  person_name: string;
+  property_key: string;
+  property_display_name: string;
+  reason: string;
+}
+
+export interface SkippedPropertyMerge {
+  from_person_id: string;
+  from_person_name: string;
+  to_person_id: string;
+  to_person_name: string;
+  property_key: string;
+  property_display_name: string;
+  reason: string;
+}
+
+export interface PropertySyncReport {
+  replaced_properties_count: number;
+  replaced_values_count: number;
+  deleted_properties_count: number;
+  deleted_values_count: number;
+  invalid_properties: InvalidPropertyItem[];
+  skipped_property_merges: SkippedPropertyMerge[];
+}
+
 export interface SyncPeopleResponse {
   synced: boolean;
   loader_report: {
@@ -94,6 +140,8 @@ export interface SyncPeopleResponse {
       vault_claimers: Array<{ id: string; name: string; path: string }>;
     }>;
   };
+  skipped_relation_merges?: SkippedRelationMerge[];
+  property_report?: PropertySyncReport | null;
 }
 
 export interface MergedSummaryPreview {
@@ -125,6 +173,18 @@ export interface RelationImpactItem {
   surviving_relation_id: string | null;
 }
 
+export interface PropertyImpactItem {
+  property_value_id: string;
+  property_definition_id: string;
+  property_key: string;
+  property_display_name: string;
+  source_type: PropertySourceType;
+  valid_from: string | null;
+  valid_until: string | null;
+  result_type: "transferred" | "merged_into_existing" | "property_conflict";
+  conflict_reason: string | null;
+}
+
 export interface PeopleMergePreviewResponse {
   allowed: boolean;
   reason: string | null;
@@ -135,9 +195,13 @@ export interface PeopleMergePreviewResponse {
   transferred_relations_count?: number;
   merged_relations_count?: number;
   self_relation_conflicts_count?: number;
+  transferred_properties_count?: number;
+  merged_properties_count?: number;
+  property_conflicts_count?: number;
   alias_transfers: AliasTransferPreview[];
   merged_summaries: MergedSummaryPreview[];
   relation_impacts?: RelationImpactItem[];
+  property_impacts?: PropertyImpactItem[];
 }
 
 export interface PersonRelationType {
@@ -231,4 +295,103 @@ export interface PersonRelationUpdateRequest {
 export interface RelationDuplicateMergeResponse {
   action: "created" | "updated" | "merged_into_existing";
   relation: PersonRelation;
+}
+
+export type PropertyDataType = "text" | "date" | "number" | "boolean" | "select";
+export type PropertyCardinality = "single" | "multiple";
+export type PropertySourceType = "database" | "vault";
+
+export interface PersonPropertyOption {
+  option_id: string;
+  option_key: string;
+  display_name: string;
+  display_order: number;
+  aliases: string[];
+}
+
+export interface PersonPropertyOptionInput {
+  option_key: string;
+  display_name: string;
+  display_order?: number;
+  aliases?: string[];
+}
+
+export interface PersonPropertyDefinition {
+  property_definition_id: string;
+  key: string;
+  display_name: string;
+  data_type: PropertyDataType;
+  cardinality: PropertyCardinality;
+  source_type: PropertySourceType;
+  aliases: string[];
+  options: PersonPropertyOption[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PersonPropertyDefinitionCreateRequest {
+  key: string;
+  display_name: string;
+  data_type: PropertyDataType;
+  cardinality: PropertyCardinality;
+  source_type?: PropertySourceType;
+  aliases?: string[];
+  options?: PersonPropertyOptionInput[];
+}
+
+export interface PersonPropertyDefinitionUpdateRequest {
+  display_name?: string;
+  aliases?: string[];
+  options?: PersonPropertyOptionInput[];
+}
+
+export interface PersonPropertyValue {
+  property_value_id: string;
+  person_id: string;
+  property_definition_id: string;
+  property_key: string;
+  property_display_name: string;
+  data_type: PropertyDataType;
+  cardinality: PropertyCardinality;
+  source_type: PropertySourceType;
+  value: any;
+  value_text: string | null;
+  value_date: string | null;
+  value_number: number | null;
+  value_boolean: boolean | null;
+  option_id: string | null;
+  option_key: string | null;
+  option_display_name: string | null;
+  valid_from: string | null;
+  valid_until: string | null;
+  note: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PersonPropertyValueCreateRequest {
+  property_definition_id: string;
+  value: any;
+  valid_from?: string | null;
+  valid_until?: string | null;
+  note?: string | null;
+}
+
+export interface PersonPropertyValueUpdateRequest {
+  value?: any;
+  valid_from?: string | null;
+  valid_until?: string | null;
+  note?: string | null;
+}
+
+export interface PersonPropertyDefinitionDeleteResponse {
+  success: boolean;
+  deleted_property_definition_id: string;
+  deleted_values_count: number;
+  deleted_options_count: number;
+}
+
+export interface PersonPropertyValueDeleteResponse {
+  success: boolean;
+  deleted_property_value_id: string;
 }

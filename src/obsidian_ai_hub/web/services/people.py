@@ -390,6 +390,12 @@ def delete_person(person_id: str) -> dict:
             )
 
             cursor.execute(
+                "SELECT COUNT(*) FROM person_property_values WHERE person_id = ?",
+                (person_id,),
+            )
+            deleted_property_values = cursor.fetchone()[0]
+
+            cursor.execute(
                 "DELETE FROM summary_people WHERE person_id = ?", (person_id,)
             )
             deleted_summary_people = cursor.rowcount
@@ -415,6 +421,7 @@ def delete_person(person_id: str) -> dict:
                 "deleted_subject_relations": deleted_subject_relations,
                 "deleted_object_relations": deleted_object_relations,
                 "deleted_relation_evidence": deleted_relation_evidence,
+                "deleted_property_values": deleted_property_values,
             }
     finally:
         conn.close()

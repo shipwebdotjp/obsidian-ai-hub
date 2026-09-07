@@ -10,6 +10,7 @@ from obsidian_ai_hub.web.routes import (
     line,
     memory,
     people,
+    person_properties,
     planner,
     projects,
     research,
@@ -28,6 +29,7 @@ router.include_router(research.router)
 router.include_router(vault.router)
 router.include_router(dashboard.router)
 router.include_router(projects.router)
+router.include_router(person_properties.router)
 router.include_router(people.router)
 router.include_router(task_config.router)
 router.include_router(execution_logs.router)

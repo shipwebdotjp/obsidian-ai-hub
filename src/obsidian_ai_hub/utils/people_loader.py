@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import logging
+import re
+import sqlite3
+from datetime import datetime, date
 from pathlib import Path
-from typing import TypedDict, Any
+from typing import TypedDict, Any, Optional
 
+from obsidian_ai_hub.database import get_db_connection
 from obsidian_ai_hub.utils import config as app_config
 from obsidian_ai_hub.utils.extracter import parse_frontmatter
+from obsidian_ai_hub.utils.periods import periods_overlap
 from obsidian_ai_hub.summary.store import normalize_entity_name
 
 logger = logging.getLogger(__name__)
@@ -33,7 +38,282 @@ class PersonNote(TypedDict):
     file_path: Path
 
 
-def load_people_notes_with_report() -> tuple[dict[str, PersonNote], dict[str, Any]]:
+def normalize_date_str(val: Any) -> str:
+    if isinstance(val, (datetime, date)):
+        return val.isoformat()[:10]
+    if isinstance(val, str):
+        v = val.strip()
+        if re.match(r"^\d{4}-\d{2}-\d{2}$", v):
+            try:
+                datetime.strptime(v, "%Y-%m-%d")
+                return v
+            except ValueError as e:
+                raise ValueError(f"Invalid date: {val}") from e
+            return v
+    raise ValueError(f"Invalid date format: {val}")
+
+
+def get_vault_property_definitions_lookup(conn: sqlite3.Connection) -> dict[str, Any]:
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT property_definition_id, key, display_name, data_type, cardinality, source_type
+        FROM person_property_definitions
+        WHERE source_type = 'vault'
+        ORDER BY key ASC
+        """
+    )
+    def_rows = cursor.fetchall()
+
+    definitions_by_id = {}
+    key_alias_map = {}
+
+    for row in def_rows:
+        d_dict = dict(row)
+        def_id = d_dict["property_definition_id"]
+        def_key = d_dict["key"]
+
+        # Get aliases
+        cursor.execute(
+            "SELECT alias_key FROM person_property_definition_aliases WHERE property_definition_id = ?",
+            (def_id,),
+        )
+        aliases = [r[0] for r in cursor.fetchall()]
+        d_dict["aliases"] = aliases
+
+        # Map key and aliases
+        key_alias_map[def_key] = def_id
+        for ak in aliases:
+            key_alias_map[ak] = def_id
+
+        # Get options if select
+        option_lookup = {}
+        if d_dict["data_type"] == "select":
+            cursor.execute(
+                """
+                SELECT option_id, option_key, display_name
+                FROM person_property_options
+                WHERE property_definition_id = ?
+                """,
+                (def_id,),
+            )
+            opt_rows = cursor.fetchall()
+            for opt_r in opt_rows:
+                opt_id = opt_r["option_id"]
+                opt_k = opt_r["option_key"]
+                opt_dn = opt_r["display_name"]
+                option_lookup[opt_k] = opt_id
+                option_lookup[opt_dn] = opt_id
+
+                cursor.execute(
+                    "SELECT alias_value FROM person_property_option_aliases WHERE option_id = ?",
+                    (opt_id,),
+                )
+                for alias_r in cursor.fetchall():
+                    option_lookup[alias_r[0]] = opt_id
+
+        d_dict["option_lookup"] = option_lookup
+        definitions_by_id[def_id] = d_dict
+
+    return {"definitions_by_id": definitions_by_id, "key_alias_map": key_alias_map}
+
+
+def parse_vault_properties_for_note(
+    fm: dict[str, Any], pid: str, pname: str, lookup: dict[str, Any]
+) -> dict[str, Any]:
+    definitions_by_id = lookup["definitions_by_id"]
+    key_alias_map = lookup["key_alias_map"]
+
+    reserved_keys = {"id", "name", "aliases"}
+
+    # Group frontmatter keys by resolved property_definition_id
+    found_keys: dict[str, list[str]] = {}
+    for fm_k in fm.keys():
+        if fm_k in reserved_keys:
+            continue
+        if fm_k in key_alias_map:
+            def_id = key_alias_map[fm_k]
+            found_keys.setdefault(def_id, []).append(fm_k)
+
+    parsed_properties: dict[str, list[dict[str, Any]]] = {}
+    missing_properties: list[str] = []
+    invalid_properties: list[dict[str, Any]] = []
+
+    # 1. Key collision check
+    invalid_def_ids = set()
+    for def_id, fm_ks in found_keys.items():
+        if len(fm_ks) > 1:
+            invalid_def_ids.add(def_id)
+            defn = definitions_by_id[def_id]
+            invalid_properties.append(
+                {
+                    "person_id": pid,
+                    "person_name": pname,
+                    "property_key": defn["key"],
+                    "property_display_name": defn["display_name"],
+                    "reason": f"同一ノート内で複数のキー ({', '.join(fm_ks)}) が同じ属性定義 '{defn['display_name']}' に指定されています。",
+                }
+            )
+
+    # 2. Process each vault property definition
+    for def_id, defn in definitions_by_id.items():
+        if def_id in invalid_def_ids:
+            continue
+
+        if def_id not in found_keys:
+            missing_properties.append(def_id)
+            continue
+
+        fm_k = found_keys[def_id][0]
+        raw_val = fm[fm_k]
+
+        if raw_val is None or raw_val == "" or raw_val == []:
+            parsed_properties[def_id] = []
+            continue
+
+        raw_items = raw_val if isinstance(raw_val, list) else [raw_val]
+
+        parsed_items: list[dict[str, Any]] = []
+        prop_error: Optional[str] = None
+
+        for item in raw_items:
+            if isinstance(item, dict):
+                if "value" not in item:
+                    prop_error = "値レコードに 'value' フィールドが存在しません。"
+                    break
+                item_val = item["value"]
+                raw_s = item.get("valid_from")
+                raw_e = item.get("valid_until")
+            else:
+                item_val = item
+                raw_s = None
+                raw_e = None
+
+            # Validate valid_from and valid_until
+            try:
+                vf = normalize_date_str(raw_s) if raw_s is not None else None
+                vu = normalize_date_str(raw_e) if raw_e is not None else None
+            except ValueError as e:
+                prop_error = str(e)
+                break
+
+            if vf and vu and vf > vu:
+                prop_error = f"valid_from ({vf}) は valid_until ({vu}) 以下である必要があります。"
+                break
+
+            # Validate typed item_val
+            data_type = defn["data_type"]
+            val_text = None
+            val_date = None
+            val_num = None
+            val_bool = None
+            opt_id = None
+
+            try:
+                if data_type == "text":
+                    if item_val is None or not str(item_val).strip():
+                        raise ValueError("テキスト属性値が空です。")
+                    val_text = str(item_val).strip()
+                elif data_type == "date":
+                    val_date = normalize_date_str(item_val)
+                elif data_type == "number":
+                    if isinstance(item_val, bool):
+                        raise ValueError(f"数値属性値の形式が不正です: {item_val}")
+                    try:
+                        val_num = float(item_val)
+                    except (ValueError, TypeError) as e:
+                        raise ValueError(f"数値属性値の形式が不正です: {item_val}") from e
+                elif data_type == "boolean":
+                    if isinstance(item_val, bool):
+                        val_bool = 1 if item_val else 0
+                    elif isinstance(item_val, (int, str)) and str(item_val).strip().lower() in ("true", "1", "yes"):
+                        val_bool = 1
+                    elif isinstance(item_val, (int, str)) and str(item_val).strip().lower() in ("false", "0", "no"):
+                        val_bool = 0
+                    else:
+                        raise ValueError(f"真偽値属性の形式が不正です: {item_val}")
+                elif data_type == "select":
+                    raw_str = str(item_val).strip() if item_val is not None else ""
+                    if raw_str in defn["option_lookup"]:
+                        opt_id = defn["option_lookup"][raw_str]
+                    else:
+                        raise ValueError(f"選択肢 '{item_val}' は属性定義 '{defn['display_name']}' の有効な選択肢として解決できません。")
+            except ValueError as e:
+                prop_error = str(e)
+                break
+
+            item_dict = {
+                "value_text": val_text,
+                "value_date": val_date,
+                "value_number": val_num,
+                "value_boolean": val_bool,
+                "option_id": opt_id,
+                "valid_from": vf,
+                "valid_until": vu,
+            }
+
+            # Deduplicate exact duplicate items in raw input
+            if item_dict not in parsed_items:
+                parsed_items.append(item_dict)
+
+        if prop_error:
+            invalid_properties.append(
+                {
+                    "person_id": pid,
+                    "person_name": pname,
+                    "property_key": defn["key"],
+                    "property_display_name": defn["display_name"],
+                    "reason": prop_error,
+                }
+            )
+            continue
+
+        # Single cardinality overlap check
+        if defn["cardinality"] == "single" and len(parsed_items) > 1:
+            has_single_conflict = False
+            for i in range(len(parsed_items)):
+                for j in range(i + 1, len(parsed_items)):
+                    pi1 = parsed_items[i]
+                    pi2 = parsed_items[j]
+                    if periods_overlap(pi1["valid_from"], pi1["valid_until"], pi2["valid_from"], pi2["valid_until"]):
+                        # Check if they have different values
+                        diff_val = (
+                            pi1["value_text"] != pi2["value_text"]
+                            or pi1["value_date"] != pi2["value_date"]
+                            or pi1["value_number"] != pi2["value_number"]
+                            or pi1["value_boolean"] != pi2["value_boolean"]
+                            or pi1["option_id"] != pi2["option_id"]
+                        )
+                        if diff_val:
+                            has_single_conflict = True
+                            break
+                if has_single_conflict:
+                    break
+
+            if has_single_conflict:
+                invalid_properties.append(
+                    {
+                        "person_id": pid,
+                        "person_name": pname,
+                        "property_key": defn["key"],
+                        "property_display_name": defn["display_name"],
+                        "reason": f"単数属性 '{defn['display_name']}' で期間が重複する複数の異なる値が指定されています。",
+                    }
+                )
+                continue
+
+        parsed_properties[def_id] = parsed_items
+
+    return {
+        "parsed_properties": parsed_properties,
+        "missing_properties": missing_properties,
+        "invalid_properties": invalid_properties,
+    }
+
+
+def load_people_notes_with_report(
+    conn: Optional[sqlite3.Connection] = None,
+) -> tuple[dict[str, PersonNote], dict[str, Any]]:
     """
     Load all person notes from under PEOPLE_PATH (vault.people) recursively.
     Does not raise exceptions on validation errors, but skipped notes and collisions
@@ -107,6 +387,7 @@ def load_people_notes_with_report() -> tuple[dict[str, PersonNote], dict[str, An
                     "name": pname,
                     "aliases": aliases,
                     "file_path": path,
+                    "frontmatter": fm,
                 }
             )
         except (OSError, ValueError, TypeError) as e:
@@ -238,6 +519,47 @@ def load_people_notes_with_report() -> tuple[dict[str, PersonNote], dict[str, An
             norm_alias = normalize_entity_name(alias)
             if norm_alias:
                 normalized_to_note[norm_alias] = safe_note
+
+    # Stage 5: Parse Vault property frontmatter for vault-source property definitions
+    close_conn_on_exit = False
+    if conn is None:
+        try:
+            conn = get_db_connection()
+            close_conn_on_exit = True
+        except Exception as e:
+            logger.warning("Could not connect to DB for vault property loader: %s", e)
+            conn = None
+
+    property_report = {
+        "invalid_properties": [],
+        "parsed_properties_by_note_id": {},
+        "missing_properties_by_note_id": {},
+    }
+
+    if conn is not None:
+        try:
+            lookup = get_vault_property_definitions_lookup(conn)
+            for note in stage3_notes:
+                note_id = note["id"]
+                fm = note.get("frontmatter", {})
+                p_res = parse_vault_properties_for_note(
+                    fm, note_id, note["name"], lookup
+                )
+                if p_res["invalid_properties"]:
+                    property_report["invalid_properties"].extend(
+                        p_res["invalid_properties"]
+                    )
+                property_report["parsed_properties_by_note_id"][note_id] = p_res[
+                    "parsed_properties"
+                ]
+                property_report["missing_properties_by_note_id"][note_id] = p_res[
+                    "missing_properties"
+                ]
+        finally:
+            if close_conn_on_exit:
+                conn.close()
+
+    report["property_report"] = property_report
 
     return normalized_to_note, report
 

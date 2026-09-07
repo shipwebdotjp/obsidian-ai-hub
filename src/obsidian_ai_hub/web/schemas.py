@@ -681,6 +681,7 @@ class PersonDeleteResponse(BaseModel):
     deleted_subject_relations: int = 0
     deleted_object_relations: int = 0
     deleted_relation_evidence: int = 0
+    deleted_property_values: int = 0
 
 
 class PersonActionResponse(BaseModel):
@@ -733,6 +734,33 @@ class SkippedRelationMerge(BaseModel):
     skipped_relations: list[SkippedRelationItem] = []
 
 
+class InvalidPropertyItem(BaseModel):
+    person_id: str
+    person_name: str
+    property_key: str
+    property_display_name: str
+    reason: str
+
+
+class SkippedPropertyMerge(BaseModel):
+    from_person_id: str
+    from_person_name: str
+    to_person_id: str
+    to_person_name: str
+    property_key: str
+    property_display_name: str
+    reason: str
+
+
+class PropertySyncReport(BaseModel):
+    replaced_properties_count: int = 0
+    replaced_values_count: int = 0
+    deleted_properties_count: int = 0
+    deleted_values_count: int = 0
+    invalid_properties: list[InvalidPropertyItem] = Field(default_factory=list)
+    skipped_property_merges: list[SkippedPropertyMerge] = Field(default_factory=list)
+
+
 class SyncPeopleResponse(BaseModel):
     # True when a sync was actually applied (POST /people/sync); False for the
     # read-only vault report (GET /people/vault-report), which never syncs.
@@ -740,6 +768,7 @@ class SyncPeopleResponse(BaseModel):
     loader_report: dict[str, Any]
     db_conflicts: dict[str, Any]
     skipped_relation_merges: list[SkippedRelationMerge] = []
+    property_report: Optional[PropertySyncReport] = None
 
 
 class MergedSummaryPreview(BaseModel):
@@ -771,6 +800,18 @@ class RelationImpactItem(BaseModel):
     surviving_relation_id: Optional[str] = None
 
 
+class PropertyImpactItem(BaseModel):
+    property_value_id: str
+    property_definition_id: str
+    property_key: str
+    property_display_name: str
+    source_type: Literal["database", "vault"]
+    valid_from: Optional[str] = None
+    valid_until: Optional[str] = None
+    result_type: Literal["transferred", "merged_into_existing", "property_conflict"]
+    conflict_reason: Optional[str] = None
+
+
 class PeopleMergePreviewResponse(BaseModel):
     allowed: bool
     reason: Optional[str] = None
@@ -781,9 +822,13 @@ class PeopleMergePreviewResponse(BaseModel):
     transferred_relations_count: int = 0
     merged_relations_count: int = 0
     self_relation_conflicts_count: int = 0
+    transferred_properties_count: int = 0
+    merged_properties_count: int = 0
+    property_conflicts_count: int = 0
     alias_transfers: list[AliasTransferPreview] = []
     merged_summaries: list[MergedSummaryPreview] = []
     relation_impacts: list[RelationImpactItem] = []
+    property_impacts: list[PropertyImpactItem] = []
 
 
 # --- Project Management Schemas ---
@@ -1351,3 +1396,169 @@ class PersonRelationListResponse(BaseModel):
 class RelationDuplicateMergeResponse(BaseModel):
     action: Literal["created", "updated", "merged_into_existing"]
     relation: PersonRelation
+
+
+# --- Person Property schemas ---
+
+PropertyDataType = Literal["text", "date", "number", "boolean", "select"]
+PropertyCardinality = Literal["single", "multiple"]
+PropertySourceType = Literal["database", "vault"]
+
+
+class PersonPropertyOption(BaseModel):
+    option_id: str
+    option_key: str
+    display_name: str
+    display_order: int = 0
+    aliases: list[str] = Field(default_factory=list)
+
+
+class PersonPropertyOptionInput(BaseModel):
+    option_key: str
+    display_name: str
+    display_order: int = 0
+    aliases: list[str] = Field(default_factory=list)
+
+    @field_validator("option_key", "display_name")
+    @classmethod
+    def _validate_non_empty_str(cls, v: str) -> str:
+        s = v.strip()
+        if not s:
+            raise ValueError("Field must not be empty")
+        return s
+
+
+class PersonPropertyDefinition(BaseModel):
+    property_definition_id: str
+    key: str
+    display_name: str
+    data_type: PropertyDataType
+    cardinality: PropertyCardinality
+    source_type: PropertySourceType
+    aliases: list[str] = Field(default_factory=list)
+    options: list[PersonPropertyOption] = Field(default_factory=list)
+    created_at: str
+    updated_at: str
+
+
+class PersonPropertyDefinitionCreateRequest(BaseModel):
+    key: str
+    display_name: str
+    data_type: PropertyDataType
+    cardinality: PropertyCardinality
+    source_type: PropertySourceType = "database"
+    aliases: list[str] = Field(default_factory=list)
+    options: list[PersonPropertyOptionInput] = Field(default_factory=list)
+
+    @field_validator("key", "display_name")
+    @classmethod
+    def _validate_non_empty_key_name(cls, v: str) -> str:
+        s = v.strip()
+        if not s:
+            raise ValueError("Field must not be empty")
+        return s
+
+    @model_validator(mode="after")
+    def _validate_options_and_data_type(self) -> "PersonPropertyDefinitionCreateRequest":
+        if self.data_type == "select":
+            if not self.options:
+                raise ValueError("options are required for data_type 'select'")
+        else:
+            if self.options:
+                raise ValueError("options are only allowed for data_type 'select'")
+        return self
+
+
+class PersonPropertyDefinitionUpdateRequest(BaseModel):
+    display_name: Optional[str] = None
+    aliases: Optional[list[str]] = None
+    options: Optional[list[PersonPropertyOptionInput]] = None
+
+    @field_validator("display_name")
+    @classmethod
+    def _validate_display_name_if_present(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        s = v.strip()
+        if not s:
+            raise ValueError("display_name must not be empty")
+        return s
+
+
+class PersonPropertyValue(BaseModel):
+    property_value_id: str
+    person_id: str
+    property_definition_id: str
+    property_key: str
+    property_display_name: str
+    data_type: PropertyDataType
+    cardinality: PropertyCardinality
+    source_type: PropertySourceType
+    value: Any
+    value_text: Optional[str] = None
+    value_date: Optional[str] = None
+    value_number: Optional[float] = None
+    value_boolean: Optional[bool] = None
+    option_id: Optional[str] = None
+    option_key: Optional[str] = None
+    option_display_name: Optional[str] = None
+    valid_from: Optional[str] = None
+    valid_until: Optional[str] = None
+    note: Optional[str] = None
+    created_at: str
+    updated_at: str
+
+
+class PersonPropertyValueCreateRequest(BaseModel):
+    property_definition_id: str
+    value: Any
+    valid_from: Optional[str] = None
+    valid_until: Optional[str] = None
+    note: Optional[str] = None
+
+    @field_validator("valid_from", "valid_until")
+    @classmethod
+    def _validate_dates(cls, v: Optional[str]) -> Optional[str]:
+        return _validate_yyyy_mm_dd_or_none(v)
+
+    @model_validator(mode="after")
+    def _validate_dates_order(self) -> "PersonPropertyValueCreateRequest":
+        if self.valid_from and self.valid_until:
+            s_date = datetime.strptime(self.valid_from, "%Y-%m-%d")
+            e_date = datetime.strptime(self.valid_until, "%Y-%m-%d")
+            if s_date > e_date:
+                raise ValueError("valid_from must be less than or equal to valid_until")
+        return self
+
+
+class PersonPropertyValueUpdateRequest(BaseModel):
+    value: Optional[Any] = None
+    valid_from: Optional[str] = None
+    valid_until: Optional[str] = None
+    note: Optional[str] = None
+
+    @field_validator("valid_from", "valid_until")
+    @classmethod
+    def _validate_dates(cls, v: Optional[str]) -> Optional[str]:
+        return _validate_yyyy_mm_dd_or_none(v)
+
+    @model_validator(mode="after")
+    def _validate_dates_order(self) -> "PersonPropertyValueUpdateRequest":
+        if self.valid_from and self.valid_until:
+            s_date = datetime.strptime(self.valid_from, "%Y-%m-%d")
+            e_date = datetime.strptime(self.valid_until, "%Y-%m-%d")
+            if s_date > e_date:
+                raise ValueError("valid_from must be less than or equal to valid_until")
+        return self
+
+
+class PersonPropertyDefinitionDeleteResponse(BaseModel):
+    success: bool
+    deleted_property_definition_id: str
+    deleted_values_count: int
+    deleted_options_count: int
+
+
+class PersonPropertyValueDeleteResponse(BaseModel):
+    success: bool
+    deleted_property_value_id: str

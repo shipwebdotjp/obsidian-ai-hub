@@ -165,6 +165,82 @@ export default function VaultReportTab({
               </div>
             )}
           </div>
+
+          {/* 7. Vault Property Sync Report */}
+          {vaultReport.property_report && (
+            <>
+              {/* Summary Counts if Synced */}
+              {vaultReport.synced && (
+                <div className="pt-4 space-y-2">
+                  <h3 className="text-xs font-bold text-slate-800 flex items-center gap-1">
+                    <span>📊</span> 属性同期サマリ
+                  </h3>
+                  <div className="grid grid-cols-2 gap-3 text-xs">
+                    <div className="bg-emerald-50 border border-emerald-100 p-2.5 rounded text-emerald-900">
+                      <div className="text-[10px] text-emerald-700">正常置換した属性</div>
+                      <div className="font-bold text-sm mt-0.5">
+                        {vaultReport.property_report.replaced_properties_count}件
+                        <span className="text-xs font-normal text-emerald-700 ml-1">
+                          ({vaultReport.property_report.replaced_values_count}値)
+                        </span>
+                      </div>
+                    </div>
+                    <div className="bg-slate-50 border border-slate-200 p-2.5 rounded text-slate-800">
+                      <div className="text-[10px] text-slate-500">欠落により削除した属性</div>
+                      <div className="font-bold text-sm mt-0.5">
+                        {vaultReport.property_report.deleted_properties_count}件
+                        <span className="text-xs font-normal text-slate-500 ml-1">
+                          ({vaultReport.property_report.deleted_values_count}値)
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Invalid Properties */}
+              <div className="pt-4 space-y-2.5">
+                <h3 className="text-xs font-bold text-orange-800 flex items-center gap-1">
+                  <span>⚠️</span> 保留した不正なVault属性 ({vaultReport.property_report.invalid_properties.length})
+                </h3>
+                <p className="text-[10px] text-slate-500">※ 型不一致、未知選択肢、キー重複等の不備がある属性は、既存の投影値を保護するため更新を保留しました。</p>
+                {vaultReport.property_report.invalid_properties.length === 0 ? (
+                  <p className="text-xs text-slate-400">不正なVault属性はありません。</p>
+                ) : (
+                  <div className="space-y-2">
+                    {vaultReport.property_report.invalid_properties.map((ip, i) => (
+                      <div key={i} className="bg-orange-50 border border-orange-100 text-orange-900 text-xs p-2.5 rounded space-y-1 font-mono">
+                        <div><strong>対象人物:</strong> {ip.person_name} ({ip.person_id})</div>
+                        <div><strong>属性:</strong> {ip.property_display_name} (<code>{ip.property_key}</code>)</div>
+                        <div className="text-orange-800"><strong>原因:</strong> {ip.reason}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Skipped Property Merges */}
+              <div className="pt-4 space-y-2.5">
+                <h3 className="text-xs font-bold text-orange-800 flex items-center gap-1">
+                  <span>⚠️</span> 属性競合によりスキップした自動人物統合 ({vaultReport.property_report.skipped_property_merges.length})
+                </h3>
+                <p className="text-[10px] text-slate-500">※ 自動統合により単数属性の期間重複が発生するため、該当人物の自動統合をスキップしました。</p>
+                {vaultReport.property_report.skipped_property_merges.length === 0 ? (
+                  <p className="text-xs text-slate-400">属性競合による自動統合スキップはありません。</p>
+                ) : (
+                  <div className="space-y-2">
+                    {vaultReport.property_report.skipped_property_merges.map((spm, i) => (
+                      <div key={i} className="bg-orange-50 border border-orange-100 text-orange-900 text-xs p-2.5 rounded space-y-1 font-mono">
+                        <div><strong>統合元:</strong> {spm.from_person_name} ({spm.from_person_id}) &rarr; <strong>統合先:</strong> {spm.to_person_name} ({spm.to_person_id})</div>
+                        <div><strong>競合属性:</strong> {spm.property_display_name} (<code>{spm.property_key}</code>)</div>
+                        <div className="text-orange-800"><strong>理由:</strong> {spm.reason}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
         </div>
       )}
     </div>
