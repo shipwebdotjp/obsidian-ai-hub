@@ -4,6 +4,11 @@ from typing import Any, Optional
 from obsidian_ai_hub.database import get_db_connection
 from obsidian_ai_hub.people_sync.sync import merge_display_orders
 from obsidian_ai_hub.utils.people_loader import load_people_notes_with_report
+from obsidian_ai_hub.web.services.person_properties import (
+    PropertyConflictError,
+    preview_person_property_merge,
+    transfer_person_properties_on_merge,
+)
 from obsidian_ai_hub.web.services.person_relations import (
     SelfRelationError,
     preview_person_relation_merge,
@@ -15,6 +20,14 @@ class SelfRelationConflictError(ValueError):
     def __init__(
         self,
         message="統合により自己関係が発生するため実行できません。",
+    ):
+        super().__init__(message)
+
+
+class PropertyConflictConflictError(ValueError):
+    def __init__(
+        self,
+        message="単数属性の期間競合があるため統合を実行できません。",
     ):
         super().__init__(message)
 
@@ -305,11 +318,17 @@ def verify_people_merge(
     # 7. Build Person Relations Preview
     rel_preview = preview_person_relation_merge(cursor, from_person_id, to_person_id)
 
+    # 8. Build Person Properties Preview
+    prop_preview = preview_person_property_merge(cursor, from_person_id, to_person_id)
+
     allowed = True
     reason = "統合可能です。"
     if rel_preview["self_relation_conflicts_count"] > 0:
         allowed = False
         reason = "統合により自己関係が発生するため実行できません。"
+    elif prop_preview["property_conflicts_count"] > 0:
+        allowed = False
+        reason = f"属性の期間・単数制約の競合があるため統合できません（競合件数: {prop_preview['property_conflicts_count']}）。"
 
     return {
         "allowed": allowed,
@@ -321,9 +340,13 @@ def verify_people_merge(
         "transferred_relations_count": rel_preview["transferred_relations_count"],
         "merged_relations_count": rel_preview["merged_relations_count"],
         "self_relation_conflicts_count": rel_preview["self_relation_conflicts_count"],
+        "transferred_properties_count": prop_preview["transferred_properties_count"],
+        "merged_properties_count": prop_preview["merged_properties_count"],
+        "property_conflicts_count": prop_preview["property_conflicts_count"],
         "alias_transfers": alias_transfers,
         "merged_summaries": merged_summaries,
         "relation_impacts": rel_preview["relation_impacts"],
+        "property_impacts": prop_preview["property_impacts"],
     }
 
 
@@ -359,6 +382,12 @@ def merge_people(from_person_id: str, to_person_id: str) -> bool:
                 transfer_person_relations_on_merge(cursor, from_person_id, to_person_id)
             except SelfRelationError as e:
                 raise SelfRelationConflictError() from e
+
+            # 1c. Transfer person properties (will re-verify conflicts in tx)
+            try:
+                transfer_person_properties_on_merge(cursor, from_person_id, to_person_id)
+            except PropertyConflictError as e:
+                raise PropertyConflictConflictError() from e
 
             # 2. Migrate summary links
             cursor.execute(

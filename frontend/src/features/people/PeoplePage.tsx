@@ -8,7 +8,22 @@ import {
   DuplicatesResponse,
   SyncPeopleResponse,
   PeopleMergePreviewResponse,
-  PeopleError
+  PeopleError,
+  PersonRelationType,
+  PersonRelation,
+  RelationStatus,
+  PersonRelationTypeCreateRequest,
+  PersonRelationTypeUpdateRequest,
+  PersonRelationCreateRequest,
+  PersonRelationUpdateRequest,
+  PersonRelationEvidenceCreateRequest,
+  PersonRelationEvidenceUpdateRequest,
+  PersonPropertyDefinition,
+  PersonPropertyDefinitionCreateRequest,
+  PersonPropertyDefinitionUpdateRequest,
+  PersonPropertyValue,
+  PersonPropertyValueCreateRequest,
+  PersonPropertyValueUpdateRequest,
 } from "./types";
 import * as peopleApi from "./peopleApi";
 
@@ -19,22 +34,11 @@ import VaultReportTab from "./VaultReportTab";
 import MergePreviewDialog from "./MergePreviewDialog";
 import DeleteAliasDialog from "./DeleteAliasDialog";
 import DeletePersonDialog from "./DeletePersonDialog";
-
-import {
-  PersonRelationType,
-  PersonRelation,
-  RelationStatus,
-  PersonRelationTypeCreateRequest,
-  PersonRelationTypeUpdateRequest,
-  PersonRelationCreateRequest,
-  PersonRelationUpdateRequest,
-  PersonRelationEvidenceCreateRequest,
-  PersonRelationEvidenceUpdateRequest
-} from "./types";
 import RelationTypesTab from "./RelationTypesTab";
 import RelationFormModal from "./RelationFormModal";
+import PropertyDefinitionsTab from "./PropertyDefinitionsTab";
 
-type Tab = "candidates" | "rejected_candidates" | "list" | "relation_types" | "duplicates" | "report";
+type Tab = "candidates" | "rejected_candidates" | "list" | "property_definitions" | "relation_types" | "duplicates" | "report";
 
 interface TabDefinition {
   value: Tab;
@@ -44,7 +48,8 @@ interface TabDefinition {
     rejectedCandidatesCount: number,
     peopleCount: number,
     duplicatesCount: number,
-    typesCount: number
+    typesCount: number,
+    defsCount: number
   ) => number | string;
 }
 
@@ -63,6 +68,11 @@ const TABS_CONFIG: TabDefinition[] = [
     value: "list",
     label: "人物一覧",
     getCount: (_, __, people) => people,
+  },
+  {
+    value: "property_definitions",
+    label: "属性定義",
+    getCount: (_, __, ___, ____, _____, defs) => defs,
   },
   {
     value: "relation_types",
@@ -95,9 +105,11 @@ export default function PeoplePage() {
   const [duplicates, setDuplicates] = useState<DuplicatesResponse | null>(null);
   const [vaultReport, setVaultReport] = useState<SyncPeopleResponse | null>(null);
   const [relationTypes, setRelationTypes] = useState<PersonRelationType[]>([]);
+  const [propertyDefinitions, setPropertyDefinitions] = useState<PersonPropertyDefinition[]>([]);
 
-  // Person relations state
+  // Person relations & properties state
   const [personRelations, setPersonRelations] = useState<PersonRelation[]>([]);
+  const [personProperties, setPersonProperties] = useState<PersonPropertyValue[]>([]);
   const [relationStatusFilter, setRelationStatusFilter] = useState<RelationStatus | "all">("all");
   const [showRelationModal, setShowRelationModal] = useState(false);
   const [editingRelation, setEditingRelation] = useState<PersonRelation | null>(null);
@@ -186,13 +198,14 @@ export default function PeoplePage() {
       setSuccessMessage(null);
     }
     try {
-      const [candsData, rejectedCandsData, peopleData, dupsData, reportData, typesData] = await Promise.all([
+      const [candsData, rejectedCandsData, peopleData, dupsData, reportData, typesData, defsData] = await Promise.all([
         peopleApi.fetchCandidates("unresolved"),
         peopleApi.fetchCandidates("rejected"),
         peopleApi.fetchPeople(),
         peopleApi.fetchDuplicates(),
         peopleApi.fetchVaultReport(),
         peopleApi.fetchPersonRelationTypes(),
+        peopleApi.fetchPropertyDefinitions(),
       ]);
       setCandidates(candsData);
       setRejectedCandidates(rejectedCandsData);
@@ -200,6 +213,7 @@ export default function PeoplePage() {
       setDuplicates(dupsData);
       setVaultReport(reportData);
       setRelationTypes(typesData);
+      setPropertyDefinitions(defsData);
       return true;
     } catch (e) {
       setError("データの読み込みに失敗しました");
@@ -209,13 +223,6 @@ export default function PeoplePage() {
     }
   };
 
-  // Always fetch the full relation list; status filtering is done client-side
-  // in PersonRelationsSection so counts stay consistent.
-  // The request id guards against rapid person switching: a stale fetch
-  // resolving after a newer one must not overwrite the current list.
-  // Returns null on failure AND when superseded (both already surfaced or
-  // moot), so callers can skip their success messages in those cases.
-  // A legitimately empty list is `[]`, never null.
   const relationsRequestRef = useRef(0);
   const loadPersonRelations = async (personId: string): Promise<PersonRelation[] | null> => {
     const reqId = ++relationsRequestRef.current;
@@ -231,9 +238,15 @@ export default function PeoplePage() {
     }
   };
 
-  // Mirrors the currently selected person for staleness guards: detail
-  // fetches resolving after a person switch must not overwrite the new
-  // selection (same race as the relation list above).
+  const loadPersonProperties = async (personId: string) => {
+    try {
+      const data = await peopleApi.fetchPersonProperties(personId);
+      setPersonProperties(data);
+    } catch {
+      setPersonProperties([]);
+    }
+  };
+
   const selectedPersonIdRef = useRef<string | null>(null);
 
   const handleRejectCandidate = async (candId: string) => {
@@ -310,9 +323,8 @@ export default function PeoplePage() {
     setMergeGuidance(null);
     setEditError(null);
     setEditSuccess(null);
-    // Clear the previous person's relations immediately so stale data
-    // is never shown while the new person's data loads.
     setPersonRelations([]);
+    setPersonProperties([]);
     selectedPersonIdRef.current = p.person_id;
     try {
       const data = await peopleApi.fetchPersonDetail(p.person_id);
@@ -321,7 +333,10 @@ export default function PeoplePage() {
       setMobileDetailOpen(true);
       setEditDisplayName(data.display_name);
       setEditAliasesText((data.aliases || []).map((al) => al.display_name).join("\n"));
-      await loadPersonRelations(p.person_id);
+      await Promise.all([
+        loadPersonRelations(p.person_id),
+        loadPersonProperties(p.person_id),
+      ]);
     } catch (e) {
       if (selectedPersonIdRef.current !== p.person_id) return;
       setError("人物の詳細の取得に失敗しました");
@@ -330,6 +345,53 @@ export default function PeoplePage() {
 
   const handleRelationStatusFilterChange = (status: RelationStatus | "all") => {
     setRelationStatusFilter(status);
+  };
+
+  const handleCreatePropertyDefinition = async (req: PersonPropertyDefinitionCreateRequest) => {
+    await peopleApi.createPropertyDefinition(req);
+    await loadAllData(false);
+    setSuccessMessage(`属性定義「${req.display_name}」を作成しました。`);
+  };
+
+  const handleUpdatePropertyDefinition = async (
+    propertyDefinitionId: string,
+    req: PersonPropertyDefinitionUpdateRequest
+  ) => {
+    const updated = await peopleApi.updatePropertyDefinition(propertyDefinitionId, req);
+    await loadAllData(false);
+    setSuccessMessage(`属性定義「${updated.display_name}」を更新しました。`);
+  };
+
+  const handleDeletePropertyDefinition = async (propertyDefinitionId: string) => {
+    const res = await peopleApi.deletePropertyDefinition(propertyDefinitionId);
+    await loadAllData(false);
+    setSuccessMessage(
+      `属性定義を削除しました。（削除された属性値数: ${res.deleted_values_count}件）`
+    );
+  };
+
+  const handleCreatePersonProperty = async (req: PersonPropertyValueCreateRequest) => {
+    if (!selectedPerson) return;
+    await peopleApi.createPersonPropertyValue(selectedPerson.person_id, req);
+    await loadPersonProperties(selectedPerson.person_id);
+    setSuccessMessage("属性値を追加しました。");
+  };
+
+  const handleUpdatePersonProperty = async (
+    propertyValueId: string,
+    req: PersonPropertyValueUpdateRequest
+  ) => {
+    if (!selectedPerson) return;
+    await peopleApi.updatePersonPropertyValue(selectedPerson.person_id, propertyValueId, req);
+    await loadPersonProperties(selectedPerson.person_id);
+    setSuccessMessage("属性値を更新しました。");
+  };
+
+  const handleDeletePersonProperty = async (propertyValueId: string) => {
+    if (!selectedPerson) return;
+    await peopleApi.deletePersonPropertyValue(selectedPerson.person_id, propertyValueId);
+    await loadPersonProperties(selectedPerson.person_id);
+    setSuccessMessage("属性値を削除しました。");
   };
 
   const handleCreateRelationType = async (req: PersonRelationTypeCreateRequest) => {
@@ -350,8 +412,6 @@ export default function PeoplePage() {
     if (!selectedPerson) return;
     const personId = selectedPerson.person_id;
     const res = await peopleApi.createPersonRelation(personId, req);
-    // Set the success message only after the reload succeeds so a reload
-    // failure never leaves contradictory success + error banners.
     const successMsg =
       res.action === "merged_into_existing"
         ? "既存の同一人物間関係が存在するため、内容および根拠を重複統合しました。"
@@ -746,7 +806,14 @@ export default function PeoplePage() {
         {/* Dynamic Tab Buttons Render */}
         <div className="flex shrink-0 space-x-1 overflow-x-auto whitespace-nowrap border-b border-slate-200">
           {TABS_CONFIG.map((tab) => {
-            const count = tab.getCount(candidates.length, rejectedCandidates.length, people.length, duplicatesTotalCount, relationTypes.length);
+            const count = tab.getCount(
+              candidates.length,
+              rejectedCandidates.length,
+              people.length,
+              duplicatesTotalCount,
+              relationTypes.length,
+              propertyDefinitions.length
+            );
             const countSuffix = count !== "" ? ` (${count})` : "";
             const isTabActive = activeTab === tab.value;
             return (
@@ -766,6 +833,19 @@ export default function PeoplePage() {
         </div>
 
         <div className="min-h-0 flex-1 flex flex-col gap-4 overflow-hidden lg:flex-row">
+          {activeTab === "property_definitions" && (
+            <div className="w-full overflow-y-auto rounded-lg border border-slate-200 bg-white p-6">
+              <PropertyDefinitionsTab
+                definitions={propertyDefinitions}
+                loading={loading}
+                error={error}
+                onCreateDefinition={handleCreatePropertyDefinition}
+                onUpdateDefinition={handleUpdatePropertyDefinition}
+                onDeleteDefinition={handleDeletePropertyDefinition}
+              />
+            </div>
+          )}
+
           {activeTab === "relation_types" && (
             <div className="w-full overflow-y-auto rounded-lg border border-slate-200 bg-white p-6">
               <RelationTypesTab
@@ -871,6 +951,11 @@ export default function PeoplePage() {
                 setShowRelationModal(true);
               }}
               onDeleteRelation={handleDeleteRelation}
+              personProperties={personProperties}
+              propertyDefinitions={propertyDefinitions}
+              onCreateProperty={handleCreatePersonProperty}
+              onUpdateProperty={handleUpdatePersonProperty}
+              onDeleteProperty={handleDeletePersonProperty}
             />
           )}
 

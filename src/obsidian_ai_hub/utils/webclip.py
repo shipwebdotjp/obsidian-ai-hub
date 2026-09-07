@@ -449,9 +449,9 @@ def process_single_webclip(
     # Fall back to the extracted title (or URL-derived title) when missing.
     filename_title = normalized.get("file_title") or title
     if existing_file:
-        # Keep the existing path to preserve Obsidian links.
-        # Metadata/body are updated, but no rename or category move occurs.
-        target_path = existing_file
+        target_path = get_unique_webclip_path(category_folder, filename_title, exclude_path=existing_file)
+        if target_path.resolve() != existing_file.resolve():
+            existing_file.unlink(missing_ok=True)
     else:
         target_path = get_unique_webclip_path(category_folder, filename_title)
 

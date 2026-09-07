@@ -16,11 +16,20 @@ import {
   PersonRelationUpdateRequest,
   PersonRelationEvidenceCreateRequest,
   PersonRelationEvidenceUpdateRequest,
-  RelationDuplicateMergeResponse
+  RelationDuplicateMergeResponse,
+  PersonPropertyDefinition,
+  PersonPropertyDefinitionCreateRequest,
+  PersonPropertyDefinitionUpdateRequest,
+  PersonPropertyValue,
+  PersonPropertyValueCreateRequest,
+  PersonPropertyValueUpdateRequest,
+  PersonPropertyDefinitionDeleteResponse,
+  PersonPropertyValueDeleteResponse
 } from "./types";
 
 const PEOPLE_API = "/api/v1/people";
 const RELATION_TYPES_API = "/api/v1/person-relation-types";
+const PROPERTY_DEFINITIONS_API = "/api/v1/person-property-definitions";
 const RELATIONS_API = "/api/v1/person-relations";
 const EVIDENCE_API = "/api/v1/person-relation-evidence";
 
@@ -187,4 +196,70 @@ export async function updateRelationEvidence(
 
 export async function deleteRelationEvidence(evidenceId: string): Promise<void> {
   await apiDelete(`${EVIDENCE_API}/${encodeURIComponent(evidenceId)}`);
+}
+
+export async function fetchPropertyDefinitions(): Promise<PersonPropertyDefinition[]> {
+  return apiGet<PersonPropertyDefinition[]>(PROPERTY_DEFINITIONS_API);
+}
+
+export async function createPropertyDefinition(
+  req: PersonPropertyDefinitionCreateRequest
+): Promise<PersonPropertyDefinition> {
+  return apiPost<PersonPropertyDefinition>(PROPERTY_DEFINITIONS_API, req);
+}
+
+export async function updatePropertyDefinition(
+  propertyDefinitionId: string,
+  req: PersonPropertyDefinitionUpdateRequest
+): Promise<PersonPropertyDefinition> {
+  return apiPatch<PersonPropertyDefinition>(
+    `${PROPERTY_DEFINITIONS_API}/${encodeURIComponent(propertyDefinitionId)}`,
+    req
+  );
+}
+
+export async function deletePropertyDefinition(
+  propertyDefinitionId: string
+): Promise<PersonPropertyDefinitionDeleteResponse> {
+  return apiDelete<PersonPropertyDefinitionDeleteResponse>(
+    `${PROPERTY_DEFINITIONS_API}/${encodeURIComponent(propertyDefinitionId)}`
+  );
+}
+
+export async function fetchPersonProperties(
+  personId: string
+): Promise<PersonPropertyValue[]> {
+  return apiGet<PersonPropertyValue[]>(
+    `${PEOPLE_API}/${encodeURIComponent(personId)}/properties`
+  );
+}
+
+export async function createPersonPropertyValue(
+  personId: string,
+  req: PersonPropertyValueCreateRequest
+): Promise<PersonPropertyValue> {
+  return apiPost<PersonPropertyValue>(
+    `${PEOPLE_API}/${encodeURIComponent(personId)}/properties`,
+    req
+  );
+}
+
+export async function updatePersonPropertyValue(
+  personId: string,
+  propertyValueId: string,
+  req: PersonPropertyValueUpdateRequest
+): Promise<PersonPropertyValue> {
+  return apiPatch<PersonPropertyValue>(
+    `${PEOPLE_API}/${encodeURIComponent(personId)}/properties/${encodeURIComponent(propertyValueId)}`,
+    req
+  );
+}
+
+export async function deletePersonPropertyValue(
+  personId: string,
+  propertyValueId: string
+): Promise<PersonPropertyValueDeleteResponse> {
+  return apiDelete<PersonPropertyValueDeleteResponse>(
+    `${PEOPLE_API}/${encodeURIComponent(personId)}/properties/${encodeURIComponent(propertyValueId)}`
+  );
 }

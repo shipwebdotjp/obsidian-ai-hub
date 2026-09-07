@@ -277,6 +277,11 @@ def merge_people(
             status_code=409,
             detail={"message": str(e), "conflict_type": "self_relation"},
         ) from e
+    except service.PropertyConflictConflictError as e:
+        raise HTTPException(
+            status_code=409,
+            detail={"message": str(e), "conflict_type": "property_conflict"},
+        ) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

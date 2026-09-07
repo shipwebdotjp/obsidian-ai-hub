@@ -78,12 +78,29 @@ from obsidian_ai_hub.web.services.people_candidates import (
     resolve_person_candidate,
 )
 from obsidian_ai_hub.web.services.people_merge import (
+    PropertyConflictConflictError,
     SelfRelationConflictError,
     consolidate_summary_links,
     get_duplicate_candidates,
     merge_people,
     preview_people_merge,
     verify_people_merge,
+)
+from obsidian_ai_hub.web.services.person_properties import (
+    InvalidValueError,
+    KeyConflictError,
+    OptionInUseError,
+    PropertyConflictError,
+    SingleCardinalityOverlapError,
+    VaultSourceReadOnlyError,
+    create_person_property_value,
+    create_property_definition,
+    delete_person_property_value,
+    delete_property_definition,
+    list_person_properties,
+    list_property_definitions,
+    update_person_property_value,
+    update_property_definition,
 )
 from obsidian_ai_hub.web.services.people_sync import (
     get_vault_report_dynamic,
