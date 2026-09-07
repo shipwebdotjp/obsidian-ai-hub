@@ -340,3 +340,32 @@ UIでの確定は人による判断済みの結果であり、後から入力さ
 4. **専用監査ログ・アクセス制御を見送る理由**:
    - 初期版（v4）においては属性単位・エージェント単位の複雑なアクセス制御や専用監査テーブルの導入を見送り、既存の agent run ツール呼出履歴をそのまま監査証跡として活用する。
    - 将来的な属性単位制限やアクセス制御の必要性が生じた段階で、今回のデータモデルの上に先行設計なしで制御層を重ねる。
+
+## 人物間リレーション v4: people_get への直接リレーション公開と境界設計
+
+| 項目 | 内容 |
+|------|------|
+| 決定日 | 2026-09-08 |
+| カテゴリ | 人物管理・AIツール連携 |
+| 決定内容 | `people_get` ツールレスポンスへ直接接続する全リレーション（`related_people` 配列）を無制限で公開する決定を記録する。 |
+
+### 結論に至った経緯と決定事項
+
+1. **`people_get` への直接リレーション公開**:
+   - `people_get` を有効化した全エージェントに対し、対象人物に直接接続する全リレーションを `related_people` 配列として公開する。
+   - ステータス（active / ended / upcoming / undated）を問わず全直接関係レコードを返す。同一相手・同一型であっても期間が異なるレコードは、期間情報付きで別要素として返却する。
+   - 件数制限や専用監査ログは設けず、既存の Agent Run ツール実行履歴の文字数切詰め（ライブ表示2,000文字、DB永続化20,000文字）を利用する。
+
+2. **AI用最小投影データ構造と制限事項**:
+   - 各要素は `{person_id, display_name, relation, relation_type_slug, endpoint_role, started_on, ended_on}` の7項目のみを返す。
+   - 対象人物の視点に応じ、`subject` の場合は `forward_label`、`object` の場合は `reverse_label` を `relation` に設定する。
+   - 関係内部 ID（`relation_id`）、関係タイプ ID（`relation_type_id`）、説明（`description`）、メモ（`note`）、ステータス（`status`）、根拠（`evidence`）、作成更新日時は一切非公開とする。
+   - 多段探索（2 hop 以上のグラフ辿り）は行わない。ソート順は `created_at` 降順、同時刻は `relation_id` 昇順とする。関係がなければ `related_people: []` を返す。
+
+3. **既存システム・Web API契約の保護**:
+   - 変更はエージェント用 `people_get` ツールのレスポンスのみに局所化し、Web HTTP API (`GET /api/v1/people/{person_id}`)、`get_person_detail` サービス関数、および `PersonDetail` DTO スキーマは一切変更しない。
+   - `web/services/person_relations.py` に AI 用最小投影関数 (`get_person_relations_for_ai`) を追加し、`agents/registry.py` 内の `people_get` はそれを呼び出してレスポンスに付加する。
+   - 新しい relation 専用 AI ツールはカタログへ追加せず、`people_get` のカタログ説明および docstring を更新する。
+
+4. **将来の拡張方針**:
+   - 多段探索やアクセス制御、専用監査ログは未設計の後続項目とし、将来の必要性に応じて段階的に導入する。

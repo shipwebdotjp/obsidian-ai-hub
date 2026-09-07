@@ -239,11 +239,53 @@ def test_people_get_with_vault_note():
     assert "aliases" in res
     assert "summaries" in res
     assert "relation_counts" in res
+    assert "related_people" in res
     assert len(res["summaries"]) >= 1
     # vault_note enrichment
     assert "vault_note" in res
     assert res["vault_note"]["relative_path"].endswith("yamada.md")
     assert "山田太郎さんについてのメモ" in res["vault_note"]["content"]
+
+
+def test_people_get_includes_related_people():
+    from obsidian_ai_hub.database import get_db_connection
+    from obsidian_ai_hub.web.services.person_relations import create_person_relation_in_tx
+
+    ids = _seed_people_for_registry()
+    taro_id = ids["山田太郎"]
+    sato_id = ids["佐藤花子"]
+
+    # Create relation: 山田太郎 (subject) -> 佐藤花子 (object) (parent-child)
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        create_person_relation_in_tx(
+            cursor,
+            taro_id,
+            sato_id,
+            "rlt_builtin_parent-child",
+            started_on="2021-04-01",
+            note="Secret relation note",
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    res = json.loads(registry.people_get.invoke({"person_id": taro_id}))
+    assert "related_people" in res
+    assert len(res["related_people"]) == 1
+    rel = res["related_people"][0]
+    assert rel["person_id"] == sato_id
+    assert rel["display_name"] == "佐藤花子"
+    assert rel["relation"] == "親である"
+    assert rel["relation_type_slug"] == "parent-child"
+    assert rel["endpoint_role"] == "subject"
+    assert rel["started_on"] == "2021-04-01"
+    assert rel["ended_on"] is None
+
+    # Verify secret relation note and internal IDs are NOT leaked
+    res_str = json.dumps(res, ensure_ascii=False)
+    assert "Secret relation note" not in res_str
 
 
 def test_people_get_without_vault_id():

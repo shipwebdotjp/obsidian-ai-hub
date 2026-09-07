@@ -992,3 +992,68 @@ def delete_relation_evidence(evidence_id: str) -> None:
             cursor.execute("DELETE FROM person_relation_evidence WHERE evidence_id = ?", (evidence_id,))
     finally:
         conn.close()
+
+
+def get_person_relations_for_ai(person_id: str) -> list[dict[str, Any]]:
+    """Return minimal direct person relations projection for AI tools (people_get).
+
+    Returns list of dicts with 7 exact fields:
+    - person_id: partner person ID
+    - display_name: partner display name
+    - relation: label from target person's perspective (forward_label if subject, reverse_label if object)
+    - relation_type_slug: relation type slug
+    - endpoint_role: 'subject' or 'object' (target person's role)
+    - started_on: YYYY-MM-DD or None
+    - ended_on: YYYY-MM-DD or None
+
+    Sorted by created_at DESC, relation_id ASC.
+    Returns [] if no direct relations exist.
+    """
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT r.relation_id, r.subject_person_id, r.object_person_id,
+                   r.started_on, r.ended_on, r.created_at,
+                   t.slug AS relation_type_slug, t.forward_label, t.reverse_label,
+                   sp.display_name AS subject_display_name,
+                   op.display_name AS object_display_name
+            FROM person_relations r
+            JOIN person_relation_types t ON r.relation_type_id = t.relation_type_id
+            LEFT JOIN people sp ON r.subject_person_id = sp.person_id
+            LEFT JOIN people op ON r.object_person_id = op.person_id
+            WHERE r.subject_person_id = ? OR r.object_person_id = ?
+            ORDER BY r.created_at DESC, r.relation_id ASC
+            """,
+            (person_id, person_id),
+        )
+        rows = cursor.fetchall()
+        result = []
+        for r in rows:
+            is_subject = (r["subject_person_id"] == person_id)
+            if is_subject:
+                partner_id = r["object_person_id"]
+                partner_name = r["object_display_name"] or partner_id
+                relation_label = r["forward_label"]
+                endpoint_role = "subject"
+            else:
+                partner_id = r["subject_person_id"]
+                partner_name = r["subject_display_name"] or partner_id
+                relation_label = r["reverse_label"]
+                endpoint_role = "object"
+
+            result.append(
+                {
+                    "person_id": partner_id,
+                    "display_name": partner_name,
+                    "relation": relation_label,
+                    "relation_type_slug": r["relation_type_slug"],
+                    "endpoint_role": endpoint_role,
+                    "started_on": r["started_on"],
+                    "ended_on": r["ended_on"],
+                }
+            )
+        return result
+    finally:
+        conn.close()

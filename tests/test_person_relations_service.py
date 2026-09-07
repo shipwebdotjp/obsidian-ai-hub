@@ -8,6 +8,7 @@ from obsidian_ai_hub.web.services.person_relations import (
     compute_relation_status,
     create_person_relation_in_tx,
     get_person_relation_by_id_in_tx,
+    get_person_relations_for_ai,
     add_relation_evidence,
     update_person_relation,
     update_relation_evidence,
@@ -468,4 +469,109 @@ def test_empty_evidence_rejected_at_service_boundary(tmp_path, monkeypatch):
     # A single valid field is accepted through the same boundary.
     created = add_relation_evidence(rel["relation_id"], note="n")
     assert len(created["evidence"]) == 1
+    conn.close()
+
+
+def test_get_person_relations_for_ai(tmp_path, monkeypatch):
+    db_file = tmp_path / "test_ai_rel.db"
+    monkeypatch.setattr(config, "MEMORY_SQLITE_PATH", db_file)
+
+    conn = get_db_connection()
+    setup_test_people(conn)
+    cursor = conn.cursor()
+
+    # Create relations involving peo_1 (Alice), peo_2 (Bob), peo_3 (Charlie)
+    # 1. peo_1 -> peo_2 (directed parent-child: forward "親", reverse "子")
+    rel1, _ = create_person_relation_in_tx(
+        cursor,
+        "peo_1",
+        "peo_2",
+        "rlt_builtin_parent-child",
+        started_on="2020-01-01",
+        ended_on=None,
+        note="Secret note 1",
+        initial_evidence=[{"source_type": "manual", "quote": "Evidence 1"}],
+    )
+
+    # 2. peo_3 -> peo_1 (directed parent-child: peo_3 is parent of peo_1. From peo_1 perspective, peo_1 is object)
+    rel2, _ = create_person_relation_in_tx(
+        cursor,
+        "peo_3",
+        "peo_1",
+        "rlt_builtin_parent-child",
+        started_on="1990-05-10",
+        ended_on="2010-05-10",
+        note="Secret note 2",
+        initial_evidence=[{"source_type": "manual", "quote": "Evidence 2"}],
+    )
+
+    # 3. peo_1 <-> peo_2 (symmetric friend)
+    rel3, _ = create_person_relation_in_tx(
+        cursor,
+        "peo_1",
+        "peo_2",
+        "rlt_builtin_friend",
+        started_on=None,
+        ended_on=None,
+        note="Secret note 3",
+    )
+    conn.commit()
+
+    # Fetch relations for peo_1
+    ai_rels_1 = get_person_relations_for_ai("peo_1")
+    assert len(ai_rels_1) == 3
+
+    # Verify 7 fields exact match & strict non-leakage
+    allowed_keys = {
+        "person_id",
+        "display_name",
+        "relation",
+        "relation_type_slug",
+        "endpoint_role",
+        "started_on",
+        "ended_on",
+    }
+    forbidden_keys = [
+        "relation_id",
+        "relation_type_id",
+        "description",
+        "note",
+        "status",
+        "evidence",
+        "created_at",
+        "updated_at",
+    ]
+
+    for item in ai_rels_1:
+        assert set(item.keys()) == allowed_keys
+        for f_key in forbidden_keys:
+            assert f_key not in item
+
+    # Check peo_1 as subject in rel1 (peo_1 -> peo_2 parent-child)
+    item_rel1 = next(r for r in ai_rels_1 if r["person_id"] == "peo_2" and r["relation_type_slug"] == "parent-child")
+    assert item_rel1["display_name"] == "Bob"
+    assert item_rel1["relation"] == "親である"  # forward label for parent-child
+    assert item_rel1["endpoint_role"] == "subject"
+    assert item_rel1["started_on"] == "2020-01-01"
+    assert item_rel1["ended_on"] is None
+
+    # Check peo_1 as object in rel2 (peo_3 -> peo_1 parent-child)
+    item_rel2 = next(r for r in ai_rels_1 if r["person_id"] == "peo_3" and r["relation_type_slug"] == "parent-child")
+    assert item_rel2["display_name"] == "Charlie"
+    assert item_rel2["relation"] == "子である"  # reverse label for parent-child
+    assert item_rel2["endpoint_role"] == "object"
+    assert item_rel2["started_on"] == "1990-05-10"
+    assert item_rel2["ended_on"] == "2010-05-10"
+
+    # Fetch relations for peo_2 (Bob)
+    ai_rels_2 = get_person_relations_for_ai("peo_2")
+    assert len(ai_rels_2) == 2
+    item_rel1_bob = next(r for r in ai_rels_2 if r["person_id"] == "peo_1" and r["relation_type_slug"] == "parent-child")
+    assert item_rel1_bob["display_name"] == "Alice"
+    assert item_rel1_bob["relation"] == "子である"  # reverse label from object perspective
+    assert item_rel1_bob["endpoint_role"] == "object"
+
+    # Fetch relations for non-existent person or person with no relations
+    assert get_person_relations_for_ai("peo_nonexistent") == []
+
     conn.close()
