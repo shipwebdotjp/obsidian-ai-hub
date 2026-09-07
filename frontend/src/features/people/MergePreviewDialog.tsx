@@ -1,8 +1,10 @@
-import React, { forwardRef } from "react";
+import React, { forwardRef, useMemo } from "react";
 import { Person } from "../../api/types";
 import { PeopleMergePreviewResponse } from "./types";
+import PersonCombobox from "./PersonCombobox";
 
 interface MergePreviewDialogProps {
+  people?: Person[];
   mergeFromPerson: Person | null;
   mergeToPerson: Person | null;
   previewLoading: boolean;
@@ -11,11 +13,14 @@ interface MergePreviewDialogProps {
   loading: boolean;
   onCloseModal: () => void;
   onExecuteMerge: () => void;
+  onChangeMergeToPerson?: (person: Person | null) => void;
+  onRequestPreview?: () => void;
 }
 
 const MergePreviewDialog = forwardRef<HTMLDialogElement, MergePreviewDialogProps>(
   (
     {
+      people = [],
       mergeFromPerson,
       mergeToPerson,
       previewLoading,
@@ -24,9 +29,15 @@ const MergePreviewDialog = forwardRef<HTMLDialogElement, MergePreviewDialogProps
       loading,
       onCloseModal,
       onExecuteMerge,
+      onChangeMergeToPerson = () => {},
+      onRequestPreview = () => {},
     },
     ref
   ) => {
+    const availableToPeople = useMemo(
+      () => (people ?? []).filter((p) => p.person_id !== mergeFromPerson?.person_id),
+      [people, mergeFromPerson]
+    );
     return (
       <dialog
         ref={ref}
@@ -51,22 +62,49 @@ const MergePreviewDialog = forwardRef<HTMLDialogElement, MergePreviewDialogProps
 
           {/* Modal Body */}
           <div className="p-5 overflow-y-auto space-y-4 text-xs text-slate-700">
-            {/* Target info comparison */}
+            {/* Target info comparison & selection */}
             <div className="grid grid-cols-1 gap-4 border border-slate-100 rounded-lg p-3 bg-slate-50 sm:grid-cols-2">
               <div className="space-y-1">
                 <div className="text-[10px] uppercase font-bold text-slate-400">統合元（削除される人物）</div>
-                <div className="font-semibold text-slate-800 text-sm">{mergeFromPerson?.display_name}</div>
-                <div className="text-slate-500 text-[10px]">ID: {mergeFromPerson?.person_id}</div>
-                <div className="text-slate-500 text-[10px]">
-                  Vault ID: {mergeFromPerson?.vault_id ? <code className="bg-slate-200 px-1 rounded">{mergeFromPerson.vault_id}</code> : "未連携"}
-                </div>
+                <div className="font-semibold text-slate-800 text-sm">{mergeFromPerson?.display_name || "未選択"}</div>
+                {mergeFromPerson && (
+                  <>
+                    <div className="text-slate-500 text-[10px]">ID: {mergeFromPerson.person_id}</div>
+                    <div className="text-slate-500 text-[10px]">
+                      Vault ID: {mergeFromPerson.vault_id ? <code className="bg-slate-200 px-1 rounded">{mergeFromPerson.vault_id}</code> : "未連携"}
+                    </div>
+                  </>
+                )}
               </div>
-              <div className="space-y-1 border-t border-slate-200 pt-4 sm:border-l sm:border-t-0 sm:pl-4 sm:pt-0">
+              <div className="space-y-2 border-t border-slate-200 pt-4 sm:border-l sm:border-t-0 sm:pl-4 sm:pt-0">
                 <div className="text-[10px] uppercase font-bold text-slate-400">統合先（残す人物）</div>
-                <div className="font-semibold text-slate-800 text-sm">{mergeToPerson?.display_name}</div>
-                <div className="text-slate-500 text-[10px]">ID: {mergeToPerson?.person_id}</div>
-                <div className="text-slate-500 text-[10px]">
-                  Vault ID: {mergeToPerson?.vault_id ? <code className="bg-slate-200 px-1 rounded">{mergeToPerson.vault_id}</code> : "未連携"}
+                <PersonCombobox
+                  people={availableToPeople}
+                  value={mergeToPerson?.person_id ?? ""}
+                  onChange={(personId) => {
+                    const found = people.find((p) => p.person_id === personId) ?? null;
+                    onChangeMergeToPerson(found);
+                  }}
+                  disabled={loading || previewLoading}
+                  ariaLabel="統合先（残す人物）"
+                  placeholder="-- 統合先（残す）の人物を選択 --"
+                />
+                {mergeToPerson && (
+                  <div className="text-slate-500 text-[10px]">
+                    ID: {mergeToPerson.person_id} | Vault ID: {mergeToPerson.vault_id ? <code className="bg-slate-200 px-1 rounded">{mergeToPerson.vault_id}</code> : "未連携"}
+                  </div>
+                )}
+                <div className="pt-1 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={onRequestPreview}
+                    disabled={loading || previewLoading || !mergeToPerson}
+                    className={`rounded bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50 ${
+                      loading || previewLoading || !mergeToPerson ? "disabled:cursor-not-allowed" : "cursor-pointer"
+                    }`}
+                  >
+                    {previewLoading ? "検証中..." : "統合内容を確認"}
+                  </button>
                 </div>
               </div>
             </div>

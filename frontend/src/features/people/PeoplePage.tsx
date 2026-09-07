@@ -545,6 +545,47 @@ export default function PeoplePage() {
     }
   };
 
+  const handleOpenMergeModalFromList = (p: PersonDetail) => {
+    triggerRef.current = document.activeElement as HTMLElement;
+    setMergeFromPerson(p);
+    const preselected = mergeGuidance?.personId
+      ? people.find((item) => item.person_id === mergeGuidance.personId) ?? null
+      : null;
+    setMergeToPerson(preselected);
+    setPreviewData(null);
+    setMergeModalError(null);
+    setPreviewLoading(false);
+    setShowMergeModal(true);
+  };
+
+  const handleChangeMergeToPersonInModal = (target: Person | null) => {
+    setMergeToPerson(target);
+    setPreviewData(null);
+    setMergeModalError(null);
+  };
+
+  const handleRequestMergePreview = async () => {
+    if (!mergeFromPerson || !mergeToPerson) return;
+    const reqId = ++requestCounterRef.current;
+    setPreviewData(null);
+    setMergeModalError(null);
+    setPreviewLoading(true);
+    try {
+      const data = await peopleApi.getMergePreview(mergeFromPerson.person_id, mergeToPerson.person_id);
+      if (reqId === requestCounterRef.current) {
+        setPreviewData(data);
+      }
+    } catch (e: any) {
+      if (reqId === requestCounterRef.current) {
+        setMergeModalError(e.message || "マージプレビューの取得に失敗しました。");
+      }
+    } finally {
+      if (reqId === requestCounterRef.current) {
+        setPreviewLoading(false);
+      }
+    }
+  };
+
   const handleTriggerMergePreview = async (fromPerson: Person, toPerson: Person) => {
     triggerRef.current = document.activeElement as HTMLElement;
     const reqId = ++requestCounterRef.current;
@@ -811,6 +852,7 @@ export default function PeoplePage() {
                 setPersonToDelete(p);
                 setShowDeleteConfirm(true);
               }}
+              onTriggerMergeModal={handleOpenMergeModalFromList}
               onChangeMergeToPersonId={setMergeToPersonId}
               onTriggerMergePreview={handleTriggerMergePreview}
               onTriggerAliasDelete={(al) => {
@@ -853,6 +895,7 @@ export default function PeoplePage() {
         {/* Dialogs / Modals */}
         <MergePreviewDialog
           ref={dialogRef}
+          people={people}
           mergeFromPerson={mergeFromPerson}
           mergeToPerson={mergeToPerson}
           previewLoading={previewLoading}
@@ -861,6 +904,8 @@ export default function PeoplePage() {
           loading={loading}
           onCloseModal={handleCloseModal}
           onExecuteMerge={handleExecuteMerge}
+          onChangeMergeToPerson={handleChangeMergeToPersonInModal}
+          onRequestPreview={handleRequestMergePreview}
         />
 
         {showAliasDeleteConfirm && aliasToDelete && selectedPerson && (

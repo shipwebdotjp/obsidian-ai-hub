@@ -183,7 +183,7 @@ def seed_hitl_demo_data() -> None:
 
 
 def seed_people_demo_data() -> None:
-    """Seed an unlinked master and a candidate for the people-resolution E2E flow."""
+    """Seed unlinked masters and a candidate for the people-resolution E2E flow."""
     ensure_test_mode()
 
     from obsidian_ai_hub.summary import store as summary_store
@@ -197,10 +197,13 @@ def seed_people_demo_data() -> None:
             "period_type": "day",
             "period_key": "2026-08-01",
             "summary": "E2E unlinked master setup",
-            "people": [{"name": "鈴木健", "note": "マスター人物の作成"}],
+            "people": [
+                {"name": "鈴木健", "note": "マスター人物の作成"},
+                {"name": "佐藤花子", "note": "2人目のマスター人物作成"},
+            ],
         }
     )
-    master_candidate = next(
+    master_candidate1 = next(
         (
             candidate
             for candidate in list_person_candidates()
@@ -208,11 +211,25 @@ def seed_people_demo_data() -> None:
         ),
         None,
     )
-    if master_candidate is None:
+    if master_candidate1 is None:
         raise RuntimeError(
             "seed_people_demo_data: no unresolved candidate found for 鈴木健"
         )
-    promote_person_candidate(master_candidate["candidate_id"], "鈴木健")
+    promote_person_candidate(master_candidate1["candidate_id"], "鈴木健")
+
+    master_candidate2 = next(
+        (
+            candidate
+            for candidate in list_person_candidates()
+            if candidate["normalized_name"] == "佐藤花子"
+        ),
+        None,
+    )
+    if master_candidate2 is None:
+        raise RuntimeError(
+            "seed_people_demo_data: no unresolved candidate found for 佐藤花子"
+        )
+    promote_person_candidate(master_candidate2["candidate_id"], "佐藤花子")
 
     summary_store.upsert_summary(
         {

@@ -1,4 +1,5 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, test, expect, vi, beforeEach } from "vitest";
 
 beforeEach(() => {
@@ -447,6 +448,108 @@ describe("Person Relations UI Components", () => {
     expect(screen.getByText("統合阻害要因", { exact: false })).toBeInTheDocument();
     expect(screen.getByText("自己関係違反")).toBeInTheDocument();
     expect(screen.getByText("(期間未設定)")).toBeInTheDocument();
+  });
+
+  test("MergePreviewDialog requires selecting mergeToPerson and confirming preview before execution", async () => {
+    const user = userEvent.setup();
+    const onRequestPreview = vi.fn();
+    const onChangeMergeToPerson = vi.fn();
+    const onExecuteMerge = vi.fn();
+
+    const fromPerson = { person_id: "p1", display_name: "Alice Tanaka", normalized_name: "alice tanaka", vault_id: "vault-001", aliases: [], summary_count: 2 };
+    const toPerson = { person_id: "p2", display_name: "佐藤花子", normalized_name: "佐藤花子", vault_id: null, aliases: [], summary_count: 1 };
+    const peopleList = [fromPerson, toPerson];
+
+    // Initial state: mergeToPerson is null, previewData is null
+    const { rerender } = render(
+      <MergePreviewDialog
+        people={peopleList}
+        mergeFromPerson={fromPerson}
+        mergeToPerson={null}
+        previewLoading={false}
+        previewData={null}
+        mergeModalError={null}
+        loading={false}
+        onCloseModal={vi.fn()}
+        onExecuteMerge={onExecuteMerge}
+        onChangeMergeToPerson={onChangeMergeToPerson}
+        onRequestPreview={onRequestPreview}
+      />
+    );
+
+    // "安全に統合を実行する" button should be disabled when previewData is null
+    const executeBtn = screen.getByRole("button", { name: "安全に統合を実行する", hidden: true });
+    expect(executeBtn).toBeDisabled();
+
+    // "統合内容を確認" button is disabled when mergeToPerson is null
+    const confirmBtn = screen.getByRole("button", { name: "統合内容を確認", hidden: true });
+    expect(confirmBtn).toBeDisabled();
+
+    // Select toPerson in PersonCombobox
+    const comboboxInput = screen.getByRole("combobox", { name: "統合先（残す人物）", hidden: true });
+    await user.click(comboboxInput);
+    const option = await screen.findByText(/佐藤花子/);
+    await user.click(option);
+
+    expect(onChangeMergeToPerson).toHaveBeenCalledWith(toPerson);
+
+    // Rerender with mergeToPerson set
+    rerender(
+      <MergePreviewDialog
+        people={peopleList}
+        mergeFromPerson={fromPerson}
+        mergeToPerson={toPerson}
+        previewLoading={false}
+        previewData={null}
+        mergeModalError={null}
+        loading={false}
+        onCloseModal={vi.fn()}
+        onExecuteMerge={onExecuteMerge}
+        onChangeMergeToPerson={onChangeMergeToPerson}
+        onRequestPreview={onRequestPreview}
+      />
+    );
+
+    // Now "統合内容を確認" is enabled
+    const confirmBtnEnabled = screen.getByRole("button", { name: "統合内容を確認", hidden: true });
+    expect(confirmBtnEnabled).not.toBeDisabled();
+    await user.click(confirmBtnEnabled);
+
+    expect(onRequestPreview).toHaveBeenCalled();
+
+    // Rerender with allowed previewData
+    rerender(
+      <MergePreviewDialog
+        people={peopleList}
+        mergeFromPerson={fromPerson}
+        mergeToPerson={toPerson}
+        previewLoading={false}
+        previewData={{
+          allowed: true,
+          reason: null,
+          from_person: fromPerson,
+          to_person: toPerson,
+          transferred_summaries_count: 1,
+          transferred_aliases_count: 0,
+          transferred_relations_count: 0,
+          merged_relations_count: 0,
+          self_relation_conflicts_count: 0,
+          alias_transfers: [],
+          merged_summaries: [],
+          relation_impacts: [],
+        }}
+        mergeModalError={null}
+        loading={false}
+        onCloseModal={vi.fn()}
+        onExecuteMerge={onExecuteMerge}
+        onChangeMergeToPerson={onChangeMergeToPerson}
+        onRequestPreview={onRequestPreview}
+      />
+    );
+
+    // "安全に統合を実行する" button is now enabled
+    const executeBtnEnabled = screen.getByRole("button", { name: "安全に統合を実行する", hidden: true });
+    expect(executeBtnEnabled).not.toBeDisabled();
   });
 
   test("formatPeriodDate hides null, empty, and invalid dates", () => {
