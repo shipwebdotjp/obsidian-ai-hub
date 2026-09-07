@@ -60,7 +60,12 @@ def main():
         logger.info("Running rsync for backup")
         try:
             proc = subprocess.run(
-                cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True
+                cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+                errors="backslashreplace",
             )
         except FileNotFoundError:
             message = "rsync not found on PATH. Install rsync or use a different method."

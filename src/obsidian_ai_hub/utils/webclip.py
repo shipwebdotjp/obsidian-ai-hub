@@ -15,6 +15,45 @@ from obsidian_ai_hub.utils import config, extracter, llm_client, prompt, topics
 
 logger = logging.getLogger(__name__)
 
+MAX_WEBCLIP_FILENAME_BYTES = 120
+
+
+def _truncate_utf8_bytes(s: str, max_bytes: int) -> str:
+    """
+    Truncates a string so its UTF-8 encoding fits within max_bytes,
+    without splitting a multibyte character.
+    """
+    if max_bytes <= 0:
+        return ""
+    encoded = s.encode("utf-8")
+    if len(encoded) <= max_bytes:
+        return s
+    truncated = encoded[:max_bytes]
+    # Drop trailing incomplete multibyte sequence
+    while truncated:
+        try:
+            return truncated.decode("utf-8")
+        except UnicodeDecodeError:
+            truncated = truncated[:-1]
+    return ""
+
+
+def _build_webclip_filename(safe_title: str, serial: int | None = None) -> str:
+    """
+    Builds a filename (including extension and serial suffix) whose
+    UTF-8 byte length is at most MAX_WEBCLIP_FILENAME_BYTES.
+    """
+    suffix = "" if serial is None else f" {serial}"
+    ext = ".md"
+    overhead = len((suffix + ext).encode("utf-8"))
+    truncated_title = _truncate_utf8_bytes(safe_title, MAX_WEBCLIP_FILENAME_BYTES - overhead)
+    # Preserve clean_filename() guarantee of non-empty title
+    if not truncated_title:
+        truncated_title = _truncate_utf8_bytes(
+            "untitled", MAX_WEBCLIP_FILENAME_BYTES - overhead
+        ) or "untitled"
+    return f"{truncated_title}{suffix}{ext}"
+
 
 def clean_filename(title: str) -> str:
     """
@@ -153,6 +192,11 @@ def normalize_webclip_json(payload: dict) -> dict:
     kps = [str(k) for k in kps if k]
 
     summary = str(payload.get("summary") or "")
+    raw_file_title = payload.get("file_title")
+    if isinstance(raw_file_title, str):
+        file_title = raw_file_title.strip()
+    else:
+        file_title = ""
     return {
         "published_at": pub,
         "updated_at": upd,
@@ -161,6 +205,7 @@ def normalize_webclip_json(payload: dict) -> dict:
         "tags": tags,
         "summary": summary,
         "key_points": kps,
+        "file_title": file_title,
     }
 
 
@@ -208,12 +253,14 @@ def get_unique_webclip_path(
     Computes a unique filepath within config.WEBCLIP_PATH / category / title.md.
     If the file already exists (and is not exclude_path), appends serial number.
     e.g., 'title 2.md', 'title 3.md', etc.
+    The filename including extension and serial suffix is truncated to
+    MAX_WEBCLIP_FILENAME_BYTES UTF-8 bytes without splitting multibyte chars.
     """
     safe_title = clean_filename(title)
     base_dir = config.WEBCLIP_PATH / category
 
     # Check simple case first
-    target = base_dir / f"{safe_title}.md"
+    target = base_dir / _build_webclip_filename(safe_title)
     if not target.exists() or (
         exclude_path and target.resolve() == exclude_path.resolve()
     ):
@@ -222,7 +269,7 @@ def get_unique_webclip_path(
     # Try incrementing serial
     serial = 2
     while True:
-        target = base_dir / f"{safe_title} {serial}.md"
+        target = base_dir / _build_webclip_filename(safe_title, serial)
         if not target.exists() or (
             exclude_path and target.resolve() == exclude_path.resolve()
         ):
@@ -328,9 +375,10 @@ def process_single_webclip(
     - Resolves title (determines clean title).
     - Checks for duplicate source_url.
     - Runs LLM with JSON prompt on raw_content to extract structured metadata.
-    - Normalizes topics, category, dates, and lists.
+    - Normalizes topics, category, dates, lists, and file_title.
     - If LLM fails or content is missing, builds fallback structured metadata.
-    - Computes unique target path and moves/deletes old version if changed.
+    - New webclips use the LLM file_title for the filename; title stays in frontmatter.
+    - Re-clips of an existing source_url keep the existing path and only update content.
     - Saves webclip markdown file.
     - Returns the formatted daily note internal link string.
     """
@@ -397,10 +445,15 @@ def process_single_webclip(
         frontmatter.update(extra_frontmatter)
 
     category_folder = normalized["category"]
-    # Target Path determination (considering duplicate moving)
-    target_path = get_unique_webclip_path(
-        category_folder, title, exclude_path=existing_file
-    )
+    # New webclips use the LLM short title for the filename.
+    # Fall back to the extracted title (or URL-derived title) when missing.
+    filename_title = normalized.get("file_title") or title
+    if existing_file:
+        # Keep the existing path to preserve Obsidian links.
+        # Metadata/body are updated, but no rename or category move occurs.
+        target_path = existing_file
+    else:
+        target_path = get_unique_webclip_path(category_folder, filename_title)
 
     # Ensure output directory exists
     target_path.parent.mkdir(parents=True, exist_ok=True)
@@ -410,21 +463,17 @@ def process_single_webclip(
     target_path.write_text(md_content, encoding="utf-8")
     logger.info(f"Saved webclip to {target_path}")
 
-    # If duplicate exists, handle potential move/update
-    if existing_file:
-        if existing_file.resolve() != target_path.resolve():
-            # Old file had a different path, delete it
-            try:
-                existing_file.unlink()
-                logger.info(f"Deleted old webclip at {existing_file}")
-            except Exception:
-                logger.exception(f"Failed to delete old webclip {existing_file}")
-
     # 6. Generate Daily Note link format
     # - HH:MM [webclip] [[webclip/{主topic}/{タイトル}]]
-    # (Note: path in double brackets should be relative to vault root, but we use webclip/{category}/{actual_filename_without_md})
-    actual_filename = target_path.stem
+    # (Note: path in double brackets should be relative to vault root.)
+    # For re-clips the existing relative path is kept; for new clips it is
+    # webclip/{category}/{actual_filename_without_md}.
     webclip_rel_dir = config.WEBCLIP_DIR_NAME  # e.g. "webclip"
-    internal_link = f"{webclip_rel_dir}/{category_folder}/{actual_filename}"
+    try:
+        rel_path = target_path.relative_to(config.WEBCLIP_PATH).with_suffix("")
+        internal_link = f"{webclip_rel_dir}/{rel_path.as_posix()}"
+    except ValueError:
+        actual_filename = target_path.stem
+        internal_link = f"{webclip_rel_dir}/{category_folder}/{actual_filename}"
 
     return f"- {hour_str} [webclip] [[{internal_link}]]"

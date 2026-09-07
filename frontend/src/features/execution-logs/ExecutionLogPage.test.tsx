@@ -173,3 +173,78 @@ it("toggles mobile detail panel when multiple rows are clicked", async () => {
     expect(screen.getByText("← 一覧")).toBeInTheDocument();
   });
 });
+
+const listCalls = () =>
+  mockApiGet.mock.calls
+    .map((c) => c[0] as string)
+    .filter((p) => p.startsWith("/api/v1/execution-logs?"));
+
+it("shows a full-text search box", async () => {
+  render(<ExecutionLogPage />);
+
+  await waitFor(() => {
+    expect(screen.getByText("make_target")).toBeInTheDocument();
+  });
+  expect(screen.getByText("全文検索")).toBeInTheDocument();
+  expect(screen.queryByText("コマンド・モデル検索")).not.toBeInTheDocument();
+  expect(
+    screen.getByPlaceholderText("e.g. プロンプト本文、引数、エラー文言")
+  ).toBeInTheDocument();
+});
+
+it("sends q param and resets to the first page on input", async () => {
+  mockApiGet.mockImplementation((path: string) => {
+    if (path.includes("/task-states")) {
+      return Promise.resolve({ items: [] });
+    }
+    return Promise.resolve({ items: [sampleCommandItem], total: 120 });
+  });
+  render(<ExecutionLogPage />);
+
+  const input = await screen.findByPlaceholderText(
+    "e.g. プロンプト本文、引数、エラー文言"
+  );
+
+  await userEvent.click(screen.getByRole("button", { name: "次へ" }));
+  await waitFor(() => {
+    const calls = listCalls();
+    expect(calls.length).toBeGreaterThan(0);
+    expect(calls[calls.length - 1]).toContain("offset=50");
+  });
+
+  mockApiGet.mockClear();
+  await userEvent.type(input, "hello");
+
+  await waitFor(() => {
+    const calls = listCalls();
+    expect(calls.length).toBeGreaterThan(0);
+    const last = calls[calls.length - 1];
+    expect(last).toContain("q=hello");
+    expect(last).toContain("offset=0");
+  });
+  expect(screen.getByText("1 / 3")).toBeInTheDocument();
+});
+
+it("clear button removes the q param", async () => {
+  render(<ExecutionLogPage />);
+
+  const input = await screen.findByPlaceholderText(
+    "e.g. プロンプト本文、引数、エラー文言"
+  );
+  await userEvent.type(input, "hello");
+
+  await waitFor(() => {
+    const calls = listCalls();
+    expect(calls.length).toBeGreaterThan(0);
+    expect(calls[calls.length - 1]).toContain("q=hello");
+  });
+
+  mockApiGet.mockClear();
+  await userEvent.click(screen.getByRole("button", { name: "クリア" }));
+
+  await waitFor(() => {
+    const calls = listCalls();
+    expect(calls.length).toBeGreaterThan(0);
+    expect(calls[calls.length - 1]).not.toContain("q=");
+  });
+});

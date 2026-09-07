@@ -11,6 +11,7 @@ def list_execution_logs(
     to_date: Optional[str] = None,
     limit: int = 50,
     offset: int = 0,
+    q: Optional[str] = None,
 ) -> dict[str, Any]:
     from obsidian_ai_hub.utils import execution_logger
     items, total = execution_logger.list_execution_logs(
@@ -21,6 +22,7 @@ def list_execution_logs(
         to_date=to_date,
         limit=limit,
         offset=offset,
+        q=q,
     )
     return {"items": items, "total": total}
 

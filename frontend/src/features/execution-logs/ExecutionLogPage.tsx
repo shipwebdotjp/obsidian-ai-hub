@@ -97,7 +97,7 @@ export default function ExecutionLogPage() {
   // Filters state
   const [kind, setKind] = useState<string>("");
   const [status, setStatus] = useState<string>("");
-  const [command, setCommand] = useState<string>("");
+  const [q, setQ] = useState<string>("");
   const [fromDate, setFromDate] = useState<string>("");
   const [toDate, setToDate] = useState<string>("");
 
@@ -121,7 +121,7 @@ export default function ExecutionLogPage() {
       const sp = new URLSearchParams();
       if (kind) sp.set("kind", kind);
       if (status) sp.set("status", status);
-      if (command) sp.set("command", command);
+      if (q) sp.set("q", q);
       if (fromDate) sp.set("from", new Date(fromDate).toISOString());
       if (toDate) sp.set("to", new Date(toDate).toISOString());
       sp.set("limit", String(limit));
@@ -141,7 +141,7 @@ export default function ExecutionLogPage() {
 
   useEffect(() => {
     fetchLogs();
-  }, [kind, status, command, fromDate, toDate, page]);
+  }, [kind, status, q, fromDate, toDate, page]);
 
   const fetchTaskStates = useCallback(async () => {
     try {
@@ -328,13 +328,13 @@ export default function ExecutionLogPage() {
       <div className="shrink-0 bg-white border-b border-slate-200 px-6 py-3 flex flex-wrap gap-4 items-center">
         {/* Search */}
         <div className="flex flex-col min-w-[200px]">
-          <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1">コマンド・モデル検索</label>
+          <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1">全文検索</label>
           <input
             type="text"
-            placeholder="e.g. make_target, gpt-4"
-            value={command}
+            placeholder="e.g. プロンプト本文、引数、エラー文言"
+            value={q}
             onChange={(e) => {
-              setCommand(e.target.value);
+              setQ(e.target.value);
               setPage(1);
             }}
             className="rounded border border-slate-300 px-3 py-1 text-sm focus:border-slate-500 focus:outline-none"
@@ -405,13 +405,13 @@ export default function ExecutionLogPage() {
         </div>
 
         {/* Clear Filters */}
-        {(kind || status || command || fromDate || toDate) && (
+        {(kind || status || q || fromDate || toDate) && (
           <button
             type="button"
             onClick={() => {
               setKind("");
               setStatus("");
-              setCommand("");
+              setQ("");
               setFromDate("");
               setToDate("");
               setPage(1);

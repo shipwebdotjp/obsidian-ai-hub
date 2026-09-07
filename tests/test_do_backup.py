@@ -20,7 +20,13 @@ def test_backup_error_includes_rsync_stderr(monkeypatch, tmp_path):
             SimpleNamespace(returncode=0, stderr=""),
         ]
     )
-    monkeypatch.setattr(do_backup.subprocess, "run", lambda *args, **kwargs: next(results))
+    calls = []
+
+    def run(*args, **kwargs):
+        calls.append((args, kwargs))
+        return next(results)
+
+    monkeypatch.setattr(do_backup.subprocess, "run", run)
 
     with pytest.raises(do_backup.BackupError) as exc_info:
         do_backup.main()
@@ -29,3 +35,6 @@ def test_backup_error_includes_rsync_stderr(monkeypatch, tmp_path):
     assert "/source-one" in message
     assert "exit 1" in message
     assert "rsync: permission denied" in message
+    assert calls[0][1]["text"] is True
+    assert calls[0][1]["encoding"] == "utf-8"
+    assert calls[0][1]["errors"] == "backslashreplace"

@@ -343,6 +343,11 @@ def fail_llm_call(call_id: str, exc: Exception) -> None:
         conn.close()
 
 
+def _escape_like_literal(value: str) -> str:
+    """Escape LIKE wildcards so % _ \\ are matched literally."""
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 def list_execution_logs(
     kind: Optional[str] = None,
     status: Optional[str] = None,
@@ -351,6 +356,7 @@ def list_execution_logs(
     to_date: Optional[str] = None,
     limit: int = 50,
     offset: int = 0,
+    q: Optional[str] = None,
 ) -> Tuple[List[Dict[str, Any]], int]:
     """
     List execution logs (command runs, LLM calls or both) sorted by started_at DESC.
@@ -373,6 +379,22 @@ def list_execution_logs(
             if command:
                 conds.append("command LIKE ?")
                 params_runs.append(f"%{command}%")
+            if q:
+                pattern = f"%{_escape_like_literal(q)}%"
+                q_cols = (
+                    "command",
+                    "args_json",
+                    "summary",
+                    "exception_type",
+                    "exception_message",
+                    "traceback",
+                )
+                conds.append(
+                    "("
+                    + " OR ".join(f"{c} LIKE ? ESCAPE '\\'" for c in q_cols)
+                    + ")"
+                )
+                params_runs.extend([pattern] * len(q_cols))
             if from_date:
                 conds.append("started_at >= ?")
                 params_runs.append(from_date)
@@ -394,6 +416,23 @@ def list_execution_logs(
                 conds.append("(provider LIKE ? OR model LIKE ?)")
                 params_llm.append(f"%{command}%")
                 params_llm.append(f"%{command}%")
+            if q:
+                pattern = f"%{_escape_like_literal(q)}%"
+                q_cols = (
+                    "provider",
+                    "model",
+                    "prompt",
+                    "response",
+                    "exception_type",
+                    "exception_message",
+                    "traceback",
+                )
+                conds.append(
+                    "("
+                    + " OR ".join(f"{c} LIKE ? ESCAPE '\\'" for c in q_cols)
+                    + ")"
+                )
+                params_llm.extend([pattern] * len(q_cols))
             if from_date:
                 conds.append("started_at >= ?")
                 params_llm.append(from_date)
