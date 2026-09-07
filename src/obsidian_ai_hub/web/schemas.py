@@ -734,6 +734,33 @@ class SkippedRelationMerge(BaseModel):
     skipped_relations: list[SkippedRelationItem] = []
 
 
+class InvalidPropertyItem(BaseModel):
+    person_id: str
+    person_name: str
+    property_key: str
+    property_display_name: str
+    reason: str
+
+
+class SkippedPropertyMerge(BaseModel):
+    from_person_id: str
+    from_person_name: str
+    to_person_id: str
+    to_person_name: str
+    property_key: str
+    property_display_name: str
+    reason: str
+
+
+class PropertySyncReport(BaseModel):
+    replaced_properties_count: int = 0
+    replaced_values_count: int = 0
+    deleted_properties_count: int = 0
+    deleted_values_count: int = 0
+    invalid_properties: list[InvalidPropertyItem] = Field(default_factory=list)
+    skipped_property_merges: list[SkippedPropertyMerge] = Field(default_factory=list)
+
+
 class SyncPeopleResponse(BaseModel):
     # True when a sync was actually applied (POST /people/sync); False for the
     # read-only vault report (GET /people/vault-report), which never syncs.
@@ -741,6 +768,7 @@ class SyncPeopleResponse(BaseModel):
     loader_report: dict[str, Any]
     db_conflicts: dict[str, Any]
     skipped_relation_merges: list[SkippedRelationMerge] = []
+    property_report: Optional[PropertySyncReport] = None
 
 
 class MergedSummaryPreview(BaseModel):

@@ -71,6 +71,51 @@ export interface DuplicatesResponse {
   same_vault_id_groups: DuplicateSameVaultIdGroup[];
 }
 
+export interface SkippedRelationItem {
+  relation_id: string;
+  relation_type_slug: string;
+  other_person_id: string;
+  other_person_name: string;
+  started_on: string | null;
+  ended_on: string | null;
+}
+
+export interface SkippedRelationMerge {
+  from_person_id: string;
+  from_person_name: string;
+  to_person_id: string;
+  to_person_name: string;
+  reason: string;
+  skipped_relations: SkippedRelationItem[];
+}
+
+export interface InvalidPropertyItem {
+  person_id: string;
+  person_name: string;
+  property_key: string;
+  property_display_name: string;
+  reason: string;
+}
+
+export interface SkippedPropertyMerge {
+  from_person_id: string;
+  from_person_name: string;
+  to_person_id: string;
+  to_person_name: string;
+  property_key: string;
+  property_display_name: string;
+  reason: string;
+}
+
+export interface PropertySyncReport {
+  replaced_properties_count: number;
+  replaced_values_count: number;
+  deleted_properties_count: number;
+  deleted_values_count: number;
+  invalid_properties: InvalidPropertyItem[];
+  skipped_property_merges: SkippedPropertyMerge[];
+}
+
 export interface SyncPeopleResponse {
   synced: boolean;
   loader_report: {
@@ -95,6 +140,8 @@ export interface SyncPeopleResponse {
       vault_claimers: Array<{ id: string; name: string; path: string }>;
     }>;
   };
+  skipped_relation_merges?: SkippedRelationMerge[];
+  property_report?: PropertySyncReport | null;
 }
 
 export interface MergedSummaryPreview {

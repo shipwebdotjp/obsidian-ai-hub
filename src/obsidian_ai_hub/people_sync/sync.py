@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import sqlite3
 import uuid
+from datetime import datetime
 from typing import Any, Dict
 
 from obsidian_ai_hub.database import get_db_connection
@@ -11,6 +12,11 @@ from obsidian_ai_hub.summary.store import normalize_entity_name
 from obsidian_ai_hub.web.services.person_relations import (
     preview_person_relation_merge,
     transfer_person_relations_on_merge,
+)
+from obsidian_ai_hub.web.services.person_properties import (
+    preview_person_property_merge,
+    transfer_person_properties_on_merge,
+    JST,
 )
 
 logger = logging.getLogger(__name__)
@@ -96,9 +102,31 @@ def get_db_vault_conflicts_report(
 
 
 def sync_people_in_tx(
-    conn: sqlite3.Connection, people_notes_map: Dict[str, Any]
-) -> list[dict[str, Any]]:
+    conn: sqlite3.Connection,
+    people_notes_map: Dict[str, Any],
+    property_report: Dict[str, Any] | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     skipped_relation_merges = []
+    skipped_property_merges = []
+    replaced_properties_count = 0
+    replaced_values_count = 0
+    deleted_properties_count = 0
+    deleted_values_count = 0
+
+    invalid_properties = (
+        property_report.get("invalid_properties", []) if property_report else []
+    )
+    parsed_props_by_note = (
+        property_report.get("parsed_properties_by_note_id", {})
+        if property_report
+        else {}
+    )
+    missing_props_by_note = (
+        property_report.get("missing_properties_by_note_id", {})
+        if property_report
+        else {}
+    )
+
     # 1. Group notes by note ID (since map is normalized_name -> PersonNote, multiple keys map to same dict)
     seen_note_ids = set()
     unique_notes = []
@@ -353,6 +381,34 @@ def sync_people_in_tx(
                 skipped_old_person_ids.add(old_person_id)
                 continue
 
+            # Check if migrating this person causes a property conflict
+            prop_preview = preview_person_property_merge(
+                cursor, old_person_id, target_person_id
+            )
+            if prop_preview["property_conflicts_count"] > 0:
+                logger.warning(
+                    "Skipping auto-merge of person '%s' (%s -> %s) due to property conflict",
+                    old_display_name,
+                    old_person_id,
+                    target_person_id,
+                )
+                for imp in prop_preview["property_impacts"]:
+                    if imp["result_type"] == "property_conflict":
+                        skipped_property_merges.append(
+                            {
+                                "from_person_id": old_person_id,
+                                "from_person_name": old_display_name,
+                                "to_person_id": target_person_id,
+                                "to_person_name": vault_name,
+                                "property_key": imp["property_key"],
+                                "property_display_name": imp["property_display_name"],
+                                "reason": imp["conflict_reason"]
+                                or "自動統合で単数属性の期間重複が発生するため統合をスキップしました。",
+                            }
+                        )
+                skipped_old_person_ids.add(old_person_id)
+                continue
+
             logger.info(
                 "Migrating old duplicate person (id=%s) to target person_id=%s",
                 old_person_id,
@@ -361,6 +417,11 @@ def sync_people_in_tx(
 
             # Transfer relations safely
             transfer_person_relations_on_merge(
+                cursor, old_person_id, target_person_id
+            )
+
+            # Transfer properties safely
+            transfer_person_properties_on_merge(
                 cursor, old_person_id, target_person_id
             )
 
@@ -435,7 +496,72 @@ def sync_people_in_tx(
         if needs_final_update:
             conn.execute(final_update_sql, final_update_args)
 
-    return skipped_relation_merges
+        # Apply Vault property projections for target_person_id
+        parsed_props_by_def = parsed_props_by_note.get(vault_id, {})
+        missing_prop_def_ids = missing_props_by_note.get(vault_id, [])
+
+        now_iso = datetime.now(JST).isoformat()
+
+        # 1. Replace valid parsed properties
+        for def_id, item_list in parsed_props_by_def.items():
+            cursor.execute(
+                "DELETE FROM person_property_values WHERE person_id = ? AND property_definition_id = ? AND source_type = 'vault'",
+                (target_person_id, def_id),
+            )
+            replaced_properties_count += 1
+            replaced_values_count += len(item_list)
+
+            for item in item_list:
+                val_id = f"propval_{uuid.uuid4().hex}"
+                cursor.execute(
+                    """
+                    INSERT INTO person_property_values (
+                        property_value_id, person_id, property_definition_id, source_type,
+                        value_text, value_date, value_number, value_boolean, option_id,
+                        valid_from, valid_until, note, created_at, updated_at
+                    ) VALUES (?, ?, ?, 'vault', ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
+                    """,
+                    (
+                        val_id,
+                        target_person_id,
+                        def_id,
+                        item["value_text"],
+                        item["value_date"],
+                        item["value_number"],
+                        item["value_boolean"],
+                        item["option_id"],
+                        item["valid_from"],
+                        item["valid_until"],
+                        now_iso,
+                        now_iso,
+                    ),
+                )
+
+        # 2. Delete missing vault properties
+        for def_id in missing_prop_def_ids:
+            cursor.execute(
+                "SELECT COUNT(*) FROM person_property_values WHERE person_id = ? AND property_definition_id = ? AND source_type = 'vault'",
+                (target_person_id, def_id),
+            )
+            ex_cnt = cursor.fetchone()[0]
+            if ex_cnt > 0:
+                cursor.execute(
+                    "DELETE FROM person_property_values WHERE person_id = ? AND property_definition_id = ? AND source_type = 'vault'",
+                    (target_person_id, def_id),
+                )
+                deleted_properties_count += 1
+                deleted_values_count += ex_cnt
+
+    property_sync_summary = {
+        "replaced_properties_count": replaced_properties_count,
+        "replaced_values_count": replaced_values_count,
+        "deleted_properties_count": deleted_properties_count,
+        "deleted_values_count": deleted_values_count,
+        "invalid_properties": invalid_properties,
+        "skipped_property_merges": skipped_property_merges,
+    }
+
+    return skipped_relation_merges, property_sync_summary
 
 
 def log_vault_report_to_cli(
@@ -496,13 +622,23 @@ def log_vault_report_to_cli(
                     f"    * Vault Note ID: {vc['id']}, Name: {vc['name']}, Path: {vc['path']}"
                 )
 
+    invalid_props = report.get("property_report", {}).get("invalid_properties", [])
+    if invalid_props:
+        logger.warning("=== Invalid Vault Properties (不正なVault属性) ===")
+        for ip in invalid_props:
+            logger.warning(f"  - Person: {ip['person_name']} ({ip['person_id']})")
+            logger.warning(
+                f"    Property: {ip['property_display_name']} ({ip['property_key']})"
+            )
+            logger.warning(f"    Reason: {ip['reason']}")
+
 
 def main() -> None:
     logger.info("Starting sync of people from Vault notes...")
-    people_notes_map, report = load_people_notes_with_report()
-
     conn = get_db_connection()
     try:
+        people_notes_map, report = load_people_notes_with_report(conn)
+
         with conn:
             # 1. Detect DB conflicts
             db_conflicts = get_db_vault_conflicts_report(
@@ -513,7 +649,31 @@ def main() -> None:
             log_vault_report_to_cli(report, db_conflicts)
 
             # 3. Synchronize safely
-            sync_people_in_tx(conn, people_notes_map)
+            skipped_relation_merges, prop_summary = sync_people_in_tx(
+                conn, people_notes_map, report.get("property_report")
+            )
+
+            if prop_summary.get("skipped_property_merges"):
+                logger.warning(
+                    "=== Skipped Property Merges (属性競合による自動統合スキップ) ==="
+                )
+                for spm in prop_summary["skipped_property_merges"]:
+                    logger.warning(
+                        f"  - From: {spm['from_person_name']} ({spm['from_person_id']}) -> To: {spm['to_person_name']} ({spm['to_person_id']})"
+                    )
+                    logger.warning(
+                        f"    Property: {spm['property_display_name']} ({spm['property_key']})"
+                    )
+                    logger.warning(f"    Reason: {spm['reason']}")
+
+            logger.info(
+                "Property sync completed: Replaced %d properties (%d values), Deleted %d missing properties (%d values).",
+                prop_summary["replaced_properties_count"],
+                prop_summary["replaced_values_count"],
+                prop_summary["deleted_properties_count"],
+                prop_summary["deleted_values_count"],
+            )
+
         logger.info("People sync completed successfully.")
     except Exception:
         logger.exception("Failed to sync people from Vault notes")
