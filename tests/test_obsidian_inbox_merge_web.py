@@ -303,10 +303,9 @@ def test_same_url_full_update_and_move(tmp_path: Path):
         )
 
     # Smoke assertions
-    assert not old_file.exists()
-    new_file = webclip_dir / "金融・投資" / "Target Page.md"
-    assert new_file.exists()
+    assert old_file.exists()
     frontmatter = yaml.safe_load(
-        new_file.read_text(encoding="utf-8").split("---", 2)[1]
+        old_file.read_text(encoding="utf-8").split("---", 2)[1]
     )
+    assert frontmatter["category"] == "金融・投資"
     assert frontmatter["why_saved"] == "手入力した保存理由"
