@@ -1,8 +1,18 @@
 import React, { useMemo, useState } from "react";
 import { GitMerge, Trash2 } from "lucide-react";
 import { Person, PersonAlias } from "../../api/types";
-import { PersonDetail, PeopleError, PersonRelation, RelationStatus } from "./types";
+import {
+  PersonDetail,
+  PeopleError,
+  PersonRelation,
+  RelationStatus,
+  PersonPropertyValue,
+  PersonPropertyDefinition,
+  PersonPropertyValueCreateRequest,
+  PersonPropertyValueUpdateRequest,
+} from "./types";
 import PersonRelationsSection from "./PersonRelationsSection";
+import PersonPropertiesSection from "./PersonPropertiesSection";
 
 interface PeopleListTabProps {
   people: Person[];
@@ -31,6 +41,11 @@ interface PeopleListTabProps {
   onOpenCreateRelationModal?: () => void;
   onOpenEditRelationModal?: (relation: PersonRelation) => void;
   onDeleteRelation?: (relationId: string) => Promise<void>;
+  personProperties?: PersonPropertyValue[];
+  propertyDefinitions?: PersonPropertyDefinition[];
+  onCreateProperty?: (req: PersonPropertyValueCreateRequest) => Promise<void>;
+  onUpdateProperty?: (propertyValueId: string, req: PersonPropertyValueUpdateRequest) => Promise<void>;
+  onDeleteProperty?: (propertyValueId: string) => Promise<void>;
 }
 
 export default function PeopleListTab({
@@ -60,6 +75,11 @@ export default function PeopleListTab({
   onOpenCreateRelationModal = () => {},
   onOpenEditRelationModal = () => {},
   onDeleteRelation = async () => {},
+  personProperties = [],
+  propertyDefinitions = [],
+  onCreateProperty = async () => {},
+  onUpdateProperty = async () => {},
+  onDeleteProperty = async () => {},
 }: PeopleListTabProps) {
   const [nameQuery, setNameQuery] = useState("");
 
@@ -277,6 +297,17 @@ export default function PeopleListTab({
                 </div>
               </div>
             )}
+
+            {/* Person Properties Section */}
+            <PersonPropertiesSection
+              personId={selectedPerson.person_id}
+              properties={personProperties}
+              definitions={propertyDefinitions}
+              loading={loading}
+              onCreateProperty={onCreateProperty}
+              onUpdateProperty={onUpdateProperty}
+              onDeleteProperty={onDeleteProperty}
+            />
 
             {/* Person Relations Section */}
             <PersonRelationsSection

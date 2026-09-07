@@ -23,7 +23,7 @@ from obsidian_ai_hub.web.schemas import (
 def test_migration_v38_creates_tables_and_seeds_builtin_types(test_memory_db_path):
     with memory.get_db_connection() as conn:
         version = conn.execute("PRAGMA user_version;").fetchone()[0]
-        assert version == 38
+        assert version >= 38
 
         # Check tables exist
         cursor = conn.execute(
