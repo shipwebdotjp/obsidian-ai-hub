@@ -191,6 +191,11 @@ export default function PropertyDefinitionsTab({
       return;
     }
 
+    if (editingDefinition.data_type === "select" && editOptions.length === 0) {
+      setEditError("選択肢型(select)の場合は、少なくとも1つの選択肢を設定してください。");
+      return;
+    }
+
     const aliases = editAliasesText
       .split("\n")
       .map((s) => s.trim())

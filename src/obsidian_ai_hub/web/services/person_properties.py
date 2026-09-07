@@ -6,6 +6,7 @@ from typing import Any, Literal, Optional
 from zoneinfo import ZoneInfo
 
 from obsidian_ai_hub.database import get_db_connection
+from obsidian_ai_hub.utils.periods import periods_overlap
 
 JST = ZoneInfo("Asia/Tokyo")
 
@@ -51,15 +52,6 @@ def validate_yyyy_mm_dd(d_val: Optional[str]) -> None:
             datetime.strptime(v, "%Y-%m-%d")
         except ValueError as e:
             raise InvalidValueError(f"Invalid date: {d_val}") from e
-
-
-def periods_overlap(
-    s1: Optional[str], e1: Optional[str], s2: Optional[str], e2: Optional[str]
-) -> bool:
-    """True if interval [s1, e1] overlaps with [s2, e2]. None means unbounded."""
-    cond1 = (s1 is None) or (e2 is None) or (s1 <= e2)
-    cond2 = (e1 is None) or (s2 is None) or (e1 >= s2)
-    return cond1 and cond2
 
 
 def get_property_definition_by_id_in_tx(
@@ -513,7 +505,9 @@ def validate_and_prepare_value_columns(
             raise InvalidValueError("Text property value must not be empty")
         cols["value_text"] = str(raw_val).strip()
     elif data_type == "date":
-        validate_yyyy_mm_dd(str(raw_val) if raw_val is not None else None)
+        if raw_val is None or not str(raw_val).strip():
+            raise InvalidValueError("Date property value must not be empty")
+        validate_yyyy_mm_dd(str(raw_val).strip())
         cols["value_date"] = str(raw_val).strip()
     elif data_type == "number":
         try:
@@ -675,6 +669,7 @@ def update_person_property_value_in_tx(
     note: Optional[str] = None,
     provided: Optional[list[str]] = None,
     is_api_call: bool = True,
+    expected_person_id: Optional[str] = None,
 ) -> dict[str, Any]:
     cursor.execute(
         """
@@ -695,6 +690,9 @@ def update_person_property_value_in_tx(
     if row is None:
         raise FileNotFoundError(f"Property value not found: {property_value_id}")
     curr = dict(row)
+
+    if expected_person_id is not None and curr["person_id"] != expected_person_id:
+        raise FileNotFoundError(f"Property value not found: {property_value_id}")
 
     if is_api_call and curr["source_type"] == "vault":
         raise VaultSourceReadOnlyError()
@@ -774,14 +772,19 @@ def update_person_property_value_in_tx(
 
 
 def delete_person_property_value_in_tx(
-    cursor: sqlite3.Cursor, property_value_id: str, is_api_call: bool = True
+    cursor: sqlite3.Cursor,
+    property_value_id: str,
+    is_api_call: bool = True,
+    expected_person_id: Optional[str] = None,
 ) -> dict[str, Any]:
     cursor.execute(
-        "SELECT property_value_id, source_type FROM person_property_values WHERE property_value_id = ?",
+        "SELECT property_value_id, person_id, source_type FROM person_property_values WHERE property_value_id = ?",
         (property_value_id,),
     )
     row = cursor.fetchone()
     if row is None:
+        raise FileNotFoundError(f"Property value not found: {property_value_id}")
+    if expected_person_id is not None and row["person_id"] != expected_person_id:
         raise FileNotFoundError(f"Property value not found: {property_value_id}")
 
     if is_api_call and row["source_type"] == "vault":
@@ -1036,6 +1039,7 @@ def update_person_property_value(
     valid_until: Optional[str] = None,
     note: Optional[str] = None,
     provided: Optional[list[str]] = None,
+    expected_person_id: Optional[str] = None,
 ) -> dict[str, Any]:
     conn = get_db_connection()
     try:
@@ -1050,18 +1054,24 @@ def update_person_property_value(
                 note=note,
                 provided=provided,
                 is_api_call=True,
+                expected_person_id=expected_person_id,
             )
     finally:
         conn.close()
 
 
-def delete_person_property_value(property_value_id: str) -> dict[str, Any]:
+def delete_person_property_value(
+    property_value_id: str, expected_person_id: Optional[str] = None
+) -> dict[str, Any]:
     conn = get_db_connection()
     try:
         with conn:
             cursor = conn.cursor()
             return delete_person_property_value_in_tx(
-                cursor, property_value_id, is_api_call=True
+                cursor,
+                property_value_id,
+                is_api_call=True,
+                expected_person_id=expected_person_id,
             )
     finally:
         conn.close()

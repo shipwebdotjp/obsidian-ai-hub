@@ -169,6 +169,7 @@ def update_person_property_value(
             valid_until=body.valid_until,
             note=body.note,
             provided=list(body.model_fields_set),
+            expected_person_id=person_id,
         )
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
@@ -199,7 +200,9 @@ def delete_person_property_value(
     _=Depends(require_bearer_token),
 ):
     try:
-        return service.delete_person_property_value(property_value_id)
+        return service.delete_person_property_value(
+            property_value_id, expected_person_id=person_id
+        )
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     except service.VaultSourceReadOnlyError as e:

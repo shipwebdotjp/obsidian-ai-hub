@@ -238,12 +238,18 @@ export default function PeoplePage() {
     }
   };
 
-  const loadPersonProperties = async (personId: string) => {
+  const propertiesRequestRef = useRef(0);
+  const loadPersonProperties = async (personId: string): Promise<PersonPropertyValue[] | null> => {
+    const reqId = ++propertiesRequestRef.current;
     try {
       const data = await peopleApi.fetchPersonProperties(personId);
+      if (reqId !== propertiesRequestRef.current) return null;
       setPersonProperties(data);
+      return data;
     } catch {
+      if (reqId !== propertiesRequestRef.current) return null;
       setPersonProperties([]);
+      return null;
     }
   };
 
@@ -349,7 +355,8 @@ export default function PeoplePage() {
 
   const handleCreatePropertyDefinition = async (req: PersonPropertyDefinitionCreateRequest) => {
     await peopleApi.createPropertyDefinition(req);
-    await loadAllData(false);
+    const reloaded = await loadAllData(false);
+    if (!reloaded) return;
     setSuccessMessage(`属性定義「${req.display_name}」を作成しました。`);
   };
 
@@ -358,13 +365,15 @@ export default function PeoplePage() {
     req: PersonPropertyDefinitionUpdateRequest
   ) => {
     const updated = await peopleApi.updatePropertyDefinition(propertyDefinitionId, req);
-    await loadAllData(false);
+    const reloaded = await loadAllData(false);
+    if (!reloaded) return;
     setSuccessMessage(`属性定義「${updated.display_name}」を更新しました。`);
   };
 
   const handleDeletePropertyDefinition = async (propertyDefinitionId: string) => {
     const res = await peopleApi.deletePropertyDefinition(propertyDefinitionId);
-    await loadAllData(false);
+    const reloaded = await loadAllData(false);
+    if (!reloaded) return;
     setSuccessMessage(
       `属性定義を削除しました。（削除された属性値数: ${res.deleted_values_count}件）`
     );

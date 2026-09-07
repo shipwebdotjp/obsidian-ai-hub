@@ -373,6 +373,8 @@ def merge_people(from_person_id: str, to_person_id: str) -> bool:
             if not preview["allowed"]:
                 if preview.get("self_relation_conflicts_count", 0) > 0:
                     raise SelfRelationConflictError()
+                if preview.get("property_conflicts_count", 0) > 0:
+                    raise PropertyConflictConflictError()
                 raise ValueError(preview["reason"])
 
             from_p = preview["from_person"]

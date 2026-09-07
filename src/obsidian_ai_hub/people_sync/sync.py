@@ -8,6 +8,7 @@ from typing import Any, Dict
 
 from obsidian_ai_hub.database import get_db_connection
 from obsidian_ai_hub.utils.people_loader import load_people_notes_with_report
+from obsidian_ai_hub.utils.periods import periods_overlap
 from obsidian_ai_hub.summary.store import normalize_entity_name
 from obsidian_ai_hub.web.services.person_relations import (
     preview_person_relation_merge,
@@ -30,6 +31,63 @@ def merge_display_orders(order1: int | None, order2: int | None) -> int | None:
     if order2 is None:
         return order1
     return min(order1, order2)
+
+
+def _consolidate_single_cardinality_items(
+    item_list: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Merge same-valued items with overlapping validity periods.
+
+    Groups items by typed value and merges overlapping ranges within each
+    group (None means unbounded). Distinct values are preserved as-is so
+    non-overlapping history is retained.
+    """
+    groups: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
+    group_order: list[tuple[Any, ...]] = []
+    for item in item_list:
+        key = (
+            item.get("value_text"),
+            item.get("value_date"),
+            item.get("value_number"),
+            item.get("value_boolean"),
+            item.get("option_id"),
+        )
+        if key not in groups:
+            groups[key] = []
+            group_order.append(key)
+        groups[key].append(item)
+
+    consolidated: list[dict[str, Any]] = []
+    for key in group_order:
+        items = sorted(
+            groups[key],
+            key=lambda it: (it.get("valid_from") is not None, it.get("valid_from") or ""),
+        )
+        merged: list[dict[str, Any]] = []
+        for item in items:
+            current = dict(item)
+            if not merged:
+                merged.append(current)
+                continue
+            last = merged[-1]
+            if periods_overlap(
+                last.get("valid_from"),
+                last.get("valid_until"),
+                current.get("valid_from"),
+                current.get("valid_until"),
+            ):
+                ls, le = last.get("valid_from"), last.get("valid_until")
+                cs, ce = current.get("valid_from"), current.get("valid_until")
+                last["valid_from"] = (
+                    None if ls is None or cs is None else min(ls, cs)
+                )
+                last["valid_until"] = (
+                    None if le is None or ce is None else max(le, ce)
+                )
+            else:
+                merged.append(current)
+        consolidated.extend(merged)
+    return consolidated
 
 
 def get_db_vault_conflicts_report(
@@ -509,9 +567,18 @@ def sync_people_in_tx(
                 (target_person_id, def_id),
             )
             replaced_properties_count += 1
-            replaced_values_count += len(item_list)
+            cursor.execute(
+                "SELECT cardinality FROM person_property_definitions WHERE property_definition_id = ?",
+                (def_id,),
+            )
+            card_row = cursor.fetchone()
+            if card_row is not None and card_row[0] == "single":
+                effective_items = _consolidate_single_cardinality_items(item_list)
+            else:
+                effective_items = item_list
+            replaced_values_count += len(effective_items)
 
-            for item in item_list:
+            for item in effective_items:
                 val_id = f"propval_{uuid.uuid4().hex}"
                 cursor.execute(
                     """
@@ -652,6 +719,20 @@ def main() -> None:
             skipped_relation_merges, prop_summary = sync_people_in_tx(
                 conn, people_notes_map, report.get("property_report")
             )
+
+            if skipped_relation_merges:
+                logger.warning(
+                    "=== Skipped Relation Merges (自己関係競合による自動統合スキップ) ==="
+                )
+                for srm in skipped_relation_merges:
+                    logger.warning(
+                        f"  - From: {srm['from_person_name']} ({srm['from_person_id']}) -> To: {srm['to_person_name']} ({srm['to_person_id']})"
+                    )
+                    logger.warning(f"    Reason: {srm['reason']}")
+                    for rel in srm.get("skipped_relations", []):
+                        logger.warning(
+                            f"    Relation: {rel['relation_type_slug']} with {rel['other_person_name']} ({rel['other_person_id']})"
+                        )
 
             if prop_summary.get("skipped_property_merges"):
                 logger.warning(

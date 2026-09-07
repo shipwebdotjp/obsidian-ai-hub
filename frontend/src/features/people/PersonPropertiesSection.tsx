@@ -6,6 +6,23 @@ import {
   PersonPropertyValueUpdateRequest,
 } from "./types";
 import { useNativeDialog } from "./useNativeDialog";
+import { formatYmdWithDow } from "../../utils/date";
+
+function isValidYmd(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(`${value}T00:00:00`);
+  return (
+    date.getFullYear() === year && date.getMonth() + 1 === month && date.getDate() === day
+  );
+}
+
+// formatYmdWithDow returns invalid input unchanged, so validate first and
+// hide null/empty/invalid values per project convention.
+function formatPeriodDate(value: string | null | undefined): string {
+  if (!value || !isValidYmd(value)) return "";
+  return formatYmdWithDow(value);
+}
 
 interface PersonPropertiesSectionProps {
   personId: string;
@@ -37,6 +54,7 @@ export default function PersonPropertiesSection({
   const [validUntil, setValidUntil] = useState("");
   const [note, setNote] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   const formDialogRef = useRef<HTMLDialogElement>(null);
@@ -46,7 +64,15 @@ export default function PersonPropertiesSection({
     setShowFormModal(false);
     setEditingValue(null);
   };
-  const closeDeleteModal = () => setDeletingValue(null);
+  const closeDeleteModal = () => {
+    setDeletingValue(null);
+    setDeleteError(null);
+  };
+
+  const openDeleteModal = (pv: PersonPropertyValue) => {
+    setDeletingValue(pv);
+    setDeleteError(null);
+  };
 
   useNativeDialog(formDialogRef, closeFormModal, showFormModal || editingValue !== null);
   useNativeDialog(deleteDialogRef, closeDeleteModal, deletingValue !== null);
@@ -126,12 +152,13 @@ export default function PersonPropertiesSection({
 
   const handleDeleteSubmit = async () => {
     if (!deletingValue) return;
+    setDeleteError(null);
     setSubmitting(true);
     try {
       await onDeleteProperty(deletingValue.property_value_id);
       setDeletingValue(null);
     } catch (err: unknown) {
-      setFormError(err instanceof Error ? err.message : "属性値の削除に失敗しました。");
+      setDeleteError(err instanceof Error ? err.message : "属性値の削除に失敗しました。");
     } finally {
       setSubmitting(false);
     }
@@ -205,7 +232,7 @@ export default function PersonPropertiesSection({
                         編集
                       </button>
                       <button
-                        onClick={() => setDeletingValue(pv)}
+                        onClick={() => openDeleteModal(pv)}
                         className="px-2 py-0.5 text-[11px] font-semibold text-red-600 border border-red-200 rounded hover:bg-red-50 cursor-pointer"
                       >
                         削除
@@ -220,7 +247,14 @@ export default function PersonPropertiesSection({
 
                 {(pv.valid_from || pv.valid_until) && (
                   <div className="text-[11px] text-slate-500 font-mono">
-                    有効期間: {pv.valid_from || "開始指定なし"} ～ {pv.valid_until || "終了指定なし"}
+                    有効期間:{" "}
+                    {pv.valid_from
+                      ? formatPeriodDate(pv.valid_from) || ""
+                      : "開始指定なし"}{" "}
+                    ～{" "}
+                    {pv.valid_until
+                      ? formatPeriodDate(pv.valid_until) || ""
+                      : "終了指定なし"}
                   </div>
                 )}
 
@@ -429,6 +463,11 @@ export default function PersonPropertiesSection({
             <p className="text-xs text-slate-600 leading-relaxed">
               この属性値を削除します。よろしいですか？
             </p>
+            {deleteError && (
+              <div className="p-3 bg-red-50 border border-red-200 text-red-700 rounded-lg text-xs">
+                {deleteError}
+              </div>
+            )}
             <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
               <button
                 type="button"

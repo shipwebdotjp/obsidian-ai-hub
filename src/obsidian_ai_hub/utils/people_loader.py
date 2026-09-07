@@ -10,6 +10,7 @@ from typing import TypedDict, Any, Optional
 from obsidian_ai_hub.database import get_db_connection
 from obsidian_ai_hub.utils import config as app_config
 from obsidian_ai_hub.utils.extracter import parse_frontmatter
+from obsidian_ai_hub.utils.periods import periods_overlap
 from obsidian_ai_hub.summary.store import normalize_entity_name
 
 logger = logging.getLogger(__name__)
@@ -50,14 +51,6 @@ def normalize_date_str(val: Any) -> str:
                 raise ValueError(f"Invalid date: {val}") from e
             return v
     raise ValueError(f"Invalid date format: {val}")
-
-
-def periods_overlap(
-    s1: Optional[str], e1: Optional[str], s2: Optional[str], e2: Optional[str]
-) -> bool:
-    cond1 = (s1 is None) or (e2 is None) or (s1 <= e2)
-    cond2 = (e1 is None) or (s2 is None) or (e1 >= s2)
-    return cond1 and cond2
 
 
 def get_vault_property_definitions_lookup(conn: sqlite3.Connection) -> dict[str, Any]:
