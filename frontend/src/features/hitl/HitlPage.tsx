@@ -62,6 +62,45 @@ interface ReminderContext {
   content?: string | null;
 }
 
+interface PersonCandidateContext {
+  candidate_type: "property" | "relation";
+  candidate_key: string;
+  operation: "create" | "update" | "delete";
+  summary_id: string;
+  person_id?: string;
+  person_name?: string;
+  property_definition_id?: string;
+  property_key?: string;
+  property_display_name?: string;
+  property_value_id?: string;
+  subject_person_id?: string;
+  subject_person_name?: string;
+  object_person_id?: string;
+  object_person_name?: string;
+  relation_type_id?: string;
+  relation_type_slug?: string;
+  relation_type_forward_label?: string;
+  relation_type_reverse_label?: string;
+  relation_id?: string;
+  before?: Record<string, any> | null;
+  after?: Record<string, any> | null;
+  quote?: string;
+  reason?: string;
+  snapshot?: Record<string, any> | null;
+}
+
+function asPersonCandidateContext(context: unknown): PersonCandidateContext | null {
+  if (
+    context &&
+    typeof context === "object" &&
+    "candidate_type" in context &&
+    ((context as any).candidate_type === "property" || (context as any).candidate_type === "relation")
+  ) {
+    return context as PersonCandidateContext;
+  }
+  return null;
+}
+
 function asMemoryMaintenanceContext(context: unknown): MemoryMaintenanceContext | null {
   if (context && typeof context === "object" && (context as any).type === "memory_maintenance") {
     return context as MemoryMaintenanceContext;
@@ -93,6 +132,7 @@ function asReminderContext(context: unknown): ReminderContext | null {
 function displayTypeLabel(dt: string | null | undefined): string {
   if (!dt) return "";
   if (dt === "in_conversation_question") return "ASK";
+  if (dt === "daily_person_changes") return "日次人物変更候補";
   return dt;
 }
 
@@ -841,6 +881,152 @@ export default function HitlPage() {
                                     <div>
                                       <span className="font-bold text-slate-600">元の内容: </span>
                                       <p className="mt-0.5 text-slate-800 leading-relaxed font-medium whitespace-pre-wrap">{currentReminderCtx.content}</p>
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            }
+
+                            const currentPersonCandCtx = asPersonCandidateContext(q.context);
+                            if (currentPersonCandCtx) {
+                              const cand = currentPersonCandCtx;
+                              const opLabel =
+                                cand.operation === "create"
+                                  ? "新規作成"
+                                  : cand.operation === "update"
+                                  ? "更新"
+                                  : "削除";
+                              const typeLabel = cand.candidate_type === "property" ? "人物属性" : "人物間リレーション";
+
+                              return (
+                                <div
+                                  data-testid="person-candidate-context"
+                                  className="mt-3 space-y-3 rounded-lg border border-slate-200 bg-white p-4 text-xs text-slate-700"
+                                >
+                                  <div className="flex items-center gap-2 border-b border-slate-100 pb-2">
+                                    <span className="rounded bg-indigo-50 border border-indigo-100 px-2 py-0.5 text-[10px] font-bold text-indigo-700">
+                                      {typeLabel} - {opLabel}
+                                    </span>
+                                    <span className="font-bold text-slate-700">
+                                      {cand.candidate_type === "property"
+                                        ? `${cand.person_name} の「${cand.property_display_name}」`
+                                        : `${cand.subject_person_name} → ${cand.object_person_name}（${cand.relation_type_forward_label}）`}
+                                    </span>
+                                  </div>
+
+                                  {cand.candidate_type === "property" ? (
+                                    <div className="space-y-2">
+                                      <div>
+                                        <span className="font-bold text-slate-600">対象人物: </span>
+                                        <span className="text-slate-800 font-medium">{cand.person_name}</span>
+                                      </div>
+                                      <div>
+                                        <span className="font-bold text-slate-600">属性定義: </span>
+                                        <span className="text-slate-800 font-medium">{cand.property_display_name} ({cand.property_key})</span>
+                                      </div>
+
+                                      {/* Diffs */}
+                                      <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2 bg-slate-50 p-2.5 rounded border border-slate-100">
+                                        <div>
+                                          <span className="text-[10px] font-bold text-slate-400 block mb-1">変更前 (Before)</span>
+                                          {cand.before ? (
+                                            <div className="text-slate-700">
+                                              <p className="font-semibold text-slate-800">{String(cand.before.value ?? "（なし）")}</p>
+                                              {(cand.before.valid_from || cand.before.valid_until) && (
+                                                <p className="text-[10px] text-slate-500 mt-0.5">
+                                                  期間: {cand.before.valid_from || "開始日未指定"} ～ {cand.before.valid_until || "終了日未指定"}
+                                                </p>
+                                              )}
+                                              {cand.before.note && (
+                                                <p className="text-[10px] text-slate-500 mt-0.5">メモ: {cand.before.note}</p>
+                                              )}
+                                            </div>
+                                          ) : (
+                                            <p className="text-slate-400 italic">（なし - 新規作成）</p>
+                                          )}
+                                        </div>
+
+                                        <div>
+                                          <span className="text-[10px] font-bold text-emerald-600 block mb-1">変更後 (After)</span>
+                                          {cand.after ? (
+                                            <div className="text-slate-800">
+                                              <p className="font-semibold text-emerald-800">{String(cand.after.value ?? "（なし）")}</p>
+                                              {(cand.after.valid_from || cand.after.valid_until) && (
+                                                <p className="text-[10px] text-slate-600 mt-0.5">
+                                                  期間: {cand.after.valid_from || "開始日未指定"} ～ {cand.after.valid_until || "終了日未指定"}
+                                                </p>
+                                              )}
+                                              {cand.after.note && (
+                                                <p className="text-[10px] text-slate-600 mt-0.5">メモ: {cand.after.note}</p>
+                                              )}
+                                            </div>
+                                          ) : (
+                                            <p className="text-rose-600 font-semibold italic">（削除）</p>
+                                          )}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <div className="space-y-2">
+                                      <div>
+                                        <span className="font-bold text-slate-600">対象関係: </span>
+                                        <span className="text-slate-800 font-medium">{cand.subject_person_name} → {cand.object_person_name}</span>
+                                      </div>
+                                      <div>
+                                        <span className="font-bold text-slate-600">関係タイプ: </span>
+                                        <span className="text-slate-800 font-medium">{cand.relation_type_forward_label} ({cand.relation_type_slug})</span>
+                                      </div>
+
+                                      {/* Diffs */}
+                                      <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2 bg-slate-50 p-2.5 rounded border border-slate-100">
+                                        <div>
+                                          <span className="text-[10px] font-bold text-slate-400 block mb-1">変更前 (Before)</span>
+                                          {cand.before ? (
+                                            <div className="text-slate-700">
+                                              <p className="text-[11px]">
+                                                期間: {cand.before.started_on || "開始日未指定"} ～ {cand.before.ended_on || "終了日未指定"}
+                                              </p>
+                                              {cand.before.note && (
+                                                <p className="text-[10px] text-slate-500 mt-0.5">メモ: {cand.before.note}</p>
+                                              )}
+                                            </div>
+                                          ) : (
+                                            <p className="text-slate-400 italic">（なし - 新規作成）</p>
+                                          )}
+                                        </div>
+
+                                        <div>
+                                          <span className="text-[10px] font-bold text-emerald-600 block mb-1">変更後 (After)</span>
+                                          {cand.after ? (
+                                            <div className="text-slate-800">
+                                              <p className="text-[11px] font-semibold text-emerald-800">
+                                                期間: {cand.after.started_on || "開始日未指定"} ～ {cand.after.ended_on || "終了日未指定"}
+                                              </p>
+                                              {cand.after.note && (
+                                                <p className="text-[10px] text-slate-600 mt-0.5">メモ: {cand.after.note}</p>
+                                              )}
+                                            </div>
+                                          ) : (
+                                            <p className="text-rose-600 font-semibold italic">（削除）</p>
+                                          )}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  )}
+
+                                  {cand.quote && (
+                                    <div>
+                                      <span className="font-bold text-slate-600">引用（根拠テキスト）: </span>
+                                      <blockquote className="mt-0.5 border-l-2 border-slate-300 pl-2 italic text-slate-700 bg-slate-50 py-1 rounded-r">
+                                        &ldquo;{cand.quote}&rdquo;
+                                      </blockquote>
+                                    </div>
+                                  )}
+
+                                  {cand.reason && (
+                                    <div>
+                                      <span className="font-bold text-slate-600">抽出理由: </span>
+                                      <p className="mt-0.5 text-slate-800 leading-relaxed font-medium">{cand.reason}</p>
                                     </div>
                                   )}
                                 </div>
