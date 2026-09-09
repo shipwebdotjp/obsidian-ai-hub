@@ -222,8 +222,29 @@ def _apply_relation_candidate(cursor: Any, cand: Dict[str, Any], summary_id: str
         # 現行確認
         curr_rel = person_relations.get_person_relation_by_id_in_tx(cursor, rel_id)
         if snapshot:
-            if curr_rel["relation_type_id"] != snapshot.get("relation_type_id"):
-                raise ValueError("Relation type changed")
+            snapshot_type = snapshot.get("relation_type_id")
+            snapshot_subj = snapshot.get("subject_person_id")
+            snapshot_obj = snapshot.get("object_person_id")
+            snapshot_s_date = snapshot.get("started_on")
+            snapshot_e_date = snapshot.get("ended_on")
+            snapshot_note = snapshot.get("note")
+
+            curr_type = curr_rel.get("relation_type_id")
+            curr_subj = curr_rel.get("subject_person_id")
+            curr_obj = curr_rel.get("object_person_id")
+            curr_s_date = curr_rel.get("started_on")
+            curr_e_date = curr_rel.get("ended_on")
+            curr_note = curr_rel.get("note")
+
+            if (
+                curr_type != snapshot_type or
+                curr_subj != snapshot_subj or
+                curr_obj != snapshot_obj or
+                curr_s_date != snapshot_s_date or
+                curr_e_date != snapshot_e_date or
+                curr_note != snapshot_note
+            ):
+                raise ValueError("Relation target snapshot mismatch")
 
         s_date = after.get("started_on") if after else None
         e_date = after.get("ended_on") if after else None

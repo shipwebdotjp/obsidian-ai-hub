@@ -3,15 +3,42 @@ import logging
 import sqlite3
 from typing import Any, Dict, List, Optional
 
+from datetime import datetime
+
 from obsidian_ai_hub.database import get_db_connection
 from obsidian_ai_hub.hitl.service import register_run_and_questions
 from obsidian_ai_hub.hitl.store import get_run
+from obsidian_ai_hub.summary import store as summary_store
 from obsidian_ai_hub.utils import config, llm_client, prompt
 from obsidian_ai_hub.web.services import person_properties, person_relations
 
 logger = logging.getLogger(__name__)
 
 PROMPT_PATH = config.BASE_DIR / "config" / "prompts" / "extract_person_candidates.md"
+
+
+def run_person_candidate_extraction_for_summary(
+    summary_res: Dict[str, Any],
+    target_date: datetime,
+    daily_content: str,
+) -> Optional[str]:
+    """日次要約の保存結果から確定人物と根拠テキストを取り出し、候補抽出とHITL登録を実行するオーケストレーション関数。"""
+    summary_id = summary_res.get("summary_id")
+    if not summary_id:
+        return None
+
+    date_str = target_date.strftime("%Y-%m-%d")
+    summary_full = summary_store.get_summary_by_id(summary_id)
+    resolved_people = summary_full.get("people", []) if summary_full else []
+    summary_text = summary_res.get("summary", "") or ""
+    ground_truth_text = f"{summary_text}\n\n{daily_content}".strip()
+
+    return extract_and_register_person_candidates(
+        summary_id=summary_id,
+        date_str=date_str,
+        ground_truth_text=ground_truth_text,
+        resolved_people=resolved_people,
+    )
 
 
 def get_deterministic_run_id(summary_id: str) -> str:
@@ -341,11 +368,20 @@ def _validate_and_build_relation_candidates(
             if not rel_id or rel_id not in rels_map:
                 continue
             curr_rel = rels_map[rel_id]
-            # Ensure endpoints and relation_type match current
             if curr_rel["relation_type_id"] != rel_type_id:
                 continue
-            if not ((curr_rel["subject_person_id"] == subj_id and curr_rel["object_person_id"] == obj_id) or
-                    (curr_rel["subject_person_id"] == obj_id and curr_rel["object_person_id"] == subj_id)):
+
+            if rel_type.get("directionality") == "symmetric":
+                endpoints_match = (
+                    (curr_rel["subject_person_id"] == subj_id and curr_rel["object_person_id"] == obj_id) or
+                    (curr_rel["subject_person_id"] == obj_id and curr_rel["object_person_id"] == subj_id)
+                )
+            else:
+                endpoints_match = (
+                    curr_rel["subject_person_id"] == subj_id and curr_rel["object_person_id"] == obj_id
+                )
+
+            if not endpoints_match:
                 continue
             snapshot = curr_rel
         else:

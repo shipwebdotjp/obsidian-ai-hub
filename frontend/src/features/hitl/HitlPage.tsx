@@ -898,6 +898,12 @@ export default function HitlPage() {
                                   : "削除";
                               const typeLabel = cand.candidate_type === "property" ? "人物属性" : "人物間リレーション";
 
+                              const formatPeriodDate = (val?: string | null, fallback = "開始日未指定") => {
+                                if (!val) return fallback;
+                                const formatted = formatYmdWithDow(val);
+                                return formatted || val || fallback;
+                              };
+
                               return (
                                 <div
                                   data-testid="person-candidate-context"
@@ -934,7 +940,7 @@ export default function HitlPage() {
                                               <p className="font-semibold text-slate-800">{String(cand.before.value ?? "（なし）")}</p>
                                               {(cand.before.valid_from || cand.before.valid_until) && (
                                                 <p className="text-[10px] text-slate-500 mt-0.5">
-                                                  期間: {cand.before.valid_from || "開始日未指定"} ～ {cand.before.valid_until || "終了日未指定"}
+                                                  期間: {formatPeriodDate(cand.before.valid_from, "開始日未指定")} ～ {formatPeriodDate(cand.before.valid_until, "終了日未指定")}
                                                 </p>
                                               )}
                                               {cand.before.note && (
@@ -953,7 +959,7 @@ export default function HitlPage() {
                                               <p className="font-semibold text-emerald-800">{String(cand.after.value ?? "（なし）")}</p>
                                               {(cand.after.valid_from || cand.after.valid_until) && (
                                                 <p className="text-[10px] text-slate-600 mt-0.5">
-                                                  期間: {cand.after.valid_from || "開始日未指定"} ～ {cand.after.valid_until || "終了日未指定"}
+                                                  期間: {formatPeriodDate(cand.after.valid_from, "開始日未指定")} ～ {formatPeriodDate(cand.after.valid_until, "終了日未指定")}
                                                 </p>
                                               )}
                                               {cand.after.note && (
@@ -984,7 +990,7 @@ export default function HitlPage() {
                                           {cand.before ? (
                                             <div className="text-slate-700">
                                               <p className="text-[11px]">
-                                                期間: {cand.before.started_on || "開始日未指定"} ～ {cand.before.ended_on || "終了日未指定"}
+                                                期間: {formatPeriodDate(cand.before.started_on, "開始日未指定")} ～ {formatPeriodDate(cand.before.ended_on, "終了日未指定")}
                                               </p>
                                               {cand.before.note && (
                                                 <p className="text-[10px] text-slate-500 mt-0.5">メモ: {cand.before.note}</p>
@@ -1000,7 +1006,7 @@ export default function HitlPage() {
                                           {cand.after ? (
                                             <div className="text-slate-800">
                                               <p className="text-[11px] font-semibold text-emerald-800">
-                                                期間: {cand.after.started_on || "開始日未指定"} ～ {cand.after.ended_on || "終了日未指定"}
+                                                期間: {formatPeriodDate(cand.after.started_on, "開始日未指定")} ～ {formatPeriodDate(cand.after.ended_on, "終了日未指定")}
                                               </p>
                                               {cand.after.note && (
                                                 <p className="text-[10px] text-slate-600 mt-0.5">メモ: {cand.after.note}</p>

@@ -399,27 +399,20 @@ def summarize_day(target_date: datetime) -> dict:
     summary_res = upsert_summary_record(structured_record)
 
     # 4. 確定人物を用いた第2段階人物変更候補の抽出とHITL登録
-    summary_id = summary_res.get("summary_id")
-    if summary_id:
-        date_str = target_date.strftime("%Y-%m-%d")
-        try:
-            summary_full = summary_store.get_summary_by_id(summary_id)
-            resolved_people = summary_full.get("people", []) if summary_full else []
-            from obsidian_ai_hub.summary.person_candidates import (
-                extract_and_register_person_candidates,
-            )
+    try:
+        from obsidian_ai_hub.summary.person_candidates import (
+            run_person_candidate_extraction_for_summary,
+        )
 
-            extract_and_register_person_candidates(
-                summary_id=summary_id,
-                date_str=date_str,
-                ground_truth_text=f"{structured_record.get('summary', '')}\n\n{daily_content}",
-                resolved_people=resolved_people,
-            )
-        except Exception as e:
-            logger.error(
-                f"Failed to extract or register person candidates for summary {summary_id}: {e}"
-            )
-            raise
+        run_person_candidate_extraction_for_summary(
+            summary_res=summary_res,
+            target_date=target_date,
+            daily_content=daily_content,
+        )
+    except Exception as e:
+        logger.error(
+            f"Failed to extract or register person candidates for summary {summary_res.get('summary_id')}: {e}"
+        )
 
     return summary_res
 
