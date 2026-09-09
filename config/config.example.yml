@@ -20,6 +20,12 @@ backup:
       destination: /path/to/your/backup/Obsidian/Default
     - source: /path/to/your/obsidian/Inbox
       destination: /path/to/your/backup/Obsidian/Inbox
+      # Optional per-pair rsync excludes, passed through unmodified in listed order
+      # directly after the fixed --exclude=.DS_Store. Example:
+      # excludes:
+      #   - node_modules/
+      #   - "*.tmp"
+      #   - /private/
     - source: /path/to/your/documents
       destination: /path/to/your/backup/Documents
     - source: /path/to/your/share

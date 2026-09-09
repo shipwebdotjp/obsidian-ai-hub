@@ -44,6 +44,31 @@ def main():
             errors.append(message)
             continue
 
+        # Per-pair excludes: passed through to rsync unmodified, in listed order,
+        # directly after the fixed --exclude=.DS_Store. Empty strings are invalid,
+        # matching the falsy check used for source/destination above; patterns
+        # are never stripped or converted.
+        extra_excludes: list[str] = []
+        if "excludes" in pair:
+            excludes = pair.get("excludes")
+            if not isinstance(excludes, list):
+                logger.warning(
+                    "Invalid excludes for %r -> %r: expected a list, ignoring excludes",
+                    src,
+                    dest,
+                )
+            else:
+                for pattern in excludes:
+                    if not isinstance(pattern, str) or pattern == "":
+                        logger.warning(
+                            "Invalid exclude pattern for %r -> %r: %r, ignoring",
+                            src,
+                            dest,
+                            pattern,
+                        )
+                        continue
+                    extra_excludes.append(pattern)
+
         # Ensure we copy the contents of the source directory (trailing slash)
         src_path = src.rstrip("/") + "/"
 
@@ -53,6 +78,7 @@ def main():
             "--delete",
             "--delete-excluded",
             "--exclude=.DS_Store",
+            *(f"--exclude={pattern}" for pattern in extra_excludes),
             src_path,
             dest,
         ]
