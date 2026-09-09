@@ -30,12 +30,12 @@ export default function DeleteAliasDialog({
     <dialog
       ref={dialogRef}
       onClose={onCancel}
-      className="fixed inset-0 m-auto rounded-xl shadow-xl border border-slate-200 w-full max-w-sm p-0 overflow-hidden backdrop:bg-slate-900/60 backdrop:backdrop-blur-sm"
+      className="m-auto rounded-xl shadow-xl border border-slate-200 w-full max-w-sm p-0 overflow-hidden backdrop:bg-slate-900/60 backdrop:backdrop-blur-sm"
       role="dialog"
       aria-modal="true"
       aria-labelledby="delete-alias-dialog-title"
     >
-      <div className="flex flex-col h-full bg-white">
+      <div className="flex flex-col bg-white">
         <div className="p-4 border-b border-slate-100 bg-slate-50 flex items-center justify-between shrink-0">
           <h3 id="delete-alias-dialog-title" className="text-sm font-bold text-slate-900">別名の削除確認</h3>
           <button

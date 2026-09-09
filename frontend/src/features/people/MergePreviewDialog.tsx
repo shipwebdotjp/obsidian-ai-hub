@@ -42,12 +42,12 @@ const MergePreviewDialog = forwardRef<HTMLDialogElement, MergePreviewDialogProps
       <dialog
         ref={ref}
         onClose={onCloseModal}
-        className="fixed inset-0 m-auto rounded-xl shadow-xl border border-slate-200 w-full max-w-2xl max-h-[85vh] p-0 overflow-hidden backdrop:bg-slate-900/60 backdrop:backdrop-blur-sm"
+        className="m-auto rounded-xl shadow-xl border border-slate-200 w-full max-w-2xl max-h-[85vh] p-0 overflow-hidden backdrop:bg-slate-900/60 backdrop:backdrop-blur-sm"
         role="dialog"
         aria-labelledby="merge-dialog-title"
         aria-modal="true"
       >
-        <div className="flex flex-col h-full bg-white">
+        <div className="flex flex-col max-h-[85vh] bg-white">
           {/* Modal Header */}
           <div className="p-4 border-b border-slate-100 flex items-center justify-between shrink-0 bg-slate-50">
             <h2 id="merge-dialog-title" className="text-sm font-bold text-slate-900">人物統合プレビューと確認</h2>
@@ -61,7 +61,7 @@ const MergePreviewDialog = forwardRef<HTMLDialogElement, MergePreviewDialogProps
           </div>
 
           {/* Modal Body */}
-          <div className="p-5 overflow-y-auto space-y-4 text-xs text-slate-700">
+          <div className="p-5 flex-1 min-h-0 overflow-y-auto space-y-4 text-xs text-slate-700">
             {/* Target info comparison & selection */}
             <div className="grid grid-cols-1 gap-4 border border-slate-100 rounded-lg p-3 bg-slate-50 sm:grid-cols-2">
               <div className="space-y-1">

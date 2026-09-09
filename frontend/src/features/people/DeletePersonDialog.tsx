@@ -27,12 +27,12 @@ export default function DeletePersonDialog({
     <dialog
       ref={dialogRef}
       onClose={onCancel}
-      className="fixed inset-0 m-auto rounded-xl shadow-xl border border-slate-200 w-full max-w-md p-0 overflow-hidden backdrop:bg-slate-900/60 backdrop:backdrop-blur-sm"
+      className="m-auto rounded-xl shadow-xl border border-slate-200 w-full max-w-md p-0 overflow-hidden backdrop:bg-slate-900/60 backdrop:backdrop-blur-sm"
       role="dialog"
       aria-modal="true"
       aria-labelledby="delete-person-dialog-title"
     >
-      <div className="flex flex-col h-full bg-white">
+      <div className="flex flex-col bg-white">
         {/* Modal Header */}
         <div className="p-4 border-b border-slate-100 bg-red-50 flex items-center justify-between shrink-0">
           <h3 id="delete-person-dialog-title" className="text-sm font-bold text-red-900">⚠️ 人物の完全削除確認</h3>
