@@ -552,6 +552,156 @@ describe("Person Relations UI Components", () => {
     expect(executeBtnEnabled).not.toBeDisabled();
   });
 
+  test("PersonRelationsSection links target person name to detail via onSelectPerson", async () => {
+    const user = userEvent.setup();
+    const onSelectPerson = vi.fn();
+    const currentPerson: PersonDetail = {
+      person_id: "peo_taro",
+      display_name: "山田 太郎",
+      normalized_name: "山田太郎",
+      vault_id: null,
+      aliases: [],
+      summary_count: 1,
+      summaries: [],
+      relation_counts: {
+        summaries: 1,
+        aliases: 0,
+        assignments: 0,
+        subject_relations: 1,
+        object_relations: 0,
+        evidence: 0,
+      },
+    };
+    const relations: PersonRelation[] = [
+      {
+        relation_id: "rel_1",
+        subject_person_id: "peo_taro",
+        object_person_id: "peo_hanako",
+        relation_type_id: "rlt_parent",
+        started_on: null,
+        ended_on: null,
+        note: null,
+        status: "active",
+        created_at: "2026-01-01T00:00:00",
+        updated_at: "2026-01-01T00:00:00",
+        relation_type: mockTypes[0],
+        evidence: [],
+      },
+    ];
+    const hanako = { person_id: "peo_hanako", display_name: "鈴木 花子", normalized_name: "鈴木花子", vault_id: null, aliases: [], summary_count: 1 };
+    const mockPeopleList = [
+      { person_id: "peo_taro", display_name: "山田 太郎", normalized_name: "山田太郎", vault_id: null, aliases: [], summary_count: 1 },
+      hanako,
+    ];
+
+    render(
+      <PersonRelationsSection
+        currentPerson={currentPerson}
+        relations={relations}
+        peopleList={mockPeopleList}
+        statusFilter="all"
+        onStatusFilterChange={vi.fn()}
+        onOpenCreateModal={vi.fn()}
+        onOpenEditModal={vi.fn()}
+        onDeleteRelation={vi.fn()}
+        onSelectPerson={onSelectPerson}
+      />
+    );
+
+    const link = screen.getByRole("button", { name: "鈴木 花子の詳細を表示" });
+    expect(link).toBeInTheDocument();
+    await user.click(link);
+    expect(onSelectPerson).toHaveBeenCalledWith(expect.objectContaining({ person_id: "peo_hanako" }));
+  });
+
+  test("PersonRelationsSection falls back to plain text for unknown person, self, or missing handler", () => {
+    const basePerson: PersonDetail = {
+      person_id: "peo_taro",
+      display_name: "山田 太郎",
+      normalized_name: "山田太郎",
+      vault_id: null,
+      aliases: [],
+      summary_count: 1,
+      summaries: [],
+      relation_counts: {
+        summaries: 1,
+        aliases: 0,
+        assignments: 0,
+        subject_relations: 1,
+        object_relations: 0,
+        evidence: 0,
+      },
+    };
+    const baseRelation = {
+      relation_type_id: "rlt_parent",
+      started_on: null,
+      ended_on: null,
+      note: null,
+      created_at: "2026-01-01T00:00:00",
+      updated_at: "2026-01-01T00:00:00",
+      relation_type: mockTypes[0],
+      evidence: [],
+    };
+    const peopleList = [
+      { person_id: "peo_taro", display_name: "山田 太郎", normalized_name: "山田太郎", vault_id: null, aliases: [], summary_count: 1 },
+      { person_id: "peo_hanako", display_name: "鈴木 花子", normalized_name: "鈴木花子", vault_id: null, aliases: [], summary_count: 1 },
+    ];
+    const sectionProps = {
+      peopleList,
+      statusFilter: "all" as const,
+      onStatusFilterChange: vi.fn(),
+      onOpenCreateModal: vi.fn(),
+      onOpenEditModal: vi.fn(),
+      onDeleteRelation: vi.fn(),
+      onSelectPerson: vi.fn(),
+    };
+
+    // 不明人物: peopleList に存在しない相手IDはリンク化せず title にIDを保持する。
+    const unknownRelation: PersonRelation = {
+      ...baseRelation,
+      relation_id: "rel_unknown",
+      subject_person_id: "peo_taro",
+      object_person_id: "peo_missing",
+      status: "active",
+    };
+    const { unmount: unmountUnknown } = render(
+      <PersonRelationsSection currentPerson={basePerson} relations={[unknownRelation]} {...sectionProps} />
+    );
+    expect(screen.getByText("不明な人物")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /の詳細を表示/ })).not.toBeInTheDocument();
+    unmountUnknown();
+
+    // 本人: 相手IDが本人と同一の場合はリンク化しない。
+    const selfRelation: PersonRelation = {
+      ...baseRelation,
+      relation_id: "rel_self",
+      subject_person_id: "peo_taro",
+      object_person_id: "peo_taro",
+      status: "active",
+    };
+    const { unmount: unmountSelf } = render(
+      <PersonRelationsSection currentPerson={basePerson} relations={[selfRelation]} {...sectionProps} />
+    );
+    expect(screen.getByText("山田 太郎")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /の詳細を表示/ })).not.toBeInTheDocument();
+    unmountSelf();
+
+    // ハンドラ未指定: 従来通りプレーンテキスト表示となる。
+    const normalRelation: PersonRelation = {
+      ...baseRelation,
+      relation_id: "rel_normal",
+      subject_person_id: "peo_taro",
+      object_person_id: "peo_hanako",
+      status: "active",
+    };
+    const { onSelectPerson: _omitted, ...propsWithoutHandler } = sectionProps;
+    render(
+      <PersonRelationsSection currentPerson={basePerson} relations={[normalRelation]} {...propsWithoutHandler} />
+    );
+    expect(screen.getByText("鈴木 花子")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /の詳細を表示/ })).not.toBeInTheDocument();
+  });
+
   test("formatPeriodDate hides null, empty, and invalid dates", () => {
     expect(formatPeriodDate("2020-01-01")).toBe("2020/01/01(水)");
     expect(formatPeriodDate("2020-12-31")).toBe("2020/12/31(木)");

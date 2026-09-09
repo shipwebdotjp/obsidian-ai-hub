@@ -13,6 +13,7 @@ interface PersonRelationsSectionProps {
   onOpenCreateModal: () => void;
   onOpenEditModal: (relation: PersonRelation) => void;
   onDeleteRelation: (relationId: string) => Promise<void>;
+  onSelectPerson?: (person: Person) => void;
 }
 
 const STATUS_GROUPS: { key: RelationStatus; label: string; badgeColor: string }[] = [
@@ -47,6 +48,7 @@ export default function PersonRelationsSection({
   onOpenCreateModal,
   onOpenEditModal,
   onDeleteRelation,
+  onSelectPerson,
 }: PersonRelationsSectionProps) {
   const [expandedRelationIds, setExpandedRelationIds] = useState<Set<string>>(new Set());
   const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
@@ -154,6 +156,13 @@ export default function PersonRelationsSection({
                     const otherPersonId = isSubject ? rel.object_person_id : rel.subject_person_id;
                     const otherPerson = peopleMap.get(otherPersonId);
                     const otherPersonName = otherPerson ? otherPerson.display_name : "不明な人物";
+                    // 既存の人物詳細遷移 (PeoplePage.handleSelectPerson) を再利用する。
+                    // 専用の /people/:id ルートは存在しないため Link は使わない。
+                    // 本人・不明人物・ハンドラ未指定時は従来通りプレーンテキスト表示。
+                    const isLinkable =
+                      !!otherPerson &&
+                      !!onSelectPerson &&
+                      otherPerson.person_id !== currentPerson.person_id;
 
                     const labelText = isSubject
                       ? rel.relation_type?.forward_label || "関係あり"
@@ -168,9 +177,21 @@ export default function PersonRelationsSection({
                             <div className="flex items-center gap-1.5 text-xs font-bold text-slate-900">
                               <span className="text-slate-600 font-semibold">{labelText}</span>
                               <span className="text-slate-400">—</span>
-                              <span className="text-slate-900 font-bold underline decoration-slate-300" title={otherPerson ? undefined : otherPersonId}>
-                                {otherPersonName}
-                              </span>
+                              {isLinkable && otherPerson ? (
+                                <button
+                                  type="button"
+                                  onClick={() => onSelectPerson?.(otherPerson)}
+                                  title={`${otherPersonName}の詳細を表示`}
+                                  aria-label={`${otherPersonName}の詳細を表示`}
+                                  className="text-slate-900 font-bold underline decoration-slate-300 cursor-pointer hover:text-blue-700 hover:decoration-blue-300 bg-transparent p-0 text-xs"
+                                >
+                                  {otherPersonName}
+                                </button>
+                              ) : (
+                                <span className="text-slate-900 font-bold underline decoration-slate-300" title={otherPerson ? undefined : otherPersonId}>
+                                  {otherPersonName}
+                                </span>
+                              )}
                             </div>
 
                             <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-500">

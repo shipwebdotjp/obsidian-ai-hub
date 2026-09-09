@@ -319,6 +319,7 @@ export default function PeopleListTab({
               onOpenCreateModal={onOpenCreateRelationModal}
               onOpenEditModal={onOpenEditRelationModal}
               onDeleteRelation={onDeleteRelation}
+              onSelectPerson={onSelectPerson}
             />
 
             <div>
