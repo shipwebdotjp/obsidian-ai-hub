@@ -396,9 +396,27 @@ def summarize_day(target_date: datetime) -> dict:
         raise ValueError("Failed to generate structured record: summary is missing or empty.")
 
     # 3. SQLiteへの保存 (永続化)
-    return upsert_summary_record(structured_record)
+    summary_res = upsert_summary_record(structured_record)
 
-    # 4. デイリーノートへの追記 (人間用表示) 260719: 人間の書いたものと、AIの書いたものを混ぜないためにデイリーノートへの追記は中止
+    # 4. 確定人物を用いた第2段階人物変更候補の抽出とHITL登録
+    try:
+        from obsidian_ai_hub.summary.person_candidates import (
+            run_person_candidate_extraction_for_summary,
+        )
+
+        run_person_candidate_extraction_for_summary(
+            summary_res=summary_res,
+            target_date=target_date,
+            daily_content=daily_content,
+        )
+    except Exception as e:
+        logger.error(
+            f"Failed to extract or register person candidates for summary {summary_res.get('summary_id')}: {e}"
+        )
+
+    return summary_res
+
+    # 5. デイリーノートへの追記 (人間用表示) 260719: 人間の書いたものと、AIの書いたものを混ぜないためにデイリーノートへの追記は中止
     # if daily_file.exists():
     #     markdown_content = format_structured_record_as_markdown(structured_record, activity_logs)
     #     extracter.append_to_subheader_file(daily_file.as_posix(), "## AIによる要約", [markdown_content])

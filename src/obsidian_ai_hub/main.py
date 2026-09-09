@@ -42,6 +42,7 @@ def register_hitl_handlers():
     from obsidian_ai_hub.calendar.hitl import add_approved_calendar_event
     from obsidian_ai_hub.reminders.hitl import add_approved_reminder
     from obsidian_ai_hub.agents.ask_user_handler import handle_agent_ask_user, handle_coding_ask_user
+    from obsidian_ai_hub.summary.person_candidates_handler import apply_person_candidates_handler
     register_handler("research.run_approved_suggestion", run_approved_suggestion)
     register_handler("memory.apply_maintenance_proposals", run_approved_maintenance)
     register_handler("memory.apply_interview_answers", apply_interview_answers)
@@ -49,6 +50,7 @@ def register_hitl_handlers():
     register_handler("reminders.add_approved_reminder", add_approved_reminder)
     register_handler("agents.ask_user", handle_agent_ask_user)
     register_handler("coding.ask_user", handle_coding_ask_user)
+    register_handler("summary.apply_person_candidates", apply_person_candidates_handler)
 
 
 def main():

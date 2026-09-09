@@ -950,4 +950,79 @@ describe("HitlPage", () => {
       });
     });
   });
+
+  describe("daily_person_changes context rendering", () => {
+    it("displays '日次人物変更候補' badge and renders property & relation candidate context cards", async () => {
+      mockListHitlRuns.mockResolvedValue({
+        items: [
+          {
+            run_id: "hrun-person-cand-1",
+            handler: "summary.apply_person_candidates",
+            status: "pending_user",
+            created_at: "2026-09-08T10:00:00Z",
+            title: "2026-09-08 日次人物変更候補",
+            display_title: "2026-09-08 日次人物変更候補",
+            display_type: "daily_person_changes",
+          },
+        ],
+        total: 1,
+      } as any);
+
+      mockGetHitlRun.mockResolvedValue({
+        run_id: "hrun-person-cand-1",
+        handler: "summary.apply_person_candidates",
+        status: "pending_user",
+        title: "2026-09-08 日次人物変更候補",
+        display_title: "2026-09-08 日次人物変更候補",
+        display_type: "daily_person_changes",
+        questions: [
+          {
+            question_id: "q-p1",
+            question_key: "cand_attr_0",
+            question_type: "select",
+            display_text: "【属性新規作成】山田太郎 の「役職」",
+            title: "属性新規作成: 山田太郎（役職）",
+            choices: [
+              { value: "apply", label: "適用" },
+              { value: "skip", label: "見送り" },
+            ],
+            is_required: 1,
+            status: "pending",
+            context: {
+              candidate_type: "property",
+              candidate_key: "cand_attr_0",
+              operation: "create",
+              summary_id: "sum_123",
+              person_id: "peo_1",
+              person_name: "山田太郎",
+              property_definition_id: "propdef_1",
+              property_key: "title",
+              property_display_name: "役職",
+              after: {
+                value: "部長",
+                valid_from: "2026-09-01",
+                valid_until: null,
+                note: "昇進",
+              },
+              quote: "山田太郎さんが9月1日付けで部長に昇進した。",
+              reason: "日次ノートの昇進記述に基づく",
+            },
+          },
+        ],
+      } as any);
+
+      renderPage(["/hitl?run_id=hrun-person-cand-1"]);
+
+      await waitFor(() => {
+        expect(screen.getAllByText("日次人物変更候補").length).toBeGreaterThanOrEqual(1);
+      });
+
+      expect(screen.getByTestId("person-candidate-context")).toBeInTheDocument();
+      expect(screen.getByText("人物属性 - 新規作成")).toBeInTheDocument();
+      expect(screen.getByText("山田太郎 の「役職」")).toBeInTheDocument();
+      expect(screen.getByText("部長")).toBeInTheDocument();
+      expect(screen.getByText("“山田太郎さんが9月1日付けで部長に昇進した。”")).toBeInTheDocument();
+      expect(screen.getByText("日次ノートの昇進記述に基づく")).toBeInTheDocument();
+    });
+  });
 });

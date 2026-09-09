@@ -55,3 +55,7 @@
 ## Person Event / Action (人物イベント／アクション)
 
 特定時点または期間に発生した単発の出来事や行為（例: 「資金を援助した」）。継続的な関係状態である Person Relation（例: 「援助関係にある」）とは区別される概念であり、v1 対象外として将来の拡張領域に位置づけられる。
+
+## 日次人物変更候補 (daily_person_changes)
+
+日次要約の保存および確定人物の同定後に、専用プロンプト（`config/prompts/extract_person_candidates.md`）を用いて抽出される、DB専用属性および既存リレーションタイプの変更（create/update/delete）の提案候補。LLM生成時点ではDB正本を変更せず、決定的な HITL Run（`display_type = "daily_person_changes"`）として登録される。承認（「適用」）時に候補ごとの独立トランザクションで現行DB状態に対し再検証した上で反映され、リレーション適用時には `summary:{summary_id}` Evidence が記録される。
