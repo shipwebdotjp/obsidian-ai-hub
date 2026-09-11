@@ -367,13 +367,23 @@ class CodingOrchestrator:
                     backend_name=backend_name,
                     phase=phase,
                     phase_turn=phase_turn,
+                    session_id=session_id,
                 )
             except TypeError:
-                resp = await self.generate_response(
-                    history=history,
-                    repo_path=repo_path,
-                    backend_name=backend_name,
-                )
+                try:
+                    resp = await self.generate_response(
+                        history=history,
+                        repo_path=repo_path,
+                        backend_name=backend_name,
+                        phase=phase,
+                        phase_turn=phase_turn,
+                    )
+                except TypeError:
+                    resp = await self.generate_response(
+                        history=history,
+                        repo_path=repo_path,
+                        backend_name=backend_name,
+                    )
             yield {"type": "text", "content": resp}
             return
 
@@ -459,6 +469,7 @@ class CodingOrchestrator:
             temperature=0.7,
             max_tokens=8192,
             use_responses_api=True,
+            session_id=session_id,
         )
         messages = self._build_messages(
             history,
@@ -728,6 +739,7 @@ class CodingOrchestrator:
         backend_name: str,
         phase: str = "initial",
         phase_turn: int = 1,
+        session_id: Optional[str] = None,
     ) -> str:
         """Generate complete orchestrator response string asynchronously (wrapper consuming events)."""
         text_parts = []
@@ -737,6 +749,7 @@ class CodingOrchestrator:
             backend_name=backend_name,
             phase=phase,
             phase_turn=phase_turn,
+            session_id=session_id,
         ):
             if event.get("type") == "text":
                 text_parts.append(event.get("content", ""))
@@ -748,13 +761,21 @@ class CodingOrchestrator:
         new_user_message: Optional[str] = None,
         repo_path: str = "",
         backend_name: str = "",
+        session_id: Optional[str] = None,
     ) -> AsyncGenerator[str, None]:
         """Stream orchestrator tokens asynchronously (legacy helper / backwards compatibility)."""
         full_history = list(history)
         if new_user_message:
             full_history.append({"role": "user", "content": new_user_message})
 
-        llm = create_langchain_llm(provider=self.provider, model=self.model, temperature=0.7, max_tokens=8192, use_responses_api=True)
+        llm = create_langchain_llm(
+            provider=self.provider,
+            model=self.model,
+            temperature=0.7,
+            max_tokens=8192,
+            use_responses_api=True,
+            session_id=session_id,
+        )
         messages = self._build_messages(full_history, repo_path, backend_name)
 
         try:

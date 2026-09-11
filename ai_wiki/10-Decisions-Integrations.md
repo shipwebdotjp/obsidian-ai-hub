@@ -1,16 +1,32 @@
 # 外部連携の決定記録
 
-## OpenCode Go へ x-opencode-session ヘッダーを送る
+## OpenCode Go へ User-Agent および x-opencode-session ヘッダーを送る
 
 | 項目 | 内容 |
 |------|------|
-| 決定日 | 2026-09-03 |
+| 決定日 | 2026-09-03（2026-09-11 拡張） |
 | カテゴリ | LLM連携 |
-| 決定内容 | `provider: opencode_go` の OpenAI互換経路（`ChatOpenAI`、base_url `https://opencode.ai/zen/go/v1`）に `default_headers={"x-opencode-session": OPENCODE_SESSION_ID}` を付与する |
+| 決定内容 | `provider: opencode_go` の OpenAI 互換（`ChatOpenAI`）および Anthropic 互換（`ChatAnthropic`）の両経路へ `User-Agent: obsidian-ai-hub/1.0` を固定付与し、会話 ID に応じた `x-opencode-session` ヘッダーを送信する |
 
 ### 結論に至った経緯
 
-OpenCode Go 向け OpenAI/Python クライアント生成は `utils/llm_client.py::create_opencode_go_llm` の `ChatOpenAI` のみで、直接の `OpenAI`/`AsyncOpenAI` 生成や Hermes 依存はない。`ChatOpenAI(default_headers=...)` は配下の同期・非同期 OpenAI クライアント双方へ同一値を渡すため、1か所の指定で両経路を満たす。値は固定の安定識別子 `obsidian-ai-hub` を既定とし、環境変数 `OPENCODE_SESSION_ID` または `config.yml` の `opencode_go.session_id` で上書き可能にする。APIキー・ユーザー入力・プロンプト・個人情報は含めない。既存 `default_headers` がある場合は `setdefault` でマージし、消さない。
+OpenCode Go 呼び出しにおいて、obsidian-ai-hub からのトラフィック識別と会話セッションの適切な紐付け・分離を行うため、以下のヘッダー仕様を全 OpenCode Go 経路に適用する。
+
+1. **User-Agent ヘッダーの固定付与**:
+   - `provider: opencode_go` のすべての呼び出し（OpenAI 互換 `ChatOpenAI` および Anthropic 互換 `ChatAnthropic`）に対し、一律で `User-Agent: obsidian-ai-hub/1.0` を付与する。呼び出し側の `default_headers` に既存の `User-Agent` が指定されていても、この固定値で上書きする。
+
+2. **会話 session_id の優先順位と固定フォールバック**:
+   - `x-opencode-session` ヘッダーの値は以下の優先順位で決定する:
+     ① 明示的に渡された会話 `session_id`（AI エージェントの `asess_...` やコーディング・オーケストレータの `cses_...`）
+     ② 呼び出し側の `default_headers` 内の既存 `x-opencode-session` 値
+     ③ 環境変数 `OPENCODE_SESSION_ID` または `config.yml`（`opencode_go.session_id`）の指定値
+     ④ 固定フォールバック値 `"obsidian-ai-hub"`
+   - 明示的な `session_id` が `None` や空文字列 `""` の場合は①をスキップして②〜④へフォールスルーする。
+   - サブエージェント委譲時（`execute_subagent_core`）は親 AI エージェントの `session_id` を引き継いで送信する。
+   - 日次サマリー作成や記憶抽出等の非会話 LLM 呼び出しでは明示的な会話 ID を渡さず、固定フォールバック（`OPENCODE_SESSION_ID` または `"obsidian-ai-hub"`）を使用する。
+
+3. **安全性とプライバシー**:
+   - セッションヘッダーには非機密で安定した会話識別子（`asess_...` / `cses_...` / `"obsidian-ai-hub"`）のみを使用し、API キー・プロンプト・個人情報は一切含めない。
 
 ## OpenCode Go の GPT モデルは Responses API を使う
 

@@ -22,23 +22,33 @@ logger = logging.getLogger(__name__)
 
 OPENCODE_SESSION_HEADER = "x-opencode-session"
 OPENCODE_SESSION_ID_FALLBACK = "obsidian-ai-hub"
+OPENCODE_USER_AGENT = "obsidian-ai-hub/1.0"
 
 
 def _opencode_default_headers(
+    session_id: str | None = None,
     extra: dict[str, Any] | None = None,
 ) -> dict[str, str]:
     """OpenCode Go 用の default_headers を返す。
 
     安全で安定した識別子のみを使い、APIキー・ユーザー入力・プロンプト・
     個人情報は含めない。呼び出し側の既存 default_headers は保持し、
-    不足分としてセッションヘッダーを補う。
+    不足分としてセッションヘッダーを補う。User-Agent は常に obsidian-ai-hub/1.0。
     """
-    session_id = (
-        str(getattr(config, "OPENCODE_SESSION_ID", "") or "").strip()
+    merged = dict(extra or {})
+    merged["User-Agent"] = OPENCODE_USER_AGENT
+
+    explicit_session = (session_id or "").strip()
+    caller_session = str(merged.get(OPENCODE_SESSION_HEADER, "") or "").strip()
+    config_session = str(getattr(config, "OPENCODE_SESSION_ID", "") or "").strip()
+
+    effective_session = (
+        explicit_session
+        or caller_session
+        or config_session
         or OPENCODE_SESSION_ID_FALLBACK
     )
-    merged = dict(extra or {})
-    merged.setdefault(OPENCODE_SESSION_HEADER, session_id)
+    merged[OPENCODE_SESSION_HEADER] = effective_session
     return merged
 
 
@@ -374,6 +384,7 @@ def generate_llm_response(
     max_tokens: int = 16384,
     files: Sequence[Path | str] | None = None,
     system_prompt: str | None = None,
+    session_id: str | None = None,
 ) -> str:
     """
     指定のモデルとプロンプトで OpenAI/Gemini/Local/Ollama を呼び出し、
@@ -384,11 +395,16 @@ def generate_llm_response(
     config.ensure_external_allowed("LLM API call")
     messages = _prepare_messages(provider, prompt, files, system_prompt=system_prompt)
     logger.info(f"Prepared messages for LLM: {messages}")
+    extra_options: dict[str, Any] = {}
+    if session_id is not None:
+        extra_options["session_id"] = session_id
+
     llm = create_langchain_llm(
         provider=provider,
         model=model,
         temperature=temperature,
         max_tokens=max_tokens,
+        **extra_options,
     )
 
     def _call() -> str:
@@ -411,6 +427,7 @@ def generate_llm_response_with_tools(
     max_iterations: int = 10,
     files: Sequence[Path | str] | None = None,
     system_prompt: str | None = None,
+    session_id: str | None = None,
 ) -> str:
     """
     ツール呼び出しをサポートしたLLMレスポンス生成。
@@ -426,12 +443,17 @@ def generate_llm_response_with_tools(
             "store": False,
         }
 
+    extra_options: dict[str, Any] = {}
+    if session_id is not None:
+        extra_options["session_id"] = session_id
+
     llm = create_langchain_llm(
         provider=provider,
         model=model,
         temperature=temperature,
         max_tokens=max_tokens,
         **openai_tool_options,
+        **extra_options,
     )
 
     llm_with_tools = llm.bind_tools(list(tools))
@@ -495,6 +517,8 @@ def create_langchain_llm(
     use_responses_api: bool | None = None,
     store: bool | None = None,
     reasoning_effort: str | None = None,
+    default_headers: dict[str, Any] | None = None,
+    session_id: str | None = None,
 ):
     """
     provider 名から LangChain の ChatModel / LLM を生成する。
@@ -539,6 +563,10 @@ def create_langchain_llm(
         opencode_options: dict[str, Any] = {}
         if cleaned_effort is not None:
             opencode_options["reasoning_effort"] = cleaned_effort
+        if default_headers is not None:
+            opencode_options["default_headers"] = default_headers
+        if session_id is not None:
+            opencode_options["session_id"] = session_id
         return create_opencode_go_llm(model, temperature, max_tokens, **opencode_options)
 
     raise ValueError(f"Unknown provider: {provider}")
@@ -551,6 +579,7 @@ def create_opencode_go_llm(
     *,
     reasoning_effort: str | None = None,
     default_headers: dict[str, Any] | None = None,
+    session_id: str | None = None,
 ):
     """OpenCode Go 用 LangChain ChatModel を返す。"""
     api_key = config.OPENCODE_API_KEY
@@ -559,6 +588,8 @@ def create_opencode_go_llm(
 
     openai_prefixes = ("gpt-", "glm-", "kimi-", "deepseek-", "mimo-", "grok-")
     anthropic_prefixes = ("minimax-", "qwen3.7-", "qwen3.6-")
+
+    headers = _opencode_default_headers(session_id=session_id, extra=default_headers)
 
     if model.startswith(openai_prefixes):
         try:
@@ -573,7 +604,7 @@ def create_opencode_go_llm(
             options["use_responses_api"] = True
         if reasoning_effort is not None:
             options["reasoning_effort"] = reasoning_effort
-        options["default_headers"] = _opencode_default_headers(default_headers)
+        options["default_headers"] = headers
 
         return ChatOpenAI(
             model=model,
@@ -599,6 +630,7 @@ def create_opencode_go_llm(
             temperature=temperature,
             max_tokens=max_tokens,
             max_retries=0,
+            default_headers=headers,
         )
     else:
         raise RuntimeError(f"Unsupported model ID for opencode_go: {model}")

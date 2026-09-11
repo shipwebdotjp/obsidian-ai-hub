@@ -551,6 +551,7 @@ def execute_subagent_core(
             temperature=0.7,
             max_tokens=max_tokens_val,
             reasoning_effort=reasoning_effort,
+            session_id=trusted_ctx.get("session_id"),
             **openai_options,
         )
 
@@ -1263,6 +1264,7 @@ async def generate_agent_stream(
             temperature=0.7,
             max_tokens=max_tokens_val,
             reasoning_effort=reasoning_effort,
+            session_id=session.get("session_id"),
             **openai_options,
         )
 
