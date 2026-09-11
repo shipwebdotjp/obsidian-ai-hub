@@ -67,7 +67,7 @@ llm:
   #   provider: opencode_go
   #   model: deepseek-v3  # OpenAI-compatible model
   #   # model: qwen3.7-72b  # Anthropic-compatible model
-  # Optional OpenCode Go session identifier sent as x-opencode-session
+  # Optional OpenCode Go default session identifier sent as x-opencode-session when no conversation session ID is specified
   # (OPENCODE_SESSION_ID overrides this; default: obsidian-ai-hub):
   # opencode_go:
   #   session_id: obsidian-ai-hub
