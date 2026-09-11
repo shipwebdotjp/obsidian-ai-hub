@@ -214,7 +214,7 @@ export default function PeopleListTab({
                     disabled={loading}
                     title="本人設定を解除"
                     aria-label="本人設定を解除"
-                    className="rounded bg-indigo-50 border border-indigo-200 px-2.5 py-1 text-xs font-medium text-indigo-700 hover:bg-indigo-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                    className="flex items-center gap-1 rounded bg-slate-900 px-3 py-1 text-sm text-white hover:bg-slate-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                   >
                     本人設定を解除
                   </button>
@@ -225,7 +225,7 @@ export default function PeopleListTab({
                     disabled={loading}
                     title="本人に設定"
                     aria-label="本人に設定"
-                    className="rounded bg-indigo-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                    className="flex items-center gap-1 rounded bg-blue-600 px-3 py-1 text-sm text-white hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                   >
                     本人に設定
                   </button>
