@@ -1,6 +1,7 @@
-import { apiGet, apiPost, apiPatch, apiDelete } from "../../api/client";
+import { apiGet, apiPost, apiPut, apiPatch, apiDelete } from "../../api/client";
 import { Person } from "../../api/types";
 import {
+  PrincipalPersonResponse,
   PersonCandidate,
   PersonCandidateDetail,
   PersonDetail,
@@ -43,6 +44,20 @@ export async function rejectCandidate(candidateId: string): Promise<void> {
 
 export async function reopenCandidate(candidateId: string): Promise<void> {
   await apiPost(`${PEOPLE_API}/candidates/${encodeURIComponent(candidateId)}/reopen`, {});
+}
+
+export async function fetchPrincipalPerson(): Promise<PrincipalPersonResponse> {
+  return apiGet<PrincipalPersonResponse>(`${PEOPLE_API}/principal`);
+}
+
+export async function setPrincipalPerson(personId: string): Promise<PrincipalPersonResponse> {
+  return apiPut<PrincipalPersonResponse>(`${PEOPLE_API}/principal`, {
+    person_id: personId,
+  });
+}
+
+export async function unsetPrincipalPerson(): Promise<void> {
+  await apiDelete(`${PEOPLE_API}/principal`);
 }
 
 export async function fetchPeople(): Promise<Person[]> {

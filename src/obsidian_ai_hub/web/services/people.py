@@ -36,6 +36,81 @@ class VaultLinkedPersonError(ValueError):
         super().__init__(message)
 
 
+class PrincipalPersonConflictError(ValueError):
+    def __init__(self, message="本人に設定されている人物は削除できません"):
+        super().__init__(message)
+
+
+# --- Principal Person Management services ---
+
+
+def get_principal_person() -> dict[str, Optional[str]]:
+    """Return dict with principal_person_id and display_name, or None/None if not set."""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT s.person_id, p.display_name
+            FROM principal_person_settings s
+            JOIN people p ON s.person_id = p.person_id
+            WHERE s.id = 1
+            """
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return {"principal_person_id": None, "display_name": None}
+        return {
+            "principal_person_id": row["person_id"],
+            "display_name": row["display_name"],
+        }
+    finally:
+        conn.close()
+
+
+def set_principal_person(person_id: str) -> dict[str, str]:
+    """Set or update principal person setting to person_id.
+
+    Raises FileNotFoundError if person_id does not exist in people.
+    """
+    conn = get_db_connection()
+    try:
+        with conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT display_name FROM people WHERE person_id = ?", (person_id,))
+            row = cursor.fetchone()
+            if row is None:
+                raise FileNotFoundError(f"Person not found: {person_id}")
+
+            from datetime import datetime, timezone
+            now_str = datetime.now(timezone.utc).isoformat()
+
+            cursor.execute(
+                """
+                INSERT INTO principal_person_settings (id, person_id, created_at, updated_at)
+                VALUES (1, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    person_id = excluded.person_id,
+                    updated_at = excluded.updated_at
+                """,
+                (person_id, now_str, now_str),
+            )
+            return {"principal_person_id": person_id, "display_name": row["display_name"]}
+    finally:
+        conn.close()
+
+
+def unset_principal_person() -> None:
+    """Delete principal person setting row if it exists."""
+    conn = get_db_connection()
+    try:
+        with conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM principal_person_settings WHERE id = 1")
+    finally:
+        conn.close()
+
+
 # --- People Management services ---
 
 
@@ -357,6 +432,11 @@ def delete_person(person_id: str) -> dict:
             )
             if cursor.fetchone() is None:
                 raise FileNotFoundError("Person not found")
+
+            # Block deletion if person is currently set as principal person
+            cursor.execute("SELECT person_id FROM principal_person_settings WHERE id = 1 AND person_id = ?", (person_id,))
+            if cursor.fetchone() is not None:
+                raise PrincipalPersonConflictError()
 
             # Count relations and evidence to be deleted
             cursor.execute(

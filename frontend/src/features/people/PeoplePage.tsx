@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef } from "react";
 import { ApiError } from "../../api/client";
 import { Person, PersonAlias } from "../../api/types";
 import {
+  PrincipalPersonResponse,
   PersonCandidate,
   PersonCandidateDetail,
   PersonDetail,
@@ -99,6 +100,7 @@ export default function PeoplePage() {
   const [successMsg, setSuccessMessage] = useState<string | null>(null);
 
   // Data states
+  const [principalPerson, setPrincipalPerson] = useState<PrincipalPersonResponse | null>(null);
   const [candidates, setCandidates] = useState<PersonCandidate[]>([]);
   const [rejectedCandidates, setRejectedCandidates] = useState<PersonCandidate[]>([]);
   const [people, setPeople] = useState<Person[]>([]);
@@ -198,7 +200,8 @@ export default function PeoplePage() {
       setSuccessMessage(null);
     }
     try {
-      const [candsData, rejectedCandsData, peopleData, dupsData, reportData, typesData, defsData] = await Promise.all([
+      const [principalData, candsData, rejectedCandsData, peopleData, dupsData, reportData, typesData, defsData] = await Promise.all([
+        peopleApi.fetchPrincipalPerson(),
         peopleApi.fetchCandidates("unresolved"),
         peopleApi.fetchCandidates("rejected"),
         peopleApi.fetchPeople(),
@@ -207,6 +210,7 @@ export default function PeoplePage() {
         peopleApi.fetchPersonRelationTypes(),
         peopleApi.fetchPropertyDefinitions(),
       ]);
+      setPrincipalPerson(principalData);
       setCandidates(candsData);
       setRejectedCandidates(rejectedCandsData);
       setPeople(peopleData);
@@ -570,6 +574,36 @@ export default function PeoplePage() {
     }
   };
 
+  const handleSetPrincipalPerson = async (personId: string) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await peopleApi.setPrincipalPerson(personId);
+      setPrincipalPerson(res);
+      setSuccessMessage(`人物「${res.display_name}」を本人に設定しました。`);
+      await loadAllData(false);
+    } catch (e: any) {
+      setError(e.message || "本人設定に失敗しました");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleUnsetPrincipalPerson = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      await peopleApi.unsetPrincipalPerson();
+      setPrincipalPerson({ principal_person_id: null, display_name: null });
+      setSuccessMessage("本人設定を解除しました。");
+      await loadAllData(false);
+    } catch (e: any) {
+      setError(e.message || "本人設定の解除に失敗しました");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleExecuteDelete = async () => {
     if (!personToDelete) return;
     setLoading(true);
@@ -588,7 +622,16 @@ export default function PeoplePage() {
       setShowDeleteConfirm(false);
       await loadAllData(false);
     } catch (e: any) {
-      setError(e.message || "削除に失敗しました");
+      if (e instanceof ApiError && e.status === 409) {
+        const detail = e.body?.detail as PeopleError;
+        if (detail && detail.conflict_type === "principal_person") {
+          setError("本人に設定されている人物は削除できません。本人設定を解除してから削除してください。");
+        } else {
+          setError(detail?.message || e.message || "削除に失敗しました");
+        }
+      } else {
+        setError(e.message || "削除に失敗しました");
+      }
     } finally {
       setLoading(false);
     }
@@ -924,6 +967,9 @@ export default function PeoplePage() {
             <PeopleListTab
               people={people}
               selectedPerson={selectedPerson}
+              principalPersonId={principalPerson?.principal_person_id}
+              onSetPrincipalPerson={handleSetPrincipalPerson}
+              onUnsetPrincipalPerson={handleUnsetPrincipalPerson}
               editDisplayName={editDisplayName}
               editAliasesText={editAliasesText}
               editError={editError}

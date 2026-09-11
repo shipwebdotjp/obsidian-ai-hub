@@ -697,42 +697,68 @@ def people_search(query: str, limit: int = 10) -> str:
         return json.dumps({"error": _sanitize_unexpected_error(exc)}, ensure_ascii=False)
 
 
-@tool(args_schema=PersonGetInput)
-def people_get(person_id: str) -> str:
-    """人物IDから詳細（別名、全属性値、直接接続リレーション、関連サマリ、件数）を取得します。属性値（properties）にはDB/Vault正本問わず期間付き履歴や複数値を含む全属性値が含まれます。直接接続リレーション（related_people）には対象人物の視点からの関係情報が含まれます。vault_idがある場合はVault人物ノートの本文（vault_note）も付与します。"""
-    try:
-        from obsidian_ai_hub.web.services.people import get_person_detail
-        from obsidian_ai_hub.web.services.person_properties import get_person_properties_for_ai
-        from obsidian_ai_hub.web.services.person_relations import get_person_relations_for_ai
-
-        detail = get_person_detail(person_id)
-        if detail is None:
-            return json.dumps({"error": "人物が見つかりません"}, ensure_ascii=False)
-        vault_id = detail.get("vault_id")
-        if vault_id:
-            vault_note = _resolve_person_vault_note(str(vault_id))
-            if vault_note is not None:
-                detail["vault_note"] = vault_note
-
+def _make_people_get_tool(trusted_ctx: Optional[Dict[str, Any]] = None) -> BaseTool:
+    @tool(args_schema=PersonGetInput)
+    def people_get(person_id: str) -> str:
+        """人物IDから詳細（別名、全属性値・履歴、直接接続リレーション、本人との直接関係、関連サマリ、件数）を取得します。特定人物メッセージを個人化する際は people_search → people_get を使用し、relationship_to_principal が空/nullの場合は本人との関係を推測・言及しないでください。"""
         try:
-            detail["properties"] = get_person_properties_for_ai(person_id)
-        except Exception as p_exc:
-            logger.warning("people_get: failed to fetch properties for person_id=%s: %s", person_id, p_exc)
-            detail["properties"] = []
+            from obsidian_ai_hub.web.services.people import get_person_detail
+            from obsidian_ai_hub.web.services.person_properties import get_person_properties_for_ai
+            from obsidian_ai_hub.web.services.person_relations import (
+                get_person_relations_for_ai,
+                get_relationship_to_principal_for_ai,
+            )
 
-        try:
-            detail["related_people"] = get_person_relations_for_ai(person_id)
-        except Exception as r_exc:
-            logger.warning("people_get: failed to fetch related_people for person_id=%s: %s", person_id, r_exc)
-            detail["related_people"] = []
+            detail = get_person_detail(person_id)
+            if detail is None:
+                return json.dumps({"error": "人物が見つかりません"}, ensure_ascii=False)
+            vault_id = detail.get("vault_id")
+            if vault_id:
+                vault_note = _resolve_person_vault_note(str(vault_id))
+                if vault_note is not None:
+                    detail["vault_note"] = vault_note
 
-        return json.dumps(detail, ensure_ascii=False)
-    except EXPECTED_TOOL_EXCEPTIONS as exc:
-        logger.warning("people_get failed: %s", exc)
-        return json.dumps({"error": str(exc)}, ensure_ascii=False)
-    except Exception as exc:
-        logger.exception("people_get failed")
-        return json.dumps({"error": _sanitize_unexpected_error(exc)}, ensure_ascii=False)
+            try:
+                detail["properties"] = get_person_properties_for_ai(person_id)
+            except Exception as p_exc:
+                logger.warning("people_get: failed to fetch properties for person_id=%s: %s", person_id, p_exc)
+                detail["properties"] = []
+
+            try:
+                detail["related_people"] = get_person_relations_for_ai(person_id)
+            except Exception as r_exc:
+                logger.warning("people_get: failed to fetch related_people for person_id=%s: %s", person_id, r_exc)
+                detail["related_people"] = []
+
+            principal_id = trusted_ctx.get("principal_person_id") if trusted_ctx else None
+            principal_name = trusted_ctx.get("principal_display_name") if trusted_ctx else None
+            now_dt = trusted_ctx.get("now") if trusted_ctx else None
+            today_str = now_dt.strftime("%Y-%m-%d") if hasattr(now_dt, "strftime") else None
+
+            try:
+                detail["relationship_to_principal"] = get_relationship_to_principal_for_ai(
+                    target_person_id=person_id,
+                    principal_person_id=principal_id,
+                    principal_display_name=principal_name,
+                    today_str=today_str,
+                )
+            except Exception as rel_exc:
+                logger.warning("people_get: failed to fetch relationship_to_principal for person_id=%s: %s", person_id, rel_exc)
+                detail["relationship_to_principal"] = None
+
+            return json.dumps(detail, ensure_ascii=False)
+        except EXPECTED_TOOL_EXCEPTIONS as exc:
+            logger.warning("people_get failed: %s", exc)
+            return json.dumps({"error": str(exc)}, ensure_ascii=False)
+        except Exception as exc:
+            logger.exception("people_get failed")
+            return json.dumps({"error": _sanitize_unexpected_error(exc)}, ensure_ascii=False)
+
+    people_get.name = "people_get"  # type: ignore[attr-defined]
+    return people_get
+
+
+people_get = _make_people_get_tool(None)
 
 
 @tool(args_schema=ProjectSearchInput)
@@ -915,14 +941,15 @@ _BUILTIN_TOOL_DEFINITIONS: Dict[str, Dict[str, Any]] = {
     "people_search": {
         "tool_id": "people_search",
         "name": "人物検索",
-        "description": "確定済み人物を名前・別名の部分一致で検索します（未解決候補は除外）。people_get と組み合わせて詳細を取得できます。",
+        "description": "確定済み人物を名前・別名の部分一致で検索します（未解決候補は除外）。特定人物メッセージを個人化する際は people_search → people_get の順で詳細を取得してください。",
         "get_tool": lambda: people_search,
     },
     "people_get": {
         "tool_id": "people_get",
         "name": "人物詳細取得",
-        "description": "人物IDから詳細（別名、全属性値・履歴、直接接続リレーション、関連サマリ、件数）を取得します。vault_idがある場合はVault人物ノートの本文（vault_note）も付与します。",
-        "get_tool": lambda: people_get,
+        "description": "人物IDから詳細（別名、全属性値・履歴、直接接続リレーション、本人との直接関係、関連サマリ、件数）を取得します。特定人物メッセージを個人化する際は people_search → people_get を使用し、relationship_to_principal が空/nullの場合は本人との関係を推測・言及しないでください。",
+        "get_tool": lambda: _make_people_get_tool(None),
+        "get_tool_with_context": lambda ctx: _make_people_get_tool(ctx),
     },
     "project_search": {
         "tool_id": "project_search",

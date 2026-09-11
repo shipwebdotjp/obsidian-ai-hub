@@ -9,11 +9,33 @@ from obsidian_ai_hub.web.routes.deps import require_bearer_token
 logger = logging.getLogger(__name__)
 
 # NOTE: Static route prefixes (/people/candidates, /people/duplicates,
-# /people/vault-report, /people/merge, /people/sync) must be declared before the
+# /people/vault-report, /people/merge, /people/sync, /people/principal) must be declared before the
 # parametrized /people/{person_id} routes so that "candidates" etc. are not
 # captured as a person_id.
 
 router = APIRouter()
+
+
+@router.get("/people/principal", response_model=schemas.PrincipalPersonResponse)
+def get_principal_person(_=Depends(require_bearer_token)):
+    return service.get_principal_person()
+
+
+@router.put("/people/principal", response_model=schemas.PrincipalPersonResponse)
+def set_principal_person(
+    body: schemas.PrincipalPersonSetRequest,
+    _=Depends(require_bearer_token),
+):
+    try:
+        return service.set_principal_person(body.person_id)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+
+
+@router.delete("/people/principal", status_code=status.HTTP_204_NO_CONTENT)
+def unset_principal_person(_=Depends(require_bearer_token)):
+    service.unset_principal_person()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/people", response_model=list[schemas.Person])
@@ -128,6 +150,11 @@ def delete_person(
 ):
     try:
         return service.delete_person(person_id)
+    except service.PrincipalPersonConflictError as e:
+        raise HTTPException(
+            status_code=409,
+            detail={"message": str(e), "conflict_type": "principal_person"},
+        ) from e
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
 

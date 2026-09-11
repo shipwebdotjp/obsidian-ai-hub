@@ -17,6 +17,9 @@ import PersonPropertiesSection from "./PersonPropertiesSection";
 interface PeopleListTabProps {
   people: Person[];
   selectedPerson: PersonDetail | null;
+  principalPersonId?: string | null;
+  onSetPrincipalPerson?: (personId: string) => Promise<void>;
+  onUnsetPrincipalPerson?: () => Promise<void>;
   editDisplayName: string;
   editAliasesText: string;
   editError: PeopleError | null;
@@ -51,6 +54,9 @@ interface PeopleListTabProps {
 export default function PeopleListTab({
   people,
   selectedPerson,
+  principalPersonId = null,
+  onSetPrincipalPerson = async () => {},
+  onUnsetPrincipalPerson = async () => {},
   editDisplayName,
   editAliasesText,
   editError,
@@ -121,6 +127,7 @@ export default function PeopleListTab({
           <div className="space-y-2">
             {filteredPeople.map((p) => {
               const isSelected = selectedPerson?.person_id === p.person_id;
+              const isPrincipal = principalPersonId === p.person_id;
               return (
                 <button
                   key={p.person_id}
@@ -133,7 +140,14 @@ export default function PeopleListTab({
                   }`}
                 >
                   <div className="flex items-center justify-between">
-                    <span>{p.display_name}</span>
+                    <div className="flex items-center gap-1.5">
+                      <span>{p.display_name}</span>
+                      {isPrincipal && (
+                        <span className="bg-indigo-100 text-indigo-800 text-[9px] px-1.5 py-0.5 rounded-full font-bold">
+                          本人
+                        </span>
+                      )}
+                    </div>
                     {p.vault_id ? (
                       <span className="bg-slate-100 text-slate-800 text-[9px] px-1.5 py-0.5 rounded-full font-mono">{p.vault_id}</span>
                     ) : (
@@ -179,13 +193,43 @@ export default function PeopleListTab({
           <div className="space-y-4">
             <div className="flex items-start justify-between gap-2">
               <div>
-                <h2 className="text-base font-bold">{selectedPerson.display_name}</h2>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-base font-bold">{selectedPerson.display_name}</h2>
+                  {principalPersonId === selectedPerson.person_id && (
+                    <span className="bg-indigo-100 text-indigo-800 text-xs px-2 py-0.5 rounded-full font-bold">
+                      本人
+                    </span>
+                  )}
+                </div>
                 <p className="text-xs text-slate-400">ID: {selectedPerson.person_id} | 正規化名: {selectedPerson.normalized_name}</p>
                 {selectedPerson.vault_id && (
                   <p className="text-xs text-slate-500 mt-1">Vault 接続ID: <code className="bg-slate-100 px-1 rounded">{selectedPerson.vault_id}</code></p>
                 )}
               </div>
               <div className="flex items-center gap-1.5 shrink-0">
+                {principalPersonId === selectedPerson.person_id ? (
+                  <button
+                    type="button"
+                    onClick={() => onUnsetPrincipalPerson()}
+                    disabled={loading}
+                    title="本人設定を解除"
+                    aria-label="本人設定を解除"
+                    className="flex items-center gap-1 rounded bg-slate-900 px-3 py-1 text-sm text-white hover:bg-slate-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                  >
+                    本人設定を解除
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => onSetPrincipalPerson(selectedPerson.person_id)}
+                    disabled={loading}
+                    title="本人に設定"
+                    aria-label="本人に設定"
+                    className="flex items-center gap-1 rounded bg-blue-600 px-3 py-1 text-sm text-white hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                  >
+                    本人に設定
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => onTriggerMergeModal(selectedPerson)}
