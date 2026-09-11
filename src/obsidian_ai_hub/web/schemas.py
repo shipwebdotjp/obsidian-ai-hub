@@ -692,6 +692,15 @@ class CandidateResolveRequest(BaseModel):
     target_person_id: str
 
 
+class PrincipalPersonResponse(BaseModel):
+    principal_person_id: Optional[str] = None
+    display_name: Optional[str] = None
+
+
+class PrincipalPersonSetRequest(BaseModel):
+    person_id: str
+
+
 class PersonPromoteRequest(BaseModel):
     display_name: str
 

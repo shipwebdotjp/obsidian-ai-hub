@@ -672,6 +672,9 @@ def get_db_connection() -> sqlite3.Connection:
     if current_version <= 38:
         run_migration_v39(conn)
 
+    if current_version <= 39:
+        run_migration_v40(conn)
+
     return conn
 
 
@@ -865,6 +868,21 @@ def run_migration_v39(db: sqlite3.Connection) -> None:
     )
 
     db.execute("PRAGMA user_version = 39")
+    db.commit()
+
+
+def run_migration_v40(db: sqlite3.Connection) -> None:
+    """Run migration for version 40 (principal_person_settings table for Principal Person context)."""
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS principal_person_settings (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            person_id TEXT NOT NULL REFERENCES people(person_id) ON DELETE RESTRICT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+    """)
+
+    db.execute("PRAGMA user_version = 40")
     db.commit()
 
 

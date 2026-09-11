@@ -460,6 +460,16 @@ def merge_people(from_person_id: str, to_person_id: str) -> bool:
                 (to_person_id, from_person_id),
             )
 
+            # 3c. Atomic transfer of principal_person_settings if from_person_id is principal
+            cursor.execute("SELECT person_id FROM principal_person_settings WHERE id = 1 AND person_id = ?", (from_person_id,))
+            if cursor.fetchone() is not None:
+                from datetime import datetime, timezone
+                now_str = datetime.now(timezone.utc).isoformat()
+                cursor.execute(
+                    "UPDATE principal_person_settings SET person_id = ?, updated_at = ? WHERE id = 1",
+                    (to_person_id, now_str),
+                )
+
             # 4. Delete source person
             conn.execute("DELETE FROM people WHERE person_id = ?", (from_person_id,))
 

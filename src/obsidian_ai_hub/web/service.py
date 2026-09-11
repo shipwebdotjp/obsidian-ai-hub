@@ -60,11 +60,15 @@ from obsidian_ai_hub.web.services.people import (
     AliasConflictError,
     AssignmentConflictError,
     MainNameConflictError,
+    PrincipalPersonConflictError,
     VaultLinkedPersonError,
     delete_person,
     delete_person_alias,
     get_person_detail,
+    get_principal_person,
     list_people,
+    set_principal_person,
+    unset_principal_person,
     update_unlinked_person,
 )
 from obsidian_ai_hub.web.services.people_candidates import (

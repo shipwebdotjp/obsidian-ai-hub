@@ -1057,3 +1057,103 @@ def get_person_relations_for_ai(person_id: str) -> list[dict[str, Any]]:
         return result
     finally:
         conn.close()
+
+
+def get_relationship_to_principal_for_ai(
+    target_person_id: str,
+    principal_person_id: Optional[str],
+    principal_display_name: Optional[str],
+    today_str: Optional[str] = None,
+) -> Optional[dict[str, Any]]:
+    """Return relationship_to_principal projection for AI tools (people_get).
+
+    - If principal_person_id is None / unset -> returns None.
+    - If target_person_id == principal_person_id:
+        returns {
+            "principal_person_id": principal_person_id,
+            "principal_display_name": principal_display_name,
+            "is_principal": True,
+            "relations": []
+        }
+    - If target_person_id != principal_person_id:
+        returns {
+            "principal_person_id": principal_person_id,
+            "principal_display_name": principal_display_name,
+            "is_principal": False,
+            "relations": [
+                {
+                    "person_to_principal": label,
+                    "principal_to_person": label,
+                    "relation_type_slug": slug,
+                    "status": "active"|"undated"|"ended"|"upcoming",
+                    "started_on": YYYY-MM-DD|None,
+                    "ended_on": YYYY-MM-DD|None,
+                }, ...
+            ]
+        }
+    """
+    if not principal_person_id:
+        return None
+
+    if target_person_id == principal_person_id:
+        return {
+            "principal_person_id": principal_person_id,
+            "principal_display_name": principal_display_name or principal_person_id,
+            "is_principal": True,
+            "relations": [],
+        }
+
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT r.subject_person_id, r.object_person_id,
+                   r.started_on, r.ended_on,
+                   t.slug AS relation_type_slug, t.forward_label, t.reverse_label
+            FROM person_relations r
+            JOIN person_relation_types t ON r.relation_type_id = t.relation_type_id
+            WHERE (r.subject_person_id = ? AND r.object_person_id = ?)
+               OR (r.subject_person_id = ? AND r.object_person_id = ?)
+            ORDER BY r.created_at DESC, r.relation_id ASC
+            """,
+            (target_person_id, principal_person_id, principal_person_id, target_person_id),
+        )
+        rows = cursor.fetchall()
+        relations = []
+        for r in rows:
+            is_target_subject = (r["subject_person_id"] == target_person_id)
+            if is_target_subject:
+                # Target is subject, Principal is object
+                person_to_principal = r["forward_label"]
+                principal_to_person = r["reverse_label"]
+            else:
+                # Target is object, Principal is subject
+                person_to_principal = r["reverse_label"]
+                principal_to_person = r["forward_label"]
+
+            rel_status = compute_relation_status(
+                started_on=r["started_on"],
+                ended_on=r["ended_on"],
+                today_str=today_str,
+            )
+
+            relations.append(
+                {
+                    "person_to_principal": person_to_principal,
+                    "principal_to_person": principal_to_person,
+                    "relation_type_slug": r["relation_type_slug"],
+                    "status": rel_status,
+                    "started_on": r["started_on"],
+                    "ended_on": r["ended_on"],
+                }
+            )
+
+        return {
+            "principal_person_id": principal_person_id,
+            "principal_display_name": principal_display_name or principal_person_id,
+            "is_principal": False,
+            "relations": relations,
+        }
+    finally:
+        conn.close()

@@ -35,6 +35,11 @@ export interface RelationCounts {
   evidence?: number;
 }
 
+export interface PrincipalPersonResponse {
+  principal_person_id: string | null;
+  display_name: string | null;
+}
+
 export interface PersonDetail extends Person {
   summaries: AssociatedSummary[];
   relation_counts: RelationCounts;
