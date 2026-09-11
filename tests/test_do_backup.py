@@ -68,9 +68,16 @@ def test_excludes_appended_in_order_after_ds_store(monkeypatch, tmp_path):
     do_backup.main()
 
     cmd = calls[0][0][0]
-    assert cmd[:5] == ["rsync", "-a", "--delete", "--delete-excluded", "--exclude=.DS_Store"]
-    assert cmd[5:8] == ["--exclude=node_modules/", "--exclude=*.tmp", "--exclude=/private/"]
-    assert cmd[8:] == ["/source-one/", dest]
+    assert cmd[:6] == [
+        "rsync",
+        "-a",
+        "--inplace",
+        "--delete",
+        "--delete-excluded",
+        "--exclude=.DS_Store",
+    ]
+    assert cmd[6:9] == ["--exclude=node_modules/", "--exclude=*.tmp", "--exclude=/private/"]
+    assert cmd[9:] == ["/source-one/", dest]
 
 
 def test_excludes_are_per_pair(monkeypatch, tmp_path):
@@ -96,7 +103,7 @@ def test_excludes_are_per_pair(monkeypatch, tmp_path):
     assert "--exclude=b/" not in cmd_one
     assert "--exclude=c/" not in cmd_one
     assert "--exclude=a/" not in cmd_two
-    assert cmd_two[5:7] == ["--exclude=b/", "--exclude=c/"]
+    assert cmd_two[6:8] == ["--exclude=b/", "--exclude=c/"]
     # Fixed exclude and --delete-excluded are kept for both pairs.
     for cmd in (cmd_one, cmd_two):
         assert "--exclude=.DS_Store" in cmd
@@ -120,6 +127,7 @@ def test_excludes_not_list_warns_and_syncs_with_default(monkeypatch, tmp_path, c
     assert cmd == [
         "rsync",
         "-a",
+        "--inplace",
         "--delete",
         "--delete-excluded",
         "--exclude=.DS_Store",
@@ -196,6 +204,7 @@ def test_no_excludes_keeps_default_behavior(monkeypatch, tmp_path):
     assert calls[0][0][0] == [
         "rsync",
         "-a",
+        "--inplace",
         "--delete",
         "--delete-excluded",
         "--exclude=.DS_Store",

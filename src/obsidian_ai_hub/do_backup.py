@@ -14,7 +14,7 @@ class BackupError(RuntimeError):
 def main():
     """Synchronize configured folders using rsync.
 
-    Uses rsync -a --delete to mirror source -> destination. If any
+    Uses rsync -a --inplace --delete to mirror source -> destination. If any
     rsync invocation fails the script will exit with a non-zero code.
     """
     sync_folders = config.BACKUP_SYNC_FOLDERS
@@ -75,6 +75,7 @@ def main():
         cmd = [
             "rsync",
             "-a",
+            "--inplace",
             "--delete",
             "--delete-excluded",
             "--exclude=.DS_Store",
