@@ -68,3 +68,45 @@ describe("AgentMessageList copy button", () => {
     expect(screen.getByText("コピーしました")).toBeInTheDocument();
   });
 });
+
+describe("AgentMessageList assistant bubble width", () => {
+  it("保存済みassistantバブルがレスポンシブ幅classを持つ", () => {
+    renderList({
+      messages: [
+        {
+          message_id: "a1",
+          session_id: "s1",
+          sequence: 1,
+          role: "assistant",
+          content: "保存済み応答テキスト",
+          created_at: "2026-01-01T00:00:00Z",
+        } satisfies AgentMessage,
+      ],
+    });
+
+    const bubble = screen.getByText("保存済み応答テキスト").closest("div.max-w-xl");
+    expect(bubble).not.toBeNull();
+    expect(bubble).toHaveClass("w-full", "min-w-0", "max-w-xl", "sm:w-auto");
+  });
+
+  it("ストリーミング応答バブルがレスポンシブ幅classを持つ", () => {
+    renderList({
+      messages: [],
+      isStreaming: true,
+      streamingText: "ストリーミング応答テキスト",
+    });
+
+    const bubble = screen.getByText("ストリーミング応答テキスト").closest("div.max-w-xl");
+    expect(bubble).not.toBeNull();
+    expect(bubble).toHaveClass("w-full", "min-w-0", "max-w-xl", "sm:w-auto");
+  });
+
+  it("ユーザー送信バブルはレスポンシブ幅classを持たない", () => {
+    renderList();
+
+    const bubble = screen.getByText("エージェントへの依頼文").closest("div.max-w-xl");
+    expect(bubble).not.toBeNull();
+    expect(bubble).toHaveClass("max-w-xl");
+    expect(bubble).not.toHaveClass("w-full", "sm:w-auto");
+  });
+});

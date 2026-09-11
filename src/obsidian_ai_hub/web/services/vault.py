@@ -1,6 +1,5 @@
 import json
 import logging
-import threading
 from pathlib import Path
 
 from obsidian_ai_hub.handler import obsidian_vault_retriever
@@ -10,14 +9,14 @@ logger = logging.getLogger(__name__)
 
 # --- Vault Search services ---
 
-_vault_search_lock = threading.Lock()
-
+# NOTE: serialization is provided by the dedicated single-worker executor in
+# obsidian_vault_retriever (required by md-hybrid-search's single-thread
+# SQLite connection), so no lock is needed here.
 
 def search_vault(q: str, k: int = 10, mode: str = "hybrid") -> dict:
-    with _vault_search_lock:
-        result_json = obsidian_vault_retriever.search_obsidian_vault.func(
-            query=q, k=k, search_mode=mode
-        )
+    result_json = obsidian_vault_retriever.search_obsidian_vault.func(
+        query=q, k=k, search_mode=mode
+    )
     try:
         results = json.loads(result_json)
     except json.JSONDecodeError as e:

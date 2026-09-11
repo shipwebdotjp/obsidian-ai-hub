@@ -68,4 +68,28 @@ describe("PersonPropertiesSection", () => {
     expect(screen.queryByText("2026-09-07")).toBeNull();
   });
 
+  it("表示名と整形済み値を表示しslugを表示しない", () => {
+    renderSection([makeValue()], [makeDefinition()]);
+    expect(screen.getByText("生年月日")).toBeDefined();
+    expect(screen.queryByText("(birth_date)")).toBeNull();
+    expect(screen.queryByText("birth_date")).toBeNull();
+  });
+
+  it("日付・有効期間・メモを持つ属性の補足表示を維持する", () => {
+    const { container } = renderSection(
+      [
+        makeValue({
+          valid_from: "2026-01-01",
+          valid_until: "2026-12-31",
+          note: "備考メモ",
+        }),
+      ],
+      [makeDefinition()],
+    );
+    const text = container.textContent ?? "";
+    expect(text).toContain(formatYmdWithDow("2026-09-07"));
+    expect(text).toContain(formatYmdWithDow("2026-01-01"));
+    expect(text).toContain(formatYmdWithDow("2026-12-31"));
+    expect(screen.getByText("備考メモ")).toBeDefined();
+  });
 });

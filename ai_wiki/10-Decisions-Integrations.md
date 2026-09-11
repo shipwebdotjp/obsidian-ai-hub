@@ -367,3 +367,23 @@ OpenAI Responses API は `max_output_tokens`、Chat Completions は `max_complet
 - 1フィールドで `max_tokens` を統一したため、Responses API の `max_output_tokens` との厳密な差異を UI で意識できないが、LangChain の吸収により実用上の問題はなく複雑性を下げられる。
 - `reasoning.effort` を自由入力にしたため無効値を送る可能性があるが、provider 側のエラーは `runtime` の例外として `fail_run` へ集約され、DB への永続化は防がれる。
 - プロンプトテンプレートの並び替えは `display_order` で管理するが、フェーズ1ではドラッグ並替えは提供せず追加順のみ。
+
+## Vault検索のインデックス操作は専用ワーカースレッドに固定する
+
+| 項目 | 内容 |
+|------|------|
+| 決定日 | 2026-09-11 |
+| カテゴリ | 外部連携（Obsidian Vault検索） |
+| 決定内容 | md-hybrid-search の `SearchIndex` への全アクセス（構築・検索）を `handler/obsidian_vault_retriever.py` 内の `ThreadPoolExecutor(max_workers=1)` 経由に限定する。md-hybrid-search 側に `check_same_thread` 相当のオプション追加や接続の作り変えはしない |
+
+### 結論に至った経緯
+
+`/api/v1/vault-search`（同期 `def` ルート）が FastAPI のスレッドプールで実行される一方、インデックスはモジュールレベルの遅延シングルトンだったため、作成スレッドと異なるスレッドからの `index.search()` で `sqlite3.ProgrammingError`（`check_same_thread=True` の既定契約）が発生し 500 になった。md-hybrid-search は `sqlite3.connect()` を既定設定で開くため、これは使い方の問題である。
+
+ライブラリ作者が同一人物でありライブラリ側の修正も可能だったが、`check_same_thread=False` の追加だけではスレッド安全が保証されず（直列化は利用者責任になる）、直列化ロックの追加もライブラリの公開契約を広げる変更になるため見送った。アプリ側で `max_workers=1` のexecutorに固定すれば、SQLite契約を遵守しつつ同時検索の直列化も得られる。
+
+### トレードオフ
+
+- 全検索が1スレッドで直列化されるため、同時検索のスループットは頭打ちになる。検索負荷が課題になったら、md-hybrid-search 側のスレッド安全化（`Database` への RLock 追加、将来は per-operation 接続による並行読み取り）を再検討する。
+- `web/services/vault.py` の `_vault_search_lock` はexecutorが直列化を保証するため削除した。
+- テストは `tests/test_obsidian_vault_retriever.py` で、異スレッドからの呼び出しが同一ワーカースレッドで実行されること（旧実装では失敗すること）を検証する。

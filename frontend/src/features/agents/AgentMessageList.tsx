@@ -49,6 +49,8 @@ interface AgentMessageListProps {
 }
 
 /** 会話メッセージ一覧とストリーミング・待機中質問・リンク・エラー表示。 */
+// sm未満ではp-4の内側いっぱいに広げて横スクロールを防ぎ、sm以上では自動幅に戻す。
+const ASSISTANT_BUBBLE_WIDTH_CLASS = "w-full min-w-0 sm:w-auto";
 export function AgentMessageList({
   messages,
   isStreaming,
@@ -173,7 +175,7 @@ export function AgentMessageList({
                 <div
                   className={`max-w-xl rounded-2xl px-4 py-2.5 text-xs shadow-sm ${
                     isAssistant
-                      ? "bg-white border border-slate-200 text-slate-800"
+                      ? `${ASSISTANT_BUBBLE_WIDTH_CLASS} bg-white border border-slate-200 text-slate-800`
                       : "bg-slate-900 text-white whitespace-pre-wrap"
                   }`}
                 >
@@ -366,7 +368,7 @@ export function AgentMessageList({
             </div>
           )}
           <div className="flex justify-start">
-            <div className="max-w-xl rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-xs text-slate-800 shadow-sm">
+            <div className={`max-w-xl rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-xs text-slate-800 shadow-sm ${ASSISTANT_BUBBLE_WIDTH_CLASS}`}>
               {streamingText ? (
                 <MarkdownPreview content={streamingText} />
               ) : displayedStreamingPhase === "thinking" ? (
