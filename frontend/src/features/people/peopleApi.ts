@@ -1,4 +1,4 @@
-import { apiGet, apiPost, apiPatch, apiDelete } from "../../api/client";
+import { apiGet, apiPost, apiPut, apiPatch, apiDelete } from "../../api/client";
 import { Person } from "../../api/types";
 import {
   PrincipalPersonResponse,
