@@ -25,6 +25,7 @@ import {
   PersonPropertyValue,
   PersonPropertyValueCreateRequest,
   PersonPropertyValueUpdateRequest,
+  PersonPropertyBulkSaveRequest,
 } from "./types";
 import * as peopleApi from "./peopleApi";
 
@@ -405,6 +406,16 @@ export default function PeoplePage() {
     await peopleApi.deletePersonPropertyValue(selectedPerson.person_id, propertyValueId);
     await loadPersonProperties(selectedPerson.person_id);
     setSuccessMessage("属性値を削除しました。");
+  };
+
+  const handleBulkSavePersonProperty = async (
+    propertyDefinitionId: string,
+    req: PersonPropertyBulkSaveRequest
+  ) => {
+    if (!selectedPerson) return;
+    await peopleApi.replacePersonPropertyValues(selectedPerson.person_id, propertyDefinitionId, req);
+    await loadPersonProperties(selectedPerson.person_id);
+    setSuccessMessage("属性値を一括保存しました。");
   };
 
   const handleCreateRelationType = async (req: PersonRelationTypeCreateRequest) => {
@@ -826,10 +837,10 @@ export default function PeoplePage() {
 
   return (
     <div className="flex h-full flex-col overflow-hidden bg-slate-50">
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 p-4 sm:p-6 sm:pb-4">
-        <div>
-          <h1 className="text-xl font-bold text-slate-900">人物同定・管理</h1>
-          <p className="mt-1 text-xs text-slate-500">
+      <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3 sm:px-6 sm:py-4">
+        <div className="min-w-0">
+          <h1 className="text-lg font-bold text-slate-900">人物同定・管理</h1>
+          <p className="mt-0.5 text-xs text-slate-500">
             サマリから抽出された人物の解決、重複統合、およびVaultファイルとの同期を安全に管理します。
           </p>
         </div>
@@ -840,7 +851,7 @@ export default function PeoplePage() {
         >
           {loading ? "更新中..." : "データを再読み込み"}
         </button>
-      </div>
+      </header>
 
       <div className="flex-1 min-h-0 flex flex-col gap-4 overflow-hidden p-4 pt-4 sm:p-6 sm:pt-4">
         {successMsg && (
@@ -1011,6 +1022,7 @@ export default function PeoplePage() {
               onCreateProperty={handleCreatePersonProperty}
               onUpdateProperty={handleUpdatePersonProperty}
               onDeleteProperty={handleDeletePersonProperty}
+              onBulkSaveProperty={handleBulkSavePersonProperty}
             />
           )}
 

@@ -771,6 +771,140 @@ def update_person_property_value_in_tx(
     return format_property_value(cursor.fetchone())
 
 
+def replace_person_property_values_in_tx(
+    cursor: sqlite3.Cursor,
+    person_id: str,
+    property_definition_id: str,
+    items: list[dict[str, Any]],
+    is_api_call: bool = True,
+) -> list[dict[str, Any]]:
+    cursor.execute("SELECT person_id FROM people WHERE person_id = ?", (person_id,))
+    if cursor.fetchone() is None:
+        raise FileNotFoundError(f"Person not found: {person_id}")
+
+    defn = get_property_definition_by_id_in_tx(cursor, property_definition_id)
+
+    if is_api_call and defn["source_type"] == "vault":
+        raise VaultSourceReadOnlyError()
+    if defn["cardinality"] != "multiple":
+        raise ValueError("Bulk save is only supported for multiple-cardinality properties")
+
+    cursor.execute(
+        "SELECT property_value_id FROM person_property_values WHERE person_id = ? AND property_definition_id = ?",
+        (person_id, property_definition_id),
+    )
+    existing_ids = {r["property_value_id"] for r in cursor.fetchall()}
+
+    seen_ids: set[str] = set()
+    prepared: list[tuple[Optional[str], dict[str, Any], Optional[str], Optional[str], Optional[str]]] = []
+    for item in items:
+        value_id = item.get("property_value_id")
+        raw_val = item.get("value")
+        valid_from = item.get("valid_from")
+        valid_until = item.get("valid_until")
+        note = item.get("note")
+
+        if value_id is not None:
+            if value_id in seen_ids:
+                raise ValueError(f"Duplicate property_value_id in request: {value_id}")
+            seen_ids.add(value_id)
+            cursor.execute(
+                "SELECT property_value_id, person_id, property_definition_id FROM person_property_values WHERE property_value_id = ?",
+                (value_id,),
+            )
+            row = cursor.fetchone()
+            if row is None:
+                raise FileNotFoundError(f"Property value not found: {value_id}")
+            if row["person_id"] != person_id or row["property_definition_id"] != property_definition_id:
+                raise ValueError(
+                    f"Property value does not belong to this person and property definition: {value_id}"
+                )
+
+        validate_yyyy_mm_dd(valid_from)
+        validate_yyyy_mm_dd(valid_until)
+        if valid_from and valid_until and valid_from > valid_until:
+            raise InvalidValueError("valid_from must be less than or equal to valid_until")
+
+        cols = validate_and_prepare_value_columns(cursor, defn, raw_val)
+        prepared.append((value_id, cols, valid_from, valid_until, note))
+
+    # Request omits existing values -> delete them (empty list deletes all)
+    for stale_id in existing_ids - seen_ids:
+        cursor.execute(
+            "DELETE FROM person_property_values WHERE property_value_id = ?",
+            (stale_id,),
+        )
+
+    now_iso = datetime.now(JST).isoformat()
+    for value_id, cols, valid_from, valid_until, note in prepared:
+        if value_id is not None:
+            cursor.execute(
+                """
+                UPDATE person_property_values
+                SET value_text = ?, value_date = ?, value_number = ?, value_boolean = ?, option_id = ?,
+                    valid_from = ?, valid_until = ?, note = ?, updated_at = ?
+                WHERE property_value_id = ?
+                """,
+                (
+                    cols["value_text"],
+                    cols["value_date"],
+                    cols["value_number"],
+                    cols["value_boolean"],
+                    cols["option_id"],
+                    valid_from,
+                    valid_until,
+                    note,
+                    now_iso,
+                    value_id,
+                ),
+            )
+        else:
+            new_id = f"propval_{uuid.uuid4().hex}"
+            cursor.execute(
+                """
+                INSERT INTO person_property_values (
+                    property_value_id, person_id, property_definition_id, source_type,
+                    value_text, value_date, value_number, value_boolean, option_id,
+                    valid_from, valid_until, note, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    new_id,
+                    person_id,
+                    property_definition_id,
+                    defn["source_type"],
+                    cols["value_text"],
+                    cols["value_date"],
+                    cols["value_number"],
+                    cols["value_boolean"],
+                    cols["option_id"],
+                    valid_from,
+                    valid_until,
+                    note,
+                    now_iso,
+                    now_iso,
+                ),
+            )
+
+    cursor.execute(
+        """
+        SELECT v.property_value_id, v.person_id, v.property_definition_id, v.source_type,
+               v.value_text, v.value_date, v.value_number, v.value_boolean, v.option_id,
+               v.valid_from, v.valid_until, v.note, v.created_at, v.updated_at,
+               d.key AS property_key, d.display_name AS property_display_name,
+               d.data_type, d.cardinality,
+               o.option_key, o.display_name AS option_display_name
+        FROM person_property_values v
+        JOIN person_property_definitions d ON v.property_definition_id = d.property_definition_id
+        LEFT JOIN person_property_options o ON v.option_id = o.option_id
+        WHERE v.person_id = ? AND v.property_definition_id = ?
+        ORDER BY v.created_at ASC
+        """,
+        (person_id, property_definition_id),
+    )
+    return [format_property_value(row) for row in cursor.fetchall()]
+
+
 def delete_person_property_value_in_tx(
     cursor: sqlite3.Cursor,
     property_value_id: str,
@@ -1126,6 +1260,26 @@ def delete_person_property_value(
                 property_value_id,
                 is_api_call=True,
                 expected_person_id=expected_person_id,
+            )
+    finally:
+        conn.close()
+
+
+def replace_person_property_values(
+    person_id: str,
+    property_definition_id: str,
+    items: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    conn = get_db_connection()
+    try:
+        with conn:
+            cursor = conn.cursor()
+            return replace_person_property_values_in_tx(
+                cursor,
+                person_id=person_id,
+                property_definition_id=property_definition_id,
+                items=items,
+                is_api_call=True,
             )
     finally:
         conn.close()

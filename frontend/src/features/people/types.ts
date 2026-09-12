@@ -389,6 +389,18 @@ export interface PersonPropertyValueUpdateRequest {
   note?: string | null;
 }
 
+export interface PersonPropertyBulkValueItem {
+  property_value_id?: string | null;
+  value: any;
+  valid_from?: string | null;
+  valid_until?: string | null;
+  note?: string | null;
+}
+
+export interface PersonPropertyBulkSaveRequest {
+  values: PersonPropertyBulkValueItem[];
+}
+
 export interface PersonPropertyDefinitionDeleteResponse {
   success: boolean;
   deleted_property_definition_id: string;

@@ -190,6 +190,36 @@ def update_person_property_value(
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 
+@router.put(
+    "/people/{person_id}/properties/by-definition/{property_definition_id}",
+    response_model=list[schemas.PersonPropertyValue],
+)
+def replace_person_property_values(
+    person_id: str,
+    property_definition_id: str,
+    body: schemas.PersonPropertyBulkSaveRequest,
+    _=Depends(require_bearer_token),
+):
+    try:
+        return service.replace_person_property_values(
+            person_id=person_id,
+            property_definition_id=property_definition_id,
+            items=[item.model_dump() for item in body.values],
+        )
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except service.VaultSourceReadOnlyError as e:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "Vault正本属性はWeb APIからの直接編集ができません。Vaultノートを編集して人物同期を行ってください。",
+                "conflict_type": "vault_source_readonly",
+            },
+        ) from e
+    except (ValueError, service.InvalidValueError) as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
 @router.delete(
     "/people/{person_id}/properties/{property_value_id}",
     response_model=schemas.PersonPropertyValueDeleteResponse,

@@ -103,6 +103,7 @@ from obsidian_ai_hub.web.services.person_properties import (
     delete_property_definition,
     list_person_properties,
     list_property_definitions,
+    replace_person_property_values,
     update_person_property_value,
     update_property_definition,
 )

@@ -1561,6 +1561,32 @@ class PersonPropertyValueUpdateRequest(BaseModel):
         return self
 
 
+class PersonPropertyBulkValueItem(BaseModel):
+    property_value_id: Optional[str] = None
+    value: Any
+    valid_from: Optional[str] = None
+    valid_until: Optional[str] = None
+    note: Optional[str] = None
+
+    @field_validator("valid_from", "valid_until")
+    @classmethod
+    def _validate_dates(cls, v: Optional[str]) -> Optional[str]:
+        return _validate_yyyy_mm_dd_or_none(v)
+
+    @model_validator(mode="after")
+    def _validate_dates_order(self) -> "PersonPropertyBulkValueItem":
+        if self.valid_from and self.valid_until:
+            s_date = datetime.strptime(self.valid_from, "%Y-%m-%d")
+            e_date = datetime.strptime(self.valid_until, "%Y-%m-%d")
+            if s_date > e_date:
+                raise ValueError("valid_from must be less than or equal to valid_until")
+        return self
+
+
+class PersonPropertyBulkSaveRequest(BaseModel):
+    values: list[PersonPropertyBulkValueItem] = Field(default_factory=list)
+
+
 class PersonPropertyDefinitionDeleteResponse(BaseModel):
     success: bool
     deleted_property_definition_id: str

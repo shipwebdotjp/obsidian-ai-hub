@@ -1,8 +1,23 @@
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import PersonPropertiesSection from "./PersonPropertiesSection";
 import { formatYmdWithDow } from "../../utils/date";
-import { PersonPropertyDefinition, PersonPropertyValue } from "./types";
+import {
+  PersonPropertyBulkSaveRequest,
+  PersonPropertyDefinition,
+  PersonPropertyValue,
+  PersonPropertyValueCreateRequest,
+  PersonPropertyValueUpdateRequest,
+} from "./types";
+
+beforeEach(() => {
+  HTMLDialogElement.prototype.showModal = vi.fn(function (this: HTMLDialogElement) {
+    this.open = true;
+  });
+  HTMLDialogElement.prototype.close = vi.fn(function (this: HTMLDialogElement) {
+    this.open = false;
+  });
+});
 
 function makeDefinition(overrides: Partial<PersonPropertyDefinition> = {}): PersonPropertyDefinition {
   return {
@@ -47,18 +62,61 @@ function makeValue(overrides: Partial<PersonPropertyValue> = {}): PersonProperty
   };
 }
 
-function renderSection(properties: PersonPropertyValue[], definitions: PersonPropertyDefinition[]) {
-  return render(
+function makeMultiDefinition(overrides: Partial<PersonPropertyDefinition> = {}): PersonPropertyDefinition {
+  return makeDefinition({
+    property_definition_id: "def-skills",
+    key: "skills",
+    display_name: "スキル",
+    data_type: "text",
+    cardinality: "multiple",
+    source_type: "database",
+    ...overrides,
+  });
+}
+
+function makeMultiValue(text: string, overrides: Partial<PersonPropertyValue> = {}): PersonPropertyValue {
+  return makeValue({
+    property_value_id: `pv-${text}`,
+    person_id: "p1",
+    property_definition_id: "def-skills",
+    property_key: "skills",
+    property_display_name: "スキル",
+    data_type: "text",
+    cardinality: "multiple",
+    source_type: "database",
+    value: text,
+    value_text: text,
+    value_date: null,
+    ...overrides,
+  });
+}
+
+function renderSection(
+  properties: PersonPropertyValue[],
+  definitions: PersonPropertyDefinition[],
+  handlers: {
+    onCreateProperty?: Mock<(req: PersonPropertyValueCreateRequest) => Promise<void>>;
+    onUpdateProperty?: Mock<(propertyValueId: string, req: PersonPropertyValueUpdateRequest) => Promise<void>>;
+    onDeleteProperty?: Mock<(propertyValueId: string) => Promise<void>>;
+    onBulkSaveProperty?: Mock<(propertyDefinitionId: string, req: PersonPropertyBulkSaveRequest) => Promise<void>>;
+  } = {},
+) {
+  const bound = {
+    onCreateProperty: handlers.onCreateProperty ?? vi.fn(async () => {}),
+    onUpdateProperty: handlers.onUpdateProperty ?? vi.fn(async () => {}),
+    onDeleteProperty: handlers.onDeleteProperty ?? vi.fn(async () => {}),
+    onBulkSaveProperty: handlers.onBulkSaveProperty ?? vi.fn(async () => {}),
+  };
+  const result = render(
     <PersonPropertiesSection
       personId="p1"
       properties={properties}
       definitions={definitions}
       loading={false}
-      onCreateProperty={vi.fn()}
-      onUpdateProperty={vi.fn()}
-      onDeleteProperty={vi.fn()}
+      {...bound}
     />,
   );
+  return { ...result, ...bound };
 }
 
 describe("PersonPropertiesSection", () => {
@@ -73,6 +131,152 @@ describe("PersonPropertiesSection", () => {
     expect(screen.getByText("生年月日")).toBeDefined();
     expect(screen.queryByText("(birth_date)")).toBeNull();
     expect(screen.queryByText("birth_date")).toBeNull();
+  });
+
+  it("multiple 属性は値行ごとに表示し単一の編集導線だけを持つ", () => {
+    renderSection(
+      [makeMultiValue("php"), makeMultiValue("python")],
+      [makeMultiDefinition()],
+    );
+    expect(screen.getByText("php")).toBeInTheDocument();
+    expect(screen.getByText("python")).toBeInTheDocument();
+    // Group-level single edit affordance; no per-row edit/delete buttons.
+    expect(screen.getByRole("button", { name: "スキルを一括編集" })).toBeInTheDocument();
+    expect(screen.queryByText("削除")).toBeNull();
+  });
+
+  it("single 属性は従来どおり行ごとの編集・削除を持つ", () => {
+    renderSection(
+      [
+        makeValue({ property_value_id: "pv-a", value: "a", value_text: "a", source_type: "database", cardinality: "single" }),
+        makeValue({ property_value_id: "pv-b", value: "b", value_text: "b", source_type: "database", cardinality: "single" }),
+      ],
+      [makeDefinition({ source_type: "database", cardinality: "single" })],
+    );
+    expect(screen.getAllByRole("button", { name: "編集" })).toHaveLength(2);
+    expect(screen.getAllByRole("button", { name: "削除" })).toHaveLength(2);
+  });
+
+  it("新規追加で multiple を選ぶと複数行フォームから一括保存する", async () => {
+    const onBulkSaveProperty = vi.fn(async () => {});
+    const onCreateProperty = vi.fn(async () => {});
+    renderSection([], [makeMultiDefinition()], { onBulkSaveProperty, onCreateProperty });
+
+    fireEvent.click(screen.getByRole("button", { name: "＋ 属性を追加" }));
+    expect(screen.getByLabelText("値 1 値")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "＋ 値行を追加" }));
+    expect(screen.getByLabelText("値 2 値")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("値 1 値"), { target: { value: "php" } });
+    fireEvent.change(screen.getByLabelText("値 2 値"), { target: { value: "python" } });
+    fireEvent.change(screen.getByLabelText("値 2 メモ"), { target: { value: "得意" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+
+    await waitFor(() => expect(onBulkSaveProperty).toHaveBeenCalledTimes(1));
+    expect(onBulkSaveProperty).toHaveBeenCalledWith(
+      "def-skills",
+      {
+        values: [
+          { value: "php", valid_from: null, valid_until: null, note: null },
+          { value: "python", valid_from: null, valid_until: null, note: "得意" },
+        ],
+      },
+    );
+    expect(onCreateProperty).not.toHaveBeenCalled();
+  });
+
+  it("既存 multiple 値の編集導線から全値を読み込み追加・削除して一括保存する", async () => {
+    const onBulkSaveProperty = vi.fn(async () => {});
+    renderSection(
+      [
+        makeMultiValue("php", { property_value_id: "pv-php", note: "古い" }),
+        makeMultiValue("python", { property_value_id: "pv-python" }),
+      ],
+      [makeMultiDefinition()],
+      { onBulkSaveProperty },
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "スキルを一括編集" }));
+    expect(screen.getByRole("heading", { name: "スキルの一括編集" })).toBeInTheDocument();
+    expect(screen.getByLabelText("値 1 値")).toHaveValue("php");
+    expect(screen.getByLabelText("値 2 値")).toHaveValue("python");
+
+    // Drop the first row, keep the second, add a third.
+    fireEvent.click(screen.getByRole("button", { name: "値 1の行を削除" }));
+    expect(screen.queryByDisplayValue("php")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "＋ 値行を追加" }));
+    fireEvent.change(screen.getByLabelText("値 2 値"), { target: { value: "rust" } });
+    fireEvent.click(screen.getByRole("button", { name: "一括保存" }));
+
+    await waitFor(() => expect(onBulkSaveProperty).toHaveBeenCalledTimes(1));
+    expect(onBulkSaveProperty).toHaveBeenCalledWith(
+      "def-skills",
+      {
+        values: [
+          {
+            property_value_id: "pv-python",
+            value: "python",
+            valid_from: null,
+            valid_until: null,
+            note: null,
+          },
+          { value: "rust", valid_from: null, valid_until: null, note: null },
+        ],
+      },
+    );
+  });
+
+  it("全ての値行を削除して一括保存すると空配列で全削除する", async () => {
+    const onBulkSaveProperty = vi.fn(async () => {});
+    renderSection(
+      [makeMultiValue("php", { property_value_id: "pv-php" })],
+      [makeMultiDefinition()],
+      { onBulkSaveProperty },
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "スキルを一括編集" }));
+    fireEvent.click(screen.getByRole("button", { name: "値 1の行を削除" }));
+    expect(screen.getByText("すべての値行を削除しました。保存するとこの属性の値がすべて削除されます。")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "一括保存" }));
+
+    await waitFor(() => expect(onBulkSaveProperty).toHaveBeenCalledTimes(1));
+    expect(onBulkSaveProperty).toHaveBeenCalledWith("def-skills", { values: [] });
+  });
+
+  it("boolean の新規行は未選択のまま保存できず選択を促す", async () => {
+    const onBulkSaveProperty = vi.fn(async () => {});
+    renderSection(
+      [],
+      [makeMultiDefinition({ data_type: "boolean" })],
+      { onBulkSaveProperty },
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "＋ 属性を追加" }));
+    expect(screen.getByLabelText("値 1 値")).toHaveValue("");
+    // fireEvent.submit bypasses native required-validation to exercise the JS guard.
+    fireEvent.submit(screen.getByRole("dialog").querySelector("form")!);
+
+    await waitFor(() => expect(screen.getByText("値を選択してください。")).toBeInTheDocument());
+    expect(onBulkSaveProperty).not.toHaveBeenCalled();
+  });
+
+  it("一括保存エラー時は入力を保持してエラーを表示する", async () => {
+    const onBulkSaveProperty = vi.fn(async () => {
+      throw new Error("保存失敗");
+    });
+    renderSection([makeMultiValue("php", { property_value_id: "pv-php" })], [makeMultiDefinition()], {
+      onBulkSaveProperty,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "スキルを一括編集" }));
+    fireEvent.change(screen.getByLabelText("値 1 値"), { target: { value: "changed" } });
+    fireEvent.click(screen.getByRole("button", { name: "一括保存" }));
+
+    await waitFor(() => expect(screen.getByText("保存失敗")).toBeInTheDocument());
+    // Dialog stays open and user input is preserved.
+    expect(screen.getByRole("heading", { name: "スキルの一括編集" })).toBeInTheDocument();
+    expect(screen.getByLabelText("値 1 値")).toHaveValue("changed");
   });
 
   it("日付・有効期間・メモを持つ属性の補足表示を維持する", () => {

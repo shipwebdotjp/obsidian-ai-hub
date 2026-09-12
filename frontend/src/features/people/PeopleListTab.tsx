@@ -10,6 +10,7 @@ import {
   PersonPropertyDefinition,
   PersonPropertyValueCreateRequest,
   PersonPropertyValueUpdateRequest,
+  PersonPropertyBulkSaveRequest,
 } from "./types";
 import PersonRelationsSection from "./PersonRelationsSection";
 import PersonPropertiesSection from "./PersonPropertiesSection";
@@ -49,6 +50,7 @@ interface PeopleListTabProps {
   onCreateProperty?: (req: PersonPropertyValueCreateRequest) => Promise<void>;
   onUpdateProperty?: (propertyValueId: string, req: PersonPropertyValueUpdateRequest) => Promise<void>;
   onDeleteProperty?: (propertyValueId: string) => Promise<void>;
+  onBulkSaveProperty?: (propertyDefinitionId: string, req: PersonPropertyBulkSaveRequest) => Promise<void>;
 }
 
 export default function PeopleListTab({
@@ -86,6 +88,7 @@ export default function PeopleListTab({
   onCreateProperty = async () => {},
   onUpdateProperty = async () => {},
   onDeleteProperty = async () => {},
+  onBulkSaveProperty = async () => {},
 }: PeopleListTabProps) {
   const [nameQuery, setNameQuery] = useState("");
 
@@ -351,6 +354,7 @@ export default function PeopleListTab({
               onCreateProperty={onCreateProperty}
               onUpdateProperty={onUpdateProperty}
               onDeleteProperty={onDeleteProperty}
+              onBulkSaveProperty={onBulkSaveProperty}
             />
 
             {/* Person Relations Section */}

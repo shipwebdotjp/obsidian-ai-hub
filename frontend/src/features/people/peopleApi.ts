@@ -24,6 +24,7 @@ import {
   PersonPropertyValue,
   PersonPropertyValueCreateRequest,
   PersonPropertyValueUpdateRequest,
+  PersonPropertyBulkSaveRequest,
   PersonPropertyDefinitionDeleteResponse,
   PersonPropertyValueDeleteResponse
 } from "./types";
@@ -276,5 +277,16 @@ export async function deletePersonPropertyValue(
 ): Promise<PersonPropertyValueDeleteResponse> {
   return apiDelete<PersonPropertyValueDeleteResponse>(
     `${PEOPLE_API}/${encodeURIComponent(personId)}/properties/${encodeURIComponent(propertyValueId)}`
+  );
+}
+
+export async function replacePersonPropertyValues(
+  personId: string,
+  propertyDefinitionId: string,
+  req: PersonPropertyBulkSaveRequest
+): Promise<PersonPropertyValue[]> {
+  return apiPut<PersonPropertyValue[]>(
+    `${PEOPLE_API}/${encodeURIComponent(personId)}/properties/by-definition/${encodeURIComponent(propertyDefinitionId)}`,
+    req
   );
 }
