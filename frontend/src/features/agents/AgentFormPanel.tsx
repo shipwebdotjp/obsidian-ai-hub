@@ -315,7 +315,8 @@ export function AgentFormPanel({
                 return (
                   <label
                     key={t.tool_id}
-                    className="flex items-start gap-2 text-xs cursor-pointer hover:bg-slate-50 p-1 rounded"
+                    title={t.description || undefined}
+                    className="flex items-center gap-2 text-xs cursor-pointer hover:bg-slate-50 p-1 rounded"
                   >
                     <input
                       type="checkbox"
@@ -329,16 +330,11 @@ export function AgentFormPanel({
                           );
                         }
                       }}
-                      className="mt-0.5 cursor-pointer"
+                      className="cursor-pointer"
                     />
-                    <div>
-                      <span className="font-semibold text-slate-800">
-                        {t.name}
-                      </span>
-                      <p className="text-[10px] text-slate-500">
-                        {t.description}
-                      </p>
-                    </div>
+                    <span className="font-semibold text-slate-800">
+                      {t.name}
+                    </span>
                   </label>
                 );
               })

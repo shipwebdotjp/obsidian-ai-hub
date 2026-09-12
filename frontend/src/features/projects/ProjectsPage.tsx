@@ -373,29 +373,29 @@ export default function ProjectsPage() {
 
   return (
     <div className="flex h-full flex-col overflow-hidden bg-slate-50">
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 p-4 sm:p-6 sm:pb-4">
-        <div>
-          <h1 className="text-xl font-bold text-slate-900">プロジェクト追跡</h1>
-          <p className="mt-1 text-xs text-slate-500">
+      <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3 sm:px-6 sm:py-4">
+        <div className="min-w-0">
+          <h1 className="text-lg font-bold text-slate-900">プロジェクト追跡</h1>
+          <p className="mt-0.5 text-xs text-slate-500">
             ゴールや終了状態を持つ取り組みをプロジェクトとして管理し、サマリと紐付けます。
           </p>
         </div>
         <div className="flex items-center gap-2">
           <button
             onClick={openCreateModal}
-            className="rounded bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
+            className="rounded bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 cursor-pointer"
           >
             新規登録
           </button>
           <button
             onClick={() => loadAllData()}
             disabled={loading}
-            className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-50 cursor-pointer"
           >
             {loading ? "更新中..." : "再読み込み"}
           </button>
         </div>
-      </div>
+      </header>
 
       <div className="flex-1 min-h-0 flex flex-col gap-4 overflow-hidden p-4 pt-4 sm:p-6 sm:pt-4">
         {successMsg && (
