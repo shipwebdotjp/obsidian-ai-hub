@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import MemoryList from "./MemoryList";
 import MemoryDetailPanel from "./MemoryDetailPanel";
-import type { Memory, MemoryDetail, MemoryStatus } from "../../api/types";
-import { getMemoryOptions, renderCopilotProfile } from "../../api/client";
+import type { Memory, MemoryDetail, MemoryStatus, Person } from "../../api/types";
+import { getMemoryOptions, listPeople, renderCopilotProfile } from "../../api/client";
 
 interface Toast {
   id: number;
@@ -11,11 +12,16 @@ interface Toast {
 }
 
 export default function MemoryPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const initialPersonId = searchParams.get("person_id") || "";
+
   const [status, setStatus] = useState<MemoryStatus>("candidate");
   const [queryInput, setQueryInput] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [kind, setKind] = useState("");
   const [topic, setTopic] = useState("");
+  const [personId, setPersonId] = useState(initialPersonId);
+  const [peopleOptions, setPeopleOptions] = useState<Person[]>([]);
   const [kindsOptions, setKindsOptions] = useState<string[]>([]);
   const [topicsOptions, setTopicsOptions] = useState<string[]>([]);
   const [isRendering, setIsRendering] = useState(false);
@@ -48,7 +54,7 @@ export default function MemoryPage() {
     }, 3500);
   }, []);
 
-  // Fetch filter options once on page load
+  // Fetch filter options and people list once on page load
   useEffect(() => {
     getMemoryOptions()
       .then((res) => {
@@ -57,6 +63,14 @@ export default function MemoryPage() {
       })
       .catch((err) => {
         console.error("Failed to fetch memory options:", err);
+      });
+
+    listPeople()
+      .then((res) => {
+        setPeopleOptions(res);
+      })
+      .catch((err) => {
+        console.error("Failed to fetch people:", err);
       });
   }, []);
 
@@ -75,7 +89,20 @@ export default function MemoryPage() {
   useEffect(() => {
     setSelectedMemory(null);
     setSelected(new Set());
-  }, [status, debouncedQuery, kind, topic]);
+  }, [status, debouncedQuery, kind, topic, personId]);
+
+  const handlePersonFilterChange = (newPersonId: string) => {
+    setPersonId(newPersonId);
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (newPersonId) {
+        next.set("person_id", newPersonId);
+      } else {
+        next.delete("person_id");
+      }
+      return next;
+    });
+  };
 
   const showRightPanel = status === "candidate" || status === "approved" || status === "rejected" || status === "superseded" || status === "expired";
 
@@ -135,6 +162,19 @@ export default function MemoryPage() {
           ))}
         </select>
         <select
+          value={personId}
+          onChange={(e) => handlePersonFilterChange(e.target.value)}
+          aria-label="人物フィルター"
+          className="cursor-pointer rounded border border-slate-300 px-2 py-1 text-sm"
+        >
+          <option value="">人物: すべて</option>
+          {peopleOptions.map((p) => (
+            <option key={p.person_id} value={p.person_id}>
+              {p.display_name}
+            </option>
+          ))}
+        </select>
+        <select
           value={topic}
           onChange={(e) => setTopic(e.target.value)}
           aria-label="トピックフィルター"
@@ -174,6 +214,7 @@ export default function MemoryPage() {
             query={debouncedQuery}
             topic={topic}
             kind={kind}
+            personId={personId}
             selectedIds={selected}
             selectedMemoryId={selectedMemoryId}
             onSelectionChange={setSelected}
@@ -212,6 +253,7 @@ export default function MemoryPage() {
                 <MemoryDetailPanel
                   memoryId={selectedMemory.memory_id}
                   status={status}
+                  peopleOptions={peopleOptions}
                   onChanged={onChanged}
                   notify={notify}
                 />

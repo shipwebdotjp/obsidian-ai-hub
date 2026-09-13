@@ -87,10 +87,9 @@ def is_obsolete(m: dict, base_date: datetime) -> bool:
 
 def build_maintenance_groups(memories: List[Dict[str, Any]], embedder=None) -> List[List[Dict[str, Any]]]:
     """
-    Group approved memories by memory_key, exact normalized content, or vector similarity >= 0.85.
-    Every approved memory in the system is included in the output. Standalone memories that do
-    not belong to any multi-item similar group are returned as single-item groups.
-    Returns a list of disjoint memory groups.
+    Group approved memories by scope, memory_key, exact normalized content, or vector similarity >= 0.85.
+    Memories of different scopes ('user' vs 'person') are strictly separated into different groups.
+    For person memories, items are grouped only if they share at least one person_id.
     """
     approved_mems = [m for m in memories if m.get("status") == "approved"]
     if not approved_mems:
@@ -128,7 +127,21 @@ def build_maintenance_groups(memories: List[Dict[str, Any]], embedder=None) -> L
 
     # Pairwise comparison
     for i in range(n):
+        scope_i = approved_mems[i].get("scope", "user")
+        p_ids_i = {p["person_id"] for p in (approved_mems[i].get("people") or []) if isinstance(p, dict) and p.get("person_id")}
+
         for j in range(i + 1, n):
+            scope_j = approved_mems[j].get("scope", "user")
+            # Separate scopes strictly
+            if scope_i != scope_j:
+                continue
+
+            if scope_i == "person":
+                p_ids_j = {p["person_id"] for p in (approved_mems[j].get("people") or []) if isinstance(p, dict) and p.get("person_id")}
+                # Must share at least 1 associated person
+                if not (p_ids_i & p_ids_j):
+                    continue
+
             # 1. Same memory key
             if keys[i] and keys[i] == keys[j]:
                 union(i, j)
@@ -506,6 +519,22 @@ def apply_single_proposal(
         main_mem["tags"] = merged_tags
         main_mem["evidence"] = merged_evidence
         main_mem["updated_at"] = timestamp_now
+
+        # If person memory, compute union of person_ids across main and absorbed records
+        if main_mem.get("scope") == "person":
+            union_person_ids = set()
+            for p in (main_mem.get("people") or []):
+                if isinstance(p, dict) and p.get("person_id"):
+                    union_person_ids.add(p["person_id"])
+            for aid in absorbed_ids:
+                if aid in memories_map:
+                    for p in (memories_map[aid].get("people") or []):
+                        if isinstance(p, dict) and p.get("person_id"):
+                            union_person_ids.add(p["person_id"])
+            if union_person_ids:
+                from obsidian_ai_hub.memory.store import set_memory_people
+                set_memory_people(main_id, sorted(union_person_ids), conn=conn)
+                main_mem["people"] = [{"person_id": pid, "display_name": ""} for pid in sorted(union_person_ids)]
 
         db_row = serialize_memory(main_mem)
         set_clause = ", ".join(f"{col} = ?" for col in MEMORY_COLUMNS if col != "memory_id")

@@ -59,3 +59,7 @@
 ## 日次人物変更候補 (daily_person_changes)
 
 日次要約の保存および確定人物の同定後に、専用プロンプト（`config/prompts/extract_person_candidates.md`）を用いて抽出される、DB専用属性および既存リレーションタイプの変更（create/update/delete）の提案候補。LLM生成時点ではDB正本を変更せず、決定的な HITL Run（`display_type = "daily_person_changes"`）として登録される。承認（「適用」）時に候補ごとの独立トランザクションで現行DB状態に対し再検証した上で反映され、リレーション適用時には `summary:{summary_id}` Evidence が記録される。
+
+## 人物メモリ (Person Memory)
+
+特定の人物に紐づく事実、好み、傾向、約束、および人生の重要転機に関する長期記憶（`scope = 'person'`）。日次サマリの人物メモから週次バッチ（`extract_person_memories`）で自動抽出され、1メモリを複数人物（`memory_people`）で共有できる。利用者自身の全般記憶（`scope = 'user'`）とはAIコンテキスト・Copilot投影・重複統合のいずれにおいても完全に分離され、`people_get` ツール実行時のみその人物の承認済み有効メモリとして最小投影で出力される。

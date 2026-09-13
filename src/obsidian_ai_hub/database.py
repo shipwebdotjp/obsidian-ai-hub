@@ -675,6 +675,9 @@ def get_db_connection() -> sqlite3.Connection:
     if current_version <= 39:
         run_migration_v40(conn)
 
+    if current_version <= 40:
+        run_migration_v41(conn)
+
     return conn
 
 
@@ -883,6 +886,45 @@ def run_migration_v40(db: sqlite3.Connection) -> None:
     """)
 
     db.execute("PRAGMA user_version = 40")
+    db.commit()
+
+
+def run_migration_v41(db: sqlite3.Connection) -> None:
+    """Run migration for version 41 (memories.scope, memory_people table, and person_summary_extraction_logs table)."""
+    try:
+        db.execute(
+            "ALTER TABLE memories ADD COLUMN scope TEXT DEFAULT 'user' CHECK (scope IS NULL OR scope IN ('user', 'person'));"
+        )
+    except sqlite3.OperationalError as e:
+        _ignore_duplicate_schema_object(e)
+
+    # Fill existing rows with scope='user' if null
+    db.execute("UPDATE memories SET scope = 'user' WHERE scope IS NULL;")
+
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS memory_people (
+            memory_id TEXT NOT NULL REFERENCES memories(memory_id) ON DELETE CASCADE,
+            person_id TEXT NOT NULL REFERENCES people(person_id) ON DELETE CASCADE,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (memory_id, person_id)
+        );
+    """)
+
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_memory_people_person ON memory_people(person_id);"
+    )
+
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS person_summary_extraction_logs (
+            summary_id TEXT NOT NULL REFERENCES summaries(summary_id) ON DELETE CASCADE,
+            person_id TEXT NOT NULL REFERENCES people(person_id) ON DELETE CASCADE,
+            content_hash TEXT NOT NULL,
+            processed_at TEXT NOT NULL,
+            PRIMARY KEY (summary_id, person_id)
+        );
+    """)
+
+    db.execute("PRAGMA user_version = 41")
     db.commit()
 
 
