@@ -1,13 +1,11 @@
 import { render, screen, waitFor, act, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router-dom";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import MemoryPage from "./MemoryPage";
 
 // Mock the API client
 vi.mock("../../api/client", () => ({
   getMemoryOptions: vi.fn(),
-  listPeople: vi.fn(),
   listMemories: vi.fn(),
   getMemory: vi.fn(),
   renderCopilotProfile: vi.fn(),
@@ -20,10 +18,9 @@ vi.mock("../../api/client", () => ({
   },
 }));
 
-import { getMemoryOptions, listPeople, listMemories, getMemory, renderCopilotProfile } from "../../api/client";
+import { getMemoryOptions, listMemories, getMemory, renderCopilotProfile } from "../../api/client";
 
 const mockGetMemoryOptions = vi.mocked(getMemoryOptions);
-const mockListPeople = vi.mocked(listPeople);
 const mockListMemories = vi.mocked(listMemories);
 const mockGetMemory = vi.mocked(getMemory);
 const mockRenderCopilotProfile = vi.mocked(renderCopilotProfile);
@@ -66,7 +63,6 @@ const sampleDetail = {
 beforeEach(() => {
   vi.clearAllMocks();
   mockGetMemoryOptions.mockResolvedValue(sampleOptions);
-  mockListPeople.mockResolvedValue([]);
   mockListMemories.mockResolvedValue(sampleCandidates as any);
   mockGetMemory.mockResolvedValue(sampleDetail as any);
 });
@@ -77,11 +73,7 @@ afterEach(() => {
 
 describe("MemoryPage", () => {
   it("initial load fetches options and lists candidate memories", async () => {
-    render(
-      <MemoryRouter>
-        <MemoryPage />
-      </MemoryRouter>
-    );
+    render(<MemoryPage />);
 
     await waitFor(() => {
       expect(mockGetMemoryOptions).toHaveBeenCalledTimes(1);
@@ -90,7 +82,6 @@ describe("MemoryPage", () => {
         q: "",
         topic: "",
         kind: "",
-        person_id: "",
       });
     });
 
@@ -100,11 +91,7 @@ describe("MemoryPage", () => {
   });
 
   it("filters candidate memories when status, kind or topic select is changed", async () => {
-    render(
-      <MemoryRouter>
-        <MemoryPage />
-      </MemoryRouter>
-    );
+    render(<MemoryPage />);
 
     await waitFor(() => {
       expect(screen.getByText("朝のストレッチを毎日10分行う")).toBeInTheDocument();
@@ -122,7 +109,6 @@ describe("MemoryPage", () => {
         q: "",
         topic: "",
         kind: "",
-        person_id: "",
       });
     });
 
@@ -136,7 +122,6 @@ describe("MemoryPage", () => {
         q: "",
         topic: "",
         kind: "fact",
-        person_id: "",
       });
     });
 
@@ -150,17 +135,12 @@ describe("MemoryPage", () => {
         q: "",
         topic: "健康",
         kind: "fact",
-        person_id: "",
       });
     });
   });
 
   it("resets selection when status, topic, kind, or search query changes", async () => {
-    render(
-      <MemoryRouter>
-        <MemoryPage />
-      </MemoryRouter>
-    );
+    render(<MemoryPage />);
 
     await waitFor(() => {
       expect(screen.getByText("朝のストレッチを毎日10分行う")).toBeInTheDocument();
@@ -195,11 +175,7 @@ describe("MemoryPage", () => {
     });
 
     it("does not trigger search immediately during typing but triggers after 500ms delay", async () => {
-      render(
-        <MemoryRouter>
-          <MemoryPage />
-        </MemoryRouter>
-      );
+      render(<MemoryPage />);
 
       await act(async () => {
         vi.runAllTimers();
@@ -225,7 +201,6 @@ describe("MemoryPage", () => {
         q: "Stretch",
         topic: "",
         kind: "",
-        person_id: "",
       });
     });
   });
@@ -235,11 +210,7 @@ describe("MemoryPage", () => {
       const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
       mockRenderCopilotProfile.mockResolvedValue({ updated_files: ["file1.md", "file2.md"] });
 
-      render(
-        <MemoryRouter>
-          <MemoryPage />
-        </MemoryRouter>
-      );
+      render(<MemoryPage />);
 
       const renderButton = screen.getByRole("button", { name: "プロファイル生成" });
       await userEvent.click(renderButton);
@@ -261,11 +232,7 @@ describe("MemoryPage", () => {
     it("does not call renderCopilotProfile if confirmation is rejected", async () => {
       const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
 
-      render(
-        <MemoryRouter>
-          <MemoryPage />
-        </MemoryRouter>
-      );
+      render(<MemoryPage />);
 
       const renderButton = screen.getByRole("button", { name: "プロファイル生成" });
       await userEvent.click(renderButton);
@@ -278,11 +245,7 @@ describe("MemoryPage", () => {
       vi.spyOn(window, "confirm").mockReturnValue(true);
       mockRenderCopilotProfile.mockRejectedValue(new Error("Generation failed"));
 
-      render(
-        <MemoryRouter>
-          <MemoryPage />
-        </MemoryRouter>
-      );
+      render(<MemoryPage />);
 
       const renderButton = screen.getByRole("button", { name: "プロファイル生成" });
       await userEvent.click(renderButton);

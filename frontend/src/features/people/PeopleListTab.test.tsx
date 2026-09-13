@@ -1,6 +1,5 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 import PeopleListTab from "./PeopleListTab";
 import { Person } from "../../api/types";
@@ -34,30 +33,28 @@ const people: Person[] = [
 
 function renderTab(overrides: Partial<Parameters<typeof PeopleListTab>[0]> = {}) {
   return render(
-    <MemoryRouter>
-      <PeopleListTab
-        people={people}
-        selectedPerson={null}
-        editDisplayName=""
-        editAliasesText=""
-        editError={null}
-        editSuccess={null}
-        mergeGuidance={null}
-        mergeToPersonId=""
-        loading={false}
-        mobileDetailOpen={false}
-        setMobileDetailOpen={vi.fn()}
-        onSelectPerson={vi.fn()}
-        onChangeEditDisplayName={vi.fn()}
-        onChangeEditAliasesText={vi.fn()}
-        onUpdatePerson={vi.fn()}
-        onTriggerDeleteConfirm={vi.fn()}
-        onChangeMergeToPersonId={vi.fn()}
-        onTriggerMergePreview={vi.fn()}
-        onTriggerAliasDelete={vi.fn()}
-        {...overrides}
-      />
-    </MemoryRouter>,
+    <PeopleListTab
+      people={people}
+      selectedPerson={null}
+      editDisplayName=""
+      editAliasesText=""
+      editError={null}
+      editSuccess={null}
+      mergeGuidance={null}
+      mergeToPersonId=""
+      loading={false}
+      mobileDetailOpen={false}
+      setMobileDetailOpen={vi.fn()}
+      onSelectPerson={vi.fn()}
+      onChangeEditDisplayName={vi.fn()}
+      onChangeEditAliasesText={vi.fn()}
+      onUpdatePerson={vi.fn()}
+      onTriggerDeleteConfirm={vi.fn()}
+      onChangeMergeToPersonId={vi.fn()}
+      onTriggerMergePreview={vi.fn()}
+      onTriggerAliasDelete={vi.fn()}
+      {...overrides}
+    />,
   );
 }
 

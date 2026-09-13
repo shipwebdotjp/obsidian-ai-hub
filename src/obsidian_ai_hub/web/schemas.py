@@ -51,17 +51,11 @@ class DedupAssessment(BaseModel):
     failure_kind: Optional[Literal["request_failed", "response_invalid"]] = None
 
 
-class MemoryPersonRef(BaseModel):
-    person_id: str
-    display_name: str
-
-
 class Memory(BaseModel):
     model_config = {"populate_by_name": True}
 
     memory_id: str
     status: Literal["candidate", "approved", "rejected", "expired", "superseded"]
-    scope: Literal["user", "person"] = "user"
     kind: Optional[
         Literal[
             "preference",
@@ -92,7 +86,6 @@ class Memory(BaseModel):
     updated_at: Optional[str] = None
     reviewed_by: Optional[str] = None
     reviewed_at: Optional[str] = None
-    people: Optional[list[MemoryPersonRef]] = Field(default_factory=list)
 
 
 class MemoryEvent(BaseModel):
@@ -133,7 +126,6 @@ class EditRequest(BaseModel):
     valid_until: Optional[str] = None
     review_due_at: Optional[str] = None
     stability: Optional[Literal["stable", "tentative", "explicitly_settled"]] = None
-    person_ids: Optional[list[str]] = None
 
 
 class BatchReviewRequest(BaseModel):

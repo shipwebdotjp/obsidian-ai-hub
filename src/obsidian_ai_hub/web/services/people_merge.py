@@ -470,27 +470,6 @@ def merge_people(from_person_id: str, to_person_id: str) -> bool:
                     (to_person_id, now_str),
                 )
 
-            # 3d. Reassign memory_people & person_summary_extraction_logs to target_person_id
-            cursor.execute(
-                """
-                INSERT OR IGNORE INTO memory_people (memory_id, person_id, created_at)
-                SELECT memory_id, ?, created_at
-                FROM memory_people WHERE person_id = ?
-                """,
-                (to_person_id, from_person_id),
-            )
-            cursor.execute("DELETE FROM memory_people WHERE person_id = ?", (from_person_id,))
-
-            cursor.execute(
-                """
-                INSERT OR IGNORE INTO person_summary_extraction_logs (summary_id, person_id, content_hash, processed_at)
-                SELECT summary_id, ?, content_hash, processed_at
-                FROM person_summary_extraction_logs WHERE person_id = ?
-                """,
-                (to_person_id, from_person_id),
-            )
-            cursor.execute("DELETE FROM person_summary_extraction_logs WHERE person_id = ?", (from_person_id,))
-
             # 4. Delete source person
             conn.execute("DELETE FROM people WHERE person_id = ?", (from_person_id,))
 

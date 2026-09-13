@@ -1,18 +1,18 @@
 import { useState } from "react";
 import { ApiError, editMemory } from "../../api/client";
-import type { EditPayload, Memory, MemoryDetail, Person, Stability } from "../../api/types";
+import type { EditPayload, Memory, MemoryDetail } from "../../api/types";
+import type { Stability } from "../../api/types";
 
 const STABILITIES: Stability[] = ["stable", "tentative", "explicitly_settled"];
 
 export interface MemoryEditFormProps {
   memory: Memory | MemoryDetail;
-  peopleOptions?: Person[];
   onUpdated: (memory: Memory) => void;
   notify: (msg: string, kind?: "info" | "error") => void;
   onCancel: () => void;
 }
 
-export default function MemoryEditForm({ memory, peopleOptions = [], onUpdated, notify, onCancel }: MemoryEditFormProps) {
+export default function MemoryEditForm({ memory, onUpdated, notify, onCancel }: MemoryEditFormProps) {
   const [content, setContent] = useState(memory.content);
   const [topicsText, setTopicsText] = useState((memory.topics || []).join(", "));
   const [tagsText, setTagsText] = useState((memory.tags || []).join(", "));
@@ -20,9 +20,6 @@ export default function MemoryEditForm({ memory, peopleOptions = [], onUpdated, 
   const [validUntil, setValidUntil] = useState(memory.valid_until || "");
   const [reviewDueAt, setReviewDueAt] = useState(memory.review_due_at || "");
   const [stability, setStability] = useState<Stability>(memory.stability || "stable");
-  const [selectedPersonIds, setSelectedPersonIds] = useState<string[]>(
-    (memory.people || []).map((p) => p.person_id)
-  );
   const [busy, setBusy] = useState(false);
 
   function splitList(value: string): string[] {
@@ -32,19 +29,7 @@ export default function MemoryEditForm({ memory, peopleOptions = [], onUpdated, 
       .filter(Boolean);
   }
 
-  function togglePerson(personId: string) {
-    if (selectedPersonIds.includes(personId)) {
-      setSelectedPersonIds(selectedPersonIds.filter((id) => id !== personId));
-    } else {
-      setSelectedPersonIds([...selectedPersonIds, personId]);
-    }
-  }
-
   async function save() {
-    if (memory.scope === "person" && selectedPersonIds.length === 0) {
-      notify("人物メモリには最低1人の関連人物が必要です", "error");
-      return;
-    }
     setBusy(true);
     const payload: EditPayload = {
       content: content.trim(),
@@ -54,9 +39,7 @@ export default function MemoryEditForm({ memory, peopleOptions = [], onUpdated, 
       valid_from: validFrom || null,
       valid_until: validUntil || null,
       review_due_at: reviewDueAt || null,
-      person_ids: selectedPersonIds,
     };
-
     try {
       const res = await editMemory(memory.memory_id, payload);
       onUpdated(res.memory);
@@ -79,27 +62,6 @@ export default function MemoryEditForm({ memory, peopleOptions = [], onUpdated, 
         value={content}
         onChange={(e) => setContent(e.target.value)}
       />
-      {(memory.scope === "person" || peopleOptions.length > 0) && (
-        <div>
-          <label className="block text-xs text-slate-500 mb-1">関連人物 {memory.scope === "person" && "(必須: 1人以上)"}</label>
-          <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto border border-slate-200 rounded p-2 bg-slate-50">
-            {peopleOptions.map((p) => {
-              const checked = selectedPersonIds.includes(p.person_id);
-              return (
-                <label key={p.person_id} className={`inline-flex items-center gap-1 text-xs px-2 py-1 rounded cursor-pointer border ${checked ? "bg-indigo-100 border-indigo-300 text-indigo-900 font-medium" : "bg-white border-slate-200 text-slate-700"}`}>
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    onChange={() => togglePerson(p.person_id)}
-                    className="cursor-pointer"
-                  />
-                  <span>{p.display_name}</span>
-                </label>
-              );
-            })}
-          </div>
-        </div>
-      )}
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         <div>
           <label className="block text-xs text-slate-500">Topics (カンマ区切り)</label>
@@ -160,14 +122,14 @@ export default function MemoryEditForm({ memory, peopleOptions = [], onUpdated, 
         </div>
       </div>
       <div className="flex justify-end gap-2">
-        <button
-          type="button"
-          onClick={onCancel}
-          disabled={busy}
-          className="cursor-pointer rounded border border-slate-300 px-3 py-1 text-sm disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          キャンセル
-        </button>
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={busy}
+            className="cursor-pointer rounded border border-slate-300 px-3 py-1 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            キャンセル
+          </button>
         <button
           type="button"
           onClick={save}

@@ -20,34 +20,6 @@ from obsidian_ai_hub.memory.models import (
 logger = logging.getLogger(__name__)
 
 
-def _attach_people_to_memories(cursor: sqlite3.Cursor, memories: list[dict]):
-    if not memories:
-        return
-    mem_map = {m["memory_id"]: m for m in memories}
-    for m in memories:
-        m["people"] = []
-
-    placeholders = ", ".join("?" for _ in mem_map)
-    cursor.execute(
-        f"""
-        SELECT mp.memory_id, mp.person_id, p.display_name
-        FROM memory_people mp
-        JOIN people p ON mp.person_id = p.person_id
-        WHERE mp.memory_id IN ({placeholders})
-        ORDER BY mp.created_at ASC, p.person_id ASC
-        """,
-        tuple(mem_map.keys()),
-    )
-    rows = cursor.fetchall()
-    for row in rows:
-        mid = row["memory_id"]
-        if mid in mem_map:
-            mem_map[mid]["people"].append({
-                "person_id": row["person_id"],
-                "display_name": row["display_name"],
-            })
-
-
 def load_all_memories() -> list[dict]:
     conn = get_db_connection()
     try:
@@ -55,9 +27,7 @@ def load_all_memories() -> list[dict]:
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM memories")
             rows = cursor.fetchall()
-            memories = [deserialize_memory(dict(row)) for row in rows]
-            _attach_people_to_memories(cursor, memories)
-            return memories
+            return [deserialize_memory(dict(row)) for row in rows]
     finally:
         conn.close()
 
@@ -71,45 +41,9 @@ def get_memory(memory_id: str) -> Optional[dict]:
             row = cursor.fetchone()
             if row is None:
                 return None
-            m = deserialize_memory(dict(row))
-            _attach_people_to_memories(cursor, [m])
-            return m
+            return deserialize_memory(dict(row))
     finally:
         conn.close()
-
-
-def set_memory_people(
-    memory_id: str, person_ids: list[str], conn: Optional[sqlite3.Connection] = None
-):
-    """Update people linked to a memory_id. Enforces minimum 1 person if memory scope is 'person'."""
-    def _do_update(c: sqlite3.Connection):
-        cur = c.cursor()
-        cur.execute("SELECT scope FROM memories WHERE memory_id = ?", (memory_id,))
-        row = cur.fetchone()
-        if not row:
-            raise ValueError(f"Memory not found: {memory_id}")
-        scope = row["scope"] or "user"
-
-        if scope == "person" and not person_ids:
-            raise ValueError("Person memory must be associated with at least one person")
-
-        cur.execute("DELETE FROM memory_people WHERE memory_id = ?", (memory_id,))
-        now = get_current_timestamp()
-        for pid in person_ids:
-            cur.execute(
-                "INSERT INTO memory_people (memory_id, person_id, created_at) VALUES (?, ?, ?)",
-                (memory_id, pid, now),
-            )
-
-    if conn is not None:
-        _do_update(conn)
-    else:
-        c = get_db_connection()
-        try:
-            with c:
-                _do_update(c)
-        finally:
-            c.close()
 
 
 def save_all_memories(memories: list[dict]):
@@ -125,17 +59,7 @@ def save_all_memories(memories: list[dict]):
         with conn:
             cursor = conn.cursor()
             for m in memories:
-                scope = m.get("scope", "user")
-                if scope == "person":
-                    people = m.get("people") or []
-                    p_ids = [p["person_id"] if isinstance(p, dict) else str(p) for p in people]
-                    if not p_ids:
-                        raise ValueError(f"Person memory {m.get('memory_id')} must have at least one associated person")
-
                 db_row = serialize_memory(m)
-                if "scope" not in db_row or not db_row["scope"]:
-                    db_row["scope"] = "user"
-
                 columns = ", ".join(MEMORY_COLUMNS)
                 placeholders = ", ".join("?" for _ in MEMORY_COLUMNS)
                 update_clause = ", ".join(
@@ -148,10 +72,6 @@ def save_all_memories(memories: list[dict]):
                     f"ON CONFLICT(memory_id) DO UPDATE SET {update_clause}",
                     tuple(db_row.get(col) for col in MEMORY_COLUMNS),
                 )
-
-                if "people" in m and isinstance(m["people"], list):
-                    p_ids = [p["person_id"] if isinstance(p, dict) else str(p) for p in m["people"]]
-                    set_memory_people(m["memory_id"], p_ids, conn=conn)
 
             keep_ids = [m.get("memory_id") for m in memories if m.get("memory_id")]
             cursor.execute("SELECT memory_id FROM memories")

@@ -44,7 +44,6 @@ _APP_ENV_VARS = [
     "ACTIVITY_CLASSIFICATION_PROMPT_PATH",
     "LINE_INBOX_SCAN_PROMPT_PATH",
     "MEMORY_EXTRACTOR_PROMPT_PATH",
-    "PERSON_MEMORY_EXTRACTOR_PROMPT_PATH",
     "MEMORY_RENDERER_PROMPT_PATH",
     "INBOX_TRANSCRIPT_CORRECTION_PROMPT_PATH",
     "INBOX_WEB_SUMMARY_PROMPT_PATH",
@@ -727,14 +726,6 @@ MEMORY_EXTRACTOR_PROMPT_PATH = _optional_path(
 )
 if MEMORY_EXTRACTOR_PROMPT_PATH is None:
     MEMORY_EXTRACTOR_PROMPT_PATH = BASE_DIR / "config" / "prompts" / "memory_extract.md"
-
-PERSON_MEMORY_EXTRACTOR_PROMPT_PATH = _optional_path(
-    "PERSON_MEMORY_EXTRACTOR_PROMPT_PATH", "memory", "person_extractor", "prompt_path"
-)
-if PERSON_MEMORY_EXTRACTOR_PROMPT_PATH is None:
-    PERSON_MEMORY_EXTRACTOR_PROMPT_PATH = (
-        BASE_DIR / "config" / "prompts" / "person_memory_extract.md"
-    )
 
 _renderer_provider = _config_value("memory", "renderer", "provider")
 MEMORY_RENDERER_PROVIDER = (

@@ -67,7 +67,7 @@ def _check_memory_validity(
 def get_valid_approved_memories_readonly(
     now: datetime | None = None,
 ) -> tuple[list[dict], list[dict]]:
-    """Read-only filter for currently valid approved memories (scope = 'user' only).
+    """Read-only filter for currently valid approved memories.
 
     No DB writes, no projection. Suitable for search and agent prompt injection.
     """
@@ -76,7 +76,7 @@ def get_valid_approved_memories_readonly(
     active: list[dict] = []
     excluded: list[dict] = []
     for m in memories:
-        if m.get("status") != "approved" or m.get("scope") != "user":
+        if m.get("status") != "approved":
             continue
         is_active, reason = _check_memory_validity(m, now_dt)
         if not is_active:
@@ -174,7 +174,6 @@ def get_currently_valid_approved_memories() -> tuple[list[dict], list[dict]]:
                 if status != "approved":
                     continue
 
-                scope = m.get("scope", "user")
                 is_active, reason = _check_memory_validity(m, now_dt)
                 if not is_active:
                     if reason == "expired":
@@ -202,12 +201,10 @@ def get_currently_valid_approved_memories() -> tuple[list[dict], list[dict]]:
                             reason="Automatic expiration during validity check",
                             conn=conn,
                         )
-                    if scope == "user":
-                        excluded.append({"memory_id": m_id, "reason": reason})
+                    excluded.append({"memory_id": m_id, "reason": reason})
                     continue
 
-                if scope == "user":
-                    active_approved.append(m)
+                active_approved.append(m)
     finally:
         conn.close()
 

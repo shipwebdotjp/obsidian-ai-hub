@@ -161,21 +161,12 @@ def update_memory_fields(memory_id: str, fields: dict) -> dict:
                 raise ValueError("Cannot edit a superseded memory")
             timestamp_now = get_current_timestamp()
 
-            person_ids_update = None
-            if "person_ids" in validated:
-                person_ids_update = validated.pop("person_ids")
-
             changes = {}
             for k, v in validated.items():
                 before = target.get(k)
                 if before != v:
                     changes[k] = {"before": before, "after": v}
                     target[k] = v
-
-            if person_ids_update is not None:
-                from obsidian_ai_hub.memory.store import set_memory_people
-                set_memory_people(memory_id, person_ids_update, conn=conn)
-                changes["person_ids"] = {"updated": person_ids_update}
 
             if not changes:
                 return {

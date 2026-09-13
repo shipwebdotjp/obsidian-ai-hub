@@ -10,7 +10,6 @@ def list_memories(
     kind: Optional[str] = None,
     topic: Optional[str] = None,
     q: Optional[str] = None,
-    person_id: Optional[str] = None,
 ) -> list[dict]:
     rows = memory.load_all_memories()
     out = []
@@ -21,10 +20,6 @@ def list_memories(
             continue
         if topic and topic not in (r.get("topics") or []):
             continue
-        if person_id:
-            p_ids = [p.get("person_id") for p in (r.get("people") or []) if isinstance(p, dict)]
-            if person_id not in p_ids:
-                continue
         if q:
             target = (r.get("content") or "") + " " + " ".join(r.get("tags") or [])
             if q.lower() not in target.lower():

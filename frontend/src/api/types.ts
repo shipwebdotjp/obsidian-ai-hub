@@ -38,15 +38,9 @@ export interface MemoryEvent {
   reason?: string;
 }
 
-export interface MemoryPersonRef {
-  person_id: string;
-  display_name: string;
-}
-
 export interface Memory {
   memory_id: string;
   status: MemoryStatus;
-  scope?: "user" | "person";
   kind?: string;
   memory_key?: string;
   content: string;
@@ -68,7 +62,6 @@ export interface Memory {
   updated_at?: string;
   reviewed_by?: string;
   reviewed_at?: string;
-  people?: MemoryPersonRef[];
 }
 
 export interface MemoryDetail extends Memory {
@@ -88,7 +81,6 @@ export interface EditPayload {
   valid_until?: string | null;
   review_due_at?: string | null;
   stability?: Stability;
-  person_ids?: string[];
 }
 
 export interface BatchReviewRequest {

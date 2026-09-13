@@ -8,7 +8,6 @@ export interface MemoryListProps {
   query: string;
   topic: string;
   kind?: string;
-  personId?: string;
   selectedIds: Set<string>;
   selectedMemoryId: string | null;
   onSelectionChange: (next: Set<string>) => void;
@@ -22,7 +21,6 @@ export default function MemoryList({
   query,
   topic,
   kind,
-  personId,
   selectedIds,
   selectedMemoryId,
   onSelectionChange,
@@ -44,7 +42,7 @@ export default function MemoryList({
     setLoading(true);
     setError(null);
     try {
-      const res = await listMemories({ status, q: query, topic, kind, person_id: personId });
+      const res = await listMemories({ status, q: query, topic, kind });
       if (controller.signal.aborted) return;
       setItems(res.items);
       onSelectionChange(new Set());
@@ -213,14 +211,6 @@ export default function MemoryList({
                   <div className="text-sm">{m.content}</div>
                   <div className="mt-1 flex flex-wrap gap-2 text-xs text-slate-500">
                     <span className="rounded bg-slate-200 px-1">{m.kind || "?"}</span>
-                    {m.scope === "person" && (
-                      <span className="rounded bg-indigo-100 font-medium text-indigo-800 px-1">人物</span>
-                    )}
-                    {m.people && m.people.length > 0 && (
-                      <span className="rounded bg-indigo-50 border border-indigo-200 text-indigo-700 px-1">
-                        関連: {m.people.map((p) => p.display_name || p.person_id).join(", ")}
-                      </span>
-                    )}
                     {m.memory_key && <span>key: {m.memory_key}</span>}
                     {typeof m.extraction_confidence === "number" && (
                       <span>conf: {m.extraction_confidence.toFixed(2)}</span>

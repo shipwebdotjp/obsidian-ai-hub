@@ -40,7 +40,6 @@ MEMORY_COLUMNS = [
     "reviewed_at",
     "dedup_suggestions",
     "dedup_assessment",
-    "scope",
 ]
 
 EVENT_COLUMNS = [
@@ -114,8 +113,6 @@ def serialize_memory(m: dict) -> dict:
 
 def deserialize_memory(row: dict) -> dict:
     m = dict(row)
-    if "scope" not in m or not m["scope"]:
-        m["scope"] = "user"
     for col in [
         "topics",
         "tags",
@@ -254,7 +251,6 @@ EDITABLE_FIELDS = (
     "valid_until",
     "review_due_at",
     "stability",
-    "person_ids",
 )
 
 
@@ -310,10 +306,5 @@ def _validate_edit_payload(payload: dict) -> dict:
         vu = payload.get("valid_until")
         if vf and vu and vf > vu:
             raise ValueError("valid_from must be on or before valid_until")
-
-    if "person_ids" in payload and payload["person_ids"] is not None:
-        p_ids = payload["person_ids"]
-        if not isinstance(p_ids, list) or not all(isinstance(pid, str) for pid in p_ids):
-            raise ValueError("person_ids must be a list of person_id strings")
 
     return payload

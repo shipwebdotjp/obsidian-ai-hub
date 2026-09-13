@@ -17,7 +17,6 @@ def list_memories(
     kind: Optional[str] = None,
     topic: Optional[str] = None,
     q: Optional[str] = None,
-    person_id: Optional[str] = None,
     _=Depends(require_bearer_token),
 ):
     if status_filter and status_filter not in schemas.ALLOWED_STATUS:
@@ -25,7 +24,7 @@ def list_memories(
             status_code=400,
             detail=f"status must be one of {sorted(schemas.ALLOWED_STATUS)}",
         )
-    items = service.list_memories(status=status_filter, kind=kind, topic=topic, q=q, person_id=person_id)
+    items = service.list_memories(status=status_filter, kind=kind, topic=topic, q=q)
     return schemas.MemoryListResponse(items=items, total=len(items))
 
 
