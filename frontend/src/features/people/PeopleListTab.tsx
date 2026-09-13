@@ -1,6 +1,8 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { GitMerge, Trash2 } from "lucide-react";
-import { Person, PersonAlias } from "../../api/types";
+import { ApiError, listMemories } from "../../api/client";
+import { Memory, Person, PersonAlias } from "../../api/types";
 import {
   PersonDetail,
   PeopleError,
@@ -91,6 +93,38 @@ export default function PeopleListTab({
   onBulkSaveProperty = async () => {},
 }: PeopleListTabProps) {
   const [nameQuery, setNameQuery] = useState("");
+  const [personMemories, setPersonMemories] = useState<Memory[]>([]);
+  const [loadingMemories, setLoadingMemories] = useState(false);
+  const [memoriesError, setMemoriesError] = useState<string | null>(null);
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (!selectedPerson?.person_id) {
+      setPersonMemories([]);
+      setMemoriesError(null);
+      return;
+    }
+    let cancelled = false;
+    setLoadingMemories(true);
+    setMemoriesError(null);
+    (async () => {
+      try {
+        const res = await listMemories({ person_id: selectedPerson.person_id });
+        if (!cancelled) setPersonMemories(res.items);
+      } catch (e) {
+        if (!cancelled) {
+          const msg = e instanceof ApiError ? e.message : "人物メモリの取得に失敗しました";
+          setMemoriesError(msg);
+          setPersonMemories([]);
+        }
+      } finally {
+        if (!cancelled) setLoadingMemories(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedPerson?.person_id]);
 
   const filteredPeople = useMemo(() => {
     const query = nameQuery.trim().toLowerCase();
@@ -369,6 +403,44 @@ export default function PeopleListTab({
               onDeleteRelation={onDeleteRelation}
               onSelectPerson={onSelectPerson}
             />
+
+            {/* Person Memories Section */}
+            <div className="border border-slate-200 rounded-lg p-3 bg-white">
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-xs font-bold text-slate-700">人物メモリ ({personMemories.length})</h3>
+                <button
+                  type="button"
+                  onClick={() => navigate(`/memories?person_id=${selectedPerson.person_id}`)}
+                  className="text-xs text-blue-600 hover:underline flex items-center gap-1 cursor-pointer font-medium"
+                >
+                  メモリ画面で見る →
+                </button>
+              </div>
+              {memoriesError && <p className="text-xs text-red-600">{memoriesError}</p>}
+              {loadingMemories ? (
+                <p className="text-xs text-slate-400">読み込み中…</p>
+              ) : personMemories.length === 0 ? (
+                memoriesError ? null : (
+                  <p className="text-xs text-slate-400">人物メモリはありません。</p>
+                )
+              ) : (
+                <div className="border border-slate-100 rounded-lg overflow-hidden divide-y divide-slate-100">
+                  {personMemories.map((m) => (
+                    <div key={m.memory_id} className="p-2.5 text-xs bg-slate-50/50">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="rounded bg-indigo-100 text-indigo-800 text-[10px] font-medium px-1.5 py-0.5">
+                          {m.status === "approved" ? "承認済み" : m.status === "candidate" ? "候補" : m.status}
+                        </span>
+                        <span className="rounded bg-slate-200 text-slate-700 text-[10px] px-1.5 py-0.5">
+                          {m.kind || "fact"}
+                        </span>
+                      </div>
+                      <div className="text-slate-800 font-medium whitespace-pre-wrap">{m.content}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
 
             <div>
               <h3 className="text-xs font-bold text-slate-700 mb-2">紐づくサマリ ({selectedPerson.summaries.length})</h3>

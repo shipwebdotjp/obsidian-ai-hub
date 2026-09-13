@@ -700,7 +700,7 @@ def people_search(query: str, limit: int = 10) -> str:
 def _make_people_get_tool(trusted_ctx: Optional[Dict[str, Any]] = None) -> BaseTool:
     @tool(args_schema=PersonGetInput)
     def people_get(person_id: str) -> str:
-        """人物IDから詳細（別名、全属性値・履歴、直接接続リレーション、本人との直接関係、関連サマリ、件数）を取得します。特定人物メッセージを個人化する際は people_search → people_get を使用し、relationship_to_principal が空/nullの場合は本人との関係を推測・言及しないでください。"""
+        """人物IDから詳細（別名、全属性値・履歴、直接接続リレーション、本人との直接関係、人物メモリ、関連サマリ、件数）を取得します。特定人物メッセージを個人化する際は people_search → people_get を使用し、relationship_to_principal が空/nullの場合は本人との関係を推測・言及しないでください。"""
         try:
             from obsidian_ai_hub.web.services.people import get_person_detail
             from obsidian_ai_hub.web.services.person_properties import get_person_properties_for_ai
@@ -745,6 +745,46 @@ def _make_people_get_tool(trusted_ctx: Optional[Dict[str, Any]] = None) -> BaseT
             except Exception as rel_exc:
                 logger.warning("people_get: failed to fetch relationship_to_principal for person_id=%s: %s", person_id, rel_exc)
                 detail["relationship_to_principal"] = None
+
+            try:
+                from obsidian_ai_hub.memory.context import _check_memory_validity
+                from obsidian_ai_hub.database import get_db_connection
+                from obsidian_ai_hub.memory.models import deserialize_memory
+                from datetime import datetime, timezone
+
+                ref_now = now_dt if hasattr(now_dt, "date") else datetime.now(timezone.utc)
+                conn = get_db_connection()
+                try:
+                    cur = conn.cursor()
+                    cur.execute(
+                        """
+                        SELECT m.* FROM memories m
+                        JOIN memory_people mp ON m.memory_id = mp.memory_id
+                        WHERE mp.person_id = ? AND m.scope = 'person' AND m.status = 'approved'
+                        ORDER BY m.updated_at DESC LIMIT 20
+                        """,
+                        (person_id,),
+                    )
+                    person_mems = [deserialize_memory(dict(row)) for row in cur.fetchall()]
+                finally:
+                    conn.close()
+                person_memories = []
+                for m in person_mems:
+                    is_active, _ = _check_memory_validity(m, ref_now)
+                    if is_active:
+                        content = m.get("content") or ""
+                        if len(content) > 1000:
+                            content = content[:1000] + "…"
+                        person_memories.append({
+                            "kind": m.get("kind"),
+                            "content": content,
+                            "valid_from": m.get("valid_from"),
+                            "valid_until": m.get("valid_until"),
+                        })
+                detail["person_memories"] = person_memories
+            except Exception as pm_exc:
+                logger.warning("people_get: failed to fetch person_memories for person_id=%s: %s", person_id, pm_exc)
+                detail["person_memories"] = []
 
             return json.dumps(detail, ensure_ascii=False)
         except EXPECTED_TOOL_EXCEPTIONS as exc:
