@@ -1,7 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
-import PersonPropertiesSection from "./PersonPropertiesSection";
-import { formatYmdWithDow } from "../../utils/date";
+import PersonPropertiesSection, { formatJapaneseDate } from "./PersonPropertiesSection";
 import {
   PersonPropertyBulkSaveRequest,
   PersonPropertyDefinition,
@@ -120,10 +119,14 @@ function renderSection(
 }
 
 describe("PersonPropertiesSection", () => {
-  it("日付型の値を共通フォーマッターで表示する", () => {
-    renderSection([makeValue()], [makeDefinition()]);
-    expect(screen.getByText(formatYmdWithDow("2026-09-07"))).toBeDefined();
+  it("日付型の値を日本語フォーマッターで表示する (YYYY年M月D日 / YYYY年M月 / YYYY年)", () => {
+    renderSection([makeValue({ value_date: "2026-09-07" })], [makeDefinition()]);
+    expect(screen.getByText("2026年9月7日")).toBeDefined();
     expect(screen.queryByText("2026-09-07")).toBeNull();
+
+    expect(formatJapaneseDate("1990")).toBe("1990年");
+    expect(formatJapaneseDate("1990-05")).toBe("1990年5月");
+    expect(formatJapaneseDate("1990-05-15")).toBe("1990年5月15日");
   });
 
   it("表示名と整形済み値を表示しslugを表示しない", () => {
@@ -291,9 +294,9 @@ describe("PersonPropertiesSection", () => {
       [makeDefinition()],
     );
     const text = container.textContent ?? "";
-    expect(text).toContain(formatYmdWithDow("2026-09-07"));
-    expect(text).toContain(formatYmdWithDow("2026-01-01"));
-    expect(text).toContain(formatYmdWithDow("2026-12-31"));
+    expect(text).toContain("2026年9月7日");
+    expect(text).toContain("2026年1月1日");
+    expect(text).toContain("2026年12月31日");
     expect(screen.getByText("備考メモ")).toBeDefined();
   });
 });

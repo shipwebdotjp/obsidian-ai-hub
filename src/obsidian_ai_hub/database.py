@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import calendar
 import os
+import re
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -678,6 +680,9 @@ def get_db_connection() -> sqlite3.Connection:
     if current_version <= 40:
         run_migration_v41(conn)
 
+    if current_version <= 41:
+        run_migration_v42(conn)
+
     return conn
 
 
@@ -925,6 +930,137 @@ def run_migration_v41(db: sqlite3.Connection) -> None:
     """)
 
     db.execute("PRAGMA user_version = 41")
+    db.commit()
+
+
+def get_date_bounds(d_str: str | None) -> tuple[str | None, str | None]:
+    if not d_str or not str(d_str).strip():
+        return None, None
+    s = str(d_str).strip().replace("/", "-")
+    parts = s.split("-")
+    if len(parts) == 1 and re.match(r"^\d{4}$", parts[0]):
+        y = int(parts[0])
+        return f"{y:04d}-01-01", f"{y:04d}-12-31"
+    elif len(parts) == 2 and re.match(r"^\d{4}$", parts[0]) and re.match(r"^\d{1,2}$", parts[1]):
+        y, m = int(parts[0]), int(parts[1])
+        if 1 <= m <= 12:
+            last_day = calendar.monthrange(y, m)[1]
+            return f"{y:04d}-{m:02d}-01", f"{y:04d}-{m:02d}-{last_day:02d}"
+    elif len(parts) == 3 and re.match(r"^\d{4}$", parts[0]) and re.match(r"^\d{1,2}$", parts[1]) and re.match(r"^\d{1,2}$", parts[2]):
+        y, m, d = int(parts[0]), int(parts[1]), int(parts[2])
+        if 1 <= m <= 12:
+            last_day = calendar.monthrange(y, m)[1]
+            if 1 <= d <= last_day:
+                formatted = f"{y:04d}-{m:02d}-{d:02d}"
+                return formatted, formatted
+    return None, None
+
+
+def run_migration_v42(db: sqlite3.Connection) -> None:
+    """Run migration for version 42 (person_property_values rebuild with partial date boundary columns & new CHECK constraint)."""
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS person_property_values_v42 (
+            property_value_id TEXT PRIMARY KEY,
+            person_id TEXT NOT NULL REFERENCES people(person_id) ON DELETE CASCADE,
+            property_definition_id TEXT NOT NULL REFERENCES person_property_definitions(property_definition_id) ON DELETE CASCADE,
+            source_type TEXT NOT NULL CHECK (source_type IN ('database', 'vault')),
+            value_text TEXT,
+            value_date TEXT,
+            value_date_min TEXT,
+            value_date_max TEXT,
+            value_number REAL,
+            value_boolean INTEGER CHECK (value_boolean IS NULL OR value_boolean IN (0, 1)),
+            option_id TEXT REFERENCES person_property_options(option_id) ON DELETE RESTRICT,
+            valid_from TEXT,
+            valid_from_min TEXT,
+            valid_until TEXT,
+            valid_until_max TEXT,
+            note TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            CHECK (valid_from_min IS NULL OR valid_until_max IS NULL OR valid_from_min <= valid_until_max)
+        );
+    """)
+
+    cursor = db.cursor()
+    cursor.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='person_property_values';"
+    )
+    if cursor.fetchone() is not None:
+        cursor.execute("""
+            SELECT property_value_id, person_id, property_definition_id, source_type,
+                   value_text, value_date, value_number, value_boolean, option_id,
+                   valid_from, valid_until, note, created_at, updated_at
+            FROM person_property_values
+        """)
+        rows = cursor.fetchall()
+        for r in rows:
+            v_date_min, v_date_max = get_date_bounds(r["value_date"])
+            v_from_min, _ = get_date_bounds(r["valid_from"])
+            _, v_until_max = get_date_bounds(r["valid_until"])
+
+            db.execute(
+                """
+                INSERT INTO person_property_values_v42 (
+                    property_value_id, person_id, property_definition_id, source_type,
+                    value_text, value_date, value_date_min, value_date_max,
+                    value_number, value_boolean, option_id,
+                    valid_from, valid_from_min, valid_until, valid_until_max,
+                    note, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    r["property_value_id"],
+                    r["person_id"],
+                    r["property_definition_id"],
+                    r["source_type"],
+                    r["value_text"],
+                    r["value_date"],
+                    v_date_min,
+                    v_date_max,
+                    r["value_number"],
+                    r["value_boolean"],
+                    r["option_id"],
+                    r["valid_from"],
+                    v_from_min,
+                    r["valid_until"],
+                    v_until_max,
+                    r["note"],
+                    r["created_at"],
+                    r["updated_at"],
+                ),
+            )
+
+        db.execute("DROP TABLE person_property_values;")
+
+    db.execute("ALTER TABLE person_property_values_v42 RENAME TO person_property_values;")
+
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_ppv_person ON person_property_values(person_id);"
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_ppv_definition ON person_property_values(property_definition_id);"
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_ppv_def_text_period ON person_property_values(property_definition_id, value_text, valid_from_min, valid_until_max);"
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_ppv_def_date_period ON person_property_values(property_definition_id, value_date_min, value_date_max, valid_from_min, valid_until_max);"
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_ppv_def_number_period ON person_property_values(property_definition_id, value_number, valid_from_min, valid_until_max);"
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_ppv_def_bool_period ON person_property_values(property_definition_id, value_boolean, valid_from_min, valid_until_max);"
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_ppv_def_option_period ON person_property_values(property_definition_id, option_id, valid_from_min, valid_until_max);"
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_ppv_def_bounds ON person_property_values(property_definition_id, valid_from_min, valid_until_max);"
+    )
+
+    db.execute("PRAGMA user_version = 42")
     db.commit()
 
 

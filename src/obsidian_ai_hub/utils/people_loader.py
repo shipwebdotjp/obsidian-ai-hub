@@ -9,8 +9,12 @@ from typing import TypedDict, Any, Optional
 
 from obsidian_ai_hub.database import get_db_connection
 from obsidian_ai_hub.utils import config as app_config
+from obsidian_ai_hub.utils.dates import (
+    get_partial_date_bounds,
+    parse_and_normalize_partial_date,
+)
 from obsidian_ai_hub.utils.extracter import parse_frontmatter
-from obsidian_ai_hub.utils.periods import periods_overlap
+from obsidian_ai_hub.utils.periods import periods_overlap, temporal_ranges_overlap
 from obsidian_ai_hub.summary.store import normalize_entity_name
 
 logger = logging.getLogger(__name__)
@@ -43,17 +47,12 @@ def normalize_date_str(val: Any) -> str:
         return val.isoformat()[:10]
     if isinstance(val, str):
         v = val.strip()
-        if re.match(r"^\d{4}-\d{2}-\d{2}$", v):
-            try:
-                datetime.strptime(v, "%Y-%m-%d")
-                return v
-            except ValueError as e:
-                raise ValueError(f"Invalid date: {val}") from e
-        if re.match(r"^\d{4}/\d{1,2}/\d{1,2}$", v):
-            try:
-                return datetime.strptime(v, "%Y/%m/%d").strftime("%Y-%m-%d")
-            except ValueError as e:
-                raise ValueError(f"Invalid date: {val}") from e
+        try:
+            res = parse_and_normalize_partial_date(v)
+            if res is not None:
+                return res
+        except ValueError as e:
+            raise ValueError(f"Invalid date: {val}") from e
     raise ValueError(f"Invalid date format: {val}")
 
 
@@ -201,7 +200,9 @@ def parse_vault_properties_for_note(
                 prop_error = str(e)
                 break
 
-            if vf and vu and vf > vu:
+            vf_min, _ = get_partial_date_bounds(vf)
+            _, vu_max = get_partial_date_bounds(vu)
+            if vf_min and vu_max and vf_min > vu_max:
                 prop_error = f"valid_from ({vf}) は valid_until ({vu}) 以下である必要があります。"
                 break
 
@@ -279,7 +280,12 @@ def parse_vault_properties_for_note(
                 for j in range(i + 1, len(parsed_items)):
                     pi1 = parsed_items[i]
                     pi2 = parsed_items[j]
-                    if periods_overlap(pi1["valid_from"], pi1["valid_until"], pi2["valid_from"], pi2["valid_until"]):
+                    pi1_s_min, _ = get_partial_date_bounds(pi1["valid_from"])
+                    _, pi1_e_max = get_partial_date_bounds(pi1["valid_until"])
+                    pi2_s_min, _ = get_partial_date_bounds(pi2["valid_from"])
+                    _, pi2_e_max = get_partial_date_bounds(pi2["valid_until"])
+
+                    if temporal_ranges_overlap(pi1_s_min, pi1_e_max, pi2_s_min, pi2_e_max):
                         # Check if they have different values
                         diff_val = (
                             pi1["value_text"] != pi2["value_text"]

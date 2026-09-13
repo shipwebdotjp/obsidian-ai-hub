@@ -410,3 +410,16 @@ LLMによる自動抽出を即時DB書き込みにすると、推測や誤認識
 ### 理由
 
 人物ごとの持続的な知見・内省をAIが適切に活用できるようにしつつ、利用者自身の全体メモリやCopilotプロフィールと混同されることを防ぐため。M:N関連により複数人に跨る関係的記憶（共同プロジェクト等）を安全に表現し、スコープ分離と厳格な公開境界を設けることで情報の混入や誤爆を防止する。
+
+## 2026-09-13: 人物属性・定義の将来的な変更履歴イベントモデル（append-only）と補償復元方針
+
+### 決定
+
+- **対象範囲**: 属性定義（`person_property_definitions`）、選択肢（`person_property_options`）、別名（`person_property_definition_aliases` / `person_property_option_aliases`）、属性値（`person_property_values`）、および Vault 同期処理。
+- **イベント記録モデル**: 履歴は追記専用（append-only）のイベントテーブルに永続化し、既存の正本レコードをインプレースで過去改ざん・書き換えしない。
+- **記録項目**: 変更前スナップショット（`before_snapshot_json`）、変更後スナップショット（`after_snapshot_json`）、操作種別（`created`, `updated`, `deleted`, `synced`, `transferred`, `compensated`）、実行主体／由来（Web API, Vault Sync, HITL Approval, System Merge）、記録時刻（`occurred_at`）、および操作単位 ID（`transaction_id`）。
+- **復元方針**: 過去状態への復元（ロールバック）は、履歴ログの直接削除・書き換え・破壊によって行うのではなく、過去スナップショットを新たな正本状態として反映する「補償イベント（compensation event）」を発行・記録することで実現する。
+
+### 理由
+
+属性値や定義の変更履歴を追記専用イベントで記録することにより、どの操作がいつ・どのコンテキストで発生したかを正確に監査可能にする。データ不整合や誤操作時の復元を過去ログ削除ではなく補償イベントとして扱うことで、復元操作自体も監査証跡として安全に追跡できるようになり、データ追跡可能性と完全性を両立できる。

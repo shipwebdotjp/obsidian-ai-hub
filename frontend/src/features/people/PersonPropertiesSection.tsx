@@ -7,22 +7,127 @@ import {
   PersonPropertyBulkSaveRequest,
 } from "./types";
 import { useNativeDialog } from "./useNativeDialog";
-import { formatYmdWithDow } from "../../utils/date";
 
-function isValidYmd(value: string): boolean {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
-  const [year, month, day] = value.split("-").map(Number);
-  const date = new Date(`${value}T00:00:00`);
-  return (
-    date.getFullYear() === year && date.getMonth() + 1 === month && date.getDate() === day
-  );
+export function formatJapaneseDate(value: string | null | undefined): string {
+  if (!value) return "";
+  const v = value.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(v)) {
+    const [y, m, d] = v.split("-").map(Number);
+    const date = new Date(y, m - 1, d);
+    if (date.getFullYear() === y && date.getMonth() === m - 1 && date.getDate() === d) {
+      return `${y}年${m}月${d}日`;
+    }
+    return "";
+  }
+  if (/^\d{4}-\d{2}$/.test(v)) {
+    const [y, m] = v.split("-").map(Number);
+    if (m >= 1 && m <= 12) {
+      return `${y}年${m}月`;
+    }
+    return "";
+  }
+  if (/^\d{4}$/.test(v)) {
+    const y = Number(v);
+    if (y >= 1000 && y <= 9999) {
+      return `${v}年`;
+    }
+    return "";
+  }
+  return "";
 }
 
-// formatYmdWithDow returns invalid input unchanged, so validate first and
-// hide null/empty/invalid values per project convention.
-function formatPeriodDate(value: string | null | undefined): string {
-  if (!value || !isValidYmd(value)) return "";
-  return formatYmdWithDow(value);
+function detectDatePrecision(val: string): "day" | "month" | "year" {
+  if (/^\d{4}$/.test(val.trim())) return "year";
+  if (/^\d{4}-\d{2}$/.test(val.trim())) return "month";
+  return "day";
+}
+
+interface DatePrecisionInputProps {
+  value: string;
+  onChange: (val: string) => void;
+  labelPrefix: string;
+  required?: boolean;
+}
+
+function DatePrecisionInput({ value, onChange, labelPrefix, required = false }: DatePrecisionInputProps) {
+  const [precision, setPrecision] = useState<"day" | "month" | "year">(() => detectDatePrecision(value));
+
+  const handlePrecisionChange = (newPrec: "day" | "month" | "year") => {
+    setPrecision(newPrec);
+    if (!value) return;
+    if (newPrec === "year") {
+      if (value.length >= 4 && /^\d{4}/.test(value)) {
+        onChange(value.slice(0, 4));
+      } else {
+        onChange("");
+      }
+    } else if (newPrec === "month") {
+      if (value.length >= 7 && /^\d{4}-\d{2}/.test(value)) {
+        onChange(value.slice(0, 7));
+      } else {
+        onChange("");
+      }
+    } else if (newPrec === "day") {
+      if (/^\d{4}-\d{2}-\d{2}$/.test(value.trim())) {
+        onChange(value.trim());
+      } else {
+        onChange("");
+      }
+    }
+  };
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center gap-2 mb-1">
+        <span className="text-[11px] font-semibold text-slate-600">精度:</span>
+        {(["day", "month", "year"] as const).map((p) => (
+          <label key={p} className="inline-flex items-center gap-1 text-[11px] text-slate-700 cursor-pointer">
+            <input
+              type="radio"
+              name={`prec-${labelPrefix}-${p}`}
+              checked={precision === p}
+              onChange={() => handlePrecisionChange(p)}
+              className="text-slate-800 focus:ring-slate-800 cursor-pointer"
+            />
+            {p === "day" ? "日" : p === "month" ? "月" : "年"}
+          </label>
+        ))}
+      </div>
+      {precision === "day" && (
+        <input
+          aria-label={`${labelPrefix} 日`}
+          type="date"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className="w-full rounded border border-slate-300 p-2 text-xs font-mono focus:ring-2 focus:ring-slate-800 focus:outline-none"
+          required={required}
+        />
+      )}
+      {precision === "month" && (
+        <input
+          aria-label={`${labelPrefix} 月`}
+          type="month"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className="w-full rounded border border-slate-300 p-2 text-xs font-mono focus:ring-2 focus:ring-slate-800 focus:outline-none"
+          required={required}
+        />
+      )}
+      {precision === "year" && (
+        <input
+          aria-label={`${labelPrefix} 年`}
+          type="number"
+          min="1000"
+          max="9999"
+          placeholder="YYYY"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className="w-full rounded border border-slate-300 p-2 text-xs font-mono focus:ring-2 focus:ring-slate-800 focus:outline-none"
+          required={required}
+        />
+      )}
+    </div>
+  );
 }
 
 interface BulkRow {
@@ -46,6 +151,9 @@ function rowValueFromProperty(pv: PersonPropertyValue): string {
   }
   if (pv.data_type === "select") {
     return pv.option_id || (typeof pv.value === "string" ? pv.value : "") || "";
+  }
+  if (pv.data_type === "date") {
+    return pv.value_date || (typeof pv.value === "string" ? pv.value : "") || "";
   }
   return pv.value === null || pv.value === undefined ? "" : String(pv.value);
 }
@@ -108,6 +216,7 @@ export default function PersonPropertiesSection({
   const [bulkRows, setBulkRows] = useState<BulkRow[]>([]);
   const [bulkError, setBulkError] = useState<string | null>(null);
   const [bulkSubmitting, setBulkSubmitting] = useState(false);
+
   // Draft rows for bulk creation when a multiple definition is selected.
   const [createBulkRows, setCreateBulkRows] = useState<BulkRow[]>(() => [newBulkRow()]);
 
@@ -115,8 +224,7 @@ export default function PersonPropertiesSection({
   const deleteDialogRef = useRef<HTMLDialogElement>(null);
   const bulkDialogRef = useRef<HTMLDialogElement>(null);
 
-  // Group values by property definition so multiple-cardinality attributes
-  // render as several value rows with a single group-level edit affordance.
+  // Group values by property definition
   const groups: PropertyGroup[] = useMemo(() => {
     const order: string[] = [];
     const map = new Map<string, PersonPropertyValue[]>();
@@ -270,7 +378,6 @@ export default function PersonPropertiesSection({
       });
       closeBulkModal();
     } catch (err: unknown) {
-      // Keep the rows so user input is not lost on save errors.
       setBulkError(err instanceof Error ? err.message : "属性値の一括保存に失敗しました。");
     } finally {
       setBulkSubmitting(false);
@@ -294,7 +401,7 @@ export default function PersonPropertiesSection({
   const renderValueDisplay = (pv: PersonPropertyValue) => {
     if (pv.data_type === "date") {
       const raw = pv.value_date ?? (typeof pv.value === "string" ? pv.value : null);
-      return formatPeriodDate(raw) || "—";
+      return formatJapaneseDate(raw) || "—";
     }
     if (pv.data_type === "boolean") {
       return pv.value_boolean ? "はい (True)" : "いいえ (False)";
@@ -347,12 +454,10 @@ export default function PersonPropertiesSection({
     }
     if (definition.data_type === "date") {
       return (
-        <input
-          aria-label={`${labelPrefix} 値`}
-          type="date"
+        <DatePrecisionInput
           value={value}
-          onChange={(e) => onChange(e.target.value)}
-          className="w-full rounded border border-slate-300 p-2 text-xs font-mono focus:ring-2 focus:ring-slate-800 focus:outline-none"
+          onChange={onChange}
+          labelPrefix={labelPrefix}
           required={required}
         />
       );
@@ -421,23 +526,19 @@ export default function PersonPropertiesSection({
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">開始日 (YYYY-MM-DD)</label>
-                <input
-                  aria-label={`${labelPrefix} 開始日`}
-                  type="date"
+                <label className="block font-semibold text-slate-700 mb-1">開始日</label>
+                <DatePrecisionInput
                   value={row.validFrom}
-                  onChange={(e) => updateRow({ validFrom: e.target.value })}
-                  className="w-full rounded border border-slate-300 p-2 text-xs font-mono focus:ring-2 focus:ring-slate-800 focus:outline-none"
+                  onChange={(v) => updateRow({ validFrom: v })}
+                  labelPrefix={`${labelPrefix} 開始日`}
                 />
               </div>
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">終了日 (YYYY-MM-DD)</label>
-                <input
-                  aria-label={`${labelPrefix} 終了日`}
-                  type="date"
+                <label className="block font-semibold text-slate-700 mb-1">終了日</label>
+                <DatePrecisionInput
                   value={row.validUntil}
-                  onChange={(e) => updateRow({ validUntil: e.target.value })}
-                  className="w-full rounded border border-slate-300 p-2 text-xs font-mono focus:ring-2 focus:ring-slate-800 focus:outline-none"
+                  onChange={(v) => updateRow({ validUntil: v })}
+                  labelPrefix={`${labelPrefix} 終了日`}
                 />
               </div>
             </div>
@@ -464,8 +565,6 @@ export default function PersonPropertiesSection({
     </div>
   );
 
-  // Creation dialog shows a multi-row editor when a multiple-cardinality
-  // definition is selected; the rows above are the bulk-create draft.
   const handleDefinitionChangeForCreate = (defId: string) => {
     setSelectedDefinitionId(defId);
     setValInput("");
@@ -566,11 +665,11 @@ export default function PersonPropertiesSection({
                           <div className="text-[11px] text-slate-500">
                             有効期間:{" "}
                             {pv.valid_from
-                              ? formatPeriodDate(pv.valid_from) || ""
+                              ? formatJapaneseDate(pv.valid_from) || ""
                               : "開始指定なし"}{" "}
                             ～{" "}
                             {pv.valid_until
-                              ? formatPeriodDate(pv.valid_until) || ""
+                              ? formatJapaneseDate(pv.valid_until) || ""
                               : "終了指定なし"}
                           </div>
                         )}
@@ -601,7 +700,7 @@ export default function PersonPropertiesSection({
         </div>
       )}
 
-      {/* Form Modal (Create single / Edit single; create multiple uses bulk rows) */}
+      {/* Form Modal */}
       {(showFormModal || editingValue) && (
         <dialog
           ref={formDialogRef}
@@ -670,21 +769,19 @@ export default function PersonPropertiesSection({
 
                     <div className="grid grid-cols-2 gap-3">
                       <div>
-                        <label className="block font-semibold text-slate-700 mb-1">開始日 (YYYY-MM-DD)</label>
-                        <input
-                          type="date"
+                        <label className="block font-semibold text-slate-700 mb-1">開始日</label>
+                        <DatePrecisionInput
                           value={validFrom}
-                          onChange={(e) => setValidFrom(e.target.value)}
-                          className="w-full rounded border border-slate-300 p-2 text-xs font-mono focus:ring-2 focus:ring-slate-800 focus:outline-none"
+                          onChange={setValidFrom}
+                          labelPrefix="開始日"
                         />
                       </div>
                       <div>
-                        <label className="block font-semibold text-slate-700 mb-1">終了日 (YYYY-MM-DD)</label>
-                        <input
-                          type="date"
+                        <label className="block font-semibold text-slate-700 mb-1">終了日</label>
+                        <DatePrecisionInput
                           value={validUntil}
-                          onChange={(e) => setValidUntil(e.target.value)}
-                          className="w-full rounded border border-slate-300 p-2 text-xs font-mono focus:ring-2 focus:ring-slate-800 focus:outline-none"
+                          onChange={setValidUntil}
+                          labelPrefix="終了日"
                         />
                       </div>
                     </div>
@@ -723,7 +820,7 @@ export default function PersonPropertiesSection({
         </dialog>
       )}
 
-      {/* Bulk Edit Modal (multiple-cardinality) */}
+      {/* Bulk Edit Modal */}
       {bulkDefinitionId && bulkDefinition && (
         <dialog
           ref={bulkDialogRef}

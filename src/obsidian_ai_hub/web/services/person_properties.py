@@ -6,7 +6,11 @@ from typing import Any, Literal, Optional
 from zoneinfo import ZoneInfo
 
 from obsidian_ai_hub.database import get_db_connection
-from obsidian_ai_hub.utils.periods import periods_overlap
+from obsidian_ai_hub.utils.dates import (
+    get_partial_date_bounds,
+    parse_and_normalize_partial_date,
+)
+from obsidian_ai_hub.utils.periods import periods_overlap, temporal_ranges_overlap
 
 JST = ZoneInfo("Asia/Tokyo")
 
@@ -41,17 +45,20 @@ class PropertyConflictError(ValueError):
         super().__init__(message)
 
 
+def validate_and_normalize_partial_date(d_val: Optional[str]) -> Optional[str]:
+    if d_val is None:
+        return None
+    s = str(d_val).strip()
+    if not s:
+        return None
+    try:
+        return parse_and_normalize_partial_date(s)
+    except ValueError as e:
+        raise InvalidValueError(f"Invalid date: {d_val}") from e
+
+
 def validate_yyyy_mm_dd(d_val: Optional[str]) -> None:
-    if d_val is not None:
-        v = d_val.strip()
-        if not v:
-            return
-        if not re.match(r"^\d{4}-\d{2}-\d{2}$", v):
-            raise InvalidValueError(f"Date must be in YYYY-MM-DD format: {d_val}")
-        try:
-            datetime.strptime(v, "%Y-%m-%d")
-        except ValueError as e:
-            raise InvalidValueError(f"Invalid date: {d_val}") from e
+    validate_and_normalize_partial_date(d_val)
 
 
 def get_property_definition_by_id_in_tx(
@@ -470,8 +477,10 @@ def list_person_properties_in_tx(
     cursor.execute(
         """
         SELECT v.property_value_id, v.person_id, v.property_definition_id, v.source_type,
-               v.value_text, v.value_date, v.value_number, v.value_boolean, v.option_id,
-               v.valid_from, v.valid_until, v.note, v.created_at, v.updated_at,
+               v.value_text, v.value_date, v.value_date_min, v.value_date_max,
+               v.value_number, v.value_boolean, v.option_id,
+               v.valid_from, v.valid_from_min, v.valid_until, v.valid_until_max,
+               v.note, v.created_at, v.updated_at,
                d.key AS property_key, d.display_name AS property_display_name,
                d.data_type, d.cardinality,
                o.option_key, o.display_name AS option_display_name
@@ -495,6 +504,8 @@ def validate_and_prepare_value_columns(
     cols: dict[str, Any] = {
         "value_text": None,
         "value_date": None,
+        "value_date_min": None,
+        "value_date_max": None,
         "value_number": None,
         "value_boolean": None,
         "option_id": None,
@@ -507,8 +518,11 @@ def validate_and_prepare_value_columns(
     elif data_type == "date":
         if raw_val is None or not str(raw_val).strip():
             raise InvalidValueError("Date property value must not be empty")
-        validate_yyyy_mm_dd(str(raw_val).strip())
-        cols["value_date"] = str(raw_val).strip()
+        norm_d = validate_and_normalize_partial_date(str(raw_val).strip())
+        d_min, d_max = get_partial_date_bounds(norm_d)
+        cols["value_date"] = norm_d
+        cols["value_date_min"] = d_min
+        cols["value_date_max"] = d_max
     elif data_type == "number":
         try:
             cols["value_number"] = float(raw_val)
@@ -549,9 +563,13 @@ def check_single_cardinality_overlap_in_tx(
     new_cols: dict[str, Any],
     exclude_value_id: Optional[str] = None,
 ) -> None:
+    from_min, _ = get_partial_date_bounds(valid_from)
+    _, until_max = get_partial_date_bounds(valid_until)
+
     cursor.execute(
         """
-        SELECT property_value_id, value_text, value_date, value_number, value_boolean, option_id, valid_from, valid_until
+        SELECT property_value_id, value_text, value_date, value_number, value_boolean, option_id,
+               valid_from, valid_from_min, valid_until, valid_until_max
         FROM person_property_values
         WHERE person_id = ? AND property_definition_id = ?
         """,
@@ -565,8 +583,10 @@ def check_single_cardinality_overlap_in_tx(
 
         ex_s = r["valid_from"]
         ex_e = r["valid_until"]
+        ex_s_min = r["valid_from_min"]
+        ex_e_max = r["valid_until_max"]
 
-        if periods_overlap(valid_from, valid_until, ex_s, ex_e):
+        if temporal_ranges_overlap(from_min, until_max, ex_s_min, ex_e_max):
             ex_cols = {
                 "value_text": r["value_text"],
                 "value_date": r["value_date"],
@@ -574,7 +594,7 @@ def check_single_cardinality_overlap_in_tx(
                 "value_boolean": r["value_boolean"],
                 "option_id": r["option_id"],
             }
-            # If same value and same exact period, allowed as exact duplicate
+            # If same value and same exact period strings, allowed as exact duplicate
             if is_same_typed_value(new_cols, ex_cols) and valid_from == ex_s and valid_until == ex_e:
                 continue
             raise SingleCardinalityOverlapError(
@@ -601,16 +621,19 @@ def create_person_property_value_in_tx(
     if is_api_call and defn["source_type"] == "vault":
         raise VaultSourceReadOnlyError()
 
-    validate_yyyy_mm_dd(valid_from)
-    validate_yyyy_mm_dd(valid_until)
-    if valid_from and valid_until and valid_from > valid_until:
+    norm_from = validate_and_normalize_partial_date(valid_from)
+    norm_until = validate_and_normalize_partial_date(valid_until)
+    from_min, _ = get_partial_date_bounds(norm_from)
+    _, until_max = get_partial_date_bounds(norm_until)
+
+    if from_min and until_max and from_min > until_max:
         raise InvalidValueError("valid_from must be less than or equal to valid_until")
 
     cols = validate_and_prepare_value_columns(cursor, defn, value)
 
     if defn["cardinality"] == "single":
         check_single_cardinality_overlap_in_tx(
-            cursor, person_id, property_definition_id, valid_from, valid_until, cols
+            cursor, person_id, property_definition_id, norm_from, norm_until, cols
         )
 
     now_iso = datetime.now(JST).isoformat()
@@ -620,9 +643,11 @@ def create_person_property_value_in_tx(
         """
         INSERT INTO person_property_values (
             property_value_id, person_id, property_definition_id, source_type,
-            value_text, value_date, value_number, value_boolean, option_id,
-            valid_from, valid_until, note, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            value_text, value_date, value_date_min, value_date_max,
+            value_number, value_boolean, option_id,
+            valid_from, valid_from_min, valid_until, valid_until_max,
+            note, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             val_id,
@@ -631,11 +656,15 @@ def create_person_property_value_in_tx(
             defn["source_type"],
             cols["value_text"],
             cols["value_date"],
+            cols["value_date_min"],
+            cols["value_date_max"],
             cols["value_number"],
             cols["value_boolean"],
             cols["option_id"],
-            valid_from,
-            valid_until,
+            norm_from,
+            from_min,
+            norm_until,
+            until_max,
             note,
             now_iso,
             now_iso,
@@ -699,13 +728,16 @@ def update_person_property_value_in_tx(
 
     defn = get_property_definition_by_id_in_tx(cursor, curr["property_definition_id"])
 
-    new_s = valid_from if (provided and "valid_from" in provided) else curr["valid_from"]
-    new_e = valid_until if (provided and "valid_until" in provided) else curr["valid_until"]
+    raw_s = valid_from if (provided and "valid_from" in provided) else curr["valid_from"]
+    raw_e = valid_until if (provided and "valid_until" in provided) else curr["valid_until"]
     new_note = note if (provided and "note" in provided) else curr["note"]
 
-    validate_yyyy_mm_dd(new_s)
-    validate_yyyy_mm_dd(new_e)
-    if new_s and new_e and new_s > new_e:
+    norm_s = validate_and_normalize_partial_date(raw_s)
+    norm_e = validate_and_normalize_partial_date(raw_e)
+    from_min, _ = get_partial_date_bounds(norm_s)
+    _, until_max = get_partial_date_bounds(norm_e)
+
+    if from_min and until_max and from_min > until_max:
         raise InvalidValueError("valid_from must be less than or equal to valid_until")
 
     if provided and "value" in provided and value is not None:
@@ -714,6 +746,8 @@ def update_person_property_value_in_tx(
         cols = {
             "value_text": curr["value_text"],
             "value_date": curr["value_date"],
+            "value_date_min": curr.get("value_date_min"),
+            "value_date_max": curr.get("value_date_max"),
             "value_number": curr["value_number"],
             "value_boolean": curr["value_boolean"],
             "option_id": curr["option_id"],
@@ -724,8 +758,8 @@ def update_person_property_value_in_tx(
             cursor,
             curr["person_id"],
             curr["property_definition_id"],
-            new_s,
-            new_e,
+            norm_s,
+            norm_e,
             cols,
             exclude_value_id=property_value_id,
         )
@@ -735,18 +769,24 @@ def update_person_property_value_in_tx(
     cursor.execute(
         """
         UPDATE person_property_values
-        SET value_text = ?, value_date = ?, value_number = ?, value_boolean = ?, option_id = ?,
-            valid_from = ?, valid_until = ?, note = ?, updated_at = ?
+        SET value_text = ?, value_date = ?, value_date_min = ?, value_date_max = ?,
+            value_number = ?, value_boolean = ?, option_id = ?,
+            valid_from = ?, valid_from_min = ?, valid_until = ?, valid_until_max = ?,
+            note = ?, updated_at = ?
         WHERE property_value_id = ?
         """,
         (
             cols["value_text"],
             cols["value_date"],
+            cols["value_date_min"],
+            cols["value_date_max"],
             cols["value_number"],
             cols["value_boolean"],
             cols["option_id"],
-            new_s,
-            new_e,
+            norm_s,
+            from_min,
+            norm_e,
+            until_max,
             new_note,
             now_iso,
             property_value_id,
@@ -820,13 +860,16 @@ def replace_person_property_values_in_tx(
                     f"Property value does not belong to this person and property definition: {value_id}"
                 )
 
-        validate_yyyy_mm_dd(valid_from)
-        validate_yyyy_mm_dd(valid_until)
-        if valid_from and valid_until and valid_from > valid_until:
+        norm_from = validate_and_normalize_partial_date(valid_from)
+        norm_until = validate_and_normalize_partial_date(valid_until)
+        from_min, _ = get_partial_date_bounds(norm_from)
+        _, until_max = get_partial_date_bounds(norm_until)
+
+        if from_min and until_max and from_min > until_max:
             raise InvalidValueError("valid_from must be less than or equal to valid_until")
 
         cols = validate_and_prepare_value_columns(cursor, defn, raw_val)
-        prepared.append((value_id, cols, valid_from, valid_until, note))
+        prepared.append((value_id, cols, norm_from, from_min, norm_until, until_max, note))
 
     # Request omits existing values -> delete them (empty list deletes all)
     for stale_id in existing_ids - seen_ids:
@@ -836,23 +879,29 @@ def replace_person_property_values_in_tx(
         )
 
     now_iso = datetime.now(JST).isoformat()
-    for value_id, cols, valid_from, valid_until, note in prepared:
+    for value_id, cols, norm_from, from_min, norm_until, until_max, note in prepared:
         if value_id is not None:
             cursor.execute(
                 """
                 UPDATE person_property_values
-                SET value_text = ?, value_date = ?, value_number = ?, value_boolean = ?, option_id = ?,
-                    valid_from = ?, valid_until = ?, note = ?, updated_at = ?
+                SET value_text = ?, value_date = ?, value_date_min = ?, value_date_max = ?,
+                    value_number = ?, value_boolean = ?, option_id = ?,
+                    valid_from = ?, valid_from_min = ?, valid_until = ?, valid_until_max = ?,
+                    note = ?, updated_at = ?
                 WHERE property_value_id = ?
                 """,
                 (
                     cols["value_text"],
                     cols["value_date"],
+                    cols["value_date_min"],
+                    cols["value_date_max"],
                     cols["value_number"],
                     cols["value_boolean"],
                     cols["option_id"],
-                    valid_from,
-                    valid_until,
+                    norm_from,
+                    from_min,
+                    norm_until,
+                    until_max,
                     note,
                     now_iso,
                     value_id,
@@ -864,9 +913,11 @@ def replace_person_property_values_in_tx(
                 """
                 INSERT INTO person_property_values (
                     property_value_id, person_id, property_definition_id, source_type,
-                    value_text, value_date, value_number, value_boolean, option_id,
-                    valid_from, valid_until, note, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    value_text, value_date, value_date_min, value_date_max,
+                    value_number, value_boolean, option_id,
+                    valid_from, valid_from_min, valid_until, valid_until_max,
+                    note, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     new_id,
@@ -875,11 +926,15 @@ def replace_person_property_values_in_tx(
                     defn["source_type"],
                     cols["value_text"],
                     cols["value_date"],
+                    cols["value_date_min"],
+                    cols["value_date_max"],
                     cols["value_number"],
                     cols["value_boolean"],
                     cols["option_id"],
-                    valid_from,
-                    valid_until,
+                    norm_from,
+                    from_min,
+                    norm_until,
+                    until_max,
                     note,
                     now_iso,
                     now_iso,
@@ -966,6 +1021,9 @@ def preview_person_property_merge(
         is_exact_dup = False
         has_period_conflict = False
 
+        fp_s_min, _ = get_partial_date_bounds(s_date)
+        _, fp_e_max = get_partial_date_bounds(e_date)
+
         for tp in target_matches:
             tp_cols = {
                 "value_text": tp["value_text"],
@@ -976,12 +1034,14 @@ def preview_person_property_merge(
             }
             tp_s = tp["valid_from"]
             tp_e = tp["valid_until"]
+            tp_s_min, _ = get_partial_date_bounds(tp_s)
+            _, tp_e_max = get_partial_date_bounds(tp_e)
 
             if is_same_typed_value(fp_cols, tp_cols) and s_date == tp_s and e_date == tp_e:
                 is_exact_dup = True
                 break
 
-            if card == "single" and periods_overlap(s_date, e_date, tp_s, tp_e):
+            if card == "single" and temporal_ranges_overlap(fp_s_min, fp_e_max, tp_s_min, tp_e_max):
                 has_period_conflict = True
 
         if is_exact_dup:
@@ -1263,6 +1323,25 @@ def delete_person_property_value(
             )
     finally:
         conn.close()
+
+
+def matches_temporal_condition(
+    val_date_min: Optional[str],
+    val_date_max: Optional[str],
+    valid_from_min: Optional[str],
+    valid_until_max: Optional[str],
+    query_start: Optional[str] = None,
+    query_end: Optional[str] = None,
+) -> bool:
+    """Helper primitive for v2 temporal search: checks if property date/period overlaps with query date bounds."""
+    q_min, _ = get_partial_date_bounds(query_start)
+    _, q_max = get_partial_date_bounds(query_end)
+
+    if val_date_min is not None or val_date_max is not None:
+        if not temporal_ranges_overlap(val_date_min, val_date_max, q_min, q_max):
+            return False
+
+    return temporal_ranges_overlap(valid_from_min, valid_until_max, q_min, q_max)
 
 
 def replace_person_property_values(

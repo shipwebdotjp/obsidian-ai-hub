@@ -10,3 +10,16 @@ def periods_overlap(
     cond1 = (s1 is None) or (e2 is None) or (s1 <= e2)
     cond2 = (e1 is None) or (s2 is None) or (e1 >= s2)
     return cond1 and cond2
+
+
+def temporal_ranges_overlap(
+    s1_min: Optional[str],
+    e1_max: Optional[str],
+    s2_min: Optional[str],
+    e2_max: Optional[str],
+) -> bool:
+    """True if effective temporal range [s1_min, e1_max] overlaps with [s2_min, e2_max].
+
+    None means unbounded.
+    """
+    return periods_overlap(s1_min, e1_max, s2_min, e2_max)

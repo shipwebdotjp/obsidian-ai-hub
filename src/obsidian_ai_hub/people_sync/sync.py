@@ -7,8 +7,9 @@ from datetime import datetime
 from typing import Any, Dict
 
 from obsidian_ai_hub.database import get_db_connection
+from obsidian_ai_hub.utils.dates import get_partial_date_bounds
 from obsidian_ai_hub.utils.people_loader import load_people_notes_with_report
-from obsidian_ai_hub.utils.periods import periods_overlap
+from obsidian_ai_hub.utils.periods import periods_overlap, temporal_ranges_overlap
 from obsidian_ai_hub.summary.store import normalize_entity_name
 from obsidian_ai_hub.web.services.person_relations import (
     preview_person_relation_merge,
@@ -70,20 +71,35 @@ def _consolidate_single_cardinality_items(
                 merged.append(current)
                 continue
             last = merged[-1]
-            if periods_overlap(
-                last.get("valid_from"),
-                last.get("valid_until"),
-                current.get("valid_from"),
-                current.get("valid_until"),
+            last_s_min, _ = get_partial_date_bounds(last.get("valid_from"))
+            _, last_e_max = get_partial_date_bounds(last.get("valid_until"))
+            curr_s_min, _ = get_partial_date_bounds(current.get("valid_from"))
+            _, curr_e_max = get_partial_date_bounds(current.get("valid_until"))
+
+            if temporal_ranges_overlap(
+                last_s_min,
+                last_e_max,
+                curr_s_min,
+                curr_e_max,
             ):
                 ls, le = last.get("valid_from"), last.get("valid_until")
                 cs, ce = current.get("valid_from"), current.get("valid_until")
-                last["valid_from"] = (
-                    None if ls is None or cs is None else min(ls, cs)
-                )
-                last["valid_until"] = (
-                    None if le is None or ce is None else max(le, ce)
-                )
+
+                # Choose valid_from raw string whose min boundary is earlier
+                if ls is None or cs is None:
+                    last["valid_from"] = None
+                elif curr_s_min and (not last_s_min or curr_s_min < last_s_min):
+                    last["valid_from"] = cs
+                else:
+                    last["valid_from"] = ls
+
+                # Choose valid_until raw string whose max boundary is later
+                if le is None or ce is None:
+                    last["valid_until"] = None
+                elif curr_e_max and (not last_e_max or curr_e_max > last_e_max):
+                    last["valid_until"] = ce
+                else:
+                    last["valid_until"] = le
             else:
                 merged.append(current)
         consolidated.extend(merged)
@@ -580,13 +596,19 @@ def sync_people_in_tx(
 
             for item in effective_items:
                 val_id = f"propval_{uuid.uuid4().hex}"
+                v_date_min, v_date_max = get_partial_date_bounds(item["value_date"])
+                v_from_min, _ = get_partial_date_bounds(item["valid_from"])
+                _, v_until_max = get_partial_date_bounds(item["valid_until"])
+
                 cursor.execute(
                     """
                     INSERT INTO person_property_values (
                         property_value_id, person_id, property_definition_id, source_type,
-                        value_text, value_date, value_number, value_boolean, option_id,
-                        valid_from, valid_until, note, created_at, updated_at
-                    ) VALUES (?, ?, ?, 'vault', ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
+                        value_text, value_date, value_date_min, value_date_max,
+                        value_number, value_boolean, option_id,
+                        valid_from, valid_from_min, valid_until, valid_until_max,
+                        note, created_at, updated_at
+                    ) VALUES (?, ?, ?, 'vault', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
                     """,
                     (
                         val_id,
@@ -594,11 +616,15 @@ def sync_people_in_tx(
                         def_id,
                         item["value_text"],
                         item["value_date"],
+                        v_date_min,
+                        v_date_max,
                         item["value_number"],
                         item["value_boolean"],
                         item["option_id"],
                         item["valid_from"],
+                        v_from_min,
                         item["valid_until"],
+                        v_until_max,
                         now_iso,
                         now_iso,
                     ),
