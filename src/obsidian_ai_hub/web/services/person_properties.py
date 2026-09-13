@@ -1160,6 +1160,385 @@ def create_property_definition(
         conn.close()
 
 
+def search_people_by_properties_in_tx(
+    cursor: sqlite3.Cursor,
+    name_query: Optional[str] = None,
+    conditions: Optional[list[dict[str, Any]]] = None,
+    valid_period: Optional[dict[str, Any]] = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> dict[str, Any]:
+    if limit < 1 or limit > 100:
+        raise InvalidValueError("Limit must be between 1 and 100")
+    if offset < 0:
+        raise InvalidValueError("Offset must be non-negative")
+
+    cond_list = conditions or []
+    if len(cond_list) > 10:
+        raise InvalidValueError("Maximum 10 property conditions allowed")
+
+    period_cond = valid_period or {"mode": "current"}
+    mode = period_cond.get("mode", "current")
+
+    q_start_min: Optional[str] = None
+    q_end_max: Optional[str] = None
+
+    if mode == "current":
+        today_str = datetime.now(JST).strftime("%Y-%m-%d")
+        q_start_min = today_str
+        q_end_max = today_str
+    elif mode == "as_of":
+        as_of_val = period_cond.get("as_of")
+        if not as_of_val or not str(as_of_val).strip():
+            raise InvalidValueError("as_of is required when mode is 'as_of'")
+        norm_as_of = validate_and_normalize_partial_date(str(as_of_val))
+        d_min, d_max = get_partial_date_bounds(norm_as_of)
+        q_start_min = d_min
+        q_end_max = d_max
+    elif mode == "between":
+        p_start = period_cond.get("start")
+        p_end = period_cond.get("end")
+        if not p_start and not p_end:
+            raise InvalidValueError("at least one of start or end is required when mode is 'between'")
+        if p_start:
+            norm_s = validate_and_normalize_partial_date(str(p_start))
+            s_min, _ = get_partial_date_bounds(norm_s)
+            q_start_min = s_min
+        if p_end:
+            norm_e = validate_and_normalize_partial_date(str(p_end))
+            _, e_max = get_partial_date_bounds(norm_e)
+            q_end_max = e_max
+        if q_start_min and q_end_max and q_start_min > q_end_max:
+            raise InvalidValueError("start date must be less than or equal to end date")
+    elif mode == "all":
+        pass
+    else:
+        raise InvalidValueError(f"Invalid valid_period mode: {mode}")
+
+    params: list[Any] = []
+    where_clauses: list[str] = []
+
+    if name_query and name_query.strip():
+        import unicodedata
+        clean_name = unicodedata.normalize("NFKC", name_query.strip()).casefold()
+        name_pattern = f"%{clean_name}%"
+        where_clauses.append(
+            """
+            (
+                nfkc_casefold(p.display_name) LIKE ? OR
+                nfkc_casefold(p.normalized_name) LIKE ? OR
+                EXISTS (
+                    SELECT 1 FROM person_aliases pa
+                    WHERE pa.person_id = p.person_id
+                    AND (nfkc_casefold(pa.display_name) LIKE ? OR nfkc_casefold(pa.normalized_name) LIKE ?)
+                )
+            )
+            """
+        )
+        params.extend([name_pattern, name_pattern, name_pattern, name_pattern])
+
+    validated_conds = []
+    for idx, cond in enumerate(cond_list):
+        prop_def_id = cond.get("property_definition_id")
+        if not prop_def_id:
+            raise InvalidValueError("property_definition_id is required for condition")
+
+        defn = get_property_definition_by_id_in_tx(cursor, prop_def_id)
+        data_type = defn["data_type"]
+        op = cond.get("operator")
+
+        val = cond.get("value")
+        val_from = cond.get("value_from")
+        val_to = cond.get("value_to")
+
+        if data_type == "text":
+            if op != "contains":
+                raise InvalidValueError(f"Operator '{op}' is not supported for text data_type")
+            if val is None or not str(val).strip():
+                raise InvalidValueError("value is required for 'contains' operator")
+        elif data_type in ("select", "boolean"):
+            if op != "eq":
+                raise InvalidValueError(f"Operator '{op}' is not supported for {data_type} data_type")
+            if val is None or (isinstance(val, str) and not val.strip()):
+                raise InvalidValueError("value is required for 'eq' operator")
+        elif data_type == "number":
+            if op not in ("eq", "gte", "lte", "between"):
+                raise InvalidValueError(f"Operator '{op}' is not supported for number data_type")
+            if op in ("eq", "gte", "lte"):
+                if val is None or isinstance(val, bool):
+                    raise InvalidValueError(f"value is required for number '{op}' operator")
+                try:
+                    float(val)
+                except (ValueError, TypeError) as e:
+                    raise InvalidValueError(f"Invalid number value: {val}") from e
+            elif op == "between":
+                if val_from is None or val_to is None or isinstance(val_from, bool) or isinstance(val_to, bool):
+                    raise InvalidValueError("value_from and value_to are required for number 'between' operator")
+                try:
+                    vf = float(val_from)
+                    vt = float(val_to)
+                except (ValueError, TypeError) as e:
+                    raise InvalidValueError(f"Invalid number range values: {val_from}, {val_to}") from e
+                if vf > vt:
+                    raise InvalidValueError("value_from must be less than or equal to value_to")
+        elif data_type == "date":
+            if op != "overlaps":
+                raise InvalidValueError(f"Operator '{op}' is not supported for date data_type")
+            if not val and not val_from and not val_to:
+                raise InvalidValueError("At least one date parameter (value, value_from, value_to) is required")
+        else:
+            raise InvalidValueError(f"Unsupported data_type: {data_type}")
+
+        validated_conds.append({
+            "defn": defn,
+            "op": op,
+            "value": val,
+            "value_from": val_from,
+            "value_to": val_to,
+        })
+
+        sub_sql_parts = ["v.person_id = p.person_id", "v.property_definition_id = ?"]
+        sub_params = [prop_def_id]
+
+        if data_type == "text":
+            import unicodedata
+            clean_v = unicodedata.normalize("NFKC", str(val).strip()).casefold()
+            sub_sql_parts.append("nfkc_casefold(v.value_text) LIKE ?")
+            sub_params.append(f"%{clean_v}%")
+        elif data_type == "select":
+            opt = resolve_option(cursor, prop_def_id, val)
+            sub_sql_parts.append("v.option_id = ?")
+            sub_params.append(opt["option_id"])
+        elif data_type == "boolean":
+            b_val = 1 if (isinstance(val, bool) and val) or str(val).strip().lower() in ("true", "1", "yes") else 0
+            sub_sql_parts.append("v.value_boolean = ?")
+            sub_params.append(b_val)
+        elif data_type == "number":
+            num_v = float(val) if val is not None else None
+            if op == "eq":
+                sub_sql_parts.append("v.value_number = ?")
+                sub_params.append(num_v)
+            elif op == "gte":
+                sub_sql_parts.append("v.value_number >= ?")
+                sub_params.append(num_v)
+            elif op == "lte":
+                sub_sql_parts.append("v.value_number <= ?")
+                sub_params.append(num_v)
+            elif op == "between":
+                vf = float(val_from)
+                vt = float(val_to)
+                sub_sql_parts.append("v.value_number BETWEEN ? AND ?")
+                sub_params.extend([vf, vt])
+        elif data_type == "date":
+            d_start = val_from or val
+            d_end = val_to or val
+            if d_start:
+                norm_ds = validate_and_normalize_partial_date(str(d_start))
+                ds_min, _ = get_partial_date_bounds(norm_ds)
+            else:
+                ds_min = None
+
+            if d_end:
+                norm_de = validate_and_normalize_partial_date(str(d_end))
+                _, de_max = get_partial_date_bounds(norm_de)
+            else:
+                de_max = None
+
+            if ds_min and de_max and ds_min > de_max:
+                raise InvalidValueError("Date range start must be less than or equal to end")
+
+            sub_sql_parts.append("(v.value_date_min IS NULL OR ? IS NULL OR v.value_date_min <= ?)")
+            sub_params.extend([de_max, de_max])
+            sub_sql_parts.append("(v.value_date_max IS NULL OR ? IS NULL OR v.value_date_max >= ?)")
+            sub_params.extend([ds_min, ds_min])
+
+        if mode != "all":
+            sub_sql_parts.append("(v.valid_from_min IS NULL OR ? IS NULL OR v.valid_from_min <= ?)")
+            sub_params.extend([q_end_max, q_end_max])
+            sub_sql_parts.append("(v.valid_until_max IS NULL OR ? IS NULL OR v.valid_until_max >= ?)")
+            sub_params.extend([q_start_min, q_start_min])
+
+        where_clauses.append(f"EXISTS (SELECT 1 FROM person_property_values v WHERE {' AND '.join(sub_sql_parts)})")
+        params.extend(sub_params)
+
+    where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+
+    cursor.execute(f"SELECT COUNT(*) FROM people p {where_sql}", params)
+    total_count = cursor.fetchone()[0]
+
+    cursor.execute(
+        f"""
+        SELECT p.person_id, p.display_name, p.normalized_name, p.vault_id,
+               (SELECT COUNT(*) FROM summary_people sp WHERE sp.person_id = p.person_id) AS summary_count
+        FROM people p
+        {where_sql}
+        ORDER BY p.display_name ASC, p.person_id ASC
+        LIMIT ? OFFSET ?
+        """,
+        params + [limit, offset],
+    )
+    people_rows = cursor.fetchall()
+
+    items = []
+    for p_row in people_rows:
+        person_id = p_row["person_id"]
+
+        cursor.execute(
+            "SELECT normalized_name, display_name FROM person_aliases WHERE person_id = ? ORDER BY display_name ASC",
+            (person_id,),
+        )
+        aliases = [dict(a_row) for a_row in cursor.fetchall()]
+
+        person_dict = {
+            "person_id": person_id,
+            "display_name": p_row["display_name"],
+            "normalized_name": p_row["normalized_name"],
+            "vault_id": p_row["vault_id"],
+            "aliases": aliases,
+            "summary_count": p_row["summary_count"],
+        }
+
+        matched_props = []
+        for cond_info in validated_conds:
+            defn = cond_info["defn"]
+            prop_def_id = defn["property_definition_id"]
+            data_type = defn["data_type"]
+            op = cond_info["op"]
+            val = cond_info["value"]
+            val_from = cond_info["value_from"]
+            val_to = cond_info["value_to"]
+
+            m_sql_parts = ["v.person_id = ?", "v.property_definition_id = ?"]
+            m_params = [person_id, prop_def_id]
+
+            if data_type == "text":
+                import unicodedata
+                clean_v = unicodedata.normalize("NFKC", str(val).strip()).casefold()
+                m_sql_parts.append("nfkc_casefold(v.value_text) LIKE ?")
+                m_params.append(f"%{clean_v}%")
+            elif data_type == "select":
+                opt = resolve_option(cursor, prop_def_id, val)
+                m_sql_parts.append("v.option_id = ?")
+                m_params.append(opt["option_id"])
+            elif data_type == "boolean":
+                b_val = 1 if (isinstance(val, bool) and val) or str(val).strip().lower() in ("true", "1", "yes") else 0
+                m_sql_parts.append("v.value_boolean = ?")
+                m_params.append(b_val)
+            elif data_type == "number":
+                num_v = float(val) if val is not None else None
+                if op == "eq":
+                    m_sql_parts.append("v.value_number = ?")
+                    m_params.append(num_v)
+                elif op == "gte":
+                    m_sql_parts.append("v.value_number >= ?")
+                    m_params.append(num_v)
+                elif op == "lte":
+                    m_sql_parts.append("v.value_number <= ?")
+                    m_params.append(num_v)
+                elif op == "between":
+                    vf = float(val_from)
+                    vt = float(val_to)
+                    m_sql_parts.append("v.value_number BETWEEN ? AND ?")
+                    m_params.extend([vf, vt])
+            elif data_type == "date":
+                d_start = val_from or val
+                d_end = val_to or val
+                ds_min = get_partial_date_bounds(validate_and_normalize_partial_date(str(d_start)))[0] if d_start else None
+                de_max = get_partial_date_bounds(validate_and_normalize_partial_date(str(d_end)))[1] if d_end else None
+                m_sql_parts.append("(v.value_date_min IS NULL OR ? IS NULL OR v.value_date_min <= ?)")
+                m_params.extend([de_max, de_max])
+                m_sql_parts.append("(v.value_date_max IS NULL OR ? IS NULL OR v.value_date_max >= ?)")
+                m_params.extend([ds_min, ds_min])
+
+            if mode != "all":
+                m_sql_parts.append("(v.valid_from_min IS NULL OR ? IS NULL OR v.valid_from_min <= ?)")
+                m_params.extend([q_end_max, q_end_max])
+                m_sql_parts.append("(v.valid_until_max IS NULL OR ? IS NULL OR v.valid_until_max >= ?)")
+                m_params.extend([q_start_min, q_start_min])
+
+            cursor.execute(
+                f"""
+                SELECT v.property_value_id, v.property_definition_id, v.value_text, v.value_date,
+                       v.value_number, v.value_boolean, v.option_id, v.valid_from, v.valid_until,
+                       d.key AS property_key, d.display_name AS property_display_name, d.data_type,
+                       o.option_key
+                FROM person_property_values v
+                JOIN person_property_definitions d ON v.property_definition_id = d.property_definition_id
+                LEFT JOIN person_property_options o ON v.option_id = o.option_id
+                WHERE {' AND '.join(m_sql_parts)}
+                ORDER BY v.created_at ASC, v.property_value_id ASC
+                LIMIT 1
+                """,
+                m_params,
+            )
+            m_row = cursor.fetchone()
+            if m_row:
+                m_dt = m_row["data_type"]
+                m_val = None
+                if m_dt == "text":
+                    m_val = m_row["value_text"]
+                elif m_dt == "date":
+                    m_val = m_row["value_date"]
+                elif m_dt == "number":
+                    m_val = m_row["value_number"]
+                elif m_dt == "boolean":
+                    m_val = bool(m_row["value_boolean"]) if m_row["value_boolean"] is not None else None
+                elif m_dt == "select":
+                    m_val = m_row["option_key"]
+
+                matched_props.append(
+                    {
+                        "property_value_id": m_row["property_value_id"],
+                        "property_definition_id": m_row["property_definition_id"],
+                        "property_key": m_row["property_key"],
+                        "property_display_name": m_row["property_display_name"],
+                        "data_type": m_dt,
+                        "value": m_val,
+                        "valid_from": m_row["valid_from"],
+                        "valid_until": m_row["valid_until"],
+                    }
+                )
+
+        items.append({
+            "person": person_dict,
+            "matched_properties": matched_props,
+        })
+
+    return {"items": items, "total": total_count}
+
+
+def register_nfkc_casefold(conn: sqlite3.Connection) -> None:
+    import unicodedata
+    def _nfkc_casefold(text: Optional[str]) -> Optional[str]:
+        if text is None:
+            return None
+        return unicodedata.normalize("NFKC", str(text)).casefold()
+    conn.create_function("nfkc_casefold", 1, _nfkc_casefold)
+
+
+def search_people_by_properties(
+    name_query: Optional[str] = None,
+    conditions: Optional[list[dict[str, Any]]] = None,
+    valid_period: Optional[dict[str, Any]] = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> dict[str, Any]:
+    conn = get_db_connection()
+    register_nfkc_casefold(conn)
+    try:
+        cursor = conn.cursor()
+        return search_people_by_properties_in_tx(
+            cursor,
+            name_query=name_query,
+            conditions=conditions,
+            valid_period=valid_period,
+            limit=limit,
+            offset=offset,
+        )
+    finally:
+        conn.close()
+
+
 def get_person_properties_for_ai(person_id: str) -> list[dict[str, Any]]:
     """Return minimal person property projection for AI tools.
 
