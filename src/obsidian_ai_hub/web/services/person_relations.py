@@ -7,6 +7,10 @@ from typing import Any, Literal, Optional
 from zoneinfo import ZoneInfo
 
 from obsidian_ai_hub.database import get_db_connection
+from obsidian_ai_hub.utils.dates import (
+    get_partial_date_bounds,
+    parse_and_normalize_partial_date,
+)
 
 JST = ZoneInfo("Asia/Tokyo")
 
@@ -38,19 +42,29 @@ def get_jst_today_str() -> str:
 def compute_relation_status(
     started_on: Optional[str], ended_on: Optional[str], today_str: Optional[str] = None
 ) -> str:
-    if started_on is None and ended_on is None:
+    s = (started_on or "").strip() or None
+    e = (ended_on or "").strip() or None
+    if s is None and e is None:
         return "undated"
     if today_str is None:
         today_str = get_jst_today_str()
 
-    if started_on and started_on > today_str:
+    s_min, _ = get_partial_date_bounds(s)
+    _, e_max = get_partial_date_bounds(e)
+
+    if s_min is not None and s_min > today_str:
         return "upcoming"
-    if ended_on and ended_on < today_str:
+    if e_max is not None and e_max < today_str:
         return "ended"
     return "active"
 
 
 def validate_dates(started_on: Optional[str], ended_on: Optional[str]) -> None:
+    """Validate strict YYYY-MM-DD dates (Evidence observed_at).
+
+    Relation period dates (started_on/ended_on) accept partial dates; use
+    ``validate_and_normalize_relation_dates`` for those instead.
+    """
     for d_val in (started_on, ended_on):
         if d_val is not None:
             if not re.match(r"^\d{4}-\d{2}-\d{2}$", d_val):
@@ -62,6 +76,37 @@ def validate_dates(started_on: Optional[str], ended_on: Optional[str]) -> None:
 
     if started_on and ended_on and started_on > ended_on:
         raise InvalidDateError("started_on must be less than or equal to ended_on")
+
+
+def _normalize_relation_date(d_val: Optional[str], field_name: str) -> Optional[str]:
+    if d_val is None:
+        return None
+    s = str(d_val).strip()
+    if not s:
+        return None
+    try:
+        return parse_and_normalize_partial_date(s)
+    except ValueError as e:
+        raise InvalidDateError(f"Invalid date for {field_name}: {d_val}") from e
+
+
+def validate_and_normalize_relation_dates(
+    started_on: Optional[str], ended_on: Optional[str]
+) -> tuple[Optional[str], Optional[str]]:
+    """Validate relation period dates and return normalized partial date strings.
+
+    Accepts YYYY, YYYY-MM, or YYYY-MM-DD (plus slash variants), normalized to
+    ISO form. Empty/whitespace-only values are treated as None. Order is
+    checked on date bounds (started_on_min <= ended_on_max) so mixed-precision
+    pairs such as ("2023-05", "2023") are accepted. Raises InvalidDateError.
+    """
+    norm_started_on = _normalize_relation_date(started_on, "started_on")
+    norm_ended_on = _normalize_relation_date(ended_on, "ended_on")
+    s_min, _ = get_partial_date_bounds(norm_started_on)
+    _, e_max = get_partial_date_bounds(norm_ended_on)
+    if s_min is not None and e_max is not None and s_min > e_max:
+        raise InvalidDateError("started_on must be less than or equal to ended_on")
+    return norm_started_on, norm_ended_on
 
 
 def normalize_endpoints(
@@ -209,7 +254,9 @@ def create_person_relation_in_tx(
     note: Optional[str] = None,
     initial_evidence: Optional[list[dict[str, Any]]] = None,
 ) -> tuple[dict[str, Any], Literal["created", "merged_into_existing"]]:
-    validate_dates(started_on, ended_on)
+    started_on, ended_on = validate_and_normalize_relation_dates(started_on, ended_on)
+    s_min, _ = get_partial_date_bounds(started_on)
+    _, e_max = get_partial_date_bounds(ended_on)
 
     if initial_evidence and any(_is_empty_evidence(ev) for ev in initial_evidence):
         raise ValueError(
@@ -260,8 +307,8 @@ def create_person_relation_in_tx(
         """
         INSERT INTO person_relations (
             relation_id, subject_person_id, object_person_id, relation_type_id,
-            started_on, ended_on, note, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            started_on, started_on_min, ended_on, ended_on_max, note, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             rel_id,
@@ -269,7 +316,9 @@ def create_person_relation_in_tx(
             norm_obj,
             relation_type_id,
             started_on,
+            s_min,
             ended_on,
+            e_max,
             note,
             now_iso,
             now_iso,
@@ -366,7 +415,11 @@ def update_person_relation_in_tx(
         new_started_on = started_on if "started_on" in provided else current_rel["started_on"]
         new_ended_on = ended_on if "ended_on" in provided else current_rel["ended_on"]
         merged_note = note if "note" in provided else current_rel["note"]
-    validate_dates(new_started_on, new_ended_on)
+    new_started_on, new_ended_on = validate_and_normalize_relation_dates(
+        new_started_on, new_ended_on
+    )
+    new_s_min, _ = get_partial_date_bounds(new_started_on)
+    _, new_e_max = get_partial_date_bounds(new_ended_on)
 
     now_iso = datetime.now(JST).isoformat()
 
@@ -418,8 +471,8 @@ def update_person_relation_in_tx(
 
     # Standard update (merged_note already resolved above, honoring `provided`)
     cursor.execute(
-        "UPDATE person_relations SET started_on = ?, ended_on = ?, note = ?, updated_at = ? WHERE relation_id = ?",
-        (new_started_on, new_ended_on, merged_note, now_iso, relation_id),
+        "UPDATE person_relations SET started_on = ?, started_on_min = ?, ended_on = ?, ended_on_max = ?, note = ?, updated_at = ? WHERE relation_id = ?",
+        (new_started_on, new_s_min, new_ended_on, new_e_max, merged_note, now_iso, relation_id),
     )
 
     updated_rel = get_person_relation_by_id_in_tx(cursor, relation_id)
@@ -1003,8 +1056,8 @@ def get_person_relations_for_ai(person_id: str) -> list[dict[str, Any]]:
     - relation: label from target person's perspective (forward_label if subject, reverse_label if object)
     - relation_type_slug: relation type slug
     - endpoint_role: 'subject' or 'object' (target person's role)
-    - started_on: YYYY-MM-DD or None
-    - ended_on: YYYY-MM-DD or None
+    - started_on: YYYY, YYYY-MM, YYYY-MM-DD, or None (normalized partial date)
+    - ended_on: YYYY, YYYY-MM, YYYY-MM-DD, or None (normalized partial date)
 
     Sorted by created_at DESC, relation_id ASC.
     Returns [] if no direct relations exist.
@@ -1086,8 +1139,8 @@ def get_relationship_to_principal_for_ai(
                     "principal_to_person": label,
                     "relation_type_slug": slug,
                     "status": "active"|"undated"|"ended"|"upcoming",
-                    "started_on": YYYY-MM-DD|None,
-                    "ended_on": YYYY-MM-DD|None,
+                    "started_on": YYYY|YYYY-MM|YYYY-MM-DD|None,
+                    "ended_on": YYYY|YYYY-MM|YYYY-MM-DD|None,
                 }, ...
             ]
         }

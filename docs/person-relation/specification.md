@@ -57,14 +57,13 @@
 ## 5. 関係の期間
 
 - `started_on`、`ended_on` は任意（NULL 許容）とする。
-- v1 は厳密な `YYYY-MM-DD` または NULL だけを許容する。
-- 年月だけ、年だけ、概算日（「90年代頃」等）は、偽の日付に補完せず v1 対象外とする。入力 UI では完全な日付か空欄かのいずれかのみ受け付ける。
-- 開始日は終了日以前でなければならない（`started_on <= ended_on`、いずれか NULL の場合は検証対象外）。
-- 境界日は期間に含む（`started_on <= today <= ended_on` は有効）。
-- 状態を次の4値として共通規則で判定する。判定はサービス層の共通関数に集約する。
-  - `upcoming`: 開始日が未来（`started_on > today`）。
-  - `active`: 今日が期間内（開始日なし／開始日≦今日 かつ 終了日なし／今日≦終了日）。
-  - `ended`: 終了日が過去（`ended_on < today`）。
+- 部分日（`YYYY`、`YYYY-MM`）および完全日（`YYYY-MM-DD`）を受け付ける。保存時は ISO 形に正規化する（例: `2023/5` → `2023-05`）。偽の完全日付への補完は行わない。
+- 概算日（「90年代頃」等）は対象外とする。
+- 順序検証は境界（`started_on_min <= ended_on_max`）で行う。混在精度（例: 開始 `2023-05`・終了 `2023`）も境界で正しく判定する。DB の CHECK 制約も境界列に対する（migration v43）。
+- 状態を次の4値として共通規則で判定する。判定はサービス層の共通関数に集約し、境界で判定する。
+  - `upcoming`: 開始境界が未来（`started_on_min > today`）。
+  - `active`: 上記・下記以外（境界が今日に重なる部分日を含む）。
+  - `ended`: 終了境界が過去（`ended_on_max < today`）。
   - `undated`: 開始・終了とも不明（両方 NULL）。
 - 開始・終了とも不明なものを自動的に active と断定しない。`undated` として区別し、一覧の既定表示に含めるかは未確定事項とする。
 
@@ -160,12 +159,14 @@ PATCH  /api/v1/person-relation-types/{relation_type_id}
 - `subject_person_id TEXT NOT NULL REFERENCES people(person_id) ON DELETE CASCADE`
 - `object_person_id TEXT NOT NULL REFERENCES people(person_id) ON DELETE CASCADE`
 - `relation_type_id TEXT NOT NULL REFERENCES person_relation_types(relation_type_id) ON DELETE RESTRICT`（使用中タイプ削除禁止に対応。SQLite の `RESTRICT` はサービス層でも二重検査する）。
-- `started_on TEXT NULL`: `YYYY-MM-DD` または NULL。
-- `ended_on TEXT NULL`: 同上。
+- `started_on TEXT NULL`: 正規化された部分日（`YYYY` / `YYYY-MM` / `YYYY-MM-DD`）または NULL。
+- `started_on_min TEXT NULL`: `started_on` の下限境界（`YYYY-MM-DD`）。ステータス判定・順序検証用。サービス層が保存時に付与する。
+- `ended_on TEXT NULL`: 同上（終了側）。
+- `ended_on_max TEXT NULL`: `ended_on` の上限境界（`YYYY-MM-DD`）。同上。
 - `note TEXT NULL`: メモ。重複統合時は失わず統合する。
 - `created_at TEXT NOT NULL` / `updated_at TEXT NOT NULL`: トランザクション時刻（transaction time）。期間（valid time）と区別する。
-- 制約（概念）: `subject != object`（自己関係禁止）、`started_on <= ended_on`（NULL 除外）。
-- 一意インデックス（意味的重複防止）: `(relation_type_id, subject_person_id, object_person_id, started_on, ended_on)`。NULL 含有時の扱いは「実装時の注意」参照。
+- 制約（概念）: `subject != object`（自己関係禁止）、`started_on_min <= ended_on_max`（NULL 除外、DB CHECK）。
+- 一意インデックス（意味的重複防止）: `(relation_type_id, subject_person_id, object_person_id, COALESCE(started_on, ''), COALESCE(ended_on, ''))`。重複判定は正規化後の生文字列の完全一致（精度違いは別関係）。
 - 検索用インデックス: `(subject_person_id)`、`(object_person_id)`、`(relation_type_id)` を含む複合。人物画面の発信・受信一覧、型使用中判定に使う。
 
 ### 10.3 `person_relation_evidence`（根拠）
@@ -197,7 +198,7 @@ PATCH  /api/v1/person-relation-types/{relation_type_id}
 - Person Event / Action モデル（単発出来事のテーブル化）。
 - relation と event の自動導出（行為→状態、状態→行為の推論）。
 - 型階層、推移性、排他制約、関係推論（例: 親の親は祖父母）。
-- 部分日付、概算日（年月・年・「頃」）。
+- 部分日付のうち概算日（「頃」等）。年月・年・年月日の部分日は実装済み（migration v43、§5 参照）。
 - 完全な変更履歴・削除監査。
 - Vault への書き戻し（人物ノートへの関係投影）。
 - AI 公開（relation 用ツール、LLM による自動抽出、`people_get` への関係付与）。

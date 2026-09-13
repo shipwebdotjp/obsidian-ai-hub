@@ -1236,6 +1236,20 @@ def _validate_partial_date_or_none(v: Optional[str]) -> Optional[str]:
         raise ValueError("Invalid date format") from exc
 
 
+def _validate_relation_date_order(started_on: str, ended_on: str) -> None:
+    """Raise ValueError unless started_on_min <= ended_on_max.
+
+    Inputs are normalized partial dates (YYYY, YYYY-MM, or YYYY-MM-DD), so
+    mixed-precision pairs such as ("2023-05", "2023") compare on bounds.
+    """
+    from obsidian_ai_hub.utils.dates import get_partial_date_bounds
+
+    s_min, _ = get_partial_date_bounds(started_on)
+    _, e_max = get_partial_date_bounds(ended_on)
+    if s_min is not None and e_max is not None and s_min > e_max:
+        raise ValueError("started_on must be less than or equal to ended_on")
+
+
 def _validate_yyyy_mm_dd_or_none(v: Optional[str]) -> Optional[str]:
     if v is None:
         return None
@@ -1386,15 +1400,12 @@ class PersonRelationCreateRequest(BaseModel):
     @field_validator("started_on", "ended_on")
     @classmethod
     def _validate_dates(cls, v: Optional[str]) -> Optional[str]:
-        return _validate_yyyy_mm_dd_or_none(v)
+        return _validate_partial_date_or_none(v)
 
     @model_validator(mode="after")
     def _validate_relation_request(self) -> "PersonRelationCreateRequest":
         if self.started_on and self.ended_on:
-            s_date = datetime.strptime(self.started_on, "%Y-%m-%d")
-            e_date = datetime.strptime(self.ended_on, "%Y-%m-%d")
-            if s_date > e_date:
-                raise ValueError("started_on must be less than or equal to ended_on")
+            _validate_relation_date_order(self.started_on, self.ended_on)
         return self
 
 
@@ -1406,15 +1417,12 @@ class PersonRelationUpdateRequest(BaseModel):
     @field_validator("started_on", "ended_on")
     @classmethod
     def _validate_dates(cls, v: Optional[str]) -> Optional[str]:
-        return _validate_yyyy_mm_dd_or_none(v)
+        return _validate_partial_date_or_none(v)
 
     @model_validator(mode="after")
     def _validate_dates_order(self) -> "PersonRelationUpdateRequest":
         if self.started_on and self.ended_on:
-            s_date = datetime.strptime(self.started_on, "%Y-%m-%d")
-            e_date = datetime.strptime(self.ended_on, "%Y-%m-%d")
-            if s_date > e_date:
-                raise ValueError("started_on must be less than or equal to ended_on")
+            _validate_relation_date_order(self.started_on, self.ended_on)
         return self
 
 

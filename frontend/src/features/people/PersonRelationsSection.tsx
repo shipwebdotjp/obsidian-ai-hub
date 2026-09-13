@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Person } from "../../api/types";
 import { PersonDetail, PersonRelation, RelationStatus } from "./types";
 import { formatYmdWithDow } from "../../utils/date";
+import { formatJapaneseDate } from "./DatePrecisionInput";
 import RelationEvidenceSection from "./RelationEvidenceSection";
 
 interface PersonRelationsSectionProps {
@@ -33,10 +34,12 @@ function isValidYmd(value: string): boolean {
 }
 
 // formatYmdWithDow returns invalid input unchanged, so validate first and
-// hide null/empty/invalid values per project convention.
+// hide null/empty/invalid values per project convention. Partial dates
+// (YYYY / YYYY-MM) fall back to Japanese formatting.
 export function formatPeriodDate(value: string | null | undefined): string {
-  if (!value || !isValidYmd(value)) return "";
-  return formatYmdWithDow(value);
+  if (!value) return "";
+  if (isValidYmd(value)) return formatYmdWithDow(value);
+  return formatJapaneseDate(value);
 }
 
 export default function PersonRelationsSection({

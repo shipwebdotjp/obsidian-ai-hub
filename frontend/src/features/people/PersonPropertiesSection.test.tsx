@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
-import PersonPropertiesSection, { formatJapaneseDate } from "./PersonPropertiesSection";
+import PersonPropertiesSection from "./PersonPropertiesSection";
+import { formatJapaneseDate } from "./DatePrecisionInput";
 import {
   PersonPropertyBulkSaveRequest,
   PersonPropertyDefinition,

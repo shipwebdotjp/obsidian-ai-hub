@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from obsidian_ai_hub.utils import config
+from obsidian_ai_hub.utils.dates import get_partial_date_bounds
 
 
 def _assert_test_db_is_not_production(db_path: Path) -> None:
@@ -683,6 +684,9 @@ def get_db_connection() -> sqlite3.Connection:
     if current_version <= 41:
         run_migration_v42(conn)
 
+    if current_version <= 42:
+        run_migration_v43(conn)
+
     return conn
 
 
@@ -1062,6 +1066,90 @@ def run_migration_v42(db: sqlite3.Connection) -> None:
 
     db.execute("PRAGMA user_version = 42")
     db.commit()
+
+
+def run_migration_v43(db: sqlite3.Connection) -> None:
+    """Run migration for version 43 (person_relations rebuild with partial date boundary columns & new CHECK constraint)."""
+    # Rebuilding drops person_relations while person_relation_evidence holds a
+    # foreign key to it; disable FK enforcement for the rebuild (restored below).
+    db.execute("PRAGMA foreign_keys = OFF;")
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS person_relations_v43 (
+            relation_id TEXT PRIMARY KEY,
+            subject_person_id TEXT NOT NULL REFERENCES people(person_id) ON DELETE CASCADE,
+            object_person_id TEXT NOT NULL REFERENCES people(person_id) ON DELETE CASCADE,
+            relation_type_id TEXT NOT NULL REFERENCES person_relation_types(relation_type_id) ON DELETE RESTRICT,
+            started_on TEXT,
+            started_on_min TEXT,
+            ended_on TEXT,
+            ended_on_max TEXT,
+            note TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            CHECK (subject_person_id != object_person_id),
+            CHECK (started_on_min IS NULL OR ended_on_max IS NULL OR started_on_min <= ended_on_max)
+        );
+    """)
+
+    cursor = db.cursor()
+    cursor.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='person_relations';"
+    )
+    if cursor.fetchone() is not None:
+        cursor.execute("""
+            SELECT relation_id, subject_person_id, object_person_id, relation_type_id,
+                   started_on, ended_on, note, created_at, updated_at
+            FROM person_relations
+        """)
+        rows = cursor.fetchall()
+        for r in rows:
+            s_min, _ = get_partial_date_bounds(r["started_on"])
+            _, e_max = get_partial_date_bounds(r["ended_on"])
+
+            db.execute(
+                """
+                INSERT INTO person_relations_v43 (
+                    relation_id, subject_person_id, object_person_id, relation_type_id,
+                    started_on, started_on_min, ended_on, ended_on_max,
+                    note, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    r["relation_id"],
+                    r["subject_person_id"],
+                    r["object_person_id"],
+                    r["relation_type_id"],
+                    r["started_on"],
+                    s_min,
+                    r["ended_on"],
+                    e_max,
+                    r["note"],
+                    r["created_at"],
+                    r["updated_at"],
+                ),
+            )
+
+        db.execute("DROP TABLE person_relations;")
+
+    db.execute("ALTER TABLE person_relations_v43 RENAME TO person_relations;")
+
+    db.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_person_relations_unique_period "
+        "ON person_relations (relation_type_id, subject_person_id, object_person_id, COALESCE(started_on, ''), COALESCE(ended_on, ''));"
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_person_relations_subject ON person_relations(subject_person_id);"
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_person_relations_object ON person_relations(object_person_id);"
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_person_relations_type ON person_relations(relation_type_id);"
+    )
+
+    db.execute("PRAGMA user_version = 43")
+    db.commit()
+    db.execute("PRAGMA foreign_keys = ON;")
 
 
 def run_migration_v18(conn: sqlite3.Connection) -> None:

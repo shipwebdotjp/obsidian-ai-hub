@@ -304,3 +304,76 @@ def test_empty_evidence_rejected(seed_people_data, client):
     )
     res = client.post("/api/v1/people/peo_taro/relations", json=bad_create_req)
     assert res.status_code == 422
+
+
+def test_person_relations_partial_dates(seed_people_data, client):
+    res = client.get("/api/v1/person-relation-types")
+    types = res.json()
+    parent_type = next(t for t in types if t["slug"] == "parent-child")
+    type_id = parent_type["relation_type_id"]
+
+    # Month/year precision is accepted and normalized (slash variants too).
+    res = client.post(
+        "/api/v1/people/peo_taro/relations",
+        json={
+            "subject_person_id": "peo_taro",
+            "object_person_id": "peo_hanako",
+            "relation_type_id": type_id,
+            "started_on": "2023/5",
+            "ended_on": "2024",
+            "note": "部分日テスト",
+        },
+    )
+    assert res.status_code == 201
+    rel = res.json()["relation"]
+    assert rel["started_on"] == "2023-05"
+    assert rel["ended_on"] == "2024"
+    rel_id = rel["relation_id"]
+
+    # Mixed-precision order violation is rejected.
+    res = client.post(
+        "/api/v1/people/peo_taro/relations",
+        json={
+            "subject_person_id": "peo_taro",
+            "object_person_id": "peo_jiro",
+            "relation_type_id": type_id,
+            "started_on": "2024",
+            "ended_on": "2023-05",
+        },
+    )
+    assert res.status_code == 422
+
+    # Invalid partial dates are rejected.
+    for bad in ("2023-13", "2023-02-30", "not-a-date"):
+        res = client.post(
+            "/api/v1/people/peo_taro/relations",
+            json={
+                "subject_person_id": "peo_taro",
+                "object_person_id": "peo_jiro",
+                "relation_type_id": type_id,
+                "started_on": bad,
+            },
+        )
+        assert res.status_code == 422
+
+    # Partial dates flow through list responses.
+    res = client.get("/api/v1/people/peo_taro/relations")
+    assert res.status_code == 200
+    listed = next(r for r in res.json() if r["relation_id"] == rel_id)
+    assert listed["started_on"] == "2023-05"
+    assert listed["ended_on"] == "2024"
+
+    # Update accepts partial dates.
+    res = client.patch(
+        f"/api/v1/person-relations/{rel_id}",
+        json={"started_on": "2020", "ended_on": None},
+    )
+    assert res.status_code == 200
+    assert res.json()["relation"]["started_on"] == "2020"
+
+    # Evidence observed_at stays full-date only.
+    res = client.post(
+        f"/api/v1/person-relations/{rel_id}/evidence",
+        json={"source_type": "manual", "quote": "q", "observed_at": "2023-05"},
+    )
+    assert res.status_code == 422

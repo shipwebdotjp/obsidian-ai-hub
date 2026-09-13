@@ -2,6 +2,14 @@ import React, { forwardRef, useMemo } from "react";
 import { Person } from "../../api/types";
 import { PeopleMergePreviewResponse } from "./types";
 import PersonCombobox from "./PersonCombobox";
+import { formatJapaneseDate } from "./DatePrecisionInput";
+
+function formatMergePeriodDate(value: string | null | undefined): string {
+  if (!value || !value.trim()) return "";
+  // Hide invalid values per project convention (frontend/AGENTS.md),
+  // consistent with PersonRelationsSection.formatPeriodDate.
+  return formatJapaneseDate(value);
+}
 
 interface MergePreviewDialogProps {
   people?: Person[];
@@ -217,7 +225,7 @@ const MergePreviewDialog = forwardRef<HTMLDialogElement, MergePreviewDialogProps
                         <div key={imp.relation_id} className="p-2.5 flex items-center justify-between gap-2">
                           <div>
                             <span className="font-bold text-slate-900">{imp.other_person_name}</span> との「{imp.relation_type_forward_label}」
-                            <span className="text-slate-400 text-[10px] ml-2">{imp.started_on || imp.ended_on ? `(${imp.started_on || "未指定"} ～ ${imp.ended_on || "現在"})` : "(期間未設定)"}</span>
+                            <span className="text-slate-400 text-[10px] ml-2">{imp.started_on || imp.ended_on ? `(${formatMergePeriodDate(imp.started_on) || "未指定"} ～ ${formatMergePeriodDate(imp.ended_on) || "現在"})` : "(期間未設定)"}</span>
                           </div>
                           <div>
                             {imp.result_type === "transferred" && (

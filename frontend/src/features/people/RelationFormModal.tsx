@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import PersonCombobox from "./PersonCombobox";
+import DatePrecisionInput, { getPartialDateBounds } from "./DatePrecisionInput";
 import { useNativeDialog } from "./useNativeDialog";
 import { Person } from "../../api/types";
 import {
@@ -185,7 +186,13 @@ export default function RelationFormModal({
       }
     }
 
-    if (startedOn && endedOn && startedOn > endedOn) {
+    const { min: startedMin } = getPartialDateBounds(startedOn);
+    const { max: endedMax } = getPartialDateBounds(endedOn);
+    if ((startedOn.trim() && !startedMin) || (endedOn.trim() && !endedMax)) {
+      setFormError("日付の形式が正しくありません。");
+      return;
+    }
+    if (startedMin && endedMax && startedMin > endedMax) {
       setFormError("開始日は終了日以前である必要があります。");
       return;
     }
@@ -492,22 +499,20 @@ export default function RelationFormModal({
                 <label className="block font-semibold text-slate-700 mb-1">
                   開始日 (started_on)
                 </label>
-                <input
-                  type="date"
+                <DatePrecisionInput
                   value={startedOn}
-                  onChange={(e) => setStartedOn(e.target.value)}
-                  className="w-full rounded border border-slate-300 p-2 text-xs focus:ring-2 focus:ring-slate-800 focus:outline-none"
+                  onChange={setStartedOn}
+                  labelPrefix="開始日"
                 />
               </div>
               <div>
                 <label className="block font-semibold text-slate-700 mb-1">
                   終了日 (ended_on)
                 </label>
-                <input
-                  type="date"
+                <DatePrecisionInput
                   value={endedOn}
-                  onChange={(e) => setEndedOn(e.target.value)}
-                  className="w-full rounded border border-slate-300 p-2 text-xs focus:ring-2 focus:ring-slate-800 focus:outline-none"
+                  onChange={setEndedOn}
+                  labelPrefix="終了日"
                 />
               </div>
             </div>

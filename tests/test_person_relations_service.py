@@ -11,6 +11,7 @@ from obsidian_ai_hub.web.services.person_relations import (
     get_person_relations_for_ai,
     add_relation_evidence,
     update_person_relation,
+    update_person_relation_in_tx,
     update_relation_evidence,
 )
 from obsidian_ai_hub.web.services.people import delete_person
@@ -573,5 +574,259 @@ def test_get_person_relations_for_ai(tmp_path, monkeypatch):
 
     # Fetch relations for non-existent person or person with no relations
     assert get_person_relations_for_ai("peo_nonexistent") == []
+
+    conn.close()
+
+
+def test_relation_partial_date_normalization_and_order():
+    from obsidian_ai_hub.web.services.person_relations import (
+        validate_and_normalize_relation_dates,
+    )
+
+    # Normalization (incl. slash variants) and empty handling
+    assert validate_and_normalize_relation_dates("2023/5", None) == ("2023-05", None)
+    assert validate_and_normalize_relation_dates("2023", "2024-02") == ("2023", "2024-02")
+    assert validate_and_normalize_relation_dates("", "  ") == (None, None)
+    assert validate_and_normalize_relation_dates(None, None) == (None, None)
+    # Mixed precision compares on bounds: May 2023 .. end of 2023 is valid
+    assert validate_and_normalize_relation_dates("2023-05", "2023") == ("2023-05", "2023")
+
+    with pytest.raises(InvalidDateError):
+        validate_and_normalize_relation_dates("2023-13", None)
+    with pytest.raises(InvalidDateError):
+        validate_and_normalize_relation_dates("2023-02-30", None)
+    with pytest.raises(InvalidDateError):
+        validate_and_normalize_relation_dates("not-a-date", None)
+    with pytest.raises(InvalidDateError):
+        # 2024-01-01 (start min) > 2023-05-31 (end max)
+        validate_and_normalize_relation_dates("2024", "2023-05")
+
+
+def test_relation_status_with_partial_dates():
+    assert compute_relation_status("2023-05", None, "2026-09-13") == "active"
+    assert compute_relation_status("2027", None, "2026-09-13") == "upcoming"
+    assert compute_relation_status("2026-10", None, "2026-09-13") == "upcoming"
+    assert compute_relation_status(None, "2023-05", "2026-09-13") == "ended"
+    assert compute_relation_status(None, "2026-08", "2026-09-13") == "ended"
+    # Bounds overlapping today count as active, not ended/upcoming
+    assert compute_relation_status(None, "2026-09", "2026-09-13") == "active"
+    assert compute_relation_status("2026-09", None, "2026-09-13") == "active"
+    assert compute_relation_status("2026", "2026", "2026-09-13") == "active"
+    # Full dates keep previous behavior
+    assert compute_relation_status("2026-09-14", None, "2026-09-13") == "upcoming"
+    assert compute_relation_status(None, "2026-09-12", "2026-09-13") == "ended"
+
+
+def test_relation_crud_with_partial_dates(tmp_path, monkeypatch):
+    db_file = tmp_path / "test_rel_partial.db"
+    monkeypatch.setattr(config, "MEMORY_SQLITE_PATH", db_file)
+
+    conn = get_db_connection()
+    setup_test_people(conn)
+    cursor = conn.cursor()
+
+    rel, action = create_person_relation_in_tx(
+        cursor,
+        "peo_1",
+        "peo_2",
+        "rlt_builtin_parent-child",
+        started_on="2023/5",
+        ended_on="2024",
+    )
+    assert action == "created"
+    assert rel["started_on"] == "2023-05"
+    assert rel["ended_on"] == "2024"
+    assert rel["status"] == "ended"
+    cursor.execute(
+        "SELECT started_on_min, ended_on_max FROM person_relations WHERE relation_id = ?",
+        (rel["relation_id"],),
+    )
+    row = cursor.fetchone()
+    assert row["started_on_min"] == "2023-05-01"
+    assert row["ended_on_max"] == "2024-12-31"
+
+    # Same period at different precision is a distinct relation (exact-match dedup)
+    rel2, action2 = create_person_relation_in_tx(
+        cursor,
+        "peo_1",
+        "peo_2",
+        "rlt_builtin_parent-child",
+        started_on="2023-05-01",
+    )
+    assert action2 == "created"
+    assert rel2["relation_id"] != rel["relation_id"]
+
+    # Exact same normalized values still merge into existing
+    rel3, action3 = create_person_relation_in_tx(
+        cursor,
+        "peo_1",
+        "peo_2",
+        "rlt_builtin_parent-child",
+        started_on="2023-05",
+        ended_on="2024",
+        note="extra",
+    )
+    assert action3 == "merged_into_existing"
+    assert rel3["relation_id"] == rel["relation_id"]
+
+    # Update to year precision; explicit None clears bounds to NULL
+    updated, _ = update_person_relation_in_tx(
+        cursor,
+        rel["relation_id"],
+        started_on="2020",
+        ended_on=None,
+        provided={"started_on", "ended_on"},
+    )
+    assert updated["started_on"] == "2020"
+    assert updated["ended_on"] is None
+    cursor.execute(
+        "SELECT started_on_min, ended_on_max FROM person_relations WHERE relation_id = ?",
+        (rel["relation_id"],),
+    )
+    row = cursor.fetchone()
+    assert row["started_on_min"] == "2020-01-01"
+    assert row["ended_on_max"] is None
+
+    conn.close()
+
+
+def test_relation_ai_projection_exposes_partial_dates(tmp_path, monkeypatch):
+    db_file = tmp_path / "test_ai_partial.db"
+    monkeypatch.setattr(config, "MEMORY_SQLITE_PATH", db_file)
+
+    conn = get_db_connection()
+    setup_test_people(conn)
+    cursor = conn.cursor()
+    create_person_relation_in_tx(
+        cursor, "peo_1", "peo_2", "rlt_builtin_parent-child",
+        started_on="2023-05", ended_on="2024",
+    )
+    conn.commit()
+
+    proj = get_person_relations_for_ai("peo_1")
+    assert len(proj) == 1
+    assert proj[0]["started_on"] == "2023-05"
+    assert proj[0]["ended_on"] == "2024"
+
+    conn.close()
+
+
+def test_relation_person_merge_preserves_partial_dates(tmp_path, monkeypatch):
+    db_file = tmp_path / "test_merge_partial.db"
+    monkeypatch.setattr(config, "MEMORY_SQLITE_PATH", db_file)
+
+    conn = get_db_connection()
+    setup_test_people(conn)
+    cursor = conn.cursor()
+    rel, _ = create_person_relation_in_tx(
+        cursor, "peo_3", "peo_2", "rlt_builtin_friend",
+        started_on="2023-05",
+    )
+    conn.commit()
+
+    preview = preview_people_merge("peo_3", "peo_1")
+    assert preview["allowed"] is True
+    merge_people("peo_3", "peo_1")
+
+    merged = get_person_relation_by_id_in_tx(conn.cursor(), rel["relation_id"])
+    assert merged["subject_person_id"] == "peo_1"
+    assert merged["object_person_id"] == "peo_2"
+    assert merged["started_on"] == "2023-05"
+    assert merged["status"] == "active"
+    conn.close()
+
+
+def test_migration_v43_preserves_legacy_dates_and_evidence(tmp_path, monkeypatch):
+    from obsidian_ai_hub.database import run_migration_v43
+
+    db_file = tmp_path / "test_mig43.db"
+    monkeypatch.setattr(config, "MEMORY_SQLITE_PATH", db_file)
+
+    conn = get_db_connection()
+    setup_test_people(conn)
+    cursor = conn.cursor()
+
+    # Simulate the pre-v43 table shape (v38 columns, no boundary columns).
+    cursor.execute("PRAGMA foreign_keys = OFF;")
+    cursor.execute("DROP TABLE person_relations;")
+    cursor.execute("""
+        CREATE TABLE person_relations (
+            relation_id TEXT PRIMARY KEY,
+            subject_person_id TEXT NOT NULL REFERENCES people(person_id) ON DELETE CASCADE,
+            object_person_id TEXT NOT NULL REFERENCES people(person_id) ON DELETE CASCADE,
+            relation_type_id TEXT NOT NULL REFERENCES person_relation_types(relation_type_id) ON DELETE RESTRICT,
+            started_on TEXT,
+            ended_on TEXT,
+            note TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            CHECK (subject_person_id != object_person_id),
+            CHECK (started_on IS NULL OR ended_on IS NULL OR started_on <= ended_on)
+        );
+    """)
+    cursor.execute(
+        "INSERT INTO person_relations (relation_id, subject_person_id, object_person_id, "
+        "relation_type_id, started_on, ended_on, note, created_at, updated_at) "
+        "VALUES ('rel_legacy', 'peo_1', 'peo_2', 'rlt_builtin_parent-child', "
+        "'2020-01-01', '2020-12-31', 'legacy', '2025-01-01T00:00:00', '2025-01-01T00:00:00')"
+    )
+    cursor.execute(
+        "INSERT INTO person_relations (relation_id, subject_person_id, object_person_id, "
+        "relation_type_id, started_on, ended_on, note, created_at, updated_at) "
+        "VALUES ('rel_undated', 'peo_1', 'peo_3', 'rlt_builtin_friend', "
+        "NULL, NULL, NULL, '2025-01-01T00:00:00', '2025-01-01T00:00:00')"
+    )
+    cursor.execute(
+        "INSERT INTO person_relation_evidence (evidence_id, relation_id, source_type, quote, "
+        "created_at, updated_at) VALUES ('ev_legacy', 'rel_legacy', 'manual', 'q', "
+        "'2025-01-01T00:00:00', '2025-01-01T00:00:00')"
+    )
+    conn.commit()
+    cursor.execute("PRAGMA foreign_keys = ON;")
+
+    run_migration_v43(conn)
+
+    cursor = conn.cursor()
+    assert cursor.execute("PRAGMA user_version;").fetchone()[0] == 43
+    cols = [r[1] for r in cursor.execute("PRAGMA table_info(person_relations);")]
+    assert "started_on_min" in cols
+    assert "ended_on_max" in cols
+
+    row = cursor.execute(
+        "SELECT started_on, started_on_min, ended_on, ended_on_max, note "
+        "FROM person_relations WHERE relation_id = 'rel_legacy'"
+    ).fetchone()
+    assert row["started_on"] == "2020-01-01"
+    assert row["started_on_min"] == "2020-01-01"
+    assert row["ended_on"] == "2020-12-31"
+    assert row["ended_on_max"] == "2020-12-31"
+    assert row["note"] == "legacy"
+
+    row2 = cursor.execute(
+        "SELECT started_on_min, ended_on_max FROM person_relations WHERE relation_id = 'rel_undated'"
+    ).fetchone()
+    assert row2["started_on_min"] is None
+    assert row2["ended_on_max"] is None
+
+    # Evidence survives the rebuild; FK enforcement is restored.
+    assert cursor.execute("SELECT COUNT(*) FROM person_relation_evidence;").fetchone()[0] == 1
+    assert cursor.execute("PRAGMA foreign_keys;").fetchone()[0] == 1
+    idx_names = [
+        r["name"]
+        for r in cursor.execute(
+            "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='person_relations';"
+        )
+    ]
+    assert "idx_person_relations_unique_period" in idx_names
+
+    # New boundary CHECK rejects inverted periods at the DB level.
+    with pytest.raises(Exception):
+        cursor.execute(
+            "INSERT INTO person_relations (relation_id, subject_person_id, object_person_id, "
+            "relation_type_id, started_on, started_on_min, ended_on, ended_on_max, "
+            "created_at, updated_at) VALUES ('rel_bad', 'peo_1', 'peo_2', "
+            "'rlt_builtin_parent-child', '2024', '2024-01-01', '2023', '2023-12-31', "
+            "'2025-01-01T00:00:00', '2025-01-01T00:00:00')"
+        )
 
     conn.close()

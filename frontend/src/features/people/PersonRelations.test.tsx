@@ -13,6 +13,7 @@ import RelationFormModal from "./RelationFormModal";
 import RelationEvidenceSection from "./RelationEvidenceSection";
 import MergePreviewDialog from "./MergePreviewDialog";
 import { formatPeriodDate } from "./PersonRelationsSection";
+import { getPartialDateBounds } from "./DatePrecisionInput";
 import { PersonRelationType, PersonRelation, PersonDetail } from "./types";
 
 describe("Person Relations UI Components", () => {
@@ -713,6 +714,24 @@ describe("Person Relations UI Components", () => {
     expect(formatPeriodDate("not-a-date")).toBe("");
   });
 
+  test("formatPeriodDate renders partial dates in Japanese", () => {
+    expect(formatPeriodDate("2023-05")).toBe("2023年5月");
+    expect(formatPeriodDate("2023")).toBe("2023年");
+    expect(formatPeriodDate("2023-13")).toBe("");
+    expect(formatPeriodDate("0999")).toBe("");
+  });
+
+  test("getPartialDateBounds computes bounds for partial dates", () => {
+    expect(getPartialDateBounds("2023-05")).toEqual({ min: "2023-05-01", max: "2023-05-31" });
+    expect(getPartialDateBounds("2024-02")).toEqual({ min: "2024-02-01", max: "2024-02-29" });
+    expect(getPartialDateBounds("2023")).toEqual({ min: "2023-01-01", max: "2023-12-31" });
+    expect(getPartialDateBounds("2023-05-15")).toEqual({ min: "2023-05-15", max: "2023-05-15" });
+    expect(getPartialDateBounds(null)).toEqual({ min: null, max: null });
+    expect(getPartialDateBounds("")).toEqual({ min: null, max: null });
+    expect(getPartialDateBounds("2023-13")).toEqual({ min: null, max: null });
+    expect(getPartialDateBounds("2023-02-30")).toEqual({ min: null, max: null });
+  });
+
   test("PersonRelationsSection renders start-only, end-only, and unset periods", () => {
     const currentPerson: PersonDetail = {
       person_id: "peo_taro",
@@ -845,5 +864,191 @@ describe("Person Relations UI Components", () => {
       ).toBeGreaterThan(0);
     });
     expect(onUpdateEvidence).not.toHaveBeenCalled();
+  });
+
+  test("PersonRelationsSection renders partial-date periods", () => {
+    const currentPerson: PersonDetail = {
+      person_id: "peo_taro",
+      display_name: "山田 太郎",
+      normalized_name: "山田太郎",
+      vault_id: null,
+      aliases: [],
+      summary_count: 0,
+      summaries: [],
+      relation_counts: {
+        summaries: 0,
+        aliases: 0,
+        assignments: 0,
+        subject_relations: 1,
+        object_relations: 0,
+        evidence: 0,
+      },
+    };
+    const relations: PersonRelation[] = [
+      {
+        relation_id: "rel_partial",
+        subject_person_id: "peo_taro",
+        object_person_id: "peo_hanako",
+        relation_type_id: "rlt_parent",
+        started_on: "2023-05",
+        ended_on: "2024",
+        note: null,
+        status: "ended",
+        created_at: "2026-01-01T00:00:00",
+        updated_at: "2026-01-01T00:00:00",
+        relation_type: mockTypes[0],
+        evidence: [],
+      },
+    ];
+    const mockPeopleList = [
+      { person_id: "peo_taro", display_name: "山田 太郎", normalized_name: "山田太郎", vault_id: null, aliases: [], summary_count: 1 },
+      { person_id: "peo_hanako", display_name: "鈴木 花子", normalized_name: "鈴木花子", vault_id: null, aliases: [], summary_count: 1 },
+    ];
+
+    render(
+      <PersonRelationsSection
+        currentPerson={currentPerson}
+        relations={relations}
+        peopleList={mockPeopleList}
+        statusFilter="all"
+        onStatusFilterChange={vi.fn()}
+        onOpenCreateModal={vi.fn()}
+        onOpenEditModal={vi.fn()}
+        onDeleteRelation={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("期間: 2023年5月 ～ 2024年")).toBeInTheDocument();
+  });
+
+  test("RelationFormModal submits month-precision dates", async () => {
+    const onCreate = vi.fn();
+    const mockPeopleList = [
+      { person_id: "peo_taro", display_name: "山田 太郎", normalized_name: "山田太郎", vault_id: null, aliases: [], summary_count: 1 },
+      { person_id: "peo_hanako", display_name: "鈴木 花子", normalized_name: "鈴木花子", vault_id: null, aliases: [], summary_count: 1 },
+    ];
+
+    render(
+      <RelationFormModal
+        currentPersonId="peo_taro"
+        relationToEdit={null}
+        types={mockTypes}
+        peopleList={mockPeopleList}
+        onClose={vi.fn()}
+        onCreate={onCreate}
+        onUpdate={vi.fn()}
+        onAddEvidence={vi.fn()}
+        onUpdateEvidence={vi.fn()}
+        onDeleteEvidence={vi.fn()}
+      />
+    );
+
+    const objectInput = screen.getByPlaceholderText("相手人物を選択...");
+    fireEvent.focus(objectInput);
+    const hanakoLabel = await screen.findByText("鈴木 花子", { exact: false });
+    fireEvent.click(hanakoLabel.closest("li")!);
+
+    // Switch the start-date precision to month and enter 2023-05.
+    const monthRadios = screen.getAllByRole("radio", { name: "月", hidden: true });
+    fireEvent.click(monthRadios[0]);
+    fireEvent.change(screen.getByLabelText("開始日 月"), { target: { value: "2023-05" } });
+
+    fireEvent.click(screen.getByText("関係を作成"));
+
+    await waitFor(() => {
+      expect(onCreate).toHaveBeenCalledTimes(1);
+    });
+    expect(onCreate.mock.calls[0][0]).toMatchObject({
+      started_on: "2023-05",
+      ended_on: null,
+    });
+  });
+
+  test("RelationFormModal rejects malformed partial dates before submit", async () => {
+    const onCreate = vi.fn();
+    const mockPeopleList = [
+      { person_id: "peo_taro", display_name: "山田 太郎", normalized_name: "山田太郎", vault_id: null, aliases: [], summary_count: 1 },
+      { person_id: "peo_hanako", display_name: "鈴木 花子", normalized_name: "鈴木花子", vault_id: null, aliases: [], summary_count: 1 },
+    ];
+
+    render(
+      <RelationFormModal
+        currentPersonId="peo_taro"
+        relationToEdit={null}
+        types={mockTypes}
+        peopleList={mockPeopleList}
+        onClose={vi.fn()}
+        onCreate={onCreate}
+        onUpdate={vi.fn()}
+        onAddEvidence={vi.fn()}
+        onUpdateEvidence={vi.fn()}
+        onDeleteEvidence={vi.fn()}
+      />
+    );
+
+    const objectInput = screen.getByPlaceholderText("相手人物を選択...");
+    fireEvent.focus(objectInput);
+    const hanakoLabel = await screen.findByText("鈴木 花子", { exact: false });
+    fireEvent.click(hanakoLabel.closest("li")!);
+
+    // Year "99" is out of range: bounds are null, so the frontend
+    // format check must reject it instead of submitting.
+    const yearRadios = screen.getAllByRole("radio", { name: "年", hidden: true });
+    fireEvent.click(yearRadios[0]);
+    fireEvent.change(screen.getByLabelText("開始日 年"), { target: { value: "99" } });
+
+    fireEvent.click(screen.getByText("関係を作成"));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("日付の形式が正しくありません。")
+      ).toBeInTheDocument();
+    });
+    expect(onCreate).not.toHaveBeenCalled();
+  });
+
+  test("RelationFormModal rejects inverted mixed-precision dates", async () => {
+    const onCreate = vi.fn();
+    const mockPeopleList = [
+      { person_id: "peo_taro", display_name: "山田 太郎", normalized_name: "山田太郎", vault_id: null, aliases: [], summary_count: 1 },
+      { person_id: "peo_hanako", display_name: "鈴木 花子", normalized_name: "鈴木花子", vault_id: null, aliases: [], summary_count: 1 },
+    ];
+
+    render(
+      <RelationFormModal
+        currentPersonId="peo_taro"
+        relationToEdit={null}
+        types={mockTypes}
+        peopleList={mockPeopleList}
+        onClose={vi.fn()}
+        onCreate={onCreate}
+        onUpdate={vi.fn()}
+        onAddEvidence={vi.fn()}
+        onUpdateEvidence={vi.fn()}
+        onDeleteEvidence={vi.fn()}
+      />
+    );
+
+    const objectInput = screen.getByPlaceholderText("相手人物を選択...");
+    fireEvent.focus(objectInput);
+    const hanakoLabel = await screen.findByText("鈴木 花子", { exact: false });
+    fireEvent.click(hanakoLabel.closest("li")!);
+
+    // started_on=2024-05 vs ended_on=2023-05: invalid on bounds (lexical compare would also fail here,
+    // but started_on=2024 vs ended_on=2024-06 would only fail on bounds).
+    const monthRadios = screen.getAllByRole("radio", { name: "月", hidden: true });
+    fireEvent.click(monthRadios[0]);
+    fireEvent.change(screen.getByLabelText("開始日 月"), { target: { value: "2024-05" } });
+    fireEvent.click(monthRadios[1]);
+    fireEvent.change(screen.getByLabelText("終了日 月"), { target: { value: "2023-05" } });
+
+    fireEvent.click(screen.getByText("関係を作成"));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("開始日は終了日以前である必要があります。")
+      ).toBeInTheDocument();
+    });
+    expect(onCreate).not.toHaveBeenCalled();
   });
 });

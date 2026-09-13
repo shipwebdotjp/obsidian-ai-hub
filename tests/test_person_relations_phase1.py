@@ -129,7 +129,7 @@ def test_db_check_constraints(test_memory_db_path):
                 (now, now),
             )
 
-        # Date order CHECK constraint (started_on <= ended_on)
+        # Date order CHECK constraint (started_on_min <= ended_on_max, v43+)
         conn.execute(
             "INSERT INTO people (person_id, normalized_name, display_name) VALUES ('peo_2', 'bob', 'Bob');"
         )
@@ -138,11 +138,25 @@ def test_db_check_constraints(test_memory_db_path):
                 """
                 INSERT INTO person_relations (
                     relation_id, subject_person_id, object_person_id, relation_type_id,
-                    started_on, ended_on, created_at, updated_at
-                ) VALUES ('rel_bad_dates', 'peo_1', 'peo_2', 'rlt_builtin_friend', '2024-01-01', '2020-01-01', ?, ?);
+                    started_on, started_on_min, ended_on, ended_on_max, created_at, updated_at
+                ) VALUES ('rel_bad_dates', 'peo_1', 'peo_2', 'rlt_builtin_friend',
+                          '2024', '2024-01-01', '2023', '2023-12-31', ?, ?);
                 """,
                 (now, now),
             )
+
+        # Raw date strings without bounds pass the DB CHECK; order is
+        # enforced with bounds by the service layer.
+        conn.execute(
+            """
+            INSERT INTO person_relations (
+                relation_id, subject_person_id, object_person_id, relation_type_id,
+                started_on, ended_on, created_at, updated_at
+            ) VALUES ('rel_raw_only', 'peo_1', 'peo_2', 'rlt_builtin_friend', '2024-01-01', '2020-01-01', ?, ?);
+            """,
+            (now, now),
+        )
+        conn.execute("DELETE FROM person_relations WHERE relation_id = 'rel_raw_only';")
 
         # Evidence source_type CHECK constraint (source_type = 'manual')
         conn.execute(
@@ -253,9 +267,15 @@ def test_dto_relation_validations():
             ended_on="2020-01-01",
         )
 
+    # Single-digit month/day is normalized (consistent with property dates)
+    normalized = PersonRelationUpdateRequest(started_on="2020-1-1")
+    assert normalized.started_on == "2020-01-01"
+
     # Reject invalid date format
     with pytest.raises(ValidationError):
-        PersonRelationUpdateRequest(started_on="2020-1-1")
+        PersonRelationUpdateRequest(started_on="2020-13")
+    with pytest.raises(ValidationError):
+        PersonRelationUpdateRequest(started_on="not-a-date")
 
 
 def test_dto_person_delete_response_extended_fields():
