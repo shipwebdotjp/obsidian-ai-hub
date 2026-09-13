@@ -1223,6 +1223,19 @@ class PlannerGenerateResponse(BaseModel):
 RelationStatus = Literal["upcoming", "active", "ended", "undated"]
 
 
+def _validate_partial_date_or_none(v: Optional[str]) -> Optional[str]:
+    if v is None:
+        return None
+    s = v.strip()
+    if not s:
+        return None
+    from obsidian_ai_hub.utils.dates import parse_and_normalize_partial_date
+    try:
+        return parse_and_normalize_partial_date(s)
+    except ValueError as exc:
+        raise ValueError("Invalid date format") from exc
+
+
 def _validate_yyyy_mm_dd_or_none(v: Optional[str]) -> Optional[str]:
     if v is None:
         return None
@@ -1536,14 +1549,15 @@ class PersonPropertyValueCreateRequest(BaseModel):
     @field_validator("valid_from", "valid_until")
     @classmethod
     def _validate_dates(cls, v: Optional[str]) -> Optional[str]:
-        return _validate_yyyy_mm_dd_or_none(v)
+        return _validate_partial_date_or_none(v)
 
     @model_validator(mode="after")
     def _validate_dates_order(self) -> "PersonPropertyValueCreateRequest":
         if self.valid_from and self.valid_until:
-            s_date = datetime.strptime(self.valid_from, "%Y-%m-%d")
-            e_date = datetime.strptime(self.valid_until, "%Y-%m-%d")
-            if s_date > e_date:
+            from obsidian_ai_hub.utils.dates import get_partial_date_bounds
+            s_min, _ = get_partial_date_bounds(self.valid_from)
+            _, e_max = get_partial_date_bounds(self.valid_until)
+            if s_min and e_max and s_min > e_max:
                 raise ValueError("valid_from must be less than or equal to valid_until")
         return self
 
@@ -1557,14 +1571,15 @@ class PersonPropertyValueUpdateRequest(BaseModel):
     @field_validator("valid_from", "valid_until")
     @classmethod
     def _validate_dates(cls, v: Optional[str]) -> Optional[str]:
-        return _validate_yyyy_mm_dd_or_none(v)
+        return _validate_partial_date_or_none(v)
 
     @model_validator(mode="after")
     def _validate_dates_order(self) -> "PersonPropertyValueUpdateRequest":
         if self.valid_from and self.valid_until:
-            s_date = datetime.strptime(self.valid_from, "%Y-%m-%d")
-            e_date = datetime.strptime(self.valid_until, "%Y-%m-%d")
-            if s_date > e_date:
+            from obsidian_ai_hub.utils.dates import get_partial_date_bounds
+            s_min, _ = get_partial_date_bounds(self.valid_from)
+            _, e_max = get_partial_date_bounds(self.valid_until)
+            if s_min and e_max and s_min > e_max:
                 raise ValueError("valid_from must be less than or equal to valid_until")
         return self
 
@@ -1579,14 +1594,15 @@ class PersonPropertyBulkValueItem(BaseModel):
     @field_validator("valid_from", "valid_until")
     @classmethod
     def _validate_dates(cls, v: Optional[str]) -> Optional[str]:
-        return _validate_yyyy_mm_dd_or_none(v)
+        return _validate_partial_date_or_none(v)
 
     @model_validator(mode="after")
     def _validate_dates_order(self) -> "PersonPropertyBulkValueItem":
         if self.valid_from and self.valid_until:
-            s_date = datetime.strptime(self.valid_from, "%Y-%m-%d")
-            e_date = datetime.strptime(self.valid_until, "%Y-%m-%d")
-            if s_date > e_date:
+            from obsidian_ai_hub.utils.dates import get_partial_date_bounds
+            s_min, _ = get_partial_date_bounds(self.valid_from)
+            _, e_max = get_partial_date_bounds(self.valid_until)
+            if s_min and e_max and s_min > e_max:
                 raise ValueError("valid_from must be less than or equal to valid_until")
         return self
 
@@ -1605,3 +1621,81 @@ class PersonPropertyDefinitionDeleteResponse(BaseModel):
 class PersonPropertyValueDeleteResponse(BaseModel):
     success: bool
     deleted_property_value_id: str
+
+
+# --- Person Search v2 schemas ---
+
+PropertyOperator = Literal["contains", "eq", "gte", "lte", "between", "overlaps"]
+ValidPeriodMode = Literal["current", "as_of", "between", "all"]
+
+
+class PropertyCondition(BaseModel):
+    property_definition_id: str
+    operator: PropertyOperator
+    value: Optional[Any] = None
+    value_from: Optional[Any] = None
+    value_to: Optional[Any] = None
+
+
+class ValidPeriodCondition(BaseModel):
+    mode: ValidPeriodMode = "current"
+    as_of: Optional[str] = None
+    start: Optional[str] = None
+    end: Optional[str] = None
+
+    @field_validator("as_of", "start", "end")
+    @classmethod
+    def _validate_period_dates(cls, v: Optional[str]) -> Optional[str]:
+        return _validate_partial_date_or_none(v)
+
+    @model_validator(mode="after")
+    def _validate_period_condition(self) -> "ValidPeriodCondition":
+        if self.mode == "as_of":
+            if not self.as_of or not self.as_of.strip():
+                raise ValueError("as_of is required when mode is 'as_of'")
+        elif self.mode == "between":
+            if not self.start and not self.end:
+                raise ValueError("at least one of start or end is required when mode is 'between'")
+            if self.start and self.end:
+                from obsidian_ai_hub.utils.dates import get_partial_date_bounds
+                s_min, _ = get_partial_date_bounds(self.start)
+                _, e_max = get_partial_date_bounds(self.end)
+                if s_min and e_max and s_min > e_max:
+                    raise ValueError("start date must be less than or equal to end date")
+        return self
+
+
+class PersonSearchRequest(BaseModel):
+    name_query: Optional[str] = None
+    conditions: list[PropertyCondition] = Field(default_factory=list)
+    valid_period: ValidPeriodCondition = Field(default_factory=ValidPeriodCondition)
+    limit: int = Field(default=100, ge=1, le=100)
+    offset: int = Field(default=0, ge=0)
+
+    @field_validator("conditions")
+    @classmethod
+    def _validate_conditions_count(cls, v: list[PropertyCondition]) -> list[PropertyCondition]:
+        if len(v) > 10:
+            raise ValueError("Maximum 10 property conditions allowed")
+        return v
+
+
+class MatchedPropertyValue(BaseModel):
+    property_value_id: str
+    property_definition_id: str
+    property_key: str
+    property_display_name: str
+    data_type: PropertyDataType
+    value: Any
+    valid_from: Optional[str] = None
+    valid_until: Optional[str] = None
+
+
+class PersonSearchItem(BaseModel):
+    person: Person
+    matched_properties: list[MatchedPropertyValue] = Field(default_factory=list)
+
+
+class PersonSearchResponse(BaseModel):
+    items: list[PersonSearchItem]
+    total: int
