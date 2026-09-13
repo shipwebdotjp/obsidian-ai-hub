@@ -4,9 +4,12 @@ import type { MemoryDetail } from "../../api/types";
 import type { Memory } from "../../api/types";
 import MemoryEditForm from "./MemoryEditForm";
 
+import type { Person } from "../../api/types";
+
 export interface MemoryDetailPanelProps {
   memoryId: string;
   status: string;
+  peopleOptions?: Person[];
   onChanged: (memory: MemoryDetail | null) => void;
   notify: (msg: string, kind?: "info" | "error") => void;
 }
@@ -14,6 +17,7 @@ export interface MemoryDetailPanelProps {
 export default function MemoryDetailPanel({
   memoryId,
   status,
+  peopleOptions = [],
   onChanged,
   notify,
 }: MemoryDetailPanelProps) {
@@ -171,6 +175,9 @@ export default function MemoryDetailPanel({
     <div className="flex h-full flex-col overflow-y-auto p-4">
       <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-slate-500">
         <span className="rounded bg-slate-200 px-1">{detail.kind || "?"}</span>
+        {detail.scope === "person" && (
+          <span className="rounded bg-indigo-100 font-medium text-indigo-800 px-1">人物</span>
+        )}
         <span>status: {detail.status}</span>
         {detail.memory_key && <span>key: {detail.memory_key}</span>}
         {detail.stability && <span>stability: {detail.stability}</span>}
@@ -178,6 +185,16 @@ export default function MemoryDetailPanel({
           <span>conf: {detail.extraction_confidence.toFixed(2)}</span>
         )}
       </div>
+      {detail.people && detail.people.length > 0 && (
+        <div className="mb-3 flex flex-wrap gap-1 text-xs">
+          <span className="text-slate-500">関連人物:</span>
+          {detail.people.map((p) => (
+            <span key={p.person_id} className="rounded bg-indigo-50 border border-indigo-200 text-indigo-800 px-1.5 py-0.5 font-medium">
+              {p.display_name || p.person_id}
+            </span>
+          ))}
+        </div>
+      )}
       <h2 className="text-sm font-semibold text-slate-700">本文</h2>
       <p className="mt-1 whitespace-pre-wrap text-sm">{detail.content}</p>
 
@@ -464,6 +481,7 @@ export default function MemoryDetailPanel({
         ) : (
           <MemoryEditForm
             memory={detail}
+            peopleOptions={peopleOptions}
             onUpdated={handleUpdated}
             notify={notify}
             onCancel={() => setEditing(false)}

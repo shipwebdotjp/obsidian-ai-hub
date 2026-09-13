@@ -22,8 +22,19 @@ def run_deduplication(
     cand_norm = normalize_content(candidate.get("content", ""))
     cand_key = candidate.get("memory_key", "")
 
-    # We only dedup against currently active approved memories
-    approved_mems = [m for m in existing_memories if m.get("status") == "approved"]
+    cand_scope = candidate.get("scope", "user")
+    cand_people_ids = {p["person_id"] for p in (candidate.get("people") or []) if isinstance(p, dict) and p.get("person_id")}
+
+    # We only dedup against currently active approved memories with matching scope
+    approved_mems = [
+        m for m in existing_memories
+        if m.get("status") == "approved" and m.get("scope", "user") == cand_scope
+    ]
+    if cand_scope == "person":
+        approved_mems = [
+            m for m in approved_mems
+            if any(p.get("person_id") in cand_people_ids for p in (m.get("people") or []) if isinstance(p, dict))
+        ]
     if not approved_mems:
         return suggestions
 

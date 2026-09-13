@@ -117,6 +117,7 @@ export function listMemories(params: {
   kind?: string;
   topic?: string;
   q?: string;
+  person_id?: string;
 }): Promise<MemoryListResponse> {
   const sp = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) {

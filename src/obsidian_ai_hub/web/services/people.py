@@ -491,6 +491,42 @@ def delete_person(person_id: str) -> dict:
             )
             deleted_assignments = cursor.rowcount
 
+            # Disassociate person from memory_people
+            cursor.execute(
+                "SELECT DISTINCT memory_id FROM memory_people WHERE person_id = ?",
+                (person_id,),
+            )
+            affected_mem_ids = [r["memory_id"] for r in cursor.fetchall()]
+
+            cursor.execute("DELETE FROM memory_people WHERE person_id = ?", (person_id,))
+
+            # Find orphaned person memories (scope = 'person' with 0 remaining memory_people entries)
+            if affected_mem_ids:
+                placeholders = ", ".join("?" for _ in affected_mem_ids)
+                cursor.execute(
+                    f"""
+                    SELECT m.memory_id
+                    FROM memories m
+                    LEFT JOIN memory_people mp ON m.memory_id = mp.memory_id
+                    WHERE m.memory_id IN ({placeholders}) AND m.scope = 'person'
+                    GROUP BY m.memory_id
+                    HAVING COUNT(mp.person_id) = 0
+                    """,
+                    affected_mem_ids,
+                )
+                orphaned_ids = [r["memory_id"] for r in cursor.fetchall()]
+
+                if orphaned_ids:
+                    o_placeholders = ", ".join("?" for _ in orphaned_ids)
+                    cursor.execute(
+                        f"DELETE FROM memory_events WHERE memory_id IN ({o_placeholders})",
+                        orphaned_ids,
+                    )
+                    cursor.execute(
+                        f"DELETE FROM memories WHERE memory_id IN ({o_placeholders})",
+                        orphaned_ids,
+                    )
+
             cursor.execute("DELETE FROM people WHERE person_id = ?", (person_id,))
 
             return {
