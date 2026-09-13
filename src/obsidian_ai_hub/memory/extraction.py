@@ -308,7 +308,7 @@ def extract_person_memories(week_date_str: Optional[str] = None) -> list[dict]:
                 raw_p_ids = item.get("person_ids") or []
                 if not isinstance(raw_p_ids, list):
                     raw_p_ids = [raw_p_ids]
-                target_p_ids = list(dict.fromkeys(pid for pid in raw_p_ids if pid in valid_person_ids_in_week))
+                target_p_ids = list(dict.fromkeys(pid for pid in raw_p_ids if isinstance(pid, str) and pid in valid_person_ids_in_week))
                 if not target_p_ids:
                     logger.warning("Person memory extraction returned candidate with invalid/unmatched person_ids: %s", raw_p_ids)
                     continue

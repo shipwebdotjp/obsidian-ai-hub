@@ -83,7 +83,7 @@ export default function MemoryEditForm({ memory, peopleOptions = [], onUpdated, 
         <div>
           <label className="block text-xs text-slate-500 mb-1">関連人物 {memory.scope === "person" && "(必須: 1人以上)"}</label>
           {peopleOptions.length === 0 ? (
-            <p className="text-xs text-red-600">人物一覧の取得に失敗しました。人物メモリは保存できません。</p>
+            <p className="text-xs text-slate-400">関連付け可能な人物がいません。</p>
           ) : (
           <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto border border-slate-200 rounded p-2 bg-slate-50">
             {peopleOptions.map((p) => {

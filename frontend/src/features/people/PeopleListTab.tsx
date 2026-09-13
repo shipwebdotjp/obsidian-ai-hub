@@ -420,7 +420,9 @@ export default function PeopleListTab({
               {loadingMemories ? (
                 <p className="text-xs text-slate-400">読み込み中…</p>
               ) : personMemories.length === 0 ? (
-                <p className="text-xs text-slate-400">人物メモリはありません。</p>
+                memoriesError ? null : (
+                  <p className="text-xs text-slate-400">人物メモリはありません。</p>
+                )
               ) : (
                 <div className="border border-slate-100 rounded-lg overflow-hidden divide-y divide-slate-100">
                   {personMemories.map((m) => (
