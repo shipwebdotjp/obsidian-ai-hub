@@ -38,6 +38,27 @@ def unset_principal_person(_=Depends(require_bearer_token)):
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+@router.post("/people/search", response_model=schemas.PersonSearchResponse)
+def search_people(
+    req: schemas.PersonSearchRequest,
+    _=Depends(require_bearer_token),
+) -> schemas.PersonSearchResponse:
+    try:
+        res = service.search_people_by_properties(
+            name_query=req.name_query,
+            conditions=[c.model_dump() for c in req.conditions],
+            valid_period=req.valid_period.model_dump(),
+            limit=req.limit,
+            offset=req.offset,
+        )
+        return schemas.PersonSearchResponse(**res)
+    except (service.InvalidValueError, FileNotFoundError) as e:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(e),
+        ) from e
+
+
 @router.get("/people", response_model=list[schemas.Person])
 def get_people(_=Depends(require_bearer_token)):
     return service.list_people()
