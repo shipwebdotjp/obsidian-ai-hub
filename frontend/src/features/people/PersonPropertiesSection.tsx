@@ -13,16 +13,27 @@ export function formatJapaneseDate(value: string | null | undefined): string {
   const v = value.trim();
   if (/^\d{4}-\d{2}-\d{2}$/.test(v)) {
     const [y, m, d] = v.split("-").map(Number);
-    return `${y}年${m}月${d}日`;
+    const date = new Date(y, m - 1, d);
+    if (date.getFullYear() === y && date.getMonth() === m - 1 && date.getDate() === d) {
+      return `${y}年${m}月${d}日`;
+    }
+    return "";
   }
   if (/^\d{4}-\d{2}$/.test(v)) {
     const [y, m] = v.split("-").map(Number);
-    return `${y}年${m}月`;
+    if (m >= 1 && m <= 12) {
+      return `${y}年${m}月`;
+    }
+    return "";
   }
   if (/^\d{4}$/.test(v)) {
-    return `${v}年`;
+    const y = Number(v);
+    if (y >= 1000 && y <= 9999) {
+      return `${v}年`;
+    }
+    return "";
   }
-  return v;
+  return "";
 }
 
 function detectDatePrecision(val: string): "day" | "month" | "year" {
@@ -45,9 +56,23 @@ function DatePrecisionInput({ value, onChange, labelPrefix, required = false }: 
     setPrecision(newPrec);
     if (!value) return;
     if (newPrec === "year") {
-      onChange(value.slice(0, 4));
+      if (value.length >= 4 && /^\d{4}/.test(value)) {
+        onChange(value.slice(0, 4));
+      } else {
+        onChange("");
+      }
     } else if (newPrec === "month") {
-      onChange(value.length >= 7 ? value.slice(0, 7) : value);
+      if (value.length >= 7 && /^\d{4}-\d{2}/.test(value)) {
+        onChange(value.slice(0, 7));
+      } else {
+        onChange("");
+      }
+    } else if (newPrec === "day") {
+      if (/^\d{4}-\d{2}-\d{2}$/.test(value.trim())) {
+        onChange(value.trim());
+      } else {
+        onChange("");
+      }
     }
   };
 

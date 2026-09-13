@@ -477,8 +477,10 @@ def list_person_properties_in_tx(
     cursor.execute(
         """
         SELECT v.property_value_id, v.person_id, v.property_definition_id, v.source_type,
-               v.value_text, v.value_date, v.value_number, v.value_boolean, v.option_id,
-               v.valid_from, v.valid_until, v.note, v.created_at, v.updated_at,
+               v.value_text, v.value_date, v.value_date_min, v.value_date_max,
+               v.value_number, v.value_boolean, v.option_id,
+               v.valid_from, v.valid_from_min, v.valid_until, v.valid_until_max,
+               v.note, v.created_at, v.updated_at,
                d.key AS property_key, d.display_name AS property_display_name,
                d.data_type, d.cardinality,
                o.option_key, o.display_name AS option_display_name

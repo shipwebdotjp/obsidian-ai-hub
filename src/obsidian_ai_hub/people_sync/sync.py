@@ -84,12 +84,22 @@ def _consolidate_single_cardinality_items(
             ):
                 ls, le = last.get("valid_from"), last.get("valid_until")
                 cs, ce = current.get("valid_from"), current.get("valid_until")
-                last["valid_from"] = (
-                    None if ls is None or cs is None else min(ls, cs)
-                )
-                last["valid_until"] = (
-                    None if le is None or ce is None else max(le, ce)
-                )
+
+                # Choose valid_from raw string whose min boundary is earlier
+                if ls is None or cs is None:
+                    last["valid_from"] = None
+                elif curr_s_min and (not last_s_min or curr_s_min < last_s_min):
+                    last["valid_from"] = cs
+                else:
+                    last["valid_from"] = ls
+
+                # Choose valid_until raw string whose max boundary is later
+                if le is None or ce is None:
+                    last["valid_until"] = None
+                elif curr_e_max and (not last_e_max or curr_e_max > last_e_max):
+                    last["valid_until"] = ce
+                else:
+                    last["valid_until"] = le
             else:
                 merged.append(current)
         consolidated.extend(merged)
