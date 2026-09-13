@@ -6,7 +6,7 @@ HITL_PLIST=~/Library/LaunchAgents/jp.shipweb.obsidian-ai-hub.hitl-worker.plist
 HITL_LABEL=jp.shipweb.obsidian-ai-hub.hitl-worker
 DOMAIN=gui/$(shell id -u)
 
-.PHONY: install install-all install-hitl-worker start stop restart reload reload-hitl-worker enable enable-hitl-worker disable disable-hitl-worker status status-hitl-worker logs logs-hitl-worker errorlogs errorlogs-hitl-worker build-web dev-web jules-setup serve
+.PHONY: install install-all install-hitl-worker start stop restart restart-hitl-worker reload reload-hitl-worker enable enable-hitl-worker disable disable-hitl-worker status status-hitl-worker logs logs-hitl-worker errorlogs errorlogs-hitl-worker build-web dev-web jules-setup serve
 
 # インストール（初回のみ）
 install:
@@ -37,6 +37,10 @@ stop:
 # 再起動（通常はこれ）
 restart:
 	launchctl kickstart -k $(DOMAIN)/$(LABEL)
+
+# hitl-worker 再起動（コード変更時・通常はこれ）
+restart-hitl-worker:
+	launchctl kickstart -k $(DOMAIN)/$(HITL_LABEL)
 
 # plist再読み込み（設定変更時）
 reload:
