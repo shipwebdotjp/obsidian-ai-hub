@@ -8,10 +8,10 @@
 
 - **Task Orchestration** — 自由文依頼をPlanへ変換し、承認ポリシーに従って既存能力へ委譲し、
   状態と結果を追跡する文脈。
-- **HITL** — Taskの対象解決質問を保存・回答する汎用基盤。TaskのPlan承認自体は所有しない。
+- **HITL** — Taskの対象解決質問とカレンダー/リマインダー作成提案を保存・回答する汎用基盤。TaskのPlan承認自体は所有しない。
 - **AI Agents / Coding Workspace** — Taskが子runを作る既存の実行文脈。Taskはそれぞれの内部会話・
   権限・出力を所有しない。
-- **Vault / Calendar / Reminders** — Taskが読取対象として参照し得る外部境界。直接書込みはMVP外。
+- **Vault / Calendar / Reminders** — Taskが読取対象として参照し得る外部境界。直接書込みは対象外。Calendar / Remindersへの追加は既存提案HITL登録ツール経由のみ行い、人間の承認はHITL側で行う。
 
 ## ユビキタス言語
 
@@ -49,7 +49,7 @@
 
 - **CLI入口** — Task投入専用であり、Task IDと詳細URLを返す。
 - **WebUI** — Plan承認、差戻し、取消、結果閲覧、Capability policy設定を扱う。
-- **HITL** — 対象解決質問の永続化と回答処理を扱う。
+- **HITL** — 対象解決質問とカレンダー/リマインダー作成提案の永続化と回答処理を扱う。
 - **AI Agent** — 子runは実行時点の設定で動作する。Taskは設定を凍結しないが、
   `specialist_agent` を含むDirectional Planの承認時点指紋を記録し、実行開始時に
   差分・削除を検出したら再承認へ回す。

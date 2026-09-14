@@ -16,7 +16,8 @@ Status: Accepted (MVP implemented, Phases 1-5 done)
 ### MVP外
 
 - Vaultの作成・編集・削除、カレンダー/リマインダーへの直接書込み
-- 既存のカレンダー/リマインダー提案HITLをTask実行から呼ぶこと
+- Task実行からの直接書込み提案（Taskは既存のカレンダー/リマインダー提案HITL登録
+  ツール経由でのみ登録し、直接書込みAdapterは持たない）
 - Capability Adapterの任意作成や入力仕様・説明のWeb編集
 - 共通Workspaceロック、複数Task worker、Task固有の実行上限・自動リトライ・自動ロールバック
 - Coding CLI/Agent内部の計画逸脱を親側で技術的に防ぐこと
@@ -67,14 +68,16 @@ Registryに新規builtin toolを追加すればTask Capabilityとしても自動
 | key / 種別 | 既定 | 備考 |
 | --- | --- | --- |
 | 読取・検索系の既存Registry tool | `auto` | web、Vault、Calendar、Reminders、Memory、People、Projectの読取・検索のみ。 |
+| `calendar_create_proposal` / `reminder_create_proposal` | `auto` | 既存提案HITLの登録のみ（直接書込みなし）。人間の承認はHITL側で行うため、auto時のPlan確認は不要。 |
 | `memory_propose` | `plan_required` | Memory candidateの作成。 |
 | `specialist_agent` | `plan_required` | 登録済みAI Agentを指定して一回限りの子runを作る。 |
 | `coding_cli` | `plan_required` | 登録済みProjectのGit rootで新規Coding session/runを作る。 |
 | `run_shell`、Skills、その他新規Registry tool | `plan_required` | Registryの正本から自動派生。 |
 
-Task Capabilityにしないtool(コード固定の除外セット): `ask_user`、
-`agent_delegate`(`specialist_agent` と重複)、`calendar_create_proposal` /
-`reminder_create_proposal`(既存提案HITLとの二重承認を避ける)。
+Task Capabilityにしないtool(コード固定の除外セット): `ask_user`
+(会話内専用)、`agent_delegate`(`specialist_agent` と重複し親Agent run文脈が前提)。
+`calendar_create_proposal` / `reminder_create_proposal` はTask Capabilityとし、
+既存ツール経由で提案HITL登録のみ行う（直接書込みはしない）。
 
 `specialist_agent` は実行開始時のAgent設定指紋とPlan承認時の指紋を照合する。
 承認後にAgentのsystem prompt・有効tool・provider/model・委譲先が変わった場合、
@@ -159,7 +162,10 @@ exactly-onceではない。副作用の実行から完了Event保存の間に障
 - 差戻しは理由必須であり、同じTask IDを再キューして新しいPlan版を作る。
 
 Planの承認・差戻しはTask APIで直接処理する。対象解決の質問だけは既存HITLに保存し、
-回答後にTaskを再キューする。外部書込み提案HITLをTaskから作成しない。
+回答後にTaskを再キューする。カレンダー/リマインダー提案HITLは、承認済みPlanの範囲内で
+既存ツール経由でのみ登録し、直接書込みはしない。`auto` のみのPlanはPlan確認を経ずに
+実行し、ツール側のHITL承認を人間の承認とする。`plan_required` を含むPlanの承認フローは
+従来どおり維持する。
 
 ## 5. 状態モデル
 
@@ -263,5 +269,5 @@ Task、Plan、Eventは終端化から30日後にまとめて削除する。非�
 6. 無効化Capabilityは実行前に `waiting_reapproval` で止まる。
 7. 取消・サーバー停止は子runに伝播し、Taskを自動再実行しない。
 8. Coding/Agent Stepの子runと結果がTask Eventから辿れる。
-9. Task Capabilityにないtool(`ask_user`、`agent_delegate`、提案HITL)をTaskが選べない。
+9. Task Capabilityにないtool(`ask_user`、`agent_delegate`)をTaskが選べない。提案HITL登録は `calendar_create_proposal` / `reminder_create_proposal` の既存ツール経由でのみ行う。
 10. Task履歴が30日で削除され、既知秘密値と非公開思考過程を保存しない。

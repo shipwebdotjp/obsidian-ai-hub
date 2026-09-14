@@ -26,12 +26,21 @@ Status: Accepted (当初の「初期カタログから除外」判断を改訂�
   追加すれば、Task Capabilityとしても自動公開される(入力スキーマは
   `tasks/capability_schemas.py` が `args_schema` から自動導出するため追加作業なし)。
 - 自動派生の安全境界は「提示しない」から「提示するがPlan承認必須」へ移行する。
-  既定policyは読取・検索系のみ `auto`、それ以外(`run_shell`、Skills、
-  `custom:*` プラグイン、新規builtinを含む)は `plan_required` とする。
+  既定policyは読取・検索系と提案HITL登録のみ `auto`、それ以外(`run_shell`、
+  Skills、`custom:*` プラグイン、新規builtinを含む)は `plan_required` とする。
 - 次のtoolだけはコード固定の除外セットとしてTask Capabilityにしない:
   `ask_user`(会話内専用)、`agent_delegate`(`specialist_agent` と重複し親Agent
-  run文脈が前提)、`calendar_create_proposal` / `reminder_create_proposal`
-  (既存提案HITLとの二重承認になるため。spec §1の決定を継承)。
+  run文脈が前提)。
+
+## Amendment (提案HITL登録のTask Capability化)
+
+Status: Accepted (当初の「提案HITLは除外」判断を改訂する)。
+
+- `calendar_create_proposal` / `reminder_create_proposal` をTask Capabilityに含める。
+  直接書込みはせず、既存ツール経由で提案HITL登録のみ行うため、二重承認にはならない:
+  `auto` 時のPlan確認は不要とし、人間の承認は既存提案HITL側で行う。
+- 既存バリデーション・権限制御・ツール境界・安全制約は維持し、HITL登録処理の迂回はしない。
+- `plan_required` 時の承認フローは従来どおり維持する。
 - DB側の `enabled` / `approval_policy` は起動時同期でも上書き保護する
   (migration v44 seedと同一規則)。
 

@@ -9,11 +9,14 @@ the startup sync never overwrite those two columns.
 
 Code-fixed safety boundary (see ``docs/task-agent/adr/``): the only tools
 that never become capabilities are ``EXCLUDED_TOOL_IDS`` — ``ask_user``
-(conversational only), ``agent_delegate`` (covered by ``specialist_agent``
-and requiring a parent agent run context), and the calendar/reminder
-create-proposal tools (double approval with the existing proposal HITL).
-Everything else defaults to ``plan_required`` except the read/search tools
-in ``AUTO_POLICY_TOOL_IDS``.
+(conversational only) and ``agent_delegate`` (covered by
+``specialist_agent`` and requiring a parent agent run context).
+Calendar/reminder create-proposal tools are capabilities: they never write
+directly and only register an existing proposal HITL run, so the human
+approval happens via that HITL. They default to ``auto`` so an auto-only
+plan skips plan confirmation and the Runtime Worker registers the HITL via
+the existing tool route. Everything else defaults to ``plan_required``
+except the read/search tools and proposal tools in ``AUTO_POLICY_TOOL_IDS``.
 """
 
 from __future__ import annotations
@@ -38,8 +41,6 @@ EXCLUDED_TOOL_IDS: frozenset[str] = frozenset(
     {
         "ask_user",
         "agent_delegate",
-        "calendar_create_proposal",
-        "reminder_create_proposal",
     }
 )
 
@@ -60,6 +61,11 @@ AUTO_POLICY_TOOL_IDS: frozenset[str] = frozenset(
         "people_get",
         "project_search",
         "project_get",
+        # Proposal tools only register an existing HITL approval run and never
+        # write directly, so auto execution still requires human approval via
+        # that HITL. Defaulting to auto avoids a redundant plan confirmation.
+        "calendar_create_proposal",
+        "reminder_create_proposal",
     }
 )
 

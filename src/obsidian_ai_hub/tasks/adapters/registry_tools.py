@@ -2,7 +2,10 @@
 
 Only capability keys from the registry-derived catalog
 (``tasks/capabilities.py``) resolve; anything outside it (``ask_user``,
-``agent_delegate``, write proposals) is refused. Steps run with their saved
+``agent_delegate``) is refused. Calendar/reminder create-proposal
+capabilities resolve here and execute via the existing Registry tool route
+(``tool.invoke``), which registers the existing proposal HITL run; the
+adapter never bypasses that tool boundary. Steps run with their saved
 inputs; inputs are never rebuilt here. Every call is validated against the
 single-source Pydantic model (``tasks/capability_schemas.py``) immediately
 before ``tool.invoke``.

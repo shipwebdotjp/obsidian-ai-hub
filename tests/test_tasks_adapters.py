@@ -97,8 +97,6 @@ def test_registry_tool_rejects_excluded_tools():
     for excluded in (
         "ask_user",
         "agent_delegate",
-        "calendar_create_proposal",
-        "reminder_create_proposal",
     ):
         task, plan = _task_with_plan(excluded, {}, {})
         with pytest.raises(ValueError, match="not a .* capability|not registered"):
