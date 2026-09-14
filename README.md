@@ -119,6 +119,12 @@ a Coordinator LLM that only handles progress, questions, and the final summary,
 and an external CLI Worker (Codex/OpenCode) that owns repository investigation,
 implementation, tests, and technical decisions.
 
+The Coordinator delegates by emitting a `<cli_request>` block in its response
+body; the app extracts it, runs the CLI Worker, and feeds the Worker output back
+as the next turn's observation, so the Coordinator can iterate. The Coordinator
+must not launch the CLI through tools such as `run_shell` or `agent_delegate`,
+and the backend name is not disclosed to it.
+
 Configure it in `config/config.yml` under `coding`. Environment variables override
 the YAML values if set.
 

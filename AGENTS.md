@@ -49,6 +49,12 @@
 - Do not alter production data found during an investigation without explicit
   authorization.
 
+## Tests
+
+- Do not add tests that assert prompt, message, or UI wording. Wording changes
+  frequently and such tests create false failures; test behavior and contracts
+  instead.
+
 ## Frontend changes
 
 - Do not add or update browser E2E tests in `tests/e2e/`, or run

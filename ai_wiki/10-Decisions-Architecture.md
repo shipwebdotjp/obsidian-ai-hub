@@ -590,6 +590,8 @@ Coordinator が対象ファイルやコマンドまで事前確定すると、Wo
 - **二層を残す理由**: 実行権限・会話永続化・HITL・SSE 配信はアプリ側に残し、リポジトリ内の技術判断は外部 CLI に委ねる。単層化すると権限境界と監査証跡が失われるため二層を維持する。
 - **質問権限**: ask_user と HITL 永続化は Coordinator のみが持つ。Worker は直接 waiting_user を作らず、調査後にユーザー判断が必要な場合だけ通常報告に非空の `<needs_user_input>…</needs_user_input>` を一つ付けて停止する。Worker が質問文だけを返した場合は自動で待機化せず、正しい停止契約での再報告を依頼する。
 - **制御タグ契約**: 継続は非空 `<cli_request>` 一つのみ、完了は非空 `<final_report>` 一つのみ。混在・重複・空・タグなしはプロトコル違反とし、一度だけ自己修正を要求、再度不正なら run を failed にする。ユーザー質問は ask_user ツール呼び出しのみ。`<final_report>` 本文を orchestrator メッセージ兼最終報告として保存・表示する。既存 SSE event 名と DB schema は維持する。
+- **委譲の実行経路**: Worker 呼び出しは Coordinator が応答本文に出力する `<cli_request>` タグのみで成立する。アプリがタグを抽出して CLI Worker を実行し、その出力を次ターンの観測情報として Coordinator に返すことで、追加指示（ループ）と完了判断を毎ターン繰り返せる。Coordinator が `run_shell` や `agent_delegate` 等のツール経由で外部 CLI を起動したりリポジトリを操作したりするのは契約違反とし、プロンプトで禁止する。ツール経由の実行はアプリ側の実行権限・外部セッション追跡・HITL を迂回し、次ターンの観測も返らないためである。
+- **バックエンド非開示**: 使用 CLI バックエンド（codex/opencode）の名前は Coordinator の環境情報・プロンプトに開示しない。アプリが管理する実行詳細であり、開示すると Coordinator が CLI を直接起動する誘因になるため。
 - **表示と履歴**: 生の制御タグは画面に露出させず、Worker ブロックは `【Worker がユーザー判断を要請】` に正規化する。Coordinator の次ターンには同じ意味を観測情報として明示して渡す。過去の cli_request は AIMessage に再注入し、Worker 出力は観測情報として扱う。
 - **単発 `--coding`**: `user_question` を収集し、`waiting_user` は終了コード 0・`ok: true`・`run.status: "waiting_user"` で返す。JSON には `waiting_for_user`（HITL run ID と質問内容）を追加し、テキスト出力では Web UI での回答待ちを明示する。完了時の主表示は Worker 報告を根拠にした Coordinator の最終要約とする。
 

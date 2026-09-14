@@ -184,7 +184,10 @@ def test_orchestrator_build_messages_injects_skills_block_directly():
     assert isinstance(msgs[0], SystemMessage)
     assert block in msgs[0].content
     assert "/repo/path" in msgs[0].content
-    assert "opencode" in msgs[0].content
+    # The app-managed CLI backend name is intentionally not disclosed to the
+    # Coordinator (it would invite direct CLI invocation).
+    assert "opencode" not in msgs[0].content
 
     msgs_no = orch._build_messages([], "/repo/path", "codex", skills_block=None)
     assert "Available Agent Skills" not in msgs_no[0].content
+    assert "codex" not in msgs_no[0].content

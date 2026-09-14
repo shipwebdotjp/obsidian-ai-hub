@@ -13,7 +13,9 @@
   権限・出力を所有しない。
 - **Coding Workspace** — Coordinator は進行・質問・最終要約だけを担い、Worker が技術的な
   実行主体（リポジトリ調査・実装・テスト・技術判断）となる二層構成。Coordinator は実装方針・
-  対象ファイル・コマンドを通常時に決めない。
+  対象ファイル・コマンドを通常時に決めない。Worker 呼び出しは Coordinator が応答本文に
+  出力する `<cli_request>` タグのみで行い、ツール経由で外部CLIを起動しない。使用バックエンド
+  名は Coordinator に開示しない。
 - **Vault / Calendar / Reminders** — Taskが読取対象として参照し得る外部境界。Calendar / Remindersへの追加は既存提案HITL登録ツール経由のみ行い、人間の承認はHITL側で行う。Vaultへの直接書込みは `vault_write_file` Capability経由のみ行い、既定 `plan_required` のPlan一括承認を要する。
 
 ## ユビキタス言語
