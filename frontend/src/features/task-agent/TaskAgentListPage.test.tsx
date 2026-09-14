@@ -13,6 +13,7 @@ vi.mock("../../api/client", () => ({
   listTaskAgentTasks: vi.fn(),
   getTaskAgentTask: vi.fn(),
   cancelTaskAgentTask: vi.fn(),
+  createTaskAgentTask: vi.fn(),
   ApiError: class ApiError extends Error {},
 }));
 

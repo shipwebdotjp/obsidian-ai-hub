@@ -163,6 +163,7 @@ from obsidian_ai_hub.web.services.summary import (
 from obsidian_ai_hub.web.services.task_agent import (
     approve_task_agent_task,
     cancel_task_agent_task,
+    create_task_agent_task,
     get_task_agent_task_detail,
     list_task_agent_capabilities,
     list_task_agent_tasks,

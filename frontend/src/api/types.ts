@@ -929,6 +929,10 @@ export interface TaskAgentListResponse {
   total: number;
 }
 
+export interface TaskAgentCreateRequest {
+  prompt_text: string;
+}
+
 export interface TaskAgentCapability {
   capability_key: string;
   adapter_kind: string;

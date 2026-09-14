@@ -18,6 +18,11 @@ def list_task_agent_tasks(
     return items, total
 
 
+def create_task_agent_task(prompt_text: str) -> dict[str, Any]:
+    """Create a task in ``queued`` status via the Task intake receipt path."""
+    return task_store.create_task(prompt_text)
+
+
 def get_task_agent_task_detail(task_id: str) -> Optional[dict[str, Any]]:
     task = task_store.get_task(task_id)
     if task is None:

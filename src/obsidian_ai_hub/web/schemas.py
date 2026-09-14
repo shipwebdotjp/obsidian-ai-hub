@@ -1760,6 +1760,19 @@ class TaskAgentListResponse(BaseModel):
     total: int
 
 
+class CreateTaskRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    prompt_text: str
+
+    @field_validator("prompt_text")
+    @classmethod
+    def _prompt_text_must_not_be_blank(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("prompt_text must not be blank")
+        return v
+
+
 class RejectTaskRequest(BaseModel):
     model_config = {"extra": "forbid"}
 

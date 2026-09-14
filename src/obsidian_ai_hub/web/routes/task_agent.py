@@ -21,6 +21,18 @@ def list_tasks(
     return {"items": items, "total": total}
 
 
+@router.post(
+    "/tasks", response_model=schemas.TaskAgentTask, status_code=201
+)
+def create_task(
+    body: schemas.CreateTaskRequest, _=Depends(require_bearer_token)
+):
+    try:
+        return service.create_task_agent_task(body.prompt_text)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @router.get("/tasks/{task_id}", response_model=schemas.TaskAgentTaskDetail)
 def get_task(task_id: str, _=Depends(require_bearer_token)):
     detail = service.get_task_agent_task_detail(task_id)

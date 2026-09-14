@@ -158,6 +158,42 @@ def test_capabilities_api(test_memory_db_path, client):
     assert response.status_code == 422
 
 
+def test_create_task(test_memory_db_path, client):
+    response = client.post(
+        "/api/v1/task-agent/tasks", json={"prompt_text": "Summarize this week"}
+    )
+    assert response.status_code == 201
+    data = response.json()
+    assert data["task_id"].startswith("task_")
+    assert data["status"] == "queued"
+    assert data["prompt_text"] == "Summarize this week"
+
+    persisted = store.get_task(data["task_id"])
+    assert persisted is not None
+    assert persisted["status"] == "queued"
+
+
+def test_create_task_validation(test_memory_db_path, client):
+    assert (
+        client.post("/api/v1/task-agent/tasks", json={"prompt_text": "  "}).status_code
+        == 422
+    )
+    assert client.post("/api/v1/task-agent/tasks", json={}).status_code == 422
+    assert (
+        client.post(
+            "/api/v1/task-agent/tasks",
+            json={"prompt_text": "job", "unexpected": "field"},
+        ).status_code
+        == 422
+    )
+
+
 def test_auth_required(test_memory_db_path, anon_client):
     assert anon_client.get("/api/v1/task-agent/tasks").status_code == 401
     assert anon_client.get("/api/v1/task-agent/capabilities").status_code == 401
+    assert (
+        anon_client.post(
+            "/api/v1/task-agent/tasks", json={"prompt_text": "job"}
+        ).status_code
+        == 401
+    )

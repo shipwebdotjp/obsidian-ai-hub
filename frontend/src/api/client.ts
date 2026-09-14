@@ -792,10 +792,20 @@ export async function subscribeAgentRunEvents(
 import type {
   TaskAgentCapability,
   TaskAgentCapabilityUpdate,
+  TaskAgentCreateRequest,
   TaskAgentListResponse,
   TaskAgentTask,
   TaskAgentTaskDetail,
 } from "./types";
+
+export function createTaskAgentTask(
+  body: TaskAgentCreateRequest,
+): Promise<TaskAgentTask> {
+  return request<TaskAgentTask>(`/api/v1/task-agent/tasks`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
 
 export function listTaskAgentTasks(params: {
   status?: string;

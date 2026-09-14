@@ -11,6 +11,7 @@ import {
   taskStatusBadgeClass,
   taskStatusLabel,
 } from "./taskAgentLabels";
+import TaskAgentCreateForm from "./TaskAgentCreateForm";
 
 const TERMINAL_SET = new Set<string>(TERMINAL_STATUSES);
 const STATUS_FILTERS = [
@@ -45,6 +46,7 @@ export default function TaskAgentListPage({
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -81,16 +83,37 @@ export default function TaskAgentListPage({
       <header className="border-b border-slate-200 bg-white px-4 py-3">
         <div className="flex items-center justify-between gap-2">
           <h1 className="text-lg font-semibold">Task Agent</h1>
-          <Link
-            to={ROUTES.TASK_AGENT_CAPABILITIES}
-            aria-label="Task Capability設定を開く"
-            title="Task Capability設定を開く"
-            data-testid="task-capability-settings-link"
-            className="inline-flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
-          >
-            <Settings className="h-4 w-4" aria-hidden="true" />
-          </Link>
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setCreating((v) => !v)}
+              className="cursor-pointer rounded bg-blue-600 px-3 py-1 text-sm text-white hover:bg-blue-700"
+            >
+              新規作成
+            </button>
+            <Link
+              to={ROUTES.TASK_AGENT_CAPABILITIES}
+              aria-label="Task Capability設定を開く"
+              title="Task Capability設定を開く"
+              data-testid="task-capability-settings-link"
+              className="inline-flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+            >
+              <Settings className="h-4 w-4" aria-hidden="true" />
+            </Link>
+          </div>
         </div>
+        {creating && (
+          <div className="mt-2">
+            <TaskAgentCreateForm
+              onCreated={(task) => {
+                setCreating(false);
+                void reload();
+                navigate(taskAgentDetailPath(task.task_id));
+              }}
+              onCancel={() => setCreating(false)}
+            />
+          </div>
+        )}
         <div className="mt-2 flex items-center gap-2">
           <select
             aria-label="ステータスフィルター"

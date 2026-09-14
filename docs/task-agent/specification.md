@@ -266,6 +266,8 @@ Task、Plan、Eventは終端化から30日後にまとめて削除する。非�
 
 ## 8. API契約
 
+- `POST /api/v1/task-agent/tasks` — WebUIからの新規Task投入。`prompt_text`（非空白必須）を
+  受け取り、作成されたTaskを `201` で返す。CLIと同じ受付サービス・保存則に従う。
 - `GET /api/v1/task-agent/tasks` — Task一覧。
 - `GET /api/v1/task-agent/tasks/{task_id}` — Task、Plan履歴、Event、関連子run/HITL参照。
 - `POST /api/v1/task-agent/tasks/{task_id}/approve` — `waiting_approval` または
@@ -291,3 +293,5 @@ Task、Plan、Eventは終端化から30日後にまとめて削除する。非�
 8. Coding/Agent Stepの子runと結果がTask Eventから辿れる。
 9. Task Capabilityにないtool(`ask_user`、`agent_delegate`)をTaskが選べない。提案HITL登録は `calendar_create_proposal` / `reminder_create_proposal` の既存ツール経由でのみ行う。
 10. Task履歴が30日で削除され、既知秘密値と非公開思考過程を保存しない。
+11. WebUI上で依頼内容を入力して新規Taskを投入でき、成功時と入力・通信失敗時の
+    フィードバックが提供される。
