@@ -1,8 +1,8 @@
 """Plan step execution seam.
 
 The worker runs saved plan steps through an injected ``StepExecutor``.
-Concrete Capability adapters connect in Phase 3; until then the default
-executor refuses every step and the task fails without masking the error.
+Each step's writes are independent atomic operations: adapters may poll
+child runs for minutes, so no long-lived transaction spans the step loop.
 """
 
 from __future__ import annotations
@@ -48,6 +48,10 @@ class DeviationReported(Exception):
         self.reason = reason
 
 
+class TaskCancelled(Exception):
+    """Raised by an adapter when the task entered ``cancelling`` mid-step."""
+
+
 class StepExecutor(Protocol):
     """Executes one saved plan step."""
 
@@ -85,83 +89,70 @@ def execute_plan(
 
     A ``DeviationReported`` saves the revised plan as the next version and
     returns a deviation outcome; the caller moves the task to
-    ``waiting_reapproval``. Any other error returns a failed outcome.
+    ``waiting_reapproval``. ``TaskCancelled`` propagates to the caller.
+    Any other error returns a failed outcome.
     """
     active_executor: StepExecutor = executor or UnconnectedExecutor()
-    with task_store.auto_connection(conn) as (active_conn, _):
-        task = task_store.get_task(task_id, conn=active_conn)
-        if task is None:
-            raise FileNotFoundError(f"Task '{task_id}' not found.")
+    task = task_store.get_task(task_id, conn=conn)
+    if task is None:
+        raise FileNotFoundError(f"Task '{task_id}' not found.")
     inner = plan.get("plan")
     steps = inner.get("steps") if isinstance(inner, dict) else None
     if not isinstance(steps, list) or not steps:
         return ExecutorOutcome(kind="failed", error_summary="current plan has no steps")
 
-    with task_store.auto_connection(conn) as (active_conn, is_generated):
-
-        def _do() -> ExecutorOutcome:
-            summaries: list[str] = []
+    summaries: list[str] = []
+    try:
+        for step_index, step in enumerate(steps):
             try:
-                for step_index, step in enumerate(steps):
-                    try:
-                        result = active_executor.execute_step(
-                            task, plan, step_index, step
-                        )
-                    except DeviationReported:
-                        raise
-                    except Exception as exc:
-                        logger.exception("Plan execution failed for task %s", task_id)
-                        task_store.clear_active_child(task_id, conn=active_conn)
-                        return ExecutorOutcome(kind="failed", error_summary=str(exc))
-                    summaries.append(result.summary)
-                    if result.child_kind and result.child_run_id:
-                        task_store.set_active_child(
-                            task_id,
-                            result.child_kind,
-                            result.child_run_id,
-                            conn=active_conn,
-                        )
-                    task_store.append_task_event(
-                        task_id,
-                        "capability_completed",
-                        {
-                            "step_index": step_index,
-                            "capability_key": result.capability_key,
-                            "summary": result.summary,
-                            "child_kind": result.child_kind,
-                            "child_run_id": result.child_run_id,
-                        },
-                        conn=active_conn,
-                    )
-            except DeviationReported as dev:
-                revised = task_store.create_plan(
+                result = active_executor.execute_step(task, plan, step_index, step)
+            except (DeviationReported, TaskCancelled):
+                raise
+            except Exception as exc:
+                logger.exception("Plan execution failed for task %s", task_id)
+                task_store.clear_active_child(task_id, conn=conn)
+                return ExecutorOutcome(kind="failed", error_summary=str(exc))
+            summaries.append(result.summary)
+            if result.child_kind and result.child_run_id:
+                task_store.set_active_child(
                     task_id,
-                    dev.revised_plan,
-                    plan.get("approval_policy_snapshot", {}),
-                    conn=active_conn,
+                    result.child_kind,
+                    result.child_run_id,
+                    conn=conn,
                 )
-                task_store.append_task_event(
-                    task_id,
-                    "note",
-                    {
-                        "text": f"deviation reported: {dev.reason}",
-                        "revised_plan_id": revised["plan_id"],
-                    },
-                    conn=active_conn,
-                )
-                task_store.clear_active_child(task_id, conn=active_conn)
-                return ExecutorOutcome(
-                    kind="deviation",
-                    revised_plan=dev.revised_plan,
-                    deviation_reason=dev.reason,
-                )
-            task_store.clear_active_child(task_id, conn=active_conn)
-            return ExecutorOutcome(
-                kind="completed", result_summary="\n".join(summaries)
+            task_store.append_task_event(
+                task_id,
+                "capability_completed",
+                {
+                    "step_index": step_index,
+                    "capability_key": result.capability_key,
+                    "summary": result.summary,
+                    "child_kind": result.child_kind,
+                    "child_run_id": result.child_run_id,
+                },
+                conn=conn,
             )
-
-        if is_generated:
-            with active_conn:
-                return _do()
-        else:
-            return _do()
+    except DeviationReported as dev:
+        revised = task_store.create_plan(
+            task_id,
+            dev.revised_plan,
+            plan.get("approval_policy_snapshot", {}),
+            conn=conn,
+        )
+        task_store.append_task_event(
+            task_id,
+            "note",
+            {
+                "text": f"deviation reported: {dev.reason}",
+                "revised_plan_id": revised["plan_id"],
+            },
+            conn=conn,
+        )
+        task_store.clear_active_child(task_id, conn=conn)
+        return ExecutorOutcome(
+            kind="deviation",
+            revised_plan=dev.revised_plan,
+            deviation_reason=dev.reason,
+        )
+    task_store.clear_active_child(task_id, conn=conn)
+    return ExecutorOutcome(kind="completed", result_summary="\n".join(summaries))

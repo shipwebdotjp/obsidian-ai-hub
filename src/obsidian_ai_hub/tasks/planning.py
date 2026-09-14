@@ -35,13 +35,15 @@ Planの場合:
 対象を一意に解決できない場合:
 {"type": "question", "question_text": "...", "choices": ["..."]}
 
-規則:
-- stepsのcapability_keyは提示された有効Capabilityだけを使う。
-- specialist_agentのtarget.agent_idは提示されたAgent IDだけを使う。
-- coding_cliのtarget.project_idは提示されたProject IDだけを使う。
-- 提示にないCapability/Agent/Projectが必要ならPlanを作らずquestionを返す。
-- 実行時にCapabilityや対象を作り直さない前提で、入力と対象をPlanに固定する。
-"""
+ 規則:
+ - stepsのcapability_keyは提示された有効Capabilityだけを使う。
+ - specialist_agentのtarget.agent_idは提示されたAgent IDだけを使う。
+ - coding_cliのtarget.project_idは提示されたProject IDだけを使う。
+   target.backendはcodexまたはopencode(省略時は既定backend)。
+ - 提示にないCapability/Agent/Projectが必要ならPlanを作らずquestionを返す。
+ - 実行時にCapabilityや対象を作り直さない前提で、入力と対象をPlanに固定する。
+ - 子runはPlan外の作業を検出できないため、Planは必要十分なStepだけを含む。
+ """
 
 
 def default_provider_model() -> tuple[str, str]:
@@ -209,6 +211,9 @@ def validate_plan_targets(
                 raise ValueError(
                     f"Plan step {index} targets invalid project '{project_id}'."
                 )
+            backend = target.get("backend")
+            if backend is not None and backend not in ("codex", "opencode"):
+                raise ValueError(f"Plan step {index} uses unknown backend '{backend}'.")
     return snapshot
 
 

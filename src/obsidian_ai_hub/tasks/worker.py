@@ -7,7 +7,12 @@ import logging
 from typing import Any, Optional
 
 from obsidian_ai_hub.tasks import store as task_store
-from obsidian_ai_hub.tasks.execution import StepExecutor, execute_plan
+from obsidian_ai_hub.tasks.adapters import get_default_executor
+from obsidian_ai_hub.tasks.execution import (
+    StepExecutor,
+    TaskCancelled,
+    execute_plan,
+)
 from obsidian_ai_hub.tasks.planning import plan_task
 
 logger = logging.getLogger(__name__)
@@ -62,7 +67,16 @@ def _process_one(instance_id: str, executor: Optional[StepExecutor] = None) -> b
 def _run_execution(
     task_id: str, plan: dict[str, Any], executor: Optional[StepExecutor]
 ) -> None:
-    outcome = execute_plan(task_id, plan, executor)
+    if not _ensure_capabilities_enabled(task_id, plan):
+        return
+    active_executor: StepExecutor = executor or get_default_executor()
+    try:
+        outcome = execute_plan(task_id, plan, active_executor)
+    except TaskCancelled:
+        task_store.clear_active_child(task_id)
+        task_store.transition_task_status(task_id, "cancelling")
+        task_store.transition_task_status(task_id, "cancelled")
+        return
     if outcome.kind == "completed":
         task_store.transition_task_status(
             task_id, "completed", result_summary=outcome.result_summary
@@ -73,6 +87,39 @@ def _run_execution(
         task_store.transition_task_status(
             task_id, "failed", error_summary=outcome.error_summary
         )
+
+
+def _ensure_capabilities_enabled(task_id: str, plan: dict[str, Any]) -> bool:
+    """Stop before execution start when a planned capability is disabled.
+
+    Creates a revised pending plan so the task waits in ``waiting_reapproval``
+    instead of running with a capability the operator turned off.
+    """
+    capabilities = {c["capability_key"]: c for c in task_store.list_capabilities()}
+    steps = plan.get("plan", {}).get("steps", [])
+    disabled = sorted(
+        {
+            str(step.get("capability_key"))
+            for step in steps
+            if not capabilities.get(str(step.get("capability_key")), {}).get(
+                "enabled", False
+            )
+        }
+    )
+    if not disabled:
+        return True
+    task_store.create_plan(
+        task_id,
+        plan.get("plan", {}),
+        plan.get("approval_policy_snapshot", {}),
+    )
+    task_store.append_task_event(
+        task_id,
+        "note",
+        {"text": f"disabled capabilities block execution: {', '.join(disabled)}"},
+    )
+    task_store.transition_task_status(task_id, "waiting_reapproval")
+    return False
 
 
 async def task_worker_loop(

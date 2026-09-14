@@ -27,12 +27,12 @@
 
 ## Capability Adapter
 
-- [ ] Registry読取・検索系の固定allowlist Adapterを実装する
-- [ ] `memory_propose` Adapterを実装する
-- [ ] 実行時の最新設定を使う `specialist_agent` Adapterを実装する
-- [ ] Task専用の新規sessionを作る `coding_cli` Adapterを実装する
-- [ ] 再承認自己申告を改訂Planと `waiting_reapproval` へ接続する
-- [ ] shell、Skills、plugin、外部書込み提案が選択不能なことを保証する
+- [x] Registry読取・検索系の固定allowlist Adapterを実装する
+- [x] `memory_propose` Adapterを実装する
+- [x] 実行時の最新設定を使う `specialist_agent` Adapterを実装する
+- [x] Task専用の新規sessionを作る `coding_cli` Adapterを実装する
+- [x] 再承認自己申告を改訂Planと `waiting_reapproval` へ接続する
+- [x] shell、Skills、plugin、外部書込み提案が選択不能なことを保証する
 
 ## 入口とWebUI
 
@@ -46,5 +46,5 @@
 
 - [x] migration、状態遷移、Plan版、purge、redactionのテストを追加する
 - [x] auto/承認必須/disabled/HITL質問の結合テストを追加する
-- [ ] 子run、取消、recovery、再承認のテストを追加する
+- [x] 子run、取消、recovery、再承認のテストを追加する
 - [ ] CLI/API/フロントエンド単体テストを追加し、`uv run pytest tests/` を実行する

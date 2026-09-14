@@ -122,7 +122,7 @@ def test_process_one_planner_failure_marks_failed(monkeypatch):
 def test_process_one_unconnected_executor_fails(monkeypatch):
     _patch_llm(monkeypatch, _auto_plan_json())
     task = store.create_task("no adapters job")
-    assert task_worker._process_one("worker-1", None) is True
+    assert task_worker._process_one("worker-1", execution.UnconnectedExecutor()) is True
     updated = store.get_task(task["task_id"])
     assert updated is not None
     assert updated["status"] == "failed"
