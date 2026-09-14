@@ -28,8 +28,7 @@ Task Agent は、自由文の依頼を内部で実行計画へ変換し、既存
   計画・実行を行わない。
 - Capability のAdapter定義はコードで固定し、DBと設定UIでは有効/無効と承認ポリシーだけを
   管理する。任意shell、Skills、プラグインはMVPのTask Capabilityではない。
-- 外部書込み（カレンダー、リマインダー）とVault直接編集はMVP外。既存の提案HITLをTaskの
-  実行経路で呼ばないため、二重承認は生じない。
+- 外部への直接書込み（カレンダー、リマインダー）とVault直接編集は対象外。カレンダー/リマインダーへの追加は既存の提案HITL登録ツール（`calendar_create_proposal` / `reminder_create_proposal`）経由のみ行い、人間の承認はHITL側で行うため、auto時のPlan確認は不要。
 
 ## 運用上の要点
 
