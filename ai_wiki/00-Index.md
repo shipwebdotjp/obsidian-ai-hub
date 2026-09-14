@@ -14,6 +14,7 @@
 ## 用語集
 
 - [ドメイン用語集](30-Glossary.md)
+- [タスクオーケストレーション CONTEXT.md](../CONTEXT.md)（Bounded Context とユビキタス言語）
 
 ## 主要な決定
 
@@ -29,3 +30,10 @@
 - [AIプランナー提案のプレイグラウンド（スキーマ v20）](10-Decisions-Integrations.md#aiプランナー提案のプレイグラウンドスキーマ-v20)（2026-08-19）
 - [ヘルスケア: Apple Health export の分離DB・全種raw保存（スキーマ v1）](10-Decisions-Integrations.md#ヘルスケア-apple-health-export-の分離db全種raw保存スキーマ-v1)（2026-08-24）
 - [Safari の検索結果リストの隙間（inline-block ボタンのラインボックス問題）](10-Decisions-Web.md#safari-の検索結果リストの隙間inline-block-ボタンのラインボックス問題)（2026-08-26）
+- [Task Agent MVP 仕様](../docs/task-agent/specification.md)（2026-09-14）。文書群の入口は [docs/task-agent/README.md](../docs/task-agent/README.md)。判断記録は [docs/task-agent/adr/](../docs/task-agent/adr/) 配下:
+  - [SQLite をタスク状態の正本とする](../docs/task-agent/adr/sqlite-as-task-state-source-of-truth.md)
+  - [CLI 投入専用 + WebUI HITL + 常駐ワーカー](../docs/task-agent/adr/cli-intake-webui-hitl-resident-worker.md)
+  - [承認済み計画を実行境界にする](../docs/task-agent/adr/approved-plan-as-execution-boundary.md)
+  - [Capability Manifest + 委譲先固有 Adapter](../docs/task-agent/adr/capability-manifest-and-delegate-adapters.md)
+  - [Workspace 解決とコーディング CLI の信頼境界](../docs/task-agent/adr/workspace-resolution-and-coding-cli-trust-boundary.md)
+  - [自動ロールバックを行わず、構造化トレースと HITL で復旧する](../docs/task-agent/adr/no-automatic-rollback-recovery-via-trace-and-hitl.md)
