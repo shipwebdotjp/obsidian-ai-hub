@@ -29,9 +29,11 @@ def startup_recovery(instance_id: str) -> dict[str, Any]:
     """Interrupt前インスタンス所有の非終端run (lock取得成功時のみ呼ぶ)."""
     from obsidian_ai_hub.agents import store as agent_store
     from obsidian_ai_hub.coding import store as coding_store
+    from obsidian_ai_hub.tasks import store as task_store
 
     agent_count = 0
     coding_count = 0
+    task_count = 0
     try:
         agent_count = agent_store.mark_other_instances_interrupted(instance_id)
     except Exception:
@@ -40,6 +42,10 @@ def startup_recovery(instance_id: str) -> dict[str, Any]:
         coding_count = coding_store.mark_other_instances_interrupted(instance_id)
     except Exception:
         logger.exception("Coding startup recovery failed")
+    try:
+        task_count = task_store.mark_stale_tasks_interrupted(instance_id)
+    except Exception:
+        logger.exception("Task startup recovery failed")
     # 期限切れ terminal run の event log を掃除 (確定データは残す).
     try:
         agent_store.purge_old_run_events()
@@ -49,13 +55,22 @@ def startup_recovery(instance_id: str) -> dict[str, Any]:
         coding_store.purge_old_run_events()
     except Exception:
         logger.exception("Coding event purge failed")
-    return {"agent_interrupted": agent_count, "coding_interrupted": coding_count}
+    try:
+        task_store.purge_terminal_tasks()
+    except Exception:
+        logger.exception("Task purge failed")
+    return {
+        "agent_interrupted": agent_count,
+        "coding_interrupted": coding_count,
+        "task_interrupted": task_count,
+    }
 
 
 def shutdown_recovery(instance_id: str) -> dict[str, Any]:
     """自インスタンスの非終端runだけを interrupted 化し cancel 通知する."""
     from obsidian_ai_hub.agents import store as agent_store
     from obsidian_ai_hub.coding import store as coding_store
+    from obsidian_ai_hub.tasks import store as task_store
 
     # 明示 cancel 通知: coding の実行中 CLI へ cancel_event を立てる.
     try:
@@ -79,6 +94,7 @@ def shutdown_recovery(instance_id: str) -> dict[str, Any]:
 
     agent_count = 0
     coding_count = 0
+    task_count = 0
     try:
         agent_count = agent_store.mark_runs_interrupted(
             only_mine=True, owner_instance_id=instance_id
@@ -89,13 +105,22 @@ def shutdown_recovery(instance_id: str) -> dict[str, Any]:
         coding_count = coding_store.mark_own_runs_interrupted(instance_id)
     except Exception:
         logger.exception("Coding shutdown recovery failed")
-    return {"agent_interrupted": agent_count, "coding_interrupted": coding_count}
+    try:
+        task_count = task_store.mark_tasks_interrupted(instance_id)
+    except Exception:
+        logger.exception("Task shutdown recovery failed")
+    return {
+        "agent_interrupted": agent_count,
+        "coding_interrupted": coding_count,
+        "task_interrupted": task_count,
+    }
 
 
 async def _start_workers(instance_id: str) -> None:
     global _worker_tasks, _worker_stop
     from obsidian_ai_hub.runs.agent_worker import agent_worker_loop
     from obsidian_ai_hub.runs.coding_worker import coding_worker_loop
+    from obsidian_ai_hub.tasks.worker import task_worker_loop
 
     if _worker_tasks:
         return
@@ -103,6 +128,7 @@ async def _start_workers(instance_id: str) -> None:
     _worker_tasks = [
         asyncio.create_task(agent_worker_loop(instance_id, _worker_stop), name="agent-run-worker"),
         asyncio.create_task(coding_worker_loop(instance_id, _worker_stop), name="coding-run-worker"),
+        asyncio.create_task(task_worker_loop(instance_id, _worker_stop), name="task-worker"),
     ]
     logger.info("Run workers started for instance %s", instance_id)
 

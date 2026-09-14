@@ -16,9 +16,7 @@ from obsidian_ai_hub.tasks.redaction import redact_text
 logger = logging.getLogger(__name__)
 
 
-TASK_TERMINAL_STATUSES: frozenset[str] = frozenset(
-    {"completed", "failed", "cancelled"}
-)
+TASK_TERMINAL_STATUSES: frozenset[str] = frozenset({"completed", "failed", "cancelled"})
 
 TASK_ALLOWED_TRANSITIONS: dict[str, frozenset[str]] = {
     "queued": frozenset({"planning", "cancelled"}),
@@ -85,9 +83,7 @@ def _now_iso() -> str:
 def _validate_task_transition(from_status: str, to_status: str) -> None:
     allowed = TASK_ALLOWED_TRANSITIONS.get(from_status, frozenset())
     if to_status not in allowed:
-        raise ValueError(
-            f"Illegal task transition: '{from_status}' -> '{to_status}'."
-        )
+        raise ValueError(f"Illegal task transition: '{from_status}' -> '{to_status}'.")
 
 
 def _row_to_task(row: sqlite3.Row) -> dict[str, Any]:
@@ -334,7 +330,9 @@ def decide_plan(
         event_type = "plan_approved" if decision == "approve" else "plan_rejected"
         clean_reason = reason.strip() if reason else None
         event_payload_json = redact_text(
-            json.dumps({"plan_id": current_plan_id, "reason": reason}, ensure_ascii=False)
+            json.dumps(
+                {"plan_id": current_plan_id, "reason": reason}, ensure_ascii=False
+            )
         )
 
         def _do() -> None:
@@ -492,7 +490,9 @@ def transition_task_status(
             return task
         _validate_task_transition(from_status, to_status)
         now = _now_iso()
-        finished_at = now if to_status in TASK_TERMINAL_STATUSES else task["finished_at"]
+        finished_at = (
+            now if to_status in TASK_TERMINAL_STATUSES else task["finished_at"]
+        )
 
         def _do() -> None:
             cur = active_conn.execute(
@@ -549,6 +549,92 @@ def mark_tasks_interrupted(
                 return _do()
         else:
             return _do()
+
+
+def mark_stale_tasks_interrupted(
+    current_instance_id: str, conn: Optional[sqlite3.Connection] = None
+) -> int:
+    """Interrupt in-flight tasks not owned by ``current_instance_id``.
+
+    Used at startup: a single worker holds the lock, so tasks claimed by a
+    dead instance (or never claimed) never resume on their own.
+    """
+    now = _now_iso()
+    with auto_connection(conn) as (active_conn, is_generated):
+
+        def _do() -> int:
+            cur = active_conn.execute(
+                "UPDATE task_agent_tasks SET status = 'interrupted', updated_at = ? "
+                "WHERE status IN ('planning', 'running', 'cancelling') "
+                "AND (worker_instance_id IS NULL OR worker_instance_id != ?);",
+                (now, current_instance_id),
+            )
+            return cur.rowcount
+
+        if is_generated:
+            with active_conn:
+                return _do()
+        else:
+            return _do()
+
+
+def set_active_child(
+    task_id: str,
+    child_kind: str,
+    child_run_id: str,
+    conn: Optional[sqlite3.Connection] = None,
+) -> dict[str, Any]:
+    """Record the in-flight child run a task is waiting on."""
+    if child_kind not in ("agent", "coding"):
+        raise ValueError(f"Unknown child kind: '{child_kind}'.")
+    now = _now_iso()
+    with auto_connection(conn) as (active_conn, is_generated):
+        if get_task(task_id, conn=active_conn) is None:
+            raise FileNotFoundError(f"Task '{task_id}' not found.")
+
+        def _do() -> None:
+            active_conn.execute(
+                "UPDATE task_agent_tasks SET active_child_kind = ?, active_child_run_id = ?, "
+                "updated_at = ? WHERE task_id = ?;",
+                (child_kind, child_run_id, now, task_id),
+            )
+
+        if is_generated:
+            with active_conn:
+                _do()
+        else:
+            _do()
+        updated = get_task(task_id, conn=active_conn)
+    if updated is None:
+        raise FileNotFoundError(f"Task '{task_id}' not found after update.")
+    return updated
+
+
+def clear_active_child(
+    task_id: str, conn: Optional[sqlite3.Connection] = None
+) -> dict[str, Any]:
+    """Clear the in-flight child run reference of a task."""
+    now = _now_iso()
+    with auto_connection(conn) as (active_conn, is_generated):
+        if get_task(task_id, conn=active_conn) is None:
+            raise FileNotFoundError(f"Task '{task_id}' not found.")
+
+        def _do() -> None:
+            active_conn.execute(
+                "UPDATE task_agent_tasks SET active_child_kind = NULL, active_child_run_id = NULL, "
+                "updated_at = ? WHERE task_id = ?;",
+                (now, task_id),
+            )
+
+        if is_generated:
+            with active_conn:
+                _do()
+        else:
+            _do()
+        updated = get_task(task_id, conn=active_conn)
+    if updated is None:
+        raise FileNotFoundError(f"Task '{task_id}' not found after update.")
+    return updated
 
 
 def purge_terminal_tasks(
@@ -642,5 +728,7 @@ def update_capability(
             _do()
         updated = get_capability(capability_key, conn=active_conn)
     if updated is None:
-        raise FileNotFoundError(f"Capability '{capability_key}' not found after update.")
+        raise FileNotFoundError(
+            f"Capability '{capability_key}' not found after update."
+        )
     return updated

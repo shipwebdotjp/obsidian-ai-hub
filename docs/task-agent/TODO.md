@@ -19,10 +19,10 @@
 
 ## Plannerとworker
 
-- [ ] 構造化Plan/質問を返すPlannerを実装する
-- [ ] auto-only Planとplan-required Planの分岐を実装する
+- [x] 構造化Plan/質問を返すPlannerを実装する
+- [x] auto-only Planとplan-required Planの分岐を実装する
 - [ ] 既存HITLの質問とTask再キューhandlerを接続する
-- [ ] FastAPI lifespanに単一Task workerとrecoveryを追加する
+- [x] FastAPI lifespanに単一Task workerとrecoveryを追加する
 - [ ] 取消の子run伝播と `interrupted` 復旧を実装する
 
 ## Capability Adapter
@@ -45,6 +45,6 @@
 ## 検証
 
 - [x] migration、状態遷移、Plan版、purge、redactionのテストを追加する
-- [ ] auto/承認必須/disabled/HITL質問の結合テストを追加する
+- [x] auto/承認必須/disabled/HITL質問の結合テストを追加する
 - [ ] 子run、取消、recovery、再承認のテストを追加する
 - [ ] CLI/API/フロントエンド単体テストを追加し、`uv run pytest tests/` を実行する
