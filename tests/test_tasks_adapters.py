@@ -370,7 +370,9 @@ def test_agent_adapter_propagates_task_cancel(monkeypatch):
     assert cancelled == ["arun_x"]
 
 
-def _mock_coding_success(monkeypatch, worker_text="code done"):
+def _mock_coding_success(
+    monkeypatch, worker_text="code done", orch_text="orchestrated done"
+):
     monkeypatch.setattr(
         projects_service,
         "get_project_detail",
@@ -398,7 +400,10 @@ def _mock_coding_success(monkeypatch, worker_text="code done"):
     monkeypatch.setattr(
         coding_store,
         "list_messages",
-        lambda session_id: [{"role": "worker", "content": worker_text}],
+        lambda session_id: [
+            {"role": "worker", "content": worker_text},
+            {"role": "orchestrator", "content": orch_text},
+        ],
     )
 
 
@@ -406,9 +411,32 @@ def test_coding_adapter_success(monkeypatch):
     _mock_coding_success(monkeypatch)
     task, plan = _task_with_plan("coding_cli", {"project_id": 7})
     result = CodingAdapter().execute_step(task, plan, 0, plan["plan"]["steps"][0])
-    assert result.summary == "code done"
+    assert result.summary == "orchestrated done"
     assert result.child_kind == "coding"
     assert result.child_run_id == "crun_x"
+
+
+def test_coding_adapter_uses_orchestrator_final_text(monkeypatch):
+    _mock_coding_success(
+        monkeypatch,
+        worker_text="raw cli output",
+        orch_text="final report with SHA abc123",
+    )
+    task, plan = _task_with_plan("coding_cli", {"project_id": 7})
+    result = CodingAdapter().execute_step(task, plan, 0, plan["plan"]["steps"][0])
+    assert result.summary == "final report with SHA abc123"
+
+
+def test_coding_adapter_requires_orchestrator_text(monkeypatch):
+    _mock_coding_success(monkeypatch)
+    monkeypatch.setattr(
+        coding_store,
+        "list_messages",
+        lambda session_id: [{"role": "worker", "content": "only worker"}],
+    )
+    task, plan = _task_with_plan("coding_cli", {"project_id": 7})
+    with pytest.raises(ValueError, match="produced no messages"):
+        CodingAdapter().execute_step(task, plan, 0, plan["plan"]["steps"][0])
 
 
 def test_coding_adapter_validates_target(monkeypatch):

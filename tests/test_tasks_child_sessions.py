@@ -116,7 +116,10 @@ def _mock_coding_run(monkeypatch, worker_text="code done"):
     monkeypatch.setattr(
         coding_store,
         "list_messages",
-        lambda session_id: [{"role": "worker", "content": worker_text}],
+        lambda session_id: [
+            {"role": "worker", "content": worker_text},
+            {"role": "orchestrator", "content": "orchestrated done"},
+        ],
     )
 
 

@@ -76,3 +76,6 @@ MVPの範囲は [specification.md](specification.md) を正とする。
   鍵管理、ローテーション、復旧方法を含めて導入する。
 - **通知と外部入口** — Inbox・定期実行・LINE/Push通知は、Task受付サービスの契約を保ったまま
   追加できる。通知失敗がTask本体を失敗させない方針を先に定める。
+
+## UI
+- Plan履歴,実行EventをJSONではなく，ユーザーフレンドリーな表示に修正する

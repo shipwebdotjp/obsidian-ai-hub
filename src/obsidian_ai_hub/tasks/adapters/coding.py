@@ -235,11 +235,10 @@ class CodingAdapter:
 
     def _final_text(self, coding_store: Any, session_id: str, run_id: str) -> str:
         messages = coding_store.list_messages(session_id)
-        worker_texts = [
-            str(m.get("content") or "") for m in messages if m.get("role") == "worker"
-        ]
-        if worker_texts:
-            return worker_texts[-1]
-        if messages:
-            return str(messages[-1].get("content") or "")
+        for message in reversed(messages):
+            if str(message.get("role") or "") != "orchestrator":
+                continue
+            text = str(message.get("content") or "")
+            if text.strip():
+                return text
         raise ValueError(f"Child coding run '{run_id}' produced no messages.")
