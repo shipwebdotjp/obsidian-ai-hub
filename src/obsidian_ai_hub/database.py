@@ -9,6 +9,7 @@ from pathlib import Path
 
 from obsidian_ai_hub.utils import config
 from obsidian_ai_hub.utils.dates import get_partial_date_bounds
+from obsidian_ai_hub.tasks.capabilities import CAPABILITY_DEFINITIONS
 
 
 def _assert_test_db_is_not_production(db_path: Path) -> None:
@@ -687,6 +688,9 @@ def get_db_connection() -> sqlite3.Connection:
     if current_version <= 42:
         run_migration_v43(conn)
 
+    if current_version <= 43:
+        run_migration_v44(conn)
+
     return conn
 
 
@@ -1150,6 +1154,111 @@ def run_migration_v43(db: sqlite3.Connection) -> None:
     db.execute("PRAGMA user_version = 43")
     db.commit()
     db.execute("PRAGMA foreign_keys = ON;")
+
+
+def run_migration_v44(db: sqlite3.Connection) -> None:
+    """Run migration for version 44 (Task Agent MVP tables + capability seed)."""
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS task_agent_tasks (
+            task_id TEXT PRIMARY KEY,
+            prompt_text TEXT NOT NULL,
+            status TEXT NOT NULL CHECK (status IN (
+                'queued', 'planning', 'waiting_user', 'waiting_approval',
+                'ready', 'running', 'waiting_reapproval', 'cancelling',
+                'interrupted', 'completed', 'failed', 'cancelled'
+            )),
+            current_plan_id TEXT,
+            worker_instance_id TEXT,
+            active_child_kind TEXT,
+            active_child_run_id TEXT,
+            result_summary TEXT,
+            error_summary TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            started_at TEXT,
+            finished_at TEXT
+        );
+    """)
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS task_agent_plans (
+            plan_id TEXT PRIMARY KEY,
+            task_id TEXT NOT NULL REFERENCES task_agent_tasks(task_id) ON DELETE CASCADE,
+            version INTEGER NOT NULL,
+            plan_json TEXT NOT NULL,
+            approval_policy_snapshot TEXT NOT NULL,
+            status TEXT NOT NULL CHECK (status IN (
+                'pending', 'approved', 'rejected', 'superseded'
+            )),
+            rejection_reason TEXT,
+            created_at TEXT NOT NULL,
+            decided_at TEXT,
+            UNIQUE (task_id, version)
+        );
+    """)
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS task_agent_events (
+            event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id TEXT NOT NULL REFERENCES task_agent_tasks(task_id) ON DELETE CASCADE,
+            seq INTEGER NOT NULL,
+            event_type TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            UNIQUE (task_id, seq)
+        );
+    """)
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS task_agent_capabilities (
+            capability_key TEXT PRIMARY KEY,
+            adapter_kind TEXT NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            approval_policy TEXT NOT NULL CHECK (approval_policy IN ('auto', 'plan_required')),
+            updated_at TEXT NOT NULL
+        );
+    """)
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_task_agent_tasks_status "
+        "ON task_agent_tasks(status);"
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_task_agent_tasks_worker "
+        "ON task_agent_tasks(worker_instance_id);"
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_task_agent_tasks_finished "
+        "ON task_agent_tasks(finished_at);"
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_task_agent_plans_task "
+        "ON task_agent_plans(task_id, version);"
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_task_agent_events_task "
+        "ON task_agent_events(task_id, seq);"
+    )
+
+    # Idempotent seed of the code-defined catalog. The DB owns only `enabled`
+    # and `approval_policy`, so the seed never overwrites those two columns.
+    now = datetime.now(timezone.utc).isoformat()
+    for definition in CAPABILITY_DEFINITIONS:
+        db.execute(
+            """
+            INSERT INTO task_agent_capabilities (
+                capability_key, adapter_kind, enabled, approval_policy, updated_at
+            ) VALUES (?, ?, 1, ?, ?)
+            ON CONFLICT(capability_key) DO UPDATE SET
+                adapter_kind=excluded.adapter_kind,
+                updated_at=excluded.updated_at
+            """,
+            (
+                definition.key,
+                definition.adapter_kind,
+                definition.default_approval_policy,
+                now,
+            ),
+        )
+
+    db.execute("PRAGMA user_version = 44")
+    db.commit()
 
 
 def run_migration_v18(conn: sqlite3.Connection) -> None:

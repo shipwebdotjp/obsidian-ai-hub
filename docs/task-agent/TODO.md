@@ -5,17 +5,17 @@
 
 ## 文書と判断記録
 
-- [ ] `CONTEXT.md` とTask Agent文書群の状態・承認ポリシーを同期する
-- [ ] 承認境界、Capability Manifest、Workspace信頼境界のADRを更新する
+- [x] `CONTEXT.md` とTask Agent文書群の状態・承認ポリシーを同期する
+- [x] 承認境界、Capability Manifest、Workspace信頼境界のADRを更新する
 - [ ] Webサーバー同居workerと入力保存の運用をREADMEへ追記する
 
 ## 永続化とコア
 
-- [ ] v44 migrationで `task_agent_*` の4テーブルと索引を追加する
-- [ ] コード定義Capability catalogとDB seedを実装する
+- [x] v44 migrationで `task_agent_*` の4テーブルと索引を追加する
+- [x] コード定義Capability catalogとDB seedを実装する
 - [ ] Capability設定の `enabled` / `approval_policy` 更新を実装する
-- [ ] Task受付、Plan版管理、Event追記、状態機械、30日purgeを実装する
-- [ ] 既知秘密値のredactionをTask永続化に適用する
+- [x] Task受付、Plan版管理、Event追記、状態機械、30日purgeを実装する
+- [x] 既知秘密値のredactionをTask永続化に適用する
 
 ## Plannerとworker
 
@@ -44,7 +44,7 @@
 
 ## 検証
 
-- [ ] migration、状態遷移、Plan版、purge、redactionのテストを追加する
+- [x] migration、状態遷移、Plan版、purge、redactionのテストを追加する
 - [ ] auto/承認必須/disabled/HITL質問の結合テストを追加する
 - [ ] 子run、取消、recovery、再承認のテストを追加する
 - [ ] CLI/API/フロントエンド単体テストを追加し、`uv run pytest tests/` を実行する
