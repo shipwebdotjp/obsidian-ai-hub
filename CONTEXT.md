@@ -11,6 +11,9 @@
 - **HITL** — Taskの対象解決質問とカレンダー/リマインダー作成提案を保存・回答する汎用基盤。TaskのPlan承認自体は所有しない。
 - **AI Agents / Coding Workspace** — Taskが子runを作る既存の実行文脈。Taskはそれぞれの内部会話・
   権限・出力を所有しない。
+- **Coding Workspace** — Coordinator は進行・質問・最終要約だけを担い、Worker が技術的な
+  実行主体（リポジトリ調査・実装・テスト・技術判断）となる二層構成。Coordinator は実装方針・
+  対象ファイル・コマンドを通常時に決めない。
 - **Vault / Calendar / Reminders** — Taskが読取対象として参照し得る外部境界。Calendar / Remindersへの追加は既存提案HITL登録ツール経由のみ行い、人間の承認はHITL側で行う。Vaultへの直接書込みは `vault_write_file` Capability経由のみ行い、既定 `plan_required` のPlan一括承認を要する。
 
 ## ユビキタス言語

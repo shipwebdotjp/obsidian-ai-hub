@@ -97,7 +97,7 @@ def test_coding_start_idempotent_and_replay(api_token, tmp_path):
 
     # Execute with mocked orchestrator (no CLI) -> completed + done event.
     async def mock_generate_response(*args, **kwargs):
-        return "完了しました。"
+        return "<final_report>完了しました。</final_report>"
 
     with patch(
         "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response",
@@ -141,7 +141,7 @@ def test_coding_worker_holds_lock_and_cancel_registry_during_cli(api_token, tmp_
     async def mock_generate_response(*args, **kwargs):
         history = kwargs.get("history", [])
         if any(h.get("role") == "worker" for h in history):
-            return "完了しました。"
+            return "<final_report>完了しました。</final_report>"
         return "解析\n<cli_request>\necho hi\n</cli_request>"
 
     def checking_execute(self, repo_path, prompt, external_session_id=None, cancel_event=None):

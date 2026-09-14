@@ -15,7 +15,13 @@ from zoneinfo import ZoneInfo
 
 from obsidian_ai_hub.agents import runtime as agents_runtime
 from obsidian_ai_hub.coding import backend, store
-from obsidian_ai_hub.coding.orchestrator import CodingOrchestrator, parse_cli_request
+from obsidian_ai_hub.coding.orchestrator import (
+    PROTOCOL_CORRECTION_INSTRUCTION,
+    CodingOrchestrator,
+    parse_and_normalize_worker_output,
+    parse_coordinator_response,
+    parse_cli_request,
+)
 
 logger = logging.getLogger(__name__)
 JST = ZoneInfo("Asia/Tokyo")
@@ -161,6 +167,9 @@ async def run_coding_turn_stream(
         codex_title_source: Optional[str] = None
         # Track in-memory external session id for this turn (P0-1: carry recreated id to next iteration)
         current_external_id = session.get("external_session_id") if session else None
+        # Exclusive-control protocol: one self-correction per turn, then fail.
+        protocol_retried = False
+        ephemeral_correction: list = []
 
         while True:
             if cancel_event.is_set():
@@ -184,6 +193,8 @@ async def run_coding_turn_stream(
             for m in raw_history:
                 msg_dict = {"role": m["role"], "content": m["content"]}
                 history.append(msg_dict)
+            # Ephemeral protocol self-correction context (not persisted).
+            history.extend(ephemeral_correction)
 
             full_orch_response = ""
             try:
@@ -321,7 +332,48 @@ async def run_coding_turn_stream(
                 yield f"data: {json.dumps({'event': 'cancelled', 'message': 'キャンセルされました'}, ensure_ascii=False)}\n\n"
                 return
 
-            clean_orch_text, cli_prompt = parse_cli_request(full_orch_response)
+            parsed = parse_coordinator_response(full_orch_response)
+            if parsed.kind == "invalid":
+                if not protocol_retried:
+                    protocol_retried = True
+                    ephemeral_correction.append(
+                        {"role": "orchestrator", "content": full_orch_response}
+                    )
+                    ephemeral_correction.append(
+                        {
+                            "role": "user",
+                            "content": (
+                                f"プロトコル違反（{parsed.violation}: {parsed.detail}）。"
+                                f"{PROTOCOL_CORRECTION_INSTRUCTION}"
+                            ),
+                        }
+                    )
+                    continue
+                store.mark_running_tool_calls_interrupted_for_run(
+                    run_id,
+                    error=f"Coordinator protocol violation: {parsed.violation}",
+                )
+                store.update_run(
+                    run_id,
+                    status="failed",
+                    error_message=(
+                        f"Coordinator protocol violation: {parsed.violation} "
+                        f"({parsed.detail})"
+                    ),
+                    finished_at=datetime.now(JST).isoformat(),
+                )
+                yield f"data: {json.dumps({'event': 'error', 'message': f'オーケストレーター応答が制御契約に違反しました（{parsed.violation}）。実行を中断しました。'}, ensure_ascii=False)}\n\n"
+                return
+            # A successful parse consumes the pending correction budget.
+            protocol_retried = False
+            ephemeral_correction = []
+
+            if parsed.kind == "continue":
+                clean_orch_text = parsed.clean_text
+                cli_prompt = parsed.cli_prompt
+            else:
+                clean_orch_text = parsed.final_report or ""
+                cli_prompt = None
 
             # Check maximum autonomous CLI limit ceiling
             if cli_count >= MAX_CLI_ITERATIONS:
@@ -424,10 +476,6 @@ async def run_coding_turn_stream(
                     return
 
                 worker_output = cli_result.output
-                if backend_name == "codex" and codex_title_source is None:
-                    # Use the first Codex response, matching AI Agents' initial-turn
-                    # title generation semantics rather than querying Codex for a title.
-                    codex_title_source = worker_output
                 if cli_result.session_recreated:
                     if backend_name == "codex":
                         notice_prefix = "前の Codex セッションが見つからなかったため、新しいセッションへ切り替えて続行しました。"
@@ -438,6 +486,16 @@ async def run_coding_turn_stream(
                         worker_output = f"{notice_prefix}\n\n{worker_output}"
                     else:
                         worker_output = notice_prefix
+
+                # Worker escalation contract: strip raw <needs_user_input> tags
+                # and surface them under the normalized display prefix.
+                worker_output, _worker_blocker = parse_and_normalize_worker_output(
+                    worker_output
+                )
+                if backend_name == "codex" and codex_title_source is None:
+                    # Use the first Codex response, matching AI Agents' initial-turn
+                    # title generation semantics rather than querying Codex for a title.
+                    codex_title_source = worker_output
 
                 # Save worker output message (P1-2: link to run via run_id)
                 worker_msg = store.add_message(

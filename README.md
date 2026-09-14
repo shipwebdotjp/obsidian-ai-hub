@@ -115,8 +115,9 @@ llm:
 ### Coding Workspace Configuration
 
 The coding workspace (`/coding` in the Web UI) uses a two-layer architecture:
-an LLM orchestrator that plans and an external coding CLI agent (Codex/OpenCode)
-that executes file edits and tests.
+a Coordinator LLM that only handles progress, questions, and the final summary,
+and an external CLI Worker (Codex/OpenCode) that owns repository investigation,
+implementation, tests, and technical decisions.
 
 Configure it in `config/config.yml` under `coding`. Environment variables override
 the YAML values if set.

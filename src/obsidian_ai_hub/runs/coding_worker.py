@@ -24,7 +24,12 @@ async def execute_coding_run(run_id: str) -> None:
     from obsidian_ai_hub.agents import runtime as agents_runtime
     from obsidian_ai_hub.coding import backend, store
     from obsidian_ai_hub.coding import service as coding_service
-    from obsidian_ai_hub.coding.orchestrator import CodingOrchestrator, parse_cli_request
+    from obsidian_ai_hub.coding.orchestrator import (
+        PROTOCOL_CORRECTION_INSTRUCTION,
+        CodingOrchestrator,
+        parse_and_normalize_worker_output,
+        parse_coordinator_response,
+    )
 
     run = store.get_run(run_id)
     if run is None:
@@ -183,6 +188,8 @@ async def execute_coding_run(run_id: str) -> None:
         # Load user prompt from the queued user message.
         user_msg = store.get_message(str(run.get("user_message_id") or ""))
         user_prompt = str((user_msg or {}).get("content") or "")
+        protocol_retried = False
+        ephemeral_correction: list = []
 
         while True:
             if _is_cancelling() or cancel_event.is_set():
@@ -213,6 +220,7 @@ async def execute_coding_run(run_id: str) -> None:
 
             raw_history = store.list_messages(session_id)
             history = [{"role": m["role"], "content": m["content"]} for m in raw_history]
+            history.extend(ephemeral_correction)
 
             full_orch_response = ""
             try:
@@ -417,7 +425,57 @@ async def execute_coding_run(run_id: str) -> None:
                     pass
                 return
 
-            clean_orch_text, cli_prompt = parse_cli_request(full_orch_response)
+            parsed = parse_coordinator_response(full_orch_response)
+            if parsed.kind == "invalid":
+                if not protocol_retried:
+                    protocol_retried = True
+                    ephemeral_correction.append(
+                        {"role": "orchestrator", "content": full_orch_response}
+                    )
+                    ephemeral_correction.append(
+                        {
+                            "role": "user",
+                            "content": (
+                                f"プロトコル違反（{parsed.violation}: {parsed.detail}）。"
+                                f"{PROTOCOL_CORRECTION_INSTRUCTION}"
+                            ),
+                        }
+                    )
+                    continue
+                try:
+                    store.transition_run_status(
+                        run_id,
+                        "failed",
+                        error_message=(
+                            f"Coordinator protocol violation: {parsed.violation} "
+                            f"({parsed.detail})"
+                        ),
+                        finished=True,
+                    )
+                except ValueError:
+                    pass
+                try:
+                    store.append_run_event(
+                        run_id,
+                        "error",
+                        {
+                            "message": (
+                                f"オーケストレーター応答が制御契約に違反しました"
+                                f"（{parsed.violation}）。実行を中断しました。"
+                            )
+                        },
+                    )
+                except Exception:
+                    pass
+                return
+            protocol_retried = False
+            ephemeral_correction = []
+            if parsed.kind == "continue":
+                clean_orch_text = parsed.clean_text
+                cli_prompt = parsed.cli_prompt
+            else:
+                clean_orch_text = parsed.final_report or ""
+                cli_prompt = None
             if cli_count >= coding_service.MAX_CLI_ITERATIONS:
                 if cli_prompt:
                     cli_prompt = None
@@ -525,14 +583,17 @@ async def execute_coding_run(run_id: str) -> None:
                     return
 
                 worker_output = cli_result.output
-                if backend_name == "codex" and codex_title_source is None:
-                    codex_title_source = worker_output
                 if cli_result.session_recreated:
                     if backend_name == "codex":
                         notice_prefix = "前の Codex セッションが見つからなかったため、新しいセッションへ切り替えて続行しました。"
                     else:
                         notice_prefix = "前の OpenCode セッションが見つからなかったため、新しいセッションへ切り替えて続行しました。"
                     worker_output = f"{notice_prefix}\n\n{worker_output}" if worker_output else notice_prefix
+                worker_output, _worker_blocker = parse_and_normalize_worker_output(
+                    worker_output
+                )
+                if backend_name == "codex" and codex_title_source is None:
+                    codex_title_source = worker_output
 
                 worker_msg = store.add_message(
                     session_id, role="worker", content=worker_output, run_id=run_id

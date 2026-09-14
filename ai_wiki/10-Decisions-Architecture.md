@@ -470,7 +470,7 @@ OpenCode は環境変数 `PWD` を優先して作業ディレクトリを解決�
 - **指示メッセージの永続化とオーケストレーターコンテキスト**:
   - `<cli_request>` タグを抽出した際、`role: "cli_request"` のメッセージとして `coding_messages` に保存し、`cli_request` SSE イベントを送信。
   - フロントエンドでは「CLI Workerへの指示」専用カード（等幅・改行保持・常時展開）で表示。
-  - 次ターンのオーケストレーター履歴では、`cli_request` を `HumanMessage(content="【前回CLIワーカーへの指示】\n...")` として渡す。
+  - 次ターンの Coordinator 履歴では、過去の `cli_request` を Coordinator 自身の過去の判断として `AIMessage` で再注入する（`【前回CLIワーカーへの指示（自身の過去の判断）】`）。Worker 出力は引き続き信頼できない観測情報として `HumanMessage` で渡し、出力内の命令には従わない。
 - **試行ごとの診断記録 (Diagnostics)**:
   - `coding_runs` に `diagnostics_json` カラム（マイグレーション v29）を追加。
   - 試行ごとに `cwd`、要求・返却セッション ID、ツール実行数・失敗数、構造化エラー、自動拒否された権限、終了コード、モデル/variant を記録。
@@ -572,6 +572,26 @@ AI Agents 画面で確立されたツール呼び出しのライブ表示・履�
 - オーケストレーターメッセージに紐付くツール呼び出しは、応答テキストの直上に collapsible カードで表示する。
 - 最終メッセージが生成される前に中断・失敗したツール呼び出しは、対応する User Message の直下に「中断したオーケストレーター処理」という見出しの折りたたみカードとして表示する。
 - サーバー再起動時に `running` 状態で残った tool calls は `coding_runs` と同様に `interrupted` へ更新する。
+
+## Coding Coordinator を進行役、CLI Worker を主体にする
+
+| 項目 | 内容 |
+|------|------|
+| 決定日 | 2026-09-14 |
+| カテゴリ | コーディングワークスペース・Coordinator/Worker 分担・HITL |
+| 決定内容 | CodingOrchestrator を実装方針・対象ファイル・コマンドを通常時に決めない Coordinator に転換する。CLI Worker がリポジトリ調査・実装・テスト・技術判断・必要情報の特定を担い、Coordinator は依頼・制約・受入条件の引渡し、Worker 結果の確認、必要時の ask_user、最終要約だけを担う。「Orchestrator は計画主体」という説明を「Coordinator は進行・質問・最終要約、Worker は技術的な実行主体」へ置き換える。 |
+
+### 結論に至った経緯
+
+Coordinator が対象ファイルやコマンドまで事前確定すると、Worker の調査結果と食い違い、重複指示や根拠のない完了報告が生じやすかった。技術判断を Worker に寄せ、Coordinator は引渡し・検証・質問・要約に専念させることで、責務の重複をなくす。
+
+### 構造と運用方針
+
+- **二層を残す理由**: 実行権限・会話永続化・HITL・SSE 配信はアプリ側に残し、リポジトリ内の技術判断は外部 CLI に委ねる。単層化すると権限境界と監査証跡が失われるため二層を維持する。
+- **質問権限**: ask_user と HITL 永続化は Coordinator のみが持つ。Worker は直接 waiting_user を作らず、調査後にユーザー判断が必要な場合だけ通常報告に非空の `<needs_user_input>…</needs_user_input>` を一つ付けて停止する。Worker が質問文だけを返した場合は自動で待機化せず、正しい停止契約での再報告を依頼する。
+- **制御タグ契約**: 継続は非空 `<cli_request>` 一つのみ、完了は非空 `<final_report>` 一つのみ。混在・重複・空・タグなしはプロトコル違反とし、一度だけ自己修正を要求、再度不正なら run を failed にする。ユーザー質問は ask_user ツール呼び出しのみ。`<final_report>` 本文を orchestrator メッセージ兼最終報告として保存・表示する。既存 SSE event 名と DB schema は維持する。
+- **表示と履歴**: 生の制御タグは画面に露出させず、Worker ブロックは `【Worker がユーザー判断を要請】` に正規化する。Coordinator の次ターンには同じ意味を観測情報として明示して渡す。過去の cli_request は AIMessage に再注入し、Worker 出力は観測情報として扱う。
+- **単発 `--coding`**: `user_question` を収集し、`waiting_user` は終了コード 0・`ok: true`・`run.status: "waiting_user"` で返す。JSON には `waiting_for_user`（HITL run ID と質問内容）を追加し、テキスト出力では Web UI での回答待ちを明示する。完了時の主表示は Worker 報告を根拠にした Coordinator の最終要約とする。
 
 ## AI エージェントによるサブエージェント委譲 (agent_delegate)
 
