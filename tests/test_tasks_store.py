@@ -4,7 +4,7 @@ import pytest
 
 from obsidian_ai_hub.database import get_db_connection, run_migration_v44
 from obsidian_ai_hub.tasks import store
-from obsidian_ai_hub.tasks.capabilities import CAPABILITY_DEFINITIONS
+from obsidian_ai_hub.tasks.capabilities import get_capability_definitions
 from obsidian_ai_hub.utils import config
 
 
@@ -28,7 +28,9 @@ def test_migration_v44_schema_and_seed():
         }
 
         capabilities = store.list_capabilities(conn=conn)
-        assert len(capabilities) == len(CAPABILITY_DEFINITIONS)
+        assert {c["capability_key"] for c in capabilities} == {
+            d.key for d in get_capability_definitions()
+        }
         by_key = {c["capability_key"]: c for c in capabilities}
         assert by_key["web_search"]["approval_policy"] == "auto"
         assert by_key["web_search"]["enabled"] is True
@@ -47,7 +49,7 @@ def test_migration_v44_seed_preserves_db_owned_fields():
         )
         run_migration_v44(conn)
         capabilities = store.list_capabilities(conn=conn)
-        assert len(capabilities) == len(CAPABILITY_DEFINITIONS)
+        assert len(capabilities) == len(get_capability_definitions())
         coding_cli = store.get_capability("coding_cli", conn=conn)
         assert coding_cli is not None
         assert coding_cli["enabled"] is False
@@ -251,9 +253,7 @@ def test_redaction_before_persistence(monkeypatch):
     task = store.create_task("use sk-test-secret-123 here")
     assert task["prompt_text"] == "use [REDACTED] here"
 
-    plan = store.create_plan(
-        task["task_id"], {"purpose": "sk-test-secret-123"}, {}
-    )
+    plan = store.create_plan(task["task_id"], {"purpose": "sk-test-secret-123"}, {})
     assert "sk-test-secret-123" not in plan["plan"]["purpose"]
     assert plan["plan"] == {"purpose": "[REDACTED]"}
 
@@ -290,8 +290,8 @@ def test_capability_update_validation():
     with pytest.raises(ValueError, match="Unknown approval policy"):
         store.update_capability("coding_cli", approval_policy="bogus")
     with pytest.raises(FileNotFoundError):
-        store.update_capability("run_shell", enabled=False)
-    assert store.get_capability("run_shell") is None
+        store.update_capability("ask_user", enabled=False)
+    assert store.get_capability("ask_user") is None
 
 
 def test_mark_tasks_interrupted_only_owned_inflight():

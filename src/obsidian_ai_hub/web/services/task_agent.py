@@ -103,8 +103,24 @@ def replan_task_agent_task(task_id: str) -> dict[str, Any]:
     return task_store.transition_task_status(task_id, "queued")
 
 
+def _enrich_capability(row: dict[str, Any], catalog: dict[str, Any]) -> dict[str, Any]:
+    definition = catalog.get(row["capability_key"])
+    return {
+        **row,
+        "label": definition.label if definition else row["capability_key"],
+        "description": definition.description if definition else "",
+    }
+
+
+def _capability_catalog() -> dict[str, Any]:
+    from obsidian_ai_hub.tasks.capabilities import get_capability_definitions
+
+    return {d.key: d for d in get_capability_definitions()}
+
+
 def list_task_agent_capabilities() -> list[dict[str, Any]]:
-    return task_store.list_capabilities()
+    catalog = _capability_catalog()
+    return [_enrich_capability(row, catalog) for row in task_store.list_capabilities()]
 
 
 def update_task_agent_capability(
@@ -112,6 +128,7 @@ def update_task_agent_capability(
     enabled: Optional[bool] = None,
     approval_policy: Optional[str] = None,
 ) -> dict[str, Any]:
-    return task_store.update_capability(
+    row = task_store.update_capability(
         capability_key, enabled=enabled, approval_policy=approval_policy
     )
+    return _enrich_capability(row, _capability_catalog())

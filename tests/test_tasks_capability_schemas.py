@@ -4,12 +4,14 @@ import pytest
 
 from obsidian_ai_hub.agents.registry import MemoryProposeInput
 from obsidian_ai_hub.tasks import capability_schemas as schemas
-from obsidian_ai_hub.tasks.capabilities import CAPABILITY_DEFINITIONS
+from obsidian_ai_hub.tasks.capabilities import get_capability_definitions
 
 
 def test_all_capabilities_resolve_input_model():
     missing = [
-        d.key for d in CAPABILITY_DEFINITIONS if schemas.resolve_input_model(d.key) is None
+        d.key
+        for d in get_capability_definitions()
+        if schemas.resolve_input_model(d.key) is None
     ]
     assert missing == []
 
@@ -114,4 +116,4 @@ def test_delegate_target_models():
 
 def test_unresolvable_capability_rejected():
     with pytest.raises(ValueError, match="no resolvable input schema"):
-        schemas.validate_capability_inputs("run_shell", {"command": "ls"})
+        schemas.validate_capability_inputs("ask_user", {})

@@ -1,10 +1,11 @@
-"""Adapter for fixed-allowlist Registry tools and ``memory_propose``.
+"""Adapter for registry-derived Task capabilities and ``memory_propose``.
 
-Only capability keys defined in ``tasks/capabilities.py`` resolve; anything
-else (``run_shell``, Skills, plugins, write proposals) is refused. Steps run
-with their saved inputs; inputs are never rebuilt here. Every call is
-validated against the single-source Pydantic model
-(``tasks/capability_schemas.py``) immediately before ``tool.invoke``.
+Only capability keys from the registry-derived catalog
+(``tasks/capabilities.py``) resolve; anything outside it (``ask_user``,
+``agent_delegate``, write proposals) is refused. Steps run with their saved
+inputs; inputs are never rebuilt here. Every call is validated against the
+single-source Pydantic model (``tasks/capability_schemas.py``) immediately
+before ``tool.invoke``.
 """
 
 from __future__ import annotations
@@ -13,14 +14,12 @@ import json
 import logging
 from typing import Any
 
-from obsidian_ai_hub.tasks.capabilities import CAPABILITY_DEFINITIONS
+from obsidian_ai_hub.tasks.capabilities import get_capability_definitions
 from obsidian_ai_hub.tasks.execution import StepResult
 
 logger = logging.getLogger(__name__)
 
 SUMMARY_LIMIT = 800
-
-_DEFINITIONS_BY_KEY = {d.key: d for d in CAPABILITY_DEFINITIONS}
 
 READ_ONLY_KINDS = frozenset({"registry_tool"})
 CONTEXT_KINDS = frozenset({"memory"})
@@ -51,13 +50,13 @@ class RegistryToolExecutor:
         from obsidian_ai_hub.agents.registry import TOOL_DEFINITIONS
 
         capability_key = step.get("capability_key")
-        definition = _DEFINITIONS_BY_KEY.get(str(capability_key))
+        definition = {d.key: d for d in get_capability_definitions()}.get(
+            str(capability_key)
+        )
         if definition is None or definition.adapter_kind not in (
             READ_ONLY_KINDS | CONTEXT_KINDS
         ):
-            raise ValueError(
-                f"Capability '{capability_key}' is not an allowlisted Registry tool."
-            )
+            raise ValueError(f"Capability '{capability_key}' is not a Task capability.")
         tool_id = definition.registry_tool_id
         meta = TOOL_DEFINITIONS.get(str(tool_id))
         if meta is None:

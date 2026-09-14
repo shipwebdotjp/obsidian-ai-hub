@@ -1,19 +1,25 @@
-"""Code-defined Task Agent capability catalog.
+"""Task Agent capability catalog, derived from the Agent Registry.
 
-This module is the source of truth for adapter keys, input validation anchors,
-labels, and descriptions. The ``task_agent_capabilities`` table is the source
-of truth only for ``enabled`` and ``approval_policy``; the v44 migration seeds
-this catalog idempotently without overwriting those two columns.
+The Agent Registry (``agents.registry.TOOL_DEFINITIONS``) is the source of
+truth: this module derives one Capability per registry tool at call time, so
+adding a builtin tool (or a ``custom:*`` plugin file) exposes it to the Task
+Agent without touching this module. The ``task_agent_capabilities`` table is
+the source of truth only for ``enabled`` and ``approval_policy``; seeds and
+the startup sync never overwrite those two columns.
 
-Registry-backed entries resolve ``registry_tool_id`` against the existing
-Agent tool registry in Phase 3 (``tasks/adapters/registry_tools.py``). The
-allowlist is fixed here: ``run_shell``, Skills, custom plugins, external-write
-proposals, and the calendar/reminder create-proposal tools are excluded.
+Code-fixed safety boundary (see ``docs/task-agent/adr/``): the only tools
+that never become capabilities are ``EXCLUDED_TOOL_IDS`` — ``ask_user``
+(conversational only), ``agent_delegate`` (covered by ``specialist_agent``
+and requiring a parent agent run context), and the calendar/reminder
+create-proposal tools (double approval with the existing proposal HITL).
+Everything else defaults to ``plan_required`` except the read/search tools
+in ``AUTO_POLICY_TOOL_IDS``.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any, Mapping, Optional
 
 
 @dataclass(frozen=True)
@@ -21,112 +27,43 @@ class CapabilityDefinition:
     """A single code-defined capability."""
 
     key: str
-    adapter_kind: str  # "registry_tool" | "memory" | "agent" | "coding"
+    adapter_kind: str  # "registry_tool" | "memory" | "skills" | "agent" | "coding"
     label: str
     description: str
     default_approval_policy: str  # "auto" | "plan_required"
     registry_tool_id: str | None = None
 
 
-CAPABILITY_DEFINITIONS: tuple[CapabilityDefinition, ...] = (
-    # Read/search-only existing Registry tools (auto).
-    CapabilityDefinition(
-        key="web_search",
-        adapter_kind="registry_tool",
-        label="Web検索",
-        description="Webを検索する。",
-        default_approval_policy="auto",
-        registry_tool_id="web_search",
-    ),
-    CapabilityDefinition(
-        key="web_extract",
-        adapter_kind="registry_tool",
-        label="Web本文抽出",
-        description="指定URLの本文テキストを抽出する。",
-        default_approval_policy="auto",
-        registry_tool_id="web_extract",
-    ),
-    CapabilityDefinition(
-        key="vault_search",
-        adapter_kind="registry_tool",
-        label="Vault検索",
-        description="Obsidian Vault内を検索する。",
-        default_approval_policy="auto",
-        registry_tool_id="vault_search",
-    ),
-    CapabilityDefinition(
-        key="vault_read_file",
-        adapter_kind="registry_tool",
-        label="Vaultファイル読取",
-        description="Obsidian Vault内のMarkdownファイルを読み込む。",
-        default_approval_policy="auto",
-        registry_tool_id="vault_read_file",
-    ),
-    CapabilityDefinition(
-        key="calendar_read",
-        adapter_kind="registry_tool",
-        label="カレンダー読取",
-        description="カレンダーの予定を取得する。",
-        default_approval_policy="auto",
-        registry_tool_id="calendar_read",
-    ),
-    CapabilityDefinition(
-        key="reminders_read",
-        adapter_kind="registry_tool",
-        label="リマインダー読取",
-        description="リマインダーの未完了タスクを取得する。",
-        default_approval_policy="auto",
-        registry_tool_id="reminders_read",
-    ),
-    CapabilityDefinition(
-        key="memory_search",
-        adapter_kind="registry_tool",
-        label="長期記憶検索",
-        description="承認済み長期記憶を検索する。",
-        default_approval_policy="auto",
-        registry_tool_id="memory_search",
-    ),
-    CapabilityDefinition(
-        key="people_search",
-        adapter_kind="registry_tool",
-        label="人物検索",
-        description="確定済み人物を検索する。",
-        default_approval_policy="auto",
-        registry_tool_id="people_search",
-    ),
-    CapabilityDefinition(
-        key="people_get",
-        adapter_kind="registry_tool",
-        label="人物詳細取得",
-        description="人物IDから詳細を取得する。",
-        default_approval_policy="auto",
-        registry_tool_id="people_get",
-    ),
-    CapabilityDefinition(
-        key="project_search",
-        adapter_kind="registry_tool",
-        label="プロジェクト検索",
-        description="確定済みプロジェクトを検索する。",
-        default_approval_policy="auto",
-        registry_tool_id="project_search",
-    ),
-    CapabilityDefinition(
-        key="project_get",
-        adapter_kind="registry_tool",
-        label="プロジェクト詳細取得",
-        description="プロジェクトIDから詳細を取得する。",
-        default_approval_policy="auto",
-        registry_tool_id="project_get",
-    ),
-    # Write/delegate capabilities (plan_required: whole-plan bulk approval).
-    CapabilityDefinition(
-        key="memory_propose",
-        adapter_kind="memory",
-        label="長期記憶候補作成",
-        description="長期記憶候補を作成する。",
-        default_approval_policy="plan_required",
-        registry_tool_id="memory_propose",
-    ),
+EXCLUDED_TOOL_IDS: frozenset[str] = frozenset(
+    {
+        "ask_user",
+        "agent_delegate",
+        "calendar_create_proposal",
+        "reminder_create_proposal",
+    }
+)
+
+MEMORY_KIND_TOOL_IDS: frozenset[str] = frozenset({"memory_propose"})
+
+SKILLS_TOOL_IDS: frozenset[str] = frozenset({"skills"})
+
+AUTO_POLICY_TOOL_IDS: frozenset[str] = frozenset(
+    {
+        "web_search",
+        "web_extract",
+        "vault_search",
+        "vault_read_file",
+        "calendar_read",
+        "reminders_read",
+        "memory_search",
+        "people_search",
+        "people_get",
+        "project_search",
+        "project_get",
+    }
+)
+
+SPECIAL_DEFINITIONS: tuple[CapabilityDefinition, ...] = (
     CapabilityDefinition(
         key="specialist_agent",
         adapter_kind="agent",
@@ -143,4 +80,51 @@ CAPABILITY_DEFINITIONS: tuple[CapabilityDefinition, ...] = (
     ),
 )
 
-CAPABILITY_KEYS: frozenset[str] = frozenset(d.key for d in CAPABILITY_DEFINITIONS)
+
+def get_capability_definitions(
+    tool_definitions: Optional[Mapping[str, Mapping[str, Any]]] = None,
+) -> tuple[CapabilityDefinition, ...]:
+    """Build the capability catalog from the Agent Registry.
+
+    ``tool_definitions`` is injectable for tests; when omitted the live
+    ``agents.registry.TOOL_DEFINITIONS`` is read fresh on every call so
+    plugin reloads are picked up. Import is local to avoid a hard
+    ``database -> capabilities -> agents.registry`` cycle.
+    """
+    if tool_definitions is None:
+        from obsidian_ai_hub.agents import registry as agent_registry
+
+        tool_definitions = agent_registry.TOOL_DEFINITIONS
+    derived: list[CapabilityDefinition] = []
+    for tool_id, meta in tool_definitions.items():
+        if tool_id in EXCLUDED_TOOL_IDS:
+            continue
+        if tool_id in MEMORY_KIND_TOOL_IDS:
+            adapter_kind = "memory"
+        elif tool_id in SKILLS_TOOL_IDS:
+            adapter_kind = "skills"
+        else:
+            adapter_kind = "registry_tool"
+        policy = "auto" if tool_id in AUTO_POLICY_TOOL_IDS else "plan_required"
+        label = meta.get("name") if isinstance(meta, Mapping) else None
+        description = meta.get("description") if isinstance(meta, Mapping) else None
+        derived.append(
+            CapabilityDefinition(
+                key=str(tool_id),
+                adapter_kind=adapter_kind,
+                label=str(label) if label else str(tool_id),
+                description=str(description) if description else "",
+                default_approval_policy=policy,
+                registry_tool_id=str(tool_id),
+            )
+        )
+    derived.extend(SPECIAL_DEFINITIONS)
+    derived.sort(key=lambda d: d.key)
+    return tuple(derived)
+
+
+def get_capability_keys(
+    tool_definitions: Optional[Mapping[str, Mapping[str, Any]]] = None,
+) -> frozenset[str]:
+    """Return the current capability keys (registry-derived)."""
+    return frozenset(d.key for d in get_capability_definitions(tool_definitions))

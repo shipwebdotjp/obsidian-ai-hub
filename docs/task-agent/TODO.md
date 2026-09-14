@@ -32,7 +32,13 @@
 - [x] 実行時の最新設定を使う `specialist_agent` Adapterを実装する
 - [x] Task専用の新規sessionを作る `coding_cli` Adapterを実装する
 - [x] 再承認自己申告を改訂Planと `waiting_reapproval` へ接続する
-- [x] shell、Skills、plugin、外部書込み提案が選択不能なことを保証する
+- [x] Task Capabilityにないtool(`ask_user`、`agent_delegate`、提案HITL)が選択不能なことを保証する
+
+## Capability自動同期
+
+- [x] Agent Registry正本の自動派生に `capabilities.py` を移行する
+- [x] `run_shell` / Skills / `custom:*` を既定 `plan_required` で有効化する
+- [x] 起動時 `sync_capabilities()` で既存DBへ新規Capabilityを反映する
 
 ## 入口とWebUI
 

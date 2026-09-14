@@ -46,6 +46,11 @@ def startup_recovery(instance_id: str) -> dict[str, Any]:
         task_count = task_store.mark_stale_tasks_interrupted(instance_id)
     except Exception:
         logger.exception("Task startup recovery failed")
+    try:
+        synced = task_store.sync_capabilities()
+        logger.info("Task capabilities synced: %s", synced)
+    except Exception:
+        logger.exception("Task capability sync failed")
     # 期限切れ terminal run の event log を掃除 (確定データは残す).
     try:
         agent_store.purge_old_run_events()

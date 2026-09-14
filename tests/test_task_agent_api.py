@@ -118,11 +118,24 @@ def test_replan_only_interrupted(test_memory_db_path, client):
 
 
 def test_capabilities_api(test_memory_db_path, client):
+    from obsidian_ai_hub.tasks.capabilities import get_capability_definitions
+
     response = client.get("/api/v1/task-agent/capabilities")
     assert response.status_code == 200
     capabilities = response.json()
-    assert len(capabilities) == 14
+    assert len(capabilities) == len(get_capability_definitions())
     assert all("capability_key" in c for c in capabilities)
+    by_key = {c["capability_key"]: c for c in capabilities}
+    assert by_key["run_shell"]["approval_policy"] == "plan_required"
+    assert by_key["run_shell"]["label"]
+    assert by_key["web_search"]["approval_policy"] == "auto"
+
+    response = client.put(
+        "/api/v1/task-agent/capabilities/run_shell", json={"enabled": False}
+    )
+    assert response.status_code == 200
+    assert response.json()["enabled"] is False
+    assert response.json()["label"]
 
     response = client.put(
         "/api/v1/task-agent/capabilities/coding_cli", json={"enabled": False}
@@ -137,7 +150,7 @@ def test_capabilities_api(test_memory_db_path, client):
     assert response.status_code == 422
 
     response = client.put(
-        "/api/v1/task-agent/capabilities/run_shell", json={"enabled": False}
+        "/api/v1/task-agent/capabilities/ask_user", json={"enabled": False}
     )
     assert response.status_code == 404
 

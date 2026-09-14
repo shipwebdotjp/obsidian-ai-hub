@@ -688,6 +688,55 @@ def list_capabilities(
         return [_row_to_capability(row) for row in cur.fetchall()]
 
 
+def sync_capabilities(
+    conn: Optional[sqlite3.Connection] = None,
+) -> dict[str, int]:
+    """Upsert the registry-derived catalog into ``task_agent_capabilities``.
+
+    New capabilities (new builtin tools, installed plugins) are inserted with
+    their default policy; the DB-owned ``enabled`` / ``approval_policy`` of
+    existing rows are never overwritten. Returns ``{"inserted": n}``.
+    """
+    from obsidian_ai_hub.tasks.capabilities import get_capability_definitions
+
+    now = _now_iso()
+    with auto_connection(conn) as (active_conn, is_generated):
+
+        def _do() -> int:
+            inserted = 0
+            for definition in get_capability_definitions():
+                cur = active_conn.execute(
+                    """
+                    INSERT INTO task_agent_capabilities (
+                        capability_key, adapter_kind, enabled, approval_policy, updated_at
+                    ) VALUES (?, ?, 1, ?, ?)
+                    ON CONFLICT(capability_key) DO NOTHING
+                    """,
+                    (
+                        definition.key,
+                        definition.adapter_kind,
+                        definition.default_approval_policy,
+                        now,
+                    ),
+                )
+                if cur.rowcount == 1:
+                    inserted += 1
+                else:
+                    active_conn.execute(
+                        "UPDATE task_agent_capabilities SET adapter_kind = ?, "
+                        "updated_at = ? WHERE capability_key = ?;",
+                        (definition.adapter_kind, now, definition.key),
+                    )
+            return inserted
+
+        if is_generated:
+            with active_conn:
+                result = _do()
+        else:
+            result = _do()
+    return {"inserted": result}
+
+
 def get_capability(
     capability_key: str, conn: Optional[sqlite3.Connection] = None
 ) -> dict[str, Any] | None:

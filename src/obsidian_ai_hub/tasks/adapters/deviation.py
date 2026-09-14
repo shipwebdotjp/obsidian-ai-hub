@@ -53,12 +53,13 @@ def build_revised_plan(
     """Append reported steps to a copy of the saved plan inner dict.
 
     Reported steps are untrusted child LLM output: capability keys must be in
-    the code-defined catalog and target/inputs must be objects. Approval stays
-    human, but injection (e.g. ``run_shell``) is refused here, not at review.
+    the registry-derived catalog and target/inputs must be objects. Approval
+    stays human, but injection (e.g. excluded tools) is refused here, not at
+    review.
     """
-    from obsidian_ai_hub.tasks.capabilities import CAPABILITY_DEFINITIONS
+    from obsidian_ai_hub.tasks.capabilities import get_capability_keys
 
-    allowed = {d.key for d in CAPABILITY_DEFINITIONS}
+    allowed = get_capability_keys()
     for index, step in enumerate(report["steps"]):
         if not isinstance(step, dict):
             raise ValueError(f"Reported step {index} must be an object.")

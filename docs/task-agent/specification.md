@@ -17,7 +17,6 @@ Status: Accepted (MVP implemented, Phases 1-5 done)
 
 - Vaultの作成・編集・削除、カレンダー/リマインダーへの直接書込み
 - 既存のカレンダー/リマインダー提案HITLをTask実行から呼ぶこと
-- `run_shell`、Skills、カスタムプラグインのTask実行
 - Capability Adapterの任意作成や入力仕様・説明のWeb編集
 - 共通Workspaceロック、複数Task worker、Task固有の実行上限・自動リトライ・自動ロールバック
 - Coding CLI/Agent内部の計画逸脱を親側で技術的に防ぐこと
@@ -60,7 +59,10 @@ Plannerは有効Capabilityだけを選択する。Plan内に一つでも `plan_r
 Plan作成後のポリシー変更は既存Planの承認要否を変えない。ただし実行開始前にCapabilityが
 無効化されていたら、そのTaskは `waiting_reapproval` に停止する。
 
-初期Capabilityは次のとおり。
+初期Capabilityは次のとおり。Agent Registryを正本として自動派生するため、
+Registryに新規builtin toolを追加すればTask Capabilityとしても自動公開される
+(入力スキーマは `args_schema` から自動導出)。`run_shell`、Skills、
+`custom:*` プラグインは既定 `plan_required` で有効化される。
 
 | key / 種別 | 既定 | 備考 |
 | --- | --- | --- |
@@ -68,6 +70,11 @@ Plan作成後のポリシー変更は既存Planの承認要否を変えない。
 | `memory_propose` | `plan_required` | Memory candidateの作成。 |
 | `specialist_agent` | `plan_required` | 登録済みAI Agentを指定して一回限りの子runを作る。 |
 | `coding_cli` | `plan_required` | 登録済みProjectのGit rootで新規Coding session/runを作る。 |
+| `run_shell`、Skills、その他新規Registry tool | `plan_required` | Registryの正本から自動派生。 |
+
+Task Capabilityにしないtool(コード固定の除外セット): `ask_user`、
+`agent_delegate`(`specialist_agent` と重複)、`calendar_create_proposal` /
+`reminder_create_proposal`(既存提案HITLとの二重承認を避ける)。
 
 `specialist_agent` は実行開始時のAgent設定指紋とPlan承認時の指紋を照合する。
 承認後にAgentのsystem prompt・有効tool・provider/model・委譲先が変わった場合、
@@ -256,5 +263,5 @@ Task、Plan、Eventは終端化から30日後にまとめて削除する。非�
 6. 無効化Capabilityは実行前に `waiting_reapproval` で止まる。
 7. 取消・サーバー停止は子runに伝播し、Taskを自動再実行しない。
 8. Coding/Agent Stepの子runと結果がTask Eventから辿れる。
-9. Registry外Capability、shell、Skills、プラグイン、外部書込み提案をTaskが選べない。
+9. Task Capabilityにないtool(`ask_user`、`agent_delegate`、提案HITL)をTaskが選べない。
 10. Task履歴が30日で削除され、既知秘密値と非公開思考過程を保存しない。

@@ -87,10 +87,10 @@ def collect_planner_context() -> dict[str, Any]:
     (``trusted_ctx``, API keys, session ids) are ever included.
     """
     from obsidian_ai_hub.agents import store as agent_store
-    from obsidian_ai_hub.tasks.capabilities import CAPABILITY_DEFINITIONS
+    from obsidian_ai_hub.tasks.capabilities import get_capability_definitions
     from obsidian_ai_hub.tasks.capability_schemas import compact_schema_text
 
-    catalog = {d.key: d for d in CAPABILITY_DEFINITIONS}
+    catalog = {d.key: d for d in get_capability_definitions()}
     capabilities = []
     for c in task_store.list_capabilities():
         if not c["enabled"]:

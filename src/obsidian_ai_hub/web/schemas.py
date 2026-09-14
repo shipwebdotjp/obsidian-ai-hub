@@ -1779,6 +1779,8 @@ class TaskAgentCapability(BaseModel):
     enabled: bool
     approval_policy: str
     updated_at: str
+    label: str = ""
+    description: str = ""
 
 
 class CapabilityUpdateRequest(BaseModel):

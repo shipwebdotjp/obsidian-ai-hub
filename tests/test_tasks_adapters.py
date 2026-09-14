@@ -73,16 +73,43 @@ def test_registry_tool_success_and_inputs(monkeypatch):
     assert fake.calls == [{"start_date": "2026-09-14", "end_date": "2026-09-15"}]
 
 
-def test_registry_tool_rejects_outside_allowlist():
-    task, plan = _task_with_plan("run_shell", {}, {"command": "ls"})
-    with pytest.raises(ValueError, match="not an allowlisted"):
-        RegistryToolExecutor().execute_step(task, plan, 0, plan["plan"]["steps"][0])
+def test_registry_tool_allows_run_shell(monkeypatch):
+    fake = FakeTool('{"exit_code": 0}')
+    monkeypatch.setattr(
+        registry_module,
+        "TOOL_DEFINITIONS",
+        {
+            "run_shell": {
+                "get_tool": lambda: fake,
+                "input_model": registry_module.RunShellInput,
+            }
+        },
+    )
+    task, plan = _task_with_plan("run_shell", {}, {"command": "echo hi"})
+    result = RegistryToolExecutor().execute_step(
+        task, plan, 0, plan["plan"]["steps"][0]
+    )
+    assert result.summary == '{"exit_code": 0}'
+    assert fake.calls == [{"command": "echo hi"}]
+
+
+def test_registry_tool_rejects_excluded_tools():
+    for excluded in (
+        "ask_user",
+        "agent_delegate",
+        "calendar_create_proposal",
+        "reminder_create_proposal",
+    ):
+        task, plan = _task_with_plan(excluded, {}, {})
+        with pytest.raises(ValueError, match="not a .* capability|not registered"):
+            RegistryToolExecutor().execute_step(task, plan, 0, plan["plan"]["steps"][0])
 
 
 def test_registry_tool_unknown_registration(monkeypatch):
     monkeypatch.setattr(registry_module, "TOOL_DEFINITIONS", {})
     task, plan = _task_with_plan("web_search", {}, {"query": "x"})
-    with pytest.raises(ValueError, match="not registered"):
+    # With an empty registry the catalog itself has no web_search.
+    with pytest.raises(ValueError, match="not a Task capability|not registered"):
         RegistryToolExecutor().execute_step(task, plan, 0, plan["plan"]["steps"][0])
 
 
@@ -170,7 +197,7 @@ def test_deviation_protocol():
                 "reason": "r",
                 "steps": [
                     {
-                        "capability_key": "run_shell",
+                        "capability_key": "ask_user",
                         "title": "evil",
                         "target": {},
                         "inputs": {},
@@ -178,6 +205,22 @@ def test_deviation_protocol():
                 ],
             },
         )
+
+    allowed = build_revised_plan(
+        {"purpose": "p", "steps": [{"title": "old"}], "completion_criteria": "d"},
+        {
+            "reason": "r",
+            "steps": [
+                {
+                    "capability_key": "run_shell",
+                    "title": "shell it",
+                    "target": {},
+                    "inputs": {"command": "echo hi"},
+                }
+            ],
+        },
+    )
+    assert [s["title"] for s in allowed["steps"]] == ["old", "shell it"]
     with pytest.raises(ValueError, match="target/inputs must be objects"):
         build_revised_plan(
             {"purpose": "p", "steps": []},
@@ -417,8 +460,8 @@ def test_composite_executor_dispatch_and_rejection(monkeypatch):
     )
     assert result.summary == '{"ok": true}'
 
-    task2, plan2 = _task_with_plan("run_shell", {}, {})
-    with pytest.raises(ValueError, match="not an allowlisted"):
+    task2, plan2 = _task_with_plan("ask_user", {}, {})
+    with pytest.raises(ValueError, match="not a .* capability"):
         CompositeExecutor().execute_step(task2, plan2, 0, plan2["plan"]["steps"][0])
 
 

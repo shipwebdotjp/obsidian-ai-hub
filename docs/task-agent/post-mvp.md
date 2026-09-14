@@ -33,8 +33,9 @@ MVPの範囲は [specification.md](specification.md) を正とする。
   パス制約、変更一覧、取消時の途中状態、共通Workspace lockを合わせて設計する。
 - **カレンダー/リマインダー直接書込み** — Taskの一括Plan承認を唯一の承認として、既存の
   提案HITLを経由せずに書き込むAdapterを追加する。外部API失敗時の結果表示も必要になる。
-- **任意shell、Skills、カスタムプラグイン** — Task Capabilityとして公開するかを個別に検討する。
-  公開する場合は、固定allowlist、入力検証、redaction、対象範囲、取消の契約を追加する。
+- **任意shell、Skills、カスタムプラグイン** — Capability自動同期へ移行し、
+  既定 `plan_required` で公開する(除外セットは `ask_user`、`agent_delegate`、
+  提案HITLのみ)。入力検証・redaction・取消は既存契約をそのまま適用する。
 
 ## 実行制御と安全性
 

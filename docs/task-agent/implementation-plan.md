@@ -35,8 +35,8 @@ Artifact/Delegation/HITL linkテーブル、Vault/外部書込みAdapter、Task�
 
 ### Phase 3: Capability Adapter
 
-- `tasks/adapters/registry_tools.py` はコードの固定allowlistだけを既存Registryから解決して、
-  保存済み入力で呼び出す。
+- `tasks/adapters/registry_tools.py` はTask Capability(Registry正本の自動派生+
+  コード固定の除外セット)だけを既存Registryから解決して、保存済み入力で呼び出す。
 - `tasks/adapters/agent.py` は指定Agentの新規session/runを既存serviceでキューし、終端結果を
   Task Eventへ要約する。Agent設定は実行時に読み直す。
 - `tasks/adapters/coding.py` はPlanのProject/Git root/backendで新規Coding session/runを作る。
@@ -77,6 +77,6 @@ Artifact/Delegation/HITL linkテーブル、Vault/外部書込みAdapter、Task�
 - auto-only Plan、承認必須Plan、disabled Capability、HITL質問からの再キュー。
 - Agent/Coding子run生成、Task Event参照、取消伝播、サーバー停止時の `interrupted`、
   自動再実行なし。
-- allowlist外のCapability、shell、Skills、plugin、外部書込み提案の拒否とredaction。
+- Task Capabilityにないtool、`ask_user`、`agent_delegate`、提案HITLの拒否とredaction。
 - CLI即時返却、Task API結合、Task詳細・Capability設定のフロントエンド単体テスト。
   ブラウザE2Eは追加・実行しない。

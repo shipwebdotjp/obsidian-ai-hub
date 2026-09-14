@@ -7,10 +7,15 @@ from typing import Any, Optional
 from obsidian_ai_hub.tasks.adapters.agent import AgentAdapter
 from obsidian_ai_hub.tasks.adapters.coding import CodingAdapter
 from obsidian_ai_hub.tasks.adapters.registry_tools import RegistryToolExecutor
-from obsidian_ai_hub.tasks.capabilities import CAPABILITY_DEFINITIONS
+from obsidian_ai_hub.tasks.adapters.skills import SkillsAdapter
+from obsidian_ai_hub.tasks.capabilities import get_capability_definitions
 from obsidian_ai_hub.tasks.execution import StepExecutor, StepResult
 
-_DEFINITIONS_BY_KEY = {d.key: d for d in CAPABILITY_DEFINITIONS}
+
+def _definitions_by_key() -> dict[str, Any]:
+    # Looked up fresh on every dispatch: the catalog is registry-derived and
+    # plugin reloads must be picked up.
+    return {d.key: d for d in get_capability_definitions()}
 
 
 class CompositeExecutor:
@@ -20,6 +25,7 @@ class CompositeExecutor:
         self._adapters = {
             "registry_tool": RegistryToolExecutor(),
             "memory": RegistryToolExecutor(),
+            "skills": SkillsAdapter(),
             "agent": AgentAdapter(poll_interval=poll_interval),
             "coding": CodingAdapter(poll_interval=poll_interval),
         }
@@ -32,11 +38,9 @@ class CompositeExecutor:
         step: dict[str, Any],
     ) -> StepResult:
         capability_key = str(step.get("capability_key"))
-        definition = _DEFINITIONS_BY_KEY.get(capability_key)
+        definition = _definitions_by_key().get(capability_key)
         if definition is None:
-            raise ValueError(
-                f"Capability '{capability_key}' is not an allowlisted capability."
-            )
+            raise ValueError(f"Capability '{capability_key}' is not a Task capability.")
         adapter: Optional[StepExecutor] = self._adapters.get(definition.adapter_kind)
         if adapter is None:
             raise ValueError(f"No adapter connected for capability '{capability_key}'.")

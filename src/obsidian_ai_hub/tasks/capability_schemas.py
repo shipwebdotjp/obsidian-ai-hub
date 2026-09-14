@@ -82,6 +82,20 @@ class CodingInputs(BaseModel):
     )
 
 
+class SkillInputs(BaseModel):
+    """Select one tool of the skills bundle; the rest is per-tool args.
+
+    The chosen skill tool validates its own arguments at invoke time via its
+    ``args_schema``, so unknown extra keys are allowed here and forwarded.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    skill: Literal["load_skill", "read_skill_resource", "run_skill_script"] = Field(
+        description="実行するskillツール名。"
+    )
+
+
 _DELEGATE_TARGET_MODELS: dict[str, type[BaseModel]] = {
     "specialist_agent": SpecialistAgentTarget,
     "coding_cli": CodingTarget,
@@ -90,13 +104,14 @@ _DELEGATE_TARGET_MODELS: dict[str, type[BaseModel]] = {
 _DELEGATE_INPUT_MODELS: dict[str, type[BaseModel]] = {
     "specialist_agent": SpecialistAgentInputs,
     "coding_cli": CodingInputs,
+    "skills": SkillInputs,
 }
 
 
 def _capability_registry_tool_id(capability_key: str) -> str | None:
-    from obsidian_ai_hub.tasks.capabilities import CAPABILITY_DEFINITIONS
+    from obsidian_ai_hub.tasks.capabilities import get_capability_definitions
 
-    for definition in CAPABILITY_DEFINITIONS:
+    for definition in get_capability_definitions():
         if definition.key == capability_key:
             return definition.registry_tool_id
     return None
@@ -219,15 +234,15 @@ def compact_schema_text(capability_key: str) -> str | None:
         if isinstance(spec, dict):
             lines.append("  - " + _compact_field(name, spec, required))
     forbid = schema.get("additionalProperties") is False
-    header = f"{capability_key} inputs ({'required: ' + ', '.join(sorted(required)) if required else 'no required fields'}; unknown keys forbidden)" if forbid else (
-        f"{capability_key} inputs"
+    header = (
+        f"{capability_key} inputs ({'required: ' + ', '.join(sorted(required)) if required else 'no required fields'}; unknown keys forbidden)"
+        if forbid
+        else (f"{capability_key} inputs")
     )
     return header + "\n" + "\n".join(lines) if lines else header
 
 
-def validate_capability_inputs(
-    capability_key: str, inputs: Any
-) -> dict[str, Any]:
+def validate_capability_inputs(capability_key: str, inputs: Any) -> dict[str, Any]:
     """Validate raw inputs against the single-source model.
 
     Returns the validated (and default-filled) dict. Raises ``ValueError``
@@ -241,9 +256,7 @@ def validate_capability_inputs(
             f"Capability '{capability_key}' has no resolvable input schema."
         )
     if not isinstance(inputs, dict):
-        raise ValueError(
-            f"Capability '{capability_key}' inputs must be an object."
-        )
+        raise ValueError(f"Capability '{capability_key}' inputs must be an object.")
     try:
         validated = model.model_validate(inputs)
     except Exception as exc:
@@ -261,9 +274,7 @@ def validate_capability_inputs(
     return dumped
 
 
-def validate_capability_target(
-    capability_key: str, target: Any
-) -> dict[str, Any]:
+def validate_capability_target(capability_key: str, target: Any) -> dict[str, Any]:
     """Validate a delegate target (agent/project). No-op for registry tools."""
     model = resolve_target_model(capability_key)
     if model is None:

@@ -9,7 +9,7 @@ from pathlib import Path
 
 from obsidian_ai_hub.utils import config
 from obsidian_ai_hub.utils.dates import get_partial_date_bounds
-from obsidian_ai_hub.tasks.capabilities import CAPABILITY_DEFINITIONS
+from obsidian_ai_hub.tasks.capabilities import get_capability_definitions
 
 
 def _assert_test_db_is_not_production(db_path: Path) -> None:
@@ -1239,7 +1239,7 @@ def run_migration_v44(db: sqlite3.Connection) -> None:
     # Idempotent seed of the code-defined catalog. The DB owns only `enabled`
     # and `approval_policy`, so the seed never overwrites those two columns.
     now = datetime.now(timezone.utc).isoformat()
-    for definition in CAPABILITY_DEFINITIONS:
+    for definition in get_capability_definitions():
         db.execute(
             """
             INSERT INTO task_agent_capabilities (
