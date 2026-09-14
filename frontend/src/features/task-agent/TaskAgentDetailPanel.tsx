@@ -1,0 +1,647 @@
+import { useCallback, useEffect, useState } from "react";
+import { Link } from "react-router-dom";
+import {
+  ApiError,
+  approveTaskAgentTask,
+  cancelHitlRun,
+  cancelTaskAgentTask,
+  getHitlRun,
+  getTaskAgentTask,
+  rejectTaskAgentTask,
+  replanTaskAgentTask,
+  submitHitlAnswer,
+} from "../../api/client";
+import type {
+  HitlRunDetail,
+  TaskAgentEvent,
+  TaskAgentTaskDetail,
+} from "../../api/types";
+import {
+  WaitingRunQuestionCard,
+  toQuestionItems,
+  waitForHitlSettled,
+} from "../../components/InConversationQuestionCard";
+import { ROUTES } from "../../constants/routes";
+import { formatDateTime } from "../../utils/date";
+import {
+  TERMINAL_STATUSES,
+  eventTypeLabel,
+  taskStatusBadgeClass,
+  taskStatusLabel,
+} from "./taskAgentLabels";
+import { SmartText, StructuredValue } from "./StructuredValue";
+import {
+  ChildRunLink,
+  HitlRunLink,
+  childRunRefFromPayload,
+  hitlRunIdFromPayload,
+} from "./ChildRunLink";
+
+const TERMINAL_SET = new Set<string>(TERMINAL_STATUSES);
+const APPROVAL_STATUSES = ["waiting_approval", "waiting_reapproval"];
+const ANSWERABLE_HITL_STATUSES = ["pending_user", "ready_to_resume"];
+
+interface DirectionalPlanJson {
+  purpose?: unknown;
+  strategy?: unknown;
+  capabilities?: Array<{ capability_key?: unknown; intent?: unknown }>;
+  allowed_agent_ids?: unknown;
+  allowed_project_ids?: unknown;
+  constraints?: unknown;
+  completion_criteria?: unknown;
+  max_actions?: unknown;
+}
+
+function isDirectionalPlan(plan: unknown): boolean {
+  if (plan == null || typeof plan !== "object") return false;
+  const p = plan as Record<string, unknown>;
+  return Array.isArray(p["capabilities"]) && typeof p["purpose"] === "string";
+}
+
+function DirectionalPlanView({ plan }: { plan: DirectionalPlanJson }) {
+  return (
+    <div className="mt-1 space-y-1 text-xs text-slate-700">
+      <p className="rounded bg-blue-50 px-2 py-1 text-[11px] text-blue-800">
+        承認対象は方向性とCapability範囲です（詳細引数は実行時に確定し、履歴に記録されます）。
+      </p>
+      {typeof plan.purpose === "string" && (
+        <p className="min-w-0 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+          <span className="font-medium">目的: </span>
+          {plan.purpose}
+        </p>
+      )}
+      {typeof plan.strategy === "string" && plan.strategy && (
+        <p className="min-w-0 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+          <span className="font-medium">方針: </span>
+          {plan.strategy}
+        </p>
+      )}
+      {Array.isArray(plan.capabilities) && (
+        <ul className="space-y-0.5">
+          {plan.capabilities.map((c, i) => (
+            <li key={i} className="flex min-w-0 flex-wrap items-center gap-1">
+              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium break-all text-slate-700">
+                {String(c.capability_key ?? "")}
+              </span>
+              {typeof c.intent === "string" && c.intent && (
+                <span className="min-w-0 break-words text-slate-600">
+                  {c.intent}
+                </span>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      {typeof plan.constraints === "string" && plan.constraints && (
+        <p className="min-w-0 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+          <span className="font-medium">制約: </span>
+          {plan.constraints}
+        </p>
+      )}
+      {Array.isArray(plan.allowed_agent_ids) && plan.allowed_agent_ids.length > 0 && (
+        <p className="min-w-0 break-words text-slate-500">
+          委譲可能なAgent: {plan.allowed_agent_ids.map(String).join(", ")}
+        </p>
+      )}
+      {Array.isArray(plan.allowed_project_ids) &&
+        plan.allowed_project_ids.length > 0 && (
+          <p className="min-w-0 break-words text-slate-500">
+            実行可能なProject: {plan.allowed_project_ids.map(String).join(", ")}
+          </p>
+        )}
+      {typeof plan.completion_criteria === "string" && (
+        <p className="min-w-0 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+          <span className="font-medium">完了条件: </span>
+          {plan.completion_criteria}
+        </p>
+      )}
+      {plan.max_actions != null && (
+        <p className="text-slate-500">最大Action数: {String(plan.max_actions)}</p>
+      )}
+    </div>
+  );
+}
+
+function LegacyPlanView({ plan }: { plan: unknown }) {
+  const p = (plan ?? {}) as Record<string, unknown>;
+  const steps = Array.isArray(p["steps"]) ? p["steps"] : [];
+  return (
+    <div className="mt-1 space-y-1 text-xs text-slate-700">
+      <p className="rounded bg-slate-100 px-2 py-1 text-[11px] text-slate-600">
+        旧形式の静的Plan（保存済み入力で実行されます）。
+      </p>
+      {typeof p["purpose"] === "string" && (
+        <p className="min-w-0 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+          <span className="font-medium">目的: </span>
+          {p["purpose"]}
+        </p>
+      )}
+      <p className="text-slate-500">Step数: {steps.length}</p>
+    </div>
+  );
+}
+
+/** payload 中の run 参照を識別可能なラベル付きリンクとして表示する。 */
+function RelatedRunLinks({ payload }: { payload: Record<string, any> }) {
+  const childRef = childRunRefFromPayload(payload);
+  const hitlRunId = hitlRunIdFromPayload(payload);
+  if (!childRef && !hitlRunId) return null;
+  return (
+    <p className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
+      <span className="shrink-0 font-medium text-slate-500">関連run:</span>
+      {childRef && <ChildRunLink {...childRef} />}
+      {hitlRunId && <HitlRunLink runId={hitlRunId} />}
+    </p>
+  );
+}
+
+function sessionIdForRunId(
+  events: TaskAgentEvent[],
+  runId: string,
+): string | null {
+  for (const e of events) {
+    const payload = e.payload as Record<string, unknown> | null | undefined;
+    if (
+      payload &&
+      typeof payload === "object" &&
+      payload["child_run_id"] === runId &&
+      typeof payload["session_id"] === "string" &&
+      payload["session_id"] !== ""
+    ) {
+      return payload["session_id"];
+    }
+  }
+  return null;
+}
+
+export default function TaskAgentDetailPanel({
+  taskId,
+  onTaskChanged,
+}: {
+  taskId: string;
+  /** approve/reject/cancel/replan 成功時に呼ばれる（一覧の再取得用）。 */
+  onTaskChanged?: () => void;
+}) {
+  const [detail, setDetail] = useState<TaskAgentTaskDetail | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [rejectReason, setRejectReason] = useState("");
+  const [hitlRun, setHitlRun] = useState<HitlRunDetail | null>(null);
+  const [hitlBusy, setHitlBusy] = useState(false);
+  const [loadedTaskId, setLoadedTaskId] = useState<string | null>(null);
+
+  const loadDetail = useCallback(
+    async (showLoading = true) => {
+      if (!taskId) {
+        setError("Taskが見つかりません");
+        setLoading(false);
+        return;
+      }
+      if (showLoading) setLoading(true);
+      setError(null);
+      try {
+        const res = await getTaskAgentTask(taskId);
+        setDetail(res);
+        setLoadedTaskId(taskId);
+        const asked = res.events
+          .filter((e) => e.event_type === "hitl_question_asked")
+          .sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0))
+          .at(-1);
+        const hitlRunId = asked?.payload?.hitl_run_id;
+        if (typeof hitlRunId === "string" && hitlRunId) {
+          try {
+            setHitlRun(await getHitlRun(hitlRunId));
+          } catch {
+            setHitlRun(null);
+          }
+        } else {
+          setHitlRun(null);
+        }
+      } catch (e) {
+        setError(e instanceof ApiError ? e.message : "読み込みに失敗しました");
+      } finally {
+        if (showLoading) setLoading(false);
+      }
+    },
+    [taskId],
+  );
+
+  useEffect(() => {
+    void loadDetail();
+  }, [loadDetail]);
+
+  useEffect(() => {
+    const status = detail?.task.status;
+    if (!status || loadedTaskId !== taskId || TERMINAL_SET.has(status)) return;
+    const id = setInterval(() => void loadDetail(false), 3000);
+    return () => clearInterval(id);
+  }, [loadDetail, detail?.task.status, loadedTaskId, taskId]);
+
+  const runAction = useCallback(
+    async (fn: (id: string) => Promise<unknown>) => {
+      if (!taskId) return;
+      setBusy(true);
+      setActionError(null);
+      try {
+        await fn(taskId);
+        await loadDetail(false);
+        onTaskChanged?.();
+      } catch (e) {
+        setActionError(e instanceof ApiError ? e.message : "操作に失敗しました");
+      } finally {
+        setBusy(false);
+      }
+    },
+    [taskId, loadDetail, onTaskChanged],
+  );
+
+  // 初回ロードかつ前回内容がない場合のみ全画面ローディングにする。
+  // 行切替時は直前の内容を維持する（AGENTS.md: コンポーネントのマウント・更新）。
+  if (loading && !detail)
+    return <p className="p-4 text-sm text-slate-500">読み込み中…</p>;
+  if (error && !detail)
+    return (
+      <div className="bg-slate-50 p-4">
+        <p className="rounded border border-rose-300 bg-rose-50 p-2 text-sm text-rose-700">
+          {error}
+        </p>
+        <Link
+          to={ROUTES.TASK_AGENT}
+          className="mt-2 inline-block text-sm text-blue-600"
+        >
+          ← 一覧
+        </Link>
+      </div>
+    );
+  if (!detail) return null;
+
+  const task = detail.task;
+  const isTerminal = TERMINAL_SET.has(task.status);
+  const needsApproval = APPROVAL_STATUSES.includes(task.status);
+  const canReplan = task.status === "interrupted";
+  const showingStale = loadedTaskId !== null && loadedTaskId !== taskId;
+  const childRefEvents = detail.events.filter(
+    (e) =>
+      typeof (e.payload as Record<string, unknown> | null)?.["child_run_id"] ===
+        "string" &&
+      (e.payload as Record<string, unknown>)["child_run_id"] !== "",
+  );
+  const actionHistory = detail.events.filter(
+    (e) => e.event_type === "capability_completed",
+  );
+  const pendingQuestions = hitlRun
+    ? toQuestionItems(hitlRun.questions ?? [])
+    : [];
+  const showQuestionCard =
+    hitlRun != null &&
+    ANSWERABLE_HITL_STATUSES.includes(hitlRun.status) &&
+    pendingQuestions.length > 0;
+  const rejectDisabled = busy || !rejectReason.trim();
+  const activeChildSession =
+    task.active_child_run_id != null
+      ? sessionIdForRunId(detail.events, task.active_child_run_id)
+      : null;
+
+  return (
+    <div className="flex h-full min-h-0 min-w-0 flex-col bg-slate-50">
+      <header className="border-b border-slate-200 bg-white px-4 py-3">
+        <Link
+          to={ROUTES.TASK_AGENT}
+          aria-label="一覧に戻る"
+          className="text-sm text-blue-600 lg:hidden"
+        >
+          ← 一覧
+        </Link>
+        <h1 className="mt-1 text-lg font-semibold">Task詳細</h1>
+        <p className="mt-0.5 break-all font-mono text-[11px] text-slate-400">
+          {task.task_id}
+        </p>
+      </header>
+      <div className="min-h-0 min-w-0 flex-1 space-y-4 overflow-y-auto p-4">
+        {(loading || showingStale) && (
+          <p
+            aria-live="polite"
+            className="rounded border border-slate-200 bg-white p-2 text-xs text-slate-500"
+          >
+            読み込み中…
+          </p>
+        )}
+        {error && detail && (
+          <p className="rounded border border-rose-300 bg-rose-50 p-2 text-sm text-rose-700">
+            {error}
+          </p>
+        )}
+        {actionError && (
+          <p className="rounded border border-rose-300 bg-rose-50 p-2 text-sm text-rose-700">
+            {actionError}
+          </p>
+        )}
+
+        <section
+          aria-label="ユーザータスク"
+          className="min-w-0 rounded border border-slate-200 bg-white p-4"
+        >
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <span className={taskStatusBadgeClass(task.status)}>
+              {taskStatusLabel(task.status)}
+            </span>
+            <span className="min-w-0 break-words text-xs text-slate-400">
+              作成 {formatDateTime(task.created_at)}
+              {task.started_at && ` / 開始 ${formatDateTime(task.started_at)}`}
+              {task.finished_at && ` / 終了 ${formatDateTime(task.finished_at)}`}
+            </span>
+          </div>
+          <h2 className="mt-3 text-sm font-semibold">ユーザータスク</h2>
+          <div className="mt-1 min-w-0 text-sm">
+            <SmartText text={task.prompt_text} />
+          </div>
+          <dl className="mt-3 space-y-1 border-t border-slate-100 pt-2 text-xs text-slate-600">
+            <div className="flex min-w-0 flex-wrap gap-x-2">
+              <dt className="shrink-0 font-medium text-slate-500">状態:</dt>
+              <dd className="min-w-0 break-all">
+                {taskStatusLabel(task.status)}（{task.status}）
+              </dd>
+            </div>
+            <div className="flex min-w-0 flex-wrap gap-x-2">
+              <dt className="shrink-0 font-medium text-slate-500">現行Plan:</dt>
+              <dd className="min-w-0 break-all">
+                {task.current_plan_id ?? "（未設定）"}
+              </dd>
+            </div>
+            <div className="flex min-w-0 flex-wrap gap-x-2">
+              <dt className="shrink-0 font-medium text-slate-500">Worker:</dt>
+              <dd className="min-w-0 break-all">
+                {task.worker_instance_id ?? "（未設定）"}
+              </dd>
+            </div>
+            {task.active_child_run_id && (
+              <div className="flex min-w-0 flex-wrap gap-x-2">
+                <dt className="shrink-0 font-medium text-slate-500">
+                  実行中の子run:
+                </dt>
+                <dd className="min-w-0 flex-1">
+                  <ChildRunLink
+                    childKind={task.active_child_kind ?? ""}
+                    childRunId={task.active_child_run_id}
+                    sessionId={activeChildSession}
+                  />
+                </dd>
+              </div>
+            )}
+          </dl>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {needsApproval && (
+              <>
+                <button
+                  type="button"
+                  data-testid="task-approve"
+                  disabled={busy}
+                  onClick={() => void runAction(approveTaskAgentTask)}
+                  className="cursor-pointer rounded bg-emerald-600 px-3 py-1.5 text-xs text-white disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  承認
+                </button>
+                <button
+                  type="button"
+                  data-testid="task-reject"
+                  disabled={rejectDisabled}
+                  onClick={() =>
+                    void runAction((id) => rejectTaskAgentTask(id, rejectReason.trim()))
+                  }
+                  className="cursor-pointer rounded bg-rose-600 px-3 py-1.5 text-xs text-white disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  差戻し
+                </button>
+              </>
+            )}
+            {!isTerminal && (
+              <button
+                type="button"
+                data-testid="task-cancel"
+                disabled={busy}
+                onClick={() => void runAction(cancelTaskAgentTask)}
+                className="cursor-pointer rounded bg-slate-900 px-3 py-1.5 text-xs text-white disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {task.status === "running" ? "実行中の子runを停止して取消" : "取消"}
+              </button>
+            )}
+            {canReplan && (
+              <button
+                type="button"
+                data-testid="task-replan"
+                disabled={busy}
+                onClick={() => void runAction(replanTaskAgentTask)}
+                className="cursor-pointer rounded bg-blue-600 px-3 py-1.5 text-xs text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                再計画
+              </button>
+            )}
+          </div>
+          {needsApproval && (
+            <textarea
+              aria-label="差戻し理由"
+              value={rejectReason}
+              onChange={(e) => setRejectReason(e.target.value)}
+              placeholder="差戻し理由(必須)"
+              rows={2}
+              className="mt-2 w-full rounded border border-slate-300 px-2 py-1 text-sm"
+            />
+          )}
+        </section>
+
+        <section
+          aria-label="結果"
+          className="min-w-0 rounded border border-slate-200 bg-white p-4"
+        >
+          <h2 className="text-sm font-semibold">結果</h2>
+          {!task.result_summary && !task.error_summary && (
+            <p className="mt-1 text-sm text-slate-500">結果はまだありません</p>
+          )}
+          {task.result_summary && (
+            <div className="mt-1 min-w-0 text-sm text-slate-700">
+              <SmartText text={task.result_summary} />
+            </div>
+          )}
+          {task.error_summary && (
+            <div className="mt-2 min-w-0 text-sm text-rose-700">
+              <p className="text-xs font-medium">エラー:</p>
+              <SmartText text={task.error_summary} />
+            </div>
+          )}
+        </section>
+
+        {showQuestionCard && hitlRun && (
+          <WaitingRunQuestionCard
+            hitlRunId={hitlRun.run_id}
+            questions={pendingQuestions}
+            disabled={hitlBusy}
+            onSubmit={async (answers) => {
+              setHitlBusy(true);
+              try {
+                await Promise.all(
+                  Object.entries(answers).map(([key, a]) =>
+                    submitHitlAnswer(hitlRun.run_id, key, a.value, a.comment),
+                  ),
+                );
+                await waitForHitlSettled(hitlRun.run_id).catch(() => undefined);
+                await loadDetail(false);
+              } finally {
+                setHitlBusy(false);
+              }
+            }}
+            onCancel={async () => {
+              setHitlBusy(true);
+              try {
+                await cancelHitlRun(hitlRun.run_id);
+                await loadDetail(false);
+              } finally {
+                setHitlBusy(false);
+              }
+            }}
+          />
+        )}
+
+        <section
+          aria-label="Plan履歴"
+          className="min-w-0 rounded border border-slate-200 bg-white p-4"
+        >
+          <h2 className="text-sm font-semibold">Plan履歴</h2>
+          {detail.plans.length === 0 && (
+            <p className="mt-1 text-sm text-slate-500">Planはまだありません</p>
+          )}
+          <ul className="mt-2 space-y-3">
+            {detail.plans.map((p) => (
+              <li
+                key={p.plan_id}
+                className="min-w-0 rounded border border-slate-200 p-2"
+              >
+                <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs">
+                  <span className="font-medium">v{p.version}</span>
+                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600">
+                    {p.status}
+                  </span>
+                  {p.plan_id === task.current_plan_id && (
+                    <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-medium text-blue-800">
+                      現行
+                    </span>
+                  )}
+                  <span className="min-w-0 break-words text-slate-400">
+                    {formatDateTime(p.created_at)}
+                  </span>
+                </div>
+                <p className="mt-1 min-w-0 break-all text-[11px] text-slate-400">
+                  Plan ID: {p.plan_id}
+                  {p.decided_at && ` / 決定 ${formatDateTime(p.decided_at)}`}
+                </p>
+                {p.rejection_reason && (
+                  <p className="mt-1 min-w-0 whitespace-pre-wrap break-words text-xs text-rose-700 [overflow-wrap:anywhere]">
+                    差戻し理由: {p.rejection_reason}
+                  </p>
+                )}
+                {isDirectionalPlan(p.plan) ? (
+                  <DirectionalPlanView plan={p.plan as DirectionalPlanJson} />
+                ) : (
+                  <LegacyPlanView plan={p.plan} />
+                )}
+                <div className="mt-2 min-w-0 border-t border-slate-100 pt-2 text-xs text-slate-700">
+                  <p className="font-medium text-slate-500">Planデータ全体</p>
+                  <div className="mt-1 min-w-0">
+                    <StructuredValue value={p.plan} />
+                  </div>
+                </div>
+                <div className="mt-2 min-w-0 text-xs text-slate-700">
+                  <p className="font-medium text-slate-500">
+                    承認ポリシースナップショット
+                  </p>
+                  <div className="mt-1 min-w-0">
+                    <StructuredValue value={p.approval_policy_snapshot} />
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+
+        {actionHistory.length > 0 && (
+          <section
+            aria-label="実行Action履歴"
+            className="min-w-0 rounded border border-slate-200 bg-white p-4"
+          >
+            <h2 className="text-sm font-semibold">実行Action履歴</h2>
+            <ul className="mt-1 space-y-2 text-xs text-slate-700">
+              {actionHistory.map((e) => (
+                <li
+                  key={e.event_id}
+                  className="min-w-0 rounded border border-slate-100 p-2"
+                >
+                  <div className="min-w-0 break-words font-medium">
+                    Action{" "}
+                    {String(e.payload?.action_index ?? e.payload?.step_index ?? "?")}
+                    : {String(e.payload?.capability_key ?? "")}
+                  </div>
+                  <RelatedRunLinks payload={e.payload} />
+                  <div className="mt-1 min-w-0">
+                    <StructuredValue value={e.payload} />
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+
+        {childRefEvents.length > 0 && (
+          <section
+            aria-label="子run参照"
+            className="min-w-0 rounded border border-slate-200 bg-white p-4"
+          >
+            <h2 className="text-sm font-semibold">子run参照</h2>
+            <ul className="mt-1 space-y-1 text-xs text-slate-700">
+              {childRefEvents.map((e) => {
+                const ref = childRunRefFromPayload(e.payload);
+                if (!ref) return null;
+                const stepLabel =
+                  e.payload?.step_index ?? e.payload?.action_index;
+                return (
+                  <li key={e.event_id} className="min-w-0">
+                    <ChildRunLink {...ref} />
+                    <span className="ml-2 break-words text-slate-400">
+                      （{eventTypeLabel(e.event_type)}
+                      {stepLabel != null ? ` / Step ${String(stepLabel)}` : ""}
+                      {` / ${formatDateTime(e.created_at)}`}）
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        )}
+
+        <section
+          aria-label="実行Event"
+          className="min-w-0 rounded border border-slate-200 bg-white p-4"
+        >
+          <h2 className="text-sm font-semibold">実行Event</h2>
+          {detail.events.length === 0 && (
+            <p className="mt-1 text-sm text-slate-500">Eventはまだありません</p>
+          )}
+          <ul className="mt-1 divide-y divide-slate-100 text-xs">
+            {detail.events.map((e) => (
+              <li key={e.event_id} className="min-w-0 py-2">
+                <span className="font-medium">{eventTypeLabel(e.event_type)}</span>
+                <span className="ml-2 break-words text-slate-400">
+                  {formatDateTime(e.created_at)}（seq {e.seq}）
+                </span>
+                <RelatedRunLinks payload={e.payload} />
+                <div className="mt-1 min-w-0 text-slate-600">
+                  <StructuredValue value={e.payload} />
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      </div>
+    </div>
+  );
+}

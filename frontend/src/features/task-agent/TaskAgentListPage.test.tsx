@@ -57,6 +57,10 @@ function renderPage(initialPath = "/task-agent") {
       <Routes>
         <Route path="/task-agent" element={<TaskAgentListPage />} />
         <Route
+          path="/task-agent/capabilities"
+          element={<div data-testid="capabilities-marker">capabilities</div>}
+        />
+        <Route
           path="/task-agent/:taskId"
           element={<div data-testid="detail-marker">detail</div>}
         />
@@ -117,5 +121,23 @@ describe("TaskAgentListPage", () => {
     const rows = await screen.findAllByTestId("task-agent-row");
     await user.click(rows[0]);
     expect(await screen.findByTestId("detail-marker")).toBeInTheDocument();
+  });
+
+  it("shows a settings gear link to the existing capabilities URL", async () => {
+    renderPage();
+    await screen.findByText("今日の予定をまとめて");
+    const link = screen.getByRole("link", { name: "Task Capability設定を開く" });
+    expect(link).toHaveAttribute("href", "/task-agent/capabilities");
+    expect(link).toHaveAttribute("title", "Task Capability設定を開く");
+  });
+
+  it("navigates to the capabilities page on gear click", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText("今日の予定をまとめて");
+    await user.click(
+      screen.getByRole("link", { name: "Task Capability設定を開く" }),
+    );
+    expect(await screen.findByTestId("capabilities-marker")).toBeInTheDocument();
   });
 });

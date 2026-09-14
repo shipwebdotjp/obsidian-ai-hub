@@ -78,4 +78,4 @@ MVPの範囲は [specification.md](specification.md) を正とする。
   追加できる。通知失敗がTask本体を失敗させない方針を先に定める。
 
 ## UI
-- Plan履歴,実行EventをJSONではなく，ユーザーフレンドリーな表示に修正する
+- タスクエージェント、Plan履歴, 実行EventをJSONではなく，構造化データとして表示する。子run参照はリンクに。
