@@ -70,8 +70,14 @@ def _run_execution(
     if not _ensure_capabilities_enabled(task_id, plan):
         return
     active_executor: StepExecutor = executor or get_default_executor()
+    from obsidian_ai_hub.tasks.directional import is_directional_plan
+    from obsidian_ai_hub.tasks.orchestrator import run_directional_plan
+
     try:
-        outcome = execute_plan(task_id, plan, active_executor)
+        if is_directional_plan(plan.get("plan", {})):
+            outcome = run_directional_plan(task_id, plan, active_executor)
+        else:
+            outcome = execute_plan(task_id, plan, active_executor)
     except TaskCancelled:
         task_store.clear_active_child(task_id)
         task_store.transition_task_status(task_id, "cancelling")
@@ -96,14 +102,26 @@ def _ensure_capabilities_enabled(task_id: str, plan: dict[str, Any]) -> bool:
     instead of running with a capability the operator turned off.
     """
     capabilities = {c["capability_key"]: c for c in task_store.list_capabilities()}
-    steps = plan.get("plan", {}).get("steps", [])
-    disabled = sorted(
-        {
+    plan_inner = plan.get("plan", {}) or {}
+    # Directional plans list approved capabilities; legacy plans list steps.
+    if isinstance(plan_inner.get("capabilities"), list):
+        keys = {
+            str(entry.get("capability_key"))
+            for entry in plan_inner["capabilities"]
+            if isinstance(entry, dict)
+        }
+    else:
+        steps = plan_inner.get("steps", [])
+        keys = {
             str(step.get("capability_key"))
             for step in steps
-            if not capabilities.get(str(step.get("capability_key")), {}).get(
-                "enabled", False
-            )
+            if isinstance(step, dict)
+        }
+    disabled = sorted(
+        {
+            key
+            for key in keys
+            if not capabilities.get(key, {}).get("enabled", False)
         }
     )
     if not disabled:

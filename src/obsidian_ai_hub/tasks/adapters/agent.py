@@ -47,10 +47,22 @@ class AgentAdapter:
         from obsidian_ai_hub.agents import store as agent_store
         from obsidian_ai_hub.runs.instance import get_instance_id
 
+        from obsidian_ai_hub.tasks.capability_schemas import (
+            validate_capability_inputs,
+            validate_capability_target,
+        )
+
         task_id = str(task["task_id"])
-        target = step.get("target")
-        if not isinstance(target, dict):
-            raise ValueError(f"Step {step_index} target must be an object.")
+        try:
+            target = validate_capability_target(
+                "specialist_agent", step.get("target")
+            )
+            step_inputs = validate_capability_inputs(
+                "specialist_agent", step.get("inputs", {})
+            )
+        except ValueError as exc:
+            raise ValueError(f"Step {step_index} {exc}") from exc
+        step = dict(step, target=target, inputs=step_inputs)
         agent_id = target.get("agent_id")
         agent = agent_store.get_agent(str(agent_id)) if agent_id else None
         if agent is None:

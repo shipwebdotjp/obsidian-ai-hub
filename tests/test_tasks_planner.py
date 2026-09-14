@@ -395,3 +395,285 @@ def test_plan_task_after_answer_builds_plan(monkeypatch):
     result = planning.plan_task(task["task_id"])
     assert result["outcome"] == "running"
     assert "project:1" in seen["prompt"]
+
+
+def _directional_json(**overrides):
+    plan = {
+        "type": "plan",
+        "purpose": "好みを記憶する",
+        "strategy": "検索して提案",
+        "capabilities": [
+            {"capability_key": "web_search", "intent": "検索する"},
+        ],
+        "constraints": "",
+        "completion_criteria": "done",
+        "max_actions": 5,
+    }
+    plan.update(overrides)
+    return json.dumps(plan, ensure_ascii=False)
+
+
+def test_parse_planner_output_directional():
+    plan = planning.parse_planner_output(_directional_json())
+    assert plan["plan_version"] == 2
+    assert plan["capabilities"][0]["capability_key"] == "web_search"
+    assert "steps" not in plan
+
+    with pytest.raises(ValueError, match="capabilities"):
+        planning.parse_planner_output(
+            json.dumps({"type": "plan", "purpose": "p", "completion_criteria": "d"})
+        )
+    with pytest.raises(ValueError, match="blank"):
+        planning.parse_planner_output(_directional_json(purpose="  "))
+    with pytest.raises(ValueError, match="must not be empty"):
+        planning.parse_planner_output(_directional_json(capabilities=[]))
+
+
+def test_validate_directional_plan():
+    plan = json.loads(_directional_json())
+    snapshot = planning.validate_directional_plan(plan, _context())
+    assert snapshot == {"web_search": "auto"}
+
+    bad = json.loads(_directional_json())
+    bad["capabilities"][0]["capability_key"] = "run_shell"
+    with pytest.raises(ValueError, match="unknown or disabled"):
+        planning.validate_directional_plan(bad, _context())
+
+    dup = json.loads(_directional_json())
+    dup["capabilities"].append({"capability_key": "web_search", "intent": "x"})
+    with pytest.raises(ValueError, match="twice"):
+        planning.validate_directional_plan(dup, _context())
+
+
+def test_validate_directional_rejects_unresolvable_schema(monkeypatch):
+    from obsidian_ai_hub.tasks import capability_schemas
+
+    monkeypatch.setattr(
+        capability_schemas, "resolve_json_schema", lambda key: None
+    )
+    with pytest.raises(ValueError, match="no resolvable input schema"):
+        planning.validate_directional_plan(json.loads(_directional_json()), _context())
+
+
+def test_build_planner_prompt_includes_schema_and_description():
+    context = planning.collect_planner_context()
+    keys = {c["capability_key"] for c in context["capabilities"]}
+    assert "web_search" in keys and "memory_propose" in keys
+    prompt = planning.build_planner_prompt("好みを記憶して", context, [])
+    assert "memory_propose" in prompt
+    assert "content" in prompt  # compact schema field
+    assert "required" in prompt
+    assert "trusted_ctx" not in prompt
+
+
+def test_plan_task_directional_saves_scope(monkeypatch):
+    monkeypatch.setattr(planning, "collect_planner_context", _context)
+    monkeypatch.setattr(
+        planning, "generate_llm_response", lambda *a, **k: _directional_json()
+    )
+    task = store.create_task("directional job")
+    _claim(task["task_id"])
+    result = planning.plan_task(task["task_id"])
+    assert result["outcome"] == "running"
+    plan_inner = result["plan"]["plan"]
+    assert plan_inner["plan_version"] == 2
+    assert plan_inner["capabilities"][0]["capability_key"] == "web_search"
+    assert "steps" not in plan_inner
+    assert result["plan"]["approval_policy_snapshot"] == {"web_search": "auto"}
+
+
+def test_plan_task_directional_plan_required_waits_approval(monkeypatch):
+    context = dict(
+        _context(),
+        capabilities=_context()["capabilities"]
+        + [
+            {
+                "capability_key": "memory_propose",
+                "adapter_kind": "memory",
+                "approval_policy": "plan_required",
+            }
+        ],
+    )
+    monkeypatch.setattr(planning, "collect_planner_context", lambda: context)
+    raw = _directional_json(
+        capabilities=[{"capability_key": "memory_propose", "intent": "記憶する"}]
+    )
+    monkeypatch.setattr(planning, "generate_llm_response", lambda *a, **k: raw)
+    task = store.create_task("memory job")
+    _claim(task["task_id"])
+    result = planning.plan_task(task["task_id"])
+    assert result["outcome"] == "waiting_approval"
+    assert result["plan"]["plan"]["max_actions"] == 5
+
+
+def test_validate_directional_plan_stamps_target_allowlists():
+    context = dict(
+        _context(),
+        agents=[{"agent_id": "agent_1", "name": "Helper"}],
+        projects=[{"project_id": 3, "name": "Demo", "git_root": "/repo/demo"}],
+    )
+    plan = json.loads(
+        _directional_json(
+            capabilities=[
+                {"capability_key": "web_search", "intent": "検索"},
+                {"capability_key": "specialist_agent", "intent": "委譲"},
+                {"capability_key": "coding_cli", "intent": "実装"},
+            ]
+        )
+    )
+    full_context = dict(
+        context,
+        capabilities=context["capabilities"]
+        + [
+            {
+                "capability_key": "specialist_agent",
+                "adapter_kind": "agent",
+                "approval_policy": "plan_required",
+            },
+            {
+                "capability_key": "coding_cli",
+                "adapter_kind": "coding",
+                "approval_policy": "plan_required",
+            },
+        ],
+    )
+    snapshot = planning.validate_directional_plan(plan, full_context)
+    assert snapshot["specialist_agent"] == "plan_required"
+    assert plan["allowed_agent_ids"] == ["agent_1"]
+    assert plan["allowed_project_ids"] == [3]
+
+
+def test_validate_directional_plan_rejects_delegate_without_registry():
+    plan = json.loads(
+        _directional_json(
+            capabilities=[{"capability_key": "specialist_agent", "intent": "委譲"}]
+        )
+    )
+    context = dict(
+        _context(),
+        agents=[],
+        capabilities=_context()["capabilities"]
+        + [
+            {
+                "capability_key": "specialist_agent",
+                "adapter_kind": "agent",
+                "approval_policy": "plan_required",
+            }
+        ],
+    )
+    with pytest.raises(ValueError, match="no agents are registered"):
+        planning.validate_directional_plan(plan, context)
+
+    coding_plan = json.loads(
+        _directional_json(
+            capabilities=[{"capability_key": "coding_cli", "intent": "実装"}]
+        )
+    )
+    coding_context = dict(
+        _context(),
+        projects=[],
+        capabilities=_context()["capabilities"]
+        + [
+            {
+                "capability_key": "coding_cli",
+                "adapter_kind": "coding",
+                "approval_policy": "plan_required",
+            }
+        ],
+    )
+    with pytest.raises(ValueError, match="no valid projects"):
+        planning.validate_directional_plan(coding_plan, coding_context)
+
+
+def test_validate_directional_stamps_target_allowlists():
+    context = dict(
+        _context(),
+        agents=[{"agent_id": "agent_1", "name": "Helper"}],
+        projects=[{"project_id": 3, "name": "Demo", "git_root": "/repo/demo"}],
+    )
+    plan = json.loads(
+        _directional_json(
+            capabilities=[
+                {"capability_key": "web_search", "intent": "検索"},
+                {"capability_key": "specialist_agent", "intent": "委譲"},
+                {"capability_key": "coding_cli", "intent": "実装"},
+            ]
+        )
+    )
+    context["capabilities"] = context["capabilities"] + [
+        {
+            "capability_key": "specialist_agent",
+            "adapter_kind": "agent",
+            "approval_policy": "plan_required",
+        },
+        {
+            "capability_key": "coding_cli",
+            "adapter_kind": "coding",
+            "approval_policy": "plan_required",
+        },
+    ]
+    snapshot = planning.validate_directional_plan(plan, context)
+    assert set(snapshot) == {"web_search", "specialist_agent", "coding_cli"}
+    assert plan["allowed_agent_ids"] == ["agent_1"]
+    assert plan["allowed_project_ids"] == [3]
+
+
+def test_validate_directional_rejects_delegate_without_registry():
+    plan = json.loads(
+        _directional_json(
+            capabilities=[{"capability_key": "specialist_agent", "intent": "委譲"}]
+        )
+    )
+    context = dict(
+        _context(),
+        agents=[],
+        capabilities=_context()["capabilities"]
+        + [
+            {
+                "capability_key": "specialist_agent",
+                "adapter_kind": "agent",
+                "approval_policy": "plan_required",
+            }
+        ],
+    )
+    with pytest.raises(ValueError, match="no agents are registered"):
+        planning.validate_directional_plan(plan, context)
+
+    coding_plan = json.loads(
+        _directional_json(
+            capabilities=[{"capability_key": "coding_cli", "intent": "実装"}]
+        )
+    )
+    coding_context = dict(
+        _context(),
+        projects=[],
+        capabilities=_context()["capabilities"]
+        + [
+            {
+                "capability_key": "coding_cli",
+                "adapter_kind": "coding",
+                "approval_policy": "plan_required",
+            }
+        ],
+    )
+    with pytest.raises(ValueError, match="no valid projects"):
+        planning.validate_directional_plan(coding_plan, coding_context)
+
+
+def test_plan_task_directional_records_allowlist_snapshot(monkeypatch):
+    context = dict(
+        _context(),
+        agents=[{"agent_id": "agent_9", "name": "Nine"}],
+        projects=[{"project_id": 7, "name": "P", "git_root": "/repo/p"}],
+    )
+    monkeypatch.setattr(planning, "collect_planner_context", lambda: context)
+    monkeypatch.setattr(
+        planning, "generate_llm_response", lambda *a, **k: _directional_json()
+    )
+    task = store.create_task("allowlist job")
+    _claim(task["task_id"])
+    result = planning.plan_task(task["task_id"])
+    assert result["outcome"] == "running"
+    saved = result["plan"]["plan"]
+    assert saved["allowed_agent_ids"] == ["agent_9"]
+    assert saved["allowed_project_ids"] == [7]

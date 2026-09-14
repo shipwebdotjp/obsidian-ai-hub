@@ -56,7 +56,12 @@ def test_registry_tool_success_and_inputs(monkeypatch):
     monkeypatch.setattr(
         registry_module,
         "TOOL_DEFINITIONS",
-        {"calendar_read": {"get_tool": lambda: fake}},
+        {
+            "calendar_read": {
+                "get_tool": lambda: fake,
+                "input_model": registry_module.CalendarReadInput,
+            }
+        },
     )
     task, plan = _task_with_plan(
         "calendar_read", {}, {"start_date": "2026-09-14", "end_date": "2026-09-15"}
@@ -82,9 +87,13 @@ def test_registry_tool_unknown_registration(monkeypatch):
 
 
 def test_registry_tool_invalid_inputs_and_tool_error(monkeypatch):
+    from obsidian_ai_hub.handler.web_search import WebSearchInput
+
     fake = FakeTool('{"ok": true}')
     monkeypatch.setattr(
-        registry_module, "TOOL_DEFINITIONS", {"web_search": {"get_tool": lambda: fake}}
+        registry_module,
+        "TOOL_DEFINITIONS",
+        {"web_search": {"get_tool": lambda: fake, "input_model": WebSearchInput}},
     )
     task, plan = _task_with_plan("web_search", {}, {"query": "x"})
     bad_step = dict(plan["plan"]["steps"][0], inputs=["not", "a", "dict"])
@@ -95,7 +104,7 @@ def test_registry_tool_invalid_inputs_and_tool_error(monkeypatch):
     monkeypatch.setattr(
         registry_module,
         "TOOL_DEFINITIONS",
-        {"web_search": {"get_tool": lambda: failing}},
+        {"web_search": {"get_tool": lambda: failing, "input_model": WebSearchInput}},
     )
     with pytest.raises(ValueError, match="Registry tool 'web_search' failed"):
         RegistryToolExecutor().execute_step(task, plan, 0, plan["plan"]["steps"][0])
@@ -111,7 +120,12 @@ def test_memory_propose_uses_task_context(monkeypatch):
     monkeypatch.setattr(
         registry_module,
         "TOOL_DEFINITIONS",
-        {"memory_propose": {"get_tool_with_context": factory}},
+        {
+            "memory_propose": {
+                "get_tool_with_context": factory,
+                "input_model": registry_module.MemoryProposeInput,
+            }
+        },
     )
     task, plan = _task_with_plan("memory_propose", {}, {"content": "x", "kind": "fact"})
     RegistryToolExecutor().execute_step(task, plan, 0, plan["plan"]["steps"][0])
@@ -359,11 +373,11 @@ def test_coding_adapter_success(monkeypatch):
 def test_coding_adapter_validates_target(monkeypatch):
     _mock_coding_success(monkeypatch)
     task, plan = _task_with_plan("coding_cli", {"project_id": 7, "backend": "bogus"})
-    with pytest.raises(ValueError, match="unknown backend"):
+    with pytest.raises(ValueError, match="target invalid"):
         CodingAdapter().execute_step(task, plan, 0, plan["plan"]["steps"][0])
 
     task2, plan2 = _task_with_plan("coding_cli", {"project_id": "not-an-int"})
-    with pytest.raises(ValueError, match="invalid project"):
+    with pytest.raises(ValueError, match="target invalid"):
         CodingAdapter().execute_step(task2, plan2, 0, plan2["plan"]["steps"][0])
 
     monkeypatch.setattr(projects_service, "get_project_detail", lambda project_id: None)
@@ -389,9 +403,13 @@ def test_coding_adapter_failed_child(monkeypatch):
 
 
 def test_composite_executor_dispatch_and_rejection(monkeypatch):
+    from obsidian_ai_hub.handler.web_search import WebSearchInput
+
     fake = FakeTool('{"ok": true}')
     monkeypatch.setattr(
-        registry_module, "TOOL_DEFINITIONS", {"web_search": {"get_tool": lambda: fake}}
+        registry_module,
+        "TOOL_DEFINITIONS",
+        {"web_search": {"get_tool": lambda: fake, "input_model": WebSearchInput}},
     )
     task, plan = _task_with_plan("web_search", {}, {"query": "x"})
     result = get_default_executor().execute_step(

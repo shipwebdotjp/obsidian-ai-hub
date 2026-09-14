@@ -19,8 +19,13 @@
 | --- | --- |
 | **Task** | 自由文依頼一件の集約ルート。Plan、状態、Event、子run参照を所有する。 |
 | **Task Agent** | Task Orchestration機能全体。CLI、Planner、Task worker、WebUIを含む。 |
-| **Plan** | 目的、順序付きStep、Capability、対象、入力、副作用、完了条件を持つ実行記述。Task内で版管理される。 |
-| **Step** | Plan内の一つのCapability実行単位。保存済み入力と対象だけを使う。 |
+| **Plan** | 目的、順序付きStep、Capability、対象、入力、副作用、完了条件を持つ実行記述。Task内で版管理される。Directional Planと旧形式の静的Planがある。 |
+| **Directional Plan** | タスクの目的、実行方針、承認されたCapability範囲、制約、完了条件を表す。全ツール引数を事前確定しない。 |
+| **Step** | 旧形式の静的Plan内の一つのCapability実行単位。保存済み入力と対象だけを使う。 |
+| **Runtime Orchestrator** | Directional Planと過去のObservationを基に、次のActionを構造化出力する判断主体。 |
+| **Action** | 次のCapability呼び出し、またはタスク完了を表す構造化された判断。 |
+| **Observation** | Capability実行結果としてRuntime Orchestratorへ戻される情報。 |
+| **Approval Scope** | 承認された目的、Capability、制約の境界。範囲外のActionは実行せず再承認へ回す。 |
 | **Capability** | コードで定義されたAdapterと、DBで管理する有効状態・承認ポリシーの組。 |
 | **Approval Policy** | `auto` または `plan_required`。Planの人間承認要否を決めるCapability設定。 |
 | **Adapter** | Registry tool、AI Agent、Coding CLIの入出力をTaskのEventと結果へ正規化する層。 |

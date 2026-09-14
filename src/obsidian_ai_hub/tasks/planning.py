@@ -26,34 +26,49 @@ TASK_RESOLVE_HANDLER = "tasks.resolve_target"
 
 PLANNER_SYSTEM_PROMPT = """あなたは個人用タスクオーケストレーターのPlannerである。
 自由文の依頼を、次に示すJSONだけ(前後の説明やコードフェンスなし)で返す。
+あなたが作るのはDirectional Planである: 承認対象は全体の方向性・目的・
+許可するCapability範囲・主要な制約であり、個々のツール呼び出しの詳細入力
+(inputs)を事前確定しない。詳細入力はRuntime Orchestratorが実行時に生成する。
 
 Planの場合:
-{"type": "plan", "purpose": "目的", "steps": [{"capability_key": "...", "title": "...",
-"target": {"agent_id": "..."} または {"project_id": "..."} または {},
-"inputs": {...}, "side_effects": "..."}], "completion_criteria": "..."}
+{"type": "plan", "purpose": "目的", "strategy": "実行方針の概要",
+ "capabilities": [{"capability_key": "...", "intent": "そのCapabilityを使う大まかな意図"}],
+ "constraints": "主要な制約(触れてはならない範囲など)",
+ "completion_criteria": "完了条件", "max_actions": 8}
 
- 対象を一意に解決できない場合:
- {"type": "question", "question_text": "...",
-  "options": [{"value": "project:1", "label": "Project 1: Obsidian AI Hub"},
-              {"value": "agent:agent_1", "label": "Helper"}]}
+  委譲対象の扱い: specialist_agent / coding_cli の具体的な対象ID
+  (agent_id / project_id) はPlanに書かない。承認時点で有効なAgent / Project
+  一覧を承認範囲として自動記録し、Runtime Orchestratorが範囲内でのみ解決する。
+  specialist_agentを使うならintentにどのAgentを使うかの目安を書き、
+  coding_cliを使うならどのProjectを使うかの目安を書く。
+  登録済みAgentが一つもないのにspecialist_agentを、有効Projectがないのに
+  coding_cliを選んではならない。その場合はquestionを返す。
 
- 規則:
- - stepsのcapability_keyは提示された有効Capabilityだけを使う。
- - specialist_agentのtarget.agent_idは提示されたAgent IDだけを使う。
- - coding_cliのtarget.project_idは提示されたProject IDだけを使う。
-   target.project_idはJSONの整数で返す。target.backendはcodexまたはopencode(省略時は既定backend)。
- - 依頼文に登録済みProjectの名前・キーワードが含まれる場合は対象が確定している。
-   その場合は質問せず、該当Projectをtargetに固定したPlanを作る。
- - 提示にないCapability/Agent/Projectが必要ならPlanを作らずquestionを返す。
-   optionsに挙げられる対象は提示された有効Project/Agentだけを使う。
-   optionsのvalueは "project:<project_id>"、"agent:<agent_id>"、または自由文テキストとし、
-   labelは人間に表示する文言とする。
- - 実行時にCapabilityや対象を作り直さない前提で、入力と対象をPlanに固定する。
- - 子runはPlan外の作業を検出できないため、Planは必要十分なStepだけを含む。
- - 以前の質問と回答がある場合、その回答は確定事項である。回答に従って対象を確定し
-   Planを作り、回答済みの質問を再質問してはならない。
- - 質問は依頼文から対象がまったく推定できないときだけ使う。
- """
+  対象を一意に解決できない場合:
+  {"type": "question", "question_text": "...",
+   "options": [{"value": "project:1", "label": "Project 1: Obsidian AI Hub"},
+               {"value": "agent:agent_1", "label": "Helper"}]}
+
+  規則:
+  - capabilitiesのcapability_keyは提示された有効Capabilityだけを使う。
+  - 各capabilityのintentには詳細な引数値ではなく大まかな用途を書く。
+    inputsの具体値 (query/content等) をPlanに固定してはならない。
+  - specialist_agentを使う場合はintentにどのAgentを使うかの目安を書く。
+    最終的なagent_id解決はRuntime Orchestratorが行うが、提示されたAgent IDの範囲を超えてはならない。
+  - coding_cliを使う場合はintentにどのProjectを使うかの目安を書く。
+    提示にないProjectが必要ならPlanを作らずquestionを返す。
+  - 依頼文に登録済みProjectの名前・キーワードが含まれる場合は対象が確定している。
+    その場合は質問せず、該当Projectをintentに明記したPlanを作る。
+  - 提示にないCapability/Agent/Projectが必要ならPlanを作らずquestionを返す。
+    optionsに挙げられる対象は提示された有効Project/Agentだけを使う。
+    optionsのvalueは "project:<project_id>"、"agent:<agent_id>"、または自由文テキストとし、
+    labelは人間に表示する文言とする。
+  - 承認対象は方向性とCapability範囲である。Planに詳細inputsを含めない。
+  - max_actionsは1以上30以下の整数で、省略時は8とする。
+  - 以前の質問と回答がある場合、その回答は確定事項である。回答に従って対象を確定し
+    Planを作り、回答済みの質問を再質問してはならない。
+  - 質問は依頼文から対象がまったく推定できないときだけ使う。
+  """
 
 
 def default_provider_model() -> tuple[str, str]:
@@ -64,18 +79,34 @@ def default_provider_model() -> tuple[str, str]:
 
 
 def collect_planner_context() -> dict[str, Any]:
-    """Collect enabled capabilities, registered agents, and valid projects."""
-    from obsidian_ai_hub.agents import store as agent_store
+    """Collect enabled capabilities, registered agents, and valid projects.
 
-    capabilities = [
-        {
-            "capability_key": c["capability_key"],
-            "adapter_kind": c["adapter_kind"],
-            "approval_policy": c["approval_policy"],
-        }
-        for c in task_store.list_capabilities()
-        if c["enabled"]
-    ]
+    Capability entries carry the code-defined label/description plus a
+    compact input schema derived from the single-source Pydantic model
+    (``tasks/capability_schemas.py``). No runtime-injected values
+    (``trusted_ctx``, API keys, session ids) are ever included.
+    """
+    from obsidian_ai_hub.agents import store as agent_store
+    from obsidian_ai_hub.tasks.capabilities import CAPABILITY_DEFINITIONS
+    from obsidian_ai_hub.tasks.capability_schemas import compact_schema_text
+
+    catalog = {d.key: d for d in CAPABILITY_DEFINITIONS}
+    capabilities = []
+    for c in task_store.list_capabilities():
+        if not c["enabled"]:
+            continue
+        key = c["capability_key"]
+        definition = catalog.get(key)
+        capabilities.append(
+            {
+                "capability_key": key,
+                "adapter_kind": c["adapter_kind"],
+                "approval_policy": c["approval_policy"],
+                "label": definition.label if definition else key,
+                "description": definition.description if definition else "",
+                "input_schema": compact_schema_text(key),
+            }
+        )
     agents = [
         {"agent_id": a["agent_id"], "name": a.get("name", "")}
         for a in agent_store.list_agents()
@@ -118,10 +149,23 @@ def build_planner_prompt(
     context: dict[str, Any],
     qa_history: Optional[list[dict[str, Any]]] = None,
 ) -> str:
-    capability_lines = [
-        f"- {c['capability_key']} ({c['adapter_kind']}, {c['approval_policy']}): "
-        for c in context["capabilities"]
-    ]
+    capability_lines = []
+    for c in context["capabilities"]:
+        header = (
+            f"- {c['capability_key']} ({c['adapter_kind']}, {c['approval_policy']}): "
+            f"{c.get('label', '')} {c.get('description', '')}".rstrip()
+        )
+        capability_lines.append(header)
+        schema_text = c.get("input_schema")
+        if schema_text:
+            # Indent the compact schema so the planner sees field-level
+            # requirements without a second hand-written source.
+            indented = "\n".join(
+                f"    {line}" for line in str(schema_text).splitlines()
+            )
+            capability_lines.append(indented)
+        else:
+            capability_lines.append("    (入力schema: 解決不可のCapabilityはPlanに含めないこと)")
     agent_lines = [f"- {a['agent_id']}: {a['name']}" for a in context["agents"]]
     project_lines = [
         f"- {p['project_id']}: {p['name']} ({p['git_root']})"
@@ -223,10 +267,58 @@ def parse_planner_output(raw: str) -> dict[str, Any]:
         raise ValueError("Planner output must be a JSON object.")
     output_type = output.get("type")
     if output_type == "plan":
-        return _validate_plan_shape(output)
+        # Directional plans carry "capabilities"; legacy static plans carry
+        # "steps". Both parse here; legacy stays readable for old tasks.
+        if isinstance(output.get("capabilities"), list):
+            return _validate_directional_shape(output)
+        if isinstance(output.get("steps"), list):
+            return _validate_plan_shape(output)
+        raise ValueError(
+            "Plan requires either 'capabilities' (directional) or 'steps' (legacy)."
+        )
     if output_type == "question":
         return _validate_question_shape(output)
     raise ValueError(f"Planner output has unknown type: {output_type!r}.")
+
+
+def _validate_directional_shape(output: dict[str, Any]) -> dict[str, Any]:
+    """Validate the planner's directional plan JSON (no frozen inputs)."""
+    from obsidian_ai_hub.tasks.directional import (
+        MAX_ACTIONS_HARD_LIMIT,
+        DirectionalPlan,
+    )
+
+    try:
+        plan = DirectionalPlan.model_validate(
+            {
+                "plan_version": output.get("plan_version", 2),
+                "purpose": output.get("purpose"),
+                "strategy": output.get("strategy", ""),
+                "capabilities": output.get("capabilities"),
+                "allowed_agent_ids": output.get("allowed_agent_ids", []),
+                "allowed_project_ids": output.get("allowed_project_ids", []),
+                "constraints": output.get("constraints", ""),
+                "completion_criteria": output.get("completion_criteria"),
+                "max_actions": output.get("max_actions", 8),
+            }
+        )
+    except Exception as exc:
+        raise ValueError(f"Invalid directional plan: {exc}") from exc
+    if plan.max_actions is not None and not (
+        1 <= int(plan.max_actions) <= MAX_ACTIONS_HARD_LIMIT
+    ):
+        raise ValueError("Plan max_actions must be between 1 and 30.")
+    output["plan_version"] = 2
+    output["purpose"] = plan.purpose
+    output["strategy"] = plan.strategy
+    output["capabilities"] = [d.model_dump() for d in plan.capabilities]
+    output["allowed_agent_ids"] = list(plan.allowed_agent_ids or [])
+    output["allowed_project_ids"] = list(plan.allowed_project_ids or [])
+    output["constraints"] = plan.constraints
+    output["completion_criteria"] = plan.completion_criteria
+    output["max_actions"] = plan.max_actions
+    output.pop("steps", None)
+    return output
 
 
 def _validate_plan_shape(output: dict[str, Any]) -> dict[str, Any]:
@@ -332,6 +424,74 @@ def validate_plan_targets(
     return snapshot
 
 
+def validate_directional_plan(
+    plan: dict[str, Any], context: dict[str, Any]
+) -> dict[str, str]:
+    """Validate a directional plan's approval scope. Returns policy snapshot.
+
+    Checks that every planned capability is enabled and has a resolvable
+    input schema (the single source). Detailed inputs are intentionally NOT
+    fixed here — the Runtime Orchestrator generates and validates them.
+
+    As a side effect, stamps the approval-time delegate target allowlists
+    (``allowed_agent_ids`` / ``allowed_project_ids``) onto the plan from the
+    current registry context. The planner never forges these lists; the
+    orchestrator enforces membership per action.
+    """
+    from obsidian_ai_hub.tasks.capability_schemas import resolve_json_schema
+
+    enabled = {
+        c["capability_key"]: c["approval_policy"] for c in context["capabilities"]
+    }
+    snapshot: dict[str, str] = {}
+    capabilities = plan.get("capabilities")
+    if not isinstance(capabilities, list) or not capabilities:
+        raise ValueError("Directional plan requires a non-empty capabilities list.")
+    seen: set[str] = set()
+    for index, entry in enumerate(capabilities):
+        if not isinstance(entry, dict):
+            raise ValueError(f"Plan capability {index} must be an object.")
+        key = entry.get("capability_key")
+        if not isinstance(key, str) or not key:
+            raise ValueError(f"Plan capability {index} needs a capability_key.")
+        if key in seen:
+            raise ValueError(f"Plan capability '{key}' is listed twice.")
+        seen.add(key)
+        if key not in enabled:
+            raise ValueError(
+                f"Plan capability {index} uses unknown or disabled capability '{key}'."
+            )
+        snapshot[key] = enabled[key]
+        if resolve_json_schema(key) is None:
+            raise ValueError(
+                f"Plan capability '{key}' has no resolvable input schema."
+            )
+    agent_ids = [
+        str(a.get("agent_id"))
+        for a in context.get("agents", [])
+        if a.get("agent_id")
+    ]
+    project_ids = []
+    for project in context.get("projects", []):
+        try:
+            project_ids.append(int(project.get("project_id")))
+        except (TypeError, ValueError):
+            continue
+    if "specialist_agent" in seen and not agent_ids:
+        raise ValueError(
+            "Plan uses 'specialist_agent' but no agents are registered; "
+            "ask a target question instead."
+        )
+    if "coding_cli" in seen and not project_ids:
+        raise ValueError(
+            "Plan uses 'coding_cli' but no valid projects are registered; "
+            "ask a target question instead."
+        )
+    plan["allowed_agent_ids"] = agent_ids
+    plan["allowed_project_ids"] = project_ids
+    return snapshot
+
+
 def plan_task(
     task_id: str, conn: Optional[sqlite3.Connection] = None
 ) -> dict[str, Any]:
@@ -358,7 +518,10 @@ def plan_task(
         output = parse_planner_output(raw)
         snapshot: Optional[dict[str, str]] = None
         if output["type"] == "plan":
-            snapshot = validate_plan_targets(output, context)
+            if isinstance(output.get("capabilities"), list):
+                snapshot = validate_directional_plan(output, context)
+            else:
+                snapshot = validate_plan_targets(output, context)
     except Exception as exc:
         _fail_task(task_id, exc, conn=conn)
         raise ValueError(f"Planner failed for task '{task_id}': {exc}") from exc
@@ -392,13 +555,29 @@ def plan_task(
                     "hitl_run_id": hitl_run_id,
                 }
             assert snapshot is not None
-            plan_record = task_store.create_plan(
-                task_id,
-                {
+            if isinstance(output.get("capabilities"), list):
+                plan_inner: dict[str, Any] = {
+                    "plan_version": 2,
+                    "purpose": output["purpose"],
+                    "strategy": output.get("strategy", ""),
+                    "capabilities": output["capabilities"],
+                    "allowed_agent_ids": list(output.get("allowed_agent_ids") or []),
+                    "allowed_project_ids": list(
+                        output.get("allowed_project_ids") or []
+                    ),
+                    "constraints": output.get("constraints", ""),
+                    "completion_criteria": output["completion_criteria"],
+                    "max_actions": output.get("max_actions", 8),
+                }
+            else:
+                plan_inner = {
                     "purpose": output["purpose"],
                     "steps": output["steps"],
                     "completion_criteria": output["completion_criteria"],
-                },
+                }
+            plan_record = task_store.create_plan(
+                task_id,
+                plan_inner,
                 snapshot,
                 conn=active_conn,
             )

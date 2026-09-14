@@ -43,6 +43,10 @@ MVP後の再検討項目は [post-mvp.md](post-mvp.md) に集約する。
 
 Capabilityはコード側のAdapter keyとDB側の設定を組み合わせた実行能力である。
 Adapter実装、入力検証、ラベル、説明はコードの正本とし、DBは有効状態と承認ポリシーの正本とする。
+入力仕様の正本は各CapabilityのPydantic入力モデル / LangChain tool の `args_schema`
+であり、`tasks/capability_schemas.py` が遅延解決してPlanner用schemaと実行時検証を
+生成する。必須キーの手書き複製 (`required_inputs` 等) はしない。`trusted_ctx` や
+APIキー等のruntime注入値はschemaに含めず、Plannerへ公開しない。
 
 `approval_policy` は次の二値である。
 
@@ -70,8 +74,69 @@ system promptや有効toolが変われば挙動も変わり得る。このリス
 
 ## 4. Planと実行境界
 
-Planは少なくとも目的、順序付きStep、Capability key、確定対象、入力、想定副作用、完了条件を
-持つ。`coding_cli` StepではProject、正規化済みGit root、backendをPlanに固定する。
+Plan承認は全体的な方向性、目的、許可するCapability、主要な制約を承認する
+(Directional Plan)。個々のツール呼び出しの詳細入力は承認対象ではなく、
+承認済みPlanの目的・Capability範囲内の詳細入力生成には再承認を要求しない。
+
+Directional Planは少なくとも目的、実行方針、承認されたCapabilityの集合
+(Capabilityごとの大まかな意図付き)、制約、完了条件、最大Action数を持つ。
+詳細inputsはPlan時点で固定しない。`{{steps.N.summary}}` の単純文字列置換は
+採用しない。旧形式の静的Plan (順序付きStep・確定対象・入力を持つ) は互換
+読み込みし、旧実行器で実行する。DB schema変更はしない。
+
+承認済みDirectional Planの実行はRuntime Orchestratorの動的ループで行う:
+次のAction (Capability呼び出し / finish) を構造化出力し、承認範囲・入力
+schemaを検証してから実行し、ActionとObservationをEventへ保存する。
+各ツール呼び出し直前に入力モデルで完全検証し、外部副作用のないvalidation
+エラーは最大2回まで自己修正させる。`max_actions` (既定8、上限30) と同一
+Action反復検出で無限ループを防ぐ。再開時は完了済みActionを重複実行しない
+(`capability_completed` の `action_index` 基準。副作用完了〜Event保存間の
+障害では at-least-once の重複が残り得る)。
+
+未承認Capabilityの追加、目的の実質的変更は自動実行せず、改訂Planを同じ
+Task IDの次版として保存して `waiting_reapproval` にする (旧形式の自己申告
+フローと同様)。`coding_cli` ではProject、正規化済みGit root、backendを実行
+時に解決し、対象IDの検証は共通のPydanticモデルで行う。`specialist_agent` /
+`coding_cli` の委譲対象は、承認時点で有効だったAgent / Project IDの集合
+(`allowed_agent_ids` / `allowed_project_ids`) としてPlanへ記録し、Actionごとに
+範囲内か検証する。範囲外の対象は実行せず `waiting_reapproval` に回す。
+
+### 操作シナリオ契約
+
+| 段階 | 入力と正本 | 機械可読な識別子 | 永続化 | 次に読む主体 | 停止・失敗時 | 不可逆操作 |
+| --- | --- | --- | --- | --- | --- | --- |
+| Plan生成 | Capability schema (`args_schema`単一正本) | `capability_key` / `agent_id` / `project_id`(数値正規化) | Plan (方向性・Capability範囲・対象allowlist) | 承認者、Orchestrator | 未知Capability・解決不能schema・対象不在はPlan化せず失敗/質問 | なし |
+| 承認 | 承認範囲 (目的・Capability・制約・対象allowlist) | plan_version・承認snapshot | plan_approved / ready | worker | 差戻しは理由必須でqueuedへ | なし |
+| Action生成 | Plan・依頼・履歴Observation | RuntimeAction (構造化JSON) | 保存しない (LLM出力は使い捨て) | Orchestrator検証 | 不正出力は最大2回修正させて失敗 | なし |
+| Action検証 | 正本のPydanticモデル | capability_key・target・inputs | note (検証エラー) | Orchestrator (修正) / 人間 (再承認) | 範囲外は実行せずdeviation、修正尽きは失敗 (対象範囲外は再承認) | なし (実行しない) |
+| Action実行 | 検証済み入力 | action_index | capability_completed (target・inputs・observation) | 次ターンOrchestrator・再開時resume | tool失敗は失敗、取消は伝播 | memory_propose等の副作用 (at-least-once注意) |
+| 再開 | capability_completedのaction_index | action_index (max+1、重複排除) | 既存Event | Orchestrator | 上限到達・同一反復は停止 | 完了Event未保存の副作用は再実行され得る |
+| 完了 | 完了条件・finish要約 | result_summary | completed | 閲覧者 | — | — |
+
+保証範囲: 完了済みActionの非重複実行は `action_index` 基準のbest-effortであり、
+exactly-onceではない。副作用の実行から完了Event保存の間に障害が起きると、
+再開時に重複実行され得る (at-least-once)。Event履歴で検出可能にするが、
+自動的な防止・取消はしない。
+
+### 操作シナリオ契約
+
+| 段階 | 入力と正本 | 機械可読な識別子 | 永続化 | 次に読む主体 | 停止・失敗時 | 不可逆操作 |
+| --- | --- | --- | --- | --- | --- | --- |
+| Plan生成 | Capability schema (`args_schema`単一正本) | `capability_key` / `agent_id` / `project_id`(数値正規化) | Plan (方向性・Capability範囲・対象allowlist) | 承認者、Orchestrator | 未知Capability・解決不能schema・対象不在はPlan化せず失敗/質問 | なし |
+| 承認 | 承認範囲 (目的・Capability・制約・対象allowlist) | plan_version・承認snapshot | plan_approved / ready | worker | 差戻しは理由必須でqueuedへ | なし |
+| Action生成 | Plan・依頼・履歴Observation | RuntimeAction (構造化JSON) | 保存しない (LLM出力は使い捨て) | Orchestrator検証 | 不正出力は最大2回修正させて失敗 | なし |
+| Action検証 | 正本のPydanticモデル | capability_key・target・inputs | note (検証エラー) | Orchestrator (修正) / 人間 (再承認) | 範囲外は実行せずdeviation、修正尽きは失敗 (対象範囲外は再承認) | なし (実行しない) |
+| Action実行 | 検証済み入力 | action_index | capability_completed (target・inputs・observation) | 次ターンOrchestrator・再開時resume | tool失敗は失敗、取消は伝播 | memory_propose等の副作用 (at-least-onceに注意) |
+| 再開 | capability_completedのaction_index | action_index (max+1、重複排除) | 既存Event | Orchestrator | 上限到達・同一反復は停止 | 完了Event未保存の副作用は再実行され得る |
+| 完了 | 完了条件・finish要約 | result_summary | completed | 閲覧者 | — | — |
+
+保証範囲: 完了済みActionの非重複実行は `action_index` 基準のbest-effortであり、
+exactly-onceではない。副作用の実行から完了Event保存の間に障害が起きると、
+再開時に重複実行され得る (at-least-once)。Event履歴で検出可能にするが、
+自動的な防止・取消はしない。`specialist_agent` /
+`coding_cli` の委譲対象は、承認時点で有効だったAgent / Project IDの集合
+(`allowed_agent_ids` / `allowed_project_ids`) としてPlanへ記録し、Actionごとに
+範囲内か検証する。範囲外の対象は実行せず `waiting_reapproval` に回す。
 
 - Plannerは対象を一意に解決できなければ、既存HITLの質問を登録し `waiting_user` にする。
 - 実行器は保存済みPlanのStepだけを順に実行し、実行時にCapabilityを再選択しない。

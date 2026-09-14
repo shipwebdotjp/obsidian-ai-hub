@@ -132,6 +132,70 @@ describe("TaskAgentDetailPage", () => {
     await waitFor(() => expect(mockCancel).toHaveBeenCalledWith("task_aaa"));
   });
 
+  it("renders a directional plan with approval scope", async () => {
+    mockGetTask.mockResolvedValue({
+      ...baseDetail(),
+      plans: [
+        {
+          plan_id: "tplan_2",
+          task_id: "task_aaa",
+          version: 2,
+          plan: {
+            plan_version: 2,
+            purpose: "好みを記憶する",
+            strategy: "検索して提案",
+            capabilities: [
+              { capability_key: "vault_search", intent: "検索する" },
+              { capability_key: "memory_propose", intent: "提案する" },
+            ],
+            allowed_agent_ids: ["agent_1"],
+            allowed_project_ids: [3],
+            constraints: "推測禁止",
+            completion_criteria: "候補作成",
+            max_actions: 8,
+          },
+          approval_policy_snapshot: { vault_search: "auto" },
+          status: "pending",
+          rejection_reason: null,
+          created_at: "2026-09-14T10:01:00+09:00",
+          decided_at: null,
+        },
+      ],
+      events: [
+        {
+          event_id: 9,
+          task_id: "task_aaa",
+          seq: 2,
+          event_type: "capability_completed",
+          payload: {
+            action_index: 0,
+            capability_key: "vault_search",
+            inputs: { query: "好み" },
+            summary: "obs",
+            observation: "obs",
+          },
+          created_at: "2026-09-14T10:02:00+09:00",
+        },
+      ],
+    } as any);
+    renderPage();
+    await screen.findByText("好みを記憶する");
+    expect(
+      screen.getByText(/承認対象は方向性とCapability範囲です/),
+    ).toBeInTheDocument();
+    expect(screen.getByText("vault_search")).toBeInTheDocument();
+    expect(screen.getByText(/委譲可能なAgent: agent_1/)).toBeInTheDocument();
+    expect(screen.getByText(/実行可能なProject: 3/)).toBeInTheDocument();
+    expect(screen.getByText("最大Action数: 8")).toBeInTheDocument();
+    expect(screen.getByText(/実行Action履歴/)).toBeInTheDocument();
+  });
+
+  it("keeps rendering legacy static plans", async () => {
+    renderPage();
+    await screen.findByText("まとめる");
+    expect(screen.getByText(/旧形式の静的Plan/)).toBeInTheDocument();
+  });
+
   it("embeds the HITL question card and submits the answer", async () => {
     const user = userEvent.setup();
     mockGetTask.mockResolvedValue({

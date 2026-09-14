@@ -2,7 +2,9 @@
 
 Only capability keys defined in ``tasks/capabilities.py`` resolve; anything
 else (``run_shell``, Skills, plugins, write proposals) is refused. Steps run
-with their saved inputs; inputs are never rebuilt here.
+with their saved inputs; inputs are never rebuilt here. Every call is
+validated against the single-source Pydantic model
+(``tasks/capability_schemas.py``) immediately before ``tool.invoke``.
 """
 
 from __future__ import annotations
@@ -65,6 +67,14 @@ class RegistryToolExecutor:
             raise ValueError(
                 f"Step {step_index} inputs must be an object, got {type(inputs).__name__}."
             )
+        from obsidian_ai_hub.tasks.capability_schemas import (
+            validate_capability_inputs,
+        )
+
+        try:
+            inputs = validate_capability_inputs(str(capability_key), inputs)
+        except ValueError as exc:
+            raise ValueError(f"Step {step_index} {exc}") from exc
         if definition.adapter_kind in CONTEXT_KINDS:
             factory = meta.get("get_tool_with_context")
             tool = factory(_task_context(task)) if factory else meta["get_tool"]()

@@ -30,6 +30,104 @@ const TERMINAL_SET = new Set<string>(TERMINAL_STATUSES);
 const APPROVAL_STATUSES = ["waiting_approval", "waiting_reapproval"];
 const ANSWERABLE_HITL_STATUSES = ["pending_user", "ready_to_resume"];
 
+interface DirectionalPlanJson {
+  purpose?: unknown;
+  strategy?: unknown;
+  capabilities?: Array<{ capability_key?: unknown; intent?: unknown }>;
+  allowed_agent_ids?: unknown;
+  allowed_project_ids?: unknown;
+  constraints?: unknown;
+  completion_criteria?: unknown;
+  max_actions?: unknown;
+}
+
+function isDirectionalPlan(plan: unknown): boolean {
+  if (plan == null || typeof plan !== "object") return false;
+  const p = plan as Record<string, unknown>;
+  return Array.isArray(p["capabilities"]) && typeof p["purpose"] === "string";
+}
+
+function DirectionalPlanView({ plan }: { plan: DirectionalPlanJson }) {
+  return (
+    <div className="mt-1 space-y-1 text-xs text-slate-700">
+      <p className="rounded bg-blue-50 px-2 py-1 text-[11px] text-blue-800">
+        承認対象は方向性とCapability範囲です（詳細引数は実行時に確定し、履歴に記録されます）。
+      </p>
+      {typeof plan.purpose === "string" && (
+        <p>
+          <span className="font-medium">目的: </span>
+          {plan.purpose}
+        </p>
+      )}
+      {typeof plan.strategy === "string" && plan.strategy && (
+        <p>
+          <span className="font-medium">方針: </span>
+          {plan.strategy}
+        </p>
+      )}
+      {Array.isArray(plan.capabilities) && (
+        <ul className="space-y-0.5">
+          {plan.capabilities.map((c, i) => (
+            <li key={i} className="flex flex-wrap items-center gap-1">
+              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-700">
+                {String(c.capability_key ?? "")}
+              </span>
+              {typeof c.intent === "string" && c.intent && (
+                <span className="text-slate-600">{c.intent}</span>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      {typeof plan.constraints === "string" && plan.constraints && (
+        <p>
+          <span className="font-medium">制約: </span>
+          {plan.constraints}
+        </p>
+      )}
+      {Array.isArray(plan.allowed_agent_ids) && plan.allowed_agent_ids.length > 0 && (
+        <p className="text-slate-500">
+          委譲可能なAgent: {plan.allowed_agent_ids.map(String).join(", ")}
+        </p>
+      )}
+      {Array.isArray(plan.allowed_project_ids) &&
+        plan.allowed_project_ids.length > 0 && (
+          <p className="text-slate-500">
+            実行可能なProject: {plan.allowed_project_ids.map(String).join(", ")}
+          </p>
+        )}
+      {typeof plan.completion_criteria === "string" && (
+        <p>
+          <span className="font-medium">完了条件: </span>
+          {plan.completion_criteria}
+        </p>
+      )}
+      {plan.max_actions != null && (
+        <p className="text-slate-500">最大Action数: {String(plan.max_actions)}</p>
+      )}
+    </div>
+  );
+}
+
+function LegacyPlanView({ plan }: { plan: unknown }) {
+  const p = (plan ?? {}) as Record<string, unknown>;
+  const steps = Array.isArray(p["steps"]) ? p["steps"] : [];
+  return (
+    <div className="mt-1 space-y-1 text-xs text-slate-700">
+      <p className="rounded bg-slate-100 px-2 py-1 text-[11px] text-slate-600">
+        旧形式の静的Plan（保存済み入力で実行されます）。
+      </p>
+      {typeof p["purpose"] === "string" && (
+        <p>
+          <span className="font-medium">目的: </span>
+          {p["purpose"]}
+        </p>
+      )}
+      <p className="text-slate-500">Step数: {steps.length}</p>
+    </div>
+  );
+}
+
 export default function TaskAgentDetailPage() {
   const { taskId } = useParams<{ taskId: string }>();
   const [detail, setDetail] = useState<TaskAgentTaskDetail | null>(null);
@@ -123,6 +221,9 @@ export default function TaskAgentDetailPage() {
   const canReplan = task.status === "interrupted";
   const childRefs = detail.events.filter(
     (e) => e.event_type === "child_run_started",
+  );
+  const actionHistory = detail.events.filter(
+    (e) => e.event_type === "capability_completed",
   );
   const pendingQuestions = hitlRun
     ? toQuestionItems(hitlRun.questions ?? [])
@@ -286,6 +387,11 @@ export default function TaskAgentDetailPage() {
                     差戻し理由: {p.rejection_reason}
                   </p>
                 )}
+                {isDirectionalPlan(p.plan) ? (
+                  <DirectionalPlanView plan={p.plan as DirectionalPlanJson} />
+                ) : (
+                  <LegacyPlanView plan={p.plan} />
+                )}
                 <pre className="mt-1 overflow-x-auto whitespace-pre-wrap text-xs text-slate-700">
                   {JSON.stringify(p.plan, null, 1)}
                 </pre>
@@ -293,6 +399,32 @@ export default function TaskAgentDetailPage() {
             ))}
           </ul>
         </section>
+
+        {actionHistory.length > 0 && (
+          <section className="rounded border border-slate-200 bg-white p-4">
+            <h2 className="text-sm font-semibold">実行Action履歴</h2>
+            <ul className="mt-1 space-y-2 text-xs text-slate-700">
+              {actionHistory.map((e) => (
+                <li key={e.event_id} className="rounded border border-slate-100 p-2">
+                  <div className="font-medium">
+                    Action {String(e.payload?.action_index ?? e.payload?.step_index ?? "?")}:{" "}
+                    {String(e.payload?.capability_key ?? "")}
+                  </div>
+                  {e.payload?.inputs != null && (
+                    <pre className="mt-1 overflow-x-auto whitespace-pre-wrap text-slate-600">
+                      入力: {JSON.stringify(e.payload.inputs)}
+                    </pre>
+                  )}
+                  {(e.payload?.observation ?? e.payload?.summary) != null && (
+                    <p className="mt-1 whitespace-pre-wrap text-slate-600">
+                      結果: {String(e.payload?.observation ?? e.payload?.summary)}
+                    </p>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
 
         {childRefs.length > 0 && (
           <section className="rounded border border-slate-200 bg-white p-4">

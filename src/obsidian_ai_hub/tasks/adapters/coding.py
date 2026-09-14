@@ -51,10 +51,20 @@ class CodingAdapter:
         from obsidian_ai_hub.runs.instance import get_instance_id
         from obsidian_ai_hub.web.services.projects import get_project_detail
 
+        from obsidian_ai_hub.tasks.capability_schemas import (
+            validate_capability_inputs,
+            validate_capability_target,
+        )
+
         task_id = str(task["task_id"])
-        target = step.get("target")
-        if not isinstance(target, dict):
-            raise ValueError(f"Step {step_index} target must be an object.")
+        try:
+            target = validate_capability_target("coding_cli", step.get("target"))
+            step_inputs = validate_capability_inputs(
+                "coding_cli", step.get("inputs", {})
+            )
+        except ValueError as exc:
+            raise ValueError(f"Step {step_index} {exc}") from exc
+        step = dict(step, target=target, inputs=step_inputs)
         try:
             project_id = int(target.get("project_id"))
         except (TypeError, ValueError):
