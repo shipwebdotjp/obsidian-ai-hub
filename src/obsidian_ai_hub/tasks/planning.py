@@ -137,7 +137,14 @@ def _valid_projects() -> list[dict[str, Any]]:
         valid.append(
             {
                 "project_id": project_id,
-                "name": project.get("name", ""),
+                # NOTE: the projects table carries display_name /
+                # normalized_name — there is no "name" column. Reading
+                # project.get("name") always yields "" and leaves the
+                # planner with nameless projects.
+                "name": str(
+                    project.get("display_name") or project.get("normalized_name") or ""
+                ),
+                "keywords": list(project.get("keywords") or []),
                 "git_root": git_root,
             }
         )
@@ -169,10 +176,13 @@ def build_planner_prompt(
                 "    (入力schema: 解決不可のCapabilityはPlanに含めないこと)"
             )
     agent_lines = [f"- {a['agent_id']}: {a['name']}" for a in context["agents"]]
-    project_lines = [
-        f"- {p['project_id']}: {p['name']} ({p['git_root']})"
-        for p in context["projects"]
-    ]
+    project_lines = []
+    for p in context["projects"]:
+        keywords = ", ".join(str(k) for k in (p.get("keywords") or []))
+        suffix = f" [キーワード: {keywords}]" if keywords else ""
+        project_lines.append(
+            f"- {p['project_id']}: {p.get('name', '')} ({p['git_root']}){suffix}"
+        )
     prompt = (
         f"依頼:\n{prompt_text}\n\n"
         f"有効Capability:\n" + "\n".join(capability_lines) + "\n\n"

@@ -348,6 +348,60 @@ def test_get_task_qa_history_pairs_question_answer():
     assert history[0]["answer"] == "project:1"
 
 
+def test_valid_projects_uses_display_name_and_keywords(monkeypatch):
+    from obsidian_ai_hub.coding import backend as coding_backend
+    from obsidian_ai_hub.web.services import projects as project_service
+
+    monkeypatch.setattr(
+        project_service,
+        "list_projects",
+        lambda: [
+            {
+                "project_id": 1,
+                "normalized_name": "obsidian ai hub",
+                "display_name": "Obsidian AI Hub",
+                "keywords": ["obsidian-ai-hub", "React"],
+                "project_path": "/repo/demo",
+            },
+            {
+                "project_id": 2,
+                "normalized_name": "no path",
+                "display_name": "",
+                "keywords": [],
+                "project_path": "",
+            },
+        ],
+    )
+    monkeypatch.setattr(coding_backend, "validate_git_repo", lambda path: "/repo/demo")
+    # _valid_projects imports both lazily; attribute patches apply.
+    projects = planning._valid_projects()
+    assert projects == [
+        {
+            "project_id": 1,
+            "name": "Obsidian AI Hub",
+            "keywords": ["obsidian-ai-hub", "React"],
+            "git_root": "/repo/demo",
+        }
+    ]
+
+
+def test_build_planner_prompt_shows_project_names_and_keywords():
+    context = dict(
+        _context(),
+        projects=[
+            {
+                "project_id": 1,
+                "name": "Obsidian AI Hub",
+                "keywords": ["obsidian-ai-hub"],
+                "git_root": "/repo/demo",
+            }
+        ],
+    )
+    prompt = planning.build_planner_prompt("do it", context, [])
+    assert "- 1: Obsidian AI Hub (/repo/demo)" in prompt
+    assert "obsidian-ai-hub" in prompt
+
+
 def test_build_planner_prompt_includes_qa_history():
     prompt = planning.build_planner_prompt(
         "do it",
@@ -448,9 +502,7 @@ def test_validate_directional_plan():
 def test_validate_directional_rejects_unresolvable_schema(monkeypatch):
     from obsidian_ai_hub.tasks import capability_schemas
 
-    monkeypatch.setattr(
-        capability_schemas, "resolve_json_schema", lambda key: None
-    )
+    monkeypatch.setattr(capability_schemas, "resolve_json_schema", lambda key: None)
     with pytest.raises(ValueError, match="no resolvable input schema"):
         planning.validate_directional_plan(json.loads(_directional_json()), _context())
 
