@@ -197,3 +197,182 @@ def test_default_provider_model_fallback(monkeypatch):
     provider, model = planning.default_provider_model()
     assert provider == "openai"
     assert model == "gpt-4o"
+
+
+def test_question_options_shape():
+    question = planning.parse_planner_output(
+        json.dumps(
+            {
+                "type": "question",
+                "question_text": "Which repo?",
+                "options": [
+                    {"value": "project:1", "label": "Project 1"},
+                    {"value": "other", "label": "Other"},
+                ],
+            }
+        )
+    )
+    assert question["options"] == [
+        {"value": "project:1", "label": "Project 1"},
+        {"value": "other", "label": "Other"},
+    ]
+
+    legacy = planning.parse_planner_output(
+        json.dumps(
+            {"type": "question", "question_text": "Which repo?", "choices": ["a"]}
+        )
+    )
+    assert legacy["options"] == [{"value": "a", "label": "a"}]
+
+    no_options = planning.parse_planner_output(
+        json.dumps({"type": "question", "question_text": "Which repo?"})
+    )
+    assert no_options["options"] == []
+
+    with pytest.raises(ValueError, match="non-empty list"):
+        planning.parse_planner_output(
+            json.dumps({"type": "question", "question_text": "Q?", "options": []})
+        )
+    with pytest.raises(ValueError, match="non-blank value"):
+        planning.parse_planner_output(
+            json.dumps(
+                {
+                    "type": "question",
+                    "question_text": "Q?",
+                    "options": [{"value": " ", "label": "x"}],
+                }
+            )
+        )
+    with pytest.raises(ValueError, match="non-blank label"):
+        planning.parse_planner_output(
+            json.dumps(
+                {
+                    "type": "question",
+                    "question_text": "Q?",
+                    "options": [{"value": "x", "label": " "}],
+                }
+            )
+        )
+
+
+def test_question_options_register_value_label(monkeypatch):
+    from obsidian_ai_hub.hitl import store as hitl_store
+
+    monkeypatch.setattr(planning, "collect_planner_context", _context)
+    monkeypatch.setattr(
+        planning,
+        "generate_llm_response",
+        lambda *a, **k: json.dumps(
+            {
+                "type": "question",
+                "question_text": "Which repo?",
+                "options": [{"value": "project:1", "label": "Project 1: Demo"}],
+            }
+        ),
+    )
+    task = store.create_task("ambiguous job")
+    _claim(task["task_id"])
+    result = planning.plan_task(task["task_id"])
+    assert result["outcome"] == "waiting_user"
+    questions = hitl_store.get_questions_by_set(result["hitl_run_id"], "target")
+    assert len(questions) == 1
+    assert questions[0]["choices"] == [
+        {"value": "project:1", "label": "Project 1: Demo"}
+    ]
+
+
+def _seed_qa_round(task_id):
+    """Register one answered target question round via the real planner path."""
+    from obsidian_ai_hub.hitl.service import register_run_and_questions
+
+    hitl_run_id = f"tasks_{task_id}_seed1"
+    register_run_and_questions(
+        run_id=hitl_run_id,
+        handler=planning.TASK_RESOLVE_HANDLER,
+        checkpoint=json.dumps({"task_id": task_id}),
+        question_set_id="target",
+        questions_data=[
+            {
+                "question_key": "target",
+                "question_type": "select",
+                "display_text": "Which repo?",
+                "title": "Taskの対象確認",
+                "prompt": "Which repo?",
+                "choices": [{"value": "project:1", "label": "Project 1: Demo"}],
+                "is_required": 1,
+            }
+        ],
+        title="Taskの対象確認",
+        description="ambiguous job",
+        display_type="task_target_question",
+    )
+    store.append_task_event(
+        task_id,
+        "hitl_question_asked",
+        {"hitl_run_id": hitl_run_id, "question_set_id": "target"},
+    )
+    store.append_task_event(
+        task_id,
+        "hitl_question_answered",
+        {"hitl_run_id": hitl_run_id, "answer": "project:1"},
+    )
+    return hitl_run_id
+
+
+def test_get_task_qa_history_pairs_question_answer():
+    task = store.create_task("ambiguous job")
+    hitl_run_id = _seed_qa_round(task["task_id"])
+    history = planning.get_task_qa_history(task["task_id"])
+    assert len(history) == 1
+    assert history[0]["hitl_run_id"] == hitl_run_id
+    assert history[0]["question"] == "Which repo?"
+    assert history[0]["answer"] == "project:1"
+
+
+def test_build_planner_prompt_includes_qa_history():
+    prompt = planning.build_planner_prompt(
+        "do it",
+        _context(),
+        [
+            {
+                "hitl_run_id": "tasks_x_1",
+                "question": "Which repo?",
+                "answer": "project:1",
+            },
+            {"hitl_run_id": "tasks_x_2", "question": "Which agent?", "answer": None},
+        ],
+    )
+    assert "以前の質問と回答" in prompt
+    assert "Which repo?" in prompt
+    assert "project:1" in prompt
+    assert "未回答" in prompt
+
+    without = planning.build_planner_prompt("do it", _context(), [])
+    assert "以前の質問と回答" not in without
+
+
+def test_plan_task_after_answer_builds_plan(monkeypatch):
+    monkeypatch.setattr(planning, "collect_planner_context", _context)
+    seen = {}
+
+    def fake_llm(provider, model, prompt, **kwargs):
+        seen["prompt"] = prompt
+        return _plan_json()
+
+    monkeypatch.setattr(planning, "generate_llm_response", fake_llm)
+    task = store.create_task("ambiguous job")
+    _claim(task["task_id"])
+    # Simulate: question asked on the first planning round, answered, re-queued.
+    store.append_task_event(
+        task["task_id"],
+        "hitl_question_asked",
+        {"hitl_run_id": "tasks_old", "question_set_id": "target"},
+    )
+    store.append_task_event(
+        task["task_id"],
+        "hitl_question_answered",
+        {"hitl_run_id": "tasks_old", "answer": "project:1"},
+    )
+    result = planning.plan_task(task["task_id"])
+    assert result["outcome"] == "running"
+    assert "project:1" in seen["prompt"]

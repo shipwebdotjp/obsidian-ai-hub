@@ -32,17 +32,27 @@ Planの場合:
 "target": {"agent_id": "..."} または {"project_id": "..."} または {},
 "inputs": {...}, "side_effects": "..."}], "completion_criteria": "..."}
 
-対象を一意に解決できない場合:
-{"type": "question", "question_text": "...", "choices": ["..."]}
+ 対象を一意に解決できない場合:
+ {"type": "question", "question_text": "...",
+  "options": [{"value": "project:1", "label": "Project 1: Obsidian AI Hub"},
+              {"value": "agent:agent_1", "label": "Helper"}]}
 
  規則:
  - stepsのcapability_keyは提示された有効Capabilityだけを使う。
  - specialist_agentのtarget.agent_idは提示されたAgent IDだけを使う。
  - coding_cliのtarget.project_idは提示されたProject IDだけを使う。
    target.backendはcodexまたはopencode(省略時は既定backend)。
+ - 依頼文に登録済みProjectの名前・キーワードが含まれる場合は対象が確定している。
+   その場合は質問せず、該当Projectをtargetに固定したPlanを作る。
  - 提示にないCapability/Agent/Projectが必要ならPlanを作らずquestionを返す。
+   optionsに挙げられる対象は提示された有効Project/Agentだけを使う。
+   optionsのvalueは "project:<project_id>"、"agent:<agent_id>"、または自由文テキストとし、
+   labelは人間に表示する文言とする。
  - 実行時にCapabilityや対象を作り直さない前提で、入力と対象をPlanに固定する。
  - 子runはPlan外の作業を検出できないため、Planは必要十分なStepだけを含む。
+ - 以前の質問と回答がある場合、その回答は確定事項である。回答に従って対象を確定し
+   Planを作り、回答済みの質問を再質問してはならない。
+ - 質問は依頼文から対象がまったく推定できないときだけ使う。
  """
 
 
@@ -103,7 +113,11 @@ def _valid_projects() -> list[dict[str, Any]]:
     return valid
 
 
-def build_planner_prompt(prompt_text: str, context: dict[str, Any]) -> str:
+def build_planner_prompt(
+    prompt_text: str,
+    context: dict[str, Any],
+    qa_history: Optional[list[dict[str, Any]]] = None,
+) -> str:
     capability_lines = [
         f"- {c['capability_key']} ({c['adapter_kind']}, {c['approval_policy']}): "
         for c in context["capabilities"]
@@ -113,11 +127,81 @@ def build_planner_prompt(prompt_text: str, context: dict[str, Any]) -> str:
         f"- {p['project_id']}: {p['name']} ({p['git_root']})"
         for p in context["projects"]
     ]
-    return (
+    prompt = (
         f"依頼:\n{prompt_text}\n\n"
         f"有効Capability:\n" + "\n".join(capability_lines) + "\n\n"
         "登録済みAgent:\n" + "\n".join(agent_lines) + "\n\n"
         "有効Project:\n" + "\n".join(project_lines)
+    )
+    if qa_history:
+        qa_lines = []
+        for index, round in enumerate(qa_history, start=1):
+            question = str(round.get("question") or "(質問文を取得できませんでした)")
+            answer = round.get("answer")
+            answer_text = "(未回答)" if answer is None else _format_answer(answer)
+            qa_lines.append(f"- 第{index}回 質問: {question} / 回答: {answer_text}")
+        prompt += "\n\n以前の質問と回答(確定事項):\n" + "\n".join(qa_lines)
+    return prompt
+
+
+def _format_answer(answer: Any) -> str:
+    if isinstance(answer, str):
+        return answer
+    try:
+        return json.dumps(answer, ensure_ascii=False)
+    except (TypeError, ValueError):
+        return str(answer)
+
+
+def get_task_qa_history(task_id: str) -> list[dict[str, Any]]:
+    """Return past target Q&A rounds oldest-first for replanning context.
+
+    Each round is ``{"hitl_run_id": str|None, "question": str, "answer": Any}``
+    with ``answer`` None until the matching ``hitl_question_answered`` event.
+    """
+    from obsidian_ai_hub.hitl import store as hitl_store
+
+    rounds: list[dict[str, Any]] = []
+    for event in task_store.list_task_events(task_id):
+        event_type = event.get("event_type")
+        payload = event.get("payload") or {}
+        if event_type == "hitl_question_asked":
+            rounds.append(
+                {
+                    "hitl_run_id": payload.get("hitl_run_id"),
+                    "question": _lookup_question_text(
+                        hitl_store,
+                        payload.get("hitl_run_id"),
+                        payload.get("question_set_id") or "target",
+                    ),
+                    "answer": None,
+                }
+            )
+        elif event_type == "hitl_question_answered":
+            for round in reversed(rounds):
+                if round["answer"] is None and round["hitl_run_id"] == payload.get(
+                    "hitl_run_id"
+                ):
+                    round["answer"] = payload.get("answer")
+                    break
+    return rounds
+
+
+def _lookup_question_text(
+    hitl_store: Any, hitl_run_id: Any, question_set_id: str
+) -> str:
+    if not hitl_run_id:
+        return ""
+    try:
+        questions = hitl_store.get_questions_by_set(str(hitl_run_id), question_set_id)
+    except Exception:
+        logger.warning("Failed to load HITL questions for %s", hitl_run_id)
+        return ""
+    if not questions:
+        return ""
+    first = questions[0]
+    return str(
+        first.get("display_text") or first.get("prompt") or first.get("title") or ""
     )
 
 
@@ -170,14 +254,33 @@ def _validate_question_shape(output: dict[str, Any]) -> dict[str, Any]:
     question_text = output.get("question_text")
     if not isinstance(question_text, str) or not question_text.strip():
         raise ValueError("Question requires non-blank question_text.")
+    options = output.get("options")
     choices = output.get("choices")
-    if choices is not None:
+    if options is not None:
+        if not isinstance(options, list) or not options:
+            raise ValueError("Question options must be a non-empty list.")
+        normalized = []
+        for index, option in enumerate(options):
+            if not isinstance(option, dict):
+                raise ValueError(f"Question option {index} must be an object.")
+            value = option.get("value")
+            label = option.get("label")
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"Question option {index} needs a non-blank value.")
+            if not isinstance(label, str) or not label.strip():
+                raise ValueError(f"Question option {index} needs a non-blank label.")
+            normalized.append({"value": value.strip(), "label": label.strip()})
+        output["options"] = normalized
+    elif choices is not None:
         if (
             not isinstance(choices, list)
             or not choices
             or not all(isinstance(c, str) and c.strip() for c in choices)
         ):
             raise ValueError("Question choices must be a non-empty list of strings.")
+        output["options"] = [{"value": c.strip(), "label": c.strip()} for c in choices]
+    else:
+        output["options"] = []
     return output
 
 
@@ -230,12 +333,13 @@ def plan_task(
         if task is None:
             raise FileNotFoundError(f"Task '{task_id}' not found.")
     context = collect_planner_context()
+    qa_history = get_task_qa_history(task_id)
     provider, model = default_provider_model()
     try:
         raw = generate_llm_response(
             provider,
             model,
-            build_planner_prompt(str(task["prompt_text"]), context),
+            build_planner_prompt(str(task["prompt_text"]), context, qa_history),
             system_prompt=PLANNER_SYSTEM_PROMPT,
             session_id=f"task-plan-{task_id}",
         )
@@ -353,15 +457,18 @@ def _register_target_question_hitl(
 
     hitl_run_id = f"tasks_{task_id}_{uuid.uuid4().hex[:8]}"
     question_text = str(output["question_text"]).strip()
-    choices = output.get("choices")
-    if choices:
+    options = output.get("options") or []
+    if options:
         question: dict[str, Any] = {
             "question_key": "target",
             "question_type": "select",
             "display_text": question_text,
             "title": "Taskの対象確認",
             "prompt": question_text,
-            "choices": [{"value": choice, "label": choice} for choice in choices],
+            "choices": [
+                {"value": option["value"], "label": option["label"]}
+                for option in options
+            ],
             "is_required": 1,
         }
     else:
