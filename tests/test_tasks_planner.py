@@ -108,6 +108,25 @@ def test_validate_plan_targets():
         planning.validate_plan_targets(coding_plan, context)
 
 
+def test_validate_plan_targets_accepts_string_project_id():
+    context = dict(
+        _context(),
+        projects=[{"project_id": 1, "name": "Demo", "git_root": "/repo/demo"}],
+    )
+    plan = json.loads(_plan_json())
+    plan["steps"][0]["capability_key"] = "coding_cli"
+    plan["steps"][0]["target"] = {"project_id": "1"}
+    snapshot = planning.validate_plan_targets(plan, context)
+    assert snapshot == {"coding_cli": "plan_required"}
+    assert plan["steps"][0]["target"]["project_id"] == 1
+
+    bad = json.loads(_plan_json())
+    bad["steps"][0]["capability_key"] = "coding_cli"
+    bad["steps"][0]["target"] = {"project_id": "not-a-project"}
+    with pytest.raises(ValueError, match="invalid project"):
+        planning.validate_plan_targets(bad, context)
+
+
 def _claim(task_id):
     claimed = store.claim_task("worker-test", "planning")
     assert claimed is not None

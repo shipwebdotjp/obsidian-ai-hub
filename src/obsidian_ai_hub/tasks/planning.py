@@ -41,7 +41,7 @@ Planの場合:
  - stepsのcapability_keyは提示された有効Capabilityだけを使う。
  - specialist_agentのtarget.agent_idは提示されたAgent IDだけを使う。
  - coding_cliのtarget.project_idは提示されたProject IDだけを使う。
-   target.backendはcodexまたはopencode(省略時は既定backend)。
+   target.project_idはJSONの整数で返す。target.backendはcodexまたはopencode(省略時は既定backend)。
  - 依頼文に登録済みProjectの名前・キーワードが含まれる場合は対象が確定している。
    その場合は質問せず、該当Projectをtargetに固定したPlanを作る。
  - 提示にないCapability/Agent/Projectが必要ならPlanを作らずquestionを返す。
@@ -309,11 +309,23 @@ def validate_plan_targets(
                     f"Plan step {index} targets unregistered agent '{agent_id}'."
                 )
         elif key == "coding_cli":
-            project_id = target.get("project_id")
-            if project_id not in project_ids:
+            raw_project_id = target.get("project_id")
+            matched: Any = None
+            for candidate in project_ids:
+                if (
+                    candidate == raw_project_id
+                    or str(candidate) == str(raw_project_id).strip()
+                ):
+                    matched = candidate
+                    break
+            if matched is None:
                 raise ValueError(
-                    f"Plan step {index} targets invalid project '{project_id}'."
+                    f"Plan step {index} targets invalid project '{raw_project_id}'."
                 )
+            # Normalize the saved plan to the DB-canonical id type: the DB
+            # project_id is an integer, but the planner returns JSON where
+            # the id may arrive as a string ("1" vs 1).
+            target["project_id"] = matched
             backend = target.get("backend")
             if backend is not None and backend not in ("codex", "opencode"):
                 raise ValueError(f"Plan step {index} uses unknown backend '{backend}'.")
