@@ -7,13 +7,13 @@
 
 - [x] `CONTEXT.md` とTask Agent文書群の状態・承認ポリシーを同期する
 - [x] 承認境界、Capability Manifest、Workspace信頼境界のADRを更新する
-- [ ] Webサーバー同居workerと入力保存の運用をREADMEへ追記する
+- [x] Webサーバー同居workerと入力保存の運用をREADMEへ追記する
 
 ## 永続化とコア
 
 - [x] v44 migrationで `task_agent_*` の4テーブルと索引を追加する
 - [x] コード定義Capability catalogとDB seedを実装する
-- [ ] Capability設定の `enabled` / `approval_policy` 更新を実装する
+- [x] Capability設定の `enabled` / `approval_policy` 更新を実装する
 - [x] Task受付、Plan版管理、Event追記、状態機械、30日purgeを実装する
 - [x] 既知秘密値のredactionをTask永続化に適用する
 
@@ -21,9 +21,9 @@
 
 - [x] 構造化Plan/質問を返すPlannerを実装する
 - [x] auto-only Planとplan-required Planの分岐を実装する
-- [ ] 既存HITLの質問とTask再キューhandlerを接続する
+- [x] 既存HITLの質問とTask再キューhandlerを接続する
 - [x] FastAPI lifespanに単一Task workerとrecoveryを追加する
-- [ ] 取消の子run伝播と `interrupted` 復旧を実装する
+- [x] 取消の子run伝播と `interrupted` 復旧を実装する
 
 ## Capability Adapter
 
@@ -47,4 +47,4 @@
 - [x] migration、状態遷移、Plan版、purge、redactionのテストを追加する
 - [x] auto/承認必須/disabled/HITL質問の結合テストを追加する
 - [x] 子run、取消、recovery、再承認のテストを追加する
-- [ ] CLI/API/フロントエンド単体テストを追加し、`uv run pytest tests/` を実行する
+- [x] CLI/API/フロントエンド単体テストを追加し、`uv run pytest tests/` を実行する

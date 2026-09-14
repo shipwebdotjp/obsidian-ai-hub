@@ -250,6 +250,34 @@ def test_startup_recovery_covers_tasks():
     assert store.get_task(orphan["task_id"])["status"] == "interrupted"
 
 
+def test_startup_recovery_purges_old_terminal_tasks():
+    from obsidian_ai_hub.database import get_db_connection
+
+    old = store.create_task("old terminal")
+    store.claim_task("dead-instance", "planning")
+    store.transition_task_status(old["task_id"], "running")
+    store.transition_task_status(old["task_id"], "completed")
+    conn = get_db_connection()
+    try:
+        conn.execute(
+            "UPDATE task_agent_tasks SET finished_at = '2000-01-01T00:00:00+00:00' "
+            "WHERE task_id = ?;",
+            (old["task_id"],),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    recent = store.create_task("recent terminal")
+    store.claim_task("dead-instance", "planning")
+    store.transition_task_status(recent["task_id"], "running")
+    store.transition_task_status(recent["task_id"], "completed")
+
+    run_manager.startup_recovery("live-instance")
+    assert store.get_task(old["task_id"]) is None
+    assert store.get_task(recent["task_id"]) is not None
+
+
 def test_shutdown_recovery_covers_tasks():
     store.create_task("mine")
     mine = store.claim_task("this-instance", "planning")

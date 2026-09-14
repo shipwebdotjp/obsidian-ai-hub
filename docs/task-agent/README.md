@@ -31,6 +31,20 @@ Task Agent は、自由文の依頼を内部で実行計画へ変換し、既存
 - 外部書込み（カレンダー、リマインダー）とVault直接編集はMVP外。既存の提案HITLをTaskの
   実行経路で呼ばないため、二重承認は生じない。
 
+## 運用上の要点
+
+- Task worker は Web サーバーの FastAPI worker lifespan に同居する。
+  **Web サーバー停止中は新規の計画・実行を行わず、Task はキューに残る。**
+  停止時に `planning` / `running` / `cancelling` だった Task は `interrupted`
+  になり、自動再実行はしない。WebUI の再計画から明示的に `queued` へ戻す。
+- 終端化から 30 日後の起動時 maintenance で Task・Plan・Event をまとめて削除
+  する（cascade）。非終端 Task は削除しない。
+- 依頼本文・Plan・Event・要約は既知の設定済み秘密値を redact して保存する。
+  LLM の非公開思考過程や全出力は保存しない。**未知の秘密値を依頼本文に
+  含めないことは利用者の運用責任である。**
+- 子 Agent / Coding run の既存制限はそのまま継承する（Coding CLI 反復上限
+  50 回など）。Task 固有の実行上限・自動リトライ・自動ロールバックは持たない。
+
 ## 実装の進め方
 
 フェーズ単位で次のループを回す。

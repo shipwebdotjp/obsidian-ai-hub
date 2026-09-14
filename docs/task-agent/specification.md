@@ -1,6 +1,6 @@
 # Task Agent MVP 仕様
 
-Status: Draft (MVP spec, implementation not started)
+Status: Accepted (MVP implemented, Phases 1-5 done)
 
 関連文書: [README.md](README.md)、[CONTEXT.md](../../CONTEXT.md)、[ADR](adr/)
 

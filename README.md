@@ -270,7 +270,34 @@ python -m obsidian_ai_hub --agent-chat --agent-id agent_1234567890ab \
 python -m obsidian_ai_hub --agent-chat --agent-id agent_1234567890ab \
   --agent-prompt "要約してください" --agent-output json
 ```
+
+### Task Agent CLI
+
+Submit a free-text request to the Task Agent. The command creates a task,
+prints its ID, status, and detail URL, then exits immediately. Planning and
+execution happen in the web server process.
+
+```bash
+python -m obsidian_ai_hub --task-agent "Summarize this week's schedule"
 ```
+
+Track progress and approve plans in the Web UI at `/task-agent`, or use the
+Task Agent API (`/api/v1/task-agent/*`).
+
+Operational notes:
+
+- The Task worker runs inside the web server's FastAPI worker lifespan
+  alongside the Agent/Coding workers. **While the web server is stopped,
+  tasks stay queued — no new planning or execution happens.**
+- Stopped tasks become `interrupted` and are never re-run automatically;
+  re-plan them explicitly from the Web UI. Child runs keep their existing
+  limits (e.g. the 50-iteration Coding CLI limit is unchanged).
+- Known configured secrets are redacted before Task input and summaries are
+  stored, but **do not include unknown secrets in the request text** — that
+  is the operator's responsibility. The model's private reasoning and full
+  outputs are never stored unconditionally.
+- Terminal task, plan, and event history is deleted 30 days after
+  finalization; non-terminal tasks are never purged.
 
 ## Long-Term Memory
 
