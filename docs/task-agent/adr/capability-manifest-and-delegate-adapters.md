@@ -58,6 +58,25 @@ Status: Accepted (2026-09-14)。
   (succeeded/failed) を待ってから取消を伝播し、started後のjobは完走
   (Vault公開を含む) し得る。この仕様は specification.md の操作シナリオ契約に記録する。
 
+## Amendment (Vault直接書込みのTask Capability化)
+
+Status: Accepted (2026-09-14)。
+
+- `vault_write_file` をTask Capabilityに含める。実装はAgent Registryの
+  builtin tool (`agents.registry.vault_write_file` /
+  `web.services.vault.write_vault_file`) を正本とし、Task側の手動登録は
+  不要 (自動派生)。入力スキーマは `args_schema` (`VaultWriteFileInput`)
+  から自動導出する。
+- Vaultへの書込みは不可逆操作のため、既定policyは `plan_required` とする。
+  `auto` への緩和は本ADRの改訂を要する。
+- 上書きは `overwrite=true` の明示指定が必須 (既定 `false` では競合停止)。
+  パスはVault相対のみを受け付け、絶対パス・`..`・解決先がVault外となる
+  シンボリックリンク経由の書込みを拒否する。書込みは一時ファイル+置換に
+  よる原子書込みとする。
+- 操作シナリオ契約は `web/services/vault.py` の `write_vault_file`
+  docstring を正本とし、縦断テストは `tests/test_vault_write_file.py`
+  (Registry tool 実行 + Task Adapter 実行) とする。
+
 ## Consequences (当初)
 
 - 追加Capabilityにはコードとテストが必要だが、危険な能力が設定だけで公開されない。

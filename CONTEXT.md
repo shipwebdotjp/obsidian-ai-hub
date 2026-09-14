@@ -11,7 +11,7 @@
 - **HITL** — Taskの対象解決質問とカレンダー/リマインダー作成提案を保存・回答する汎用基盤。TaskのPlan承認自体は所有しない。
 - **AI Agents / Coding Workspace** — Taskが子runを作る既存の実行文脈。Taskはそれぞれの内部会話・
   権限・出力を所有しない。
-- **Vault / Calendar / Reminders** — Taskが読取対象として参照し得る外部境界。直接書込みは対象外。Calendar / Remindersへの追加は既存提案HITL登録ツール経由のみ行い、人間の承認はHITL側で行う。
+- **Vault / Calendar / Reminders** — Taskが読取対象として参照し得る外部境界。Calendar / Remindersへの追加は既存提案HITL登録ツール経由のみ行い、人間の承認はHITL側で行う。Vaultへの直接書込みは `vault_write_file` Capability経由のみ行い、既定 `plan_required` のPlan一括承認を要する。
 
 ## ユビキタス言語
 

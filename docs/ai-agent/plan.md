@@ -62,6 +62,7 @@ src/obsidian_ai_hub/
 | `web_extract` | `handler.web_extract` | 読取り |
 | `vault_search` | `handler.obsidian_vault_retriever` | 読取り |
 | `vault_read_file` | `web.services.vault.get_vault_file` を安全な引数スキーマで包む | 読取り |
+| `vault_write_file` | `web.services.vault.write_vault_file` を安全な引数スキーマで包む。Vault相対パスのみ、親ディレクトリ自動作成、一時ファイル+置換による原子書込み。上書きは `overwrite=true` の明示指定が必須 | 書込み |
 | `calendar_read` | `planner.apple.fetch_calendar_events` | 読取り |
 | `reminders_read` | `planner.apple.fetch_incomplete_reminders` | 読取り |
 | `calendar_create_proposal` | `calendar.hitl.register_calendar_event_approval` を包む | HITL 提案 |

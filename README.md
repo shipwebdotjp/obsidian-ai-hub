@@ -284,6 +284,37 @@ python -m obsidian_ai_hub --task-agent "Summarize this week's schedule"
 Track progress and approve plans in the Web UI at `/task-agent`, or use the
 Task Agent API (`/api/v1/task-agent/*`).
 
+### Vault read/write tools (AI Agent / Task Agent)
+
+Both the AI Agent (`vault_write_file` tool) and the Task Agent
+(`vault_write_file` capability, `plan_required` by default) can write UTF-8
+text directly into the Obsidian vault rooted at `VAULT_PATH`.
+
+Input (single source of truth: `VaultWriteFileInput` in
+`src/obsidian_ai_hub/agents/registry.py`):
+
+- `relative_path` (string, required): path relative to the Vault root
+  (e.g. `notes/daily.md`). Absolute paths and `..` are rejected, and the
+  symlink-resolved path must stay inside the Vault.
+- `content` (string, required): UTF-8 text to write.
+- `overwrite` (boolean, optional, default `false`): must be explicitly set
+  to `true` to replace an existing file. Without it, writing to an existing
+  path fails and the file is left untouched.
+
+Output (JSON string):
+
+- Success: `{"relative_path": "<normalized posix path>",
+  "bytes_written": <number>, "overwritten": <boolean>}`.
+- Failure: `{"error": "<reason>"}` for invalid input, unconfigured vault,
+  conflicts, or I/O errors.
+
+Missing parent directories are created inside the Vault, and writes are
+atomic (temporary file + `fsync` + replace). New files are claimed with an
+exclusive create (`O_CREAT|O_EXCL|O_NOFOLLOW`) so a concurrent creator is
+never silently overwritten when `overwrite` is false; existing symlinks are
+replaced as links, never followed. Task Agent plans containing this
+capability require one-shot plan approval before anything runs.
+
 Operational notes:
 
 - The Task worker runs inside the web server's FastAPI worker lifespan

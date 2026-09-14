@@ -15,7 +15,9 @@ Status: Accepted (MVP implemented, Phases 1-5 done)
 
 ### MVP外
 
-- Vaultの作成・編集・削除、カレンダー/リマインダーへの直接書込み
+- Vaultの削除、カレンダー/リマインダーへの直接書込み
+  (Vaultの作成・編集は `vault_write_file` Capability経由のみ許可し、既定
+  `plan_required` とする。詳細は [ADR](adr/capability-manifest-and-delegate-adapters.md#amendment-vault直接書込みのtask-capability化) を参照)
 - Task実行からの直接書込み提案（Taskは既存のカレンダー/リマインダー提案HITL登録
   ツール経由でのみ登録し、直接書込みAdapterは持たない）
 - Capability Adapterの任意作成や入力仕様・説明のWeb編集
@@ -70,6 +72,7 @@ Registryに新規builtin toolを追加すればTask Capabilityとしても自動
 | 読取・検索系の既存Registry tool | `auto` | web、Vault、Calendar、Reminders、Memory、People、Projectの読取・検索のみ。 |
 | `calendar_create_proposal` / `reminder_create_proposal` | `auto` | 既存提案HITLの登録のみ（直接書込みなし）。人間の承認はHITL側で行うため、auto時のPlan確認は不要。 |
 | `memory_propose` | `plan_required` | Memory candidateの作成。 |
+| `vault_write_file` | `plan_required` | 既存Vault書込み基盤の再利用 (相対パス・UTF-8・親dir自動作成・原子書込み・`overwrite=true` 必須)。 |
 | `specialist_agent` | `plan_required` | 登録済みAI Agentを指定して一回限りの子runを作る。 |
 | `coding_cli` | `plan_required` | 登録済みProjectのGit rootで新規Coding session/runを作る。 |
 | `research_agent` | `plan_required` | 既存リサーチ基盤のjobを作成・実行し、レポートをVaultへ公開する(target不要)。 |

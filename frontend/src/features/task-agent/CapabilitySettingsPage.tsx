@@ -15,6 +15,7 @@ const CAPABILITY_DESCRIPTIONS: Record<string, string> = {
   web_extract: "Web本文抽出",
   vault_search: "Vault検索",
   vault_read_file: "Vaultファイル読取",
+  vault_write_file: "Vaultファイル書込(Plan承認が必要)",
   calendar_read: "カレンダー読取",
   reminders_read: "リマインダー読取",
   memory_search: "長期記憶検索",
