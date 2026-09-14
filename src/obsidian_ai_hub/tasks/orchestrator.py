@@ -42,6 +42,16 @@ OBSERVATION_LIMIT = 2000
 MAX_SELF_CORRECTIONS = 2
 MAX_REPEATS = 2
 
+# Prompt-side observation budgets (chars). The newest observation keeps the
+# largest window because the finish decision depends on its completion
+# evidence; older observations are compressed progressively. The history
+# section total is capped separately so long loops cannot blow up the prompt.
+OBSERVATION_HEAD = 500
+OBSERVATION_TAIL = 1500
+OLDER_OBSERVATION_HEAD = 200
+OLDER_OBSERVATION_TAIL = 600
+HISTORY_TOTAL_BUDGET = 60000
+
 ORCHESTRATOR_SYSTEM_PROMPT = """あなたはTask実行のRuntime Orchestratorである。
 承認済みDirectional Planの目的・Capability範囲・制約の中で、次の一手を
 次のJSONだけ(前後の説明やコードフェンスなし)で返す。
@@ -64,6 +74,9 @@ Capability呼び出しの場合:
 - 秘密値 (APIキー、トークン等) をinputsやreasonに含めない。
 - 同じCapability・同じinputsの反復は避け、進展がない場合はfinishする。
 - 完了条件を満たした、またはこれ以上有効な一手がないと判断したらfinishする。
+- 直前のObservationに完了条件の達成証拠（テスト結果・コミットSHA等）が具体的に
+  含まれる場合は、同一内容の再検証のための追加呼び出しを避け、その証拠を引用して
+  finishで要約する。独立した検証が真に必要な場合に限り、最小限の追加Actionに留める。
 """
 
 
@@ -139,6 +152,73 @@ def _truncate(text: str, limit: int = OBSERVATION_LIMIT) -> str:
     return text[:limit] + "\n...(truncated)"
 
 
+def _truncate_observation(
+    text: str, head: int = OBSERVATION_HEAD, tail: int = OBSERVATION_TAIL
+) -> str:
+    """Truncate a child-run observation while preserving its conclusion.
+
+    Child results report evidence (test counts, commit SHAs) at the end, so
+    head-only truncation drops exactly what the finish decision needs. Keep
+    both ends within the same overall budget as the prompt history slot.
+    """
+    if len(text) <= head + tail:
+        return text
+    omitted = len(text) - head - tail
+    return text[:head] + f"\n...({omitted} chars omitted)...\n" + text[-tail:]
+
+
+def _compress_history_lines(
+    history: list[dict[str, Any]], budget: int = HISTORY_TOTAL_BUDGET
+) -> list[str]:
+    """Render history lines within a total char budget.
+
+    The newest action always keeps its full observation budget. When the
+    section overflows, the oldest actions collapse to one-line summaries
+    first. Redaction happens before rendering so secrets never enter the
+    prompt regardless of compression.
+    """
+    rendered: list[tuple[int, str, str]] = []
+    for position, item in enumerate(history):
+        is_latest = position == len(history) - 1
+        safe_inputs = redact_text(_canonical_inputs(item.get("inputs")))
+        action_line = (
+            f"- Action {item.get('action_index')}: "
+            f"{item.get('capability_key')} "
+            f"inputs={_truncate(safe_inputs, 500)}"
+        )
+        safe_observation = redact_text(str(item.get("observation") or ""))
+        if is_latest:
+            observation_line = _truncate_observation(
+                safe_observation, OBSERVATION_HEAD, OBSERVATION_TAIL
+            )
+        else:
+            observation_line = _truncate_observation(
+                safe_observation, OLDER_OBSERVATION_HEAD, OLDER_OBSERVATION_TAIL
+            )
+        rendered.append(
+            (int(item.get("action_index") or 0), action_line, observation_line)
+        )
+    total = sum(len(action) + len(observation) for _, action, observation in rendered)
+    index = 0
+    while total > budget and index < len(rendered) - 1:
+        action_index, action_line, observation_line = rendered[index]
+        summary = (
+            f"  Observation: (older action {action_index} observation "
+            f"{len(observation_line)} chars, omitted for budget)"
+        )
+        total -= len(observation_line) - len(summary)
+        rendered[index] = (action_index, action_line, summary)
+        index += 1
+    lines: list[str] = []
+    for _, action_line, observation_line in rendered:
+        lines.append(action_line)
+        if observation_line.startswith("  Observation:"):
+            lines.append(observation_line)
+        else:
+            lines.append(f"  Observation: {observation_line}")
+    return lines
+
+
 def _canonical_inputs(value: Any) -> str:
     try:
         return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
@@ -204,19 +284,7 @@ def build_orchestrator_prompt(
     lines += ["", f"完了条件:\n{plan.completion_criteria}"]
     if history:
         lines += ["", "過去のActionとObservation:"]
-        for item in history:
-            # Redact before LLM exposure: store redaction only covers
-            # persistence, while history re-enters the prompt every turn.
-            safe_inputs = redact_text(_canonical_inputs(item.get("inputs")))
-            safe_observation = redact_text(str(item.get("observation") or ""))
-            lines.append(
-                f"- Action {item.get('action_index')}: "
-                f"{item.get('capability_key')} "
-                f"inputs={_truncate(safe_inputs, 500)}"
-            )
-            lines.append(
-                f"  Observation: {_truncate(safe_observation, 800)}"
-            )
+        lines += _compress_history_lines(history)
     else:
         lines += ["", "過去のActionとObservation: なし(最初の一手)"]
     if correction:

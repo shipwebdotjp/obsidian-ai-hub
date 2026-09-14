@@ -9,10 +9,14 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any
+from typing import Any, Optional
 
 from obsidian_ai_hub.tasks import store as task_store
-from obsidian_ai_hub.tasks.adapters.child_runs import wait_for_child_run
+from obsidian_ai_hub.tasks.adapters.child_runs import (
+    build_task_session_title,
+    find_prior_child_session,
+    wait_for_child_run,
+)
 from obsidian_ai_hub.tasks.adapters.deviation import (
     DEVIATION_INSTRUCTION,
     build_revised_plan,
@@ -70,11 +74,11 @@ class AgentAdapter:
                 f"Step {step_index} targets unregistered agent '{agent_id}'."
             )
         content = self._build_content(task, plan, step_index, step)
-        session = agent_store.create_session(
-            str(agent_id), title=f"Task {task_id} step {step_index}"
+        session_id, session_reused = self._resolve_session(
+            task_id, str(agent_id), step_inputs, step_index, step, plan
         )
         _, run = agent_store.start_queued_run(
-            session["session_id"],
+            session_id,
             content,
             created_instance_id=get_instance_id(),
         )
@@ -87,6 +91,8 @@ class AgentAdapter:
                 "step_index": step_index,
                 "child_kind": "agent",
                 "child_run_id": run_id,
+                "session_id": session_id,
+                "session_reused": session_reused,
                 "agent_id": str(agent_id),
             },
         )
@@ -119,6 +125,72 @@ class AgentAdapter:
         raise ValueError(
             f"Child agent run '{run_id}' ended with status '{status}': "
             f"{final.get('error_message') or 'no error message'}"
+        )
+
+    def _resolve_session(
+        self,
+        task_id: str,
+        agent_id: str,
+        step_inputs: dict[str, Any],
+        step_index: int,
+        step: dict[str, Any],
+        plan: dict[str, Any],
+    ) -> tuple[str, bool]:
+        """Return ``(session_id, reused)`` for this step.
+
+        Additional agent requests inside the same task reuse the existing
+        session for the same agent so follow-up runs keep the prior
+        context. A new session is created only when the step explicitly
+        asks for one (``fresh_session``), when no prior session exists, or
+        when the prior session is gone, retargeted, or busy.
+        """
+        from obsidian_ai_hub.agents import store as agent_store
+
+        if not step_inputs.get("fresh_session"):
+            prior = find_prior_child_session(
+                task_id,
+                "agent",
+                lambda payload: str(payload.get("agent_id") or "") == agent_id,
+                lambda run_id: self._session_of_run(agent_store, run_id),
+            )
+            if prior is not None:
+                session = agent_store.get_session(prior)
+                if session is not None and str(
+                    session.get("agent_id") or ""
+                ) == agent_id:
+                    if not self._session_has_active_run(agent_store, prior):
+                        logger.info(
+                            "Task %s reuses agent session %s (step %s)",
+                            task_id,
+                            prior,
+                            step_index,
+                        )
+                        return prior, True
+        session = agent_store.create_session(
+            agent_id,
+            title=build_task_session_title(task_id, step_index, step, plan),
+        )
+        return str(session["session_id"]), False
+
+    @staticmethod
+    def _session_of_run(agent_store: Any, run_id: str) -> Optional[str]:
+        run = agent_store.get_run(run_id)
+        if not run:
+            return None
+        return str(run.get("session_id") or "") or None
+
+    @staticmethod
+    def _session_has_active_run(agent_store: Any, session_id: str) -> bool:
+        """Return True when the session still has a non-terminal run."""
+        from obsidian_ai_hub.agents.store import AGENT_NON_TERMINAL_STATUSES
+
+        try:
+            runs = agent_store.list_runs(session_id)
+        except Exception:
+            # Unknown state: let start_queued_run's active-run guard decide.
+            return False
+        return any(
+            str(run.get("status")) in AGENT_NON_TERMINAL_STATUSES for run in runs
         )
 
     def _build_content(

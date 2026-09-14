@@ -53,6 +53,10 @@ class SpecialistAgentInputs(BaseModel):
         default="",
         description="子エージェントに実行させる具体的なタスク内容。空ならPlanの目的・方針を使う。",
     )
+    fresh_session: bool = Field(
+        default=False,
+        description="同一タスク内の既存セッション再利用をやめ、新規セッションで実行したい場合のみtrue。",
+    )
 
 
 class CodingTarget(BaseModel):
@@ -79,6 +83,10 @@ class CodingInputs(BaseModel):
     task: str = Field(
         default="",
         description="子Coding runへの作業指示ヒント。空ならPlanの目的・方針を使う。",
+    )
+    fresh_session: bool = Field(
+        default=False,
+        description="同一タスク内の既存セッション再利用をやめ、新規セッションで実行したい場合のみtrue。",
     )
 
 

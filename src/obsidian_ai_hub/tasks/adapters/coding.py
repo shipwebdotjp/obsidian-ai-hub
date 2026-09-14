@@ -8,10 +8,14 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any
+from typing import Any, Optional
 
 from obsidian_ai_hub.tasks import store as task_store
-from obsidian_ai_hub.tasks.adapters.child_runs import wait_for_child_run
+from obsidian_ai_hub.tasks.adapters.child_runs import (
+    build_task_session_title,
+    find_prior_child_session,
+    wait_for_child_run,
+)
 from obsidian_ai_hub.tasks.adapters.deviation import (
     DEVIATION_INSTRUCTION,
     build_revised_plan,
@@ -85,14 +89,11 @@ class CodingAdapter:
             raise ValueError(f"Project '{project_id}' has no project_path.")
         git_root = validate_git_repo(str(repo_path))
         content = self._build_content(task, plan, step_index, step)
-        session = coding_store.create_session(
-            project_id=project_id,
-            backend=backend,
-            repo_path=git_root,
-            title=f"Task {task_id} step {step_index}",
+        session_id, session_reused = self._resolve_session(
+            task_id, project_id, backend, git_root, step_inputs, step_index, step, plan
         )
         _, run = coding_store.start_queued_run(
-            session["session_id"],
+            session_id,
             content,
             created_instance_id=get_instance_id(),
         )
@@ -105,6 +106,8 @@ class CodingAdapter:
                 "step_index": step_index,
                 "child_kind": "coding",
                 "child_run_id": run_id,
+                "session_id": session_id,
+                "session_reused": session_reused,
                 "project_id": project_id,
                 "backend": backend,
             },
@@ -119,7 +122,7 @@ class CodingAdapter:
         )
         status = str(final.get("status"))
         if status == "completed":
-            text = self._final_text(coding_store, session["session_id"], run_id)
+            text = self._final_text(coding_store, session_id, run_id)
             report = parse_deviation_report(text)
             if report is not None:
                 raise DeviationReported(
@@ -139,6 +142,78 @@ class CodingAdapter:
             f"Child coding run '{run_id}' ended with status '{status}': "
             f"{final.get('error_message') or 'no error message'}"
         )
+
+    def _resolve_session(
+        self,
+        task_id: str,
+        project_id: int,
+        backend: str,
+        git_root: str,
+        step_inputs: dict[str, Any],
+        step_index: int,
+        step: dict[str, Any],
+        plan: dict[str, Any],
+    ) -> tuple[str, bool]:
+        """Return ``(session_id, reused)`` for this step.
+
+        Additional coding requests inside the same task reuse the existing
+        session for the same project/backend so follow-up runs keep the
+        prior context. A new session is created only when the step
+        explicitly asks for one (``fresh_session``), when no prior session
+        exists, or when the prior session is gone, retargeted, or busy.
+        """
+        from obsidian_ai_hub.coding import store as coding_store
+
+        if not step_inputs.get("fresh_session"):
+            prior = find_prior_child_session(
+                task_id,
+                "coding",
+                lambda payload: self._same_coding_target(
+                    payload, project_id, backend
+                ),
+                lambda run_id: self._session_of_run(coding_store, run_id),
+            )
+            if prior is not None:
+                session = coding_store.get_session(prior)
+                if (
+                    session is not None
+                    and int(session.get("project_id") or -1) == project_id
+                    and str(session.get("backend") or "") == backend
+                    and coding_store.get_active_run_for_session(prior) is None
+                ):
+                    logger.info(
+                        "Task %s reuses coding session %s (step %s)",
+                        task_id,
+                        prior,
+                        step_index,
+                    )
+                    return prior, True
+        session = coding_store.create_session(
+            project_id=project_id,
+            backend=backend,
+            repo_path=git_root,
+            title=build_task_session_title(task_id, step_index, step, plan),
+        )
+        return str(session["session_id"]), False
+
+    @staticmethod
+    def _same_coding_target(
+        payload: dict[str, Any], project_id: int, backend: str
+    ) -> bool:
+        try:
+            if int(payload.get("project_id")) != project_id:
+                return False
+        except (TypeError, ValueError):
+            return False
+        recorded = payload.get("backend")
+        return recorded is None or str(recorded) == backend
+
+    @staticmethod
+    def _session_of_run(coding_store: Any, run_id: str) -> Optional[str]:
+        run = coding_store.get_run(run_id)
+        if not run:
+            return None
+        return str(run.get("session_id") or "") or None
 
     def _build_content(
         self,

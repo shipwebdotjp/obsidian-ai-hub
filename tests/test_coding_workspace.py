@@ -1497,7 +1497,9 @@ def test_opencode_title_sync_skips_on_fetch_failure(test_project):
         ("", True),
         ("   ", True),
         (service.DEFAULT_CODING_SESSION_TITLE, True),
+        ("Task task_bde93d76a598 step 2", True),
         ("ユーザー指定のタイトル", False),
+        ("Capability入力スキーマ二重定義の調査", False),
     ],
 )
 def test_coding_title_generation_eligibility(title, expected):

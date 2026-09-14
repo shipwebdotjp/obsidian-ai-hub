@@ -78,7 +78,7 @@ def build_revised_plan(
     return revised
 
 
-def tail_text(text: str, limit: int = 1000) -> str:
+def tail_text(text: str, limit: int = 2000) -> str:
     """Keep the tail of a child result for the Task summary."""
     if len(text) <= limit:
         return text

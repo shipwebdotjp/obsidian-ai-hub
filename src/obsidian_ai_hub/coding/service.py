@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import sqlite3
 import threading
 import uuid
@@ -27,17 +28,28 @@ CLI_LIMIT_REACHED_NOTICE = (
 
 DEFAULT_CODING_SESSION_TITLE = "新しいコーディングセッション"
 
+# Legacy Task-generated session titles ("Task <task_id> step <n>") carry no
+# work description. Mirrored from tasks.adapters.child_runs (single source of
+# the pattern); kept local to avoid a coding -> tasks import cycle.
+_TASK_GENERATED_TITLE_PATTERN = re.compile(r"^Task \S+ step \d+$")
+
 
 def _should_update_coding_title(current_title: Optional[str]) -> bool:
     """Return True only if title is auto-generated / unset and safe to overwrite.
 
-    Overwrite only when title equals the default placeholder or is empty.
-    This prevents destroying user-supplied titles.
+    Overwrite only when title equals the default placeholder, is empty, or
+    is a legacy Task-generated ``Task <id> step <n>`` title carrying no work
+    description. Content-derived and user-supplied titles are preserved.
+    The legacy pattern is mirrored from
+    ``tasks.adapters.child_runs.is_task_generated_session_title`` to avoid
+    a coding -> tasks import cycle.
     """
     if not current_title:
         return True
     stripped = current_title.strip()
-    return stripped == "" or stripped == DEFAULT_CODING_SESSION_TITLE
+    if stripped == "" or stripped == DEFAULT_CODING_SESSION_TITLE:
+        return True
+    return bool(_TASK_GENERATED_TITLE_PATTERN.match(stripped))
 
 
 # Lock per normalized repo_path to prevent concurrent execution on the same Git repo
