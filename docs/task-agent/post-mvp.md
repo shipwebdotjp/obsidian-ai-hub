@@ -3,6 +3,30 @@
 この文書はMVPで意図的に実装しない事項の一覧である。実装の確約や優先順位ではない。
 MVPの範囲は [specification.md](specification.md) を正とする。
 
+## 次期実装の選定記録（2026-09-14）
+
+- **調査したMVP除外候補**: Vault直接書込み、カレンダー/リマインダー直接書込み、
+  任意shell・Skills・カスタムプラグイン、共通Workspace lock、複数Task workerと並列実行、
+  Task固有の実行時間・呼出し数・コスト上限、Task固有の自動リトライ、
+  親側の計画逸脱検出・sandbox、自動ロールバック、専用launchd Task worker、
+  Capability完全CRUD、Agent設定のPlanスナップショット、Capability別の高度な承認ポリシー、
+  Artifact/Delegation/HITL linkの専用テーブル、保持期間とアーカイブ、依頼本文の暗号化、
+  通知と外部入口（Inbox・定期実行・LINE/Push）。
+- **選定した機能（1つのみ）**: Agent設定のPlanスナップショット（最小形:
+  承認時点の指紋記録と実行開始時の差分検出・再承認回し。設定の完全凍結はしない）。
+- **選定根拠**:
+  - ユーザー価値: 仕様書が「承認後にAgentのsystem promptや有効toolが変われば挙動も
+    変わり得る。このリスクは個人利用の運用として受容する」と明記していた承認境界の
+    既知の穴を塞ぐ。承認した内容と異なる設定で子runが動ることを防げる。
+  - 実装コスト: DB migration不要（`plan_json` 内の任意キー追加のみ）、外部書込みなし、
+    実行開始時の比較と既存 `waiting_reapproval` 経路の再利用だけの小変更。
+  - 設計整合性: 承認済みPlanを実行境界にするADRと、無効化Capabilityの実行前停止という
+    既存 precedent（`_ensure_capabilities_enabled`）に沿う。委譲対象allowlistと同様に
+    Planへ承認範囲を記録する。
+  - リスク: 可逆的で副作用なし。スナップショットのない旧Plan・委譲なしPlanは従来通り
+    通過するため回帰が小さい。Vault/外部書込み・shell公開・並列worker・自動ロールバック
+    といった不可逆・競合・復旧責任を伴う候補は今回見送った。
+
 ## 書込みCapability
 
 - **Vault直接書込み** — ノートの作成・編集・削除をTask Capabilityとして追加する。
@@ -35,6 +59,9 @@ MVPの範囲は [specification.md](specification.md) を正とする。
   DBからAdapter、入力仕様、説明を任意作成する機能は、コード定義との整合検証を設計してから行う。
 - **Agent設定のPlanスナップショット** — 現在は実行時の最新Agent設定を使う。承認後の設定変更を
   実行境界から除外したくなった時点で、system prompt、tool設定、委譲先をPlanへ固定する。
+  （2026-09-14に最小形を実装: `specialist_agent` を含むDirectional Planは承認時点の
+  Agent設定指紋（`agent_config_snapshot`）をPlanへ記録し、実行開始時に差分・削除を検出したら
+  `waiting_reapproval` へ回す。実行中の子runへの設定固定や実行中ループでの再検出は将来課題。）
 - **Capability別の高度な承認ポリシー** — `auto` / `plan_required` 以外の、削除だけ追加承認、
   時間帯制限、対象別policyなどは、実際の利用パターンが出てから検討する。
 

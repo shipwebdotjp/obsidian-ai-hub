@@ -69,6 +69,8 @@ def _run_execution(
 ) -> None:
     if not _ensure_capabilities_enabled(task_id, plan):
         return
+    if not _ensure_agent_snapshot_fresh(task_id, plan):
+        return
     active_executor: StepExecutor = executor or get_default_executor()
     from obsidian_ai_hub.tasks.directional import is_directional_plan
     from obsidian_ai_hub.tasks.orchestrator import run_directional_plan
@@ -113,16 +115,10 @@ def _ensure_capabilities_enabled(task_id: str, plan: dict[str, Any]) -> bool:
     else:
         steps = plan_inner.get("steps", [])
         keys = {
-            str(step.get("capability_key"))
-            for step in steps
-            if isinstance(step, dict)
+            str(step.get("capability_key")) for step in steps if isinstance(step, dict)
         }
     disabled = sorted(
-        {
-            key
-            for key in keys
-            if not capabilities.get(key, {}).get("enabled", False)
-        }
+        {key for key in keys if not capabilities.get(key, {}).get("enabled", False)}
     )
     if not disabled:
         return True
@@ -135,6 +131,61 @@ def _ensure_capabilities_enabled(task_id: str, plan: dict[str, Any]) -> bool:
         task_id,
         "note",
         {"text": f"disabled capabilities block execution: {', '.join(disabled)}"},
+    )
+    task_store.transition_task_status(task_id, "waiting_reapproval")
+    return False
+
+
+def _ensure_agent_snapshot_fresh(task_id: str, plan: dict[str, Any]) -> bool:
+    """Stop before execution start when a delegate Agent's config drifted.
+
+    Compares the plan's approval-time ``agent_config_snapshot`` against the
+    live Agent registry. On drift (changed config or deleted agent) creates
+    a revised pending plan so the task waits in ``waiting_reapproval``
+    instead of running under a config the approver never saw.
+
+    Plans without a snapshot baseline (legacy plans, pre-snapshot plans, or
+    plans without ``specialist_agent``) always pass, preserving old behavior.
+    """
+    from obsidian_ai_hub.tasks.directional import (
+        find_agent_config_drift,
+        fingerprint_agent_config,
+        is_directional_plan,
+    )
+
+    plan_inner = plan.get("plan", {}) or {}
+    if not is_directional_plan(plan_inner):
+        return True
+    saved = plan_inner.get("agent_config_snapshot") or {}
+    if not isinstance(saved, dict) or not saved:
+        return True
+
+    from obsidian_ai_hub.agents import store as agent_store
+
+    current: dict[str, Any] = {}
+    for agent_id in saved:
+        record = agent_store.get_agent(str(agent_id))
+        if record is not None:
+            current[str(agent_id)] = fingerprint_agent_config(record)
+    drifted = find_agent_config_drift(saved, current)
+    if not drifted:
+        return True
+    task_store.create_plan(
+        task_id,
+        plan.get("plan", {}),
+        plan.get("approval_policy_snapshot", {}),
+    )
+    task_store.append_task_event(
+        task_id,
+        "note",
+        {
+            "text": (
+                "delegate agent config changed since approval: "
+                + ", ".join(drifted)
+                + ". Reapproval required."
+            ),
+            "drifted_agent_ids": drifted,
+        },
     )
     task_store.transition_task_status(task_id, "waiting_reapproval")
     return False

@@ -50,5 +50,7 @@
 - **CLI入口** — Task投入専用であり、Task IDと詳細URLを返す。
 - **WebUI** — Plan承認、差戻し、取消、結果閲覧、Capability policy設定を扱う。
 - **HITL** — 対象解決質問の永続化と回答処理を扱う。
-- **AI Agent** — 実行時点の設定で子runとして動作する。Taskはその設定を凍結しない。
+- **AI Agent** — 子runは実行時点の設定で動作する。Taskは設定を凍結しないが、
+  `specialist_agent` を含むDirectional Planの承認時点指紋を記録し、実行開始時に
+  差分・削除を検出したら再承認へ回す。
 - **Coding CLI** — 正規化済みProjectのGit root内で動作する。実権限は既存CLI設定に委ねる。

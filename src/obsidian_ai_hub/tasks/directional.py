@@ -11,12 +11,92 @@ compatibility helpers.
 
 from __future__ import annotations
 
+import hashlib
 from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 DEFAULT_MAX_ACTIONS = 10
 MAX_ACTIONS_HARD_LIMIT = 30
+
+
+class AgentConfigSnapshot(BaseModel):
+    """Approval-time fingerprint of one delegate Agent's execution config.
+
+    Only a SHA-256 of the system prompt is stored (never the prompt text),
+    plus the fields that change child-run behavior. Compared at execution
+    start; a mismatch routes the task to ``waiting_reapproval`` instead of
+    silently running under a new config.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    agent_id: str = Field(description="登録済みAgent ID。")
+    name: str = Field(default="", description="承認時点のAgent表示名。")
+    system_prompt_sha256: str = Field(
+        default="", description="承認時点のsystem promptのSHA-256。"
+    )
+    tool_ids: list[str] = Field(
+        default_factory=list, description="承認時点の有効tool ID。"
+    )
+    provider: Optional[str] = Field(
+        default=None, description="承認時点のprovider（未設定はNone）。"
+    )
+    model: Optional[str] = Field(
+        default=None, description="承認時点のmodel（未設定はNone）。"
+    )
+    delegate_agent_ids: list[str] = Field(
+        default_factory=list, description="承認時点の委譲先Agent ID。"
+    )
+    updated_at: str = Field(default="", description="承認時点のAgent更新時刻。")
+
+
+def fingerprint_agent_config(agent: dict[str, Any]) -> AgentConfigSnapshot:
+    """Build a snapshot from a live agent record. Never raises on shapes."""
+    agent_id = str(agent.get("agent_id") or "")
+    prompt = str(agent.get("system_prompt") or "")
+    digest = hashlib.sha256(prompt.encode("utf-8")).hexdigest() if prompt else ""
+    tool_ids = sorted(str(t) for t in (agent.get("tool_ids") or []) if t)
+    delegates = sorted(str(t) for t in (agent.get("delegate_agent_ids") or []) if t)
+    provider = agent.get("provider")
+    model = agent.get("model")
+    return AgentConfigSnapshot(
+        agent_id=agent_id,
+        name=str(agent.get("name") or ""),
+        system_prompt_sha256=digest,
+        tool_ids=tool_ids,
+        provider=str(provider) if provider else None,
+        model=str(model) if model else None,
+        delegate_agent_ids=delegates,
+        updated_at=str(agent.get("updated_at") or ""),
+    )
+
+
+def find_agent_config_drift(
+    saved: dict[str, Any], current: dict[str, AgentConfigSnapshot]
+) -> list[str]:
+    """Return sorted agent_ids whose live config differs from the snapshot.
+
+    ``saved`` is the plan's ``agent_config_snapshot`` mapping. Missing live
+    records (deleted agents) count as drift. Empty ``saved`` means "no
+    baseline" (pre-snapshot plans) and never drifts, preserving old behavior.
+    """
+    if not saved:
+        return []
+    drifted: list[str] = []
+    for agent_id, entry in saved.items():
+        live = current.get(str(agent_id))
+        if live is None:
+            drifted.append(str(agent_id))
+            continue
+        try:
+            baseline = AgentConfigSnapshot.model_validate(entry)
+        except Exception:
+            drifted.append(str(agent_id))
+            continue
+        if baseline != live:
+            drifted.append(str(agent_id))
+    return sorted(drifted)
 
 
 class PlanDirective(BaseModel):
@@ -56,6 +136,13 @@ class DirectionalPlan(BaseModel):
         default_factory=list,
         description="coding_cliが実行可能な登録済みProject IDの承認範囲。空なら実行不可。",
     )
+    # Approval-time fingerprint of delegate Agent configs in the allowed
+    # scope. Empty means "no baseline" (pre-snapshot plans, or plans without
+    # specialist_agent) and disables drift detection. Keyed by agent_id.
+    agent_config_snapshot: dict[str, AgentConfigSnapshot] = Field(
+        default_factory=dict,
+        description="承認時点の委譲先Agent設定の指紋。空なら差分検出しない。",
+    )
     constraints: str = Field(
         default="",
         description="主要な制約（触れてはならない範囲、守るべき条件など）。",
@@ -77,9 +164,7 @@ class DirectionalPlan(BaseModel):
 
     @field_validator("capabilities")
     @classmethod
-    def _non_empty_capabilities(
-        cls, value: list[PlanDirective]
-    ) -> list[PlanDirective]:
+    def _non_empty_capabilities(cls, value: list[PlanDirective]) -> list[PlanDirective]:
         if not value:
             raise ValueError("capabilities must not be empty")
         keys = [d.capability_key for d in value]

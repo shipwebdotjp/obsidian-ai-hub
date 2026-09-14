@@ -165,7 +165,9 @@ def build_planner_prompt(
             )
             capability_lines.append(indented)
         else:
-            capability_lines.append("    (入力schema: 解決不可のCapabilityはPlanに含めないこと)")
+            capability_lines.append(
+                "    (入力schema: 解決不可のCapabilityはPlanに含めないこと)"
+            )
     agent_lines = [f"- {a['agent_id']}: {a['name']}" for a in context["agents"]]
     project_lines = [
         f"- {p['project_id']}: {p['name']} ({p['git_root']})"
@@ -300,6 +302,9 @@ def _validate_directional_shape(output: dict[str, Any]) -> dict[str, Any]:
                 "constraints": output.get("constraints", ""),
                 "completion_criteria": output.get("completion_criteria"),
                 "max_actions": output.get("max_actions", 8),
+                # The planner never forges the delegate config fingerprint;
+                # validate_directional_plan stamps the authoritative snapshot.
+                # Any LLM-supplied value is discarded here.
             }
         )
     except Exception as exc:
@@ -318,6 +323,7 @@ def _validate_directional_shape(output: dict[str, Any]) -> dict[str, Any]:
     output["completion_criteria"] = plan.completion_criteria
     output["max_actions"] = plan.max_actions
     output.pop("steps", None)
+    output.pop("agent_config_snapshot", None)
     return output
 
 
@@ -437,6 +443,12 @@ def validate_directional_plan(
     (``allowed_agent_ids`` / ``allowed_project_ids``) onto the plan from the
     current registry context. The planner never forges these lists; the
     orchestrator enforces membership per action.
+
+    When the plan uses ``specialist_agent``, also stamps an approval-time
+    fingerprint of each in-scope Agent's execution config
+    (``agent_config_snapshot``). The worker compares it at execution start
+    and routes drifted tasks to reapproval instead of silently running
+    under a changed config.
     """
     from obsidian_ai_hub.tasks.capability_schemas import resolve_json_schema
 
@@ -463,13 +475,9 @@ def validate_directional_plan(
             )
         snapshot[key] = enabled[key]
         if resolve_json_schema(key) is None:
-            raise ValueError(
-                f"Plan capability '{key}' has no resolvable input schema."
-            )
+            raise ValueError(f"Plan capability '{key}' has no resolvable input schema.")
     agent_ids = [
-        str(a.get("agent_id"))
-        for a in context.get("agents", [])
-        if a.get("agent_id")
+        str(a.get("agent_id")) for a in context.get("agents", []) if a.get("agent_id")
     ]
     project_ids = []
     for project in context.get("projects", []):
@@ -489,7 +497,30 @@ def validate_directional_plan(
         )
     plan["allowed_agent_ids"] = agent_ids
     plan["allowed_project_ids"] = project_ids
+    if "specialist_agent" in seen:
+        plan["agent_config_snapshot"] = _snapshot_agent_configs(agent_ids)
+    else:
+        plan["agent_config_snapshot"] = {}
     return snapshot
+
+
+def _snapshot_agent_configs(agent_ids: list[str]) -> dict[str, Any]:
+    """Fingerprint the current config of each in-scope agent.
+
+    A missing record (deleted agent) is left out of the snapshot; the
+    worker treats absence from the live registry as drift. Read errors
+    propagate and fail planning like any other planner failure.
+    """
+    from obsidian_ai_hub.agents import store as agent_store
+    from obsidian_ai_hub.tasks.directional import fingerprint_agent_config
+
+    snapshots: dict[str, Any] = {}
+    for agent_id in agent_ids:
+        record = agent_store.get_agent(str(agent_id))
+        if record is None:
+            continue
+        snapshots[str(agent_id)] = fingerprint_agent_config(record).model_dump()
+    return snapshots
 
 
 def plan_task(
@@ -564,6 +595,9 @@ def plan_task(
                     "allowed_agent_ids": list(output.get("allowed_agent_ids") or []),
                     "allowed_project_ids": list(
                         output.get("allowed_project_ids") or []
+                    ),
+                    "agent_config_snapshot": dict(
+                        output.get("agent_config_snapshot") or {}
                     ),
                     "constraints": output.get("constraints", ""),
                     "completion_criteria": output["completion_criteria"],

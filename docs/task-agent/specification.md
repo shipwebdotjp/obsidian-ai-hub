@@ -69,8 +69,13 @@ Plan作成後のポリシー変更は既存Planの承認要否を変えない。
 | `specialist_agent` | `plan_required` | 登録済みAI Agentを指定して一回限りの子runを作る。 |
 | `coding_cli` | `plan_required` | 登録済みProjectのGit rootで新規Coding session/runを作る。 |
 
-`specialist_agent` は実行開始時の最新Agent設定を使う。したがって、承認後にAgentの
-system promptや有効toolが変われば挙動も変わり得る。このリスクは個人利用の運用として受容する。
+`specialist_agent` は実行開始時のAgent設定指紋とPlan承認時の指紋を照合する。
+承認後にAgentのsystem prompt・有効tool・provider/model・委譲先が変わった場合、
+または対象Agentが削除された場合は実行せず `waiting_reapproval` に停止し、
+改訂Plan（同一内容の次版）と差分メモを残して人間の再承認を求める。
+スナップショットを持たない旧Planと `specialist_agent` を含まないPlanは従来通り実行する。
+実行開始後の設定変更（長時間ループ中の変更）の検出と、承認時点設定での子run固定は
+将来課題とし、子run自体は従来通り実行時の設定で動作する。
 
 ## 4. Planと実行境界
 
