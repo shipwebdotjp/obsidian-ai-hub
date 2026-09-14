@@ -36,9 +36,9 @@
 
 ## 入口とWebUI
 
-- [ ] `--task-agent TEXT` の即時返却CLIを実装する
-- [ ] Task一覧・詳細・承認・差戻し・取消・再計画APIを実装する
-- [ ] Capability設定APIを実装する
+- [x] `--task-agent TEXT` の即時返却CLIを実装する
+- [x] Task一覧・詳細・承認・差戻し・取消・再計画APIを実装する
+- [x] Capability設定APIを実装する
 - [ ] `/task-agent` と `/task-agent/:id` の画面を追加する
 - [ ] Capability設定画面を追加する
 

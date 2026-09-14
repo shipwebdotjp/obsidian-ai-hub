@@ -43,6 +43,7 @@ def register_hitl_handlers():
     from obsidian_ai_hub.reminders.hitl import add_approved_reminder
     from obsidian_ai_hub.agents.ask_user_handler import handle_agent_ask_user, handle_coding_ask_user
     from obsidian_ai_hub.summary.person_candidates_handler import apply_person_candidates_handler
+    from obsidian_ai_hub.tasks.hitl import resolve_task_target
     register_handler("research.run_approved_suggestion", run_approved_suggestion)
     register_handler("memory.apply_maintenance_proposals", run_approved_maintenance)
     register_handler("memory.apply_interview_answers", apply_interview_answers)
@@ -51,6 +52,7 @@ def register_hitl_handlers():
     register_handler("agents.ask_user", handle_agent_ask_user)
     register_handler("coding.ask_user", handle_coding_ask_user)
     register_handler("summary.apply_person_candidates", apply_person_candidates_handler)
+    register_handler("tasks.resolve_target", resolve_task_target)
 
 
 def main():
@@ -380,6 +382,12 @@ def main():
         help="Coding Orchestratorを単発CLIで実行（新規は --project-id 必須、再開は --resume-session）",
     )
     parser.add_argument(
+        "--task-agent",
+        type=str,
+        default=None,
+        help="Task Agentへ自由文の依頼を投入し、Task ID・状態・詳細URLを即時表示して終了",
+    )
+    parser.add_argument(
         "--project-id",
         type=int,
         dest="project_id",
@@ -472,6 +480,51 @@ def main():
         ]
         if any(other_action_flags):
             parser.error("--agent-chat cannot be combined with other execution flags")
+
+    if getattr(args, "task_agent", None) is not None:
+        if not args.task_agent.strip():
+            parser.error("--task-agent requires non-blank TEXT")
+
+        other_action_flags = [
+            args.merge_inbox,
+            args.make_target,
+            args.write_today_schedule,
+            args.summerize_week,
+            args.review_draft,
+            args.summerize_month,
+            args.summerize_day,
+            args.backup,
+            args.notify_today_schedule,
+            args.sync_knowledge,
+            args.sync_vault,
+            args.sync_people,
+            args.rebuild_vault,
+            args.research_agent,
+            args.add_research_theme,
+            args.suggest_research_theme,
+            args.generate_planner_proposals,
+            args.screenshot,
+            args.scan_line_inbox,
+            args.log_activity,
+            args.vault_search,
+            args.memory_extract,
+            args.memory_interview,
+            args.memory_review,
+            args.memory_delete,
+            args.memory_compile,
+            getattr(args, "render_copilot_profile", False),
+            args.serve,
+            args.hitl_dispatch,
+            getattr(args, "hitl_worker", False),
+            getattr(args, "memory_maintain", False),
+            getattr(args, "cleanup_line_webhooks", False),
+            getattr(args, "cleanup_execution_logs", False),
+            getattr(args, "import_apple_health", False),
+            getattr(args, "agent_chat", False),
+            getattr(args, "coding", False),
+        ]
+        if any(other_action_flags):
+            parser.error("--task-agent cannot be combined with other execution flags")
 
     if args.research_agent and args.add_research_theme:
         parser.error("--research-agent and --add-research-theme cannot be combined")
@@ -831,6 +884,23 @@ def main():
             resume_session=getattr(args, "resume_session", None),
             prompt=prompt,
             json_output=bool(getattr(args, "json", False)),
+        )
+        ran = True
+    if getattr(args, "task_agent", None) is not None:
+        import os as _os
+
+        from obsidian_ai_hub.tasks.intake import main_task_agent
+
+        host = args.serve_host or _os.getenv("OBSIDIAN_AI_HUB_HOST", "127.0.0.1")
+        port = args.serve_port or int(_os.getenv("OBSIDIAN_AI_HUB_PORT", "8765"))
+        run_and_log(
+            lambda: main_task_agent(
+                args.task_agent,
+                host=host,
+                port=port,
+            ),
+            "task_agent",
+            {"prompt_length": len(args.task_agent)},
         )
         ran = True
     if not ran:

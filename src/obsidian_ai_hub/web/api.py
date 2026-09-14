@@ -14,6 +14,7 @@ from obsidian_ai_hub.web.routes import (
     planner,
     projects,
     research,
+    task_agent,
     task_config,
     task_states,
     vault,
@@ -34,6 +35,7 @@ router.include_router(people.router)
 router.include_router(task_config.router)
 router.include_router(execution_logs.router)
 router.include_router(task_states.router)
+router.include_router(task_agent.router)
 router.include_router(hitl.router)
 router.include_router(planner.router)
 router.include_router(healthcare.router)

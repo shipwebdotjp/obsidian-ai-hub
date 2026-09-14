@@ -215,6 +215,21 @@ def list_tasks(
         return [_row_to_task(row) for row in cur.fetchall()]
 
 
+def count_tasks(
+    status: Optional[str] = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> int:
+    with auto_connection(conn) as (active_conn, _):
+        if status is not None:
+            cur = active_conn.execute(
+                "SELECT COUNT(*) AS total FROM task_agent_tasks WHERE status = ?;",
+                (status,),
+            )
+        else:
+            cur = active_conn.execute("SELECT COUNT(*) AS total FROM task_agent_tasks;")
+        return int(cur.fetchone()["total"])
+
+
 def create_plan(
     task_id: str,
     plan: dict[str, Any],
