@@ -16,6 +16,10 @@
 - [ドメイン用語集](30-Glossary.md)
 - [タスクオーケストレーション CONTEXT.md](../CONTEXT.md)（Bounded Context とユビキタス言語）
 
+## 開発ガイド
+
+- [不可逆変更の設計・実装品質ガイド](../docs/development-quality-playbook.md)
+
 ## 主要な決定
 
 - [テスト層再編プラン (Phase 0 完了)](../docs/test-reduction/plan.md)

@@ -27,6 +27,18 @@
   wrappers; put application logic in the appropriate subpackage.
 - Do not mask unexpected failures with defensive exception handling.
 
+## Irreversible-change quality gate
+
+- Before designing or implementing a change that deletes data, writes or sends
+  data outside the application, or changes an authorization boundary, read
+  [docs/development-quality-playbook.md](docs/development-quality-playbook.md).
+- Record its operation-scenario contract in the feature specification or
+  implementation plan. Implement a focused, isolated end-to-end backend
+  scenario for that contract before considering the change complete.
+- Give `ocr review` the scenario, irreversible operation, identity/schema
+  boundary, and failure/stop behavior as background. OCR supports review; it
+  does not replace the scenario test or a human check of the contract.
+
 ## Test data safety
 
 - Read [docs/testing.md](docs/testing.md) before work that can write data.
