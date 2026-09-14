@@ -30,7 +30,7 @@ class CapabilityDefinition:
     """A single code-defined capability."""
 
     key: str
-    adapter_kind: str  # "registry_tool" | "memory" | "skills" | "agent" | "coding"
+    adapter_kind: str  # "registry_tool" | "memory" | "skills" | "agent" | "coding" | "research"
     label: str
     description: str
     default_approval_policy: str  # "auto" | "plan_required"
@@ -82,6 +82,13 @@ SPECIAL_DEFINITIONS: tuple[CapabilityDefinition, ...] = (
         adapter_kind="coding",
         label="Coding CLI実行",
         description="登録済みProjectのGit rootで新規Coding session/runを作る。",
+        default_approval_policy="plan_required",
+    ),
+    CapabilityDefinition(
+        key="research_agent",
+        adapter_kind="research",
+        label="リサーチ実行",
+        description="既存のリサーチ基盤でjobを作り、レポートを生成してVaultへ保存する。",
         default_approval_policy="plan_required",
     ),
 )

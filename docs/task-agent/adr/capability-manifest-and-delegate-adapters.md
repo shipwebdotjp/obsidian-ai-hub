@@ -44,6 +44,20 @@ Status: Accepted (当初の「提案HITLは除外」判断を改訂する)。
 - DB側の `enabled` / `approval_policy` は起動時同期でも上書き保護する
   (migration v44 seedと同一規則)。
 
+## Amendment (リサーチ基盤への接続)
+
+Status: Accepted (2026-09-14)。
+
+- `research_agent` Capabilityを追加する。既存リサーチ基盤
+  (`research.runner`: テーマ/job DB、バックグラウンドjob実行、Vault公開) を
+  新Adapterから再利用し、リサーチのパイプライン自体は複製しない。
+- Vaultへのレポート新規作成は不可逆な書込みのため、既定policyは `plan_required`。
+- practitioner対象(委譲対象ID)は不要で、入力は `theme` 必須の
+  `ResearchAgentInputs` (Pydantic単一正本) とする。
+- research jobには協調的キャンセルがない。タスク取消時はjobの終端
+  (succeeded/failed) を待ってから取消を伝播し、started後のjobは完走
+  (Vault公開を含む) し得る。この仕様は specification.md の操作シナリオ契約に記録する。
+
 ## Consequences (当初)
 
 - 追加Capabilityにはコードとテストが必要だが、危険な能力が設定だけで公開されない。

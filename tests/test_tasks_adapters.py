@@ -328,7 +328,14 @@ def test_agent_adapter_failed_and_cancelled_child(monkeypatch):
 def test_agent_adapter_propagates_task_cancel(monkeypatch):
     _mock_agent_success(monkeypatch)
     cancelled = []
-    states = [{"status": "running"}, {"status": "running"}, {"status": "cancelled"}]
+    # The cancel path reads the run once more (HITL-link lookup), so the
+    # queue holds an extra state: the cancelling run seen by that lookup.
+    states = [
+        {"status": "running"},
+        {"status": "running"},
+        {"status": "cancelling"},
+        {"status": "cancelled"},
+    ]
     monkeypatch.setattr(agent_store, "get_run", lambda run_id: states.pop(0))
     monkeypatch.setattr(
         agent_store, "request_cancel_run", lambda run_id: cancelled.append(run_id) or {}

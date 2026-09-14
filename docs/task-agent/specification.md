@@ -72,12 +72,29 @@ Registryに新規builtin toolを追加すればTask Capabilityとしても自動
 | `memory_propose` | `plan_required` | Memory candidateの作成。 |
 | `specialist_agent` | `plan_required` | 登録済みAI Agentを指定して一回限りの子runを作る。 |
 | `coding_cli` | `plan_required` | 登録済みProjectのGit rootで新規Coding session/runを作る。 |
+| `research_agent` | `plan_required` | 既存リサーチ基盤のjobを作成・実行し、レポートをVaultへ公開する(target不要)。 |
 | `run_shell`、Skills、その他新規Registry tool | `plan_required` | Registryの正本から自動派生。 |
 
 Task Capabilityにしないtool(コード固定の除外セット): `ask_user`
 (会話内専用)、`agent_delegate`(`specialist_agent` と重複し親Agent run文脈が前提)。
 `calendar_create_proposal` / `reminder_create_proposal` はTask Capabilityとし、
 既存ツール経由で提案HITL登録のみ行う（直接書込みはしない）。
+
+`research_agent` の操作シナリオ契約 (Vault公開は不可逆操作):
+
+| 段階 | 入力と正本 | 機械可読な識別子 | 永続化 | 次に読む主体 | 停止・失敗時 | 不可逆操作 |
+| --- | --- | --- | --- | --- | --- | --- |
+| 入力検証 | `ResearchAgentInputs` (単一正本、theme必須) | `capability_key` / `research_agent` | 検証失敗はStep失敗 | ResearchAdapter | 未知キー・theme欠損は実行せず失敗 | なし |
+| テーマ/job解決 | `theme`(NFKC正規化キー) | `theme_id` / `job_id` | research_themes / research_jobs | research db / WebUI | 同内容のapprovedテーマは再利用、candidateはjob成功後に承認化 | research DB作成 |
+| 実行 | job (既存パイプライン) | `job_id` | research_jobs (succeeded/failed) | Adapterの待受ループ・WebUI | 失敗時はjob失敗でStep失敗 | なし |
+| Vault公開 | succeededなjobのmarkdown | `output_path` / `is_published` | research_jobs (output_path, is_published) | Vault購読者 | 公開失敗はjobをfailedへ。未公開のまま(再実行可能) | Vaultへmarkdown新規作成 |
+| タスク取消 | — | `child_run_id=job_id` | child_run_started Event | 再開ロジック | research jobに協調的キャンセルはなし。job終端まで待ってから取消を伝播 | job継続(公開され得る) |
+
+一回性: 再実行 (rerun等) は既存 `save_research_to_vault` の冪等性
+(`is_published=1` で既存ファイルがあれば skip) に依存し、Vault上の同一
+ファイル名は `<title>_<job_id>.md` で固有化する。Task再開時の重複実行は
+jobごとに最大1回の公開に収まる (at-least-once、Event履歴で検出可能)。
+
 
 `specialist_agent` は実行開始時のAgent設定指紋とPlan承認時の指紋を照合する。
 承認後にAgentのsystem prompt・有効tool・provider/model・委譲先が変わった場合、

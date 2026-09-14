@@ -57,6 +57,8 @@ Planの場合:
     最終的なagent_id解決はRuntime Orchestratorが行うが、提示されたAgent IDの範囲を超えてはならない。
   - coding_cliを使う場合はintentにどのProjectを使うかの目安を書く。
     提示にないProjectが必要ならPlanを作らずquestionを返す。
+  - research_agentを使う場合はintentにどのテーマを調査するかの目安を書く。
+    targetは空でよい。theme/mode/contextの具体値はPlanに固定しない。
   - 依頼文に登録済みProjectの名前・キーワードが含まれる場合は対象が確定している。
     その場合は質問せず、該当Projectをintentに明記したPlanを作る。
   - 提示にないCapability/Agent/Projectが必要ならPlanを作らずquestionを返す。

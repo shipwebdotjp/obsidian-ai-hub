@@ -99,10 +99,14 @@ class AgentAdapter:
         final = wait_for_child_run(
             task_id,
             lambda: agent_store.get_run(run_id),
-            lambda: agent_store.request_cancel_run(run_id),
+            lambda: self._request_child_cancel(task_id, run_id),
             agent_store.AGENT_TERMINAL_STATUSES,
             self.poll_interval,
             self.timeout_secs,
+            waiting_statuses=frozenset({"waiting_user"}),
+            on_first_wait=lambda waiting_run: self._notify_hitl_wait(
+                task_id, step_index, run_id, str(agent_id), waiting_run
+            ),
         )
         status = str(final.get("status"))
         if status == "succeeded":
@@ -191,6 +195,66 @@ class AgentAdapter:
             return False
         return any(
             str(run.get("status")) in AGENT_NON_TERMINAL_STATUSES for run in runs
+        )
+
+    @staticmethod
+    def _request_child_cancel(task_id: str, run_id: str) -> None:
+        """Request child cancel, including a linked HITL wait if any.
+
+        A run parked in ``waiting_user`` has no live worker thread, so the
+        plain cancel request (``cancelling``) would never reach a terminal
+        status on its own. Cancelling the linked HITL run syncs the agent
+        run to ``cancelled`` (checkpoint domain/run_id), letting the wait
+        loop raise ``TaskCancelled`` instead of timing out.
+        """
+        from obsidian_ai_hub.agents import store as agent_store
+
+        agent_store.request_cancel_run(run_id)
+        try:
+            latest = agent_store.get_run(run_id)
+        except Exception:
+            latest = None
+        hitl_run_id = (latest or {}).get("hitl_run_id")
+        if not hitl_run_id:
+            return
+        try:
+            from obsidian_ai_hub.hitl import service as hitl_service
+
+            hitl_service.cancel_run(str(hitl_run_id))
+        except Exception:
+            logger.warning(
+                "Task %s failed to cancel linked HITL run %s for child %s",
+                task_id,
+                hitl_run_id,
+                run_id,
+                exc_info=True,
+            )
+
+    @staticmethod
+    def _notify_hitl_wait(
+        task_id: str,
+        step_index: int,
+        run_id: str,
+        agent_id: str,
+        waiting_run: dict[str, Any],
+    ) -> None:
+        """Record the child's HITL wait as a task event (HITL link included).
+
+        The Task detail UI renders ``hitl_question_asked`` events generically:
+        the ``hitl_run_id`` becomes a link to the HITL run plus its answer
+        card, so no dedicated frontend display is needed.
+        """
+        hitl_run_id = waiting_run.get("hitl_run_id")
+        task_store.append_task_event(
+            task_id,
+            "hitl_question_asked",
+            {
+                "step_index": step_index,
+                "child_kind": "agent",
+                "child_run_id": run_id,
+                "hitl_run_id": str(hitl_run_id) if hitl_run_id else None,
+                "agent_id": agent_id,
+            },
         )
 
     def _build_content(

@@ -90,6 +90,29 @@ class CodingInputs(BaseModel):
     )
 
 
+class ResearchAgentInputs(BaseModel):
+    """Inputs for the existing research pipeline (no target needed)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    theme: str = Field(
+        min_length=1,
+        description="調査テーマ。既存の承認済みテーマと重複すればそのテーマを再利用する。",
+    )
+    mode: Optional[Literal["auto", "internal", "web", "deep"]] = Field(
+        default=None,
+        description="調査モード。省略時はauto(自動ルーティング)。",
+    )
+    context: Optional[str] = Field(
+        default=None,
+        description="自分の前提知識や調査理由の補足文脈。テーマのdirectionとしても使われる。",
+    )
+    output_style: Optional[str] = Field(
+        default=None,
+        description="出力長スタイル(short/long等)。省略時は既定。",
+    )
+
+
 class SkillInputs(BaseModel):
     """Select one tool of the skills bundle; the rest is per-tool args.
 
@@ -113,6 +136,7 @@ _DELEGATE_INPUT_MODELS: dict[str, type[BaseModel]] = {
     "specialist_agent": SpecialistAgentInputs,
     "coding_cli": CodingInputs,
     "skills": SkillInputs,
+    "research_agent": ResearchAgentInputs,
 }
 
 

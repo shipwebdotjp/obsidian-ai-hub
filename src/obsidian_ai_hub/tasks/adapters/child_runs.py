@@ -121,6 +121,8 @@ def wait_for_child_run(
     terminal_statuses: frozenset[str],
     poll_interval: float = 2.0,
     timeout_secs: float = 1800.0,
+    waiting_statuses: frozenset[str] = frozenset(),
+    on_first_wait: Optional[Callable[[dict[str, Any]], None]] = None,
 ) -> dict[str, Any]:
     """Poll a child run until terminal.
 
@@ -128,8 +130,16 @@ def wait_for_child_run(
     ``TaskCancelled`` is raised once the child reaches a terminal status.
     A stuck non-terminal child fails the step after ``timeout_secs`` so the
     serial task worker is never blocked indefinitely.
+
+    Statuses in ``waiting_statuses`` (e.g. ``waiting_user`` while a child
+    run waits for a HITL answer) are exempt from the timeout: the deadline
+    is refreshed on every such poll so active execution after the answer
+    still gets the full budget. ``on_first_wait`` fires once with the run
+    dict when first entering a waiting status so callers can record the
+    HITL linkage (task event with the HITL run id).
     """
     cancel_requested = False
+    notified_waiting = False
     deadline = time.monotonic() + timeout_secs
     while True:
         run = get_run()
@@ -140,7 +150,17 @@ def wait_for_child_run(
             if cancel_requested:
                 raise TaskCancelled(f"Task '{task_id}' was cancelled.")
             return run
-        if time.monotonic() > deadline:
+        in_waiting = status in waiting_statuses
+        if in_waiting:
+            deadline = time.monotonic() + timeout_secs
+            if not notified_waiting:
+                notified_waiting = True
+                if on_first_wait is not None:
+                    try:
+                        on_first_wait(run)
+                    except Exception:
+                        logger.exception("Task %s waiting notification failed", task_id)
+        elif time.monotonic() > deadline:
             raise TimeoutError(
                 f"Child run for task '{task_id}' did not finish "
                 f"within {timeout_secs} seconds."

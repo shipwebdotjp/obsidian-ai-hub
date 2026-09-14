@@ -71,6 +71,7 @@ Capability呼び出しの場合:
 - inputsは提示された入力schemaに従い、必須fieldをすべて含め、未知のキーを
   含めない。先行Observationの値を参照して具体値を生成する。
 - specialist_agent/coding_cliではtargetに対象IDを入れ、inputs.taskに作業指示を書く。
+  research_agentではtargetは常に空オブジェクトで、inputsにthemeを必須として入れる。
 - 秘密値 (APIキー、トークン等) をinputsやreasonに含めない。
 - 同じCapability・同じinputsの反復は避け、進展がない場合はfinishする。
 - 完了条件を満たした、またはこれ以上有効な一手がないと判断したらfinishする。

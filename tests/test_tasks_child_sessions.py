@@ -10,12 +10,15 @@ found at the tail of child observations.
 import obsidian_ai_hub.agents.store as agent_store
 import obsidian_ai_hub.coding.store as coding_store
 import obsidian_ai_hub.web.services.projects as projects_service
+import pytest
 from obsidian_ai_hub.coding import backend as coding_backend
 from obsidian_ai_hub.tasks import capability_schemas as schemas
+from obsidian_ai_hub.tasks import execution as execution_module
 from obsidian_ai_hub.tasks import orchestrator as orchestrator_module
 from obsidian_ai_hub.tasks import store
 from obsidian_ai_hub.tasks.adapters import child_runs
 from obsidian_ai_hub.tasks.adapters.agent import AgentAdapter
+from obsidian_ai_hub.tasks.adapters.child_runs import wait_for_child_run
 from obsidian_ai_hub.tasks.adapters.coding import CodingAdapter
 
 
@@ -396,3 +399,209 @@ def test_orchestrator_prompt_keeps_tail_evidence():
     )
     assert "deadbeef12345678" in prompt
     assert "29件成功" in prompt
+
+
+# --- HITL wait: timeout exemption, single event, cancel linkage ---
+
+
+def test_wait_for_child_run_exempts_hitl_wait_from_timeout():
+    task = store.create_task("hitl wait job")
+    states = [{"status": "running"}]
+    states += [
+        {"status": "waiting_user", "hitl_run_id": "hrun_wait"} for _ in range(200)
+    ]
+    states.append({"status": "completed"})
+    notified = []
+
+    final = wait_for_child_run(
+        task["task_id"],
+        lambda: states.pop(0),
+        lambda: None,
+        frozenset({"completed"}),
+        poll_interval=0.001,
+        timeout_secs=0.05,
+        waiting_statuses=frozenset({"waiting_user"}),
+        on_first_wait=notified.append,
+    )
+    # 200 waiting polls (~0.2s) far exceed the 0.05s execution budget, so
+    # survival proves the exemption. Without it this raises TimeoutError.
+    assert final["status"] == "completed"
+    assert len(notified) == 1
+    assert notified[0]["hitl_run_id"] == "hrun_wait"
+
+
+def test_wait_for_child_run_still_times_out_without_waiting():
+    task = store.create_task("stuck job")
+    with pytest.raises(TimeoutError, match="did not finish"):
+        wait_for_child_run(
+            task["task_id"],
+            lambda: {"status": "running"},
+            lambda: None,
+            frozenset({"completed"}),
+            poll_interval=0.001,
+            timeout_secs=0.02,
+            waiting_statuses=frozenset({"waiting_user"}),
+        )
+
+
+def _mock_coding_hitl_run(monkeypatch, run_states, worker_text="code done"):
+    monkeypatch.setattr(
+        projects_service,
+        "get_project_detail",
+        lambda project_id: {"project_id": project_id, "project_path": "/repo/demo"},
+    )
+    monkeypatch.setattr(coding_backend, "validate_git_repo", lambda path: "/repo/demo")
+    monkeypatch.setattr(
+        coding_store,
+        "create_session",
+        lambda project_id, backend, repo_path, title=None: {
+            "session_id": "cses_hitl",
+            "project_id": project_id,
+            "backend": backend,
+        },
+    )
+    monkeypatch.setattr(
+        coding_store,
+        "start_queued_run",
+        lambda session_id, content, created_instance_id=None: (
+            {"message_id": "m"},
+            {"run_id": "crun_hitl"},
+        ),
+    )
+    monkeypatch.setattr(coding_store, "get_run", lambda run_id: run_states.pop(0))
+    monkeypatch.setattr(
+        coding_store,
+        "get_session",
+        lambda sid: {"session_id": sid, "project_id": 7, "backend": "opencode"},
+    )
+    monkeypatch.setattr(coding_store, "get_active_run_for_session", lambda sid: None)
+    monkeypatch.setattr(
+        coding_store,
+        "list_messages",
+        lambda session_id: [
+            {"role": "worker", "content": "raw cli output"},
+            {"role": "orchestrator", "content": worker_text},
+        ],
+    )
+
+
+def test_coding_adapter_hitl_wait_resume_records_single_event(monkeypatch):
+    run_states = [{"status": "running"}]
+    run_states += [
+        {"status": "waiting_user", "hitl_run_id": "hrun_ask"} for _ in range(100)
+    ]
+    run_states.append({"status": "completed"})
+    _mock_coding_hitl_run(monkeypatch, run_states)
+
+    task = store.create_task("coding hitl job")
+    plan = _legacy_task_plan(
+        task["task_id"], "coding_cli", {"project_id": 7}, {"task": "確認が必要な作業"}
+    )
+    adapter = CodingAdapter(poll_interval=0.001, timeout_secs=0.05)
+    result = adapter.execute_step(task, plan, 0, plan["plan"]["steps"][0])
+    assert result.summary == "code done"
+
+    events = store.list_task_events(task["task_id"])
+    asked = [e for e in events if e["event_type"] == "hitl_question_asked"]
+    assert len(asked) == 1
+    payload = asked[0]["payload"]
+    assert payload["hitl_run_id"] == "hrun_ask"
+    assert payload["child_run_id"] == "crun_hitl"
+    assert payload["child_kind"] == "coding"
+    assert payload["step_index"] == 0
+
+
+def test_coding_adapter_cancel_during_hitl_wait_cancels_hitl(monkeypatch):
+    import obsidian_ai_hub.hitl.service as hitl_service
+
+    cancelled_hitl = []
+    monkeypatch.setattr(
+        hitl_service, "cancel_run", lambda run_id: cancelled_hitl.append(run_id)
+    )
+    run_states = [
+        {"status": "running"},
+        {"status": "waiting_user", "hitl_run_id": "hrun_cancel"},
+        {"status": "waiting_user", "hitl_run_id": "hrun_cancel"},
+        {"status": "cancelled"},
+    ]
+    _mock_coding_hitl_run(monkeypatch, run_states)
+
+    task = store.create_task("coding hitl cancel job")
+    store.claim_task("worker-1", "planning")
+    store.transition_task_status(task["task_id"], "running")
+    plan = _legacy_task_plan(
+        task["task_id"], "coding_cli", {"project_id": 7}, {"task": "確認が必要な作業"}
+    )
+    calls = {"n": 0}
+    requested = []
+    original_get_run = coding_store.get_run
+
+    def staged_get_run(run_id):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            store.transition_task_status(task["task_id"], "cancelling")
+        return original_get_run(run_id)
+
+    monkeypatch.setattr(coding_store, "get_run", staged_get_run)
+    monkeypatch.setattr(
+        coding_store,
+        "request_cancel_run",
+        lambda run_id: (
+            requested.append(run_id) or {"run_id": run_id, "status": "cancelling"}
+        ),
+    )
+    adapter = CodingAdapter(poll_interval=0.001, timeout_secs=5.0)
+    with pytest.raises(execution_module.TaskCancelled):
+        adapter.execute_step(task, plan, 0, plan["plan"]["steps"][0])
+    assert requested == ["crun_hitl"]
+    assert cancelled_hitl == ["hrun_cancel"]
+
+
+def test_agent_adapter_hitl_wait_resume_records_single_event(monkeypatch):
+    run_states = [{"status": "running"}]
+    run_states += [
+        {
+            "status": "waiting_user",
+            "hitl_run_id": "hrun_a",
+            "assistant_message_id": "amsg_x",
+        }
+        for _ in range(100)
+    ]
+    run_states.append({"status": "succeeded", "assistant_message_id": "amsg_x"})
+    _mock_agent_run(monkeypatch)
+    monkeypatch.setattr(agent_store, "get_run", lambda run_id: run_states.pop(0))
+    monkeypatch.setattr(
+        agent_store,
+        "create_session",
+        lambda agent_id, title=None: {"session_id": "asess_hitl", "agent_id": agent_id},
+    )
+    monkeypatch.setattr(
+        agent_store,
+        "start_queued_run",
+        lambda session_id, content, created_instance_id=None: (
+            {"message_id": "m"},
+            {"run_id": "arun_hitl"},
+        ),
+    )
+    monkeypatch.setattr(
+        agent_store,
+        "get_session",
+        lambda sid: {"session_id": sid, "agent_id": "agent_1"},
+    )
+
+    task = store.create_task("agent hitl job")
+    plan = _legacy_task_plan(
+        task["task_id"],
+        "specialist_agent",
+        {"agent_id": "agent_1"},
+        {"task": "確認が必要な調査"},
+    )
+    adapter = AgentAdapter(poll_interval=0.001, timeout_secs=0.05)
+    result = adapter.execute_step(task, plan, 0, plan["plan"]["steps"][0])
+    assert result.summary == "agent done"
+
+    events = store.list_task_events(task["task_id"])
+    asked = [e for e in events if e["event_type"] == "hitl_question_asked"]
+    assert len(asked) == 1
+    assert asked[0]["payload"]["hitl_run_id"] == "hrun_a"
+    assert asked[0]["payload"]["child_kind"] == "agent"

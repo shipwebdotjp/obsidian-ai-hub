@@ -600,7 +600,7 @@ def set_active_child(
     conn: Optional[sqlite3.Connection] = None,
 ) -> dict[str, Any]:
     """Record the in-flight child run a task is waiting on."""
-    if child_kind not in ("agent", "coding"):
+    if child_kind not in ("agent", "coding", "research"):
         raise ValueError(f"Unknown child kind: '{child_kind}'.")
     now = _now_iso()
     with auto_connection(conn) as (active_conn, is_generated):
