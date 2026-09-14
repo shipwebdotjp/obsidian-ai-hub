@@ -7,6 +7,9 @@ import ResearchPage from "./features/research/ResearchPage";
 import AgentsPage from "./features/agents/AgentsPage";
 import CodingPage from "./features/coding/CodingPage";
 import HitlPage from "./features/hitl/HitlPage";
+import TaskAgentDetailPage from "./features/task-agent/TaskAgentDetailPage";
+import TaskAgentListPage from "./features/task-agent/TaskAgentListPage";
+import CapabilitySettingsPage from "./features/task-agent/CapabilitySettingsPage";
 import VaultSearchPage from "./features/vault-search/VaultSearchPage";
 import SummaryDashboardPage from "./features/summary-dashboard/SummaryDashboardPage";
 import HealthcarePage from "./features/healthcare/HealthcarePage";
@@ -177,6 +180,15 @@ export default function App() {
           <Route path={ROUTES.AGENTS} element={<AgentsPage />} />
           <Route path={ROUTES.CODING} element={<CodingPage />} />
           <Route path={ROUTES.HITL} element={<HitlPage />} />
+          <Route path={ROUTES.TASK_AGENT} element={<TaskAgentListPage />} />
+          <Route
+            path={ROUTES.TASK_AGENT_DETAIL}
+            element={<TaskAgentDetailPage />}
+          />
+          <Route
+            path={ROUTES.TASK_AGENT_CAPABILITIES}
+            element={<CapabilitySettingsPage />}
+          />
           <Route path={ROUTES.VAULT_SEARCH} element={<VaultSearchPage />} />
           <Route path={ROUTES.SUMMARY_DASHBOARD} element={<SummaryDashboardPage />} />
           <Route path={ROUTES.HEALTHCARE} element={<HealthcarePage />} />

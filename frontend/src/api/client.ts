@@ -786,3 +786,85 @@ export async function subscribeAgentRunEvents(
     },
   });
 }
+
+// --- Task Agent APIs ---
+
+import type {
+  TaskAgentCapability,
+  TaskAgentCapabilityUpdate,
+  TaskAgentListResponse,
+  TaskAgentTask,
+  TaskAgentTaskDetail,
+} from "./types";
+
+export function listTaskAgentTasks(params: {
+  status?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<TaskAgentListResponse> {
+  const sp = new URLSearchParams();
+  if (params.status) sp.set("status", params.status);
+  if (params.limit != null) sp.set("limit", String(params.limit));
+  if (params.offset != null) sp.set("offset", String(params.offset));
+  const qs = sp.toString();
+  return request<TaskAgentListResponse>(
+    `/api/v1/task-agent/tasks${qs ? `?${qs}` : ""}`,
+  );
+}
+
+export function getTaskAgentTask(taskId: string): Promise<TaskAgentTaskDetail> {
+  return request<TaskAgentTaskDetail>(
+    `/api/v1/task-agent/tasks/${encodeURIComponent(taskId)}`,
+  );
+}
+
+export function approveTaskAgentTask(taskId: string): Promise<TaskAgentTask> {
+  return request<TaskAgentTask>(
+    `/api/v1/task-agent/tasks/${encodeURIComponent(taskId)}/approve`,
+    { method: "POST" },
+  );
+}
+
+export function rejectTaskAgentTask(
+  taskId: string,
+  reason: string,
+): Promise<TaskAgentTask> {
+  return request<TaskAgentTask>(
+    `/api/v1/task-agent/tasks/${encodeURIComponent(taskId)}/reject`,
+    {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    },
+  );
+}
+
+export function cancelTaskAgentTask(taskId: string): Promise<TaskAgentTask> {
+  return request<TaskAgentTask>(
+    `/api/v1/task-agent/tasks/${encodeURIComponent(taskId)}/cancel`,
+    { method: "POST" },
+  );
+}
+
+export function replanTaskAgentTask(taskId: string): Promise<TaskAgentTask> {
+  return request<TaskAgentTask>(
+    `/api/v1/task-agent/tasks/${encodeURIComponent(taskId)}/replan`,
+    { method: "POST" },
+  );
+}
+
+export function listTaskAgentCapabilities(): Promise<TaskAgentCapability[]> {
+  return request<TaskAgentCapability[]>(`/api/v1/task-agent/capabilities`);
+}
+
+export function updateTaskAgentCapability(
+  capabilityKey: string,
+  update: TaskAgentCapabilityUpdate,
+): Promise<TaskAgentCapability> {
+  return request<TaskAgentCapability>(
+    `/api/v1/task-agent/capabilities/${encodeURIComponent(capabilityKey)}`,
+    {
+      method: "PUT",
+      body: JSON.stringify(update),
+    },
+  );
+}
