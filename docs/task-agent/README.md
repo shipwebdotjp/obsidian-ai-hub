@@ -1,46 +1,39 @@
 # Task Agent 文書群
 
-Task Agent は、AI Hub と人間の間で依頼を理解・分解・中継する単一のタスクオーケストレーターである。
-CLI から自由文プロンプトを投入すると、常駐ワーカーが非同期に計画を作り、WebUI の HITL
-(Human-in-the-Loop) で計画承認・質問回答・差戻し・取消を行い、Obsidian Vault と登録済み
-Git リポジトリへ委譲実行する。MVP の優先順位は、実タスクの完遂品質より状態遷移・HITL・監査・
-停止と再開の完全性にある。
+Task Agent は、自由文の依頼を内部で実行計画へ変換し、既存の AI Agent、Coding CLI、
+安全に限定した既存ツールへ委譲する個人用オーケストレーターである。
+
+計画に `plan_required` Capability が含まれるときだけ、WebUI で一括承認を求める。
+すべてが `auto` Capability の計画は、記録を残して自律実行する。MVP は、実行能力を
+増やすことより、承認境界、停止、結果追跡を既存基盤に重複なく統合することを優先する。
 
 ## 文書一覧
 
 | 文書 | 役割 |
 | --- | --- |
-| [CONTEXT.md](../../CONTEXT.md) | 用語・ドメインモデル・不変条件（リポジトリルートのドメインモデル文書） |
-| [specification.md](specification.md) | 確定済みの外部契約と振る舞い（MVP 仕様） |
-| [implementation-plan.md](implementation-plan.md) | 実装順序、依存関係、検証戦略 |
-| [TODO.md](TODO.md) | 未完了作業の追跡チェックリスト |
-| [adr/sqlite-as-task-state-source-of-truth.md](adr/sqlite-as-task-state-source-of-truth.md) | SQLite をタスク状態の正本とする |
-| [adr/cli-intake-webui-hitl-resident-worker.md](adr/cli-intake-webui-hitl-resident-worker.md) | CLI 投入専用 + WebUI HITL + 常駐ワーカー |
-| [adr/approved-plan-as-execution-boundary.md](adr/approved-plan-as-execution-boundary.md) | 承認済み計画を実行境界にする |
-| [adr/capability-manifest-and-delegate-adapters.md](adr/capability-manifest-and-delegate-adapters.md) | Capability Manifest + 委譲先固有 Adapter |
-| [adr/workspace-resolution-and-coding-cli-trust-boundary.md](adr/workspace-resolution-and-coding-cli-trust-boundary.md) | Workspace 解決とコーディング CLI の信頼境界 |
-| [adr/no-automatic-rollback-recovery-via-trace-and-hitl.md](adr/no-automatic-rollback-recovery-via-trace-and-hitl.md) | 自動ロールバックを行わず、構造化トレースと HITL で復旧する |
+| [CONTEXT.md](../../CONTEXT.md) | 用語、境界、不変条件 |
+| [specification.md](specification.md) | 確定済みの外部契約と振る舞い |
+| [implementation-plan.md](implementation-plan.md) | 実装順序、既存基盤との接続、検証 |
+| [TODO.md](TODO.md) | 未完了作業の追跡 |
+| [post-mvp.md](post-mvp.md) | MVP後に再検討する機能・運用項目 |
+| [adr/](adr/) | 変更コストが高い設計判断 |
 
-## 文書ごとの責務
+## 設計上の要点
 
-- **CONTEXT.md** — ユビキタス言語、Bounded Context、集約・エンティティ・値オブジェクト、不変条件、
-  外部境界を定義する。実装詳細・仕様・手順は含まない。
-- **specification.md** — 確定済みの外部契約 (CLI 投入、WebUI、状態遷移) と振る舞いを定義する。
-  実装方法や順序は含まない。未決事項は仕様書 §16 に列挙する。
-- **implementation-plan.md** — 仕様を実リポジトリ構成へ落とす実装順序・依存関係・検証戦略を定める。
-  仕様を上書きしない。未決事項は decision gate として扱い、勝手に確定しない。
-- **TODO.md** — 未完了作業の追跡。実装事実が確定したら更新する。
-- **ADR** — 独立して変更され得る重要な設計判断を Context / Decision / Consequences / Alternatives
-  付きで記録する。
+- CLI の入口は `python -m obsidian_ai_hub --task-agent "依頼"`。Task ID、状態、
+  詳細URLを返して終了する。
+- WebUI は `/task-agent/:id` にTask一覧・詳細を置き、既存の定期タスク設定 `/tasks` と
+  分ける。
+- Task worker は FastAPI の既存 worker lifespan に同居する。Webサーバー停止中は新規の
+  計画・実行を行わない。
+- Capability のAdapter定義はコードで固定し、DBと設定UIでは有効/無効と承認ポリシーだけを
+  管理する。任意shell、Skills、プラグインはMVPのTask Capabilityではない。
+- 外部書込み（カレンダー、リマインダー）とVault直接編集はMVP外。既存の提案HITLをTaskの
+  実行経路で呼ばないため、二重承認は生じない。
 
-## 文書更新時の同期規則
+## 文書同期規則
 
-1. **状態識別子・用語・リンクを文書間で一致させる。** 状態キーは specification.md §13 を正とし、
-   CONTEXT.md・ADR・図・TODO はそれを参照する。識別子を変える場合は specification.md の変更が先。
-2. **仕様変更と設計判断変更を混同しない。** 振る舞いの変更は specification.md を更新し、
-   それに伴い判断そのものが変わる場合のみ該当 ADR を更新する (ADR の Status を見直す)。
-3. **完了した TODO を実装事実として仕様へ無条件に移さない。** TODO が完了しても、
-   それが外部契約の確定を意味するとは限らない。仕様への反映は specification.md の編集として
-   明示的に行う。
-4. ADR の必須見出し (`Status / Context / Decision / Consequences / Alternatives`) と
-   Status 値は移動・編集で変えない。
+1. 状態識別子とCapability keyは [specification.md](specification.md) を正とする。
+2. 振る舞いは仕様書、判断理由はADR、実装順序は実装計画、作業事実はTODOに記す。
+3. 承認ポリシー、Capability登録、実行境界を変更する際は、対応するADRと `CONTEXT.md` を
+   同時に更新する。

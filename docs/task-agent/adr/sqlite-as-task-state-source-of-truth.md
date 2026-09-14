@@ -1,4 +1,4 @@
-# SQLite をタスク状態の正本とする
+# SQLiteをTask状態の正本とする
 
 ## Status
 
@@ -6,32 +6,23 @@ Accepted
 
 ## Context
 
-Task Agent MVP は、CLI 投入から WebUI 承認、常駐ワーカー実行、取消・中断・復旧までを
-単一の状態機械で追跡する。タスクは長時間に及び、プロセス再起動やワーカー停止を跨ぐため、
-状態の正本はプロセス外に永続化される必要がある。
-
-既存の AI Hub は、単一 SQLite (database.py が所有、`PRAGMA user_version` による
-バージョン付きマイグレーション) を各機能の正本として採用してきた
-(projects, hitl_runs, agents, coding_runs 等)。HITL 基盤も SQLite ポーリングの
-常駐ワーカーで動作している。
+TaskはCLI投入、承認待ち、子run待ち、停止復旧を跨ぐため、プロセス外の状態正本が必要である。
+既存AI HubはSQLite migration、WAL、単一worker instance lockを用いてAgent/Coding/HITLを管理している。
 
 ## Decision
 
-- タスク状態・計画・トレース・成果物・委譲記録の正本を **既存の単一 SQLite** に置く。
-- スキーマは database.py のマイグレーション (user_version) で追加する。
-- 常駐ワーカーは SQLite をポーリングしてタスクを claim する。既存 HITL worker と同じ方式。
-- タスクの状態遷移は DB 上で検証し、表外の遷移を拒否する。
+- Taskの正本は既存SQLiteの `task_agent_tasks`、`task_agent_plans`、`task_agent_events` とする。
+- Capability policyは同じDBの `task_agent_capabilities` に置く。
+- migrationは `database.py` のv44として追加し、既存 `task_state` と名前を混同しない。
+- Eventは追記のみ、状態遷移とworker claimはDBで検証する。
 
 ## Consequences
 
-- 単一ファイル DB の制約 (同時書込み) を引き受ける。常駐ワーカーは単一インスタンス前提とし、
-  既存のインスタンスロック (runs/instance.py) で二重実行を防ぐ。
-- 高頻度なトレース書込みが既存機能と同一 DB を共有するため、書込み量の制御 (要約・redact) が必要。
-- 将来スケールする場合 (複数ホスト・高並列) は移行が必要になるが、単一ローカルユーザー前提の
-  MVP では十分。
+- 既存DBのバックアップ・テスト分離・instance lockを利用できる。
+- Taskは子runの詳細を複製せず、ID参照と要約Eventを持つ。
 
 ## Alternatives
 
-- **プロセス内メモリ + ファイルスナップショット**: 再起動復旧・監査の完全性が失われる。不採用。
-- **外部キュー / DB (Redis, PostgreSQL)**: 単一ローカルユーザー構成では運用コストに見合わない。不採用。
-- **タスクごとの JSON ファイル**: 既存の SQLite 集約方針と衝突し、クエリ・一貫性が弱い。不採用。
+- プロセス内メモリ: 停止復旧・承認待ちを保持できず不採用。
+- 別DB/キュー: 個人ローカル用途には運用負荷が過大で不採用。
+- Artifact/Delegation等の専用テーブル群: 子runとEventで追跡できるMVPには過剰なため不採用。

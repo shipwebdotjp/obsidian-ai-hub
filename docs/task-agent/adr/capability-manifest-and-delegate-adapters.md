@@ -1,4 +1,4 @@
-# Capability Manifest + 委譲先固有 Adapter
+# コード定義AdapterとDB管理Capabilityポリシー
 
 ## Status
 
@@ -6,35 +6,25 @@ Accepted
 
 ## Context
 
-オーケストレーターは Vault 操作、登録済み専門エージェント、コーディング CLI という
-性質の異なる能力を使い分ける。各委譲先は入出力の形式・実行方式・リトライ特性が大きく異なる
-(専門エージェントは in-process の LLM ループ、コーディング CLI は外部プロセス)。
-
-既存の AI Hub には agents (ツールレジストリ・委譲 agent_delegate) と coding
-(Codex/OpenCode backend) の双方の実行基盤があるが、タスクオーケストレーターから
-これらを統一的に「発見・選択・呼出し・結果正規化」する仕組みはない。
+Taskは既存Registry tool、AI Agent、Coding CLIを使い分ける。任意の実行器をDBから作れるように
+すると、入力検証、redaction、取消、監査の保証を失う。一方で個人利用では、能力ごとの有効化と
+承認要否をUIから素早く変えたい。
 
 ## Decision
 
-- 利用可能なツール／専門エージェントは**登録済み Capability Manifest から認識**する。
-  Manifest は少なくとも名前・説明・入力仕様・必要権限・アダプター種別・リトライ方針を表現する。
-- 委譲先ごとに**固有の入出力アダプター**を持つ。親オーケストレーターは各アダプターの結果を
-  親タスクの状態・成果物・トレースへ正規化する。
-- **一律の共通レスポンスを委譲先へ強制する設計ではない**。正規化の方向は「委譲先 → 親」の一方向であり、
-  委譲先の自然な出力形式を尊重する。
-- ツールの自動リトライは Manifest／Adapter が宣言した「再試行可否・最大回数・間隔」の範囲でのみ行う。
+- Adapter key、入力検証、説明、allowlistはコードで固定する。
+- `task_agent_capabilities` をDBの正本とし、`enabled` と `approval_policy` をWebUIで更新できる。
+- `specialist_agent` と `coding_cli` は汎用Adapterであり、Planが対象Agent/Projectを固定する。
+- 初期カタログから `run_shell`、Skills、custom plugin、外部書込み提案を除外する。
+- Agentは実行時の最新設定を使う。TaskはAgent設定をスナップショットしない。
 
 ## Consequences
 
-- 新しい委譲先の追加は Manifest 登録 + Adapter 実装で完結し、オーケストレーターの変更が不要になる。
-- Adapter ごとの品質ばらつき (正規化漏れ・redact 漏れ) がトレースの品質に直結する。Adapter 実装時の
-  テストで担保する。
-- 既存 agents / coding の実行基盤をどう Manifest に統合するかは実装時の課題 (仕様書 §16.4)。
+- 追加Capabilityにはコードとテストが必要だが、危険な能力が設定だけで公開されない。
+- Agent編集が承認後の実行挙動を変え得る。これは個人利用の既知リスクである。
 
 ## Alternatives
 
-- **全委譲先に共通の JSON レスポンス契約を強制**: 委譲先 (特に外部 CLI) の自然な出力を歪め、
-  Adapter を書く以上の手間を委譲先側に押し付ける。不採用。
-- **委譲なし (オーケストレーターが全ツールを直接呼ぶ)**: コーディング CLI の対話的実行や
-  専門エージェントの会話状態を親のループで再現するのは現実的でない。不採用。
-- **ハードコードされた委譲先一覧**: 能力の追加・無効化のたびにコード変更が必要。不採用。
+- 完全なCapability CRUD: 柔軟だがAdapterとの整合検証・管理画面が重く不採用。
+- コードだけでpolicyも固定: 実装は軽いが、個人運用での調整性を失うため不採用。
+- 既存Registryを全公開: shellやpluginまでTaskから実行可能になるため不採用。
