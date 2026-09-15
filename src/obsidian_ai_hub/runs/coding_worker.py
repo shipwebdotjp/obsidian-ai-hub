@@ -27,7 +27,7 @@ async def execute_coding_run(run_id: str) -> None:
     from obsidian_ai_hub.coding.orchestrator import (
         PROTOCOL_CORRECTION_INSTRUCTION,
         CodingOrchestrator,
-        parse_and_normalize_worker_output,
+        normalize_worker_output,
         parse_coordinator_response,
     )
 
@@ -666,9 +666,7 @@ async def execute_coding_run(run_id: str) -> None:
                 diag["transport"] = "acp"
                 if acp_res.stop_reason:
                     diag.setdefault("stop_reason", acp_res.stop_reason)
-                worker_output, _worker_blocker = parse_and_normalize_worker_output(
-                    worker_output
-                )
+                worker_output = normalize_worker_output(worker_output)
                 if title_source is None:
                     title_source = worker_output
 

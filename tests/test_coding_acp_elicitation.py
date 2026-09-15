@@ -600,3 +600,80 @@ def test_execute_turn_elicitation_real_subprocess_cancel(tmp_path):
     )
     assert res.stop_reason == "end_turn"
     assert "ELICIT-OK action=cancel" in res.output
+
+
+def _make_handler(run, cancel_event, deadline_s=30):
+    import time as _time
+    return acp_el.make_elicitation_handler(
+        run_id=run["run_id"],
+        session_id=run["session_id"],
+        user_prompt="do work",
+        repo_path="/tmp",
+        backend_name="opencode",
+        phase="initial",
+        phase_turn=1,
+        cli_count=1,
+        tool_ids=["skills"],
+        provider="test",
+        model="test",
+        prior_hitl_run_id=None,
+        cancel_event=cancel_event,
+    )
+
+
+def test_make_handler_registers_hitl_and_accepts(tmp_path):
+    import threading, time
+    _, run = _seed_coding_run(tmp_path, 981)
+    cancel_event = threading.Event()
+    handler = _make_handler(run, cancel_event)
+    parsed = _parsed()
+    wait_ctx = {"request_id": 77, "connection_token": "tok_h",
+                "deadline_monotonic": time.monotonic() + 30}
+    result_box = {}
+    def _run():
+        result_box["res"] = handler(parsed, wait_ctx)
+    th = threading.Thread(target=_run)
+    th.start()
+    # Wait for HITL registration, then answer via HITL service.
+    deadline = time.monotonic() + 10
+    hitl_run_id = None
+    while time.monotonic() < deadline:
+        r = coding_store.get_run(run["run_id"])
+        if r.get("hitl_run_id"):
+            hitl_run_id = r["hitl_run_id"]
+            break
+        time.sleep(0.05)
+    assert hitl_run_id is not None
+    submit_answer(hitl_run_id, "qset_1", "strategy", {"value": "balanced"})
+    submit_answer(hitl_run_id, "qset_1", "note", {"value": "other", "comment": "go slow"})
+    th.join(timeout=15)
+    assert not th.is_alive()
+    assert result_box["res"] == {"action": "accept",
+                                 "content": {"strategy": "balanced", "note": "go slow"}}
+
+
+def test_make_handler_cancel_event_aborts(tmp_path):
+    import threading, time
+    _, run = _seed_coding_run(tmp_path, 982)
+    cancel_event = threading.Event()
+    cancel_event.set()
+    handler = _make_handler(run, cancel_event)
+    with __import__("pytest").raises(acp_el.AcpElicitationCancelled):
+        handler(_parsed(), {"request_id": 78, "connection_token": "tok_h",
+                            "deadline_monotonic": time.monotonic() + 30})
+
+
+def test_waiter_coding_run_cancel_aborts(tmp_path):
+    import threading, time
+    _, run = _seed_coding_run(tmp_path, 983)
+    parsed = _parsed()
+    hitl_run_id, _ = _seed_elicitation_hitl(run, parsed)
+    acp_el.create_wait(hitl_run_id=hitl_run_id, coding_run_id=run["run_id"],
+                       elicitation_request_id="42", connection_token="tok_test")
+    coding_store.update_run(run["run_id"], status="cancelled")
+    with __import__("pytest").raises(acp_el.AcpElicitationCancelled):
+        acp_el.wait_for_hitl_answers(
+            hitl_run_id=hitl_run_id, active_question_set_id="qset_1", parsed=parsed,
+            cancel_event=threading.Event(),
+            deadline_monotonic=time.monotonic() + 30,
+            coding_run_id=run["run_id"], poll_interval_s=0.01)

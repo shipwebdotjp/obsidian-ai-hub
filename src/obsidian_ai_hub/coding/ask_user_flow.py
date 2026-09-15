@@ -55,8 +55,8 @@ def build_coding_checkpoint(
     resume_target selects the resume path in handle_coding_ask_user: the default
     (None) requeues to the next Coordinator turn, while "acp_elicitation"
     resumes by answering the waiting ACP elicitation/create request on the same
-    connection (with <needs_user_input> kept as fallback). elicitation carries
-    the request identifiers needed for the stale-connection guard.
+    connection (stale waits fall back to the next Coordinator turn).
+    elicitation carries the request identifiers needed for the stale-connection guard.
     """
     checkpoint = {
         "domain": "coding",

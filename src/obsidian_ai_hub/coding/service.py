@@ -18,7 +18,7 @@ from obsidian_ai_hub.coding import acp as acp_module, backend, store
 from obsidian_ai_hub.coding.orchestrator import (
     PROTOCOL_CORRECTION_INSTRUCTION,
     CodingOrchestrator,
-    parse_and_normalize_worker_output,
+    normalize_worker_output,
     parse_coordinator_response,
     parse_cli_request,
 )
@@ -514,7 +514,7 @@ async def run_coding_turn_stream(
                     notice_prefix = "前の OpenCode ACP セッションが見つからなかったため、新しいセッションへ切り替えて続行しました。"
                     worker_output = f"{notice_prefix}\n\n{worker_output}" if worker_output else notice_prefix
 
-                worker_output, _worker_blocker = parse_and_normalize_worker_output(worker_output)
+                worker_output = normalize_worker_output(worker_output)
                 if title_source is None:
                     title_source = worker_output
 

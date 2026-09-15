@@ -13,8 +13,8 @@ Operation-scenario contract (see docs/acp/permission-hitl-contract.md):
 Cross-process note: the HITL answer handler (``handle_coding_ask_user``) may run
 in a separate ``--hitl-worker`` process from the ACP turn waiter thread, so
 liveness is mediated by the ``acp_elicitation_waits`` row (heartbeat), never by
-in-process state. A restart wipes heartbeats, which degrades to the
-``<needs_user_input>`` fallback path instead of answering a dead connection.
+in-process state. A restart wipes heartbeats, which falls back to the next
+Coordinator turn instead of answering a dead connection.
 """
 
 from __future__ import annotations

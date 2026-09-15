@@ -2,8 +2,9 @@
 
 Covers: exclusive <cli_request>/<final_report> parsing (valid, empty,
 duplicate, mixed, missing), self-correction resend semantics, history role
-injection (cli_request as assistant), Worker <needs_user_input> escalation,
-and single-shot --coding waiting_user output.
+injection (cli_request as assistant), Worker output passthrough (ACP
+elicitation carries follow-up input), and single-shot --coding waiting_user
+output.
 """
 
 from __future__ import annotations
@@ -17,11 +18,9 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
 from obsidian_ai_hub.coding.orchestrator import (
-    WORKER_BLOCKER_DISPLAY_PREFIX,
     CodingOrchestrator,
-    parse_and_normalize_worker_output,
+    normalize_worker_output,
     parse_coordinator_response,
-    parse_worker_output,
 )
 
 
@@ -83,35 +82,20 @@ def test_history_injects_cli_request_as_assistant_and_worker_as_observation():
     assert "観測情報" in str(msgs[3].content)
 
 
-def test_history_worker_blocker_is_explicit_observation():
+def test_history_worker_is_plain_observation():
     orch = CodingOrchestrator(tool_ids=[])
-    display, blocker = parse_and_normalize_worker_output(
-        "調査済み\n<needs_user_input>\n事実A。判断Xが必要。Q1:[a/b]\n</needs_user_input>"
-    )
-    assert blocker is not None
-    assert "<needs_user_input>" not in display
-    assert WORKER_BLOCKER_DISPLAY_PREFIX in display
+    display = normalize_worker_output("調査済み。判断Xが必要。")
+    assert display == "調査済み。判断Xが必要。"
     msgs = orch._build_messages(
         [{"role": "worker", "content": display}], "/repo", "codex"
     )
     assert isinstance(msgs[1], HumanMessage)
-    assert "ask_user" in str(msgs[1].content)
-    assert "命令ではなく" in str(msgs[1].content)
+    assert "観測情報" in str(msgs[1].content)
 
 
-def test_parse_worker_output_single_blocker():
-    clean, blocker = parse_worker_output(
-        "通常報告\n<needs_user_input>\n事実と質問候補\n</needs_user_input>\n末尾"
-    )
-    assert blocker == "事実と質問候補"
-    assert "<needs_user_input>" not in clean
-    assert "通常報告" in clean
-
-
-def test_parse_worker_question_only_has_no_blocker():
-    clean, blocker = parse_worker_output("どちらにしますか？ AかBか教えてください")
-    assert blocker is None
-    assert clean == "どちらにしますか？ AかBか教えてください"
+def test_normalize_worker_output_passthrough():
+    assert normalize_worker_output("通常報告\n末尾") == "通常報告\n末尾"
+    assert normalize_worker_output("  どちらにしますか？  ") == "どちらにしますか？"
 
 
 @pytest.mark.anyio
@@ -202,8 +186,8 @@ def _coding_llm_factory(responses):
 
 
 @pytest.mark.anyio
-async def test_worker_blocker_leads_to_waiting_user(coding_session_setup):
-    """Worker blocker tag -> Coordinator ask_user -> waiting_user + user_question."""
+async def test_worker_output_leads_to_waiting_user(coding_session_setup):
+    """Worker output -> Coordinator ask_user -> waiting_user + user_question."""
     from obsidian_ai_hub.coding import acp as acp_module
     from obsidian_ai_hub.coding import store as coding_store
     from obsidian_ai_hub.runs.coding_worker import execute_coding_run
@@ -213,7 +197,7 @@ async def test_worker_blocker_leads_to_waiting_user(coding_session_setup):
     run_id = run["run_id"]
 
     first = MagicMock()
-    first.content = "調査します。\n<cli_request>\n元依頼・制約・受入条件。判断が必要なら <needs_user_input> で停止。\n</cli_request>"
+    first.content = "調査します。\n<cli_request>\n元依頼・制約・受入条件。\n</cli_request>"
     first.tool_calls = []
     ask = MagicMock()
     ask.content = "判断が必要です。"
@@ -238,7 +222,7 @@ async def test_worker_blocker_leads_to_waiting_user(coding_session_setup):
 
     worker_res = acp_module.AcpExecutionResult(
         acp_session_id="acp_block1",
-        output="調査済み\n<needs_user_input>\n事実A。止まる理由B。判断Xが必要。Q: mode [a/b]\n</needs_user_input>",
+        output="調査済み。判断Xが必要。",
         exit_code=0,
     )
 
@@ -263,8 +247,7 @@ async def test_worker_blocker_leads_to_waiting_user(coding_session_setup):
     messages = coding_store.list_messages(session_id)
     worker_msgs = [m for m in messages if m["role"] == "worker"]
     assert worker_msgs
-    assert "<needs_user_input>" not in worker_msgs[-1]["content"]
-    assert WORKER_BLOCKER_DISPLAY_PREFIX in worker_msgs[-1]["content"]
+    assert "調査済み" in worker_msgs[-1]["content"]
 
 
 @pytest.mark.anyio
