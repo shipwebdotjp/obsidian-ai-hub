@@ -195,10 +195,13 @@ export default function TaskAgentDetailPanel({
   const [hitlBusy, setHitlBusy] = useState(false);
   const [loadedTaskId, setLoadedTaskId] = useState<string | null>(null);
   const inFlightRef = useRef(false);
+  const requestGenRef = useRef(0);
 
   useEffect(() => {
+    requestGenRef.current++;
     setRejectReason("");
     setActionError(null);
+    setHitlRun(null);
   }, [taskId]);
 
   const loadDetail = useCallback(
@@ -208,10 +211,12 @@ export default function TaskAgentDetailPanel({
         setLoading(false);
         return;
       }
+      const currentGen = ++requestGenRef.current;
       if (showLoading) setLoading(true);
       setError(null);
       try {
         const res = await getTaskAgentTask(taskId);
+        if (currentGen !== requestGenRef.current) return;
         setDetail(res);
         setLoadedTaskId(taskId);
         const asked = res.events
@@ -221,8 +226,11 @@ export default function TaskAgentDetailPanel({
         const hitlRunId = asked?.payload?.hitl_run_id;
         if (typeof hitlRunId === "string" && hitlRunId) {
           try {
-            setHitlRun(await getHitlRun(hitlRunId));
+            const hr = await getHitlRun(hitlRunId);
+            if (currentGen !== requestGenRef.current) return;
+            setHitlRun(hr);
           } catch (e) {
+            if (currentGen !== requestGenRef.current) return;
             setHitlRun(null);
             setActionError(
               e instanceof ApiError
@@ -231,12 +239,16 @@ export default function TaskAgentDetailPanel({
             );
           }
         } else {
+          if (currentGen !== requestGenRef.current) return;
           setHitlRun(null);
         }
       } catch (e) {
+        if (currentGen !== requestGenRef.current) return;
         setError(e instanceof ApiError ? e.message : "読み込みに失敗しました");
       } finally {
-        if (showLoading) setLoading(false);
+        if (currentGen === requestGenRef.current && showLoading) {
+          setLoading(false);
+        }
       }
     },
     [taskId],
