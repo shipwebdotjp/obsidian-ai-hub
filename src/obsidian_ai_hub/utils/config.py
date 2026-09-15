@@ -61,6 +61,7 @@ _APP_ENV_VARS = [
     "CODING_ORCHESTRATOR_PROVIDER",
     "CODING_ORCHESTRATOR_MODEL",
     "CODING_OPENCODE_CLI_PATH",
+    "CODING_OPENCODE_MODEL",
 ]
 
 if IS_TEST_ENV:
@@ -604,6 +605,15 @@ CODING_ORCHESTRATOR_MODEL = str(
 )
 CODING_OPENCODE_CLI_PATH = str(
     _env_or_config("CODING_OPENCODE_CLI_PATH", "coding", "cli", "opencode_path", default="opencode")
+)
+CODING_OPENCODE_MODEL = str(
+    _env_or_config(
+        "CODING_OPENCODE_MODEL",
+        "coding",
+        "acp",
+        "opencode_model",
+        default="opencode-go/muse-spark-1.3-contributor",
+    )
 )
 # Coding workspace is ACP-only with the OpenCode backend. There is no
 # backend selection: keep the constant for callers that still reference it.

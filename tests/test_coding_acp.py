@@ -137,6 +137,73 @@ def test_acp_execute_turn_mocked_success():
             assert res.cancelled is False
 
 
+def test_acp_execute_turn_pins_configured_model_before_prompt():
+    """session/set_model runs with the configured model before session/prompt."""
+    profile = acp.AcpLaunchProfile.get_profile("opencode")
+    client = acp.AcpClientBackend(profile)
+    calls = []
+
+    with patch.object(acp.AcpConnection, "start"), \
+         patch.object(acp.AcpConnection, "is_alive", return_value=True), \
+         patch.object(acp.AcpConnection, "terminate", return_value=0), \
+         patch.object(acp.AcpConnection, "notify"), \
+         patch.object(acp.AcpClientBackend, "initialize", return_value={"protocol_version": 1, "capabilities": {"sessionCapabilities": {"resume": {}}}}):
+
+        def fake_request(method, params, timeout=60.0):
+            calls.append(method)
+            if method == "session/new":
+                assert params == {"cwd": "/tmp", "mcpServers": []}
+                return {"sessionId": "acp_sess_new"}
+            if method == "session/set_model":
+                assert params == {"sessionId": "acp_sess_new", "modelId": acp.CODING_OPENCODE_MODEL}
+                return {}
+            return {}
+
+        def fake_send_async(method, params):
+            calls.append(method)
+            return 99
+
+        with patch.object(acp.AcpConnection, "request", side_effect=fake_request), \
+             patch.object(acp.AcpConnection, "send_request_async", side_effect=fake_send_async), \
+             patch.object(acp.AcpConnection, "wait_for_response", return_value={"result": {"stopReason": "end_turn"}}):
+
+            res = client.execute_turn(repo_path="/tmp", prompt="Hello")
+
+            assert res.exit_code == 0
+            assert "session/set_model" in calls
+            assert calls.index("session/set_model") < calls.index("session/prompt")
+            assert (res.diagnostics or {}).get("acp_model") == acp.CODING_OPENCODE_MODEL
+
+
+def test_acp_set_model_rejection_fails_turn():
+    """A rejected session/set_model fails the turn instead of running on default."""
+    profile = acp.AcpLaunchProfile.get_profile("opencode")
+    client = acp.AcpClientBackend(profile)
+
+    with patch.object(acp.AcpConnection, "start"), \
+         patch.object(acp.AcpConnection, "is_alive", return_value=True), \
+         patch.object(acp.AcpConnection, "terminate", return_value=0), \
+         patch.object(acp.AcpConnection, "notify"), \
+         patch.object(acp.AcpClientBackend, "initialize", return_value={"protocol_version": 1, "capabilities": {"sessionCapabilities": {"resume": {}}}}):
+
+        def fake_request(method, params, timeout=60.0):
+            if method == "session/new":
+                return {"sessionId": "acp_sess_new"}
+            if method == "session/set_model":
+                raise acp.AcpError("RPC error on session/set_model: unknown model")
+            return {}
+
+        with patch.object(acp.AcpConnection, "request", side_effect=fake_request), \
+             patch.object(acp.AcpConnection, "send_request_async") as mock_send, \
+             patch.object(acp.AcpConnection, "wait_for_response"):
+
+            res = client.execute_turn(repo_path="/tmp", prompt="Hello")
+
+            assert res.exit_code == -1
+            assert acp.CODING_OPENCODE_MODEL in (res.error_message or "")
+            mock_send.assert_not_called()
+
+
 def test_acp_resume_failure_falls_back_to_new():
     """A failed session/resume recreates the session and records the reason."""
     profile = acp.AcpLaunchProfile.get_profile("opencode")

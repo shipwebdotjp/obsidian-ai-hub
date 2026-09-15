@@ -13,6 +13,7 @@ from obsidian_ai_hub.coding import (
     service as coding_service,
     store as coding_store,
 )
+from obsidian_ai_hub.utils.config import CODING_OPENCODE_MODEL
 from obsidian_ai_hub.web import service as web_service
 from obsidian_ai_hub.web.routes.deps import require_bearer_token
 
@@ -79,8 +80,8 @@ def update_coding_defaults(body: UpdateToolsRequest, _=Depends(require_bearer_to
 
 @router.get("/config")
 def get_coding_config(_=Depends(require_bearer_token)):
-    """Get coding workspace config (default backend)."""
-    return {"default_backend": "opencode"}
+    """Get coding workspace config (default backend, OpenCode model)."""
+    return {"default_backend": "opencode", "opencode_model": CODING_OPENCODE_MODEL}
 
 
 @router.get("/tools")

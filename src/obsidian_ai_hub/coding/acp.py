@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from obsidian_ai_hub.utils.config import (
     CODING_OPENCODE_CLI_PATH,
+    CODING_OPENCODE_MODEL,
 )
 
 logger = logging.getLogger(__name__)
@@ -334,6 +335,32 @@ class AcpClientBackend:
             "capabilities": agent_capabilities,
         }
 
+    def _apply_session_model(self, conn: AcpConnection, session_id: str) -> None:
+        """Pin the configured OpenCode model on the ACP session.
+
+        Raises AcpError on rejection: a misconfigured model name must fail
+        the turn instead of silently running on the agent default.
+        """
+        model = (CODING_OPENCODE_MODEL or "").strip()
+        if not model:
+            raise AcpError(
+                "OpenCode model is not configured (coding.acp.opencode_model / "
+                "CODING_OPENCODE_MODEL); refusing to run on an unknown model."
+            )
+        try:
+            conn.request(
+                "session/set_model",
+                {"sessionId": session_id, "modelId": model},
+                timeout=15.0,
+            )
+        except AcpError as exc:
+            raise AcpError(
+                f"Failed to set OpenCode model '{model}' on ACP session "
+                f"'{session_id}': {exc}. Check coding.acp.opencode_model / "
+                "CODING_OPENCODE_MODEL."
+            ) from exc
+        logger.info("ACP session '%s' model set to '%s'.", session_id, model)
+
     def _handle_permission_request(self, req: Dict[str, Any], conn: AcpConnection) -> Tuple[bool, str]:
         """Handle session/request_permission RPC request from ACP agent.
 
@@ -543,6 +570,12 @@ class AcpClientBackend:
                 if not curr_session_id or not isinstance(curr_session_id, str):
                     raise AcpError("ACP session/new response did not return a valid session ID")
 
+            # Pin the OpenCode-side model before prompting (per-prompt model
+            # params are ignored by OpenCode; fail the turn on rejection so a
+            # misconfigured model name surfaces instead of silently running
+            # on the agent default).
+            self._apply_session_model(conn, curr_session_id)
+
             # Send session/prompt request asynchronously to process streaming notifications
             prompt_params = {
                 "sessionId": curr_session_id,
@@ -722,6 +755,7 @@ class AcpClientBackend:
             diag = {
                 "acp_version": init_meta.get("protocol_version"),
                 "acp_profile_id": self.profile.profile_id,
+                "acp_model": CODING_OPENCODE_MODEL,
                 "acp_agent": agent_info,
                 "acp_capabilities": init_meta.get("capabilities"),
                 "stop_reason": stop_reason,

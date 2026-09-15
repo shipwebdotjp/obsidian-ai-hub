@@ -105,6 +105,10 @@ def main() -> int:
             sid = f"sess_fake_{counter}"
             sessions[sid] = params
             send({"jsonrpc": "2.0", "id": rid, "result": {"sessionId": sid}})
+        elif method == "session/set_model":
+            # Emulate a compliant agent: accept the model pin (real OpenCode
+            # returns {} on success).
+            send({"jsonrpc": "2.0", "id": rid, "result": {}})
         elif method == "session/prompt":
             sid = params.get("sessionId", "")
             prompt = params.get("prompt", [])

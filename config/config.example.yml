@@ -149,7 +149,7 @@ vault_index:
 
 # Coding workspace: orchestrator LLM and OpenCode ACP agent (ACP-only, OpenCode only)
 # Environment variables CODING_ORCHESTRATOR_PROVIDER, CODING_ORCHESTRATOR_MODEL,
-# CODING_OPENCODE_CLI_PATH override these values if set.
+# CODING_OPENCODE_CLI_PATH, CODING_OPENCODE_MODEL override these values if set.
 # Defaults: orchestrator provider=openai, model=gpt-5.6-terra, opencode executable=opencode on PATH.
 coding:
   orchestrator:
@@ -159,6 +159,10 @@ coding:
     # model: gpt-5.6-luna
   cli:
     opencode_path: /path/to/your/opencode
+  acp:
+    # OpenCode-side model (provider/model[/variant]) applied via session/set_model
+    # before every prompt. Env CODING_OPENCODE_MODEL overrides this value if set.
+    opencode_model: opencode-go/muse-spark-1.3-contributor
 
 youtube:
   transcript_languages: [ja, en]
