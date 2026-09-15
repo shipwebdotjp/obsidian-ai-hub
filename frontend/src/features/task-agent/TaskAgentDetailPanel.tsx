@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   ApiError,
@@ -79,7 +79,10 @@ function DirectionalPlanView({ plan }: { plan: DirectionalPlanJson }) {
       {Array.isArray(plan.capabilities) && (
         <ul className="space-y-0.5">
           {plan.capabilities.map((c, i) => (
-            <li key={i} className="flex min-w-0 flex-wrap items-center gap-1">
+            <li
+              key={String(c.capability_key ?? i)}
+              className="flex min-w-0 flex-wrap items-center gap-1"
+            >
               <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium break-all text-slate-700">
                 {String(c.capability_key ?? "")}
               </span>
@@ -115,7 +118,7 @@ function DirectionalPlanView({ plan }: { plan: DirectionalPlanJson }) {
           {plan.completion_criteria}
         </p>
       )}
-      {plan.max_actions != null && (
+      {plan.max_actions !== null && plan.max_actions !== undefined && (
         <p className="text-slate-500">最大Action数: {String(plan.max_actions)}</p>
       )}
     </div>
@@ -142,7 +145,7 @@ function LegacyPlanView({ plan }: { plan: unknown }) {
 }
 
 /** payload 中の run 参照を識別可能なラベル付きリンクとして表示する。 */
-function RelatedRunLinks({ payload }: { payload: Record<string, any> }) {
+function RelatedRunLinks({ payload }: { payload: Record<string, unknown> }) {
   const childRef = childRunRefFromPayload(payload);
   const hitlRunId = hitlRunIdFromPayload(payload);
   if (!childRef && !hitlRunId) return null;
@@ -191,6 +194,15 @@ export default function TaskAgentDetailPanel({
   const [hitlRun, setHitlRun] = useState<HitlRunDetail | null>(null);
   const [hitlBusy, setHitlBusy] = useState(false);
   const [loadedTaskId, setLoadedTaskId] = useState<string | null>(null);
+  const inFlightRef = useRef(false);
+  const requestGenRef = useRef(0);
+
+  useEffect(() => {
+    requestGenRef.current++;
+    setRejectReason("");
+    setActionError(null);
+    setHitlRun(null);
+  }, [taskId]);
 
   const loadDetail = useCallback(
     async (showLoading = true) => {
@@ -199,10 +211,12 @@ export default function TaskAgentDetailPanel({
         setLoading(false);
         return;
       }
+      const currentGen = ++requestGenRef.current;
       if (showLoading) setLoading(true);
       setError(null);
       try {
         const res = await getTaskAgentTask(taskId);
+        if (currentGen !== requestGenRef.current) return;
         setDetail(res);
         setLoadedTaskId(taskId);
         const asked = res.events
@@ -212,17 +226,29 @@ export default function TaskAgentDetailPanel({
         const hitlRunId = asked?.payload?.hitl_run_id;
         if (typeof hitlRunId === "string" && hitlRunId) {
           try {
-            setHitlRun(await getHitlRun(hitlRunId));
-          } catch {
+            const hr = await getHitlRun(hitlRunId);
+            if (currentGen !== requestGenRef.current) return;
+            setHitlRun(hr);
+          } catch (e) {
+            if (currentGen !== requestGenRef.current) return;
             setHitlRun(null);
+            setActionError(
+              e instanceof ApiError
+                ? `確認タスク読み込みエラー: ${e.message}`
+                : "確認タスクの読み込みに失敗しました",
+            );
           }
         } else {
+          if (currentGen !== requestGenRef.current) return;
           setHitlRun(null);
         }
       } catch (e) {
+        if (currentGen !== requestGenRef.current) return;
         setError(e instanceof ApiError ? e.message : "読み込みに失敗しました");
       } finally {
-        if (showLoading) setLoading(false);
+        if (currentGen === requestGenRef.current && showLoading) {
+          setLoading(false);
+        }
       }
     },
     [taskId],
@@ -235,7 +261,13 @@ export default function TaskAgentDetailPanel({
   useEffect(() => {
     const status = detail?.task.status;
     if (!status || loadedTaskId !== taskId || TERMINAL_SET.has(status)) return;
-    const id = setInterval(() => void loadDetail(false), 3000);
+    const id = setInterval(() => {
+      if (inFlightRef.current) return;
+      inFlightRef.current = true;
+      void loadDetail(false).finally(() => {
+        inFlightRef.current = false;
+      });
+    }, 3000);
     return () => clearInterval(id);
   }, [loadDetail, detail?.task.status, loadedTaskId, taskId]);
 
@@ -283,10 +315,7 @@ export default function TaskAgentDetailPanel({
   const canReplan = task.status === "interrupted";
   const showingStale = loadedTaskId !== null && loadedTaskId !== taskId;
   const childRefEvents = detail.events.filter(
-    (e) =>
-      typeof (e.payload as Record<string, unknown> | null)?.["child_run_id"] ===
-        "string" &&
-      (e.payload as Record<string, unknown>)["child_run_id"] !== "",
+    (e) => childRunRefFromPayload(e.payload) !== null,
   );
   const actionHistory = detail.events.filter(
     (e) => e.event_type === "capability_completed",
@@ -295,12 +324,12 @@ export default function TaskAgentDetailPanel({
     ? toQuestionItems(hitlRun.questions ?? [])
     : [];
   const showQuestionCard =
-    hitlRun != null &&
+    hitlRun !== null &&
     ANSWERABLE_HITL_STATUSES.includes(hitlRun.status) &&
     pendingQuestions.length > 0;
   const rejectDisabled = busy || !rejectReason.trim();
   const activeChildSession =
-    task.active_child_run_id != null
+    task.active_child_run_id !== null && task.active_child_run_id !== undefined
       ? sessionIdForRunId(detail.events, task.active_child_run_id)
       : null;
 
@@ -479,6 +508,7 @@ export default function TaskAgentDetailPanel({
             disabled={hitlBusy}
             onSubmit={async (answers) => {
               setHitlBusy(true);
+              setActionError(null);
               try {
                 await Promise.all(
                   Object.entries(answers).map(([key, a]) =>
@@ -487,15 +517,30 @@ export default function TaskAgentDetailPanel({
                 );
                 await waitForHitlSettled(hitlRun.run_id).catch(() => undefined);
                 await loadDetail(false);
+              } catch (e) {
+                setActionError(
+                  e instanceof ApiError
+                    ? e.message
+                    : "回答の送信に失敗しました",
+                );
+                throw e;
               } finally {
                 setHitlBusy(false);
               }
             }}
             onCancel={async () => {
               setHitlBusy(true);
+              setActionError(null);
               try {
                 await cancelHitlRun(hitlRun.run_id);
                 await loadDetail(false);
+              } catch (e) {
+                setActionError(
+                  e instanceof ApiError
+                    ? e.message
+                    : "確認タスクの取消に失敗しました",
+                );
+                throw e;
               } finally {
                 setHitlBusy(false);
               }
@@ -608,7 +653,9 @@ export default function TaskAgentDetailPanel({
                     <ChildRunLink {...ref} />
                     <span className="ml-2 break-words text-slate-400">
                       （{eventTypeLabel(e.event_type)}
-                      {stepLabel != null ? ` / Step ${String(stepLabel)}` : ""}
+                      {stepLabel !== null && stepLabel !== undefined
+                        ? ` / Step ${String(stepLabel)}`
+                        : ""}
                       {` / ${formatDateTime(e.created_at)}`}）
                     </span>
                   </li>
