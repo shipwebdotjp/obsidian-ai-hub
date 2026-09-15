@@ -1686,4 +1686,76 @@ describe("CodingPage", () => {
       expect(clientApi.cancelHitlRun).toHaveBeenCalledWith("hitl_ask_failed");
     });
   });
+
+  it("renders live ACP worker text, thought, and tool calls, then clears on worker_done", async () => {
+    vi.mocked(codingApi.startCodingRun).mockResolvedValue({
+      run: mockCodingRun({ run_id: "crun_acp_live", session_id: "cses_111" }),
+    });
+    let capturedOnEnvelope: ((e: Envelope) => void) | null = null;
+    vi.mocked(codingApi.subscribeCodingRunEvents).mockImplementation((_runId, opts) => {
+      capturedOnEnvelope = (opts as { onEnvelope: (e: Envelope) => void }).onEnvelope;
+      return new Promise(() => {});
+    });
+
+    renderPage();
+    await waitFor(() => expect(screen.getByText("Test App")).toBeInTheDocument());
+    const textarea = screen.getByPlaceholderText(
+      "指示・質問を入力…（Enterで送信 / Shift+Enterで改行）",
+    );
+    fireEvent.change(textarea, { target: { value: "ACPストリーミング" } });
+    fireEvent.click(screen.getByRole("button", { name: "送信" }));
+    await waitFor(() => expect(capturedOnEnvelope).not.toBeNull());
+
+    act(() => {
+      capturedOnEnvelope?.({
+        eventId: 1,
+        data: { event: "worker_start", attempt: 1, backend: "opencode", prompt: "p" },
+      });
+      capturedOnEnvelope?.({ eventId: 2, data: { event: "text_append", delta: "ACPライブ本文" } });
+      capturedOnEnvelope?.({
+        eventId: 3,
+        data: { event: "acp_thought_append", delta: "考え中の内容" },
+      });
+      capturedOnEnvelope?.({
+        eventId: 4,
+        data: {
+          event: "acp_tool_call",
+          tool_call_id: "t1",
+          tool_name: "bash",
+          status: "running",
+          args: { command: "ls" },
+        },
+      });
+    });
+
+    expect(await screen.findByText("ACP Worker 応答（ストリーミング）")).toBeInTheDocument();
+    expect(screen.getByText("ACPライブ本文")).toBeInTheDocument();
+    expect(screen.getByText("考え中の内容")).toBeInTheDocument();
+    expect(screen.getByTestId("acp-tool-call")).toBeInTheDocument();
+
+    act(() => {
+      capturedOnEnvelope?.({
+        eventId: 5,
+        data: {
+          event: "worker_done",
+          attempt: 1,
+          message: {
+            message_id: "cmsg_worker_acp",
+            session_id: "cses_111",
+            sequence: 5,
+            role: "worker",
+            content: "最終応答",
+            created_at: "2026-01-01T00:03:00Z",
+          },
+          exit_code: 0,
+          error: null,
+        },
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByText("ACP Worker 応答（ストリーミング）")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("acp-tool-call")).not.toBeInTheDocument();
+    });
+  });
 });

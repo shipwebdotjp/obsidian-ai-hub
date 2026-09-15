@@ -6,11 +6,10 @@ import asyncio
 import json
 import logging
 import re
-import sqlite3
 import threading
 import uuid
 from datetime import datetime
-from typing import Any, AsyncGenerator, Dict, Optional, Tuple
+from typing import AsyncGenerator, Dict, Optional, Tuple
 from zoneinfo import ZoneInfo
 
 from obsidian_ai_hub.agents import runtime as agents_runtime
@@ -20,7 +19,6 @@ from obsidian_ai_hub.coding.orchestrator import (
     CodingOrchestrator,
     normalize_worker_output,
     parse_coordinator_response,
-    parse_cli_request,
 )
 
 logger = logging.getLogger(__name__)
@@ -458,11 +456,15 @@ async def run_coding_turn_stream(
                     current_external_id = db_acp_id
                 act_acp_id = current_external_id
 
-                def _update_handler(params: Dict[str, Any]):
-                    # Optional: emit supplementary ACP live update events
-                    pass
-
+                from obsidian_ai_hub.coding import acp_updates
                 from obsidian_ai_hub.coding import acp_elicitation as acp_el
+
+                update_streamer = acp_updates.AcpUpdateStreamer(
+                    run_id=run_id,
+                    phase=phase,
+                    phase_turn=phase_turn,
+                    attempt=cli_count,
+                )
 
                 _elicitation_handler = acp_el.make_elicitation_handler(
                     run_id=run_id,
@@ -480,17 +482,22 @@ async def run_coding_turn_stream(
                     cancel_event=cancel_event,
                 )
 
-                acp_res: acp_module.AcpExecutionResult = await loop.run_in_executor(
-                    None,
-                    lambda s=act_acp_id: acp_client.execute_turn(
-                        repo_path=canonical_repo,
-                        prompt=cli_prompt,
-                        acp_session_id=s,
-                        cancel_event=cancel_event,
-                        on_update_callback=_update_handler,
-                        on_elicitation_create=_elicitation_handler,
-                    ),
-                )
+                try:
+                    acp_res: acp_module.AcpExecutionResult = (
+                        await loop.run_in_executor(
+                            None,
+                            lambda s=act_acp_id: acp_client.execute_turn(
+                                repo_path=canonical_repo,
+                                prompt=cli_prompt,
+                                acp_session_id=s,
+                                cancel_event=cancel_event,
+                                on_update_callback=update_streamer.handle,
+                                on_elicitation_create=_elicitation_handler,
+                            ),
+                        )
+                    )
+                finally:
+                    update_streamer.flush()
 
                 if acp_res.session_recreated or acp_res.acp_session_id != act_acp_id:
                     store.update_session_acp_id(

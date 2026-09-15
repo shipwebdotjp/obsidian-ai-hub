@@ -31,6 +31,10 @@ interface CodingMessageListProps {
   currentRun: CodingRun | null;
   activeWaitingRun: ActiveWaitingRun | null;
   streamingToolCalls: CodingLiveToolCall[];
+  streamingText?: string;
+  streamingThought?: string;
+  acpToolCalls?: CodingLiveToolCall[];
+  streamingPlan?: string[];
   activePhaseText: string | null;
   workerState: {
     status: "idle" | "running" | "done";
@@ -52,6 +56,97 @@ interface CodingMessageListProps {
   backend: string;
 }
 
+/** Live tool-call card shared by Coordinator and ACP worker streams. */
+function StreamingToolCallCard({
+  tc,
+  tone,
+  testId,
+}: {
+  tc: CodingLiveToolCall;
+  tone: "slate" | "teal";
+  testId?: string;
+}) {
+  const border = tone === "teal" ? "border-teal-200" : "border-slate-200";
+  const headerBg =
+    tone === "teal" ? "bg-teal-50 hover:bg-teal-100" : "bg-slate-50 hover:bg-slate-100";
+  return (
+    <details
+      className={`rounded border ${border} bg-white text-xs overflow-hidden group`}
+      data-testid={testId}
+    >
+      <summary
+        className={`cursor-pointer list-none flex items-center justify-between gap-2 px-3 py-1.5 ${headerBg}`}
+      >
+        <span className="flex items-center gap-1.5 min-w-0">
+          <span className="font-semibold truncate text-slate-800">{tc.tool_name}</span>
+          <span
+            className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold border ${
+              tc.status === "succeeded"
+                ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                : tc.status === "failed"
+                ? "bg-rose-50 text-rose-700 border-rose-200"
+                : tc.status === "running"
+                ? "bg-amber-50 text-amber-700 border-amber-200"
+                : "bg-blue-50 text-blue-700 border-blue-200"
+            }`}
+          >
+            {tc.status === "succeeded"
+              ? "成功"
+              : tc.status === "failed"
+              ? "失敗"
+              : tc.status === "running"
+              ? "実行中…"
+              : "準備中…"}
+          </span>
+        </span>
+        <span className="text-[10px] text-slate-400 group-open:rotate-180 transition-transform shrink-0">▼</span>
+      </summary>
+      <div className={`border-t ${border} p-3 space-y-2 bg-white`}>
+        {tc.status === "preparing" ? (
+          <div className="flex items-center gap-2 text-[11px] text-blue-700">
+            <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-blue-200 border-t-blue-600" />
+            ツール呼び出しを準備中…
+          </div>
+        ) : (
+          <>
+            <div>
+              <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">引数</div>
+              <pre className="max-h-40 overflow-auto rounded bg-slate-50 border border-slate-200 p-2 text-[11px] font-mono whitespace-pre-wrap break-all">
+                {(() => {
+                  try {
+                    return JSON.stringify(tc.args, null, 2);
+                  } catch {
+                    return String(tc.args);
+                  }
+                })()}
+              </pre>
+            </div>
+            {tc.status !== "running" && (
+              <div>
+                <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">結果</div>
+                <pre className="max-h-64 overflow-auto rounded bg-slate-50 border border-slate-200 p-2 text-[11px] font-mono whitespace-pre-wrap break-all">
+                  {tc.result || "-"}
+                </pre>
+              </div>
+            )}
+          </>
+        )}
+        {tc.status === "running" && (
+          <div className="flex items-center gap-2 text-[11px] text-amber-700">
+            <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-amber-300 border-t-amber-600" />
+            実行中…
+          </div>
+        )}
+        {tc.error && (
+          <div className="text-[11px] text-rose-700 bg-rose-50 border border-rose-200 rounded px-2 py-1 break-all">
+            {tc.error}
+          </div>
+        )}
+      </div>
+    </details>
+  );
+}
+
 /** 会話メッセージ一覧とストリーミング・待機中質問の表示。 */
 export function CodingMessageList({
   messages,
@@ -63,6 +158,10 @@ export function CodingMessageList({
   currentRun,
   activeWaitingRun,
   streamingToolCalls,
+  streamingText = "",
+  streamingThought = "",
+  acpToolCalls = [],
+  streamingPlan = [],
   activePhaseText,
   workerState,
   copiedMessageId,
@@ -446,6 +545,60 @@ export function CodingMessageList({
       {/* Streaming state UI */}
       {isStreaming && (
         <div className="space-y-3">
+          {streamingPlan.length > 0 && (
+            <div className="flex justify-start min-w-0">
+              <div className="max-w-2xl w-full min-w-0 rounded-xl border border-indigo-200 bg-indigo-50/60 px-3 py-2">
+                <div className="text-[10px] font-bold uppercase tracking-wider text-indigo-800">
+                  タスク計画 {streamingPlan.length}件
+                </div>
+                <ol className="mt-1 list-decimal space-y-0.5 pl-4 text-[11px] text-indigo-950">
+                  {streamingPlan.map((entry, i) => (
+                    <li key={`acp-plan-${i}`} className="[overflow-wrap:anywhere]">
+                      {entry}
+                    </li>
+                  ))}
+                </ol>
+              </div>
+            </div>
+          )}
+
+          {acpToolCalls.length > 0 && (
+            <div className="flex justify-start min-w-0">
+              <div className="max-w-2xl w-full min-w-0 space-y-1.5 rounded-xl border border-teal-200 bg-teal-50/50 px-3 py-2">
+                <div className="text-[10px] font-bold uppercase tracking-wider text-teal-800">
+                  ACP ツール実行 {acpToolCalls.length}件
+                </div>
+                {acpToolCalls.map((tc) => (
+                  <StreamingToolCallCard key={tc.id} tc={tc} tone="teal" testId="acp-tool-call" />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {streamingThought && (
+            <div className="flex justify-start min-w-0">
+              <details className="max-w-2xl w-full min-w-0 rounded-xl border border-slate-300 bg-slate-100 px-3 py-2 text-xs text-slate-600">
+                <summary className="cursor-pointer list-none text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                  思考プロセス
+                </summary>
+                <div className="mt-1 whitespace-pre-wrap [overflow-wrap:anywhere]">
+                  {streamingThought}
+                </div>
+              </details>
+            </div>
+          )}
+
+          {streamingText && (
+            <div className="flex min-w-0 justify-start">
+              <div className="max-w-2xl w-full min-w-0 overflow-hidden rounded-xl border border-teal-300 bg-slate-900 p-4 text-xs text-slate-100 shadow-sm">
+                <div className="mb-1 text-[10px] font-semibold uppercase text-teal-300">
+                  ACP Worker 応答（ストリーミング）
+                </div>
+                <MarkdownPreview content={streamingText} variant="dark" />
+              </div>
+            </div>
+          )}
+
           {streamingToolCalls.length > 0 && (
             <div className="flex justify-start min-w-0">
               <div className="max-w-2xl w-full min-w-0 space-y-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
@@ -453,78 +606,7 @@ export function CodingMessageList({
                   ツール呼び出し {streamingToolCalls.length}件
                 </div>
                 {streamingToolCalls.map((tc) => (
-                  <details
-                    key={tc.id}
-                    className="rounded border border-slate-200 bg-white text-xs overflow-hidden group"
-                  >
-                    <summary className="cursor-pointer list-none flex items-center justify-between gap-2 px-3 py-1.5 bg-slate-50 hover:bg-slate-100">
-                      <span className="flex items-center gap-1.5 min-w-0">
-                        <span className="font-semibold truncate text-slate-800">{tc.tool_name}</span>
-                        <span
-                          className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold border ${
-                            tc.status === "succeeded"
-                              ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                              : tc.status === "failed"
-                              ? "bg-rose-50 text-rose-700 border-rose-200"
-                              : tc.status === "running"
-                              ? "bg-amber-50 text-amber-700 border-amber-200"
-                              : "bg-blue-50 text-blue-700 border-blue-200"
-                          }`}
-                        >
-                          {tc.status === "succeeded"
-                            ? "成功"
-                            : tc.status === "failed"
-                            ? "失敗"
-                            : tc.status === "running"
-                            ? "実行中…"
-                            : "準備中…"}
-                        </span>
-                      </span>
-                      <span className="text-[10px] text-slate-400 group-open:rotate-180 transition-transform shrink-0">▼</span>
-                    </summary>
-                    <div className="border-t border-slate-200 p-3 space-y-2 bg-white">
-                      {tc.status === "preparing" ? (
-                        <div className="flex items-center gap-2 text-[11px] text-blue-700">
-                          <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-blue-200 border-t-blue-600" />
-                          ツール呼び出しを準備中…
-                        </div>
-                      ) : (
-                        <>
-                          <div>
-                            <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">引数</div>
-                            <pre className="max-h-40 overflow-auto rounded bg-slate-50 border border-slate-200 p-2 text-[11px] font-mono whitespace-pre-wrap break-all">
-                              {(() => {
-                                try {
-                                  return JSON.stringify(tc.args, null, 2);
-                                } catch {
-                                  return String(tc.args);
-                                }
-                              })()}
-                            </pre>
-                          </div>
-                          {tc.status !== "running" && (
-                            <div>
-                              <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">結果</div>
-                              <pre className="max-h-64 overflow-auto rounded bg-slate-50 border border-slate-200 p-2 text-[11px] font-mono whitespace-pre-wrap break-all">
-                                {tc.result || "-"}
-                              </pre>
-                            </div>
-                          )}
-                        </>
-                      )}
-                      {tc.status === "running" && (
-                        <div className="flex items-center gap-2 text-[11px] text-amber-700">
-                          <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-amber-300 border-t-amber-600" />
-                          実行中…
-                        </div>
-                      )}
-                      {tc.error && (
-                        <div className="text-[11px] text-rose-700 bg-rose-50 border border-rose-200 rounded px-2 py-1 break-all">
-                          {tc.error}
-                        </div>
-                      )}
-                    </div>
-                  </details>
+                  <StreamingToolCallCard key={tc.id} tc={tc} tone="slate" />
                 ))}
               </div>
             </div>

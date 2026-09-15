@@ -561,6 +561,7 @@ async def execute_coding_run(run_id: str) -> None:
                 """
                 from obsidian_ai_hub.coding import acp as acp_module
                 from obsidian_ai_hub.coding import acp_elicitation as acp_el
+                from obsidian_ai_hub.coding import acp_updates
 
                 acp_profile = acp_module.AcpLaunchProfile.get_profile(backend_name)
                 acp_client = acp_module.AcpClientBackend(acp_profile)
@@ -594,16 +595,30 @@ async def execute_coding_run(run_id: str) -> None:
                     cancel_event=cancel_event,
                 )
                 loop = asyncio.get_running_loop()
-                acp_res: acp_module.AcpExecutionResult = await loop.run_in_executor(
-                    None,
-                    lambda s=act_acp_id: acp_client.execute_turn(
-                        repo_path=canonical_repo,
-                        prompt=cli_prompt,
-                        acp_session_id=s,
-                        cancel_event=cancel_event,
-                        on_elicitation_create=elicitation_handler,
-                    ),
+                update_streamer = acp_updates.AcpUpdateStreamer(
+                    run_id=run_id,
+                    phase=phase,
+                    phase_turn=phase_turn,
+                    attempt=cli_count,
                 )
+                try:
+                    acp_res: acp_module.AcpExecutionResult = (
+                        await loop.run_in_executor(
+                            None,
+                            lambda s=act_acp_id: acp_client.execute_turn(
+                                repo_path=canonical_repo,
+                                prompt=cli_prompt,
+                                acp_session_id=s,
+                                cancel_event=cancel_event,
+                                on_update_callback=update_streamer.handle,
+                                on_elicitation_create=elicitation_handler,
+                            ),
+                        )
+                    )
+                finally:
+                    # Persist any uncommitted aggregated text before terminal
+                    # events are written (cancel/timeout/error included).
+                    update_streamer.flush()
 
                 if acp_res.session_recreated or acp_res.acp_session_id != act_acp_id:
                     store.update_session_acp_id(

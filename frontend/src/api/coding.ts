@@ -202,6 +202,47 @@ export type CodingSseEvent =
   | { event: "cli_request"; message: CodingMessage }
   | { event: "worker_start"; attempt: number; backend: string; prompt: string }
   | {
+      event: "text_append";
+      delta: string;
+      phase?: "initial" | "review";
+      phase_turn?: number;
+      attempt?: number;
+    }
+  | {
+      event: "acp_thought_append";
+      delta: string;
+      phase?: "initial" | "review";
+      phase_turn?: number;
+      attempt?: number;
+    }
+  | {
+      event: "acp_tool_call";
+      tool_call_id: string;
+      tool_name?: string;
+      kind?: string | null;
+      status?: string | null;
+      args?: Record<string, unknown>;
+      locations?: { path: string }[];
+      phase?: "initial" | "review";
+      phase_turn?: number;
+      attempt?: number;
+    }
+  | {
+      event: "acp_tool_call_update";
+      tool_call_id: string;
+      tool_name?: string;
+      kind?: string | null;
+      status?: string | null;
+      args?: Record<string, unknown>;
+      locations?: { path: string }[];
+      result?: string;
+      error?: string | null;
+      phase?: "initial" | "review";
+      phase_turn?: number;
+      attempt?: number;
+    }
+  | { event: "acp_plan"; entries: unknown[] }
+  | {
       event: "worker_done";
       attempt: number;
       message: CodingMessage;

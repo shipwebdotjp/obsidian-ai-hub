@@ -6,6 +6,10 @@ interface UseCodingUiStateOptions {
   messages: CodingMessage[];
   activePhaseText: string | null;
   streamingToolCalls: CodingLiveToolCall[];
+  streamingText?: string;
+  streamingThought?: string;
+  acpToolCalls?: CodingLiveToolCall[];
+  streamingPlan?: string[];
   workerState: { status: "idle" | "running" | "done" };
   activeWaitingRun: ActiveWaitingRun | null;
 }
@@ -15,6 +19,10 @@ export function useCodingUiState({
   messages,
   activePhaseText,
   streamingToolCalls,
+  streamingText,
+  streamingThought,
+  acpToolCalls,
+  streamingPlan,
   workerState,
   activeWaitingRun,
 }: UseCodingUiStateOptions) {
@@ -81,7 +89,7 @@ export function useCodingUiState({
   // scrollTop クランプに引きずられないようにする。
   useEffect(() => {
     scrollToBottomIfStuck();
-  }, [messages, activePhaseText, streamingToolCalls, workerState, activeWaitingRun, scrollToBottomIfStuck]);
+  }, [messages, activePhaseText, streamingToolCalls, streamingText, streamingThought, acpToolCalls, streamingPlan, workerState, activeWaitingRun, scrollToBottomIfStuck]);
 
   // Mobile drawer focus management & trap
   useEffect(() => {

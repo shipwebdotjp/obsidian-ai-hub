@@ -27,6 +27,27 @@ DEFAULT_ACP_TURN_TIMEOUT_S = 600.0
 ELICITATION_FORM_CAPABILITY: Dict[str, Any] = {"form": {}}
 
 
+def _extract_content_text(content: Any) -> List[str]:
+    """Extract text parts from an ACP update ``content`` value.
+
+    Handles both the single-part object form (``{"type": "text", "text": ...}``)
+    and the multi-part list form observed for prompted content.
+    """
+    texts: List[str] = []
+    if isinstance(content, dict):
+        if isinstance(content.get("text"), str):
+            texts.append(content["text"])
+    elif isinstance(content, list):
+        for part in content:
+            if (
+                isinstance(part, dict)
+                and part.get("type") == "text"
+                and isinstance(part.get("text"), str)
+            ):
+                texts.append(part["text"])
+    return texts
+
+
 class AcpError(Exception):
     """Base exception for ACP protocol/transport errors."""
 
@@ -641,48 +662,44 @@ class AcpClientBackend:
                         # Flat shapes plus the spec-shaped nested update form
                         # (params.update.sessionUpdate with content.text), as
                         # observed in Phase 0 artifacts for both profiles.
-                        texts: List[str] = []
-                        top_text = params.get("text")
-                        if isinstance(top_text, str) and top_text:
-                            texts.append(top_text)
-                        top_content = params.get("content")
-                        if isinstance(top_content, str) and top_content:
-                            texts.append(top_content)
-                        elif isinstance(top_content, dict) and isinstance(
-                            top_content.get("text"), str
-                        ):
-                            texts.append(top_content["text"])
                         nested = params.get("update")
-                        if isinstance(nested, dict):
-                            nested_content = nested.get("content")
-                            if isinstance(nested_content, dict) and isinstance(
-                                nested_content.get("text"), str
-                            ):
-                                texts.append(nested_content["text"])
-                            elif isinstance(nested_content, list):
-                                for part in nested_content:
-                                    if (
-                                        isinstance(part, dict)
-                                        and part.get("type") == "text"
-                                        and isinstance(part.get("text"), str)
-                                    ):
-                                        texts.append(part["text"])
-                        flat_part = params.get("part")
-                        if (
-                            isinstance(flat_part, dict)
-                            and flat_part.get("type") == "text"
-                            and isinstance(flat_part.get("text"), str)
-                        ):
-                            texts.append(flat_part["text"])
-                        output_chunks.extend(texts)
-
-                        nested_update = params.get("update")
+                        if not isinstance(nested, dict):
+                            nested = None
                         kind = (
-                            nested_update.get("sessionUpdate")
-                            if isinstance(nested_update, dict)
+                            str(nested.get("sessionUpdate"))
+                            if nested and nested.get("sessionUpdate")
                             else None
                         )
-                        kind_key = str(kind) if kind else "flat"
+
+                        # Only assistant message text becomes the worker output.
+                        # Thought chunks are delivered via on_update_callback for
+                        # separate display and must not leak into the final worker
+                        # message. Flat (non-spec) shapes carry no kind and are
+                        # treated as assistant message text.
+                        if kind in (None, "agent_message_chunk"):
+                            texts: List[str] = []
+                            top_text = params.get("text")
+                            if isinstance(top_text, str) and top_text:
+                                texts.append(top_text)
+                            top_content = params.get("content")
+                            if isinstance(top_content, str) and top_content:
+                                texts.append(top_content)
+                            elif isinstance(top_content, dict) and isinstance(
+                                top_content.get("text"), str
+                            ):
+                                texts.append(top_content["text"])
+                            if nested is not None:
+                                texts.extend(_extract_content_text(nested.get("content")))
+                            flat_part = params.get("part")
+                            if (
+                                isinstance(flat_part, dict)
+                                and flat_part.get("type") == "text"
+                                and isinstance(flat_part.get("text"), str)
+                            ):
+                                texts.append(flat_part["text"])
+                            output_chunks.extend(texts)
+
+                        kind_key = kind if kind else "flat"
                         update_kinds[kind_key] = update_kinds.get(kind_key, 0) + 1
 
                         sr = params.get("stop_reason") or params.get("stopReason")

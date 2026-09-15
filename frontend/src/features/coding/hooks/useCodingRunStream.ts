@@ -20,6 +20,60 @@ import type {
   QuestionItem,
 } from "../../../components/InConversationQuestionCard";
 
+/** Upsert a live ACP tool call emitted by the OpenCode worker. */
+function upsertAcpToolCall(
+  prev: CodingLiveToolCall[],
+  data: Record<string, unknown>,
+  type: string,
+): CodingLiveToolCall[] {
+  const toolCallId = String(data.tool_call_id ?? "");
+  if (!toolCallId) return prev;
+  const idx = prev.findIndex((tc) => tc.id === toolCallId);
+  const existing = idx >= 0 ? prev[idx] : undefined;
+  const rawStatus = String(data.status ?? "");
+  // Unknown/missing status must not regress a terminal badge to running.
+  const status: CodingLiveToolCall["status"] =
+    rawStatus === "succeeded" ||
+    rawStatus === "failed" ||
+    rawStatus === "running" ||
+    rawStatus === "preparing"
+      ? rawStatus
+      : existing?.status ?? "running";
+  const incomingArgs =
+    data.args && typeof data.args === "object"
+      ? (data.args as Record<string, unknown>)
+      : {};
+  const inbound: CodingLiveToolCall = {
+    id: toolCallId,
+    tool_name: String(data.tool_name ?? ""),
+    args: incomingArgs,
+    result: type === "acp_tool_call_update" ? String(data.result ?? "") : "",
+    status,
+    error: (data.error as string | null) ?? null,
+  };
+  if (idx < 0) return [...prev, inbound];
+  return prev.map((tc, i) =>
+    i === idx
+      ? {
+          ...tc,
+          tool_name: inbound.tool_name || tc.tool_name,
+          args:
+            type === "acp_tool_call_update" &&
+            Object.keys(inbound.args).length === 0
+              ? tc.args
+              : inbound.args,
+          result: inbound.result || tc.result,
+          status: inbound.status,
+          error: inbound.error ?? tc.error ?? null,
+        }
+      : tc,
+  );
+}
+
+// Bound live text buffers so very long runs cannot accumulate MBs or reparse
+// the entire accumulated Markdown on every delta.
+const MAX_STREAM_CHARS = 200_000;
+
 interface UseCodingRunStreamOptions {
   selectedSessionId: string | null;
   selectedSessionIdRef: MutableRefObject<string | null>;
@@ -65,6 +119,11 @@ export function useCodingRunStream({
   const [isStreaming, setIsStreaming] = useState(false);
   const [activePhaseText, setActivePhaseText] = useState<string | null>(null);
   const [streamingToolCalls, setStreamingToolCalls] = useState<CodingLiveToolCall[]>([]);
+  // Live ACP worker output (separate from the Coordinator's tool calls).
+  const [streamingText, setStreamingText] = useState("");
+  const [streamingThought, setStreamingThought] = useState("");
+  const [acpToolCalls, setAcpToolCalls] = useState<CodingLiveToolCall[]>([]);
+  const [streamingPlan, setStreamingPlan] = useState<string[]>([]);
   const [workerState, setWorkerState] = useState<{
     status: "idle" | "running" | "done";
     attempt?: number;
@@ -82,6 +141,13 @@ export function useCodingRunStream({
   // --- Reconnectable run subscription (docs/run-sse) ---
   // Server event log is the source of truth; sessionStorage caches only the
   // last applied event id. Abort here stops only the subscription, never the run.
+  const clearAcpLiveDisplay = useCallback(() => {
+    setStreamingText("");
+    setStreamingThought("");
+    setAcpToolCalls([]);
+    setStreamingPlan([]);
+  }, []);
+
   const handleRunEnvelope = useCallback(
     (
       envelope: RunSseEnvelope,
@@ -135,6 +201,7 @@ export function useCodingRunStream({
         setIsStreaming(false);
         setActivePhaseText(null);
         setWorkerState({ status: "idle" });
+        clearAcpLiveDisplay();
         abortControllerRef.current = null;
         activeRunIdRef.current = null;
         return;
@@ -145,6 +212,7 @@ export function useCodingRunStream({
         setIsStreaming(false);
         setActivePhaseText(null);
         setWorkerState({ status: "idle" });
+        clearAcpLiveDisplay();
         abortControllerRef.current = null;
         activeRunIdRef.current = null;
         return;
@@ -154,6 +222,7 @@ export function useCodingRunStream({
         setIsStreaming(false);
         setActivePhaseText(null);
         setWorkerState({ status: "idle" });
+        clearAcpLiveDisplay();
         abortControllerRef.current = null;
         activeRunIdRef.current = null;
         const hitlRunId = String(data.hitl_run_id ?? "");
@@ -169,6 +238,7 @@ export function useCodingRunStream({
         setIsStreaming(false);
         setActivePhaseText(null);
         setWorkerState({ status: "idle" });
+        clearAcpLiveDisplay();
         abortControllerRef.current = null;
         activeRunIdRef.current = null;
         if (data.git_status && typeof data.git_status === "object") {
@@ -183,6 +253,29 @@ export function useCodingRunStream({
         return;
       }
       if (!isCurrentSession) return;
+      if (type === "text_append") {
+        const delta = String(data.delta ?? "");
+        if (delta) setStreamingText((prev) => (prev + delta).slice(-MAX_STREAM_CHARS));
+        return;
+      } else if (type === "acp_thought_append") {
+        const delta = String(data.delta ?? "");
+        if (delta)
+          setStreamingThought((prev) => (prev + delta).slice(-MAX_STREAM_CHARS));
+        return;
+      } else if (type === "acp_tool_call" || type === "acp_tool_call_update") {
+        setAcpToolCalls((prev) => upsertAcpToolCall(prev, data, type));
+        return;
+      } else if (type === "acp_plan") {
+        const rawEntries = Array.isArray(data.entries)
+          ? (data.entries as unknown[])
+          : [];
+        setStreamingPlan(
+          rawEntries.map((entry) =>
+            typeof entry === "string" ? entry : JSON.stringify(entry),
+          ),
+        );
+        return;
+      }
       if (type === "orchestrator_start") {
         setActivePhaseText(data.phase === "review" ? "CLI結果を確認中..." : "依頼を検討中...");
       } else if (type === "orchestrator_tool_call_detected") {
@@ -292,6 +385,7 @@ export function useCodingRunStream({
           setMessages((prev) => (prev.some((m) => m.message_id === msg.message_id) ? prev : [...prev, msg]));
         }
       } else if (type === "worker_start") {
+        clearAcpLiveDisplay();
         setActivePhaseText(null);
         setWorkerState({
           status: "running",
@@ -300,6 +394,7 @@ export function useCodingRunStream({
         });
       } else if (type === "worker_done") {
         const msg = asMessage((data as Record<string, unknown>).message);
+        clearAcpLiveDisplay();
         setWorkerState({
           status: "done",
           attempt: typeof data.attempt === "number" ? data.attempt : undefined,
@@ -331,6 +426,7 @@ export function useCodingRunStream({
     setActivePhaseText("依頼を検討中...");
     setStreamingToolCalls([]);
     setWorkerState({ status: "idle" });
+    clearAcpLiveDisplay();
     onError(null);
     const controller = new AbortController();
     abortControllerRef.current = controller;
@@ -388,6 +484,7 @@ export function useCodingRunStream({
     setActivePhaseText(null);
     setStreamingToolCalls([]);
     setWorkerState({ status: "idle" });
+    clearAcpLiveDisplay();
   };
 
   const executeSend = async () => {
@@ -412,6 +509,7 @@ export function useCodingRunStream({
     setActivePhaseText("依頼を検討中...");
     setStreamingToolCalls([]);
     setWorkerState({ status: "idle" });
+    clearAcpLiveDisplay();
     onError(null);
 
     // 送信成功確定時のみ対象セッションの下書きを削除する。切替先にいる場合は
@@ -563,6 +661,10 @@ export function useCodingRunStream({
     isStreaming,
     activePhaseText,
     streamingToolCalls,
+    streamingText,
+    streamingThought,
+    acpToolCalls,
+    streamingPlan,
     workerState,
     abortControllerRef,
     activeRunIdRef,

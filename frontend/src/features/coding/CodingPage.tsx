@@ -81,6 +81,10 @@ export default function CodingPage() {
     messages: detail.messages,
     activePhaseText: stream.activePhaseText,
     streamingToolCalls: stream.streamingToolCalls,
+    streamingText: stream.streamingText,
+    streamingThought: stream.streamingThought,
+    acpToolCalls: stream.acpToolCalls,
+    streamingPlan: stream.streamingPlan,
     workerState: stream.workerState,
     activeWaitingRun: detail.activeWaitingRun,
   });
@@ -195,6 +199,10 @@ export default function CodingPage() {
               currentRun={currentRun}
               activeWaitingRun={detail.activeWaitingRun}
               streamingToolCalls={stream.streamingToolCalls}
+              streamingText={stream.streamingText}
+              streamingThought={stream.streamingThought}
+              acpToolCalls={stream.acpToolCalls}
+              streamingPlan={stream.streamingPlan}
               activePhaseText={stream.activePhaseText}
               workerState={stream.workerState}
               copiedMessageId={ui.copiedMessageId}
