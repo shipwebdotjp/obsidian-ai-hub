@@ -52,6 +52,13 @@ export interface CodingDiagnosticsUsage {
   input?: number | null;
   output?: number | null;
   total?: number | null;
+  cached?: number | null;
+  /** Cumulative tokens used (ACP usage_update `used`). */
+  used?: number | null;
+  /** Context window size (ACP usage_update `size`). */
+  size?: number | null;
+  /** Billed cost (ACP usage_update `cost`). */
+  cost?: { amount?: number | null; currency?: string | null } | null;
 }
 
 export interface CodingDiagnostics {

@@ -48,13 +48,20 @@ def _extract_content_text(content: Any) -> List[str]:
     return texts
 
 
-def _extract_usage_numbers(value: Any) -> Optional[Dict[str, int]]:
-    """Best-effort extraction of token usage numbers from an ACP payload.
+def _extract_usage_numbers(value: Any) -> Optional[Dict[str, Any]]:
+    """Extract token usage numbers from an ACP payload.
 
-    The exact ``usage_update`` shape varies by agent version, so only
-    observed numeric fields with common input/output/total key spellings
-    are picked up. Returns None when nothing usable is found; never
-    fabricates zeros.
+    Verified against recorded artifacts
+    (docs/acp/artifacts/opencode-1.18.31-2026-09-15/new-prompt-run.json,
+    codex-1.11.0-2026-09-15/new-prompt-run.json):
+
+    - ``session/update`` with ``sessionUpdate: "usage_update"`` carries
+      ``{used, size, cost?: {amount, currency}}`` (no input/output split).
+    - ``session/prompt`` result carries
+      ``usage: {inputTokens, outputTokens, totalTokens, cachedReadTokens}``.
+
+    Only these observed fields are picked up. Returns None when nothing
+    usable is found; never fabricates zeros.
     """
     if not isinstance(value, dict):
         return None
@@ -65,7 +72,7 @@ def _extract_usage_numbers(value: Any) -> Optional[Dict[str, int]]:
     input_keys = ("inputTokens", "input_tokens", "promptTokens", "prompt_tokens")
     output_keys = ("outputTokens", "output_tokens", "completionTokens", "completion_tokens")
     total_keys = ("totalTokens", "total_tokens", "total")
-    out: Dict[str, int] = {}
+    out: Dict[str, Any] = {}
     for cand in candidates:
         if not isinstance(cand, dict):
             continue
@@ -87,15 +94,43 @@ def _extract_usage_numbers(value: Any) -> Optional[Dict[str, int]]:
                 continue
             if isinstance(v, (int, float)) and v >= 0 and "total" not in out:
                 out["total"] = int(v)
+        for k, out_k in (("cachedReadTokens", "cached"), ("cached_read_tokens", "cached")):
+            v = cand.get(k)
+            if isinstance(v, bool):
+                continue
+            if isinstance(v, (int, float)) and v >= 0 and "cached" not in out:
+                out["cached"] = int(v)
+        # usage_update cumulative counters (observed in artifacts).
+        for k, out_k in (("used", "used"), ("size", "size")):
+            v = cand.get(k)
+            if isinstance(v, bool):
+                continue
+            if isinstance(v, (int, float)) and v >= 0 and out_k not in out:
+                out[out_k] = int(v)
+        cost = cand.get("cost")
+        if isinstance(cost, dict) and "cost" not in out:
+            amount = cost.get("amount")
+            if isinstance(amount, (int, float)) and not isinstance(amount, bool):
+                out["cost"] = {
+                    "amount": amount,
+                    "currency": cost.get("currency")
+                    if isinstance(cost.get("currency"), str)
+                    else None,
+                }
     return out or None
 
 
-def _merge_usage(acc: Dict[str, int], found: Optional[Dict[str, int]]) -> None:
-    """Keep the max observed value per key (usage counters are cumulative)."""
+def _merge_usage(acc: Dict[str, Any], found: Optional[Dict[str, Any]]) -> None:
+    """Keep the max observed value per numeric key (counters are cumulative).
+
+    ``cost`` is replaced with the latest observed value.
+    """
     if not found:
         return
     for k, v in found.items():
-        if v >= acc.get(k, 0):
+        if k == "cost":
+            acc[k] = v
+        elif isinstance(v, (int, float)) and v >= acc.get(k, 0):
             acc[k] = v
 
 
@@ -670,7 +705,7 @@ class AcpClientBackend:
             elicitations: List[Dict[str, Any]] = []
             update_kinds: Dict[str, int] = {}
             worker_tool_terminal: Dict[str, str] = {}
-            usage_acc: Dict[str, int] = {}
+            usage_acc: Dict[str, Any] = {}
 
             while True:
                 # Check cancellation

@@ -391,23 +391,32 @@ export function CodingMessageList({
                     </div>
                   );
                 })()}
-                <div className="flex min-w-0 justify-start">
-                  <div className="max-w-2xl min-w-0 overflow-hidden rounded-2xl bg-white border border-slate-200 p-4 text-xs text-slate-800 shadow-sm [overflow-wrap:anywhere]">
-                    <div className="mb-1 text-[10px] font-semibold text-slate-400 uppercase">
-                      AI Orchestrator
+                {/* Worker指示のみでユーザー向け本文が空の場合はバブルを表示しない */}
+                {msg.content?.trim() ? (
+                  <>
+                    <div className="flex min-w-0 justify-start">
+                      <div className="max-w-2xl min-w-0 overflow-hidden rounded-2xl bg-white border border-slate-200 p-4 text-xs text-slate-800 shadow-sm [overflow-wrap:anywhere]">
+                        <div className="mb-1 text-[10px] font-semibold text-slate-400 uppercase">
+                          AI Orchestrator
+                        </div>
+                        <MarkdownPreview content={msg.content} />
+                      </div>
                     </div>
-                    <MarkdownPreview content={msg.content} />
+                    <div className="flex items-center gap-2 text-[10px] text-slate-400 justify-start">
+                      <CopyMessageButton
+                        content={msg.content}
+                        messageId={msg.message_id}
+                        copiedMessageId={copiedMessageId}
+                        onCopy={onCopyMessage}
+                      />
+                      <span aria-label="送信時刻">{formatDateTime(msg.created_at)}</span>
+                    </div>
+                  </>
+                ) : (toolCallsByMessageId.get(msg.message_id)?.length ? (
+                  <div className="flex items-center gap-2 text-[10px] text-slate-400 justify-start">
+                    <span aria-label="送信時刻">{formatDateTime(msg.created_at)}</span>
                   </div>
-                </div>
-                <div className="flex items-center gap-2 text-[10px] text-slate-400 justify-start">
-                  <CopyMessageButton
-                    content={msg.content}
-                    messageId={msg.message_id}
-                    copiedMessageId={copiedMessageId}
-                    onCopy={onCopyMessage}
-                  />
-                  <span aria-label="送信時刻">{formatDateTime(msg.created_at)}</span>
-                </div>
+                ) : null)}
               </>
             )}
 
@@ -498,8 +507,16 @@ export function CodingMessageList({
                           usage &&
                           (typeof usage.input === "number" ||
                             typeof usage.output === "number" ||
-                            typeof usage.total === "number")
+                            typeof usage.total === "number" ||
+                            typeof usage.cached === "number" ||
+                            typeof usage.used === "number" ||
+                            typeof usage.size === "number" ||
+                            typeof usage.cost?.amount === "number")
                         );
+                        const costText =
+                          typeof usage?.cost?.amount === "number"
+                            ? `${usage.cost.amount}${usage.cost.currency ? ` ${usage.cost.currency}` : ""}`
+                            : null;
                         const resultText =
                           msgRun?.status && msgRun.status !== "completed"
                             ? `${msgRun.status}${msgRun.error_message ? `: ${msgRun.error_message}` : ""}`
@@ -591,10 +608,15 @@ export function CodingMessageList({
                                   {[
                                     typeof usage?.input === "number" ? `入力 ${usage.input}` : null,
                                     typeof usage?.output === "number" ? `出力 ${usage.output}` : null,
+                                    typeof usage?.cached === "number" ? `キャッシュ読取 ${usage.cached}` : null,
                                     typeof usage?.total === "number" ? `合計 ${usage.total}` : null,
+                                    typeof usage?.used === "number"
+                                      ? `使用 ${usage.used}${typeof usage?.size === "number" ? ` / ${usage.size}` : ""}`
+                                      : null,
                                   ]
                                     .filter(Boolean)
                                     .join(" / ")}
+                                  {costText ? ` (費用 ${costText})` : ""}
                                 </span>
                               </div>
                             )}
