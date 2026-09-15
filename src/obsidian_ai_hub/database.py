@@ -691,7 +691,50 @@ def get_db_connection() -> sqlite3.Connection:
     if current_version <= 43:
         run_migration_v44(conn)
 
+    if current_version <= 44:
+        run_migration_v45(conn)
+
     return conn
+
+
+def run_migration_v45(db: sqlite3.Connection) -> None:
+    """Run migration for version 45 (ACP transport support in coding_sessions and coding_runs)."""
+    # 1. Add transport & ACP columns to coding_sessions
+    try:
+        db.execute("ALTER TABLE coding_sessions ADD COLUMN transport TEXT NOT NULL DEFAULT 'direct_cli';")
+    except sqlite3.OperationalError as e:
+        _ignore_duplicate_schema_object(e)
+    try:
+        db.execute("ALTER TABLE coding_sessions ADD COLUMN acp_session_id TEXT;")
+    except sqlite3.OperationalError as e:
+        _ignore_duplicate_schema_object(e)
+    try:
+        db.execute("ALTER TABLE coding_sessions ADD COLUMN acp_profile_id TEXT;")
+    except sqlite3.OperationalError as e:
+        _ignore_duplicate_schema_object(e)
+
+    # Backfill existing session transport
+    db.execute("UPDATE coding_sessions SET transport = 'direct_cli' WHERE transport IS NULL OR transport = '';")
+
+    # 2. Add transport & ACP columns to coding_runs
+    for col_def in (
+        "transport TEXT NOT NULL DEFAULT 'direct_cli'",
+        "acp_session_id TEXT",
+        "acp_profile_id TEXT",
+        "acp_version TEXT",
+        "acp_capabilities_json TEXT",
+        "acp_resume_mode TEXT",
+        "acp_stop_reason TEXT",
+    ):
+        try:
+            db.execute(f"ALTER TABLE coding_runs ADD COLUMN {col_def};")
+        except sqlite3.OperationalError as e:
+            _ignore_duplicate_schema_object(e)
+
+    db.execute("UPDATE coding_runs SET transport = 'direct_cli' WHERE transport IS NULL OR transport = '';")
+
+    db.execute("PRAGMA user_version = 45")
+    db.commit()
 
 
 def run_migration_v14(conn: sqlite3.Connection) -> None:

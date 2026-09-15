@@ -161,6 +161,26 @@ def mark_interrupted_runs_on_startup() -> int:
     return count
 
 
+def update_session_acp_id(
+    session_id: str, acp_session_id: Optional[str], acp_profile_id: Optional[str] = None
+) -> None:
+    """Update acp_session_id and optional acp_profile_id for a session."""
+    conn = get_db_connection()
+    now = _now_iso()
+    if acp_profile_id is not None:
+        conn.execute(
+            "UPDATE coding_sessions SET acp_session_id = ?, acp_profile_id = ?, updated_at = ? WHERE session_id = ?",
+            (acp_session_id, acp_profile_id, now, session_id),
+        )
+    else:
+        conn.execute(
+            "UPDATE coding_sessions SET acp_session_id = ?, updated_at = ? WHERE session_id = ?",
+            (acp_session_id, now, session_id),
+        )
+    conn.commit()
+    conn.close()
+
+
 def mark_running_tool_calls_interrupted_for_run(
     run_id: str, error: str = "User cancelled execution"
 ) -> int:
@@ -525,6 +545,9 @@ def create_session(
     title: str = "新しいコーディングセッション",
     external_session_id: Optional[str] = None,
     tool_ids: Optional[List[str]] = None,
+    transport: str = "direct_cli",
+    acp_session_id: Optional[str] = None,
+    acp_profile_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Create a new coding session."""
     conn = get_db_connection()
@@ -547,24 +570,51 @@ def create_session(
         clean_ids = [t for t in tool_ids if isinstance(t, str) and t in all_tools]
         tool_ids_json = json.dumps(clean_ids, ensure_ascii=False)
 
-    conn.execute(
-        """
-        INSERT INTO coding_sessions (
-            session_id, project_id, backend, repo_path, external_session_id, title, tool_ids_json, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            session_id,
-            project_id,
-            backend,
-            repo_path,
-            external_session_id,
-            title,
-            tool_ids_json,
-            now,
-            now,
-        ),
-    )
+    has_trans = _has_column(conn, "coding_sessions", "transport")
+    clean_transport = transport if transport in ("direct_cli", "acp") else "direct_cli"
+
+    if has_trans:
+        conn.execute(
+            """
+            INSERT INTO coding_sessions (
+                session_id, project_id, backend, repo_path, external_session_id, title, tool_ids_json,
+                transport, acp_session_id, acp_profile_id, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                session_id,
+                project_id,
+                backend,
+                repo_path,
+                external_session_id,
+                title,
+                tool_ids_json,
+                clean_transport,
+                acp_session_id,
+                acp_profile_id,
+                now,
+                now,
+            ),
+        )
+    else:
+        conn.execute(
+            """
+            INSERT INTO coding_sessions (
+                session_id, project_id, backend, repo_path, external_session_id, title, tool_ids_json, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                session_id,
+                project_id,
+                backend,
+                repo_path,
+                external_session_id,
+                title,
+                tool_ids_json,
+                now,
+                now,
+            ),
+        )
     conn.commit()
 
     session = get_session(session_id, conn=conn)
@@ -890,21 +940,49 @@ def get_message(message_id: str) -> Optional[Dict[str, Any]]:
 
 
 def create_run(
-    session_id: str, user_message_id: str, dirty_tree_at_start: Optional[str] = None
+    session_id: str,
+    user_message_id: str,
+    dirty_tree_at_start: Optional[str] = None,
+    transport: str = "direct_cli",
+    acp_session_id: Optional[str] = None,
+    acp_profile_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Create a coding run."""
     conn = get_db_connection()
     run_id = f"crun_{uuid.uuid4().hex[:12]}"
     now = _now_iso()
 
-    conn.execute(
-        """
-        INSERT INTO coding_runs (
-            run_id, session_id, user_message_id, status, dirty_tree_at_start, started_at
-        ) VALUES (?, ?, ?, 'running', ?, ?)
-        """,
-        (run_id, session_id, user_message_id, dirty_tree_at_start, now),
-    )
+    has_trans = _has_column(conn, "coding_runs", "transport")
+    clean_transport = transport if transport in ("direct_cli", "acp") else "direct_cli"
+
+    if has_trans:
+        conn.execute(
+            """
+            INSERT INTO coding_runs (
+                run_id, session_id, user_message_id, status, dirty_tree_at_start, started_at,
+                transport, acp_session_id, acp_profile_id
+            ) VALUES (?, ?, ?, 'running', ?, ?, ?, ?, ?)
+            """,
+            (
+                run_id,
+                session_id,
+                user_message_id,
+                dirty_tree_at_start,
+                now,
+                clean_transport,
+                acp_session_id,
+                acp_profile_id,
+            ),
+        )
+    else:
+        conn.execute(
+            """
+            INSERT INTO coding_runs (
+                run_id, session_id, user_message_id, status, dirty_tree_at_start, started_at
+            ) VALUES (?, ?, ?, 'running', ?, ?)
+            """,
+            (run_id, session_id, user_message_id, dirty_tree_at_start, now),
+        )
     conn.commit()
 
     run = get_run(run_id, conn=conn)
