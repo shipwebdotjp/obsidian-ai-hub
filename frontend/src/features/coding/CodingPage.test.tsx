@@ -273,16 +273,14 @@ describe("CodingPage", () => {
         started_at: "2026-01-01T00:00:00Z",
         finished_at: "2026-01-01T00:02:00Z",
         diagnostics: {
-          cwd: "/app/test_repo",
-          requested_session_id: "ses_req123",
-          returned_session_id: "ses_ret456",
-          tool_call_count: 3,
-          tool_failure_count: 0,
-          structured_error: null,
-          auto_rejected_permission: false,
-          exit_code: 0,
-          model: "既定（Global default）",
-          variant: "なし",
+          acp_session_id: "ses_acp_1",
+          acp_model: "opencode-model",
+          acp_profile_id: "opencode",
+          acp_agent: { name: "OpenCode", version: "1.18.31" },
+          stop_reason: "end_turn",
+          worker_tool_call_count: 3,
+          worker_tool_failure_count: 1,
+          usage: { input: 100, output: 50, total: 150 },
         },
       },
       orchestrator_tool_calls: [],
@@ -295,9 +293,9 @@ describe("CodingPage", () => {
       expect(screen.getByText("git status && pytest")).toBeInTheDocument();
       const diagCard = screen.getByTestId("worker-diagnostics");
       expect(diagCard).toBeInTheDocument();
-      expect(within(diagCard).getByText("/app/test_repo")).toBeInTheDocument();
-      expect(screen.getByText("ses_req123")).toBeInTheDocument();
-      expect(screen.getByText("ses_ret456")).toBeInTheDocument();
+      expect(within(diagCard).getByText("ses_acp_1")).toBeInTheDocument();
+      expect(screen.queryByText("ses_req123")).not.toBeInTheDocument();
+      expect(screen.queryByText("ses_ret456")).not.toBeInTheDocument();
     });
   });
 

@@ -530,11 +530,11 @@ async def run_coding_turn_stream(
                 )
                 worker_msg_id = worker_msg["message_id"]
 
-                diag_json_str = (
-                    json.dumps(acp_res.diagnostics, ensure_ascii=False)
-                    if acp_res.diagnostics
-                    else None
-                )
+                diag = dict(acp_res.diagnostics or {})
+                diag.setdefault("transport", "acp")
+                if acp_res.stop_reason:
+                    diag.setdefault("stop_reason", acp_res.stop_reason)
+                diag_json_str = json.dumps(diag, ensure_ascii=False) if diag else None
 
                 store.update_run(
                     run_id,
@@ -553,7 +553,7 @@ async def run_coding_turn_stream(
                     "error": acp_res.error_message,
                     "session_recreated": acp_res.session_recreated,
                     "git_status": git_status,
-                    "diagnostics": acp_res.diagnostics,
+                    "diagnostics": diag,
                     "stop_reason": acp_res.stop_reason,
                 }
                 yield f"data: {json.dumps(worker_done_data, ensure_ascii=False)}\n\n"

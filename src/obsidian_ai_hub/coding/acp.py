@@ -48,6 +48,57 @@ def _extract_content_text(content: Any) -> List[str]:
     return texts
 
 
+def _extract_usage_numbers(value: Any) -> Optional[Dict[str, int]]:
+    """Best-effort extraction of token usage numbers from an ACP payload.
+
+    The exact ``usage_update`` shape varies by agent version, so only
+    observed numeric fields with common input/output/total key spellings
+    are picked up. Returns None when nothing usable is found; never
+    fabricates zeros.
+    """
+    if not isinstance(value, dict):
+        return None
+    candidates = []
+    if isinstance(value.get("usage"), dict):
+        candidates.append(value["usage"])
+    candidates.append(value)
+    input_keys = ("inputTokens", "input_tokens", "promptTokens", "prompt_tokens")
+    output_keys = ("outputTokens", "output_tokens", "completionTokens", "completion_tokens")
+    total_keys = ("totalTokens", "total_tokens", "total")
+    out: Dict[str, int] = {}
+    for cand in candidates:
+        if not isinstance(cand, dict):
+            continue
+        for k in input_keys:
+            v = cand.get(k)
+            if isinstance(v, bool):
+                continue
+            if isinstance(v, (int, float)) and v >= 0 and "input" not in out:
+                out["input"] = int(v)
+        for k in output_keys:
+            v = cand.get(k)
+            if isinstance(v, bool):
+                continue
+            if isinstance(v, (int, float)) and v >= 0 and "output" not in out:
+                out["output"] = int(v)
+        for k in total_keys:
+            v = cand.get(k)
+            if isinstance(v, bool):
+                continue
+            if isinstance(v, (int, float)) and v >= 0 and "total" not in out:
+                out["total"] = int(v)
+    return out or None
+
+
+def _merge_usage(acc: Dict[str, int], found: Optional[Dict[str, int]]) -> None:
+    """Keep the max observed value per key (usage counters are cumulative)."""
+    if not found:
+        return
+    for k, v in found.items():
+        if v >= acc.get(k, 0):
+            acc[k] = v
+
+
 class AcpError(Exception):
     """Base exception for ACP protocol/transport errors."""
 
@@ -618,6 +669,8 @@ class AcpClientBackend:
             prompt_response: Optional[Dict[str, Any]] = None
             elicitations: List[Dict[str, Any]] = []
             update_kinds: Dict[str, int] = {}
+            worker_tool_terminal: Dict[str, str] = {}
+            usage_acc: Dict[str, int] = {}
 
             while True:
                 # Check cancellation
@@ -702,6 +755,19 @@ class AcpClientBackend:
                         kind_key = kind if kind else "flat"
                         update_kinds[kind_key] = update_kinds.get(kind_key, 0) + 1
 
+                        if kind in ("tool_call", "tool_call_update") and isinstance(nested, dict):
+                            tc_id = nested.get("toolCallId") or nested.get("tool_call_id")
+                            raw_status = str(nested.get("status") or "")
+                            # Terminal Worker tool states only; pending/in_progress
+                            # must not inflate the count and each toolCallId is
+                            # counted once (no double counting across updates).
+                            if tc_id and raw_status in ("completed", "failed"):
+                                worker_tool_terminal[str(tc_id)] = raw_status
+                        if kind == "usage_update" and isinstance(nested, dict):
+                            _merge_usage(usage_acc, _extract_usage_numbers(nested))
+                            for uk in ("usage", "tokens", "tokenUsage"):
+                                _merge_usage(usage_acc, _extract_usage_numbers(nested.get(uk)))
+
                         sr = params.get("stop_reason") or params.get("stopReason")
                         if sr:
                             stop_reason = str(sr)
@@ -742,6 +808,8 @@ class AcpClientBackend:
                     sr = res_data.get("stop_reason") or res_data.get("stopReason")
                     if sr:
                         stop_reason = str(sr)
+                    _merge_usage(usage_acc, _extract_usage_numbers(res_data))
+                    _merge_usage(usage_acc, _extract_usage_numbers(res_data.get("usage")))
 
             final_output = "".join(output_chunks).strip()
             stderr_str = "\n".join(conn.stderr_chunks).strip()
@@ -770,6 +838,8 @@ class AcpClientBackend:
                     self.profile.profile_id,
                 )
             diag = {
+                "transport": "acp",
+                "acp_session_id": curr_session_id,
                 "acp_version": init_meta.get("protocol_version"),
                 "acp_profile_id": self.profile.profile_id,
                 "acp_model": CODING_OPENCODE_MODEL,
@@ -780,6 +850,11 @@ class AcpClientBackend:
                 "stderr_snippet": stderr_str[:500] if stderr_str else None,
                 "elicitations": elicitations,
                 "update_kinds": update_kinds,
+                "worker_tool_call_count": len(worker_tool_terminal),
+                "worker_tool_failure_count": sum(
+                    1 for s in worker_tool_terminal.values() if s == "failed"
+                ),
+                "usage": dict(usage_acc) or None,
             }
 
             return AcpExecutionResult(
@@ -804,6 +879,8 @@ class AcpClientBackend:
                 cancelled=False,
                 session_recreated=session_recreated,
                 diagnostics={
+                    "transport": "acp",
+                    "acp_session_id": curr_session_id or acp_session_id,
                     "acp_profile_id": self.profile.profile_id,
                     "error": str(exc),
                 },

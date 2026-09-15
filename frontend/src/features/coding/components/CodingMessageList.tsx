@@ -421,7 +421,7 @@ export function CodingMessageList({
                     >
                       <summary className="flex cursor-pointer items-center justify-between px-4 py-2.5 bg-blue-100/80 font-mono text-[11px] text-blue-950 font-semibold hover:bg-blue-100">
                         <span className="flex items-center gap-1.5">
-                          <span>CLI Workerへの指示</span>
+                          <span>Workerへの指示</span>
                         </span>
                         <span className="text-blue-700 text-[10px] font-normal" aria-hidden="true">
                           <span className="group-open:hidden">▼</span>
@@ -456,7 +456,7 @@ export function CodingMessageList({
                   <div className="w-full max-w-2xl min-w-0">
                     <details className="rounded-xl border border-slate-200 bg-slate-900 text-slate-100 text-xs shadow-sm overflow-hidden group min-w-0">
                       <summary className="flex cursor-pointer items-center justify-between px-4 py-2.5 bg-slate-800 font-mono text-[11px] hover:bg-slate-700">
-                        <span>CLI Worker 最終返答 ({backend})</span>
+                        <span>Worker 最終返答 ({backend})</span>
                         <span className="text-slate-400 text-[10px]" aria-hidden="true">
                           <span className="group-open:hidden">▼</span>
                           <span className="hidden group-open:inline">▲</span>
@@ -467,57 +467,141 @@ export function CodingMessageList({
                         <MarkdownPreview content={msg.content} variant="dark" />
                       </div>
 
-                      {/* Diagnostics Details */}
+                      {/* Worker execution info (Coordinator tool calls are shown separately) */}
                       {(() => {
                         const msgRun = (msg.run_id ? runById.get(msg.run_id) : undefined) ?? currentRun;
-                        if (!msgRun?.diagnostics) return null;
-                        const diag = msgRun.diagnostics;
+                        const diag = msgRun?.diagnostics;
+                        if (!diag) return null;
+                        const sessionId =
+                          diag.acp_session_id ||
+                          diag.returned_session_id ||
+                          diag.requested_session_id ||
+                          null;
+                        // Worker tool counts: new ACP diagnostics first, legacy
+                        // direct_cli worker counts as fallback. Coordinator
+                        // counts (orchestrator_tool_calls) are never used here.
+                        const workerCount =
+                          diag.worker_tool_call_count ?? diag.tool_call_count ?? null;
+                        const workerFailures =
+                          diag.worker_tool_failure_count ?? diag.tool_failure_count ?? null;
+                        const hasWorkerCount =
+                          typeof workerCount === "number" && Number.isFinite(workerCount);
+                        const hasWorkerFailures =
+                          typeof workerFailures === "number" && Number.isFinite(workerFailures);
+                        const model = diag.acp_model || diag.model || null;
+                        const profile = diag.acp_profile_id || null;
+                        const agentName = diag.acp_agent?.name || null;
+                        const agentVersion = diag.acp_agent?.version || null;
+                        const hasAgent = !!(agentName || agentVersion);
+                        const usage = diag.usage || null;
+                        const hasUsage = !!(
+                          usage &&
+                          (typeof usage.input === "number" ||
+                            typeof usage.output === "number" ||
+                            typeof usage.total === "number")
+                        );
+                        const resultText =
+                          msgRun?.status && msgRun.status !== "completed"
+                            ? `${msgRun.status}${msgRun.error_message ? `: ${msgRun.error_message}` : ""}`
+                            : diag.stop_reason ||
+                              (typeof diag.exit_code === "number"
+                                ? `exit ${diag.exit_code}`
+                                : null) ||
+                              diag.error ||
+                              null;
+                        const structError = diag.structured_error || diag.error || null;
+                        const hasAny =
+                          !!(
+                            sessionId ||
+                            resultText ||
+                            hasWorkerCount ||
+                            model ||
+                            profile ||
+                            hasAgent ||
+                            hasUsage ||
+                            structError ||
+                            (msgRun?.status && msgRun.status !== "completed")
+                          );
+                        if (!hasAny) return null;
                         return (
                         <div
                           className="p-3 bg-slate-950 font-mono text-[11px] space-y-1.5 border-t border-slate-800 text-slate-300"
                           data-testid="worker-diagnostics"
                         >
                           <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                            🔍 実行診断情報 (Diagnostics)
+                            実行情報
                           </div>
                           <div className="grid grid-cols-1 gap-1 pl-1">
-                            <div>
-                              <span className="text-slate-500">作業ディレクトリ (cwd): </span>
-                              <span className="text-slate-200 select-all">{diag.cwd}</span>
-                            </div>
-                            <div>
-                              <span className="text-slate-500">要求セッションID: </span>
-                              <span className="text-slate-200 select-all">
-                                {diag.requested_session_id || "なし（新規起動）"}
-                              </span>
-                            </div>
-                            <div>
-                              <span className="text-slate-500">返却セッションID: </span>
-                              <span className="text-slate-200 select-all">
-                                {diag.returned_session_id || "なし"}
-                              </span>
-                            </div>
-                            <div>
-                              <span className="text-slate-500">ツール実行数: </span>
-                              <span className="text-slate-200">
-                                {diag.tool_call_count}回 (失敗: {diag.tool_failure_count}回)
-                              </span>
-                            </div>
-                            <div>
-                              <span className="text-slate-500">モデル/variant: </span>
-                              <span className="text-slate-200">
-                                {diag.model} / {diag.variant}
-                              </span>
-                            </div>
-                            {diag.auto_rejected_permission && (
-                              <div className="text-amber-400 font-semibold">
-                                ⚠️ 権限制限により選択リポジトリ外への操作が自動拒否されました
+                            {sessionId && (
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-slate-500">セッションID: </span>
+                                <span className="text-slate-200 select-all break-all">{sessionId}</span>
+                                <CopyMessageButton
+                                  content={sessionId}
+                                  messageId={`session-${msg.message_id}`}
+                                  copiedMessageId={copiedMessageId}
+                                  onCopy={onCopyMessage}
+                                  ariaLabel="セッションIDをコピー"
+                                />
                               </div>
                             )}
-                            {diag.structured_error && (
+                            {resultText && (
+                              <div>
+                                <span className="text-slate-500">実行結果: </span>
+                                <span className="text-slate-200 break-all">{resultText}</span>
+                              </div>
+                            )}
+                            {hasWorkerCount && (
+                              <div>
+                                <span className="text-slate-500">Worker ツール実行: </span>
+                                <span className="text-slate-200">
+                                  {workerCount}回
+                                  {hasWorkerFailures ? ` (失敗: ${workerFailures}回)` : ""}
+                                </span>
+                              </div>
+                            )}
+                            {model && (
+                              <div>
+                                <span className="text-slate-500">モデル: </span>
+                                <span className="text-slate-200 break-all">
+                                  {model}
+                                  {diag.variant ? ` (${diag.variant})` : ""}
+                                </span>
+                              </div>
+                            )}
+                            {profile && (
+                              <div>
+                                <span className="text-slate-500">プロファイル: </span>
+                                <span className="text-slate-200 break-all">{profile}</span>
+                              </div>
+                            )}
+                            {hasAgent && (
+                              <div>
+                                <span className="text-slate-500">エージェント: </span>
+                                <span className="text-slate-200 break-all">
+                                  {[agentName, agentVersion].filter(Boolean).join(" ")}
+                                  {diag.acp_version != null ? ` (ACP ${String(diag.acp_version)})` : ""}
+                                </span>
+                              </div>
+                            )}
+                            {hasUsage && (
+                              <div>
+                                <span className="text-slate-500">トークン使用量: </span>
+                                <span className="text-slate-200">
+                                  {[
+                                    typeof usage?.input === "number" ? `入力 ${usage.input}` : null,
+                                    typeof usage?.output === "number" ? `出力 ${usage.output}` : null,
+                                    typeof usage?.total === "number" ? `合計 ${usage.total}` : null,
+                                  ]
+                                    .filter(Boolean)
+                                    .join(" / ")}
+                                </span>
+                              </div>
+                            )}
+                            {structError && (
                               <div className="text-rose-400">
                                 <span className="text-rose-500">構造化エラー: </span>
-                                {diag.structured_error}
+                                {structError}
                               </div>
                             )}
                           </div>
@@ -625,7 +709,7 @@ export function CodingMessageList({
             <div className="flex justify-start">
               <div className="rounded-xl bg-slate-800 p-3 text-xs text-slate-200 font-mono flex items-center gap-2">
                 <span className="inline-block h-2 w-2 animate-ping rounded-full bg-emerald-400" />
-                CLIワーカー {workerState.attempt ? `(${workerState.attempt}回目)` : ""} ({workerState.backend}) 実行中...
+                Worker {workerState.attempt ? `(${workerState.attempt}回目)` : ""} ({workerState.backend}) 実行中...
               </div>
             </div>
           )}

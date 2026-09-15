@@ -48,17 +48,38 @@ export interface CodingSession {
   updated_at: string;
 }
 
+export interface CodingDiagnosticsUsage {
+  input?: number | null;
+  output?: number | null;
+  total?: number | null;
+}
+
 export interface CodingDiagnostics {
-  cwd: string;
-  requested_session_id: string | null;
-  returned_session_id: string | null;
-  tool_call_count: number;
-  tool_failure_count: number;
-  structured_error: string | null;
-  auto_rejected_permission: boolean;
-  exit_code: number;
-  model: string;
-  variant: string;
+  // 新ACP診断（任意）。旧direct_cli runは旧キーのみ持つ。
+  transport?: string | null;
+  acp_session_id?: string | null;
+  acp_version?: number | string | null;
+  acp_profile_id?: string | null;
+  acp_model?: string | null;
+  acp_agent?: { name?: string | null; version?: string | null } | null;
+  stop_reason?: string | null;
+  session_recreated?: boolean | null;
+  stderr_snippet?: string | null;
+  worker_tool_call_count?: number | null;
+  worker_tool_failure_count?: number | null;
+  usage?: CodingDiagnosticsUsage | null;
+  exit_code?: number | null;
+  error?: string | null;
+  // 旧direct_cli診断（後方互換のため読取のみ）。
+  cwd?: string | null;
+  requested_session_id?: string | null;
+  returned_session_id?: string | null;
+  tool_call_count?: number | null;
+  tool_failure_count?: number | null;
+  structured_error?: string | null;
+  auto_rejected_permission?: boolean | null;
+  model?: string | null;
+  variant?: string | null;
 }
 
 export interface CodingMessage {

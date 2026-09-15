@@ -537,3 +537,49 @@ async def _async_test_acp_service_turn_stream_integration(monkeypatch, tmp_path)
     assert len(runs) == 1
     assert runs[0]["transport"] == "acp"
     assert runs[0]["acp_session_id"] == "acp_existing_id"
+
+
+def test_acp_turn_diagnostics_include_session_usage_and_worker_counts():
+    """ACP diagnostics carry session id, token usage and terminal worker tool counts."""
+    profile = acp.AcpLaunchProfile.get_profile("opencode")
+    client = acp.AcpClientBackend(profile)
+
+    updates = [
+        {"method": "session/update", "params": {"update": {"sessionUpdate": "tool_call", "toolCallId": "c1", "status": "pending"}}},
+        {"method": "session/update", "params": {"update": {"sessionUpdate": "tool_call_update", "toolCallId": "c1", "status": "completed"}}},
+        {"method": "session/update", "params": {"update": {"sessionUpdate": "tool_call_update", "toolCallId": "c1", "status": "completed"}}},
+        {"method": "session/update", "params": {"update": {"sessionUpdate": "tool_call_update", "toolCallId": "c2", "status": "failed"}}},
+        {"method": "session/update", "params": {"update": {"sessionUpdate": "usage_update", "usage": {"inputTokens": 10, "outputTokens": 4, "totalTokens": 14}}}},
+    ]
+
+    with patch.object(acp.AcpConnection, "start"), \
+         patch.object(acp.AcpConnection, "is_alive", return_value=True), \
+         patch.object(acp.AcpConnection, "terminate", return_value=0), \
+         patch.object(acp.AcpConnection, "notify"), \
+         patch.object(acp.AcpClientBackend, "initialize", return_value={"protocol_version": 1, "agent_info": {"name": "OpenCode", "version": "1.18.31"}, "capabilities": {}}):
+
+        def fake_request(method, params, timeout=60.0):
+            if method == "session/new":
+                return {"sessionId": "sess_abc"}
+            return {}
+
+        pops = {"n": 0}
+
+        def fake_pop_notifications():
+            pops["n"] += 1
+            return list(updates) if pops["n"] == 1 else []
+
+        with patch.object(acp.AcpConnection, "request", side_effect=fake_request), \
+             patch.object(acp.AcpConnection, "send_request_async", return_value=5), \
+             patch.object(acp.AcpConnection, "wait_for_response", return_value={"result": {"stopReason": "end_turn"}}), \
+             patch.object(acp.AcpConnection, "pop_notifications", side_effect=fake_pop_notifications), \
+             patch.object(acp.AcpConnection, "pop_client_requests", return_value=[]):
+            res = client.execute_turn(repo_path="/tmp", prompt="hi")
+
+    diag = res.diagnostics or {}
+    assert diag["transport"] == "acp"
+    assert diag["acp_session_id"] == "sess_abc"
+    # Distinct terminal tool ids only: c1 once + c2 once (duplicate update not double counted).
+    assert diag["worker_tool_call_count"] == 2
+    assert diag["worker_tool_failure_count"] == 1
+    assert diag["usage"] == {"input": 10, "output": 4, "total": 14}

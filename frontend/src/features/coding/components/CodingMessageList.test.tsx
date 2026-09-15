@@ -110,7 +110,7 @@ describe("CodingMessageList bubbles", () => {
     }
   });
 
-  it("CLI Workerへの指示の先頭に絵文字がなくトグルが矢印表示になる", () => {
+  it("Workerへの指示の先頭に絵文字がなくトグルが矢印表示になる", () => {
     render(
       <CodingMessageList
         {...baseProps}
@@ -123,14 +123,14 @@ describe("CodingMessageList bubbles", () => {
     expect(card).toBeInTheDocument();
     expect(card).not.toHaveAttribute("open");
     expect(screen.queryByText(/🤖/)).not.toBeInTheDocument();
-    expect(screen.getByText("CLI Workerへの指示")).toBeInTheDocument();
+    expect(screen.getByText("Workerへの指示")).toBeInTheDocument();
     expect(screen.getByText("▼")).toBeInTheDocument();
     expect(screen.getByText("▲")).toBeInTheDocument();
     // アクセシブルな説明は sr-only で保持される
     expect(screen.getByText("クリックで展開/折りたたみ")).toBeInTheDocument();
   });
 
-  it("CLI Worker最終返答のトグルが矢印表示になる", () => {
+  it("Worker最終返答のトグルが矢印表示になる", () => {
     render(
       <CodingMessageList
         {...baseProps}
@@ -139,7 +139,7 @@ describe("CodingMessageList bubbles", () => {
       />,
     );
 
-    expect(screen.getByText(/CLI Worker 最終返答/)).toBeInTheDocument();
+    expect(screen.getByText(/Worker 最終返答/)).toBeInTheDocument();
     expect(screen.getByText("▼")).toBeInTheDocument();
     expect(screen.getByText("▲")).toBeInTheDocument();
   });
@@ -229,5 +229,68 @@ describe("CodingMessageList bubbles", () => {
     expect(scroller).toHaveClass("relative");
     // トグル補助文言はスクロール領域内に収まる
     expect(scroller?.textContent).toContain("クリックで展開/折りたたみ");
+  });
+});
+
+describe("Worker実行情報ブロック", () => {
+  function workerProps(diag: unknown, runExtra = {}) {
+    const run = {
+      run_id: "r1",
+      session_id: "cses_1",
+      user_message_id: "u1",
+      orchestrator_message_id: null,
+      worker_message_id: "w1",
+      status: "completed",
+      hitl_run_id: null,
+      dirty_tree_at_start: null,
+      error_message: null,
+      started_at: "2026-01-01T00:00:00Z",
+      finished_at: "2026-01-01T00:01:00Z",
+      diagnostics: diag,
+      ...runExtra,
+    } as never;
+    return {
+      ...baseProps,
+      messages: [message({ message_id: "w1", role: "worker", content: "done", run_id: "r1" })],
+      currentRun: run,
+      onCopyMessage: vi.fn(),
+    };
+  }
+
+  it("欠損項目は行ごと非表示でundefinedを表示しない", () => {
+    render(<CodingMessageList {...workerProps({ acp_session_id: "s1" })} />);
+    const card = screen.getByTestId("worker-diagnostics");
+    expect(card).toBeInTheDocument();
+    expect(card.textContent).not.toMatch(/undefined|NaN/);
+    expect(screen.queryByText(/作業ディレクトリ/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/要求セッションID|返却セッションID/)).not.toBeInTheDocument();
+    expect(screen.getByText("s1")).toBeInTheDocument();
+  });
+
+  it("旧runの返却IDにフォールバックしcwdを出さない", () => {
+    render(
+      <CodingMessageList
+        {...workerProps({ cwd: "/repo", requested_session_id: "req1", returned_session_id: "ret1", tool_call_count: 2, tool_failure_count: 0, model: "m", variant: "v" })}
+      />,
+    );
+    const card = screen.getByTestId("worker-diagnostics");
+    expect(card).toBeInTheDocument();
+    expect(screen.getByText("ret1")).toBeInTheDocument();
+    expect(screen.queryByText("/repo")).not.toBeInTheDocument();
+    expect(screen.queryByText("req1")).not.toBeInTheDocument();
+  });
+
+  it("空診断ではブロック自体を表示しない", () => {
+    render(<CodingMessageList {...workerProps({})} />);
+    expect(screen.queryByTestId("worker-diagnostics")).not.toBeInTheDocument();
+  });
+
+  it("auto_rejected_permissionを表示しない", () => {
+    render(
+      <CodingMessageList
+        {...workerProps({ acp_session_id: "s1", auto_rejected_permission: true })}
+      />,
+    );
+    expect(screen.queryByText(/権限制限/)).not.toBeInTheDocument();
   });
 });
