@@ -570,12 +570,22 @@ class CodingOrchestrator:
             yield {"type": "text", "content": resp}
             return
 
-        # Resolve permitted tools
+        # Resolve permitted tools. agent_delegate is excluded from the coding
+        # catalog because it requires a parent AI-agent run context (agent_id)
+        # the Coordinator does not have; filter it defensively too so explicit
+        # or legacy session tool_ids cannot re-introduce it.
+        from obsidian_ai_hub.coding.store import (
+            CODING_EXCLUDED_TOOL_IDS,
+            list_available_coding_tools,
+        )
+
         if self.tool_ids is None:
-            resolved_tool_ids = registry.list_available_tools()
+            resolved_tool_ids = list_available_coding_tools()
             target_ids = [t["tool_id"] for t in resolved_tool_ids]
         else:
-            target_ids = list(self.tool_ids)
+            target_ids = [
+                tid for tid in self.tool_ids if tid not in CODING_EXCLUDED_TOOL_IDS
+            ]
 
         if "ask_user" not in target_ids:
             target_ids.append("ask_user")

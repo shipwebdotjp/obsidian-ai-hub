@@ -929,6 +929,69 @@ def test_coding_tools_and_user_defaults(test_project):
     assert eff_tools1_reset == custom_defaults
 
 
+def test_coding_tool_catalog_excludes_agent_delegate(test_project):
+    # agent_delegate requires a parent AI-agent run (agent_id). A coding session
+    # has no agent run, so the tool can only ever fail and must not be offered
+    # or selectable.
+    all_ids = store.get_all_available_tool_ids()
+    assert "agent_delegate" not in all_ids
+    assert "run_shell" in all_ids
+
+    catalog_ids = [t["tool_id"] for t in store.list_available_coding_tools()]
+    assert "agent_delegate" not in catalog_ids
+
+    # User defaults never include it, and explicit selection is dropped.
+    assert "agent_delegate" not in store.get_user_default_tool_ids()
+    saved = store.update_user_default_tool_ids(["agent_delegate", "web_search"])
+    assert saved == ["web_search"]
+
+    session = store.create_session(
+        test_project["project_id"],
+        "codex",
+        test_project["repo_path"],
+        title="Exclude Delegate",
+    )
+    updated = store.update_session_tool_ids(
+        session["session_id"], ["agent_delegate", "web_search"]
+    )
+    assert updated == ["web_search"]
+
+
+def test_coding_tools_api_excludes_agent_delegate(test_project):
+    app = create_app(token="test-token")
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer test-token"}
+
+    res = client.get("/api/v1/coding/defaults", headers=headers)
+    assert res.status_code == 200
+    data = res.json()
+    assert "agent_delegate" not in data["default_tool_ids"]
+    assert "agent_delegate" not in [
+        t["tool_id"] for t in data["available_tools"]
+    ]
+
+    res = client.get("/api/v1/coding/tools", headers=headers)
+    assert res.status_code == 200
+    assert "agent_delegate" not in [t["tool_id"] for t in res.json()["tools"]]
+
+    res = client.post(
+        "/api/v1/coding/sessions",
+        headers=headers,
+        json={
+            "project_id": test_project["project_id"],
+            "backend": "codex",
+            "title": "Exclude Delegate API",
+        },
+    )
+    assert res.status_code == 200
+    sid = res.json()["session_id"]
+    res = client.get(f"/api/v1/coding/sessions/{sid}", headers=headers)
+    assert res.status_code == 200
+    assert "agent_delegate" not in [
+        t["tool_id"] for t in res.json()["available_tools"]
+    ]
+
+
 def test_coding_tools_api_endpoints(test_project):
     app = create_app(token="test-token")
     client = TestClient(app)

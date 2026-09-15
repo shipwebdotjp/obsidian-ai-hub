@@ -386,9 +386,31 @@ def list_orchestrator_tool_calls_for_session(
     return res
 
 
+# Tools that require a parent AI-agent run context and can therefore never
+# succeed from the coding Coordinator. The coding session has no agent run and
+# no agent_id (see coding_sessions schema), so agent_delegate is kept out of
+# the coding catalog: it is neither selectable nor bound to the Coordinator
+# LLM. Mirrors tasks/capabilities.EXCLUDED_TOOL_IDS for Task capabilities.
+CODING_EXCLUDED_TOOL_IDS: frozenset[str] = frozenset({"agent_delegate"})
+
+
+def list_available_coding_tools() -> List[Dict[str, Any]]:
+    """Return registry tools offered to the coding workspace.
+
+    ``agent_delegate`` is excluded because it needs a parent agent run
+    (``agent_id``) that the coding Coordinator does not have; exposing it would
+    offer a tool that can only fail.
+    """
+    return [
+        t
+        for t in registry.list_available_tools()
+        if t["tool_id"] not in CODING_EXCLUDED_TOOL_IDS
+    ]
+
+
 def get_all_available_tool_ids() -> List[str]:
-    """Return all registered tool IDs."""
-    return [t["tool_id"] for t in registry.list_available_tools()]
+    """Return all registered tool IDs available to the coding workspace."""
+    return [t["tool_id"] for t in list_available_coding_tools()]
 
 
 def get_user_default_tool_ids(conn=None) -> List[str]:

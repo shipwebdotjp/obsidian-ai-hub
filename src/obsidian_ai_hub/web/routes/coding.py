@@ -8,7 +8,6 @@ from fastapi.responses import StreamingResponse
 from typing import Literal
 from pydantic import BaseModel, Field
 
-from obsidian_ai_hub.agents import registry
 from obsidian_ai_hub.coding import (
     backend,
     service as coding_service,
@@ -57,7 +56,7 @@ class StartCodingRunRequest(BaseModel):
 def get_coding_defaults(_=Depends(require_bearer_token)):
     """Get global user default tool settings and available tools for coding workspace."""
     default_ids = coding_store.get_user_default_tool_ids()
-    available_tools = registry.list_available_tools()
+    available_tools = coding_store.list_available_coding_tools()
     return {
         "default_tool_ids": default_ids,
         "available_tools": available_tools,
@@ -68,7 +67,7 @@ def get_coding_defaults(_=Depends(require_bearer_token)):
 def update_coding_defaults(body: UpdateToolsRequest, _=Depends(require_bearer_token)):
     """Update global user default tool settings for coding workspace."""
     updated_ids = coding_store.update_user_default_tool_ids(body.tool_ids)
-    available_tools = registry.list_available_tools()
+    available_tools = coding_store.list_available_coding_tools()
     return {
         "default_tool_ids": updated_ids,
         "available_tools": available_tools,
@@ -92,8 +91,8 @@ def get_coding_config(_=Depends(require_bearer_token)):
 
 @router.get("/tools")
 def list_available_coding_tools(_=Depends(require_bearer_token)):
-    """List all available tools in registry."""
-    return {"tools": registry.list_available_tools()}
+    """List all tools available to the coding workspace."""
+    return {"tools": coding_store.list_available_coding_tools()}
 
 
 @router.get("/git-status")
@@ -246,7 +245,7 @@ def get_session_detail(session_id: str, _=Depends(require_bearer_token)):
     runs = coding_store.list_runs_for_session(session_id)
     effective_tool_ids = coding_store.get_effective_session_tool_ids(session_id)
     has_custom = session.get("tool_ids_json") is not None
-    available_tools = registry.list_available_tools()
+    available_tools = coding_store.list_available_coding_tools()
     orchestrator_tool_calls = coding_store.list_orchestrator_tool_calls_for_session(
         session_id
     )

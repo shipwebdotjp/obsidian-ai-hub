@@ -47,6 +47,57 @@ def test_validated_tool_calls_rejects_duplicate_provider_ids():
 
 
 @pytest.mark.anyio
+async def test_agent_stream_binds_parent_agent_id_in_trusted_ctx():
+    """The main AI-agent runtime must generate and pass the parent agent_id
+    (plus session/run ids) into the contextual tool resolver."""
+    agent = store.create_agent(
+        name="Context Agent",
+        system_prompt="Helpful assistant",
+        tool_ids=["web_search"],
+    )
+    session = store.create_session(agent["agent_id"])
+    user_msg, run = store.start_user_run(session["session_id"], "hi")
+
+    captured: dict = {}
+
+    def fake_resolve(tool_ids, trusted_ctx):
+        captured["tool_ids"] = list(tool_ids)
+        captured["ctx"] = dict(trusted_ctx)
+        return []
+
+    mock_llm = MagicMock()
+    _configure_astream(mock_llm, [[AIMessageChunk(content="ok")]])
+    mock_llm.bind_tools.return_value = mock_llm
+
+    with (
+        patch(
+            "obsidian_ai_hub.agents.runtime.create_langchain_llm",
+            return_value=mock_llm,
+        ),
+        patch(
+            "obsidian_ai_hub.agents.runtime.registry.resolve_tools_with_context",
+            side_effect=fake_resolve,
+        ),
+    ):
+        events = [
+            event
+            async for event in runtime.generate_agent_stream(
+                agent=agent,
+                session=session,
+                run=run,
+                history_messages=[user_msg],
+                user_content="hi",
+            )
+        ]
+
+    assert events
+    assert captured["ctx"]["agent_id"] == agent["agent_id"]
+    assert captured["ctx"]["session_id"] == session["session_id"]
+    assert captured["ctx"]["run_id"] == run["run_id"]
+    assert "web_search" in captured["tool_ids"]
+
+
+@pytest.mark.anyio
 async def test_agent_stream_sends_text_chunks_in_order_and_persists_exact_content():
     agent = store.create_agent(
         name="Stream Agent",

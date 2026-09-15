@@ -114,6 +114,45 @@ def test_parse_worker_question_only_has_no_blocker():
     assert clean == "どちらにしますか？ AかBか教えてください"
 
 
+@pytest.mark.anyio
+async def test_coding_orchestrator_never_binds_agent_delegate():
+    """The coding Coordinator has no parent agent run, so even an explicit or
+    legacy tool_ids request must not bind agent_delegate to its LLM."""
+    captured: dict = {}
+    mock_with = MagicMock()
+
+    def bind_tools(tools):
+        captured["tools"] = tools
+        return mock_with
+
+    mock_llm = MagicMock()
+    mock_llm.bind_tools.side_effect = bind_tools
+
+    async def ainvoke(_messages):
+        return AIMessage(content="<final_report>完了報告</final_report>")
+
+    mock_with.ainvoke = ainvoke
+
+    orch = CodingOrchestrator(tool_ids=["agent_delegate", "ask_user"])
+    with patch(
+        "obsidian_ai_hub.coding.orchestrator.create_langchain_llm",
+        return_value=mock_llm,
+    ):
+        events = [
+            event
+            async for event in orch.generate_response_events(
+                history=[{"role": "user", "content": "修正して"}],
+                repo_path="/repo",
+                backend_name="codex",
+            )
+        ]
+
+    bound_names = [t.name for t in captured["tools"]]
+    assert "agent_delegate" not in bound_names
+    assert "ask_user" in bound_names
+    assert any(event.get("type") == "text" for event in events)
+
+
 @pytest.fixture
 def coding_session_setup(tmp_path):
     repo = tmp_path / "repo"
