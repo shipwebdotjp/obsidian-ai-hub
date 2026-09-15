@@ -52,18 +52,16 @@ export default function TaskAgentListPage({
     setLoading(true);
     setError(null);
     try {
-      const singleStatus =
-        filter && filter !== NON_TERMINAL_FILTER ? filter : undefined;
+      const statusParam =
+        filter === NON_TERMINAL_FILTER
+          ? "__non_terminal__"
+          : filter || undefined;
       const res = await listTaskAgentTasks({
-        status: singleStatus,
+        status: statusParam,
         limit: 100,
       });
-      let visible = res.items;
-      if (filter === NON_TERMINAL_FILTER) {
-        visible = res.items.filter((t) => !TERMINAL_SET.has(t.status));
-      }
-      setItems(visible);
-      setTotal(filter === NON_TERMINAL_FILTER ? visible.length : res.total);
+      setItems(res.items);
+      setTotal(res.total);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "読み込みに失敗しました");
     } finally {
