@@ -107,6 +107,10 @@ npm-dev:
 serve:
 	uv run -m obsidian_ai_hub --serve
 
+serve-restart:
+	lsof -ti :8765 | xargs kill
+	uv run -m obsidian_ai_hub --serve
+
 serve-debug:
 	uv run -m obsidian_ai_hub --serve --debug
 
