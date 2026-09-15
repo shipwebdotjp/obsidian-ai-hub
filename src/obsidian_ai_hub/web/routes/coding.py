@@ -26,6 +26,9 @@ class SessionCreateRequest(BaseModel):
     tool_ids: Optional[List[str]] = Field(
         default=None, description="Optional custom tool IDs for session"
     )
+    transport: Optional[str] = Field(
+        default="direct_cli", description="'direct_cli' or 'acp'"
+    )
 
 
 class UpdateToolsRequest(BaseModel):
@@ -180,6 +183,13 @@ def create_session(
     clean_title = (body.title or "").strip()
     session_title = clean_title if clean_title else "新しいコーディングセッション"
 
+    clean_transport = (body.transport or "direct_cli").lower().strip()
+    if clean_transport not in ("direct_cli", "acp"):
+        raise HTTPException(
+            status_code=400,
+            detail="トランスポートは 'direct_cli' または 'acp' を指定してください",
+        )
+
     try:
         session = coding_store.create_session(
             project_id=body.project_id,
@@ -187,6 +197,7 @@ def create_session(
             repo_path=canonical_repo,
             title=session_title,
             tool_ids=body.tool_ids,
+            transport=clean_transport,
         )
         return session
     except ValueError as exc:
