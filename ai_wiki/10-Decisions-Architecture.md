@@ -1,5 +1,53 @@
 # アーキテクチャ・運用の決定記録
 
+## CodingAgents は共通 ACP Client へ段階移行する
+
+| 項目 | 内容 |
+|------|------|
+| 決定日 | 2026-09-15 |
+| カテゴリ | Coding Workspace・Agent transport・認可境界 |
+| 決定内容 | Codex/OpenCode の直接 CLI 出力を個別解釈する backend を恒久形にせず、共通 ACP Client backend と provider ごとの launch profile へ段階移行する。直接 CLI backend は既存 session の互換と検証期間だけ維持し、ACP の session、取消、permission/HITL、復旧の受入条件を満たした後に廃止する。 |
+
+### Context
+
+現行 Coding Workspace は `codex exec --json` と OpenCode 固有 CLI を subprocess 実行し、各出力・
+session 消失・タイトル取得を個別に処理している。ACP は Agent/Client の JSON-RPC session、prompt、
+cancel、progress notification を標準化し、Codex と OpenCode の双方に ACP 経路がある。一方で protocol
+は Agent 実装ごとの capability、認証、session 永続性、permission の意味まで同一化しない。特に本アプリの
+永続 HITL と、ACP の接続中 permission request は同じ状態モデルではない。
+
+### Decision
+
+- アプリは ACP **Client** として stdio Agent server を起動する。ACP stdout は protocol message 専用とし、
+  すべての JSON-RPC lifecycle と event 正規化は一つの `AcpClientBackend` が所有する。
+- Codex / OpenCode の差は executable・argv・version pin・認証・必須 capability・session persistence・
+  version 固有の回避策だけを持つ launch profile に閉じる。provider 固有の protocol parser は作らない。
+- 初期版は ACP v1 を固定し、Client filesystem / terminal capability を advertise しない。追加するなら
+  operation-scenario contract と別 ADR を要する。
+- Coordinator、Task の承認済み Directional Plan、Git root、repo lock、SQLite run/event、HITL は既存の
+  正本のままにする。ACP plan / permission が Task の承認境界を置換することはない。
+- permission が Task policy の範囲外、または durable な人間回答を要する場合は、Agent に allow して接続を
+  待たせず deny/stop と既存 HITL の作成へ接続する。未回答のまま接続が失われた操作は実行しない。
+- 既存 direct CLI session は保存済み transport でのみ再開し、ACP session へ自動移行/replay しない。
+  support window の終了後も履歴を削除せず archive する。
+
+### Consequences
+
+- 新しい ACP Agent は profile と capability PoC を追加することで接続でき、transport 実装と test surface の
+  provider 増殖を避けられる。
+- ACP v1 の capability negotiation、session lifecycle、双方向 permission、subprocess の長期管理を新たに
+  実装・監視する必要がある。Codex は外部 `codex-acp` package への依存も持つ。
+- 直接 CLI を即削除しないため一時的に transport が二重になるが、Phase 2 の実測が安全な廃止判断を可能にする。
+- 既存の Agent 自律操作を完全に sandbox する保証は ACP により増えない。親 Task が保証できる範囲は従来どおり
+  Plan・対象・起動境界までである。
+
+### Alternatives
+
+- Codex/OpenCode ごとに ACP backend を追加して恒久併存する: provider × transport の実装・テスト・運用が
+  増え、標準 protocol 導入の利点を失うため不採用。
+- 直接 CLI を即時削除して ACP のみへ切替える: session 再開、取消、HITL/permission、外部 adapter の実測が
+  未了で既存 run を壊し得るため不採用。受入後の Phase 3 で採用する。
+
 ## Web UI 管理の AI エージェント、永続会話、およびツール境界
 
 | 項目 | 内容 |
