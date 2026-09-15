@@ -6,7 +6,6 @@ cancel mechanism; this adapter only creates, watches, and summarizes.
 
 from __future__ import annotations
 
-import json
 import logging
 from typing import Any, Optional
 
@@ -16,14 +15,8 @@ from obsidian_ai_hub.tasks.adapters.child_runs import (
     find_prior_child_session,
     wait_for_child_run,
 )
-from obsidian_ai_hub.tasks.adapters.deviation import (
-    DEVIATION_INSTRUCTION,
-    build_revised_plan,
-    parse_deviation_report,
-    tail_text,
-)
+from obsidian_ai_hub.tasks.adapters.deviation import tail_text
 from obsidian_ai_hub.tasks.execution import (
-    DeviationReported,
     StepResult,
     TaskCancelled,
 )
@@ -127,12 +120,6 @@ class CodingAdapter:
         status = str(final.get("status"))
         if status == "completed":
             text = self._final_text(coding_store, session_id, run_id)
-            report = parse_deviation_report(text)
-            if report is not None:
-                raise DeviationReported(
-                    build_revised_plan(plan.get("plan", {}), report),
-                    report["reason"],
-                )
             return StepResult(
                 step_index=step_index,
                 capability_key=str(step.get("capability_key")),
@@ -288,16 +275,14 @@ class CodingAdapter:
         step_index: int,
         step: dict[str, Any],
     ) -> str:
-        plan_inner = plan.get("plan", {})
-        return (
-            f"TaskのPlan Step {step_index} を実行してください。\n"
-            f"目的: {plan_inner.get('purpose', '')}\n"
-            f"作業: {step.get('title', '')}\n"
-            f"入力: {json.dumps(step.get('inputs', {}), ensure_ascii=False)}\n"
-            f"想定副作用: {step.get('side_effects', '')}\n"
-            f"完了条件: {plan_inner.get('completion_criteria', '')}\n\n"
-            f"{DEVIATION_INSTRUCTION}"
-        )
+        step_inputs = step.get("inputs", {}) or {}
+        task_text = str(step_inputs.get("task") or "").strip()
+        if task_text:
+            return task_text
+
+        plan_inner = plan.get("plan", {}) if isinstance(plan.get("plan"), dict) else {}
+        purpose = str(plan_inner.get("purpose") or plan.get("purpose") or "").strip()
+        return purpose
 
     def _final_text(self, coding_store: Any, session_id: str, run_id: str) -> str:
         messages = coding_store.list_messages(session_id)

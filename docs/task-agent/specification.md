@@ -175,10 +175,8 @@ exactly-onceではない。副作用の実行から完了Event保存の間に障
 
 - Plannerは対象を一意に解決できなければ、既存HITLの質問を登録し `waiting_user` にする。
 - 実行器は保存済みPlanのStepだけを順に実行し、実行時にCapabilityを再選択しない。
-- Adapterが追加のCapability、対象、または副作用が必要だと自己申告した場合、実行を止め、
-  改訂Planを同じTask IDの次版として保存して `waiting_reapproval` にする。
-- Coding CLI/Agentがこの自己申告をせずに逸脱することは親側で防止・検出できない。Adapterは
-  「Plan外が必要なら実行せず構造化結果を返す」ことを子runへの指示に含める。
+- `specialist_agent` のAdapterが追加のCapability、対象、または副作用が必要だと自己申告 (`<deviation_request>`) した場合、実行を止め、改訂Planを同じTask IDの次版として保存して `waiting_reapproval` にする。
+- `coding_cli` の子Coding CoordinatorへはTask Agent内部のStep番号・Plan・JSON入力・`fresh_session`・逸脱申告プロトコルを渡さず、解決済みの作業本文 (`inputs.task` または Plan目的) だけを渡す。`coding_cli` 子run内で想定外の作業の必要性が生じても、Task Agentによる自動再計画や `waiting_reapproval` への遷移は行わず、通常のCoding結果報告として扱う (利用者がCoding結果を確認し、必要に応じて新しいTaskを依頼する運用とする)。
 - 差戻しは理由必須であり、同じTask IDを再キューして新しいPlan版を作る。
 
 Planの承認・差戻しはTask APIで直接処理する。対象解決の質問だけは既存HITLに保存し、
