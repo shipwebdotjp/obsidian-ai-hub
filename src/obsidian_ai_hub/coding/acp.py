@@ -21,6 +21,7 @@ from obsidian_ai_hub.utils.config import (
 logger = logging.getLogger(__name__)
 
 SUPPORTED_PROTOCOL_VERSIONS = ("1.0", "1.1", "1.2", "2024-11-05", "2025-01-01")
+DEFAULT_ACP_TURN_TIMEOUT_S = 600.0
 
 
 class AcpError(Exception):
@@ -368,7 +369,7 @@ class AcpClientBackend:
         prompt: str,
         acp_session_id: Optional[str] = None,
         cancel_event: Optional[threading.Event] = None,
-        timeout: Optional[float] = None,
+        timeout: Optional[float] = DEFAULT_ACP_TURN_TIMEOUT_S,
         on_update_callback: Optional[Any] = None,
     ) -> AcpExecutionResult:
         """Execute a single ACP prompt turn with full session lifecycle handling."""

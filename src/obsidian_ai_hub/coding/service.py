@@ -433,7 +433,17 @@ async def run_coding_turn_stream(
                 if session_transport == "acp":
                     acp_profile = acp_module.AcpLaunchProfile.get_profile(backend_name)
                     acp_client = acp_module.AcpClientBackend(acp_profile)
-                    current_acp_id = session.get("acp_session_id")
+                    db_session = store.get_session(session_id)
+                    db_acp_id = db_session.get("acp_session_id") if db_session else None
+                    if (
+                        db_acp_id != current_external_id
+                        and current_external_id is None
+                        and db_acp_id is not None
+                    ):
+                        current_external_id = db_acp_id
+                    elif db_acp_id != current_external_id and cli_count == 1:
+                        current_external_id = db_acp_id
+                    act_acp_id = current_external_id
 
                     def _update_handler(params: Dict[str, Any]):
                         # Optional: emit supplementary ACP live update events
@@ -441,7 +451,7 @@ async def run_coding_turn_stream(
 
                     acp_res: acp_module.AcpExecutionResult = await loop.run_in_executor(
                         None,
-                        lambda s=current_acp_id: acp_client.execute_turn(
+                        lambda s=act_acp_id: acp_client.execute_turn(
                             repo_path=canonical_repo,
                             prompt=cli_prompt,
                             acp_session_id=s,
@@ -450,10 +460,11 @@ async def run_coding_turn_stream(
                         ),
                     )
 
-                    if acp_res.session_recreated or acp_res.acp_session_id != current_acp_id:
+                    if acp_res.session_recreated or acp_res.acp_session_id != act_acp_id:
                         store.update_session_acp_id(
                             session_id, acp_res.acp_session_id, acp_profile.profile_id
                         )
+                        current_external_id = acp_res.acp_session_id
 
                     if acp_res.cancelled:
                         store.mark_running_tool_calls_interrupted_for_run(run_id, error="User cancelled ACP execution")
