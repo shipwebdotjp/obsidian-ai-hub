@@ -537,26 +537,143 @@ async def execute_coding_run(run_id: str) -> None:
             except Exception:
                 logger.exception("append worker_start failed %s", run_id)
 
-            try:
-                cli_backend = backend.get_backend(backend_name)
-                db_session = store.get_session(session_id)
-                db_ext = db_session.get("external_session_id") if db_session else None
-                if db_ext != current_external_id and current_external_id is None and db_ext is not None:
-                    current_external_id = db_ext
-                elif db_ext != current_external_id and cli_count == 1:
-                    current_external_id = db_ext
-                ext_sess_id = current_external_id
+            async def _execute_acp_worker_turn() -> tuple[
+                "Optional[backend.CodingBackendResult]", "Optional[str]"
+            ]:
+                """Execute one worker turn over ACP transport.
 
+                Returns (adapted result, updated ACP session id). None result
+                means cancellation was already handled (terminal state + event).
+                The adapted result mirrors CodingBackendResult so the shared
+                tail below (reconcile skipped via session_recreated=False,
+                cancel already handled, message persistence) applies unchanged.
+                """
+                from obsidian_ai_hub.coding import acp as acp_module
+                from obsidian_ai_hub.coding import acp_elicitation as acp_el
+
+                acp_profile = acp_module.AcpLaunchProfile.get_profile(backend_name)
+                acp_client = acp_module.AcpClientBackend(acp_profile)
+                db_acp_session = store.get_session(session_id)
+                db_acp_id = (
+                    db_acp_session.get("acp_session_id") if db_acp_session else None
+                )
+                act_acp_id = current_external_id
+                if (
+                    db_acp_id != act_acp_id
+                    and act_acp_id is None
+                    and db_acp_id is not None
+                ):
+                    act_acp_id = db_acp_id
+                elif db_acp_id != act_acp_id and cli_count == 1:
+                    act_acp_id = db_acp_id
+
+                elicitation_handler = acp_el.make_elicitation_handler(
+                    run_id=run_id,
+                    session_id=session_id,
+                    user_prompt=user_prompt,
+                    repo_path=canonical_repo,
+                    backend_name=backend_name,
+                    phase=phase,
+                    phase_turn=phase_turn,
+                    cli_count=cli_count,
+                    tool_ids=effective_tool_ids,
+                    provider=orchestrator.provider,
+                    model=orchestrator.model,
+                    prior_hitl_run_id=run.get("hitl_run_id"),
+                    cancel_event=cancel_event,
+                )
                 loop = asyncio.get_running_loop()
-                cli_result: backend.CodingBackendResult = await loop.run_in_executor(
+                acp_res: acp_module.AcpExecutionResult = await loop.run_in_executor(
                     None,
-                    lambda s=ext_sess_id: cli_backend.execute(
+                    lambda s=act_acp_id: acp_client.execute_turn(
                         repo_path=canonical_repo,
                         prompt=cli_prompt,
-                        external_session_id=s,
+                        acp_session_id=s,
                         cancel_event=cancel_event,
+                        on_elicitation_create=elicitation_handler,
                     ),
                 )
+
+                if acp_res.session_recreated or acp_res.acp_session_id != act_acp_id:
+                    store.update_session_acp_id(
+                        session_id, acp_res.acp_session_id, acp_profile.profile_id
+                    )
+                    act_acp_id = acp_res.acp_session_id
+
+                if acp_res.cancelled or _is_cancelling() or cancel_event.is_set():
+                    try:
+                        store.mark_running_tool_calls_interrupted_for_run(
+                            run_id, error="User cancelled ACP execution"
+                        )
+                    except Exception:
+                        pass
+                    try:
+                        store.transition_run_status(
+                            run_id, "cancelled",
+                            error_message="User cancelled ACP execution", finished=True,
+                        )
+                    except ValueError:
+                        pass
+                    try:
+                        store.append_run_event(run_id, "cancelled", {"message": "ACP実行がキャンセルされました"})
+                    except Exception:
+                        pass
+                    return None, act_acp_id
+
+                worker_text = acp_res.output
+                if acp_res.session_recreated:
+                    if backend_name == "codex":
+                        notice_prefix = "前の Codex ACP セッションが見つからなかったため、新しいセッションへ切り替えて続行しました。"
+                    else:
+                        notice_prefix = "前の OpenCode ACP セッションが見つからなかったため、新しいセッションへ切り替えて続行しました。"
+                    worker_text = f"{notice_prefix}\n\n{worker_text}" if worker_text else notice_prefix
+                diag = dict(acp_res.diagnostics or {})
+                diag["transport"] = "acp"
+                if acp_res.stop_reason:
+                    diag.setdefault("stop_reason", acp_res.stop_reason)
+                return (
+                    backend.CodingBackendResult(
+                        output=worker_text,
+                        exit_code=acp_res.exit_code,
+                        external_session_id=act_acp_id,
+                        session_recreated=False,
+                        cancelled=False,
+                        error_message=acp_res.error_message,
+                        diagnostics=diag,
+                    ),
+                    act_acp_id,
+                )
+
+            try:
+                worker_transport = str(
+                    (store.get_session(session_id) or {}).get("transport")
+                    or "direct_cli"
+                )
+                if worker_transport == "acp":
+                    cli_result, current_external_id = await _execute_acp_worker_turn()
+                    if cli_result is None:
+                        return
+                    ext_sess_id = current_external_id
+                else:
+                    cli_backend = backend.get_backend(backend_name)
+                    db_session = store.get_session(session_id)
+                    db_ext = db_session.get("external_session_id") if db_session else None
+                    if db_ext != current_external_id and current_external_id is None and db_ext is not None:
+                        current_external_id = db_ext
+                    elif db_ext != current_external_id and cli_count == 1:
+                        current_external_id = db_ext
+                    ext_sess_id = current_external_id
+
+                    loop = asyncio.get_running_loop()
+                    cli_result = await loop.run_in_executor(
+                        None,
+                        lambda s=ext_sess_id: cli_backend.execute(
+                            repo_path=canonical_repo,
+                            prompt=cli_prompt,
+                            external_session_id=s,
+                            cancel_event=cancel_event,
+                        ),
+                    )
 
                 if cli_result.session_recreated or cli_result.external_session_id != ext_sess_id:
                     store.update_session_external_id(session_id, cli_result.external_session_id)

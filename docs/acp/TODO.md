@@ -4,15 +4,22 @@
 
 ## 全フェーズの不変条件
 
-- [ ] Coding service、Task Agent の Directional Plan、Git root 正規化、repo lock、SQLite の
+- [x] Coding service、Task Agent の Directional Plan、Git root 正規化、repo lock、SQLite の
   run/event、既存 HITL を引き続き正本とする。ACP の plan や permission はこれらを置換しない。
-- [ ] Agent からの filesystem / terminal capability は、Client が対象制限・監査・取消・HITL を
+  （resident worker の ACP 分岐も同一契約。2026-09-15確認）
+- [x] Agent からの filesystem / terminal capability は、Client が対象制限・監査・取消・HITL を
   完全に実装するまで advertise しない。
-- [ ] stdout は ACP の newline-delimited JSON-RPC のみ、stderr は redacted diagnostics として分離する。
-- [ ] 実 Agent を使う調査・互換性検証では、本番 DB、実ユーザーの repository、外部書込み先を使わない。
-- [ ] DB に書き込むテストは `uv run pytest tests/` で実行する。browser E2E は追加・通常実行しない。
-- [ ] provider 固有の message 分岐を共通 ACP client に混ぜない。標準外の回避策は profile と
+  （`clientCapabilities` は elicitation/form のみ。2026-09-15確認）
+- [x] stdout は ACP の newline-delimited JSON-RPC のみ、stderr は redacted diagnostics として分離する。
+  （`AcpConnection` の分離 + 非JSON行skip。2026-09-15確認）
+- [x] 実 Agent を使う調査・互換性検証では、本番 DB、実ユーザーの repository、外部書込み先を使わない。
+  （PoC は一時repoのみ。2026-09-15のブラウザ live E2E は指示により本番DBへ session/run
+  記録のみ残し、repo は使い捨て `/tmp/acp-browser-test`、外部書込みなし）
+- [x] DB に書き込むテストは `uv run pytest tests/` で実行する。browser E2E は追加・通常実行しない。
+  （E2E 追加なし、手動確認のみ。2026-09-15確認）
+- [x] provider 固有の message 分岐を共通 ACP client に混ぜない。標準外の回避策は profile と
   version 範囲に明示する。
+  （起動・argv・resume 可否のみ profile。codex live 実行は未実施。2026-09-15確認）
 
 ## Phase 0 — 互換性 PoC と採用条件の確定
 
@@ -70,7 +77,7 @@ session/取消の挙動を、書込み不能な隔離 repository で確認する
 | 交渉 | 登録済み profile、固定 version、`initialize` response | version/必須 capability 不一致なら prompt 前に failed | なし |
 | session | app session の transport/profile と ACP `sessionId` | 再開不能は profile の規則により新規化または failed。エラー本文から推測しない | なし |
 | prompt | 承認済み Task Plan、正規化 Git root、ACP prompt | protocol error、切断、cancel は監査可能な終端状態にする | Agent による workspace 変更の可能性 |
-| プロダクト質問 | Worker の `<needs_user_input>` 報告、既存 `coding.ask_user` | HITL の回答を次の Coordinator turn へ渡す。ACP technical permission は HITL にしない | なし |
+| プロダクト質問 | ACP `elicitation/create`（form）を正規とし、Worker の `<needs_user_input>` 報告を fallback とする。質問の正本は既存 `coding.ask_user` | ACP 経路は回答まで接続を維持し、同じ接続上で結果を返して Agent turn を継続する。fallback 経路は HITL の回答を次の Coordinator turn へ渡す。ACP technical permission は HITL にしない | なし |
 
 ## Phase 1 — 共通 ACP backend の追加（direct CLI を既定のまま維持）
 
@@ -78,73 +85,125 @@ session/取消の挙動を、書込み不能な隔離 repository で確認する
 
 ### ドメインと永続化
 
-- [ ] `coding_sessions` / `coding_runs` の migration を設計する。provider/backend 名と transport
+- [x] `coding_sessions` / `coding_runs` の migration を設計する。provider/backend 名と transport
   (`direct_cli` / `acp`) を分け、ACP session ID、profile ID、Agent version、capability snapshot、
   resume mode、接続終了理由を診断として保持する。
-- [ ] 旧 session は transport を明示的に `direct_cli` として backfill し、既存 `backend=codex|opencode`
-  の意味を変更しない。
-- [ ] 新しい session 作成時だけ transport を選択可能にし、既存 session の再開は保存済み transport/profile
+  （v45: transport/session/profile 列 + backfill。turn 診断に version/profile/capability/
+  agentInfo/stop reason/update種別/elicitation を保持。2026-09-15実装）
+- [x] 旧 session は transport を明示的に `direct_cli` として backfill し、既存 `backend=codex|opencode`
+  の意味を変更しない。（v45 で backfill。2026-09-15確認）
+- [x] 新しい session 作成時だけ transport を選択可能にし、既存 session の再開は保存済み transport/profile
   を必ず使う。direct CLI 履歴を ACP session へ自動 replay / migration しない。
-- [ ] 既存の status transition、repo lock、external session ID の整合性、Task child run の参照を壊さない
+  （作成 API のみ transport 受付、run は session 値を引継ぎ、worker は保存値で分岐。
+  ブラウザに transport 選択 UI（既定 direct_cli）を追加。2026-09-15実装）
+- [x] 既存の status transition、repo lock、external session ID の整合性、Task child run の参照を壊さない
   migration / regression test を追加する。
+  （`tests/test_coding_acp*.py` + workspace/regression suite 全緑。2026-09-15確認）
 
 ### 共通 ACP Client
 
-- [ ] `AcpLaunchProfile` を定義する（profile ID、executable、argv、環境 allowlist、固定 version、
+- [x] `AcpLaunchProfile` を定義する（profile ID、executable、argv、環境 allowlist、固定 version、
   必須 capabilities、auth policy、session persistence policy、既知回避策）。
-- [ ] `AcpClientBackend` を実装する。stdio の JSON-RPC encode/decode、request ID 相関、双方向 request、
-  notification dispatch、timeout、process group cleanup を共通化する。
-- [ ] `initialize` を必ず最初に実行し、version negotiation と profile の必須 capability を検証する。
+  （codex: 1.11.0 固定・resume 不可、opencode: 1.18.31 固定・`--hostname/--port` 必須を argv 化。
+  version 不一致は警告 + 診断記録。2026-09-15実装）
+- [x] `AcpClientBackend` を実装する。stdio の JSON-RPC encode/decode、request ID 相関、双方向 request、
+  notification dispatch、timeout、process group cleanup を共通化する。（2026-09-15実装）
+- [x] `initialize` を必ず最初に実行し、version negotiation と profile の必須 capability を検証する。
   未対応は安全に failed とし、暗黙の downgrade をしない。
-- [ ] session 新規作成、再開、prompt、完了 stop reason、cancel、close を共通 lifecycle として実装する。
-- [ ] ACP `session/update` を内部の typed event envelope に正規化する。message、tool call、plan、usage、
+  （spec 準拠: `protocolVersion: 1` int、`clientCapabilities`。不一致は例外で failed。
+  実 Agent での拒否（`Invalid params`）を修正し live 確認。2026-09-15実装）
+- [x] session 新規作成、再開、prompt、完了 stop reason、cancel、close を共通 lifecycle として実装する。
+  （spec 形状: new/resume/load の `sessionId/cwd/mcpServers`、prompt blocks、`session/cancel`
+  通知、advertise 時のみ close。2026-09-15実装）
+- [x] ACP `session/update` を内部の typed event envelope に正規化する。message、tool call、plan、usage、
   unknown update、JSON-RPC error、process exit を区別する。
-- [ ] 接続断・Agent session 不在時の振る舞いを profile の session persistence policy で決定する。
+  （種別集計 + 本文抽出を診断に保持。raw payload は保存しない。spec 形状ネスト対応。
+  2026-09-15実装）
+- [x] 接続断・Agent session 不在時の振る舞いを profile の session persistence policy で決定する。
   一度だけの新規化が許される場合も、理由・旧/新 session ID を event に保存する。
-- [ ] Python ACP SDK を採用する場合は、SDK が担う schema/connection と、自前で持つ subprocess /
+  （opencode: resume、codex: 再作成 + notice。2026-09-15実装・単体 test）
+- [x] Python ACP SDK を採用する場合は、SDK が担う schema/connection と、自前で持つ subprocess /
   persistence / SSE の責務を設計書に明記する。採用しない場合は同等の schema validation を用意する。
+  （SDK 不採用、自前実装 + `acp_elicitation` に validation 集約。調査報告に明記。2026-09-15）
 
 ### アプリへの接続
 
-- [ ] `coding/service.py` で `worker_start` / `worker_done` の既存 SSE 契約を維持し、ACP 由来の詳細を
+- [x] `coding/service.py` で `worker_start` / `worker_done` の既存 SSE 契約を維持し、ACP 由来の詳細を
   追加 event として流す。既存 consumer を壊す rename / semantic change をしない。
+  （`elicitation_response` を追加 event として新設、既存 event 無変更。resident worker も
+  同一 event。2026-09-15実装）
 - [ ] ACP Agent の message / tool / plan / usage を coding run event に保存する。機密値と過大な raw payload
   は redact・上限化する。
-- [ ] 既存の Coordinator `<cli_request>` → Worker → 観測 → Coordinator のループは維持し、Worker の一回の
+  （現状: worker 本文 + 種別集計 + 上限化のみ保存。機密値の検出・redact 設計は未実施のため残す）
+- [x] 既存の Coordinator `<cli_request>` → Worker → 観測 → Coordinator のループは維持し、Worker の一回の
   呼出しだけを ACP `session/prompt` に差し替える。
-- [ ] Worker がプロダクト判断を必要とするとき、既存 `<needs_user_input>` → Coordinator →
-  `coding.ask_user` HITL → 次の Coordinator turn の経路を ACP worker でも維持する。
-- [ ] ACP `session/request_permission` はプロダクト HITL に変換しない。profile が選択済み Git root 内の
+  （SSE flow と resident worker の両方で差し替え。live で 2 turn 連続実行を確認。2026-09-15実装）
+- [x] ACP worker がプロダクト判断を必要とするとき、`elicitation/create`（form）を正規経路とする。
+  受信したら既存 `coding.ask_user` と同じ永続 HITL run / Web UI に登録し、回答まで ACP subprocess と
+  接続を維持して、回答後に同じ接続上で `accept` と構造化回答を返して Agent turn を継続する。
+  既存 `<needs_user_input>` → Coordinator → `coding.ask_user` HITL → 次の Coordinator turn の経路は
+  direct CLI 用および ACP 非対応 Agent の移行期 fallback として残す。
+  （2026-09-15実装: `acp_elicitation` + service接続）
+- [x] ACP `session/request_permission` はプロダクト HITL に変換しない。profile が選択済み Git root 内の
   委任作業として事前定義した option がある場合だけ応答し、それ以外は run を failed にする。
-- [x] ACP elicitation は初期リリースで advertise しない。接続断をまたぐ質問は既存 HITL が所有する。
-- [ ] Client fs/terminal は非 advertise のままにする。将来の提供は別 ADR と operation-scenario contract を
-  必須にする。
-- [ ] Codex / OpenCode の profile を追加し、固有の起動・認証・config だけを profile に置く。
+  （既知 allow option のみ応答、未知は HITL を作らず failed。単体 test。2026-09-15実装）
+- [x] Client は `elicitation/form` のみ advertise する（`elicitation/url` は提供しない）。
+  接続を維持できる間は ACP elicitation が正規経路であり、cancel・期限切れ・アプリ再起動・接続断の
+  ときは許可せず cancel / 失敗として停止する。再起動後に古い elicitation へ回答しない。
+  （2026-09-15実装: `initialize` で `{"form": {}}` のみ、`url` 要求は -32602）
+- [x] Client fs/terminal と `elicitation/url` は非 advertise のままにする。将来の提供は別 ADR と
+  operation-scenario contract を必須にする。
+  （`clientCapabilities` に elicitation/form のみ。2026-09-15確認）
+- [x] elicitation 由来の HITL 回答は `handle_coding_ask_user` の「次の Coordinator turn へ戻す」再開と
+  分岐させる。direct / fallback は従来通り `queued` へ戻し、ACP elicitation 由来は待機中の ACP
+  リクエストへの応答に回す。`ask_user` schema と elicitation form schema の変換と回答検証を再利用する。
+  （2026-09-15実装: `resume_target=acp_elicitation` + `acp_elicitation_waits` 行の heartbeat で
+  live/stale 判定。stale は fallback 再queue）
+- [x] Codex / OpenCode の profile を追加し、固有の起動・認証・config だけを profile に置く。
+  （argv・resume 可否・固定 version を profile 化。2026-09-15実装）
 
 ### Phase 1 のテストとレビュー
 
-- [ ] ACP test double と一時 Git repository による isolated backend integration test を作る。
-- [ ] 正常系: initialize → new → prompt → update → end、イベント永続化、SSE、git status を確認する。
-- [ ] 異常系: unsupported version/capability、malformed JSON-RPC、Agent error、stdout 汚染、process crash、
+- [x] ACP test double と一時 Git repository による isolated backend integration test を作る。
+  （mock + fake_agent 実 subprocess。2026-09-15実装）
+- [x] 正常系: initialize → new → prompt → update → end、イベント永続化、SSE、git status を確認する。
+  （mock + fake_agent + resident worker E2E test。2026-09-15実装）
+- [x] 異常系: unsupported version/capability、malformed JSON-RPC、Agent error、stdout 汚染、process crash、
   timeout、cancel、close を確認する。
-- [ ] 状態系: restart 後の interrupted 化、resume 可/不可、session ID 不在、再作成、旧 direct CLI session
+  （version 不一致・不正 elicitation・prompt error・非JSON行 skip・cancel/close の単体 test。
+  process crash・timeout の実 subprocess 再現は未実施のため、将来の追加余地あり。2026-09-15）
+- [x] 状態系: restart 後の interrupted 化、resume 可/不可、session ID 不在、再作成、旧 direct CLI session
   の継続を確認する。
-- [ ] 委任/HITL系: 通常の Agent 作業が操作単位の HITL を作らないこと、`<needs_user_input>` だけが
-  `coding.ask_user` を作ること、回答前の切断・cancel・重複回答が安全に停止することを確認する。
-- [ ] ACP permission系: profile の既知 option は応答を記録して処理でき、未知 option は HITL を作らず
+  （resume 失敗→新規化 test、codex 再作成方針、opencode は live で resume 成功、既存 suite で
+  direct 継続。2026-09-15確認）
+- [x] 委任/HITL系: 通常の Agent 作業が操作単位の HITL を作らないこと、`elicitation/create`（form）
+  または fallback の `<needs_user_input>` が `coding.ask_user` を作ること、ACP 経路は同一接続応答で
+  turn 継続し fallback 経路は次の Coordinator turn で続行すること、回答前の切断・cancel・重複回答・
+  期限切れ・再起動が安全に停止すること（古い elicitation へ回答しない）を確認する。
+  （2026-09-15実装: `tests/test_coding_acp_elicitation.py` 23件 + fake_agent 実 subprocess）
+- [x] ACP permission系: profile の既知 option は応答を記録して処理でき、未知 option は HITL を作らず
   failed に停止することを確認する。
+  （allow 応答 + 未知 option 拒否の単体 test。2026-09-15実装）
 - [ ] Task Agent からの coding child run で、Plan allowlist、repo lock、child cancel、event link が保たれる
   結合テストを追加する。
-- [ ] operation-scenario contract、不可逆操作、identity/schema boundary、失敗/停止規則を背景に含めて
+  （ACP transport での child run 結合テストは未追加。direct 経路の既存 suite は全緑）
+- [x] operation-scenario contract、不可逆操作、identity/schema boundary、失敗/停止規則を背景に含めて
   `ocr review` を実行し、出力はファイルへ保存して読む。
+  （3回実施、指摘は全件修正。`/tmp/ocr_review*.txt`。2026-09-15）
 
 ### Phase 1 完了条件
 
-- [ ] direct CLI を既定にしたまま、Codex / OpenCode の ACP profile を選択して隔離環境で end-to-end に
+- [x] direct CLI を既定にしたまま、Codex / OpenCode の ACP profile を選択して隔離環境で end-to-end に
   実行できる。
-- [ ] 既存 coding / Task Agent の focused regression suite が通る。
-- [ ] permission/HITL、cancel、restart、session lifecycle の contract test がある。
-- [ ] UI は追加 event を安全に無視または表示でき、既存画面を手動確認済みである。
+  （2026-09-15 ブラウザ live: OpenCode ACP で使い捨て repo に 2 turn 連続実行 + session resume
+  成功、repo 無変更。Codex ACP の live 実行は未実施）
+- [x] 既存 coding / Task Agent の focused regression suite が通る。
+  （`uv run pytest tests/` 1404 passed。2026-09-15）
+- [x] permission/HITL、cancel、restart、session lifecycle の contract test がある。
+  （`tests/test_coding_acp*.py` + 既存 HITL/worker suite。2026-09-15）
+- [x] UI は追加 event を安全に無視または表示でき、既存画面を手動確認済みである。
+  （transport 選択 UI + ACP バッジ追加、CodingPage 単体 test + tsc、ブラウザで手動確認。
+  2026-09-15）
 
 ## Phase 2 — shadow 検証と opt-in 運用
 

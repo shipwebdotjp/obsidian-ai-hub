@@ -47,9 +47,18 @@ def build_coding_checkpoint(
     provider: str,
     model: str,
     prior_history: Optional[List[Dict[str, Any]]] = None,
+    resume_target: Optional[str] = None,
+    elicitation: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """Build a v2 Coding ask_user checkpoint with carried history."""
-    return {
+    """Build a v2 Coding ask_user checkpoint with carried history.
+
+    resume_target selects the resume path in handle_coding_ask_user: the default
+    (None) requeues to the next Coordinator turn, while "acp_elicitation"
+    resumes by answering the waiting ACP elicitation/create request on the same
+    connection (with <needs_user_input> kept as fallback). elicitation carries
+    the request identifiers needed for the stale-connection guard.
+    """
+    checkpoint = {
         "domain": "coding",
         "session_id": session_id,
         "run_id": run_id,
@@ -72,6 +81,11 @@ def build_coding_checkpoint(
         "provider": provider,
         "model": model,
     }
+    if resume_target is not None:
+        checkpoint["resume_target"] = resume_target
+    if elicitation is not None:
+        checkpoint["elicitation"] = elicitation
+    return checkpoint
 
 
 def restore_coding_progress(prior_hitl_run_id: Optional[str]) -> Tuple[int, int]:

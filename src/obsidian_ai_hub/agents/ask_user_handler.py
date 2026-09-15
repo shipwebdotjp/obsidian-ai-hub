@@ -121,6 +121,45 @@ def handle_coding_ask_user(ctx: HitlContext) -> HitlResult:
     merged = append_answer_to_history(cp, tool_call_id, cp.get("ask_user_args") or {}, formatted_answers)
     new_checkpoint = json.dumps(merged, ensure_ascii=False)
 
+    # ACP elicitation resume path: the wait row decides exactly once whether
+    # the live ACP turn waiter delivers the answers on the same connection
+    # (no requeue here) or the run falls back to the next Coordinator turn.
+    # consume_wait_if_live is atomic (single UPDATE + rowcount), so a waiter
+    # timing out concurrently cannot both cancel the connection and lose the
+    # answers here. Known limitation: if the waiter process crashes after this
+    # handler skips the requeue but before it replies, the coding run stays
+    # waiting_user until the user cancels it or startup recovery interrupts it.
+    if cp.get("resume_target") == "acp_elicitation":
+        elicitation_meta = cp.get("elicitation") or {}
+        elicitation_request_id = str(elicitation_meta.get("request_id") or "")
+        connection_token = elicitation_meta.get("connection_token")
+        try:
+            from obsidian_ai_hub.coding import acp_elicitation as acp_el
+
+            if elicitation_request_id and acp_el.consume_wait_if_live(
+                ctx.run_id, elicitation_request_id, connection_token
+            ):
+                # Won ownership: the live waiter reads the answers from the
+                # questions table and replies on the same ACP connection.
+                return HitlResult.complete(checkpoint=new_checkpoint)
+            row = acp_el.get_wait(ctx.run_id)
+            if row is not None and row.get("status") == acp_el.WAIT_STATUS_CONSUMED:
+                # The waiter already owns delivery; never double-resume.
+                return HitlResult.complete(checkpoint=new_checkpoint)
+            if row is not None:
+                acp_el.mark_wait_if_waiting(ctx.run_id, acp_el.WAIT_STATUS_STALE)
+            logger.info(
+                "ACP elicitation waiter for HITL %s is stale or missing; "
+                "falling back to Coordinator requeue.",
+                ctx.run_id,
+            )
+        except Exception:
+            logger.exception(
+                "Elicitation wait-row check failed for HITL %s; "
+                "falling back to Coordinator requeue.",
+                ctx.run_id,
+            )
+
     # Update coding run status from waiting_user to queued while keeping hitl_run_id
     # NOTE: best-effort two-phase commit with the HITL dispatcher (see Decisions-HITL):
     # the dispatcher persists new_checkpoint after this handler returns.

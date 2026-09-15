@@ -25,19 +25,28 @@ Agent の技術的な作業をアプリが操作ごとに承認する仕組み�
   profile の責務として維持する。これは「各操作を承認する」ものではなく、session を開始するときの
   実行環境の境界である。
 
-### D2 — プロダクト判断だけを既存 HITL へ送る
+### D2 — プロダクト判断は elicitation を正規経路とし既存 HITL へ送る
 
-- Agent が要件・仕様・優先順位・受入条件などの判断を必要とする場合、既存 Worker contract の
-  `<needs_user_input>…</needs_user_input>` を一つ付けて停止する。
-- Coordinator はこの報告を受け、既存の `coding.ask_user` HITL run を作る。人間の回答は永続化され、
-  既存の HITL worker が次の Coordinator turn を再開する。
-- Agent からの ACP `session/request_permission` や elicitation はプロダクト質問として扱わない。
-  これは技術的な実行 UI のための protocol message であり、接続断を越える質問・回答には適さない。
+- ACP Worker が要件・仕様・優先順位・受入条件などのプロダクト判断を必要とする場合、
+  正規経路は ACP `elicitation/create`（`form` のみ）である。
+- Client は `elicitation/create` を受けたら、既存の `coding.ask_user` と同じ永続 HITL run /
+  Web UI / 回答検証に登録する。`coding.ask_user` は質問の正本のまま残す。
+- 回答まで ACP subprocess と接続を維持し、回答後は同じ接続上で `accept` と構造化回答を返して
+  Agent turn を継続する。次の Coordinator turn は作らない。
+- `cancel`・期限切れ・アプリ再起動・接続断のときは許可せず `cancel` / 失敗として停止する。
+  再起動後に古い elicitation へ回答を返そうとはしない（Codex ACP は再接続 resume が実測で
+  失敗しているため）。
+- 既存 Worker contract の `<needs_user_input>…</needs_user_input>` → Coordinator →
+  `coding.ask_user` → 次の Coordinator turn の経路は、direct CLI 用および ACP 非対応 Agent の
+  移行期 fallback として残す。
+- ACP `session/request_permission` はプロダクト質問として扱わない。これは技術的な実行許可の
+  protocol message であり、D3 の事前定義 option か failed 停止で処理する。
 
 ### D3 — ACP Client が宣言する機能を最小にする
 
-- Phase 1 の Client capability は `fs`、`terminal`、`elicitation` を advertise しない。これは
-  「アプリのファイル API、アプリの terminal、接続中フォーム UI を Agent に貸さない」という意味である。
+- Phase 1 の Client capability は `fs`、`terminal`、`elicitation/url` を advertise しない。これは
+  「アプリのファイル API、アプリの terminal、外部 URL を開く接続中 UI を Agent に貸さない」
+  という意味である。`elicitation/form` のみ advertise する。
 - 非advertiseは Agent 自身の sandbox 内の shell / filesystem 操作を禁止しない。Phase 0 でも両 Agent は
   それぞれ自前 sandbox で `rg` / `find` / `ls` を実行した。
 - 通常の実行は profile の approval 設定で Agent が止まらないように構成する。予期しない
@@ -59,16 +68,32 @@ Agent の技術的な作業をアプリが操作ごとに承認する仕組み�
 | --- | --- | --- | --- | --- |
 | session 開始 | project の正規化 Git root、選択 profile | profile/version/capability/ACP session ID → coding session/run | 必須 capability 不足・起動失敗は prompt 前に failed | なし |
 | 技術作業 | Agent prompt、profile の sandbox/approval | ACP progress → run event / SSE | Agent 自身の失敗は worker output と終端 status を保存 | repository 内の変更・コマンド実行 |
-| プロダクト質問 | Worker の `<needs_user_input>` 報告 | `coding.ask_user` HITL checkpoint → HITL worker / 次の Coordinator turn | HITL 取消は Coding run も cancelled。回答喪失は failed | なし |
+| プロダクト質問 | ACP `elicitation/create`（form）と Worker の `<needs_user_input>` 報告（fallback） | `coding.ask_user` HITL checkpoint → 待機中の ACP リクエストへの応答（ACP 経路）または HITL worker / 次の Coordinator turn（fallback 経路） | HITL 取消・期限切れ・切断・再起動は Coding run も cancelled / failed。古い elicitation へは回答しない | なし |
 | ACP 技術許可 | `session/request_permission` と profile の事前定義 option | request/応答 → run event | option が不明なら failed。HITLにはしない | 許可された場合は Agent の repository 内操作 |
 | 取消・復旧 | `session/cancel`、process exit、ACP session ID | 終端 status・diagnostics・旧/新 session ID → 監査 / 次 turn | cancel/切断時に自動 rollback しない | 既存 repository 変更は戻さない |
+
+## 待受・再開の機械可読契約（実装正本: `coding/acp_elicitation.py`）
+
+- 識別子: `hitl_run_id`（HITL run）、elicitation 要求 ID（Agent の JSON-RPC `id`）、
+  `connection_token`（turn ごとの uuid）。表示用 `message`・`label` を内部 ID として
+  再利用しない。choice value は安定 ID、content 変換時に元の enum メンバ型へ戻す。
+- 待受行 `acp_elicitation_waits`（migration v46）の状態: `waiting` → `consumed`
+ （回答を同一接続へ返した）または `stale`（cancel・期限切れ・切断・再起動）。
+  waiter thread が heartbeat を更新し、`handle_coding_ask_user` は heartbeat 新鮮度と
+  要求 ID 一致で live/stale を判定する（プロセスまたぎ対応、in-process 状態に依存しない）。
+- 回答検証は副作用（接続への応答）より前。必須欠落・型変換失敗は ValueError とし、
+  turn を failed にする（schemaless な応答を作らない）。enum の自由入力は Agent が
+  再検証する前提で通過させる。
+- 重複回答は HITL の once-only 制約と wait 行の単一消費で安全に停止する。
 
 ## Phase 1 の受入条件
 
 - [ ] Codex / OpenCode とも、選択済み Git root で技術作業を操作ごとのアプリ承認なしに完了できる。
-- [ ] Worker の `<needs_user_input>` だけが既存 `coding.ask_user` HITL を作り、回答後に Coordinator →
-  Agent の順で続行できる。
-- [ ] `fs` / `terminal` / `elicitation` 非advertiseでも、Agent の sandbox 内の正常な作業を妨げない。
+- [ ] ACP 経路の `elicitation/create`（form）または fallback 経路の Worker `<needs_user_input>` が
+  既存 `coding.ask_user` HITL を作る。ACP 経路は回答後に同一 ACP 接続で Agent turn を継続し、
+  fallback 経路は回答後に Coordinator → Agent の順で続行できる。
+- [ ] `fs` / `terminal` / `elicitation/url` 非advertise（`elicitation/form` のみ advertise）でも、
+  Agent の sandbox 内の正常な作業を妨げない。
 - [ ] 予期しない ACP permission request は profile の事前定義 option で処理されるか、安全に failed となり、
   プロダクト判断 HITL と混同されない。
 - [ ] cancel、切断、Codex の再作成、OpenCode の再開を contract test で確認する。
@@ -76,3 +101,5 @@ Agent の技術的な作業をアプリが操作ごとに承認する仕組み�
 ## 承認
 
 - [x] 承認: Agent の技術的実行を Codex/OpenCode に委任し、プロダクト判断だけを既存 HITL にエスカレーションする（2026-09-15）。
+- [ ] 再承認: ACP worker のプロダクト判断は `elicitation/create`（form）を正規経路とし、`coding.ask_user`
+  を正本・UIとして同一 ACP 接続で応答する改訂（`<needs_user_input>` は fallback）。

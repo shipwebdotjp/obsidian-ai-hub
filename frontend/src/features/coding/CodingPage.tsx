@@ -251,6 +251,8 @@ export default function CodingPage() {
         setNewSessionTitle={sessions.setNewSessionTitle}
         newSessionBackend={sessions.newSessionBackend}
         setNewSessionBackend={sessions.setNewSessionBackend}
+        newSessionTransport={sessions.newSessionTransport}
+        setNewSessionTransport={sessions.setNewSessionTransport}
         backendManuallySelected={sessions.backendManuallySelected}
         creatingSession={sessions.creatingSession}
         selectedProjectItem={selectedProjectItem}

@@ -52,6 +52,7 @@ const mockSession: codingApi.CodingSession = {
   repo_path: "/app/test_repo",
   external_session_id: null,
   title: "新規セッション",
+  transport: "direct_cli",
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",
 };
@@ -343,7 +344,37 @@ describe("CodingPage", () => {
     fireEvent.click(submitBtn);
 
     await waitFor(() => {
-      expect(codingApi.createCodingSession).toHaveBeenCalledWith(1, "opencode", undefined);
+      expect(codingApi.createCodingSession).toHaveBeenCalledWith(1, "opencode", undefined, undefined, "direct_cli");
+    });
+  });
+
+  it("creates a session with ACP transport when selected", async () => {
+    vi.mocked(codingApi.createCodingSession).mockResolvedValue({
+      ...mockSession,
+      session_id: "cses_224",
+      title: "新しいコーディングセッション",
+      transport: "acp",
+    });
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("Test App")).toBeInTheDocument();
+    });
+
+    const newBtn = screen.getByRole("button", { name: "+ 新規" });
+    fireEvent.click(newBtn);
+
+    expect(screen.getByText("新規コーディングセッション作成")).toBeInTheDocument();
+
+    const acpBtn = screen.getByRole("button", { name: /ACP（opt-in）/ });
+    fireEvent.click(acpBtn);
+
+    const submitBtn = screen.getByRole("button", { name: "作成" });
+    fireEvent.click(submitBtn);
+
+    await waitFor(() => {
+      expect(codingApi.createCodingSession).toHaveBeenCalledWith(1, "opencode", undefined, undefined, "acp");
     });
   });
 
@@ -374,7 +405,7 @@ describe("CodingPage", () => {
     fireEvent.click(submitBtn);
 
     await waitFor(() => {
-      expect(codingApi.createCodingSession).toHaveBeenCalledWith(1, "codex", undefined);
+      expect(codingApi.createCodingSession).toHaveBeenCalledWith(1, "codex", undefined, undefined, "direct_cli");
     });
   });
 
@@ -400,7 +431,7 @@ describe("CodingPage", () => {
     fireEvent.click(submitBtn);
 
     await waitFor(() => {
-      expect(codingApi.createCodingSession).toHaveBeenCalledWith(1, "opencode", undefined);
+      expect(codingApi.createCodingSession).toHaveBeenCalledWith(1, "opencode", undefined, undefined, "direct_cli");
     });
   });
 
@@ -440,7 +471,7 @@ describe("CodingPage", () => {
     fireEvent.click(submitBtn);
 
     await waitFor(() => {
-      expect(codingApi.createCodingSession).toHaveBeenCalledWith(1, "codex", undefined);
+      expect(codingApi.createCodingSession).toHaveBeenCalledWith(1, "codex", undefined, undefined, "direct_cli");
     });
   });
 
@@ -471,7 +502,7 @@ describe("CodingPage", () => {
     fireEvent.click(submitBtn);
 
     await waitFor(() => {
-      expect(codingApi.createCodingSession).toHaveBeenCalledWith(1, "opencode", undefined);
+      expect(codingApi.createCodingSession).toHaveBeenCalledWith(1, "opencode", undefined, undefined, "direct_cli");
     });
   });
 

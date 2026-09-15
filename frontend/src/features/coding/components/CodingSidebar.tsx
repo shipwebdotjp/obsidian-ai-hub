@@ -283,6 +283,11 @@ export function CodingSidebar({
                         <span className="uppercase font-semibold text-slate-600">
                           {sess.backend}
                         </span>
+                        {sess.transport === "acp" && (
+                          <span className="rounded bg-slate-800 px-1 py-px font-semibold uppercase text-white">
+                            ACP
+                          </span>
+                        )}
                         {dateStr && (
                           <>
                             <span>•</span>

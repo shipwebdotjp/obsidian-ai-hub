@@ -29,6 +29,7 @@ export function useCodingSessions({
   // New session modal state
   const [isNewSessionModalOpen, setIsNewSessionModalOpen] = useState(false);
   const [newSessionBackend, setNewSessionBackend] = useState<"codex" | "opencode">("opencode");
+  const [newSessionTransport, setNewSessionTransport] = useState<"direct_cli" | "acp">("direct_cli");
   const [newSessionTitle, setNewSessionTitle] = useState("");
   const [creatingSession, setCreatingSession] = useState(false);
   const backendManuallySelected = useRef(false);
@@ -130,6 +131,8 @@ export function useCodingSessions({
         selectedProjectId,
         newSessionBackend,
         newSessionTitle.trim() || undefined,
+        undefined, // toolIds: keep user defaults
+        newSessionTransport,
       );
       setIsNewSessionModalOpen(false);
       setNewSessionTitle("");
@@ -170,6 +173,8 @@ export function useCodingSessions({
     setIsNewSessionModalOpen,
     newSessionBackend,
     setNewSessionBackend,
+    newSessionTransport,
+    setNewSessionTransport,
     newSessionTitle,
     setNewSessionTitle,
     creatingSession,

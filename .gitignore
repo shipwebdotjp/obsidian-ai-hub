@@ -32,3 +32,4 @@ e2e_server.log
 
 # E2E test artifacts
 test-results/
+.playwright-cli/

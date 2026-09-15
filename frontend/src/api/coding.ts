@@ -40,6 +40,9 @@ export interface CodingSession {
   external_session_id: string | null;
   title: string;
   tool_ids_json?: string | null;
+  transport: "direct_cli" | "acp";
+  acp_session_id?: string | null;
+  acp_profile_id?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -259,12 +262,14 @@ export function createCodingSession(
   backend: string,
   title?: string,
   toolIds?: string[],
+  transport?: "direct_cli" | "acp",
 ): Promise<CodingSession> {
   return apiPost<CodingSession>("/api/v1/coding/sessions", {
     project_id: projectId,
     backend,
     title,
     tool_ids: toolIds,
+    transport,
   });
 }
 

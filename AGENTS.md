@@ -72,6 +72,11 @@
   ocr review --audience agent -b "..." > /tmp/ocr_review.txt 2>&1
   ```
 
+## Check the operation
+- Please perform operational checks using the actual database; it is acceptable if side effects occur. After modifying the code, terminate the existing process and restart the server(make serve).
+- http://127.0.0.1:8765
+- Production DB Path: ~/.config/obsidian-ai-hub/memory.sqlite3
+
 ## Jules clean-clone & test environments
 
 - Jules runs in a clean-clone virtual machine where neither `.env`, local databases, nor `.env.test` exist.

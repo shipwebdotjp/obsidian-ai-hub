@@ -10,7 +10,7 @@ import sqlite3
 import threading
 import uuid
 from datetime import datetime
-from typing import AsyncGenerator, Dict, Optional, Tuple
+from typing import Any, AsyncGenerator, Dict, Optional, Tuple
 from zoneinfo import ZoneInfo
 
 from obsidian_ai_hub.agents import runtime as agents_runtime
@@ -449,6 +449,24 @@ async def run_coding_turn_stream(
                         # Optional: emit supplementary ACP live update events
                         pass
 
+                    from obsidian_ai_hub.coding import acp_elicitation as acp_el
+
+                    _elicitation_handler = acp_el.make_elicitation_handler(
+                        run_id=run_id,
+                        session_id=session_id,
+                        user_prompt=user_prompt,
+                        repo_path=canonical_repo,
+                        backend_name=backend_name,
+                        phase=phase,
+                        phase_turn=phase_turn,
+                        cli_count=cli_count,
+                        tool_ids=effective_tool_ids,
+                        provider=orchestrator.provider,
+                        model=orchestrator.model,
+                        prior_hitl_run_id=run.get("hitl_run_id"),
+                        cancel_event=cancel_event,
+                    )
+
                     acp_res: acp_module.AcpExecutionResult = await loop.run_in_executor(
                         None,
                         lambda s=act_acp_id: acp_client.execute_turn(
@@ -457,6 +475,7 @@ async def run_coding_turn_stream(
                             acp_session_id=s,
                             cancel_event=cancel_event,
                             on_update_callback=_update_handler,
+                            on_elicitation_create=_elicitation_handler,
                         ),
                     )
 

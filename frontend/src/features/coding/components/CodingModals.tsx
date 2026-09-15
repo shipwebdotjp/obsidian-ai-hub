@@ -30,6 +30,8 @@ interface CodingModalsProps {
   setNewSessionTitle: React.Dispatch<React.SetStateAction<string>>;
   newSessionBackend: "codex" | "opencode";
   setNewSessionBackend: React.Dispatch<React.SetStateAction<"codex" | "opencode">>;
+  newSessionTransport: "direct_cli" | "acp";
+  setNewSessionTransport: React.Dispatch<React.SetStateAction<"direct_cli" | "acp">>;
   backendManuallySelected: MutableRefObject<boolean>;
   creatingSession: boolean;
   selectedProjectItem: CodingProjectItem | undefined;
@@ -62,6 +64,8 @@ export function CodingModals({
   setNewSessionTitle,
   newSessionBackend,
   setNewSessionBackend,
+  newSessionTransport,
+  setNewSessionTransport,
   backendManuallySelected,
   creatingSession,
   selectedProjectItem,
@@ -340,6 +344,39 @@ export function CodingModals({
                   >
                     <div className="font-semibold">OpenCode CLI</div>
                     <div className="mt-0.5 text-[10px] opacity-80">OpenCode CLI アダプタ</div>
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-700">
+                  実行方式
+                </label>
+                <div className="mt-2 grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setNewSessionTransport("direct_cli")}
+                    className={`rounded-lg border p-3 text-left text-xs transition-colors ${
+                      newSessionTransport === "direct_cli"
+                        ? "border-slate-900 bg-slate-900 text-white"
+                        : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                    }`}
+                  >
+                    <div className="font-semibold">直接CLI（既定）</div>
+                    <div className="mt-0.5 text-[10px] opacity-80">従来の実行経路</div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setNewSessionTransport("acp")}
+                    className={`rounded-lg border p-3 text-left text-xs transition-colors ${
+                      newSessionTransport === "acp"
+                        ? "border-slate-900 bg-slate-900 text-white"
+                        : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                    }`}
+                  >
+                    <div className="font-semibold">ACP（opt-in）</div>
+                    <div className="mt-0.5 text-[10px] opacity-80">共通ACPクライアント経由</div>
                   </button>
                 </div>
               </div>

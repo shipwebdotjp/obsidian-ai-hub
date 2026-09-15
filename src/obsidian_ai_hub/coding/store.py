@@ -67,6 +67,7 @@ CODING_EVENT_TYPES = frozenset(
         "worker_done",
         "text_append",
         "user_question",
+        "elicitation_response",
         "done",
         "error",
         "cancelled",
@@ -1296,15 +1297,31 @@ def start_queued_run(
         run_id = f"crun_{uuid.uuid4().hex[:12]}"
         now = _now_iso()
         has_slash_col = _has_column(conn, "coding_runs", "slash_invocation_json")
+        # Runs inherit the session's saved transport/profile: new sessions select
+        # transport at creation, existing sessions always resume on it (no replay).
+        session_transport = str((session or {}).get("transport") or "direct_cli")
+        if session_transport not in ("direct_cli", "acp"):
+            session_transport = "direct_cli"
+        session_acp_id = (session or {}).get("acp_session_id")
+        session_acp_profile = (session or {}).get("acp_profile_id")
+        has_run_transport = _has_column(conn, "coding_runs", "transport")
+        transport_cols = ""
+        transport_placeholders = ""
+        transport_values: tuple = ()
+        if has_run_transport:
+            transport_cols = ", transport, acp_session_id, acp_profile_id"
+            transport_placeholders = ", ?, ?, ?"
+            transport_values = (session_transport, session_acp_id, session_acp_profile)
         try:
             if has_idem and has_slash_col:
                 conn.execute(
-                    """
+                    f"""
                     INSERT INTO coding_runs (
                         run_id, session_id, user_message_id, status, dirty_tree_at_start,
                         started_at, idempotency_key, idempotency_hash,
                         created_instance_id, worker_instance_id, slash_invocation_json
-                    ) VALUES (?, ?, ?, 'queued', NULL, ?, ?, ?, ?, NULL, ?)
+                        {transport_cols}
+                    ) VALUES (?, ?, ?, 'queued', NULL, ?, ?, ?, ?, NULL, ?{transport_placeholders})
                     """,
                     (
                         run_id,
@@ -1315,18 +1332,20 @@ def start_queued_run(
                         idempotency_hash,
                         created_instance_id,
                         slash_json,
+                        *transport_values,
                     ),
                 )
             elif has_idem:
                 if slash_invocation is not None:
                     raise ValueError("slash_invocation requires slash_invocation_json column (run migration v36).")
                 conn.execute(
-                    """
+                    f"""
                     INSERT INTO coding_runs (
                         run_id, session_id, user_message_id, status, dirty_tree_at_start,
                         started_at, idempotency_key, idempotency_hash,
                         created_instance_id, worker_instance_id
-                    ) VALUES (?, ?, ?, 'queued', NULL, ?, ?, ?, ?, NULL)
+                        {transport_cols}
+                    ) VALUES (?, ?, ?, 'queued', NULL, ?, ?, ?, ?, NULL{transport_placeholders})
                     """,
                     (
                         run_id,
@@ -1336,6 +1355,7 @@ def start_queued_run(
                         clean_key,
                         idempotency_hash,
                         created_instance_id,
+                        *transport_values,
                     ),
                 )
             else:

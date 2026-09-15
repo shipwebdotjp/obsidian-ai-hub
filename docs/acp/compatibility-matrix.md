@@ -17,7 +17,7 @@ ACP v1 を初期採用版として固定。v2 は別 ticket（本移行と切り
 | Python | 3.12.12 |
 | 実施日 | 2026-09-15 |
 | 作業ディレクトリ | 一時 Git repository + 一時 cwd のみ（本番DB・実ユーザrepo不使用） |
-| Client capability | 最小（`clientCapabilities: {}` — fs/terminal/elicitation 非advertise） |
+| Client capability | Phase 0 PoC 時は最小（`clientCapabilities: {}` — fs/terminal/elicitation 非advertise）。Phase 1 以降は `elicitation/form` のみ advertise し、fs/terminal/`elicitation/url` は非advertise のまま |
 
 ## Agent 一覧
 
@@ -69,9 +69,19 @@ secret値のartifact混入なし（自動検査済み）を確認。
 - text-only `session/prompt`、`session/update` のtyped正規化（message/tool/plan/usage/unknownの区別）
 - `session/cancel` による `cancelled` 終端（`$/cancel_request` は取消手段として使わない）
 - process group所有＋終了待機＋orphan検査
+- プロダクト質問は `elicitation/form` のみ advertise し、`elicitation/create` を既存 `coding.ask_user` HITL に登録して同一 ACP 接続で応答する（Phase 0 PoC では未観測のため Phase 1 で検証する）
 - 再開可否はprofileのpersistence policyで決定（opencode: resume可、codex: 再作成）。`session not found`系の文字列推測をしない
 
 ## 再現手順
 
 `tools/acp_poc/README.md` を参照。artifact は `docs/acp/artifacts/<agent>-<version>-<date>/` に保存する。
 stderr は redacted diagnostics のみ保存し、秘密値は記録しない。
+
+## Phase 1 live 検証メモ（2026-09-15、ブラウザ経由）
+
+- OpenCode 1.18.31 の ACP profile をブラウザの transport 選択（opt-in）から使い捨て Git
+  repository で 2 turn 連続実行。`initialize` → `session/new` → `session/prompt` →
+  `session/update` → `end_turn`、2 turn 目は同一 ACP session の resume で継続し、
+  `git status` clean のまま完了。spec 形状（`protocolVersion` int、
+  `clientCapabilities`、`sessionId/cwd/mcpServers`、prompt blocks）への修正が前提だった。
+- Codex ACP の live 実行は未実施（profile のみ実装、resume 不可方針）。

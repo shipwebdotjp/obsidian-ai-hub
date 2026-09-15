@@ -694,6 +694,9 @@ def get_db_connection() -> sqlite3.Connection:
     if current_version <= 44:
         run_migration_v45(conn)
 
+    if current_version <= 45:
+        run_migration_v46(conn)
+
     return conn
 
 
@@ -734,6 +737,29 @@ def run_migration_v45(db: sqlite3.Connection) -> None:
     db.execute("UPDATE coding_runs SET transport = 'direct_cli' WHERE transport IS NULL OR transport = '';")
 
     db.execute("PRAGMA user_version = 45")
+    db.commit()
+
+
+def run_migration_v46(db: sqlite3.Connection) -> None:
+    """Run migration for version 46 (ACP elicitation wait table for cross-process HITL handoff)."""
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS acp_elicitation_waits (
+            hitl_run_id TEXT PRIMARY KEY,
+            coding_run_id TEXT NOT NULL,
+            elicitation_request_id TEXT NOT NULL,
+            connection_token TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'waiting',
+            heartbeat_at TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+    """)
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_acp_elicitation_waits_coding_run "
+        "ON acp_elicitation_waits(coding_run_id);"
+    )
+
+    db.execute("PRAGMA user_version = 46")
     db.commit()
 
 

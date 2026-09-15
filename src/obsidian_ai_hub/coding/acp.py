@@ -20,8 +20,11 @@ from obsidian_ai_hub.utils.config import (
 
 logger = logging.getLogger(__name__)
 
-SUPPORTED_PROTOCOL_VERSIONS = ("1.0", "1.1", "1.2", "2024-11-05", "2025-01-01")
+SUPPORTED_PROTOCOL_VERSION = 1
 DEFAULT_ACP_TURN_TIMEOUT_S = 600.0
+
+# Single source of truth for the advertised elicitation capability (form only).
+ELICITATION_FORM_CAPABILITY: Dict[str, Any] = {"form": {}}
 
 
 class AcpError(Exception):
@@ -52,6 +55,7 @@ class AcpLaunchProfile:
     argv: List[str]
     env_overrides: Dict[str, str] = field(default_factory=dict)
     supports_resume: bool = True
+    expected_version: Optional[str] = None
 
     @classmethod
     def get_profile(cls, backend_name: str) -> AcpLaunchProfile:
@@ -60,21 +64,44 @@ class AcpLaunchProfile:
             exe = os.getenv("CODING_CODEX_ACP_PATH") or CODING_CODEX_CLI_PATH or "codex-acp"
             if exe == "codex" or exe.endswith("/codex"):
                 exe = "codex-acp"
+            # Extra argv items for installs that need a launcher prefix
+            # (e.g. CODING_CODEX_ACP_PATH=node with ARGV ["<pinned index.js>"]).
+            # JSON list appended after exe. No implicit npm/node download here.
+            argv = [exe]
+            raw_argv = (os.getenv("CODING_CODEX_ACP_ARGV") or "").strip()
+            if raw_argv:
+                try:
+                    extra = json.loads(raw_argv)
+                except (json.JSONDecodeError, TypeError, ValueError) as exc:
+                    raise ValueError(
+                        "CODING_CODEX_ACP_ARGV must be a JSON list of argv items."
+                    ) from exc
+                if not isinstance(extra, list) or not all(isinstance(a, str) for a in extra):
+                    raise ValueError(
+                        "CODING_CODEX_ACP_ARGV must be a JSON list of argv items."
+                    )
+                argv = argv + list(extra)
             return cls(
                 profile_id="codex_acp",
                 backend_name="codex",
-                executable=exe,
-                argv=[exe],
-                supports_resume=True,
+                executable=argv[0],
+                argv=argv,
+                # Phase 0 evidence: resume/load advertise but fail with
+                # -32603 after process restart, so never reuse sessions.
+                supports_resume=False,
+                expected_version="1.11.0",
             )
         elif b == "opencode":
             exe = CODING_OPENCODE_CLI_PATH or "opencode"
+            # --hostname/--port are mandatory: bare `opencode acp` dies with
+            # ServeError (1.18.31, see compatibility-matrix).
             return cls(
                 profile_id="opencode_acp",
                 backend_name="opencode",
                 executable=exe,
-                argv=[exe, "acp"],
+                argv=[exe, "acp", "--hostname", "127.0.0.1", "--port", "0"],
                 supports_resume=True,
+                expected_version="1.18.31",
             )
         else:
             raise ValueError(f"Unknown ACP backend: '{backend_name}' (expected 'codex' or 'opencode')")
@@ -308,26 +335,34 @@ class AcpClientBackend:
     def initialize(self, conn: AcpConnection, timeout: float = 30.0) -> Dict[str, Any]:
         """Perform mandatory ACP protocol initialization and capability negotiation."""
         params = {
-            "protocolVersion": "1.0",
+            "protocolVersion": SUPPORTED_PROTOCOL_VERSION,
+            "clientCapabilities": {
+                # Omitted capabilities mean unsupported: fs/terminal/url stay
+                # non-advertised; elicitation form only (D3).
+                "elicitation": dict(ELICITATION_FORM_CAPABILITY),
+            },
             "clientInfo": {
                 "name": "obsidian-ai-hub",
                 "version": "1.0.0",
             },
-            # Non-advertised capabilities
-            "capabilities": {
-                "fs": False,
-                "terminal": False,
-                "elicitation": False,
-            },
         }
         res = conn.request("initialize", params, timeout=timeout)
-        version = res.get("protocolVersion") or res.get("version")
-        if version and str(version) not in SUPPORTED_PROTOCOL_VERSIONS and not str(version).startswith("1."):
-            logger.warning("Agent returned unexpected ACP protocol version '%s'", version)
+        version = res.get("protocolVersion", res.get("version", SUPPORTED_PROTOCOL_VERSION))
+        try:
+            version_int = int(version)
+        except (TypeError, ValueError):
+            version_int = -1
+        if version_int != SUPPORTED_PROTOCOL_VERSION:
+            raise AcpCapabilityMismatchError(
+                f"ACP protocol version mismatch: agent returned '{version}', "
+                f"client supports v{SUPPORTED_PROTOCOL_VERSION}."
+            )
 
-        agent_capabilities = res.get("capabilities") or {}
+        agent_capabilities = res.get("agentCapabilities") or res.get("capabilities") or {}
+        if not isinstance(agent_capabilities, dict):
+            agent_capabilities = {}
         return {
-            "protocol_version": version or "1.0",
+            "protocol_version": version_int,
             "agent_info": res.get("agentInfo") or res.get("agent_info") or {},
             "capabilities": agent_capabilities,
         }
@@ -363,6 +398,96 @@ class AcpClientBackend:
                 f"ACP agent requested permission with options {options}, which is not in pre-defined allowlist"
             )
 
+    def _handle_elicitation_request(
+        self,
+        req: Dict[str, Any],
+        conn: AcpConnection,
+        *,
+        on_elicitation_create: Optional[Any],
+        cancel_event: Optional[threading.Event],
+        deadline_monotonic: float,
+        connection_token: str,
+    ) -> Dict[str, Any]:
+        """Handle an elicitation/create RPC request from the ACP agent.
+
+        Form mode is routed to on_elicitation_create (same-connection reply,
+        backed by the existing coding.ask_user HITL in the service layer).
+        Unadvertised modes and invalid schemas get a -32602 error reply and the
+        turn continues. Unexpected handler failures get a -32603 reply and fail
+        the turn loudly instead of masking the failure.
+        """
+        from obsidian_ai_hub.coding import acp_elicitation as acp_el
+
+        rid = req.get("id")
+        params = req.get("params") or {}
+        if rid is None:
+            # elicitation/create is a request, not a notification: without an
+            # id no reply is possible, so fail the turn loudly instead of
+            # creating orphan HITL state.
+            raise AcpError("elicitation/create without a request id is not supported.")
+        try:
+            parsed = acp_el.parse_elicitation_create(params)
+        except acp_el.AcpElicitationError as exc:
+            if rid is not None:
+                try:
+                    conn.respond_error(rid, exc.code, str(exc))
+                except Exception:
+                    logger.warning("Failed to send elicitation error reply", exc_info=True)
+            logger.warning("Rejecting elicitation/create: %s", exc)
+            return {"request_id": rid, "action": "error", "error": str(exc)}
+
+        if on_elicitation_create is None:
+            if rid is not None:
+                try:
+                    conn.respond(rid, {"action": "cancel"})
+                except Exception:
+                    logger.warning("Failed to send elicitation cancel reply", exc_info=True)
+            logger.warning("No elicitation handler; replied cancel to elicitation/create.")
+            return {"request_id": rid, "action": "cancel", "unhandled": True}
+
+        wait_ctx = {
+            "deadline_monotonic": deadline_monotonic,
+            "cancel_event": cancel_event,
+            "connection_token": connection_token,
+            "request_id": rid,
+        }
+        try:
+            result = on_elicitation_create(parsed, wait_ctx)
+        except acp_el.AcpElicitationDeclined:
+            result = {"action": "decline"}
+        except acp_el.AcpElicitationCancelled as exc:
+            logger.info("Elicitation cancelled: %s", exc)
+            result = {"action": "cancel"}
+        except Exception as exc:
+            if rid is not None:
+                try:
+                    conn.respond_error(rid, -32603, f"Elicitation handler failed: {exc}")
+                except Exception:
+                    logger.warning("Failed to send elicitation error reply", exc_info=True)
+            raise AcpError(f"Elicitation handler failed: {exc}") from exc
+        if (
+            not isinstance(result, dict)
+            or result.get("action") not in ("accept", "decline", "cancel")
+            or (result.get("action") == "accept" and not isinstance(result.get("content"), dict))
+        ):
+            if rid is not None:
+                try:
+                    conn.respond_error(rid, -32603, "Elicitation handler returned invalid result")
+                except Exception:
+                    logger.warning("Failed to send elicitation error reply", exc_info=True)
+            raise AcpError(
+                "Elicitation handler returned an invalid result; failing the turn."
+            )
+        if rid is not None:
+            conn.respond(rid, result)
+        message_snippet = (parsed.message or "")[:200]
+        return {
+            "request_id": rid,
+            "action": result.get("action"),
+            "message": message_snippet,
+            "properties": [p.name for p in parsed.properties],
+        }
+
     def execute_turn(
         self,
         repo_path: str,
@@ -371,8 +496,20 @@ class AcpClientBackend:
         cancel_event: Optional[threading.Event] = None,
         timeout: Optional[float] = DEFAULT_ACP_TURN_TIMEOUT_S,
         on_update_callback: Optional[Any] = None,
+        on_elicitation_create: Optional[Any] = None,
     ) -> AcpExecutionResult:
-        """Execute a single ACP prompt turn with full session lifecycle handling."""
+        """Execute a single ACP prompt turn with full session lifecycle handling.
+
+        on_elicitation_create, when given, is called for each form-mode
+        elicitation/create request as ``callback(parsed, wait_ctx)`` where
+        parsed is the validated request dict and wait_ctx carries
+        ``deadline_monotonic``, ``cancel_event``, ``connection_token`` and
+        ``request_id``. It returns the JSON-RPC result payload
+        (``{"action": "accept"|"decline"|"cancel", "content"?: {...}}``) or
+        raises AcpElicitationDeclined / AcpElicitationCancelled, which are
+        translated to decline/cancel replies. Without a callback, form
+        elicitations are answered with cancel (no user to ask).
+        """
         env = self._prepare_env()
         conn = AcpConnection(
             argv=self.profile.argv,
@@ -397,14 +534,32 @@ class AcpClientBackend:
         try:
             init_meta = self.initialize(conn, timeout=15.0)
 
-            # Session resolution (new or resume)
+            # Session resolution (new / resume / load) per advertised capabilities.
+            agent_caps = init_meta.get("capabilities", {})
+            session_caps = agent_caps.get("sessionCapabilities") or {}
             if curr_session_id:
-                agent_caps = init_meta.get("capabilities", {})
-                can_resume = bool(agent_caps.get("resume") or agent_caps.get("load") or self.profile.supports_resume)
-                if can_resume:
+                resume_ok = bool(
+                    (session_caps.get("resume") is not None)
+                    and self.profile.supports_resume
+                )
+                load_ok = bool(agent_caps.get("loadSession"))
+                if resume_ok:
+                    resume_method: Optional[str] = "session/resume"
+                elif load_ok:
+                    resume_method = "session/load"
+                else:
+                    resume_method = None
+                if resume_method is not None:
                     try:
-                        resume_method = "session/resume" if agent_caps.get("resume") else "session/load"
-                        conn.request(resume_method, {"session_id": curr_session_id, "sessionId": curr_session_id}, timeout=15.0)
+                        conn.request(
+                            resume_method,
+                            {
+                                "sessionId": curr_session_id,
+                                "cwd": repo_path,
+                                "mcpServers": [],
+                            },
+                            timeout=15.0,
+                        )
                     except AcpError as exc:
                         logger.warning("Failed to resume ACP session '%s': %s. Fallback to session/new...", curr_session_id, exc)
                         curr_session_id = None
@@ -414,36 +569,41 @@ class AcpClientBackend:
                     session_recreated = True
 
             if not curr_session_id:
-                new_res = conn.request("session/new", {"cwd": repo_path, "repo_path": repo_path}, timeout=15.0)
-                curr_session_id = (
-                    new_res.get("sessionId")
-                    or new_res.get("session_id")
-                    or (new_res.get("session") or {}).get("id")
+                new_res = conn.request(
+                    "session/new", {"cwd": repo_path, "mcpServers": []}, timeout=15.0
                 )
-                if not curr_session_id:
+                curr_session_id = new_res.get("sessionId")
+                if not curr_session_id or not isinstance(curr_session_id, str):
                     raise AcpError("ACP session/new response did not return a valid session ID")
 
             # Send session/prompt request asynchronously to process streaming notifications
             prompt_params = {
                 "sessionId": curr_session_id,
-                "session_id": curr_session_id,
-                "prompt": prompt,
+                "prompt": [{"type": "text", "text": prompt}],
             }
             prompt_req_id = conn.send_request_async("session/prompt", prompt_params)
+
+            import uuid as _uuid
 
             output_chunks: List[str] = []
             stop_reason: Optional[str] = None
             start_time = time.monotonic()
+            deadline_monotonic = (
+                start_time + timeout if timeout is not None else float("inf")
+            )
+            connection_token = f"acpconn_{_uuid.uuid4().hex[:12]}"
             poll_interval = 0.1
             cancelled = False
             prompt_response: Optional[Dict[str, Any]] = None
+            elicitations: List[Dict[str, Any]] = []
+            update_kinds: Dict[str, int] = {}
 
             while True:
                 # Check cancellation
                 if cancel_event and cancel_event.is_set():
                     cancelled = True
                     try:
-                        conn.notify("session/cancel", {"sessionId": curr_session_id, "session_id": curr_session_id})
+                        conn.notify("session/cancel", {"sessionId": curr_session_id})
                     except Exception:
                         pass
                     break
@@ -452,29 +612,78 @@ class AcpClientBackend:
                 if timeout is not None and (time.monotonic() - start_time) >= timeout:
                     cancelled = True
                     try:
-                        conn.notify("session/cancel", {"sessionId": curr_session_id, "session_id": curr_session_id})
+                        conn.notify("session/cancel", {"sessionId": curr_session_id})
                     except Exception:
                         pass
                     break
 
-                # Check client requests (permissions)
+                # Check client requests (permissions + elicitations)
                 for client_req in conn.pop_client_requests():
                     method = client_req.get("method")
                     if method in ("session/request_permission", "request_permission"):
                         self._handle_permission_request(client_req, conn)
+                    elif method == "elicitation/create":
+                        record = self._handle_elicitation_request(
+                            client_req,
+                            conn,
+                            on_elicitation_create=on_elicitation_create,
+                            cancel_event=cancel_event,
+                            deadline_monotonic=deadline_monotonic,
+                            connection_token=connection_token,
+                        )
+                        elicitations.append(record)
 
                 # Process notifications (updates)
                 for notif in conn.pop_notifications():
                     method = notif.get("method")
                     params = notif.get("params") or {}
                     if method in ("session/update", "update"):
-                        text = params.get("text") or params.get("content")
-                        if text and isinstance(text, str):
-                            output_chunks.append(text)
-                        elif "part" in params and isinstance(params["part"], dict):
-                            part = params["part"]
-                            if part.get("type") == "text" and isinstance(part.get("text"), str):
-                                output_chunks.append(part["text"])
+                        # Flat shapes plus the spec-shaped nested update form
+                        # (params.update.sessionUpdate with content.text), as
+                        # observed in Phase 0 artifacts for both profiles.
+                        texts: List[str] = []
+                        top_text = params.get("text")
+                        if isinstance(top_text, str) and top_text:
+                            texts.append(top_text)
+                        top_content = params.get("content")
+                        if isinstance(top_content, str) and top_content:
+                            texts.append(top_content)
+                        elif isinstance(top_content, dict) and isinstance(
+                            top_content.get("text"), str
+                        ):
+                            texts.append(top_content["text"])
+                        nested = params.get("update")
+                        if isinstance(nested, dict):
+                            nested_content = nested.get("content")
+                            if isinstance(nested_content, dict) and isinstance(
+                                nested_content.get("text"), str
+                            ):
+                                texts.append(nested_content["text"])
+                            elif isinstance(nested_content, list):
+                                for part in nested_content:
+                                    if (
+                                        isinstance(part, dict)
+                                        and part.get("type") == "text"
+                                        and isinstance(part.get("text"), str)
+                                    ):
+                                        texts.append(part["text"])
+                        flat_part = params.get("part")
+                        if (
+                            isinstance(flat_part, dict)
+                            and flat_part.get("type") == "text"
+                            and isinstance(flat_part.get("text"), str)
+                        ):
+                            texts.append(flat_part["text"])
+                        output_chunks.extend(texts)
+
+                        nested_update = params.get("update")
+                        kind = (
+                            nested_update.get("sessionUpdate")
+                            if isinstance(nested_update, dict)
+                            else None
+                        )
+                        kind_key = str(kind) if kind else "flat"
+                        update_kinds[kind_key] = update_kinds.get(kind_key, 0) + 1
 
                         sr = params.get("stop_reason") or params.get("stopReason")
                         if sr:
@@ -485,6 +694,11 @@ class AcpClientBackend:
                                 on_update_callback(params)
                             except Exception:
                                 pass
+                    else:
+                        # Unknown/custom notifications are never executed, only
+                        # counted for the typed-update audit below.
+                        other_key = f"ignored:{method}"
+                        update_kinds[other_key] = update_kinds.get(other_key, 0) + 1
 
                 # Check prompt RPC response completion
                 res = conn.wait_for_response(prompt_req_id, timeout=poll_interval)
@@ -515,21 +729,39 @@ class AcpClientBackend:
             final_output = "".join(output_chunks).strip()
             stderr_str = "\n".join(conn.stderr_chunks).strip()
 
-            # Attempt graceful session/close notify
-            try:
-                conn.notify("session/close", {"sessionId": curr_session_id, "session_id": curr_session_id})
-            except Exception:
-                pass
+            # Graceful session/close only when advertised (fire-and-forget).
+            if (init_meta.get("capabilities", {}).get("sessionCapabilities") or {}).get(
+                "close"
+            ) is not None:
+                try:
+                    conn.notify("session/close", {"sessionId": curr_session_id})
+                except Exception:
+                    pass
 
             exit_code = conn.terminate(grace_s=2.0)
 
+            agent_info = init_meta.get("agent_info") or {}
+            if (
+                self.profile.expected_version
+                and isinstance(agent_info, dict)
+                and agent_info.get("version") not in (None, self.profile.expected_version)
+            ):
+                logger.warning(
+                    "ACP agent version '%s' differs from pinned '%s' for profile '%s'",
+                    agent_info.get("version"),
+                    self.profile.expected_version,
+                    self.profile.profile_id,
+                )
             diag = {
                 "acp_version": init_meta.get("protocol_version"),
                 "acp_profile_id": self.profile.profile_id,
+                "acp_agent": agent_info,
                 "acp_capabilities": init_meta.get("capabilities"),
                 "stop_reason": stop_reason,
                 "session_recreated": session_recreated,
                 "stderr_snippet": stderr_str[:500] if stderr_str else None,
+                "elicitations": elicitations,
+                "update_kinds": update_kinds,
             }
 
             return AcpExecutionResult(

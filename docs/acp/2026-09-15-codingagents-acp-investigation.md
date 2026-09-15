@@ -137,11 +137,15 @@ ACP request をそのまま「UI に許可ダイアログを出し、その接�
 
 - 選択済み Git root 内の技術的な調査・実装・テストは Coding Agent に委任し、アプリが操作ごとに
   allow / deny や HITL を挟まない。
-- 要件・仕様・優先順位などのプロダクト判断だけを、既存 Worker の `<needs_user_input>` 報告から
-  Coordinator と durable な HITL run へ送る。ACP Agent の technical permission / elicitation はこの
-  プロダクト質問経路に混ぜない。
-- `fs` / `terminal` / `elicitation` capability は初期リリースで advertise しない。これはアプリのサービスを
-  Agent に貸さない宣言であって、Agent 自身の sandbox 内操作を禁止するものではない。
+- 要件・仕様・優先順位などのプロダクト判断は、ACP worker では `elicitation/create`（`form` のみ）
+  を正規経路とし、既存の `coding.ask_user` と同じ永続 HITL run へ送る。回答まで ACP 接続を維持し、
+  回答後は同一接続で結果を返して Agent turn を継続する。direct CLI / 非対応 Agent では従来通り
+  既存 Worker の `<needs_user_input>` 報告から Coordinator と durable な HITL run へ送り、
+  次の Coordinator turn を再開する。ACP Agent の technical permission（`session/request_permission`）
+  はこのプロダクト質問経路に混ぜない。
+- `fs` / `terminal` / `elicitation/url` capability は advertise しない（`elicitation/form` のみ提供）。
+  これはアプリのファイル API・terminal・外部 URL を開く UI を Agent に貸さない宣言であって、
+  Agent 自身の sandbox 内操作を禁止するものではない。
 
 この分離は、既存 ADR の「親 Task は Coding Agent 内部の権限・Plan逸脱を技術的に保証しない」という境界も
 変えない。ACP は可視性と permission point を増やすが、Agent 自身が持つ filesystem/terminal 権限を
@@ -185,12 +189,14 @@ Codex ACP と OpenCode ACP に対し、共通 JSON-RPC harness で次を記録�
 ### Phase 1: 共通 ACP backend を追加（direct CLI はデフォルトのまま）
 
 - `CodingBackend` を非同期 lifecycle を表現できる内部 interface に拡張し、`AcpClientBackend` と
-  `AcpLaunchProfile` を追加する。Python SDK は Pydantic model、async base class、JSON-RPC plumbing を
-  提供しており、採用候補である。ただし、subprocess lifecycle、SQLite、SSE 正規化はアプリ側の責務とする。
+  `AcpLaunchProfile` を追加する。Python SDK は採用しない。自前の stdio JSON-RPC connection、
+  subprocess 所有、SQLite 永続化、HITL 待受、SSE 正規化を持ち、schema validation は
+  `acp_elicitation` の parse/変換に集約する（2026-09-15決定、Phase 1実装済み）。
 - DB / API の既存 `backend` 名（`codex` / `opencode`）を急に意味変更しない。移行中は transport
   (`direct_cli` / `acp`) と profile/version/ACP session diagnostics を追加し、旧 session は必ず旧 transport
   で再開する。
-- 実装の初期 Client capability は必要最小限とし、permission と elicitation の挙動を明示的にテストする。
+- 実装の Client capability は `elicitation/form` のみ提供し、fs/terminal/`elicitation/url` は
+  非 advertise とする。permission と elicitation の挙動を明示的にテストする。
   workspace file/terminal を Client 経由で提供するのは別 phase とする。
 
 ### Phase 2: shadow 検証後に opt-in
@@ -225,7 +231,7 @@ ACP 導入はコードを書き込ませ得る authorization boundary に関わ�
 | 起動・交渉 | 登録済み profile、固定 argv、`initialize` response | profile/version/capability diagnostics → run event | 非対応 version / 必須 capability 欠落は prompt 前に failed | なし |
 | session 解決 | coding session の transport/profile と ACP session ID | session diagnostics → Coding service | resume 非対応・ID不在は契約に従い新規化または failed。推測しない | なし |
 | prompt 実行 | 承認済み Task Plan、Git root、ACP prompt | ACP updates → SSE / run event | protocol error・切断・cancel は終端状態へ一意に遷移 | Agent が workspace を変更し得る |
-| permission / 質問 | ACP request、Task policy、HITL run | allow/deny と HITL link → event | policy外は deny/stop。接続切断時に未回答を実行しない | 許可後の Agent 操作 |
+| permission / 質問 | `session/request_permission`（技術許可）、`elicitation/create`（form、正規のプロダクト質問）、Task policy、HITL run | allow/deny と HITL link → event。elicitation は `coding.ask_user` HITL に登録し同一 ACP 接続で応答 | policy外は deny/stop。接続切断・cancel・再起動時に未回答を実行せず、古い elicitation へ回答しない | 許可後の Agent 操作 |
 | 完了・復旧 | stop reason、git status、process exit | run status / diagnostics | 完了 event 前の失敗は `failed` / `interrupted`。自動 rollback はしない | 既存変更は戻さない |
 
 この scenario を満たす isolated end-to-end backend test を、実 Agent には依存しない ACP test double と
