@@ -105,6 +105,9 @@ npm-dev:
 
 # Web UI の開発サーバ（OBSIDIAN_AI_HUB_API_TOKEN が必須。localhost bind 固定）
 serve:
+	uv run -m obsidian_ai_hub --serve
+
+serve-debug:
 	uv run -m obsidian_ai_hub --serve --debug
 
 # E2E 探索サーバー（Ctrl-C で停止）

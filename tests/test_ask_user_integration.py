@@ -257,7 +257,7 @@ async def test_coding_ask_user_interception_and_resumption(coding_setup):
 
     # 3. Second execution: Orchestrator resumes with answer ToolMessage and finishes
     final_ai_msg = MagicMock()
-    final_ai_msg.content = "了解しました。カスタム設定で進行します。"
+    final_ai_msg.content = "<final_report>了解しました。カスタム設定で進行します。</final_report>"
     final_ai_msg.tool_calls = []
 
     captured_messages = []
@@ -647,7 +647,7 @@ async def test_coding_mixed_and_invalid_bounce_without_hitl(coding_setup):
         {"name": "ask_user", "args": {"questions": [{"question_id": "q1", "question": "Q?", "choices": []}]}, "id": "c_bad"},
     ]
     final = MagicMock()
-    final.content = "再試行で完了します。"
+    final.content = "<final_report>再試行で完了します。</final_report>"
     final.tool_calls = []
 
     with patch("obsidian_ai_hub.coding.orchestrator.create_langchain_llm",
@@ -707,7 +707,7 @@ async def test_coding_cancel_keeps_hitl_link_and_sse_order(coding_setup):
     assert coding_store.get_run(run2_id)["status"] == "queued"
 
     done_msg = MagicMock()
-    done_msg.content = "完了します。"
+    done_msg.content = "<final_report>完了します。</final_report>"
     done_msg.tool_calls = []
     with patch("obsidian_ai_hub.coding.orchestrator.create_langchain_llm", side_effect=_coding_llm_factory([done_msg])):
         await execute_coding_run(run2_id)

@@ -876,3 +876,71 @@ export type AgentStreamEvent =
   | { type: "user_question"; hitl_run_id: string; question_set_id: string; questions: QuestionItem[] }
   | { type: "done"; message: AgentMessage; run: AgentRun; hitl_run_ids: string[]; tool_calls?: AgentToolCall[]; session_title?: string }
   | { type: "error"; error: string; run_id?: string };
+
+// --- Task Agent types ---
+
+export type TaskAgentApprovalPolicy = "auto" | "plan_required";
+
+export interface TaskAgentTask {
+  task_id: string;
+  prompt_text: string;
+  status: string;
+  current_plan_id: string | null;
+  worker_instance_id: string | null;
+  active_child_kind: string | null;
+  active_child_run_id: string | null;
+  result_summary: string | null;
+  error_summary: string | null;
+  created_at: string;
+  updated_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
+export interface TaskAgentPlan {
+  plan_id: string;
+  task_id: string;
+  version: number;
+  plan: Record<string, unknown>;
+  approval_policy_snapshot: Record<string, unknown>;
+  status: string;
+  rejection_reason: string | null;
+  created_at: string;
+  decided_at: string | null;
+}
+
+export interface TaskAgentEvent {
+  event_id: number;
+  task_id: string;
+  seq: number;
+  event_type: string;
+  payload: Record<string, any>;
+  created_at: string;
+}
+
+export interface TaskAgentTaskDetail {
+  task: TaskAgentTask;
+  plans: TaskAgentPlan[];
+  events: TaskAgentEvent[];
+}
+
+export interface TaskAgentListResponse {
+  items: TaskAgentTask[];
+  total: number;
+}
+
+export interface TaskAgentCreateRequest {
+  prompt_text: string;
+}
+
+export interface TaskAgentCapability {
+  capability_key: string;
+  adapter_kind: string;
+  enabled: boolean;
+  approval_policy: TaskAgentApprovalPolicy;
+  updated_at: string;
+}
+
+export type TaskAgentCapabilityUpdate =
+  | { enabled: boolean; approval_policy?: TaskAgentApprovalPolicy }
+  | { enabled?: boolean; approval_policy: TaskAgentApprovalPolicy };

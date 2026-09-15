@@ -115,8 +115,15 @@ llm:
 ### Coding Workspace Configuration
 
 The coding workspace (`/coding` in the Web UI) uses a two-layer architecture:
-an LLM orchestrator that plans and an external coding CLI agent (Codex/OpenCode)
-that executes file edits and tests.
+a Coordinator LLM that only handles progress, questions, and the final summary,
+and an external CLI Worker (Codex/OpenCode) that owns repository investigation,
+implementation, tests, and technical decisions.
+
+The Coordinator delegates by emitting a `<cli_request>` block in its response
+body; the app extracts it, runs the CLI Worker, and feeds the Worker output back
+as the next turn's observation, so the Coordinator can iterate. The Coordinator
+must not launch the CLI through tools such as `run_shell` or `agent_delegate`,
+and the backend name is not disclosed to it.
 
 Configure it in `config/config.yml` under `coding`. Environment variables override
 the YAML values if set.
@@ -270,7 +277,65 @@ python -m obsidian_ai_hub --agent-chat --agent-id agent_1234567890ab \
 python -m obsidian_ai_hub --agent-chat --agent-id agent_1234567890ab \
   --agent-prompt "要約してください" --agent-output json
 ```
+
+### Task Agent CLI
+
+Submit a free-text request to the Task Agent. The command creates a task,
+prints its ID, status, and detail URL, then exits immediately. Planning and
+execution happen in the web server process.
+
+```bash
+python -m obsidian_ai_hub --task-agent "Summarize this week's schedule"
 ```
+
+Track progress and approve plans in the Web UI at `/task-agent`, or use the
+Task Agent API (`/api/v1/task-agent/*`).
+
+### Vault read/write tools (AI Agent / Task Agent)
+
+Both the AI Agent (`vault_write_file` tool) and the Task Agent
+(`vault_write_file` capability, `plan_required` by default) can write UTF-8
+text directly into the Obsidian vault rooted at `VAULT_PATH`.
+
+Input (single source of truth: `VaultWriteFileInput` in
+`src/obsidian_ai_hub/agents/registry.py`):
+
+- `relative_path` (string, required): path relative to the Vault root
+  (e.g. `notes/daily.md`). Absolute paths and `..` are rejected, and the
+  symlink-resolved path must stay inside the Vault.
+- `content` (string, required): UTF-8 text to write.
+- `overwrite` (boolean, optional, default `false`): must be explicitly set
+  to `true` to replace an existing file. Without it, writing to an existing
+  path fails and the file is left untouched.
+
+Output (JSON string):
+
+- Success: `{"relative_path": "<normalized posix path>",
+  "bytes_written": <number>, "overwritten": <boolean>}`.
+- Failure: `{"error": "<reason>"}` for invalid input, unconfigured vault,
+  conflicts, or I/O errors.
+
+Missing parent directories are created inside the Vault, and writes are
+atomic (temporary file + `fsync` + replace). New files are claimed with an
+exclusive create (`O_CREAT|O_EXCL|O_NOFOLLOW`) so a concurrent creator is
+never silently overwritten when `overwrite` is false; existing symlinks are
+replaced as links, never followed. Task Agent plans containing this
+capability require one-shot plan approval before anything runs.
+
+Operational notes:
+
+- The Task worker runs inside the web server's FastAPI worker lifespan
+  alongside the Agent/Coding workers. **While the web server is stopped,
+  tasks stay queued — no new planning or execution happens.**
+- Stopped tasks become `interrupted` and are never re-run automatically;
+  re-plan them explicitly from the Web UI. Child runs keep their existing
+  limits (e.g. the 50-iteration Coding CLI limit is unchanged).
+- Known configured secrets are redacted before Task input and summaries are
+  stored, but **do not include unknown secrets in the request text** — that
+  is the operator's responsibility. The model's private reasoning and full
+  outputs are never stored unconditionally.
+- Terminal task, plan, and event history is deleted 30 days after
+  finalization; non-terminal tasks are never purged.
 
 ## Long-Term Memory
 

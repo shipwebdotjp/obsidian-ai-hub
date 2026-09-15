@@ -13,6 +13,13 @@ export const ROUTES = {
   EXECUTION_LOGS_LOGS: "/execution-logs/logs",
   EXECUTION_LOGS_TASK_STATES: "/execution-logs/task-states",
   HITL: "/hitl",
+  TASK_AGENT: "/task-agent",
+  TASK_AGENT_DETAIL: "/task-agent/:taskId",
+  TASK_AGENT_CAPABILITIES: "/task-agent/capabilities",
   PLANNER: "/planner",
   SETTINGS: "/settings",
 } as const;
+
+export function taskAgentDetailPath(taskId: string): string {
+  return `/task-agent/${encodeURIComponent(taskId)}`;
+}

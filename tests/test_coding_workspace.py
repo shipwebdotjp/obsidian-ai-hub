@@ -203,7 +203,7 @@ def test_coding_api_endpoints(test_project):
         # 1st call: request CLI, 2nd call: report completion
         history = kwargs.get("history", [])
         if any(h.get("role") == "worker" for h in history):
-            return "テスト成功を確認しました。完了です。"
+            return "<final_report>テスト成功を確認しました。完了です。</final_report>"
         return "解析結果です。\n<cli_request>\npytest\n</cli_request>"
 
     mock_cli_res = backend.CodingBackendResult(
@@ -472,7 +472,7 @@ def test_opencode_stream_session_recreated_notification(test_project):
     async def mock_generate_response(*args, **kwargs):
         history = kwargs.get("history", [])
         if any(h.get("role") == "worker" for h in history):
-            return "確認しました。"
+            return "<final_report>確認しました。</final_report>"
         return "解析結果です。\n<cli_request>\nopencode run test\n</cli_request>"
 
     mock_cli_res = backend.CodingBackendResult(
@@ -696,7 +696,7 @@ def test_codex_stream_session_recreated_notification(test_project):
     async def mock_generate_response(*args, **kwargs):
         history = kwargs.get("history", [])
         if any(h.get("role") == "worker" for h in history):
-            return "確認完了。"
+            return "<final_report>確認完了。</final_report>"
         return "解析結果です。\n<cli_request>\ncodex exec test\n</cli_request>"
 
     mock_cli_res = backend.CodingBackendResult(
@@ -833,7 +833,7 @@ def test_coding_turn_non_zero_exit_code_passed_to_review(test_project):
             return "実行します。\n<cli_request>\npython script.py\n</cli_request>"
         # Review phase receives worker error message
         assert "SyntaxError" in worker_msgs[0]["content"]
-        return "エラーが発生したため原因を説明します。文法エラーを修正してください。"
+        return "<final_report>エラーが発生したため原因を説明します。文法エラーを修正してください。</final_report>"
 
     mock_cli_res = backend.CodingBackendResult(
         external_session_id="th_err123",
@@ -927,6 +927,69 @@ def test_coding_tools_and_user_defaults(test_project):
     store.update_session_tool_ids(sid1, None)
     eff_tools1_reset = store.get_effective_session_tool_ids(sid1)
     assert eff_tools1_reset == custom_defaults
+
+
+def test_coding_tool_catalog_excludes_agent_delegate(test_project):
+    # agent_delegate requires a parent AI-agent run (agent_id). A coding session
+    # has no agent run, so the tool can only ever fail and must not be offered
+    # or selectable.
+    all_ids = store.get_all_available_tool_ids()
+    assert "agent_delegate" not in all_ids
+    assert "run_shell" in all_ids
+
+    catalog_ids = [t["tool_id"] for t in store.list_available_coding_tools()]
+    assert "agent_delegate" not in catalog_ids
+
+    # User defaults never include it, and explicit selection is dropped.
+    assert "agent_delegate" not in store.get_user_default_tool_ids()
+    saved = store.update_user_default_tool_ids(["agent_delegate", "web_search"])
+    assert saved == ["web_search"]
+
+    session = store.create_session(
+        test_project["project_id"],
+        "codex",
+        test_project["repo_path"],
+        title="Exclude Delegate",
+    )
+    updated = store.update_session_tool_ids(
+        session["session_id"], ["agent_delegate", "web_search"]
+    )
+    assert updated == ["web_search"]
+
+
+def test_coding_tools_api_excludes_agent_delegate(test_project):
+    app = create_app(token="test-token")
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer test-token"}
+
+    res = client.get("/api/v1/coding/defaults", headers=headers)
+    assert res.status_code == 200
+    data = res.json()
+    assert "agent_delegate" not in data["default_tool_ids"]
+    assert "agent_delegate" not in [
+        t["tool_id"] for t in data["available_tools"]
+    ]
+
+    res = client.get("/api/v1/coding/tools", headers=headers)
+    assert res.status_code == 200
+    assert "agent_delegate" not in [t["tool_id"] for t in res.json()["tools"]]
+
+    res = client.post(
+        "/api/v1/coding/sessions",
+        headers=headers,
+        json={
+            "project_id": test_project["project_id"],
+            "backend": "codex",
+            "title": "Exclude Delegate API",
+        },
+    )
+    assert res.status_code == 200
+    sid = res.json()["session_id"]
+    res = client.get(f"/api/v1/coding/sessions/{sid}", headers=headers)
+    assert res.status_code == 200
+    assert "agent_delegate" not in [
+        t["tool_id"] for t in res.json()["available_tools"]
+    ]
 
 
 def test_coding_tools_api_endpoints(test_project):
@@ -1315,7 +1378,7 @@ def test_opencode_title_sync_updates_default_title(test_project):
     async def mock_generate_response(*args, **kwargs):
         history = kwargs.get("history", [])
         if any(h.get("role") == "worker" for h in history):
-            return "完了しました。"
+            return "<final_report>完了しました。</final_report>"
         return "解析結果です。\n<cli_request>\nopencode run test\n</cli_request>"
 
     mock_cli_res = backend.CodingBackendResult(
@@ -1385,7 +1448,7 @@ def test_opencode_title_sync_does_not_overwrite_custom_title(test_project):
     async def mock_generate_response(*args, **kwargs):
         history = kwargs.get("history", [])
         if any(h.get("role") == "worker" for h in history):
-            return "完了しました。"
+            return "<final_report>完了しました。</final_report>"
         return "解析\n<cli_request>\nopencode test\n</cli_request>"
 
     mock_cli_res = backend.CodingBackendResult(
@@ -1448,7 +1511,7 @@ def test_opencode_title_sync_skips_on_fetch_failure(test_project):
     async def mock_generate_response(*args, **kwargs):
         history = kwargs.get("history", [])
         if any(h.get("role") == "worker" for h in history):
-            return "完了しました。"
+            return "<final_report>完了しました。</final_report>"
         return "x\n<cli_request>\nopencode test\n</cli_request>"
 
     mock_cli_res = backend.CodingBackendResult(
@@ -1497,7 +1560,9 @@ def test_opencode_title_sync_skips_on_fetch_failure(test_project):
         ("", True),
         ("   ", True),
         (service.DEFAULT_CODING_SESSION_TITLE, True),
+        ("Task task_bde93d76a598 step 2", True),
         ("ユーザー指定のタイトル", False),
+        ("Capability入力スキーマ二重定義の調査", False),
     ],
 )
 def test_coding_title_generation_eligibility(title, expected):
@@ -1519,7 +1584,7 @@ def test_codex_title_generation_updates_default_title(test_project):
     async def mock_generate_response(*args, **kwargs):
         history = kwargs.get("history", [])
         if any(h.get("role") == "worker" for h in history):
-            return "完了しました。"
+            return "<final_report>完了しました。</final_report>"
         return "解析結果です。\n<cli_request>\ncodex exec test\n</cli_request>"
 
     mock_cli_res = backend.CodingBackendResult(
@@ -1582,7 +1647,7 @@ def test_codex_title_generation_preserves_explicit_title(test_project):
 
     async def mock_generate_response(*args, **kwargs):
         if any(h.get("role") == "worker" for h in kwargs.get("history", [])):
-            return "完了しました。"
+            return "<final_report>完了しました。</final_report>"
         return "解析\n<cli_request>\ncodex exec test\n</cli_request>"
 
     res = client.post(
@@ -1630,7 +1695,7 @@ def test_codex_title_generation_failure_does_not_fail_turn(test_project):
 
     async def mock_generate_response(*args, **kwargs):
         if any(h.get("role") == "worker" for h in kwargs.get("history", [])):
-            return "完了しました。"
+            return "<final_report>完了しました。</final_report>"
         return "解析\n<cli_request>\ncodex exec test\n</cli_request>"
 
     res = client.post(
@@ -1838,7 +1903,7 @@ def test_coding_turn_carries_recreated_session_id_to_next_cli(test_project):
         elif worker_count == 1:
             return "second\n<cli_request>\nsecond cli\n</cli_request>"
         else:
-            return "done"
+            return "<final_report>done</final_report>"
 
     # First CLI recreates session, second should receive new id
     first_res = backend.CodingBackendResult(
@@ -1941,7 +2006,7 @@ def test_worker_messages_not_orphaned_within_same_run(test_project):
         elif len(workers) == 1:
             return "b\n<cli_request>\ncli2\n</cli_request>"
         else:
-            return "final"
+            return "<final_report>final</final_report>"
 
     r1 = backend.CodingBackendResult(
         external_session_id="ses_m1",
@@ -2312,7 +2377,7 @@ def test_coding_turn_picks_up_external_session_id_updated_before_first_cli(
     async def mock_gen(*args, **kwargs):
         history = kwargs.get("history", [])
         if any(h.get("role") == "worker" for h in history):
-            return "完了しました。"
+            return "<final_report>完了しました。</final_report>"
         return "解析\n<cli_request>\nfirst cli\n</cli_request>"
 
     # DB更新を模擬: ワーカー開始後の初回 store.get_session 呼び出しで新しいIDを返す

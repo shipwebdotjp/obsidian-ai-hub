@@ -1707,3 +1707,103 @@ class PersonSearchItem(BaseModel):
 class PersonSearchResponse(BaseModel):
     items: list[PersonSearchItem]
     total: int
+
+
+# --- Task Agent schemas ---
+
+
+class TaskAgentTask(BaseModel):
+    task_id: str
+    prompt_text: str
+    status: str
+    current_plan_id: Optional[str] = None
+    worker_instance_id: Optional[str] = None
+    active_child_kind: Optional[str] = None
+    active_child_run_id: Optional[str] = None
+    result_summary: Optional[str] = None
+    error_summary: Optional[str] = None
+    created_at: str
+    updated_at: str
+    started_at: Optional[str] = None
+    finished_at: Optional[str] = None
+
+
+class TaskAgentPlan(BaseModel):
+    plan_id: str
+    task_id: str
+    version: int
+    plan: dict[str, Any]
+    approval_policy_snapshot: dict[str, Any]
+    status: str
+    rejection_reason: Optional[str] = None
+    created_at: str
+    decided_at: Optional[str] = None
+
+
+class TaskAgentEvent(BaseModel):
+    event_id: int
+    task_id: str
+    seq: int
+    event_type: str
+    payload: dict[str, Any]
+    created_at: str
+
+
+class TaskAgentTaskDetail(BaseModel):
+    task: TaskAgentTask
+    plans: list[TaskAgentPlan]
+    events: list[TaskAgentEvent]
+
+
+class TaskAgentListResponse(BaseModel):
+    items: list[TaskAgentTask]
+    total: int
+
+
+class CreateTaskRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    prompt_text: str
+
+    @field_validator("prompt_text")
+    @classmethod
+    def _prompt_text_must_not_be_blank(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("prompt_text must not be blank")
+        return v
+
+
+class RejectTaskRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    reason: str
+
+    @field_validator("reason")
+    @classmethod
+    def _reason_must_not_be_blank(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("reason must not be blank")
+        return v
+
+
+class TaskAgentCapability(BaseModel):
+    capability_key: str
+    adapter_kind: str
+    enabled: bool
+    approval_policy: str
+    updated_at: str
+    label: str = ""
+    description: str = ""
+
+
+class CapabilityUpdateRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    enabled: Optional[bool] = None
+    approval_policy: Optional[Literal["auto", "plan_required"]] = None
+
+    @model_validator(mode="after")
+    def _at_least_one_field(self) -> "CapabilityUpdateRequest":
+        if self.enabled is None and self.approval_policy is None:
+            raise ValueError("Nothing to update.")
+        return self

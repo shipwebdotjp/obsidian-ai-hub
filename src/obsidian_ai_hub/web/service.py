@@ -160,6 +160,17 @@ from obsidian_ai_hub.web.services.summary import (
     get_edit_options,
     update_summary_detail,
 )
+from obsidian_ai_hub.web.services.task_agent import (
+    approve_task_agent_task,
+    cancel_task_agent_task,
+    create_task_agent_task,
+    get_task_agent_task_detail,
+    list_task_agent_capabilities,
+    list_task_agent_tasks,
+    reject_task_agent_task,
+    replan_task_agent_task,
+    update_task_agent_capability,
+)
 from obsidian_ai_hub.web.services.task_config import (
     TaskConfigConflictError,
     get_task_config,

@@ -9,6 +9,7 @@ import {
   listHitlRuns,
   getToken,
   listMemories,
+  listTaskAgentCapabilities,
 } from "./api/client";
 
 // Mock the API client
@@ -17,6 +18,8 @@ vi.mock("./api/client", () => ({
   listHitlRuns: vi.fn(),
   getToken: vi.fn(),
   listMemories: vi.fn(),
+  listTaskAgentCapabilities: vi.fn(),
+  updateTaskAgentCapability: vi.fn(),
   AUTH_EXPIRED_EVENT: "auth:expired",
   ApiError: class ApiError extends Error {
     status: number;
@@ -55,12 +58,14 @@ const mockHealth = vi.mocked(health);
 const mockListHitlRuns = vi.mocked(listHitlRuns);
 const mockGetToken = vi.mocked(getToken);
 const mockListMemories = vi.mocked(listMemories);
+const mockListCapabilities = vi.mocked(listTaskAgentCapabilities);
 
 beforeEach(() => {
   vi.clearAllMocks();
   mockListHitlRuns.mockResolvedValue({ items: [], total: 0 });
   mockGetToken.mockReturnValue("");
   mockListMemories.mockResolvedValue({ items: [], total: 0 } as any);
+  mockListCapabilities.mockResolvedValue([] as any);
 });
 
 describe("App", () => {
@@ -386,5 +391,38 @@ describe("App", () => {
       expect(mockListHitlRuns).toHaveBeenCalled();
     });
     expect(screen.queryByTestId("hitl-pending-badge")).not.toBeInTheDocument();
+  });
+
+  it("does not show Task Capability設定 in the sidebar", async () => {
+    mockHealth.mockResolvedValue({ status: "ok", auth_required: false });
+    render(
+      <MemoryRouter initialEntries={["/memories"]}>
+        <App />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("page-memories")).toBeInTheDocument();
+    });
+    expect(
+      screen.queryByRole("link", { name: "Task Capability設定" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Task Agent" })).toBeInTheDocument();
+  });
+
+  it("renders the capabilities settings page on direct navigation (legacy URL compat)", async () => {
+    mockHealth.mockResolvedValue({ status: "ok", auth_required: false });
+    render(
+      <MemoryRouter initialEntries={["/task-agent/capabilities"]}>
+        <App />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(mockListCapabilities).toHaveBeenCalled();
+    });
+    expect(
+      screen.getByRole("heading", { name: "Task Capability設定" }),
+    ).toBeInTheDocument();
   });
 });

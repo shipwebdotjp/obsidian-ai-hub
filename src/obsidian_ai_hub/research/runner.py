@@ -760,9 +760,10 @@ def submit_research_job_bg(
     job_id: str,
     mode: str = "auto",
     output_style: Optional[str] = None,
+    context: Optional[str] = None,
 ):
     future = _research_executor.submit(
-        execute_research_job_sync, theme_id, job_id, mode, output_style
+        execute_research_job_sync, theme_id, job_id, mode, output_style, context
     )
 
     def done_callback(fut):

@@ -23,6 +23,102 @@ def test_agent_delegate_without_context_fails():
     assert "コンテキストが無いため" in res["error"]
 
 
+def test_agent_delegate_coding_context_without_agent_id_fails():
+    # The coding orchestrator binds trusted_ctx with only repo_path/backend_name
+    # (no agent run context). agent_delegate must refuse this context instead of
+    # attempting a delegation whose parent agent id is empty.
+    ctx = {"repo_path": "/tmp/repo", "backend_name": "codex"}
+    tool_obj = registry.resolve_tools_with_context(["agent_delegate"], ctx)[0]
+    res_str = tool_obj.invoke({"agent_id": "agent_target", "task": "something"})
+    res = json.loads(res_str)
+    assert res["status"] == "failed"
+    assert "コンテキストが無いため" in res["error"]
+
+
+def test_agent_delegate_tool_with_agent_context_succeeds():
+    # AI-agent tool-call path: trusted_ctx carries the parent agent_id, so the
+    # context guard must not block the delegation.
+    child = store.create_agent(
+        name="Child Tool",
+        system_prompt="Child prompt",
+        tool_ids=["web_search"],
+    )
+    parent = store.create_agent(
+        name="Parent Tool",
+        system_prompt="Parent prompt",
+        tool_ids=["agent_delegate"],
+        delegate_agent_ids=[child["agent_id"]],
+    )
+    trusted_ctx = {
+        "agent_id": parent["agent_id"],
+        "session_id": "asess_tool",
+        "run_id": "arun_tool",
+        "user_message_id": "amsg_tool",
+        "user_content": "本物のユーザー発話",
+    }
+    tool_obj = registry.resolve_tools_with_context(["agent_delegate"], trusted_ctx)[0]
+
+    with patch("obsidian_ai_hub.agents.runtime.create_langchain_llm") as mock_llm_factory:
+        mock_llm = MagicMock()
+        mock_llm_factory.return_value = mock_llm
+        mock_ai_msg = MagicMock()
+        mock_ai_msg.content = "子の最終回答テキスト"
+        mock_ai_msg.tool_calls = []
+        mock_llm.bind_tools.return_value = mock_llm
+        mock_llm.invoke.return_value = mock_ai_msg
+
+        res = json.loads(
+            tool_obj.invoke({"agent_id": child["agent_id"], "task": "委譲タスク"})
+        )
+
+    assert res["status"] == "succeeded"
+    assert res["agent_id"] == child["agent_id"]
+    assert res["final_answer"] == "子の最終回答テキスト"
+
+
+def test_delegate_subagent_propagates_child_agent_id_and_root_context(monkeypatch):
+    # Nested delegation must propagate the child's own agent_id (so its internal
+    # agent_delegate / memory tools keep a real identity) plus the root user
+    # context.
+    child = store.create_agent(name="Child Prop", system_prompt="Prompt")
+    parent = store.create_agent(
+        name="Parent Prop",
+        system_prompt="Prompt",
+        delegate_agent_ids=[child["agent_id"]],
+    )
+    captured: dict = {}
+
+    def fake_core(agent, task, trusted_ctx, depth):
+        captured["agent_id"] = agent["agent_id"]
+        captured["ctx"] = dict(trusted_ctx)
+        return {
+            "status": "succeeded",
+            "agent_id": agent["agent_id"],
+            "agent_name": agent["name"],
+            "depth": depth,
+            "final_answer": "ok",
+            "used_tools": [],
+            "created_hitl_run_ids": [],
+        }
+
+    monkeypatch.setattr(runtime, "execute_subagent_core", fake_core)
+    parent_ctx = {
+        "agent_id": parent["agent_id"],
+        "session_id": "asess_prop",
+        "run_id": "arun_prop",
+        "user_message_id": "amsg_prop",
+        "user_content": "ルート発話",
+    }
+
+    res = runtime.delegate_subagent(child["agent_id"], "task", parent_ctx)
+
+    assert res["status"] == "succeeded"
+    assert captured["agent_id"] == child["agent_id"]
+    assert captured["ctx"]["agent_id"] == child["agent_id"]
+    assert captured["ctx"]["user_content"] == "ルート発話"
+    assert captured["ctx"]["run_id"] == "arun_prop"
+
+
 def test_agent_delegate_permission_and_self_and_cycle():
     child = store.create_agent(name="Child Deleg", system_prompt="Prompt")
     unallowed = store.create_agent(name="Unallowed Deleg", system_prompt="Prompt")

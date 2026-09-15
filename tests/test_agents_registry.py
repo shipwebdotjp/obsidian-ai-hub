@@ -17,6 +17,7 @@ def test_list_available_tools():
         "web_extract",
         "vault_search",
         "vault_read_file",
+        "vault_write_file",
         "calendar_read",
         "reminders_read",
         "calendar_create_proposal",

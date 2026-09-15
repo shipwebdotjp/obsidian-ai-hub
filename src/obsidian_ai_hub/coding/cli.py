@@ -45,6 +45,7 @@ async def _collect_coding_result(
     git_status: Optional[Dict[str, Any]] = None
     worker_done_payload: Optional[Dict[str, Any]] = None
     orchestrator_messages = []
+    user_question_payload: Optional[Dict[str, Any]] = None
 
     # For text mode, emit progress to stderr
     def stderr_write(msg: str):
@@ -93,6 +94,13 @@ async def _collect_coding_result(
                 stderr_write(f"[worker_done] attempt={data.get('attempt')} exit_code={data.get('exit_code')} session_recreated={data.get('session_recreated')}\n")
                 if data.get("diagnostics"):
                     stderr_write(f"[diagnostics] {json.dumps(data.get('diagnostics'), ensure_ascii=False)[:500]}\n")
+            elif evt == "user_question":
+                user_question_payload = {
+                    "hitl_run_id": data.get("hitl_run_id"),
+                    "question_set_id": data.get("question_set_id"),
+                    "questions": data.get("questions", []),
+                }
+                stderr_write(f"[user_question] hitl_run_id={data.get('hitl_run_id')}\n")
             elif evt == "done":
                 done_data = data
                 run_id = data.get("run_id", run_id)
@@ -117,11 +125,26 @@ async def _collect_coding_result(
         except Exception:
             git_status = None
 
-    # Determine ok and error
+    # Determine ok and error. waiting_user is a successful stop (exit 0).
+    waiting_for_user = user_question_payload
+    run_status = (run or {}).get("status") if run else None
+    if run_status == "waiting_user" and waiting_for_user is None:
+        hitl_id = (run or {}).get("hitl_run_id")
+        waiting_for_user = {
+            "hitl_run_id": hitl_id,
+            "question_set_id": "qset_1",
+            "questions": [],
+        }
+    is_waiting = waiting_for_user is not None or run_status == "waiting_user"
+
     ok = True
     err_type = None
     err_msg = error_message
-    if error_message:
+    if is_waiting:
+        ok = True
+        err_msg = None
+        err_type = None
+    elif error_message:
         ok = False
         err_type = _classify_error_type(RuntimeError(error_message), error_message)
     elif done_data and done_data.get("status") not in (None, "completed"):
@@ -151,6 +174,7 @@ async def _collect_coding_result(
         "error_message": err_msg,
         "error_type": err_type,
         "worker_done": worker_done_payload,
+        "waiting_for_user": waiting_for_user,
     }
 
 
@@ -329,7 +353,7 @@ def main_coding(
             run = result.get("run")
             git_status = result.get("git_status")
             if result.get("ok"):
-                # success json
+                # success json (completed or waiting_user; both exit 0)
                 sess_obj = None
                 if fresh_session:
                     sess_obj = {
@@ -338,6 +362,7 @@ def main_coding(
                         "title": fresh_session.get("title"),
                     }
                 run_obj = None
+                run_status = (run or {}).get("status") if run else None
                 if run:
                     run_obj = {
                         "id": run.get("run_id"),
@@ -345,11 +370,17 @@ def main_coding(
                         "git_status": git_status,
                     }
                 elif result.get("run_id"):
+                    fallback_status = "completed"
+                    if result.get("waiting_for_user"):
+                        fallback_status = "waiting_user"
+                    elif result.get("done_data"):
+                        fallback_status = result["done_data"].get("status", "completed")
                     run_obj = {
                         "id": result.get("run_id"),
-                        "status": result.get("done_data", {}).get("status", "completed") if result.get("done_data") else "completed",
+                        "status": fallback_status,
                         "git_status": git_status,
                     }
+                    run_status = fallback_status
                 out = {
                     "ok": True,
                     "response": result.get("response_text", ""),
@@ -359,6 +390,12 @@ def main_coding(
                 # Also include top-level git_status for convenience if not in run
                 if git_status and (not run_obj or not run_obj.get("git_status")):
                     out["git_status"] = git_status
+                if result.get("waiting_for_user") or run_status == "waiting_user":
+                    out["waiting_for_user"] = result.get("waiting_for_user") or {
+                        "hitl_run_id": (run or {}).get("hitl_run_id"),
+                        "question_set_id": "qset_1",
+                        "questions": [],
+                    }
                 sys.stdout.write(json.dumps(out, ensure_ascii=False) + "\n")
                 sys.stdout.flush()
                 execution_logger.succeed_command_run(cli_run_id, out)
@@ -403,13 +440,28 @@ def main_coding(
                 execution_logger.fail_command_run(cli_run_id, RuntimeError(result.get("error_message") or "Coding execution failed"))
                 sys.exit(1)
         else:
-            # Text mode
+            # Text mode (completed and waiting_user both exit 0; the completed
+            # main display is the Coordinator final summary).
             if result.get("ok"):
-                # stdout: final orchestrator response only
-                resp = result.get("response_text", "")
-                sys.stdout.write(resp)
-                if resp and not resp.endswith("\n"):
-                    sys.stdout.write("\n")
+                waiting = result.get("waiting_for_user")
+                run_status = ((result.get("run") or {}).get("status")
+                              if result.get("run") else None)
+                if waiting is not None or run_status == "waiting_user":
+                    hitl_id = (waiting or {}).get("hitl_run_id") or (
+                        (result.get("run") or {}).get("hitl_run_id"))
+                    notice = (
+                        "Web UI での回答待ちです"
+                        + (f"（HITL run: {hitl_id}）" if hitl_id else "")
+                        + "。Web UI で回答後に再開してください。"
+                    )
+                    sys.stdout.write(notice + "\n")
+                    resp = notice + "\n"
+                else:
+                    # stdout: final orchestrator response only
+                    resp = result.get("response_text", "")
+                    sys.stdout.write(resp)
+                    if resp and not resp.endswith("\n"):
+                        sys.stdout.write("\n")
                 sys.stdout.flush()
                 # stderr already contains progress; also add final session/run summary
                 fresh_session = result.get("session") or session

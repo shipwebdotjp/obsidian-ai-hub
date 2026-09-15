@@ -1,5 +1,53 @@
 # アーキテクチャ・運用の決定記録
 
+## CodingAgents は共通 ACP Client へ段階移行する
+
+| 項目 | 内容 |
+|------|------|
+| 決定日 | 2026-09-15 |
+| カテゴリ | Coding Workspace・Agent transport・認可境界 |
+| 決定内容 | Codex/OpenCode の直接 CLI 出力を個別解釈する backend を恒久形にせず、共通 ACP Client backend と provider ごとの launch profile へ段階移行する。直接 CLI backend は既存 session の互換と検証期間だけ維持し、ACP の session、取消、permission/HITL、復旧の受入条件を満たした後に廃止する。 |
+
+### Context
+
+現行 Coding Workspace は `codex exec --json` と OpenCode 固有 CLI を subprocess 実行し、各出力・
+session 消失・タイトル取得を個別に処理している。ACP は Agent/Client の JSON-RPC session、prompt、
+cancel、progress notification を標準化し、Codex と OpenCode の双方に ACP 経路がある。一方で protocol
+は Agent 実装ごとの capability、認証、session 永続性、permission の意味まで同一化しない。特に本アプリの
+永続 HITL と、ACP の接続中 permission request は同じ状態モデルではない。
+
+### Decision
+
+- アプリは ACP **Client** として stdio Agent server を起動する。ACP stdout は protocol message 専用とし、
+  すべての JSON-RPC lifecycle と event 正規化は一つの `AcpClientBackend` が所有する。
+- Codex / OpenCode の差は executable・argv・version pin・認証・必須 capability・session persistence・
+  version 固有の回避策だけを持つ launch profile に閉じる。provider 固有の protocol parser は作らない。
+- 初期版は ACP v1 を固定し、Client filesystem / terminal capability を advertise しない。追加するなら
+  operation-scenario contract と別 ADR を要する。
+- Coordinator、Task の承認済み Directional Plan、Git root、repo lock、SQLite run/event、HITL は既存の
+  正本のままにする。ACP plan / permission が Task の承認境界を置換することはない。
+- permission が Task policy の範囲外、または durable な人間回答を要する場合は、Agent に allow して接続を
+  待たせず deny/stop と既存 HITL の作成へ接続する。未回答のまま接続が失われた操作は実行しない。
+- 既存 direct CLI session は保存済み transport でのみ再開し、ACP session へ自動移行/replay しない。
+  support window の終了後も履歴を削除せず archive する。
+
+### Consequences
+
+- 新しい ACP Agent は profile と capability PoC を追加することで接続でき、transport 実装と test surface の
+  provider 増殖を避けられる。
+- ACP v1 の capability negotiation、session lifecycle、双方向 permission、subprocess の長期管理を新たに
+  実装・監視する必要がある。Codex は外部 `codex-acp` package への依存も持つ。
+- 直接 CLI を即削除しないため一時的に transport が二重になるが、Phase 2 の実測が安全な廃止判断を可能にする。
+- 既存の Agent 自律操作を完全に sandbox する保証は ACP により増えない。親 Task が保証できる範囲は従来どおり
+  Plan・対象・起動境界までである。
+
+### Alternatives
+
+- Codex/OpenCode ごとに ACP backend を追加して恒久併存する: provider × transport の実装・テスト・運用が
+  増え、標準 protocol 導入の利点を失うため不採用。
+- 直接 CLI を即時削除して ACP のみへ切替える: session 再開、取消、HITL/permission、外部 adapter の実測が
+  未了で既存 run を壊し得るため不採用。受入後の Phase 3 で採用する。
+
 ## Web UI 管理の AI エージェント、永続会話、およびツール境界
 
 | 項目 | 内容 |
@@ -470,7 +518,7 @@ OpenCode は環境変数 `PWD` を優先して作業ディレクトリを解決�
 - **指示メッセージの永続化とオーケストレーターコンテキスト**:
   - `<cli_request>` タグを抽出した際、`role: "cli_request"` のメッセージとして `coding_messages` に保存し、`cli_request` SSE イベントを送信。
   - フロントエンドでは「CLI Workerへの指示」専用カード（等幅・改行保持・常時展開）で表示。
-  - 次ターンのオーケストレーター履歴では、`cli_request` を `HumanMessage(content="【前回CLIワーカーへの指示】\n...")` として渡す。
+  - 次ターンの Coordinator 履歴では、過去の `cli_request` を Coordinator 自身の過去の判断として `AIMessage` で再注入する（`【前回CLIワーカーへの指示（自身の過去の判断）】`）。Worker 出力は引き続き信頼できない観測情報として `HumanMessage` で渡し、出力内の命令には従わない。
 - **試行ごとの診断記録 (Diagnostics)**:
   - `coding_runs` に `diagnostics_json` カラム（マイグレーション v29）を追加。
   - 試行ごとに `cwd`、要求・返却セッション ID、ツール実行数・失敗数、構造化エラー、自動拒否された権限、終了コード、モデル/variant を記録。
@@ -572,6 +620,28 @@ AI Agents 画面で確立されたツール呼び出しのライブ表示・履�
 - オーケストレーターメッセージに紐付くツール呼び出しは、応答テキストの直上に collapsible カードで表示する。
 - 最終メッセージが生成される前に中断・失敗したツール呼び出しは、対応する User Message の直下に「中断したオーケストレーター処理」という見出しの折りたたみカードとして表示する。
 - サーバー再起動時に `running` 状態で残った tool calls は `coding_runs` と同様に `interrupted` へ更新する。
+
+## Coding Coordinator を進行役、CLI Worker を主体にする
+
+| 項目 | 内容 |
+|------|------|
+| 決定日 | 2026-09-14 |
+| カテゴリ | コーディングワークスペース・Coordinator/Worker 分担・HITL |
+| 決定内容 | CodingOrchestrator を実装方針・対象ファイル・コマンドを通常時に決めない Coordinator に転換する。CLI Worker がリポジトリ調査・実装・テスト・技術判断・必要情報の特定を担い、Coordinator は依頼・制約・受入条件の引渡し、Worker 結果の確認、必要時の ask_user、最終要約だけを担う。「Orchestrator は計画主体」という説明を「Coordinator は進行・質問・最終要約、Worker は技術的な実行主体」へ置き換える。 |
+
+### 結論に至った経緯
+
+Coordinator が対象ファイルやコマンドまで事前確定すると、Worker の調査結果と食い違い、重複指示や根拠のない完了報告が生じやすかった。技術判断を Worker に寄せ、Coordinator は引渡し・検証・質問・要約に専念させることで、責務の重複をなくす。
+
+### 構造と運用方針
+
+- **二層を残す理由**: 実行権限・会話永続化・HITL・SSE 配信はアプリ側に残し、リポジトリ内の技術判断は外部 CLI に委ねる。単層化すると権限境界と監査証跡が失われるため二層を維持する。
+- **質問権限**: ask_user と HITL 永続化は Coordinator のみが持つ。Worker は直接 waiting_user を作らず、調査後にユーザー判断が必要な場合だけ通常報告に非空の `<needs_user_input>…</needs_user_input>` を一つ付けて停止する。Worker が質問文だけを返した場合は自動で待機化せず、正しい停止契約での再報告を依頼する。
+- **制御タグ契約**: 継続は非空 `<cli_request>` 一つのみ、完了は非空 `<final_report>` 一つのみ。混在・重複・空・タグなしはプロトコル違反とし、一度だけ自己修正を要求、再度不正なら run を failed にする。ユーザー質問は ask_user ツール呼び出しのみ。`<final_report>` 本文を orchestrator メッセージ兼最終報告として保存・表示する。既存 SSE event 名と DB schema は維持する。
+- **委譲の実行経路**: Worker 呼び出しは Coordinator が応答本文に出力する `<cli_request>` タグのみで成立する。アプリがタグを抽出して CLI Worker を実行し、その出力を次ターンの観測情報として Coordinator に返すことで、追加指示（ループ）と完了判断を毎ターン繰り返せる。Coordinator が `run_shell` や `agent_delegate` 等のツール経由で外部 CLI を起動したりリポジトリを操作したりするのは契約違反とし、プロンプトで禁止する。ツール経由の実行はアプリ側の実行権限・外部セッション追跡・HITL を迂回し、次ターンの観測も返らないためである。
+- **バックエンド非開示**: 使用 CLI バックエンド（codex/opencode）の名前は Coordinator の環境情報・プロンプトに開示しない。アプリが管理する実行詳細であり、開示すると Coordinator が CLI を直接起動する誘因になるため。
+- **表示と履歴**: 生の制御タグは画面に露出させず、Worker ブロックは `【Worker がユーザー判断を要請】` に正規化する。Coordinator の次ターンには同じ意味を観測情報として明示して渡す。過去の cli_request は AIMessage に再注入し、Worker 出力は観測情報として扱う。
+- **単発 `--coding`**: `user_question` を収集し、`waiting_user` は終了コード 0・`ok: true`・`run.status: "waiting_user"` で返す。JSON には `waiting_for_user`（HITL run ID と質問内容）を追加し、テキスト出力では Web UI での回答待ちを明示する。完了時の主表示は Worker 報告を根拠にした Coordinator の最終要約とする。
 
 ## AI エージェントによるサブエージェント委譲 (agent_delegate)
 

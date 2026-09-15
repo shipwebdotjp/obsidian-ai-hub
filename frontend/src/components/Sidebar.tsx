@@ -101,6 +101,9 @@ export default function Sidebar({ open, onClose, id }: SidebarProps) {
         <NavLink to={ROUTES.TASKS} className={linkClass} onClick={onClose}>
           タスク管理
         </NavLink>
+        <NavLink to={ROUTES.TASK_AGENT} className={linkClass} onClick={onClose} end>
+          Task Agent
+        </NavLink>
         <div>
           <button
             type="button"
