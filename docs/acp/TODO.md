@@ -216,6 +216,7 @@ session/取消の挙動を、書込み不能な隔離 repository で確認する
 - [ ] Codex ACP と OpenCode ACP の upgrade compatibility suite を実行し、version pin を更新する手順を定める。
 - [ ] Web UI と Task Agent で ACP を明示 opt-in にする。利用者に profile、version、再開可否、既知の
   制限を表示する。
+  （Web UI の transport 選択は Phase 1 で先行実装済み。Task Agent 側と profile/version 表示は残件）
 - [ ] telemetry は個人の prompt / source を保存せず、profile/version/capability hash、状態、失敗分類、
   duration、cleanup 成否に限定する。
 - [ ] production での新規 ACP session と旧 direct CLI session の同時利用、repo lock 競合、取消を
