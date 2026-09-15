@@ -12,14 +12,10 @@ from obsidian_ai_hub.database import get_db_connection
 
 
 def test_acp_launch_profile():
-    p_codex = acp.AcpLaunchProfile.get_profile("codex")
-    assert p_codex.profile_id == "codex_acp"
-    assert p_codex.backend_name == "codex"
-    assert p_codex.supports_resume is False
-
     p_opencode = acp.AcpLaunchProfile.get_profile("opencode")
     assert p_opencode.profile_id == "opencode_acp"
     assert p_opencode.backend_name == "opencode"
+    assert p_opencode.supports_resume is True
     assert p_opencode.argv == [
         p_opencode.executable, "acp", "--hostname", "127.0.0.1", "--port", "0",
     ]
@@ -27,19 +23,6 @@ def test_acp_launch_profile():
     with pytest.raises(ValueError):
         acp.AcpLaunchProfile.get_profile("unknown")
 
-
-def test_acp_codex_argv_override(monkeypatch):
-    import json as _json
-
-    monkeypatch.setenv("CODING_CODEX_ACP_PATH", "node")
-    monkeypatch.setenv(
-        "CODING_CODEX_ACP_ARGV", _json.dumps(["/pinned/codex-acp/dist/index.js"])
-    )
-    p = acp.AcpLaunchProfile.get_profile("codex")
-    assert p.executable == "node"
-    assert p.argv == ["node", "/pinned/codex-acp/dist/index.js"]
-
-    monkeypatch.setenv("CODING_CODEX_ACP_ARGV", "not-json")
     with pytest.raises(ValueError):
         acp.AcpLaunchProfile.get_profile("codex")
 
@@ -63,7 +46,7 @@ def test_acp_connection_json_rpc():
 
 
 def test_acp_handle_permission_request_allow():
-    profile = acp.AcpLaunchProfile.get_profile("codex")
+    profile = acp.AcpLaunchProfile.get_profile("opencode")
     client = acp.AcpClientBackend(profile)
     mock_conn = MagicMock()
 
@@ -86,7 +69,7 @@ def test_acp_handle_permission_request_allow():
 
 
 def test_acp_handle_permission_request_unhandled_raises():
-    profile = acp.AcpLaunchProfile.get_profile("codex")
+    profile = acp.AcpLaunchProfile.get_profile("opencode")
     client = acp.AcpClientBackend(profile)
     mock_conn = MagicMock()
 
@@ -109,7 +92,7 @@ def test_acp_handle_permission_request_unhandled_raises():
 
 
 def test_acp_execute_turn_mocked_success():
-    profile = acp.AcpLaunchProfile.get_profile("codex")
+    profile = acp.AcpLaunchProfile.get_profile("opencode")
     client = acp.AcpClientBackend(profile)
 
     with patch.object(acp.AcpConnection, "start"), \
@@ -432,7 +415,7 @@ async def _async_test_acp_service_turn_stream_integration(monkeypatch, tmp_path)
     # Create ACP session
     sess = store.create_session(
         project_id=999,
-        backend="codex",
+        backend="opencode",
         repo_path=str(tmp_path),
         title="ACP Session",
         transport="acp",

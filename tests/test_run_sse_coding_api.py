@@ -43,7 +43,7 @@ def _make_project_and_session(client, headers, tmp_path):
     res = client.post(
         "/api/v1/coding/sessions",
         headers=headers,
-        json={"project_id": pid, "backend": "codex", "title": "S"},
+        json={"project_id": pid, "backend": "opencode", "title": "S"},
     )
     assert res.status_code == 200
     return res.json()["session_id"]
@@ -144,20 +144,22 @@ def test_coding_worker_holds_lock_and_cancel_registry_during_cli(api_token, tmp_
             return "<final_report>完了しました。</final_report>"
         return "解析\n<cli_request>\necho hi\n</cli_request>"
 
-    def checking_execute(self, repo_path, prompt, external_session_id=None, cancel_event=None):
-        # Repo lock and cancel registration must be held for the whole CLI call.
+    def checking_execute(self, repo_path, prompt, acp_session_id=None, cancel_event=None, **kwargs):
+        # Repo lock and cancel registration must be held for the whole ACP call.
         seen["repo_busy"] = coding_service.is_repo_busy(repo_path)
         with coding_service._JOBS_GUARD:
             seen["job_registered"] = run_id in coding_service._RUNNING_JOBS
-        return backend.CodingBackendResult(
-            external_session_id="th_lock1", output="ok", exit_code=0
+        from obsidian_ai_hub.coding import acp as acp_module
+
+        return acp_module.AcpExecutionResult(
+            acp_session_id="acp_lock1", output="ok", exit_code=0
         )
 
     with patch(
         "obsidian_ai_hub.coding.orchestrator.CodingOrchestrator.generate_response",
         side_effect=mock_generate_response,
     ), patch(
-        "obsidian_ai_hub.coding.backend.CodexCliBackend.execute", checking_execute
+        "obsidian_ai_hub.coding.acp.AcpClientBackend.execute_turn", checking_execute
     ):
         asyncio.run(execute_coding_run(run_id))
 

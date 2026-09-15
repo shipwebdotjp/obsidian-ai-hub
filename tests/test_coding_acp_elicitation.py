@@ -49,7 +49,7 @@ def _parsed(params=None):
 
 
 def test_initialize_advertises_form_only():
-    profile = acp.AcpLaunchProfile.get_profile("codex")
+    profile = acp.AcpLaunchProfile.get_profile("opencode")
     client = acp.AcpClientBackend(profile)
     seen = {}
 
@@ -68,7 +68,7 @@ def test_initialize_advertises_form_only():
 
 
 def test_initialize_rejects_version_mismatch():
-    profile = acp.AcpLaunchProfile.get_profile("codex")
+    profile = acp.AcpLaunchProfile.get_profile("opencode")
     client = acp.AcpClientBackend(profile)
     conn = MagicMock()
     conn.request.return_value = {"protocolVersion": 2, "agentCapabilities": {}}
@@ -205,7 +205,7 @@ def _seed_coding_run(tmp_path, project_id):
     conn.close()
     sess = coding_store.create_session(
         project_id=project_id,
-        backend="codex",
+        backend="opencode",
         repo_path=str(tmp_path),
         title="Elicit Session",
         transport="acp",
@@ -227,7 +227,7 @@ def _seed_elicitation_hitl(run, parsed, request_id="42"):
         run_id=run["run_id"],
         user_prompt="do work",
         repo_path="/tmp",
-        backend_name="codex",
+        backend_name="opencode",
         ask_call={"id": f"elicitation_{request_id}", "args": ask_user_args},
         questions_data=questions_data,
         phase="initial",
@@ -435,7 +435,7 @@ def test_waiter_deadline(tmp_path):
 
 
 def _mocked_turn(client_requests):
-    profile = acp.AcpLaunchProfile.get_profile("codex")
+    profile = acp.AcpLaunchProfile.get_profile("opencode")
     client = acp.AcpClientBackend(profile)
     reqs = list(client_requests)
     state = {"responded": [], "errors": []}
@@ -561,7 +561,7 @@ def _git_init(path):
 def _real_profile():
     return acp.AcpLaunchProfile(
         profile_id="test_fake",
-        backend_name="codex",
+        backend_name="opencode",
         executable=sys.executable,
         argv=[sys.executable, str(FAKE_AGENT)],
     )

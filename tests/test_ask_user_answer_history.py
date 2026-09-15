@@ -49,7 +49,7 @@ def coding_session_setup(tmp_path):
 
     session = coding_store.create_session(
         project_id=pid,
-        backend="codex",
+        backend="opencode",
         repo_path=str(repo),
         title="History Coding Session",
     )

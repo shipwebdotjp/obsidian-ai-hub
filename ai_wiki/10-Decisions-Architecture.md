@@ -645,6 +645,26 @@ Coordinator が対象ファイルやコマンドまで事前確定すると、Wo
 - **表示と履歴**: 生の制御タグは画面に露出させず、Worker ブロックは `【Worker がユーザー判断を要請】` に正規化する。Coordinator の次ターンには同じ意味を観測情報として明示して渡す。過去の cli_request は AIMessage に再注入し、Worker 出力は観測情報として扱う。
 - **単発 `--coding`**: `user_question` を収集し、`waiting_user` は終了コード 0・`ok: true`・`run.status: "waiting_user"` で返す。JSON には `waiting_for_user`（HITL run ID と質問内容）を追加し、テキスト出力では Web UI での回答待ちを明示する。完了時の主表示は Worker 報告を根拠にした Coordinator の最終要約とする。
 
+## Direct CLI 削除・ACP 一本化（OpenCode のみ）
+
+| 項目 | 内容 |
+|------|------|
+| 決定日 | 2026-09-15 |
+| カテゴリ | コーディングワークスペース・実行トランスポート・バックエンド選定 |
+| 決定内容 | Direct CLI バックエンド（`CodexCliBackend` / `OpenCodeCliBackend`、`get_backend`、`_BaseSubprocessBackend`）を削除し、ACP トランスポートに一本化する。バックエンド種別は OpenCode のみに絞り、Codex（Direct・ACP 両方）を廃止する。`transport` カラムは残して ACP 固定とし、新規マイグレーションは行わない。旧 Direct CLI / Codex セッションは読取専用で、新規 run は不可とする。 |
+
+### 結論に至った経緯
+
+OpenCode の ACP 化が動作するようになり、Direct CLI（`opencode run` / `codex exec` のサブプロセスJSON解析）と ACP の二重実行経路を維持する理由がなくなった。二重経路はセッション再開フォールバック・診断・タイトル同期の分岐を倍増させ、障害時の切分けを複雑にしていた。比較した選択肢は (a) 二重維持（現状）、(b) ACP 一本化（OpenCode のみ）、(c) ACP 一本化（codex/opencode 両維持）で、Codex ACP はプロセス再起動後の resume/load が失敗する実測（`supports_resume=False` 運用）があり、維持コストに見合わないため (b) を採用した。
+
+### 構造と運用方針
+
+- **削除範囲**: `coding/backend.py` は Git ヘルパー（`validate_git_repo` / `check_dirty_tree` / `get_git_status`）のみ残す。`acp.py` の `codex_acp` プロファイル分岐と `CODING_CODEX_ACP_PATH/ARGV` を削除する。`--coding` 単発 CLI（`coding/cli.py`）は ACP 経由で存続する。
+- **設定**: Direct 専用キー（`CODING_CODEX_CLI_PATH`、`CODING_OPENCODE_AUTO_APPROVE/MODEL/VARIANT`、`coding.cli.codex_path`、`opencode_auto_approve`、`default_backend`）を廃止する。`CODING_OPENCODE_CLI_PATH` は ACP エージェント実行ファイルとして維持し、`CODING_DEFAULT_BACKEND` は `"opencode"` 定数とする。
+- **旧セッション**: `coding_sessions` / `coding_runs` の `transport`・`external_session_id` カラムは残す。新規作成は `backend="opencode"` + `transport="acp"` のみ受付け、それ以外は ValueError / 400 で拒否する。旧 `direct_cli` / `codex` セッションへの新規 run（`start_queued_run`、単発 turn、常駐 worker）はいずれも「新規 ACP セッションを作成してください」という明示エラーで失敗させる。
+- **タイトル**: `opencode export` によるタイトル同期（`fetch_opencode_session_title`）を廃止し、Codex で実績のある自前 LLM 生成（`agents_runtime.generate_session_title`＋`_should_update_coding_title` ゲート）に一本化する。生成失敗は警告のみで run を失敗させない。
+- **API・UI**: `POST /coding/sessions` は `backend` / `transport` とも `opencode` / `acp` のみ受付。新規セッションモーダルのバックエンド選択・実行方式選択 UI を削除し、固定文言を表示する。Task の `coding_cli` 委譲（capability schema・planning 検証・adapter）も `opencode` のみとする。
+
 ## AI エージェントによるサブエージェント委譲 (agent_delegate)
 
 | 項目 | 内容 |

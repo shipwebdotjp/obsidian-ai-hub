@@ -68,7 +68,7 @@ def coding_setup(tmp_path):
 
     session = coding_store.create_session(
         project_id=pid,
-        backend="codex",
+        backend="opencode",
         repo_path=str(repo),
         title="AskUser Coding Session",
     )

@@ -179,7 +179,7 @@ def coding_session_setup(tmp_path):
     from obsidian_ai_hub.coding import store as coding_store
 
     session = coding_store.create_session(
-        project_id=pid, backend="codex", repo_path=str(repo), title="Coord Session"
+        project_id=pid, backend="opencode", repo_path=str(repo), title="Coord Session"
     )
     return session
 
@@ -204,7 +204,7 @@ def _coding_llm_factory(responses):
 @pytest.mark.anyio
 async def test_worker_blocker_leads_to_waiting_user(coding_session_setup):
     """Worker blocker tag -> Coordinator ask_user -> waiting_user + user_question."""
-    from obsidian_ai_hub.coding import backend as coding_backend
+    from obsidian_ai_hub.coding import acp as acp_module
     from obsidian_ai_hub.coding import store as coding_store
     from obsidian_ai_hub.runs.coding_worker import execute_coding_run
 
@@ -236,8 +236,8 @@ async def test_worker_blocker_leads_to_waiting_user(coding_session_setup):
         }
     ]
 
-    worker_res = coding_backend.CodingBackendResult(
-        external_session_id="th_block1",
+    worker_res = acp_module.AcpExecutionResult(
+        acp_session_id="acp_block1",
         output="調査済み\n<needs_user_input>\n事実A。止まる理由B。判断Xが必要。Q: mode [a/b]\n</needs_user_input>",
         exit_code=0,
     )
@@ -248,7 +248,7 @@ async def test_worker_blocker_leads_to_waiting_user(coding_session_setup):
             side_effect=_coding_llm_factory([first, ask]),
         ),
         patch(
-            "obsidian_ai_hub.coding.backend.CodexCliBackend.execute",
+            "obsidian_ai_hub.coding.acp.AcpClientBackend.execute_turn",
             return_value=worker_res,
         ),
     ):

@@ -60,12 +60,7 @@ _APP_ENV_VARS = [
     "HEALTHCARE_EXPORT_DIR",
     "CODING_ORCHESTRATOR_PROVIDER",
     "CODING_ORCHESTRATOR_MODEL",
-    "CODING_CODEX_CLI_PATH",
     "CODING_OPENCODE_CLI_PATH",
-    "CODING_OPENCODE_AUTO_APPROVE",
-    "CODING_OPENCODE_MODEL",
-    "CODING_OPENCODE_VARIANT",
-    "CODING_DEFAULT_BACKEND",
 ]
 
 if IS_TEST_ENV:
@@ -607,47 +602,12 @@ CODING_ORCHESTRATOR_PROVIDER = str(
 CODING_ORCHESTRATOR_MODEL = str(
     _env_or_config("CODING_ORCHESTRATOR_MODEL", "coding", "orchestrator", "model", default="gpt-5.6-terra")
 )
-CODING_CODEX_CLI_PATH = str(
-    _env_or_config("CODING_CODEX_CLI_PATH", "coding", "cli", "codex_path", default="codex")
-)
 CODING_OPENCODE_CLI_PATH = str(
     _env_or_config("CODING_OPENCODE_CLI_PATH", "coding", "cli", "opencode_path", default="opencode")
 )
-_CODING_OPENCODE_AUTO_APPROVE_RAW = _env_or_config(
-    "CODING_OPENCODE_AUTO_APPROVE", "coding", "cli", "opencode_auto_approve", default=True
-)
-if isinstance(_CODING_OPENCODE_AUTO_APPROVE_RAW, str):
-    CODING_OPENCODE_AUTO_APPROVE = _CODING_OPENCODE_AUTO_APPROVE_RAW.lower() in (
-        "1",
-        "true",
-        "yes",
-        "on",
-    )
-else:
-    CODING_OPENCODE_AUTO_APPROVE = bool(_CODING_OPENCODE_AUTO_APPROVE_RAW)
-
-CODING_OPENCODE_MODEL = _env_or_config(
-    "CODING_OPENCODE_MODEL", "coding", "cli", "opencode_model", default=None
-)
-if CODING_OPENCODE_MODEL:
-    CODING_OPENCODE_MODEL = str(CODING_OPENCODE_MODEL)
-
-CODING_OPENCODE_VARIANT = _env_or_config(
-    "CODING_OPENCODE_VARIANT", "coding", "cli", "opencode_variant", default=None
-)
-if CODING_OPENCODE_VARIANT:
-    CODING_OPENCODE_VARIANT = str(CODING_OPENCODE_VARIANT)
-
-CODING_DEFAULT_BACKEND = str(
-    _env_or_config("CODING_DEFAULT_BACKEND", "coding", "default_backend", default="opencode")
-).strip().lower()
-if CODING_DEFAULT_BACKEND not in ("codex", "opencode"):
-    import logging
-
-    logging.getLogger(__name__).warning(
-        f"Invalid CODING_DEFAULT_BACKEND '{CODING_DEFAULT_BACKEND}' (expected 'codex' or 'opencode'), falling back to 'opencode'"
-    )
-    CODING_DEFAULT_BACKEND = "opencode"
+# Coding workspace is ACP-only with the OpenCode backend. There is no
+# backend selection: keep the constant for callers that still reference it.
+CODING_DEFAULT_BACKEND = "opencode"
 
 if IS_TEST_ENV:
     AI_LOG_PATH = TEST_WORKSPACE / "vault" / "ai-log"

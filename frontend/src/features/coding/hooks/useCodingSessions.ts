@@ -1,9 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   createCodingSession,
   deleteCodingSession,
-  getCodingConfig,
   listCodingSessions,
   type CodingSession,
 } from "../../../api/coding";
@@ -28,33 +27,8 @@ export function useCodingSessions({
 
   // New session modal state
   const [isNewSessionModalOpen, setIsNewSessionModalOpen] = useState(false);
-  const [newSessionBackend, setNewSessionBackend] = useState<"codex" | "opencode">("opencode");
-  const [newSessionTransport, setNewSessionTransport] = useState<"direct_cli" | "acp">("direct_cli");
   const [newSessionTitle, setNewSessionTitle] = useState("");
   const [creatingSession, setCreatingSession] = useState(false);
-  const backendManuallySelected = useRef(false);
-
-  // Fetch default backend from server config (fallback opencode, preserve manual selection)
-  useEffect(() => {
-    let cancelled = false;
-    const fetchDefaultBackend = async () => {
-      try {
-        const cfg = await getCodingConfig();
-        const backend = cfg.default_backend;
-        if (!cancelled && !backendManuallySelected.current && (backend === "codex" || backend === "opencode")) {
-          setNewSessionBackend(backend);
-        }
-      } catch {
-        if (!cancelled && !backendManuallySelected.current) {
-          setNewSessionBackend("opencode");
-        }
-      }
-    };
-    fetchDefaultBackend();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   const syncSessionUrl = (
     sessionId: string | null,
@@ -129,10 +103,8 @@ export function useCodingSessions({
     try {
       const session = await createCodingSession(
         selectedProjectId,
-        newSessionBackend,
         newSessionTitle.trim() || undefined,
         undefined, // toolIds: keep user defaults
-        newSessionTransport,
       );
       setIsNewSessionModalOpen(false);
       setNewSessionTitle("");
@@ -171,14 +143,9 @@ export function useCodingSessions({
     syncSessionUrl: (sessionId: string | null) => syncSessionUrl(sessionId, setSearchParams),
     isNewSessionModalOpen,
     setIsNewSessionModalOpen,
-    newSessionBackend,
-    setNewSessionBackend,
-    newSessionTransport,
-    setNewSessionTransport,
     newSessionTitle,
     setNewSessionTitle,
     creatingSession,
-    backendManuallySelected,
     handleCreateSession,
     handleDeleteSession,
   };

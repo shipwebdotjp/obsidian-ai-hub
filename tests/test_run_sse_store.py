@@ -199,7 +199,7 @@ def test_coding_queued_idempotent_and_guards(tmp_path):
     conn.close()
 
     session = coding_store.create_session(
-        project_id=pid, backend="codex", repo_path=str(repo), title="S"
+        project_id=pid, backend="opencode", repo_path=str(repo), title="S"
     )
     sid = session["session_id"]
 

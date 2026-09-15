@@ -546,11 +546,17 @@ def create_session(
     title: str = "新しいコーディングセッション",
     external_session_id: Optional[str] = None,
     tool_ids: Optional[List[str]] = None,
-    transport: str = "direct_cli",
+    transport: str = "acp",
     acp_session_id: Optional[str] = None,
     acp_profile_id: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Create a new coding session."""
+    """Create a new coding session (ACP-only, OpenCode-only).
+
+    ``transport`` accepts only ``"acp"``; any other value raises ValueError.
+    ``backend`` accepts only ``"opencode"``; any other value raises ValueError.
+    ``external_session_id`` is retained for reading legacy rows but is no
+    longer set for new sessions (always persisted as NULL).
+    """
     conn = get_db_connection()
     # Verify project exists
     cursor = conn.execute(
@@ -559,6 +565,17 @@ def create_session(
     if not cursor.fetchone():
         conn.close()
         raise ValueError(f"Project with id {project_id} does not exist")
+
+    if backend != "opencode":
+        conn.close()
+        raise ValueError(f"Unknown coding backend '{backend}' (expected 'opencode')")
+    clean_transport = (transport or "acp").lower().strip()
+    if clean_transport != "acp":
+        conn.close()
+        raise ValueError(
+            f"Unknown coding transport '{transport}' (expected 'acp'). "
+            "Direct CLI sessions are no longer supported; create a new ACP session."
+        )
 
     session_id = f"cses_{uuid.uuid4().hex[:12]}"
     now = _now_iso()
@@ -572,7 +589,6 @@ def create_session(
         tool_ids_json = json.dumps(clean_ids, ensure_ascii=False)
 
     has_trans = _has_column(conn, "coding_sessions", "transport")
-    clean_transport = transport if transport in ("direct_cli", "acp") else "direct_cli"
 
     if has_trans:
         conn.execute(
@@ -587,7 +603,7 @@ def create_session(
                 project_id,
                 backend,
                 repo_path,
-                external_session_id,
+                None,
                 title,
                 tool_ids_json,
                 clean_transport,
@@ -609,7 +625,7 @@ def create_session(
                 project_id,
                 backend,
                 repo_path,
-                external_session_id,
+                None,
                 title,
                 tool_ids_json,
                 now,
@@ -709,20 +725,6 @@ def list_daily_session_overviews(target_date: date) -> List[Dict[str, Any]]:
         return overviews
     finally:
         conn.close()
-
-
-def update_session_external_id(
-    session_id: str, external_session_id: Optional[str]
-) -> None:
-    """Update external_session_id for a session."""
-    conn = get_db_connection()
-    now = _now_iso()
-    conn.execute(
-        "UPDATE coding_sessions SET external_session_id = ?, updated_at = ? WHERE session_id = ?",
-        (external_session_id, now, session_id),
-    )
-    conn.commit()
-    conn.close()
 
 
 def update_session_title(session_id: str, title: str) -> None:
@@ -944,17 +946,23 @@ def create_run(
     session_id: str,
     user_message_id: str,
     dirty_tree_at_start: Optional[str] = None,
-    transport: str = "direct_cli",
+    transport: str = "acp",
     acp_session_id: Optional[str] = None,
     acp_profile_id: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Create a coding run."""
+    """Create a coding run (ACP-only)."""
     conn = get_db_connection()
     run_id = f"crun_{uuid.uuid4().hex[:12]}"
     now = _now_iso()
 
     has_trans = _has_column(conn, "coding_runs", "transport")
-    clean_transport = transport if transport in ("direct_cli", "acp") else "direct_cli"
+    clean_transport = (transport or "acp").lower().strip()
+    if clean_transport != "acp":
+        conn.close()
+        raise ValueError(
+            f"Unknown coding transport '{transport}' (expected 'acp'). "
+            "Direct CLI runs are no longer supported."
+        )
 
     if has_trans:
         conn.execute(
@@ -1284,6 +1292,23 @@ def start_queued_run(
             raise ValueError(
                 f"Session '{session_id}' already has an active run; cancel it first."
             )
+        # Legacy 'direct_cli' sessions and legacy 'codex' backends are
+        # read-only: reject before persisting the user message so a failed
+        # queue leaves no orphan message behind.
+        if str((session or {}).get("backend") or "") != "opencode":
+            conn.close()
+            raise ValueError(
+                f"Session '{session_id}' uses retired backend "
+                f"'{(session or {}).get('backend')}'. "
+                "Codex sessions are read-only; create a new OpenCode session."
+            )
+        if str((session or {}).get("transport") or "acp") != "acp":
+            conn.close()
+            raise ValueError(
+                f"Session '{session_id}' uses retired transport "
+                f"'{(session or {}).get('transport')}'. "
+                "Direct CLI sessions are read-only; create a new ACP session."
+            )
         try:
             user_msg = add_message(session_id, role="user", content=clean_content)
         except Exception:
@@ -1297,11 +1322,9 @@ def start_queued_run(
         run_id = f"crun_{uuid.uuid4().hex[:12]}"
         now = _now_iso()
         has_slash_col = _has_column(conn, "coding_runs", "slash_invocation_json")
-        # Runs inherit the session's saved transport/profile: new sessions select
-        # transport at creation, existing sessions always resume on it (no replay).
-        session_transport = str((session or {}).get("transport") or "direct_cli")
-        if session_transport not in ("direct_cli", "acp"):
-            session_transport = "direct_cli"
+        # Runs inherit the session's saved transport/profile (already
+        # validated as OpenCode/ACP above).
+        session_transport = str((session or {}).get("transport") or "acp")
         session_acp_id = (session or {}).get("acp_session_id")
         session_acp_profile = (session or {}).get("acp_profile_id")
         has_run_transport = _has_column(conn, "coding_runs", "transport")

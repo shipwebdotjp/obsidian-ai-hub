@@ -48,11 +48,11 @@ const mockProjectItem: codingApi.CodingProjectItem = {
 const mockSession: codingApi.CodingSession = {
   session_id: "cses_111",
   project_id: 1,
-  backend: "codex",
+  backend: "opencode",
   repo_path: "/app/test_repo",
   external_session_id: null,
   title: "新規セッション",
-  transport: "direct_cli",
+  transport: "acp",
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",
 };
@@ -117,7 +117,6 @@ describe("CodingPage", () => {
       candidates: [{ kind: "skill", name: "pdftomd", description: "PDF to MD" }],
       has_skills_tool: true,
     });
-    vi.mocked(codingApi.getCodingConfig).mockResolvedValue({ default_backend: "opencode" });
     vi.mocked(codingApi.listCodingProjects).mockResolvedValue([mockProjectItem]);
     vi.mocked(codingApi.listCodingSessions).mockResolvedValue([mockSession]);
     vi.mocked(codingApi.subscribeCodingRunEvents).mockResolvedValue(undefined);
@@ -339,21 +338,20 @@ describe("CodingPage", () => {
 
     expect(screen.getByText("新規コーディングセッション作成")).toBeInTheDocument();
 
-    // Do not fill in title input - default backend should be opencode (server default)
+    // Do not fill in title input - session is always created as OpenCode/ACP
     const submitBtn = screen.getByRole("button", { name: "作成" });
     fireEvent.click(submitBtn);
 
     await waitFor(() => {
-      expect(codingApi.createCodingSession).toHaveBeenCalledWith(1, "opencode", undefined, undefined, "direct_cli");
+      expect(codingApi.createCodingSession).toHaveBeenCalledWith(1, undefined, undefined);
     });
   });
 
-  it("creates a session with ACP transport when selected", async () => {
+  it("shows OpenCode ACP notice in the new session modal", async () => {
     vi.mocked(codingApi.createCodingSession).mockResolvedValue({
       ...mockSession,
       session_id: "cses_224",
       title: "新しいコーディングセッション",
-      transport: "acp",
     });
 
     renderPage();
@@ -366,144 +364,7 @@ describe("CodingPage", () => {
     fireEvent.click(newBtn);
 
     expect(screen.getByText("新規コーディングセッション作成")).toBeInTheDocument();
-
-    const acpBtn = screen.getByRole("button", { name: /ACP（opt-in）/ });
-    fireEvent.click(acpBtn);
-
-    const submitBtn = screen.getByRole("button", { name: "作成" });
-    fireEvent.click(submitBtn);
-
-    await waitFor(() => {
-      expect(codingApi.createCodingSession).toHaveBeenCalledWith(1, "opencode", undefined, undefined, "acp");
-    });
-  });
-
-  it("initializes new session backend from server config (codex)", async () => {
-    vi.mocked(codingApi.getCodingConfig).mockResolvedValue({ default_backend: "codex" });
-    vi.mocked(codingApi.createCodingSession).mockResolvedValue({
-      ...mockSession,
-      session_id: "cses_223",
-      title: "新しいコーディングセッション",
-      backend: "codex",
-    });
-
-    renderPage();
-
-    await waitFor(() => {
-      expect(screen.getByText("Test App")).toBeInTheDocument();
-    });
-
-    // Wait for config fetch to update backend selection
-    await waitFor(() => {
-      expect(codingApi.getCodingConfig).toHaveBeenCalled();
-    });
-
-    const newBtn = screen.getByRole("button", { name: "+ 新規" });
-    fireEvent.click(newBtn);
-
-    const submitBtn = screen.getByRole("button", { name: "作成" });
-    fireEvent.click(submitBtn);
-
-    await waitFor(() => {
-      expect(codingApi.createCodingSession).toHaveBeenCalledWith(1, "codex", undefined, undefined, "direct_cli");
-    });
-  });
-
-  it("falls back to opencode when config fetch fails", async () => {
-    vi.mocked(codingApi.getCodingConfig).mockRejectedValue(new Error("network error"));
-    vi.mocked(codingApi.createCodingSession).mockResolvedValue({
-      ...mockSession,
-      session_id: "cses_224",
-      title: "新しいコーディングセッション",
-      backend: "opencode",
-    });
-
-    renderPage();
-
-    await waitFor(() => {
-      expect(screen.getByText("Test App")).toBeInTheDocument();
-    });
-
-    const newBtn = screen.getByRole("button", { name: "+ 新規" });
-    fireEvent.click(newBtn);
-
-    const submitBtn = screen.getByRole("button", { name: "作成" });
-    fireEvent.click(submitBtn);
-
-    await waitFor(() => {
-      expect(codingApi.createCodingSession).toHaveBeenCalledWith(1, "opencode", undefined, undefined, "direct_cli");
-    });
-  });
-
-  it("preserves manually selected backend when config fetch resolves late", async () => {
-    let resolveConfig: (v: any) => void;
-    const configPromise = new Promise<codingApi.CodingConfig>((res) => {
-      resolveConfig = res;
-    });
-    vi.mocked(codingApi.getCodingConfig).mockReturnValue(configPromise as any);
-    vi.mocked(codingApi.createCodingSession).mockResolvedValue({
-      ...mockSession,
-      session_id: "cses_225",
-      title: "新しいコーディングセッション",
-      backend: "codex",
-    });
-
-    renderPage();
-
-    await waitFor(() => {
-      expect(screen.getByText("Test App")).toBeInTheDocument();
-    });
-
-    const newBtn = screen.getByRole("button", { name: "+ 新規" });
-    fireEvent.click(newBtn);
-
-    // Manually select codex before config resolves
-    const codexBtn = screen.getByText("Codex CLI").closest("button")!;
-    fireEvent.click(codexBtn);
-
-    // Now resolve config with opencode - should not overwrite manual selection
-    resolveConfig!({ default_backend: "opencode" });
-    await waitFor(() => {
-      expect(codingApi.getCodingConfig).toHaveBeenCalled();
-    });
-
-    const submitBtn = screen.getByRole("button", { name: "作成" });
-    fireEvent.click(submitBtn);
-
-    await waitFor(() => {
-      expect(codingApi.createCodingSession).toHaveBeenCalledWith(1, "codex", undefined, undefined, "direct_cli");
-    });
-  });
-
-  it("falls back to opencode when config returns invalid backend", async () => {
-    vi.mocked(codingApi.getCodingConfig).mockResolvedValue({ default_backend: "invalid" as any });
-    vi.mocked(codingApi.createCodingSession).mockResolvedValue({
-      ...mockSession,
-      session_id: "cses_226",
-      title: "新しいコーディングセッション",
-      backend: "opencode",
-    });
-
-    renderPage();
-
-    await waitFor(() => {
-      expect(screen.getByText("Test App")).toBeInTheDocument();
-    });
-
-    // Wait for invalid config to be processed (should remain opencode)
-    await waitFor(() => {
-      expect(codingApi.getCodingConfig).toHaveBeenCalled();
-    });
-
-    const newBtn = screen.getByRole("button", { name: "+ 新規" });
-    fireEvent.click(newBtn);
-
-    const submitBtn = screen.getByRole("button", { name: "作成" });
-    fireEvent.click(submitBtn);
-
-    await waitFor(() => {
-      expect(codingApi.createCodingSession).toHaveBeenCalledWith(1, "opencode", undefined, undefined, "direct_cli");
-    });
+    expect(screen.getByText("OpenCode（ACP経由）で実行されます。")).toBeInTheDocument();
   });
 
   it("updates session title when coding CLI response event contains session_title", async () => {
@@ -567,7 +428,7 @@ describe("CodingPage", () => {
           },
         },
       },
-      { eventId: 3, data: { event: "worker_start", attempt: 1, backend: "codex", prompt: "codex test" } },
+      { eventId: 3, data: { event: "worker_start", attempt: 1, backend: "opencode", prompt: "opencode test" } },
       {
         eventId: 4,
         data: {
@@ -1528,7 +1389,7 @@ describe("CodingPage", () => {
           call_index: 0,
         },
       });
-      onEnvelope({ eventId: 2, data: { event: "worker_start", attempt: 1, backend: "codex", prompt: "p" } });
+      onEnvelope({ eventId: 2, data: { event: "worker_start", attempt: 1, backend: "opencode", prompt: "p" } });
       onEnvelope({
         eventId: 3,
         data: {

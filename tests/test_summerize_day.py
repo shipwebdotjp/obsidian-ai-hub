@@ -327,7 +327,7 @@ def test_load_daily_session_overviews_uses_jst_start_date_and_metadata(
     coding_now = {"value": "2023-10-27T09:00:00+09:00"}
     monkeypatch.setattr(coding_store, "_now_iso", lambda: coding_now["value"])
     included_coding_session = coding_store.create_session(
-        project["project_id"], "codex", "/private/repo", title="実装セッション"
+        project["project_id"], "opencode", "/private/repo", title="実装セッション"
     )
     coding_message = coding_store.add_message(
         included_coding_session["session_id"], "user", "本文はコンテキストに含めない"
@@ -365,7 +365,7 @@ def test_load_daily_session_overviews_uses_jst_start_date_and_metadata(
             "project_id": project["project_id"],
             "project_name": "日次集計プロジェクト",
             "session_title": "実装セッション",
-            "backend": "codex",
+            "backend": "opencode",
             "started_at": "2023-10-27T09:00:00+09:00",
             "run_count": 1,
             "run_status_counts": {"completed": 1},

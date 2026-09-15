@@ -1,4 +1,4 @@
-"""ACP Client Backend and Launch Profiles for Codex and OpenCode."""
+"""ACP Client Backend and Launch Profile for OpenCode (ACP-only)."""
 
 from __future__ import annotations
 
@@ -14,7 +14,6 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
 from obsidian_ai_hub.utils.config import (
-    CODING_CODEX_CLI_PATH,
     CODING_OPENCODE_CLI_PATH,
 )
 
@@ -47,10 +46,10 @@ class AcpPermissionRejectedError(AcpError):
 
 @dataclass
 class AcpLaunchProfile:
-    """Launch configuration profile for an ACP Agent subprocess."""
+    """Launch configuration profile for the OpenCode ACP Agent subprocess."""
 
-    profile_id: str  # e.g., "codex_acp", "opencode_acp"
-    backend_name: str  # "codex" or "opencode"
+    profile_id: str  # "opencode_acp"
+    backend_name: str  # "opencode" (fixed; the workspace is OpenCode-only)
     executable: str
     argv: List[str]
     env_overrides: Dict[str, str] = field(default_factory=dict)
@@ -60,51 +59,19 @@ class AcpLaunchProfile:
     @classmethod
     def get_profile(cls, backend_name: str) -> AcpLaunchProfile:
         b = (backend_name or "").strip().lower()
-        if b == "codex":
-            exe = os.getenv("CODING_CODEX_ACP_PATH") or CODING_CODEX_CLI_PATH or "codex-acp"
-            if exe == "codex" or exe.endswith("/codex"):
-                exe = "codex-acp"
-            # Extra argv items for installs that need a launcher prefix
-            # (e.g. CODING_CODEX_ACP_PATH=node with ARGV ["<pinned index.js>"]).
-            # JSON list appended after exe. No implicit npm/node download here.
-            argv = [exe]
-            raw_argv = (os.getenv("CODING_CODEX_ACP_ARGV") or "").strip()
-            if raw_argv:
-                try:
-                    extra = json.loads(raw_argv)
-                except (json.JSONDecodeError, TypeError, ValueError) as exc:
-                    raise ValueError(
-                        "CODING_CODEX_ACP_ARGV must be a JSON list of argv items."
-                    ) from exc
-                if not isinstance(extra, list) or not all(isinstance(a, str) for a in extra):
-                    raise ValueError(
-                        "CODING_CODEX_ACP_ARGV must be a JSON list of argv items."
-                    )
-                argv = argv + list(extra)
-            return cls(
-                profile_id="codex_acp",
-                backend_name="codex",
-                executable=argv[0],
-                argv=argv,
-                # Phase 0 evidence: resume/load advertise but fail with
-                # -32603 after process restart, so never reuse sessions.
-                supports_resume=False,
-                expected_version="1.11.0",
-            )
-        elif b == "opencode":
-            exe = CODING_OPENCODE_CLI_PATH or "opencode"
-            # --hostname/--port are mandatory: bare `opencode acp` dies with
-            # ServeError (1.18.31, see compatibility-matrix).
-            return cls(
-                profile_id="opencode_acp",
-                backend_name="opencode",
-                executable=exe,
-                argv=[exe, "acp", "--hostname", "127.0.0.1", "--port", "0"],
-                supports_resume=True,
-                expected_version="1.18.31",
-            )
-        else:
-            raise ValueError(f"Unknown ACP backend: '{backend_name}' (expected 'codex' or 'opencode')")
+        if b != "opencode":
+            raise ValueError(f"Unknown ACP backend: '{backend_name}' (expected 'opencode')")
+        exe = CODING_OPENCODE_CLI_PATH or "opencode"
+        # --hostname/--port are mandatory: bare `opencode acp` dies with
+        # ServeError (1.18.31, see compatibility-matrix).
+        return cls(
+            profile_id="opencode_acp",
+            backend_name="opencode",
+            executable=exe,
+            argv=[exe, "acp", "--hostname", "127.0.0.1", "--port", "0"],
+            supports_resume=True,
+            expected_version="1.18.31",
+        )
 
 
 @dataclass

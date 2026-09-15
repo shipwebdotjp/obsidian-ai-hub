@@ -35,6 +35,7 @@
 - [ヘルスケア: Apple Health export の分離DB・全種raw保存（スキーマ v1）](10-Decisions-Integrations.md#ヘルスケア-apple-health-export-の分離db全種raw保存スキーマ-v1)（2026-08-24）
 - [Safari の検索結果リストの隙間（inline-block ボタンのラインボックス問題）](10-Decisions-Web.md#safari-の検索結果リストの隙間inline-block-ボタンのラインボックス問題)（2026-08-26）
 - [Coding Coordinator を進行役、CLI Worker を主体にする](10-Decisions-Architecture.md#coding-coordinator-を進行役cli-worker-を主体にする)（2026-09-14）
+- [Direct CLI 削除・ACP 一本化（OpenCode のみ）](10-Decisions-Architecture.md#direct-cli-削除acp-一本化opencode-のみ)（2026-09-15）
 - [Task Agent MVP 仕様](../docs/task-agent/specification.md)（2026-09-14）。文書群の入口は [docs/task-agent/README.md](../docs/task-agent/README.md)。判断記録は [docs/task-agent/adr/](../docs/task-agent/adr/) 配下:
   - [SQLiteをTask状態の正本とする](../docs/task-agent/adr/sqlite-as-task-state-source-of-truth.md)
   - [CLI投入・WebUI操作・Webサーバー同居worker](../docs/task-agent/adr/cli-intake-webui-hitl-resident-worker.md)

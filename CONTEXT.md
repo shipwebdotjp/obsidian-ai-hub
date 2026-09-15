@@ -58,4 +58,4 @@
 - **AI Agent** — 子runは実行時点の設定で動作する。Taskは設定を凍結しないが、
   `specialist_agent` を含むDirectional Planの承認時点指紋を記録し、実行開始時に
   差分・削除を検出したら再承認へ回す。
-- **Coding CLI** — 正規化済みProjectのGit root内で動作する。実権限は既存CLI設定に委ねる。
+- **Coding ACP (OpenCode)** — 正規化済みProjectのGit root内で `opencode acp` 経由の単一トランスポートで動作する。実権限は既存ACP設定に委ねる。Direct CLI と Codex バックエンドは廃止済みで、旧セッションは読取専用である。

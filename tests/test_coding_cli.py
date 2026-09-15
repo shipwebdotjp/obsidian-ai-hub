@@ -159,7 +159,7 @@ def test_coding_resume_uses_existing_session(test_project, capsys):
     # Create a session via store
     sess = store.create_session(
         project_id=test_project["project_id"],
-        backend="codex",
+        backend="opencode",
         repo_path=test_project["repo_path"],
         title="Existing Session",
     )
@@ -270,12 +270,6 @@ def test_coding_execution_logger_records_failure(test_project, capsys):
 
 
 def test_coding_default_backend_is_opencode_when_unspecified(test_project, monkeypatch):
-    from obsidian_ai_hub.utils import config
-    from obsidian_ai_hub.coding import cli as coding_cli
-
-    # Ensure default is opencode (config.test.yml has no coding.default_backend)
-    monkeypatch.setattr(config, "CODING_DEFAULT_BACKEND", "opencode")
-    # Also ensure cli sees same value (cli reads config at runtime)
     with patch.object(service, "run_coding_turn_stream", side_effect=_mock_success_stream):
         # Use main_coding which will create session via _create_new_session
         from obsidian_ai_hub.coding.cli import main_coding
@@ -290,26 +284,22 @@ def test_coding_default_backend_is_opencode_when_unspecified(test_project, monke
     assert latest["backend"] == "opencode"
 
 
-def test_coding_default_backend_codex_via_config(test_project, monkeypatch):
-    from obsidian_ai_hub.utils import config
-
-    monkeypatch.setattr(config, "CODING_DEFAULT_BACKEND", "codex")
+def test_coding_backend_always_opencode_acp(test_project):
     with patch.object(service, "run_coding_turn_stream", side_effect=_mock_success_stream):
         from obsidian_ai_hub.coding.cli import main_coding
 
-        main_coding(project_id=test_project["project_id"], resume_session=None, prompt="codex backend", json_output=True)
+        main_coding(project_id=test_project["project_id"], resume_session=None, prompt="acp backend", json_output=True)
 
     from obsidian_ai_hub.coding import store as coding_store
 
     sessions = coding_store.list_sessions_by_project(test_project["project_id"])
     assert len(sessions) >= 1
     latest = sessions[0]
-    assert latest["backend"] == "codex"
+    assert latest["backend"] == "opencode"
+    assert latest["transport"] == "acp"
 
 
 def test_coding_resume_ignores_default_backend(test_project, monkeypatch, capsys):
-    from obsidian_ai_hub.utils import config
-
     # Create session with opencode explicitly
     sess = store.create_session(
         project_id=test_project["project_id"],
@@ -319,9 +309,6 @@ def test_coding_resume_ignores_default_backend(test_project, monkeypatch, capsys
     )
     sid = sess["session_id"]
     assert sess["backend"] == "opencode"
-
-    # Change default to codex, resume should still use opencode
-    monkeypatch.setattr(config, "CODING_DEFAULT_BACKEND", "codex")
 
     def _capture(session_id, prompt):
         # Verify that resume does not create new session with codex
@@ -339,21 +326,22 @@ def test_coding_resume_ignores_default_backend(test_project, monkeypatch, capsys
     capsys.readouterr()
 
 
-def test_coding_invalid_backend_raises(test_project, monkeypatch, capsys):
-    from obsidian_ai_hub.utils import config
-    from obsidian_ai_hub.coding import cli as coding_cli
+def test_coding_create_session_rejects_retired_backend(test_project):
+    # The store layer rejects non-opencode backends (Codex is retired).
+    with pytest.raises(ValueError, match="opencode"):
+        store.create_session(
+            project_id=test_project["project_id"],
+            backend="codex",
+            repo_path=test_project["repo_path"],
+            title="Retired Backend",
+        )
 
-    monkeypatch.setattr(config, "CODING_DEFAULT_BACKEND", "invalid_backend")
-
-    # _create_new_session should raise ValueError for invalid backend
-    with pytest.raises(ValueError, match="Invalid CODING_DEFAULT_BACKEND"):
-        coding_cli._create_new_session(test_project["project_id"])
-
-    # Via main_coding, invalid should result in ok:false exit 1 json
-    with pytest.raises(SystemExit) as exc:
-        coding_cli.main_coding(project_id=test_project["project_id"], resume_session=None, prompt="invalid", json_output=True)
-    assert exc.value.code == 1
-    captured = capsys.readouterr()
-    data = json.loads(captured.out.strip())
-    assert data["ok"] is False
-    assert "Invalid" in data["error"]["message"] or "CODING_DEFAULT_BACKEND" in data["error"]["message"]
+    # The store layer rejects non-acp transports (Direct CLI is retired).
+    with pytest.raises(ValueError, match="acp"):
+        store.create_session(
+            project_id=test_project["project_id"],
+            backend="opencode",
+            repo_path=test_project["repo_path"],
+            title="Retired Transport",
+            transport="direct_cli",
+        )

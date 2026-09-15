@@ -134,16 +134,19 @@ coding:
     provider: openai        # openai | ollama | gemini | opencode_go | local
     model: gpt-5.6-terra    # any model supported by the provider
   cli:
-    codex_path: /path/to/your/codex        # default: codex (on PATH)
-    opencode_path: /path/to/your/opencode  # default: opencode (on PATH)
+    opencode_path: /path/to/your/opencode  # default: opencode (on PATH, ACP agent executable)
 ```
 
 Settings:
 
 - `coding.orchestrator.provider` (`CODING_ORCHESTRATOR_PROVIDER`): LLM provider for the orchestrator. Default `openai`.
 - `coding.orchestrator.model` (`CODING_ORCHESTRATOR_MODEL`): Model ID for the orchestrator. Default `gpt-5.6-terra`.
-- `coding.cli.codex_path` (`CODING_CODEX_CLI_PATH`): Absolute path or binary name for the Codex CLI. Default `codex`.
-- `coding.cli.opencode_path` (`CODING_OPENCODE_CLI_PATH`): Absolute path or binary name for the OpenCode CLI. Default `opencode`.
+- `coding.cli.opencode_path` (`CODING_OPENCODE_CLI_PATH`): Absolute path or binary name for the OpenCode ACP agent executable. Default `opencode`.
+
+The coding workspace is ACP-only with the OpenCode backend. Legacy Direct CLI
+backends (Codex / OpenCode `run`) and the Codex backend were removed; existing
+Direct CLI or Codex sessions are read-only and new runs require a fresh OpenCode
+ACP session.
 
 See `config/config.example.yml` for a complete example.
 

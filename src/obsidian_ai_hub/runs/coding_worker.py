@@ -76,6 +76,20 @@ async def execute_coding_run(run_id: str) -> None:
         cur = store.get_run(run_id)
         return cur is not None and str(cur.get("status")) == "cancelling"
 
+    if backend_name != "opencode":
+        _fail(
+            f"Session '{session_id}' uses retired backend '{backend_name}'. "
+            "Codex sessions are read-only; create a new OpenCode session."
+        )
+        return
+    if str(session.get("transport") or "acp") != "acp":
+        _fail(
+            f"Session '{session_id}' uses retired transport "
+            f"'{session.get('transport')}'. Direct CLI sessions are read-only; "
+            "create a new ACP session."
+        )
+        return
+
     # Validate repo.
     try:
         canonical_repo = backend.validate_git_repo(repo_path_raw)
@@ -182,8 +196,8 @@ async def execute_coding_run(run_id: str) -> None:
             _fail(f"Prior HITL checkpoint unreadable: {exc}")
             return
         final_status = "completed"
-        codex_title_source: Optional[str] = None
-        current_external_id = session.get("external_session_id")
+        title_source: Optional[str] = None
+        current_external_id = session.get("acp_session_id")
 
         # Load user prompt from the queued user message.
         user_msg = store.get_message(str(run.get("user_message_id") or ""))
@@ -538,15 +552,12 @@ async def execute_coding_run(run_id: str) -> None:
                 logger.exception("append worker_start failed %s", run_id)
 
             async def _execute_acp_worker_turn() -> tuple[
-                "Optional[backend.CodingBackendResult]", "Optional[str]"
+                "Optional[Any]", "Optional[str]"
             ]:
-                """Execute one worker turn over ACP transport.
+                """Execute one worker turn over the ACP transport.
 
-                Returns (adapted result, updated ACP session id). None result
+                Returns (ACP result, updated ACP session id). None result
                 means cancellation was already handled (terminal state + event).
-                The adapted result mirrors CodingBackendResult so the shared
-                tail below (reconcile skipped via session_recreated=False,
-                cancel already handled, message persistence) applies unchanged.
                 """
                 from obsidian_ai_hub.coding import acp as acp_module
                 from obsidian_ai_hub.coding import acp_elicitation as acp_el
@@ -620,112 +631,61 @@ async def execute_coding_run(run_id: str) -> None:
                         pass
                     return None, act_acp_id
 
-                worker_text = acp_res.output
-                if acp_res.session_recreated:
-                    if backend_name == "codex":
-                        notice_prefix = "前の Codex ACP セッションが見つからなかったため、新しいセッションへ切り替えて続行しました。"
-                    else:
-                        notice_prefix = "前の OpenCode ACP セッションが見つからなかったため、新しいセッションへ切り替えて続行しました。"
-                    worker_text = f"{notice_prefix}\n\n{worker_text}" if worker_text else notice_prefix
-                diag = dict(acp_res.diagnostics or {})
-                diag["transport"] = "acp"
-                if acp_res.stop_reason:
-                    diag.setdefault("stop_reason", acp_res.stop_reason)
-                return (
-                    backend.CodingBackendResult(
-                        output=worker_text,
-                        exit_code=acp_res.exit_code,
-                        external_session_id=act_acp_id,
-                        session_recreated=False,
-                        cancelled=False,
-                        error_message=acp_res.error_message,
-                        diagnostics=diag,
-                    ),
-                    act_acp_id,
-                )
+                return acp_res, act_acp_id
 
             try:
-                worker_transport = str(
-                    (store.get_session(session_id) or {}).get("transport")
-                    or "direct_cli"
-                )
-                if worker_transport == "acp":
-                    cli_result, current_external_id = await _execute_acp_worker_turn()
-                    if cli_result is None:
-                        return
-                    ext_sess_id = current_external_id
-                else:
-                    cli_backend = backend.get_backend(backend_name)
-                    db_session = store.get_session(session_id)
-                    db_ext = db_session.get("external_session_id") if db_session else None
-                    if db_ext != current_external_id and current_external_id is None and db_ext is not None:
-                        current_external_id = db_ext
-                    elif db_ext != current_external_id and cli_count == 1:
-                        current_external_id = db_ext
-                    ext_sess_id = current_external_id
+                acp_res, current_external_id = await _execute_acp_worker_turn()
+                if acp_res is None:
+                    return
 
-                    loop = asyncio.get_running_loop()
-                    cli_result = await loop.run_in_executor(
-                        None,
-                        lambda s=ext_sess_id: cli_backend.execute(
-                            repo_path=canonical_repo,
-                            prompt=cli_prompt,
-                            external_session_id=s,
-                            cancel_event=cancel_event,
-                        ),
-                    )
-
-                if cli_result.session_recreated or cli_result.external_session_id != ext_sess_id:
-                    store.update_session_external_id(session_id, cli_result.external_session_id)
-                    current_external_id = cli_result.external_session_id
-
-                if cli_result.cancelled or _is_cancelling() or cancel_event.is_set():
+                if _is_cancelling() or cancel_event.is_set():
                     try:
                         store.mark_running_tool_calls_interrupted_for_run(
-                            run_id, error="User cancelled CLI execution"
+                            run_id, error="User cancelled ACP execution"
                         )
                     except Exception:
                         pass
                     try:
                         store.transition_run_status(
                             run_id, "cancelled",
-                            error_message="User cancelled CLI execution", finished=True,
+                            error_message="User cancelled ACP execution", finished=True,
                         )
                     except ValueError:
                         pass
                     try:
-                        store.append_run_event(run_id, "cancelled", {"message": "CLI実行がキャンセルされました"})
+                        store.append_run_event(run_id, "cancelled", {"message": "ACP実行がキャンセルされました"})
                     except Exception:
                         pass
                     return
 
-                worker_output = cli_result.output
-                if cli_result.session_recreated:
-                    if backend_name == "codex":
-                        notice_prefix = "前の Codex セッションが見つからなかったため、新しいセッションへ切り替えて続行しました。"
-                    else:
-                        notice_prefix = "前の OpenCode セッションが見つからなかったため、新しいセッションへ切り替えて続行しました。"
+                worker_output = acp_res.output
+                if acp_res.session_recreated:
+                    notice_prefix = "前の OpenCode ACP セッションが見つからなかったため、新しいセッションへ切り替えて続行しました。"
                     worker_output = f"{notice_prefix}\n\n{worker_output}" if worker_output else notice_prefix
+                diag = dict(acp_res.diagnostics or {})
+                diag["transport"] = "acp"
+                if acp_res.stop_reason:
+                    diag.setdefault("stop_reason", acp_res.stop_reason)
                 worker_output, _worker_blocker = parse_and_normalize_worker_output(
                     worker_output
                 )
-                if backend_name == "codex" and codex_title_source is None:
-                    codex_title_source = worker_output
+                if title_source is None:
+                    title_source = worker_output
 
                 worker_msg = store.add_message(
                     session_id, role="worker", content=worker_output, run_id=run_id
                 )
                 worker_msg_id = worker_msg["message_id"]
                 diag_json_str = (
-                    json.dumps(cli_result.diagnostics, ensure_ascii=False)
-                    if cli_result.diagnostics
+                    json.dumps(diag, ensure_ascii=False)
+                    if diag
                     else None
                 )
                 try:
                     store.update_run(
                         run_id,
                         worker_message_id=worker_msg_id,
-                        error_message=cli_result.error_message,
+                        error_message=acp_res.error_message,
                         diagnostics_json=diag_json_str,
                     )
                 except Exception:
@@ -751,18 +711,19 @@ async def execute_coding_run(run_id: str) -> None:
                         {
                             "attempt": cli_count,
                             "message": worker_msg,
-                            "exit_code": cli_result.exit_code,
-                            "error": cli_result.error_message,
-                            "session_recreated": cli_result.session_recreated,
+                            "exit_code": acp_res.exit_code,
+                            "error": acp_res.error_message,
+                            "session_recreated": acp_res.session_recreated,
                             "git_status": git_status,
-                            "diagnostics": cli_result.diagnostics,
+                            "diagnostics": diag,
+                            "stop_reason": acp_res.stop_reason,
                         },
                     )
                 except Exception:
                     logger.exception("append worker_done failed %s", run_id)
 
             except Exception as exc:
-                logger.exception("CLI worker error for %s", run_id)
+                logger.exception("ACP worker error for %s", run_id)
                 try:
                     store.transition_run_status(
                         run_id, "failed", error_message=f"Worker error: {exc}", finished=True
@@ -770,40 +731,29 @@ async def execute_coding_run(run_id: str) -> None:
                 except ValueError:
                     pass
                 try:
-                    store.append_run_event(run_id, "error", {"message": f"CLIワーカー実行エラー: {exc}"})
+                    store.append_run_event(run_id, "error", {"message": f"ACPワーカー実行エラー: {exc}"})
                 except Exception:
                     pass
                 return
 
-        # Title sync (best effort, must not fail run).
+        # Title generation via the app's standard AI Agents title LLM,
+        # from the first worker output of this run (best effort, must not
+        # fail the run).
         session_title_updated: Optional[str] = None
-        if backend_name == "codex" and codex_title_source is not None:
+        if title_source is not None:
             try:
                 cur_sess = store.get_session(session_id)
                 if cur_sess and coding_service._should_update_coding_title(cur_sess.get("title")):
                     generated_title = await asyncio.to_thread(
                         agents_runtime.generate_session_title,
                         user_content=user_prompt,
-                        assistant_content=codex_title_source,
+                        assistant_content=title_source,
                     )
                     if generated_title and generated_title != cur_sess.get("title"):
                         store.update_session_title(session_id, generated_title)
                         session_title_updated = generated_title
             except Exception as exc:
-                logger.warning("Codex title generation failed for %s: %s", session_id, exc)
-        elif backend_name == "opencode":
-            try:
-                cur_sess = store.get_session(session_id)
-                if cur_sess and cur_sess.get("external_session_id"):
-                    ext_id = cur_sess.get("external_session_id")
-                    cur_title = cur_sess.get("title")
-                    if coding_service._should_update_coding_title(cur_title):
-                        fetched_title = backend.OpenCodeCliBackend.fetch_opencode_session_title(ext_id)
-                        if fetched_title and fetched_title != cur_title:
-                            store.update_session_title(session_id, fetched_title)
-                            session_title_updated = fetched_title
-            except Exception as exc:
-                logger.warning("OpenCode title sync failed for %s: %s", session_id, exc)
+                logger.warning("Title generation failed for %s: %s", session_id, exc)
 
         # Final status (respect late cancel).
         if _is_cancelling() or cancel_event.is_set():

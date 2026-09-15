@@ -10,7 +10,6 @@ from datetime import datetime
 from typing import Any, Dict, Optional
 
 from obsidian_ai_hub.coding import backend, service, store
-from obsidian_ai_hub.utils import config
 
 
 def _classify_error_type(exc: Exception, message: str = "") -> str:
@@ -179,7 +178,7 @@ async def _collect_coding_result(
 
 
 def _create_new_session(project_id: int) -> Dict[str, Any]:
-    """Create a new coding session for project_id using default backend."""
+    """Create a new OpenCode ACP coding session for project_id."""
     from obsidian_ai_hub.web.services.projects import get_project_detail
 
     project = get_project_detail(project_id)
@@ -189,16 +188,12 @@ def _create_new_session(project_id: int) -> Dict[str, Any]:
     if not project_path:
         raise ValueError("プロジェクトに project_path が設定されていません")
     canonical_repo = backend.validate_git_repo(project_path)
-    backend_name = str(config.CODING_DEFAULT_BACKEND).strip().lower()
-    if backend_name not in ("codex", "opencode"):
-        raise ValueError(
-            f"Invalid CODING_DEFAULT_BACKEND '{config.CODING_DEFAULT_BACKEND}' (expected 'codex' or 'opencode')"
-        )
     session = store.create_session(
         project_id=project_id,
-        backend=backend_name,
+        backend="opencode",
         repo_path=canonical_repo,
         title=service.DEFAULT_CODING_SESSION_TITLE,
+        transport="acp",
     )
     return session
 

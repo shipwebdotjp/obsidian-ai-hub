@@ -21,13 +21,13 @@ router = APIRouter(prefix="/coding", tags=["coding"])
 
 class SessionCreateRequest(BaseModel):
     project_id: int
-    backend: str = Field(description="'codex' or 'opencode'")
+    backend: str = Field(description="'opencode' (fixed; the workspace is OpenCode-only)")
     title: Optional[str] = Field(default=None)
     tool_ids: Optional[List[str]] = Field(
         default=None, description="Optional custom tool IDs for session"
     )
     transport: Optional[str] = Field(
-        default="direct_cli", description="'direct_cli' or 'acp'"
+        default="acp", description="'acp' (fixed; Direct CLI is retired)"
     )
 
 
@@ -80,16 +80,7 @@ def update_coding_defaults(body: UpdateToolsRequest, _=Depends(require_bearer_to
 @router.get("/config")
 def get_coding_config(_=Depends(require_bearer_token)):
     """Get coding workspace config (default backend)."""
-    from obsidian_ai_hub.utils.config import CODING_DEFAULT_BACKEND
-
-    backend = (
-        str(CODING_DEFAULT_BACKEND).strip().lower()
-        if isinstance(CODING_DEFAULT_BACKEND, str)
-        else "opencode"
-    )
-    if backend not in ("codex", "opencode"):
-        backend = "opencode"
-    return {"default_backend": backend}
+    return {"default_backend": "opencode"}
 
 
 @router.get("/tools")
@@ -172,22 +163,22 @@ def create_session(
             detail=f"無効なGitリポジトリパスです: {str(exc)}",
         )
 
-    # Validate backend
+    # Validate backend (OpenCode-only; Codex is retired)
     b_name = body.backend.lower().strip()
-    if b_name not in ("codex", "opencode"):
+    if b_name != "opencode":
         raise HTTPException(
             status_code=400,
-            detail="バックエンドは 'codex' または 'opencode' を指定してください",
+            detail="バックエンドは 'opencode' を指定してください",
         )
 
     clean_title = (body.title or "").strip()
     session_title = clean_title if clean_title else "新しいコーディングセッション"
 
-    clean_transport = (body.transport or "direct_cli").lower().strip()
-    if clean_transport not in ("direct_cli", "acp"):
+    clean_transport = (body.transport or "acp").lower().strip()
+    if clean_transport != "acp":
         raise HTTPException(
             status_code=400,
-            detail="トランスポートは 'direct_cli' または 'acp' を指定してください",
+            detail="トランスポートは 'acp' を指定してください（直接CLIは廃止されました）",
         )
 
     try:

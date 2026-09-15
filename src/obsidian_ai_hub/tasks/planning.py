@@ -437,7 +437,7 @@ def validate_plan_targets(
             # the id may arrive as a string ("1" vs 1).
             target["project_id"] = matched
             backend = target.get("backend")
-            if backend is not None and backend not in ("codex", "opencode"):
+            if backend is not None and backend != "opencode":
                 raise ValueError(f"Plan step {index} uses unknown backend '{backend}'.")
     return snapshot
 

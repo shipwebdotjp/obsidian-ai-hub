@@ -112,7 +112,21 @@ async def run_coding_turn_stream(
 
     repo_path = session["repo_path"]
     backend_name = session["backend"]
-    session_transport = session.get("transport") or "direct_cli"
+    if backend_name != "opencode":
+        retire_msg = (
+            f"Session '{session_id}' uses retired backend '{backend_name}'. "
+            "Codex sessions are read-only; create a new OpenCode session."
+        )
+        yield f"data: {json.dumps({'event': 'error', 'message': retire_msg})}\n\n"
+        return
+    session_transport = session.get("transport") or "acp"
+    if session_transport != "acp":
+        retire_msg = (
+            f"Session '{session_id}' uses retired transport '{session_transport}'. "
+            "Direct CLI sessions are read-only; create a new ACP session."
+        )
+        yield f"data: {json.dumps({'event': 'error', 'message': retire_msg})}\n\n"
+        return
 
     # Validate git repo path
     try:
@@ -170,9 +184,9 @@ async def run_coding_turn_stream(
 
         cli_count, phase_turn = restore_coding_progress(run.get("hitl_run_id"))
         final_status = "completed"
-        codex_title_source: Optional[str] = None
-        # Track in-memory external session id for this turn (P0-1: carry recreated id to next iteration)
-        current_external_id = session.get("external_session_id") if session else None
+        title_source: Optional[str] = None
+        # Track in-memory ACP session id for this turn (carry recreated id to next iteration)
+        current_external_id = session.get("acp_session_id") if session else None
         # Exclusive-control protocol: one self-correction per turn, then fail.
         protocol_retried = False
         ephemeral_correction: list = []
@@ -426,212 +440,116 @@ async def run_coding_turn_stream(
             cli_count += 1
             yield f"data: {json.dumps({'event': 'worker_start', 'attempt': cli_count, 'backend': backend_name, 'transport': session_transport, 'prompt': cli_prompt}, ensure_ascii=False)}\n\n"
 
-            # Execute worker in thread pool via selected transport
+            # Execute worker via the ACP transport (the only supported transport)
             try:
                 loop = asyncio.get_running_loop()
 
-                if session_transport == "acp":
-                    acp_profile = acp_module.AcpLaunchProfile.get_profile(backend_name)
-                    acp_client = acp_module.AcpClientBackend(acp_profile)
-                    db_session = store.get_session(session_id)
-                    db_acp_id = db_session.get("acp_session_id") if db_session else None
-                    if (
-                        db_acp_id != current_external_id
-                        and current_external_id is None
-                        and db_acp_id is not None
-                    ):
-                        current_external_id = db_acp_id
-                    elif db_acp_id != current_external_id and cli_count == 1:
-                        current_external_id = db_acp_id
-                    act_acp_id = current_external_id
+                acp_profile = acp_module.AcpLaunchProfile.get_profile(backend_name)
+                acp_client = acp_module.AcpClientBackend(acp_profile)
+                db_session = store.get_session(session_id)
+                db_acp_id = db_session.get("acp_session_id") if db_session else None
+                if (
+                    db_acp_id != current_external_id
+                    and current_external_id is None
+                    and db_acp_id is not None
+                ):
+                    current_external_id = db_acp_id
+                elif db_acp_id != current_external_id and cli_count == 1:
+                    current_external_id = db_acp_id
+                act_acp_id = current_external_id
 
-                    def _update_handler(params: Dict[str, Any]):
-                        # Optional: emit supplementary ACP live update events
-                        pass
+                def _update_handler(params: Dict[str, Any]):
+                    # Optional: emit supplementary ACP live update events
+                    pass
 
-                    from obsidian_ai_hub.coding import acp_elicitation as acp_el
+                from obsidian_ai_hub.coding import acp_elicitation as acp_el
 
-                    _elicitation_handler = acp_el.make_elicitation_handler(
-                        run_id=run_id,
-                        session_id=session_id,
-                        user_prompt=user_prompt,
+                _elicitation_handler = acp_el.make_elicitation_handler(
+                    run_id=run_id,
+                    session_id=session_id,
+                    user_prompt=user_prompt,
+                    repo_path=canonical_repo,
+                    backend_name=backend_name,
+                    phase=phase,
+                    phase_turn=phase_turn,
+                    cli_count=cli_count,
+                    tool_ids=effective_tool_ids,
+                    provider=orchestrator.provider,
+                    model=orchestrator.model,
+                    prior_hitl_run_id=run.get("hitl_run_id"),
+                    cancel_event=cancel_event,
+                )
+
+                acp_res: acp_module.AcpExecutionResult = await loop.run_in_executor(
+                    None,
+                    lambda s=act_acp_id: acp_client.execute_turn(
                         repo_path=canonical_repo,
-                        backend_name=backend_name,
-                        phase=phase,
-                        phase_turn=phase_turn,
-                        cli_count=cli_count,
-                        tool_ids=effective_tool_ids,
-                        provider=orchestrator.provider,
-                        model=orchestrator.model,
-                        prior_hitl_run_id=run.get("hitl_run_id"),
+                        prompt=cli_prompt,
+                        acp_session_id=s,
                         cancel_event=cancel_event,
+                        on_update_callback=_update_handler,
+                        on_elicitation_create=_elicitation_handler,
+                    ),
+                )
+
+                if acp_res.session_recreated or acp_res.acp_session_id != act_acp_id:
+                    store.update_session_acp_id(
+                        session_id, acp_res.acp_session_id, acp_profile.profile_id
                     )
+                    current_external_id = acp_res.acp_session_id
 
-                    acp_res: acp_module.AcpExecutionResult = await loop.run_in_executor(
-                        None,
-                        lambda s=act_acp_id: acp_client.execute_turn(
-                            repo_path=canonical_repo,
-                            prompt=cli_prompt,
-                            acp_session_id=s,
-                            cancel_event=cancel_event,
-                            on_update_callback=_update_handler,
-                            on_elicitation_create=_elicitation_handler,
-                        ),
-                    )
-
-                    if acp_res.session_recreated or acp_res.acp_session_id != act_acp_id:
-                        store.update_session_acp_id(
-                            session_id, acp_res.acp_session_id, acp_profile.profile_id
-                        )
-                        current_external_id = acp_res.acp_session_id
-
-                    if acp_res.cancelled:
-                        store.mark_running_tool_calls_interrupted_for_run(run_id, error="User cancelled ACP execution")
-                        store.update_run(
-                            run_id,
-                            status="cancelled",
-                            error_message="User cancelled ACP execution",
-                            finished_at=datetime.now(JST).isoformat(),
-                        )
-                        yield f"data: {json.dumps({'event': 'cancelled', 'message': 'ACP実行がキャンセルされました'}, ensure_ascii=False)}\n\n"
-                        return
-
-                    worker_output = acp_res.output
-                    if acp_res.session_recreated:
-                        notice_prefix = f"前の {backend_name.capitalize()} ACP セッションが見つからなかったため、新しいセッションへ切り替えて続行しました。"
-                        worker_output = f"{notice_prefix}\n\n{worker_output}" if worker_output else notice_prefix
-
-                    worker_output, _worker_blocker = parse_and_normalize_worker_output(worker_output)
-                    if backend_name == "codex" and codex_title_source is None:
-                        codex_title_source = worker_output
-
-                    worker_msg = store.add_message(
-                        session_id, role="worker", content=worker_output, run_id=run_id
-                    )
-                    worker_msg_id = worker_msg["message_id"]
-
-                    diag_json_str = (
-                        json.dumps(acp_res.diagnostics, ensure_ascii=False)
-                        if acp_res.diagnostics
-                        else None
-                    )
-
+                if acp_res.cancelled:
+                    store.mark_running_tool_calls_interrupted_for_run(run_id, error="User cancelled ACP execution")
                     store.update_run(
                         run_id,
-                        worker_message_id=worker_msg_id,
-                        error_message=acp_res.error_message,
-                        diagnostics_json=diag_json_str,
+                        status="cancelled",
+                        error_message="User cancelled ACP execution",
+                        finished_at=datetime.now(JST).isoformat(),
                     )
-                    store.append_run_worker_message(run_id, worker_msg_id)
+                    yield f"data: {json.dumps({'event': 'cancelled', 'message': 'ACP実行がキャンセルされました'}, ensure_ascii=False)}\n\n"
+                    return
 
-                    git_status = backend.get_git_status(canonical_repo)
-                    worker_done_data = {
-                        "event": "worker_done",
-                        "attempt": cli_count,
-                        "message": worker_msg,
-                        "exit_code": acp_res.exit_code,
-                        "error": acp_res.error_message,
-                        "session_recreated": acp_res.session_recreated,
-                        "git_status": git_status,
-                        "diagnostics": acp_res.diagnostics,
-                        "stop_reason": acp_res.stop_reason,
-                    }
-                    yield f"data: {json.dumps(worker_done_data, ensure_ascii=False)}\n\n"
+                worker_output = acp_res.output
+                if acp_res.session_recreated:
+                    notice_prefix = "前の OpenCode ACP セッションが見つからなかったため、新しいセッションへ切り替えて続行しました。"
+                    worker_output = f"{notice_prefix}\n\n{worker_output}" if worker_output else notice_prefix
 
-                else:
-                    cli_backend = backend.get_backend(backend_name)
-                    db_session = store.get_session(session_id)
-                    db_ext = db_session.get("external_session_id") if db_session else None
-                    if (
-                        db_ext != current_external_id
-                        and current_external_id is None
-                        and db_ext is not None
-                    ):
-                        current_external_id = db_ext
-                    elif db_ext != current_external_id and cli_count == 1:
-                        current_external_id = db_ext
-                    ext_sess_id = current_external_id
+                worker_output, _worker_blocker = parse_and_normalize_worker_output(worker_output)
+                if title_source is None:
+                    title_source = worker_output
 
-                    cli_result: backend.CodingBackendResult = await loop.run_in_executor(
-                        None,
-                        lambda s=ext_sess_id: cli_backend.execute(
-                            repo_path=canonical_repo,
-                            prompt=cli_prompt,
-                            external_session_id=s,
-                            cancel_event=cancel_event,
-                        ),
-                    )
+                worker_msg = store.add_message(
+                    session_id, role="worker", content=worker_output, run_id=run_id
+                )
+                worker_msg_id = worker_msg["message_id"]
 
-                    if (
-                        cli_result.session_recreated
-                        or cli_result.external_session_id != ext_sess_id
-                    ):
-                        store.update_session_external_id(
-                            session_id, cli_result.external_session_id
-                        )
-                        current_external_id = cli_result.external_session_id
+                diag_json_str = (
+                    json.dumps(acp_res.diagnostics, ensure_ascii=False)
+                    if acp_res.diagnostics
+                    else None
+                )
 
-                    if cli_result.cancelled:
-                        store.mark_running_tool_calls_interrupted_for_run(run_id, error="User cancelled CLI execution")
-                        store.update_run(
-                            run_id,
-                            status="cancelled",
-                            error_message="User cancelled CLI execution",
-                            finished_at=datetime.now(JST).isoformat(),
-                        )
-                        yield f"data: {json.dumps({'event': 'cancelled', 'message': 'CLI実行がキャンセルされました'}, ensure_ascii=False)}\n\n"
-                        return
+                store.update_run(
+                    run_id,
+                    worker_message_id=worker_msg_id,
+                    error_message=acp_res.error_message,
+                    diagnostics_json=diag_json_str,
+                )
+                store.append_run_worker_message(run_id, worker_msg_id)
 
-                    worker_output = cli_result.output
-                    if cli_result.session_recreated:
-                        if backend_name == "codex":
-                            notice_prefix = "前の Codex セッションが見つからなかったため、新しいセッションへ切り替えて続行しました。"
-                        else:
-                            notice_prefix = "前の OpenCode セッションが見つからなかったため、新しいセッションへ切り替えて続行しました。"
-
-                        if worker_output:
-                            worker_output = f"{notice_prefix}\n\n{worker_output}"
-                        else:
-                            worker_output = notice_prefix
-
-                    worker_output, _worker_blocker = parse_and_normalize_worker_output(
-                        worker_output
-                    )
-                    if backend_name == "codex" and codex_title_source is None:
-                        codex_title_source = worker_output
-
-                    worker_msg = store.add_message(
-                        session_id, role="worker", content=worker_output, run_id=run_id
-                    )
-                    worker_msg_id = worker_msg["message_id"]
-
-                    diag_json_str = (
-                        json.dumps(cli_result.diagnostics, ensure_ascii=False)
-                        if cli_result.diagnostics
-                        else None
-                    )
-
-                    store.update_run(
-                        run_id,
-                        worker_message_id=worker_msg_id,
-                        error_message=cli_result.error_message,
-                        diagnostics_json=diag_json_str,
-                    )
-                    store.append_run_worker_message(run_id, worker_msg_id)
-
-                    git_status = backend.get_git_status(canonical_repo)
-
-                    worker_done_data = {
-                        "event": "worker_done",
-                        "attempt": cli_count,
-                        "message": worker_msg,
-                        "exit_code": cli_result.exit_code,
-                        "error": cli_result.error_message,
-                        "session_recreated": cli_result.session_recreated,
-                        "git_status": git_status,
-                        "diagnostics": cli_result.diagnostics,
-                    }
-                    yield f"data: {json.dumps(worker_done_data, ensure_ascii=False)}\n\n"
+                git_status = backend.get_git_status(canonical_repo)
+                worker_done_data = {
+                    "event": "worker_done",
+                    "attempt": cli_count,
+                    "message": worker_msg,
+                    "exit_code": acp_res.exit_code,
+                    "error": acp_res.error_message,
+                    "session_recreated": acp_res.session_recreated,
+                    "git_status": git_status,
+                    "diagnostics": acp_res.diagnostics,
+                    "stop_reason": acp_res.stop_reason,
+                }
+                yield f"data: {json.dumps(worker_done_data, ensure_ascii=False)}\n\n"
 
             except Exception as exc:
                 logger.exception("Error during worker execution")
@@ -644,17 +562,17 @@ async def run_coding_turn_stream(
                 yield f"data: {json.dumps({'event': 'error', 'message': f'ワーカー実行エラー: {str(exc)}'}, ensure_ascii=False)}\n\n"
                 return
 
-        # Generate a Codex title through the app's standard AI Agents title LLM.
-        # Codex CLI does not provide a title retrieval API, so never query it for one.
+        # Generate a session title through the app's standard AI Agents
+        # title LLM from the first worker output of this turn.
         session_title_updated: Optional[str] = None
-        if backend_name == "codex" and codex_title_source is not None:
+        if title_source is not None:
             try:
                 cur_sess = store.get_session(session_id)
                 if cur_sess and _should_update_coding_title(cur_sess.get("title")):
                     generated_title = await asyncio.to_thread(
                         agents_runtime.generate_session_title,
                         user_content=user_prompt,
-                        assistant_content=codex_title_source,
+                        assistant_content=title_source,
                     )
                     if generated_title and generated_title != cur_sess.get("title"):
                         store.update_session_title(session_id, generated_title)
@@ -664,35 +582,9 @@ async def run_coding_turn_stream(
                             session_id,
                         )
             except Exception as exc:
-                # A title is auxiliary metadata and must not fail the Codex run.
+                # A title is auxiliary metadata and must not fail the run.
                 logger.warning(
-                    "Failed to generate Codex title for session %s: %s", session_id, exc
-                )
-
-        # Attempt OpenCode external session title sync (safe post-turn hook)
-        elif backend_name == "opencode":
-            try:
-                cur_sess = store.get_session(session_id)
-                if cur_sess and cur_sess.get("external_session_id"):
-                    ext_id = cur_sess.get("external_session_id")
-                    cur_title = cur_sess.get("title")
-                    if _should_update_coding_title(cur_title):
-                        fetched_title = (
-                            backend.OpenCodeCliBackend.fetch_opencode_session_title(
-                                ext_id
-                            )
-                        )
-                        if fetched_title and fetched_title != cur_title:
-                            store.update_session_title(session_id, fetched_title)
-                            session_title_updated = fetched_title
-                            logger.info(
-                                "Updated coding session %s title from OpenCode export: %s",
-                                session_id,
-                                fetched_title,
-                            )
-            except Exception as exc:
-                logger.warning(
-                    "Failed to sync OpenCode title for session %s: %s", session_id, exc
+                    "Failed to generate title for session %s: %s", session_id, exc
                 )
 
         # Update final run status

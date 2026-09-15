@@ -69,9 +69,9 @@ class CodingTarget(BaseModel):
     project_id: int = Field(
         description="プロジェクトID（例: 1）。登録済みProjectのみ指定可能。"
     )
-    backend: Optional[Literal["codex", "opencode"]] = Field(
+    backend: Optional[Literal["opencode"]] = Field(
         default=None,
-        description="Coding backend。省略時は既定backend。codexまたはopencode。",
+        description="Coding backend。省略時は既定backend（opencode固定）。",
     )
 
 

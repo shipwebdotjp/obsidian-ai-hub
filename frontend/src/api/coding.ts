@@ -14,7 +14,7 @@ export interface CodingDefaults {
 }
 
 export interface CodingConfig {
-  default_backend: "codex" | "opencode";
+  default_backend: "opencode";
 }
 
 export interface GitStatus {
@@ -40,7 +40,8 @@ export interface CodingSession {
   external_session_id: string | null;
   title: string;
   tool_ids_json?: string | null;
-  transport: "direct_cli" | "acp";
+  // "direct_cli" persists on legacy read-only rows; new sessions are always "acp".
+  transport: "acp" | "direct_cli";
   acp_session_id?: string | null;
   acp_profile_id?: string | null;
   created_at: string;
@@ -259,17 +260,15 @@ export function updateCodingSessionTitle(
 
 export function createCodingSession(
   projectId: number,
-  backend: string,
   title?: string,
   toolIds?: string[],
-  transport?: "direct_cli" | "acp",
 ): Promise<CodingSession> {
   return apiPost<CodingSession>("/api/v1/coding/sessions", {
     project_id: projectId,
-    backend,
+    backend: "opencode",
     title,
     tool_ids: toolIds,
-    transport,
+    transport: "acp",
   });
 }
 

@@ -24,7 +24,7 @@ from obsidian_ai_hub.utils import config
 
 logger = logging.getLogger(__name__)
 
-CODING_BACKENDS = frozenset({"codex", "opencode"})
+CODING_BACKENDS = frozenset({"opencode"})
 
 
 class CodingAdapter:
