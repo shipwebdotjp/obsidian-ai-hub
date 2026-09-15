@@ -1,0 +1,133 @@
+{
+  "profile": "opencode-acp",
+  "pinnedVersion": "1.18.31",
+  "scenario": "initialize",
+  "envVarNames": [
+    "OPENAI_API_KEY",
+    "OPENCODE_GO_API_KEY"
+  ],
+  "tmpRepo": "/var/folders/qk/1f14k2js0p31c99xgrgnyk0w0000gn/T/acp-poc-em425yh7",
+  "gitStatusBefore": "",
+  "initialize": {
+    "protocolVersion": 1,
+    "agentCapabilities": {
+      "loadSession": true,
+      "mcpCapabilities": {
+        "http": true,
+        "sse": true
+      },
+      "promptCapabilities": {
+        "embeddedContext": true,
+        "image": true
+      },
+      "sessionCapabilities": {
+        "close": {},
+        "fork": {},
+        "list": {},
+        "resume": {}
+      }
+    },
+    "authMethods": [
+      {
+        "description": "Run `opencode auth login` in the terminal",
+        "name": "Login with opencode",
+        "id": "opencode-login"
+      }
+    ],
+    "agentInfo": {
+      "name": "OpenCode",
+      "version": "1.18.31"
+    }
+  },
+  "terminate": {
+    "exitCode": -15,
+    "signalled": true,
+    "orphans": []
+  },
+  "elapsed_s": 1.05,
+  "gitStatusAfter": "",
+  "repoClean": true,
+  "stderrRedacted": "",
+  "nonJsonStdoutLines": [
+    "[12:14:41.522] WARN (#16615): mDNS enabled but hostname is loopback; skipping mDNS publish"
+  ],
+  "transcript": [
+    {
+      "t_ms": 0,
+      "direction": "note",
+      "text": "profile=opencode-acp pinned=1.18.31"
+    },
+    {
+      "t_ms": 0,
+      "direction": "note",
+      "text": "tmp_repo=/var/folders/qk/1f14k2js0p31c99xgrgnyk0w0000gn/T/acp-poc-em425yh7 git_status_before=''"
+    },
+    {
+      "t_ms": 2,
+      "direction": "note",
+      "text": "spawned pid=254 pgid=254 argv=['opencode', 'acp', '--hostname', '127.0.0.1', '--port', '0']"
+    },
+    {
+      "t_ms": 1007,
+      "direction": "sent",
+      "payload": {
+        "jsonrpc": "2.0",
+        "id": "initialize",
+        "method": "initialize",
+        "params": {
+          "protocolVersion": 1,
+          "clientCapabilities": {},
+          "clientInfo": {
+            "name": "acp-poc-harness",
+            "title": "ACP PoC Harness",
+            "version": "0.1.0"
+          }
+        }
+      }
+    },
+    {
+      "t_ms": 1012,
+      "direction": "received",
+      "payload": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": {
+          "protocolVersion": 1,
+          "agentCapabilities": {
+            "loadSession": true,
+            "mcpCapabilities": {
+              "http": true,
+              "sse": true
+            },
+            "promptCapabilities": {
+              "embeddedContext": true,
+              "image": true
+            },
+            "sessionCapabilities": {
+              "close": {},
+              "fork": {},
+              "list": {},
+              "resume": {}
+            }
+          },
+          "authMethods": [
+            {
+              "description": "Run `opencode auth login` in the terminal",
+              "name": "Login with opencode",
+              "id": "opencode-login"
+            }
+          ],
+          "agentInfo": {
+            "name": "OpenCode",
+            "version": "1.18.31"
+          }
+        }
+      }
+    },
+    {
+      "t_ms": 1053,
+      "direction": "note",
+      "text": "terminated: exit=-15 signalled=True"
+    }
+  ]
+}

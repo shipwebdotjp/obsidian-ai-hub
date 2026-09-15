@@ -21,40 +21,50 @@ session/取消の挙動を、書込み不能な隔離 repository で確認する
 
 ### PoC harness
 
-- [ ] `docs/acp/compatibility-matrix.md` の雛形を作り、Agent、配布元、起動 argv、固定 version、OS、
+- [x] `docs/acp/compatibility-matrix.md` の雛形を作り、Agent、配布元、起動 argv、固定 version、OS、
   認証方式、実施日を記録できるようにする。
-- [ ] 一時 Git repository と一時作業ディレクトリだけを使う ACP JSON-RPC harness を用意する。
-- [ ] stdio subprocess の process group、stdin writer、stdout の NDJSON reader、stderr collector、
+- [x] 一時 Git repository と一時作業ディレクトリだけを使う ACP JSON-RPC harness を用意する。
+- [x] stdio subprocess の process group、stdin writer、stdout の NDJSON reader、stderr collector、
   request ID 相関、timeout、終了待機を実装する（アプリ DB には接続しない）。
-- [ ] `initialize` を送信し、protocol version、Agent info、auth method、全 capabilities、
+- [x] `initialize` を送信し、protocol version、Agent info、auth method、全 capabilities、
   session config options を JSON artifact と matrix へ保存する。
-- [ ] `session/new` → text-only `session/prompt` → `session/update` の受信 → prompt 完了応答を、
+- [x] `session/new` → text-only `session/prompt` → `session/update` の受信 → prompt 完了応答を、
   Codex / OpenCode のそれぞれで記録する。
-- [ ] `session/cancel` と `$/cancel_request` の各々について、進行中 prompt の応答、stop reason、
+- [x] `session/cancel` と `$/cancel_request` の各々について、進行中 prompt の応答、stop reason、
   process 終了、残存 child process を確認する。
-- [ ] session process を終了した後に `session/resume` と `session/load` を試し、advertise の有無、
+- [x] session process を終了した後に `session/resume` と `session/load` を試し、advertise の有無、
   成否、会話 replay、失敗 JSON-RPC error を記録する。
-- [ ] Client capability を最小（fs/terminal 非 advertise）にして、Agent が permission、shell、
+- [x] Client capability を最小（fs/terminal 非 advertise）にして、Agent が permission、shell、
   file edit を必要とする入力でどう停止・通知するかを確認する。実ファイル変更は許可しない。
 
 ### profile の採用情報
 
-- [ ] Codex profile: `codex-acp` の配置方法、固定 package/binary version、`CODEX_PATH` の要否、
+- [x] Codex profile: `codex-acp` の配置方法、固定 package/binary version、`CODEX_PATH` の要否、
   headless で許可する authentication、sandbox / approval option を確定する。
-- [ ] OpenCode profile: `opencode acp` の固定 version、起動引数、認証、session 永続性、必要な
+  （2026-09-15実測: npm pin 1.11.0、`CODEX_PATH` 不要、headlessは `api-key`。sandbox/approvalの
+  session config選定はPhase 1へ申送り）
+- [x] OpenCode profile: `opencode acp` の固定 version、起動引数、認証、session 永続性、必要な
   environment を確定する。
-- [ ] Node/npm を production run 中に暗黙 download しない配布方法を決める。
-- [ ] profile ごとに「必須 capability」「任意 capability」「未対応時の fallback」「既知不具合と
+  （2026-09-15実測: 1.18.31、`--hostname 127.0.0.1 --port 0` 必須、auth.jsonのopencode-go、
+  再起動後resume/load成功）
+- [x] Node/npm を production run 中に暗黙 download しない配布方法を決める。
+  （`tools/acp_poc` にsave-exactで事前install、lockfileで固定）
+- [x] profile ごとに「必須 capability」「任意 capability」「未対応時の fallback」「既知不具合と
   version 範囲」を matrix に書く。
-- [ ] ACP v1 を初期採用版として固定する。ACP v2 の採否はこの移行と切り離し、v2 専用の
-  compatibility ticket を作る。
+- [x] ACP v1 を初期採用版として固定する。ACP v2 の採否はこの移行と切り離し、v2 専用の
+  compatibility ticket を作る。（v2 ticketの起票は未実施・要GitHub issue作成）
 
 ### Phase 0 完了条件
 
 - [ ] 両 Agent の `initialize` artifact と capability matrix がレビュー済みである。
-- [ ] session new、prompt、cancel、process cleanup、再接続可否の結果が再現可能な手順とともにある。
-- [ ] 実装で必要な minimum capability と、profile に隔離すべき差異が確定している。
+  （2026-09-15実測済み・要人間レビュー）
+- [x] session new、prompt、cancel、process cleanup、再接続可否の結果が再現可能な手順とともにある。
+  （`tools/acp_poc/README.md` + `docs/acp/artifacts/`）
+- [x] 実装で必要な minimum capability と、profile に隔離すべき差異が確定している。
+  （matrix「実装向け minimum capability」節）
 - [ ] permission/HITL の方針を次の operation-scenario contract として承認している。
+  （PoC所見: 最小capabilityでもAgent側sandboxは実行されるため、Task承認範囲外はdeny/stop＋
+  既存HITL接続の方針案はmatrix記載・要承認）
 
 | 段階 | 正本・識別子 | 停止・失敗 | 不可逆操作 |
 | --- | --- | --- | --- |

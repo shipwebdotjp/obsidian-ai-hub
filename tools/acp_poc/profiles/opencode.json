@@ -1,0 +1,17 @@
+{
+  "profileId": "opencode-acp",
+  "agent": "opencode",
+  "pinnedVersion": "1.18.31",
+  "distribution": "mise opencode binary",
+  "executable": "opencode",
+  "argv": ["acp", "--hostname", "127.0.0.1", "--port", "0"],
+  "envAllowlist": [],
+  "authPolicy": "existing auth.json opencode-go entry (model opencode/big-pickle). OPENCODE_GO_API_KEY from acp-poc.env as fallback.",
+  "sessionPersistencePolicy": "resume/load advertised AND succeed after process restart (verified 2026-09-15). Still record reason + old/new IDs on recreate.",
+  "cancelPolicy": "session/cancel works (stopReason cancelled). $/cancel_request has no effect on the turn; do not rely on it.",
+  "requiredEnv": {},
+  "knownWorkarounds": [
+    "bare 'opencode acp' dies with ServeError (1.18.31); explicit --hostname 127.0.0.1 --port 0 required",
+    "non-JSON mDNS WARN line pollutes stdout (1.18.31); client must detect/record stdout contamination"
+  ]
+}

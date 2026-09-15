@@ -1,0 +1,2 @@
+artifacts は PoC 実行時に `docs/acp/artifacts/<agent>-<version>-<date>/` として作成する。
+秘密値（APIキー・トークン）は保存しない。stderr は redacted のみ。

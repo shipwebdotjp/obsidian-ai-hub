@@ -1,0 +1,19 @@
+{
+  "profileId": "codex-acp",
+  "agent": "codex",
+  "pinnedVersion": "1.11.0",
+  "distribution": "npm @agentclientprotocol/codex-acp (tools/acp_poc/node_modules, save-exact)",
+  "executable": "node",
+  "argv": [
+    "<REPO>/tools/acp_poc/node_modules/@agentclientprotocol/codex-acp/dist/index.js"
+  ],
+  "envAllowlist": [],
+  "authPolicy": "api-key (OPENAI_API_KEY). CODEX_PATH not required when codex is on PATH (verified 2026-09-15). Headless ChatGPT login not used.",
+  "codexPathRequired": false,
+  "sessionPersistencePolicy": "resume/load advertised but FAIL after process restart (-32603 no rollout found, 1.11.0). Phase 1 must recreate session and record reason + old/new IDs.",
+  "cancelPolicy": "session/cancel works (stopReason cancelled). $/cancel_request has no effect on the turn; do not rely on it.",
+  "knownWorkarounds": [
+    "codex-acp has no --help/--version (hangs on stdio); use package.json + initialize agentInfo",
+    "custom _auth/status_update notification arrives; accept per extensibility, store unknown updates redacted"
+  ]
+}

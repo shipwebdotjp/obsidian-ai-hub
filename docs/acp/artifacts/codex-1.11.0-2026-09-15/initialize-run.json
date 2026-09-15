@@ -1,0 +1,229 @@
+{
+  "profile": "codex-acp",
+  "pinnedVersion": "1.11.0",
+  "scenario": "initialize",
+  "envVarNames": [
+    "OPENAI_API_KEY",
+    "OPENCODE_GO_API_KEY"
+  ],
+  "tmpRepo": "/var/folders/qk/1f14k2js0p31c99xgrgnyk0w0000gn/T/acp-poc-sed29gqu",
+  "gitStatusBefore": "",
+  "initialize": {
+    "protocolVersion": 1,
+    "agentInfo": {
+      "name": "@agentclientprotocol/codex-acp",
+      "title": "Codex",
+      "version": "1.11.0"
+    },
+    "agentCapabilities": {
+      "auth": {
+        "logout": {}
+      },
+      "providers": {},
+      "loadSession": true,
+      "promptCapabilities": {
+        "embeddedContext": true,
+        "image": true
+      },
+      "sessionCapabilities": {
+        "resume": {},
+        "list": {},
+        "close": {},
+        "delete": {},
+        "fork": {},
+        "additionalDirectories": {},
+        "subagents": {}
+      },
+      "mcpCapabilities": {
+        "acp": false,
+        "http": true,
+        "sse": false
+      },
+      "_meta": {
+        "authStatus": {}
+      }
+    },
+    "authMethods": [
+      {
+        "id": "api-key",
+        "name": "API Key",
+        "description": "Use an API key to authenticate",
+        "_meta": {
+          "api-key": {
+            "provider": "openai"
+          }
+        }
+      },
+      {
+        "id": "chat-gpt",
+        "name": "ChatGPT",
+        "description": "Use ChatGPT to authenticate"
+      }
+    ],
+    "_meta": {
+      "steering": {
+        "supported": true
+      },
+      "goal": {
+        "version": 1,
+        "controlMethod": "_session/goal",
+        "actions": [
+          "set",
+          "pause",
+          "resume",
+          "clear"
+        ]
+      },
+      "jetbrains": {
+        "air": {
+          "version": 1,
+          "capabilities": [
+            "sessionFailure",
+            "agentFileChangeReport",
+            "nativeSubagentSessions",
+            "asyncTasks",
+            "recommendedValue"
+          ]
+        }
+      }
+    }
+  },
+  "terminate": {
+    "exitCode": -15,
+    "signalled": true,
+    "orphans": []
+  },
+  "elapsed_s": 1.04,
+  "gitStatusAfter": "",
+  "repoClean": true,
+  "stderrRedacted": "",
+  "nonJsonStdoutLines": [],
+  "transcript": [
+    {
+      "t_ms": 0,
+      "direction": "note",
+      "text": "profile=codex-acp pinned=1.11.0"
+    },
+    {
+      "t_ms": 0,
+      "direction": "note",
+      "text": "tmp_repo=/var/folders/qk/1f14k2js0p31c99xgrgnyk0w0000gn/T/acp-poc-sed29gqu git_status_before=''"
+    },
+    {
+      "t_ms": 2,
+      "direction": "note",
+      "text": "spawned pid=580 pgid=580 argv=['node', '/Users/ship/project/py/obsidian-daily-merge/tools/acp_poc/node_modules/@agentclientprotocol/codex-acp/dist/index.js']"
+    },
+    {
+      "t_ms": 1008,
+      "direction": "sent",
+      "payload": {
+        "jsonrpc": "2.0",
+        "id": "initialize",
+        "method": "initialize",
+        "params": {
+          "protocolVersion": 1,
+          "clientCapabilities": {},
+          "clientInfo": {
+            "name": "acp-poc-harness",
+            "title": "ACP PoC Harness",
+            "version": "0.1.0"
+          }
+        }
+      }
+    },
+    {
+      "t_ms": 1015,
+      "direction": "received",
+      "payload": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": {
+          "protocolVersion": 1,
+          "agentInfo": {
+            "name": "@agentclientprotocol/codex-acp",
+            "title": "Codex",
+            "version": "1.11.0"
+          },
+          "agentCapabilities": {
+            "auth": {
+              "logout": {}
+            },
+            "providers": {},
+            "loadSession": true,
+            "promptCapabilities": {
+              "embeddedContext": true,
+              "image": true
+            },
+            "sessionCapabilities": {
+              "resume": {},
+              "list": {},
+              "close": {},
+              "delete": {},
+              "fork": {},
+              "additionalDirectories": {},
+              "subagents": {}
+            },
+            "mcpCapabilities": {
+              "acp": false,
+              "http": true,
+              "sse": false
+            },
+            "_meta": {
+              "authStatus": {}
+            }
+          },
+          "authMethods": [
+            {
+              "id": "api-key",
+              "name": "API Key",
+              "description": "Use an API key to authenticate",
+              "_meta": {
+                "api-key": {
+                  "provider": "openai"
+                }
+              }
+            },
+            {
+              "id": "chat-gpt",
+              "name": "ChatGPT",
+              "description": "Use ChatGPT to authenticate"
+            }
+          ],
+          "_meta": {
+            "steering": {
+              "supported": true
+            },
+            "goal": {
+              "version": 1,
+              "controlMethod": "_session/goal",
+              "actions": [
+                "set",
+                "pause",
+                "resume",
+                "clear"
+              ]
+            },
+            "jetbrains": {
+              "air": {
+                "version": 1,
+                "capabilities": [
+                  "sessionFailure",
+                  "agentFileChangeReport",
+                  "nativeSubagentSessions",
+                  "asyncTasks",
+                  "recommendedValue"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "t_ms": 1043,
+      "direction": "note",
+      "text": "terminated: exit=-15 signalled=True"
+    }
+  ]
+}
