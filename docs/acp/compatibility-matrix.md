@@ -2,6 +2,9 @@
 
 関連: [TODO.md](TODO.md), [調査報告](2026-09-15-codingagents-acp-investigation.md)
 
+方針承認: [ACP の委任とプロダクト判断 HITL contract](permission-hitl-contract.md)。技術的作業は
+Agent/profile に委任し、プロダクト判断だけを既存 Coordinator → HITL 経路へ送る。
+
 ACP v1 を初期採用版として固定。v2 は別 ticket（本移行と切り離し）。
 
 ## 環境

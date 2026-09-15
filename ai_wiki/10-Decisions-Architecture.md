@@ -26,8 +26,10 @@ cancel、progress notification を標準化し、Codex と OpenCode の双方に
   operation-scenario contract と別 ADR を要する。
 - Coordinator、Task の承認済み Directional Plan、Git root、repo lock、SQLite run/event、HITL は既存の
   正本のままにする。ACP plan / permission が Task の承認境界を置換することはない。
-- permission が Task policy の範囲外、または durable な人間回答を要する場合は、Agent に allow して接続を
-  待たせず deny/stop と既存 HITL の作成へ接続する。未回答のまま接続が失われた操作は実行しない。
+- 選択済み Git root 内の調査・実装・shell・テストという技術的実行は Agent と profile の
+  sandbox / approval 設定へ委任し、操作ごとの app allow/deny や HITL を行わない。要件・仕様・
+  優先順位などのプロダクト判断だけを、Worker の `<needs_user_input>` 報告から既存 `coding.ask_user`
+  HITL へ送る。ACP の technical permission / elicitation は HITL に変換しない。
 - 既存 direct CLI session は保存済み transport でのみ再開し、ACP session へ自動移行/replay しない。
   support window の終了後も履歴を削除せず archive する。
 
@@ -35,8 +37,8 @@ cancel、progress notification を標準化し、Codex と OpenCode の双方に
 
 - 新しい ACP Agent は profile と capability PoC を追加することで接続でき、transport 実装と test surface の
   provider 増殖を避けられる。
-- ACP v1 の capability negotiation、session lifecycle、双方向 permission、subprocess の長期管理を新たに
-  実装・監視する必要がある。Codex は外部 `codex-acp` package への依存も持つ。
+- ACP v1 の capability negotiation、session lifecycle、予期しない technical permission、subprocess の
+  長期管理を新たに実装・監視する必要がある。Codex は外部 `codex-acp` package への依存も持つ。
 - 直接 CLI を即削除しないため一時的に transport が二重になるが、Phase 2 の実測が安全な廃止判断を可能にする。
 - 既存の Agent 自律操作を完全に sandbox する保証は ACP により増えない。親 Task が保証できる範囲は従来どおり
   Plan・対象・起動境界までである。

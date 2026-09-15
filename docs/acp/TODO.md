@@ -56,22 +56,21 @@ session/取消の挙動を、書込み不能な隔離 repository で確認する
 
 ### Phase 0 完了条件
 
-- [ ] 両 Agent の `initialize` artifact と capability matrix がレビュー済みである。
-  （2026-09-15実測済み・要人間レビュー）
+- [x] 両 Agent の `initialize` artifact と capability matrix がレビュー済みである。
+  （2026-09-15実測、2026-09-15方針レビュー完了）
 - [x] session new、prompt、cancel、process cleanup、再接続可否の結果が再現可能な手順とともにある。
   （`tools/acp_poc/README.md` + `docs/acp/artifacts/`）
 - [x] 実装で必要な minimum capability と、profile に隔離すべき差異が確定している。
   （matrix「実装向け minimum capability」節）
-- [ ] permission/HITL の方針を次の operation-scenario contract として承認している。
-  （PoC所見: 最小capabilityでもAgent側sandboxは実行されるため、Task承認範囲外はdeny/stop＋
-  既存HITL接続の方針案はmatrix記載・要承認）
+- [x] permission/HITL の方針を [委任とプロダクト判断 HITL contract](permission-hitl-contract.md) として承認している。
+  （技術的作業はAgentへ委任し、プロダクト判断だけを既存HITLへ送る）
 
 | 段階 | 正本・識別子 | 停止・失敗 | 不可逆操作 |
 | --- | --- | --- | --- |
 | 交渉 | 登録済み profile、固定 version、`initialize` response | version/必須 capability 不一致なら prompt 前に failed | なし |
 | session | app session の transport/profile と ACP `sessionId` | 再開不能は profile の規則により新規化または failed。エラー本文から推測しない | なし |
 | prompt | 承認済み Task Plan、正規化 Git root、ACP prompt | protocol error、切断、cancel は監査可能な終端状態にする | Agent による workspace 変更の可能性 |
-| permission | ACP request、Task policy、HITL run ID | policy 外は deny/stop。接続が失われた未回答 request は実行しない | 許可後の Agent 操作 |
+| プロダクト質問 | Worker の `<needs_user_input>` 報告、既存 `coding.ask_user` | HITL の回答を次の Coordinator turn へ渡す。ACP technical permission は HITL にしない | なし |
 
 ## Phase 1 — 共通 ACP backend の追加（direct CLI を既定のまま維持）
 
@@ -113,10 +112,11 @@ session/取消の挙動を、書込み不能な隔離 repository で確認する
   は redact・上限化する。
 - [ ] 既存の Coordinator `<cli_request>` → Worker → 観測 → Coordinator のループは維持し、Worker の一回の
   呼出しだけを ACP `session/prompt` に差し替える。
-- [ ] `session/request_permission` の応答器を実装する。Task の承認済み範囲内の allow/deny を機械的に
-  決め、範囲外・持続的な質問は deny/stop と既存 HITL 作成へ接続する。
-- [ ] ACP elicitation を初期リリースで advertise するかを明示的に決める。advertise する場合は、
-  HITL run と verified user/connection の紐付け、cancel、restart を縦断実装する。
+- [ ] Worker がプロダクト判断を必要とするとき、既存 `<needs_user_input>` → Coordinator →
+  `coding.ask_user` HITL → 次の Coordinator turn の経路を ACP worker でも維持する。
+- [ ] ACP `session/request_permission` はプロダクト HITL に変換しない。profile が選択済み Git root 内の
+  委任作業として事前定義した option がある場合だけ応答し、それ以外は run を failed にする。
+- [x] ACP elicitation は初期リリースで advertise しない。接続断をまたぐ質問は既存 HITL が所有する。
 - [ ] Client fs/terminal は非 advertise のままにする。将来の提供は別 ADR と operation-scenario contract を
   必須にする。
 - [ ] Codex / OpenCode の profile を追加し、固有の起動・認証・config だけを profile に置く。
@@ -129,8 +129,10 @@ session/取消の挙動を、書込み不能な隔離 repository で確認する
   timeout、cancel、close を確認する。
 - [ ] 状態系: restart 後の interrupted 化、resume 可/不可、session ID 不在、再作成、旧 direct CLI session
   の継続を確認する。
-- [ ] 権限系: policy 外 permission、HITL 待機、回答前の切断、cancel、重複回答が副作用なしで停止することを
-  確認する。
+- [ ] 委任/HITL系: 通常の Agent 作業が操作単位の HITL を作らないこと、`<needs_user_input>` だけが
+  `coding.ask_user` を作ること、回答前の切断・cancel・重複回答が安全に停止することを確認する。
+- [ ] ACP permission系: profile の既知 option は応答を記録して処理でき、未知 option は HITL を作らず
+  failed に停止することを確認する。
 - [ ] Task Agent からの coding child run で、Plan allowlist、repo lock、child cancel、event link が保たれる
   結合テストを追加する。
 - [ ] operation-scenario contract、不可逆操作、identity/schema boundary、失敗/停止規則を背景に含めて

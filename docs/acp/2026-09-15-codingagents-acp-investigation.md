@@ -135,11 +135,13 @@ ACP の `session/request_permission` は、Agent が処理中に Client へ送�
 ACP request をそのまま「UI に許可ダイアログを出し、その接続で待つ」実装にすると、Web server restart や
 切断時に回答先を失う。MVP では以下を明確に選ぶ必要がある。
 
-- Task の承認済み Plan と既存 policy が許す操作だけを、ACP Client が allow / deny に変換する。
-- plan 外、または永続的な質問が必要な request は、ACP Agent に deny/stop を返し、アプリ側で既存 HITL
-  run を作る。回答後は新規 prompt ないし再開可能な session で文脈を渡す。
-- `fs` / `terminal` capability を安易に advertise しない。advertise するなら、Git root 制限、実行監査、
-  取消、HITL の責務を持つ Client 実装が必要である。
+- 選択済み Git root 内の技術的な調査・実装・テストは Coding Agent に委任し、アプリが操作ごとに
+  allow / deny や HITL を挟まない。
+- 要件・仕様・優先順位などのプロダクト判断だけを、既存 Worker の `<needs_user_input>` 報告から
+  Coordinator と durable な HITL run へ送る。ACP Agent の technical permission / elicitation はこの
+  プロダクト質問経路に混ぜない。
+- `fs` / `terminal` / `elicitation` capability は初期リリースで advertise しない。これはアプリのサービスを
+  Agent に貸さない宣言であって、Agent 自身の sandbox 内操作を禁止するものではない。
 
 この分離は、既存 ADR の「親 Task は Coding Agent 内部の権限・Plan逸脱を技術的に保証しない」という境界も
 変えない。ACP は可視性と permission point を増やすが、Agent 自身が持つ filesystem/terminal 権限を
@@ -263,4 +265,3 @@ ACP 導入はコードを書き込ませ得る authorization boundary に関わ�
 - [OpenCode `acp` command source](https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/cli/cmd/acp.ts) — OpenCode の ACP server 起動と stdio NDJSON 接続。
 - [ACP Python SDK](https://agentclientprotocol.com/libraries/python) — Pydantic models、async base classes、JSON-RPC plumbing。
 - [ACP v2 Overview](https://agentclientprotocol.com/protocol/v2/overview) — v2 が v1 と異なる lifecycle を持つことの確認用（採用対象ではない）。
-
