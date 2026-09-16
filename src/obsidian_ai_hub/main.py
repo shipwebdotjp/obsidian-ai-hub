@@ -153,7 +153,7 @@ def main():
     parser.add_argument(
         "--suggest-research-theme",
         action="store_true",
-        help="最近30日のノートから研究候補を生成して追記",
+        help="Task Agentに最適リサーチテーマの選定・HITL候補登録タスクを投入",
     )
     parser.add_argument(
         "--generate-planner-proposals",

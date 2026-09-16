@@ -31,6 +31,13 @@ def test_list_available_tools():
         "skills",
         "run_shell",
         "agent_delegate",
+        "research_context_snapshot",
+        "research_theme_history_search",
+        "activity_search",
+        "periodic_note_read",
+        "agent_conversation_search",
+        "coding_history_search",
+        "research_theme_propose",
     }
     # Order is not contractual; assert membership instead.
     assert set(tool_ids) == expected_ids

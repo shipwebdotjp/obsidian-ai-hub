@@ -697,7 +697,28 @@ def get_db_connection() -> sqlite3.Connection:
     if current_version <= 45:
         run_migration_v46(conn)
 
+    if current_version <= 46:
+        run_migration_v47(conn)
+
     return conn
+
+
+def run_migration_v47(db: sqlite3.Connection) -> None:
+    """Run migration for version 47 (research_suggestion_requests table for research proposal idempotency)."""
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS research_suggestion_requests (
+            request_key TEXT PRIMARY KEY,
+            theme_id TEXT NOT NULL REFERENCES research_themes(theme_id) ON DELETE CASCADE,
+            hitl_run_id TEXT NOT NULL REFERENCES hitl_runs(run_id) ON DELETE CASCADE,
+            created_at TEXT NOT NULL
+        );
+    """)
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_research_suggestion_requests_created "
+        "ON research_suggestion_requests(created_at);"
+    )
+    db.execute("PRAGMA user_version = 47")
+    db.commit()
 
 
 def run_migration_v45(db: sqlite3.Connection) -> None:

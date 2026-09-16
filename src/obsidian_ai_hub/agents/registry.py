@@ -364,6 +364,163 @@ class AgentDelegateInput(BaseModel):
     )
 
 
+class ResearchContextSnapshotInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class ResearchThemeHistorySearchInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    query: Optional[str] = Field(
+        default=None,
+        description="検索キーワード（テーマ・方向性・理由など）。部分一致検索。",
+    )
+    status: Optional[Literal["candidate", "approved", "rejected", "duplicate"]] = Field(
+        default=None,
+        description="テーマ状態での絞り込み: candidate, approved, rejected, duplicate。",
+    )
+    feedback_decision: Optional[Literal["approved", "rejected"]] = Field(
+        default=None,
+        description="HITLフィードバック決定での絞り込み: approved, rejected。",
+    )
+    limit: int = Field(
+        default=10,
+        ge=1,
+        le=20,
+        strict=True,
+        description="最大返却件数 (1-20)。既定: 10。",
+    )
+
+
+class ActivitySearchInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    query: Optional[str] = Field(
+        default=None,
+        description="要約やキーワードの部分一致検索。",
+    )
+    start_date: Optional[str] = Field(
+        default=None,
+        description="開始日 (YYYY-MM-DD)。",
+    )
+    end_date: Optional[str] = Field(
+        default=None,
+        description="終了日 (YYYY-MM-DD)。",
+    )
+    category: Optional[str] = Field(
+        default=None,
+        description="カテゴリ名で絞り込み。",
+    )
+    project_id: Optional[int] = Field(
+        default=None,
+        strict=True,
+        description="プロジェクトIDで絞り込み。",
+    )
+    limit: int = Field(
+        default=10,
+        ge=1,
+        le=20,
+        strict=True,
+        description="最大返却件数 (1-20)。既定: 10。",
+    )
+
+
+class PeriodicNoteReadInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    period_type: Literal["day", "week"] = Field(
+        description="ノートの期間種別: 'day' (Daily Note) または 'week' (Weekly Note)。",
+    )
+    reference_date: str = Field(
+        description="基準日 (YYYY-MM-DD)。例: '2026-09-15'。",
+    )
+
+
+class AgentConversationSearchInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    query: str = Field(
+        min_length=1,
+        description="検索キーワード（必須）。メッセージ本文から部分一致検索。",
+    )
+    start_date: Optional[str] = Field(
+        default=None,
+        description="開始日時/日付での絞り込み。",
+    )
+    end_date: Optional[str] = Field(
+        default=None,
+        description="終了日時/日付での絞り込み。",
+    )
+    agent_id: Optional[str] = Field(
+        default=None,
+        description="エージェントIDで絞り込み。",
+    )
+    limit: int = Field(
+        default=5,
+        ge=1,
+        le=10,
+        strict=True,
+        description="最大返却件数 (1-10)。既定: 5。",
+    )
+
+
+class CodingHistorySearchInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    query: str = Field(
+        min_length=1,
+        description="検索キーワード（必須）。プロンプトやオーケストレーター・ワーカーのメッセージから部分一致検索。",
+    )
+    start_date: Optional[str] = Field(
+        default=None,
+        description="開始日時/日付での絞り込み。",
+    )
+    end_date: Optional[str] = Field(
+        default=None,
+        description="終了日時/日付での絞り込み。",
+    )
+    project_id: Optional[int] = Field(
+        default=None,
+        strict=True,
+        description="プロジェクトIDで絞り込み。",
+    )
+    limit: int = Field(
+        default=5,
+        ge=1,
+        le=10,
+        strict=True,
+        description="最大返却件数 (1-10)。既定: 5。",
+    )
+
+
+class ResearchThemeProposeInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    theme: str = Field(
+        max_length=80,
+        description="提案するリサーチテーマ（80文字以内）。必須。",
+    )
+    direction: str = Field(
+        default="",
+        max_length=140,
+        description="調査の方向性・焦点（140文字以内）。省略可。",
+    )
+    kind: Literal["deep", "adjacent", "explore"] = Field(
+        default="explore",
+        description="テーマ種別: deep, adjacent, explore のいずれか。",
+    )
+    why_now: str = Field(
+        default="",
+        description="今このテーマを提案する理由・背景。省略可。",
+    )
+    confidence: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=1.0,
+        description="提案の自信度 (0.0 - 1.0)。既定: 0.0。",
+    )
+
+
 # --- Memory Tool Factories (require trusted context) ---
 
 
@@ -951,6 +1108,185 @@ def run_shell(command: str) -> str:
         raise
 
 
+def _make_research_theme_propose_tool(
+    trusted_ctx: Optional[Dict[str, Any]] = None,
+) -> BaseTool:
+    @tool(args_schema=ResearchThemeProposeInput)
+    def research_theme_propose(
+        theme: str,
+        direction: str = "",
+        kind: str = "explore",
+        why_now: str = "",
+        confidence: float = 0.0,
+    ) -> str:
+        """リサーチテーマ候補を1件提案し、人間の承認リクエスト（HITL）を登録します。"""
+        try:
+            from obsidian_ai_hub.research.capabilities import propose_research_theme_handler
+
+            res = propose_research_theme_handler(
+                theme=theme,
+                direction=direction,
+                kind=kind,
+                why_now=why_now,
+                confidence=confidence,
+                trusted_ctx=trusted_ctx,
+            )
+            return json.dumps(res, ensure_ascii=False)
+        except EXPECTED_TOOL_EXCEPTIONS as exc:
+            logger.warning("research_theme_propose failed: %s", exc)
+            return json.dumps({"error": str(exc)}, ensure_ascii=False)
+        except Exception as exc:
+            logger.exception("research_theme_propose failed")
+            return json.dumps({"error": _sanitize_unexpected_error(exc)}, ensure_ascii=False)
+
+    research_theme_propose.name = "research_theme_propose"  # type: ignore[attr-defined]
+    return research_theme_propose
+
+
+@tool(args_schema=ResearchContextSnapshotInput)
+def research_context_snapshot() -> str:
+    """直近7日のDaily Note、最新Weekly Note、直近アクティビティ、既存テーマとフィードバックの要約スナップショットを取得します。"""
+    try:
+        from obsidian_ai_hub.research.capabilities import get_research_context_snapshot
+
+        res = get_research_context_snapshot()
+        return json.dumps(res, ensure_ascii=False)
+    except EXPECTED_TOOL_EXCEPTIONS as exc:
+        logger.warning("research_context_snapshot failed: %s", exc)
+        return json.dumps({"error": str(exc)}, ensure_ascii=False)
+    except Exception as exc:
+        logger.exception("research_context_snapshot failed")
+        return json.dumps({"error": _sanitize_unexpected_error(exc)}, ensure_ascii=False)
+
+
+@tool(args_schema=ResearchThemeHistorySearchInput)
+def research_theme_history_search(
+    query: Optional[str] = None,
+    status: Optional[str] = None,
+    feedback_decision: Optional[str] = None,
+    limit: int = 10,
+) -> str:
+    """過去のリサーチテーマ・方向性・状態・最新job結果・フィードバック理由を検索します。"""
+    try:
+        from obsidian_ai_hub.research.capabilities import search_research_theme_history
+
+        res = search_research_theme_history(
+            query=query,
+            status=status,
+            feedback_decision=feedback_decision,
+            limit=limit,
+        )
+        return json.dumps(res, ensure_ascii=False)
+    except EXPECTED_TOOL_EXCEPTIONS as exc:
+        logger.warning("research_theme_history_search failed: %s", exc)
+        return json.dumps({"error": str(exc)}, ensure_ascii=False)
+    except Exception as exc:
+        logger.exception("research_theme_history_search failed")
+        return json.dumps({"error": _sanitize_unexpected_error(exc)}, ensure_ascii=False)
+
+
+@tool(args_schema=ActivitySearchInput)
+def activity_search(
+    query: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    category: Optional[str] = None,
+    project_id: Optional[int] = None,
+    limit: int = 10,
+) -> str:
+    """アクティビティログを期間・キーワード・カテゴリ・プロジェクトで検索します（画像は含まず要約・キーワード・時刻のみ）。"""
+    try:
+        from obsidian_ai_hub.research.capabilities import search_activities
+
+        res = search_activities(
+            query=query,
+            start_date=start_date,
+            end_date=end_date,
+            category=category,
+            project_id=project_id,
+            limit=limit,
+        )
+        return json.dumps(res, ensure_ascii=False)
+    except EXPECTED_TOOL_EXCEPTIONS as exc:
+        logger.warning("activity_search failed: %s", exc)
+        return json.dumps({"error": str(exc)}, ensure_ascii=False)
+    except Exception as exc:
+        logger.exception("activity_search failed")
+        return json.dumps({"error": _sanitize_unexpected_error(exc)}, ensure_ascii=False)
+
+
+@tool(args_schema=PeriodicNoteReadInput)
+def periodic_note_read(period_type: str, reference_date: str) -> str:
+    """基準日を指定して設定済みの Daily Note (period_type='day') または Weekly Note (period_type='week') の内容を取得します。"""
+    try:
+        from obsidian_ai_hub.research.capabilities import read_periodic_note
+
+        res = read_periodic_note(period_type=period_type, reference_date=reference_date)
+        return json.dumps(res, ensure_ascii=False)
+    except EXPECTED_TOOL_EXCEPTIONS as exc:
+        logger.warning("periodic_note_read failed: %s", exc)
+        return json.dumps({"error": str(exc)}, ensure_ascii=False)
+    except Exception as exc:
+        logger.exception("periodic_note_read failed")
+        return json.dumps({"error": _sanitize_unexpected_error(exc)}, ensure_ascii=False)
+
+
+@tool(args_schema=AgentConversationSearchInput)
+def agent_conversation_search(
+    query: str,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    agent_id: Optional[str] = None,
+    limit: int = 5,
+) -> str:
+    """AI エージェントの会話履歴からキーワード（必須）で検索し、一致箇所周辺の短い抜粋と識別子を取得します。"""
+    try:
+        from obsidian_ai_hub.research.capabilities import search_agent_conversations
+
+        res = search_agent_conversations(
+            query=query,
+            start_date=start_date,
+            end_date=end_date,
+            agent_id=agent_id,
+            limit=limit,
+        )
+        return json.dumps(res, ensure_ascii=False)
+    except EXPECTED_TOOL_EXCEPTIONS as exc:
+        logger.warning("agent_conversation_search failed: %s", exc)
+        return json.dumps({"error": str(exc)}, ensure_ascii=False)
+    except Exception as exc:
+        logger.exception("agent_conversation_search failed")
+        return json.dumps({"error": _sanitize_unexpected_error(exc)}, ensure_ascii=False)
+
+
+@tool(args_schema=CodingHistorySearchInput)
+def coding_history_search(
+    query: str,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    project_id: Optional[int] = None,
+    limit: int = 5,
+) -> str:
+    """Coding Workspace の実行・会話履歴からキーワード（必須）で検索し、一致箇所周辺の短い抜粋と識別子を取得します。"""
+    try:
+        from obsidian_ai_hub.research.capabilities import search_coding_history
+
+        res = search_coding_history(
+            query=query,
+            start_date=start_date,
+            end_date=end_date,
+            project_id=project_id,
+            limit=limit,
+        )
+        return json.dumps(res, ensure_ascii=False)
+    except EXPECTED_TOOL_EXCEPTIONS as exc:
+        logger.warning("coding_history_search failed: %s", exc)
+        return json.dumps({"error": str(exc)}, ensure_ascii=False)
+    except Exception as exc:
+        logger.exception("coding_history_search failed")
+        return json.dumps({"error": _sanitize_unexpected_error(exc)}, ensure_ascii=False)
+
+
 # --- Tool Registry Definition ---
 
 _BUILTIN_TOOL_DEFINITIONS: Dict[str, Dict[str, Any]] = {
@@ -1072,6 +1408,49 @@ _BUILTIN_TOOL_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "name": "会話内質問",
         "description": "会話内でユーザーに1つまたは複数の質問（要件定義、確認事項、選択肢）を行います。",
         "get_tool": lambda: __import__("obsidian_ai_hub.agents.ask_user", fromlist=["ask_user"]).ask_user,
+    },
+    "research_context_snapshot": {
+        "tool_id": "research_context_snapshot",
+        "name": "リサーチ文脈スナップショット",
+        "description": "直近7日のノート、最新週次ノート、直近アクティビティ、既存リサーチテーマとフィードバックを取得します。",
+        "get_tool": lambda: research_context_snapshot,
+    },
+    "research_theme_history_search": {
+        "tool_id": "research_theme_history_search",
+        "name": "リサーチテーマ履歴検索",
+        "description": "過去のリサーチテーマ・方向性・状態・最新job結果・フィードバック理由を検索します。",
+        "get_tool": lambda: research_theme_history_search,
+    },
+    "activity_search": {
+        "tool_id": "activity_search",
+        "name": "アクティビティ検索",
+        "description": "アクティビティログを期間・キーワード・カテゴリ・プロジェクトで検索します（要約・キーワード・時刻のみ）。",
+        "get_tool": lambda: activity_search,
+    },
+    "periodic_note_read": {
+        "tool_id": "periodic_note_read",
+        "name": "定期ノート読取",
+        "description": "基準日を指定して Daily Note または Weekly Note の内容を取得します。",
+        "get_tool": lambda: periodic_note_read,
+    },
+    "agent_conversation_search": {
+        "tool_id": "agent_conversation_search",
+        "name": "エージェント会話検索",
+        "description": "AI エージェント会話履歴からキーワードで検索し、一致箇所の短い抜粋と識別子を取得します。",
+        "get_tool": lambda: agent_conversation_search,
+    },
+    "coding_history_search": {
+        "tool_id": "coding_history_search",
+        "name": "Coding履歴検索",
+        "description": "Coding Workspace 履歴からキーワードで検索し、一致箇所の短い抜粋と識別子を取得します。",
+        "get_tool": lambda: coding_history_search,
+    },
+    "research_theme_propose": {
+        "tool_id": "research_theme_propose",
+        "name": "リサーチテーマ提案 (HITL)",
+        "description": "ユーザーに最適なリサーチテーマを1件提案し、人間の調査承認リクエスト（HITL）として登録します。",
+        "get_tool": lambda: _make_research_theme_propose_tool(None),
+        "get_tool_with_context": lambda ctx: _make_research_theme_propose_tool(ctx),
     },
 }
 

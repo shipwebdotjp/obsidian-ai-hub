@@ -61,11 +61,18 @@ AUTO_POLICY_TOOL_IDS: frozenset[str] = frozenset(
         "people_get",
         "project_search",
         "project_get",
+        "research_context_snapshot",
+        "research_theme_history_search",
+        "activity_search",
+        "periodic_note_read",
+        "agent_conversation_search",
+        "coding_history_search",
         # Proposal tools only register an existing HITL approval run and never
         # write directly, so auto execution still requires human approval via
         # that HITL. Defaulting to auto avoids a redundant plan confirmation.
         "calendar_create_proposal",
         "reminder_create_proposal",
+        "research_theme_propose",
     }
 )
 
