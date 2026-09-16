@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { CodingMessageList } from "./CodingMessageList";
 import type { CodingMessage } from "../../../api/coding";
@@ -121,7 +121,7 @@ describe("CodingMessageList bubbles", () => {
 
     const card = screen.getByTestId("cli-request-card");
     expect(card).toBeInTheDocument();
-    expect(card).not.toHaveAttribute("open");
+    expect(card).toHaveAttribute("open");
     expect(screen.queryByText(/🤖/)).not.toBeInTheDocument();
     expect(screen.getByText("Workerへの指示")).toBeInTheDocument();
     expect(screen.getByText("▼")).toBeInTheDocument();
@@ -140,6 +140,7 @@ describe("CodingMessageList bubbles", () => {
     );
 
     expect(screen.getByText(/Worker 最終返答/)).toBeInTheDocument();
+    expect(screen.getByTestId("worker-response-card")).toHaveAttribute("open");
     expect(screen.getByText("▼")).toBeInTheDocument();
     expect(screen.getByText("▲")).toBeInTheDocument();
   });
@@ -157,10 +158,34 @@ describe("CodingMessageList bubbles", () => {
     expect(summary).not.toBeNull();
     if (summary) {
       fireEvent.click(summary);
-      expect(card).toHaveAttribute("open");
-      fireEvent.click(summary);
       expect(card).not.toHaveAttribute("open");
+      fireEvent.click(summary);
+      expect(card).toHaveAttribute("open");
     }
+  });
+
+  it("折りたたんだペインは再レンダーで開き直らない", () => {
+    const messages = [
+      message({ message_id: "c1", role: "cli_request", content: "git status" }),
+    ];
+    const { rerender } = render(
+      <CodingMessageList {...baseProps} messages={messages} onCopyMessage={vi.fn()} />,
+    );
+
+    const summary = screen.getByTestId("cli-request-card").querySelector("summary");
+    expect(summary).not.toBeNull();
+    if (summary) fireEvent.click(summary);
+    expect(screen.getByTestId("cli-request-card")).not.toHaveAttribute("open");
+
+    rerender(
+      <CodingMessageList
+        {...baseProps}
+        messages={[...messages, message({ message_id: "u2", content: "追記" })]}
+        onCopyMessage={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId("cli-request-card")).not.toHaveAttribute("open");
   });
 
   it("再読み込み中も既存メッセージを維持し高さを潰さない", () => {
@@ -292,5 +317,31 @@ describe("Worker実行情報ブロック", () => {
       />,
     );
     expect(screen.queryByText(/権限制限/)).not.toBeInTheDocument();
+  });
+
+  it("複数試行のrunでは累積トークン使用量を表示する", () => {
+    render(
+      <CodingMessageList
+        {...workerProps({
+          acp_session_id: "s1",
+          usage: { input: 50, output: 5, total: 60 },
+          usage_cumulative: {
+            input: 1500,
+            output: 25,
+            total: 1600,
+            cached: 40,
+            used_max: 2000,
+            size_max: 200000,
+          },
+          worker_attempt_count: 2,
+        })}
+      />,
+    );
+
+    const card = screen.getByTestId("worker-diagnostics");
+    expect(within(card).getByText(/1\.6k/)).toBeInTheDocument();
+    expect(within(card).getByText(/2回試行/)).toBeInTheDocument();
+    // 累積に最終試行が含まれるため、最終試行行は重複表示しない
+    expect(within(card).queryByText(/合計 60/)).not.toBeInTheDocument();
   });
 });

@@ -4,6 +4,17 @@
 
 ## 次のセッションへの引き継ぎ（handoff）
 
+### 2026-09-16: コーディングのトークン使用量積算と初期展開ペイン
+
+決定記録: `10-Decisions-Architecture.md`「コーディング実行のトークン使用量積算と試行単位の合算方針」。
+
+実装完了・検証済:
+
+- バックエンド: `src/obsidian_ai_hub/coding/usage.py` を追加。`service.run_coding_turn_stream` と `runs/coding_worker.execute_coding_run` の両経路で、run 内の全ワーカー試行の usage を積算し `diagnostics_json.usage_cumulative` と `worker_attempt_count` を記録。HITL 再開時は保存済み累積を読み戻す（旧データは試行単位 `usage` へフォールバック）。
+- フロントエンド: `features/coding/utils/codingUsage.ts`（集計・整形）を追加。Workerへの指示／Worker最終返答ペインを既定で開き、実行情報に「この実行の累積」、会話ヘッダーに `data-testid="session-token-usage"` でセッション累積（入力/キャッシュ読取/出力/合計＋費用）を表示。
+- 検証: `uv run pytest tests/` → `1390 passed`。Frontend `vitest` → `468 passed`、`npm run build` OK。実サーバー（:8765）で 2 run 分のセッション累積と全ペイン初期展開を目視確認。OCR 5 件は `defaultOpen` 指摘（React 非対応）を除き対応済み。
+- 注意: オーケストレーター（Coordinator）側 LLM のトークンは未計測で対象外。UI はワーカー分であることを「この実行の累積」と明示。
+
 ### 2026-08-19: 1分間隔タスクのログ抑制（task_state + 日次クリーンアップ）実装済
 
 決定記録: `10-Decisions-Architecture.md`「1分間隔タスク向けのログ抑制（task_state 集計 + 日次クリーンアップ）」。

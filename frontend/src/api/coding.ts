@@ -61,6 +61,20 @@ export interface CodingDiagnosticsUsage {
   cost?: { amount?: number | null; currency?: string | null } | null;
 }
 
+/** Run-wide accumulation across every worker attempt in one run. */
+export interface CodingDiagnosticsUsageCumulative {
+  input?: number | null;
+  output?: number | null;
+  total?: number | null;
+  cached?: number | null;
+  /** Max context-window usage observed (never summed; it is a snapshot). */
+  used_max?: number | null;
+  /** Context window size observed. */
+  size_max?: number | null;
+  /** Summed cost across attempts. */
+  cost?: { amount?: number | null; currency?: string | null } | null;
+}
+
 export interface CodingDiagnostics {
   // 新ACP診断（任意）。旧direct_cli runは旧キーのみ持つ。
   transport?: string | null;
@@ -75,6 +89,10 @@ export interface CodingDiagnostics {
   worker_tool_call_count?: number | null;
   worker_tool_failure_count?: number | null;
   usage?: CodingDiagnosticsUsage | null;
+  /** Aggregate over all worker attempts in the run (present when usage existed). */
+  usage_cumulative?: CodingDiagnosticsUsageCumulative | null;
+  /** Number of worker attempts that contributed to the run. */
+  worker_attempt_count?: number | null;
   exit_code?: number | null;
   error?: string | null;
   // 旧direct_cli診断（後方互換のため読取のみ）。

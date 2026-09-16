@@ -879,6 +879,45 @@ def test_superseded_editing_restrictions(clean_memory_env):
         )
 
 
+def test_update_memory_fields_with_person_ids(clean_memory_env):
+    conn = memory.get_db_connection()
+    try:
+        conn.execute(
+            "INSERT INTO people (person_id, display_name, normalized_name, vault_id) "
+            "VALUES (?, ?, ?, ?)",
+            ("peo_a", "甲", "甲", "a"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    m = {
+        "memory_id": "mem_person_edit",
+        "status": "candidate",
+        "scope": "person",
+        "kind": "episode",
+        "content": "元の内容",
+        "people": [{"person_id": "peo_a", "display_name": "甲"}],
+        "created_at": "2026-07-14T10:00:00+09:00",
+        "updated_at": "2026-07-14T10:00:00+09:00",
+    }
+    memory.save_all_memories([m])
+
+    result = memory.update_memory_fields(
+        "mem_person_edit", {"content": "更新後の内容", "person_ids": ["peo_a"]}
+    )
+
+    assert result["found"] is True
+    assert result["updated"] is True
+    assert result["memory"]["people"] == [
+        {"person_id": "peo_a", "display_name": "甲"}
+    ]
+
+    stored = memory.get_memory("mem_person_edit")
+    assert stored["content"] == "更新後の内容"
+    assert stored["people"] == [{"person_id": "peo_a", "display_name": "甲"}]
+
+
 def test_resolve_memory_merge_existing(clean_memory_env):
     target = {
         "memory_id": "mem_existing_target",

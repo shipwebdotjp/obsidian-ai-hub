@@ -22,7 +22,7 @@ def _now_iso() -> str:
 async def execute_coding_run(run_id: str) -> None:
     """Execute one claimed coding run to a terminal state, persisting events."""
     from obsidian_ai_hub.agents import runtime as agents_runtime
-    from obsidian_ai_hub.coding import backend, store
+    from obsidian_ai_hub.coding import backend, store, usage
     from obsidian_ai_hub.coding import service as coding_service
     from obsidian_ai_hub.coding.orchestrator import (
         PROTOCOL_CORRECTION_INSTRUCTION,
@@ -198,6 +198,9 @@ async def execute_coding_run(run_id: str) -> None:
         final_status = "completed"
         title_source: Optional[str] = None
         current_external_id = session.get("acp_session_id")
+        # Accumulate token usage across the worker attempts of this run; a HITL
+        # resume re-enters here with the earlier attempts still persisted.
+        usage_totals = usage.usage_totals_from_diagnostics(run.get("diagnostics"))
 
         # Load user prompt from the queued user message.
         user_msg = store.get_message(str(run.get("user_message_id") or ""))
@@ -689,6 +692,8 @@ async def execute_coding_run(run_id: str) -> None:
                     session_id, role="worker", content=worker_output, run_id=run_id
                 )
                 worker_msg_id = worker_msg["message_id"]
+                usage.accumulate_usage(usage_totals, diag.get("usage"))
+                usage.attach_usage_cumulative(diag, usage_totals, cli_count)
                 diag_json_str = (
                     json.dumps(diag, ensure_ascii=False)
                     if diag

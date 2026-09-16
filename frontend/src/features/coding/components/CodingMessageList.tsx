@@ -20,6 +20,12 @@ import {
   groupToolCallsByMessageId,
   groupUnassociatedToolCallsByRunId,
 } from "../utils/codingSelectors";
+import {
+  formatCost,
+  formatTokenBreakdown,
+  hasCumulativeUsage,
+  runUsageSummary,
+} from "../utils/codingUsage";
 
 interface CodingMessageListProps {
   messages: CodingMessage[];
@@ -424,9 +430,13 @@ export function CodingMessageList({
               <>
                 <div className="flex min-w-0 justify-start">
                   <div className="w-full max-w-2xl min-w-0">
+                    {/* `open` is the initial-open state: React has no
+                        `defaultOpen` for <details>, and a constant `open` prop
+                        never resets a user collapse on re-render. */}
                     <details
                       className="rounded-xl border border-blue-200 bg-blue-50 text-xs text-blue-950 shadow-sm overflow-hidden group min-w-0"
                       data-testid="cli-request-card"
+                      open
                     >
                       <summary className="flex cursor-pointer items-center justify-between px-4 py-2.5 bg-blue-100/80 font-mono text-[11px] text-blue-950 font-semibold hover:bg-blue-100">
                         <span className="flex items-center gap-1.5">
@@ -463,7 +473,12 @@ export function CodingMessageList({
               <>
                 <div className="flex min-w-0 justify-start">
                   <div className="w-full max-w-2xl min-w-0">
-                    <details className="rounded-xl border border-slate-200 bg-slate-900 text-slate-100 text-xs shadow-sm overflow-hidden group min-w-0">
+                    {/* Initial-open; see the cli_request card note above. */}
+                    <details
+                      className="rounded-xl border border-slate-200 bg-slate-900 text-slate-100 text-xs shadow-sm overflow-hidden group min-w-0"
+                      data-testid="worker-response-card"
+                      open
+                    >
                       <summary className="flex cursor-pointer items-center justify-between px-4 py-2.5 bg-slate-800 font-mono text-[11px] hover:bg-slate-700">
                         <span>Worker 最終返答 ({backend})</span>
                         <span className="text-slate-400 text-[10px]" aria-hidden="true">
@@ -513,9 +528,15 @@ export function CodingMessageList({
                             typeof usage.size === "number" ||
                             typeof usage.cost?.amount === "number")
                         );
-                        const costText =
-                          typeof usage?.cost?.amount === "number"
-                            ? `${usage.cost.amount}${usage.cost.currency ? ` ${usage.cost.currency}` : ""}`
+                        // Run-wide accumulation over every worker attempt. Falls
+                        // back to the last attempt for runs persisted before the
+                        // backend began accumulating.
+                        const runUsage = runUsageSummary(msgRun);
+                        const cumulativeUsage = hasCumulativeUsage(msgRun);
+                        const attemptCount =
+                          typeof diag.worker_attempt_count === "number" &&
+                          Number.isFinite(diag.worker_attempt_count)
+                            ? diag.worker_attempt_count
                             : null;
                         const resultText =
                           msgRun?.status && msgRun.status !== "completed"
@@ -536,6 +557,7 @@ export function CodingMessageList({
                             profile ||
                             hasAgent ||
                             hasUsage ||
+                            runUsage ||
                             structError ||
                             (msgRun?.status && msgRun.status !== "completed")
                           );
@@ -601,22 +623,18 @@ export function CodingMessageList({
                                 </span>
                               </div>
                             )}
-                            {hasUsage && (
+                            {runUsage && (
                               <div>
-                                <span className="text-slate-500">トークン使用量: </span>
+                                <span className="text-slate-500">
+                                  {cumulativeUsage
+                                    ? `トークン使用量（この実行の累積${attemptCount && attemptCount > 1 ? `・${attemptCount}回試行` : ""}）: `
+                                    : "トークン使用量: "}
+                                </span>
                                 <span className="text-slate-200">
-                                  {[
-                                    typeof usage?.input === "number" ? `入力 ${usage.input}` : null,
-                                    typeof usage?.output === "number" ? `出力 ${usage.output}` : null,
-                                    typeof usage?.cached === "number" ? `キャッシュ読取 ${usage.cached}` : null,
-                                    typeof usage?.total === "number" ? `合計 ${usage.total}` : null,
-                                    typeof usage?.used === "number"
-                                      ? `使用 ${usage.used}${typeof usage?.size === "number" ? ` / ${usage.size}` : ""}`
-                                      : null,
-                                  ]
-                                    .filter(Boolean)
-                                    .join(" / ")}
-                                  {costText ? ` (費用 ${costText})` : ""}
+                                  {formatTokenBreakdown(runUsage)}
+                                  {runUsage.costAmount !== undefined
+                                    ? `（費用 ${formatCost(runUsage.costAmount, runUsage.costCurrency)}）`
+                                    : ""}
                                 </span>
                               </div>
                             )}

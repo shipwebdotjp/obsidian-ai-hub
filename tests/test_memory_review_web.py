@@ -170,6 +170,33 @@ def test_edit_writable_fields_auto_approve(loopback_client):
     assert "unknown-topic" not in mem["topics"]
 
 
+def test_edit_with_person_ids(loopback_client):
+    conn = memory.get_db_connection()
+    try:
+        conn.execute(
+            "INSERT INTO people (person_id, display_name, normalized_name, vault_id) "
+            "VALUES (?, ?, ?, ?)",
+            ("peo_a", "甲", "甲", "a"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    cand = _make_candidate("mem_person", content="old")
+    cand["scope"] = "person"
+    cand["people"] = [{"person_id": "peo_a", "display_name": "甲"}]
+    memory.save_all_memories(memory.load_all_memories() + [cand])
+
+    res = loopback_client.post(
+        "/api/v1/memories/mem_person/edit",
+        json={"content": "new", "person_ids": ["peo_a"]},
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["updated"] is True
+    assert body["memory"]["people"] == [{"person_id": "peo_a", "display_name": "甲"}]
+
+
 def test_edit_rejects_invalid_date_range(loopback_client):
     _seed("mem_d")
     res = loopback_client.post(

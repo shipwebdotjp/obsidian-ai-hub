@@ -479,6 +479,34 @@ OpenCode および Codex CLI の外部セッション/thread は外部で有効�
 - **フェーズ完了型SSE契約**:
   - 生の `orchestrator_chunk` を廃止し、`orchestrator_start`（`phase: initial | review`）および保存済み `CodingMessage` を含む `orchestrator_message` / `worker_done` に統一することで、画面上の内部タグ露出や中途半端な文字送りを防ぐ。
 
+## コーディング実行のトークン使用量積算と試行単位の合算方針
+
+| 項目 | 内容 |
+|------|------|
+| 決定日 | 2026-09-16 |
+| カテゴリ | コーディングワークスペース・ACP ワーカー・診断 |
+| 決定内容 | ACP ワーカーのトークン使用量は、1 run 内の全ワーカー試行を合算した `usage_cumulative` として `diagnostics_json` に記録する。`input`/`output`/`total`/`cached`/`cost` は加算し、`used`/`size`（コンテキストウィンドウのスナップショット）は最大値を採る。既存の試行単位 `usage` は後方互換のため残す。UI は run 累積（実行情報）とセッション累積（会話ヘッダー）を表示する。 |
+
+### 結論に至った経緯
+
+`session/prompt` の結果 `usage` は 1 試行（1 ターン）分の合計だが、1 ユーザー送信はオーケストレーターの判断で最大 50 回のワーカー試行に分岐しうる。従来は試行ごとに `diagnostics_json` を上書きしていたため、最後の試行の値しか残らず、「指示から最終返答までの総量」を表示できなかった。
+
+`session/update` の `usage_update` が持つ `used`/`size`/`cost` はセッション累積カウンタであり、加算すると二重計上になる。そのため数値の性質ごとに加算と最大を分ける。
+
+### 構造と運用方針
+
+- **加算対象**: `input`/`output`/`total`/`cached`（`session/prompt` 結果、試行ごとのターン合計）と `cost.amount`。`cost.currency` は最後に観測したものを使う。
+- **最大対象**: `used`/`size`（`usage_update` のコンテキスト使用量スナップショット）。加算しない。
+- **後方互換**: 既存の試行単位 `usage` は変更せず保持し、`usage_cumulative` と `worker_attempt_count` を追加キーとして併記する（`diagnostics_json` はスキーマレス）。
+- **HITL 再開**: 再開時は保存済み `usage_cumulative` を読み戻して加算を継続する。旧データは試行単位 `usage` へフォールバックする。
+- **未計測**: オーケストレーター（Coordinator）側 LLM のトークンは対象外。UI では「この実行の累積」と明示し、ワーカー分であることを示す。
+- **ゼロ値**: 未報告の `used`/`size`/`cost` は保存・表示しない（`使用 0 / 0` や `費用 0` のノイズを避ける）。
+
+### Alternatives
+
+- **試行差分（delta）方式**: 累積カウンタの差分を取る。プロバイダーごとの累積/非累積の差異に依存し、リセット判定も必要になるため採用しない。
+- **最終試行値のみ表示**: 実装は最小だが「指示から最終返答までの総量」という要件を満たさない。
+
 ## Codex ワーカーのアプリ側タイトル生成
 
 | 項目 | 内容 |

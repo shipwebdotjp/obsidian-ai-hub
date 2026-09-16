@@ -6,12 +6,18 @@ import type {
   CodingSessionDetail,
   GitStatus,
 } from "../../../api/coding";
+import {
+  formatCost,
+  formatTokenBreakdown,
+  type TokenUsageSummary,
+} from "../utils/codingUsage";
 
 interface CodingConversationHeaderProps {
   selectedSession: CodingSession;
   sessionDetail: CodingSessionDetail | null;
   gitStatus: GitStatus | null;
   currentRun: CodingRun | null;
+  sessionUsage?: TokenUsageSummary | null;
   leftPaneCollapsed: boolean;
   onExpandLeftPane: () => void;
   drawerTriggerBtnRef: RefObject<HTMLButtonElement>;
@@ -26,6 +32,7 @@ export function CodingConversationHeader({
   sessionDetail,
   gitStatus,
   currentRun,
+  sessionUsage = null,
   leftPaneCollapsed,
   onExpandLeftPane,
   drawerTriggerBtnRef,
@@ -87,6 +94,19 @@ export function CodingConversationHeader({
                 </span>
                 <span className="font-mono text-rose-600 font-medium">
                   -{gitStatus.deletions}
+                </span>
+              </div>
+            )}
+            {sessionUsage && (
+              <div
+                className="flex items-center gap-1.5 border-l border-slate-200 pl-2"
+                data-testid="session-token-usage"
+              >
+                <span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-slate-700">
+                  {formatTokenBreakdown(sessionUsage)}
+                  {sessionUsage.costAmount !== undefined
+                    ? `（費用 ${formatCost(sessionUsage.costAmount, sessionUsage.costCurrency)}）`
+                    : ""}
                 </span>
               </div>
             )}

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronRight } from "lucide-react";
 import { useSessionPromptDraft } from "../../hooks/useSessionPromptDraft";
 import { CodingSidebar } from "./components/CodingSidebar";
@@ -12,7 +12,8 @@ import { useCodingSessionDetail } from "./hooks/useCodingSessionDetail";
 import { useCodingRunStream } from "./hooks/useCodingRunStream";
 import { useCodingSlash } from "./hooks/useCodingSlash";
 import { useCodingUiState } from "./hooks/useCodingUiState";
-import { selectValidProjects } from "./utils/codingSelectors";
+import { buildRunById, selectValidProjects } from "./utils/codingSelectors";
+import { sessionUsageSummary } from "./utils/codingUsage";
 
 export default function CodingPage() {
   const [error, setError] = useState<string | null>(null);
@@ -113,6 +114,22 @@ export default function CodingPage() {
 
   const currentRun = detail.activeRun || detail.latestRun;
 
+  // Session-wide token usage across every run (deduped by run_id so an active
+  // run that is also listed in sessionDetail.runs is not counted twice).
+  const sessionUsage = useMemo(
+    () =>
+      sessionUsageSummary(
+        Array.from(
+          buildRunById(
+            detail.sessionDetail?.runs,
+            detail.activeRun,
+            detail.latestRun,
+          ).values(),
+        ),
+      ),
+    [detail.sessionDetail?.runs, detail.activeRun, detail.latestRun],
+  );
+
   return (
     <div className="flex h-full w-full overflow-hidden bg-slate-50">
       {/* Mobile drawer + desktop collapsible left pane */}
@@ -181,6 +198,7 @@ export default function CodingPage() {
               sessionDetail={detail.sessionDetail}
               gitStatus={detail.gitStatus}
               currentRun={currentRun}
+              sessionUsage={sessionUsage}
               leftPaneCollapsed={ui.leftPaneCollapsed}
               onExpandLeftPane={() => ui.setLeftPaneCollapsed(false)}
               drawerTriggerBtnRef={ui.drawerTriggerBtnRef}

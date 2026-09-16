@@ -13,7 +13,7 @@ from typing import AsyncGenerator, Dict, Optional, Tuple
 from zoneinfo import ZoneInfo
 
 from obsidian_ai_hub.agents import runtime as agents_runtime
-from obsidian_ai_hub.coding import acp as acp_module, backend, store
+from obsidian_ai_hub.coding import acp as acp_module, backend, store, usage
 from obsidian_ai_hub.coding.orchestrator import (
     PROTOCOL_CORRECTION_INSTRUCTION,
     CodingOrchestrator,
@@ -185,6 +185,8 @@ async def run_coding_turn_stream(
         title_source: Optional[str] = None
         # Track in-memory ACP session id for this turn (carry recreated id to next iteration)
         current_external_id = session.get("acp_session_id") if session else None
+        # Accumulate token usage across the worker attempts of this run.
+        usage_totals = usage.usage_totals_from_diagnostics(run.get("diagnostics"))
         # Exclusive-control protocol: one self-correction per turn, then fail.
         protocol_retried = False
         ephemeral_correction: list = []
@@ -534,6 +536,8 @@ async def run_coding_turn_stream(
                 diag.setdefault("transport", "acp")
                 if acp_res.stop_reason:
                     diag.setdefault("stop_reason", acp_res.stop_reason)
+                usage.accumulate_usage(usage_totals, diag.get("usage"))
+                usage.attach_usage_cumulative(diag, usage_totals, cli_count)
                 diag_json_str = json.dumps(diag, ensure_ascii=False) if diag else None
 
                 store.update_run(

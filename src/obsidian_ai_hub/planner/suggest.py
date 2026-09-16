@@ -21,7 +21,7 @@ from obsidian_ai_hub.utils import config, llm_client, prompt
 
 logger = logging.getLogger(__name__)
 
-LLM_CANDIDATE_COUNT = 10
+LLM_CANDIDATE_COUNT = 3
 GENERATION_SOURCE = "daily_06:00"
 MAX_TITLE_LENGTH = 80
 MAX_RATIONALE_LENGTH = 400

@@ -192,8 +192,12 @@ def update_memory_fields(memory_id: str, fields: dict) -> dict:
             target["updated_at"] = timestamp_now
 
             db_row = serialize_memory(target)
-            set_clause = ", ".join(f"{col} = ?" for col in db_row if col != "memory_id")
-            values = [db_row[col] for col in db_row if col != "memory_id"] + [memory_id]
+            set_clause = ", ".join(
+                f"{col} = ?" for col in MEMORY_COLUMNS if col != "memory_id"
+            )
+            values = [
+                db_row.get(col) for col in MEMORY_COLUMNS if col != "memory_id"
+            ] + [memory_id]
             conn.execute(
                 f"UPDATE memories SET {set_clause} WHERE memory_id = ?", values
             )
