@@ -29,7 +29,8 @@
 | **Step** | 旧形式の静的Plan内の一つのCapability実行単位。保存済み入力と対象だけを使う。 |
 | **Runtime Orchestrator** | Directional Planと過去のObservationを基に、次のActionを構造化出力する判断主体。 |
 | **Action** | 次のCapability呼び出し、またはタスク完了を表す構造化された判断。 |
-| **Observation** | Capability実行結果としてRuntime Orchestratorへ戻される情報。 |
+| **Observation** | Capability実行結果としてRuntime Orchestratorへ戻される情報。表示/監査用の詳細Observationと、全履歴へ常に渡す履歴要点 (約1,500文字、`observation_summary`) の二層を持つ。 |
+| **Action予算** | Planの `max_actions` と実行済みAction数から求まる上限・完了済み数・残数。PlannerとRuntimeへ明示し、必須提案 (research_theme_propose) がある場合は提案とfinishの2枠を残す。 |
 | **Approval Scope** | 承認された目的、Capability、制約の境界。範囲外のActionは実行せず再承認へ回す。 |
 | **Capability** | コードで定義されたAdapterと、DBで管理する有効状態・承認ポリシーの組。 |
 | **Approval Policy** | `auto` または `plan_required`。Planの人間承認要否を決めるCapability設定。 |
@@ -39,8 +40,8 @@
 | **HITL Question** | 対象を一意に解決できないときに既存HITLへ登録する質問。 |
 | **Re-approval** | Plan外の能力・対象・副作用が必要だという自己申告後、改訂Planを承認すること。 |
 | **Trace Event** | Taskの追記のみの監査記録。子run/HITLの参照と要約を持つ。 |
-| **リサーチ提案コンテキスト** | 直近のノート、アクティビティ、過去テーマ・フィードバックをTask Observation上限内に圧縮した読み取り情報群。 |
-| **リサーチテーマ候補登録** | `research_theme_propose` Capabilityにより最適なテーマをHITL提案候補として自動登録する操作。実行コンテキストに応じた冪等性を維持する。 |
+| **リサーチ提案コンテキスト** | 直近の活動・既存テーマ・却下フィードバックを優先し、front matterと空テンプレートを除外したノート本文の有意味な抜粋を添えた読み取り情報群。 |
+| **リサーチテーマ候補登録** | `research_theme_propose` Capabilityにより最適なテーマをHITL提案候補として自動登録する操作。テーマ名ではなく Task ID を冪等キーとし、1 Task につき最大1件を登録する。 |
 
 ## 不変条件
 

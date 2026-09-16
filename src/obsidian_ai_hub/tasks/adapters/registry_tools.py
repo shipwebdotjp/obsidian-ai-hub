@@ -22,16 +22,25 @@ from obsidian_ai_hub.tasks.execution import StepResult
 
 logger = logging.getLogger(__name__)
 
-SUMMARY_LIMIT = 800
-
 READ_ONLY_KINDS = frozenset({"registry_tool"})
 CONTEXT_KINDS = frozenset({"memory"})
 
+# Registry tools that need the synthetic Task context (no agent run exists).
+# ``memory_propose`` is context-bound by adapter kind; research proposal is a
+# registry tool but must receive the Task ID so candidate registration is
+# idempotent per Task (``task:<task_id>``), not per theme name.
+TASK_CONTEXT_TOOL_IDS = frozenset({"research_theme_propose"})
+
 
 def _task_context(task: dict[str, Any]) -> dict[str, Any]:
-    """Synthetic trusted context for ``memory_propose`` (no agent run exists)."""
+    """Synthetic trusted context for context-bound Task capabilities.
+
+    ``task_id`` is the primary idempotency key for research proposals; the
+    agent/run/session fields keep memory proposal behavior unchanged.
+    """
     task_id = str(task["task_id"])
     return {
+        "task_id": task_id,
         "agent_id": f"task-agent:{task_id}",
         "session_id": task_id,
         "run_id": task_id,
@@ -77,7 +86,11 @@ class RegistryToolExecutor:
             inputs = validate_capability_inputs(str(capability_key), inputs)
         except ValueError as exc:
             raise ValueError(f"Step {step_index} {exc}") from exc
-        if definition.adapter_kind in CONTEXT_KINDS:
+        needs_context = (
+            definition.adapter_kind in CONTEXT_KINDS
+            or str(tool_id) in TASK_CONTEXT_TOOL_IDS
+        )
+        if needs_context:
             factory = meta.get("get_tool_with_context")
             tool = factory(_task_context(task)) if factory else meta["get_tool"]()
         else:
@@ -98,8 +111,11 @@ class RegistryToolExecutor:
             raise ValueError(
                 f"Registry tool '{tool_id}' failed: {tool_exc}"
             ) from tool_exc
+        # No uniform head cut here: the Runtime Orchestrator applies the
+        # capability-specific detail window and derives the history gist
+        # (``tasks/observation.py``).
         return StepResult(
             step_index=step_index,
             capability_key=str(capability_key),
-            summary=result_str[:SUMMARY_LIMIT],
+            summary=result_str,
         )

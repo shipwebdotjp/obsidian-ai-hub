@@ -67,6 +67,11 @@ Planの場合:
     labelは人間に表示する文言とする。
   - 承認対象は方向性とCapability範囲である。Planに詳細inputsを含めない。
   - max_actionsは1以上30以下の整数で、省略時は8とする。
+    まだActionを実行していないため完了済みは0である。max_actionsには実行予定の
+    Action数にfinishの1枠を含めて明示する(読取り4回なら5)。
+  - 依頼または完了条件でresearch_theme_proposeによる提案が必須の場合、
+    提案(research_theme_propose)と完了(finish)の2枠を必ず残す。例えば読取りに
+    4回使うPlanならmax_actions=6とする。読取りActionに枠を使い切ってはならない。
   - 以前の質問と回答がある場合、その回答は確定事項である。回答に従って対象を確定し
     Planを作り、回答済みの質問を再質問してはならない。
   - 質問は依頼文から対象がまったく推定できないときだけ使う。
@@ -189,7 +194,9 @@ def build_planner_prompt(
         f"依頼:\n{prompt_text}\n\n"
         f"有効Capability:\n" + "\n".join(capability_lines) + "\n\n"
         "登録済みAgent:\n" + "\n".join(agent_lines) + "\n\n"
-        "有効Project:\n" + "\n".join(project_lines)
+        "有効Project:\n" + "\n".join(project_lines) + "\n\n"
+        "Action予算: 完了済み0 / 残数はPlanのmax_actionsで決める"
+        "(未指定時は8、finishの1枠を必ず含める)。"
     )
     if qa_history:
         qa_lines = []

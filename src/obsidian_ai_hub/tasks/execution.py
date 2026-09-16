@@ -19,11 +19,18 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class StepResult:
-    """Outcome of a single executed step."""
+    """Outcome of a single executed step.
+
+    ``summary`` is the display/audit observation. ``observation_summary`` is
+    an optional history gist; when omitted the orchestrator derives one from
+    ``summary`` with the capability's two-layer budget
+    (``tasks/observation.py``).
+    """
 
     step_index: int
     capability_key: str
     summary: str
+    observation_summary: Optional[str] = None
     child_kind: Optional[str] = None
     child_run_id: Optional[str] = None
 

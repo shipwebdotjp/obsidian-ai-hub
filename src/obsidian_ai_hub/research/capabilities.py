@@ -14,6 +14,56 @@ from obsidian_ai_hub.research.db import auto_connection, get_current_timestamp
 logger = logging.getLogger(__name__)
 
 
+DAILY_EXCERPT_LIMIT = 500
+WEEKLY_EXCERPT_LIMIT = 800
+PERIODIC_NOTE_LIMIT = 3000
+
+
+def _strip_front_matter(text: str) -> str:
+    """Drop a leading YAML front-matter block. Unclosed blocks become empty."""
+    if not text:
+        return ""
+    stripped = text.lstrip()
+    if not stripped.startswith("---"):
+        return text.strip()
+    lines = stripped.splitlines()
+    for index in range(1, len(lines)):
+        if lines[index].strip() == "---":
+            return "\n".join(lines[index + 1 :]).strip()
+    return ""
+
+
+def _is_placeholder_line(line: str) -> bool:
+    """True for blank lines and Markdown scaffolding with no content.
+
+    Empty Daily/Weekly templates are mostly headings and task checkboxes; the
+    remaining text after stripping decoration decides whether the line carries
+    decision material.
+    """
+    core = line.strip().lstrip("#>-* \t")
+    core = core.replace("[ ]", "").replace("[x]", "").replace("[X]", "")
+    core = core.strip(" *_`|")
+    return core == ""
+
+
+def _meaningful_excerpt(text: str, limit: int) -> str:
+    """Front-matter-free, template-free excerpt of a note body."""
+    body = _strip_front_matter(text)
+    if not body:
+        return ""
+    lines = [
+        line.rstrip()
+        for line in body.splitlines()
+        if not _is_placeholder_line(line)
+    ]
+    body = "\n".join(lines).strip()
+    if not body:
+        return ""
+    if len(body) <= limit:
+        return body
+    return body[:limit] + "…"
+
+
 def get_suggestion_request(
     request_key: str, conn: Optional[sqlite3.Connection] = None
 ) -> Optional[dict]:
@@ -143,44 +193,16 @@ def get_research_context_snapshot() -> dict:
 
     today = date.today()
 
-    # 1. Recent 7 days Daily Notes
-    daily_notes = []
-    for i in range(7):
-        d = today - timedelta(days=i)
-        d_str = d.strftime("%Y-%m-%d")
-        content = reader.get_daily_note_content(d)
-        if content and content.strip():
-            trunc = content[:800] + ("…" if len(content) > 800 else "")
-            path = reader.get_daily_note_path(d)
-            try:
-                rel_path = str(path.relative_to(config.VAULT_PATH))
-            except Exception:
-                rel_path = str(path)
-            daily_notes.append(
-                {"date": d_str, "relative_path": rel_path, "content": trunc}
-            )
+    # Priority order matters: the runtime history gist keeps the head of this
+    # JSON, so activities/themes/feedback (decision material) must precede the
+    # daily/weekly note excerpts, which are the most likely to be empty or
+    # template scaffolding.
 
-    # 2. Latest Weekly Note
-    weekly_content = reader.get_weekly_note_content(today)
-    weekly_path = reader.get_weekly_note_path(today)
-    try:
-        rel_weekly = str(weekly_path.relative_to(config.VAULT_PATH))
-    except Exception:
-        rel_weekly = str(weekly_path)
-    latest_weekly = {
-        "relative_path": rel_weekly,
-        "content": (
-            weekly_content[:1000] + ("…" if len(weekly_content) > 1000 else "")
-            if weekly_content
-            else ""
-        ),
-    }
-
-    # 3. Recent 7 days activity
+    # 1. Recent 7 days activity
     activities = db.list_recent_activity_days(days=7)
     activities_summary = activities[:15]
 
-    # 4. Existing research themes & feedback
+    # 2. Existing research themes
     themes = db.list_themes()
     recent_themes = [
         {
@@ -191,14 +213,53 @@ def get_research_context_snapshot() -> dict:
         }
         for t in themes[:15]
     ]
-    feedback_items = db.list_theme_feedback(limit=10)
+
+    # 3. Feedback, rejected first (avoid repeating an idea the user refused)
+    feedback_items = sorted(
+        db.list_theme_feedback(limit=10),
+        key=lambda item: 0 if item.get("feedback_decision") == "rejected" else 1,
+    )
+
+    # 4. Recent 7 days Daily Notes with meaningful excerpts only
+    daily_notes = []
+    for i in range(7):
+        d = today - timedelta(days=i)
+        d_str = d.strftime("%Y-%m-%d")
+        path = reader.get_daily_note_path(d)
+        if not path.exists():
+            continue
+        excerpt = _meaningful_excerpt(
+            reader.get_daily_note_content(d), DAILY_EXCERPT_LIMIT
+        )
+        if not excerpt:
+            continue
+        try:
+            rel_path = str(path.relative_to(config.VAULT_PATH))
+        except Exception:
+            rel_path = str(path)
+        daily_notes.append(
+            {"date": d_str, "relative_path": rel_path, "content": excerpt}
+        )
+
+    # 5. Latest Weekly Note with a meaningful excerpt only
+    weekly_path = reader.get_weekly_note_path(today)
+    try:
+        rel_weekly = str(weekly_path.relative_to(config.VAULT_PATH))
+    except Exception:
+        rel_weekly = str(weekly_path)
+    weekly_excerpt = ""
+    if weekly_path.exists():
+        weekly_excerpt = _meaningful_excerpt(
+            reader.get_weekly_note_content(today), WEEKLY_EXCERPT_LIMIT
+        )
+    latest_weekly = {"relative_path": rel_weekly, "content": weekly_excerpt}
 
     return {
-        "daily_notes": daily_notes,
-        "latest_weekly_note": latest_weekly,
         "recent_activities": activities_summary,
         "existing_themes": recent_themes,
         "recent_feedback": feedback_items,
+        "daily_notes": daily_notes,
+        "latest_weekly_note": latest_weekly,
     }
 
 
@@ -323,11 +384,13 @@ def read_periodic_note(period_type: str, reference_date: str) -> dict:
     except Exception:
         rel_path = str(path)
 
-    max_chars = 3000
-    truncated = False
-    if len(content) > max_chars:
-        content = content[:max_chars] + "\n...(truncated)"
-        truncated = True
+    # A missing note must not return the empty template as if it were content.
+    if not path.exists():
+        content = ""
+        truncated = False
+    else:
+        content = _meaningful_excerpt(content, PERIODIC_NOTE_LIMIT)
+        truncated = content.endswith("…")
 
     return {
         "period_type": period_type,

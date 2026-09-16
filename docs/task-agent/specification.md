@@ -72,7 +72,7 @@ Registryに新規builtin toolを追加すればTask Capabilityとしても自動
 | 読取・検索系の既存Registry tool | `auto` | web、Vault、Calendar、Reminders、Memory、People、Projectの読取・検索のみ。 |
 | `calendar_create_proposal` / `reminder_create_proposal` | `auto` | 既存提案HITLの登録のみ（直接書込みなし）。人間の承認はHITL側で行うため、auto時のPlan確認は不要。 |
 | `research_context_snapshot` / `research_theme_history_search` / `activity_search` / `periodic_note_read` / `agent_conversation_search` / `coding_history_search` | `auto` | リサーチ提案用文脈読取・検索 Capability。 |
-| `research_theme_propose` | `auto` | 最適リサーチテーマのHITL提案候補自動登録（直接書込みなし、1Taskにつき最大1回、冪等キー管理）。 |
+| `research_theme_propose` | `auto` | 最適リサーチテーマのHITL提案候補自動登録（直接書込みなし、1Taskにつき最大1回）。Taskコンテキストを渡し、冪等キーはテーマ名ではなく Task ID (`task:<task_id>`) 単位で管理する。 |
 | `memory_propose` | `plan_required` | Memory candidateの作成。 |
 | `vault_write_file` | `plan_required` | 既存Vault書込み基盤の再利用 (相対パス・UTF-8・親dir自動作成・原子書込み・`overwrite=true` 必須)。 |
 | `specialist_agent` | `plan_required` | 登録済みAI Agentを指定して一回限りの子runを作る。 |
@@ -99,6 +99,18 @@ Task Capabilityにしないtool(コード固定の除外セット): `ask_user`
 (`is_published=1` で既存ファイルがあれば skip) に依存し、Vault上の同一
 ファイル名は `<title>_<job_id>.md` で固有化する。Task再開時の重複実行は
 jobごとに最大1回の公開に収まる (at-least-once、Event履歴で検出可能)。
+
+`research_theme_propose` の操作シナリオ契約 (HITL候補登録は不可逆操作):
+
+| 段階 | 入力と正本 | 機械可読な識別子 | 永続化 | 次に読む主体 | 停止・失敗時 | 不可逆操作 |
+| --- | --- | --- | --- | --- | --- | --- |
+| 文脈読取 | Registry読取Capabilityのschema | `capability_key`、`action_index` | `capability_completed` (`observation` 詳細 / `observation_summary` 要点) | 次ターンOrchestrator、再開処理 | tool失敗はAction失敗 (読取りは副作用なし) | なし |
+| 候補登録 | `ResearchThemeProposeInput` | `theme` と合成コンテキストの `task_id` | `research_suggestion_requests` (`request_key=task:<task_id>`、`theme_id`、`hitl_run_id`) | 再開時の再提案、WebUI HITL | 空テーマ・文字数超過・未知キーは登録せずエラー | テーマ候補とHITL runを1件作成 |
+| 重複提案 | 保存済み `request_key` | `task:<task_id>` | 変更なし | 次のOrchestrator | 既存 `theme_id` / `hitl_run_id` を返して停止 | なし |
+| 登録後完了 | `finish` の要約 | `result_summary` | `completed` | 閲覧者 | — | なし |
+| 再開 | `capability_completed` と `research_suggestion_requests` | `task:<task_id>` | 既存Event | Orchestrator | 提案Event未保存でもTask ID単位で再登録しない | 重複登録なし |
+
+縦断テスト: `tests/test_tasks_research_proposal_flow.py`。
 
 
 `specialist_agent` は実行開始時のAgent設定指紋とPlan承認時の指紋を照合する。
@@ -129,6 +141,20 @@ schemaを検証してから実行し、ActionとObservationをEventへ保存す�
 Action反復検出で無限ループを防ぐ。再開時は完了済みActionを重複実行しない
 (`capability_completed` の `action_index` 基準。副作用完了〜Event保存間の
 障害では at-least-once の重複が残り得る)。
+
+Observationは二層で扱う (`tasks/observation.py`)。各Actionは
+`observation_summary` (履歴用要点、約1,500文字) を常に次のRuntimeプロンプトへ
+渡し、最新Actionだけ `observation` (表示/監査用詳細、Capability別上限。
+リサーチ系は最大6,000文字、汎用Registry toolは現行相当の2,000文字) を渡す。
+全履歴の合計は60,000文字を上限とする。Registry Adapterの一律800文字切詰めは
+持たず、Capability別上限はOrchestratorが適用する。再開時はEventの
+`observation` と `observation_summary` から同じ二層情報を復元する。
+
+PlannerとRuntimeプロンプトは `max_actions` / 完了済み数 / 残数を明示する。
+依頼または完了条件で `research_theme_propose` が必須の場合、Plannerは提案と
+finishの2枠を残したPlanを作り、Runtimeは残り2枠を追加の読取りに使わない。
+専用の自動完了・Action強制・成功判定の例外は追加しない (最後の2手は通常どおり
+LLMが `research_theme_propose` と `finish` を選ぶ)。
 
 未承認Capabilityの追加、目的の実質的変更は自動実行せず、改訂Planを同じ
 Task IDの次版として保存して `waiting_reapproval` にする (旧形式の自己申告

@@ -17,6 +17,62 @@ def test_research_context_snapshot():
     assert "recent_feedback" in snapshot
 
 
+def test_research_context_snapshot_prioritizes_decision_material():
+    from obsidian_ai_hub.utils import reader
+
+    today = date.today()
+    path = reader.get_daily_note_path(today)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "---\ntitle: daily\n---\n## \n- [ ]\n活動: Task Agentを実装した\n",
+        encoding="utf-8",
+    )
+    # Rejected feedback must be listed before approved feedback.
+    conn = get_db_connection()
+    try:
+        approved = db.create_theme(theme="承認済みテーマ", status="approved", conn=conn)
+        rejected = db.create_theme(theme="却下テーマ", status="rejected", conn=conn)
+        conn.commit()
+    finally:
+        conn.close()
+    db.set_theme_feedback(approved["theme_id"], status="approved", decision="approved")
+    db.set_theme_feedback(
+        rejected["theme_id"],
+        status="rejected",
+        decision="rejected",
+        reason="duplicate",
+    )
+
+    snapshot = capabilities.get_research_context_snapshot()
+
+    # Decision material comes first so the runtime history gist keeps it.
+    assert list(snapshot.keys())[:3] == [
+        "recent_activities",
+        "existing_themes",
+        "recent_feedback",
+    ]
+    decisions = [item["feedback_decision"] for item in snapshot["recent_feedback"]]
+    assert decisions[:2] == ["rejected", "approved"]
+
+    daily = [
+        note
+        for note in snapshot["daily_notes"]
+        if note["date"] == today.strftime("%Y-%m-%d")
+    ]
+    assert daily
+    content = daily[0]["content"]
+    assert "title:" not in content
+    assert "[ ]" not in content
+    assert "Task Agentを実装した" in content
+
+
+def test_periodic_note_read_excludes_empty_template():
+    res = capabilities.read_periodic_note("day", "2000-01-01")
+    assert res["content"] == ""
+    assert res["truncated"] is False
+
+
+
 def test_research_theme_history_search():
     conn = get_db_connection()
     try:

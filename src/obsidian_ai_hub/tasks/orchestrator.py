@@ -34,6 +34,11 @@ from obsidian_ai_hub.tasks.execution import (
     StepResult,
     TaskCancelled,
 )
+from obsidian_ai_hub.tasks.observation import (
+    HISTORY_TOTAL_BUDGET,
+    build_history_gist,
+    split_observation,
+)
 from obsidian_ai_hub.tasks.redaction import redact_text
 
 logger = logging.getLogger(__name__)
@@ -41,16 +46,6 @@ logger = logging.getLogger(__name__)
 OBSERVATION_LIMIT = 2000
 MAX_SELF_CORRECTIONS = 2
 MAX_REPEATS = 2
-
-# Prompt-side observation budgets (chars). The newest observation keeps the
-# largest window because the finish decision depends on its completion
-# evidence; older observations are compressed progressively. The history
-# section total is capped separately so long loops cannot blow up the prompt.
-OBSERVATION_HEAD = 500
-OBSERVATION_TAIL = 1500
-OLDER_OBSERVATION_HEAD = 200
-OLDER_OBSERVATION_TAIL = 600
-HISTORY_TOTAL_BUDGET = 60000
 
 ORCHESTRATOR_SYSTEM_PROMPT = """あなたはTask実行のRuntime Orchestratorである。
 承認済みDirectional Planの目的・Capability範囲・制約の中で、次の一手を
@@ -65,6 +60,9 @@ Capability呼び出しの場合:
 {"action": "finish", "summary": "タスク全体の結果要約", "reason": "完了と判断した理由"}
 
 規則:
+- 提示される「Action予算」を守る。残り枠が少なくなったら、未実行の必須Capability
+  (特に完了条件が提案を要求するresearch_theme_propose)とfinishの枠を確保し、
+  残り2枠を追加の読取りに使わない。
 - capability_keyは承認されたCapability範囲の中からのみ選ぶ。範囲外が必要なら
   finishせず、範囲外のCapabilityを選ばずに、現状の要約でfinishする
   (範囲外の実行は親がreapprovalへ回すため、自己判断で実行しない)。
@@ -153,19 +151,18 @@ def _truncate(text: str, limit: int = OBSERVATION_LIMIT) -> str:
     return text[:limit] + "\n...(truncated)"
 
 
-def _truncate_observation(
-    text: str, head: int = OBSERVATION_HEAD, tail: int = OBSERVATION_TAIL
-) -> str:
-    """Truncate a child-run observation while preserving its conclusion.
+def _history_item_gist(item: dict[str, Any]) -> str:
+    """Return the history gist for one completed action.
 
-    Child results report evidence (test counts, commit SHAs) at the end, so
-    head-only truncation drops exactly what the finish decision needs. Keep
-    both ends within the same overall budget as the prompt history slot.
+    New events carry ``observation_summary`` directly; events written before
+    the two-layer change (and legacy static plans) fall back to the detail
+    observation or the summary, so resume never loses the decision material.
     """
-    if len(text) <= head + tail:
-        return text
-    omitted = len(text) - head - tail
-    return text[:head] + f"\n...({omitted} chars omitted)...\n" + text[-tail:]
+    gist = item.get("observation_summary")
+    if gist:
+        return str(gist)
+    raw = str(item.get("observation") or item.get("summary") or "")
+    return build_history_gist(raw)
 
 
 def _compress_history_lines(
@@ -173,12 +170,14 @@ def _compress_history_lines(
 ) -> list[str]:
     """Render history lines within a total char budget.
 
-    The newest action always keeps its full observation budget. When the
-    section overflows, the oldest actions collapse to one-line summaries
+    Every past action contributes its history gist so earlier conclusions are
+    always available as decision material. The newest action additionally
+    carries its capability-specific detail observation (display/audit). When
+    the section overflows, the oldest gists collapse to one-line summaries
     first. Redaction happens before rendering so secrets never enter the
     prompt regardless of compression.
     """
-    rendered: list[tuple[int, str, str]] = []
+    rendered: list[tuple[int, str, str, str]] = []
     for position, item in enumerate(history):
         is_latest = position == len(history) - 1
         safe_inputs = redact_text(_canonical_inputs(item.get("inputs")))
@@ -187,36 +186,41 @@ def _compress_history_lines(
             f"{item.get('capability_key')} "
             f"inputs={_truncate(safe_inputs, 500)}"
         )
-        safe_observation = redact_text(str(item.get("observation") or ""))
+        safe_gist = redact_text(_history_item_gist(item))
+        gist_line = f"  Observation(要点): {safe_gist}"
+        detail_line = ""
         if is_latest:
-            observation_line = _truncate_observation(
-                safe_observation, OBSERVATION_HEAD, OBSERVATION_TAIL
-            )
-        else:
-            observation_line = _truncate_observation(
-                safe_observation, OLDER_OBSERVATION_HEAD, OLDER_OBSERVATION_TAIL
-            )
+            safe_detail = redact_text(str(item.get("observation") or ""))
+            if safe_detail and safe_detail != safe_gist:
+                detail_line = f"  Observation(詳細): {safe_detail}"
         rendered.append(
-            (int(item.get("action_index") or 0), action_line, observation_line)
+            (
+                int(item.get("action_index") or 0),
+                action_line,
+                gist_line,
+                detail_line,
+            )
         )
-    total = sum(len(action) + len(observation) for _, action, observation in rendered)
+    total = sum(
+        len(action) + len(gist) + len(detail)
+        for _, action, gist, detail in rendered
+    )
     index = 0
     while total > budget and index < len(rendered) - 1:
-        action_index, action_line, observation_line = rendered[index]
-        summary = (
-            f"  Observation: (older action {action_index} observation "
-            f"{len(observation_line)} chars, omitted for budget)"
+        action_index, action_line, gist_line, detail_line = rendered[index]
+        omitted = (
+            f"  Observation(要点): (older action {action_index} observation "
+            f"{len(gist_line) + len(detail_line)} chars, omitted for budget)"
         )
-        total -= len(observation_line) - len(summary)
-        rendered[index] = (action_index, action_line, summary)
+        total -= (len(gist_line) + len(detail_line)) - len(omitted)
+        rendered[index] = (action_index, action_line, omitted, "")
         index += 1
     lines: list[str] = []
-    for _, action_line, observation_line in rendered:
+    for _, action_line, gist_line, detail_line in rendered:
         lines.append(action_line)
-        if observation_line.startswith("  Observation:"):
-            lines.append(observation_line)
-        else:
-            lines.append(f"  Observation: {observation_line}")
+        lines.append(gist_line)
+        if detail_line:
+            lines.append(detail_line)
     return lines
 
 
@@ -283,6 +287,23 @@ def build_orchestrator_prompt(
             "  " + ", ".join(str(p) for p in plan.allowed_project_ids),
         ]
     lines += ["", f"完了条件:\n{plan.completion_criteria}"]
+    max_actions = plan.max_actions or DEFAULT_MAX_ACTIONS
+    # Use the next-free slot (max index + 1), not len(history): resume can
+    # leave index gaps, and the budget the loop enforces is index-based.
+    completed = max(
+        (int(item.get("action_index") or 0) for item in history), default=-1
+    ) + 1
+    remaining = max(0, max_actions - completed)
+    lines += [
+        "",
+        f"Action予算: 最大{max_actions} / 完了済み{completed} / 残り{remaining}",
+    ]
+    if _required_proposal_pending(plan, history) and remaining <= 2:
+        lines += [
+            "未実行の必須提案(research_theme_propose)が残っている。残り枠を追加の"
+            "読取りに使わず、次の一手でresearch_theme_proposeを実行し、その後finishする"
+            "こと。",
+        ]
     if history:
         lines += ["", "過去のActionとObservation:"]
         lines += _compress_history_lines(history)
@@ -291,6 +312,22 @@ def build_orchestrator_prompt(
     if correction:
         lines += ["", f"直前の出力への修正指示:\n{correction}"]
     return "\n".join(lines)
+
+
+def _required_proposal_pending(
+    plan: DirectionalPlan, history: list[dict[str, Any]]
+) -> bool:
+    """Whether the approved plan includes an unexecuted research proposal.
+
+    Presence in the approved capabilities is the contract: an approved plan
+    that lists ``research_theme_propose`` treats it as required. This is only
+    a prompt hint; no automatic completion or action forcing is added.
+    """
+    planned = {directive.capability_key for directive in plan.capabilities}
+    if "research_theme_propose" not in planned:
+        return False
+    executed = {str(item.get("capability_key") or "") for item in history}
+    return "research_theme_propose" not in executed
 
 
 def _default_generator(
@@ -370,6 +407,7 @@ def run_directional_plan(
             "target": p.get("target") or {},
             "inputs": p.get("inputs"),
             "observation": str(p.get("observation") or p.get("summary") or ""),
+            "observation_summary": str(p.get("observation_summary") or ""),
         }
         for p in completed
     ]
@@ -600,7 +638,10 @@ def run_directional_plan(
             )
             return ExecutorOutcome(kind="failed", error_summary=str(exc))
 
-        observation = _truncate(str(result.summary or ""))
+        raw_observation = str(result.summary or "")
+        detail, gist = split_observation(str(result.capability_key), raw_observation)
+        if result.observation_summary:
+            gist = build_history_gist(str(result.observation_summary))
         # Match the legacy runner order (execution.py): record the active
         # child before the completion event so a crash between the two never
         # orphans a running child run from cancellation propagation.
@@ -617,8 +658,11 @@ def run_directional_plan(
                 "capability_key": result.capability_key,
                 "target": validated_target,
                 "inputs": validated_inputs,
-                "summary": result.summary,
-                "observation": observation,
+                # summary/observation keep the display/audit detail view;
+                # observation_summary keeps the always-replayed history gist.
+                "summary": detail,
+                "observation": detail,
+                "observation_summary": gist,
                 "child_kind": result.child_kind,
                 "child_run_id": result.child_run_id,
             },
@@ -630,7 +674,8 @@ def run_directional_plan(
                 "capability_key": result.capability_key,
                 "target": validated_target,
                 "inputs": validated_inputs,
-                "observation": observation,
+                "observation": detail,
+                "observation_summary": gist,
             }
         )
         last_signature = signature

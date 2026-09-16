@@ -161,6 +161,62 @@ def test_memory_propose_uses_task_context(monkeypatch):
     assert ctx["user_message_id"]
 
 
+def test_research_theme_propose_uses_task_context(monkeypatch):
+    seen = {}
+
+    def factory(ctx):
+        seen["ctx"] = ctx
+        return FakeTool('{"status": "candidate", "theme_id": "t1"}')
+
+    monkeypatch.setattr(
+        registry_module,
+        "TOOL_DEFINITIONS",
+        {
+            "research_theme_propose": {
+                "get_tool_with_context": factory,
+                "input_model": registry_module.ResearchThemeProposeInput,
+            }
+        },
+    )
+    task, plan = _task_with_plan(
+        "research_theme_propose", {}, {"theme": "エッジAIの量子化"}
+    )
+    result = RegistryToolExecutor().execute_step(
+        task, plan, 0, plan["plan"]["steps"][0]
+    )
+    assert result.summary == '{"status": "candidate", "theme_id": "t1"}'
+    ctx = seen["ctx"]
+    # Task-ID keyed idempotency: the handler uses task:<task_id>.
+    assert ctx["task_id"] == task["task_id"]
+    assert ctx["run_id"] == task["task_id"]
+
+
+def test_registry_tool_keeps_full_observation(monkeypatch):
+    long_result = '{"items": [' + "x" * 9000 + "]}"
+    fake = FakeTool(long_result)
+    monkeypatch.setattr(
+        registry_module,
+        "TOOL_DEFINITIONS",
+        {
+            "calendar_read": {
+                "get_tool": lambda: fake,
+                "input_model": registry_module.CalendarReadInput,
+            }
+        },
+    )
+    task, plan = _task_with_plan(
+        "calendar_read",
+        {},
+        {"start_date": "2026-09-14", "end_date": "2026-09-15"},
+    )
+    result = RegistryToolExecutor().execute_step(
+        task, plan, 0, plan["plan"]["steps"][0]
+    )
+    # The adapter no longer head-cuts at 800: the orchestrator applies the
+    # capability-specific detail window instead.
+    assert result.summary == long_result
+
+
 def test_deviation_protocol():
     assert parse_deviation_report("plain text") is None
     report = parse_deviation_report(

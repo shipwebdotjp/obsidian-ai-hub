@@ -831,6 +831,94 @@ def test_resume_with_gapped_indices_continues_after_max():
     assert [c[0] for c in executor.calls] == [3]
 
 
+def test_prompt_shows_budget_and_layered_observations():
+    history = [
+        {
+            "action_index": 0,
+            "capability_key": "vault_search",
+            "inputs": {"query": "q0"},
+            "observation": "DETAIL0-" + "a" * 5000,
+            "observation_summary": "GIST0",
+        },
+        {
+            "action_index": 1,
+            "capability_key": "vault_search",
+            "inputs": {"query": "q1"},
+            "observation": "DETAIL1-" + "b" * 5000,
+            "observation_summary": "GIST1",
+        },
+    ]
+    plan = orchestrator_module.DirectionalPlan(
+        purpose="p",
+        capabilities=[{"capability_key": "vault_search", "intent": "i"}],
+        completion_criteria="d",
+        max_actions=5,
+    )
+    prompt = orchestrator_module.build_orchestrator_prompt(
+        {"prompt_text": "job"},
+        plan,
+        {"capability_keys": ["vault_search"]},
+        {"vault_search": "query string required"},
+        history,
+    )
+    assert "Action予算: 最大5 / 完了済み2 / 残り3" in prompt
+    # Older actions carry only their gist so they cannot crowd the prompt.
+    assert "GIST0" in prompt
+    assert "DETAIL0-" not in prompt
+    # The newest action carries both the gist and the detail view.
+    assert "GIST1" in prompt
+    assert "DETAIL1-" in prompt
+
+
+def test_prompt_warns_to_reserve_proposal_slots():
+    plan = orchestrator_module.DirectionalPlan(
+        purpose="p",
+        capabilities=[
+            {"capability_key": "research_context_snapshot", "intent": "read"},
+            {"capability_key": "research_theme_propose", "intent": "propose"},
+        ],
+        completion_criteria="提案して完了",
+        max_actions=6,
+    )
+    reads = [
+        {
+            "action_index": index,
+            "capability_key": "research_context_snapshot",
+            "inputs": {},
+            "observation": "obs",
+            "observation_summary": "gist",
+        }
+        for index in range(4)
+    ]
+    pending = orchestrator_module.build_orchestrator_prompt(
+        {"prompt_text": "提案して"},
+        plan,
+        {"capability_keys": ["research_context_snapshot", "research_theme_propose"]},
+        {},
+        reads,
+    )
+    assert "Action予算: 最大6 / 完了済み4 / 残り2" in pending
+    assert "未実行の必須提案" in pending
+
+    done = reads + [
+        {
+            "action_index": 4,
+            "capability_key": "research_theme_propose",
+            "inputs": {"theme": "t"},
+            "observation": "proposed",
+            "observation_summary": "proposed",
+        }
+    ]
+    after = orchestrator_module.build_orchestrator_prompt(
+        {"prompt_text": "提案して"},
+        plan,
+        {"capability_keys": ["research_context_snapshot", "research_theme_propose"]},
+        {},
+        done,
+    )
+    assert "未実行の必須提案" not in after
+
+
 def test_prompt_history_is_redacted():
     from obsidian_ai_hub.tasks import redaction
 

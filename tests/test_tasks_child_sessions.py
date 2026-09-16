@@ -361,15 +361,15 @@ def test_delegate_inputs_default_to_session_reuse():
 # --- orchestrator observation fidelity ---
 
 
-def test_observation_truncation_preserves_completion_evidence():
+def test_observation_gist_preserves_completion_evidence():
+    from obsidian_ai_hub.tasks import observation as observation_module
+
     head = "実装内容の説明。" * 300
     tail = "テスト: 9 passed。コミットSHA: b918a5495454923cb483b74abc6d5135eb5a9641"
     text = head + "\n" + tail
-    assert len(text) > orchestrator_module.OBSERVATION_HEAD + (
-        orchestrator_module.OBSERVATION_TAIL
-    )
-    shortened = orchestrator_module._truncate_observation(text)
-    assert len(shortened) <= 2001 + len("\n...() chars omitted...\n") + 20
+    assert len(text) > observation_module.HISTORY_GIST_LIMIT
+    shortened = observation_module.build_history_gist(text)
+    assert len(shortened) <= observation_module.HISTORY_GIST_LIMIT + 40
     assert "b918a5495454923cb483b74abc6d5135eb5a9641" in shortened
     assert "9 passed" in shortened
     assert "omitted" in shortened
