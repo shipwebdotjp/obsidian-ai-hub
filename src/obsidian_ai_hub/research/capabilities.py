@@ -117,12 +117,22 @@ def propose_research_theme_handler(
     theme_id = result.get("theme_id", "")
     hitl_run_id = result.get("hitl_run_id", "") or ""
 
-    if theme_id:
-        record_suggestion_request(
-            request_key=request_key,
-            theme_id=theme_id,
-            hitl_run_id=hitl_run_id,
-        )
+    if theme_id and hitl_run_id:
+        try:
+            record_suggestion_request(
+                request_key=request_key,
+                theme_id=theme_id,
+                hitl_run_id=hitl_run_id,
+            )
+        except sqlite3.IntegrityError:
+            existing = get_suggestion_request(request_key)
+            if existing:
+                return {
+                    "status": "already_proposed",
+                    "theme_id": existing["theme_id"],
+                    "hitl_run_id": existing["hitl_run_id"],
+                    "message": f"この実行コンテキストですでに提案済みです (theme_id: {existing['theme_id']})",
+                }
 
     return result
 
@@ -347,8 +357,18 @@ def search_agent_conversations(
         where_clauses.append("m.created_at >= ?")
         params.append(start_date)
     if end_date:
-        where_clauses.append("m.created_at <= ?")
-        params.append(end_date)
+        clean_end = end_date.strip()
+        if len(clean_end) == 10:
+            try:
+                next_day = (date.fromisoformat(clean_end) + timedelta(days=1)).isoformat()
+                where_clauses.append("m.created_at < ?")
+                params.append(next_day)
+            except ValueError:
+                where_clauses.append("m.created_at <= ?")
+                params.append(clean_end)
+        else:
+            where_clauses.append("m.created_at <= ?")
+            params.append(clean_end)
     if agent_id:
         where_clauses.append("s.agent_id = ?")
         params.append(agent_id)
@@ -422,8 +442,18 @@ def search_coding_history(
         where_clauses.append("m.created_at >= ?")
         params.append(start_date)
     if end_date:
-        where_clauses.append("m.created_at <= ?")
-        params.append(end_date)
+        clean_end = end_date.strip()
+        if len(clean_end) == 10:
+            try:
+                next_day = (date.fromisoformat(clean_end) + timedelta(days=1)).isoformat()
+                where_clauses.append("m.created_at < ?")
+                params.append(next_day)
+            except ValueError:
+                where_clauses.append("m.created_at <= ?")
+                params.append(clean_end)
+        else:
+            where_clauses.append("m.created_at <= ?")
+            params.append(clean_end)
     if project_id is not None:
         where_clauses.append("s.project_id = ?")
         params.append(project_id)
