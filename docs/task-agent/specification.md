@@ -71,6 +71,8 @@ Registryに新規builtin toolを追加すればTask Capabilityとしても自動
 | --- | --- | --- |
 | 読取・検索系の既存Registry tool | `auto` | web、Vault、Calendar、Reminders、Memory、People、Projectの読取・検索のみ。 |
 | `calendar_create_proposal` / `reminder_create_proposal` | `auto` | 既存提案HITLの登録のみ（直接書込みなし）。人間の承認はHITL側で行うため、auto時のPlan確認は不要。 |
+| `research_context_snapshot` / `research_theme_history_search` / `activity_search` / `periodic_note_read` / `agent_conversation_search` / `coding_history_search` | `auto` | リサーチ提案用文脈読取・検索 Capability。 |
+| `research_theme_propose` | `auto` | 最適リサーチテーマのHITL提案候補自動登録（直接書込みなし、1Taskにつき最大1回、冪等キー管理）。 |
 | `memory_propose` | `plan_required` | Memory candidateの作成。 |
 | `vault_write_file` | `plan_required` | 既存Vault書込み基盤の再利用 (相対パス・UTF-8・親dir自動作成・原子書込み・`overwrite=true` 必須)。 |
 | `specialist_agent` | `plan_required` | 登録済みAI Agentを指定して一回限りの子runを作る。 |
