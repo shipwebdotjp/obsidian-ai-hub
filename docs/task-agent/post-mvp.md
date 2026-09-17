@@ -1,81 +1,98 @@
-# Task Agent Post-MVP 検討項目
+# Task Agent Post-MVP ロードマップ
 
-この文書はMVPで意図的に実装しない事項の一覧である。実装の確約や優先順位ではない。
-MVPの範囲は [specification.md](specification.md) を正とする。
+この文書はMVP後に再検討する機能を、**既存Taskで可能な自動化を広げる価値**を
+主軸に優先順位付けしたロードマップである。実装の確約ではない。
+MVPの範囲と現在の外部契約は [specification.md](specification.md) を正とする。
 
-## 次期実装の選定記録（2026-09-14）
+不可逆操作（データ削除、アプリケーション外への書込み・送信、認可境界の変更）を含む
+項目は、実装開始前に [development-quality-playbook.md](../development-quality-playbook.md)
+に従う。少なくとも対象ID・入力schema・承認範囲・保存と再開・重複時の扱い・失敗時の
+停止先を定めた操作シナリオ契約と、fake外部Adapterを使う隔離済み縦断テストを作る。
 
-- **調査したMVP除外候補**: Vault直接書込み、カレンダー/リマインダー直接書込み、
-  任意shell・Skills・カスタムプラグイン、共通Workspace lock、複数Task workerと並列実行、
-  Task固有の実行時間・呼出し数・コスト上限、Task固有の自動リトライ、
-  親側の計画逸脱検出・sandbox、自動ロールバック、専用launchd Task worker、
-  Capability完全CRUD、Agent設定のPlanスナップショット、Capability別の高度な承認ポリシー、
-  Artifact/Delegation/HITL linkの専用テーブル、保持期間とアーカイブ、依頼本文の暗号化、
-  通知と外部入口（Inbox・定期実行・LINE/Push）。
-- **選定した機能（1つのみ）**: Agent設定のPlanスナップショット（最小形:
-  承認時点の指紋記録と実行開始時の差分検出・再承認回し。設定の完全凍結はしない）。
-- **選定根拠**:
-  - ユーザー価値: 仕様書が「承認後にAgentのsystem promptや有効toolが変われば挙動も
-    変わり得る。このリスクは個人利用の運用として受容する」と明記していた承認境界の
-    既知の穴を塞ぐ。承認した内容と異なる設定で子runが動ることを防げる。
-  - 実装コスト: DB migration不要（`plan_json` 内の任意キー追加のみ）、外部書込みなし、
-    実行開始時の比較と既存 `waiting_reapproval` 経路の再利用だけの小変更。
-  - 設計整合性: 承認済みPlanを実行境界にするADRと、無効化Capabilityの実行前停止という
-    既存 precedent（`_ensure_capabilities_enabled`）に沿う。委譲対象allowlistと同様に
-    Planへ承認範囲を記録する。
-  - リスク: 可逆的で副作用なし。スナップショットのない旧Plan・委譲なしPlanは従来通り
-    通過するため回帰が小さい。Vault/外部書込み・shell公開・並列worker・自動ロールバック
-    といった不可逆・競合・復旧責任を伴う候補は今回見送った。
+## 優先順位
 
-## 書込みCapability
+### 1. カレンダー／リマインダーへの直接書込み
 
-- **Vault直接書込み** — ノートの作成・編集・削除をTask Capabilityとして追加する。
-  パス制約、変更一覧、取消時の途中状態、共通Workspace lockを合わせて設計する。
-- **カレンダー/リマインダー直接書込み** — Taskの一括Plan承認を唯一の承認として、既存の
-  提案HITLを経由せずに書き込むAdapterを追加する。外部API失敗時の結果表示も必要になる。
-- **任意shell、Skills、カスタムプラグイン** — Capability自動同期へ移行し、
-  既定 `plan_required` で公開する(除外セットは `ask_user`、`agent_delegate`、
-  提案HITLのみ)。入力検証・redaction・取消は既存契約をそのまま適用する。
+承認済みTask Planを唯一の承認境界として、既存の提案HITLを経由せずに
+カレンダーまたはリマインダーへ書き込むAdapterを追加する。予定・リマインダーを
+実行可能な形で自動化できるため、最も大きく利用価値を広げる。
 
-## 実行制御と安全性
+- 着手条件: 対象の安定ID、作成・更新・削除の範囲、API失敗・取消・再開時の一回性と
+  人間による復旧方法を操作シナリオ契約で確定する。
+- `plan_required` のPlan承認前には外部書込みを行わず、実行結果と外部IDをTask Eventから
+  辿れるようにする。
 
-- **共通Workspace lock** — Vault/外部書込みを追加する段階で、読取共有・書込み排他、待機状態、
-  lock解放時の再開を導入する。MVPのGit書込みは既存Codingのrepo lockを使う。
-- **複数Task workerと並列実行** — まず単一workerの実運用を観測し、並列化が必要になった時点で
-  claim、lock、子run待機の競合制御を拡張する。
-- **Task固有の実行時間・呼出し数・コスト上限** — MVPでは取消に依存する。追加する場合は、
-  子runの既存上限との優先順位と、超過時の停止/再承認UXを定める。
-- **Task固有の自動リトライ** — Adapterごとの安全な再試行条件、冪等性、外部副作用の重複防止を
-  定義できる場合にのみ追加する。
-- **親側の計画逸脱検出・sandbox** — 現在はAgent/Coding CLIの自己申告を使う。ファイル監視、
-  パスallowlist、Planとの差分照合を導入するなら、CLI固有権限との責任分界を再設計する。
-- **自動ロールバック** — Vault、Git、外部APIを横断して安全に戻す方式が必要になるため、
-  変更スナップショットと復旧責任を含めて別途検討する。
+### 2. 外部入口とTask通知
 
-## 運用と設定
+Inbox、定期実行、LINE/PushからTaskを投入できるようにし、承認待ち・完了・失敗を
+深いリンクで通知する。人がWebUIを開いて依頼する手間を減らし、日常フローを自動化する。
 
-- **専用launchd Task worker** — Webサーバー停止中もTaskを進めたくなった場合に追加する。
-  FastAPI同居workerとの二重実行を防ぐinstance ownershipが前提となる。
-- **Capability完全CRUD** — 現在の設定UIは `enabled` と `approval_policy` のみである。
-  DBからAdapter、入力仕様、説明を任意作成する機能は、コード定義との整合検証を設計してから行う。
-- **Agent設定のPlanスナップショット** — 現在は実行時の最新Agent設定を使う。承認後の設定変更を
-  実行境界から除外したくなった時点で、system prompt、tool設定、委譲先をPlanへ固定する。
-  （2026-09-14に最小形を実装: `specialist_agent` を含むDirectional Planは承認時点の
-  Agent設定指紋（`agent_config_snapshot`）をPlanへ記録し、実行開始時に差分・削除を検出したら
-  `waiting_reapproval` へ回す。実行中の子runへの設定固定や実行中ループでの再検出は将来課題。）
-- **Capability別の高度な承認ポリシー** — `auto` / `plan_required` 以外の、削除だけ追加承認、
-  時間帯制限、対象別policyなどは、実際の利用パターンが出てから検討する。
+- 着手条件: 入口ごとの依頼元、重複投入の冪等キー、認証・入力正規化を受付サービスの
+  境界で定める。
+- 通知はDBコミット後のベストエフォートとし、送信失敗がTask本体を失敗させない。再送・
+  outboxは通知漏れが運用上問題になった段階で追加する。
 
-## 保存・観測性
+### 3. 専用常駐Task worker
 
-- **Artifact/Delegation/HITL linkの専用テーブル** — MVPではEvent内の要約とID参照で辿る。
-  成果物横断検索や分析が必要になった場合に正規化テーブルを追加する。
-- **保持期間とアーカイブ** — terminal Taskは30日で削除する。長期監査が必要になった場合は、
-  保存対象、redaction、アーカイブ先、削除ポリシーを改めて決める。
-- **依頼本文の暗号化** — 既知秘密値のredactionと「未知の秘密を入力しない」運用を置き換える場合に、
-  鍵管理、ローテーション、復旧方法を含めて導入する。
-- **通知と外部入口** — Inbox・定期実行・LINE/Push通知は、Task受付サービスの契約を保ったまま
-  追加できる。通知失敗がTask本体を失敗させない方針を先に定める。
+Webサーバー停止中もキューを進められる専用launchd workerを追加する。外部入口や定期Taskを
+実用的な自動化につなげるための運用基盤である。
 
-## UI
-- タスクエージェント、Plan履歴, 実行EventをJSONではなく，構造化データとして表示する。子run参照はリンクに。
+- 着手条件: FastAPI同居workerとの二重実行を防ぐinstance ownership、lease/claim、
+  graceful shutdown時の `interrupted` 遷移を確定する。
+
+### 4. Task固有の実行予算と安全な自動リトライ
+
+Task単位の実行時間・Action数・コスト上限と、Adapterごとに安全性を確認した自動リトライを
+導入する。外部入口からの自律実行を安心して増やすための制御である。
+
+- 子runの既存上限との優先順位、上限超過時の停止または再承認、リトライ可能な失敗、
+  冪等キーと副作用重複時の扱いをCapabilityごとに定める。
+
+### 5. 構造化されたTask履歴UI
+
+Task、Plan履歴、Action/Event、子run、HITL、成果物をJSONではなく構造化データとして表示し、
+関連する子runとHITLへリンクする。承認済み自動化の確認と、失敗時の人間による判断を速くする。
+
+### 6. 共通Workspace lockと複数Task worker
+
+書込みCapabilityの増加または単一workerが実運用上のボトルネックになった時点で、読取共有・
+書込み排他、待機状態、lock解放後の再開、複数workerのclaim競合制御を追加する。
+
+MVPのGit書込みは既存Codingのrepo lockに委ねる。実測上の競合または待ち時間がない限り、
+複雑な並列制御は追加しない。
+
+### 7. Vault削除と自動ロールバック
+
+Vault、Git、外部APIにまたがる変更を安全に取り消せるようにする。利用価値はあるが、
+変更スナップショット、競合、途中状態、復旧責任を定義しなければ危険なため後順位とする。
+
+- Vault削除は、対象パス・削除前確認・復旧可能期間・取り消しを先に確定する。
+- 自動ロールバックは、障害時に自動で戻すのではなく、Eventに基づく人間判断を置き換えられる
+  根拠が得られた場合だけ検討する。
+
+### 8. 長期運用・管理機能
+
+次の機能は、実際の検索・監査・運用要件が発生してから追加する。
+
+- Artifact／Delegation／HITL linkの専用テーブルと、横断検索・分析。
+- 30日保持を置き換える保持期間、アーカイブ、削除ポリシー。
+- 依頼本文の暗号化（鍵管理、ローテーション、復旧を含む）。
+- Capability完全CRUD、および削除時だけの追加承認・時間帯・対象別policyなどの高度な承認設定。
+
+### 9. 親側sandboxと計画逸脱の技術的防止
+
+ファイル監視、パスallowlist、Planとの差分照合で、Agent/Coding CLI内部の逸脱を親側から
+防ぐ。Coding ACPとAgentの実権限・責任境界を再設計する大きな変更なので、最後に検討する。
+
+## 実装済みになった候補
+
+次の候補はMVP後の項目ではなく、現行仕様へ取り込まれている。
+
+- Vaultの作成・編集: `vault_write_file` Capability。既定 `plan_required`、相対パス制約、
+  原子書込み、明示的な `overwrite=true` を採用済み（Vault削除は未実装）。
+- 任意shell、Skills、カスタムプラグイン: Capability自動同期により既定 `plan_required` で
+  公開済み。`ask_user` と `agent_delegate` はTask Capabilityから除外する。
+- Agent設定のPlanスナップショット最小形: `specialist_agent` を含むDirectional Planについて、
+  承認時点の設定指紋を保存し、実行開始時の差分・削除を検出して再承認へ回す。
+
+MVPの不具合、安全性修正、回帰修正はこのロードマップに含めず、通常の修正作業として優先する。
