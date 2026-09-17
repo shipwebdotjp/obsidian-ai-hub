@@ -29,7 +29,9 @@ CONTEXT_KINDS = frozenset({"memory"})
 # ``memory_propose`` is context-bound by adapter kind; research proposal is a
 # registry tool but must receive the Task ID so candidate registration is
 # idempotent per Task (``task:<task_id>``), not per theme name.
-TASK_CONTEXT_TOOL_IDS = frozenset({"research_theme_propose"})
+# ``register_one_shot_job`` records the Task-derived IDs as its source so the
+# registration origin is never spoofable via step inputs.
+TASK_CONTEXT_TOOL_IDS = frozenset({"research_theme_propose", "register_one_shot_job"})
 
 
 def _task_context(task: dict[str, Any]) -> dict[str, Any]:

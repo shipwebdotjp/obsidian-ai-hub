@@ -67,7 +67,7 @@ class TestIsolation:
             "print(config.VAULT_PATH, config.MEMORY_SQLITE_PATH, "
             "config.AI_LOG_PATH, config.VAULT_INDEX_SQLITE_PATH, "
             "config.VAULT_INDEX_CHROMA_PATH, config.ACTIVITY_PATH, "
-            "config.TASK_RUN_STATE_PATH, config.KNOWLEDGE_SYNC_STATE_PATH)",
+            "config.JOB_RUN_STATE_PATH, config.KNOWLEDGE_SYNC_STATE_PATH)",
             extra_env={"ENV": "test", "OAIHUB_SKIP_DOTENV": "1"},
         )
         parts = out.split()
@@ -112,12 +112,12 @@ class TestIsolation:
         )
         assert "False" in out
 
-    def test_load_tasks_empty(self):
-        """ENV=test → load_tasks() returns empty list"""
+    def test_load_jobs_empty(self):
+        """ENV=test → load_jobs() returns empty list"""
         out, _ = _run(
             "from obsidian_ai_hub.utils import config; "
-            "from obsidian_ai_hub import task_runner; "
-            "print(task_runner.load_tasks())",
+            "from obsidian_ai_hub.scheduler_jobs import recurring; "
+            "print(recurring.load_jobs())",
             extra_env={"ENV": "test", "OAIHUB_SKIP_DOTENV": "1"},
         )
         assert out == "[]"

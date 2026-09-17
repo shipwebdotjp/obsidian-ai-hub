@@ -1,9 +1,10 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import TaskStatePage from "./TaskStatePage";
+import JobStatePage from "./JobStatePage";
 
 vi.mock("../../api/client", () => ({
   apiGet: vi.fn(),
+  listJobStates: vi.fn(),
   ApiError: class ApiError extends Error {
     status: number;
     constructor(status: number, message: string) {
@@ -13,19 +14,19 @@ vi.mock("../../api/client", () => ({
   },
 }));
 
-import { apiGet } from "../../api/client";
+import { listJobStates } from "../../api/client";
 
-const mockApiGet = vi.mocked(apiGet);
+const mockListJobStates = vi.mocked(listJobStates);
 
 beforeEach(() => {
   vi.clearAllMocks();
 });
 
-it("renders task state cards with aggregated status and health labels", async () => {
-  mockApiGet.mockResolvedValueOnce({
+it("renders job state cards with aggregated status and health labels", async () => {
+  mockListJobStates.mockResolvedValueOnce({
     items: [
       {
-        task_id: "merge_inbox",
+        job_id: "merge_inbox",
         last_check_at: new Date().toISOString(),
         consecutive_empty_count: 3,
         last_processed_at: new Date(Date.now() - 3600_000).toISOString(),
@@ -40,43 +41,43 @@ it("renders task state cards with aggregated status and health labels", async ()
     ],
   });
 
-  render(<TaskStatePage />);
+  render(<JobStatePage />);
 
   await waitFor(() => {
     expect(screen.getByText("merge_inbox")).toBeInTheDocument();
   });
 
-  expect(screen.getByText("タスク状態")).toBeInTheDocument();
+  expect(screen.getByText("ジョブ状態")).toBeInTheDocument();
   expect(
-    screen.getByText("定期・高頻度タスクの動作状態を確認できます（空振りはログに出さずここに集計）")
+    screen.getByText("定期・高頻度ジョブの動作状態を確認できます（空振りはログに出さずここに集計）")
   ).toBeInTheDocument();
   expect(screen.getByText("稼働中")).toBeInTheDocument();
   expect(screen.getByText("3 回")).toBeInTheDocument();
   expect(screen.getByText("5 / 2 / 0")).toBeInTheDocument();
 });
 
-it("displays error warning when task-state API fails", async () => {
-  mockApiGet.mockRejectedValueOnce(new Error("fetch failed"));
+it("displays error warning when job-state API fails", async () => {
+  mockListJobStates.mockRejectedValueOnce(new Error("fetch failed"));
 
-  render(<TaskStatePage />);
+  render(<JobStatePage />);
 
   await waitFor(() => {
-    expect(screen.getByText("タスク状態を取得できません")).toBeInTheDocument();
+    expect(screen.getByText("ジョブ状態を取得できません")).toBeInTheDocument();
   });
 });
 
-it("polls task-states every 30 seconds", async () => {
+it("polls job-states every 30 seconds", async () => {
   vi.useFakeTimers();
-  mockApiGet.mockResolvedValue({ items: [] });
+  mockListJobStates.mockResolvedValue({ items: [] });
 
-  render(<TaskStatePage />);
+  render(<JobStatePage />);
 
-  expect(mockApiGet).toHaveBeenCalledTimes(1);
+  expect(mockListJobStates).toHaveBeenCalledTimes(1);
 
   await act(async () => {
     vi.advanceTimersByTime(30_000);
   });
-  expect(mockApiGet).toHaveBeenCalledTimes(2);
+  expect(mockListJobStates).toHaveBeenCalledTimes(2);
 
   vi.useRealTimers();
 });

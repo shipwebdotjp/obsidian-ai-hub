@@ -32,9 +32,9 @@ def test_hitl_package_does_not_import_research_at_import_time():
     assert research == [], f"Unexpected domain imports in hitl: {research}"
 
 
-def test_task_runner_preset_contains_hitl_dispatch():
-    """The task runner preset dictionary must include --hitl-dispatch."""
-    from obsidian_ai_hub.task_runner import PRESET_FLAGS
+def test_job_runner_preset_contains_hitl_dispatch():
+    """The job runner preset dictionary must include --hitl-dispatch."""
+    from obsidian_ai_hub.scheduler_jobs.recurring import PRESET_FLAGS
 
     assert "--hitl-dispatch" in PRESET_FLAGS, (
         "PRESET_FLAGS must contain --hitl-dispatch key"

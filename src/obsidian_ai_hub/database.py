@@ -700,7 +700,82 @@ def get_db_connection() -> sqlite3.Connection:
     if current_version <= 46:
         run_migration_v47(conn)
 
+    if current_version <= 47:
+        run_migration_v48(conn)
+
     return conn
+
+
+def run_migration_v48(conn: sqlite3.Connection) -> None:
+    """Run migration for version 48 (Scheduler Job rename + one-shot queue).
+
+    - Recreate ``task_state`` as ``job_state`` (``task_id`` -> ``job_id``),
+      copy existing rows, then drop the old table. Scheduler execution state
+      is preserved; old table/SQL must not remain.
+    - Create ``one_shot_jobs`` queue for run-once jobs with
+      queued/running/succeeded/failed/cancelled/interrupted states,
+      registration source, timing, exit code, per-segment output, and indexes
+      on due-date and completion time.
+    """
+    tables = {r[0] for r in conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table'"
+    ).fetchall()}
+    if "job_state" not in tables:
+        conn.execute("""
+            CREATE TABLE job_state (
+                job_id TEXT PRIMARY KEY,
+                last_check_at TEXT NOT NULL,
+                consecutive_empty_count INTEGER NOT NULL DEFAULT 0,
+                last_processed_at TEXT,
+                last_error_at TEXT,
+                last_error_message TEXT,
+                last_error_type TEXT,
+                processed_count INTEGER NOT NULL DEFAULT 0,
+                skipped_count INTEGER NOT NULL DEFAULT 0,
+                failed_count INTEGER NOT NULL DEFAULT 0,
+                updated_at TEXT NOT NULL
+            );
+        """)
+    if "task_state" in tables:
+        conn.execute("""
+            INSERT OR REPLACE INTO job_state (
+                job_id, last_check_at, consecutive_empty_count,
+                last_processed_at, last_error_at, last_error_message, last_error_type,
+                processed_count, skipped_count, failed_count, updated_at
+            ) SELECT task_id, last_check_at, consecutive_empty_count,
+                last_processed_at, last_error_at, last_error_message, last_error_type,
+                processed_count, skipped_count, failed_count, updated_at
+            FROM task_state;
+        """)
+        conn.execute("DROP TABLE task_state;")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS one_shot_jobs (
+            job_id TEXT PRIMARY KEY,
+            command TEXT NOT NULL,
+            run_at_utc TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'queued',
+            agent_id TEXT,
+            session_id TEXT,
+            run_id TEXT,
+            created_at TEXT NOT NULL,
+            started_at TEXT,
+            finished_at TEXT,
+            exit_code INTEGER,
+            segments_json TEXT NOT NULL DEFAULT '[]',
+            output_truncated INTEGER NOT NULL DEFAULT 0,
+            error_summary TEXT
+        );
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_one_shot_jobs_status_run_at"
+        " ON one_shot_jobs(status, run_at_utc);"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_one_shot_jobs_finished_at"
+        " ON one_shot_jobs(finished_at);"
+    )
+    conn.execute("PRAGMA user_version = 48;")
+    conn.commit()
 
 
 def run_migration_v47(db: sqlite3.Connection) -> None:

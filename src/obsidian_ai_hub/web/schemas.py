@@ -930,9 +930,9 @@ class ProjectCandidateResolveRequest(BaseModel):
         return self
 
 
-# --- Task Config schemas ---
+# --- Scheduler Job schemas ---
 
-class TaskItem(BaseModel):
+class RecurringJob(BaseModel):
     id: str
     enabled: bool = True
     schedule: dict
@@ -1012,10 +1012,10 @@ class LLMCallDetail(BaseModel):
     traceback: Optional[str] = None
 
 
-# --- Task State schemas ---
+# --- Job State schemas ---
 
-class TaskState(BaseModel):
-    task_id: str
+class JobState(BaseModel):
+    job_id: str
     last_check_at: str
     consecutive_empty_count: int
     last_processed_at: Optional[str] = None
@@ -1028,22 +1028,22 @@ class TaskState(BaseModel):
     updated_at: str
 
 
-class TaskStateListResponse(BaseModel):
-    items: list[TaskState]
+class JobStateListResponse(BaseModel):
+    items: list[JobState]
 
 
-class TaskConfigResponse(BaseModel):
-    tasks: list[TaskItem]
+class SchedulerJobConfigResponse(BaseModel):
+    jobs: list[RecurringJob]
     filepath: str
     revision: str
 
 
-class TaskConfigRequest(BaseModel):
+class SchedulerJobConfigRequest(BaseModel):
     revision: str
-    tasks: list[dict]
+    jobs: list[dict]
 
 
-class TaskConfigUpdateResponse(BaseModel):
+class SchedulerJobConfigUpdateResponse(BaseModel):
     success: bool
     revision: str
 
@@ -1062,6 +1062,41 @@ class CommandPreviewResponse(BaseModel):
     is_preset: bool
     preset_flag: Optional[str] = None
     preset_name: Optional[str] = None
+
+
+class OneShotJobSummary(BaseModel):
+    job_id: str
+    command: str
+    run_at_utc: str
+    status: str
+    agent_id: Optional[str] = None
+    session_id: Optional[str] = None
+    run_id: Optional[str] = None
+    created_at: str
+    started_at: Optional[str] = None
+    finished_at: Optional[str] = None
+    exit_code: Optional[int] = None
+    output_truncated: bool = False
+    error_summary: Optional[str] = None
+
+
+class OneShotJobSegment(BaseModel):
+    cwd: Optional[str] = None
+    args: list[str]
+    exit_code: Optional[int] = None
+    stdout: str = ""
+    stderr: str = ""
+    truncated_stdout: bool = False
+    truncated_stderr: bool = False
+
+
+class OneShotJobDetail(OneShotJobSummary):
+    segments: list[OneShotJobSegment] = []
+
+
+class OneShotJobListResponse(BaseModel):
+    items: list[OneShotJobSummary]
+    total: int
 
 # --- HITL schemas ---
 

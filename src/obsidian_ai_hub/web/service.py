@@ -171,14 +171,15 @@ from obsidian_ai_hub.web.services.task_agent import (
     replan_task_agent_task,
     update_task_agent_capability,
 )
-from obsidian_ai_hub.web.services.task_config import (
-    TaskConfigConflictError,
-    get_task_config,
+from obsidian_ai_hub.web.services.scheduler_jobs import (
+    SchedulerJobConfigConflictError,
+    cancel_one_shot_job,
+    get_one_shot_job_detail,
+    get_recurring_jobs,
+    list_job_states,
+    list_one_shot_jobs,
     preview_command,
-    update_task_config,
-)
-from obsidian_ai_hub.web.services.task_states import (
-    list_task_states,
+    update_recurring_jobs,
 )
 from obsidian_ai_hub.web.services.vault import (
     get_vault_file,

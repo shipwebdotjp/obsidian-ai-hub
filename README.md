@@ -606,11 +606,20 @@ Or use environment variables: `HEALTHCARE_SQLITE_PATH`, `HEALTHCARE_EXPORT_DIR`.
 
 The import is idempotent; re-running it will not duplicate records.
 
-## Task Runner
+## Job Runner
 
-The task runner reads scheduled jobs from `tasks/tasks.local.yml` when it exists, and falls back to `tasks/tasks.yml` otherwise. It also persists the last execution time in `tasks/last_run.json` so each task is only run once per matching schedule window.
+The job runner reads recurring jobs from `jobs/jobs.local.yml` when it exists, and falls back to `jobs/jobs.yml` otherwise. It also persists the last execution time in `jobs/last_run.json` so each job is only run once per matching schedule window.
 
-Use `tasks/tasks.local.sample.yml` as the starting point for your own `tasks/tasks.local.yml`.
+Use `jobs/jobs.local.sample.yml` as the starting point for your own `jobs/jobs.local.yml`.
+
+> **Migration from Scheduler Task names:** if `tasks/` files remain, the runner
+> refuses to start. Migrate once with
+> `python -m obsidian_ai_hub.job_runner --migrate-tasks-to-jobs`, which moves
+> `tasks/tasks.local.yml` (or `tasks/tasks.yml`) to `jobs/jobs.local.yml`,
+> copies `last_run.json` state, and removes the legacy files. The Web UI moved
+> from `/tasks` to `/jobs` and the API from `/api/v1/task-config` to
+> `/api/v1/scheduler-jobs` (recurring: `recurring-jobs`, one-shot:
+> `one-shot-jobs`). Old URLs return 404.
 
 To create and send a weekly review draft on Sunday night, enable the
 `review_draft_sunday_evening` example after replacing its project path. The
@@ -618,7 +627,7 @@ weekly note must contain an empty `result::` line; the generated draft is saved
 immediately below it before the LINE Push notification is sent.
 
 For near-real-time Inbox processing, schedule `merge_inbox` with
-`type: minutely` and `second: 0`. The task runner LaunchAgent already fires
+`type: minutely` and `second: 0`. The job runner LaunchAgent already fires
 every 60 seconds, so inbox files are usually merged within about a minute of
 save. Files whose `mtime` is within the last 5 seconds are deferred to the
 next run (a single stat check, no wait), which avoids racing with an
@@ -626,7 +635,7 @@ in-progress write. iCloud-offloaded files are still downloaded and awaited up
 to 60 seconds, and Whisper is loaded only inside that CLI process and released
 when it exits.
 
-Each task entry uses this shape:
+Each job entry uses this shape:
 
 ```yaml
 - id: example
@@ -651,14 +660,15 @@ The runner understands `second`, `minute`, `hour`, `day`, and `weekday`. Missing
 
 Commands are executed without a shell. Plain argv-style commands are supported, and you can chain a directory change with `cd /path && ...`. Shell operators like pipes, redirects, and environment expansion are not interpreted.
 
-### Task Runner Web UI (Token)
+### Job Runner Web UI (Token)
 
-The Web UI provides a dedicated **Task Management** page where you can manage, add, edit, and disable tasks visually:
-- **Access Control:** All Web API endpoints — including the task configuration APIs (`GET`/`PUT` `/api/v1/task-config`) — require a valid `Authorization: Bearer <token>` header matching the `OBSIDIAN_AI_HUB_API_TOKEN` environment variable. Authentication is unconditional regardless of the connecting client (loopback, LAN, or public), and the app is bound to localhost with TLS terminated at a reverse proxy or tunnel.
+The Web UI provides a dedicated **Job Management** page (`/jobs`) where you can manage, add, edit, and disable recurring jobs visually, plus inspect one-shot jobs (schedule, status, source, result detail, cancel-if-queued):
+- **Access Control:** All Web API endpoints — including the scheduler job APIs (`GET`/`PUT` `/api/v1/scheduler-jobs/recurring-jobs`, one-shot and `job-states` reads) — require a valid `Authorization: Bearer <token>` header matching the `OBSIDIAN_AI_HUB_API_TOKEN` environment variable. Authentication is unconditional regardless of the connecting client (loopback, LAN, or public), and the app is bound to localhost with TLS terminated at a reverse proxy or tunnel.
 - **Structure Validation:** ID uniqueness, valid cron ranges/values, relevant fields per schedule type, and command execution structures are validated prior to saving. Syntax/meaning errors return `422 Unprocessable Entity`.
 - **Atomic Operations & Optimistic Locking:** Settings are written atomically using temporary files and `os.replace` to prevent corruption. If multiple sessions try to modify configuration concurrently, the server throws `409 Conflict`, prompting you to refresh.
-- **No Retrospective Execution (Arming):** When you add a task, re-enable it, or modify its schedule/command, the task is "armed" with the current save time, preventing retrospective execution of past run frames.
-- **Detailed Mode parsing:** When editing custom commands in detailed mode, the UI displays the backend parsed representation (shlex argv list) to prevent misinterpretation of command execution paths. Note that comments in `tasks.local.yml` are not preserved during structured saves.
+- **No Retrospective Execution (Arming):** When you add a job, re-enable it, or modify its schedule/command, the job is "armed" with the current save time, preventing retrospective execution of past run frames.
+- **Detailed Mode parsing:** When editing custom commands in detailed mode, the UI displays the backend parsed representation (shlex argv list) to prevent misinterpretation of command execution paths. Note that comments in `jobs.local.yml` are not preserved during structured saves.
+- **One-shot jobs:** Agents with the explicitly granted `register_one_shot_job` tool register run-once commands; the next `job_runner` cycle claims and runs each exactly once (at-most-once, no auto-retry after interruption). Terminal history is kept 30 days.
 
 ## Project Structure
 

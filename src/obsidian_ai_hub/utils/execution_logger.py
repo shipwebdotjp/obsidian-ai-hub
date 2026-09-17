@@ -35,7 +35,7 @@ def cleanup_old_logs_now(days: int = 30) -> None:
     """One-shot cleanup of execution/LLM logs older than `days`.
 
     Opens its own connection so the daily maintenance task can invoke it
-    without any in-flight command run. Does not touch task_state.
+    without any in-flight command run. Does not touch job_state.
     """
     conn = get_db_connection()
     try:
@@ -49,14 +49,14 @@ def cleanup_old_logs_now(days: int = 30) -> None:
         conn.close()
 
 
-def upsert_task_state(
-    task_id: str,
+def upsert_job_state(
+    job_id: str,
     *,
     result: Optional[Dict[str, Any]] = None,
     error: Optional[Exception] = None,
     now_iso: Optional[str] = None,
 ) -> None:
-    """Upsert a single task_state row for a high-frequency task.
+    """Upsert a single job_state row for a high-frequency job.
 
     Three modes:
     - Empty success (no work attempted): increment consecutive_empty_count,
@@ -81,7 +81,7 @@ def upsert_task_state(
         # Current row, used only to derive increments/preserved fields. The
         # write below is a single atomic upsert, so a concurrent first-write
         # cannot raise IntegrityError on the primary key.
-        cur = conn.execute("SELECT * FROM task_state WHERE task_id = ?", (task_id,))
+        cur = conn.execute("SELECT * FROM job_state WHERE job_id = ?", (job_id,))
         row = cur.fetchone()
 
         if row is None:
@@ -125,12 +125,12 @@ def upsert_task_state(
 
         conn.execute(
             """
-            INSERT INTO task_state (
-                task_id, last_check_at, consecutive_empty_count,
+            INSERT INTO job_state (
+                job_id, last_check_at, consecutive_empty_count,
                 last_processed_at, last_error_at, last_error_message, last_error_type,
                 processed_count, skipped_count, failed_count, updated_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(task_id) DO UPDATE SET
+            ON CONFLICT(job_id) DO UPDATE SET
                 last_check_at = excluded.last_check_at,
                 consecutive_empty_count = excluded.consecutive_empty_count,
                 last_processed_at = excluded.last_processed_at,
@@ -143,14 +143,14 @@ def upsert_task_state(
                 updated_at = excluded.updated_at
             """,
             (
-                task_id, now, consecutive_empty,
+                job_id, now, consecutive_empty,
                 last_processed, last_error_at, last_error_msg, last_error_type,
                 processed, skipped, failed, now,
             ),
         )
         conn.commit()
     except Exception as e:
-        logger.error("Failed to upsert task state: %s", e)
+        logger.error("Failed to upsert job state: %s", e)
     finally:
         conn.close()
 
@@ -181,12 +181,12 @@ def suppress_command_run(run_id: str) -> bool:
         conn.close()
 
 
-def list_task_states() -> List[Dict[str, Any]]:
-    """Return all task_state rows ordered by most recent check first."""
+def list_job_states() -> List[Dict[str, Any]]:
+    """Return all job_state rows ordered by most recent check first."""
     conn = get_db_connection()
     try:
         cur = conn.execute(
-            "SELECT * FROM task_state ORDER BY last_check_at DESC"
+            "SELECT * FROM job_state ORDER BY last_check_at DESC"
         )
         return [dict(r) for r in cur.fetchall()]
     finally:

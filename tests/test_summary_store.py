@@ -61,7 +61,7 @@ def test_schema_version_bump(test_memory_db_path):
         assert "person_candidates" in tables
         assert "summary_person_candidates" in tables
         assert "summary_person_assignments" in tables
-        assert "task_state" in tables
+        assert "job_state" in tables
     finally:
         conn.close()
 

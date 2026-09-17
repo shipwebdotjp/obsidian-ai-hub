@@ -1,7 +1,7 @@
 from datetime import datetime
 import pytest
 
-from obsidian_ai_hub.task_runner import compute_target
+from obsidian_ai_hub.scheduler_jobs.recurring import compute_target
 
 
 def test_minutely_default_second_returns_now():

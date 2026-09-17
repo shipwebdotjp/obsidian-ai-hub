@@ -507,12 +507,30 @@ export interface Person {
   summary_count: number;
 }
 
-// --- Task Config Types ---
+// --- Scheduler Job Types ---
 
-export interface TaskItem {
+export type RecurringJobScheduleType =
+  | "minutely"
+  | "hourly"
+  | "daily"
+  | "weekly"
+  | "monthly";
+
+export type CronFieldValue = number | string | Array<number | string>;
+
+export interface RecurringJobSchedule {
+  type: RecurringJobScheduleType;
+  second?: CronFieldValue;
+  minute?: CronFieldValue;
+  hour?: CronFieldValue;
+  weekday?: CronFieldValue;
+  day?: CronFieldValue;
+}
+
+export interface RecurringJob {
   id: string;
   enabled: boolean;
-  schedule: Record<string, any>;
+  schedule: RecurringJobSchedule;
   command: string;
   is_preset: boolean;
   preset_flag?: string | null;
@@ -520,15 +538,74 @@ export interface TaskItem {
   next_run?: string | null;
 }
 
-export interface TaskConfigResponse {
-  tasks: TaskItem[];
+export interface SchedulerJobConfigResponse {
+  jobs: RecurringJob[];
   filepath: string;
   revision: string;
 }
 
-export interface TaskConfigUpdateResponse {
+export interface SchedulerJobConfigUpdateResponse {
   success: boolean;
   revision: string;
+}
+
+export type RecurringJobUpdate = Pick<RecurringJob, "id" | "enabled" | "schedule" | "command">;
+
+export type OneShotJobStatus =
+  | "queued"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "cancelled"
+  | "interrupted";
+
+export interface OneShotJobSummary {
+  job_id: string;
+  command: string;
+  run_at_utc: string;
+  status: OneShotJobStatus;
+  agent_id?: string | null;
+  session_id?: string | null;
+  run_id?: string | null;
+  created_at: string;
+  started_at?: string | null;
+  finished_at?: string | null;
+  exit_code?: number | null;
+  output_truncated: boolean;
+  error_summary?: string | null;
+}
+
+export interface OneShotJobSegment {
+  cwd?: string | null;
+  args: string[];
+  exit_code?: number | null;
+  stdout: string;
+  stderr: string;
+  truncated_stdout: boolean;
+  truncated_stderr: boolean;
+}
+
+export interface OneShotJobDetail extends OneShotJobSummary {
+  segments: OneShotJobSegment[];
+}
+
+export interface OneShotJobListResponse {
+  items: OneShotJobSummary[];
+  total: number;
+}
+
+export interface JobState {
+  job_id: string;
+  last_check_at: string;
+  consecutive_empty_count: number;
+  last_processed_at: string | null;
+  last_error_at: string | null;
+  last_error_message: string | null;
+  last_error_type: string | null;
+  processed_count: number;
+  skipped_count: number;
+  failed_count: number;
+  updated_at: string;
 }
 
 export interface CommandSegment {

@@ -210,7 +210,7 @@ def _filesystem_sandbox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(app_config, "RESEARCH_CANDIDATE_THEME_LIST_PATH", (vault / app_config.RESEARCH_DIR_NAME) / app_config.RESEARCH_CANDIDATE_THEME_LIST_FILENAME)
 
     monkeypatch.setattr(app_config, "AI_LOG_PATH", tmp_path / "ai-log")
-    monkeypatch.setattr(app_config, "TASK_RUN_STATE_PATH", tmp_path / "last_run.json")
+    monkeypatch.setattr(app_config, "JOB_RUN_STATE_PATH", tmp_path / "last_run.json")
     monkeypatch.setattr(app_config, "KNOWLEDGE_SYNC_STATE_PATH", tmp_path / "knowledge_sync_state.json")
     monkeypatch.setattr(app_config, "VAULT_INDEX_SQLITE_PATH", tmp_path / "vault-index" / "search.sqlite")
     monkeypatch.setattr(app_config, "VAULT_INDEX_CHROMA_PATH", tmp_path / "vault-index" / "chroma")

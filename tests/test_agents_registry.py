@@ -38,6 +38,7 @@ def test_list_available_tools():
         "agent_conversation_search",
         "coding_history_search",
         "research_theme_propose",
+        "register_one_shot_job",
     }
     # Order is not contractual; assert membership instead.
     assert set(tool_ids) == expected_ids

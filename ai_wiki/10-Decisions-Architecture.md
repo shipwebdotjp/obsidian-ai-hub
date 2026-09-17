@@ -720,3 +720,24 @@ OpenCode の ACP 化が動作するようになり、Direct CLI（`opencode run`
   - 子の最終回答、対象エージェント名/ID、到達深さ、子が使用したツール、子が作成した HITL Run ID を集約して `agent_delegate` の結果 JSON として親 run の `tool_calls_json` に記録。
   - 子が作成した HITL Run ID は親 run の `created_hitl_run_ids_json` へ集約される。
   - 親 run の `used_tools` には親が直接呼び出したツール（`agent_delegate` 等）のみを記録し、子の内部ツールは混在させない。
+
+## Scheduler Task から Job への完全改称とワンショット実行ジョブ導入
+
+| 項目 | 内容 |
+|------|------|
+| 決定日 | 2026-09-17 |
+| カテゴリ | スケジューラ・用語分離・実行キュー・設定移行 |
+| 決定内容 | Task Agent の Task（自由文依頼の集約）と Scheduler の「Task」（定時コマンド起動）を分離し、後者を Scheduler Job（定期: Recurring Job、単発: One-shot Job）へ完全改称する。`task_runner.py` を `scheduler_jobs` 集約＋薄い `job_runner` 入口へ置換し、`tasks/` YAML・状態・lock、`task_state` 表、`task-config` API、`/tasks` 画面を Job 名へ移す。旧名の import alias・URL 互換・fallback 読込は提供しない。Agent が任意コマンドを一度だけ実行できる `register_one_shot_job` tool と `one_shot_jobs` SQLite キュー（at-most-once、終端30日保持）を導入する。 |
+
+### 結論に至った経緯
+
+Scheduler Task と Task Agent Task が `task` 一語を共有し、画面・API・DB・設定ファイルのいずれを見ても実行器と状態の帰属が判別できなかった。定期実行とワンショット実行を別々に実装すると同一ファイル群（runner、schema、API、画面、テスト）を二度触るため、旧名でのワンショット先行実装ではなく新 Job 名への単一パス統合実装を選んだ。比較した選択肢は (a) 改称優先→ワンショット後付け（改称の受入条件がワンショット存在を要求し不成立）、(b) ワンショット旧名先行→改称で二度手間（同群ファイルの二重 churn と取残し危険）、(c) 新名称への統合一括実装（採用）。設定移行は自動マージせず明示コマンド＋両存時停止とし、旧 `tasks/` 残存時は fail-closed（起動失敗＋手順表示）とした。DB は `task_state` を `job_state` へ再作成複写して旧表削除（v48）、同時に `one_shot_jobs` を作成する。
+
+### 構造と運用方針
+
+- **境界**: Scheduler Job は Task Agent Task と別集約・別実行器。`job_runner` が唯一の実行入口で、runner lock 内で定期期限判定とワンショット claim・実行を行う。`CONTEXT.md` に Scheduler 用語を追加した。
+- **永続化**: 定期定義は `jobs/jobs.local.yml` のみ（`jobs/` 以外を読まない）、状態は `jobs/last_run.json` と `job_state` のみ。ワンショットは `one_shot_jobs`（`queued/running/succeeded/failed/cancelled/interrupted`、登録元・予定・終了コード・セグメント別出力・エラー要約、期限・完了索引）のみ。
+- **実行契約**: `docs/job/one-shot-jobs.md` の操作シナリオ契約に従う。command は既存 `parse_command` 形式のみ（shell 不使用）、`run_at` 省略時は次回 cycle、naive は JST、過去は即時扱い。`running` 永続化後に実行し、中断残りは次回 `interrupted` 化して自動再実行しない。`queued` のみ取消可。
+- **権限**: `register_one_shot_job`（`command`＋任意 `run_at` の Pydantic 単一正本）は選択可能カタログに現れるが自動付与せず、編集画面の明示追加のみ。登録元 ID は trusted context 注入で偽装不可。Task Agent では自動 Capability 同期で既定 `plan_required` のまま公開する。
+- **公開面**: API は `/api/v1/scheduler-jobs`（`recurring-jobs`、`one-shot-jobs`、`job-states`）、画面は `/jobs`（定期＋ワンショット）とジョブ状態表示。旧 route・旧 schema・旧クライアント関数は削除し、旧 URL は 404。`command_runs` は一般実行ログ名を維持し、scheduler 起因の表示は `job_id` を使う。
+- **移行**: 手順は `docs/job/migration.md`。`python -m obsidian_ai_hub.job_runner --migrate-tasks-to-jobs` が唯一の YAML 移行経路。`batch/scheduler.sh` と LaunchAgent plist は `job_runner` を指す。

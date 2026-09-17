@@ -1,3 +1,11 @@
+"""Recurring Scheduler Jobs: YAML-defined, schedule-driven execution.
+
+This module is the renamed successor of the former ``task_runner`` scheduler
+Task code. Scheduler Job (recurring / one-shot) is a separate aggregate from
+the Task Agent Task and uses ``jobs/`` YAML, ``jobs/last_run.json`` state,
+``.job-config.lock`` / ``.job-runner.lock`` files, and the ``job_state`` table.
+"""
+
 import contextlib
 import fcntl
 import hashlib
@@ -5,23 +13,45 @@ import json
 import logging
 import os
 import shlex
+import shutil
 import subprocess
 import tempfile
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
 import yaml
 from obsidian_ai_hub.utils import config
 
 logger = logging.getLogger(__name__)
 
-TEST_TASK_FILE = config.BASE_DIR / "tasks" / "tasks.test.yml"
-DEFAULT_TASK_FILE = config.BASE_DIR / "tasks" / "tasks.yml"
-LOCAL_TASK_FILE = config.BASE_DIR / "tasks" / "tasks.local.yml"
-STATE_FILE = config.TASK_RUN_STATE_PATH
+TEST_JOB_FILE = config.BASE_DIR / "jobs" / "jobs.test.yml"
+DEFAULT_JOB_FILE = config.BASE_DIR / "jobs" / "jobs.yml"
+LOCAL_JOB_FILE = config.BASE_DIR / "jobs" / "jobs.local.yml"
+STATE_FILE = config.JOB_RUN_STATE_PATH
 
-LOCK_FILE = STATE_FILE.parent / ".task-config.lock"
-RUNNER_LOCK_FILE = STATE_FILE.parent / ".task-runner.lock"
+LOCK_FILE = STATE_FILE.parent / ".job-config.lock"
+RUNNER_LOCK_FILE = STATE_FILE.parent / ".job-runner.lock"
+
+# Legacy Scheduler Task paths. The runner never reads these; their presence
+# means YAML migration has not run, so startup fails closed with guidance.
+LEGACY_TASK_DIR = config.BASE_DIR / "tasks"
+LEGACY_TASK_FILES = (
+    LEGACY_TASK_DIR / "tasks.local.yml",
+    LEGACY_TASK_DIR / "tasks.yml",
+    LEGACY_TASK_DIR / "tasks.test.yml",
+    LEGACY_TASK_DIR / "last_run.json",
+)
+LEGACY_STATE_FILE = LEGACY_TASK_DIR / "last_run.json"
+LEGACY_KNOWLEDGE_STATE_FILE = LEGACY_TASK_DIR / "knowledge_sync_state.json"
+
+MIGRATION_GUIDANCE = (
+    "Legacy Scheduler Task files found in tasks/. "
+    "Run YAML migration first: "
+    "python -m obsidian_ai_hub.job_runner --migrate-tasks-to-jobs "
+    "(moves tasks/tasks.local.yml or tasks/tasks.yml to jobs/jobs.local.yml, "
+    "copies last_run.json state, then removes legacy files)."
+)
 
 PRESET_FLAGS = {
     "--merge-inbox": "Inbox merge",
@@ -45,8 +75,25 @@ PRESET_FLAGS = {
 }
 
 
+def assert_no_legacy_task_files() -> None:
+    """Fail closed when unmigrated Scheduler Task files remain.
+
+    The runner reads ``jobs/`` only and never merges both directories, so a
+    leftover legacy file means the operator may be editing a file that has no
+    effect. Raise instead of silently ignoring it. Skipped in test envs where
+    the sandbox redirects all writable paths (fail-closed is covered by
+    dedicated tests with patched legacy paths).
+    """
+    if config.IS_TEST_ENV:
+        return
+    leftovers = [p for p in LEGACY_TASK_FILES if p.exists()]
+    if leftovers:
+        names = ", ".join(p.name for p in leftovers)
+        raise RuntimeError(f"{MIGRATION_GUIDANCE} Found: {names}")
+
+
 @contextlib.contextmanager
-def acquire_task_config_lock():
+def acquire_job_config_lock():
     LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
     with open(LOCK_FILE, "w") as f:
         fcntl.flock(f, fcntl.LOCK_EX)
@@ -196,6 +243,8 @@ def _find_target(schedule: dict, now: datetime, forward: bool) -> datetime:
     if t not in ["minutely", "hourly", "daily", "weekly", "monthly"]:
         raise ValueError(f"unknown schedule type: {t}")
 
+    from datetime import timedelta
+
     now = now.replace(microsecond=0)
 
     seconds = sorted(list(parse_cron_field(schedule.get("second", 0), 0, 59)), reverse=not forward)
@@ -286,12 +335,17 @@ def compute_next_target(schedule: dict, now: datetime) -> datetime:
     return _find_target(schedule, now, forward=True)
 
 
-def load_tasks():
+def load_jobs():
+    assert_no_legacy_task_files()
     if config.IS_TEST_ENV:
-        with TEST_TASK_FILE.open() as f:
+        if not TEST_JOB_FILE.exists():
+            return []
+        with TEST_JOB_FILE.open() as f:
             return yaml.safe_load(f)
-    task_file = LOCAL_TASK_FILE if LOCAL_TASK_FILE.exists() else DEFAULT_TASK_FILE
-    with task_file.open() as f:
+    job_file = LOCAL_JOB_FILE if LOCAL_JOB_FILE.exists() else DEFAULT_JOB_FILE
+    if not job_file.exists():
+        return []
+    with job_file.open() as f:
         return yaml.safe_load(f) or []
 
 
@@ -365,118 +419,119 @@ def parse_command(command: str) -> list[dict]:
     return parsed_segments
 
 
-def validate_tasks(tasks: list) -> None:
+def validate_jobs(jobs: list) -> None:
     seen_ids = set()
-    for task in tasks:
-        if not isinstance(task, dict):
-            raise ValueError("Each task must be a dictionary")
+    for job in jobs:
+        if not isinstance(job, dict):
+            raise ValueError("Each job must be a dictionary")
 
-        task_id = task.get("id")
-        if not task_id or not isinstance(task_id, str) or not task_id.strip():
-            raise ValueError("Task ID is required and must be a non-empty string")
+        job_id = job.get("id")
+        if not job_id or not isinstance(job_id, str) or not job_id.strip():
+            raise ValueError("Job ID is required and must be a non-empty string")
 
-        if task_id in seen_ids:
-            raise ValueError(f"Duplicate task ID: {task_id}")
-        seen_ids.add(task_id)
+        if job_id in seen_ids:
+            raise ValueError(f"Duplicate job ID: {job_id}")
+        seen_ids.add(job_id)
 
-        enabled = task.get("enabled", True)
+        enabled = job.get("enabled", True)
         if not isinstance(enabled, bool):
-            raise ValueError(f"Task '{task_id}': enabled must be a boolean")
+            raise ValueError(f"Job '{job_id}': enabled must be a boolean")
 
-        schedule = task.get("schedule")
+        schedule = job.get("schedule")
         if not isinstance(schedule, dict):
-            raise ValueError(f"Task '{task_id}': schedule is required and must be a dictionary")
+            raise ValueError(f"Job '{job_id}': schedule is required and must be a dictionary")
 
         try:
             normalize_schedule(schedule)
         except ValueError as e:
-            raise ValueError(f"Task '{task_id}': Invalid schedule: {e}")
+            raise ValueError(f"Job '{job_id}': Invalid schedule: {e}")
 
-        command = task.get("command")
+        command = job.get("command")
         if not command or not isinstance(command, str) or not command.strip():
-            raise ValueError(f"Task '{task_id}': Command must be a non-empty string")
+            raise ValueError(f"Job '{job_id}': Command must be a non-empty string")
 
         try:
             parse_command(command)
         except ValueError as e:
-            raise ValueError(f"Task '{task_id}': Invalid command structure: {e}")
+            raise ValueError(f"Job '{job_id}': Invalid command structure: {e}")
 
 
-def get_tasks_file_and_revision() -> tuple[Path, str, list]:
+def get_jobs_file_and_revision() -> tuple[Path, str, list]:
+    assert_no_legacy_task_files()
     if config.IS_TEST_ENV:
-        task_file = TEST_TASK_FILE
+        job_file = TEST_JOB_FILE
     else:
-        task_file = LOCAL_TASK_FILE if LOCAL_TASK_FILE.exists() else DEFAULT_TASK_FILE
+        job_file = LOCAL_JOB_FILE if LOCAL_JOB_FILE.exists() else DEFAULT_JOB_FILE
 
-    if not task_file.exists():
-        return task_file, "", []
+    if not job_file.exists():
+        return job_file, "", []
 
-    with open(task_file, "rb") as f:
+    with open(job_file, "rb") as f:
         content_bytes = f.read()
 
     sha = hashlib.sha256(content_bytes).hexdigest()
 
-    try:
-        tasks = yaml.safe_load(content_bytes.decode("utf-8")) or []
-    except Exception:
-        tasks = []
+    # Corrupt YAML must surface (500 via the API, loud failure in the runner),
+    # never silently read as empty: the save flow would otherwise overwrite the
+    # corrupt file with old_jobs=[] and lose data.
+    jobs = yaml.safe_load(content_bytes.decode("utf-8")) or []
 
-    return task_file, sha, tasks
-
-
-def get_tasks_file_and_revision_locked() -> tuple[Path, str, list]:
-    with acquire_task_config_lock():
-        return get_tasks_file_and_revision()
+    return job_file, sha, jobs
 
 
-def save_tasks_and_arm(new_tasks: list, old_tasks: list, now: datetime):
-    old_by_id = {t["id"]: t for t in old_tasks if "id" in t}
+def get_jobs_file_and_revision_locked() -> tuple[Path, str, list]:
+    with acquire_job_config_lock():
+        return get_jobs_file_and_revision()
+
+
+def save_jobs_and_arm(new_jobs: list, old_jobs: list, now: datetime):
+    old_by_id = {t["id"]: t for t in old_jobs if "id" in t}
     state = load_state()
-    new_ids = {t["id"] for t in new_tasks if "id" in t}
+    new_ids = {t["id"] for t in new_jobs if "id" in t}
 
-    # 1. Clean up deleted tasks from state
+    # 1. Clean up deleted jobs from state
     for old_id in list(state.keys()):
         if old_id not in new_ids:
             state.pop(old_id, None)
 
-    # 2. Check each task for arming
-    for task in new_tasks:
-        task_id = task.get("id")
-        if not task_id:
+    # 2. Check each job for arming
+    for job in new_jobs:
+        job_id = job.get("id")
+        if not job_id:
             continue
 
-        if not task.get("enabled", True):
+        if not job.get("enabled", True):
             continue
 
         need_arm = False
-        if task_id not in old_by_id:
+        if job_id not in old_by_id:
             need_arm = True
         else:
-            old_task = old_by_id[task_id]
-            if not old_task.get("enabled", True):
+            old_job = old_by_id[job_id]
+            if not old_job.get("enabled", True):
                 need_arm = True
-            old_sched = old_task.get("schedule")
-            new_sched = task.get("schedule")
+            old_sched = old_job.get("schedule")
+            new_sched = job.get("schedule")
             try:
                 if normalize_schedule(old_sched) != normalize_schedule(new_sched):
                     need_arm = True
             except Exception:
                 need_arm = True
-            if old_task.get("command") != task.get("command"):
+            if old_job.get("command") != job.get("command"):
                 need_arm = True
 
         if need_arm:
-            state[task_id] = now
+            state[job_id] = now
 
     # Save
-    atomic_write_yaml(LOCAL_TASK_FILE, new_tasks)
+    atomic_write_yaml(LOCAL_JOB_FILE, new_jobs)
     save_state(state)
 
 
 def run_command(command):
     """Run a scheduled command without invoking a shell.
 
-    Supports the existing task format with optional "cd <path> && ..." chains.
+    Supports the existing job format with optional "cd <path> && ..." chains.
     Each segment is parsed with shlex and executed with shell=False.
     """
     cwd = None
@@ -500,46 +555,78 @@ def run_command(command):
         subprocess.run(parts, cwd=cwd, check=False)
 
 
-def main():
-    now = datetime.now()
+def migrate_tasks_yaml_to_jobs(base_dir: Optional[Path] = None) -> Path:
+    """One-shot YAML migration: tasks/ -> jobs/.
 
-    # 1. Acquire runner lock
-    RUNNER_LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
-    runner_f = open(RUNNER_LOCK_FILE, "w")
+    Copies ``tasks/tasks.local.yml`` (fallback ``tasks/tasks.yml``) to
+    ``jobs/jobs.local.yml`` after validation, copies ``last_run.json`` and
+    ``knowledge_sync_state.json`` state files when present, then removes the
+    legacy files. Stops without merging when the destination already exists or
+    when no legacy source exists.
+    """
+    root = Path(base_dir) if base_dir is not None else config.BASE_DIR
+    legacy_dir = root / "tasks"
+    jobs_dir = root / "jobs"
+    dest = jobs_dir / "jobs.local.yml"
+
+    if dest.exists():
+        raise RuntimeError(
+            "Migration stopped: jobs/jobs.local.yml already exists. "
+            "Remove it or finish migration manually; refusing to merge both directories."
+        )
+
+    legacy_local = legacy_dir / "tasks.local.yml"
+    legacy_default = legacy_dir / "tasks.yml"
+    source = legacy_local if legacy_local.exists() else legacy_default
+    if not source.exists():
+        raise RuntimeError(
+            "Migration stopped: no legacy tasks YAML found "
+            "(tasks/tasks.local.yml or tasks/tasks.yml)."
+        )
+
+    with source.open(encoding="utf-8") as f:
+        jobs = yaml.safe_load(f) or []
+    validate_jobs(jobs)
+
+    jobs_dir.mkdir(parents=True, exist_ok=True)
+    atomic_write_yaml(dest, jobs)
+
+    new_state = jobs_dir / "last_run.json"
+    old_state = legacy_dir / "last_run.json"
+    if old_state.exists() and not new_state.exists():
+        shutil.copy2(old_state, new_state)
+
+    new_knowledge = jobs_dir / "knowledge_sync_state.json"
+    old_knowledge = legacy_dir / "knowledge_sync_state.json"
+    if old_knowledge.exists() and not new_knowledge.exists():
+        shutil.copy2(old_knowledge, new_knowledge)
+
+    for legacy_file in (
+        legacy_dir / "tasks.local.yml",
+        legacy_dir / "tasks.yml",
+        legacy_dir / "tasks.local.sample.yml",
+        legacy_dir / "tasks.test.yml",
+        legacy_dir / "last_run.json",
+        legacy_dir / "knowledge_sync_state.json",
+    ):
+        try:
+            if legacy_file.exists():
+                legacy_file.unlink()
+        except OSError:
+            logger.warning("Failed to remove legacy file %s", legacy_file)
+
+    # Remove the legacy lock files if present; the runner uses job locks now.
+    for legacy_lock in (legacy_dir / ".task-config.lock", legacy_dir / ".task-runner.lock"):
+        try:
+            if legacy_lock.exists():
+                legacy_lock.unlink()
+        except OSError:
+            logger.warning("Failed to remove legacy lock %s", legacy_lock)
+
     try:
-        fcntl.flock(runner_f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        if legacy_dir.exists() and not any(legacy_dir.iterdir()):
+            legacy_dir.rmdir()
     except OSError:
-        logger.info("Another scheduler runner is already running. Exiting.")
-        return
+        logger.warning("Failed to remove legacy tasks directory %s", legacy_dir)
 
-    # 2. Under config lock, load snapshot
-    with acquire_task_config_lock():
-        tasks = load_tasks()
-
-    # 3. Execute
-    for task in tasks:
-        if not task.get("enabled", True):
-            continue
-
-        task_id = task["id"]
-        schedule = task["schedule"]
-        command = task["command"]
-
-        with acquire_task_config_lock():
-            current_state = load_state()
-            last_run = current_state.get(task_id, datetime.min)
-
-        target = compute_target(schedule, now)
-
-        if last_run < target <= now:
-            logger.info("Running task: %s", task_id)
-            run_command(command)
-
-            with acquire_task_config_lock():
-                current_state = load_state()
-                current_state[task_id] = now
-                save_state(current_state)
-
-
-if __name__ == "__main__":
-    main()
+    return dest

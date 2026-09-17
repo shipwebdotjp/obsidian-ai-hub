@@ -17,6 +17,16 @@
   出力する `<cli_request>` タグのみで行い、ツール経由で外部CLIを起動しない。使用バックエンド
   名は Coordinator に開示しない。
 - **Vault / Calendar / Reminders** — Taskが読取対象として参照し得る外部境界。Calendar / Remindersへの追加は既存提案HITL登録ツール経由のみ行い、人間の承認はHITL側で行う。Vaultへの直接書込みは `vault_write_file` Capability経由のみ行い、既定 `plan_required` のPlan一括承認を要する。
+- **Scheduler** — 指定時刻や登録契機にOSコマンドを起動する別集約・別実行器の文脈。Task Agent の Task とは集約・実行器・状態を共有しない。`job_runner` が唯一の実行入口である。
+
+## ユビキタス言語（Scheduler）
+
+| 用語 | 定義 |
+| --- | --- |
+| **Scheduler Job** | 指定コマンドを起動する定義の総称。定期実行とワンショット実行をともに指す。Task Agent の Task とは別集約である。 |
+| **Recurring Job** | YAML（`jobs/jobs.local.yml`）で定義し、schedule に従い繰り返し起動する Job。状態は `jobs/last_run.json` と `job_state` に持つ。 |
+| **One-shot Job** | Agent が `register_one_shot_job` tool で登録し、一度だけ実行する Job。専用 SQLite キュー（`one_shot_jobs`）に保存し、at-most-once で実行する。 |
+| **Job Runner** | `job_runner` モジュール。runner lock 内で定期 Job の期限判定とワンショット Job の claim・実行を行う。 |
 
 ## ユビキタス言語
 

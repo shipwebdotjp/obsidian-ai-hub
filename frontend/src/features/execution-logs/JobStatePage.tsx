@@ -1,58 +1,47 @@
 import { useCallback, useEffect, useState } from "react";
-import { apiGet } from "../../api/client";
+import { listJobStates } from "../../api/client";
+import type { JobState } from "../../api/types";
 import { formatDateTime } from "../../utils/date";
 
-const TASK_STATE_POLL_MS = 30_000;
+const JOB_STATE_POLL_MS = 30_000;
 const ERROR_WINDOW_MS = 60 * 60 * 1000; // last_error_at: show エラー for 1h
 const ACTIVE_WINDOW_MS = 3 * 60 * 1000; // last_check_at: actively running
 const RECENT_WINDOW_MS = 24 * 60 * 60 * 1000; // last_check_at: seen recently
 
-interface TaskState {
-  task_id: string;
-  last_check_at: string;
-  consecutive_empty_count: number;
-  last_processed_at: string | null;
-  last_error_at: string | null;
-  last_error_message: string | null;
-  last_error_type: string | null;
-  processed_count: number;
-  skipped_count: number;
-  failed_count: number;
-  updated_at: string;
-}
-
-export default function TaskStatePage() {
-  const [taskStates, setTaskStates] = useState<TaskState[]>([]);
-  const [taskStatesError, setTaskStatesError] = useState(false);
+export default function JobStatePage() {
+  const [jobStates, setJobStates] = useState<JobState[]>([]);
+  const [jobStatesError, setJobStatesError] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  const fetchTaskStates = useCallback(async () => {
+  const fetchJobStates = useCallback(async () => {
     try {
-      const res = await apiGet<{ items: TaskState[] }>("/api/v1/task-states");
-      setTaskStates(res.items);
-      setTaskStatesError(false);
-    } catch (_) {
-      setTaskStatesError(true);
+      const res = await listJobStates();
+      setJobStates(res.items);
+      setJobStatesError(false);
+    } catch {
+      setJobStatesError(true);
     } finally {
       setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    fetchTaskStates();
-    const interval = setInterval(fetchTaskStates, TASK_STATE_POLL_MS);
+    fetchJobStates();
+    const interval = setInterval(fetchJobStates, JOB_STATE_POLL_MS);
     return () => clearInterval(interval);
-  }, [fetchTaskStates]);
+  }, [fetchJobStates]);
 
   const isWithinMs = (iso: string | null | undefined, withinMs: number) => {
     if (!iso) return false;
     const t = new Date(iso).getTime();
-    return Number.isFinite(t) && Date.now() - t < withinMs;
+    if (!Number.isFinite(t)) return false;
+    const delta = Date.now() - t;
+    return delta >= 0 && delta < withinMs;
   };
 
   const formatTs = (v: string | null | undefined) => (v ? formatDateTime(v) : "");
 
-  const getTaskStateHealth = (ts: TaskState) => {
+  const getJobStateHealth = (ts: JobState) => {
     if (isWithinMs(ts.last_error_at, ERROR_WINDOW_MS)) {
       return { label: "エラー", className: "bg-rose-50 text-rose-700 border-rose-200" };
     }
@@ -69,40 +58,40 @@ export default function TaskStatePage() {
     <div className="flex h-full flex-col overflow-hidden bg-slate-50">
       {/* Header */}
       <div className="shrink-0 border-b border-slate-200 bg-white px-6 py-4 shadow-sm">
-        <h1 className="text-xl font-bold text-slate-900">タスク状態</h1>
+        <h1 className="text-xl font-bold text-slate-900">ジョブ状態</h1>
         <p className="text-xs text-slate-500 mt-1">
-          定期・高頻度タスクの動作状態を確認できます（空振りはログに出さずここに集計）
+          定期・高頻度ジョブの動作状態を確認できます（空振りはログに出さずここに集計）
         </p>
       </div>
 
       {/* Main Content */}
       <div className="flex-1 overflow-y-auto p-6">
-        {taskStatesError && (
+        {jobStatesError && (
           <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 p-3">
             <p className="text-xs font-semibold text-amber-700">
-              タスク状態を取得できません
+              ジョブ状態を取得できません
             </p>
           </div>
         )}
 
         {loading ? (
           <div className="p-8 text-center text-sm text-slate-500">読み込み中…</div>
-        ) : taskStates.length === 0 ? (
+        ) : jobStates.length === 0 ? (
           <div className="p-8 text-center text-sm text-slate-500">
-            タスク状態データがありません。
+            ジョブ状態データがありません。
           </div>
         ) : (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {taskStates.map((ts) => {
-              const health = getTaskStateHealth(ts);
+            {jobStates.map((ts) => {
+              const health = getJobStateHealth(ts);
               return (
                 <div
-                  key={ts.task_id}
+                  key={ts.job_id}
                   className="flex flex-col gap-2 rounded border border-slate-200 bg-white p-4 shadow-sm"
                 >
                   <div className="flex items-center justify-between gap-2">
                     <span className="truncate font-semibold text-slate-800 text-sm">
-                      {ts.task_id}
+                      {ts.job_id}
                     </span>
                     <span
                       className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase ${health.className}`}

@@ -12,7 +12,7 @@
         <string>obsidian_merge</string>
         <string>{{PWD}}/.venv/bin/python3</string>
         <string>-m</string>
-        <string>obsidian_ai_hub.task_runner</string>
+        <string>obsidian_ai_hub.job_runner</string>
     </array>
 
     <key>WorkingDirectory</key>

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # launchd_log_wrapper.sh — rotates stdout/stderr for a short-lived launchd job
-# (e.g. a periodic task_runner that starts every N seconds and exits).
+# (e.g. a periodic job_runner that starts every N seconds and exits).
 #
 # Usage: launchd_log_wrapper.sh <label> <command...>
 #

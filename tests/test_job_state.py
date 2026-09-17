@@ -13,7 +13,7 @@ from obsidian_ai_hub.web.app import create_app
 
 
 @pytest.fixture
-def loopback_client(monkeypatch, test_memory_db_path, api_token, api_auth_headers):
+def loopback_client(test_memory_db_path, api_token, api_auth_headers):
     app = create_app(host="127.0.0.1", port=0, token=api_token)
     return TestClient(app, headers=api_auth_headers)
 
@@ -34,7 +34,7 @@ def _run_empty_merge_inbox(monkeypatch, times=1):
             _run_cli(monkeypatch, ["--merge-inbox"])
 
 
-# --- Empty runs: no command_runs, only task_state ---
+# --- Empty runs: no command_runs, only job_state ---
 
 def test_empty_merge_inbox_creates_no_command_run(monkeypatch, test_memory_db_path):
     _run_empty_merge_inbox(monkeypatch)
@@ -43,20 +43,20 @@ def test_empty_merge_inbox_creates_no_command_run(monkeypatch, test_memory_db_pa
     assert total == 0
     assert items == []
 
-    states = execution_logger.list_task_states()
+    states = execution_logger.list_job_states()
     assert len(states) == 1
     s = states[0]
-    assert s["task_id"] == "merge_inbox"
+    assert s["job_id"] == "merge_inbox"
     assert s["consecutive_empty_count"] == 1
     assert s["processed_count"] == 0
     assert s["last_processed_at"] is None
     assert s["last_error_at"] is None
 
 
-def test_multiple_empty_runs_update_task_state_without_growth(monkeypatch, test_memory_db_path):
+def test_multiple_empty_runs_update_job_state_without_growth(monkeypatch, test_memory_db_path):
     _run_empty_merge_inbox(monkeypatch, times=3)
 
-    states = execution_logger.list_task_states()
+    states = execution_logger.list_job_states()
     assert len(states) == 1
     assert states[0]["consecutive_empty_count"] == 3
 
@@ -64,7 +64,7 @@ def test_multiple_empty_runs_update_task_state_without_growth(monkeypatch, test_
     assert total == 0
 
 
-# --- Non-empty runs: keep command_run and refresh task_state ---
+# --- Non-empty runs: keep command_run and refresh job_state ---
 
 def test_non_empty_merge_inbox_keeps_command_run(monkeypatch, test_memory_db_path):
     _run_empty_merge_inbox(monkeypatch, times=2)
@@ -81,7 +81,7 @@ def test_non_empty_merge_inbox_keeps_command_run(monkeypatch, test_memory_db_pat
     assert items[0]["status"] == "succeeded"
     assert items[0]["summary"] == str({"processed": 2, "skipped": 1, "failed": 0, "checked": 3})
 
-    states = execution_logger.list_task_states()
+    states = execution_logger.list_job_states()
     s = states[0]
     assert s["consecutive_empty_count"] == 0
     assert s["processed_count"] == 2
@@ -101,15 +101,15 @@ def test_skipped_only_run_treated_as_empty_increments_streak(monkeypatch, test_m
     items, total = execution_logger.list_execution_logs(kind="command", command="merge_inbox")
     assert total == 0
 
-    states = execution_logger.list_task_states()
+    states = execution_logger.list_job_states()
     assert states[0]["consecutive_empty_count"] == 1
     assert states[0]["skipped_count"] == 3
     assert states[0]["last_processed_at"] is None
 
 
-# --- Failures: keep failed command_run and record error in task_state ---
+# --- Failures: keep failed command_run and record error in job_state ---
 
-def test_failed_merge_inbox_records_error_in_task_state(monkeypatch, test_memory_db_path):
+def test_failed_merge_inbox_records_error_in_job_state(monkeypatch, test_memory_db_path):
     with patch.object(
         main_module.obsidian_inbox_merge, "main", side_effect=RuntimeError("boom")
     ):
@@ -120,7 +120,7 @@ def test_failed_merge_inbox_records_error_in_task_state(monkeypatch, test_memory
     assert total == 1
     assert items[0]["status"] == "failed"
 
-    states = execution_logger.list_task_states()
+    states = execution_logger.list_job_states()
     s = states[0]
     assert s["last_error_type"] == "RuntimeError"
     assert s["last_error_message"] == "boom"
@@ -136,7 +136,7 @@ def test_failure_does_not_change_consecutive_empty_count(monkeypatch, test_memor
         with pytest.raises(RuntimeError):
             _run_cli(monkeypatch, ["--merge-inbox"])
 
-    states = execution_logger.list_task_states()
+    states = execution_logger.list_job_states()
     assert states[0]["consecutive_empty_count"] == 2
 
 
@@ -152,7 +152,7 @@ def test_success_after_failure_clears_last_error(monkeypatch, test_memory_db_pat
     ):
         _run_cli(monkeypatch, ["--merge-inbox"])
 
-    states = execution_logger.list_task_states()
+    states = execution_logger.list_job_states()
     s = states[0]
     assert s["last_error_at"] is None
     assert s["last_error_message"] is None
@@ -180,10 +180,10 @@ def test_suppress_command_run_refuses_when_llm_calls_exist(test_memory_db_path):
     assert len(detail["llm_calls"]) == 1
 
 
-# --- cleanup preserves task_state ---
+# --- cleanup preserves job_state ---
 
-def test_cleanup_old_logs_now_preserves_task_state(test_memory_db_path):
-    execution_logger.upsert_task_state(
+def test_cleanup_old_logs_now_preserves_job_state(test_memory_db_path):
+    execution_logger.upsert_job_state(
         "merge_inbox",
         result={"processed": 1, "skipped": 0, "failed": 0},
     )
@@ -215,9 +215,9 @@ def test_cleanup_old_logs_now_preserves_task_state(test_memory_db_path):
     assert total == 0
     assert all(item["id"] != "old-call" for item in items)
 
-    states = execution_logger.list_task_states()
+    states = execution_logger.list_job_states()
     assert len(states) == 1
-    assert states[0]["task_id"] == "merge_inbox"
+    assert states[0]["job_id"] == "merge_inbox"
     assert states[0]["processed_count"] == 1
 
 
@@ -244,18 +244,18 @@ def test_merge_inbox_main_returns_zero_counts_when_inbox_missing(monkeypatch, tm
 
 # --- Web API ---
 
-def test_task_states_api(loopback_client, test_memory_db_path):
-    execution_logger.upsert_task_state(
+def test_job_states_api(loopback_client, test_memory_db_path):
+    execution_logger.upsert_job_state(
         "merge_inbox",
         result={"processed": 0, "skipped": 0, "failed": 0},
     )
 
-    res = loopback_client.get("/api/v1/task-states")
+    res = loopback_client.get("/api/v1/scheduler-jobs/job-states")
     assert res.status_code == 200
     body = res.json()
     assert len(body["items"]) == 1
     item = body["items"][0]
-    assert item["task_id"] == "merge_inbox"
+    assert item["job_id"] == "merge_inbox"
     assert item["consecutive_empty_count"] == 1
     assert item["last_check_at"]
     assert "processed_count" in item

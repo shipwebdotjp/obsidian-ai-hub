@@ -98,8 +98,8 @@ export default function Sidebar({ open, onClose, id }: SidebarProps) {
         <NavLink to={ROUTES.PROJECTS} className={linkClass} onClick={onClose}>
           プロジェクト管理
         </NavLink>
-        <NavLink to={ROUTES.TASKS} className={linkClass} onClick={onClose}>
-          タスク管理
+        <NavLink to={ROUTES.JOBS} className={linkClass} onClick={onClose}>
+          ジョブ管理
         </NavLink>
         <NavLink to={ROUTES.TASK_AGENT} className={linkClass} onClick={onClose} end>
           Task Agent
@@ -126,11 +126,11 @@ export default function Sidebar({ open, onClose, id }: SidebarProps) {
                 ログ
               </NavLink>
               <NavLink
-                to={ROUTES.EXECUTION_LOGS_TASK_STATES}
+                to={ROUTES.EXECUTION_LOGS_JOB_STATES}
                 className={linkClass}
                 onClick={onClose}
               >
-                タスク状態
+                ジョブ状態
               </NavLink>
             </div>
           )}

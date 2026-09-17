@@ -60,15 +60,15 @@ beforeEach(() => {
   });
 });
 
-it("renders log items in the list and does not fetch task states", async () => {
+it("renders log items in the list and does not fetch job states", async () => {
   render(<ExecutionLogPage />);
 
   await waitFor(() => {
     expect(screen.getByText("make_target")).toBeInTheDocument();
   });
   expect(screen.getByText("gpt-4o-mini")).toBeInTheDocument();
-  expect(screen.queryByText("タスク状態")).not.toBeInTheDocument();
-  expect(mockApiGet).not.toHaveBeenCalledWith("/api/v1/task-states");
+  expect(screen.queryByText("ジョブ状態")).not.toBeInTheDocument();
+  expect(mockApiGet).not.toHaveBeenCalledWith("/api/v1/scheduler-jobs/job-states");
 });
 
 it("shows detail prompt on desktop when list says to select", async () => {

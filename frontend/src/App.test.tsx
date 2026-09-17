@@ -38,9 +38,9 @@ vi.mock("./features/vault-search/VaultSearchPage", () => ({ default: () => <div 
 vi.mock("./features/summary-dashboard/SummaryDashboardPage", () => ({ default: () => <div data-testid="page-summary-dashboard">SummaryDashboardPage</div> }));
 vi.mock("./features/people/PeoplePage", () => ({ default: () => <div data-testid="page-people">PeoplePage</div> }));
 vi.mock("./features/projects/ProjectsPage", () => ({ default: () => <div data-testid="page-projects">ProjectsPage</div> }));
-vi.mock("./features/tasks/TaskPage", () => ({ default: () => <div data-testid="page-tasks">TaskPage</div> }));
+vi.mock("./features/jobs/JobPage", () => ({ default: () => <div data-testid="page-jobs">JobPage</div> }));
 vi.mock("./features/execution-logs/ExecutionLogPage", () => ({ default: () => <div data-testid="page-execution-logs">ExecutionLogPage</div> }));
-vi.mock("./features/execution-logs/TaskStatePage", () => ({ default: () => <div data-testid="page-task-states">TaskStatePage</div> }));
+vi.mock("./features/execution-logs/JobStatePage", () => ({ default: () => <div data-testid="page-job-states">JobStatePage</div> }));
 vi.mock("./features/planner/PlannerPage", () => ({ default: () => <div data-testid="page-planner">PlannerPage</div> }));
 vi.mock("./features/settings/SettingsPage", () => ({ default: () => <div data-testid="page-settings">SettingsPage</div> }));
 
@@ -238,16 +238,16 @@ describe("App", () => {
     });
   });
 
-  it("renders /execution-logs/task-states", async () => {
+  it("renders /execution-logs/job-states", async () => {
     mockHealth.mockResolvedValue({ status: "ok", auth_required: false });
     render(
-      <MemoryRouter initialEntries={["/execution-logs/task-states"]}>
+      <MemoryRouter initialEntries={["/execution-logs/job-states"]}>
         <App />
       </MemoryRouter>
     );
 
     await waitFor(() => {
-      expect(screen.getByTestId("page-task-states")).toBeInTheDocument();
+      expect(screen.getByTestId("page-job-states")).toBeInTheDocument();
     });
   });
 
@@ -270,12 +270,12 @@ describe("App", () => {
     // Click to expand
     await userEvent.click(toggleBtn);
     expect(screen.getByRole("link", { name: "ログ" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "タスク状態" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "ジョブ状態" })).toBeInTheDocument();
 
-    // Click タスク状態
-    await userEvent.click(screen.getByRole("link", { name: "タスク状態" }));
+    // Click ジョブ状態
+    await userEvent.click(screen.getByRole("link", { name: "ジョブ状態" }));
     await waitFor(() => {
-      expect(screen.getByTestId("page-task-states")).toBeInTheDocument();
+      expect(screen.getByTestId("page-job-states")).toBeInTheDocument();
     });
 
     // Click ログ
@@ -345,7 +345,7 @@ describe("App", () => {
       { name: "サマリダッシュボード", testId: "page-summary-dashboard" },
       { name: "人物管理", testId: "page-people" },
       { name: "プロジェクト管理", testId: "page-projects" },
-      { name: "タスク管理", testId: "page-tasks" },
+      { name: "ジョブ管理", testId: "page-jobs" },
       { name: "プランナー", testId: "page-planner" },
       { name: "設定", testId: "page-settings" },
     ];

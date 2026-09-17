@@ -38,6 +38,14 @@ import type {
   AgentPromptTemplate,
   SlashInvocation,
   AgentSlashCandidatesResponse,
+  SchedulerJobConfigResponse,
+  SchedulerJobConfigUpdateResponse,
+  CommandPreviewResponse,
+  OneShotJobListResponse,
+  OneShotJobDetail,
+  OneShotJobSummary,
+  RecurringJobUpdate,
+  JobState,
 } from "./types";
 
 const TOKEN_KEY = "obsidian-ai-hub:api-token";
@@ -237,30 +245,52 @@ export function cancelHitlRun(runId: string): Promise<{ success: boolean }> {
   );
 }
 
-// --- Task Config APIs ---
+// --- Scheduler Job APIs ---
 
-import type {
-  TaskConfigResponse,
-  TaskConfigUpdateResponse,
-  CommandPreviewResponse,
-} from "./types";
-
-export function getTaskConfig(): Promise<TaskConfigResponse> {
-  return request<TaskConfigResponse>("/api/v1/task-config");
+export function getRecurringJobs(): Promise<SchedulerJobConfigResponse> {
+  return request<SchedulerJobConfigResponse>("/api/v1/scheduler-jobs/recurring-jobs");
 }
 
-export function updateTaskConfig(revision: string, tasks: any[]): Promise<TaskConfigUpdateResponse> {
-  return request<TaskConfigUpdateResponse>("/api/v1/task-config", {
+export function updateRecurringJobs(revision: string, jobs: RecurringJobUpdate[]): Promise<SchedulerJobConfigUpdateResponse> {
+  return request<SchedulerJobConfigUpdateResponse>("/api/v1/scheduler-jobs/recurring-jobs", {
     method: "PUT",
-    body: JSON.stringify({ revision, tasks }),
+    body: JSON.stringify({ revision, jobs }),
   });
 }
 
 export function previewCommand(command: string): Promise<CommandPreviewResponse> {
-  return request<CommandPreviewResponse>("/api/v1/task-config/preview", {
+  return request<CommandPreviewResponse>("/api/v1/scheduler-jobs/preview", {
     method: "POST",
     body: JSON.stringify({ command }),
   });
+}
+
+export function listOneShotJobs(limit = 100, offset = 0): Promise<OneShotJobListResponse> {
+  const safeLimit = Number.isFinite(limit) ? Math.min(200, Math.max(1, Math.floor(limit))) : 100;
+  const safeOffset = Number.isFinite(offset) ? Math.max(0, Math.floor(offset)) : 0;
+  const sp = new URLSearchParams();
+  sp.set("limit", String(safeLimit));
+  sp.set("offset", String(safeOffset));
+  return request<OneShotJobListResponse>(
+    `/api/v1/scheduler-jobs/one-shot-jobs?${sp.toString()}`,
+  );
+}
+
+export function getOneShotJobDetail(jobId: string): Promise<OneShotJobDetail> {
+  return request<OneShotJobDetail>(
+    `/api/v1/scheduler-jobs/one-shot-jobs/${encodeURIComponent(jobId)}`,
+  );
+}
+
+export function cancelOneShotJob(jobId: string): Promise<OneShotJobSummary> {
+  return request<OneShotJobSummary>(
+    `/api/v1/scheduler-jobs/one-shot-jobs/${encodeURIComponent(jobId)}/cancel`,
+    { method: "POST" },
+  );
+}
+
+export function listJobStates(): Promise<{ items: JobState[] }> {
+  return request<{ items: JobState[] }>("/api/v1/scheduler-jobs/job-states");
 }
 
 export function apiPatch<T>(path: string, body: any): Promise<T> {

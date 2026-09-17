@@ -353,6 +353,18 @@ class RunShellInput(BaseModel):
     )
 
 
+class RegisterOneShotJobInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    command: str = Field(
+        description="一度だけ実行するコマンド。'cd <path> && ...' 形式と複数セグメントの順次実行に対応し、シェルは使わない。",
+    )
+    run_at: Optional[str] = Field(
+        default=None,
+        description="実行予定日時（ISO 8601）。省略時は次回job_runner起動時に実行。タイムゾーンなしはJSTとして解釈し、過去日時は即時扱い。",
+    )
+
+
 class AgentDelegateInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -1143,6 +1155,48 @@ def _make_research_theme_propose_tool(
     return research_theme_propose
 
 
+def _make_register_one_shot_job_tool(
+    trusted_ctx: Optional[Dict[str, Any]] = None,
+) -> BaseTool:
+    """Create a register_one_shot_job tool bound to a trusted execution context.
+
+    The registration source (agent/session/run IDs) is injected from the
+    trusted context so the LLM cannot spoof it via tool inputs.
+    """
+
+    @tool(args_schema=RegisterOneShotJobInput)
+    def register_one_shot_job(command: str, run_at: Optional[str] = None) -> str:
+        """任意コマンドをワンショット実行ジョブとして登録し、次回job_runner起動時または指定日時以降に一度だけ実行します。"""
+        try:
+            from obsidian_ai_hub.scheduler_jobs import one_shot as _one_shot
+
+            ctx = trusted_ctx if isinstance(trusted_ctx, dict) else {}
+            res = _one_shot.register_one_shot_job(
+                command,
+                run_at,
+                agent_id=str(ctx.get("agent_id")) if ctx.get("agent_id") else None,
+                session_id=str(ctx.get("session_id")) if ctx.get("session_id") else None,
+                run_id=str(ctx.get("run_id")) if ctx.get("run_id") else None,
+            )
+            return json.dumps(
+                {
+                    "job_id": res["job_id"],
+                    "status": res["status"],
+                    "run_at_utc": res["run_at_utc"],
+                },
+                ensure_ascii=False,
+            )
+        except ValueError as exc:
+            logger.warning("register_one_shot_job validation failed: %s", exc)
+            return json.dumps({"error": str(exc)}, ensure_ascii=False)
+        except Exception as exc:
+            logger.exception("register_one_shot_job failed")
+            return json.dumps({"error": _sanitize_unexpected_error(exc)}, ensure_ascii=False)
+
+    register_one_shot_job.name = "register_one_shot_job"  # type: ignore[attr-defined]
+    return register_one_shot_job
+
+
 @tool(args_schema=ResearchContextSnapshotInput)
 def research_context_snapshot() -> str:
     """直近7日のDaily Note、最新Weekly Note、直近アクティビティ、既存テーマとフィードバックの要約スナップショットを取得します。"""
@@ -1451,6 +1505,13 @@ _BUILTIN_TOOL_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "description": "ユーザーに最適なリサーチテーマを1件提案し、人間の調査承認リクエスト（HITL）として登録します。",
         "get_tool": lambda: _make_research_theme_propose_tool(None),
         "get_tool_with_context": lambda ctx: _make_research_theme_propose_tool(ctx),
+    },
+    "register_one_shot_job": {
+        "tool_id": "register_one_shot_job",
+        "name": "ワンショット実行ジョブ登録",
+        "description": "任意コマンドをワンショット実行ジョブとして登録し、次回job_runner起動時または指定日時以降に一度だけ実行します。登録には編集画面での明示付与が必要です。",
+        "get_tool": lambda: _make_register_one_shot_job_tool(None),
+        "get_tool_with_context": lambda ctx: _make_register_one_shot_job_tool(ctx),
     },
 }
 

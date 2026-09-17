@@ -402,7 +402,7 @@ def main():
     args = parser.parse_args()
     ran = False
 
-    def run_and_log(fn, name: str, cmd_args: dict = None, task_id: str = None,
+    def run_and_log(fn, name: str, cmd_args: dict = None, job_id: str = None,
                     empty_result_predicate=None):
         import uuid
         from obsidian_ai_hub.utils import execution_logger
@@ -415,24 +415,24 @@ def main():
         try:
             res = fn()
             execution_logger.succeed_command_run(run_id, res)
-            if task_id is not None:
+            if job_id is not None:
                 is_empty = bool(empty_result_predicate(res)) if empty_result_predicate else False
                 if is_empty:
                     execution_logger.suppress_command_run(run_id)
-                execution_logger.upsert_task_state(task_id, result=res if isinstance(res, dict) else None)
+                execution_logger.upsert_job_state(job_id, result=res if isinstance(res, dict) else None)
             return res
         except SystemExit as e:
             if e.code is not None and e.code != 0:
                 print(f"[ERROR] {name}: SystemExit({e.code})")
                 execution_logger.fail_command_run(run_id, e)
-                if task_id is not None:
-                    execution_logger.upsert_task_state(task_id, error=e)
+                if job_id is not None:
+                    execution_logger.upsert_job_state(job_id, error=e)
             raise
         except Exception as e:
             print(f"[ERROR] {name}: {type(e).__name__}")
             execution_logger.fail_command_run(run_id, e)
-            if task_id is not None:
-                execution_logger.upsert_task_state(task_id, error=e)
+            if job_id is not None:
+                execution_logger.upsert_job_state(job_id, error=e)
             raise
         finally:
             print(f"[END] {name} at {datetime.now().isoformat()}")
@@ -596,7 +596,7 @@ def main():
             obsidian_inbox_merge.main,
             "merge_inbox",
             {},
-            task_id="merge_inbox",
+            job_id="merge_inbox",
             empty_result_predicate=lambda r: bool(
                 r and r.get("processed", 0) == 0 and r.get("failed", 0) == 0
             ),

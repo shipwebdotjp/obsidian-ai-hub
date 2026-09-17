@@ -724,9 +724,9 @@ MEMORY_RENDERER_PROMPT_PATH = _optional_path(
 if MEMORY_RENDERER_PROMPT_PATH is None:
     MEMORY_RENDERER_PROMPT_PATH = BASE_DIR / "config" / "prompts" / "memory_render.md"
 
-# Task runner and knowledge sync state files
-TASK_RUN_STATE_PATH = BASE_DIR / "tasks" / "last_run.json"
-KNOWLEDGE_SYNC_STATE_PATH = BASE_DIR / "tasks" / "knowledge_sync_state.json"
+# Scheduler job runner and knowledge sync state files
+JOB_RUN_STATE_PATH = BASE_DIR / "jobs" / "last_run.json"
+KNOWLEDGE_SYNC_STATE_PATH = BASE_DIR / "jobs" / "knowledge_sync_state.json"
 
 # Healthcare (separate DB, never co-located with memory.sqlite3)
 _HEALTHCARE_SQLITE_PATH_RAW = _optional_path(
@@ -756,7 +756,7 @@ if IS_TEST_ENV:
     LOCAL_MODEL_DIR = TEST_WORKSPACE / "local-models"
     VAULT_INDEX_SQLITE_PATH = TEST_WORKSPACE / "vault-index" / "search.sqlite"
     VAULT_INDEX_CHROMA_PATH = TEST_WORKSPACE / "vault-index" / "chroma"
-    TASK_RUN_STATE_PATH = TEST_WORKSPACE / "last_run.json"
+    JOB_RUN_STATE_PATH = TEST_WORKSPACE / "last_run.json"
     KNOWLEDGE_SYNC_STATE_PATH = TEST_WORKSPACE / "knowledge_sync_state.json"
     PLUGINS_TOOLS_DIR = TEST_WORKSPACE / "plugins" / "tools"
     AGENT_SKILLS_PRIMARY_ROOT = TEST_WORKSPACE / "primary_skills"

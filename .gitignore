@@ -8,6 +8,8 @@ knowledge_sync_state.json
 last_run.json
 tasks.local.yml
 tasks/*.lock
+jobs.local.yml
+jobs/*.lock
 config.yml
 doc/
 .hermes/
