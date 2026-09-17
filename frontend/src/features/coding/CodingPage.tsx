@@ -86,12 +86,15 @@ export default function CodingPage() {
     selectedSessionIdRef,
     activeRun: detail.activeRun,
     latestRun: detail.latestRun,
+    loadedSessionId: detail.loadedSessionId,
+    sessionRuns: detail.sessionDetail?.runs,
     onError: setError,
     loadSessionDetail: detail.loadSessionDetail,
     setMessages: detail.setMessages,
     setActiveRun: detail.setActiveRun,
     setSessions: sessions.setSessions,
     setGitStatus: detail.setGitStatus,
+    activeWaitingRun: detail.activeWaitingRun,
     setActiveWaitingRun: detail.setActiveWaitingRun,
     messages: detail.messages,
     inputContent,
@@ -268,6 +271,9 @@ export default function CodingPage() {
               onCopyMessage={ui.handleCopyMessage}
               onSubmitWaitingAnswers={detail.handleSubmitWaitingAnswers}
               onCancelWaitingRun={detail.handleCancelWaitingRun}
+              queuedMessages={stream.queuedMessages}
+              onRemoveQueuedMessage={stream.handleRemoveQueuedMessage}
+              onRetryQueuedMessage={stream.handleRetryQueuedMessage}
               messageEndRef={ui.messageEndRef}
               scrollContainerRef={ui.scrollContainerRef}
               onScrollMessages={ui.handleMessageScroll}
@@ -277,8 +283,6 @@ export default function CodingPage() {
             <CodingChatInput
               inputContent={inputContent}
               onInputChange={setInputContent}
-              isStreaming={stream.isStreaming}
-              currentRun={currentRun}
               availableModels={
                 detail.sessionDetail?.available_models?.length
                   ? detail.sessionDetail.available_models
@@ -315,6 +319,7 @@ export default function CodingPage() {
               onClearSlashInvocation={() => slash.setSlashInvocation(null)}
               onSelectCandidate={slash.handleSelectCandidate}
               onSend={stream.executeSend}
+              queuedCount={stream.queuedMessages.length}
             />
           </>
         )}

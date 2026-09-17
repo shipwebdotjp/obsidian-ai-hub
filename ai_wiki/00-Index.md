@@ -38,7 +38,7 @@
 - [Direct CLI 削除・ACP 一本化（OpenCode のみ）](10-Decisions-Architecture.md#direct-cli-削除acp-一本化opencode-のみ)（2026-09-15）
 - [コーディング実行のトークン使用量積算と試行単位の合算方針](10-Decisions-Architecture.md#コーディング実行のトークン使用量積算と試行単位の合算方針)（2026-09-16）
 - [Scheduler Task から Job への完全改称とワンショット実行ジョブ導入](10-Decisions-Architecture.md#scheduler-task-から-job-への完全改称とワンショット実行ジョブ導入)（2026-09-17）
-- [エージェント会話の送信キューはクライアント側に置く](10-Decisions-Web.md#エージェント会話の送信キューはクライアント側に置く)（2026-09-17）
+- [エージェント／コーディング会話の送信キューはクライアント側に置く](10-Decisions-Web.md#エージェント会話の送信キューはクライアント側に置く)（2026-09-17）
 - [Task Agent MVP 仕様](../docs/task-agent/specification.md)（2026-09-14）。文書群の入口は [docs/task-agent/README.md](../docs/task-agent/README.md)。判断記録は [docs/task-agent/adr/](../docs/task-agent/adr/) 配下:
   - [SQLiteをTask状態の正本とする](../docs/task-agent/adr/sqlite-as-task-state-source-of-truth.md)
   - [CLI投入・WebUI操作・Webサーバー同居worker](../docs/task-agent/adr/cli-intake-webui-hitl-resident-worker.md)

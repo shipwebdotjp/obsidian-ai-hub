@@ -6,6 +6,7 @@ import {
   listCodingSessions,
   type CodingSession,
 } from "../../../api/coding";
+import { removeCodingSendQueue } from "../utils/codingSendQueue";
 
 interface UseCodingSessionsOptions {
   selectedProjectId: number | null;
@@ -119,6 +120,7 @@ export function useCodingSessions({
     if (!confirm("このセッションを削除してもよろしいですか？")) return;
     try {
       await deleteCodingSession(sessionId);
+      removeCodingSendQueue(sessionId);
       if (selectedProjectId) {
         await loadSessions(selectedProjectId);
       }

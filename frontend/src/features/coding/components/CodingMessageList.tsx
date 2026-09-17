@@ -14,6 +14,7 @@ import {
 } from "../../../components/InConversationQuestionCard";
 import { AnsweredRequirementCard } from "../../../components/AnsweredRequirementCard";
 import { formatDateTime } from "../../../utils/date";
+import type { QueuedCodingMessage } from "../utils/codingSendQueue";
 import {
   buildRunById,
   getRunIdForUserMessage,
@@ -56,6 +57,9 @@ interface CodingMessageListProps {
     answers: Record<string, { value: string; comment?: string }>,
   ) => Promise<void>;
   onCancelWaitingRun: (waiting: ActiveWaitingRun) => Promise<void>;
+  queuedMessages?: QueuedCodingMessage[];
+  onRemoveQueuedMessage?: (queueId: string) => void;
+  onRetryQueuedMessage?: (queueId: string) => void;
   messageEndRef: RefObject<HTMLDivElement>;
   scrollContainerRef?: RefObject<HTMLDivElement>;
   onScrollMessages?: () => void;
@@ -174,6 +178,9 @@ export function CodingMessageList({
   onCopyMessage,
   onSubmitWaitingAnswers,
   onCancelWaitingRun,
+  queuedMessages = [],
+  onRemoveQueuedMessage,
+  onRetryQueuedMessage,
   messageEndRef,
   scrollContainerRef,
   onScrollMessages,
@@ -753,6 +760,51 @@ export function CodingMessageList({
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Queued messages waiting for the current turn to finish */}
+      {queuedMessages.length > 0 && (
+        <div className="space-y-2" data-testid="coding-queued-messages">
+          {queuedMessages.map((item) => (
+            <div key={item.queue_id} className="flex justify-end">
+              <div className="max-w-xl rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-2.5 text-xs text-slate-700 shadow-sm">
+                <div className="mb-1 flex items-center gap-2">
+                  <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500">
+                    送信待ち
+                  </span>
+                  {item.slash_invocation?.name && (
+                    <span className="rounded bg-slate-800 px-2 py-0.5 font-mono text-[10px] font-semibold text-slate-200">
+                      /{item.slash_invocation.name}
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => onRemoveQueuedMessage?.(item.queue_id)}
+                    className="ml-auto inline-flex h-4 w-4 items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-700 cursor-pointer"
+                    aria-label="送信待ちメッセージを削除"
+                  >
+                    ×
+                  </button>
+                </div>
+                {item.content && <div className="whitespace-pre-wrap">{item.content}</div>}
+                {item.status === "error" && (
+                  <div className="mt-1 flex items-center gap-2 text-[11px] text-rose-600">
+                    <span data-testid="coding-queued-error">
+                      {item.error_message ?? "送信に失敗しました。"}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => onRetryQueuedMessage?.(item.queue_id)}
+                      className="rounded border border-rose-300 px-1.5 py-0.5 font-semibold text-rose-700 hover:bg-rose-50 cursor-pointer"
+                    >
+                      再送
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
         </div>
       )}
 

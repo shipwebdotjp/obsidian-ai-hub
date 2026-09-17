@@ -1,4 +1,4 @@
-import type { CodingRun, SlashCandidate, SlashInvocation } from "../../../api/coding";
+import type { SlashCandidate, SlashInvocation } from "../../../api/coding";
 import {
   getChatInputPlaceholder,
   shouldSendOnEnter,
@@ -8,8 +8,8 @@ import {
 interface CodingChatInputProps {
   inputContent: string;
   onInputChange: (text: string) => void;
-  isStreaming: boolean;
-  currentRun: CodingRun | null;
+  /** Number of messages waiting in the send queue for this session. */
+  queuedCount?: number;
   showSlashPalette: boolean;
   hasSkillsTool: boolean;
   filteredCandidates: SlashCandidate[];
@@ -29,8 +29,7 @@ interface CodingChatInputProps {
 export function CodingChatInput({
   inputContent,
   onInputChange,
-  isStreaming,
-  currentRun,
+  queuedCount = 0,
   showSlashPalette,
   hasSkillsTool,
   filteredCandidates,
@@ -144,6 +143,17 @@ export function CodingChatInput({
         </div>
       )}
 
+      {queuedCount > 0 && (
+        <div className="mb-2">
+          <span
+            data-testid="coding-queued-count"
+            className="inline-flex items-center gap-1 rounded bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600 border border-slate-200"
+          >
+            待機 {queuedCount}件
+          </span>
+        </div>
+      )}
+
       <form onSubmit={handleSendMessage} className="flex gap-2">
         <textarea
           rows={2}
@@ -151,14 +161,11 @@ export function CodingChatInput({
           onChange={(e) => onInputChange(e.target.value)}
           onKeyDown={handleInputKeyDown}
           placeholder={codingPlaceholder}
-          disabled={isStreaming || currentRun?.status === "running"}
           className="flex-1 resize-none rounded-lg border border-slate-300 p-2 text-xs focus:border-slate-800 focus:outline-none disabled:bg-slate-100"
         />
         <button
           type="submit"
-          disabled={
-            !inputContent.trim() || isStreaming || currentRun?.status === "running"
-          }
+          disabled={!inputContent.trim() && !slashInvocation}
           className="rounded bg-slate-900 px-4 text-xs font-medium text-white hover:bg-slate-800 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 disabled:bg-slate-300"
         >
           送信

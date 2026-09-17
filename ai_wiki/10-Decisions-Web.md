@@ -758,7 +758,7 @@ AgentsPage と CodingPage の左ペイン構造は共通のレイアウトを採
 |------|------|
 | 決定日 | 2026-09-17 |
 | カテゴリ | Web UI・AI エージェント |
-| 決定内容 | `/agents` の会話画面で、現ターンの処理中もユーザー入力を `sessionStorage` のセッション別キューに積み、ターン終端後に1件ずつ FIFO で自動送信する。バックエンドに複数の `queued` run を積む方式は採らず、既存の「1セッション1非終端 run」制約と単一ワーカー構成を維持する。 |
+| 決定内容 | `/agents` と `/coding` の会話画面で、現ターンの処理中もユーザー入力を `sessionStorage` のセッション別キューに積み、ターン終端後に1件ずつ FIFO で自動送信する。バックエンドに複数の `queued` run を積む方式は採らず、既存の「1セッション1非終端 run」制約と単一ワーカー構成を維持する。 |
 
 ### 結論に至った経緯
 
@@ -776,3 +776,12 @@ AgentsPage と CodingPage の左ペイン構造は共通のレイアウトを採
 - **送信:** `useAgentChat.ts` の送信を composer 起点とキュー起点で共通の `sendRun` に整理し、`submitMessageViaRun` は idle なら composer 送信、busy またはキューに先行項目があれば enqueue する。`flushQueue` は選択中セッションが idle のとき先頭の `pending` を1件送信し、`onAccepted` で項目を削除、409 は block、その他失敗は `error` 表示＋再送とした。
 - **UI:** `AgentChatInput.tsx` は処理中も入力・添付・スキル・送信を有効化し待機件数を表示、`AgentMessageList.tsx` はストリーミングパネル下に「送信待ち」バブル（×・再送・エラー）を描画する。セッション削除時は `useAgentSessions.ts` が対象キーの storage を削除する。
 - **検証:** `agentSendQueue.test.ts`（永続化・順序・上限・破損・error 切替）と `AgentsPageSendQueue.test.tsx`（FIFO 自動送信・削除・リロード復元・409 保持・質問待ち停止）を追加。`npm run test` 487 passed、`tsc -b` clean。フロント変更は `make serve` で目視確認する（E2E は追加しない）。
+
+### コーディングセッションへの適用（2026-09-17）
+
+エージェント会話と同じ決定をコーディングセッション（`/coding`）にも適用する。サーバーの実行モデル（`start_queued_run` の active-run ガード、単一ワーカー）と `Idempotency-Key` による二重実行防止が共通のため、追加の恒久判断はなく、同じクライアント側キューの契約を再利用する。
+
+- **キュー:** `frontend/src/features/coding/utils/codingSendQueue.ts` にキー `coding-send-queue:{session_id}:v1`、約1MB上限（添付なしのテキストとスキルのみ）、破損・例外時に空配列／無視、pure な append／remove／error 切替を実装した。
+- **送信:** `useCodingRunStream.ts` の送信を composer 起点とキュー起点で共通の `sendRun` に整理し、`executeSend` は idle なら composer 送信、busy（streaming・質問待ち・非終端 run・キュー先行あり）なら enqueue する。`flushQueue` は選択中セッションの詳細ロード済みで先頭の `pending` を1件送信し、`onAccepted` で項目を削除、409 は block、その他失敗は `error` 表示＋再送とした。
+- **UI:** `CodingChatInput.tsx` は処理中も入力・送信を有効化し待機件数を表示、`CodingMessageList.tsx` は「送信待ち」バブル（×・再送・エラー）を描画する。セッション削除時は `useCodingSessions.ts` が対象キーの storage を削除する。
+- **検証:** `codingSendQueue.test.ts`（永続化・順序・上限・破損・error 切替）と `CodingPageSendQueue.test.tsx`（FIFO 自動送信・下書き保持・削除・リロード復元・409 保持・質問待ち停止）を追加。`npm run test` 501 passed、`tsc -b`／`vite build` clean。

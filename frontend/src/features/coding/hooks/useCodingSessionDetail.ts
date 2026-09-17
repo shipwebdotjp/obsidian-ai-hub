@@ -45,6 +45,9 @@ export function useCodingSessionDetail({
   const [activeWaitingRun, setActiveWaitingRun] = useState<ActiveWaitingRun | null>(null);
   const [gitStatus, setGitStatus] = useState<GitStatus | null>(null);
   const [loadingMessages, setLoadingMessages] = useState(false);
+  // Detail (active/latest run) has been loaded for this session. The send
+  // queue only flushes once this matches the selected session.
+  const [loadedSessionId, setLoadedSessionId] = useState<string | null>(null);
 
   // Conversation tool settings modal state
   const [isSessionSettingsOpen, setIsSessionSettingsOpen] = useState(false);
@@ -73,10 +76,14 @@ export function useCodingSessionDetail({
   };
 
   const loadSessionDetail = async (sessionId: string) => {
+    // Invalidate the previous load so the send queue never flushes against
+    // stale active/latest run state while this fetch is in flight.
+    setLoadedSessionId(null);
     setLoadingMessages(true);
     try {
       const data = await getCodingSessionDetail(sessionId);
       if (selectedSessionIdRef.current !== sessionId) return;
+      setLoadedSessionId(sessionId);
       setSessionDetail(data);
       setMessages(data.messages);
       setActiveRun(data.active_run);
@@ -113,6 +120,7 @@ export function useCodingSessionDetail({
       }
     } catch (e: any) {
       if (selectedSessionIdRef.current !== sessionId) return;
+      setLoadedSessionId(null);
       setSessionDetail(null);
       setGitStatus(null);
       onError(e.message || "セッション詳細の取得に失敗しました");
@@ -122,6 +130,7 @@ export function useCodingSessionDetail({
   };
 
   const resetForEmptySession = () => {
+    setLoadedSessionId(null);
     setSessionDetail(null);
     setMessages([]);
     setActiveRun(null);
@@ -302,6 +311,7 @@ export function useCodingSessionDetail({
     gitStatus,
     setGitStatus,
     loadingMessages,
+    loadedSessionId,
     loadSessionDetail,
     fetchGitStatus,
     resetForEmptySession,

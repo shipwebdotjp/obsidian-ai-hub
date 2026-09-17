@@ -19,6 +19,48 @@ import type {
   ActiveWaitingRun,
   QuestionItem,
 } from "../../../components/InConversationQuestionCard";
+import {
+  clearQueuedCodingMessageError,
+  createQueuedCodingMessage,
+  enqueueCodingMessage,
+  markQueuedCodingMessageError,
+  readCodingSendQueue,
+  removeQueuedCodingMessage,
+  writeCodingSendQueue,
+  type CodingSendQueueWriteResult,
+  type QueuedCodingMessage,
+} from "../utils/codingSendQueue";
+
+const NON_TERMINAL_RUN_STATUSES = new Set<CodingRun["status"]>([
+  "queued",
+  "running",
+  "cancelling",
+  "waiting_user",
+]);
+
+const EMPTY_RUNS: CodingRun[] = [];
+
+function generateIdempotencyKey(): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+interface CodingSendSnapshot {
+  promptText: string;
+  rawText: string;
+  slashInvocation: SlashInvocation | null;
+  idempotencyKey: string;
+}
+
+interface SendRunOptions {
+  sessionId: string;
+  snapshot: CodingSendSnapshot;
+  mode: "composer" | "queue";
+  onAccepted?: () => void;
+  onPostError?: (error: unknown) => void;
+}
 
 /** Upsert a live ACP tool call emitted by the OpenCode worker. */
 function upsertAcpToolCall(
@@ -79,12 +121,17 @@ interface UseCodingRunStreamOptions {
   selectedSessionIdRef: MutableRefObject<string | null>;
   activeRun: CodingRun | null;
   latestRun: CodingRun | null;
+  /** Session detail (active/latest run) is loaded for this session. */
+  loadedSessionId: string | null;
+  /** All known runs of the selected session's detail, if loaded. */
+  sessionRuns?: CodingRun[];
   onError: (message: string | null) => void;
   loadSessionDetail: (sessionId: string) => Promise<void>;
   setMessages: React.Dispatch<React.SetStateAction<CodingMessage[]>>;
   setActiveRun: React.Dispatch<React.SetStateAction<CodingRun | null>>;
   setSessions: React.Dispatch<React.SetStateAction<CodingSession[]>>;
   setGitStatus: React.Dispatch<React.SetStateAction<GitStatus | null>>;
+  activeWaitingRun: ActiveWaitingRun | null;
   setActiveWaitingRun: React.Dispatch<React.SetStateAction<ActiveWaitingRun | null>>;
   messages: CodingMessage[];
   inputContent: string;
@@ -101,12 +148,15 @@ export function useCodingRunStream({
   selectedSessionIdRef,
   activeRun,
   latestRun,
+  loadedSessionId,
+  sessionRuns,
   onError,
   loadSessionDetail,
   setMessages,
   setActiveRun,
   setSessions,
   setGitStatus,
+  activeWaitingRun,
   setActiveWaitingRun,
   messages,
   inputContent,
@@ -131,12 +181,98 @@ export function useCodingRunStream({
     output?: string;
     error?: string | null;
   }>({ status: "idle" });
+  const [queuedMessages, setQueuedMessages] = useState<QueuedCodingMessage[]>([]);
+
+  // Send queue (sessionStorage). The ref is the flush source of truth; state
+  // mirrors only the selected session for rendering.
+  const queueRef = useRef<{ sessionId: string | null; items: QueuedCodingMessage[] }>({
+    sessionId: null,
+    items: [],
+  });
+  const flushInFlightRef = useRef(false);
+  const queueBlockedRef = useRef(false);
+  const queueRetryTimerRef = useRef<number | null>(null);
+  const flushQueueRef = useRef<() => void>(() => {});
+  const loadedSessionIdRef = useRef<string | null>(loadedSessionId);
+  const activeWaitingRunRef = useRef<ActiveWaitingRun | null>(activeWaitingRun);
+  const activeRunRef = useRef<CodingRun | null>(activeRun);
+  const latestRunRef = useRef<CodingRun | null>(latestRun);
+  const sessionRunsRef = useRef<CodingRun[]>(EMPTY_RUNS);
+  const isStreamingRef = useRef(false);
+  const updateQueueRef = useRef<
+    (
+      sessionId: string,
+      updater: (items: QueuedCodingMessage[]) => QueuedCodingMessage[],
+    ) => CodingSendQueueWriteResult
+  >(() => "ok");
+  const sendRunRef = useRef<(options: SendRunOptions) => Promise<void>>(async () => {});
+
+  loadedSessionIdRef.current = loadedSessionId;
+  activeWaitingRunRef.current = activeWaitingRun;
+  activeRunRef.current = activeRun;
+  latestRunRef.current = latestRun;
+  sessionRunsRef.current = sessionRuns ?? EMPTY_RUNS;
+  isStreamingRef.current = isStreaming;
 
   // Reconnectable run subscription state (docs/run-sse).
   // AbortController here aborts only the subscription; it never cancels the run.
   const abortControllerRef = useRef<AbortController | null>(null);
   const activeRunIdRef = useRef<string | null>(null);
   const lastAppliedEventIdRef = useRef(0);
+
+  const clearQueueRetry = useCallback(() => {
+    if (queueRetryTimerRef.current !== null) {
+      window.clearTimeout(queueRetryTimerRef.current);
+      queueRetryTimerRef.current = null;
+    }
+  }, []);
+
+  const updateQueue = useCallback(
+    (
+      sessionId: string,
+      updater: (items: QueuedCodingMessage[]) => QueuedCodingMessage[],
+    ): CodingSendQueueWriteResult => {
+      const current =
+        queueRef.current.sessionId === sessionId
+          ? queueRef.current.items
+          : readCodingSendQueue(sessionId);
+      const next = updater(current);
+      const result = writeCodingSendQueue(sessionId, next);
+      if (result !== "ok") {
+        // Do not commit unpersisted state: a reload would restore the old queue
+        // and the UI would diverge from storage.
+        onError(
+          result === "too-large"
+            ? "待機メッセージが大きすぎて保存できません。"
+            : "待機メッセージの保存に失敗しました。",
+        );
+        return result;
+      }
+      queueRef.current = { sessionId, items: next };
+      if (selectedSessionIdRef.current === sessionId) {
+        setQueuedMessages(next);
+      }
+      return result;
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+  updateQueueRef.current = updateQueue;
+
+  // Restore the persisted queue for the selected session. Other sessions keep
+  // their queues in storage and are only flushed once selected again.
+  useEffect(() => {
+    queueBlockedRef.current = false;
+    clearQueueRetry();
+    if (!selectedSessionId) {
+      queueRef.current = { sessionId: null, items: [] };
+      setQueuedMessages([]);
+      return;
+    }
+    const items = readCodingSendQueue(selectedSessionId);
+    queueRef.current = { sessionId: selectedSessionId, items };
+    setQueuedMessages(items);
+  }, [selectedSessionId, clearQueueRetry]);
 
   // --- Reconnectable run subscription (docs/run-sse) ---
   // Server event log is the source of truth; sessionStorage caches only the
@@ -195,6 +331,8 @@ export function useCodingRunStream({
       if (type === "cancelled") {
         // Draft restore must happen even when switched (targets sendSessionId);
         // UI updates must not leak to the switched session.
+        queueBlockedRef.current = false;
+        clearQueueRetry();
         ctx.restoreSendText();
         if (!isCurrentSession) return;
         onError(String(data.message ?? "キャンセルされました"));
@@ -206,6 +344,8 @@ export function useCodingRunStream({
         activeRunIdRef.current = null;
         return;
       } else if (type === "error") {
+        queueBlockedRef.current = false;
+        clearQueueRetry();
         ctx.restoreSendText();
         if (!isCurrentSession) return;
         onError(String(data.message ?? "エラーが発生しました"));
@@ -217,6 +357,8 @@ export function useCodingRunStream({
         activeRunIdRef.current = null;
         return;
       } else if (type === "user_question") {
+        queueBlockedRef.current = false;
+        clearQueueRetry();
         ctx.finalizeSendSuccess();
         if (!isCurrentSession) return;
         setIsStreaming(false);
@@ -233,6 +375,8 @@ export function useCodingRunStream({
         void loadSessionDetail(ctx.streamSessionId);
         return;
       } else if (type === "done") {
+        queueBlockedRef.current = false;
+        clearQueueRetry();
         ctx.finalizeSendSuccess();
         if (!isCurrentSession) return;
         setIsStreaming(false);
@@ -469,6 +613,10 @@ export function useCodingRunStream({
         abortControllerRef.current = null;
       }
       activeRunIdRef.current = null;
+      if (queueRetryTimerRef.current !== null) {
+        window.clearTimeout(queueRetryTimerRef.current);
+        queueRetryTimerRef.current = null;
+      }
     };
   }, []);
 
@@ -480,6 +628,8 @@ export function useCodingRunStream({
     }
     activeRunIdRef.current = null;
     lastAppliedEventIdRef.current = 0;
+    flushInFlightRef.current = false;
+    queueBlockedRef.current = false;
     setIsStreaming(false);
     setActivePhaseText(null);
     setStreamingToolCalls([]);
@@ -487,13 +637,16 @@ export function useCodingRunStream({
     clearAcpLiveDisplay();
   };
 
-  const executeSend = async () => {
-    if (!selectedSessionId || !inputContent.trim() || isStreaming) return;
-
-    const sendSessionId = selectedSessionId;
-    const sendText = inputContent;
-    const promptText = inputContent.trim();
-    const currentSlashInv = slashInvocation;
+  const sendRun = async ({
+    sessionId: sendSessionId,
+    snapshot,
+    mode,
+    onAccepted,
+    onPostError,
+  }: SendRunOptions) => {
+    const isComposer = mode === "composer";
+    const sendText = snapshot.rawText;
+    const promptText = snapshot.promptText;
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
@@ -503,8 +656,10 @@ export function useCodingRunStream({
       selectedSessionIdRef.current === sendSessionId && abortControllerRef.current === controller;
     // 送信前のテキストは下書きとして確定保存する。入力欄だけ一時クリアし、
     // storage の削除は送信成功確定時まで行わない。
-    savePromptDraftFor(sendSessionId, sendText);
-    setPromptInputLocal("");
+    if (isComposer) {
+      savePromptDraftFor(sendSessionId, sendText);
+      setPromptInputLocal("");
+    }
     setIsStreaming(true);
     setActivePhaseText("依頼を検討中...");
     setStreamingToolCalls([]);
@@ -515,6 +670,7 @@ export function useCodingRunStream({
     // 送信成功確定時のみ対象セッションの下書きを削除する。切替先にいる場合は
     // 入力状態へ触れず、対象セッションの storage のみ削除する。
     const finalizeSendSuccess = () => {
+      if (!isComposer) return;
       removePromptDraftFor(sendSessionId);
       if (selectedSessionIdRef.current === sendSessionId) {
         setPromptInputLocal("");
@@ -523,6 +679,7 @@ export function useCodingRunStream({
     // 失敗・キャンセル時は送信前テキストを対象セッションの下書きへ戻す。
     // 切替先にいる場合は入力状態へ触れない。
     const restoreSendText = () => {
+      if (!isComposer) return;
       savePromptDraftFor(sendSessionId, sendText);
       if (selectedSessionIdRef.current === sendSessionId) {
         setPromptInputLocal(sendText);
@@ -530,7 +687,7 @@ export function useCodingRunStream({
     };
 
     // Optimistically add user message to list
-    const tempUserMsgId = `temp_${Date.now()}`;
+    const tempUserMsgId = `temp_${Date.now()}_${Math.random().toString(16).slice(2)}`;
     const tempUserMsg: CodingMessage = {
       message_id: tempUserMsgId,
       session_id: sendSessionId,
@@ -540,25 +697,23 @@ export function useCodingRunStream({
       created_at: new Date().toISOString(),
     };
     setMessages((prev) => [...prev, tempUserMsg]);
+    const removeTempMessage = () =>
+      setMessages((prev) => prev.filter((m) => m.message_id !== tempUserMsgId));
 
-    const idempotencyKey =
-      typeof crypto !== "undefined" && "randomUUID" in crypto
-        ? crypto.randomUUID()
-        : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
     let runId: string;
     try {
       const started = await startCodingRun(
         sendSessionId,
         promptText,
-        idempotencyKey,
-        currentSlashInv,
+        snapshot.idempotencyKey,
+        snapshot.slashInvocation,
       );
       if (!isCurrent()) {
         // Switched sessions (or superseded) while start was in flight.
         // Streaming state belongs to the new session; only clean up this
         // send's optimistic message/draft and release refs if still ours.
         // The server run continues and resubscribes when returning to it.
-        setMessages((prev) => prev.filter((m) => m.message_id !== tempUserMsgId));
+        removeTempMessage();
         restoreSendText();
         if (abortControllerRef.current === controller) {
           abortControllerRef.current = null;
@@ -568,10 +723,11 @@ export function useCodingRunStream({
       }
       runId = started.run.run_id;
       setActiveRun(started.run);
-      clearSlashInvocation();
+      if (isComposer) clearSlashInvocation();
+      onAccepted?.();
     } catch (err: any) {
       if (!isCurrent()) {
-        setMessages((prev) => prev.filter((m) => m.message_id !== tempUserMsgId));
+        removeTempMessage();
         restoreSendText();
         if (abortControllerRef.current === controller) {
           abortControllerRef.current = null;
@@ -579,9 +735,22 @@ export function useCodingRunStream({
         }
         return;
       }
+      if (!isComposer) {
+        removeTempMessage();
+        setIsStreaming(false);
+        setActivePhaseText(null);
+        setStreamingToolCalls([]);
+        setWorkerState({ status: "idle" });
+        if (abortControllerRef.current === controller) {
+          abortControllerRef.current = null;
+          activeRunIdRef.current = null;
+        }
+        onPostError?.(err);
+        return;
+      }
       onError(err.message || "メッセージの送信に失敗しました");
       restoreSendText();
-      setMessages((prev) => prev.filter((m) => m.message_id !== tempUserMsgId));
+      removeTempMessage();
       setIsStreaming(false);
       setActivePhaseText(null);
       setStreamingToolCalls([]);
@@ -638,6 +807,159 @@ export function useCodingRunStream({
       }
     }
   };
+  sendRunRef.current = sendRun;
+
+  const flushQueue = useCallback(() => {
+    if (flushInFlightRef.current || queueBlockedRef.current) return;
+    const sessionId = selectedSessionIdRef.current;
+    if (!sessionId) return;
+    if (loadedSessionIdRef.current !== sessionId) return;
+    if (isStreamingRef.current) return;
+    if (activeWaitingRunRef.current) return;
+    if (activeRunRef.current && NON_TERMINAL_RUN_STATUSES.has(activeRunRef.current.status)) {
+      return;
+    }
+    if (latestRunRef.current && NON_TERMINAL_RUN_STATUSES.has(latestRunRef.current.status)) {
+      return;
+    }
+    if (sessionRunsRef.current.some((r) => NON_TERMINAL_RUN_STATUSES.has(r.status))) return;
+    const queue = queueRef.current;
+    if (queue.sessionId !== sessionId || queue.items.length === 0) return;
+    const head = queue.items[0];
+    if (head.status !== "pending") return;
+    flushInFlightRef.current = true;
+    void sendRunRef
+      .current({
+        sessionId,
+        snapshot: {
+          promptText: head.content,
+          rawText: head.content,
+          slashInvocation: head.slash_invocation,
+          idempotencyKey: head.idempotency_key,
+        },
+        mode: "queue",
+        onAccepted: () => {
+          clearQueueRetry();
+          updateQueueRef.current(sessionId, (items) =>
+            removeQueuedCodingMessage(items, head.queue_id),
+          );
+        },
+        onPostError: (error: unknown) => {
+          const status = (error as { status?: number } | null)?.status;
+          if (status === 409) {
+            // Another run owns the session (e.g. another tab). Keep the item
+            // pending, recover the active run, and retry after a short delay.
+            // The terminal event of that run also releases the block.
+            queueBlockedRef.current = true;
+            void loadSessionDetail(sessionId).finally(() => {
+              clearQueueRetry();
+              queueRetryTimerRef.current = window.setTimeout(() => {
+                queueRetryTimerRef.current = null;
+                queueBlockedRef.current = false;
+                flushQueueRef.current();
+              }, 2000);
+            });
+            return;
+          }
+          const message =
+            error instanceof Error ? error.message : "メッセージの送信に失敗しました";
+          updateQueueRef.current(sessionId, (items) =>
+            markQueuedCodingMessageError(items, head.queue_id, message),
+          );
+          onError(message);
+        },
+      })
+      .finally(() => {
+        flushInFlightRef.current = false;
+      });
+  }, [clearQueueRetry, loadSessionDetail, onError]);
+  flushQueueRef.current = flushQueue;
+
+  const executeSend = async () => {
+    if (!selectedSessionId) return;
+    const promptText = inputContent.trim();
+    if (!promptText && !slashInvocation) return;
+    const sessionId = selectedSessionId;
+    const snapshot: CodingSendSnapshot = {
+      promptText,
+      rawText: inputContent,
+      slashInvocation,
+      idempotencyKey: generateIdempotencyKey(),
+    };
+
+    const busy =
+      isStreamingRef.current ||
+      activeWaitingRunRef.current !== null ||
+      (activeRunRef.current !== null &&
+        NON_TERMINAL_RUN_STATUSES.has(activeRunRef.current.status)) ||
+      (latestRunRef.current !== null &&
+        NON_TERMINAL_RUN_STATUSES.has(latestRunRef.current.status)) ||
+      sessionRunsRef.current.some((r) => NON_TERMINAL_RUN_STATUSES.has(r.status)) ||
+      (queueRef.current.sessionId === sessionId && queueRef.current.items.length > 0);
+    if (busy) {
+      const item = createQueuedCodingMessage({
+        content: promptText,
+        slash_invocation: slashInvocation,
+      });
+      const queued = updateQueueRef.current(sessionId, (items) =>
+        enqueueCodingMessage(items, item),
+      );
+      if (queued !== "ok") {
+        // Keep the composer so the message is not lost when it cannot persist.
+        return;
+      }
+      removePromptDraftFor(sessionId);
+      setPromptInputLocal("");
+      clearSlashInvocation();
+      onError(null);
+      flushQueue();
+      return;
+    }
+    await sendRunRef.current({ sessionId, snapshot, mode: "composer" });
+  };
+
+  const handleRemoveQueuedMessage = useCallback((queueId: string) => {
+    const sessionId = selectedSessionIdRef.current;
+    if (!sessionId) return;
+    updateQueueRef.current(sessionId, (items) =>
+      removeQueuedCodingMessage(items, queueId),
+    );
+  }, []);
+
+  const handleRetryQueuedMessage = useCallback(
+    (queueId: string) => {
+      const sessionId = selectedSessionIdRef.current;
+      if (!sessionId) return;
+      updateQueueRef.current(sessionId, (items) =>
+        clearQueuedCodingMessageError(items, queueId),
+      );
+      queueBlockedRef.current = false;
+      flushQueue();
+    },
+    [flushQueue],
+  );
+
+  // Flush the selected session's queue whenever the session becomes idle.
+  useEffect(() => {
+    if (isStreaming || activeWaitingRun || !selectedSessionId) return;
+    if (loadedSessionId !== selectedSessionId) return;
+    if (activeRun && NON_TERMINAL_RUN_STATUSES.has(activeRun.status)) return;
+    if (latestRun && NON_TERMINAL_RUN_STATUSES.has(latestRun.status)) return;
+    if ((sessionRuns ?? EMPTY_RUNS).some((r) => NON_TERMINAL_RUN_STATUSES.has(r.status))) {
+      return;
+    }
+    flushQueue();
+  }, [
+    flushQueue,
+    isStreaming,
+    activeWaitingRun,
+    selectedSessionId,
+    loadedSessionId,
+    activeRun,
+    latestRun,
+    sessionRuns,
+    queuedMessages,
+  ]);
 
   const handleCancelRun = async () => {
     const isCancellable = (r: CodingRun | null | undefined) =>
@@ -666,11 +988,14 @@ export function useCodingRunStream({
     acpToolCalls,
     streamingPlan,
     workerState,
+    queuedMessages,
     abortControllerRef,
     activeRunIdRef,
     handleRunEnvelope,
     resetForSessionSwitch,
     executeSend,
+    handleRemoveQueuedMessage,
+    handleRetryQueuedMessage,
     handleCancelRun,
   };
 }
