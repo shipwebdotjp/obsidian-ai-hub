@@ -5,6 +5,7 @@ from typing import Optional
 from obsidian_ai_hub.research.runner import (
     RESEARCH_MODE_DEEP,
     RESEARCH_MODE_INTERNAL,
+    RESEARCH_MODE_PROJECT,
     RESEARCH_MODE_WEB,
     ResearchReport,
     ResearchRunResult,
@@ -27,6 +28,7 @@ from obsidian_ai_hub.research.runner import main as _runner_main
 __all__ = [
     "RESEARCH_MODE_DEEP",
     "RESEARCH_MODE_INTERNAL",
+    "RESEARCH_MODE_PROJECT",
     "RESEARCH_MODE_WEB",
     "ResearchReport",
     "ResearchRunResult",

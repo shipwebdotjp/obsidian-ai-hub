@@ -4,6 +4,8 @@ import os
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from obsidian_ai_hub.research import db as research_themes
 from obsidian_ai_hub.research import runner
 
@@ -200,3 +202,59 @@ def test_gpt_researcher_environment_uses_config_and_restores_prior_values(monkey
 
     assert os.environ["FAST_LLM"] == "original-fast"
     assert "SMART_LLM" not in os.environ
+
+
+def test_normalize_project_mode_and_alias():
+    assert runner._normalize_research_mode("project") == runner.RESEARCH_MODE_PROJECT
+    assert runner._normalize_research_mode("coding") == runner.RESEARCH_MODE_PROJECT
+    assert runner._normalize_research_mode("codebase") == runner.RESEARCH_MODE_PROJECT
+
+
+def test_project_mode_requires_project_id():
+    with pytest.raises(ValueError, match="project_id"):
+        runner.run_research(theme="PJ調査", mode="project")
+
+
+def test_auto_mode_with_project_id_uses_project_engine():
+    with (
+        patch.object(runner, "collect_research_context", return_value=""),
+        patch.object(runner, "_resolve_project_label", return_value="Proj (path)"),
+        patch.object(runner, "generate_research_title", return_value="title"),
+        patch.object(runner, "build_research_prompt", return_value="prompt") as build,
+        patch.object(runner, "conduct_research", return_value="report") as conduct,
+    ):
+        report = runner.run_research(theme="PJ調査", mode="auto", project_id=7)
+
+    assert report.mode == runner.RESEARCH_MODE_PROJECT
+    assert build.call_args.kwargs["project_label"] == "Proj (path)"
+    assert conduct.call_args.kwargs["project_id"] == 7
+
+
+def test_project_id_persisted_on_theme_and_job():
+    theme = research_themes.create_theme(theme="PJ永続化", project_id=12)
+    assert theme["project_id"] == 12
+
+    job = research_themes.create_job(theme["theme_id"], project_id=12)
+    assert job["project_id"] == 12
+
+    fetched = research_themes.get_theme(theme["theme_id"])
+    assert fetched["project_id"] == 12
+
+    listed = [
+        t for t in research_themes.list_themes() if t["theme_id"] == theme["theme_id"]
+    ]
+    assert listed[0]["latest_job"]["project_id"] == 12
+
+
+def test_approved_theme_not_reused_across_projects():
+    existing = research_themes.create_theme(
+        theme="PJ跨ぎ再利用", status="approved", project_id=1
+    )
+    theme_rec, job_rec = runner.get_or_create_theme_and_job(
+        theme="PJ跨ぎ再利用", project_id=2
+    )
+
+    assert theme_rec["theme_id"] != existing["theme_id"]
+    assert theme_rec["project_id"] == 2
+    assert job_rec["project_id"] == 2
+    assert theme_rec["latest_job"]["project_id"] == 2

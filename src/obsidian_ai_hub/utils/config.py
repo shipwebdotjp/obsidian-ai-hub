@@ -540,6 +540,14 @@ RESEARCH_DEEP_PROMPT_PATH = _config_optional_path(
 if RESEARCH_DEEP_PROMPT_PATH is None:
     RESEARCH_DEEP_PROMPT_PATH = BASE_DIR / "config" / "prompts" / "research_deep.md"
 
+RESEARCH_PROJECT_PROMPT_PATH = _config_optional_path(
+    "llm", "research", "project", "prompt_path"
+)
+if RESEARCH_PROJECT_PROMPT_PATH is None:
+    RESEARCH_PROJECT_PROMPT_PATH = (
+        BASE_DIR / "config" / "prompts" / "research_project.md"
+    )
+
 RESEARCH_TITLE_GENERATION_PROVIDER = str(
     _config_value("llm", "research", "title_generation", "provider", default="openai")
 )

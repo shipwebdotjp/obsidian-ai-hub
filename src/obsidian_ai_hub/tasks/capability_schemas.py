@@ -99,9 +99,9 @@ class ResearchAgentInputs(BaseModel):
         min_length=1,
         description="調査テーマ。既存の承認済みテーマと重複すればそのテーマを再利用する。",
     )
-    mode: Optional[Literal["auto", "internal", "web", "deep"]] = Field(
+    mode: Optional[Literal["auto", "internal", "web", "deep", "project"]] = Field(
         default=None,
-        description="調査モード。省略時はauto(自動ルーティング)。",
+        description="調査モード。省略時はauto(自動ルーティング)。projectはコードベース調査。",
     )
     context: Optional[str] = Field(
         default=None,
@@ -110,6 +110,10 @@ class ResearchAgentInputs(BaseModel):
     output_style: Optional[str] = Field(
         default=None,
         description="出力長スタイル(short/long等)。省略時は既定。",
+    )
+    project_id: Optional[int] = Field(
+        default=None,
+        description="projectモードで調査する対象Project ID。",
     )
 
 

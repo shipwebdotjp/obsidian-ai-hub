@@ -260,3 +260,25 @@ def test_propose_research_theme_handler_validation_and_idempotency():
         )
         assert res2["status"] == "already_proposed"
         assert res2["theme_id"] == theme_id
+
+
+def test_propose_research_theme_handler_persists_project_id():
+    err = capabilities.propose_research_theme_handler(theme="PJ", project_id=-1)
+    assert "error" in err
+
+    with (
+        patch("obsidian_ai_hub.line_notification.notify_research_suggestion"),
+        patch(
+            "obsidian_ai_hub.research.dedup.run_dedup_review",
+            return_value={"decision": "new", "related_ids": [], "reason": None},
+        ),
+    ):
+        res = capabilities.propose_research_theme_handler(
+            theme="プロジェクト固有の設計判断ログ",
+            project_id=42,
+            trusted_ctx={"session_id": "sess_proj_001"},
+        )
+
+    assert res["status"] == "candidate"
+    theme = db.get_theme(res["theme_id"])
+    assert theme["project_id"] == 42

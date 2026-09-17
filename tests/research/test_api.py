@@ -215,6 +215,31 @@ def test_run_research_theme_success(client):
     )
 
 
+def test_run_research_theme_project_mode_requires_project_id(client):
+    resp = client.post(
+        "/api/v1/research-themes/run", json={"theme": "PJ", "mode": "project"}
+    )
+    assert resp.status_code == 400
+
+
+def test_run_research_theme_project_mode_success(client):
+    with patch("obsidian_ai_hub.research.runner.submit_research_job_bg") as mock_submit:
+        resp = client.post(
+            "/api/v1/research-themes/run",
+            json={"theme": "APIテストPJ", "mode": "project", "project_id": 5},
+        )
+
+    assert resp.status_code == 202
+    data = resp.json()
+    assert data["theme"]["project_id"] == 5
+    assert data["job"]["project_id"] == 5
+    mock_submit.assert_called_once_with(
+        theme_id=data["theme"]["theme_id"],
+        job_id=data["job"]["job_id"],
+        mode="project",
+    )
+
+
 def test_cleanup_stale_jobs_on_startup():
     from obsidian_ai_hub.research import db as research_db
 

@@ -115,6 +115,7 @@ def propose_research_theme_handler(
     why_now: str = "",
     confidence: float = 0.0,
     trusted_ctx: Optional[dict] = None,
+    project_id: Optional[int] = None,
 ) -> dict:
     theme = (theme or "").strip()
     if not theme:
@@ -126,6 +127,13 @@ def propose_research_theme_handler(
         return {"error": "direction must be 140 characters or fewer"}
     if kind not in ("deep", "adjacent", "explore"):
         kind = "explore"
+    if project_id is not None:
+        try:
+            project_id = int(project_id)
+        except (TypeError, ValueError):
+            return {"error": "project_id must be an integer"}
+        if project_id <= 0:
+            return {"error": "project_id must be a positive integer"}
 
     # Build request_key for idempotency
     request_key = None
@@ -162,6 +170,7 @@ def propose_research_theme_handler(
         why_now=why_now,
         confidence=confidence,
         is_suggestion=True,
+        project_id=project_id,
     )
 
     theme_id = result.get("theme_id", "")

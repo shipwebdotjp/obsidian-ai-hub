@@ -90,3 +90,17 @@ def test_delegate_target_models():
 def test_unresolvable_capability_rejected():
     with pytest.raises(ValueError, match="no resolvable input schema"):
         schemas.validate_capability_inputs("ask_user", {})
+
+
+def test_research_agent_accepts_project_mode_and_project_id():
+    inputs = schemas.validate_capability_inputs(
+        "research_agent",
+        {"theme": "PJ調査", "mode": "project", "project_id": "3"},
+    )
+    assert inputs["mode"] == "project"
+    assert inputs["project_id"] == 3
+
+    with pytest.raises(ValueError, match="inputs invalid"):
+        schemas.validate_capability_inputs(
+            "research_agent", {"theme": "PJ", "mode": "bogus"}
+        )

@@ -11,6 +11,7 @@ import type {
   ResearchListResponse,
   ResearchTheme,
   ResearchJob,
+  ResearchMode,
   ResearchRunAcceptedResponse,
   VaultSearchResponse,
   VaultFileResponse,
@@ -365,11 +366,14 @@ export function rerunResearchTheme(themeId: string): Promise<ResearchJob> {
 
 export function runResearchTheme(
   theme: string,
-  mode: "auto" | "internal" | "web" | "deep",
+  mode: ResearchMode,
+  projectId?: number,
 ): Promise<ResearchRunAcceptedResponse> {
+  const body: Record<string, unknown> = { theme, mode };
+  if (projectId != null) body.project_id = projectId;
   return request<ResearchRunAcceptedResponse>("/api/v1/research-themes/run", {
     method: "POST",
-    body: JSON.stringify({ theme, mode }),
+    body: JSON.stringify(body),
   });
 }
 

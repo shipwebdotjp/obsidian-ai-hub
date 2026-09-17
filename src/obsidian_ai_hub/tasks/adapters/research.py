@@ -73,6 +73,7 @@ class ResearchAdapter:
             mode=mode,
             context=step_inputs.get("context"),
             output_style=step_inputs.get("output_style"),
+            project_id=step_inputs.get("project_id"),
         )
         theme_id = str(theme_rec["theme_id"])
         job_id = str(job_rec["job_id"])

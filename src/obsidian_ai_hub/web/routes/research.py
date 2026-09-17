@@ -59,10 +59,15 @@ def run_research_theme(
 ):
     if not body.theme or not body.theme.strip():
         raise HTTPException(status_code=400, detail="Theme must not be empty or blank")
+    if body.mode == "project" and body.project_id is None:
+        raise HTTPException(
+            status_code=400, detail="project mode requires project_id"
+        )
     try:
         theme_rec, job_rec = service.run_research_theme(
             theme=body.theme,
             mode=body.mode,
+            project_id=body.project_id,
         )
         return {"theme": theme_rec, "job": job_rec}
     except ValueError as e:

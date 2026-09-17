@@ -130,6 +130,7 @@ export interface RenderCopilotProfileResponse {
 
 export type ResearchStatus = "candidate" | "approved" | "rejected" | "duplicate";
 export type ResearchJobStatus = "pending" | "running" | "succeeded" | "failed";
+export type ResearchMode = "auto" | "internal" | "web" | "deep" | "project";
 
 export interface ResearchJob {
   job_id: string;
@@ -140,6 +141,7 @@ export interface ResearchJob {
   error?: string;
   started_at?: string;
   finished_at?: string;
+  project_id?: number | null;
 }
 
 export interface ResearchThemeReference {
@@ -167,6 +169,7 @@ export interface ResearchTheme {
   latest_job?: ResearchJob | null;
   origin?: string;
   hitl_run_id?: string;
+  project_id?: number | null;
 }
 
 export interface ResearchListResponse {

@@ -35,14 +35,18 @@ def rerun_research_theme(theme_id: str) -> Optional[dict]:
     return job
 
 
-def run_research_theme(theme: str, mode: str = "auto") -> tuple[dict, dict]:
+def run_research_theme(
+    theme: str, mode: str = "auto", project_id: Optional[int] = None
+) -> tuple[dict, dict]:
     from obsidian_ai_hub.research.runner import (
         get_or_create_theme_and_job,
         submit_research_job_bg,
     )
     from obsidian_ai_hub.research import db
 
-    theme_rec, job_rec = get_or_create_theme_and_job(theme=theme, mode=mode)
+    theme_rec, job_rec = get_or_create_theme_and_job(
+        theme=theme, mode=mode, project_id=project_id
+    )
     try:
         submit_research_job_bg(
             theme_id=theme_rec["theme_id"],

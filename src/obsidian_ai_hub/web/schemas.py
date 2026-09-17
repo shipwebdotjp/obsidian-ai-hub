@@ -243,6 +243,7 @@ class ResearchJob(BaseModel):
     error: Optional[str] = None
     started_at: Optional[str] = None
     finished_at: Optional[str] = None
+    project_id: Optional[int] = None
 
 
 class ResearchThemeReference(BaseModel):
@@ -270,6 +271,7 @@ class ResearchTheme(BaseModel):
     latest_job: Optional[ResearchJob] = None
     origin: Optional[str] = None
     hitl_run_id: Optional[str] = None
+    project_id: Optional[int] = None
 
 
 class ResearchThemeListResponse(BaseModel):
@@ -279,7 +281,8 @@ class ResearchThemeListResponse(BaseModel):
 
 class ResearchRunRequest(BaseModel):
     theme: str
-    mode: Literal["auto", "internal", "web", "deep"] = "auto"
+    mode: Literal["auto", "internal", "web", "deep", "project"] = "auto"
+    project_id: Optional[int] = None
 
 
 class ResearchRunAcceptedResponse(BaseModel):

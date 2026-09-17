@@ -12,6 +12,15 @@ from obsidian_ai_hub.research import feedback
 logger = logging.getLogger(__name__)
 
 
+def _same_project_scope(left: Optional[int], right: Optional[int]) -> bool:
+    if left is None or right is None:
+        return left is None and right is None
+    try:
+        return int(left) == int(right)
+    except (TypeError, ValueError):
+        return False
+
+
 def create_theme_and_research(
     *,
     theme: str,
@@ -21,6 +30,7 @@ def create_theme_and_research(
     confidence: float = 1.0,
     conn: Optional[sqlite3.Connection] = None,
     is_suggestion: bool = False,
+    project_id: Optional[int] = None,
 ) -> dict:
     from obsidian_ai_hub.research import db, dedup
 
@@ -35,7 +45,9 @@ def create_theme_and_research(
         with conn:
             normalized = db.normalize_theme_key(theme)
             existing = db.find_exact_duplicate(normalized, conn=conn)
-            if existing:
+            if existing and _same_project_scope(
+                existing.get("project_id"), project_id
+            ):
                 logger.info("Exact duplicate found for '%s': %s", theme, existing["theme_id"])
                 db.create_theme(
                     theme=theme,
@@ -46,6 +58,7 @@ def create_theme_and_research(
                     status="duplicate",
                     duplicate_of_theme_id=existing["theme_id"],
                     duplicate_reason="normalized exact match",
+                    project_id=project_id,
                     conn=conn,
                 )
                 return {"status": "duplicate", "theme_id": existing["theme_id"]}
@@ -63,18 +76,29 @@ def create_theme_and_research(
 
             if decision["decision"] == "duplicate":
                 target = decision["target_theme_id"]
-                rec = db.create_theme(
-                    theme=theme,
-                    direction=direction,
-                    kind=kind,
-                    why_now=why_now,
-                    confidence=confidence,
-                    status="duplicate",
-                    duplicate_of_theme_id=target,
-                    duplicate_reason=decision.get("reason"),
-                    conn=conn,
+                target_theme = db.get_theme(target, conn=conn) if target else None
+                if target_theme is None or _same_project_scope(
+                    target_theme.get("project_id"), project_id
+                ):
+                    rec = db.create_theme(
+                        theme=theme,
+                        direction=direction,
+                        kind=kind,
+                        why_now=why_now,
+                        confidence=confidence,
+                        status="duplicate",
+                        duplicate_of_theme_id=target,
+                        duplicate_reason=decision.get("reason"),
+                        project_id=project_id,
+                        conn=conn,
+                    )
+                    return {"status": "duplicate", "theme_id": rec["theme_id"]}
+                logger.info(
+                    "Ignoring cross-project duplicate for '%s' (target %s, project %s)",
+                    theme,
+                    target,
+                    project_id,
                 )
-                return {"status": "duplicate", "theme_id": rec["theme_id"]}
 
             rec = db.create_theme(
                 theme=theme,
@@ -86,6 +110,7 @@ def create_theme_and_research(
                 related_theme_ids=decision.get("related_ids", []),
                 duplicate_reason=decision.get("reason"),
                 origin="auto_suggestion" if is_suggestion else None,
+                project_id=project_id,
                 conn=conn,
             )
 

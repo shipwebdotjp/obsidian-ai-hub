@@ -48,6 +48,7 @@ RESEARCH_THEME_COLUMNS = [
     "reviewed_at",
     "reviewed_by",
     "origin",
+    "project_id",
     "hitl_run_id",
     "feedback_decision",
     "feedback_reason",
@@ -68,6 +69,7 @@ RESEARCH_JOB_COLUMNS = [
     "finished_at",
     "output_path",
     "is_published",
+    "project_id",
 ]
 
 ALLOWED_THEME_STATUS = frozenset({"candidate", "approved", "rejected", "duplicate"})
@@ -150,6 +152,7 @@ def create_theme(
     duplicate_reason: Optional[str] = None,
     related_theme_ids: Optional[list[str]] = None,
     origin: Optional[str] = None,
+    project_id: Optional[int] = None,
     hitl_run_id: Optional[str] = None,
     conn: Optional[sqlite3.Connection] = None,
 ) -> dict:
@@ -178,6 +181,7 @@ def create_theme(
         "reviewed_at": None,
         "reviewed_by": None,
         "origin": origin,
+        "project_id": project_id,
         "hitl_run_id": hitl_run_id,
         "feedback_decision": None,
         "feedback_reason": None,
@@ -252,7 +256,7 @@ def list_themes(
         cursor.execute(
             f"""
             SELECT rt.*, rj.job_id AS latest_job_id, rj.status AS job_status,
-                   rj.generated_title, rj.mode, rj.error,
+                   rj.generated_title, rj.mode, rj.error, rj.project_id AS job_project_id,
                    rj.started_at AS job_started_at, rj.finished_at AS job_finished_at,
                    duplicate_theme.theme AS duplicate_of_theme_name
             FROM research_themes rt
@@ -287,6 +291,7 @@ def list_themes(
                 "generated_title": r["generated_title"],
                 "mode": r["mode"],
                 "error": r["error"],
+                "project_id": r.get("job_project_id"),
                 "started_at": r["job_started_at"],
                 "finished_at": r["job_finished_at"],
             }
@@ -440,7 +445,12 @@ def list_theme_feedback(
         return [dict(row) for row in cursor.fetchall()]
 
 
-def create_job(theme_id: str, conn: Optional[sqlite3.Connection] = None) -> dict:
+def create_job(
+    theme_id: str,
+    conn: Optional[sqlite3.Connection] = None,
+    *,
+    project_id: Optional[int] = None,
+) -> dict:
     now = get_current_timestamp()
     job_id = generate_job_id()
     rec = {
@@ -456,6 +466,7 @@ def create_job(theme_id: str, conn: Optional[sqlite3.Connection] = None) -> dict
         "finished_at": None,
         "output_path": None,
         "is_published": 0,
+        "project_id": project_id,
     }
     columns = ", ".join(RESEARCH_JOB_COLUMNS)
     placeholders = ", ".join("?" for _ in RESEARCH_JOB_COLUMNS)
@@ -486,6 +497,7 @@ def update_job(
     finished_at: Optional[str] = None,
     output_path: Optional[str] = None,
     is_published: Optional[int] = None,
+    project_id: Optional[int] = None,
     conn: Optional[sqlite3.Connection] = None,
 ) -> Optional[dict]:
     def _execute_update(c_conn):
@@ -515,6 +527,8 @@ def update_job(
             j["output_path"] = output_path
         if is_published is not None:
             j["is_published"] = is_published
+        if project_id is not None:
+            j["project_id"] = project_id
 
         set_clause = ", ".join(
             f"{c} = ?" for c in RESEARCH_JOB_COLUMNS if c != "job_id"

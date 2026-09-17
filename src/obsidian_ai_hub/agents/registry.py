@@ -531,6 +531,13 @@ class ResearchThemeProposeInput(BaseModel):
         le=1.0,
         description="提案の自信度 (0.0 - 1.0)。既定: 0.0。",
     )
+    project_id: Optional[int] = Field(
+        default=None,
+        description=(
+            "テーマが特定Projectに密接に関係する場合のProject ID。"
+            "指定するとコードベース調査(project)モードで調査する。省略可。"
+        ),
+    )
 
 
 # --- Memory Tool Factories (require trusted context) ---
@@ -1130,6 +1137,7 @@ def _make_research_theme_propose_tool(
         kind: str = "explore",
         why_now: str = "",
         confidence: float = 0.0,
+        project_id: Optional[int] = None,
     ) -> str:
         """リサーチテーマ候補を1件提案し、人間の承認リクエスト（HITL）を登録します。"""
         try:
@@ -1142,6 +1150,7 @@ def _make_research_theme_propose_tool(
                 why_now=why_now,
                 confidence=confidence,
                 trusted_ctx=trusted_ctx,
+                project_id=project_id,
             )
             return json.dumps(res, ensure_ascii=False)
         except EXPECTED_TOOL_EXCEPTIONS as exc:

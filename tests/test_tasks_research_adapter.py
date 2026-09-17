@@ -42,11 +42,15 @@ def _task_with_research_step(inputs):
 def _fakes(monkeypatch, job_status="succeeded", error=None, markdown="# report"):
     submitted = []
 
-    def create(theme, mode="auto", context=None, output_style=None):
+    def create(theme, mode="auto", context=None, output_style=None, project_id=None):
         theme_rec = research_db.create_theme(
-            theme=theme, kind="explore", confidence=1.0, status="candidate"
+            theme=theme,
+            kind="explore",
+            confidence=1.0,
+            status="candidate",
+            project_id=project_id,
         )
-        job = research_db.create_job(theme_rec["theme_id"])
+        job = research_db.create_job(theme_rec["theme_id"], project_id=project_id)
         return theme_rec, job
 
     def submit(theme_id, job_id, mode="auto", output_style=None, context=None):

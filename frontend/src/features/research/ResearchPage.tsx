@@ -3,8 +3,9 @@ import ResearchList from "./ResearchList";
 import ResearchDetailPanel from "./ResearchDetailPanel";
 import SplitHandle from "../../components/SplitHandle";
 import { DEFAULT_LIST_RATIO, usePaneResize } from "../../hooks/usePaneResize";
-import type { ResearchTheme, ResearchStatus } from "../../api/types";
+import type { ResearchTheme, ResearchStatus, ResearchMode } from "../../api/types";
 import { runResearchTheme, getResearchTheme, ApiError } from "../../api/client";
+import { listCodingProjects, type CodingProjectItem } from "../../api/coding";
 
 interface Toast {
   id: number;
@@ -32,7 +33,11 @@ export default function ResearchPage() {
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [themeInput, setThemeInput] = useState("");
-  const [modeInput, setModeInput] = useState<"auto" | "internal" | "web" | "deep">("auto");
+  const [modeInput, setModeInput] = useState<ResearchMode>("auto");
+  const [projectIdInput, setProjectIdInput] = useState<number | null>(null);
+  const [projects, setProjects] = useState<CodingProjectItem[]>([]);
+  const [loadingProjects, setLoadingProjects] = useState(false);
+  const [projectsError, setProjectsError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [modalError, setModalError] = useState<string | null>(null);
 
@@ -168,10 +173,41 @@ export default function ResearchPage() {
     };
   }, [selectedTheme, notify, handleRefresh]);
 
+  useEffect(() => {
+    if (!isModalOpen || modeInput !== "project") return;
+    let cancelled = false;
+    setLoadingProjects(true);
+    setProjectsError(null);
+    listCodingProjects()
+      .then((data) => {
+        if (cancelled) return;
+        const valid = data.filter((p) => p.is_valid_git_repo);
+        setProjects(valid);
+        setProjectIdInput((prev) =>
+          prev != null && valid.some((p) => p.project.project_id === prev)
+            ? prev
+            : valid[0]?.project.project_id ?? null,
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setProjectsError("プロジェクト一覧の取得に失敗しました");
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingProjects(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isModalOpen, modeInput]);
+
   const handleModalSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!themeInput || !themeInput.trim()) {
       setModalError("テーマ名を入力してください");
+      return;
+    }
+    if (modeInput === "project" && projectIdInput == null) {
+      setModalError("プロジェクトを選択してください");
       return;
     }
 
@@ -179,7 +215,11 @@ export default function ResearchPage() {
     setModalError(null);
 
     try {
-      const res = await runResearchTheme(themeInput.trim(), modeInput);
+      const res = await runResearchTheme(
+        themeInput.trim(),
+        modeInput,
+        modeInput === "project" ? projectIdInput ?? undefined : undefined,
+      );
 
       // Select the theme in details panel immediately
       setSelectedTheme(res.theme);
@@ -198,6 +238,7 @@ export default function ResearchPage() {
       setIsModalOpen(false);
       setThemeInput("");
       setModeInput("auto");
+      setProjectIdInput(null);
 
       // Trigger list refresh
       handleRefresh();
@@ -214,6 +255,7 @@ export default function ResearchPage() {
     setIsModalOpen(false);
     setThemeInput("");
     setModeInput("auto");
+    setProjectIdInput(null);
     setModalError(null);
   };
 
@@ -360,15 +402,52 @@ export default function ResearchPage() {
                   id="modal-mode"
                   disabled={isSubmitting}
                   value={modeInput}
-                  onChange={(e) => setModeInput(e.target.value as any)}
+                  onChange={(e) => setModeInput(e.target.value as ResearchMode)}
                   className="mt-1 w-full rounded border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none disabled:bg-slate-50"
                 >
                   <option value="auto">自動（router）</option>
                   <option value="internal">内省 (internal)</option>
                   <option value="web">ウェブ検索 (web)</option>
                   <option value="deep">ディープリサーチ (deep)</option>
+                  <option value="project">コードベース調査 (project)</option>
                 </select>
               </div>
+
+              {modeInput === "project" && (
+                <div>
+                  <label htmlFor="modal-project" className="block text-xs font-medium text-slate-500">
+                    対象プロジェクト
+                  </label>
+                  <select
+                    id="modal-project"
+                    disabled={isSubmitting || loadingProjects}
+                    value={projectIdInput ?? ""}
+                    onChange={(e) => {
+                      if (!e.target.value) {
+                        setProjectIdInput(null);
+                        return;
+                      }
+                      const id = Number(e.target.value);
+                      setProjectIdInput(Number.isInteger(id) ? id : null);
+                    }}
+                    className="mt-1 w-full rounded border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none disabled:bg-slate-50 disabled:text-slate-500"
+                  >
+                    {projects.length === 0 && (
+                      <option value="">
+                        {loadingProjects ? "読み込み中..." : "対象プロジェクトがありません"}
+                      </option>
+                    )}
+                    {projects.map((p) => (
+                      <option key={p.project.project_id} value={p.project.project_id}>
+                        {p.project.display_name}
+                      </option>
+                    ))}
+                  </select>
+                  {projectsError && (
+                    <p className="mt-1 text-xs text-rose-600">{projectsError}</p>
+                  )}
+                </div>
+              )}
 
               {modalError && (
                 <div className="rounded border border-rose-200 bg-rose-50 p-3 text-xs text-rose-600">

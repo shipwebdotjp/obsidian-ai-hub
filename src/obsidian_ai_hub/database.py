@@ -706,6 +706,9 @@ def get_db_connection() -> sqlite3.Connection:
     if current_version <= 48:
         run_migration_v49(conn)
 
+    if current_version <= 49:
+        run_migration_v50(conn)
+
     return conn
 
 
@@ -716,6 +719,26 @@ def run_migration_v49(conn: sqlite3.Connection) -> None:
     except sqlite3.OperationalError as e:
         _ignore_duplicate_schema_object(e)
     conn.execute("PRAGMA user_version = 49;")
+    conn.commit()
+
+
+def run_migration_v50(conn: sqlite3.Connection) -> None:
+    """Run migration for version 50 (project-grounded research mode)."""
+    for statement in (
+        "ALTER TABLE research_themes ADD COLUMN project_id INTEGER;",
+        "ALTER TABLE research_jobs ADD COLUMN project_id INTEGER;",
+    ):
+        try:
+            conn.execute(statement)
+        except sqlite3.OperationalError as e:
+            _ignore_duplicate_schema_object(e)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_rt_project_id ON research_themes(project_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_rj_project_id ON research_jobs(project_id)"
+    )
+    conn.execute("PRAGMA user_version = 50;")
     conn.commit()
 
 

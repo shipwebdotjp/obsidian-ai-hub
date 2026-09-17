@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 from obsidian_ai_hub.database import get_db_connection
 from obsidian_ai_hub.hitl import get_run
+from obsidian_ai_hub.research import db
 from obsidian_ai_hub.research.pipeline import create_theme_and_research
 
 
@@ -106,3 +107,22 @@ def test_duplicate_theme_does_not_send_notification(test_memory_db_path: Path):
     assert second["status"] == "duplicate"
     # Only the first (non-duplicate) registration notifies.
     mock_notify.assert_called_once()
+
+
+def test_exact_duplicate_is_not_merged_across_projects(test_memory_db_path: Path):
+    existing = db.create_theme(
+        theme="プロジェクト跨ぎテーマ", status="approved", project_id=1
+    )
+    with patch("obsidian_ai_hub.line_notification.notify_research_suggestion"):
+        result = create_theme_and_research(
+            theme="プロジェクト跨ぎテーマ",
+            direction="方向",
+            kind="explore",
+            is_suggestion=True,
+            project_id=2,
+        )
+
+    assert result["status"] == "candidate"
+    assert result["theme_id"] != existing["theme_id"]
+    theme = db.get_theme(result["theme_id"])
+    assert theme["project_id"] == 2

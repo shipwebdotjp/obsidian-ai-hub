@@ -26,9 +26,12 @@ MAX_FILENAME_BYTES = 120
 RESEARCH_MODE_INTERNAL = "internal"
 RESEARCH_MODE_WEB = "web"
 RESEARCH_MODE_DEEP = "deep"
+RESEARCH_MODE_PROJECT = "project"
 RESEARCH_MODE_ALIASES = {
     "quick-first": RESEARCH_MODE_INTERNAL,
     "web-first": RESEARCH_MODE_DEEP,
+    "coding": RESEARCH_MODE_PROJECT,
+    "codebase": RESEARCH_MODE_PROJECT,
 }
 
 MAX_CONTEXT_LINES = 48
@@ -60,7 +63,12 @@ def _normalize_optional_text(text: Optional[str]) -> str:
 def _normalize_research_mode(mode: str) -> str:
     normalized = mode.strip().lower()
     normalized = RESEARCH_MODE_ALIASES.get(normalized, normalized)
-    if normalized in {RESEARCH_MODE_INTERNAL, RESEARCH_MODE_WEB, RESEARCH_MODE_DEEP}:
+    if normalized in {
+        RESEARCH_MODE_INTERNAL,
+        RESEARCH_MODE_WEB,
+        RESEARCH_MODE_DEEP,
+        RESEARCH_MODE_PROJECT,
+    }:
         return normalized
     return RESEARCH_MODE_INTERNAL
 
@@ -235,6 +243,7 @@ def build_research_prompt(
     context: Optional[str] = None,
     output_style: Optional[str] = None,
     why_now: Optional[str] = None,
+    project_label: Optional[str] = None,
 ) -> str:
     context_text = _normalize_optional_text(context)
     why_now_text = _normalize_optional_text(why_now)
@@ -245,6 +254,24 @@ def build_research_prompt(
         _normalize_optional_text(output_style) or config.RESEARCH_DEFAULT_OUTPUT_STYLE
     )
     normalized_mode = _normalize_research_mode(mode)
+
+    if normalized_mode == RESEARCH_MODE_PROJECT:
+        project_label_text = _normalize_optional_text(project_label)
+        project_section = (
+            f"\n## 対象プロジェクト:\n{project_label_text}"
+            if project_label_text
+            else ""
+        )
+        return prompt.render_prompt(
+            config.RESEARCH_PROJECT_PROMPT_PATH,
+            {
+                "theme": theme,
+                "why_now_section": why_now_section,
+                "context_section": context_section,
+                "project_section": project_section,
+                "output_style_text": output_style_text,
+            },
+        )
 
     if normalized_mode == RESEARCH_MODE_WEB:
         search_results = _run_web_search_with_raw_theme(theme)
@@ -397,6 +424,7 @@ def conduct_research(
     *,
     mode: str = RESEARCH_MODE_INTERNAL,
     output_style: Optional[str] = None,
+    project_id: Optional[int] = None,
 ) -> str:
     output_style = (
         _normalize_optional_text(output_style) or config.RESEARCH_DEFAULT_OUTPUT_STYLE
@@ -425,6 +453,15 @@ def conduct_research(
             max_tokens=8000,
             max_iterations=3,
         ).strip()
+
+    if normalized_mode == RESEARCH_MODE_PROJECT:
+        if project_id is None:
+            raise ValueError("project research mode requires a project_id")
+        from obsidian_ai_hub.research.coding_research import (
+            run_project_research_report,
+        )
+
+        return run_project_research_report(prompt, project_id=project_id)
 
     report = asyncio.run(_run_gpt_researcher(prompt))
     return report
@@ -509,6 +546,25 @@ def save_markdown(path: Path, content: str) -> None:
     write_lines_atomic(path, [content])
 
 
+def _resolve_project_label(project_id: Optional[int]) -> Optional[str]:
+    if project_id is None:
+        return None
+    try:
+        from obsidian_ai_hub.web.services.projects import get_project_detail
+
+        project = get_project_detail(int(project_id))
+    except Exception:
+        logger.exception("Failed to resolve project %s for research", project_id)
+        return None
+    if not project:
+        return None
+    name = project.get("display_name") or project.get("normalized_name") or ""
+    path = project.get("project_path") or ""
+    if name and path:
+        return f"{name} ({path})"
+    return name or path or None
+
+
 def run_research(
     theme: str,
     *,
@@ -517,16 +573,22 @@ def run_research(
     mode: str = "auto",
     context: Optional[str] = None,
     output_style: Optional[str] = None,
+    project_id: Optional[int] = None,
 ) -> ResearchReport:
     combined_context = collect_research_context(theme, context)
     resolved_mode = mode
     if mode == "auto":
-        resolved_mode = route_research_topic(
-            theme,
-            context=combined_context,
-            why_now=why_now,
-        )
+        if project_id is not None:
+            resolved_mode = RESEARCH_MODE_PROJECT
+        else:
+            resolved_mode = route_research_topic(
+                theme,
+                context=combined_context,
+                why_now=why_now,
+            )
     normalized_mode = _normalize_research_mode(resolved_mode)
+    if normalized_mode == RESEARCH_MODE_PROJECT and project_id is None:
+        raise ValueError("project research mode requires a project_id")
     logger.info("Resolved research mode for theme '%s': %s", theme, normalized_mode)
 
     p = build_research_prompt(
@@ -535,13 +597,20 @@ def run_research(
         context=combined_context,
         output_style=output_style,
         why_now=why_now,
+        project_label=_resolve_project_label(project_id),
     )
     title = generate_research_title(theme, p)
-    report_body = conduct_research(p, mode=resolved_mode, output_style=output_style)
+    report_body = conduct_research(
+        p,
+        mode=resolved_mode,
+        output_style=output_style,
+        project_id=project_id,
+    )
     source = {
         RESEARCH_MODE_INTERNAL: "internal-llm",
         RESEARCH_MODE_WEB: "tavily-search",
         RESEARCH_MODE_DEEP: "gpt-researcher",
+        RESEARCH_MODE_PROJECT: "coding-agent",
     }.get(normalized_mode, "internal-llm")
 
     body = f"## テーマ\n{theme}\n\n## 調査結果レポート\n{report_body}"
@@ -562,7 +631,7 @@ def run_theme_research(
         logger.error("Theme not found: %s", theme_id)
         return None
 
-    job = db.create_job(theme_id)
+    job = db.create_job(theme_id, project_id=theme_obj.get("project_id"))
     job_id = job["job_id"]
 
     try:
@@ -573,6 +642,7 @@ def run_theme_research(
             why_now=theme_obj.get("why_now"),
             mode=mode,
             output_style=output_style,
+            project_id=theme_obj.get("project_id"),
         )
         db.update_job(
             job_id,
@@ -620,11 +690,21 @@ def cleanup_stale_jobs() -> None:
         conn.close()
 
 
+def _same_project_scope(left: Optional[int], right: Optional[int]) -> bool:
+    if left is None or right is None:
+        return left is None and right is None
+    try:
+        return int(left) == int(right)
+    except (TypeError, ValueError):
+        return False
+
+
 def get_or_create_theme_and_job(
     theme: str,
     mode: str = "auto",
     context: Optional[str] = None,
     output_style: Optional[str] = None,
+    project_id: Optional[int] = None,
 ) -> tuple[dict, dict]:
     from obsidian_ai_hub.research import db
 
@@ -634,7 +714,11 @@ def get_or_create_theme_and_job(
     normalized = db.normalize_theme_key(theme)
     existing = db.find_exact_duplicate(normalized)
 
-    if existing and existing.get("status") == "approved":
+    if (
+        existing
+        and existing.get("status") == "approved"
+        and _same_project_scope(existing.get("project_id"), project_id)
+    ):
         theme_id = existing["theme_id"]
         theme_rec = existing
         logger.info("Reusing existing approved theme %s for re-research", theme_id)
@@ -646,10 +730,11 @@ def get_or_create_theme_and_job(
             kind="explore",
             confidence=1.0,
             status="candidate",
+            project_id=project_id,
         )
         theme_id = theme_rec["theme_id"]
 
-    job_rec = db.create_job(theme_id)
+    job_rec = db.create_job(theme_id, project_id=theme_rec.get("project_id"))
 
     theme_rec["latest_job"] = {
         "job_id": job_rec["job_id"],
@@ -659,6 +744,7 @@ def get_or_create_theme_and_job(
         "error": job_rec.get("error"),
         "started_at": job_rec.get("started_at"),
         "finished_at": job_rec.get("finished_at"),
+        "project_id": job_rec.get("project_id"),
     }
 
     return theme_rec, job_rec
@@ -725,6 +811,7 @@ def execute_research_job_sync(
             mode=mode,
             context=context,
             output_style=output_style,
+            project_id=theme_obj.get("project_id"),
         )
 
         db.update_job(
@@ -978,7 +1065,12 @@ def run_approved_suggestion(ctx) -> "HitlResult":
     job_id = cp.get("job_id")
 
     if not job_id:
-        job = db.create_job(theme_id, conn=ctx.conn)
+        theme_obj = db.get_theme(theme_id, conn=ctx.conn)
+        job = db.create_job(
+            theme_id,
+            conn=ctx.conn,
+            project_id=(theme_obj or {}).get("project_id"),
+        )
         job_id = job["job_id"]
         new_cp = json.dumps({"theme_id": theme_id, "job_id": job_id, "phase": "job_created"})
         update_checkpoint(ctx.run_id, checkpoint=new_cp, conn=ctx.conn)
