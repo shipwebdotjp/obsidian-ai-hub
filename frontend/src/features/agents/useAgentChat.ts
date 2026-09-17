@@ -10,6 +10,7 @@ import type {
   AgentMessage,
   AgentMessageAttachment,
   AgentRun,
+  AgentRunStatus,
   AgentSession,
   SlashInvocation,
 } from "../../api/types";
@@ -24,11 +25,63 @@ import type {
 } from "../../components/InConversationQuestionCard";
 import { useAgentImageDraft } from "./useAgentImageDraft";
 import {
+  clearQueuedAgentMessageError,
+  createQueuedMessage,
+  enqueueAgentMessage,
+  markQueuedAgentMessageError,
+  readAgentSendQueue,
+  removeQueuedAgentMessage,
+  writeAgentSendQueue,
+  type AgentSendQueueWriteResult,
+  type QueuedAgentMessage,
+} from "./agentSendQueue";
+import {
   MAX_AGENT_IMAGES,
   MAX_AGENT_IMAGE_BYTES,
   matchesLiveToolCall,
   type PendingAttachment,
 } from "./agentViewUtils";
+
+const NON_TERMINAL_RUN_STATUSES = new Set<AgentRunStatus>([
+  "queued",
+  "running",
+  "cancelling",
+  "waiting_user",
+]);
+
+interface AgentSendSnapshot {
+  content: string;
+  rawText: string;
+  attachments: AgentMessageAttachment[];
+  attachmentDrafts: PendingAttachment[];
+  slashInvocation: SlashInvocation | null;
+  idempotencyKey: string;
+}
+
+interface SendRunOptions {
+  sessionId: string;
+  snapshot: AgentSendSnapshot;
+  mode: "composer" | "queue";
+  onAccepted?: () => void;
+  onPostError?: (error: unknown) => void;
+}
+
+function generateIdempotencyKey(): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function isAbortError(err: unknown): boolean {
+  return (
+    (err instanceof DOMException && err.name === "AbortError") ||
+    (typeof err === "object" &&
+      err !== null &&
+      "name" in err &&
+      (err as { name: string }).name === "AbortError")
+  );
+}
 
 interface UseAgentChatOptions {
   selectedSessionId: string | null;
@@ -36,11 +89,15 @@ interface UseAgentChatOptions {
   activeAgent: Agent | undefined;
   onChatError: (message: string | null) => void;
   loadSessions: (agentId: string) => Promise<void>;
-  loadSessionDetail: (sessionId: string) => Promise<void>;
+  loadSessionDetail: (
+    sessionId: string,
+    options?: { preserveChatError?: boolean },
+  ) => Promise<void>;
   messages: AgentMessage[];
   setMessages: React.Dispatch<React.SetStateAction<AgentMessage[]>>;
   runs: AgentRun[];
   loadedSessionId: string | null;
+  activeWaitingRun: ActiveWaitingRun | null;
   setActiveWaitingRun: React.Dispatch<React.SetStateAction<ActiveWaitingRun | null>>;
   setSessions: React.Dispatch<React.SetStateAction<AgentSession[]>>;
   inputText: string;
@@ -62,6 +119,7 @@ export function useAgentChat({
   setMessages,
   runs,
   loadedSessionId,
+  activeWaitingRun,
   setActiveWaitingRun,
   setSessions,
   inputText,
@@ -82,6 +140,44 @@ export function useAgentChat({
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
   const [attachmentReadsPending, setAttachmentReadsPending] = useState(0);
   const [isDragOver, setIsDragOver] = useState(false);
+  const [queuedMessages, setQueuedMessages] = useState<QueuedAgentMessage[]>([]);
+
+  // Send queue (docs/ai-agent plan: 送信キュー). The ref is the flush source of
+  // truth; state mirrors only the selected session for rendering.
+  const queueRef = useRef<{ sessionId: string | null; items: QueuedAgentMessage[] }>({
+    sessionId: null,
+    items: [],
+  });
+  const flushInFlightRef = useRef(false);
+  const queueBlockedRef = useRef(false);
+  const queueRetryTimerRef = useRef<number | null>(null);
+  const flushQueueRef = useRef<() => void>(() => {});
+  const selectedSessionIdRef = useRef<string | null>(selectedSessionId);
+  const loadedSessionIdRef = useRef<string | null>(loadedSessionId);
+  const activeWaitingRunRef = useRef<ActiveWaitingRun | null>(activeWaitingRun);
+  const runsRef = useRef<AgentRun[]>(runs);
+  const isStreamingRef = useRef(false);
+  const inputTextRef = useRef(inputText);
+  const pendingAttachmentsRef = useRef<PendingAttachment[]>(pendingAttachments);
+  const loadSessionDetailRef = useRef(loadSessionDetail);
+  const onChatErrorRef = useRef(onChatError);
+  const updateQueueRef = useRef<
+    (
+      sessionId: string,
+      updater: (items: QueuedAgentMessage[]) => QueuedAgentMessage[],
+    ) => AgentSendQueueWriteResult
+  >(() => "ok");
+  const sendRunRef = useRef<(options: SendRunOptions) => Promise<void>>(async () => {});
+
+  selectedSessionIdRef.current = selectedSessionId;
+  loadedSessionIdRef.current = loadedSessionId;
+  activeWaitingRunRef.current = activeWaitingRun;
+  runsRef.current = runs;
+  isStreamingRef.current = isStreaming;
+  inputTextRef.current = inputText;
+  pendingAttachmentsRef.current = pendingAttachments;
+  loadSessionDetailRef.current = loadSessionDetail;
+  onChatErrorRef.current = onChatError;
 
   // Reconnectable run subscription state (docs/run-sse).
   // AbortController here aborts only the subscription; it never cancels the run.
@@ -105,6 +201,59 @@ export function useAgentChat({
     inputText,
     () => onChatError("下書きが大きすぎて保存できません（画像を減らしてください）。"),
   );
+
+  const updateQueue = useCallback(
+    (
+      sessionId: string,
+      updater: (items: QueuedAgentMessage[]) => QueuedAgentMessage[],
+    ): AgentSendQueueWriteResult => {
+      const current =
+        queueRef.current.sessionId === sessionId
+          ? queueRef.current.items
+          : readAgentSendQueue(sessionId);
+      const next = updater(current);
+      const result = writeAgentSendQueue(sessionId, next);
+      if (result !== "ok") {
+        // Do not commit unpersisted state: a reload would restore the old queue
+        // and the UI would diverge from storage.
+        onChatErrorRef.current(
+          result === "too-large"
+            ? "待機メッセージが大きすぎて保存できません（画像を減らしてください）。"
+            : "待機メッセージの保存に失敗しました。",
+        );
+        return result;
+      }
+      queueRef.current = { sessionId, items: next };
+      if (selectedSessionIdRef.current === sessionId) {
+        setQueuedMessages(next);
+      }
+      return result;
+    },
+    [],
+  );
+  updateQueueRef.current = updateQueue;
+
+  const clearQueueRetry = useCallback(() => {
+    if (queueRetryTimerRef.current !== null) {
+      window.clearTimeout(queueRetryTimerRef.current);
+      queueRetryTimerRef.current = null;
+    }
+  }, []);
+
+  // Restore the persisted queue for the selected session. Other sessions keep
+  // their queues in storage and are only flushed once selected again.
+  useEffect(() => {
+    queueBlockedRef.current = false;
+    clearQueueRetry();
+    if (!selectedSessionId) {
+      queueRef.current = { sessionId: null, items: [] };
+      setQueuedMessages([]);
+      return;
+    }
+    const items = readAgentSendQueue(selectedSessionId);
+    queueRef.current = { sessionId: selectedSessionId, items };
+    setQueuedMessages(items);
+  }, [selectedSessionId, clearQueueRetry]);
 
   const invalidatePendingStreamingText = useCallback(() => {
     streamGenerationRef.current += 1;
@@ -308,6 +457,8 @@ export function useAgentChat({
         if (hitlRunId) setActiveWaitingRun({ hitlRunId, questions, hitlStatus: "pending_user" });
         void loadSessionDetail(ctx.streamSessionId);
       } else if (type === "done") {
+        queueBlockedRef.current = false;
+        clearQueueRetry();
         ctx.finalizeSendSuccess();
         resetStreamingState();
         abortControllerRef.current = null;
@@ -325,22 +476,29 @@ export function useAgentChat({
         const hitlIds = Array.isArray(data.hitl_run_ids) ? (data.hitl_run_ids as string[]) : [];
         if (hitlIds.length > 0) setHitlLinks(hitlIds);
       } else if (type === "error") {
+        queueBlockedRef.current = false;
+        clearQueueRetry();
         ctx.restoreSendText();
         ctx.removeTempMessage?.();
         resetStreamingState();
         abortControllerRef.current = null;
         activeRunIdRef.current = null;
         onChatError(String(data.error ?? data.error_message ?? "エラーが発生しました。"));
+        void loadSessionDetail(ctx.streamSessionId, { preserveChatError: true });
       } else if (type === "cancelled") {
+        queueBlockedRef.current = false;
+        clearQueueRetry();
         ctx.restoreSendText();
         ctx.removeTempMessage?.();
         resetStreamingState();
         abortControllerRef.current = null;
         activeRunIdRef.current = null;
         onChatError("キャンセルされました");
+        void loadSessionDetail(ctx.streamSessionId, { preserveChatError: true });
       }
     },
     [
+      clearQueueRetry,
       enqueueStreamingText,
       loadSessions,
       resetStreamingState,
@@ -393,29 +551,22 @@ export function useAgentChat({
     [handleRunEnvelope],
   );
 
-  const submitMessageViaRun = async () => {
-    if (!selectedSessionId || (!inputText.trim() && pendingAttachments.length === 0 && !selectedSkill) || isStreaming)
-      return;
-    const streamSessionId = selectedSessionId;
-    const userText = inputText.trim();
-    const sendText = inputText;
-    const attachmentsSnapshot = pendingAttachments.map<AgentMessageAttachment>((att) => ({
-      name: att.name,
-      mime_type: att.mime_type,
-      data: att.data,
-    }));
-    const attachmentsSnapshotFull = pendingAttachments.map((att) => ({ ...att }));
+  const sendRun = async ({ sessionId, snapshot, mode, onAccepted, onPostError }: SendRunOptions) => {
+    const isComposer = mode === "composer";
     if (abortControllerRef.current) abortControllerRef.current.abort();
     invalidatePendingStreamingText();
     const streamGeneration = streamGenerationRef.current;
     const controller = new AbortController();
     abortControllerRef.current = controller;
 
-    savePromptDraftFor(streamSessionId, sendText);
-    saveImageDraftFor(streamSessionId, sendText, attachmentsSnapshotFull);
-    setPromptInputLocal("");
-    setLocalAttachments([]);
-    if (imageInputRef.current) imageInputRef.current.value = "";
+    if (isComposer) {
+      savePromptDraftFor(sessionId, snapshot.rawText);
+      saveImageDraftFor(sessionId, snapshot.rawText, snapshot.attachmentDrafts);
+      setPromptInputLocal("");
+      setLocalAttachments([]);
+      setSelectedSkill(null);
+      if (imageInputRef.current) imageInputRef.current.value = "";
+    }
     onChatError(null);
     setHitlLinks([]);
     setIsStreaming(true);
@@ -424,14 +575,14 @@ export function useAgentChat({
     setStreamingPhase("thinking");
     setStreamingIteration(null);
 
-    const tempUserMsgId = `temp_${Date.now()}`;
+    const tempUserMsgId = `temp_${Date.now()}_${Math.random().toString(16).slice(2)}`;
     const tempUserMsg: AgentMessage = {
       message_id: tempUserMsgId,
-      session_id: streamSessionId,
+      session_id: sessionId,
       sequence: messages.length + 1,
       role: "user",
-      content: userText,
-      attachments: attachmentsSnapshot.length > 0 ? attachmentsSnapshot : undefined,
+      content: snapshot.content,
+      attachments: snapshot.attachments.length > 0 ? snapshot.attachments : undefined,
       created_at: new Date().toISOString(),
     };
     setMessages((prev) => [...prev, tempUserMsg]);
@@ -441,36 +592,36 @@ export function useAgentChat({
     const isCurrentStream = () =>
       streamGeneration === streamGenerationRef.current &&
       abortControllerRef.current === controller;
+    // The composer stays usable while a run is streaming, so a newer draft may
+    // exist by the time this send settles. Only touch the composer/drafts when
+    // it is still empty; otherwise the next message would be lost.
+    const composerIsEmpty = () =>
+      inputTextRef.current.trim() === "" && pendingAttachmentsRef.current.length === 0;
     const finalizeSendSuccess = () => {
-      removePromptDraftFor(streamSessionId);
-      removeImageDraftFor(streamSessionId);
+      if (!isComposer || !composerIsEmpty()) return;
+      removePromptDraftFor(sessionId);
+      removeImageDraftFor(sessionId);
       setPromptInputLocal("");
       setLocalAttachments([]);
     };
     const restoreSendText = () => {
-      savePromptDraftFor(streamSessionId, sendText);
-      setPromptInputLocal(sendText);
-      saveImageDraftFor(streamSessionId, sendText, attachmentsSnapshotFull);
-      setLocalAttachments(attachmentsSnapshotFull);
+      if (!isComposer || !composerIsEmpty()) return;
+      savePromptDraftFor(sessionId, snapshot.rawText);
+      setPromptInputLocal(snapshot.rawText);
+      saveImageDraftFor(sessionId, snapshot.rawText, snapshot.attachmentDrafts);
+      setLocalAttachments(snapshot.attachmentDrafts);
     };
 
-    const idempotencyKey =
-      typeof crypto !== "undefined" && "randomUUID" in crypto
-        ? crypto.randomUUID()
-        : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
     let runId: string;
-    const activeSkill = selectedSkill;
-    setSelectedSkill(null);
-
     try {
       const started = await startAgentRun(
-        streamSessionId,
+        sessionId,
         {
-          content: userText,
-          images: attachmentsSnapshot.length > 0 ? attachmentsSnapshot : undefined,
-          slash_invocation: activeSkill,
+          content: snapshot.content,
+          images: snapshot.attachments.length > 0 ? snapshot.attachments : undefined,
+          slash_invocation: snapshot.slashInvocation,
         },
-        idempotencyKey,
+        snapshot.idempotencyKey,
       );
       if (!isCurrentStream()) {
         removeTempMessage();
@@ -478,13 +629,21 @@ export function useAgentChat({
         return;
       }
       runId = started.run.run_id;
+      onAccepted?.();
     } catch (err: unknown) {
-      setSelectedSkill(activeSkill);
       if (!isCurrentStream()) {
         removeTempMessage();
         restoreSendText();
         return;
       }
+      if (!isComposer) {
+        removeTempMessage();
+        resetStreamingState();
+        abortControllerRef.current = null;
+        onPostError?.(err);
+        return;
+      }
+      setSelectedSkill(snapshot.slashInvocation);
       restoreSendText();
       removeTempMessage();
       resetStreamingState();
@@ -494,7 +653,7 @@ export function useAgentChat({
     }
 
     try {
-      await subscribeToAgentRun(runId, streamSessionId, 0, {
+      await subscribeToAgentRun(runId, sessionId, 0, {
         streamGeneration,
         isCurrentStream,
         finalizeSendSuccess,
@@ -511,22 +670,19 @@ export function useAgentChat({
           resetStreamingState();
           abortControllerRef.current = null;
           activeRunIdRef.current = null;
-          void loadSessionDetail(streamSessionId);
+          void loadSessionDetailRef.current(sessionId);
         }
       }
     } catch (err: unknown) {
       if (!isCurrentStream()) return;
-      const isAbort =
-        (err instanceof DOMException && err.name === "AbortError") ||
-        (typeof err === "object" && err !== null && "name" in err && (err as { name: string }).name === "AbortError");
-      if (isAbort) {
+      if (isAbortError(err)) {
         // Unmount/session-switch aborts only the subscription; run continues.
         resetStreamingState();
         abortControllerRef.current = null;
         activeRunIdRef.current = null;
         return;
       }
-      restoreSendText();
+      if (isComposer) restoreSendText();
       removeTempMessage();
       resetStreamingState();
       abortControllerRef.current = null;
@@ -534,6 +690,154 @@ export function useAgentChat({
       onChatError(err instanceof Error ? err.message : "メッセージの送信に失敗しました。");
     }
   };
+  sendRunRef.current = sendRun;
+
+  const flushQueue = useCallback(() => {
+    if (flushInFlightRef.current || queueBlockedRef.current) return;
+    const sessionId = selectedSessionIdRef.current;
+    if (!sessionId) return;
+    if (loadedSessionIdRef.current !== sessionId) return;
+    if (isStreamingRef.current) return;
+    if (activeWaitingRunRef.current) return;
+    if (activeRunIdRef.current) return;
+    if (runsRef.current.some((r) => NON_TERMINAL_RUN_STATUSES.has(r.status))) return;
+    const queue = queueRef.current;
+    if (queue.sessionId !== sessionId || queue.items.length === 0) return;
+    const head = queue.items[0];
+    if (head.status !== "pending") return;
+    flushInFlightRef.current = true;
+    void sendRunRef
+      .current({
+        sessionId,
+        snapshot: {
+          content: head.content,
+          rawText: head.content,
+          attachments: head.attachments,
+          attachmentDrafts: [],
+          slashInvocation: head.slash_invocation,
+          idempotencyKey: head.idempotency_key,
+        },
+        mode: "queue",
+        onAccepted: () => {
+          clearQueueRetry();
+          updateQueueRef.current(sessionId, (items) =>
+            removeQueuedAgentMessage(items, head.queue_id),
+          );
+        },
+        onPostError: (error: unknown) => {
+          const status = (error as { status?: number } | null)?.status;
+          if (status === 409) {
+            // Another run owns the session (e.g. another tab). Keep the item
+            // pending, recover the active run, and retry after a short delay.
+            // The terminal event of that run also releases the block.
+            queueBlockedRef.current = true;
+            void loadSessionDetailRef.current(sessionId).finally(() => {
+              clearQueueRetry();
+              queueRetryTimerRef.current = window.setTimeout(() => {
+                queueRetryTimerRef.current = null;
+                queueBlockedRef.current = false;
+                flushQueueRef.current();
+              }, 2000);
+            });
+            return;
+          }
+          const message =
+            error instanceof Error ? error.message : "メッセージの送信に失敗しました。";
+          updateQueueRef.current(sessionId, (items) =>
+            markQueuedAgentMessageError(items, head.queue_id, message),
+          );
+          onChatErrorRef.current(message);
+        },
+      })
+      .finally(() => {
+        flushInFlightRef.current = false;
+      });
+  }, [clearQueueRetry]);
+  flushQueueRef.current = flushQueue;
+
+  const submitMessageViaRun = async () => {
+    if (!selectedSessionId) return;
+    if (!inputText.trim() && pendingAttachments.length === 0 && !selectedSkill) return;
+    const sessionId = selectedSessionId;
+    const snapshot: AgentSendSnapshot = {
+      content: inputText.trim(),
+      rawText: inputText,
+      attachments: pendingAttachments.map<AgentMessageAttachment>((att) => ({
+        name: att.name,
+        mime_type: att.mime_type,
+        data: att.data,
+      })),
+      attachmentDrafts: pendingAttachments.map((att) => ({ ...att })),
+      slashInvocation: selectedSkill,
+      idempotencyKey: generateIdempotencyKey(),
+    };
+
+    const busy =
+      isStreamingRef.current ||
+      activeWaitingRunRef.current !== null ||
+      runsRef.current.some((r) => NON_TERMINAL_RUN_STATUSES.has(r.status)) ||
+      (queueRef.current.sessionId === sessionId && queueRef.current.items.length > 0);
+    if (busy) {
+      const item = createQueuedMessage({
+        content: snapshot.content,
+        attachments: snapshot.attachments,
+        slash_invocation: snapshot.slashInvocation,
+      });
+      const queued = updateQueueRef.current(sessionId, (items) =>
+        enqueueAgentMessage(items, item),
+      );
+      if (queued !== "ok") {
+        // Keep the composer so the message is not lost when it cannot persist.
+        return;
+      }
+      removePromptDraftFor(sessionId);
+      removeImageDraftFor(sessionId);
+      setPromptInputLocal("");
+      setLocalAttachments([]);
+      setSelectedSkill(null);
+      if (imageInputRef.current) imageInputRef.current.value = "";
+      onChatError(null);
+      flushQueue();
+      return;
+    }
+    await sendRunRef.current({ sessionId, snapshot, mode: "composer" });
+  };
+
+  const handleRemoveQueuedMessage = useCallback((queueId: string) => {
+    const sessionId = selectedSessionIdRef.current;
+    if (!sessionId) return;
+    updateQueueRef.current(sessionId, (items) => removeQueuedAgentMessage(items, queueId));
+  }, []);
+
+  const handleRetryQueuedMessage = useCallback(
+    (queueId: string) => {
+      const sessionId = selectedSessionIdRef.current;
+      if (!sessionId) return;
+      updateQueueRef.current(sessionId, (items) =>
+        clearQueuedAgentMessageError(items, queueId),
+      );
+      queueBlockedRef.current = false;
+      flushQueue();
+    },
+    [flushQueue],
+  );
+
+  // Flush the selected session's queue whenever the session becomes idle.
+  // A stale active run is retried through the 409 path in flushQueue.
+  useEffect(() => {
+    if (isStreaming || activeWaitingRun || !selectedSessionId) return;
+    if (loadedSessionId !== selectedSessionId) return;
+    if (runs.some((r) => NON_TERMINAL_RUN_STATUSES.has(r.status))) return;
+    flushQueue();
+  }, [
+    flushQueue,
+    isStreaming,
+    activeWaitingRun,
+    selectedSessionId,
+    loadedSessionId,
+    runs,
+    queuedMessages,
+  ]);
 
   const handleCancelAgentRun = useCallback(async () => {
     const runId = activeRunIdRef.current;
@@ -622,7 +926,7 @@ export function useAgentChat({
   };
 
   const handleFormDragOver = (e: React.DragEvent<HTMLFormElement>) => {
-    if (!activeAgent || !selectedSessionId || isStreaming) return;
+    if (!activeAgent || !selectedSessionId) return;
     if (!e.dataTransfer.types.includes("Files")) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = "copy";
@@ -640,7 +944,7 @@ export function useAgentChat({
   };
 
   const handleFormDrop = (e: React.DragEvent<HTMLFormElement>) => {
-    if (!activeAgent || !selectedSessionId || isStreaming) return;
+    if (!activeAgent || !selectedSessionId) return;
     if (!e.dataTransfer.files || e.dataTransfer.files.length === 0) return;
     e.preventDefault();
     setIsDragOver(false);
@@ -648,7 +952,7 @@ export function useAgentChat({
   };
 
   const handleInputPaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
-    if (!activeAgent || !selectedSessionId || isStreaming) return;
+    if (!activeAgent || !selectedSessionId) return;
     const items = e.clipboardData?.items;
     if (!items || items.length === 0) return;
     const files: File[] = [];
@@ -698,6 +1002,10 @@ export function useAgentChat({
         abortControllerRef.current.abort();
       }
       invalidatePendingStreamingText();
+      if (queueRetryTimerRef.current !== null) {
+        window.clearTimeout(queueRetryTimerRef.current);
+        queueRetryTimerRef.current = null;
+      }
     };
   }, [invalidatePendingStreamingText]);
 
@@ -784,10 +1092,13 @@ export function useAgentChat({
     attachmentReadsPending,
     isDragOver,
     setIsDragOver,
+    queuedMessages,
     resetStreamingState,
     abortSubscriptionAndReset,
     handleRunEnvelope,
     submitMessageViaRun,
+    handleRemoveQueuedMessage,
+    handleRetryQueuedMessage,
     handleCancelAgentRun,
     handleFilesSelected,
     handleRemoveAttachment,

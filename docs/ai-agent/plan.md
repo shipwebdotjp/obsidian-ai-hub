@@ -154,3 +154,30 @@ ID が見つからないときは 404、不正な tool ID、重複名、空白�
 - 任意のコード、MCP サーバー、URL をユーザーがツールとして登録する機能。
 - 承認後の自動会話再開、ツール実行の取消、バックグラウンドジョブ、再接続、詳細な進捗表示。
 - ユーザー／権限のマルチテナント化。既存 Web の単一 Bearer 認証境界を継続する。
+
+## 送信キュー（2026-09-17 追加）
+
+`/agents` の会話画面で、サーバーが現ターンを処理している間もユーザー入力を送信待ちキューへ積み、現ターンの終端後に自動で順に実行する。恒久判断は [決定記録](../../ai_wiki/10-Decisions-Web.md#エージェント会話の送信キューはクライアント側に置く) を正とする。
+
+### 契約
+
+- キューの実体はクライアント側に置く。`sessionStorage` の `agent-send-queue:{session_id}:v1` に `{version, items}` でセッション別に保存する。DB・スキーマ・既存の「1セッション1非終端 run」制約は変更しない。
+- キュー項目は `queue_id`、本文、添付画像、`slash_invocation`、`idempotency_key`、`status`（`pending` / `error`）、`error_message` を持つ。`idempotency_key` は enqueue 時に確定し、再送でも同じ値を使う（202 replay で二重実行しない）。
+- 1件ずつ FIFO で送信する。flush 条件は「選択中セッション」「セッション詳細ロード済み」「実行中でない」「質問待ちでない」「当該セッションに非終端 run がない」「先頭が `pending`」。先頭が `error` の間は停止する。
+- 送信中（`isStreaming`）または質問待ち（`activeWaitingRun`）のときの送信は composer からキューへ移し、入力を有効なままにする。添付画像・スラッシュスキルも同様にキューできる。
+- キャンセルは実行中 run のみを止め、キューは継続する。キュー項目は UI の × で個別削除、`error` 時は再送できる。
+- 項目は 202 受理時にキューから削除する。以降の run 失敗・キャンセルではユーザーメッセージは会話履歴に残るため再 enqueue しない（同一 `idempotency_key` の再送は同じ terminal run を返すため再実行にならない）。
+- 409（他タブ等の active run）は項目を `pending` のまま保持し、block して詳細を再取得、次 terminal または約2秒後の再試行で再開する。項目を失敗扱いにもループにもしない。
+- 保存失敗（4MB 超・quota・storage 不可）ではメモリ状態を確定せず、enqueue 時はコンポーザを保持してメッセージを失わない。既存の保存済みキューも削除しない。
+- セッションを削除したらそのキューの storage も削除する。セッション切替時は他セッションのキューを保持し、選択して idle になった時点で再開する。
+
+### 非目標と制約
+
+- タブを閉じるとキューは消える（`sessionStorage`）。サーバー再起動を跨ぐ永続キューは対象外。
+- 他セッションのキューは、そのセッションを開くまで送信されない（購読は選択中セッションのみ）。
+- バックエンドに複数の `queued` run を積む方式は採用しない。
+
+### 実装箇所と検証
+
+- `frontend/src/features/agents/agentSendQueue.ts`（storage・pure ops）、`useAgentChat.ts`（enqueue / flush / retry / remove、`sendRun` 共通化）、`AgentChatInput.tsx` / `AgentMessageList.tsx`（入力有効化・待機バブル・件数）。
+- Vitest: `agentSendQueue.test.ts`（永続化・順序・上限・破損）、`AgentsPageSendQueue.test.tsx`（FIFO 自動送信・削除・リロード復元・409 保持・質問待ち停止）。既存の画面確認は `make serve` で行い、E2E は追加しない。

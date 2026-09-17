@@ -751,3 +751,28 @@ AgentsPage と CodingPage の左ペイン構造は共通のレイアウトを採
 
 - Frontend Vitest (`CodingPage.test.tsx`) でボタンのスタイルクラスおよび既存の開閉・設定操作を検証し、全テスト通過。
 - `tsc -b` 型チェックおよび `vite build` クリーン通過。
+
+## エージェント会話の送信キューはクライアント側に置く
+
+| 項目 | 内容 |
+|------|------|
+| 決定日 | 2026-09-17 |
+| カテゴリ | Web UI・AI エージェント |
+| 決定内容 | `/agents` の会話画面で、現ターンの処理中もユーザー入力を `sessionStorage` のセッション別キューに積み、ターン終端後に1件ずつ FIFO で自動送信する。バックエンドに複数の `queued` run を積む方式は採らず、既存の「1セッション1非終端 run」制約と単一ワーカー構成を維持する。 |
+
+### 結論に至った経緯
+
+- **代替案との比較:** バックエンドに複数 `queued` run を積めばリロード・タブ閉じに強いが、v35 の `idx_agent_runs_single_active` 部分 unique index、active-run 409 ガード、queued run の取消、`active_run` 単数前提の UI を変更する必要がある。さらに `get_instance_id()` はプロセス単位で、サーバー再起動時は前インスタンス所有の非終端 run が `interrupted` になるため、「サーバーに永続キューを置く」利点が実際には小さい。
+- **既存決定との整合:** 個人利用の単一ホスト・単一 ASGI worker 前提で Redis／Temporal／別プロセスキューを導入しない決定（2026-09-04）と、`sessionStorage` をタブ寿命の補助キャッシュとする決定を踏襲する。
+- **二重実行の防止:** 送信は既存の `Idempotency-Key`＋部分 unique index を再利用する。キーは enqueue 時に固定して項目と一緒に保存し、リロード後の再送や不確実なネットワーク失敗後の再送でも 202 replay で同一 run を返す。
+- **順序と割り込みの扱い:** キューは選択中セッションのみを flush する。他セッションのキューは storage に保持し、そのセッションを開いて idle になった時点で再開する。実行中 run のキャンセルはキューを消さず、項目ごとの × で削除する。
+- **質問待ち（`waiting_user`）:** 回答待ちの間は flush を止め、回答・再開後の終端、または取消後に再開する。ロード直後に `activeWaitingRun` が未確定でも、`runs` に非終端 run がある間は flush しない。
+- **409 の扱い:** 他タブ等が run を持つ場合の 409 は項目を `pending` のまま保持して block し、詳細を再取得して次 terminal で再開する。失敗表示にもポーリングループにもしない。
+- **制約:** タブを閉じるとキューは消える。他セッションのキューは開くまで送信されない。いずれも用途（処理中の連投を順に処理する）に対して許容する。
+
+### 実装結果（2026-09-17）
+
+- **キュー:** `frontend/src/features/agents/agentSendQueue.ts` にキー `agent-send-queue:{session_id}:v1`、約4MB上限、破損・例外時に空配列／無視、pure な append／remove／error 切替を実装した。
+- **送信:** `useAgentChat.ts` の送信を composer 起点とキュー起点で共通の `sendRun` に整理し、`submitMessageViaRun` は idle なら composer 送信、busy またはキューに先行項目があれば enqueue する。`flushQueue` は選択中セッションが idle のとき先頭の `pending` を1件送信し、`onAccepted` で項目を削除、409 は block、その他失敗は `error` 表示＋再送とした。
+- **UI:** `AgentChatInput.tsx` は処理中も入力・添付・スキル・送信を有効化し待機件数を表示、`AgentMessageList.tsx` はストリーミングパネル下に「送信待ち」バブル（×・再送・エラー）を描画する。セッション削除時は `useAgentSessions.ts` が対象キーの storage を削除する。
+- **検証:** `agentSendQueue.test.ts`（永続化・順序・上限・破損・error 切替）と `AgentsPageSendQueue.test.tsx`（FIFO 自動送信・削除・リロード復元・409 保持・質問待ち停止）を追加。`npm run test` 487 passed、`tsc -b` clean。フロント変更は `make serve` で目視確認する（E2E は追加しない）。

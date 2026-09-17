@@ -36,6 +36,9 @@ function renderList(props: Partial<React.ComponentProps<typeof AgentMessageList>
         onCopyMessage={onCopy}
         onSubmitWaitingAnswers={vi.fn()}
         onCancelWaitingRun={vi.fn()}
+        queuedMessages={[]}
+        onRemoveQueuedMessage={vi.fn()}
+        onRetryQueuedMessage={vi.fn()}
         messageRefs={{ current: new Map() }}
         messagesEndRef={{ current: null }}
         {...props}

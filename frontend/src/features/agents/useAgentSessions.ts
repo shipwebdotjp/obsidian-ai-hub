@@ -27,6 +27,7 @@ import {
   clearLastViewedSessionId,
   writeLastViewedSessionId,
 } from "./lastViewedSession";
+import { removeAgentSendQueue } from "./agentSendQueue";
 
 interface UseAgentSessionsOptions {
   selectedAgentId: string | null;
@@ -140,7 +141,10 @@ export function useAgentSessions({
     await loadSessions(agentId);
   };
 
-  const loadSessionDetail = async (sessionId: string) => {
+  const loadSessionDetail = async (
+    sessionId: string,
+    options?: { preserveChatError?: boolean },
+  ) => {
     onActionError(null);
     try {
       const detail = await getAgentSessionDetail(sessionId);
@@ -158,7 +162,9 @@ export function useAgentSessions({
       setRuns(sessionRuns);
       setAnswerHistory(detail.ask_user_answer_history || []);
       setLoadedSessionId(sessionId);
-      onChatError(null);
+      if (!options?.preserveChatError) {
+        onChatError(null);
+      }
 
       // Check if latest run is waiting_user and fetch its active question set
       const waitingRun = [...sessionRuns].reverse().find((r) => r.status === "waiting_user");
@@ -334,6 +340,7 @@ export function useAgentSessions({
     onActionError(null);
     try {
       await deleteAgentSession(deletedId);
+      removeAgentSendQueue(deletedId);
       const remaining = sessions.filter((s) => s.session_id !== deletedId);
       setSessions((prev) => prev.filter((s) => s.session_id !== deletedId));
       setSessionToDelete(null);

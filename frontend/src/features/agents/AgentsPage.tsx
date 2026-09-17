@@ -87,6 +87,7 @@ export default function AgentsPage() {
     setMessages: sessions.setMessages,
     runs: sessions.runs,
     loadedSessionId: sessions.loadedSessionId,
+    activeWaitingRun: sessions.activeWaitingRun,
     setActiveWaitingRun: sessions.setActiveWaitingRun,
     setSessions: sessions.setSessions,
     inputText,
@@ -328,6 +329,9 @@ export default function AgentsPage() {
               onCopyMessage={chat.handleCopyMessage}
               onSubmitWaitingAnswers={sessions.handleSubmitWaitingAnswers}
               onCancelWaitingRun={sessions.handleCancelWaitingRun}
+              queuedMessages={chat.queuedMessages}
+              onRemoveQueuedMessage={chat.handleRemoveQueuedMessage}
+              onRetryQueuedMessage={chat.handleRetryQueuedMessage}
               messageRefs={sessions.messageElementRefs}
               messagesEndRef={ui.messagesEndRef}
             />
@@ -337,6 +341,7 @@ export default function AgentsPage() {
               inputText={inputText}
               onInputTextChange={setInputText}
               isStreaming={chat.isStreaming}
+              queuedCount={chat.queuedMessages.length}
               selectedSessionId={sessions.selectedSessionId}
               activeAgent={activeAgent}
               isDragOver={chat.isDragOver}

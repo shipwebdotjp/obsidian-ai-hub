@@ -17,6 +17,7 @@ interface AgentChatInputProps {
   inputText: string;
   onInputTextChange: (text: string) => void;
   isStreaming: boolean;
+  queuedCount: number;
   selectedSessionId: string | null;
   activeAgent: Agent | undefined;
   isDragOver: boolean;
@@ -57,6 +58,7 @@ export function AgentChatInput({
   inputText,
   onInputTextChange,
   isStreaming,
+  queuedCount,
   selectedSessionId,
   activeAgent,
   isDragOver,
@@ -331,7 +333,7 @@ export function AgentChatInput({
         onChange={(e) => onInputTextChange(e.target.value)}
         onKeyDown={handleInputKeyDown}
         onPaste={onPaste}
-        disabled={isStreaming || !selectedSessionId}
+        disabled={!selectedSessionId}
         placeholder={inputPlaceholder}
         className="w-full resize-none rounded-lg border border-slate-300 p-2 text-xs leading-relaxed focus:border-slate-500 focus:outline-none disabled:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed"
       />
@@ -341,7 +343,7 @@ export function AgentChatInput({
           <div ref={plusMenuRef} className="relative">
             <button
               type="button"
-              disabled={!activeAgent || !selectedSessionId || isStreaming}
+              disabled={!activeAgent || !selectedSessionId}
               onClick={onTogglePlusMenu}
               className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
               aria-label="追加メニュー"
@@ -364,7 +366,6 @@ export function AgentChatInput({
                   disabled={
                     !activeAgent ||
                     !selectedSessionId ||
-                    isStreaming ||
                     attachmentReadsPending > 0 ||
                     pendingAttachments.length >= MAX_AGENT_IMAGES
                   }
@@ -421,6 +422,14 @@ export function AgentChatInput({
             </span>
           )}
         </div>
+        {queuedCount > 0 && (
+          <span
+            className="text-[11px] text-slate-500"
+            data-testid="agent-queued-count"
+          >
+            待機 {queuedCount}件
+          </span>
+        )}
         {isStreaming && (
           <button
             type="button"
@@ -434,7 +443,6 @@ export function AgentChatInput({
         <button
           type="submit"
           disabled={
-            isStreaming ||
             attachmentReadsPending > 0 ||
             (!inputText.trim() && pendingAttachments.length === 0 && !selectedSkill) ||
             !selectedSessionId
