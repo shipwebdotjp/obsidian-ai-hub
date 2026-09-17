@@ -216,6 +216,12 @@ def main():
         choices=("short", "medium", "long"),
         help="--research-agent の出力長を切り替える",
     )
+    parser.add_argument(
+        "--research-mode",
+        choices=("auto", "internal", "web", "deep", "project"),
+        default=None,
+        help="--research-agent の調査モード（既定: auto）。project は --project-id 必須",
+    )
 
     def validate_month(value):
         import re
@@ -392,7 +398,7 @@ def main():
         type=int,
         dest="project_id",
         default=None,
-        help="--coding 新規セッションで使用するプロジェクトID",
+        help="--coding 新規セッション、または --research-agent --research-mode project で使用するプロジェクトID",
     )
     parser.add_argument(
         "prompt_args",
@@ -538,6 +544,10 @@ def main():
         parser.error("--context requires --research-agent")
     if args.output_style and not args.research_agent:
         parser.error("--output-style requires --research-agent")
+    if args.research_mode and not args.research_agent:
+        parser.error("--research-mode requires --research-agent")
+    if args.project_id is not None and not (args.coding or args.research_agent):
+        parser.error("--project-id requires --coding or --research-agent")
     if args.research_agent and not args.theme:
         parser.error(
             "--research-agent requires --theme (queue mode removed; use --suggest-research-theme instead)"
@@ -585,11 +595,24 @@ def main():
     if getattr(args, "prompt_args", None) and not getattr(args, "coding", False):
         parser.error(f"unexpected positional arguments: {' '.join(args.prompt_args)}")
 
+    if (
+        args.research_agent
+        and args.research_mode == "project"
+        and args.project_id is None
+    ):
+        parser.error(
+            "--research-agent --research-mode project では --project-id が必要です"
+        )
+
     research_kwargs = {}
     if args.context is not None:
         research_kwargs["context"] = args.context
     if args.output_style is not None:
         research_kwargs["output_style"] = args.output_style
+    if args.research_mode is not None:
+        research_kwargs["mode"] = args.research_mode
+    if args.project_id is not None:
+        research_kwargs["project_id"] = args.project_id
 
     if args.merge_inbox:
         run_and_log(

@@ -922,6 +922,7 @@ def main(
     context: Optional[str] = None,
     mode: str = "auto",
     output_style: Optional[str] = None,
+    project_id: Optional[int] = None,
 ) -> ResearchRunResult:
 
     result = ResearchRunResult()
@@ -937,6 +938,7 @@ def main(
             mode=mode,
             context=context,
             output_style=output_style,
+            project_id=project_id,
         )
 
         job = execute_research_job_sync(

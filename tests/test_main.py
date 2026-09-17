@@ -22,6 +22,84 @@ def test_research_agent_cli_requires_theme(monkeypatch):
         assert "--research-agent requires --theme" in mock_error.call_args[0][0]
 
 
+def test_research_agent_project_mode_requires_project_id(monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["prog", "--research-agent", "--theme", "テーマ", "--research-mode", "project"],
+    )
+
+    with patch("argparse.ArgumentParser.error") as mock_error:
+        mock_error.side_effect = SystemExit(2)
+        with patch.object(sys, "exit"):
+            try:
+                main_module.main()
+            except SystemExit:
+                pass
+        mock_error.assert_called_once()
+        assert "--project-id が必要" in mock_error.call_args[0][0]
+
+
+def test_research_mode_requires_research_agent(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["prog", "--research-mode", "deep"])
+
+    with patch("argparse.ArgumentParser.error") as mock_error:
+        mock_error.side_effect = SystemExit(2)
+        with patch.object(sys, "exit"):
+            try:
+                main_module.main()
+            except SystemExit:
+                pass
+        mock_error.assert_called_once()
+        assert "--research-mode requires --research-agent" in mock_error.call_args[0][0]
+
+
+def test_project_id_requires_coding_or_research_agent(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["prog", "--project-id", "1"])
+
+    with patch("argparse.ArgumentParser.error") as mock_error:
+        mock_error.side_effect = SystemExit(2)
+        with patch.object(sys, "exit"):
+            try:
+                main_module.main()
+            except SystemExit:
+                pass
+        mock_error.assert_called_once()
+        assert "--project-id requires --coding or --research-agent" in mock_error.call_args[0][0]
+
+
+def test_research_agent_cli_passes_mode_and_project_id(monkeypatch, test_memory_db_path):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "prog",
+            "--research-agent",
+            "--theme",
+            "テーマ",
+            "--research-mode",
+            "project",
+            "--project-id",
+            "42",
+            "--context",
+            "文脈",
+            "--output-style",
+            "long",
+        ],
+    )
+
+    with patch.object(main_module.research_agent, "main", return_value=None) as mock_run:
+        main_module.main()
+
+    mock_run.assert_called_once_with(
+        "テーマ",
+        mode="project",
+        project_id=42,
+        context="文脈",
+        output_style="long",
+    )
+
+
 def test_vault_search_cli_requires_query(monkeypatch):
     monkeypatch.setattr(sys, "argv", ["prog", "--vault-search"])
 
