@@ -198,6 +198,9 @@ async def execute_coding_run(run_id: str) -> None:
         final_status = "completed"
         title_source: Optional[str] = None
         current_external_id = session.get("acp_session_id")
+        # Freeze the session model for this run: mid-run model changes must
+        # not affect the in-flight request; they apply from the next message.
+        frozen_run_model = store.get_effective_session_model(session)
         # Accumulate token usage across the worker attempts of this run; a HITL
         # resume re-enters here with the earlier attempts still persisted.
         usage_totals = usage.usage_totals_from_diagnostics(run.get("diagnostics"))
@@ -615,6 +618,7 @@ async def execute_coding_run(run_id: str) -> None:
                                 cancel_event=cancel_event,
                                 on_update_callback=update_streamer.handle,
                                 on_elicitation_create=elicitation_handler,
+                                model=frozen_run_model,
                             ),
                         )
                     )

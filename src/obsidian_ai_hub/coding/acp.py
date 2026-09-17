@@ -442,18 +442,34 @@ class AcpClientBackend:
             "capabilities": agent_capabilities,
         }
 
-    def _apply_session_model(self, conn: AcpConnection, session_id: str) -> None:
-        """Pin the configured OpenCode model on the ACP session.
+    def _apply_session_model(
+        self, conn: AcpConnection, session_id: str, model: Optional[str] = None
+    ) -> str:
+        """Pin the resolved OpenCode model on the ACP session.
 
-        Raises AcpError on rejection: a misconfigured model name must fail
-        the turn instead of silently running on the agent default.
+        ``model`` is the run-frozen session model; when absent or not
+        allowlisted it falls back to the configured default. Raises AcpError
+        on rejection: a misconfigured model name must fail the turn instead
+        of silently running on the agent default. Returns the model sent.
         """
-        model = (CODING_OPENCODE_MODEL or "").strip()
-        if not model:
+        from obsidian_ai_hub.utils.config import (
+            get_available_coding_models,
+            resolve_effective_coding_model,
+        )
+
+        candidate = (model or "").strip()
+        if candidate and candidate not in get_available_coding_models():
+            raise AcpError(
+                f"OpenCode model '{candidate}' is not in the configured model list "
+                "(coding.acp.opencode_models); refusing to run on an unknown model."
+            )
+        resolved = resolve_effective_coding_model(candidate or None) if candidate else (CODING_OPENCODE_MODEL or "").strip()
+        if not resolved:
             raise AcpError(
                 "OpenCode model is not configured (coding.acp.opencode_model / "
                 "CODING_OPENCODE_MODEL); refusing to run on an unknown model."
             )
+        model = resolved
         try:
             conn.request(
                 "session/set_model",
@@ -467,6 +483,7 @@ class AcpClientBackend:
                 "CODING_OPENCODE_MODEL."
             ) from exc
         logger.info("ACP session '%s' model set to '%s'.", session_id, model)
+        return model
 
     def _handle_permission_request(self, req: Dict[str, Any], conn: AcpConnection) -> Tuple[bool, str]:
         """Handle session/request_permission RPC request from ACP agent.
@@ -598,6 +615,7 @@ class AcpClientBackend:
         timeout: Optional[float] = DEFAULT_ACP_TURN_TIMEOUT_S,
         on_update_callback: Optional[Any] = None,
         on_elicitation_create: Optional[Any] = None,
+        model: Optional[str] = None,
     ) -> AcpExecutionResult:
         """Execute a single ACP prompt turn with full session lifecycle handling.
 
@@ -631,6 +649,7 @@ class AcpClientBackend:
         session_recreated = False
         init_meta = {}
         curr_session_id = acp_session_id
+        sent_model: str = CODING_OPENCODE_MODEL
 
         try:
             init_meta = self.initialize(conn, timeout=15.0)
@@ -681,7 +700,7 @@ class AcpClientBackend:
             # params are ignored by OpenCode; fail the turn on rejection so a
             # misconfigured model name surfaces instead of silently running
             # on the agent default).
-            self._apply_session_model(conn, curr_session_id)
+            sent_model = self._apply_session_model(conn, curr_session_id, model)
 
             # Send session/prompt request asynchronously to process streaming notifications
             prompt_params = {
@@ -877,7 +896,7 @@ class AcpClientBackend:
                 "acp_session_id": curr_session_id,
                 "acp_version": init_meta.get("protocol_version"),
                 "acp_profile_id": self.profile.profile_id,
-                "acp_model": CODING_OPENCODE_MODEL,
+                "acp_model": sent_model,
                 "acp_agent": agent_info,
                 "acp_capabilities": init_meta.get("capabilities"),
                 "stop_reason": stop_reason,

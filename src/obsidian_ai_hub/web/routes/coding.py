@@ -13,7 +13,11 @@ from obsidian_ai_hub.coding import (
     service as coding_service,
     store as coding_store,
 )
-from obsidian_ai_hub.utils.config import CODING_OPENCODE_MODEL
+from obsidian_ai_hub.utils.config import (
+    CODING_OPENCODE_MODEL,
+    get_available_coding_models,
+    resolve_coding_model,
+)
 from obsidian_ai_hub.web import service as web_service
 from obsidian_ai_hub.web.routes.deps import require_bearer_token
 
@@ -24,6 +28,10 @@ class SessionCreateRequest(BaseModel):
     project_id: int
     backend: str = Field(description="'opencode' (fixed; the workspace is OpenCode-only)")
     title: Optional[str] = Field(default=None)
+    opencode_model: Optional[str] = Field(
+        default=None,
+        description="OpenCode model; must be in coding.acp.opencode_models",
+    )
     tool_ids: Optional[List[str]] = Field(
         default=None, description="Optional custom tool IDs for session"
     )
@@ -78,10 +86,18 @@ def update_coding_defaults(body: UpdateToolsRequest, _=Depends(require_bearer_to
     }
 
 
+class UpdateSessionModelRequest(BaseModel):
+    opencode_model: str = Field(description="New OpenCode model (allowlisted only)")
+
+
 @router.get("/config")
 def get_coding_config(_=Depends(require_bearer_token)):
     """Get coding workspace config (default backend, OpenCode model)."""
-    return {"default_backend": "opencode", "opencode_model": CODING_OPENCODE_MODEL}
+    return {
+        "default_backend": "opencode",
+        "opencode_model": CODING_OPENCODE_MODEL,
+        "available_models": get_available_coding_models(),
+    }
 
 
 @router.get("/tools")
@@ -182,6 +198,12 @@ def create_session(
             detail="トランスポートは 'acp' を指定してください（直接CLIは廃止されました）",
         )
 
+    if body.opencode_model not in (None, ""):
+        try:
+            resolve_coding_model(body.opencode_model)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
     try:
         session = coding_store.create_session(
             project_id=body.project_id,
@@ -190,6 +212,7 @@ def create_session(
             title=session_title,
             tool_ids=body.tool_ids,
             transport=clean_transport,
+            opencode_model=body.opencode_model,
         )
         return session
     except ValueError as exc:
@@ -215,6 +238,25 @@ def update_session_title(
         raise HTTPException(
             status_code=404, detail="セッションが見つかりません"
         ) from exc
+    return get_session_detail(session_id)
+
+
+@router.put("/sessions/{session_id}/model")
+def update_session_model(
+    session_id: str,
+    body: UpdateSessionModelRequest,
+    _=Depends(require_bearer_token),
+):
+    """Change the session's OpenCode model (allowlisted only; active runs keep their frozen model)."""
+    session = coding_store.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="セッションが見つかりません")
+    try:
+        coding_store.update_session_model(session_id, body.opencode_model)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="セッションが見つかりません")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     return get_session_detail(session_id)
 
 
@@ -256,6 +298,8 @@ def get_session_detail(session_id: str, _=Depends(require_bearer_token)):
 
     return {
         "session": session,
+        "effective_model": coding_store.get_effective_session_model(session),
+        "available_models": get_available_coding_models(),
         "effective_tool_ids": effective_tool_ids,
         "has_custom_tools": has_custom,
         "available_tools": available_tools,

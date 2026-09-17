@@ -62,6 +62,7 @@ _APP_ENV_VARS = [
     "CODING_ORCHESTRATOR_MODEL",
     "CODING_OPENCODE_CLI_PATH",
     "CODING_OPENCODE_MODEL",
+    "CODING_OPENCODE_MODELS",
 ]
 
 if IS_TEST_ENV:
@@ -615,6 +616,68 @@ CODING_OPENCODE_MODEL = str(
         default="opencode-go/muse-spark-1.3-contributor",
     )
 )
+
+
+def _parse_coding_model_list(raw: object) -> list[str]:
+    if isinstance(raw, str):
+        items = raw.split(",")
+    elif isinstance(raw, (list, tuple)):
+        items = list(raw)
+    else:
+        return []
+    seen: list[str] = []
+    for item in items:
+        name = str(item or "").strip()
+        if name and name not in seen:
+            seen.append(name)
+    return seen
+
+
+def get_available_coding_models() -> list[str]:
+    """Return the config-derived allowlist of OpenCode models.
+
+    Sources: ``CODING_OPENCODE_MODELS`` env (comma-separated) or
+    ``coding.acp.opencode_models`` list in config.yml. Falls back to
+    ``[CODING_OPENCODE_MODEL]`` so legacy single-model configs keep working.
+    Free-form user input is never accepted; callers must validate
+    membership in this list.
+    """
+    env_raw = os.getenv("CODING_OPENCODE_MODELS")
+    models = _parse_coding_model_list(env_raw) if env_raw not in (None, "") else []
+    if not models:
+        models = _parse_coding_model_list(_config_value("coding", "acp", "opencode_models", default=[]))
+    if not models:
+        models = _parse_coding_model_list(CODING_OPENCODE_MODEL)
+    return models
+
+
+def resolve_coding_model(candidate: object) -> str:
+    """Return ``candidate`` if it is in the allowlist, else raise ValueError."""
+    name = str(candidate or "").strip()
+    if name in get_available_coding_models():
+        return name
+    raise ValueError(
+        f"Unknown coding model '{candidate}'. "
+        "Choose one of the models configured in coding.acp.opencode_models."
+    )
+
+
+def resolve_effective_coding_model(session_value: object) -> str:
+    """Return the session model when allowlisted, else the default.
+
+    Legacy sessions store NULL/unknown values; they fall back to
+    ``CODING_OPENCODE_MODEL`` for backward compatibility.
+    """
+    name = str(session_value or "").strip()
+    if name and name in get_available_coding_models():
+        return name
+    default = (CODING_OPENCODE_MODEL or "").strip()
+    if default:
+        return default
+    models = get_available_coding_models()
+    if not models:
+        raise ValueError("No coding models are configured.")
+    return models[0]
 # Coding workspace is ACP-only with the OpenCode backend. There is no
 # backend selection: keep the constant for callers that still reference it.
 CODING_DEFAULT_BACKEND = "opencode"

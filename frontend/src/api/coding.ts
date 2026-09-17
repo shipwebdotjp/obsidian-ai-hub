@@ -15,6 +15,8 @@ export interface CodingDefaults {
 
 export interface CodingConfig {
   default_backend: "opencode";
+  opencode_model?: string | null;
+  available_models?: string[];
 }
 
 export interface GitStatus {
@@ -44,6 +46,7 @@ export interface CodingSession {
   transport: "acp" | "direct_cli";
   acp_session_id?: string | null;
   acp_profile_id?: string | null;
+  opencode_model?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -197,6 +200,8 @@ export interface CodingRun {
 
 export interface CodingSessionDetail {
   session: CodingSession;
+  effective_model?: string | null;
+  available_models?: string[];
   effective_tool_ids: string[];
   has_custom_tools: boolean;
   available_tools: CodingTool[];
@@ -350,12 +355,23 @@ export function createCodingSession(
   title?: string,
   toolIds?: string[],
 ): Promise<CodingSession> {
+  // The server applies the config-derived default model; per-session changes
+  // are made from the conversation status bar via updateCodingSessionModel.
   return apiPost<CodingSession>("/api/v1/coding/sessions", {
     project_id: projectId,
     backend: "opencode",
     title,
     tool_ids: toolIds,
     transport: "acp",
+  });
+}
+
+export function updateCodingSessionModel(
+  sessionId: string,
+  opencodeModel: string,
+): Promise<CodingSessionDetail> {
+  return apiPut<CodingSessionDetail>(`/api/v1/coding/sessions/${encodeURIComponent(sessionId)}/model`, {
+    opencode_model: opencodeModel,
   });
 }
 

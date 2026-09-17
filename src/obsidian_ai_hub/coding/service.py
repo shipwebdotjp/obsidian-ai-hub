@@ -185,6 +185,7 @@ async def run_coding_turn_stream(
         title_source: Optional[str] = None
         # Track in-memory ACP session id for this turn (carry recreated id to next iteration)
         current_external_id = session.get("acp_session_id") if session else None
+        frozen_run_model = store.get_effective_session_model(session)
         # Accumulate token usage across the worker attempts of this run.
         usage_totals = usage.usage_totals_from_diagnostics(run.get("diagnostics"))
         # Exclusive-control protocol: one self-correction per turn, then fail.
@@ -495,6 +496,7 @@ async def run_coding_turn_stream(
                                 cancel_event=cancel_event,
                                 on_update_callback=update_streamer.handle,
                                 on_elicitation_create=_elicitation_handler,
+                                model=frozen_run_model,
                             ),
                         )
                     )

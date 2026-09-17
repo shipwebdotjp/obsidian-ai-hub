@@ -703,7 +703,20 @@ def get_db_connection() -> sqlite3.Connection:
     if current_version <= 47:
         run_migration_v48(conn)
 
+    if current_version <= 48:
+        run_migration_v49(conn)
+
     return conn
+
+
+def run_migration_v49(conn: sqlite3.Connection) -> None:
+    """Run migration for version 49 (per-session OpenCode model)."""
+    try:
+        conn.execute("ALTER TABLE coding_sessions ADD COLUMN opencode_model TEXT;")
+    except sqlite3.OperationalError as e:
+        _ignore_duplicate_schema_object(e)
+    conn.execute("PRAGMA user_version = 49;")
+    conn.commit()
 
 
 def run_migration_v48(conn: sqlite3.Connection) -> None:

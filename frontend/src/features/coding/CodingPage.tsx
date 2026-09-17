@@ -16,9 +16,31 @@ import SplitHandle from "../../components/SplitHandle";
 import { usePaneResize } from "../../hooks/usePaneResize";
 import { buildRunById, selectValidProjects } from "./utils/codingSelectors";
 import { sessionUsageSummary } from "./utils/codingUsage";
+import { getCodingConfig, updateCodingSessionModel } from "../../api/coding";
 
 export default function CodingPage() {
   const [error, setError] = useState<string | null>(null);
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [modelChanging, setModelChanging] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void Promise.resolve()
+      .then(() => getCodingConfig())
+      .then((cfg) => {
+        if (cancelled) return;
+        const models = cfg.available_models?.length
+          ? cfg.available_models
+          : cfg.opencode_model
+            ? [cfg.opencode_model]
+            : [];
+        setAvailableModels(models);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const projects = useCodingProjects({ onError: setError });
   const sessions = useCodingSessions({
@@ -257,6 +279,33 @@ export default function CodingPage() {
               onInputChange={setInputContent}
               isStreaming={stream.isStreaming}
               currentRun={currentRun}
+              availableModels={
+                detail.sessionDetail?.available_models?.length
+                  ? detail.sessionDetail.available_models
+                  : availableModels
+              }
+              effectiveModel={
+                detail.sessionDetail?.effective_model ||
+                detail.sessionDetail?.session.opencode_model ||
+                null
+              }
+              modelChanging={modelChanging}
+              onChangeModel={(model) => {
+                const sid = sessions.selectedSessionId;
+                if (!sid || !model) return;
+                setModelChanging(true);
+                void updateCodingSessionModel(sid, model)
+                  .then((updated) => {
+                    detail.setSessionDetail(updated);
+                    void detail.loadSessionDetail(sid);
+                  })
+                  .catch((e: unknown) => {
+                    setError(
+                      e instanceof Error ? e.message : "モデルの変更に失敗しました",
+                    );
+                  })
+                  .finally(() => setModelChanging(false));
+              }}
               showSlashPalette={slash.showSlashPalette}
               hasSkillsTool={slash.hasSkillsTool}
               filteredCandidates={slash.filteredCandidates}

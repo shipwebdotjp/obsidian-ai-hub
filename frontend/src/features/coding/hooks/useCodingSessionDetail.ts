@@ -291,6 +291,7 @@ export function useCodingSessionDetail({
 
   return {
     sessionDetail,
+    setSessionDetail,
     messages,
     setMessages,
     activeRun,

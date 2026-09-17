@@ -553,6 +553,7 @@ def create_session(
     transport: str = "acp",
     acp_session_id: Optional[str] = None,
     acp_profile_id: Optional[str] = None,
+    opencode_model: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Create a new coding session (ACP-only, OpenCode-only).
 
@@ -581,8 +582,17 @@ def create_session(
             "Direct CLI sessions are no longer supported; create a new ACP session."
         )
 
+    from obsidian_ai_hub.utils.config import (
+        resolve_coding_model,
+        resolve_effective_coding_model,
+    )
+
     session_id = f"cses_{uuid.uuid4().hex[:12]}"
     now = _now_iso()
+    if opencode_model in (None, ""):
+        effective_new_model: Optional[str] = resolve_effective_coding_model(None)
+    else:
+        effective_new_model = resolve_coding_model(opencode_model)
 
     if tool_ids is None:
         init_tool_ids = get_user_default_tool_ids(conn=conn)
@@ -593,30 +603,56 @@ def create_session(
         tool_ids_json = json.dumps(clean_ids, ensure_ascii=False)
 
     has_trans = _has_column(conn, "coding_sessions", "transport")
+    has_model = _has_column(conn, "coding_sessions", "opencode_model")
 
     if has_trans:
-        conn.execute(
-            """
-            INSERT INTO coding_sessions (
-                session_id, project_id, backend, repo_path, external_session_id, title, tool_ids_json,
-                transport, acp_session_id, acp_profile_id, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                session_id,
-                project_id,
-                backend,
-                repo_path,
-                None,
-                title,
-                tool_ids_json,
-                clean_transport,
-                acp_session_id,
-                acp_profile_id,
-                now,
-                now,
-            ),
-        )
+        if has_model:
+            conn.execute(
+                """
+                INSERT INTO coding_sessions (
+                    session_id, project_id, backend, repo_path, external_session_id, title, tool_ids_json,
+                    transport, acp_session_id, acp_profile_id, opencode_model, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    session_id,
+                    project_id,
+                    backend,
+                    repo_path,
+                    None,
+                    title,
+                    tool_ids_json,
+                    clean_transport,
+                    acp_session_id,
+                    acp_profile_id,
+                    effective_new_model,
+                    now,
+                    now,
+                ),
+            )
+        else:
+            conn.execute(
+                """
+                INSERT INTO coding_sessions (
+                    session_id, project_id, backend, repo_path, external_session_id, title, tool_ids_json,
+                    transport, acp_session_id, acp_profile_id, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    session_id,
+                    project_id,
+                    backend,
+                    repo_path,
+                    None,
+                    title,
+                    tool_ids_json,
+                    clean_transport,
+                    acp_session_id,
+                    acp_profile_id,
+                    now,
+                    now,
+                ),
+            )
     else:
         conn.execute(
             """
@@ -752,6 +788,45 @@ def update_session_title(session_id: str, title: str) -> None:
         conn.commit()
     finally:
         conn.close()
+
+
+def get_effective_session_model(session: Optional[Dict[str, Any]]) -> str:
+    """Return the session's allowlisted model, else the configured default."""
+    from obsidian_ai_hub.utils.config import resolve_effective_coding_model
+
+    return resolve_effective_coding_model((session or {}).get("opencode_model"))
+
+
+def update_session_model(session_id: str, opencode_model: str) -> Dict[str, Any]:
+    """Persist a new session model (allowlist-validated).
+
+    The change is accepted even while a run is active: the in-flight run
+    keeps the model frozen at run start, and the new model applies from
+    the next message (next run).
+    """
+    from obsidian_ai_hub.utils.config import resolve_coding_model
+
+    clean_model = resolve_coding_model(opencode_model)
+    conn = get_db_connection()
+    try:
+        if not _has_column(conn, "coding_sessions", "opencode_model"):
+            raise ValueError("Session model column is unavailable; run migrations first.")
+        cursor = conn.execute(
+            "SELECT session_id FROM coding_sessions WHERE session_id = ?",
+            (session_id,),
+        )
+        if not cursor.fetchone():
+            raise FileNotFoundError(f"Session '{session_id}' not found.")
+        conn.execute(
+            "UPDATE coding_sessions SET opencode_model = ?, updated_at = ? WHERE session_id = ?",
+            (clean_model, _now_iso(), session_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    session = get_session(session_id)
+    assert session is not None
+    return session
 
 
 def delete_session(session_id: str) -> bool:

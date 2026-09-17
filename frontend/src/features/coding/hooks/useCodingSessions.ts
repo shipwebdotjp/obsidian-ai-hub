@@ -99,6 +99,7 @@ export function useCodingSessions({
     if (selectedProjectId === null || creatingSession) return;
     setCreatingSession(true);
     try {
+      // The server assigns the config-derived default model at creation.
       const session = await createCodingSession(
         selectedProjectId,
         undefined, // title: empty by default, editable later via conversation settings

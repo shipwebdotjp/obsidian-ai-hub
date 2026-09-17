@@ -19,6 +19,10 @@ interface CodingChatInputProps {
   onClearSlashInvocation: () => void;
   onSelectCandidate: (cand: SlashCandidate) => void;
   onSend: () => void | Promise<void>;
+  availableModels?: string[];
+  effectiveModel?: string | null;
+  modelChanging?: boolean;
+  onChangeModel?: (model: string) => void;
 }
 
 /** チャット入力欄とスラッシュ候補パレット・選択中スキルチップ。 */
@@ -36,6 +40,10 @@ export function CodingChatInput({
   onClearSlashInvocation,
   onSelectCandidate,
   onSend,
+  availableModels = [],
+  effectiveModel = null,
+  modelChanging = false,
+  onChangeModel,
 }: CodingChatInputProps) {
   const [chatSendMode] = useChatSendMode();
 
@@ -156,6 +164,28 @@ export function CodingChatInput({
           送信
         </button>
       </form>
+
+      {/* Model status bar: current model + allowlisted change (next message onward) */}
+      <div className="mt-2 flex items-center gap-2 text-[11px] text-slate-500">
+        <span aria-label="現在のモデル">モデル: {effectiveModel || "—"}</span>
+        {availableModels.length > 0 && (
+          <select
+            value={effectiveModel || ""}
+            onChange={(e) => onChangeModel?.(e.target.value)}
+            disabled={modelChanging}
+            className="rounded border border-slate-300 bg-white px-1 py-0.5 text-[11px] text-slate-700 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+            title="モデルを変更（次回送信から適用）"
+            aria-label="モデルを変更"
+          >
+            {availableModels.map((m) => (
+              <option key={m} value={m}>
+                {m}
+              </option>
+            ))}
+          </select>
+        )}
+        {modelChanging && <span>変更中...</span>}
+      </div>
     </div>
   );
 }

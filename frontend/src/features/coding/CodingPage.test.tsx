@@ -26,6 +26,7 @@ vi.mock("../../api/coding", () => ({
   updateCodingDefaults: vi.fn(),
   updateCodingSessionTools: vi.fn(),
   updateCodingSessionTitle: vi.fn(),
+  updateCodingSessionModel: vi.fn(),
   getSlashCandidates: vi.fn(),
 }));
 
@@ -338,6 +339,59 @@ describe("CodingPage", () => {
       expect(codingApi.createCodingSession).toHaveBeenCalledWith(1, undefined, undefined);
     });
     expect(screen.queryByText("新規コーディングセッション作成")).not.toBeInTheDocument();
+    // The new-session model picker was removed from the sidebar; the model is
+    // the config-derived default chosen server-side.
+    expect(screen.queryByLabelText("新規セッションのモデル")).not.toBeInTheDocument();
+  });
+
+  it("keeps the model status bar under the input and changes the session model", async () => {
+    vi.mocked(codingApi.getCodingConfig).mockResolvedValue({
+      default_backend: "opencode",
+      opencode_model: "model-a",
+      available_models: ["model-a", "model-b"],
+    });
+    vi.mocked(codingApi.getCodingSessionDetail).mockResolvedValue({
+      session: { ...mockSession, opencode_model: "model-a" },
+      effective_model: "model-a",
+      available_models: ["model-a", "model-b"],
+      effective_tool_ids: ["web_search", "vault_search"],
+      has_custom_tools: false,
+      available_tools: [],
+      messages: [],
+      active_run: null,
+      latest_run: null,
+      orchestrator_tool_calls: [],
+    });
+    vi.mocked(codingApi.updateCodingSessionModel).mockResolvedValue({
+      session: { ...mockSession, opencode_model: "model-b" },
+      effective_model: "model-b",
+      available_models: ["model-a", "model-b"],
+      effective_tool_ids: ["web_search", "vault_search"],
+      has_custom_tools: false,
+      available_tools: [],
+      messages: [],
+      active_run: null,
+      latest_run: null,
+      orchestrator_tool_calls: [],
+    });
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("モデル: model-a")).toBeInTheDocument();
+    });
+
+    const modelSelect = screen.getByLabelText("モデルを変更") as HTMLSelectElement;
+    expect(modelSelect.value).toBe("model-a");
+
+    fireEvent.change(modelSelect, { target: { value: "model-b" } });
+
+    await waitFor(() => {
+      expect(codingApi.updateCodingSessionModel).toHaveBeenCalledWith(
+        "cses_111",
+        "model-b",
+      );
+    });
   });
 
   it("updates session title when coding CLI response event contains session_title", async () => {
