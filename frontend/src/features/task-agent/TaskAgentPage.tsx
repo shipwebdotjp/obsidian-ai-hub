@@ -2,6 +2,8 @@ import { useState } from "react";
 import { useParams } from "react-router-dom";
 import TaskAgentDetailPanel from "./TaskAgentDetailPanel";
 import TaskAgentListPage from "./TaskAgentListPage";
+import SplitHandle from "../../components/SplitHandle";
+import { DEFAULT_LIST_RATIO, usePaneResize } from "../../hooks/usePaneResize";
 
 /**
  * Task Agent のマスター・詳細ページ。
@@ -17,10 +19,22 @@ export default function TaskAgentPage() {
   const { taskId } = useParams<{ taskId: string }>();
   const [refreshKey, setRefreshKey] = useState(0);
 
+  const { containerRef, paneRef, containerStyle, isDragging, handleProps } = usePaneResize({
+    defaultSize: DEFAULT_LIST_RATIO,
+    minSize: 260,
+    minOther: 360,
+    storageKey: "task-agent",
+  });
+
   return (
-    <div className="flex h-full flex-col bg-slate-50 lg:flex-row">
+    <div
+      ref={containerRef}
+      style={containerStyle}
+      className="flex h-full flex-col bg-slate-50 lg:flex-row"
+    >
       <div
-        className={`h-full w-full min-h-0 shrink-0 border-slate-200 bg-white lg:w-96 lg:border-r ${
+        ref={paneRef}
+        className={`h-full w-full min-h-0 shrink-0 border-slate-200 bg-white lg:w-[var(--pane-size)] ${
           taskId ? "hidden" : "flex flex-col"
         } lg:flex lg:flex-col`}
       >
@@ -29,6 +43,7 @@ export default function TaskAgentPage() {
           refreshKey={refreshKey}
         />
       </div>
+      <SplitHandle handleProps={handleProps} isDragging={isDragging} />
       <div
         className={`min-h-0 min-w-0 flex-1 overflow-hidden bg-slate-50 ${
           taskId ? "flex flex-col" : "hidden"

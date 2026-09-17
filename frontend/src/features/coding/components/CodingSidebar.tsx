@@ -22,6 +22,7 @@ interface CodingSidebarProps {
   onOpenNewSession: () => void;
   onOpenUserDefaults: () => void;
   onDeleteSession: (sessionId: string, e: React.MouseEvent) => void;
+  desktopPaneRef?: RefObject<HTMLDivElement>;
 }
 
 /** モバイルドロワーとデスクトップ左ペイン（プロジェクト/セッション一覧）。 */
@@ -44,6 +45,7 @@ export function CodingSidebar({
   onOpenNewSession,
   onOpenUserDefaults,
   onDeleteSession,
+  desktopPaneRef,
 }: CodingSidebarProps) {
   return (
     <>
@@ -171,7 +173,10 @@ export function CodingSidebar({
 
       {/* Desktop Collapsible Left Pane */}
       {!leftPaneCollapsed && (
-      <div className="hidden h-full w-64 shrink-0 flex-col border-r border-slate-200 bg-white lg:flex">
+      <div
+        ref={desktopPaneRef}
+        className="hidden h-full w-64 shrink-0 flex-col border-r border-slate-200 bg-white lg:flex lg:w-[var(--pane-size)]"
+      >
         <div className="flex items-center justify-end border-b border-slate-200 p-2">
           <button
             type="button"

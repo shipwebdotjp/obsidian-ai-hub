@@ -7,6 +7,8 @@ import ProjectList from "./ProjectList";
 import ProjectDetail from "./ProjectDetail";
 import ArchiveList from "./ArchiveList";
 import ProjectFormModal from "./ProjectFormModal";
+import SplitHandle from "../../components/SplitHandle";
+import { DEFAULT_LIST_RATIO, usePaneResize } from "../../hooks/usePaneResize";
 import { parseKeywords } from "./utils";
 import type {
   Project,
@@ -371,6 +373,13 @@ export default function ProjectsPage() {
     }
   };
 
+  const { containerRef, paneRef, containerStyle, isDragging, handleProps } = usePaneResize({
+    defaultSize: DEFAULT_LIST_RATIO,
+    minSize: 260,
+    minOther: 400,
+    storageKey: "projects",
+  });
+
   return (
     <div className="flex h-full flex-col overflow-hidden bg-slate-50">
       <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3 sm:px-6 sm:py-4">
@@ -444,12 +453,17 @@ export default function ProjectsPage() {
         </button>
       </div>
 
-      <div className="min-h-0 flex-1 flex flex-col gap-4 overflow-hidden lg:flex-row">
+      <div
+        ref={containerRef}
+        style={containerStyle}
+        className="min-h-0 flex-1 flex flex-col gap-4 overflow-hidden lg:flex-row"
+      >
         {/* TAB 1: INBOX */}
         {activeTab === "inbox" && (
           <>
             <div
-              className={`flex w-full flex-col overflow-y-auto rounded-lg border border-slate-200 bg-white p-4 lg:w-1/3 ${
+              ref={paneRef}
+              className={`flex w-full flex-col overflow-y-auto rounded-lg border border-slate-200 bg-white p-4 lg:w-[var(--pane-size)] ${
                 mobileDetailOpen ? "hidden" : "flex"
               } lg:flex`}
             >
@@ -460,8 +474,9 @@ export default function ProjectsPage() {
               />
             </div>
 
+            <SplitHandle handleProps={handleProps} isDragging={isDragging} />
             <div
-              className={`w-full overflow-y-auto rounded-lg border border-slate-200 bg-white p-4 lg:flex-1 ${
+              className={`w-full min-w-0 overflow-y-auto rounded-lg border border-slate-200 bg-white p-4 lg:flex-1 ${
                 mobileDetailOpen ? "flex flex-col" : "hidden"
               } lg:flex`}
             >
@@ -480,7 +495,8 @@ export default function ProjectsPage() {
         {activeTab === "projects" && (
           <>
             <div
-              className={`flex w-full flex-col overflow-y-auto rounded-lg border border-slate-200 bg-white p-4 lg:w-1/3 ${
+              ref={paneRef}
+              className={`flex w-full flex-col overflow-y-auto rounded-lg border border-slate-200 bg-white p-4 lg:w-[var(--pane-size)] ${
                 mobileDetailOpen ? "hidden" : "flex"
               } lg:flex`}
             >
@@ -495,8 +511,9 @@ export default function ProjectsPage() {
               />
             </div>
 
+            <SplitHandle handleProps={handleProps} isDragging={isDragging} />
             <div
-              className={`w-full overflow-y-auto rounded-lg border border-slate-200 bg-white p-4 lg:flex-1 ${
+              className={`w-full min-w-0 overflow-y-auto rounded-lg border border-slate-200 bg-white p-4 lg:flex-1 ${
                 mobileDetailOpen ? "flex flex-col" : "hidden"
               } lg:flex`}
             >

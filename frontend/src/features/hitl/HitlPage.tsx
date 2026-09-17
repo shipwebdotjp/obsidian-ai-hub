@@ -9,6 +9,8 @@ import {
 } from "../../api/client";
 import type { HitlRun, HitlRunDetail, HitlQuestion } from "../../api/types";
 import { WaitingRunQuestionCard, toQuestionItems } from "../../components/InConversationQuestionCard";
+import SplitHandle from "../../components/SplitHandle";
+import { usePaneResize } from "../../hooks/usePaneResize";
 import { formatDateTime, formatYmdWithDow } from "../../utils/date";
 
 interface MaintEvidence {
@@ -420,10 +422,24 @@ export default function HitlPage() {
     return null;
   };
 
+  const { containerRef, paneRef, containerStyle, isDragging, handleProps } = usePaneResize({
+    defaultSize: "20rem",
+    minSize: 240,
+    minOther: 400,
+    storageKey: "hitl",
+  });
+
   return (
-    <div className="flex h-full flex-col overflow-hidden bg-slate-50 lg:flex-row">
+    <div
+      ref={containerRef}
+      style={containerStyle}
+      className="flex h-full flex-col overflow-hidden bg-slate-50 lg:flex-row"
+    >
       {/* Runs Side Panel */}
-      <div className={`h-full w-full min-h-0 border-r border-slate-200 bg-white lg:w-80 shrink-0 ${mobileDetailOpen ? "hidden" : "flex flex-col"} lg:flex lg:flex-col`}>
+      <div
+        ref={paneRef}
+        className={`h-full w-full min-h-0 bg-white lg:w-[var(--pane-size)] shrink-0 ${mobileDetailOpen ? "hidden" : "flex flex-col"} lg:flex lg:flex-col`}
+      >
         <div className="border-b border-slate-200 p-4">
           <div className="flex items-center justify-between">
             <h1 className="text-base font-semibold text-slate-800">確認待ちタスク</h1>
@@ -506,6 +522,7 @@ export default function HitlPage() {
         </ul>
       </div>
 
+      <SplitHandle handleProps={handleProps} isDragging={isDragging} />
       {/* Run Details Panel */}
       <div className={`min-w-0 min-h-0 flex-1 overflow-hidden bg-slate-50 ${mobileDetailOpen ? "flex flex-col" : "hidden"} lg:flex lg:flex-col`}>
         <div className="flex items-center gap-2 border-b border-slate-200 bg-white p-3 lg:hidden">

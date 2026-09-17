@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { apiGet } from "../../api/client";
+import SplitHandle from "../../components/SplitHandle";
+import { DEFAULT_LIST_RATIO, usePaneResize } from "../../hooks/usePaneResize";
 
 interface ExecutionLogItem {
   id: string;
@@ -196,6 +198,13 @@ export default function ExecutionLogPage() {
 
   const totalPages = Math.ceil(total / limit) || 1;
 
+  const { containerRef, paneRef, containerStyle, isDragging, handleProps } = usePaneResize({
+    defaultSize: DEFAULT_LIST_RATIO,
+    minSize: 320,
+    minOther: 400,
+    storageKey: "execution-logs",
+  });
+
   return (
     <div className="flex h-full flex-col overflow-hidden bg-slate-50">
       {/* Header */}
@@ -304,11 +313,15 @@ export default function ExecutionLogPage() {
       </div>
 
       {/* Main Workspace */}
-      <div className="flex-1 flex overflow-hidden min-h-0">
+      <div
+        ref={containerRef}
+        style={containerStyle}
+        className="flex-1 flex overflow-hidden min-h-0"
+      >
         {/* Left Side: Logs List */}
-        <div className={`flex-col border-r border-slate-200 overflow-y-auto min-w-[320px] ${
+        <div ref={paneRef} className={`flex-col border-r border-slate-200 overflow-y-auto ${
           mobileDetailOpen ? 'hidden' : 'flex-1 flex'
-        } md:flex-1 md:flex md:flex-col`}>
+        } md:w-[var(--pane-size)] md:flex-none md:flex md:flex-col`}>
           {loading ? (
             <div className="p-8 text-center text-slate-500 text-sm">読み込み中…</div>
           ) : error ? (
@@ -386,10 +399,15 @@ export default function ExecutionLogPage() {
           )}
         </div>
 
+        <SplitHandle
+          handleProps={handleProps}
+          isDragging={isDragging}
+          visibilityClassName="hidden md:flex"
+        />
         {/* Right Side: Selected Detail Panel */}
         <div className={`flex-col bg-white ${
           mobileDetailOpen ? 'flex flex-1' : 'hidden'
-        } md:w-1/2 md:flex md:flex-col`}>
+        } md:flex-1 md:flex md:flex-col`}>
           {/* Mobile back button */}
           <div className="flex items-center gap-2 border-b border-slate-200 p-3 md:hidden">
             <button

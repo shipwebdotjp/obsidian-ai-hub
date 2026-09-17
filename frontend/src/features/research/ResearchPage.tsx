@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState, useRef } from "react";
 import ResearchList from "./ResearchList";
 import ResearchDetailPanel from "./ResearchDetailPanel";
+import SplitHandle from "../../components/SplitHandle";
+import { DEFAULT_LIST_RATIO, usePaneResize } from "../../hooks/usePaneResize";
 import type { ResearchTheme, ResearchStatus } from "../../api/types";
 import { runResearchTheme, getResearchTheme, ApiError } from "../../api/client";
 
@@ -215,6 +217,13 @@ export default function ResearchPage() {
     setModalError(null);
   };
 
+  const { containerRef, paneRef, containerStyle, isDragging, handleProps } = usePaneResize({
+    defaultSize: DEFAULT_LIST_RATIO,
+    minSize: 280,
+    minOther: 360,
+    storageKey: "research",
+  });
+
   return (
     <div className="flex h-full flex-col">
       <header className="flex flex-wrap items-center gap-2 border-b border-slate-200 bg-white p-3 sm:gap-3 sm:p-4">
@@ -252,9 +261,14 @@ export default function ResearchPage() {
           新規リサーチ
         </button>
       </header>
-      <div className="flex flex-1 flex-col overflow-hidden lg:flex-row">
+      <div
+        ref={containerRef}
+        style={containerStyle}
+        className="flex flex-1 flex-col overflow-hidden lg:flex-row"
+      >
         <div
-          className={`h-full w-full min-h-0 border-slate-200 lg:w-1/2 lg:border-r ${
+          ref={paneRef}
+          className={`h-full w-full min-h-0 border-slate-200 lg:w-[var(--pane-size)] ${
             mobileDetailOpen ? "hidden" : "flex flex-col"
           } lg:flex lg:flex-col`}
         >
@@ -270,8 +284,9 @@ export default function ResearchPage() {
             notify={notify}
           />
         </div>
+        <SplitHandle handleProps={handleProps} isDragging={isDragging} />
         <div
-          className={`h-full w-full min-h-0 overflow-hidden lg:w-1/2 ${
+          className={`h-full w-full min-w-0 min-h-0 overflow-hidden lg:flex-1 ${
             mobileDetailOpen ? "flex flex-col" : "hidden"
           } lg:flex lg:flex-col`}
         >

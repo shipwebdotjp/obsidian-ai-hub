@@ -30,6 +30,8 @@ import {
 import * as peopleApi from "./peopleApi";
 
 import CandidateTab from "./CandidateTab";
+import SplitHandle from "../../components/SplitHandle";
+import { DEFAULT_LIST_RATIO, usePaneResize } from "../../hooks/usePaneResize";
 import PeopleListTab from "./PeopleListTab";
 import DuplicatesTab from "./DuplicatesTab";
 import VaultReportTab from "./VaultReportTab";
@@ -835,6 +837,13 @@ export default function PeoplePage() {
 
   const duplicatesTotalCount = (duplicates?.vault_matches.length || 0) + (duplicates?.same_vault_id_groups.length || 0);
 
+  const { containerRef, paneRef, containerStyle, isDragging, handleProps } = usePaneResize({
+    defaultSize: DEFAULT_LIST_RATIO,
+    minSize: 260,
+    minOther: 400,
+    storageKey: "people",
+  });
+
   return (
     <div className="flex h-full flex-col overflow-hidden bg-slate-50">
       <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3 sm:px-6 sm:py-4">
@@ -895,7 +904,11 @@ export default function PeoplePage() {
           })}
         </div>
 
-        <div className="min-h-0 flex-1 flex flex-col gap-4 overflow-hidden lg:flex-row">
+        <div
+          ref={containerRef}
+          style={containerStyle}
+          className="min-h-0 flex-1 flex flex-col gap-4 overflow-hidden lg:flex-row"
+        >
           {activeTab === "property_definitions" && (
             <div className="w-full overflow-y-auto rounded-lg border border-slate-200 bg-white p-6">
               <PropertyDefinitionsTab
@@ -944,6 +957,8 @@ export default function PeoplePage() {
               }
               onAssignCandidateSummary={handleAssignCandidateSummary}
               onRejectCandidate={handleRejectCandidate}
+              listPaneRef={paneRef}
+              splitHandle={<SplitHandle handleProps={handleProps} isDragging={isDragging} />}
             />
           )}
 
@@ -971,6 +986,8 @@ export default function PeoplePage() {
               onAssignCandidateSummary={handleAssignCandidateSummary}
               onReopenCandidate={handleReopenCandidate}
               isRejectedTab={true}
+              listPaneRef={paneRef}
+              splitHandle={<SplitHandle handleProps={handleProps} isDragging={isDragging} />}
             />
           )}
 
@@ -1023,6 +1040,8 @@ export default function PeoplePage() {
               onUpdateProperty={handleUpdatePersonProperty}
               onDeleteProperty={handleDeletePersonProperty}
               onBulkSaveProperty={handleBulkSavePersonProperty}
+              listPaneRef={paneRef}
+              splitHandle={<SplitHandle handleProps={handleProps} isDragging={isDragging} />}
             />
           )}
 

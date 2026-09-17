@@ -9,6 +9,8 @@ import type {
 } from "../../api/types";
 import { BrowseList } from "./BrowseList";
 import { DetailPanel } from "./DetailPanel";
+import SplitHandle from "../../components/SplitHandle";
+import { usePaneResize } from "../../hooks/usePaneResize";
 
 export function BrowseTab({
   year,
@@ -77,11 +79,23 @@ export function BrowseTab({
   onGenerate: () => void;
   onRequestRegenerate: () => void;
 }) {
+  const { containerRef, paneRef, containerStyle, isDragging, handleProps } = usePaneResize({
+    defaultSize: "50%",
+    minSize: 280,
+    minOther: 360,
+    storageKey: "summary-browse",
+  });
+
   return (
-    <div className="flex h-full flex-col lg:flex-row">
+    <div
+      ref={containerRef}
+      style={containerStyle}
+      className="flex h-full flex-col lg:flex-row"
+    >
       {/* Left lists column */}
       <div
-        className={`flex h-full w-full flex-col border-slate-200 bg-white lg:w-1/2 lg:border-r ${
+        ref={paneRef}
+        className={`flex h-full w-full flex-col border-slate-200 bg-white lg:w-[var(--pane-size)] ${
           mobileDetailOpen ? "hidden" : "flex"
         } lg:flex`}
       >
@@ -99,6 +113,7 @@ export function BrowseTab({
         />
       </div>
 
+      <SplitHandle handleProps={handleProps} isDragging={isDragging} />
       {/* Right details column */}
       <DetailPanel
         selectedSummary={selectedSummary}

@@ -10,6 +10,8 @@ import { AgentChatInput } from "./AgentChatInput";
 import { AgentModals } from "./AgentModals";
 import { useAgentsCatalog } from "./useAgentsCatalog";
 import { useAgentSessions } from "./useAgentSessions";
+import SplitHandle from "../../components/SplitHandle";
+import { usePaneResize } from "../../hooks/usePaneResize";
 import { useAgentChat } from "./useAgentChat";
 import { useAgentTemplates } from "./useAgentTemplates";
 import { useAgentsUiState } from "./useAgentsUiState";
@@ -185,9 +187,21 @@ export default function AgentsPage() {
   const { activeAgent } = catalog;
   const isFormOpen = catalog.isCreatingAgent || catalog.isEditingAgent;
 
+  const { containerRef, paneRef, containerStyle, isDragging, handleProps } = usePaneResize({
+    defaultSize: "16rem",
+    minSize: 220,
+    minOther: 400,
+    storageKey: "agents",
+  });
+
   return (
-    <div className="flex h-full flex-col bg-slate-50 lg:flex-row">
+    <div
+      ref={containerRef}
+      style={containerStyle}
+      className="flex h-full flex-col bg-slate-50 lg:flex-row"
+    >
       <AgentSidebar
+        desktopPaneRef={paneRef}
         agents={catalog.agents}
         selectedAgentId={catalog.selectedAgentId}
         isCreatingAgent={catalog.isCreatingAgent}
@@ -226,6 +240,10 @@ export default function AgentsPage() {
         leftPaneCollapsed={ui.leftPaneCollapsed}
         onCollapsePane={() => ui.setLeftPaneCollapsed(true)}
       />
+
+      {!ui.leftPaneCollapsed && (
+        <SplitHandle handleProps={handleProps} isDragging={isDragging} />
+      )}
 
       {/* Main Content Area */}
       <div className="flex flex-1 flex-col overflow-hidden">

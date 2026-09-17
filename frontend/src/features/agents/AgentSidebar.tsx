@@ -83,6 +83,7 @@ interface AgentSidebarProps {
   mobileDrawerRef: RefObject<HTMLDivElement>;
   leftPaneCollapsed: boolean;
   onCollapsePane: () => void;
+  desktopPaneRef?: React.Ref<HTMLDivElement>;
 }
 
 /** モバイルドロワーとデスクトップ左ペイン（エージェント/会話履歴一覧・検索）。 */
@@ -116,6 +117,7 @@ export function AgentSidebar({
   mobileDrawerRef,
   leftPaneCollapsed,
   onCollapsePane,
+  desktopPaneRef,
 }: AgentSidebarProps) {
   const sidebarContent = (
     <>
@@ -371,7 +373,10 @@ export function AgentSidebar({
 
       {/* Desktop collapsible left pane */}
       {!leftPaneCollapsed && (
-        <div className="hidden h-full w-64 shrink-0 flex-col border-r border-slate-200 bg-white lg:flex">
+        <div
+          ref={desktopPaneRef}
+          className="hidden h-full w-64 shrink-0 flex-col border-r border-slate-200 bg-white lg:flex lg:w-[var(--pane-size)]"
+        >
           <div className="flex items-center justify-end border-b border-slate-200 p-2">
             <SidebarIconButton
               label="サイドバーを畳む"

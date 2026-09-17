@@ -61,7 +61,7 @@ export function DetailPanel({
 }) {
   return (
     <div
-      className={`h-full w-full overflow-y-auto border-l border-slate-100 bg-white p-4 sm:p-6 lg:w-1/2 ${
+      className={`h-full w-full min-w-0 overflow-y-auto bg-white p-4 sm:p-6 lg:flex-1 ${
         mobileDetailOpen ? "flex flex-col" : "hidden"
       } lg:flex lg:flex-col`}
     >

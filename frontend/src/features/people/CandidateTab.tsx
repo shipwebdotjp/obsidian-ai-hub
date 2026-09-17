@@ -25,6 +25,8 @@ interface CandidateTabProps {
   onRejectCandidate?: (candidateId: string) => void;
   onReopenCandidate?: (candidateId: string) => void;
   isRejectedTab?: boolean;
+  listPaneRef?: React.Ref<HTMLDivElement>;
+  splitHandle?: React.ReactNode;
 }
 
 export default function CandidateTab({
@@ -49,13 +51,16 @@ export default function CandidateTab({
   onRejectCandidate,
   onReopenCandidate,
   isRejectedTab = false,
+  listPaneRef,
+  splitHandle,
 }: CandidateTabProps) {
   const selectedTarget = people.find((person) => person.person_id === targetPersonId);
 
   return (
     <>
       <div
-        className={`flex w-full flex-col overflow-y-auto rounded-lg border border-slate-200 bg-white p-4 lg:w-1/3 ${
+        ref={listPaneRef}
+        className={`flex w-full flex-col overflow-y-auto rounded-lg border border-slate-200 bg-white p-4 lg:w-[var(--pane-size)] ${
           mobileDetailOpen ? "hidden" : "flex"
         } lg:flex`}
       >
@@ -90,8 +95,10 @@ export default function CandidateTab({
         )}
       </div>
 
+      {splitHandle}
+
       <div
-        className={`w-full overflow-y-auto rounded-lg border border-slate-200 bg-white p-4 lg:flex-1 ${
+        className={`w-full min-w-0 overflow-y-auto rounded-lg border border-slate-200 bg-white p-4 lg:flex-1 ${
           mobileDetailOpen ? "flex flex-col" : "hidden"
         } lg:flex`}
       >

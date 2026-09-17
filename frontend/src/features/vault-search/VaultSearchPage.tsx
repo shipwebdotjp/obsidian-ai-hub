@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import VaultSearchList from "./VaultSearchList";
 import VaultSearchDetailPanel from "./VaultSearchDetailPanel";
+import SplitHandle from "../../components/SplitHandle";
+import { DEFAULT_LIST_RATIO, usePaneResize } from "../../hooks/usePaneResize";
 import type { VaultSearchHit } from "../../api/types";
 
 interface Toast {
@@ -111,6 +113,13 @@ export default function VaultSearchPage() {
     }
   }, [committedQuery, notify]);
 
+  const { containerRef, paneRef, containerStyle, isDragging, handleProps } = usePaneResize({
+    defaultSize: DEFAULT_LIST_RATIO,
+    minSize: 300,
+    minOther: 360,
+    storageKey: "vault-search",
+  });
+
   return (
     <div className="flex h-full flex-col">
       <header className="flex flex-wrap items-center gap-2 border-b border-slate-200 bg-white p-3 sm:gap-3 sm:p-4">
@@ -151,9 +160,14 @@ export default function VaultSearchPage() {
           {isSearching ? "検索中…" : "検索"}
         </button>
       </header>
-      <div className="flex flex-1 flex-col overflow-hidden lg:flex-row">
+      <div
+        ref={containerRef}
+        style={containerStyle}
+        className="flex flex-1 flex-col overflow-hidden lg:flex-row"
+      >
         <div
-          className={`flex w-full flex-col overflow-hidden border-slate-200 lg:w-1/2 lg:border-r ${
+          ref={paneRef}
+          className={`flex w-full flex-col overflow-hidden border-slate-200 lg:w-[var(--pane-size)] ${
             mobileDetailOpen ? "hidden" : "flex"
           } lg:flex`}
         >
@@ -191,8 +205,9 @@ export default function VaultSearchPage() {
             />
           </div>
         </div>
+        <SplitHandle handleProps={handleProps} isDragging={isDragging} />
         <div
-          className={`w-full overflow-hidden lg:w-1/2 ${
+          className={`w-full min-w-0 overflow-hidden lg:flex-1 ${
             mobileDetailOpen ? "flex flex-col" : "hidden"
           } lg:flex lg:flex-col`}
         >

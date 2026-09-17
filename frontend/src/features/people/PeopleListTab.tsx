@@ -53,6 +53,8 @@ interface PeopleListTabProps {
   onUpdateProperty?: (propertyValueId: string, req: PersonPropertyValueUpdateRequest) => Promise<void>;
   onDeleteProperty?: (propertyValueId: string) => Promise<void>;
   onBulkSaveProperty?: (propertyDefinitionId: string, req: PersonPropertyBulkSaveRequest) => Promise<void>;
+  listPaneRef?: React.Ref<HTMLDivElement>;
+  splitHandle?: React.ReactNode;
 }
 
 export default function PeopleListTab({
@@ -91,6 +93,8 @@ export default function PeopleListTab({
   onUpdateProperty = async () => {},
   onDeleteProperty = async () => {},
   onBulkSaveProperty = async () => {},
+  listPaneRef,
+  splitHandle,
 }: PeopleListTabProps) {
   const [nameQuery, setNameQuery] = useState("");
   const [personMemories, setPersonMemories] = useState<Memory[]>([]);
@@ -143,7 +147,8 @@ export default function PeopleListTab({
   return (
     <>
       <div
-        className={`flex w-full flex-col overflow-y-auto rounded-lg border border-slate-200 bg-white p-4 lg:w-1/3 ${
+        ref={listPaneRef}
+        className={`flex w-full flex-col overflow-y-auto rounded-lg border border-slate-200 bg-white p-4 lg:w-[var(--pane-size)] ${
           mobileDetailOpen ? "hidden" : "flex"
         } lg:flex`}
       >
@@ -206,8 +211,10 @@ export default function PeopleListTab({
         )}
       </div>
 
+      {splitHandle}
+
       <div
-        className={`w-full overflow-y-auto rounded-lg border border-slate-200 bg-white p-4 lg:flex-1 ${
+        className={`w-full min-w-0 overflow-y-auto rounded-lg border border-slate-200 bg-white p-4 lg:flex-1 ${
           mobileDetailOpen ? "flex flex-col" : "hidden"
         } lg:flex`}
       >

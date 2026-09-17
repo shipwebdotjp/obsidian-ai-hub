@@ -12,6 +12,8 @@ import { useCodingSessionDetail } from "./hooks/useCodingSessionDetail";
 import { useCodingRunStream } from "./hooks/useCodingRunStream";
 import { useCodingSlash } from "./hooks/useCodingSlash";
 import { useCodingUiState } from "./hooks/useCodingUiState";
+import SplitHandle from "../../components/SplitHandle";
+import { usePaneResize } from "../../hooks/usePaneResize";
 import { buildRunById, selectValidProjects } from "./utils/codingSelectors";
 import { sessionUsageSummary } from "./utils/codingUsage";
 
@@ -130,10 +132,22 @@ export default function CodingPage() {
     [detail.sessionDetail?.runs, detail.activeRun, detail.latestRun],
   );
 
+  const { containerRef, paneRef, containerStyle, isDragging, handleProps } = usePaneResize({
+    defaultSize: "16rem",
+    minSize: 220,
+    minOther: 400,
+    storageKey: "coding",
+  });
+
   return (
-    <div className="flex h-full w-full overflow-hidden bg-slate-50">
+    <div
+      ref={containerRef}
+      style={containerStyle}
+      className="flex h-full w-full overflow-hidden bg-slate-50"
+    >
       {/* Mobile drawer + desktop collapsible left pane */}
       <CodingSidebar
+          desktopPaneRef={paneRef}
           mobileDrawerOpen={ui.mobileDrawerOpen}
           onCloseMobileDrawer={() => ui.setMobileDrawerOpen(false)}
           drawerCloseBtnRef={ui.drawerCloseBtnRef}
@@ -153,6 +167,10 @@ export default function CodingPage() {
           onOpenUserDefaults={detail.handleOpenUserDefaults}
           onDeleteSession={sessions.handleDeleteSession}
         />
+
+      {!ui.leftPaneCollapsed && (
+        <SplitHandle handleProps={handleProps} isDragging={isDragging} />
+      )}
 
       {/* Pane 3: Conversation */}
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-slate-50">

@@ -13,6 +13,8 @@ import type {
   PlannerTimelineResponse,
 } from "../../api/types";
 import ProposalDetailPanel from "./ProposalDetailPanel";
+import SplitHandle from "../../components/SplitHandle";
+import { usePaneResize } from "../../hooks/usePaneResize";
 
 interface Toast {
   id: number;
@@ -339,6 +341,14 @@ export default function PlannerPage() {
 
   const isToday = (d: Date) => toISODate(d) === toISODate(new Date());
 
+  const { containerRef, paneRef, containerStyle, isDragging, handleProps } = usePaneResize({
+    defaultSize: "20rem",
+    side: "right",
+    minSize: 260,
+    minOther: 480,
+    storageKey: "planner",
+  });
+
   return (
     <div className="flex h-full flex-col bg-slate-50">
       <header className="flex flex-wrap items-center gap-2 border-b border-slate-200 bg-white p-3 sm:gap-3 sm:p-4">
@@ -432,7 +442,11 @@ export default function PlannerPage() {
         </div>
       )}
 
-      <div className="flex min-h-0 flex-1 overflow-hidden">
+      <div
+        ref={containerRef}
+        style={containerStyle}
+        className="flex min-h-0 flex-1 overflow-hidden"
+      >
         <div className="min-h-0 min-w-0 flex-1 overflow-auto">
           {loading && timeline === null ? (
             <div className="flex h-full items-center justify-center text-sm text-slate-500">
@@ -561,16 +575,22 @@ export default function PlannerPage() {
         </div>
 
         {selectedProposal && (
-          <div className="hidden w-80 shrink-0 lg:block">
-            <ProposalDetailPanel
-              proposal={selectedProposal}
-              busy={busy}
-              onSave={handleSave}
-              onPromote={handlePromote}
-              onReject={handleReject}
-              onClose={() => setSelectedId(null)}
-            />
-          </div>
+          <>
+            <SplitHandle handleProps={handleProps} isDragging={isDragging} />
+            <div
+              ref={paneRef}
+              className="hidden w-[var(--pane-size)] min-w-0 shrink-0 lg:block"
+            >
+              <ProposalDetailPanel
+                proposal={selectedProposal}
+                busy={busy}
+                onSave={handleSave}
+                onPromote={handlePromote}
+                onReject={handleReject}
+                onClose={() => setSelectedId(null)}
+              />
+            </div>
+          </>
         )}
       </div>
 
