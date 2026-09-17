@@ -614,6 +614,131 @@ def test_validate_directional_rejects_delegate_without_registry():
         planning.validate_directional_plan(coding_plan, coding_context)
 
 
+def _seed_rejected_plan(task_id, purpose, reason, capabilities=("coding_cli",)):
+    plan_inner = {
+        "plan_version": 2,
+        "purpose": purpose,
+        "strategy": "",
+        "capabilities": [
+            {"capability_key": key, "intent": "test"} for key in capabilities
+        ],
+        "allowed_agent_ids": [],
+        "allowed_project_ids": [],
+        "agent_config_snapshot": {},
+        "constraints": "",
+        "completion_criteria": "done",
+        "max_actions": 8,
+    }
+    store.create_plan(task_id, plan_inner, {"coding_cli": "plan_required"})
+    current = store.get_task(task_id)
+    if current["status"] == "planning":
+        store.transition_task_status(task_id, "waiting_approval")
+    store.decide_plan(task_id, "reject", reason=reason)
+    return store.list_plans(task_id)[-1]
+
+
+def test_get_task_rejection_history_returns_rejected_newest_first():
+    task = store.create_task("rejected job")
+    _claim(task["task_id"])
+    _seed_rejected_plan(task["task_id"], "first purpose", "first reason")
+    store.claim_task("worker-test", "planning")
+    _seed_rejected_plan(task["task_id"], "second purpose", "second reason")
+    history = planning.get_task_rejection_history(task["task_id"])
+    assert [h["version"] for h in history] == [2, 1]
+    assert history[0]["reason"] == "second reason"
+    assert history[0]["purpose"] == "second purpose"
+    assert history[0]["capabilities"] == ["coding_cli"]
+
+
+def test_get_task_rejection_history_empty_without_rejections():
+    task = store.create_task("fresh job")
+    assert planning.get_task_rejection_history(task["task_id"]) == []
+
+
+def test_build_planner_prompt_includes_rejection_history():
+    prompt = planning.build_planner_prompt(
+        "do it",
+        _context(),
+        [],
+        [
+            {
+                "plan_id": "tplan_x",
+                "version": 1,
+                "reason": "delegate to runtime instead",
+                "purpose": "old purpose",
+                "capabilities": ["coding_cli"],
+            }
+        ],
+    )
+    assert "delegate to runtime instead" in prompt
+    assert "old purpose" in prompt
+    assert "coding_cli" in prompt
+
+    without = planning.build_planner_prompt("do it", _context(), [], [])
+    assert "却下" not in without
+
+
+def test_build_planner_prompt_includes_qa_comment():
+    prompt = planning.build_planner_prompt(
+        "do it",
+        _context(),
+        [
+            {
+                "hitl_run_id": "tasks_x_1",
+                "question": "Which agent?",
+                "answer": "agent:agent_1",
+                "comment": "use the runtime orchestrator",
+            }
+        ],
+    )
+    assert "use the runtime orchestrator" in prompt
+
+
+def test_get_task_qa_history_includes_comment():
+    task = store.create_task("ambiguous job")
+    hitl_run_id = _seed_qa_round(task["task_id"])
+    store.append_task_event(
+        task["task_id"],
+        "hitl_question_asked",
+        {"hitl_run_id": "other-run", "question_set_id": "target"},
+    )
+    store.append_task_event(
+        task["task_id"],
+        "hitl_question_answered",
+        {
+            "hitl_run_id": "other-run",
+            "answer": "agent:agent_1",
+            "comment": "use the runtime orchestrator",
+        },
+    )
+    history = planning.get_task_qa_history(task["task_id"])
+    assert history[0]["comment"] is None
+    assert history[0]["hitl_run_id"] == hitl_run_id
+    commented = [h for h in history if h["hitl_run_id"] == "other-run"][0]
+    assert commented["comment"] == "use the runtime orchestrator"
+
+
+def test_plan_task_includes_rejection_reason_in_prompt(monkeypatch):
+    monkeypatch.setattr(planning, "collect_planner_context", _context)
+    seen = {}
+
+    def fake_llm(provider, model, prompt, **kwargs):
+        seen["prompt"] = prompt
+        return _plan_json()
+
+    monkeypatch.setattr(planning, "generate_llm_response", fake_llm)
+    task = store.create_task("replanned job")
+    _claim(task["task_id"])
+    _seed_rejected_plan(
+        task["task_id"], "delegate to project agent", "use the runtime instead"
+    )
+    store.claim_task("worker-test", "planning")
+    result = planning.plan_task(task["task_id"])
+    assert result["outcome"] == "running"
+    assert "use the runtime instead" in seen["prompt"]
+    assert "delegate to project agent" in seen["prompt"]
+
+
 def test_plan_task_directional_records_allowlist_snapshot(monkeypatch):
     context = dict(
         _context(),

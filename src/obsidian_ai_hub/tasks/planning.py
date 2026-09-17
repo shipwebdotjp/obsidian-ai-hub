@@ -74,6 +74,10 @@ Planの場合:
     4回使うPlanならmax_actions=6とする。読取りActionに枠を使い切ってはならない。
   - 以前の質問と回答がある場合、その回答は確定事項である。回答に従って対象を確定し
     Planを作り、回答済みの質問を再質問してはならない。
+    回答にコメントが付いている場合、そのコメントも確定事項として尊重する。
+  - 過去の却下Planと差戻し理由がある場合、それらは確定の制約である。
+    差戻し理由に反するPlan（同じCapability構成・同じ委譲先の繰り返しなど）を
+    再提案してはならない。
   - 質問は依頼文から対象がまったく推定できないときだけ使う。
   """
 
@@ -162,6 +166,7 @@ def build_planner_prompt(
     prompt_text: str,
     context: dict[str, Any],
     qa_history: Optional[list[dict[str, Any]]] = None,
+    rejection_history: Optional[list[dict[str, Any]]] = None,
 ) -> str:
     capability_lines = []
     for c in context["capabilities"]:
@@ -204,8 +209,31 @@ def build_planner_prompt(
             question = str(round.get("question") or "(質問文を取得できませんでした)")
             answer = round.get("answer")
             answer_text = "(未回答)" if answer is None else _format_answer(answer)
-            qa_lines.append(f"- 第{index}回 質問: {question} / 回答: {answer_text}")
+            line = f"- 第{index}回 質問: {question} / 回答: {answer_text}"
+            comment = round.get("comment")
+            if isinstance(comment, str) and comment.strip():
+                line += f" / コメント: {comment.strip()}"
+            qa_lines.append(line)
         prompt += "\n\n以前の質問と回答(確定事項):\n" + "\n".join(qa_lines)
+    if rejection_history:
+        rejection_lines = []
+        for entry in rejection_history:
+            version = entry.get("version")
+            purpose = str(entry.get("purpose") or "")
+            capabilities = entry.get("capabilities") or []
+            capability_keys = ", ".join(
+                str(c) for c in capabilities if str(c).strip()
+            )
+            reason = str(entry.get("reason") or "")
+            line = f"- v{version} 目的: {purpose}"
+            if capability_keys:
+                line += f" / Capability: {capability_keys}"
+            if reason.strip():
+                line += f" / 差戻し理由: {reason.strip()}"
+            rejection_lines.append(line)
+        prompt += "\n\n過去の却下Planと差戻し理由(確定の制約):\n" + "\n".join(
+            rejection_lines
+        )
     return prompt
 
 
@@ -221,8 +249,10 @@ def _format_answer(answer: Any) -> str:
 def get_task_qa_history(task_id: str) -> list[dict[str, Any]]:
     """Return past target Q&A rounds oldest-first for replanning context.
 
-    Each round is ``{"hitl_run_id": str|None, "question": str, "answer": Any}``
-    with ``answer`` None until the matching ``hitl_question_answered`` event.
+    Each round is ``{"hitl_run_id": str|None, "question": str, "answer": Any,
+    "comment": str|None}`` with ``answer`` None until the matching
+    ``hitl_question_answered`` event. ``comment`` carries the free-text
+    comment attached to the answer, if any (old events without it yield None).
     """
     from obsidian_ai_hub.hitl import store as hitl_store
 
@@ -240,6 +270,7 @@ def get_task_qa_history(task_id: str) -> list[dict[str, Any]]:
                         payload.get("question_set_id") or "target",
                     ),
                     "answer": None,
+                    "comment": None,
                 }
             )
         elif event_type == "hitl_question_answered":
@@ -248,8 +279,58 @@ def get_task_qa_history(task_id: str) -> list[dict[str, Any]]:
                     "hitl_run_id"
                 ):
                     round["answer"] = payload.get("answer")
+                    comment = payload.get("comment")
+                    round["comment"] = (
+                        str(comment)
+                        if isinstance(comment, str) and comment.strip()
+                        else None
+                    )
                     break
     return rounds
+
+
+def get_task_rejection_history(
+    task_id: str, limit: int = 3
+) -> list[dict[str, Any]]:
+    """Return rejected plans newest-first (capped) for replanning context.
+
+    Each entry is ``{"plan_id": str, "version": int, "reason": str|None,
+    "purpose": str, "capabilities": list[str]}``. Plans without a stored
+    rejection reason still appear so the planner can see what was already
+    refused; the detailed inputs are intentionally excluded (directional
+    plans never freeze them).
+    """
+    try:
+        plans = task_store.list_plans(task_id)
+    except Exception:
+        logger.warning("Failed to load plans for task %s", task_id)
+        return []
+    rejected = [p for p in plans if p.get("status") == "rejected"]
+    rejected.sort(key=lambda p: int(p.get("version") or 0), reverse=True)
+    history: list[dict[str, Any]] = []
+    for plan_record in rejected[: max(1, limit)]:
+        inner = plan_record.get("plan") or {}
+        capabilities: list[str] = []
+        raw_capabilities = inner.get("capabilities")
+        if isinstance(raw_capabilities, list):
+            for entry in raw_capabilities:
+                if isinstance(entry, dict) and entry.get("capability_key"):
+                    capabilities.append(str(entry["capability_key"]))
+        elif isinstance(inner.get("steps"), list):
+            for step in inner["steps"]:
+                if isinstance(step, dict) and step.get("capability_key"):
+                    capabilities.append(str(step["capability_key"]))
+        reason = plan_record.get("rejection_reason")
+        history.append(
+            {
+                "plan_id": plan_record.get("plan_id"),
+                "version": plan_record.get("version"),
+                "reason": str(reason) if isinstance(reason, str) else None,
+                "purpose": str(inner.get("purpose") or ""),
+                "capabilities": capabilities,
+            }
+        )
+    return history
 
 
 def _lookup_question_text(
@@ -556,12 +637,18 @@ def plan_task(
             raise FileNotFoundError(f"Task '{task_id}' not found.")
     context = collect_planner_context()
     qa_history = get_task_qa_history(task_id)
+    rejection_history = get_task_rejection_history(task_id)
     provider, model = default_provider_model()
     try:
         raw = generate_llm_response(
             provider,
             model,
-            build_planner_prompt(str(task["prompt_text"]), context, qa_history),
+            build_planner_prompt(
+                str(task["prompt_text"]),
+                context,
+                qa_history,
+                rejection_history,
+            ),
             system_prompt=PLANNER_SYSTEM_PROMPT,
             session_id=f"task-plan-{task_id}",
         )

@@ -56,6 +56,28 @@ def test_resolve_task_target_requeues():
     assert events[0]["payload"]["answer"] == "proj_a"
 
 
+def test_resolve_task_target_preserves_comment():
+    task = store.create_task("ambiguous job")
+    store.claim_task("worker-test", "planning")
+    store.transition_task_status(task["task_id"], "waiting_user")
+    ctx = HitlContext(
+        run_id=f"tasks_{task['task_id']}_abc",
+        checkpoint=json.dumps({"task_id": task["task_id"]}),
+        answers_by_question_key={"target": "agent:agent_1"},
+        conn=None,
+        raw_answers_by_question_key={
+            "target": {"value": "agent:agent_1", "comment": "use the runtime"}
+        },
+    )
+    result = resolve_task_target(ctx)
+    assert result.status == "completed"
+    events = store.list_task_events(task["task_id"])
+    answered = [e for e in events if e["event_type"] == "hitl_question_answered"]
+    assert len(answered) == 1
+    assert answered[0]["payload"]["answer"] == "agent:agent_1"
+    assert answered[0]["payload"]["comment"] == "use the runtime"
+
+
 def test_resolve_task_target_bad_checkpoint_completes():
     ctx = HitlContext(
         run_id="tasks_broken",

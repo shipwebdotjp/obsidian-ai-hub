@@ -27,11 +27,27 @@ def resolve_task_target(ctx: Any) -> Any:
         logger.warning("Task resolve handler got checkpoint without task_id")
         return HitlResult.complete()
     answer = ctx.answers_by_question_key.get("target")
+    comment = _extract_answer_comment(ctx)
     task_store.transition_task_status(str(task_id), "queued", conn=ctx.conn)
     task_store.append_task_event(
         str(task_id),
         "hitl_question_answered",
-        {"hitl_run_id": ctx.run_id, "answer": answer},
+        {"hitl_run_id": ctx.run_id, "answer": answer, "comment": comment},
         conn=ctx.conn,
     )
     return HitlResult.complete()
+
+
+def _extract_answer_comment(ctx: Any) -> str | None:
+    """Return the free-text comment attached to the target answer, if any."""
+    raw_answers = getattr(ctx, "raw_answers_by_question_key", None)
+    if not isinstance(raw_answers, dict):
+        return None
+    raw = raw_answers.get("target")
+    if isinstance(raw, dict):
+        comment = raw.get("comment")
+    else:
+        return None
+    if isinstance(comment, str) and comment.strip():
+        return comment.strip()
+    return None
