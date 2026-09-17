@@ -25,7 +25,6 @@ def conn():
 
 
 def test_initialize_and_new_and_prompt(conn):
-    rec = ScenarioRecorder()
     init = conn.request(
         "initialize",
         {"protocolVersion": 1, "clientCapabilities": {},

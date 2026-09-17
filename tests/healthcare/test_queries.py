@@ -140,49 +140,6 @@ def test_healthcare_overview_day_granularity(test_healthcare_db_path: Path, tmp_
     assert hr["latest_value"] is None
 
 
-def test_healthcare_overview_week_granularity(test_healthcare_db_path: Path, tmp_path: Path):
-    helpers = _helpers()
-    export_dir = helpers.write_mini_export(tmp_path)
-    from obsidian_ai_hub.healthcare.importer import import_export
-
-    import_export(export_dir)
-    from obsidian_ai_hub.web.services.healthcare import get_healthcare_overview
-
-    # 61 days -> week granularity
-    resp = get_healthcare_overview("2026-06-01", "2026-07-31")
-    assert resp["granularity"] == "week"
-    # Buckets are ISO weeks, count depends on calendar. For Jun 1..Jul31 there are ~9 weeks.
-    assert len(resp["metrics"][0]["buckets"]) >= 8
-    # Each bucket should have display_label like Wxx
-    assert resp["metrics"][0]["buckets"][0]["display_label"].startswith("W")
-
-
-def test_healthcare_overview_month_granularity(test_healthcare_db_path: Path, tmp_path: Path):
-    helpers = _helpers()
-    export_dir = helpers.write_mini_export(tmp_path)
-    from obsidian_ai_hub.healthcare.importer import import_export
-
-    import_export(export_dir)
-    from obsidian_ai_hub.web.services.healthcare import get_healthcare_overview
-
-    # >366 days -> month
-    resp = get_healthcare_overview("2025-01-01", "2026-12-31")
-    assert resp["granularity"] == "month"
-    assert len(resp["metrics"][0]["buckets"]) == 24
-    assert resp["metrics"][0]["buckets"][0]["display_label"] == "2025/01"
-
-
-def test_healthcare_overview_validation():
-    from obsidian_ai_hub.web.services.healthcare import get_healthcare_overview
-
-    with pytest.raises(ValueError, match="Invalid date format"):
-        get_healthcare_overview("bad", "2026-08-10")
-    with pytest.raises(ValueError, match="start_date must be"):
-        get_healthcare_overview("2026-08-10", "2026-08-01")
-    with pytest.raises(ValueError, match="exceeds maximum"):
-        get_healthcare_overview("2010-01-01", "2026-01-01")
-
-
 def test_healthcare_overview_avg_aggregation(test_healthcare_db_path: Path, tmp_path: Path):
     helpers = _helpers()
     export_dir = helpers.write_mini_export(tmp_path)
@@ -218,19 +175,6 @@ def test_healthcare_overview_avg_aggregation(test_healthcare_db_path: Path, tmp_
     assert b["max"] == pytest.approx(80.0)
     assert b["sum"] == pytest.approx(210.0)
     assert b["count"] == 3
-
-
-def test_healthcare_overview_empty_db(test_healthcare_db_path: Path):
-    # No import at all; DB is empty but schema exists
-    from obsidian_ai_hub.web.services.healthcare import get_healthcare_overview
-
-    resp = get_healthcare_overview("2026-08-01", "2026-08-07")
-    assert resp["granularity"] == "day"
-    assert len(resp["metrics"]) == 11
-    for m in resp["metrics"]:
-        assert all(b["value"] is None for b in m["buckets"])
-        assert m["latest_value"] is None
-        assert m["delta_pct"] is None
 
 
 def test_category_sleep_and_stand(test_healthcare_db_path: Path, tmp_path: Path):

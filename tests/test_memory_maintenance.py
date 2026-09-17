@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 from datetime import datetime, timezone, timedelta
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from obsidian_ai_hub.database import get_db_connection
-from obsidian_ai_hub.memory.models import deserialize_memory, get_approved_memories_path
+from obsidian_ai_hub.memory.models import get_approved_memories_path
 from obsidian_ai_hub.memory.maintenance import (
     parse_jst_date,
     is_obsolete,
@@ -16,13 +14,11 @@ from obsidian_ai_hub.memory.maintenance import (
     validate_proposals,
     run_maintenance_diagnosis,
     register_maintenance_hitl_run,
-    check_snapshot_conflicts,
     apply_single_proposal,
-    re_diagnose_individual_proposal,
     run_approved_maintenance,
 )
-from obsidian_ai_hub.hitl.dispatcher import HitlContext, HitlResult, dispatch_runs
-from obsidian_ai_hub.hitl.service import register_run_and_questions, submit_answer
+from obsidian_ai_hub.hitl.dispatcher import dispatch_runs
+from obsidian_ai_hub.hitl.service import submit_answer
 
 
 def test_parse_jst_date():

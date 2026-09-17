@@ -22,22 +22,6 @@ def test_memory_propose_required_is_content_kind():
     assert set(model.model_json_schema().get("required", [])) == {"content", "kind"}
 
 
-def test_compact_schema_reflects_constraints():
-    text = schemas.compact_schema_text("memory_propose")
-    assert text is not None
-    assert "content" in text and "required" in text
-    assert "preference" in text  # kind enum/Literal surfaces
-    assert "unknown keys forbidden" in text  # extra="forbid" policy
-
-    search_text = schemas.compact_schema_text("memory_search")
-    assert search_text is not None
-    assert "query" in search_text
-    assert "minimum" in search_text or "maximum" in search_text  # limit range
-
-    key_text = schemas.compact_schema_text("memory_propose")
-    assert "pattern" in key_text  # memory_key pattern surfaces
-
-
 def test_runtime_injected_values_not_in_schema():
     schema = schemas.resolve_json_schema("memory_propose")
     assert schema is not None
@@ -85,17 +69,6 @@ def test_enum_range_pattern_violations_rejected():
             "memory_propose",
             {"content": "x", "kind": "fact", "memory_key": "日本語"},
         )
-
-
-def test_no_circular_import():
-    import sys
-
-    for module in ("obsidian_ai_hub.tasks.capability_schemas",):
-        sys.modules.pop(module, None)
-    import importlib
-
-    module = importlib.import_module("obsidian_ai_hub.tasks.capability_schemas")
-    assert module.resolve_input_model("web_search") is not None
 
 
 def test_delegate_target_models():

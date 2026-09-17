@@ -3,20 +3,16 @@
 import json
 import os
 import stat
-import subprocess
-from pathlib import Path
-import pytest
 
 from obsidian_ai_hub.agents.skills import (
     SkillInfo,
     SkillIndex,
     discover_skills,
-    create_skill_tools,
     _load_skill_impl,
     _read_skill_resource_impl,
     _run_skill_script_impl,
 )
-from obsidian_ai_hub.agents import registry, runtime
+from obsidian_ai_hub.agents import registry
 
 
 def test_skills_root_priority_and_frontmatter_validation(tmp_path):

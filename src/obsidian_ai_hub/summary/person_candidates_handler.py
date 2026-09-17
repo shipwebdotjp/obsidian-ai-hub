@@ -106,7 +106,7 @@ def _apply_property_candidate(cursor: Any, cand: Dict[str, Any]) -> None:
         raise ValueError(f"Person {pid} no longer exists in DB")
 
     # 定義存在確認
-    defn = person_properties.get_property_definition_by_id_in_tx(cursor, def_id)
+    person_properties.get_property_definition_by_id_in_tx(cursor, def_id)
 
     if op == "create":
         v = after.get("value") if after else None

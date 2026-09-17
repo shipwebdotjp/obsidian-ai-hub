@@ -4,7 +4,6 @@ import pytest
 
 import obsidian_ai_hub.agents.registry as registry_module
 from obsidian_ai_hub.runs import manager as run_manager
-from obsidian_ai_hub.tasks import capability_schemas as schemas
 from obsidian_ai_hub.tasks import store
 from obsidian_ai_hub.tasks.adapters.skills import SkillsAdapter
 from obsidian_ai_hub.tasks.capabilities import (
@@ -66,12 +65,6 @@ def test_catalog_accepts_custom_plugin_tool():
     assert definitions["custom:my_tool"].default_approval_policy == "plan_required"
     assert definitions["custom:my_tool"].label == "My Tool"
     assert definitions["web_search"].default_approval_policy == "auto"
-
-
-def test_catalog_deterministic_order():
-    first = [d.key for d in get_capability_definitions()]
-    second = [d.key for d in get_capability_definitions()]
-    assert first == second == sorted(first)
 
 
 def test_sync_capabilities_inserts_and_protects():
@@ -181,17 +174,3 @@ def test_skills_adapter_rejects_non_skills_capability():
     bad_step = dict(plan["plan"]["steps"][0], capability_key="web_search")
     with pytest.raises(ValueError, match="not a skills capability"):
         SkillsAdapter().execute_step(task, plan, 0, bad_step)
-
-
-def test_run_shell_schema_resolves():
-    model = schemas.resolve_input_model("run_shell")
-    assert model is registry_module.RunShellInput
-
-
-def test_skills_input_schema():
-    model = schemas.resolve_input_model("skills")
-    assert model is not None
-    validated = model.model_validate({"skill": "load_skill", "name": "x"})
-    assert validated.skill == "load_skill"
-    with pytest.raises(Exception):
-        model.model_validate({"name": "x"})

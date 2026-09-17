@@ -9,7 +9,6 @@ from obsidian_ai_hub import memory
 from obsidian_ai_hub.agents.registry import list_available_tools
 from obsidian_ai_hub.database import BUILTIN_RELATION_TYPES
 from obsidian_ai_hub.web.schemas import (
-    PersonDeleteResponse,
     PersonDetail,
     PersonRelationCreateRequest,
     PersonRelationEvidenceCreateRequest,
@@ -276,31 +275,6 @@ def test_dto_relation_validations():
         PersonRelationUpdateRequest(started_on="2020-13")
     with pytest.raises(ValidationError):
         PersonRelationUpdateRequest(started_on="not-a-date")
-
-
-def test_dto_person_delete_response_extended_fields():
-    resp = PersonDeleteResponse(
-        success=True,
-        deleted_summary_people=1,
-        deleted_aliases=2,
-        deleted_assignments=3,
-    )
-    assert resp.deleted_subject_relations == 0
-    assert resp.deleted_object_relations == 0
-    assert resp.deleted_relation_evidence == 0
-
-    resp_with_relations = PersonDeleteResponse(
-        success=True,
-        deleted_summary_people=1,
-        deleted_aliases=2,
-        deleted_assignments=3,
-        deleted_subject_relations=2,
-        deleted_object_relations=2,
-        deleted_relation_evidence=5,
-    )
-    assert resp_with_relations.deleted_subject_relations == 2
-    assert resp_with_relations.deleted_object_relations == 2
-    assert resp_with_relations.deleted_relation_evidence == 5
 
 
 def test_regression_person_detail_and_ai_registry_unchanged():

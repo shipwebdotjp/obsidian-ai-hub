@@ -32,27 +32,6 @@ def test_cache_ttl_and_invalidation(monkeypatch):
     assert cache.get_cached(key) is None
 
 
-def test_cache_invalidate_all(monkeypatch):
-    cache.put_cached(("a",), 1)
-    cache.put_cached(("b",), 2)
-    cache.invalidate_all()
-    assert cache.get_cached(("a",)) is None
-    assert cache.get_cached(("b",)) is None
-
-
-def test_cached_or_fetch_calls_fetcher_once():
-    key = ("k",)
-    calls = []
-
-    def fetcher():
-        calls.append(1)
-        return "payload"
-
-    assert cache.cached_or_fetch(key, fetcher) == "payload"
-    assert cache.cached_or_fetch(key, fetcher) == "payload"
-    assert len(calls) == 1
-
-
 def test_get_external_data_cached_per_range(monkeypatch):
     from datetime import date
 

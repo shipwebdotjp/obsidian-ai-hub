@@ -6,7 +6,7 @@ import json
 import logging
 import sqlite3
 from datetime import date, timedelta
-from typing import Any, Optional
+from typing import Optional
 
 from obsidian_ai_hub.database import get_db_connection
 from obsidian_ai_hub.research.db import auto_connection, get_current_timestamp

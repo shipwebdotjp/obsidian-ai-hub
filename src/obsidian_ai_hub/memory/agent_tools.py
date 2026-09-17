@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import re
 import unicodedata
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
 

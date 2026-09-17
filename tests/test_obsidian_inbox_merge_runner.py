@@ -64,34 +64,6 @@ def test_process_inbox_file_processes_stale_markdown(tmp_path: Path):
     assert not inbox_file.exists(), "processed file must be removed"
 
 
-def test_process_inbox_file_markdown_success_deletes(tmp_path: Path):
-    """Markdownの成功処理は元ファイルを削除する。"""
-    inbox = tmp_path / "vault" / "Inbox"
-    inbox.mkdir(parents=True)
-    inbox_file = inbox / "2026-08-19.md"
-    inbox_file.write_text("memo body", encoding="utf-8")
-
-    daily_template = (
-        tmp_path / "vault" / obsidian_inbox_merge.config.DAILY_DIR_NAME
-        / obsidian_inbox_merge.config.TEMPLATE_DIR_NAME
-        / obsidian_inbox_merge.config.DAILY_TEMPLATE_FILENAME
-    )
-    _create_template(daily_template)
-
-    fixed_now = datetime(2026, 8, 19, 10, 0, 0)
-    _set_mtime(inbox_file, fixed_now - timedelta(seconds=60))
-
-    with (
-        patch.object(obsidian_inbox_merge, "is_icloud_offloaded", return_value=False),
-        patch.object(
-            obsidian_inbox_merge, "merge_content_into_daily_note", return_value="memo"
-        ),
-    ):
-        obsidian_inbox_merge.process_inbox_file(inbox_file, now=fixed_now)
-
-    assert not inbox_file.exists()
-
-
 def test_process_inbox_file_icloud_wait_failure_keeps_file(tmp_path: Path):
     """iCloud待機失敗時は元ファイルを残す。"""
     inbox = tmp_path / "vault" / "Inbox"

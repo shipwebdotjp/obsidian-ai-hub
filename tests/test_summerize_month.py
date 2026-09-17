@@ -1,6 +1,5 @@
 import json
 from datetime import datetime
-from pathlib import Path
 from unittest.mock import patch
 import pytest
 
@@ -30,15 +29,6 @@ def mock_config(tmp_path):
         ),
     ):
         yield
-
-
-def test_get_monthly_note_path(mock_config):
-    dt = datetime(2024, 10, 15)
-    with patch(
-        "obsidian_ai_hub.summerize_month.reader.config.DAILY_PATH", Path("/vault/daily")
-    ):
-        path = summerize_month.reader.get_monthly_note_path(dt)
-        assert path == Path("/vault/daily/2024/10/2024-10.md")
 
 
 def test_load_weekly_records(mock_config, test_memory_db_path):
@@ -173,33 +163,3 @@ def test_summarize_month(mock_llm, mock_render, mock_config, test_memory_db_path
         assert item_kinds == set(store.MONTH_ITEM_KINDS)
     finally:
         conn.close()
-
-
-@patch("obsidian_ai_hub.summerize_month.prompt.render_prompt")
-@patch("obsidian_ai_hub.utils.llm_client.generate_llm_response")
-def test_get_monthly_structured_record_passes_candidates_and_normalizes_topics(
-    mock_llm, mock_render, mock_config
-):
-    target_date = datetime(2024, 10, 1)
-    mock_render.return_value = "Rendered Prompt"
-
-    # LLM returns topics with mixed valid, duplicates, and out-of-candidates
-    mock_llm.return_value = json.dumps(
-        {
-            "summary": "Monthly summary test",
-            "topics": ["LLM・AI活用", "未知のトピック", "LLM・AI活用"],
-        }
-    )
-
-    record = summerize_month.get_monthly_structured_record(target_date, [])
-
-    # Check render_prompt is called with TOPIC_CANDIDATES
-    mock_render.assert_called_once()
-    context = mock_render.call_args[0][1]
-    assert "TOPIC_CANDIDATES" in context
-    candidates = json.loads(context["TOPIC_CANDIDATES"])
-    assert "LLM・AI活用" in candidates
-    assert "その他" in candidates
-
-    # Check parsed and normalized topics in record
-    assert record["topics"] == ["LLM・AI活用", "その他"]

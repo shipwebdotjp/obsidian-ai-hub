@@ -50,6 +50,10 @@ markers = [
     "e2e: browser end-to-end tests that require frontend/dist and Playwright Chromium",
 ]
 
+[tool.ruff.lint.per-file-ignores]
+# Pure re-export facade: imported names are part of the public import surface.
+"src/obsidian_ai_hub/web/service.py" = ["F401"]
+
 [dependency-groups]
 dev = [
     "playwright>=1.61.0",

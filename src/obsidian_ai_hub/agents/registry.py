@@ -23,11 +23,11 @@ import sys
 from collections.abc import Sequence
 from datetime import date, datetime, time
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
 from langchain_core.tools import BaseTool, tool
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Literal
 
 import os

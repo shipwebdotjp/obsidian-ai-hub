@@ -1,13 +1,12 @@
 """Integration tests for ask_user conversational HITL across Agents and Coding Workspace."""
 
-import asyncio
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from langchain_core.messages import AIMessage, AIMessageChunk, ToolMessage
+from langchain_core.messages import AIMessageChunk, ToolMessage
 
-from obsidian_ai_hub.agents import runtime as agent_runtime, store as agent_store
+from obsidian_ai_hub.agents import store as agent_store
 from obsidian_ai_hub.agents.ask_user_handler import handle_agent_ask_user, handle_coding_ask_user
 from obsidian_ai_hub.coding import store as coding_store
 from obsidian_ai_hub.hitl import service as hitl_service, store as hitl_store

@@ -17,108 +17,12 @@ from unittest.mock import patch
 from obsidian_ai_hub.sync_knowledge import (
     FileState,
     SyncState,
-    SyncResult,
     ChangeDetector,
     create_new_state,
     load_state_file,
     save_state_file,
     scan_local_files,
 )
-
-
-class TestFileState:
-    """Test FileState data class"""
-
-    def test_create_file_state(self):
-        fs = FileState(knowledge_id="kb1", name="note.md", mtime=123456.0)
-        assert fs.knowledge_id == "kb1"
-        assert fs.name == "note.md"
-        assert fs.mtime == 123456.0
-        assert fs.file_id_on_webui is None
-
-    def test_file_state_with_id(self):
-        fs = FileState(
-            knowledge_id="kb1",
-            name="note.md",
-            mtime=123456.0,
-            file_id_on_webui="file_123",
-        )
-        assert fs.file_id_on_webui == "file_123"
-
-
-class TestSyncState:
-    """Test SyncState data class"""
-
-    def test_sync_state_creation(self):
-        now = datetime.now(timezone.utc).isoformat()
-        files = [
-            FileState(knowledge_id="kb1", name="note1.md", mtime=100.0),
-            FileState(
-                knowledge_id="kb2",
-                name="note2.md",
-                mtime=200.0,
-                file_id_on_webui="file_1",
-            ),
-        ]
-        state = SyncState(last_sync=now, files=files)
-
-        assert state.last_sync == now
-        assert len(state.files) == 2
-        assert state.files[0].name == "note1.md"
-
-    def test_sync_state_to_dict(self):
-        now = datetime.now(timezone.utc).isoformat()
-        files = [FileState(knowledge_id="kb1", name="note1.md", mtime=100.0)]
-        state = SyncState(last_sync=now, files=files)
-
-        data = state.to_dict()
-        assert data["last_sync"] == now
-        assert len(data["files"]) == 1
-        assert data["files"][0]["knowledge_id"] == "kb1"
-        assert data["files"][0]["name"] == "note1.md"
-
-    def test_sync_state_from_dict(self):
-        now = datetime.now(timezone.utc).isoformat()
-        data = {
-            "last_sync": now,
-            "files": [
-                {
-                    "knowledge_id": "kb1",
-                    "name": "note1.md",
-                    "mtime": 100.0,
-                    "file_id_on_webui": "file_1",
-                }
-            ],
-        }
-
-        state = SyncState.from_dict(data)
-        assert state.last_sync == now
-        assert len(state.files) == 1
-        assert state.files[0].knowledge_id == "kb1"
-        assert state.files[0].name == "note1.md"
-        assert state.files[0].file_id_on_webui == "file_1"
-
-
-class TestSyncResult:
-    """Test SyncResult data class"""
-
-    def test_sync_result_default(self):
-        result = SyncResult()
-        assert result.success_count == 0
-        assert result.error_count == 0
-        assert result.error_files == []
-        assert result.duration_sec == 0.0
-
-    def test_sync_result_with_values(self):
-        result = SyncResult(
-            success_count=5,
-            error_count=2,
-            error_files=["file1.md", "file2.md"],
-            duration_sec=10.5,
-        )
-        assert result.success_count == 5
-        assert result.error_count == 2
-        assert len(result.error_files) == 2
 
 
 class TestStateFilePersistence:

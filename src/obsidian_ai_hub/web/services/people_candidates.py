@@ -249,7 +249,6 @@ def resolve_person_candidate(
             target_row = cursor.fetchone()
             if target_row is None:
                 raise ValueError("Target person not found")
-            target = dict(target_row)
 
             normalized_name = cand["normalized_name"]
 

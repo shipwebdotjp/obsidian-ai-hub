@@ -5,14 +5,13 @@ from __future__ import annotations
 import json
 import logging
 import os
-import stat
 import subprocess
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import yaml
 from langchain_core.tools import BaseTool, tool
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 from obsidian_ai_hub.utils import config
 

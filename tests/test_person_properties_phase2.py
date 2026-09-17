@@ -1,16 +1,12 @@
-import pytest
 import sqlite3
 from obsidian_ai_hub.database import get_db_connection
 from obsidian_ai_hub.utils import config
-from obsidian_ai_hub.utils.people_loader import load_people_notes_with_report
 from obsidian_ai_hub.web.services.person_properties import (
     create_property_definition_in_tx,
     create_person_property_value_in_tx,
     list_person_properties_in_tx,
 )
-from obsidian_ai_hub.web.services.person_relations import create_person_relation_in_tx
-from obsidian_ai_hub.people_sync.sync import sync_people_in_tx, get_db_vault_conflicts_report
-from obsidian_ai_hub.web.services.people_sync import sync_people, get_vault_report_dynamic
+from obsidian_ai_hub.people_sync.sync import sync_people_in_tx
 
 
 def setup_phase2_db(conn: sqlite3.Connection):

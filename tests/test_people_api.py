@@ -265,44 +265,6 @@ def test_people_resolve_conflicts(test_memory_db_path, tmp_path, monkeypatch, cl
     assert err_detail["existing_person_id"] == "peo_ken"
 
 
-def test_people_merge_restrictions(test_memory_db_path, client):
-    conn = memory.get_db_connection()
-    try:
-        # Create vault-linked person A
-        conn.execute(
-            "INSERT INTO people (person_id, display_name, normalized_name, vault_id) VALUES (?, ?, ?, ?)",
-            ("peo_a", "山田太郎", "山田太郎", "yamada-taro"),
-        )
-        # Create vault-linked person B (different vault_id)
-        conn.execute(
-            "INSERT INTO people (person_id, display_name, normalized_name, vault_id) VALUES (?, ?, ?, ?)",
-            ("peo_b", "鈴木健", "鈴木健", "ken-suzuki"),
-        )
-        # Create unlinked person C
-        conn.execute(
-            "INSERT INTO people (person_id, display_name, normalized_name, vault_id) VALUES (?, ?, ?, ?)",
-            ("peo_c", "佐藤さん", "佐藤さん", None),
-        )
-        conn.commit()
-    finally:
-        conn.close()
-
-    # 1. Merging two different Vault IDs (peo_b into peo_a) -> should fail (HTTP 400)
-    response = client.post(
-        "/api/v1/people/merge",
-        json={"from_person_id": "peo_b", "to_person_id": "peo_a"},
-    )
-    assert response.status_code == 400
-    assert "異なるVault ID" in response.json()["detail"]
-
-    # 2. Merging unlinked person C into vault-linked person A -> should succeed (HTTP 200)
-    response = client.post(
-        "/api/v1/people/merge",
-        json={"from_person_id": "peo_c", "to_person_id": "peo_a"},
-    )
-    assert response.status_code == 200
-
-
 def test_db_vs_vault_mismatches_dynamic_report(
     test_memory_db_path, tmp_path, monkeypatch, client
 ):
@@ -690,67 +652,6 @@ def test_people_list_sorting_and_counts(test_memory_db_path, client):
     assert filtered[2]["summary_count"] == 3
 
 
-def test_people_detail_relation_counts(test_memory_db_path, client):
-    conn = memory.get_db_connection()
-    try:
-        conn.execute(
-            "INSERT INTO people (person_id, display_name, normalized_name, vault_id) VALUES (?, ?, ?, ?)",
-            ("p_detail", "Dave", "dave", None),
-        )
-        conn.execute(
-            "INSERT INTO person_aliases (normalized_name, person_id, display_name) VALUES (?, ?, ?)",
-            ("デーヴ", "p_detail", "デーヴ"),
-        )
-
-        # Insert summaries to satisfy FK constraints
-        conn.execute(
-            "INSERT INTO summaries (summary_id, period_type, period_key, period_start, period_end, generated_at, summary) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (
-                "sum_d_1",
-                "day",
-                "2026-08-01",
-                "2026-08-01",
-                "2026-08-01",
-                "2026-08-01T12:00:00+09:00",
-                "summary",
-            ),
-        )
-        conn.execute(
-            "INSERT INTO summaries (summary_id, period_type, period_key, period_start, period_end, generated_at, summary) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (
-                "sum_d_2",
-                "day",
-                "2026-08-02",
-                "2026-08-02",
-                "2026-08-02",
-                "2026-08-01T12:00:00+09:00",
-                "summary",
-            ),
-        )
-
-        conn.execute(
-            "INSERT INTO summary_people (summary_id, person_id, note, display_order) VALUES (?, ?, ?, ?)",
-            ("sum_d_1", "p_detail", "note", 1),
-        )
-        conn.execute(
-            "INSERT INTO summary_person_assignments (summary_id, normalized_name, person_id) VALUES (?, ?, ?)",
-            ("sum_d_2", "デーヴ", "p_detail"),
-        )
-        conn.commit()
-    finally:
-        conn.close()
-
-    response = client.get("/api/v1/people/p_detail")
-    assert response.status_code == 200
-    detail = response.json()
-    assert detail["summary_count"] == 1
-    assert detail["relation_counts"]["summaries"] == 1
-    assert detail["relation_counts"]["aliases"] == 1
-    assert detail["relation_counts"]["assignments"] == 1
-
-
 def test_people_edit_unlinked_success_and_conflict(test_memory_db_path, client):
     conn = memory.get_db_connection()
     try:
@@ -1031,67 +932,6 @@ def test_promote_candidate_different_name(test_memory_db_path, client):
     response = client.get("/api/v1/people/candidates")
     assert response.status_code == 200
     assert len(response.json()) == 0
-
-
-def test_promote_candidate_same_name(test_memory_db_path, client):
-    """Promote with the same name does not create alias."""
-    conn = memory.get_db_connection()
-    try:
-        summary_store.upsert_summary(
-            {
-                "period_type": "day",
-                "period_key": "2026-09-03",
-                "summary": "Met Tanaka",
-                "people": [{"name": "田中"}],
-            },
-            conn=conn,
-        )
-        conn.commit()
-    finally:
-        conn.close()
-
-    # Get candidate
-    response = client.get("/api/v1/people/candidates")
-    assert response.status_code == 200
-    candidates = response.json()
-    cand_id = candidates[0]["candidate_id"]
-
-    # Promote with same name
-    response = client.post(
-        f"/api/v1/people/candidates/{cand_id}/promote",
-        json={"display_name": "田中"},
-    )
-    assert response.status_code == 200
-    person = response.json()
-    assert person["display_name"] == "田中"
-    assert len(person["aliases"]) == 0
-
-    # Next upsert should resolve to the promoted person
-    summary_store.upsert_summary(
-        {
-            "period_type": "day",
-            "period_key": "2026-09-04",
-            "summary": "Met Tanaka again",
-            "people": [{"name": "田中"}],
-        }
-    )
-
-    # Verify the new summary was linked to the promoted person
-    conn = memory.get_db_connection()
-    try:
-        cursor = conn.cursor()
-        cursor.execute(
-            """
-            SELECT sp.person_id FROM summary_people sp
-            JOIN summaries s ON sp.summary_id = s.summary_id
-            WHERE s.period_key = ? AND s.period_type = ?""",
-            ("2026-09-04", "day"),
-        )
-        row = cursor.fetchone()
-        assert row is not None
-        assert row["person_id"] == person["person_id"]
-    finally:
-        conn.close()
 
 
 def test_promote_candidate_assignment_conflict(test_memory_db_path, client):

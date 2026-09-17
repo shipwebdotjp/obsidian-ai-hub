@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from obsidian_ai_hub.coding import backend, store as coding_store
+from obsidian_ai_hub.coding import store as coding_store
 from obsidian_ai_hub.coding import service as coding_service
 from obsidian_ai_hub.runs.coding_worker import execute_coding_run
 from obsidian_ai_hub.web.app import create_app

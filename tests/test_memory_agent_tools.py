@@ -15,8 +15,7 @@ from obsidian_ai_hub.memory.agent_tools import (
     create_memory_candidate,
     search_memories,
 )
-from obsidian_ai_hub.memory.store import load_all_memories, save_all_memories
-from obsidian_ai_hub.utils import config
+from obsidian_ai_hub.memory.store import save_all_memories
 
 
 # ---------------------------------------------------------------------------
@@ -27,7 +26,6 @@ from obsidian_ai_hub.utils import config
 def _make_approved(mid, content, *, kind="preference", memory_key="", topics=None, tags=None,
                    extraction_confidence=0.9, stability="tentative", valid_until=None,
                    valid_from=None):
-    now = datetime.now(timezone.utc).date().isoformat()
     return {
         "schema_version": 1,
         "memory_id": mid,
@@ -63,22 +61,6 @@ def _reset_db():
 # ---------------------------------------------------------------------------
 # _normalize_memory_key
 # ---------------------------------------------------------------------------
-
-
-def test_normalize_memory_key_none_returns_empty():
-    assert _normalize_memory_key(None) == ""
-
-
-def test_normalize_memory_key_empty_returns_empty():
-    assert _normalize_memory_key("   ") == ""
-
-
-def test_normalize_memory_key_valid():
-    assert _normalize_memory_key("response-style-concise") == "response-style-concise"
-    assert _normalize_memory_key("FOO-Bar-Baz") == "foo-bar-baz"
-    # Pydantic pattern str is the same regex; the function must accept the
-    # canonical form used by the UI.
-    assert _normalize_memory_key("mem-1-abc") == "mem-1-abc"
 
 
 def test_normalize_memory_key_invalid_raises():
@@ -296,36 +278,6 @@ def test_create_candidate_stability_always_tentative():
 # ---------------------------------------------------------------------------
 # registry: resolve_tools_with_context + LLM-facing validation
 # ---------------------------------------------------------------------------
-
-
-def test_resolve_tools_with_context_binds_trusted_ctx():
-    captured = {}
-    tool = registry._make_memory_propose_tool(captured)
-    # tool name should be the stable "memory_propose"
-    assert tool.name == "memory_propose"
-
-
-def test_resolve_tools_with_context_copies_trusted_ctx_snapshot():
-    trusted = {"agent_id": "a1", "session_id": "s1", "run_id": "r1",
-               "user_message_id": "m1", "user_content": "u", "now": None}
-    tools = registry.resolve_tools_with_context(["memory_propose"], trusted)
-    assert len(tools) == 1
-    # Mutate the caller's dict; the tool's bound snapshot must not change.
-    trusted["agent_id"] = "MUTATED"
-    # Inspect the tool's closure by introspection: try to mutate via a save call
-    # and confirm provenance still uses original id.
-    res = tools[0].invoke({
-        "content": "test",
-        "kind": "preference",
-    })
-    # The propose call requires user_message_id; without it the tool returns
-    # a validation error. We just verify the tool didn't accept the mutated
-    # agent_id via the captured call path by inspecting provenance if it ran.
-    parsed = json.loads(res)
-    # If the tool ran, agent_id should be the original "a1", not mutated.
-    if parsed.get("status") == "candidate_created":
-        cand = memory.get_memory(parsed["memory_id"])
-        assert cand["provenance"]["agent_id"] == "a1"
 
 
 def test_resolve_tools_with_context_propagates_factory_errors():

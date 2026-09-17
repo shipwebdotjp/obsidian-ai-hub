@@ -687,16 +687,14 @@ async def test_agent_stream_generates_title_only_on_initial_turn():
         ) as mock_gen_title,
     ):
         # 1st Turn
-        events = [
-            event
-            async for event in runtime.generate_agent_stream(
-                agent=agent,
-                session=session,
-                run=run,
-                history_messages=[user_msg],
-                user_content="最初の質問",
-            )
-        ]
+        async for _ in runtime.generate_agent_stream(
+            agent=agent,
+            session=session,
+            run=run,
+            history_messages=[user_msg],
+            user_content="最初の質問",
+        ):
+            pass
         assert mock_gen_title.call_count == 1
         kwargs = mock_gen_title.call_args.kwargs
         assert kwargs["user_content"] == "最初の質問"
@@ -713,16 +711,14 @@ async def test_agent_stream_generates_title_only_on_initial_turn():
             [[AIMessageChunk(content="2回目の回答")]],
         )
 
-        events_2 = [
-            event
-            async for event in runtime.generate_agent_stream(
-                agent=agent,
-                session=session,
-                run=run_2,
-                history_messages=history,
-                user_content="2回目の質問",
-            )
-        ]
+        async for _ in runtime.generate_agent_stream(
+            agent=agent,
+            session=session,
+            run=run_2,
+            history_messages=history,
+            user_content="2回目の質問",
+        ):
+            pass
         # Title generation should NOT be called on 2nd turn
         assert mock_gen_title.call_count == 0
         final_session = store.get_session(session["session_id"])

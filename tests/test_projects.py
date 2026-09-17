@@ -423,10 +423,10 @@ def test_search_projects(test_memory_db_path):
         search_projects(query=123)  # type: ignore[arg-type]
 
     # Setup projects
-    p_ai = service.create_project(schemas.ProjectCreateRequest(display_name="AI", domain="work", status="active"))
+    service.create_project(schemas.ProjectCreateRequest(display_name="AI", domain="work", status="active"))
     p_hub = service.create_project(schemas.ProjectCreateRequest(display_name="AI Hub", domain="work", status="active"))
-    p_blog = service.create_project(schemas.ProjectCreateRequest(display_name="Blog Project", domain="personal", status="active"))
-    p_percent = service.create_project(schemas.ProjectCreateRequest(display_name="Test%Project", domain="work", status="active"))
+    service.create_project(schemas.ProjectCreateRequest(display_name="Blog Project", domain="personal", status="active"))
+    service.create_project(schemas.ProjectCreateRequest(display_name="Test%Project", domain="work", status="active"))
 
     # Give p_hub higher summary_count
     for i in range(3):
@@ -478,7 +478,7 @@ def test_search_projects(test_memory_db_path):
     res_no_wildcard = search_projects(query="TestProject", limit=10)
     assert not any(p["display_name"] == "Test%Project" for p in res_no_wildcard["projects"])
     # Underscore and backslash escaping
-    p_under = service.create_project(schemas.ProjectCreateRequest(display_name="A_B Project", domain="work", status="active"))
+    service.create_project(schemas.ProjectCreateRequest(display_name="A_B Project", domain="work", status="active"))
     res_under = search_projects(query="A_B", limit=10)
     assert any(p["display_name"] == "A_B Project" for p in res_under["projects"])
     res_under_no = search_projects(query="AXB", limit=10)

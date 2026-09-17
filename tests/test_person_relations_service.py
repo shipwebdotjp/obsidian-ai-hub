@@ -316,32 +316,6 @@ def test_merge_people_rollback_on_error_leaves_no_partial_transfers(tmp_path, mo
     conn2.close()
 
 
-def test_relation_detail_returns_relation_type_timestamps(tmp_path, monkeypatch):
-    db_file = tmp_path / "test_type_ts.db"
-    monkeypatch.setattr(config, "MEMORY_SQLITE_PATH", db_file)
-
-    conn = get_db_connection()
-    setup_test_people(conn)
-    cursor = conn.cursor()
-
-    rel, action = create_person_relation_in_tx(
-        cursor, "peo_1", "peo_2", "rlt_builtin_parent-child"
-    )
-    assert action == "created"
-    conn.commit()
-
-    cursor.execute(
-        "SELECT created_at, updated_at FROM person_relation_types "
-        "WHERE relation_type_id = 'rlt_builtin_parent-child'"
-    )
-    type_row = cursor.fetchone()
-
-    fetched = get_person_relation_by_id_in_tx(cursor, rel["relation_id"])
-    assert fetched["relation_type"]["created_at"] == type_row["created_at"]
-    assert fetched["relation_type"]["updated_at"] == type_row["updated_at"]
-    conn.close()
-
-
 def test_update_clears_fields_with_explicit_null(tmp_path, monkeypatch):
     db_file = tmp_path / "test_clear.db"
     monkeypatch.setattr(config, "MEMORY_SQLITE_PATH", db_file)

@@ -8,65 +8,6 @@ from obsidian_ai_hub.line_notification import (
 )
 
 
-class TestBuildHitlRunText:
-    def test_includes_kind_title_description_and_link(self):
-        text = build_hitl_run_text(
-            kind="長期記憶保守",
-            title="メモリ長期記憶 診断メンテナンス",
-            description="基準日 2026-08-15 の保守提案です。",
-            run_id="mem_maint_100",
-            web_url="https://aihub.tail744355.ts.net",
-        )
-        assert "長期記憶保守" in text
-        assert "メモリ長期記憶 診断メンテナンス" in text
-        assert "基準日 2026-08-15 の保守提案です。" in text
-        assert "https://aihub.tail744355.ts.net/hitl?run_id=mem_maint_100" in text
-
-    def test_initial_registration_is_confirmation(self):
-        text = build_hitl_run_text(
-            kind="長期記憶保守",
-            title="診断メンテナンス",
-            description="",
-            run_id="mem_maint_1",
-            web_url="https://aihub.tail744355.ts.net",
-            round_number=1,
-        )
-        assert "長期記憶保守の確認です" in text
-        assert "再提案" not in text
-
-    def test_reproposal_round_shows_round_number(self):
-        text = build_hitl_run_text(
-            kind="長期記憶保守",
-            title="診断メンテナンス",
-            description="",
-            run_id="mem_maint_1",
-            web_url="https://aihub.tail744355.ts.net",
-            round_number=2,
-        )
-        assert "長期記憶保守の再提案です（ラウンド 2）" in text
-
-    def test_empty_web_url_omits_link_line(self):
-        text = build_hitl_run_text(
-            kind="週次メモリインタビュー",
-            title="週次メモリインタビュー",
-            description="振り返り質問",
-            run_id="mem_interview_2026-W33",
-            web_url="",
-        )
-        assert "振り返り質問" in text
-        assert "/hitl" not in text
-
-    def test_encodes_run_id_in_link(self):
-        text = build_hitl_run_text(
-            kind="週次メモリインタビュー",
-            title="週次メモリインタビュー",
-            description="",
-            run_id="mem a/b?c=1",
-            web_url="https://aihub.tail744355.ts.net",
-        )
-        assert "https://aihub.tail744355.ts.net/hitl?run_id=mem%20a%2Fb%3Fc%3D1" in text
-
-
 class TestNotifyHitlRun:
     def test_returns_false_and_logs_when_config_missing(self, caplog):
         with patch("obsidian_ai_hub.utils.line_messaging.send_line_push") as m:

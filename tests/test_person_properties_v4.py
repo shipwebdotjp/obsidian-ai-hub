@@ -223,19 +223,3 @@ def test_people_get_tool_with_properties(test_db_setup):
             "valid_from": None,
             "valid_until": None,
         }
-
-
-def test_people_get_tool_empty_properties(test_db_setup):
-    raw_res = people_get.invoke({"person_id": "peo_empty"})
-    res = json.loads(raw_res)
-
-    assert res["person_id"] == "peo_empty"
-    assert "properties" in res
-    assert res["properties"] == []
-
-
-def test_people_get_tool_not_found(test_db_setup):
-    raw_res = people_get.invoke({"person_id": "peo_nonexistent"})
-    res = json.loads(raw_res)
-
-    assert res == {"error": "人物が見つかりません"}

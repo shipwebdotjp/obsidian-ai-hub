@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import sqlite3
 import pytest
-from datetime import datetime
 from fastapi.testclient import TestClient
 
 from obsidian_ai_hub import memory

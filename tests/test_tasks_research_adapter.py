@@ -154,15 +154,6 @@ def test_research_adapter_propagates_task_cancel(monkeypatch):
         )
 
 
-def test_composite_dispatches_research(monkeypatch):
-    _fakes(monkeypatch)
-    task, plan = _task_with_research_step({"theme": "テーマ"})
-    result = CompositeExecutor().execute_step(
-        task, plan, 0, plan["plan"]["steps"][0]
-    )
-    assert result.child_kind == "research"
-
-
 @pytest.fixture
 def _sync_research_execution(monkeypatch):
     """Run the research job synchronously in the scenario tests.

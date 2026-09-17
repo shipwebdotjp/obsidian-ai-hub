@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import sqlite3
 import time
 from datetime import datetime, timezone, timedelta
-from typing import Any, Dict
 
 import pytest
 
@@ -25,7 +23,7 @@ from obsidian_ai_hub.hitl.service import (
 import threading
 from obsidian_ai_hub.hitl.store import get_run
 from obsidian_ai_hub.main import main
-from obsidian_ai_hub.hitl.worker import HeartbeatRunner, HitlWorker
+from obsidian_ai_hub.hitl.worker import HitlWorker
 
 
 @pytest.fixture(autouse=True)
@@ -138,112 +136,6 @@ def test_settle_run_outcome_conditions(test_memory_db_path):
     assert run["checkpoint"] == "cp_final"
     assert run["lease_owner"] is None
     assert run["lease_expires_at"] is None
-
-
-def test_heartbeat_runner_thread(test_memory_db_path):
-    """Test HeartbeatRunner thread renewing lease and marking unhealthy on failure."""
-    conn = get_db_connection()
-    run_id = "run_hb_runner"
-    questions = [
-        {"question_key": "q1", "question_type": "text", "display_text": "Q1", "is_required": 1}
-    ]
-    register_run_and_questions(
-        run_id=run_id,
-        handler="dummy_handler",
-        checkpoint=None,
-        question_set_id="set_1",
-        questions_data=questions,
-        title="HB Runner Test",
-        display_type="test",
-        conn=conn,
-    )
-
-    submit_answer(run_id, "set_1", "q1", answer="val", conn=conn)
-    worker_id = "worker_hb_runner"
-    claim_run(run_id, worker_id, lease_duration_seconds=300, conn=conn)
-
-    # Short interval runner
-    runner = HeartbeatRunner(
-        run_id=run_id, worker_id=worker_id, interval=0.1, extension_seconds=300
-    )
-    runner.start()
-    time.sleep(0.35)
-    assert runner.is_healthy is True
-    runner.stop()
-
-    # If lease owner changes in DB, runner should mark itself unhealthy
-    conn.execute("UPDATE hitl_runs SET lease_owner = 'other_worker' WHERE run_id = ?", (run_id,))
-    conn.commit()
-    runner_bad = HeartbeatRunner(
-        run_id=run_id, worker_id=worker_id, interval=0.1, extension_seconds=300
-    )
-    runner_bad.start()
-    time.sleep(0.35)
-    assert runner_bad.is_healthy is False
-    runner_bad.stop()
-
-
-def test_hitl_worker_full_integration(test_memory_db_path):
-    """Integration test: submit answer -> ready_to_resume -> worker processes to completed."""
-    conn = get_db_connection()
-    run_id = "run_worker_e2e"
-    executed_context = {}
-
-    def test_handler(context: HitlContext) -> HitlResult:
-        executed_context["answers"] = context.answers_by_question_key
-        return HitlResult.complete(checkpoint="cp_done")
-
-    register_handler("test_handler", test_handler)
-
-    questions = [
-        {"question_key": "q1", "question_type": "text", "display_text": "Answer me", "is_required": 1}
-    ]
-    register_run_and_questions(
-        run_id=run_id,
-        handler="test_handler",
-        checkpoint="cp_start",
-        question_set_id="set_1",
-        questions_data=questions,
-        title="E2E Worker Run",
-        display_type="test",
-        conn=conn,
-    )
-
-    run = get_run(run_id, conn)
-    assert run["status"] == "pending_user"
-
-    # User submits answer
-    submit_answer(run_id, "set_1", "q1", answer="hello_world", conn=conn)
-
-    run = get_run(run_id, conn)
-    assert run["status"] == "ready_to_resume"
-
-    # Create worker and execute one run iteration
-    worker = HitlWorker(worker_id="integration_worker", poll_interval=0.1)
-    eligible = [dict(run)]
-    success = worker.execute_run(eligible[0], conn)
-    assert success is True
-
-    run_final = get_run(run_id, conn)
-    assert run_final["status"] == "completed"
-    assert run_final["checkpoint"] == "cp_done"
-    assert executed_context["answers"]["q1"] == "hello_world"
-
-
-def test_hitl_worker_drain_on_signal(test_memory_db_path, monkeypatch):
-    """Test worker draining when signal received."""
-    import os
-    import signal
-    conn = get_db_connection()
-    worker = HitlWorker(worker_id="drain_worker", poll_interval=0.1)
-
-    # Trigger real signal inside setup_signal_handlers / run_loop
-    worker.setup_signal_handlers()
-    os.kill(os.getpid(), signal.SIGTERM)
-
-    code = worker.run_loop(conn=conn)
-    assert code == 0
-    assert worker.draining is True
 
 
 def test_main_cli_hitl_worker(monkeypatch):

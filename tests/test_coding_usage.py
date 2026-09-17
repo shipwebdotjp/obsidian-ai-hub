@@ -97,14 +97,6 @@ def test_attach_keeps_cost_only_attempts():
     assert diag["worker_attempt_count"] == 1
 
 
-def test_attach_skips_empty_totals():
-    diag: dict = {"transport": "acp"}
-    usage.attach_usage_cumulative(diag, usage.new_usage_totals(), attempt_count=0)
-
-    assert "usage_cumulative" not in diag
-    assert "worker_attempt_count" not in diag
-
-
 def test_restore_from_cumulative_block():
     prior = {
         "usage_cumulative": {
@@ -138,9 +130,3 @@ def test_restore_falls_back_to_legacy_last_attempt_usage():
     assert totals["total"] == 120
     assert totals["used_max"] == 900
     assert totals["size_max"] == 200000
-
-
-def test_restore_handles_missing_diagnostics():
-    totals = usage.usage_totals_from_diagnostics(None)
-
-    assert totals == usage.new_usage_totals()

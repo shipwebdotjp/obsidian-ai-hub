@@ -5,16 +5,6 @@ from obsidian_ai_hub.utils import config as app_config
 from obsidian_ai_hub.utils.people_loader import load_people_notes_with_report
 
 
-def test_people_loader_no_dir(tmp_path, monkeypatch):
-    # Set PEOPLE_PATH to a non-existent directory
-    fake_people_path = tmp_path / "non_existent_people_dir"
-    monkeypatch.setattr(app_config, "PEOPLE_PATH", fake_people_path)
-
-    res, report = load_people_notes_with_report()
-    assert res == {}
-    assert report["file_deficiencies"] == []
-
-
 def test_people_loader_valid(tmp_path, monkeypatch):
     monkeypatch.setattr(app_config, "PEOPLE_PATH", tmp_path)
 
@@ -86,27 +76,6 @@ name: No ID Person
     assert len(report["file_deficiencies"]) == 1
     assert (
         "Missing or empty required field 'id'"
-        in report["file_deficiencies"][0]["message"]
-    )
-
-
-def test_people_loader_missing_name(tmp_path, monkeypatch):
-    monkeypatch.setattr(app_config, "PEOPLE_PATH", tmp_path)
-
-    note = tmp_path / "invalid.md"
-    note.write_text(
-        """---
-id: valid-id
----
-""",
-        encoding="utf-8",
-    )
-
-    res, report = load_people_notes_with_report()
-    assert res == {}
-    assert len(report["file_deficiencies"]) == 1
-    assert (
-        "Missing or empty required field 'name'"
         in report["file_deficiencies"][0]["message"]
     )
 

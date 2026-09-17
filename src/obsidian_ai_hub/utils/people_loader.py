@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import re
 import sqlite3
 from datetime import datetime, date
 from pathlib import Path
@@ -14,7 +13,7 @@ from obsidian_ai_hub.utils.dates import (
     parse_and_normalize_partial_date,
 )
 from obsidian_ai_hub.utils.extracter import parse_frontmatter
-from obsidian_ai_hub.utils.periods import periods_overlap, temporal_ranges_overlap
+from obsidian_ai_hub.utils.periods import temporal_ranges_overlap
 from obsidian_ai_hub.summary.store import normalize_entity_name
 
 logger = logging.getLogger(__name__)

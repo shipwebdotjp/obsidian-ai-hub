@@ -2,8 +2,6 @@ import base64
 import hashlib
 import hmac
 import json
-import os
-import sqlite3
 import pytest
 from datetime import datetime, timezone, timedelta
 from fastapi.testclient import TestClient

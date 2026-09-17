@@ -1,6 +1,5 @@
 import json
 from unittest.mock import MagicMock, patch
-import pytest
 
 from obsidian_ai_hub.agents import registry, runtime, store
 

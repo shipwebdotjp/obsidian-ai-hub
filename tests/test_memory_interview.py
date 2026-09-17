@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import json
-import pytest
-import sqlite3
 from datetime import datetime, timezone, timedelta
 
 from obsidian_ai_hub import hitl
@@ -10,10 +8,8 @@ from obsidian_ai_hub.database import get_db_connection
 from obsidian_ai_hub.memory.interview import (
     get_next_monday_morning,
     generate_interview_questions,
-    apply_interview_answers,
 )
-from obsidian_ai_hub.hitl.dispatcher import HitlContext, HitlResult, dispatch_runs
-from obsidian_ai_hub.utils import config
+from obsidian_ai_hub.hitl.dispatcher import dispatch_runs
 
 
 def test_hitl_question_expiration_and_cancellation(test_memory_db_path):

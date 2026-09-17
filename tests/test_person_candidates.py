@@ -1,13 +1,11 @@
 import json
-import sqlite3
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 from obsidian_ai_hub.database import get_db_connection
 from obsidian_ai_hub.hitl import dispatcher
 from obsidian_ai_hub.hitl import store as hitl_store
 from obsidian_ai_hub.hitl.service import register_run_and_questions
-from obsidian_ai_hub.summary import store as summary_store
 from obsidian_ai_hub.summary.person_candidates import (
     extract_and_register_person_candidates,
     get_deterministic_run_id,

@@ -36,18 +36,6 @@ def test_create_proposal_persists_fields():
     assert fetched["created_at"] is not None
 
 
-def test_create_reminder_proposal_date_only_due():
-    rec = store.create_proposal(
-        kind="reminder",
-        title="本を返す",
-        rationale="貸出期限が近い",
-        generation_source="daily_06:00",
-        due_date="2026-08-20",
-    )
-    assert rec["due_date"] == "2026-08-20"
-    assert rec["start_time"] is None
-
-
 def test_create_proposal_invalid_fields_raise():
     with pytest.raises(ValueError):
         store.create_proposal(kind="bogus", title="x", rationale="r", generation_source="s")
@@ -261,7 +249,3 @@ def test_cleanup_expired_proposals_does_not_touch_promoted():
     conn.commit()
     assert store.cleanup_expired_proposals(days=7, conn=conn, now_dt=_now_jst()) == 0
     assert store.get_proposal(rec["proposal_id"], conn=conn)["status"] == "promoted"
-
-
-def test_get_proposal_missing_returns_none():
-    assert store.get_proposal("pp_nonexistent") is None

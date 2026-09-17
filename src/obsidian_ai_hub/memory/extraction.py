@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import hashlib
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -134,9 +135,6 @@ def _load_weekly_memory_sources(
         week_end.date(),
     )
     return daily_notes, structured_records
-
-
-import hashlib
 
 
 def compute_person_note_hash(note: str) -> str:

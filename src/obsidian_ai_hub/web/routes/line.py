@@ -6,7 +6,7 @@ import logging
 import os
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, HTTPException, Request, Response, status
+from fastapi import APIRouter, HTTPException, Request, status
 from starlette.concurrency import run_in_threadpool
 
 from obsidian_ai_hub.line_webhook.store import record_webhook_event

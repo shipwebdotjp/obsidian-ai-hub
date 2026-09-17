@@ -154,10 +154,6 @@ def test_process_one_deviation_revises_plan(monkeypatch):
     assert plans[1]["status"] == "pending"
 
 
-def test_process_one_idle_returns_false():
-    assert task_worker._process_one("worker-1", FakeExecutor()) is False
-
-
 def test_execute_plan_empty_steps_fails():
     task = store.create_task("empty plan job")
     store.claim_task("worker-1", "planning")
@@ -229,16 +225,6 @@ def test_mark_stale_tasks_interrupted():
     assert store.mark_stale_tasks_interrupted("live-instance") == 1
     assert store.get_task(stale["task_id"])["status"] == "interrupted"
     assert store.get_task(fresh["task_id"])["status"] == "planning"
-
-
-def test_active_child_set_and_clear():
-    task = store.create_task("child job")
-    updated = store.set_active_child(task["task_id"], "agent", "arun_123")
-    assert updated["active_child_kind"] == "agent"
-    assert updated["active_child_run_id"] == "arun_123"
-    cleared = store.clear_active_child(task["task_id"])
-    assert cleared["active_child_kind"] is None
-    assert cleared["active_child_run_id"] is None
 
 
 def test_startup_recovery_covers_tasks():

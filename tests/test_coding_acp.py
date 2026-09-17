@@ -2,8 +2,6 @@
 
 import asyncio
 import json
-import sqlite3
-import threading
 import pytest
 from unittest.mock import MagicMock, patch
 

@@ -469,7 +469,7 @@ async def subscribe_agent_run_events(
     )
 
     try:
-        run = agent_service.get_run(run_id)
+        agent_service.get_run(run_id)
     except FileNotFoundError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
 

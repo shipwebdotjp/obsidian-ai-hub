@@ -231,7 +231,6 @@ def run_scenario(args, profile: dict, poc_env: dict[str, str], redactor: Redacto
 
         init_resp = do_initialize(conn, rec, timeout=args.rpc_timeout)
         result["initialize"] = init_resp.get("result") or {"error": init_resp.get("error")}
-        caps = (init_resp.get("result") or {}).get("agentCapabilities", {})
 
         if args.scenario == "initialize":
             pass
@@ -336,7 +335,7 @@ def run_scenario(args, profile: dict, poc_env: dict[str, str], redactor: Redacto
         result["gitStatusAfter"] = git_status(tmp_repo)
         result["repoClean"] = result["gitStatusAfter"] == status_before
         result["stderrRedacted"] = conn.redacted_stderr()
-        result["nonJsonStdoutLines"] = [redactor(l) for l in conn.non_json_stdout]
+        result["nonJsonStdoutLines"] = [redactor(line) for line in conn.non_json_stdout]
         result["transcript"] = rec.export(redactor)
     return result
 

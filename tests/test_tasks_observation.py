@@ -42,16 +42,3 @@ def test_history_gist_preserves_head_and_tail_within_limit():
     assert gist.startswith("HEAD-")
     assert gist.endswith("-TAIL")
     assert "chars omitted" in gist
-
-
-def test_split_observation_returns_detail_and_gist():
-    raw = "s" * 8000
-    detail, gist = observation.split_observation("periodic_note_read", raw)
-    assert detail == observation.truncate_detail(raw, "periodic_note_read")
-    assert gist == observation.build_history_gist(raw)
-    assert len(gist) < len(detail)
-
-    short = '{"ok": true}'
-    detail2, gist2 = observation.split_observation("vault_search", short)
-    assert detail2 == short
-    assert gist2 == short

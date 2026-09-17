@@ -6,7 +6,7 @@ from obsidian_ai_hub.agents import store as agent_store
 from obsidian_ai_hub.agents.ask_user import extract_session_ask_user_history
 from obsidian_ai_hub.agents.ask_user_handler import handle_agent_ask_user, handle_coding_ask_user
 from obsidian_ai_hub.coding import store as coding_store
-from obsidian_ai_hub.hitl import service as hitl_service, store as hitl_store
+from obsidian_ai_hub.hitl import service as hitl_service
 from obsidian_ai_hub.hitl.dispatcher import HitlContext
 from obsidian_ai_hub.web.services import agents as agent_web_service
 

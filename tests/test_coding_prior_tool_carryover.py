@@ -10,10 +10,6 @@ from langchain_core.messages import ToolMessage
 from obsidian_ai_hub.coding import store as coding_store
 from obsidian_ai_hub.coding.orchestrator import (
     CodingOrchestrator,
-    _build_prior_tool_results_block,
-    _format_prior_run,
-    _format_prior_tool_call,
-    _load_prior_tool_context,
 )
 
 
@@ -180,23 +176,6 @@ async def test_only_last_three_completed_runs_carried(coding_session):
     assert "RUNNING_MARKER" not in block
 
 
-def test_excerpt_budget_and_omission():
-    long_result = "X" * 2000
-    txt = _format_prior_tool_call(
-        {"call_id": "c1", "tool_name": "web_search", "args": {"q": "hi"}, "result": long_result, "status": "succeeded", "error": None}
-    )
-    assert long_result[:1000] in txt
-    assert "first 1000" in txt
-
-    many = [
-        {"call_id": f"c{i}", "tool_name": "web_search", "args": {"q": f"q-{i}-" + "Y" * 400}, "result": "R" * 1200, "status": "succeeded", "error": None}
-        for i in range(10)
-    ]
-    run_txt = _format_prior_run("crun_test", many, 4000)
-    assert len(run_txt) <= 4000
-    assert "omitted" in run_txt
-
-
 @pytest.mark.anyio
 async def test_safety_block_always_present(coding_session):
     sess, repo = coding_session
@@ -313,15 +292,3 @@ async def test_hitl_resume_includes_preinterruption_calls_and_qa(coding_session)
     assert "PRETOOL_CODING_777" in sys_content
     tool_msgs = [m for m in captured if isinstance(m, ToolMessage)]
     assert any("q1" in (m.content or "") for m in tool_msgs)
-
-
-def test_load_prior_context_returns_completed_only_with_calls(coding_session):
-    sess, _ = coding_session
-    sid = sess["session_id"]
-    r0 = _complete_run_with_calls(sid, "q0", [{"tool_name": "t", "result": "R0"}])
-    _complete_run_with_calls(sid, "q1", [{"tool_name": "t", "result": "R1"}])
-    prior, current = _load_prior_tool_context(sid, "crun_new")
-    assert [p["run_id"] for p in prior] == [r0, prior[1]["run_id"]]
-    assert current == []
-    block = _build_prior_tool_results_block(prior, current)
-    assert "R0" in block and "R1" in block

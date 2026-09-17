@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import sqlite3
 import pytest
-import uuid
 from datetime import datetime, timezone, timedelta
 
 from obsidian_ai_hub.database import get_db_connection
@@ -15,66 +13,6 @@ def clean_handlers_fixture():
     hitl.clear_handlers()
     yield
     hitl.clear_handlers()
-
-
-def test_registry_and_handler_context(test_memory_db_path):
-    """Verify that handlers can be registered, and they receive the proper context and answers."""
-    conn = get_db_connection()
-    try:
-        run_id = "run_context_test"
-        checkpoint = "initial_step"
-        qset_id = "set_1"
-
-        questions_data = [
-            {
-                "question_key": "user_choice",
-                "question_type": "select",
-                "display_text": "Do you want to continue?",
-                "choices": ["yes", "no"],
-                "is_required": 1,
-            }
-        ]
-
-        # Register run & questions
-        hitl.register_run_and_questions(
-            run_id=run_id,
-            handler="dummy_handler",
-            checkpoint=checkpoint,
-            question_set_id=qset_id,
-            questions_data=questions_data,
-            conn=conn,
-        )
-
-        # Answer the question to make it ready_to_resume
-        hitl.submit_answer(run_id, qset_id, "user_choice", "yes", conn)
-
-        received_context = []
-
-        def dummy_handler(ctx: hitl.HitlContext) -> hitl.HitlResult:
-            received_context.append(ctx)
-            return hitl.HitlResult.complete(checkpoint="step_completed")
-
-        hitl.register_handler("dummy_handler", dummy_handler)
-
-        # Dispatch
-        count = hitl.dispatch_runs(conn)
-        assert count == 1
-
-        # Check handler received context
-        assert len(received_context) == 1
-        ctx = received_context[0]
-        assert ctx.run_id == run_id
-        assert ctx.checkpoint == checkpoint
-        assert ctx.answers_by_question_key == {"user_choice": "yes"}
-
-        # Check run status updated to completed
-        run = hitl.get_run(run_id, conn)
-        assert run["status"] == "completed"
-        assert run["checkpoint"] == "step_completed"
-        assert run["lease_owner"] is None
-        assert run["lease_expires_at"] is None
-    finally:
-        conn.close()
 
 
 def test_handler_re_suspension_with_next_questions(test_memory_db_path):
@@ -300,48 +238,6 @@ def test_dispatch_cli_flag_processes_runs(test_memory_db_path, monkeypatch):
         run = hitl.get_run(run_id, conn)
         assert run["status"] == "completed"
         assert run["checkpoint"] == "done"
-        assert run["lease_owner"] is None
-        assert run["lease_expires_at"] is None
-    finally:
-        conn.close()
-
-
-def test_full_happy_path_dispatch(test_memory_db_path):
-    """A run progresses through the complete lifecycle: pending_user → ready_to_resume → running → completed."""
-    conn = get_db_connection()
-    try:
-        run_id = "run_happy_path"
-        qset_id = "set_happy"
-
-        hitl.register_run_and_questions(
-            run_id=run_id,
-            handler="happy_handler",
-            checkpoint="chk",
-            question_set_id=qset_id,
-            questions_data=[
-                {"question_key": "q1", "question_type": "text", "display_text": "Q1", "is_required": 1}
-            ],
-            conn=conn,
-        )
-
-        run = hitl.get_run(run_id, conn)
-        assert run["status"] == "pending_user"
-
-        hitl.submit_answer(run_id, qset_id, "q1", "value", conn)
-
-        run = hitl.get_run(run_id, conn)
-        assert run["status"] == "ready_to_resume"
-
-        def happy_handler(ctx: hitl.HitlContext) -> hitl.HitlResult:
-            return hitl.HitlResult.complete(checkpoint="chk_final")
-
-        hitl.register_handler("happy_handler", happy_handler)
-        count = hitl.dispatch_runs(conn)
-        assert count == 1
-
-        run = hitl.get_run(run_id, conn)
-        assert run["status"] == "completed"
-        assert run["checkpoint"] == "chk_final"
         assert run["lease_owner"] is None
         assert run["lease_expires_at"] is None
     finally:

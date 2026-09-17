@@ -1,5 +1,4 @@
 import pytest
-import sqlite3
 from obsidian_ai_hub.database import get_db_connection
 from obsidian_ai_hub.utils.dates import (
     get_partial_date_bounds,

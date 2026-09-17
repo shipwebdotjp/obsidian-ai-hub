@@ -5,7 +5,6 @@ from typing import Any, Dict, List, Optional
 
 from datetime import datetime
 
-from obsidian_ai_hub.database import get_db_connection
 from obsidian_ai_hub.hitl.service import register_run_and_questions
 from obsidian_ai_hub.hitl.store import get_run
 from obsidian_ai_hub.summary import store as summary_store

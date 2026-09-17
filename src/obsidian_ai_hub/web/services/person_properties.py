@@ -1,8 +1,7 @@
-import re
 import sqlite3
 import uuid
 from datetime import datetime
-from typing import Any, Literal, Optional
+from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
 from obsidian_ai_hub.database import get_db_connection
@@ -10,7 +9,7 @@ from obsidian_ai_hub.utils.dates import (
     get_partial_date_bounds,
     parse_and_normalize_partial_date,
 )
-from obsidian_ai_hub.utils.periods import periods_overlap, temporal_ranges_overlap
+from obsidian_ai_hub.utils.periods import temporal_ranges_overlap
 
 JST = ZoneInfo("Asia/Tokyo")
 

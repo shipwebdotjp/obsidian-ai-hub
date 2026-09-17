@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import sys
 from io import StringIO
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -56,9 +56,8 @@ def test_main_agent_chat_stdin_fallback(test_agent, monkeypatch):
     monkeypatch.setattr(sys, "stderr", stderr)
 
     async def mock_stream(*args, **kwargs):
-        session = kwargs.get("session") or args[1]
         run = kwargs.get("run") or args[2]
-        yield f'data: {{"type": "text", "delta": "Hello from agent!"}}\n\n'
+        yield 'data: {"type": "text", "delta": "Hello from agent!"}\n\n'
         done_payload = {
             "type": "done",
             "message": {"message_id": "amsg_1", "role": "assistant", "content": "Hello from agent!"},
@@ -150,7 +149,7 @@ def test_main_agent_chat_error_event_exits_nonzero(test_agent, monkeypatch):
     monkeypatch.setattr(sys, "stderr", stderr)
 
     async def mock_stream(*args, **kwargs):
-        yield f'data: {{"type": "error", "error": "LLM failed", "run_id": "arun_123"}}\n\n'
+        yield 'data: {"type": "error", "error": "LLM failed", "run_id": "arun_123"}\n\n'
 
     with patch("obsidian_ai_hub.agents.runtime.generate_agent_stream", side_effect=mock_stream):
         with pytest.raises(SystemExit) as exc_info:

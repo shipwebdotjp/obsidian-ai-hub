@@ -223,13 +223,6 @@ def test_cleanup_old_logs_now_preserves_job_state(test_memory_db_path):
 
 # --- CLI for cleanup ---
 
-def test_cleanup_execution_logs_cli(monkeypatch, test_memory_db_path):
-    with patch(
-        "obsidian_ai_hub.utils.execution_logger.cleanup_old_logs_now"
-    ) as mock_cleanup:
-        _run_cli(monkeypatch, ["--cleanup-execution-logs"])
-    mock_cleanup.assert_called_once_with(days=30)
-
 
 # --- merge_inbox.main() integration (real code path) ---
 

@@ -124,7 +124,7 @@ def test_activity_project_association_and_cascade_delete(test_memory_db_path):
         conn.commit()
 
         # Add an activity associated with the project
-        act = store.add_activity(
+        store.add_activity(
             conn=conn,
             activity_date="2026-07-20",
             occurred_at="2026-07-20T12:00:00",

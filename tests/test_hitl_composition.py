@@ -3,9 +3,7 @@ from __future__ import annotations
 import subprocess
 import sys
 
-import pytest
 
-from obsidian_ai_hub.database import get_db_connection
 from obsidian_ai_hub.main import register_hitl_handlers
 from obsidian_ai_hub.hitl.dispatcher import get_handler
 

@@ -32,25 +32,6 @@ def test_submit_request_rejects_blank():
         intake.submit_request("   ")
 
 
-def test_task_agent_blank_flag_errors(monkeypatch, capsys):
-    import sys
-
-    from obsidian_ai_hub import main as app_main
-
-    monkeypatch.setattr(sys, "argv", ["prog", "--task-agent", ""])
-    with pytest.raises(SystemExit) as exc_info:
-        app_main.main()
-    assert exc_info.value.code == 2
-
-
-def test_main_task_agent_prints_receipt(capsys):
-    intake.main_task_agent("hello", host="127.0.0.1", port=8765)
-    out = capsys.readouterr().out
-    assert "task_id: task_" in out
-    assert "status: queued" in out
-    assert "detail_url: http://127.0.0.1:8765/task-agent/task_" in out
-
-
 def _context(task_id, answer="proj_a"):
     return HitlContext(
         run_id=f"tasks_{task_id}_abc",

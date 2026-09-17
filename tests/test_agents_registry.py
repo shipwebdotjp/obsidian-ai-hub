@@ -400,7 +400,6 @@ def test_project_search_basic():
 
 
 def test_project_search_filters_and_excludes_candidates():
-    from obsidian_ai_hub.database import get_db_connection
 
     _seed_projects_for_registry()
     # domain filter

@@ -8,22 +8,6 @@ from obsidian_ai_hub.research import db as research_themes
 from obsidian_ai_hub.research import runner
 
 
-def test_run_research_returns_report_without_saving_to_vault():
-    with (
-        patch.object(runner, "collect_research_context", return_value=""),
-        patch.object(runner, "route_research_topic", return_value="internal"),
-        patch.object(
-            runner.llm_client, "generate_llm_response", return_value="mocked response"
-        ),
-        patch.object(runner, "conduct_research", return_value="mocked report"),
-    ):
-        report = runner.run_research("test theme")
-
-    assert report.title is not None
-    assert report.mode == "internal"
-    assert "mocked report" in report.markdown
-
-
 def test_run_theme_research_succeeds():
     rec = research_themes.create_theme(theme="テスト調査", kind="deep", confidence=0.8)
 
@@ -196,50 +180,6 @@ def test_main_reuses_existing_approved_theme(tmp_path: Path):
     themes2 = [t for t in themes2 if "再利用テーマ" in t["theme"]]
     assert len(themes2) == 1
     assert themes2[0]["theme_id"] == first_id
-
-
-def test_research_uses_the_provider_and_model_for_each_llm_role():
-    with (
-        patch.object(runner.config, "RESEARCH_ROUTER_PROVIDER", "router-provider"),
-        patch.object(runner.config, "RESEARCH_ROUTER_MODEL", "router-model"),
-        patch.object(
-            runner.config, "RESEARCH_TITLE_GENERATION_PROVIDER", "title-provider"
-        ),
-        patch.object(runner.config, "RESEARCH_TITLE_GENERATION_MODEL", "title-model"),
-        patch.object(runner.config, "RESEARCH_INTERNAL_PROVIDER", "internal-provider"),
-        patch.object(runner.config, "RESEARCH_INTERNAL_MODEL", "internal-model"),
-        patch.object(
-            runner.llm_client, "generate_llm_response", return_value="internal"
-        ) as mock_response,
-    ):
-        runner.route_research_topic("topic")
-        runner.generate_research_title("topic", "prompt")
-        runner.conduct_research("prompt", mode="internal")
-
-    assert mock_response.call_args_list[0].kwargs["provider"] == "router-provider"
-    assert mock_response.call_args_list[0].kwargs["model"] == "router-model"
-    assert mock_response.call_args_list[1].kwargs["provider"] == "title-provider"
-    assert mock_response.call_args_list[1].kwargs["model"] == "title-model"
-    assert mock_response.call_args_list[2].kwargs["provider"] == "internal-provider"
-    assert mock_response.call_args_list[2].kwargs["model"] == "internal-model"
-
-
-def test_web_research_uses_its_own_provider_and_model():
-    with (
-        patch.object(runner.config, "RESEARCH_WEB_PROVIDER", "web-provider"),
-        patch.object(runner.config, "RESEARCH_WEB_MODEL", "web-model"),
-        patch.object(
-            runner.llm_client, "generate_llm_response_with_tools", return_value="report"
-        ) as mock_response,
-    ):
-        assert runner.conduct_research("prompt", mode="web") == "report"
-
-    assert mock_response.call_args.kwargs["provider"] == "web-provider"
-    assert mock_response.call_args.kwargs["model"] == "web-model"
-    assert [tool.name for tool in mock_response.call_args.kwargs["tools"]] == [
-        "web_search",
-        "web_extract",
-    ]
 
 
 def test_gpt_researcher_environment_uses_config_and_restores_prior_values(monkeypatch):

@@ -9,7 +9,7 @@ from typing import Any, Dict
 from obsidian_ai_hub.database import get_db_connection
 from obsidian_ai_hub.utils.dates import get_partial_date_bounds
 from obsidian_ai_hub.utils.people_loader import load_people_notes_with_report
-from obsidian_ai_hub.utils.periods import periods_overlap, temporal_ranges_overlap
+from obsidian_ai_hub.utils.periods import temporal_ranges_overlap
 from obsidian_ai_hub.summary.store import normalize_entity_name
 from obsidian_ai_hub.web.services.person_relations import (
     preview_person_relation_merge,

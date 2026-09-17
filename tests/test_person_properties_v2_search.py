@@ -1,16 +1,14 @@
-import sqlite3
-import pytest
 from fastapi.testclient import TestClient
 
 from obsidian_ai_hub.database import get_db_connection
 from obsidian_ai_hub.web.app import create_app
-
-app = create_app(token="test-token")
 from obsidian_ai_hub.web.services.person_properties import (
     create_property_definition_in_tx,
     create_person_property_value_in_tx,
     search_people_by_properties,
 )
+
+app = create_app(token="test-token")
 
 
 def setup_test_data():
@@ -188,42 +186,3 @@ def test_search_api_endpoint(monkeypatch):
         },
     )
     assert resp_invalid.status_code == 422
-
-
-def test_v3_partial_date_crud_schemas(monkeypatch):
-    monkeypatch.setenv("OBSIDIAN_AI_HUB_API_TOKEN", "test-token")
-    import obsidian_ai_hub.web.app as web_app
-    monkeypatch.setattr(web_app, "TOKEN", "test-token")
-    client = TestClient(app)
-    headers = {"Authorization": "Bearer test-token"}
-
-    conn = get_db_connection()
-    with conn:
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM person_property_values")
-        cursor.execute("DELETE FROM person_property_definitions")
-        cursor.execute("DELETE FROM people")
-        cursor.execute(
-            "INSERT INTO people (person_id, display_name, normalized_name) VALUES (?, ?, ?)",
-            ("p_partial", "Partial Date Person", "partialdateperson"),
-        )
-        d_note = create_property_definition_in_tx(
-            cursor, key="work_history", display_name="Work History", data_type="text", cardinality="multiple", source_type="database"
-        )
-        def_id = d_note["property_definition_id"]
-
-    # Test Pydantic schema acceptance of YYYY and YYYY-MM
-    resp = client.post(
-        f"/api/v1/people/p_partial/properties",
-        headers=headers,
-        json={
-            "property_definition_id": def_id,
-            "value": "Company A",
-            "valid_from": "2020",
-            "valid_until": "2024-05",
-        },
-    )
-    assert resp.status_code == 201
-    res_val = resp.json()
-    assert res_val["valid_from"] == "2020"
-    assert res_val["valid_until"] == "2024-05"

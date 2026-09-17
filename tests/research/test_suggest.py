@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from unittest.mock import patch
 
@@ -77,7 +76,7 @@ def test_suggestion_hitl_run_approve_and_execute(tmp_path: Path, monkeypatch, te
             markdown="---\ntitle: テスト自動承認テーマの調査結果\nstatus: researched\n---\n## 調査結果詳細",
         )
 
-        with patch("obsidian_ai_hub.research.runner.run_research", return_value=mock_report) as mock_conduct:
+        with patch("obsidian_ai_hub.research.runner.run_research", return_value=mock_report):
             processed = hitl.dispatch_runs(conn)
             assert processed == 1
 

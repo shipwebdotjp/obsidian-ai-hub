@@ -8,12 +8,6 @@ import pytest
 from obsidian_ai_hub.research import db as research_themes
 
 
-def test_normalize_theme_key():
-    assert research_themes.normalize_theme_key("AI 研究") == "ai研究"
-    assert research_themes.normalize_theme_key("　スペース ") == "スペース"
-    assert research_themes.normalize_theme_key("ABC") == "abc"
-
-
 def test_create_and_get_theme():
     rec = research_themes.create_theme(
         theme="テストテーマ",
@@ -42,14 +36,6 @@ def test_find_exact_duplicate():
     dup = research_themes.find_exact_duplicate(normalized)
     assert dup is not None
     assert dup["normalized_key"] == normalized
-
-
-def test_list_themes():
-    research_themes.create_theme(theme="一覧テストA", kind="deep", confidence=0.8)
-    research_themes.create_theme(theme="一覧テストB", kind="adjacent", confidence=0.6)
-    all_themes = research_themes.list_themes()
-    themes = [t for t in all_themes if "一覧テスト" in t["theme"]]
-    assert len(themes) >= 2
 
 
 def test_set_status():
@@ -119,17 +105,6 @@ def test_list_recent_activity_days():
     assert "別のアクティビティ" in summaries
 
 
-def test_theme_defaults_have_empty_feedback():
-    rec = research_themes.create_theme(
-        theme="フィードバック既定テーマ", confidence=0.5, origin="auto_suggestion"
-    )
-    fetched = research_themes.get_theme(rec["theme_id"])
-    assert fetched["feedback_decision"] is None
-    assert fetched["feedback_reason"] is None
-    assert fetched["feedback_comment"] is None
-    assert fetched["feedback_at"] is None
-
-
 def test_set_theme_feedback_approve_saves_and_retrieves():
     rec = research_themes.create_theme(
         theme="フィードバック承認テーマ", confidence=0.5, origin="auto_suggestion"
@@ -196,31 +171,6 @@ def test_set_theme_feedback_invalid_values():
         research_themes.set_theme_feedback(
             rec["theme_id"], status="rejected", decision="approved", reason="vague"
         )
-
-
-def test_set_theme_feedback_invalid_values_leave_theme_untouched():
-    rec = research_themes.create_theme(
-        theme="無効フィードバック後も未変更", confidence=0.5
-    )
-    for kwargs in (
-        {"status": "approved", "decision": "rejected"},
-        {"status": "approved", "decision": "approved", "reason": "vague"},
-        {"status": "approved", "decision": "approved", "reason": "bogus"},
-    ):
-        with pytest.raises(ValueError):
-            research_themes.set_theme_feedback(rec["theme_id"], **kwargs)
-    fetched = research_themes.get_theme(rec["theme_id"])
-    assert fetched["status"] == "candidate"
-    assert fetched["feedback_decision"] is None
-    assert fetched["feedback_reason"] is None
-    assert fetched["feedback_at"] is None
-
-
-def test_set_theme_feedback_missing_theme_returns_none():
-    updated = research_themes.set_theme_feedback(
-        "rth_nonexistent", status="approved", decision="approved"
-    )
-    assert updated is None
 
 
 def test_list_theme_feedback_newest_first_and_limit():

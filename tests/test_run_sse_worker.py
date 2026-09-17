@@ -1,7 +1,6 @@
 """Tests for run-SSE common helpers, lock, and recovery (plan step 2)."""
 
 from obsidian_ai_hub.agents import store as agent_store
-from obsidian_ai_hub.coding import store as coding_store
 from obsidian_ai_hub.runs import events as run_events
 from obsidian_ai_hub.runs import manager as run_manager
 from obsidian_ai_hub.runs.instance import RunWorkerLock

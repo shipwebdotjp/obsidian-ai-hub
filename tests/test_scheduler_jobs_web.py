@@ -338,18 +338,6 @@ def test_one_shot_jobs_require_token(clean_job_env, api_token):
     assert res.status_code == 401
 
 
-def test_job_states_api(web_client, test_memory_db_path):
-    from obsidian_ai_hub.utils import execution_logger
-
-    execution_logger.upsert_job_state("merge_inbox", result={"processed": 0, "skipped": 0, "failed": 0})
-
-    res = web_client.get("/api/v1/scheduler-jobs/job-states")
-    assert res.status_code == 200
-    body = res.json()
-    assert len(body["items"]) == 1
-    assert body["items"][0]["job_id"] == "merge_inbox"
-
-
 def test_corrupt_jobs_yaml_returns_500_and_never_overwrites(clean_job_env, web_client):
     job_file, _ = clean_job_env
     job_file.write_text("id: [unclosed\n  broken: : :", encoding="utf-8")

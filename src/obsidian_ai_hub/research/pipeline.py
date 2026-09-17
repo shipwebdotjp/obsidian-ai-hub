@@ -2,16 +2,15 @@ from __future__ import annotations
 
 import json
 import logging
+import sqlite3
 from typing import Optional
 
 from obsidian_ai_hub.utils.embeddings import get_embedder
+from obsidian_ai_hub.database import get_db_connection
+from obsidian_ai_hub.research import feedback
 
 logger = logging.getLogger(__name__)
 
-
-import sqlite3
-from obsidian_ai_hub.database import get_db_connection
-from obsidian_ai_hub.research import feedback
 
 def create_theme_and_research(
     *,

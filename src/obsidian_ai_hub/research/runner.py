@@ -10,9 +10,12 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional, Sequence
+from typing import TYPE_CHECKING, Optional, Sequence
 
 from obsidian_ai_hub.utils import config, llm_client, prompt
+
+if TYPE_CHECKING:
+    from obsidian_ai_hub.hitl.dispatcher import HitlResult
 
 _research_executor = ThreadPoolExecutor(max_workers=1)
 
@@ -973,7 +976,6 @@ def run_approved_suggestion(ctx) -> "HitlResult":
         return HitlResult.complete(checkpoint=json.dumps({**cp, "phase": "rejected"}))
 
     job_id = cp.get("job_id")
-    phase = cp.get("phase", "awaiting_approval")
 
     if not job_id:
         job = db.create_job(theme_id, conn=ctx.conn)

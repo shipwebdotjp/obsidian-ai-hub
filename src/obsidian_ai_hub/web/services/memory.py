@@ -1,7 +1,6 @@
 from typing import Optional
 
 from obsidian_ai_hub import memory
-from obsidian_ai_hub.database import get_db_connection
 from obsidian_ai_hub.web import schemas
 
 

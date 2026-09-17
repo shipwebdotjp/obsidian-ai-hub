@@ -9,7 +9,6 @@ registration is idempotent per Task ID.
 
 import json
 
-import pytest
 
 import obsidian_ai_hub.agents.registry as registry_module
 from obsidian_ai_hub.tasks import store

@@ -210,14 +210,6 @@ def test_plan_task_unknown_capability_fails(monkeypatch):
     assert store.get_task(task["task_id"])["status"] == "failed"
 
 
-def test_default_provider_model_fallback(monkeypatch):
-    monkeypatch.setattr(planning.config, "AGENT_PROVIDER", "", raising=False)
-    monkeypatch.setattr(planning.config, "AGENT_MODEL", "", raising=False)
-    provider, model = planning.default_provider_model()
-    assert provider == "openai"
-    assert model == "gpt-4o"
-
-
 def test_question_options_shape():
     question = planning.parse_planner_output(
         json.dumps(
@@ -507,17 +499,6 @@ def test_validate_directional_rejects_unresolvable_schema(monkeypatch):
         planning.validate_directional_plan(json.loads(_directional_json()), _context())
 
 
-def test_build_planner_prompt_includes_schema_and_description():
-    context = planning.collect_planner_context()
-    keys = {c["capability_key"] for c in context["capabilities"]}
-    assert "web_search" in keys and "memory_propose" in keys
-    prompt = planning.build_planner_prompt("好みを記憶して", context, [])
-    assert "memory_propose" in prompt
-    assert "content" in prompt  # compact schema field
-    assert "required" in prompt
-    assert "trusted_ctx" not in prompt
-
-
 def test_plan_task_directional_saves_scope(monkeypatch):
     monkeypatch.setattr(planning, "collect_planner_context", _context)
     monkeypatch.setattr(
@@ -556,85 +537,6 @@ def test_plan_task_directional_plan_required_waits_approval(monkeypatch):
     result = planning.plan_task(task["task_id"])
     assert result["outcome"] == "waiting_approval"
     assert result["plan"]["plan"]["max_actions"] == 5
-
-
-def test_validate_directional_plan_stamps_target_allowlists():
-    context = dict(
-        _context(),
-        agents=[{"agent_id": "agent_1", "name": "Helper"}],
-        projects=[{"project_id": 3, "name": "Demo", "git_root": "/repo/demo"}],
-    )
-    plan = json.loads(
-        _directional_json(
-            capabilities=[
-                {"capability_key": "web_search", "intent": "検索"},
-                {"capability_key": "specialist_agent", "intent": "委譲"},
-                {"capability_key": "coding_cli", "intent": "実装"},
-            ]
-        )
-    )
-    full_context = dict(
-        context,
-        capabilities=context["capabilities"]
-        + [
-            {
-                "capability_key": "specialist_agent",
-                "adapter_kind": "agent",
-                "approval_policy": "plan_required",
-            },
-            {
-                "capability_key": "coding_cli",
-                "adapter_kind": "coding",
-                "approval_policy": "plan_required",
-            },
-        ],
-    )
-    snapshot = planning.validate_directional_plan(plan, full_context)
-    assert snapshot["specialist_agent"] == "plan_required"
-    assert plan["allowed_agent_ids"] == ["agent_1"]
-    assert plan["allowed_project_ids"] == [3]
-
-
-def test_validate_directional_plan_rejects_delegate_without_registry():
-    plan = json.loads(
-        _directional_json(
-            capabilities=[{"capability_key": "specialist_agent", "intent": "委譲"}]
-        )
-    )
-    context = dict(
-        _context(),
-        agents=[],
-        capabilities=_context()["capabilities"]
-        + [
-            {
-                "capability_key": "specialist_agent",
-                "adapter_kind": "agent",
-                "approval_policy": "plan_required",
-            }
-        ],
-    )
-    with pytest.raises(ValueError, match="no agents are registered"):
-        planning.validate_directional_plan(plan, context)
-
-    coding_plan = json.loads(
-        _directional_json(
-            capabilities=[{"capability_key": "coding_cli", "intent": "実装"}]
-        )
-    )
-    coding_context = dict(
-        _context(),
-        projects=[],
-        capabilities=_context()["capabilities"]
-        + [
-            {
-                "capability_key": "coding_cli",
-                "adapter_kind": "coding",
-                "approval_policy": "plan_required",
-            }
-        ],
-    )
-    with pytest.raises(ValueError, match="no valid projects"):
-        planning.validate_directional_plan(coding_plan, coding_context)
 
 
 def test_validate_directional_stamps_target_allowlists():

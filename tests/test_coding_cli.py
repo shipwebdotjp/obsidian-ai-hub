@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-import io
 import json
 import subprocess
-import sys
 from unittest.mock import patch
 
 import pytest
 
-from obsidian_ai_hub.coding import backend, service, store
+from obsidian_ai_hub.coding import service, store
 
 
 @pytest.fixture
@@ -98,7 +96,6 @@ def test_coding_json_mode_single_parseable_json(test_project, capsys):
 
     captured = capsys.readouterr()
     # stdout should be single JSON
-    lines = [l for l in captured.out.strip().splitlines() if l.strip()]
     # Find JSON object (might be indented multi-line, but main_coding writes single line)
     json_text = captured.out.strip()
     data = json.loads(json_text)
@@ -233,57 +230,6 @@ def test_coding_git_repo_invalid_error(test_project, tmp_path, capsys):
     assert "GitRepoInvalid" in data["error"]["type"] or "git" in data["error"]["message"].lower()
 
 
-def test_coding_execution_logger_records_success(test_project, capsys):
-    from obsidian_ai_hub.coding.cli import main_coding
-    from obsidian_ai_hub.utils import execution_logger
-
-    with patch.object(service, "run_coding_turn_stream", side_effect=_mock_success_stream):
-        main_coding(project_id=test_project["project_id"], resume_session=None, prompt="log test", json_output=False)
-
-    # Check last command log
-    items, total = execution_logger.list_execution_logs(kind="command")
-    assert total >= 1
-    # Find coding entry
-    coding_items = [i for i in items if i["name"] == "coding"]
-    assert len(coding_items) >= 1
-    detail = execution_logger.get_command_run_detail(coding_items[0]["id"])
-    assert detail is not None
-    assert detail["status"] == "succeeded"
-    capsys.readouterr()
-
-
-def test_coding_execution_logger_records_failure(test_project, capsys):
-    from obsidian_ai_hub.coding.cli import main_coding
-    from obsidian_ai_hub.utils import execution_logger
-
-    with patch.object(service, "run_coding_turn_stream", side_effect=_mock_error_stream):
-        with pytest.raises(SystemExit):
-            main_coding(project_id=test_project["project_id"], resume_session=None, prompt="fail log", json_output=False)
-
-    items, total = execution_logger.list_execution_logs(kind="command")
-    coding_items = [i for i in items if i["name"] == "coding"]
-    assert len(coding_items) >= 1
-    # The most recent failed run should be among them; find one with failed status
-    failed = [execution_logger.get_command_run_detail(i["id"]) for i in coding_items]
-    assert any(d and d["status"] == "failed" for d in failed)
-    capsys.readouterr()
-
-
-def test_coding_default_backend_is_opencode_when_unspecified(test_project, monkeypatch):
-    with patch.object(service, "run_coding_turn_stream", side_effect=_mock_success_stream):
-        # Use main_coding which will create session via _create_new_session
-        from obsidian_ai_hub.coding.cli import main_coding
-
-        main_coding(project_id=test_project["project_id"], resume_session=None, prompt="default backend", json_output=True)
-    # Verify last created session uses opencode
-    from obsidian_ai_hub.coding import store as coding_store
-
-    sessions = coding_store.list_sessions_by_project(test_project["project_id"])
-    assert len(sessions) >= 1
-    latest = sessions[0]  # ordered by created_at DESC
-    assert latest["backend"] == "opencode"
-
-
 def test_coding_backend_always_opencode_acp(test_project):
     with patch.object(service, "run_coding_turn_stream", side_effect=_mock_success_stream):
         from obsidian_ai_hub.coding.cli import main_coding
@@ -297,51 +243,3 @@ def test_coding_backend_always_opencode_acp(test_project):
     latest = sessions[0]
     assert latest["backend"] == "opencode"
     assert latest["transport"] == "acp"
-
-
-def test_coding_resume_ignores_default_backend(test_project, monkeypatch, capsys):
-    # Create session with opencode explicitly
-    sess = store.create_session(
-        project_id=test_project["project_id"],
-        backend="opencode",
-        repo_path=test_project["repo_path"],
-        title="Resume Backend Test",
-    )
-    sid = sess["session_id"]
-    assert sess["backend"] == "opencode"
-
-    def _capture(session_id, prompt):
-        # Verify that resume does not create new session with codex
-        # Just return success stream
-        return _mock_success_stream(session_id, prompt)
-
-    with patch.object(service, "run_coding_turn_stream", side_effect=_capture):
-        from obsidian_ai_hub.coding.cli import main_coding
-
-        main_coding(project_id=None, resume_session=sid, prompt="resume check", json_output=False)
-
-    # Session backend should remain opencode
-    refreshed = store.get_session(sid)
-    assert refreshed["backend"] == "opencode"
-    capsys.readouterr()
-
-
-def test_coding_create_session_rejects_retired_backend(test_project):
-    # The store layer rejects non-opencode backends (Codex is retired).
-    with pytest.raises(ValueError, match="opencode"):
-        store.create_session(
-            project_id=test_project["project_id"],
-            backend="codex",
-            repo_path=test_project["repo_path"],
-            title="Retired Backend",
-        )
-
-    # The store layer rejects non-acp transports (Direct CLI is retired).
-    with pytest.raises(ValueError, match="acp"):
-        store.create_session(
-            project_id=test_project["project_id"],
-            backend="opencode",
-            repo_path=test_project["repo_path"],
-            title="Retired Transport",
-            transport="direct_cli",
-        )

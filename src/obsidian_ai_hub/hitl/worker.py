@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 import signal
 import sqlite3
-import sys
 import threading
 import time
 import uuid
@@ -25,7 +24,6 @@ from obsidian_ai_hub.hitl.service import (
 )
 from obsidian_ai_hub.hitl.store import (
     get_questions_by_set,
-    get_run,
 )
 
 logger = logging.getLogger(__name__)

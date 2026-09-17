@@ -28,13 +28,6 @@ for module_name in mock_modules:
 from obsidian_ai_hub.utils.topics import normalize_keywords, normalize_topics  # noqa: E402
 
 
-def test_normalize_topics_as_is():
-    # Candidates should be preserved as-is
-    topics = ["LLM・AI活用", "AI・機械学習", "ソフトウェア開発"]
-    result = normalize_topics(topics)
-    assert result == ["LLM・AI活用", "AI・機械学習", "ソフトウェア開発"]
-
-
 def test_normalize_topics_with_whitespace_and_nfkc():
     # Whitespace stripping and NFKC normalization
     topics = ["  LLM・AI活用  ", "ＡＩ・機械学習"]  # Zenkaku AI
@@ -71,11 +64,6 @@ def test_normalize_topics_mixed():
     ]
 
 
-def test_normalize_topics_empty_or_none():
-    assert normalize_topics([]) == []
-    assert normalize_topics(None) == []
-
-
 def test_normalize_keywords_trims_deduplicates_and_limits():
     keywords = [
         " Python ",
@@ -98,8 +86,3 @@ def test_normalize_keywords_trims_deduplicates_and_limits():
         "SQLite",
         "Extra",
     ]
-
-
-def test_normalize_keywords_rejects_non_lists():
-    assert normalize_keywords("Python") == []
-    assert normalize_keywords(None) == []

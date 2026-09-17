@@ -18,7 +18,7 @@ import json
 import logging
 from typing import Any, Callable, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 
 from obsidian_ai_hub.tasks import store as task_store
 from obsidian_ai_hub.tasks.directional import (
@@ -270,7 +270,7 @@ def build_orchestrator_prompt(
         lines.append(f"- {directive.capability_key}: {directive.intent or '(意図なし)'}")
         schema_text = schemas.get(directive.capability_key)
         if schema_text:
-            indented = "\n".join(f"    {l}" for l in str(schema_text).splitlines())
+            indented = "\n".join(f"    {line}" for line in str(schema_text).splitlines())
             lines.append(indented)
     if plan.constraints:
         lines += ["", f"制約:\n{plan.constraints}"]

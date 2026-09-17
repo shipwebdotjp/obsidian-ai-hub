@@ -8,7 +8,6 @@ from typing import Any, Callable, Dict, List, Optional
 
 from obsidian_ai_hub.database import get_db_connection
 from obsidian_ai_hub.hitl.store import (
-    auto_connection,
     get_current_iso,
     get_run,
     upsert_run,

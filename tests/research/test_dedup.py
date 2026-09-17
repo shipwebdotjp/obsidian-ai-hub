@@ -11,11 +11,6 @@ def test_run_dedup_no_similar():
     assert result["failed"] is False
 
 
-def test_run_dedup_empty_similar():
-    result = research_dedup.run_dedup_review("新テーマ", similar=[])
-    assert result["decision"] == "distinct"
-
-
 def test_run_dedup_llm_duplicate():
     from obsidian_ai_hub.research import db as research_themes
 

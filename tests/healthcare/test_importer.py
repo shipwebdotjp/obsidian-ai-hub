@@ -85,7 +85,7 @@ def test_idempotent_second_import(test_healthcare_db_path: Path, tmp_path: Path)
     from obsidian_ai_hub.healthcare.importer import import_export
     from obsidian_ai_hub.healthcare.store import get_healthcare_db_connection
 
-    r1 = import_export(export_dir)
+    import_export(export_dir)
     r2 = import_export(export_dir)
     assert r2["ignored_duplicates"] == 7 + 1 + 1  # records+workouts+activity
     conn = get_healthcare_db_connection()
@@ -187,7 +187,6 @@ def test_missing_export_dir_raises(tmp_path: Path):
     with pytest.raises(FileNotFoundError, match="Export dir not found"):
         import_export(tmp_path / "nonexistent")
 
-    helpers = _helpers()
     empty_dir = tmp_path / "empty"
     empty_dir.mkdir()
     with pytest.raises(FileNotFoundError, match="export.xml not found"):

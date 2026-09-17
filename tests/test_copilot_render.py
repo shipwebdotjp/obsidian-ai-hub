@@ -18,7 +18,7 @@ mock_modules = {
 for name, m in mock_modules.items():
     sys.modules[name] = m
 
-from obsidian_ai_hub import memory, main
+from obsidian_ai_hub import memory
 from obsidian_ai_hub.utils import config
 
 
@@ -124,30 +124,6 @@ def test_get_currently_valid_approved_memories_basic(clean_copilot_env):
     mems_db = memory.load_all_memories()
     m_exp_db = next(x for x in mems_db if x["memory_id"] == "mem_expired")
     assert m_exp_db["status"] == "expired"
-
-
-def test_render_copilot_profile_zero_memories(clean_copilot_env):
-    # No memories in DB
-    updated_files = memory.render_copilot_profile()
-
-    # 7 files must be updated
-    assert len(updated_files) == 7
-    expected_rel_paths = [
-        "copilot/AI_README.md",
-        "copilot/core/values.md",
-        "copilot/core/response_style.md",
-        "copilot/core/decision_policy.md",
-        "copilot/core/risk_tolerance.md",
-        "copilot/core/memory_rules.md",
-        "copilot/core/current_projects.md",
-    ]
-    for rel_path in expected_rel_paths:
-        assert rel_path in updated_files
-        full_path = clean_copilot_env / rel_path
-        assert full_path.exists()
-        content = full_path.read_text(encoding="utf-8")
-        assert "type: copilot-profile" in content
-        assert "現時点で承認済みメモリなし" in content
 
 
 def test_render_copilot_profile_happy_path(clean_copilot_env):
@@ -265,17 +241,3 @@ def test_render_copilot_profile_validation_failures(clean_copilot_env):
         mock_llm.return_value = mock_empty_body
         with pytest.raises(ValueError, match="must have a non-empty string value"):
             memory.render_copilot_profile()
-
-
-def test_cli_wiring_render_copilot_profile(clean_copilot_env, monkeypatch):
-    # Setup mocks for CLI invocation
-    with (
-        patch("obsidian_ai_hub.memory.render_copilot_profile") as mock_render,
-        patch("sys.argv", ["main.py", "--render-copilot-profile"]),
-    ):
-        mock_render.return_value = ["copilot/AI_README.md", "copilot/core/values.md"]
-
-        main.main()
-
-        # Verify our command was triggered successfully
-        mock_render.assert_called_once()

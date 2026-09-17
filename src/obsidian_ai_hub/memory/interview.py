@@ -2,13 +2,11 @@ from __future__ import annotations
 
 import json
 import logging
-import sqlite3
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Any, Dict, List
+from typing import Optional
 
 from obsidian_ai_hub.database import get_db_connection
 from obsidian_ai_hub.utils import config, prompt, llm_client
-from obsidian_ai_hub.hitl.types import QuestionDraft
 from obsidian_ai_hub.hitl.service import register_run_and_questions
 from obsidian_ai_hub.hitl.dispatcher import HitlContext, HitlResult
 from obsidian_ai_hub.memory.extraction import _load_weekly_memory_sources, _week_bounds

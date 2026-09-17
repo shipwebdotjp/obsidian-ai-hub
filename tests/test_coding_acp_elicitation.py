@@ -603,7 +603,6 @@ def test_execute_turn_elicitation_real_subprocess_cancel(tmp_path):
 
 
 def _make_handler(run, cancel_event, deadline_s=30):
-    import time as _time
     return acp_el.make_elicitation_handler(
         run_id=run["run_id"],
         session_id=run["session_id"],
@@ -622,7 +621,8 @@ def _make_handler(run, cancel_event, deadline_s=30):
 
 
 def test_make_handler_registers_hitl_and_accepts(tmp_path):
-    import threading, time
+    import threading
+    import time
     _, run = _seed_coding_run(tmp_path, 981)
     cancel_event = threading.Event()
     handler = _make_handler(run, cancel_event)
@@ -653,7 +653,8 @@ def test_make_handler_registers_hitl_and_accepts(tmp_path):
 
 
 def test_make_handler_cancel_event_aborts(tmp_path):
-    import threading, time
+    import threading
+    import time
     _, run = _seed_coding_run(tmp_path, 982)
     cancel_event = threading.Event()
     cancel_event.set()
@@ -664,7 +665,8 @@ def test_make_handler_cancel_event_aborts(tmp_path):
 
 
 def test_waiter_coding_run_cancel_aborts(tmp_path):
-    import threading, time
+    import threading
+    import time
     _, run = _seed_coding_run(tmp_path, 983)
     parsed = _parsed()
     hitl_run_id, _ = _seed_elicitation_hitl(run, parsed)

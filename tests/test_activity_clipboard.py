@@ -1,4 +1,3 @@
-import pytest
 from obsidian_ai_hub.activity.clipboard import sanitize_clipboard_text, get_sanitized_clipboard_text
 
 

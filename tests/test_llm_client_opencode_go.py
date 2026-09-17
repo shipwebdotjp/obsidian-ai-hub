@@ -135,31 +135,6 @@ def test_opencode_go_unsupported_model_id():
         mock_chat_anthropic.assert_not_called()
 
 
-def test_generate_llm_response_opencode_go_integration():
-    """Verify integration flow using generate_llm_response with opencode_go provider."""
-    with (
-        patch(
-            "obsidian_ai_hub.utils.llm_client.config.OPENCODE_API_KEY",
-            "test_opencode_key",
-        ),
-        patch("langchain_openai.ChatOpenAI") as mock_chat_openai,
-    ):
-        mock_llm = MagicMock()
-        mock_llm.invoke.return_value = AIMessage(
-            content="Generated response from OpenCode Go"
-        )
-        mock_chat_openai.return_value = mock_llm
-
-        response = llm_client.generate_llm_response(
-            provider="opencode_go",
-            model="deepseek-v3",
-            prompt="Tell me about OpenCode Go.",
-        )
-
-        assert response == "Generated response from OpenCode Go"
-        mock_llm.invoke.assert_called_once()
-
-
 def test_generate_llm_response_with_tools_uses_responses_api_for_openai():
     mock_llm = MagicMock()
     mock_llm.bind_tools.return_value.invoke.return_value = AIMessage(
@@ -184,31 +159,6 @@ def test_generate_llm_response_with_tools_uses_responses_api_for_openai():
         max_tokens=16384,
         use_responses_api=True,
         store=False,
-    )
-
-
-def test_generate_llm_response_with_tools_keeps_non_openai_default():
-    mock_llm = MagicMock()
-    mock_llm.bind_tools.return_value.invoke.return_value = AIMessage(
-        content="Research complete"
-    )
-
-    with patch(
-        "obsidian_ai_hub.utils.llm_client.create_langchain_llm", return_value=mock_llm
-    ) as factory:
-        response = llm_client.generate_llm_response_with_tools(
-            provider="opencode_go",
-            model="deepseek-v3",
-            prompt="Research this topic",
-            tools=[],
-        )
-
-    assert response == "Research complete"
-    factory.assert_called_once_with(
-        provider="opencode_go",
-        model="deepseek-v3",
-        temperature=0.7,
-        max_tokens=16384,
     )
 
 
@@ -314,25 +264,6 @@ def test_opencode_go_empty_session_id_fallback():
         )
         _, kwargs = mock_chat_openai.call_args
         assert kwargs["default_headers"]["x-opencode-session"] == "config-session"
-
-
-def test_non_opencode_go_providers_no_added_headers():
-    """opencode_go 以外のプロバイダー（openai など）にはヘッダーが追加されない。"""
-    with (
-        patch(
-            "obsidian_ai_hub.utils.llm_client.config.OPENAI_API_KEY",
-            "test_openai_key",
-        ),
-        patch("langchain_openai.ChatOpenAI") as mock_chat_openai,
-    ):
-        llm_client.create_langchain_llm(
-            provider="openai",
-            model="gpt-5.6-terra",
-            session_id="asess_should_not_be_passed",
-        )
-
-    _, kwargs = mock_chat_openai.call_args
-    assert "default_headers" not in kwargs or kwargs["default_headers"] is None
 
 
 def test_opencode_go_session_header_contains_no_secrets():

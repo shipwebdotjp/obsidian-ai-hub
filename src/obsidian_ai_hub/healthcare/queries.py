@@ -38,7 +38,7 @@ def get_daily_aggregates(
 
     # Validate dates quickly; caller already validated but be defensive.
     try:
-        s = date.fromisoformat(start_date)
+        date.fromisoformat(start_date)
         e = date.fromisoformat(end_date)
     except ValueError:
         return {}
@@ -101,7 +101,7 @@ def get_daily_aggregates_multi(
         return {}
     # Validate dates defensively
     try:
-        s = date.fromisoformat(start_date)
+        date.fromisoformat(start_date)
         e = date.fromisoformat(end_date)
     except ValueError:
         return {t: {} for t in types}
@@ -190,7 +190,7 @@ def get_daily_category_durations(
     if not type_:
         return {}
     try:
-        s = date.fromisoformat(start_date)
+        date.fromisoformat(start_date)
         e = date.fromisoformat(end_date)
     except ValueError:
         return {}
@@ -264,7 +264,7 @@ def get_daily_stand_counts(
     if not start_date or not end_date:
         return {}
     try:
-        s = date.fromisoformat(start_date)
+        date.fromisoformat(start_date)
         e = date.fromisoformat(end_date)
     except ValueError:
         return {}

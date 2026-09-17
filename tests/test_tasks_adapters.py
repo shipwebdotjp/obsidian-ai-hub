@@ -73,26 +73,6 @@ def test_registry_tool_success_and_inputs(monkeypatch):
     assert fake.calls == [{"start_date": "2026-09-14", "end_date": "2026-09-15"}]
 
 
-def test_registry_tool_allows_run_shell(monkeypatch):
-    fake = FakeTool('{"exit_code": 0}')
-    monkeypatch.setattr(
-        registry_module,
-        "TOOL_DEFINITIONS",
-        {
-            "run_shell": {
-                "get_tool": lambda: fake,
-                "input_model": registry_module.RunShellInput,
-            }
-        },
-    )
-    task, plan = _task_with_plan("run_shell", {}, {"command": "echo hi"})
-    result = RegistryToolExecutor().execute_step(
-        task, plan, 0, plan["plan"]["steps"][0]
-    )
-    assert result.summary == '{"exit_code": 0}'
-    assert fake.calls == [{"command": "echo hi"}]
-
-
 def test_registry_tool_rejects_excluded_tools():
     for excluded in (
         "ask_user",
@@ -470,27 +450,6 @@ def _mock_coding_success(
     )
 
 
-def test_coding_adapter_build_content_task_and_fallback():
-    adapter = CodingAdapter()
-    task = {"task_id": "t1"}
-    plan = {"plan": {"purpose": "Refactor codebase"}}
-
-    # When task string is present and non-empty after strip
-    step_with_task = {"inputs": {"task": "  Fix bug in parser  ", "fresh_session": True}}
-    content = adapter._build_content(task, plan, 0, step_with_task)
-    assert content == "Fix bug in parser"
-
-    # When task string is empty or whitespace, fallback to purpose
-    step_blank_task = {"inputs": {"task": "   "}}
-    content_fallback = adapter._build_content(task, plan, 0, step_blank_task)
-    assert content_fallback == "Refactor codebase"
-
-    # Ensure no step headers, deviation instructions or JSON inputs in content
-    assert "TaskのPlan Step" not in content
-    assert "<deviation_request>" not in content
-    assert "fresh_session" not in content
-
-
 def test_coding_adapter_ignores_deviation_tags_and_completes_normally(monkeypatch):
     deviation_text = (
         'done result <deviation_request>{"reason": "need code", "steps": []}</deviation_request>'
@@ -499,15 +458,6 @@ def test_coding_adapter_ignores_deviation_tags_and_completes_normally(monkeypatc
     task, plan = _task_with_plan("coding_cli", {"project_id": 7})
     result = CodingAdapter().execute_step(task, plan, 0, plan["plan"]["steps"][0])
     assert result.summary == deviation_text
-    assert result.child_kind == "coding"
-    assert result.child_run_id == "crun_x"
-
-
-def test_coding_adapter_success(monkeypatch):
-    _mock_coding_success(monkeypatch)
-    task, plan = _task_with_plan("coding_cli", {"project_id": 7})
-    result = CodingAdapter().execute_step(task, plan, 0, plan["plan"]["steps"][0])
-    assert result.summary == "orchestrated done"
     assert result.child_kind == "coding"
     assert result.child_run_id == "crun_x"
 

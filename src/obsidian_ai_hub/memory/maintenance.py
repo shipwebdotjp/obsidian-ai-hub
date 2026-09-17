@@ -6,10 +6,8 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 import sqlite3
 
-from obsidian_ai_hub.database import get_db_connection
 from obsidian_ai_hub.utils import config, llm_client, prompt
 from obsidian_ai_hub.memory.models import (
-    deserialize_memory,
     serialize_memory,
     get_current_timestamp,
     normalize_content,
@@ -95,8 +93,6 @@ def build_maintenance_groups(memories: List[Dict[str, Any]], embedder=None) -> L
     if not approved_mems:
         return []
 
-    # Map each memory to an index
-    id_to_idx = {m["memory_id"]: i for i, m in enumerate(approved_mems)}
     n = len(approved_mems)
     parent = list(range(n))
 

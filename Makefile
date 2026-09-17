@@ -113,11 +113,3 @@ serve-restart:
 
 serve-debug:
 	uv run -m obsidian_ai_hub --serve --debug
-
-# E2E 探索サーバー（Ctrl-C で停止）
-e2e-serve: build-web
-	uv run python -m obsidian_ai_hub.testing.e2e_server
-
-# E2E テストを実行（フロントエンドをビルドしてからブラウザテスト）
-test-e2e: build-web
-	uv run pytest -m e2e

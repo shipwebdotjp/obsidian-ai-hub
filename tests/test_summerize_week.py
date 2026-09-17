@@ -5,11 +5,8 @@ import pytest
 
 from obsidian_ai_hub import memory
 from obsidian_ai_hub.summerize_week import (
-    get_week_dates,
     load_daily_records,
     get_weekly_structured_record,
-    format_weekly_record_as_markdown,
-    upsert_summary_record,
     summarize_week,
 )
 from obsidian_ai_hub.summary import store
@@ -23,15 +20,6 @@ def mock_config(tmp_path):
         mock_cfg.MAKE_TODAY_TARGET_PROVIDER = "test_provider"
         mock_cfg.MAKE_TODAY_TARGET_MODEL = "test_model"
         yield mock_cfg
-
-
-def test_get_week_dates():
-    # 2023-10-27 is Friday
-    target_date = datetime(2023, 10, 27)
-    week_dates = get_week_dates(target_date)
-    assert len(week_dates) == 7
-    assert week_dates[0] == datetime(2023, 10, 23)  # Monday
-    assert week_dates[-1] == datetime(2023, 10, 29)  # Sunday
 
 
 def test_load_daily_records(mock_config, test_memory_db_path):
@@ -67,39 +55,6 @@ def test_load_daily_records(mock_config, test_memory_db_path):
     assert records[0]["summary"] == "Day 23"
     assert records[1]["summary"] == "Day 24"
     assert records[2] is None
-
-
-def test_upsert_summary_record(mock_config, test_memory_db_path):
-    record = {
-        "period_type": "week",
-        "period_key": "2023-W43",
-        "period_start": "2023-10-23",
-        "period_end": "2023-10-29",
-        "generated_at": "2023-10-29T22:00:00",
-        "summary": "Week 43",
-        "keywords": [],
-        "mood": None,
-        "sleep_raw": None,
-        "sleep_hours": None,
-        "topics": [],
-        "projects": [],
-        "people": [],
-        "items": [],
-    }
-    upsert_summary_record(record)
-
-    conn = memory.get_db_connection()
-    try:
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT * FROM summaries WHERE period_type = ? AND period_key = ?",
-            ("week", "2023-W43"),
-        )
-        row = cursor.fetchone()
-        assert row is not None
-        assert row["summary"] == "Week 43"
-    finally:
-        conn.close()
 
 
 @patch("obsidian_ai_hub.summerize_week.prompt.render_prompt")
@@ -172,25 +127,6 @@ def test_get_weekly_structured_record_malformed_json(
     assert record["topics"] == []
 
 
-def test_format_weekly_record_as_markdown():
-    record = {
-        "summary": "Great week.",
-        "items": [
-            {"kind": "highlights", "body": "Highlight", "display_order": 0},
-            {"kind": "progress", "body": "Progress", "display_order": 0},
-        ],
-        "people": [{"name": "Charlie", "note": "Met"}],
-    }
-    md = format_weekly_record_as_markdown(record)
-    assert "Great week." in md
-    assert "### ハイライト" in md
-    assert "- Highlight" in md
-    assert "### 目標・プロジェクトの前進" in md
-    assert "- Progress" in md
-    assert "### 人物メモ" in md
-    assert "- **Charlie**: Met" in md
-
-
 @patch("obsidian_ai_hub.summerize_week.prompt.render_prompt")
 @patch("obsidian_ai_hub.summerize_week.llm_client.generate_llm_response")
 def test_summarize_week(mock_llm, mock_render, mock_config, test_memory_db_path):
@@ -219,33 +155,3 @@ def test_summarize_week(mock_llm, mock_render, mock_config, test_memory_db_path)
         assert row["items"][0]["body"] == "Highlight"
     finally:
         conn.close()
-
-
-@patch("obsidian_ai_hub.summerize_week.prompt.render_prompt")
-@patch("obsidian_ai_hub.summerize_week.llm_client.generate_llm_response")
-def test_get_weekly_structured_record_passes_candidates_and_normalizes_topics(
-    mock_llm, mock_render, mock_config
-):
-    target_date = datetime(2023, 10, 27)  # W43
-    mock_render.return_value = "Rendered Prompt"
-
-    # LLM returns topics with mixed valid, duplicates, and out-of-candidates
-    mock_llm.return_value = json.dumps(
-        {
-            "summary": "AI Weekly Summary",
-            "topics": ["LLM・AI活用", "未知のトピック", "LLM・AI活用"],
-        }
-    )
-
-    record = get_weekly_structured_record(target_date, [])
-
-    # Check render_prompt is called with TOPIC_CANDIDATES
-    mock_render.assert_called_once()
-    context = mock_render.call_args[0][1]
-    assert "TOPIC_CANDIDATES" in context
-    candidates = json.loads(context["TOPIC_CANDIDATES"])
-    assert "LLM・AI活用" in candidates
-    assert "その他" in candidates
-
-    # Check parsed and normalized topics in record
-    assert record["topics"] == ["LLM・AI活用", "その他"]

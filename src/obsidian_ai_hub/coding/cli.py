@@ -6,7 +6,6 @@ import asyncio
 import json
 import sys
 import uuid
-from datetime import datetime
 from typing import Any, Dict, Optional
 
 from obsidian_ai_hub.coding import backend, service, store

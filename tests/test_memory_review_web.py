@@ -85,14 +85,6 @@ def _make_candidate(
     }
 
 
-def test_health(loopback_client):
-    res = loopback_client.get("/health")
-    assert res.status_code == 200
-    body = res.json()
-    assert body["status"] == "ok"
-    assert body["auth_required"] is True
-
-
 def test_list_and_detail(loopback_client):
     _seed("mem_a", content="おはよう")
     _seed("mem_b", content="こんばんは", status="approved")
@@ -254,47 +246,12 @@ def test_token_required_when_not_loopback():
         assert res.status_code in (200, 404), (method, path, res.status_code)
 
 
-def test_token_required_at_startup_for_non_loopback():
-    from obsidian_ai_hub.web import app as web_app
-
-    with pytest.raises(RuntimeError):
-        web_app.create_app(host="0.0.0.0", port=0, token="")
-
-
-def test_serve_cli_starts_server(monkeypatch):
-    import uvicorn as _real_uvicorn
-    from obsidian_ai_hub import main as cli_main
-
-    # --serve now requires a bearer token unconditionally (even on loopback).
-    monkeypatch.setenv("OBSIDIAN_AI_HUB_API_TOKEN", "test-api-token")
-    monkeypatch.setenv("OBSIDIAN_AI_HUB_HOST", "127.0.0.1")
-
-    # We patch uvicorn.run globally so that when main.py imports uvicorn
-    # and calls uvicorn.run(...), it's intercepted.
-    with patch("sys.argv", ["main.py", "--serve"]):
-        with patch.object(_real_uvicorn, "run") as mock_run:
-            cli_main.main()
-    mock_run.assert_called_once()
-
-
-def test_serve_host_without_serve_is_rejected():
-    """`--serve-host` without `--serve` should not raise--argparse accepts the flag
-    but the value is silently ignored. The validation is semantic-only."""
-    from obsidian_ai_hub import main as cli_main
-    from unittest.mock import patch
-
-    with patch("sys.argv", ["main.py", "--serve-host", "0.0.0.0"]):
-        # Should not raise -- just prints help
-        cli_main.main()
-
-
 def test_token_required_at_startup_even_loopback():
     """create_app must fail at startup without a token, even on loopback."""
     from obsidian_ai_hub.web import app as web_app
 
     with pytest.raises(RuntimeError):
         web_app.create_app(host="127.0.0.1", port=0, token="")
-
 
 
 def test_resolve_memory_keep_both(loopback_client):

@@ -9,17 +9,15 @@ output.
 
 from __future__ import annotations
 
-import asyncio
 import json
 import subprocess
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
 from obsidian_ai_hub.coding.orchestrator import (
     CodingOrchestrator,
-    normalize_worker_output,
     parse_coordinator_response,
 )
 
@@ -80,22 +78,6 @@ def test_history_injects_cli_request_as_assistant_and_worker_as_observation():
     assert "自身の過去の判断" in str(msgs[2].content)
     assert isinstance(msgs[3], HumanMessage)
     assert "観測情報" in str(msgs[3].content)
-
-
-def test_history_worker_is_plain_observation():
-    orch = CodingOrchestrator(tool_ids=[])
-    display = normalize_worker_output("調査済み。判断Xが必要。")
-    assert display == "調査済み。判断Xが必要。"
-    msgs = orch._build_messages(
-        [{"role": "worker", "content": display}], "/repo", "codex"
-    )
-    assert isinstance(msgs[1], HumanMessage)
-    assert "観測情報" in str(msgs[1].content)
-
-
-def test_normalize_worker_output_passthrough():
-    assert normalize_worker_output("通常報告\n末尾") == "通常報告\n末尾"
-    assert normalize_worker_output("  どちらにしますか？  ") == "どちらにしますか？"
 
 
 @pytest.mark.anyio

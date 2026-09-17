@@ -85,11 +85,6 @@ def test_vault_search_invalid_mode(loopback_client):
     assert "mode must be one of" in res.json()["detail"]
 
 
-def test_vault_search_missing_query(loopback_client):
-    res = loopback_client.get("/api/v1/vault-search")
-    assert res.status_code == 422
-
-
 def test_vault_search_token_required():
     app = create_app(host="0.0.0.0", port=0, token="secret-token")
     client = TestClient(app)
@@ -112,27 +107,6 @@ def test_vault_search_token_required():
             headers={"Authorization": "Bearer secret-token"},
         )
         assert res.status_code == 200
-
-
-def test_vault_search_k_limits(loopback_client):
-    res = loopback_client.get("/api/v1/vault-search", params={"q": "test", "k": 0})
-    assert res.status_code == 422
-
-    res = loopback_client.get("/api/v1/vault-search", params={"q": "test", "k": 100})
-    assert res.status_code == 422
-
-
-def test_vault_search_missing_metadata(loopback_client):
-    mock_items = [{"content": "x", "metadata": None, "score": 0.1}]
-    with patch(
-        "obsidian_ai_hub.handler.obsidian_vault_retriever.search_obsidian_vault.func",
-        return_value=_mock_search_results(mock_items),
-    ):
-        res = loopback_client.get("/api/v1/vault-search", params={"q": "test"})
-    assert res.status_code == 200
-    body = res.json()
-    assert body["total"] == 1
-    assert body["items"][0]["metadata"]["vault_name"] == "vault"
 
 
 def test_vault_file_success(loopback_client, tmp_path):

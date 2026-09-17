@@ -13,6 +13,12 @@ from obsidian_ai_hub.web.service import (
     PrincipalPersonConflictError,
 )
 from obsidian_ai_hub.summary.store import normalize_entity_name
+from obsidian_ai_hub.web.services.person_relations import (
+    create_person_relation,
+    create_person_relation_type,
+    get_relationship_to_principal_for_ai,
+)
+from obsidian_ai_hub.agents.registry import resolve_tools_with_context
 
 
 def _helper_create_person(display_name: str) -> dict:
@@ -26,14 +32,6 @@ def _helper_create_person(display_name: str) -> dict:
             (p_id, display_name, norm),
         )
     return {"person_id": p_id, "display_name": display_name, "normalized_name": norm}
-
-
-from obsidian_ai_hub.web.services.person_relations import (
-    create_person_relation,
-    create_person_relation_type,
-    get_relationship_to_principal_for_ai,
-)
-from obsidian_ai_hub.agents.registry import resolve_tools_with_context
 
 
 @pytest.fixture

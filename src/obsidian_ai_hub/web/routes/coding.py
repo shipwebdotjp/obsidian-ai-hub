@@ -1,7 +1,7 @@
 """FastAPI router for dedicated coding workspace."""
 
 import asyncio
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
