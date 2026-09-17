@@ -101,12 +101,12 @@ def test_runner_fails_closed_with_legacy_files(monkeypatch, tmp_path):
         recurring.get_jobs_file_and_revision()
 
 
-def test_db_v48_copies_task_state_to_job_state_and_drops_old(tmp_path, monkeypatch):
-    from obsidian_ai_hub.utils import config as app_config
+def test_db_v48_copies_task_state_to_job_state_and_drops_old(tmp_path):
     from obsidian_ai_hub import database
 
     db_file = tmp_path / "legacy.sqlite3"
     conn = sqlite3.connect(str(db_file))
+    conn.row_factory = sqlite3.Row
     conn.execute("""
         CREATE TABLE task_state (
             task_id TEXT PRIMARY KEY,
@@ -130,11 +130,9 @@ def test_db_v48_copies_task_state_to_job_state_and_drops_old(tmp_path, monkeypat
     )
     conn.execute("PRAGMA user_version = 47;")
     conn.commit()
-    conn.close()
 
-    monkeypatch.setattr(app_config, "MEMORY_SQLITE_PATH", db_file)
-    conn = database.get_db_connection()
     try:
+        database.run_migration_v48(conn)
         tables = {
             r[0]
             for r in conn.execute(
