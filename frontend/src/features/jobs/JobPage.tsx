@@ -75,6 +75,7 @@ export default function JobPage() {
   const [oneShotDetailLoading, setOneShotDetailLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<"recurring" | "one-shot">("recurring");
 
   const primaryInputRef = useRef<HTMLInputElement>(null);
 
@@ -535,8 +536,28 @@ export default function JobPage() {
         </div>
       </header>
 
+      {/* Tab nav */}
+      <div className="flex shrink-0 gap-1 border-b border-slate-200 bg-white px-4 sm:px-6">
+        <button
+          type="button"
+          onClick={() => setActiveTab("recurring")}
+          className={`rounded-t px-4 py-2 text-sm font-semibold ${activeTab === "recurring" ? "border-b-2 border-slate-900 bg-white text-slate-900" : "text-slate-500 hover:bg-slate-100"} cursor-pointer`}
+        >
+          定期実行ジョブ
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab("one-shot")}
+          className={`rounded-t px-4 py-2 text-sm font-semibold ${activeTab === "one-shot" ? "border-b-2 border-slate-900 bg-white text-slate-900" : "text-slate-500 hover:bg-slate-100"} cursor-pointer`}
+        >
+          ワンショット実行ジョブ
+        </button>
+      </div>
+
       {/* Main Content Area */}
       <div className="flex-1 overflow-auto p-4 sm:p-6">
+        {activeTab === "recurring" && (
+        <>
         <h2 className="mb-3 text-sm font-bold text-slate-800">定期実行ジョブ</h2>
         {error && (
           <div className="mb-6 rounded-lg bg-red-50 p-4 text-sm text-red-600">
@@ -630,8 +651,12 @@ export default function JobPage() {
           </div>
         )}
 
+        </>
+        )}
+        {activeTab === "one-shot" && (
+        <>
         {/* One-shot Jobs Section */}
-        <h2 className="mb-3 mt-8 text-sm font-bold text-slate-800">ワンショット実行ジョブ</h2>
+        <h2 className="mb-3 text-sm font-bold text-slate-800">ワンショット実行ジョブ</h2>
         <p className="mb-3 text-xs text-slate-500">
           Agent が register_one_shot_job で登録した一度だけ実行するジョブ。未完了を優先して表示し、終端履歴は30日間保持。UI からの手動登録はなし。
         </p>
@@ -715,6 +740,8 @@ export default function JobPage() {
           <p className="mt-2 text-xs text-slate-400">
             {oneShotTotal} 件中 {oneShotJobs.length} 件を表示
           </p>
+        )}
+        </>
         )}
 
         {/* One-shot Detail Modal */}
