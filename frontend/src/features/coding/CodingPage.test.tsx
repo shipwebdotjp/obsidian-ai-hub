@@ -344,7 +344,7 @@ describe("CodingPage", () => {
     expect(screen.queryByLabelText("新規セッションのモデル")).not.toBeInTheDocument();
   });
 
-  it("keeps the model status bar under the input and changes the session model", async () => {
+  it("shows only the model selector under the input and changes the session model", async () => {
     vi.mocked(codingApi.getCodingConfig).mockResolvedValue({
       default_backend: "opencode",
       opencode_model: "model-a",
@@ -377,12 +377,14 @@ describe("CodingPage", () => {
 
     renderPage();
 
-    await waitFor(() => {
-      expect(screen.getByText("モデル: model-a")).toBeInTheDocument();
-    });
-
-    const modelSelect = screen.getByLabelText("モデルを変更") as HTMLSelectElement;
+    const modelSelect = (await screen.findByLabelText(
+      "モデルを変更",
+    )) as HTMLSelectElement;
+    // The select's value is the currently selected model; no separate
+    // "現在のモデル" text label is rendered.
     expect(modelSelect.value).toBe("model-a");
+    expect(screen.queryByLabelText("現在のモデル")).not.toBeInTheDocument();
+    expect(screen.queryByText(/^モデル: /)).not.toBeInTheDocument();
 
     fireEvent.change(modelSelect, { target: { value: "model-b" } });
 

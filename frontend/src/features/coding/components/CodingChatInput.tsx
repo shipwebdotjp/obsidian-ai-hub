@@ -172,10 +172,9 @@ export function CodingChatInput({
         </button>
       </form>
 
-      {/* Model status bar: current model + allowlisted change (next message onward) */}
-      <div className="mt-2 flex items-center gap-2 text-[11px] text-slate-500">
-        <span aria-label="現在のモデル">モデル: {effectiveModel || "—"}</span>
-        {availableModels.length > 0 && (
+      {/* Model selector: allowlisted models only (applies from the next message) */}
+      {availableModels.length > 0 && (
+        <div className="mt-2 flex items-center">
           <select
             value={effectiveModel || ""}
             onChange={(e) => onChangeModel?.(e.target.value)}
@@ -190,9 +189,8 @@ export function CodingChatInput({
               </option>
             ))}
           </select>
-        )}
-        {modelChanging && <span>変更中...</span>}
-      </div>
+        </div>
+      )}
     </div>
   );
 }
