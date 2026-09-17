@@ -281,3 +281,92 @@ def test_merge_content_reminder_empty_due_date_is_accepted(
     merged = daily_file.read_text(encoding="utf-8")
     assert "[reminder]" in merged
     assert _count_reminder_runs() == 1
+
+
+def _count_task_agent_tasks() -> int:
+    from obsidian_ai_hub.tasks import store as task_store
+
+    return len(task_store.list_tasks())
+
+
+def test_merge_content_task_submits_via_task_agent_intake(
+    tmp_path: Path, test_memory_db_path
+):
+    from obsidian_ai_hub.tasks import intake as task_intake
+
+    daily_file = tmp_path / "2026-05-09.md"
+    daily_file.write_text("# Daily\n## 📝メモ\n", encoding="utf-8")
+
+    with (
+        patch.object(
+            obsidian_inbox_merge.llm_client,
+            "generate_llm_response",
+            return_value='{"category":"task"}',
+        ),
+        patch.object(
+            task_intake, "submit_request", wraps=task_intake.submit_request
+        ) as submit_spy,
+    ):
+        result = obsidian_inbox_merge.merge_content_into_daily_note(
+            "xxxを実行して", daily_file, "08:30"
+        )
+
+    assert result == "task"
+    submit_spy.assert_called_once_with("xxxを実行して")
+    assert _count_task_agent_tasks() == 1
+    merged = daily_file.read_text(encoding="utf-8")
+    assert "- 08:30 [task] xxxを実行して" in merged
+
+
+def test_merge_content_non_task_does_not_submit_to_task_agent(
+    tmp_path: Path, test_memory_db_path
+):
+    from obsidian_ai_hub.tasks import intake as task_intake
+
+    daily_file = tmp_path / "2026-05-09.md"
+    daily_file.write_text("# Daily\n## 📝メモ\n", encoding="utf-8")
+
+    with (
+        patch.object(
+            obsidian_inbox_merge.llm_client,
+            "generate_llm_response",
+            return_value='{"category":"memo"}',
+        ),
+        patch.object(task_intake, "submit_request") as submit_mock,
+    ):
+        result = obsidian_inbox_merge.merge_content_into_daily_note(
+            "just a memo", daily_file, "08:30"
+        )
+
+    assert result == "memo"
+    submit_mock.assert_not_called()
+    assert _count_task_agent_tasks() == 0
+    assert "[memo]" in daily_file.read_text(encoding="utf-8")
+
+
+def test_merge_content_task_submit_failure_keeps_existing_behavior(
+    tmp_path: Path, test_memory_db_path
+):
+    from obsidian_ai_hub.tasks import intake as task_intake
+
+    daily_file = tmp_path / "2026-05-09.md"
+    daily_file.write_text("# Daily\n## 📝メモ\n", encoding="utf-8")
+
+    with (
+        patch.object(
+            obsidian_inbox_merge.llm_client,
+            "generate_llm_response",
+            return_value='{"category":"task"}',
+        ),
+        patch.object(
+            task_intake, "submit_request", side_effect=RuntimeError("boom")
+        ),
+    ):
+        result = obsidian_inbox_merge.merge_content_into_daily_note(
+            "xxxを実行して", daily_file, "08:30"
+        )
+
+    assert result == "task"
+    assert _count_task_agent_tasks() == 0
+    merged = daily_file.read_text(encoding="utf-8")
+    assert "- 08:30 [task] xxxを実行して" in merged

@@ -296,6 +296,9 @@ def parse_classification_response(text: str) -> InboxClassification:
         _validate_reminder_due_date(reminder)
         return InboxClassification(category="reminder", reminder=reminder)
 
+    if category == "task":
+        return InboxClassification(category="task")
+
     raise ValueError(f"Unknown classification category: {category}")
 
 
@@ -413,6 +416,16 @@ def merge_content_into_daily_note(
                 )
         except Exception:
             logger.exception("Failed to register reminder approval HITL run")
+    elif classification.category == "task":
+        try:
+            from obsidian_ai_hub.tasks.intake import submit_request
+
+            receipt = submit_request(content)
+            logger.info(
+                "Submitted inbox task to task agent: %s", receipt["task_id"]
+            )
+        except Exception:
+            logger.exception("Failed to submit inbox task to task agent")
 
     subheader = "## 📝メモ"
     content_to_merge = f"- {hour_str} [{classification.category}] {content}"
