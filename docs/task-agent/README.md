@@ -16,6 +16,7 @@ Task Agent は、自由文の依頼を内部で実行計画へ変換し、既存
 | [implementation-plan.md](implementation-plan.md) | 実装順序、既存基盤との接続、検証 |
 | [TODO.md](TODO.md) | 未完了作業の追跡 |
 | [post-mvp.md](post-mvp.md) | MVP後に再検討する機能・運用項目 |
+| [proactive-plan.md](proactive-plan.md) | 自発性・成長支援のロードマップと設計候補（Phase A-C、実装未着手） |
 | [adr/](adr/) | 変更コストが高い設計判断 |
 
 ## 設計上の要点
