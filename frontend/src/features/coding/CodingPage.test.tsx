@@ -318,7 +318,7 @@ describe("CodingPage", () => {
     });
   });
 
-  it("opens new session modal and creates a session without manually entering a title", async () => {
+  it("creates a session immediately without showing a dialog", async () => {
     vi.mocked(codingApi.createCodingSession).mockResolvedValue({
       ...mockSession,
       session_id: "cses_222",
@@ -334,35 +334,10 @@ describe("CodingPage", () => {
     const newBtn = screen.getByRole("button", { name: "+ 新規" });
     fireEvent.click(newBtn);
 
-    expect(screen.getByText("新規コーディングセッション作成")).toBeInTheDocument();
-
-    // Do not fill in title input - session is always created as OpenCode/ACP
-    const submitBtn = screen.getByRole("button", { name: "作成" });
-    fireEvent.click(submitBtn);
-
     await waitFor(() => {
       expect(codingApi.createCodingSession).toHaveBeenCalledWith(1, undefined, undefined);
     });
-  });
-
-  it("shows OpenCode ACP notice in the new session modal", async () => {
-    vi.mocked(codingApi.createCodingSession).mockResolvedValue({
-      ...mockSession,
-      session_id: "cses_224",
-      title: "新しいコーディングセッション",
-    });
-
-    renderPage();
-
-    await waitFor(() => {
-      expect(screen.getByText("Test App")).toBeInTheDocument();
-    });
-
-    const newBtn = screen.getByRole("button", { name: "+ 新規" });
-    fireEvent.click(newBtn);
-
-    expect(screen.getByText("新規コーディングセッション作成")).toBeInTheDocument();
-    expect(screen.getByText("OpenCode（ACP経由）で実行されます。")).toBeInTheDocument();
+    expect(screen.queryByText("新規コーディングセッション作成")).not.toBeInTheDocument();
   });
 
   it("updates session title when coding CLI response event contains session_title", async () => {

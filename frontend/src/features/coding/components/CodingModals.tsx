@@ -1,6 +1,5 @@
 import type {
   CodingDefaults,
-  CodingProjectItem,
   CodingSessionDetail,
 } from "../../../api/coding";
 
@@ -23,16 +22,9 @@ interface CodingModalsProps {
   setUserDefaultsSelectedTools: React.Dispatch<React.SetStateAction<string[]>>;
   savingUserDefaults: boolean;
   onSaveUserDefaults: () => void;
-  isNewSessionModalOpen: boolean;
-  onCloseNewSession: () => void;
-  newSessionTitle: string;
-  setNewSessionTitle: React.Dispatch<React.SetStateAction<string>>;
-  creatingSession: boolean;
-  selectedProjectItem: CodingProjectItem | undefined;
-  onCreateSession: () => void;
 }
 
-/** 会話設定・ユーザー既定・新規セッションの3モーダル。 */
+/** 会話設定・ユーザー既定の2モーダル。 */
 export function CodingModals({
   isSessionSettingsOpen,
   onCloseSessionSettings,
@@ -52,13 +44,6 @@ export function CodingModals({
   setUserDefaultsSelectedTools,
   savingUserDefaults,
   onSaveUserDefaults,
-  isNewSessionModalOpen,
-  onCloseNewSession,
-  newSessionTitle,
-  setNewSessionTitle,
-  creatingSession,
-  selectedProjectItem,
-  onCreateSession,
 }: CodingModalsProps) {
   return (
     <>
@@ -275,54 +260,6 @@ export function CodingModals({
         </div>
       )}
 
-      {/* New Session Modal */}
-      {isNewSessionModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
-          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
-            <h3 className="text-base font-semibold text-slate-900">新規コーディングセッション作成</h3>
-            <p className="mt-1 text-xs text-slate-500">
-              プロジェクト: {selectedProjectItem?.project.display_name}
-            </p>
-
-            <div className="mt-4 space-y-4">
-              <div>
-                <label className="block text-xs font-medium text-slate-700">
-                  セッションタイトル
-                </label>
-                <input
-                  type="text"
-                  value={newSessionTitle}
-                  onChange={(e) => setNewSessionTitle(e.target.value)}
-                  placeholder="自動生成 (空欄可) / 例: リファクタリング作業"
-                  className="mt-1 w-full rounded-md border border-slate-300 px-3 py-1.5 text-xs focus:border-slate-800 focus:outline-none"
-                />
-              </div>
-
-              <p className="rounded-lg bg-slate-100 px-3 py-2 text-[11px] text-slate-600">
-                OpenCode（ACP経由）で実行されます。
-              </p>
-            </div>
-
-            <div className="mt-6 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={onCloseNewSession}
-                className="rounded px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-100 cursor-pointer"
-              >
-                キャンセル
-              </button>
-              <button
-                type="button"
-                disabled={creatingSession}
-                onClick={onCreateSession}
-                className="rounded bg-blue-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-blue-700 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {creatingSession ? "作成中..." : "作成"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </>
   );
 }

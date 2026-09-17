@@ -22,6 +22,7 @@ interface CodingSidebarProps {
   onOpenNewSession: () => void;
   onOpenUserDefaults: () => void;
   onDeleteSession: (sessionId: string, e: React.MouseEvent) => void;
+  creatingSession?: boolean;
   desktopPaneRef?: RefObject<HTMLDivElement>;
 }
 
@@ -45,6 +46,7 @@ export function CodingSidebar({
   onOpenNewSession,
   onOpenUserDefaults,
   onDeleteSession,
+  creatingSession = false,
   desktopPaneRef,
 }: CodingSidebarProps) {
   return (
@@ -122,9 +124,10 @@ export function CodingSidebar({
                         onOpenNewSession();
                         onCloseMobileDrawer();
                       }}
-                      className="rounded bg-slate-900 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-slate-800 cursor-pointer"
+                      disabled={creatingSession}
+                      className="rounded bg-slate-900 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-slate-800 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      + 新規
+                      {creatingSession ? "作成中..." : "+ 新規"}
                     </button>
                   )}
                 </div>
@@ -242,10 +245,11 @@ export function CodingSidebar({
                 <button
                   type="button"
                   onClick={onOpenNewSession}
-                  className="rounded bg-blue-600 px-3 py-1 text-sm font-medium text-white hover:bg-blue-700 cursor-pointer"
+                  disabled={creatingSession}
+                  className="rounded bg-blue-600 px-3 py-1 text-sm font-medium text-white hover:bg-blue-700 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
                   title="新規セッション作成"
                 >
-                  + 新規
+                  {creatingSession ? "作成中..." : "+ 新規"}
                 </button>
               )}
             </div>

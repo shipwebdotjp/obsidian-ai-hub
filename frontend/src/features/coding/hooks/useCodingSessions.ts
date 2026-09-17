@@ -25,9 +25,7 @@ export function useCodingSessions({
   const [loadingSessions, setLoadingSessions] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
 
-  // New session modal state
-  const [isNewSessionModalOpen, setIsNewSessionModalOpen] = useState(false);
-  const [newSessionTitle, setNewSessionTitle] = useState("");
+  // New session creation state (no dialog: created immediately with empty title)
   const [creatingSession, setCreatingSession] = useState(false);
 
   const syncSessionUrl = (
@@ -98,16 +96,14 @@ export function useCodingSessions({
   }, [selectedProjectId]);
 
   const handleCreateSession = async () => {
-    if (selectedProjectId === null) return;
+    if (selectedProjectId === null || creatingSession) return;
     setCreatingSession(true);
     try {
       const session = await createCodingSession(
         selectedProjectId,
-        newSessionTitle.trim() || undefined,
+        undefined, // title: empty by default, editable later via conversation settings
         undefined, // toolIds: keep user defaults
       );
-      setIsNewSessionModalOpen(false);
-      setNewSessionTitle("");
       await loadSessions(selectedProjectId);
       selectSession(session.session_id);
     } catch (e: any) {
@@ -141,10 +137,6 @@ export function useCodingSessions({
     loadSessions,
     selectSession,
     syncSessionUrl: (sessionId: string | null) => syncSessionUrl(sessionId, setSearchParams),
-    isNewSessionModalOpen,
-    setIsNewSessionModalOpen,
-    newSessionTitle,
-    setNewSessionTitle,
     creatingSession,
     handleCreateSession,
     handleDeleteSession,

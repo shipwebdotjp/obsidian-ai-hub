@@ -163,9 +163,10 @@ export default function CodingPage() {
           selectedSessionId={sessions.selectedSessionId}
           onSelectSession={sessions.selectSession}
           selectedProjectItem={selectedProjectItem}
-          onOpenNewSession={() => sessions.setIsNewSessionModalOpen(true)}
+          onOpenNewSession={() => void sessions.handleCreateSession()}
           onOpenUserDefaults={detail.handleOpenUserDefaults}
           onDeleteSession={sessions.handleDeleteSession}
+          creatingSession={sessions.creatingSession}
         />
 
       {!ui.leftPaneCollapsed && (
@@ -289,13 +290,6 @@ export default function CodingPage() {
         setUserDefaultsSelectedTools={detail.setUserDefaultsSelectedTools}
         savingUserDefaults={detail.savingUserDefaults}
         onSaveUserDefaults={detail.handleSaveUserDefaults}
-        isNewSessionModalOpen={sessions.isNewSessionModalOpen}
-        onCloseNewSession={() => sessions.setIsNewSessionModalOpen(false)}
-        newSessionTitle={sessions.newSessionTitle}
-        setNewSessionTitle={sessions.setNewSessionTitle}
-        creatingSession={sessions.creatingSession}
-        selectedProjectItem={selectedProjectItem}
-        onCreateSession={sessions.handleCreateSession}
       />
     </div>
   );
