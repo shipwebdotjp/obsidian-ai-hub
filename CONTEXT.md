@@ -35,6 +35,10 @@
 | **Task** | 自由文依頼一件の集約ルート。Plan、状態、Event、子run参照を所有する。 |
 | **Task Agent** | Task Orchestration機能全体。CLI、Planner、Task worker、WebUIを含む。 |
 | **Plan** | 目的、順序付きStep、Capability、対象、入力、副作用、完了条件を持つ実行記述。Task内で版管理される。Directional Planと旧形式の静的Planがある。 |
+| **主対象Project** | Taskの作業対象となるProject 1件。複数repoにまたがる作業は別Taskに分ける。 |
+| **一般Task** | 特定Projectに属さないTaskの分類。`coding_cli` を含むPlanにはならない。 |
+| **対象解決 (project_resolution)** | 主対象Projectまたは一般Taskの選定結果。選定元（Planner推定／人間指定）、判断スコア、根拠、表示名スナップショットを持ち、v3 Directional Planの必須要素である。 |
+| **判断スコア (confidence)** | 推定score 0..1。統計的確率ではなく、0.75未満で人間への質問へ分岐するための判断スコアである。 |
 | **Directional Plan** | タスクの目的、実行方針、承認されたCapability範囲、制約、完了条件を表す。全ツール引数を事前確定しない。 |
 | **Step** | 旧形式の静的Plan内の一つのCapability実行単位。保存済み入力と対象だけを使う。 |
 | **Runtime Orchestrator** | Directional Planと過去のObservationを基に、次のActionを構造化出力する判断主体。 |

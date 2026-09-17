@@ -824,6 +824,8 @@ import type {
   TaskAgentCapabilityUpdate,
   TaskAgentCreateRequest,
   TaskAgentListResponse,
+  TaskAgentProjectResolutionBody,
+  TaskAgentTargetOptionsResponse,
   TaskAgentTask,
   TaskAgentTaskDetail,
 } from "./types";
@@ -889,6 +891,25 @@ export function replanTaskAgentTask(taskId: string): Promise<TaskAgentTask> {
   return request<TaskAgentTask>(
     `/api/v1/task-agent/tasks/${encodeURIComponent(taskId)}/replan`,
     { method: "POST" },
+  );
+}
+
+export function listTaskAgentTargetOptions(): Promise<TaskAgentTargetOptionsResponse> {
+  return request<TaskAgentTargetOptionsResponse>(
+    `/api/v1/task-agent/target-options`,
+  );
+}
+
+export function setTaskAgentProjectResolution(
+  taskId: string,
+  body: TaskAgentProjectResolutionBody,
+): Promise<TaskAgentTask> {
+  return request<TaskAgentTask>(
+    `/api/v1/task-agent/tasks/${encodeURIComponent(taskId)}/project-resolution`,
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+    },
   );
 }
 

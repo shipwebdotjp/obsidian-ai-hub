@@ -8,8 +8,10 @@ import {
   cancelTaskAgentTask,
   getHitlRun,
   getTaskAgentTask,
+  listTaskAgentTargetOptions,
   rejectTaskAgentTask,
   replanTaskAgentTask,
+  setTaskAgentProjectResolution,
   submitHitlAnswer,
 } from "../../api/client";
 import TaskAgentDetailPage from "./TaskAgentDetailPage";
@@ -20,8 +22,10 @@ vi.mock("../../api/client", () => ({
   cancelTaskAgentTask: vi.fn(),
   getHitlRun: vi.fn(),
   getTaskAgentTask: vi.fn(),
+  listTaskAgentTargetOptions: vi.fn(),
   rejectTaskAgentTask: vi.fn(),
   replanTaskAgentTask: vi.fn(),
+  setTaskAgentProjectResolution: vi.fn(),
   submitHitlAnswer: vi.fn(),
   ApiError: class ApiError extends Error {},
 }));
@@ -33,6 +37,8 @@ const mockCancel = vi.mocked(cancelTaskAgentTask);
 const mockReplan = vi.mocked(replanTaskAgentTask);
 const mockGetHitlRun = vi.mocked(getHitlRun);
 const mockSubmitHitlAnswer = vi.mocked(submitHitlAnswer);
+const mockTargetOptions = vi.mocked(listTaskAgentTargetOptions);
+const mockSetResolution = vi.mocked(setTaskAgentProjectResolution);
 
 function baseDetail(overrides: Record<string, any> = {}) {
   return {
@@ -89,6 +95,8 @@ beforeEach(() => {
   mockCancel.mockResolvedValue({} as any);
   mockReplan.mockResolvedValue({} as any);
   mockSubmitHitlAnswer.mockResolvedValue({ success: true });
+  mockTargetOptions.mockResolvedValue({ items: [] } as any);
+  mockSetResolution.mockResolvedValue({} as any);
 });
 
 describe("TaskAgentDetailPage", () => {
@@ -197,6 +205,220 @@ describe("TaskAgentDetailPage", () => {
     // 目的文は要約表示と構造化表示（Planデータ全体）の双方に現れる。
     expect(await screen.findAllByText("まとめる")).not.toHaveLength(0);
     expect(screen.getByText(/旧形式の静的Plan/)).toBeInTheDocument();
+  });
+
+  it("shows the v3 target resolution with source, score, and rationale", async () => {
+    mockGetTask.mockResolvedValue({
+      ...baseDetail(),
+      plans: [
+        {
+          plan_id: "tplan_3",
+          task_id: "task_aaa",
+          version: 3,
+          plan: {
+            plan_version: 3,
+            purpose: "実装する",
+            strategy: "",
+            capabilities: [{ capability_key: "coding_cli", intent: "実装" }],
+            allowed_agent_ids: [],
+            allowed_project_ids: [7],
+            project_resolution: {
+              kind: "project",
+              project_id: 7,
+              display_name: "Demo Seven",
+              confidence: 0.9,
+              rationale: "依頼文にProject名が含まれる",
+              source: "inferred",
+            },
+            constraints: "",
+            completion_criteria: "done",
+            max_actions: 8,
+          },
+          approval_policy_snapshot: { coding_cli: "plan_required" },
+          status: "pending",
+          rejection_reason: null,
+          created_at: "2026-09-14T10:01:00+09:00",
+          decided_at: null,
+        },
+      ],
+    } as any);
+    renderPage();
+    // 「対象: Demo Seven」の要約表示と構造化表示（Planデータ全体）の双方に現れる。
+    expect(await screen.findAllByText("Demo Seven")).not.toHaveLength(0);
+    expect(screen.getByText(/選定元: 推定/)).toBeInTheDocument();
+    expect(screen.getByText(/スコア: 0.9/)).toBeInTheDocument();
+    expect(screen.getByText(/根拠:/)).toBeInTheDocument();
+  });
+
+  it("shows general tasks without a project target", async () => {
+    mockGetTask.mockResolvedValue({
+      ...baseDetail(),
+      plans: [
+        {
+          plan_id: "tplan_3",
+          task_id: "task_aaa",
+          version: 3,
+          plan: {
+            plan_version: 3,
+            purpose: "調べる",
+            strategy: "",
+            capabilities: [{ capability_key: "vault_search", intent: "検索" }],
+            allowed_agent_ids: [],
+            allowed_project_ids: [],
+            project_resolution: {
+              kind: "general",
+              project_id: null,
+              display_name: "",
+              confidence: 0.95,
+              rationale: "特定Projectに属さない",
+              source: "inferred",
+            },
+            constraints: "",
+            completion_criteria: "done",
+            max_actions: 8,
+          },
+          approval_policy_snapshot: { vault_search: "auto" },
+          status: "pending",
+          rejection_reason: null,
+          created_at: "2026-09-14T10:01:00+09:00",
+          decided_at: null,
+        },
+      ],
+    } as any);
+    renderPage();
+    expect(await screen.findByText("一般Task")).toBeInTheDocument();
+  });
+
+  it("marks v2 plans as having no recorded target", async () => {
+    mockGetTask.mockResolvedValue({
+      ...baseDetail(),
+      plans: [
+        {
+          plan_id: "tplan_2",
+          task_id: "task_aaa",
+          version: 2,
+          plan: {
+            plan_version: 2,
+            purpose: "好みを記憶する",
+            strategy: "",
+            capabilities: [
+              { capability_key: "vault_search", intent: "検索する" },
+            ],
+            allowed_agent_ids: [],
+            allowed_project_ids: [3],
+            constraints: "",
+            completion_criteria: "done",
+            max_actions: 8,
+          },
+          approval_policy_snapshot: { vault_search: "auto" },
+          status: "pending",
+          rejection_reason: null,
+          created_at: "2026-09-14T10:01:00+09:00",
+          decided_at: null,
+        },
+      ],
+    } as any);
+    renderPage();
+    expect(
+      await screen.findByText(/対象: 未記録（v3より前のPlan）/),
+    ).toBeInTheDocument();
+  });
+
+  it("changes the target via the project-resolution API", async () => {
+    const user = userEvent.setup();
+    mockTargetOptions.mockResolvedValue({
+      items: [
+        {
+          project_id: 7,
+          name: "Demo Seven",
+          git_root: "/repo/demo",
+          keywords: [],
+        },
+      ],
+    } as any);
+    renderPage();
+    await screen.findByText("今日の予定をまとめて");
+    const select = await screen.findByLabelText("対象の変更");
+    await user.selectOptions(select, "project:7");
+    await user.click(screen.getByTestId("task-change-target"));
+    await waitFor(() =>
+      expect(mockSetResolution).toHaveBeenCalledWith("task_aaa", {
+        kind: "project",
+        project_id: 7,
+      }),
+    );
+  });
+
+  it("disables the change button when the target is unchanged", async () => {
+    mockTargetOptions.mockResolvedValue({
+      items: [
+        {
+          project_id: 7,
+          name: "Demo Seven",
+          git_root: "/repo/demo",
+          keywords: [],
+        },
+      ],
+    } as any);
+    mockGetTask.mockResolvedValue({
+      ...baseDetail(),
+      task: {
+        ...baseDetail().task,
+        current_plan_id: "tplan_3",
+      },
+      plans: [
+        {
+          plan_id: "tplan_3",
+          task_id: "task_aaa",
+          version: 3,
+          plan: {
+            plan_version: 3,
+            purpose: "実装する",
+            strategy: "",
+            capabilities: [{ capability_key: "coding_cli", intent: "実装" }],
+            allowed_agent_ids: [],
+            allowed_project_ids: [7],
+            project_resolution: {
+              kind: "project",
+              project_id: 7,
+              display_name: "Demo Seven",
+              confidence: null,
+              rationale: "人間が選択した対象",
+              source: "user",
+            },
+            constraints: "",
+            completion_criteria: "done",
+            max_actions: 8,
+          },
+          approval_policy_snapshot: { coding_cli: "plan_required" },
+          status: "pending",
+          rejection_reason: null,
+          created_at: "2026-09-14T10:01:00+09:00",
+          decided_at: null,
+        },
+      ],
+    } as any);
+    renderPage();
+    await screen.findByText("今日の予定をまとめて");
+    const select = (await screen.findByLabelText(
+      "対象の変更",
+    )) as HTMLSelectElement;
+    await waitFor(() => expect(select.value).toBe("project:7"));
+    expect(screen.getByTestId("task-change-target")).toBeDisabled();
+  });
+
+  it("changes the target to a general task", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText("今日の予定をまとめて");
+    const select = await screen.findByLabelText("対象の変更");
+    await user.selectOptions(select, "general");
+    await user.click(screen.getByTestId("task-change-target"));
+    await waitFor(() =>
+      expect(mockSetResolution).toHaveBeenCalledWith("task_aaa", {
+        kind: "general",
+      }),
+    );
   });
 
   it("renders structured plan/event data without raw JSON and links child runs", async () => {

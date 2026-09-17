@@ -271,3 +271,110 @@ def test_shutdown_recovery_covers_tasks():
     result = run_manager.shutdown_recovery("this-instance")
     assert result["task_interrupted"] == 1
     assert store.get_task(mine["task_id"])["status"] == "interrupted"
+
+
+def _v3_coding_plan(task_id, project_id=7):
+    return store.create_plan(
+        task_id,
+        {
+            "plan_version": 3,
+            "purpose": "実装する",
+            "strategy": "codingする",
+            "capabilities": [{"capability_key": "coding_cli", "intent": "実装"}],
+            "allowed_agent_ids": [],
+            "allowed_project_ids": [project_id],
+            "project_resolution": {
+                "kind": "project",
+                "project_id": project_id,
+                "display_name": "Demo",
+                "confidence": None,
+                "rationale": "人間が選択した対象",
+                "source": "user",
+            },
+            "constraints": "",
+            "completion_criteria": "done",
+            "max_actions": 5,
+        },
+        {"coding_cli": "plan_required"},
+    )
+
+
+def _ready_for_execution(task_id):
+    store.sync_capabilities()
+    store.claim_task("worker-1", "planning")
+    store.transition_task_status(task_id, "waiting_approval")
+    store.decide_plan(task_id, "approve")
+    claimed = store.claim_task("worker-1", "execution")
+    assert claimed is not None
+
+
+def test_run_execution_stops_when_target_project_deleted(monkeypatch):
+    def _gone(pid):
+        raise ValueError(f"Project '{pid}' no longer exists.")
+
+    monkeypatch.setattr(planning, "validate_target_project", _gone)
+    task = store.create_task("deleted target job")
+    plan = _v3_coding_plan(task["task_id"])
+    _ready_for_execution(task["task_id"])
+    executor = FakeExecutor()
+    task_worker._run_execution(task["task_id"], plan, executor)
+    updated = store.get_task(task["task_id"])
+    assert updated is not None
+    assert updated["status"] == "waiting_reapproval"
+    assert executor.calls == []
+    plans = store.list_plans(task["task_id"])
+    assert [p["version"] for p in plans] == [1, 2]
+    assert plans[1]["status"] == "pending"
+
+
+def test_run_execution_passes_when_target_project_valid(monkeypatch):
+    monkeypatch.setattr(
+        planning, "validate_target_project", lambda pid: ("Demo", "/repo/demo")
+    )
+    task = store.create_task("valid target job")
+    plan = _v3_coding_plan(task["task_id"])
+    _ready_for_execution(task["task_id"])
+
+    def _scripted(task_id, plan_record, executor=None, action_generator=None, conn=None):
+        return execution.ExecutorOutcome(kind="completed", result_summary="done")
+
+    import obsidian_ai_hub.tasks.orchestrator as orchestrator_module
+
+    monkeypatch.setattr(orchestrator_module, "run_directional_plan", _scripted)
+    task_worker._run_execution(task["task_id"], plan, FakeExecutor())
+    assert store.get_task(task["task_id"])["status"] == "completed"
+
+
+def test_run_execution_ignores_target_for_non_coding_v3(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        planning,
+        "validate_target_project",
+        lambda pid: calls.append(pid) or ("Demo", "/repo/demo"),
+    )
+    task = store.create_task("non coding job")
+    plan = store.create_plan(
+        task["task_id"],
+        {
+            "plan_version": 3,
+            "purpose": "調べる",
+            "strategy": "検索",
+            "capabilities": [{"capability_key": "web_search", "intent": "検索"}],
+            "allowed_agent_ids": [],
+            "allowed_project_ids": [],
+            "project_resolution": {
+                "kind": "general",
+                "project_id": None,
+                "display_name": "",
+                "confidence": 0.9,
+                "rationale": "一般作業",
+                "source": "inferred",
+            },
+            "constraints": "",
+            "completion_criteria": "done",
+            "max_actions": 5,
+        },
+        {"web_search": "auto"},
+    )
+    assert task_worker._ensure_target_project_valid(task["task_id"], plan) is True
+    assert calls == []

@@ -197,3 +197,145 @@ def test_auth_required(test_memory_db_path, anon_client):
         ).status_code
         == 401
     )
+
+
+def _valid_project_stubs(monkeypatch):
+    from obsidian_ai_hub.coding import backend as coding_backend
+    from obsidian_ai_hub.web.services import projects as project_service
+
+    def _list_projects():
+        return [
+            {
+                "project_id": 7,
+                "display_name": "Demo Seven",
+                "normalized_name": "demo seven",
+                "keywords": ["demo"],
+                "project_path": "/repo/demo",
+            },
+            {
+                "project_id": 11,
+                "display_name": "Broken",
+                "normalized_name": "broken",
+                "keywords": [],
+                "project_path": "/repo/broken",
+            },
+        ]
+
+    def _detail(pid):
+        return next((p for p in _list_projects() if p["project_id"] == pid), None)
+
+    def _git_root(path):
+        if path == "/repo/demo":
+            return "/repo/demo"
+        raise ValueError("not a git repo")
+
+    monkeypatch.setattr(project_service, "list_projects", _list_projects)
+    monkeypatch.setattr(project_service, "get_project_detail", _detail)
+    monkeypatch.setattr(coding_backend, "validate_git_repo", _git_root)
+
+
+def _waiting_target_task(prompt="target job"):
+    """Create a task waiting for approval without relying on claim order."""
+    task = store.create_task(prompt)
+    store.transition_task_status(task["task_id"], "planning")
+    store.create_plan(task["task_id"], {"purpose": "p", "steps": []}, {})
+    store.transition_task_status(task["task_id"], "waiting_approval")
+    return task
+
+
+def test_project_resolution_changes_target(test_memory_db_path, client, monkeypatch):
+    _valid_project_stubs(monkeypatch)
+    task = _waiting_target_task()
+    response = client.post(
+        f"/api/v1/task-agent/tasks/{task['task_id']}/project-resolution",
+        json={"kind": "project", "project_id": 7},
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "queued"
+    events = store.list_task_events(task["task_id"])
+    selected = [e for e in events if e["event_type"] == "target_resolution_selected"]
+    assert len(selected) == 1
+    assert selected[0]["payload"]["project_id"] == 7
+    assert selected[0]["payload"]["kind"] == "project"
+    plans = store.list_plans(task["task_id"])
+    assert plans[0]["status"] == "superseded"
+
+    response = client.post(
+        f"/api/v1/task-agent/tasks/{task['task_id']}/project-resolution",
+        json={"kind": "general"},
+    )
+    assert response.status_code == 400
+
+    task2 = _waiting_target_task("target job 2")
+    response = client.post(
+        f"/api/v1/task-agent/tasks/{task2['task_id']}/project-resolution",
+        json={"kind": "general"},
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "queued"
+
+
+def test_project_resolution_rejects_invalid(test_memory_db_path, client, monkeypatch):
+    _valid_project_stubs(monkeypatch)
+    task = _waiting_target_task()
+    # Deleted project (not in registry).
+    response = client.post(
+        f"/api/v1/task-agent/tasks/{task['task_id']}/project-resolution",
+        json={"kind": "project", "project_id": 99},
+    )
+    assert response.status_code == 400
+    # Invalid git root.
+    response = client.post(
+        f"/api/v1/task-agent/tasks/{task['task_id']}/project-resolution",
+        json={"kind": "project", "project_id": 11},
+    )
+    assert response.status_code == 400
+    # Malformed bodies.
+    assert (
+        client.post(
+            f"/api/v1/task-agent/tasks/{task['task_id']}/project-resolution",
+            json={"kind": "project"},
+        ).status_code
+        == 422
+    )
+    assert (
+        client.post(
+            f"/api/v1/task-agent/tasks/{task['task_id']}/project-resolution",
+            json={"kind": "general", "project_id": 7},
+        ).status_code
+        == 422
+    )
+    # Task still waiting: no selection persisted, plan still pending.
+    events = store.list_task_events(task["task_id"])
+    assert [e for e in events if e["event_type"] == "target_resolution_selected"] == []
+    assert store.get_task(task["task_id"])["status"] == "waiting_approval"
+
+    queued = store.create_task("not waiting")
+    response = client.post(
+        f"/api/v1/task-agent/tasks/{queued['task_id']}/project-resolution",
+        json={"kind": "general"},
+    )
+    assert response.status_code == 400
+
+    response = client.post(
+        "/api/v1/task-agent/tasks/task_missing/project-resolution",
+        json={"kind": "general"},
+    )
+    assert response.status_code == 404
+
+
+def test_target_options_returns_valid_git_projects_only(
+    test_memory_db_path, client, monkeypatch
+):
+    _valid_project_stubs(monkeypatch)
+    response = client.get("/api/v1/task-agent/target-options")
+    assert response.status_code == 200
+    items = response.json()["items"]
+    assert items == [
+        {
+            "project_id": 7,
+            "name": "Demo Seven",
+            "git_root": "/repo/demo",
+            "keywords": ["demo"],
+        }
+    ]

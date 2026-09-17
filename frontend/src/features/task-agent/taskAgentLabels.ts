@@ -54,6 +54,7 @@ export const EVENT_TYPE_LABELS: Record<string, string> = {
   child_run_finished: "子run終了",
   hitl_question_asked: "質問登録",
   hitl_question_answered: "質問回答",
+  target_resolution_selected: "対象確定",
   capability_completed: "Capability完了",
   note: "メモ",
 };

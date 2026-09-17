@@ -166,9 +166,11 @@ from obsidian_ai_hub.web.services.task_agent import (
     create_task_agent_task,
     get_task_agent_task_detail,
     list_task_agent_capabilities,
+    list_task_agent_target_options,
     list_task_agent_tasks,
     reject_task_agent_task,
     replan_task_agent_task,
+    set_task_agent_project_resolution,
     update_task_agent_capability,
 )
 from obsidian_ai_hub.web.services.scheduler_jobs import (

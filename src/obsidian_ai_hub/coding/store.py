@@ -921,6 +921,21 @@ def add_message(
     return dict(row)
 
 
+def get_latest_user_message(session_id: str) -> Optional[Dict[str, Any]]:
+    """Return the most recent user-role message of a coding session, if any."""
+    conn = get_db_connection()
+    try:
+        cursor = conn.execute(
+            "SELECT * FROM coding_messages WHERE session_id = ? AND role = 'user' "
+            "ORDER BY sequence DESC LIMIT 1",
+            (session_id,),
+        )
+        row = cursor.fetchone()
+        return dict(row) if row is not None else None
+    finally:
+        conn.close()
+
+
 def list_messages(session_id: str) -> List[Dict[str, Any]]:
     """List all messages for a session ordered by sequence."""
     conn = get_db_connection()

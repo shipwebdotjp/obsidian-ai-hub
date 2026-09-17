@@ -509,10 +509,13 @@ def test_plan_task_directional_saves_scope(monkeypatch):
     result = planning.plan_task(task["task_id"])
     assert result["outcome"] == "running"
     plan_inner = result["plan"]["plan"]
-    assert plan_inner["plan_version"] == 2
+    assert plan_inner["plan_version"] == 3
     assert plan_inner["capabilities"][0]["capability_key"] == "web_search"
     assert "steps" not in plan_inner
     assert result["plan"]["approval_policy_snapshot"] == {"web_search": "auto"}
+    resolution = plan_inner["project_resolution"]
+    assert resolution["kind"] == "general"
+    assert resolution["source"] == "inferred"
 
 
 def test_plan_task_directional_plan_required_waits_approval(monkeypatch):
@@ -756,3 +759,420 @@ def test_plan_task_directional_records_allowlist_snapshot(monkeypatch):
     saved = result["plan"]["plan"]
     assert saved["allowed_agent_ids"] == ["agent_9"]
     assert saved["allowed_project_ids"] == [7]
+
+
+def _v3_context():
+    context = _context()
+    return dict(
+        context,
+        projects=[
+            {
+                "project_id": 7,
+                "name": "Demo Seven",
+                "keywords": ["demo"],
+                "git_root": "/repo/demo",
+            }
+        ],
+    )
+
+
+def _v3_coding_context():
+    context = _v3_context()
+    return dict(
+        context,
+        capabilities=context["capabilities"]
+        + [
+            {
+                "capability_key": "memory_propose",
+                "adapter_kind": "memory",
+                "approval_policy": "plan_required",
+            }
+        ],
+    )
+
+
+def _directional_v3_json(resolution, **overrides):
+    plan = json.loads(_directional_json())
+    plan["plan_version"] = 3
+    plan["project_resolution"] = resolution
+    plan.update(overrides)
+    return json.dumps(plan, ensure_ascii=False)
+
+
+def _project_resolution(**overrides):
+    resolution = {
+        "kind": "project",
+        "project_id": 7,
+        "display_name": "Demo Seven",
+        "confidence": 0.9,
+        "rationale": "依頼文にProject名が含まれる",
+        "source": "inferred",
+    }
+    resolution.update(overrides)
+    return resolution
+
+
+def test_plan_task_high_confidence_project_saves_v3(monkeypatch):
+    monkeypatch.setattr(planning, "collect_planner_context", _v3_context)
+    monkeypatch.setattr(
+        planning,
+        "generate_llm_response",
+        lambda *a, **k: _directional_v3_json(_project_resolution()),
+    )
+    task = store.create_task("coding job")
+    _claim(task["task_id"])
+    result = planning.plan_task(task["task_id"])
+    assert result["outcome"] == "running"
+    plan_inner = result["plan"]["plan"]
+    assert plan_inner["plan_version"] == 3
+    resolution = plan_inner["project_resolution"]
+    assert resolution["kind"] == "project"
+    assert resolution["project_id"] == 7
+    assert resolution["display_name"] == "Demo Seven"
+    assert resolution["confidence"] == 0.9
+    assert resolution["source"] == "inferred"
+    assert plan_inner["allowed_project_ids"] == [7]
+
+
+def test_plan_task_low_confidence_registers_target_question(monkeypatch):
+    from obsidian_ai_hub.hitl import store as hitl_store
+
+    monkeypatch.setattr(planning, "collect_planner_context", _v3_context)
+    monkeypatch.setattr(
+        planning,
+        "generate_llm_response",
+        lambda *a, **k: _directional_v3_json(_project_resolution(confidence=0.2)),
+    )
+    task = store.create_task("ambiguous job")
+    _claim(task["task_id"])
+    result = planning.plan_task(task["task_id"])
+    assert result["outcome"] == "waiting_user"
+    assert store.list_plans(task["task_id"]) == []
+    events = store.list_task_events(task["task_id"])
+    assert [e["event_type"] for e in events] == ["hitl_question_asked"]
+    questions = hitl_store.get_questions_by_set(result["hitl_run_id"], "target")
+    assert len(questions) == 1
+    choices = questions[0]["choices"]
+    values = [c["value"] for c in choices]
+    assert "project:7" in values
+    assert "general" in values
+    top = [c for c in choices if c["value"] == "project:7"][0]
+    assert "0.20" in top["label"]
+
+
+def test_plan_task_missing_resolution_non_coding_saves_general(monkeypatch):
+    monkeypatch.setattr(planning, "collect_planner_context", _v3_context)
+    monkeypatch.setattr(
+        planning, "generate_llm_response", lambda *a, **k: _directional_json()
+    )
+    task = store.create_task("search job")
+    _claim(task["task_id"])
+    result = planning.plan_task(task["task_id"])
+    assert result["outcome"] == "running"
+    plan_inner = result["plan"]["plan"]
+    assert plan_inner["plan_version"] == 3
+    resolution = plan_inner["project_resolution"]
+    assert resolution["kind"] == "general"
+    assert resolution["confidence"] == 0.0
+    assert resolution["source"] == "inferred"
+
+
+def test_plan_task_missing_resolution_coding_asks(monkeypatch):
+    context = _v3_coding_context()
+    raw = _directional_json(
+        capabilities=[{"capability_key": "coding_cli", "intent": "実装"}]
+    )
+    context = dict(
+        context,
+        capabilities=context["capabilities"]
+        + [
+            {
+                "capability_key": "coding_cli",
+                "adapter_kind": "coding",
+                "approval_policy": "plan_required",
+            }
+        ],
+    )
+    monkeypatch.setattr(planning, "collect_planner_context", lambda: context)
+    monkeypatch.setattr(planning, "generate_llm_response", lambda *a, **k: raw)
+    task = store.create_task("coding job")
+    _claim(task["task_id"])
+    result = planning.plan_task(task["task_id"])
+    assert result["outcome"] == "waiting_user"
+    assert store.list_plans(task["task_id"]) == []
+
+
+def _seed_forced_selection(task_id, kind="project", project_id=7):
+    payload = {
+        "kind": kind,
+        "project_id": project_id if kind == "project" else None,
+        "display_name": "Demo Seven" if kind == "project" else "",
+        "source": "user",
+        "set_via": "hitl",
+    }
+    store.append_task_event(task_id, "target_resolution_selected", payload)
+
+
+def test_plan_task_forced_selection_overrides_planner(monkeypatch):
+    monkeypatch.setattr(planning, "collect_planner_context", _v3_context)
+    # The planner guesses a different project with max confidence.
+    monkeypatch.setattr(
+        planning,
+        "generate_llm_response",
+        lambda *a, **k: _directional_v3_json(_project_resolution(project_id=9)),
+    )
+    task = store.create_task("forced job")
+    _claim(task["task_id"])
+    _seed_forced_selection(task["task_id"])
+    result = planning.plan_task(task["task_id"])
+    assert result["outcome"] == "running"
+    plan_inner = result["plan"]["plan"]
+    resolution = plan_inner["project_resolution"]
+    assert resolution["kind"] == "project"
+    assert resolution["project_id"] == 7
+    assert resolution["source"] == "user"
+    assert resolution["confidence"] is None
+    assert plan_inner["allowed_project_ids"] == [7]
+
+
+def test_plan_task_forced_general_rejects_coding(monkeypatch):
+    monkeypatch.setattr(planning, "collect_planner_context", _v3_coding_context)
+    raw = _directional_json(
+        capabilities=[{"capability_key": "coding_cli", "intent": "実装"}]
+    )
+    monkeypatch.setattr(planning, "generate_llm_response", lambda *a, **k: raw)
+    task = store.create_task("forced general job")
+    _claim(task["task_id"])
+    _seed_forced_selection(task["task_id"], kind="general")
+    with pytest.raises(ValueError, match="Planner failed"):
+        planning.plan_task(task["task_id"])
+    assert store.get_task(task["task_id"])["status"] == "failed"
+
+
+def test_forced_selection_in_prompt(monkeypatch):
+    monkeypatch.setattr(planning, "collect_planner_context", _v3_context)
+    seen = {}
+
+    def fake_llm(provider, model, prompt, **kwargs):
+        seen["prompt"] = prompt
+        return _directional_json()
+
+    monkeypatch.setattr(planning, "generate_llm_response", fake_llm)
+    task = store.create_task("forced prompt job")
+    _claim(task["task_id"])
+    _seed_forced_selection(task["task_id"])
+    planning.plan_task(task["task_id"])
+    assert "確定済みの対象" in seen["prompt"]
+    assert "project:7" in seen["prompt"]
+
+
+def test_validate_v3_general_with_coding_rejected():
+    plan = json.loads(
+        _directional_v3_json(
+            {"kind": "general", "confidence": 0.95, "source": "inferred"},
+            capabilities=[{"capability_key": "coding_cli", "intent": "実装"}],
+        )
+    )
+    context = dict(
+        _v3_context(),
+        capabilities=_v3_context()["capabilities"]
+        + [
+            {
+                "capability_key": "coding_cli",
+                "adapter_kind": "coding",
+                "approval_policy": "plan_required",
+            }
+        ],
+    )
+    with pytest.raises(ValueError, match="general task cannot include"):
+        planning.validate_directional_plan(plan, context)
+
+
+def test_validate_v3_unknown_project_rejected():
+    plan = json.loads(_directional_v3_json(_project_resolution(project_id=99)))
+    with pytest.raises(ValueError, match="unregistered project"):
+        planning.validate_directional_plan(plan, _v3_context())
+
+
+def test_validate_v3_narrows_allowlist_to_single_project():
+    context = dict(
+        _v3_context(),
+        projects=_v3_context()["projects"]
+        + [{"project_id": 11, "name": "Other", "git_root": "/repo/other"}],
+    )
+    plan = json.loads(_directional_v3_json(_project_resolution()))
+    planning.validate_directional_plan(plan, context)
+    assert plan["allowed_project_ids"] == [7]
+
+
+def test_parse_selection_value():
+    assert planning.parse_selection_value("project:7") == {
+        "kind": "project",
+        "project_id": 7,
+    }
+    assert planning.parse_selection_value("  project:7  ") == {
+        "kind": "project",
+        "project_id": 7,
+    }
+    assert planning.parse_selection_value("general") == {
+        "kind": "general",
+        "project_id": None,
+    }
+    assert planning.parse_selection_value("project:0") is None
+    assert planning.parse_selection_value("project:x") is None
+    assert planning.parse_selection_value("agent:agent_1") is None
+    assert planning.parse_selection_value("") is None
+    assert planning.parse_selection_value(None) is None
+
+
+def test_normalize_planner_resolution_fallbacks():
+    resolution, missing = planning.normalize_planner_resolution(None)
+    assert missing is True
+    assert resolution["kind"] == "general"
+    assert resolution["confidence"] == 0.0
+
+    resolution, missing = planning.normalize_planner_resolution(
+        {"kind": "project", "project_id": 7}
+    )
+    assert missing is True
+    assert resolution["kind"] == "general"
+
+    resolution, missing = planning.normalize_planner_resolution(
+        {"kind": "general", "confidence": 1.5}
+    )
+    assert missing is True
+    assert resolution["kind"] == "general"
+
+    resolution, missing = planning.normalize_planner_resolution(
+        {"kind": "project", "confidence": 1.2, "project_id": 7}
+    )
+    assert missing is True
+
+    resolution, missing = planning.normalize_planner_resolution(
+        _project_resolution()
+    )
+    assert missing is False
+    assert resolution["project_id"] == 7
+    assert resolution["source"] == "inferred"
+
+    forced = {"kind": "project", "project_id": 7, "display_name": "Demo"}
+    resolution, missing = planning.normalize_planner_resolution(
+        _project_resolution(project_id=9, confidence=0.99), forced
+    )
+    assert missing is False
+    assert resolution["project_id"] == 7
+    assert resolution["source"] == "user"
+    assert resolution["confidence"] is None
+
+
+def test_get_forced_target_resolution_returns_latest():
+    task = store.create_task("forced job")
+    assert planning.get_forced_target_resolution(task["task_id"]) is None
+    _seed_forced_selection(task["task_id"])
+    _seed_forced_selection(task["task_id"], kind="general")
+    forced = planning.get_forced_target_resolution(task["task_id"])
+    assert forced == {"kind": "general", "project_id": None, "display_name": ""}
+
+
+def test_low_confidence_question_redacts_rationale(monkeypatch):
+    from obsidian_ai_hub.tasks import redaction as redaction_module
+
+    monkeypatch.setattr(
+        redaction_module, "configured_secret_values", lambda: ("s3cr3t-token",)
+    )
+    output = planning.build_target_question_output(
+        {
+            "kind": "project",
+            "project_id": 7,
+            "display_name": "Demo Seven",
+            "confidence": 0.2,
+            "rationale": "token s3cr3t-token を含む根拠",
+            "source": "inferred",
+        },
+        _v3_context()["projects"],
+    )
+    assert output["type"] == "question"
+    assert "s3cr3t-token" not in output["question_text"]
+    top = [c for c in output["options"] if c["value"] == "project:7"][0]
+    assert "s3cr3t-token" not in top["label"]
+    assert "[REDACTED]" in top["label"]
+
+
+def test_attach_project_histories_failure_falls_back_to_empty(monkeypatch):
+    from obsidian_ai_hub.coding import store as coding_store
+
+    def _boom(pid):
+        raise RuntimeError("coding db hiccup")
+
+    monkeypatch.setattr(coding_store, "list_sessions_by_project", _boom)
+    projects = [{"project_id": 7, "name": "Demo", "git_root": "/repo/demo"}]
+    planning._attach_project_histories(projects)
+    assert projects[0]["recent_sessions"] == []
+
+
+def test_record_target_selection_rejects_invalid(monkeypatch):
+    from obsidian_ai_hub.web.services import projects as project_service
+
+    monkeypatch.setattr(project_service, "get_project_detail", lambda pid: None)
+    task = store.create_task("invalid target job")
+    with pytest.raises(ValueError, match="no longer exists"):
+        planning.record_target_resolution_selection(
+            task["task_id"], kind="project", project_id=7
+        )
+    assert store.list_task_events(task["task_id"]) == []
+
+    with pytest.raises(ValueError, match="Unknown target kind"):
+        planning.record_target_resolution_selection(task["task_id"], kind="other")
+
+
+def test_attach_project_histories_truncation_and_redaction(monkeypatch):
+    from obsidian_ai_hub.coding import store as coding_store
+    from obsidian_ai_hub.tasks import redaction as redaction_module
+
+    monkeypatch.setattr(
+        redaction_module, "configured_secret_values", lambda: ("s3cr3t-token",)
+    )
+    monkeypatch.setattr(
+        coding_store,
+        "list_sessions_by_project",
+        lambda pid: [
+            {"session_id": f"s{i}", "title": f"title-{i}"} for i in range(5)
+        ],
+    )
+    monkeypatch.setattr(
+        coding_store,
+        "get_latest_user_message",
+        lambda sid: {"content": f"request-{sid}"},
+    )
+    projects = [
+        {"project_id": 7, "name": "Demo", "git_root": "/repo/demo"},
+        {"project_id": 8, "name": "Other", "git_root": "/repo/other"},
+    ]
+    planning._attach_project_histories(projects)
+    assert len(projects[0]["recent_sessions"]) == 3
+
+    long_text = "s3cr3t-token " + "x" * 500
+    monkeypatch.setattr(
+        coding_store,
+        "list_sessions_by_project",
+        lambda pid: [{"session_id": "s9", "title": f"title {long_text}"}],
+    )
+    monkeypatch.setattr(
+        coding_store,
+        "get_latest_user_message",
+        lambda sid: {"content": f"request {long_text}"},
+    )
+    planning._attach_project_histories(projects)
+    first = projects[0]["recent_sessions"]
+    assert len(first) == 1
+    assert "s3cr3t-token" not in first[0]["title"]
+    assert "[REDACTED]" in first[0]["title"]
+    assert len(first[0]["title"]) <= planning.HISTORY_FRAGMENT_LIMIT
+    assert len(first[0]["latest_user_request"]) <= planning.HISTORY_FRAGMENT_LIMIT
+    total_first = first[0]["title"] + first[0]["latest_user_request"]
+    assert len(total_first) <= planning.PROJECT_HISTORY_LIMIT
+    prompt = planning.build_planner_prompt(
+        "do it", {"capabilities": [], "agents": [], "projects": projects}
+    )
+    history_part = prompt.split("直近のCoding履歴")[1]
+    assert "題名・最新依頼" in history_part

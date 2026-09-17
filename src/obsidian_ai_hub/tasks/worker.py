@@ -71,6 +71,8 @@ def _run_execution(
         return
     if not _ensure_agent_snapshot_fresh(task_id, plan):
         return
+    if not _ensure_target_project_valid(task_id, plan):
+        return
     active_executor: StepExecutor = executor or get_default_executor()
     from obsidian_ai_hub.tasks.directional import is_directional_plan
     from obsidian_ai_hub.tasks.orchestrator import run_directional_plan
@@ -189,6 +191,56 @@ def _ensure_agent_snapshot_fresh(task_id: str, plan: dict[str, Any]) -> bool:
     )
     task_store.transition_task_status(task_id, "waiting_reapproval")
     return False
+
+
+def _ensure_target_project_valid(task_id: str, plan: dict[str, Any]) -> bool:
+    """Stop before execution when the v3 target project is gone or invalid.
+
+    Applies only to v3 plans whose resolution names a project and whose
+    capabilities include ``coding_cli`` (the only capability that uses the
+    classification as an execution bound). On failure creates a revised
+    pending plan so the task waits in ``waiting_reapproval`` instead of
+    launching coding work into a deleted or broken project; the human can
+    re-select the target from the plan screen. No external call is made.
+    """
+    from obsidian_ai_hub.tasks.directional import is_directional_plan
+    from obsidian_ai_hub.tasks.planning import validate_target_project
+
+    plan_inner = plan.get("plan", {}) or {}
+    if not is_directional_plan(plan_inner):
+        return True
+    resolution = plan_inner.get("project_resolution") or {}
+    if not isinstance(resolution, dict) or resolution.get("kind") != "project":
+        return True
+    capabilities = plan_inner.get("capabilities") or []
+    keys = {
+        str(entry.get("capability_key"))
+        for entry in capabilities
+        if isinstance(entry, dict)
+    }
+    if "coding_cli" not in keys:
+        return True
+    try:
+        validate_target_project(resolution.get("project_id"))
+    except ValueError as exc:
+        task_store.create_plan(
+            task_id,
+            plan.get("plan", {}),
+            plan.get("approval_policy_snapshot", {}),
+        )
+        task_store.append_task_event(
+            task_id,
+            "note",
+            {
+                "text": (
+                    "target project unavailable since approval: "
+                    f"{exc}. Reapproval required."
+                ),
+            },
+        )
+        task_store.transition_task_status(task_id, "waiting_reapproval")
+        return False
+    return True
 
 
 async def task_worker_loop(

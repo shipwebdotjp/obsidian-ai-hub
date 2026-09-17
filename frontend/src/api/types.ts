@@ -1021,3 +1021,27 @@ export interface TaskAgentCapability {
 export type TaskAgentCapabilityUpdate =
   | { enabled: boolean; approval_policy?: TaskAgentApprovalPolicy }
   | { enabled?: boolean; approval_policy: TaskAgentApprovalPolicy };
+
+export interface TaskAgentTargetOption {
+  project_id: number;
+  name: string;
+  git_root: string;
+  keywords: string[];
+}
+
+export interface TaskAgentTargetOptionsResponse {
+  items: TaskAgentTargetOption[];
+}
+
+export type TaskAgentProjectResolutionBody =
+  | { kind: "project"; project_id: number }
+  | { kind: "general" };
+
+export interface TaskAgentProjectResolution {
+  kind: "project" | "general";
+  project_id: number | null;
+  display_name: string;
+  confidence: number | null;
+  rationale: string;
+  source: "inferred" | "user";
+}

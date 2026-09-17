@@ -1821,6 +1821,35 @@ class RejectTaskRequest(BaseModel):
         return v
 
 
+class TargetResolutionRequest(BaseModel):
+    """Human-selected task target: a project or a general task."""
+
+    model_config = {"extra": "forbid"}
+
+    kind: Literal["project", "general"]
+    project_id: Optional[int] = None
+
+    @model_validator(mode="after")
+    def _check_kind_fields(self) -> "TargetResolutionRequest":
+        if self.kind == "project":
+            if self.project_id is None or int(self.project_id) <= 0:
+                raise ValueError("project kind requires a positive project_id")
+        elif self.project_id is not None:
+            raise ValueError("general kind must not carry a project_id")
+        return self
+
+
+class TaskAgentTargetOption(BaseModel):
+    project_id: int
+    name: str
+    git_root: str
+    keywords: list[str] = []
+
+
+class TaskAgentTargetOptionsResponse(BaseModel):
+    items: list[TaskAgentTargetOption]
+
+
 class TaskAgentCapability(BaseModel):
     capability_key: str
     adapter_kind: str

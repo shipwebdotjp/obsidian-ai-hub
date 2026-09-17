@@ -85,6 +85,38 @@ def replan_task(task_id: str, _=Depends(require_bearer_token)):
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@router.post(
+    "/tasks/{task_id}/project-resolution", response_model=schemas.TaskAgentTask
+)
+def set_project_resolution(
+    task_id: str,
+    body: schemas.TargetResolutionRequest,
+    _=Depends(require_bearer_token),
+):
+    """Change a pending plan's target project (or mark it a general task).
+
+    Accepted only while the task waits for approval. The normalized human
+    selection is persisted, the pending plan is superseded, and the task
+    returns to ``queued`` for replanning on the selected target.
+    """
+    try:
+        return service.set_task_agent_project_resolution(
+            task_id, body.kind, body.project_id
+        )
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get(
+    "/target-options", response_model=schemas.TaskAgentTargetOptionsResponse
+)
+def list_target_options(_=Depends(require_bearer_token)):
+    """Return the selectable targets: valid Git projects only."""
+    return {"items": service.list_task_agent_target_options()}
+
+
 @router.get("/capabilities", response_model=list[schemas.TaskAgentCapability])
 def list_capabilities(_=Depends(require_bearer_token)):
     return service.list_task_agent_capabilities()

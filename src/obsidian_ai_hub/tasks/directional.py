@@ -14,10 +14,55 @@ from __future__ import annotations
 import hashlib
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 DEFAULT_MAX_ACTIONS = 10
 MAX_ACTIONS_HARD_LIMIT = 30
+
+
+class ProjectResolution(BaseModel):
+    """Resolved main-target project of a v3 Directional Plan.
+
+    A task targets either a single main project (``kind="project"``) or is a
+    general task with no specific project (``kind="general"``). ``confidence``
+    is a 0..1 *decision score* for the low-confidence HITL branch, not a
+    statistical probability. Human selections (``source="user"``) carry no
+    confidence. ``display_name`` is a snapshot shown in the plan detail even
+    if the project is later renamed or deleted.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["project", "general"] = Field(
+        description="主対象Projectか一般Taskか。"
+    )
+    project_id: Optional[int] = Field(
+        default=None, description="主対象Project ID（general時はなし）。"
+    )
+    display_name: str = Field(
+        default="", description="選定時点のProject表示名スナップショット。"
+    )
+    confidence: Optional[float] = Field(
+        default=None,
+        description="判断スコア 0..1。人間指定では付けない。",
+    )
+    rationale: str = Field(default="", description="選定の短い根拠。")
+    source: Literal["inferred", "user"] = Field(
+        default="inferred", description="選定元（Planner推定か人間指定）。"
+    )
+
+    @model_validator(mode="after")
+    def _check_kind_fields(self) -> "ProjectResolution":
+        if self.kind == "project":
+            if self.project_id is None or int(self.project_id) <= 0:
+                raise ValueError("project kind requires a positive project_id")
+        elif self.project_id is not None:
+            raise ValueError("general kind must not carry a project_id")
+        if self.confidence is not None and not (
+            0.0 <= float(self.confidence) <= 1.0
+        ):
+            raise ValueError("confidence must be between 0 and 1")
+        return self
 
 
 class AgentConfigSnapshot(BaseModel):
@@ -112,11 +157,16 @@ class PlanDirective(BaseModel):
 
 
 class DirectionalPlan(BaseModel):
-    """Validated Directional Plan (plan_version 2)."""
+    """Validated Directional Plan (plan_version 2 or 3).
+
+    Version 3 plans always carry a ``project_resolution``: the task's
+    main-target project or an explicit "general" classification. Version 2
+    plans (pre-resolution) stay readable and executable.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
-    plan_version: Literal[2] = Field(default=2)
+    plan_version: Literal[2, 3] = Field(default=2)
     purpose: str = Field(description="タスクの目的。承認対象の中心。")
     strategy: str = Field(
         default="",
@@ -154,6 +204,20 @@ class DirectionalPlan(BaseModel):
         le=MAX_ACTIONS_HARD_LIMIT,
         description="Runtime Orchestratorの最大Action数。無限ループ防止の必須上限。",
     )
+    # Version 3 only: the task's main-target project (or "general").
+    # Mandatory for plan_version 3; absent (or None) for version 2.
+    project_resolution: Optional[ProjectResolution] = Field(
+        default=None,
+        description="主対象Projectの解決結果。v3では必須、v2ではなし。",
+    )
+
+    @model_validator(mode="after")
+    def _check_version_resolution(self) -> "DirectionalPlan":
+        if self.plan_version == 3 and self.project_resolution is None:
+            raise ValueError("plan_version 3 requires project_resolution")
+        if self.plan_version == 2 and self.project_resolution is not None:
+            raise ValueError("plan_version 2 must not carry project_resolution")
+        return self
 
     @field_validator("purpose", "completion_criteria")
     @classmethod
@@ -182,7 +246,7 @@ def plan_format(plan_inner: Any) -> Literal["directional", "legacy", "unknown"]:
     ):
         # Directional plans always carry an explicit version marker; legacy
         # plans carry "steps".
-        if plan_inner.get("plan_version") == 2 or "steps" not in plan_inner:
+        if plan_inner.get("plan_version") in (2, 3) or "steps" not in plan_inner:
             return "directional"
     if isinstance(plan_inner.get("steps"), list):
         return "legacy"
@@ -199,7 +263,7 @@ def parse_directional_plan(plan_inner: dict[str, Any]) -> DirectionalPlan:
 
 def approval_scope(plan: DirectionalPlan) -> dict[str, Any]:
     """Return the approval boundary derived from a directional plan."""
-    return {
+    scope: dict[str, Any] = {
         "purpose": plan.purpose,
         "capability_keys": sorted(d.capability_key for d in plan.capabilities),
         "intents": {d.capability_key: d.intent for d in plan.capabilities},
@@ -209,6 +273,9 @@ def approval_scope(plan: DirectionalPlan) -> dict[str, Any]:
         "allowed_agent_ids": list(plan.allowed_agent_ids or []),
         "allowed_project_ids": list(plan.allowed_project_ids or []),
     }
+    if plan.project_resolution is not None:
+        scope["project_resolution"] = plan.project_resolution.model_dump()
+    return scope
 
 
 def is_directional_plan(plan_inner: Any) -> bool:

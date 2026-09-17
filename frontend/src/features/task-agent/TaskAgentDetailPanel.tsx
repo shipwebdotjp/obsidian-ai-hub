@@ -7,13 +7,17 @@ import {
   cancelTaskAgentTask,
   getHitlRun,
   getTaskAgentTask,
+  listTaskAgentTargetOptions,
   rejectTaskAgentTask,
   replanTaskAgentTask,
+  setTaskAgentProjectResolution,
   submitHitlAnswer,
 } from "../../api/client";
 import type {
   HitlRunDetail,
   TaskAgentEvent,
+  TaskAgentProjectResolution,
+  TaskAgentTargetOption,
   TaskAgentTaskDetail,
 } from "../../api/types";
 import {
@@ -47,9 +51,67 @@ interface DirectionalPlanJson {
   capabilities?: Array<{ capability_key?: unknown; intent?: unknown }>;
   allowed_agent_ids?: unknown;
   allowed_project_ids?: unknown;
+  project_resolution?: TaskAgentProjectResolution | null;
   constraints?: unknown;
   completion_criteria?: unknown;
   max_actions?: unknown;
+}
+
+function resolutionSummaryText(
+  resolution: TaskAgentProjectResolution,
+): string {
+  if (resolution.kind === "project") {
+    const name =
+      resolution.display_name && resolution.display_name.trim()
+        ? resolution.display_name
+        : `Project ${String(resolution.project_id ?? "")}`;
+    return name;
+  }
+  return "一般Task";
+}
+
+function resolutionSourceLabel(source: string): string {
+  return source === "user" ? "人間選択" : "推定";
+}
+
+function ProjectResolutionView({
+  resolution,
+}: {
+  resolution: TaskAgentProjectResolution;
+}) {
+  return (
+    <div className="mt-1 rounded border border-slate-200 bg-slate-50 px-2 py-1">
+      <p className="min-w-0 break-words">
+        <span className="font-medium">対象: </span>
+        {resolutionSummaryText(resolution)}
+        {resolution.kind === "project" &&
+          resolution.project_id !== null &&
+          resolution.project_id !== undefined && (
+            <span className="text-slate-500">
+              {" "}
+              (project:{String(resolution.project_id)})
+            </span>
+          )}
+      </p>
+      <p className="mt-0.5 min-w-0 break-words text-slate-500">
+        選定元: {resolutionSourceLabel(resolution.source)}
+        {resolution.source === "inferred" &&
+        resolution.confidence !== null &&
+        resolution.confidence !== undefined ? (
+          <> / スコア: {String(resolution.confidence)}</>
+        ) : null}
+        {resolution.rationale ? (
+          <>
+            {" "}
+            / 根拠:{" "}
+            <span className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+              {resolution.rationale}
+            </span>
+          </>
+        ) : null}
+      </p>
+    </div>
+  );
 }
 
 function isDirectionalPlan(plan: unknown): boolean {
@@ -64,6 +126,19 @@ function DirectionalPlanView({ plan }: { plan: DirectionalPlanJson }) {
       <p className="rounded bg-blue-50 px-2 py-1 text-[11px] text-blue-800">
         承認対象は方向性とCapability範囲です（詳細引数は実行時に確定し、履歴に記録されます）。
       </p>
+      {plan.project_resolution !== null &&
+      plan.project_resolution !== undefined &&
+      typeof plan.project_resolution === "object" &&
+      (plan.project_resolution.kind === "project" ||
+        plan.project_resolution.kind === "general") ? (
+        <ProjectResolutionView
+          resolution={plan.project_resolution as TaskAgentProjectResolution}
+        />
+      ) : (
+        <p className="min-w-0 break-words text-slate-500">
+          対象: 未記録（v3より前のPlan）
+        </p>
+      )}
       {typeof plan.purpose === "string" && (
         <p className="min-w-0 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
           <span className="font-medium">目的: </span>
@@ -158,6 +233,25 @@ function RelatedRunLinks({ payload }: { payload: Record<string, unknown> }) {
   );
 }
 
+function defaultTargetValue(detail: TaskAgentTaskDetail | null): string {
+  if (!detail) return "";
+  const current = detail.plans.find(
+    (p) => p.plan_id === detail.task.current_plan_id,
+  );
+  const resolution = (current?.plan as DirectionalPlanJson | undefined)
+    ?.project_resolution;
+  if (
+    resolution &&
+    resolution.kind === "project" &&
+    resolution.project_id !== null &&
+    resolution.project_id !== undefined
+  ) {
+    return `project:${resolution.project_id}`;
+  }
+  if (resolution && resolution.kind === "general") return "general";
+  return "";
+}
+
 function sessionIdForRunId(
   events: TaskAgentEvent[],
   runId: string,
@@ -194,6 +288,14 @@ export default function TaskAgentDetailPanel({
   const [hitlRun, setHitlRun] = useState<HitlRunDetail | null>(null);
   const [hitlBusy, setHitlBusy] = useState(false);
   const [loadedTaskId, setLoadedTaskId] = useState<string | null>(null);
+  const [targetOptions, setTargetOptions] = useState<TaskAgentTargetOption[]>(
+    [],
+  );
+  const [targetOptionsError, setTargetOptionsError] = useState<string | null>(
+    null,
+  );
+  const [selectedTarget, setSelectedTarget] = useState("");
+  const [targetBusy, setTargetBusy] = useState(false);
   const inFlightRef = useRef(false);
   const requestGenRef = useRef(0);
 
@@ -202,6 +304,9 @@ export default function TaskAgentDetailPanel({
     setRejectReason("");
     setActionError(null);
     setHitlRun(null);
+    setTargetOptions([]);
+    setTargetOptionsError(null);
+    setSelectedTarget("");
   }, [taskId]);
 
   const loadDetail = useCallback(
@@ -258,6 +363,35 @@ export default function TaskAgentDetailPanel({
     void loadDetail();
   }, [loadDetail]);
 
+  const currentDefaultTarget = detail ? defaultTargetValue(detail) : "";
+
+  useEffect(() => {
+    const status = detail?.task.status;
+    if (!status || loadedTaskId !== taskId) return;
+    if (!APPROVAL_STATUSES.includes(status)) return;
+    const currentGen = requestGenRef.current;
+    void listTaskAgentTargetOptions()
+      .then((res) => {
+        if (currentGen !== requestGenRef.current) return;
+        const items = res.items ?? [];
+        setTargetOptions(items);
+        setTargetOptionsError(null);
+        setSelectedTarget((prev) => prev || currentDefaultTarget);
+      })
+      .catch((e) => {
+        if (currentGen !== requestGenRef.current) return;
+        setTargetOptions([]);
+        setTargetOptionsError(
+          e instanceof ApiError
+            ? `対象候補の読み込みエラー: ${e.message}`
+            : "対象候補の読み込みに失敗しました",
+        );
+      });
+    // Polling recreates `detail` every 3s; depend on the stable status and
+    // resolution value instead of the object identity to avoid refetching.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detail?.task.status, loadedTaskId, taskId, currentDefaultTarget]);
+
   useEffect(() => {
     const status = detail?.task.status;
     if (!status || loadedTaskId !== taskId || TERMINAL_SET.has(status)) return;
@@ -288,6 +422,35 @@ export default function TaskAgentDetailPanel({
     },
     [taskId, loadDetail, onTaskChanged],
   );
+
+  const changeTarget = useCallback(async () => {
+    if (!taskId || !selectedTarget || targetBusy) return;
+    const body =
+      selectedTarget === "general"
+        ? ({ kind: "general" } as const)
+        : ({
+            kind: "project",
+            project_id: Number(selectedTarget.slice("project:".length)),
+          } as const);
+    if (
+      body.kind === "project" &&
+      (!Number.isInteger(body.project_id) || body.project_id <= 0)
+    ) {
+      setActionError("対象の選択が不正です");
+      return;
+    }
+    setTargetBusy(true);
+    setActionError(null);
+    try {
+      await setTaskAgentProjectResolution(taskId, body);
+      await loadDetail(false);
+      onTaskChanged?.();
+    } catch (e) {
+      setActionError(e instanceof ApiError ? e.message : "対象の変更に失敗しました");
+    } finally {
+      setTargetBusy(false);
+    }
+  }, [taskId, selectedTarget, targetBusy, loadDetail, onTaskChanged]);
 
   // 初回ロードかつ前回内容がない場合のみ全画面ローディングにする。
   // 行切替時は直前の内容を維持する（AGENTS.md: コンポーネントのマウント・更新）。
@@ -327,7 +490,8 @@ export default function TaskAgentDetailPanel({
     hitlRun !== null &&
     ANSWERABLE_HITL_STATUSES.includes(hitlRun.status) &&
     pendingQuestions.length > 0;
-  const rejectDisabled = busy || !rejectReason.trim();
+  const actionBusy = busy || targetBusy;
+  const rejectDisabled = actionBusy || !rejectReason.trim();
   const activeChildSession =
     task.active_child_run_id !== null && task.active_child_run_id !== undefined
       ? sessionIdForRunId(detail.events, task.active_child_run_id)
@@ -426,7 +590,7 @@ export default function TaskAgentDetailPanel({
                 <button
                   type="button"
                   data-testid="task-approve"
-                  disabled={busy}
+                  disabled={actionBusy}
                   onClick={() => void runAction(approveTaskAgentTask)}
                   className="cursor-pointer rounded bg-emerald-600 px-3 py-1.5 text-xs text-white disabled:cursor-not-allowed disabled:opacity-50"
                 >
@@ -446,11 +610,11 @@ export default function TaskAgentDetailPanel({
               </>
             )}
             {!isTerminal && (
-              <button
-                type="button"
-                data-testid="task-cancel"
-                disabled={busy}
-                onClick={() => void runAction(cancelTaskAgentTask)}
+                <button
+                  type="button"
+                  data-testid="task-cancel"
+                  disabled={actionBusy}
+                  onClick={() => void runAction(cancelTaskAgentTask)}
                 className="cursor-pointer rounded bg-slate-900 px-3 py-1.5 text-xs text-white disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {task.status === "running" ? "実行中の子runを停止して取消" : "取消"}
@@ -477,6 +641,68 @@ export default function TaskAgentDetailPanel({
               rows={2}
               className="mt-2 w-full rounded border border-slate-300 px-2 py-1 text-sm"
             />
+          )}
+          {needsApproval && (
+            <div className="mt-3 border-t border-slate-100 pt-2">
+              <label
+                htmlFor="task-target-select"
+                className="text-xs font-medium text-slate-500"
+              >
+                対象Project /
+                一般Taskの変更（変更すると現行Planは破棄され再計画されます）
+              </label>
+              <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2">
+                <select
+                  id="task-target-select"
+                  aria-label="対象の変更"
+                  value={selectedTarget}
+                  disabled={targetBusy || busy}
+                  onChange={(e) => setSelectedTarget(e.target.value)}
+                  className="min-w-0 flex-1 cursor-pointer rounded border border-slate-300 px-2 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <option value="">選択してください</option>
+                  {targetOptions.map((o) => (
+                    <option
+                      key={o.project_id}
+                      value={`project:${o.project_id}`}
+                    >
+                      {o.name}（project:{o.project_id}）
+                    </option>
+                  ))}
+                  {selectedTarget !== "" &&
+                    selectedTarget !== "general" &&
+                    !targetOptions.some(
+                      (o) => `project:${o.project_id}` === selectedTarget,
+                    ) && (
+                      <option value={selectedTarget}>
+                        現在の対象（{selectedTarget} / 候補に存在しません）
+                      </option>
+                    )}
+                  <option value="general">
+                    一般Task（Projectを特定しない）
+                  </option>
+                </select>
+                <button
+                  type="button"
+                  data-testid="task-change-target"
+                  disabled={
+                    targetBusy ||
+                    busy ||
+                    !selectedTarget ||
+                    selectedTarget === currentDefaultTarget
+                  }
+                  onClick={() => void changeTarget()}
+                  className="cursor-pointer rounded bg-slate-900 px-3 py-1.5 text-xs text-white disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  対象を変更して再計画
+                </button>
+              </div>
+              {targetOptionsError && (
+                <p className="mt-1 text-xs text-rose-700">
+                  {targetOptionsError}
+                </p>
+              )}
+            </div>
           )}
         </section>
 

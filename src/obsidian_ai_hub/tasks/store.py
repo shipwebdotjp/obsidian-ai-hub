@@ -55,6 +55,7 @@ TASK_EVENT_TYPES: frozenset[str] = frozenset(
         "child_run_finished",
         "hitl_question_asked",
         "hitl_question_answered",
+        "target_resolution_selected",
         "capability_completed",
         "note",
     }
@@ -285,6 +286,35 @@ def create_plan(
     if created is None:
         raise FileNotFoundError(f"Plan '{plan_id}' not found after creation.")
     return created
+
+
+def supersede_pending_plans(
+    task_id: str, conn: Optional[sqlite3.Connection] = None
+) -> int:
+    """Mark all pending plans of a task as superseded. Returns the count.
+
+    Used when a pending plan's target is changed by a human: the current
+    pending plan is discarded and the task returns to ``queued`` so the next
+    planning round builds a new plan on the human-selected target.
+    """
+    with auto_connection(conn) as (active_conn, is_generated):
+        current = get_task(task_id, conn=active_conn)
+        if current is None:
+            raise FileNotFoundError(f"Task '{task_id}' not found.")
+
+        def _do() -> int:
+            cur = active_conn.execute(
+                "UPDATE task_agent_plans SET status = 'superseded' "
+                "WHERE task_id = ? AND status = 'pending';",
+                (task_id,),
+            )
+            return int(cur.rowcount or 0)
+
+        if is_generated:
+            with active_conn:
+                return _do()
+        else:
+            return _do()
 
 
 def get_plan(

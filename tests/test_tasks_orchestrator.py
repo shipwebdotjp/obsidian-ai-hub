@@ -757,3 +757,104 @@ def test_deviation_rebuild_preserves_completed_targets():
     plans = store.list_plans(task["task_id"])
     rebuilt = plans[-1]["plan"]["steps"][0]
     assert rebuilt["target"] == {"agent_id": "agent_1"}
+
+
+def _v3_plan_with_resolution(task_id, project_id=7):
+    return store.create_plan(
+        task_id,
+        {
+            "plan_version": 3,
+            "purpose": "実装テスト",
+            "strategy": "",
+            "capabilities": [
+                {"capability_key": "coding_cli", "intent": "対象Projectで実装"}
+            ],
+            "allowed_agent_ids": [],
+            "allowed_project_ids": [project_id],
+            "project_resolution": {
+                "kind": "project",
+                "project_id": project_id,
+                "display_name": "Demo Seven",
+                "confidence": None,
+                "rationale": "人間が選択した対象",
+                "source": "user",
+            },
+            "constraints": "",
+            "completion_criteria": "done",
+            "max_actions": 6,
+        },
+        {"coding_cli": "plan_required"},
+    )
+
+
+def test_v3_plan_runs_resolved_project_and_rejects_others():
+    task = store.create_task("v3 codingジョブ")
+    plan = _v3_plan_with_resolution(task["task_id"])
+    executor = FakeExecutor()
+    generator = _scripted(
+        [
+            {
+                "action": "call_capability",
+                "capability_key": "coding_cli",
+                "target": {"project_id": 11},
+                "inputs": {"task": "hack"},
+                "reason": "範囲外",
+            },
+            {
+                "action": "call_capability",
+                "capability_key": "coding_cli",
+                "target": {"project_id": 7},
+                "inputs": {"task": "implement"},
+                "reason": "対象",
+            },
+            {"action": "finish", "summary": "実装した", "reason": "完了"},
+        ]
+    )
+    outcome = run_directional_plan(task["task_id"], plan, executor, generator)
+    assert outcome.kind == "completed"
+    assert len(executor.calls) == 1
+    completed = [
+        e
+        for e in store.list_task_events(task["task_id"])
+        if e["event_type"] == "capability_completed"
+    ]
+    assert len(completed) == 1
+    assert completed[0]["payload"]["target"]["project_id"] == 7
+
+
+def test_v3_persistent_scope_violation_goes_to_deviation():
+    task = store.create_task("v3 scope外ジョブ")
+    plan = _v3_plan_with_resolution(task["task_id"])
+    executor = FakeExecutor()
+    generator = _scripted(
+        [
+            {
+                "action": "call_capability",
+                "capability_key": "coding_cli",
+                "target": {"project_id": 11},
+                "inputs": {"task": "hack"},
+                "reason": "範囲外",
+            }
+        ]
+        * 5
+    )
+    outcome = run_directional_plan(task["task_id"], plan, executor, generator)
+    assert outcome.kind == "deviation"
+    assert "11" in (outcome.deviation_reason or "")
+    assert executor.calls == []
+
+
+def test_orchestrator_prompt_shows_v3_target():
+    from obsidian_ai_hub.tasks.directional import parse_directional_plan
+    from obsidian_ai_hub.tasks.orchestrator import build_orchestrator_prompt
+    from obsidian_ai_hub.tasks.directional import approval_scope
+
+    task = store.create_task("v3 promptジョブ")
+    plan_record = _v3_plan_with_resolution(task["task_id"])
+    parsed = parse_directional_plan(dict(plan_record["plan"]))
+    scope = approval_scope(parsed)
+    prompt = build_orchestrator_prompt(
+        task, parsed, scope, {"coding_cli": "task field"}, [], None
+    )
+    assert "project:7" in prompt
+    assert "Demo Seven" in prompt

@@ -108,6 +108,78 @@ def replan_task_agent_task(task_id: str) -> dict[str, Any]:
     return task_store.transition_task_status(task_id, "queued")
 
 
+_TASK_TARGET_CHANGE_STATUSES = ("waiting_approval", "waiting_reapproval")
+
+
+def set_task_agent_project_resolution(
+    task_id: str, kind: str, project_id: Optional[int] = None
+) -> dict[str, Any]:
+    """Change a pending plan's target and requeue the task for replanning.
+
+    Accepted only in the waiting-approval states. Records the normalized
+    human selection as a ``target_resolution_selected`` event (no
+    confidence), supersedes the current pending plan, and returns the task
+    to ``queued`` so the next planning round builds a new plan on the
+    human-selected target. Invalid or deleted projects are rejected.
+    """
+    from obsidian_ai_hub.database import get_db_connection
+    from obsidian_ai_hub.tasks import planning as task_planning
+
+    task = task_store.get_task(task_id)
+    if task is None:
+        raise FileNotFoundError(f"Task '{task_id}' not found.")
+    status = str(task["status"])
+    if status not in _TASK_TARGET_CHANGE_STATUSES:
+        raise ValueError(
+            f"Task '{task_id}' target can only be changed while waiting for "
+            f"approval (now '{status}')."
+        )
+    # One transaction for all three writes: a failure (concurrent status
+    # change, DB error) must not leave a superseded plan with an orphan
+    # selection, or vice versa.
+    conn = get_db_connection()
+    try:
+        with conn:
+            task_planning.record_target_resolution_selection(
+                task_id,
+                kind=kind,
+                project_id=project_id,
+                via="plan_screen",
+                conn=conn,
+            )
+            task_store.supersede_pending_plans(task_id, conn=conn)
+            task_store.transition_task_status(task_id, "queued", conn=conn)
+    finally:
+        conn.close()
+    updated = task_store.get_task(task_id)
+    if updated is None:
+        raise FileNotFoundError(f"Task '{task_id}' not found after update.")
+    return updated
+
+
+def list_task_agent_target_options() -> list[dict[str, Any]]:
+    """Return the selectable targets: valid Git projects only."""
+    from obsidian_ai_hub.tasks import planning as task_planning
+
+    options: list[dict[str, Any]] = []
+    for project in task_planning.list_valid_projects():
+        try:
+            project_id = int(project.get("project_id"))  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            continue
+        if project_id <= 0:
+            continue
+        options.append(
+            {
+                "project_id": project_id,
+                "name": str(project.get("name") or ""),
+                "git_root": str(project.get("git_root") or ""),
+                "keywords": [str(k) for k in (project.get("keywords") or [])],
+            }
+        )
+    return options
+
+
 def _enrich_capability(row: dict[str, Any], catalog: dict[str, Any]) -> dict[str, Any]:
     definition = catalog.get(row["capability_key"])
     return {

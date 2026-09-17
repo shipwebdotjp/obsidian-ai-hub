@@ -37,7 +37,9 @@ MVP後の再検討項目は [post-mvp.md](post-mvp.md) に集約する。
 - WebUI: `/task-agent` は一覧、`/task-agent/:id` は詳細画面である。
   - `/tasks` は既存の定期タスク設定のまま維持する。
   - 詳細には状態、Plan履歴、質問、実行Event、子runへのリンク、結果、取消を表示する。
+  - v3 Planの詳細には対象（または一般Task）、選定元、confidence、根拠を常時表示する。
   - `waiting_approval` / `waiting_reapproval` では承認または理由必須の差戻しを行える。
+    同状態では対象Project／一般Taskの選び直しもでき、変更時は現行Planを破棄して再計画する。
 - Capability設定画面では、コードで登録されたCapabilityの `enabled` と
   `approval_policy` だけを変更できる。
 
@@ -76,7 +78,7 @@ Registryに新規builtin toolを追加すればTask Capabilityとしても自動
 | `memory_propose` | `plan_required` | Memory candidateの作成。 |
 | `vault_write_file` | `plan_required` | 既存Vault書込み基盤の再利用 (相対パス・UTF-8・親dir自動作成・原子書込み・`overwrite=true` 必須)。 |
 | `specialist_agent` | `plan_required` | 登録済みAI Agentを指定して一回限りの子runを作る。 |
-| `coding_cli` | `plan_required` | 登録済みProjectのGit rootで新規Coding session/runを作る。 |
+| `coding_cli` | `plan_required` | 登録済みProjectのGit rootで新規Coding session/runを作る。v3 Planでは解決済みの主対象Project 1件だけで実行する。 |
 | `research_agent` | `plan_required` | 既存リサーチ基盤のjobを作成・実行し、レポートをVaultへ公開する(target不要)。 |
 | `run_shell`、Skills、その他新規Registry tool | `plan_required` | Registryの正本から自動派生。 |
 
@@ -133,6 +135,29 @@ Directional Planは少なくとも目的、実行方針、承認されたCapabil
 採用しない。旧形式の静的Plan (順序付きStep・確定対象・入力を持つ) は互換
 読み込みし、旧実行器で実行する。DB schema変更はしない。
 
+Directional Plan v3は主対象の解決結果 (`project_resolution`) を必須とする。
+Taskは「主対象Project 1件」または「一般Task」に分類する。複数repoにまたがる
+作業は別Taskに分ける運用とし、主対象は常に1件である。分類は非Coding Taskにも
+記録するが、実行先制限として使うのは `coding_cli` のみである。
+
+対象選定はPlannerの1回のLLM呼出しでPlan生成と同時に行う。Planner contextには
+各有効Projectの名前・キーワード・Git rootと、最新3件のCoding sessionの
+題名・最新user依頼を加える（各断片redact済み、1件300文字・Projectあたり800文字・
+全体12,000文字で打ち切る）。worker応答や実行ログ全体は渡さない。
+
+`project_resolution` は kind (`project` / `general`)、project_id、表示名スナップショット、
+confidence (0..1)、短い根拠、source (`inferred` / `user`) を持つ。confidenceは
+統計的確率ではなく、人間への質問へ分岐するための判断スコアである。推定scoreが0.75未満
+ならPlanは保存せず、全有効Projectと「一般Task」を選択肢にした既存HITL質問
+（内部値 `project:<整数ID>` / `general`）へ回す。質問文には推定上位候補のscore・
+根拠を記載する。HITL回答またはPlan画面での変更は正規化済みIDを
+`target_resolution_selected` Eventとして保存し、以後の再計画で強制入力にする
+（人間指定にはconfidenceを付けない）。
+
+Projectを選んだv3 Planの `allowed_project_ids` はそのIDだけにし、Runtimeは範囲外の
+`coding_cli` 実行を拒否する。一般TaskのPlanに `coding_cli` は含めない。v2の
+Directional Planと旧静的Planの挙動・対象範囲は変更しない。
+
 承認済みDirectional Planの実行はRuntime Orchestratorの動的ループで行う:
 次のAction (Capability呼び出し / finish) を構造化出力し、承認範囲・入力
 schemaを検証してから実行し、ActionとObservationをEventへ保存する。
@@ -168,8 +193,11 @@ Task IDの次版として保存して `waiting_reapproval` にする (旧形式�
 
 | 段階 | 入力と正本 | 機械可読な識別子 | 永続化 | 次に読む主体 | 停止・失敗時 | 不可逆操作 |
 | --- | --- | --- | --- | --- | --- | --- |
-| Plan生成 | Capability schema (`args_schema`単一正本) | `capability_key` / `agent_id` / `project_id`(数値正規化) | Plan (方向性・Capability範囲・対象allowlist) | 承認者、Orchestrator | 未知Capability・解決不能schema・対象不在はPlan化せず失敗/質問 | なし |
+| 推定 | 有効Projectと最近のCoding履歴 (題名・最新user依頼のみ、redact済み) | `project_id` / `general` | v3 Plan または HITL候補 | 承認者、Orchestrator | 低scoreは質問、Plan未保存・実行なし | なし |
+| 人間選択 | HITLの `project:<int>` / `general`、Plan画面の選択 | `project_id`(数値正規化) / `general` | `target_resolution_selected` Event | 再計画のPlanner | 不正・削除済みIDは拒否 | なし |
+| Plan生成 | Capability schema (`args_schema`単一正本) | `capability_key` / `agent_id` / `project_id`(数値正規化) | Plan (方向性・Capability範囲・単一対象allowlist) | 承認者、Orchestrator | 未知Capability・解決不能schema・対象不在はPlan化せず失敗/質問 | なし |
 | 承認 | 承認範囲 (目的・Capability・制約・対象allowlist) | plan_version・承認snapshot | plan_approved / ready | worker | 差戻しは理由必須でqueuedへ | なし |
+| 承認・実行 | v3の単一 `allowed_project_ids` | `project_id` | Plan承認・Action Event | worker、Orchestrator | 範囲外・無効ProjectはCoding起動前に停止 (`waiting_reapproval`) | Coding副作用 (at-least-once注意) |
 | Action生成 | Plan・依頼・履歴Observation | RuntimeAction (構造化JSON) | 保存しない (LLM出力は使い捨て) | Orchestrator検証 | 不正出力は最大2回修正させて失敗 | なし |
 | Action検証 | 正本のPydanticモデル | capability_key・target・inputs | note (検証エラー) | Orchestrator (修正) / 人間 (再承認) | 範囲外は実行せずdeviation、修正尽きは失敗 (対象範囲外は再承認) | なし (実行しない) |
 | Action実行 | 検証済み入力 | action_index | capability_completed (target・inputs・observation) | 次ターンOrchestrator・再開時resume | tool失敗は失敗、取消は伝播 | memory_propose等の副作用 (at-least-once注意) |
@@ -179,27 +207,11 @@ Task IDの次版として保存して `waiting_reapproval` にする (旧形式�
 保証範囲: 完了済みActionの非重複実行は `action_index` 基準のbest-effortであり、
 exactly-onceではない。副作用の実行から完了Event保存の間に障害が起きると、
 再開時に重複実行され得る (at-least-once)。Event履歴で検出可能にするが、
-自動的な防止・取消はしない。
-
-### 操作シナリオ契約
-
-| 段階 | 入力と正本 | 機械可読な識別子 | 永続化 | 次に読む主体 | 停止・失敗時 | 不可逆操作 |
-| --- | --- | --- | --- | --- | --- | --- |
-| Plan生成 | Capability schema (`args_schema`単一正本) | `capability_key` / `agent_id` / `project_id`(数値正規化) | Plan (方向性・Capability範囲・対象allowlist) | 承認者、Orchestrator | 未知Capability・解決不能schema・対象不在はPlan化せず失敗/質問 | なし |
-| 承認 | 承認範囲 (目的・Capability・制約・対象allowlist) | plan_version・承認snapshot | plan_approved / ready | worker | 差戻しは理由必須でqueuedへ | なし |
-| Action生成 | Plan・依頼・履歴Observation | RuntimeAction (構造化JSON) | 保存しない (LLM出力は使い捨て) | Orchestrator検証 | 不正出力は最大2回修正させて失敗 | なし |
-| Action検証 | 正本のPydanticモデル | capability_key・target・inputs | note (検証エラー) | Orchestrator (修正) / 人間 (再承認) | 範囲外は実行せずdeviation、修正尽きは失敗 (対象範囲外は再承認) | なし (実行しない) |
-| Action実行 | 検証済み入力 | action_index | capability_completed (target・inputs・observation) | 次ターンOrchestrator・再開時resume | tool失敗は失敗、取消は伝播 | memory_propose等の副作用 (at-least-onceに注意) |
-| 再開 | capability_completedのaction_index | action_index (max+1、重複排除) | 既存Event | Orchestrator | 上限到達・同一反復は停止 | 完了Event未保存の副作用は再実行され得る |
-| 完了 | 完了条件・finish要約 | result_summary | completed | 閲覧者 | — | — |
-
-保証範囲: 完了済みActionの非重複実行は `action_index` 基準のbest-effortであり、
-exactly-onceではない。副作用の実行から完了Event保存の間に障害が起きると、
-再開時に重複実行され得る (at-least-once)。Event履歴で検出可能にするが、
 自動的な防止・取消はしない。`specialist_agent` /
-`coding_cli` の委譲対象は、承認時点で有効だったAgent / Project IDの集合
-(`allowed_agent_ids` / `allowed_project_ids`) としてPlanへ記録し、Actionごとに
-範囲内か検証する。範囲外の対象は実行せず `waiting_reapproval` に回す。
+`coding_cli` の委譲対象は、承認時点の有効集合 (`allowed_agent_ids` /
+`allowed_project_ids`) としてPlanへ記録し、Actionごとに範囲内か検証する。
+v3では対象Projectは1件に限定される。範囲外の対象は実行せず
+`waiting_reapproval` に回す。
 
 - Plannerは対象を一意に解決できなければ、既存HITLの質問を登録し `waiting_user` にする。
 - 実行器は保存済みPlanのStepだけを順に実行し、実行時にCapabilityを再選択しない。
@@ -302,6 +314,10 @@ Task、Plan、Eventは終端化から30日後にまとめて削除する。非�
   却下して `queued` にする。
 - `POST /api/v1/task-agent/tasks/{task_id}/cancel` — 取消を要求する。
 - `POST /api/v1/task-agent/tasks/{task_id}/replan` — `interrupted` Taskを明示的に `queued` に戻す。
+- `POST /api/v1/task-agent/tasks/{task_id}/project-resolution` — 承認待ち状態でのみ対象変更を受け付ける。
+  本文は `{"kind":"project","project_id":int}` または `{"kind":"general"}`。現行pending Planを
+  `superseded` にし、Taskを `queued` に戻して人間指定を前提に再計画する。
+- `GET /api/v1/task-agent/target-options` — Project選択UI向けに有効Git Projectだけを返す。
 - `GET /api/v1/task-agent/capabilities`、`PUT /api/v1/task-agent/capabilities/{capability_key}` —
   Capabilityの一覧と `enabled` / `approval_policy` の更新。
 
@@ -321,3 +337,10 @@ Task、Plan、Eventは終端化から30日後にまとめて削除する。非�
 10. Task履歴が30日で削除され、既知秘密値と非公開思考過程を保存しない。
 11. WebUI上で依頼内容を入力して新規Taskを投入でき、成功時と入力・通信失敗時の
     フィードバックが提供される。
+12. 高confidenceのProject推定／一般TaskはそのままPlan化され、低confidenceは
+    候補Projectと「一般Task」の質問になる。v3 Planの詳細には対象（または一般Task）、
+    選定元、confidence、根拠が表示される。
+13. Projectを選んだv3 Planは選択Project以外で `coding_cli` を実行しない。
+    承認後に削除・Git root不正となった対象はCoding起動前に止まり、
+    Plan画面から対象を選び直せる。
+14. 承認待ちPlanの対象変更は現行Planを破棄して再計画され、状態外の変更は拒否される。

@@ -286,6 +286,18 @@ def build_orchestrator_prompt(
             "実行可能なProject ID (coding_cliのtarget.project_idはこの中からのみ):",
             "  " + ", ".join(str(p) for p in plan.allowed_project_ids),
         ]
+    if plan.project_resolution is not None:
+        resolution = plan.project_resolution
+        if resolution.kind == "project":
+            lines += [
+                "",
+                "Taskの主対象Project "
+                f"(coding_cliのtarget.project_idは{resolution.project_id}のみ):",
+                f"  {resolution.display_name or '(名称未記録)'}"
+                f" (project:{resolution.project_id})",
+            ]
+        else:
+            lines += ["", "Taskの対象: 一般Task（特定Projectなし）。"]
     lines += ["", f"完了条件:\n{plan.completion_criteria}"]
     max_actions = plan.max_actions or DEFAULT_MAX_ACTIONS
     # Use the next-free slot (max index + 1), not len(history): resume can

@@ -1,5 +1,17 @@
 # ドメイン用語集
 
+## 主対象Project
+
+Taskの作業対象となるProject 1件。複数repoにまたがる作業は別Taskに分ける運用とし、主対象は常に1件である。
+
+## 一般Task
+
+特定Projectに属さないTaskの分類。`coding_cli` を含むPlanにはならない。Project分類は非Coding Taskにも記録するが、実行先制限として使うのは `coding_cli` のみである。
+
+## 対象解決 (project_resolution)
+
+主対象Projectまたは一般Taskの選定結果。kind（`project` / `general`）、project_id、表示名スナップショット、判断スコア（confidence 0..1）、短い根拠、選定元（Planner推定 `inferred` / 人間指定 `user`）を持ち、Directional Plan v3の必須要素である。
+
 ## AI エージェント
 
 利用者が作成した、システムプロンプト、LLM 設定、利用を許可する登録ツールの組である。ツール実装を任意コードとして保存せず、サーバーが持つツールレジストリの識別子だけを選択できる。
