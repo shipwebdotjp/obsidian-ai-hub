@@ -14,11 +14,30 @@
 
 ## 設定
 
-- `HEALTHCARE_SQLITE_PATH` / `HEALTHCARE_EXPORT_DIR`（env または `config.yml: healthcare.*`）。
-  既定は `~/.config/obsidian-ai-hub/healthcare.sqlite3` と
-  `~/.config/obsidian-ai-hub/healthcare/apple_health_export`。
+- `HEALTHCARE_SQLITE_PATH` / `HEALTHCARE_EXPORT_DIR` / `HEALTHCARE_IMPORT_STAGING_DIR`
+  （env または `config.yml: healthcare.*`）。既定は `~/.config/obsidian-ai-hub/healthcare.sqlite3`、
+  `~/.config/obsidian-ai-hub/healthcare/apple_health_export`、
+  `~/.config/obsidian-ai-hub/healthcare/staging`。
 - CLI: `python -m obsidian_ai_hub --import-apple-health`
   （`--healthcare-export-dir` / `--healthcare-batch-size` / `--healthcare-dry-run`）。
+- Web: `POST /api/v1/healthcare/import`（multipart。`file` か `path` の一方を必須）。
+
+## Web からの差分インポート
+
+`/healthcare` のインポートダイアログから Apple Health の `export.zip` を取り込む。
+
+- 受領: D&D アップロード（上限 4GiB）またはサーバー側パス指定。同期リクエストで、
+  ルートは `def` のため FastAPI threadpool 実行（event loop 非ブロック）。
+- 展開: `healthcare/export_zip.py` が `export.xml` と `electrocardiograms/*.csv` のみを
+  staging へ安全に展開（zip slip / zip bomb / symlink / 暗号化を拒否、非圧縮合計・entry 数・
+  圧縮率を展開前に検証）。ネストした `apple_health_export/` prefix は strip。
+- 取込: `importer.import_export_zip()` → 既存 `import_export()`。差分は
+  `fingerprint UNIQUE` ＋ `INSERT OR IGNORE` で成立し、`stats_json` の
+  `records_inserted` / `workouts_inserted` / `activity_summaries_inserted` と
+  `ignored_duplicates` を UI に表示。失敗時は `rollback` 後に `failed` 記録して再raise。
+- 後始末: アップロード zip と展開 staging は `finally` で削除。`Me`（生年月日）等の
+  PII はログ出力しない。
+- 同時実行: プロセス内ロックで直列化し、実行中は 409 を返す。
 
 ## スキーマ v1（テーブル一覧）
 

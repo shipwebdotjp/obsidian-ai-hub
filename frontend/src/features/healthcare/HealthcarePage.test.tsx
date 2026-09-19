@@ -6,6 +6,7 @@ import HealthcarePage from "./HealthcarePage";
 vi.mock("../../api/client", () => ({
   getHealthcareOverview: vi.fn(),
   getHealthcareCorrelation: vi.fn(),
+  importHealthcareZip: vi.fn(),
   ApiError: class ApiError extends Error {
     status: number;
     constructor(status: number, message: string) {

@@ -1,7 +1,7 @@
 
 import pytest
 from fastapi.testclient import TestClient
-from tests.healthcare.helpers import write_mini_export
+from tests.healthcare.helpers import write_mini_export, write_mini_export_zip
 
 from obsidian_ai_hub.web.app import create_app
 
@@ -172,3 +172,125 @@ def test_healthcare_correlation_bad_metric(healthcare_client):
     assert res3.status_code == 400
     res4 = healthcare_client.get("/api/v1/healthcare/correlation?metric_x=steps&metric_y=sleep&start_date=2010-01-01&end_date=2026-01-01")
     assert res4.status_code == 400
+
+
+# --- Browser/zip differential import ---
+
+
+def test_healthcare_import_requires_auth(test_healthcare_db_path, api_token, tmp_path):
+    app = create_app(token=api_token)
+    client = TestClient(app)
+    zip_path = write_mini_export_zip(tmp_path)
+    res = client.post(
+        "/api/v1/healthcare/import",
+        files={"file": ("export.zip", zip_path.read_bytes(), "application/zip")},
+    )
+    assert res.status_code == 401
+
+
+def test_healthcare_import_upload_success(
+    test_healthcare_db_path, api_token, api_auth_headers, tmp_path
+):
+    app = create_app(token=api_token)
+    client = TestClient(app, headers=api_auth_headers)
+    zip_path = write_mini_export_zip(tmp_path)
+
+    res = client.post(
+        "/api/v1/healthcare/import",
+        files={"file": ("export.zip", zip_path.read_bytes(), "application/zip")},
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "succeeded"
+    assert data["stats"]["records"] == 7
+    assert data["stats"]["records_inserted"] == 7
+    assert data["stats"]["ecg_files"] == 1
+
+    # Imported data is immediately visible to the overview endpoint.
+    res2 = client.get(
+        "/api/v1/healthcare/overview?start_date=2026-08-15&end_date=2026-08-21"
+    )
+    assert any(m["latest_value"] is not None for m in res2.json()["metrics"])
+
+
+def test_healthcare_import_is_differential(healthcare_client, tmp_path):
+    # healthcare_client already imported the same synthetic export.
+    zip_path = write_mini_export_zip(tmp_path)
+    res = healthcare_client.post(
+        "/api/v1/healthcare/import",
+        files={"file": ("export.zip", zip_path.read_bytes(), "application/zip")},
+    )
+    assert res.status_code == 200
+    stats = res.json()["stats"]
+    assert stats["records_inserted"] == 0
+    assert stats["workouts_inserted"] == 0
+    assert stats["activity_summaries_inserted"] == 0
+    # mini export = 7 records + 1 workout + 1 activity summary
+    assert stats["ignored_duplicates"] == 7 + 1 + 1
+
+
+def test_healthcare_import_from_server_path(
+    test_healthcare_db_path, api_token, api_auth_headers, tmp_path
+):
+    app = create_app(token=api_token)
+    client = TestClient(app, headers=api_auth_headers)
+    zip_path = write_mini_export_zip(tmp_path)
+
+    res = client.post("/api/v1/healthcare/import", data={"path": str(zip_path)})
+    assert res.status_code == 200
+    assert res.json()["stats"]["records_inserted"] == 7
+
+
+def test_healthcare_import_validates_input(healthcare_client, tmp_path):
+    # Neither file nor path
+    res = healthcare_client.post("/api/v1/healthcare/import", data={})
+    assert res.status_code == 400
+
+    # Both file and path
+    zip_path = write_mini_export_zip(tmp_path)
+    res2 = healthcare_client.post(
+        "/api/v1/healthcare/import",
+        files={"file": ("export.zip", zip_path.read_bytes(), "application/zip")},
+        data={"path": str(zip_path)},
+    )
+    assert res2.status_code == 400
+
+    # Not a zip
+    res3 = healthcare_client.post(
+        "/api/v1/healthcare/import",
+        files={"file": ("export.zip", b"not a zip", "application/zip")},
+    )
+    assert res3.status_code == 400
+
+    # Missing server path
+    res4 = healthcare_client.post(
+        "/api/v1/healthcare/import", data={"path": str(tmp_path / "missing.zip")}
+    )
+    assert res4.status_code == 400
+
+
+def test_healthcare_import_upload_too_large_maps_to_413(healthcare_client, tmp_path, monkeypatch):
+    from obsidian_ai_hub.web.services import healthcare_import as hc_import
+
+    monkeypatch.setattr(hc_import, "MAX_UPLOAD_BYTES", 16)
+    zip_path = write_mini_export_zip(tmp_path)
+    res = healthcare_client.post(
+        "/api/v1/healthcare/import",
+        files={"file": ("export.zip", zip_path.read_bytes(), "application/zip")},
+    )
+    assert res.status_code == 413
+
+
+def test_healthcare_import_rejects_concurrent_run(healthcare_client, tmp_path):
+    from obsidian_ai_hub.web.services import healthcare_import as hc_import
+
+    zip_path = write_mini_export_zip(tmp_path)
+    hc_import._import_lock.acquire()
+    try:
+        res = healthcare_client.post(
+            "/api/v1/healthcare/import",
+            files={"file": ("export.zip", zip_path.read_bytes(), "application/zip")},
+        )
+    finally:
+        hc_import._import_lock.release()
+    assert res.status_code == 409

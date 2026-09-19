@@ -345,6 +345,42 @@ Apple取得が失敗・利用不能の場合は、Apple項目だけを空とし�
 - ダッシュボード / `summerize_day` への健康集計の自動注入（集計のみ・opt-in 前提）。
 - `task_runner`（現 `job_runner`）への定期差分 import 登録。
 
+## ヘルスケア: ブラウザからの zip 差分インポート（安全展開＋同期取込）
+
+| 項目 | 内容 |
+|------|------|
+| 決定日 | 2026-09-19 |
+| カテゴリ | ヘルスケア・Web UI・不可逆書込み |
+| 決定内容 | `/healthcare` にインポートダイアログを追加。Apple Health の `export.zip` を D&D アップロードまたはサーバー側パス指定で受け、`healthcare/export_zip.py` で必要 entry のみ安全に staging 展開し、`importer.import_export_zip()` 経由で既存 importer に渡す。 |
+
+### 結論に至った経緯
+
+これまで取込は CLI (`--import-apple-health`) のみで、ブラウザからは実行できなかった。差分取込ロジック自体は `health_records.fingerprint UNIQUE` ＋ `INSERT OR IGNORE` として既に存在するため、新規実装は「zip の受領・安全な展開・既存 importer への接続・UI」に限定した。巨大 zip を event loop で処理しないよう、ルートを同期 `def` にして FastAPI の threadpool 上で完走させ、プロセス内 `threading.Lock` で同時実行を 409 に落とす。変換は行わず、受領境界で一度だけパス/サイズを検証する。
+
+### 操作シナリオ契約
+
+| 段階 | 入力と正本 | 識別子 | 永続化 | 次に読む主体 | 停止・失敗時 | 不可逆操作 |
+|------|-----------|--------|--------|--------------|--------------|-----------|
+| 受領 | browser D&D / サーバーパス | staging 一時dir | 一時ファイルのみ | extractor | 形式・サイズ不正は展開前に 400/413 | なし |
+| 展開 | zip 内 `export.xml` の親 | 抽出先パス | staging | importer | zip slip/bomb/export.xml 欠落は書込まず停止 | staging へ書込 |
+| 取込 | 正規化済み export dir | `import_id: himp_*` | `health_imports` ＋各テーブル | overview API | 失敗時 `rollback`→`failed` 記録して再raise | DB へ行追加 |
+| 完了 | `stats_json` | `import_id` | `health_imports.status=succeeded` | UI 結果サマリ | 同時実行は 409 | なし |
+
+### 仕組みの概要
+
+1. **安全展開** (`healthcare/export_zip.py`): `export.xml` と `electrocardiograms/*.csv` のみ抽出。`extractall` を使わず、絶対パス/`..`/backslash/NUL/暗号化/symlink を拒否し、entry 数・非圧縮合計・圧縮率を展開前に中央ディレクトリで検証（zip slip / zip bomb 対策）。ネストした `apple_health_export/` prefix は strip。
+2. **取込** (`importer.import_export_zip`): staging に展開→`import_export()`→`finally` で staging 削除。`stats_json` に `records_inserted` / `workouts_inserted` / `activity_summaries_inserted` を追加し、UI で新規/重複を表示。`export_dir` には元 zip パスを記録。
+3. **Web** (`web/routes/healthcare.py`): `POST /api/v1/healthcare/import` が multipart の `file` か `path` の一方を必須で受ける。既存 Bearer 認証を継続。アップロードは 4GiB 上限でチャンク保存。
+4. **UI** (`HealthcareImportDialog.tsx`): D&D ドロップゾーン＋ファイル選択＋サーバーパス入力。取込後は新規/重複/ECG 件数を表示し、健康 overview を再取得。
+5. **設定/テスト**: `HEALTHCARE_IMPORT_STAGING_DIR` を追加（既定 `~/.config/obsidian-ai-hub/healthcare/staging`、test は隔離）。zip 展開の拒否系と、multipart→取込→同一 zip 再取込で `ignored_duplicates` 全件（差分）の縦断テストを追加。
+
+### トレードオフ
+
+- 同期リクエストのため、初回の巨大 export は待ち時間が長く、リバースプロキシ（Tailscale funnel 等）で timeout し得る。その場合はサーバー側パス指定（アップロード無し）を推奨。将来は同一 service を流用して背景実行＋ポーリングへ拡張可能。
+- PII を含む zip/staging は取込後に必ず削除し、内容や `Me` をログに残さない方針を維持。
+- `python-multipart` を明示依存に追加（FastAPI の File/Form に必要）。
+- 並行取込はプロセス内ロックで直列化。単一サーバープロセス前提で、複数プロセス運用時は DB 側の `running` 検査が必要。
+
 ## AIエージェントの高度なパラメーターとプロンプトテンプレート（スキーマ v23）
 
 | 項目 | 内容 |

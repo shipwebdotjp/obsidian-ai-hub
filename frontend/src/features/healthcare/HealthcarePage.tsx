@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, getHealthcareCorrelation, getHealthcareOverview } from "../../api/client";
 import type { HealthcareCorrelationResponse, HealthcareOverviewResponse } from "../../api/types";
+import HealthcareImportDialog from "./HealthcareImportDialog";
 import { HealthcareScatterChart } from "./HealthcareScatterChart";
 import { MetricCard } from "./MetricCard";
 
@@ -35,6 +36,7 @@ export default function HealthcarePage() {
   const [corrData, setCorrData] = useState<HealthcareCorrelationResponse | null>(null);
   const [corrLoading, setCorrLoading] = useState(false);
   const [corrError, setCorrError] = useState<string | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
 
   const requestRef = useRef(0);
   const corrRequestRef = useRef(0);
@@ -128,8 +130,19 @@ export default function HealthcarePage() {
   return (
     <div className="flex h-full flex-col bg-slate-50">
       <div className="shrink-0 border-b border-slate-200 bg-white px-6 py-4">
-        <h1 className="text-lg font-bold text-slate-900">ヘルスケア</h1>
-        <p className="mt-1 text-xs text-slate-500">一定期間の生体指標の推移を概観できます。Quantity 型（歩数・心拍・エネルギーなど）と Category 型（睡眠・スタンド）を日次で集計しています。</p>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-lg font-bold text-slate-900">ヘルスケア</h1>
+            <p className="mt-1 text-xs text-slate-500">一定期間の生体指標の推移を概観できます。Quantity 型（歩数・心拍・エネルギーなど）と Category 型（睡眠・スタンド）を日次で集計しています。</p>
+          </div>
+          <button
+            onClick={() => setImportOpen(true)}
+            data-testid="healthcare-import-open"
+            className="shrink-0 rounded bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 cursor-pointer"
+          >
+            インポート
+          </button>
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto p-6 space-y-6">
@@ -241,8 +254,14 @@ export default function HealthcarePage() {
                   <div className="rounded-xl border border-dashed border-slate-300 bg-white p-8 text-center">
                     <p className="text-sm font-semibold text-slate-700">ヘルスケアデータがまだありません</p>
                     <p className="mt-1 text-xs text-slate-500">
-                      <code className="rounded bg-slate-100 px-1 py-0.5">uv run python -m obsidian_ai_hub.main --import-apple-health --healthcare-export-dir &lt;dir&gt;</code> で取り込んでください。
+                      Apple Health から書き出した export.zip を取り込むと表示されます。
                     </p>
+                    <button
+                      onClick={() => setImportOpen(true)}
+                      className="mt-3 rounded bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 cursor-pointer"
+                    >
+                      インポート
+                    </button>
                   </div>
                 )}
               </>
@@ -318,6 +337,17 @@ export default function HealthcarePage() {
           </div>
         )}
       </div>
+
+      <HealthcareImportDialog
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        onImported={() => {
+          load(startDate, endDate);
+          if (activeTab === "correlation") {
+            loadCorrelation(startDate, endDate, corrMetricX, corrMetricY);
+          }
+        }}
+      />
     </div>
   );
 }

@@ -11,12 +11,15 @@ import csv
 import hashlib
 import json
 import logging
+import shutil
 import sqlite3
+import tempfile
 import uuid
 from datetime import datetime
 from pathlib import Path
 from xml.etree.ElementTree import iterparse
 
+from obsidian_ai_hub.healthcare.export_zip import extract_health_export
 from obsidian_ai_hub.healthcare.models import HealthRecord, HealthWorkout
 from obsidian_ai_hub.healthcare.store import (
     create_import_row,
@@ -142,12 +145,17 @@ def import_export(
     batch_size: int = DEFAULT_BATCH_SIZE,
     dry_run: bool = False,
     conn: sqlite3.Connection | None = None,
+    export_dir_label: str | None = None,
 ) -> dict:
     """Import an Apple Health export directory into healthcare.sqlite3.
 
     export_dir must contain export.xml and optionally electrocardiograms/*.csv.
     Returns stats dict. When dry_run=True, no DB writes are performed — the
     XML is still parsed and stats are returned.
+
+    export_dir_label overrides the value recorded in health_imports.export_dir
+    (used when the directory is an ephemeral staging dir and the meaningful
+    source is e.g. the original zip path).
     """
     export_dir = Path(export_dir).expanduser()
     export_xml = export_dir / "export.xml"
@@ -176,7 +184,7 @@ def import_export(
         create_import_row(
             conn,
             import_id=import_id,
-            export_dir=str(export_dir),
+            export_dir=export_dir_label or str(export_dir),
             started_at=started_at,
         )
         conn.commit()
@@ -248,6 +256,59 @@ def import_export(
             conn.close()
 
 
+def import_export_zip(
+    zip_path: Path | str,
+    *,
+    batch_size: int = DEFAULT_BATCH_SIZE,
+    conn: sqlite3.Connection | None = None,
+    staging_dir: Path | str | None = None,
+    keep_staging: bool = False,
+    source_label: str | None = None,
+) -> dict:
+    """Import an Apple Health export ``.zip`` into healthcare.sqlite3.
+
+    The archive is safely extracted to a private staging directory (see
+    :mod:`obsidian_ai_hub.healthcare.export_zip`), imported via
+    :func:`import_export`, and the staging directory is removed afterwards.
+    Differential behavior is inherited: existing fingerprints are ignored.
+
+    staging_dir selects the parent for the temporary directory; when omitted
+    the system temp dir is used. source_label records the meaningful origin
+    (e.g. the uploaded filename) instead of the ephemeral staging path.
+    """
+    zip_path = Path(zip_path).expanduser()
+    if not zip_path.is_file():
+        raise FileNotFoundError(f"zip が見つかりません: {zip_path}")
+    if zip_path.suffix.lower() != ".zip":
+        raise ValueError("取り込めるのは .zip ファイルのみです")
+
+    label = source_label or str(zip_path)
+    parent = Path(staging_dir).expanduser() if staging_dir else None
+    if parent is not None:
+        parent.mkdir(parents=True, exist_ok=True)
+    tmp_root = Path(
+        tempfile.mkdtemp(prefix="healthcare_import_", dir=str(parent) if parent else None)
+    )
+    try:
+        export_dir = extract_health_export(zip_path, tmp_root / "export")
+        result = import_export(
+            export_dir,
+            batch_size=batch_size,
+            conn=conn,
+            export_dir_label=label,
+        )
+        result["source"] = label
+        return result
+    finally:
+        if not keep_staging:
+            try:
+                shutil.rmtree(tmp_root, ignore_errors=False)
+            except OSError:
+                logger.warning(
+                    "Failed to cleanup healthcare staging dir %s", tmp_root, exc_info=True
+                )
+
+
 def _dry_run_count(export_xml: Path, export_dir: Path) -> dict:
     counts = {"records": 0, "workouts": 0, "activity_summaries": 0, "ecg_files": 0}
     # Count ECG files without DB
@@ -287,6 +348,9 @@ def _stream_import(
         "ignored_duplicates": 0,
         "metadata_entries": 0,
         "hrv_beats": 0,
+        "records_inserted": 0,
+        "workouts_inserted": 0,
+        "activity_summaries_inserted": 0,
     }
     header: dict[str, str | None] = {
         "export_date": None,
@@ -316,6 +380,7 @@ def _stream_import(
                 inserted, meta_cnt, hrv_cnt = _handle_record(elem, import_id, conn)
                 counts["records"] += 1
                 if inserted:
+                    counts["records_inserted"] += 1
                     counts["metadata_entries"] += meta_cnt
                     counts["hrv_beats"] += hrv_cnt
                 else:
@@ -325,14 +390,18 @@ def _stream_import(
             elif elem.tag == "Workout":
                 inserted = _handle_workout(elem, import_id, conn)
                 counts["workouts"] += 1
-                if not inserted:
+                if inserted:
+                    counts["workouts_inserted"] += 1
+                else:
                     counts["ignored_duplicates"] += 1
                 pending_commits += 1
                 elem.clear()
             elif elem.tag == "ActivitySummary":
                 inserted = _handle_activity_summary(elem, import_id, conn)
                 counts["activity_summaries"] += 1
-                if not inserted:
+                if inserted:
+                    counts["activity_summaries_inserted"] += 1
+                else:
                     counts["ignored_duplicates"] += 1
                 pending_commits += 1
                 elem.clear()

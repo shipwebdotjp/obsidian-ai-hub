@@ -58,6 +58,7 @@ _APP_ENV_VARS = [
     "OBSIDIAN_AI_HUB_SKILLS_DIR",
     "HEALTHCARE_SQLITE_PATH",
     "HEALTHCARE_EXPORT_DIR",
+    "HEALTHCARE_IMPORT_STAGING_DIR",
     "CODING_ORCHESTRATOR_PROVIDER",
     "CODING_ORCHESTRATOR_MODEL",
     "CODING_OPENCODE_CLI_PATH",
@@ -814,9 +815,13 @@ _HEALTHCARE_SQLITE_PATH_RAW = _optional_path(
 _HEALTHCARE_EXPORT_DIR_RAW = _optional_path(
     "HEALTHCARE_EXPORT_DIR", "healthcare", "export_dir"
 )
+_HEALTHCARE_IMPORT_STAGING_DIR_RAW = _optional_path(
+    "HEALTHCARE_IMPORT_STAGING_DIR", "healthcare", "import_staging_dir"
+)
 if IS_TEST_ENV:
     HEALTHCARE_SQLITE_PATH = TEST_WORKSPACE / "healthcare.sqlite3"
     HEALTHCARE_EXPORT_DIR = TEST_WORKSPACE / "healthcare_export"
+    HEALTHCARE_IMPORT_STAGING_DIR = TEST_WORKSPACE / "healthcare" / "staging"
 else:
     if _HEALTHCARE_SQLITE_PATH_RAW is not None:
         HEALTHCARE_SQLITE_PATH = _HEALTHCARE_SQLITE_PATH_RAW
@@ -829,6 +834,12 @@ else:
     else:
         HEALTHCARE_EXPORT_DIR = Path(
             "~/.config/obsidian-ai-hub/healthcare/apple_health_export"
+        ).expanduser()
+    if _HEALTHCARE_IMPORT_STAGING_DIR_RAW is not None:
+        HEALTHCARE_IMPORT_STAGING_DIR = _HEALTHCARE_IMPORT_STAGING_DIR_RAW
+    else:
+        HEALTHCARE_IMPORT_STAGING_DIR = Path(
+            "~/.config/obsidian-ai-hub/healthcare/staging"
         ).expanduser()
 
 if IS_TEST_ENV:

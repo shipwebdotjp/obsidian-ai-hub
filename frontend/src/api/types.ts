@@ -456,6 +456,26 @@ export interface HealthcareCorrelationResponse {
   points: HealthcareCorrelationPoint[];
 }
 
+export interface HealthcareImportStats {
+  records: number;
+  workouts: number;
+  activity_summaries: number;
+  ecg_files: number;
+  ignored_duplicates: number;
+  metadata_entries: number;
+  hrv_beats: number;
+  records_inserted: number;
+  workouts_inserted: number;
+  activity_summaries_inserted: number;
+}
+
+export interface HealthcareImportResponse {
+  import_id: string;
+  status: "succeeded";
+  source: string;
+  stats: HealthcareImportStats;
+}
+
 // --- Summary Edit/Delete types ---
 
 export interface SummaryItemInput {

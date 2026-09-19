@@ -624,6 +624,26 @@ class HealthcareCorrelationResponse(BaseModel):
     points: list[HealthcareCorrelationPoint] = Field(default_factory=list)
 
 
+class HealthcareImportStats(BaseModel):
+    records: int = 0
+    workouts: int = 0
+    activity_summaries: int = 0
+    ecg_files: int = 0
+    ignored_duplicates: int = 0
+    metadata_entries: int = 0
+    hrv_beats: int = 0
+    records_inserted: int = 0
+    workouts_inserted: int = 0
+    activity_summaries_inserted: int = 0
+
+
+class HealthcareImportResponse(BaseModel):
+    import_id: str
+    status: Literal["succeeded"]
+    source: str
+    stats: HealthcareImportStats
+
+
 # --- People Management schemas ---
 
 

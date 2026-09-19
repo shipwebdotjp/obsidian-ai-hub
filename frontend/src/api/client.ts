@@ -36,6 +36,7 @@ import type {
   AgentSessionDetailResponse,
   HealthcareOverviewResponse,
   HealthcareCorrelationResponse,
+  HealthcareImportResponse,
   AgentPromptTemplate,
   SlashInvocation,
   AgentSlashCandidatesResponse,
@@ -85,7 +86,8 @@ export class ApiError extends Error {
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers || {});
   headers.set("Accept", "application/json");
-  if (init.body && !headers.has("Content-Type")) {
+  const isFormData = typeof FormData !== "undefined" && init.body instanceof FormData;
+  if (init.body && !isFormData && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
   const token = getToken();
@@ -505,6 +507,24 @@ export function getHealthcareCorrelation(params: {
   return request<HealthcareCorrelationResponse>(
     `/api/v1/healthcare/correlation?${sp.toString()}`,
   );
+}
+
+export function importHealthcareZip(input: {
+  file?: File;
+  path?: string;
+}): Promise<HealthcareImportResponse> {
+  const form = new FormData();
+  if (input.file) {
+    form.append("file", input.file);
+  } else if (input.path && input.path.trim()) {
+    form.append("path", input.path.trim());
+  } else {
+    throw new Error("file or path is required");
+  }
+  return request<HealthcareImportResponse>("/api/v1/healthcare/import", {
+    method: "POST",
+    body: form,
+  });
 }
 
 export function listPeople(): Promise<Person[]> {

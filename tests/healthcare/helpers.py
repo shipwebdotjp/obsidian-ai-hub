@@ -16,6 +16,7 @@ Usage:
 from __future__ import annotations
 
 import textwrap
+import zipfile
 from functools import lru_cache
 from pathlib import Path
 
@@ -79,6 +80,36 @@ def write_mini_export(
         (ecg_dir / ECG_FILENAME).write_text(_mini_ecg_csv(), encoding="utf-8")
 
     return export_dir
+
+
+def write_mini_export_zip(
+    base: Path,
+    *,
+    subdir: str = "zip_export",
+    prefix: str = "apple_health_export",
+    include_ecg: bool = True,
+    extra_records_xml: str = "",
+) -> Path:
+    """Build a synthetic Apple Health export .zip and return its Path.
+
+    Mirrors the real archive layout: ``<prefix>/export.xml`` plus
+    ``<prefix>/electrocardiograms/*.csv``. A throwaway source tree is written
+    under ``<base>/<subdir>_src``.
+    """
+    source = write_mini_export(
+        base,
+        subdir=f"{subdir}_src",
+        include_ecg=include_ecg,
+        extra_records_xml=extra_records_xml,
+    )
+    zip_path = base / f"{subdir}.zip"
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.write(source / "export.xml", f"{prefix}/export.xml")
+        ecg_dir = source / ECG_SUBDIR
+        if include_ecg and ecg_dir.is_dir():
+            for csv_path in sorted(ecg_dir.glob("*.csv")):
+                zf.write(csv_path, f"{prefix}/{ECG_SUBDIR}/{csv_path.name}")
+    return zip_path
 
 
 def write_ecg_csv(

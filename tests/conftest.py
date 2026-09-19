@@ -220,6 +220,10 @@ def _filesystem_sandbox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     # fixture (autouse via _isolate_memory_db); only the export dir needs patching here.
     if hasattr(app_config, "HEALTHCARE_EXPORT_DIR"):
         monkeypatch.setattr(app_config, "HEALTHCARE_EXPORT_DIR", tmp_path / "healthcare_export")
+    if hasattr(app_config, "HEALTHCARE_IMPORT_STAGING_DIR"):
+        monkeypatch.setattr(
+            app_config, "HEALTHCARE_IMPORT_STAGING_DIR", tmp_path / "healthcare" / "staging"
+        )
     # Ensure plugin registry is reset for this test's isolated directory.
     # The directory does not exist yet (no plugins), so the reload is a no-op
     # and leaves only built-ins.  Tests that create plugins must call
