@@ -18,6 +18,8 @@ def list_memories(
     topic: Optional[str] = None,
     q: Optional[str] = None,
     person_id: Optional[str] = None,
+    limit: Optional[int] = Query(None, ge=1, le=200),
+    offset: int = Query(0, ge=0),
     _=Depends(require_bearer_token),
 ):
     if status_filter and status_filter not in schemas.ALLOWED_STATUS:
@@ -25,8 +27,16 @@ def list_memories(
             status_code=400,
             detail=f"status must be one of {sorted(schemas.ALLOWED_STATUS)}",
         )
-    items = service.list_memories(status=status_filter, kind=kind, topic=topic, q=q, person_id=person_id)
-    return schemas.MemoryListResponse(items=items, total=len(items))
+    page = service.list_memories(
+        status=status_filter,
+        kind=kind,
+        topic=topic,
+        q=q,
+        person_id=person_id,
+        limit=limit,
+        offset=offset,
+    )
+    return schemas.MemoryListResponse(items=page["items"], total=page["total"])
 
 
 @router.get("/memories/{memory_id}", response_model=schemas.MemoryDetail)

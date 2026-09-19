@@ -127,10 +127,12 @@ export function listMemories(params: {
   topic?: string;
   q?: string;
   person_id?: string;
+  limit?: number;
+  offset?: number;
 }): Promise<MemoryListResponse> {
   const sp = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) {
-    if (v) sp.set(k, v);
+    if (v !== undefined && v !== null && v !== "") sp.set(k, String(v));
   }
   const qs = sp.toString();
   return request<MemoryListResponse>(`/api/v1/memories${qs ? `?${qs}` : ""}`);

@@ -10,7 +10,9 @@ def list_memories(
     topic: Optional[str] = None,
     q: Optional[str] = None,
     person_id: Optional[str] = None,
-) -> list[dict]:
+    limit: Optional[int] = None,
+    offset: int = 0,
+) -> dict:
     rows = memory.load_all_memories()
     out = []
     for r in rows:
@@ -29,7 +31,17 @@ def list_memories(
             if q.lower() not in target.lower():
                 continue
         out.append(r)
-    return out
+
+    out.sort(
+        key=lambda r: (r.get("created_at") or "", r.get("memory_id") or ""),
+        reverse=True,
+    )
+    total = len(out)
+    if offset > 0:
+        out = out[offset:]
+    if limit is not None:
+        out = out[:limit]
+    return {"items": out, "total": total}
 
 
 def get_memory(memory_id: str) -> Optional[dict]:

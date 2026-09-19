@@ -791,3 +791,29 @@ AgentsPage と CodingPage の左ペイン構造は共通のレイアウトを採
 - **送信:** `useCodingRunStream.ts` の送信を composer 起点とキュー起点で共通の `sendRun` に整理し、`executeSend` は idle なら composer 送信、busy（streaming・質問待ち・非終端 run・キュー先行あり）なら enqueue する。`flushQueue` は選択中セッションの詳細ロード済みで先頭の `pending` を1件送信し、`onAccepted` で項目を削除、409 は block、その他失敗は `error` 表示＋再送とした。
 - **UI:** `CodingChatInput.tsx` は処理中も入力・送信を有効化し待機件数を表示、`CodingMessageList.tsx` は「送信待ち」バブル（×・再送・エラー）を描画する。セッション削除時は `useCodingSessions.ts` が対象キーの storage を削除する。
 - **検証:** `codingSendQueue.test.ts`（永続化・順序・上限・破損・error 切替）と `CodingPageSendQueue.test.tsx`（FIFO 自動送信・下書き保持・削除・リロード復元・409 保持・質問待ち停止）を追加。`npm run test` 501 passed、`tsc -b`／`vite build` clean。
+
+## 一覧のページングはページ送りを標準、会話履歴のみ逆方向キーセット
+
+| 項目 | 内容 |
+|------|------|
+| 決定日 | 2026-09-19 |
+| カテゴリ | フロントエンド・Web API |
+| 決定内容 | 有限長の一覧（記憶・HITL・TaskAgent など）は「前へ/次へ＋全 N 件中 x-y 件」のページ送りを標準とする。会話ログのように直近を読みたまに遡る無限長ストリームのみ、上方向の逆方向キーセット読み込みを将来導入する。無限スクロールを原則採用しない。 |
+
+### 結論に至った経緯
+
+- **代替案との比較:** 無限スクロールはフィード閲覧では快適だが、一括選択（記憶の一括承認/却下/削除）と組み合わせると「全選択」の範囲が曖昧になり、編集後の再取得でスクロール位置と選択が破綻しやすい。カーソル管理も必要で、ページ送りより実装・テストの負担が大きい。
+- **既存規範との整合:** 実行ログ（`ExecutionLogPage`）が既にページ送り＋総件数表示で実装済みであり、これを共通コンポーネント／フックへ抽出して全一覧の規範とする。
+- **安定順序の要求:** offset ページングは非一意な `ORDER BY` だと同時書き込みで重複・欠落するため、一意タイブレーカ（既存 PK）を必ず付す。`usePagination` はページ・総件数の同期、総件数減少時の最終ページクランプ、フィルタ変更時の先頭ページ復帰を担う。
+
+### 実装（2026-09-19）
+
+- **共通基盤:** `frontend/src/hooks/usePagination.ts`（`resetKey` で先頭ページ復帰、総件数クランプ）と `frontend/src/components/PaginationBar.tsx`（「全 N 件中 x-y 件」「前へ/次へ」）を新設。`ExecutionLogPage` のインライン実装をこれに移行した。
+- **記憶一覧:** `GET /api/v1/memories` に任意 `limit`（1–200）と `offset` を追加し、`total` を実カウントで返す。`limit` 省略時は従来どおり全件を返し後方互換を保つ。`MemoryList` は `limit=50` のページ送りとし、ページ・フィルタ変更で選択を解除、全選択は現ページのみを対象とする。フィルタと並び順は既存の Python 実装を維持し、`created_at DESC, memory_id DESC` で安定化した（DB へのフィルタ述語プッシュダウンは件数増加時に再検討）。
+- **HITL・TaskAgent:** バックエンドは既に `limit/offset/total` 対応済みだったが UI が `limit=100` 固定で超過分を無言打ち切りしていたため、`limit=50` のページ送りコントロールを追加した。
+- **スコープ外:** リサーチ一覧のページ送りは同方針で次フェーズ。人物・プロジェクト一覧は件数が小さく、`listPeople` をコンボボックスの選択肢供給と共用するため分離設計まで保留。会話履歴は 1 セッションが閾値（目安 200 メッセージ）を超えた時点で `(session_id, sequence)` インデックスを用いた逆方向キーセットを導入する。
+
+### 検証
+
+- Frontend: `usePagination`（offset 算出・resetKey 復帰・クランプ）、`MemoryList`（limit/offset 送信・ページ送り）、`HitlPage`/`TaskAgentListPage`/`ExecutionLogPage` の既存ページング回帰を Vitest で確認。全体 505 passed、`tsc -b` clean。
+- Backend: `tests/test_memory_review_web.py` に `limit/offset/total` と全件（limit 省略）の後方互換を追加。`uv run pytest tests/` 1299 passed。

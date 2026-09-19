@@ -9,7 +9,9 @@ import {
 } from "../../api/client";
 import type { HitlRun, HitlRunDetail, HitlQuestion } from "../../api/types";
 import { WaitingRunQuestionCard, toQuestionItems } from "../../components/InConversationQuestionCard";
+import PaginationBar from "../../components/PaginationBar";
 import SplitHandle from "../../components/SplitHandle";
+import { usePagination } from "../../hooks/usePagination";
 import { usePaneResize } from "../../hooks/usePaneResize";
 import { formatDateTime, formatYmdWithDow } from "../../utils/date";
 
@@ -176,7 +178,6 @@ export default function HitlPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const runIdParam = searchParams.get("run_id");
   const [runs, setRuns] = useState<HitlRun[]>([]);
-  const [total, setTotal] = useState(0);
   const [selectedRun, setSelectedRun] = useState<HitlRunDetail | null>(null);
   const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string>("pending_user");
@@ -191,6 +192,9 @@ export default function HitlPage() {
 
   const abortRef = useRef<AbortController | null>(null);
 
+  const { page, limit, offset, total, totalPages, setTotal, setPage } =
+    usePagination(statusFilter, 50);
+
   const reloadRuns = useCallback(async () => {
     abortRef.current?.abort();
     const controller = new AbortController();
@@ -201,7 +205,8 @@ export default function HitlPage() {
     try {
       const res = await listHitlRuns({
         status: statusFilter === "all" ? undefined : statusFilter,
-        limit: 100,
+        limit,
+        offset,
       });
       if (controller.signal.aborted) return;
       setRuns(res.items);
@@ -212,7 +217,7 @@ export default function HitlPage() {
     } finally {
       if (!controller.signal.aborted) setLoading(false);
     }
-  }, [statusFilter]);
+  }, [statusFilter, limit, offset, setTotal]);
 
   useEffect(() => {
     void reloadRuns();
@@ -311,6 +316,11 @@ export default function HitlPage() {
       next.set("run_id", run.run_id);
       return next;
     }, { replace: true });
+  };
+
+  const handleStatusFilterChange = (value: string) => {
+    handleBackToList();
+    setStatusFilter(value);
   };
 
   const handleSubmitAnswer = async (q: HitlQuestion) => {
@@ -453,7 +463,7 @@ export default function HitlPage() {
               id="status-filter"
               aria-label="ステータスフィルター"
               value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
+              onChange={(e) => handleStatusFilterChange(e.target.value)}
               className="w-full cursor-pointer rounded border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 outline-none"
             >
               <option value="all">すべて</option>
@@ -520,6 +530,16 @@ export default function HitlPage() {
             </li>
           )}
         </ul>
+        <PaginationBar
+          page={page}
+          totalPages={totalPages}
+          total={total}
+          limit={limit}
+          onPageChange={(next) => {
+            handleBackToList();
+            setPage(next);
+          }}
+        />
       </div>
 
       <SplitHandle handleProps={handleProps} isDragging={isDragging} />

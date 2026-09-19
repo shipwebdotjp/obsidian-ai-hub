@@ -1,6 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { apiGet } from "../../api/client";
+import PaginationBar from "../../components/PaginationBar";
 import SplitHandle from "../../components/SplitHandle";
+import { usePagination } from "../../hooks/usePagination";
 import { DEFAULT_LIST_RATIO, usePaneResize } from "../../hooks/usePaneResize";
 
 interface ExecutionLogItem {
@@ -67,7 +69,6 @@ interface LLMCallDetail {
 
 export default function ExecutionLogPage() {
   const [logs, setLogs] = useState<ExecutionLogItem[]>([]);
-  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -79,8 +80,11 @@ export default function ExecutionLogPage() {
   const [toDate, setToDate] = useState<string>("");
 
   // Pagination state
-  const [page, setPage] = useState(1);
-  const limit = 50;
+  const filterKey = [kind, status, q, fromDate, toDate].join("|");
+  const { page, limit, offset, total, totalPages, setTotal, setPage } = usePagination(
+    filterKey,
+    50,
+  );
 
   // Selection state
   const [selectedItem, setSelectedItem] = useState<{ id: string; kind: "command" | "llm" } | null>(null);
@@ -90,8 +94,14 @@ export default function ExecutionLogPage() {
   const [detailError, setDetailError] = useState<string | null>(null);
   const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
 
+  const abortRef = useRef<AbortController | null>(null);
+
   // Fetch logs list
   const fetchLogs = async () => {
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     setLoading(true);
     setError(null);
     try {
@@ -102,23 +112,32 @@ export default function ExecutionLogPage() {
       if (fromDate) sp.set("from", new Date(fromDate).toISOString());
       if (toDate) sp.set("to", new Date(toDate).toISOString());
       sp.set("limit", String(limit));
-      sp.set("offset", String((page - 1) * limit));
+      sp.set("offset", String(offset));
 
       const res = await apiGet<{ items: ExecutionLogItem[]; total: number }>(
         `/api/v1/execution-logs?${sp.toString()}`
       );
+      if (controller.signal.aborted) return;
       setLogs(res.items);
       setTotal(res.total);
     } catch (e: any) {
+      if (controller.signal.aborted) return;
       setError(e.message || "ログ一覧の取得に失敗しました");
     } finally {
-      setLoading(false);
+      if (!controller.signal.aborted) setLoading(false);
     }
   };
 
   useEffect(() => {
     fetchLogs();
+    return () => abortRef.current?.abort();
   }, [kind, status, q, fromDate, toDate, page]);
+
+  // フィルタ・ページ変更時は、現在の一覧に存在しない詳細選択を解除する。
+  useEffect(() => {
+    setSelectedItem(null);
+    setMobileDetailOpen(false);
+  }, [filterKey, page]);
 
   // Fetch detail when selection changes
   useEffect(() => {
@@ -195,8 +214,6 @@ export default function ExecutionLogPage() {
     }
     return "bg-sky-50 text-sky-700 border-sky-200";
   };
-
-  const totalPages = Math.ceil(total / limit) || 1;
 
   const { containerRef, paneRef, containerStyle, isDragging, handleProps } = usePaneResize({
     defaultSize: DEFAULT_LIST_RATIO,
@@ -326,75 +343,59 @@ export default function ExecutionLogPage() {
             <div className="p-8 text-center text-slate-500 text-sm">読み込み中…</div>
           ) : error ? (
             <div className="p-8 text-center text-red-500 text-sm font-semibold">{error}</div>
-          ) : logs.length === 0 ? (
-            <div className="p-8 text-center text-slate-500 text-sm">該当するログがありません。</div>
           ) : (
             <div className="flex-1 flex flex-col justify-between">
-              {/* Table/List */}
-              <div className="divide-y divide-slate-200">
-                {logs.map((item) => {
-                  const isSelected = selectedItem?.id === item.id;
-                  return (
-                    <button
-                      key={item.id}
-                      onClick={() => handleRowClick(item)}
-                      className={`w-full p-4 text-left transition flex flex-col gap-2 hover:bg-slate-100 ${
-                        isSelected ? "bg-slate-200 border-l-4 border-slate-800" : "bg-white"
-                      }`}
-                    >
-                      <div className="flex justify-between items-start">
-                        <span className="text-xs font-semibold text-slate-500">
-                          {formatLocalTime(item.started_at)}
-                        </span>
-                        <div className="flex gap-2">
-                          <span className={`text-[10px] uppercase font-bold border px-1.5 py-0.5 rounded ${getKindBadgeClass(item.kind)}`}>
-                            {item.kind === "command" ? "Command" : "LLM"}
+              {logs.length === 0 ? (
+                <div className="p-8 text-center text-slate-500 text-sm">
+                  該当するログがありません。
+                </div>
+              ) : (
+                <div className="divide-y divide-slate-200">
+                  {logs.map((item) => {
+                    const isSelected = selectedItem?.id === item.id;
+                    return (
+                      <button
+                        key={item.id}
+                        onClick={() => handleRowClick(item)}
+                        className={`w-full p-4 text-left transition flex flex-col gap-2 hover:bg-slate-100 ${
+                          isSelected ? "bg-slate-200 border-l-4 border-slate-800" : "bg-white"
+                        }`}
+                      >
+                        <div className="flex justify-between items-start">
+                          <span className="text-xs font-semibold text-slate-500">
+                            {formatLocalTime(item.started_at)}
                           </span>
-                          <span className={`text-[10px] uppercase font-bold border px-1.5 py-0.5 rounded ${getStatusBadgeClass(item.status)}`}>
-                            {item.status}
-                          </span>
+                          <div className="flex gap-2">
+                            <span className={`text-[10px] uppercase font-bold border px-1.5 py-0.5 rounded ${getKindBadgeClass(item.kind)}`}>
+                              {item.kind === "command" ? "Command" : "LLM"}
+                            </span>
+                            <span className={`text-[10px] uppercase font-bold border px-1.5 py-0.5 rounded ${getStatusBadgeClass(item.status)}`}>
+                              {item.status}
+                            </span>
+                          </div>
                         </div>
-                      </div>
-                      <div className="font-semibold text-slate-800 break-all text-sm">
-                        {item.name}
-                      </div>
-                      {item.summary && (
-                        <div className="text-xs text-slate-500 truncate max-w-lg break-all">
-                          {item.summary}
+                        <div className="font-semibold text-slate-800 break-all text-sm">
+                          {item.name}
                         </div>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
+                        {item.summary && (
+                          <div className="text-xs text-slate-500 truncate max-w-lg break-all">
+                            {item.summary}
+                          </div>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
 
               {/* Pagination bar */}
-              <div className="shrink-0 border-t border-slate-200 bg-white px-4 py-3 flex items-center justify-between">
-                <span className="text-xs text-slate-600 font-semibold">
-                  全 {total} 件中 {(page - 1) * limit + 1}-{Math.min(page * limit, total)} 件
-                </span>
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    disabled={page === 1}
-                    onClick={() => setPage((p) => Math.max(1, p - 1))}
-                    className="px-3 py-1 border border-slate-300 rounded text-xs bg-white text-slate-700 disabled:opacity-50 enabled:hover:bg-slate-50 transition"
-                  >
-                    前へ
-                  </button>
-                  <span className="text-xs self-center px-1 text-slate-700 font-bold">
-                    {page} / {totalPages}
-                  </span>
-                  <button
-                    type="button"
-                    disabled={page >= totalPages}
-                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                    className="px-3 py-1 border border-slate-300 rounded text-xs bg-white text-slate-700 disabled:opacity-50 enabled:hover:bg-slate-50 transition"
-                  >
-                    次へ
-                  </button>
-                </div>
-              </div>
+              <PaginationBar
+                page={page}
+                totalPages={totalPages}
+                total={total}
+                limit={limit}
+                onPageChange={setPage}
+              />
             </div>
           )}
         </div>

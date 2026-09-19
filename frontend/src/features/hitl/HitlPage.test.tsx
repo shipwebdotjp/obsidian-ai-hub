@@ -162,7 +162,8 @@ describe("HitlPage", () => {
     await waitFor(() => {
       expect(mockListHitlRuns).toHaveBeenCalledWith({
         status: "pending_user",
-        limit: 100,
+        limit: 50,
+        offset: 0,
       });
     });
 
@@ -186,7 +187,8 @@ describe("HitlPage", () => {
     await waitFor(() => {
       expect(mockListHitlRuns).toHaveBeenLastCalledWith({
         status: undefined,
-        limit: 100,
+        limit: 50,
+        offset: 0,
       });
     });
   });

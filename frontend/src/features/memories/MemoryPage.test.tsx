@@ -91,6 +91,8 @@ describe("MemoryPage", () => {
         topic: "",
         kind: "",
         person_id: "",
+        limit: 50,
+        offset: 0,
       });
     });
 
@@ -123,6 +125,8 @@ describe("MemoryPage", () => {
         topic: "",
         kind: "",
         person_id: "",
+        limit: 50,
+        offset: 0,
       });
     });
 
@@ -137,6 +141,8 @@ describe("MemoryPage", () => {
         topic: "",
         kind: "fact",
         person_id: "",
+        limit: 50,
+        offset: 0,
       });
     });
 
@@ -151,6 +157,8 @@ describe("MemoryPage", () => {
         topic: "健康",
         kind: "fact",
         person_id: "",
+        limit: 50,
+        offset: 0,
       });
     });
   });
@@ -226,6 +234,8 @@ describe("MemoryPage", () => {
         topic: "",
         kind: "",
         person_id: "",
+        limit: 50,
+        offset: 0,
       });
     });
   });

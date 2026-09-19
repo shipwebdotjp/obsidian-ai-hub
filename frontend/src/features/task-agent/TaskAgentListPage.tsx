@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Settings } from "lucide-react";
 import { ApiError, listTaskAgentTasks } from "../../api/client";
 import type { TaskAgentTask } from "../../api/types";
+import PaginationBar from "../../components/PaginationBar";
+import { usePagination } from "../../hooks/usePagination";
 import { ROUTES, taskAgentDetailPath } from "../../constants/routes";
 import { formatDateTime } from "../../utils/date";
 import {
@@ -43,12 +45,17 @@ export default function TaskAgentListPage({
   const navigate = useNavigate();
   const [filter, setFilter] = useState("");
   const [items, setItems] = useState<TaskAgentTask[]>([]);
-  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
 
+  const { page, limit, offset, total, totalPages, setTotal, setPage } =
+    usePagination(filter, 50);
+
+  const requestIdRef = useRef(0);
+
   const reload = useCallback(async () => {
+    const requestId = ++requestIdRef.current;
     setLoading(true);
     setError(null);
     try {
@@ -58,16 +65,19 @@ export default function TaskAgentListPage({
           : filter || undefined;
       const res = await listTaskAgentTasks({
         status: statusParam,
-        limit: 100,
+        limit,
+        offset,
       });
+      if (requestId !== requestIdRef.current) return;
       setItems(res.items);
       setTotal(res.total);
     } catch (e) {
+      if (requestId !== requestIdRef.current) return;
       setError(e instanceof ApiError ? e.message : "読み込みに失敗しました");
     } finally {
-      setLoading(false);
+      if (requestId === requestIdRef.current) setLoading(false);
     }
-  }, [filter]);
+  }, [filter, limit, offset, setTotal]);
 
   useEffect(() => {
     void reload();
@@ -178,6 +188,16 @@ export default function TaskAgentListPage({
           })}
         </ul>
       </div>
+      <PaginationBar
+        page={page}
+        totalPages={totalPages}
+        total={total}
+        limit={limit}
+        onPageChange={(next) => {
+          if (selectedTaskId) navigate(ROUTES.TASK_AGENT);
+          setPage(next);
+        }}
+      />
     </div>
   );
 }

@@ -177,4 +177,37 @@ describe("MemoryList", () => {
     expect(rows[0]).toHaveAttribute("data-selected", "true");
     expect(rows[1]).toHaveAttribute("data-selected", "false");
   });
+
+  it("requests pages with limit/offset and resets to the first page", async () => {
+    mockListMemories.mockResolvedValue({ items: sampleItems.items, total: 120 } as any);
+
+    render(
+      <MemoryList
+        status="candidate"
+        query=""
+        topic=""
+        selectedIds={new Set()}
+        selectedMemoryId={null}
+        onSelectionChange={onSelectionChangeMock}
+        onSelect={onSelectMock}
+        refreshKey={0}
+        notify={notifyMock}
+      />
+    );
+
+    await waitFor(() => {
+      expect(mockListMemories).toHaveBeenLastCalledWith(
+        expect.objectContaining({ limit: 50, offset: 0 }),
+      );
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "次へ" }));
+
+    await waitFor(() => {
+      expect(mockListMemories).toHaveBeenLastCalledWith(
+        expect.objectContaining({ limit: 50, offset: 50 }),
+      );
+    });
+    expect(screen.getByText("2 / 3")).toBeInTheDocument();
+  });
 });

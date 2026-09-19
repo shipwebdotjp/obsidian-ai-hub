@@ -101,6 +101,33 @@ def test_list_and_detail(loopback_client):
     assert "events" in detail.json()
 
 
+def test_list_pagination_returns_total_and_slices(loopback_client):
+    _seed("mem_p1", content="1")
+    _seed("mem_p2", content="2")
+    _seed("mem_p3", content="3")
+
+    res = loopback_client.get("/api/v1/memories?status=candidate&limit=2&offset=0")
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["total"] == 3
+    assert len(body["items"]) == 2
+
+    res2 = loopback_client.get("/api/v1/memories?status=candidate&limit=2&offset=2")
+    assert res2.status_code == 200, res2.text
+    body2 = res2.json()
+    assert body2["total"] == 3
+    assert len(body2["items"]) == 1
+
+    ids = {i["memory_id"] for i in body["items"]} | {
+        i["memory_id"] for i in body2["items"]
+    }
+    assert ids == {"mem_p1", "mem_p2", "mem_p3"}
+
+    res3 = loopback_client.get("/api/v1/memories?status=candidate")
+    assert res3.status_code == 200, res3.text
+    assert len(res3.json()["items"]) == 3
+
+
 def test_review_approve_reject(loopback_client):
     _seed("mem_x")
     res = loopback_client.post(

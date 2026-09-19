@@ -39,6 +39,7 @@
 - [Scheduler Task から Job への完全改称とワンショット実行ジョブ導入](10-Decisions-Architecture.md#scheduler-task-から-job-への完全改称とワンショット実行ジョブ導入)（2026-09-17）
 - [Activity・サマリーの正本を SQLite へ移行（JSONL 廃止）](10-Decisions-Architecture.md#activityサマリーの正本を-sqlite-へ移行jsonl-廃止)
 - [エージェント／コーディング会話の送信キューはクライアント側に置く](10-Decisions-Web.md#エージェント会話の送信キューはクライアント側に置く)（2026-09-17）
+- [一覧のページングはページ送りを標準、会話履歴のみ逆方向キーセット](10-Decisions-Web.md#一覧のページングはページ送りを標準会話履歴のみ逆方向キーセット)（2026-09-19）
 - [Agent Skills 明示呼び出しの Per-Run 文脈注入設計](../docs/adr/agent-skills-explicit-per-run-context-injection.md)（ADR）
 - [Task Agent MVP 仕様](../docs/task-agent/specification.md)（2026-09-14）。文書群の入口は [docs/task-agent/README.md](../docs/task-agent/README.md)。判断記録は [docs/task-agent/adr/](../docs/task-agent/adr/) 配下:
   - [SQLiteをTask状態の正本とする](../docs/task-agent/adr/sqlite-as-task-state-source-of-truth.md)

@@ -86,7 +86,7 @@ describe("TaskAgentListPage", () => {
   it("fetches and lists tasks with status badges", async () => {
     renderPage();
     await waitFor(() =>
-      expect(mockListTaskAgentTasks).toHaveBeenCalledWith({ limit: 100 }),
+      expect(mockListTaskAgentTasks).toHaveBeenCalledWith({ limit: 50, offset: 0 }),
     );
     expect(await screen.findByText("今日の予定をまとめて")).toBeInTheDocument();
     const rows = screen.getAllByTestId("task-agent-row");
@@ -104,7 +104,8 @@ describe("TaskAgentListPage", () => {
     await waitFor(() =>
       expect(mockListTaskAgentTasks).toHaveBeenCalledWith({
         status: "queued",
-        limit: 100,
+        limit: 50,
+        offset: 0,
       }),
     );
     expect(screen.queryByTestId("task-agent-row")).not.toBeInTheDocument();

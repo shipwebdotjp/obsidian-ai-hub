@@ -1,6 +1,8 @@
 import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { ApiError, listMemories, batchReview, reviewMemory, batchDeleteMemories } from "../../api/client";
 import type { Memory, MemoryStatus } from "../../api/types";
+import PaginationBar from "../../components/PaginationBar";
+import { usePagination } from "../../hooks/usePagination";
 import { formatDateTime } from "../../utils/date";
 
 export interface MemoryListProps {
@@ -36,6 +38,10 @@ export default function MemoryList({
   const [isProcessing, setIsProcessing] = useState<Set<string>>(new Set());
   const abortRef = useRef<AbortController | null>(null);
 
+  const filterKey = [status, query, topic, kind ?? "", personId ?? ""].join("|");
+  const { page, limit, offset, total, totalPages, setTotal, setPage } =
+    usePagination(filterKey, 50);
+
   const reload = useCallback(async () => {
     abortRef.current?.abort();
     const controller = new AbortController();
@@ -44,9 +50,18 @@ export default function MemoryList({
     setLoading(true);
     setError(null);
     try {
-      const res = await listMemories({ status, q: query, topic, kind, person_id: personId });
+      const res = await listMemories({
+        status,
+        q: query,
+        topic,
+        kind,
+        person_id: personId,
+        limit,
+        offset,
+      });
       if (controller.signal.aborted) return;
       setItems(res.items);
+      setTotal(res.total);
       onSelectionChange(new Set());
     } catch (e) {
       if (controller.signal.aborted) return;
@@ -55,7 +70,7 @@ export default function MemoryList({
     } finally {
       if (!controller.signal.aborted) setLoading(false);
     }
-  }, [status, query, topic, kind, personId, onSelectionChange]);
+  }, [status, query, topic, kind, personId, limit, offset, setTotal, onSelectionChange]);
 
   useEffect(() => {
     void reload();
@@ -154,9 +169,9 @@ export default function MemoryList({
               disabled={items.length === 0}
               className="cursor-pointer disabled:cursor-not-allowed"
             />
-            <span>全選択</span>
+            <span>このページを全選択</span>
           </label>
-          <span className="text-slate-500">({items.length} 件)</span>
+          <span className="text-slate-500">({total} 件)</span>
         </div>
         <div className="flex gap-2">
             <button
@@ -261,6 +276,13 @@ export default function MemoryList({
           <li className="p-6 text-sm text-slate-500">該当する候補はありません。</li>
         )}
       </ul>
+      <PaginationBar
+        page={page}
+        totalPages={totalPages}
+        total={total}
+        limit={limit}
+        onPageChange={setPage}
+      />
     </div>
   );
 }
