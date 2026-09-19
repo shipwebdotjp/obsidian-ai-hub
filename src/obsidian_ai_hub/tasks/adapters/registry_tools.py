@@ -31,7 +31,12 @@ CONTEXT_KINDS = frozenset({"memory"})
 # idempotent per Task (``task:<task_id>``), not per theme name.
 # ``register_one_shot_job`` records the Task-derived IDs as its source so the
 # registration origin is never spoofable via step inputs.
-TASK_CONTEXT_TOOL_IDS = frozenset({"research_theme_propose", "register_one_shot_job"})
+# ``register_recurring_job`` records the same synthetic owner; its companion
+# ``set_recurring_job_enabled`` is intentionally excluded from Task
+# capabilities (see ``tasks/capabilities.py``).
+TASK_CONTEXT_TOOL_IDS = frozenset(
+    {"research_theme_propose", "register_one_shot_job", "register_recurring_job"}
+)
 
 
 def _task_context(task: dict[str, Any]) -> dict[str, Any]:

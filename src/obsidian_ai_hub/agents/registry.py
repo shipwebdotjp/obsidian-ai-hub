@@ -406,6 +406,36 @@ class RegisterOneShotJobInput(BaseModel):
     )
 
 
+class RegisterRecurringJobInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    job_id: str = Field(
+        description="登録する定期ジョブの一意なID。既存ID（手動作成・他Agent所有を含む）とは重複できない。",
+    )
+    command: str = Field(
+        description="定期実行するコマンド。'cd <path> && ...' 形式と複数セグメントの順次実行に対応し、シェルは使わない。",
+    )
+    schedule: Dict[str, int | str | list[int | str]] = Field(
+        description=(
+            "実行スケジュール。{'type': 'minutely'|'hourly'|'daily'|'weekly'|'monthly'} を必須とし、"
+            "秒/分/時/曜日/日を second/minute/hour/weekday/day で指定する。"
+            "値は数値、'*/5'・'8-18/2'・'0,30' のようなcron風文字列、またはその配列。"
+            "許可キー・範囲・既定値の意味検証はサーバー側で行う。"
+        ),
+    )
+
+
+class SetRecurringJobEnabledInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    job_id: str = Field(
+        description="有効／無効を切り替える定期ジョブのID。自身が登録し、その後人間に編集されていないジョブのみ操作できる。",
+    )
+    enabled: bool = Field(
+        description="true で有効化、false で無効化。無効化は以後のrunner cycleのみ止め、実行中のcycleは取り消さない。",
+    )
+
+
 class AgentDelegateInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -1281,6 +1311,84 @@ def _make_register_one_shot_job_tool(
     return register_one_shot_job
 
 
+def _recurring_trusted_ids(trusted_ctx: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    ctx = trusted_ctx if isinstance(trusted_ctx, dict) else {}
+    return {
+        "agent_id": str(ctx.get("agent_id")) if ctx.get("agent_id") else None,
+        "session_id": str(ctx.get("session_id")) if ctx.get("session_id") else None,
+        "run_id": str(ctx.get("run_id")) if ctx.get("run_id") else None,
+    }
+
+
+def _make_register_recurring_job_tool(
+    trusted_ctx: Optional[Dict[str, Any]] = None,
+) -> BaseTool:
+    """Create a register_recurring_job tool bound to a trusted execution context.
+
+    The registration source (agent/session/run IDs) is injected from the
+    trusted context so the LLM cannot spoof ownership via tool inputs.
+    """
+
+    @tool(args_schema=RegisterRecurringJobInput)
+    def register_recurring_job(job_id: str, command: str, schedule: dict) -> str:
+        """定期実行ジョブを新規登録し、指定スケジュールの次回枠から実行します。登録したAgentだけが後で有効／無効を切り替えられます。"""
+        try:
+            from obsidian_ai_hub.scheduler_jobs import recurring as _recurring
+
+            ids = _recurring_trusted_ids(trusted_ctx)
+            res = _recurring.register_recurring_job(
+                job_id,
+                command,
+                schedule,
+                agent_id=ids["agent_id"],
+                session_id=ids["session_id"],
+                run_id=ids["run_id"],
+            )
+            return json.dumps(res, ensure_ascii=False)
+        except ValueError as exc:
+            logger.warning("register_recurring_job validation failed: %s", exc)
+            return json.dumps({"error": str(exc)}, ensure_ascii=False)
+        except Exception as exc:
+            logger.exception("register_recurring_job failed")
+            return json.dumps({"error": _sanitize_unexpected_error(exc)}, ensure_ascii=False)
+
+    register_recurring_job.name = "register_recurring_job"  # type: ignore[attr-defined]
+    return register_recurring_job
+
+
+def _make_set_recurring_job_enabled_tool(
+    trusted_ctx: Optional[Dict[str, Any]] = None,
+) -> BaseTool:
+    """Create a set_recurring_job_enabled tool bound to a trusted context.
+
+    Ownership is enforced from the trusted agent_id, so the LLM cannot toggle
+    jobs registered by a human or by another Agent.
+    """
+
+    @tool(args_schema=SetRecurringJobEnabledInput)
+    def set_recurring_job_enabled(job_id: str, enabled: bool) -> str:
+        """自身が登録し人間に編集されていない定期ジョブだけを有効／無効にします。"""
+        try:
+            from obsidian_ai_hub.scheduler_jobs import recurring as _recurring
+
+            ids = _recurring_trusted_ids(trusted_ctx)
+            res = _recurring.set_recurring_job_enabled(
+                job_id,
+                enabled,
+                agent_id=ids["agent_id"],
+            )
+            return json.dumps(res, ensure_ascii=False)
+        except ValueError as exc:
+            logger.warning("set_recurring_job_enabled validation failed: %s", exc)
+            return json.dumps({"error": str(exc)}, ensure_ascii=False)
+        except Exception as exc:
+            logger.exception("set_recurring_job_enabled failed")
+            return json.dumps({"error": _sanitize_unexpected_error(exc)}, ensure_ascii=False)
+
+    set_recurring_job_enabled.name = "set_recurring_job_enabled"  # type: ignore[attr-defined]
+    return set_recurring_job_enabled
+
+
 @tool(args_schema=ResearchContextSnapshotInput)
 def research_context_snapshot() -> str:
     """直近7日のDaily Note、最新Weekly Note、直近アクティビティ、既存テーマとフィードバックの要約スナップショットを取得します。"""
@@ -1602,6 +1710,20 @@ _BUILTIN_TOOL_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "description": "任意コマンドをワンショット実行ジョブとして登録し、次回job_runner起動時または指定日時以降に一度だけ実行します。登録には編集画面での明示付与が必要です。",
         "get_tool": lambda: _make_register_one_shot_job_tool(None),
         "get_tool_with_context": lambda ctx: _make_register_one_shot_job_tool(ctx),
+    },
+    "register_recurring_job": {
+        "tool_id": "register_recurring_job",
+        "name": "定期実行ジョブ登録",
+        "description": "任意コマンドを定期実行ジョブとして新規登録します。登録元のAgentだけが後で有効／無効を切り替えられ、人間が編集すると所有は解除されます。登録には編集画面での明示付与が必要です。",
+        "get_tool": lambda: _make_register_recurring_job_tool(None),
+        "get_tool_with_context": lambda ctx: _make_register_recurring_job_tool(ctx),
+    },
+    "set_recurring_job_enabled": {
+        "tool_id": "set_recurring_job_enabled",
+        "name": "定期実行ジョブ有効切替",
+        "description": "自身が登録し人間に編集されていない定期実行ジョブだけを有効／無効にします。他Agent所有・手動作成・存在しないジョブは変更できません。",
+        "get_tool": lambda: _make_set_recurring_job_enabled_tool(None),
+        "get_tool_with_context": lambda ctx: _make_set_recurring_job_enabled_tool(ctx),
     },
 }
 

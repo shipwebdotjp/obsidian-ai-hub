@@ -550,6 +550,13 @@ export interface RecurringJobSchedule {
   day?: CronFieldValue;
 }
 
+export interface AgentJobSource {
+  agent_id: string;
+  session_id?: string | null;
+  run_id?: string | null;
+  registered_at?: string | null;
+}
+
 export interface RecurringJob {
   id: string;
   enabled: boolean;
@@ -559,6 +566,7 @@ export interface RecurringJob {
   preset_flag?: string | null;
   preset_name?: string | null;
   next_run?: string | null;
+  agent_source?: AgentJobSource | null;
 }
 
 export interface SchedulerJobConfigResponse {
@@ -572,7 +580,10 @@ export interface SchedulerJobConfigUpdateResponse {
   revision: string;
 }
 
-export type RecurringJobUpdate = Pick<RecurringJob, "id" | "enabled" | "schedule" | "command">;
+export type RecurringJobUpdate = Pick<
+  RecurringJob,
+  "id" | "enabled" | "schedule" | "command" | "agent_source"
+>;
 
 export type OneShotJobStatus =
   | "queued"

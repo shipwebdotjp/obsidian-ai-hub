@@ -26,6 +26,9 @@
 | **Scheduler Job** | 指定コマンドを起動する定義の総称。定期実行とワンショット実行をともに指す。Task Agent の Task とは別集約である。 |
 | **Recurring Job** | YAML（`jobs/jobs.local.yml`）で定義し、schedule に従い繰り返し起動する Job。状態は `jobs/last_run.json` と `job_state` に持つ。 |
 | **One-shot Job** | Agent が `register_one_shot_job` tool で登録し、一度だけ実行する Job。専用 SQLite キュー（`one_shot_jobs`）に保存し、at-most-once で実行する。 |
+| **Agent 所有 Recurring Job** | Agent が `register_recurring_job` tool で登録した Recurring Job。YAML の `agent_source`（agent/session/run ID と UTC 登録時刻）で登録元を記録する。 |
+| **agent_source** | Agent 所有 Recurring Job の登録元メタデータ。欠落・破損は「未所有」として扱い、runner と一覧は停止しない。 |
+| **所有失効** | 人間が `/jobs` で Agent 所有 Job の ID・command・schedule・enabled を変更した時点で `agent_source` を削除し、人間管理へ移管すること。 |
 | **Job Runner** | `job_runner` モジュール。runner lock 内で定期 Job の期限判定とワンショット Job の claim・実行を行う。 |
 
 ## ユビキタス言語

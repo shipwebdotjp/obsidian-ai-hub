@@ -10,6 +10,7 @@ import {
 import type { RecurringJob, RecurringJobSchedule, RecurringJobScheduleType, RecurringJobUpdate, CommandSegment, OneShotJobSummary, OneShotJobDetail } from "../../api/types";
 import { ApiError } from "../../api/client";
 import TokenPrompt from "../../components/TokenPrompt";
+import { toRecurringJobUpdate, toRecurringJobUpdates } from "./recurringJobPayload";
 
 // Keep in sync with backend PRESET_FLAGS (scheduler_jobs/recurring.py).
 // Every flag here must exist as an argparse flag in main.py; otherwise the
@@ -189,15 +190,9 @@ export default function JobPage() {
     }
   };
 
-  const toRawJob = (t: RecurringJob): RecurringJobUpdate => ({
-    id: t.id,
-    enabled: t.enabled,
-    schedule: t.schedule,
-    command: t.command,
-  });
+  const toRawJob = toRecurringJobUpdate;
 
-  const toRawJobs = (items: RecurringJob[]): RecurringJobUpdate[] =>
-    items.map(toRawJob);
+  const toRawJobs = toRecurringJobUpdates;
 
   // Update command preview for detailed mode (stale responses are ignored).
   const previewSeq = useRef(0);
@@ -606,7 +601,12 @@ export default function JobPage() {
                       />
                     </td>
                     <td className="px-6 py-4 font-semibold text-slate-900 font-mono">
-                      {job.id}
+                      <div>{job.id}</div>
+                      {job.agent_source?.agent_id && (
+                        <div className="mt-0.5 text-[11px] font-normal text-slate-400">
+                          Agent: {job.agent_source.agent_id}
+                        </div>
+                      )}
                     </td>
                     <td className="px-6 py-4 text-slate-600">
                       {formatSchedule(job)}

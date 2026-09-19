@@ -643,6 +643,8 @@ The job runner reads recurring jobs from `jobs/jobs.local.yml` when it exists, a
 
 Use `jobs/jobs.local.sample.yml` as the starting point for your own `jobs/jobs.local.yml`.
 
+Agents with the explicitly granted `register_recurring_job` tool can add recurring jobs at runtime. The registration records an `agent_source` (agent/session/run IDs and UTC time) in the YAML, and only that agent may later enable/disable the job via `set_recurring_job_enabled`; editing the job in `/jobs` revokes the agent's ownership so humans stay in control. Registration always reads the full active job list and writes it back to `jobs/jobs.local.yml`, so existing jobs and `last_run` state are never lost. See [docs/job/recurring-jobs.md](docs/job/recurring-jobs.md) for the full operation contract.
+
 > **Migration from Scheduler Task names:** if `tasks/` files remain, the runner
 > refuses to start. Migrate once with
 > `python -m obsidian_ai_hub.job_runner --migrate-tasks-to-jobs`, which moves
@@ -700,6 +702,7 @@ The Web UI provides a dedicated **Job Management** page (`/jobs`) where you can 
 - **No Retrospective Execution (Arming):** When you add a job, re-enable it, or modify its schedule/command, the job is "armed" with the current save time, preventing retrospective execution of past run frames.
 - **Detailed Mode parsing:** When editing custom commands in detailed mode, the UI displays the backend parsed representation (shlex argv list) to prevent misinterpretation of command execution paths. Note that comments in `jobs.local.yml` are not preserved during structured saves.
 - **One-shot jobs:** Agents with the explicitly granted `register_one_shot_job` tool register run-once commands; the next `job_runner` cycle claims and runs each exactly once (at-most-once, no auto-retry after interruption). Terminal history is kept 30 days.
+- **Agent-owned recurring jobs:** Agents with the explicitly granted `register_recurring_job` tool register recurring jobs, and `set_recurring_job_enabled` lets the registering agent enable/disable only the jobs it created. The list shows the owning agent ID; a meaningful human edit in `/jobs` removes ownership. Task Agents may register but not toggle (human `/jobs` operations stop them).
 
 ## Project Structure
 

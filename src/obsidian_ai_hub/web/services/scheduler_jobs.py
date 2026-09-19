@@ -16,6 +16,7 @@ def get_recurring_jobs() -> dict:
     from obsidian_ai_hub.scheduler_jobs.recurring import (
         get_jobs_file_and_revision_locked,
         get_command_preset_info,
+        get_agent_source,
         compute_next_target,
     )
     filepath, sha, jobs = get_jobs_file_and_revision_locked()
@@ -44,6 +45,8 @@ def get_recurring_jobs() -> dict:
             "preset_flag": preset_info["flag"],
             "preset_name": preset_info["name"],
             "next_run": next_run_str,
+            # Corrupt/missing sources are hidden rather than failing the list.
+            "agent_source": get_agent_source(t),
         })
 
     return {
@@ -58,20 +61,26 @@ def update_recurring_jobs(revision: str, jobs: list) -> dict:
         acquire_job_config_lock,
         get_jobs_file_and_revision,
         validate_jobs,
+        merge_recurring_jobs,
         save_jobs_and_arm,
     )
 
     with acquire_job_config_lock():
         _, current_sha, old_jobs = get_jobs_file_and_revision()
 
+        # Revision check must precede any merge/validation/save so a stale
+        # client can never partially apply its payload.
         if revision != current_sha:
             raise SchedulerJobConfigConflictError()
 
-        # Validate jobs
-        validate_jobs(jobs)
+        # Merge against the current raw YAML: preserve unknown metadata, drop
+        # agent_source on meaningful human edits, and never trust a
+        # client-supplied agent_source.
+        merged_jobs = merge_recurring_jobs(old_jobs, jobs)
+        validate_jobs(merged_jobs)
 
         # Arm changed jobs and save atomically
-        save_jobs_and_arm(jobs, old_jobs, datetime.now())
+        save_jobs_and_arm(merged_jobs, old_jobs, datetime.now())
 
         # Reload to get the new sha
         _, new_sha, _ = get_jobs_file_and_revision()

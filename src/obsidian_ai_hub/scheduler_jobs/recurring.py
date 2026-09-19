@@ -16,7 +16,7 @@ import shlex
 import shutil
 import subprocess
 import tempfile
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -32,6 +32,13 @@ STATE_FILE = config.JOB_RUN_STATE_PATH
 
 LOCK_FILE = STATE_FILE.parent / ".job-config.lock"
 RUNNER_LOCK_FILE = STATE_FILE.parent / ".job-runner.lock"
+
+# YAML field recording which Agent registered a recurring job. It is written
+# only by ``register_recurring_job`` (never by the human-facing API) and grants
+# that Agent enable/disable rights until a human edits the job.
+AGENT_SOURCE_FIELD = "agent_source"
+_AGENT_SOURCE_OPTIONAL_FIELDS = ("session_id", "run_id", "registered_at")
+
 
 # Legacy Scheduler Task paths. The runner never reads these; their presence
 # means YAML migration has not run, so startup fails closed with guidance.
@@ -526,6 +533,245 @@ def save_jobs_and_arm(new_jobs: list, old_jobs: list, now: datetime):
     # Save
     atomic_write_yaml(LOCAL_JOB_FILE, new_jobs)
     save_state(state)
+
+
+def get_agent_source(job) -> Optional[dict]:
+    """Return a sanitized ``agent_source`` dict, else ``None``.
+
+    A missing, non-dict, or ``agent_id``-less source is treated as "no owner"
+    so corrupt hand-edited YAML never breaks the runner or the /jobs list; it
+    simply cannot be toggled by an Agent. Optional fields with a wrong type are
+    also rejected here so the value always matches the API response schema.
+    """
+    if not isinstance(job, dict):
+        return None
+    source = job.get(AGENT_SOURCE_FIELD)
+    if not isinstance(source, dict):
+        return None
+    agent_id = source.get("agent_id")
+    if not isinstance(agent_id, str) or not agent_id.strip():
+        return None
+    sanitized = {"agent_id": agent_id}
+    for key in _AGENT_SOURCE_OPTIONAL_FIELDS:
+        value = source.get(key)
+        if value is None or isinstance(value, str):
+            sanitized[key] = value
+        else:
+            return None
+    return sanitized
+
+
+def is_agent_owned_by(job, agent_id: Optional[str]) -> bool:
+    if not agent_id:
+        return False
+    source = get_agent_source(job)
+    return source is not None and source.get("agent_id") == agent_id
+
+
+def _find_job_index(jobs: list, job_id: str) -> int:
+    for index, job in enumerate(jobs or []):
+        if isinstance(job, dict) and job.get("id") == job_id:
+            return index
+    return -1
+
+
+def _validate_job_id(job_id) -> str:
+    if not isinstance(job_id, str) or not job_id.strip():
+        raise ValueError("Job ID is required and must be a non-empty string")
+    return job_id
+
+
+def _utc_timestamp(now: Optional[datetime]) -> str:
+    # ``now`` is usually a naive local time (matching arming/last_run state), so
+    # a naive value is interpreted as local and converted; the default is read
+    # as aware UTC. Either way ``registered_at`` is a true UTC instant.
+    ref = now if now is not None else datetime.now(timezone.utc)
+    return ref.astimezone(timezone.utc).isoformat()
+
+
+def register_recurring_job(
+    job_id: str,
+    command: str,
+    schedule: dict,
+    *,
+    agent_id: Optional[str],
+    session_id: Optional[str] = None,
+    run_id: Optional[str] = None,
+    now: Optional[datetime] = None,
+) -> dict:
+    """Register a new enabled recurring job owned by ``agent_id``.
+
+    The full active YAML is read, the new entry is appended, and the entire
+    list is written atomically to ``jobs/jobs.local.yml`` so existing jobs and
+    ``last_run`` state are never lost. Arming follows ``save_jobs_and_arm``:
+    the new job is armed to ``now`` and runs from its next matching slot, not
+    retroactively. Raises ``ValueError`` without changing anything when the
+    trusted agent identity is missing, the schedule/command is invalid, or the
+    job ID already exists.
+    """
+    agent_id = str(agent_id).strip() if agent_id else ""
+    if not agent_id:
+        raise ValueError("trusted agent identity is required to register a recurring job")
+    _validate_job_id(job_id)
+    try:
+        normalize_schedule(schedule)
+    except ValueError as e:
+        raise ValueError(f"Invalid schedule: {e}") from e
+    try:
+        parse_command(command)
+    except ValueError as e:
+        raise ValueError(f"Invalid command structure: {e}") from e
+
+    arm_now = now or datetime.now()
+
+    with acquire_job_config_lock():
+        _, _, old_jobs = get_jobs_file_and_revision()
+        if _find_job_index(old_jobs, job_id) != -1:
+            raise ValueError(f"Job ID already exists: {job_id}")
+
+        source: dict = {
+            "agent_id": agent_id,
+            "session_id": str(session_id) if session_id else None,
+            "run_id": str(run_id) if run_id else None,
+            "registered_at": _utc_timestamp(arm_now),
+        }
+        new_job = {
+            "id": job_id,
+            "enabled": True,
+            "schedule": schedule,
+            "command": command,
+            AGENT_SOURCE_FIELD: source,
+        }
+        new_jobs = list(old_jobs or []) + [new_job]
+        validate_jobs(new_jobs)
+        save_jobs_and_arm(new_jobs, old_jobs, arm_now)
+        _, revision, _ = get_jobs_file_and_revision()
+
+    return {
+        "job_id": job_id,
+        "enabled": True,
+        "next_run": compute_next_target(schedule, arm_now).isoformat(),
+        "revision": revision,
+    }
+
+
+def set_recurring_job_enabled(
+    job_id: str,
+    enabled: bool,
+    *,
+    agent_id: Optional[str],
+    now: Optional[datetime] = None,
+) -> dict:
+    """Enable/disable a job only when ``agent_id`` registered it.
+
+    The active YAML is read, the single matching entry is replaced, and the
+    full list is written atomically. Only a disabled→enabled transition
+    re-arms the job (via ``save_jobs_and_arm``). Missing IDs, manual jobs, and
+    jobs owned by another Agent fail with ``ValueError`` and no change.
+    """
+    agent_id = str(agent_id).strip() if agent_id else ""
+    if not agent_id:
+        raise ValueError("trusted agent identity is required to change a recurring job")
+    _validate_job_id(job_id)
+    if not isinstance(enabled, bool):
+        raise ValueError("enabled must be a boolean")
+
+    arm_now = now or datetime.now()
+
+    with acquire_job_config_lock():
+        _, _, old_jobs = get_jobs_file_and_revision()
+        index = _find_job_index(old_jobs, job_id)
+        if index == -1:
+            raise ValueError(f"Recurring job not found: {job_id}")
+        if not is_agent_owned_by(old_jobs[index], agent_id):
+            raise ValueError(
+                f"Recurring job '{job_id}' is not owned by this agent; "
+                "only the registering agent may change it"
+            )
+
+        new_jobs = list(old_jobs)
+        updated = dict(new_jobs[index])
+        updated["enabled"] = enabled
+        new_jobs[index] = updated
+
+        validate_jobs(new_jobs)
+        save_jobs_and_arm(new_jobs, old_jobs, arm_now)
+        _, revision, _ = get_jobs_file_and_revision()
+        schedule = updated.get("schedule")
+
+    next_run = None
+    if enabled:
+        try:
+            next_run = compute_next_target(schedule, arm_now).isoformat()
+        except Exception:
+            next_run = None
+
+    return {
+        "job_id": job_id,
+        "enabled": enabled,
+        "next_run": next_run,
+        "revision": revision,
+    }
+
+
+def _job_meaning_changed(old: dict, new: dict) -> bool:
+    """True when a human PUT changes the identity/schedule/command/enabled.
+
+    Reordering and same-value PUTs keep the entry's metadata (including
+    ``agent_source``). Schedule comparison is semantic so equivalent cron
+    spellings do not count as a change.
+    """
+    if old.get("command") != new.get("command"):
+        return True
+    if bool(old.get("enabled", True)) != bool(new.get("enabled", True)):
+        return True
+    try:
+        if normalize_schedule(old.get("schedule")) != normalize_schedule(new.get("schedule")):
+            return True
+    except Exception:
+        return True
+    return False
+
+
+def merge_recurring_jobs(current_jobs: list, incoming_jobs: list) -> list:
+    """Merge a human full-list PUT onto the current raw YAML.
+
+    Existing IDs keep their unknown metadata (and ``agent_source`` unless the
+    entry was meaningfully changed); ``agent_source`` supplied by the client
+    is always ignored so ownership can only be created by Agent registration.
+    New entries keep their other fields but a client-supplied ``agent_source``
+    is stripped. Result order follows ``incoming_jobs``; omitted IDs are
+    deleted.
+    """
+    current_by_id = {
+        job["id"]: job
+        for job in (current_jobs or [])
+        if isinstance(job, dict) and isinstance(job.get("id"), str)
+    }
+    merged_jobs: list = []
+    for incoming in incoming_jobs or []:
+        if not isinstance(incoming, dict):
+            raise ValueError("Each job must be a dictionary")
+        job_id = incoming.get("id")
+        if not isinstance(job_id, str) or not job_id.strip():
+            raise ValueError("Job ID is required and must be a non-empty string")
+
+        if job_id in current_by_id:
+            base = dict(current_by_id[job_id])
+            changed = _job_meaning_changed(base, incoming)
+            for key in ("enabled", "schedule", "command"):
+                if key in incoming:
+                    base[key] = incoming[key]
+            base["id"] = job_id
+            if changed:
+                base.pop(AGENT_SOURCE_FIELD, None)
+            merged_jobs.append(base)
+        else:
+            entry = dict(incoming)
+            entry.pop(AGENT_SOURCE_FIELD, None)
+            entry["id"] = job_id
+            merged_jobs.append(entry)
+    return merged_jobs
 
 
 def run_command(command):

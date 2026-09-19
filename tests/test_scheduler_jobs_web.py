@@ -214,6 +214,137 @@ def test_update_recurring_jobs_conflict(clean_job_env, web_client):
     assert "Conflict" in res.json()["detail"]
 
 
+def test_recurring_agent_source_roundtrip_and_human_edit(clean_job_env, web_client):
+    job_file, _ = clean_job_env
+    recurring.atomic_write_yaml(
+        job_file,
+        [
+            {
+                "id": "agent_job",
+                "enabled": True,
+                "schedule": {"type": "minutely", "second": 0},
+                "command": "printf agent",
+                "note": "hand written",
+                "agent_source": {"agent_id": "agent-1", "session_id": "s1"},
+            },
+            {
+                "id": "manual",
+                "enabled": True,
+                "schedule": {"type": "minutely"},
+                "command": "printf manual",
+            },
+        ],
+    )
+
+    body = web_client.get("/api/v1/scheduler-jobs/recurring-jobs").json()
+    agent = next(j for j in body["jobs"] if j["id"] == "agent_job")
+    assert agent["agent_source"]["agent_id"] == "agent-1"
+    manual = next(j for j in body["jobs"] if j["id"] == "manual")
+    assert manual["agent_source"] is None
+
+    # Same-value PUT keeps ownership and unknown metadata.
+    same = [
+        {
+            "id": "agent_job",
+            "enabled": True,
+            "schedule": {"type": "minutely", "second": 0},
+            "command": "printf agent",
+        },
+        {
+            "id": "manual",
+            "enabled": True,
+            "schedule": {"type": "minutely"},
+            "command": "printf manual",
+            # A client cannot self-assign ownership.
+            "agent_source": {"agent_id": "evil"},
+        },
+    ]
+    res = web_client.put(
+        "/api/v1/scheduler-jobs/recurring-jobs",
+        json={"revision": body["revision"], "jobs": same},
+    )
+    assert res.status_code == 200
+    saved = {j["id"]: j for j in yaml.safe_load(open(job_file))}
+    assert saved["agent_job"]["agent_source"]["agent_id"] == "agent-1"
+    assert saved["agent_job"]["note"] == "hand written"
+    assert "agent_source" not in saved["manual"]
+
+    # A meaningful human edit revokes ownership.
+    rev = res.json()["revision"]
+    edited = [
+        {
+            "id": "agent_job",
+            "enabled": True,
+            "schedule": {"type": "minutely", "second": 0},
+            "command": "printf changed",
+        },
+        {
+            "id": "manual",
+            "enabled": True,
+            "schedule": {"type": "minutely"},
+            "command": "printf manual",
+        },
+    ]
+    res = web_client.put(
+        "/api/v1/scheduler-jobs/recurring-jobs",
+        json={"revision": rev, "jobs": edited},
+    )
+    assert res.status_code == 200
+    saved = {j["id"]: j for j in yaml.safe_load(open(job_file))}
+    assert "agent_source" not in saved["agent_job"]
+    assert saved["agent_job"]["note"] == "hand written"
+
+
+def test_recurring_corrupt_agent_source_does_not_500(clean_job_env, web_client):
+    job_file, _ = clean_job_env
+    recurring.atomic_write_yaml(
+        job_file,
+        [
+            {
+                "id": "corrupt",
+                "enabled": True,
+                "schedule": {"type": "minutely"},
+                "command": "printf x",
+                "agent_source": {"agent_id": "a", "session_id": 123},
+            }
+        ],
+    )
+    res = web_client.get("/api/v1/scheduler-jobs/recurring-jobs")
+    assert res.status_code == 200
+    assert res.json()["jobs"][0]["agent_source"] is None
+
+
+def test_update_recurring_jobs_stale_revision_writes_nothing(clean_job_env, web_client):
+    job_file, _ = clean_job_env
+    original = [
+        {
+            "id": "kept",
+            "enabled": True,
+            "schedule": {"type": "minutely"},
+            "command": "printf kept",
+        }
+    ]
+    recurring.atomic_write_yaml(job_file, original)
+    before = open(job_file, "rb").read()
+
+    res = web_client.put(
+        "/api/v1/scheduler-jobs/recurring-jobs",
+        json={
+            "revision": "stale",
+            "jobs": [
+                {
+                    "id": "replaced",
+                    "enabled": True,
+                    "schedule": {"type": "hourly", "minute": 0},
+                    "command": "printf replaced",
+                }
+            ],
+        },
+    )
+    assert res.status_code == 409
+    assert open(job_file, "rb").read() == before
+
+
 def test_update_recurring_jobs_validation_errors(clean_job_env, web_client):
     job_file, _ = clean_job_env
     recurring.atomic_write_yaml(job_file, [])

@@ -41,6 +41,11 @@ EXCLUDED_TOOL_IDS: frozenset[str] = frozenset(
     {
         "ask_user",
         "agent_delegate",
+        # ``register_recurring_job`` is exposed to the Task Agent, but
+        # ``set_recurring_job_enabled`` is not: a Task's synthetic owner ID
+        # (``task-agent:<task_id>``) is transient, so job management is left
+        # to humans via /jobs.
+        "set_recurring_job_enabled",
     }
 )
 

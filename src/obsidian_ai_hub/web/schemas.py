@@ -957,6 +957,13 @@ class ProjectCandidateResolveRequest(BaseModel):
 
 # --- Scheduler Job schemas ---
 
+class AgentJobSource(BaseModel):
+    agent_id: str
+    session_id: Optional[str] = None
+    run_id: Optional[str] = None
+    registered_at: Optional[str] = None
+
+
 class RecurringJob(BaseModel):
     id: str
     enabled: bool = True
@@ -966,6 +973,7 @@ class RecurringJob(BaseModel):
     preset_flag: Optional[str] = None
     preset_name: Optional[str] = None
     next_run: Optional[str] = None
+    agent_source: Optional[AgentJobSource] = None
 
 
 # --- Execution Log schemas ---
