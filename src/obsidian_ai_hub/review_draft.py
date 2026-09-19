@@ -86,6 +86,16 @@ def _clean_generated_draft(response: object) -> str:
     return draft
 
 
+def _compile_long_term_memories() -> str:
+    try:
+        from obsidian_ai_hub.memory.context import compile_context_text
+
+        return compile_context_text("review-draft")
+    except Exception as e:
+        logger.warning("Failed to compile long-term memories for review draft: %s", e)
+        return ""
+
+
 def _has_expected_format(draft: str) -> bool:
     positions = [draft.find(heading) for heading in REVIEW_HEADINGS]
     return all(position >= 0 for position in positions) and positions == sorted(
@@ -141,6 +151,7 @@ def review_draft(target_date: datetime | date_type | str | None = None) -> bool:
             {
                 "WEEKLY_NOTE": weekly_note,
                 "DAILY_NOTES": daily_notes,
+                "LONG_TERM_MEMORIES": _compile_long_term_memories(),
             },
         )
         draft = _clean_generated_draft(

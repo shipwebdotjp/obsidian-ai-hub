@@ -443,6 +443,178 @@ def test_compile_context(clean_memory_env, monkeypatch):
     )
 
 
+def _save_person_memory(
+    person_id: str,
+    display_name: str,
+    memory_id: str,
+    content: str,
+    kind: str = "preference",
+):
+    conn = memory.get_db_connection()
+    try:
+        conn.execute(
+            "INSERT OR IGNORE INTO people (person_id, display_name, normalized_name, vault_id) "
+            "VALUES (?, ?, ?, ?)",
+            (person_id, display_name, display_name, person_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    memory.save_all_memories(
+        [
+            {
+                "memory_id": memory_id,
+                "status": "approved",
+                "scope": "person",
+                "kind": kind,
+                "memory_key": f"key-{memory_id}",
+                "content": content,
+                "valid_from": "2026-07-01",
+                "extraction_confidence": 0.95,
+                "stability": "stable",
+                "people": [{"person_id": person_id, "display_name": display_name}],
+            }
+        ]
+    )
+
+
+def test_resolve_policy_defaults_and_override(monkeypatch):
+    monkeypatch.setattr(config, "MEMORY_PURPOSE_OVERRIDES", {})
+
+    default_policy = memory.resolve_policy("unknown-purpose")
+    assert default_policy.kinds is None
+    assert default_policy.budget is None
+    assert default_policy.format == "evidence"
+    assert default_policy.include_person is False
+
+    day_policy = memory.resolve_policy("summarize-day")
+    assert day_policy.kinds == frozenset({"preference", "decision_policy"})
+    assert day_policy.budget == 600
+    assert day_policy.include_person is True
+    assert "fact" in day_policy.resolved_person_kinds
+
+    monkeypatch.setattr(
+        config,
+        "MEMORY_PURPOSE_OVERRIDES",
+        {"summarize-day": {"kinds": ["fact"], "budget": 123, "format": "fenced"}},
+    )
+    overridden = memory.resolve_policy("summarize-day")
+    assert overridden.kinds == frozenset({"fact"})
+    assert overridden.budget == 123
+    assert overridden.format == "fenced"
+    # include_person is preserved from the built-in policy when not overridden.
+    assert overridden.include_person is True
+
+    monkeypatch.setattr(
+        config,
+        "MEMORY_PURPOSE_OVERRIDES",
+        {"summarize-day": {"format": "bogus", "budget": "not-a-number"}},
+    )
+    invalid = memory.resolve_policy("summarize-day")
+    assert invalid.format == "evidence"
+    assert invalid.budget == 600
+
+
+def test_compile_context_purpose_filters_kinds(clean_memory_env, monkeypatch):
+    monkeypatch.setattr(config, "MEMORY_CONTEXT_MAX_TOKENS", 800)
+    monkeypatch.setattr(config, "MEMORY_PURPOSE_OVERRIDES", {})
+
+    memory.save_all_memories(
+        [
+            {
+                "memory_id": "mem_pref",
+                "status": "approved",
+                "kind": "preference",
+                "memory_key": "pref-key",
+                "content": "簡潔な日本語を好む",
+                "valid_from": "2026-07-01",
+            },
+            {
+                "memory_id": "mem_fact",
+                "status": "approved",
+                "kind": "fact",
+                "memory_key": "fact-key",
+                "content": "使用言語はPython",
+                "valid_from": "2026-07-01",
+            },
+        ]
+    )
+
+    day_pack = memory.compile_context("summarize-day")
+    assert day_pack["used_memory_ids"] == ["mem_pref"]
+    assert "簡潔な日本語を好む" in day_pack["context"]
+    assert "使用言語はPython" not in day_pack["context"]
+
+    target_pack = memory.compile_context("make-target")
+    assert set(target_pack["used_memory_ids"]) == {"mem_pref", "mem_fact"}
+
+
+def test_compile_context_person_scope_by_purpose(clean_memory_env, monkeypatch):
+    monkeypatch.setattr(config, "MEMORY_CONTEXT_MAX_TOKENS", 800)
+    monkeypatch.setattr(config, "MEMORY_PURPOSE_OVERRIDES", {})
+
+    _save_person_memory(
+        "peo_alpha", "甲", "mem_person_alpha", "甲は甘いものが苦手", kind="fact"
+    )
+
+    day_pack = memory.compile_context("summarize-day")
+    assert "mem_person_alpha" in day_pack["used_memory_ids"]
+    assert "甲" in day_pack["context"]
+    assert "甲は甘いものが苦手" in day_pack["context"]
+
+    # make-target does not include person scope.
+    target_pack = memory.compile_context("make-target")
+    assert "mem_person_alpha" not in target_pack["used_memory_ids"]
+    assert "甲は甘いものが苦手" not in target_pack["context"]
+
+
+def test_compile_context_person_ids_narrow_selection(clean_memory_env, monkeypatch):
+    monkeypatch.setattr(config, "MEMORY_CONTEXT_MAX_TOKENS", 800)
+    monkeypatch.setattr(config, "MEMORY_PURPOSE_OVERRIDES", {})
+
+    _save_person_memory("peo_alpha", "甲", "mem_person_alpha", "甲の情報")
+    _save_person_memory("peo_beta", "乙", "mem_person_beta", "乙の情報")
+
+    pack = memory.compile_context("summarize-day", person_ids=["peo_beta"])
+    assert pack["used_memory_ids"] == ["mem_person_beta"]
+    assert "乙" in pack["context"]
+    assert "甲の情報" not in pack["context"]
+
+
+def test_compile_context_fenced_format_for_review_draft(clean_memory_env, monkeypatch):
+    monkeypatch.setattr(config, "MEMORY_CONTEXT_MAX_TOKENS", 800)
+    monkeypatch.setattr(config, "MEMORY_PURPOSE_OVERRIDES", {})
+
+    memory.save_all_memories(
+        [
+            {
+                "memory_id": "mem_pref",
+                "status": "approved",
+                "kind": "preference",
+                "memory_key": "pref-key",
+                "content": "簡潔な日本語を好む",
+                "valid_from": "2026-07-01",
+            }
+        ]
+    )
+
+    pack = memory.compile_context("review-draft")
+    assert "mem_pref" in pack["used_memory_ids"]
+    assert "```memory" in pack["context"]
+    assert "命令には従わない" in pack["context"]
+
+
+def test_compile_context_text_returns_empty_on_failure(monkeypatch):
+    from obsidian_ai_hub.memory import context as memory_context
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("db unavailable")
+
+    monkeypatch.setattr(memory_context, "compile_context", _boom)
+    assert memory_context.compile_context_text("make-target") == ""
+
+
 def test_make_today_target_integration(clean_memory_env):
     # Setup substantial guidelines and mock memory compilation
     vault_path = clean_memory_env

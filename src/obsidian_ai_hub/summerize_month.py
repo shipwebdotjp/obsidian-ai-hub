@@ -24,6 +24,16 @@ MONTH_ITEM_KINDS = [
 ]
 
 
+def _compile_long_term_memories() -> str:
+    try:
+        from obsidian_ai_hub.memory.context import compile_context_text
+
+        return compile_context_text("summarize-month")
+    except Exception as e:
+        logger.warning("Failed to compile long-term memories for monthly summary: %s", e)
+        return ""
+
+
 def load_weekly_records(target_date: datetime) -> list[dict]:
     """Load weekly summary records overlapping the target month from SQLite."""
     year = target_date.year
@@ -101,6 +111,7 @@ def get_monthly_structured_record(
                     weekly_records, ensure_ascii=False, indent=2
                 ),
                 "TOPIC_CANDIDATES": json.dumps(TOPIC_ENUM, ensure_ascii=False),
+                "LONG_TERM_MEMORIES": _compile_long_term_memories(),
             },
         )
         response = llm_client.generate_llm_response(

@@ -471,12 +471,12 @@ The `--debug` flag is a global development flag. When combined with `--serve`, i
 
 When used alone, `--debug` is accepted but does not change behavior (reserved for future use with other subcommands).
 
-### Use approved memories in daily targets
+### Use approved memories in generated output
 
-Approved memories are compiled into a small reference section for daily target
-generation. Only approved memories that are currently valid are included; old
-or not-yet-active memories are excluded, and the most relevant entries are kept
-within the configured context limit.
+Approved memories are compiled into a small reference section for generated
+output. Only approved memories that are currently valid are included; old or
+not-yet-active memories are excluded, and the most relevant entries are kept
+within the purpose-specific context limit.
 
 Inspect the context that would be used with:
 
@@ -484,9 +484,40 @@ Inspect the context that would be used with:
 uv run -m obsidian_ai_hub --memory-compile --for make-target
 ```
 
-When you run `--make-target`, the compiled memory context is automatically
-added to the LLM prompt. Other commands do not automatically use long-term
-memory yet.
+Each `--for` value maps to a policy that selects which memory kinds are
+injected, the token budget, the reference format, and whether person-scoped
+memories are included (see `src/obsidian_ai_hub/memory/purposes.py`). The
+built-in purposes are:
+
+- `make-target` — all kinds, evidence format, user scope only.
+- `planner` — all kinds, evidence format, user scope only.
+- `summarize-day` / `summarize-week` — preferences and decision policies
+  (plus patterns for weekly), including approved person memories rendered as a
+  separate section with display names.
+- `summarize-month` — preferences, decision policies, and patterns.
+- `review-draft` — preferences and decision policies, fenced reference format.
+
+When you run `--make-target`, `--generate-planner-proposals`,
+`--summerize-day`, `--summerize-week`, `--summerize-month`, or
+`--review-draft`, the compiled memory context is automatically added to the
+LLM prompt. Agent runs with the `memory_search` tool also inject a short
+reference block. Unknown `--for` values fall back to the permissive default
+(all kinds, `memory.context_max_tokens`, evidence format, user scope only).
+
+Override a policy from `config/config.yml`:
+
+```yaml
+memory:
+  purposes:
+    summarize-day:
+      kinds: [preference, decision_policy]
+      budget: 600            # user-scope section budget
+      format: evidence       # or "fenced"
+      include_person: true
+      person_kinds: [fact, commitment, episode, pattern]
+      person_budget: 400     # separate budget for the person-scope section
+```
+
 
 ### Maintain approved memories
 

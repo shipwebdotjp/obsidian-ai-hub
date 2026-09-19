@@ -20,6 +20,16 @@ logger = logging.getLogger(__name__)
 DAY_ITEM_KINDS = ["highlights", "activities", "learnings", "reflections", "gratitude"]
 
 
+def _compile_long_term_memories() -> str:
+    try:
+        from obsidian_ai_hub.memory.context import compile_context_text
+
+        return compile_context_text("summarize-day")
+    except Exception as e:
+        logger.warning("Failed to compile long-term memories for daily summary: %s", e)
+        return ""
+
+
 def get_activity_rankings(
     activity_logs: list[dict],
 ) -> tuple[list[tuple[str, int]], list[tuple[str, int]]]:
@@ -130,6 +140,7 @@ def get_daily_structured_record(
                 "CODING_SESSION_OVERVIEWS": json.dumps(
                     coding_session_overviews or [], ensure_ascii=False, indent=2
                 ),
+                "LONG_TERM_MEMORIES": _compile_long_term_memories(),
             },
         )
         response = llm_client.generate_llm_response(

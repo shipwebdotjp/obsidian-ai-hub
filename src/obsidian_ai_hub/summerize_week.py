@@ -23,6 +23,16 @@ WEEK_ITEM_KINDS = [
 ]
 
 
+def _compile_long_term_memories() -> str:
+    try:
+        from obsidian_ai_hub.memory.context import compile_context_text
+
+        return compile_context_text("summarize-week")
+    except Exception as e:
+        logger.warning("Failed to compile long-term memories for weekly summary: %s", e)
+        return ""
+
+
 def get_week_dates(date: datetime):
     """
     指定された日付が属する週の月曜日から日曜日までの7日間のリストを返す
@@ -95,6 +105,7 @@ def get_weekly_structured_record(
                     simplified_daily_records, ensure_ascii=False, indent=2
                 ),
                 "TOPIC_CANDIDATES": json.dumps(TOPIC_ENUM, ensure_ascii=False),
+                "LONG_TERM_MEMORIES": _compile_long_term_memories(),
             },
         )
         response = llm_client.generate_llm_response(

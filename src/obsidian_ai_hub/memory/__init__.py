@@ -26,6 +26,7 @@ from obsidian_ai_hub.utils.embeddings import cosine_similarity, get_embedder
 
 from obsidian_ai_hub.memory.context import (
     compile_context,
+    compile_context_text,
     get_currently_valid_approved_memories,
 )
 from obsidian_ai_hub.memory.dedup import (
@@ -65,6 +66,11 @@ from obsidian_ai_hub.memory.projection import (
     project_approved_memories,
     render_copilot_profile,
 )
+from obsidian_ai_hub.memory.purposes import (
+    PurposePolicy,
+    get_builtin_policy,
+    resolve_policy,
+)
 from obsidian_ai_hub.memory.review import (
     batch_delete_memories,
     batch_review_memories,
@@ -95,9 +101,11 @@ __all__ = [
     "EXPECTED_FILES",
     "MEMORY_COLUMNS",
     "STABILITY_DEFAULT",
+    "PurposePolicy",
     "batch_delete_memories",
     "batch_review_memories",
     "compile_context",
+    "compile_context_text",
     "cosine_similarity",
     "delete_memory",
     "deserialize_event",
@@ -107,6 +115,7 @@ __all__ = [
     "generate_event_id",
     "generate_memory_id",
     "get_approved_memories_path",
+    "get_builtin_policy",
     "get_current_timestamp",
     "get_currently_valid_approved_memories",
     "get_db_connection",
@@ -124,6 +133,7 @@ __all__ = [
     "project_approved_memories",
     "render_copilot_profile",
     "resolve_memory",
+    "resolve_policy",
     "review_memory",
     "run_deduplication",
     "save_all_memories",

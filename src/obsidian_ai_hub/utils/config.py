@@ -724,6 +724,14 @@ MEMORY_AGENT_CONTEXT_MAX_TOKENS = int(
     _config_value("memory", "agent_context_max_tokens", default=400)
 )
 
+# Per-purpose overrides for long-term memory compilation. Keys are purpose
+# strings (e.g. "make-target", "summarize-day") mapped to a dict with optional
+# "kinds", "budget", "format" ("evidence" | "fenced"), "include_person",
+# "person_kinds", and "person_budget".
+MEMORY_PURPOSE_OVERRIDES = _config_value("memory", "purposes", default={})
+if not isinstance(MEMORY_PURPOSE_OVERRIDES, dict):
+    MEMORY_PURPOSE_OVERRIDES = {}
+
 # Memory Interview Configuration
 MEMORY_INTERVIEW_PROVIDER = _config_value("memory", "interview", "provider")
 MEMORY_INTERVIEW_MODEL = _config_value("memory", "interview", "model")
