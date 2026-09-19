@@ -26,6 +26,7 @@ def test_list_available_tools():
         "memory_propose",
         "people_search",
         "people_get",
+        "people_relations_walk",
         "project_search",
         "project_get",
         "skills",
@@ -295,6 +296,57 @@ def test_people_get_includes_related_people():
     # Verify secret relation note and internal IDs are NOT leaked
     res_str = json.dumps(res, ensure_ascii=False)
     assert "Secret relation note" not in res_str
+
+
+def test_people_relations_walk_tool():
+    from obsidian_ai_hub.database import get_db_connection
+    from obsidian_ai_hub.web.services.person_relations import create_person_relation_in_tx
+
+    ids = _seed_people_for_registry()
+    taro_id = ids["山田太郎"]
+    sato_id = ids["佐藤花子"]
+
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO people (person_id, display_name, normalized_name) "
+            "VALUES ('peo_mid_registry_test', '田中', '田中')"
+        )
+        create_person_relation_in_tx(
+            cursor,
+            taro_id,
+            sato_id,
+            "rlt_builtin_parent-child",
+            note="Secret relation note",
+        )
+        create_person_relation_in_tx(
+            cursor,
+            sato_id,
+            "peo_mid_registry_test",
+            "rlt_builtin_friend",
+            note="Secret relation note 2",
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    res = json.loads(
+        registry.people_relations_walk.invoke({"person_id": taro_id, "max_hops": 2})
+    )
+    hops = {n["person_id"]: n["hop"] for n in res["nodes"]}
+    assert hops[taro_id] == 0
+    assert hops[sato_id] == 1
+    assert hops["peo_mid_registry_test"] == 2
+    assert len(res["edges"]) == 2
+    assert res["truncated"] is False
+    assert "Secret relation note" not in json.dumps(res, ensure_ascii=False)
+
+    # Unknown person -> error JSON, not a graph.
+    err = json.loads(
+        registry.people_relations_walk.invoke({"person_id": "peo_missing"})
+    )
+    assert "error" in err
 
 
 def test_people_get_without_vault_id():

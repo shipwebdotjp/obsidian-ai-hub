@@ -1,3 +1,5 @@
+import json
+
 import pytest
 from obsidian_ai_hub.database import get_db_connection
 from obsidian_ai_hub.utils import config
@@ -9,6 +11,7 @@ from obsidian_ai_hub.web.services.person_relations import (
     create_person_relation_in_tx,
     get_person_relation_by_id_in_tx,
     get_person_relations_for_ai,
+    walk_person_relations_for_ai,
     add_relation_evidence,
     update_person_relation,
     update_person_relation_in_tx,
@@ -272,10 +275,13 @@ def test_vault_sync_self_relation_skip_blocks_final_rename(tmp_path, monkeypatch
 
 
 def test_ai_tool_registry_non_exposure():
-    # Verify that no relation tool is exposed in the public tool catalog.
+    # Only the read-only relation walk tool is exposed; no relation write/edit
+    # tool is registered (matches the AI non-exposure boundary for mutations).
     available_tools = list_available_tools()
-    relation_tools = [t for t in available_tools if "relation" in t["tool_id"].lower()]
-    assert len(relation_tools) == 0
+    relation_tools = {
+        t["tool_id"] for t in available_tools if "relation" in t["tool_id"].lower()
+    }
+    assert relation_tools == {"people_relations_walk"}
 
 
 def test_merge_people_rollback_on_error_leaves_no_partial_transfers(tmp_path, monkeypatch):
@@ -550,6 +556,155 @@ def test_get_person_relations_for_ai(tmp_path, monkeypatch):
     assert get_person_relations_for_ai("peo_nonexistent") == []
 
     conn.close()
+
+
+def _seed_walk_graph(tmp_path, monkeypatch):
+    db_file = tmp_path / "test_walk.db"
+    monkeypatch.setattr(config, "MEMORY_SQLITE_PATH", db_file)
+
+    conn = get_db_connection()
+    setup_test_people(conn)
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO people (person_id, normalized_name, display_name) "
+        "VALUES ('peo_4', 'dave', 'Dave')"
+    )
+    # peo_1 -> peo_2 (active parent-child)
+    create_person_relation_in_tx(
+        cursor,
+        "peo_1",
+        "peo_2",
+        "rlt_builtin_parent-child",
+        started_on="2020-01-01",
+        note="Secret walk note 1",
+        initial_evidence=[{"source_type": "manual", "quote": "Secret evidence"}],
+    )
+    # peo_2 -> peo_3 (symmetrized friend, undated)
+    create_person_relation_in_tx(
+        cursor,
+        "peo_2",
+        "peo_3",
+        "rlt_builtin_friend",
+        note="Secret walk note 2",
+    )
+    # peo_3 -> peo_4 (ended parent-child)
+    create_person_relation_in_tx(
+        cursor,
+        "peo_3",
+        "peo_4",
+        "rlt_builtin_parent-child",
+        started_on="2000-01-01",
+        ended_on="2010-01-01",
+        note="Secret walk note 3",
+    )
+    conn.commit()
+    return conn
+
+
+def test_walk_person_relations_for_ai_graph(tmp_path, monkeypatch):
+    conn = _seed_walk_graph(tmp_path, monkeypatch)
+    try:
+        result = walk_person_relations_for_ai("peo_1", max_hops=2)
+    finally:
+        conn.close()
+
+    assert result["root"] == {"person_id": "peo_1", "display_name": "Alice"}
+    assert result["max_hops"] == 2
+    assert result["truncated"] is False
+
+    hops = {n["person_id"]: n["hop"] for n in result["nodes"]}
+    assert hops == {"peo_1": 0, "peo_2": 1, "peo_3": 2}
+
+    assert len(result["edges"]) == 2
+    edge_pairs = {(e["from_person_id"], e["to_person_id"]) for e in result["edges"]}
+    assert edge_pairs == {("peo_1", "peo_2"), ("peo_2", "peo_3")}
+
+    parent_edge = next(e for e in result["edges"] if e["to_person_id"] == "peo_2")
+    assert parent_edge["relation"] == "親である"
+    assert parent_edge["relation_type_slug"] == "parent-child"
+    assert parent_edge["status"] == "active"
+    assert parent_edge["started_on"] == "2020-01-01"
+    assert parent_edge["ended_on"] is None
+
+    # Node/edge fields are a fixed minimal projection; no secrets leak.
+    for node in result["nodes"]:
+        assert set(node.keys()) == {"person_id", "display_name", "hop"}
+    for edge in result["edges"]:
+        assert set(edge.keys()) == {
+            "from_person_id",
+            "to_person_id",
+            "relation",
+            "relation_type_slug",
+            "status",
+            "started_on",
+            "ended_on",
+        }
+    assert "Secret" not in json.dumps(result, ensure_ascii=False)
+
+
+def test_walk_person_relations_for_ai_direction_and_filters(tmp_path, monkeypatch):
+    conn = _seed_walk_graph(tmp_path, monkeypatch)
+    try:
+        outgoing = walk_person_relations_for_ai(
+            "peo_1", max_hops=3, direction="outgoing"
+        )
+        incoming = walk_person_relations_for_ai(
+            "peo_1", max_hops=3, direction="incoming"
+        )
+        friend_only = walk_person_relations_for_ai(
+            "peo_2", max_hops=3, relation_type_slugs=["friend"]
+        )
+        ended_only = walk_person_relations_for_ai(
+            "peo_3", max_hops=3, statuses=["ended"]
+        )
+    finally:
+        conn.close()
+
+    # outgoing follows subject -> object through the chain.
+    assert {n["person_id"] for n in outgoing["nodes"]} == {
+        "peo_1",
+        "peo_2",
+        "peo_3",
+        "peo_4",
+    }
+    # peo_1 has no incoming edges.
+    assert [n["person_id"] for n in incoming["nodes"]] == ["peo_1"]
+    assert incoming["edges"] == []
+
+    assert {n["person_id"] for n in friend_only["nodes"]} == {"peo_2", "peo_3"}
+    assert len(friend_only["edges"]) == 1
+    assert friend_only["edges"][0]["relation_type_slug"] == "friend"
+
+    assert {n["person_id"] for n in ended_only["nodes"]} == {"peo_3", "peo_4"}
+    assert len(ended_only["edges"]) == 1
+    assert ended_only["edges"][0]["status"] == "ended"
+
+
+def test_walk_person_relations_for_ai_bounds_and_validation(tmp_path, monkeypatch):
+    conn = _seed_walk_graph(tmp_path, monkeypatch)
+    try:
+        bounded = walk_person_relations_for_ai("peo_1", max_hops=2, max_nodes=2)
+        deep = walk_person_relations_for_ai("peo_1", max_hops=3)
+        missing = walk_person_relations_for_ai("peo_missing")
+        with pytest.raises(ValueError):
+            walk_person_relations_for_ai("peo_1", max_hops=4)
+        with pytest.raises(ValueError):
+            walk_person_relations_for_ai("peo_1", max_hops=0)
+        with pytest.raises(ValueError):
+            walk_person_relations_for_ai("peo_1", direction="sideways")  # type: ignore[arg-type]
+    finally:
+        conn.close()
+
+    assert len(bounded["nodes"]) == 2
+    assert bounded["truncated"] is True
+    assert {n["person_id"] for n in deep["nodes"]} == {
+        "peo_1",
+        "peo_2",
+        "peo_3",
+        "peo_4",
+    }
+    assert deep["nodes"][-1]["hop"] == 3
+    assert missing == {"error": "人物が見つかりません"}
 
 
 def test_relation_partial_date_normalization_and_order():

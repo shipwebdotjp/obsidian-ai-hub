@@ -42,6 +42,26 @@ def test_bare_tool_schema_resolves():
     assert validated["query"] == "x"
 
 
+def test_people_relations_walk_schema_resolves():
+    model = schemas.resolve_input_model("people_relations_walk")
+    assert model is not None
+    assert set(model.model_json_schema().get("required", [])) == {"person_id"}
+    validated = schemas.validate_capability_inputs(
+        "people_relations_walk",
+        {"person_id": "peo_1", "max_hops": 2, "direction": "both"},
+    )
+    assert validated["person_id"] == "peo_1"
+    assert validated["max_hops"] == 2
+    assert validated["direction"] == "both"
+    assert validated["max_nodes"] == 50
+    assert validated["max_edges"] == 200
+    # max_hops is capped at 3 by the single-source model.
+    with pytest.raises(ValueError, match="inputs invalid"):
+        schemas.validate_capability_inputs(
+            "people_relations_walk", {"person_id": "peo_1", "max_hops": 9}
+        )
+
+
 def test_unknown_keys_rejected_before_execution():
     with pytest.raises(ValueError, match="inputs invalid"):
         schemas.validate_capability_inputs(

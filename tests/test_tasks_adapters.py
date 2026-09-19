@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 import obsidian_ai_hub.agents.registry as registry_module
@@ -71,6 +73,49 @@ def test_registry_tool_success_and_inputs(monkeypatch):
     )
     assert result.summary == '{"events": []}'
     assert fake.calls == [{"start_date": "2026-09-14", "end_date": "2026-09-15"}]
+
+
+def test_registry_tool_people_relations_walk_end_to_end(tmp_path, monkeypatch):
+    from obsidian_ai_hub.utils import config
+    from obsidian_ai_hub.database import get_db_connection
+    from obsidian_ai_hub.web.services.person_relations import create_person_relation_in_tx
+
+    db_file = tmp_path / "walk_adapter.db"
+    monkeypatch.setattr(config, "MEMORY_SQLITE_PATH", db_file)
+
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO people (person_id, display_name, normalized_name) "
+            "VALUES ('peo_a', 'A', 'a')"
+        )
+        cursor.execute(
+            "INSERT INTO people (person_id, display_name, normalized_name) "
+            "VALUES ('peo_b', 'B', 'b')"
+        )
+        cursor.execute(
+            "INSERT INTO people (person_id, display_name, normalized_name) "
+            "VALUES ('peo_c', 'C', 'c')"
+        )
+        create_person_relation_in_tx(
+            cursor, "peo_a", "peo_b", "rlt_builtin_parent-child"
+        )
+        create_person_relation_in_tx(cursor, "peo_b", "peo_c", "rlt_builtin_friend")
+        conn.commit()
+    finally:
+        conn.close()
+
+    task, plan = _task_with_plan(
+        "people_relations_walk", {}, {"person_id": "peo_a", "max_hops": 2}
+    )
+    result = RegistryToolExecutor().execute_step(
+        task, plan, 0, plan["plan"]["steps"][0]
+    )
+    payload = json.loads(result.summary)
+    hops = {n["person_id"]: n["hop"] for n in payload["nodes"]}
+    assert hops == {"peo_a": 0, "peo_b": 1, "peo_c": 2}
+    assert len(payload["edges"]) == 2
 
 
 def test_registry_tool_rejects_excluded_tools():

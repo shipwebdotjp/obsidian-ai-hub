@@ -306,6 +306,47 @@ class PersonGetInput(BaseModel):
     )
 
 
+class PeopleRelationsWalkInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    person_id: str = Field(
+        description="起点人物ID（例: 'peo_xxx'）。people_search の結果の person_id を指定する。",
+    )
+    max_hops: int = Field(
+        default=2,
+        ge=1,
+        le=3,
+        strict=True,
+        description="探索する最大ホップ数 (1-3)。省略時は2。",
+    )
+    relation_type_slugs: Optional[List[str]] = Field(
+        default=None,
+        description="辿るリレーション種別スラッグの絞り込み（例: ['parent-child', 'friend']）。省略時は全種別。",
+    )
+    statuses: Optional[List[Literal["active", "ended", "upcoming", "undated"]]] = Field(
+        default=None,
+        description="期間ステータスの絞り込み。省略時は全ステータス。",
+    )
+    direction: Literal["both", "outgoing", "incoming"] = Field(
+        default="both",
+        description="辺を辿る向き。outgoing=subject→object、incoming=object→subject、both=無向（既定）。",
+    )
+    max_nodes: int = Field(
+        default=50,
+        ge=1,
+        le=50,
+        strict=True,
+        description="返却する最大ノード数 (1-50)。省略時は50。",
+    )
+    max_edges: int = Field(
+        default=200,
+        ge=1,
+        le=200,
+        strict=True,
+        description="返却する最大辺数 (1-200)。省略時は200。",
+    )
+
+
 class ProjectSearchInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -1015,6 +1056,40 @@ def _make_people_get_tool(trusted_ctx: Optional[Dict[str, Any]] = None) -> BaseT
 people_get = _make_people_get_tool(None)
 
 
+@tool(args_schema=PeopleRelationsWalkInput)
+def people_relations_walk(
+    person_id: str,
+    max_hops: int = 2,
+    relation_type_slugs: Optional[List[str]] = None,
+    statuses: Optional[List[str]] = None,
+    direction: str = "both",
+    max_nodes: int = 50,
+    max_edges: int = 200,
+) -> str:
+    """起点人物から人物間リレーションを最大3ホップまで辿り、到達人物(nodes)と辺(edges)のグラフを返します。直接接続だけでは分からない間接的なつながりを調べる際に使用してください。既定2ホップ・双方向探索・件数上限つき。note/evidence/内部IDは返しません。"""
+    try:
+        from obsidian_ai_hub.web.services.person_relations import (
+            walk_person_relations_for_ai,
+        )
+
+        result = walk_person_relations_for_ai(
+            person_id=person_id,
+            max_hops=max_hops,
+            relation_type_slugs=relation_type_slugs,
+            statuses=statuses,
+            direction=direction,  # type: ignore[arg-type]
+            max_nodes=max_nodes,
+            max_edges=max_edges,
+        )
+        return json.dumps(result, ensure_ascii=False)
+    except EXPECTED_TOOL_EXCEPTIONS as exc:
+        logger.warning("people_relations_walk failed: %s", exc)
+        return json.dumps({"error": str(exc)}, ensure_ascii=False)
+    except Exception as exc:
+        logger.exception("people_relations_walk failed")
+        return json.dumps({"error": _sanitize_unexpected_error(exc)}, ensure_ascii=False)
+
+
 @tool(args_schema=ProjectSearchInput)
 def project_search(
     query: str = "",
@@ -1430,9 +1505,15 @@ _BUILTIN_TOOL_DEFINITIONS: Dict[str, Dict[str, Any]] = {
     "people_get": {
         "tool_id": "people_get",
         "name": "人物詳細取得",
-        "description": "人物IDから詳細（別名、全属性値・履歴、直接接続リレーション、本人との直接関係、関連サマリ、件数）を取得します。特定人物メッセージを個人化する際は people_search → people_get を使用し、relationship_to_principal が空/nullの場合は本人との関係を推測・言及しないでください。",
+        "description": "人物IDから詳細（別名、全属性値・履歴、直接接続リレーション、本人との直接関係、関連サマリ、件数）を取得します。特定人物メッセージを個人化する際は people_search → people_get を使用し、relationship_to_principal が空/nullの場合は本人との関係を推測・言及しないでください。直接接続を超えるつながりは people_relations_walk を使用してください。",
         "get_tool": lambda: _make_people_get_tool(None),
         "get_tool_with_context": lambda ctx: _make_people_get_tool(ctx),
+    },
+    "people_relations_walk": {
+        "tool_id": "people_relations_walk",
+        "name": "人物リレーション探索",
+        "description": "起点人物から人物間リレーションを最大3ホップ（既定2）まで双方向に辿り、到達人物(nodes)と辺(edges)のグラフを返します。relation_type_slugs/statuses/direction で絞り込み可能。note/evidence/内部IDは公開しません。",
+        "get_tool": lambda: people_relations_walk,
     },
     "project_search": {
         "tool_id": "project_search",

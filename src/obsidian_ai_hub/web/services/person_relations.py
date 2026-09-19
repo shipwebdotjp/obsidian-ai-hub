@@ -1112,6 +1112,215 @@ def get_person_relations_for_ai(person_id: str) -> list[dict[str, Any]]:
         conn.close()
 
 
+_WALK_MAX_HOPS = 3
+_WALK_DEFAULT_MAX_NODES = 50
+_WALK_DEFAULT_MAX_EDGES = 200
+
+
+def _fetch_relations_touching(
+    cursor: sqlite3.Cursor,
+    frontier: Collection[str],
+    direction: Literal["both", "outgoing", "incoming"],
+) -> list[sqlite3.Row]:
+    placeholders = ", ".join("?" for _ in frontier)
+    params: list[Any] = list(frontier)
+    if direction == "outgoing":
+        where = f"r.subject_person_id IN ({placeholders})"
+    elif direction == "incoming":
+        where = f"r.object_person_id IN ({placeholders})"
+    else:
+        where = (
+            f"r.subject_person_id IN ({placeholders}) "
+            f"OR r.object_person_id IN ({placeholders})"
+        )
+        params = params * 2
+    cursor.execute(
+        f"""
+        SELECT r.relation_id, r.subject_person_id, r.object_person_id,
+               r.started_on, r.ended_on,
+               t.slug AS relation_type_slug, t.forward_label,
+               sp.display_name AS subject_display_name,
+               op.display_name AS object_display_name
+        FROM person_relations r
+        JOIN person_relation_types t ON r.relation_type_id = t.relation_type_id
+        LEFT JOIN people sp ON r.subject_person_id = sp.person_id
+        LEFT JOIN people op ON r.object_person_id = op.person_id
+        WHERE {where}
+        ORDER BY r.created_at DESC, r.relation_id ASC
+        """,
+        params,
+    )
+    return cursor.fetchall()
+
+
+def _relation_status_if_selected(
+    row: sqlite3.Row,
+    slug_filter: Optional[set[str]],
+    status_filter: Optional[set[str]],
+    status_cache: dict[str, str],
+) -> Optional[str]:
+    slug = row["relation_type_slug"]
+    if slug_filter is not None and slug not in slug_filter:
+        return None
+    relation_id = row["relation_id"]
+    status = status_cache.get(relation_id)
+    if status is None:
+        status = compute_relation_status(row["started_on"], row["ended_on"])
+        status_cache[relation_id] = status
+    if status_filter is not None and status not in status_filter:
+        return None
+    return status
+
+
+def walk_person_relations_for_ai(
+    person_id: str,
+    max_hops: int = 2,
+    relation_type_slugs: Optional[Collection[str]] = None,
+    statuses: Optional[Collection[str]] = None,
+    direction: Literal["both", "outgoing", "incoming"] = "both",
+    max_nodes: int = _WALK_DEFAULT_MAX_NODES,
+    max_edges: int = _WALK_DEFAULT_MAX_EDGES,
+) -> dict[str, Any]:
+    """Walk person relations up to ``max_hops`` and return a bounded graph.
+
+    Breadth-first from ``person_id``. ``direction`` decides which edges are
+    traversed: ``outgoing`` follows subject -> object, ``incoming`` follows
+    object -> subject, ``both`` (default) ignores orientation. Optional
+    ``relation_type_slugs`` / ``statuses`` filters restrict traversal and the
+    returned edges. The result is the induced subgraph over the reachable
+    nodes: nodes carry their shortest hop from the root, edges carry the
+    forward label and computed status. Internal IDs, notes, descriptions and
+    evidence are never exposed (matches ``get_person_relations_for_ai``).
+
+    ``max_hops`` is capped at 3. ``max_nodes`` / ``max_edges`` bound the
+    output; when a bound is hit ``truncated`` is True. Returns
+    ``{"error": "人物が見つかりません"}`` when the root person does not exist.
+    """
+    if not isinstance(max_hops, int) or max_hops < 1 or max_hops > _WALK_MAX_HOPS:
+        raise ValueError(f"max_hops must be between 1 and {_WALK_MAX_HOPS}")
+    if max_nodes < 1:
+        raise ValueError("max_nodes must be >= 1")
+    if max_edges < 1:
+        raise ValueError("max_edges must be >= 1")
+    if direction not in ("both", "outgoing", "incoming"):
+        raise ValueError("direction must be one of: both, outgoing, incoming")
+
+    slug_filter: Optional[set[str]] = None
+    if relation_type_slugs is not None:
+        slug_filter = {str(s) for s in relation_type_slugs if str(s)}
+    status_filter: Optional[set[str]] = None
+    if statuses is not None:
+        status_filter = {str(s) for s in statuses if str(s)}
+
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT person_id, display_name FROM people WHERE person_id = ?",
+            (person_id,),
+        )
+        root_row = cursor.fetchone()
+        if root_row is None:
+            return {"error": "人物が見つかりません"}
+        root_name = root_row["display_name"] or person_id
+
+        visited: dict[str, int] = {person_id: 0}
+        names: dict[str, str] = {person_id: root_name}
+        truncated = False
+        frontier = [person_id]
+        status_cache: dict[str, str] = {}
+
+        for hop in range(1, max_hops + 1):
+            if not frontier:
+                break
+            rows = _fetch_relations_touching(cursor, frontier, direction)
+            next_frontier: list[str] = []
+            for row in rows:
+                if _relation_status_if_selected(row, slug_filter, status_filter, status_cache) is None:
+                    continue
+                if direction == "outgoing":
+                    candidates = [(row["object_person_id"], row["object_display_name"])]
+                elif direction == "incoming":
+                    candidates = [(row["subject_person_id"], row["subject_display_name"])]
+                else:
+                    candidates = []
+                    if row["subject_person_id"] in frontier:
+                        candidates.append((row["object_person_id"], row["object_display_name"]))
+                    if row["object_person_id"] in frontier:
+                        candidates.append((row["subject_person_id"], row["subject_display_name"]))
+                for neighbor_id, neighbor_name in candidates:
+                    if neighbor_id in visited:
+                        continue
+                    if len(visited) >= max_nodes:
+                        truncated = True
+                        continue
+                    visited[neighbor_id] = hop
+                    names[neighbor_id] = neighbor_name or neighbor_id
+                    next_frontier.append(neighbor_id)
+            frontier = next_frontier
+
+        edges: dict[str, dict[str, Any]] = {}
+        visited_ids = list(visited)
+        placeholders = ", ".join("?" for _ in visited_ids)
+        cursor.execute(
+            f"""
+            SELECT r.relation_id, r.subject_person_id, r.object_person_id,
+                   r.started_on, r.ended_on,
+                   t.slug AS relation_type_slug, t.forward_label
+            FROM person_relations r
+            JOIN person_relation_types t ON r.relation_type_id = t.relation_type_id
+            WHERE r.subject_person_id IN ({placeholders})
+              AND r.object_person_id IN ({placeholders})
+            ORDER BY r.created_at DESC, r.relation_id ASC
+            """,
+            visited_ids * 2,
+        )
+        for row in cursor.fetchall():
+            rel_status = _relation_status_if_selected(row, slug_filter, status_filter, status_cache)
+            if rel_status is None:
+                continue
+            if len(edges) >= max_edges:
+                truncated = True
+                continue
+            edges[row["relation_id"]] = {
+                "from_person_id": row["subject_person_id"],
+                "to_person_id": row["object_person_id"],
+                "relation": row["forward_label"],
+                "relation_type_slug": row["relation_type_slug"],
+                "status": rel_status,
+                "started_on": row["started_on"],
+                "ended_on": row["ended_on"],
+            }
+
+        nodes = [
+            {"person_id": pid, "display_name": names.get(pid, pid), "hop": hop}
+            for pid, hop in sorted(
+                visited.items(),
+                key=lambda kv: (kv[1], names.get(kv[0], kv[0]), kv[0]),
+            )
+        ]
+        edge_list = sorted(
+            edges.values(),
+            key=lambda e: (
+                e["from_person_id"],
+                e["to_person_id"],
+                e["relation_type_slug"],
+                e["started_on"] or "",
+                e["ended_on"] or "",
+            ),
+        )
+        return {
+            "root": {"person_id": person_id, "display_name": root_name},
+            "max_hops": max_hops,
+            "direction": direction,
+            "nodes": nodes,
+            "edges": edge_list,
+            "truncated": truncated,
+        }
+    finally:
+        conn.close()
+
+
 def get_relationship_to_principal_for_ai(
     target_person_id: str,
     principal_person_id: Optional[str],

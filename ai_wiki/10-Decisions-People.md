@@ -453,3 +453,19 @@ LLMによる自動抽出を即時DB書き込みにすると、推測や誤認識
 
 人物メモリについては、日次・週次要約が人物メモを生成する主体であるにもかかわらず、その人物に関する既知の承認済み知見を参照できなかった。`people_get` の最小投影と同等の情報を、人物表示名でグループ化した参考セクションとして生成系に渡すことでパーソナライズ精度を上げる。プライバシー境界を広げる変更のため、candidate/期限切れの除外と purpose 単位の opt-in を契約とし、`tests/test_memory.py` のスコープ別コンパイルテストで固定する。`include_person` を既定 `false` とし、人物メモリを扱わない生成系（月次・レビュー下書き・企画提案）には混入させない。
 
+## 2026-09-19: 人物間リレーションのマルチホップ探索ツール（people_relations_walk）
+
+### 決定
+
+- **読み取り専用ツールの追加**: エージェントツール `people_relations_walk` を追加する。起点 `person_id` から `max_hops`（既定2・最大3）でBFSし、到達人物（最短 `hop` 付き `nodes`）と辺（`edges`）の誘導部分グラフを返す。
+- **探索・絞り込みの契約**: 探索方向は既定 `both`（辺を無向として辿る）。`outgoing`（subject→object）/ `incoming`（object→subject）、`relation_type_slugs`、`statuses` を任意引数で提供する。各辺は stored subject→object の `forward_label`、`compute_relation_status` の `status`、部分日を含む期間を返す。
+- **有界化**: `max_nodes`（既定50・最大50）、`max_edges`（既定200・最大200）で出力を制限し、上限到達時は `truncated=true` を返す。BFSの訪問済み集合でサイクルを排除する。
+- **非公開境界の維持**: note / description / evidence / 内部ID（`relation_id`, `relation_type_id`）は公開しない。既存 `get_person_relations_for_ai` の最小投影方針を継承する。
+- **既存契約の保護**: Web HTTP API、`get_person_detail`、`PersonDetail` DTO、および `people_get` の出力契約（直接接続 `related_people`）は変更しない。`people_get` の説明からのみ本ツールへ誘導する。
+- **Task Capability 化**: Agent Registry からの自動派生に従い、読み取り専用のため `tasks/capabilities.py` の `AUTO_POLICY_TOOL_IDS` に追加して既定 `auto` とする。Task の観測詳細ウィンドウは `tasks/observation.py` で `MAX_DETAIL_LIMIT`（6,000字）に設定する。既存DBへは起動時 `sync_capabilities` が挿入し、新規 migration は設けない。
+- **本決定による置換**: 「人物間リレーション v4」の「多段探索（2 hop 以上）は行わない」「新しい relation 専用 AI ツールはカタログへ追加せず」を置換する。Web API/DTO 不変とリレーションの書き込み系非公開は維持する。
+
+### 理由
+
+エージェントが直接接続を超えた間接的なつながりを扱えるようにしつつ、ノード/辺の上限と最小投影で計算量・出力・プライバシー面を有界化する。読み取り専用で副作用がないため、Task 側は既存の自動同期と `auto` ポリシーにより追加作業なく活用できる。非公開境界テスト（`tests/test_person_relations_phase1.py`, `tests/test_person_relations_service.py`）は「読み取り専用の walk のみ公開、書き込み系は非公開」を検証する形へ更新する。
+

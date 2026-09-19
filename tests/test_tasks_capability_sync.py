@@ -48,6 +48,9 @@ def test_catalog_policies_and_kinds():
     assert by_key["memory_propose"].adapter_kind == "memory"
     assert by_key["specialist_agent"].adapter_kind == "agent"
     assert by_key["coding_cli"].adapter_kind == "coding"
+    # Read-only relation traversal is auto-approved like the other read tools.
+    assert by_key["people_relations_walk"].adapter_kind == "registry_tool"
+    assert by_key["people_relations_walk"].default_approval_policy == "auto"
     # Labels come from the registry.
     assert (
         by_key["web_search"].label

@@ -283,7 +283,10 @@ def test_regression_person_detail_and_ai_registry_unchanged():
     assert "relations" not in person_detail_fields
     assert "person_relations" not in person_detail_fields
 
-    # Verify AI tool registry does not have relation tools registered
+    # Verify only the read-only relation walk tool is registered; no relation
+    # write/edit tool is exposed to AI agents.
     available_tools = list_available_tools()
-    relation_tools = [t for t in available_tools if "relation" in t["tool_id"].lower()]
-    assert len(relation_tools) == 0
+    relation_tools = {
+        t["tool_id"] for t in available_tools if "relation" in t["tool_id"].lower()
+    }
+    assert relation_tools == {"people_relations_walk"}

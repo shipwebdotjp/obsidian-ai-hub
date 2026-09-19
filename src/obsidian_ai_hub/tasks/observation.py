@@ -41,6 +41,7 @@ _DETAIL_LIMITS: dict[str, int] = {
     "periodic_note_read": MAX_DETAIL_LIMIT,
     "agent_conversation_search": 4000,
     "coding_history_search": 4000,
+    "people_relations_walk": MAX_DETAIL_LIMIT,
     "research_theme_propose": 2000,
     "research_agent": MAX_DETAIL_LIMIT,
     "specialist_agent": MAX_DETAIL_LIMIT,

@@ -59,6 +59,7 @@ AUTO_POLICY_TOOL_IDS: frozenset[str] = frozenset(
         "memory_search",
         "people_search",
         "people_get",
+        "people_relations_walk",
         "project_search",
         "project_get",
         "research_context_snapshot",
