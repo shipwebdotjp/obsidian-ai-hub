@@ -50,6 +50,24 @@ cancel、progress notification を標準化し、Codex と OpenCode の双方に
 - 直接 CLI を即時削除して ACP のみへ切替える: session 再開、取消、HITL/permission、外部 adapter の実測が
   未了で既存 run を壊し得るため不採用。受入後の Phase 3 で採用する。
 
+### 未実装の残課題（2026-09-19）
+
+実装は ACP 既定化・Direct CLI/Codex backend 削除まで完了した。以下は未実装または保留である。
+
+- **Phase 2 の shadow 受入 matrix 未消化**: direct CLI と ACP を同一 prompt suite で比較する実測が
+  行われないまま ACP 既定化（Phase 3）が先行した。profile/version 別の session 継続・cancel・
+  HITL/restart・resource cleanup の比較記録が無い。
+- **support window と archival 運用**: 旧 direct CLI session の読取り・再開をいつまで保証するか、
+  未終端 session を archival transport 状態へ移す運用が未定義。会話履歴は削除しない。
+- **Codex ACP の live 実行未実施**: PoC は OpenCode のみ live。Codex profile の version pin・
+  upgrade test・障害対応手順が未整備。
+- **第三の ACP Agent の profile-only 接続**: `opencode` 分岐がコードに固定されており、profile 追加
+  だけで別 Agent を接続できない。
+- **ACP run event の機密 redact/上限設計**: worker 本文と種別集計・上限化のみで、機密値検出の設計は未実施。
+- **ACP v2 / native subagent・background task・per-file-change report の UI 公開**: 別 ADR と
+  operation-scenario contract を要する将来項目。Coordinator を残すか ACP Agent を直接主体にするかの
+  再設計も保留。
+
 ## Web UI 管理の AI エージェント、永続会話、およびツール境界
 
 | 項目 | 内容 |
@@ -741,3 +759,29 @@ Scheduler Task と Task Agent Task が `task` 一語を共有し、画面・API�
 - **権限**: `register_one_shot_job`（`command`＋任意 `run_at` の Pydantic 単一正本）は選択可能カタログに現れるが自動付与せず、編集画面の明示追加のみ。登録元 ID は trusted context 注入で偽装不可。Task Agent では自動 Capability 同期で既定 `plan_required` のまま公開する。
 - **公開面**: API は `/api/v1/scheduler-jobs`（`recurring-jobs`、`one-shot-jobs`、`job-states`）、画面は `/jobs`（定期＋ワンショット）とジョブ状態表示。旧 route・旧 schema・旧クライアント関数は削除し、旧 URL は 404。`command_runs` は一般実行ログ名を維持し、scheduler 起因の表示は `job_id` を使う。
 - **移行**: 手順は `docs/job/migration.md`。`python -m obsidian_ai_hub.job_runner --migrate-tasks-to-jobs` が唯一の YAML 移行経路。`batch/scheduler.sh` と LaunchAgent plist は `job_runner` を指す。
+
+## Activity・サマリーの正本を SQLite へ移行（JSONL 廃止）
+
+| 項目 | 内容 |
+|------|------|
+| 決定日 | 2026-09-19（決定時点の作業を記録） |
+| カテゴリ | データ永続化・ダッシュボード |
+| 決定内容 | Activity 生ログと日次・週次・月次サマリーの正本を、日別 JSONL から共有 SQLite（`activity_logs` / `summaries` / `summary_items` ほか）へ移す。旧 JSONL は一方向の移行スクリプトで取り込み、アーカイブとして残す。 |
+
+### 結論に至った経緯
+
+- 日別 JSONL は日→週→月の連鎖・`memory.py`・静的ダッシュボードが個別に読み、重複除去や順序保証を
+  各呼出元が持っていた。共有 SQLite の単一スキーマへ寄せることで、期間キー `UNIQUE(period_type, period_key)`
+  による冪等 upsert、日次→週次→月次の入力確定、API/React ダッシュボードからの一貫した読取を可能にする。
+- Activity は `(source_path, source_line)` の `UNIQUE` と fingerprint で旧 JSONL 取込を冪等にする。
+- 旧データは `scripts/migrate_activity_jsonl_to_sqlite.py` / `scripts/migrate_summary_jsonl_to_sqlite.py`
+  で一方向に取り込む。不正行は警告して継続、同一期間キーは最後の行を採用する。
+
+### 未実装の残課題（2026-09-19）
+
+- 週・月の睡眠 `min/avg/max` と気分分布の集計 API（`web/services/dashboard.py` に未実装）。
+- topic/project/person/open-loop の絞り込みは `summary_store.list_summaries` にあるが API/UI へ未配線。
+- React ダッシュボード一覧の絞り込みは年月のみ。
+- 静的 `src/obsidian_ai_hub/dashboard.py`・`tests/test_dashboard.py`・設定 `DASHBOARD_PATH` は
+  CLI フラグ削除後もデッドコードとして残る。
+- 要約器の Markdown レンダリング関数は存在するが呼び出しが無効化されている。

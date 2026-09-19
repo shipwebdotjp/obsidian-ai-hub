@@ -21,6 +21,12 @@ minor であるため、これは許容可能である。
 
 ## タスク管理 Web UI (localhost 専用)
 
+> **置換済み（2026-09-19 注記）**: 本節の `/api/v1/task-config` は 2026-09-17 の Job 改称で
+> `/api/v1/scheduler-jobs` に、`/tasks` 画面は `/jobs` に置換され、旧 URL は 404。
+> 認証も 2026-08-15 の Bearer 一元化で置換済み。現行は
+> [Scheduler Task から Job への完全改称](10-Decisions-Architecture.md#scheduler-task-から-job-への完全改称とワンショット実行ジョブ導入)
+> と [Web API の Bearer 認証一元化](#web-api-の-bearer-認証一元化ループバックtailnet-免除の廃止) を正とする。
+
 | 項目 | 内容 |
 |------|------|
 | 決定日 | 2026-07-21 |

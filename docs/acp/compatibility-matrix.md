@@ -1,11 +1,14 @@
 # ACP Compatibility Matrix (Phase 0 PoC)
 
-関連: [TODO.md](TODO.md), [調査報告](2026-09-15-codingagents-acp-investigation.md)
+この表は 2026-09-15 の PoC 実測結果（固定 version・capability・session/cancel 挙動）の記録である。
+移行の判断と未実装の残課題は
+`ai_wiki/10-Decisions-Architecture.md`「CodingAgents は共通 ACP Client へ段階移行する」を正とする。
 
 方針承認: [ACP の委任とプロダクト判断 HITL contract](permission-hitl-contract.md)。技術的作業は
 Agent/profile に委任し、プロダクト判断だけを既存 Coordinator → HITL 経路へ送る。
 
-ACP v1 を初期採用版として固定。v2 は別 ticket（本移行と切り離し）。
+ACP v1 を初期採用版として固定。v2 は別 ticket（本移行と切り離し）。PoC の raw artifact は
+`docs/acp/artifacts/` に残す。
 
 ## 環境
 

@@ -84,15 +84,10 @@ Vault、Git、外部APIにまたがる変更を安全に取り消せるように
 ファイル監視、パスallowlist、Planとの差分照合で、Agent/Coding CLI内部の逸脱を親側から
 防ぐ。Coding ACPとAgentの実権限・責任境界を再設計する大きな変更なので、最後に検討する。
 
-## 実装済みになった候補
+## 実装済みになった事項（ロードマップ対象外）
 
-次の候補はMVP後の項目ではなく、現行仕様へ取り込まれている。
-
-- Vaultの作成・編集: `vault_write_file` Capability。既定 `plan_required`、相対パス制約、
-  原子書込み、明示的な `overwrite=true` を採用済み（Vault削除は未実装）。
-- 任意shell、Skills、カスタムプラグイン: Capability自動同期により既定 `plan_required` で
-  公開済み。`ask_user` と `agent_delegate` はTask Capabilityから除外する。
-- Agent設定のPlanスナップショット最小形: `specialist_agent` を含むDirectional Planについて、
-  承認時点の設定指紋を保存し、実行開始時の差分・削除を検出して再承認へ回す。
+Vault の作成・編集（`vault_write_file`、既定 `plan_required`）、任意 shell / Skills / カスタム
+プラグインの Capability 自動同期、Agent 設定の Plan スナップショット最小形は現行仕様へ取り込み済み。
+以降の対象は上記 1〜9 の未実装項目のみ。
 
 MVPの不具合、安全性修正、回帰修正はこのロードマップに含めず、通常の修正作業として優先する。

@@ -5,7 +5,7 @@ Status: Draft（調査・提案。実装未着手）
 この文書は、Task Agent を「要求駆動の実行者」から「自発的にユーザーを助け、
 支援し、成長を後押しするエージェント」へ拡張するための調査結果・設計案・
 優先順位を、将来の実装時の参考資料としてまとめたものである。意思決定の正本は
-[specification.md](specification.md) と [adr/](adr/)、作業事実は [TODO.md](TODO.md) に置き、
+[specification.md](specification.md) と [adr/](adr/) に置き、
 本書はロードマップと設計候補の整理に限定する。
 
 関連: [README.md](README.md)、[CONTEXT.md](../../CONTEXT.md)、
@@ -37,8 +37,9 @@ Status: Draft（調査・提案。実装未着手）
   （[research/capabilities.py](../../src/obsidian_ai_hub/research/capabilities.py)）。
 - Capability の自動派生: Agent Registry のツールを Task Capability として自動公開
   （[tasks/capabilities.py](../../src/obsidian_ai_hub/tasks/capabilities.py)）。
-- 既存の定期実行: `task_runner.py` + `tasks/tasks.local.yml` + Web の `/task-config` で
-  cron 的スケジュールを管理（[task_runner.py](../../src/obsidian_ai_hub/task_runner.py)）。
+- 既存の定期実行: `job_runner` + `jobs/jobs.local.yml` + Web の `/jobs` で cron 的スケジュールを
+  管理（[README.md](../../README.md#job-runner)）。旧称 `task_runner` / `tasks/tasks.local.yml` /
+  `/task-config` は 2026-09 の改称で置換済み。
 
 ### 2.2 自発性・成長支援のギャップ
 

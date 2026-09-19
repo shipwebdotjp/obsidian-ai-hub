@@ -17,9 +17,9 @@
     API constraints apply.
   - **Likely recurring disagreement:** the same discussion is likely to recur.
 - For an ADR candidate, record the context and rationale in the relevant
-  decision record listed in [ai_wiki/00-Index.md](ai_wiki/00-Index.md). Use
-  [ai_wiki/20-Worklog.md](ai_wiki/20-Worklog.md) only for temporary progress
-  notes and handoffs.
+  decision record listed in [ai_wiki/00-Index.md](ai_wiki/00-Index.md). Do not
+  keep temporary progress notes or handoffs as repository documents; rely on
+  Git history.
 
 ## Project conventions
 

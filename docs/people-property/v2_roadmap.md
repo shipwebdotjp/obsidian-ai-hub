@@ -1,6 +1,9 @@
 # 人物属性 v2 以降ロードマップ
 
-関連文書: [仕様書](specification.md) / [実装計画](implementation-plan.md) / [作業チェックリスト](todo.md)
+実装済み v1 の仕様は `ai_wiki/10-Decisions-People.md`（人物属性 v1 Vault正本投影・同期レポート・
+安全境界、人物属性 v4: `people_get` への全属性公開）を正とする。本書は v2 以降の未実装計画のみを扱う。
+
+関連: [人物間リレーション v2 以降ロードマップ](../person-relation/v2_roadmap.md)
 
 v1の型付き値・Vault正本投影を安定基盤とし、人物属性を横断して検索・比較・点検する日常利用を最優先に、正本境界と既存値を壊さない順に機能を追加する。
 

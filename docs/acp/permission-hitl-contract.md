@@ -1,8 +1,9 @@
 # ACP の委任とプロダクト判断 HITL contract
 
-対象: ACP 移行 Phase 1「アプリへの接続」。
+対象: ACP の委任境界とプロダクト判断 HITL の契約。
 根拠: [compatibility-matrix.md](compatibility-matrix.md) の Phase 0 PoC。
-この文書の承認により、[TODO.md](TODO.md) の Phase 0 は完了し、Phase 1 に着手できる。
+判断と未実装の残課題は `ai_wiki/10-Decisions-Architecture.md`「CodingAgents は共通 ACP Client へ
+段階移行する」を正とする。
 
 ## 一文でいうと
 

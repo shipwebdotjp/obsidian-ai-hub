@@ -142,8 +142,9 @@ export function useAgentChat({
   const [isDragOver, setIsDragOver] = useState(false);
   const [queuedMessages, setQueuedMessages] = useState<QueuedAgentMessage[]>([]);
 
-  // Send queue (docs/ai-agent plan: 送信キュー). The ref is the flush source of
-  // truth; state mirrors only the selected session for rendering.
+  // Send queue (ai_wiki/10-Decisions-Web.md: エージェント会話の送信キューは
+  // クライアント側に置く). The ref is the flush source of truth; state mirrors
+  // only the selected session for rendering.
   const queueRef = useRef<{ sessionId: string | null; items: QueuedAgentMessage[] }>({
     sessionId: null,
     items: [],

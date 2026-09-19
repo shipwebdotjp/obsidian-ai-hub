@@ -338,6 +338,13 @@ Apple取得が失敗・利用不能の場合は、Apple項目だけを空とし�
 - ECG 波形を DB に持たないため検索はファイルI/O依存だが、医療データの肥大化と `health_ecg_samples` の `WITHOUT ROWID` 運用コストを回避。
 - re-import は fingerprint UNIQUE で `ignored_duplicates` として集計し、2回目は `health_records` 不変・`health_imports` のみ追加。ECG も `UNIQUE(file_path)` で同様。
 
+### 未実装の将来拡張
+
+- `health_daily_metrics` の VIEW / refresh ジョブによる日次集計（睡眠・歩数・心拍）。
+- `export_cda.xml` の `health_clinical_records` 対応（現状は `stats_json.cda_skipped=true` でスキップ）。
+- ダッシュボード / `summerize_day` への健康集計の自動注入（集計のみ・opt-in 前提）。
+- `task_runner`（現 `job_runner`）への定期差分 import 登録。
+
 ## AIエージェントの高度なパラメーターとプロンプトテンプレート（スキーマ v23）
 
 | 項目 | 内容 |

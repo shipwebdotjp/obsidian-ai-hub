@@ -22,7 +22,6 @@
 
 ## 主要な決定
 
-- [テスト層再編プラン (Phase 0 完了)](../docs/test-reduction/plan.md)
 - [個人開発ではブラウザ E2E を追加・更新しない](10-Decisions-Testing.md#個人開発ではブラウザ-e2e-を追加更新しない)
 - [フロントエンドのツールチェーンポリシー (Vite 6 + Vitest 4)](10-Decisions-Testing.md#フロントエンドのツールチェーンポリシー-vite-6--vitest-4)
 - [タスク管理 Web UI (loopback または tailnet + トークン)](10-Decisions-Web.md#タスク管理-web-ui-loopback-または-tailnet--トークン)（2026-08-15 の [Bearer 認証一元化](10-Decisions-Web.md#web-api-の-bearer-認証一元化ループバックtailnet-免除の廃止) で置換）
@@ -38,7 +37,9 @@
 - [Direct CLI 削除・ACP 一本化（OpenCode のみ）](10-Decisions-Architecture.md#direct-cli-削除acp-一本化opencode-のみ)（2026-09-15）
 - [コーディング実行のトークン使用量積算と試行単位の合算方針](10-Decisions-Architecture.md#コーディング実行のトークン使用量積算と試行単位の合算方針)（2026-09-16）
 - [Scheduler Task から Job への完全改称とワンショット実行ジョブ導入](10-Decisions-Architecture.md#scheduler-task-から-job-への完全改称とワンショット実行ジョブ導入)（2026-09-17）
+- [Activity・サマリーの正本を SQLite へ移行（JSONL 廃止）](10-Decisions-Architecture.md#activityサマリーの正本を-sqlite-へ移行jsonl-廃止)
 - [エージェント／コーディング会話の送信キューはクライアント側に置く](10-Decisions-Web.md#エージェント会話の送信キューはクライアント側に置く)（2026-09-17）
+- [Agent Skills 明示呼び出しの Per-Run 文脈注入設計](../docs/adr/agent-skills-explicit-per-run-context-injection.md)（ADR）
 - [Task Agent MVP 仕様](../docs/task-agent/specification.md)（2026-09-14）。文書群の入口は [docs/task-agent/README.md](../docs/task-agent/README.md)。判断記録は [docs/task-agent/adr/](../docs/task-agent/adr/) 配下:
   - [SQLiteをTask状態の正本とする](../docs/task-agent/adr/sqlite-as-task-state-source-of-truth.md)
   - [CLI投入・WebUI操作・Webサーバー同居worker](../docs/task-agent/adr/cli-intake-webui-hitl-resident-worker.md)
