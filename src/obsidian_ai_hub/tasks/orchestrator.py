@@ -274,13 +274,16 @@ def build_orchestrator_prompt(
             lines.append(indented)
     if plan.constraints:
         lines += ["", f"制約:\n{plan.constraints}"]
-    if plan.allowed_agent_ids:
+    # Delegate target allowlists are only meaningful when the matching
+    # capability was actually approved; they are still enforced at runtime.
+    planned = {directive.capability_key for directive in plan.capabilities}
+    if plan.allowed_agent_ids and "specialist_agent" in planned:
         lines += [
             "",
             "委譲可能なAgent ID (specialist_agentのtarget.agent_idはこの中からのみ):",
             "  " + ", ".join(plan.allowed_agent_ids),
         ]
-    if plan.allowed_project_ids:
+    if plan.allowed_project_ids and "coding_cli" in planned:
         lines += [
             "",
             "実行可能なProject ID (coding_cliのtarget.project_idはこの中からのみ):",
@@ -289,10 +292,14 @@ def build_orchestrator_prompt(
     if plan.project_resolution is not None:
         resolution = plan.project_resolution
         if resolution.kind == "project":
+            target_line = "Taskの主対象Project"
+            if "coding_cli" in planned:
+                target_line += (
+                    f" (coding_cliのtarget.project_idは{resolution.project_id}のみ)"
+                )
             lines += [
                 "",
-                "Taskの主対象Project "
-                f"(coding_cliのtarget.project_idは{resolution.project_id}のみ):",
+                f"{target_line}:",
                 f"  {resolution.display_name or '(名称未記録)'}"
                 f" (project:{resolution.project_id})",
             ]

@@ -858,3 +858,22 @@ def test_orchestrator_prompt_shows_v3_target():
     )
     assert "project:7" in prompt
     assert "Demo Seven" in prompt
+    assert "実行可能なProject ID" in prompt
+    assert "(coding_cliのtarget.project_idは7のみ)" in prompt
+
+
+def test_orchestrator_prompt_includes_approved_delegate_agents():
+    from obsidian_ai_hub.tasks.orchestrator import build_orchestrator_prompt
+
+    task = store.create_task("委譲含むジョブ")
+    plan = orchestrator_module.DirectionalPlan(
+        purpose="委譲して調査する",
+        capabilities=[{"capability_key": "specialist_agent", "intent": "調査"}],
+        allowed_agent_ids=["agent_alpha"],
+        completion_criteria="done",
+    )
+    prompt = build_orchestrator_prompt(
+        task, plan, {}, {"specialist_agent": ""}, [], None
+    )
+    assert "委譲可能なAgent ID" in prompt
+    assert "agent_alpha" in prompt
