@@ -84,6 +84,22 @@ def test_build_excluded_inbox_items_lists_pending_calendar_reminder():
     assert "記憶インタビュー" not in text
 
 
+def test_build_existing_proposals_block_includes_rejection_reason():
+    rec = store.create_proposal(
+        kind="calendar",
+        title="歯科検診",
+        rationale="根拠",
+        generation_source="daily_06:00",
+        start_time="2026-08-26T10:00:00",
+    )
+    store.reject_proposal(rec["proposal_id"], reason="done", comment="先週済んだ")
+
+    text = context.build_existing_proposals_block()
+
+    assert "done" in text
+    assert "先週済んだ" in text
+
+
 def test_generate_proposals_creates_and_persists_candidates():
     llm_response = json.dumps(
         {

@@ -4,6 +4,8 @@ from typing import Literal, Optional, Any
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from obsidian_ai_hub.planner.feedback import ALLOWED_REJECTION_REASONS
+
 EDITABLE_FIELDS = (
     "content",
     "topics",
@@ -1221,6 +1223,8 @@ class PlannerProposal(BaseModel):
     status: str
     fingerprint: Optional[str] = None
     external_result: Optional[str] = None
+    rejection_reason: Optional[str] = None
+    rejection_comment: Optional[str] = None
     start_time: Optional[str] = None
     end_time: Optional[str] = None
     location: Optional[str] = None
@@ -1269,6 +1273,17 @@ class PlannerProposalUpdateRequest(BaseModel):
 
 class PlannerRejectRequest(BaseModel):
     reason: Optional[str] = None
+    comment: Optional[str] = None
+
+    @field_validator("reason")
+    @classmethod
+    def _validate_reason(cls, v: Optional[str]) -> Optional[str]:
+        if v is None or not v.strip():
+            return None
+        key = v.strip()
+        if key not in ALLOWED_REJECTION_REASONS:
+            raise ValueError(f"Invalid rejection reason: {v}")
+        return key
 
 
 class PlannerGenerateResponse(BaseModel):

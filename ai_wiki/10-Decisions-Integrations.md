@@ -297,6 +297,14 @@ Inbox分類は高確信度の予定・Todoを HITL 承認で登録するフロ�
 
 Apple取得が失敗・利用不能の場合は、Apple項目だけを空としてログへ記録し、定期予定および他のコンテキストを用いて生成を継続する。
 
+### 却下理由フィードバック（スキーマ v51、2026-09-19 追記）
+
+却下時に任意の理由を構造化キーとして記録し、次回の提案生成プロンプトに参考として渡す。`planner_proposals` に `rejection_reason` / `rejection_comment` を追加し、`external_result`（昇格時の Apple 書き込み結果）と分離した。理由キーの正本は `planner/feedback.py` とし、`duplicate`（既知・重複）/ `done`（完了済み）/ `not_needed`（不要）は同内容を再提案しない、`not_now`（今は優先外）は同系統を約30日抑制、`bad_time` / `wrong_kind` / `vague` は抑制せず日時・種別・具体性を修正して出す、`other` はコメントのみを参考にする。
+
+生成文脈（`planner/context.py` の `build_existing_proposals_block`）は却下済み提案に理由ラベルとコメントを付けて渡し、`ai_planner.md` で「抑制する理由」と「修正して出す理由」を切り分ける。理由は任意で、UI はクイックチップ＋任意コメント。task-agent の plan 差戻し（必須理由＋専用カラム＋プロンプト注入）と research の feedback taxonomy を踏襲しつつ、プレイグラウンドの手軽さを優先して必須にはしない。
+
+トレードオフ: 理由なしの却下は従来どおり空で記録される。抑制・修正の挙動はプロンプトと LLM に依存し、理由に基づく機械的な衝突判定は導入しない。
+
 ### トレードオフ
 
 - 昇格は HITL 承認を介さないため、既存 HITL フローの二重登録ガード（`phase=added`）は適用されない。昇格の原子性は「Apple 書き込み成功 → `transition_status('promoted')`」の順で担保し、Apple 書き込み失敗時は proposed のまま残す。Apple ツール自体は既存の `add_calendar_event` / `add_reminder` を再利用するため、登録 API の冪等性の限界は既存 HITL フローと同様に残る。

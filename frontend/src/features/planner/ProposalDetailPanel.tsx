@@ -1,12 +1,23 @@
 import { useEffect, useState } from "react";
 import type { PlannerProposal, PlannerProposalUpdatePayload } from "../../api/types";
 
+const REJECT_REASONS: { key: string; label: string }[] = [
+  { key: "duplicate", label: "既知・重複" },
+  { key: "done", label: "完了済み" },
+  { key: "not_needed", label: "不要" },
+  { key: "not_now", label: "今は優先外" },
+  { key: "bad_time", label: "日時が不適切" },
+  { key: "wrong_kind", label: "種別違い" },
+  { key: "vague", label: "内容が曖昧" },
+  { key: "other", label: "その他" },
+];
+
 interface Props {
   proposal: PlannerProposal;
   busy: boolean;
   onSave: (payload: PlannerProposalUpdatePayload) => Promise<void>;
   onPromote: () => Promise<void>;
-  onReject: () => Promise<void>;
+  onReject: (reason: string | null, comment: string | null) => Promise<void>;
   onClose: () => void;
 }
 
@@ -25,6 +36,8 @@ export default function ProposalDetailPanel({
   const [endTime, setEndTime] = useState(proposal.end_time ?? "");
   const [location, setLocation] = useState(proposal.location ?? "");
   const [dueDate, setDueDate] = useState(proposal.due_date ?? "");
+  const [rejectReason, setRejectReason] = useState<string | null>(null);
+  const [rejectComment, setRejectComment] = useState("");
 
   useEffect(() => {
     setTitle(proposal.title);
@@ -34,7 +47,18 @@ export default function ProposalDetailPanel({
     setEndTime(proposal.end_time ?? "");
     setLocation(proposal.location ?? "");
     setDueDate(proposal.due_date ?? "");
+    setRejectReason(null);
+    setRejectComment("");
   }, [proposal.proposal_id, proposal.title, proposal.rationale, proposal.kind, proposal.start_time, proposal.end_time, proposal.location, proposal.due_date]);
+
+  const toggleRejectReason = (key: string) => {
+    setRejectReason((current) => (current === key ? null : key));
+  };
+
+  const handleReject = () => {
+    const comment = rejectComment.trim();
+    return onReject(rejectReason, comment ? comment : null);
+  };
 
   const handleSave = async () => {
     const payload: PlannerProposalUpdatePayload = { title, rationale, kind };
@@ -151,8 +175,38 @@ export default function ProposalDetailPanel({
             className="w-full rounded border border-slate-300 px-2 py-1 text-sm"
           />
         </div>
+        <div className="space-y-1">
+          <span className="block text-xs font-medium text-slate-600">
+            却下理由（任意）
+          </span>
+          <div className="flex flex-wrap gap-1">
+            {REJECT_REASONS.map((reason) => (
+              <button
+                key={reason.key}
+                type="button"
+                aria-pressed={rejectReason === reason.key}
+                onClick={() => toggleRejectReason(reason.key)}
+                className={`cursor-pointer rounded border px-2 py-0.5 text-xs ${
+                  rejectReason === reason.key
+                    ? "border-rose-600 bg-rose-600 text-white"
+                    : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                }`}
+              >
+                {reason.label}
+              </button>
+            ))}
+          </div>
+          <textarea
+            aria-label="却下コメント"
+            value={rejectComment}
+            onChange={(e) => setRejectComment(e.target.value)}
+            rows={2}
+            placeholder="補足コメント（任意）"
+            className="mt-1 w-full rounded border border-slate-300 px-2 py-1 text-sm"
+          />
+        </div>
         <p className="text-xs text-slate-500">
-          昇格するとAppleカレンダー/リマインダーに登録されます。却下すると再利用のためfingerprintが解放されます。
+          昇格するとAppleカレンダー/リマインダーに登録されます。却下すると再利用のためfingerprintが解放され、理由は次回の提案生成に参考にされます。
         </p>
       </div>
       <div className="space-y-2 border-t border-slate-200 p-4">
@@ -176,7 +230,7 @@ export default function ProposalDetailPanel({
           <button
             type="button"
             disabled={busy}
-            onClick={onReject}
+            onClick={handleReject}
             className="cursor-pointer rounded bg-rose-600 px-3 py-1.5 text-xs text-white disabled:opacity-50"
           >
             却下

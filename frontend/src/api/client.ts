@@ -25,6 +25,7 @@ import type {
   PlannerProposal,
   PlannerProposalListResponse,
   PlannerProposalUpdatePayload,
+  PlannerRejectPayload,
   PlannerTimelineResponse,
   Agent,
   AgentTool,
@@ -568,10 +569,13 @@ export function updatePlannerProposal(
   );
 }
 
-export function rejectPlannerProposal(proposalId: string): Promise<PlannerProposal> {
+export function rejectPlannerProposal(
+  proposalId: string,
+  payload: PlannerRejectPayload = {},
+): Promise<PlannerProposal> {
   return request<PlannerProposal>(
     `/api/v1/planner/proposals/${encodeURIComponent(proposalId)}/reject`,
-    { method: "POST", body: JSON.stringify({}) },
+    { method: "POST", body: JSON.stringify(payload) },
   );
 }
 

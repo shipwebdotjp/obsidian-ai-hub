@@ -709,7 +709,29 @@ def get_db_connection() -> sqlite3.Connection:
     if current_version <= 49:
         run_migration_v50(conn)
 
+    if current_version <= 50:
+        run_migration_v51(conn)
+
     return conn
+
+
+def run_migration_v51(conn: sqlite3.Connection) -> None:
+    """Run migration for version 51 (planner proposal rejection feedback).
+
+    Adds dedicated columns so a rejection reason key and an optional free-text
+    comment are stored separately from ``external_result`` (which stays the
+    Apple write result on promotion).
+    """
+    for statement in (
+        "ALTER TABLE planner_proposals ADD COLUMN rejection_reason TEXT;",
+        "ALTER TABLE planner_proposals ADD COLUMN rejection_comment TEXT;",
+    ):
+        try:
+            conn.execute(statement)
+        except sqlite3.OperationalError as e:
+            _ignore_duplicate_schema_object(e)
+    conn.execute("PRAGMA user_version = 51;")
+    conn.commit()
 
 
 def run_migration_v49(conn: sqlite3.Connection) -> None:

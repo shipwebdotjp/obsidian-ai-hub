@@ -161,12 +161,41 @@ def test_planner_proposal_reject_persists_reason(test_memory_db_path, client):
 
     response = client.post(
         f"/api/v1/planner/proposals/{proposal['proposal_id']}/reject",
-        json={"reason": "下期に延期"},
+        json={"reason": "not_now", "comment": "来月まで待つ"},
     )
     assert response.status_code == 200
-    assert response.json()["external_result"] == "下期に延期"
+    body = response.json()
+    assert body["status"] == "rejected"
+    assert body["rejection_reason"] == "not_now"
+    assert body["rejection_comment"] == "来月まで待つ"
+    assert body["external_result"] is None
     fetched = store.get_proposal(proposal["proposal_id"])
-    assert fetched["external_result"] == "下期に延期"
+    assert fetched["rejection_reason"] == "not_now"
+    assert fetched["rejection_comment"] == "来月まで待つ"
+    assert fetched["external_result"] is None
+
+
+def test_planner_proposal_reject_accepts_unknown_reason_key(test_memory_db_path, client):
+    proposal = _calendar_proposal()
+
+    response = client.post(
+        f"/api/v1/planner/proposals/{proposal['proposal_id']}/reject",
+        json={"reason": "下期に延期"},
+    )
+    assert response.status_code == 422
+
+
+def test_planner_proposal_reject_without_reason_is_allowed(test_memory_db_path, client):
+    proposal = _calendar_proposal()
+
+    response = client.post(
+        f"/api/v1/planner/proposals/{proposal['proposal_id']}/reject",
+        json={},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["rejection_reason"] is None
+    assert body["rejection_comment"] is None
 
 
 def test_planner_proposal_update_rejects_malformed_datetime(

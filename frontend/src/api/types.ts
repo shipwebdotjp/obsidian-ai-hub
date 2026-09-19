@@ -740,6 +740,8 @@ export interface PlannerProposal {
   status: PlannerProposalStatus;
   fingerprint: string | null;
   external_result: string | null;
+  rejection_reason: string | null;
+  rejection_comment: string | null;
   start_time: string | null;
   end_time: string | null;
   location: string | null;
@@ -773,6 +775,11 @@ export interface PlannerProposalUpdatePayload {
   end_time?: string | null;
   location?: string | null;
   due_date?: string | null;
+}
+
+export interface PlannerRejectPayload {
+  reason?: string | null;
+  comment?: string | null;
 }
 
 export interface PlannerGenerateResponse {

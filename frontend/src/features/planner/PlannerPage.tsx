@@ -311,11 +311,11 @@ export default function PlannerPage() {
     }
   };
 
-  const handleReject = async () => {
+  const handleReject = async (reason: string | null, comment: string | null) => {
     if (!selectedProposal) return;
     setBusy(true);
     try {
-      await rejectPlannerProposal(selectedProposal.proposal_id);
+      await rejectPlannerProposal(selectedProposal.proposal_id, { reason, comment });
       notify("却下しました");
       setSelectedId(null);
       setRefreshKey((v) => v + 1);

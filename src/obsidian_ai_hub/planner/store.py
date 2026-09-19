@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from obsidian_ai_hub.database import get_db_connection
+from obsidian_ai_hub.planner.feedback import ALLOWED_REJECTION_REASONS
 
 ALLOWED_PROPOSAL_STATUS = frozenset({"proposed", "promoted", "rejected", "expired"})
 ALLOWED_KINDS = frozenset({"calendar", "reminder"})
@@ -330,6 +331,42 @@ def transition_status(
                 """,
                 (to_status, now, proposal_id),
             )
+        changed = cursor.rowcount > 0
+        active_conn.commit()
+    return changed
+
+
+def reject_proposal(
+    proposal_id: str,
+    *,
+    reason: Optional[str] = None,
+    comment: Optional[str] = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> bool:
+    """Reject a proposal, optionally recording a structured reason and comment.
+
+    ``reason`` must be one of ``ALLOWED_REJECTION_REASONS`` (or None). ``comment``
+    is free text and optional. Both are stored in their own columns instead of
+    overloading ``external_result``, which remains the Apple write result on
+    promotion. Returns False when the current status was not 'proposed'.
+    """
+    clean_reason = reason.strip() if reason and reason.strip() else None
+    if clean_reason is not None and clean_reason not in ALLOWED_REJECTION_REASONS:
+        raise ValueError(f"Invalid rejection reason: {reason}")
+    clean_comment = comment.strip() if comment and comment.strip() else None
+
+    now = get_current_timestamp()
+    with auto_connection(conn) as (active_conn, _):
+        cursor = active_conn.cursor()
+        cursor.execute(
+            """
+            UPDATE planner_proposals
+            SET status = 'rejected', rejected_at = ?, updated_at = ?,
+                rejection_reason = ?, rejection_comment = ?
+            WHERE proposal_id = ? AND status = 'proposed'
+            """,
+            (now, now, clean_reason, clean_comment, proposal_id),
+        )
         changed = cursor.rowcount > 0
         active_conn.commit()
     return changed

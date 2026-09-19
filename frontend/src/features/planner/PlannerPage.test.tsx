@@ -276,7 +276,30 @@ describe("PlannerPage", () => {
     await user.click(screen.getByRole("button", { name: "却下" }));
 
     await waitFor(() => {
-      expect(mockReject).toHaveBeenCalledWith("pp-1");
+      expect(mockReject).toHaveBeenCalledWith("pp-1", { reason: null, comment: null });
+    });
+  });
+
+  it("sends the selected rejection reason and comment", async () => {
+    const user = userEvent.setup();
+    render(<PlannerPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/歯科検診/)).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByText(/歯科検診/));
+    await user.click(screen.getByRole("button", { name: "既知・重複" }));
+    await user.type(screen.getByLabelText("却下コメント"), "すでに予定あり");
+
+    mockReject.mockResolvedValue({ ...sampleTimeline.ai_proposals[0], status: "rejected" } as any);
+    await user.click(screen.getByRole("button", { name: "却下" }));
+
+    await waitFor(() => {
+      expect(mockReject).toHaveBeenCalledWith("pp-1", {
+        reason: "duplicate",
+        comment: "すでに予定あり",
+      });
     });
   });
 

@@ -160,13 +160,15 @@ def update_planner_proposal(proposal_id: str, payload: dict) -> dict:
     )
 
 
-def reject_planner_proposal(proposal_id: str, reason: Optional[str] = None) -> dict:
+def reject_planner_proposal(
+    proposal_id: str,
+    reason: Optional[str] = None,
+    comment: Optional[str] = None,
+) -> dict:
     proposal = store.get_proposal(proposal_id)
     if proposal is None:
         raise LookupError(f"Proposal not found: {proposal_id}")
-    changed = store.transition_status(
-        proposal_id, to_status="rejected", external_result=reason
-    )
+    changed = store.reject_proposal(proposal_id, reason=reason, comment=comment)
     if not changed:
         raise ValueError(f"Proposal {proposal_id} is not 'proposed'")
     updated = store.get_proposal(proposal_id)

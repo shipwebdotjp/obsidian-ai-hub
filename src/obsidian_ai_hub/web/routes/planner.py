@@ -83,7 +83,9 @@ def reject_planner_proposal(
 ):
     try:
         return service.reject_planner_proposal(
-            proposal_id, _body.reason if _body else None
+            proposal_id,
+            _body.reason if _body else None,
+            _body.comment if _body else None,
         )
     except LookupError as e:
         raise HTTPException(status_code=404, detail=str(e))

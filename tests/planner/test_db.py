@@ -167,6 +167,33 @@ def test_transition_status_rejected_sets_rejected_at():
     assert fetched["rejected_at"] is not None
 
 
+def test_reject_proposal_stores_reason_and_comment():
+    rec = store.create_proposal(kind="calendar", title="A", rationale="r", generation_source="s")
+    changed = store.reject_proposal(
+        rec["proposal_id"], reason="duplicate", comment="  既に予定あり  "
+    )
+    assert changed is True
+    fetched = store.get_proposal(rec["proposal_id"])
+    assert fetched["status"] == "rejected"
+    assert fetched["rejected_at"] is not None
+    assert fetched["rejection_reason"] == "duplicate"
+    assert fetched["rejection_comment"] == "既に予定あり"
+    assert fetched["external_result"] is None
+
+
+def test_reject_proposal_invalid_reason_raises_and_leaves_proposed():
+    rec = store.create_proposal(kind="calendar", title="A", rationale="r", generation_source="s")
+    with pytest.raises(ValueError, match="Invalid rejection reason"):
+        store.reject_proposal(rec["proposal_id"], reason="bogus")
+    assert store.get_proposal(rec["proposal_id"])["status"] == "proposed"
+
+
+def test_reject_proposal_only_when_proposed():
+    rec = store.create_proposal(kind="calendar", title="A", rationale="r", generation_source="s")
+    assert store.reject_proposal(rec["proposal_id"]) is True
+    assert store.reject_proposal(rec["proposal_id"]) is False
+
+
 def test_transition_status_invalid_target_raises():
     rec = store.create_proposal(kind="calendar", title="A", rationale="r", generation_source="s")
     with pytest.raises(ValueError):

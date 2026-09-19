@@ -20,6 +20,7 @@ RECENT_DAYS = 7
 ACTIVITY_DAYS = 30
 MAX_NOTE_CHARS = 800
 MAX_BLOCK_ITEMS = 30
+MAX_REJECTION_COMMENT_CHARS = 120
 SCHEDULE_CONTEXT_DAYS = 30
 
 
@@ -308,7 +309,7 @@ def build_existing_proposals_block() -> str:
     `proposed` (pending, neither approved nor rejected) is included so the LLM
     does not waste slots re-generating items the user is still deliberating on.
     """
-    from obsidian_ai_hub.planner import store
+    from obsidian_ai_hub.planner import feedback, store
 
     lines: list[str] = []
     for status in ("proposed", "promoted", "rejected"):
@@ -322,7 +323,17 @@ def build_existing_proposals_block() -> str:
             if not title:
                 continue
             anchor = p.get("start_time") or p.get("due_date") or ""
-            lines.append(f"- [{status}] {title} ({p.get('kind')} {anchor})".strip())
+            label = status
+            if status == "rejected":
+                reason = p.get("rejection_reason")
+                if reason:
+                    label = f"rejected/{reason} {feedback.rejection_reason_label(reason)}"
+            line = f"- [{label}] {title} ({p.get('kind')} {anchor})".strip()
+            if status == "rejected" and p.get("rejection_comment"):
+                comment = str(p["rejection_comment"]).strip()
+                if comment:
+                    line += f" — コメント: {comment[:MAX_REJECTION_COMMENT_CHARS]}"
+            lines.append(line)
 
     if not lines:
         return "(none)"
