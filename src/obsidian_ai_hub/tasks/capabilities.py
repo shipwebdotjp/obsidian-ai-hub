@@ -22,12 +22,20 @@ except the read/search tools and proposal tools in ``AUTO_POLICY_TOOL_IDS``.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Mapping, Optional
+from typing import Any, Iterable, Mapping, Optional
 
 
 @dataclass(frozen=True)
 class CapabilityDefinition:
-    """A single code-defined capability."""
+    """A single code-defined capability.
+
+    ``satisfied_effects`` is the code-owned, machine-checkable postcondition
+    set the capability establishes when it succeeds. It is the single source
+    of truth for the Runtime Orchestrator's acceptance predicate: a plan that
+    includes an effectful capability is obligated to satisfy its effects
+    (``docs/task-agent/adr/effect-contract-completion.md``). Read/search
+    capabilities declare none.
+    """
 
     key: str
     adapter_kind: str  # "registry_tool" | "memory" | "skills" | "agent" | "coding" | "research"
@@ -35,6 +43,7 @@ class CapabilityDefinition:
     description: str
     default_approval_policy: str  # "auto" | "plan_required"
     registry_tool_id: str | None = None
+    satisfied_effects: tuple[str, ...] = ()
 
 
 EXCLUDED_TOOL_IDS: frozenset[str] = frozenset(
@@ -48,6 +57,14 @@ EXCLUDED_TOOL_IDS: frozenset[str] = frozenset(
         "set_recurring_job_enabled",
     }
 )
+
+# Registry tools whose successful result must satisfy a machine-checkable
+# postcondition. The Orchestrator treats the effects of every effectful tool
+# present in an approved plan as required, so completion no longer depends on
+# the LLM remembering to emit ``finish``.
+EFFECTFUL_TOOL_IDS: dict[str, tuple[str, ...]] = {
+    "research_theme_propose": ("research_theme_registered",),
+}
 
 MEMORY_KIND_TOOL_IDS: frozenset[str] = frozenset({"memory_propose"})
 
@@ -142,6 +159,7 @@ def get_capability_definitions(
                 description=str(description) if description else "",
                 default_approval_policy=policy,
                 registry_tool_id=str(tool_id),
+                satisfied_effects=EFFECTFUL_TOOL_IDS.get(str(tool_id), ()),
             )
         )
     derived.extend(SPECIAL_DEFINITIONS)
@@ -154,3 +172,21 @@ def get_capability_keys(
 ) -> frozenset[str]:
     """Return the current capability keys (registry-derived)."""
     return frozenset(d.key for d in get_capability_definitions(tool_definitions))
+
+
+def get_required_effects(
+    capability_keys: Iterable[str],
+    tool_definitions: Optional[Mapping[str, Mapping[str, Any]]] = None,
+) -> tuple[str, ...]:
+    """Return the required effect IDs for an approved capability set.
+
+    The obligation is code-derived: every effect declared by an effectful
+    capability present in the plan is required. Order is stable and IDs are
+    deduplicated.
+    """
+    wanted = {str(key) for key in capability_keys}
+    effects: list[str] = []
+    for definition in get_capability_definitions(tool_definitions):
+        if definition.key in wanted:
+            effects.extend(definition.satisfied_effects)
+    return tuple(dict.fromkeys(effects))

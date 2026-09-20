@@ -74,7 +74,7 @@ Registryに新規builtin toolを追加すればTask Capabilityとしても自動
 | 読取・検索系の既存Registry tool | `auto` | web、Vault、Calendar、Reminders、Memory、People、Projectの読取・検索のみ。 |
 | `calendar_create_proposal` / `reminder_create_proposal` | `auto` | 既存提案HITLの登録のみ（直接書込みなし）。人間の承認はHITL側で行うため、auto時のPlan確認は不要。 |
 | `research_context_snapshot` / `research_theme_history_search` / `activity_search` / `periodic_note_read` / `agent_conversation_search` / `coding_history_search` | `auto` | リサーチ提案用文脈読取・検索 Capability。 |
-| `research_theme_propose` | `auto` | 最適リサーチテーマのHITL提案候補自動登録（直接書込みなし、1Taskにつき最大1回）。Taskコンテキストを渡し、冪等キーはテーマ名ではなく Task ID (`task:<task_id>`) 単位で管理する。 |
+| `research_theme_propose` | `auto` | 最適リサーチテーマのHITL提案候補自動登録（直接書込みなし、1Taskにつき最大1回）。Taskコンテキストを渡し、冪等キーはテーマ名ではなく Task ID (`task:<task_id>`) 単位で管理する。成功時は `research_theme_registered` 効果を宣言し、Orchestratorはその成立で自動完了する。 |
 | `memory_propose` | `plan_required` | Memory candidateの作成。 |
 | `vault_write_file` | `plan_required` | 既存Vault書込み基盤の再利用 (相対パス・UTF-8・親dir自動作成・原子書込み・`overwrite=true` 必須)。 |
 | `specialist_agent` | `plan_required` | 登録済みAI Agentを指定して一回限りの子runを作る。 |
@@ -109,7 +109,7 @@ jobごとに最大1回の公開に収まる (at-least-once、Event履歴で検�
 | 文脈読取 | Registry読取Capabilityのschema | `capability_key`、`action_index` | `capability_completed` (`observation` 詳細 / `observation_summary` 要点) | 次ターンOrchestrator、再開処理 | tool失敗はAction失敗 (読取りは副作用なし) | なし |
 | 候補登録 | `ResearchThemeProposeInput` | `theme` と合成コンテキストの `task_id` | `research_suggestion_requests` (`request_key=task:<task_id>`、`theme_id`、`hitl_run_id`) | 再開時の再提案、WebUI HITL | 空テーマ・文字数超過・未知キーは登録せずエラー | テーマ候補とHITL runを1件作成 |
 | 重複提案 | 保存済み `request_key` | `task:<task_id>` | 変更なし | 次のOrchestrator | 既存 `theme_id` / `hitl_run_id` を返して停止 | なし |
-| 登録後完了 | `finish` の要約 | `result_summary` | `completed` | 閲覧者 | — | なし |
+| 登録後完了 | `satisfied_effects` (`research_theme_registered`) | `result_summary` | `completed`（効果成立で自動完了、要約は観測から合成） | 閲覧者 | — | なし |
 | 再開 | `capability_completed` と `research_suggestion_requests` | `task:<task_id>` | 既存Event | Orchestrator | 提案Event未保存でもTask ID単位で再登録しない | 重複登録なし |
 
 縦断テスト: `tests/test_tasks_research_proposal_flow.py`。
@@ -175,11 +175,19 @@ Observationは二層で扱う (`tasks/observation.py`)。各Actionは
 持たず、Capability別上限はOrchestratorが適用する。再開時はEventの
 `observation` と `observation_summary` から同じ二層情報を復元する。
 
-PlannerとRuntimeプロンプトは `max_actions` / 完了済み数 / 残数を明示する。
-依頼または完了条件で `research_theme_propose` が必須の場合、Plannerは提案と
-finishの2枠を残したPlanを作り、Runtimeは残り2枠を追加の読取りに使わない。
-専用の自動完了・Action強制・成功判定の例外は追加しない (最後の2手は通常どおり
-LLMが `research_theme_propose` と `finish` を選ぶ)。
+PlannerとRuntimeプロンプトは `max_actions` / 完了済み数 / 残数に加え、**必須効果**と
+その充足状況を明示する。Planの方向性は変えず、効果集合はPlanに固定しない。
+
+完了はLLMの `finish` ではなく、Capabilityがコードで宣言した検査可能な効果から導出する
+([ADR](adr/effect-contract-completion.md))。承認済みPlanに含まれる効果的Capabilityの
+効果を必須効果とし (`get_required_effects`)、Adapterが `StepResult.satisfied_effects`
+で成立を報告、Orchestratorは `capability_completed` Event に保存する。受理述語
+`必須効果 ⊆ 成立効果` が成立した時点で、`finish` や残予算を待たずに `completed` と
+して終了し、要約は観測から合成する。必須効果が未達の `finish` は完了にせず、上限つきで
+自己修正させる。予算枯渇は、必須効果が未達なら（必須効果がないオープンなタスクでも）
+`failed` ではなく `incomplete` として終端する。再開時はEventの `effects_satisfied` から
+成立効果を復元する。読取・検索Capabilityは効果を宣言しないため、従来どおり最後は
+LLMが `finish` で終える。
 
 未承認Capabilityの追加、目的の実質的変更は自動実行せず、改訂Planを同じ
 Task IDの次版として保存して `waiting_reapproval` にする (旧形式の自己申告
@@ -238,7 +246,9 @@ Planの承認・差戻しはTask APIで直接処理する。対象解決の質�
 | `waiting_reapproval` | 逸脱自己申告後の改訂Plan承認待ち。 |
 | `cancelling` | 子runの協調的取消待ち。 |
 | `interrupted` | worker停止により中断。 |
-| `completed` / `failed` / `cancelled` | 終端状態。 |
+| `completed` | 必須効果が成立した終端状態（効果のないオープンなタスクでは `finish` で成立）。 |
+| `incomplete` | 必須効果が未達のままAction予算を使い切った終端状態。失敗ではない。 |
+| `failed` / `cancelled` | エラーによる終端 / 取消による終端。 |
 
 許可遷移は次のとおり。
 
@@ -249,7 +259,7 @@ Planの承認・差戻しはTask APIで直接処理する。対象解決の質�
 | `waiting_user` | `queued`, `cancelled` |
 | `waiting_approval` | `ready`, `queued`, `cancelled` |
 | `ready` | `running`, `cancelled`, `interrupted` |
-| `running` | `completed`, `failed`, `waiting_reapproval`, `cancelling`, `interrupted` |
+| `running` | `completed`, `incomplete`, `failed`, `waiting_reapproval`, `cancelling`, `interrupted` |
 | `waiting_reapproval` | `ready`, `queued`, `cancelled` |
 | `cancelling` | `cancelled`, `failed`, `interrupted` |
 | `interrupted` | `queued`, `cancelled` |
@@ -344,3 +354,7 @@ Task、Plan、Eventは終端化から30日後にまとめて削除する。非�
     承認後に削除・Git root不正となった対象はCoding起動前に止まり、
     Plan画面から対象を選び直せる。
 14. 承認待ちPlanの対象変更は現行Planを破棄して再計画され、状態外の変更は拒否される。
+15. 必須効果が成立した時点で、`finish` を待たずに `completed` として終了する。
+    効果成立後に同一Capabilityを重複実行しない。
+16. 必須効果が未達のままAction予算を使い切ったTaskは `failed` ではなく `incomplete`
+    になる。必須効果がないオープンなタスクの予算枯渇も `incomplete` になる。

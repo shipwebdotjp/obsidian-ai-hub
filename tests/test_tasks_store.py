@@ -125,6 +125,39 @@ def test_full_allowed_transition_map():
             assert updated["status"] == to_status
 
 
+def test_list_tasks_excludes_terminal_statuses():
+    active = _task_in_status("running")
+    completed = _task_in_status("running")
+    store.transition_task_status(completed["task_id"], "completed")
+    incomplete = _task_in_status("running")
+    store.transition_task_status(incomplete["task_id"], "incomplete")
+
+    terminal = set(store.TASK_TERMINAL_STATUSES)
+    rows = store.list_tasks(exclude_statuses=terminal)
+    ids = {t["task_id"] for t in rows}
+    assert active["task_id"] in ids
+    assert completed["task_id"] not in ids
+    assert incomplete["task_id"] not in ids
+    assert store.count_tasks(exclude_statuses=terminal) == len(rows)
+
+
+def test_non_terminal_filter_service_sentinel():
+    from obsidian_ai_hub.web.services.task_agent import (
+        NON_TERMINAL_FILTER,
+        list_task_agent_tasks,
+    )
+
+    active = _task_in_status("running")
+    done = _task_in_status("running")
+    store.transition_task_status(done["task_id"], "completed")
+
+    items, total = list_task_agent_tasks(status=NON_TERMINAL_FILTER)
+    ids = {t["task_id"] for t in items}
+    assert active["task_id"] in ids
+    assert done["task_id"] not in ids
+    assert total == len(items)
+
+
 def test_representative_forbidden_transitions():
     task = store.create_task("no direct run")
     with pytest.raises(ValueError, match="Illegal task transition"):

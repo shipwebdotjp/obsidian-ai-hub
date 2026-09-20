@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any
+from typing import Any, Callable
 
 from obsidian_ai_hub.tasks.capabilities import get_capability_definitions
 from obsidian_ai_hub.tasks.execution import StepResult
@@ -37,6 +37,47 @@ CONTEXT_KINDS = frozenset({"memory"})
 TASK_CONTEXT_TOOL_IDS = frozenset(
     {"research_theme_propose", "register_one_shot_job", "register_recurring_job"}
 )
+
+
+def _is_research_theme_registered(payload: dict[str, Any]) -> bool:
+    """``research_theme_propose`` established its effect.
+
+    The handler registers a candidate and its HITL run atomically and returns
+    both IDs; an idempotent ``already_proposed`` retry returns the existing
+    IDs. Either way the effect holds.
+    """
+    if payload.get("error"):
+        return False
+    return bool(payload.get("theme_id") and payload.get("hitl_run_id"))
+
+
+# Code-owned interpreters: registry tool ID -> whether a successful result
+# satisfies the capability's declared effects. The declared effect IDs live on
+# ``CapabilityDefinition.satisfied_effects``; this map only decides whether the
+# concrete result actually established them.
+_EFFECT_EVALUATORS: dict[str, Callable[[dict[str, Any]], bool]] = {
+    "research_theme_propose": _is_research_theme_registered,
+}
+
+
+def _satisfied_effects(
+    tool_id: str, result_str: str, declared: tuple[str, ...]
+) -> tuple[str, ...]:
+    """Return the effects a successful registry tool call actually satisfied."""
+    if not declared:
+        return ()
+    try:
+        payload = json.loads(result_str)
+    except (TypeError, ValueError):
+        return ()
+    if not isinstance(payload, dict):
+        return ()
+    evaluator = _EFFECT_EVALUATORS.get(tool_id)
+    if evaluator is not None:
+        return declared if evaluator(payload) else ()
+    # Declared effects without a dedicated interpreter: a non-error object
+    # return is the strongest signal available.
+    return () if payload.get("error") else declared
 
 
 def _task_context(task: dict[str, Any]) -> dict[str, Any]:
@@ -125,4 +166,7 @@ class RegistryToolExecutor:
             step_index=step_index,
             capability_key=str(capability_key),
             summary=result_str,
+            satisfied_effects=_satisfied_effects(
+                str(tool_id), result_str, definition.satisfied_effects
+            ),
         )

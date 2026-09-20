@@ -16,7 +16,9 @@ from obsidian_ai_hub.tasks.redaction import redact_text
 logger = logging.getLogger(__name__)
 
 
-TASK_TERMINAL_STATUSES: frozenset[str] = frozenset({"completed", "failed", "cancelled"})
+TASK_TERMINAL_STATUSES: frozenset[str] = frozenset(
+    {"completed", "failed", "incomplete", "cancelled"}
+)
 
 TASK_ALLOWED_TRANSITIONS: dict[str, frozenset[str]] = {
     "queued": frozenset({"planning", "cancelled"}),
@@ -34,7 +36,14 @@ TASK_ALLOWED_TRANSITIONS: dict[str, frozenset[str]] = {
     "waiting_approval": frozenset({"ready", "queued", "cancelled"}),
     "ready": frozenset({"running", "cancelled", "interrupted"}),
     "running": frozenset(
-        {"completed", "failed", "waiting_reapproval", "cancelling", "interrupted"}
+        {
+            "completed",
+            "incomplete",
+            "failed",
+            "waiting_reapproval",
+            "cancelling",
+            "interrupted",
+        }
     ),
     "waiting_reapproval": frozenset({"ready", "queued", "cancelled"}),
     "cancelling": frozenset({"cancelled", "failed", "interrupted"}),
@@ -195,39 +204,46 @@ def get_task(
         return _row_to_task(row) if row is not None else None
 
 
+def _status_filter_clause(
+    status: Optional[str], exclude_statuses: Optional[set[str]]
+) -> tuple[str, list[Any]]:
+    """Build a WHERE fragment for a status filter or an exclusion set."""
+    if status is not None:
+        return " WHERE status = ?", [status]
+    if exclude_statuses:
+        placeholders = ",".join("?" for _ in exclude_statuses)
+        return f" WHERE status NOT IN ({placeholders})", sorted(exclude_statuses)
+    return "", []
+
+
 def list_tasks(
     status: Optional[str] = None,
     limit: int = 100,
     offset: int = 0,
     conn: Optional[sqlite3.Connection] = None,
+    exclude_statuses: Optional[set[str]] = None,
 ) -> list[dict[str, Any]]:
+    clause, params = _status_filter_clause(status, exclude_statuses)
     with auto_connection(conn) as (active_conn, _):
-        if status is not None:
-            cur = active_conn.execute(
-                "SELECT * FROM task_agent_tasks WHERE status = ? "
-                "ORDER BY created_at DESC LIMIT ? OFFSET ?;",
-                (status, limit, offset),
-            )
-        else:
-            cur = active_conn.execute(
-                "SELECT * FROM task_agent_tasks ORDER BY created_at DESC LIMIT ? OFFSET ?;",
-                (limit, offset),
-            )
+        cur = active_conn.execute(
+            f"SELECT * FROM task_agent_tasks{clause} "
+            "ORDER BY created_at DESC LIMIT ? OFFSET ?;",
+            (*params, limit, offset),
+        )
         return [_row_to_task(row) for row in cur.fetchall()]
 
 
 def count_tasks(
     status: Optional[str] = None,
     conn: Optional[sqlite3.Connection] = None,
+    exclude_statuses: Optional[set[str]] = None,
 ) -> int:
+    clause, params = _status_filter_clause(status, exclude_statuses)
     with auto_connection(conn) as (active_conn, _):
-        if status is not None:
-            cur = active_conn.execute(
-                "SELECT COUNT(*) AS total FROM task_agent_tasks WHERE status = ?;",
-                (status,),
-            )
-        else:
-            cur = active_conn.execute("SELECT COUNT(*) AS total FROM task_agent_tasks;")
+        cur = active_conn.execute(
+            f"SELECT COUNT(*) AS total FROM task_agent_tasks{clause};",
+            tuple(params),
+        )
         return int(cur.fetchone()["total"])
 
 

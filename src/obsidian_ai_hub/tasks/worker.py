@@ -91,6 +91,12 @@ def _run_execution(
         task_store.transition_task_status(
             task_id, "completed", result_summary=outcome.result_summary
         )
+    elif outcome.kind == "incomplete":
+        # Goal-unmet budget exhaustion is not an error; keep it distinct from
+        # failure so operators can see the required effects that were missed.
+        task_store.transition_task_status(
+            task_id, "incomplete", error_summary=outcome.error_summary
+        )
     elif outcome.kind == "deviation":
         task_store.transition_task_status(task_id, "waiting_reapproval")
     else:

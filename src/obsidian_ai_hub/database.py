@@ -712,7 +712,76 @@ def get_db_connection() -> sqlite3.Connection:
     if current_version <= 50:
         run_migration_v51(conn)
 
+    if current_version <= 51:
+        run_migration_v52(conn)
+
     return conn
+
+
+def run_migration_v52(conn: sqlite3.Connection) -> None:
+    """Run migration for version 52 (allow the ``incomplete`` Task status).
+
+    Budget exhaustion with unmet required effects is recorded as
+    ``incomplete`` rather than ``failed`` (see
+    ``docs/task-agent/adr/effect-contract-completion.md``). The status CHECK
+    constraint is inline, so SQLite requires a table rebuild while foreign
+    keys from ``task_agent_plans``/``task_agent_events`` are disabled.
+    """
+    conn.execute("PRAGMA foreign_keys = OFF;")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS task_agent_tasks_v52 (
+            task_id TEXT PRIMARY KEY,
+            prompt_text TEXT NOT NULL,
+            status TEXT NOT NULL CHECK (status IN (
+                'queued', 'planning', 'waiting_user', 'waiting_approval',
+                'ready', 'running', 'waiting_reapproval', 'cancelling',
+                'interrupted', 'completed', 'incomplete', 'failed', 'cancelled'
+            )),
+            current_plan_id TEXT,
+            worker_instance_id TEXT,
+            active_child_kind TEXT,
+            active_child_run_id TEXT,
+            result_summary TEXT,
+            error_summary TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            started_at TEXT,
+            finished_at TEXT
+        );
+    """)
+    existing = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='task_agent_tasks';"
+    ).fetchone()
+    if existing is not None:
+        conn.execute("""
+            INSERT OR REPLACE INTO task_agent_tasks_v52 (
+                task_id, prompt_text, status, current_plan_id, worker_instance_id,
+                active_child_kind, active_child_run_id, result_summary,
+                error_summary, created_at, updated_at, started_at, finished_at
+            )
+            SELECT task_id, prompt_text, status, current_plan_id,
+                worker_instance_id, active_child_kind, active_child_run_id,
+                result_summary, error_summary, created_at, updated_at,
+                started_at, finished_at
+            FROM task_agent_tasks;
+        """)
+        conn.execute("DROP TABLE task_agent_tasks;")
+    conn.execute("ALTER TABLE task_agent_tasks_v52 RENAME TO task_agent_tasks;")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_task_agent_tasks_status "
+        "ON task_agent_tasks(status);"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_task_agent_tasks_worker "
+        "ON task_agent_tasks(worker_instance_id);"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_task_agent_tasks_finished "
+        "ON task_agent_tasks(finished_at);"
+    )
+    conn.execute("PRAGMA user_version = 52;")
+    conn.commit()
+    conn.execute("PRAGMA foreign_keys = ON;")
 
 
 def run_migration_v51(conn: sqlite3.Connection) -> None:

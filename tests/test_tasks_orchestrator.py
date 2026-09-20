@@ -211,7 +211,8 @@ def test_max_actions_stops_loop():
         ]
     )
     outcome = run_directional_plan(task["task_id"], plan, executor, generator)
-    assert outcome.kind == "failed"
+    # Budget exhaustion with no required effect is "incomplete", not "failed".
+    assert outcome.kind == "incomplete"
     assert "最大Action数" in (outcome.error_summary or "")
     assert len(executor.calls) == 2
 

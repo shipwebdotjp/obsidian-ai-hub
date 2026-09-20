@@ -1,4 +1,9 @@
-export const TERMINAL_STATUSES = ["completed", "failed", "cancelled"] as const;
+export const TERMINAL_STATUSES = [
+  "completed",
+  "incomplete",
+  "failed",
+  "cancelled",
+] as const;
 
 export const NON_TERMINAL_FILTER = "__non_terminal__";
 
@@ -15,6 +20,7 @@ export const TASK_STATUS_LABELS: Record<string, string> = {
   completed: "完了",
   failed: "失敗",
   cancelled: "取消済み",
+  incomplete: "未完了",
 };
 
 const GREEN_STATUSES = new Set(["completed", "ready"]);
@@ -29,6 +35,7 @@ const YELLOW_STATUSES = new Set([
 ]);
 const BLUE_STATUSES = new Set(["running"]);
 const RED_STATUSES = new Set(["failed"]);
+const AMBER_STATUSES = new Set(["incomplete"]);
 const GRAY_STATUSES = new Set(["cancelled"]);
 
 export function taskStatusLabel(status: string): string {
@@ -41,6 +48,7 @@ export function taskStatusBadgeClass(status: string): string {
   if (YELLOW_STATUSES.has(status)) return `${base} bg-yellow-100 text-yellow-800`;
   if (BLUE_STATUSES.has(status)) return `${base} bg-blue-100 text-blue-800`;
   if (RED_STATUSES.has(status)) return `${base} bg-rose-100 text-rose-800`;
+  if (AMBER_STATUSES.has(status)) return `${base} bg-amber-100 text-amber-800`;
   if (GRAY_STATUSES.has(status)) return `${base} bg-slate-100 text-slate-600`;
   return `${base} bg-slate-100 text-slate-600`;
 }

@@ -10,9 +10,20 @@ from obsidian_ai_hub.tasks import store as task_store
 logger = logging.getLogger(__name__)
 
 
+NON_TERMINAL_FILTER = "__non_terminal__"
+"""Frontend sentinel: list every task that is not in a terminal state."""
+
+
 def list_task_agent_tasks(
     status: Optional[str] = None, limit: int = 50, offset: int = 0
 ) -> tuple[list[dict[str, Any]], int]:
+    if status == NON_TERMINAL_FILTER:
+        exclude = set(task_store.TASK_TERMINAL_STATUSES)
+        items = task_store.list_tasks(
+            limit=limit, offset=offset, exclude_statuses=exclude
+        )
+        total = task_store.count_tasks(exclude_statuses=exclude)
+        return items, total
     items = task_store.list_tasks(status=status, limit=limit, offset=offset)
     total = task_store.count_tasks(status=status)
     return items, total

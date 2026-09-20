@@ -21,6 +21,7 @@ from typing import Any, Callable, Literal, Optional
 from pydantic import BaseModel, ConfigDict
 
 from obsidian_ai_hub.tasks import store as task_store
+from obsidian_ai_hub.tasks.capabilities import get_required_effects
 from obsidian_ai_hub.tasks.directional import (
     DEFAULT_MAX_ACTIONS,
     DirectionalPlan,
@@ -60,9 +61,9 @@ Capability呼び出しの場合:
 {"action": "finish", "summary": "タスク全体の結果要約", "reason": "完了と判断した理由"}
 
 規則:
-- 提示される「Action予算」を守る。残り枠が少なくなったら、未実行の必須Capability
-  (特に完了条件が提案を要求するresearch_theme_propose)とfinishの枠を確保し、
-  残り2枠を追加の読取りに使わない。
+- 提示される「必須効果」を充足させることが完了条件である。必須効果が充足すると
+  ランタイムが自動で完了する。読取りだけでAction予算を使い切り、必須Capabilityを
+  実行しないまま終えないこと。必須効果が未達のままfinishしても完了にはならない。
 - capability_keyは承認されたCapability範囲の中からのみ選ぶ。範囲外が必要なら
   finishせず、範囲外のCapabilityを選ばずに、現状の要約でfinishする
   (範囲外の実行は親がreapprovalへ回すため、自己判断で実行しない)。
@@ -257,6 +258,7 @@ def build_orchestrator_prompt(
     schemas: dict[str, str | None],
     history: list[dict[str, Any]],
     correction: str | None = None,
+    satisfied_effects: tuple[str, ...] = (),
 ) -> str:
     lines = [
         f"依頼:\n{redact_text(str(task.get('prompt_text') or ''))}",
@@ -317,12 +319,17 @@ def build_orchestrator_prompt(
         "",
         f"Action予算: 最大{max_actions} / 完了済み{completed} / 残り{remaining}",
     ]
-    if _required_proposal_pending(plan, history) and remaining <= 2:
-        lines += [
-            "未実行の必須提案(research_theme_propose)が残っている。残り枠を追加の"
-            "読取りに使わず、次の一手でresearch_theme_proposeを実行し、その後finishする"
-            "こと。",
-        ]
+    required_effects = get_required_effects(planned)
+    if required_effects:
+        unmet = [effect for effect in required_effects if effect not in satisfied_effects]
+        lines += ["", f"必須効果: {', '.join(required_effects)}"]
+        if unmet:
+            lines += [
+                f"未達の必須効果: {', '.join(unmet)}。これらを充足するCapabilityを"
+                "実行すること。充足するとランタイムが自動で完了する。",
+            ]
+        else:
+            lines += ["必須効果はすべて充足済み。"]
     if history:
         lines += ["", "過去のActionとObservation:"]
         lines += _compress_history_lines(history)
@@ -331,22 +338,6 @@ def build_orchestrator_prompt(
     if correction:
         lines += ["", f"直前の出力への修正指示:\n{correction}"]
     return "\n".join(lines)
-
-
-def _required_proposal_pending(
-    plan: DirectionalPlan, history: list[dict[str, Any]]
-) -> bool:
-    """Whether the approved plan includes an unexecuted research proposal.
-
-    Presence in the approved capabilities is the contract: an approved plan
-    that lists ``research_theme_propose`` treats it as required. This is only
-    a prompt hint; no automatic completion or action forcing is added.
-    """
-    planned = {directive.capability_key for directive in plan.capabilities}
-    if "research_theme_propose" not in planned:
-        return False
-    executed = {str(item.get("capability_key") or "") for item in history}
-    return "research_theme_propose" not in executed
 
 
 def _default_generator(
@@ -384,6 +375,26 @@ def _default_generator(
     return _generate
 
 
+def _acceptance_summary(
+    required_effects: tuple[str, ...],
+    satisfied_effects: set[str],
+    history: list[dict[str, Any]],
+) -> str:
+    """Synthesize the result summary when acceptance ends the run.
+
+    The LLM's ``finish`` summary is not required once the machine-checkable
+    effects hold, so the runtime writes this from observed state instead.
+    """
+    effects = ", ".join(sorted(set(required_effects) & satisfied_effects)) or "(none)"
+    summary = f"必須効果を充足: {effects}"
+    if history:
+        last = history[-1]
+        gist = str(last.get("observation_summary") or last.get("observation") or "")
+        if gist:
+            summary += f"\n{_truncate(gist, 1000)}"
+    return summary
+
+
 def run_directional_plan(
     task_id: str,
     plan_record: dict[str, Any],
@@ -414,11 +425,16 @@ def run_directional_plan(
 
     scope = approval_scope(plan)
     allowed = set(scope["capability_keys"])
+    required_effects = get_required_effects(allowed)
     max_actions = plan.max_actions or DEFAULT_MAX_ACTIONS
     schemas = {key: compact_schema_text(key) for key in allowed}
 
     active_executor = executor or get_default_executor()
     completed = _completed_actions(task_id, conn=conn)
+    satisfied: set[str] = set()
+    for payload in completed:
+        for effect in payload.get("effects_satisfied") or ():
+            satisfied.add(str(effect))
     history: list[dict[str, Any]] = [
         {
             "action_index": int(p.get("action_index")),
@@ -433,10 +449,19 @@ def run_directional_plan(
     next_index = (
         max(item["action_index"] for item in history) + 1 if history else 0
     )
-    if next_index >= max_actions:
+    # A resume can begin with every required effect already satisfied; end as
+    # completed before asking the LLM for another action.
+    if required_effects and satisfied.issuperset(required_effects):
         return ExecutorOutcome(
-            kind="failed",
-            error_summary=f"最大Action数({max_actions})に到達済みのため再開できない",
+            kind="completed",
+            result_summary=_acceptance_summary(required_effects, satisfied, history),
+        )
+    if next_index >= max_actions:
+        unmet = [effect for effect in required_effects if effect not in satisfied]
+        detail = f"（未達効果: {', '.join(unmet)}）" if unmet else ""
+        return ExecutorOutcome(
+            kind="incomplete",
+            error_summary=f"最大Action数({max_actions})に到達済みのため再開できない{detail}",
         )
 
     corrections = 0
@@ -454,7 +479,13 @@ def run_directional_plan(
             raise TaskCancelled("Task was cancelled during orchestration.")
 
         prompt = build_orchestrator_prompt(
-            task, plan, scope, schemas, history, pending_correction
+            task,
+            plan,
+            scope,
+            schemas,
+            history,
+            pending_correction,
+            satisfied_effects=tuple(sorted(satisfied)),
         )
         pending_correction = None
         generate = action_generator or _default_generator(task_id, next_index)
@@ -500,6 +531,35 @@ def run_directional_plan(
                     )
                 pending_correction = (
                     "finishには非空のsummaryが必要。結果要約を入れてfinishすること。"
+                )
+                continue
+            unmet = [effect for effect in required_effects if effect not in satisfied]
+            if unmet:
+                corrections += 1
+                task_store.append_task_event(
+                    task_id,
+                    "note",
+                    {
+                        "text": (
+                            "finish rejected: required effects unmet: "
+                            f"{', '.join(unmet)}"
+                        ),
+                        "action_index": next_index,
+                    },
+                    conn=conn,
+                )
+                if corrections > MAX_SELF_CORRECTIONS:
+                    task_store.clear_active_child(task_id, conn=conn)
+                    return ExecutorOutcome(
+                        kind="incomplete",
+                        error_summary=(
+                            "必須効果が未達のまま完了しようとしたため未完了: "
+                            + ", ".join(unmet)
+                        ),
+                    )
+                pending_correction = (
+                    "必須効果が未達のためfinishできない。先に該当Capabilityを実行"
+                    f"すること: {', '.join(unmet)}"
                 )
                 continue
             task_store.clear_active_child(task_id, conn=conn)
@@ -684,6 +744,9 @@ def run_directional_plan(
                 "observation_summary": gist,
                 "child_kind": result.child_kind,
                 "child_run_id": result.child_run_id,
+                # Machine-checkable effects this action established; the
+                # acceptance predicate and resume both read them.
+                "effects_satisfied": list(result.satisfied_effects),
             },
             conn=conn,
         )
@@ -695,14 +758,31 @@ def run_directional_plan(
                 "inputs": validated_inputs,
                 "observation": detail,
                 "observation_summary": gist,
+                "effects_satisfied": list(result.satisfied_effects),
             }
         )
+        satisfied.update(str(effect) for effect in result.satisfied_effects)
         last_signature = signature
         next_index += 1
         corrections = 0
         repeats = 0
 
+        # Acceptance is code-derived: once every required effect holds, end as
+        # completed without waiting for the LLM to emit ``finish`` or spend
+        # the remaining budget. This is what makes a satisfied-but-unfinished
+        # run impossible to misclassify as failed.
+        if required_effects and satisfied.issuperset(required_effects):
+            task_store.clear_active_child(task_id, conn=conn)
+            return ExecutorOutcome(
+                kind="completed",
+                result_summary=_acceptance_summary(
+                    required_effects, satisfied, history
+                ),
+            )
+
+    unmet = [effect for effect in required_effects if effect not in satisfied]
+    detail = f"（未達効果: {', '.join(unmet)}）" if unmet else ""
     return ExecutorOutcome(
-        kind="failed",
-        error_summary=f"最大Action数({max_actions})に到達したため停止",
+        kind="incomplete",
+        error_summary=f"最大Action数({max_actions})に到達したため未完了{detail}",
     )

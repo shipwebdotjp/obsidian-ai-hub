@@ -33,13 +33,17 @@ class StepResult:
     observation_summary: Optional[str] = None
     child_kind: Optional[str] = None
     child_run_id: Optional[str] = None
+    # Machine-checkable postconditions this step actually satisfied. The
+    # adapter reports them so the Runtime Orchestrator can decide completion
+    # from state instead of relying on the LLM's ``finish``.
+    satisfied_effects: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
 class ExecutorOutcome:
     """Outcome of a whole-plan execution."""
 
-    kind: str  # "completed" | "failed" | "deviation"
+    kind: str  # "completed" | "incomplete" | "failed" | "deviation"
     result_summary: Optional[str] = None
     error_summary: Optional[str] = None
     revised_plan: Optional[dict[str, Any]] = None

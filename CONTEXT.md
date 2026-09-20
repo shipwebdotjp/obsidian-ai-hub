@@ -47,7 +47,10 @@
 | **Runtime Orchestrator** | Directional Planと過去のObservationを基に、次のActionを構造化出力する判断主体。 |
 | **Action** | 次のCapability呼び出し、またはタスク完了を表す構造化された判断。 |
 | **Observation** | Capability実行結果としてRuntime Orchestratorへ戻される情報。表示/監査用の詳細Observationと、全履歴へ常に渡す履歴要点 (約1,500文字、`observation_summary`) の二層を持つ。 |
-| **Action予算** | Planの `max_actions` と実行済みAction数から求まる上限・完了済み数・残数。PlannerとRuntimeへ明示し、必須提案 (research_theme_propose) がある場合は提案とfinishの2枠を残す。 |
+| **Action予算** | Planの `max_actions` と実行済みAction数から求まる上限・完了済み数・残数。PlannerとRuntimeへ明示する。追加Actionを許すための純粋なバックストップであり、枯渇は失敗ではなく未完了を意味する。 |
+| **効果 (Effect)** | Capabilityが成功時に成立させる、コードで宣言した検査可能な事後条件 (`CapabilityDefinition.satisfied_effects`)。読取・検索Capabilityは宣言しない。 |
+| **必須効果 (Required Effect)** | 承認済みPlanに含まれる効果的Capabilityの効果集合。`get_required_effects` でコードから導出し、Planには固定しない。 |
+| **受理 (Acceptance)** | `必須効果 ⊆ 成立効果` が成り立つこと。成立した時点で `finish` を待たず `completed` として終了する。 |
 | **Approval Scope** | 承認された目的、Capability、制約の境界。範囲外のActionは実行せず再承認へ回す。 |
 | **Capability** | コードで定義されたAdapterと、DBで管理する有効状態・承認ポリシーの組。 |
 | **Approval Policy** | `auto` または `plan_required`。Planの人間承認要否を決めるCapability設定。 |
@@ -69,6 +72,8 @@
 - 差戻し理由は必須で、Task IDはPlan改訂を通じて不変である。
 - Trace Eventは追記のみで、既知秘密値とLLM非公開思考過程を含まない。
 - worker停止後のTaskは自動再実行しない。
+- 完了はLLMの `finish` ではなく必須効果の成立で決まり、成立時点で自動完了する。
+- Action予算の枯渇は `failed` ではなく `incomplete`（未完了）として記録する。
 
 ## 外部境界
 
