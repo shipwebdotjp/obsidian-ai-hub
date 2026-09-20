@@ -1,4 +1,5 @@
 import React, { useMemo, useRef, useState } from "react";
+import { getErrorMessage } from "../../utils/error";
 import {
   PersonPropertyDefinition,
   PersonPropertyValue,
@@ -234,7 +235,7 @@ export default function PersonPropertiesSection({
         setShowFormModal(false);
       }
     } catch (err: unknown) {
-      setFormError(err instanceof Error ? err.message : "属性値の保存に失敗しました。");
+      setFormError(getErrorMessage(err, "属性値の保存に失敗しました。"));
     } finally {
       setSubmitting(false);
     }
@@ -257,7 +258,7 @@ export default function PersonPropertiesSection({
       });
       closeBulkModal();
     } catch (err: unknown) {
-      setBulkError(err instanceof Error ? err.message : "属性値の一括保存に失敗しました。");
+      setBulkError(getErrorMessage(err, "属性値の一括保存に失敗しました。"));
     } finally {
       setBulkSubmitting(false);
     }
@@ -271,7 +272,7 @@ export default function PersonPropertiesSection({
       await onDeleteProperty(deletingValue.property_value_id);
       setDeletingValue(null);
     } catch (err: unknown) {
-      setDeleteError(err instanceof Error ? err.message : "属性値の削除に失敗しました。");
+      setDeleteError(getErrorMessage(err, "属性値の削除に失敗しました。"));
     } finally {
       setSubmitting(false);
     }
@@ -470,7 +471,7 @@ export default function PersonPropertiesSection({
       });
       setShowFormModal(false);
     } catch (err: unknown) {
-      setFormError(err instanceof Error ? err.message : "属性値の保存に失敗しました。");
+      setFormError(getErrorMessage(err, "属性値の保存に失敗しました。"));
     } finally {
       setSubmitting(false);
     }

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { getApiErrorMessage } from "../../utils/error";
 import { Link, useNavigate } from "react-router-dom";
 import { Settings } from "lucide-react";
-import { ApiError, listTaskAgentTasks } from "../../api/client";
+import { listTaskAgentTasks } from "../../api/client";
 import type { TaskAgentTask } from "../../api/types";
 import PaginationBar from "../../components/PaginationBar";
 import { usePagination } from "../../hooks/usePagination";
@@ -73,7 +74,7 @@ export default function TaskAgentListPage({
       setTotal(res.total);
     } catch (e) {
       if (requestId !== requestIdRef.current) return;
-      setError(e instanceof ApiError ? e.message : "読み込みに失敗しました");
+      setError(getApiErrorMessage(e, "読み込みに失敗しました"));
     } finally {
       if (requestId === requestIdRef.current) setLoading(false);
     }

@@ -1,8 +1,10 @@
-import { useEffect, useState, useMemo, useCallback, useRef } from "react";
-import { ApiError, listMemories, batchReview, reviewMemory, batchDeleteMemories } from "../../api/client";
+import { useMemo, useState } from "react";
+import { getApiErrorMessage } from "../../utils/error";
+import { listMemories, batchReview, reviewMemory, batchDeleteMemories } from "../../api/client";
 import type { Memory, MemoryStatus } from "../../api/types";
 import PaginationBar from "../../components/PaginationBar";
 import { usePagination } from "../../hooks/usePagination";
+import { useListResource } from "../../hooks/useListResource";
 import { formatDateTime } from "../../utils/date";
 
 export interface MemoryListProps {
@@ -32,25 +34,15 @@ export default function MemoryList({
   refreshKey,
   notify,
 }: MemoryListProps) {
-  const [items, setItems] = useState<Memory[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState<Set<string>>(new Set());
-  const abortRef = useRef<AbortController | null>(null);
 
   const filterKey = [status, query, topic, kind ?? "", personId ?? ""].join("|");
   const { page, limit, offset, total, totalPages, setTotal, setPage } =
     usePagination(filterKey, 50);
 
-  const reload = useCallback(async () => {
-    abortRef.current?.abort();
-    const controller = new AbortController();
-    abortRef.current = controller;
-
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await listMemories({
+  const { items, loading, error, reload } = useListResource<Memory>({
+    fetcher: () =>
+      listMemories({
         status,
         q: query,
         topic,
@@ -58,26 +50,15 @@ export default function MemoryList({
         person_id: personId,
         limit,
         offset,
-      });
-      if (controller.signal.aborted) return;
-      setItems(res.items);
-      setTotal(res.total);
+      }),
+    deps: [status, query, topic, kind, personId, limit, offset],
+    refreshKey,
+    fallbackError: "一覧取得に失敗しました",
+    onSuccess: (res) => {
+      setTotal(res.total ?? 0);
       onSelectionChange(new Set());
-    } catch (e) {
-      if (controller.signal.aborted) return;
-      const msg = e instanceof ApiError ? e.message : "一覧取得に失敗しました";
-      setError(msg);
-    } finally {
-      if (!controller.signal.aborted) setLoading(false);
-    }
-  }, [status, query, topic, kind, personId, limit, offset, setTotal, onSelectionChange]);
-
-  useEffect(() => {
-    void reload();
-    return () => {
-      abortRef.current?.abort();
-    };
-  }, [reload, refreshKey]);
+    },
+  });
 
   const allSelected = useMemo(
     () => items.length > 0 && items.every((m) => selectedIds.has(m.memory_id)),
@@ -117,7 +98,7 @@ export default function MemoryList({
       );
       await reload();
     } catch (e) {
-      const msg = e instanceof ApiError ? e.message : "一括操作に失敗しました";
+      const msg = getApiErrorMessage(e, "一括操作に失敗しました");
       notify(msg, "error");
     } finally {
       setIsProcessing(new Set());
@@ -136,7 +117,7 @@ export default function MemoryList({
       );
       await reload();
     } catch (e) {
-      const msg = e instanceof ApiError ? e.message : "一括削除に失敗しました";
+      const msg = getApiErrorMessage(e, "一括削除に失敗しました");
       notify(msg, "error");
     } finally {
       setIsProcessing(new Set());
@@ -150,7 +131,7 @@ export default function MemoryList({
       notify(`${id} を${action === "approve" ? "承認" : "却下"}しました`);
       await reload();
     } catch (e) {
-      const msg = e instanceof ApiError ? e.message : "操作に失敗しました";
+      const msg = getApiErrorMessage(e, "操作に失敗しました");
       notify(msg, "error");
     } finally {
       setIsProcessing(new Set());

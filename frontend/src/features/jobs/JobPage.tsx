@@ -1,5 +1,7 @@
 import { useEffect, useState, useRef } from "react";
+import { getApiErrorMessage } from "../../utils/error";
 import {
+  ApiError,
   getRecurringJobs,
   updateRecurringJobs,
   previewCommand,
@@ -8,7 +10,6 @@ import {
   cancelOneShotJob,
 } from "../../api/client";
 import type { RecurringJob, RecurringJobSchedule, RecurringJobScheduleType, RecurringJobUpdate, CommandSegment, OneShotJobSummary, OneShotJobDetail } from "../../api/types";
-import { ApiError } from "../../api/client";
 import TokenPrompt from "../../components/TokenPrompt";
 import { toRecurringJobUpdate, toRecurringJobUpdates } from "./recurringJobPayload";
 
@@ -186,7 +187,7 @@ export default function JobPage() {
       closeOneShotDetail();
       await fetchOneShotJobs();
     } catch (e) {
-      alert(e instanceof ApiError ? e.message : "ワンショット実行ジョブの取消に失敗しました");
+      alert(getApiErrorMessage(e, "ワンショット実行ジョブの取消に失敗しました"));
     }
   };
 
@@ -288,7 +289,7 @@ export default function JobPage() {
         alert("版競合が発生しました。他のセッションで設定が更新されています。最新の状態をロードして再試行してください。");
         fetchConfig();
       } else {
-        alert(e instanceof ApiError ? e.message : "ジョブの削除に失敗しました");
+        alert(getApiErrorMessage(e, "ジョブの削除に失敗しました"));
       }
     } finally {
       setSaving(false);
@@ -315,7 +316,7 @@ export default function JobPage() {
         alert("版競合が発生しました。他のセッションで設定が更新されています。最新の状態をロードして再試行してください。");
         fetchConfig();
       } else {
-        alert(e instanceof ApiError ? e.message : "有効状態の切り替えに失敗しました");
+        alert(getApiErrorMessage(e, "有効状態の切り替えに失敗しました"));
       }
     } finally {
       setSaving(false);

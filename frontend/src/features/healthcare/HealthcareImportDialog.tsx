@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ApiError, importHealthcareZip } from "../../api/client";
+import { getApiErrorMessage } from "../../utils/error";
+import { importHealthcareZip } from "../../api/client";
 import type { HealthcareImportResponse } from "../../api/types";
 
 export interface HealthcareImportDialogProps {
@@ -86,7 +87,7 @@ export default function HealthcareImportDialog({
       setResult(res);
       onImported();
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "ヘルスケアデータの取込に失敗しました");
+      setError(getApiErrorMessage(e, "ヘルスケアデータの取込に失敗しました"));
     } finally {
       setImporting(false);
     }

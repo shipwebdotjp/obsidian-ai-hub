@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { getApiErrorMessage } from "./utils/error";
 import { Navigate, Route, Routes } from "react-router-dom";
 import Sidebar from "./components/Sidebar";
 import TokenPrompt from "./components/TokenPrompt";
@@ -63,7 +64,7 @@ export default function App() {
               if (cancelled) return;
               setAuthed(false);
               setHealthError(
-                e instanceof ApiError ? e.message : "サーバーとの接続に失敗しました",
+                getApiErrorMessage(e, "サーバーとの接続に失敗しました"),
               );
               return;
             }
@@ -80,7 +81,7 @@ export default function App() {
           setAuthed(false);
         } else {
           setAuthed(false);
-          setHealthError(e instanceof ApiError ? e.message : "サーバーとの接続に失敗しました");
+          setHealthError(getApiErrorMessage(e, "サーバーとの接続に失敗しました"));
         }
       });
     return () => {

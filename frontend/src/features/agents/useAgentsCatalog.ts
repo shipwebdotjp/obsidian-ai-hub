@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type MutableRefObject } from "react";
+import { getErrorMessage } from "../../utils/error";
 import type { SetURLSearchParams } from "react-router-dom";
 import {
   createAgent,
@@ -129,7 +130,7 @@ export function useAgentsCatalog({
         setSelectedAgentId(agRes.agents[0].agent_id);
       }
     } catch (e: unknown) {
-      onActionError(e instanceof Error ? e.message : "エージェントまたはツールの読み込みに失敗しました。");
+      onActionError(getErrorMessage(e, "エージェントまたはツールの読み込みに失敗しました。"));
     }
   };
 
@@ -229,7 +230,7 @@ export function useAgentsCatalog({
       setIsCreatingAgent(false);
       setIsEditingAgent(false);
     } catch (err: unknown) {
-      setFormError(err instanceof Error ? err.message : "エージェントの保存に失敗しました。");
+      setFormError(getErrorMessage(err, "エージェントの保存に失敗しました。"));
     }
   };
 
@@ -259,7 +260,7 @@ export function useAgentsCatalog({
       const res = await listAgents();
       setAgents(res.agents);
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "ピン留めの更新に失敗しました。";
+      const message = getErrorMessage(err, "ピン留めの更新に失敗しました。");
       onActionError(message);
     }
   };

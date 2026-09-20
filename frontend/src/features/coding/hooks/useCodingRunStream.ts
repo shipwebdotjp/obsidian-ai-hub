@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from "react";
+import { getErrorMessage } from "../../../utils/error";
 import {
   cancelCodingRun,
   startCodingRun,
@@ -862,7 +863,7 @@ export function useCodingRunStream({
             return;
           }
           const message =
-            error instanceof Error ? error.message : "メッセージの送信に失敗しました";
+            getErrorMessage(error, "メッセージの送信に失敗しました");
           updateQueueRef.current(sessionId, (items) =>
             markQueuedCodingMessageError(items, head.queue_id, message),
           );

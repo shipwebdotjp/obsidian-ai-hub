@@ -1,15 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import VaultSearchList from "./VaultSearchList";
 import VaultSearchDetailPanel from "./VaultSearchDetailPanel";
-import SplitHandle from "../../components/SplitHandle";
-import { DEFAULT_LIST_RATIO, usePaneResize } from "../../hooks/usePaneResize";
+import MasterDetailLayout from "../../components/MasterDetailLayout";
+import { ToastStack, useToasts } from "../../components/Toast";
+import { DEFAULT_LIST_RATIO } from "../../hooks/usePaneResize";
 import type { VaultSearchHit } from "../../api/types";
-
-interface Toast {
-  id: number;
-  text: string;
-  kind: "info" | "error";
-}
 
 interface SearchHistoryItem {
   query: string;
@@ -45,7 +40,7 @@ export default function VaultSearchPage() {
   const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [isSearching, setIsSearching] = useState(false);
-  const [toasts, setToasts] = useState<Toast[]>([]);
+  const { toasts, notify } = useToasts();
   const [searchHistory, setSearchHistory] = useState<SearchHistoryItem[]>(loadHistory);
 
   useEffect(() => {
@@ -55,14 +50,6 @@ export default function VaultSearchPage() {
   useEffect(() => {
     if (!selectedHit) setMobileDetailOpen(false);
   }, [selectedHit]);
-
-  const notify = useCallback((text: string, kind: "info" | "error" = "info") => {
-    const id = Date.now() + Math.random();
-    setToasts((prev) => [...prev, { id, text, kind }]);
-    window.setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 3500);
-  }, []);
 
   const runSearch = useCallback((query: string, searchMode: "hybrid" | "keyword" | "similarity", resultK: number) => {
     if (!query.trim() || isSearching) return;
@@ -113,13 +100,6 @@ export default function VaultSearchPage() {
     }
   }, [committedQuery, notify]);
 
-  const { containerRef, paneRef, containerStyle, isDragging, handleProps } = usePaneResize({
-    defaultSize: DEFAULT_LIST_RATIO,
-    minSize: 300,
-    minOther: 360,
-    storageKey: "vault-search",
-  });
-
   return (
     <div className="flex h-full flex-col">
       <header className="flex flex-wrap items-center gap-2 border-b border-slate-200 bg-white p-3 sm:gap-3 sm:p-4">
@@ -160,91 +140,65 @@ export default function VaultSearchPage() {
           {isSearching ? "検索中…" : "検索"}
         </button>
       </header>
-      <div
-        ref={containerRef}
-        style={containerStyle}
-        className="flex flex-1 flex-col overflow-hidden lg:flex-row"
-      >
-        <div
-          ref={paneRef}
-          className={`flex w-full flex-col overflow-hidden border-slate-200 lg:w-[var(--pane-size)] ${
-            mobileDetailOpen ? "hidden" : "flex"
-          } lg:flex`}
-        >
-          {searchHistory.length > 0 && (
-            <div className="max-h-36 shrink-0 overflow-y-auto border-b border-slate-100 p-2">
-              <h2 className="mb-1 text-xs font-semibold text-slate-500">最近の検索</h2>
-              <ul className="space-y-0.5">
-                {searchHistory.map((item, i) => (
-                  <li key={`${item.query}-${item.mode}-${item.k}-${item.searchedAt}`}>
-                    <button
-                      type="button"
-                      onClick={() => handleHistorySearch(item)}
-                      disabled={isSearching}
-                      className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-sm hover:bg-slate-100 disabled:opacity-50"
-                    >
-                      <span className="truncate text-slate-700">{item.query}</span>
-                      <span className="shrink-0 text-xs text-slate-400">{item.mode} / {item.k}件</span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-          <div className="flex-1 overflow-hidden">
-            <VaultSearchList
-              query={committedQuery}
-              k={committedK}
-              mode={committedMode}
-              refreshKey={refreshKey}
-              onSelect={(h) => {
-                setSelectedHit(h);
-                setMobileDetailOpen(true);
-              }}
-              onLoaded={handleLoaded}
-            />
-          </div>
-        </div>
-        <SplitHandle handleProps={handleProps} isDragging={isDragging} />
-        <div
-          className={`w-full min-w-0 overflow-hidden lg:flex-1 ${
-            mobileDetailOpen ? "flex flex-col" : "hidden"
-          } lg:flex lg:flex-col`}
-        >
-          <div className="flex items-center gap-2 border-b border-slate-200 p-3 lg:hidden">
-            <button
-              type="button"
-              onClick={() => setMobileDetailOpen(false)}
-              aria-label="一覧に戻る"
-              className="rounded px-2 py-1 text-sm text-slate-600 hover:bg-slate-100"
-            >
-              ← 一覧
-            </button>
-            <span className="truncate text-sm font-semibold text-slate-700">
-              検索結果プレビュー
-            </span>
-          </div>
-          <div className="flex-1 overflow-hidden">
-            {selectedHit ? (
-              <VaultSearchDetailPanel hit={selectedHit} notify={notify} />
-            ) : (
-              <p className="p-6 text-sm text-slate-500">一覧から結果を選択してください。</p>
+      <MasterDetailLayout
+        mobileOpen={mobileDetailOpen}
+        onBack={() => setMobileDetailOpen(false)}
+        mobileTitle="検索結果プレビュー"
+        listClassName="w-full overflow-hidden border-slate-200 lg:w-[var(--pane-size)]"
+        detailClassName="w-full min-w-0 overflow-hidden lg:flex-1"
+        detailContentClassName="flex-1 overflow-hidden"
+        paneOptions={{
+          defaultSize: DEFAULT_LIST_RATIO,
+          minSize: 300,
+          minOther: 360,
+          storageKey: "vault-search",
+        }}
+        list={
+          <>
+            {searchHistory.length > 0 && (
+              <div className="max-h-36 shrink-0 overflow-y-auto border-b border-slate-100 p-2">
+                <h2 className="mb-1 text-xs font-semibold text-slate-500">最近の検索</h2>
+                <ul className="space-y-0.5">
+                  {searchHistory.map((item, i) => (
+                    <li key={`${item.query}-${item.mode}-${item.k}-${item.searchedAt}`}>
+                      <button
+                        type="button"
+                        onClick={() => handleHistorySearch(item)}
+                        disabled={isSearching}
+                        className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-sm hover:bg-slate-100 disabled:opacity-50"
+                      >
+                        <span className="truncate text-slate-700">{item.query}</span>
+                        <span className="shrink-0 text-xs text-slate-400">{item.mode} / {item.k}件</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
             )}
-          </div>
-        </div>
-      </div>
-      <div className="pointer-events-none fixed bottom-4 right-4 flex flex-col gap-2">
-        {toasts.map((t) => (
-          <div
-            key={t.id}
-            className={`pointer-events-auto rounded px-4 py-2 text-sm text-white shadow ${
-              t.kind === "error" ? "bg-rose-600" : "bg-slate-900"
-            }`}
-          >
-            {t.text}
-          </div>
-        ))}
-      </div>
+            <div className="flex-1 overflow-hidden">
+              <VaultSearchList
+                query={committedQuery}
+                k={committedK}
+                mode={committedMode}
+                refreshKey={refreshKey}
+                onSelect={(h) => {
+                  setSelectedHit(h);
+                  setMobileDetailOpen(true);
+                }}
+                onLoaded={handleLoaded}
+              />
+            </div>
+          </>
+        }
+        detail={
+          selectedHit ? (
+            <VaultSearchDetailPanel hit={selectedHit} notify={notify} />
+          ) : (
+            <p className="p-6 text-sm text-slate-500">一覧から結果を選択してください。</p>
+          )
+        }
+      />
+      <ToastStack toasts={toasts} />
     </div>
   );
 }

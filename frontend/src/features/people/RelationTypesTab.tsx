@@ -1,4 +1,5 @@
 import React, { useRef, useState } from "react";
+import { getErrorMessage } from "../../utils/error";
 import { PersonRelationType, PersonRelationTypeCreateRequest, PersonRelationTypeUpdateRequest } from "./types";
 import { useNativeDialog } from "./useNativeDialog";
 
@@ -81,7 +82,7 @@ export default function RelationTypesTab({
       });
       setShowCreateModal(false);
     } catch (err: unknown) {
-      setCreateError(err instanceof Error ? err.message : "関係タイプの作成に失敗しました。");
+      setCreateError(getErrorMessage(err, "関係タイプの作成に失敗しました。"));
     } finally {
       setSubmittingCreate(false);
     }
@@ -105,7 +106,7 @@ export default function RelationTypesTab({
       });
       setEditingType(null);
     } catch (err: unknown) {
-      setEditError(err instanceof Error ? err.message : "関係タイプの更新に失敗しました。");
+      setEditError(getErrorMessage(err, "関係タイプの更新に失敗しました。"));
     } finally {
       setSubmittingEdit(false);
     }

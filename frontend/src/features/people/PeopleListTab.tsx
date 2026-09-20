@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { getApiErrorMessage } from "../../utils/error";
 import { useNavigate } from "react-router-dom";
 import { GitMerge, Trash2 } from "lucide-react";
-import { ApiError, listMemories } from "../../api/client";
+import { listMemories } from "../../api/client";
 import { Memory, Person, PersonAlias } from "../../api/types";
 import {
   PersonDetail,
@@ -117,7 +118,7 @@ export default function PeopleListTab({
         if (!cancelled) setPersonMemories(res.items);
       } catch (e) {
         if (!cancelled) {
-          const msg = e instanceof ApiError ? e.message : "人物メモリの取得に失敗しました";
+          const msg = getApiErrorMessage(e, "人物メモリの取得に失敗しました");
           setMemoriesError(msg);
           setPersonMemories([]);
         }

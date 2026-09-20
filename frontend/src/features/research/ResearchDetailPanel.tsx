@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { getApiErrorMessage } from "../../utils/error";
 import { Link } from "react-router-dom";
-import { ApiError, getResearchTheme, rerunResearchTheme } from "../../api/client";
+import { getResearchTheme, rerunResearchTheme } from "../../api/client";
 import type { ResearchTheme } from "../../api/types";
 import MarkdownPreview from "../../components/MarkdownPreview";
 import { ROUTES } from "../../constants/routes";
+import { researchStatusLabel } from "./researchLabels";
 
 export interface ResearchDetailPanelProps {
   themeId: string;
@@ -39,7 +41,7 @@ export default function ResearchDetailPanel({
       })
       .catch((e) => {
         if (currentFetchId !== fetchIdRef.current) return;
-        const msg = e instanceof ApiError ? e.message : "詳細取得に失敗しました";
+        const msg = getApiErrorMessage(e, "詳細取得に失敗しました");
         setError(msg);
         setDetail(null);
       })
@@ -81,7 +83,7 @@ export default function ResearchDetailPanel({
       setDetail(updated);
       onChanged(updated);
     } catch (e) {
-      const msg = e instanceof ApiError ? e.message : "再実行に失敗しました";
+      const msg = getApiErrorMessage(e, "再実行に失敗しました");
       notify(msg, "error");
     } finally {
       setIsSubmitting(false);
@@ -99,20 +101,11 @@ export default function ResearchDetailPanel({
   }
 
   const job = detail.latest_job;
-  const statusLabel = (s: string) => {
-    switch (s) {
-      case "candidate": return "候補";
-      case "approved": return "承認済み";
-      case "rejected": return "却下済み";
-      case "duplicate": return "重複";
-      default: return s;
-    }
-  };
 
   return (
     <div className="flex h-full flex-col overflow-y-auto p-4">
       <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-slate-500">
-        <span className="rounded bg-slate-200 px-1">{statusLabel(detail.status)}</span>
+        <span className="rounded bg-slate-200 px-1">{researchStatusLabel(detail.status)}</span>
         {detail.kind && <span className="rounded bg-slate-200 px-1">{detail.kind}</span>}
         {detail.confidence !== undefined && (
           <span>conf: {detail.confidence.toFixed(2)}</span>

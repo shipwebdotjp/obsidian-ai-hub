@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { getErrorMessage } from "../utils/error";
 import { getHitlRun } from '../api/client';
 
 export interface ChoiceOption {
@@ -102,7 +103,7 @@ export const WaitingRunStatusPanel: React.FC<WaitingRunStatusPanelProps> = ({
     try {
       await onCancel();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : '取消処理中にエラーが発生しました。');
+      setError(getErrorMessage(err, '取消処理中にエラーが発生しました。'));
       setIsCancelling(false);
     }
   };
@@ -214,7 +215,7 @@ export const WaitingRunQuestionCard: React.FC<InConversationQuestionCardProps> =
     try {
       await onSubmit(payload);
     } catch (err: unknown) {
-      setErrorMessage(err instanceof Error ? err.message : '送信中にエラーが発生しました。');
+      setErrorMessage(getErrorMessage(err, '送信中にエラーが発生しました。'));
       setIsSubmitting(false);
     }
   };
@@ -226,7 +227,7 @@ export const WaitingRunQuestionCard: React.FC<InConversationQuestionCardProps> =
     try {
       await onCancel();
     } catch (err: unknown) {
-      setErrorMessage(err instanceof Error ? err.message : '取消処理中にエラーが発生しました。');
+      setErrorMessage(getErrorMessage(err, '取消処理中にエラーが発生しました。'));
       setIsCancelling(false);
     }
   };

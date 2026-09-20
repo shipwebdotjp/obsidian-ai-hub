@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { getApiErrorMessage } from "../../utils/error";
 import { Link } from "react-router-dom";
 import {
   ApiError,
@@ -349,7 +350,7 @@ export default function TaskAgentDetailPanel({
         }
       } catch (e) {
         if (currentGen !== requestGenRef.current) return;
-        setError(e instanceof ApiError ? e.message : "読み込みに失敗しました");
+        setError(getApiErrorMessage(e, "読み込みに失敗しました"));
       } finally {
         if (currentGen === requestGenRef.current && showLoading) {
           setLoading(false);
@@ -415,7 +416,7 @@ export default function TaskAgentDetailPanel({
         await loadDetail(false);
         onTaskChanged?.();
       } catch (e) {
-        setActionError(e instanceof ApiError ? e.message : "操作に失敗しました");
+        setActionError(getApiErrorMessage(e, "操作に失敗しました"));
       } finally {
         setBusy(false);
       }
@@ -446,7 +447,7 @@ export default function TaskAgentDetailPanel({
       await loadDetail(false);
       onTaskChanged?.();
     } catch (e) {
-      setActionError(e instanceof ApiError ? e.message : "対象の変更に失敗しました");
+      setActionError(getApiErrorMessage(e, "対象の変更に失敗しました"));
     } finally {
       setTargetBusy(false);
     }

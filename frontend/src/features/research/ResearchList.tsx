@@ -1,12 +1,11 @@
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useState } from "react";
+import { getApiErrorMessage } from "../../utils/error";
 import { Link } from "react-router-dom";
-import {
-  ApiError,
-  listResearchThemes,
-  rerunResearchTheme,
-} from "../../api/client";
+import { listResearchThemes, rerunResearchTheme } from "../../api/client";
 import type { ResearchTheme } from "../../api/types";
 import { ROUTES } from "../../constants/routes";
+import { useListResource } from "../../hooks/useListResource";
+import { researchJobStatusColor, researchStatusLabel } from "./researchLabels";
 
 export interface ResearchListProps {
   status: string;
@@ -25,62 +24,23 @@ export default function ResearchList({
   refreshKey,
   notify,
 }: ResearchListProps) {
-  const [items, setItems] = useState<ResearchTheme[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState<Set<string>>(new Set());
-  const abortRef = useRef<AbortController | null>(null);
 
-  const reload = useCallback(async () => {
-    abortRef.current?.abort();
-    const controller = new AbortController();
-    abortRef.current = controller;
-
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await listResearchThemes({
+  const { items, loading, error, reload } = useListResource<ResearchTheme>({
+    fetcher: () =>
+      listResearchThemes({
         status: status || undefined,
         q: query || undefined,
-      });
-      if (controller.signal.aborted) return;
-      setItems(res.items);
-    } catch (e) {
-      if (controller.signal.aborted) return;
-      const msg = e instanceof ApiError ? e.message : "一覧取得に失敗しました";
-      setError(msg);
-    } finally {
-      if (!controller.signal.aborted) setLoading(false);
-    }
-  }, [status, query]);
-
-  useEffect(() => {
-    void reload();
-    return () => {
-      abortRef.current?.abort();
-    };
-  }, [reload, refreshKey]);
-
-  const statusLabel = (s: string) => {
-    switch (s) {
-      case "candidate": return "候補";
-      case "approved": return "承認済み";
-      case "rejected": return "却下済み";
-      case "duplicate": return "重複";
-      default: return s;
-    }
-  };
+      }),
+    deps: [status, query],
+    refreshKey,
+    fallbackError: "一覧取得に失敗しました",
+  });
 
   const jobStatusBadge = (s?: string) => {
     if (!s) return null;
-    const colors: Record<string, string> = {
-      pending: "bg-yellow-100 text-yellow-800",
-      running: "bg-blue-100 text-blue-800",
-      succeeded: "bg-emerald-100 text-emerald-800",
-      failed: "bg-rose-100 text-rose-800",
-    };
     return (
-      <span className={`rounded px-1 text-[10px] font-medium ${colors[s] || "bg-slate-100"}`}>
+      <span className={`rounded px-1 text-[10px] font-medium ${researchJobStatusColor(s)}`}>
         {s}
       </span>
     );
@@ -93,7 +53,7 @@ export default function ResearchList({
       notify("再実行を開始しました");
       await reload();
     } catch (e) {
-      const msg = e instanceof ApiError ? e.message : "再実行に失敗しました";
+      const msg = getApiErrorMessage(e, "再実行に失敗しました");
       notify(msg, "error");
     } finally {
       setIsProcessing(new Set());
@@ -124,7 +84,7 @@ export default function ResearchList({
                   )}
                   <div className="mt-1 flex flex-wrap items-center gap-2">
                     <span className="rounded bg-slate-200 px-1 text-[10px]">
-                      {statusLabel(t.status)}
+                      {researchStatusLabel(t.status)}
                     </span>
                     {t.kind && (
                       <span className="rounded bg-slate-100 px-1 text-[10px] text-slate-600">

@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from "react";
+import { getApiErrorMessage } from "../../utils/error";
 import {
-  ApiError,
   getDashboardHome,
   getDashboardBrowse,
   getDashboardSummary,
@@ -115,7 +115,7 @@ export default function SummaryDashboardPage() {
       })
       .catch((e) => {
         if (reqId !== homeRequestRef.current) return;
-        setHomeError(e instanceof ApiError ? e.message : "ホームデータの取得に失敗しました");
+        setHomeError(getApiErrorMessage(e, "ホームデータの取得に失敗しました"));
       })
       .finally(() => {
         if (reqId === homeRequestRef.current) setHomeLoading(false);
@@ -137,7 +137,7 @@ export default function SummaryDashboardPage() {
       })
       .catch((e) => {
         if (reqId !== browseRequestRef.current) return;
-        setBrowseError(e instanceof ApiError ? e.message : "一覧データの取得に失敗しました");
+        setBrowseError(getApiErrorMessage(e, "一覧データの取得に失敗しました"));
       })
       .finally(() => {
         if (reqId === browseRequestRef.current) setBrowseLoading(false);
@@ -157,7 +157,7 @@ export default function SummaryDashboardPage() {
       })
       .catch((e) => {
         if (reqId !== statsRequestRef.current) return;
-        setStatsError(e instanceof ApiError ? e.message : "統計データの取得に失敗しました");
+        setStatsError(getApiErrorMessage(e, "統計データの取得に失敗しました"));
       })
       .finally(() => {
         if (reqId === statsRequestRef.current) setStatsLoading(false);
@@ -180,7 +180,7 @@ export default function SummaryDashboardPage() {
       })
       .catch((e) => {
         if (reqId !== detailRequestRef.current) return;
-        setDetailError(e instanceof ApiError ? e.message : "詳細の取得に失敗しました");
+        setDetailError(getApiErrorMessage(e, "詳細の取得に失敗しました"));
       })
       .finally(() => {
         if (reqId === detailRequestRef.current) setDetailLoading(false);
@@ -202,7 +202,7 @@ export default function SummaryDashboardPage() {
       })
       .catch((e) => {
         if (reqId !== detailRequestRef.current) return;
-        setDetailError(e instanceof ApiError ? e.message : "日別詳細の取得に失敗しました");
+        setDetailError(getApiErrorMessage(e, "日別詳細の取得に失敗しました"));
       })
       .finally(() => {
         if (reqId === detailRequestRef.current) setDetailLoading(false);
@@ -240,7 +240,7 @@ export default function SummaryDashboardPage() {
       loadHome();
       loadBrowse(browseYear, browseMonth);
     } catch (e) {
-      setGenerationError(e instanceof ApiError ? e.message : "サマリの生成に失敗しました。再試行してください。");
+      setGenerationError(getApiErrorMessage(e, "サマリの生成に失敗しました。再試行してください。"));
       setShowRegenerateConfirm(false);
     } finally {
       setGenerationSaving(false);
@@ -300,7 +300,7 @@ export default function SummaryDashboardPage() {
       loadHome();
       loadBrowse(browseYear, browseMonth);
     } catch (e) {
-      setEditError(e instanceof ApiError ? e.message : "保存に失敗しました");
+      setEditError(getApiErrorMessage(e, "保存に失敗しました"));
     } finally {
       setEditSaving(false);
     }
@@ -318,7 +318,7 @@ export default function SummaryDashboardPage() {
       loadHome();
       loadBrowse(browseYear, browseMonth);
     } catch (e) {
-      setEditError(e instanceof ApiError ? e.message : "削除に失敗しました");
+      setEditError(getApiErrorMessage(e, "削除に失敗しました"));
       setShowDeleteConfirm(false);
     }
   }, [selectedSummary, loadHome, loadBrowse, browseYear, browseMonth]);

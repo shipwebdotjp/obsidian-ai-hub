@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ApiError, getMemory, reviewMemory, resolveMemory, deleteMemory } from "../../api/client";
+import { getApiErrorMessage } from "../../utils/error";
+import { getMemory, reviewMemory, resolveMemory, deleteMemory } from "../../api/client";
 import type { MemoryDetail } from "../../api/types";
 import type { Memory } from "../../api/types";
 import MemoryEditForm from "./MemoryEditForm";
@@ -74,7 +75,7 @@ export default function MemoryDetailPanel({
       })
       .catch((e) => {
         if (currentFetchId !== fetchIdRef.current) return;
-        const msg = e instanceof ApiError ? e.message : "詳細取得に失敗しました";
+        const msg = getApiErrorMessage(e, "詳細取得に失敗しました");
         setError(msg);
         setDetail(null);
         fetchedOnceRef.current = false;
@@ -103,7 +104,7 @@ export default function MemoryDetailPanel({
       onChanged(null);
       setDetail(null);
     } catch (e) {
-      const msg = e instanceof ApiError ? e.message : "削除に失敗しました";
+      const msg = getApiErrorMessage(e, "削除に失敗しました");
       notify(msg, "error");
     } finally {
       setIsSubmitting(false);
@@ -120,7 +121,7 @@ export default function MemoryDetailPanel({
       notify(`${memoryId} を${action === "approve" ? "承認" : "却下"}しました`);
       onChanged(updated);
     } catch (e) {
-      const msg = e instanceof ApiError ? e.message : "操作に失敗しました";
+      const msg = getApiErrorMessage(e, "操作に失敗しました");
       notify(msg, "error");
     } finally {
       setIsSubmitting(false);
@@ -152,7 +153,7 @@ export default function MemoryDetailPanel({
       notify(`${memoryId} を「${actionLabel}」で解決しました`);
       onChanged(updated);
     } catch (e) {
-      const msg = e instanceof ApiError ? e.message : "操作に失敗しました";
+      const msg = getApiErrorMessage(e, "操作に失敗しました");
       notify(msg, "error");
     } finally {
       setIsSubmitting(false);

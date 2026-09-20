@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type MutableRefObject } from "react";
+import { getErrorMessage } from "../../utils/error";
 import {
   createPromptTemplate,
   deletePromptTemplate,
@@ -210,7 +211,7 @@ export function useAgentTemplates({
       setTemplateFormName("");
       setTemplateFormContent("");
     } catch (err: unknown) {
-      setTemplateError(err instanceof Error ? err.message : "テンプレートの保存に失敗しました。");
+      setTemplateError(getErrorMessage(err, "テンプレートの保存に失敗しました。"));
     }
   };
 
@@ -225,7 +226,7 @@ export function useAgentTemplates({
         setTemplateFormContent("");
       }
     } catch (err: unknown) {
-      setTemplateError(err instanceof Error ? err.message : "テンプレートの削除に失敗しました。");
+      setTemplateError(getErrorMessage(err, "テンプレートの削除に失敗しました。"));
     }
   };
 

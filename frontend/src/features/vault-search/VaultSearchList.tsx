@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { searchVault, ApiError } from "../../api/client";
+import { getApiErrorMessage } from "../../utils/error";
+import { searchVault } from "../../api/client";
 import type { VaultSearchHit } from "../../api/types";
 import { formatScore } from "./utils";
 
@@ -49,7 +50,7 @@ export default function VaultSearchList({
       })
       .catch((e) => {
         if (controller.signal.aborted) return;
-        const msg = e instanceof ApiError ? e.message : "検索に失敗しました";
+        const msg = getApiErrorMessage(e, "検索に失敗しました");
         setError(msg);
         setItems([]);
         onLoaded([], msg);

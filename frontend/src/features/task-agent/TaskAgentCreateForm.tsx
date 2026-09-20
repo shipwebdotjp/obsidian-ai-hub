@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { getApiErrorMessage } from "../../utils/error";
 import { ApiError, createTaskAgentTask } from "../../api/client";
 import type { TaskAgentTask } from "../../api/types";
 
@@ -35,7 +36,7 @@ export default function TaskAgentCreateForm({
       onCreated(task);
     } catch (err) {
       setError(
-        err instanceof ApiError ? err.message : "タスクの作成に失敗しました",
+        getApiErrorMessage(err, "タスクの作成に失敗しました"),
       );
     } finally {
       setSubmitting(false);

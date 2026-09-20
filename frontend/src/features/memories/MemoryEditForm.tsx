@@ -1,5 +1,7 @@
+import { splitList } from "../../utils/list";
 import { useState } from "react";
-import { ApiError, editMemory } from "../../api/client";
+import { getApiErrorMessage } from "../../utils/error";
+import { editMemory } from "../../api/client";
 import type { EditPayload, Memory, MemoryDetail, Person, Stability } from "../../api/types";
 
 const STABILITIES: Stability[] = ["stable", "tentative", "explicitly_settled"];
@@ -25,13 +27,6 @@ export default function MemoryEditForm({ memory, peopleOptions = [], onUpdated, 
   );
   const [busy, setBusy] = useState(false);
 
-  function splitList(value: string): string[] {
-    return value
-      .split(/[,\n]/)
-      .map((s) => s.trim())
-      .filter(Boolean);
-  }
-
   function togglePerson(personId: string) {
     if (selectedPersonIds.includes(personId)) {
       setSelectedPersonIds(selectedPersonIds.filter((id) => id !== personId));
@@ -48,8 +43,8 @@ export default function MemoryEditForm({ memory, peopleOptions = [], onUpdated, 
     setBusy(true);
     const payload: EditPayload = {
       content: content.trim(),
-      topics: splitList(topicsText),
-      tags: splitList(tagsText),
+      topics: splitList(topicsText, /[,\n]/),
+      tags: splitList(tagsText, /[,\n]/),
       stability,
       valid_from: validFrom || null,
       valid_until: validUntil || null,
@@ -62,7 +57,7 @@ export default function MemoryEditForm({ memory, peopleOptions = [], onUpdated, 
       onUpdated(res.memory);
       notify("編集を保存して承認しました");
     } catch (e) {
-      const msg = e instanceof ApiError ? e.message : "編集に失敗しました";
+      const msg = getApiErrorMessage(e, "編集に失敗しました");
       notify(msg, "error");
     } finally {
       setBusy(false);

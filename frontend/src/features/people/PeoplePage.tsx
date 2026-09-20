@@ -1,4 +1,6 @@
+import { splitList } from "../../utils/list";
 import React, { useEffect, useState, useRef } from "react";
+import { getErrorMessage } from "../../utils/error";
 import { ApiError } from "../../api/client";
 import { Person, PersonAlias } from "../../api/types";
 import {
@@ -453,7 +455,7 @@ export default function PeoplePage() {
       setSuccessMessage(successMsg);
     } catch (e) {
       if (selectedPersonIdRef.current !== personId) return;
-      setError(e instanceof Error ? e.message : "詳細の再読み込みに失敗しました");
+      setError(getErrorMessage(e, "詳細の再読み込みに失敗しました"));
     }
   };
 
@@ -476,7 +478,7 @@ export default function PeoplePage() {
       setSuccessMessage(successMsg);
     } catch (e) {
       if (selectedPersonIdRef.current !== personId) return;
-      setError(e instanceof Error ? e.message : "詳細の再読み込みに失敗しました");
+      setError(getErrorMessage(e, "詳細の再読み込みに失敗しました"));
     }
   };
 
@@ -495,7 +497,7 @@ export default function PeoplePage() {
       setSuccessMessage("人物間関係を削除しました。");
     } catch (e) {
       if (selectedPersonIdRef.current !== personId) return;
-      setError(e instanceof Error ? e.message : "人物間関係の削除に失敗しました");
+      setError(getErrorMessage(e, "人物間関係の削除に失敗しました"));
     }
   };
 
@@ -553,10 +555,7 @@ export default function PeoplePage() {
     setEditError(null);
     setEditSuccess(null);
     try {
-      const aliasList = editAliasesText
-        .split("\n")
-        .map((line) => line.trim())
-        .filter((line) => line.length > 0);
+      const aliasList = splitList(editAliasesText);
 
       const res = await peopleApi.updatePerson(
         selectedPerson.person_id,

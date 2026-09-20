@@ -1,4 +1,4 @@
-import { apiGet, apiPost, apiPut, apiPatch, apiDelete } from "../../api/client";
+import { apiGet, apiPost, apiPut, apiPatch, apiDelete, withQuery } from "../../api/client";
 import { Person } from "../../api/types";
 import {
   PrincipalPersonResponse,
@@ -36,7 +36,7 @@ const RELATIONS_API = "/api/v1/person-relations";
 const EVIDENCE_API = "/api/v1/person-relation-evidence";
 
 export async function fetchCandidates(status: "unresolved" | "rejected" = "unresolved"): Promise<PersonCandidate[]> {
-  return apiGet<PersonCandidate[]>(`${PEOPLE_API}/candidates?status=${status}`);
+  return apiGet<PersonCandidate[]>(withQuery(`${PEOPLE_API}/candidates`, { status }));
 }
 
 export async function rejectCandidate(candidateId: string): Promise<void> {
@@ -137,7 +137,9 @@ export async function executeMerge(fromPersonId: string, toPersonId: string): Pr
 
 export async function deleteAlias(personId: string, normalizedName: string): Promise<PersonDetail> {
   return apiDelete<PersonDetail>(
-    `${PEOPLE_API}/${encodeURIComponent(personId)}/aliases?normalized_name=${encodeURIComponent(normalizedName)}`
+    withQuery(`${PEOPLE_API}/${encodeURIComponent(personId)}/aliases`, {
+      normalized_name: normalizedName,
+    })
   );
 }
 

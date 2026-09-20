@@ -2,16 +2,12 @@ import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import MemoryList from "./MemoryList";
 import MemoryDetailPanel from "./MemoryDetailPanel";
-import SplitHandle from "../../components/SplitHandle";
-import { DEFAULT_LIST_RATIO, usePaneResize } from "../../hooks/usePaneResize";
+import MasterDetailLayout from "../../components/MasterDetailLayout";
+import { ToastStack, useToasts } from "../../components/Toast";
+import { useDebouncedValue } from "../../hooks/useDebouncedValue";
+import { DEFAULT_LIST_RATIO } from "../../hooks/usePaneResize";
 import type { Memory, MemoryDetail, MemoryStatus, Person } from "../../api/types";
 import { getMemoryOptions, listPeople, renderCopilotProfile } from "../../api/client";
-
-interface Toast {
-  id: number;
-  text: string;
-  kind: "info" | "error";
-}
 
 export default function MemoryPage() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -19,7 +15,7 @@ export default function MemoryPage() {
 
   const [status, setStatus] = useState<MemoryStatus>("candidate");
   const [queryInput, setQueryInput] = useState("");
-  const [debouncedQuery, setDebouncedQuery] = useState("");
+  const debouncedQuery = useDebouncedValue(queryInput, 500);
   const [kind, setKind] = useState("");
   const [topic, setTopic] = useState("");
   const [personId, setPersonId] = useState(initialPersonId);
@@ -35,7 +31,7 @@ export default function MemoryPage() {
   const [selectedMemory, setSelectedMemory] = useState<Memory | null>(null);
   const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
-  const [toasts, setToasts] = useState<Toast[]>([]);
+  const { toasts, notify } = useToasts();
 
   const handleRefresh = useCallback(() => setRefreshKey((v) => v + 1), []);
   const selectedMemoryId = selectedMemory?.memory_id ?? null;
@@ -50,14 +46,6 @@ export default function MemoryPage() {
     }
     handleRefresh();
   }, [handleRefresh]);
-
-  const notify = useCallback((text: string, kind: "info" | "error" = "info") => {
-    const id = Date.now() + Math.random();
-    setToasts((prev) => [...prev, { id, text, kind }]);
-    window.setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 3500);
-  }, []);
 
   // Fetch filter options and people list once on page load
   useEffect(() => {
@@ -79,17 +67,6 @@ export default function MemoryPage() {
       });
   }, []);
 
-  // Debounce free-text search (Local input responds immediately, updates debounced value after 500ms)
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      setDebouncedQuery(queryInput);
-    }, 500);
-
-    return () => {
-      window.clearTimeout(timer);
-    };
-  }, [queryInput]);
-
   // Reset list selection and single selection when any filter changes
   useEffect(() => {
     setSelectedMemory(null);
@@ -110,13 +87,6 @@ export default function MemoryPage() {
   };
 
   const showRightPanel = status === "candidate" || status === "approved" || status === "rejected" || status === "superseded" || status === "expired";
-
-  const { containerRef, paneRef, containerStyle, isDragging, handleProps } = usePaneResize({
-    defaultSize: DEFAULT_LIST_RATIO,
-    minSize: 280,
-    minOther: 360,
-    storageKey: "memory",
-  });
 
   const handleRenderCopilotProfile = async () => {
     const confirmed = window.confirm(
@@ -215,17 +185,20 @@ export default function MemoryPage() {
           {isRendering ? "生成中…" : "プロファイル生成"}
         </button>
       </header>
-      <div
-        ref={containerRef}
-        style={containerStyle}
-        className="flex flex-1 flex-col overflow-hidden lg:flex-row"
-      >
-        <div
-          ref={paneRef}
-          className={`h-full w-full min-h-0 border-slate-200 lg:w-[var(--pane-size)] ${
-            mobileDetailOpen ? "hidden" : "flex flex-col"
-          } lg:flex lg:flex-col`}
-        >
+      <MasterDetailLayout
+        mobileOpen={mobileDetailOpen}
+        onBack={() => {
+          setMobileDetailOpen(false);
+          setSelectedMemory(null);
+        }}
+        mobileTitle="メモリ詳細"
+        paneOptions={{
+          defaultSize: DEFAULT_LIST_RATIO,
+          minSize: 280,
+          minOther: 360,
+          storageKey: "memory",
+        }}
+        list={
           <MemoryList
             status={status}
             query={debouncedQuery}
@@ -242,62 +215,28 @@ export default function MemoryPage() {
             refreshKey={refreshKey}
             notify={notify}
           />
-        </div>
-        <SplitHandle handleProps={handleProps} isDragging={isDragging} />
-        <div
-          className={`h-full w-full min-w-0 min-h-0 overflow-hidden lg:flex-1 ${
-            mobileDetailOpen ? "flex flex-col" : "hidden"
-          } lg:flex lg:flex-col`}
-        >
-          <div className="flex items-center gap-2 border-b border-slate-200 p-3 lg:hidden">
-            <button
-              type="button"
-              onClick={() => {
-                setMobileDetailOpen(false);
-                setSelectedMemory(null);
-              }}
-              aria-label="一覧に戻る"
-              className="cursor-pointer rounded px-2 py-1 text-sm text-slate-600 hover:bg-slate-100"
-            >
-              ← 一覧
-            </button>
-            <span className="truncate text-sm font-semibold text-slate-700">
-              メモリ詳細
-            </span>
-          </div>
-          <div className="min-h-0 flex-1 overflow-hidden">
-            {selectedMemory ? (
-              showRightPanel ? (
-                <MemoryDetailPanel
-                  memoryId={selectedMemory.memory_id}
-                  status={status}
-                  peopleOptions={peopleOptions}
-                  onChanged={onChanged}
-                  notify={notify}
-                />
-              ) : (
-                <p className="p-6 text-sm text-slate-500">
-                  このステータスの記憶は読み取り専用です。
-                </p>
-              )
+        }
+        detail={
+          selectedMemory ? (
+            showRightPanel ? (
+              <MemoryDetailPanel
+                memoryId={selectedMemory.memory_id}
+                status={status}
+                peopleOptions={peopleOptions}
+                onChanged={onChanged}
+                notify={notify}
+              />
             ) : (
-              <p className="p-6 text-sm text-slate-500">一覧から候補を選択してください。</p>
-            )}
-          </div>
-        </div>
-      </div>
-      <div className="pointer-events-none fixed bottom-4 right-4 flex flex-col gap-2">
-        {toasts.map((t) => (
-          <div
-            key={t.id}
-            className={`pointer-events-auto rounded px-4 py-2 text-sm text-white shadow ${
-              t.kind === "error" ? "bg-rose-600" : "bg-slate-900"
-            }`}
-          >
-            {t.text}
-          </div>
-        ))}
-      </div>
+              <p className="p-6 text-sm text-slate-500">
+                このステータスの記憶は読み取り専用です。
+              </p>
+            )
+          ) : (
+            <p className="p-6 text-sm text-slate-500">一覧から候補を選択してください。</p>
+          )
+        }
+      />
+      <ToastStack toasts={toasts} />
     </div>
   );
 }

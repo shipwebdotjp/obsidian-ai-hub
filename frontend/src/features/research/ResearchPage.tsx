@@ -1,17 +1,14 @@
 import { useCallback, useEffect, useState, useRef } from "react";
+import { getApiErrorMessage } from "../../utils/error";
 import ResearchList from "./ResearchList";
 import ResearchDetailPanel from "./ResearchDetailPanel";
-import SplitHandle from "../../components/SplitHandle";
-import { DEFAULT_LIST_RATIO, usePaneResize } from "../../hooks/usePaneResize";
+import MasterDetailLayout from "../../components/MasterDetailLayout";
+import { ToastStack, useToasts } from "../../components/Toast";
+import { useDebouncedValue } from "../../hooks/useDebouncedValue";
+import { DEFAULT_LIST_RATIO } from "../../hooks/usePaneResize";
 import type { ResearchTheme, ResearchStatus, ResearchMode } from "../../api/types";
-import { runResearchTheme, getResearchTheme, ApiError } from "../../api/client";
+import { runResearchTheme, getResearchTheme } from "../../api/client";
 import { listCodingProjects, type CodingProjectItem } from "../../api/coding";
-
-interface Toast {
-  id: number;
-  text: string;
-  kind: "info" | "error";
-}
 
 interface TrackedJob {
   jobId: string;
@@ -23,12 +20,12 @@ interface TrackedJob {
 export default function ResearchPage() {
   const [status, setStatus] = useState<string>("");
   const [queryInput, setQueryInput] = useState("");
-  const [debouncedQuery, setDebouncedQuery] = useState("");
+  const debouncedQuery = useDebouncedValue(queryInput, 500);
   const [selectedTheme, setSelectedTheme] = useState<ResearchTheme | null>(null);
   const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [detailRefreshKey, setDetailRefreshKey] = useState(0);
-  const [toasts, setToasts] = useState<Toast[]>([]);
+  const { toasts, notify } = useToasts();
 
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -58,31 +55,16 @@ export default function ResearchPage() {
     handleRefresh();
   }, [handleRefresh]);
 
-  const notify = useCallback((text: string, kind: "info" | "error" = "info") => {
-    const id = Date.now() + Math.random();
-    setToasts((prev) => [...prev, { id, text, kind }]);
-    window.setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 3500);
-  }, []);
-
   const openTheme = useCallback(async (themeId: string) => {
     try {
       const theme = await getResearchTheme(themeId);
       setSelectedTheme(theme);
       setMobileDetailOpen(true);
     } catch (e) {
-      const msg = e instanceof ApiError ? e.message : "テーマ詳細の取得に失敗しました";
+      const msg = getApiErrorMessage(e, "テーマ詳細の取得に失敗しました");
       notify(msg, "error");
     }
   }, [notify]);
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      setDebouncedQuery(queryInput);
-    }, 500);
-    return () => window.clearTimeout(timer);
-  }, [queryInput]);
 
   useEffect(() => {
     setSelectedTheme(null);
@@ -243,7 +225,7 @@ export default function ResearchPage() {
       // Trigger list refresh
       handleRefresh();
     } catch (err) {
-      const msg = err instanceof ApiError ? err.message : "リサーチの作成に失敗しました";
+      const msg = getApiErrorMessage(err, "リサーチの作成に失敗しました");
       setModalError(msg);
     } finally {
       setIsSubmitting(false);
@@ -258,13 +240,6 @@ export default function ResearchPage() {
     setProjectIdInput(null);
     setModalError(null);
   };
-
-  const { containerRef, paneRef, containerStyle, isDragging, handleProps } = usePaneResize({
-    defaultSize: DEFAULT_LIST_RATIO,
-    minSize: 280,
-    minOther: 360,
-    storageKey: "research",
-  });
 
   return (
     <div className="flex h-full flex-col">
@@ -303,17 +278,17 @@ export default function ResearchPage() {
           新規リサーチ
         </button>
       </header>
-      <div
-        ref={containerRef}
-        style={containerStyle}
-        className="flex flex-1 flex-col overflow-hidden lg:flex-row"
-      >
-        <div
-          ref={paneRef}
-          className={`h-full w-full min-h-0 border-slate-200 lg:w-[var(--pane-size)] ${
-            mobileDetailOpen ? "hidden" : "flex flex-col"
-          } lg:flex lg:flex-col`}
-        >
+      <MasterDetailLayout
+        mobileOpen={mobileDetailOpen}
+        onBack={() => setMobileDetailOpen(false)}
+        mobileTitle="リサーチ詳細"
+        paneOptions={{
+          defaultSize: DEFAULT_LIST_RATIO,
+          minSize: 280,
+          minOther: 360,
+          storageKey: "research",
+        }}
+        list={
           <ResearchList
             status={status}
             query={debouncedQuery}
@@ -325,53 +300,22 @@ export default function ResearchPage() {
             refreshKey={refreshKey}
             notify={notify}
           />
-        </div>
-        <SplitHandle handleProps={handleProps} isDragging={isDragging} />
-        <div
-          className={`h-full w-full min-w-0 min-h-0 overflow-hidden lg:flex-1 ${
-            mobileDetailOpen ? "flex flex-col" : "hidden"
-          } lg:flex lg:flex-col`}
-        >
-          <div className="flex items-center gap-2 border-b border-slate-200 p-3 lg:hidden">
-            <button
-              type="button"
-              onClick={() => setMobileDetailOpen(false)}
-              aria-label="一覧に戻る"
-              className="rounded px-2 py-1 text-sm text-slate-600 hover:bg-slate-100"
-            >
-              ← 一覧
-            </button>
-            <span className="truncate text-sm font-semibold text-slate-700">
-              リサーチ詳細
-            </span>
-          </div>
-          <div className="min-h-0 flex-1 overflow-hidden">
-            {selectedTheme ? (
-              <ResearchDetailPanel
-                themeId={selectedTheme.theme_id}
-                refreshKey={detailRefreshKey}
-                onChanged={onChanged}
-                onOpenTheme={openTheme}
-                notify={notify}
-              />
-            ) : (
-              <p className="p-6 text-sm text-slate-500">一覧からテーマを選択してください。</p>
-            )}
-          </div>
-        </div>
-      </div>
-      <div className="pointer-events-none fixed bottom-4 right-4 flex flex-col gap-2">
-        {toasts.map((t) => (
-          <div
-            key={t.id}
-            className={`pointer-events-auto rounded px-4 py-2 text-sm text-white shadow ${
-              t.kind === "error" ? "bg-rose-600" : "bg-slate-900"
-            }`}
-          >
-            {t.text}
-          </div>
-        ))}
-      </div>
+        }
+        detail={
+          selectedTheme ? (
+            <ResearchDetailPanel
+              themeId={selectedTheme.theme_id}
+              refreshKey={detailRefreshKey}
+              onChanged={onChanged}
+              onOpenTheme={openTheme}
+              notify={notify}
+            />
+          ) : (
+            <p className="p-6 text-sm text-slate-500">一覧からテーマを選択してください。</p>
+          )
+        }
+      />
+      <ToastStack toasts={toasts} />
 
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">

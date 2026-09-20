@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import { getApiErrorMessage } from "../../utils/error";
 import {
   getToken,
   setToken,
   clearToken,
   listMemories,
-  ApiError,
   AUTH_EXPIRED_EVENT,
 } from "../../api/client";
 import { useChatSendMode } from "./chatSendMode";
@@ -36,7 +36,7 @@ export default function SettingsPage() {
       setSaved(true);
     } catch (e) {
       if (!isMounted.current) return;
-      const msg = e instanceof ApiError ? e.message : "トークン検証に失敗しました";
+      const msg = getApiErrorMessage(e, "トークン検証に失敗しました");
       clearToken();
       setError(msg);
     } finally {

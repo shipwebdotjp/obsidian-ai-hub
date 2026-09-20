@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { getErrorMessage } from "../../utils/error";
 import { ChevronRight } from "lucide-react";
 import { useSessionPromptDraft } from "../../hooks/useSessionPromptDraft";
 import { CodingSidebar } from "./components/CodingSidebar";
@@ -305,7 +306,7 @@ export default function CodingPage() {
                   })
                   .catch((e: unknown) => {
                     setError(
-                      e instanceof Error ? e.message : "モデルの変更に失敗しました",
+                      getErrorMessage(e, "モデルの変更に失敗しました"),
                     );
                   })
                   .finally(() => setModelChanging(false));

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import { getErrorMessage } from "../../utils/error";
 import PersonCombobox from "./PersonCombobox";
 import DatePrecisionInput, { getPartialDateBounds } from "./DatePrecisionInput";
 import { useNativeDialog } from "./useNativeDialog";
@@ -232,7 +233,7 @@ export default function RelationFormModal({
       }
       onClose();
     } catch (err: unknown) {
-      setFormError(err instanceof Error ? err.message : "関係の保存に失敗しました。");
+      setFormError(getErrorMessage(err, "関係の保存に失敗しました。"));
     } finally {
       setSubmitting(false);
     }
@@ -263,7 +264,7 @@ export default function RelationFormModal({
       setNewEvNote("");
       setNewEvObservedAt("");
     } catch (err: unknown) {
-      setFormError(err instanceof Error ? err.message : "根拠の追加に失敗しました。");
+      setFormError(getErrorMessage(err, "根拠の追加に失敗しました。"));
     } finally {
       setEvidenceSubmitting(false);
     }
@@ -295,7 +296,7 @@ export default function RelationFormModal({
       await onUpdateEvidence(evidenceId, toEvidenceFields(draft));
       setEditingEvidenceId(null);
     } catch (err: unknown) {
-      setFormError(err instanceof Error ? err.message : "根拠の更新に失敗しました。");
+      setFormError(getErrorMessage(err, "根拠の更新に失敗しました。"));
     } finally {
       setEvidenceSubmitting(false);
     }
@@ -309,7 +310,7 @@ export default function RelationFormModal({
     try {
       await onDeleteEvidence(evidenceId);
     } catch (err: unknown) {
-      setFormError(err instanceof Error ? err.message : "根拠の削除に失敗しました。");
+      setFormError(getErrorMessage(err, "根拠の削除に失敗しました。"));
     } finally {
       setEvidenceSubmitting(false);
     }

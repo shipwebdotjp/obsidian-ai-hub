@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ApiError,
   AUTH_EXPIRED_EVENT,
+  buildQuery,
   cancelHitlRun,
   clearToken,
   deleteMemory,
@@ -15,6 +16,7 @@ import {
   submitHitlAnswer,
   updateSummary,
   generateSummary,
+  withQuery,
 } from "./client";
 
 const TOKEN_KEY = "obsidian-ai-hub:api-token";
@@ -357,5 +359,25 @@ describe("api/client", () => {
       const result = await deleteMemory("m1");
       expect(result).toBeUndefined();
     });
+  });
+});
+
+describe("buildQuery / withQuery", () => {
+  it("skips undefined, null, and empty string values", () => {
+    expect(buildQuery({ a: "1", b: undefined, c: null, d: "", e: 0, f: false })).toBe(
+      "a=1&e=0&f=false",
+    );
+  });
+
+  it("percent-encodes keys and values", () => {
+    expect(buildQuery({ q: "a b&c" })).toBe("q=a+b%26c");
+  });
+
+  it("returns the path unchanged when no query remains", () => {
+    expect(withQuery("/api/v1/items", { a: undefined })).toBe("/api/v1/items");
+  });
+
+  it("appends the query with a question mark", () => {
+    expect(withQuery("/api/v1/items", { a: "1" })).toBe("/api/v1/items?a=1");
   });
 });

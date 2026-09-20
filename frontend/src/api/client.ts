@@ -74,6 +74,22 @@ export function clearToken(): void {
   localStorage.removeItem(TOKEN_KEY);
 }
 
+/** クエリ文字列を構築する。`undefined` / `null` / 空文字は除外する。 */
+export function buildQuery(params: Record<string, unknown>): string {
+  const sp = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined || value === null || value === "") continue;
+    sp.set(key, String(value));
+  }
+  return sp.toString();
+}
+
+/** パスにクエリ文字列を付与する。クエリが空ならパスのみを返す。 */
+export function withQuery(path: string, params: Record<string, unknown> = {}): string {
+  const qs = buildQuery(params);
+  return qs ? `${path}?${qs}` : path;
+}
+
 export class ApiError extends Error {
   status: number;
   body: any;
@@ -133,12 +149,7 @@ export function listMemories(params: {
   limit?: number;
   offset?: number;
 }): Promise<MemoryListResponse> {
-  const sp = new URLSearchParams();
-  for (const [k, v] of Object.entries(params)) {
-    if (v !== undefined && v !== null && v !== "") sp.set(k, String(v));
-  }
-  const qs = sp.toString();
-  return request<MemoryListResponse>(`/api/v1/memories${qs ? `?${qs}` : ""}`);
+  return request<MemoryListResponse>(withQuery("/api/v1/memories", params));
 }
 
 export function getMemory(memoryId: string): Promise<MemoryDetail> {
@@ -217,12 +228,13 @@ export function listHitlRuns(params: {
   limit?: number;
   offset?: number;
 }): Promise<HitlRunListResponse> {
-  const sp = new URLSearchParams();
-  if (params.status) sp.set("status", params.status);
-  if (params.limit) sp.set("limit", String(params.limit));
-  if (params.offset) sp.set("offset", String(params.offset));
-  const qs = sp.toString();
-  return request<HitlRunListResponse>(`/api/v1/hitl/runs${qs ? `?${qs}` : ""}`);
+  return request<HitlRunListResponse>(
+    withQuery("/api/v1/hitl/runs", {
+      status: params.status,
+      limit: params.limit,
+      offset: params.offset,
+    }),
+  );
 }
 
 export function getHitlRun(runId: string): Promise<HitlRunDetail> {
@@ -274,11 +286,11 @@ export function previewCommand(command: string): Promise<CommandPreviewResponse>
 export function listOneShotJobs(limit = 100, offset = 0): Promise<OneShotJobListResponse> {
   const safeLimit = Number.isFinite(limit) ? Math.min(200, Math.max(1, Math.floor(limit))) : 100;
   const safeOffset = Number.isFinite(offset) ? Math.max(0, Math.floor(offset)) : 0;
-  const sp = new URLSearchParams();
-  sp.set("limit", String(safeLimit));
-  sp.set("offset", String(safeOffset));
   return request<OneShotJobListResponse>(
-    `/api/v1/scheduler-jobs/one-shot-jobs?${sp.toString()}`,
+    withQuery("/api/v1/scheduler-jobs/one-shot-jobs", {
+      limit: safeLimit,
+      offset: safeOffset,
+    }),
   );
 }
 
@@ -350,12 +362,7 @@ export function listResearchThemes(params: {
   job_status?: string;
   q?: string;
 }): Promise<ResearchListResponse> {
-  const sp = new URLSearchParams();
-  for (const [k, v] of Object.entries(params)) {
-    if (v) sp.set(k, v);
-  }
-  const qs = sp.toString();
-  return request<ResearchListResponse>(`/api/v1/research-themes${qs ? `?${qs}` : ""}`);
+  return request<ResearchListResponse>(withQuery("/api/v1/research-themes", params));
 }
 
 export function getResearchTheme(themeId: string): Promise<ResearchTheme> {
@@ -389,17 +396,11 @@ export function searchVault(params: {
   k?: number;
   mode?: "hybrid" | "keyword" | "similarity";
 }): Promise<VaultSearchResponse> {
-  const sp = new URLSearchParams();
-  sp.set("q", params.q);
-  if (params.k) sp.set("k", String(params.k));
-  if (params.mode) sp.set("mode", params.mode);
-  return request<VaultSearchResponse>(`/api/v1/vault-search?${sp.toString()}`);
+  return request<VaultSearchResponse>(withQuery("/api/v1/vault-search", params));
 }
 
 export function getVaultFile(path: string, signal?: AbortSignal): Promise<VaultFileResponse> {
-  const sp = new URLSearchParams();
-  sp.set("path", path);
-  return request<VaultFileResponse>(`/api/v1/vault-file?${sp.toString()}`, { signal });
+  return request<VaultFileResponse>(withQuery("/api/v1/vault-file", { path }), { signal });
 }
 
 // Summary Dashboard API
@@ -419,12 +420,8 @@ export function getDashboardBrowse(params: {
   year?: string;
   month?: string;
 }): Promise<DashboardBrowseResponse> {
-  const sp = new URLSearchParams();
-  if (params.year) sp.set("year", params.year);
-  if (params.month) sp.set("month", params.month);
-  const qs = sp.toString();
   return request<DashboardBrowseResponse>(
-    `/api/v1/summary-dashboard/browse${qs ? `?${qs}` : ""}`
+    withQuery("/api/v1/summary-dashboard/browse", params)
   );
 }
 
@@ -451,11 +448,8 @@ export function getDashboardStats(params: {
   start_date: string;
   end_date: string;
 }): Promise<DashboardStatsResponse> {
-  const sp = new URLSearchParams();
-  sp.set("start_date", params.start_date);
-  sp.set("end_date", params.end_date);
   return request<DashboardStatsResponse>(
-    `/api/v1/summary-dashboard/stats?${sp.toString()}`
+    withQuery("/api/v1/summary-dashboard/stats", params)
   );
 }
 
@@ -486,11 +480,8 @@ export function getHealthcareOverview(params: {
   start_date: string;
   end_date: string;
 }): Promise<HealthcareOverviewResponse> {
-  const sp = new URLSearchParams();
-  sp.set("start_date", params.start_date);
-  sp.set("end_date", params.end_date);
   return request<HealthcareOverviewResponse>(
-    `/api/v1/healthcare/overview?${sp.toString()}`,
+    withQuery("/api/v1/healthcare/overview", params),
   );
 }
 
@@ -500,13 +491,8 @@ export function getHealthcareCorrelation(params: {
   start_date: string;
   end_date: string;
 }): Promise<HealthcareCorrelationResponse> {
-  const sp = new URLSearchParams();
-  sp.set("metric_x", params.metric_x);
-  sp.set("metric_y", params.metric_y);
-  sp.set("start_date", params.start_date);
-  sp.set("end_date", params.end_date);
   return request<HealthcareCorrelationResponse>(
-    `/api/v1/healthcare/correlation?${sp.toString()}`,
+    withQuery("/api/v1/healthcare/correlation", params),
   );
 }
 
@@ -533,8 +519,9 @@ export function listPeople(): Promise<Person[]> {
 }
 
 export function getPlannerTimeline(start: string, end: string): Promise<PlannerTimelineResponse> {
-  const qs = new URLSearchParams({ start, end }).toString();
-  return request<PlannerTimelineResponse>(`/api/v1/planner/timeline?${qs}`);
+  return request<PlannerTimelineResponse>(
+    withQuery("/api/v1/planner/timeline", { start, end }),
+  );
 }
 
 export function listPlannerProposals(params: {
@@ -543,13 +530,8 @@ export function listPlannerProposals(params: {
   limit?: number;
   offset?: number;
 }): Promise<PlannerProposalListResponse> {
-  const sp = new URLSearchParams();
-  for (const [k, v] of Object.entries(params)) {
-    if (v !== undefined && v !== null && v !== "") sp.set(k, String(v));
-  }
-  const qs = sp.toString();
   return request<PlannerProposalListResponse>(
-    `/api/v1/planner/proposals${qs ? `?${qs}` : ""}`,
+    withQuery("/api/v1/planner/proposals", params),
   );
 }
 
@@ -655,9 +637,8 @@ export function listAgentSessions(agentId: string): Promise<{ sessions: AgentSes
 export function searchAgentMessages(
   query: string,
 ): Promise<{ results: AgentMessageSearchResult[] }> {
-  const params = new URLSearchParams({ q: query });
   return request<{ results: AgentMessageSearchResult[] }>(
-    `/api/v1/agent-sessions/search?${params.toString()}`,
+    withQuery("/api/v1/agent-sessions/search", { q: query }),
   );
 }
 
@@ -874,13 +855,12 @@ export function listTaskAgentTasks(params: {
   limit?: number;
   offset?: number;
 }): Promise<TaskAgentListResponse> {
-  const sp = new URLSearchParams();
-  if (params.status) sp.set("status", params.status);
-  if (params.limit != null) sp.set("limit", String(params.limit));
-  if (params.offset != null) sp.set("offset", String(params.offset));
-  const qs = sp.toString();
   return request<TaskAgentListResponse>(
-    `/api/v1/task-agent/tasks${qs ? `?${qs}` : ""}`,
+    withQuery("/api/v1/task-agent/tasks", {
+      status: params.status,
+      limit: params.limit,
+      offset: params.offset,
+    }),
   );
 }
 

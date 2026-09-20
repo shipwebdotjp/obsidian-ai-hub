@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   generatePlannerProposals,
   getPlannerTimeline,
@@ -14,13 +14,8 @@ import type {
 } from "../../api/types";
 import ProposalDetailPanel from "./ProposalDetailPanel";
 import SplitHandle from "../../components/SplitHandle";
+import { ToastStack, useToasts } from "../../components/Toast";
 import { usePaneResize } from "../../hooks/usePaneResize";
-
-interface Toast {
-  id: number;
-  text: string;
-  kind: "info" | "error";
-}
 
 type ViewMode = "month" | "week";
 
@@ -208,15 +203,7 @@ export default function PlannerPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
-  const [toasts, setToasts] = useState<Toast[]>([]);
-
-  const notify = useCallback((text: string, kind: "info" | "error" = "info") => {
-    const id = Date.now() + Math.random();
-    setToasts((prev) => [...prev, { id, text, kind }]);
-    window.setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 3500);
-  }, []);
+  const { toasts, notify } = useToasts();
 
   const isMonthView = view === "month";
 
@@ -594,18 +581,7 @@ export default function PlannerPage() {
         )}
       </div>
 
-      <div className="pointer-events-none fixed bottom-4 right-4 flex flex-col gap-2">
-        {toasts.map((t) => (
-          <div
-            key={t.id}
-            className={`pointer-events-auto rounded px-4 py-2 text-sm text-white shadow ${
-              t.kind === "error" ? "bg-rose-600" : "bg-slate-900"
-            }`}
-          >
-            {t.text}
-          </div>
-        ))}
-      </div>
+      <ToastStack toasts={toasts} />
     </div>
   );
 }

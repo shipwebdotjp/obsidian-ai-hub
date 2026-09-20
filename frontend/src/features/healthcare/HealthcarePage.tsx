@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ApiError, getHealthcareCorrelation, getHealthcareOverview } from "../../api/client";
+import { getApiErrorMessage } from "../../utils/error";
+import { getHealthcareCorrelation, getHealthcareOverview } from "../../api/client";
 import type { HealthcareCorrelationResponse, HealthcareOverviewResponse } from "../../api/types";
 import HealthcareImportDialog from "./HealthcareImportDialog";
 import { HealthcareScatterChart } from "./HealthcareScatterChart";
@@ -52,7 +53,7 @@ export default function HealthcarePage() {
       })
       .catch((e) => {
         if (reqId !== requestRef.current) return;
-        setError(e instanceof ApiError ? e.message : "ヘルスケアデータの取得に失敗しました");
+        setError(getApiErrorMessage(e, "ヘルスケアデータの取得に失敗しました"));
       })
       .finally(() => {
         if (reqId === requestRef.current) setLoading(false);
@@ -70,7 +71,7 @@ export default function HealthcarePage() {
       })
       .catch((e) => {
         if (reqId !== corrRequestRef.current) return;
-        setCorrError(e instanceof ApiError ? e.message : "相関データの取得に失敗しました");
+        setCorrError(getApiErrorMessage(e, "相関データの取得に失敗しました"));
       })
       .finally(() => {
         if (reqId === corrRequestRef.current) setCorrLoading(false);

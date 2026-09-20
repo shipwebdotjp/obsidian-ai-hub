@@ -1,4 +1,4 @@
-import { apiGet, apiPost, apiPut, apiDelete, getToken, clearToken, AUTH_EXPIRED_EVENT, ApiError } from "./client";
+import { apiGet, apiPost, apiPut, apiDelete, getToken, clearToken, AUTH_EXPIRED_EVENT, ApiError, withQuery } from "./client";
 import type { Project, AskUserAnswerRound } from "./types";
 import type { QuestionItem } from "../components/InConversationQuestionCard";
 
@@ -309,7 +309,7 @@ export type CodingSseEvent =
   | { event: "error"; message: string };
 
 export function getGitStatus(repoPath: string): Promise<GitStatus> {
-  return apiGet<GitStatus>(`/api/v1/coding/git-status?repo_path=${encodeURIComponent(repoPath)}`);
+  return apiGet<GitStatus>(withQuery("/api/v1/coding/git-status", { repo_path: repoPath }));
 }
 
 export function listCodingProjects(): Promise<CodingProjectItem[]> {
@@ -317,7 +317,7 @@ export function listCodingProjects(): Promise<CodingProjectItem[]> {
 }
 
 export function listCodingSessions(projectId: number): Promise<CodingSession[]> {
-  return apiGet<CodingSession[]>(`/api/v1/coding/sessions?project_id=${projectId}`);
+  return apiGet<CodingSession[]>(withQuery("/api/v1/coding/sessions", { project_id: projectId }));
 }
 
 export function getCodingDefaults(): Promise<CodingDefaults> {

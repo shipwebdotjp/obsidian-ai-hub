@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { apiGet, apiPost, apiPatch, ApiError } from "../../api/client";
+import { apiGet, apiPost, apiPatch, ApiError, withQuery } from "../../api/client";
 import type { ProjectCandidate } from "../../api/types";
 import CandidateList from "./CandidateList";
 import CandidateDetail from "./CandidateDetail";
@@ -9,7 +9,7 @@ import ArchiveList from "./ArchiveList";
 import ProjectFormModal from "./ProjectFormModal";
 import SplitHandle from "../../components/SplitHandle";
 import { DEFAULT_LIST_RATIO, usePaneResize } from "../../hooks/usePaneResize";
-import { parseKeywords } from "./utils";
+import { splitList } from "../../utils/list";
 import type {
   Project,
   ProjectDetail as ProjectDetailType,
@@ -74,9 +74,9 @@ export default function ProjectsPage() {
     const reqId = ++candidatesRequestCounterRef.current;
     setLoading(true);
     try {
-      const unresolved = await apiGet<ProjectCandidate[]>("/api/v1/projects/candidates?status=unresolved");
-      const resolved = await apiGet<ProjectCandidate[]>("/api/v1/projects/candidates?status=resolved");
-      const rejected = await apiGet<ProjectCandidate[]>("/api/v1/projects/candidates?status=rejected");
+      const unresolved = await apiGet<ProjectCandidate[]>(withQuery("/api/v1/projects/candidates", { status: "unresolved" }));
+      const resolved = await apiGet<ProjectCandidate[]>(withQuery("/api/v1/projects/candidates", { status: "resolved" }));
+      const rejected = await apiGet<ProjectCandidate[]>(withQuery("/api/v1/projects/candidates", { status: "rejected" }));
       if (reqId === candidatesRequestCounterRef.current) {
         setCandidates(unresolved);
         setArchivedCandidates([...resolved, ...rejected]);
@@ -96,18 +96,12 @@ export default function ProjectsPage() {
     const reqId = ++projectsRequestCounterRef.current;
     setLoading(true);
     try {
-      let url = "/api/v1/projects";
-      const qParts: string[] = [];
-      if (domainFilter !== "all") {
-        qParts.push(`domain=${domainFilter}`);
-      }
-      if (statusFilter !== "all") {
-        qParts.push(`status=${statusFilter}`);
-      }
-      if (qParts.length > 0) {
-        url += "?" + qParts.join("&");
-      }
-      const data = await apiGet<Project[]>(url);
+      const data = await apiGet<Project[]>(
+        withQuery("/api/v1/projects", {
+          domain: domainFilter !== "all" ? domainFilter : undefined,
+          status: statusFilter !== "all" ? statusFilter : undefined,
+        }),
+      );
       if (reqId === projectsRequestCounterRef.current) {
         setProjects(data);
       }
@@ -187,7 +181,7 @@ export default function ProjectsPage() {
     setLoading(true);
     clearMessages();
     try {
-      const keywords = parseKeywords(formKeywordsText);
+      const keywords = splitList(formKeywordsText);
 
       const res = await apiPost<ProjectDetailType>("/api/v1/projects", {
         display_name: formDisplayName,
@@ -240,7 +234,7 @@ export default function ProjectsPage() {
     setLoading(true);
     clearMessages();
     try {
-      const keywords = parseKeywords(formKeywordsText);
+      const keywords = splitList(formKeywordsText);
 
       const res = await apiPatch<ProjectDetailType>(`/api/v1/projects/${selectedProject.project_id}`, {
         display_name: formDisplayName,
@@ -294,7 +288,7 @@ export default function ProjectsPage() {
     setLoading(true);
     clearMessages();
     try {
-      const keywords = parseKeywords(formKeywordsText);
+      const keywords = splitList(formKeywordsText);
 
       let payload: any = {
         action: resolveMode,

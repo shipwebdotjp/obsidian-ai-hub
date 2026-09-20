@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from "react";
+import { getErrorMessage } from "../../utils/error";
+import { useCopyMessage } from "../../hooks/useCopyMessage";
 import {
   cancelAgentRun,
   startAgentRun,
@@ -134,8 +136,7 @@ export function useAgentChat({
   const [streamingPhase, setStreamingPhase] = useState<"thinking" | "tool_preparing" | "tool_running" | null>(null);
   const [streamingIteration, setStreamingIteration] = useState<number | null>(null);
   const [hitlLinks, setHitlLinks] = useState<string[]>([]);
-  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
-  const copyResetRef = useRef<number | null>(null);
+  const { copiedMessageId, handleCopyMessage } = useCopyMessage();
   const [selectedSkill, setSelectedSkill] = useState<SlashInvocation | null>(null);
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
   const [attachmentReadsPending, setAttachmentReadsPending] = useState(0);
@@ -649,7 +650,7 @@ export function useAgentChat({
       removeTempMessage();
       resetStreamingState();
       abortControllerRef.current = null;
-      onChatError(err instanceof Error ? err.message : "メッセージの送信に失敗しました。");
+      onChatError(getErrorMessage(err, "メッセージの送信に失敗しました。"));
       return;
     }
 
@@ -688,7 +689,7 @@ export function useAgentChat({
       resetStreamingState();
       abortControllerRef.current = null;
       activeRunIdRef.current = null;
-      onChatError(err instanceof Error ? err.message : "メッセージの送信に失敗しました。");
+      onChatError(getErrorMessage(err, "メッセージの送信に失敗しました。"));
     }
   };
   sendRunRef.current = sendRun;
@@ -743,7 +744,7 @@ export function useAgentChat({
             return;
           }
           const message =
-            error instanceof Error ? error.message : "メッセージの送信に失敗しました。";
+            getErrorMessage(error, "メッセージの送信に失敗しました。");
           updateQueueRef.current(sessionId, (items) =>
             markQueuedAgentMessageError(items, head.queue_id, message),
           );
@@ -846,7 +847,7 @@ export function useAgentChat({
     try {
       await cancelAgentRun(runId);
     } catch (e) {
-      onChatError(e instanceof Error ? e.message : "キャンセルの送信に失敗しました。");
+      onChatError(getErrorMessage(e, "キャンセルの送信に失敗しました。"));
     }
   }, [onChatError]);
 
@@ -968,33 +969,6 @@ export function useAgentChat({
     // insert text while we only attach images.
     void handleFilesSelected(files);
   };
-
-  const handleCopyMessage = async (content: string, messageId: string) => {
-    try {
-      await navigator.clipboard.writeText(content);
-      setCopiedMessageId(messageId);
-      if (copyResetRef.current !== null) {
-        window.clearTimeout(copyResetRef.current);
-      }
-      copyResetRef.current = window.setTimeout(() => {
-        setCopiedMessageId((current) => (current === messageId ? null : current));
-        copyResetRef.current = null;
-      }, 2000);
-    } catch (err) {
-      console.error("Failed to copy message:", err);
-    }
-  };
-
-  // Cleanup pending copy-feedback timer on unmount to avoid state updates
-  // on an unmounted component.
-  useEffect(() => {
-    return () => {
-      if (copyResetRef.current !== null) {
-        window.clearTimeout(copyResetRef.current);
-        copyResetRef.current = null;
-      }
-    };
-  }, []);
 
   // Cleanup abort controller on unmount
   useEffect(() => {

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type MutableRefObject } from "react";
+import { getErrorMessage } from "../../utils/error";
 import type { SetURLSearchParams } from "react-router-dom";
 import {
   createAgentSession,
@@ -125,7 +126,7 @@ export function useAgentSessions({
       pendingSessionIdRef.current = null;
       pendingSourceRef.current = null;
     } catch (e: unknown) {
-      onActionError(e instanceof Error ? e.message : "会話履歴の読み込みに失敗しました。");
+      onActionError(getErrorMessage(e, "会話履歴の読み込みに失敗しました。"));
     }
   };
 
@@ -181,7 +182,7 @@ export function useAgentSessions({
         } catch (e: unknown) {
           console.error("Failed to load HITL question set", e);
           setActiveWaitingRun(null);
-          onChatError(e instanceof Error ? e.message : "確認質問の読み込みに失敗しました。");
+          onChatError(getErrorMessage(e, "確認質問の読み込みに失敗しました。"));
         }
       } else {
         setActiveWaitingRun(null);
@@ -203,7 +204,7 @@ export function useAgentSessions({
         return;
       }
       const message =
-        e instanceof Error ? e.message : "セッション詳細の読み込みに失敗しました。";
+        getErrorMessage(e, "セッション詳細の読み込みに失敗しました。");
       onChatError(message);
     }
   };
@@ -241,7 +242,7 @@ export function useAgentSessions({
       }
     } catch (e: unknown) {
       if (selectedSessionIdRef.current !== opSessionId) return;
-      onChatError(e instanceof Error ? e.message : "回答の送信に失敗しました");
+      onChatError(getErrorMessage(e, "回答の送信に失敗しました"));
     }
   };
 
@@ -256,7 +257,7 @@ export function useAgentSessions({
       }
     } catch (e: unknown) {
       if (selectedSessionIdRef.current !== opSessionId) return;
-      onChatError(e instanceof Error ? e.message : "質問の取消に失敗しました");
+      onChatError(getErrorMessage(e, "質問の取消に失敗しました"));
     }
   };
 
@@ -402,7 +403,7 @@ export function useAgentSessions({
       }
     } catch (err: unknown) {
       const message =
-        err instanceof Error ? err.message : "会話タイトルの更新に失敗しました。";
+        getErrorMessage(err, "会話タイトルの更新に失敗しました。");
       setEditTitleError(message);
     }
   };
@@ -417,7 +418,7 @@ export function useAgentSessions({
         setSessions(res.sessions);
       }
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "ピン留めの更新に失敗しました。";
+      const message = getErrorMessage(err, "ピン留めの更新に失敗しました。");
       onActionError(message);
     }
   };
@@ -443,7 +444,7 @@ export function useAgentSessions({
           if (!cancelled) {
             setSessionSearchResults([]);
             setSessionSearchError(
-              error instanceof Error ? error.message : "会話履歴の検索に失敗しました。",
+              getErrorMessage(error, "会話履歴の検索に失敗しました。"),
             );
           }
         })

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { setToken, clearToken, listMemories, ApiError } from "../api/client";
+import { getApiErrorMessage } from "../utils/error";
+import { setToken, clearToken, listMemories } from "../api/client";
 
 export interface TokenPromptProps {
   onAuthenticated: () => void;
@@ -41,7 +42,7 @@ export default function TokenPrompt({
       onAuthenticated();
     } catch (e) {
       if (!isMounted.current) return;
-      const msg = e instanceof ApiError ? e.message : "トークン検証に失敗しました";
+      const msg = getApiErrorMessage(e, "トークン検証に失敗しました");
       setError(msg);
       clearToken();
     } finally {

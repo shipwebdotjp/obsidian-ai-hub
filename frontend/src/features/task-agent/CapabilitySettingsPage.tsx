@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
+import { getApiErrorMessage } from "../../utils/error";
 import {
-  ApiError,
   listTaskAgentCapabilities,
   updateTaskAgentCapability,
 } from "../../api/client";
@@ -61,7 +61,7 @@ export default function CapabilitySettingsPage() {
       setItems(res);
       setRows(Object.fromEntries(res.map((c) => [c.capability_key, toRow(c)])));
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "読み込みに失敗しました");
+      setError(getApiErrorMessage(e, "読み込みに失敗しました"));
     } finally {
       setLoading(false);
     }
@@ -96,7 +96,7 @@ export default function CapabilitySettingsPage() {
     } catch (e) {
       patchRow(c.capability_key, {
         busy: false,
-        error: e instanceof ApiError ? e.message : "保存に失敗しました",
+        error: getApiErrorMessage(e, "保存に失敗しました"),
       });
     }
   };

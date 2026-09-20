@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useCopyMessage } from "../../../hooks/useCopyMessage";
 import type { CodingLiveToolCall, CodingMessage } from "../../../api/coding";
 import type { ActiveWaitingRun } from "../../../components/InConversationQuestionCard";
 
@@ -33,8 +34,7 @@ export function useCodingUiState({
   const drawerTriggerBtnRef = useRef<HTMLButtonElement>(null);
   const mobileDrawerRef = useRef<HTMLDivElement>(null);
 
-  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
-  const copyResetRef = useRef<number | null>(null);
+  const { copiedMessageId, handleCopyMessage } = useCopyMessage();
 
   const messageEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -56,31 +56,6 @@ export function useCodingUiState({
     if (!stickToBottomRef.current) return;
     // scrollIntoView は先祖スクロール全体へ波及するため使わない。
     container.scrollTo({ top: container.scrollHeight, behavior: "auto" });
-  }, []);
-
-  const handleCopyMessage = async (content: string, messageId: string) => {
-    try {
-      await navigator.clipboard.writeText(content);
-      setCopiedMessageId(messageId);
-      if (copyResetRef.current !== null) {
-        window.clearTimeout(copyResetRef.current);
-      }
-      copyResetRef.current = window.setTimeout(() => {
-        setCopiedMessageId((current) => (current === messageId ? null : current));
-        copyResetRef.current = null;
-      }, 2000);
-    } catch (err) {
-      console.error("Failed to copy message:", err);
-    }
-  };
-
-  useEffect(() => {
-    return () => {
-      if (copyResetRef.current !== null) {
-        window.clearTimeout(copyResetRef.current);
-        copyResetRef.current = null;
-      }
-    };
   }, []);
 
   // Auto-scroll on new messages / phase change / waiting-run change

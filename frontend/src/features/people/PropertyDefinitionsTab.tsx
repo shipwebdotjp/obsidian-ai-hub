@@ -1,4 +1,6 @@
+import { splitList } from "../../utils/list";
 import React, { useRef, useState } from "react";
+import { getErrorMessage } from "../../utils/error";
 import {
   PersonPropertyDefinition,
   PersonPropertyDefinitionCreateRequest,
@@ -147,19 +149,13 @@ export default function PropertyDefinitionsTab({
       return;
     }
 
-    const aliases = createAliasesText
-      .split("\n")
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0);
+    const aliases = splitList(createAliasesText);
 
     const formattedOptions = createOptions.map((opt) => ({
       option_key: opt.option_key.trim(),
       display_name: opt.display_name.trim(),
       display_order: opt.display_order,
-      aliases: opt.aliases_text
-        .split("\n")
-        .map((s) => s.trim())
-        .filter((s) => s.length > 0),
+      aliases: splitList(opt.aliases_text),
     }));
 
     setSubmittingCreate(true);
@@ -175,7 +171,7 @@ export default function PropertyDefinitionsTab({
       });
       setShowCreateModal(false);
     } catch (err: unknown) {
-      setCreateError(err instanceof Error ? err.message : "属性定義の作成に失敗しました。");
+      setCreateError(getErrorMessage(err, "属性定義の作成に失敗しました。"));
     } finally {
       setSubmittingCreate(false);
     }
@@ -196,19 +192,13 @@ export default function PropertyDefinitionsTab({
       return;
     }
 
-    const aliases = editAliasesText
-      .split("\n")
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0);
+    const aliases = splitList(editAliasesText);
 
     const formattedOptions = editOptions.map((opt) => ({
       option_key: opt.option_key.trim(),
       display_name: opt.display_name.trim(),
       display_order: opt.display_order,
-      aliases: opt.aliases_text
-        .split("\n")
-        .map((s) => s.trim())
-        .filter((s) => s.length > 0),
+      aliases: splitList(opt.aliases_text),
     }));
 
     setSubmittingEdit(true);
@@ -220,7 +210,7 @@ export default function PropertyDefinitionsTab({
       });
       setEditingDefinition(null);
     } catch (err: unknown) {
-      setEditError(err instanceof Error ? err.message : "属性定義の更新に失敗しました。");
+      setEditError(getErrorMessage(err, "属性定義の更新に失敗しました。"));
     } finally {
       setSubmittingEdit(false);
     }
@@ -234,7 +224,7 @@ export default function PropertyDefinitionsTab({
       await onDeleteDefinition(deletingDefinition.property_definition_id);
       setDeletingDefinition(null);
     } catch (err: unknown) {
-      setDeleteError(err instanceof Error ? err.message : "属性定義の削除に失敗しました。");
+      setDeleteError(getErrorMessage(err, "属性定義の削除に失敗しました。"));
     } finally {
       setSubmittingDelete(false);
     }

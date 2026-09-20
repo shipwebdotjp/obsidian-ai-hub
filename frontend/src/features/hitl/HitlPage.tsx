@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
+import { getApiErrorMessage, getErrorMessage } from "../../utils/error";
 import { useSearchParams } from "react-router-dom";
 import {
-  ApiError,
   listHitlRuns,
   getHitlRun,
   submitHitlAnswer,
@@ -213,7 +213,7 @@ export default function HitlPage() {
       setTotal(res.total);
     } catch (e) {
       if (controller.signal.aborted) return;
-      setError(e instanceof ApiError ? e.message : "確認待ちタスクの取得に失敗しました");
+      setError(getApiErrorMessage(e, "確認待ちタスクの取得に失敗しました"));
     } finally {
       if (!controller.signal.aborted) setLoading(false);
     }
@@ -276,7 +276,7 @@ export default function HitlPage() {
       setAnswers(initialAnswers);
       setComments({});
     } catch (e) {
-      setDetailError(e instanceof ApiError ? e.message : "詳細情報の取得に失敗しました");
+      setDetailError(getApiErrorMessage(e, "詳細情報の取得に失敗しました"));
       setSelectedRun(null);
     } finally {
       setDetailLoading(false);
@@ -352,7 +352,7 @@ export default function HitlPage() {
       await loadDetail(selectedRun.run_id, true);
       await reloadRuns();
     } catch (e) {
-      setDetailError(e instanceof ApiError ? e.message : "回答の送信に失敗しました");
+      setDetailError(getApiErrorMessage(e, "回答の送信に失敗しました"));
     } finally {
       setSubmitting(null);
     }
@@ -371,7 +371,7 @@ export default function HitlPage() {
       await loadDetail(selectedRun.run_id);
       await reloadRuns();
     } catch (e) {
-      setDetailError(e instanceof ApiError ? e.message : "キャンセルの実行に失敗しました");
+      setDetailError(getApiErrorMessage(e, "キャンセルの実行に失敗しました"));
     } finally {
       setSubmitting(null);
     }
@@ -708,7 +708,7 @@ export default function HitlPage() {
                         const rejections = results.filter((r): r is PromiseRejectedResult => r.status === "rejected");
                         if (rejections.length > 0) {
                           const firstErr = rejections[0].reason;
-                          const msg = firstErr instanceof Error ? firstErr.message : "一部の回答の送信に失敗しました";
+                          const msg = getErrorMessage(firstErr, "一部の回答の送信に失敗しました");
                           setDetailError(msg);
                           throw new Error(msg);
                         }

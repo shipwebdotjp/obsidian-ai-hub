@@ -10,7 +10,7 @@ import {
 
 type PaneSide = "left" | "right";
 
-type UsePaneResizeOptions = {
+export type UsePaneResizeOptions = {
   /** 初期幅。CSS の長さとして渡す（例: "50%", "20rem"）。 */
   defaultSize: string;
   /** どちら側のペインをリサイズするか。既定は "left"。 */
