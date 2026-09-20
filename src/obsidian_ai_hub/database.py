@@ -715,6 +715,9 @@ def get_db_connection() -> sqlite3.Connection:
     if current_version <= 51:
         run_migration_v52(conn)
 
+    if current_version <= 52:
+        run_migration_v53(conn)
+
     return conn
 
 
@@ -782,6 +785,160 @@ def run_migration_v52(conn: sqlite3.Connection) -> None:
     conn.execute("PRAGMA user_version = 52;")
     conn.commit()
     conn.execute("PRAGMA foreign_keys = ON;")
+
+
+def run_migration_v53(conn: sqlite3.Connection) -> None:
+    """Run migration for version 53 (Workflow graph tables).
+
+    Adds the Workflow Bounded Context tables (``docs/workflow/specification.md``
+    §16.2). Nodes/edges belong to a revision; runs snapshot the graph; node
+    invocations are keyed by persistent activation id so retries reuse the same
+    activation while loop iterations get a new one.
+    """
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workflows (
+            workflow_id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            description TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workflow_revisions (
+            revision_id TEXT PRIMARY KEY,
+            workflow_id TEXT NOT NULL,
+            version INTEGER NOT NULL,
+            status TEXT NOT NULL CHECK (status IN ('draft','published','superseded')),
+            inputs_schema TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workflow_nodes (
+            node_id TEXT PRIMARY KEY,
+            revision_id TEXT NOT NULL,
+            node_type TEXT NOT NULL,
+            label TEXT,
+            config_json TEXT NOT NULL,
+            parent_loop_node_id TEXT,
+            ui_position_json TEXT
+        );
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workflow_edges (
+            edge_id TEXT PRIMARY KEY,
+            revision_id TEXT NOT NULL,
+            source_node_id TEXT NOT NULL,
+            target_node_id TEXT NOT NULL,
+            edge_kind TEXT NOT NULL DEFAULT 'normal',
+            condition_json TEXT,
+            order_index INTEGER NOT NULL
+        );
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workflow_runs (
+            run_id TEXT PRIMARY KEY,
+            workflow_id TEXT NOT NULL,
+            revision_id TEXT NOT NULL,
+            status TEXT NOT NULL,
+            inputs_json TEXT,
+            graph_snapshot_json TEXT,
+            worker_instance_id TEXT,
+            result_summary TEXT,
+            error_summary TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            started_at TEXT,
+            finished_at TEXT
+        );
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workflow_run_nodes (
+            run_id TEXT NOT NULL,
+            node_id TEXT NOT NULL,
+            activation_id TEXT NOT NULL,
+            attempt INTEGER NOT NULL DEFAULT 1,
+            status TEXT NOT NULL,
+            inputs_json TEXT,
+            output_json TEXT,
+            output_summary TEXT,
+            error_summary TEXT,
+            started_at TEXT,
+            finished_at TEXT,
+            PRIMARY KEY (activation_id, attempt)
+        );
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workflow_activations (
+            activation_id TEXT PRIMARY KEY,
+            run_id TEXT NOT NULL,
+            node_id TEXT NOT NULL,
+            iteration_context TEXT,
+            created_at TEXT NOT NULL
+        );
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workflow_events (
+            event_id TEXT PRIMARY KEY,
+            run_id TEXT NOT NULL,
+            seq INTEGER NOT NULL,
+            event_type TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_workflow_revisions_workflow "
+        "ON workflow_revisions(workflow_id, status);"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_workflow_nodes_revision "
+        "ON workflow_nodes(revision_id);"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_workflow_edges_revision "
+        "ON workflow_edges(revision_id, source_node_id);"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_workflow_runs_status "
+        "ON workflow_runs(status);"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_workflow_runs_worker "
+        "ON workflow_runs(worker_instance_id);"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_workflow_runs_finished "
+        "ON workflow_runs(finished_at);"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_workflow_run_nodes_run "
+        "ON workflow_run_nodes(run_id, node_id);"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_workflow_events_run "
+        "ON workflow_events(run_id, seq);"
+    )
+    conn.execute("PRAGMA user_version = 53;")
+    conn.commit()
 
 
 def run_migration_v51(conn: sqlite3.Connection) -> None:

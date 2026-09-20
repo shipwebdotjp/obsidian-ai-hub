@@ -44,6 +44,7 @@ def register_hitl_handlers():
     from obsidian_ai_hub.agents.ask_user_handler import handle_agent_ask_user, handle_coding_ask_user
     from obsidian_ai_hub.summary.person_candidates_handler import apply_person_candidates_handler
     from obsidian_ai_hub.tasks.hitl import resolve_task_target
+    from obsidian_ai_hub.workflow.hitl import resolve_workflow_hitl
     register_handler("research.run_approved_suggestion", run_approved_suggestion)
     register_handler("memory.apply_maintenance_proposals", run_approved_maintenance)
     register_handler("memory.apply_interview_answers", apply_interview_answers)
@@ -53,6 +54,7 @@ def register_hitl_handlers():
     register_handler("coding.ask_user", handle_coding_ask_user)
     register_handler("summary.apply_person_candidates", apply_person_candidates_handler)
     register_handler("tasks.resolve_target", resolve_task_target)
+    register_handler("workflow.hitl_wait", resolve_workflow_hitl)
 
 
 def main():

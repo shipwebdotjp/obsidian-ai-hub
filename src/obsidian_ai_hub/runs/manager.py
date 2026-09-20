@@ -64,10 +64,19 @@ def startup_recovery(instance_id: str) -> dict[str, Any]:
         task_store.purge_terminal_tasks()
     except Exception:
         logger.exception("Task purge failed")
+    workflow_count = 0
+    try:
+        from obsidian_ai_hub.workflow import store as workflow_store
+
+        workflow_count = workflow_store.mark_stale_runs_interrupted(instance_id)
+        workflow_store.purge_terminal_runs()
+    except Exception:
+        logger.exception("Workflow startup recovery failed")
     return {
         "agent_interrupted": agent_count,
         "coding_interrupted": coding_count,
         "task_interrupted": task_count,
+        "workflow_interrupted": workflow_count,
     }
 
 
@@ -114,10 +123,18 @@ def shutdown_recovery(instance_id: str) -> dict[str, Any]:
         task_count = task_store.mark_tasks_interrupted(instance_id)
     except Exception:
         logger.exception("Task shutdown recovery failed")
+    workflow_count = 0
+    try:
+        from obsidian_ai_hub.workflow import store as workflow_store
+
+        workflow_count = workflow_store.mark_own_runs_interrupted(instance_id)
+    except Exception:
+        logger.exception("Workflow shutdown recovery failed")
     return {
         "agent_interrupted": agent_count,
         "coding_interrupted": coding_count,
         "task_interrupted": task_count,
+        "workflow_interrupted": workflow_count,
     }
 
 
@@ -126,6 +143,7 @@ async def _start_workers(instance_id: str) -> None:
     from obsidian_ai_hub.runs.agent_worker import agent_worker_loop
     from obsidian_ai_hub.runs.coding_worker import coding_worker_loop
     from obsidian_ai_hub.tasks.worker import task_worker_loop
+    from obsidian_ai_hub.workflow.worker import workflow_worker_loop
 
     if _worker_tasks:
         return
@@ -134,6 +152,7 @@ async def _start_workers(instance_id: str) -> None:
         asyncio.create_task(agent_worker_loop(instance_id, _worker_stop), name="agent-run-worker"),
         asyncio.create_task(coding_worker_loop(instance_id, _worker_stop), name="coding-run-worker"),
         asyncio.create_task(task_worker_loop(instance_id, _worker_stop), name="task-worker"),
+        asyncio.create_task(workflow_worker_loop(instance_id, _worker_stop), name="workflow-worker"),
     ]
     logger.info("Run workers started for instance %s", instance_id)
 

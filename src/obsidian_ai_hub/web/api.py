@@ -18,6 +18,7 @@ from obsidian_ai_hub.web.routes import (
     task_agent,
     vault,
 )
+from obsidian_ai_hub.workflow import routes as workflow_routes
 
 router = APIRouter(prefix="/api/v1")
 
@@ -37,3 +38,4 @@ router.include_router(task_agent.router)
 router.include_router(hitl.router)
 router.include_router(planner.router)
 router.include_router(healthcare.router)
+router.include_router(workflow_routes.router)

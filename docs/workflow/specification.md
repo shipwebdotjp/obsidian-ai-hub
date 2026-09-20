@@ -130,7 +130,7 @@ ui_position_json TEXT
 {
   "capability_key": "vault_write_file",
   "inputs": {
-    "relative_path": "notes/{{run.inputs.title}}.md",
+    "relative_path": {"$ref": "run.inputs.output_path"},
     "content": {"$ref": "nodes.agent_xxx.output.note_body"}
   },
   "retry": {"max_attempts": 1, "backoff_seconds": 0}
@@ -228,10 +228,13 @@ edge_id TEXT PRIMARY KEY
 revision_id TEXT NOT NULL
 source_node_id TEXT NOT NULL
 target_node_id TEXT NOT NULL
+edge_kind TEXT NOT NULL DEFAULT 'normal'  -- 'normal' | 'error'
 condition_json TEXT            -- NULL なら常に真
 order_index INTEGER NOT NULL
 ```
 
+- `edge_kind` が `normal` の Edge は Node 成功時に評価する。`error` の Edge は Node 失敗時に
+  最初の 1 本だけを使い、存在しなければ Run は `failed` とする。
 - 条件付き Edge は **排他的** に評価する。source Node からの outgoing Edge を `order_index` 順に評価し、
   最初に真になった Edge の target へ進む。
 - 条件がすべて偽で default Edge（条件なし）もない場合、Run は `failed` とする。
@@ -335,10 +338,10 @@ Node 間のデータ連携は文字列テンプレート展開ではなく、以
 | From | To |
 | --- | --- |
 | `queued` | `waiting_approval`, `running`, `cancelled`, `failed` |
-| `waiting_approval` | `running`, `cancelled` |
+| `waiting_approval` | `queued`, `running`, `cancelled` |
 | `running` | `completed`, `incomplete`, `failed`, `cancelling`, `interrupted`, `waiting_hitl`, `waiting_attention` |
-| `waiting_hitl` | `running`, `cancelled` |
-| `waiting_attention` | `running`, `failed`, `interrupted`, `cancelled` |
+| `waiting_hitl` | `queued`, `cancelled` |
+| `waiting_attention` | `queued`, `failed`, `interrupted`, `cancelled` |
 | `cancelling` | `cancelled`, `failed`, `interrupted` |
 | `interrupted` | `queued`(再開), `cancelled` |
 
@@ -500,8 +503,8 @@ HITL 待ちは Capability Node として実装する。`hitl_wait` Capability �
 3. **新しい Activation として再実行**
    - 重複副作用の可能性を警告し、明示確認後に実行する。
 
-`waiting_attention` から `interrupted` への移行も許可し、再開時は `running` ではなく
-`waiting_attention` に戻す。
+`waiting_attention` から `interrupted` への移行も許可する。待機状態からの再開は `queued` を経由し、
+worker が Activation の既存状態を読んで `waiting_attention` の Node から再開する。
 
 ## 14. イベント、監査、redaction、保持期間
 
@@ -620,6 +623,7 @@ workflow_edges
   revision_id TEXT NOT NULL
   source_node_id TEXT NOT NULL
   target_node_id TEXT NOT NULL
+  edge_kind TEXT NOT NULL DEFAULT 'normal'
   condition_json TEXT
   order_index INTEGER NOT NULL
 
@@ -629,6 +633,7 @@ workflow_runs
   revision_id TEXT NOT NULL
   status TEXT NOT NULL
   inputs_json TEXT
+  graph_snapshot_json TEXT NOT NULL
   worker_instance_id TEXT
   result_summary TEXT
   error_summary TEXT
@@ -649,7 +654,7 @@ workflow_run_nodes
   error_summary TEXT
   started_at TEXT
   finished_at TEXT
-  PRIMARY KEY (run_id, node_id, attempt)
+  PRIMARY KEY (activation_id, attempt)
 
 workflow_activations
   activation_id TEXT PRIMARY KEY
