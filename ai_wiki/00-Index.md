@@ -15,6 +15,7 @@
 
 - [ドメイン用語集](30-Glossary.md)
 - [タスクオーケストレーション CONTEXT.md](../CONTEXT.md)（Bounded Context とユビキタス言語）
+- [Workflow 文書群](../docs/workflow/README.md)（人間が GUI で設計する Node/Edge グラフ。制御は決定的、Agent Node 出力は JSON Schema で検証）
 
 ## 開発ガイド
 
