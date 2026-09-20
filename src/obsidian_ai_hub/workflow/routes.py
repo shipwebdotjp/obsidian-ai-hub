@@ -15,6 +15,11 @@ from pydantic import BaseModel, Field
 
 from obsidian_ai_hub.web.routes.deps import require_bearer_token
 from obsidian_ai_hub.workflow import store as workflow_store
+from obsidian_ai_hub.workflow.capabilities import (
+    default_approval_policy,
+    is_workflow_only,
+    workflow_capability_keys,
+)
 from obsidian_ai_hub.workflow.models import validate_value_against_schema
 from obsidian_ai_hub.workflow.validation import validate_graph
 
@@ -49,11 +54,14 @@ class AttentionDecision(BaseModel):
 def _capability_enabled() -> Any:
     from obsidian_ai_hub.tasks import store as task_store
 
-    capabilities = {
+    enabled = {
         str(c["capability_key"]): bool(c["enabled"])
         for c in task_store.list_capabilities()
     }
-    return lambda key: key == "hitl_wait" or capabilities.get(key, False)
+    valid_keys = workflow_capability_keys()
+    return lambda key: key in valid_keys and (
+        is_workflow_only(key) or enabled.get(key, False)
+    )
 
 
 def _agent_exists() -> Any:
@@ -86,9 +94,10 @@ def _requires_approval(revision: dict[str, Any]) -> bool:
         if node_type != "capability":
             continue
         key = str((node.get("config") or {}).get("capability_key") or "")
-        if key == "hitl_wait":
+        if not key:
             continue
-        if key and policies.get(key, "plan_required") == "plan_required":
+        policy = policies.get(key, default_approval_policy(key))
+        if policy == "plan_required":
             return True
     return False
 

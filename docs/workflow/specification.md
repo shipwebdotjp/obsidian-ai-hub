@@ -302,6 +302,7 @@ Node 間のデータ連携は文字列テンプレート展開ではなく、以
 - Edge の source/target が同一 Revision（または同一 Loop 子グラフ）内に存在すること。
 - 通常 Edge が循環していないこと。
 - Loop Node の子グラフが非循環で、1 つの `loop_result` に到達すること。
+- Loop Node の `continuation_condition` が必須であること（未指定は検証エラー）。
 - Loop Node がネストされていないこと。
 - Terminal Node に outgoing Edge がないこと。
 - 型付き参照が解決可能であり、参照先の型と一致すること。
@@ -579,10 +580,9 @@ inputs/output 要約、effects、Agent 指紋を含む。
 | `PUT /api/v1/workflows/revisions/:revision_id` | draft Revision の更新。 |
 | `POST /api/v1/workflows/revisions/:revision_id/publish` | draft → published。 |
 | `POST /api/v1/workflows/revisions/:revision_id/validate` | 静的検証。 |
-| `POST /api/v1/workflows/revisions/:revision_id/runs` | Run 作成 + 入力フォーム schema 返却。 |
-| `POST /api/v1/workflows/runs/:run_id/start` | 入力値を保存し実行開始。 |
+| `POST /api/v1/workflows/revisions/:revision_id/runs` | Run 作成。`inputs` を同梱して受領し、`inputs_schema` で検証する。`plan_required` Capability / Agent Node を含む場合は `waiting_approval` で原子的に作成する。 |
 | `GET /api/v1/workflows/runs/:run_id` | Run + Node 状態 + Events。 |
-| `POST /api/v1/workflows/runs/:run_id/approve` | 承認。`waiting_approval` → `running`。 |
+| `POST /api/v1/workflows/runs/:run_id/approve` | 承認。`waiting_approval` → `queued`。 |
 | `POST /api/v1/workflows/runs/:run_id/cancel` | 取消。 |
 | `POST /api/v1/workflows/runs/:run_id/resume` | 明示再開。`interrupted` → `queued`。 |
 | `POST /api/v1/workflows/runs/:run_id/attention` | needs_attention 処置（採用 / 失敗 / 再実行 / interrupted）。 |

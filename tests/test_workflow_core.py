@@ -226,3 +226,18 @@ def test_indexed_run_input_reference_is_valid():
         "properties": {"items": {"type": "array", "items": {"type": "string"}}},
     }
     assert validate_graph(nodes=nodes, edges=edges, inputs_schema=schema) == []
+
+
+def test_workflow_catalog_includes_hitl_wait_without_task_agent():
+    from obsidian_ai_hub.tasks.capabilities import get_capability_keys
+    from obsidian_ai_hub.workflow.capabilities import (
+        default_approval_policy,
+        is_workflow_only,
+        workflow_capability_keys,
+    )
+
+    keys = workflow_capability_keys()
+    assert "hitl_wait" in keys
+    assert "hitl_wait" not in get_capability_keys()
+    assert is_workflow_only("hitl_wait") is True
+    assert default_approval_policy("hitl_wait") == "auto"

@@ -8,6 +8,7 @@ Public surface: ``store`` (persistence), ``validation`` (static checks),
 from __future__ import annotations
 
 __all__ = [
+    "capabilities",
     "models",
     "store",
     "validation",

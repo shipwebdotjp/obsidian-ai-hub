@@ -287,3 +287,45 @@ def test_failure_terminal_marks_failed():
         FakeRunner(lambda n, i, c: NodeOutcome(status="failed", error="boom"))
     ).execute(run)
     assert outcome.kind == "failed"
+
+
+def test_loop_without_continuation_condition_errors():
+    loop = _node(
+        "loop",
+        "loop",
+        {
+            "state_schema": {
+                "type": "object",
+                "properties": {"done": {"type": "boolean"}},
+            },
+            "input_mapping": {"done": False},
+            "max_iterations": 3,
+            "entry_node_id": "step",
+        },
+    )
+    step = _node(
+        "step",
+        "capability",
+        {"capability_key": "vault_search", "inputs": {}},
+        parent="loop",
+    )
+    result = _node(
+        "result",
+        "loop_result",
+        {"output_mapping": {"done": {"$ref": "nodes.step.output.done"}}},
+        parent="loop",
+    )
+    terminal = _node("t", "terminal", {"outcome": "success"})
+    run = _setup(
+        [loop, step, result, terminal],
+        [_edge("e1", "loop", "t"), _edge("e2", "step", "result")],
+    )
+    engine = WorkflowEngine(
+        FakeRunner(lambda n, i, c: NodeOutcome(status="succeeded", output={"done": True}))
+    )
+    try:
+        engine.execute(run)
+    except ValueError as exc:
+        assert "continuation_condition" in str(exc)
+    else:
+        raise AssertionError("missing continuation_condition must fail")

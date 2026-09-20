@@ -669,7 +669,7 @@ class WorkflowEngine:
     ) -> bool:
         condition = config.get("continuation_condition")
         if not isinstance(condition, dict):
-            return False
+            raise ValueError("Loop continuation_condition が未指定です")
         try:
             return evaluate_condition(
                 condition,

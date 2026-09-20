@@ -217,3 +217,41 @@ def test_run_inputs_validated_against_schema(test_memory_db_path, client):
         f"/api/v1/workflows/revisions/{revision_id}/runs", json={"inputs": {}}
     )
     assert bad.status_code == 422
+
+
+def test_hitl_wait_node_publishes_without_task_catalog(test_memory_db_path, client):
+    created = client.post("/api/v1/workflows", json={"name": "hitl"})
+    revision_id = created.json()["revision"]["revision_id"]
+    nodes = [
+        {
+            "node_id": "n_hitl",
+            "node_type": "capability",
+            "config": {
+                "capability_key": "hitl_wait",
+                "inputs": {"question": "続行しますか？"},
+            },
+        },
+        {"node_id": "n_end", "node_type": "terminal", "config": {"outcome": "success"}},
+    ]
+    edges = [
+        {
+            "edge_id": "e1",
+            "source_node_id": "n_hitl",
+            "target_node_id": "n_end",
+            "order_index": 0,
+        }
+    ]
+    client.put(
+        f"/api/v1/workflows/revisions/{revision_id}",
+        json={"inputs_schema": {"type": "object"}, "nodes": nodes, "edges": edges},
+    )
+    validated = client.post(f"/api/v1/workflows/revisions/{revision_id}/validate")
+    assert validated.status_code == 200
+    assert validated.json()["valid"] is True
+    published = client.post(f"/api/v1/workflows/revisions/{revision_id}/publish")
+    assert published.status_code == 200
+    run = client.post(
+        f"/api/v1/workflows/revisions/{revision_id}/runs", json={"inputs": {}}
+    ).json()
+    # hitl_wait is auto policy, so the run is queued rather than awaiting approval.
+    assert run["status"] == "queued"
