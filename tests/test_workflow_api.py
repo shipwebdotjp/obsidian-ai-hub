@@ -309,3 +309,66 @@ def test_revision_returns_ui_position_and_new_draft_is_blank(test_memory_db_path
     new_draft = client.post(f"/api/v1/workflows/{workflow_id}/revisions").json()
     assert new_draft["nodes"] == []
     assert new_draft["edges"] == []
+
+
+def test_templates_and_instantiation_use_fresh_ids(test_memory_db_path, client):
+    templates = client.get("/api/v1/workflows/templates")
+    assert templates.status_code == 200
+    keys = {t["template_key"] for t in templates.json()["items"]}
+    assert "plan_review_execute" in keys
+    assert "contextual_research" in keys
+
+    first = client.post(
+        "/api/v1/workflows/from-template",
+        json={"template_key": "contextual_research"},
+    )
+    assert first.status_code == 201
+    first_revision = first.json()["revision"]
+    assert len(first_revision["nodes"]) == 4
+    assert len(first_revision["edges"]) == 3
+    # References point at freshly generated node ids, not template symbols.
+    node_ids = {n["node_id"] for n in first_revision["nodes"]}
+    assert all(nid not in {"context", "theme", "research", "done"} for nid in node_ids)
+
+    second = client.post(
+        "/api/v1/workflows/from-template",
+        json={"template_key": "contextual_research"},
+    )
+    second_ids = {n["node_id"] for n in second.json()["revision"]["nodes"]}
+    assert node_ids.isdisjoint(second_ids)
+
+
+def test_list_events_after(test_memory_db_path):
+    workflow = workflow_store.create_workflow("events")
+    workflow_store.publish_revision(workflow["revision"]["revision_id"])
+    run = workflow_store.create_run(
+        workflow["workflow_id"], workflow["revision"]["revision_id"], {}
+    )
+    workflow_store.append_event(run["run_id"], "node_started", {"n": 1})
+    workflow_store.append_event(run["run_id"], "node_completed", {"n": 2})
+    after_first = workflow_store.list_events_after(run["run_id"], 1)
+    assert [event["event_type"] for event in after_first] == ["node_completed"]
+    assert workflow_store.list_events_after(run["run_id"], 2) == []
+
+
+def test_template_references_are_remapped(test_memory_db_path, client):
+    created = client.post(
+        "/api/v1/workflows/from-template",
+        json={"template_key": "plan_review_execute"},
+    ).json()
+    revision = created["revision"]
+    node_ids = {n["node_id"] for n in revision["nodes"]}
+    loop = next(n for n in revision["nodes"] if n["node_type"] == "loop")
+    child_ids = {
+        n["node_id"] for n in revision["nodes"] if n["parent_loop_node_id"] == loop["node_id"]
+    }
+    assert loop["config"]["entry_node_id"] in child_ids
+    assert loop["config"]["input_mapping"]["plan"]["$ref"].startswith("nodes.")
+    referenced = loop["config"]["input_mapping"]["plan"]["$ref"].split(".")[1]
+    assert referenced in node_ids
+
+    result = next(n for n in revision["nodes"] if n["node_type"] == "loop_result")
+    for mapping in result["config"]["output_mapping"].values():
+        assert mapping["$ref"].split(".")[1] in node_ids
+    # Every instantiated node carries a canvas position.
+    assert all(n["ui_position"] is not None for n in revision["nodes"])

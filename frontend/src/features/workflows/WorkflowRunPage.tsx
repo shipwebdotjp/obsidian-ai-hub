@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
   approveWorkflowRun,
@@ -9,6 +9,11 @@ import {
 } from "../../api/client";
 import type { WorkflowRun } from "../../api/types";
 import { ROUTES } from "../../constants/routes";
+import {
+  loadLastAppliedId,
+  saveLastAppliedId,
+  subscribeRunEvents,
+} from "../../api/runSse";
 import { formatDateTime } from "../../utils/date";
 import { getApiErrorMessage } from "../../utils/error";
 
@@ -29,22 +34,85 @@ export default function WorkflowRunPage() {
     }
   }, [runId]);
 
+  const reloadRef = useRef(reload);
+  useEffect(() => {
+    reloadRef.current = reload;
+  }, [reload]);
+
   useEffect(() => {
     void reload();
   }, [reload]);
 
+  const [generation, setGeneration] = useState(0);
+  const statusRef = useRef("");
+  const debounceRef = useRef<number | null>(null);
+
   useEffect(() => {
-    if (!run || TERMINAL.has(run.status)) return;
-    const timer = window.setInterval(() => void reload(), 3000);
-    return () => window.clearInterval(timer);
-  }, [run, reload]);
+    statusRef.current = run?.status ?? "";
+  }, [run]);
+
+  const scheduleReload = useCallback(() => {
+    if (debounceRef.current !== null) return;
+    debounceRef.current = window.setTimeout(() => {
+      debounceRef.current = null;
+      void reloadRef.current();
+    }, 500);
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    let disposed = false;
+    let resubscribeTimer: number | null = null;
+    const stream = async () => {
+      try {
+        await subscribeRunEvents({
+          url: `/api/v1/workflows/runs/${encodeURIComponent(runId)}/stream`,
+          lastEventId: loadLastAppliedId("workflow", runId),
+          signal: controller.signal,
+          onEnvelope: (envelope) => {
+            saveLastAppliedId("workflow", runId, envelope.eventId);
+            scheduleReload();
+          },
+        });
+      } catch (e) {
+        if (!disposed) setError(getApiErrorMessage(e, "進捗の取得に失敗しました"));
+        return;
+      }
+      if (disposed) return;
+      await reloadRef.current();
+      if (disposed) return;
+      // The server closes the stream on terminal or waiting state. While the
+      // run is still active, re-subscribe from the saved cursor.
+      if (["queued", "running", "cancelling"].includes(statusRef.current)) {
+        resubscribeTimer = window.setTimeout(
+          () => setGeneration((value) => value + 1),
+          1000,
+        );
+      }
+    };
+    void stream();
+    const poll = window.setInterval(() => {
+      if (TERMINAL.has(statusRef.current)) return;
+      void reloadRef.current();
+    }, 10000);
+    return () => {
+      disposed = true;
+      controller.abort();
+      if (resubscribeTimer !== null) window.clearTimeout(resubscribeTimer);
+      if (debounceRef.current !== null) window.clearTimeout(debounceRef.current);
+      window.clearInterval(poll);
+    };
+  }, [runId, generation, scheduleReload]);
 
   const act = async (action: () => Promise<WorkflowRun>) => {
     setBusy(true);
     try {
-      await action();
+      const updated = await action();
       await reload();
       setError(null);
+      if (!TERMINAL.has(updated.status)) {
+        setGeneration((value) => value + 1);
+      }
     } catch (e) {
       setError(getApiErrorMessage(e, "操作に失敗しました"));
     } finally {

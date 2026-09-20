@@ -893,6 +893,28 @@ def append_event(
         return _do()
 
 
+def list_events_after(
+    run_id: str,
+    after_seq: int,
+    *,
+    limit: int = 200,
+    conn: Optional[sqlite3.Connection] = None,
+) -> list[dict[str, Any]]:
+    """Return events with ``seq > after_seq`` in ascending order (SSE replay)."""
+    with auto_connection(conn) as (active_conn, _):
+        rows = active_conn.execute(
+            "SELECT * FROM workflow_events WHERE run_id = ? AND seq > ? "
+            "ORDER BY seq ASC LIMIT ?;",
+            (run_id, after_seq, limit),
+        ).fetchall()
+    events = []
+    for row in rows:
+        event = dict(row)
+        event["payload"] = _loads(event.get("payload_json"), {})
+        events.append(event)
+    return events
+
+
 def list_events(
     run_id: str, *, conn: Optional[sqlite3.Connection] = None
 ) -> list[dict[str, Any]]:

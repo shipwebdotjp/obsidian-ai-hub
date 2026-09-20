@@ -1230,3 +1230,13 @@ export interface WorkflowValidationResponse {
   valid: boolean;
   errors: string[];
 }
+
+export interface WorkflowTemplate {
+  template_key: string;
+  name: string;
+  description: string;
+}
+
+export interface WorkflowTemplateListResponse {
+  items: WorkflowTemplate[];
+}

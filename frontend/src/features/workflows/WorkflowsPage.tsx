@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { createWorkflow, listWorkflows } from "../../api/client";
-import type { WorkflowSummary } from "../../api/types";
+import {
+  createWorkflow,
+  createWorkflowFromTemplate,
+  listWorkflowTemplates,
+  listWorkflows,
+} from "../../api/client";
+import type { WorkflowSummary, WorkflowTemplate } from "../../api/types";
 import PaginationBar from "../../components/PaginationBar";
 import { usePagination } from "../../hooks/usePagination";
 import {
@@ -20,6 +25,7 @@ export default function WorkflowsPage() {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [creating, setCreating] = useState(false);
+  const [templates, setTemplates] = useState<WorkflowTemplate[]>([]);
   const { page, limit, offset, total, totalPages, setTotal, setPage } =
     usePagination("workflows", 20);
 
@@ -41,6 +47,20 @@ export default function WorkflowsPage() {
     void reload();
   }, [reload]);
 
+  useEffect(() => {
+    let cancelled = false;
+    listWorkflowTemplates()
+      .then((res) => {
+        if (!cancelled) setTemplates(res.items);
+      })
+      .catch(() => {
+        // Template list is optional; the page still works without it.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const onCreate = async () => {
     if (!name.trim()) return;
     setCreating(true);
@@ -58,6 +78,26 @@ export default function WorkflowsPage() {
       );
     } catch (e) {
       setError(getApiErrorMessage(e, "作成に失敗しました"));
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const onCreateFromTemplate = async (template: WorkflowTemplate) => {
+    setCreating(true);
+    setError(null);
+    try {
+      const workflow = await createWorkflowFromTemplate({
+        template_key: template.template_key,
+      });
+      const revisionId = workflow.revision?.revision_id;
+      navigate(
+        revisionId
+          ? workflowEditPath(revisionId)
+          : workflowDetailPath(workflow.workflow_id),
+      );
+    } catch (e) {
+      setError(getApiErrorMessage(e, "テンプレートからの作成に失敗しました"));
     } finally {
       setCreating(false);
     }
@@ -100,6 +140,27 @@ export default function WorkflowsPage() {
         </div>
         {error && <p className="mt-2 text-xs text-rose-700">{error}</p>}
       </section>
+      {templates.length > 0 && (
+        <section className="border-b border-slate-200 bg-white px-4 py-3">
+          <h2 className="mb-2 text-xs font-semibold text-slate-600">
+            テンプレートから作成
+          </h2>
+          <div className="flex flex-wrap gap-2">
+            {templates.map((template) => (
+              <button
+                key={template.template_key}
+                type="button"
+                disabled={creating}
+                onClick={() => onCreateFromTemplate(template)}
+                className="cursor-pointer rounded border border-slate-300 px-3 py-1.5 text-xs hover:bg-slate-50 disabled:opacity-50"
+                title={template.description}
+              >
+                {template.name}
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
       <div className="flex-1 overflow-auto">
         {loading ? (
           <p className="p-4 text-sm text-slate-500">読み込み中…</p>

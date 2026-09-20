@@ -56,6 +56,7 @@ import type {
   WorkflowNode,
   WorkflowRevision,
   WorkflowRun,
+  WorkflowTemplateListResponse,
   WorkflowValidationResponse,
 } from "./types";
 
@@ -1072,4 +1073,18 @@ export function resolveWorkflowAttention(
     `/api/v1/workflows/runs/${encodeURIComponent(runId)}/attention`,
     { method: "POST", body: JSON.stringify(payload) },
   );
+}
+
+export function listWorkflowTemplates(): Promise<WorkflowTemplateListResponse> {
+  return request<WorkflowTemplateListResponse>("/api/v1/workflows/templates");
+}
+
+export function createWorkflowFromTemplate(payload: {
+  template_key: string;
+  name?: string;
+}): Promise<WorkflowDetail> {
+  return request<WorkflowDetail>("/api/v1/workflows/from-template", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }

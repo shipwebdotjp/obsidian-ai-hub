@@ -1,15 +1,19 @@
 import { ApiError, AUTH_EXPIRED_EVENT, clearToken, getToken } from "./client";
 
+export type RunStreamDomain = "agent" | "coding" | "workflow";
+
 export interface RunSseEnvelope {
   eventId: number;
   data: Record<string, unknown>;
 }
 
-export function storageKey(domain: "agent" | "coding", runId: string): string {
+export function storageKey(
+  domain: RunStreamDomain, runId: string): string {
   return `run-sse:${domain}:${runId}:last-event-id`;
 }
 
-export function loadLastAppliedId(domain: "agent" | "coding", runId: string): number {
+export function loadLastAppliedId(
+  domain: RunStreamDomain, runId: string): number {
   try {
     const raw = sessionStorage.getItem(storageKey(domain, runId));
     if (!raw) return 0;
@@ -21,7 +25,7 @@ export function loadLastAppliedId(domain: "agent" | "coding", runId: string): nu
 }
 
 export function saveLastAppliedId(
-  domain: "agent" | "coding",
+  domain: RunStreamDomain,
   runId: string,
   eventId: number,
 ): void {

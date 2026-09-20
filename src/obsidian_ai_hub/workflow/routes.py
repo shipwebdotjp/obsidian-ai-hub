@@ -7,10 +7,12 @@ engine contract documented in ``docs/workflow/specification.md`` §16.
 
 from __future__ import annotations
 
+import asyncio
 import sqlite3
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from obsidian_ai_hub.web.routes.deps import require_bearer_token
@@ -22,7 +24,12 @@ from obsidian_ai_hub.workflow.capabilities import (
     is_workflow_only,
     workflow_capability_keys,
 )
-from obsidian_ai_hub.workflow.models import validate_value_against_schema
+from obsidian_ai_hub.workflow.models import (
+    RUN_TERMINAL_STATUSES,
+    RUN_WAITING_STATUSES,
+    validate_value_against_schema,
+)
+from obsidian_ai_hub.workflow import templates as workflow_templates
 from obsidian_ai_hub.workflow.validation import validate_graph
 
 router = APIRouter(
@@ -115,6 +122,34 @@ def create_workflow(payload: WorkflowCreate) -> dict[str, Any]:
     return workflow_store.create_workflow(
         payload.name, payload.description, inputs_schema=payload.inputs_schema
     )
+
+
+class WorkflowFromTemplate(BaseModel):
+    template_key: str = Field(min_length=1)
+    name: Optional[str] = None
+    description: Optional[str] = None
+
+
+@router.get("/templates")
+def list_templates() -> dict[str, Any]:
+    return {"items": workflow_templates.list_templates()}
+
+
+@router.post("/from-template", status_code=201)
+def create_from_template(payload: WorkflowFromTemplate) -> dict[str, Any]:
+    template = workflow_templates.get_template(payload.template_key)
+    if template is None:
+        raise HTTPException(status_code=404, detail="template not found")
+    workflow = workflow_store.create_workflow(
+        payload.name or template["name"],
+        payload.description or template["description"],
+        inputs_schema=template["inputs_schema"],
+    )
+    revision = workflow["revision"]
+    nodes, edges = workflow_templates.build_graph(template)
+    workflow_store.set_revision_graph(revision["revision_id"], nodes, edges)
+    workflow["revision"] = workflow_store.get_revision(revision["revision_id"])
+    return workflow
 
 
 @router.get("/capabilities")
@@ -330,6 +365,67 @@ def resolve_attention(run_id: str, payload: AttentionDecision) -> dict[str, Any]
     if decision == "fail":
         return _transition(run_id_str, "failed", from_status="waiting_attention")
     return _transition(run_id_str, "interrupted", from_status="waiting_attention")
+
+
+@router.get("/runs/{run_id}/stream")
+async def stream_run_events(
+    run_id: str,
+    request: Request,
+    _=Depends(require_bearer_token),
+    last_event_id: Optional[str] = Query(default=None, alias="last_event_id"),
+    last_event_id_header: Optional[str] = Header(default=None, alias="Last-Event-ID"),
+):
+    """Replay workflow events after the cursor, then follow until paused/terminal."""
+    from obsidian_ai_hub.runs.events import (
+        format_sse,
+        heartbeat_sse,
+        parse_last_event_id,
+    )
+
+    if workflow_store.get_run(run_id) is None:
+        raise HTTPException(status_code=404, detail="run not found")
+    raw_cursor = (
+        last_event_id_header if last_event_id_header is not None else last_event_id
+    )
+    cursor = parse_last_event_id(raw_cursor)
+
+    async def event_gen():
+        nonlocal cursor
+        idle_cycles = 0
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                events = await asyncio.to_thread(
+                    workflow_store.list_events_after, run_id, cursor, limit=200
+                )
+                for event in events:
+                    seq = int(event["seq"])
+                    payload = dict(event.get("payload") or {})
+                    payload.setdefault("event", event.get("event_type"))
+                    yield format_sse(seq, payload)
+                    cursor = seq
+                batch_full = len(events) >= 200
+                current = await asyncio.to_thread(workflow_store.get_run, run_id)
+                status = str(current["status"]) if current is not None else ""
+                # Only close once the backlog is fully drained; a full batch
+                # means more real events are waiting.
+                if not batch_full and status in (
+                    RUN_TERMINAL_STATUSES | RUN_WAITING_STATUSES
+                ):
+                    return
+                if not events:
+                    idle_cycles += 1
+                    if idle_cycles >= 30:
+                        idle_cycles = 0
+                        yield heartbeat_sse()
+                else:
+                    idle_cycles = 0
+                await asyncio.sleep(0.5)
+        except asyncio.CancelledError:
+            return
+
+    return StreamingResponse(event_gen(), media_type="text/event-stream")
 
 
 @router.get("/runs/{run_id}/events")

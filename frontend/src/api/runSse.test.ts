@@ -111,6 +111,15 @@ describe("runSse", () => {
     expect(seen).toEqual([1, 2]);
   });
 
+  it("caches the workflow domain cursor separately", () => {
+    expect(storageKey("workflow", "wrun_1")).toBe(
+      "run-sse:workflow:wrun_1:last-event-id",
+    );
+    saveLastAppliedId("workflow", "wrun_1", 7);
+    expect(loadLastAppliedId("workflow", "wrun_1")).toBe(7);
+    expect(loadLastAppliedId("agent", "wrun_1")).toBe(0);
+  });
+
   it("aborting the subscription does not cancel the run (only stops polling)", async () => {
     const controller = new AbortController();
     controller.abort();
