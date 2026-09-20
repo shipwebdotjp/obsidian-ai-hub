@@ -185,6 +185,12 @@ export default function WorkflowEditorPage() {
 
   const save = useCallback(async (): Promise<boolean> => {
     setError(null);
+    // Published/superseded revisions are immutable; a run must not be blocked
+    // by an impossible save. Local edits to non-draft revisions are not saved.
+    if (revision?.status !== "draft") {
+      setStatus("公開済み/旧リビジョンのため保存されません");
+      return true;
+    }
     try {
       const updated = await updateWorkflowRevision(revisionId, {
         inputs_schema: inputsSchema,
@@ -199,7 +205,7 @@ export default function WorkflowEditorPage() {
       setError(getApiErrorMessage(e, "保存に失敗しました"));
       return false;
     }
-  }, [revisionId, inputsSchema, nodes, edges]);
+  }, [revisionId, revision?.status, inputsSchema, nodes, edges]);
 
   const onValidate = async () => {
     setServerIssues([]);
@@ -256,6 +262,11 @@ export default function WorkflowEditorPage() {
         <div className="text-sm font-semibold">
           {revision.workflow_id} / v{revision.version} ({revision.status})
           {dirty && <span className="ml-2 text-xs text-amber-700">未保存</span>}
+          {revision.status !== "draft" && (
+            <span className="ml-2 text-xs font-normal text-slate-500">
+              このリビジョンは編集できません（実行のみ）
+            </span>
+          )}
         </div>
         <div className="flex flex-wrap gap-2">
           <button type="button" onClick={save} className="cursor-pointer rounded bg-slate-900 px-3 py-1 text-xs text-white">
