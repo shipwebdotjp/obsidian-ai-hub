@@ -9,6 +9,10 @@ import AgentsPage from "./features/agents/AgentsPage";
 import CodingPage from "./features/coding/CodingPage";
 import HitlPage from "./features/hitl/HitlPage";
 import TaskAgentPage from "./features/task-agent/TaskAgentPage";
+import WorkflowsPage from "./features/workflows/WorkflowsPage";
+import WorkflowDetailPage from "./features/workflows/WorkflowDetailPage";
+import WorkflowEditorPage from "./features/workflows/WorkflowEditorPage";
+import WorkflowRunPage from "./features/workflows/WorkflowRunPage";
 import CapabilitySettingsPage from "./features/task-agent/CapabilitySettingsPage";
 import VaultSearchPage from "./features/vault-search/VaultSearchPage";
 import SummaryDashboardPage from "./features/summary-dashboard/SummaryDashboardPage";
@@ -181,6 +185,10 @@ export default function App() {
           <Route path={ROUTES.CODING} element={<CodingPage />} />
           <Route path={ROUTES.HITL} element={<HitlPage />} />
           <Route path={ROUTES.TASK_AGENT} element={<TaskAgentPage />} />
+          <Route path={ROUTES.WORKFLOWS} element={<WorkflowsPage />} />
+          <Route path={ROUTES.WORKFLOW_EDIT} element={<WorkflowEditorPage />} />
+          <Route path={ROUTES.WORKFLOW_RUN} element={<WorkflowRunPage />} />
+          <Route path={ROUTES.WORKFLOW_DETAIL} element={<WorkflowDetailPage />} />
           <Route
             path={ROUTES.TASK_AGENT_DETAIL}
             element={<TaskAgentPage />}

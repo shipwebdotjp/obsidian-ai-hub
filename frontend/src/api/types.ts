@@ -1086,3 +1086,147 @@ export interface TaskAgentProjectResolution {
   rationale: string;
   source: "inferred" | "user";
 }
+
+
+// --- Workflow --------------------------------------------------------------
+
+export interface WorkflowCapabilityRecord {
+  capability_key: string;
+  label: string;
+  description: string;
+  enabled: boolean;
+  approval_policy: string;
+  workflow_only: boolean;
+}
+
+export interface WorkflowCapabilityListResponse {
+  items: WorkflowCapabilityRecord[];
+}
+
+export type WorkflowNodeType =
+  | "capability"
+  | "agent"
+  | "loop"
+  | "terminal"
+  | "loop_result";
+
+export interface WorkflowUIPosition {
+  x: number;
+  y: number;
+}
+
+export interface WorkflowNode {
+  node_id: string;
+  node_type: WorkflowNodeType;
+  label?: string | null;
+  config: Record<string, unknown>;
+  parent_loop_node_id?: string | null;
+  ui_position?: WorkflowUIPosition | null;
+}
+
+export interface WorkflowEdge {
+  edge_id: string;
+  source_node_id: string;
+  target_node_id: string;
+  edge_kind: "normal" | "error";
+  condition: Record<string, unknown> | null;
+  order_index: number;
+}
+
+export interface WorkflowRevision {
+  revision_id: string;
+  workflow_id: string;
+  version: number;
+  status: "draft" | "published" | "superseded";
+  inputs_schema: Record<string, unknown>;
+  nodes: WorkflowNode[];
+  edges: WorkflowEdge[];
+  created_at: string;
+  updated_at: string;
+}
+
+export type WorkflowRunStatus =
+  | "queued"
+  | "waiting_approval"
+  | "running"
+  | "waiting_hitl"
+  | "waiting_attention"
+  | "cancelling"
+  | "interrupted"
+  | "completed"
+  | "incomplete"
+  | "failed"
+  | "cancelled";
+
+export type WorkflowNodeStatus =
+  | "pending"
+  | "running"
+  | "waiting_hitl"
+  | "succeeded"
+  | "skipped"
+  | "failed"
+  | "needs_attention"
+  | "cancelled";
+
+export interface WorkflowRunNode {
+  run_id: string;
+  node_id: string;
+  activation_id: string;
+  attempt: number;
+  status: WorkflowNodeStatus;
+  inputs_json?: string | null;
+  output_json?: string | null;
+  output_summary?: string | null;
+  error_summary?: string | null;
+  started_at?: string | null;
+  finished_at?: string | null;
+}
+
+export interface WorkflowEvent {
+  event_id: string;
+  run_id: string;
+  seq: number;
+  event_type: string;
+  payload: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface WorkflowRun {
+  run_id: string;
+  workflow_id: string;
+  revision_id: string;
+  status: WorkflowRunStatus;
+  inputs: Record<string, unknown>;
+  result_summary?: string | null;
+  error_summary?: string | null;
+  created_at: string;
+  updated_at: string;
+  started_at?: string | null;
+  finished_at?: string | null;
+  nodes?: WorkflowRunNode[];
+  events?: WorkflowEvent[];
+}
+
+export interface WorkflowSummary {
+  workflow_id: string;
+  name: string;
+  description: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WorkflowDetail extends WorkflowSummary {
+  revisions?: WorkflowRevision[];
+  runs?: WorkflowRun[];
+  revision?: WorkflowRevision;
+}
+
+export interface WorkflowListResponse {
+  items: WorkflowSummary[];
+  total: number;
+}
+
+export interface WorkflowValidationResponse {
+  valid: boolean;
+  errors: string[];
+}

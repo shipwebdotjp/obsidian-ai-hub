@@ -107,7 +107,8 @@ updated_at TEXT NOT NULL
 ```
 
 - `draft` のみ編集可能。`published` は不変。
-- `published` を編集する場合、新しい `version` の `draft` を作成する。
+- `published` を編集する場合、新しい `version` の `draft` を作成する。v1 では新 draft は
+  空のグラフ・既定 `inputs_schema` で開始し、既存グラフの複製は将来拡張とする。
 - Run は `revision_id` とその時点のグラフ・inputs をスナップショットして実行する。
 
 ### 3.3 Node

@@ -22,6 +22,15 @@ WORKFLOW_ONLY_KEYS: frozenset[str] = frozenset({HITL_WAIT_KEY})
 # approval; the human gate is the HITL question itself.
 WORKFLOW_ONLY_APPROVAL: dict[str, str] = {HITL_WAIT_KEY: "auto"}
 
+# Display metadata for workflow-only capabilities, kept next to the policy
+# so a new key cannot be published with another capability's label.
+WORKFLOW_ONLY_METADATA: dict[str, tuple[str, str]] = {
+    HITL_WAIT_KEY: (
+        "HITL確認",
+        "既存HITLへ質問を登録し、回答まで待つ。",
+    ),
+}
+
 
 def workflow_capability_keys() -> frozenset[str]:
     """Return all capability keys selectable in a Workflow revision."""

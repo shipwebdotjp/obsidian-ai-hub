@@ -49,6 +49,14 @@ import type {
   OneShotJobSummary,
   RecurringJobUpdate,
   JobState,
+  WorkflowCapabilityListResponse,
+  WorkflowDetail,
+  WorkflowEdge,
+  WorkflowListResponse,
+  WorkflowNode,
+  WorkflowRevision,
+  WorkflowRun,
+  WorkflowValidationResponse,
 } from "./types";
 
 const TOKEN_KEY = "obsidian-ai-hub:api-token";
@@ -937,5 +945,131 @@ export function updateTaskAgentCapability(
       method: "PUT",
       body: JSON.stringify(update),
     },
+  );
+}
+
+// --- Workflow --------------------------------------------------------------
+
+export function listWorkflows(params: {
+  limit?: number;
+  offset?: number;
+} = {}): Promise<WorkflowListResponse> {
+  return request<WorkflowListResponse>(withQuery("/api/v1/workflows", params));
+}
+
+export function createWorkflow(payload: {
+  name: string;
+  description?: string;
+  inputs_schema?: Record<string, unknown>;
+}): Promise<WorkflowDetail> {
+  return request<WorkflowDetail>("/api/v1/workflows", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function getWorkflow(workflowId: string): Promise<WorkflowDetail> {
+  return request<WorkflowDetail>(
+    `/api/v1/workflows/${encodeURIComponent(workflowId)}`,
+  );
+}
+
+export function createWorkflowRevision(
+  workflowId: string,
+): Promise<WorkflowRevision> {
+  return request<WorkflowRevision>(
+    `/api/v1/workflows/${encodeURIComponent(workflowId)}/revisions`,
+    { method: "POST" },
+  );
+}
+
+export function listWorkflowCapabilities(): Promise<WorkflowCapabilityListResponse> {
+  return request<WorkflowCapabilityListResponse>("/api/v1/workflows/capabilities");
+}
+
+export function getWorkflowRevision(
+  revisionId: string,
+): Promise<WorkflowRevision> {
+  return request<WorkflowRevision>(
+    `/api/v1/workflows/revisions/${encodeURIComponent(revisionId)}`,
+  );
+}
+
+export function updateWorkflowRevision(
+  revisionId: string,
+  payload: {
+    inputs_schema: Record<string, unknown>;
+    nodes: WorkflowNode[];
+    edges: WorkflowEdge[];
+  },
+): Promise<WorkflowRevision> {
+  return request<WorkflowRevision>(
+    `/api/v1/workflows/revisions/${encodeURIComponent(revisionId)}`,
+    { method: "PUT", body: JSON.stringify(payload) },
+  );
+}
+
+export function validateWorkflowRevision(
+  revisionId: string,
+): Promise<WorkflowValidationResponse> {
+  return request<WorkflowValidationResponse>(
+    `/api/v1/workflows/revisions/${encodeURIComponent(revisionId)}/validate`,
+    { method: "POST" },
+  );
+}
+
+export function publishWorkflowRevision(
+  revisionId: string,
+): Promise<WorkflowRevision> {
+  return request<WorkflowRevision>(
+    `/api/v1/workflows/revisions/${encodeURIComponent(revisionId)}/publish`,
+    { method: "POST" },
+  );
+}
+
+export function createWorkflowRun(
+  revisionId: string,
+  inputs: Record<string, unknown>,
+): Promise<WorkflowRun> {
+  return request<WorkflowRun>(
+    `/api/v1/workflows/revisions/${encodeURIComponent(revisionId)}/runs`,
+    { method: "POST", body: JSON.stringify({ inputs }) },
+  );
+}
+
+export function getWorkflowRun(runId: string): Promise<WorkflowRun> {
+  return request<WorkflowRun>(
+    `/api/v1/workflows/runs/${encodeURIComponent(runId)}`,
+  );
+}
+
+export function approveWorkflowRun(runId: string): Promise<WorkflowRun> {
+  return request<WorkflowRun>(
+    `/api/v1/workflows/runs/${encodeURIComponent(runId)}/approve`,
+    { method: "POST" },
+  );
+}
+
+export function cancelWorkflowRun(runId: string): Promise<WorkflowRun> {
+  return request<WorkflowRun>(
+    `/api/v1/workflows/runs/${encodeURIComponent(runId)}/cancel`,
+    { method: "POST" },
+  );
+}
+
+export function resumeWorkflowRun(runId: string): Promise<WorkflowRun> {
+  return request<WorkflowRun>(
+    `/api/v1/workflows/runs/${encodeURIComponent(runId)}/resume`,
+    { method: "POST" },
+  );
+}
+
+export function resolveWorkflowAttention(
+  runId: string,
+  payload: { decision: "adopt" | "fail" | "reexecute" | "interrupt" },
+): Promise<WorkflowRun> {
+  return request<WorkflowRun>(
+    `/api/v1/workflows/runs/${encodeURIComponent(runId)}/attention`,
+    { method: "POST", body: JSON.stringify(payload) },
   );
 }

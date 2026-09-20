@@ -217,6 +217,7 @@ def _revision_row(
     revision["inputs_schema"] = _loads(revision.get("inputs_schema"), {})
     for node in nodes:
         node["config"] = _loads(node.get("config_json"), {})
+        node["ui_position"] = _loads(node.get("ui_position_json"), None)
     for edge in edges:
         edge["condition"] = _loads(edge.get("condition_json"), None)
     revision["nodes"] = nodes

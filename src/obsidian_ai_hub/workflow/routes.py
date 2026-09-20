@@ -16,6 +16,8 @@ from pydantic import BaseModel, Field
 from obsidian_ai_hub.web.routes.deps import require_bearer_token
 from obsidian_ai_hub.workflow import store as workflow_store
 from obsidian_ai_hub.workflow.capabilities import (
+    WORKFLOW_ONLY_KEYS,
+    WORKFLOW_ONLY_METADATA,
     default_approval_policy,
     is_workflow_only,
     workflow_capability_keys,
@@ -115,6 +117,50 @@ def create_workflow(payload: WorkflowCreate) -> dict[str, Any]:
     )
 
 
+@router.get("/capabilities")
+def list_workflow_capabilities() -> dict[str, Any]:
+    """List capabilities selectable in a Workflow revision.
+
+    Registry-derived capabilities carry their DB enablement/approval policy;
+    workflow-only capabilities (``hitl_wait``) are always enabled and auto.
+    """
+    from obsidian_ai_hub.tasks import store as task_store
+    from obsidian_ai_hub.tasks.capabilities import get_capability_definitions
+
+    policies = {
+        str(c["capability_key"]): c for c in task_store.list_capabilities()
+    }
+    items: list[dict[str, Any]] = []
+    for definition in get_capability_definitions():
+        record = policies.get(definition.key, {})
+        items.append(
+            {
+                "capability_key": definition.key,
+                "label": definition.label,
+                "description": definition.description,
+                "enabled": bool(record.get("enabled", False)),
+                "approval_policy": str(
+                    record.get("approval_policy")
+                    or default_approval_policy(definition.key)
+                ),
+                "workflow_only": False,
+            }
+        )
+    for key in sorted(WORKFLOW_ONLY_KEYS):
+        label, description = WORKFLOW_ONLY_METADATA.get(key, (key, ""))
+        items.append(
+            {
+                "capability_key": key,
+                "label": label,
+                "description": description,
+                "enabled": True,
+                "approval_policy": default_approval_policy(key),
+                "workflow_only": True,
+            }
+        )
+    return {"items": items}
+
+
 @router.get("/{workflow_id}")
 def get_workflow(workflow_id: str) -> dict[str, Any]:
     workflow = workflow_store.get_workflow(workflow_id)
@@ -124,6 +170,19 @@ def get_workflow(workflow_id: str) -> dict[str, Any]:
     workflow["revisions"] = workflow_store.list_revisions(workflow_id)
     workflow["runs"] = runs
     return workflow
+
+
+@router.post("/{workflow_id}/revisions", status_code=201)
+def create_revision(workflow_id: str) -> dict[str, Any]:
+    """Create an empty draft for further editing.
+
+    v1 starts a new draft blank (no graph/inputs_schema clone); the author
+    rebuilds or adjusts from a blank canvas. See specification §5.
+    """
+    workflow = workflow_store.get_workflow(workflow_id)
+    if workflow is None:
+        raise HTTPException(status_code=404, detail="workflow not found")
+    return workflow_store.create_revision(workflow_id)
 
 
 @router.get("/revisions/{revision_id}")

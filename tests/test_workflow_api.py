@@ -255,3 +255,57 @@ def test_hitl_wait_node_publishes_without_task_catalog(test_memory_db_path, clie
     ).json()
     # hitl_wait is auto policy, so the run is queued rather than awaiting approval.
     assert run["status"] == "queued"
+
+
+def test_workflow_capabilities_and_new_revision(test_memory_db_path, client):
+    task_store.sync_capabilities()
+    caps = client.get("/api/v1/workflows/capabilities")
+    assert caps.status_code == 200
+    items = caps.json()["items"]
+    keys = {c["capability_key"] for c in items}
+    assert "hitl_wait" in keys
+    hitl = next(c for c in items if c["capability_key"] == "hitl_wait")
+    assert hitl["workflow_only"] is True
+    assert hitl["approval_policy"] == "auto"
+
+    created = client.post("/api/v1/workflows", json={"name": "rev"})
+    workflow_id = created.json()["workflow_id"]
+    second = client.post(f"/api/v1/workflows/{workflow_id}/revisions")
+    assert second.status_code == 201
+    assert second.json()["version"] == 2
+    assert second.json()["status"] == "draft"
+
+
+def test_revision_returns_ui_position_and_new_draft_is_blank(test_memory_db_path, client):
+    created = client.post("/api/v1/workflows", json={"name": "layout"})
+    workflow_id = created.json()["workflow_id"]
+    revision_id = created.json()["revision"]["revision_id"]
+    nodes = [
+        {
+            "node_id": "n_a",
+            "node_type": "capability",
+            "config": {"capability_key": "vault_search", "inputs": {}},
+            "ui_position": {"x": 120, "y": 80},
+        },
+        {"node_id": "n_end", "node_type": "terminal", "config": {"outcome": "success"}},
+    ]
+    edges = [
+        {
+            "edge_id": "e1",
+            "source_node_id": "n_a",
+            "target_node_id": "n_end",
+            "order_index": 0,
+        }
+    ]
+    client.put(
+        f"/api/v1/workflows/revisions/{revision_id}",
+        json={"inputs_schema": {"type": "object"}, "nodes": nodes, "edges": edges},
+    )
+    stored = client.get(f"/api/v1/workflows/revisions/{revision_id}").json()
+    position = next(n for n in stored["nodes"] if n["node_id"] == "n_a")["ui_position"]
+    assert position == {"x": 120, "y": 80}
+
+    client.post(f"/api/v1/workflows/revisions/{revision_id}/publish")
+    new_draft = client.post(f"/api/v1/workflows/{workflow_id}/revisions").json()
+    assert new_draft["nodes"] == []
+    assert new_draft["edges"] == []
