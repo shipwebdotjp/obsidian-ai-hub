@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   approveWorkflowRun,
   cancelWorkflowRun,
   getWorkflowRun,
+  rerunWorkflowRun,
   resolveWorkflowAttention,
   resumeWorkflowRun,
 } from "../../api/client";
 import type { WorkflowRun } from "../../api/types";
-import { ROUTES } from "../../constants/routes";
+import { ROUTES, workflowRunPath } from "../../constants/routes";
 import {
   loadLastAppliedId,
   saveLastAppliedId,
@@ -16,12 +17,17 @@ import {
 } from "../../api/runSse";
 import { formatDateTime } from "../../utils/date";
 import { getApiErrorMessage } from "../../utils/error";
+import InputsSchemaForm from "./InputsSchemaForm";
 
 const TERMINAL = new Set(["completed", "incomplete", "failed", "cancelled"]);
 
 export default function WorkflowRunPage() {
   const { runId = "" } = useParams();
+  const navigate = useNavigate();
   const [run, setRun] = useState<WorkflowRun | null>(null);
+  const [rerunOpen, setRerunOpen] = useState(false);
+  const [rerunInputs, setRerunInputs] = useState<Record<string, unknown>>({});
+  const [rerunErrors, setRerunErrors] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -120,6 +126,21 @@ export default function WorkflowRunPage() {
     }
   };
 
+  const onRerun = async () => {
+    setBusy(true);
+    try {
+      const created = await rerunWorkflowRun(runId, rerunInputs);
+      navigate(workflowRunPath(created.run_id));
+    } catch (e) {
+      const detail = (e as { body?: { detail?: { errors?: string[] } } })?.body
+        ?.detail;
+      setRerunErrors(Array.isArray(detail?.errors) ? detail.errors : []);
+      setError(getApiErrorMessage(e, "再実行に失敗しました"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   if (!run) {
     return (
       <div className="p-4 text-sm text-slate-500">
@@ -203,6 +224,24 @@ export default function WorkflowRunPage() {
               </button>
             </>
           )}
+          {TERMINAL.has(run.status) && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() =>
+                setRerunOpen((value) => {
+                  if (!value) {
+                    setRerunInputs(run.inputs ?? {});
+                    setRerunErrors([]);
+                  }
+                  return !value;
+                })
+              }
+              className="cursor-pointer rounded bg-slate-900 px-3 py-1 text-xs text-white disabled:opacity-50"
+            >
+              再実行
+            </button>
+          )}
           <Link className="rounded border border-slate-300 px-3 py-1 text-xs" to={ROUTES.WORKFLOWS}>
             一覧
           </Link>
@@ -214,6 +253,26 @@ export default function WorkflowRunPage() {
         <p className="bg-white px-4 py-2 text-xs text-amber-700">
           Node {attentionNode.node_id} が対応待ちです。
         </p>
+      )}
+
+      {rerunOpen && (
+        <section className="border-b border-slate-200 bg-white px-4 py-3 text-xs">
+          <h2 className="mb-2 text-sm font-semibold">再実行の入力</h2>
+          <InputsSchemaForm
+            schema={run.graph_snapshot?.inputs_schema ?? { type: "object" }}
+            values={rerunInputs}
+            onChange={setRerunInputs}
+            errors={rerunErrors}
+          />
+          <button
+            type="button"
+            disabled={busy}
+            onClick={onRerun}
+            className="mt-2 cursor-pointer rounded bg-blue-600 px-3 py-1 text-xs text-white disabled:opacity-50"
+          >
+            この入力で再実行
+          </button>
+        </section>
       )}
 
       <section className="px-4 py-3 text-xs">

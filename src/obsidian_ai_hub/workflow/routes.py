@@ -60,6 +60,10 @@ class AttentionDecision(BaseModel):
     output: Optional[dict[str, Any]] = None
 
 
+class RerunRequest(BaseModel):
+    inputs: Optional[dict[str, Any]] = None
+
+
 def _capability_enabled() -> Any:
     from obsidian_ai_hub.tasks import store as task_store
 
@@ -295,6 +299,47 @@ def create_run(revision_id: str, payload: RunCreate) -> dict[str, Any]:
         )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/runs/{run_id}/rerun", status_code=201)
+def rerun_run(run_id: str, payload: RerunRequest) -> dict[str, Any]:
+    """Create a new run from a terminal run's snapshot (inputs overridable).
+
+    Uses the stored graph snapshot, so the rerun works even when the source
+    revision has been superseded. ``source_run_id`` links the lineage.
+    """
+    source = workflow_store.get_run(run_id)
+    if source is None:
+        raise HTTPException(status_code=404, detail="run not found")
+    if str(source["status"]) not in RUN_TERMINAL_STATUSES:
+        raise HTTPException(
+            status_code=409, detail="only a terminal run can be rerun"
+        )
+    snapshot = source.get("graph_snapshot") or {}
+    inputs = (
+        dict(payload.inputs)
+        if payload.inputs is not None
+        else dict(source.get("inputs") or {})
+    )
+    input_errors = validate_value_against_schema(
+        inputs, snapshot.get("inputs_schema") or {}, path="run.inputs"
+    )
+    if input_errors:
+        raise HTTPException(status_code=422, detail={"errors": input_errors})
+    initial_status = (
+        "waiting_approval"
+        if _requires_approval({"nodes": snapshot.get("nodes") or []})
+        else "queued"
+    )
+    new_run = workflow_store.create_rerun_run(
+        source, inputs, initial_status=initial_status
+    )
+    workflow_store.append_event(
+        str(new_run["run_id"]),
+        "run_rerun_created",
+        {"source_run_id": run_id},
+    )
+    return new_run
 
 
 @router.get("/runs/{run_id}")

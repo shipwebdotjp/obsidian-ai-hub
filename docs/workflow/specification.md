@@ -508,6 +508,16 @@ HITL 待ちは Capability Node として実装する。`hitl_wait` Capability �
 `waiting_attention` から `interrupted` への移行も許可する。待機状態からの再開は `queued` を経由し、
 worker が Activation の既存状態を読んで `waiting_attention` の Node から再開する。
 
+### 13.5 再実行（Rerun）
+
+- 終端 Run（`completed` / `incomplete` / `failed` / `cancelled`）は、その `graph_snapshot` と
+  `inputs` を引き継いだ新 Run として再実行できる。
+- 新 Run は元 Run の Revision が `superseded` になっていても作成できる（スナップショットを複製するため）。
+- `inputs` を指定すると上書きし、スナップショットの `inputs_schema` で検証する。省略時は元 Run の入力をコピーする。
+- 承認要否はスナップショットの Node 集合から再判定し、`plan_required` を含む場合は `waiting_approval` で作成する。
+- 新 Run は `source_run_id` で元 Run を参照し、`run_rerun_created` Event を監査記録に残す。
+- 非終端 Run は再実行できない（`409`）。
+
 ## 14. イベント、監査、redaction、保持期間
 
 ### 14.1 Event
@@ -586,6 +596,7 @@ inputs/output 要約、effects、Agent 指紋を含む。
 | `POST /api/v1/workflows/runs/:run_id/approve` | 承認。`waiting_approval` → `queued`。 |
 | `POST /api/v1/workflows/runs/:run_id/cancel` | 取消。 |
 | `POST /api/v1/workflows/runs/:run_id/resume` | 明示再開。`interrupted` → `queued`。 |
+| `POST /api/v1/workflows/runs/:run_id/rerun` | 終端 Run のスナップショットから新 Run を作成。`inputs` は省略時コピー、指定時は上書き（`inputs_schema` で検証）。`source_run_id` を記録。 |
 | `POST /api/v1/workflows/runs/:run_id/attention` | needs_attention 処置（採用 / 失敗 / 再実行 / interrupted）。 |
 | `GET /api/v1/workflows/runs/:run_id/events` | SSE 進捗（または long-polling 代替）。 |
 
@@ -635,6 +646,7 @@ workflow_runs
   status TEXT NOT NULL
   inputs_json TEXT
   graph_snapshot_json TEXT NOT NULL
+  source_run_id TEXT
   worker_instance_id TEXT
   result_summary TEXT
   error_summary TEXT

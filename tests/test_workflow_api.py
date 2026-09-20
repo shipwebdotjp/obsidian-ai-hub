@@ -372,3 +372,154 @@ def test_template_references_are_remapped(test_memory_db_path, client):
         assert mapping["$ref"].split(".")[1] in node_ids
     # Every instantiated node carries a canvas position.
     assert all(n["ui_position"] is not None for n in revision["nodes"])
+
+
+def _terminal_run(client, revision_id, inputs):
+    run = client.post(
+        f"/api/v1/workflows/revisions/{revision_id}/runs", json={"inputs": inputs}
+    ).json()
+    workflow_store.claim_run("rerun-test")
+    workflow_store.transition_run_status(run["run_id"], "completed")
+    return run
+
+
+def test_rerun_from_snapshot_with_input_override(test_memory_db_path, client):
+    created = client.post(
+        "/api/v1/workflows",
+        json={
+            "name": "rerun",
+            "inputs_schema": {
+                "type": "object",
+                "properties": {"topic": {"type": "string"}},
+                "required": ["topic"],
+            },
+        },
+    )
+    revision_id = created.json()["revision"]["revision_id"]
+    nodes = [
+        {
+            "node_id": "n_a",
+            "node_type": "capability",
+            "config": {"capability_key": "research_context_snapshot", "inputs": {}},
+        },
+        {"node_id": "n_end", "node_type": "terminal", "config": {"outcome": "success"}},
+    ]
+    edges = [
+        {
+            "edge_id": "e1",
+            "source_node_id": "n_a",
+            "target_node_id": "n_end",
+            "order_index": 0,
+        }
+    ]
+    client.put(
+        f"/api/v1/workflows/revisions/{revision_id}",
+        json={
+            "inputs_schema": {
+                "type": "object",
+                "properties": {"topic": {"type": "string"}},
+                "required": ["topic"],
+            },
+            "nodes": nodes,
+            "edges": edges,
+        },
+    )
+    client.post(f"/api/v1/workflows/revisions/{revision_id}/publish")
+    source = _terminal_run(client, revision_id, {"topic": "first"})
+
+    # A non-terminal run cannot be rerun.
+    queued = client.post(
+        f"/api/v1/workflows/revisions/{revision_id}/runs", json={"inputs": {"topic": "x"}}
+    ).json()
+    assert client.post(f"/api/v1/workflows/runs/{queued['run_id']}/rerun", json={}).status_code == 409
+
+    # Supersede the source revision; rerun must still work from the snapshot.
+    second = client.post(f"/api/v1/workflows/{created.json()['workflow_id']}/revisions").json()
+    client.put(
+        f"/api/v1/workflows/revisions/{second['revision_id']}",
+        json={
+            "inputs_schema": {"type": "object"},
+            "nodes": nodes,
+            "edges": edges,
+        },
+    )
+    client.post(f"/api/v1/workflows/revisions/{second['revision_id']}/publish")
+
+    rerun = client.post(
+        f"/api/v1/workflows/runs/{source['run_id']}/rerun",
+        json={"inputs": {"topic": "second"}},
+    )
+    assert rerun.status_code == 201
+    body = rerun.json()
+    assert body["status"] == "queued"
+    assert body["inputs"] == {"topic": "second"}
+    assert body["source_run_id"] == source["run_id"]
+    assert body["revision_id"] == revision_id
+    assert len(body["graph_snapshot"]["nodes"]) == 2
+
+    # Input override is validated against the snapshot schema.
+    bad = client.post(
+        f"/api/v1/workflows/runs/{source['run_id']}/rerun", json={"inputs": {}}
+    )
+    assert bad.status_code == 422
+
+
+def test_rerun_without_inputs_copies_source_inputs(test_memory_db_path, client):
+    created = client.post("/api/v1/workflows", json={"name": "rerun-copy"})
+    revision_id = created.json()["revision"]["revision_id"]
+    nodes = [
+        {
+            "node_id": "n_a",
+            "node_type": "capability",
+            "config": {"capability_key": "research_context_snapshot", "inputs": {}},
+        },
+        {"node_id": "n_end", "node_type": "terminal", "config": {"outcome": "success"}},
+    ]
+    edges = [
+        {"edge_id": "e1", "source_node_id": "n_a", "target_node_id": "n_end", "order_index": 0}
+    ]
+    client.put(
+        f"/api/v1/workflows/revisions/{revision_id}",
+        json={"inputs_schema": {"type": "object"}, "nodes": nodes, "edges": edges},
+    )
+    client.post(f"/api/v1/workflows/revisions/{revision_id}/publish")
+    source = _terminal_run(client, revision_id, {"k": "v"})
+    rerun = client.post(f"/api/v1/workflows/runs/{source['run_id']}/rerun", json={}).json()
+    assert rerun["inputs"] == {"k": "v"}
+
+
+def test_rerun_recomputes_approval_from_snapshot(test_memory_db_path, client):
+    task_store.sync_capabilities()
+    created = client.post("/api/v1/workflows", json={"name": "rerun-approval"})
+    revision_id = created.json()["revision"]["revision_id"]
+    nodes = [
+        {
+            "node_id": "n_write",
+            "node_type": "capability",
+            "config": {
+                "capability_key": "vault_write_file",
+                "inputs": {"relative_path": "x.md", "content": "hi", "overwrite": True},
+            },
+        },
+        {"node_id": "n_end", "node_type": "terminal", "config": {"outcome": "success"}},
+    ]
+    edges = [
+        {"edge_id": "e1", "source_node_id": "n_write", "target_node_id": "n_end", "order_index": 0}
+    ]
+    client.put(
+        f"/api/v1/workflows/revisions/{revision_id}",
+        json={"inputs_schema": {"type": "object"}, "nodes": nodes, "edges": edges},
+    )
+    client.post(f"/api/v1/workflows/revisions/{revision_id}/publish")
+    source = client.post(
+        f"/api/v1/workflows/revisions/{revision_id}/runs", json={"inputs": {}}
+    ).json()
+    assert source["status"] == "waiting_approval"
+    client.post(f"/api/v1/workflows/runs/{source['run_id']}/approve")
+    workflow_store.claim_run("rerun-approval-test")
+    workflow_store.transition_run_status(source["run_id"], "completed")
+
+    rerun = client.post(f"/api/v1/workflows/runs/{source['run_id']}/rerun", json={}).json()
+    # A plan_required capability in the snapshot forces approval again.
+    assert rerun["status"] == "waiting_approval"
+    assert rerun["source_run_id"] == source["run_id"]

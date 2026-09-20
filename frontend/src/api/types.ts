@@ -1197,6 +1197,12 @@ export interface WorkflowRun {
   revision_id: string;
   status: WorkflowRunStatus;
   inputs: Record<string, unknown>;
+  graph_snapshot?: {
+    inputs_schema?: Record<string, unknown>;
+    nodes?: unknown[];
+    edges?: unknown[];
+  } | null;
+  source_run_id?: string | null;
   result_summary?: string | null;
   error_summary?: string | null;
   created_at: string;

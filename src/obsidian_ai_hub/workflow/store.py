@@ -386,6 +386,40 @@ def _require_draft(conn: sqlite3.Connection, revision_id: str) -> sqlite3.Row:
 # --- Runs ------------------------------------------------------------------
 
 
+def _insert_run(
+    conn: sqlite3.Connection,
+    *,
+    workflow_id: str,
+    revision_id: str,
+    inputs: dict[str, Any],
+    snapshot: dict[str, Any],
+    initial_status: str,
+    source_run_id: Optional[str] = None,
+) -> str:
+    """Insert one run row (redacted) and return its id."""
+    if initial_status not in ("queued", "waiting_approval"):
+        raise ValueError(f"Unsupported initial run status: {initial_status}")
+    run_id = _new_id("wrun")
+    now = _now_iso()
+    conn.execute(
+        "INSERT INTO workflow_runs (run_id, workflow_id, revision_id, status, "
+        "inputs_json, graph_snapshot_json, source_run_id, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);",
+        (
+            run_id,
+            workflow_id,
+            revision_id,
+            initial_status,
+            _redacted_json(inputs),
+            _redacted_json(snapshot),
+            source_run_id,
+            now,
+            now,
+        ),
+    )
+    return run_id
+
+
 def create_run(
     workflow_id: str,
     revision_id: str,
@@ -400,10 +434,7 @@ def create_run(
     directly as ``waiting_approval`` so a worker can never claim it
     before the human gate (spec §7.2).
     """
-    if initial_status not in ("queued", "waiting_approval"):
-        raise ValueError(f"Unsupported initial run status: {initial_status}")
-    run_id = _new_id("wrun")
-    now = _now_iso()
+    run_id: str | None = None
     with auto_connection(conn) as (active_conn, is_generated):
         revision = active_conn.execute(
             "SELECT * FROM workflow_revisions WHERE revision_id = ?;",
@@ -415,29 +446,21 @@ def create_run(
             raise ValueError("Only a published revision can start a run.")
         full = get_revision(revision_id, conn=active_conn)
         assert full is not None
-        snapshot = _redacted_json(
-            {
-                "inputs_schema": full["inputs_schema"],
-                "nodes": full["nodes"],
-                "edges": full["edges"],
-            }
-        )
+        snapshot = {
+            "inputs_schema": full["inputs_schema"],
+            "nodes": full["nodes"],
+            "edges": full["edges"],
+        }
 
         def _do() -> None:
-            active_conn.execute(
-                "INSERT INTO workflow_runs (run_id, workflow_id, revision_id, status, "
-                "inputs_json, graph_snapshot_json, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?);",
-                (
-                    run_id,
-                    workflow_id,
-                    revision_id,
-                    initial_status,
-                    _redacted_json(inputs),
-                    snapshot,
-                    now,
-                    now,
-                ),
+            nonlocal run_id
+            run_id = _insert_run(
+                active_conn,
+                workflow_id=workflow_id,
+                revision_id=revision_id,
+                inputs=inputs,
+                snapshot=snapshot,
+                initial_status=initial_status,
             )
 
         if is_generated:
@@ -445,7 +468,44 @@ def create_run(
                 _do()
         else:
             _do()
-    created = get_run(run_id, conn=conn)
+    created = get_run(str(run_id), conn=conn)
+    assert created is not None
+    return created
+
+
+def create_rerun_run(
+    source_run: dict[str, Any],
+    inputs: dict[str, Any],
+    *,
+    initial_status: str = "queued",
+    conn: Optional[sqlite3.Connection] = None,
+) -> dict[str, Any]:
+    """Create a new run from a past run's graph snapshot and inputs.
+
+    The source run's ``graph_snapshot`` is copied, so a rerun works even after
+    the source revision is superseded. ``source_run_id`` is recorded for audit.
+    """
+    run_id: str | None = None
+    with auto_connection(conn) as (active_conn, is_generated):
+
+        def _do() -> None:
+            nonlocal run_id
+            run_id = _insert_run(
+                active_conn,
+                workflow_id=str(source_run["workflow_id"]),
+                revision_id=str(source_run["revision_id"]),
+                inputs=inputs,
+                snapshot=source_run.get("graph_snapshot") or {},
+                initial_status=initial_status,
+                source_run_id=str(source_run["run_id"]),
+            )
+
+        if is_generated:
+            with active_conn:
+                _do()
+        else:
+            _do()
+    created = get_run(str(run_id), conn=conn)
     assert created is not None
     return created
 

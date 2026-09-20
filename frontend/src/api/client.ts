@@ -1038,6 +1038,16 @@ export function createWorkflowRun(
   );
 }
 
+export function rerunWorkflowRun(
+  runId: string,
+  inputs?: Record<string, unknown>,
+): Promise<WorkflowRun> {
+  return request<WorkflowRun>(
+    `/api/v1/workflows/runs/${encodeURIComponent(runId)}/rerun`,
+    { method: "POST", body: JSON.stringify(inputs === undefined ? {} : { inputs }) },
+  );
+}
+
 export function getWorkflowRun(runId: string): Promise<WorkflowRun> {
   return request<WorkflowRun>(
     `/api/v1/workflows/runs/${encodeURIComponent(runId)}`,

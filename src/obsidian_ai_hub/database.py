@@ -718,6 +718,9 @@ def get_db_connection() -> sqlite3.Connection:
     if current_version <= 52:
         run_migration_v53(conn)
 
+    if current_version <= 53:
+        run_migration_v54(conn)
+
     return conn
 
 
@@ -938,6 +941,19 @@ def run_migration_v53(conn: sqlite3.Connection) -> None:
         "ON workflow_events(run_id, seq);"
     )
     conn.execute("PRAGMA user_version = 53;")
+    conn.commit()
+
+
+def run_migration_v54(conn: sqlite3.Connection) -> None:
+    """Run migration for version 54 (Workflow run rerun lineage).
+
+    Records which run a rerun was created from so the audit trail can link the
+    copies. Adds ``workflow_runs.source_run_id``.
+    """
+    conn.execute(
+        "ALTER TABLE workflow_runs ADD COLUMN source_run_id TEXT;"
+    )
+    conn.execute("PRAGMA user_version = 54;")
     conn.commit()
 
 
