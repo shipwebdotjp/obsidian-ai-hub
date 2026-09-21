@@ -31,7 +31,7 @@ project overview.
 
 ```bash
 git clone <repository-url>
-cd obsidian-daily-merge
+cd obsidian-ai-hub
 uv sync
 cp config/config.example.yml config/config.yml
 cp .env.example .env

@@ -29,7 +29,7 @@
   schedule:
     type: minutely
     second: 0
-  command: 'uv --directory /path/to/obsidian-daily-merge run -m obsidian_ai_hub --merge-inbox'
+  command: 'uv --directory /path/to/obsidian-ai-hub run -m obsidian_ai_hub --merge-inbox'
 
 - id: sample_hourly_basic
   enabled: true
@@ -70,7 +70,7 @@
     weekday: 6 # Sunday
     hour: 21
     minute: 30
-  command: 'uv --directory /path/to/obsidian-daily-merge run -m obsidian_ai_hub --review-draft'
+  command: 'uv --directory /path/to/obsidian-ai-hub run -m obsidian_ai_hub --review-draft'
 
 # Enable to create long-term-memory candidates from the most recently completed week.
 - id: memory_extract_monday_early
@@ -80,7 +80,7 @@
     weekday: 0 # Monday
     hour: 0
     minute: 15
-  command: 'uv --directory /path/to/obsidian-daily-merge run -m obsidian_ai_hub --memory-extract'
+  command: 'uv --directory /path/to/obsidian-ai-hub run -m obsidian_ai_hub --memory-extract'
 
 # Daily 06:00 AI planner proposal generation (low-to-medium confidence schedule/reminder candidates).
 - id: generate_planner_proposals_daily
@@ -89,7 +89,7 @@
     type: daily
     hour: 6
     minute: 0
-  command: 'uv --directory /path/to/obsidian-daily-merge run -m obsidian_ai_hub --generate-planner-proposals'
+  command: 'uv --directory /path/to/obsidian-ai-hub run -m obsidian_ai_hub --generate-planner-proposals'
 
 - id: sample_monthly
   enabled: true
@@ -116,7 +116,7 @@
   schedule:
     type: minutely
     second: [0, 30]
-  command: 'uv --directory /path/to/obsidian-daily-merge run -m obsidian_ai_hub --hitl-dispatch'
+  command: 'uv --directory /path/to/obsidian-ai-hub run -m obsidian_ai_hub --hitl-dispatch'
 
 - id: cleanup_line_webhooks_daily
   enabled: true
@@ -124,7 +124,7 @@
     type: daily
     hour: 3
     minute: 15
-  command: 'uv --directory /path/to/obsidian-daily-merge run -m obsidian_ai_hub --cleanup-line-webhooks'
+  command: 'uv --directory /path/to/obsidian-ai-hub run -m obsidian_ai_hub --cleanup-line-webhooks'
 
 - id: cleanup_execution_logs_daily
   enabled: true
@@ -132,4 +132,4 @@
     type: daily
     hour: 3
     minute: 20
-  command: 'uv --directory /path/to/obsidian-daily-merge run -m obsidian_ai_hub --cleanup-execution-logs'
+  command: 'uv --directory /path/to/obsidian-ai-hub run -m obsidian_ai_hub --cleanup-execution-logs'

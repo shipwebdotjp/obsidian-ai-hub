@@ -34,7 +34,7 @@ title: ジョブのスケジュール
   schedule:
     type: minutely
     second: 0
-  command: uv --directory /path/to/obsidian-daily-merge run -m obsidian_ai_hub --merge-inbox
+  command: uv --directory /path/to/obsidian-ai-hub run -m obsidian_ai_hub --merge-inbox
 ```
 
 毎時 0 分:

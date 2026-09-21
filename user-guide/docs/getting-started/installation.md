@@ -11,7 +11,7 @@ title: インストールと初期設定
 
 ```bash
 git clone <repository-url>
-cd obsidian-daily-merge
+cd obsidian-ai-hub
 ```
 
 ## 2. 依存関係をインストールする
