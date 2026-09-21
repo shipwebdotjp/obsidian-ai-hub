@@ -724,6 +724,9 @@ def get_db_connection() -> sqlite3.Connection:
     if current_version <= 54:
         run_migration_v55(conn)
 
+    if current_version <= 55:
+        run_migration_v56(conn)
+
     return conn
 
 
@@ -976,6 +979,36 @@ def run_migration_v55(conn: sqlite3.Connection) -> None:
     except sqlite3.OperationalError as e:
         _ignore_duplicate_schema_object(e)
     conn.execute("PRAGMA user_version = 55;")
+    conn.commit()
+
+
+def run_migration_v56(conn: sqlite3.Connection) -> None:
+    """Run migration for version 56 (Task origin separation).
+
+    Workflow capability nodes reuse the Task capability adapters, which
+    require a Task row for child linkage, cancellation and events. That
+    short-lived "bridge" Task must not surface as a user-facing Task in the
+    Task Agent list (see ``docs/workflow/adr/workflow-graph-and-agent-node.md``).
+    ``origin`` records who created the row; the list API excludes
+    ``'workflow'``. Existing bridge rows are backfilled from the prompt
+    marker used before this column existed.
+    """
+    try:
+        conn.execute(
+            "ALTER TABLE task_agent_tasks ADD COLUMN origin "
+            "TEXT NOT NULL DEFAULT 'user';"
+        )
+    except sqlite3.OperationalError as e:
+        _ignore_duplicate_schema_object(e)
+    conn.execute(
+        "UPDATE task_agent_tasks SET origin = 'workflow' "
+        "WHERE prompt_text LIKE 'Workflow run % node % (%';"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_task_agent_tasks_origin "
+        "ON task_agent_tasks(origin);"
+    )
+    conn.execute("PRAGMA user_version = 56;")
     conn.commit()
 
 

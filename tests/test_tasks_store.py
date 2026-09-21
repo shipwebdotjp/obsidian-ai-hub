@@ -2,7 +2,11 @@ import sqlite3
 
 import pytest
 
-from obsidian_ai_hub.database import get_db_connection, run_migration_v44
+from obsidian_ai_hub.database import (
+    get_db_connection,
+    run_migration_v44,
+    run_migration_v56,
+)
 from obsidian_ai_hub.tasks import store
 from obsidian_ai_hub.tasks.capabilities import get_capability_definitions
 from obsidian_ai_hub.utils import config
@@ -57,6 +61,41 @@ def test_migration_v44_seed_preserves_db_owned_fields():
         assert coding_cli["adapter_kind"] == "coding"
     finally:
         conn.close()
+
+
+def test_migration_v56_backfills_workflow_origin(tmp_path):
+    conn = sqlite3.connect(tmp_path / "legacy.sqlite3")
+    try:
+        conn.execute(
+            "CREATE TABLE task_agent_tasks ("
+            "task_id TEXT PRIMARY KEY, prompt_text TEXT NOT NULL, "
+            "status TEXT NOT NULL, created_at TEXT NOT NULL, "
+            "updated_at TEXT NOT NULL);"
+        )
+        conn.execute(
+            "INSERT INTO task_agent_tasks VALUES "
+            "('task_user', 'summarize', 'queued', 't', 't');"
+        )
+        conn.execute(
+            "INSERT INTO task_agent_tasks VALUES "
+            "('task_bridge', 'Workflow run wrun_1 node n (web_search)', "
+            "'completed', 't', 't');"
+        )
+        conn.execute(
+            "INSERT INTO task_agent_tasks VALUES "
+            "('task_user_lookalike', 'Workflow run failed, investigate', "
+            "'queued', 't', 't');"
+        )
+        run_migration_v56(conn)
+        rows = dict(
+            conn.execute("SELECT task_id, origin FROM task_agent_tasks;").fetchall()
+        )
+    finally:
+        conn.close()
+    assert rows["task_user"] == "user"
+    assert rows["task_bridge"] == "workflow"
+    # A user prompt that merely starts with the same words is not a bridge.
+    assert rows["task_user_lookalike"] == "user"
 
 
 def test_create_task_validation_and_defaults():
@@ -155,6 +194,48 @@ def test_non_terminal_filter_service_sentinel():
     ids = {t["task_id"] for t in items}
     assert active["task_id"] in ids
     assert done["task_id"] not in ids
+    assert total == len(items)
+
+
+def test_task_origin_defaults_and_filtering():
+    user_task = store.create_task("user prompt")
+    assert user_task["origin"] == "user"
+    bridge = store.create_task(
+        "Workflow run wrun_x node n (web_search)",
+        origin=store.TASK_ORIGIN_WORKFLOW,
+    )
+    assert bridge["origin"] == "workflow"
+
+    all_ids = {t["task_id"] for t in store.list_tasks()}
+    assert {user_task["task_id"], bridge["task_id"]} <= all_ids
+
+    visible = store.list_tasks(exclude_origins={store.TASK_ORIGIN_WORKFLOW})
+    visible_ids = {t["task_id"] for t in visible}
+    assert user_task["task_id"] in visible_ids
+    assert bridge["task_id"] not in visible_ids
+    assert store.count_tasks(exclude_origins={store.TASK_ORIGIN_WORKFLOW}) == len(
+        visible
+    )
+
+    only_bridge = store.list_tasks(origin=store.TASK_ORIGIN_WORKFLOW)
+    assert [t["task_id"] for t in only_bridge] == [bridge["task_id"]]
+
+    with pytest.raises(ValueError, match="Unknown task origin"):
+        store.create_task("bad origin", origin="elsewhere")
+
+
+def test_task_list_hides_workflow_bridges():
+    from obsidian_ai_hub.web.services.task_agent import list_task_agent_tasks
+
+    visible = store.create_task("visible user task")
+    bridge = store.create_task(
+        "Workflow run wrun_hidden node n (web_search)",
+        origin=store.TASK_ORIGIN_WORKFLOW,
+    )
+    items, total = list_task_agent_tasks()
+    ids = {t["task_id"] for t in items}
+    assert visible["task_id"] in ids
+    assert bridge["task_id"] not in ids
     assert total == len(items)
 
 

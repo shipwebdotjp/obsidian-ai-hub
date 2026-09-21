@@ -1808,6 +1808,7 @@ class TaskAgentTask(BaseModel):
     task_id: str
     prompt_text: str
     status: str
+    origin: str = "user"
     current_plan_id: Optional[str] = None
     worker_instance_id: Optional[str] = None
     active_child_kind: Optional[str] = None

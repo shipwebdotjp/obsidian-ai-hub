@@ -1020,6 +1020,7 @@ export interface TaskAgentTask {
   task_id: string;
   prompt_text: string;
   status: string;
+  origin?: string;
   current_plan_id: string | null;
   worker_instance_id: string | null;
   active_child_kind: string | null;

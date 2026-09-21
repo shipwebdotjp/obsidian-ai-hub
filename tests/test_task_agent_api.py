@@ -53,6 +53,27 @@ def test_list_and_detail(test_memory_db_path, client):
     assert response.status_code == 404
 
 
+def test_workflow_bridge_hidden_from_list_but_detail_available(
+    test_memory_db_path, client
+):
+    user_task = store.create_task("user listed task")
+    bridge = store.create_task(
+        "Workflow run wrun_api node n (research_agent)",
+        origin=store.TASK_ORIGIN_WORKFLOW,
+    )
+    response = client.get("/api/v1/task-agent/tasks")
+    data = response.json()
+    listed_ids = {item["task_id"] for item in data["items"]}
+    assert user_task["task_id"] in listed_ids
+    assert bridge["task_id"] not in listed_ids
+    assert data["total"] == len(listed_ids)
+
+    # Bridge rows stay reachable for audit through the direct detail URL.
+    response = client.get(f"/api/v1/task-agent/tasks/{bridge['task_id']}")
+    assert response.status_code == 200
+    assert response.json()["task"]["origin"] == "workflow"
+
+
 def test_approve_and_reject(test_memory_db_path, client):
     task = _waiting_task()
     response = client.post(f"/api/v1/task-agent/tasks/{task['task_id']}/approve")

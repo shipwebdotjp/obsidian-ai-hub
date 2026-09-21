@@ -19,6 +19,12 @@ uv run -m obsidian_ai_hub --task-agent "Summarize this week's schedule"
 
 Web UI の **Task Agent** 画面（`/task-agent`）では、**新規作成** から依頼を投入できます。
 
+:::note[Workflow の実行は一覧に表示されません]
+Workflow の Capability Node 実行は、内部の子 Run 連携・取消・監査のために短命の内部
+Task（origin `workflow`）を使います。これは依頼した Task ではないため、Task Agent の
+一覧・件数には表示されません。監査上必要な場合は Task 詳細 URL を直接開くと閲覧できます。
+:::
+
 ## 承認と実行
 
 - 計画に `plan_required` の Capability が含まれる場合だけ、Web UI で一括承認を求めます（`waiting_approval` / `waiting_reapproval`）。

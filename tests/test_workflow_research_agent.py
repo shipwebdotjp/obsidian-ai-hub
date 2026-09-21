@@ -112,6 +112,7 @@ def test_capability_bridge_sends_empty_target():
     ]
     assert len(bridge_tasks) == 1
     assert bridge_tasks[0]["status"] == "completed"
+    assert bridge_tasks[0]["origin"] == "workflow"
 
 
 class _BoomExecutor:
@@ -140,6 +141,7 @@ def test_capability_bridge_marks_task_failed_on_error():
     ]
     assert len(bridge_tasks) == 1
     assert bridge_tasks[0]["status"] == "failed"
+    assert bridge_tasks[0]["origin"] == "workflow"
 
 
 def _research_graph(theme):

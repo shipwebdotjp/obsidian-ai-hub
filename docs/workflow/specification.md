@@ -376,6 +376,9 @@ Node 間のデータ連携は文字列テンプレート展開ではなく、以
 - 論理的な 1 回起動単位ごとに `activation_id`（永続 UUID）を生成または再利用する。
 - Capability Adapter を `(validated_inputs, invocation_context)` の形で呼び出す。
 - Adapter は `StepResult` を返す。`satisfied_effects` があれば Event として記録する。
+- 既存 Adapter 実行契約は Task 行を要求するため、実行中だけ短命のブリッジ Task を持つ。
+  これは `origin = 'workflow'` として Task Agent の一覧から除外する
+  ([ADR](adr/workflow-graph-and-agent-node.md#amendment-capability-ブリッジ-task-の隔離))。
 
 ### 8.2 InvocationContext
 

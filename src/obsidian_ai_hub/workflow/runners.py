@@ -62,13 +62,18 @@ class DefaultNodeRunner:
         # row, so the bridge owns a short-lived Task for this node execution.
         # Creation and the departure from ``queued`` share one transaction so
         # a concurrent Task worker can never observe (and claim) the bridge
-        # row. The row ends terminal so the 30-day task retention purges it.
+        # row. The row is ``origin='workflow'`` so the Task Agent list excludes
+        # it, and ends terminal so the 30-day task retention purges it.
         run_id = str(context["run_id"])
         node_id = str(node.get("node_id"))
         prompt = f"Workflow run {run_id} node {node_id} ({key})"
         with task_store.auto_connection() as (bridge_conn, _):
             with bridge_conn:
-                bridge = task_store.create_task(prompt, conn=bridge_conn)
+                bridge = task_store.create_task(
+                    prompt,
+                    conn=bridge_conn,
+                    origin=task_store.TASK_ORIGIN_WORKFLOW,
+                )
                 bridge_id = str(bridge["task_id"])
                 task_store.transition_task_status(bridge_id, "planning", conn=bridge_conn)
                 task_store.transition_task_status(bridge_id, "running", conn=bridge_conn)

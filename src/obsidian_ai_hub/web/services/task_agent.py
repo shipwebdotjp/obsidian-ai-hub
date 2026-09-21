@@ -13,6 +13,10 @@ logger = logging.getLogger(__name__)
 NON_TERMINAL_FILTER = "__non_terminal__"
 """Frontend sentinel: list every task that is not in a terminal state."""
 
+# Workflow capability-node bridge tasks are internal execution rows; the
+# Task Agent list never shows them (direct detail URLs still resolve).
+EXCLUDED_ORIGINS = frozenset({task_store.TASK_ORIGIN_WORKFLOW})
+
 
 def list_task_agent_tasks(
     status: Optional[str] = None, limit: int = 50, offset: int = 0
@@ -20,12 +24,19 @@ def list_task_agent_tasks(
     if status == NON_TERMINAL_FILTER:
         exclude = set(task_store.TASK_TERMINAL_STATUSES)
         items = task_store.list_tasks(
-            limit=limit, offset=offset, exclude_statuses=exclude
+            limit=limit,
+            offset=offset,
+            exclude_statuses=exclude,
+            exclude_origins=EXCLUDED_ORIGINS,
         )
-        total = task_store.count_tasks(exclude_statuses=exclude)
+        total = task_store.count_tasks(
+            exclude_statuses=exclude, exclude_origins=EXCLUDED_ORIGINS
+        )
         return items, total
-    items = task_store.list_tasks(status=status, limit=limit, offset=offset)
-    total = task_store.count_tasks(status=status)
+    items = task_store.list_tasks(
+        status=status, limit=limit, offset=offset, exclude_origins=EXCLUDED_ORIGINS
+    )
+    total = task_store.count_tasks(status=status, exclude_origins=EXCLUDED_ORIGINS)
     return items, total
 
 

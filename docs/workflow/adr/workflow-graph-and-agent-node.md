@@ -111,6 +111,20 @@ Capability に型付きで受け渡すフローは、線形モデルでは表現
 - Scheduler Job から Workflow を起動する必要が出た時。
 - `needs_attention` の人間対応が頻発し、自動化または別の停止ポリシーが必要になった時。
 
+## Amendment (Capability ブリッジ Task の隔離)
+
+Status: Accepted (2026-09-21)。
+
+- Task Adapter の実行契約は `task_id` を要求し、子 Run 連携 (`set_active_child`)・取消監視・
+  Event 記録に Task 行を使う。Workflow の Capability Node はこれに合わせ、実行中だけ
+  **短命のブリッジ Task** を作る。作成と `queued` 離脱は単一トランザクションにして
+  Task worker に claim させず、終端化して 30 日保持に委ねる。
+- ブリッジ Task は Task Agent の集約ではないため、`task_agent_tasks.origin = 'workflow'` を
+  付与し、Task Agent の一覧 API・画面・件数から除外する。Task 詳細 URL の直接参照は監査用に残す。
+- 将来 Adapter を InvocationContext ネイティブ化して Task 行を不要にできれば、ブリッジ Task
+  自体を廃止する（本 ADR の「共有しない: Capability への InvocationContext 付加層」の完成）。
+  それまでの隔離手段がこの origin である。
+
 ## 関連文書
 
 - [workflow-independent-context-shared-foundation.md](workflow-independent-context-shared-foundation.md) — 撤回された初期 ADR

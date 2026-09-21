@@ -20,6 +20,12 @@ TASK_TERMINAL_STATUSES: frozenset[str] = frozenset(
     {"completed", "failed", "incomplete", "cancelled"}
 )
 
+TASK_ORIGIN_USER = "user"
+TASK_ORIGIN_WORKFLOW = "workflow"
+"""Workflow capability-node bridge rows: internal, hidden from the task list."""
+
+TASK_ORIGINS: frozenset[str] = frozenset({TASK_ORIGIN_USER, TASK_ORIGIN_WORKFLOW})
+
 TASK_ALLOWED_TRANSITIONS: dict[str, frozenset[str]] = {
     "queued": frozenset({"planning", "cancelled"}),
     "planning": frozenset(
@@ -101,6 +107,7 @@ def _row_to_task(row: sqlite3.Row) -> dict[str, Any]:
         "task_id": row["task_id"],
         "prompt_text": row["prompt_text"],
         "status": row["status"],
+        "origin": row["origin"],
         "current_plan_id": row["current_plan_id"],
         "worker_instance_id": row["worker_instance_id"],
         "active_child_kind": row["active_child_kind"],
@@ -166,20 +173,30 @@ def _row_to_capability(row: sqlite3.Row) -> dict[str, Any]:
 
 
 def create_task(
-    prompt_text: str, conn: Optional[sqlite3.Connection] = None
+    prompt_text: str,
+    conn: Optional[sqlite3.Connection] = None,
+    *,
+    origin: str = TASK_ORIGIN_USER,
 ) -> dict[str, Any]:
-    """Create a task in ``queued`` status. Blank prompts are rejected."""
+    """Create a task in ``queued`` status. Blank prompts are rejected.
+
+    ``origin`` defaults to ``'user'``. Workflow capability-node bridges pass
+    ``'workflow'`` so the task list can exclude internal execution rows.
+    """
     if not prompt_text or not prompt_text.strip():
         raise ValueError("prompt_text must not be blank.")
+    if origin not in TASK_ORIGINS:
+        raise ValueError(f"Unknown task origin: '{origin}'.")
     task_id = f"task_{uuid.uuid4().hex[:12]}"
     now = _now_iso()
     with auto_connection(conn) as (active_conn, is_generated):
 
         def _do() -> None:
             active_conn.execute(
-                "INSERT INTO task_agent_tasks (task_id, prompt_text, status, created_at, updated_at) "
-                "VALUES (?, ?, 'queued', ?, ?);",
-                (task_id, redact_text(prompt_text), now, now),
+                "INSERT INTO task_agent_tasks "
+                "(task_id, prompt_text, status, origin, created_at, updated_at) "
+                "VALUES (?, ?, 'queued', ?, ?, ?);",
+                (task_id, redact_text(prompt_text), origin, now, now),
             )
 
         if is_generated:
@@ -204,16 +221,32 @@ def get_task(
         return _row_to_task(row) if row is not None else None
 
 
-def _status_filter_clause(
-    status: Optional[str], exclude_statuses: Optional[set[str]]
+def _task_filter_clause(
+    status: Optional[str],
+    exclude_statuses: Optional[set[str]],
+    origin: Optional[str],
+    exclude_origins: Optional[set[str]],
 ) -> tuple[str, list[Any]]:
-    """Build a WHERE fragment for a status filter or an exclusion set."""
+    """Build a WHERE fragment for status and origin filters."""
+    conditions: list[str] = []
+    params: list[Any] = []
     if status is not None:
-        return " WHERE status = ?", [status]
-    if exclude_statuses:
+        conditions.append("status = ?")
+        params.append(status)
+    elif exclude_statuses:
         placeholders = ",".join("?" for _ in exclude_statuses)
-        return f" WHERE status NOT IN ({placeholders})", sorted(exclude_statuses)
-    return "", []
+        conditions.append(f"status NOT IN ({placeholders})")
+        params.extend(sorted(exclude_statuses))
+    if origin is not None:
+        conditions.append("origin = ?")
+        params.append(origin)
+    elif exclude_origins:
+        placeholders = ",".join("?" for _ in exclude_origins)
+        conditions.append(f"origin NOT IN ({placeholders})")
+        params.extend(sorted(exclude_origins))
+    if not conditions:
+        return "", params
+    return " WHERE " + " AND ".join(conditions), params
 
 
 def list_tasks(
@@ -222,8 +255,12 @@ def list_tasks(
     offset: int = 0,
     conn: Optional[sqlite3.Connection] = None,
     exclude_statuses: Optional[set[str]] = None,
+    origin: Optional[str] = None,
+    exclude_origins: Optional[set[str]] = None,
 ) -> list[dict[str, Any]]:
-    clause, params = _status_filter_clause(status, exclude_statuses)
+    clause, params = _task_filter_clause(
+        status, exclude_statuses, origin, exclude_origins
+    )
     with auto_connection(conn) as (active_conn, _):
         cur = active_conn.execute(
             f"SELECT * FROM task_agent_tasks{clause} "
@@ -237,8 +274,12 @@ def count_tasks(
     status: Optional[str] = None,
     conn: Optional[sqlite3.Connection] = None,
     exclude_statuses: Optional[set[str]] = None,
+    origin: Optional[str] = None,
+    exclude_origins: Optional[set[str]] = None,
 ) -> int:
-    clause, params = _status_filter_clause(status, exclude_statuses)
+    clause, params = _task_filter_clause(
+        status, exclude_statuses, origin, exclude_origins
+    )
     with auto_connection(conn) as (active_conn, _):
         cur = active_conn.execute(
             f"SELECT COUNT(*) AS total FROM task_agent_tasks{clause};",
