@@ -3,9 +3,9 @@ name: Deploy to GitHub Pages
 on:
   push:
     branches:
-      - master
+      - main
     paths:
-      - 'document/**'
+      - 'user-guide/**'
     # Review gh actions docs if you want to further define triggers, paths, etc
     # https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions#on
 
@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: ./document
+        working-directory: ./user-guide
     steps:
       - uses: actions/checkout@v4
         with:
@@ -24,7 +24,7 @@ jobs:
         with:
           node-version: 18
           cache: npm
-          cache-dependency-path: ./document/package-lock.json
+          cache-dependency-path: ./user-guide/package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -34,7 +34,7 @@ jobs:
       - name: Upload Build Artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: ./document/build
+          path: ./user-guide/build
 
   deploy:
     name: Deploy to GitHub Pages
