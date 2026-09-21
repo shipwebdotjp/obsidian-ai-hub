@@ -15,6 +15,7 @@ import type {
   ResearchRunAcceptedResponse,
   VaultSearchResponse,
   VaultFileResponse,
+  VaultFilesResponse,
   SummaryDetail,
   SummaryGenerateRequest,
   SummaryUpdatePayload,
@@ -33,6 +34,7 @@ import type {
   AgentMessageSearchResult,
   AgentMessage,
   AgentMessageAttachment,
+  AgentContextRef,
   AgentRun,
   AgentSessionDetailResponse,
   HealthcareOverviewResponse,
@@ -404,12 +406,16 @@ export function searchVault(params: {
   q: string;
   k?: number;
   mode?: "hybrid" | "keyword" | "similarity";
-}): Promise<VaultSearchResponse> {
-  return request<VaultSearchResponse>(withQuery("/api/v1/vault-search", params));
+}, signal?: AbortSignal): Promise<VaultSearchResponse> {
+  return request<VaultSearchResponse>(withQuery("/api/v1/vault-search", params), { signal });
 }
 
 export function getVaultFile(path: string, signal?: AbortSignal): Promise<VaultFileResponse> {
   return request<VaultFileResponse>(withQuery("/api/v1/vault-file", { path }), { signal });
+}
+
+export function listVaultFiles(signal?: AbortSignal): Promise<VaultFilesResponse> {
+  return request<VaultFilesResponse>("/api/v1/vault-files", { signal });
 }
 
 // Summary Dashboard API
@@ -764,6 +770,7 @@ export function startAgentRun(
     content: string;
     images?: AgentMessageAttachment[];
     slash_invocation?: SlashInvocation | null;
+    context_refs?: AgentContextRef[];
   },
   idempotencyKey?: string,
 ): Promise<{ run: AgentRun }> {
@@ -782,6 +789,12 @@ export function startAgentRun(
   }
   if (payload.slash_invocation) {
     body.slash_invocation = payload.slash_invocation;
+  }
+  if (payload.context_refs && payload.context_refs.length > 0) {
+    body.context_refs = payload.context_refs.map((ref) => ({
+      kind: ref.kind,
+      path: ref.path,
+    }));
   }
   return fetch(`/api/v1/agent-sessions/${encodeURIComponent(sessionId)}/runs`, {
     method: "POST",

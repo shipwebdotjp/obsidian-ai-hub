@@ -185,5 +185,7 @@ from obsidian_ai_hub.web.services.scheduler_jobs import (
 )
 from obsidian_ai_hub.web.services.vault import (
     get_vault_file,
+    list_vault_files,
     search_vault,
+    validate_vault_file_ref,
 )

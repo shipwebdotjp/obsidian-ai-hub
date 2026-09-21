@@ -1,5 +1,5 @@
 import { useEffect, useRef, type MutableRefObject } from "react";
-import { FileText, Image as ImageIcon, Plus, SendHorizontal, X } from "lucide-react";
+import { FileText, FolderSearch, Image as ImageIcon, Plus, SendHorizontal, X } from "lucide-react";
 import type {
   Agent,
   AgentPromptTemplate,
@@ -11,7 +11,13 @@ import {
   shouldSendOnEnter,
   useChatSendMode,
 } from "../settings/chatSendMode";
-import { MAX_AGENT_IMAGES, type PendingAttachment } from "./agentViewUtils";
+import { AgentVaultFilePicker } from "./AgentVaultFilePicker";
+import {
+  MAX_AGENT_CONTEXT_REFS,
+  MAX_AGENT_IMAGES,
+  type PendingAttachment,
+  type PendingContextRef,
+} from "./agentViewUtils";
 
 interface AgentChatInputProps {
   inputText: string;
@@ -23,6 +29,12 @@ interface AgentChatInputProps {
   isDragOver: boolean;
   pendingAttachments: PendingAttachment[];
   onRemoveAttachment: (index: number) => void;
+  pendingContextRefs: PendingContextRef[];
+  onRemoveContextRef: (index: number) => void;
+  onToggleContextRef: (path: string) => void;
+  vaultPickerOpen: boolean;
+  onOpenVaultPicker: () => void;
+  onCloseVaultPicker: () => void;
   selectedSkill: SlashInvocation | null;
   onClearSkill: () => void;
   isPaletteActive: boolean;
@@ -64,6 +76,12 @@ export function AgentChatInput({
   isDragOver,
   pendingAttachments,
   onRemoveAttachment,
+  pendingContextRefs,
+  onRemoveContextRef,
+  onToggleContextRef,
+  vaultPickerOpen,
+  onOpenVaultPicker,
+  onCloseVaultPicker,
   selectedSkill,
   onClearSkill,
   isPaletteActive,
@@ -96,6 +114,7 @@ export function AgentChatInput({
   const [chatSendMode] = useChatSendMode();
   const chatInputRef = useRef<HTMLTextAreaElement>(null);
   const plusMenuRef = useRef<HTMLDivElement | null>(null);
+  const vaultPickerRef = useRef<HTMLDivElement | null>(null);
 
   const focusInputSoon = () => {
     setTimeout(() => {
@@ -116,6 +135,28 @@ export function AgentChatInput({
   const handleSendMessage = (e: React.FormEvent) => {
     e.preventDefault();
     void onSend();
+  };
+
+  // `@` を行頭または空白直後で打つと Vault 参照ピッカーを開く。
+  // IME変換中・ペースト時は発火させない。`@` 自体は入力から取り除く。
+  const handleTextareaChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const value = e.target.value;
+    const caret = e.target.selectionStart ?? value.length;
+    const nativeEvent = e.nativeEvent as InputEvent;
+    const isFreshAtInsert =
+      nativeEvent.inputType === "insertText" && nativeEvent.data === "@";
+    const before = value.slice(0, caret);
+    if (
+      !vaultPickerOpen &&
+      isFreshAtInsert &&
+      !nativeEvent.isComposing &&
+      /(^|\s)@$/.test(before)
+    ) {
+      onInputTextChange(value.slice(0, caret - 1) + value.slice(caret));
+      onOpenVaultPicker();
+      return;
+    }
+    onInputTextChange(value);
   };
 
   const handleInputKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -178,17 +219,22 @@ export function AgentChatInput({
   // not re-subscribed on every parent render while the menu is open.
   const onClosePlusMenuRef = useRef(onClosePlusMenu);
   onClosePlusMenuRef.current = onClosePlusMenu;
+  const onCloseVaultPickerRef = useRef(onCloseVaultPicker);
+  onCloseVaultPickerRef.current = onCloseVaultPicker;
   useEffect(() => {
-    if (!plusMenuOpen && !templateSelectorOpen) return;
+    if (!plusMenuOpen && !templateSelectorOpen && !vaultPickerOpen) return;
     const onClick = (e: MouseEvent) => {
       if (!(e.target instanceof Node)) return;
       if (plusMenuRef.current && !plusMenuRef.current.contains(e.target)) {
         onClosePlusMenuRef.current();
       }
+      if (vaultPickerRef.current && !vaultPickerRef.current.contains(e.target)) {
+        onCloseVaultPickerRef.current();
+      }
     };
     document.addEventListener("mousedown", onClick);
     return () => document.removeEventListener("mousedown", onClick);
-  }, [plusMenuOpen, templateSelectorOpen]);
+  }, [plusMenuOpen, templateSelectorOpen, vaultPickerOpen]);
 
   const inputPlaceholder = !selectedSessionId
     ? "左側の「＋ 新しい会話」をクリックして会話を開始してください"
@@ -213,8 +259,31 @@ export function AgentChatInput({
           </span>
         </div>
       )}
-      {pendingAttachments.length > 0 && (
-        <div className="flex flex-wrap gap-2 border border-slate-200 rounded-lg p-2 bg-slate-50/50" aria-label="送信前の添付画像">
+      {pendingContextRefs.length > 0 && (
+        <div className="flex flex-wrap gap-1.5" aria-label="送信前の参照コンテキスト">
+          {pendingContextRefs.map((ref, index) => (
+            <span
+              key={`${ref.path}-${index}`}
+              className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-slate-800 py-1 pl-3 pr-1.5 text-xs text-white shadow-sm"
+              data-testid="context-ref-chip"
+            >
+              <FileText className="h-3 w-3 shrink-0 text-slate-300" />
+              <span className="max-w-48 truncate font-mono" title={ref.path}>
+                {ref.path}
+              </span>
+              <button
+                type="button"
+                onClick={() => onRemoveContextRef(index)}
+                className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-slate-300 hover:bg-slate-700 hover:text-white cursor-pointer"
+                aria-label={`${ref.path} の参照を取り除く`}
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+      {pendingAttachments.length > 0 && (        <div className="flex flex-wrap gap-2 border border-slate-200 rounded-lg p-2 bg-slate-50/50" aria-label="送信前の添付画像">
           {pendingAttachments.map((att, index) => (
             <div
               key={`${att.name}-${index}`}
@@ -330,13 +399,22 @@ export function AgentChatInput({
         ref={chatInputRef}
         rows={1}
         value={inputText}
-        onChange={(e) => onInputTextChange(e.target.value)}
+        onChange={handleTextareaChange}
         onKeyDown={handleInputKeyDown}
         onPaste={onPaste}
         disabled={!selectedSessionId}
         placeholder={inputPlaceholder}
         className="w-full resize-none rounded-lg border border-slate-300 p-2 text-xs leading-relaxed focus:border-slate-500 focus:outline-none disabled:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed"
       />
+      {vaultPickerOpen && selectedSessionId && (
+        <div ref={vaultPickerRef}>
+          <AgentVaultFilePicker
+            selected={pendingContextRefs}
+            onToggle={onToggleContextRef}
+            onClose={onCloseVaultPicker}
+          />
+        </div>
+      )}
       {/* Row 2: tools + model + send */}
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
@@ -360,6 +438,27 @@ export function AgentChatInput({
                 >
                   <FileText className="h-3.5 w-3.5 text-slate-500" />
                   テンプレート
+                </button>
+                <button
+                  type="button"
+                  disabled={
+                    !activeAgent ||
+                    !selectedSessionId ||
+                    pendingContextRefs.length >= MAX_AGENT_CONTEXT_REFS
+                  }
+                  onClick={() => {
+                    onOpenVaultPicker();
+                    onClosePlusMenu();
+                  }}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  <FolderSearch className="h-3.5 w-3.5 text-slate-500" />
+                  Vault ファイル
+                  {pendingContextRefs.length > 0 && (
+                    <span className="ml-auto text-[10px] text-slate-400">
+                      {pendingContextRefs.length}/{MAX_AGENT_CONTEXT_REFS}
+                    </span>
+                  )}
                 </button>
                 <button
                   type="button"
@@ -444,7 +543,10 @@ export function AgentChatInput({
           type="submit"
           disabled={
             attachmentReadsPending > 0 ||
-            (!inputText.trim() && pendingAttachments.length === 0 && !selectedSkill) ||
+            (!inputText.trim() &&
+              pendingAttachments.length === 0 &&
+              pendingContextRefs.length === 0 &&
+              !selectedSkill) ||
             !selectedSessionId
           }
           className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-slate-900 text-white hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"

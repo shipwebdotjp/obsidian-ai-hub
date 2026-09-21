@@ -80,6 +80,12 @@ async def execute_agent_run(run_id: str) -> None:
     user_msg = await asyncio.to_thread(agent_store.get_message, run["user_message_id"])
     user_content = str((user_msg or {}).get("content") or "")
     attachments = (user_msg or {}).get("attachments")
+    user_refs = (user_msg or {}).get("context_refs")
+    context_refs = (
+        [r for r in user_refs if isinstance(r, dict)]
+        if isinstance(user_refs, list)
+        else None
+    )
 
     aggregator = TextAggregator()
     stream = agent_runtime.generate_agent_stream(
@@ -89,6 +95,7 @@ async def execute_agent_run(run_id: str) -> None:
         history_messages=history,
         user_content=user_content,
         attachments=attachments,
+        context_refs=context_refs,
     )
 
     async def _is_cancelling() -> bool:

@@ -36,6 +36,8 @@ export default function AgentsPage() {
   // session after a switch; track the current selection in a ref.
   const selectedSessionIdRef = useRef<string | null>(null);
   const imageInputRef = useRef<HTMLInputElement | null>(null);
+  // Vault ピッカーを開く前のパレット破棄状態。閉じる時に復元する。
+  const paletteDismissedBeforePickerRef = useRef(false);
 
   const catalog = useAgentsCatalog({
     sessionIdParam,
@@ -347,6 +349,22 @@ export default function AgentsPage() {
               isDragOver={chat.isDragOver}
               pendingAttachments={chat.pendingAttachments}
               onRemoveAttachment={chat.handleRemoveAttachment}
+              pendingContextRefs={chat.pendingContextRefs}
+              onRemoveContextRef={chat.handleRemoveContextRef}
+              onToggleContextRef={chat.handleToggleContextRef}
+              vaultPickerOpen={chat.vaultPickerOpen}
+              onOpenVaultPicker={() => {
+                paletteDismissedBeforePickerRef.current =
+                  templates.isCommandPaletteDismissed;
+                templates.setIsCommandPaletteDismissed(true);
+                chat.setVaultPickerOpen(true);
+              }}
+              onCloseVaultPicker={() => {
+                chat.setVaultPickerOpen(false);
+                templates.setIsCommandPaletteDismissed(
+                  paletteDismissedBeforePickerRef.current,
+                );
+              }}
               selectedSkill={chat.selectedSkill}
               onClearSkill={() => chat.setSelectedSkill(null)}
               isPaletteActive={templates.isPaletteActive}

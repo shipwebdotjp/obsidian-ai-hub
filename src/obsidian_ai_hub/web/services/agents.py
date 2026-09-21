@@ -170,6 +170,7 @@ def start_run(
     images: Optional[List[Dict[str, Any]]] = None,
     idempotency_key: Optional[str] = None,
     slash_invocation: Optional[Dict[str, Any]] = None,
+    context_refs: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Queue an agent run and return it (202 contract)."""
     from obsidian_ai_hub.runs.instance import get_instance_id
@@ -182,6 +183,11 @@ def start_run(
         for item in images:
             if isinstance(item, dict):
                 normalized.append(item)
+    normalized_refs: List[Dict[str, Any]] = []
+    if context_refs:
+        for ref in context_refs:
+            if isinstance(ref, dict):
+                normalized_refs.append(ref)
     _, run = store.start_queued_run(
         session_id=session_id,
         content=content,
@@ -189,6 +195,7 @@ def start_run(
         idempotency_key=idempotency_key,
         created_instance_id=get_instance_id(),
         slash_invocation=slash_invocation,
+        context_refs=normalized_refs or None,
     )
     return run
 

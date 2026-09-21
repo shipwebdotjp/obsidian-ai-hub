@@ -216,6 +216,17 @@ export interface VaultFileResponse {
   relative_path: string;
 }
 
+export interface VaultFileListItem {
+  relative_path: string;
+  size: number;
+  mtime: number;
+}
+
+export interface VaultFilesResponse {
+  items: VaultFileListItem[];
+  total: number;
+}
+
 export type SummaryPeriodType = "day" | "week" | "month";
 
 export interface SummaryPerson {
@@ -864,6 +875,11 @@ export interface AgentMessageAttachment {
   data: string;
 }
 
+export interface AgentContextRef {
+  kind: "vault_file";
+  path: string;
+}
+
 export interface AgentMessage {
   message_id: string;
   session_id: string;
@@ -871,6 +887,7 @@ export interface AgentMessage {
   role: "user" | "assistant";
   content: string;
   attachments?: AgentMessageAttachment[];
+  context_refs?: AgentContextRef[];
   created_at: string;
 }
 

@@ -119,6 +119,13 @@ class SlashInvocationRequest(BaseModel):
     model_config = {"extra": "forbid"}
 
 
+class ContextRefRequest(BaseModel):
+    kind: str = Field(..., description="Reference kind ('vault_file')")
+    path: str = Field(..., min_length=1, description="Vault-relative file path")
+
+    model_config = {"extra": "forbid"}
+
+
 def _decode_base64_payload(data: str) -> bytes:
     import base64
 
@@ -126,6 +133,51 @@ def _decode_base64_payload(data: str) -> bytes:
         return base64.b64decode(data, validate=True)
     except (ValueError, TypeError) as exc:
         raise ValueError("Attachment data is not valid base64.") from exc
+
+
+def _validate_context_refs(
+    refs: List[ContextRefRequest],
+) -> List[Dict[str, Any]]:
+    """Validate Vault context references for a new run.
+
+    Rejects unknown kinds, empty or duplicate paths, counts above
+    ``MAX_AGENT_CONTEXT_REFS``, and paths that fail the shared Vault
+    safety/existence check. Only normalized paths are returned; bodies are
+    read by the runtime on every turn.
+    """
+    from obsidian_ai_hub.agents.vault_context import (
+        MAX_AGENT_CONTEXT_REFS,
+        VAULT_FILE_REF_KIND,
+        normalize_context_refs,
+    )
+    from obsidian_ai_hub.web import service as web_service
+
+    if len(refs) > MAX_AGENT_CONTEXT_REFS:
+        raise ValueError(
+            f"At most {MAX_AGENT_CONTEXT_REFS} context files can be attached to one message."
+        )
+    normalized = normalize_context_refs(
+        [{"kind": r.kind, "path": r.path} for r in refs]
+    )
+    if len(refs) != len(normalized):
+        raise ValueError(
+            "Each context reference must have kind "
+            f"'{VAULT_FILE_REF_KIND}' and a non-empty, unique path."
+        )
+    validated: List[Dict[str, Any]] = []
+    for ref in normalized:
+        try:
+            resolved = web_service.validate_vault_file_ref(ref["path"])
+        except FileNotFoundError:
+            raise ValueError(
+                f"Context file not found in the Vault: {ref['path']}"
+            ) from None
+        except ValueError as exc:
+            raise ValueError(
+                f"Invalid context file path '{ref['path']}': {exc}"
+            ) from None
+        validated.append({"kind": VAULT_FILE_REF_KIND, "path": resolved})
+    return validated
 
 
 def _validate_images(images: List[ImageAttachmentRequest]) -> List[Dict[str, Any]]:
@@ -389,6 +441,10 @@ class StartAgentRunRequest(BaseModel):
     slash_invocation: Optional[SlashInvocationRequest] = Field(
         default=None, description="Optional slash invocation"
     )
+    context_refs: List[ContextRefRequest] = Field(
+        default_factory=list,
+        description="Optional list of Vault file context references (paths only).",
+    )
 
 
 @router.post("/agent-sessions/{session_id}/runs", status_code=status.HTTP_202_ACCEPTED)
@@ -400,9 +456,10 @@ def start_agent_run(
     content = req.content.strip() if req.content else ""
     try:
         validated_images = _validate_images(req.images)
+        validated_refs = _validate_context_refs(req.context_refs)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
-    if not content and not validated_images:
+    if not content and not validated_images and not validated_refs:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Message content must not be empty.",
@@ -440,6 +497,7 @@ def start_agent_run(
             images=validated_images or None,
             idempotency_key=idempotency_key,
             slash_invocation=slash_inv,
+            context_refs=validated_refs or None,
         )
         return {"run": run}
     except FileNotFoundError as e:

@@ -21,6 +21,7 @@ from langchain_core.messages import (
 )
 
 from obsidian_ai_hub.agents import registry, store
+from obsidian_ai_hub.agents import vault_context
 from obsidian_ai_hub.utils import config
 from obsidian_ai_hub.utils.llm_client import (
     _ai_message_from_chunk,
@@ -927,6 +928,7 @@ async def generate_agent_stream(
     history_messages: Sequence[Dict[str, Any]],
     user_content: str,
     attachments: Optional[Sequence[Dict[str, Any]]] = None,
+    context_refs: Optional[Sequence[Dict[str, Any]]] = None,
     max_iterations: int = 10,
     max_history_messages: int = 20,
     now: Optional[datetime] = None,
@@ -1180,18 +1182,26 @@ async def generate_agent_stream(
             if m.get("message_id") == run.get("user_message_id"):
                 continue
             if role == "user":
+                history_refs = m.get("context_refs")
+                history_text = (
+                    vault_context.compose_user_text(
+                        content,
+                        history_refs if isinstance(history_refs, list) else None,
+                    )
+                )
                 langchain_messages.append(
                     _build_user_message(
                         provider,
-                        content,
+                        history_text,
                         m.get("attachments") if isinstance(m.get("attachments"), list) else None,
                     )
                 )
             elif role == "assistant":
                 langchain_messages.append(AIMessage(content=content))
 
+        current_text = vault_context.compose_user_text(user_content, context_refs)
         langchain_messages.append(
-            _build_user_message(provider, user_content, attachments)
+            _build_user_message(provider, current_text, attachments)
         )
 
         for turn in resume_turns:

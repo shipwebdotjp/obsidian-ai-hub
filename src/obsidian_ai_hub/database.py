@@ -721,6 +721,9 @@ def get_db_connection() -> sqlite3.Connection:
     if current_version <= 53:
         run_migration_v54(conn)
 
+    if current_version <= 54:
+        run_migration_v55(conn)
+
     return conn
 
 
@@ -954,6 +957,25 @@ def run_migration_v54(conn: sqlite3.Connection) -> None:
         "ALTER TABLE workflow_runs ADD COLUMN source_run_id TEXT;"
     )
     conn.execute("PRAGMA user_version = 54;")
+    conn.commit()
+
+
+def run_migration_v55(conn: sqlite3.Connection) -> None:
+    """Run migration for version 55 (agent Vault context references).
+
+    Stores user-selected Vault file references (``[{"kind": "vault_file",
+    "path": "<vault-relative POSIX path>"}]``) on ``agent_messages`` so the
+    runtime can re-read the current note content into the LLM context on every
+    turn. Only paths are persisted; note bodies always come from the Vault.
+    """
+    try:
+        conn.execute(
+            "ALTER TABLE agent_messages ADD COLUMN context_refs_json "
+            "TEXT NOT NULL DEFAULT '[]';"
+        )
+    except sqlite3.OperationalError as e:
+        _ignore_duplicate_schema_object(e)
+    conn.execute("PRAGMA user_version = 55;")
     conn.commit()
 
 

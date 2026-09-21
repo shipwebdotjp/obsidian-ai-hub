@@ -205,6 +205,21 @@ def _row_to_message(row: sqlite3.Row) -> dict[str, Any]:
                 attachments = [item for item in parsed if isinstance(item, dict)]
         except (json.JSONDecodeError, TypeError):
             attachments = []
+    context_refs: list[dict[str, Any]] = []
+    # context_refs_json added in v55; tolerate missing column on pre-migration rows
+    try:
+        raw_refs = row["context_refs_json"]  # type: ignore[index]
+    except (IndexError, KeyError, ValueError):
+        raw_refs = None
+    if raw_refs:
+        try:
+            parsed_refs = json.loads(raw_refs)
+            if isinstance(parsed_refs, list):
+                context_refs = [
+                    item for item in parsed_refs if isinstance(item, dict)
+                ]
+        except (json.JSONDecodeError, TypeError):
+            context_refs = []
     return {
         "message_id": row["message_id"],
         "session_id": row["session_id"],
@@ -212,6 +227,7 @@ def _row_to_message(row: sqlite3.Row) -> dict[str, Any]:
         "role": row["role"],
         "content": row["content"],
         "attachments": attachments,
+        "context_refs": context_refs,
         "created_at": row["created_at"],
     }
 
@@ -1135,6 +1151,7 @@ def start_user_run(
     session_id: str,
     content: str,
     attachments: Optional[Sequence[dict[str, Any]]] = None,
+    context_refs: Optional[Sequence[dict[str, Any]]] = None,
     conn: Optional[sqlite3.Connection] = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     clean_content = content.strip() if content else ""
@@ -1152,8 +1169,19 @@ def start_user_run(
             attachments_json = "[]"
     else:
         attachments_json = "[]"
-    # Empty user text is allowed only when at least one attachment is present.
-    if not clean_content and not attachments_list:
+    refs_list: list[dict[str, Any]] = []
+    if context_refs:
+        for ref in context_refs:
+            if isinstance(ref, dict):
+                refs_list.append(ref)
+    try:
+        context_refs_json = json.dumps(refs_list, ensure_ascii=False)
+    except (TypeError, ValueError):
+        context_refs_json = "[]"
+        refs_list = []
+    # Empty user text is allowed only when at least one attachment or
+    # context reference is present.
+    if not clean_content and not attachments_list and not refs_list:
         raise ValueError("Message content must not be empty.")
 
     with auto_connection(conn) as (active_conn, is_generated):
@@ -1162,6 +1190,13 @@ def start_user_run(
             raise FileNotFoundError(f"Session '{session_id}' not found.")
 
         now = _now_iso()
+        has_refs_col = _has_column(
+            active_conn, "agent_messages", "context_refs_json"
+        )
+        if refs_list and not has_refs_col:
+            raise ValueError(
+                "context_refs requires context_refs_json column (run migration v55)."
+            )
 
         def _execute_transaction():
             cursor = active_conn.execute(
@@ -1175,13 +1210,22 @@ def start_user_run(
 
             message_id = f"amsg_{uuid.uuid4().hex[:12]}"
             try:
-                active_conn.execute(
-                    """
-                    INSERT INTO agent_messages (message_id, session_id, sequence, role, content, attachments_json, created_at)
-                    VALUES (?, ?, ?, 'user', ?, ?, ?)
-                    """,
-                    (message_id, session_id, next_seq, clean_content, attachments_json, now),
-                )
+                if has_refs_col:
+                    active_conn.execute(
+                        """
+                        INSERT INTO agent_messages (message_id, session_id, sequence, role, content, attachments_json, context_refs_json, created_at)
+                        VALUES (?, ?, ?, 'user', ?, ?, ?, ?)
+                        """,
+                        (message_id, session_id, next_seq, clean_content, attachments_json, context_refs_json, now),
+                    )
+                else:
+                    active_conn.execute(
+                        """
+                        INSERT INTO agent_messages (message_id, session_id, sequence, role, content, attachments_json, created_at)
+                        VALUES (?, ?, ?, 'user', ?, ?, ?)
+                        """,
+                        (message_id, session_id, next_seq, clean_content, attachments_json, now),
+                    )
             except sqlite3.OperationalError as e:
                 if "no such column: attachments_json" in str(e):
                     active_conn.execute(
@@ -1207,9 +1251,15 @@ def start_user_run(
             )
 
             if session["title"] == "新しい会話" and next_seq == 1:
-                # Empty user text (image-only) gets a placeholder title so the
-                # session does not keep the default "新しい会話" label.
-                title_source = clean_content or "画像を送りました"
+                # Empty user text (image-only or context-ref-only) gets a
+                # placeholder title so the session does not keep the default
+                # "新しい会話" label.
+                if clean_content:
+                    title_source = clean_content
+                elif attachments_list:
+                    title_source = "画像を送りました"
+                else:
+                    title_source = "ファイルを参照しました"
                 title_summary = title_source[:30].replace("\n", " ")
                 active_conn.execute(
                     "UPDATE agent_sessions SET title = ?, updated_at = ? WHERE session_id = ?;",
@@ -1448,6 +1498,7 @@ def compute_idempotency_hash(
     content: str,
     attachments_json: str = "[]",
     slash_invocation: Optional[dict[str, Any]] = None,
+    context_refs: Optional[Sequence[dict[str, Any]]] = None,
 ) -> str:
     import hashlib
 
@@ -1461,6 +1512,13 @@ def compute_idempotency_hash(
             slash_invocation, sort_keys=True, ensure_ascii=False
         )
         h.update(canonical_slash.encode("utf-8"))
+    refs_list = [r for r in (context_refs or []) if isinstance(r, dict)]
+    if refs_list:
+        h.update(b"\x00")
+        canonical_refs = json.dumps(
+            refs_list, sort_keys=True, ensure_ascii=False
+        )
+        h.update(canonical_refs.encode("utf-8"))
     return h.hexdigest()
 
 
@@ -1472,6 +1530,7 @@ def start_queued_run(
     idempotency_hash: Optional[str] = None,
     created_instance_id: Optional[str] = None,
     slash_invocation: Optional[dict[str, Any]] = None,
+    context_refs: Optional[Sequence[dict[str, Any]]] = None,
     conn: Optional[sqlite3.Connection] = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Queue a new agent run with idempotency and active-run guard.
@@ -1486,18 +1545,31 @@ def start_queued_run(
         for item in attachments:
             if isinstance(item, dict):
                 attachments_list.append(item)
+    refs_list: list[dict[str, Any]] = []
+    if context_refs:
+        for ref in context_refs:
+            if isinstance(ref, dict):
+                refs_list.append(ref)
     try:
         attachments_json = json.dumps(attachments_list, ensure_ascii=False)
     except (TypeError, ValueError):
         attachments_json = "[]"
         attachments_list = []
-    if not clean_content and not attachments_list:
+    if not clean_content and not attachments_list and not refs_list:
         raise ValueError("Message content must not be empty.")
     clean_key = (idempotency_key or "").strip() or None
     if clean_key is not None and idempotency_hash is None:
-        idempotency_hash = compute_idempotency_hash(clean_content, attachments_json, slash_invocation)
+        idempotency_hash = compute_idempotency_hash(
+            clean_content, attachments_json, slash_invocation, refs_list or None
+        )
     elif clean_key is None:
         idempotency_hash = None
+
+    try:
+        context_refs_json = json.dumps(refs_list, ensure_ascii=False)
+    except (TypeError, ValueError):
+        context_refs_json = "[]"
+        refs_list = []
 
     slash_invocation_json = (
         json.dumps(slash_invocation, ensure_ascii=False)
@@ -1512,6 +1584,9 @@ def start_queued_run(
 
         has_idem_cols = _has_column(active_conn, "agent_runs", "idempotency_key")
         has_slash_col = _has_column(active_conn, "agent_runs", "slash_invocation_json")
+        has_refs_col = _has_column(active_conn, "agent_messages", "context_refs_json")
+        if refs_list and not has_refs_col:
+            raise ValueError("context_refs requires context_refs_json column (run migration v55).")
 
         def _execute() -> tuple[str, str]:
             # Idempotent replay first: same key returns first run.
@@ -1553,13 +1628,22 @@ def start_queued_run(
             ) + 1
             message_id = f"amsg_{uuid.uuid4().hex[:12]}"
             try:
-                active_conn.execute(
-                    """
-                    INSERT INTO agent_messages (message_id, session_id, sequence, role, content, attachments_json, created_at)
-                    VALUES (?, ?, ?, 'user', ?, ?, ?)
-                    """,
-                    (message_id, session_id, next_seq, clean_content, attachments_json, now),
-                )
+                if has_refs_col:
+                    active_conn.execute(
+                        """
+                        INSERT INTO agent_messages (message_id, session_id, sequence, role, content, attachments_json, context_refs_json, created_at)
+                        VALUES (?, ?, ?, 'user', ?, ?, ?, ?)
+                        """,
+                        (message_id, session_id, next_seq, clean_content, attachments_json, context_refs_json, now),
+                    )
+                else:
+                    active_conn.execute(
+                        """
+                        INSERT INTO agent_messages (message_id, session_id, sequence, role, content, attachments_json, created_at)
+                        VALUES (?, ?, ?, 'user', ?, ?, ?)
+                        """,
+                        (message_id, session_id, next_seq, clean_content, attachments_json, now),
+                    )
             except sqlite3.OperationalError as e:
                 if "no such column: attachments_json" in str(e):
                     active_conn.execute(
@@ -1630,7 +1714,12 @@ def start_queued_run(
                     (run_id, session_id, message_id, now),
                 )
             if session["title"] == "新しい会話" and next_seq == 1:
-                title_source = clean_content or "画像を送りました"
+                if clean_content:
+                    title_source = clean_content
+                elif attachments_list:
+                    title_source = "画像を送りました"
+                else:
+                    title_source = "ファイルを参照しました"
                 title_summary = title_source[:30].replace("\n", " ")
                 active_conn.execute(
                     "UPDATE agent_sessions SET title = ?, updated_at = ? WHERE session_id = ?;",

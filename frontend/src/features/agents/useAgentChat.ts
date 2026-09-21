@@ -8,6 +8,7 @@ import {
 } from "../../api/client";
 import type {
   Agent,
+  AgentContextRef,
   AgentLiveToolCall,
   AgentMessage,
   AgentMessageAttachment,
@@ -26,6 +27,7 @@ import type {
   QuestionItem,
 } from "../../components/InConversationQuestionCard";
 import { useAgentImageDraft } from "./useAgentImageDraft";
+import { useAgentContextRefDraft } from "./useAgentContextRefDraft";
 import {
   clearQueuedAgentMessageError,
   createQueuedMessage,
@@ -38,10 +40,13 @@ import {
   type QueuedAgentMessage,
 } from "./agentSendQueue";
 import {
+  MAX_AGENT_CONTEXT_REFS,
   MAX_AGENT_IMAGES,
   MAX_AGENT_IMAGE_BYTES,
   matchesLiveToolCall,
+  toAgentContextRef,
   type PendingAttachment,
+  type PendingContextRef,
 } from "./agentViewUtils";
 
 const NON_TERMINAL_RUN_STATUSES = new Set<AgentRunStatus>([
@@ -56,6 +61,8 @@ interface AgentSendSnapshot {
   rawText: string;
   attachments: AgentMessageAttachment[];
   attachmentDrafts: PendingAttachment[];
+  contextRefs: AgentContextRef[];
+  contextRefDrafts: PendingContextRef[];
   slashInvocation: SlashInvocation | null;
   idempotencyKey: string;
 }
@@ -139,6 +146,8 @@ export function useAgentChat({
   const { copiedMessageId, handleCopyMessage } = useCopyMessage();
   const [selectedSkill, setSelectedSkill] = useState<SlashInvocation | null>(null);
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
+  const [pendingContextRefs, setPendingContextRefs] = useState<PendingContextRef[]>([]);
+  const [vaultPickerOpen, setVaultPickerOpen] = useState(false);
   const [attachmentReadsPending, setAttachmentReadsPending] = useState(0);
   const [isDragOver, setIsDragOver] = useState(false);
   const [queuedMessages, setQueuedMessages] = useState<QueuedAgentMessage[]>([]);
@@ -161,6 +170,7 @@ export function useAgentChat({
   const isStreamingRef = useRef(false);
   const inputTextRef = useRef(inputText);
   const pendingAttachmentsRef = useRef<PendingAttachment[]>(pendingAttachments);
+  const pendingContextRefsRef = useRef<PendingContextRef[]>(pendingContextRefs);
   const loadSessionDetailRef = useRef(loadSessionDetail);
   const onChatErrorRef = useRef(onChatError);
   const updateQueueRef = useRef<
@@ -178,6 +188,7 @@ export function useAgentChat({
   isStreamingRef.current = isStreaming;
   inputTextRef.current = inputText;
   pendingAttachmentsRef.current = pendingAttachments;
+  pendingContextRefsRef.current = pendingContextRefs;
   loadSessionDetailRef.current = loadSessionDetail;
   onChatErrorRef.current = onChatError;
 
@@ -203,6 +214,39 @@ export function useAgentChat({
     inputText,
     () => onChatError("下書きが大きすぎて保存できません（画像を減らしてください）。"),
   );
+
+  // 参照コンテキスト（Vault ファイル）の下書きもセッションごとに保存・復元する。
+  const {
+    saveContextRefDraftFor,
+    removeContextRefDraftFor,
+    setLocalContextRefs,
+  } = useAgentContextRefDraft(
+    selectedSessionId,
+    pendingContextRefs,
+    setPendingContextRefs,
+  );
+
+  const handleToggleContextRef = useCallback(
+    (path: string) => {
+      setPendingContextRefs((prev) => {
+        if (prev.some((r) => r.path === path)) {
+          return prev.filter((r) => r.path !== path);
+        }
+        if (prev.length >= MAX_AGENT_CONTEXT_REFS) return prev;
+        return [...prev, { kind: "vault_file", path }];
+      });
+    },
+    [],
+  );
+
+  const handleRemoveContextRef = useCallback((index: number) => {
+    setPendingContextRefs((prev) => prev.filter((_, i) => i !== index));
+  }, []);
+
+  // セッション切替時は参照ピッカーを閉じる（参照自体は下書きとして保持）。
+  useEffect(() => {
+    setVaultPickerOpen(false);
+  }, [selectedSessionId]);
 
   const updateQueue = useCallback(
     (
@@ -564,8 +608,11 @@ export function useAgentChat({
     if (isComposer) {
       savePromptDraftFor(sessionId, snapshot.rawText);
       saveImageDraftFor(sessionId, snapshot.rawText, snapshot.attachmentDrafts);
+      saveContextRefDraftFor(sessionId, snapshot.contextRefDrafts);
       setPromptInputLocal("");
       setLocalAttachments([]);
+      setLocalContextRefs([]);
+      setVaultPickerOpen(false);
       setSelectedSkill(null);
       if (imageInputRef.current) imageInputRef.current.value = "";
     }
@@ -585,6 +632,7 @@ export function useAgentChat({
       role: "user",
       content: snapshot.content,
       attachments: snapshot.attachments.length > 0 ? snapshot.attachments : undefined,
+      context_refs: snapshot.contextRefs.length > 0 ? snapshot.contextRefs : undefined,
       created_at: new Date().toISOString(),
     };
     setMessages((prev) => [...prev, tempUserMsg]);
@@ -598,13 +646,17 @@ export function useAgentChat({
     // exist by the time this send settles. Only touch the composer/drafts when
     // it is still empty; otherwise the next message would be lost.
     const composerIsEmpty = () =>
-      inputTextRef.current.trim() === "" && pendingAttachmentsRef.current.length === 0;
+      inputTextRef.current.trim() === "" &&
+      pendingAttachmentsRef.current.length === 0 &&
+      pendingContextRefsRef.current.length === 0;
     const finalizeSendSuccess = () => {
       if (!isComposer || !composerIsEmpty()) return;
       removePromptDraftFor(sessionId);
       removeImageDraftFor(sessionId);
+      removeContextRefDraftFor(sessionId);
       setPromptInputLocal("");
       setLocalAttachments([]);
+      setLocalContextRefs([]);
     };
     const restoreSendText = () => {
       if (!isComposer || !composerIsEmpty()) return;
@@ -612,6 +664,8 @@ export function useAgentChat({
       setPromptInputLocal(snapshot.rawText);
       saveImageDraftFor(sessionId, snapshot.rawText, snapshot.attachmentDrafts);
       setLocalAttachments(snapshot.attachmentDrafts);
+      saveContextRefDraftFor(sessionId, snapshot.contextRefDrafts);
+      setLocalContextRefs(snapshot.contextRefDrafts);
     };
 
     let runId: string;
@@ -622,6 +676,7 @@ export function useAgentChat({
           content: snapshot.content,
           images: snapshot.attachments.length > 0 ? snapshot.attachments : undefined,
           slash_invocation: snapshot.slashInvocation,
+          context_refs: snapshot.contextRefs.length > 0 ? snapshot.contextRefs : undefined,
         },
         snapshot.idempotencyKey,
       );
@@ -716,6 +771,8 @@ export function useAgentChat({
           rawText: head.content,
           attachments: head.attachments,
           attachmentDrafts: [],
+          contextRefs: head.context_refs,
+          contextRefDrafts: [],
           slashInvocation: head.slash_invocation,
           idempotencyKey: head.idempotency_key,
         },
@@ -725,8 +782,7 @@ export function useAgentChat({
           updateQueueRef.current(sessionId, (items) =>
             removeQueuedAgentMessage(items, head.queue_id),
           );
-        },
-        onPostError: (error: unknown) => {
+        },        onPostError: (error: unknown) => {
           const status = (error as { status?: number } | null)?.status;
           if (status === 409) {
             // Another run owns the session (e.g. another tab). Keep the item
@@ -759,7 +815,13 @@ export function useAgentChat({
 
   const submitMessageViaRun = async () => {
     if (!selectedSessionId) return;
-    if (!inputText.trim() && pendingAttachments.length === 0 && !selectedSkill) return;
+    if (
+      !inputText.trim() &&
+      pendingAttachments.length === 0 &&
+      pendingContextRefs.length === 0 &&
+      !selectedSkill
+    )
+      return;
     const sessionId = selectedSessionId;
     const snapshot: AgentSendSnapshot = {
       content: inputText.trim(),
@@ -770,6 +832,8 @@ export function useAgentChat({
         data: att.data,
       })),
       attachmentDrafts: pendingAttachments.map((att) => ({ ...att })),
+      contextRefs: pendingContextRefs.map(toAgentContextRef),
+      contextRefDrafts: pendingContextRefs.map((ref) => ({ ...ref })),
       slashInvocation: selectedSkill,
       idempotencyKey: generateIdempotencyKey(),
     };
@@ -784,6 +848,7 @@ export function useAgentChat({
         content: snapshot.content,
         attachments: snapshot.attachments,
         slash_invocation: snapshot.slashInvocation,
+        context_refs: snapshot.contextRefs,
       });
       const queued = updateQueueRef.current(sessionId, (items) =>
         enqueueAgentMessage(items, item),
@@ -794,8 +859,11 @@ export function useAgentChat({
       }
       removePromptDraftFor(sessionId);
       removeImageDraftFor(sessionId);
+      removeContextRefDraftFor(sessionId);
       setPromptInputLocal("");
       setLocalAttachments([]);
+      setLocalContextRefs([]);
+      setVaultPickerOpen(false);
       setSelectedSkill(null);
       if (imageInputRef.current) imageInputRef.current.value = "";
       onChatError(null);
@@ -1064,6 +1132,9 @@ export function useAgentChat({
     selectedSkill,
     setSelectedSkill,
     pendingAttachments,
+    pendingContextRefs,
+    vaultPickerOpen,
+    setVaultPickerOpen,
     attachmentReadsPending,
     isDragOver,
     setIsDragOver,
@@ -1077,6 +1148,8 @@ export function useAgentChat({
     handleCancelAgentRun,
     handleFilesSelected,
     handleRemoveAttachment,
+    handleToggleContextRef,
+    handleRemoveContextRef,
     handleFormDragOver,
     handleFormDragLeave,
     handleFormDrop,

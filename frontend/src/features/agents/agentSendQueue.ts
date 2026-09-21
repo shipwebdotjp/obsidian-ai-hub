@@ -1,4 +1,5 @@
-import type { AgentMessageAttachment, SlashInvocation } from "../../api/types";
+import type { AgentContextRef, AgentMessageAttachment, SlashInvocation } from "../../api/types";
+import { isValidContextRef } from "./agentViewUtils";
 import {
   clearQueuedItemError,
   enqueueItem,
@@ -18,6 +19,7 @@ export type QueuedAgentMessageStatus = QueuedMessageStatus;
 
 export interface QueuedAgentMessage extends QueuedMessageBase {
   attachments: AgentMessageAttachment[];
+  context_refs: AgentContextRef[];
 }
 
 export function buildAgentSendQueueKey(sessionId: string): string {
@@ -36,6 +38,13 @@ function isValidAttachment(value: unknown): value is AgentMessageAttachment {
   );
 }
 
+function normalizeContextRefs(value: unknown): AgentContextRef[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter(isValidContextRef)
+    .map((ref) => ({ kind: ref.kind, path: ref.path }));
+}
+
 function normalizeItem(value: unknown): QueuedAgentMessage | null {
   const base = normalizeBaseItem(value);
   if (!base) return null;
@@ -46,6 +55,7 @@ function normalizeItem(value: unknown): QueuedAgentMessage | null {
   return {
     ...base,
     attachments: item.attachments.map((att) => ({ ...att })),
+    context_refs: normalizeContextRefs(item.context_refs),
   };
 }
 
@@ -78,6 +88,7 @@ export interface CreateQueuedMessageInput {
   content: string;
   attachments?: AgentMessageAttachment[];
   slash_invocation?: SlashInvocation | null;
+  context_refs?: AgentContextRef[];
 }
 
 export function createQueuedMessage(input: CreateQueuedMessageInput): QueuedAgentMessage {
@@ -86,6 +97,7 @@ export function createQueuedMessage(input: CreateQueuedMessageInput): QueuedAgen
     content: input.content,
     attachments: input.attachments ? input.attachments.map((att) => ({ ...att })) : [],
     slash_invocation: input.slash_invocation ?? null,
+    context_refs: input.context_refs ? normalizeContextRefs(input.context_refs) : [],
     idempotency_key: newId("idem"),
     created_at: new Date().toISOString(),
     status: "pending",

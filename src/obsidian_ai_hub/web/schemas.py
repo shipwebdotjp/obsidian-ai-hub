@@ -324,6 +324,17 @@ class VaultFileResponse(BaseModel):
     relative_path: str
 
 
+class VaultFileListItem(BaseModel):
+    relative_path: str
+    size: int
+    mtime: float
+
+
+class VaultFilesResponse(BaseModel):
+    items: list[VaultFileListItem]
+    total: int
+
+
 # --- Summary schemas ---
 
 ALLOWED_PERIOD_TYPES = frozenset({"day", "week", "month"})

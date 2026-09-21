@@ -1,6 +1,8 @@
 import React, { useMemo, type MutableRefObject, type RefObject } from "react";
 import { Link } from "react-router-dom";
+import { FileText } from "lucide-react";
 import type {
+  AgentContextRef,
   AgentLiveToolCall,
   AgentMessage,
   AgentRun,
@@ -55,6 +57,34 @@ interface AgentMessageListProps {
 /** 会話メッセージ一覧とストリーミング・待機中質問・リンク・エラー表示。 */
 // sm未満ではp-4の内側いっぱいに広げて横スクロールを防ぎ、sm以上では自動幅に戻す。
 const ASSISTANT_BUBBLE_WIDTH_CLASS = "w-full min-w-0 sm:w-auto";
+
+/** ユーザーメッセージに付随した Vault 参照チップ。 */
+function ContextRefChips({
+  refs,
+  dark,
+}: {
+  refs: AgentContextRef[];
+  dark: boolean;
+}) {
+  if (!refs || refs.length === 0) return null;
+  return (
+    <div className="mb-1 flex flex-wrap gap-1.5">
+      {refs.map((ref, index) => (
+        <span
+          key={`${ref.path}-${index}`}
+          title={ref.path}
+          data-testid="message-context-ref"
+          className={`inline-flex max-w-full items-center gap-1 rounded-full px-2 py-0.5 font-mono text-[10px] ${
+            dark ? "bg-slate-800 text-slate-200" : "bg-slate-100 text-slate-600"
+          }`}
+        >
+          <FileText className="h-3 w-3 shrink-0" />
+          <span className="max-w-48 truncate">{ref.path}</span>
+        </span>
+      ))}
+    </div>
+  );
+}
 export function AgentMessageList({
   messages,
   isStreaming,
@@ -218,6 +248,7 @@ export function AgentMessageList({
                           ))}
                         </div>
                       )}
+                      <ContextRefChips refs={m.context_refs ?? []} dark />
                       {m.content && <div>{m.content}</div>}
                     </div>
                   )}
@@ -431,6 +462,7 @@ export function AgentMessageList({
                     ))}
                   </div>
                 )}
+                <ContextRefChips refs={item.context_refs} dark={false} />
                 {item.content && <div className="whitespace-pre-wrap">{item.content}</div>}
                 {item.status === "error" && (
                   <div className="mt-1 flex items-center gap-2 text-[11px] text-rose-600">

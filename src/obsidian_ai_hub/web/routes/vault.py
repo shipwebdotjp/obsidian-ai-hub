@@ -40,3 +40,15 @@ def get_vault_file(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+@router.get("/vault-files", response_model=schemas.VaultFilesResponse)
+def list_vault_files(
+    _=Depends(require_bearer_token),
+):
+    try:
+        return service.list_vault_files()
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))

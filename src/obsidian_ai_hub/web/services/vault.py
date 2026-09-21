@@ -37,7 +37,15 @@ def search_vault(q: str, k: int = 10, mode: str = "hybrid") -> dict:
     return {"items": results, "total": len(results)}
 
 
-def get_vault_file(relative_path: str) -> dict:
+def _resolve_vault_file_path(relative_path: str) -> Path:
+    """Validate *relative_path* and return the resolved file path in the Vault.
+
+    Shares the single path-safety rule used by both the reader and the
+    context-reference validation: no absolute paths, no ``..`` components,
+    ``.md`` only, resolved target must stay inside ``VAULT_PATH`` and be a
+    regular file. Raises ``ValueError`` / ``FileNotFoundError``
+    with the same messages as :func:`get_vault_file`.
+    """
     vault_dir = Path(config.VAULT_PATH).resolve()
 
     p = Path(relative_path)
@@ -70,6 +78,11 @@ def get_vault_file(relative_path: str) -> dict:
 
     if not resolved_path.is_file():
         raise FileNotFoundError("File is not a file")
+    return resolved_path
+
+
+def get_vault_file(relative_path: str) -> dict:
+    resolved_path = _resolve_vault_file_path(relative_path)
 
     with open(resolved_path, "r", encoding="utf-8") as f:
         content = f.read()
@@ -78,6 +91,85 @@ def get_vault_file(relative_path: str) -> dict:
         "content": content,
         "relative_path": relative_path,
     }
+
+
+def validate_vault_file_ref(relative_path: str) -> str:
+    """Validate an agent context-reference path without reading its body.
+
+    Returns the normalized vault-relative POSIX path. Raises ``ValueError``
+    for unsafe/non-Markdown paths and ``FileNotFoundError`` for missing
+    targets, mirroring :func:`get_vault_file` semantics.
+    """
+    vault_dir = Path(config.VAULT_PATH).resolve()
+    resolved = _resolve_vault_file_path(relative_path)
+    return resolved.relative_to(vault_dir).as_posix()
+
+
+# --- Vault file listing service (agent @-reference picker) ---
+# Hidden/system directories never shown in the Vault file picker.
+_HIDDEN_DIR_PREFIXES = (".",)
+
+
+def _is_listable_markdown(candidate: Path, vault_dir: Path) -> bool:
+    """Return True when *candidate* is a listable ``.md`` file in the Vault."""
+    try:
+        rel = candidate.relative_to(vault_dir)
+    except ValueError:
+        return False
+    # ``rglob`` follows symlinked directories on Python < 3.13, so the
+    # resolved parent (not just the leaf) must stay inside the Vault.
+    try:
+        if not candidate.parent.resolve().is_relative_to(vault_dir):
+            return False
+    except (OSError, RuntimeError):
+        return False
+    if any(part.startswith(_HIDDEN_DIR_PREFIXES) for part in rel.parts[:-1]):
+        return False
+    if candidate.name.startswith("."):
+        return False
+    if candidate.suffix.lower() != ".md":
+        return False
+    if candidate.is_symlink():
+        # Resolve the link and require the real target to stay in the Vault.
+        try:
+            resolved = candidate.resolve(strict=True)
+        except (OSError, RuntimeError):
+            return False
+        try:
+            resolved.relative_to(vault_dir)
+        except ValueError:
+            return False
+        return resolved.is_file()
+    return candidate.is_file()
+
+
+def list_vault_files() -> dict:
+    """List all ``.md`` files in the Vault for the agent context picker.
+
+    Returns ``{"items": [{"relative_path", "size", "mtime"}], "total"}``
+    with vault-relative POSIX paths sorted ascending. Hidden directories
+    (``.obsidian``, ``.trash``, ``.git``, …) and symlink escapes are
+    excluded. Only paths are returned; note bodies are read on demand.
+    """
+    vault_dir = _resolve_vault_dir()
+    if not vault_dir.is_dir():
+        raise FileNotFoundError("Vault directory not found")
+    items: list[dict] = []
+    for candidate in sorted(vault_dir.rglob("*.md")):
+        if not _is_listable_markdown(candidate, vault_dir):
+            continue
+        try:
+            stat = candidate.stat()
+        except OSError:
+            continue
+        items.append(
+            {
+                "relative_path": candidate.relative_to(vault_dir).as_posix(),
+                "size": stat.st_size,
+                "mtime": stat.st_mtime,
+            }
+        )
+    return {"items": items, "total": len(items)}
 
 
 # --- Vault file write service ---
