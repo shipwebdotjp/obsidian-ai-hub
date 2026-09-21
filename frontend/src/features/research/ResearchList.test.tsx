@@ -86,4 +86,75 @@ describe("ResearchList", () => {
     });
     expect(screen.queryByRole("button", { name: /重複先テーマ/ })).toBeNull();
   });
+
+  it("shows the generated title with the original theme for succeeded jobs", async () => {
+    const generatedTitle = `生成タイトル-${Date.now()}`;
+    const originalTheme = `元の長いテーマ-${Date.now()}-` + "あ".repeat(20);
+    mockListResearchThemes.mockResolvedValue({
+      items: [
+        {
+          theme_id: "rth_researched",
+          status: "approved",
+          theme: originalTheme,
+          normalized_key: "researched",
+          related_theme_ids: [],
+          latest_job: {
+            job_id: "job-1",
+            status: "succeeded",
+            generated_title: generatedTitle,
+            mode: "web",
+          },
+        },
+      ],
+      total: 1,
+    });
+
+    render(
+      <ResearchList
+        status=""
+        query=""
+        onSelect={vi.fn()}
+        onOpenTheme={vi.fn()}
+        refreshKey={0}
+        notify={vi.fn()}
+      />,
+    );
+
+    expect(await screen.findByText(generatedTitle)).toBeInTheDocument();
+    expect(screen.getByText(originalTheme, { exact: false })).toBeInTheDocument();
+  });
+
+  it("shows the theme itself when the job has not succeeded", async () => {
+    const theme = `未実施テーマ-${Date.now()}`;
+    mockListResearchThemes.mockResolvedValue({
+      items: [
+        {
+          theme_id: "rth_pending",
+          status: "candidate",
+          theme,
+          normalized_key: "pending",
+          related_theme_ids: [],
+          latest_job: {
+            job_id: "job-2",
+            status: "running",
+            mode: "web",
+          },
+        },
+      ],
+      total: 1,
+    });
+
+    render(
+      <ResearchList
+        status=""
+        query=""
+        onSelect={vi.fn()}
+        onOpenTheme={vi.fn()}
+        refreshKey={0}
+        notify={vi.fn()}
+      />,
+    );
+
+    expect(await screen.findByText(theme)).toBeInTheDocument();
+  });
 });

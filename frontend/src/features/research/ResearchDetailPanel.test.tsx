@@ -82,6 +82,54 @@ describe("ResearchDetailPanel", () => {
     expect(screen.queryByText("...(truncated)")).toBeNull();
   });
 
+  it("strips frontmatter metadata from the rendered result body", async () => {
+    const bodyHeading = `結果本文-${Date.now()}`;
+    mockGetResearchTheme.mockResolvedValue({
+      theme_id: "test-frontmatter",
+      status: "approved",
+      theme: "frontmatter test",
+      normalized_key: "frontmatter-test",
+      related_theme_ids: [],
+      latest_job: {
+        job_id: "job-fm",
+        status: "succeeded",
+        mode: "web",
+        generated_title: `生成タイトル-${Date.now()}`,
+        finished_at: "2026-09-21T13:10:52+09:00",
+        markdown: [
+          "---",
+          "title: 生成タイトル",
+          "status: researched",
+          "generated_at: 2026-09-21T13:10:52+09:00",
+          "source: tavily-search",
+          "output_style: long",
+          "---",
+          "",
+          `# ${bodyHeading}`,
+          "",
+          "本文",
+          "",
+        ].join("\n"),
+      },
+    });
+
+    render(
+      <ResearchDetailPanel
+        themeId="test-frontmatter"
+        onChanged={vi.fn()}
+        onOpenTheme={vi.fn()}
+        notify={vi.fn()}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: bodyHeading, level: 1 })).toBeInTheDocument();
+    });
+
+    expect(screen.queryByText("output_style: long", { exact: false })).toBeNull();
+    expect(screen.queryByText("status: researched", { exact: false })).toBeNull();
+  });
+
   it("does not render markdown when job is not succeeded", async () => {
     mockGetResearchTheme.mockResolvedValue({
       theme_id: "test-2",

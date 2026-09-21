@@ -5,7 +5,7 @@ import { listResearchThemes, rerunResearchTheme } from "../../api/client";
 import type { ResearchTheme } from "../../api/types";
 import { ROUTES } from "../../constants/routes";
 import { useListResource } from "../../hooks/useListResource";
-import { researchJobStatusColor, researchStatusLabel } from "./researchLabels";
+import { researchJobStatusColor, researchJobStatusLabel, researchModeLabel, researchStatusLabel, isResearchSucceeded } from "./researchLabels";
 
 export interface ResearchListProps {
   status: string;
@@ -41,7 +41,7 @@ export default function ResearchList({
     if (!s) return null;
     return (
       <span className={`rounded px-1 text-[10px] font-medium ${researchJobStatusColor(s)}`}>
-        {s}
+        {researchJobStatusLabel(s)}
       </span>
     );
   };
@@ -70,6 +70,10 @@ export default function ResearchList({
       <ul className="flex-1 overflow-y-auto divide-y divide-slate-100">
         {items.map((t) => {
           const job = t.latest_job;
+          const researched = isResearchSucceeded(job);
+          const generatedTitle = researched ? job?.generated_title?.trim() : undefined;
+          const displayTitle = generatedTitle || t.theme;
+          const showOriginalTheme = Boolean(generatedTitle && generatedTitle !== t.theme);
           return (
             <li key={t.theme_id} className="flex items-start gap-2 p-3 hover:bg-slate-50">
               <div className="min-w-0 flex-1">
@@ -78,7 +82,10 @@ export default function ResearchList({
                   className="block w-full text-left"
                   onClick={() => onSelect(t)}
                 >
-                  <div className="text-sm font-medium">{t.theme}</div>
+                  <div className="text-sm font-medium">{displayTitle}</div>
+                  {showOriginalTheme && (
+                    <div className="text-xs text-slate-500 mt-0.5 break-words">テーマ: {t.theme}</div>
+                  )}
                   {t.direction && (
                     <div className="text-xs text-slate-500 mt-0.5">{t.direction}</div>
                   )}
@@ -91,7 +98,16 @@ export default function ResearchList({
                         {t.kind}
                       </span>
                     )}
-                    {job && jobStatusBadge(job.status)}
+                    {job ? jobStatusBadge(job.status) : (
+                      <span className="rounded bg-slate-100 px-1 text-[10px] text-slate-600">
+                        未リサーチ
+                      </span>
+                    )}
+                    {researched && job?.mode && (
+                      <span className="rounded bg-indigo-100 px-1 text-[10px] text-indigo-800">
+                        {researchModeLabel(job.mode)}
+                      </span>
+                    )}
                     {t.related_theme_ids.length > 0 && (
                       <span className="text-[10px] text-blue-700">
                         related: {t.related_theme_ids.length}

@@ -5,7 +5,9 @@ import { getResearchTheme, rerunResearchTheme } from "../../api/client";
 import type { ResearchTheme } from "../../api/types";
 import MarkdownPreview from "../../components/MarkdownPreview";
 import { ROUTES } from "../../constants/routes";
-import { researchStatusLabel } from "./researchLabels";
+import { formatDateTime } from "../../utils/date";
+import { researchJobStatusLabel, researchModeLabel, researchStatusLabel } from "./researchLabels";
+import { parseResearchFrontmatter } from "./researchMarkdown";
 
 export interface ResearchDetailPanelProps {
   themeId: string;
@@ -101,6 +103,13 @@ export default function ResearchDetailPanel({
   }
 
   const job = detail.latest_job;
+  const frontmatter = job?.markdown && job.status === "succeeded"
+    ? parseResearchFrontmatter(job.markdown)
+    : null;
+  const resultBody = frontmatter?.body ?? (job?.status === "succeeded" ? job?.markdown : undefined);
+  const resultTitle = job?.generated_title?.trim() || frontmatter?.title;
+  const generatedAtRaw = frontmatter?.generated_at || job?.finished_at || job?.started_at;
+  const generatedAt = generatedAtRaw ? formatDateTime(generatedAtRaw) : "";
 
   return (
     <div className="flex h-full flex-col overflow-y-auto p-4">
@@ -168,21 +177,50 @@ export default function ResearchDetailPanel({
         <>
           <h2 className="mt-4 text-sm font-semibold text-slate-700">調査</h2>
           <div className="mt-1 space-y-2 text-sm">
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-slate-500">状態:</span>
-              <span className="text-xs font-medium">{job.status}</span>
-              {job.mode && <span className="text-xs text-slate-500">mode: {job.mode}</span>}
-              {job.generated_title && <span className="text-xs text-slate-500">{job.generated_title}</span>}
-            </div>
+            <dl className="rounded border border-slate-200 bg-slate-50 p-3 text-xs space-y-1.5">
+              <div className="flex items-center gap-2">
+                <dt className="shrink-0 text-slate-500">状態</dt>
+                <dd className="font-medium text-slate-800">{researchJobStatusLabel(job.status)}</dd>
+                {job.mode && (
+                  <dd className="rounded bg-indigo-100 px-1 text-[10px] text-indigo-800">
+                    {researchModeLabel(job.mode)}
+                  </dd>
+                )}
+              </div>
+              {resultTitle && (
+                <div className="flex items-start gap-2">
+                  <dt className="shrink-0 text-slate-500">タイトル</dt>
+                  <dd className="font-medium text-slate-800 break-words">{resultTitle}</dd>
+                </div>
+              )}
+              {generatedAt && (
+                <div className="flex items-center gap-2">
+                  <dt className="shrink-0 text-slate-500">生成日時</dt>
+                  <dd className="text-slate-700">{generatedAt}</dd>
+                </div>
+              )}
+              {frontmatter?.source && (
+                <div className="flex items-center gap-2">
+                  <dt className="shrink-0 text-slate-500">source</dt>
+                  <dd className="text-slate-700">{frontmatter.source}</dd>
+                </div>
+              )}
+              {frontmatter?.output_style && (
+                <div className="flex items-center gap-2">
+                  <dt className="shrink-0 text-slate-500">output_style</dt>
+                  <dd className="text-slate-700">{frontmatter.output_style}</dd>
+                </div>
+              )}
+            </dl>
             {job.error && (
               <div className="rounded border border-rose-200 bg-rose-50 p-2 text-xs text-rose-700">
                 {job.error}
               </div>
             )}
-            {job.markdown && job.status === "succeeded" && (
+            {resultBody && job.status === "succeeded" && (
               <>
                 <h3 className="text-xs font-semibold text-slate-700 mt-2">結果</h3>
-                <MarkdownPreview content={job.markdown} />
+                <MarkdownPreview content={resultBody} />
               </>
             )}
           </div>
