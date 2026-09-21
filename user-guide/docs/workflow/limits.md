@@ -1,0 +1,95 @@
+---
+sidebar_position: 8
+title: 制約とトラブルシューティング
+---
+
+# 制約とトラブルシューティング
+
+## 実行上限・制約
+
+| 項目 | 制限 |
+| --- | --- |
+| Revision あたりの Node 数 | 最大 **30** |
+| Loop の `max_iterations` | **1〜50** |
+| Loop のネスト | 不可 |
+| 通常 Edge の循環 | 不可 |
+| 並列 Node / fork / AND join | 不可（OR 合流のみ） |
+| 任意コード Node | 不可 |
+| Agent Node ごとの prompt / model / tool 上書き | 不可 |
+| Workflow 全体のタイムアウト | なし（各 Capability / 子 Run のタイムアウトに従う） |
+| 定義の JSON / YAML インポート・エクスポート | 不可 |
+| Scheduler Job からの Workflow 起動 | 不可 |
+
+### JSON Schema のサブセット
+
+許可: `object` / `properties` / `required`、primitive（string / integer / number / boolean）、`enum`、配列、
+および `additionalProperties` / `description` / `title` / `default` / `minimum` / `maximum` /
+`minLength` / `maxLength` / `pattern` など一部の制約。
+
+未対応: `$ref` / `oneOf` / `anyOf` / `allOf` / `not` / `const` / `if`-`then`-`else` / 再帰など。
+
+## 検証エラー
+
+公開時の検証で検出される代表例:
+
+- **未知の Capability** — `Capability '<key>' は無効です`。Capability が `enabled` か確認します。
+- **存在しない Agent** — `Agent '<id>' が存在しません`。
+- **循環 Edge** — `cycle: ...グラフに循環 Edge があります`。
+- **Loop ネスト** — `loop_nested: ... Loop Node のネストは未対応です`。
+- **loop_result の数** — 子グラフに `loop_result` がちょうど 1 つ必要です。
+- **entry の数** — トップレベルに entry Node（入辺なし）がちょうど 1 つ必要です。
+- **到達不能 Node** — entry から、または `loop_result` へ到達できない子 Node がある。
+- **参照スコープ** — `reference_scope: ... 参照先 Node は同一スコープにありません` など。
+- **branch の継続条件未指定** — Loop の `continuation_condition` は必須です。
+
+エディタではローカル検証（黄色）とサーバー検証（赤色）が別々に表示されます。
+**公開** はサーバー検証に合格した場合だけ実行できます。
+
+## よくあるつまずき
+
+### 「実行」で Run が作成できない
+
+Run は `published` Revision からのみ作成できます。`draft` のまま **実行** すると
+`Only a published revision can start a run.` で失敗します。先に **公開** してください。
+
+### 公開済み Revision を編集できない
+
+`published` / `superseded` は不変です。Workflow 詳細で **新しい下書き** を作成し、
+そこを編集してください。v1 では新しい下書きは空のグラフで始まります。
+
+### 承認しても実行されない／進まない
+
+- Web サーバー（worker）が停止していないか確認します。停止中は `queued` のまま進みません。
+- Capability や Agent が実行時に無効化されていると `interrupted` で停止します。再開に進みません。
+
+### `incomplete` になった
+
+失敗ではありません。次のいずれかです。
+
+- 実行した効果的 Node の Effect が不足している。
+- Loop が `max_iterations` に達した。
+
+内容を確認し、必要なら再実行してください。
+
+### `waiting_attention` になった
+
+Agent / Coding などの非冪等 Node が外部操作中に中断した状態です。
+Run 詳細で **採用して続行** / **再実行** / **失敗として処理** のいずれかを選びます。
+重複副作用の可能性を確認してから **再実行** してください。
+
+### Edge の条件（condition）を UI で設定できない
+
+現行のエディタは Edge の種別（`normal` / `error`）のみを編集できます。
+条件付き排他的分岐を使う場合は、API で Revision のグラフを更新してください。
+
+## 運用上の注意
+
+- Workflow worker は Web サーバーの lifespan に同居します。**サーバー停止中は新規実行が進みません。**
+- 終端 Run とその Node・Activation・Event は 30 日後に削除されます。
+- 自動ロールバックは行いません。実施済みの副作用は人間が確認・処置します。
+- Run 入力に秘密値を入れないでください。
+
+## 次に読む
+
+- [Run・承認・復旧](runs.md)
+- [ワークフロー概要](index.md)

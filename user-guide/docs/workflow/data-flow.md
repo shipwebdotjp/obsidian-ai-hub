@@ -1,0 +1,94 @@
+---
+sidebar_position: 5
+title: データの受け渡し
+---
+
+# データの受け渡し
+
+Node 間のデータ連携は、文字列のテンプレート展開ではなく **型付き参照** だけで行います。
+参照は `{"$ref": "<path>"}` の形で書き、リテラル値はそのまま渡ります。
+
+## 参照できるパス
+
+| 参照 | 意味 | 使える場所 |
+| --- | --- | --- |
+| `run.inputs.<field>` | Run 開始時の入力値 | 全体 |
+| `nodes.<node_id>.output.<field>` | 先行 Node の出力 | 同一スコープ内 |
+| `loop.state.<field>` | Loop の現在の反復状態 | Loop 子グラフ内のみ |
+| `loop.input.<field>` | Loop の初期入力（`input_mapping`） | Loop 子グラフ内のみ |
+| `loop.iteration` | Loop の反復番号 | Loop 子グラフ内のみ |
+
+例:
+
+```json
+{
+  "relative_path": {"$ref": "run.inputs.output_path"},
+  "content": {"$ref": "nodes.plan_node.output.plan"}
+}
+```
+
+## 解決のタイミング
+
+1. **静的検証** — 参照が解決可能で、スコープ規則に合うかを確認します。
+   - `nodes.<node_id>.output.*` は同一スコープの Node だけを参照できます。
+   - `run.inputs.<field>` は `inputs_schema.properties` に存在する必要があります。
+   - `loop.*` は Loop 子グラフ内でのみ有効です。
+2. **実行直前** — 参照を実際の値へ解決し、Pydantic / JSON Schema で完全に検証します。
+
+参照が未解決、または schema に合わない場合、Node は実行されず失敗します。
+動的検証エラー（参照未解決・schema 不一致）は再試行されません。
+
+## 分岐（条件付き Edge）
+
+Edge は `condition` オブジェクトを持てます。
+
+```json
+{
+  "from_path": "nodes.review.output.approved",
+  "operator": "equals",
+  "value": true
+}
+```
+
+| operator | 内容 | `value` |
+| --- | --- | --- |
+| `equals` | 参照値と `value` が等しい | 必須 |
+| `exists` | 参照値が `null` でない | 不要 |
+| `in` | 参照値が配列 `value` に含まれる | 必須（配列） |
+
+- source Node の outgoing Edge を `order_index` 順に評価し、最初に真になった 1 本だけを通ります（排他的）。
+- どの条件も真にならず、条件なし（常に真）の Edge もない場合、Run は `failed` になります。
+- 分岐で選ばれなかった Node は `skipped` になります。
+
+:::note[エディタ UI での条件編集]
+条件はグラフモデル・検証・実行でサポートされていますが、現行のエディタには
+条件を編集するコントロールがありません。条件付き分岐を使う場合は API で
+Revision のグラフを更新してください。
+:::
+
+## 合流（OR 合流）
+
+複数の source Node から同じ target Node へ Edge を張れます。
+target Node は最初に到達した経路で一度だけ実行されます。並列実行は行いません。
+
+## Loop 内のデータフロー
+
+```mermaid
+flowchart TD
+    A[input_mapping で loop.state を初期化] --> B[entry_node_id から子グラフを実行]
+    B --> C[loop_result の output_mapping が次の loop.state]
+    C --> D{continuation_condition が真?}
+    D -->|真| B
+    D -->|偽| E[親へ final_state / iterations / exit_reason]
+```
+
+- 各反復の開始時に子グラフを `entry_node_id` から実行します。
+- 子グラフ内の Node は `loop.state` / `loop.input` / `loop.iteration` を参照できます。
+- `loop_result` の `output_mapping` が次の `loop.state` になります。
+- `continuation_condition` が真の間、`max_iterations` まで反復します。
+- 反復ごとに Activation が新規作成されます（retry 時は同一 Activation を再利用）。
+
+## 次に読む
+
+- [Run・承認・復旧](runs.md)
+- [テンプレート](templates.md)
