@@ -54,11 +54,46 @@ class DefaultNodeRunner:
             from obsidian_ai_hub.tasks.adapters import get_default_executor
 
             self._executor = get_default_executor(poll_interval=self.poll_interval)
+        from obsidian_ai_hub.tasks import store as task_store
+
         key = (node.get("config") or {}).get("capability_key")
-        step = {"capability_key": key, "inputs": inputs}
-        task = {"task_id": str(context["run_id"]), "prompt_text": ""}
+        # Task adapters record child linkage (``set_active_child`` /
+        # ``child_run_started`` events) and watch cancellation against a Task
+        # row, so the bridge owns a short-lived Task for this node execution.
+        # Creation and the departure from ``queued`` share one transaction so
+        # a concurrent Task worker can never observe (and claim) the bridge
+        # row. The row ends terminal so the 30-day task retention purges it.
+        run_id = str(context["run_id"])
+        node_id = str(node.get("node_id"))
+        prompt = f"Workflow run {run_id} node {node_id} ({key})"
+        with task_store.auto_connection() as (bridge_conn, _):
+            with bridge_conn:
+                bridge = task_store.create_task(prompt, conn=bridge_conn)
+                bridge_id = str(bridge["task_id"])
+                task_store.transition_task_status(bridge_id, "planning", conn=bridge_conn)
+                task_store.transition_task_status(bridge_id, "running", conn=bridge_conn)
+        # The Task Step contract requires ``target`` to be an object even
+        # when the capability ignores it (e.g. ``research_agent``). The
+        # Workflow node contract stays ``capability_key`` + ``inputs`` only;
+        # this compatibility layer alone supplies the empty object.
+        step = {"capability_key": key, "target": {}, "inputs": inputs}
+        task = {"task_id": bridge_id, "prompt_text": ""}
         plan = {"plan": {"purpose": "", "completion_criteria": ""}}
-        result = self._executor.execute_step(task, plan, 0, step)
+        try:
+            result = self._executor.execute_step(task, plan, 0, step)
+        except Exception:
+            try:
+                task_store.transition_task_status(bridge_id, "failed")
+            except Exception:
+                logger.warning("Bridge task '%s' bookkeeping failed", bridge_id)
+            raise
+        try:
+            task_store.transition_task_status(bridge_id, "completed")
+        except Exception:
+            # Bookkeeping must never turn a completed, possibly
+            # side-effecting node into a failure (which a retry could
+            # execute twice).
+            logger.warning("Bridge task '%s' bookkeeping failed", bridge_id)
         output = parse_json_object(result.summary)
         if output is None:
             output = {"summary": result.summary}
