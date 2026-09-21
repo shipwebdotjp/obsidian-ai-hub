@@ -19,9 +19,11 @@ import type {
 } from "../../api/types";
 import { workflowRunPath } from "../../constants/routes";
 import { getApiErrorMessage } from "../../utils/error";
+import ConditionEditor from "./ConditionEditor";
 import InputsSchemaForm from "./InputsSchemaForm";
 import WorkflowCanvas from "./WorkflowCanvas";
 import {
+  conditionCandidates,
   createNode,
   createEdge,
   defaultInputsSchema,
@@ -94,6 +96,8 @@ export default function WorkflowEditorPage() {
   const [edgeSource, setEdgeSource] = useState("");
   const [edgeTarget, setEdgeTarget] = useState("");
   const [edgeKind, setEdgeKind] = useState<"normal" | "error">("normal");
+  const [edgeCondition, setEdgeCondition] = useState<Record<string, unknown> | null>(null);
+  const [editingEdgeId, setEditingEdgeId] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [serverIssues, setServerIssues] = useState<string[]>([]);
@@ -165,9 +169,15 @@ export default function WorkflowEditorPage() {
   const onAddEdge = () => {
     if (!edgeSource || !edgeTarget || edgeSource === edgeTarget) return;
     const order = edges.filter((edge) => edge.source_node_id === edgeSource).length;
-    setEdges((prev) =>
-      [...prev, { ...createEdge(edgeSource, edgeTarget, order), edge_kind: edgeKind }],
-    );
+    setEdges((prev) => [
+      ...prev,
+      {
+        ...createEdge(edgeSource, edgeTarget, order),
+        edge_kind: edgeKind,
+        condition: edgeCondition,
+      },
+    ]);
+    setEdgeCondition(null);
     markDirty();
   };
 
@@ -418,9 +428,11 @@ export default function WorkflowEditorPage() {
               <select
                 className="rounded border border-slate-300 px-1 py-0.5"
                 value={edgeKind}
-                onChange={(event) =>
-                  setEdgeKind(event.target.value as "normal" | "error")
-                }
+                onChange={(event) => {
+                  const next = event.target.value as "normal" | "error";
+                  setEdgeKind(next);
+                  if (next === "error") setEdgeCondition(null);
+                }}
               >
                 <option value="normal">normal</option>
                 <option value="error">error</option>
@@ -429,6 +441,18 @@ export default function WorkflowEditorPage() {
                 Edge 追加
               </button>
             </div>
+            {edgeKind === "normal" && (
+              <ConditionEditor
+                idPrefix="edge-new"
+                condition={edgeCondition}
+                candidates={
+                  edgeSource
+                    ? conditionCandidates(nodes, edgeSource, inputsSchema)
+                    : []
+                }
+                onChange={setEdgeCondition}
+              />
+            )}
           </section>
 
           <section className="space-y-2">
@@ -588,24 +612,67 @@ export default function WorkflowEditorPage() {
             <h3 className="font-semibold">Edge 一覧</h3>
             <ul className="space-y-1">
               {edges.map((edge) => (
-                <li key={edge.edge_id} className="flex items-center justify-between">
-                  <span className="truncate">
-                    {edge.source_node_id.slice(0, 5)}→{edge.target_node_id.slice(0, 5)}{" "}
-                    ({edge.edge_kind}
-                    {edge.condition ? ", cond" : ""})
-                  </span>
-                  <button
-                    type="button"
-                    className="cursor-pointer text-rose-700"
-                    onClick={() => {
-                      setEdges((prev) =>
-                        prev.filter((item) => item.edge_id !== edge.edge_id),
-                      );
-                      markDirty();
-                    }}
-                  >
-                    削除
-                  </button>
+                <li key={edge.edge_id} className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className="truncate">
+                      {edge.source_node_id.slice(0, 5)}→{edge.target_node_id.slice(0, 5)}{" "}
+                      ({edge.edge_kind}
+                      {edge.condition ? ", cond" : ""})
+                    </span>
+                    <span className="flex gap-2">
+                      {edge.edge_kind === "normal" && (
+                        <button
+                          type="button"
+                          className="cursor-pointer text-blue-700"
+                          onClick={() =>
+                            setEditingEdgeId(
+                              editingEdgeId === edge.edge_id
+                                ? null
+                                : edge.edge_id,
+                            )
+                          }
+                        >
+                          条件
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className="cursor-pointer text-rose-700"
+                        onClick={() => {
+                          setEdges((prev) =>
+                            prev.filter((item) => item.edge_id !== edge.edge_id),
+                          );
+                          if (editingEdgeId === edge.edge_id) {
+                            setEditingEdgeId(null);
+                          }
+                          markDirty();
+                        }}
+                      >
+                        削除
+                      </button>
+                    </span>
+                  </div>
+                  {editingEdgeId === edge.edge_id && (
+                    <ConditionEditor
+                      idPrefix={`edge-${edge.edge_id}`}
+                      condition={edge.condition}
+                      candidates={conditionCandidates(
+                        nodes,
+                        edge.source_node_id,
+                        inputsSchema,
+                      )}
+                      onChange={(condition) => {
+                        setEdges((prev) =>
+                          prev.map((item) =>
+                            item.edge_id === edge.edge_id
+                              ? { ...item, condition }
+                              : item,
+                          ),
+                        );
+                        markDirty();
+                      }}
+                    />
+                  )}
                 </li>
               ))}
             </ul>

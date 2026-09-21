@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  conditionCandidates,
   createEdge,
   createNode,
   defaultNodeConfig,
+  parseConditionValue,
   removeNode,
   validateGraphShape,
   type WorkflowEdge,
@@ -115,5 +117,90 @@ describe("graphModel", () => {
     );
     expect(referenceIssues).toHaveLength(1);
     expect(referenceIssues[0].nodeId).toBe("bad");
+  });
+});
+
+
+describe("condition helpers", () => {
+  const schema = {
+    type: "object",
+    properties: { flag: { type: "boolean" } },
+  };
+
+  it("lists run.inputs, node outputs and loop state candidates", () => {
+    const loop = node("loop", "loop", {
+      ...defaultNodeConfig("loop"),
+      state_schema: {
+        type: "object",
+        properties: { done: { type: "boolean" } },
+      },
+      input_mapping: { draft: "" },
+    });
+    const child = node("child", "capability", capability(), "loop");
+    const end = node("end", "terminal", { outcome: "success" });
+    const top = node("top", "capability", capability());
+
+    const topCandidates = conditionCandidates([top, end], "top", schema);
+    expect(topCandidates).toContain("run.inputs.flag");
+    expect(topCandidates).toContain("nodes.end.output");
+    expect(topCandidates).not.toContain("loop.iteration");
+
+    const loopCandidates = conditionCandidates([loop, child, end], "child", schema);
+    expect(loopCandidates).toContain("loop.state.done");
+    expect(loopCandidates).toContain("loop.input.draft");
+    expect(loopCandidates).toContain("loop.iteration");
+  });
+
+  it("flags malformed conditions with backend parity", () => {
+    const nodes = [node("a", "capability", capability()), node("end", "terminal", { outcome: "success" })];
+    const base = edge("e1", "a", "end");
+
+    const badOperator = validateGraphShape(
+      nodes,
+      [{ ...base, condition: { from_path: "run.inputs.flag", operator: "nope" } }],
+      schema,
+    ).map((issue) => issue.code);
+    expect(badOperator).toContain("condition_operator");
+    expect(badOperator).not.toContain("condition_value");
+
+    const missingValue = validateGraphShape(
+      nodes,
+      [{ ...base, condition: { from_path: "run.inputs.flag", operator: "equals" } }],
+      schema,
+    ).map((issue) => issue.code);
+    expect(missingValue).toContain("condition_value");
+    expect(missingValue).not.toContain("reference_scope");
+
+    // Shape-valid condition with a broken reference still reports scope.
+    const badReference = validateGraphShape(
+      nodes,
+      [
+        {
+          ...base,
+          condition: { from_path: "nodes.missing.output.x", operator: "equals", value: 1 },
+        },
+      ],
+      schema,
+    ).map((issue) => issue.code);
+    expect(badReference).toContain("reference_scope");
+  });
+
+  it("requires an array for the in operator", () => {
+    const nodes = [node("a", "capability", capability()), node("end", "terminal", { outcome: "success" })];
+    const edges: WorkflowEdge[] = [
+      {
+        ...edge("e1", "a", "end"),
+        condition: { from_path: "run.inputs.flag", operator: "in", value: "x" },
+      },
+    ];
+    const codes = validateGraphShape(nodes, edges, schema).map((i) => i.code);
+    expect(codes).toContain("condition_value_array");
+  });
+
+  it("parses condition values by operator", () => {
+    expect(parseConditionValue("true", "equals")).toEqual({ ok: true, value: true });
+    expect(parseConditionValue("hello", "equals")).toEqual({ ok: true, value: "hello" });
+    expect(parseConditionValue("[1,2]", "in")).toEqual({ ok: true, value: [1, 2] });
+    expect(parseConditionValue("oops", "in").ok).toBe(false);
   });
 });

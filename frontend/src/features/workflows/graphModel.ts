@@ -211,6 +211,111 @@ export function inputsKeysFromSchema(
   return [];
 }
 
+export const CONDITION_OPERATORS = ["equals", "exists", "in"] as const;
+export type ConditionOperator = (typeof CONDITION_OPERATORS)[number];
+
+/** Candidate reference paths usable as a condition's ``from_path``. */
+export function conditionCandidates(
+  nodes: WorkflowNode[],
+  sourceNodeId: string,
+  inputsSchema: Record<string, unknown>,
+): string[] {
+  const source = nodes.find((node) => node.node_id === sourceNodeId);
+  if (!source) return [];
+  const scope = scopeOf(source);
+  const scopeIds = nodes
+    .filter((node) => scopeOf(node) === scope)
+    .map((node) => node.node_id);
+  const candidates: string[] = inputsKeysFromSchema(inputsSchema).map(
+    (key) => `run.inputs.${key}`,
+  );
+  for (const nodeId of scopeIds) {
+    candidates.push(`nodes.${nodeId}.output`);
+  }
+  if (scope !== null) {
+    const loop = nodes.find((node) => node.node_id === scope);
+    const stateSchema = (loop?.config as Record<string, unknown> | undefined)
+      ?.state_schema as Record<string, unknown> | undefined;
+    const stateProps = (stateSchema?.properties ?? {}) as Record<string, unknown>;
+    for (const key of Object.keys(stateProps)) {
+      candidates.push(`loop.state.${key}`);
+    }
+    const inputMapping = (loop?.config as Record<string, unknown> | undefined)
+      ?.input_mapping as Record<string, unknown> | undefined;
+    for (const key of Object.keys(inputMapping ?? {})) {
+      candidates.push(`loop.input.${key}`);
+    }
+    candidates.push("loop.iteration");
+  }
+  return candidates;
+}
+
+/** Validate the shape of one condition object (mirrors backend validation). */
+export function validateConditionShape(
+  condition: unknown,
+  path = "condition",
+): GraphIssue[] {
+  if (!condition || typeof condition !== "object") {
+    return [{ code: "condition_shape", message: `${path} は object が必要です` }];
+  }
+  const record = condition as Record<string, unknown>;
+  const issues: GraphIssue[] = [];
+  if (typeof record.from_path !== "string" || !record.from_path.trim()) {
+    issues.push({
+      code: "condition_from_path",
+      message: `${path}.from_path が必要です`,
+    });
+  }
+  const operator = record.operator;
+  if (!CONDITION_OPERATORS.includes(operator as ConditionOperator)) {
+    issues.push({
+      code: "condition_operator",
+      message: `${path}.operator が不正です`,
+    });
+  }
+  if (
+    (operator === "equals" || operator === "in") &&
+    !("value" in record)
+  ) {
+    issues.push({
+      code: "condition_value",
+      message: `${path}.value が必要です`,
+    });
+  }
+  if (operator === "in" && "value" in record && !Array.isArray(record.value)) {
+    issues.push({
+      code: "condition_value_array",
+      message: `${path}.value は配列が必要です`,
+    });
+  }
+  return issues;
+}
+
+/** Parse the text input for a condition value. ``in`` requires a JSON array. */
+export function parseConditionValue(
+  raw: string,
+  operator: ConditionOperator,
+): { ok: true; value: unknown } | { ok: false; error: string } {
+  if (operator === "in") {
+    try {
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) {
+        return { ok: false, error: "JSON 配列を入力してください" };
+      }
+      return { ok: true, value: parsed };
+    } catch {
+      return { ok: false, error: "JSON 配列として解釈できません" };
+    }
+  }
+  const trimmed = raw.trim();
+  if (trimmed === "") return { ok: true, value: "" };
+  try {
+    return { ok: true, value: JSON.parse(trimmed) };
+  } catch {
+    return { ok: true, value: raw };
+  }
+}
+
 /** Client-side structural checks that mirror the backend validator codes. */
 export function validateGraphShape(
   nodes: WorkflowNode[],
@@ -257,7 +362,7 @@ export function validateGraphShape(
     }
   }
 
-  // Terminal nodes must have no outgoing edge.
+  // Terminal nodes must have no outgoing edge, and conditions must be valid.
   for (const edge of edges) {
     const source = byId.get(edge.source_node_id);
     if (source?.node_type === "terminal") {
@@ -266,6 +371,23 @@ export function validateGraphShape(
         message: "terminal Node に outgoing Edge があります",
         edgeId: edge.edge_id,
       });
+    }
+    if (edge.condition) {
+      const shapeIssues = validateConditionShape(edge.condition);
+      for (const issue of shapeIssues) {
+        issues.push({ ...issue, edgeId: edge.edge_id });
+      }
+      // Resolve references only when the shape is valid (backend parity).
+      if (shapeIssues.length === 0) {
+        const scope = source ? scopeOf(source) : null;
+        const scopeIds = (scopes.get(scope) ?? []).map((node) => node.node_id);
+        const error = validateReference(String(edge.condition.from_path ?? ""), {
+          inputsKeys: inputsKeysFromSchema(inputsSchema),
+          nodeIds: scopeIds,
+          inLoop: scope !== null,
+        });
+        if (error) issues.push({ ...error, edgeId: edge.edge_id });
+      }
     }
   }
 
