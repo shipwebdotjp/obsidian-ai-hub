@@ -1216,8 +1216,8 @@ export interface WorkflowRun {
   inputs: Record<string, unknown>;
   graph_snapshot?: {
     inputs_schema?: Record<string, unknown>;
-    nodes?: unknown[];
-    edges?: unknown[];
+    nodes?: WorkflowNode[];
+    edges?: WorkflowEdge[];
   } | null;
   source_run_id?: string | null;
   result_summary?: string | null;

@@ -35,8 +35,18 @@ Agent Node は実行時点の最新の Agent 設定（system prompt・model・�
 | --- | --- |
 | ヘッダー | Run ID と状態。状態に応じた操作ボタン。 |
 | 概要 | 作成日時、結果要約、エラー要約、実行入力の JSON。 |
-| Node | Node ごとの `status` / `attempt` / 出力（またはエラー）。 |
+| グラフ | 実行時スナップショットの読み取り専用グラフ。Node ごとの状態表示と実行回数。 |
+| Node | 選択中 Node の `status` / `attempt` / 出力（またはエラー）。未選択時は全 Node。 |
 | Events | 追記のみの監査イベント一覧。 |
+
+### グラフ表示とノード選択
+
+- グラフは Run 作成時の `graph_snapshot` を使った読み取り専用表示です。ドラッグや編集はできません。
+- 各 Node の状態は、その Node の最新 Activation の最後の `attempt` から決まります（retry や Loop 反復を含みます）。
+- 1 つの Node が複数回実行された場合（Loop・再実行）は実行回数を表示します。
+- Node をクリックすると、その Node だけの Activation・`attempt`・出力／エラー履歴に絞って表示します。完全な Node ID は選択詳細に表示されます。「選択を解除」で全 Node の履歴に戻ります。
+- 条件分岐で通過した Edge は記録されないため、Edge は定義どおりに表示し、通過状態の強調はしません。
+- スナップショットを持たない旧 Run ではグラフを表示せず、従来どおり全 Node の履歴を表示します。
 
 進捗は SSE（`GET /api/v1/workflows/runs/:run_id/stream`）で自動更新されます。
 切断時は last-event-id により差分から再開し、完了・待機状態に達するとストリームは閉じます。

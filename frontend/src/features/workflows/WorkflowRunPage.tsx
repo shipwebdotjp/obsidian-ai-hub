@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   approveWorkflowRun,
@@ -17,7 +17,17 @@ import {
 } from "../../api/runSse";
 import { formatDateTime } from "../../utils/date";
 import { getApiErrorMessage } from "../../utils/error";
+import { nodeDisplayName } from "./graphModel";
+import {
+  aggregateNodeStates,
+  historyForNode,
+  initialSelectedNodeId,
+  layoutRunGraph,
+  RUN_GRAPH_STATUS_LABELS,
+  runGraphOf,
+} from "./runGraphModel";
 import InputsSchemaForm from "./InputsSchemaForm";
+import WorkflowCanvas from "./WorkflowCanvas";
 
 const TERMINAL = new Set(["completed", "incomplete", "failed", "cancelled"]);
 
@@ -30,6 +40,8 @@ export default function WorkflowRunPage() {
   const [rerunErrors, setRerunErrors] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const selectionTouched = useRef(false);
 
   const reload = useCallback(async () => {
     try {
@@ -141,6 +153,34 @@ export default function WorkflowRunPage() {
     }
   };
 
+  const runNodes = run?.nodes ?? [];
+  const graphNodes = useMemo(() => (run ? runGraphOf(run) : null), [run]);
+  const nodeStates = useMemo(() => aggregateNodeStates(runNodes), [runNodes]);
+  const nodeStatesRecord = useMemo(
+    () => Object.fromEntries(nodeStates),
+    [nodeStates],
+  );
+  const graphLayout = useMemo(
+    () => (graphNodes ? layoutRunGraph(graphNodes.nodes) : null),
+    [graphNodes],
+  );
+
+  useEffect(() => {
+    setSelectedNodeId(null);
+    selectionTouched.current = false;
+  }, [runId]);
+
+  useEffect(() => {
+    if (selectionTouched.current || !graphNodes) return;
+    setSelectedNodeId(
+      initialSelectedNodeId(
+        graphNodes.nodes.map((node) => node.node_id),
+        runNodes,
+        nodeStates,
+      ),
+    );
+  }, [graphNodes, runNodes, nodeStates]);
+
   if (!run) {
     return (
       <div className="p-4 text-sm text-slate-500">
@@ -149,7 +189,18 @@ export default function WorkflowRunPage() {
     );
   }
 
-  const attentionNode = (run.nodes ?? []).find(
+  const selectedNode =
+    graphNodes?.nodes.find((node) => node.node_id === selectedNodeId) ??
+    null;
+  const selectedState = selectedNodeId
+    ? nodeStates.get(selectedNodeId)
+    : undefined;
+  const visibleRunNodes =
+    graphNodes && selectedNodeId
+      ? historyForNode(runNodes, selectedNodeId)
+      : runNodes;
+
+  const attentionNode = runNodes.find(
     (node) => node.status === "needs_attention",
   );
 
@@ -285,22 +336,87 @@ export default function WorkflowRunPage() {
         </pre>
       </section>
 
+      {graphNodes && graphLayout && (
+        <section className="border-b border-slate-200 bg-white px-4 py-3">
+          <div className="mb-2 flex items-center justify-between">
+            <h2 className="text-sm font-semibold">グラフ</h2>
+            {selectedNodeId && (
+              <button
+                type="button"
+                data-testid="run-graph-clear-selection"
+                onClick={() => {
+                  selectionTouched.current = true;
+                  setSelectedNodeId(null);
+                }}
+                className="cursor-pointer rounded border border-slate-300 px-3 py-1 text-xs"
+              >
+                選択を解除
+              </button>
+            )}
+          </div>
+          <WorkflowCanvas
+            nodes={graphNodes.nodes}
+            edges={graphNodes.edges}
+            selectedNodeId={selectedNodeId}
+            onSelectNode={(nodeId) => {
+              selectionTouched.current = true;
+              setSelectedNodeId(nodeId);
+            }}
+            readOnly
+            nodeStates={nodeStatesRecord}
+            positions={graphLayout.positions}
+            canvasWidth={graphLayout.width}
+            canvasHeight={graphLayout.height}
+          />
+          {selectedNode && (
+            <div
+              data-testid="run-node-detail"
+              className="mt-2 rounded border border-slate-200 bg-slate-50 px-3 py-2 text-xs"
+            >
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                <span className="font-semibold">
+                  {nodeDisplayName(selectedNode)}
+                </span>
+                <span className="text-slate-500">{selectedNode.node_type}</span>
+                {selectedState && selectedState.status !== "unexecuted" && (
+                  <span className="text-slate-600">
+                    状態: {RUN_GRAPH_STATUS_LABELS[selectedState.status]} /
+                    attempt {selectedState.latestAttempt}
+                    {selectedState.activationCount > 1 &&
+                      ` / 実行 ${selectedState.activationCount} 回`}
+                  </span>
+                )}
+              </div>
+              <div className="mt-1 break-all font-mono text-[11px] text-slate-600">
+                {selectedNode.node_id}
+              </div>
+            </div>
+          )}
+        </section>
+      )}
+
       <section className="px-4 py-3">
-        <h2 className="mb-2 text-sm font-semibold">Node</h2>
+        <h2 className="mb-2 text-sm font-semibold">
+          Node{selectedNode ? `: ${nodeDisplayName(selectedNode)}` : ""}
+        </h2>
         <table className="w-full border-collapse bg-white text-xs">
           <thead>
             <tr className="text-left text-slate-500">
-              <th className="border-b border-slate-200 px-2 py-1">node</th>
+              <th className="border-b border-slate-200 px-2 py-1">
+                {graphNodes && selectedNodeId ? "activation" : "node"}
+              </th>
               <th className="border-b border-slate-200 px-2 py-1">status</th>
               <th className="border-b border-slate-200 px-2 py-1">attempt</th>
               <th className="border-b border-slate-200 px-2 py-1">output</th>
             </tr>
           </thead>
           <tbody>
-            {(run.nodes ?? []).map((node) => (
+            {visibleRunNodes.map((node) => (
               <tr key={`${node.activation_id}-${node.attempt}`}>
                 <td className="border-b border-slate-100 px-2 py-1">
-                  {node.node_id.slice(0, 8)}
+                  {graphNodes && selectedNodeId
+                    ? node.activation_id.slice(0, 8)
+                    : node.node_id.slice(0, 8)}
                 </td>
                 <td className="border-b border-slate-100 px-2 py-1">{node.status}</td>
                 <td className="border-b border-slate-100 px-2 py-1">{node.attempt}</td>
@@ -309,6 +425,17 @@ export default function WorkflowRunPage() {
                 </td>
               </tr>
             ))}
+            {visibleRunNodes.length === 0 && (
+              <tr>
+                <td
+                  colSpan={4}
+                  data-testid="run-node-empty"
+                  className="border-b border-slate-100 px-2 py-1 text-slate-500"
+                >
+                  このノードの実行履歴はありません
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </section>

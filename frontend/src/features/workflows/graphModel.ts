@@ -65,6 +65,18 @@ export function defaultNodeConfig(
   }
 }
 
+/** Display name for a graph node: label first, then type-specific config. */
+export function nodeDisplayName(node: WorkflowNode): string {
+  const label = typeof node.label === "string" ? node.label.trim() : "";
+  if (label) return label;
+  const config = (node.config ?? {}) as Record<string, unknown>;
+  for (const key of ["capability_key", "agent_id", "outcome"] as const) {
+    const value = config[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return node.node_type;
+}
+
 export function createNode(
   nodeType: WorkflowNodeType,
   position: { x: number; y: number },
