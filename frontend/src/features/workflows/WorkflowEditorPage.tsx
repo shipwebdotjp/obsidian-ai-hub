@@ -8,6 +8,7 @@ import {
   updateWorkflowRevision,
   validateWorkflowRevision,
   createWorkflowRun,
+  deleteWorkflowRevision,
 } from "../../api/client";
 import type {
   Agent,
@@ -17,8 +18,9 @@ import type {
   WorkflowNodeType,
   WorkflowRevision,
 } from "../../api/types";
-import { workflowRunPath } from "../../constants/routes";
+import { workflowDetailPath, workflowRunPath } from "../../constants/routes";
 import { getApiErrorMessage } from "../../utils/error";
+import { revisionStatusLabel } from "./revisionLabels";
 import ConditionEditor from "./ConditionEditor";
 import InputsSchemaForm from "./InputsSchemaForm";
 import WorkflowCanvas from "./WorkflowCanvas";
@@ -104,6 +106,7 @@ export default function WorkflowEditorPage() {
   const [runInputs, setRunInputs] = useState<Record<string, unknown>>({});
   const [runErrors, setRunErrors] = useState<string[]>([]);
   const [dirty, setDirty] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const load = useCallback(async () => {
     setError(null);
@@ -252,6 +255,28 @@ export default function WorkflowEditorPage() {
     }
   };
 
+  const onDelete = async () => {
+    if (!revision || revision.status === "published") return;
+    const statusLabel = revisionStatusLabel(revision.status);
+    if (
+      !window.confirm(
+        `v${revision.version}（${statusLabel}）を完全に削除しますか？この操作は取り消せません。` +
+          (dirty ? "未保存の変更も破棄されます。" : ""),
+      )
+    ) {
+      return;
+    }
+    setDeleting(true);
+    try {
+      await deleteWorkflowRevision(revisionId);
+      navigate(workflowDetailPath(revision.workflow_id));
+    } catch (e) {
+      setError(getApiErrorMessage(e, "削除に失敗しました"));
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   if (!revision) {
     return (
       <div className="p-4 text-sm text-slate-500">
@@ -291,6 +316,11 @@ export default function WorkflowEditorPage() {
           <button type="button" onClick={onStart} className="cursor-pointer rounded bg-blue-600 px-3 py-1 text-xs text-white">
             実行
           </button>
+          {revision.status !== "published" && (
+            <button type="button" onClick={onDelete} disabled={deleting} className="cursor-pointer rounded bg-rose-800 px-3 py-1 text-xs text-white disabled:opacity-50">
+              削除
+            </button>
+          )}
         </div>
       </header>
 

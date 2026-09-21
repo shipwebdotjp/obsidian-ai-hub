@@ -32,8 +32,13 @@ title: 用語と状態
 | `superseded` | 新しい `published` が作成された旧版。参照は可能だが新規 Run には使わない。 |
 
 - `draft` のみ編集できます。公開済み Revision を編集するには、Workflow 詳細で **新しい下書き** を作成します。
-- v1 では新しい下書きは空のグラフ・既定の `inputs_schema` で始まります（既存グラフの複製はしません）。
+- 新しい下書きは、公開済み Revision がある場合はそのグラフ（Node / Edge / 入力 Schema・
+  レイアウト・Loop 構成・型付き参照）を **複製** して開始します。複製時には新しい Node / Edge ID が
+  割り当てられ、複製元の公開済み Revision は不変のまま保たれます。公開済み Revision がない場合は
+  空のグラフ・既定の `inputs_schema` で開始します。
 - 公開のたびに新しい `published` Revision が作られ、それ以前の `published` は `superseded` になります。
+- `draft` と `superseded` の Revision は削除できます（[エディタの使い方](editor.md#revision-を削除する) を参照）。
+  `published` は削除できません。削除しても Run は残り、参照したグラフは Run 側のスナップショットで閲覧・再実行できます。
 - Run は作成時点の `revision_id` とグラフ・入力をスナップショットとして保持します。公開後に Capability / Agent を変更しても既存 Run には影響しません。
 
 ## グラフの構造規約

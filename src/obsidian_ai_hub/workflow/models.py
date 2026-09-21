@@ -264,6 +264,30 @@ def iter_references(value: Any) -> Iterable[str]:
             yield from iter_references(child)
 
 
+_NODE_REF_RE = re.compile(r"^nodes\.([^.]+)(\..*)?$")
+
+
+def remap_node_references(value: Any, id_map: dict[str, str]) -> Any:
+    """Return ``value`` with ``nodes.<id>`` references rewritten via ``id_map``.
+
+    Used when copying a graph into a new revision (fresh node ids) so typed
+    references keep pointing at the copied nodes.
+    """
+    if isinstance(value, str):
+        match = _NODE_REF_RE.match(value)
+        if match and match.group(1) in id_map:
+            return f"nodes.{id_map[match.group(1)]}{match.group(2) or ''}"
+        return value
+    if isinstance(value, dict):
+        return {
+            key: remap_node_references(child, id_map)
+            for key, child in value.items()
+        }
+    if isinstance(value, list):
+        return [remap_node_references(child, id_map) for child in value]
+    return value
+
+
 _SEGMENT_RE = re.compile(r"^([^\[\]]+)((?:\[\d+\])*)$")
 _INDEX_RE = re.compile(r"\[(\d+)\]")
 

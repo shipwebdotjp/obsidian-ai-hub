@@ -9,28 +9,16 @@ publishing. See ``docs/workflow/specification.md`` §15 and §20.
 
 from __future__ import annotations
 
-import re
 import uuid
 from typing import Any
 
-_REF_NODE = re.compile(r"^nodes\.([^.]+)(\..*)?$")
+from obsidian_ai_hub.workflow.models import remap_node_references
+
+_remap_value = remap_node_references
 
 
 def _new_id() -> str:
     return str(uuid.uuid4())
-
-
-def _remap_value(value: Any, id_map: dict[str, str]) -> Any:
-    if isinstance(value, str):
-        match = _REF_NODE.match(value)
-        if match and match.group(1) in id_map:
-            return f"nodes.{id_map[match.group(1)]}{match.group(2) or ''}"
-        return value
-    if isinstance(value, dict):
-        return {key: _remap_value(child, id_map) for key, child in value.items()}
-    if isinstance(value, list):
-        return [_remap_value(child, id_map) for child in value]
-    return value
 
 
 def _agent_node(

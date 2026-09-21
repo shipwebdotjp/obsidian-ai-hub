@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
   createWorkflowRevision,
+  deleteWorkflowRevision,
   getWorkflow,
 } from "../../api/client";
 import type { WorkflowDetail } from "../../api/types";
@@ -11,12 +12,7 @@ import {
 } from "../../constants/routes";
 import { formatDateTime } from "../../utils/date";
 import { getApiErrorMessage } from "../../utils/error";
-
-const REVISION_STATUS_LABEL: Record<string, string> = {
-  draft: "下書き",
-  published: "公開",
-  superseded: "旧版",
-};
+import { REVISION_STATUS_LABEL } from "./revisionLabels";
 
 export default function WorkflowDetailPage() {
   const { workflowId = "" } = useParams();
@@ -44,6 +40,26 @@ export default function WorkflowDetailPage() {
       await reload();
     } catch (e) {
       setError(getApiErrorMessage(e, "Revision 作成に失敗しました"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onDeleteRevision = async (revisionId: string, version: number, status: string) => {
+    const statusLabel = REVISION_STATUS_LABEL[status] ?? status;
+    if (
+      !window.confirm(
+        `v${version}（${statusLabel}）を完全に削除しますか？この操作は取り消せません。`,
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    try {
+      await deleteWorkflowRevision(revisionId);
+      await reload();
+    } catch (e) {
+      setError(getApiErrorMessage(e, "Revision 削除に失敗しました"));
     } finally {
       setBusy(false);
     }
@@ -89,16 +105,34 @@ export default function WorkflowDetailPage() {
                 v{revision.version} ・{" "}
                 {REVISION_STATUS_LABEL[revision.status] ?? revision.status}
               </span>
-              {revision.status === "draft" ? (
-                <Link
-                  className="text-blue-700"
-                  to={workflowEditPath(revision.revision_id)}
-                >
-                  編集
-                </Link>
-              ) : (
-                <span className="text-slate-400">編集不可</span>
-              )}
+              <span className="flex items-center gap-2">
+                {revision.status === "draft" ? (
+                  <Link
+                    className="text-blue-700"
+                    to={workflowEditPath(revision.revision_id)}
+                  >
+                    編集
+                  </Link>
+                ) : (
+                  <span className="text-slate-400">編集不可</span>
+                )}
+                {revision.status !== "published" && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      onDeleteRevision(
+                        revision.revision_id,
+                        revision.version,
+                        revision.status,
+                      )
+                    }
+                    disabled={busy}
+                    className="cursor-pointer rounded bg-rose-800 px-2 py-0.5 text-xs text-white disabled:opacity-50"
+                  >
+                    削除
+                  </button>
+                )}
+              </span>
             </li>
           ))}
         </ul>

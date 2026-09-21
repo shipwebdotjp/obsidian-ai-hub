@@ -1041,6 +1041,15 @@ export function publishWorkflowRevision(
   );
 }
 
+export function deleteWorkflowRevision(
+  revisionId: string,
+): Promise<{ success: boolean; revision_id: string }> {
+  return request<{ success: boolean; revision_id: string }>(
+    `/api/v1/workflows/revisions/${encodeURIComponent(revisionId)}`,
+    { method: "DELETE" },
+  );
+}
+
 export function createWorkflowRun(
   revisionId: string,
   inputs: Record<string, unknown>,

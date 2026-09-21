@@ -213,10 +213,11 @@ def get_workflow(workflow_id: str) -> dict[str, Any]:
 
 @router.post("/{workflow_id}/revisions", status_code=201)
 def create_revision(workflow_id: str) -> dict[str, Any]:
-    """Create an empty draft for further editing.
+    """Create the next draft revision for further editing.
 
-    v1 starts a new draft blank (no graph/inputs_schema clone); the author
-    rebuilds or adjusts from a blank canvas. See specification §5.
+    When the workflow has a published revision, its graph and inputs_schema
+    are copied into the new draft (fresh ids, source left immutable). With no
+    published revision the draft starts blank.
     """
     workflow = workflow_store.get_workflow(workflow_id)
     if workflow is None:
@@ -275,6 +276,22 @@ def publish_revision(revision_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.delete("/revisions/{revision_id}")
+def delete_revision(revision_id: str) -> dict[str, Any]:
+    """Delete a draft or superseded revision with its graph.
+
+    Published revisions are rejected; runs referencing the deleted
+    revision are kept (they carry their own graph snapshot).
+    """
+    try:
+        workflow_store.delete_revision(revision_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"success": True, "revision_id": revision_id}
 
 
 @router.post("/revisions/{revision_id}/runs", status_code=201)

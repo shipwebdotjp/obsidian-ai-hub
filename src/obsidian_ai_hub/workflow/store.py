@@ -20,6 +20,7 @@ from obsidian_ai_hub.workflow.models import (
     NODE_TERMINAL_STATUSES,
     RUN_ALLOWED_TRANSITIONS,
     RUN_TERMINAL_STATUSES,
+    remap_node_references,
 )
 
 RETENTION_DAYS = 30
@@ -143,20 +144,37 @@ def create_revision(
     workflow_id: str,
     inputs_schema: Optional[dict[str, Any]] = None,
     *,
+    source_revision_id: Optional[str] = None,
     conn: Optional[sqlite3.Connection] = None,
 ) -> dict[str, Any]:
-    """Create the next draft revision for a workflow."""
+    """Create the next draft revision for a workflow.
+
+    When the workflow has a published revision (or an explicit
+    ``source_revision_id`` is given), its graph and ``inputs_schema`` are
+    copied into the new draft with fresh node/edge ids so the source stays
+    immutable. With no published revision the draft starts blank, preserving
+    initial workflow creation.
+    """
     revision_id = _new_id("wrev")
     now = _now_iso()
     with auto_connection(conn) as (active_conn, is_generated):
 
         def _do() -> None:
+            source = _resolve_source_revision(
+                active_conn, workflow_id, source_revision_id
+            )
             row = active_conn.execute(
                 "SELECT COALESCE(MAX(version), 0) AS v FROM workflow_revisions "
                 "WHERE workflow_id = ?;",
                 (workflow_id,),
             ).fetchone()
             version = int(row["v"]) + 1
+            if inputs_schema is not None:
+                schema = inputs_schema
+            elif source is not None:
+                schema = source.get("inputs_schema") or {"type": "object"}
+            else:
+                schema = {"type": "object"}
             active_conn.execute(
                 "INSERT INTO workflow_revisions (revision_id, workflow_id, version, "
                 "status, inputs_schema, created_at, updated_at) "
@@ -165,11 +183,16 @@ def create_revision(
                     revision_id,
                     workflow_id,
                     version,
-                    _redacted_json(inputs_schema or {"type": "object"}),
+                    _redacted_json(schema),
                     now,
                     now,
                 ),
             )
+            if source is not None:
+                nodes, edges = _clone_graph(
+                    source.get("nodes") or [], source.get("edges") or []
+                )
+                _insert_graph(active_conn, revision_id, nodes, edges)
 
         if is_generated:
             with active_conn:
@@ -179,6 +202,116 @@ def create_revision(
     revision = get_revision(revision_id, conn=conn)
     assert revision is not None
     return revision
+
+
+def _resolve_source_revision(
+    conn: sqlite3.Connection,
+    workflow_id: str,
+    source_revision_id: Optional[str],
+) -> Optional[dict[str, Any]]:
+    """Return the revision to copy from, or None for a blank draft.
+
+    An explicit ``source_revision_id`` is honoured as-is (any status). Without
+    one, the workflow's current published revision is used when present.
+    """
+    if source_revision_id is not None:
+        source = get_revision(source_revision_id, conn=conn)
+        if source is None:
+            raise FileNotFoundError(
+                f"Source revision '{source_revision_id}' not found."
+            )
+        if str(source.get("workflow_id")) != workflow_id:
+            raise ValueError(
+                f"Source revision '{source_revision_id}' belongs to another workflow."
+            )
+        return source
+    row = conn.execute(
+        "SELECT revision_id FROM workflow_revisions "
+        "WHERE workflow_id = ? AND status = 'published' "
+        "ORDER BY version DESC LIMIT 1;",
+        (workflow_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    return get_revision(str(row["revision_id"]), conn=conn)
+
+
+def _clone_graph(
+    nodes: list[dict[str, Any]], edges: list[dict[str, Any]]
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Deep-copy a graph with fresh node/edge ids and rewritten references."""
+    id_map = {str(node["node_id"]): _new_uuid() for node in nodes}
+    cloned_nodes: list[dict[str, Any]] = []
+    for node in nodes:
+        parent = node.get("parent_loop_node_id")
+        config = remap_node_references(node.get("config") or {}, id_map)
+        if isinstance(config, dict) and config.get("entry_node_id") in id_map:
+            config["entry_node_id"] = id_map[config["entry_node_id"]]
+        cloned_nodes.append(
+            {
+                "node_id": id_map[str(node["node_id"])],
+                "node_type": node["node_type"],
+                "label": node.get("label"),
+                "config": config,
+                "parent_loop_node_id": id_map.get(str(parent)) if parent else None,
+                "ui_position": node.get("ui_position"),
+            }
+        )
+    cloned_edges = [
+        {
+            "edge_id": _new_uuid(),
+            "source_node_id": id_map[str(edge["source_node_id"])],
+            "target_node_id": id_map[str(edge["target_node_id"])],
+            "edge_kind": edge.get("edge_kind") or "normal",
+            "condition": remap_node_references(edge.get("condition"), id_map),
+            "order_index": int(edge.get("order_index") or 0),
+        }
+        for edge in edges
+    ]
+    return cloned_nodes, cloned_edges
+
+
+def _insert_graph(
+    conn: sqlite3.Connection,
+    revision_id: str,
+    nodes: list[dict[str, Any]],
+    edges: list[dict[str, Any]],
+) -> None:
+    """Insert nodes and edges for a revision (no deletes; caller manages that)."""
+    for node in nodes:
+        conn.execute(
+            "INSERT INTO workflow_nodes (node_id, revision_id, node_type, "
+            "label, config_json, parent_loop_node_id, ui_position_json) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?);",
+            (
+                str(node["node_id"]),
+                revision_id,
+                str(node["node_type"]),
+                node.get("label"),
+                _redacted_json(node.get("config") or {}),
+                node.get("parent_loop_node_id"),
+                json.dumps(node.get("ui_position"), ensure_ascii=False)
+                if node.get("ui_position") is not None
+                else None,
+            ),
+        )
+    for edge in edges:
+        conn.execute(
+            "INSERT INTO workflow_edges (edge_id, revision_id, "
+            "source_node_id, target_node_id, edge_kind, condition_json, "
+            "order_index) VALUES (?, ?, ?, ?, ?, ?, ?);",
+            (
+                str(edge["edge_id"]),
+                revision_id,
+                str(edge["source_node_id"]),
+                str(edge["target_node_id"]),
+                str(edge.get("edge_kind") or "normal"),
+                _redacted_json(edge["condition"])
+                if edge.get("condition") is not None
+                else None,
+                int(edge.get("order_index") or 0),
+            ),
+        )
 
 
 def get_revision(
@@ -296,40 +429,7 @@ def set_revision_graph(
             active_conn.execute(
                 "DELETE FROM workflow_nodes WHERE revision_id = ?;", (revision_id,)
             )
-            for node in nodes:
-                active_conn.execute(
-                    "INSERT INTO workflow_nodes (node_id, revision_id, node_type, "
-                    "label, config_json, parent_loop_node_id, ui_position_json) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?);",
-                    (
-                        str(node["node_id"]),
-                        revision_id,
-                        str(node["node_type"]),
-                        node.get("label"),
-                        _redacted_json(node.get("config") or {}),
-                        node.get("parent_loop_node_id"),
-                        json.dumps(node.get("ui_position"), ensure_ascii=False)
-                        if node.get("ui_position") is not None
-                        else None,
-                    ),
-                )
-            for edge in edges:
-                active_conn.execute(
-                    "INSERT INTO workflow_edges (edge_id, revision_id, "
-                    "source_node_id, target_node_id, edge_kind, condition_json, "
-                    "order_index) VALUES (?, ?, ?, ?, ?, ?, ?);",
-                    (
-                        str(edge["edge_id"]),
-                        revision_id,
-                        str(edge["source_node_id"]),
-                        str(edge["target_node_id"]),
-                        str(edge.get("edge_kind") or "normal"),
-                        _redacted_json(edge["condition"])
-                        if edge.get("condition") is not None
-                        else None,
-                        int(edge.get("order_index") or 0),
-                    ),
-                )
+            _insert_graph(active_conn, revision_id, nodes, edges)
             active_conn.execute(
                 "UPDATE workflow_revisions SET updated_at = ? WHERE revision_id = ?;",
                 (now, revision_id),
@@ -370,6 +470,55 @@ def publish_revision(
     published = get_revision(revision_id, conn=conn)
     assert published is not None
     return published
+
+
+def delete_revision(
+    revision_id: str, *, conn: Optional[sqlite3.Connection] = None
+) -> None:
+    """Delete a draft or superseded revision together with its graph.
+
+    Only ``draft`` and ``superseded`` revisions can be deleted; a
+    ``published`` revision is rejected so a workflow never silently loses
+    its runnable revision. The status check is a single conditional
+    ``DELETE`` so a concurrent publish wins the race instead of losing
+    its graph. Runs that reference the deleted revision are kept: they
+    carry their own immutable graph snapshot.
+    """
+    with auto_connection(conn) as (active_conn, is_generated):
+
+        def _do() -> None:
+            cur = active_conn.execute(
+                "DELETE FROM workflow_revisions WHERE revision_id = ? "
+                "AND status IN ('draft', 'superseded');",
+                (revision_id,),
+            )
+            if cur.rowcount == 1:
+                active_conn.execute(
+                    "DELETE FROM workflow_edges WHERE revision_id = ?;",
+                    (revision_id,),
+                )
+                active_conn.execute(
+                    "DELETE FROM workflow_nodes WHERE revision_id = ?;",
+                    (revision_id,),
+                )
+                return
+            row = active_conn.execute(
+                "SELECT status FROM workflow_revisions WHERE revision_id = ?;",
+                (revision_id,),
+            ).fetchone()
+            if row is None:
+                raise FileNotFoundError(
+                    f"Revision '{revision_id}' not found."
+                )
+            raise ValueError(
+                f"Revision '{revision_id}' is published and cannot be deleted."
+            )
+
+        if is_generated:
+            with active_conn:
+                _do()
+        else:
+            _do()
 
 
 def _require_draft(conn: sqlite3.Connection, revision_id: str) -> sqlite3.Row:

@@ -13,6 +13,7 @@ Status: 再設計後の仕様 Accepted (Phase 0 未実装)。実装はフェー�
 | --- | --- |
 | [specification.md](specification.md) | 確定済みの外部契約と振る舞い（実装の正本） |
 | [adr/workflow-graph-and-agent-node.md](adr/workflow-graph-and-agent-node.md) | グラフ / Agent Node / Loop Node / 承認境界の設計判断 ADR |
+| [adr/workflow-revision-deletion.md](adr/workflow-revision-deletion.md) | Revision 削除ポリシー（draft / superseded のハード削除・Run 温存） |
 | [adr/workflow-independent-context-shared-foundation.md](adr/workflow-independent-context-shared-foundation.md) | 撤回された旧 ADR（履歴） |
 
 ## 設計上の要点

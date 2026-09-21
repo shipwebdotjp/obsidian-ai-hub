@@ -141,6 +141,86 @@ def test_claim_returns_none_when_idle(test_memory_db_path):
     assert workflow_store.claim_run("inst-idle") is None
 
 
+def test_create_revision_clones_explicit_source_with_loop(test_memory_db_path):
+    workflow = workflow_store.create_workflow("clone-loop")
+    source = workflow["revision"]
+    nodes = [
+        {
+            "node_id": "n_plan",
+            "node_type": "capability",
+            "config": {"capability_key": "vault_search", "inputs": {}},
+        },
+        {
+            "node_id": "n_loop",
+            "node_type": "loop",
+            "config": {
+                "state_schema": {"type": "object"},
+                "input_mapping": {"plan": {"$ref": "nodes.n_plan.output"}},
+                "continuation_condition": {
+                    "from_path": "loop.state.done",
+                    "operator": "equals",
+                    "value": False,
+                },
+                "max_iterations": 3,
+                "entry_node_id": "n_child",
+            },
+        },
+        {
+            "node_id": "n_child",
+            "node_type": "capability",
+            "config": {"capability_key": "vault_search", "inputs": {}},
+            "parent_loop_node_id": "n_loop",
+        },
+        {
+            "node_id": "n_result",
+            "node_type": "loop_result",
+            "config": {"output_mapping": {"out": {"$ref": "nodes.n_child.output"}}},
+            "parent_loop_node_id": "n_loop",
+        },
+        {"node_id": "n_end", "node_type": "terminal", "config": {"outcome": "success"}},
+    ]
+    edges = [
+        {"edge_id": "e1", "source_node_id": "n_plan", "target_node_id": "n_loop", "order_index": 0},
+        {"edge_id": "e2", "source_node_id": "n_loop", "target_node_id": "n_end", "order_index": 0},
+        {"edge_id": "e3", "source_node_id": "n_child", "target_node_id": "n_result", "order_index": 0},
+    ]
+    workflow_store.set_revision_graph(source["revision_id"], nodes, edges)
+
+    draft = workflow_store.create_revision(
+        workflow["workflow_id"], source_revision_id=source["revision_id"]
+    )
+    new_ids = {n["node_id"] for n in draft["nodes"]}
+    assert new_ids.isdisjoint({"n_plan", "n_loop", "n_child", "n_result", "n_end"})
+    assert len(draft["nodes"]) == len(nodes)
+    assert len(draft["edges"]) == len(edges)
+    loop = next(n for n in draft["nodes"] if n["node_type"] == "loop")
+    child = next(
+        n
+        for n in draft["nodes"]
+        if n["node_type"] == "capability"
+        and n["parent_loop_node_id"] == loop["node_id"]
+    )
+    result = next(n for n in draft["nodes"] if n["node_type"] == "loop_result")
+    assert loop["config"]["entry_node_id"] == child["node_id"]
+    assert loop["config"]["input_mapping"]["plan"]["$ref"].split(".")[1] in new_ids
+    assert result["parent_loop_node_id"] == loop["node_id"]
+    assert result["config"]["output_mapping"]["out"]["$ref"].split(".")[1] == child["node_id"]
+    assert {e["source_node_id"] for e in draft["edges"]} <= new_ids
+    assert {e["target_node_id"] for e in draft["edges"]} <= new_ids
+
+    # The source revision keeps its original ids and references.
+    stored = workflow_store.get_revision(source["revision_id"])
+    assert {n["node_id"] for n in stored["nodes"]} == {
+        "n_plan",
+        "n_loop",
+        "n_child",
+        "n_result",
+        "n_end",
+    }
+    stored_loop = next(n for n in stored["nodes"] if n["node_type"] == "loop")
+    assert stored_loop["config"]["entry_node_id"] == "n_child"
+
+
 def test_approval_required_flow(test_memory_db_path, client):
     task_store.sync_capabilities()
     created = client.post("/api/v1/workflows", json={"name": "approve"})
@@ -270,21 +350,29 @@ def test_workflow_capabilities_and_new_revision(test_memory_db_path, client):
 
     created = client.post("/api/v1/workflows", json={"name": "rev"})
     workflow_id = created.json()["workflow_id"]
+    # No published revision yet: the new draft starts blank.
     second = client.post(f"/api/v1/workflows/{workflow_id}/revisions")
     assert second.status_code == 201
     assert second.json()["version"] == 2
     assert second.json()["status"] == "draft"
+    assert second.json()["nodes"] == []
+    assert second.json()["edges"] == []
 
 
-def test_revision_returns_ui_position_and_new_draft_is_blank(test_memory_db_path, client):
-    created = client.post("/api/v1/workflows", json={"name": "layout"})
-    workflow_id = created.json()["workflow_id"]
-    revision_id = created.json()["revision"]["revision_id"]
+def _publishable_graph():
+    inputs_schema = {
+        "type": "object",
+        "properties": {"topic": {"type": "string"}},
+        "required": ["topic"],
+    }
     nodes = [
         {
             "node_id": "n_a",
             "node_type": "capability",
-            "config": {"capability_key": "vault_search", "inputs": {}},
+            "config": {
+                "capability_key": "vault_search",
+                "inputs": {"query": {"$ref": "run.inputs.topic"}},
+            },
             "ui_position": {"x": 120, "y": 80},
         },
         {"node_id": "n_end", "node_type": "terminal", "config": {"outcome": "success"}},
@@ -297,18 +385,75 @@ def test_revision_returns_ui_position_and_new_draft_is_blank(test_memory_db_path
             "order_index": 0,
         }
     ]
+    return inputs_schema, nodes, edges
+
+
+def test_new_draft_clones_published_revision(test_memory_db_path, client):
+    task_store.sync_capabilities()
+    created = client.post("/api/v1/workflows", json={"name": "clone"})
+    workflow_id = created.json()["workflow_id"]
+    revision_id = created.json()["revision"]["revision_id"]
+    inputs_schema, nodes, edges = _publishable_graph()
     client.put(
         f"/api/v1/workflows/revisions/{revision_id}",
-        json={"inputs_schema": {"type": "object"}, "nodes": nodes, "edges": edges},
+        json={"inputs_schema": inputs_schema, "nodes": nodes, "edges": edges},
     )
-    stored = client.get(f"/api/v1/workflows/revisions/{revision_id}").json()
-    position = next(n for n in stored["nodes"] if n["node_id"] == "n_a")["ui_position"]
-    assert position == {"x": 120, "y": 80}
+    assert client.post(
+        f"/api/v1/workflows/revisions/{revision_id}/publish"
+    ).status_code == 200
+    original = client.get(f"/api/v1/workflows/revisions/{revision_id}").json()
 
+    draft = client.post(f"/api/v1/workflows/{workflow_id}/revisions").json()
+    assert draft["status"] == "draft"
+    assert draft["version"] == 2
+    assert draft["inputs_schema"] == original["inputs_schema"]
+    assert len(draft["nodes"]) == len(original["nodes"])
+    assert len(draft["edges"]) == len(original["edges"])
+    original_ids = {n["node_id"] for n in original["nodes"]}
+    draft_ids = {n["node_id"] for n in draft["nodes"]}
+    assert original_ids.isdisjoint(draft_ids)
+    # Typed references and layout survive the copy.
+    cloned_cap = next(n for n in draft["nodes"] if n["node_type"] == "capability")
+    assert cloned_cap["config"]["inputs"]["query"] == {"$ref": "run.inputs.topic"}
+    assert cloned_cap["ui_position"] == {"x": 120, "y": 80}
+    # Edge endpoints point at the copied nodes.
+    assert draft["edges"][0]["source_node_id"] in draft_ids
+    assert draft["edges"][0]["target_node_id"] in draft_ids
+    # The cloned draft is independently valid and publishable.
+    assert client.post(
+        f"/api/v1/workflows/revisions/{draft['revision_id']}/validate"
+    ).json()["valid"] is True
+
+    # The source published revision is unchanged.
+    after = client.get(f"/api/v1/workflows/revisions/{revision_id}").json()
+    assert after["status"] == "published"
+    assert {n["node_id"] for n in after["nodes"]} == original_ids
+    assert after["nodes"] == original["nodes"]
+
+
+def test_editing_cloned_draft_does_not_affect_source(test_memory_db_path, client):
+    task_store.sync_capabilities()
+    created = client.post("/api/v1/workflows", json={"name": "isolate"})
+    workflow_id = created.json()["workflow_id"]
+    revision_id = created.json()["revision"]["revision_id"]
+    inputs_schema, nodes, edges = _publishable_graph()
+    client.put(
+        f"/api/v1/workflows/revisions/{revision_id}",
+        json={"inputs_schema": inputs_schema, "nodes": nodes, "edges": edges},
+    )
     client.post(f"/api/v1/workflows/revisions/{revision_id}/publish")
-    new_draft = client.post(f"/api/v1/workflows/{workflow_id}/revisions").json()
-    assert new_draft["nodes"] == []
-    assert new_draft["edges"] == []
+
+    draft = client.post(f"/api/v1/workflows/{workflow_id}/revisions").json()
+    # Replace the draft graph entirely.
+    client.put(
+        f"/api/v1/workflows/revisions/{draft['revision_id']}",
+        json={"inputs_schema": {"type": "object"}, "nodes": [], "edges": []},
+    )
+    after = client.get(f"/api/v1/workflows/revisions/{revision_id}").json()
+    assert [n["node_id"] for n in after["nodes"]] == ["n_a", "n_end"]
+    assert after["nodes"][0]["config"] == nodes[0]["config"]
+    assert after["edges"][0]["edge_id"] == "e1"
+    assert after["status"] == "published"
 
 
 def test_templates_and_instantiation_use_fresh_ids(test_memory_db_path, client):
@@ -522,4 +667,124 @@ def test_rerun_recomputes_approval_from_snapshot(test_memory_db_path, client):
     rerun = client.post(f"/api/v1/workflows/runs/{source['run_id']}/rerun", json={}).json()
     # A plan_required capability in the snapshot forces approval again.
     assert rerun["status"] == "waiting_approval"
-    assert rerun["source_run_id"] == source["run_id"]
+
+
+def _graph_counts(revision_id):
+    from obsidian_ai_hub.database import get_db_connection
+
+    with get_db_connection() as conn:
+        nodes = conn.execute(
+            "SELECT COUNT(*) AS n FROM workflow_nodes WHERE revision_id = ?;",
+            (revision_id,),
+        ).fetchone()["n"]
+        edges = conn.execute(
+            "SELECT COUNT(*) AS n FROM workflow_edges WHERE revision_id = ?;",
+            (revision_id,),
+        ).fetchone()["n"]
+    return int(nodes), int(edges)
+
+
+def test_delete_superseded_revision_keeps_run_and_allows_rerun(
+    test_memory_db_path, client
+):
+    """Operation scenario: delete a superseded revision end to end.
+
+    Old revision's graph disappears, the referencing run survives, and a
+    rerun still works from the run's own graph snapshot.
+    """
+    created = client.post("/api/v1/workflows", json={"name": "rev-delete"}).json()
+    workflow_id = created["workflow_id"]
+    old_revision_id = created["revision"]["revision_id"]
+    nodes, edges = _linear_graph()
+    client.put(
+        f"/api/v1/workflows/revisions/{old_revision_id}",
+        json={"inputs_schema": {"type": "object"}, "nodes": nodes, "edges": edges},
+    )
+    client.post(f"/api/v1/workflows/revisions/{old_revision_id}/publish")
+    source = _terminal_run(client, old_revision_id, {})
+
+    # Supersede the old revision by publishing a new draft, then delete it.
+    draft = client.post(f"/api/v1/workflows/{workflow_id}/revisions").json()
+    republished = client.post(
+        f"/api/v1/workflows/revisions/{draft['revision_id']}/publish"
+    )
+    assert republished.status_code == 200
+    deleted = client.delete(f"/api/v1/workflows/revisions/{old_revision_id}")
+    assert deleted.status_code == 200
+    assert deleted.json() == {"success": True, "revision_id": old_revision_id}
+
+    assert (
+        client.get(f"/api/v1/workflows/revisions/{old_revision_id}").status_code
+        == 404
+    )
+    assert _graph_counts(old_revision_id) == (0, 0)
+
+    # The run survives with its dangling revision_id, and rerun works.
+    assert (
+        client.get(f"/api/v1/workflows/runs/{source['run_id']}").status_code == 200
+    )
+    rerun = client.post(
+        f"/api/v1/workflows/runs/{source['run_id']}/rerun", json={}
+    )
+    assert rerun.status_code == 201
+    assert rerun.json()["source_run_id"] == source["run_id"]
+    assert rerun.json()["revision_id"] == old_revision_id
+
+    # The new draft is untouched.
+    assert (
+        client.get(f"/api/v1/workflows/revisions/{draft['revision_id']}").status_code
+        == 200
+    )
+
+
+def test_delete_draft_revision(test_memory_db_path, client):
+    created = client.post("/api/v1/workflows", json={"name": "draft-delete"}).json()
+    revision_id = created["revision"]["revision_id"]
+    nodes, edges = _linear_graph()
+    client.put(
+        f"/api/v1/workflows/revisions/{revision_id}",
+        json={"inputs_schema": {"type": "object"}, "nodes": nodes, "edges": edges},
+    )
+    assert _graph_counts(revision_id) == (2, 1)
+
+    assert client.delete(f"/api/v1/workflows/revisions/{revision_id}").status_code == 200
+    assert (
+        client.get(f"/api/v1/workflows/revisions/{revision_id}").status_code == 404
+    )
+    assert _graph_counts(revision_id) == (0, 0)
+
+    # The workflow survives with no revisions; a fresh draft can be created.
+    detail = client.get(f"/api/v1/workflows/{created['workflow_id']}").json()
+    assert detail["revisions"] == []
+    new_draft = client.post(
+        f"/api/v1/workflows/{created['workflow_id']}/revisions"
+    ).json()
+    assert new_draft["status"] == "draft"
+
+
+def test_delete_published_or_missing_revision_fails_without_side_effects(
+    test_memory_db_path, client
+):
+    created = client.post("/api/v1/workflows", json={"name": "rev-guard"}).json()
+    revision_id = created["revision"]["revision_id"]
+    nodes, edges = _linear_graph()
+    client.put(
+        f"/api/v1/workflows/revisions/{revision_id}",
+        json={"inputs_schema": {"type": "object"}, "nodes": nodes, "edges": edges},
+    )
+    client.post(f"/api/v1/workflows/revisions/{revision_id}/publish")
+
+    assert (
+        client.delete(f"/api/v1/workflows/revisions/{revision_id}").status_code
+        == 409
+    )
+    assert (
+        client.delete("/api/v1/workflows/revisions/wrev_does_not_exist").status_code
+        == 404
+    )
+
+    # The published revision and its graph are untouched.
+    assert (
+        client.get(f"/api/v1/workflows/revisions/{revision_id}").status_code == 200
+    )
+    assert _graph_counts(revision_id) == (2, 1)

@@ -107,8 +107,10 @@ updated_at TEXT NOT NULL
 ```
 
 - `draft` のみ編集可能。`published` は不変。
-- `published` を編集する場合、新しい `version` の `draft` を作成する。v1 では新 draft は
-  空のグラフ・既定 `inputs_schema` で開始し、既存グラフの複製は将来拡張とする。
+- `published` を編集する場合、新しい `version` の `draft` を作成する。新 draft は公開済み
+  Revision のグラフ（Node / Edge / `inputs_schema` / `ui_position` / Loop 構成 / 型付き参照）を
+  複製し、Node / Edge ID には新しい UUID を割り当てる。複製元は不変のまま保持される。
+  公開済み Revision が存在しない場合（初期作成時など）は空のグラフ・既定 `inputs_schema` で開始する。
 - Run は `revision_id` とその時点のグラフ・inputs をスナップショットして実行する。
 
 ### 3.3 Node
@@ -291,6 +293,10 @@ Node 間のデータ連携は文字列テンプレート展開ではなく、以
 - `published` Revision のグラフは不変。
 - Run は `revision_id` をスナップショットとして保持する。公開後の Capability / Agent / Policy 変更は
   既存 Run には影響しない。
+- Revision の削除は `draft` / `superseded` のみ可能（`published` は 409 で拒否）。
+  削除は `workflow_edges` → `workflow_nodes` → `workflow_revisions` の順に同一トランザクションで行う。
+  参照する Run は削除しない（グラフ・入力のスナップショットを保持し、rerun 可能）。
+  削除後に `version` が再利用される場合がある（`MAX(version)+1`）。
 
 ## 6. 静的検証と動的検証
 
@@ -554,13 +560,14 @@ inputs/output 要約、effects、Agent 指紋を含む。
 ### 15.1 画面構成
 
 - `/workflows` — Workflow 一覧。
-- `/workflows/:id` — Revision 履歴と最近の Run。
+- `/workflows/:id` — Revision 履歴と最近の Run。draft / 旧版 Revision に削除ボタン。
 - `/workflows/:id/revisions/:revision_id/edit` — グラフエディタ（キャンバス）。
   - Node カタログ（Capability / Agent / Loop / Terminal）。
   - Node ごとの config 編集（schema 入力、Agent 選択、Loop 設定）。
   - Edge 追加と条件編集。
   - Loop Node 子グラフの編集。
   - 公開前検証ボタン。
+  - draft / 旧版 Revision の削除ボタン（確認ダイアログ付き。published には表示しない）。
 - `/workflows/runs/:run_id` — Run 詳細。
   - グラフ上の Node 状態表示。
   - 入出力、Error、Effect の閲覧。
@@ -586,9 +593,10 @@ inputs/output 要約、effects、Agent 指紋を含む。
 | `GET /api/v1/workflows` | Workflow 一覧（ページ送り）。 |
 | `POST /api/v1/workflows` | 新規 Workflow + 初期 draft Revision 作成。 |
 | `GET /api/v1/workflows/:id` | Workflow + Revision 履歴 + 最近 Run。 |
-| `POST /api/v1/workflows/:id/revisions` | 新しい draft Revision を作成。 |
+| `POST /api/v1/workflows/:id/revisions` | 新しい draft Revision を作成。公開済み Revision があればグラフと `inputs_schema` を複製する。 |
 | `GET /api/v1/workflows/revisions/:revision_id` | Revision + Node/Edge グラフ。 |
 | `PUT /api/v1/workflows/revisions/:revision_id` | draft Revision の更新。 |
+| `DELETE /api/v1/workflows/revisions/:revision_id` | draft / superseded Revision の削除（グラフ含む）。published は 409。参照する Run は残す。 |
 | `POST /api/v1/workflows/revisions/:revision_id/publish` | draft → published。 |
 | `POST /api/v1/workflows/revisions/:revision_id/validate` | 静的検証。 |
 | `POST /api/v1/workflows/revisions/:revision_id/runs` | Run 作成。`inputs` を同梱して受領し、`inputs_schema` で検証する。`plan_required` Capability / Agent Node を含む場合は `waiting_approval` で原子的に作成する。 |
@@ -827,6 +835,7 @@ workflow_events
 ## 21. 関連文書・コード
 
 - [adr/workflow-graph-and-agent-node.md](adr/workflow-graph-and-agent-node.md) — 設計判断 ADR
+- [adr/workflow-revision-deletion.md](adr/workflow-revision-deletion.md) — Revision 削除ポリシー
 - [adr/workflow-independent-context-shared-foundation.md](adr/workflow-independent-context-shared-foundation.md) — 撤回された旧 ADR
 - [../task-agent/specification.md](../task-agent/specification.md) — Task Agent 契約
 - [../task-agent/adr/approved-plan-as-execution-boundary.md](../task-agent/adr/approved-plan-as-execution-boundary.md) — Approval Policy

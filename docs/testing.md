@@ -39,6 +39,21 @@ database for a test, reproduction, or seed data. For healthcare manual checks,
 use `ENV=test` with an explicit `--healthcare-export-dir` pointing at a
 temporary copy of `export.xml` (see `docs/healthcare-import/plan.md`).
 
+## 実データベースでの動作確認と後片付け
+
+AGENTS.md の運用に従い、実データベース（`~/.config/obsidian-ai-hub/memory.sqlite3`）で
+サーバーを使って動作確認する場合は、確認終了後に対象データを必ず削除する。
+
+- テスト用データ（Workflow / Agent / タスクなど）は名前に識別用プレフィックス
+  （例: `__opcheck_`）を付け、作成した ID を控えておく。
+- 確認終了後、従属レコードを依存順に削除する。Workflow の場合:
+  `workflow_events` → `workflow_activations` → `workflow_run_nodes` →
+  `workflow_runs` → `workflow_edges` → `workflow_nodes` →
+  `workflow_revisions` → `workflows`。
+- 削除前後に対象件数を数え、削除したデータの識別情報（ID・名前・作成時刻）を報告する。
+- 削除後に対象が残っていないことを SQL で確認する。
+- ユーザーデータおよび確認対象外のレコードは変更・削除しない。
+
 ## ブラウザ E2E の扱い
 
 個人開発ではブラウザ E2E を追加・更新しない。フロントエンド変更後は影響した画面を手動で

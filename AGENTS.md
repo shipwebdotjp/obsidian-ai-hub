@@ -85,6 +85,7 @@
 
 ## Check the operation
 - Please perform operational checks using the actual database; it is acceptable if side effects occur. After modifying the code, terminate the existing process and restart the server(make serve).
+- Clean up any test data you create during operational checks before finishing, including dependent records (e.g. a Workflow's revisions, nodes, edges, runs, activations, events). Use an identifying name prefix such as `__opcheck_`, report the deleted IDs/counts, and verify nothing remains. Never delete user data.
 - http://127.0.0.1:8765
 - Production DB Path: ~/.config/obsidian-ai-hub/memory.sqlite3
 
