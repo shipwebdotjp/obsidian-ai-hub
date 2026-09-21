@@ -27,6 +27,17 @@
   wrappers; put application logic in the appropriate subpackage.
 - Do not mask unexpected failures with defensive exception handling.
 
+## Documentation
+
+- `README.md` stays as a project overview. Do not add detailed usage,
+  command references, or configuration details to it; link to the user
+  guide (https://aihub.shipweb.jp) instead.
+- When adding a user-facing feature or changing existing user-visible
+  behavior (CLI flags, Web UI screens, configuration keys, workflows),
+  update `user-guide/docs/` accordingly and remove any duplicated detail
+  from `README.md`. If the guide lacks a place for required information,
+  add it to the guide first, then trim the README.
+
 ## Irreversible-change quality gate
 
 - Before designing or implementing a change that deletes data, writes or sends

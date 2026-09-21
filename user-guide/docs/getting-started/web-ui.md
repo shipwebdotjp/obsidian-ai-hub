@@ -36,6 +36,21 @@ uv run -m obsidian_ai_hub --serve --debug
 `--serve-host` で外部に公開する場合は、リバースプロキシ等で TLS を終端し、
 `OBSIDIAN_AI_HUB_API_TOKEN` を設定したうえで利用してください。
 
+### フロントエンド開発
+
+フロントエンドを修正する場合は、API サーバーとは別に Vite 開発サーバーを起動します。
+API リクエストは `http://127.0.0.1:8765` へプロキシされます。
+
+```bash
+uv run -m obsidian_ai_hub --serve --debug
+```
+
+```bash
+cd frontend && npm run dev
+```
+
+ブラウザで `http://127.0.0.1:5173` を開いてください。
+
 ## トークンを入力する
 
 初回アクセス時、トークンが未保存なら入力画面（TokenPrompt）が表示されます。

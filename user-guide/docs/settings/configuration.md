@@ -78,9 +78,11 @@ memory:
   purposes:
     summarize-day:
       kinds: [preference, decision_policy]
-      budget: 600
-      format: evidence
+      budget: 600            # ユーザースコープの文脈上限
+      format: evidence       # または "fenced"
       include_person: true
+      person_kinds: [fact, commitment, episode, pattern]
+      person_budget: 400     # 人物スコープの別枠上限
 
 healthcare:
   sqlite_path: /Users/you/.config/obsidian-ai-hub/healthcare.sqlite3

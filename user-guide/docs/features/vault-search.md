@@ -51,6 +51,9 @@ uv run -m obsidian_ai_hub --vault-search --query "project planning" \
   --k 5 --search-mode hybrid --json
 ```
 
+`--k` は結果件数（既定 10）、`--search-mode` は `similarity` / `keyword` / `hybrid`（既定 hybrid）、
+`--json` は機械可読の JSON 出力です。
+
 ## 次に読む
 
 - [Inbox とデイリーノート](../daily/inbox-and-daily-note.md)

@@ -89,7 +89,7 @@ uv run -m obsidian_ai_hub --memory-compile --for make-target
 | `review-draft` | 好みと意思決定方針。Fenced 形式 |
 
 `--for` に未知の値を渡すと、既定（すべて・`memory.context_max_tokens`・evidence 形式・ユーザースコープのみ）にフォールバックします。
-方針は `config/config.yml` の `memory.purposes` で上書きできます。
+方針は `config/config.yml` の `memory.purposes` で上書きできます（全項目の例は [設定](../settings/configuration.md) を参照）。
 
 ## メンテナンス
 
