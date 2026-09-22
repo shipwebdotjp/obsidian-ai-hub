@@ -112,6 +112,31 @@ def test_unresolvable_capability_rejected():
         schemas.validate_capability_inputs("ask_user", {})
 
 
+def test_ui_input_schema_flattens_optional_and_enum():
+    schema = schemas.ui_input_schema("memory_search")
+    assert schema is not None
+    assert schema["type"] == "object"
+    props = schema["properties"]
+    assert props["query"]["type"] == "string"
+    # Optional[Literal[...]] becomes a nullable enum, not anyOf:[X, null].
+    kind = props["kind"]
+    assert "anyOf" not in kind
+    assert kind["nullable"] is True
+    assert "preference" in kind["enum"]
+    assert props["limit"]["type"] == "integer"
+    assert props["limit"]["minimum"] == 1
+    assert schema["required"] == ["query"]
+
+
+def test_ui_input_schema_available_for_all_capabilities():
+    missing = [
+        d.key
+        for d in get_capability_definitions()
+        if schemas.ui_input_schema(d.key) is None
+    ]
+    assert missing == []
+
+
 def test_research_agent_accepts_project_mode_and_project_id():
     inputs = schemas.validate_capability_inputs(
         "research_agent",

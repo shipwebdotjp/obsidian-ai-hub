@@ -52,32 +52,52 @@ Run は `published` Revision からしか作成できません。`draft` のま�
 - target には **同じスコープ**（トップレベル同士、または同じ Loop の子）にある Node だけが表示されます。
 - 同じ source からの Edge は追加順に `order_index` が割り当てられます。
 
-:::note[条件分岐の編集について]
-現行のエディタの Edge 追加 UI は source / target / 種別（`normal` / `error`）のみを設定します。
-Edge の `condition`（条件付き排他的分岐）はグラフモデルおよび検証・実行エンジンには存在しますが、
-キャンバス UI からの編集コントロールは用意されていません。条件を使うグラフは API 経由で作成・更新します。
-:::
+Edge の `condition`（条件付き排他的分岐）は、Edge 一覧の **条件** から編集できます
+（後述の **参照ピッカー** で `from_path` を選べます）。
 
 ## Node の設定を編集する
 
-Node を選択すると、右パネルに対応する設定欄が表示されます。JSON 欄は直接編集でき、
-不正な JSON を入力すると「JSON が不正です」と表示されます。
+Node を選択すると、右パネルに対応する設定欄が表示されます。入力はスキーマから生成される
+ガイド付きフォームが中心で、JSON を直接書く必要はありません（スキーマ自体を作る欄は JSON のままです）。
 
 | 種別 | 設定項目 |
 | --- | --- |
-| `capability` | `capability_key`（選択）、`inputs`（JSON） |
-| `agent` | `agent_id`（選択）、`inputs`（JSON）、`output_schema`（JSON） |
-| `loop` | `state_schema`、`input_mapping`、`max_iterations`、`entry_node_id`、`continuation_condition` |
-| `loop_result` | `output_mapping`（JSON） |
+| `capability` | `capability_key`（選択）、`inputs`（Capability の入力スキーマから生成。要承認は選択肢に表示）、`retry.max_attempts` |
+| `agent` | `agent_id`（選択）、`inputs`（構造化エディタ。キーを追加し、各値は値か参照）、`output_schema`（JSON） |
+| `loop` | `state_schema`（JSON）、`input_mapping`（`state_schema` から生成。各値は値か参照）、`max_iterations`、`entry_node_id`、`continuation_condition`（条件エディタ） |
+| `loop_result` | `output_mapping`（親 Loop の `state_schema` から生成。各値は値か参照） |
 | `terminal` | `outcome`（`success` / `failure`） |
 
+- `capability` の `inputs` は、選択した Capability の入力スキーマから生成されます。`enum` は選択肢、
+  `boolean` はチェックボックス、`integer` / `number` は数値入力になります。自由形式の項目は JSON 欄になります。
+- `agent` の `inputs` はスキーマを持たない自由形式です。キーを追加し、各値はテキスト入力か
+  **参照**（型付き参照）を選べます。`task` / `context` は入力候補として表示されます。
+- `agent` の `output_schema`、`loop` の `state_schema`、右パネルの `inputs_schema` は
+  JSON で直接編集します（スキーマを作るガイド UI は今後の対応）。
+
 選択中の Node は **削除** できます。**Edge 一覧** から不要な Edge を削除できます。
+
+## 参照ピッカー（型付き参照）
+
+`{"$ref": "..."}` の型付き参照は、**参照** ボタンからピッカーで選べます。ピッカーは
+そのスコープで使える候補を型付きで一覧します。
+
+- `run.inputs.<field>` — `inputs_schema` の各項目（ネストも展開）。
+- `nodes.<node_id>.output.<field>` — 先行 Node の出力。Agent は `output_schema`、
+  Loop は `final_state.*` / `iterations` / `exit_reason`、Loop Result は `state_schema` の項目。
+  Capability の出力は型が未宣言のため `nodes.<node_id>.output` 全体のみ表示します。
+- `loop.state.<field>` / `loop.input.<field>` / `loop.iteration` — Loop 子グラフ内のみ。
+
+検索欄で候補を絞り込めます。ピッカーを使わず直接入力することもできます。
 
 ## 入力スキーマ（inputs_schema）
 
 右パネルの **入力 Schema** に、Run 開始時に入力する値の JSON Schema を定義します。
 許可されるのはサブセットで、`object` / `properties` / `required`、primitive、`enum`、配列などです
 （`$ref` / `oneOf` / `anyOf` / `allOf` / 再帰は未対応）。
+
+定義した `inputs_schema` は **実行入力** フォーム（および Run の再実行フォーム）に反映されます。
+ネストした `object` や配列にも対応します。
 
 ## 検証
 

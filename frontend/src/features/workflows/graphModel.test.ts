@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildReferenceGroups,
   conditionCandidates,
   createEdge,
   createNode,
@@ -120,6 +121,76 @@ describe("graphModel", () => {
   });
 });
 
+
+describe("typed reference groups", () => {
+  const inputsSchema = {
+    type: "object",
+    properties: { topic: { type: "string" } },
+  };
+
+  function paths(groups: ReturnType<typeof buildReferenceGroups>): string[] {
+    return groups.flatMap((group) => group.fields.map((field) => field.path));
+  }
+
+  it("exposes agent output_schema fields and hides the edited node", () => {
+    const agent = node("agent", "agent", {
+      agent_id: "a1",
+      inputs: {},
+      output_schema: {
+        type: "object",
+        properties: { plan: { type: "string" } },
+      },
+    });
+    const cap = node("cap", "capability", capability());
+    const groups = buildReferenceGroups([agent, cap], null, inputsSchema, {
+      excludeNodeId: "cap",
+    });
+    const refs = paths(groups);
+    expect(refs).toContain("run.inputs.topic");
+    expect(refs).toContain("nodes.agent.output.plan");
+    expect(refs).not.toContain("nodes.cap.output");
+    // The bare container path is not resolvable at runtime.
+    expect(refs).not.toContain("run.inputs");
+  });
+
+  it("marks capability output as opaque and expands loop outputs", () => {
+    const loop = node("loop", "loop", {
+      ...defaultNodeConfig("loop"),
+      state_schema: {
+        type: "object",
+        properties: { done: { type: "boolean" } },
+      },
+    });
+    const cap = node("cap", "capability", capability());
+    const top = paths(buildReferenceGroups([loop, cap], null, inputsSchema));
+    expect(top).toContain("nodes.cap.output");
+    expect(top).toContain("nodes.loop.output.final_state.done");
+    expect(top).toContain("nodes.loop.output.iterations");
+    expect(top).toContain("nodes.loop.output.exit_reason");
+  });
+
+  it("adds loop.state/input/iteration inside a child scope only", () => {
+    const loop = node("loop", "loop", {
+      ...defaultNodeConfig("loop"),
+      state_schema: {
+        type: "object",
+        properties: { done: { type: "boolean" } },
+      },
+      input_mapping: { draft: "" },
+    });
+    const child = node("child", "capability", capability(), "loop");
+    const childRefs = paths(
+      buildReferenceGroups([loop, child], "loop", inputsSchema),
+    );
+    expect(childRefs).toContain("loop.state.done");
+    expect(childRefs).toContain("loop.input.draft");
+    expect(childRefs).toContain("loop.iteration");
+    const topRefs = paths(
+      buildReferenceGroups([loop, child], null, inputsSchema),
+    );
+    expect(topRefs).not.toContain("loop.iteration");
+  });
+});
 
 describe("condition helpers", () => {
   const schema = {

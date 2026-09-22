@@ -23,8 +23,10 @@ import { getApiErrorMessage } from "../../utils/error";
 import { revisionStatusLabel } from "./revisionLabels";
 import ConditionEditor from "./ConditionEditor";
 import InputsSchemaForm from "./InputsSchemaForm";
+import StructuredValueEditor from "./StructuredValueEditor";
 import WorkflowCanvas from "./WorkflowCanvas";
 import {
+  buildReferenceGroups,
   conditionCandidates,
   createNode,
   createEdge,
@@ -34,6 +36,7 @@ import {
   scopeOf,
   validateGraphShape,
   type GraphIssue,
+  type ReferenceGroup,
 } from "./graphModel";
 
 const NODE_TYPES: WorkflowNodeType[] = [
@@ -137,6 +140,14 @@ export default function WorkflowEditorPage() {
     [nodes],
   );
   const selectedNode = nodes.find((node) => node.node_id === selectedNodeId) ?? null;
+  const selectedCapability =
+    selectedNode?.node_type === "capability"
+      ? capabilities.find(
+          (c) =>
+            c.capability_key ===
+            String(selectedNode.config.capability_key ?? ""),
+        )
+      : undefined;
   const localIssues: GraphIssue[] = useMemo(
     () => validateGraphShape(nodes, edges, inputsSchema),
     [nodes, edges, inputsSchema],
@@ -290,6 +301,22 @@ export default function WorkflowEditorPage() {
     if (!source) return [];
     return nodes.filter((node) => scopeOf(node) === scopeOf(source) && node.node_id !== sourceId);
   };
+
+  const groupsForNode = (nodeId: string): ReferenceGroup[] => {
+    const node = nodes.find((item) => item.node_id === nodeId);
+    return node ? buildReferenceGroups(nodes, scopeOf(node), inputsSchema) : [];
+  };
+
+  const pathsFromGroups = (groups: ReferenceGroup[]): string[] =>
+    groups.flatMap((group) => group.fields.map((field) => field.path));
+
+  const parentLoopStateSchema = selectedNode?.parent_loop_node_id
+    ? ((nodes.find(
+        (node) => node.node_id === selectedNode.parent_loop_node_id,
+      )?.config as Record<string, unknown> | undefined)?.state_schema as
+        | Record<string, unknown>
+        | undefined)
+    : undefined;
 
   return (
     <div className="flex h-full flex-col bg-slate-50">
@@ -480,6 +507,7 @@ export default function WorkflowEditorPage() {
                     ? conditionCandidates(nodes, edgeSource, inputsSchema)
                     : []
                 }
+                groups={edgeSource ? groupsForNode(edgeSource) : []}
                 onChange={setEdgeCondition}
               />
             )}
@@ -498,7 +526,10 @@ export default function WorkflowEditorPage() {
           </section>
 
           {selectedNode && (
-            <section className="space-y-2 rounded border border-slate-200 p-2">
+            <section
+              key={selectedNode.node_id}
+              className="space-y-2 rounded border border-slate-200 p-2"
+            >
               <div className="flex items-center justify-between">
                 <h3 className="font-semibold">
                   {selectedNode.node_type} 設定
@@ -522,14 +553,72 @@ export default function WorkflowEditorPage() {
                       .map((c) => (
                         <option key={c.capability_key} value={c.capability_key}>
                           {c.capability_key}
+                          {c.approval_policy === "plan_required"
+                            ? " (要承認)"
+                            : ""}
                         </option>
                       ))}
                   </select>
-                  <JsonArea
-                    label="inputs"
-                    value={selectedNode.config.inputs ?? {}}
-                    onCommit={(value) => updateNodeConfig({ inputs: value })}
-                  />
+                  {selectedCapability?.description && (
+                    <p className="text-[10px] leading-tight text-slate-500">
+                      {selectedCapability.description}
+                    </p>
+                  )}
+                  {selectedCapability?.inputs_schema ? (
+                    <div className="space-y-1">
+                      <span className="block text-slate-700">inputs</span>
+                      <InputsSchemaForm
+                        testIdPrefix="cap-input"
+                        schema={selectedCapability.inputs_schema}
+                        values={
+                          (selectedNode.config.inputs as Record<
+                            string,
+                            unknown
+                          >) ?? {}
+                        }
+                        onChange={(value) => updateNodeConfig({ inputs: value })}
+                        allowReferences
+                        referenceGroups={buildReferenceGroups(
+                          nodes,
+                          scopeOf(selectedNode),
+                          inputsSchema,
+                          { excludeNodeId: selectedNode.node_id },
+                        )}
+                      />
+                    </div>
+                  ) : (
+                    <JsonArea
+                      label="inputs"
+                      value={selectedNode.config.inputs ?? {}}
+                      onCommit={(value) => updateNodeConfig({ inputs: value })}
+                    />
+                  )}
+                  <label className="block">
+                    retry.max_attempts
+                    <input
+                      type="number"
+                      min={0}
+                      className="ml-1 w-20 rounded border border-slate-300 px-1"
+                      value={Number(
+                        (selectedNode.config.retry as { max_attempts?: number })
+                          ?.max_attempts ?? 0,
+                      )}
+                      onChange={(event) =>
+                        updateNodeConfig({
+                          retry: {
+                            ...((selectedNode.config.retry as Record<
+                              string,
+                              unknown
+                            >) ?? {}),
+                            max_attempts: Math.max(
+                              0,
+                              Number(event.target.value) || 0,
+                            ),
+                          },
+                        })
+                      }
+                    />
+                  </label>
                 </>
               )}
               {selectedNode.node_type === "agent" && (
@@ -548,11 +637,26 @@ export default function WorkflowEditorPage() {
                       </option>
                     ))}
                   </select>
-                  <JsonArea
-                    label="inputs"
-                    value={selectedNode.config.inputs ?? {}}
-                    onCommit={(value) => updateNodeConfig({ inputs: value })}
-                  />
+                  <div className="space-y-1">
+                    <span className="block text-slate-700">inputs</span>
+                    <StructuredValueEditor
+                      testIdPrefix="agent-inputs"
+                      value={
+                        (selectedNode.config.inputs as Record<
+                          string,
+                          unknown
+                        >) ?? {}
+                      }
+                      onChange={(value) => updateNodeConfig({ inputs: value })}
+                      suggestions={["task", "context"]}
+                      referenceGroups={buildReferenceGroups(
+                        nodes,
+                        scopeOf(selectedNode),
+                        inputsSchema,
+                        { excludeNodeId: selectedNode.node_id },
+                      )}
+                    />
+                  </div>
                   <JsonArea
                     label="output_schema"
                     value={selectedNode.config.output_schema ?? {}}
@@ -567,11 +671,33 @@ export default function WorkflowEditorPage() {
                     value={selectedNode.config.state_schema ?? {}}
                     onCommit={(value) => updateNodeConfig({ state_schema: value })}
                   />
-                  <JsonArea
-                    label="input_mapping"
-                    value={selectedNode.config.input_mapping ?? {}}
-                    onCommit={(value) => updateNodeConfig({ input_mapping: value })}
-                  />
+                  <div className="space-y-1">
+                    <span className="block text-slate-700">input_mapping</span>
+                    <InputsSchemaForm
+                      testIdPrefix="loop-input-mapping"
+                      schema={
+                        (selectedNode.config.state_schema as Record<
+                          string,
+                          unknown
+                        >) ?? {}
+                      }
+                      values={
+                        (selectedNode.config.input_mapping as Record<
+                          string,
+                          unknown
+                        >) ?? {}
+                      }
+                      onChange={(value) =>
+                        updateNodeConfig({ input_mapping: value })
+                      }
+                      allowReferences
+                      referenceGroups={buildReferenceGroups(
+                        nodes,
+                        null,
+                        inputsSchema,
+                      )}
+                    />
+                  </div>
                   <label className="block">
                     max_iterations
                     <input
@@ -607,21 +733,60 @@ export default function WorkflowEditorPage() {
                         ))}
                     </select>
                   </label>
-                  <JsonArea
-                    label="continuation_condition"
-                    value={selectedNode.config.continuation_condition ?? {}}
-                    onCommit={(value) =>
-                      updateNodeConfig({ continuation_condition: value })
-                    }
-                  />
+                  <div className="space-y-1">
+                    <span className="block text-slate-700">
+                      continuation_condition
+                    </span>
+                    <ConditionEditor
+                      idPrefix={`loop-${selectedNode.node_id}`}
+                      condition={
+                        (selectedNode.config.continuation_condition as Record<
+                          string,
+                          unknown
+                        > | null) ?? null
+                      }
+                      candidates={pathsFromGroups(
+                        buildReferenceGroups(
+                          nodes,
+                          selectedNode.node_id,
+                          inputsSchema,
+                        ),
+                      )}
+                      groups={buildReferenceGroups(
+                        nodes,
+                        selectedNode.node_id,
+                        inputsSchema,
+                      )}
+                      onChange={(condition) =>
+                        updateNodeConfig({ continuation_condition: condition })
+                      }
+                    />
+                  </div>
                 </>
               )}
               {selectedNode.node_type === "loop_result" && (
-                <JsonArea
-                  label="output_mapping"
-                  value={selectedNode.config.output_mapping ?? {}}
-                  onCommit={(value) => updateNodeConfig({ output_mapping: value })}
-                />
+                <div className="space-y-1">
+                  <span className="block text-slate-700">output_mapping</span>
+                  <InputsSchemaForm
+                    testIdPrefix="loop-result-output-mapping"
+                    schema={parentLoopStateSchema ?? {}}
+                    values={
+                      (selectedNode.config.output_mapping as Record<
+                        string,
+                        unknown
+                      >) ?? {}
+                    }
+                    onChange={(value) =>
+                      updateNodeConfig({ output_mapping: value })
+                    }
+                    allowReferences
+                    referenceGroups={buildReferenceGroups(
+                      nodes,
+                      selectedNode.parent_loop_node_id ?? null,
+                      inputsSchema,
+                    )}
+                  />
+                </div>
               )}
               {selectedNode.node_type === "terminal" && (
                 <select
@@ -691,6 +856,7 @@ export default function WorkflowEditorPage() {
                         edge.source_node_id,
                         inputsSchema,
                       )}
+                      groups={groupsForNode(edge.source_node_id)}
                       onChange={(condition) => {
                         setEdges((prev) =>
                           prev.map((item) =>

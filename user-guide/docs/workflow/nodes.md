@@ -5,7 +5,10 @@ title: Node リファレンス
 
 # Node リファレンス
 
-Node は `config_json` に種別ごとの設定を持ちます。エディタの JSON 欄で編集します。
+Node は `config_json` に種別ごとの設定を持ちます。エディタでは、Capability 入力・
+Loop の入出力マッピング・Agent 入力はスキーマや構造化エディタで入力し、スキーマ定義
+（`inputs_schema` / `output_schema` / `state_schema`）は JSON で編集します
+（[エディタの使い方](editor.md) を参照）。
 
 ## capability Node
 

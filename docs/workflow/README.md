@@ -15,6 +15,7 @@ Status: 再設計後の仕様 Accepted (Phase 0 未実装)。実装はフェー�
 | [adr/workflow-graph-and-agent-node.md](adr/workflow-graph-and-agent-node.md) | グラフ / Agent Node / Loop Node / 承認境界の設計判断 ADR |
 | [adr/workflow-revision-deletion.md](adr/workflow-revision-deletion.md) | Revision 削除ポリシー（draft / superseded のハード削除・Run 温存） |
 | [adr/workflow-independent-context-shared-foundation.md](adr/workflow-independent-context-shared-foundation.md) | 撤回された旧 ADR（履歴） |
+| [adr/workflow-editor-guided-forms.md](adr/workflow-editor-guided-forms.md) | エディタのガイド型フォーム（自前スキーマフォーム・型付き参照ピッカー） |
 
 ## 設計上の要点
 

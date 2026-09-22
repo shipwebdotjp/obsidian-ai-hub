@@ -12,6 +12,8 @@ See ``docs/workflow/specification.md`` §7 and §10.
 
 from __future__ import annotations
 
+from typing import Any
+
 HITL_WAIT_KEY = "hitl_wait"
 
 # Keys that exist only inside Workflow and are never exposed to the Task Agent
@@ -29,6 +31,34 @@ WORKFLOW_ONLY_METADATA: dict[str, tuple[str, str]] = {
         "HITL確認",
         "既存HITLへ質問を登録し、回答まで待つ。",
     ),
+}
+
+# Workflow-only capabilities have no Pydantic args model, so their UI-facing
+# input schema is defined here next to the policy/metadata. Shape mirrors the
+# normalized schema returned by ``tasks.capability_schemas.ui_input_schema`` so
+# the editor can render every capability the same way.
+WORKFLOW_ONLY_INPUT_SCHEMA: dict[str, dict[str, Any]] = {
+    HITL_WAIT_KEY: {
+        "type": "object",
+        "properties": {
+            "question": {
+                "type": "string",
+                "description": "HITL に登録する質問文。",
+            },
+            "question_type": {
+                "type": "string",
+                "enum": ["text", "select", "boolean"],
+                "default": "text",
+                "description": "回答UIの種別。select のときは choices を使う。",
+            },
+            "choices": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "question_type=select のときの選択肢。",
+            },
+        },
+        "required": ["question"],
+    }
 }
 
 

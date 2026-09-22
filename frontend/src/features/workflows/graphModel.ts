@@ -2,6 +2,7 @@ import type {
   WorkflowEdge,
   WorkflowNode,
   WorkflowNodeType,
+  WorkflowSchemaField,
 } from "../../api/types";
 
 export type { WorkflowEdge, WorkflowNode, WorkflowNodeType };
@@ -226,6 +227,158 @@ export function inputsKeysFromSchema(
 export const CONDITION_OPERATORS = ["equals", "exists", "in"] as const;
 export type ConditionOperator = (typeof CONDITION_OPERATORS)[number];
 
+export interface ReferenceField {
+  path: string;
+  type?: string;
+  description?: string;
+}
+
+export interface ReferenceGroup {
+  label: string;
+  fields: ReferenceField[];
+}
+
+function asSchemaField(schema: unknown): WorkflowSchemaField | null {
+  return schema && typeof schema === "object"
+    ? (schema as WorkflowSchemaField)
+    : null;
+}
+
+/** True when ``value`` is exactly ``{"$ref": "<path>"}``. */
+export function isReferenceValue(value: unknown): value is { $ref: string } {
+  return (
+    !!value &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    Object.keys(value as Record<string, unknown>).length === 1 &&
+    typeof (value as { $ref?: unknown }).$ref === "string"
+  );
+}
+
+/**
+ * Flatten a normalized schema into selectable reference paths.
+ *
+ * Objects expose both the whole-object path and their (recursive) children so a
+ * node can pass a full object or one field. Arrays stay a single field; item
+ * indices are intentionally not enumerated.
+ */
+export function schemaReferenceFields(
+  schema: unknown,
+  basePath: string,
+): ReferenceField[] {
+  const field = asSchemaField(schema);
+  if (!field || field["x-unsupported"]) {
+    return [{ path: basePath, type: "object" }];
+  }
+  const description = field.description;
+  if (field.type === "object" && field.properties) {
+    return [
+      { path: basePath, type: "object", description },
+      ...Object.entries(field.properties).flatMap(([name, sub]) =>
+        schemaReferenceFields(sub, `${basePath}.${name}`),
+      ),
+    ];
+  }
+  if (field.type === "array") {
+    return [{ path: basePath, type: "array", description }];
+  }
+  if (field.enum) {
+    return [{ path: basePath, type: "enum", description }];
+  }
+  return [{ path: basePath, type: field.type ?? "object", description }];
+}
+
+function nodeOutputFields(
+  node: WorkflowNode,
+  nodes: WorkflowNode[],
+): ReferenceField[] {
+  const config = (node.config ?? {}) as Record<string, unknown>;
+  const basePath = `nodes.${node.node_id}.output`;
+  if (node.node_type === "agent") {
+    return schemaReferenceFields(config.output_schema, basePath);
+  }
+  if (node.node_type === "loop") {
+    return [
+      { path: basePath, type: "object" },
+      ...schemaReferenceFields(config.state_schema, `${basePath}.final_state`),
+      { path: `${basePath}.iterations`, type: "integer" },
+      { path: `${basePath}.exit_reason`, type: "string" },
+    ];
+  }
+  if (node.node_type === "loop_result") {
+    const parent = nodes.find(
+      (candidate) => candidate.node_id === node.parent_loop_node_id,
+    );
+    const stateSchema = (parent?.config as Record<string, unknown> | undefined)
+      ?.state_schema;
+    return schemaReferenceFields(stateSchema, basePath);
+  }
+  if (node.node_type === "capability") {
+    return [
+      {
+        path: basePath,
+        type: "object",
+        description:
+          "Capability 出力は型未宣言（summary、または JSON object 全体）。",
+      },
+    ];
+  }
+  return [{ path: basePath, type: "object" }];
+}
+
+/**
+ * Build the typed reference candidates available inside a scope.
+ *
+ * ``scopeId`` is ``null`` for the top level or the owning Loop Node id for a
+ * child graph. ``excludeNodeId`` hides a node's own output (used when editing
+ * that node's inputs).
+ */
+export function buildReferenceGroups(
+  nodes: WorkflowNode[],
+  scopeId: string | null,
+  inputsSchema: Record<string, unknown>,
+  options: { excludeNodeId?: string } = {},
+): ReferenceGroup[] {
+  const groups: ReferenceGroup[] = [];
+  // A bare ``run.inputs`` is not resolvable at runtime (the backend requires
+  // ``run.inputs.<field>``), so the container path itself is not offered.
+  const inputFields = schemaReferenceFields(inputsSchema, "run.inputs").filter(
+    (field) => field.path !== "run.inputs",
+  );
+  if (inputFields.length > 0) {
+    groups.push({ label: "実行入力 (run.inputs)", fields: inputFields });
+  }
+
+  const scopeNodes = nodes.filter(
+    (node) =>
+      scopeOf(node) === scopeId && node.node_id !== options.excludeNodeId,
+  );
+  for (const node of scopeNodes) {
+    groups.push({
+      label: `${nodeDisplayName(node)} (${node.node_id.slice(0, 6)})`,
+      fields: nodeOutputFields(node, nodes),
+    });
+  }
+
+  if (scopeId !== null) {
+    const loop = nodes.find((node) => node.node_id === scopeId);
+    const loopConfig = (loop?.config ?? {}) as Record<string, unknown>;
+    const fields: ReferenceField[] = [
+      ...schemaReferenceFields(loopConfig.state_schema, "loop.state"),
+    ];
+    const inputMapping = (loopConfig.input_mapping ?? {}) as Record<
+      string,
+      unknown
+    >;
+    for (const key of Object.keys(inputMapping)) {
+      fields.push({ path: `loop.input.${key}` });
+    }
+    fields.push({ path: "loop.iteration", type: "integer" });
+    groups.push({ label: "Loop 状態", fields });
+  }
+  return groups;
+}
+
 /** Candidate reference paths usable as a condition's ``from_path``. */
 export function conditionCandidates(
   nodes: WorkflowNode[],
@@ -234,32 +387,9 @@ export function conditionCandidates(
 ): string[] {
   const source = nodes.find((node) => node.node_id === sourceNodeId);
   if (!source) return [];
-  const scope = scopeOf(source);
-  const scopeIds = nodes
-    .filter((node) => scopeOf(node) === scope)
-    .map((node) => node.node_id);
-  const candidates: string[] = inputsKeysFromSchema(inputsSchema).map(
-    (key) => `run.inputs.${key}`,
+  return buildReferenceGroups(nodes, scopeOf(source), inputsSchema).flatMap(
+    (group) => group.fields.map((field) => field.path),
   );
-  for (const nodeId of scopeIds) {
-    candidates.push(`nodes.${nodeId}.output`);
-  }
-  if (scope !== null) {
-    const loop = nodes.find((node) => node.node_id === scope);
-    const stateSchema = (loop?.config as Record<string, unknown> | undefined)
-      ?.state_schema as Record<string, unknown> | undefined;
-    const stateProps = (stateSchema?.properties ?? {}) as Record<string, unknown>;
-    for (const key of Object.keys(stateProps)) {
-      candidates.push(`loop.state.${key}`);
-    }
-    const inputMapping = (loop?.config as Record<string, unknown> | undefined)
-      ?.input_mapping as Record<string, unknown> | undefined;
-    for (const key of Object.keys(inputMapping ?? {})) {
-      candidates.push(`loop.input.${key}`);
-    }
-    candidates.push("loop.iteration");
-  }
-  return candidates;
 }
 
 /** Validate the shape of one condition object (mirrors backend validation). */

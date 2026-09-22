@@ -3,7 +3,9 @@ import {
   CONDITION_OPERATORS,
   parseConditionValue,
   type ConditionOperator,
+  type ReferenceGroup,
 } from "./graphModel";
+import ReferencePicker from "./ReferencePicker";
 
 export interface ConditionEditorProps {
   condition: Record<string, unknown> | null;
@@ -11,6 +13,8 @@ export interface ConditionEditorProps {
   onChange: (condition: Record<string, unknown> | null) => void;
   /** Test id / datalist prefix; must be unique per editor instance. */
   idPrefix: string;
+  /** Typed candidates; when provided, renders a guided reference picker. */
+  groups?: ReferenceGroup[];
 }
 
 function conditionValueText(value: unknown): string {
@@ -23,6 +27,7 @@ export default function ConditionEditor({
   candidates,
   onChange,
   idPrefix,
+  groups,
 }: ConditionEditorProps) {
   const operator = (condition?.operator as ConditionOperator) ?? "equals";
   const [jsonText, setJsonText] = useState(() =>
@@ -138,23 +143,35 @@ export default function ConditionEditor({
 
       {condition && (
         <>
-          <label className="block">
-            from_path
-            <input
-              list={listId}
-              data-testid={`${idPrefix}-from-path`}
-              className="w-full rounded border border-slate-300 px-1 py-0.5 font-mono text-[11px]"
-              value={String(condition.from_path ?? "")}
-              onChange={(event) =>
-                onChange({ ...condition, from_path: event.target.value })
-              }
-            />
-            <datalist id={listId}>
-              {candidates.map((candidate) => (
-                <option key={candidate} value={candidate} />
-              ))}
-            </datalist>
-          </label>
+          {groups && groups.length > 0 ? (
+            <div className="block">
+              <span className="text-slate-700">from_path</span>
+              <ReferencePicker
+                idPrefix={`${idPrefix}-from-path`}
+                groups={groups}
+                value={String(condition.from_path ?? "")}
+                onChange={(path) => onChange({ ...condition, from_path: path })}
+              />
+            </div>
+          ) : (
+            <label className="block">
+              from_path
+              <input
+                list={listId}
+                data-testid={`${idPrefix}-from-path`}
+                className="w-full rounded border border-slate-300 px-1 py-0.5 font-mono text-[11px]"
+                value={String(condition.from_path ?? "")}
+                onChange={(event) =>
+                  onChange({ ...condition, from_path: event.target.value })
+                }
+              />
+              <datalist id={listId}>
+                {candidates.map((candidate) => (
+                  <option key={candidate} value={candidate} />
+                ))}
+              </datalist>
+            </label>
+          )}
 
           <label className="block">
             operator

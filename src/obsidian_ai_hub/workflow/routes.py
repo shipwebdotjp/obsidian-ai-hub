@@ -24,6 +24,7 @@ from obsidian_ai_hub.workflow.execution import (
     ATTENTION_REASON_CANCEL_UNKNOWN,
 )
 from obsidian_ai_hub.workflow.capabilities import (
+    WORKFLOW_ONLY_INPUT_SCHEMA,
     WORKFLOW_ONLY_KEYS,
     WORKFLOW_ONLY_METADATA,
     default_approval_policy,
@@ -152,6 +153,7 @@ def list_workflow_capabilities() -> dict[str, Any]:
     """
     from obsidian_ai_hub.tasks import store as task_store
     from obsidian_ai_hub.tasks.capabilities import get_capability_definitions
+    from obsidian_ai_hub.tasks.capability_schemas import ui_input_schema
 
     policies = {
         str(c["capability_key"]): c for c in task_store.list_capabilities()
@@ -170,6 +172,7 @@ def list_workflow_capabilities() -> dict[str, Any]:
                     or default_approval_policy(definition.key)
                 ),
                 "workflow_only": False,
+                "inputs_schema": ui_input_schema(definition.key),
             }
         )
     for key in sorted(WORKFLOW_ONLY_KEYS):
@@ -182,6 +185,7 @@ def list_workflow_capabilities() -> dict[str, Any]:
                 "enabled": True,
                 "approval_policy": default_approval_policy(key),
                 "workflow_only": True,
+                "inputs_schema": WORKFLOW_ONLY_INPUT_SCHEMA.get(key),
             }
         )
     return {"items": items}

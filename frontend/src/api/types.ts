@@ -1143,6 +1143,33 @@ export interface TaskAgentProjectResolution {
 
 // --- Workflow --------------------------------------------------------------
 
+/**
+ * UI-facing normalized JSON Schema field.
+ *
+ * Produced by the backend (`tasks/capability_schemas.ui_input_schema`): the
+ * v1 subset plus Pydantic-derived constructs flattened for form rendering.
+ * ``x-unsupported`` marks a branch the renderer cannot express, so the caller
+ * falls back to a raw JSON editor.
+ */
+export interface WorkflowSchemaField {
+  type?: string;
+  nullable?: boolean;
+  enum?: unknown[];
+  description?: string;
+  title?: string;
+  default?: unknown;
+  minimum?: number;
+  maximum?: number;
+  minLength?: number;
+  maxLength?: number;
+  pattern?: string;
+  properties?: Record<string, WorkflowSchemaField>;
+  required?: string[];
+  items?: WorkflowSchemaField;
+  additionalProperties?: boolean | WorkflowSchemaField;
+  "x-unsupported"?: boolean;
+}
+
 export interface WorkflowCapabilityRecord {
   capability_key: string;
   label: string;
@@ -1150,6 +1177,7 @@ export interface WorkflowCapabilityRecord {
   enabled: boolean;
   approval_policy: string;
   workflow_only: boolean;
+  inputs_schema?: WorkflowSchemaField | null;
 }
 
 export interface WorkflowCapabilityListResponse {

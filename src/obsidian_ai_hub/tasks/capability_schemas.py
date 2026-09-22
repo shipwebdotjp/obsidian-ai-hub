@@ -213,6 +213,146 @@ def resolve_json_schema(capability_key: str) -> dict[str, Any] | None:
         return None
 
 
+# UI-facing normalization of Pydantic JSON Schema.
+#
+# The Workflow editor renders one form field per leaf. Pydantic emits
+# ``anyOf: [X, {"type": "null"}]`` for ``Optional`` and ``$defs``/``$ref`` for
+# nested models, neither of which a simple renderer can consume. This layer
+# flattens those into a single, stable shape while leaving the schema itself as
+# the single source of truth (no hand-duplicated field lists).
+_UI_PASSTHROUGH_KEYS = (
+    "description",
+    "title",
+    "default",
+    "minimum",
+    "maximum",
+    "exclusiveMinimum",
+    "exclusiveMaximum",
+    "multipleOf",
+    "minLength",
+    "maxLength",
+    "pattern",
+    "format",
+    "minItems",
+    "maxItems",
+)
+
+
+def _deref(node: Any, defs: dict[str, Any]) -> Any:
+    seen = 0
+    while isinstance(node, dict) and "$ref" in node and seen < 32:
+        ref = node.get("$ref")
+        if not isinstance(ref, str) or not ref.startswith("#/$defs/"):
+            return {"x-unsupported": True}
+        target = defs.get(ref[len("#/$defs/") :])
+        if not isinstance(target, dict):
+            return {"x-unsupported": True}
+        node = target
+        seen += 1
+    return node
+
+
+def _normalize_ui_schema(
+    node: Any, defs: dict[str, Any], *, depth: int = 0
+) -> dict[str, Any]:
+    if depth > 12 or not isinstance(node, dict):
+        return {"x-unsupported": True}
+    node = _deref(node, defs)
+    if not isinstance(node, dict) or node.get("x-unsupported"):
+        return {"x-unsupported": True}
+
+    for combiner in ("anyOf", "oneOf"):
+        branches = node.get(combiner)
+        if isinstance(branches, list):
+            non_null = [
+                branch
+                for branch in branches
+                if not (isinstance(branch, dict) and branch.get("type") == "null")
+            ]
+            if len(non_null) != 1:
+                return {"x-unsupported": True}
+            merged = dict(non_null[0])
+            for key in ("default", "description", "title"):
+                if key not in merged and key in node:
+                    merged[key] = node[key]
+            result = _normalize_ui_schema(merged, defs, depth=depth + 1)
+            if result.get("x-unsupported"):
+                return result
+            if len(non_null) != len(branches):
+                result["nullable"] = True
+            return result
+
+    stype = node.get("type")
+    if isinstance(stype, list):
+        non_null_types = [t for t in stype if t != "null"]
+        if len(non_null_types) != 1:
+            return {"x-unsupported": True}
+        node = dict(node)
+        node["type"] = non_null_types[0]
+        if len(non_null_types) != len(stype):
+            node["nullable"] = True
+        stype = non_null_types[0]
+
+    out: dict[str, Any] = {}
+    if isinstance(stype, str):
+        out["type"] = stype
+    if node.get("nullable"):
+        out["nullable"] = True
+    if isinstance(node.get("enum"), list):
+        out["enum"] = list(node["enum"])
+    elif "const" in node:
+        # Pydantic emits ``const`` (not ``enum``) for a single-value Literal.
+        out["enum"] = [node["const"]]
+    for key in _UI_PASSTHROUGH_KEYS:
+        if key in node:
+            out[key] = node[key]
+
+    if stype == "object":
+        props = node.get("properties")
+        if isinstance(props, dict):
+            out["properties"] = {
+                name: _normalize_ui_schema(spec, defs, depth=depth + 1)
+                for name, spec in props.items()
+            }
+        required = node.get("required")
+        if isinstance(required, list):
+            out["required"] = [r for r in required if isinstance(r, str)]
+        additional = node.get("additionalProperties")
+        if isinstance(additional, bool):
+            out["additionalProperties"] = additional
+        elif isinstance(additional, dict):
+            out["additionalProperties"] = _normalize_ui_schema(
+                additional, defs, depth=depth + 1
+            )
+    elif stype == "array":
+        if "items" in node:
+            out["items"] = _normalize_ui_schema(
+                node["items"], defs, depth=depth + 1
+            )
+    elif stype is None and "enum" not in out:
+        return {"x-unsupported": True}
+    return out
+
+
+def ui_input_schema(capability_key: str) -> dict[str, Any] | None:
+    """Return the UI-facing (normalized) JSON Schema for a capability's inputs.
+
+    Thin wrapper over :func:`resolve_json_schema` so the Workflow editor never
+    hand-duplicates field metadata. Unknown shapes are marked
+    ``{"x-unsupported": true}`` so the frontend can fall back to a raw editor.
+    """
+    schema = resolve_json_schema(capability_key)
+    if not isinstance(schema, dict):
+        return None
+    defs = schema.get("$defs")
+    normalized = _normalize_ui_schema(
+        schema, defs if isinstance(defs, dict) else {}
+    )
+    if not isinstance(normalized, dict) or normalized.get("x-unsupported"):
+        return None
+    return normalized
+
+
 def _compact_field(name: str, spec: dict[str, Any], required: set[str]) -> str:
     parts = [name]
     raw_type = spec.get("type")

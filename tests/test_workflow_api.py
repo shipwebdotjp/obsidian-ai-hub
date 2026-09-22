@@ -348,6 +348,14 @@ def test_workflow_capabilities_and_new_revision(test_memory_db_path, client):
     assert hitl["workflow_only"] is True
     assert hitl["approval_policy"] == "auto"
 
+    # Capability input schemas are exposed for the guided editor.
+    assert hitl["inputs_schema"]["properties"]["question"]["type"] == "string"
+    vault = next(c for c in items if c["capability_key"] == "vault_write_file")
+    assert set(vault["inputs_schema"]["properties"]) >= {
+        "relative_path",
+        "content",
+    }
+
     created = client.post("/api/v1/workflows", json={"name": "rev"})
     workflow_id = created.json()["workflow_id"]
     # No published revision yet: the new draft starts blank.
