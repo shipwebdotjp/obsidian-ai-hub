@@ -602,6 +602,25 @@ def test_execute_turn_elicitation_real_subprocess_cancel(tmp_path):
     assert "ELICIT-OK action=cancel" in res.output
 
 
+def test_execute_turn_permission_real_subprocess_allow(tmp_path):
+    _git_init(tmp_path)
+    client = acp.AcpClientBackend(_real_profile())
+
+    res = client.execute_turn(
+        repo_path=str(tmp_path),
+        prompt="please PERMISSION now",
+        timeout=60.0,
+    )
+
+    assert res.stop_reason == "end_turn"
+    assert "PERM-OK" in res.output
+    assert '"outcome": "selected"' in res.output
+    assert '"optionId": "allow-once"' in res.output
+    permission = res.diagnostics["permissions"][0]
+    assert permission["action"] == "allow"
+    assert permission["selected_option_id"] == "allow-once"
+
+
 def _make_handler(run, cancel_event, deadline_s=30):
     return acp_el.make_elicitation_handler(
         run_id=run["run_id"],

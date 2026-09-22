@@ -28,9 +28,15 @@ def main() -> int:
 
     pending_elicit: dict[int, dict] = {}
     elicit_counter = 0
+    pending_permission: dict[int, dict] = {}
+    permission_counter = 0
 
-    def emit_permission(session_id: str) -> None:
-        req_id = 9000 + counter
+    def emit_permission(session_id: str) -> "threading.Event":
+        nonlocal permission_counter
+        permission_counter += 1
+        req_id = 9000 + permission_counter
+        done = threading.Event()
+        pending_permission[req_id] = {"event": done}
         send({
             "jsonrpc": "2.0",
             "id": req_id,
@@ -40,10 +46,12 @@ def main() -> int:
                 "toolCall": {"toolCallId": "call_1", "title": "Probe tool", "kind": "execute"},
                 "options": [
                     {"optionId": "allow-once", "name": "Allow once", "kind": "allow_once"},
+                    {"optionId": "allow-always", "name": "Always allow", "kind": "allow_always"},
                     {"optionId": "reject-once", "name": "Reject", "kind": "reject_once"},
                 ],
             },
         })
+        return done
 
     def emit_elicitation(session_id: str) -> "threading.Event":
         nonlocal elicit_counter
@@ -81,9 +89,10 @@ def main() -> int:
             msg = json.loads(line)
         except json.JSONDecodeError:
             continue
-        # Replies to our own elicitation/create calls: record, never answer.
+        # Replies to our own elicitation/create and request_permission calls:
+        # record them, never answer.
         if "id" in msg and ("result" in msg or "error" in msg):
-            entry = pending_elicit.get(msg["id"])
+            entry = pending_elicit.get(msg["id"]) or pending_permission.get(msg["id"])
             if entry is not None:
                 entry["result"] = msg.get("result")
                 entry["error"] = msg.get("error")
@@ -119,11 +128,30 @@ def main() -> int:
                     b.get("text", "") for b in prompt
                     if isinstance(b, dict) and b.get("type") == "text"
                 )
-            if "PERMISSION" in text:
-                emit_permission(sid)
+            perm_done = emit_permission(sid) if "PERMISSION" in text else None
             elicit_done = emit_elicitation(sid) if "ELICITATION" in text else None
 
-            def finish(rid=rid, sid=sid, elicit_done=elicit_done) -> None:
+            def finish(
+                rid=rid, sid=sid, elicit_done=elicit_done, perm_done=perm_done
+            ) -> None:
+                perm_note = ""
+                if perm_done is not None:
+                    if perm_done.wait(timeout=20.0):
+                        entry = next(
+                            (e for e in pending_permission.values() if e["event"] is perm_done),
+                            {},
+                        )
+                        if entry.get("error") is not None:
+                            perm_note = f" PERM-ERR {json.dumps(entry['error'], ensure_ascii=False)}"
+                        else:
+                            res = entry.get("result") or {}
+                            perm_note = (
+                                " PERM-OK outcome="
+                                + json.dumps(res.get("outcome"), ensure_ascii=False)
+                            )
+                    else:
+                        perm_note = " PERM-MISSING"
+                    time.sleep(0.1)
                 elicit_note = ""
                 if elicit_done is not None:
                     if elicit_done.wait(timeout=20.0):
@@ -142,7 +170,7 @@ def main() -> int:
                     else:
                         elicit_note = " ELICIT-MISSING"
                     time.sleep(0.1)
-                else:
+                if perm_done is None and elicit_done is None:
                     time.sleep(0.3)
                 if sid in cancelled:
                     send({"jsonrpc": "2.0", "id": rid, "result": {"stopReason": "cancelled"}})
@@ -150,7 +178,7 @@ def main() -> int:
                 send({"jsonrpc": "2.0", "method": "session/update", "params": {
                     "sessionId": sid,
                     "update": {"sessionUpdate": "agent_message_chunk",
-                               "content": {"type": "text", "text": "POC-OK" + elicit_note}},
+                               "content": {"type": "text", "text": "POC-OK" + perm_note + elicit_note}},
                 }})
                 # Let the client drain the update before the turn result lands.
                 time.sleep(0.3)

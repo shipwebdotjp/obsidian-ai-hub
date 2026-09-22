@@ -68,6 +68,26 @@ cancel、progress notification を標準化し、Codex と OpenCode の双方に
   operation-scenario contract を要する将来項目。Coordinator を残すか ACP Agent を直接主体にするかの
   再設計も保留。
 
+### technical permission の ACP v1 spec 準拠（2026-09-22）
+
+D3 の「予期しない technical permission は profile の事前定義 option で処理するか failed」を、
+ACP v1 spec に一致させて実装した。従来の `_handle_permission_request` は PoC で permission request を
+観測できなかったため `option_id` / `outcome` 前提の推測形状で、OpenCode 1.18.31 が発行する
+`optionId` / `kind`（`allow_once` / `allow_always` / `reject_once` / `reject_always`）を判定できず、
+spec 外の応答 `{"outcome": "allow", ...}` を返していた。リサーチ project モードの実運用で
+permission request により turn が failed したことを受けて修正した。
+
+- request は spec の `optionId` / `kind` を正とし、旧 `option_id` / `id` / `value` / `outcome: allow`
+  も後方互換で受理する。
+- 応答は `{"outcome": {"outcome": "selected", "optionId": ...}}` または
+  `{"outcome": {"outcome": "cancelled"}}`。JSON-RPC error は返さない。
+- 選択は最小権限を優先し `allow_once` → `allow_always` → その他 allow。`allow_always` は
+  永続的な permission rule を作り得るため、`allow_once` が無い場合に限る。
+- allow option が無ければ reject option を `selected` で返すか `cancelled` を返して failed に停止し、
+  HITL へ変換しない。選択結果は run diagnostics の `permissions` に記録する。
+- この修正は研究 project モードと coding workspace が共有する ACP client に効く。委任した技術作業を
+  操作ごとにアプリ承認しないという D1/D3 の範囲を変えない。
+
 ## Web UI 管理の AI エージェント、永続会話、およびツール境界
 
 | 項目 | 内容 |

@@ -66,6 +66,21 @@ secret値のartifact混入なし（自動検査済み）を確認。
 | codex-acp | protocol v1、`session/new`、`session/prompt`（text）、`session/update` 受信、`session/cancel` | `loadSession`、`sessionCapabilities.resume`（再開は不可のためPhase 1では不使用）、`additionalDirectories`、`subagents`、`mcp http` | resume/load失敗時は新規session化＋理由・旧/新IDをevent保存（エラー本文推測をしない）。`$/cancel_request` には依存しない | 再起動後のresume/loadはadvertiseがあっても `-32603 no rollout found` で失敗（1.11.0実測）。`_auth/status_update` 等の `_` prefix custom通知が来る（1.11.0実測、specのextensibility範囲内として受容・未知updateはredacted保存） |
 | opencode-acp | protocol v1、`session/new`、`session/prompt`（text）、`session/update` 受信、`session/cancel` | `loadSession`、`sessionCapabilities.resume`（再起動後も成功することを確認）、`mcp http/sse`、`prompt embeddedContext/image` | resume失敗時はcodex同様に新規化＋記録。`$/cancel_request` には依存しない | (1) 引数なし `opencode acp` は `ServeError` で即死する（1.18.31実測）。`--hostname 127.0.0.1 --port 0` の明示が必須 → profile argvに固定。(2) stdoutに `[..] WARN .. mDNS enabled but hostname is loopback` の非JSON行が混入する（1.18.31実測）。Clientはstdout汚染を検出・記録できること |
 
+## session/request_permission の実測形状（OpenCode 1.18.31）
+
+Phase 0/1 の artifact では permission request は 0 件（`agentRequestCount: 0`）で、
+Client 側の事前定義 option 判定は未検証だった。2026-09-22 のリサーチ project モード実運用で
+OpenCode 1.18.31 が実際に `session/request_permission` を発行することを確認した。
+
+- request の option は spec 形状（`optionId` / `name` / `kind`）。実測例:
+  `[{"optionId": "once", "kind": "allow_once"}, {"optionId": "always", "kind": "allow_always"}, {"optionId": "reject", "kind": "reject_once"}]`
+- Client は spec 形状 `{"outcome": {"outcome": "selected", "optionId": ...}}`（許可・明示拒否）
+  または `{"outcome": {"outcome": "cancelled"}}` を返す必要がある。旧実装の
+  `{"outcome": "allow", ...}` と `option_id`/`outcome` 前提の判定は spec と一致せず、
+  permission request で turn が failed していた。
+- 選択方針は最小権限（`allow_once` 優先、次に `allow_always`）。詳細は
+  [permission-hitl-contract.md](permission-hitl-contract.md) D3 を正とする。
+
 ## 実装向け minimum capability（共通）
 
 - `initialize` のprotocol v1合意＋必須capability検証（不一致はprompt前にfailed、暗黙downgradeなし）

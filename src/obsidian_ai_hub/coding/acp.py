@@ -147,9 +147,98 @@ class AcpCapabilityMismatchError(AcpError):
 
 
 class AcpPermissionRejectedError(AcpError):
-    """Raised when an unhandled permission request is received."""
+    """Raised when a permission request cannot be granted by client policy."""
 
     pass
+
+
+# ACP v1 session/request_permission option kinds (agentclientprotocol.com).
+_PERMISSION_ALLOW_ONCE_KIND = "allow_once"
+_PERMISSION_ALLOW_ALWAYS_KIND = "allow_always"
+_PERMISSION_REJECT_KINDS = frozenset({"reject_once", "reject_always"})
+# Legacy/non-spec option identifiers tolerated for backward compatibility.
+_PERMISSION_ALLOW_LEGACY_IDS = frozenset({"allow", "yes", "accept", "permit"})
+_PERMISSION_REJECT_LEGACY_IDS = frozenset({"reject", "deny", "no", "cancel", "decline"})
+
+
+def _permission_option_id(option: Dict[str, Any]) -> Optional[str]:
+    value = (
+        option.get("optionId")
+        or option.get("option_id")
+        or option.get("id")
+        or option.get("value")
+    )
+    if value is None:
+        return None
+    return str(value)
+
+
+def _permission_option_kind(option: Dict[str, Any]) -> str:
+    return str(option.get("kind") or "").strip().lower()
+
+
+def _select_permission_option(
+    options: List[Any],
+) -> Tuple[str, Optional[Dict[str, Any]]]:
+    """Choose an option per least-privilege policy.
+
+    Returns ``(action, option)`` where action is ``"allow"``, ``"reject"`` or
+    ``"cancel"``. Spec ``kind`` values are preferred, then legacy identifiers.
+    ``allow_once`` is preferred over ``allow_always`` so a persistent permission
+    rule is only granted when no single-use option is offered.
+    """
+    entries = [
+        (opt, _permission_option_id(opt), _permission_option_kind(opt))
+        for opt in options
+        if isinstance(opt, dict)
+    ]
+
+    # Spec ``kind`` ordering first so legacy identifiers never outrank a
+    # least-privilege spec option that appears later in the list.
+    for opt, _opt_id, kind in entries:
+        if kind == _PERMISSION_ALLOW_ONCE_KIND:
+            return "allow", opt
+    for opt, _opt_id, kind in entries:
+        if kind == _PERMISSION_ALLOW_ALWAYS_KIND:
+            return "allow", opt
+    for opt, _opt_id, kind in entries:
+        if kind.startswith("allow"):
+            return "allow", opt
+
+    # Legacy identifiers and ``outcome`` only after spec kinds.
+    for opt, opt_id, kind in entries:
+        if not kind and opt_id and opt_id.lower() in _PERMISSION_ALLOW_LEGACY_IDS:
+            return "allow", opt
+    for opt, _opt_id, _kind in entries:
+        if str(opt.get("outcome") or "").strip().lower() == "allow":
+            return "allow", opt
+
+    for opt, _opt_id, kind in entries:
+        if kind in _PERMISSION_REJECT_KINDS:
+            return "reject", opt
+    for opt, opt_id, kind in entries:
+        if not kind and opt_id and opt_id.lower() in _PERMISSION_REJECT_LEGACY_IDS:
+            return "reject", opt
+
+    return "cancel", None
+
+
+def _permission_record(
+    options: List[Any], action: str, option_id: Optional[str]
+) -> Dict[str, Any]:
+    return {
+        "options": [
+            {
+                "optionId": _permission_option_id(opt),
+                "name": opt.get("name") or opt.get("label"),
+                "kind": _permission_option_kind(opt) or None,
+            }
+            for opt in options
+            if isinstance(opt, dict)
+        ],
+        "action": action,
+        "selected_option_id": option_id,
+    }
 
 
 @dataclass
@@ -485,36 +574,59 @@ class AcpClientBackend:
         logger.info("ACP session '%s' model set to '%s'.", session_id, model)
         return model
 
-    def _handle_permission_request(self, req: Dict[str, Any], conn: AcpConnection) -> Tuple[bool, str]:
-        """Handle session/request_permission RPC request from ACP agent.
+    def _handle_permission_request(
+        self,
+        req: Dict[str, Any],
+        conn: AcpConnection,
+        records: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
+        """Handle a session/request_permission RPC request from the ACP agent.
 
-        Pre-defined policy: check if options contain an 'allow' outcome/id/value.
-        If found, respond with selected option. Otherwise, reject and raise AcpPermissionRejectedError.
-        No HITL run is created for unhandled technical permissions.
+        Delegated technical work is not escalated to HITL (see
+        docs/acp/permission-hitl-contract.md D3). Per least-privilege policy an
+        ``allow_once`` option is preferred, then ``allow_always``, then any
+        allow-kind option. A request that offers no allow option is declined:
+        the client replies with a spec-shaped ``selected`` reject option when
+        one exists, otherwise ``cancelled``, and raises
+        ``AcpPermissionRejectedError`` so the turn fails instead of silently
+        substituting another mode.
+
+        Responses follow the ACP v1 spec: ``{"outcome": {"outcome":
+        "selected", "optionId": ...}}`` or ``{"outcome": {"outcome":
+        "cancelled"}}``. The chosen request/response is appended to ``records``
+        for run diagnostics.
         """
         rid = req.get("id")
         params = req.get("params") or {}
         options = params.get("options") or []
+        if not isinstance(options, list):
+            options = []
 
-        selected_option = None
-        for opt in options:
-            if isinstance(opt, dict):
-                opt_id = str(opt.get("option_id") or opt.get("id") or opt.get("value") or "").lower()
-                outcome = str(opt.get("outcome") or "").lower()
-                if opt_id in ("allow", "yes", "accept", "permit") or outcome == "allow":
-                    selected_option = opt
-                    break
+        action, option = _select_permission_option(options)
+        option_id = _permission_option_id(option) if option is not None else None
+        if action == "allow" and option_id is None:
+            # An allow option with no resolvable id cannot be selected in a
+            # spec response; record and reply as a decline so diagnostics match.
+            action = "cancel"
+        record = _permission_record(options, action, option_id)
+        if records is not None:
+            records.append(record)
 
-        if selected_option is not None and rid is not None:
-            option_id = selected_option.get("option_id") or selected_option.get("id") or selected_option.get("value")
-            conn.respond(rid, {"outcome": "allow", "selected_option_id": option_id, "option_id": option_id})
-            return True, f"Allowed permission option '{option_id}'"
-        else:
-            if rid is not None:
-                conn.respond_error(rid, -32601, "Permission denied by client policy")
+        if action == "allow" and option_id is not None and rid is not None:
+            conn.respond(rid, {"outcome": {"outcome": "selected", "optionId": option_id}})
+            return record
+
+        if action == "reject" and option_id is not None and rid is not None:
+            conn.respond(rid, {"outcome": {"outcome": "selected", "optionId": option_id}})
             raise AcpPermissionRejectedError(
-                f"ACP agent requested permission with options {options}, which is not in pre-defined allowlist"
+                f"ACP permission rejected by client policy: options {options}"
             )
+
+        if rid is not None:
+            conn.respond(rid, {"outcome": {"outcome": "cancelled"}})
+        raise AcpPermissionRejectedError(
+            f"ACP agent requested permission with options {options}, which is not in pre-defined allowlist"
+        )
 
     def _handle_elicitation_request(
         self,
@@ -650,6 +762,7 @@ class AcpClientBackend:
         init_meta = {}
         curr_session_id = acp_session_id
         sent_model: str = CODING_OPENCODE_MODEL
+        permissions: List[Dict[str, Any]] = []
 
         try:
             init_meta = self.initialize(conn, timeout=15.0)
@@ -749,7 +862,7 @@ class AcpClientBackend:
                 for client_req in conn.pop_client_requests():
                     method = client_req.get("method")
                     if method in ("session/request_permission", "request_permission"):
-                        self._handle_permission_request(client_req, conn)
+                        self._handle_permission_request(client_req, conn, permissions)
                     elif method == "elicitation/create":
                         record = self._handle_elicitation_request(
                             client_req,
@@ -903,6 +1016,7 @@ class AcpClientBackend:
                 "session_recreated": session_recreated,
                 "stderr_snippet": stderr_str[:500] if stderr_str else None,
                 "elicitations": elicitations,
+                "permissions": permissions,
                 "update_kinds": update_kinds,
                 "worker_tool_call_count": len(worker_tool_terminal),
                 "worker_tool_failure_count": sum(
@@ -937,5 +1051,6 @@ class AcpClientBackend:
                     "acp_session_id": curr_session_id or acp_session_id,
                     "acp_profile_id": self.profile.profile_id,
                     "error": str(exc),
+                    "permissions": permissions,
                 },
             )

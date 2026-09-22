@@ -43,27 +43,137 @@ def test_acp_connection_json_rpc():
     )
 
 
-def test_acp_handle_permission_request_allow():
+def _permission_req(rid, options):
+    return {
+        "id": rid,
+        "method": "session/request_permission",
+        "params": {
+            "sessionId": "sess_1",
+            "toolCall": {"toolCallId": "call_1", "title": "Probe tool"},
+            "options": options,
+        },
+    }
+
+
+def test_acp_handle_permission_request_allow_spec_prefers_once():
     profile = acp.AcpLaunchProfile.get_profile("opencode")
     client = acp.AcpClientBackend(profile)
     mock_conn = MagicMock()
 
-    req = {
-        "id": 10,
-        "method": "session/request_permission",
-        "params": {
-            "options": [
-                {"option_id": "deny", "label": "Deny"},
-                {"option_id": "allow", "label": "Allow"},
-            ]
-        },
-    }
-
-    allowed, msg = client._handle_permission_request(req, mock_conn)
-    assert allowed is True
-    mock_conn.respond.assert_called_once_with(
-        10, {"outcome": "allow", "selected_option_id": "allow", "option_id": "allow"}
+    req = _permission_req(
+        10,
+        [
+            {"optionId": "allow-always", "name": "Always allow", "kind": "allow_always"},
+            {"optionId": "allow-once", "name": "Allow once", "kind": "allow_once"},
+            {"optionId": "reject-once", "name": "Reject", "kind": "reject_once"},
+        ],
     )
+
+    records = []
+    record = client._handle_permission_request(req, mock_conn, records)
+
+    mock_conn.respond.assert_called_once_with(
+        10, {"outcome": {"outcome": "selected", "optionId": "allow-once"}}
+    )
+    assert record["action"] == "allow"
+    assert record["selected_option_id"] == "allow-once"
+    assert records == [record]
+
+
+def test_acp_handle_permission_request_allow_always_fallback():
+    profile = acp.AcpLaunchProfile.get_profile("opencode")
+    client = acp.AcpClientBackend(profile)
+    mock_conn = MagicMock()
+
+    req = _permission_req(
+        12,
+        [{"optionId": "always", "name": "Always allow", "kind": "allow_always"}],
+    )
+
+    client._handle_permission_request(req, mock_conn)
+
+    mock_conn.respond.assert_called_once_with(
+        12, {"outcome": {"outcome": "selected", "optionId": "always"}}
+    )
+
+
+def test_acp_handle_permission_request_legacy_allow():
+    profile = acp.AcpLaunchProfile.get_profile("opencode")
+    client = acp.AcpClientBackend(profile)
+    mock_conn = MagicMock()
+
+    req = _permission_req(
+        13,
+        [
+            {"option_id": "deny", "label": "Deny"},
+            {"option_id": "allow", "label": "Allow"},
+        ],
+    )
+
+    client._handle_permission_request(req, mock_conn)
+
+    mock_conn.respond.assert_called_once_with(
+        13, {"outcome": {"outcome": "selected", "optionId": "allow"}}
+    )
+
+
+def test_acp_handle_permission_request_spec_kind_beats_legacy_order():
+    profile = acp.AcpLaunchProfile.get_profile("opencode")
+    client = acp.AcpClientBackend(profile)
+    mock_conn = MagicMock()
+
+    req = _permission_req(
+        15,
+        [
+            {"option_id": "allow", "label": "Allow"},
+            {"optionId": "once", "name": "Allow once", "kind": "allow_once"},
+        ],
+    )
+
+    client._handle_permission_request(req, mock_conn)
+
+    mock_conn.respond.assert_called_once_with(
+        15, {"outcome": {"outcome": "selected", "optionId": "once"}}
+    )
+
+
+def test_acp_handle_permission_request_idless_allow_declines():
+    profile = acp.AcpLaunchProfile.get_profile("opencode")
+    client = acp.AcpClientBackend(profile)
+    mock_conn = MagicMock()
+
+    req = _permission_req(16, [{"outcome": "allow", "label": "Allow"}])
+
+    records = []
+    with pytest.raises(acp.AcpPermissionRejectedError):
+        client._handle_permission_request(req, mock_conn, records)
+
+    mock_conn.respond.assert_called_once_with(
+        16, {"outcome": {"outcome": "cancelled"}}
+    )
+    assert records[0]["action"] == "cancel"
+
+
+def test_acp_handle_permission_request_reject_raises():
+    profile = acp.AcpLaunchProfile.get_profile("opencode")
+    client = acp.AcpClientBackend(profile)
+    mock_conn = MagicMock()
+
+    req = _permission_req(
+        14,
+        [
+            {"optionId": "reject-once", "name": "Reject", "kind": "reject_once"},
+        ],
+    )
+
+    records = []
+    with pytest.raises(acp.AcpPermissionRejectedError):
+        client._handle_permission_request(req, mock_conn, records)
+
+    mock_conn.respond.assert_called_once_with(
+        14, {"outcome": {"outcome": "selected", "optionId": "reject-once"}}
+    )
+    assert records[0]["action"] == "reject"
 
 
 def test_acp_handle_permission_request_unhandled_raises():
@@ -71,22 +181,20 @@ def test_acp_handle_permission_request_unhandled_raises():
     client = acp.AcpClientBackend(profile)
     mock_conn = MagicMock()
 
-    req = {
-        "id": 11,
-        "method": "session/request_permission",
-        "params": {
-            "options": [
-                {"option_id": "custom_option", "label": "Custom Option"},
-            ]
-        },
-    }
-
-    with pytest.raises(acp.AcpPermissionRejectedError):
-        client._handle_permission_request(req, mock_conn)
-
-    mock_conn.respond_error.assert_called_once_with(
-        11, -32601, "Permission denied by client policy"
+    req = _permission_req(
+        11,
+        [{"option_id": "custom_option", "label": "Custom Option"}],
     )
+
+    records = []
+    with pytest.raises(acp.AcpPermissionRejectedError):
+        client._handle_permission_request(req, mock_conn, records)
+
+    mock_conn.respond.assert_called_once_with(
+        11, {"outcome": {"outcome": "cancelled"}}
+    )
+    mock_conn.respond_error.assert_not_called()
+    assert records[0]["action"] == "cancel"
 
 
 def test_acp_execute_turn_mocked_success():

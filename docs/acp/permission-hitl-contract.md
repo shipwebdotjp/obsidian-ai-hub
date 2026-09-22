@@ -55,6 +55,15 @@ Agent の技術的な作業をアプリが操作ごとに承認する仕組み�
   `session/request_permission` を受信した場合は、request と選択した応答を run event に記録し、
   profile が「選択済み Git root 内の委任作業」として事前定義した option があればそれを選ぶ。
   そうでなければ failed に停止する。HITL へ変換しない。
+- `session/request_permission` の option は ACP v1 spec の `optionId` / `kind`
+  （`allow_once` / `allow_always` / `reject_once` / `reject_always`）を正とし、旧来の
+  `option_id` / `id` / `value` と `outcome: allow` も後方互換で受理する。選択順は
+  最小権限を優先し、`allow_once` → `allow_always` → その他の allow 種別 → 旧 allow 識別子。
+- 応答は spec 形状 `{"outcome": {"outcome": "selected", "optionId": <id>}}`（許可・明示拒否）
+  または `{"outcome": {"outcome": "cancelled"}}`（選択不能）とする。JSON-RPC error は返さない。
+  allow option が無い場合は reject option を選んで `selected` を返したうえで failed に停止し、
+  reject option も無ければ `cancelled` を返して failed に停止する。診断には request の option と
+  選択結果（`permissions`）を残す。
 
 ### D4 — 接続・取消・復旧
 
