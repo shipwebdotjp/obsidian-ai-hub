@@ -27,6 +27,10 @@ Node 間のデータ連携は、文字列のテンプレート展開ではなく
 }
 ```
 
+Capability Node の出力は、型が宣言されているもの（読み取り/検索系、`hitl_wait`、`research_agent`、
+`register_*_job` など）は `nodes.<node_id>.output.<field>` を参照できます。宣言のない Capability は
+`nodes.<node_id>.output` 全体（要約 `summary`、または JSON object 全体）のみ参照できます。
+
 ## 解決のタイミング
 
 1. **静的検証** — 参照が解決可能で、スコープ規則に合うかを確認します。
@@ -60,11 +64,8 @@ Edge は `condition` オブジェクトを持てます。
 - どの条件も真にならず、条件なし（常に真）の Edge もない場合、Run は `failed` になります。
 - 分岐で選ばれなかった Node は `skipped` になります。
 
-:::note[エディタ UI での条件編集]
-条件はグラフモデル・検証・実行でサポートされていますが、現行のエディタには
-条件を編集するコントロールがありません。条件付き分岐を使う場合は API で
-Revision のグラフを更新してください。
-:::
+条件は **Edge 一覧** の **条件** から編集できます（`from_path` は参照ピッカーで選択）。
+Loop の `continuation_condition` も同様の条件エディタで編集します。
 
 ## 合流（OR 合流）
 

@@ -228,6 +228,38 @@ def test_indexed_run_input_reference_is_valid():
     assert validate_graph(nodes=nodes, edges=edges, inputs_schema=schema) == []
 
 
+def test_target_capability_requires_and_validates_target():
+    terminal = _node("t", "terminal", {"outcome": "success"})
+    edges = [_edge("e1", "a", "t")]
+
+    missing = _node(
+        "a",
+        "capability",
+        {"capability_key": "specialist_agent", "inputs": {"task": "x"}},
+    )
+    errors = validate_graph(nodes=[missing, terminal], edges=edges)
+    assert any("target が必要です" in e for e in errors)
+
+    valid = _node(
+        "a",
+        "capability",
+        {
+            "capability_key": "specialist_agent",
+            "inputs": {"task": "x"},
+            "target": {"agent_id": "agent_1"},
+        },
+    )
+    assert validate_graph(nodes=[valid, terminal], edges=edges) == []
+
+    invalid = _node(
+        "a",
+        "capability",
+        {"capability_key": "coding_cli", "inputs": {}, "target": {"project_id": "x"}},
+    )
+    errors = validate_graph(nodes=[invalid, terminal], edges=edges)
+    assert any("target が不正です" in e for e in errors)
+
+
 def test_workflow_catalog_includes_hitl_wait_without_task_agent():
     from obsidian_ai_hub.tasks.capabilities import get_capability_keys
     from obsidian_ai_hub.workflow.capabilities import (

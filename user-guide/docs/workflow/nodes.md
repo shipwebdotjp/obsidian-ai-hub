@@ -16,6 +16,7 @@ Loop の入出力マッピング・Agent 入力・スキーマ定義（`inputs_s
 ```json
 {
   "capability_key": "vault_write_file",
+  "target": {},
   "inputs": {
     "relative_path": {"$ref": "run.inputs.output_path"},
     "content": {"$ref": "nodes.<agent_node_id>.output.note_body"}
@@ -25,6 +26,9 @@ Loop の入出力マッピング・Agent 入力・スキーマ定義（`inputs_s
 ```
 
 - `capability_key` は `task_agent_capabilities` に存在し `enabled=1` である必要があります。
+- `target` は target を持つ Capability（`specialist_agent` / `coding_cli`）で必須です。
+  エディタでは target 欄が表示され、`specialist_agent` は委譲先 Agent、`coding_cli` は対象 Project を選びます。
+  値に型付き参照は使えません。
 - `inputs` は Capability の入力 schema に対応する値、または [型付き参照](data-flow.md) です。
 - `retry` は任意。`max_attempts` は非負整数です。
 

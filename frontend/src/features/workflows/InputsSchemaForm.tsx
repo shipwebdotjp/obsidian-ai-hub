@@ -5,6 +5,7 @@ import {
   type ReferenceGroup,
 } from "./graphModel";
 import ReferencePicker from "./ReferencePicker";
+import { renderFieldWidget } from "./SchemaFieldWidget";
 
 export interface InputsSchemaFormProps {
   schema: WorkflowSchemaField | Record<string, unknown>;
@@ -179,6 +180,18 @@ function SchemaValueField({
         <JsonField testId={testId} value={value} onCommit={onChange} />
       </div>
     );
+  }
+
+  if (field["x-ui"]) {
+    const widget = renderFieldWidget(field["x-ui"], value, onChange, testId);
+    if (widget) {
+      return (
+        <div className="block text-sm">
+          {header}
+          {widget}
+        </div>
+      );
+    }
   }
 
   if (field.type === "boolean") {

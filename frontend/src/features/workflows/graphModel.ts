@@ -38,7 +38,7 @@ export function defaultNodeConfig(
 ): Record<string, unknown> {
   switch (nodeType) {
     case "capability":
-      return { capability_key: capabilityKey ?? "", inputs: {} };
+      return { capability_key: capabilityKey ?? "", target: {}, inputs: {} };
     case "agent":
       return {
         agent_id: "",
@@ -321,6 +321,7 @@ export function isReferencePath(value: string): boolean {
 function nodeOutputFields(
   node: WorkflowNode,
   nodes: WorkflowNode[],
+  capabilityOutputSchemas?: Record<string, WorkflowSchemaField>,
 ): ReferenceField[] {
   const config = (node.config ?? {}) as Record<string, unknown>;
   const basePath = `nodes.${node.node_id}.output`;
@@ -344,6 +345,11 @@ function nodeOutputFields(
     return schemaReferenceFields(stateSchema, basePath);
   }
   if (node.node_type === "capability") {
+    const key = String(config.capability_key ?? "");
+    const outputSchema = capabilityOutputSchemas?.[key];
+    if (outputSchema) {
+      return schemaReferenceFields(outputSchema, basePath);
+    }
     return [
       {
         path: basePath,
@@ -367,7 +373,10 @@ export function buildReferenceGroups(
   nodes: WorkflowNode[],
   scopeId: string | null,
   inputsSchema: Record<string, unknown>,
-  options: { excludeNodeId?: string } = {},
+  options: {
+    excludeNodeId?: string;
+    capabilityOutputSchemas?: Record<string, WorkflowSchemaField>;
+  } = {},
 ): ReferenceGroup[] {
   const groups: ReferenceGroup[] = [];
   // A bare ``run.inputs`` is not resolvable at runtime (the backend requires
@@ -386,7 +395,7 @@ export function buildReferenceGroups(
   for (const node of scopeNodes) {
     groups.push({
       label: `${nodeDisplayName(node)} (${node.node_id.slice(0, 6)})`,
-      fields: nodeOutputFields(node, nodes),
+      fields: nodeOutputFields(node, nodes, options.capabilityOutputSchemas),
     });
   }
 
@@ -493,6 +502,7 @@ export function validateGraphShape(
   nodes: WorkflowNode[],
   edges: WorkflowEdge[],
   inputsSchema: Record<string, unknown>,
+  targetSchemas?: Record<string, WorkflowSchemaField>,
 ): GraphIssue[] {
   const issues: GraphIssue[] = [];
   const byId = new Map(nodes.map((node) => [node.node_id, node]));
@@ -510,6 +520,38 @@ export function validateGraphShape(
         message: "capability_key が必要です",
         nodeId: node.node_id,
       });
+    }
+    if (node.node_type === "capability" && config.capability_key) {
+      const targetSchema = targetSchemas?.[String(config.capability_key)];
+      if (targetSchema) {
+        const target = config.target;
+        if (
+          !target ||
+          typeof target !== "object" ||
+          Array.isArray(target)
+        ) {
+          issues.push({
+            code: "capability_target_required",
+            message: "target が必要です",
+            nodeId: node.node_id,
+          });
+        } else {
+          const targetRecord = target as Record<string, unknown>;
+          const required = Array.isArray(targetSchema.required)
+            ? targetSchema.required
+            : [];
+          for (const name of required) {
+            const value = targetRecord[name];
+            if (value === undefined || value === null || value === "") {
+              issues.push({
+                code: "capability_target_required",
+                message: `target.${name} が必要です`,
+                nodeId: node.node_id,
+              });
+            }
+          }
+        }
+      }
     }
     if (node.node_type === "agent" && !config.agent_id) {
       issues.push({

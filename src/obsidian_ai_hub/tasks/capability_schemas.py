@@ -334,6 +334,56 @@ def _normalize_ui_schema(
     return out
 
 
+# Code-owned UI widget hints. The Workflow editor renders a dedicated control
+# for these fields instead of a free-text input; the capability schema stays the
+# single source of truth for the field set. ``x-ui`` is advisory: an unknown
+# widget degrades to the default control.
+_FIELD_WIDGETS: dict[str, dict[str, str]] = {
+    "vault_read_file": {"relative_path": "vault_path"},
+    "vault_write_file": {"relative_path": "vault_path"},
+    "specialist_agent": {"agent_id": "agent"},
+    "coding_cli": {"project_id": "project"},
+    "research_agent": {"project_id": "project"},
+    "activity_search": {"project_id": "project"},
+    "project_get": {"project_id": "project"},
+    "people_get": {"person_id": "person"},
+    "people_relations_walk": {"person_id": "person"},
+}
+
+_DATE_FIELDS = frozenset(
+    {"start_date", "end_date", "reference_date", "due_date", "date"}
+)
+_DATETIME_FIELDS = frozenset({"run_at"})
+
+
+def field_widget(
+    capability_key: str, name: str, spec: dict[str, Any]
+) -> str | None:
+    """Return the UI widget hint for one capability field, if any."""
+    explicit = _FIELD_WIDGETS.get(capability_key, {}).get(name)
+    if explicit:
+        return explicit
+    if spec.get("type") == "string":
+        if name in _DATETIME_FIELDS:
+            return "datetime"
+        if name in _DATE_FIELDS or name.endswith("_date"):
+            return "date"
+    return None
+
+
+def _apply_field_widgets(
+    capability_key: str, schema: dict[str, Any]
+) -> dict[str, Any]:
+    props = schema.get("properties")
+    if isinstance(props, dict):
+        for name, spec in props.items():
+            if isinstance(spec, dict):
+                widget = field_widget(capability_key, name, spec)
+                if widget:
+                    spec["x-ui"] = widget
+    return schema
+
+
 def ui_input_schema(capability_key: str) -> dict[str, Any] | None:
     """Return the UI-facing (normalized) JSON Schema for a capability's inputs.
 
@@ -347,6 +397,150 @@ def ui_input_schema(capability_key: str) -> dict[str, Any] | None:
     defs = schema.get("$defs")
     normalized = _normalize_ui_schema(
         schema, defs if isinstance(defs, dict) else {}
+    )
+    if not isinstance(normalized, dict) or normalized.get("x-unsupported"):
+        return None
+    return _apply_field_widgets(capability_key, normalized)
+
+
+def capability_has_target(capability_key: str) -> bool:
+    """True when the capability takes a delegate ``target`` (agent/project)."""
+    return resolve_target_model(capability_key) is not None
+
+
+def ui_target_schema(capability_key: str) -> dict[str, Any] | None:
+    """Return the UI-facing (normalized) JSON Schema for a capability target."""
+    model = resolve_target_model(capability_key)
+    if model is None:
+        return None
+    try:
+        schema = model.model_json_schema()
+    except Exception:
+        logger.warning("Failed to build target JSON schema for %s", capability_key)
+        return None
+    if not isinstance(schema, dict):
+        return None
+    defs = schema.get("$defs")
+    normalized = _normalize_ui_schema(
+        schema, defs if isinstance(defs, dict) else {}
+    )
+    if not isinstance(normalized, dict) or normalized.get("x-unsupported"):
+        return None
+    return _apply_field_widgets(capability_key, normalized)
+
+
+# Code-owned output contracts for capabilities whose adapter/tool returns a
+# stable JSON object. The Workflow reference picker uses these to offer typed
+# ``nodes.<capability>.output.<field>`` candidates; the runtime treats a
+# mismatch as advisory only (never fails a node). Capabilities without a
+# declaration fall back to ``{"summary": <text>}``.
+def _object_output(
+    properties: dict[str, Any], description: str = ""
+) -> dict[str, Any]:
+    schema: dict[str, Any] = {
+        "type": "object",
+        "properties": properties,
+        "additionalProperties": True,
+    }
+    if description:
+        schema["description"] = description
+    return schema
+
+
+_SUMMARY_OUTPUT_SCHEMA: dict[str, Any] = _object_output(
+    {"summary": {"type": "string", "description": "実行結果の要約テキスト。"}}
+)
+
+_OUTPUT_SCHEMAS: dict[str, dict[str, Any]] = {
+    "vault_read_file": _object_output(
+        {"relative_path": {"type": "string"}, "content": {"type": "string"}}
+    ),
+    "calendar_read": _object_output(
+        {"events": {"type": "array", "items": {"type": "object"}}}
+    ),
+    "reminders_read": _object_output(
+        {"reminders": {"type": "array", "items": {"type": "object"}}}
+    ),
+    "calendar_create_proposal": _object_output(
+        {
+            "status": {"type": "string"},
+            "hitl_run_id": {"type": "string"},
+            "message": {"type": "string"},
+            "event": {"type": "object"},
+        }
+    ),
+    "reminder_create_proposal": _object_output(
+        {
+            "status": {"type": "string"},
+            "hitl_run_id": {"type": "string"},
+            "message": {"type": "string"},
+            "reminder": {"type": "object"},
+        }
+    ),
+    "people_search": _object_output(
+        {"people": {"type": "array", "items": {"type": "object"}}}
+    ),
+    "project_search": _object_output(
+        {"projects": {"type": "array", "items": {"type": "object"}}}
+    ),
+    "memory_search": _object_output(
+        {"memories": {"type": "array", "items": {"type": "object"}}}
+    ),
+    "periodic_note_read": _object_output(
+        {
+            "period_type": {"type": "string"},
+            "reference_date": {"type": "string"},
+            "relative_path": {"type": "string"},
+            "content": {"type": "string"},
+            "truncated": {"type": "boolean"},
+        }
+    ),
+    "research_context_snapshot": _object_output(
+        {
+            "recent_activities": {"type": "array", "items": {"type": "object"}},
+            "existing_themes": {"type": "array", "items": {"type": "object"}},
+            "recent_feedback": {"type": "array", "items": {"type": "object"}},
+            "daily_notes": {"type": "array", "items": {"type": "object"}},
+            "latest_weekly_note": {"type": "object"},
+        }
+    ),
+    "run_shell": _object_output(
+        {
+            "exit_code": {"type": "integer"},
+            "stdout": {"type": "string"},
+            "stderr": {"type": "string"},
+            "timeout": {"type": "boolean"},
+        }
+    ),
+    "register_one_shot_job": _object_output(
+        {
+            "job_id": {"type": "string"},
+            "status": {"type": "string"},
+            "run_at_utc": {"type": "string"},
+        }
+    ),
+    "register_recurring_job": _object_output({"job_id": {"type": "string"}}),
+    "research_theme_propose": _object_output(
+        {"theme_id": {"type": "string"}, "hitl_run_id": {"type": "string"}}
+    ),
+    # Text-summary adapters (the workflow normalizes their output to {summary}).
+    "research_agent": _object_output({"summary": {"type": "string"}}),
+    "specialist_agent": _object_output({"summary": {"type": "string"}}),
+    "coding_cli": _object_output({"summary": {"type": "string"}}),
+}
+
+
+def capability_output_schema(capability_key: str) -> dict[str, Any] | None:
+    """Return the declared output schema, or ``None`` when undeclared."""
+    return _OUTPUT_SCHEMAS.get(capability_key)
+
+
+def ui_output_schema(capability_key: str) -> dict[str, Any] | None:
+    """Return the UI-facing (normalized) output schema with summary fallback."""
+    raw = capability_output_schema(capability_key) or _SUMMARY_OUTPUT_SCHEMA
+    defs = raw.get("$defs")
+    normalized = _normalize_ui_schema(
+        raw, defs if isinstance(defs, dict) else {}
     )
     if not isinstance(normalized, dict) or normalized.get("x-unsupported"):
         return None

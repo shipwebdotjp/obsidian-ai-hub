@@ -151,9 +151,27 @@ export default function WorkflowEditorPage() {
             String(selectedNode.config.capability_key ?? ""),
         )
       : undefined;
+  const targetSchemas = useMemo(() => {
+    const map: Record<string, WorkflowSchemaField> = {};
+    for (const capability of capabilities) {
+      if (capability.target_schema) {
+        map[capability.capability_key] = capability.target_schema;
+      }
+    }
+    return map;
+  }, [capabilities]);
+  const capabilityOutputSchemas = useMemo(() => {
+    const map: Record<string, WorkflowSchemaField> = {};
+    for (const capability of capabilities) {
+      if (capability.output_schema) {
+        map[capability.capability_key] = capability.output_schema;
+      }
+    }
+    return map;
+  }, [capabilities]);
   const localIssues: GraphIssue[] = useMemo(
-    () => validateGraphShape(nodes, edges, inputsSchema),
-    [nodes, edges, inputsSchema],
+    () => validateGraphShape(nodes, edges, inputsSchema, targetSchemas),
+    [nodes, edges, inputsSchema, targetSchemas],
   );
 
   const markDirty = () => setDirty(true);
@@ -307,7 +325,11 @@ export default function WorkflowEditorPage() {
 
   const groupsForNode = (nodeId: string): ReferenceGroup[] => {
     const node = nodes.find((item) => item.node_id === nodeId);
-    return node ? buildReferenceGroups(nodes, scopeOf(node), inputsSchema) : [];
+    return node
+      ? buildReferenceGroups(nodes, scopeOf(node), inputsSchema, {
+          capabilityOutputSchemas,
+        })
+      : [];
   };
 
   const pathsFromGroups = (groups: ReferenceGroup[]): string[] =>
@@ -635,6 +657,24 @@ export default function WorkflowEditorPage() {
                       {selectedCapability.description}
                     </p>
                   )}
+                  {selectedCapability?.target_schema && (
+                    <div className="space-y-1">
+                      <span className="block text-slate-700">target</span>
+                      <InputsSchemaForm
+                        testIdPrefix="cap-target"
+                        schema={selectedCapability.target_schema}
+                        values={
+                          (selectedNode.config.target as Record<
+                            string,
+                            unknown
+                          >) ?? {}
+                        }
+                        onChange={(value) =>
+                          updateNodeConfig({ target: value })
+                        }
+                      />
+                    </div>
+                  )}
                   {selectedCapability?.inputs_schema ? (
                     <div className="space-y-1">
                       <span className="block text-slate-700">inputs</span>
@@ -653,7 +693,10 @@ export default function WorkflowEditorPage() {
                           nodes,
                           scopeOf(selectedNode),
                           inputsSchema,
-                          { excludeNodeId: selectedNode.node_id },
+                          {
+                            excludeNodeId: selectedNode.node_id,
+                            capabilityOutputSchemas,
+                          },
                         )}
                       />
                     </div>
@@ -724,7 +767,10 @@ export default function WorkflowEditorPage() {
                         nodes,
                         scopeOf(selectedNode),
                         inputsSchema,
-                        { excludeNodeId: selectedNode.node_id },
+                        {
+                          excludeNodeId: selectedNode.node_id,
+                          capabilityOutputSchemas,
+                        },
                       )}
                     />
                   </div>
@@ -784,6 +830,7 @@ export default function WorkflowEditorPage() {
                         nodes,
                         null,
                         inputsSchema,
+                        { capabilityOutputSchemas },
                       )}
                     />
                   </div>
@@ -839,12 +886,14 @@ export default function WorkflowEditorPage() {
                           nodes,
                           selectedNode.node_id,
                           inputsSchema,
+                          { capabilityOutputSchemas },
                         ),
                       )}
                       groups={buildReferenceGroups(
                         nodes,
                         selectedNode.node_id,
                         inputsSchema,
+                        { capabilityOutputSchemas },
                       )}
                       onChange={(condition) =>
                         updateNodeConfig({ continuation_condition: condition })
@@ -873,6 +922,7 @@ export default function WorkflowEditorPage() {
                       nodes,
                       selectedNode.parent_loop_node_id ?? null,
                       inputsSchema,
+                      { capabilityOutputSchemas },
                     )}
                   />
                 </div>

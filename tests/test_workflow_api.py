@@ -355,6 +355,16 @@ def test_workflow_capabilities_and_new_revision(test_memory_db_path, client):
         "relative_path",
         "content",
     }
+    assert vault["target_schema"] is None
+    specialist = next(
+        c for c in items if c["capability_key"] == "specialist_agent"
+    )
+    assert "agent_id" in specialist["target_schema"]["properties"]
+    coding = next(c for c in items if c["capability_key"] == "coding_cli")
+    assert "project_id" in coding["target_schema"]["properties"]
+    calendar = next(c for c in items if c["capability_key"] == "calendar_read")
+    assert "events" in calendar["output_schema"]["properties"]
+    assert "answer" in hitl["output_schema"]["properties"]
 
     created = client.post("/api/v1/workflows", json={"name": "rev"})
     workflow_id = created.json()["workflow_id"]

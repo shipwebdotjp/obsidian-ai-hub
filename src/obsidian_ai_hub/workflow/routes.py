@@ -27,6 +27,7 @@ from obsidian_ai_hub.workflow.capabilities import (
     WORKFLOW_ONLY_INPUT_SCHEMA,
     WORKFLOW_ONLY_KEYS,
     WORKFLOW_ONLY_METADATA,
+    WORKFLOW_ONLY_OUTPUT_SCHEMA,
     default_approval_policy,
     is_workflow_only,
     workflow_capability_keys,
@@ -153,7 +154,11 @@ def list_workflow_capabilities() -> dict[str, Any]:
     """
     from obsidian_ai_hub.tasks import store as task_store
     from obsidian_ai_hub.tasks.capabilities import get_capability_definitions
-    from obsidian_ai_hub.tasks.capability_schemas import ui_input_schema
+    from obsidian_ai_hub.tasks.capability_schemas import (
+        ui_input_schema,
+        ui_output_schema,
+        ui_target_schema,
+    )
 
     policies = {
         str(c["capability_key"]): c for c in task_store.list_capabilities()
@@ -173,6 +178,8 @@ def list_workflow_capabilities() -> dict[str, Any]:
                 ),
                 "workflow_only": False,
                 "inputs_schema": ui_input_schema(definition.key),
+                "target_schema": ui_target_schema(definition.key),
+                "output_schema": ui_output_schema(definition.key),
             }
         )
     for key in sorted(WORKFLOW_ONLY_KEYS):
@@ -186,6 +193,8 @@ def list_workflow_capabilities() -> dict[str, Any]:
                 "approval_policy": default_approval_policy(key),
                 "workflow_only": True,
                 "inputs_schema": WORKFLOW_ONLY_INPUT_SCHEMA.get(key),
+                "target_schema": None,
+                "output_schema": WORKFLOW_ONLY_OUTPUT_SCHEMA.get(key),
             }
         )
     return {"items": items}

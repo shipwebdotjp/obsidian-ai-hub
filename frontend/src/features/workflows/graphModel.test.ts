@@ -87,6 +87,55 @@ describe("graphModel", () => {
     expect(issues.some((issue) => issue.code === "cycle")).toBe(true);
   });
 
+  it("requires a target for target-based capabilities", () => {
+    const schemas = {
+      specialist_agent: {
+        type: "object",
+        properties: { agent_id: { type: "string" } },
+        required: ["agent_id"],
+      },
+    };
+    const end = node("end", "terminal", { outcome: "success" });
+
+    const missing = [
+      node("a", "capability", { capability_key: "specialist_agent", inputs: {} }),
+      end,
+    ];
+    expect(
+      validateGraphShape(missing, [], { type: "object" }, schemas).some(
+        (issue) => issue.code === "capability_target_required",
+      ),
+    ).toBe(true);
+
+    const partial = [
+      node("a", "capability", {
+        capability_key: "specialist_agent",
+        target: {},
+        inputs: {},
+      }),
+      end,
+    ];
+    expect(
+      validateGraphShape(partial, [], { type: "object" }, schemas).some(
+        (issue) => issue.message === "target.agent_id が必要です",
+      ),
+    ).toBe(true);
+
+    const present = [
+      node("a", "capability", {
+        capability_key: "specialist_agent",
+        target: { agent_id: "agent_1" },
+        inputs: {},
+      }),
+      end,
+    ];
+    expect(
+      validateGraphShape(present, [], { type: "object" }, schemas).some(
+        (issue) => issue.code === "capability_target_required",
+      ),
+    ).toBe(false);
+  });
+
   it("requires capability and agent targets", () => {
     const nodes = [
       node("a", "capability", { inputs: {} }),
@@ -152,6 +201,31 @@ describe("typed reference groups", () => {
     expect(refs).not.toContain("nodes.cap.output");
     // The bare container path is not resolvable at runtime.
     expect(refs).not.toContain("run.inputs");
+  });
+
+  it("expands a declared capability output schema", () => {
+    const cap = node("cap", "capability", {
+      capability_key: "calendar_read",
+      inputs: {},
+    });
+    const refs = paths(
+      buildReferenceGroups([cap], null, { type: "object", properties: {} }, {
+        capabilityOutputSchemas: {
+          calendar_read: {
+            type: "object",
+            properties: { events: { type: "array", items: { type: "object" } } },
+          },
+        },
+      }),
+    );
+    expect(refs).toContain("nodes.cap.output");
+    expect(refs).toContain("nodes.cap.output.events");
+
+    const opaque = paths(
+      buildReferenceGroups([cap], null, { type: "object", properties: {} }),
+    );
+    expect(opaque).toContain("nodes.cap.output");
+    expect(opaque).not.toContain("nodes.cap.output.events");
   });
 
   it("marks capability output as opaque and expands loop outputs", () => {

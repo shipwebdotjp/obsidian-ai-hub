@@ -61,6 +61,20 @@ WORKFLOW_ONLY_INPUT_SCHEMA: dict[str, dict[str, Any]] = {
     }
 }
 
+# Output of a workflow-only capability (shape mirrors ``ui_output_schema``).
+WORKFLOW_ONLY_OUTPUT_SCHEMA: dict[str, dict[str, Any]] = {
+    HITL_WAIT_KEY: {
+        "type": "object",
+        "properties": {
+            "answer": {
+                "type": "string",
+                "description": "HITL の回答値。",
+            },
+        },
+        "additionalProperties": True,
+    }
+}
+
 
 def workflow_capability_keys() -> frozenset[str]:
     """Return all capability keys selectable in a Workflow revision."""

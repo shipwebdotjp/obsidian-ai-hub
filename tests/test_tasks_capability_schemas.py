@@ -128,6 +128,62 @@ def test_ui_input_schema_flattens_optional_and_enum():
     assert schema["required"] == ["query"]
 
 
+def test_ui_input_schema_field_widget_hints():
+    vault = schemas.ui_input_schema("vault_write_file")
+    assert vault["properties"]["relative_path"]["x-ui"] == "vault_path"
+
+    research = schemas.ui_input_schema("research_agent")
+    assert research["properties"]["project_id"]["x-ui"] == "project"
+
+    calendar = schemas.ui_input_schema("calendar_read")
+    assert calendar["properties"]["start_date"]["x-ui"] == "date"
+    assert calendar["properties"]["end_date"]["x-ui"] == "date"
+
+    one_shot = schemas.ui_input_schema("register_one_shot_job")
+    assert one_shot["properties"]["run_at"]["x-ui"] == "datetime"
+
+    people = schemas.ui_input_schema("people_get")
+    assert people["properties"]["person_id"]["x-ui"] == "person"
+
+    specialist = schemas.ui_target_schema("specialist_agent")
+    assert specialist["properties"]["agent_id"]["x-ui"] == "agent"
+    coding = schemas.ui_target_schema("coding_cli")
+    assert coding["properties"]["project_id"]["x-ui"] == "project"
+
+
+def test_capability_output_schema_declared_and_fallback():
+    declared = schemas.capability_output_schema("calendar_read")
+    assert declared is not None
+    assert "events" in declared["properties"]
+    assert schemas.capability_output_schema("vault_search") is None
+
+    ui = schemas.ui_output_schema("calendar_read")
+    assert "events" in ui["properties"]
+
+    # Undeclared capabilities fall back to {summary}.
+    fallback = schemas.ui_output_schema("vault_search")
+    assert "summary" in fallback["properties"]
+
+    summary_cap = schemas.ui_output_schema("research_agent")
+    assert "summary" in summary_cap["properties"]
+
+
+def test_ui_target_schema_for_delegate_capabilities():
+    assert schemas.capability_has_target("specialist_agent") is True
+    assert schemas.capability_has_target("coding_cli") is True
+    assert schemas.capability_has_target("vault_search") is False
+
+    agent = schemas.ui_target_schema("specialist_agent")
+    assert agent is not None
+    assert "agent_id" in agent["properties"]
+
+    coding = schemas.ui_target_schema("coding_cli")
+    assert coding is not None
+    assert set(coding["properties"]) >= {"project_id", "backend"}
+
+    assert schemas.ui_target_schema("vault_search") is None
+
+
 def test_ui_input_schema_available_for_all_capabilities():
     missing = [
         d.key

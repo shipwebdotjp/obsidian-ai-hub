@@ -136,6 +136,7 @@ ui_position_json TEXT
 ```json
 {
   "capability_key": "vault_write_file",
+  "target": {},
   "inputs": {
     "relative_path": {"$ref": "run.inputs.output_path"},
     "content": {"$ref": "nodes.agent_xxx.output.note_body"}
@@ -145,6 +146,9 @@ ui_position_json TEXT
 ```
 
 - `inputs` は Capability の Pydantic schema に対応する値または型付き参照。
+- `target` は target を持つ Capability（`specialist_agent` / `coding_cli`）で必須。
+  `specialist_agent` は `agent_id`、`coding_cli` は `project_id`（任意で `backend`）を持つ。
+  値は型付き参照にできない（実行時にそのまま Adapter へ渡す）。
 - `retry` は非負整数。
 
 #### agent
@@ -309,6 +313,7 @@ Node 間のデータ連携は文字列テンプレート展開ではなく、以
 - `inputs_schema` / `output_schema` / `state_schema` が許可された JSON Schema サブセット内であること。
 - 全 Node ID / Edge ID が UUID 形式で一意であること。
 - `capability_key` が `task_agent_capabilities` に存在し `enabled=1` であること。
+- target を持つ Capability は `config.target` が必須で、target schema に適合すること。
 - `agent_id` が `agents` テーブルに存在すること。
 - Edge の source/target が同一 Revision（または同一 Loop 子グラフ）内に存在すること。
 - 通常 Edge が循環していないこと。
@@ -385,6 +390,8 @@ Node 間のデータ連携は文字列テンプレート展開ではなく、以
 - 論理的な 1 回起動単位ごとに `activation_id`（永続 UUID）を生成または再利用する。
 - Capability Adapter を `(validated_inputs, invocation_context)` の形で呼び出す。
 - Adapter は `StepResult` を返す。`satisfied_effects` があれば Event として記録する。
+- 出力はコード宣言された出力スキーマ（読み取り/検索系・`hitl_wait` 等）と照合し、
+  不一致なら `capability_output_schema_mismatch` Event を記録する。**Node は失敗させない**（助言）。
 - 既存 Adapter 実行契約は Task 行を要求するため、実行中だけ短命のブリッジ Task を持つ。
   これは `origin = 'workflow'` として Task Agent の一覧から除外する
   ([ADR](adr/workflow-graph-and-agent-node.md#amendment-capability-ブリッジ-task-の隔離))。
@@ -567,6 +574,7 @@ worker が Activation の既存状態を読んで `waiting_attention` の Node �
 - `node_needs_attention`, `attention_resolved`
 - `effect_satisfied`
 - `agent_config_fingerprint`
+- `capability_output_schema_mismatch`（宣言出力スキーマとの不一致。Node は失敗させない）
 
 payload には node_id、activation_id、子 run ID、HITL run ID、Capability key、
 inputs/output 要約、effects、取消理由（`attention_reason` / `result_certainty`）、

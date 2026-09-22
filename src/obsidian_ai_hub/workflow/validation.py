@@ -356,6 +356,21 @@ def _validate_capability_node(
             path=f"Node '{node_id}'.inputs",
         )
     )
+    if isinstance(key, str) and key.strip():
+        from obsidian_ai_hub.tasks.capability_schemas import (
+            capability_has_target,
+            validate_capability_target,
+        )
+
+        if capability_has_target(key):
+            target = config.get("target")
+            if not isinstance(target, dict) or not target:
+                errors.append(f"Node '{node_id}': target が必要です")
+            else:
+                try:
+                    validate_capability_target(key, target)
+                except ValueError as exc:
+                    errors.append(f"Node '{node_id}': target が不正です: {exc}")
     retry = config.get("retry")
     if retry is not None:
         attempts = retry.get("max_attempts") if isinstance(retry, dict) else None

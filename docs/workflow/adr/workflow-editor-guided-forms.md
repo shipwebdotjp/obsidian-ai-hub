@@ -2,8 +2,9 @@
 
 ## Status
 
-Accepted (2026-09-22)。Phase 0〜4 と P0 フォローアップ（スキーマ作成フォーム・
-検証ジャンプ・参照ピッカー改善）を実装済み。Capability 出力スキーマの宣言は対象外。
+Accepted (2026-09-22)。Phase 0〜4、P0 フォローアップ（スキーマ作成フォーム・
+検証ジャンプ・参照ピッカー改善）、P1（target・フィールドウィジェット・出力スキーマ）を
+実装済み。Capability 出力スキーマの全面宣言は対象外。
 
 ## Context
 
@@ -95,9 +96,31 @@ Status: Accepted (2026-09-22)。当初「対象外」としていたスキーマ
 - 参照ピッカーを既定折りたたみにし、自由入力が参照形式でない場合の警告、配列 `[0]` 例、
   パスのコピーを追加した。
 
+## Amendment (P1: target・フィールドウィジェット・出力スキーマ)
+
+Status: Accepted (2026-09-22)。エディタの入力候補を増やし、target 対応の
+不具合を解消した。
+
+- **Capability target 対応**: `capability` Node の `config` に `target` を追加し
+  （[specification.md](../specification.md) §3.3）、target を持つ Capability
+  （`specialist_agent` / `coding_cli`）は target 必須として静的検証する。実行器は
+  `config.target` を Adapter へ渡す。従来は `target: {}` 固定で実行時に必ず失敗していた。
+  エディタは target 欄を表示する（target に型付き参照は使えない）。
+- **`x-ui` フィールドウィジェットヒント**: `tasks/capability_schemas.field_widget()` が
+  フィールド名/型から `vault_path` / `project` / `person` / `agent` / `date` / `datetime`
+  を決め、`ui_input_schema` / `ui_target_schema` の property に付与する。フロントは
+  `x-ui` に従って専用コントロール（Vault ピッカー・Project/人物/Agent 選択・日付入力）
+  を描画し、未知のウィジェットは既定コントロールへフォールバックする。
+- **Capability 出力スキーマ**: コード所有マップ `capability_output_schema()` と
+  `ui_output_schema()`（未宣言は `{summary: string}`）を追加し、capabilities API の
+  `output_schema` として公開する。参照ピッカーは宣言済み Capability の出力項目を展開する。
+  実行時は宣言スキーマとの不一致を `capability_output_schema_mismatch` Event に記録するが、
+  **Node は失敗させない**（助言）。宣言範囲は安定した読み取り/検索系＋ `hitl_wait` /
+  `research_agent` / `register_*_job` に限定し、必要に応じて拡張する。
+
 ## 対象外
 
-- Capability 出力スキーマのコード宣言（参照ピッカーは opaque のまま）
+- Capability 出力スキーマの全面宣言（未宣言は `{summary}` フォールバック）
 - 定義の import / export、ユーザー管理テンプレート、複雑な JSON Schema
 
 ## 関連文書

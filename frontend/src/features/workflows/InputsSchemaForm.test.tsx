@@ -83,6 +83,23 @@ describe("InputsSchemaForm", () => {
     expect(onChange).toHaveBeenLastCalledWith({ topic: { $ref: "" } });
   });
 
+  it("renders a backend x-ui widget hint instead of a text input", () => {
+    render(
+      <InputsSchemaForm
+        schema={{
+          type: "object",
+          properties: { start_date: { type: "string", "x-ui": "date" } },
+        }}
+        values={{}}
+        onChange={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("workflow-input-start_date")).toHaveAttribute(
+      "type",
+      "date",
+    );
+  });
+
   it("offers the reference toggle for boolean fields too", async () => {
     const onChange = vi.fn();
     render(

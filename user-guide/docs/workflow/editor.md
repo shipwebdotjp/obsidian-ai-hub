@@ -62,14 +62,18 @@ Node を選択すると、右パネルに対応する設定欄が表示されま
 
 | 種別 | 設定項目 |
 | --- | --- |
-| `capability` | `capability_key`（選択）、`inputs`（Capability の入力スキーマから生成。要承認は選択肢に表示）、`retry.max_attempts` |
+| `capability` | `capability_key`（選択）、`target`（target を持つ Capability のみ。委譲先 Agent / 対象 Project を選択）、`inputs`（Capability の入力スキーマから生成。要承認は選択肢に表示）、`retry.max_attempts` |
 | `agent` | `agent_id`（選択）、`inputs`（構造化エディタ。キーを追加し、各値は値か参照）、`output_schema`（スキーマ作成フォーム） |
 | `loop` | `state_schema`（スキーマ作成フォーム）、`input_mapping`（`state_schema` から生成。各値は値か参照）、`max_iterations`、`entry_node_id`、`continuation_condition`（条件エディタ） |
 | `loop_result` | `output_mapping`（親 Loop の `state_schema` から生成。各値は値か参照） |
 | `terminal` | `outcome`（`success` / `failure`） |
 
 - `capability` の `inputs` は、選択した Capability の入力スキーマから生成されます。`enum` は選択肢、
-  `boolean` はチェックボックス、`integer` / `number` は数値入力になります。自由形式の項目は JSON 欄になります。
+  `boolean` はチェックボックス、`integer` / `number` は数値入力になります。既知の項目は専用ピッカーに
+  なります（`relative_path` は Vault ファイルピッカー、`project_id` は Project 検索、`person_id` は
+  人物ピッカー、`agent_id` は Agent 選択、日付系は date / datetime 入力）。自由形式の項目は JSON 欄になります。
+- `specialist_agent` / `coding_cli` は **target** 欄が表示され、委譲先 Agent・対象 Project を選びます
+  （target に型付き参照は使えません）。
 - `agent` の `inputs` はスキーマを持たない自由形式です。キーを追加し、各値はテキスト入力か
   **参照**（型付き参照）を選べます。`task` / `context` は入力候補として表示されます。
 - `agent` の `output_schema`、`loop` の `state_schema`、右パネルの `inputs_schema` は
@@ -100,7 +104,8 @@ Node を選択すると、右パネルに対応する設定欄が表示されま
 - `run.inputs.<field>` — `inputs_schema` の各項目（ネストも展開、配列は `[0]` の例つき）。
 - `nodes.<node_id>.output.<field>` — 先行 Node の出力。Agent は `output_schema`、
   Loop は `final_state.*` / `iterations` / `exit_reason`、Loop Result は `state_schema` の項目。
-  Capability の出力は型が未宣言のため `nodes.<node_id>.output` 全体のみ表示します。
+  Capability は型が宣言されているもの（読み取り/検索系・`hitl_wait`・`research_agent` など）は
+  項目を展開し、未宣言のものは `nodes.<node_id>.output` 全体のみ表示します。
 - `loop.state.<field>` / `loop.input.<field>` / `loop.iteration` — Loop 子グラフ内のみ。
 
 候補は **候補から選ぶ** で開閉でき、検索欄で絞り込めます。**コピー** でパスをコピーできます。

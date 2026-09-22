@@ -1168,6 +1168,8 @@ export interface WorkflowSchemaField {
   items?: WorkflowSchemaField;
   additionalProperties?: boolean | WorkflowSchemaField;
   "x-unsupported"?: boolean;
+  /** Backend UI widget hint (e.g. ``vault_path`` / ``project`` / ``date``). */
+  "x-ui"?: string;
 }
 
 export interface WorkflowCapabilityRecord {
@@ -1178,6 +1180,8 @@ export interface WorkflowCapabilityRecord {
   approval_policy: string;
   workflow_only: boolean;
   inputs_schema?: WorkflowSchemaField | null;
+  target_schema?: WorkflowSchemaField | null;
+  output_schema?: WorkflowSchemaField | null;
 }
 
 export interface WorkflowCapabilityListResponse {

@@ -102,11 +102,16 @@ class DefaultNodeRunner:
                 status="cancelled",
                 result_certainty=CANCEL_CERTAINTY_CANCELLED,
             )
-        # The Task Step contract requires ``target`` to be an object even
-        # when the capability ignores it (e.g. ``research_agent``). The
-        # Workflow node contract stays ``capability_key`` + ``inputs`` only;
-        # this compatibility layer alone supplies the empty object.
-        step = {"capability_key": key, "target": {}, "inputs": inputs}
+        # The Task Step contract requires ``target`` to be an object. Target-
+        # based capabilities (``specialist_agent`` / ``coding_cli``) carry it in
+        # ``config.target``; every other capability ignores the empty object.
+        config = node.get("config") or {}
+        target = config.get("target")
+        step = {
+            "capability_key": key,
+            "target": target if isinstance(target, dict) else {},
+            "inputs": inputs,
+        }
         task = {"task_id": bridge_id, "prompt_text": ""}
         plan = {"plan": {"purpose": "", "completion_criteria": ""}}
         try:
@@ -147,12 +152,41 @@ class DefaultNodeRunner:
         output = parse_json_object(result.summary)
         if output is None:
             output = {"summary": result.summary}
+        self._warn_output_mismatch(str(key), output, context)
         return NodeOutcome(
             status="succeeded",
             output=output,
             satisfied_effects=tuple(result.satisfied_effects or ()),
             child_kind=result.child_kind,
             child_run_id=result.child_run_id,
+        )
+
+    @staticmethod
+    def _warn_output_mismatch(
+        key: str, output: dict[str, Any], context: dict[str, Any]
+    ) -> None:
+        """Record (never fail) a mismatch against a declared output schema."""
+        from obsidian_ai_hub.tasks.capability_schemas import (
+            capability_output_schema,
+        )
+        from obsidian_ai_hub.workflow import store as workflow_store
+        from obsidian_ai_hub.workflow.models import validate_value_against_schema
+
+        schema = capability_output_schema(key)
+        if not schema:
+            return
+        errors = validate_value_against_schema(output, schema, path="output")
+        if not errors:
+            return
+        workflow_store.append_event(
+            str(context["run_id"]),
+            "capability_output_schema_mismatch",
+            {
+                "node_id": context.get("node_id"),
+                "activation_id": context.get("activation_id"),
+                "capability_key": key,
+                "errors": errors,
+            },
         )
 
     @staticmethod
