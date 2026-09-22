@@ -56,6 +56,11 @@ class WorkflowCreate(BaseModel):
     inputs_schema: dict[str, Any] = Field(default_factory=lambda: {"type": "object"})
 
 
+class WorkflowUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+
+
 class GraphUpdate(BaseModel):
     inputs_schema: dict[str, Any] = Field(default_factory=lambda: {"type": "object"})
     nodes: list[dict[str, Any]] = Field(default_factory=list)
@@ -216,6 +221,77 @@ def get_workflow(workflow_id: str) -> dict[str, Any]:
     workflow["revisions"] = workflow_store.list_revisions(workflow_id)
     workflow["runs"] = runs
     return workflow
+
+
+@router.patch("/{workflow_id}")
+def update_workflow(workflow_id: str, payload: WorkflowUpdate) -> dict[str, Any]:
+    """Partially update a workflow's name and/or description."""
+    fields = payload.model_dump(exclude_unset=True)
+    if "name" in fields and fields["name"] is None:
+        raise HTTPException(status_code=422, detail="name must not be null")
+    if "description" in fields and fields["description"] is None:
+        fields["description"] = ""
+    try:
+        return workflow_store.update_workflow(
+            workflow_id,
+            name=fields.get("name"),
+            description=fields.get("description"),
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.delete("/{workflow_id}")
+def delete_workflow(workflow_id: str) -> dict[str, Any]:
+    """Delete a workflow and its whole aggregate (definition and run history).
+
+    Rejected with 409 when a Scheduler Job still targets the workflow or a
+    non-terminal run exists; both leave no way to reach the run afterwards.
+    """
+    if workflow_store.get_workflow(workflow_id) is None:
+        raise HTTPException(
+            status_code=404, detail=f"Workflow '{workflow_id}' not found."
+        )
+    references = _scheduler_references(workflow_id)
+    if references:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": (
+                    "Scheduler Job がこの Workflow を参照しています。"
+                    "先に対象を変更または削除してください。"
+                ),
+                "references": references,
+            },
+        )
+    try:
+        deleted = workflow_store.delete_workflow(workflow_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"success": True, "workflow_id": workflow_id, "deleted": deleted}
+
+
+def _scheduler_references(workflow_id: str) -> list[dict[str, str]]:
+    """Return Scheduler Jobs (recurring and one-shot) targeting the workflow."""
+    from obsidian_ai_hub.scheduler_jobs import one_shot as one_shot_store
+    from obsidian_ai_hub.scheduler_jobs import recurring
+
+    references: list[dict[str, str]] = []
+    for job in recurring.load_jobs() or []:
+        target = recurring.get_workflow_target(job)
+        if target and str(target.get("workflow_id") or "") == workflow_id:
+            references.append(
+                {"source": "recurring", "job_id": str((job or {}).get("id") or "")}
+            )
+    for job in one_shot_store.find_non_terminal_workflow_jobs(workflow_id):
+        references.append(
+            {"source": "one_shot", "job_id": str(job.get("job_id") or "")}
+        )
+    return references
 
 
 @router.post("/{workflow_id}/revisions", status_code=201)

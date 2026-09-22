@@ -5,8 +5,10 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
+from obsidian_ai_hub.scheduler_jobs import one_shot, recurring
 from obsidian_ai_hub.tasks import store as task_store
 from obsidian_ai_hub.web.app import create_app
+from obsidian_ai_hub.workflow import routes as workflow_routes
 from obsidian_ai_hub.workflow import store as workflow_store
 
 
@@ -806,3 +808,140 @@ def test_delete_published_or_missing_revision_fails_without_side_effects(
         client.get(f"/api/v1/workflows/revisions/{revision_id}").status_code == 200
     )
     assert _graph_counts(revision_id) == (2, 1)
+
+
+# --- Workflow update / delete ----------------------------------------------
+
+
+def test_update_workflow_name_and_description(test_memory_db_path, client):
+    created = client.post(
+        "/api/v1/workflows", json={"name": "old", "description": "d"}
+    ).json()
+    workflow_id = created["workflow_id"]
+
+    renamed = client.patch(
+        f"/api/v1/workflows/{workflow_id}", json={"name": "  new  "}
+    )
+    assert renamed.status_code == 200
+    assert renamed.json()["name"] == "new"
+    assert renamed.json()["description"] == "d"
+
+    described = client.patch(
+        f"/api/v1/workflows/{workflow_id}", json={"description": ""}
+    )
+    assert described.status_code == 200
+    assert described.json()["description"] == ""
+    assert described.json()["name"] == "new"
+
+    blank = client.patch(
+        f"/api/v1/workflows/{workflow_id}", json={"name": "   "}
+    )
+    assert blank.status_code == 422
+    assert (
+        client.patch(
+            f"/api/v1/workflows/{workflow_id}", json={"name": None}
+        ).status_code
+        == 422
+    )
+
+    cleared = client.patch(
+        f"/api/v1/workflows/{workflow_id}", json={"description": None}
+    )
+    assert cleared.status_code == 200
+    assert cleared.json()["description"] == ""
+
+    assert (
+        client.patch(
+            "/api/v1/workflows/wf_missing", json={"name": "x"}
+        ).status_code
+        == 404
+    )
+
+
+def _publish_linear(client) -> tuple[str, str]:
+    task_store.sync_capabilities()
+    created = client.post("/api/v1/workflows", json={"name": "del"}).json()
+    revision_id = created["revision"]["revision_id"]
+    nodes, edges = _linear_graph()
+    client.put(
+        f"/api/v1/workflows/revisions/{revision_id}",
+        json={"inputs_schema": {"type": "object"}, "nodes": nodes, "edges": edges},
+    )
+    client.post(f"/api/v1/workflows/revisions/{revision_id}/publish")
+    return created["workflow_id"], revision_id
+
+
+def test_delete_workflow_removes_definition_and_run_history(
+    test_memory_db_path, client
+):
+    workflow_id, revision_id = _publish_linear(client)
+    run = client.post(
+        f"/api/v1/workflows/revisions/{revision_id}/runs", json={"inputs": {}}
+    ).json()
+    client.post(f"/api/v1/workflows/runs/{run['run_id']}/cancel")
+
+    deleted = client.delete(f"/api/v1/workflows/{workflow_id}")
+    assert deleted.status_code == 200
+    assert deleted.json()["deleted"]["runs"] == 1
+
+    assert client.get(f"/api/v1/workflows/{workflow_id}").status_code == 404
+    assert workflow_store.get_run(run["run_id"]) is None
+    assert workflow_store.list_revisions(workflow_id) == []
+    assert _graph_counts(revision_id) == (0, 0)
+    assert client.delete(f"/api/v1/workflows/{workflow_id}").status_code == 404
+
+
+def test_delete_workflow_rejects_non_terminal_run(test_memory_db_path, client):
+    workflow_id, revision_id = _publish_linear(client)
+    run = client.post(
+        f"/api/v1/workflows/revisions/{revision_id}/runs", json={"inputs": {}}
+    ).json()
+    assert run["status"] == "queued"
+
+    blocked = client.delete(f"/api/v1/workflows/{workflow_id}")
+    assert blocked.status_code == 409
+    assert client.get(f"/api/v1/workflows/{workflow_id}").status_code == 200
+    assert workflow_store.get_run(run["run_id"]) is not None
+
+
+def test_delete_workflow_rejects_scheduler_reference(test_memory_db_path, client):
+    workflow_id, _ = _publish_linear(client)
+    job = one_shot.register_one_shot_workflow_job(workflow_id, {})
+
+    blocked = client.delete(f"/api/v1/workflows/{workflow_id}")
+    assert blocked.status_code == 409
+    assert blocked.json()["detail"]["references"] == [
+        {"source": "one_shot", "job_id": job["job_id"]}
+    ]
+    assert client.get(f"/api/v1/workflows/{workflow_id}").status_code == 200
+
+    one_shot.cancel_one_shot_job(job["job_id"])
+    assert client.delete(f"/api/v1/workflows/{workflow_id}").status_code == 200
+
+
+def test_scheduler_references_detects_recurring_job(
+    test_memory_db_path, monkeypatch
+):
+    monkeypatch.setattr(
+        recurring,
+        "load_jobs",
+        lambda: [
+            {"id": "job1", "workflow": {"workflow_id": "wf_x", "inputs": {}}}
+        ],
+    )
+    references = workflow_routes._scheduler_references("wf_x")
+    assert {"source": "recurring", "job_id": "job1"} in references
+    assert workflow_routes._scheduler_references("wf_other") == []
+
+
+def test_delete_missing_workflow_is_404_even_with_reference(
+    test_memory_db_path, client, monkeypatch
+):
+    monkeypatch.setattr(
+        recurring,
+        "load_jobs",
+        lambda: [
+            {"id": "job1", "workflow": {"workflow_id": "wf_gone", "inputs": {}}}
+        ],
+    )
+    assert client.delete("/api/v1/workflows/wf_gone").status_code == 404

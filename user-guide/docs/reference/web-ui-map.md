@@ -26,7 +26,7 @@ Web UI は `http://127.0.0.1:8765`（既定）で動作します。
 | Task Agent | `/task-agent` | 依頼の投入、Plan 承認・差戻し・再計画 |
 | Task Capability設定 | `/task-agent/capabilities` | Capability の有効化と承認ポリシー |
 | ワークフロー | `/workflows` | 一覧・新規作成・テンプレートから作成 |
-| Workflow 詳細 | `/workflows/:workflowId` | Revision 履歴、最近の Run、新しい下書き |
+| Workflow 詳細 | `/workflows/:workflowId` | Revision 履歴、最近の Run、新しい下書き、改名・削除 |
 | Workflow エディタ | `/workflows/revisions/:revisionId/edit` | グラフ編集、検証、公開、実行 |
 | Workflow Run | `/workflows/runs/:runId` | 進捗・Node・Event、承認・再開・取消・再実行 |
 | 実行ログ（ログ） | `/execution-logs/logs` | CLI / LLM 実行ログの閲覧 |

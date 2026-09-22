@@ -1004,6 +1004,25 @@ export function getWorkflow(workflowId: string): Promise<WorkflowDetail> {
   );
 }
 
+export function updateWorkflow(
+  workflowId: string,
+  payload: { name?: string; description?: string },
+): Promise<WorkflowDetail> {
+  return request<WorkflowDetail>(
+    `/api/v1/workflows/${encodeURIComponent(workflowId)}`,
+    { method: "PATCH", body: JSON.stringify(payload) },
+  );
+}
+
+export function deleteWorkflow(
+  workflowId: string,
+): Promise<{ success: boolean; workflow_id: string }> {
+  return request<{ success: boolean; workflow_id: string }>(
+    `/api/v1/workflows/${encodeURIComponent(workflowId)}`,
+    { method: "DELETE" },
+  );
+}
+
 export function createWorkflowRevision(
   workflowId: string,
 ): Promise<WorkflowRevision> {

@@ -98,6 +98,9 @@ updated_at TEXT NOT NULL
 
 Workflow は名前・説明の恒久 ID だけを持ち、グラフの実体は Revision に属する。
 
+- 名前・説明は `PATCH /api/v1/workflows/:id` の部分更新で変更できる。空名は拒否する。
+- Workflow 本体の削除は定義と実行履歴の aggregate 全体を対象とする（§5.1）。
+
 ### 3.2 Workflow Revision
 
 ```text
@@ -305,6 +308,18 @@ Node 間のデータ連携は文字列テンプレート展開ではなく、以
   削除は `workflow_edges` → `workflow_nodes` → `workflow_revisions` の順に同一トランザクションで行う。
   参照する Run は削除しない（グラフ・入力のスナップショットを保持し、rerun 可能）。
   削除後に `version` が再利用される場合がある（`MAX(version)+1`）。
+
+### 5.1 Workflow 本体の削除
+
+- API: `DELETE /api/v1/workflows/:id`。Workflow 定義（Workflow / Revision / Node / Edge）と
+  実行履歴（Run / Run Node / Activation / Event / Schedule Dispatch）を同一トランザクションで削除する。
+- `published` Revision も定義の一部として削除する（Workflow が消えるため公開ポインタも消える）。
+- 次の場合は 409 で拒否し、何も削除しない。
+  - 非終端 Run（`queued` / `waiting_approval` / `running` / `waiting_hitl` / `waiting_attention` /
+    `cancelling` / `interrupted`）が 1 件以上ある。
+  - Scheduler Job が参照している。定期 YAML ジョブの `workflow.workflow_id`、または終端でない
+    `one_shot_jobs`（`target_kind='workflow'`）が対象。
+- 改名・説明更新（`PATCH`）は削除の前提条件ではない。
 
 ## 6. 静的検証と動的検証
 
@@ -631,6 +646,8 @@ Agent 指紋を含む。
 | `GET /api/v1/workflows/schedulable` | Scheduler Job の対象選択用に、published Revision を持つ Workflow とその `inputs_schema` を返す。 |
 | `POST /api/v1/workflows` | 新規 Workflow + 初期 draft Revision 作成。 |
 | `GET /api/v1/workflows/:id` | Workflow + Revision 履歴 + 最近 Run。 |
+| `PATCH /api/v1/workflows/:id` | Workflow の名前・説明を部分更新。空名は 422。 |
+| `DELETE /api/v1/workflows/:id` | Workflow 定義と実行履歴を削除。非終端 Run または Scheduler Job 参照があれば 409。 |
 | `POST /api/v1/workflows/:id/revisions` | 新しい draft Revision を作成。公開済み Revision があればグラフと `inputs_schema` を複製する。 |
 | `GET /api/v1/workflows/revisions/:revision_id` | Revision + Node/Edge グラフ。 |
 | `PUT /api/v1/workflows/revisions/:revision_id` | draft Revision の更新。 |
@@ -892,6 +909,9 @@ one_shot_jobs（v58 で再構築）
     旧 snapshot を維持し、次回発火のみが新 Revision を使う。
 22. Scheduler 失敗: published 不在 / 入力 schema 不一致では Run を作らず、定期 Job は
     当該枠を再試行せず、one-shot は `failed` として理由とともに残る。
+23. 改名・説明更新: `PATCH` で名前・説明を変更でき、空名は 422。削除: 非終端 Run または
+    Scheduler Job 参照がある Workflow の `DELETE` は 409 で、定義・履歴を一切削除しない。
+    条件を満たす `DELETE` は定義と実行履歴を削除し、以降 `GET` は 404 になる。
 
 ## 20. MVP 対象外、将来拡張、未決事項、リスク
 
@@ -941,6 +961,7 @@ one_shot_jobs（v58 で再構築）
 
 - [adr/workflow-graph-and-agent-node.md](adr/workflow-graph-and-agent-node.md) — 設計判断 ADR
 - [adr/workflow-revision-deletion.md](adr/workflow-revision-deletion.md) — Revision 削除ポリシー
+- [adr/workflow-deletion.md](adr/workflow-deletion.md) — Workflow 本体削除ポリシー
 - [adr/workflow-independent-context-shared-foundation.md](adr/workflow-independent-context-shared-foundation.md) — 撤回された旧 ADR
 - [../task-agent/specification.md](../task-agent/specification.md) — Task Agent 契約
 - [../task-agent/adr/approved-plan-as-execution-boundary.md](../task-agent/adr/approved-plan-as-execution-boundary.md) — Approval Policy

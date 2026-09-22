@@ -234,6 +234,26 @@ def list_one_shot_jobs(limit: int = 100, offset: int = 0) -> tuple[list[dict], i
         conn.close()
 
 
+def find_non_terminal_workflow_jobs(workflow_id: str) -> list[dict]:
+    """Return non-terminal one-shot jobs targeting ``workflow_id``.
+
+    A targeted query instead of the capped job listing, so a workflow is
+    never deleted while any pending job still references it.
+    """
+    placeholders = ",".join("?" for _ in TERMINAL_STATUSES)
+    conn = get_db_connection()
+    try:
+        rows = conn.execute(
+            f"SELECT * FROM one_shot_jobs WHERE target_kind = ? "
+            f"AND workflow_id = ? AND status NOT IN ({placeholders})"
+            " ORDER BY created_at ASC",
+            (TARGET_WORKFLOW, workflow_id, *TERMINAL_STATUSES),
+        ).fetchall()
+        return [_row_to_dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
 def cancel_one_shot_job(job_id: str, *, now: Optional[datetime] = None) -> dict:
     """Cancel a ``queued`` job. Running or terminal jobs cannot be cancelled."""
     ref = now or datetime.now(timezone.utc)

@@ -137,6 +137,153 @@ def list_workflows(
     return [dict(row) for row in rows], int(total)
 
 
+def update_workflow(
+    workflow_id: str,
+    *,
+    name: Optional[str] = None,
+    description: Optional[str] = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> dict[str, Any]:
+    """Update a workflow's name and/or description.
+
+    Only the provided fields change. A blank name is rejected so the
+    workflow keeps a usable display label. Raises ``FileNotFoundError`` when
+    the workflow does not exist and ``ValueError`` for a blank name.
+    """
+    if name is None and description is None:
+        existing = get_workflow(workflow_id, conn=conn)
+        if existing is None:
+            raise FileNotFoundError(f"Workflow '{workflow_id}' not found.")
+        return existing
+    if name is not None:
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("workflow name must not be blank")
+        name = name.strip()
+    now = _now_iso()
+    with auto_connection(conn) as (active_conn, is_generated):
+
+        def _do() -> None:
+            row = active_conn.execute(
+                "SELECT workflow_id FROM workflows WHERE workflow_id = ?;",
+                (workflow_id,),
+            ).fetchone()
+            if row is None:
+                raise FileNotFoundError(f"Workflow '{workflow_id}' not found.")
+            assignments = ["updated_at = ?"]
+            params: list[Any] = [now]
+            if name is not None:
+                assignments.append("name = ?")
+                params.append(name)
+            if description is not None:
+                assignments.append("description = ?")
+                params.append(description)
+            params.append(workflow_id)
+            active_conn.execute(
+                f"UPDATE workflows SET {', '.join(assignments)} "
+                "WHERE workflow_id = ?;",
+                params,
+            )
+
+        if is_generated:
+            with active_conn:
+                _do()
+        else:
+            _do()
+    updated = get_workflow(workflow_id, conn=conn)
+    assert updated is not None
+    return updated
+
+
+def delete_workflow(
+    workflow_id: str, *, conn: Optional[sqlite3.Connection] = None
+) -> dict[str, int]:
+    """Delete a workflow and its entire aggregate (definition and run history).
+
+    Non-terminal runs block deletion so no in-flight run is orphaned. Runs,
+    nodes, activations, events and schedule dispatches are removed together
+    with revisions and their graphs in one transaction. Raises
+    ``FileNotFoundError`` when the workflow does not exist and ``ValueError``
+    when a non-terminal run is present.
+    """
+    with auto_connection(conn) as (active_conn, is_generated):
+
+        def _do() -> dict[str, int]:
+            row = active_conn.execute(
+                "SELECT workflow_id FROM workflows WHERE workflow_id = ?;",
+                (workflow_id,),
+            ).fetchone()
+            if row is None:
+                raise FileNotFoundError(f"Workflow '{workflow_id}' not found.")
+            placeholders = ", ".join("?" for _ in RUN_TERMINAL_STATUSES)
+            blocking = active_conn.execute(
+                "SELECT COUNT(*) AS n FROM workflow_runs WHERE workflow_id = ? "
+                f"AND status NOT IN ({placeholders});",
+                (workflow_id, *sorted(RUN_TERMINAL_STATUSES)),
+            ).fetchone()["n"]
+            if int(blocking) > 0:
+                raise ValueError(
+                    f"Workflow '{workflow_id}' has {int(blocking)} non-terminal "
+                    "run(s) and cannot be deleted."
+                )
+            revision_count = active_conn.execute(
+                "SELECT COUNT(*) AS n FROM workflow_revisions "
+                "WHERE workflow_id = ?;",
+                (workflow_id,),
+            ).fetchone()["n"]
+            run_count = active_conn.execute(
+                "SELECT COUNT(*) AS n FROM workflow_runs WHERE workflow_id = ?;",
+                (workflow_id,),
+            ).fetchone()["n"]
+            active_conn.execute(
+                "DELETE FROM workflow_events WHERE run_id IN "
+                "(SELECT run_id FROM workflow_runs WHERE workflow_id = ?);",
+                (workflow_id,),
+            )
+            active_conn.execute(
+                "DELETE FROM workflow_run_nodes WHERE run_id IN "
+                "(SELECT run_id FROM workflow_runs WHERE workflow_id = ?);",
+                (workflow_id,),
+            )
+            active_conn.execute(
+                "DELETE FROM workflow_activations WHERE run_id IN "
+                "(SELECT run_id FROM workflow_runs WHERE workflow_id = ?);",
+                (workflow_id,),
+            )
+            active_conn.execute(
+                "DELETE FROM workflow_runs WHERE workflow_id = ?;", (workflow_id,)
+            )
+            active_conn.execute(
+                "DELETE FROM workflow_edges WHERE revision_id IN "
+                "(SELECT revision_id FROM workflow_revisions WHERE workflow_id = ?);",
+                (workflow_id,),
+            )
+            active_conn.execute(
+                "DELETE FROM workflow_nodes WHERE revision_id IN "
+                "(SELECT revision_id FROM workflow_revisions WHERE workflow_id = ?);",
+                (workflow_id,),
+            )
+            active_conn.execute(
+                "DELETE FROM workflow_revisions WHERE workflow_id = ?;",
+                (workflow_id,),
+            )
+            active_conn.execute(
+                "DELETE FROM workflow_schedule_dispatches WHERE workflow_id = ?;",
+                (workflow_id,),
+            )
+            active_conn.execute(
+                "DELETE FROM workflows WHERE workflow_id = ?;", (workflow_id,)
+            )
+            return {
+                "revisions": int(revision_count),
+                "runs": int(run_count),
+            }
+
+        if is_generated:
+            with active_conn:
+                return _do()
+        return _do()
+
+
 # --- Revisions -------------------------------------------------------------
 
 

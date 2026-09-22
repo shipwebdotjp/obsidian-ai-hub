@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   createWorkflowRevision,
+  deleteWorkflow,
   deleteWorkflowRevision,
   getWorkflow,
+  updateWorkflow,
 } from "../../api/client";
 import type { WorkflowDetail } from "../../api/types";
 import {
+  ROUTES,
   workflowEditPath,
   workflowRunPath,
 } from "../../constants/routes";
@@ -17,9 +20,13 @@ import { runStatusLabel } from "./runStatusLabels";
 
 export default function WorkflowDetailPage() {
   const { workflowId = "" } = useParams();
+  const navigate = useNavigate();
   const [workflow, setWorkflow] = useState<WorkflowDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [nameDraft, setNameDraft] = useState("");
+  const [descriptionDraft, setDescriptionDraft] = useState("");
 
   const reload = useCallback(async () => {
     setError(null);
@@ -33,6 +40,50 @@ export default function WorkflowDetailPage() {
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  const startEditing = () => {
+    setNameDraft(workflow?.name ?? "");
+    setDescriptionDraft(workflow?.description ?? "");
+    setEditing(true);
+  };
+
+  const onSave = async () => {
+    if (!nameDraft.trim()) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await updateWorkflow(workflowId, {
+        name: nameDraft.trim(),
+        description: descriptionDraft.trim(),
+      });
+      setEditing(false);
+      await reload();
+    } catch (e) {
+      setError(getApiErrorMessage(e, "更新に失敗しました"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onDeleteWorkflow = async () => {
+    if (
+      !window.confirm(
+        "このワークフローと実行履歴をすべて削除しますか？この操作は取り消せません。",
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await deleteWorkflow(workflowId);
+      navigate(ROUTES.WORKFLOWS);
+    } catch (e) {
+      setError(getApiErrorMessage(e, "削除に失敗しました"));
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const onNewRevision = async () => {
     setBusy(true);
@@ -77,19 +128,76 @@ export default function WorkflowDetailPage() {
   return (
     <div className="flex h-full flex-col overflow-auto bg-slate-50">
       <header className="border-b border-slate-200 bg-white px-4 py-3">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-lg font-semibold">{workflow.name}</h1>
-            <p className="text-xs text-slate-500">{workflow.description}</p>
-          </div>
-          <button
-            type="button"
-            onClick={onNewRevision}
-            disabled={busy}
-            className="cursor-pointer rounded bg-blue-600 px-3 py-1.5 text-xs text-white hover:bg-blue-700 disabled:opacity-50"
-          >
-            新しい下書き
-          </button>
+        <div className="flex items-center justify-between gap-4">
+          {editing ? (
+            <div className="flex flex-1 flex-wrap items-end gap-2">
+              <label className="text-xs text-slate-600">
+                名前
+                <input
+                  className="ml-1 rounded border border-slate-300 px-2 py-1 text-sm"
+                  value={nameDraft}
+                  onChange={(event) => setNameDraft(event.target.value)}
+                />
+              </label>
+              <label className="text-xs text-slate-600">
+                説明
+                <input
+                  className="ml-1 rounded border border-slate-300 px-2 py-1 text-sm"
+                  value={descriptionDraft}
+                  onChange={(event) => setDescriptionDraft(event.target.value)}
+                />
+              </label>
+              <button
+                type="button"
+                onClick={onSave}
+                disabled={busy || !nameDraft.trim()}
+                className="cursor-pointer rounded bg-blue-600 px-3 py-1.5 text-xs text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                保存
+              </button>
+              <button
+                type="button"
+                onClick={() => setEditing(false)}
+                disabled={busy}
+                className="cursor-pointer rounded bg-slate-900 px-3 py-1.5 text-xs text-white disabled:opacity-50"
+              >
+                キャンセル
+              </button>
+            </div>
+          ) : (
+            <div>
+              <h1 className="text-lg font-semibold">{workflow.name}</h1>
+              <p className="text-xs text-slate-500">{workflow.description}</p>
+            </div>
+          )}
+          {!editing && (
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={startEditing}
+                disabled={busy}
+                className="cursor-pointer rounded bg-slate-900 px-3 py-1.5 text-xs text-white disabled:opacity-50"
+              >
+                編集
+              </button>
+              <button
+                type="button"
+                onClick={onNewRevision}
+                disabled={busy}
+                className="cursor-pointer rounded bg-blue-600 px-3 py-1.5 text-xs text-white hover:bg-blue-700 disabled:opacity-50"
+              >
+                新しい下書き
+              </button>
+              <button
+                type="button"
+                onClick={onDeleteWorkflow}
+                disabled={busy}
+                className="cursor-pointer rounded bg-rose-800 px-3 py-1.5 text-xs text-white disabled:opacity-50"
+              >
+                Workflow を削除
+              </button>
+            </div>
+          )}
         </div>
         {error && <p className="mt-2 text-xs text-rose-700">{error}</p>}
       </header>
