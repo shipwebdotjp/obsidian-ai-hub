@@ -59,8 +59,44 @@ class DeviationReported(Exception):
         self.reason = reason
 
 
+CANCEL_CERTAINTY_CANCELLED = "cancelled"
+CANCEL_CERTAINTY_COMPLETED = "completed"
+CANCEL_CERTAINTY_UNKNOWN = "unknown"
+
+
+@dataclass(frozen=True)
+class CancellationEvidence:
+    """What is known about a child process when cancellation stopped waiting.
+
+    Cancellation is a request, not a rollback: the child may have reached
+    ``cancelled`` (cooperative), may have already ``completed`` before the
+    request arrived, or may have ended in a state whose external effects are
+    unknown. Callers use ``result_certainty`` to decide whether they can stop
+    cleanly or must ask a human.
+    """
+
+    child_kind: Optional[str] = None
+    child_run_id: Optional[str] = None
+    result_certainty: str = CANCEL_CERTAINTY_UNKNOWN
+    # Best-effort human-readable result recovered when the child actually
+    # finished; lets the Workflow persist adoptable evidence instead of
+    # discarding a completed external result.
+    result_summary: Optional[str] = None
+
+
 class TaskCancelled(Exception):
-    """Raised by an adapter when the task entered ``cancelling`` mid-step."""
+    """Raised by an adapter when the task entered ``cancelling`` mid-step.
+
+    Carries the minimal :class:`CancellationEvidence` (child kind/id and how
+    certain the outcome is) so an orchestrator can choose ``cancelled`` versus
+    ``needs_attention`` instead of guessing.
+    """
+
+    def __init__(
+        self, message: str = "", *, evidence: Optional[CancellationEvidence] = None
+    ) -> None:
+        super().__init__(message)
+        self.evidence = evidence or CancellationEvidence()
 
 
 class StepExecutor(Protocol):

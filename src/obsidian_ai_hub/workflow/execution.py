@@ -12,9 +12,13 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Optional, Protocol
 
+from obsidian_ai_hub.tasks.execution import (
+    CANCEL_CERTAINTY_CANCELLED,
+    CANCEL_CERTAINTY_COMPLETED,
+)
 from obsidian_ai_hub.workflow import store as workflow_store
 from obsidian_ai_hub.workflow.models import (
     MAX_ITERATIONS,
@@ -29,25 +33,33 @@ HITL_ANSWER_EVENT = "hitl_answer_received"
 ATTENTION_EVENT = "attention_resolved"
 HITL_HANDLER = "workflow.hitl_wait"
 
+ATTENTION_REASON_CANCEL_COMPLETED = "cancel_after_external_completion"
+ATTENTION_REASON_CANCEL_UNKNOWN = "cancel_with_unknown_external_result"
+
 
 @dataclass(frozen=True)
 class NodeOutcome:
     """Result of one node invocation."""
 
-    status: str  # succeeded | failed | waiting_hitl | needs_attention
+    status: str  # succeeded | failed | cancelled | waiting_hitl | needs_attention
     output: dict[str, Any] = field(default_factory=dict)
     satisfied_effects: tuple[str, ...] = ()
     error: Optional[str] = None
     child_kind: Optional[str] = None
     child_run_id: Optional[str] = None
     hitl_run_id: Optional[str] = None
+    # ``cancelled`` | ``completed`` | ``unknown``. Only meaningful when the
+    # outcome is cancel-aware: a cooperative cancel can end the run, but a
+    # child that finished or is uncertain must be reviewed by a human.
+    result_certainty: Optional[str] = None
+    attention_reason: Optional[str] = None
 
 
 @dataclass(frozen=True)
 class RunOutcome:
     """Terminal or waiting outcome of a whole run execution."""
 
-    kind: str  # completed | incomplete | failed | waiting_hitl | waiting_attention
+    kind: str  # completed | incomplete | failed | cancelled | waiting_hitl | waiting_attention
     result_summary: Optional[str] = None
     error_summary: Optional[str] = None
     hitl_run_id: Optional[str] = None
@@ -135,6 +147,8 @@ class WorkflowEngine:
                 return RunOutcome(
                     kind="failed", error_summary="グラフ実行が上限を超えました"
                 )
+            if self._cancel_requested(run_id):
+                return self._stop_cancelled(run_id)
             node = self._by_id[current]
             node_type = node.get("node_type")
             if node_type == "terminal":
@@ -151,16 +165,15 @@ class WorkflowEngine:
                 continue
             outcome = self._run_single_node(run_id, node)
             if outcome.status == "waiting_hitl":
-                workflow_store.transition_run_status(
-                    run_id, "waiting_hitl", conn=self._conn
-                )
-                return RunOutcome(kind="waiting_hitl", hitl_run_id=outcome.hitl_run_id)
+                return self._park_hitl(run_id, outcome)
             if outcome.status == "needs_attention":
-                workflow_store.transition_run_status(
-                    run_id, "waiting_attention", conn=self._conn
-                )
+                self._to_waiting_attention(run_id)
                 return RunOutcome(kind="waiting_attention")
+            if outcome.status == "cancelled":
+                return self._stop_cancelled(run_id)
             if outcome.status == "succeeded":
+                if self._cancel_requested(run_id):
+                    return self._stop_cancelled(run_id)
                 current = self._next_target(node, success=True)
                 if current is None:
                     return RunOutcome(
@@ -169,12 +182,79 @@ class WorkflowEngine:
                     )
                 continue
             # failed
+            if self._cancel_requested(run_id):
+                return self._stop_cancelled(run_id)
             current = self._next_target(node, success=False)
             if current is None:
                 return RunOutcome(
                     kind="failed",
                     error_summary=outcome.error or "Node が失敗しました",
                 )
+
+    def _cancel_requested(self, run_id: str) -> bool:
+        run = workflow_store.get_run(run_id, conn=self._conn)
+        return run is not None and str(run.get("status")) == "cancelling"
+
+    def _stop_cancelled(self, run_id: str) -> RunOutcome:
+        run = workflow_store.get_run(run_id, conn=self._conn)
+        if run is not None and str(run.get("status")) == "running":
+            # A child run cancelled outside a workflow cancel request still
+            # stops the run through the cooperative path.
+            workflow_store.transition_run_status(
+                run_id, "cancelling", conn=self._conn
+            )
+        summary = "取消要求により停止しました"
+        workflow_store.transition_run_status(
+            run_id, "cancelled", result_summary=summary, conn=self._conn
+        )
+        workflow_store.append_event(
+            run_id,
+            "run_status_changed",
+            {"status": "cancelled"},
+            conn=self._conn,
+        )
+        return RunOutcome(kind="cancelled", result_summary=summary)
+
+    def _to_waiting_attention(self, run_id: str) -> None:
+        """Move ``running`` or ``cancelling`` to ``waiting_attention``."""
+        workflow_store.transition_run_status(
+            run_id, "waiting_attention", conn=self._conn
+        )
+
+    def _park_hitl(self, run_id: str, outcome: NodeOutcome) -> RunOutcome:
+        """Park at ``waiting_hitl`` unless a cancel arrived meanwhile.
+
+        A cancel can land between the node creating its HITL run and this
+        transition. Then the HITL run is cancelled and the run stops as
+        ``cancelled`` instead of parking (``cancelling -> waiting_hitl`` is
+        not a legal transition).
+        """
+        if self._cancel_requested(run_id):
+            self._cancel_hitl_run(outcome.hitl_run_id)
+            return self._stop_cancelled(run_id)
+        try:
+            workflow_store.transition_run_status(
+                run_id, "waiting_hitl", conn=self._conn
+            )
+        except ValueError:
+            self._cancel_hitl_run(outcome.hitl_run_id)
+            return self._stop_cancelled(run_id)
+        return RunOutcome(kind="waiting_hitl", hitl_run_id=outcome.hitl_run_id)
+
+    @staticmethod
+    def _cancel_hitl_run(hitl_run_id: Optional[str]) -> None:
+        if not hitl_run_id:
+            return
+        try:
+            from obsidian_ai_hub.hitl import service as hitl_service
+
+            hitl_service.cancel_run(str(hitl_run_id))
+        except Exception:  # noqa: BLE001 - best-effort HITL teardown
+            logger.warning(
+                "Failed to cancel HITL run %s during workflow cancel",
+                hitl_run_id,
+                exc_info=True,
+            )
 
     def _next_target(self, node: dict[str, Any], *, success: bool) -> Optional[str]:
         node_id = str(node["node_id"])
@@ -270,25 +350,21 @@ class WorkflowEngine:
             except Exception as exc:  # noqa: BLE001 - surfaced as node failure
                 logger.exception("Workflow node '%s' crashed", node_id)
                 outcome = NodeOutcome(status="failed", error=str(exc))
-            if outcome.status in ("waiting_hitl", "needs_attention"):
-                status = (
-                    "waiting_hitl" if outcome.status == "waiting_hitl" else "needs_attention"
-                )
+            if outcome.status == "waiting_hitl":
                 workflow_store.upsert_run_node(
                     run_id=run_id,
                     node_id=node_id,
                     activation_id=activation_id,
                     attempt=attempt,
-                    status=status,
+                    status="waiting_hitl",
                     output=outcome.output,
                     error_summary=outcome.error,
+                    hitl_run_id=outcome.hitl_run_id,
                     conn=self._conn,
                 )
                 workflow_store.append_event(
                     run_id,
-                    "node_needs_attention"
-                    if status == "needs_attention"
-                    else "hitl_question_asked",
+                    "hitl_question_asked",
                     {
                         "node_id": node_id,
                         "activation_id": activation_id,
@@ -297,6 +373,41 @@ class WorkflowEngine:
                     conn=self._conn,
                 )
                 return outcome
+            if outcome.status == "needs_attention":
+                self._persist_attention(
+                    run_id, node_id, activation_id, attempt, outcome
+                )
+                return outcome
+            if outcome.status == "cancelled":
+                if outcome.result_certainty == CANCEL_CERTAINTY_CANCELLED:
+                    workflow_store.upsert_run_node(
+                        run_id=run_id,
+                        node_id=node_id,
+                        activation_id=activation_id,
+                        attempt=attempt,
+                        status="cancelled",
+                        child_kind=outcome.child_kind,
+                        child_run_id=outcome.child_run_id,
+                        cancel_outcome=CANCEL_CERTAINTY_CANCELLED,
+                        conn=self._conn,
+                    )
+                    workflow_store.append_event(
+                        run_id,
+                        "node_cancelled",
+                        {
+                            "node_id": node_id,
+                            "activation_id": activation_id,
+                            "child_kind": outcome.child_kind,
+                            "child_run_id": outcome.child_run_id,
+                        },
+                        conn=self._conn,
+                    )
+                    return outcome
+                attention = self._attention_from_cancel(outcome)
+                self._persist_attention(
+                    run_id, node_id, activation_id, attempt, attention
+                )
+                return attention
             if outcome.status == "succeeded":
                 self._record_success(run_id, node, activation_id, attempt, outcome)
                 return outcome
@@ -324,6 +435,54 @@ class WorkflowEngine:
             attempt += 1
         return NodeOutcome(status="failed", error=last_error)
 
+    def _attention_from_cancel(self, outcome: NodeOutcome) -> NodeOutcome:
+        """Convert a cancel-aware outcome into a reviewable attention state."""
+        if outcome.result_certainty == CANCEL_CERTAINTY_COMPLETED:
+            reason = ATTENTION_REASON_CANCEL_COMPLETED
+        else:
+            reason = ATTENTION_REASON_CANCEL_UNKNOWN
+        return replace(
+            outcome, status="needs_attention", attention_reason=reason
+        )
+
+    def _persist_attention(
+        self,
+        run_id: str,
+        node_id: str,
+        activation_id: str,
+        attempt: int,
+        outcome: NodeOutcome,
+    ) -> None:
+        """Persist ``needs_attention`` together with its evidence."""
+        workflow_store.upsert_run_node(
+            run_id=run_id,
+            node_id=node_id,
+            activation_id=activation_id,
+            attempt=attempt,
+            status="needs_attention",
+            output=outcome.output,
+            error_summary=outcome.error,
+            child_kind=outcome.child_kind,
+            child_run_id=outcome.child_run_id,
+            effects=outcome.satisfied_effects,
+            cancel_outcome=outcome.result_certainty,
+            attention_reason=outcome.attention_reason,
+            conn=self._conn,
+        )
+        workflow_store.append_event(
+            run_id,
+            "node_needs_attention",
+            {
+                "node_id": node_id,
+                "activation_id": activation_id,
+                "child_kind": outcome.child_kind,
+                "child_run_id": outcome.child_run_id,
+                "attention_reason": outcome.attention_reason,
+                "result_certainty": outcome.result_certainty,
+            },
+            conn=self._conn,
+        )
+
     def _record_success(
         self,
         run_id: str,
@@ -340,6 +499,11 @@ class WorkflowEngine:
             attempt=attempt,
             status="succeeded",
             output=outcome.output,
+            child_kind=outcome.child_kind,
+            child_run_id=outcome.child_run_id,
+            # ``None`` (not an empty tuple) so a resume without rehydrated
+            # effects cannot overwrite stored evidence via COALESCE.
+            effects=outcome.satisfied_effects or None,
             conn=self._conn,
         )
         self._node_outputs[node_id] = outcome.output
@@ -418,9 +582,10 @@ class WorkflowEngine:
         node_id = str(node["node_id"])
         self._node_outputs[node_id] = existing.get("output") or {}
         self._declared_effects.update(self._declared_effects_for(node))
-        self._satisfied_effects.update(
-            self._effects_for_activation(run_id, activation_id)
+        effects = existing.get("effects") or self._effects_for_activation(
+            run_id, activation_id
         )
+        self._satisfied_effects.update(effects)
 
     def _resume_waiting_state(
         self, run_id: str, node: dict[str, Any], activation_id: str
@@ -433,6 +598,7 @@ class WorkflowEngine:
         ):
             return None
         events = workflow_store.list_events(run_id, conn=self._conn)
+        stored_effects = tuple(existing.get("effects") or [])
         if existing["status"] == "waiting_hitl":
             for event in reversed(events):
                 payload = event.get("payload") or {}
@@ -443,7 +609,9 @@ class WorkflowEngine:
                     output = payload.get("answer") or {}
                     if not isinstance(output, dict):
                         output = {"answer": output}
-                    return NodeOutcome(status="succeeded", output=output)
+                    return NodeOutcome(
+                        status="succeeded", output=output, satisfied_effects=stored_effects
+                    )
             return NodeOutcome(status="waiting_hitl", output=existing.get("output") or {})
         for event in reversed(events):
             payload = event.get("payload") or {}
@@ -453,8 +621,12 @@ class WorkflowEngine:
             ):
                 decision = payload.get("decision")
                 if decision == "adopt":
+                    # Reuse the stored success output and effects so adopting a
+                    # cancel-origin node never erases its own evidence.
                     return NodeOutcome(
-                        status="succeeded", output=existing.get("output") or {}
+                        status="succeeded",
+                        output=existing.get("output") or {},
+                        satisfied_effects=stored_effects,
                     )
                 if decision == "fail":
                     return NodeOutcome(
@@ -484,6 +656,8 @@ class WorkflowEngine:
         )
         start = len(completed) + 1
         for iteration in range(start, max_iterations + 1):
+            if self._cancel_requested(run_id):
+                return self._stop_cancelled(run_id), None
             iteration_context = {"loop_node_id": loop_id, "iteration": iteration}
             workflow_store.append_event(
                 run_id,
@@ -505,6 +679,8 @@ class WorkflowEngine:
                         ),
                         None,
                     )
+                if self._cancel_requested(run_id):
+                    return self._stop_cancelled(run_id), None
                 child = self._by_id[current]
                 if child.get("node_type") == "loop_result":
                     next_state = self._resolve_loop_result(
@@ -523,25 +699,15 @@ class WorkflowEngine:
                     loop_iteration=iteration,
                     iteration_context=iteration_context,
                 )
-                if outcome.status in ("waiting_hitl", "needs_attention"):
-                    workflow_store.transition_run_status(
-                        run_id,
-                        "waiting_hitl"
-                        if outcome.status == "waiting_hitl"
-                        else "waiting_attention",
-                        conn=self._conn,
-                    )
-                    return (
-                        RunOutcome(
-                            kind=(
-                                "waiting_hitl"
-                                if outcome.status == "waiting_hitl"
-                                else "waiting_attention"
-                            ),
-                            hitl_run_id=outcome.hitl_run_id,
-                        ),
-                        None,
-                    )
+                if outcome.status == "waiting_hitl":
+                    return self._park_hitl(run_id, outcome), None
+                if outcome.status == "needs_attention":
+                    self._to_waiting_attention(run_id)
+                    return (RunOutcome(kind="waiting_attention"), None)
+                if outcome.status == "cancelled":
+                    return self._stop_cancelled(run_id), None
+                if self._cancel_requested(run_id):
+                    return self._stop_cancelled(run_id), None
                 if outcome.status == "succeeded":
                     iteration_outputs[current] = outcome.output
                     current = self._next_target(child, success=True)
@@ -731,6 +897,7 @@ class WorkflowEngine:
             "revision_id": self._run.get("revision_id"),
             "node_id": str(node["node_id"]),
             "activation_id": activation_id,
+            "attempt": attempt,
             "retry_count": attempt - 1,
             "loop_context": iteration_context,
         }

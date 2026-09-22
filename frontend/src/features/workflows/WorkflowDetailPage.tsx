@@ -13,6 +13,7 @@ import {
 import { formatDateTime } from "../../utils/date";
 import { getApiErrorMessage } from "../../utils/error";
 import { REVISION_STATUS_LABEL } from "./revisionLabels";
+import { runStatusLabel } from "./runStatusLabels";
 
 export default function WorkflowDetailPage() {
   const { workflowId = "" } = useParams();
@@ -150,7 +151,7 @@ export default function WorkflowDetailPage() {
                 className="flex items-center justify-between px-3 py-2 text-sm"
               >
                 <span>
-                  {run.status} ・ {formatDateTime(run.created_at)}
+                  {runStatusLabel(run.status)} ・ {formatDateTime(run.created_at)}
                 </span>
                 <Link className="text-blue-700" to={workflowRunPath(run.run_id)}>
                   詳細

@@ -65,15 +65,16 @@ title: 用語と状態
 | `waiting_approval` | `plan_required` Capability / Agent Node を含み、承認待ち。 |
 | `running` | 実行中。 |
 | `waiting_hitl` | HITL へ質問を登録済み。回答待ち。 |
-| `waiting_attention` | 非冪等 Node が中断し、人間対応待ち。 |
-| `cancelling` | 取消要求を受け、協調的取消処理中。 |
+| `waiting_attention` | 非冪等 Node が中断した、または取消要求後に外部処理が完了・結果不明。人間対応待ち。 |
+| `cancelling` | 取消要求を受け、協調的取消処理中（画面表示は **停止要求中**）。 |
 | `interrupted` | worker 停止などで中断。明示的な再開が必要。 |
 | `completed` | 成功 Terminal に到達し、効果が満たされた終端状態。 |
 | `incomplete` | 終端には到達したが効果未達、または Loop 上限到達。失敗ではない。 |
 | `failed` | 失敗 Terminal 到達、または実行時エラー。 |
-| `cancelled` | 取消により終端。 |
+| `cancelled` | 協調取消を確認して終端。外部処理の結果が完了・不明なら `waiting_attention` に回る。 |
 
 終端状態（`completed` / `incomplete` / `failed` / `cancelled`）からは遷移しません。
+取消はロールバックではなく要求であり、実施済みの副作用は巻き戻りません。
 
 ## Node の状態
 

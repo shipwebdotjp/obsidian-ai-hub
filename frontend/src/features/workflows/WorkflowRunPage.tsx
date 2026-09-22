@@ -26,10 +26,27 @@ import {
   RUN_GRAPH_STATUS_LABELS,
   runGraphOf,
 } from "./runGraphModel";
+import { runStatusLabel } from "./runStatusLabels";
 import InputsSchemaForm from "./InputsSchemaForm";
 import WorkflowCanvas from "./WorkflowCanvas";
 
 const TERMINAL = new Set(["completed", "incomplete", "failed", "cancelled"]);
+
+const CHILD_RUN_PATHS: Record<string, string> = {
+  agent: ROUTES.AGENTS,
+  research: ROUTES.RESEARCH,
+  coding: ROUTES.CODING,
+};
+
+function attentionReasonText(reason: string | null | undefined): string | null {
+  if (reason === "cancel_after_external_completion") {
+    return "取消要求後に外部処理が完了しました。保存済みの出力・効果があれば採用して続行できます。";
+  }
+  if (reason === "cancel_with_unknown_external_result") {
+    return "取消要求後に外部処理の結果を確認できません。子Runの結果を確認してください。";
+  }
+  return reason ? "外部処理の状態を確認してください。" : null;
+}
 
 export default function WorkflowRunPage() {
   const { runId = "" } = useParams();
@@ -203,12 +220,14 @@ export default function WorkflowRunPage() {
   const attentionNode = runNodes.find(
     (node) => node.status === "needs_attention",
   );
+  const attentionReason = attentionReasonText(attentionNode?.attention_reason);
 
   return (
     <div className="flex h-full flex-col overflow-auto bg-slate-50">
       <header className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-white px-4 py-2">
         <div className="text-sm">
-          <span className="font-semibold">Run</span> {run.run_id} ・ {run.status}
+          <span className="font-semibold">Run</span> {run.run_id} ・{" "}
+          <span data-testid="run-status">{runStatusLabel(run.status)}</span>
         </div>
         <div className="flex flex-wrap gap-2">
           {run.status === "waiting_approval" && (
@@ -273,6 +292,18 @@ export default function WorkflowRunPage() {
               >
                 失敗として処理
               </button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() =>
+                  act(() =>
+                    resolveWorkflowAttention(runId, { decision: "interrupt" }),
+                  )
+                }
+                className="cursor-pointer rounded bg-slate-900 px-3 py-1 text-xs text-white disabled:opacity-50"
+              >
+                中断
+              </button>
             </>
           )}
           {TERMINAL.has(run.status) && (
@@ -301,9 +332,31 @@ export default function WorkflowRunPage() {
 
       {error && <p className="bg-white px-4 py-2 text-xs text-rose-700">{error}</p>}
       {attentionNode && (
-        <p className="bg-white px-4 py-2 text-xs text-amber-700">
-          Node {attentionNode.node_id} が対応待ちです。
-        </p>
+        <div
+          data-testid="run-attention-banner"
+          className="bg-white px-4 py-2 text-xs text-amber-700"
+        >
+          <span>Node {attentionNode.node_id} が対応待ちです。</span>
+          {attentionReason && <span className="ml-1">{attentionReason}</span>}
+          {attentionNode.child_run_id && (
+            <span className="ml-1">
+              子Run: {attentionNode.child_kind ?? "unknown"} /{" "}
+              {attentionNode.child_run_id}
+              {attentionNode.child_kind &&
+                CHILD_RUN_PATHS[attentionNode.child_kind] && (
+                  <>
+                    {" "}
+                    <Link
+                      className="text-blue-700 underline"
+                      to={CHILD_RUN_PATHS[attentionNode.child_kind]}
+                    >
+                      確認する
+                    </Link>
+                  </>
+                )}
+            </span>
+          )}
+        </div>
       )}
 
       {rerunOpen && (

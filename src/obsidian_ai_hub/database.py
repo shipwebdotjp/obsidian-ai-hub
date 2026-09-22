@@ -727,6 +727,9 @@ def get_db_connection() -> sqlite3.Connection:
     if current_version <= 55:
         run_migration_v56(conn)
 
+    if current_version <= 56:
+        run_migration_v57(conn)
+
     return conn
 
 
@@ -1009,6 +1012,39 @@ def run_migration_v56(conn: sqlite3.Connection) -> None:
         "ON task_agent_tasks(origin);"
     )
     conn.execute("PRAGMA user_version = 56;")
+    conn.commit()
+
+
+def run_migration_v57(conn: sqlite3.Connection) -> None:
+    """Run migration for version 57 (workflow cancellation evidence).
+
+    Cancellation is a request, not a rollback. While a node waits on an
+    external process the engine must remember what was started so a
+    concurrent cancel can stop it, and must persist whatever evidence
+    exists when the process ended unexpectedly. Adds the in-flight
+    references (``bridge_task_id``, ``child_kind``, ``child_run_id``,
+    ``hitl_run_id``) and the outcome/evidence fields (``effects_json``,
+    ``cancel_outcome``, ``attention_reason``) to ``workflow_run_nodes``.
+    Existing rows stay NULL, so old runs remain readable.
+    """
+    for statement in (
+        "ALTER TABLE workflow_run_nodes ADD COLUMN bridge_task_id TEXT;",
+        "ALTER TABLE workflow_run_nodes ADD COLUMN child_kind TEXT;",
+        "ALTER TABLE workflow_run_nodes ADD COLUMN child_run_id TEXT;",
+        "ALTER TABLE workflow_run_nodes ADD COLUMN hitl_run_id TEXT;",
+        "ALTER TABLE workflow_run_nodes ADD COLUMN effects_json TEXT;",
+        "ALTER TABLE workflow_run_nodes ADD COLUMN cancel_outcome TEXT;",
+        "ALTER TABLE workflow_run_nodes ADD COLUMN attention_reason TEXT;",
+    ):
+        try:
+            conn.execute(statement)
+        except sqlite3.OperationalError as e:
+            _ignore_duplicate_schema_object(e)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_workflow_run_nodes_bridge "
+        "ON workflow_run_nodes(bridge_task_id);"
+    )
+    conn.execute("PRAGMA user_version = 57;")
     conn.commit()
 
 

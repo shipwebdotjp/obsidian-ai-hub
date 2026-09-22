@@ -781,6 +781,92 @@ def transition_run_status(
         return _do()
 
 
+IMMEDIATE_CANCEL_STATUSES = frozenset(
+    {"queued", "waiting_approval", "waiting_hitl", "waiting_attention"}
+)
+COOPERATIVE_CANCEL_STATUSES = frozenset({"running", "cancelling"})
+
+
+def request_run_cancel(
+    run_id: str, *, conn: Optional[sqlite3.Connection] = None
+) -> dict[str, Any]:
+    """Atomically record a cancel request and return the updated run.
+
+    Waiting/queued runs stop immediately (``cancelled``); a ``running`` run
+    moves to ``cancelling`` so the engine and the in-flight bridge Task can
+    stop cooperatively. The ``run_cancel_requested`` event is written in the
+    same transaction so the audit trail never lags the status. Raises
+    ``ValueError`` for terminal runs.
+    """
+    with auto_connection(conn) as (active_conn, is_generated):
+
+        def _do() -> dict[str, Any]:
+            run = get_run(run_id, conn=active_conn)
+            if run is None:
+                raise FileNotFoundError(f"Workflow run '{run_id}' not found.")
+            from_status = str(run["status"])
+            if from_status in IMMEDIATE_CANCEL_STATUSES:
+                to_status = "cancelled"
+            elif from_status in COOPERATIVE_CANCEL_STATUSES:
+                to_status = "cancelling"
+            else:
+                raise ValueError(f"cannot cancel from '{from_status}'")
+            if from_status != to_status:
+                _validate_transition(from_status, to_status)
+            now = _now_iso()
+            finished_at = (
+                now if to_status in RUN_TERMINAL_STATUSES else run["finished_at"]
+            )
+            cur = active_conn.execute(
+                "UPDATE workflow_runs SET status = ?, updated_at = ?, "
+                "finished_at = ? WHERE run_id = ? AND status = ?;",
+                (to_status, now, finished_at, run_id, from_status),
+            )
+            if cur.rowcount == 0:
+                # A concurrent transition won; never clobber it.
+                current = get_run(run_id, conn=active_conn)
+                if current is None:
+                    raise FileNotFoundError(f"Workflow run '{run_id}' not found.")
+                now_status = str(current["status"])
+                if now_status in ("cancelling", "cancelled"):
+                    return current
+                raise ValueError(f"cannot cancel from '{now_status}'")
+            append_event(
+                run_id,
+                "run_cancel_requested",
+                {"from": from_status, "to": to_status},
+                conn=active_conn,
+            )
+            return get_run(run_id, conn=active_conn)  # type: ignore[return-value]
+
+        if is_generated:
+            with active_conn:
+                return _do()
+        return _do()
+
+
+def list_cancel_targets(
+    run_id: str, *, conn: Optional[sqlite3.Connection] = None
+) -> dict[str, list[str]]:
+    """Return in-flight references a cancel request must propagate to.
+
+    ``bridge_task_ids`` are the short-lived Task rows ownership of which the
+    Capability runner delegated to the adapter; ``hitl_run_ids`` are HITL
+    waits whose answer must not requeue a cancelled run.
+    """
+    bridge_task_ids: list[str] = []
+    hitl_run_ids: list[str] = []
+    for node in list_run_nodes(run_id, conn=conn):
+        if str(node.get("status")) in ("running", "waiting_hitl"):
+            bridge = node.get("bridge_task_id")
+            if bridge:
+                bridge_task_ids.append(str(bridge))
+            hitl = node.get("hitl_run_id")
+            if hitl:
+                hitl_run_ids.append(str(hitl))
+    return {"bridge_task_ids": bridge_task_ids, "hitl_run_ids": hitl_run_ids}
+
+
 def mark_stale_runs_interrupted(
     instance_id: str, *, conn: Optional[sqlite3.Connection] = None
 ) -> int:
@@ -924,10 +1010,7 @@ def get_run_node(
         ).fetchone()
     if row is None:
         return None
-    record = dict(row)
-    record["inputs"] = _loads(record.get("inputs_json"), {})
-    record["output"] = _loads(record.get("output_json"), {})
-    return record
+    return _run_node_row(row)
 
 
 def get_latest_run_node(
@@ -942,9 +1025,14 @@ def get_latest_run_node(
         ).fetchone()
     if row is None:
         return None
+    return _run_node_row(row)
+
+
+def _run_node_row(row: sqlite3.Row) -> dict[str, Any]:
     record = dict(row)
     record["inputs"] = _loads(record.get("inputs_json"), {})
     record["output"] = _loads(record.get("output_json"), {})
+    record["effects"] = _loads(record.get("effects_json"), [])
     return record
 
 
@@ -959,6 +1047,13 @@ def upsert_run_node(
     output: Optional[dict[str, Any]] = None,
     output_summary: Optional[str] = None,
     error_summary: Optional[str] = None,
+    bridge_task_id: Optional[str] = None,
+    child_kind: Optional[str] = None,
+    child_run_id: Optional[str] = None,
+    hitl_run_id: Optional[str] = None,
+    effects: Optional[tuple[str, ...]] = None,
+    cancel_outcome: Optional[str] = None,
+    attention_reason: Optional[str] = None,
     conn: Optional[sqlite3.Connection] = None,
 ) -> None:
     now = _now_iso()
@@ -969,14 +1064,23 @@ def upsert_run_node(
             active_conn.execute(
                 "INSERT INTO workflow_run_nodes (run_id, node_id, activation_id, "
                 "attempt, status, inputs_json, output_json, output_summary, "
-                "error_summary, started_at, finished_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "error_summary, bridge_task_id, child_kind, child_run_id, "
+                "hitl_run_id, effects_json, cancel_outcome, attention_reason, "
+                "started_at, finished_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT(activation_id, attempt) DO UPDATE SET "
                 "status = excluded.status, "
                 "inputs_json = COALESCE(excluded.inputs_json, inputs_json), "
                 "output_json = COALESCE(excluded.output_json, output_json), "
                 "output_summary = COALESCE(excluded.output_summary, output_summary), "
                 "error_summary = COALESCE(excluded.error_summary, error_summary), "
+                "bridge_task_id = COALESCE(excluded.bridge_task_id, bridge_task_id), "
+                "child_kind = COALESCE(excluded.child_kind, child_kind), "
+                "child_run_id = COALESCE(excluded.child_run_id, child_run_id), "
+                "hitl_run_id = COALESCE(excluded.hitl_run_id, hitl_run_id), "
+                "effects_json = COALESCE(excluded.effects_json, effects_json), "
+                "cancel_outcome = COALESCE(excluded.cancel_outcome, cancel_outcome), "
+                "attention_reason = COALESCE(excluded.attention_reason, attention_reason), "
                 "finished_at = excluded.finished_at;",
                 (
                     run_id,
@@ -988,9 +1092,50 @@ def upsert_run_node(
                     _redacted_json(output) if output is not None else None,
                     redact_text(output_summary) if output_summary is not None else None,
                     redact_text(error_summary) if error_summary is not None else None,
+                    bridge_task_id,
+                    child_kind,
+                    child_run_id,
+                    hitl_run_id,
+                    _redacted_json(list(effects)) if effects is not None else None,
+                    cancel_outcome,
+                    redact_text(attention_reason)
+                    if attention_reason is not None
+                    else None,
                     now,
                     finished,
                 ),
+            )
+
+        if is_generated:
+            with active_conn:
+                _do()
+        else:
+            _do()
+
+
+def set_run_node_bridge(
+    *,
+    run_id: str,
+    node_id: str,
+    activation_id: str,
+    attempt: int,
+    bridge_task_id: str,
+    conn: Optional[sqlite3.Connection] = None,
+) -> None:
+    """Record the in-flight bridge Task id on a running node.
+
+    Persisted right after the bridge Task is created and before the external
+    call, so a concurrent cancel can find and stop it. A no-op when the row
+    does not exist yet (the caller inserts it as ``running`` first).
+    """
+    with auto_connection(conn) as (active_conn, is_generated):
+
+        def _do() -> None:
+            active_conn.execute(
+                "UPDATE workflow_run_nodes SET bridge_task_id = ? "
+                "WHERE run_id = ? AND node_id = ? "
+                "AND activation_id = ? AND attempt = ?;",
+                (bridge_task_id, run_id, node_id, activation_id, attempt),
             )
 
         if is_generated:
@@ -1009,7 +1154,7 @@ def list_run_nodes(
             "ORDER BY started_at ASC, node_id ASC;",
             (run_id,),
         ).fetchall()
-    return [dict(row) for row in rows]
+    return [_run_node_row(row) for row in rows]
 
 
 def list_activations(

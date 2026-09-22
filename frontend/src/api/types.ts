@@ -1186,6 +1186,8 @@ export type WorkflowNodeStatus =
   | "needs_attention"
   | "cancelled";
 
+export type WorkflowCancelOutcome = "cancelled" | "completed" | "unknown";
+
 export interface WorkflowRunNode {
   run_id: string;
   node_id: string;
@@ -1196,6 +1198,13 @@ export interface WorkflowRunNode {
   output_json?: string | null;
   output_summary?: string | null;
   error_summary?: string | null;
+  bridge_task_id?: string | null;
+  child_kind?: string | null;
+  child_run_id?: string | null;
+  hitl_run_id?: string | null;
+  effects?: string[] | null;
+  cancel_outcome?: WorkflowCancelOutcome | null;
+  attention_reason?: string | null;
   started_at?: string | null;
   finished_at?: string | null;
 }

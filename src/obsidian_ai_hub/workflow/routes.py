@@ -8,6 +8,7 @@ engine contract documented in ``docs/workflow/specification.md`` §16.
 from __future__ import annotations
 
 import asyncio
+import logging
 import sqlite3
 from typing import Any, Optional
 
@@ -15,8 +16,13 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from obsidian_ai_hub.tasks.execution import CANCEL_CERTAINTY_COMPLETED
 from obsidian_ai_hub.web.routes.deps import require_bearer_token
 from obsidian_ai_hub.workflow import store as workflow_store
+from obsidian_ai_hub.workflow.execution import (
+    ATTENTION_REASON_CANCEL_COMPLETED,
+    ATTENTION_REASON_CANCEL_UNKNOWN,
+)
 from obsidian_ai_hub.workflow.capabilities import (
     WORKFLOW_ONLY_KEYS,
     WORKFLOW_ONLY_METADATA,
@@ -31,6 +37,8 @@ from obsidian_ai_hub.workflow.models import (
 )
 from obsidian_ai_hub.workflow import templates as workflow_templates
 from obsidian_ai_hub.workflow.validation import validate_graph
+
+_logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/workflows",
@@ -376,15 +384,57 @@ def approve_run(run_id: str) -> dict[str, Any]:
 
 @router.post("/runs/{run_id}/cancel")
 def cancel_run(run_id: str) -> dict[str, Any]:
+    """Request cancellation (not a rollback).
+
+    Waiting/queued runs stop immediately; a running run records ``cancelling``
+    together with a cancel event and marks any in-flight bridge Task
+    ``cancelling`` so the adapter can stop its child run. A ``waiting_hitl``
+    run also cancels the linked HITL run so a late answer cannot requeue it.
+    """
     run = workflow_store.get_run(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="run not found")
-    status = str(run["status"])
-    if status in ("queued", "waiting_approval", "waiting_hitl", "waiting_attention"):
-        return _transition(run_id, "cancelled")
-    if status == "running":
-        return _transition(run_id, "cancelling")
-    raise HTTPException(status_code=409, detail=f"cannot cancel from '{status}'")
+    try:
+        updated = workflow_store.request_run_cancel(run_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    targets = workflow_store.list_cancel_targets(run_id)
+    _cancel_bridge_tasks(targets["bridge_task_ids"])
+    for hitl_run_id in targets["hitl_run_ids"]:
+        _cancel_hitl_run(hitl_run_id)
+    return updated
+
+
+def _cancel_bridge_tasks(bridge_task_ids: list[str]) -> None:
+    from obsidian_ai_hub.tasks import store as task_store
+
+    for bridge_id in bridge_task_ids:
+        try:
+            task = task_store.get_task(bridge_id)
+            if task is None:
+                continue
+            status = str(task.get("status"))
+            if status in task_store.TASK_TERMINAL_STATUSES:
+                continue
+            if status == "running":
+                task_store.transition_task_status(bridge_id, "cancelling")
+        except Exception:  # noqa: BLE001 - best-effort; engine also stops
+            _logger.warning(
+                "Failed to request cancel on bridge task %s", bridge_id, exc_info=True
+            )
+
+
+def _cancel_hitl_run(hitl_run_id: str) -> None:
+    try:
+        from obsidian_ai_hub.hitl import service as hitl_service
+
+        hitl_service.cancel_run(hitl_run_id)
+    except Exception:  # noqa: BLE001 - best-effort; handler checks run status
+        _logger.warning(
+            "Failed to cancel linked HITL run %s", hitl_run_id, exc_info=True
+        )
 
 
 @router.post("/runs/{run_id}/resume")
@@ -412,6 +462,16 @@ def resolve_attention(run_id: str, payload: AttentionDecision) -> dict[str, Any]
         raise HTTPException(status_code=409, detail="no node needs attention")
     node_id = str(target["node_id"])
     decision = payload.decision
+    if decision == "adopt" and _is_cancel_origin(target):
+        if not _has_success_evidence(target):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "取消起因の要確認です。保存済みの成功出力・効果の証跡がない"
+                    "ため採用できません。失敗として処理・中断・再実行のいずれかを"
+                    "選んでください。"
+                ),
+            )
     workflow_store.append_event(
         run_id_str,
         "attention_resolved",
@@ -495,6 +555,24 @@ def list_events(run_id: str) -> dict[str, Any]:
     if workflow_store.get_run(run_id) is None:
         raise HTTPException(status_code=404, detail="run not found")
     return {"items": workflow_store.list_events(run_id)}
+
+
+_CANCEL_ATTENTION_REASONS = frozenset(
+    {ATTENTION_REASON_CANCEL_COMPLETED, ATTENTION_REASON_CANCEL_UNKNOWN}
+)
+
+
+def _is_cancel_origin(node: dict[str, Any]) -> bool:
+    return str(node.get("attention_reason") or "") in _CANCEL_ATTENTION_REASONS
+
+
+def _has_success_evidence(node: dict[str, Any]) -> bool:
+    """True when a cancelled external process left verifiable success output."""
+    if str(node.get("cancel_outcome") or "") != CANCEL_CERTAINTY_COMPLETED:
+        return False
+    output = node.get("output")
+    effects = node.get("effects") or []
+    return bool(output) or bool(effects)
 
 
 def _transition(

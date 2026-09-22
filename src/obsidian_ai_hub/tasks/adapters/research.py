@@ -9,7 +9,9 @@ summarizes the report markdown.
 Cancellation: research jobs have no cooperative cancel; on task cancel the
 adapter keeps waiting until the job reaches a terminal status, then raises
 ``TaskCancelled``. The job itself finishes (and may publish its report to
-the Vault) once started.
+the Vault) once started. When it finished successfully the report summary is
+attached as ``CancellationEvidence.result_summary`` so the Workflow can store
+adoptable evidence instead of discarding a completed result.
 """
 
 from __future__ import annotations
@@ -20,7 +22,12 @@ from typing import Any
 
 from obsidian_ai_hub.tasks import store as task_store
 from obsidian_ai_hub.tasks.adapters.child_runs import wait_for_child_run
-from obsidian_ai_hub.tasks.execution import StepResult
+from obsidian_ai_hub.tasks.execution import (
+    CANCEL_CERTAINTY_CANCELLED,
+    CancellationEvidence,
+    StepResult,
+    TaskCancelled,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -95,14 +102,35 @@ class ResearchAdapter:
                 "theme_id": theme_id,
             },
         )
-        final = wait_for_child_run(
-            task_id,
-            lambda: research_db.get_job(job_id),
-            self._no_op_cancel,
-            RESEARCH_TERMINAL_STATUSES,
-            self.poll_interval,
-            self.timeout_secs,
-        )
+        try:
+            final = wait_for_child_run(
+                task_id,
+                lambda: research_db.get_job(job_id),
+                self._no_op_cancel,
+                RESEARCH_TERMINAL_STATUSES,
+                self.poll_interval,
+                self.timeout_secs,
+                child_kind="research",
+                child_run_id=job_id,
+            )
+        except TaskCancelled as exc:
+            # Research jobs cannot be cancelled; if the job finished before
+            # the request landed, preserve its report so the caller can offer
+            # an adoptable result instead of a bare unknown.
+            evidence = exc.evidence
+            if evidence.result_certainty != CANCEL_CERTAINTY_CANCELLED:
+                finished = research_db.get_job(job_id)
+                if finished is not None and str(finished.get("status")) == "succeeded":
+                    raise TaskCancelled(
+                        str(exc),
+                        evidence=CancellationEvidence(
+                            child_kind=evidence.child_kind,
+                            child_run_id=evidence.child_run_id,
+                            result_certainty=evidence.result_certainty,
+                            result_summary=self._summary(job_id, finished),
+                        ),
+                    ) from exc
+            raise
         status = str(final.get("status"))
         if status != "succeeded":
             err = str(final.get("error") or "unknown error")

@@ -12,6 +12,11 @@ import logging
 import uuid
 from typing import Any
 
+from obsidian_ai_hub.tasks.execution import (
+    CANCEL_CERTAINTY_CANCELLED,
+    CANCEL_CERTAINTY_COMPLETED,
+    CANCEL_CERTAINTY_UNKNOWN,
+)
 from obsidian_ai_hub.workflow.execution import (
     HITL_HANDLER,
     NodeOutcome,
@@ -55,6 +60,8 @@ class DefaultNodeRunner:
 
             self._executor = get_default_executor(poll_interval=self.poll_interval)
         from obsidian_ai_hub.tasks import store as task_store
+        from obsidian_ai_hub.tasks.execution import TaskCancelled
+        from obsidian_ai_hub.workflow import store as workflow_store
 
         key = (node.get("config") or {}).get("capability_key")
         # Task adapters record child linkage (``set_active_child`` /
@@ -66,6 +73,8 @@ class DefaultNodeRunner:
         # it, and ends terminal so the 30-day task retention purges it.
         run_id = str(context["run_id"])
         node_id = str(node.get("node_id"))
+        activation_id = str(context["activation_id"])
+        attempt = int(context.get("attempt") or 1)
         prompt = f"Workflow run {run_id} node {node_id} ({key})"
         with task_store.auto_connection() as (bridge_conn, _):
             with bridge_conn:
@@ -77,6 +86,22 @@ class DefaultNodeRunner:
                 bridge_id = str(bridge["task_id"])
                 task_store.transition_task_status(bridge_id, "planning", conn=bridge_conn)
                 task_store.transition_task_status(bridge_id, "running", conn=bridge_conn)
+        # Persist the in-flight reference before any external call so a
+        # concurrent cancel can find and stop this bridge. If the run already
+        # moved to ``cancelling`` we never start the external operation.
+        workflow_store.set_run_node_bridge(
+            run_id=run_id,
+            node_id=node_id,
+            activation_id=activation_id,
+            attempt=attempt,
+            bridge_task_id=bridge_id,
+        )
+        if self._workflow_cancelling(run_id):
+            self._cancel_bridge_task(bridge_id)
+            return NodeOutcome(
+                status="cancelled",
+                result_certainty=CANCEL_CERTAINTY_CANCELLED,
+            )
         # The Task Step contract requires ``target`` to be an object even
         # when the capability ignores it (e.g. ``research_agent``). The
         # Workflow node contract stays ``capability_key`` + ``inputs`` only;
@@ -86,6 +111,26 @@ class DefaultNodeRunner:
         plan = {"plan": {"purpose": "", "completion_criteria": ""}}
         try:
             result = self._executor.execute_step(task, plan, 0, step)
+        except TaskCancelled as exc:
+            self._cancel_bridge_task(bridge_id)
+            evidence = exc.evidence
+            output = (
+                {"summary": evidence.result_summary}
+                if evidence.result_summary
+                else {}
+            )
+            return NodeOutcome(
+                status="cancelled",
+                output=output,
+                child_kind=evidence.child_kind,
+                child_run_id=evidence.child_run_id,
+                result_certainty=evidence.result_certainty,
+                error=(
+                    None
+                    if evidence.result_certainty == CANCEL_CERTAINTY_CANCELLED
+                    else "取消要求後に外部処理の結果を確認できません"
+                ),
+            )
         except Exception:
             try:
                 task_store.transition_task_status(bridge_id, "failed")
@@ -109,6 +154,35 @@ class DefaultNodeRunner:
             child_kind=result.child_kind,
             child_run_id=result.child_run_id,
         )
+
+    @staticmethod
+    def _workflow_cancelling(run_id: str) -> bool:
+        from obsidian_ai_hub.workflow import store as workflow_store
+
+        run = workflow_store.get_run(run_id)
+        return run is not None and str(run.get("status")) == "cancelling"
+
+    @staticmethod
+    def _cancel_bridge_task(bridge_id: str) -> None:
+        """Move the short-lived bridge Task to ``cancelled`` if not terminal.
+
+        Also runs when a concurrent cancel already put the bridge into
+        ``cancelling``; the terminal transition is the same either way.
+        """
+        from obsidian_ai_hub.tasks import store as task_store
+
+        try:
+            task = task_store.get_task(bridge_id)
+            if task is None:
+                return
+            status = str(task.get("status"))
+            if status in task_store.TASK_TERMINAL_STATUSES:
+                return
+            if status == "running":
+                task_store.transition_task_status(bridge_id, "cancelling")
+            task_store.transition_task_status(bridge_id, "cancelled")
+        except Exception:
+            logger.warning("Bridge task '%s' cancel bookkeeping failed", bridge_id)
 
     # --- agent -------------------------------------------------------------
 
@@ -146,38 +220,78 @@ class DefaultNodeRunner:
                 "child_run_id": run_id,
             },
         )
-        final = self._wait_for_agent_run(str(context["run_id"]), run_id)
+        workflow_run_id = str(context["run_id"])
+        final = self._wait_for_agent_run(workflow_run_id, run_id)
         status = str(final.get("status"))
-        if status != "succeeded":
+        cancel_requested = self._workflow_cancelling(workflow_run_id)
+        if status == "cancelled":
             return NodeOutcome(
-                status="failed",
-                error=f"Agent run '{run_id}' ended with status '{status}'",
+                status="cancelled",
+                child_kind="agent",
+                child_run_id=run_id,
+                result_certainty=CANCEL_CERTAINTY_CANCELLED,
             )
-        message_id = final.get("assistant_message_id")
-        message = agent_store.get_message(str(message_id)) if message_id else None
-        text = str((message or {}).get("content") or "")
-        parsed = parse_json_object(text)
-        if parsed is None:
+        if status == "succeeded":
+            message_id = final.get("assistant_message_id")
+            message = (
+                agent_store.get_message(str(message_id)) if message_id else None
+            )
+            text = str((message or {}).get("content") or "")
+            parsed = parse_json_object(text)
+            if parsed is None:
+                return self._agent_cancel_or_fail(
+                    cancel_requested,
+                    run_id,
+                    "Agent 出力を JSON object として解釈できません",
+                    CANCEL_CERTAINTY_UNKNOWN,
+                )
+            errors = validate_agent_output(parsed, output_schema)
+            if errors:
+                return self._agent_cancel_or_fail(
+                    cancel_requested,
+                    run_id,
+                    "Agent 出力が schema に一致しません: " + "; ".join(errors),
+                    CANCEL_CERTAINTY_UNKNOWN,
+                )
+            if cancel_requested:
+                # The child finished before the cancel could stop it. Keep the
+                # output so the human can adopt it, but never silently continue.
+                return NodeOutcome(
+                    status="cancelled",
+                    output=parsed,
+                    child_kind="agent",
+                    child_run_id=run_id,
+                    result_certainty=CANCEL_CERTAINTY_COMPLETED,
+                )
             return NodeOutcome(
-                status="failed",
-                error="Agent 出力を JSON object として解釈できません",
+                status="succeeded",
+                output=parsed,
                 child_kind="agent",
                 child_run_id=run_id,
             )
-        errors = validate_agent_output(parsed, output_schema)
-        if errors:
-            return NodeOutcome(
-                status="failed",
-                error="Agent 出力が schema に一致しません: " + "; ".join(errors),
-                child_kind="agent",
-                child_run_id=run_id,
-            )
-        return NodeOutcome(
-            status="succeeded",
-            output=parsed,
-            child_kind="agent",
-            child_run_id=run_id,
+        return self._agent_cancel_or_fail(
+            cancel_requested,
+            run_id,
+            f"Agent run '{run_id}' ended with status '{status}'",
+            CANCEL_CERTAINTY_UNKNOWN,
         )
+
+    @staticmethod
+    def _agent_cancel_or_fail(
+        cancel_requested: bool,
+        run_id: str,
+        error: str,
+        certainty: str,
+    ) -> NodeOutcome:
+        if cancel_requested:
+            return NodeOutcome(
+                status="cancelled",
+                error=error,
+                child_kind="agent",
+                child_run_id=run_id,
+                result_certainty=certainty,
+            )
+        return NodeOutcome(status="failed", error=error)
 
     def _wait_for_agent_run(
         self, workflow_run_id: str, agent_run_id: str
@@ -211,7 +325,32 @@ class DefaultNodeRunner:
             workflow_run = workflow_store.get_run(workflow_run_id)
             if workflow_run is not None and str(workflow_run.get("status")) == "cancelling":
                 agent_store.request_cancel_run(agent_run_id)
+                self._cancel_agent_hitl(agent_run_id)
             time.sleep(self.poll_interval)
+
+    @staticmethod
+    def _cancel_agent_hitl(agent_run_id: str) -> None:
+        """Cancel a HITL wait that a ``waiting_user`` child is parked on."""
+        from obsidian_ai_hub.agents import store as agent_store
+
+        try:
+            latest = agent_store.get_run(agent_run_id)
+        except Exception:
+            return
+        hitl_run_id = (latest or {}).get("hitl_run_id")
+        if not hitl_run_id:
+            return
+        try:
+            from obsidian_ai_hub.hitl import service as hitl_service
+
+            hitl_service.cancel_run(str(hitl_run_id))
+        except Exception:
+            logger.warning(
+                "Failed to cancel linked HITL run %s for agent child %s",
+                hitl_run_id,
+                agent_run_id,
+                exc_info=True,
+            )
 
     @staticmethod
     def _build_agent_content(inputs: dict[str, Any], output_schema: Any) -> str:

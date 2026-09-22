@@ -58,14 +58,24 @@ Agent Node は実行時点の最新の Agent 設定（system prompt・model・�
 | `waiting_approval` | **承認** |
 | `interrupted` | **再開** |
 | 非終端 | **取消** |
-| `waiting_attention` | **採用して続行** / **再実行** / **失敗として処理** |
+| `waiting_attention` | **採用して続行** / **再実行** / **失敗として処理** / **中断** |
 | 終端（`completed` / `incomplete` / `failed` / `cancelled`） | **再実行**（Rerun） |
 
 ### 取消（キャンセル）
 
+**取消はロールバックではなく要求です。** 実行中の外部処理へ取消を伝えますが、強制停止や
+処理の巻き戻し（exactly-once 保証）は行いません。すでに起きた副作用は取り消されません。
+
 - `queued` / `waiting_approval` / `waiting_hitl` / `waiting_attention` なら即時に `cancelled`。
-- `running` なら `cancelling` を経て協調的に `cancelled` へ。
+- `running` なら `cancelling`（画面表示は **停止要求中**）を経て、外部処理の停止を確認できた
+  場合に `cancelled` へ。
+- 取消要求後に外部処理が**完了していた**、または**結果が確認できない**場合は `cancelled` に
+  せず、`waiting_attention`（要確認）になります。次 Node 以降は実行されません。
+- `waiting_hitl` の取消では、関連する HITL Run も取消され、遅れて届いた回答で Run が再開
+  されることはありません。
 - **実施済みの副作用は巻き戻しません**（自動ロールバックは行いません）。
+- 自動 retry（`backoff_seconds`）の挙動は今回変更しません。取消要求の直後に同一 Node が
+  retry して副作用が重複する可能性は残ります（後続の InvocationContext 導入で扱います）。
 
 ### 中断と再開
 
@@ -80,18 +90,27 @@ Agent Node は実行時点の最新の Agent 設定（system prompt・model・�
 - worker の claim は解放されます。回答は既存の **確認待ち**（`/hitl`）画面で行います。
 - 回答後、回答値が型付き出力として返り、Node は `succeeded` になります。
 
-### needs_attention（非冪等 Node の中断）
+### needs_attention（非冪等 Node の中断・取消後の不確実結果）
 
-Agent / Coding などの非冪等 Node が外部操作中に中断すると、自動再開せず次の状態になります。
+Agent / Coding / リサーチなどの非冪等 Node が外部操作中に中断した場合、または取消要求後に
+外部処理が完了・結果不明になった場合、自動再開せず次の状態になります。
 
 - Node: `needs_attention`
 - Run: `waiting_attention`
 
+Run 詳細では、要確認の理由（外部処理が**完了済み**か**結果不明**か）と、確認すべき子 Run の
+種別・ID・確認先へのリンクが表示されます。
+
 人間は次のいずれかを選びます。
 
 1. **採用して続行** — 子 Run が実際に成功済みで、出力 schema と Effect を再検証できる場合のみ有効。
+   **取消起因**の場合は、保存済みの成功出力または効果の証跡があるときだけ採用でき、証跡が
+   なければ `409` で拒否されます。採用時は保存済みの出力を再利用し、再実行はしません。
 2. **再実行** — 新しい Activation として再実行する。重複副作用の可能性がある。
 3. **失敗として処理** — error Edge があればそこへ進み、なければ Run を `failed` にする。
+
+証跡がない取消起因の要確認では、採用はできません。**失敗として処理**・**中断**（一覧に戻る）
+・**再実行**のいずれかを選んでください。
 
 ### 再実行（Rerun）
 

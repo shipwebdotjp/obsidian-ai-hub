@@ -350,7 +350,7 @@ Node 間のデータ連携は文字列テンプレート展開ではなく、以
 | `running` | `completed`, `incomplete`, `failed`, `cancelling`, `interrupted`, `waiting_hitl`, `waiting_attention` |
 | `waiting_hitl` | `queued`, `cancelled` |
 | `waiting_attention` | `queued`, `failed`, `interrupted`, `cancelled` |
-| `cancelling` | `cancelled`, `failed`, `interrupted` |
+| `cancelling` | `cancelled`, `failed`, `interrupted`, `waiting_attention` |
 | `interrupted` | `queued`(再開), `cancelled` |
 
 終端状態からの遷移は禁止する。
@@ -365,8 +365,13 @@ Node 間のデータ連携は文字列テンプレート展開ではなく、以
 | `succeeded` | 成功。 |
 | `skipped` | 分岐により到達しなかった。 |
 | `failed` | 実行または検証に失敗。 |
-| `needs_attention` | 非冪等 Node が外部操作中に中断。人間対応待ち。 |
-| `cancelled` | 取消により終端。 |
+| `needs_attention` | 非冪等 Node が外部操作中に中断、または取消要求後に外部処理が完了／不明。人間対応待ち。 |
+| `cancelled` | 協調取消を確認して終端。 |
+
+取消時に保存する証跡は `workflow_run_nodes` に保持する（§16.2）。
+`bridge_task_id` / `child_kind` / `child_run_id` / `hitl_run_id` は実行中の参照、
+`effects_json` / `cancel_outcome`（`cancelled` / `completed` / `unknown`）/
+`attention_reason` は結果の証跡である。旧 Run の行では NULL のまま互換とする。
 
 ## 8. Capability Node と InvocationContext
 
@@ -494,9 +499,20 @@ HITL 待ちは Capability Node として実装する。`hitl_wait` Capability �
 ### 13.3 キャンセル
 
 - API: `POST /api/v1/workflows/runs/:run_id/cancel`。
+- **取消はロールバックではなく要求**である。外部処理の強制停止・巻き戻し・exactly-once は保証しない。
 - `queued` / `waiting_approval` / `waiting_hitl` / `waiting_attention` なら即時 `cancelled`。
-- `running` / `cancelling` なら協調的取消を伝播して `cancelled` とする。
+  `waiting_hitl` では関連する HITL Run も取消し、遅延した回答が Run を再キューしないようにする。
+- `running` なら `cancelling` と取消 Event を原子的に記録し、保存済みのブリッジ Task を
+  `cancelling` にする。Capability のブリッジ Task id は外部呼び出しの**開始前に**
+  該当 Activation の `workflow_run_nodes` に保存する。
+- エンジンは各 Node の開始前と完了直後、および Loop の各反復開始前に取消を確認し、
+  取消後に次 Node・次反復を起動しない。
+  - 子 Run の**協調取消が確認できた**場合は Node / Run を `cancelled` にする。
+  - 外部処理が**完了した、または不明**な場合は結果・効果・子 Run 参照を保存して Node を
+    `needs_attention`、Run を `waiting_attention` にする（`cancelling` → `waiting_attention` を許可）。
 - 実施済み副作用は巻き戻さない（自動ロールバックなし ADR に準拠）。
+- 自動 retry と `backoff_seconds` は本仕様では変更しない。取消要求後に retry で副作用が
+  重複しうる残余リスクは、後続の InvocationContext 導入で扱う。
 
 ### 13.4 needs_attention
 
@@ -509,6 +525,10 @@ HITL 待ちは Capability Node として実装する。`hitl_wait` Capability �
 
 1. **子 Run 結果を採用して続行**
    - 子 Run が実際に成功済みで、出力 schema と Effect を再検証できる場合のみ許可する。
+   - **取消起因**（`attention_reason` が取消理由）の Node では、保存済みの成功出力
+     （`output_json`）または効果（`effects_json`）の証跡があり、かつ
+     `cancel_outcome = completed` の場合のみ許可する。証跡がなければ `409` で停止し、
+     利用者は失敗扱い・中断・新 Activation での再実行を選ぶ。
 2. **失敗として処理**
    - 明示的な error Edge があればそこへ進み、なければ Run を `failed` にする。
 3. **新しい Activation として再実行**
@@ -536,6 +556,7 @@ worker が Activation の既存状態を読んで `waiting_attention` の Node �
 主要 Event 型:
 
 - `run_created`, `run_input_submitted`, `run_status_changed`
+- `run_created`, `run_input_submitted`, `run_status_changed`, `run_cancel_requested`
 - `node_started`, `node_completed`, `node_failed`, `node_skipped`, `node_cancelled`
 - `loop_iteration_started`, `loop_iteration_completed`
 - `hitl_question_asked`, `hitl_answer_received`
@@ -544,7 +565,8 @@ worker が Activation の既存状態を読んで `waiting_attention` の Node �
 - `agent_config_fingerprint`
 
 payload には node_id、activation_id、子 run ID、HITL run ID、Capability key、
-inputs/output 要約、effects、Agent 指紋を含む。
+inputs/output 要約、effects、取消理由（`attention_reason` / `result_certainty`）、
+Agent 指紋を含む。
 
 ### 14.2 Redaction
 
@@ -676,6 +698,13 @@ workflow_run_nodes
   output_json TEXT
   output_summary TEXT
   error_summary TEXT
+  bridge_task_id TEXT       -- 実行中の Capability ブリッジ Task（v57）
+  child_kind TEXT           -- agent / research / coding など（v57）
+  child_run_id TEXT         -- 子 Run / 子 Job ID（v57）
+  hitl_run_id TEXT          -- waiting_hitl の HITL Run（v57）
+  effects_json TEXT         -- 保存済みの効果証跡（v57）
+  cancel_outcome TEXT       -- cancelled / completed / unknown（v57）
+  attention_reason TEXT     -- 要確認の理由（v57）
   started_at TEXT
   finished_at TEXT
   PRIMARY KEY (activation_id, attempt)
@@ -786,9 +815,15 @@ workflow_events
 12. 再開: worker 停止後、明示再開で完了済み Activation を再実行しない。
 13. 完了: 成功 Terminal 到達し、実行した効果的 Node がすべて効果を満たせば `completed`、
     そうでなければ `incomplete`。
-14. キャンセル: 実行中の Capability / 子 run へ取消が伝播し、Run は `cancelled` になる。
-15. 保持: 終端 Run・Node・Activation・Event は 30 日後に削除される。非終端 Run は削除されない。
-16. 秘密値: Run 入力・Event 内の既知秘密値は redact される。
+14. キャンセル: ブリッジ Task 保存前の取消では外部操作を開始せず、Node / Run は `cancelled`。
+    保存後の取消ではブリッジ Task を `cancelling` にして協調取消を伝播する。
+15. 不確実結果: 取消後に子 Run が完了・不明なら、結果・効果・子 Run 参照を保存して
+    Node は `needs_attention`、Run は `waiting_attention` になる。次 Node・次 Loop 反復は起動しない。
+16. 要確認の採用: 取消起因の `needs_attention` は保存済みの成功出力・効果証跡がある場合のみ
+    `adopt` でき、証跡がなければ `409`。採用時は既存出力を再利用し、再実行しない。
+17. HITL 待機中の取消: 関連 HITL Run を取消し、回答による再キューを防止する。
+18. 保持: 終端 Run・Node・Activation・Event は 30 日後に削除される。非終端 Run は削除されない。
+19. 秘密値: Run 入力・Event 内の既知秘密値は redact される。
 
 ## 20. MVP 対象外、将来拡張、未決事項、リスク
 

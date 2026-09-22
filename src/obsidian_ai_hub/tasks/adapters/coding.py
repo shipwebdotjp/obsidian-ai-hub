@@ -17,6 +17,8 @@ from obsidian_ai_hub.tasks.adapters.child_runs import (
 )
 from obsidian_ai_hub.tasks.adapters.deviation import tail_text
 from obsidian_ai_hub.tasks.execution import (
+    CANCEL_CERTAINTY_CANCELLED,
+    CancellationEvidence,
     StepResult,
     TaskCancelled,
 )
@@ -116,6 +118,8 @@ class CodingAdapter:
             on_first_wait=lambda waiting_run: self._notify_hitl_wait(
                 task_id, step_index, run_id, project_id, backend, waiting_run
             ),
+            child_kind="coding",
+            child_run_id=run_id,
         )
         status = str(final.get("status"))
         if status == "completed":
@@ -128,7 +132,14 @@ class CodingAdapter:
                 child_run_id=run_id,
             )
         if status == "cancelled":
-            raise TaskCancelled(f"Child coding run '{run_id}' was cancelled.")
+            raise TaskCancelled(
+                f"Child coding run '{run_id}' was cancelled.",
+                evidence=CancellationEvidence(
+                    child_kind="coding",
+                    child_run_id=run_id,
+                    result_certainty=CANCEL_CERTAINTY_CANCELLED,
+                ),
+            )
         raise ValueError(
             f"Child coding run '{run_id}' ended with status '{status}': "
             f"{final.get('error_message') or 'no error message'}"

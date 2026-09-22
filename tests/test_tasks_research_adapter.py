@@ -144,10 +144,18 @@ def test_research_adapter_propagates_task_cancel(monkeypatch):
         },
         {"research_agent": "auto"},
     )
-    states = [{"status": "running"}, {"status": "running"}, {"status": "succeeded"}]
+    # The wait loop polls running, running, succeeded (cancel requested on the
+    # last), then the adapter re-reads the finished job to preserve its report
+    # as cancellation evidence.
+    states = [
+        {"status": "running"},
+        {"status": "running"},
+        {"status": "succeeded"},
+        {"status": "succeeded"},
+    ]
 
     def fake_get_job(job_id):
-        if len(states) == 2:
+        if len(states) == 3:
             task_store.transition_task_status(task["task_id"], "cancelling")
         return states.pop(0) | {"error": None}
 

@@ -256,6 +256,53 @@ describe("WorkflowRunPage run graph", () => {
     );
   });
 
+  it("shows 停止要求中 for a cancelling run", async () => {
+    mockGetWorkflowRun.mockResolvedValue(
+      baseRun({ status: "cancelling", nodes: [], events: [] }),
+    );
+    renderPage();
+    expect(await screen.findByTestId("run-status")).toHaveTextContent(
+      "停止要求中",
+    );
+  });
+
+  it("shows the cancel attention reason and a child run link", async () => {
+    mockGetWorkflowRun.mockResolvedValue(
+      baseRun({
+        status: "waiting_attention",
+        graph_snapshot: {
+          inputs_schema: { type: "object" },
+          nodes: graphNodes,
+          edges: graphEdges,
+        },
+        nodes: [
+          {
+            ...row(
+              "node-a",
+              "act-a1",
+              1,
+              "needs_attention",
+              "2026-09-21T00:00:03Z",
+            ),
+            child_kind: "research",
+            child_run_id: "job_42",
+            attention_reason: "cancel_with_unknown_external_result",
+          },
+        ],
+        events: [],
+      }),
+    );
+    renderPage();
+
+    const banner = await screen.findByTestId("run-attention-banner");
+    expect(banner).toHaveTextContent("外部処理の結果を確認できません");
+    expect(banner).toHaveTextContent("job_42");
+    expect(within(banner).getByRole("link", { name: "確認する" })).toHaveAttribute(
+      "href",
+      "/research",
+    );
+  });
+
   it("shows the full node history without a graph for legacy runs", async () => {
     mockGetWorkflowRun.mockResolvedValue(legacyRun);
     renderPage();

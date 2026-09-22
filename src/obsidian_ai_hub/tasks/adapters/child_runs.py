@@ -8,9 +8,30 @@ import time
 from typing import Any, Callable, Optional
 
 from obsidian_ai_hub.tasks import store as task_store
-from obsidian_ai_hub.tasks.execution import TaskCancelled
+from obsidian_ai_hub.tasks.execution import (
+    CANCEL_CERTAINTY_CANCELLED,
+    CANCEL_CERTAINTY_COMPLETED,
+    CANCEL_CERTAINTY_UNKNOWN,
+    CancellationEvidence,
+    TaskCancelled,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def classify_cancel_certainty(status: Any) -> str:
+    """Map a child run's terminal status to cancellation certainty.
+
+    ``cancel``/``cancelled`` means cooperative cancellation was confirmed;
+    ``succeeded``/``completed`` means the process finished before the request
+    could stop it; anything else (failed, interrupted, unknown) is uncertain.
+    """
+    normalized = str(status or "").lower()
+    if normalized in ("cancel", "cancelled", "canceled"):
+        return CANCEL_CERTAINTY_CANCELLED
+    if normalized in ("succeeded", "completed", "success"):
+        return CANCEL_CERTAINTY_COMPLETED
+    return CANCEL_CERTAINTY_UNKNOWN
 
 TASK_SESSION_TITLE_LIMIT = 30
 """Max chars for a Task-created child session title (matches the agents title convention)."""
@@ -123,6 +144,8 @@ def wait_for_child_run(
     timeout_secs: float = 1800.0,
     waiting_statuses: frozenset[str] = frozenset(),
     on_first_wait: Optional[Callable[[dict[str, Any]], None]] = None,
+    child_kind: Optional[str] = None,
+    child_run_id: Optional[str] = None,
 ) -> dict[str, Any]:
     """Poll a child run until terminal.
 
@@ -148,7 +171,14 @@ def wait_for_child_run(
         status = str(run.get("status"))
         if status in terminal_statuses:
             if cancel_requested:
-                raise TaskCancelled(f"Task '{task_id}' was cancelled.")
+                raise TaskCancelled(
+                    f"Task '{task_id}' was cancelled.",
+                    evidence=CancellationEvidence(
+                        child_kind=child_kind,
+                        child_run_id=child_run_id,
+                        result_certainty=classify_cancel_certainty(status),
+                    ),
+                )
             return run
         in_waiting = status in waiting_statuses
         if in_waiting:

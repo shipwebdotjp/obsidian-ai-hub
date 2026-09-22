@@ -58,7 +58,9 @@ RUN_ALLOWED_TRANSITIONS: dict[str, frozenset[str]] = {
     "waiting_attention": frozenset(
         {"queued", "failed", "interrupted", "cancelled"}
     ),
-    "cancelling": frozenset({"cancelled", "failed", "interrupted"}),
+    "cancelling": frozenset(
+        {"cancelled", "failed", "interrupted", "waiting_attention"}
+    ),
     "interrupted": frozenset({"queued", "cancelled"}),
 }
 

@@ -125,6 +125,50 @@ Status: Accepted (2026-09-21)。
   自体を廃止する（本 ADR の「共有しない: Capability への InvocationContext 付加層」の完成）。
   それまでの隔離手段がこの origin である。
 
+## Amendment (取消・不確実結果の追跡)
+
+Status: Accepted (2026-09-22)。
+
+取消は**ロールバックではなく要求**である。外部処理を強制停止したり巻き戻したりせず、
+「どこまで進み、どの結果が確定しているか」を正本として残す。自動retryと
+`backoff_seconds` は本 amendment では変更しない（残余リスクは後述）。
+
+### 取消時の正本
+
+取消に関わる状態は次の 4 つを正本とする。UI・API・エンジンはこの組み合わせだけを読む。
+
+- **Workflow Run 状態**（`running` → `cancelling` → `cancelled` / `waiting_attention`）:
+  取消要求と終端判断の唯一の正本。
+- **Activation**（`activation_id`）: Node の論理的な 1 回起動。取消後も取消前の実行を
+  同定する基準。
+- **ブリッジ Task**（`workflow_run_nodes.bridge_task_id`）: Capability Adapter が外部
+  呼び出しに使う短命 Task。取消伝播の到達点であり、外部操作の開始前に保存する。
+- **子 Run 参照**（`child_kind` / `child_run_id` / `hitl_run_id`）: Adapter が実際に
+  起動した外部処理。結果確度（`cancel_outcome`）と効果（`effects_json`）を伴う。
+
+### 取消の状態遷移
+
+- 実行中（`running`）の Run への取消は `cancelling` と取消 Event を原子的に記録し、
+  保存済みのブリッジ Task を `cancelling` にする。エンジンは各 Node の開始前と完了直後に
+  取消を確認し、取消後に次 Node・次 Loop 反復を起動しない。
+- 子 Run の**協調取消が確認できた**場合のみ Node / Run を `cancelled` にする。
+- 外部処理が**完了した、または結果が不明**な場合は、結果・効果・子 Run 参照を保存して
+  Node を `needs_attention`、Run を `waiting_attention` にする。`cancelling` から
+  `waiting_attention` への遷移を許可する（`cancelled` と混同しないための明示的な経路）。
+- HITL は他の子 Run と同様に**保留**であり、要求した取消は子の状態を保証しない。
+  `hitl_wait` 置換も「常に適用される取消」ではなく要求である。`waiting_hitl` の取消は
+  関連 HITL Run も取消し、遅延した回答が Run を再キューしないようにする。
+- `adopt`（採用）は、保存済みの成功出力・効果証跡がある**取消起因**の Node のみ許可する。
+  証跡がなければ 409 で停止し、利用者は失敗扱い・中断・新 Activation での再実行を選ぶ。
+
+### 残余リスク（本 amendment の対象外）
+
+- 自動ロールバック、外部サービスの強制停止、exactly-once 保証は提供しない。
+- 自動 retry と `backoff_seconds` の挙動は変更しない。Capability retry の冪等性は
+  後続の InvocationContext 導入で扱う。したがって「取消要求後に retry で副作用が重複し
+  うる」リスクは残る。Run が `cancelling` の間はエンジンが次 Node を起動しないため、
+  取消時の新規重複は主に in-flight な単一 Node の retry に限られる。
+
 ## 関連文書
 
 - [workflow-independent-context-shared-foundation.md](workflow-independent-context-shared-foundation.md) — 撤回された初期 ADR

@@ -94,7 +94,12 @@ def test_capability_bridge_sends_empty_target():
     outcome = runner.run(
         node=node,
         inputs={"theme": "テストテーマ", "mode": "internal"},
-        context={"run_id": "wrun_test"},
+        context={
+            "run_id": "wrun_test",
+            "node_id": node["node_id"],
+            "activation_id": str(uuid.uuid4()),
+            "attempt": 1,
+        },
     )
     assert outcome.status == "succeeded"
     assert len(executor.steps) == 1
@@ -132,7 +137,12 @@ def test_capability_bridge_marks_task_failed_on_error():
         runner.run(
             node=node,
             inputs={"theme": "x"},
-            context={"run_id": "wrun_boom"},
+            context={
+                "run_id": "wrun_boom",
+                "node_id": node["node_id"],
+                "activation_id": str(uuid.uuid4()),
+                "attempt": 1,
+            },
         )
     bridge_tasks = [
         t
