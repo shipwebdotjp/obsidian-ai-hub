@@ -176,6 +176,154 @@ def test_suggestion_hitl_run_approve_with_comment_and_execute(tmp_path: Path, mo
         conn.close()
 
 
+def _register_suggestion_run(conn, theme_id: str, run_id: str) -> None:
+    from obsidian_ai_hub import hitl
+
+    questions_data = [
+        {
+            "question_key": "action",
+            "question_type": "select",
+            "display_text": "Approve?",
+            "choices": ["approve", "reject"],
+            "is_required": 1,
+        }
+    ]
+    hitl.register_run_and_questions(
+        run_id=run_id,
+        handler="research.run_approved_suggestion",
+        checkpoint=theme_id,
+        question_set_id="confirm_suggest",
+        questions_data=questions_data,
+        conn=conn,
+    )
+
+
+def test_suggestion_approve_auto_project_routes_and_saves(
+    tmp_path: Path, monkeypatch, test_memory_db_path
+):
+    from obsidian_ai_hub.database import get_db_connection
+    from obsidian_ai_hub import hitl
+    from obsidian_ai_hub.research import db as research_db, runner
+    from obsidian_ai_hub.main import register_hitl_handlers
+
+    register_hitl_handlers()
+
+    conn = get_db_connection()
+    try:
+        theme_rec = research_db.create_theme(
+            theme="承認PJルーティング",
+            direction="Obsidian AI Hub の実装",
+            kind="explore",
+            why_now="理由",
+            confidence=0.8,
+            status="candidate",
+            conn=conn,
+        )
+        theme_id = theme_rec["theme_id"]
+        run_id = f"hrun_suggest_{theme_id}"
+        _register_suggestion_run(conn, theme_id, run_id)
+        hitl.submit_answer(run_id, "confirm_suggest", "action", "approve", conn)
+
+        monkeypatch.setattr(runner, "collect_research_context", lambda *a, **k: "")
+        monkeypatch.setattr(
+            runner,
+            "route_research_topic",
+            lambda *a, **k: runner.ResearchRouteDecision(
+                mode=runner.RESEARCH_MODE_PROJECT, project_id=7, confidence=0.9
+            ),
+        )
+        monkeypatch.setattr(runner, "_resolve_project_label", lambda pid: "Obsidian AI Hub")
+        monkeypatch.setattr(runner, "generate_research_title", lambda *a, **k: "title")
+
+        captured: dict = {}
+
+        def fake_conduct(prompt, *, mode, output_style=None, project_id=None):
+            captured["project_id"] = project_id
+            captured["persisted_project_id"] = research_db.get_theme(theme_id)[
+                "project_id"
+            ]
+            return "report body"
+
+        monkeypatch.setattr(runner, "conduct_research", fake_conduct)
+
+        processed = hitl.dispatch_runs(conn)
+        assert processed == 1
+
+        theme_obj = research_db.get_theme(theme_id, conn=conn)
+        assert theme_obj["status"] == "approved"
+        assert theme_obj["project_id"] == 7
+        # The project is persisted before the coding agent is started.
+        assert captured["persisted_project_id"] == 7
+
+        job = research_db.latest_job(theme_id, conn=conn)
+        assert job["status"] == "succeeded"
+        assert job["project_id"] == 7
+        assert job["is_published"] == 1
+        assert captured["project_id"] == 7
+        assert Path(job["output_path"]).exists()
+    finally:
+        conn.close()
+
+
+def test_suggestion_approve_project_coding_failure_skips_vault(
+    tmp_path: Path, monkeypatch, test_memory_db_path
+):
+    from obsidian_ai_hub.database import get_db_connection
+    from obsidian_ai_hub import hitl
+    from obsidian_ai_hub.research import db as research_db, runner
+    from obsidian_ai_hub.research.coding_research import CodingResearchError
+    from obsidian_ai_hub.main import register_hitl_handlers
+
+    register_hitl_handlers()
+
+    conn = get_db_connection()
+    try:
+        theme_rec = research_db.create_theme(
+            theme="承認PJ失敗",
+            direction="方向",
+            kind="explore",
+            why_now="理由",
+            confidence=0.8,
+            status="candidate",
+            conn=conn,
+        )
+        theme_id = theme_rec["theme_id"]
+        run_id = f"hrun_suggest_{theme_id}"
+        _register_suggestion_run(conn, theme_id, run_id)
+        hitl.submit_answer(run_id, "confirm_suggest", "action", "approve", conn)
+
+        monkeypatch.setattr(runner, "collect_research_context", lambda *a, **k: "")
+        monkeypatch.setattr(
+            runner,
+            "route_research_topic",
+            lambda *a, **k: runner.ResearchRouteDecision(
+                mode=runner.RESEARCH_MODE_PROJECT, project_id=7, confidence=0.9
+            ),
+        )
+        monkeypatch.setattr(runner, "_resolve_project_label", lambda pid: "Obsidian AI Hub")
+        monkeypatch.setattr(runner, "generate_research_title", lambda *a, **k: "title")
+
+        def boom(*args, **kwargs):
+            raise CodingResearchError("agent boom")
+
+        monkeypatch.setattr(runner, "conduct_research", boom)
+
+        processed = hitl.dispatch_runs(conn)
+        assert processed == 1
+
+        theme_obj = research_db.get_theme(theme_id, conn=conn)
+        assert theme_obj["status"] == "approved"
+        assert theme_obj["project_id"] == 7
+
+        job = research_db.latest_job(theme_id, conn=conn)
+        assert job["status"] == "failed"
+        assert job["project_id"] == 7
+        assert job["output_path"] is None
+        assert job["is_published"] == 0
+    finally:
+        conn.close()
+
+
 def test_suggestion_hitl_run_reject(tmp_path: Path, monkeypatch, test_memory_db_path):
     """Test rejecting a suggested research theme HITL Run, which sets theme to rejected and completes without job."""
     from obsidian_ai_hub.database import get_db_connection

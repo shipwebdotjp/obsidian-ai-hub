@@ -126,7 +126,11 @@ def create_theme_and_research(
                         "title": "調査の実行",
                         "prompt": f"「{theme}」を調査しますか？",
                         "choices": [
-                            {"value": "approve", "label": "承認", "description": "テーマを調査し、結果をVaultに保存します。"},
+                            {
+                                "value": "approve",
+                                "label": "承認",
+                                "description": "テーマを調査し、結果をVaultに保存します。関連する登録済みGitプロジェクトがある場合は、そのコードベースを読み取り専用で調査します。",
+                            },
                             *feedback.FEEDBACK_ACTION_CHOICES,
                         ],
                         "is_required": 1,
@@ -148,7 +152,7 @@ def create_theme_and_research(
                     conn=conn,
                     display_type="リサーチ提案",
                     title=f"「{theme}」を調査するか確認",
-                    description="承認すると、このテーマを詳しく調査し、結果をVaultに保存します。",
+                    description="承認すると、このテーマを詳しく調査し、結果をVaultに保存します。自動選択では、関連する登録済みGitプロジェクトがある場合、そのコードベースを読み取り専用で調査することがあります。",
                 )
                 # Save hitl_run_id on theme in the same transaction
                 db._set_theme_field(rec["theme_id"], "hitl_run_id", run_id, conn=conn)

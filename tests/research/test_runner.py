@@ -15,7 +15,9 @@ def test_run_theme_research_succeeds():
 
     with (
         patch.object(runner, "collect_research_context", return_value=""),
-        patch.object(runner, "route_research_topic", return_value="internal"),
+        patch.object(
+            runner, "route_research_topic", return_value=runner.ResearchRouteDecision(mode="internal")
+        ),
         patch.object(
             runner.llm_client, "generate_llm_response", return_value="mocked title"
         ),
@@ -36,7 +38,9 @@ def test_run_theme_research_fails_keeps_theme_candidate():
 
     with (
         patch.object(runner, "collect_research_context", return_value=""),
-        patch.object(runner, "route_research_topic", return_value="internal"),
+        patch.object(
+            runner, "route_research_topic", return_value=runner.ResearchRouteDecision(mode="internal")
+        ),
         patch.object(
             runner.llm_client, "generate_llm_response", side_effect=RuntimeError("fail")
         ),
@@ -58,7 +62,9 @@ def test_save_research_to_vault(tmp_path: Path):
 
     with (
         patch.object(runner, "collect_research_context", return_value=""),
-        patch.object(runner, "route_research_topic", return_value="internal"),
+        patch.object(
+            runner, "route_research_topic", return_value=runner.ResearchRouteDecision(mode="internal")
+        ),
         patch.object(
             runner.llm_client, "generate_llm_response", return_value="テストタイトル"
         ),
@@ -82,7 +88,9 @@ def test_main_creates_theme_and_researches(tmp_path: Path):
     output_dir = tmp_path / "research2"
     with (
         patch.object(runner, "collect_research_context", return_value=""),
-        patch.object(runner, "route_research_topic", return_value="internal"),
+        patch.object(
+            runner, "route_research_topic", return_value=runner.ResearchRouteDecision(mode="internal")
+        ),
         patch.object(runner.llm_client, "generate_llm_response", return_value="mocked"),
         patch.object(runner, "conduct_research", return_value="report"),
         patch.object(runner.config, "RESEARCH_OUTPUT_DIR", output_dir),
@@ -102,7 +110,9 @@ def test_main_creates_theme_and_researches(tmp_path: Path):
 def test_main_failure_keeps_candidate_status():
     with (
         patch.object(runner, "collect_research_context", return_value=""),
-        patch.object(runner, "route_research_topic", return_value="internal"),
+        patch.object(
+            runner, "route_research_topic", return_value=runner.ResearchRouteDecision(mode="internal")
+        ),
         patch.object(
             runner.llm_client, "generate_llm_response", side_effect=RuntimeError("fail")
         ),
@@ -128,7 +138,9 @@ def test_main_approved_theme_failure_keeps_approved_status():
 
     with (
         patch.object(runner, "collect_research_context", return_value=""),
-        patch.object(runner, "route_research_topic", return_value="internal"),
+        patch.object(
+            runner, "route_research_topic", return_value=runner.ResearchRouteDecision(mode="internal")
+        ),
         patch.object(
             runner.llm_client, "generate_llm_response", side_effect=RuntimeError("fail")
         ),
@@ -153,7 +165,9 @@ def test_main_reuses_existing_approved_theme(tmp_path: Path):
 
     with (
         patch.object(runner, "collect_research_context", return_value=""),
-        patch.object(runner, "route_research_topic", return_value="internal"),
+        patch.object(
+            runner, "route_research_topic", return_value=runner.ResearchRouteDecision(mode="internal")
+        ),
         patch.object(runner.llm_client, "generate_llm_response", return_value="mocked"),
         patch.object(runner, "conduct_research", return_value="report1"),
         patch.object(runner.config, "RESEARCH_OUTPUT_DIR", output_dir),
@@ -168,7 +182,9 @@ def test_main_reuses_existing_approved_theme(tmp_path: Path):
 
     with (
         patch.object(runner, "collect_research_context", return_value=""),
-        patch.object(runner, "route_research_topic", return_value="internal"),
+        patch.object(
+            runner, "route_research_topic", return_value=runner.ResearchRouteDecision(mode="internal")
+        ),
         patch.object(
             runner.llm_client, "generate_llm_response", return_value="mocked_v2"
         ),
@@ -258,3 +274,283 @@ def test_approved_theme_not_reused_across_projects():
     assert theme_rec["project_id"] == 2
     assert job_rec["project_id"] == 2
     assert theme_rec["latest_job"]["project_id"] == 2
+
+
+def _stub_report_pipeline(monkeypatch, captured: dict | None = None):
+    monkeypatch.setattr(runner, "collect_research_context", lambda *a, **k: "")
+    monkeypatch.setattr(runner, "build_research_prompt", lambda *a, **k: "prompt")
+    monkeypatch.setattr(runner, "generate_research_title", lambda *a, **k: "title")
+
+    def fake_conduct(prompt, *, mode, output_style=None, project_id=None):
+        if captured is not None:
+            captured["mode"] = mode
+            captured["project_id"] = project_id
+        return "report"
+
+    monkeypatch.setattr(runner, "conduct_research", fake_conduct)
+
+
+def test_list_project_router_candidates_filters_invalid_git(monkeypatch):
+    projects = [
+        {
+            "project_id": 1,
+            "display_name": "Obsidian AI Hub",
+            "goal": "goal",
+            "description": "desc",
+            "keywords": ["ai", "obsidian"],
+            "project_path": "/repo/a",
+        },
+        {"project_id": 2, "display_name": "B", "project_path": "/repo/b"},
+        {"project_id": 3, "display_name": "C", "project_path": None},
+    ]
+    monkeypatch.setattr(
+        "obsidian_ai_hub.web.services.projects.list_projects", lambda: projects
+    )
+
+    def fake_validate(path):
+        if path == "/repo/b":
+            raise ValueError("not a repo")
+        return path
+
+    monkeypatch.setattr(
+        "obsidian_ai_hub.coding.backend.validate_git_repo", fake_validate
+    )
+
+    candidates = runner._list_project_router_candidates()
+    assert [c["project_id"] for c in candidates] == [1]
+    assert candidates[0]["keywords"] == ["ai", "obsidian"]
+    assert "project_path" not in candidates[0]
+
+
+def test_parse_router_response_structured_and_legacy():
+    ids = {7}
+    decision = runner._parse_router_response(
+        '{"mode": "project", "project_id": 7, "confidence": 0.9}', ids
+    )
+    assert decision is not None
+    assert decision.mode == runner.RESEARCH_MODE_PROJECT
+    assert decision.project_id == 7
+
+    assert (
+        runner._parse_router_response(
+            '{"mode": "project", "project_id": 99, "confidence": 0.9}', ids
+        )
+        is None
+    )
+    assert (
+        runner._parse_router_response(
+            '{"mode": "project", "project_id": 7, "confidence": 0.5}', ids
+        )
+        is None
+    )
+    assert runner._parse_router_response('{"mode": "banana"}', ids) is None
+
+    # Non-integral / boolean ids and non-finite confidences must not be coerced.
+    assert (
+        runner._parse_router_response(
+            '{"mode": "project", "project_id": 7.9, "confidence": 0.9}', ids
+        )
+        is None
+    )
+    assert (
+        runner._parse_router_response(
+            '{"mode": "project", "project_id": true, "confidence": 0.9}', ids
+        )
+        is None
+    )
+    assert (
+        runner._parse_router_response(
+            '{"mode": "project", "project_id": 7, "confidence": NaN}', ids
+        )
+        is None
+    )
+    assert (
+        runner._parse_router_response(
+            '{"mode": "project", "project_id": 7, "confidence": Infinity}', ids
+        )
+        is None
+    )
+
+    fenced = runner._parse_router_response('```json\n{"mode": "web"}\n```', ids)
+    assert fenced is not None
+    assert fenced.mode == runner.RESEARCH_MODE_WEB
+
+    legacy = runner._parse_router_response("deep", ids)
+    assert legacy is not None
+    assert legacy.mode == runner.RESEARCH_MODE_DEEP
+
+    assert runner._parse_router_response("???", ids) is None
+
+
+def test_route_research_topic_passes_direction_and_projects(monkeypatch):
+    captured: dict = {}
+
+    def fake_render(path, context):
+        captured.update(context)
+        return "prompt"
+
+    monkeypatch.setattr(runner.prompt, "render_prompt", fake_render)
+    monkeypatch.setattr(
+        runner,
+        "_list_project_router_candidates",
+        lambda: [
+            {
+                "project_id": 7,
+                "name": "Obsidian AI Hub",
+                "goal": "goal",
+                "description": "desc",
+                "keywords": ["ai"],
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        runner.llm_client,
+        "generate_llm_response",
+        lambda **kwargs: '{"mode": "project", "project_id": 7, "confidence": 0.91}',
+    )
+
+    decision = runner.route_research_topic(
+        "theme", context="ctx", why_now="why", direction="dir"
+    )
+
+    assert decision.mode == runner.RESEARCH_MODE_PROJECT
+    assert decision.project_id == 7
+    assert "Obsidian AI Hub" in captured["projects_text"]
+    assert captured["direction_text"] == "dir"
+
+
+def test_route_research_topic_unknown_project_falls_back_to_internal(monkeypatch):
+    monkeypatch.setattr(
+        runner,
+        "_list_project_router_candidates",
+        lambda: [{"project_id": 7, "name": "P", "keywords": []}],
+    )
+    monkeypatch.setattr(
+        runner, "build_web_research_router_prompt", lambda *a, **k: "prompt"
+    )
+    monkeypatch.setattr(
+        runner.llm_client,
+        "generate_llm_response",
+        lambda **kwargs: '{"mode": "project", "project_id": 99, "confidence": 0.99}',
+    )
+
+    decision = runner.route_research_topic("theme")
+
+    assert decision.mode == runner.RESEARCH_MODE_INTERNAL
+    assert decision.project_id is None
+
+
+def test_route_research_topic_legacy_response_is_used(monkeypatch):
+    monkeypatch.setattr(runner, "_list_project_router_candidates", lambda: [])
+    monkeypatch.setattr(
+        runner, "build_web_research_router_prompt", lambda *a, **k: "prompt"
+    )
+    monkeypatch.setattr(
+        runner.llm_client, "generate_llm_response", lambda **kwargs: "web"
+    )
+
+    assert runner.route_research_topic("theme").mode == runner.RESEARCH_MODE_WEB
+
+
+def test_explicit_project_mode_skips_router(monkeypatch):
+    router_called = {"value": False}
+
+    def fake_router(*args, **kwargs):
+        router_called["value"] = True
+        return runner.ResearchRouteDecision(mode=runner.RESEARCH_MODE_INTERNAL)
+
+    _stub_report_pipeline(monkeypatch)
+    monkeypatch.setattr(runner, "route_research_topic", fake_router)
+    monkeypatch.setattr(runner, "_resolve_project_label", lambda pid: "P")
+
+    report = runner.run_research(theme="PJ", mode="project", project_id=3)
+
+    assert report.mode == runner.RESEARCH_MODE_PROJECT
+    assert router_called["value"] is False
+
+
+def test_auto_mode_with_existing_project_id_skips_router(monkeypatch):
+    router_called = {"value": False}
+
+    def fake_router(*args, **kwargs):
+        router_called["value"] = True
+        return runner.ResearchRouteDecision(mode=runner.RESEARCH_MODE_INTERNAL)
+
+    _stub_report_pipeline(monkeypatch)
+    monkeypatch.setattr(runner, "route_research_topic", fake_router)
+    monkeypatch.setattr(runner, "_resolve_project_label", lambda pid: "P")
+
+    report = runner.run_research(theme="PJ", mode="auto", project_id=4)
+
+    assert report.mode == runner.RESEARCH_MODE_PROJECT
+    assert router_called["value"] is False
+
+
+def test_execute_job_auto_project_persists_before_project_research(
+    monkeypatch, tmp_path: Path
+):
+    theme = research_themes.create_theme(theme="縦断PJ", kind="explore", confidence=0.8)
+    job = research_themes.create_job(theme["theme_id"])
+
+    _stub_report_pipeline(monkeypatch)
+    monkeypatch.setattr(
+        runner,
+        "route_research_topic",
+        lambda *a, **k: runner.ResearchRouteDecision(
+            mode=runner.RESEARCH_MODE_PROJECT, project_id=7, confidence=0.9
+        ),
+    )
+    monkeypatch.setattr(runner, "_resolve_project_label", lambda pid: "Obsidian AI Hub")
+
+    captured: dict = {}
+
+    def fake_conduct(prompt, *, mode, output_style=None, project_id=None):
+        captured["project_id"] = project_id
+        return "report"
+
+    monkeypatch.setattr(runner, "conduct_research", fake_conduct)
+
+    result = runner.execute_research_job_sync(
+        theme["theme_id"], job["job_id"], mode="auto"
+    )
+
+    assert result["status"] == "succeeded"
+    assert captured["project_id"] == 7
+    assert result["output_path"] is not None
+    assert research_themes.get_theme(theme["theme_id"])["project_id"] == 7
+    assert research_themes.get_job(job["job_id"])["project_id"] == 7
+
+
+def test_execute_job_project_failure_does_not_save_vault(monkeypatch):
+    from obsidian_ai_hub.research.coding_research import CodingResearchError
+
+    theme = research_themes.create_theme(
+        theme="縦断PJ失敗", kind="explore", confidence=0.8
+    )
+    job = research_themes.create_job(theme["theme_id"])
+
+    _stub_report_pipeline(monkeypatch)
+    monkeypatch.setattr(
+        runner,
+        "route_research_topic",
+        lambda *a, **k: runner.ResearchRouteDecision(
+            mode=runner.RESEARCH_MODE_PROJECT, project_id=7, confidence=0.9
+        ),
+    )
+    monkeypatch.setattr(runner, "_resolve_project_label", lambda pid: "Obsidian AI Hub")
+
+    def boom(*args, **kwargs):
+        raise CodingResearchError("agent boom")
+
+    monkeypatch.setattr(runner, "conduct_research", boom)
+
+    result = runner.execute_research_job_sync(
+        theme["theme_id"], job["job_id"], mode="auto"
+    )
+
+    assert result["status"] == "failed"
+    assert result["output_path"] is None
+    assert research_themes.get_theme(theme["theme_id"])["status"] == "candidate"
+    # The selected project is persisted before the coding agent is started.
+    assert research_themes.get_theme(theme["theme_id"])["project_id"] == 7
+    assert research_themes.get_job(job["job_id"])["project_id"] == 7

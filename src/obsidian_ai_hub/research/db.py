@@ -683,6 +683,37 @@ def list_approved_themes_by_date(date_str: str) -> list[dict]:
         conn.close()
 
 
+def assign_project(
+    theme_id: str,
+    job_id: str,
+    project_id: Optional[int],
+    conn: Optional[sqlite3.Connection] = None,
+) -> None:
+    """Persist an auto-selected project on the theme and its job atomically.
+
+    Both rows are updated within the same transaction so a research job never
+    runs against a project that is not also recorded on its theme.
+    """
+    now = get_current_timestamp()
+
+    def _execute_update(c_conn: sqlite3.Connection) -> None:
+        c_conn.execute(
+            "UPDATE research_themes SET project_id = ?, updated_at = ? WHERE theme_id = ?",
+            (project_id, now, theme_id),
+        )
+        c_conn.execute(
+            "UPDATE research_jobs SET project_id = ? WHERE job_id = ?",
+            (project_id, job_id),
+        )
+
+    with auto_connection(conn) as (active_conn, is_generated):
+        if is_generated:
+            with active_conn:
+                _execute_update(active_conn)
+        else:
+            _execute_update(active_conn)
+
+
 def _set_theme_field(theme_id: str, field: str, value: Any, conn: Optional[sqlite3.Connection] = None) -> None:
     """Update a single field on a research theme."""
     if field not in RESEARCH_THEME_COLUMNS:

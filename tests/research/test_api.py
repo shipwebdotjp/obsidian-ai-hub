@@ -5,6 +5,7 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
+from obsidian_ai_hub.research import runner
 from obsidian_ai_hub.web.app import create_app
 
 
@@ -136,7 +137,9 @@ def test_rerun_research_theme(client):
         ),
         patch(
             "obsidian_ai_hub.research.runner.route_research_topic",
-            return_value="internal",
+            return_value=runner.ResearchRouteDecision(
+                mode=runner.RESEARCH_MODE_INTERNAL
+            ),
         ),
         patch(
             "obsidian_ai_hub.research.runner.llm_client.generate_llm_response",

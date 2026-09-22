@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+import json
 import logging
+import math
 import os
 import re
 import tempfile
@@ -10,7 +12,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional, Sequence
+from typing import TYPE_CHECKING, Callable, Optional, Sequence
 
 from obsidian_ai_hub.utils import config, llm_client, prompt
 
@@ -36,6 +38,22 @@ RESEARCH_MODE_ALIASES = {
 
 MAX_CONTEXT_LINES = 48
 MAX_CONTEXT_CHARS = 1200
+
+PROJECT_ROUTE_CONFIDENCE_THRESHOLD = 0.85
+
+
+@dataclass
+class ResearchRouteDecision:
+    mode: str
+    project_id: Optional[int] = None
+    confidence: Optional[float] = None
+
+
+@dataclass
+class ResolvedResearchRoute:
+    mode: str
+    project_id: Optional[int]
+    context: str
 
 
 @dataclass
@@ -108,14 +126,183 @@ def _normalize_router_decision(text: str) -> Optional[str]:
     return None
 
 
+def _strict_router_mode(value: object) -> Optional[str]:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip().lower()
+    normalized = RESEARCH_MODE_ALIASES.get(normalized, normalized)
+    if normalized in {
+        RESEARCH_MODE_INTERNAL,
+        RESEARCH_MODE_WEB,
+        RESEARCH_MODE_DEEP,
+        RESEARCH_MODE_PROJECT,
+    }:
+        return normalized
+    return None
+
+
+def _load_json_object(text: str) -> Optional[dict]:
+    stripped = text.strip()
+    if not stripped:
+        return None
+    if stripped.startswith("```"):
+        stripped = re.sub(r"^```[a-zA-Z0-9_-]*\s*", "", stripped)
+        stripped = re.sub(r"\s*```$", "", stripped).strip()
+    try:
+        parsed = json.loads(stripped)
+    except (json.JSONDecodeError, TypeError):
+        parsed = None
+    if isinstance(parsed, dict):
+        return parsed
+    match = re.search(r"\{.*\}", stripped, re.DOTALL)
+    if not match:
+        return None
+    try:
+        parsed = json.loads(match.group(0))
+    except (json.JSONDecodeError, TypeError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _coerce_project_choice(
+    project_id: object,
+    confidence: object,
+    candidate_ids: set[int],
+) -> Optional[tuple[int, float]]:
+    if isinstance(project_id, bool):
+        return None
+    if isinstance(project_id, float):
+        if not project_id.is_integer():
+            return None
+        project_id = int(project_id)
+    try:
+        resolved_id = int(project_id)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    if resolved_id not in candidate_ids:
+        return None
+    if isinstance(confidence, bool):
+        return None
+    try:
+        resolved_confidence = float(confidence)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    if (
+        not math.isfinite(resolved_confidence)
+        or resolved_confidence < PROJECT_ROUTE_CONFIDENCE_THRESHOLD
+    ):
+        return None
+    return resolved_id, resolved_confidence
+
+
+def _parse_router_response(
+    text: str, candidate_ids: set[int]
+) -> Optional[ResearchRouteDecision]:
+    """Parse a router response into a decision.
+
+    Accepts the structured JSON contract first, then falls back to the legacy
+    single-word response. A structured ``project`` choice is only accepted when
+    its integer id is in ``candidate_ids`` and its confidence clears the
+    threshold; otherwise the response is treated as unusable.
+    """
+    payload = _load_json_object(text)
+    if payload is not None:
+        mode = _strict_router_mode(payload.get("mode"))
+        if mode is None:
+            return None
+        if mode == RESEARCH_MODE_PROJECT:
+            choice = _coerce_project_choice(
+                payload.get("project_id"),
+                payload.get("confidence"),
+                candidate_ids,
+            )
+            if choice is None:
+                return None
+            project_id, confidence = choice
+            return ResearchRouteDecision(
+                mode=RESEARCH_MODE_PROJECT,
+                project_id=project_id,
+                confidence=confidence,
+            )
+        return ResearchRouteDecision(mode=mode)
+
+    legacy_mode = _normalize_router_decision(text)
+    if legacy_mode is None:
+        return None
+    return ResearchRouteDecision(mode=legacy_mode)
+
+
+def _list_project_router_candidates() -> list[dict]:
+    """Return registered projects that are valid Git repositories.
+
+    Only id, name, goal, description and keywords are exposed to the router;
+    filesystem paths and code content are never sent.
+    """
+    from obsidian_ai_hub.coding.backend import validate_git_repo
+    from obsidian_ai_hub.web.services.projects import list_projects
+
+    try:
+        projects = list_projects()
+    except Exception:
+        logger.exception("Failed to list projects for research routing")
+        return []
+
+    candidates: list[dict] = []
+    for project in projects:
+        path = project.get("project_path")
+        if not path:
+            continue
+        try:
+            validate_git_repo(path)
+        except Exception:
+            continue
+        candidates.append(
+            {
+                "project_id": project.get("project_id"),
+                "name": project.get("display_name")
+                or project.get("normalized_name")
+                or "",
+                "goal": project.get("goal") or "",
+                "description": project.get("description") or "",
+                "keywords": project.get("keywords") or [],
+            }
+        )
+    return candidates
+
+
+def _format_project_candidates(candidates: Sequence[dict]) -> str:
+    if not candidates:
+        return "(該当プロジェクトなし)"
+    blocks: list[str] = []
+    for candidate in candidates:
+        lines = [f"- id: {candidate.get('project_id')} | 名称: {candidate.get('name')}"]
+        goal = _normalize_optional_text(candidate.get("goal"))
+        if goal:
+            lines.append(f"  目的: {goal}")
+        description = _normalize_optional_text(candidate.get("description"))
+        if description:
+            lines.append(f"  説明: {description}")
+        keywords = ", ".join(
+            str(keyword) for keyword in candidate.get("keywords") or [] if keyword
+        )
+        if keywords:
+            lines.append(f"  キーワード: {keywords}")
+        blocks.append("\n".join(lines))
+    return "\n".join(blocks)
+
+
 def build_web_research_router_prompt(
     theme: str,
     *,
     context: Optional[str] = None,
     why_now: Optional[str] = None,
+    direction: Optional[str] = None,
+    projects_text: Optional[str] = None,
 ) -> str:
     context_text = _normalize_optional_text(context) or "(なし)"
     why_now_text = _normalize_optional_text(why_now) or "(なし)"
+    direction_text = _normalize_optional_text(direction) or "(なし)"
+    projects_text = _normalize_optional_text(projects_text) or "(該当プロジェクトなし)"
 
     return prompt.render_prompt(
         config.RESEARCH_ROUTER_PROMPT_PATH,
@@ -123,6 +310,8 @@ def build_web_research_router_prompt(
             "theme": theme,
             "why_now_text": why_now_text,
             "context_text": context_text,
+            "direction_text": direction_text,
+            "projects_text": projects_text,
         },
     )
 
@@ -132,11 +321,15 @@ def route_research_topic(
     *,
     context: Optional[str] = None,
     why_now: Optional[str] = None,
-) -> str:
+    direction: Optional[str] = None,
+) -> ResearchRouteDecision:
+    candidates = _list_project_router_candidates()
     p = build_web_research_router_prompt(
         theme,
         context=context,
         why_now=why_now,
+        direction=direction,
+        projects_text=_format_project_candidates(candidates),
     )
     try:
         response = llm_client.generate_llm_response(
@@ -148,14 +341,19 @@ def route_research_topic(
         )
     except Exception:
         logger.exception("Failed to route research topic with LLM")
-        return RESEARCH_MODE_INTERNAL
+        return ResearchRouteDecision(mode=RESEARCH_MODE_INTERNAL)
 
-    decision = _normalize_router_decision(response)
+    candidate_ids = {
+        int(candidate["project_id"])
+        for candidate in candidates
+        if candidate.get("project_id") is not None
+    }
+    decision = _parse_router_response(response, candidate_ids)
     if decision is None:
         logger.warning(
             "Unclear research routing decision from LLM: %s", response.strip()
         )
-        return RESEARCH_MODE_INTERNAL
+        return ResearchRouteDecision(mode=RESEARCH_MODE_INTERNAL)
 
     return decision
 
@@ -565,6 +763,119 @@ def _resolve_project_label(project_id: Optional[int]) -> Optional[str]:
     return name or path or None
 
 
+def resolve_research_route(
+    theme: str,
+    *,
+    direction: Optional[str] = None,
+    why_now: Optional[str] = None,
+    mode: str = "auto",
+    context: Optional[str] = None,
+    project_id: Optional[int] = None,
+) -> ResolvedResearchRoute:
+    """Resolve the execution mode and project for a theme.
+
+    In ``auto`` mode an explicit ``project_id`` wins. Otherwise the router may
+    return a high-confidence registered Git project, in which case the mode is
+    overridden to ``project``. Any unusable router response falls back to the
+    normal routing result.
+    """
+    combined_context = collect_research_context(theme, context)
+    resolved_mode = mode
+    resolved_project_id = project_id
+    if mode == "auto":
+        if project_id is not None:
+            resolved_mode = RESEARCH_MODE_PROJECT
+        else:
+            decision = route_research_topic(
+                theme,
+                context=combined_context,
+                why_now=why_now,
+                direction=direction,
+            )
+            resolved_mode = decision.mode
+            if decision.mode == RESEARCH_MODE_PROJECT:
+                resolved_project_id = decision.project_id
+
+    normalized_mode = _normalize_research_mode(resolved_mode)
+    if normalized_mode == RESEARCH_MODE_PROJECT and resolved_project_id is None:
+        raise ValueError("project research mode requires a project_id")
+    logger.info(
+        "Resolved research mode for theme '%s': %s (project=%s)",
+        theme,
+        normalized_mode,
+        resolved_project_id,
+    )
+    return ResolvedResearchRoute(
+        mode=normalized_mode,
+        project_id=resolved_project_id,
+        context=combined_context,
+    )
+
+
+def _produce_research_report(
+    theme: str,
+    route: ResolvedResearchRoute,
+    *,
+    why_now: Optional[str] = None,
+    output_style: Optional[str] = None,
+) -> ResearchReport:
+    p = build_research_prompt(
+        theme,
+        mode=route.mode,
+        context=route.context,
+        output_style=output_style,
+        why_now=why_now,
+        project_label=_resolve_project_label(route.project_id),
+    )
+    title = generate_research_title(theme, p)
+    report_body = conduct_research(
+        p,
+        mode=route.mode,
+        output_style=output_style,
+        project_id=route.project_id,
+    )
+    source = {
+        RESEARCH_MODE_INTERNAL: "internal-llm",
+        RESEARCH_MODE_WEB: "tavily-search",
+        RESEARCH_MODE_DEEP: "gpt-researcher",
+        RESEARCH_MODE_PROJECT: "coding-agent",
+    }.get(route.mode, "internal-llm")
+
+    body = f"## テーマ\n{theme}\n\n## 調査結果レポート\n{report_body}"
+    markdown = build_markdown(title, body, source=source, output_style=output_style)
+
+    return ResearchReport(title=title, mode=route.mode, markdown=markdown)
+
+
+def _persist_resolved_project(
+    theme_id: str,
+    job_id: str,
+    previous_project_id: Optional[int],
+) -> Callable[[ResolvedResearchRoute], None]:
+    """Build a callback that persists an auto-selected project before execution.
+
+    The theme and job rows are updated in the same transaction so a job never
+    runs the coding agent without a matching persisted project scope.
+    """
+
+    def _persist(route: ResolvedResearchRoute) -> None:
+        if route.mode != RESEARCH_MODE_PROJECT:
+            return
+        if _same_project_scope(route.project_id, previous_project_id):
+            return
+        from obsidian_ai_hub.research import db
+
+        db.assign_project(theme_id, job_id, route.project_id)
+        logger.info(
+            "Persisted auto-selected project %s for theme %s (job=%s)",
+            route.project_id,
+            theme_id,
+            job_id,
+        )
+
+    return _persist
+
+
 def run_research(
     theme: str,
     *,
@@ -574,49 +885,26 @@ def run_research(
     context: Optional[str] = None,
     output_style: Optional[str] = None,
     project_id: Optional[int] = None,
+    on_route_resolved: Optional[
+        Callable[[ResolvedResearchRoute], None]
+    ] = None,
 ) -> ResearchReport:
-    combined_context = collect_research_context(theme, context)
-    resolved_mode = mode
-    if mode == "auto":
-        if project_id is not None:
-            resolved_mode = RESEARCH_MODE_PROJECT
-        else:
-            resolved_mode = route_research_topic(
-                theme,
-                context=combined_context,
-                why_now=why_now,
-            )
-    normalized_mode = _normalize_research_mode(resolved_mode)
-    if normalized_mode == RESEARCH_MODE_PROJECT and project_id is None:
-        raise ValueError("project research mode requires a project_id")
-    logger.info("Resolved research mode for theme '%s': %s", theme, normalized_mode)
-
-    p = build_research_prompt(
+    route = resolve_research_route(
         theme,
-        mode=resolved_mode,
-        context=combined_context,
-        output_style=output_style,
+        direction=direction,
         why_now=why_now,
-        project_label=_resolve_project_label(project_id),
-    )
-    title = generate_research_title(theme, p)
-    report_body = conduct_research(
-        p,
-        mode=resolved_mode,
-        output_style=output_style,
+        mode=mode,
+        context=context,
         project_id=project_id,
     )
-    source = {
-        RESEARCH_MODE_INTERNAL: "internal-llm",
-        RESEARCH_MODE_WEB: "tavily-search",
-        RESEARCH_MODE_DEEP: "gpt-researcher",
-        RESEARCH_MODE_PROJECT: "coding-agent",
-    }.get(normalized_mode, "internal-llm")
-
-    body = f"## テーマ\n{theme}\n\n## 調査結果レポート\n{report_body}"
-    markdown = build_markdown(title, body, source=source, output_style=output_style)
-
-    return ResearchReport(title=title, mode=normalized_mode, markdown=markdown)
+    if on_route_resolved is not None:
+        on_route_resolved(route)
+    return _produce_research_report(
+        theme,
+        route,
+        why_now=why_now,
+        output_style=output_style,
+    )
 
 
 def run_theme_research(
@@ -643,6 +931,9 @@ def run_theme_research(
             mode=mode,
             output_style=output_style,
             project_id=theme_obj.get("project_id"),
+            on_route_resolved=_persist_resolved_project(
+                theme_id, job_id, theme_obj.get("project_id")
+            ),
         )
         db.update_job(
             job_id,
@@ -812,6 +1103,9 @@ def execute_research_job_sync(
             context=context,
             output_style=output_style,
             project_id=theme_obj.get("project_id"),
+            on_route_resolved=_persist_resolved_project(
+                theme_id, job_id, theme_obj.get("project_id")
+            ),
         )
 
         db.update_job(
