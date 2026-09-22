@@ -5,6 +5,7 @@ import {
   createEdge,
   createNode,
   defaultNodeConfig,
+  isReferencePath,
   parseConditionValue,
   removeNode,
   validateGraphShape,
@@ -189,6 +190,41 @@ describe("typed reference groups", () => {
       buildReferenceGroups([loop, child], null, inputsSchema),
     );
     expect(topRefs).not.toContain("loop.iteration");
+  });
+
+  it("offers indexed candidates for scalar arrays", () => {
+    const refs = paths(
+      buildReferenceGroups([], null, {
+        type: "object",
+        properties: { tags: { type: "array", items: { type: "string" } } },
+      }),
+    );
+    expect(refs).toContain("run.inputs.tags");
+    expect(refs).toContain("run.inputs.tags[0]");
+  });
+
+  it("does not index a container array path", () => {
+    const agent = node("agent", "agent", {
+      agent_id: "a1",
+      inputs: {},
+      output_schema: { type: "array", items: { type: "string" } },
+    });
+    const refs = paths(
+      buildReferenceGroups([agent], null, { type: "object", properties: {} }),
+    );
+    expect(refs).toContain("nodes.agent.output");
+    expect(refs).not.toContain("nodes.agent.output[0]");
+  });
+
+  it("recognizes only resolvable reference shapes", () => {
+    expect(isReferencePath("run.inputs.topic")).toBe(true);
+    expect(isReferencePath("nodes.x.output.a")).toBe(true);
+    expect(isReferencePath("loop.state.done")).toBe(true);
+    expect(isReferencePath("loop.state")).toBe(true);
+    expect(isReferencePath("loop.iteration")).toBe(true);
+    expect(isReferencePath("run.inputs")).toBe(false);
+    expect(isReferencePath("nodes.x")).toBe(false);
+    expect(isReferencePath("nonsense")).toBe(false);
   });
 });
 

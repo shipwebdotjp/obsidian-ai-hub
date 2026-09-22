@@ -19,6 +19,13 @@ const groups: ReferenceGroup[] = [
 ];
 
 describe("ReferencePicker", () => {
+  it("keeps the candidate list collapsed until opened", () => {
+    render(
+      <ReferencePicker idPrefix="rp0" groups={groups} value="" onChange={vi.fn()} />,
+    );
+    expect(screen.queryByTestId("rp0-ref-list")).not.toBeInTheDocument();
+  });
+
   it("selects a candidate path on click", async () => {
     const onChange = vi.fn();
     render(
@@ -29,6 +36,7 @@ describe("ReferencePicker", () => {
         onChange={onChange}
       />,
     );
+    await userEvent.click(screen.getByTestId("rp-ref-toggle"));
     await userEvent.click(screen.getByText("nodes.abc123.output.plan"));
     expect(onChange).toHaveBeenCalledWith("nodes.abc123.output.plan");
   });
@@ -40,11 +48,24 @@ describe("ReferencePicker", () => {
         groups={groups}
         value=""
         onChange={vi.fn()}
+        defaultOpen
       />,
     );
     await userEvent.type(screen.getByTestId("rp2-ref-filter"), "risks");
     expect(screen.queryByText("run.inputs.topic")).not.toBeInTheDocument();
     expect(screen.getByText("nodes.abc123.output.risks")).toBeInTheDocument();
+  });
+
+  it("warns when the free-text value is not a reference shape", () => {
+    render(
+      <ReferencePicker
+        idPrefix="rp4"
+        groups={groups}
+        value="not-a-ref"
+        onChange={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("rp4-ref-warning")).toBeInTheDocument();
   });
 
   it("edits the raw path and clears it", async () => {

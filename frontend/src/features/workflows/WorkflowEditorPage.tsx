@@ -17,14 +17,17 @@ import type {
   WorkflowNode,
   WorkflowNodeType,
   WorkflowRevision,
+  WorkflowSchemaField,
 } from "../../api/types";
 import { workflowDetailPath, workflowRunPath } from "../../constants/routes";
 import { getApiErrorMessage } from "../../utils/error";
 import { revisionStatusLabel } from "./revisionLabels";
 import ConditionEditor from "./ConditionEditor";
 import InputsSchemaForm from "./InputsSchemaForm";
+import SchemaAuthoringForm from "./SchemaAuthoringForm";
 import StructuredValueEditor from "./StructuredValueEditor";
 import WorkflowCanvas from "./WorkflowCanvas";
+import { emptyObjectSchema } from "./schemaModel";
 import {
   buildReferenceGroups,
   conditionCandidates,
@@ -310,6 +313,42 @@ export default function WorkflowEditorPage() {
   const pathsFromGroups = (groups: ReferenceGroup[]): string[] =>
     groups.flatMap((group) => group.fields.map((field) => field.path));
 
+  const focusNode = (nodeId: string | undefined | null) => {
+    if (!nodeId) return;
+    setSelectedNodeId(nodeId);
+    requestAnimationFrame(() => {
+      document
+        .querySelector(`[data-testid="workflow-node-${nodeId}"]`)
+        ?.scrollIntoView({ block: "center", behavior: "smooth" });
+    });
+  };
+
+  const focusEdge = (edgeId: string) => {
+    const edge = edges.find((item) => item.edge_id === edgeId);
+    if (!edge) return;
+    setEditingEdgeId(edgeId);
+    focusNode(edge.source_node_id);
+  };
+
+  const serverIssueTarget = (
+    text: string,
+  ): { nodeId?: string; edgeId?: string } => {
+    // Backend messages lead with the authoritative locator (``Node '<id>'`` or
+    // ``edge '<id>'``) after an optional code prefix; a ``Node '...'`` later in
+    // the body is the *referenced* node, not the offender.
+    const nodeMatch = /Node '([^']+)'/.exec(text);
+    const edgeMatch = /edge '([^']+)'/.exec(text);
+    const nodeId = nodeMatch?.[1];
+    const edgeId = edgeMatch?.[1];
+    const nodeValid = nodeId && nodes.some((node) => node.node_id === nodeId);
+    const edgeValid = edgeId && edges.some((edge) => edge.edge_id === edgeId);
+    const edgeFirst = (edgeMatch?.index ?? Infinity) < (nodeMatch?.index ?? Infinity);
+    if (edgeFirst && edgeValid) return { edgeId };
+    if (nodeValid) return { nodeId };
+    if (edgeValid) return { edgeId };
+    return {};
+  };
+
   const parentLoopStateSchema = selectedNode?.parent_loop_node_id
     ? ((nodes.find(
         (node) => node.node_id === selectedNode.parent_loop_node_id,
@@ -358,15 +397,47 @@ export default function WorkflowEditorPage() {
           {localIssues.length > 0 && (
             <ul data-testid="workflow-local-issues" className="text-amber-700">
               {localIssues.map((issue, index) => (
-                <li key={`${issue.code}-${index}`}>{issue.message}</li>
+                <li key={`${issue.code}-${index}`}>
+                  {issue.nodeId || issue.edgeId ? (
+                    <button
+                      type="button"
+                      className="cursor-pointer text-left underline decoration-dotted"
+                      onClick={() => {
+                        if (issue.edgeId) focusEdge(issue.edgeId);
+                        focusNode(issue.nodeId);
+                      }}
+                    >
+                      {issue.message}
+                    </button>
+                  ) : (
+                    issue.message
+                  )}
+                </li>
               ))}
             </ul>
           )}
           {serverIssues.length > 0 && (
             <ul data-testid="workflow-server-issues" className="text-rose-700">
-              {serverIssues.map((issue) => (
-                <li key={issue}>{issue}</li>
-              ))}
+              {serverIssues.map((issue) => {
+                const target = serverIssueTarget(issue);
+                if (!target.nodeId && !target.edgeId) {
+                  return <li key={issue}>{issue}</li>;
+                }
+                return (
+                  <li key={issue}>
+                    <button
+                      type="button"
+                      className="cursor-pointer text-left underline decoration-dotted"
+                      onClick={() => {
+                        if (target.edgeId) focusEdge(target.edgeId);
+                        focusNode(target.nodeId);
+                      }}
+                    >
+                      {issue}
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>
@@ -515,10 +586,10 @@ export default function WorkflowEditorPage() {
 
           <section className="space-y-2">
             <h3 className="font-semibold">入力 Schema</h3>
-            <JsonArea
-              label="inputs_schema"
-              value={inputsSchema}
-              onCommit={(value) => {
+            <SchemaAuthoringForm
+              testIdPrefix="inputs-schema"
+              schema={inputsSchema as WorkflowSchemaField}
+              onChange={(value) => {
                 setInputsSchema(value as Record<string, unknown>);
                 markDirty();
               }}
@@ -657,20 +728,38 @@ export default function WorkflowEditorPage() {
                       )}
                     />
                   </div>
-                  <JsonArea
-                    label="output_schema"
-                    value={selectedNode.config.output_schema ?? {}}
-                    onCommit={(value) => updateNodeConfig({ output_schema: value })}
-                  />
+                  <div className="space-y-1">
+                    <span className="block text-slate-700">output_schema</span>
+                    <SchemaAuthoringForm
+                      testIdPrefix="agent-output-schema"
+                      schema={
+                        (selectedNode.config
+                          .output_schema as WorkflowSchemaField) ??
+                        emptyObjectSchema()
+                      }
+                      onChange={(value) =>
+                        updateNodeConfig({ output_schema: value })
+                      }
+                    />
+                  </div>
                 </>
               )}
               {selectedNode.node_type === "loop" && (
                 <>
-                  <JsonArea
-                    label="state_schema"
-                    value={selectedNode.config.state_schema ?? {}}
-                    onCommit={(value) => updateNodeConfig({ state_schema: value })}
-                  />
+                  <div className="space-y-1">
+                    <span className="block text-slate-700">state_schema</span>
+                    <SchemaAuthoringForm
+                      testIdPrefix="loop-state-schema"
+                      schema={
+                        (selectedNode.config
+                          .state_schema as WorkflowSchemaField) ??
+                        emptyObjectSchema()
+                      }
+                      onChange={(value) =>
+                        updateNodeConfig({ state_schema: value })
+                      }
+                    />
+                  </div>
                   <div className="space-y-1">
                     <span className="block text-slate-700">input_mapping</span>
                     <InputsSchemaForm

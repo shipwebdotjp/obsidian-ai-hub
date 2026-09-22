@@ -280,12 +280,42 @@ export function schemaReferenceFields(
     ];
   }
   if (field.type === "array") {
-    return [{ path: basePath, type: "array", description }];
+    const fields: ReferenceField[] = [
+      { path: basePath, type: "array", description },
+    ];
+    const items = asSchemaField(field.items);
+    // Offer an indexed example so the ``[N]`` syntax is discoverable, but only
+    // for arrays nested below a property: the backend only accepts an index
+    // after a field segment, not on a container path (``nodes.x.output[0]``).
+    const nestedArray =
+      basePath !== "run.inputs" &&
+      basePath !== "loop.state" &&
+      basePath !== "loop.input" &&
+      !basePath.endsWith(".output");
+    if (
+      nestedArray &&
+      items &&
+      !items["x-unsupported"] &&
+      items.type &&
+      items.type !== "object" &&
+      items.type !== "array"
+    ) {
+      fields.push({ path: `${basePath}[0]`, type: items.type });
+    }
+    return fields;
   }
   if (field.enum) {
     return [{ path: basePath, type: "enum", description }];
   }
   return [{ path: basePath, type: field.type ?? "object", description }];
+}
+
+const REFERENCE_PATH_RE =
+  /^(?:run\.inputs\..+|nodes\.[^.]+\.output(?:\..+)?|loop\.(?:state|input)(?:\..+)?|loop\.iteration)$/;
+
+/** Grammar-only check: true when ``value`` is a resolvable reference shape. */
+export function isReferencePath(value: string): boolean {
+  return REFERENCE_PATH_RE.test(value.trim());
 }
 
 function nodeOutputFields(
