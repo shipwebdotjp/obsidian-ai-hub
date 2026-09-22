@@ -2,8 +2,8 @@
 
 ## Status
 
-Accepted (2026-09-22)。Phase 0〜4 を対象とし、スキーマ作成 UI と
-Capability 出力スキーマの宣言は対象外。
+Accepted (2026-09-22)。Phase 0〜4 と P0 フォローアップ（スキーマ作成フォーム・
+検証ジャンプ・参照ピッカー改善）を実装済み。Capability 出力スキーマの宣言は対象外。
 
 ## Context
 
@@ -82,10 +82,22 @@ Loop 設定、型付き参照がすべて生 JSON 編集中心であることに
   `output_schema` / `state_schema` を書けることを前提とする。
   出力 Schema の作成障壁が残る場合は最小のスキーマビルダーを前倒しする。
 
+## Amendment (P0 フォローアップ)
+
+Status: Accepted (2026-09-22)。当初「対象外」としていたスキーマ作成 UI を実装した。
+
+- `SchemaAuthoringForm` / `schemaModel.ts` を追加し、`inputs_schema` /
+  `output_schema` / `state_schema` を v1 サブセットのプロパティ行（型・必須・説明・
+  `enum`・入れ子 `object`・配列 `items`）で編集できるようにした。生 JSON トグルと
+  サブセット検証（バックエンドの `validate_schema_subset` をミラー）を併設する。
+- 検証結果（ローカル／サーバー）の行をクリックすると該当 Node / Edge の source Node を
+  選択してスクロールする。
+- 参照ピッカーを既定折りたたみにし、自由入力が参照形式でない場合の警告、配列 `[0]` 例、
+  パスのコピーを追加した。
+
 ## 対象外
 
-- `inputs_schema` / `output_schema` / `state_schema` を作るガイド UI（生 JSON 継続）
-- Capability 出力スキーマのコード宣言
+- Capability 出力スキーマのコード宣言（参照ピッカーは opaque のまま）
 - 定義の import / export、ユーザー管理テンプレート、複雑な JSON Schema
 
 ## 関連文書

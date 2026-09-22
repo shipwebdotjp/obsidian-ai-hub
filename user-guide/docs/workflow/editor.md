@@ -57,14 +57,14 @@ Edge の `condition`（条件付き排他的分岐）は、Edge 一覧の **条�
 
 ## Node の設定を編集する
 
-Node を選択すると、右パネルに対応する設定欄が表示されます。入力はスキーマから生成される
-ガイド付きフォームが中心で、JSON を直接書く必要はありません（スキーマ自体を作る欄は JSON のままです）。
+Node を選択すると、右パネルに対応する設定欄が表示されます。入力もスキーマ定義も
+ガイド付きフォームで編集できます。
 
 | 種別 | 設定項目 |
 | --- | --- |
 | `capability` | `capability_key`（選択）、`inputs`（Capability の入力スキーマから生成。要承認は選択肢に表示）、`retry.max_attempts` |
-| `agent` | `agent_id`（選択）、`inputs`（構造化エディタ。キーを追加し、各値は値か参照）、`output_schema`（JSON） |
-| `loop` | `state_schema`（JSON）、`input_mapping`（`state_schema` から生成。各値は値か参照）、`max_iterations`、`entry_node_id`、`continuation_condition`（条件エディタ） |
+| `agent` | `agent_id`（選択）、`inputs`（構造化エディタ。キーを追加し、各値は値か参照）、`output_schema`（スキーマ作成フォーム） |
+| `loop` | `state_schema`（スキーマ作成フォーム）、`input_mapping`（`state_schema` から生成。各値は値か参照）、`max_iterations`、`entry_node_id`、`continuation_condition`（条件エディタ） |
 | `loop_result` | `output_mapping`（親 Loop の `state_schema` から生成。各値は値か参照） |
 | `terminal` | `outcome`（`success` / `failure`） |
 
@@ -73,37 +73,46 @@ Node を選択すると、右パネルに対応する設定欄が表示されま
 - `agent` の `inputs` はスキーマを持たない自由形式です。キーを追加し、各値はテキスト入力か
   **参照**（型付き参照）を選べます。`task` / `context` は入力候補として表示されます。
 - `agent` の `output_schema`、`loop` の `state_schema`、右パネルの `inputs_schema` は
-  JSON で直接編集します（スキーマを作るガイド UI は今後の対応）。
+  **スキーマ作成フォーム** で編集します（後述）。
 
 選択中の Node は **削除** できます。**Edge 一覧** から不要な Edge を削除できます。
+
+## スキーマを作成する
+
+`inputs_schema` / `output_schema` / `state_schema` は **スキーマ作成フォーム** で編集します。
+
+- **プロパティを追加** — 名前を入れて **追加**。各行で型（`string` / `integer` / `number` / `boolean` /
+  `object` / `array`）、**必須**、説明、`enum`（カンマ区切り、省略可）を設定します。
+- `object` 型は入れ子のプロパティ、`array` 型は `items` の型と（`object` のとき）そのプロパティを編集できます。
+- **未定義のプロパティを許可する** で `additionalProperties` を切り替えます。
+- 上級者向けに **JSONで編集** で生 JSON に切り替えられます。ルートは `type: "object"` が必要です。
+- 許可されるのはサブセットで、`object` / `properties` / `required`、primitive、`enum`、配列などです
+  （`$ref` / `oneOf` / `anyOf` / `allOf` / 再帰は未対応）。違反はフォーム下部に表示されます。
+
+定義した `inputs_schema` は **実行入力** フォーム（および Run の再実行フォーム）に反映されます。
+ネストした `object` や配列にも対応します。
 
 ## 参照ピッカー（型付き参照）
 
 `{"$ref": "..."}` の型付き参照は、**参照** ボタンからピッカーで選べます。ピッカーは
 そのスコープで使える候補を型付きで一覧します。
 
-- `run.inputs.<field>` — `inputs_schema` の各項目（ネストも展開）。
+- `run.inputs.<field>` — `inputs_schema` の各項目（ネストも展開、配列は `[0]` の例つき）。
 - `nodes.<node_id>.output.<field>` — 先行 Node の出力。Agent は `output_schema`、
   Loop は `final_state.*` / `iterations` / `exit_reason`、Loop Result は `state_schema` の項目。
   Capability の出力は型が未宣言のため `nodes.<node_id>.output` 全体のみ表示します。
 - `loop.state.<field>` / `loop.input.<field>` / `loop.iteration` — Loop 子グラフ内のみ。
 
-検索欄で候補を絞り込めます。ピッカーを使わず直接入力することもできます。
-
-## 入力スキーマ（inputs_schema）
-
-右パネルの **入力 Schema** に、Run 開始時に入力する値の JSON Schema を定義します。
-許可されるのはサブセットで、`object` / `properties` / `required`、primitive、`enum`、配列などです
-（`$ref` / `oneOf` / `anyOf` / `allOf` / 再帰は未対応）。
-
-定義した `inputs_schema` は **実行入力** フォーム（および Run の再実行フォーム）に反映されます。
-ネストした `object` や配列にも対応します。
+候補は **候補から選ぶ** で開閉でき、検索欄で絞り込めます。**コピー** でパスをコピーできます。
+候補を使わず直接入力することもできます（参照形式でない場合は警告が出ます）。
 
 ## 検証
 
 - **ローカル検証** — 編集内容に対してクライアント側でも形状チェックが走り、問題は黄色で表示されます。
 - **サーバー検証** — **検証** ボタンで `POST .../validate` を呼び、結果を赤色で表示します。
 - **公開** はサーバー検証に合格した場合のみ実行されます。
+- 問題の行をクリックすると、該当する Node（または Edge の source Node）を選択して
+  キャンバス上にスクロールします。
 
 検証で検出される代表的なエラーは [制約とトラブルシューティング](limits.md#検証エラー) を参照してください。
 
