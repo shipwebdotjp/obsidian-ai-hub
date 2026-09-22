@@ -35,7 +35,13 @@ CONTEXT_KINDS = frozenset({"memory"})
 # ``set_recurring_job_enabled`` is intentionally excluded from Task
 # capabilities (see ``tasks/capabilities.py``).
 TASK_CONTEXT_TOOL_IDS = frozenset(
-    {"research_theme_propose", "register_one_shot_job", "register_recurring_job"}
+    {
+        "research_theme_propose",
+        "register_one_shot_job",
+        "register_recurring_job",
+        "register_one_shot_workflow_job",
+        "register_recurring_workflow_job",
+    }
 )
 
 

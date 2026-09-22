@@ -17,6 +17,8 @@ Web UI の **ジョブ新規追加** / **編集** / **削除** からも管理�
 
 ### ジョブの形
 
+実行対象は `command` または `workflow` のどちらか一方です（同時指定はできません）。
+
 ```yaml
 - id: example
   enabled: true
@@ -25,6 +27,26 @@ Web UI の **ジョブ新規追加** / **編集** / **削除** からも管理�
     minute: 0
   command: echo "hello"
 ```
+
+公開 Workflow を起動する場合は、`command` の代わりに `workflow` を指定します。
+
+```yaml
+- id: nightly_research
+  enabled: true
+  schedule:
+    type: daily
+    hour: 7
+    minute: 0
+  workflow:
+    workflow_id: wf_xxxxxxxx
+    inputs:
+      topic: "今日のテーマ"
+```
+
+- 対象は**発火時点の最新 published Revision**です。登録時の Revision には固定されません。
+- `inputs` は発火時に最新公開版の `inputs_schema` で検証されます。不適合なら Run は作られず、その枠は失敗として消費されます。
+- 入力は平文で設定に保存されます。**秘密値を入力に含めないでください。**
+- Web UI の **ジョブ新規追加 / 編集** では「コマンド」と「公開 Workflow」を切り替えられます。公開 Workflow は published Revision を持つものだけが選択肢に出ます。
 
 ### スケジュール
 
@@ -55,24 +77,37 @@ Web UI のジョブ編集では **標準モード（プリセット）** と **�
 
 - job runner は `jobs/last_run.json` に最終実行時刻を保存し、一致する枠を 1 回だけ実行します。
 - LaunchAgent は 60 秒ごとに起動するため、「即時」の実行も通常は ~1 分以内です。
-- 追加・再有効化・スケジュールやコマンドの変更時は、保存時刻で **arming** され、過去の枠を遡って実行しません。
+- 追加・再有効化・スケジュールや対象（command / workflow と入力）の変更時は、保存時刻で **arming** され、過去の枠を遡って実行しません。
 - コマンドが失敗した場合、`last_run` は更新されず、後続のサイクルで再試行されます。
+- Workflow の発火枠は、成功・失敗にかかわらず 1 回だけ処理されます。失敗（公開版不在・入力不整合）しても当該枠は再試行せず、次回枠で最新公開版を評価し直します。
+- 発火枠の処理は `workflow_schedule_dispatches` に記録され、runner が再起動しても同じ枠で Run が二重に作られることはありません。
+- 承認が必要な Workflow は、**発火のたびに** `waiting_approval` の Run を作ります。未承認の Run が残っていても次の発火は抑止されません。承認・取消は Run 詳細で行います。
 - 設定の保存は一時ファイル + `os.replace` で原子的に行われます。同時編集の競合は `409 Conflict` になります。
 
 ## ワンショット実行ジョブ
 
-ワンショットジョブは Agent の `register_one_shot_job` ツールで登録され、専用の SQLite キューに保存されます。
-**Web UI からの手動登録はありません。** 次の runner サイクルが各ジョブを一度だけ実行します（at-most-once、中断後の自動再試行なし）。
+ワンショットジョブは Agent の `register_one_shot_job`（コマンド）または `register_one_shot_workflow_job`（公開 Workflow）ツールで登録され、専用の SQLite キューに保存されます。
+次の runner サイクルが各ジョブを一度だけ処理します（at-most-once、中断後の自動再試行なし）。
 
-タブの **ワンショット実行ジョブ** では、予定時刻・状態・登録元・コマンド・終了コードを確認し、
+タブの **ワンショット実行ジョブ** では、予定時刻・状態・登録元・対象・Run を確認し、
 `queued` のものだけ **取消** できます。終端履歴は 30 日保持されます。
+
+- **Workflow を予約** から、公開 Workflow と固定入力・実行予定日時を指定して手動登録できます。
+- Workflow 対象の成功時は状態が `dispatched` になります。これは Run の作成成功を表し、Workflow 本体の完了・失敗は Run 詳細で確認します。dispatch 後の取消は Run 詳細から行います。
+- 公開版不在・入力不整合の場合は状態 `failed` と理由が残ります。
+
+## Workflow の発火と承認
+
+- 対象 Workflow は発火のたびに最新の published Revision を使います。すでに `waiting_approval` の Run は作成時のスナップショットを維持します。
+- 承認が必要な Workflow（`plan_required` Capability または Agent Node を含む）は、承認するまで Capability を実行しません。
+- Web サーバー（Workflow worker）が停止していると、作成済みの Run は `queued` のまま進みません。
 
 ## Agent 所有の定期実行ジョブ
 
 Agent が `register_recurring_job` ツールで登録した定期ジョブは、`agent_source`（agent / session / run ID と UTC 登録時刻）で所有元を記録します。
 
 - 所有 Agent だけが `set_recurring_job_enabled` で有効 / 無効を切り替えられます。
-- 人間が `/jobs` で ID・コマンド・スケジュール・enabled を変更すると、所有権（`agent_source`）が削除され、人間管理へ移ります。
+- 人間が `/jobs` で ID・対象（コマンド / Workflow と入力）・スケジュール・enabled を変更すると、所有権（`agent_source`）が削除され、人間管理へ移ります。
 - Task Agent は登録はできますが、有効 / 無効の切り替えツールは付与されません（停止・変更は人間が `/jobs` で行います）。
 
 ## 旧 `tasks/` からの移行

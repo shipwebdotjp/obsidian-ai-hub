@@ -56,11 +56,11 @@ Capability に型付きで受け渡すフローは、線形モデルでは表現
 | 責務 | Task Agent | Scheduler Job | Workflow (再設計後) |
 | --- | --- | --- | --- |
 | 定義の生成主体 | LLM Planner | 人間 / Agent tool (YAML) | **人間 (Web UI グラフエディタ)** |
-| 定義の形状 | Directional Plan(目的・範囲・制約) | OS コマンド | **Node/Edge グラフ + Loop 子グラフ + 型付き inputs_schema** |
+| 定義の形状 | Directional Plan(目的・範囲・制約) | OS コマンド / **公開 Workflow の起動対象 + 固定入力** | **Node/Edge グラフ + Loop 子グラフ + 型付き inputs_schema** |
 | 実行判断 | Runtime Orchestrator の動的ループ | 時刻判定 | **定義されたグラフと条件評価のみ** |
 | 非決定要素 | Planner/Orchestrator が都度判断 | なし | **Agent Node の LLM 出力のみ** |
-| 集約・状態 | `task_agent_*` | `jobs/last_run.json` / `one_shot_jobs` | `workflow_*`、`workflow_revision_*`、`workflow_run_nodes`、`workflow_activations` |
-| 承認境界 | Capability Policy + 承認時点の allowed_* / 指紋 | なし | Capability Policy + 選択 Agent ID。Agent 内部設定は最新版を使用、指紋は監査のみ |
+| 集約・状態 | `task_agent_*` | `jobs/last_run.json` / `one_shot_jobs` / `workflow_schedule_dispatches`（発火枠） | `workflow_*`、`workflow_revision_*`、`workflow_run_nodes`、`workflow_activations` |
+| 承認境界 | Capability Policy + 承認時点の allowed_* / 指紋 | **Workflow 発火時は Workflow の承認境界を継承**（発火ごとに `waiting_approval` Run を作る） | Capability Policy + 選択 Agent ID。Agent 内部設定は最新版を使用、指紋は監査のみ |
 
 ### 共有するもの / 共有しないもの
 
@@ -81,7 +81,7 @@ Capability に型付きで受け渡すフローは、線形モデルでは表現
 
 **範囲**: Workflow / Revision / Node / Edge / Loop 子グラフの保存・検証、Capability Node、Agent Node(JSON Schema サブセット、Agent 選択)、Loop Node(非ネスト)、terminal/loop_result Node、型付き inputs_schema、型付き参照、条件付き排他的分岐、OR 合流、承認(`waiting_approval`)、HITL wait(`waiting_hitl`)、`needs_attention`/`waiting_attention`、中断・明示再開・キャンセル、効果契約による動的完了判定、Event 監査、redaction・30 日保持、バックエンド API、後続フェーズで GUI / SSE を実装。
 
-**対象外(将来拡張)**: 並列 Node / fork / AND join、Loop ネスト、任意の循環 Edge、任意コード Node、Agent Node ごとの prompt/model/tool 上書き、$ref/oneOf/再帰を含む JSON Schema、Workflow 独自の長期 Artifact ストア、Scheduler Job からの Workflow 起動、専用 worker、完了通知外部入口、定義のインポート/エクスポート。
+**対象外(将来拡張)**: 並列 Node / fork / AND join、Loop ネスト、任意の循環 Edge、任意コード Node、Agent Node ごとの prompt/model/tool 上書き、$ref/oneOf/再帰を含む JSON Schema、Workflow 独自の長期 Artifact ストア、専用 worker、完了通知外部入口、定義のインポート/エクスポート。
 
 ## Consequences
 
@@ -108,8 +108,9 @@ Capability に型付きで受け渡すフローは、線形モデルでは表現
 
 - Loop ネストや並列 Node の実需要が発生した時。
 - Agent Node ごとの prompt/model/tool 上書きが必要になった時。
-- Scheduler Job から Workflow を起動する必要が出た時。
 - `needs_attention` の人間対応が頻発し、自動化または別の停止ポリシーが必要になった時。
+- 承認待ち Run の蓄積が運用負荷になり、抑止・期限・自動失効のいずれかが必要になった時。
+- Workflow ごとの同時実行数制御や動的な日時入力テンプレートの実需要が発生した時。
 
 ## Amendment (Capability ブリッジ Task の隔離)
 
@@ -168,6 +169,53 @@ Status: Accepted (2026-09-22)。
   後続の InvocationContext 導入で扱う。したがって「取消要求後に retry で副作用が重複し
   うる」リスクは残る。Run が `cancelling` の間はエンジンが次 Node を起動しないため、
   取消時の新規重複は主に in-flight な単一 Node の retry に限られる。
+
+## Amendment (Scheduler Job からの公開 Workflow 起動)
+
+Status: Accepted (2026-09-22)。前提の「取消・不確実結果の追跡」amendment 完了後に着手する。
+
+Scheduler Job の実行対象に「公開 Workflow」を第一級として加える。ここでいう公開 Workflow は
+**発火時点の最新 published Revision** を指し、登録時に固定した Revision ではない。
+
+### 決定
+
+- **Scheduler の唯一の実行入口は `job_runner` のまま**。定期 Job は YAML、one-shot は
+  `one_shot_jobs` に置き、`job_runner` が発火時に Workflow Run を 1 件作成する。Workflow 本体の
+  実行は既存の lifespan 同居 Workflow worker が担う。Workflow 対象は OS コマンドを経由しない。
+- **発火枠の冪等性は `workflow_schedule_dispatches`（定期）と `one_shot_jobs` の原子的 claim
+  （one-shot）で保証する。** dispatch 行と Run 行は同一 SQLite transaction で commit し、
+  commit 後に `last_run` を進める。これにより runner 再起動や `last_run` 保存失敗でも
+  Run を二重作成しない。
+- **最新公開版追従**: 発火のたびに最新 published Revision を解決し、その `inputs_schema` で
+  固定入力を検証して Run の graph/input snapshot を作る。すでに `waiting_approval` の Run は
+  自分の snapshot を維持し、新 Revision の影響を受けない。
+- **承認待ちの蓄積を受容する**: 承認が必要な Workflow は発火ごとに必ず `waiting_approval` の
+  Run を作る。未完了 Run があっても新規発火を抑止しない。蓄積は運用作（`/jobs` の表示、
+  人間による取消・無効化）で扱い、抑止・期限・自動失効は本 amendment の対象外とする。
+- **失敗も枠を消費する**: published 不在・入力 schema 不一致は Run を作らず、dispatch に
+  失敗理由を残して当該枠を消費する。定期 Job は次回枠で最新公開版を再評価し、過去枠を
+  全件 backfill しない。one-shot は `failed` として理由とともに残す。
+- **one-shot は `dispatched` を終端とする**: Workflow dispatch 成功時の one-shot 状態は
+  `dispatched` とし、Workflow 本体の完了・失敗とは区別する。dispatch 後の取消は Workflow Run
+  側で行い、`queued` の one-shot のみ従来どおり取消可能とする。
+- **command Job の意味は変更しない**: retry/backoff を含め既存の command 実行契約は不変。
+  上記の「失敗も枠を消費する」は Workflow 対象のみに適用する。
+- **所有規則を Workflow 対象にも適用する**: Agent 所有 Recurring Job は現行の `agent_source` と
+  所有失効規則をそのまま適用し、人間が対象・入力・schedule・有効状態を変更すると所有を外す。
+
+### 操作シナリオ契約（不可逆操作: Workflow Capability の副作用）
+
+| 段階 | 入力と正本 | 機械可読な識別子 | 永続化 | 次に読む主体 | 停止・失敗時 | 不可逆操作 |
+| --- | --- | --- | --- | --- | --- | --- |
+| Job 登録 | `workflow_id`、現行 published Revision、固定入力 | `job_id` / `workflow_id` | YAML または `one_shot_jobs` | `job_runner` | Revision 不在・入力不適合は登録拒否 | なし |
+| 時刻発火 | source_kind + scheduler_job_id + scheduled_for | dispatch 行 | `workflow_schedule_dispatches` | `job_runner` | 同一枠の再実行は既存結果を返す | なし |
+| Run 作成 | 発火時の最新 published Revision と検証済み入力 | `run_id` / `revision_id` | Run の graph/input snapshot | Workflow worker | 不整合・公開版不在は Run なしで dispatch 失敗 | なし |
+| 承認 | Run snapshot の capability policy | `run_id` | `waiting_approval` Run | 人間 / approve API | 承認前に Capability を実行しない | なし |
+| 実行 | 承認済み snapshot + InvocationContext | `activation_id` | `workflow_run_nodes` / `workflow_events` | 次 Edge | validation 失敗は実行しない | Capability 副作用 |
+| one-shot 完了 | one-shot Job ID と Workflow Run ID | `job_id` / `run_id` | `dispatched` | 人間 / Run 詳細 | 以後の取消・復旧は Run 側で追跡 | なし |
+
+運用は `docs/development-quality-playbook.md` に従い、隔離 backend + fake Capability の縦断
+結合テストで「承認前に副作用 0 回」「二重 Run なし」を反証可能にする。
 
 ## 関連文書
 

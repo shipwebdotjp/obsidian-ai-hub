@@ -483,3 +483,71 @@ def test_corrupt_jobs_yaml_returns_500_and_never_overwrites(clean_job_env, web_c
 
     # The corrupt file was not overwritten by the failed save flow.
     assert job_file.read_text(encoding="utf-8").startswith("id: [unclosed")
+
+
+def _publish_terminal_workflow(name="wf"):
+    from obsidian_ai_hub.workflow import store as workflow_store
+
+    wf = workflow_store.create_workflow(name, inputs_schema={"type": "object"})
+    rev = wf["revision"]
+    workflow_store.set_revision_graph(
+        rev["revision_id"],
+        [
+            {
+                "node_id": "t",
+                "node_type": "terminal",
+                "config": {"outcome": "success"},
+                "parent_loop_node_id": None,
+                "ui_position": None,
+            }
+        ],
+        [],
+    )
+    workflow_store.publish_revision(rev["revision_id"])
+    return wf["workflow_id"]
+
+
+def test_create_one_shot_workflow_job_endpoint(
+    clean_job_env, web_client, test_memory_db_path
+):
+    workflow_id = _publish_terminal_workflow()
+
+    res = web_client.post(
+        "/api/v1/scheduler-jobs/one-shot-jobs",
+        json={"workflow_id": workflow_id, "inputs": {}},
+    )
+    assert res.status_code == 201, res.text
+    body = res.json()
+    assert body["target_kind"] == "workflow"
+    assert body["workflow_id"] == workflow_id
+    assert body["status"] == "queued"
+
+
+def test_create_one_shot_workflow_job_rejects_unpublished(
+    clean_job_env, web_client, test_memory_db_path
+):
+    res = web_client.post(
+        "/api/v1/scheduler-jobs/one-shot-jobs",
+        json={"workflow_id": "wf_missing", "inputs": {}},
+    )
+    assert res.status_code == 422
+
+
+def test_recurring_jobs_hide_corrupt_workflow_target(
+    clean_job_env, web_client, test_memory_db_path
+):
+    job_file, _ = clean_job_env
+    recurring.atomic_write_yaml(
+        job_file,
+        [
+            {
+                "id": "bad",
+                "enabled": True,
+                "schedule": {"type": "daily", "hour": 1},
+                "workflow": {"inputs": {}},
+            }
+        ],
+    )
+    res = web_client.get("/api/v1/scheduler-jobs/recurring-jobs")
+    assert res.status_code == 200, res.text
+    assert res.json()["jobs"][0]["workflow"] is None

@@ -358,6 +358,29 @@ def _revision_row(
     return revision
 
 
+def list_schedulable_workflows(
+    *, conn: Optional[sqlite3.Connection] = None
+) -> list[dict[str, Any]]:
+    """List workflows that have a published revision, with its input schema.
+
+    Backs the Scheduler Job target picker; only runnable workflows are shown.
+    """
+    with auto_connection(conn) as (active_conn, _):
+        rows = active_conn.execute(
+            "SELECT w.workflow_id, w.name, w.description, "
+            "r.revision_id, r.version, r.inputs_schema "
+            "FROM workflows w JOIN workflow_revisions r "
+            "ON r.workflow_id = w.workflow_id AND r.status = 'published' "
+            "ORDER BY w.name ASC;",
+        ).fetchall()
+    items: list[dict[str, Any]] = []
+    for row in rows:
+        record = dict(row)
+        record["inputs_schema"] = _loads(record.get("inputs_schema"), {"type": "object"})
+        items.append(record)
+    return items
+
+
 def get_latest_revision(
     workflow_id: str, conn: Optional[sqlite3.Connection] = None
 ) -> Optional[dict[str, Any]]:
@@ -620,6 +643,30 @@ def create_run(
     created = get_run(str(run_id), conn=conn)
     assert created is not None
     return created
+
+
+def insert_run_snapshot(
+    conn: sqlite3.Connection,
+    *,
+    workflow_id: str,
+    revision_id: str,
+    inputs: dict[str, Any],
+    snapshot: dict[str, Any],
+    initial_status: str,
+) -> str:
+    """Insert a run from a caller-built snapshot on an existing transaction.
+
+    Callers (scheduler dispatch, manual run creation) own the transaction so
+    the run row and any related row (e.g. a dispatch record) commit together.
+    """
+    return _insert_run(
+        conn,
+        workflow_id=workflow_id,
+        revision_id=revision_id,
+        inputs=inputs,
+        snapshot=snapshot,
+        initial_status=initial_status,
+    )
 
 
 def create_rerun_run(

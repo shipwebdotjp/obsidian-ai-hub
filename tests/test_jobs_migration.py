@@ -152,6 +152,72 @@ def test_db_v48_copies_task_state_to_job_state_and_drops_old(tmp_path):
         conn.close()
 
 
+def test_db_v58_rebuilds_one_shot_and_adds_dispatches(tmp_path):
+    """v58 must preserve existing command rows while allowing workflow targets."""
+    from obsidian_ai_hub import database
+
+    db_file = tmp_path / "v57.sqlite3"
+    conn = sqlite3.connect(str(db_file))
+    conn.row_factory = sqlite3.Row
+    conn.execute("""
+        CREATE TABLE one_shot_jobs (
+            job_id TEXT PRIMARY KEY,
+            command TEXT NOT NULL,
+            run_at_utc TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'queued',
+            agent_id TEXT,
+            session_id TEXT,
+            run_id TEXT,
+            created_at TEXT NOT NULL,
+            started_at TEXT,
+            finished_at TEXT,
+            exit_code INTEGER,
+            segments_json TEXT NOT NULL DEFAULT '[]',
+            output_truncated INTEGER NOT NULL DEFAULT 0,
+            error_summary TEXT
+        );
+    """)
+    conn.execute(
+        "INSERT INTO one_shot_jobs (job_id, command, run_at_utc, status, created_at,"
+        " exit_code, segments_json, output_truncated)"
+        " VALUES ('old1', 'printf hi', '2026-09-17T00:00:00+00:00', 'succeeded',"
+        " '2026-09-17T00:00:00+00:00', 0, '[{\"args\":[\"printf\",\"hi\"]}]', 0);"
+    )
+    conn.execute("PRAGMA user_version = 57;")
+    conn.commit()
+
+    try:
+        database.run_migration_v58(conn)
+        tables = {
+            r[0]
+            for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        assert "workflow_schedule_dispatches" in tables
+
+        row = conn.execute("SELECT * FROM one_shot_jobs WHERE job_id = 'old1'").fetchone()
+        assert row is not None
+        assert row["target_kind"] == "command"
+        assert row["command"] == "printf hi"
+        assert row["status"] == "succeeded"
+        assert row["exit_code"] == 0
+
+        # A workflow target row may now store a NULL command.
+        conn.execute(
+            "INSERT INTO one_shot_jobs (job_id, target_kind, command, workflow_id,"
+            " run_at_utc, status, created_at)"
+            " VALUES ('wf1', 'workflow', NULL, 'wf_x', '2026-09-17T00:00:00+00:00',"
+            " 'queued', '2026-09-17T00:00:00+00:00');"
+        )
+        wf = conn.execute("SELECT * FROM one_shot_jobs WHERE job_id = 'wf1'").fetchone()
+        assert wf["command"] is None
+        assert wf["target_kind"] == "workflow"
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 58
+    finally:
+        conn.close()
+
+
 def test_fresh_db_has_job_state_and_one_shot_jobs_without_task_state(test_memory_db_path):
     from obsidian_ai_hub.database import get_db_connection
 

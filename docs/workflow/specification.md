@@ -33,6 +33,8 @@ Agent Node の LLM 出力は確率的で、JSON Schema によって検証・型�
 | **Loop Result Node** | Loop Node 子グラフの終端。次の `loop.state` を返す。 |
 | **Terminal Node** | グラフの終端。`success` または `failure` の outcome を持つ。 |
 | **Workflow Run** | Revision の 1 回の実行単位。 |
+| **Workflow Scheduler Job** | Scheduler Job の実行対象として公開 Workflow を指定したもの。対象は発火時点の最新 published Revision。固定 JSON 入力を持つ。 |
+| **Scheduled Dispatch** | Scheduler Job の 1 発火枠。`source_kind` + `scheduler_job_id` + `scheduled_for` で一意。解決した Revision と作成 Run、失敗理由を保持する。 |
 | **Activation** | ある Node が、ある Loop 反復・経路で論理的に 1 回起動された単位の永続 UUID。 |
 | **InvocationContext** | Capability Adapter 実行時に渡される実行文脈（run_id, node_id, activation_id 等）。 |
 | **型付き参照** | `run.inputs.*` / `nodes.<node_id>.output.*` / `loop.state.*` の形式で値を参照する仕組み。 |
@@ -44,12 +46,13 @@ Agent Node の LLM 出力は確率的で、JSON Schema によって検証・型�
 Agent Node、Loop Node（非ネスト）、terminal / loop_result Node、型付き inputs_schema、型付き参照、
 条件付き排他的分岐、OR 合流、承認（`waiting_approval`）、HITL wait（`waiting_hitl`）、
 `needs_attention` / `waiting_attention`、中断・再開・キャンセル、効果契約による動的完了判定、
-Event 監査、redaction・30 日保持、バックエンド API、GUI / SSE（後続フェーズ）。
+Event 監査、redaction・30 日保持、バックエンド API、GUI / SSE（後続フェーズ）、
+Scheduler Job からの公開 Workflow 起動（`job_runner` 経由、発火枠単位の冪等性）。
 
 **対象外**: 並列 Node / fork / AND join、Loop ネスト、任意の循環 Edge、任意コード Node、
 Agent Node ごとの prompt/model/tool 上書き、$ref/oneOf/再帰を含む JSON Schema、Workflow 独自の
-長期 Artifact ストア、Scheduler Job からの Workflow 起動、専用 worker、完了通知外部入口、
-定義のインポート / エクスポート。
+長期 Artifact ストア、専用 worker、完了通知外部入口、定義のインポート / エクスポート、
+Workflow ごとの同時実行数制御、承認待ち Run の抑止・自動失効、動的な日時入力テンプレート。
 
 ## 2. 主要ユースケースと操作シナリオ
 
@@ -71,6 +74,7 @@ Agent Node ごとの prompt/model/tool 上書き、$ref/oneOf/再帰を含む JS
 | --- | --- | --- | --- | --- | --- | --- |
 | 定義作成 | Capability schema / Agent 選択 / Edge 条件 | `node_id` / `edge_id` | `workflow_nodes` / `workflow_edges` | 静的検証・公開 | schema 不一致は保存 / 検証拒否 | なし |
 | Revision 公開 | 検証済みグラフ + inputs_schema | `revision_id` / `version` | `workflow_revision` status 更新 | Run 作成 | 未検証は公開不可 | なし |
+| Scheduler 発火 | source_kind + scheduler_job_id + scheduled_for | `dispatch_id` | `workflow_schedule_dispatches` + `workflow_runs` | Workflow worker | 同一枠は既存結果を返す / 失敗は理由を残し枠消費 | なし |
 | Run 作成 | `revision_id` + 利用者入力 | `run_id` | `workflow_runs` + スナップショット | worker | archived / 未公開は拒否 | なし |
 | 承認判定 | `task_agent_capabilities.approval_policy` + 選択 Agent ID | policy snapshot | `workflow_events` | worker | `plan_required` あれば `waiting_approval` | なし |
 | Node 実行 | 検証済み入力 + InvocationContext | `activation_id` / `node_id` | `workflow_run_nodes` / `workflow_activations` | 次 Edge | validation 失敗は実行しない | Capability 副作用 |
@@ -616,6 +620,7 @@ Agent 指紋を含む。
 | エンドポイント | 責務 |
 | --- | --- |
 | `GET /api/v1/workflows` | Workflow 一覧（ページ送り）。 |
+| `GET /api/v1/workflows/schedulable` | Scheduler Job の対象選択用に、published Revision を持つ Workflow とその `inputs_schema` を返す。 |
 | `POST /api/v1/workflows` | 新規 Workflow + 初期 draft Revision 作成。 |
 | `GET /api/v1/workflows/:id` | Workflow + Revision 履歴 + 最近 Run。 |
 | `POST /api/v1/workflows/:id/revisions` | 新しい draft Revision を作成。公開済み Revision があればグラフと `inputs_schema` を複製する。 |
@@ -723,10 +728,35 @@ workflow_events
   event_type TEXT NOT NULL
   payload_json TEXT NOT NULL
   created_at TEXT NOT NULL
+
+workflow_schedule_dispatches   -- v58
+  dispatch_id TEXT PRIMARY KEY
+  source_kind TEXT NOT NULL             -- recurring | one_shot（source_kind ごとの拡張余地）
+  scheduler_job_id TEXT NOT NULL
+  scheduled_for TEXT NOT NULL           -- 発火枠（定期は target 、one-shot は run_at_utc）
+  workflow_id TEXT
+  revision_id TEXT                      -- 発火時に解決した published Revision
+  run_id TEXT                           -- 成功時のみ
+  status TEXT NOT NULL                  -- dispatched | failed
+  failure_reason TEXT
+  created_at TEXT NOT NULL
+  updated_at TEXT NOT NULL
+  UNIQUE (source_kind, scheduler_job_id, scheduled_for)
+
+one_shot_jobs（v58 で再構築）
+  target_kind TEXT NOT NULL DEFAULT 'command'   -- command | workflow
+  command TEXT                                  -- target_kind='command' のとき必須
+  workflow_id TEXT                              -- target_kind='workflow'
+  inputs_json TEXT NOT NULL DEFAULT '{}'
+  workflow_run_id TEXT
+  status TEXT NOT NULL                  -- queued|running|succeeded|failed|cancelled|interrupted|dispatched
+  （その他は既存列を保持）
 ```
 
 インデックス:
 
+- `workflow_schedule_dispatches(source_kind, scheduler_job_id, scheduled_for)`（UNIQUE 制約）
+- `workflow_schedule_dispatches(run_id)`
 - `workflow_revisions(workflow_id, status)`
 - `workflow_nodes(revision_id)`
 - `workflow_edges(revision_id, source_node_id)`
@@ -751,6 +781,29 @@ workflow_events
 - 切断時の再接続、last-event-id による差分取得、heartbeat は coding run と同水準を目指す。
 - MVP では long-polling でも代替可能（仕様としては SSE を正とする）。
 
+### 16.5 Scheduler Job からの Workflow 起動（v58）
+
+- 定期 Job は `command` または `workflow: {workflow_id, inputs}` の**排他的な**対象定義を持つ。
+  Workflow 対象は OS コマンドを経由しない。Agent 登録ツールは既存 command 版を変更せず、
+  Workflow 版を別ツールとして追加する。
+- 発火処理は `job_runner` からのみ呼ばれる service に集約する。service は 1 つの SQLite
+  transaction で次を行う: 最新 published Revision の解決 → `inputs_schema` 検証 →
+  capability policy による承認要否判定 → Run の不変スナップショット作成 →
+  dispatch 行（`run_id` 付き）または失敗 dispatch 行の作成。**commit 後に**定期 Job の
+  `last_run` を進める。手動 Run 作成も同じ検証・承認判定関数を共有する。
+- 承認要否は `task_agent_capabilities.approval_policy` と Agent Node の有無で判定し、
+  必要なら Run を最初から `waiting_approval` で作る。発火ごとに 1 Run を作り、未完了 Run が
+  あっても抑止しない（運用作で扱う）。
+- 失敗時（published 不在・schema 不一致）は Run を作らず、dispatch に理由を残して枠を消費し、
+  定期 Job は次回枠で最新公開版を再評価する。既存どおり停止中の枠を全件 backfill しない。
+- one-shot Workflow は `one_shot_jobs.target_kind='workflow'` として登録し、原子的 claim の後
+  同一 transaction で Run を作成して `dispatched` にする。Workflow 本体の完了・失敗とは区別し、
+  dispatch 後の取消は Workflow Run 側で行う。
+- 定期 Workflow Job も既存の `agent_source` 所有規則を適用し、人間が対象・入力・schedule・
+  有効状態を変更すると所有を外す。
+- 固定入力は平文で Scheduler 設定（YAML / `one_shot_jobs`）へ保存される。**秘密値を入力に
+  含めない**運用を必須とする。
+
 ## 17. エラー分類とセキュリティ境界
 
 ### 17.1 エラー分類
@@ -763,6 +816,7 @@ workflow_events
 | 承認エラー | 未承認で承認 API 呼び出し | 409 | 状態不整合。 |
 | attention エラー | 非冪等 Node 中断 | `waiting_attention` | 人間対応待ち。 |
 | 同時実行競合 | 他 worker が claim 中 | 409 | 短期リトライで解決。 |
+| Scheduler 発火失敗 | published 不在 / 入力 schema 不一致 | dispatch `failed` / one-shot `failed` | Run は作らない。理由を残し枠を消費。 |
 | 認可エラー | 無効 / 未提供 Bearer トークン | 401 / 403 | 既存 middleware。 |
 
 ### 17.2 セキュリティ境界
@@ -824,6 +878,12 @@ workflow_events
 17. HITL 待機中の取消: 関連 HITL Run を取消し、回答による再キューを防止する。
 18. 保持: 終端 Run・Node・Activation・Event は 30 日後に削除される。非終端 Run は削除されない。
 19. 秘密値: Run 入力・Event 内の既知秘密値は redact される。
+20. Scheduler 発火: 発火枠ごとに Run は高々 1 件。承認必須 Workflow は発火ごとに
+    `waiting_approval` となり、承認前に Capability / Agent は実行されない。
+21. 最新公開版追従: 新しい Revision を公開しても、すでに `waiting_approval` の Run は
+    旧 snapshot を維持し、次回発火のみが新 Revision を使う。
+22. Scheduler 失敗: published 不在 / 入力 schema 不一致では Run を作らず、定期 Job は
+    当該枠を再試行せず、one-shot は `failed` として理由とともに残る。
 
 ## 20. MVP 対象外、将来拡張、未決事項、リスク
 
@@ -836,14 +896,13 @@ workflow_events
 - Agent Node ごとの prompt/model/tool 上書き
 - $ref / oneOf / 再帰を含む JSON Schema
 - Workflow 独自の長期 Artifact ストア
-- Scheduler Job からの Workflow 起動
 - 専用 launchd worker
 - 完了 / 失敗 / 承認待ちの外部通知（LINE / Push）
 - 定義の JSON / YAML インポート・エクスポート
 
 ### 20.2 将来拡張（優先順位未定）
 
-1. Scheduler からの `workflow run <id>` 起動コマンド。
+1. 動的な日時入力テンプレートと、Workflow ごとの同時実行数制御。
 2. スターターテンプレートの JSON ファイル化と UI インポート。
 3. Loop ネスト（子グラフ内に子 Loop）。
 4. Agent Node ごとの軽微な上書き（承認境界を含む ADR で検討）。

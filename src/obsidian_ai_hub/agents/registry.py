@@ -436,6 +436,49 @@ class SetRecurringJobEnabledInput(BaseModel):
     )
 
 
+class ListPublishedWorkflowsInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class RegisterOneShotWorkflowJobInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    workflow_id: str = Field(
+        description="実行する公開 Workflow のID。最新の公開済み Revision が発火時に使われる。",
+    )
+    inputs: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Workflow の inputs_schema に適合する固定入力。秘密値を含めない。",
+    )
+    run_at: Optional[str] = Field(
+        default=None,
+        description="実行予定日時（ISO 8601）。省略時は次回job_runner起動時にRunを作成。タイムゾーンなしはJSTとして解釈し、過去日時は即時扱い。",
+    )
+
+
+class RegisterRecurringWorkflowJobInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    job_id: str = Field(
+        description="登録する定期ジョブの一意なID。既存ID（手動作成・他Agent所有を含む）とは重複できない。",
+    )
+    workflow_id: str = Field(
+        description="発火するたびに最新の公開済み Revision を実行する公開 Workflow のID。",
+    )
+    inputs: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Workflow の inputs_schema に適合する固定入力。秘密値を含めない。",
+    )
+    schedule: Dict[str, int | str | list[int | str]] = Field(
+        description=(
+            "実行スケジュール。{'type': 'minutely'|'hourly'|'daily'|'weekly'|'monthly'} を必須とし、"
+            "秒/分/時/曜日/日を second/minute/hour/weekday/day で指定する。"
+            "値は数値、'*/5'・'8-18/2'・'0,30' のようなcron風文字列、またはその配列。"
+            "許可キー・範囲・既定値の意味検証はサーバー側で行う。"
+        ),
+    )
+
+
 class AgentDelegateInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -1389,6 +1432,110 @@ def _make_set_recurring_job_enabled_tool(
     return set_recurring_job_enabled
 
 
+def _make_list_published_workflows_tool(
+    trusted_ctx: Optional[Dict[str, Any]] = None,
+) -> BaseTool:
+    """Create a read-only tool listing workflows runnable by Scheduler Jobs."""
+
+    @tool(args_schema=ListPublishedWorkflowsInput)
+    def list_published_workflows() -> str:
+        """Scheduler Job の対象にできる公開 Workflow（公開済み Revision と inputs_schema）を一覧します。"""
+        try:
+            from obsidian_ai_hub.workflow.store import list_schedulable_workflows
+
+            return json.dumps(
+                {"items": list_schedulable_workflows()}, ensure_ascii=False
+            )
+        except Exception as exc:
+            logger.exception("list_published_workflows failed")
+            return json.dumps({"error": _sanitize_unexpected_error(exc)}, ensure_ascii=False)
+
+    list_published_workflows.name = "list_published_workflows"  # type: ignore[attr-defined]
+    return list_published_workflows
+
+
+def _make_register_one_shot_workflow_job_tool(
+    trusted_ctx: Optional[Dict[str, Any]] = None,
+) -> BaseTool:
+    """Create a one-shot Workflow job registration tool bound to a trusted context."""
+
+    @tool(args_schema=RegisterOneShotWorkflowJobInput)
+    def register_one_shot_workflow_job(
+        workflow_id: str,
+        inputs: Optional[Dict[str, Any]] = None,
+        run_at: Optional[str] = None,
+    ) -> str:
+        """公開 Workflow をワンショット実行ジョブとして登録し、次回job_runner起動時または指定日時以降に一度だけRunを作成します。"""
+        try:
+            from obsidian_ai_hub.scheduler_jobs import one_shot as _one_shot
+
+            ctx = trusted_ctx if isinstance(trusted_ctx, dict) else {}
+            res = _one_shot.register_one_shot_workflow_job(
+                workflow_id,
+                inputs or {},
+                run_at,
+                agent_id=str(ctx.get("agent_id")) if ctx.get("agent_id") else None,
+                session_id=str(ctx.get("session_id")) if ctx.get("session_id") else None,
+                run_id=str(ctx.get("run_id")) if ctx.get("run_id") else None,
+            )
+            return json.dumps(
+                {
+                    "job_id": res["job_id"],
+                    "status": res["status"],
+                    "target_kind": res.get("target_kind"),
+                    "workflow_id": res.get("workflow_id"),
+                    "run_at_utc": res["run_at_utc"],
+                },
+                ensure_ascii=False,
+            )
+        except ValueError as exc:
+            logger.warning("register_one_shot_workflow_job validation failed: %s", exc)
+            return json.dumps({"error": str(exc)}, ensure_ascii=False)
+        except Exception as exc:
+            logger.exception("register_one_shot_workflow_job failed")
+            return json.dumps({"error": _sanitize_unexpected_error(exc)}, ensure_ascii=False)
+
+    register_one_shot_workflow_job.name = "register_one_shot_workflow_job"  # type: ignore[attr-defined]
+    return register_one_shot_workflow_job
+
+
+def _make_register_recurring_workflow_job_tool(
+    trusted_ctx: Optional[Dict[str, Any]] = None,
+) -> BaseTool:
+    """Create a recurring Workflow job registration tool bound to a trusted context."""
+
+    @tool(args_schema=RegisterRecurringWorkflowJobInput)
+    def register_recurring_workflow_job(
+        job_id: str,
+        workflow_id: str,
+        inputs: Optional[Dict[str, Any]] = None,
+        schedule: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """公開 Workflow を定期実行ジョブとして登録します。発火のたびに最新の公開Revisionを使います。登録したAgentだけが後で有効／無効を切り替えられます。"""
+        try:
+            from obsidian_ai_hub.scheduler_jobs import recurring as _recurring
+
+            ids = _recurring_trusted_ids(trusted_ctx)
+            res = _recurring.register_recurring_job(
+                job_id,
+                schedule=schedule,
+                workflow={"workflow_id": workflow_id, "inputs": inputs or {}},
+                agent_id=ids["agent_id"],
+                session_id=ids["session_id"],
+                run_id=ids["run_id"],
+            )
+            return json.dumps(res, ensure_ascii=False)
+        except ValueError as exc:
+            logger.warning("register_recurring_workflow_job validation failed: %s", exc)
+            return json.dumps({"error": str(exc)}, ensure_ascii=False)
+        except Exception as exc:
+            logger.exception("register_recurring_workflow_job failed")
+            return json.dumps({"error": _sanitize_unexpected_error(exc)}, ensure_ascii=False)
+
+    register_recurring_workflow_job.name = "register_recurring_workflow_job"  # type: ignore[attr-defined]
+    return register_recurring_workflow_job
+
+
 @tool(args_schema=ResearchContextSnapshotInput)
 def research_context_snapshot() -> str:
     """直近7日のDaily Note、最新Weekly Note、直近アクティビティ、既存テーマとフィードバックの要約スナップショットを取得します。"""
@@ -1724,6 +1871,27 @@ _BUILTIN_TOOL_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "description": "自身が登録し人間に編集されていない定期実行ジョブだけを有効／無効にします。他Agent所有・手動作成・存在しないジョブは変更できません。",
         "get_tool": lambda: _make_set_recurring_job_enabled_tool(None),
         "get_tool_with_context": lambda ctx: _make_set_recurring_job_enabled_tool(ctx),
+    },
+    "list_published_workflows": {
+        "tool_id": "list_published_workflows",
+        "name": "公開Workflow一覧",
+        "description": "Scheduler Job の対象にできる公開 Workflow（公開済み Revision と inputs_schema）を一覧します。",
+        "get_tool": lambda: _make_list_published_workflows_tool(None),
+        "get_tool_with_context": lambda ctx: _make_list_published_workflows_tool(ctx),
+    },
+    "register_one_shot_workflow_job": {
+        "tool_id": "register_one_shot_workflow_job",
+        "name": "ワンショットWorkflowジョブ登録",
+        "description": "公開 Workflow をワンショット実行ジョブとして登録し、次回job_runner起動時または指定日時以降に一度だけRunを作成します。登録には編集画面での明示付与が必要です。",
+        "get_tool": lambda: _make_register_one_shot_workflow_job_tool(None),
+        "get_tool_with_context": lambda ctx: _make_register_one_shot_workflow_job_tool(ctx),
+    },
+    "register_recurring_workflow_job": {
+        "tool_id": "register_recurring_workflow_job",
+        "name": "定期Workflowジョブ登録",
+        "description": "公開 Workflow を定期実行ジョブとして登録します。発火のたびに最新の公開Revisionを使い、登録元Agentだけが有効／無効を切り替えられます。登録には編集画面での明示付与が必要です。",
+        "get_tool": lambda: _make_register_recurring_workflow_job_tool(None),
+        "get_tool_with_context": lambda ctx: _make_register_recurring_workflow_job_tool(ctx),
     },
 }
 

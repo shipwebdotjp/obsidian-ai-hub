@@ -975,16 +975,32 @@ class AgentJobSource(BaseModel):
     registered_at: Optional[str] = None
 
 
+class WorkflowJobTarget(BaseModel):
+    workflow_id: str
+    inputs: dict = {}
+    workflow_name: Optional[str] = None
+    published_revision_id: Optional[str] = None
+
+
+class DispatchInfo(BaseModel):
+    status: str
+    scheduled_for: str
+    run_id: Optional[str] = None
+    failure_reason: Optional[str] = None
+
+
 class RecurringJob(BaseModel):
     id: str
     enabled: bool = True
     schedule: dict
-    command: str
-    is_preset: bool
+    command: Optional[str] = None
+    workflow: Optional[WorkflowJobTarget] = None
+    is_preset: bool = False
     preset_flag: Optional[str] = None
     preset_name: Optional[str] = None
     next_run: Optional[str] = None
     agent_source: Optional[AgentJobSource] = None
+    latest_dispatch: Optional[DispatchInfo] = None
 
 
 # --- Execution Log schemas ---
@@ -1110,7 +1126,11 @@ class CommandPreviewResponse(BaseModel):
 
 class OneShotJobSummary(BaseModel):
     job_id: str
-    command: str
+    target_kind: str = "command"
+    command: Optional[str] = None
+    workflow_id: Optional[str] = None
+    inputs: dict = {}
+    workflow_run_id: Optional[str] = None
     run_at_utc: str
     status: str
     agent_id: Optional[str] = None
@@ -1141,6 +1161,12 @@ class OneShotJobDetail(OneShotJobSummary):
 class OneShotJobListResponse(BaseModel):
     items: list[OneShotJobSummary]
     total: int
+
+
+class OneShotWorkflowJobCreateRequest(BaseModel):
+    workflow_id: str
+    inputs: dict = {}
+    run_at: Optional[str] = None
 
 # --- HITL schemas ---
 

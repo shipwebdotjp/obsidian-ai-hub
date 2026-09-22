@@ -426,6 +426,43 @@ def parse_command(command: str) -> list[dict]:
     return parsed_segments
 
 
+def get_workflow_target(job: dict) -> Optional[dict]:
+    """Return ``{"workflow_id", "inputs"}`` for a workflow job, else None."""
+    if not isinstance(job, dict):
+        return None
+    target = job.get("workflow")
+    if not isinstance(target, dict):
+        return None
+    return target
+
+
+def validate_workflow_target(workflow_id, inputs) -> dict:
+    """Structurally validate a workflow target and check it against the DB.
+
+    Requires a published Revision and inputs matching its ``inputs_schema`` so
+    the registration is rejected (not deferred) when the target is unusable.
+    Returns the normalized ``{"workflow_id", "inputs"}``.
+    """
+    from obsidian_ai_hub.workflow import scheduling
+    from obsidian_ai_hub.workflow.models import validate_value_against_schema
+
+    if not isinstance(workflow_id, str) or not workflow_id.strip():
+        raise ValueError("workflow.workflow_id must be a non-empty string")
+    if inputs is None:
+        inputs = {}
+    if not isinstance(inputs, dict):
+        raise ValueError("workflow.inputs must be an object")
+    revision = scheduling.resolve_published_revision(workflow_id)
+    if revision is None:
+        raise ValueError(f"Workflow '{workflow_id}' に公開済み Revision がありません")
+    errors = validate_value_against_schema(
+        inputs, revision.get("inputs_schema") or {}, path="workflow.inputs"
+    )
+    if errors:
+        raise ValueError("; ".join(errors))
+    return {"workflow_id": workflow_id, "inputs": inputs}
+
+
 def validate_jobs(jobs: list) -> None:
     seen_ids = set()
     for job in jobs:
@@ -453,9 +490,31 @@ def validate_jobs(jobs: list) -> None:
         except ValueError as e:
             raise ValueError(f"Job '{job_id}': Invalid schedule: {e}")
 
+        has_command = bool(job.get("command"))
+        has_workflow = job.get("workflow") is not None
+        if has_command and has_workflow:
+            raise ValueError(
+                f"Job '{job_id}': command と workflow は同時に指定できません"
+            )
+        if has_workflow:
+            target = get_workflow_target(job)
+            if target is None:
+                raise ValueError(f"Job '{job_id}': workflow must be a dictionary")
+            workflow_id = target.get("workflow_id")
+            if not isinstance(workflow_id, str) or not workflow_id.strip():
+                raise ValueError(
+                    f"Job '{job_id}': workflow.workflow_id must be a non-empty string"
+                )
+            inputs = target.get("inputs")
+            if inputs is not None and not isinstance(inputs, dict):
+                raise ValueError(f"Job '{job_id}': workflow.inputs must be an object")
+            continue
+
         command = job.get("command")
         if not command or not isinstance(command, str) or not command.strip():
-            raise ValueError(f"Job '{job_id}': Command must be a non-empty string")
+            raise ValueError(
+                f"Job '{job_id}': command または workflow のいずれかが必要です"
+            )
 
         try:
             parse_command(command)
@@ -526,6 +585,8 @@ def save_jobs_and_arm(new_jobs: list, old_jobs: list, now: datetime):
                 need_arm = True
             if old_job.get("command") != job.get("command"):
                 need_arm = True
+            if (old_job.get("workflow") or None) != (job.get("workflow") or None):
+                need_arm = True
 
         if need_arm:
             state[job_id] = now
@@ -591,36 +652,51 @@ def _utc_timestamp(now: Optional[datetime]) -> str:
 
 def register_recurring_job(
     job_id: str,
-    command: str,
-    schedule: dict,
+    command: Optional[str] = None,
+    schedule: Optional[dict] = None,
     *,
     agent_id: Optional[str],
     session_id: Optional[str] = None,
     run_id: Optional[str] = None,
+    workflow: Optional[dict] = None,
     now: Optional[datetime] = None,
 ) -> dict:
     """Register a new enabled recurring job owned by ``agent_id``.
 
-    The full active YAML is read, the new entry is appended, and the entire
-    list is written atomically to ``jobs/jobs.local.yml`` so existing jobs and
-    ``last_run`` state are never lost. Arming follows ``save_jobs_and_arm``:
-    the new job is armed to ``now`` and runs from its next matching slot, not
-    retroactively. Raises ``ValueError`` without changing anything when the
-    trusted agent identity is missing, the schedule/command is invalid, or the
-    job ID already exists.
+    The target is either ``command`` or ``workflow: {workflow_id, inputs}``,
+    exclusively. The full active YAML is read, the new entry is appended, and
+    the entire list is written atomically to ``jobs/jobs.local.yml`` so existing
+    jobs and ``last_run`` state are never lost. Arming follows
+    ``save_jobs_and_arm``: the new job is armed to ``now`` and runs from its
+    next matching slot, not retroactively. Raises ``ValueError`` without
+    changing anything when the trusted agent identity is missing, the
+    target/schedule is invalid, or the job ID already exists.
     """
     agent_id = str(agent_id).strip() if agent_id else ""
     if not agent_id:
         raise ValueError("trusted agent identity is required to register a recurring job")
     _validate_job_id(job_id)
+    if not isinstance(schedule, dict):
+        raise ValueError("schedule is required and must be a dictionary")
     try:
         normalize_schedule(schedule)
     except ValueError as e:
         raise ValueError(f"Invalid schedule: {e}") from e
-    try:
-        parse_command(command)
-    except ValueError as e:
-        raise ValueError(f"Invalid command structure: {e}") from e
+
+    if command is not None and workflow is not None:
+        raise ValueError("command と workflow は同時に指定できません")
+    if workflow is not None:
+        if not isinstance(workflow, dict):
+            raise ValueError("workflow must be a dictionary")
+        target = validate_workflow_target(
+            workflow.get("workflow_id"), workflow.get("inputs")
+        )
+    else:
+        try:
+            parse_command(command)
+        except ValueError as e:
+            raise ValueError(f"Invalid command structure: {e}") from e
+        target = None
 
     arm_now = now or datetime.now()
 
@@ -639,9 +715,12 @@ def register_recurring_job(
             "id": job_id,
             "enabled": True,
             "schedule": schedule,
-            "command": command,
             AGENT_SOURCE_FIELD: source,
         }
+        if target is not None:
+            new_job["workflow"] = target
+        else:
+            new_job["command"] = command
         new_jobs = list(old_jobs or []) + [new_job]
         validate_jobs(new_jobs)
         save_jobs_and_arm(new_jobs, old_jobs, arm_now)
@@ -723,6 +802,8 @@ def _job_meaning_changed(old: dict, new: dict) -> bool:
     """
     if old.get("command") != new.get("command"):
         return True
+    if (old.get("workflow") or None) != (new.get("workflow") or None):
+        return True
     if bool(old.get("enabled", True)) != bool(new.get("enabled", True)):
         return True
     try:
@@ -759,9 +840,13 @@ def merge_recurring_jobs(current_jobs: list, incoming_jobs: list) -> list:
         if job_id in current_by_id:
             base = dict(current_by_id[job_id])
             changed = _job_meaning_changed(base, incoming)
-            for key in ("enabled", "schedule", "command"):
+            for key in ("enabled", "schedule", "command", "workflow"):
                 if key in incoming:
                     base[key] = incoming[key]
+            if "workflow" in incoming:
+                base.pop("command", None)
+            elif "command" in incoming:
+                base.pop("workflow", None)
             base["id"] = job_id
             if changed:
                 base.pop(AGENT_SOURCE_FIELD, None)

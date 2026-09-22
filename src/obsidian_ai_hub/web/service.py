@@ -176,6 +176,7 @@ from obsidian_ai_hub.web.services.task_agent import (
 from obsidian_ai_hub.web.services.scheduler_jobs import (
     SchedulerJobConfigConflictError,
     cancel_one_shot_job,
+    create_one_shot_workflow_job,
     get_one_shot_job_detail,
     get_recurring_jobs,
     list_job_states,

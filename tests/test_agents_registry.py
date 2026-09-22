@@ -42,6 +42,9 @@ def test_list_available_tools():
         "register_one_shot_job",
         "register_recurring_job",
         "set_recurring_job_enabled",
+        "list_published_workflows",
+        "register_one_shot_workflow_job",
+        "register_recurring_workflow_job",
     }
     # Order is not contractual; assert membership instead.
     assert set(tool_ids) == expected_ids

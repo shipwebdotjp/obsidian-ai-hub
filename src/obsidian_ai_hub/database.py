@@ -730,6 +730,9 @@ def get_db_connection() -> sqlite3.Connection:
     if current_version <= 56:
         run_migration_v57(conn)
 
+    if current_version <= 57:
+        run_migration_v58(conn)
+
     return conn
 
 
@@ -1045,6 +1048,92 @@ def run_migration_v57(conn: sqlite3.Connection) -> None:
         "ON workflow_run_nodes(bridge_task_id);"
     )
     conn.execute("PRAGMA user_version = 57;")
+    conn.commit()
+
+
+def run_migration_v58(conn: sqlite3.Connection) -> None:
+    """Run migration for version 58 (Scheduler Job -> published Workflow).
+
+    Adds ``workflow_schedule_dispatches`` so a recurring Workflow job's fire
+    slot is dispatched at most once even if the runner restarts before
+    ``last_run`` is saved. Extends ``one_shot_jobs`` with a typed target:
+    ``target_kind`` (``command``/``workflow``), nullable ``command``,
+    ``workflow_id``, ``inputs_json`` and ``workflow_run_id``. SQLite cannot
+    drop the old ``command NOT NULL`` constraint, so the queue is rebuilt and
+    every existing row (state, history, output) is copied verbatim.
+    """
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS workflow_schedule_dispatches (
+            dispatch_id TEXT PRIMARY KEY,
+            source_kind TEXT NOT NULL,
+            scheduler_job_id TEXT NOT NULL,
+            scheduled_for TEXT NOT NULL,
+            workflow_id TEXT,
+            revision_id TEXT,
+            run_id TEXT,
+            status TEXT NOT NULL,
+            failure_reason TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE (source_kind, scheduler_job_id, scheduled_for)
+        );
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_workflow_schedule_dispatches_run "
+        "ON workflow_schedule_dispatches(run_id);"
+    )
+
+    columns = {
+        row[1]
+        for row in conn.execute("PRAGMA table_info(one_shot_jobs);").fetchall()
+    }
+    if "target_kind" not in columns:
+        conn.execute("""
+            CREATE TABLE one_shot_jobs_v58 (
+                job_id TEXT PRIMARY KEY,
+                target_kind TEXT NOT NULL DEFAULT 'command',
+                command TEXT,
+                workflow_id TEXT,
+                inputs_json TEXT NOT NULL DEFAULT '{}',
+                workflow_run_id TEXT,
+                run_at_utc TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'queued',
+                agent_id TEXT,
+                session_id TEXT,
+                run_id TEXT,
+                created_at TEXT NOT NULL,
+                started_at TEXT,
+                finished_at TEXT,
+                exit_code INTEGER,
+                segments_json TEXT NOT NULL DEFAULT '[]',
+                output_truncated INTEGER NOT NULL DEFAULT 0,
+                error_summary TEXT
+            );
+        """)
+        conn.execute("""
+            INSERT INTO one_shot_jobs_v58 (
+                job_id, target_kind, command, workflow_id, inputs_json,
+                workflow_run_id, run_at_utc, status, agent_id, session_id,
+                run_id, created_at, started_at, finished_at, exit_code,
+                segments_json, output_truncated, error_summary
+            )
+            SELECT job_id, 'command', command, NULL, '{}', NULL, run_at_utc,
+                status, agent_id, session_id, run_id, created_at, started_at,
+                finished_at, exit_code, segments_json, output_truncated,
+                error_summary
+            FROM one_shot_jobs;
+        """)
+        conn.execute("DROP TABLE one_shot_jobs;")
+        conn.execute("ALTER TABLE one_shot_jobs_v58 RENAME TO one_shot_jobs;")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_one_shot_jobs_status_run_at"
+        " ON one_shot_jobs(status, run_at_utc);"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_one_shot_jobs_finished_at"
+        " ON one_shot_jobs(finished_at);"
+    )
+    conn.execute("PRAGMA user_version = 58;")
     conn.commit()
 
 

@@ -12,21 +12,59 @@ class SchedulerJobConfigConflictError(ValueError):
 
 # --- Recurring Job services ---
 
+def _workflow_item(target: dict) -> Optional[dict]:
+    """Build the response target, or None when the raw YAML is unusable.
+
+    A hand-edited ``workflow:`` mapping without a non-empty ``workflow_id``
+    must not fail the whole list response (same intent as hiding a corrupt
+    ``agent_source``).
+    """
+    from obsidian_ai_hub.workflow import scheduling
+    from obsidian_ai_hub.workflow.store import get_workflow
+
+    workflow_id = target.get("workflow_id")
+    if not isinstance(workflow_id, str) or not workflow_id.strip():
+        return None
+    workflow = get_workflow(workflow_id)
+    revision = scheduling.resolve_published_revision(workflow_id)
+    return {
+        "workflow_id": workflow_id,
+        "inputs": target.get("inputs") or {},
+        "workflow_name": workflow.get("name") if workflow else None,
+        "published_revision_id": revision.get("revision_id") if revision else None,
+    }
+
+
 def get_recurring_jobs() -> dict:
     from obsidian_ai_hub.scheduler_jobs.recurring import (
         get_jobs_file_and_revision_locked,
         get_command_preset_info,
         get_agent_source,
+        get_workflow_target,
         compute_next_target,
     )
+    from obsidian_ai_hub.workflow import scheduling
+
     filepath, sha, jobs = get_jobs_file_and_revision_locked()
 
     job_items = []
     now = datetime.now()
 
+    job_ids = [t.get("id") for t in jobs if t.get("id")]
+    try:
+        latest_dispatches = scheduling.list_dispatches(job_ids)
+    except Exception:
+        logger.debug("Failed to load dispatches", exc_info=True)
+        latest_dispatches = {}
+
     for t in jobs:
-        # Resolve preset info
-        preset_info = get_command_preset_info(t.get("command", ""))
+        command = t.get("command")
+        workflow_target = get_workflow_target(t)
+        preset_info = (
+            get_command_preset_info(command)
+            if command
+            else {"is_preset": False, "flag": None, "name": None}
+        )
 
         # Calculate next execution explanation
         next_run_str = None
@@ -40,13 +78,15 @@ def get_recurring_jobs() -> dict:
             "id": t.get("id"),
             "enabled": t.get("enabled", True),
             "schedule": t.get("schedule"),
-            "command": t.get("command"),
+            "command": command,
+            "workflow": _workflow_item(workflow_target) if workflow_target else None,
             "is_preset": preset_info["is_preset"],
             "preset_flag": preset_info["flag"],
             "preset_name": preset_info["name"],
             "next_run": next_run_str,
             # Corrupt/missing sources are hidden rather than failing the list.
             "agent_source": get_agent_source(t),
+            "latest_dispatch": latest_dispatches.get(t.get("id")),
         })
 
     return {
@@ -60,7 +100,9 @@ def update_recurring_jobs(revision: str, jobs: list) -> dict:
     from obsidian_ai_hub.scheduler_jobs.recurring import (
         acquire_job_config_lock,
         get_jobs_file_and_revision,
+        get_workflow_target,
         validate_jobs,
+        validate_workflow_target,
         merge_recurring_jobs,
         save_jobs_and_arm,
     )
@@ -78,6 +120,16 @@ def update_recurring_jobs(revision: str, jobs: list) -> dict:
         # client-supplied agent_source.
         merged_jobs = merge_recurring_jobs(old_jobs, jobs)
         validate_jobs(merged_jobs)
+
+        # A workflow target must reference a published Revision with matching
+        # inputs; reject the whole PUT before any write so the UI cannot save a
+        # job that could never dispatch.
+        for job in merged_jobs:
+            target = get_workflow_target(job)
+            if target is not None:
+                validate_workflow_target(
+                    target.get("workflow_id"), target.get("inputs")
+                )
 
         # Arm changed jobs and save atomically
         save_jobs_and_arm(merged_jobs, old_jobs, datetime.now())
@@ -140,6 +192,18 @@ def cancel_one_shot_job(job_id: str) -> dict:
         row = one_shot.cancel_one_shot_job(job_id)
     except LookupError as e:
         raise KeyError(str(e)) from e
+    return _to_summary(row)
+
+
+def create_one_shot_workflow_job(workflow_id: str, inputs: dict, run_at: Optional[str]) -> dict:
+    from obsidian_ai_hub.scheduler_jobs import one_shot
+
+    try:
+        row = one_shot.register_one_shot_workflow_job(
+            workflow_id, inputs, run_at
+        )
+    except ValueError as e:
+        raise ValueError(str(e)) from e
     return _to_summary(row)
 
 

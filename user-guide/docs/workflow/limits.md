@@ -18,7 +18,8 @@ title: 制約とトラブルシューティング
 | Agent Node ごとの prompt / model / tool 上書き | 不可 |
 | Workflow 全体のタイムアウト | なし（各 Capability / 子 Run のタイムアウトに従う） |
 | 定義の JSON / YAML インポート・エクスポート | 不可 |
-| Scheduler Job からの Workflow 起動 | 不可 |
+| Workflow ごとの同時実行数制御 | 不可（発火ごとに Run を作成） |
+| 承認待ち Run の自動失効・抑止 | 不可（人間が取消・無効化） |
 
 ### JSON Schema のサブセット
 
@@ -88,7 +89,8 @@ Run 詳細で **採用して続行** / **再実行** / **失敗として処理**
 - Workflow worker は Web サーバーの lifespan に同居します。**サーバー停止中は新規実行が進みません。**
 - 終端 Run とその Node・Activation・Event は 30 日後に削除されます。
 - 自動ロールバックは行いません。実施済みの副作用は人間が確認・処置します。
-- Run 入力に秘密値を入れないでください。
+- Run 入力に秘密値を入れないでください。Scheduler Job の固定入力も平文で保存されるため同様です。
+- Scheduler Job からの発火は `job_runner` が Run を作成し、実行は Workflow worker が担います。承認待ち Run は発火ごとに作られ、自動では失効しません。
 
 ## 次に読む
 

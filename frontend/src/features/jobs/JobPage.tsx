@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from "react";
+import { Link } from "react-router-dom";
 import { getApiErrorMessage } from "../../utils/error";
 import {
   ApiError,
@@ -8,14 +9,52 @@ import {
   listOneShotJobs,
   getOneShotJobDetail,
   cancelOneShotJob,
+  getSchedulableWorkflows,
+  createOneShotWorkflowJob,
 } from "../../api/client";
-import type { RecurringJob, RecurringJobSchedule, RecurringJobScheduleType, RecurringJobUpdate, CommandSegment, OneShotJobSummary, OneShotJobDetail } from "../../api/types";
+import type { RecurringJob, RecurringJobSchedule, RecurringJobScheduleType, RecurringJobUpdate, CommandSegment, OneShotJobSummary, OneShotJobDetail, SchedulableWorkflow } from "../../api/types";
+import { workflowRunPath } from "../../constants/routes";
 import TokenPrompt from "../../components/TokenPrompt";
 import { toRecurringJobUpdate, toRecurringJobUpdates } from "./recurringJobPayload";
 
 // Keep in sync with backend PRESET_FLAGS (scheduler_jobs/recurring.py).
 // Every flag here must exist as an argparse flag in main.py; otherwise the
 // generated command fails at runtime.
+// Reject anything that is not a JSON object; returns null on parse/shape error.
+function parseJsonObjectInput(raw: string): Record<string, unknown> | null {
+  try {
+    const parsed = raw.trim() ? JSON.parse(raw) : {};
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      return null;
+    }
+    return parsed as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+function renderRecurringTarget(job: RecurringJob) {
+  if (job.workflow) {
+    return (
+      <span className="inline-flex items-center gap-1 rounded bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-800">
+        Workflow: {job.workflow.workflow_name || job.workflow.workflow_id}
+      </span>
+    );
+  }
+  if (job.is_preset) {
+    return (
+      <span className="inline-flex items-center gap-1 rounded bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-800">
+        {job.preset_name}
+      </span>
+    );
+  }
+  return (
+    <code className="text-xs font-mono text-slate-500 bg-slate-100 px-1 py-0.5 rounded">
+      {job.command}
+    </code>
+  );
+}
+
 const PRESET_OPTIONS = [
   { name: "Inbox merge", flag: "--merge-inbox" },
   { name: "日サマリ", flag: "--summerize-day" },
@@ -66,6 +105,21 @@ export default function JobPage() {
   const [formDetailedCommand, setFormDetailedCommand] = useState("");
   const [previewSegments, setPreviewSegments] = useState<CommandSegment[]>([]);
   const [previewError, setPreviewError] = useState<string | null>(null);
+
+  // Target type (command vs published workflow) and workflow form state
+  const [formTarget, setFormTarget] = useState<"command" | "workflow">("command");
+  const [formWorkflowId, setFormWorkflowId] = useState("");
+  const [formWorkflowInputs, setFormWorkflowInputs] = useState("{}");
+  const [schedulableWorkflows, setSchedulableWorkflows] = useState<SchedulableWorkflow[]>([]);
+  const [workflowsError, setWorkflowsError] = useState<string | null>(null);
+
+  // One-shot workflow manual reservation form
+  const [showOneShotForm, setShowOneShotForm] = useState(false);
+  const [oneShotWorkflowId, setOneShotWorkflowId] = useState("");
+  const [oneShotInputs, setOneShotInputs] = useState("{}");
+  const [oneShotRunAt, setOneShotRunAt] = useState("");
+  const [oneShotFormSaving, setOneShotFormSaving] = useState(false);
+  const [oneShotFormError, setOneShotFormError] = useState<string | null>(null);
 
   // One-shot Jobs State
   const [oneShotJobs, setOneShotJobs] = useState<OneShotJobSummary[]>([]);
@@ -137,7 +191,19 @@ export default function JobPage() {
   useEffect(() => {
     fetchConfig();
     fetchOneShotJobs();
+    fetchSchedulableWorkflows();
   }, []);
+
+  const fetchSchedulableWorkflows = async () => {
+    setWorkflowsError(null);
+    try {
+      const data = await getSchedulableWorkflows();
+      setSchedulableWorkflows(data.items);
+    } catch (e) {
+      setSchedulableWorkflows([]);
+      setWorkflowsError(getApiErrorMessage(e, "公開 Workflow の取得に失敗しました"));
+    }
+  };
 
   const fetchOneShotJobs = async () => {
     setOneShotLoading(true);
@@ -191,6 +257,33 @@ export default function JobPage() {
     }
   };
 
+  const handleCreateOneShotWorkflow = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!oneShotWorkflowId) {
+      setOneShotFormError("公開された Workflow を選択してください");
+      return;
+    }
+    const parsedInputs = parseJsonObjectInput(oneShotInputs);
+    if (!parsedInputs) {
+      setOneShotFormError("固定入力は JSON オブジェクトで入力してください");
+      return;
+    }
+    setOneShotFormSaving(true);
+    setOneShotFormError(null);
+    try {
+      await createOneShotWorkflowJob(oneShotWorkflowId, parsedInputs, oneShotRunAt || null);
+      setShowOneShotForm(false);
+      setOneShotWorkflowId("");
+      setOneShotInputs("{}");
+      setOneShotRunAt("");
+      await fetchOneShotJobs();
+    } catch (err) {
+      setOneShotFormError(getApiErrorMessage(err, "ワンショット Workflow 予約に失敗しました"));
+    } finally {
+      setOneShotFormSaving(false);
+    }
+  };
+
   const toRawJob = toRecurringJobUpdate;
 
   const toRawJobs = toRecurringJobUpdates;
@@ -240,14 +333,30 @@ export default function JobPage() {
 
     setSaveError(null);
 
-    if (job.is_preset && job.preset_flag) {
+    if (job.workflow) {
+      setFormTarget("workflow");
+      setFormWorkflowId(job.workflow.workflow_id);
+      setFormWorkflowInputs(JSON.stringify(job.workflow.inputs ?? {}, null, 2));
+      // Reset the hidden command editor so switching the target back to
+      // コマンド cannot inherit the previously edited job's command.
       setCommandMode("preset");
-      setFormPresetFlag(job.preset_flag);
-      setFormDetailedCommand("");
-    } else {
-      setCommandMode("detailed");
       setFormPresetFlag("--merge-inbox");
-      setFormDetailedCommand(job.command);
+      setFormDetailedCommand("");
+      setPreviewSegments([]);
+      setPreviewError(null);
+    } else {
+      setFormTarget("command");
+      setFormWorkflowId("");
+      setFormWorkflowInputs("{}");
+      if (job.is_preset && job.preset_flag) {
+        setCommandMode("preset");
+        setFormPresetFlag(job.preset_flag);
+        setFormDetailedCommand("");
+      } else {
+        setCommandMode("detailed");
+        setFormPresetFlag("--merge-inbox");
+        setFormDetailedCommand(job.command ?? "");
+      }
     }
   };
 
@@ -269,6 +378,9 @@ export default function JobPage() {
     setPreviewSegments([]);
     setPreviewError(null);
     setSaveError(null);
+    setFormTarget("command");
+    setFormWorkflowId(schedulableWorkflows[0]?.workflow_id ?? "");
+    setFormWorkflowInputs("{}");
   };
 
   const handleDelete = async (jobId: string) => {
@@ -356,9 +468,26 @@ export default function JobPage() {
       schedule.day = isNaN(Number(formDay)) ? formDay : Number(formDay);
     }
 
-    // Command
-    let command = "";
-    if (commandMode === "preset") {
+    // Build the new job object (command or published workflow target).
+    const newJob: RecurringJobUpdate = {
+      id: formId,
+      enabled: formEnabled,
+      schedule,
+    };
+    if (formTarget === "workflow") {
+      if (!formWorkflowId) {
+        setSaveError("公開された Workflow を選択してください");
+        setSaving(false);
+        return;
+      }
+      const parsedInputs = parseJsonObjectInput(formWorkflowInputs);
+      if (!parsedInputs) {
+        setSaveError("固定入力は JSON オブジェクトで入力してください");
+        setSaving(false);
+        return;
+      }
+      newJob.workflow = { workflow_id: formWorkflowId, inputs: parsedInputs };
+    } else if (commandMode === "preset") {
       // Base directory is derived from filepath on the backend.
       // E.g. /app/jobs/jobs.local.yml -> /app
       const m = filepath.match(/^(.*)\/jobs\/jobs\.(local\.)?yml$/);
@@ -368,18 +497,10 @@ export default function JobPage() {
         return;
       }
       const baseDir = m[1];
-      command = `uv --directory "${baseDir.replace(/"/g, '\\"')}" run -m obsidian_ai_hub ${formPresetFlag}`;
+      newJob.command = `uv --directory "${baseDir.replace(/"/g, '\\"')}" run -m obsidian_ai_hub ${formPresetFlag}`;
     } else {
-      command = formDetailedCommand;
+      newJob.command = formDetailedCommand;
     }
-
-    // Build the new job object
-    const newJob: RecurringJobUpdate = {
-      id: formId,
-      enabled: formEnabled,
-      schedule,
-      command,
-    };
 
     // Construct the complete updated jobs list
     let updatedJobs: RecurringJobUpdate[] = [];
@@ -465,7 +586,7 @@ export default function JobPage() {
           </>
         }
         validate={getRecurringJobs}
-        onAuthenticated={() => { fetchConfig(); fetchOneShotJobs(); }}
+        onAuthenticated={() => { fetchConfig(); fetchOneShotJobs(); fetchSchedulableWorkflows(); }}
       />
     );
   }
@@ -515,7 +636,7 @@ export default function JobPage() {
         <div className="flex items-center gap-3">
           <button
             type="button"
-            onClick={() => { fetchConfig(); fetchOneShotJobs(); }}
+            onClick={() => { fetchConfig(); fetchOneShotJobs(); fetchSchedulableWorkflows(); }}
             disabled={loading}
             className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-50"
           >
@@ -613,18 +734,29 @@ export default function JobPage() {
                       {formatSchedule(job)}
                     </td>
                     <td className="px-6 py-4 max-w-xs truncate">
-                      {job.is_preset ? (
-                        <span className="inline-flex items-center gap-1 rounded bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-800">
-                          {job.preset_name}
-                        </span>
-                      ) : (
-                        <code className="text-xs font-mono text-slate-500 bg-slate-100 px-1 py-0.5 rounded">
-                          {job.command}
-                        </code>
-                      )}
+                      {renderRecurringTarget(job)}
                     </td>
                     <td className="px-6 py-4 text-xs font-mono text-slate-600">
-                      {formatNextRun(job.next_run)}
+                      <div>{formatNextRun(job.next_run)}</div>
+                      {job.latest_dispatch && (
+                        <div className="mt-1 font-sans text-[11px]">
+                          {job.latest_dispatch.status === "dispatched" && job.latest_dispatch.run_id ? (
+                            <Link
+                              to={workflowRunPath(job.latest_dispatch.run_id)}
+                              className="text-blue-600 underline"
+                            >
+                              直近の Run を開く
+                            </Link>
+                          ) : (
+                            <span className="text-red-600" title={job.latest_dispatch.failure_reason ?? ""}>
+                              直近の発火: 失敗
+                              {job.latest_dispatch.failure_reason
+                                ? `（${job.latest_dispatch.failure_reason}）`
+                                : ""}
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </td>
                     <td className="px-6 py-4 text-right">
                       <div className="flex justify-end gap-2">
@@ -657,10 +789,97 @@ export default function JobPage() {
         {activeTab === "one-shot" && (
         <>
         {/* One-shot Jobs Section */}
-        <h2 className="mb-3 text-sm font-bold text-slate-800">ワンショット実行ジョブ</h2>
-        <p className="mb-3 text-xs text-slate-500">
-          Agent が register_one_shot_job で登録した一度だけ実行するジョブ。未完了を優先して表示し、終端履歴は30日間保持。UI からの手動登録はなし。
-        </p>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-bold text-slate-800">ワンショット実行ジョブ</h2>
+            <p className="mt-1 text-xs text-slate-500">
+              一度だけ実行するジョブ。未完了を優先して表示し、終端履歴は30日間保持。Workflow 予約は手動でも追加できます。
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowOneShotForm((v) => !v)}
+            className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
+          >
+            Workflow を予約
+          </button>
+        </div>
+        {showOneShotForm && (
+          <form onSubmit={handleCreateOneShotWorkflow} className="mb-4 space-y-3 rounded-xl border border-slate-200 bg-white p-4">
+            {oneShotFormError && (
+              <div className="rounded-lg bg-red-50 p-3 text-xs text-red-600">{oneShotFormError}</div>
+            )}
+            {workflowsError && (
+              <div className="rounded-lg bg-amber-50 p-3 text-xs text-amber-700">{workflowsError}</div>
+            )}
+            {schedulableWorkflows.length === 0 ? (
+              <p className="text-xs text-slate-500">
+                公開済み Revision を持つ Workflow がありません。
+              </p>
+            ) : (
+              <div>
+                <label className="mb-1 block text-xs font-medium text-slate-600">公開 Workflow</label>
+                <select
+                  value={oneShotWorkflowId}
+                  onChange={(e) => setOneShotWorkflowId(e.target.value)}
+                  disabled={oneShotFormSaving}
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-slate-500 focus:outline-none"
+                >
+                  <option value="">選択してください</option>
+                  {schedulableWorkflows.map((w) => (
+                    <option key={w.workflow_id} value={w.workflow_id}>
+                      {w.name}（{w.workflow_id}）
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+            <div>
+              <label className="mb-1 block text-xs font-medium text-slate-600">固定入力 (JSON)</label>
+              <textarea
+                rows={3}
+                value={oneShotInputs}
+                onChange={(e) => setOneShotInputs(e.target.value)}
+                disabled={oneShotFormSaving}
+                placeholder='{ "topic": "example" }'
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs font-mono focus:border-slate-500 focus:outline-none"
+              />
+              <p className="mt-1 text-[11px] text-slate-500">
+                入力は平文で保存されます。秘密値を入れないでください。
+              </p>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-slate-600">
+                実行予定日時（省略時は次回 runner サイクル。タイムゾーンなしは JST）
+              </label>
+              <input
+                type="text"
+                value={oneShotRunAt}
+                onChange={(e) => setOneShotRunAt(e.target.value)}
+                disabled={oneShotFormSaving}
+                placeholder="e.g. 2026-09-23 09:00"
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs font-mono focus:border-slate-500 focus:outline-none"
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowOneShotForm(false)}
+                disabled={oneShotFormSaving}
+                className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              >
+                キャンセル
+              </button>
+              <button
+                type="submit"
+                disabled={oneShotFormSaving || !oneShotWorkflowId}
+                className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+              >
+                {oneShotFormSaving ? "登録中..." : "予約する"}
+              </button>
+            </div>
+          </form>
+        )}
         {oneShotError && (
           <div className="mb-6 rounded-lg bg-red-50 p-4 text-sm text-red-600">
             {oneShotError}
@@ -703,12 +922,27 @@ export default function JobPage() {
                         {[job.agent_id, job.session_id, job.run_id].filter(Boolean).join(" / ") || "-"}
                       </td>
                       <td className="px-6 py-4 max-w-xs truncate">
-                        <code className="text-xs font-mono text-slate-500 bg-slate-100 px-1 py-0.5 rounded">
-                          {job.command}
-                        </code>
+                        {job.target_kind === "workflow" ? (
+                          <span className="inline-flex items-center gap-1 rounded bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-800">
+                            Workflow: {job.workflow_id}
+                          </span>
+                        ) : (
+                          <code className="text-xs font-mono text-slate-500 bg-slate-100 px-1 py-0.5 rounded">
+                            {job.command}
+                          </code>
+                        )}
                       </td>
                       <td className="px-6 py-4 text-xs font-mono text-slate-600">
-                        {job.exit_code ?? "-"}
+                        {job.workflow_run_id ? (
+                          <Link
+                            to={workflowRunPath(job.workflow_run_id)}
+                            className="text-blue-600 underline"
+                          >
+                            Run
+                          </Link>
+                        ) : (
+                          job.exit_code ?? "-"
+                        )}
                       </td>
                       <td className="px-6 py-4 text-right">
                         <div className="flex justify-end gap-2">
@@ -980,7 +1214,87 @@ export default function JobPage() {
                 </div>
               </div>
 
+              {/* Target Definition */}
+              <div className="space-y-3">
+                <label className="block text-xs font-semibold text-slate-700 uppercase">
+                  実行対象
+                </label>
+                <div className="flex gap-2 rounded-lg bg-slate-100 p-1 border border-slate-200">
+                  <button
+                    type="button"
+                    onClick={() => setFormTarget("command")}
+                    className={`flex-1 whitespace-nowrap rounded-md py-1.5 text-xs font-medium transition ${
+                      formTarget === "command"
+                        ? "bg-white text-slate-900 shadow-sm"
+                        : "text-slate-500 hover:text-slate-900"
+                    }`}
+                  >
+                    コマンド
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFormTarget("workflow")}
+                    className={`flex-1 whitespace-nowrap rounded-md py-1.5 text-xs font-medium transition ${
+                      formTarget === "workflow"
+                        ? "bg-white text-slate-900 shadow-sm"
+                        : "text-slate-500 hover:text-slate-900"
+                    }`}
+                  >
+                    公開 Workflow
+                  </button>
+                </div>
+
+                {formTarget === "workflow" && (
+                  <div className="space-y-3 rounded-xl bg-slate-50 p-4 border border-slate-200">
+                    {workflowsError && (
+                      <p className="text-xs text-red-600">{workflowsError}</p>
+                    )}
+                    {schedulableWorkflows.length === 0 ? (
+                      <p className="text-xs text-slate-500">
+                        公開済み Revision を持つ Workflow がありません。先に Workflow を公開してください。
+                      </p>
+                    ) : (
+                      <div>
+                        <label className="block text-xs font-medium text-slate-600 mb-1">
+                          公開 Workflow
+                        </label>
+                        <select
+                          value={formWorkflowId}
+                          onChange={(e) => setFormWorkflowId(e.target.value)}
+                          disabled={saving}
+                          className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-slate-500 focus:outline-none"
+                        >
+                          <option value="">選択してください</option>
+                          {schedulableWorkflows.map((w) => (
+                            <option key={w.workflow_id} value={w.workflow_id}>
+                              {w.name}（{w.workflow_id}）
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                    <div>
+                      <label className="block text-xs font-medium text-slate-600 mb-1">
+                        固定入力 (JSON)
+                      </label>
+                      <textarea
+                        rows={4}
+                        value={formWorkflowInputs}
+                        onChange={(e) => setFormWorkflowInputs(e.target.value)}
+                        disabled={saving}
+                        placeholder='{ "topic": "example" }'
+                        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs font-mono focus:border-slate-500 focus:outline-none"
+                      />
+                      <p className="mt-1 text-[11px] text-slate-500">
+                        入力は平文で設定に保存されます。秘密値を入れないでください。発火時点の最新公開版で検証されます。
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+
               {/* Command Definition */}
+              {formTarget === "command" && (
               <div className="space-y-3">
                 <label className="block text-xs font-semibold text-slate-700 uppercase">
                   実行コマンド設定
@@ -1082,6 +1396,7 @@ export default function JobPage() {
                   </div>
                 )}
               </div>
+              )}
             </form>
 
             {/* Modal Footer Actions */}
@@ -1097,7 +1412,11 @@ export default function JobPage() {
               <button
                 type="button"
                 onClick={handleSave}
-                disabled={saving || (commandMode === "detailed" && !!previewError)}
+                disabled={
+                  saving ||
+                  (formTarget === "command" && commandMode === "detailed" && !!previewError) ||
+                  (formTarget === "workflow" && !formWorkflowId)
+                }
                 className="rounded-lg bg-blue-600 px-4 py-2 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
               >
                 {saving ? "保存中..." : "保存"}

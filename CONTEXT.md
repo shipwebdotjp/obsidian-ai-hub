@@ -17,19 +17,21 @@
   出力する `<cli_request>` タグのみで行い、ツール経由で外部CLIを起動しない。使用バックエンド
   名は Coordinator に開示しない。
 - **Vault / Calendar / Reminders** — Taskが読取対象として参照し得る外部境界。Calendar / Remindersへの追加は既存提案HITL登録ツール経由のみ行い、人間の承認はHITL側で行う。Vaultへの直接書込みは `vault_write_file` Capability経由のみ行い、既定 `plan_required` のPlan一括承認を要する。
-- **Scheduler** — 指定時刻や登録契機にOSコマンドを起動する別集約・別実行器の文脈。Task Agent の Task とは集約・実行器・状態を共有しない。`job_runner` が唯一の実行入口である。
+- **Scheduler** — 指定時刻や登録契機にOSコマンド、または公開 Workflow を起動する別集約・別実行器の文脈。Task Agent の Task とは集約・実行器・状態を共有しない。`job_runner` が唯一の実行入口である。
 
 ## ユビキタス言語（Scheduler）
 
 | 用語 | 定義 |
 | --- | --- |
-| **Scheduler Job** | 指定コマンドを起動する定義の総称。定期実行とワンショット実行をともに指す。Task Agent の Task とは別集約である。 |
-| **Recurring Job** | YAML（`jobs/jobs.local.yml`）で定義し、schedule に従い繰り返し起動する Job。状態は `jobs/last_run.json` と `job_state` に持つ。 |
-| **One-shot Job** | Agent が `register_one_shot_job` tool で登録し、一度だけ実行する Job。専用 SQLite キュー（`one_shot_jobs`）に保存し、at-most-once で実行する。 |
-| **Agent 所有 Recurring Job** | Agent が `register_recurring_job` tool で登録した Recurring Job。YAML の `agent_source`（agent/session/run ID と UTC 登録時刻）で登録元を記録する。 |
+| **Scheduler Job** | 指定コマンド、または公開 Workflow を起動する定義の総称。定期実行とワンショット実行をともに指す。Task Agent の Task とは別集約である。 |
+| **Workflow Scheduler Job** | 実行対象に公開 Workflow（発火時点の最新 published Revision）と固定 JSON 入力を指定した Scheduler Job。承認が必要なら発火ごとに `waiting_approval` の Run を作る。 |
+| **Scheduled Dispatch** | Scheduler Job の 1 発火枠。`source_kind` + `scheduler_job_id` + `scheduled_for` を一意キーとし、解決した Revision・作成 Run・失敗理由を `workflow_schedule_dispatches`（one-shot は `one_shot_jobs` 行）に保持する。 |
+| **Recurring Job** | YAML（`jobs/jobs.local.yml`）で定義し、schedule に従い繰り返し起動する Job。状態は `jobs/last_run.json` と `job_state` に持つ。対象は `command` または `workflow` の排他的定義。 |
+| **One-shot Job** | Agent または人間が登録し、一度だけ実行する Job。専用 SQLite キュー（`one_shot_jobs`）に保存し、at-most-once で実行する。Workflow 対象の成功時は `dispatched` を終端とする。 |
+| **Agent 所有 Recurring Job** | Agent が tool で登録した Recurring Job。YAML の `agent_source`（agent/session/run ID と UTC 登録時刻）で登録元を記録する。 |
 | **agent_source** | Agent 所有 Recurring Job の登録元メタデータ。欠落・破損は「未所有」として扱い、runner と一覧は停止しない。 |
-| **所有失効** | 人間が `/jobs` で Agent 所有 Job の ID・command・schedule・enabled を変更した時点で `agent_source` を削除し、人間管理へ移管すること。 |
-| **Job Runner** | `job_runner` モジュール。runner lock 内で定期 Job の期限判定とワンショット Job の claim・実行を行う。 |
+| **所有失効** | 人間が `/jobs` で Agent 所有 Job の ID・対象（command / workflow と入力）・schedule・enabled を変更した時点で `agent_source` を削除し、人間管理へ移管すること。 |
+| **Job Runner** | `job_runner` モジュール。runner lock 内で定期 Job の期限判定、Workflow 発火、ワンショット Job の claim・実行を行う。 |
 
 ## ユビキタス言語
 
@@ -74,6 +76,9 @@
 - worker停止後のTaskは自動再実行しない。
 - 完了はLLMの `finish` ではなく必須効果の成立で決まり、成立時点で自動完了する。
 - Action予算の枯渇は `failed` ではなく `incomplete`（未完了）として記録する。
+- Scheduler の発火枠は高々 1 回の Run を作り、dispatch 行と Run 行は同一 transaction で commit する。
+- Workflow 発火の承認要否は Run snapshot の capability policy で判定し、承認前に Capability を実行しない。
+- Workflow 発火失敗（published 不在・入力 schema 不一致）は Run を作らず枠を消費し、command Job の retry 意味は変更しない。
 
 ## 外部境界
 

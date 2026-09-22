@@ -568,16 +568,46 @@ export interface AgentJobSource {
   registered_at?: string | null;
 }
 
+export interface WorkflowJobTarget {
+  workflow_id: string;
+  inputs: Record<string, unknown>;
+  workflow_name?: string | null;
+  published_revision_id?: string | null;
+}
+
+export interface DispatchInfo {
+  status: string;
+  scheduled_for: string;
+  run_id?: string | null;
+  failure_reason?: string | null;
+}
+
 export interface RecurringJob {
   id: string;
   enabled: boolean;
   schedule: RecurringJobSchedule;
-  command: string;
+  command?: string | null;
+  workflow?: WorkflowJobTarget | null;
   is_preset: boolean;
   preset_flag?: string | null;
   preset_name?: string | null;
   next_run?: string | null;
   agent_source?: AgentJobSource | null;
+  latest_dispatch?: DispatchInfo | null;
+}
+
+export interface SchedulableWorkflow {
+  workflow_id: string;
+  name: string;
+  description?: string | null;
+  revision_id: string;
+  version: number;
+  inputs_schema: Record<string, unknown>;
+}
+
+export interface SchedulableWorkflowListResponse {
+  items: SchedulableWorkflow[];
+  total: number;
 }
 
 export interface SchedulerJobConfigResponse {
@@ -593,7 +623,7 @@ export interface SchedulerJobConfigUpdateResponse {
 
 export type RecurringJobUpdate = Pick<
   RecurringJob,
-  "id" | "enabled" | "schedule" | "command" | "agent_source"
+  "id" | "enabled" | "schedule" | "command" | "workflow" | "agent_source"
 >;
 
 export type OneShotJobStatus =
@@ -602,11 +632,16 @@ export type OneShotJobStatus =
   | "succeeded"
   | "failed"
   | "cancelled"
-  | "interrupted";
+  | "interrupted"
+  | "dispatched";
 
 export interface OneShotJobSummary {
   job_id: string;
-  command: string;
+  target_kind: "command" | "workflow";
+  command?: string | null;
+  workflow_id?: string | null;
+  inputs: Record<string, unknown>;
+  workflow_run_id?: string | null;
   run_at_utc: string;
   status: OneShotJobStatus;
   agent_id?: string | null;

@@ -44,4 +44,24 @@ describe("recurringJobPayload", () => {
     expect(payloads[0]).not.toHaveProperty("agent_source");
     expect(payloads[1].agent_source?.agent_id).toBe("agent-1");
   });
+
+  it("sends only the workflow target for a workflow job", () => {
+    const job: RecurringJob = {
+      id: "wf_job",
+      enabled: true,
+      schedule: { type: "daily", hour: 8 },
+      workflow: {
+        workflow_id: "wf_1",
+        inputs: { topic: "news" },
+        workflow_name: "朝のリサーチ",
+        published_revision_id: "wrev_9",
+      },
+      is_preset: false,
+      agent_source: { agent_id: "agent-2" },
+    };
+    const payload = toRecurringJobUpdate(job);
+    expect(payload.workflow).toEqual({ workflow_id: "wf_1", inputs: { topic: "news" } });
+    expect(payload).not.toHaveProperty("command");
+    expect(payload.agent_source?.agent_id).toBe("agent-2");
+  });
 });

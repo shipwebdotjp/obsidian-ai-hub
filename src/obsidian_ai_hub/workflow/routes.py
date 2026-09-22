@@ -35,6 +35,7 @@ from obsidian_ai_hub.workflow.models import (
     RUN_WAITING_STATUSES,
     validate_value_against_schema,
 )
+from obsidian_ai_hub.workflow import scheduling as workflow_scheduling
 from obsidian_ai_hub.workflow import templates as workflow_templates
 from obsidian_ai_hub.workflow.validation import validate_graph
 
@@ -99,28 +100,6 @@ def _validate_revision(revision: dict[str, Any]) -> list[str]:
         capability_enabled=_capability_enabled(),
         agent_exists=_agent_exists(),
     )
-
-
-def _requires_approval(revision: dict[str, Any]) -> bool:
-    from obsidian_ai_hub.tasks import store as task_store
-
-    policies = {
-        str(c["capability_key"]): str(c.get("approval_policy") or "plan_required")
-        for c in task_store.list_capabilities()
-    }
-    for node in revision.get("nodes") or []:
-        node_type = node.get("node_type")
-        if node_type == "agent":
-            return True
-        if node_type != "capability":
-            continue
-        key = str((node.get("config") or {}).get("capability_key") or "")
-        if not key:
-            continue
-        policy = policies.get(key, default_approval_policy(key))
-        if policy == "plan_required":
-            return True
-    return False
 
 
 @router.get("")
@@ -206,6 +185,13 @@ def list_workflow_capabilities() -> dict[str, Any]:
             }
         )
     return {"items": items}
+
+
+@router.get("/schedulable")
+def list_schedulable_workflows() -> dict[str, Any]:
+    """List workflows with a published revision for Scheduler Job targeting."""
+    items = workflow_store.list_schedulable_workflows()
+    return {"items": items, "total": len(items)}
 
 
 @router.get("/{workflow_id}")
@@ -313,7 +299,9 @@ def create_run(revision_id: str, payload: RunCreate) -> dict[str, Any]:
     if input_errors:
         raise HTTPException(status_code=422, detail={"errors": input_errors})
     initial_status = (
-        "waiting_approval" if _requires_approval(revision) else "queued"
+        "waiting_approval"
+        if workflow_scheduling.requires_approval(revision.get("nodes") or [])
+        else "queued"
     )
     try:
         return workflow_store.create_run(
@@ -353,7 +341,7 @@ def rerun_run(run_id: str, payload: RerunRequest) -> dict[str, Any]:
         raise HTTPException(status_code=422, detail={"errors": input_errors})
     initial_status = (
         "waiting_approval"
-        if _requires_approval({"nodes": snapshot.get("nodes") or []})
+        if workflow_scheduling.requires_approval(snapshot.get("nodes") or [])
         else "queued"
     )
     new_run = workflow_store.create_rerun_run(

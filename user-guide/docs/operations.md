@@ -48,6 +48,8 @@ make logs-hitl-worker / make errorlogs-hitl-worker
 - job runner は LaunchAgent から 60 秒ごとに起動します。
 - 手動で 1 サイクル実行するには `uv run -m obsidian_ai_hub.job_runner` を使います。
 - 終了時や再起動後は、未実行のワンショットジョブが `interrupted` として扱われ、自動再試行されません。
+- 定期・ワンショット Job は公開 Workflow を対象にでき、発火ごとに Workflow Run を 1 件作成します。作成された Run の実行は Web サーバーの Workflow worker が担います。
+- 発火枠は `workflow_schedule_dispatches` に記録され、runner 再起動でも Run は二重作成されません。承認待ち Run は自動失効しないため、必要に応じて Run 詳細で取消するか Job を無効化します。
 
 ## データの保存先
 

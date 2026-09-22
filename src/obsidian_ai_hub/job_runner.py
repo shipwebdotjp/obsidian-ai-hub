@@ -43,9 +43,12 @@ def _run_cycle_locked(now: datetime) -> dict:
             continue
         job_id = job.get("id")
         schedule = job.get("schedule")
+        workflow_target = recurring.get_workflow_target(job)
         command = job.get("command")
-        if not job_id or not isinstance(schedule, dict) or not command:
-            logger.warning("Skipping malformed job entry (missing id/schedule/command): %r", job)
+        if not job_id or not isinstance(schedule, dict) or not (command or workflow_target):
+            logger.warning(
+                "Skipping malformed job entry (missing id/schedule/target): %r", job
+            )
             continue
 
         try:
@@ -62,11 +65,39 @@ def _run_cycle_locked(now: datetime) -> dict:
 
         if last_run < target <= now:
             logger.info("Running job: %s", job_id)
-            try:
-                recurring.run_command(command)
-            except Exception:
-                logger.exception("Recurring job failed (state not updated, will retry): %s", job_id)
-                continue
+            if workflow_target is not None:
+                # A workflow dispatch consumes the slot whether it succeeds or
+                # fails: the next slot re-resolves the latest published Revision.
+                from obsidian_ai_hub.workflow import scheduling
+
+                try:
+                    dispatch, _ = scheduling.dispatch_recurring_slot(
+                        job_id,
+                        target.isoformat(),
+                        workflow_target.get("workflow_id"),
+                        workflow_target.get("inputs") or {},
+                    )
+                    if dispatch.get("status") == scheduling.FAILED:
+                        logger.warning(
+                            "Workflow job %s dispatch failed for %s: %s",
+                            job_id,
+                            target.isoformat(),
+                            dispatch.get("failure_reason"),
+                        )
+                except Exception:
+                    logger.exception(
+                        "Workflow job dispatch errored; slot will retry: %s", job_id
+                    )
+                    continue
+            else:
+                try:
+                    recurring.run_command(command)
+                except Exception:
+                    logger.exception(
+                        "Recurring job failed (state not updated, will retry): %s",
+                        job_id,
+                    )
+                    continue
             with recurring.acquire_job_config_lock():
                 current_state = recurring.load_state()
                 current_state[job_id] = now

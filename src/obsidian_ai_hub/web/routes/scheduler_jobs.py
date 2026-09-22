@@ -51,6 +51,26 @@ def preview_command(
         raise HTTPException(status_code=500, detail="Failed to preview command")
 
 
+@router.post(
+    "/scheduler-jobs/one-shot-jobs",
+    response_model=schemas.OneShotJobSummary,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_one_shot_workflow_job(
+    body: schemas.OneShotWorkflowJobCreateRequest,
+    _=Depends(require_bearer_token),
+):
+    try:
+        return service.create_one_shot_workflow_job(
+            body.workflow_id, body.inputs, body.run_at
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
+    except Exception:
+        logger.exception("Failed to create one-shot workflow job")
+        raise HTTPException(status_code=500, detail="Failed to create one-shot workflow job")
+
+
 @router.get("/scheduler-jobs/one-shot-jobs", response_model=schemas.OneShotJobListResponse)
 def list_one_shot_jobs(
     limit: int = Query(default=100, ge=1, le=200),

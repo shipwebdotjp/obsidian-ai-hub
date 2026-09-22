@@ -27,9 +27,21 @@ SUCCEEDED = "succeeded"
 FAILED = "failed"
 CANCELLED = "cancelled"
 INTERRUPTED = "interrupted"
+DISPATCHED = "dispatched"
 
-TERMINAL_STATUSES = (SUCCEEDED, FAILED, CANCELLED, INTERRUPTED)
-ALL_STATUSES = (QUEUED, RUNNING, SUCCEEDED, FAILED, CANCELLED, INTERRUPTED)
+TARGET_COMMAND = "command"
+TARGET_WORKFLOW = "workflow"
+
+TERMINAL_STATUSES = (SUCCEEDED, FAILED, CANCELLED, INTERRUPTED, DISPATCHED)
+ALL_STATUSES = (
+    QUEUED,
+    RUNNING,
+    SUCCEEDED,
+    FAILED,
+    CANCELLED,
+    INTERRUPTED,
+    DISPATCHED,
+)
 
 MAX_OUTPUT_CHARS = 20000
 RETENTION_DAYS = 30
@@ -70,6 +82,12 @@ def _row_to_dict(row) -> dict:
     except (ValueError, TypeError):
         d["segments"] = []
     d.pop("segments_json", None)
+    try:
+        d["inputs"] = json.loads(d.get("inputs_json") or "{}")
+    except (ValueError, TypeError):
+        d["inputs"] = {}
+    d.pop("inputs_json", None)
+    d["target_kind"] = d.get("target_kind") or TARGET_COMMAND
     d["output_truncated"] = bool(d.get("output_truncated"))
     return d
 
@@ -117,6 +135,65 @@ def register_one_shot_job(
     result = get_one_shot_job(job_id)
     if result is None:
         raise RuntimeError(f"Failed to persist one-shot job {job_id}")
+    return result
+
+
+def register_one_shot_workflow_job(
+    workflow_id: str,
+    inputs: Optional[dict[str, Any]] = None,
+    run_at: Any = None,
+    *,
+    agent_id: Optional[str] = None,
+    session_id: Optional[str] = None,
+    run_id: Optional[str] = None,
+    now: Optional[datetime] = None,
+) -> dict:
+    """Register a one-shot job that starts a published Workflow.
+
+    The target is validated against the current published Revision so a bad
+    registration is rejected up front. At execution the latest published
+    Revision is re-resolved (it may have changed). Success records
+    ``status='dispatched'`` and the created Workflow Run; the Workflow's own
+    outcome is tracked on the Run, not here.
+    """
+    target = recurring.validate_workflow_target(workflow_id, inputs)
+
+    ref = now or datetime.now(timezone.utc)
+    if ref.tzinfo is None:
+        ref = ref.replace(tzinfo=timezone.utc)
+    run_at_utc = parse_run_at(run_at, now=ref)
+    created_at = ref.astimezone(timezone.utc).isoformat()
+    job_id = uuid.uuid4().hex
+
+    conn = get_db_connection()
+    try:
+        conn.execute(
+            """
+            INSERT INTO one_shot_jobs (
+                job_id, target_kind, command, workflow_id, inputs_json,
+                workflow_run_id, run_at_utc, status, agent_id, session_id,
+                run_id, created_at, started_at, finished_at,
+                exit_code, segments_json, output_truncated, error_summary
+            ) VALUES (?, 'workflow', NULL, ?, ?, NULL, ?, 'queued', ?, ?, ?, ?,
+                      NULL, NULL, NULL, '[]', 0, NULL)
+            """,
+            (
+                job_id,
+                target["workflow_id"],
+                json.dumps(target["inputs"], ensure_ascii=False),
+                run_at_utc,
+                agent_id,
+                session_id,
+                run_id,
+                created_at,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    result = get_one_shot_job(job_id)
+    if result is None:
+        raise RuntimeError(f"Failed to persist one-shot workflow job {job_id}")
     return result
 
 
@@ -199,10 +276,11 @@ def prune_expired_one_shot_jobs(
     cutoff = (ref.astimezone(timezone.utc) - timedelta(days=days)).isoformat()
     conn = get_db_connection()
     try:
+        placeholders = ",".join("?" for _ in TERMINAL_STATUSES)
         cur = conn.execute(
-            "DELETE FROM one_shot_jobs WHERE status IN ('succeeded','failed','cancelled','interrupted')"
+            f"DELETE FROM one_shot_jobs WHERE status IN ({placeholders})"
             " AND finished_at IS NOT NULL AND finished_at < ?",
-            (cutoff,),
+            (*TERMINAL_STATUSES, cutoff),
         )
         conn.commit()
         return cur.rowcount or 0
@@ -359,6 +437,65 @@ def execute_claimed_job(
     return result
 
 
+def dispatch_claimed_workflow_job(
+    job: dict, *, now: Optional[datetime] = None
+) -> dict:
+    """Start a Workflow Run for a claimed (``running``) workflow one-shot job.
+
+    The Run insert and the terminal status update commit together: a crash
+    before the commit leaves the row ``running`` (later marked ``interrupted``
+    with no Run), and a crash after it leaves ``dispatched`` with the Run. A
+    duplicate Run is impossible because the row is only dispatched once.
+    """
+    from obsidian_ai_hub.workflow import scheduling
+    from obsidian_ai_hub.workflow import store as workflow_store
+
+    job_id = job["job_id"]
+    workflow_id = job["workflow_id"]
+    inputs = job.get("inputs") or {}
+
+    ref = now or datetime.now(timezone.utc)
+    if ref.tzinfo is None:
+        ref = ref.replace(tzinfo=timezone.utc)
+    finished_at = ref.astimezone(timezone.utc).isoformat()
+
+    conn = get_db_connection()
+    try:
+        with conn:
+            try:
+                run, _revision_id, _ = scheduling.create_run_for_latest_published(
+                    conn, workflow_id, inputs
+                )
+            except scheduling.WorkflowDispatchError as exc:
+                conn.execute(
+                    "UPDATE one_shot_jobs SET status='failed', finished_at=?,"
+                    " error_summary=? WHERE job_id=? AND status='running'",
+                    (finished_at, str(exc), job_id),
+                )
+            else:
+                workflow_store.append_event(
+                    str(run["run_id"]),
+                    "run_scheduled",
+                    {
+                        "source_kind": scheduling.SOURCE_ONE_SHOT,
+                        "scheduler_job_id": job_id,
+                    },
+                    conn=conn,
+                )
+                conn.execute(
+                    "UPDATE one_shot_jobs SET status='dispatched',"
+                    " workflow_run_id=?, finished_at=?, error_summary=NULL"
+                    " WHERE job_id=? AND status='running'",
+                    (run["run_id"], finished_at, job_id),
+                )
+    finally:
+        conn.close()
+    result = get_one_shot_job(job_id)
+    if result is None:
+        raise LookupError(f"One-shot job not found: {job_id}")
+    return result
+
+
 def run_due_one_shot_jobs(
     *,
     executor: Optional[Callable[..., Any]] = None,
@@ -367,4 +504,16 @@ def run_due_one_shot_jobs(
 ) -> list[dict]:
     """Claim due jobs and execute each exactly once. Returns terminal rows."""
     claimed = claim_due_jobs(now=now, limit=limit)
-    return [execute_claimed_job(job, executor=executor, now=now) for job in claimed]
+    results: list[dict] = []
+    for job in claimed:
+        # Isolate each job: one unexpected failure must not abort the batch and
+        # leave later claimed rows with no terminal status (startup recovery
+        # would then mark them ``interrupted`` and drop the work).
+        try:
+            if job.get("target_kind") == TARGET_WORKFLOW:
+                results.append(dispatch_claimed_workflow_job(job, now=now))
+            else:
+                results.append(execute_claimed_job(job, executor=executor, now=now))
+        except Exception:
+            logger.exception("One-shot job %s failed to process", job.get("job_id"))
+    return results

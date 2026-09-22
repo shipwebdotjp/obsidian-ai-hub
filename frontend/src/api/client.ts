@@ -45,6 +45,7 @@ import type {
   AgentSlashCandidatesResponse,
   SchedulerJobConfigResponse,
   SchedulerJobConfigUpdateResponse,
+  SchedulableWorkflowListResponse,
   CommandPreviewResponse,
   OneShotJobListResponse,
   OneShotJobDetail,
@@ -303,6 +304,21 @@ export function listOneShotJobs(limit = 100, offset = 0): Promise<OneShotJobList
       offset: safeOffset,
     }),
   );
+}
+
+export function getSchedulableWorkflows(): Promise<SchedulableWorkflowListResponse> {
+  return request<SchedulableWorkflowListResponse>("/api/v1/workflows/schedulable");
+}
+
+export function createOneShotWorkflowJob(
+  workflowId: string,
+  inputs: Record<string, unknown>,
+  runAt?: string | null,
+): Promise<OneShotJobSummary> {
+  return request<OneShotJobSummary>("/api/v1/scheduler-jobs/one-shot-jobs", {
+    method: "POST",
+    body: JSON.stringify({ workflow_id: workflowId, inputs, run_at: runAt ?? null }),
+  });
 }
 
 export function getOneShotJobDetail(jobId: string): Promise<OneShotJobDetail> {
