@@ -77,7 +77,11 @@
 
 ## Code review (ocr) and commit
 
-- If there are no instructions, please review using OCR after making corrections, correct the valid points, and then commit.
+- If there are no instructions, review using OCR after making corrections. Do not
+  accept every finding unconditionally: prioritize critical and high-severity
+  findings, assess whether each finding is valid, and fix only findings that
+  are worth addressing. After corrections, run OCR review at most three times
+  total, then stop and commit.
 - Never let `ocr review` stream to the terminal. Capture its full output from
   the first run, then read the file:
   ```bash
