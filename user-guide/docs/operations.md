@@ -7,20 +7,33 @@ title: 運用
 
 ## サーバーの起動と停止
 
+Web サーバーは job_runner・hitl-worker と同様に LaunchAgent で常駐させます。
+初回のみ `make install-all`（Web サーバーだけなら `make install-web`）で登録します。
+
+```bash
+make start / make stop    # job_runner
+make restart              # job_runner + Web サーバー + hitl-worker を再起動
+make restart-web          # Web サーバーのみ再起動（コード変更時）
+make status-web           # Web サーバーの状態
+make logs-web / make errorlogs-web
+make reload-web           # plist 再読み込み（設定変更時）
+```
+
+フロントエンドを変更した場合は `make npm-build` で `dist` を更新してから
+`make restart-web` を実行します。
+
+開発時にフォアグラウンドで動かす場合のみ（人間の端末専用）:
+
 ```bash
 make serve            # 起動（uv run -m obsidian_ai_hub --serve）
-make serve-restart    # 8765 のプロセスを終了して再起動
 make serve-debug      # 自動リロード + 詳細ログ
 ```
 
-LaunchAgent として登録している場合:
-
-```bash
-make start / make stop / make restart
-make reload           # plist 再読み込み（設定変更時）
-make status
-make logs / make errorlogs
-```
+:::warning[`make serve` はエージェント向きではありません]
+`make serve` / `make serve-restart` は端末を占有するフォアグラウンドのプロセスです。
+エージェントのシェルから起動してもプロセスが残らないため、常駐確認には
+LaunchAgent の `make restart-web` を使ってください。
+:::
 
 ## 常駐ワーカー
 

@@ -7,6 +7,7 @@ CURRENT_DIR="$(pwd)"
 
 BASE="jp.shipweb.obsidian-ai-hub"
 HITL="jp.shipweb.obsidian-ai-hub.hitl-worker"
+WEB="jp.shipweb.obsidian-ai-hub.web"
 
 args=("${@:-$BASE}")
 
@@ -17,11 +18,13 @@ for arg in "${args[@]}"; do
       names+=("$BASE") ;;
     "$HITL"|hitl-worker|hitl)
       names+=("$HITL") ;;
+    "$WEB"|web)
+      names+=("$WEB") ;;
     all)
-      names+=("$BASE" "$HITL") ;;
+      names+=("$BASE" "$HITL" "$WEB") ;;
     *)
       echo "Unknown service: $arg" >&2
-      echo "Usage: $0 [base|hitl-worker|all]" >&2
+      echo "Usage: $0 [base|hitl-worker|web|all]" >&2
       exit 1 ;;
   esac
 done

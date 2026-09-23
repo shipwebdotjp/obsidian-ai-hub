@@ -85,7 +85,9 @@
   ```
 
 ## Check the operation
-- Please perform operational checks using the actual database; it is acceptable if side effects occur. After modifying the code, terminate the existing process and restart the server(make serve).
+- Please perform operational checks using the actual database; it is acceptable if side effects occur. After modifying the code, restart the LaunchAgent services with `make restart` (job_runner + Web サーバー + hitl-worker). 初回のみ `make install-all` で LaunchAgent を登録しておくこと。
+- `make serve` / `make serve-restart` はフォアグラウンドの開発用サーバーで、人間の端末専用。エージェントのシェルからはプロセスが残らないため使わない。Web サーバーだけを再起動する場合は `make restart-web`、状態とログは `make status-web` / `make logs-web` / `make errorlogs-web`。
+- Before finishing, stop any foreground server you started (do not leave `make serve` or a multiplexer session running); the LaunchAgent keeps the service up across runs.
 - Clean up any test data you create during operational checks before finishing, including dependent records. Use an identifying name prefix such as `__opcheck_`, report the deleted IDs/counts, and verify nothing remains. Never delete user data.
 - http://127.0.0.1:8765
 - Production DB Path: ~/.config/obsidian-ai-hub/memory.sqlite3

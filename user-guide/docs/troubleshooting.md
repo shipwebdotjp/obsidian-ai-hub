@@ -8,7 +8,7 @@ title: トラブルシューティング
 ## サーバーが起動しない
 
 - **`OBSIDIAN_AI_HUB_API_TOKEN` が空** — 空だとサーバーは起動に失敗します。`.env` に設定してください。
-- **ポートが使用中** — `--serve-port` で別ポートにするか、`lsof -ti :8765 | xargs kill` で解放します（`make serve-restart` が行います）。
+- **ポートが使用中** — `--serve-port` で別ポートにするか、`lsof -ti :8765 | xargs kill` で解放します（LaunchAgent 登録後は `make restart-web` が行います）。
 - **フロントエンドが未ビルド（`503`）** — `make build-web` を実行して `frontend/dist` を生成します。
 
 ## ブラウザで「接続エラー」になる
