@@ -57,6 +57,28 @@ backup:
         - "*.tmp"
 ```
 
+### rsync の実行ファイルを指定する
+
+macOS 同梱の `/usr/bin/rsync` は openrsync であり、`--delete` の削除走査中に assertion で abort することがあります。Homebrew の GNU rsync を導入し、実行ファイルを絶対パスで指定してください。
+
+```bash
+brew install rsync
+brew --prefix rsync
+```
+
+`brew --prefix rsync` の出力に `/bin/rsync` を付けた絶対パスを `backup.rsync_executable` に設定します。
+
+```yaml
+backup:
+  rsync_executable: /opt/homebrew/opt/rsync/bin/rsync
+  sync_folders:
+    - source: /path/to/your/obsidian/Default
+      destination: /path/to/your/backup/Obsidian/Default
+```
+
+バックアップ開始時に、指定した実行ファイルへ `--version` を 1 度だけ実行します。起動できない場合や、設定値が空・不正な場合は、宛先ディレクトリを作成する前に停止します。出力が openrsync の場合は警告をログに残しますが、指定どおり実行を継続します（自動での再試行は行いません）。未設定の場合は従来どおり `rsync` を使用するため、openrsync の失敗が再発し得ます。
+
+
 ## 古いレコードのクリーンアップ
 
 次の 2 つのコマンドは 30 日より古いレコードを削除します。

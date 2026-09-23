@@ -15,6 +15,11 @@ files:
   research_candidate_theme_list: リサーチ候補テーマリスト.md
 
 backup:
+  # Optional absolute path to the rsync binary used for backups. macOS ships
+  # openrsync, which can abort with an assertion during --delete scanning;
+  # install GNU rsync (`brew install rsync`) and set the path reported by
+  # `brew --prefix rsync` with /bin/rsync appended:
+  #   rsync_executable: /opt/homebrew/opt/rsync/bin/rsync
   sync_folders:
     - source: /path/to/your/obsidian/Default
       destination: /path/to/your/backup/Obsidian/Default

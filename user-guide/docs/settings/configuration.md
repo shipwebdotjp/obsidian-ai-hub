@@ -58,6 +58,7 @@ cp .env.example .env
 | `vault` | Vault 内のフォルダ名（`inbox` / `daily` / `template` / `knowledge` / `research` / `activity` / `webclip`） |
 | `files` | ファイル名（日次ノート、週次テンプレート、リサーチ候補テーマリストなど） |
 | `backup.sync_folders` | `--backup` の rsync 対象（source / destination / 任意の excludes） |
+| `backup.rsync_executable` | `--backup` で使う rsync の実行ファイル絶対パス（未設定時は `rsync`） |
 | `location_map` | 場所文字列 → 表示名の変換 |
 | `regularly_date_events` / `regularly_weekday_events` | 定期的な予定の定義（時刻付きも可） |
 | `llm` | 用途ごとの LLM プロバイダ・モデル・プロンプト上書き（[LLM プロバイダ](llm.md)） |

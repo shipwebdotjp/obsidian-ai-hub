@@ -704,6 +704,11 @@ BACKUP_SYNC_FOLDERS = _config_value("backup", "sync_folders", default=[])
 if not isinstance(BACKUP_SYNC_FOLDERS, list):
     BACKUP_SYNC_FOLDERS = []
 
+# Optional absolute path to the rsync binary to run. When unset the legacy
+# "rsync" lookup on PATH is used. The backup service validates the value and
+# runs `<executable> --version` before touching any destination.
+BACKUP_RSYNC_EXECUTABLE = _config_value("backup", "rsync_executable")
+
 LOCATION_MAP = _config_value("location_map", default={})
 if not isinstance(LOCATION_MAP, dict):
     LOCATION_MAP = {}
