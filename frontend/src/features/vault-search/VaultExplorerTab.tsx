@@ -252,11 +252,13 @@ export default function VaultExplorerTab({
                   >
                     {vaultFileName(f.relative_path)}
                   </span>
-                  <span className="mt-0.5 flex min-w-0 items-center gap-2 text-[11px] text-slate-400">
+                  <span className="mt-0.5 flex w-full min-w-0 items-center gap-2 text-[11px] text-slate-400">
                     {vaultFileDirectory(f.relative_path) && (
-                      <span className="truncate">{vaultFileDirectory(f.relative_path)}</span>
+                      <span className="min-w-0 flex-1 truncate text-left">
+                        {vaultFileDirectory(f.relative_path)}
+                      </span>
                     )}
-                    <span className="shrink-0">{formatMtime(f.mtime)}</span>
+                    <span className="ml-auto shrink-0 text-right">{formatMtime(f.mtime)}</span>
                   </span>
                 </span>
               </button>
