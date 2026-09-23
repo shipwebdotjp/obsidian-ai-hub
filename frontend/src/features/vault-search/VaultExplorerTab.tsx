@@ -98,7 +98,7 @@ export default function VaultExplorerTab({
       <li key={node.path}>
         <div
           className={`flex items-center gap-1 ${
-            isSelected ? "bg-slate-200 border-l-4 border-slate-800" : "hover:bg-slate-50"
+            isSelected ? "bg-slate-200 shadow-[inset_4px_0_0_0_#1e293b]" : "hover:bg-slate-50"
           }`}
           data-selected={isSelected ? "true" : "false"}
         >
@@ -155,7 +155,9 @@ export default function VaultExplorerTab({
         <li>
           <div
             className={`flex items-center gap-1 ${
-              selectedDir === "" ? "bg-slate-200 border-l-4 border-slate-800" : "hover:bg-slate-50"
+              selectedDir === ""
+                ? "bg-slate-200 shadow-[inset_4px_0_0_0_#1e293b]"
+                : "hover:bg-slate-50"
             }`}
             data-selected={selectedDir === "" ? "true" : "false"}
           >
