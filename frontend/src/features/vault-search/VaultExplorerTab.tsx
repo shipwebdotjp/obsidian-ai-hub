@@ -4,7 +4,6 @@ import type { VaultFileListItem } from "../../api/types";
 import { DEFAULT_LIST_RATIO } from "../../hooks/usePaneResize";
 import {
   filterVaultFilesByName,
-  formatVaultFileSize,
   listFilesInDirectory,
   sortVaultFiles,
   vaultFileDirectory,
@@ -222,7 +221,7 @@ export default function VaultExplorerTab({
           type="button"
           onClick={() => onSort("mtime")}
           aria-label="更新日時で並べ替え"
-          className="flex w-40 shrink-0 cursor-pointer items-center gap-1 px-3 py-1.5 text-left hover:bg-slate-100"
+          className="flex shrink-0 cursor-pointer items-center gap-1 px-3 py-1.5 text-right hover:bg-slate-100"
         >
           <span>更新日時</span>
           {sortKey === "mtime" && <span aria-hidden="true">{sortDir === "asc" ? "↑" : "↓"}</span>}
@@ -241,11 +240,11 @@ export default function VaultExplorerTab({
                 }}
                 data-testid="vault-explorer-row"
                 data-selected={isSelected ? "true" : "false"}
-                className={`flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left text-sm ${
+                className={`flex w-full cursor-pointer items-start gap-2 px-3 py-2 text-left text-sm ${
                   isSelected ? "bg-slate-200 border-l-4 border-slate-800" : "hover:bg-slate-50"
                 }`}
               >
-                <FileText className="h-4 w-4 shrink-0 text-slate-400" />
+                <FileText className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
                 <span className="min-w-0 flex-1">
                   <span
                     data-testid="vault-explorer-row-name"
@@ -253,17 +252,12 @@ export default function VaultExplorerTab({
                   >
                     {vaultFileName(f.relative_path)}
                   </span>
-                  {vaultFileDirectory(f.relative_path) && (
-                    <span className="block truncate text-[11px] text-slate-400">
-                      {vaultFileDirectory(f.relative_path)}
-                    </span>
-                  )}
-                </span>
-                <span className="w-32 shrink-0 text-right text-[11px] text-slate-400">
-                  {formatMtime(f.mtime)}
-                </span>
-                <span className="w-16 shrink-0 text-right text-[11px] text-slate-400">
-                  {formatVaultFileSize(f.size)}
+                  <span className="mt-0.5 flex min-w-0 items-center gap-2 text-[11px] text-slate-400">
+                    {vaultFileDirectory(f.relative_path) && (
+                      <span className="truncate">{vaultFileDirectory(f.relative_path)}</span>
+                    )}
+                    <span className="shrink-0">{formatMtime(f.mtime)}</span>
+                  </span>
                 </span>
               </button>
             </li>
