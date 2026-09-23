@@ -56,7 +56,6 @@ def test_opencode_go_gpt_models_use_responses_api():
         model="gpt-5.6-terra",
         api_key="test_opencode_key",
         base_url="https://opencode.ai/zen/go/v1",
-        temperature=0.5,
         max_tokens=256,
         max_retries=0,
         use_responses_api=True,
@@ -65,6 +64,133 @@ def test_opencode_go_gpt_models_use_responses_api():
             "x-opencode-session": "obsidian-ai-hub",
         },
     )
+
+
+def test_opencode_go_reasoning_model_omits_temperature():
+    """reasoning 系 GPT モデルには temperature を渡さない。"""
+    with (
+        patch(
+            "obsidian_ai_hub.utils.llm_client.config.OPENCODE_API_KEY",
+            "test_opencode_key",
+        ),
+        patch("langchain_openai.ChatOpenAI") as mock_chat_openai,
+    ):
+        llm_client.create_langchain_llm(
+            provider="opencode_go",
+            model="gpt-6-sol",
+            temperature=0.7,
+            max_tokens=4096,
+        )
+
+    _, kwargs = mock_chat_openai.call_args
+    assert "temperature" not in kwargs
+    assert kwargs["use_responses_api"] is True
+
+
+def test_create_openai_llm_reasoning_model_omits_temperature():
+    with (
+        patch("obsidian_ai_hub.utils.llm_client.config.OPENAI_API_KEY", "test_key"),
+        patch("langchain_openai.ChatOpenAI") as mock_chat_openai,
+    ):
+        llm_client.create_openai_llm(
+            "gpt-6-sol",
+            temperature=0.7,
+            max_tokens=4096,
+            use_responses_api=True,
+        )
+
+    _, kwargs = mock_chat_openai.call_args
+    assert "temperature" not in kwargs
+
+
+def test_create_openai_llm_chat_completions_keeps_temperature():
+    with (
+        patch("obsidian_ai_hub.utils.llm_client.config.OPENAI_API_KEY", "test_key"),
+        patch("langchain_openai.ChatOpenAI") as mock_chat_openai,
+    ):
+        llm_client.create_openai_llm("gpt-4o", temperature=0.0, max_tokens=256)
+
+    _, kwargs = mock_chat_openai.call_args
+    assert kwargs["temperature"] == 0.0
+
+
+def test_create_openai_llm_non_reasoning_model_keeps_temperature():
+    """reasoning 系以外のモデルは temperature を保持する。"""
+    with (
+        patch("obsidian_ai_hub.utils.llm_client.config.OPENAI_API_KEY", "test_key"),
+        patch("langchain_openai.ChatOpenAI") as mock_chat_openai,
+    ):
+        for model in ("gpt-4o", "o1x-alias"):
+            llm_client.create_openai_llm(
+                model,
+                temperature=0.2,
+                max_tokens=256,
+                use_responses_api=True,
+            )
+            _, kwargs = mock_chat_openai.call_args
+            assert kwargs["temperature"] == 0.2, model
+            mock_chat_openai.reset_mock()
+
+
+def test_provider_prefixed_reasoning_model_omits_temperature():
+    """``provider/model`` 形式の ID でも reasoning 判定できる。"""
+    with (
+        patch("obsidian_ai_hub.utils.llm_client.config.OPENAI_API_KEY", "test_key"),
+        patch("langchain_openai.ChatOpenAI") as mock_chat_openai,
+    ):
+        for model in ("openai/gpt-6-sol", "openai/gpt-5.3-codex"):
+            llm_client.create_openai_llm(model, temperature=0.7, max_tokens=256)
+            _, kwargs = mock_chat_openai.call_args
+            assert "temperature" not in kwargs, model
+            mock_chat_openai.reset_mock()
+
+
+def test_reasoning_model_chat_variant_keeps_temperature():
+    """``*-chat`` は reasoning 系でも temperature を保持する。"""
+    with (
+        patch("obsidian_ai_hub.utils.llm_client.config.OPENAI_API_KEY", "test_key"),
+        patch("langchain_openai.ChatOpenAI") as mock_chat_openai,
+    ):
+        llm_client.create_openai_llm("gpt-5-chat-latest", temperature=0.7, max_tokens=256)
+
+    _, kwargs = mock_chat_openai.call_args
+    assert kwargs["temperature"] == 0.7
+
+
+def test_reasoning_effort_none_keeps_temperature():
+    """reasoning を無効化した呼び出しでは temperature を保持する。"""
+    with (
+        patch("obsidian_ai_hub.utils.llm_client.config.OPENAI_API_KEY", "test_key"),
+        patch("langchain_openai.ChatOpenAI") as mock_chat_openai,
+    ):
+        llm_client.create_openai_llm(
+            "gpt-6-sol",
+            temperature=0.7,
+            max_tokens=256,
+            use_responses_api=True,
+            reasoning_effort="none",
+        )
+
+    _, kwargs = mock_chat_openai.call_args
+    assert kwargs["temperature"] == 0.7
+
+
+def test_reasoning_models_omit_temperature():
+    """reasoning 系モデルには temperature を渡さない。"""
+    with (
+        patch("obsidian_ai_hub.utils.llm_client.config.OPENAI_API_KEY", "test_key"),
+        patch("langchain_openai.ChatOpenAI") as mock_chat_openai,
+    ):
+        for model in (
+            "o1-mini",
+            "gpt-5.6-pro",
+            "gpt-6-astra-pro",
+            "codex-mini-latest",
+        ):
+            llm_client.create_openai_llm(model, temperature=0.7, max_tokens=256)
+            _, kwargs = mock_chat_openai.call_args
+            assert "temperature" not in kwargs, model
+            mock_chat_openai.reset_mock()
 
 
 def test_opencode_go_anthropic_compatible_routing():

@@ -52,6 +52,47 @@ def _opencode_default_headers(
     return merged
 
 
+# Reasoning model families whose API calls reject a non-default
+# ``temperature`` ("Unsupported parameter: 'temperature'").  Keep in sync with
+# the provider model matrix when new families appear (e.g. a future ``o5`` or
+# ``gpt-7``).
+_REASONING_O_SERIES = ("o1", "o3", "o4")
+_REASONING_GPT_PREFIXES = ("gpt-5", "gpt-6")
+
+
+def _temperature_kwargs(
+    temperature: float,
+    *,
+    model: str,
+    reasoning_effort: str | None = None,
+) -> dict[str, float]:
+    """Build the optional ``temperature`` kwarg for ``ChatOpenAI``.
+
+    Reasoning models reject a non-default ``temperature`` ("Unsupported
+    parameter: 'temperature' is not supported with this model").
+    ``langchain-openai`` only strips it for ``gpt-5`` models, so we omit it
+    ourselves for the reasoning families and let the provider apply its
+    default.  Names containing ``chat`` and calls with reasoning disabled keep
+    it.
+    """
+    name = (model or "").strip().lower().rsplit("/", 1)[-1]
+    reasoning_disabled = (reasoning_effort or "").strip().lower() == "none"
+    family = name.split("-", 1)[0]
+    is_reasoning_model = (
+        family in _REASONING_O_SERIES
+        or name.startswith(_REASONING_GPT_PREFIXES)
+        or "codex" in name.split("-")
+    )
+    if is_reasoning_model and "chat" not in name and not reasoning_disabled:
+        logger.debug(
+            "Omitting temperature for reasoning model %r (requested=%s)",
+            model,
+            temperature,
+        )
+        return {}
+    return {"temperature": temperature}
+
+
 def _is_network_error(exc: Exception) -> bool:
     """
     ネットワーク系の一時的な失敗だけをリトライ対象にする。
@@ -610,9 +651,13 @@ def create_opencode_go_llm(
             model=model,
             api_key=api_key,
             base_url="https://opencode.ai/zen/go/v1",
-            temperature=temperature,
             max_tokens=max_tokens,
             max_retries=0,
+            **_temperature_kwargs(
+                temperature,
+                model=model,
+                reasoning_effort=reasoning_effort,
+            ),
             **options,
         )
     elif model.startswith(anthropic_prefixes):
@@ -669,9 +714,13 @@ def create_openai_llm(
     return ChatOpenAI(
         model=model,
         api_key=api_key,
-        temperature=temperature,
         max_tokens=max_tokens,
         max_retries=0,  # 外側の _with_exponential_backoff に任せる
+        **_temperature_kwargs(
+            temperature,
+            model=model,
+            reasoning_effort=reasoning_effort,
+        ),
         **options,
     )
 
