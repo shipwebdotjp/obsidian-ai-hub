@@ -60,6 +60,10 @@ import type {
   WorkflowRevision,
   WorkflowRun,
   WorkflowTemplateListResponse,
+  WorkflowUserTemplateDetail,
+  WorkflowUserTemplateListResponse,
+  WorkflowImportResponse,
+  WorkflowDefinitionFormat,
   WorkflowValidationResponse,
 } from "./types";
 
@@ -112,7 +116,10 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+async function sendRequest(
+  path: string,
+  init: RequestInit = {},
+): Promise<Response> {
   const headers = new Headers(init.headers || {});
   headers.set("Accept", "application/json");
   const isFormData = typeof FormData !== "undefined" && init.body instanceof FormData;
@@ -146,10 +153,20 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     }
     throw new ApiError(res.status, detail, body);
   }
+  return res;
+}
+
+async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const res = await sendRequest(path, init);
   if (res.status === 204) {
     return undefined as T;
   }
   return (await res.json()) as T;
+}
+
+async function requestText(path: string, init: RequestInit = {}): Promise<string> {
+  const res = await sendRequest(path, init);
+  return await res.text();
 }
 
 export function listMemories(params: {
@@ -1154,4 +1171,94 @@ export function createWorkflowFromTemplate(payload: {
     method: "POST",
     body: JSON.stringify(payload),
   });
+}
+
+export function listWorkflowUserTemplates(): Promise<WorkflowUserTemplateListResponse> {
+  return request<WorkflowUserTemplateListResponse>(
+    "/api/v1/workflows/user-templates",
+  );
+}
+
+export function getWorkflowUserTemplate(
+  templateId: string,
+): Promise<WorkflowUserTemplateDetail> {
+  return request<WorkflowUserTemplateDetail>(
+    `/api/v1/workflows/user-templates/${encodeURIComponent(templateId)}`,
+  );
+}
+
+export function createWorkflowUserTemplate(payload: {
+  source_revision_id: string;
+  name?: string;
+  description?: string;
+}): Promise<WorkflowUserTemplateDetail> {
+  return request<WorkflowUserTemplateDetail>("/api/v1/workflows/user-templates", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateWorkflowUserTemplate(
+  templateId: string,
+  payload: {
+    source_revision_id?: string;
+    name?: string;
+    description?: string;
+  },
+): Promise<WorkflowUserTemplateDetail> {
+  return request<WorkflowUserTemplateDetail>(
+    `/api/v1/workflows/user-templates/${encodeURIComponent(templateId)}`,
+    { method: "PUT", body: JSON.stringify(payload) },
+  );
+}
+
+export function deleteWorkflowUserTemplate(
+  templateId: string,
+): Promise<{ success: boolean; template_id: string }> {
+  return request<{ success: boolean; template_id: string }>(
+    `/api/v1/workflows/user-templates/${encodeURIComponent(templateId)}`,
+    { method: "DELETE" },
+  );
+}
+
+export function instantiateWorkflowUserTemplate(
+  templateId: string,
+  payload: { name?: string; description?: string } = {},
+): Promise<WorkflowImportResponse> {
+  return request<WorkflowImportResponse>(
+    `/api/v1/workflows/user-templates/${encodeURIComponent(templateId)}/instantiate`,
+    { method: "POST", body: JSON.stringify(payload) },
+  );
+}
+
+export function exportWorkflowRevision(
+  revisionId: string,
+  format: WorkflowDefinitionFormat,
+): Promise<string> {
+  return requestText(
+    `/api/v1/workflows/revisions/${encodeURIComponent(revisionId)}/export?format=${format}`,
+  );
+}
+
+export function exportWorkflowUserTemplate(
+  templateId: string,
+  format: WorkflowDefinitionFormat,
+): Promise<string> {
+  return requestText(
+    `/api/v1/workflows/user-templates/${encodeURIComponent(templateId)}/export?format=${format}`,
+  );
+}
+
+export function importWorkflowDefinition(
+  body: string,
+  format: WorkflowDefinitionFormat,
+): Promise<WorkflowImportResponse> {
+  return request<WorkflowImportResponse>(
+    `/api/v1/workflows/import?format=${format}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": format === "json" ? "application/json" : "application/x-yaml" },
+      body,
+    },
+  );
 }

@@ -35,6 +35,8 @@ Agent Node の LLM 出力は確率的で、JSON Schema によって検証・型�
 | **Workflow Run** | Revision の 1 回の実行単位。 |
 | **Workflow Scheduler Job** | Scheduler Job の実行対象として公開 Workflow を指定したもの。対象は発火時点の最新 published Revision。固定 JSON 入力を持つ。 |
 | **Scheduled Dispatch** | Scheduler Job の 1 発火枠。`source_kind` + `scheduler_job_id` + `scheduled_for` で一意。解決した Revision と作成 Run、失敗理由を保持する。 |
+| **User Template** | 公開済み Revision の定義を独立スナップショットとして保存した、ユーザー管理の再利用テンプレート。元 Workflow / Revision への外部キーを持たず、`template_id` と名前・説明を持つ。 |
+| **Workflow Definition Package** | Workflow 定義を JSON / YAML で移送する v1 形式。`format` / `version` / `name` / `description` / `inputs_schema` / `nodes` / `edges` のみを含み、Workflow / Revision / Template ID、status、Run、Event、Scheduler 設定を含まない。 |
 | **Activation** | ある Node が、ある Loop 反復・経路で論理的に 1 回起動された単位の永続 UUID。 |
 | **InvocationContext** | Capability Adapter 実行時に渡される実行文脈（run_id, node_id, activation_id 等）。 |
 | **型付き参照** | `run.inputs.*` / `nodes.<node_id>.output.*` / `loop.state.*` の形式で値を参照する仕組み。 |
@@ -47,11 +49,14 @@ Agent Node、Loop Node（非ネスト）、terminal / loop_result Node、型付�
 条件付き排他的分岐、OR 合流、承認（`waiting_approval`）、HITL wait（`waiting_hitl`）、
 `needs_attention` / `waiting_attention`、中断・再開・キャンセル、効果契約による動的完了判定、
 Event 監査、redaction・30 日保持、バックエンド API、GUI / SSE（後続フェーズ）、
-Scheduler Job からの公開 Workflow 起動（`job_runner` 経由、発火枠単位の冪等性）。
+Scheduler Job からの公開 Workflow 起動（`job_runner` 経由、発火枠単位の冪等性）、
+公開 Revision からの User Template 保存と再利用、Workflow Definition Package v1 の
+JSON / YAML export / import（import は常に新規 draft を作成）。
 
 **対象外**: 並列 Node / fork / AND join、Loop ネスト、任意の循環 Edge、任意コード Node、
 Agent Node ごとの prompt/model/tool 上書き、$ref/oneOf/再帰を含む JSON Schema、Workflow 独自の
-長期 Artifact ストア、専用 worker、完了通知外部入口、定義のインポート / エクスポート、
+長期 Artifact ストア、専用 worker、完了通知外部入口、zip / 一括 import / export、
+Template の版管理、既存 draft の置換 import、
 Workflow ごとの同時実行数制御、承認待ち Run の抑止・自動失効、動的な日時入力テンプレート。
 
 ## 2. 主要ユースケースと操作シナリオ
@@ -320,6 +325,28 @@ Node 間のデータ連携は文字列テンプレート展開ではなく、以
   - Scheduler Job が参照している。定期 YAML ジョブの `workflow.workflow_id`、または終端でない
     `one_shot_jobs`（`target_kind='workflow'`）が対象。
 - 改名・説明更新（`PATCH`）は削除の前提条件ではない。
+
+### 5.2 User Template と Workflow Definition Package
+
+- User Template は**公開済み Revision からのみ**作成・内容更新できる。draft / superseded や
+  存在しない Revision は 409 / 404 で拒否する。
+- Template は元 Workflow への参照ではなく、公開 Revision の定義スナップショットである。
+  元 Workflow を削除しても Template は利用できる。Template 内に版履歴は持たない。
+- Template の内容更新は同じ `template_id` の定義を新しい公開 Revision のスナップショットへ
+  置換する。過去に Template から作成した Workflow には影響しない。
+- Template 利用（instantiate）は常に新しい Workflow と空の draft Revision を作成し、
+  Node / Edge ID をすべて新規採番する。実行・公開・Scheduler 登録は自動で行わない。
+- Workflow Definition Package v1 は `format` / `version` / `name` / `description` /
+  `inputs_schema` / `nodes` / `edges` のみを含む。Node / Edge ID は package 内の
+  グラフ接続・参照解決にだけ使い、import / instantiate 時にすべて新規 ID へ採番し、
+  `$ref`、Loop の `entry_node_id`、親 Loop、Edge 条件を一貫して書き換える。
+- import 境界では安全な YAML parse、package version、許可キー、型、ファイルサイズ、
+  Node / Edge 上限、ID 一意性、graph-local 参照整合を検証する。違反は 422 で停止し、
+  DB に何も作成しない。
+- import / instantiate 後の graph 意味検証は現行の `validate_graph` で行い、作成した draft と
+  validation_errors を返す。未知 Capability / Agent などは公開不可のままエディタで修正できる。
+- 定義 package は定義だけを扱い、実行履歴、外部成果物、Scheduler Job、秘密値を移送しない。
+  秘密値は定義へ含めない。
 
 ## 6. 静的検証と動的検証
 
@@ -612,7 +639,13 @@ Agent 指紋を含む。
 ### 15.1 画面構成
 
 - `/workflows` — Workflow 一覧。
+  - 「ユーザーテンプレート」領域: Template からの新規 Workflow 作成、名前・説明の編集、削除、
+    JSON / YAML download、import ファイル選択。
 - `/workflows/:id` — Revision 履歴と最近の Run。draft / 旧版 Revision に削除ボタン。
+  - 公開 Revision の行に Template 保存・既存 Template の内容更新・JSON / YAML export。
+    draft Revision は export / Template 保存の対象外。
+  - import / instantiate 後は新しい draft の編集画面へ遷移し、サーバー検証エラーを
+    既存の検証表示へ渡す。
 - `/workflows/:id/revisions/:revision_id/edit` — グラフエディタ（キャンバス）。
   - Node カタログ（Capability / Agent / Loop / Terminal）。
   - Node ごとの config 編集（schema 入力、Agent 選択、Loop 設定）。
@@ -654,6 +687,15 @@ Agent 指紋を含む。
 | `DELETE /api/v1/workflows/revisions/:revision_id` | draft / superseded Revision の削除（グラフ含む）。published は 409。参照する Run は残す。 |
 | `POST /api/v1/workflows/revisions/:revision_id/publish` | draft → published。 |
 | `POST /api/v1/workflows/revisions/:revision_id/validate` | 静的検証。 |
+| `GET /api/v1/workflows/revisions/:revision_id/export?format=json\|yaml` | 公開 Revision の定義を package v1 として返す。draft は 409。 |
+| `GET /api/v1/workflows/user-templates` | ユーザー Template 一覧（定義本体は含まない）。 |
+| `POST /api/v1/workflows/user-templates` | 公開 Revision から Template を作成。draft / 不在は拒否。 |
+| `GET /api/v1/workflows/user-templates/:template_id` | Template 詳細（定義 package を含む）。 |
+| `PUT /api/v1/workflows/user-templates/:template_id` | 名前・説明の更新、または公開 Revision のスナップショットで内容を置換。 |
+| `DELETE /api/v1/workflows/user-templates/:template_id` | Template 行のみ削除。生成済み Workflow / Run は変更しない。 |
+| `POST /api/v1/workflows/user-templates/:template_id/instantiate` | 新規 Workflow + draft Revision を作成し、検証結果を返す。 |
+| `GET /api/v1/workflows/user-templates/:template_id/export?format=json\|yaml` | Template の定義を package v1 として返す。 |
+| `POST /api/v1/workflows/import?format=json\|yaml` | 本文の package を新規 Workflow + draft Revision として取り込む。境界違反は 422 で無書込み。 |
 | `POST /api/v1/workflows/revisions/:revision_id/runs` | Run 作成。`inputs` を同梱して受領し、`inputs_schema` で検証する。`plan_required` Capability / Agent Node を含む場合は `waiting_approval` で原子的に作成する。 |
 | `GET /api/v1/workflows/runs/:run_id` | Run + Node 状態 + Events。 |
 | `POST /api/v1/workflows/runs/:run_id/approve` | 承認。`waiting_approval` → `queued`。 |
@@ -665,7 +707,7 @@ Agent 指紋を含む。
 
 ### 16.2 永続化
 
-SQLite に `PRAGMA user_version = 53` マイグレーションで追加する(`database.py`)。
+SQLite に `PRAGMA user_version = 53`（v59 まで拡張）マイグレーションで追加する(`database.py`)。
 
 ```text
 workflows
@@ -767,6 +809,16 @@ workflow_schedule_dispatches   -- v58
   created_at TEXT NOT NULL
   updated_at TEXT NOT NULL
   UNIQUE (source_kind, scheduler_job_id, scheduled_for)
+
+workflow_user_templates   -- v59
+  template_id TEXT PRIMARY KEY
+  name TEXT NOT NULL
+  description TEXT
+  source_workflow_id TEXT               -- 監査用。外部キーは持たない
+  source_revision_id TEXT               -- 監査用。外部キーは持たない
+  definition_json TEXT NOT NULL         -- definition package v1
+  created_at TEXT NOT NULL
+  updated_at TEXT NOT NULL
 
 one_shot_jobs（v58 で再構築）
   target_kind TEXT NOT NULL DEFAULT 'command'   -- command | workflow
@@ -912,6 +964,19 @@ one_shot_jobs（v58 で再構築）
 23. 改名・説明更新: `PATCH` で名前・説明を変更でき、空名は 422。削除: 非終端 Run または
     Scheduler Job 参照がある Workflow の `DELETE` は 409 で、定義・履歴を一切削除しない。
     条件を満たす `DELETE` は定義と実行履歴を削除し、以降 `GET` は 404 になる。
+24. User Template 保存: 公開 Revision からのみ作成でき、draft / 不在は拒否する。元 Workflow を
+    削除しても Template は利用できる。
+25. Template instantiate: 新規 Workflow + draft Revision を作成し、全 Node / Edge ID を新規採番する。
+    実行・公開・Scheduler 登録は自動で行わない。
+26. Template 内容更新: 同じ `template_id` の定義を新しい公開 Revision のスナップショットへ置換し、
+    過去に Template から作成した Workflow を変更しない。
+27. Template 削除: Template 行のみを削除し、そこから作成済みの Workflow / Revision / Run /
+    Scheduler Job を変更しない。
+28. export / import: 公開 Revision の export → import でグラフ構造・Schema・Loop・条件・参照が
+    保たれ、全 ID が新規採番される。package の未知 version・不正 YAML・サイズ超過・重複 ID・
+    不正参照は 422 で拒否し、DB に何も作成しない。
+29. import 再検証: import 先で Agent / Capability が解決不能な場合、draft と validation_errors
+    だけを作り、公開・Run 作成を拒否する。
 
 ## 20. MVP 対象外、将来拡張、未決事項、リスク
 
@@ -926,12 +991,12 @@ one_shot_jobs（v58 で再構築）
 - Workflow 独自の長期 Artifact ストア
 - 専用 launchd worker
 - 完了 / 失敗 / 承認待ちの外部通知（LINE / Push）
-- 定義の JSON / YAML インポート・エクスポート
+- zip / 一括 import / export、Template の版管理、既存 draft の置換 import
 
 ### 20.2 将来拡張（優先順位未定）
 
 1. 動的な日時入力テンプレートと、Workflow ごとの同時実行数制御。
-2. スターターテンプレートの JSON ファイル化と UI インポート。
+2. スターターテンプレートの JSON ファイル化と UI インポート（User Template の code 定義版）。
 3. Loop ネスト（子グラフ内に子 Loop）。
 4. Agent Node ごとの軽微な上書き（承認境界を含む ADR で検討）。
 5. 完了通知（軽量 outbox）。
@@ -959,7 +1024,7 @@ one_shot_jobs（v58 で再構築）
 
 ## 21. 関連文書・コード
 
-- [adr/workflow-graph-and-agent-node.md](adr/workflow-graph-and-agent-node.md) — 設計判断 ADR
+- [adr/workflow-graph-and-agent-node.md](adr/workflow-graph-and-agent-node.md) — 設計判断 ADR（User Template と定義 package の amendment を含む）
 - [adr/workflow-revision-deletion.md](adr/workflow-revision-deletion.md) — Revision 削除ポリシー
 - [adr/workflow-deletion.md](adr/workflow-deletion.md) — Workflow 本体削除ポリシー
 - [adr/workflow-independent-context-shared-foundation.md](adr/workflow-independent-context-shared-foundation.md) — 撤回された旧 ADR

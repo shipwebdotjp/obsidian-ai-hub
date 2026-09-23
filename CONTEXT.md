@@ -64,6 +64,8 @@
 | **Trace Event** | Taskの追記のみの監査記録。子run/HITLの参照と要約を持つ。 |
 | **リサーチ提案コンテキスト** | 直近の活動・既存テーマ・却下フィードバックを優先し、front matterと空テンプレートを除外したノート本文の有意味な抜粋を添えた読み取り情報群。 |
 | **リサーチテーマ候補登録** | `research_theme_propose` Capabilityにより最適なテーマをHITL提案候補として自動登録する操作。テーマ名ではなく Task ID を冪等キーとし、1 Task につき最大1件を登録する。 |
+| **User Template** | 公開済み Workflow Revision の定義を独立スナップショットとして保存した、ユーザー管理の再利用テンプレート。元 Workflow / Revision への外部キーを持たず、元 Workflow 削除後も利用できる。Template 利用は常に新規 Workflow の draft を作る。 |
+| **Workflow Definition Package** | Workflow 定義を JSON / YAML で移送する v1 形式。`format` / `version` / `name` / `description` / `inputs_schema` / `nodes` / `edges` のみを含み、ID・status・Run・Event・Scheduler 設定・秘密値を含まない。import は常に新規 draft を作り、現行 Capability / Agent で再検証する。 |
 
 ## 不変条件
 

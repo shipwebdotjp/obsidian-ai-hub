@@ -16,6 +16,7 @@ import {
 } from "../../constants/routes";
 import { formatDateTime } from "../../utils/date";
 import { getApiErrorMessage } from "../../utils/error";
+import UserTemplatesSection from "./UserTemplatesSection";
 
 export default function WorkflowsPage() {
   const navigate = useNavigate();
@@ -161,6 +162,7 @@ export default function WorkflowsPage() {
           </div>
         </section>
       )}
+      <UserTemplatesSection />
       <div className="flex-1 overflow-auto">
         {loading ? (
           <p className="p-4 text-sm text-slate-500">読み込み中…</p>

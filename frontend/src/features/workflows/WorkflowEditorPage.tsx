@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   getWorkflowRevision,
   listAgents,
@@ -87,6 +87,7 @@ function JsonArea({
 
 export default function WorkflowEditorPage() {
   const { revisionId = "" } = useParams();
+  const location = useLocation();
   const navigate = useNavigate();
   const [revision, setRevision] = useState<WorkflowRevision | null>(null);
   const [nodes, setNodes] = useState<WorkflowNode[]>([]);
@@ -108,7 +109,10 @@ export default function WorkflowEditorPage() {
   const [editingEdgeId, setEditingEdgeId] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [serverIssues, setServerIssues] = useState<string[]>([]);
+  const [serverIssues, setServerIssues] = useState<string[]>(
+    () =>
+      (location.state as { serverIssues?: string[] } | null)?.serverIssues ?? [],
+  );
   const [runInputs, setRunInputs] = useState<Record<string, unknown>>({});
   const [runErrors, setRunErrors] = useState<string[]>([]);
   const [dirty, setDirty] = useState(false);
@@ -245,6 +249,7 @@ export default function WorkflowEditorPage() {
       setRevision(updated);
       setDirty(false);
       setStatus("保存しました");
+      setServerIssues([]);
       return true;
     } catch (e) {
       setError(getApiErrorMessage(e, "保存に失敗しました"));

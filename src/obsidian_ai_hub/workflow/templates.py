@@ -9,16 +9,9 @@ publishing. See ``docs/workflow/specification.md`` §15 and §20.
 
 from __future__ import annotations
 
-import uuid
 from typing import Any
 
-from obsidian_ai_hub.workflow.models import remap_node_references
-
-_remap_value = remap_node_references
-
-
-def _new_id() -> str:
-    return str(uuid.uuid4())
+from obsidian_ai_hub.workflow.graph_copy import renumber_graph
 
 
 def _agent_node(
@@ -235,35 +228,6 @@ def get_template(template_key: str) -> dict[str, Any] | None:
 
 def build_graph(template: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Return freshly identified nodes/edges for one instantiation."""
-    id_map = {
-        str(node["node_id"]): _new_id() for node in template["nodes"]
-    }
-    nodes: list[dict[str, Any]] = []
-    for index, node in enumerate(template["nodes"]):
-        parent = node.get("parent_loop_node_id")
-        config = _remap_value(node.get("config") or {}, id_map)
-        if isinstance(config, dict) and config.get("entry_node_id") in id_map:
-            config["entry_node_id"] = id_map[config["entry_node_id"]]
-        nodes.append(
-            {
-                "node_id": id_map[str(node["node_id"])],
-                "node_type": node["node_type"],
-                "label": node.get("label"),
-                "config": config,
-                "parent_loop_node_id": id_map[parent] if parent in id_map else None,
-                "ui_position": node.get("ui_position")
-                or {"x": 40 + (index % 4) * 220, "y": 40 + (index // 4) * 120},
-            }
-        )
-    edges = [
-        {
-            "edge_id": _new_id(),
-            "source_node_id": id_map[str(edge["source_node_id"])],
-            "target_node_id": id_map[str(edge["target_node_id"])],
-            "edge_kind": edge.get("edge_kind") or "normal",
-            "condition": _remap_value(edge.get("condition"), id_map),
-            "order_index": int(edge.get("order_index") or 0),
-        }
-        for edge in template["edges"]
-    ]
-    return nodes, edges
+    return renumber_graph(
+        template["nodes"], template["edges"], default_positions=True
+    )

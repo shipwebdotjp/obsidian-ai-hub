@@ -18,6 +18,7 @@
 - [Workflow 文書群](../docs/workflow/README.md)（人間が GUI で設計する Node/Edge グラフ。制御は決定的、Agent Node 出力は JSON Schema で検証）
   - [エディタのガイド型フォーム（自前スキーマフォーム）](../docs/workflow/adr/workflow-editor-guided-forms.md)（ADR）
   - [Workflow 本体削除ポリシー（非終端 Run・Scheduler 参照を拒否）](../docs/workflow/adr/workflow-deletion.md)（ADR）
+  - [User Template と Workflow Definition Package（独立スナップショット・公開 Revision 限定・新規 draft import）](../docs/workflow/adr/workflow-graph-and-agent-node.md#amendment-user-template-と-workflow-definition-package)（ADR amendment）
 
 ## 開発ガイド
 

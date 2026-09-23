@@ -4,19 +4,27 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createWorkflowRevision,
+  createWorkflowUserTemplate,
   deleteWorkflow,
   deleteWorkflowRevision,
+  exportWorkflowRevision,
   getWorkflow,
+  listWorkflowUserTemplates,
   updateWorkflow,
+  updateWorkflowUserTemplate,
 } from "../../api/client";
 import WorkflowDetailPage from "./WorkflowDetailPage";
 
 vi.mock("../../api/client", () => ({
   createWorkflowRevision: vi.fn(),
+  createWorkflowUserTemplate: vi.fn(),
   deleteWorkflow: vi.fn(),
   deleteWorkflowRevision: vi.fn(),
+  exportWorkflowRevision: vi.fn(),
   getWorkflow: vi.fn(),
+  listWorkflowUserTemplates: vi.fn(),
   updateWorkflow: vi.fn(),
+  updateWorkflowUserTemplate: vi.fn(),
 }));
 
 const mockGetWorkflow = vi.mocked(getWorkflow);
@@ -24,6 +32,10 @@ const mockCreateWorkflowRevision = vi.mocked(createWorkflowRevision);
 const mockDeleteWorkflowRevision = vi.mocked(deleteWorkflowRevision);
 const mockUpdateWorkflow = vi.mocked(updateWorkflow);
 const mockDeleteWorkflow = vi.mocked(deleteWorkflow);
+const mockCreateWorkflowUserTemplate = vi.mocked(createWorkflowUserTemplate);
+const mockUpdateWorkflowUserTemplate = vi.mocked(updateWorkflowUserTemplate);
+const mockExportWorkflowRevision = vi.mocked(exportWorkflowRevision);
+const mockListWorkflowUserTemplates = vi.mocked(listWorkflowUserTemplates);
 
 const sampleWorkflow = {
   workflow_id: "wf_1",
@@ -50,6 +62,9 @@ function renderPage() {
 beforeEach(() => {
   vi.clearAllMocks();
   vi.spyOn(window, "confirm").mockReturnValue(true);
+  (URL as any).createObjectURL = vi.fn(() => "blob:mock");
+  (URL as any).revokeObjectURL = vi.fn();
+  vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
   mockGetWorkflow.mockResolvedValue(sampleWorkflow as any);
   mockCreateWorkflowRevision.mockResolvedValue({} as any);
   mockDeleteWorkflowRevision.mockResolvedValue({
@@ -58,6 +73,10 @@ beforeEach(() => {
   });
   mockUpdateWorkflow.mockResolvedValue(sampleWorkflow as any);
   mockDeleteWorkflow.mockResolvedValue({ success: true, workflow_id: "wf_1" });
+  mockCreateWorkflowUserTemplate.mockResolvedValue({} as any);
+  mockUpdateWorkflowUserTemplate.mockResolvedValue({} as any);
+  mockExportWorkflowRevision.mockResolvedValue("{}");
+  mockListWorkflowUserTemplates.mockResolvedValue({ items: [] });
 });
 
 describe("WorkflowDetailPage revision delete", () => {
@@ -132,5 +151,61 @@ describe("WorkflowDetailPage workflow update/delete", () => {
     await user.click(screen.getByRole("button", { name: "Workflow を削除" }));
     expect(window.confirm).toHaveBeenCalled();
     expect(mockDeleteWorkflow).not.toHaveBeenCalled();
+  });
+});
+
+describe("WorkflowDetailPage published revision actions", () => {
+  it("saves a published revision as a user template", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText("テストワークフロー");
+    await user.click(screen.getByRole("button", { name: "Template 保存" }));
+    await waitFor(() =>
+      expect(mockCreateWorkflowUserTemplate).toHaveBeenCalledWith({
+        source_revision_id: "wrev_published",
+        name: "テストワークフロー",
+        description: "説明",
+      }),
+    );
+  });
+
+  it("downloads a published revision as JSON", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText("テストワークフロー");
+    await user.click(screen.getAllByRole("button", { name: "JSON" })[0]);
+    await waitFor(() =>
+      expect(mockExportWorkflowRevision).toHaveBeenCalledWith(
+        "wrev_published",
+        "json",
+      ),
+    );
+  });
+
+  it("updates an existing template's content from a published revision", async () => {
+    mockListWorkflowUserTemplates.mockResolvedValue({
+      items: [
+        {
+          template_id: "wtpl_1",
+          name: "既存テンプレート",
+          description: "",
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-01T00:00:00Z",
+        },
+      ],
+    });
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText("テストワークフロー");
+    await user.selectOptions(
+      screen.getByLabelText("更新するユーザーテンプレート"),
+      "wtpl_1",
+    );
+    await user.click(screen.getByRole("button", { name: "内容を更新" }));
+    await waitFor(() =>
+      expect(mockUpdateWorkflowUserTemplate).toHaveBeenCalledWith("wtpl_1", {
+        source_revision_id: "wrev_published",
+      }),
+    );
   });
 });

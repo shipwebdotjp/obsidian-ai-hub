@@ -16,11 +16,11 @@ from typing import Any, Generator, Optional
 
 from obsidian_ai_hub.database import get_db_connection
 from obsidian_ai_hub.tasks.redaction import redact_text
+from obsidian_ai_hub.workflow.graph_copy import renumber_graph
 from obsidian_ai_hub.workflow.models import (
     NODE_TERMINAL_STATUSES,
     RUN_ALLOWED_TRANSITIONS,
     RUN_TERMINAL_STATUSES,
-    remap_node_references,
 )
 
 RETENTION_DAYS = 30
@@ -387,35 +387,7 @@ def _clone_graph(
     nodes: list[dict[str, Any]], edges: list[dict[str, Any]]
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Deep-copy a graph with fresh node/edge ids and rewritten references."""
-    id_map = {str(node["node_id"]): _new_uuid() for node in nodes}
-    cloned_nodes: list[dict[str, Any]] = []
-    for node in nodes:
-        parent = node.get("parent_loop_node_id")
-        config = remap_node_references(node.get("config") or {}, id_map)
-        if isinstance(config, dict) and config.get("entry_node_id") in id_map:
-            config["entry_node_id"] = id_map[config["entry_node_id"]]
-        cloned_nodes.append(
-            {
-                "node_id": id_map[str(node["node_id"])],
-                "node_type": node["node_type"],
-                "label": node.get("label"),
-                "config": config,
-                "parent_loop_node_id": id_map.get(str(parent)) if parent else None,
-                "ui_position": node.get("ui_position"),
-            }
-        )
-    cloned_edges = [
-        {
-            "edge_id": _new_uuid(),
-            "source_node_id": id_map[str(edge["source_node_id"])],
-            "target_node_id": id_map[str(edge["target_node_id"])],
-            "edge_kind": edge.get("edge_kind") or "normal",
-            "condition": remap_node_references(edge.get("condition"), id_map),
-            "order_index": int(edge.get("order_index") or 0),
-        }
-        for edge in edges
-    ]
-    return cloned_nodes, cloned_edges
+    return renumber_graph(nodes, edges)
 
 
 def _insert_graph(
@@ -610,6 +582,47 @@ def set_revision_graph(
                 _do()
         else:
             _do()
+
+
+def create_workflow_from_graph(
+    name: str,
+    description: str,
+    inputs_schema: dict[str, Any],
+    nodes: list[dict[str, Any]],
+    edges: list[dict[str, Any]],
+    *,
+    conn: Optional[sqlite3.Connection] = None,
+) -> dict[str, Any]:
+    """Create a workflow and fill its initial draft with the given graph.
+
+    Used by definition-package import and user-template instantiation. The
+    caller owns id renumbering; this only persists the graph as a new draft.
+    When no connection is supplied, workflow creation and graph insertion run
+    in a single transaction so a failure never leaves an empty draft behind.
+    """
+    with auto_connection(conn) as (active_conn, is_generated):
+        created_id: str | None = None
+
+        def _do() -> None:
+            nonlocal created_id
+            workflow = create_workflow(
+                name, description, inputs_schema=inputs_schema, conn=active_conn
+            )
+            created_id = str(workflow["workflow_id"])
+            revision = workflow["revision"]
+            set_revision_graph(
+                revision["revision_id"], nodes, edges, conn=active_conn
+            )
+
+        if is_generated:
+            with active_conn:
+                _do()
+        else:
+            _do()
+    created = get_workflow(str(created_id), conn=conn)
+    assert created is not None
+    created["revision"] = get_latest_revision(str(created_id), conn=conn)
+    return created
 
 
 def publish_revision(

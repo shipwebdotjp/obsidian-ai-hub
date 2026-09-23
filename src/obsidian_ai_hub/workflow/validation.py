@@ -13,6 +13,7 @@ from typing import Any, Callable, Optional
 
 from obsidian_ai_hub.workflow.models import (
     EDGE_KINDS,
+    MAX_EDGES,
     MAX_ITERATIONS,
     MAX_NODES,
     NODE_TYPES,
@@ -188,6 +189,8 @@ def validate_graph(
     errors: list[str] = []
     if len(nodes) > MAX_NODES:
         errors.append(f"Node 数が上限 {MAX_NODES} を超えています")
+    if len(edges) > MAX_EDGES:
+        errors.append(f"Edge 数が上限 {MAX_EDGES} を超えています")
 
     node_ids: set[str] = set()
     by_id: dict[str, dict[str, Any]] = {}

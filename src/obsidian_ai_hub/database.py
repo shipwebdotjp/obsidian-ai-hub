@@ -733,6 +733,9 @@ def get_db_connection() -> sqlite3.Connection:
     if current_version <= 57:
         run_migration_v58(conn)
 
+    if current_version <= 58:
+        run_migration_v59(conn)
+
     return conn
 
 
@@ -1134,6 +1137,31 @@ def run_migration_v58(conn: sqlite3.Connection) -> None:
         " ON one_shot_jobs(finished_at);"
     )
     conn.execute("PRAGMA user_version = 58;")
+    conn.commit()
+
+
+def run_migration_v59(conn: sqlite3.Connection) -> None:
+    """Run migration for version 59 (user workflow templates).
+
+    Adds ``workflow_user_templates``: an independent snapshot of a published
+    revision's definition (``docs/workflow/specification.md`` §16.2). There is
+    no foreign key to the source workflow/revision so a template stays usable
+    after the origin is deleted; ``definition_json`` holds a definition package
+    v1 (graph-local ids, renumbered on instantiation).
+    """
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS workflow_user_templates (
+            template_id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            description TEXT,
+            source_workflow_id TEXT,
+            source_revision_id TEXT,
+            definition_json TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+    """)
+    conn.execute("PRAGMA user_version = 59;")
     conn.commit()
 
 

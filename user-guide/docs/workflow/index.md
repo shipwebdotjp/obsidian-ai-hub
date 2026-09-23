@@ -25,7 +25,9 @@ title: ワークフローの概要
 | 操作 | 場所 |
 | --- | --- |
 | 一覧・新規作成・テンプレートから作成 | [`/workflows`](/reference/web-ui-map) |
+| ユーザーテンプレートの利用・編集・削除・import / export | `/workflows`（ユーザーテンプレート領域） |
 | Revision 履歴・最近の Run | `/workflows/:workflowId` |
+| 公開 Revision の Template 保存・JSON / YAML export | `/workflows/:workflowId` |
 | グラフエディタ | `/workflows/revisions/:revisionId/edit` |
 | Run 詳細 | `/workflows/runs/:runId` |
 

@@ -217,6 +217,52 @@ Scheduler Job の実行対象に「公開 Workflow」を第一級として加え
 運用は `docs/development-quality-playbook.md` に従い、隔離 backend + fake Capability の縦断
 結合テストで「承認前に副作用 0 回」「二重 Run なし」を反証可能にする。
 
+## Amendment (User Template と Workflow Definition Package)
+
+Status: Accepted (2026-09-23)。
+
+公開済み Revision を再利用可能な User Template として保存し、公開 Revision と User Template の
+両方を JSON / YAML でバックアップ・共有できるようにする。
+
+### 決定
+
+- **Template は元 Workflow への参照ではなく、公開 Revision の独立した定義スナップショットとする。**
+  `workflow_user_templates` は `template_id`、名前・説明、作成元 Workflow / Revision の監査用 ID、
+  定義スナップショット、作成・更新日時を持つ。作成元への外部キーは持たず、元 Workflow の削除後も
+  Template は利用できる。Template 内の版履歴は持たない。
+- **Template は公開済み Revision からのみ作成・内容更新できる。** 更新は同じ `template_id` の定義を
+  新しい公開 Revision のスナップショットへ置換し、過去に Template から作成した Workflow には
+  影響しない。
+- **import は常に新しい Workflow の draft を作り、既存 Workflow / Revision / Run を変更しない。**
+  既存 draft の置換 import は行わない。
+- **Workflow Definition Package v1 は `format` / `version` / `name` / `description` /
+  `inputs_schema` / `nodes` / `edges` のみを含む。** Workflow / Revision / Template ID、status、
+  Run、Event、Scheduler 設定は含めない。Node / Edge ID は package 内のグラフ接続・参照解決に
+  だけ使い、import / instantiate 時にすべて新規 ID へ採番し、`$ref`、Loop の `entry_node_id`、
+  親 Loop、Edge 条件も一貫して書き換える。Revision 複製とコード定義 Template の ID 再採番は
+  共通 helper に統合する。
+- **import 境界では安全な YAML parse、package version、許可キー、型、ファイルサイズ、
+  Node / Edge 上限、ID 一意性、graph-local 参照整合を検証する。** 違反は 422 で停止し、
+  DB に何も作成しない。
+- **graph の意味検証は import / instantiate 後に現行の `validate_graph` で行う。** 作成した draft と
+  validation_errors を返し、未知 Capability / Agent などは公開不可のままエディタで修正できる。
+- **import・Template 作成・Template 利用では実行・公開・Scheduler 登録を自動で行わない。**
+- **既存のコード定義 Template API（`/workflows/templates`, `/workflows/from-template`）は変更せず、
+  ユーザー Template API と明確に分離する。**
+
+### 操作シナリオ契約（不可逆操作: import / instantiate の DB 書込み、export の外部送信）
+
+| 段階 | 正本・ID | 永続化 | 停止・削除時 |
+| --- | --- | --- | --- |
+| Template 保存 | published `revision_id` | `template_id` と定義 snapshot | draft / 不在 Revision は拒否 |
+| import | package v1 の graph-local ID | 新規 `workflow_id` / draft Revision | 形式・上限違反は DB 書込みなし |
+| 再検証 | 現行 Capability / Agent | draft と検証結果 | エラー時も公開・実行しない |
+| Template 削除 | `template_id` | Template 行のみ削除 | 作成済み Workflow / Run は不変 |
+
+運用は `docs/development-quality-playbook.md` に従い、export → import → delete の縦断結合テストで
+「境界違反時に DB 書込み 0 件」「全 ID 再採番」「Template 削除が生成済み Workflow に影響しない」を
+反証可能にする。
+
 ## 関連文書
 
 - [workflow-independent-context-shared-foundation.md](workflow-independent-context-shared-foundation.md) — 撤回された初期 ADR

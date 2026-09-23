@@ -11,14 +11,18 @@ import asyncio
 import logging
 import sqlite3
 from typing import Any, Optional
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
-from fastapi.responses import StreamingResponse
+from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from obsidian_ai_hub.tasks.execution import CANCEL_CERTAINTY_COMPLETED
 from obsidian_ai_hub.web.routes.deps import require_bearer_token
 from obsidian_ai_hub.workflow import store as workflow_store
+from obsidian_ai_hub.workflow import user_templates as workflow_user_templates
+from obsidian_ai_hub.workflow import definition_package as workflow_package
 from obsidian_ai_hub.workflow.execution import (
     ATTENTION_REASON_CANCEL_COMPLETED,
     ATTENTION_REASON_CANCEL_UNKNOWN,
@@ -39,6 +43,7 @@ from obsidian_ai_hub.workflow.models import (
 )
 from obsidian_ai_hub.workflow import scheduling as workflow_scheduling
 from obsidian_ai_hub.workflow import templates as workflow_templates
+from obsidian_ai_hub.workflow.graph_copy import renumber_graph
 from obsidian_ai_hub.workflow.validation import validate_graph
 
 _logger = logging.getLogger(__name__)
@@ -148,6 +153,161 @@ def create_from_template(payload: WorkflowFromTemplate) -> dict[str, Any]:
     workflow_store.set_revision_graph(revision["revision_id"], nodes, edges)
     workflow["revision"] = workflow_store.get_revision(revision["revision_id"])
     return workflow
+
+
+class UserTemplateCreate(BaseModel):
+    source_revision_id: str = Field(min_length=1)
+    name: Optional[str] = None
+    description: Optional[str] = None
+
+
+class UserTemplateUpdate(BaseModel):
+    source_revision_id: Optional[str] = None
+    name: Optional[str] = None
+    description: Optional[str] = None
+
+
+class UserTemplateInstantiate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+
+
+def _safe_filename(name: str) -> str:
+    cleaned = "".join(
+        ch if (ch.isascii() and (ch.isalnum() or ch in ("-", "_", "."))) else "-"
+        for ch in (name or "").strip()
+    ).strip("-")
+    return cleaned or "workflow-definition"
+
+
+def _package_response(text: str, fmt: str, filename: str) -> Response:
+    media_type = "application/json" if fmt == "json" else "application/x-yaml"
+    disposition = (
+        f'attachment; filename="{_safe_filename(filename)}"; '
+        f"filename*=UTF-8''{quote(filename, safe='')}"
+    )
+    return Response(
+        content=text,
+        media_type=media_type,
+        headers={"Content-Disposition": disposition},
+    )
+
+
+def _import_result(workflow: dict[str, Any]) -> dict[str, Any]:
+    revision = workflow["revision"]
+    return {
+        "workflow": workflow,
+        "revision": revision,
+        "validation_errors": _validate_revision(revision),
+    }
+
+
+@router.get("/user-templates")
+def list_user_templates() -> dict[str, Any]:
+    return {"items": workflow_user_templates.list_user_templates()}
+
+
+@router.post("/user-templates", status_code=201)
+def create_user_template(payload: UserTemplateCreate) -> dict[str, Any]:
+    try:
+        return workflow_user_templates.create_user_template(
+            payload.source_revision_id, payload.name, payload.description
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.get("/user-templates/{template_id}")
+def get_user_template(template_id: str) -> dict[str, Any]:
+    template = workflow_user_templates.get_user_template(template_id)
+    if template is None:
+        raise HTTPException(status_code=404, detail="template not found")
+    return template
+
+
+@router.put("/user-templates/{template_id}")
+def update_user_template(
+    template_id: str, payload: UserTemplateUpdate
+) -> dict[str, Any]:
+    try:
+        return workflow_user_templates.update_user_template(
+            template_id,
+            source_revision_id=payload.source_revision_id,
+            name=payload.name,
+            description=payload.description,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.delete("/user-templates/{template_id}")
+def delete_user_template(template_id: str) -> dict[str, Any]:
+    try:
+        workflow_user_templates.delete_user_template(template_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"success": True, "template_id": template_id}
+
+
+@router.post("/user-templates/{template_id}/instantiate", status_code=201)
+def instantiate_user_template(
+    template_id: str, payload: UserTemplateInstantiate
+) -> dict[str, Any]:
+    try:
+        workflow = workflow_user_templates.instantiate_user_template(
+            template_id, payload.name, payload.description
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return _import_result(workflow)
+
+
+@router.get("/user-templates/{template_id}/export")
+def export_user_template(
+    template_id: str, format: str = Query("json", pattern="^(json|yaml)$")
+) -> Response:
+    template = workflow_user_templates.get_user_template(template_id)
+    if template is None:
+        raise HTTPException(status_code=404, detail="template not found")
+    text = workflow_package.serialize_package(template["definition"], format)
+    filename = f"{template['name']}.{format}"
+    return _package_response(text, format, filename)
+
+
+@router.post("/import", status_code=201)
+async def import_workflow(
+    request: Request, format: str = Query("json", pattern="^(json|yaml)$")
+) -> dict[str, Any]:
+    """Import a definition package as a new workflow + draft revision.
+
+    Structural boundary violations stop with 422 before any DB write. A package
+    that parses but fails graph validation still creates the draft so the user
+    can fix it in the editor (it is never published or run automatically).
+    The SQLite work is offloaded so the event loop is not blocked.
+    """
+    raw = await request.body()
+    return await run_in_threadpool(_import_definition_package, raw, format)
+
+
+def _import_definition_package(raw: bytes, format: str) -> dict[str, Any]:
+    try:
+        package = workflow_package.parse_package(raw, format)
+    except workflow_package.DefinitionPackageError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    nodes, edges = workflow_package.package_to_graph(package)
+    new_nodes, new_edges = renumber_graph(nodes, edges)
+    workflow = workflow_store.create_workflow_from_graph(
+        package["name"],
+        package["description"],
+        package["inputs_schema"],
+        new_nodes,
+        new_edges,
+    )
+    return _import_result(workflow)
 
 
 @router.get("/capabilities")
@@ -314,6 +474,33 @@ def get_revision(revision_id: str) -> dict[str, Any]:
     if revision is None:
         raise HTTPException(status_code=404, detail="revision not found")
     return revision
+
+
+@router.get("/revisions/{revision_id}/export")
+def export_revision(
+    revision_id: str, format: str = Query("json", pattern="^(json|yaml)$")
+) -> Response:
+    """Export a published revision's definition as a package (draft rejected)."""
+    revision = workflow_store.get_revision(revision_id)
+    if revision is None:
+        raise HTTPException(status_code=404, detail="revision not found")
+    if str(revision["status"]) != "published":
+        raise HTTPException(
+            status_code=409,
+            detail="Only a published revision can be exported.",
+        )
+    workflow = workflow_store.get_workflow(str(revision["workflow_id"]))
+    assert workflow is not None
+    package = workflow_package.build_package(
+        str(workflow["name"]),
+        str(workflow.get("description") or ""),
+        revision.get("inputs_schema") or {"type": "object"},
+        revision.get("nodes") or [],
+        revision.get("edges") or [],
+    )
+    text = workflow_package.serialize_package(package, format)
+    filename = f"{workflow['name']}-v{revision.get('version')}.{format}"
+    return _package_response(text, format, filename)
 
 
 @router.put("/revisions/{revision_id}")

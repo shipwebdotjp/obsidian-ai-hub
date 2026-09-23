@@ -1340,3 +1340,29 @@ export interface WorkflowTemplate {
 export interface WorkflowTemplateListResponse {
   items: WorkflowTemplate[];
 }
+
+export type WorkflowDefinitionFormat = "json" | "yaml";
+
+export interface WorkflowUserTemplate {
+  template_id: string;
+  name: string;
+  description: string;
+  source_workflow_id?: string | null;
+  source_revision_id?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WorkflowUserTemplateDetail extends WorkflowUserTemplate {
+  definition: Record<string, unknown>;
+}
+
+export interface WorkflowUserTemplateListResponse {
+  items: WorkflowUserTemplate[];
+}
+
+export interface WorkflowImportResponse {
+  workflow: WorkflowDetail;
+  revision: WorkflowRevision;
+  validation_errors: string[];
+}

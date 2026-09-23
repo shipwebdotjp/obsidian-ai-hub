@@ -10,6 +10,7 @@ title: 制約とトラブルシューティング
 | 項目 | 制限 |
 | --- | --- |
 | Revision あたりの Node 数 | 最大 **30** |
+| Revision あたりの Edge 数 | 最大 **60** |
 | Loop の `max_iterations` | **1〜50** |
 | Loop のネスト | 不可 |
 | 通常 Edge の循環 | 不可 |
@@ -17,9 +18,23 @@ title: 制約とトラブルシューティング
 | 任意コード Node | 不可 |
 | Agent Node ごとの prompt / model / tool 上書き | 不可 |
 | Workflow 全体のタイムアウト | なし（各 Capability / 子 Run のタイムアウトに従う） |
-| 定義の JSON / YAML インポート・エクスポート | 不可 |
+| 定義 package の形式 | JSON / YAML の v1 のみ（zip・一括 import / export は不可） |
+| 定義 package のサイズ | 最大 1 MiB |
 | Workflow ごとの同時実行数制御 | 不可（発火ごとに Run を作成） |
 | 承認待ち Run の自動失効・抑止 | 不可（人間が取消・無効化） |
+
+### ユーザーテンプレートと import / export の制約
+
+- Template は**公開済み Revision からのみ**作成・内容更新できます。draft は対象外です。
+- Template 利用（instantiate）と import は、常に**新しい Workflow の下書き**を作ります。
+  実行・公開・Scheduler 登録は自動では行いません。
+- import は現在の環境の Capability / Agent で再検証されます。未知の Capability / Agent があると
+  下書きと検証エラーが作られ、そのままでは公開できません。
+- package の形式違反（未知 version・不正 YAML・サイズ超過・重複 ID・不正参照）は拒否され、
+  DB には何も作られません。
+- package には実行履歴・Scheduler 設定・秘密値は含まれません。秘密値を定義に書かないでください。
+- Template の削除は Template 行だけを消し、そこから作成済みの Workflow・Run・Scheduler Job は
+  変更しません。
 
 ### JSON Schema のサブセット
 

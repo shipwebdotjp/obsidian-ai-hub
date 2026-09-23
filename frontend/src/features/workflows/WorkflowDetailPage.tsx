@@ -2,12 +2,16 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   createWorkflowRevision,
+  createWorkflowUserTemplate,
   deleteWorkflow,
   deleteWorkflowRevision,
+  exportWorkflowRevision,
   getWorkflow,
+  listWorkflowUserTemplates,
   updateWorkflow,
+  updateWorkflowUserTemplate,
 } from "../../api/client";
-import type { WorkflowDetail } from "../../api/types";
+import type { WorkflowDefinitionFormat, WorkflowDetail, WorkflowUserTemplate } from "../../api/types";
 import {
   ROUTES,
   workflowEditPath,
@@ -15,6 +19,7 @@ import {
 } from "../../constants/routes";
 import { formatDateTime } from "../../utils/date";
 import { getApiErrorMessage } from "../../utils/error";
+import { downloadDefinition, safeDefinitionFilename } from "./definitionDownload";
 import { REVISION_STATUS_LABEL } from "./revisionLabels";
 import { runStatusLabel } from "./runStatusLabels";
 
@@ -23,10 +28,13 @@ export default function WorkflowDetailPage() {
   const navigate = useNavigate();
   const [workflow, setWorkflow] = useState<WorkflowDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
   const [descriptionDraft, setDescriptionDraft] = useState("");
+  const [userTemplates, setUserTemplates] = useState<WorkflowUserTemplate[]>([]);
+  const [selectedTemplateId, setSelectedTemplateId] = useState("");
 
   const reload = useCallback(async () => {
     setError(null);
@@ -40,6 +48,20 @@ export default function WorkflowDetailPage() {
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  useEffect(() => {
+    let cancelled = false;
+    listWorkflowUserTemplates()
+      .then((res) => {
+        if (!cancelled) setUserTemplates(res.items);
+      })
+      .catch(() => {
+        // The template picker is optional; the page still works without it.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const startEditing = () => {
     setNameDraft(workflow?.name ?? "");
@@ -112,6 +134,75 @@ export default function WorkflowDetailPage() {
       await reload();
     } catch (e) {
       setError(getApiErrorMessage(e, "Revision 削除に失敗しました"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onSaveAsTemplate = async (revisionId: string) => {
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const created = await createWorkflowUserTemplate({
+        source_revision_id: revisionId,
+        name: workflow?.name,
+        description: workflow?.description,
+      });
+      setUserTemplates((prev) => [created, ...prev]);
+      setNotice("テンプレートとして保存しました");
+    } catch (e) {
+      setError(getApiErrorMessage(e, "テンプレートの保存に失敗しました"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onUpdateTemplate = async (revisionId: string) => {
+    if (!selectedTemplateId) return;
+    const target = userTemplates.find(
+      (template) => template.template_id === selectedTemplateId,
+    );
+    if (
+      !window.confirm(
+        `テンプレート「${target?.name ?? selectedTemplateId}」の内容を` +
+          "この公開 Revision の定義で置き換えますか？" +
+          "過去にこのテンプレートから作成したワークフローは変更されません。",
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await updateWorkflowUserTemplate(selectedTemplateId, {
+        source_revision_id: revisionId,
+      });
+      setNotice("テンプレートの内容を更新しました");
+    } catch (e) {
+      setError(getApiErrorMessage(e, "テンプレートの更新に失敗しました"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onDownloadRevision = async (
+    revisionId: string,
+    format: WorkflowDefinitionFormat,
+  ) => {
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const text = await exportWorkflowRevision(revisionId, format);
+      downloadDefinition(
+        `${safeDefinitionFilename(workflow?.name ?? "")}.${format}`,
+        text,
+        format,
+      );
+    } catch (e) {
+      setError(getApiErrorMessage(e, "ダウンロードに失敗しました"));
     } finally {
       setBusy(false);
     }
@@ -200,6 +291,7 @@ export default function WorkflowDetailPage() {
           )}
         </div>
         {error && <p className="mt-2 text-xs text-rose-700">{error}</p>}
+        {notice && <p className="mt-2 text-xs text-emerald-700">{notice}</p>}
       </header>
 
       <section className="px-4 py-3">
@@ -214,7 +306,7 @@ export default function WorkflowDetailPage() {
                 v{revision.version} ・{" "}
                 {REVISION_STATUS_LABEL[revision.status] ?? revision.status}
               </span>
-              <span className="flex items-center gap-2">
+              <span className="flex flex-wrap items-center gap-2">
                 {revision.status === "draft" ? (
                   <Link
                     className="text-blue-700"
@@ -224,6 +316,56 @@ export default function WorkflowDetailPage() {
                   </Link>
                 ) : (
                   <span className="text-slate-400">編集不可</span>
+                )}
+                {revision.status === "published" && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => onSaveAsTemplate(revision.revision_id)}
+                      disabled={busy}
+                      className="cursor-pointer rounded bg-emerald-600 px-2 py-0.5 text-xs text-white disabled:opacity-50"
+                    >
+                      Template 保存
+                    </button>
+                    <select
+                      aria-label="更新するユーザーテンプレート"
+                      className="rounded border border-slate-300 px-1 py-0.5 text-xs"
+                      value={selectedTemplateId}
+                      onChange={(event) => setSelectedTemplateId(event.target.value)}
+                      disabled={busy || userTemplates.length === 0}
+                    >
+                      <option value="">テンプレート選択</option>
+                      {userTemplates.map((template) => (
+                        <option key={template.template_id} value={template.template_id}>
+                          {template.name}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => onUpdateTemplate(revision.revision_id)}
+                      disabled={busy || !selectedTemplateId}
+                      className="cursor-pointer rounded bg-amber-600 px-2 py-0.5 text-xs text-white disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      内容を更新
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onDownloadRevision(revision.revision_id, "json")}
+                      disabled={busy}
+                      className="cursor-pointer rounded border border-slate-300 px-2 py-0.5 text-xs hover:bg-slate-50 disabled:opacity-50"
+                    >
+                      JSON
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onDownloadRevision(revision.revision_id, "yaml")}
+                      disabled={busy}
+                      className="cursor-pointer rounded border border-slate-300 px-2 py-0.5 text-xs hover:bg-slate-50 disabled:opacity-50"
+                    >
+                      YAML
+                    </button>
+                  </>
                 )}
                 {revision.status !== "published" && (
                   <button
