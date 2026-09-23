@@ -40,6 +40,9 @@ Agent Node の LLM 出力は確率的で、JSON Schema によって検証・型�
 | **Activation** | ある Node が、ある Loop 反復・経路で論理的に 1 回起動された単位の永続 UUID。 |
 | **InvocationContext** | Capability Adapter 実行時に渡される実行文脈（run_id, node_id, activation_id 等）。 |
 | **型付き参照** | `run.inputs.*` / `nodes.<node_id>.output.*` / `loop.state.*` の形式で値を参照する仕組み。 |
+| **値パイプライン** | `$ref` に付ける `pipe` 演算子列。参照値を入力境界で加工する（§3.7）。 |
+| **日時式** | `$expr`（`kind: date_math`）。Run の基準時刻から相対日時を生成する（§3.6）。 |
+| **Text Template Node** | `inputs` と Jinja2 `template` から文章を組み立てる純粋 Node（§3.8）。 |
 | **Effect** | Capability が成功時に成立させる検査可能な事後条件。 |
 
 ### 1.3 スコープ
@@ -58,7 +61,7 @@ JSON / YAML export / import（import は常に新規 draft を作成）。
 Agent Node ごとの prompt/model/tool 上書き、$ref/oneOf/再帰を含む JSON Schema、Workflow 独自の
 長期 Artifact ストア、専用 worker、完了通知外部入口、zip / 一括 import / export、
 Template の版管理、既存 draft の置換 import、
-Workflow ごとの同時実行数制御、承認待ち Run の抑止・自動失効、動的な日時入力テンプレート。
+Workflow ごとの同時実行数制御、承認待ち Run の抑止・自動失効、非秘密の環境設定参照。
 
 ## 2. 主要ユースケースと操作シナリオ
 
@@ -320,6 +323,70 @@ Node 間のデータ連携は文字列テンプレート展開ではなく、以
   （Node 出力・Loop 状態は参照できない）。
 - JSON Schema に `format: "date"` / `"date-time"` を追加し、anchor と `result` の型検証に使う。
 
+### 3.7 値パイプライン `pipe`
+
+`$ref` には任意で `pipe` を付けられ、参照先の値を入力境界で加工できる。`$ref` を使える値の
+位置（Capability / Agent `inputs`、Loop `input_mapping`、Loop Result `output_mapping`、Run 入力
+以外の値位置、`text_template.inputs`）で使える。
+
+```json
+{
+  "$ref": "nodes.<node_id>.output.events",
+  "pipe": [
+    { "op": "slice", "args": { "limit": 5 } },
+    { "op": "pluck", "args": { "key": "title" } },
+    { "op": "join", "args": { "sep": "\n" } },
+    { "op": "truncate", "args": { "max_len": 500 } }
+  ]
+}
+```
+
+許可キーは `$ref` と `pipe` のみ。`pipe` は 1〜`MAX_PIPE_OPS`（20）個の演算子列で、左から順に
+適用する。演算子ごとの入出力型は次のとおり。
+
+| op | 入力型 | args | 出力 |
+| --- | --- | --- | --- |
+| `upper` / `lower` | string | なし | string |
+| `truncate` | string | `max_len` int≥0 | string（文字数、省略記号なし） |
+| `slice` | string / array | `limit` int≥0、`offset` int≥0（既定 0） | 入力と同型 |
+| `replace` | string | `frm` str（必須）、`to` str（既定 ""） | string |
+| `pluck` | array\<object\> | `key` str（必須） | array\<any\> |
+| `join` | array | `sep` str（既定 ""） | string |
+| `default` | any | `value` any（必須） | 対象時 `value` |
+
+- `join` の要素文字列化は、string はそのまま、数値は `str()`、bool は `"true"`/`"false"`、
+  `null` は `""`、object / array は compact JSON。
+- `default` は `null` / 空文字列 / 空配列を `value` に置換する（`0` / `false` は対象外）。
+- `pipe` の args に `$ref` / `$expr` をネストすることはできない。
+- `$expr` に `pipe` は付けられない。日時式の値は `text_template.inputs` 経由で文字列化する。
+- 公開時に演算子名と args のキー・型・範囲を検証する。実行時に入力値の型を検証し、型不一致・
+  `pluck` のキー欠落は対象 Node を失敗させる（外部呼出前）。error Edge があればそこへ進む。
+
+### 3.8 テキスト組立 Node `text_template`
+
+複数値から文章を組み立てる純粋な内部 Node。`config` は `inputs`（変数名→値/参照）と
+`template`（Jinja2 本文）を持ち、出力は常に `nodes.<node_id>.output.text`（string）とする。
+
+```json
+{
+  "inputs": {
+    "events": {
+      "$ref": "nodes.calendar.output.events",
+      "pipe": [{ "op": "slice", "args": { "limit": 5 } }]
+    }
+  },
+  "template": "今週の予定:\n{% for event in events %}- {{ event.title }}\n{% endfor %}"
+}
+```
+
+- テンプレートは Jinja2 の `SandboxedEnvironment`（`loader` なし、独自 global なし、
+  `StrictUndefined`、autoescape なし）で描画する。Jinja2 標準フィルターと組み込み global は
+  そのまま使える。
+- テンプレート本文は UTF-8 で 16 KiB、描画結果は UTF-8 で 64 KiB を上限とし、超過は Node 失敗。
+- 公開時に構文と、`inputs` に存在しない変数（`jinja2.meta`）を検証する。実行時も
+  `StrictUndefined` で未定義変数を失敗にする。
+- effects を持たず、単体では Run の承認を必要としない（`requires_approval` の対象外）。
+
 ## 4. グラフの構造規約
 
 ### 4.1 非循環性
@@ -418,6 +485,9 @@ Node 間のデータ連携は文字列テンプレート展開ではなく、以
 - 型付き参照が解決可能であり、参照先の型と一致すること。
 - `$expr` の `kind` / `version` / `math` / `timezone` / `week_starts_on` / `result` が妥当で
   あること。anchor の参照先が date / date-time と宣言されている位置ではその型と一致すること。
+- `pipe` の演算子名・args のキー/型/範囲が妥当で、args に `$ref`/`$expr` を含まないこと。
+- `text_template` の `inputs` が object で、`template` が構文・16 KiB 以内・未定義変数なしの
+  Jinja2 本文であること。
 - 秘密値を含む入力が固定値として保存されていないこと（UI 警告 + 検証ヒューリスティック）。
 
 ### 6.2 動的検証（Run 開始直前 / Node 実行直前）
@@ -1061,11 +1131,14 @@ one_shot_jobs（v58 で再構築）
 
 ### 20.2 将来拡張（優先順位未定）
 
-1. 動的な日時入力テンプレートと、Workflow ごとの同時実行数制御。
-2. スターターテンプレートの JSON ファイル化と UI インポート（User Template の code 定義版）。
-3. Loop ネスト（子グラフ内に子 Loop）。
-4. Agent Node ごとの軽微な上書き（承認境界を含む ADR で検討）。
-5. 完了通知（軽量 outbox）。
+将来拡張の候補と、`$expr` / `pipe` / `text_template` で意図的に見送った余地は
+[v2_roadmap.md](v2_roadmap.md) に集約する。主なもの:
+
+1. 非秘密の環境設定参照 `config.<alias>`（明示 allowlist と Run 固定）。
+2. `$expr` への `pipe` 適用、`kind` の追加（算術・文字列・条件）、出力フォーマット指定。
+3. `pipe` 演算子の追加（regex、jsonpath、sort/filter/map、型変換）と静的型推論。
+4. `text_template` の構造化出力・テンプレート部品化（include/macros）・sandbox 強化。
+5. Loop ネスト、Agent Node ごとの軽微な上書き、完了通知（軽量 outbox）。
 
 ### 20.3 未決事項
 

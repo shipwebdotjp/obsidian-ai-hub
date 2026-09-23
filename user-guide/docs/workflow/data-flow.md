@@ -88,6 +88,44 @@ JSON Schema の `format` に `date` / `date-time` を指定できます。フォ
 表示し、値の形式を検証します。`$expr` の `result` は配置先の `format` と一致させてください
 （`date` には `result: "date"`、`date-time` には `result: "datetime"`）。
 
+## パイプ（`pipe`）
+
+参照先の値を入力境界で軽く加工したいときは、`$ref` に `pipe` を付けます。エディタでは参照の
+下に演算子エディタが表示され、順序変更・引数編集ができます。
+
+```json
+{
+  "$ref": "nodes.<node_id>.output.events",
+  "pipe": [
+    { "op": "slice", "args": { "limit": 5 } },
+    { "op": "pluck", "args": { "key": "title" } },
+    { "op": "join", "args": { "sep": "\n" } },
+    { "op": "truncate", "args": { "max_len": 500 } }
+  ]
+}
+```
+
+| op | 対象 | 引数 |
+| --- | --- | --- |
+| `upper` / `lower` | 文字列 | なし |
+| `truncate` | 文字列 | `max_len`（文字数、省略記号なし） |
+| `slice` | 文字列 / 配列 | `limit`、`offset`（任意） |
+| `replace` | 文字列 | `frm`、`to`（任意） |
+| `pluck` | object 配列 | `key`（要素に無ければ失敗） |
+| `join` | 配列 | `sep`（任意。object は JSON 化） |
+| `default` | 任意 | `value`（`null` / `""` / `[]` のとき置換） |
+
+- 演算子は左から順に適用されます。
+- 型が合わない・`pluck` のキーが無い場合は **その Node が失敗**し、error Edge があれば
+  そちらへ進みます。Capability / Agent は呼び出されません。
+- `$expr` にはパイプを付けられません。日時式を文章に含めるときは「テキスト組立」Node の
+  `inputs` から参照します。
+
+## テキスト組立（text_template）
+
+複数値から文章を作るときは **テキスト組立** Node を使います（[Node リファレンス](nodes.md#text_template-nodeテキスト組立)）。
+出力は常に `nodes.<node_id>.output.text`（string）です。
+
 ## 分岐（条件付き Edge）
 
 Edge は `condition` オブジェクトを持てます。

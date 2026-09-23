@@ -117,6 +117,32 @@ Loop 子グラフの終端です。次の `loop.state` を返します。
 
 子グラフには `loop_result` がちょうど 1 つ必要です。
 
+## text_template Node（テキスト組立）
+
+複数の値を文章へ組み立てる純粋な Node です。出力は常に `nodes.<node_id>.output.text`
+（string）で、後続 Node から型付き参照できます。
+
+```json
+{
+  "inputs": {
+    "events": {
+      "$ref": "nodes.<calendar_node_id>.output.events",
+      "pipe": [{ "op": "slice", "args": { "limit": 5 } }]
+    }
+  },
+  "template": "今週の予定:\n{% for event in events %}- {{ event.title }}\n{% endfor %}"
+}
+```
+
+- `inputs` は変数名 → 値・[型付き参照](data-flow.md)・日時式のマッピングです。参照には
+  [パイプ](data-flow.md#パイプpipe)を付けられます。
+- `template` は Jinja2。`{% if %}` / `{% for %}` と標準フィルターが使えます。未定義変数は
+  失敗します（`StrictUndefined`）。
+- テンプレート本文は 16 KiB、描画結果は 64 KiB までです。超過は Node 失敗になります。
+- 副作用が無いため、単体では承認を必要としません。
+- 外部 I/O の前処理はここで完結させ、Capability / Agent には整形済みの文字列を渡すのが
+  基本です。
+
 ## terminal Node
 
 グラフの終端です。

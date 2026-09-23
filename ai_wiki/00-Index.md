@@ -16,6 +16,7 @@
 - [ドメイン用語集](30-Glossary.md)
 - [タスクオーケストレーション CONTEXT.md](../CONTEXT.md)（Bounded Context とユビキタス言語）
 - [Workflow 文書群](../docs/workflow/README.md)（人間が GUI で設計する Node/Edge グラフ。制御は決定的、Agent Node 出力は JSON Schema で検証）
+  - [Workflow 値パイプラインと Text Template Node](../docs/workflow/adr/workflow-value-pipeline-and-text-template.md)（ADR）
   - [Workflow 型付き日時式 `$expr`](../docs/workflow/adr/workflow-date-expressions.md)（ADR）
   - [エディタのガイド型フォーム（自前スキーマフォーム）](../docs/workflow/adr/workflow-editor-guided-forms.md)（ADR）
   - [Workflow 本体削除ポリシー（非終端 Run・Scheduler 参照を拒否）](../docs/workflow/adr/workflow-deletion.md)（ADR）

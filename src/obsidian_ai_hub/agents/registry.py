@@ -115,7 +115,7 @@ def _recurring_to_calendar_events(items: List[Dict[str, Any]]) -> List[Dict[str,
                 {
                     "title": title,
                     "start": start_iso,
-                    "end": item.get("end_time"),
+                    "end": item.get("end_time") or "",
                     "all_day": False,
                     "source": "recurring",
                 }

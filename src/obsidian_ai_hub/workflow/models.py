@@ -19,6 +19,7 @@ NODE_TYPES: tuple[str, ...] = (
     "loop",
     "terminal",
     "loop_result",
+    "text_template",
 )
 TERMINAL_OUTCOMES: tuple[str, ...] = ("success", "failure")
 EDGE_KINDS: tuple[str, ...] = ("normal", "error")
@@ -104,6 +105,20 @@ WEEKDAYS = (
 )
 DEFAULT_TIMEZONE = "Asia/Tokyo"
 DEFAULT_WEEK_START = "monday"
+
+PIPE_KEY = "pipe"
+MAX_PIPE_OPS = 20
+PIPE_OPS: tuple[str, ...] = (
+    "upper",
+    "lower",
+    "truncate",
+    "slice",
+    "replace",
+    "pluck",
+    "join",
+    "default",
+)
+TEXT_OUTPUT_KEY = "text"
 
 _DATE_MATH_TOKEN_RE = re.compile(r"(?P<op>[/+\-])(?P<amount>\d*)(?P<unit>[yMwdhms])")
 
@@ -337,16 +352,248 @@ def is_reference(value: Any) -> bool:
     )
 
 
-def iter_references(value: Any) -> Iterable[str]:
-    """Yield every ``$ref`` string contained in a nested config value."""
+def is_piped_reference(value: Any) -> bool:
+    """True when ``value`` is ``{"$ref": "<path>", "pipe": [...]}``."""
+    if not isinstance(value, dict) or PIPE_KEY not in value:
+        return False
+    if set(value.keys()) != {REF_KEY, PIPE_KEY}:
+        return False
+    ref = value.get(REF_KEY)
+    return isinstance(ref, str) and bool(ref.strip()) and isinstance(
+        value.get(PIPE_KEY), list
+    )
+
+
+def reference_path(value: Any) -> Optional[str]:
+    """Return the ``$ref`` path of a bare or piped reference, else ``None``."""
     if is_reference(value):
-        yield value[REF_KEY]
+        return str(value[REF_KEY])
+    if is_piped_reference(value):
+        return str(value[REF_KEY])
+    return None
+
+
+def reference_pipe(value: Any) -> list[Any]:
+    """Return the pipe ops of a piped reference, else an empty list."""
+    if is_piped_reference(value):
+        return list(value[PIPE_KEY])
+    return []
+
+
+def iter_references(value: Any) -> Iterable[str]:
+    """Yield every ``$ref`` string contained in a nested config value.
+
+    Piped references yield their path and are not descended into (pipe args
+    must not contain further references).
+    """
+    path = reference_path(value)
+    if path is not None:
+        yield path
     elif isinstance(value, dict):
         for child in value.values():
             yield from iter_references(child)
     elif isinstance(value, list):
         for child in value:
             yield from iter_references(child)
+
+
+def iter_piped_references(value: Any) -> Iterable[list[Any]]:
+    """Yield every pipe op list of a piped reference in a nested value."""
+    if is_piped_reference(value):
+        yield list(value[PIPE_KEY])
+    elif isinstance(value, dict):
+        for child in value.values():
+            yield from iter_piped_references(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from iter_piped_references(child)
+
+
+def iter_invalid_reference_shapes(value: Any) -> Iterable[dict[str, Any]]:
+    """Yield dicts that carry ``$ref``/``$expr`` but do not match the grammar.
+
+    A malformed reference (e.g. ``{"$ref": ..., "pipe": "upper"}``) otherwise
+    matches neither :func:`is_reference` nor :func:`is_piped_reference`, so it
+    would be silently passed through as a literal.
+    """
+    if isinstance(value, dict):
+        if REF_KEY in value and not (is_reference(value) or is_piped_reference(value)):
+            yield value
+        if EXPR_KEY in value and not is_expression(value):
+            yield value
+        for child in value.values():
+            yield from iter_invalid_reference_shapes(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from iter_invalid_reference_shapes(child)
+
+
+def _is_int(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def validate_pipe(pipe: Any, *, path: str = "pipe") -> list[str]:
+    """Validate a pipe op list (shape, operator, argument keys/types/ranges)."""
+    errors: list[str] = []
+    if not isinstance(pipe, list):
+        return [f"{path}: 配列が必要です"]
+    if not pipe:
+        return [f"{path}: 1 つ以上の演算子が必要です"]
+    if len(pipe) > MAX_PIPE_OPS:
+        return [f"{path}: 演算子は最大 {MAX_PIPE_OPS} 個です"]
+    for index, step in enumerate(pipe):
+        step_path = f"{path}[{index}]"
+        if not isinstance(step, dict):
+            errors.append(f"{step_path}: object が必要です")
+            continue
+        unknown = set(step.keys()) - {"op", "args"}
+        if unknown:
+            errors.append(f"{step_path}: 未知のキー {sorted(unknown)}")
+        op = step.get("op")
+        if op not in PIPE_OPS:
+            errors.append(f"{step_path}.op: {list(PIPE_OPS)} のいずれかが必要です")
+            continue
+        args = step.get("args", {})
+        if not isinstance(args, dict):
+            errors.append(f"{step_path}.args: object が必要です")
+            continue
+        if _contains_reference_or_expression(args):
+            errors.append(f"{step_path}.args: 引数に $ref / $expr は使えません")
+        errors.extend(_validate_pipe_args(op, args, path=step_path))
+    return errors
+
+
+def _contains_reference_or_expression(value: Any) -> bool:
+    if reference_path(value) is not None or is_expression(value):
+        return True
+    if isinstance(value, dict):
+        return any(_contains_reference_or_expression(v) for v in value.values())
+    if isinstance(value, list):
+        return any(_contains_reference_or_expression(v) for v in value)
+    return False
+
+
+def _validate_pipe_args(op: str, args: dict[str, Any], *, path: str) -> list[str]:
+    errors: list[str] = []
+
+    def unknown(allowed: set[str]) -> None:
+        extra = set(args.keys()) - allowed
+        if extra:
+            errors.append(f"{path}.args: 未知の引数 {sorted(extra)}")
+
+    if op in ("upper", "lower"):
+        unknown(set())
+    elif op == "truncate":
+        unknown({"max_len"})
+        max_len = args.get("max_len")
+        if not _is_int(max_len) or max_len < 0:
+            errors.append(f"{path}.args.max_len: 0 以上の整数が必要です")
+    elif op == "slice":
+        unknown({"limit", "offset"})
+        limit = args.get("limit")
+        if not _is_int(limit) or limit < 0:
+            errors.append(f"{path}.args.limit: 0 以上の整数が必要です")
+        offset = args.get("offset")
+        if offset is not None and (not _is_int(offset) or offset < 0):
+            errors.append(f"{path}.args.offset: 0 以上の整数が必要です")
+    elif op == "replace":
+        unknown({"frm", "to"})
+        frm = args.get("frm")
+        if not isinstance(frm, str) or frm == "":
+            errors.append(f"{path}.args.frm: 空でない文字列が必要です")
+        to = args.get("to")
+        if to is not None and not isinstance(to, str):
+            errors.append(f"{path}.args.to: 文字列が必要です")
+    elif op == "pluck":
+        unknown({"key"})
+        key = args.get("key")
+        if not isinstance(key, str) or key == "":
+            errors.append(f"{path}.args.key: 空でない文字列が必要です")
+    elif op == "join":
+        unknown({"sep"})
+        sep = args.get("sep")
+        if sep is not None and not isinstance(sep, str):
+            errors.append(f"{path}.args.sep: 文字列が必要です")
+    elif op == "default":
+        unknown({"value"})
+        if "value" not in args:
+            errors.append(f"{path}.args.value: value が必要です")
+    return errors
+
+
+def _stringify_pipe_value(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (int, float)):
+        return str(value)
+    import json
+
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
+def _as_pipe_string(value: Any, op: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError(f"pipe '{op}' は文字列にのみ適用できます")
+    return value
+
+
+def _as_pipe_list(value: Any, op: str) -> list[Any]:
+    if not isinstance(value, list):
+        raise ValueError(f"pipe '{op}' は配列にのみ適用できます")
+    return value
+
+
+def apply_pipe(value: Any, pipe: list[Any]) -> Any:
+    """Apply pipe ops left-to-right; raises ``ValueError`` on type mismatch."""
+    current = value
+    for step in pipe:
+        op = step.get("op")
+        args = step.get("args") or {}
+        if op in ("upper", "lower"):
+            text = _as_pipe_string(current, op)
+            current = text.upper() if op == "upper" else text.lower()
+        elif op == "truncate":
+            text = _as_pipe_string(current, op)
+            current = text[: int(args["max_len"])]
+        elif op == "slice":
+            limit = int(args["limit"])
+            offset = int(args.get("offset") or 0)
+            if isinstance(current, str):
+                current = current[offset : offset + limit]
+            elif isinstance(current, list):
+                current = current[offset : offset + limit]
+            else:
+                raise ValueError("pipe 'slice' は文字列または配列にのみ適用できます")
+        elif op == "replace":
+            text = _as_pipe_string(current, op)
+            current = text.replace(str(args["frm"]), str(args.get("to") or ""))
+        elif op == "pluck":
+            items = _as_pipe_list(current, op)
+            key = str(args["key"])
+            plucked: list[Any] = []
+            for item in items:
+                if not isinstance(item, dict):
+                    raise ValueError("pipe 'pluck' は object 配列にのみ適用できます")
+                if key not in item:
+                    raise ValueError(f"pipe 'pluck': キー '{key}' が要素にありません")
+                plucked.append(item[key])
+            current = plucked
+        elif op == "join":
+            items = _as_pipe_list(current, op)
+            sep = str(args.get("sep") or "")
+            current = sep.join(_stringify_pipe_value(item) for item in items)
+        elif op == "default":
+            if current is None or current == "" or (
+                isinstance(current, list) and not current
+            ):
+                current = args.get("value")
+        else:  # pragma: no cover - validate_pipe rejects unknown ops first
+            raise ValueError(f"未対応の pipe 演算子です: {op}")
+    return current
 
 
 _NODE_REF_RE = re.compile(r"^nodes\.([^.]+)(\..*)?$")
@@ -764,10 +1011,11 @@ def resolve_value(
     loop_iteration: Optional[int] = None,
     reference_time: Optional[str] = None,
 ) -> Any:
-    """Resolve references and date expressions; literals pass through."""
-    if is_reference(value):
-        return resolve_reference(
-            value[REF_KEY],
+    """Resolve references (with optional pipe) and date expressions."""
+    path = reference_path(value)
+    if path is not None:
+        resolved = resolve_reference(
+            path,
             run_inputs=run_inputs,
             node_outputs=node_outputs,
             loop_state=loop_state,
@@ -775,6 +1023,8 @@ def resolve_value(
             loop_iteration=loop_iteration,
             reference_time=reference_time,
         )
+        pipe = reference_pipe(value)
+        return apply_pipe(resolved, pipe) if pipe else resolved
     if is_expression(value):
         return evaluate_expression(
             value,

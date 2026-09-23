@@ -456,10 +456,36 @@ _OUTPUT_SCHEMAS: dict[str, dict[str, Any]] = {
         {"relative_path": {"type": "string"}, "content": {"type": "string"}}
     ),
     "calendar_read": _object_output(
-        {"events": {"type": "array", "items": {"type": "object"}}}
+        {
+            "events": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "title": {"type": "string"},
+                        "start": {"type": "string"},
+                        "end": {"type": "string"},
+                        "all_day": {"type": "boolean"},
+                        "source": {"type": "string"},
+                    },
+                },
+            }
+        }
     ),
     "reminders_read": _object_output(
-        {"reminders": {"type": "array", "items": {"type": "object"}}}
+        {
+            "reminders": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "title": {"type": "string"},
+                        "due": {"type": "string"},
+                        "source": {"type": "string"},
+                    },
+                },
+            }
+        }
     ),
     "calendar_create_proposal": _object_output(
         {

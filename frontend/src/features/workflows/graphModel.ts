@@ -2,10 +2,19 @@ import type {
   WorkflowEdge,
   WorkflowNode,
   WorkflowNodeType,
+  WorkflowPipeOp,
+  WorkflowReferenceValue,
   WorkflowSchemaField,
 } from "../../api/types";
+import { validatePipe } from "./pipeModel";
 
-export type { WorkflowEdge, WorkflowNode, WorkflowNodeType };
+export type {
+  WorkflowEdge,
+  WorkflowNode,
+  WorkflowNodeType,
+  WorkflowPipeOp,
+  WorkflowReferenceValue,
+};
 
 export interface GraphIssue {
   code: string;
@@ -61,6 +70,8 @@ export function defaultNodeConfig(
       return { output_mapping: {} };
     case "terminal":
       return { outcome: "success" };
+    case "text_template":
+      return { inputs: {}, template: "" };
     default:
       return {};
   }
@@ -206,19 +217,37 @@ export function validateReference(
   return { code: "reference_scope", message: `未対応の参照: ${ref}` };
 }
 
-export function collectReferences(value: unknown): string[] {
+interface ReferenceEntry {
+  path: string;
+  pipe: WorkflowPipeOp[];
+}
+
+/** One recursive walk over a nested value yielding every reference entry. */
+function collectReferenceEntries(value: unknown): ReferenceEntry[] {
   if (Array.isArray(value)) {
-    return value.flatMap((child) => collectReferences(child));
+    return value.flatMap(collectReferenceEntries);
   }
   if (value && typeof value === "object") {
+    const path = referencePath(value);
+    if (path !== null) return [{ path, pipe: referencePipe(value) }];
     const record = value as Record<string, unknown>;
-    const keys = Object.keys(record);
-    if (keys.length === 1 && keys[0] === "$ref") {
-      return typeof record.$ref === "string" ? [record.$ref] : [];
-    }
-    return Object.values(record).flatMap((child) => collectReferences(child));
+    return Object.values(record).flatMap(collectReferenceEntries);
   }
   return [];
+}
+
+/** Collect every resolvable reference path (skips the empty editor sentinel). */
+export function collectReferences(value: unknown): string[] {
+  return collectReferenceEntries(value)
+    .map((entry) => entry.path)
+    .filter((path) => path !== "");
+}
+
+/** Collect every non-empty pipe op list attached to a reference. */
+export function collectPipes(value: unknown): WorkflowPipeOp[][] {
+  return collectReferenceEntries(value)
+    .map((entry) => entry.pipe)
+    .filter((pipe) => pipe.length > 0);
 }
 
 export function inputsKeysFromSchema(
@@ -251,15 +280,53 @@ function asSchemaField(schema: unknown): WorkflowSchemaField | null {
     : null;
 }
 
-/** True when ``value`` is exactly ``{"$ref": "<path>"}``. */
-export function isReferenceValue(value: unknown): value is { $ref: string } {
-  return (
-    !!value &&
-    typeof value === "object" &&
-    !Array.isArray(value) &&
-    Object.keys(value as Record<string, unknown>).length === 1 &&
-    typeof (value as { $ref?: unknown }).$ref === "string"
-  );
+/** True for ``{"$ref": "<path>"}`` with an optional ``pipe`` array. */
+export function isReferenceValue(
+  value: unknown,
+): value is WorkflowReferenceValue {
+  return referencePath(value) !== null;
+}
+
+/** Return the ``$ref`` path of a bare/piped reference, else ``null``.
+
+An empty string is a valid in-progress sentinel (the editor enters reference
+mode with ``{ $ref: "" }``); callers that resolve paths must skip it.
+*/
+export function referencePath(value: unknown): string | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const keys = Object.keys(record);
+  if (!keys.includes("$ref") || keys.some((key) => key !== "$ref" && key !== "pipe")) {
+    return null;
+  }
+  if (typeof record.$ref !== "string") return null;
+  if ("pipe" in record && !Array.isArray(record.pipe)) return null;
+  return record.$ref;
+}
+
+/** Return the pipe ops of a reference value (empty when none). */
+export function referencePipe(value: unknown): WorkflowPipeOp[] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+  const pipe = (value as { pipe?: unknown }).pipe;
+  return Array.isArray(pipe) ? (pipe as WorkflowPipeOp[]) : [];
+}
+
+/** Set the ``$ref`` path, preserving an existing non-empty pipe. */
+export function setReferencePath(
+  value: unknown,
+  path: string,
+): WorkflowReferenceValue {
+  const pipe = referencePipe(value);
+  return pipe.length ? { $ref: path, pipe } : { $ref: path };
+}
+
+/** Set the pipe, dropping it when empty; preserves the current ``$ref``. */
+export function setReferencePipe(
+  value: unknown,
+  pipe: WorkflowPipeOp[],
+): WorkflowReferenceValue {
+  const ref = referencePath(value) ?? "";
+  return pipe.length ? { $ref: ref, pipe } : { $ref: ref };
 }
 
 /**
@@ -363,6 +430,15 @@ function nodeOutputFields(
         type: "object",
         description:
           "Capability 出力は型未宣言（summary、または JSON object 全体）。",
+      },
+    ];
+  }
+  if (node.node_type === "text_template") {
+    return [
+      {
+        path: `${basePath}.text`,
+        type: "string",
+        description: "組立済みのテキスト",
       },
     ];
   }
@@ -599,6 +675,26 @@ export function validateGraphShape(
         nodeId: node.node_id,
       });
     }
+    if (node.node_type === "text_template") {
+      const inputs = config.inputs;
+      if (
+        inputs !== undefined &&
+        (inputs === null || typeof inputs !== "object" || Array.isArray(inputs))
+      ) {
+        issues.push({
+          code: "text_template_inputs",
+          message: "text_template.inputs は object が必要です",
+          nodeId: node.node_id,
+        });
+      }
+      if (typeof config.template !== "string") {
+        issues.push({
+          code: "text_template_template",
+          message: "text_template.template は文字列が必要です",
+          nodeId: node.node_id,
+        });
+      }
+    }
   }
 
   // Terminal nodes must have no outgoing edge, and conditions must be valid.
@@ -678,6 +774,16 @@ export function validateGraphShape(
         inLoop: scope !== null,
       });
       if (issue) issues.push({ ...issue, nodeId: node.node_id });
+    }
+    const pipes = [
+      ...collectPipes((node.config as Record<string, unknown>).inputs),
+      ...collectPipes((node.config as Record<string, unknown>).input_mapping),
+      ...collectPipes((node.config as Record<string, unknown>).output_mapping),
+    ];
+    for (const pipe of pipes) {
+      for (const issue of validatePipe(pipe)) {
+        issues.push({ ...issue, nodeId: node.node_id });
+      }
     }
   }
   return issues;

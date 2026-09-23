@@ -43,13 +43,16 @@ import {
   type ReferenceGroup,
 } from "./graphModel";
 
-const NODE_TYPES: WorkflowNodeType[] = [
-  "capability",
-  "agent",
-  "loop",
-  "terminal",
-  "loop_result",
-];
+const NODE_TYPE_LABELS: Record<WorkflowNodeType, string> = {
+  capability: "capability",
+  agent: "agent",
+  loop: "loop",
+  text_template: "テキスト組立 (text_template)",
+  terminal: "terminal",
+  loop_result: "loop_result",
+};
+
+const NODE_TYPES = Object.keys(NODE_TYPE_LABELS) as WorkflowNodeType[];
 
 function JsonArea({
   label,
@@ -498,7 +501,7 @@ export default function WorkflowEditorPage() {
               >
                 {NODE_TYPES.map((type) => (
                   <option key={type} value={type}>
-                    {type}
+                    {NODE_TYPE_LABELS[type]}
                   </option>
                 ))}
               </select>
@@ -935,6 +938,53 @@ export default function WorkflowEditorPage() {
                     )}
                   />
                 </div>
+              )}
+              {selectedNode.node_type === "text_template" && (
+                <>
+                  <div className="space-y-1">
+                    <span className="block text-slate-700">inputs</span>
+                    <StructuredValueEditor
+                      testIdPrefix="text-template-inputs"
+                      value={
+                        (selectedNode.config.inputs as Record<
+                          string,
+                          unknown
+                        >) ?? {}
+                      }
+                      onChange={(value) => updateNodeConfig({ inputs: value })}
+                      referenceGroups={buildReferenceGroups(
+                        nodes,
+                        scopeOf(selectedNode),
+                        inputsSchema,
+                        {
+                          excludeNodeId: selectedNode.node_id,
+                          capabilityOutputSchemas,
+                        },
+                      )}
+                    />
+                  </div>
+                  <label className="block">
+                    テンプレート本文 (Jinja2)
+                    <textarea
+                      data-testid="text-template-body"
+                      rows={8}
+                      className="mt-1 w-full rounded border border-slate-300 px-2 py-1 font-mono text-[11px]"
+                      value={String(selectedNode.config.template ?? "")}
+                      onChange={(event) =>
+                        updateNodeConfig({ template: event.target.value })
+                      }
+                    />
+                  </label>
+                  <p className="text-[10px] leading-tight text-slate-500">
+                    利用可能な変数:{" "}
+                    {Object.keys(
+                      (selectedNode.config.inputs as Record<string, unknown>) ??
+                        {},
+                    ).join(", ") || "(inputs を追加してください)"}
+                    。出力は nodes.{selectedNode.node_id}.output.text
+                    （string）。StrictUndefined のため未定義変数は失敗します。
+                  </p>
+                </>
               )}
               {selectedNode.node_type === "terminal" && (
                 <select

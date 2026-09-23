@@ -18,13 +18,18 @@ from obsidian_ai_hub.workflow.models import (
     MAX_NODES,
     NODE_TYPES,
     TERMINAL_OUTCOMES,
+    TEXT_OUTPUT_KEY,
     iter_expressions,
+    iter_invalid_reference_shapes,
+    iter_piped_references,
     iter_references,
     reference_root,
     validate_condition,
     validate_expression,
+    validate_pipe,
     validate_schema_subset,
 )
+from obsidian_ai_hub.workflow.text_template import validate_template
 
 CapabilityCheck = Callable[[str], bool]
 AgentCheck = Callable[[str], bool]
@@ -180,6 +185,12 @@ def _value_reference_errors(
                 path=path,
             )
         )
+    for pipe in iter_piped_references(value):
+        errors.extend(validate_pipe(pipe, path=f"{path}.pipe"))
+    for _ in iter_invalid_reference_shapes(value):
+        errors.append(
+            f"reference_shape: {path}: $ref / $expr の形式が不正です"
+        )
     return errors
 
 
@@ -258,6 +269,10 @@ def _anchor_type_resolver(
                     else None
                 )
                 return _schema_field_type(state_schema, tail)
+            if node_type == "text_template":
+                if tail == [TEXT_OUTPUT_KEY]:
+                    return ("string", None)
+                return None
             return None
         return None
 
@@ -413,12 +428,23 @@ def validate_graph(
                         path=f"Node '{node_id}'.output_mapping",
                     )
                 )
+        elif node_type == "text_template":
+            errors.extend(
+                _validate_text_template_node(
+                    node_id,
+                    config,
+                    scope_id=scope_id,
+                    scope_ids=scope_ids,
+                    inputs_schema=inputs_schema,
+                )
+            )
 
         expression_key = {
             "capability": "inputs",
             "agent": "inputs",
             "loop": "input_mapping",
             "loop_result": "output_mapping",
+            "text_template": "inputs",
         }.get(str(node_type))
         if expression_key is not None:
             errors.extend(
@@ -542,6 +568,38 @@ def _validate_agent_node(
             scope_ids=scope_ids,
             inputs_schema=inputs_schema,
             path=f"Node '{node_id}'.inputs",
+        )
+    )
+    return errors
+
+
+def _validate_text_template_node(
+    node_id: str,
+    config: dict[str, Any],
+    *,
+    scope_id: Optional[str],
+    scope_ids: set[str],
+    inputs_schema: Optional[dict[str, Any]],
+) -> list[str]:
+    errors: list[str] = []
+    inputs = config.get("inputs", {})
+    if not isinstance(inputs, dict):
+        errors.append(f"Node '{node_id}': inputs は object が必要です")
+        return errors
+    errors.extend(
+        _value_reference_errors(
+            inputs,
+            scope_id=scope_id,
+            scope_ids=scope_ids,
+            inputs_schema=inputs_schema,
+            path=f"Node '{node_id}'.inputs",
+        )
+    )
+    errors.extend(
+        validate_template(
+            config.get("template"),
+            allowed_variables=inputs.keys(),
+            path=f"Node '{node_id}'.template",
         )
     )
     return errors

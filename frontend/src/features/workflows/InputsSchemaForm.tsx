@@ -1,10 +1,7 @@
 import { useState, type ChangeEvent, type ReactNode } from "react";
 import type { WorkflowSchemaField } from "../../api/types";
-import {
-  isReferenceValue,
-  type ReferenceGroup,
-} from "./graphModel";
-import ReferencePicker from "./ReferencePicker";
+import { isReferenceValue, type ReferenceGroup } from "./graphModel";
+import ReferenceValueEditor from "./ReferenceValueEditor";
 import ExpressionEditor from "./ExpressionEditor";
 import {
   defaultExpression,
@@ -214,11 +211,11 @@ function SchemaValueField({
             </>
           }
         />
-        <ReferencePicker
+        <ReferenceValueEditor
           idPrefix={testId}
           groups={referenceGroups}
-          value={value.$ref}
-          onChange={(path) => onChange({ $ref: path })}
+          value={value}
+          onChange={onChange}
         />
       </div>
     );

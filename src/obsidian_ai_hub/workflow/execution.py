@@ -22,10 +22,12 @@ from obsidian_ai_hub.tasks.execution import (
 from obsidian_ai_hub.workflow import store as workflow_store
 from obsidian_ai_hub.workflow.models import (
     MAX_ITERATIONS,
+    TEXT_OUTPUT_KEY,
     evaluate_condition,
     resolve_value,
     validate_value_against_schema,
 )
+from obsidian_ai_hub.workflow.text_template import render_template
 
 logger = logging.getLogger(__name__)
 
@@ -317,18 +319,44 @@ class WorkflowEngine:
     ) -> NodeOutcome:
         node_id = str(node["node_id"])
         config = node.get("config") or {}
-        resolved = self._resolve_node_inputs(
-            config.get("inputs") or {},
-            loop_state=loop_state,
-            loop_input=loop_input,
-            loop_iteration=loop_iteration,
-        )
         iteration_context = self._with_reexecute_context(
             run_id, node_id, iteration_context
         )
         activation_id = workflow_store.get_or_create_activation(
             run_id, node_id, iteration_context, conn=self._conn
         )
+        try:
+            resolved = self._resolve_node_inputs(
+                config.get("inputs") or {},
+                loop_state=loop_state,
+                loop_input=loop_input,
+                loop_iteration=loop_iteration,
+            )
+        except (KeyError, ValueError) as exc:
+            # A reference/pipe/date-expression failure fails this Node (so an
+            # error Edge can route) before any external call (spec §3.7).
+            error = f"入力の解決に失敗しました: {exc}"
+            workflow_store.upsert_run_node(
+                run_id=run_id,
+                node_id=node_id,
+                activation_id=activation_id,
+                attempt=1,
+                status="failed",
+                error_summary=error,
+                conn=self._conn,
+            )
+            workflow_store.append_event(
+                run_id,
+                "node_failed",
+                {
+                    "node_id": node_id,
+                    "activation_id": activation_id,
+                    "attempt": 1,
+                    "error": error,
+                },
+                conn=self._conn,
+            )
+            return NodeOutcome(status="failed", error=error)
 
         resumed = self._resume_waiting_state(run_id, node, activation_id)
         if resumed is not None:
@@ -339,6 +367,11 @@ class WorkflowEngine:
         if existing is not None and existing.get("status") == "succeeded":
             self._rehydrate_success(run_id, node, activation_id, existing)
             return NodeOutcome(status="succeeded", output=existing.get("output") or {})
+
+        if node.get("node_type") == "text_template":
+            return self._run_text_template(
+                run_id, node, activation_id, resolved
+            )
 
         retry = config.get("retry") or {}
         max_attempts = int(retry.get("max_attempts") or 0)
@@ -450,6 +483,61 @@ class WorkflowEngine:
             )
             attempt += 1
         return NodeOutcome(status="failed", error=last_error)
+
+    def _run_text_template(
+        self,
+        run_id: str,
+        node: dict[str, Any],
+        activation_id: str,
+        inputs: dict[str, Any],
+    ) -> NodeOutcome:
+        """Render a ``text_template`` node locally (no external runner)."""
+        node_id = str(node["node_id"])
+        config = node.get("config") or {}
+        workflow_store.upsert_run_node(
+            run_id=run_id,
+            node_id=node_id,
+            activation_id=activation_id,
+            attempt=1,
+            status="running",
+            inputs=inputs,
+            conn=self._conn,
+        )
+        workflow_store.append_event(
+            run_id,
+            "node_started",
+            {"node_id": node_id, "activation_id": activation_id, "attempt": 1},
+            conn=self._conn,
+        )
+        try:
+            text = render_template(config.get("template"), inputs)
+        except ValueError as exc:
+            workflow_store.upsert_run_node(
+                run_id=run_id,
+                node_id=node_id,
+                activation_id=activation_id,
+                attempt=1,
+                status="failed",
+                error_summary=str(exc),
+                conn=self._conn,
+            )
+            workflow_store.append_event(
+                run_id,
+                "node_failed",
+                {
+                    "node_id": node_id,
+                    "activation_id": activation_id,
+                    "attempt": 1,
+                    "error": str(exc),
+                },
+                conn=self._conn,
+            )
+            return NodeOutcome(status="failed", error=str(exc))
+        outcome = NodeOutcome(
+            status="succeeded", output={TEXT_OUTPUT_KEY: text}
+        )
+        self._record_success(run_id, node, activation_id, 1, outcome)
+        return outcome
 
     def _attention_from_cancel(self, outcome: NodeOutcome) -> NodeOutcome:
         """Convert a cancel-aware outcome into a reviewable attention state."""

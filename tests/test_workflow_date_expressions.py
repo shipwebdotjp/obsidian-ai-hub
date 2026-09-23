@@ -343,7 +343,7 @@ def test_execution_resolves_context_reference_time():
     assert runner.calls[0][1]["when"] == normalize_reference_time(REF)
 
 
-def test_unresolvable_anchor_does_not_call_runner():
+def test_unresolvable_anchor_fails_node_without_calling_runner():
     nodes = [
         _node(
             "a",
@@ -359,8 +359,8 @@ def test_unresolvable_anchor_does_not_call_runner():
     ]
     run = _setup(nodes, [_edge("e1", "a", "t")], reference_time=REF)
     runner = FakeRunner()
-    with pytest.raises((KeyError, ValueError)):
-        WorkflowEngine(runner).execute(run)
+    outcome = WorkflowEngine(runner).execute(run)
+    assert outcome.kind == "failed"
     assert runner.calls == []
 
 

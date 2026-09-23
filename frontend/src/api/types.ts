@@ -1195,7 +1195,20 @@ export type WorkflowNodeType =
   | "agent"
   | "loop"
   | "terminal"
-  | "loop_result";
+  | "loop_result"
+  | "text_template";
+
+/** One value-pipeline step attached to a typed reference. */
+export interface WorkflowPipeOp {
+  op: string;
+  args?: Record<string, unknown>;
+}
+
+/** ``{"$ref": "<path>"}`` with an optional value pipeline. */
+export interface WorkflowReferenceValue {
+  $ref: string;
+  pipe?: WorkflowPipeOp[];
+}
 
 export interface WorkflowUIPosition {
   x: number;

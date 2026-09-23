@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { isReferenceValue, type ReferenceGroup } from "./graphModel";
-import ReferencePicker from "./ReferencePicker";
+import ReferenceValueEditor from "./ReferenceValueEditor";
 import ExpressionEditor from "./ExpressionEditor";
 import {
   defaultExpression,
@@ -54,11 +54,11 @@ function ValueEditor({
 
   if (isReferenceValue(value)) {
     return (
-      <ReferencePicker
+      <ReferenceValueEditor
         idPrefix={testId}
         groups={referenceGroups}
-        value={value.$ref}
-        onChange={(path) => onChange({ $ref: path })}
+        value={value}
+        onChange={onChange}
       />
     );
   }
