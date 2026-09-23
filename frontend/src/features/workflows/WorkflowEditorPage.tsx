@@ -36,6 +36,7 @@ import {
   defaultInputsSchema,
   moveNode,
   removeNode,
+  runContextReferenceGroup,
   scopeOf,
   validateGraphShape,
   type GraphIssue,
@@ -694,6 +695,7 @@ export default function WorkflowEditorPage() {
                         }
                         onChange={(value) => updateNodeConfig({ inputs: value })}
                         allowReferences
+                        allowExpressions
                         referenceGroups={buildReferenceGroups(
                           nodes,
                           scopeOf(selectedNode),
@@ -831,6 +833,7 @@ export default function WorkflowEditorPage() {
                         updateNodeConfig({ input_mapping: value })
                       }
                       allowReferences
+                      allowExpressions
                       referenceGroups={buildReferenceGroups(
                         nodes,
                         null,
@@ -923,6 +926,7 @@ export default function WorkflowEditorPage() {
                       updateNodeConfig({ output_mapping: value })
                     }
                     allowReferences
+                    allowExpressions
                     referenceGroups={buildReferenceGroups(
                       nodes,
                       selectedNode.parent_loop_node_id ?? null,
@@ -1025,6 +1029,9 @@ export default function WorkflowEditorPage() {
               values={runInputs}
               onChange={setRunInputs}
               errors={runErrors}
+              allowExpressions
+              allowNodeAnchors={false}
+              expressionReferenceGroups={[runContextReferenceGroup()]}
             />
           </section>
         </aside>

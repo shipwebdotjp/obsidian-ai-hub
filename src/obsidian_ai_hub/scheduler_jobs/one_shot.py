@@ -484,7 +484,10 @@ def dispatch_claimed_workflow_job(
         with conn:
             try:
                 run, _revision_id, _ = scheduling.create_run_for_latest_published(
-                    conn, workflow_id, inputs
+                    conn,
+                    workflow_id,
+                    inputs,
+                    reference_time=job.get("run_at_utc") or finished_at,
                 )
             except scheduling.WorkflowDispatchError as exc:
                 conn.execute(

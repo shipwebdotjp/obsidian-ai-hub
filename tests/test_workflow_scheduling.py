@@ -389,3 +389,16 @@ def test_agent_workflow_tool_rejects_unpublished(test_memory_db_path, isolated_j
         )
     )
     assert "error" in out
+
+
+def test_recurring_dispatch_freezes_fire_slot_as_reference_time(test_memory_db_path):
+    from obsidian_ai_hub.workflow.models import normalize_reference_time
+
+    workflow_id, _ = _publish()
+    _, run = scheduling.dispatch_recurring_slot(
+        "job_ref", "2026-01-01T00:00:00", workflow_id, {}
+    )
+    assert run is not None
+    assert run["reference_time"] == normalize_reference_time("2026-01-01T00:00:00")
+    # 2026-01-01 00:00 JST is 2025-12-31 15:00 UTC.
+    assert run["reference_time"] == "2025-12-31T15:00:00+00:00"

@@ -18,9 +18,11 @@ from obsidian_ai_hub.workflow.models import (
     MAX_NODES,
     NODE_TYPES,
     TERMINAL_OUTCOMES,
+    iter_expressions,
     iter_references,
     reference_root,
     validate_condition,
+    validate_expression,
     validate_schema_subset,
 )
 
@@ -108,6 +110,10 @@ def _reference_errors(
     path: str,
 ) -> list[str]:
     root = reference_root(ref)
+    if root[:2] == ("run", "context"):
+        if ref.split(".") == ["run", "context", "reference_time"]:
+            return []
+        return [f"reference_scope: {path}: 未対応の run.context 参照です: {ref}"]
     if root[:2] == ("run", "inputs"):
         properties = (inputs_schema or {}).get("properties")
         tokens = ref.split(".")
@@ -172,6 +178,106 @@ def _value_reference_errors(
                 scope_ids=scope_ids,
                 inputs_schema=inputs_schema,
                 path=path,
+            )
+        )
+    return errors
+
+
+def _schema_field_type(
+    schema: Any, tokens: list[str]
+) -> Optional[tuple[Optional[str], Optional[str]]]:
+    """Return ``(type, format)`` for a schema path, or None when unknown."""
+    current = schema
+    for token in tokens:
+        if not isinstance(current, dict):
+            return None
+        if current.get("type") == "array":
+            current = current.get("items")
+            if not isinstance(current, dict):
+                return None
+        base = _base_token(str(token))
+        props = current.get("properties")
+        if not isinstance(props, dict) or base not in props:
+            return None
+        current = props[base]
+        if _INDEX_SUFFIX_RE.search(str(token)):
+            if not isinstance(current, dict) or current.get("type") != "array":
+                return None
+            current = current.get("items")
+    if not isinstance(current, dict):
+        return None
+    return current.get("type"), current.get("format")
+
+
+def _anchor_type_resolver(
+    nodes: list[dict[str, Any]],
+    inputs_schema: Optional[dict[str, Any]],
+    scope_id: Optional[str],
+) -> Callable[[str], Optional[tuple[Optional[str], Optional[str]]]]:
+    """Best-effort declared-type lookup for a date-expression anchor ref.
+
+    Returns ``None`` for positions whose type the backend cannot see (opaque
+    Capability outputs); those are checked at execution time instead.
+    """
+    by_id = {str(n.get("node_id")): n for n in nodes}
+    loop = by_id.get(scope_id) if scope_id else None
+    loop_config = (loop or {}).get("config")
+    loop_state = (
+        loop_config.get("state_schema") if isinstance(loop_config, dict) else None
+    )
+
+    def resolve(ref: str) -> Optional[tuple[Optional[str], Optional[str]]]:
+        segments = ref.split(".")
+        if segments == ["run", "context", "reference_time"]:
+            return ("string", "date-time")
+        if segments[:2] == ["run", "inputs"]:
+            return _schema_field_type(inputs_schema, segments[2:])
+        if segments[:2] == ["loop", "state"]:
+            return _schema_field_type(loop_state, segments[2:])
+        if segments[:1] == ["nodes"] and len(segments) >= 3:
+            node = by_id.get(segments[1])
+            if node is None:
+                return None
+            tail = segments[3:]
+            node_type = node.get("node_type")
+            config = node.get("config")
+            if not isinstance(config, dict):
+                return None
+            if node_type == "agent":
+                return _schema_field_type(config.get("output_schema"), tail)
+            if node_type == "loop":
+                if tail[:1] == ["final_state"]:
+                    return _schema_field_type(config.get("state_schema"), tail[1:])
+                return None
+            if node_type == "loop_result":
+                parent = by_id.get(str(node.get("parent_loop_node_id")))
+                parent_config = (parent or {}).get("config")
+                state_schema = (
+                    parent_config.get("state_schema")
+                    if isinstance(parent_config, dict)
+                    else None
+                )
+                return _schema_field_type(state_schema, tail)
+            return None
+        return None
+
+    return resolve
+
+
+def _value_expression_errors(
+    value: Any,
+    *,
+    nodes: list[dict[str, Any]],
+    inputs_schema: Optional[dict[str, Any]],
+    scope_id: Optional[str],
+    path: str,
+) -> list[str]:
+    errors: list[str] = []
+    resolver = _anchor_type_resolver(nodes, inputs_schema, scope_id)
+    for expr in iter_expressions(value):
+        errors.extend(
+            validate_expression(
+                {"$expr": expr}, path=path, anchor_type_resolver=resolver
             )
         )
     return errors
@@ -307,6 +413,23 @@ def validate_graph(
                         path=f"Node '{node_id}'.output_mapping",
                     )
                 )
+
+        expression_key = {
+            "capability": "inputs",
+            "agent": "inputs",
+            "loop": "input_mapping",
+            "loop_result": "output_mapping",
+        }.get(str(node_type))
+        if expression_key is not None:
+            errors.extend(
+                _value_expression_errors(
+                    config.get(expression_key),
+                    nodes=nodes,
+                    inputs_schema=inputs_schema,
+                    scope_id=scope_id,
+                    path=f"Node '{node_id}'.{expression_key}",
+                )
+            )
 
     for edge in edges:
         if edge["source_node_id"] not in by_id:

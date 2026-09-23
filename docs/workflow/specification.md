@@ -270,10 +270,55 @@ order_index INTEGER NOT NULL
 Node 間のデータ連携は文字列テンプレート展開ではなく、以下の型付き参照のみとする。
 
 - `run.inputs.<field_path>` — Run 開始時の入力値。
+- `run.context.reference_time` — Run 作成時に固定された基準時刻（date-time）。
 - `nodes.<node_id>.output.<field_path>` — 先行 Node の出力。
 - `loop.state.<field_path>` — Loop Node 子グラフ内でのみ利用可能な反復状態。
 
 参照は静的検証で解決可能性を確認し、実行直前に値を解決してから Pydantic / JSON Schema で検証する。
+
+### 3.6 型付き日時式 `$expr`
+
+`$ref` を使える値の位置（Capability / Agent `inputs`、Loop `input_mapping`、Loop Result
+`output_mapping`、Run 入力値）には、専用タグ `$expr` で日時式を書ける。通常の文字列や
+`$ref` の意味は変えない。
+
+```json
+{
+  "$expr": {
+    "kind": "date_math",
+    "version": 1,
+    "anchor": "now",
+    "math": "/w+6d",
+    "timezone": "Asia/Tokyo",
+    "week_starts_on": "monday",
+    "result": "date"
+  }
+}
+```
+
+- `kind` は `date_math`（v1）。`version` は `1` 固定。
+- `anchor` は `"now"` または date / date-time 型の `$ref`。
+- `math` は左から順に適用するコンパクト列。文法は
+  `(("+"|"-") 数字 unit | "/" unit)*`、unit は `y M w d h m s`（大文字小文字を区別）。
+  `y/M/w/d` は式タイムゾーンでの暦単位（対象月に同日がなければ月末へ丸め）、`h/m/s` は経過時間、
+  `/unit` は同タイムゾーンでの切り下げ。省略時は空列（anchor を正規化するだけ）。
+- `timezone` は IANA 名（既定 `Asia/Tokyo`）、`week_starts_on` は `monday`〜`sunday`
+  （既定 `monday`）。
+- `result` は `date`（`YYYY-MM-DD`）または `datetime`（式タイムゾーンのオフセット付き
+  ISO 8601）。
+- 月・年加算は月末クランプし、うるう年・年またぎ・タイムゾーン境界を扱う。
+  `now/w+6d` は月曜始まりなら日曜の日付になる。
+- 評価は stdlib の `zoneinfo` / `calendar` で行い、言語仕様はライブラリ API から独立させる。
+  未対応の演算子・単位・タイムゾーン・`result` と配置先 schema の型不一致は公開時
+  （schema が既知の位置）または実行直前（その他）に拒否する。実行時エラーでは外部処理を
+  開始しない。
+- **基準時刻（reference_time）** は Run ごとに一度固定する。手動 Run は作成時刻、定期
+  Scheduler Run は発火枠 `scheduled_for`、one-shot Run は `run_at_utc`（無ければ作成時刻）、
+  Rerun は新しい作成時刻。resume・retry・attention 再実行は保存済みの基準時刻を再利用する。
+  Run 行の `reference_time`（UTC ISO 8601）に永続化する。
+- Run 入力値の `$expr` の anchor は `now` または `run.context.reference_time` に限る
+  （Node 出力・Loop 状態は参照できない）。
+- JSON Schema に `format: "date"` / `"date-time"` を追加し、anchor と `result` の型検証に使う。
 
 ## 4. グラフの構造規約
 
@@ -359,6 +404,7 @@ Node 間のデータ連携は文字列テンプレート展開ではなく、以
 ### 6.1 静的検証（保存 / 公開 / 検証 API）
 
 - `inputs_schema` / `output_schema` / `state_schema` が許可された JSON Schema サブセット内であること。
+  `format` は `date` / `date-time` のみ許可する。
 - 全 Node ID / Edge ID が UUID 形式で一意であること。
 - `capability_key` が `task_agent_capabilities` に存在し `enabled=1` であること。
 - target を持つ Capability は `config.target` が必須で、target schema に適合すること。
@@ -370,6 +416,8 @@ Node 間のデータ連携は文字列テンプレート展開ではなく、以
 - Loop Node がネストされていないこと。
 - Terminal Node に outgoing Edge がないこと。
 - 型付き参照が解決可能であり、参照先の型と一致すること。
+- `$expr` の `kind` / `version` / `math` / `timezone` / `week_starts_on` / `result` が妥当で
+  あること。anchor の参照先が date / date-time と宣言されている位置ではその型と一致すること。
 - 秘密値を含む入力が固定値として保存されていないこと（UI 警告 + 検証ヒューリスティック）。
 
 ### 6.2 動的検証（Run 開始直前 / Node 実行直前）
@@ -719,7 +767,7 @@ Agent 指紋を含む。
 
 ### 16.2 永続化
 
-SQLite に `PRAGMA user_version = 53`（v60 まで拡張）マイグレーションで追加する(`database.py`)。
+SQLite に `PRAGMA user_version = 53`（v61 まで拡張）マイグレーションで追加する(`database.py`)。
 
 ```text
 workflows
@@ -765,6 +813,7 @@ workflow_runs
   inputs_json TEXT
   graph_snapshot_json TEXT NOT NULL
   source_run_id TEXT
+  reference_time TEXT                    -- v61: frozen now for $expr (UTC ISO 8601)
   worker_instance_id TEXT
   result_summary TEXT
   error_summary TEXT

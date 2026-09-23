@@ -1,6 +1,11 @@
 import { useState } from "react";
 import { isReferenceValue, type ReferenceGroup } from "./graphModel";
 import ReferencePicker from "./ReferencePicker";
+import ExpressionEditor from "./ExpressionEditor";
+import {
+  defaultExpression,
+  isExpressionValue,
+} from "./expressionModel";
 
 export interface StructuredValueEditorProps {
   value: Record<string, unknown>;
@@ -13,6 +18,7 @@ export interface StructuredValueEditorProps {
 
 function kindOf(value: unknown): string {
   if (isReferenceValue(value)) return "参照";
+  if (isExpressionValue(value)) return "式";
   if (value === null) return "null";
   if (Array.isArray(value)) return "array";
   return typeof value;
@@ -34,6 +40,17 @@ function ValueEditor({
   testIdPrefix,
 }: ValueEditorProps) {
   const testId = `${testIdPrefix}-${idPath}`;
+
+  if (isExpressionValue(value)) {
+    return (
+      <ExpressionEditor
+        idPrefix={testId}
+        value={value}
+        onChange={onChange}
+        referenceGroups={referenceGroups}
+      />
+    );
+  }
 
   if (isReferenceValue(value)) {
     return (
@@ -184,18 +201,41 @@ export default function StructuredValueEditor({
               <span className="rounded bg-slate-100 px-1 text-[10px] text-slate-500">
                 {kindOf(child)}
               </span>
-              <button
-                type="button"
-                className="cursor-pointer rounded border border-slate-300 px-1 text-[10px] text-slate-600"
-                onClick={() =>
-                  onChange({
-                    ...value,
-                    [key]: isReferenceValue(child) ? "" : { $ref: "" },
-                  })
-                }
-              >
-                {isReferenceValue(child) ? "値を入力" : "参照"}
-              </button>
+              {isExpressionValue(child) ? (
+                <button
+                  type="button"
+                  className="cursor-pointer rounded border border-slate-300 px-1 text-[10px] text-slate-600"
+                  onClick={() => onChange({ ...value, [key]: "" })}
+                >
+                  値を入力
+                </button>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    className="cursor-pointer rounded border border-slate-300 px-1 text-[10px] text-slate-600"
+                    onClick={() =>
+                      onChange({
+                        ...value,
+                        [key]: isReferenceValue(child) ? "" : { $ref: "" },
+                      })
+                    }
+                  >
+                    {isReferenceValue(child) ? "値を入力" : "参照"}
+                  </button>
+                  {typeof child === "string" && (
+                    <button
+                      type="button"
+                      className="cursor-pointer rounded border border-slate-300 px-1 text-[10px] text-slate-600"
+                      onClick={() =>
+                        onChange({ ...value, [key]: defaultExpression() })
+                      }
+                    >
+                      式
+                    </button>
+                  )}
+                </>
+              )}
               <button
                 type="button"
                 className="cursor-pointer text-[11px] text-rose-700"

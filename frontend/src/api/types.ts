@@ -1164,6 +1164,7 @@ export interface WorkflowSchemaField {
   minLength?: number;
   maxLength?: number;
   pattern?: string;
+  format?: string;
   properties?: Record<string, WorkflowSchemaField>;
   required?: string[];
   items?: WorkflowSchemaField;

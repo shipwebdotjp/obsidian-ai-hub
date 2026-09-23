@@ -167,6 +167,27 @@ function PropertyEditor({
         />
       )}
 
+      {type === "string" && (
+        <div className="flex items-center gap-1">
+          <span className="text-[10px] text-slate-500">format</span>
+          <select
+            data-testid={`${testIdPrefix}-format`}
+            className="rounded border border-slate-300 px-1 py-0.5 text-[11px]"
+            value={typeof field.format === "string" ? field.format : "none"}
+            onChange={(event) => {
+              const next = { ...field };
+              if (event.target.value === "none") delete next.format;
+              else next.format = event.target.value;
+              onUpdate(next);
+            }}
+          >
+            <option value="none">(なし)</option>
+            <option value="date">date</option>
+            <option value="date-time">date-time</option>
+          </select>
+        </div>
+      )}
+
       {type === "array" && (
         <div className="space-y-1">
           <div className="flex items-center gap-1">

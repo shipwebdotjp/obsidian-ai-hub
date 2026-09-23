@@ -107,7 +107,23 @@ class WorkflowEngine:
         self._by_id = {str(n["node_id"]): n for n in nodes}
         self._edges = edges
         self._run = run
-        self._run_inputs = run.get("inputs") or {}
+        self._reference_time = run.get("reference_time") or run.get("created_at")
+        raw_inputs = run.get("inputs") or {}
+        # Resolve date expressions in Run inputs once, against the frozen
+        # reference time, so downstream ``run.inputs.*`` references see values.
+        try:
+            resolved_inputs = resolve_value(
+                raw_inputs,
+                run_inputs={},
+                node_outputs={},
+                reference_time=self._reference_time,
+            )
+        except (KeyError, ValueError) as exc:
+            return RunOutcome(
+                kind="failed",
+                error_summary=f"Run 入力の日時式を解決できません: {exc}",
+            )
+        self._run_inputs = resolved_inputs if isinstance(resolved_inputs, dict) else {}
         self._node_outputs: dict[str, Any] = {}
         self._declared_effects = set()
         self._satisfied_effects = set()
@@ -823,6 +839,7 @@ class WorkflowEngine:
             loop_state=state,
             loop_input=loop_input,
             loop_iteration=iteration,
+            reference_time=self._reference_time,
         )
         return resolved if isinstance(resolved, dict) else {}
 
@@ -846,6 +863,7 @@ class WorkflowEngine:
                     loop_state=state,
                     loop_input=loop_input,
                     loop_iteration=iteration,
+                    reference_time=self._reference_time,
                 ),
             )
         except KeyError as exc:
@@ -870,6 +888,7 @@ class WorkflowEngine:
             loop_state=loop_state,
             loop_input=loop_input,
             loop_iteration=loop_iteration,
+            reference_time=self._reference_time,
         )
         return resolved if isinstance(resolved, dict) else {}
 
@@ -880,6 +899,7 @@ class WorkflowEngine:
                 {"$ref": path},
                 run_inputs=self._run_inputs,
                 node_outputs=self._node_outputs,
+                reference_time=self._reference_time,
             ),
         )
 

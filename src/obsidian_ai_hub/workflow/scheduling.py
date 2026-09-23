@@ -115,12 +115,15 @@ def create_run_for_latest_published(
     conn: sqlite3.Connection,
     workflow_id: str,
     inputs: dict[str, Any],
+    *,
+    reference_time: Optional[str] = None,
 ) -> tuple[dict[str, Any], str, str]:
     """Resolve + validate + insert a Run inside the caller's transaction.
 
     Returns ``(run, revision_id, initial_status)``. Raises
     ``NoPublishedRevisionError`` / ``InputSchemaError`` before any insert so
     the caller can record the failure without a dangling Run.
+    ``reference_time`` is the scheduler fire slot frozen for date expressions.
     """
     revision = _resolve_latest_published(conn, workflow_id)
     if revision is None:
@@ -128,7 +131,10 @@ def create_run_for_latest_published(
             f"Workflow '{workflow_id}' に公開済み Revision がありません"
         )
     errors = validate_value_against_schema(
-        inputs, revision.get("inputs_schema") or {}, path="run.inputs"
+        inputs,
+        revision.get("inputs_schema") or {},
+        path="run.inputs",
+        allow_expressions=True,
     )
     if errors:
         raise InputSchemaError(errors)
@@ -151,6 +157,7 @@ def create_run_for_latest_published(
         inputs=inputs,
         snapshot=snapshot,
         initial_status=initial_status,
+        reference_time=reference_time,
     )
     if skip_approval and needs_approval:
         workflow_store.append_event(
@@ -212,7 +219,7 @@ def dispatch_recurring_slot(
             failure_reason: Optional[str] = None
             try:
                 run, revision_id, _ = create_run_for_latest_published(
-                    active, workflow_id, inputs
+                    active, workflow_id, inputs, reference_time=scheduled_for
                 )
             except WorkflowDispatchError as exc:
                 status = FAILED

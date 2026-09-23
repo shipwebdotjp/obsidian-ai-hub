@@ -159,6 +159,13 @@ export function validateReference(
     return { code: "reference_scope", message: `未対応の参照形式: ${ref}` };
   }
   const [head, second, rest] = [match[1], match[2], match[3]];
+  if (head === "run" && second === "context") {
+    if (ref === REFERENCE_TIME_REF) return null;
+    return {
+      code: "reference_scope",
+      message: `未対応の run.context 参照: ${ref}`,
+    };
+  }
   if (head === "run" && second === "inputs") {
     const field = (rest ?? "").split(".")[0].replace(/\[\d+\]$/, "");
     if (scope.inputsKeys && field && !scope.inputsKeys.includes(field)) {
@@ -311,7 +318,7 @@ export function schemaReferenceFields(
 }
 
 const REFERENCE_PATH_RE =
-  /^(?:run\.inputs\..+|nodes\.[^.]+\.output(?:\..+)?|loop\.(?:state|input)(?:\..+)?|loop\.iteration)$/;
+  /^(?:run\.inputs\..+|run\.context\.reference_time|nodes\.[^.]+\.output(?:\..+)?|loop\.(?:state|input)(?:\..+)?|loop\.iteration)$/;
 
 /** Grammar-only check: true when ``value`` is a resolvable reference shape. */
 export function isReferencePath(value: string): boolean {
@@ -362,6 +369,23 @@ function nodeOutputFields(
   return [{ path: basePath, type: "object" }];
 }
 
+/** The frozen reference-time path shared by validation and the editor. */
+export const REFERENCE_TIME_REF = "run.context.reference_time";
+
+/** The single source for the ``run.context`` reference candidate group. */
+export function runContextReferenceGroup(): ReferenceGroup {
+  return {
+    label: "実行コンテキスト (run.context)",
+    fields: [
+      {
+        path: REFERENCE_TIME_REF,
+        type: "string",
+        description: "Run 作成時に固定された基準時刻（date-time）",
+      },
+    ],
+  };
+}
+
 /**
  * Build the typed reference candidates available inside a scope.
  *
@@ -387,6 +411,7 @@ export function buildReferenceGroups(
   if (inputFields.length > 0) {
     groups.push({ label: "実行入力 (run.inputs)", fields: inputFields });
   }
+  groups.push(runContextReferenceGroup());
 
   const scopeNodes = nodes.filter(
     (node) =>

@@ -739,6 +739,9 @@ def get_db_connection() -> sqlite3.Connection:
     if current_version <= 59:
         run_migration_v60(conn)
 
+    if current_version <= 60:
+        run_migration_v61(conn)
+
     return conn
 
 
@@ -1181,6 +1184,27 @@ def run_migration_v60(conn: sqlite3.Connection) -> None:
         "ALTER TABLE workflows ADD COLUMN skip_approval INTEGER NOT NULL DEFAULT 0;"
     )
     conn.execute("PRAGMA user_version = 60;")
+    conn.commit()
+
+
+def run_migration_v61(conn: sqlite3.Connection) -> None:
+    """Run migration for version 61 (frozen run reference time).
+
+    Adds ``workflow_runs.reference_time``: the instant ``now`` is frozen to for
+    typed date expressions (``docs/workflow/specification.md`` §3.5). It is a
+    UTC ISO 8601 string fixed once at Run creation: manual runs use the creation
+    time, scheduler runs the fire slot. Existing runs backfill from
+    ``created_at``.
+    """
+    try:
+        conn.execute("ALTER TABLE workflow_runs ADD COLUMN reference_time TEXT;")
+    except sqlite3.OperationalError as e:
+        _ignore_duplicate_schema_object(e)
+    conn.execute(
+        "UPDATE workflow_runs SET reference_time = created_at "
+        "WHERE reference_time IS NULL;"
+    )
+    conn.execute("PRAGMA user_version = 61;")
     conn.commit()
 
 

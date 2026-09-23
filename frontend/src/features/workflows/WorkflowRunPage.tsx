@@ -17,7 +17,7 @@ import {
 } from "../../api/runSse";
 import { formatDateTime } from "../../utils/date";
 import { getApiErrorMessage } from "../../utils/error";
-import { nodeDisplayName } from "./graphModel";
+import { nodeDisplayName, runContextReferenceGroup } from "./graphModel";
 import {
   aggregateNodeStates,
   historyForNode,
@@ -367,6 +367,9 @@ export default function WorkflowRunPage() {
             values={rerunInputs}
             onChange={setRerunInputs}
             errors={rerunErrors}
+            allowExpressions
+            allowNodeAnchors={false}
+            expressionReferenceGroups={[runContextReferenceGroup()]}
           />
           <button
             type="button"

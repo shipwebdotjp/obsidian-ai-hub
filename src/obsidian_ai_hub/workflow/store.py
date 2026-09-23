@@ -21,6 +21,7 @@ from obsidian_ai_hub.workflow.models import (
     NODE_TERMINAL_STATUSES,
     RUN_ALLOWED_TRANSITIONS,
     RUN_TERMINAL_STATUSES,
+    normalize_reference_time,
 )
 
 RETENTION_DAYS = 30
@@ -764,16 +765,23 @@ def _insert_run(
     snapshot: dict[str, Any],
     initial_status: str,
     source_run_id: Optional[str] = None,
+    reference_time: Optional[str] = None,
 ) -> str:
-    """Insert one run row (redacted) and return its id."""
+    """Insert one run row (redacted) and return its id.
+
+    ``reference_time`` is the frozen ``now`` for date expressions. It defaults
+    to the creation time; the scheduler passes the fire slot instead
+    (spec §3.5). It is normalized to a UTC ISO string.
+    """
     if initial_status not in ("queued", "waiting_approval"):
         raise ValueError(f"Unsupported initial run status: {initial_status}")
     run_id = _new_id("wrun")
     now = _now_iso()
+    frozen = normalize_reference_time(reference_time) or now
     conn.execute(
         "INSERT INTO workflow_runs (run_id, workflow_id, revision_id, status, "
-        "inputs_json, graph_snapshot_json, source_run_id, created_at, updated_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);",
+        "inputs_json, graph_snapshot_json, source_run_id, reference_time, "
+        "created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);",
         (
             run_id,
             workflow_id,
@@ -782,6 +790,7 @@ def _insert_run(
             _redacted_json(inputs),
             _redacted_json(snapshot),
             source_run_id,
+            frozen,
             now,
             now,
         ),
@@ -795,6 +804,7 @@ def create_run(
     inputs: dict[str, Any],
     *,
     initial_status: str = "queued",
+    reference_time: Optional[str] = None,
     conn: Optional[sqlite3.Connection] = None,
 ) -> dict[str, Any]:
     """Create a run with an immutable graph + inputs snapshot.
@@ -830,6 +840,7 @@ def create_run(
                 inputs=inputs,
                 snapshot=snapshot,
                 initial_status=initial_status,
+                reference_time=reference_time,
             )
 
         if is_generated:
@@ -850,6 +861,7 @@ def insert_run_snapshot(
     inputs: dict[str, Any],
     snapshot: dict[str, Any],
     initial_status: str,
+    reference_time: Optional[str] = None,
 ) -> str:
     """Insert a run from a caller-built snapshot on an existing transaction.
 
@@ -863,6 +875,7 @@ def insert_run_snapshot(
         inputs=inputs,
         snapshot=snapshot,
         initial_status=initial_status,
+        reference_time=reference_time,
     )
 
 
@@ -871,6 +884,7 @@ def create_rerun_run(
     inputs: dict[str, Any],
     *,
     initial_status: str = "queued",
+    reference_time: Optional[str] = None,
     conn: Optional[sqlite3.Connection] = None,
 ) -> dict[str, Any]:
     """Create a new run from a past run's graph snapshot and inputs.
@@ -891,6 +905,7 @@ def create_rerun_run(
                 snapshot=source_run.get("graph_snapshot") or {},
                 initial_status=initial_status,
                 source_run_id=str(source_run["run_id"]),
+                reference_time=reference_time,
             )
 
         if is_generated:
@@ -915,6 +930,8 @@ def get_run(
     run = dict(row)
     run["inputs"] = _loads(run.get("inputs_json"), {})
     run["graph_snapshot"] = _loads(run.get("graph_snapshot_json"), {})
+    # Older rows predate the reference_time column; fall back to creation time.
+    run["reference_time"] = run.get("reference_time") or run.get("created_at")
     return run
 
 

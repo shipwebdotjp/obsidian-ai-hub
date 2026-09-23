@@ -118,3 +118,34 @@ describe("InputsSchemaForm", () => {
     expect(onChange).toHaveBeenLastCalledWith({ done: { $ref: "" } });
   });
 });
+
+  it("offers expression mode for date fields and emits $expr", async () => {
+    const onChange = vi.fn();
+    render(
+      <InputsSchemaForm
+        schema={{
+          type: "object",
+          properties: {
+            day: { type: "string", format: "date" },
+          },
+        }}
+        values={{}}
+        onChange={onChange}
+        allowExpressions
+        expressionReferenceGroups={[
+          {
+            label: "実行コンテキスト (run.context)",
+            fields: [{ path: "run.context.reference_time", type: "string" }],
+          },
+        ]}
+      />,
+    );
+    await userEvent.click(screen.getByText("式"));
+    expect(onChange).toHaveBeenCalledTimes(1);
+    const next = onChange.mock.calls[0][0] as {
+      day: { $expr: { result: string; anchor: unknown } };
+    };
+    expect(next.day.$expr.result).toBe("date");
+    expect(next.day.$expr.anchor).toBe("now");
+    expect(screen.queryByTestId("workflow-input-day-math")).not.toBeInTheDocument();
+  });

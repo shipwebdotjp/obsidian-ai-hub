@@ -37,7 +37,10 @@ const SUPPORTED_KEYS = new Set([
   "minLength",
   "maxLength",
   "pattern",
+  "format",
 ]);
+
+const SUPPORTED_FORMATS = new Set(["date", "date-time"]);
 
 const UNSUPPORTED_KEYS = new Set([
   "$ref",
@@ -95,6 +98,17 @@ export function validateSchemaSubset(
   }
   if (type === undefined && !("enum" in node)) {
     issues.push({ path, message: "type または enum が必要です" });
+  }
+  if (node.format !== null && node.format !== undefined) {
+    const format = node.format;
+    if (type !== undefined && type !== "string") {
+      issues.push({ path: `${path}.format`, message: "string 型にのみ指定できます" });
+    } else if (typeof format !== "string" || !SUPPORTED_FORMATS.has(format)) {
+      issues.push({
+        path: `${path}.format`,
+        message: "'date' または 'date-time' が必要です",
+      });
+    }
   }
   if ("enum" in node) {
     const enumValues = node.enum;

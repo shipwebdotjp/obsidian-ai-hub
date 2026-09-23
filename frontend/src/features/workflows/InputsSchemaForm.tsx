@@ -1,10 +1,15 @@
-import { useState, type ChangeEvent } from "react";
+import { useState, type ChangeEvent, type ReactNode } from "react";
 import type { WorkflowSchemaField } from "../../api/types";
 import {
   isReferenceValue,
   type ReferenceGroup,
 } from "./graphModel";
 import ReferencePicker from "./ReferencePicker";
+import ExpressionEditor from "./ExpressionEditor";
+import {
+  defaultExpression,
+  isExpressionValue,
+} from "./expressionModel";
 import { renderFieldWidget } from "./SchemaFieldWidget";
 
 export interface InputsSchemaFormProps {
@@ -15,6 +20,12 @@ export interface InputsSchemaFormProps {
   /** When set, each leaf may hold a typed ``{"$ref": ...}`` instead of a literal. */
   allowReferences?: boolean;
   referenceGroups?: ReferenceGroup[];
+  /** When set, string leaves may hold a ``{"$expr": ...}`` date expression. */
+  allowExpressions?: boolean;
+  /** Anchor references for expressions; limit to context in the Run form. */
+  expressionReferenceGroups?: ReferenceGroup[];
+  /** Whether expression anchors may reference Node/Loop outputs. */
+  allowNodeAnchors?: boolean;
   /** Test id prefix; nested fields append their path. */
   testIdPrefix?: string;
 }
@@ -78,16 +89,12 @@ function FieldHeader({
   label,
   required,
   description,
-  allowReferences,
-  onToggleReference,
-  referencing,
+  actions,
 }: {
   label: string;
   required: boolean;
   description?: string;
-  allowReferences: boolean;
-  onToggleReference?: () => void;
-  referencing: boolean;
+  actions?: ReactNode;
 }) {
   return (
     <div className="mb-1 flex items-start justify-between gap-2">
@@ -102,16 +109,22 @@ function FieldHeader({
           </p>
         )}
       </div>
-      {allowReferences && onToggleReference && (
-        <button
-          type="button"
-          className="shrink-0 cursor-pointer rounded border border-slate-300 px-1 text-[10px] text-slate-600"
-          onClick={onToggleReference}
-        >
-          {referencing ? "値を入力" : "参照"}
-        </button>
+      {actions && (
+        <div className="flex shrink-0 gap-1">{actions}</div>
       )}
     </div>
+  );
+}
+
+function ModeButton({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      className="cursor-pointer rounded border border-slate-300 px-1 text-[10px] text-slate-600"
+      onClick={onClick}
+    >
+      {label}
+    </button>
   );
 }
 
@@ -125,6 +138,9 @@ interface SchemaValueFieldProps {
   testIdPrefix: string;
   allowReferences: boolean;
   referenceGroups: ReferenceGroup[];
+  allowExpressions: boolean;
+  expressionReferenceGroups: ReferenceGroup[];
+  allowNodeAnchors: boolean;
 }
 
 function SchemaValueField({
@@ -137,9 +153,47 @@ function SchemaValueField({
   testIdPrefix,
   allowReferences,
   referenceGroups,
+  allowExpressions,
+  expressionReferenceGroups,
+  allowNodeAnchors,
 }: SchemaValueFieldProps) {
   const testId = `${testIdPrefix}-${idPath}`;
   const unsupported = field["x-unsupported"] === true;
+  const expressionCapable =
+    allowExpressions && (field.type === "string" || field.type === undefined);
+
+  // Render an existing expression independently of the toggle so a stored
+  // value is never coerced to ``[object Object]`` by the literal widgets.
+  if (isExpressionValue(value)) {
+    return (
+      <div className="block text-sm">
+        <FieldHeader
+          label={label}
+          required={required}
+          description={field.description}
+          actions={
+            <>
+              <ModeButton label="値を入力" onClick={() => onChange("")} />
+              {allowReferences && (
+                <ModeButton
+                  label="参照"
+                  onClick={() => onChange({ $ref: "" })}
+                />
+              )}
+            </>
+          }
+        />
+        <ExpressionEditor
+          idPrefix={testId}
+          value={value}
+          onChange={onChange}
+          referenceGroups={expressionReferenceGroups}
+          allowNodeAnchors={allowNodeAnchors}
+          expectedFormat={field.format}
+        />
+      </div>
+    );
+  }
 
   if (allowReferences && isReferenceValue(value)) {
     return (
@@ -148,9 +202,17 @@ function SchemaValueField({
           label={label}
           required={required}
           description={field.description}
-          allowReferences
-          referencing
-          onToggleReference={() => onChange("")}
+          actions={
+            <>
+              <ModeButton label="値を入力" onClick={() => onChange("")} />
+              {expressionCapable && (
+                <ModeButton
+                  label="式"
+                  onClick={() => onChange(defaultExpression(field.format))}
+                />
+              )}
+            </>
+          }
         />
         <ReferencePicker
           idPrefix={testId}
@@ -162,14 +224,26 @@ function SchemaValueField({
     );
   }
 
+  const literalActions =
+    allowReferences || expressionCapable ? (
+      <>
+        {allowReferences && (
+          <ModeButton label="参照" onClick={() => onChange({ $ref: "" })} />
+        )}
+        {expressionCapable && (
+          <ModeButton
+            label="式"
+            onClick={() => onChange(defaultExpression(field.format))}
+          />
+        )}
+      </>
+    ) : undefined;
   const header = (
     <FieldHeader
       label={label}
       required={required}
       description={field.description}
-      allowReferences={allowReferences}
-      referencing={false}
-      onToggleReference={() => onChange({ $ref: "" })}
+      actions={literalActions}
     />
   );
 
@@ -272,6 +346,9 @@ function SchemaValueField({
             testIdPrefix={testIdPrefix}
             allowReferences={allowReferences}
             referenceGroups={referenceGroups}
+            allowExpressions={allowExpressions}
+            expressionReferenceGroups={expressionReferenceGroups}
+            allowNodeAnchors={allowNodeAnchors}
           />
         ))}
       </div>
@@ -315,6 +392,9 @@ function SchemaValueField({
                 testIdPrefix={testIdPrefix}
                 allowReferences={allowReferences}
                 referenceGroups={referenceGroups}
+                allowExpressions={allowExpressions}
+                expressionReferenceGroups={expressionReferenceGroups}
+                allowNodeAnchors={allowNodeAnchors}
               />
               <button
                 type="button"
@@ -369,8 +449,12 @@ export default function InputsSchemaForm({
   errors = [],
   allowReferences = false,
   referenceGroups = [],
+  allowExpressions = false,
+  expressionReferenceGroups,
+  allowNodeAnchors = true,
   testIdPrefix = "workflow-input",
 }: InputsSchemaFormProps) {
+  const anchorGroups = expressionReferenceGroups ?? referenceGroups;
   const root = asField(schema);
   const properties = root.properties ?? {};
   const required = new Set(root.required ?? []);
@@ -412,6 +496,9 @@ export default function InputsSchemaForm({
           testIdPrefix={testIdPrefix}
           allowReferences={allowReferences}
           referenceGroups={referenceGroups}
+          allowExpressions={allowExpressions}
+          expressionReferenceGroups={anchorGroups}
+          allowNodeAnchors={allowNodeAnchors}
         />
       ))}
       {errorList}

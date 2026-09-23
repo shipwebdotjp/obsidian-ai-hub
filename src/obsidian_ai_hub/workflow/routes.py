@@ -593,7 +593,10 @@ def create_run(revision_id: str, payload: RunCreate) -> dict[str, Any]:
     if revision is None:
         raise HTTPException(status_code=404, detail="revision not found")
     input_errors = validate_value_against_schema(
-        payload.inputs, revision.get("inputs_schema") or {}, path="run.inputs"
+        payload.inputs,
+        revision.get("inputs_schema") or {},
+        path="run.inputs",
+        allow_expressions=True,
     )
     if input_errors:
         raise HTTPException(status_code=422, detail={"errors": input_errors})
@@ -644,7 +647,10 @@ def rerun_run(run_id: str, payload: RerunRequest) -> dict[str, Any]:
         else dict(source.get("inputs") or {})
     )
     input_errors = validate_value_against_schema(
-        inputs, snapshot.get("inputs_schema") or {}, path="run.inputs"
+        inputs,
+        snapshot.get("inputs_schema") or {},
+        path="run.inputs",
+        allow_expressions=True,
     )
     if input_errors:
         raise HTTPException(status_code=422, detail={"errors": input_errors})
