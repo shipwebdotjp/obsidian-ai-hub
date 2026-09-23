@@ -322,6 +322,7 @@ class VaultSearchResponse(BaseModel):
 class VaultFileResponse(BaseModel):
     content: str
     relative_path: str
+    vault_name: str
 
 
 class VaultFileListItem(BaseModel):

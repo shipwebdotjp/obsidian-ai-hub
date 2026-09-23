@@ -214,6 +214,7 @@ export interface VaultSearchResponse {
 export interface VaultFileResponse {
   content: string;
   relative_path: string;
+  vault_name: string;
 }
 
 export interface VaultFileListItem {

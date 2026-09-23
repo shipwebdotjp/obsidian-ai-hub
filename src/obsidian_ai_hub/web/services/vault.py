@@ -90,6 +90,7 @@ def get_vault_file(relative_path: str) -> dict:
     return {
         "content": content,
         "relative_path": relative_path,
+        "vault_name": Path(config.VAULT_PATH).name,
     }
 
 

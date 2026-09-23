@@ -1,49 +1,37 @@
 import { useEffect, useState } from "react";
-import type { VaultSearchHit } from "../../api/types";
-import { formatScore, formatMtime, buildObsidianUrl } from "./utils";
 import { getVaultFile } from "../../api/client";
 import MarkdownPreview from "../../components/MarkdownPreview";
+import { buildObsidianUrl, parseNoteContent } from "../../utils/vault";
+import { formatMtime, formatScore } from "./utils";
 
-export interface VaultSearchDetailPanelProps {
-  hit: VaultSearchHit;
+export interface VaultNoteDetailPanelProps {
+  relativePath: string;
   notify: (msg: string, kind?: "info" | "error") => void;
+  score?: number;
+  chunkIndex?: number | null;
+  mtime?: number | null;
 }
 
-function parseNoteContent(rawContent: string): { frontmatter: string | null; body: string } {
-  const lines = rawContent.split(/\r?\n/);
-  if (lines.length > 0 && lines[0] === "---") {
-    let endIdx = -1;
-    for (let i = 1; i < lines.length; i++) {
-      if (lines[i] === "---" || lines[i] === "...") {
-        endIdx = i;
-        break;
-      }
-    }
-    if (endIdx !== -1) {
-      const frontmatterLines = lines.slice(0, endIdx + 1);
-      const bodyLines = lines.slice(endIdx + 1);
-      return {
-        frontmatter: frontmatterLines.join("\n"),
-        body: bodyLines.join("\n"),
-      };
-    }
-  }
-  return { frontmatter: null, body: rawContent };
-}
-
-
-
-export default function VaultSearchDetailPanel({ hit, notify }: VaultSearchDetailPanelProps) {
-  const meta = hit.metadata;
-  const relativePath = meta.relative_path;
-
+/**
+ * 検索結果とファイルエクスプローラーで共用するノートビューアー。
+ * 本文・frontmatter・Markdown 描画・取得エラー・Obsidian 起動を一箇所に集約する。
+ */
+export default function VaultNoteDetailPanel({
+  relativePath,
+  notify,
+  score,
+  chunkIndex,
+  mtime,
+}: VaultNoteDetailPanelProps) {
   const [content, setContent] = useState<string>("");
+  const [vaultName, setVaultName] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!relativePath) {
       setContent("");
+      setVaultName(null);
       setError("相対パスが不足しているため、ノートの全文を取得できません");
       setLoading(false);
       return;
@@ -53,17 +41,19 @@ export default function VaultSearchDetailPanel({ hit, notify }: VaultSearchDetai
     setLoading(true);
     setError(null);
     setContent("");
+    setVaultName(null);
 
     getVaultFile(relativePath, controller.signal)
       .then((res) => {
         setContent(res.content);
+        setVaultName(res.vault_name ?? null);
         setError(null);
       })
       .catch((err) => {
-        if (err.name === "AbortError" || controller.signal.aborted) {
+        if ((err instanceof DOMException && err.name === "AbortError") || controller.signal.aborted) {
           return;
         }
-        setError(err.message || "ノートの取得に失敗しました");
+        setError(err instanceof Error && err.message ? err.message : "ノートの取得に失敗しました");
       })
       .finally(() => {
         if (!controller.signal.aborted) {
@@ -77,7 +67,7 @@ export default function VaultSearchDetailPanel({ hit, notify }: VaultSearchDetai
   }, [relativePath]);
 
   const handleOpenInObsidian = () => {
-    const url = buildObsidianUrl(hit);
+    const url = buildObsidianUrl(vaultName, relativePath);
     if (!url) {
       notify("Obsidian の vault 名が不明です", "error");
       return;
@@ -93,38 +83,34 @@ export default function VaultSearchDetailPanel({ hit, notify }: VaultSearchDetai
         <h2 className="text-base font-semibold text-slate-900">詳細</h2>
         <table className="w-full text-xs text-slate-600">
           <tbody>
-            <tr>
-              <td className="pr-3 font-medium w-20">Score</td>
-              <td className="font-mono">{formatScore(hit.score)}</td>
-            </tr>
-            {meta.relative_path && (
+            {score !== undefined && (
+              <tr>
+                <td className="pr-3 font-medium w-20">Score</td>
+                <td className="font-mono">{formatScore(score)}</td>
+              </tr>
+            )}
+            {relativePath && (
               <tr>
                 <td className="pr-3 font-medium">Path</td>
-                <td>{meta.relative_path}</td>
+                <td>{relativePath}</td>
               </tr>
             )}
-            {meta.file_path && (
-              <tr>
-                <td className="pr-3 font-medium">Full Path</td>
-                <td>{meta.file_path}</td>
-              </tr>
-            )}
-            {meta.chunk_index !== undefined && meta.chunk_index !== null && (
+            {chunkIndex !== undefined && chunkIndex !== null && (
               <tr>
                 <td className="pr-3 font-medium">Chunk</td>
-                <td>{meta.chunk_index}</td>
+                <td>{chunkIndex}</td>
               </tr>
             )}
-            {meta.mtime !== undefined && meta.mtime !== null && (
+            {mtime !== undefined && mtime !== null && (
               <tr>
                 <td className="pr-3 font-medium">Modified</td>
-                <td>{formatMtime(meta.mtime)}</td>
+                <td>{formatMtime(mtime)}</td>
               </tr>
             )}
-            {meta.vault_name && (
+            {vaultName && (
               <tr>
                 <td className="pr-3 font-medium">Vault</td>
-                <td>{meta.vault_name}</td>
+                <td>{vaultName}</td>
               </tr>
             )}
           </tbody>

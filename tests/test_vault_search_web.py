@@ -120,6 +120,7 @@ def test_vault_file_success(loopback_client, tmp_path):
     body = res.json()
     assert body["content"] == note_content
     assert body["relative_path"] == "test-note.md"
+    assert body["vault_name"] == "vault"
 
 
 def test_vault_file_subdir_success(loopback_client, tmp_path):
@@ -137,6 +138,7 @@ def test_vault_file_subdir_success(loopback_client, tmp_path):
     body = res.json()
     assert body["content"] == note_content
     assert body["relative_path"] == "daily/2026-07-16.md"
+    assert body["vault_name"] == "vault"
 
 
 def test_vault_file_not_found(loopback_client):

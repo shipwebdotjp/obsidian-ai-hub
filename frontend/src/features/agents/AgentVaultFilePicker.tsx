@@ -13,8 +13,8 @@ import {
 } from "lucide-react";
 import { listVaultFiles, searchVault } from "../../api/client";
 import type { VaultFileListItem } from "../../api/types";
+import { MAX_AGENT_CONTEXT_REFS, type PendingContextRef } from "./agentViewUtils";
 import {
-  MAX_AGENT_CONTEXT_REFS,
   buildVaultTree,
   filterVaultFiles,
   flattenVaultTree,
@@ -22,9 +22,8 @@ import {
   vaultFileDirectory,
   vaultFileName,
   type FlatVaultRow,
-  type PendingContextRef,
   type VaultTreeNode,
-} from "./agentViewUtils";
+} from "../../utils/vault";
 
 interface ContentHit {
   path: string;

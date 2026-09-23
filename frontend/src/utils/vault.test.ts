@@ -2,15 +2,19 @@ import { describe, it, expect } from "vitest";
 import {
   buildVaultTree,
   filterVaultFiles,
+  filterVaultFilesByName,
   flattenVaultTree,
   formatVaultFileSize,
+  listFilesInDirectory,
+  parseNoteContent,
+  sortVaultFiles,
   vaultFileDirectory,
   vaultFileName,
-} from "../agentViewUtils";
-import type { VaultFileListItem } from "../../../api/types";
+} from "./vault";
+import type { VaultFileListItem } from "../api/types";
 
-function file(relative_path: string): VaultFileListItem {
-  return { relative_path, size: 100, mtime: 1700000000 };
+function file(relative_path: string, mtime: number = 1700000000): VaultFileListItem {
+  return { relative_path, size: 100, mtime };
 }
 
 const FILES = [
@@ -53,6 +57,21 @@ describe("filterVaultFiles", () => {
   });
 });
 
+describe("filterVaultFilesByName", () => {
+  it("matches only the filename, not the directory", () => {
+    expect(filterVaultFilesByName(FILES, "プロジェクトA")).toEqual([]);
+  });
+
+  it("is case-insensitive and partial", () => {
+    expect(filterVaultFilesByName([file("Notes/Hello.md")], "ello")).toHaveLength(1);
+    expect(filterVaultFilesByName([file("Notes/Hello.md")], "HELLO")).toHaveLength(1);
+  });
+
+  it("returns all files (in input order) for an empty query", () => {
+    expect(filterVaultFilesByName(FILES, "  ")).toEqual(FILES);
+  });
+});
+
 describe("buildVaultTree / flattenVaultTree", () => {
   it("groups files by directory with directories first", () => {
     const tree = buildVaultTree(FILES);
@@ -76,6 +95,55 @@ describe("buildVaultTree / flattenVaultTree", () => {
   });
 });
 
+describe("listFilesInDirectory", () => {
+  it("returns only direct children for the root", () => {
+    const files = [file("root.md"), file("dir/a.md"), file("dir/sub/b.md")];
+    expect(listFilesInDirectory(files, "").map((f) => f.relative_path)).toEqual(["root.md"]);
+  });
+
+  it("returns files recursively under a directory", () => {
+    const files = [file("root.md"), file("dir/a.md"), file("dir/sub/b.md"), file("other/c.md")];
+    expect(listFilesInDirectory(files, "dir").map((f) => f.relative_path)).toEqual([
+      "dir/a.md",
+      "dir/sub/b.md",
+    ]);
+  });
+});
+
+describe("sortVaultFiles", () => {
+  const files = [
+    file("b/aaa.md", 100),
+    file("a/ccc.md", 300),
+    file("a/bbb.md", 300),
+  ];
+
+  it("sorts by name ascending and descending", () => {
+    expect(sortVaultFiles(files, "name", "asc").map((f) => f.relative_path)).toEqual([
+      "b/aaa.md",
+      "a/bbb.md",
+      "a/ccc.md",
+    ]);
+    expect(sortVaultFiles(files, "name", "desc").map((f) => f.relative_path)).toEqual([
+      "a/ccc.md",
+      "a/bbb.md",
+      "b/aaa.md",
+    ]);
+  });
+
+  it("sorts by mtime with relative-path tie-break", () => {
+    expect(sortVaultFiles(files, "mtime", "desc").map((f) => f.relative_path)).toEqual([
+      "a/bbb.md",
+      "a/ccc.md",
+      "b/aaa.md",
+    ]);
+    expect(sortVaultFiles(files, "mtime", "asc").map((f) => f.relative_path)).toEqual([
+      "b/aaa.md",
+      "a/bbb.md",
+      "a/ccc.md",
+    ]);
+  });
+});
+
 describe("vault path helpers", () => {
   it("splits filename and directory", () => {
     expect(vaultFileName("a/b/c.md")).toBe("c.md");
@@ -89,5 +157,19 @@ describe("vault path helpers", () => {
     expect(formatVaultFileSize(2048)).toBe("2.0 KB");
     expect(formatVaultFileSize(3 * 1024 * 1024)).toBe("3.0 MB");
     expect(formatVaultFileSize(NaN)).toBe("");
+  });
+});
+
+describe("parseNoteContent", () => {
+  it("separates frontmatter from body", () => {
+    const parsed = parseNoteContent("---\ntitle: x\n---\n# Body");
+    expect(parsed.frontmatter).toBe("---\ntitle: x\n---");
+    expect(parsed.body).toBe("# Body");
+  });
+
+  it("returns the whole content as body without frontmatter", () => {
+    const parsed = parseNoteContent("# Body");
+    expect(parsed.frontmatter).toBeNull();
+    expect(parsed.body).toBe("# Body");
   });
 });
