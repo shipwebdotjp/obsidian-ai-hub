@@ -41,14 +41,22 @@ class InputSchemaError(WorkflowDispatchError):
         super().__init__("; ".join(self.errors) or "run.inputs: schema に適合しません")
 
 
-def requires_approval(nodes: Optional[list[dict[str, Any]]]) -> bool:
+def requires_approval(
+    nodes: Optional[list[dict[str, Any]]],
+    *,
+    skip_approval: bool = False,
+) -> bool:
     """True when any Agent node or ``plan_required`` capability is present.
 
-    The approval boundary is fixed by Capability Policy + selected Agent ID;
+    ``skip_approval`` is the per-workflow override: when set, the run is
+    created ``queued`` and no human gate applies (spec §6.2). The approval
+    boundary is otherwise fixed by Capability Policy + selected Agent ID;
     node-level overrides are not part of v1 (see the Workflow ADR). Reading the
     policy opens the task store, so callers must treat this as a pre-write
     read, not part of the run-insert transaction.
     """
+    if skip_approval:
+        return False
     from obsidian_ai_hub.tasks import store as task_store
 
     policies = {
@@ -125,8 +133,11 @@ def create_run_for_latest_published(
     if errors:
         raise InputSchemaError(errors)
     revision_id = str(revision["revision_id"])
+    nodes = revision.get("nodes") or []
+    skip_approval = workflow_store.workflow_skip_approval(workflow_id, conn=conn)
+    needs_approval = requires_approval(nodes)
     initial_status = (
-        "waiting_approval" if requires_approval(revision.get("nodes") or []) else "queued"
+        "waiting_approval" if needs_approval and not skip_approval else "queued"
     )
     snapshot = {
         "inputs_schema": revision["inputs_schema"],
@@ -141,6 +152,13 @@ def create_run_for_latest_published(
         snapshot=snapshot,
         initial_status=initial_status,
     )
+    if skip_approval and needs_approval:
+        workflow_store.append_event(
+            run_id,
+            "run_approval_skipped",
+            {"reason": "workflow_skip_approval"},
+            conn=conn,
+        )
     run = workflow_store.get_run(run_id, conn=conn)
     assert run is not None
     return run, revision_id, initial_status

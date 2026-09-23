@@ -41,6 +41,7 @@ const sampleWorkflow = {
   workflow_id: "wf_1",
   name: "テストワークフロー",
   description: "説明",
+  skip_approval: false,
   revisions: [
     { revision_id: "wrev_published", version: 1, status: "published" },
     { revision_id: "wrev_draft", version: 2, status: "draft" },
@@ -126,9 +127,28 @@ describe("WorkflowDetailPage workflow update/delete", () => {
       expect(mockUpdateWorkflow).toHaveBeenCalledWith("wf_1", {
         name: "新しい名前",
         description: "説明",
+        skip_approval: false,
       }),
     );
     await waitFor(() => expect(mockGetWorkflow).toHaveBeenCalledTimes(2));
+  });
+
+  it("toggles approval skip through the edit form", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText("テストワークフロー");
+    await user.click(screen.getByRole("button", { name: "編集" }));
+    await user.click(
+      screen.getByRole("checkbox", { name: "承認なしで実行する" }),
+    );
+    await user.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() =>
+      expect(mockUpdateWorkflow).toHaveBeenCalledWith("wf_1", {
+        name: "テストワークフロー",
+        description: "説明",
+        skip_approval: true,
+      }),
+    );
   });
 
   it("deletes the workflow after confirmation and navigates to the list", async () => {

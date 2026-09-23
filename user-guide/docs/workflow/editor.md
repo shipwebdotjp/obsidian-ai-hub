@@ -129,6 +129,8 @@ Node を選択すると、右パネルに対応する設定欄が表示されま
 
 `plan_required` の Capability か Agent Node を含む場合、Run は `waiting_approval` で作成され、
 Run 詳細で承認するまで実行されません（[Run・承認・復旧](runs.md) を参照）。
+Workflow 詳細で **承認なしで実行する** を有効にした Workflow では、これらを含んでいても
+承認なしで実行されます。
 
 ## Revision を追加する
 

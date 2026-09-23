@@ -736,6 +736,9 @@ def get_db_connection() -> sqlite3.Connection:
     if current_version <= 58:
         run_migration_v59(conn)
 
+    if current_version <= 59:
+        run_migration_v60(conn)
+
     return conn
 
 
@@ -1162,6 +1165,22 @@ def run_migration_v59(conn: sqlite3.Connection) -> None:
         );
     """)
     conn.execute("PRAGMA user_version = 59;")
+    conn.commit()
+
+
+def run_migration_v60(conn: sqlite3.Connection) -> None:
+    """Run migration for version 60 (per-workflow approval skip).
+
+    Adds ``workflows.skip_approval``. When set, runs created for the workflow
+    start as ``queued`` even when they contain Agent Nodes or ``plan_required``
+    capabilities, bypassing the human approval gate
+    (``docs/workflow/specification.md`` §6.2). Defaults to ``0`` (approval
+    required) for existing workflows.
+    """
+    conn.execute(
+        "ALTER TABLE workflows ADD COLUMN skip_approval INTEGER NOT NULL DEFAULT 0;"
+    )
+    conn.execute("PRAGMA user_version = 60;")
     conn.commit()
 
 

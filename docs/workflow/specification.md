@@ -23,7 +23,7 @@ Agent Node の LLM 出力は確率的で、JSON Schema によって検証・型�
 
 | 用語 | 定義 |
 | --- | --- |
-| **Workflow** | 恒久 ID・名前・説明を持つワークフロー本体。Revision の集合。 |
+| **Workflow** | 恒久 ID・名前・説明・承認スキップ設定を持つワークフロー本体。Revision の集合。 |
 | **Workflow Revision** | 1 つのグラフ定義。`draft`/`published`/`superseded` の状態を持つ。 |
 | **Node** | グラフ上の 1 つの処理単位。`capability` / `agent` / `loop` / `terminal` / `loop_result` の種別がある。 |
 | **Edge** | Node 間の接続。条件付きの排他的分岐を持つ。 |
@@ -46,7 +46,8 @@ Agent Node の LLM 出力は確率的で、JSON Schema によって検証・型�
 
 **範囲**: Workflow / Revision / Node / Edge / Loop 子グラフの CRUD・検証、Capability Node、
 Agent Node、Loop Node（非ネスト）、terminal / loop_result Node、型付き inputs_schema、型付き参照、
-条件付き排他的分岐、OR 合流、承認（`waiting_approval`）、HITL wait（`waiting_hitl`）、
+条件付き排他的分岐、OR 合流、承認（`waiting_approval`）と Workflow 単位の承認スキップ、
+HITL wait（`waiting_hitl`）、
 `needs_attention` / `waiting_attention`、中断・再開・キャンセル、効果契約による動的完了判定、
 Event 監査、redaction・30 日保持、バックエンド API、GUI / SSE（後続フェーズ）、
 Scheduler Job からの公開 Workflow 起動（`job_runner` 経由、発火枠単位の冪等性）、
@@ -81,7 +82,7 @@ Workflow ごとの同時実行数制御、承認待ち Run の抑止・自動失
 | Revision 公開 | 検証済みグラフ + inputs_schema | `revision_id` / `version` | `workflow_revision` status 更新 | Run 作成 | 未検証は公開不可 | なし |
 | Scheduler 発火 | source_kind + scheduler_job_id + scheduled_for | `dispatch_id` | `workflow_schedule_dispatches` + `workflow_runs` | Workflow worker | 同一枠は既存結果を返す / 失敗は理由を残し枠消費 | なし |
 | Run 作成 | `revision_id` + 利用者入力 | `run_id` | `workflow_runs` + スナップショット | worker | archived / 未公開は拒否 | なし |
-| 承認判定 | `task_agent_capabilities.approval_policy` + 選択 Agent ID | policy snapshot | `workflow_events` | worker | `plan_required` あれば `waiting_approval` | なし |
+| 承認判定 | `task_agent_capabilities.approval_policy` + 選択 Agent ID + `workflows.skip_approval` | policy snapshot | `workflow_events` | worker | `plan_required` かつ skip 無効なら `waiting_approval` | なし |
 | Node 実行 | 検証済み入力 + InvocationContext | `activation_id` / `node_id` | `workflow_run_nodes` / `workflow_activations` | 次 Edge | validation 失敗は実行しない | Capability 副作用 |
 | Loop 反復 | 子グラフ + `loop.state` | `iteration` / activation_id | `workflow_events` | Loop Node | 上限到達は `incomplete` | 子 Capability 副作用 |
 | Agent Node | Agent 選択 + 期待 schema | `agent_id` / child_run_id | Agent 会話 + `workflow_events` | 後続 Node | JSON 検証失敗は Node 失敗 | Agent 子 Run 作成 |
@@ -97,13 +98,18 @@ Workflow ごとの同時実行数制御、承認待ち Run の抑止・自動失
 workflow_id TEXT PRIMARY KEY
 name TEXT NOT NULL
 description TEXT
+skip_approval INTEGER NOT NULL DEFAULT 0
 created_at TEXT NOT NULL
 updated_at TEXT NOT NULL
 ```
 
-Workflow は名前・説明の恒久 ID だけを持ち、グラフの実体は Revision に属する。
+Workflow は名前・説明・承認スキップ設定の恒久 ID だけを持ち、グラフの実体は Revision に属する。
 
 - 名前・説明は `PATCH /api/v1/workflows/:id` の部分更新で変更できる。空名は拒否する。
+- `skip_approval` は Workflow 単位の承認スキップ設定（既定 0）。1 のとき、その Workflow の
+  Run は Agent Node や `plan_required` Capability を含んでいても `queued` で作成され、
+  人間の承認を要求しない（§6.2、§9.3）。スキップで作成した Run には
+  `run_approval_skipped` Event を記録する。
 - Workflow 本体の削除は定義と実行履歴の aggregate 全体を対象とする（§5.1）。
 
 ### 3.2 Workflow Revision
@@ -370,7 +376,9 @@ Node 間のデータ連携は文字列テンプレート展開ではなく、以
 
 - Revision が `published` であること。
 - Capability / Agent がまだ有効であること。無効化されていれば `interrupted` 停止。
-- `plan_required` Capability または Agent Node を含む場合、`waiting_approval` へ遷移する。
+- `plan_required` Capability または Agent Node を含む場合、Workflow の `skip_approval` が
+  無効なら `waiting_approval`、有効なら `queued` とする。承認判定は Run 作成時に一度だけ
+  行い、スナップショット済みの既存 Run は設定変更の影響を受けない。
 - Node 入力の型付き参照を解決し、schema で完全検証する。
 - 実行時に Loop 子グラフの entry_node_id / loop_result 到達可能性を再確認する。
 
@@ -381,7 +389,7 @@ Node 間のデータ連携は文字列テンプレート展開ではなく、以
 | 状態 | 意味 |
 | --- | --- |
 | `queued` | Run 作成済み。worker claim 待ち。 |
-| `waiting_approval` | `plan_required` Capability / Agent を含み、承認待ち。 |
+| `waiting_approval` | `plan_required` Capability / Agent を含み、`skip_approval` 無効のため承認待ち。 |
 | `running` | Node 実行中。 |
 | `waiting_hitl` | HITL 質問登録済み、回答待ち。worker claim を解放。 |
 | `waiting_attention` | 非冪等 Node が中断し、人間対応待ち。worker claim を解放。 |
@@ -487,6 +495,9 @@ Node 間のデータ連携は文字列テンプレート展開ではなく、以
 - Agent Node ごとに `agent_id` を Revision 内で固定する。
 - Run 開始時の一括承認は、使用する `plan_required` Capability と Agent ID の範囲に対して行う。
 - **Agent 内部設定は実行時点の最新版を使う**。承認 UI には「現在および将来の Agent 権限で実行される」と明示する。
+- Workflow の `skip_approval` が有効な場合、Agent Node を含む Run も承認なしで開始する。
+  これは人間の承認ゲートを外す設定であり、Agent の現在および将来の権限での副作用が
+  無承認になることを利用者が明示的に選択する。Run には `run_approval_skipped` Event を残す。
 - Agent Node 開始時の設定指紋を `workflow_events` に記録し、監査に使用する。
 
 ## 10. HITL Wait
@@ -609,6 +620,7 @@ worker が Activation の既存状態を読んで `waiting_attention` の Node �
 主要 Event 型:
 
 - `run_created`, `run_input_submitted`, `run_status_changed`
+- `run_approval_skipped`（`skip_approval` により承認ゲートを外して作成した Run）
 - `run_created`, `run_input_submitted`, `run_status_changed`, `run_cancel_requested`
 - `node_started`, `node_completed`, `node_failed`, `node_skipped`, `node_cancelled`
 - `loop_iteration_started`, `loop_iteration_completed`
@@ -677,9 +689,9 @@ Agent 指紋を含む。
 | --- | --- |
 | `GET /api/v1/workflows` | Workflow 一覧（ページ送り）。 |
 | `GET /api/v1/workflows/schedulable` | Scheduler Job の対象選択用に、published Revision を持つ Workflow とその `inputs_schema` を返す。 |
-| `POST /api/v1/workflows` | 新規 Workflow + 初期 draft Revision 作成。 |
-| `GET /api/v1/workflows/:id` | Workflow + Revision 履歴 + 最近 Run。 |
-| `PATCH /api/v1/workflows/:id` | Workflow の名前・説明を部分更新。空名は 422。 |
+| `POST /api/v1/workflows` | 新規 Workflow + 初期 draft Revision 作成。`skip_approval` を受け付ける。 |
+| `GET /api/v1/workflows/:id` | Workflow（`skip_approval` 含む）+ Revision 履歴 + 最近 Run。 |
+| `PATCH /api/v1/workflows/:id` | Workflow の名前・説明・`skip_approval` を部分更新。空名・null は 422。 |
 | `DELETE /api/v1/workflows/:id` | Workflow 定義と実行履歴を削除。非終端 Run または Scheduler Job 参照があれば 409。 |
 | `POST /api/v1/workflows/:id/revisions` | 新しい draft Revision を作成。公開済み Revision があればグラフと `inputs_schema` を複製する。 |
 | `GET /api/v1/workflows/revisions/:revision_id` | Revision + Node/Edge グラフ。 |
@@ -707,13 +719,14 @@ Agent 指紋を含む。
 
 ### 16.2 永続化
 
-SQLite に `PRAGMA user_version = 53`（v59 まで拡張）マイグレーションで追加する(`database.py`)。
+SQLite に `PRAGMA user_version = 53`（v60 まで拡張）マイグレーションで追加する(`database.py`)。
 
 ```text
 workflows
   workflow_id TEXT PRIMARY KEY
   name TEXT NOT NULL
   description TEXT
+  skip_approval INTEGER NOT NULL DEFAULT 0   -- v60
   created_at TEXT NOT NULL
   updated_at TEXT NOT NULL
 
@@ -868,9 +881,11 @@ one_shot_jobs（v58 で再構築）
   capability policy による承認要否判定 → Run の不変スナップショット作成 →
   dispatch 行（`run_id` 付き）または失敗 dispatch 行の作成。**commit 後に**定期 Job の
   `last_run` を進める。手動 Run 作成も同じ検証・承認判定関数を共有する。
-- 承認要否は `task_agent_capabilities.approval_policy` と Agent Node の有無で判定し、
-  必要なら Run を最初から `waiting_approval` で作る。発火ごとに 1 Run を作り、未完了 Run が
-  あっても抑止しない（運用作で扱う）。
+- 承認要否は `task_agent_capabilities.approval_policy` と Agent Node の有無、および
+  Workflow の `skip_approval` で判定し、必要なら Run を最初から `waiting_approval` で作る。
+  発火ごとに 1 Run を作り、未完了 Run があっても抑止しない（運用作で扱う）。
+  `skip_approval` が有効な Workflow は発火時に `queued` の Run を作り、無人のまま
+  Capability 副作用まで進みうる（利用者が明示的に選択する）。
 - 失敗時（published 不在・schema 不一致）は Run を作らず、dispatch に理由を残して枠を消費し、
   定期 Job は次回枠で最新公開版を再評価する。既存どおり停止中の枠を全件 backfill しない。
 - one-shot Workflow は `one_shot_jobs.target_kind='workflow'` として登録し、原子的 claim の後
@@ -915,7 +930,8 @@ one_shot_jobs（v58 で再構築）
 4. Agent Node の出力 schema を UI で定義・テンプレートから複製できる。
 5. 型付き参照（`run.inputs.*`、`nodes.<node_id>.output.*`、`loop.state.*`）で Node 間を連携できる。
 6. Loop Node が上限付きで反復し、反復状態を型付きで管理できる。
-7. `plan_required` Capability / Agent を含む Run は実行前に承認を要求する。
+7. `plan_required` Capability / Agent を含む Run は、Workflow の `skip_approval` が
+   無効なら実行前に承認を要求する。有効な Workflow は承認なしで実行する。
 8. HITL wait は Capability Node として動作し、回答後に自動的に再開する。
 9. 非冪等 Node の中断は `needs_attention`/`waiting_attention` で停止し、人間が処置できる。
 10. 実行状況を SSE（または long-polling）で確認できる。
@@ -936,7 +952,8 @@ one_shot_jobs（v58 で再構築）
 4. Run 作成: `published` Revision から Run を作成。`inputs_schema` に従う入力フォームを表示する。
 5. 承認: `plan_required` Capability / Agent を含む Run は `waiting_approval` になる。
    承認前に Capability / Agent は実行されない。
-6. 自動実行: `auto` のみの Run は承認なしで実行される。
+6. 自動実行: `auto` のみの Run、または `skip_approval` が有効な Workflow の Run は
+   承認なしで実行される。スキップした Run には `run_approval_skipped` Event が残る。
 7. 条件分岐: Edge 条件が真の target へ進み、偽の経路の Node は `skipped` とする。
 8. Loop: 継続条件が真の間反復し、`max_iterations` に達しても条件が真なら `incomplete` で停止する。
 9. Agent Node: 最終出力が `output_schema` に合わなければ `failed`。合えば後続 Node へ型付きで受け渡す。

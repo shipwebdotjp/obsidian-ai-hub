@@ -263,6 +263,47 @@ Status: Accepted (2026-09-23)。
 「境界違反時に DB 書込み 0 件」「全 ID 再採番」「Template 削除が生成済み Workflow に影響しない」を
 反証可能にする。
 
+## Amendment (Workflow 単位の承認スキップ)
+
+Status: Accepted (2026-09-23)。
+
+Agent Node を含む Workflow は起動のたびに `waiting_approval` となり、定型的に繰り返す
+自分の Workflow では承認操作が運用負荷になる。Workflow 単位で承認ゲートを外せるようにする。
+
+### 決定
+
+- **設定は Workflow に持つ（`workflows.skip_approval`、既定 0）。** Revision や Run ではなく
+  Workflow 本体に置く。理由は、同一 Workflow の全 Revision / Run に一貫して適用したいこと、
+  変更に新 Revision を要さないこと、Workflow Definition Package v1 の形式を変えずに済むこと。
+  承認判定は Run 作成時に一度だけ行い、スナップショット済みの既存 Run は後から影響を受けない。
+- **スキップは Agent Node と `plan_required` Capability の両方に適用する。** 片方だけを残しても
+  「起動のたびに承認待ち」は解消せず、中途半端な境界は説明コストに見合わない。
+- **`skip_approval` が有効な Workflow の Run は `queued` で作成する。** worker がそのまま
+  claim し、人間の承認なしで Node を実行しうる。
+- **監査として `run_approval_skipped` Event を Run に残す。** 本来 `waiting_approval` に
+  なるノード集合をスキップした事実を Run 詳細で追えるようにする。手動実行・rerun・
+  Scheduler 発火の全経路で記録する。
+- **承認 UI の文言は維持する。** Agent は実行時点の最新設定で動くという前提は変わらず、
+  スキップは「現在および将来の Agent 権限での無承認実行」を利用者が明示的に選ぶ行為である。
+- **既定は無効のまま。** 既存 Workflow と新規 Workflow は従来どおり承認を要求する。
+
+### 操作シナリオ契約（不可逆操作: 承認なしの Capability 副作用）
+
+| 段階 | 入力と正本 | 識別子 | 永続化 | 次に読む主体 | 停止・失敗時 | 不可逆操作 |
+| --- | --- | --- | --- | --- | --- | --- |
+| 設定 | Workflow の `skip_approval` | `workflow_id` | `workflows.skip_approval` | Run 作成 | 既定 OFF | なし |
+| Run 作成 | published Revision + フラグ | `run_id` | Run + `run_approval_skipped` Event | worker | 未公開 / 入力 schema 不一致は拒否 | なし |
+| 実行 | 承認スキップ Run の snapshot | `activation_id` | `workflow_run_nodes` / `workflow_events` | 次 Edge | Capability validation 失敗は実行しない | Capability 副作用（承認前） |
+
+運用は `docs/development-quality-playbook.md` に従い、隔離 DB と fake Capability の縦断結合テストで
+「フラグ OFF なら承認前に副作用 0 回」「フラグ ON なら承認なしで副作用が 1 回だけ」を反証可能にする。
+
+### 残余リスク
+
+- スキップした Workflow は、実行時点の最新 Agent 設定（将来の権限変更を含む）で無承認に動く。
+- Scheduler 発火では無人の外部副作用が定期的に発生しうる。利用者が Workflow 単位で明示的に
+  有効化することを前提に受容する。承認待ち Run の抑止・自動失効はひき続き対象外とする。
+
 ## 関連文書
 
 - [workflow-independent-context-shared-foundation.md](workflow-independent-context-shared-foundation.md) — 撤回された初期 ADR

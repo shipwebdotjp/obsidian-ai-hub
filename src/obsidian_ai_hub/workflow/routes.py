@@ -59,11 +59,13 @@ class WorkflowCreate(BaseModel):
     name: str = Field(min_length=1)
     description: str = ""
     inputs_schema: dict[str, Any] = Field(default_factory=lambda: {"type": "object"})
+    skip_approval: bool = False
 
 
 class WorkflowUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
+    skip_approval: Optional[bool] = None
 
 
 class GraphUpdate(BaseModel):
@@ -123,7 +125,10 @@ def list_workflows(limit: int = 20, offset: int = 0) -> dict[str, Any]:
 @router.post("", status_code=201)
 def create_workflow(payload: WorkflowCreate) -> dict[str, Any]:
     return workflow_store.create_workflow(
-        payload.name, payload.description, inputs_schema=payload.inputs_schema
+        payload.name,
+        payload.description,
+        inputs_schema=payload.inputs_schema,
+        skip_approval=payload.skip_approval,
     )
 
 
@@ -385,17 +390,20 @@ def get_workflow(workflow_id: str) -> dict[str, Any]:
 
 @router.patch("/{workflow_id}")
 def update_workflow(workflow_id: str, payload: WorkflowUpdate) -> dict[str, Any]:
-    """Partially update a workflow's name and/or description."""
+    """Partially update a workflow's name, description and approval skip."""
     fields = payload.model_dump(exclude_unset=True)
     if "name" in fields and fields["name"] is None:
         raise HTTPException(status_code=422, detail="name must not be null")
     if "description" in fields and fields["description"] is None:
         fields["description"] = ""
+    if "skip_approval" in fields and fields["skip_approval"] is None:
+        raise HTTPException(status_code=422, detail="skip_approval must not be null")
     try:
         return workflow_store.update_workflow(
             workflow_id,
             name=fields.get("name"),
             description=fields.get("description"),
+            skip_approval=fields.get("skip_approval"),
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -564,6 +572,21 @@ def delete_revision(revision_id: str) -> dict[str, Any]:
     return {"success": True, "revision_id": revision_id}
 
 
+def _record_approval_skip_if_needed(
+    run_id: str,
+    nodes: list[dict[str, Any]],
+    *,
+    skip_approval: bool,
+) -> None:
+    """Audit a run that bypassed the approval gate it would otherwise need."""
+    if skip_approval and workflow_scheduling.requires_approval(nodes):
+        workflow_store.append_event(
+            run_id,
+            "run_approval_skipped",
+            {"reason": "workflow_skip_approval"},
+        )
+
+
 @router.post("/revisions/{revision_id}/runs", status_code=201)
 def create_run(revision_id: str, payload: RunCreate) -> dict[str, Any]:
     revision = workflow_store.get_revision(revision_id)
@@ -574,13 +597,19 @@ def create_run(revision_id: str, payload: RunCreate) -> dict[str, Any]:
     )
     if input_errors:
         raise HTTPException(status_code=422, detail={"errors": input_errors})
+    nodes = revision.get("nodes") or []
+    skip_approval = workflow_store.workflow_skip_approval(
+        str(revision["workflow_id"])
+    )
     initial_status = (
         "waiting_approval"
-        if workflow_scheduling.requires_approval(revision.get("nodes") or [])
+        if workflow_scheduling.requires_approval(
+            nodes, skip_approval=skip_approval
+        )
         else "queued"
     )
     try:
-        return workflow_store.create_run(
+        run = workflow_store.create_run(
             str(revision["workflow_id"]),
             revision_id,
             payload.inputs,
@@ -588,6 +617,10 @@ def create_run(revision_id: str, payload: RunCreate) -> dict[str, Any]:
         )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    _record_approval_skip_if_needed(
+        str(run["run_id"]), nodes, skip_approval=skip_approval
+    )
+    return run
 
 
 @router.post("/runs/{run_id}/rerun", status_code=201)
@@ -615,9 +648,15 @@ def rerun_run(run_id: str, payload: RerunRequest) -> dict[str, Any]:
     )
     if input_errors:
         raise HTTPException(status_code=422, detail={"errors": input_errors})
+    nodes = snapshot.get("nodes") or []
+    skip_approval = workflow_store.workflow_skip_approval(
+        str(source["workflow_id"])
+    )
     initial_status = (
         "waiting_approval"
-        if workflow_scheduling.requires_approval(snapshot.get("nodes") or [])
+        if workflow_scheduling.requires_approval(
+            nodes, skip_approval=skip_approval
+        )
         else "queued"
     )
     new_run = workflow_store.create_rerun_run(
@@ -627,6 +666,9 @@ def rerun_run(run_id: str, payload: RerunRequest) -> dict[str, Any]:
         str(new_run["run_id"]),
         "run_rerun_created",
         {"source_run_id": run_id},
+    )
+    _record_approval_skip_if_needed(
+        str(new_run["run_id"]), nodes, skip_approval=skip_approval
     )
     return new_run
 

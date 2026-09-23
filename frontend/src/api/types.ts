@@ -1312,6 +1312,7 @@ export interface WorkflowSummary {
   workflow_id: string;
   name: string;
   description: string;
+  skip_approval: boolean;
   created_at: string;
   updated_at: string;
 }

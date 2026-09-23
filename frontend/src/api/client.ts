@@ -1023,7 +1023,7 @@ export function getWorkflow(workflowId: string): Promise<WorkflowDetail> {
 
 export function updateWorkflow(
   workflowId: string,
-  payload: { name?: string; description?: string },
+  payload: { name?: string; description?: string; skip_approval?: boolean },
 ): Promise<WorkflowDetail> {
   return request<WorkflowDetail>(
     `/api/v1/workflows/${encodeURIComponent(workflowId)}`,

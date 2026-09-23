@@ -82,6 +82,7 @@ def create_workflow(
     description: str = "",
     *,
     inputs_schema: Optional[dict[str, Any]] = None,
+    skip_approval: bool = False,
     conn: Optional[sqlite3.Connection] = None,
 ) -> dict[str, Any]:
     """Create a workflow and its initial draft revision."""
@@ -93,8 +94,15 @@ def create_workflow(
         def _do() -> None:
             active_conn.execute(
                 "INSERT INTO workflows (workflow_id, name, description, "
-                "created_at, updated_at) VALUES (?, ?, ?, ?, ?);",
-                (workflow_id, name.strip(), description or "", now, now),
+                "skip_approval, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?);",
+                (
+                    workflow_id,
+                    name.strip(),
+                    description or "",
+                    1 if skip_approval else 0,
+                    now,
+                    now,
+                ),
             )
             create_revision(
                 workflow_id,
@@ -113,6 +121,13 @@ def create_workflow(
     return workflow
 
 
+def _workflow_row(row: sqlite3.Row) -> dict[str, Any]:
+    """Normalize a ``workflows`` row for the API (bool flag, not 0/1)."""
+    workflow = dict(row)
+    workflow["skip_approval"] = bool(workflow.get("skip_approval"))
+    return workflow
+
+
 def get_workflow(
     workflow_id: str, conn: Optional[sqlite3.Connection] = None
 ) -> Optional[dict[str, Any]]:
@@ -120,7 +135,25 @@ def get_workflow(
         row = active_conn.execute(
             "SELECT * FROM workflows WHERE workflow_id = ?;", (workflow_id,)
         ).fetchone()
-    return dict(row) if row is not None else None
+    if row is None:
+        return None
+    return _workflow_row(row)
+
+
+def workflow_skip_approval(
+    workflow_id: str, *, conn: Optional[sqlite3.Connection] = None
+) -> bool:
+    """Return whether the workflow bypasses the approval gate.
+
+    Missing workflows report ``False`` so a caller that races a deletion never
+    silently auto-approves; run creation validates the revision separately.
+    """
+    with auto_connection(conn) as (active_conn, _):
+        row = active_conn.execute(
+            "SELECT skip_approval FROM workflows WHERE workflow_id = ?;",
+            (workflow_id,),
+        ).fetchone()
+    return bool(row["skip_approval"]) if row is not None else False
 
 
 def list_workflows(
@@ -134,7 +167,7 @@ def list_workflows(
         total = active_conn.execute("SELECT COUNT(*) AS n FROM workflows;").fetchone()[
             "n"
         ]
-    return [dict(row) for row in rows], int(total)
+    return [_workflow_row(row) for row in rows], int(total)
 
 
 def update_workflow(
@@ -142,15 +175,16 @@ def update_workflow(
     *,
     name: Optional[str] = None,
     description: Optional[str] = None,
+    skip_approval: Optional[bool] = None,
     conn: Optional[sqlite3.Connection] = None,
 ) -> dict[str, Any]:
-    """Update a workflow's name and/or description.
+    """Update a workflow's name, description and/or approval-skip flag.
 
     Only the provided fields change. A blank name is rejected so the
     workflow keeps a usable display label. Raises ``FileNotFoundError`` when
     the workflow does not exist and ``ValueError`` for a blank name.
     """
-    if name is None and description is None:
+    if name is None and description is None and skip_approval is None:
         existing = get_workflow(workflow_id, conn=conn)
         if existing is None:
             raise FileNotFoundError(f"Workflow '{workflow_id}' not found.")
@@ -177,6 +211,9 @@ def update_workflow(
             if description is not None:
                 assignments.append("description = ?")
                 params.append(description)
+            if skip_approval is not None:
+                assignments.append("skip_approval = ?")
+                params.append(1 if skip_approval else 0)
             params.append(workflow_id)
             active_conn.execute(
                 f"UPDATE workflows SET {', '.join(assignments)} "

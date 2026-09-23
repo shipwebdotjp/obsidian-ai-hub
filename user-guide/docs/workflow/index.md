@@ -42,8 +42,10 @@ flowchart LR
     C -->|OK| D[公開 published]
     D --> E[Run 作成]
     E --> F{plan_required / Agent を含む?}
-    F -->|はい| G[waiting_approval で承認待ち]
+    F -->|はい| F2{承認スキップ有効?}
     F -->|いいえ| H[自動実行]
+    F2 -->|いいえ| G[waiting_approval で承認待ち]
+    F2 -->|はい| H
     G -->|承認| H
     H --> I[完了 / 未完了 / 失敗]
 ```
@@ -53,13 +55,15 @@ flowchart LR
 3. **検証** に合格したら **公開** します。公開した Revision は不変になります。
 4. 実行入力を入れて **実行** します。`plan_required` の Capability か Agent Node を含む場合は
    `waiting_approval` になり、Run 詳細で **承認** するまで実行されません。
+   Workflow 詳細で **承認なしで実行する** を有効にした Workflow は承認なしで実行されます。
 5. Run 詳細で進捗・Node 状態・出力・Event を確認します。
 
 ## Workflow の改名・削除
 
 Workflow 詳細（`/workflows/:workflowId`）から本体を管理できます。
 
-- **改名・説明の変更** — ヘッダーの「編集」で名前と説明を変更し「保存」します。名前は空にできません。
+- **改名・説明・承認設定の変更** — ヘッダーの「編集」で名前・説明・ **承認なしで実行する**
+  を変更し「保存」します。名前は空にできません。
 - **削除** — ヘッダーの「Workflow を削除」で確認後、Workflow 定義と実行履歴をまとめて削除します。
   次の場合は削除できません（先に解消してください）。
   - 実行中の Run（承認待ち・HITL 待ち・要確認待ちを含む終端していない Run）が残っている。

@@ -24,7 +24,7 @@
 | 用語 | 定義 |
 | --- | --- |
 | **Scheduler Job** | 指定コマンド、または公開 Workflow を起動する定義の総称。定期実行とワンショット実行をともに指す。Task Agent の Task とは別集約である。 |
-| **Workflow Scheduler Job** | 実行対象に公開 Workflow（発火時点の最新 published Revision）と固定 JSON 入力を指定した Scheduler Job。承認が必要なら発火ごとに `waiting_approval` の Run を作る。 |
+| **Workflow Scheduler Job** | 実行対象に公開 Workflow（発火時点の最新 published Revision）と固定 JSON 入力を指定した Scheduler Job。承認が必要なら発火ごとに `waiting_approval` の Run を作る（Workflow の承認スキップが有効なら `queued`）。 |
 | **Scheduled Dispatch** | Scheduler Job の 1 発火枠。`source_kind` + `scheduler_job_id` + `scheduled_for` を一意キーとし、解決した Revision・作成 Run・失敗理由を `workflow_schedule_dispatches`（one-shot は `one_shot_jobs` 行）に保持する。 |
 | **Recurring Job** | YAML（`jobs/jobs.local.yml`）で定義し、schedule に従い繰り返し起動する Job。状態は `jobs/last_run.json` と `job_state` に持つ。対象は `command` または `workflow` の排他的定義。 |
 | **One-shot Job** | Agent または人間が登録し、一度だけ実行する Job。専用 SQLite キュー（`one_shot_jobs`）に保存し、at-most-once で実行する。Workflow 対象の成功時は `dispatched` を終端とする。 |

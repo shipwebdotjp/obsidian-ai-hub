@@ -23,6 +23,18 @@ Run は **`published` Revision からのみ** 作成できます。
 Run 詳細（`/workflows/runs/:runId`）で **承認** を押すと `queued` になり、実行が始まります。
 `auto` Capability だけの Run は承認なしで実行されます。
 
+### 承認なしで実行する（Workflow 単位）
+
+Workflow 詳細の編集で **承認なしで実行する** を有効にすると、その Workflow の Run は
+Agent Node や `plan_required` Capability を含んでいても `waiting_approval` にならず、
+作成と同時に実行待ち（`queued`）になります。Scheduler Job からの起動も承認なしで走ります。
+
+- 設定は Workflow 本体にあり、全 Revision に適用されます。
+- 判定は Run 作成時に一度だけ行われ、設定変更後に作成済みの Run には影響しません。
+- スキップで作成した Run には `run_approval_skipped` イベントが記録されます。
+- Agent は実行時点の最新設定で動くため、有効化すると**現在および将来の Agent 権限**での
+  副作用が無承認で実行されます。無人の定期実行で外部操作が起きうる点に注意してください。
+
 :::warning[Agent の権限は実行時点の設定です]
 Agent Node は実行時点の最新の Agent 設定（system prompt・model・許可ツール）で動きます。
 承認 UI は「現在および将来の Agent 権限で実行される」ことを前提として扱ってください。

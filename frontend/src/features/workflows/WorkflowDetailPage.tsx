@@ -33,6 +33,7 @@ export default function WorkflowDetailPage() {
   const [editing, setEditing] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
   const [descriptionDraft, setDescriptionDraft] = useState("");
+  const [skipApprovalDraft, setSkipApprovalDraft] = useState(false);
   const [userTemplates, setUserTemplates] = useState<WorkflowUserTemplate[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
 
@@ -66,6 +67,7 @@ export default function WorkflowDetailPage() {
   const startEditing = () => {
     setNameDraft(workflow?.name ?? "");
     setDescriptionDraft(workflow?.description ?? "");
+    setSkipApprovalDraft(workflow?.skip_approval ?? false);
     setEditing(true);
   };
 
@@ -77,6 +79,7 @@ export default function WorkflowDetailPage() {
       await updateWorkflow(workflowId, {
         name: nameDraft.trim(),
         description: descriptionDraft.trim(),
+        skip_approval: skipApprovalDraft,
       });
       setEditing(false);
       await reload();
@@ -237,6 +240,17 @@ export default function WorkflowDetailPage() {
                   value={descriptionDraft}
                   onChange={(event) => setDescriptionDraft(event.target.value)}
                 />
+              </label>
+              <label className="flex cursor-pointer items-center gap-1 text-xs text-slate-600">
+                <input
+                  type="checkbox"
+                  className="cursor-pointer"
+                  checked={skipApprovalDraft}
+                  onChange={(event) =>
+                    setSkipApprovalDraft(event.target.checked)
+                  }
+                />
+                承認なしで実行する
               </label>
               <button
                 type="button"

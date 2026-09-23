@@ -62,7 +62,7 @@ title: 用語と状態
 | 状態 | 意味 |
 | --- | --- |
 | `queued` | 作成済み。worker の実行待ち。 |
-| `waiting_approval` | `plan_required` Capability / Agent Node を含み、承認待ち。 |
+| `waiting_approval` | `plan_required` Capability / Agent Node を含み、承認待ち（Workflow の承認スキップが無効なとき）。 |
 | `running` | 実行中。 |
 | `waiting_hitl` | HITL へ質問を登録済み。回答待ち。 |
 | `waiting_attention` | 非冪等 Node が中断した、または取消要求後に外部処理が完了・結果不明。人間対応待ち。 |

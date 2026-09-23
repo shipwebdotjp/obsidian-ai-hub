@@ -268,6 +268,123 @@ def test_approval_required_flow(test_memory_db_path, client):
     assert approved.json()["status"] == "queued"
 
 
+def _plan_required_nodes():
+    return [
+        {
+            "node_id": "n_write",
+            "node_type": "capability",
+            "config": {
+                "capability_key": "vault_write_file",
+                "inputs": {
+                    "relative_path": "x.md",
+                    "content": "hi",
+                    "overwrite": True,
+                },
+            },
+        },
+        {"node_id": "n_end", "node_type": "terminal", "config": {"outcome": "success"}},
+    ]
+
+
+def _plan_required_edges():
+    return [
+        {
+            "edge_id": "e1",
+            "source_node_id": "n_write",
+            "target_node_id": "n_end",
+            "order_index": 0,
+        }
+    ]
+
+
+def test_skip_approval_creates_queued_run_and_audits_event(
+    test_memory_db_path, client
+):
+    task_store.sync_capabilities()
+    created = client.post(
+        "/api/v1/workflows", json={"name": "skip", "skip_approval": True}
+    )
+    assert created.status_code == 201
+    assert created.json()["skip_approval"] is True
+    revision_id = created.json()["revision"]["revision_id"]
+    client.put(
+        f"/api/v1/workflows/revisions/{revision_id}",
+        json={
+            "inputs_schema": {"type": "object"},
+            "nodes": _plan_required_nodes(),
+            "edges": _plan_required_edges(),
+        },
+    )
+    assert (
+        client.post(
+            f"/api/v1/workflows/revisions/{revision_id}/publish"
+        ).status_code
+        == 200
+    )
+
+    run = client.post(
+        f"/api/v1/workflows/revisions/{revision_id}/runs", json={"inputs": {}}
+    ).json()
+    # A plan_required capability would normally wait, but the workflow skips it.
+    assert run["status"] == "queued"
+    detail = client.get(f"/api/v1/workflows/runs/{run['run_id']}").json()
+    assert any(
+        event["event_type"] == "run_approval_skipped" for event in detail["events"]
+    )
+
+
+def test_patch_skip_approval_toggles_and_rejects_null(test_memory_db_path, client):
+    created = client.post("/api/v1/workflows", json={"name": "toggle"})
+    workflow_id = created.json()["workflow_id"]
+    assert created.json()["skip_approval"] is False
+
+    patched = client.patch(
+        f"/api/v1/workflows/{workflow_id}", json={"skip_approval": True}
+    )
+    assert patched.status_code == 200
+    assert patched.json()["skip_approval"] is True
+
+    cleared = client.patch(
+        f"/api/v1/workflows/{workflow_id}", json={"skip_approval": False}
+    )
+    assert cleared.status_code == 200
+    assert cleared.json()["skip_approval"] is False
+
+    nulled = client.patch(
+        f"/api/v1/workflows/{workflow_id}", json={"skip_approval": None}
+    )
+    assert nulled.status_code == 422
+
+
+def test_rerun_honors_workflow_skip_approval(test_memory_db_path, client):
+    task_store.sync_capabilities()
+    created = client.post("/api/v1/workflows", json={"name": "rerun-skip"})
+    workflow_id = created.json()["workflow_id"]
+    revision_id = created.json()["revision"]["revision_id"]
+    client.put(
+        f"/api/v1/workflows/revisions/{revision_id}",
+        json={
+            "inputs_schema": {"type": "object"},
+            "nodes": _plan_required_nodes(),
+            "edges": _plan_required_edges(),
+        },
+    )
+    client.post(f"/api/v1/workflows/revisions/{revision_id}/publish")
+    client.patch(f"/api/v1/workflows/{workflow_id}", json={"skip_approval": True})
+
+    source = client.post(
+        f"/api/v1/workflows/revisions/{revision_id}/runs", json={"inputs": {}}
+    ).json()
+    assert source["status"] == "queued"
+    workflow_store.claim_run("rerun-skip-test")
+    workflow_store.transition_run_status(source["run_id"], "completed")
+
+    rerun = client.post(
+        f"/api/v1/workflows/runs/{source['run_id']}/rerun", json={}
+    ).json()
+    assert rerun["status"] == "queued"
+
+
 def test_run_inputs_validated_against_schema(test_memory_db_path, client):
     created = client.post(
         "/api/v1/workflows",

@@ -108,6 +108,38 @@ def test_dispatch_creates_waiting_approval_without_side_effect(test_memory_db_pa
     assert workflow_store.claim_run("test-instance") is None
 
 
+def test_dispatch_skip_approval_creates_queued_run_without_gate(test_memory_db_path):
+    workflow_id, _ = _publish(nodes=[_agent_node(), _terminal()])
+    workflow_store.update_workflow(workflow_id, skip_approval=True)
+
+    dispatch, run = scheduling.dispatch_recurring_slot(
+        "job1", "2026-01-01T00:00:00", workflow_id, {}
+    )
+    assert dispatch["status"] == scheduling.DISPATCHED
+    assert run is not None
+    assert run["status"] == "queued"
+    # The worker claims it without any human approval.
+    claimed = workflow_store.claim_run("test-instance")
+    assert claimed is not None
+    assert claimed["run_id"] == run["run_id"]
+    events = workflow_store.list_events(run["run_id"])
+    assert any(e["event_type"] == "run_approval_skipped" for e in events)
+
+
+def test_skip_approval_does_not_change_existing_waiting_run(test_memory_db_path):
+    workflow_id, _ = _publish(nodes=[_agent_node(), _terminal()])
+    _, run = scheduling.dispatch_recurring_slot(
+        "job1", "2026-01-01T00:00:00", workflow_id, {}
+    )
+    assert run["status"] == "waiting_approval"
+
+    workflow_store.update_workflow(workflow_id, skip_approval=True)
+
+    # The gate decision is fixed at creation; an existing run is untouched.
+    refreshed = workflow_store.get_run(run["run_id"])
+    assert refreshed["status"] == "waiting_approval"
+
+
 def test_schema_mismatch_records_failure_and_consumes_slot(test_memory_db_path):
     schema = {
         "type": "object",
