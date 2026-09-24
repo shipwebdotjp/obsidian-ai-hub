@@ -21,7 +21,7 @@ from obsidian_ai_hub.workflow.models import (
     TEXT_OUTPUT_KEY,
     iter_expressions,
     iter_invalid_reference_shapes,
-    iter_piped_references,
+    iter_piped_reference_entries,
     iter_references,
     reference_root,
     validate_condition,
@@ -166,6 +166,50 @@ def _condition_reference_errors(
     )
 
 
+_PIPE_FIRST_OP_INPUT_TYPES: dict[str, frozenset[str]] = {
+    "upper": frozenset({"string"}),
+    "lower": frozenset({"string"}),
+    "truncate": frozenset({"string"}),
+    "replace": frozenset({"string"}),
+    "slice": frozenset({"string", "array"}),
+    "join": frozenset({"array"}),
+    "pluck": frozenset({"array"}),
+    "filter": frozenset({"array"}),
+    "sort": frozenset({"array"}),
+    "unique": frozenset({"array"}),
+}
+
+
+def _pipe_input_type_errors(
+    ref: str,
+    pipe: list[Any],
+    *,
+    resolver: Callable[[str], Optional[tuple[Optional[str], Optional[str]]]],
+    path: str,
+) -> list[str]:
+    """Best-effort schema check: declared ref type vs the first op's input.
+
+    Only the referenced value's declared type is known statically; later ops
+    and opaque Capability outputs stay runtime-checked.
+    """
+    if not pipe or not isinstance(pipe[0], dict):
+        return []
+    op = pipe[0].get("op")
+    expected = _PIPE_FIRST_OP_INPUT_TYPES.get(str(op))
+    if expected is None:
+        return []
+    declared = resolver(ref)
+    if declared is None:
+        return []
+    declared_type = declared[0]
+    if declared_type is None or declared_type in expected:
+        return []
+    return [
+        f"pipe_type: {path}: 演算子 '{op}' は {sorted(expected)} を要求しますが、"
+        f"参照先の型は '{declared_type}' です"
+    ]
+
+
 def _value_reference_errors(
     value: Any,
     *,
@@ -173,6 +217,7 @@ def _value_reference_errors(
     scope_ids: set[str],
     inputs_schema: Optional[dict[str, Any]],
     path: str,
+    nodes: Optional[list[dict[str, Any]]] = None,
 ) -> list[str]:
     errors: list[str] = []
     for ref in iter_references(value):
@@ -185,8 +230,19 @@ def _value_reference_errors(
                 path=path,
             )
         )
-    for pipe in iter_piped_references(value):
+    resolver = (
+        _anchor_type_resolver(nodes, inputs_schema, scope_id)
+        if nodes is not None
+        else None
+    )
+    for ref, pipe in iter_piped_reference_entries(value):
         errors.extend(validate_pipe(pipe, path=f"{path}.pipe"))
+        if resolver is not None:
+            errors.extend(
+                _pipe_input_type_errors(
+                    ref, pipe, resolver=resolver, path=f"{path}.pipe"
+                )
+            )
     for _ in iter_invalid_reference_shapes(value):
         errors.append(
             f"reference_shape: {path}: $ref / $expr の形式が不正です"
@@ -382,6 +438,7 @@ def validate_graph(
                     scope_id=scope_id,
                     scope_ids=scope_ids,
                     inputs_schema=inputs_schema,
+                    nodes=nodes,
                     capability_enabled=capability_enabled,
                 )
             )
@@ -393,6 +450,7 @@ def validate_graph(
                     scope_id=scope_id,
                     scope_ids=scope_ids,
                     inputs_schema=inputs_schema,
+                    nodes=nodes,
                     agent_exists=agent_exists,
                 )
             )
@@ -425,6 +483,7 @@ def validate_graph(
                         scope_id=scope_id,
                         scope_ids=scope_ids,
                         inputs_schema=inputs_schema,
+                        nodes=nodes,
                         path=f"Node '{node_id}'.output_mapping",
                     )
                 )
@@ -436,6 +495,7 @@ def validate_graph(
                     scope_id=scope_id,
                     scope_ids=scope_ids,
                     inputs_schema=inputs_schema,
+                    nodes=nodes,
                 )
             )
 
@@ -487,6 +547,7 @@ def _validate_capability_node(
     scope_id: Optional[str],
     scope_ids: set[str],
     inputs_schema: Optional[dict[str, Any]],
+    nodes: Optional[list[dict[str, Any]]] = None,
     capability_enabled: Optional[CapabilityCheck],
 ) -> list[str]:
     errors: list[str] = []
@@ -505,6 +566,7 @@ def _validate_capability_node(
             scope_id=scope_id,
             scope_ids=scope_ids,
             inputs_schema=inputs_schema,
+            nodes=nodes,
             path=f"Node '{node_id}'.inputs",
         )
     )
@@ -540,6 +602,7 @@ def _validate_agent_node(
     scope_id: Optional[str],
     scope_ids: set[str],
     inputs_schema: Optional[dict[str, Any]],
+    nodes: Optional[list[dict[str, Any]]] = None,
     agent_exists: Optional[AgentCheck],
 ) -> list[str]:
     errors: list[str] = []
@@ -567,6 +630,7 @@ def _validate_agent_node(
             scope_id=scope_id,
             scope_ids=scope_ids,
             inputs_schema=inputs_schema,
+            nodes=nodes,
             path=f"Node '{node_id}'.inputs",
         )
     )
@@ -580,6 +644,7 @@ def _validate_text_template_node(
     scope_id: Optional[str],
     scope_ids: set[str],
     inputs_schema: Optional[dict[str, Any]],
+    nodes: Optional[list[dict[str, Any]]] = None,
 ) -> list[str]:
     errors: list[str] = []
     inputs = config.get("inputs", {})
@@ -592,6 +657,7 @@ def _validate_text_template_node(
             scope_id=scope_id,
             scope_ids=scope_ids,
             inputs_schema=inputs_schema,
+            nodes=nodes,
             path=f"Node '{node_id}'.inputs",
         )
     )
@@ -631,6 +697,7 @@ def _validate_loop_node(
                 scope_id=None,
                 scope_ids={str(n["node_id"]) for n in nodes if not n.get("parent_loop_node_id")},
                 inputs_schema=inputs_schema,
+                nodes=nodes,
                 path=f"Node '{node_id}'.input_mapping",
             )
         )

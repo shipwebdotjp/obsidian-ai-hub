@@ -1,13 +1,20 @@
 import type { WorkflowPipeOp } from "../../api/types";
 import type { GraphIssue } from "./graphModel";
 
-export type PipeArgType = "int" | "string" | "any";
+export type PipeArgType = "int" | "string" | "any" | "enum";
+
+export interface PipeArgOption {
+  value: string;
+  label: string;
+}
 
 export interface PipeArgSpec {
   key: string;
   label: string;
   type: PipeArgType;
   required: boolean;
+  options?: PipeArgOption[];
+  defaultValue?: unknown;
 }
 
 export interface PipeOpSpec {
@@ -17,6 +24,24 @@ export interface PipeOpSpec {
 }
 
 export const MAX_PIPE_OPS = 20;
+
+const FILTER_AS_OPTIONS: PipeArgOption[] = [
+  { value: "auto", label: "auto" },
+  { value: "date", label: "date" },
+];
+
+const FILTER_OP_OPTIONS: PipeArgOption[] = [
+  { value: "eq", label: "eq (=)" },
+  { value: "ne", label: "ne (≠)" },
+  { value: "gt", label: "gt (>)" },
+  { value: "gte", label: "gte (≥)" },
+  { value: "lt", label: "lt (<)" },
+  { value: "lte", label: "lte (≤)" },
+  { value: "in", label: "in (含まれる)" },
+  { value: "not_in", label: "not_in (含まれない)" },
+  { value: "contains", label: "contains (部分一致)" },
+  { value: "exists", label: "exists (存在)" },
+];
 
 export const PIPE_OP_SPECS: PipeOpSpec[] = [
   { op: "upper", label: "upper (大文字)", args: [] },
@@ -57,7 +82,61 @@ export const PIPE_OP_SPECS: PipeOpSpec[] = [
     label: "default (空なら置換)",
     args: [{ key: "value", label: "value", type: "any", required: true }],
   },
+  {
+    op: "filter",
+    label: "filter (選別)",
+    args: [
+      { key: "key", label: "key", type: "string", required: true },
+      {
+        key: "op",
+        label: "op",
+        type: "enum",
+        required: false,
+        defaultValue: "eq",
+        options: FILTER_OP_OPTIONS,
+      },
+      { key: "value", label: "value", type: "any", required: false },
+      {
+        key: "as",
+        label: "as",
+        type: "enum",
+        required: false,
+        options: FILTER_AS_OPTIONS,
+      },
+    ],
+  },
+  {
+    op: "sort",
+    label: "sort (並べ替え)",
+    args: [
+      { key: "key", label: "key", type: "string", required: false },
+      {
+        key: "order",
+        label: "order",
+        type: "enum",
+        required: false,
+        defaultValue: "asc",
+        options: [
+          { value: "asc", label: "asc" },
+          { value: "desc", label: "desc" },
+        ],
+      },
+    ],
+  },
+  {
+    op: "unique",
+    label: "unique (重複排除)",
+    args: [{ key: "key", label: "key", type: "string", required: false }],
+  },
 ];
+
+const FILTER_OPS = new Set(FILTER_OP_OPTIONS.map((option) => option.value));
+const FILTER_AS_VALUES = new Set(FILTER_AS_OPTIONS.map((option) => option.value));
+const FILTER_COMPARISON_OP_VALUES = ["eq", "ne", "gt", "gte", "lt", "lte"];
+const FILTER_COMPARISON_OPS = new Set(FILTER_COMPARISON_OP_VALUES);
+const FILTER_COMPARISON_HINT = FILTER_COMPARISON_OP_VALUES.map(
+  (value) => `'${value}'`,
+).join("/");
 
 export function pipeOpSpec(op: string): PipeOpSpec | undefined {
   return PIPE_OP_SPECS.find((spec) => spec.op === op);
@@ -67,14 +146,19 @@ const ARG_DEFAULTS: Record<PipeArgType, unknown> = {
   int: 0,
   string: "",
   any: null,
+  enum: null,
 };
 
 export function defaultPipeOp(op: string): WorkflowPipeOp {
   const spec = pipeOpSpec(op);
   const args: Record<string, unknown> = {};
   for (const arg of spec?.args ?? []) {
-    if (!arg.required) continue;
-    args[arg.key] = ARG_DEFAULTS[arg.type];
+    if (!arg.required && arg.defaultValue === undefined) continue;
+    if (arg.type === "enum") {
+      args[arg.key] = arg.defaultValue ?? arg.options?.[0]?.value ?? "";
+      continue;
+    }
+    args[arg.key] = arg.defaultValue ?? ARG_DEFAULTS[arg.type];
   }
   return { op, args };
 }
@@ -218,7 +302,75 @@ export function validatePipe(pipe: unknown, path = "pipe"): GraphIssue[] {
           message: `${stepPath}.args.${arg.key}: 空でない文字列が必要です`,
         });
       }
+      if (arg.type === "enum") {
+        const options = arg.options ?? [];
+        if (!options.some((option) => option.value === value)) {
+          issues.push({
+            code: "pipe_args",
+            message: `${stepPath}.args.${arg.key}: ${options
+              .map((option) => option.value)
+              .join(" / ")} のいずれかが必要です`,
+          });
+        }
+      }
+    }
+    if (spec.op === "filter") {
+      validateFilterArgs(args, stepPath, issues);
     }
   });
   return issues;
+}
+
+function validateFilterArgs(
+  args: Record<string, unknown>,
+  stepPath: string,
+  issues: GraphIssue[],
+): void {
+  const predicate = typeof args.op === "string" ? args.op : "eq";
+  if (!FILTER_OPS.has(predicate)) return;
+  if (predicate === "exists") {
+    if ("value" in args) {
+      issues.push({
+        code: "pipe_args",
+        message: `${stepPath}.args.value: op 'exists' では指定できません`,
+      });
+    }
+  } else if (!("value" in args)) {
+    issues.push({
+      code: "pipe_args",
+      message: `${stepPath}.args.value: value が必要です`,
+    });
+  }
+  if (
+    "as" in args &&
+    args.as !== undefined &&
+    args.as !== null &&
+    FILTER_AS_VALUES.has(String(args.as)) &&
+    !FILTER_COMPARISON_OPS.has(predicate)
+  ) {
+    issues.push({
+      code: "pipe_args",
+      message: `${stepPath}.args.as: op ${FILTER_COMPARISON_HINT} でのみ指定できます`,
+    });
+  }
+  if (
+    (predicate === "in" || predicate === "not_in") &&
+    "value" in args &&
+    !Array.isArray(args.value)
+  ) {
+    issues.push({
+      code: "pipe_args",
+      message: `${stepPath}.args.value: op '${predicate}' では配列が必要です`,
+    });
+  }
+  if (
+    predicate === "contains" &&
+    "value" in args &&
+    typeof args.value !== "string"
+  ) {
+    issues.push({
+      code: "pipe_args",
+      message: `${stepPath}.args.value: op 'contains' では文字列が必要です`,
+    });
+  }
 }

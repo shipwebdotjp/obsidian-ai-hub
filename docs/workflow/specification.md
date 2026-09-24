@@ -353,14 +353,30 @@ Node 間のデータ連携は文字列テンプレート展開ではなく、以
 | `pluck` | array\<object\> | `key` str（必須） | array\<any\> |
 | `join` | array | `sep` str（既定 ""） | string |
 | `default` | any | `value` any（必須） | 対象時 `value` |
+| `filter` | array | `key` str（必須）、`op` enum（既定 `eq`）、`value` any（`exists` 以外で必須）、`as` enum（`auto`/`date`、既定 `auto`） | array（順序維持） |
+| `sort` | array（`key` 指定時は array\<object\>） | `key` str（任意）、`order` enum `asc`/`desc`（既定 `asc`） | array |
+| `unique` | array | `key` str（任意） | array（最初の出現を保持） |
 
 - `join` の要素文字列化は、string はそのまま、数値は `str()`、bool は `"true"`/`"false"`、
   `null` は `""`、object / array は compact JSON。
 - `default` は `null` / 空文字列 / 空配列を `value` に置換する（`0` / `false` は対象外）。
+- `filter` の `op` は `eq` / `ne` / `gt` / `gte` / `lt` / `lte` / `in` / `not_in` / `contains` /
+  `exists`。`as:"auto"` は数値同士を数値比較、文字列同士を辞書順（同一オフセットの ISO 8601 は
+  時系列順）で比較し、bool / null は `eq`/`ne` のみ、型が合わない組合せは predicate false とする。
+  `as:"date"` は比較系 `op` のみ許可し、両辺を ISO 8601 日時として解釈して時系列比較する
+  （パース不能・タイムゾーン有無の不一致は Node 失敗）。`in`/`not_in` の `value` は配列、
+  `contains` の `value` は文字列。対象 `key` が要素に無い場合はその要素を除外する（失敗にしない）。
+- `sort` は安定ソートで `null` を常に末尾に置く。要素の型（bool / 数値 / 文字列）が混在する場合は
+  決定性のため Node 失敗とする。`key` 指定時は非 object・キー欠落を失敗とする。
+- `unique` は `key` 省略時は要素全体の JSON 正規化で、指定時はキー値で同一性を判定する。
+  `key` 指定時の非 object・キー欠落は失敗とする。
 - `pipe` の args に `$ref` / `$expr` をネストすることはできない。
 - `$expr` に `pipe` は付けられない。日時式の値は `text_template.inputs` 経由で文字列化する。
-- 公開時に演算子名と args のキー・型・範囲を検証する。実行時に入力値の型を検証し、型不一致・
-  `pluck` のキー欠落は対象 Node を失敗させる（外部呼出前）。error Edge があればそこへ進む。
+- 公開時に演算子名と args のキー・型・範囲を検証する。加えて参照先の宣言型が既知のときは、
+  先頭演算子の入力型（文字列 / 配列）と突き合わせる（`run.inputs`、Agent / Loop / `text_template`
+  出力が対象。Capability 出力など不透明な位置は実行時検証のみ）。
+- 実行時に入力値の型を検証し、型不一致・`pluck`/`sort`/`unique` のキー欠落・`as:"date"` の
+  パース失敗は対象 Node を失敗させる（外部呼出前）。error Edge があればそこへ進む。
 
 ### 3.8 テキスト組立 Node `text_template`
 
@@ -1136,7 +1152,7 @@ one_shot_jobs（v58 で再構築）
 
 1. 非秘密の環境設定参照 `config.<alias>`（明示 allowlist と Run 固定）。
 2. `$expr` への `pipe` 適用、`kind` の追加（算術・文字列・条件）、出力フォーマット指定。
-3. `pipe` 演算子の追加（regex、jsonpath、sort/filter/map、型変換）と静的型推論。
+3. `pipe` 演算子の追加（regex、jsonpath、map、型変換、`filter` の複合条件）と pipe 途中の型推論。
 4. `text_template` の構造化出力・テンプレート部品化（include/macros）・sandbox 強化。
 5. Loop ネスト、Agent Node ごとの軽微な上書き、完了通知（軽量 outbox）。
 

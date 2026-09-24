@@ -408,3 +408,276 @@ def test_render_template_allows_input_named_self():
     # (``render(**variables)`` used to raise a duplicate-argument TypeError).
     assert render_template("ok", {"self": "x"}) == "ok"
     assert render_template("{{ other }}", {"self": "x", "other": "y"}) == "y"
+
+
+# --- filter / sort / unique -------------------------------------------------
+
+
+def test_validate_pipe_accepts_filter_sort_unique():
+    assert (
+        validate_pipe(
+            [{"op": "filter", "args": {"key": "start", "op": "gt", "value": "x"}}]
+        )
+        == []
+    )
+    assert (
+        validate_pipe(
+            [
+                {
+                    "op": "filter",
+                    "args": {
+                        "key": "start",
+                        "op": "gte",
+                        "value": "2026-01-01",
+                        "as": "date",
+                    },
+                }
+            ]
+        )
+        == []
+    )
+    assert (
+        validate_pipe([{"op": "filter", "args": {"key": "start", "op": "exists"}}])
+        == []
+    )
+    assert validate_pipe([{"op": "sort", "args": {"key": "start"}}]) == []
+    assert validate_pipe([{"op": "sort", "args": {"order": "desc"}}]) == []
+    assert validate_pipe([{"op": "unique", "args": {"key": "title"}}]) == []
+    assert validate_pipe([{"op": "unique"}]) == []
+
+
+def test_validate_pipe_rejects_bad_filter_sort_unique_args():
+    assert validate_pipe([{"op": "filter", "args": {"op": "eq", "value": 1}}]) != []
+    assert (
+        validate_pipe(
+            [{"op": "filter", "args": {"key": "k", "op": "exists", "value": 1}}]
+        )
+        != []
+    )
+    assert validate_pipe([{"op": "filter", "args": {"key": "k", "op": "nope"}}]) != []
+    assert (
+        validate_pipe(
+            [{"op": "filter", "args": {"key": "k", "op": "in", "value": "x"}}]
+        )
+        != []
+    )
+    assert (
+        validate_pipe(
+            [{"op": "filter", "args": {"key": "k", "op": "contains", "value": 1}}]
+        )
+        != []
+    )
+    assert (
+        validate_pipe(
+            [{"op": "filter", "args": {"key": "k", "op": "exists", "as": "date"}}]
+        )
+        != []
+    )
+    assert validate_pipe([{"op": "sort", "args": {"order": "up"}}]) != []
+    assert validate_pipe([{"op": "sort", "args": {"key": ""}}]) != []
+    assert validate_pipe([{"op": "unique", "args": {"key": ""}}]) != []
+
+
+def test_apply_pipe_filter_auto_and_date():
+    events = [
+        {"title": "a", "n": 1, "start": "2026-09-20T10:00:00+09:00"},
+        {"title": "b", "n": 2, "start": "2026-09-21T10:00:00+09:00"},
+        {"title": "c", "start": None},
+        {"title": "d"},
+    ]
+    assert apply_pipe(
+        events, [{"op": "filter", "args": {"key": "n", "op": "gte", "value": 2}}]
+    ) == [events[1]]
+    assert apply_pipe(
+        events, [{"op": "filter", "args": {"key": "title", "op": "in", "value": ["a", "c"]}}]
+    ) == [events[0], events[2]]
+    # Missing key and null date values are excluded, not fatal.
+    assert apply_pipe(
+        events,
+        [
+            {
+                "op": "filter",
+                "args": {
+                    "key": "start",
+                    "op": "gt",
+                    "value": "2026-09-20T12:00:00+09:00",
+                    "as": "date",
+                },
+            }
+        ],
+    ) == [events[1]]
+    assert apply_pipe(
+        events, [{"op": "filter", "args": {"key": "n", "op": "exists"}}]
+    ) == [events[0], events[1]]
+
+
+def test_apply_pipe_sort_and_unique():
+    items = [
+        {"title": "b", "n": 2},
+        {"title": "a", "n": 1},
+        {"title": "b", "n": 3},
+    ]
+    assert apply_pipe(items, [{"op": "sort", "args": {"key": "title"}}]) == [
+        items[1],
+        items[0],
+        items[2],
+    ]
+    assert apply_pipe(
+        items, [{"op": "sort", "args": {"key": "title", "order": "desc"}}]
+    ) == [items[0], items[2], items[1]]
+    assert apply_pipe(items, [{"op": "unique", "args": {"key": "title"}}]) == [
+        items[0],
+        items[1],
+    ]
+    assert apply_pipe([3, 1, 3, 2], [{"op": "unique"}]) == [3, 1, 2]
+    assert apply_pipe([3, 1, 2], [{"op": "sort"}]) == [1, 2, 3]
+    # Nulls sort last, regardless of direction.
+    assert apply_pipe(
+        [2, None, 1], [{"op": "sort", "args": {"order": "desc"}}]
+    ) == [2, 1, None]
+
+
+def test_apply_pipe_sort_and_unique_errors():
+    with pytest.raises(ValueError):
+        apply_pipe([{"a": 1}, {"a": "x"}], [{"op": "sort", "args": {"key": "a"}}])
+    with pytest.raises(ValueError):
+        apply_pipe([{"a": 1}], [{"op": "sort", "args": {"key": "b"}}])
+    with pytest.raises(ValueError):
+        apply_pipe([{"a": 1}], [{"op": "unique", "args": {"key": "b"}}])
+    with pytest.raises(ValueError):
+        apply_pipe(
+            [{"start": "nope"}],
+            [
+                {
+                    "op": "filter",
+                    "args": {"key": "start", "op": "gt", "value": "x", "as": "date"},
+                }
+            ],
+        )
+    with pytest.raises(ValueError):
+        apply_pipe("x", [{"op": "filter", "args": {"key": "k", "op": "exists"}}])
+
+
+def test_validate_graph_pipe_input_type_from_schema():
+    schema = {
+        "type": "object",
+        "properties": {
+            "names": {"type": "array", "items": {"type": "string"}},
+            "title": {"type": "string"},
+        },
+    }
+
+    def _graph(pipe):
+        nodes = [
+            _node(
+                "a",
+                "capability",
+                {
+                    "capability_key": "vault_search",
+                    "inputs": {"q": {"$ref": "run.inputs.title", "pipe": pipe}},
+                },
+            ),
+            _node("t", "terminal", {"outcome": "success"}),
+        ]
+        return validate_graph(
+            nodes=nodes, edges=[_edge("e1", "a", "t")], inputs_schema=schema
+        )
+
+    assert any("pipe_type" in e for e in _graph([{"op": "join"}]))
+    assert not any("pipe_type" in e for e in _graph([{"op": "upper"}]))
+
+    nodes = [
+        _node(
+            "a",
+            "capability",
+            {
+                "capability_key": "vault_search",
+                "inputs": {
+                    "q": {
+                        "$ref": "run.inputs.names",
+                        "pipe": [{"op": "sort"}, {"op": "unique"}],
+                    }
+                },
+            },
+        ),
+        _node("t", "terminal", {"outcome": "success"}),
+    ]
+    errors = validate_graph(
+        nodes=nodes, edges=[_edge("e1", "a", "t")], inputs_schema=schema
+    )
+    assert not any("pipe_type" in e for e in errors)
+
+
+def test_execution_applies_filter_sort_unique_to_capability_input():
+    nodes = [
+        _node(
+            "src",
+            "capability",
+            {"capability_key": "calendar_read", "inputs": {}},
+        ),
+        _node(
+            "a",
+            "capability",
+            {
+                "capability_key": "vault_search",
+                "inputs": {
+                    "q": {
+                        "$ref": "nodes.src.output.events",
+                        "pipe": [
+                            {
+                                "op": "filter",
+                                "args": {
+                                    "key": "title",
+                                    "op": "contains",
+                                    "value": "会議",
+                                },
+                            },
+                            {"op": "sort", "args": {"key": "title"}},
+                            {"op": "unique", "args": {"key": "title"}},
+                            {"op": "pluck", "args": {"key": "title"}},
+                        ],
+                    }
+                },
+            },
+        ),
+        _node("t", "terminal", {"outcome": "success"}),
+    ]
+    edges = [_edge("e1", "src", "a"), _edge("e2", "a", "t")]
+
+    class Runner:
+        def __init__(self):
+            self.calls = []
+
+        def run(self, *, node, inputs, context):
+            self.calls.append((node["node_id"], inputs))
+            if node["node_id"] == "src":
+                return NodeOutcome(
+                    status="succeeded",
+                    output={
+                        "events": [
+                            {"title": "会議 B"},
+                            {"title": "ランチ"},
+                            {"title": "会議 A"},
+                            {"title": "会議 B"},
+                        ]
+                    },
+                )
+            return NodeOutcome(status="succeeded", output={})
+
+    runner = Runner()
+    outcome = WorkflowEngine(runner).execute(_setup(nodes, edges))
+    assert outcome.kind == "completed"
+    assert runner.calls[1][1]["q"] == ["会議 A", "会議 B"]
+
+
+def test_validate_pipe_filter_reports_single_error():
+    invalid_op = validate_pipe(
+        [{"op": "filter", "args": {"key": "k", "op": "nope", "as": "date"}}]
+    )
+    assert any("args.op" in e for e in invalid_op)
+    assert not any("でのみ指定できます" in e for e in invalid_op)
+
+    missing_in_value = validate_pipe(
+        [{"op": "filter", "args": {"key": "k", "op": "in"}}]
+    )
+    assert sum("args.value" in e for e in missing_in_value) == 1

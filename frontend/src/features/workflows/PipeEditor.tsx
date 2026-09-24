@@ -58,8 +58,31 @@ function ArgField({
         data-testid={testId}
         className="w-28 rounded border border-slate-300 px-1 py-0.5 text-[11px]"
         value={typeof value === "string" ? value : ""}
-        onChange={(event) => onChange(event.target.value)}
+        onChange={(event) =>
+          onChange(
+            event.target.value === "" && !arg.required
+              ? undefined
+              : event.target.value,
+          )
+        }
       />
+    );
+  }
+  if (arg.type === "enum") {
+    return (
+      <select
+        data-testid={testId}
+        className="cursor-pointer rounded border border-slate-300 px-1 py-0.5 text-[11px]"
+        value={typeof value === "string" ? value : ""}
+        onChange={(event) => onChange(event.target.value || undefined)}
+      >
+        {(!arg.required || !value) && <option value="">（既定）</option>}
+        {(arg.options ?? []).map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
     );
   }
   return <JsonArgField value={value} onChange={onChange} testId={testId} />;
@@ -166,7 +189,7 @@ export default function PipeEditor({ pipe, onChange, idPrefix }: PipeEditorProps
               className="flex flex-wrap items-center gap-1"
             >
               <select
-                data-testid={`${idPrefix}-pipe-${index}-op`}
+                data-testid={`${idPrefix}-pipe-${index}-op-select`}
                 className="rounded border border-slate-300 px-1 py-0.5"
                 value={step.op}
                 onChange={(event) => updateOp(index, event.target.value)}

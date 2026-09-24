@@ -55,3 +55,19 @@ Accepted (実装済み)。正本仕様は [../specification.md](../specification
   `output_schema` を持つ Node 種別として再設計する。
 - `calendar_read` / `reminders_read` の出力 schema に event/reminder のフィールドを追加し、
   参照ピッカーと `pluck` が guided になった。
+
+## Addendum: `filter` / `sort` / `unique`（追補）
+
+予定・リマインダーの取得結果から「必要なものだけ」を決定的に後続へ渡す需要に対し、`pipe` に
+`filter` / `sort` / `unique` を加算的に追加した（`op` 名と上限で拡張余地を残した当初方針の
+範囲内で、既存 Revision の意味は変えない）。
+
+- `filter` は単一述語 `{key, op, value}`（`op` 既定 `eq`）に限定する。`as:"date"` で比較系
+  `op` を時系列比較にでき、パース不能は Node 失敗。対象 `key` の無い要素は除外する
+  （`pluck` の失敗方針とは意図的に分ける）。
+- `sort` は安定ソート・`null` 末尾。要素型が混在する場合は決定性のため失敗とする。
+- `unique` は最初の出現を保持し、`key` 省略時は JSON 正規化で同一性を判定する。
+- 静的検証に、参照先の宣言型と先頭演算子の入力型（文字列 / 配列）の突き合わせを追加した。
+  pipe 途中の型推論は行わず、不透明な位置は実行時検証のままとする。
+- 複合条件（AND/OR）、`sort` の `as:"date"`、`map` / regex / JSONPath は将来候補とする
+  （[../v2_roadmap.md](../v2_roadmap.md) §2）。

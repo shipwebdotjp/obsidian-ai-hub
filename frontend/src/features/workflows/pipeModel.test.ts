@@ -61,3 +61,83 @@ describe("pipeModel", () => {
     expect(validatePipe(Array.from({ length: 21 }, () => ({ op: "upper" }))).length).toBeGreaterThan(0);
   });
 });
+
+describe("pipeModel filter/sort/unique", () => {
+  it("accepts valid filter/sort/unique args", () => {
+    expect(
+      validatePipe([
+        { op: "filter", args: { key: "start", op: "gt", value: "x" } },
+      ]),
+    ).toEqual([]);
+    expect(
+      validatePipe([
+        { op: "filter", args: { key: "start", op: "exists" } },
+      ]),
+    ).toEqual([]);
+    expect(
+      validatePipe([
+        { op: "filter", args: { key: "s", op: "gte", value: "d", as: "date" } },
+      ]),
+    ).toEqual([]);
+    expect(validatePipe([{ op: "sort", args: { order: "desc" } }])).toEqual([]);
+    expect(validatePipe([{ op: "unique", args: { key: "title" } }])).toEqual([]);
+  });
+
+  it("treats filter op as optional with an eq default", () => {
+    expect(
+      validatePipe([{ op: "filter", args: { key: "k", value: 1 } }]),
+    ).toEqual([]);
+    expect(
+      validatePipe([{ op: "filter", args: { key: "k", op: "in", value: [1] } }]),
+    ).toEqual([]);
+  });
+
+  it("rejects invalid filter/sort/unique args", () => {
+    expect(
+      validatePipe([{ op: "filter", args: { op: "eq", value: 1 } }]).length,
+    ).toBeGreaterThan(0);
+    expect(
+      validatePipe([
+        { op: "filter", args: { key: "k", op: "exists", value: 1 } },
+      ]).length,
+    ).toBeGreaterThan(0);
+    expect(
+      validatePipe([{ op: "filter", args: { key: "k", op: "eq" } }]).length,
+    ).toBeGreaterThan(0);
+    expect(
+      validatePipe([
+        { op: "filter", args: { key: "k", op: "in", value: "x" } },
+      ]).length,
+    ).toBeGreaterThan(0);
+    expect(
+      validatePipe([
+        { op: "filter", args: { key: "k", op: "contains", value: 1 } },
+      ]).length,
+    ).toBeGreaterThan(0);
+    expect(
+      validatePipe([
+        { op: "filter", args: { key: "k", op: "exists", as: "date" } },
+      ]).length,
+    ).toBeGreaterThan(0);
+    expect(validatePipe([{ op: "sort", args: { order: "up" } }]).length).toBeGreaterThan(0);
+    expect(validatePipe([{ op: "unique", args: { key: "" } }]).length).toBeGreaterThan(0);
+  });
+
+  it("reports a single issue for a missing or invalid filter arg", () => {
+    const missing = validatePipe([
+      { op: "filter", args: { key: "k", op: "in" } },
+    ]);
+    expect(missing.filter((issue) => issue.message.includes("args.value"))).toHaveLength(1);
+    const badAs = validatePipe([
+      { op: "filter", args: { key: "k", op: "exists", as: "bogus" } },
+    ]);
+    expect(badAs.filter((issue) => issue.message.includes("args.as"))).toHaveLength(1);
+  });
+
+  it("defaults enum args and exposes options", () => {
+    expect(defaultPipeOp("filter").args).toMatchObject({ key: "", op: "eq" });
+    expect(defaultPipeOp("sort").args).toEqual({ order: "asc" });
+    expect(pipeOpSpec("filter")?.args.find((a) => a.key === "as")?.options?.length).toBe(2);
+    expect(pipeOpSpec("sort")?.args.find((a) => a.key === "order")?.defaultValue).toBe("asc");
+  });
+});

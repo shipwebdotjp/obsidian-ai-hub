@@ -114,12 +114,42 @@ JSON Schema の `format` に `date` / `date-time` を指定できます。フォ
 | `pluck` | object 配列 | `key`（要素に無ければ失敗） |
 | `join` | 配列 | `sep`（任意。object は JSON 化） |
 | `default` | 任意 | `value`（`null` / `""` / `[]` のとき置換） |
+| `filter` | 配列 | `key`、`op`（比較方法。既定 `eq`）、`value`、`as`（任意） |
+| `sort` | 配列 | `key`（任意）、`order`（`asc` / `desc`、既定 `asc`） |
+| `unique` | 配列 | `key`（任意） |
 
 - 演算子は左から順に適用されます。
-- 型が合わない・`pluck` のキーが無い場合は **その Node が失敗**し、error Edge があれば
-  そちらへ進みます。Capability / Agent は呼び出されません。
+- 型が合わない・`pluck` / `sort` / `unique` のキーが無い場合は **その Node が失敗**し、
+  error Edge があればそちらへ進みます。Capability / Agent は呼び出されません。
 - `$expr` にはパイプを付けられません。日時式を文章に含めるときは「テキスト組立」Node の
   `inputs` から参照します。
+
+### 選別・並べ替え・重複排除（`filter` / `sort` / `unique`）
+
+予定やリマインダーの一覧から「必要なものだけ」を決定的に後続へ渡すための演算子です。
+
+```json
+{
+  "$ref": "nodes.<node_id>.output.events",
+  "pipe": [
+    { "op": "filter", "args": { "key": "start", "op": "gte", "value": "2026-09-21T00:00:00+09:00", "as": "date" } },
+    { "op": "sort", "args": { "key": "start" } },
+    { "op": "unique", "args": { "key": "title" } },
+    { "op": "pluck", "args": { "key": "title" } }
+  ]
+}
+```
+
+- `filter` は `key` の値を `op` で比較し、一致した要素だけを残します。`op` は `eq` / `ne` /
+  `gt` / `gte` / `lt` / `lte` / `in` / `not_in` / `contains` / `exists` です。
+  - 数値同士は数値比較、文字列同士は辞書順で比較します（同じタイムゾーンの ISO 8601 なら時系列順）。
+  - `as: "date"` を付けると `value` と要素の値を日時として解釈し、時系列で比較します（比較系の
+    `op` のみ）。パースできない値は Node 失敗です。
+  - `in` / `not_in` の `value` は配列、`contains` は文字列（部分一致、配列なら要素の包含）です。
+  - 対象の `key` が要素に無い場合、その要素は結果から除外されます（失敗にはなりません）。
+- `sort` は `key` の値で安定ソートします。`key` を省略するとスカラー配列をそのまま並べ替えます。
+  `null` は常に末尾、要素の型が混在していると Node 失敗です。
+- `unique` は最初に現れた要素を残します。`key` を省略すると要素全体の等値で判定します。
 
 ## テキスト組立（text_template）
 

@@ -117,7 +117,27 @@ PIPE_OPS: tuple[str, ...] = (
     "pluck",
     "join",
     "default",
+    "filter",
+    "sort",
+    "unique",
 )
+
+_FILTER_OPS: tuple[str, ...] = (
+    "eq",
+    "ne",
+    "gt",
+    "gte",
+    "lt",
+    "lte",
+    "in",
+    "not_in",
+    "contains",
+    "exists",
+)
+_FILTER_COMPARISON_OPS: frozenset[str] = frozenset(
+    {"eq", "ne", "gt", "gte", "lt", "lte"}
+)
+_FILTER_AS_VALUES: tuple[str, ...] = ("auto", "date")
 TEXT_OUTPUT_KEY = "text"
 
 _DATE_MATH_TOKEN_RE = re.compile(r"(?P<op>[/+\-])(?P<amount>\d*)(?P<unit>[yMwdhms])")
@@ -397,16 +417,16 @@ def iter_references(value: Any) -> Iterable[str]:
             yield from iter_references(child)
 
 
-def iter_piped_references(value: Any) -> Iterable[list[Any]]:
-    """Yield every pipe op list of a piped reference in a nested value."""
+def iter_piped_reference_entries(value: Any) -> Iterable[tuple[str, list[Any]]]:
+    """Yield ``(ref_path, pipe)`` for every piped reference in a nested value."""
     if is_piped_reference(value):
-        yield list(value[PIPE_KEY])
+        yield str(value[REF_KEY]), list(value[PIPE_KEY])
     elif isinstance(value, dict):
         for child in value.values():
-            yield from iter_piped_references(child)
+            yield from iter_piped_reference_entries(child)
     elif isinstance(value, list):
         for child in value:
-            yield from iter_piped_references(child)
+            yield from iter_piped_reference_entries(child)
 
 
 def iter_invalid_reference_shapes(value: Any) -> Iterable[dict[str, Any]]:
@@ -518,6 +538,60 @@ def _validate_pipe_args(op: str, args: dict[str, Any], *, path: str) -> list[str
         unknown({"value"})
         if "value" not in args:
             errors.append(f"{path}.args.value: value が必要です")
+    elif op == "filter":
+        unknown({"key", "op", "value", "as"})
+        key = args.get("key")
+        if not isinstance(key, str) or key == "":
+            errors.append(f"{path}.args.key: 空でない文字列が必要です")
+        predicate = args.get("op", "eq")
+        if predicate not in _FILTER_OPS:
+            errors.append(
+                f"{path}.args.op: {list(_FILTER_OPS)} のいずれかが必要です"
+            )
+            predicate = None
+        if predicate == "exists":
+            if "value" in args:
+                errors.append(
+                    f"{path}.args.value: op 'exists' では指定できません"
+                )
+        elif predicate is not None and "value" not in args:
+            errors.append(f"{path}.args.value: value が必要です")
+        as_value = args.get("as")
+        if as_value is not None:
+            if as_value not in _FILTER_AS_VALUES:
+                errors.append(
+                    f"{path}.args.as: {list(_FILTER_AS_VALUES)} のいずれかが必要です"
+                )
+            elif predicate is not None and predicate not in _FILTER_COMPARISON_OPS:
+                errors.append(
+                    f"{path}.args.as: op 'eq'/'ne'/'gt'/'gte'/'lt'/'lte' でのみ指定できます"
+                )
+        if (
+            predicate in ("in", "not_in")
+            and "value" in args
+            and not isinstance(args["value"], list)
+        ):
+            errors.append(
+                f"{path}.args.value: op '{predicate}' では配列が必要です"
+            )
+        if predicate == "contains" and "value" in args:
+            if not isinstance(args["value"], str):
+                errors.append(
+                    f"{path}.args.value: op 'contains' では文字列が必要です"
+                )
+    elif op == "sort":
+        unknown({"key", "order"})
+        key = args.get("key")
+        if key is not None and (not isinstance(key, str) or key == ""):
+            errors.append(f"{path}.args.key: 空でない文字列が必要です")
+        order = args.get("order")
+        if order is not None and order not in ("asc", "desc"):
+            errors.append(f"{path}.args.order: 'asc' / 'desc' が必要です")
+    elif op == "unique":
+        unknown({"key"})
+        key = args.get("key")
+        if key is not None and (not isinstance(key, str) or key == ""):
+            errors.append(f"{path}.args.key: 空でない文字列が必要です")
     return errors
 
 
@@ -545,6 +619,127 @@ def _as_pipe_list(value: Any, op: str) -> list[Any]:
     if not isinstance(value, list):
         raise ValueError(f"pipe '{op}' は配列にのみ適用できます")
     return value
+
+
+def _pipe_equals(left: Any, right: Any) -> bool:
+    """Equality that never conflates ``bool`` with ``int``/``float``."""
+    if isinstance(left, bool) != isinstance(right, bool):
+        return False
+    return bool(left == right)
+
+
+def _pipe_identity(value: Any) -> str:
+    import json
+
+    return json.dumps(
+        value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str
+    )
+
+
+def _parse_pipe_datetime(value: Any) -> datetime:
+    if not isinstance(value, str):
+        raise ValueError(
+            "pipe 'filter': as 'date' には ISO 8601 日時文字列が必要です"
+        )
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError as exc:
+        raise ValueError(
+            "pipe 'filter': as 'date' の値は ISO 8601 日時文字列である必要があります"
+        ) from exc
+
+
+def _filter_date_compare(actual: Any, expected: Any, predicate: str) -> bool:
+    left = _parse_pipe_datetime(actual)
+    right = _parse_pipe_datetime(expected)
+    if (left.tzinfo is None) != (right.tzinfo is None):
+        raise ValueError(
+            "pipe 'filter': as 'date' はタイムゾーンの有無を揃えてください"
+        )
+    if predicate == "eq":
+        return left == right
+    if predicate == "ne":
+        return left != right
+    if predicate == "gt":
+        return left > right
+    if predicate == "gte":
+        return left >= right
+    if predicate == "lt":
+        return left < right
+    return left <= right
+
+
+def _filter_auto_compare(actual: Any, expected: Any, predicate: str) -> bool:
+    if predicate in ("eq", "ne"):
+        equal = _pipe_equals(actual, expected)
+        return equal if predicate == "eq" else not equal
+    if predicate in ("gt", "gte", "lt", "lte"):
+        both_numbers = (
+            isinstance(actual, (int, float))
+            and not isinstance(actual, bool)
+            and isinstance(expected, (int, float))
+            and not isinstance(expected, bool)
+        )
+        both_strings = isinstance(actual, str) and isinstance(expected, str)
+        if not (both_numbers or both_strings):
+            return False
+        if predicate == "gt":
+            return actual > expected
+        if predicate == "gte":
+            return actual >= expected
+        if predicate == "lt":
+            return actual < expected
+        return actual <= expected
+    return False
+
+
+def _pipe_predicate(
+    item: Any, key: str, predicate: str, expected: Any, *, as_date: bool
+) -> bool:
+    if predicate == "exists":
+        return isinstance(item, dict) and key in item
+    if not isinstance(item, dict) or key not in item:
+        return False
+    actual = item[key]
+    if predicate == "in":
+        return any(_pipe_equals(actual, candidate) for candidate in expected)
+    if predicate == "not_in":
+        return not any(_pipe_equals(actual, candidate) for candidate in expected)
+    if predicate == "contains":
+        if isinstance(actual, str):
+            return isinstance(expected, str) and expected in actual
+        if isinstance(actual, list):
+            return any(_pipe_equals(element, expected) for element in actual)
+        return False
+    if as_date:
+        if actual is None:
+            return False
+        return _filter_date_compare(actual, expected, predicate)
+    return _filter_auto_compare(actual, expected, predicate)
+
+
+def _sort_pipe_items(
+    items: list[Any], values: list[Any], order: str
+) -> list[Any]:
+    non_null = [v for v in values if v is not None]
+    if non_null:
+        if all(isinstance(v, bool) for v in non_null):
+            pass
+        elif all(
+            isinstance(v, (int, float)) and not isinstance(v, bool) for v in non_null
+        ):
+            pass
+        elif all(isinstance(v, str) for v in non_null):
+            pass
+        else:
+            raise ValueError("pipe 'sort': 要素の型を揃えてください")
+    paired = [
+        (value, item) for value, item in zip(values, items) if value is not None
+    ]
+    paired.sort(key=lambda pair: pair[0], reverse=(order == "desc"))
+    ordered = [item for _, item in paired]
+    ordered.extend(item for value, item in zip(values, items) if value is None)
+    return ordered
 
 
 def apply_pipe(value: Any, pipe: list[Any]) -> Any:
@@ -591,6 +786,53 @@ def apply_pipe(value: Any, pipe: list[Any]) -> Any:
                 isinstance(current, list) and not current
             ):
                 current = args.get("value")
+        elif op == "filter":
+            items = _as_pipe_list(current, op)
+            key = str(args["key"])
+            predicate = str(args.get("op") or "eq")
+            expected = args.get("value")
+            as_date = args.get("as") == "date"
+            current = [
+                item
+                for item in items
+                if _pipe_predicate(
+                    item, key, predicate, expected, as_date=as_date
+                )
+            ]
+        elif op == "sort":
+            items = _as_pipe_list(current, op)
+            key = args.get("key")
+            order = str(args.get("order") or "asc")
+            values: list[Any] = []
+            for item in items:
+                if key is None:
+                    values.append(item)
+                else:
+                    if not isinstance(item, dict) or key not in item:
+                        raise ValueError(
+                            f"pipe 'sort': キー '{key}' が要素にありません"
+                        )
+                    values.append(item[key])
+            current = _sort_pipe_items(items, values, order)
+        elif op == "unique":
+            items = _as_pipe_list(current, op)
+            key = args.get("key")
+            seen: set[str] = set()
+            deduped: list[Any] = []
+            for item in items:
+                if key is None:
+                    identity = _pipe_identity(item)
+                else:
+                    if not isinstance(item, dict) or key not in item:
+                        raise ValueError(
+                            f"pipe 'unique': キー '{key}' が要素にありません"
+                        )
+                    identity = _pipe_identity(item[key])
+                if identity in seen:
+                    continue
+                seen.add(identity)
+                deduped.append(item)
+            current = deduped
         else:  # pragma: no cover - validate_pipe rejects unknown ops first
             raise ValueError(f"未対応の pipe 演算子です: {op}")
     return current

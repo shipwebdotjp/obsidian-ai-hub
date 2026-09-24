@@ -48,6 +48,44 @@ describe("PipeEditor", () => {
     expect(screen.queryByTestId("p-pipe-issues")).not.toBeInTheDocument();
   });
 
+  it("renders filter enum args as selects and emits the chosen op", async () => {
+    const onChange = vi.fn();
+    render(
+      <PipeEditor
+        idPrefix="p"
+        pipe={[{ op: "filter", args: { key: "title", op: "eq", value: "x" } }]}
+        onChange={onChange}
+      />,
+    );
+    const opSelect = screen.getByTestId("p-pipe-0-op") as HTMLSelectElement;
+    expect(opSelect.tagName).toBe("SELECT");
+    await userEvent.selectOptions(opSelect, "contains");
+    const next = onChange.mock.calls[0][0] as { args: Record<string, unknown> }[];
+    expect(next[0].args.op).toBe("contains");
+  });
+
+  it("adds a sort op with no required args", async () => {
+    const onChange = vi.fn();
+    render(<PipeEditor idPrefix="p" pipe={[]} onChange={onChange} />);
+    await userEvent.selectOptions(screen.getByTestId("p-pipe-add"), "sort");
+    const next = onChange.mock.calls[0][0] as { op: string }[];
+    expect(next[0].op).toBe("sort");
+  });
+
+  it("clears an optional string arg by deleting the key", async () => {
+    const onChange = vi.fn();
+    render(
+      <PipeEditor
+        idPrefix="p"
+        pipe={[{ op: "sort", args: { key: "title" } }]}
+        onChange={onChange}
+      />,
+    );
+    await userEvent.clear(screen.getByTestId("p-pipe-0-key"));
+    const next = onChange.mock.calls.at(-1)?.[0] as { args: Record<string, unknown> }[];
+    expect(next[0].args).not.toHaveProperty("key");
+  });
+
   it("keeps a raw JSON draft instead of re-quoting it", async () => {
     render(
       <PipeEditor

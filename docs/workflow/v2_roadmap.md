@@ -30,10 +30,12 @@ Node** で意図的に採用しなかった拡張余地と、Workflow 全体の�
 
 ## 2. 値パイプライン `pipe` の拡張余地
 
-- **演算子の追加** — regex 抽出/置換、JSONPath、`sort`/`unique`/`filter`/`map`、`split`、
-  `flatten`、数値・日付のフォーマット、`json_parse`/`json_stringify` など。
-- **静的型推論** — 現状は args を公開時、値型を実行時に検証。上流 schema から pipe 途中の型を
-  推論して公開時に弾く余地。
+- **演算子の追加** — regex 抽出/置換、JSONPath、`map`、`split`、`flatten`、数値・日付の
+  フォーマット、`json_parse`/`json_stringify`、`filter` の複合条件（AND/OR）など。
+- **静的型推論** — 現状は args を公開時、参照先の宣言型と先頭演算子の入力型（文字列/配列）を
+  公開時に、値型を実行時に検証。pipe 途中の型を推論して後続演算子まで公開時に弾く余地。
+- **`sort` の日付比較** — `filter` は `as:"date"` を持つが `sort` は辞書順のみ。時系列ソートの
+  `as` 追加余地。
 - **`$expr` への適用** — §1 と同じ。
 - **パイプラインの再利用・ネスト** — 名前付きマクロや、配列要素内の `$ref`+`pipe`。現状は
   値位置に限定し、args への `$ref`/`$expr` ネストは禁止。
