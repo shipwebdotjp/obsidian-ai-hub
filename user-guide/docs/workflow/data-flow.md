@@ -31,6 +31,7 @@ Node 間のデータ連携は、文字列のテンプレート展開ではなく
 Capability Node の出力は、型が宣言されているもの（読み取り/検索系、`hitl_wait`、`research_agent`、
 `register_*_job` など）は `nodes.<node_id>.output.<field>` を参照できます。宣言のない Capability は
 `nodes.<node_id>.output` 全体（要約 `summary`、または JSON object 全体）のみ参照できます。
+Agent Node と単発 LLM Node は `output_schema` を宣言するため、そのプロパティを型付きで参照できます。
 
 ## 解決のタイミング
 
@@ -46,7 +47,7 @@ Capability Node の出力は、型が宣言されているもの（読み取り/
 ## 日時式（`$expr`）
 
 「今日」「今週の月曜〜日曜」のような実行時の日付は、`{"$expr": ...}` で書きます。値の位置
-（Capability / Agent の `inputs`、Loop の `input_mapping` / `output_mapping`、Run 入力）で
+（Capability / Agent / 単発 LLM の `inputs`、Loop の `input_mapping` / `output_mapping`、Run 入力）で
 リテラルの代わりに使えます。フォームの「式」ボタンから入力できます。
 
 ```json
@@ -155,6 +156,13 @@ JSON Schema の `format` に `date` / `date-time` を指定できます。フォ
 
 複数値から文章を作るときは **テキスト組立** Node を使います（[Node リファレンス](nodes.md#text_template-nodeテキスト組立)）。
 出力は常に `nodes.<node_id>.output.text`（string）です。
+
+## 単発 LLM（llm）
+
+会話を残さずに構造化データだけが欲しいときは **単発 LLM** Node を使います
+（[Node リファレンス](nodes.md#llm-node単発-llm)）。出力は `output_schema` に沿った JSON で、
+そのプロパティを `nodes.<node_id>.output.<field>` として型付き参照できます。Agent Node と違い
+会話・ツールを持たず、出力参照候補にも `output_schema` のフィールドが表示されます。
 
 ## 分岐（条件付き Edge）
 

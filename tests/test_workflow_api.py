@@ -1062,3 +1062,46 @@ def test_delete_missing_workflow_is_404_even_with_reference(
         ],
     )
     assert client.delete("/api/v1/workflows/wf_gone").status_code == 404
+
+
+def test_text_template_preview_renders_with_sample_values(test_memory_db_path, client):
+    response = client.post(
+        "/api/v1/workflows/text-template/preview",
+        json={
+            "template": "{% for e in events %}- {{ e.title | upper }}\n{% endfor %}",
+            "values": {"events": [{"title": "alpha"}, {"title": "beta"}]},
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is True
+    assert "- ALPHA" in body["rendered"]
+    assert body["errors"] == []
+
+
+def test_text_template_preview_reports_unknown_variable(test_memory_db_path, client):
+    response = client.post(
+        "/api/v1/workflows/text-template/preview",
+        json={"template": "{{ missing }}", "values": {"events": []}},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is False
+    assert body["rendered"] is None
+    assert any("missing" in error for error in body["errors"])
+
+
+def test_text_template_preview_reports_syntax_and_include(test_memory_db_path, client):
+    syntax = client.post(
+        "/api/v1/workflows/text-template/preview",
+        json={"template": "{% for x in %}", "values": {}},
+    ).json()
+    assert syntax["ok"] is False
+    assert syntax["errors"]
+
+    include = client.post(
+        "/api/v1/workflows/text-template/preview",
+        json={"template": "{% include 'x' %}", "values": {}},
+    ).json()
+    assert include["ok"] is False
+    assert include["errors"]

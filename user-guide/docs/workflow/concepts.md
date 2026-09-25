@@ -11,12 +11,13 @@ title: 用語と状態
 | --- | --- |
 | **Workflow** | 恒久 ID・名前・説明を持つワークフロー本体。Revision の集合。 |
 | **Workflow Revision** | 1 つのグラフ定義。`draft` / `published` / `superseded` の状態を持つ。 |
-| **Node** | グラフ上の処理単位。`capability` / `agent` / `loop` / `terminal` / `loop_result` の 5 種。 |
+| **Node** | グラフ上の処理単位。`capability` / `agent` / `llm` / `loop` / `terminal` / `loop_result` / `text_template` の 7 種。 |
 | **Edge** | Node 間の接続。`normal` または `error`。 |
 | **Workflow Run** | Revision の 1 回の実行単位。 |
 | **Activation** | ある Node が、ある経路・Loop 反復で論理的に 1 回起動された単位。永続 UUID を持つ。 |
 | **Capability Node** | 既存 Capability を呼び出す Node。 |
-| **Agent Node** | 既存の Agent を呼び出し、出力を JSON Schema で検証する Node。 |
+| **Agent Node** | 既存の Agent を呼び出し、出力を JSON Schema で検証する Node。会話を保存する。 |
+| **LLM Node** | ツール・会話を持たない単発の LLM 呼び出し。入力と Schema から JSON を検証して返す。 |
 | **Loop Node** | 非循環の子グラフを上限付きで反復する Node。 |
 | **Loop Result Node** | Loop 子グラフの終端。次の `loop.state` を返す。 |
 | **Terminal Node** | グラフの終端。`success` または `failure`。 |

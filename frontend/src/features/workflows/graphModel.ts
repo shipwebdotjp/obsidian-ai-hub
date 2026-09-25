@@ -41,6 +41,35 @@ export function defaultInputsSchema(): Record<string, unknown> {
   return { type: "object", properties: {} };
 }
 
+/** Providers accepted by the backend ``llm`` node (mirrors llm_node.py). */
+export const WORKFLOW_LLM_PROVIDERS = [
+  "openai",
+  "gemini",
+  "ollama",
+  "local",
+  "opencode_go",
+] as const;
+
+/** Providers that accept ``reasoning_effort`` (mirrors llm_node.py). */
+export const WORKFLOW_LLM_REASONING_PROVIDERS = [
+  "openai",
+  "ollama",
+  "opencode_go",
+] as const;
+
+/** Config keys accepted by the backend ``llm`` node (mirrors llm_node.py). */
+export const WORKFLOW_LLM_CONFIG_KEYS = [
+  "provider",
+  "model",
+  "system_prompt",
+  "max_tokens",
+  "reasoning_effort",
+  "inputs",
+  "output_schema",
+] as const;
+
+export const WORKFLOW_LLM_DEFAULT_MAX_TOKENS = 4096;
+
 export function defaultNodeConfig(
   nodeType: WorkflowNodeType,
   capabilityKey?: string,
@@ -51,6 +80,15 @@ export function defaultNodeConfig(
     case "agent":
       return {
         agent_id: "",
+        inputs: {},
+        output_schema: { type: "object", properties: {} },
+      };
+    case "llm":
+      return {
+        provider: "openai",
+        model: "",
+        system_prompt: "",
+        max_tokens: WORKFLOW_LLM_DEFAULT_MAX_TOKENS,
         inputs: {},
         output_schema: { type: "object", properties: {} },
       };
@@ -82,7 +120,7 @@ export function nodeDisplayName(node: WorkflowNode): string {
   const label = typeof node.label === "string" ? node.label.trim() : "";
   if (label) return label;
   const config = (node.config ?? {}) as Record<string, unknown>;
-  for (const key of ["capability_key", "agent_id", "outcome"] as const) {
+  for (const key of ["capability_key", "agent_id", "model", "outcome"] as const) {
     const value = config[key];
     if (typeof value === "string" && value.trim()) return value.trim();
   }
@@ -399,7 +437,7 @@ function nodeOutputFields(
 ): ReferenceField[] {
   const config = (node.config ?? {}) as Record<string, unknown>;
   const basePath = `nodes.${node.node_id}.output`;
-  if (node.node_type === "agent") {
+  if (node.node_type === "agent" || node.node_type === "llm") {
     return schemaReferenceFields(config.output_schema, basePath);
   }
   if (node.node_type === "loop") {
@@ -443,6 +481,125 @@ function nodeOutputFields(
     ];
   }
   return [{ path: basePath, type: "object" }];
+}
+
+/**
+ * Resolve the JSON schema declared at a typed reference path, else ``null``.
+ *
+ * Used by the ``text_template`` editor to offer nested field completion (e.g.
+ * ``event.title`` inside a ``{% for %}``). Only the schema shapes the editor can
+ * already express are resolved; opaque capability outputs yield ``null``.
+ */
+export function referenceSchemaAt(
+  nodes: WorkflowNode[],
+  path: string,
+  inputsSchema: Record<string, unknown>,
+  options: {
+    capabilityOutputSchemas?: Record<string, WorkflowSchemaField>;
+    scopeId?: string | null;
+  } = {},
+): WorkflowSchemaField | null {
+  const trimmed = path.trim();
+  if (trimmed === REFERENCE_TIME_REF) return { type: "string" };
+  if (trimmed === "loop.iteration") return { type: "integer" };
+
+  const nodeMatch = /^nodes\.([^.]+)\.output(\..*)?$/.exec(trimmed);
+  if (nodeMatch) {
+    const node = nodes.find((item) => item.node_id === nodeMatch[1]);
+    if (!node) return null;
+    return walkSchemaPath(
+      nodeOutputSchema(node, nodes, options.capabilityOutputSchemas),
+      nodeMatch[2] ?? "",
+    );
+  }
+  if (trimmed === "run.inputs" || trimmed.startsWith("run.inputs.")) {
+    return walkSchemaPath(
+      asSchemaField(inputsSchema),
+      trimmed.slice("run.inputs".length),
+    );
+  }
+  if (trimmed === "loop.state" || trimmed.startsWith("loop.state.")) {
+    const loop = options.scopeId
+      ? nodes.find((item) => item.node_id === options.scopeId)
+      : undefined;
+    const stateSchema = asSchemaField(
+      (loop?.config as Record<string, unknown> | undefined)?.state_schema,
+    );
+    return walkSchemaPath(stateSchema, trimmed.slice("loop.state".length));
+  }
+  return null;
+}
+
+function nodeOutputSchema(
+  node: WorkflowNode,
+  nodes: WorkflowNode[],
+  capabilityOutputSchemas?: Record<string, WorkflowSchemaField>,
+): WorkflowSchemaField | null {
+  const config = (node.config ?? {}) as Record<string, unknown>;
+  if (node.node_type === "agent" || node.node_type === "llm") {
+    return asSchemaField(config.output_schema);
+  }
+  if (node.node_type === "loop") {
+    return {
+      type: "object",
+      properties: {
+        final_state: asSchemaField(config.state_schema) ?? {},
+        iterations: { type: "integer" },
+        exit_reason: { type: "string" },
+      },
+    };
+  }
+  if (node.node_type === "loop_result") {
+    const parent = nodes.find(
+      (candidate) => candidate.node_id === node.parent_loop_node_id,
+    );
+    const stateSchema = (parent?.config as Record<string, unknown> | undefined)
+      ?.state_schema;
+    return asSchemaField(stateSchema);
+  }
+  if (node.node_type === "capability") {
+    const key = String(config.capability_key ?? "");
+    return capabilityOutputSchemas?.[key] ?? null;
+  }
+  if (node.node_type === "text_template") {
+    return { type: "object", properties: { text: { type: "string" } } };
+  }
+  return null;
+}
+
+function walkSchemaPath(
+  schema: WorkflowSchemaField | null,
+  subPath: string,
+): WorkflowSchemaField | null {
+  if (!schema) return null;
+  const segments = subPath.replace(/^\./, "").split(".").filter(Boolean);
+  let current: WorkflowSchemaField | null = schema;
+  for (const segment of segments) {
+    if (!current) return null;
+    const [name] = segment.split("[");
+    if (name) {
+      const property: WorkflowSchemaField | undefined =
+        current.properties?.[name];
+      if (property) {
+        current = property;
+      } else if (
+        current.additionalProperties &&
+        typeof current.additionalProperties === "object"
+      ) {
+        current = current.additionalProperties;
+      } else {
+        return null;
+      }
+    }
+    if (segment.includes("[")) {
+      const container: WorkflowSchemaField | null = current;
+      current =
+        container && container.type === "array"
+          ? container.items ?? null
+          : null;
+    }
+  }
+  return current;
 }
 
 /** The frozen reference-time path shared by validation and the editor. */
@@ -660,6 +817,72 @@ export function validateGraphShape(
         message: "agent_id が必要です",
         nodeId: node.node_id,
       });
+    }
+    if (node.node_type === "llm") {
+      const provider = String(config.provider ?? "");
+      const unknownKeys = Object.keys(config).filter(
+        (key) => !(WORKFLOW_LLM_CONFIG_KEYS as readonly string[]).includes(key),
+      );
+      if (unknownKeys.length > 0) {
+        issues.push({
+          code: "llm_unknown_keys",
+          message: `llm の未知キー: ${unknownKeys.join(", ")}`,
+          nodeId: node.node_id,
+        });
+      }
+      if (!(WORKFLOW_LLM_PROVIDERS as readonly string[]).includes(provider)) {
+        issues.push({
+          code: "llm_provider",
+          message: "llm.provider が不正です",
+          nodeId: node.node_id,
+        });
+      }
+      if (typeof config.model !== "string" || !config.model.trim()) {
+        issues.push({
+          code: "llm_model",
+          message: "llm.model が必要です",
+          nodeId: node.node_id,
+        });
+      }
+      if (typeof config.system_prompt !== "string") {
+        issues.push({
+          code: "llm_system_prompt",
+          message: "llm.system_prompt は文字列が必要です",
+          nodeId: node.node_id,
+        });
+      }
+      const maxTokens = config.max_tokens;
+      if (
+        typeof maxTokens !== "number" ||
+        !Number.isInteger(maxTokens) ||
+        maxTokens < 1
+      ) {
+        issues.push({
+          code: "llm_max_tokens",
+          message: "llm.max_tokens は正整数が必要です",
+          nodeId: node.node_id,
+        });
+      }
+      const effort = config.reasoning_effort;
+      if (effort !== undefined && effort !== null && effort !== "") {
+        if (typeof effort !== "string" || !effort.trim()) {
+          issues.push({
+            code: "llm_reasoning_effort",
+            message: "llm.reasoning_effort は空でない文字列が必要です",
+            nodeId: node.node_id,
+          });
+        } else if (
+          !(WORKFLOW_LLM_REASONING_PROVIDERS as readonly string[]).includes(
+            provider,
+          )
+        ) {
+          issues.push({
+            code: "llm_reasoning_effort",
+            message: `llm.reasoning_effort は provider '${provider}' では使えません`,
+            nodeId: node.node_id,
+          });
+        }
+      }
     }
     if (node.node_type === "loop" && scopeOf(node) !== null) {
       issues.push({

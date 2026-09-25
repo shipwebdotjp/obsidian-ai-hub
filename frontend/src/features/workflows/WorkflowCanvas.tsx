@@ -50,6 +50,8 @@ function nodeTypeClass(nodeType: WorkflowNode["node_type"]): string {
       return "border-blue-400 bg-blue-50";
     case "agent":
       return "border-purple-400 bg-purple-50";
+    case "llm":
+      return "border-emerald-400 bg-emerald-50";
     case "loop":
       return "border-amber-400 bg-amber-50";
     case "loop_result":

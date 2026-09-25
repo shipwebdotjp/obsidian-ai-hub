@@ -25,10 +25,11 @@ Agent Node の LLM 出力は確率的で、JSON Schema によって検証・型�
 | --- | --- |
 | **Workflow** | 恒久 ID・名前・説明・承認スキップ設定を持つワークフロー本体。Revision の集合。 |
 | **Workflow Revision** | 1 つのグラフ定義。`draft`/`published`/`superseded` の状態を持つ。 |
-| **Node** | グラフ上の 1 つの処理単位。`capability` / `agent` / `loop` / `terminal` / `loop_result` の種別がある。 |
+| **Node** | グラフ上の 1 つの処理単位。`capability` / `agent` / `llm` / `loop` / `terminal` / `loop_result` の種別がある。 |
 | **Edge** | Node 間の接続。条件付きの排他的分岐を持つ。 |
 | **Capability Node** | 既存 Capability Adapter を呼び出す Node。 |
 | **Agent Node** | 既存 `agents` テーブルの Agent を呼び出し、JSON Schema で出力を検証する Node。 |
+| **LLM Node** | ツール・会話を持たない単発の LLM 呼び出し。`inputs` と `output_schema` を JSON-only 指示として送り、型付き JSON を返す Node（§3.9）。 |
 | **Loop Node** | 非循環の子グラフを反復実行する Node。`loop.state` を所有する。 |
 | **Loop Result Node** | Loop Node 子グラフの終端。次の `loop.state` を返す。 |
 | **Terminal Node** | グラフの終端。`success` または `failure` の outcome を持つ。 |
@@ -48,7 +49,7 @@ Agent Node の LLM 出力は確率的で、JSON Schema によって検証・型�
 ### 1.3 スコープ
 
 **範囲**: Workflow / Revision / Node / Edge / Loop 子グラフの CRUD・検証、Capability Node、
-Agent Node、Loop Node（非ネスト）、terminal / loop_result Node、型付き inputs_schema、型付き参照、
+Agent Node、単発 LLM Node、Loop Node（非ネスト）、terminal / loop_result Node、型付き inputs_schema、型付き参照、
 条件付き排他的分岐、OR 合流、承認（`waiting_approval`）と Workflow 単位の承認スキップ、
 HITL wait（`waiting_hitl`）、
 `needs_attention` / `waiting_attention`、中断・再開・キャンセル、効果契約による動的完了判定、
@@ -75,7 +76,10 @@ Workflow ごとの同時実行数制御、承認待ち Run の抑止・自動失
      `research_agent` Capability Node → Vault 書き込み Capability Node。
 3. **定型タスクの承認付き自動化**
    - 人間が設計した Capability グラフを手動実行。`plan_required` Capability を含む場合は
-     一括承認してから実行。
+      一括承認してから実行。
+4. **会話を残さない単発の構造化抽出 / 分類**
+   - 前段 Node の出力を単発 LLM Node に渡し、`output_schema` に沿った JSON（分類・要約・
+     抽出）を受け取って後続 Node へ型付きで受け渡す。Agent 会話やツールは使わない。
 
 ### 2.2 操作シナリオ契約
 
@@ -89,6 +93,7 @@ Workflow ごとの同時実行数制御、承認待ち Run の抑止・自動失
 | Node 実行 | 検証済み入力 + InvocationContext | `activation_id` / `node_id` | `workflow_run_nodes` / `workflow_activations` | 次 Edge | validation 失敗は実行しない | Capability 副作用 |
 | Loop 反復 | 子グラフ + `loop.state` | `iteration` / activation_id | `workflow_events` | Loop Node | 上限到達は `incomplete` | 子 Capability 副作用 |
 | Agent Node | Agent 選択 + 期待 schema | `agent_id` / child_run_id | Agent 会話 + `workflow_events` | 後続 Node | JSON 検証失敗は Node 失敗 | Agent 子 Run 作成 |
+| LLM Node | `provider` / `model` / `system_prompt` + 解決済み `inputs` + `output_schema` | `activation_id` / `llm_call_logs.call_id` | `llm_call_logs`（`run_id` NULL）+ `workflow_run_nodes` | 後続 Node | 取消前は送信せず、JSON / schema 不一致は Node 失敗 | 外部 LLM への送信 |
 | HITL 質問 | `hitl_wait` Capability | `hitl_run_id` | `workflow_events` | HITL 回答後の worker | — | HITL run 作成 |
 | needs_attention | 子 Run 結果 | `node_id` | `workflow_events` | 人間 | 自動再開しない | 子 Run 継続の可能性 |
 | 完了 | 成功 Terminal + 効果集合 | `run_id` | `workflow_runs` | 閲覧者 | 効果未達は `incomplete` | — |
@@ -139,7 +144,7 @@ updated_at TEXT NOT NULL
 ```text
 node_id TEXT PRIMARY KEY
 revision_id TEXT NOT NULL
-node_type TEXT NOT NULL CHECK(node_type IN ('capability','agent','loop','terminal','loop_result'))
+node_type TEXT NOT NULL CHECK(node_type IN ('capability','agent','llm','loop','terminal','loop_result','text_template'))
 label TEXT
 config_json TEXT NOT NULL
 parent_loop_node_id TEXT        -- Loop 子グラフ内の Node のみ非 NULL
@@ -403,6 +408,49 @@ Node 間のデータ連携は文字列テンプレート展開ではなく、以
   `StrictUndefined` で未定義変数を失敗にする。
 - effects を持たず、単体では Run の承認を必要としない（`requires_approval` の対象外）。
 
+### 3.9 単発 LLM Node `llm`
+
+会話・ツールを持たない、Workflow 専用の単発 LLM 呼び出し。設定は `provider`、`model`、
+`system_prompt`、`max_tokens`、任意の `reasoning_effort`、`inputs`、必須の `output_schema`
+のみで、未知キー（`retry` を含む）は拒否する。Agent Node の会話保存を設定で止める代替では
+なく、別の Node 種別として責務を分離する。
+
+```json
+{
+  "provider": "openai",
+  "model": "gpt-5",
+  "system_prompt": "入力テキストを分類してください。",
+  "max_tokens": 4096,
+  "reasoning_effort": "low",
+  "inputs": {
+    "text": {"$ref": "run.inputs.body"}
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "category": {"type": "string", "enum": ["a", "b"]},
+      "confidence": {"type": "number"}
+    },
+    "required": ["category"]
+  }
+}
+```
+
+- `provider` は既存 LLM クライアントが受け付ける `openai` / `gemini` / `ollama` / `local` /
+  `opencode_go` のみ。`model` は空でない文字列、`max_tokens` は正整数。
+- `reasoning_effort` は省略可能で、対応 provider（`openai` / `ollama` / `opencode_go`）でのみ
+  許可する。それ以外の provider では検証エラー。
+- `inputs` は値または型付き参照。`$ref` / `pipe` / `$expr` の扱いは Capability / Agent Node と
+  同等で、参照は実行直前に解決する。
+- `output_schema` は Agent Node と同じ JSON Schema サブセットで検証する。出力は
+  `nodes.<node_id>.output.<field>` として後続 Node から型付き参照できる。
+- `temperature` は `0.7` 固定。`system_prompt` は Revision に固定した文字列で、動的な文字列
+  展開は行わない（整形が必要な場合は前段の `text_template` Node で行う）。
+- Node 作成時の初期値は `provider=openai`、`model=""`、`max_tokens=4096`。`model` 未設定の
+  間は検証エラーとなり公開できない。
+- effects を持たず、単体では Run の承認を必要としない（`requires_approval` の対象外）。
+  Capability / Agent Node の承認規則は変更しない。
+
 ## 4. グラフの構造規約
 
 ### 4.1 非循環性
@@ -504,6 +552,9 @@ Node 間のデータ連携は文字列テンプレート展開ではなく、以
 - `pipe` の演算子名・args のキー/型/範囲が妥当で、args に `$ref`/`$expr` を含まないこと。
 - `text_template` の `inputs` が object で、`template` が構文・16 KiB 以内・未定義変数なしの
   Jinja2 本文であること。
+- `llm` の `config` が許可キーのみで、`provider` / `model` / `max_tokens` が妥当であり、
+  `reasoning_effort` が対応 provider でのみ指定されていること。`output_schema` が JSON Schema
+  サブセット内であること。
 - 秘密値を含む入力が固定値として保存されていないこと（UI 警告 + 検証ヒューリスティック）。
 
 ### 6.2 動的検証（Run 開始直前 / Node 実行直前）
@@ -514,6 +565,8 @@ Node 間のデータ連携は文字列テンプレート展開ではなく、以
   無効なら `waiting_approval`、有効なら `queued` とする。承認判定は Run 作成時に一度だけ
   行い、スナップショット済みの既存 Run は設定変更の影響を受けない。
 - Node 入力の型付き参照を解決し、schema で完全検証する。
+- `llm` Node は承認判定の対象外。実行直前に `inputs` を解決し、取消要求があれば外部送信せず、
+  1 Activation あたり外部送信は高々 1 回とする（自動再送しない）。
 - 実行時に Loop 子グラフの entry_node_id / loop_result 到達可能性を再確認する。
 
 ## 7. Run と Node の状態遷移
@@ -633,6 +686,25 @@ Node 間のデータ連携は文字列テンプレート展開ではなく、以
   これは人間の承認ゲートを外す設定であり、Agent の現在および将来の権限での副作用が
   無承認になることを利用者が明示的に選択する。Run には `run_approval_skipped` Event を残す。
 - Agent Node 開始時の設定指紋を `workflow_events` に記録し、監査に使用する。
+
+### 9.4 会話型 Agent と単発 LLM の責務分離
+
+Agent Node は会話・ツール・HITL を伴う確率的な子 Run であり、`agent_sessions` /
+`agent_messages` / `agent_runs` を正本として会話を保存する。`llm` Node はその代替ではなく、
+Workflow 専用の単発呼び出しとして次を守る。
+
+- Workflow 専用の実行経路で、解決済み `inputs` と `output_schema` を JSON-only 指示として
+  送信する。`system_prompt` は Revision に固定し、動的な文字列展開はしない。
+- ツールを bind せず、`agent_sessions` / `agent_messages` / `agent_runs` を作成しない。
+  OpenAI は `store=False`、OpenCode Go は Activation 由来の一意な識別子を使い、呼び出し間で
+  会話コンテキストを共有しない。
+- 既存の LLM 実行ログ機構で request / response / token usage / failure を記録する。
+  `llm_call_logs.run_id` は CLI 専用の外部キーであるため、`llm` Node のログは `run_id = NULL`
+  の独立した監査行として残す。
+- JSON 不正・schema 不一致・provider エラーは Node を失敗させ、error Edge がなければ Run を
+  失敗させる。自動再送はしない（1 Activation あたり外部送信は高々 1 回）。
+- 取消要求が送信前に届いた場合は送信しない。送信中の取消は API 呼び出しを中断できないため、
+  終了後にログと Node 結果を監査用に残し、後続 Node を起動せず Run を `cancelled` にする。
 
 ## 10. HITL Wait
 
@@ -772,6 +844,8 @@ Agent 指紋を含む。
 
 - 入力、出力、エラーは `tasks/redaction.py` と同じルールで既知の秘密値を redact して保存する。
 - LLM 非公開思考過程や未確定中間トークンは保存しない。
+- `llm` Node の request / response / token usage / failure は `llm_call_logs` に独立した監査行
+  （`run_id = NULL`）として保存し、同じ redaction ルールの対象とする。
 - Run 入力に API キー等の秘密値を入れない。資格情報は Capability 側で実行時注入する。
 
 ### 14.3 保持期間
@@ -833,6 +907,7 @@ Agent 指紋を含む。
 | `DELETE /api/v1/workflows/revisions/:revision_id` | draft / superseded Revision の削除（グラフ含む）。published は 409。参照する Run は残す。 |
 | `POST /api/v1/workflows/revisions/:revision_id/publish` | draft → published。 |
 | `POST /api/v1/workflows/revisions/:revision_id/validate` | 静的検証。 |
+| `POST /api/v1/workflows/text-template/preview` | エディタ用。`template` と解決済みサンプル `values` を受け取り、本番と同じ sandbox で描画した結果と検証エラーを返す。永続化・副作用なし。 |
 | `GET /api/v1/workflows/revisions/:revision_id/export?format=json\|yaml` | 公開 Revision の定義を package v1 として返す。draft は 409。 |
 | `GET /api/v1/workflows/user-templates` | ユーザー Template 一覧（定義本体は含まない）。 |
 | `POST /api/v1/workflows/user-templates` | 公開 Revision から Template を作成。draft / 不在は拒否。 |
@@ -1053,6 +1128,9 @@ one_shot_jobs（v58 で再構築）
   `activation_id` を渡すだけで、Capability 内部の権限は Capability 側に委ねる。
 - Agent 権限: 実行時点の最新 Agent 設定を使う。承認 UI で利用者に明示する。
 - 任意コード実行: v1 では追加しない。将来追加する場合は別 ADR + 品質ゲート必須。
+- LLM Node の外部送信: Revision に固定した `system_prompt`、解決済み `inputs`、
+  `output_schema` のみを送る。API キーは Revision / Run に保存せず、provider 資格情報は実行時に
+  既存 LLM クライアントが解決する。ツールは bind しない。
 - 秘密値: Run 入力に API キー等を含めない。Capability 側の runtime 注入に委ねる。
 
 ## 18. 機能要件・非機能要件
@@ -1061,6 +1139,7 @@ one_shot_jobs（v58 で再構築）
 
 1. Web UI で Node / Edge グラフを作成・編集・公開できる。
 2. Capability Node、Agent Node、Loop Node、Terminal Node、Loop Result Node を使える。
+   加えて単発 LLM Node とテキスト組立 Node を使える。
 3. Capability / Agent 入力は schema 単一正本から生成されたフォームで入力できる。
 4. Agent Node の出力 schema を UI で定義・テンプレートから複製できる。
 5. 型付き参照（`run.inputs.*`、`nodes.<node_id>.output.*`、`loop.state.*`）で Node 間を連携できる。
@@ -1129,6 +1208,12 @@ one_shot_jobs（v58 で再構築）
     不正参照は 422 で拒否し、DB に何も作成しない。
 29. import 再検証: import 先で Agent / Capability が解決不能な場合、draft と validation_errors
     だけを作り、公開・Run 作成を拒否する。
+30. 単発 LLM Node: `provider` / `model` / `system_prompt` / `max_tokens` / `inputs` /
+    `output_schema` を検証し、承認なしで 1 Activation につき高々 1 回だけ外部送信する。出力は
+    `output_schema` で検証し、JSON 不正・不一致・provider エラーは Node 失敗（error Edge が
+    なければ Run `failed`）。`agent_sessions` / `agent_messages` / `agent_runs` は増えず、
+    `llm_call_logs` に `run_id = NULL` の独立行を残す。取消が送信前に届けば送信せず、送信中の
+    取消は後続 Node を起動せず Run を `cancelled` にする。
 
 ## 20. MVP 対象外、将来拡張、未決事項、リスク
 
@@ -1139,6 +1224,7 @@ one_shot_jobs（v58 で再構築）
 - 任意の循環 Edge
 - 任意コード Node
 - Agent Node ごとの prompt/model/tool 上書き
+- 単発 LLM Node へのツール binding・会話連結・画像 / ファイル添付（`llm` は JSON-only 単発）
 - $ref / oneOf / 再帰を含む JSON Schema
 - Workflow 独自の長期 Artifact ストア
 - 専用 launchd worker
@@ -1193,6 +1279,7 @@ one_shot_jobs（v58 で再構築）
 - [../../src/obsidian_ai_hub/tasks/capabilities.py](../../src/obsidian_ai_hub/tasks/capabilities.py) — Capability 定義
 - [../../src/obsidian_ai_hub/tasks/capability_schemas.py](../../src/obsidian_ai_hub/tasks/capability_schemas.py) — schema 検証
 - [../../src/obsidian_ai_hub/tasks/store.py](../../src/obsidian_ai_hub/tasks/store.py) — Task 状態 / Event パターン
+- [../../src/obsidian_ai_hub/workflow/llm_node.py](../../src/obsidian_ai_hub/workflow/llm_node.py) — 単発 LLM Node の検証・実行・ログ
 - [../../src/obsidian_ai_hub/runs/manager.py](../../src/obsidian_ai_hub/runs/manager.py) — lifespan 同居 worker
 - [../../src/obsidian_ai_hub/database.py](../../src/obsidian_ai_hub/database.py) — マイグレーション
 - [../../src/obsidian_ai_hub/web/app.py](../../src/obsidian_ai_hub/web/app.py) — Bearer 認証

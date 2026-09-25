@@ -21,11 +21,13 @@ Status: 再設計後の仕様 Accepted (Phase 0 未実装)。実装はフェー�
 
 - Workflow / Workflow Revision に分離。Revision は `draft` / `published` / `superseded` の
   ライフサイクルを持つ。Node / Edge ID は UUID。
-- Node 種別: `capability`、`agent`、`loop`、`terminal`、`loop_result`。
+- Node 種別: `capability`、`agent`、`llm`、`loop`、`terminal`、`loop_result`、`text_template`。
 - 反復は Loop Node の非循環子グラフで表現する。通常の Edge は循環不可。
 - Node 間のデータ連携は型付き参照（`run.inputs.*`、`nodes.<node_id>.output.*`、`loop.state.*`）のみ。
 - Capability Adapter には `InvocationContext`（`activation_id` 含む）を渡す。
 - Agent Node は既存 `agents` テーブルから選択し、実行時点の最新設定を使う。設定指紋は監査用に保存。
+- 単発 LLM Node（`llm`）は会話・ツールを持たず、承認対象外。入力と `output_schema` だけを送り、
+  出力を JSON Schema で検証して型付きで渡す（[ADR amendment](adr/workflow-graph-and-agent-node.md#amendment-会話型-agent-と単発-llm-node-の責務分離)）。
 - 承認は Capability Policy + 選択 Agent ID の範囲で行う。Agent 内部設定の変更は再承認しない。
 - 完了判定は「成功 Terminal 到達 + 実行した効果的 Node がすべて効果を満たす」。
 - 非冪等 Node（Agent / Coding）の外部操作中の中断は `needs_attention` / `waiting_attention` で停止し、

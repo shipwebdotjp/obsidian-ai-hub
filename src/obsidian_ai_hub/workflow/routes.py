@@ -44,6 +44,7 @@ from obsidian_ai_hub.workflow.models import (
 from obsidian_ai_hub.workflow import scheduling as workflow_scheduling
 from obsidian_ai_hub.workflow import templates as workflow_templates
 from obsidian_ai_hub.workflow.graph_copy import renumber_graph
+from obsidian_ai_hub.workflow.text_template import render_template, validate_template
 from obsidian_ai_hub.workflow.validation import validate_graph
 
 _logger = logging.getLogger(__name__)
@@ -85,6 +86,11 @@ class AttentionDecision(BaseModel):
 
 class RerunRequest(BaseModel):
     inputs: Optional[dict[str, Any]] = None
+
+
+class TextTemplatePreviewRequest(BaseModel):
+    template: str
+    values: dict[str, Any] = Field(default_factory=dict)
 
 
 def _capability_enabled() -> Any:
@@ -538,6 +544,27 @@ def validate_revision(revision_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="revision not found")
     errors = _validate_revision(revision)
     return {"valid": not errors, "errors": errors}
+
+
+@router.post("/text-template/preview")
+def preview_text_template(payload: TextTemplatePreviewRequest) -> dict[str, Any]:
+    """Render a ``text_template`` body with sample values for the editor.
+
+    Pure compute: no store access, persistence or side effects. The values are
+    treated as already-resolved inputs (``$ref``/``pipe`` are not evaluated), and
+    validation mirrors the publish-time contract via ``validate_template``.
+    """
+    errors = validate_template(
+        payload.template,
+        allowed_variables=payload.values.keys(),
+    )
+    if errors:
+        return {"ok": False, "rendered": None, "errors": errors}
+    try:
+        rendered = render_template(payload.template, payload.values)
+    except ValueError as exc:
+        return {"ok": False, "rendered": None, "errors": [str(exc)]}
+    return {"ok": True, "rendered": rendered, "errors": []}
 
 
 @router.post("/revisions/{revision_id}/publish")

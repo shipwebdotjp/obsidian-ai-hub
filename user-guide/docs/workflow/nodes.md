@@ -65,6 +65,51 @@ HITL へ質問を登録し、人間が回答するまで Node を `waiting_hitl`
 - 実行時は Agent の最新設定が使われ、開始時点の設定指紋が監査用に記録されます。
 - Agent の最終出力が `output_schema` に合わない場合、Node は失敗します。
 
+## llm Node（単発 LLM）
+
+会話・ツールを持たない、1 回だけの LLM 呼び出しです。入力と `output_schema` を JSON で送り、
+schema に沿った JSON を型付きで後続 Node へ渡します。Agent Node と違い会話・ツール・HITL を
+持たないため、`agent_sessions` / `agent_messages` / `agent_runs` を作成しません。
+
+```json
+{
+  "provider": "openai",
+  "model": "gpt-5",
+  "system_prompt": "入力テキストを分類してください。",
+  "max_tokens": 4096,
+  "reasoning_effort": "low",
+  "inputs": {
+    "text": {"$ref": "run.inputs.body"}
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "category": {"type": "string", "enum": ["a", "b"]},
+      "confidence": {"type": "number"}
+    },
+    "required": ["category"]
+  }
+}
+```
+
+- `provider` — `openai` / `gemini` / `ollama` / `local` / `opencode_go` のいずれか。
+- `model` — 必須。`max_tokens` — 必須の正整数。
+- `system_prompt` — Revision に固定する文字列。動的な差し込みはできません。整形は前段の
+  [テキスト組立](nodes.md#text_template-nodeテキスト組立) Node で行います。
+- `reasoning_effort` — 任意。`openai` / `ollama` / `opencode_go` でのみ指定できます。
+- `inputs` — 値または [型付き参照](data-flow.md) / 日時式のマッピングです。
+- `output_schema` — 必須。Agent Node と同じ JSON Schema サブセットです。出力は
+  `nodes.<node_id>.output.<field>` として参照できます。
+- `temperature` は 0.7 固定です。`retry` など未知のキーは指定できません。
+- エディタでは provider 選択、model、system prompt、max tokens、reasoning effort、inputs、
+  output schema のフォームで編集できます。
+- 出力が JSON object として解釈できない、または schema に一致しない場合、Node は失敗します。
+  自動再送はしません（1 Activation につき外部送信は高々 1 回）。
+- 副作用を持たず、Agent のような承認待ちにはなりません。request / response / token usage は
+  実行ログ（LLM 呼び出しログ）に独立した行として記録されます。
+- 外部 LLM への送信は取り消せません。送信前に取消が届いた場合は送信しません。送信中の取消は
+  結果を監査用に残しつつ、後続 Node を実行せず Run を `cancelled` にします。
+
 ## loop Node
 
 非循環の子グラフを反復実行します。
@@ -142,6 +187,16 @@ Loop 子グラフの終端です。次の `loop.state` を返します。
 - 副作用が無いため、単体では承認を必要としません。
 - 外部 I/O の前処理はここで完結させ、Capability / Agent には整形済みの文字列を渡すのが
   基本です。
+
+### エディタのプレビューと補完
+
+- **描画プレビュー**: `サンプル値 (JSON)` に `inputs` の変数名をキーにしたサンプルを入力すると、
+  実行を待たずに描画結果を確認できます。「雛形を生成」で型に応じた初期値を入れられます。
+  サンプル値はエディタ内の一時状態で、Revision には保存されません。描画は実行時と同じ
+  レンダラで行われるため、未定義変数・構文エラーもここで検出できます。
+- **変数の補完**: 本文の `{{ }}` 内で入力変数名を補完します。`{% for event in events %}`
+  のようなループでは `event.` に続けて参照先のフィールド（例: `event.title`）を補完します。
+  変数チップをクリックするとカーソル位置に `{{ 変数名 }}` を挿入できます。
 
 ## terminal Node
 

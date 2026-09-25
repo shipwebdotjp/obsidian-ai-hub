@@ -29,6 +29,7 @@ from obsidian_ai_hub.workflow.models import (
     validate_pipe,
     validate_schema_subset,
 )
+from obsidian_ai_hub.workflow.llm_node import validate_llm_config
 from obsidian_ai_hub.workflow.text_template import validate_template
 
 CapabilityCheck = Callable[[str], bool]
@@ -312,6 +313,8 @@ def _anchor_type_resolver(
                 return None
             if node_type == "agent":
                 return _schema_field_type(config.get("output_schema"), tail)
+            if node_type == "llm":
+                return _schema_field_type(config.get("output_schema"), tail)
             if node_type == "loop":
                 if tail[:1] == ["final_state"]:
                     return _schema_field_type(config.get("state_schema"), tail[1:])
@@ -454,6 +457,17 @@ def validate_graph(
                     agent_exists=agent_exists,
                 )
             )
+        elif node_type == "llm":
+            errors.extend(
+                _validate_llm_node(
+                    node_id,
+                    config,
+                    scope_id=scope_id,
+                    scope_ids=scope_ids,
+                    inputs_schema=inputs_schema,
+                    nodes=nodes,
+                )
+            )
         elif node_type == "loop":
             if scope_id is not None:
                 errors.append(f"loop_nested: Node '{node_id}': Loop Node のネストは未対応です")
@@ -502,6 +516,7 @@ def validate_graph(
         expression_key = {
             "capability": "inputs",
             "agent": "inputs",
+            "llm": "inputs",
             "loop": "input_mapping",
             "loop_result": "output_mapping",
             "text_template": "inputs",
@@ -611,6 +626,43 @@ def _validate_agent_node(
         errors.append(f"Node '{node_id}': agent_id が必要です")
     elif agent_exists is not None and not agent_exists(agent_id):
         errors.append(f"Node '{node_id}': Agent '{agent_id}' が存在しません")
+    output_schema = config.get("output_schema")
+    if output_schema is None:
+        errors.append(f"Node '{node_id}': output_schema が必要です")
+    else:
+        errors.extend(
+            validate_schema_subset(
+                output_schema, path=f"Node '{node_id}'.output_schema"
+            )
+        )
+    inputs = config.get("inputs", {})
+    if not isinstance(inputs, dict):
+        errors.append(f"Node '{node_id}': inputs は object が必要です")
+        return errors
+    errors.extend(
+        _value_reference_errors(
+            inputs,
+            scope_id=scope_id,
+            scope_ids=scope_ids,
+            inputs_schema=inputs_schema,
+            nodes=nodes,
+            path=f"Node '{node_id}'.inputs",
+        )
+    )
+    return errors
+
+
+def _validate_llm_node(
+    node_id: str,
+    config: dict[str, Any],
+    *,
+    scope_id: Optional[str],
+    scope_ids: set[str],
+    inputs_schema: Optional[dict[str, Any]],
+    nodes: Optional[list[dict[str, Any]]] = None,
+) -> list[str]:
+    errors: list[str] = []
+    errors.extend(validate_llm_config(config, path=f"Node '{node_id}'"))
     output_schema = config.get("output_schema")
     if output_schema is None:
         errors.append(f"Node '{node_id}': output_schema が必要です")

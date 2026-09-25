@@ -48,6 +48,9 @@ def requires_approval(
 ) -> bool:
     """True when any Agent node or ``plan_required`` capability is present.
 
+    Single-shot ``llm`` and ``text_template`` nodes carry no Capability or
+    Agent authority and never require approval.
+
     ``skip_approval`` is the per-workflow override: when set, the run is
     created ``queued`` and no human gate applies (spec §6.2). The approval
     boundary is otherwise fixed by Capability Policy + selected Agent ID;

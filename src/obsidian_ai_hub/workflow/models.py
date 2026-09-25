@@ -16,6 +16,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 NODE_TYPES: tuple[str, ...] = (
     "capability",
     "agent",
+    "llm",
     "loop",
     "terminal",
     "loop_result",

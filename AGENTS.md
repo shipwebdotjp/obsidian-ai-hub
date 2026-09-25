@@ -82,6 +82,8 @@
   findings, assess whether each finding is valid, and fix only findings that
   are worth addressing. After corrections, run OCR review at most three times
   total, then stop and commit.
+- Unless the user instructs otherwise, commit the changes after completing up to
+  three OCR review runs. Do not leave finished work uncommitted.
 - Never let `ocr review` stream to the terminal. Capture its full output from
   the first run, then read the file:
   ```bash

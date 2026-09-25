@@ -57,7 +57,9 @@ Node** で意図的に採用しなかった拡張余地と、Workflow 全体の�
   autoescape（HTML/Markdown 出力時）。
 - **変数の型宣言** — `inputs` は値のみ。変数ごとの schema を宣言して Editor 補完と検証を
   強くする。
-- **Editor プレビュー** — サンプル値での描画プレビュー、変数一覧の補完。
+- **Editor プレビュー（実装済み）** — サンプル値での描画プレビューと、変数名・入れ子フィールド
+  の補完を実装した（`POST /workflows/text-template/preview` と `TextTemplateEditor` /
+  `TextTemplatePreview`）。残る余地はサンプル値の保存と補完対象の拡張（多重 for 等）。
 - **通知本文テンプレートへの再利用** — 完了通知 outbox と組み合わせ、本文をこの Node で
   組む設計。
 

@@ -23,6 +23,7 @@ from obsidian_ai_hub.workflow.execution import (
     parse_json_object,
     validate_agent_output,
 )
+from obsidian_ai_hub.workflow.llm_node import generate_llm_json
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +49,8 @@ class DefaultNodeRunner:
             return self._run_capability(node, inputs, context)
         if node_type == "agent":
             return self._run_agent(node, inputs, context)
+        if node_type == "llm":
+            return self._run_llm(node, inputs, context)
         raise ValueError(f"Node type '{node_type}' は NodeRunner では実行できません")
 
     # --- capability --------------------------------------------------------
@@ -395,6 +398,49 @@ class DefaultNodeRunner:
             f"期待する JSON Schema: {schema_text}\n"
             "出力は JSON 以外のテキストを含めないでください。"
         )
+
+    # --- llm ---------------------------------------------------------------
+
+    def _run_llm(
+        self, node: dict[str, Any], inputs: dict[str, Any], context: dict[str, Any]
+    ) -> NodeOutcome:
+        """Send one non-conversational LLM request and validate its JSON output.
+
+        No tools are bound and no Agent session/message/run is created. The
+        request is never sent after a cancel is requested; a cancel that lands
+        while the API call is in flight cannot abort it, so the output is kept
+        and the engine stops the run without starting the next node.
+        """
+        config = node.get("config") or {}
+        run_id = str(context["run_id"])
+        if self._workflow_cancelling(run_id):
+            return NodeOutcome(
+                status="cancelled",
+                result_certainty=CANCEL_CERTAINTY_CANCELLED,
+            )
+        response = generate_llm_json(
+            provider=str(config.get("provider") or ""),
+            model=str(config.get("model") or ""),
+            system_prompt=str(config.get("system_prompt") or ""),
+            inputs=inputs,
+            output_schema=config.get("output_schema"),
+            max_tokens=int(config.get("max_tokens") or 0),
+            reasoning_effort=config.get("reasoning_effort"),
+            session_id=str(context["activation_id"]),
+        )
+        parsed = parse_json_object(response)
+        if parsed is None:
+            return NodeOutcome(
+                status="failed",
+                error="LLM 出力を JSON object として解釈できません",
+            )
+        errors = validate_agent_output(parsed, config.get("output_schema"))
+        if errors:
+            return NodeOutcome(
+                status="failed",
+                error="LLM 出力が schema に一致しません: " + "; ".join(errors),
+            )
+        return NodeOutcome(status="succeeded", output=parsed)
 
     # --- hitl wait ---------------------------------------------------------
 

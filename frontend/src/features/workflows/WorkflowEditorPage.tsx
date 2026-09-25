@@ -26,15 +26,21 @@ import ConditionEditor from "./ConditionEditor";
 import InputsSchemaForm from "./InputsSchemaForm";
 import SchemaAuthoringForm from "./SchemaAuthoringForm";
 import StructuredValueEditor from "./StructuredValueEditor";
+import TextTemplateEditor from "./TextTemplateEditor";
+import TextTemplatePreview from "./TextTemplatePreview";
 import WorkflowCanvas from "./WorkflowCanvas";
 import { emptyObjectSchema } from "./schemaModel";
 import {
+  WORKFLOW_LLM_DEFAULT_MAX_TOKENS,
+  WORKFLOW_LLM_PROVIDERS,
+  WORKFLOW_LLM_REASONING_PROVIDERS,
   buildReferenceGroups,
   conditionCandidates,
   createNode,
   createEdge,
   defaultInputsSchema,
   moveNode,
+  referenceSchemaAt,
   removeNode,
   runContextReferenceGroup,
   scopeOf,
@@ -42,10 +48,16 @@ import {
   type GraphIssue,
   type ReferenceGroup,
 } from "./graphModel";
+import {
+  buildSampleValues,
+  templateVariables,
+} from "./textTemplateModel";
+import { useTextTemplatePreview } from "./useTextTemplatePreview";
 
 const NODE_TYPE_LABELS: Record<WorkflowNodeType, string> = {
   capability: "capability",
   agent: "agent",
+  llm: "単発 LLM (llm)",
   loop: "loop",
   text_template: "テキスト組立 (text_template)",
   terminal: "terminal",
@@ -180,6 +192,56 @@ export default function WorkflowEditorPage() {
   const localIssues: GraphIssue[] = useMemo(
     () => validateGraphShape(nodes, edges, inputsSchema, targetSchemas),
     [nodes, edges, inputsSchema, targetSchemas],
+  );
+
+  const [textTemplateSamples, setTextTemplateSamples] = useState<
+    Record<string, unknown>
+  >({});
+  const textTemplateConfig = (
+    selectedNode?.node_type === "text_template" ? selectedNode.config : {}
+  ) as Record<string, unknown>;
+  const textTemplateInputs =
+    (textTemplateConfig.inputs as Record<string, unknown>) ?? {};
+  const textTemplateBody = String(textTemplateConfig.template ?? "");
+  const textTemplateGroups =
+    selectedNode?.node_type === "text_template"
+      ? buildReferenceGroups(nodes, scopeOf(selectedNode), inputsSchema, {
+          excludeNodeId: selectedNode.node_id,
+          capabilityOutputSchemas,
+        })
+      : [];
+  const textTemplateVariables = templateVariables(
+    textTemplateInputs,
+    textTemplateGroups,
+  );
+  const textTemplateSchemaFor = (name: string): WorkflowSchemaField | null => {
+    const variable = textTemplateVariables.find((item) => item.name === name);
+    if (!variable?.refPath || !selectedNode) return null;
+    return referenceSchemaAt(nodes, variable.refPath, inputsSchema, {
+      capabilityOutputSchemas,
+      scopeId: scopeOf(selectedNode),
+    });
+  };
+  const textTemplateVariableKey = textTemplateVariables
+    .map(
+      (variable) =>
+        `${variable.name}:${variable.type ?? ""}:${variable.refPath ?? ""}`,
+    )
+    .join("\n");
+  const scaffoldTextTemplateSamples = () =>
+    buildSampleValues(textTemplateVariables, textTemplateInputs, (variable) =>
+      textTemplateSchemaFor(variable.name),
+    );
+  useEffect(() => {
+    // Sample values are editor-local (never persisted); reseed when the
+    // selected node or its input variable set changes.
+    setTextTemplateSamples(scaffoldTextTemplateSamples());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedNodeId, textTemplateVariableKey]);
+  const textTemplatePreview = useTextTemplatePreview(
+    textTemplateBody,
+    textTemplateSamples,
+    { enabled: selectedNode?.node_type === "text_template" },
   );
 
   const markDirty = () => setDirty(true);
@@ -800,6 +862,142 @@ export default function WorkflowEditorPage() {
                   </div>
                 </>
               )}
+              {selectedNode.node_type === "llm" && (
+                <>
+                  <label className="block">
+                    provider
+                    <select
+                      className="ml-1 rounded border border-slate-300 px-1"
+                      value={String(selectedNode.config.provider ?? "openai")}
+                      onChange={(event) => {
+                        const provider = event.target.value;
+                        const patch: Record<string, unknown> = { provider };
+                        if (
+                          !(
+                            WORKFLOW_LLM_REASONING_PROVIDERS as readonly string[]
+                          ).includes(provider)
+                        ) {
+                          patch.reasoning_effort = undefined;
+                        }
+                        updateNodeConfig(patch);
+                      }}
+                    >
+                      {WORKFLOW_LLM_PROVIDERS.map((provider) => (
+                        <option key={provider} value={provider}>
+                          {provider}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="block">
+                    model
+                    <input
+                      type="text"
+                      className="w-full rounded border border-slate-300 px-1"
+                      value={String(selectedNode.config.model ?? "")}
+                      onChange={(event) =>
+                        updateNodeConfig({ model: event.target.value })
+                      }
+                      placeholder="例: gpt-5"
+                    />
+                  </label>
+                  <label className="block">
+                    system_prompt
+                    <textarea
+                      rows={4}
+                      className="w-full rounded border border-slate-300 px-1 font-mono text-[11px]"
+                      value={String(selectedNode.config.system_prompt ?? "")}
+                      onChange={(event) =>
+                        updateNodeConfig({ system_prompt: event.target.value })
+                      }
+                      placeholder="会話ではなく単発呼び出しの固定 system prompt"
+                    />
+                  </label>
+                  <label className="block">
+                    max_tokens
+                    <input
+                      type="number"
+                      min={1}
+                      className="ml-1 w-24 rounded border border-slate-300 px-1"
+                      value={Number(
+                        selectedNode.config.max_tokens ??
+                          WORKFLOW_LLM_DEFAULT_MAX_TOKENS,
+                      )}
+                      onChange={(event) =>
+                        updateNodeConfig({
+                          max_tokens: Math.max(
+                            1,
+                            Number(event.target.value) || 1,
+                          ),
+                        })
+                      }
+                    />
+                  </label>
+                  {(
+                    WORKFLOW_LLM_REASONING_PROVIDERS as readonly string[]
+                  ).includes(String(selectedNode.config.provider ?? "")) && (
+                    <>
+                      <label className="block">
+                        reasoning_effort
+                        <input
+                          type="text"
+                          className="ml-1 rounded border border-slate-300 px-1"
+                          value={String(
+                            selectedNode.config.reasoning_effort ?? "",
+                          )}
+                          onChange={(event) =>
+                            updateNodeConfig({
+                              reasoning_effort:
+                                event.target.value || undefined,
+                            })
+                          }
+                          placeholder="例: low / medium / high（空欄で既定）"
+                        />
+                      </label>
+                      <p className="text-[10px] text-slate-500">
+                        reasoning_effort は openai / ollama / opencode_go でのみ
+                        指定できます。
+                      </p>
+                    </>
+                  )}
+                  <div className="space-y-1">
+                    <span className="block text-slate-700">inputs</span>
+                    <StructuredValueEditor
+                      testIdPrefix="llm-inputs"
+                      value={
+                        (selectedNode.config.inputs as Record<
+                          string,
+                          unknown
+                        >) ?? {}
+                      }
+                      onChange={(value) => updateNodeConfig({ inputs: value })}
+                      referenceGroups={buildReferenceGroups(
+                        nodes,
+                        scopeOf(selectedNode),
+                        inputsSchema,
+                        {
+                          excludeNodeId: selectedNode.node_id,
+                          capabilityOutputSchemas,
+                        },
+                      )}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <span className="block text-slate-700">output_schema</span>
+                    <SchemaAuthoringForm
+                      testIdPrefix="llm-output-schema"
+                      schema={
+                        (selectedNode.config
+                          .output_schema as WorkflowSchemaField) ??
+                        emptyObjectSchema()
+                      }
+                      onChange={(value) =>
+                        updateNodeConfig({ output_schema: value })
+                      }
+                    />
+                  </div>
+                </>
+              )}
               {selectedNode.node_type === "loop" && (
                 <>
                   <div className="space-y-1">
@@ -952,38 +1150,23 @@ export default function WorkflowEditorPage() {
                         >) ?? {}
                       }
                       onChange={(value) => updateNodeConfig({ inputs: value })}
-                      referenceGroups={buildReferenceGroups(
-                        nodes,
-                        scopeOf(selectedNode),
-                        inputsSchema,
-                        {
-                          excludeNodeId: selectedNode.node_id,
-                          capabilityOutputSchemas,
-                        },
-                      )}
+                      referenceGroups={textTemplateGroups}
                     />
                   </div>
-                  <label className="block">
-                    テンプレート本文 (Jinja2)
-                    <textarea
-                      data-testid="text-template-body"
-                      rows={8}
-                      className="mt-1 w-full rounded border border-slate-300 px-2 py-1 font-mono text-[11px]"
-                      value={String(selectedNode.config.template ?? "")}
-                      onChange={(event) =>
-                        updateNodeConfig({ template: event.target.value })
-                      }
-                    />
-                  </label>
-                  <p className="text-[10px] leading-tight text-slate-500">
-                    利用可能な変数:{" "}
-                    {Object.keys(
-                      (selectedNode.config.inputs as Record<string, unknown>) ??
-                        {},
-                    ).join(", ") || "(inputs を追加してください)"}
-                    。出力は nodes.{selectedNode.node_id}.output.text
-                    （string）。StrictUndefined のため未定義変数は失敗します。
-                  </p>
+                  <TextTemplateEditor
+                    value={textTemplateBody}
+                    onChange={(template) => updateNodeConfig({ template })}
+                    variables={textTemplateVariables}
+                    schemaFor={textTemplateSchemaFor}
+                  />
+                  <TextTemplatePreview
+                    preview={textTemplatePreview}
+                    sampleValues={textTemplateSamples}
+                    onChangeSampleValues={setTextTemplateSamples}
+                    onGenerateScaffold={() =>
+                      setTextTemplateSamples(scaffoldTextTemplateSamples())
+                    }
+                  />
                 </>
               )}
               {selectedNode.node_type === "terminal" && (

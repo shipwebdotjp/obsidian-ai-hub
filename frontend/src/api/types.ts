@@ -1193,6 +1193,7 @@ export interface WorkflowCapabilityListResponse {
 export type WorkflowNodeType =
   | "capability"
   | "agent"
+  | "llm"
   | "loop"
   | "terminal"
   | "loop_result"
@@ -1344,6 +1345,12 @@ export interface WorkflowListResponse {
 
 export interface WorkflowValidationResponse {
   valid: boolean;
+  errors: string[];
+}
+
+export interface TextTemplatePreviewResponse {
+  ok: boolean;
+  rendered: string | null;
   errors: string[];
 }
 

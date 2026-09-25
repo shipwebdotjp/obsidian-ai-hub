@@ -38,7 +38,7 @@ Run は `published` Revision からしか作成できません。`draft` のま�
 
 右パネルの **Node 追加** で種別を選び、**追加** を押します。
 
-1. **種別** — `capability` / `agent` / `loop` / `terminal` / `loop_result`。
+1. **種別** — `capability` / `agent` / `llm` / `loop` / `text_template` / `terminal` / `loop_result`。
 2. `capability` のときは **capability を選択** — 有効な Capability のみ表示され、`plan_required` のものには `(要承認)` が付きます。
 3. `agent` のときは **Agent を選択** — 既存の Agent 一覧から選びます。
 4. **親** — トップレベルに置くか、既存の Loop Node の子グラフに置くかを選びます（`loop_result` は子グラフ内でのみ有効）。
@@ -64,8 +64,10 @@ Node を選択すると、右パネルに対応する設定欄が表示されま
 | --- | --- |
 | `capability` | `capability_key`（選択）、`target`（target を持つ Capability のみ。委譲先 Agent / 対象 Project を選択）、`inputs`（Capability の入力スキーマから生成。要承認は選択肢に表示）、`retry.max_attempts` |
 | `agent` | `agent_id`（選択）、`inputs`（構造化エディタ。キーを追加し、各値は値か参照）、`output_schema`（スキーマ作成フォーム） |
+| `llm` | `provider`（選択）、`model`、`system_prompt`、`max_tokens`、`reasoning_effort`（対応 provider のみ）、`inputs`（構造化エディタ。各値は値か参照）、`output_schema`（スキーマ作成フォーム） |
 | `loop` | `state_schema`（スキーマ作成フォーム）、`input_mapping`（`state_schema` から生成。各値は値か参照）、`max_iterations`、`entry_node_id`、`continuation_condition`（条件エディタ） |
 | `loop_result` | `output_mapping`（親 Loop の `state_schema` から生成。各値は値か参照） |
+| `text_template` | `inputs`（構造化エディタ。各値は値か参照）、`template`（補完・プレビュー付きエディタ） |
 | `terminal` | `outcome`（`success` / `failure`） |
 
 - `capability` の `inputs` は、選択した Capability の入力スキーマから生成されます。`enum` は選択肢、
@@ -76,8 +78,11 @@ Node を選択すると、右パネルに対応する設定欄が表示されま
   （target に型付き参照は使えません）。
 - `agent` の `inputs` はスキーマを持たない自由形式です。キーを追加し、各値はテキスト入力か
   **参照**（型付き参照）を選べます。`task` / `context` は入力候補として表示されます。
-- `agent` の `output_schema`、`loop` の `state_schema`、右パネルの `inputs_schema` は
-  **スキーマ作成フォーム** で編集します（後述）。
+- `llm` の `inputs` も自由形式です。`reasoning_effort` は provider が `openai` / `ollama` /
+  `opencode_go` のときだけ表示され、それ以外へ切り替えると消えます。`output_schema` は必須で、
+  この schema が後続 Node の出力参照候補になります。
+- `agent` の `output_schema`、`llm` の `output_schema`、`loop` の `state_schema`、右パネルの
+  `inputs_schema` は **スキーマ作成フォーム** で編集します（後述）。
 
 選択中の Node は **削除** できます。**Edge 一覧** から不要な Edge を削除できます。
 
@@ -102,7 +107,7 @@ Node を選択すると、右パネルに対応する設定欄が表示されま
 そのスコープで使える候補を型付きで一覧します。
 
 - `run.inputs.<field>` — `inputs_schema` の各項目（ネストも展開、配列は `[0]` の例つき）。
-- `nodes.<node_id>.output.<field>` — 先行 Node の出力。Agent は `output_schema`、
+- `nodes.<node_id>.output.<field>` — 先行 Node の出力。Agent と単発 LLM は `output_schema`、
   Loop は `final_state.*` / `iterations` / `exit_reason`、Loop Result は `state_schema` の項目。
   Capability は型が宣言されているもの（読み取り/検索系・`hitl_wait`・`research_agent` など）は
   項目を展開し、未宣言のものは `nodes.<node_id>.output` 全体のみ表示します。

@@ -65,6 +65,7 @@ import type {
   WorkflowImportResponse,
   WorkflowDefinitionFormat,
   WorkflowValidationResponse,
+  TextTemplatePreviewResponse,
 } from "./types";
 
 const TOKEN_KEY = "obsidian-ai-hub:api-token";
@@ -1081,6 +1082,16 @@ export function validateWorkflowRevision(
   return request<WorkflowValidationResponse>(
     `/api/v1/workflows/revisions/${encodeURIComponent(revisionId)}/validate`,
     { method: "POST" },
+  );
+}
+
+export function previewTextTemplate(payload: {
+  template: string;
+  values: Record<string, unknown>;
+}): Promise<TextTemplatePreviewResponse> {
+  return request<TextTemplatePreviewResponse>(
+    "/api/v1/workflows/text-template/preview",
+    { method: "POST", body: JSON.stringify(payload) },
   );
 }
 

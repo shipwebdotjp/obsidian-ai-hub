@@ -304,6 +304,52 @@ Agent Node を含む Workflow は起動のたびに `waiting_approval` となり
 - Scheduler 発火では無人の外部副作用が定期的に発生しうる。利用者が Workflow 単位で明示的に
   有効化することを前提に受容する。承認待ち Run の抑止・自動失効はひき続き対象外とする。
 
+## Amendment (会話型 Agent と単発 LLM Node の責務分離)
+
+Status: Accepted (2026-09-25)。
+
+Agent Node は会話・ツール・HITL を伴う子 Run で、会話を `agent_sessions` / `agent_messages` /
+`agent_runs` に保存する。定型の構造化抽出・分類・言い換えのように「会話を残す必要がなく、
+型付き JSON だけが欲しい」用途では、Agent Node の会話保存を設定で止めるのではなく、別種別の
+`llm` Node を追加して責務を分離する。
+
+### 決定
+
+- **`llm` Node は Workflow 専用の単発 LLM 呼び出し**とし、`provider` / `model` /
+  `system_prompt` / `max_tokens` / 任意の `reasoning_effort` / `inputs` / 必須の
+  `output_schema` のみを設定とする。未知キー（`retry` を含む）は保存・公開時に拒否する。
+- **会話・ツールを持たない。** ツールを bind せず、`agent_sessions` / `agent_messages` /
+  `agent_runs` を作成しない。OpenAI は `store=False`、OpenCode Go は Activation 由来の一意な
+  識別子を使い、呼び出し間で会話コンテキストを共有しない。
+- **出力は Agent Node と同じ JSON Schema サブセット**で検証し、`nodes.<id>.output.*` として
+  後続 Node へ型付きで渡す。
+- **承認境界を広げない。** `llm` は Capability / Agent の権限を持たず、`requires_approval` の
+  対象外とする。既存の承認規則は変更しない。
+- **既存 LLM ログ機構を再利用する。** request / response / token usage / failure は
+  `llm_call_logs` に記録し、`run_id` は CLI 専用外部キーのため NULL の独立行とする。
+- **自動再送しない。** 1 Activation あたり外部送信は高々 1 回。JSON 不正・schema 不一致・
+  provider エラーは Node を失敗させ、error Edge がなければ Run を失敗させる。取消が送信前に
+  届けば送信せず、送信中の取消は API を中断できないため終了後に監査を残し、後続 Node を起動せず
+  Run を `cancelled` にする。
+- **DB migration は不要。** Node 種別の追加のみで、既存の Agent Node・スターターテンプレートの
+  会話保存動作は変更しない。
+
+### 操作シナリオ契約（不可逆操作: 外部 LLM への送信）
+
+| 段階 | 入力・識別子 | 外部送信と停止規則 |
+| --- | --- | --- |
+| 公開 | 検証済み Revision の `llm` config | 不正設定なら送信なし |
+| Node 開始 | Run snapshot、`activation_id`、解決済み `inputs` | 実行中 Node を保存してから 1 回だけ送信 |
+| LLM 応答 | `llm_call_logs.call_id`、JSON output | schema 不一致なら後続へ渡さず Node 失敗 |
+| 取消・失敗 | Run 状態、Node 状態、LLM log | 後続操作なし。再送は新しい Run 実行だけ |
+
+### 残余リスク
+
+- 外部 LLM への送信は取り消せない。取消は結果を受け取っても後続 Node を起動しないことで、
+  副作用の連鎖を止めるに留まる。
+- `inputs` に秘密値を入れると provider に送信される。Revision に固定保存しない運用規約は
+  Agent / Capability と同様。
+
 ## 関連文書
 
 - [workflow-independent-context-shared-foundation.md](workflow-independent-context-shared-foundation.md) — 撤回された初期 ADR

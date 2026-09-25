@@ -7,6 +7,7 @@ import {
   defaultNodeConfig,
   isReferencePath,
   parseConditionValue,
+  referenceSchemaAt,
   removeNode,
   validateGraphShape,
   type WorkflowEdge,
@@ -383,5 +384,157 @@ describe("condition helpers", () => {
     expect(parseConditionValue("hello", "equals")).toEqual({ ok: true, value: "hello" });
     expect(parseConditionValue("[1,2]", "in")).toEqual({ ok: true, value: [1, 2] });
     expect(parseConditionValue("oops", "in").ok).toBe(false);
+  });
+});
+
+describe("referenceSchemaAt", () => {
+  const inputsSchema = {
+    type: "object",
+    properties: {
+      topic: { type: "string" },
+      options: {
+        type: "object",
+        properties: { limit: { type: "integer" } },
+      },
+    },
+  };
+
+  it("resolves nested fields of a capability output schema", () => {
+    const nodes = [
+      node("cal", "capability", { capability_key: "calendar_read" }),
+    ];
+    const outputSchemas = {
+      calendar_read: {
+        type: "object",
+        properties: {
+          events: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: { title: { type: "string" } },
+            },
+          },
+        },
+      },
+    };
+    const events = referenceSchemaAt(
+      nodes,
+      "nodes.cal.output.events",
+      inputsSchema,
+      { capabilityOutputSchemas: outputSchemas },
+    );
+    expect(events?.type).toBe("array");
+    const title = referenceSchemaAt(
+      nodes,
+      "nodes.cal.output.events[0].title",
+      inputsSchema,
+      { capabilityOutputSchemas: outputSchemas },
+    );
+    expect(title?.type).toBe("string");
+  });
+
+  it("resolves run.inputs and returns null for opaque outputs", () => {
+    const nodes = [node("opaque", "capability", { capability_key: "unknown" })];
+    expect(
+      referenceSchemaAt(nodes, "run.inputs.options.limit", inputsSchema)?.type,
+    ).toBe("integer");
+    expect(referenceSchemaAt(nodes, "run.inputs.missing", inputsSchema)).toBeNull();
+    expect(
+      referenceSchemaAt(nodes, "nodes.opaque.output.anything", inputsSchema),
+    ).toBeNull();
+  });
+
+  it("resolves loop.state against the owning scope", () => {
+    const nodes = [
+      node("loop", "loop", {
+        state_schema: {
+          type: "object",
+          properties: { draft: { type: "string" } },
+        },
+      }),
+    ];
+    const draft = referenceSchemaAt(nodes, "loop.state.draft", inputsSchema, {
+      scopeId: "loop",
+    });
+    expect(draft?.type).toBe("string");
+    expect(referenceSchemaAt(nodes, "loop.iteration", inputsSchema)?.type).toBe(
+      "integer",
+    );
+  });
+});
+
+describe("llm node", () => {
+  const llmOutputSchema = {
+    type: "object",
+    properties: { answer: { type: "string" } },
+    required: ["answer"],
+  };
+  const validLlmConfig = (overrides: Record<string, unknown> = {}) => ({
+    provider: "openai",
+    model: "gpt-test",
+    system_prompt: "You answer.",
+    max_tokens: 4096,
+    inputs: {},
+    output_schema: llmOutputSchema,
+    ...overrides,
+  });
+
+  it("creates the documented default config", () => {
+    expect(defaultNodeConfig("llm")).toEqual({
+      provider: "openai",
+      model: "",
+      system_prompt: "",
+      max_tokens: 4096,
+      inputs: {},
+      output_schema: { type: "object", properties: {} },
+    });
+  });
+
+  it("accepts a valid llm node", () => {
+    const nodes = [
+      node("llm", "llm", validLlmConfig()),
+      node("end", "terminal", { outcome: "success" }),
+    ];
+    const issues = validateGraphShape(nodes, [edge("e1", "llm", "end")], {
+      type: "object",
+    });
+    expect(issues).toEqual([]);
+  });
+
+  it("flags invalid provider, model, max_tokens and reasoning effort", () => {
+    const nodes = [
+      node(
+        "llm",
+        "llm",
+        validLlmConfig({
+          provider: "gemini",
+          model: "",
+          max_tokens: 0,
+          reasoning_effort: "high",
+        }),
+      ),
+      node("end", "terminal", { outcome: "success" }),
+    ];
+    const codes = validateGraphShape(
+      nodes,
+      [edge("e1", "llm", "end")],
+      { type: "object" },
+    ).map((issue) => issue.code);
+    expect(codes).toContain("llm_model");
+    expect(codes).toContain("llm_max_tokens");
+    expect(codes).toContain("llm_reasoning_effort");
+  });
+
+  it("exposes llm output_schema fields and resolves nested output", () => {
+    const nodes = [node("llm", "llm", validLlmConfig())];
+    const groups = buildReferenceGroups(nodes, null, { type: "object" });
+    const fieldPaths = groups.flatMap((group) =>
+      group.fields.map((field) => field.path),
+    );
+    expect(fieldPaths).toContain("nodes.llm.output.answer");
+    expect(
+      referenceSchemaAt(nodes, "nodes.llm.output.answer", { type: "object" })
+        ?.type,
+    ).toBe("string");
   });
 });
