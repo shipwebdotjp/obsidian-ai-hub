@@ -98,6 +98,14 @@ python -m obsidian_ai_hub <flag> [options]
 | `--render-copilot-profile` | — | Copilot プロファイル（7 ファイル）を生成・上書きする。 |
 | `--memory-maintain` | — | 承認済みメモリのメンテナンスを手動実行する。 |
 
+## システムメンテナンス
+
+| フラグ | 引数 | 説明 |
+| --- | --- | --- |
+| `--system-maintenance` | — | CLI 実行ログと LLM コール履歴の失敗を診断し、改善提案を HITL に登録する。 |
+
+設定（対象プロジェクト ID など）は [システムメンテナンス診断](../features/system-maintenance.md) を参照してください。
+
 ## ヘルスケア
 
 | フラグ | 引数 | 説明 |

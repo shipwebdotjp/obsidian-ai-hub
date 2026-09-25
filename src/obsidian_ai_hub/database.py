@@ -742,6 +742,9 @@ def get_db_connection() -> sqlite3.Connection:
     if current_version <= 60:
         run_migration_v61(conn)
 
+    if current_version <= 61:
+        run_migration_v62(conn)
+
     return conn
 
 
@@ -1205,6 +1208,40 @@ def run_migration_v61(conn: sqlite3.Connection) -> None:
         "WHERE reference_time IS NULL;"
     )
     conn.execute("PRAGMA user_version = 61;")
+    conn.commit()
+
+
+def run_migration_v62(conn: sqlite3.Connection) -> None:
+    """Run migration for version 62 (system maintenance findings).
+
+    Stores the failure fingerprints observed from ``command_runs`` and
+    ``llm_call_logs``, together with their diagnosis lifecycle
+    (``open`` → ``proposed`` → ``coding_created`` / ``dismissed`` /
+    ``resolved``). It is intentionally independent of the 30-day execution
+    log pruning so recurrence state survives.
+    """
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS system_maintenance_findings (
+            fingerprint TEXT PRIMARY KEY,
+            kind TEXT NOT NULL CHECK (kind IN ('command', 'llm')),
+            label TEXT NOT NULL,
+            exception_type TEXT,
+            first_seen_at TEXT NOT NULL,
+            last_seen_at TEXT NOT NULL,
+            occurrence_count INTEGER NOT NULL DEFAULT 1,
+            missing_count INTEGER NOT NULL DEFAULT 0,
+            status TEXT NOT NULL DEFAULT 'open'
+                CHECK (status IN ('open', 'proposed', 'coding_created', 'dismissed', 'resolved')),
+            hitl_run_id TEXT,
+            coding_run_id TEXT,
+            updated_at TEXT NOT NULL
+        );
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_system_maintenance_findings_status "
+        "ON system_maintenance_findings(status, last_seen_at);"
+    )
+    conn.execute("PRAGMA user_version = 62;")
     conn.commit()
 
 

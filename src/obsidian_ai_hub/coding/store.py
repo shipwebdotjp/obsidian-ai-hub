@@ -699,6 +699,28 @@ def get_session(session_id: str, conn=None) -> Optional[Dict[str, Any]]:
     return dict(row)
 
 
+def find_session_by_title(project_id: int, title: str) -> Optional[Dict[str, Any]]:
+    """Find the most recent session for a project with an exact title.
+
+    Used by callers that need a deterministic session per logical work item
+    (e.g. system maintenance findings) so retries reuse the same session and
+    its ``start_queued_run`` idempotency.
+    """
+    conn = get_db_connection()
+    try:
+        cursor = conn.execute(
+            "SELECT * FROM coding_sessions WHERE project_id = ? AND title = ? "
+            "ORDER BY created_at DESC LIMIT 1;",
+            (project_id, title),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+        return dict(row)
+    finally:
+        conn.close()
+
+
 def list_sessions_by_project(project_id: int) -> List[Dict[str, Any]]:
     """List all coding sessions for a project."""
     conn = get_db_connection()
@@ -1298,6 +1320,23 @@ def list_runs_for_session(session_id: str) -> List[Dict[str, Any]]:
     rows = cursor.fetchall()
     conn.close()
     return [r for r in (_format_run(dict(row)) for row in rows) if r is not None]
+
+
+def find_run_by_idempotency_key(
+    session_id: str, idempotency_key: str
+) -> Optional[Dict[str, Any]]:
+    """Return the run stored for a session idempotency key, if any."""
+    conn = get_db_connection()
+    try:
+        row = conn.execute(
+            "SELECT * FROM coding_runs WHERE session_id = ? AND idempotency_key = ?;",
+            (session_id, idempotency_key),
+        ).fetchone()
+        if row is None:
+            return None
+        return _format_run(dict(row))
+    finally:
+        conn.close()
 
 
 def get_active_run_for_session(session_id: str) -> Optional[Dict[str, Any]]:

@@ -28,6 +28,28 @@ def lock_file_path() -> Path:
     return db_path.parent / (db_path.name + ".run-worker.lock")
 
 
+def is_lock_held(path: Optional[Path] = None) -> bool:
+    """Return True when another process holds the run-worker lock.
+
+    Unlike :meth:`RunWorkerLock.acquire`, an inability to open the lock file
+    propagates as ``OSError`` instead of being reported as "lock held", so
+    callers can fail closed.
+    """
+    lock_path = path or lock_file_path()
+    import os
+
+    fd = os.open(str(lock_path), os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            return True
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        return False
+    finally:
+        os.close(fd)
+
+
 class RunWorkerLock:
     """Single-process exclusive lock shared by Agent/Coding workers.
 

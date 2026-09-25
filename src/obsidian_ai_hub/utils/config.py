@@ -809,6 +809,68 @@ MEMORY_RENDERER_PROMPT_PATH = _optional_path(
 if MEMORY_RENDERER_PROMPT_PATH is None:
     MEMORY_RENDERER_PROMPT_PATH = BASE_DIR / "config" / "prompts" / "memory_render.md"
 
+# System maintenance diagnosis (CLI execution logs + LLM call history)
+SYSTEM_MAINTENANCE_PROVIDER = str(
+    _env_or_config(
+        "SYSTEM_MAINTENANCE_PROVIDER", "system_maintenance", "provider", default="openai"
+    )
+)
+SYSTEM_MAINTENANCE_MODEL = str(
+    _env_or_config(
+        "SYSTEM_MAINTENANCE_MODEL", "system_maintenance", "model", default="gpt-5.6-terra"
+    )
+)
+SYSTEM_MAINTENANCE_PROMPT_PATH = _optional_path(
+    "SYSTEM_MAINTENANCE_PROMPT_PATH", "system_maintenance", "prompt_path"
+)
+if SYSTEM_MAINTENANCE_PROMPT_PATH is None:
+    SYSTEM_MAINTENANCE_PROMPT_PATH = (
+        BASE_DIR / "config" / "prompts" / "system_maintenance_diagnosis.md"
+    )
+
+SYSTEM_MAINTENANCE_WINDOW_HOURS = int(
+    _env_or_config(
+        "SYSTEM_MAINTENANCE_WINDOW_HOURS", "system_maintenance", "window_hours", default=24
+    )
+)
+SYSTEM_MAINTENANCE_MAX_FINDINGS = int(
+    _env_or_config(
+        "SYSTEM_MAINTENANCE_MAX_FINDINGS", "system_maintenance", "max_findings", default=10
+    )
+)
+SYSTEM_MAINTENANCE_STALE_RUNNING_HOURS = int(
+    _env_or_config(
+        "SYSTEM_MAINTENANCE_STALE_RUNNING_HOURS",
+        "system_maintenance",
+        "stale_running_hours",
+        default=6,
+    )
+)
+SYSTEM_MAINTENANCE_RESOLVE_MISSING_RUNS = int(
+    _env_or_config(
+        "SYSTEM_MAINTENANCE_RESOLVE_MISSING_RUNS",
+        "system_maintenance",
+        "resolve_missing_runs",
+        default=3,
+    )
+)
+SYSTEM_MAINTENANCE_MAX_TRACEBACK_CHARS = int(
+    _env_or_config(
+        "SYSTEM_MAINTENANCE_MAX_TRACEBACK_CHARS",
+        "system_maintenance",
+        "max_traceback_chars",
+        default=4000,
+    )
+)
+_raw_system_maintenance_project_id = _env_or_config(
+    "SYSTEM_MAINTENANCE_PROJECT_ID", "system_maintenance", "project_id"
+)
+SYSTEM_MAINTENANCE_PROJECT_ID = (
+    int(_raw_system_maintenance_project_id)
+    if _raw_system_maintenance_project_id not in (None, "")
+    else None
+)
+
 # Scheduler job runner and knowledge sync state files
 JOB_RUN_STATE_PATH = BASE_DIR / "jobs" / "last_run.json"
 KNOWLEDGE_SYNC_STATE_PATH = BASE_DIR / "jobs" / "knowledge_sync_state.json"

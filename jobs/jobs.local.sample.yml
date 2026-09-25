@@ -126,6 +126,16 @@
     minute: 15
   command: 'uv --directory /path/to/obsidian-ai-hub run -m obsidian_ai_hub --cleanup-line-webhooks'
 
+# Daily failure diagnosis over CLI/LLM execution logs. Requires
+# system_maintenance.project_id in config.yml (a registered project id).
+- id: system_maintenance
+  enabled: false
+  schedule:
+    type: daily
+    hour: 7
+    minute: 0
+  command: 'uv --directory /path/to/obsidian-ai-hub run -m obsidian_ai_hub --system-maintenance'
+
 - id: cleanup_execution_logs_daily
   enabled: true
   schedule:

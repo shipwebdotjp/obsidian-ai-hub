@@ -64,6 +64,7 @@ const sidebars: SidebarsConfig = {
         'features/people',
         'features/projects',
         'features/healthcare',
+        'features/system-maintenance',
       ],
     },
     {

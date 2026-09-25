@@ -38,6 +38,18 @@ llm:
 
 `review_draft` を省略した場合は `make_today_target` のプロバイダ・モデルが使われます。
 
+## システムメンテナンス診断用の設定
+
+```yaml
+system_maintenance:
+  provider: openai
+  model: gpt-5.6-terra
+  prompt_path: /path/to/your/config/prompts/system_maintenance_diagnosis.md
+```
+
+対象プロジェクト ID や収集期間も同じ `system_maintenance` で設定します。
+詳細は [システムメンテナンス診断](../features/system-maintenance.md#設定) を参照してください。
+
 ## リサーチ用の設定
 
 ```yaml

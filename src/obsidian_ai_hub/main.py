@@ -45,6 +45,9 @@ def register_hitl_handlers():
     from obsidian_ai_hub.summary.person_candidates_handler import apply_person_candidates_handler
     from obsidian_ai_hub.tasks.hitl import resolve_task_target
     from obsidian_ai_hub.workflow.hitl import resolve_workflow_hitl
+    from obsidian_ai_hub.system_maintenance.proposals import (
+        run_approved_system_maintenance,
+    )
     register_handler("research.run_approved_suggestion", run_approved_suggestion)
     register_handler("memory.apply_maintenance_proposals", run_approved_maintenance)
     register_handler("memory.apply_interview_answers", apply_interview_answers)
@@ -55,6 +58,9 @@ def register_hitl_handlers():
     register_handler("summary.apply_person_candidates", apply_person_candidates_handler)
     register_handler("tasks.resolve_target", resolve_task_target)
     register_handler("workflow.hitl_wait", resolve_workflow_hitl)
+    register_handler(
+        "system_maintenance.create_coding_tasks", run_approved_system_maintenance
+    )
 
 
 def main():
@@ -326,6 +332,12 @@ def main():
         help="手動で承認済み長期記憶の保守・診断メンテナンスを実行",
     )
     parser.add_argument(
+        "--system-maintenance",
+        dest="system_maintenance",
+        action="store_true",
+        help="CLI実行ログとLLMコール履歴から失敗を診断し、改善提案をHITLに登録",
+    )
+    parser.add_argument(
         "--cleanup-line-webhooks",
         action="store_true",
         help="30日経過したLINE Webhook受信記録をクリーンアップ",
@@ -482,6 +494,7 @@ def main():
             args.hitl_dispatch,
             getattr(args, "hitl_worker", False),
             getattr(args, "memory_maintain", False),
+            getattr(args, "system_maintenance", False),
             getattr(args, "cleanup_line_webhooks", False),
             getattr(args, "cleanup_execution_logs", False),
             getattr(args, "import_apple_health", False),
@@ -525,6 +538,7 @@ def main():
             args.hitl_dispatch,
             getattr(args, "hitl_worker", False),
             getattr(args, "memory_maintain", False),
+            getattr(args, "system_maintenance", False),
             getattr(args, "cleanup_line_webhooks", False),
             getattr(args, "cleanup_execution_logs", False),
             getattr(args, "import_apple_health", False),
@@ -825,6 +839,11 @@ def main():
         from obsidian_ai_hub.memory.maintenance import run_maintenance_cli
 
         run_and_log(run_maintenance_cli, "memory_maintain", {})
+        ran = True
+    if getattr(args, "system_maintenance", False):
+        from obsidian_ai_hub.system_maintenance.cli import run_system_maintenance_cli
+
+        run_and_log(run_system_maintenance_cli, "system_maintenance", {})
         ran = True
     if getattr(args, "cleanup_line_webhooks", False):
         from obsidian_ai_hub.line_webhook.store import cleanup_old_events
