@@ -648,6 +648,8 @@ export interface OneShotJobSummary {
   agent_id?: string | null;
   session_id?: string | null;
   run_id?: string | null;
+  source: "agent" | "manual";
+  source_job_id?: string | null;
   created_at: string;
   started_at?: string | null;
   finished_at?: string | null;

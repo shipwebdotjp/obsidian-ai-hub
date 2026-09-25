@@ -306,6 +306,13 @@ export function updateRecurringJobs(revision: string, jobs: RecurringJobUpdate[]
   });
 }
 
+export function runRecurringJobNow(jobId: string): Promise<OneShotJobSummary> {
+  return request<OneShotJobSummary>(
+    `/api/v1/scheduler-jobs/recurring-jobs/${encodeURIComponent(jobId)}/run`,
+    { method: "POST" },
+  );
+}
+
 export function previewCommand(command: string): Promise<CommandPreviewResponse> {
   return request<CommandPreviewResponse>("/api/v1/scheduler-jobs/preview", {
     method: "POST",

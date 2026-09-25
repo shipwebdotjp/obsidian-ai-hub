@@ -1,4 +1,5 @@
 import logging
+import sqlite3
 from datetime import datetime
 from typing import Any, Optional
 
@@ -8,6 +9,15 @@ logger = logging.getLogger(__name__)
 class SchedulerJobConfigConflictError(ValueError):
     def __init__(self, message="Conflict: Scheduler job configuration has been updated by another session. Please refresh."):
         super().__init__(message)
+
+
+class ManualRunConflictError(ValueError):
+    def __init__(self, message="同じ定期ジョブの手動実行が未完了です。完了または取消後に再実行してください。"):
+        super().__init__(message)
+
+
+class RecurringJobNotFoundError(KeyError):
+    pass
 
 
 # --- Recurring Job services ---
@@ -156,6 +166,74 @@ def preview_command(command: str) -> dict:
         "preset_flag": preset_info["flag"],
         "preset_name": preset_info["name"],
     }
+
+
+def run_recurring_job_now(job_id: str) -> dict:
+    """Enqueue one manual run of a recurring job and kick the runner.
+
+    The target is resolved server-side from the current YAML by ``job_id``;
+    the client can never supply a command or workflow. The manual run is
+    stored as a ``source='manual'`` one-shot row copying the target, so the
+    recurring job's ``last_run``/``next_run`` are untouched and the existing
+    at-most-once queue semantics apply. Raises
+    ``RecurringJobNotFoundError`` when the job does not exist,
+    ``ManualRunConflictError`` when a manual run is queued/running, and
+    ``ValueError`` when the job has no runnable target.
+    """
+    from obsidian_ai_hub.scheduler_jobs import one_shot
+    from obsidian_ai_hub.scheduler_jobs.recurring import (
+        get_jobs_file_and_revision_locked,
+        get_workflow_target,
+    )
+
+    _, _, jobs = get_jobs_file_and_revision_locked()
+    job = next(
+        (t for t in jobs or [] if isinstance(t, dict) and t.get("id") == job_id), None
+    )
+    if job is None:
+        raise RecurringJobNotFoundError(f"Recurring job not found: {job_id}")
+
+    active = one_shot.find_active_manual_run(job_id)
+    if active is not None:
+        raise ManualRunConflictError()
+
+    workflow_target = get_workflow_target(job)
+    try:
+        if workflow_target is not None:
+            row = one_shot.register_one_shot_workflow_job(
+                workflow_target.get("workflow_id"),
+                workflow_target.get("inputs") or {},
+                run_at=None,
+                source=one_shot.SOURCE_MANUAL,
+                source_job_id=job_id,
+            )
+        elif job.get("command"):
+            row = one_shot.register_one_shot_job(
+                job["command"],
+                run_at=None,
+                source=one_shot.SOURCE_MANUAL,
+                source_job_id=job_id,
+            )
+        else:
+            raise ValueError(
+                f"定期ジョブ '{job_id}' に実行対象（command / workflow）がありません"
+            )
+    except sqlite3.IntegrityError as e:
+        # Race-safe backstop: the partial unique index rejects a concurrent
+        # second queued/running manual run for the same recurring job.
+        logger.info("Manual run race lost for %s: %s", job_id, e)
+        raise ManualRunConflictError() from e
+
+    # Best effort: the queued row is the durable part; if the kick fails or
+    # loses the runner lock, the next launchd cycle still executes it.
+    try:
+        from obsidian_ai_hub import job_runner
+
+        job_runner.spawn_cycle_process()
+    except Exception:
+        logger.warning("Failed to kick job_runner after manual run", exc_info=True)
+
+    return _to_summary(row)
 
 
 # --- One-shot Job services ---

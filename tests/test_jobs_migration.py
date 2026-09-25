@@ -236,6 +236,77 @@ def test_fresh_db_has_job_state_and_one_shot_jobs_without_task_state(test_memory
         conn.close()
 
 
+def test_db_v64_adds_manual_run_source_to_one_shot_jobs(tmp_path):
+    """v64 preserves agent rows and enforces one pending manual run per job."""
+    from obsidian_ai_hub import database
+
+    db_file = tmp_path / "v63.sqlite3"
+    conn = sqlite3.connect(str(db_file))
+    conn.row_factory = sqlite3.Row
+    conn.execute("""
+        CREATE TABLE one_shot_jobs (
+            job_id TEXT PRIMARY KEY,
+            target_kind TEXT NOT NULL DEFAULT 'command',
+            command TEXT,
+            workflow_id TEXT,
+            inputs_json TEXT NOT NULL DEFAULT '{}',
+            workflow_run_id TEXT,
+            run_at_utc TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'queued',
+            agent_id TEXT,
+            session_id TEXT,
+            run_id TEXT,
+            created_at TEXT NOT NULL,
+            started_at TEXT,
+            finished_at TEXT,
+            exit_code INTEGER,
+            segments_json TEXT NOT NULL DEFAULT '[]',
+            output_truncated INTEGER NOT NULL DEFAULT 0,
+            error_summary TEXT
+        );
+    """)
+    conn.execute(
+        "INSERT INTO one_shot_jobs (job_id, command, run_at_utc, status, agent_id,"
+        " created_at, segments_json, output_truncated)"
+        " VALUES ('agent1', 'printf hi', '2026-09-17T00:00:00+00:00', 'succeeded',"
+        " 'a1', '2026-09-17T00:00:00+00:00', '[]', 0);"
+    )
+    conn.execute("PRAGMA user_version = 63;")
+    conn.commit()
+
+    try:
+        database.run_migration_v64(conn)
+        row = conn.execute("SELECT * FROM one_shot_jobs WHERE job_id = 'agent1'").fetchone()
+        assert row["source"] == "agent"
+        assert row["source_job_id"] is None
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 64
+
+        def insert_manual(job_id, source_job_id, status="queued"):
+            conn.execute(
+                "INSERT INTO one_shot_jobs (job_id, target_kind, command, run_at_utc,"
+                " status, source, source_job_id, created_at, segments_json,"
+                " output_truncated)"
+                " VALUES (?, 'command', 'printf hi', '2026-09-17T00:00:00+00:00', ?,"
+                " 'manual', ?, '2026-09-17T00:00:00+00:00', '[]', 0);",
+                (job_id, status, source_job_id),
+            )
+
+        insert_manual("m1", "job_cmd")
+        with pytest.raises(sqlite3.IntegrityError):
+            insert_manual("m2", "job_cmd")
+        # A row that has already started also blocks a duplicate.
+        conn.execute("UPDATE one_shot_jobs SET status='running' WHERE job_id='m1'")
+        with pytest.raises(sqlite3.IntegrityError):
+            insert_manual("m5", "job_cmd")
+        # A different recurring job is not blocked.
+        insert_manual("m3", "job_other")
+        # Once the pending row is terminal, a new manual run is allowed.
+        conn.execute("UPDATE one_shot_jobs SET status='cancelled' WHERE job_id='m1'")
+        insert_manual("m4", "job_cmd")
+    finally:
+        conn.close()
+
+
 def test_old_scheduler_imports_fail():
     with pytest.raises(ImportError):
         import obsidian_ai_hub.task_runner  # noqa: F401

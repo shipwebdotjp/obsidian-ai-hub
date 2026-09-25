@@ -1137,6 +1137,8 @@ class OneShotJobSummary(BaseModel):
     agent_id: Optional[str] = None
     session_id: Optional[str] = None
     run_id: Optional[str] = None
+    source: str = "agent"
+    source_job_id: Optional[str] = None
     created_at: str
     started_at: Optional[str] = None
     finished_at: Optional[str] = None

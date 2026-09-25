@@ -781,6 +781,27 @@ Scheduler Task と Task Agent Task が `task` 一語を共有し、画面・API�
 - **公開面**: API は `/api/v1/scheduler-jobs`（`recurring-jobs`、`one-shot-jobs`、`job-states`）、画面は `/jobs`（定期＋ワンショット）とジョブ状態表示。旧 route・旧 schema・旧クライアント関数は削除し、旧 URL は 404。`command_runs` は一般実行ログ名を維持し、scheduler 起因の表示は `job_id` を使う。
 - **移行**: 手順は `docs/job/migration.md`。`python -m obsidian_ai_hub.job_runner --migrate-tasks-to-jobs` が唯一の YAML 移行経路。`batch/scheduler.sh` と LaunchAgent plist は `job_runner` を指す。
 
+## 定期ジョブの Web UI 手動実行（ワンショットキュー再利用・スキーマ v64）
+
+| 項目 | 内容 |
+|------|------|
+| 決定日 | 2026-09-25 |
+| カテゴリ | スケジューラ・Web UI・実行キュー・DB |
+| 決定内容 | `/jobs` の定期ジョブから「今すぐ実行」を提供する。`POST /api/v1/scheduler-jobs/recurring-jobs/{job_id}/run` が現行 YAML の対象（command / workflow と inputs）をサーバー側で解決して `one_shot_jobs` に `source='manual'`・`source_job_id` 付きで1行登録（`run_at=now`）し、`job_runner` を best-effort で即時起動する。`last_run` / `next_run` は更新しない。重複は部分 UNIQUE index（v64）で拒否して 409、無効ジョブも実行可。 |
+
+### 結論に至った経緯
+
+定期ジョブの再実行のたびに YAML の一時変更や CLI 実行が必要で、人間の運用コストが高かった。実行経路を Web プロセス内の直接実行にすると実行主体が二重化し、Web 再起動・デプロイで実行中コマンドが中断され one-shot の `interrupted` 扱いになる。`launchctl kickstart` はラベルとドメインのハードコードを招く。比較した選択肢は (a) 既存 `one_shot_jobs` キュー再利用＋runner プロセスの best-effort spawn（採用）、(b) キュー投入のみ（最大60秒遅延）、(c) Web 直接実行・launchctl kickstart（却下）。ワンショットは at-most-once・取消・出力保存・Workflow dispatch を既に持ち、二度目の実行基盤を作らない。target をクライアントから受けないのは、one-shot の「UI から任意 command を登録しない」不変条件と任意コマンド実行面の拡大を避けるため。
+
+### 構造と運用方針
+
+- **正本と識別子**: 実行対象は recurring `job_id` で現行 YAML から解決し、登録時に one-shot へコピーする。以後の YAML 編集・削除は予約済み実行に影響しない。`source='manual'` と `source_job_id` が来歴で、Agent 登録は `source='agent'` のまま。
+- **重複と失敗**: 同一 `source_job_id` の `queued`/`running` は部分 UNIQUE index（v64）で1件に制限する。pre-check と `IntegrityError` → 409 で競合も拒否。未知 ID 404、対象欠落・未公開 Revision・入力不整合 422、YAML 破損 500 で無書込み。終端後は再登録可。
+- **即時性**: Web は `job_runner.spawn_cycle_process()` で1サイクル分を detached spawn する。runner lock 競合・spawn 失敗時もキュー行は残り、最大60秒後の launchd サイクルが実行する。実行は runner プロセスなので Web 再起動で中断せず、中断残りは既存規則どおり `interrupted`（自動再実行なし）。テスト env では spawn しない。
+- **スケジュール非干渉**: `last_run`/`next_run` は変えず、次回予定枠を維持する。近接する予定枠との二重実行は人間の明示操作として許容する。Workflow は dispatch 後に `dispatched`（終端）となるため、Run 実行中でも再登録できる。
+- **権限**: Bearer 認証のみでロールは追加しない。UI は確認ダイアログを出し、手動実行が未完了の間はボタンを無効化する。
+- **契約**: `docs/job/recurring-jobs.md`・`docs/job/one-shot-jobs.md` に操作シナリオ契約を追記。縦断テストは `tests/test_scheduler_jobs_web.py` の run-now シナリオ、DB 制約は `tests/test_one_shot_jobs.py` と `tests/test_jobs_migration.py`。
+
 ## Activity・サマリーの正本を SQLite へ移行（JSONL 廃止）
 
 | 項目 | 内容 |

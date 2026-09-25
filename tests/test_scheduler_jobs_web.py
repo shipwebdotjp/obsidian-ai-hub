@@ -468,6 +468,9 @@ def test_one_shot_jobs_require_token(clean_job_env, api_token):
     res = client.get("/api/v1/scheduler-jobs/job-states")
     assert res.status_code == 401
 
+    res = client.post("/api/v1/scheduler-jobs/recurring-jobs/job_cmd/run")
+    assert res.status_code == 401
+
 
 def test_corrupt_jobs_yaml_returns_500_and_never_overwrites(clean_job_env, web_client):
     job_file, _ = clean_job_env
@@ -479,6 +482,9 @@ def test_corrupt_jobs_yaml_returns_500_and_never_overwrites(clean_job_env, web_c
     res = web_client.put(
         "/api/v1/scheduler-jobs/recurring-jobs", json={"revision": "", "jobs": []}
     )
+    assert res.status_code == 500
+
+    res = web_client.post("/api/v1/scheduler-jobs/recurring-jobs/job_cmd/run")
     assert res.status_code == 500
 
     # The corrupt file was not overwritten by the failed save flow.
@@ -551,3 +557,199 @@ def test_recurring_jobs_hide_corrupt_workflow_target(
     res = web_client.get("/api/v1/scheduler-jobs/recurring-jobs")
     assert res.status_code == 200, res.text
     assert res.json()["jobs"][0]["workflow"] is None
+
+
+class _Proc:
+    def __init__(self, returncode=0, stdout="", stderr=""):
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
+
+
+def _ok_executor(stdout="ok"):
+    calls = []
+
+    def run(args, cwd=None):
+        calls.append((list(args), cwd))
+        return _Proc(0, stdout, "")
+
+    run.calls = calls
+    return run
+
+
+def _run_now_job_entry(job_id="job_cmd", *, command=None, workflow=None, enabled=True):
+    entry = {
+        "id": job_id,
+        "enabled": enabled,
+        "schedule": {"type": "daily", "hour": 3, "minute": 0},
+    }
+    if workflow is not None:
+        entry["workflow"] = workflow
+    else:
+        entry["command"] = command or "printf run-now"
+    return entry
+
+
+def test_run_recurring_job_now_command_scenario(
+    clean_job_env, web_client, test_memory_db_path, monkeypatch
+):
+    """Recurring job -> run-now -> queued manual row -> one runner execution.
+
+    The operation-scenario contract for the manual run of a disabled job: the
+    target is resolved from the current YAML (never from the client), the
+    schedule state is untouched, duplicates are refused, and the runner runs
+    the copied command exactly once.
+    """
+    from obsidian_ai_hub import job_runner
+    from obsidian_ai_hub.scheduler_jobs import one_shot
+
+    job_file, _ = clean_job_env
+    recurring.atomic_write_yaml(job_file, [_run_now_job_entry(enabled=False)])
+
+    kicks = []
+    monkeypatch.setattr(
+        job_runner, "spawn_cycle_process", lambda: kicks.append(1) or 1234
+    )
+
+    res = web_client.post("/api/v1/scheduler-jobs/recurring-jobs/job_cmd/run")
+    assert res.status_code == 201, res.text
+    body = res.json()
+    assert body["target_kind"] == "command"
+    assert body["command"] == "printf run-now"
+    assert body["status"] == "queued"
+    assert body["source"] == "manual"
+    assert body["source_job_id"] == "job_cmd"
+    assert kicks == [1]
+
+    # A duplicate click while queued is rejected without a second row.
+    res = web_client.post("/api/v1/scheduler-jobs/recurring-jobs/job_cmd/run")
+    assert res.status_code == 409
+
+    # Manual runs do not touch the recurring job's arming/last_run state.
+    assert recurring.load_state() == {}
+
+    executor = _ok_executor()
+    finished = one_shot.run_due_one_shot_jobs(executor=executor)
+    assert [j["job_id"] for j in finished] == [body["job_id"]]
+    assert len(executor.calls) == 1
+    assert executor.calls[0][0] == ["printf", "run-now"]
+    done = one_shot.get_one_shot_job(body["job_id"])
+    assert done["status"] == "succeeded"
+    assert done["exit_code"] == 0
+
+    # A terminal manual run frees the recurring job for another manual run.
+    res = web_client.post("/api/v1/scheduler-jobs/recurring-jobs/job_cmd/run")
+    assert res.status_code == 201
+    assert res.json()["job_id"] != body["job_id"]
+
+
+def test_run_recurring_job_now_ignores_client_target_payload(
+    clean_job_env, web_client, test_memory_db_path, monkeypatch
+):
+    from obsidian_ai_hub import job_runner
+
+    job_file, _ = clean_job_env
+    recurring.atomic_write_yaml(
+        job_file, [_run_now_job_entry(command="printf safe")]
+    )
+    monkeypatch.setattr(job_runner, "spawn_cycle_process", lambda: None)
+
+    res = web_client.post(
+        "/api/v1/scheduler-jobs/recurring-jobs/job_cmd/run",
+        json={"command": "printf hacked", "workflow_id": "wf_x", "inputs": {"a": 1}},
+    )
+    assert res.status_code == 201, res.text
+    assert res.json()["command"] == "printf safe"
+    assert res.json()["workflow_id"] is None
+
+
+def test_run_recurring_job_now_spawn_failure_keeps_queued_row(
+    clean_job_env, web_client, test_memory_db_path, monkeypatch
+):
+    """A failed immediate kick must not abort the request or drop the queued row."""
+    from obsidian_ai_hub import job_runner
+    from obsidian_ai_hub.scheduler_jobs import one_shot
+
+    job_file, _ = clean_job_env
+    recurring.atomic_write_yaml(job_file, [_run_now_job_entry()])
+
+    def boom():
+        raise OSError("fork failed")
+
+    monkeypatch.setattr(job_runner, "spawn_cycle_process", boom)
+
+    res = web_client.post("/api/v1/scheduler-jobs/recurring-jobs/job_cmd/run")
+    assert res.status_code == 201, res.text
+    row = one_shot.get_one_shot_job(res.json()["job_id"])
+    assert row is not None
+    assert row["status"] == "queued"
+
+    # The queued manual row still runs on the next runner cycle.
+    executor = _ok_executor()
+    finished = one_shot.run_due_one_shot_jobs(executor=executor)
+    assert [j["job_id"] for j in finished] == [res.json()["job_id"]]
+    assert len(executor.calls) == 1
+
+
+def test_run_recurring_job_now_workflow_scenario(
+    clean_job_env, web_client, test_memory_db_path, monkeypatch
+):
+    from obsidian_ai_hub import job_runner
+    from obsidian_ai_hub.scheduler_jobs import one_shot
+
+    workflow_id = _publish_terminal_workflow()
+    job_file, _ = clean_job_env
+    recurring.atomic_write_yaml(
+        job_file,
+        [
+            _run_now_job_entry(
+                job_id="job_wf",
+                workflow={"workflow_id": workflow_id, "inputs": {}},
+            )
+        ],
+    )
+    monkeypatch.setattr(job_runner, "spawn_cycle_process", lambda: None)
+
+    res = web_client.post("/api/v1/scheduler-jobs/recurring-jobs/job_wf/run")
+    assert res.status_code == 201, res.text
+    body = res.json()
+    assert body["target_kind"] == "workflow"
+    assert body["workflow_id"] == workflow_id
+    assert body["source"] == "manual"
+    assert body["source_job_id"] == "job_wf"
+
+    res = web_client.post("/api/v1/scheduler-jobs/recurring-jobs/job_wf/run")
+    assert res.status_code == 409
+
+    # The runner dispatches the queued one-shot into a Run (queue terminal).
+    finished = one_shot.run_due_one_shot_jobs()
+    assert [j["job_id"] for j in finished] == [body["job_id"]]
+    assert finished[0]["status"] == "dispatched"
+    assert finished[0]["workflow_run_id"]
+
+
+def test_run_recurring_job_now_errors(
+    clean_job_env, web_client, test_memory_db_path, monkeypatch
+):
+    from obsidian_ai_hub import job_runner
+
+    job_file, _ = clean_job_env
+    monkeypatch.setattr(job_runner, "spawn_cycle_process", lambda: None)
+
+    res = web_client.post("/api/v1/scheduler-jobs/recurring-jobs/missing/run")
+    assert res.status_code == 404
+
+    # A job with neither command nor workflow is not runnable.
+    recurring.atomic_write_yaml(
+        job_file, [{"id": "bad", "enabled": True, "schedule": {"type": "daily"}}]
+    )
+    res = web_client.post("/api/v1/scheduler-jobs/recurring-jobs/bad/run")
+    assert res.status_code == 422
+
+    # A workflow target without a published Revision is rejected up front.
+    recurring.atomic_write_yaml(
+        job_file,
+        [_run_now_job_entry(job_id="job_wf", workflow={"workflow_id": "wf_missing"})],
+    )
+    res = web_client.post("/api/v1/scheduler-jobs/recurring-jobs/job_wf/run")
+    assert res.status_code == 422

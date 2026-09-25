@@ -45,6 +45,7 @@
 - [Direct CLI 削除・ACP 一本化（OpenCode のみ）](10-Decisions-Architecture.md#direct-cli-削除acp-一本化opencode-のみ)（2026-09-15）
 - [コーディング実行のトークン使用量積算と試行単位の合算方針](10-Decisions-Architecture.md#コーディング実行のトークン使用量積算と試行単位の合算方針)（2026-09-16）
 - [Scheduler Task から Job への完全改称とワンショット実行ジョブ導入](10-Decisions-Architecture.md#scheduler-task-から-job-への完全改称とワンショット実行ジョブ導入)（2026-09-17）
+- [定期ジョブの Web UI 手動実行（ワンショットキュー再利用・スキーマ v64）](10-Decisions-Architecture.md#定期ジョブの-web-ui-手動実行ワンショットキュー再利用スキーマ-v64)（2026-09-25）
 - [Activity・サマリーの正本を SQLite へ移行（JSONL 廃止）](10-Decisions-Architecture.md#activityサマリーの正本を-sqlite-へ移行jsonl-廃止)
 - [エージェント／コーディング会話の送信キューはクライアント側に置く](10-Decisions-Web.md#エージェント会話の送信キューはクライアント側に置く)（2026-09-17）
 - [一覧のページングはページ送りを標準、会話履歴のみ逆方向キーセット](10-Decisions-Web.md#一覧のページングはページ送りを標準会話履歴のみ逆方向キーセット)（2026-09-19）

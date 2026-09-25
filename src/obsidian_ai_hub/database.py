@@ -748,6 +748,9 @@ def get_db_connection() -> sqlite3.Connection:
     if current_version <= 62:
         run_migration_v63(conn)
 
+    if current_version <= 63:
+        run_migration_v64(conn)
+
     return conn
 
 
@@ -1264,6 +1267,43 @@ def run_migration_v63(conn: sqlite3.Connection) -> None:
         except sqlite3.OperationalError as e:
             _ignore_duplicate_schema_object(e)
     conn.execute("PRAGMA user_version = 63;")
+    conn.commit()
+
+
+def run_migration_v64(conn: sqlite3.Connection) -> None:
+    """Run migration for version 64 (manual run of a recurring job).
+
+    Adds ``source`` (``agent``/``manual``) and ``source_job_id`` to
+    ``one_shot_jobs``. The Web UI's "run now" creates a ``manual`` row that
+    copies an existing recurring job's target; the partial unique index keeps
+    at most one queued/running manual run per recurring job so duplicate
+    clicks and web-vs-runner races cannot enqueue twice. Existing agent rows
+    default to ``source='agent'``.
+    """
+    columns = {
+        row[1]
+        for row in conn.execute("PRAGMA table_info(one_shot_jobs);").fetchall()
+    }
+    if "source" not in columns:
+        try:
+            conn.execute(
+                "ALTER TABLE one_shot_jobs ADD COLUMN source TEXT NOT NULL DEFAULT 'agent';"
+            )
+        except sqlite3.OperationalError as e:
+            # Concurrent web/runner connections may both pass the PRAGMA check;
+            # tolerate the loser's duplicate-column error like v50/v61/v63.
+            _ignore_duplicate_schema_object(e)
+    if "source_job_id" not in columns:
+        try:
+            conn.execute("ALTER TABLE one_shot_jobs ADD COLUMN source_job_id TEXT;")
+        except sqlite3.OperationalError as e:
+            _ignore_duplicate_schema_object(e)
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_one_shot_manual_pending"
+        " ON one_shot_jobs(source_job_id)"
+        " WHERE source = 'manual' AND status IN ('queued', 'running');"
+    )
+    conn.execute("PRAGMA user_version = 64;")
     conn.commit()
 
 

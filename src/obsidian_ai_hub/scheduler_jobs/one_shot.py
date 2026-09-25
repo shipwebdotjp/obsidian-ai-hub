@@ -32,6 +32,10 @@ DISPATCHED = "dispatched"
 TARGET_COMMAND = "command"
 TARGET_WORKFLOW = "workflow"
 
+SOURCE_AGENT = "agent"
+SOURCE_MANUAL = "manual"
+SOURCES = (SOURCE_AGENT, SOURCE_MANUAL)
+
 TERMINAL_STATUSES = (SUCCEEDED, FAILED, CANCELLED, INTERRUPTED, DISPATCHED)
 ALL_STATUSES = (
     QUEUED,
@@ -75,6 +79,24 @@ def parse_run_at(value: Any, *, now: Optional[datetime] = None) -> Optional[str]
     return dt.astimezone(timezone.utc).isoformat()
 
 
+def _normalize_source(source: str, source_job_id: Optional[str]) -> tuple[str, Optional[str]]:
+    if source not in SOURCES:
+        raise ValueError(f"Invalid source: {source!r}")
+    if source_job_id is None:
+        if source == SOURCE_MANUAL:
+            # Without source_job_id the partial unique index cannot dedupe, so
+            # a manual run must always identify its recurring job.
+            raise ValueError("source_job_id is required for a manual run")
+        return source, None
+    if source != SOURCE_MANUAL:
+        # Non-null source_job_id always means "manual run of this recurring
+        # job"; keeping agent rows clean makes that invariant enforceable.
+        raise ValueError("source_job_id is only valid for a manual run")
+    if not isinstance(source_job_id, str) or not source_job_id.strip():
+        raise ValueError("source_job_id must be a non-empty string when provided")
+    return source, source_job_id.strip()
+
+
 def _row_to_dict(row) -> dict:
     d = dict(row)
     try:
@@ -88,6 +110,7 @@ def _row_to_dict(row) -> dict:
         d["inputs"] = {}
     d.pop("inputs_json", None)
     d["target_kind"] = d.get("target_kind") or TARGET_COMMAND
+    d["source"] = d.get("source") or SOURCE_AGENT
     d["output_truncated"] = bool(d.get("output_truncated"))
     return d
 
@@ -99,15 +122,24 @@ def register_one_shot_job(
     agent_id: Optional[str] = None,
     session_id: Optional[str] = None,
     run_id: Optional[str] = None,
+    source: str = SOURCE_AGENT,
+    source_job_id: Optional[str] = None,
     now: Optional[datetime] = None,
 ) -> dict:
-    """Validate and persist a one-shot job as ``queued``. No shell is used."""
+    """Validate and persist a one-shot job as ``queued``. No shell is used.
+
+    ``source='manual'`` with ``source_job_id`` records a Web UI "run now" that
+    copied a recurring job's target; the partial unique index rejects a second
+    queued/running manual row for the same recurring job (``IntegrityError``).
+    """
     if not command or not isinstance(command, str) or not command.strip():
         raise ValueError("Command must be a non-empty string")
     try:
         recurring.parse_command(command)
     except ValueError as e:
         raise ValueError(f"Invalid command structure: {e}") from e
+
+    source, source_job_id = _normalize_source(source, source_job_id)
 
     ref = now or datetime.now(timezone.utc)
     if ref.tzinfo is None:
@@ -123,11 +155,22 @@ def register_one_shot_job(
             INSERT INTO one_shot_jobs (
                 job_id, command, run_at_utc, status,
                 agent_id, session_id, run_id,
+                source, source_job_id,
                 created_at, started_at, finished_at,
                 exit_code, segments_json, output_truncated, error_summary
-            ) VALUES (?, ?, ?, 'queued', ?, ?, ?, ?, NULL, NULL, NULL, '[]', 0, NULL)
+            ) VALUES (?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, '[]', 0, NULL)
             """,
-            (job_id, command, run_at_utc, agent_id, session_id, run_id, created_at),
+            (
+                job_id,
+                command,
+                run_at_utc,
+                agent_id,
+                session_id,
+                run_id,
+                source,
+                source_job_id,
+                created_at,
+            ),
         )
         conn.commit()
     finally:
@@ -146,6 +189,8 @@ def register_one_shot_workflow_job(
     agent_id: Optional[str] = None,
     session_id: Optional[str] = None,
     run_id: Optional[str] = None,
+    source: str = SOURCE_AGENT,
+    source_job_id: Optional[str] = None,
     now: Optional[datetime] = None,
 ) -> dict:
     """Register a one-shot job that starts a published Workflow.
@@ -157,6 +202,7 @@ def register_one_shot_workflow_job(
     outcome is tracked on the Run, not here.
     """
     target = recurring.validate_workflow_target(workflow_id, inputs)
+    source, source_job_id = _normalize_source(source, source_job_id)
 
     ref = now or datetime.now(timezone.utc)
     if ref.tzinfo is None:
@@ -172,10 +218,11 @@ def register_one_shot_workflow_job(
             INSERT INTO one_shot_jobs (
                 job_id, target_kind, command, workflow_id, inputs_json,
                 workflow_run_id, run_at_utc, status, agent_id, session_id,
-                run_id, created_at, started_at, finished_at,
+                run_id, source, source_job_id,
+                created_at, started_at, finished_at,
                 exit_code, segments_json, output_truncated, error_summary
-            ) VALUES (?, 'workflow', NULL, ?, ?, NULL, ?, 'queued', ?, ?, ?, ?,
-                      NULL, NULL, NULL, '[]', 0, NULL)
+            ) VALUES (?, 'workflow', NULL, ?, ?, NULL, ?, 'queued', ?, ?, ?, ?, ?,
+                      ?, NULL, NULL, NULL, '[]', 0, NULL)
             """,
             (
                 job_id,
@@ -185,6 +232,8 @@ def register_one_shot_workflow_job(
                 agent_id,
                 session_id,
                 run_id,
+                source,
+                source_job_id,
                 created_at,
             ),
         )
@@ -202,6 +251,24 @@ def get_one_shot_job(job_id: str) -> Optional[dict]:
     try:
         cur = conn.execute("SELECT * FROM one_shot_jobs WHERE job_id = ?", (job_id,))
         row = cur.fetchone()
+        return _row_to_dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def find_active_manual_run(source_job_id: str) -> Optional[dict]:
+    """Return the queued/running manual run for a recurring job, else None.
+
+    Used as the Web UI's pre-check; the partial unique index is the race-safe
+    backstop for concurrent requests and web-vs-runner timing.
+    """
+    conn = get_db_connection()
+    try:
+        row = conn.execute(
+            "SELECT * FROM one_shot_jobs WHERE source = ? AND source_job_id = ?"
+            " AND status IN ('queued','running') ORDER BY created_at ASC LIMIT 1",
+            (SOURCE_MANUAL, source_job_id),
+        ).fetchone()
         return _row_to_dict(row) if row else None
     finally:
         conn.close()

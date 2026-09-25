@@ -83,6 +83,61 @@ def test_claim_race_executes_once(test_memory_db_path):
     assert one_shot.claim_due_jobs() == []
 
 
+def test_manual_source_fields_and_single_pending_run(test_memory_db_path):
+    """Manual runs carry source/source_job_id and block a pending duplicate."""
+    import sqlite3
+
+    first = one_shot.register_one_shot_job(
+        "printf manual",
+        source=one_shot.SOURCE_MANUAL,
+        source_job_id="job_a",
+    )
+    assert first["source"] == "manual"
+    assert first["source_job_id"] == "job_a"
+    assert one_shot.find_active_manual_run("job_a")["job_id"] == first["job_id"]
+    assert one_shot.find_active_manual_run("job_b") is None
+
+    # The partial unique index rejects a second queued manual run per job even
+    # when the service pre-check is bypassed (race-safe backstop).
+    with pytest.raises(sqlite3.IntegrityError):
+        one_shot.register_one_shot_job(
+            "printf manual",
+            source=one_shot.SOURCE_MANUAL,
+            source_job_id="job_a",
+        )
+
+    one_shot.cancel_one_shot_job(first["job_id"])
+    assert one_shot.find_active_manual_run("job_a") is None
+    second = one_shot.register_one_shot_job(
+        "printf manual",
+        source=one_shot.SOURCE_MANUAL,
+        source_job_id="job_a",
+    )
+    assert second["job_id"] != first["job_id"]
+
+    # Agent registrations default to source='agent' and are not deduplicated.
+    a1 = one_shot.register_one_shot_job("printf a", agent_id="a1")
+    a2 = one_shot.register_one_shot_job("printf a", agent_id="a1")
+    assert a1["source"] == "agent"
+    assert a2["source"] == "agent"
+    assert a1["source_job_id"] is None
+
+    with pytest.raises(ValueError):
+        one_shot.register_one_shot_job("printf x", source="bogus")
+    with pytest.raises(ValueError):
+        one_shot.register_one_shot_job(
+            "printf x", source=one_shot.SOURCE_MANUAL, source_job_id=""
+        )
+    with pytest.raises(ValueError):
+        # A manual run must identify its recurring job.
+        one_shot.register_one_shot_job("printf x", source=one_shot.SOURCE_MANUAL)
+    with pytest.raises(ValueError):
+        # source_job_id is only meaningful for manual runs.
+        one_shot.register_one_shot_job(
+            "printf x", agent_id="a1", source_job_id="job_a"
+        )
+
+
 def test_future_run_at_not_due_jst_normalized_and_past_immediate(test_memory_db_path):
     now = datetime(2026, 9, 17, 12, 0, 0, tzinfo=timezone.utc)
     future = now + timedelta(hours=1)

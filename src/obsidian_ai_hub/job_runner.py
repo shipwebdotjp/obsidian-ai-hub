@@ -3,7 +3,12 @@
 import argparse
 import fcntl
 import logging
+import subprocess
+import sys
+import threading
 from datetime import datetime
+from pathlib import Path
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +126,46 @@ def _run_cycle_locked(now: datetime) -> dict:
         "pruned": pruned,
         "skipped": False,
     }
+
+
+def spawn_cycle_process() -> Optional[int]:
+    """Start a detached one-off runner process, best effort.
+
+    Used by the Web UI "run now" flow so a queued one-shot job does not wait
+    for the next launchd interval. The runner lock keeps this process and the
+    launchd runner from running cycles concurrently; when the lock is taken the
+    spawned process exits immediately and the queued job is picked up by the
+    next scheduled cycle. Returns the PID, or ``None`` when spawning is
+    skipped (test env) or fails.
+    """
+    from obsidian_ai_hub.utils import config
+
+    if config.IS_TEST_ENV:
+        return None
+
+    project_root = Path(config.BASE_DIR)
+    args = [sys.executable, "-m", "obsidian_ai_hub.job_runner"]
+    wrapper = project_root / "scripts" / "launchd_log_wrapper.sh"
+    if wrapper.is_file():
+        cmd = ["/bin/bash", str(wrapper), "obsidian_merge", *args]
+    else:
+        cmd = args
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            cwd=str(project_root),
+            start_new_session=True,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except OSError:
+        logger.warning("Failed to spawn an immediate job_runner cycle", exc_info=True)
+        return None
+    # Web は長時間生き続けるため、子を reaping しないと zombie が残る。
+    threading.Thread(target=proc.wait, daemon=True).start()
+    logger.info("Spawned immediate job_runner cycle (pid=%s)", proc.pid)
+    return proc.pid
 
 
 def main() -> None:

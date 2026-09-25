@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { getApiErrorMessage } from "../../utils/error";
 import {
@@ -11,6 +11,7 @@ import {
   cancelOneShotJob,
   getSchedulableWorkflows,
   createOneShotWorkflowJob,
+  runRecurringJobNow,
 } from "../../api/client";
 import type { RecurringJob, RecurringJobSchedule, RecurringJobScheduleType, RecurringJobUpdate, CommandSegment, DispatchInfo, OneShotJobSummary, OneShotJobDetail, SchedulableWorkflow } from "../../api/types";
 import { workflowRunPath } from "../../constants/routes";
@@ -33,24 +34,48 @@ function parseJsonObjectInput(raw: string): Record<string, unknown> | null {
   }
 }
 
+function recurringJobTargetLabel(job: RecurringJob): string {
+  if (job.workflow) {
+    return `Workflow: ${job.workflow.workflow_name || job.workflow.workflow_id}`;
+  }
+  if (job.is_preset) {
+    return job.preset_name || job.command || "-";
+  }
+  return job.command || "-";
+}
+
+function isPendingManualRun(job: OneShotJobSummary): boolean {
+  return (
+    job.source === "manual" &&
+    (job.status === "queued" || job.status === "running")
+  );
+}
+
+function runNowButtonLabel(isActive: boolean, isSubmitting: boolean): string {
+  if (isActive) return "実行中";
+  if (isSubmitting) return "登録中…";
+  return "今すぐ実行";
+}
+
 function renderRecurringTarget(job: RecurringJob) {
+  const label = recurringJobTargetLabel(job);
   if (job.workflow) {
     return (
       <span className="inline-flex items-center gap-1 rounded bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-800">
-        Workflow: {job.workflow.workflow_name || job.workflow.workflow_id}
+        {label}
       </span>
     );
   }
   if (job.is_preset) {
     return (
       <span className="inline-flex items-center gap-1 rounded bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-800">
-        {job.preset_name}
+        {label}
       </span>
     );
   }
   return (
     <code className="text-xs font-mono text-slate-500 bg-slate-100 px-1 py-0.5 rounded">
-      {job.command}
+      {label}
     </code>
   );
 }
@@ -155,6 +180,10 @@ export default function JobPage() {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"recurring" | "one-shot">("recurring");
 
+  // "Run now" state: per-job in-flight requests and the last result banner.
+  const [runningNowJobIds, setRunningNowJobIds] = useState<Set<string>>(new Set());
+  const [runMessage, setRunMessage] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
+
   const primaryInputRef = useRef<HTMLInputElement>(null);
 
   // Esc-key modal closing handler
@@ -227,23 +256,41 @@ export default function JobPage() {
     }
   };
 
-  const fetchOneShotJobs = async () => {
-    setOneShotLoading(true);
+  // Sequence guard: a slow response from an older request must not overwrite
+  // the list fetched by a newer one (poll vs. post-action refresh).
+  const oneShotFetchSeq = useRef(0);
+  const fetchOneShotJobs = useCallback(async (silent = false) => {
+    const seq = ++oneShotFetchSeq.current;
+    if (!silent) setOneShotLoading(true);
     setOneShotError(null);
     try {
       const data = await listOneShotJobs(100, 0);
+      if (seq !== oneShotFetchSeq.current) return;
       setOneShotJobs(data.items);
       setOneShotTotal(data.total);
     } catch (e) {
+      if (seq !== oneShotFetchSeq.current) return;
       if (e instanceof ApiError) {
         setOneShotError(e.message || "ワンショット実行ジョブの取得に失敗しました");
       } else {
         setOneShotError("サーバーとの通信に失敗しました");
       }
     } finally {
-      setOneShotLoading(false);
+      if (!silent) setOneShotLoading(false);
     }
-  };
+  }, []);
+
+  // Poll while a manual run is pending so the row state follows the runner's
+  // progress without a manual reload. Agent-registered future one-shot jobs
+  // (`run_at` days away) must not keep the page polling.
+  const hasPendingOneShot = oneShotJobs.some(isPendingManualRun);
+  useEffect(() => {
+    if (!hasPendingOneShot) return;
+    const id = setInterval(() => {
+      void fetchOneShotJobs(true);
+    }, 5000);
+    return () => clearInterval(id);
+  }, [hasPendingOneShot, fetchOneShotJobs]);
 
   const handleSelectOneShot = async (jobId: string) => {
     setSelectedOneShotJobId(jobId);
@@ -456,6 +503,52 @@ export default function JobPage() {
       setSaving(false);
     }
   };
+
+  const handleRunNow = async (job: RecurringJob) => {
+    const target = recurringJobTargetLabel(job);
+    if (
+      !window.confirm(
+        `定期ジョブ "${job.id}" を今すぐ一度だけ実行しますか？\n対象: ${target}\n（スケジュールの次回実行枠は変更されません）`,
+      )
+    ) {
+      return;
+    }
+
+    setRunningNowJobIds((ids) => new Set(ids).add(job.id));
+    setRunMessage(null);
+    try {
+      const created = await runRecurringJobNow(job.id);
+      setRunMessage({
+        kind: "ok",
+        text: `実行を登録しました（${created.job_id}）。結果は「ワンショット実行ジョブ」タブで確認できます。`,
+      });
+      await fetchOneShotJobs();
+    } catch (e) {
+      setRunMessage({
+        kind: "error",
+        text: getApiErrorMessage(e, "今すぐ実行の登録に失敗しました"),
+      });
+      // 409 = a queued/running manual run already exists (possibly from another
+      // session); resync so the row shows 実行中 instead of staying clickable.
+      if (e instanceof ApiError && e.status === 409) {
+        void fetchOneShotJobs();
+      }
+    } finally {
+      setRunningNowJobIds((ids) => {
+        const next = new Set(ids);
+        next.delete(job.id);
+        return next;
+      });
+    }
+  };
+
+  // Recurring jobs that already have a queued/running manual run. The backend
+  // also rejects duplicates (409); this keeps the button honest in the UI.
+  const activeManualRunJobIds = new Set(
+    oneShotJobs
+      .filter((j) => isPendingManualRun(j) && j.source_job_id)
+      .map((j) => j.source_job_id as string),
+  );
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -679,14 +772,14 @@ export default function JobPage() {
       <div className="flex shrink-0 gap-1 border-b border-slate-200 bg-white px-4 sm:px-6">
         <button
           type="button"
-          onClick={() => setActiveTab("recurring")}
+          onClick={() => { setRunMessage(null); setActiveTab("recurring"); }}
           className={`rounded-t px-4 py-2 text-sm font-semibold ${activeTab === "recurring" ? "border-b-2 border-slate-900 bg-white text-slate-900" : "text-slate-500 hover:bg-slate-100"} cursor-pointer`}
         >
           定期実行ジョブ
         </button>
         <button
           type="button"
-          onClick={() => setActiveTab("one-shot")}
+          onClick={() => { setRunMessage(null); setActiveTab("one-shot"); }}
           className={`rounded-t px-4 py-2 text-sm font-semibold ${activeTab === "one-shot" ? "border-b-2 border-slate-900 bg-white text-slate-900" : "text-slate-500 hover:bg-slate-100"} cursor-pointer`}
         >
           ワンショット実行ジョブ
@@ -701,6 +794,17 @@ export default function JobPage() {
         {error && (
           <div className="mb-6 rounded-lg bg-red-50 p-4 text-sm text-red-600">
             {error}
+          </div>
+        )}
+        {runMessage && (
+          <div
+            className={`mb-4 rounded-lg p-3 text-sm ${
+              runMessage.kind === "ok"
+                ? "bg-emerald-50 text-emerald-700"
+                : "bg-red-50 text-red-600"
+            }`}
+          >
+            {runMessage.text}
           </div>
         )}
 
@@ -768,6 +872,25 @@ export default function JobPage() {
                     </td>
                     <td className="px-6 py-4 text-right">
                       <div className="flex justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleRunNow(job)}
+                          disabled={
+                            saving ||
+                            runningNowJobIds.has(job.id) ||
+                            activeManualRunJobIds.has(job.id)
+                          }
+                          className={`rounded px-2.5 py-1 text-xs font-medium ${
+                            activeManualRunJobIds.has(job.id)
+                              ? "bg-slate-100 text-slate-500 cursor-not-allowed"
+                              : "bg-blue-600 text-white hover:bg-blue-700 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                          }`}
+                        >
+                          {runNowButtonLabel(
+                            activeManualRunJobIds.has(job.id),
+                            runningNowJobIds.has(job.id),
+                          )}
+                        </button>
                         <button
                           type="button"
                           onClick={() => handleEdit(job)}
@@ -927,7 +1050,9 @@ export default function JobPage() {
                         </span>
                       </td>
                       <td className="px-6 py-4 text-xs font-mono text-slate-500">
-                        {[job.agent_id, job.session_id, job.run_id].filter(Boolean).join(" / ") || "-"}
+                        {job.source === "manual"
+                          ? `手動（定期: ${job.source_job_id ?? "-"}）`
+                          : [job.agent_id, job.session_id, job.run_id].filter(Boolean).join(" / ") || "-"}
                       </td>
                       <td className="px-6 py-4 max-w-xs truncate">
                         {job.target_kind === "workflow" ? (

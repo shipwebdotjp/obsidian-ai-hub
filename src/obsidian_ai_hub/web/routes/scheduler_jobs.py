@@ -4,7 +4,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from obsidian_ai_hub.web import schemas, service
 from obsidian_ai_hub.web.routes.deps import require_bearer_token
-from obsidian_ai_hub.web.services.scheduler_jobs import SchedulerJobConfigConflictError
+from obsidian_ai_hub.web.services.scheduler_jobs import (
+    ManualRunConflictError,
+    RecurringJobNotFoundError,
+    SchedulerJobConfigConflictError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +53,31 @@ def preview_command(
     except Exception:
         logger.exception("Failed to preview command")
         raise HTTPException(status_code=500, detail="Failed to preview command")
+
+
+@router.post(
+    "/scheduler-jobs/recurring-jobs/{job_id}/run",
+    response_model=schemas.OneShotJobSummary,
+    status_code=status.HTTP_201_CREATED,
+)
+def run_recurring_job_now(job_id: str, _=Depends(require_bearer_token)):
+    try:
+        return service.run_recurring_job_now(job_id)
+    except RecurringJobNotFoundError:
+        raise HTTPException(status_code=404, detail="Recurring job not found")
+    except ManualRunConflictError as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+    except UnicodeDecodeError:
+        # UnicodeDecodeError is a ValueError subclass, but an undecodable job
+        # config is a server-side file problem (500), not a client payload
+        # error (422).
+        logger.exception("Failed to run recurring job: undecodable job config")
+        raise HTTPException(status_code=500, detail="Failed to run recurring job")
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
+    except Exception:
+        logger.exception("Failed to run recurring job")
+        raise HTTPException(status_code=500, detail="Failed to run recurring job")
 
 
 @router.post(

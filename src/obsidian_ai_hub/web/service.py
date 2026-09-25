@@ -174,6 +174,8 @@ from obsidian_ai_hub.web.services.task_agent import (
     update_task_agent_capability,
 )
 from obsidian_ai_hub.web.services.scheduler_jobs import (
+    ManualRunConflictError,
+    RecurringJobNotFoundError,
     SchedulerJobConfigConflictError,
     cancel_one_shot_job,
     create_one_shot_workflow_job,
@@ -182,6 +184,7 @@ from obsidian_ai_hub.web.services.scheduler_jobs import (
     list_job_states,
     list_one_shot_jobs,
     preview_command,
+    run_recurring_job_now,
     update_recurring_jobs,
 )
 from obsidian_ai_hub.web.services.vault import (
