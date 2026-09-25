@@ -186,6 +186,7 @@ def _row_to_session(row: sqlite3.Row) -> dict[str, Any]:
         "title": row["title"],
         "title_is_edited": title_is_edited,
         "pinned_at": pinned_at,
+        "source": _safe_row_get(row, "source"),
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
     }
@@ -231,6 +232,8 @@ def _row_to_message(row: sqlite3.Row) -> dict[str, Any]:
         "created_at": row["created_at"],
     }
 
+
+AGENT_SESSION_SOURCES = frozenset({"chat", "task", "workflow"})
 
 AGENT_NON_TERMINAL_STATUSES = frozenset({"queued", "running", "cancelling", "waiting_user"})
 AGENT_TERMINAL_STATUSES = frozenset({"succeeded", "failed", "cancelled", "interrupted"})
@@ -752,8 +755,14 @@ def delete_agent(agent_id: str, conn: Optional[sqlite3.Connection] = None) -> bo
 def create_session(
     agent_id: str,
     title: Optional[str] = None,
+    source: str = "chat",
     conn: Optional[sqlite3.Connection] = None,
 ) -> dict[str, Any]:
+    if source not in AGENT_SESSION_SOURCES:
+        raise ValueError(
+            f"session source must be one of {sorted(AGENT_SESSION_SOURCES)}; got {source!r}"
+        )
+
     with auto_connection(conn) as (active_conn, is_generated):
         agent = get_agent(agent_id, conn=active_conn)
         if not agent:
@@ -767,18 +776,18 @@ def create_session(
             with active_conn:
                 active_conn.execute(
                     """
-                    INSERT INTO agent_sessions (session_id, agent_id, title, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?)
+                    INSERT INTO agent_sessions (session_id, agent_id, title, source, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
                     """,
-                    (session_id, agent_id, clean_title, now, now),
+                    (session_id, agent_id, clean_title, source, now, now),
                 )
         else:
             active_conn.execute(
                 """
-                INSERT INTO agent_sessions (session_id, agent_id, title, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO agent_sessions (session_id, agent_id, title, source, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (session_id, agent_id, clean_title, now, now),
+                (session_id, agent_id, clean_title, source, now, now),
             )
 
         return get_session(session_id, conn=active_conn)  # type: ignore[return-value]

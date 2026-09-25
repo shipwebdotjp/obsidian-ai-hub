@@ -324,7 +324,7 @@ def _mock_agent_success(monkeypatch, final_text="done result"):
     monkeypatch.setattr(
         agent_store,
         "create_session",
-        lambda agent_id, title=None: {"session_id": "asess_x"},
+        lambda agent_id, title=None, source=None: {"session_id": "asess_x"},
     )
     monkeypatch.setattr(
         agent_store,

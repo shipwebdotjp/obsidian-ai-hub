@@ -263,7 +263,7 @@ class DefaultNodeRunner:
             return NodeOutcome(status="failed", error=f"Agent '{agent_id}' が存在しません")
         content = self._build_agent_content(inputs, output_schema)
         session = agent_store.create_session(
-            agent_id, title=f"Workflow {context['run_id']}"[:60]
+            agent_id, title=f"Workflow {context['run_id']}"[:60], source="workflow"
         )
         session_id = str(session["session_id"])
         _, run = agent_store.start_queued_run(

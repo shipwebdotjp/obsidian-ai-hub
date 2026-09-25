@@ -45,6 +45,8 @@ _APP_ENV_VARS = [
     "LINE_INBOX_SCAN_PROMPT_PATH",
     "MEMORY_EXTRACTOR_PROMPT_PATH",
     "PERSON_MEMORY_EXTRACTOR_PROMPT_PATH",
+    "MEMORY_AGENT_CONVERSATION_PROMPT_PATH",
+    "MEMORY_AGENT_CONVERSATION_ENABLED",
     "MEMORY_RENDERER_PROMPT_PATH",
     "INBOX_TRANSCRIPT_CORRECTION_PROMPT_PATH",
     "INBOX_WEB_SUMMARY_PROMPT_PATH",
@@ -837,6 +839,46 @@ PERSON_MEMORY_EXTRACTOR_PROMPT_PATH = _optional_path(
 if PERSON_MEMORY_EXTRACTOR_PROMPT_PATH is None:
     PERSON_MEMORY_EXTRACTOR_PROMPT_PATH = (
         BASE_DIR / "config" / "prompts" / "person_memory_extract.md"
+    )
+
+_agent_conversation_enabled = _env_or_config(
+    "MEMORY_AGENT_CONVERSATION_ENABLED",
+    "memory",
+    "agent_conversation",
+    "enabled",
+    default=True,
+)
+if isinstance(_agent_conversation_enabled, str):
+    _agent_conversation_enabled = _agent_conversation_enabled.lower() in (
+        "true",
+        "1",
+        "yes",
+        "on",
+    )
+MEMORY_AGENT_CONVERSATION_ENABLED = bool(_agent_conversation_enabled)
+
+MEMORY_AGENT_CONVERSATION_MAX_MESSAGES = int(
+    _config_value("memory", "agent_conversation", "max_messages", default=300)
+)
+MEMORY_AGENT_CONVERSATION_MAX_TOTAL_CHARS = int(
+    _config_value("memory", "agent_conversation", "max_total_chars", default=60000)
+)
+MEMORY_AGENT_CONVERSATION_MAX_USER_CHARS = int(
+    _config_value("memory", "agent_conversation", "max_user_chars", default=4000)
+)
+MEMORY_AGENT_CONVERSATION_MAX_ASSISTANT_CHARS = int(
+    _config_value("memory", "agent_conversation", "max_assistant_chars", default=2000)
+)
+
+MEMORY_AGENT_CONVERSATION_PROMPT_PATH = _optional_path(
+    "MEMORY_AGENT_CONVERSATION_PROMPT_PATH",
+    "memory",
+    "agent_conversation",
+    "prompt_path",
+)
+if MEMORY_AGENT_CONVERSATION_PROMPT_PATH is None:
+    MEMORY_AGENT_CONVERSATION_PROMPT_PATH = (
+        BASE_DIR / "config" / "prompts" / "agent_memory_extract.md"
     )
 
 _renderer_provider = _config_value("memory", "renderer", "provider")

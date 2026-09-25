@@ -309,7 +309,7 @@ def test_agent_adapter_reuses_session_within_task(monkeypatch):
     _mock_agent_run(monkeypatch)
     created_titles = []
 
-    def fake_create_session(agent_id, title=None):
+    def fake_create_session(agent_id, title=None, source=None):
         created_titles.append(title)
         return {"session_id": f"asess_{len(created_titles)}", "agent_id": agent_id}
 
@@ -573,7 +573,10 @@ def test_agent_adapter_hitl_wait_resume_records_single_event(monkeypatch):
     monkeypatch.setattr(
         agent_store,
         "create_session",
-        lambda agent_id, title=None: {"session_id": "asess_hitl", "agent_id": agent_id},
+        lambda agent_id, title=None, source=None: {
+            "session_id": "asess_hitl",
+            "agent_id": agent_id,
+        },
     )
     monkeypatch.setattr(
         agent_store,

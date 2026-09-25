@@ -36,8 +36,10 @@ from obsidian_ai_hub.memory.dedup import (
 from obsidian_ai_hub.memory.extraction import (
     _extract_memory_source_content,
     _load_daily_structured_record,
+    _load_weekly_agent_messages,
     _vault_relative_path,
     _week_bounds,
+    extract_agent_conversation_memories,
     extract_memories,
 )
 from obsidian_ai_hub.memory.models import (
@@ -111,6 +113,7 @@ __all__ = [
     "deserialize_event",
     "deserialize_memory",
     "estimate_tokens",
+    "extract_agent_conversation_memories",
     "extract_memories",
     "generate_event_id",
     "generate_memory_id",
@@ -144,6 +147,7 @@ __all__ = [
     # Test-only underscored helpers (kept for compatibility).
     "_extract_memory_source_content",
     "_load_daily_structured_record",
+    "_load_weekly_agent_messages",
     "_vault_relative_path",
     "_week_bounds",
 ]

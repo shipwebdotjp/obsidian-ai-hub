@@ -751,6 +751,9 @@ def get_db_connection() -> sqlite3.Connection:
     if current_version <= 63:
         run_migration_v64(conn)
 
+    if current_version <= 64:
+        run_migration_v65(conn)
+
     return conn
 
 
@@ -1304,6 +1307,37 @@ def run_migration_v64(conn: sqlite3.Connection) -> None:
         " WHERE source = 'manual' AND status IN ('queued', 'running');"
     )
     conn.execute("PRAGMA user_version = 64;")
+    conn.commit()
+
+
+def run_migration_v65(conn: sqlite3.Connection) -> None:
+    """Run migration for version 65 (agent conversation memory extraction).
+
+    Adds ``agent_sessions.source`` (``chat`` / ``task`` / ``workflow``) so the
+    weekly memory extraction can target human Web-chat sessions only and skip
+    machine-generated Task Agent / Workflow Agent Node prompts. The column has
+    no default: rows that predate this migration keep NULL and are never
+    extracted (forward-only rollout).
+
+    ``agent_message_extraction_logs`` records the messages already sent to the
+    extractor so reruns of the same week do not create duplicate candidates.
+    """
+    try:
+        conn.execute(
+            "ALTER TABLE agent_sessions ADD COLUMN source TEXT"
+            " CHECK (source IS NULL OR source IN ('chat', 'task', 'workflow'));"
+        )
+    except sqlite3.OperationalError as e:
+        _ignore_duplicate_schema_object(e)
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS agent_message_extraction_logs (
+            message_id TEXT PRIMARY KEY
+                REFERENCES agent_messages(message_id) ON DELETE CASCADE,
+            processed_at TEXT NOT NULL
+        );
+    """)
+    conn.execute("PRAGMA user_version = 65;")
     conn.commit()
 
 

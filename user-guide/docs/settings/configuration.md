@@ -76,6 +76,12 @@ memory:
   extractor:
     provider: ollama
     model: glm-4.7:cloud
+  agent_conversation:
+    enabled: true          # Webチャット会話を週次メモリ抽出のソースに含める
+    max_messages: 300      # 1週あたりに渡すメッセージ数
+    max_total_chars: 60000 # 1週あたりの合計文字数
+    max_user_chars: 4000   # ユーザー発話1件の上限（0で無制限）
+    max_assistant_chars: 2000  # エージェント返答1件の上限（文脈用・0で無制限）
   purposes:
     summarize-day:
       kinds: [preference, decision_policy]

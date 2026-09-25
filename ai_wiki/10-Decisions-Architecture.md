@@ -827,3 +827,36 @@ Scheduler Task と Task Agent Task が `task` 一語を共有し、画面・API�
 - 静的 `src/obsidian_ai_hub/dashboard.py`・`tests/test_dashboard.py`・設定 `DASHBOARD_PATH` は
   CLI フラグ削除後もデッドコードとして残る。
 - 要約器の Markdown レンダリング関数は存在するが呼び出しが無効化されている。
+
+## エージェント会話を長期メモリ抽出ソースに追加（user発話限定・chatセッション限定・スキーマ v65）
+
+| 項目 | 内容 |
+|------|------|
+| 決定日 | 2026-09-25 |
+| カテゴリ | 長期記憶・AIエージェント・DB・抽出境界 |
+| 決定内容 | 週次 `--memory-extract` の抽出ソースに、Webチャットのエージェント会話を追加する。`agent_sessions.source`（`chat`/`task`/`workflow`、既存行は NULL）を追加し、`source='chat'` のセッションだけを対象にする。抽出LLMには user / assistant 両ロールを渡すが、候補の evidence が `role='user'` メッセージの原文引用に一致しなければ候補を破棄する。処理済みメッセージは `agent_message_extraction_logs` に記録し、同じ週の再抽出を防ぐ。 |
+
+### 結論に至った経緯
+
+エージェントとの会話には、デイリーノートに書かれない嗜好・事実・約束が現れる。リアルタイムの `memory_propose` ツールはモデルが呼び出した分しか拾えず、取りこぼしを週次バッチで回収したい。ただし `agent_sessions` は Webチャット専用ではなく、Task Agent（`tasks/adapters/agent.py`）と Workflow Agent Node（`workflow/runners.py`）も同じテーブルを使う。無条件に `role='user'` を拾うと機械生成の指示文が「ユーザー発話」として混入し、誤帰属した記憶候補が人間レビューに流れ込む。また assistant の返答はユーザーの嗜好・事実ではないため候補化してはならない。
+
+比較した選択肢は (a) assistant をプロンプトで除外指示するだけ（モデル依存で破れ得る）、(b) ユーザー発話のみを渡す（文脈が切れ「はい、そうして」等が抽出不能）、(c) 全セッションを対象（機械生成文の混入）、(d) 既存セッションをタイトル等から分類してバックフィル（推定の誤りが過去に遡って混入する）。採用は「両ロールを文脈として渡し、evidence 検証で assistant を機械的に排除」「`source` 列で chat 限定」「導入前セッションは NULL のまま除外し forward-only」。
+
+### 構造と運用方針
+
+- **セッション種別**: `agent_sessions.source` は `create_session(source=...)` で付与する。Webチャットは既定 `chat`、Task アダプタは `task`、Workflow Agent Node は `workflow`。CHECK 制約で3値以外を拒否し、migration v65 は既存行に DEFAULT を付けず NULL のまま残す（＝導入前セッションは抽出対象外）。
+- **抽出境界**: `extract_agent_conversation_memories` は JST 週内・`source='chat'`・未処理メッセージのみを取得し、assistant は文脈として同梱する。候補は `_validate_agent_conversation_evidence` が `agent://sessions/{session_id}/messages/{message_id}` を解決し、`role='user'` の本文に正規化部分文字列として引用が存在する場合だけ通す。パス不正・assistant 参照・引用不一致の候補は警告ログ付きで破棄する。
+- **重複と冪等性**: 処理した全メッセージ（候補を生まなかった分も含む）を `agent_message_extraction_logs`（`message_id` PK、session 削除で cascade）に記録する。候補の完全一致判定は approved に加えて candidate も対象とし、リアルタイム `memory_propose` が作った候補との二重登録を防ぐ。日次ソースと共通の `_finalize_user_scope_candidates` で既存 dedup・LLM assessment を通す。
+- **量の制御**: `memory.agent_conversation`（`enabled` / `max_messages` / `max_total_chars` / `max_user_chars` / `max_assistant_chars` / `prompt_path`）で週次の投入量を制限する。予算超過分は処理ログに載せず、明示的な `--week` 再実行で回収できる。
+- **プライバシー**: 会話本文は抽出LLMプロバイダへ送信される。ユーザーガイド（`user-guide/docs/features/memory.md`）に明記する。
+- **契約**: 縦断テストは `tests/test_memory_agent_conversation.py`（user evidence 必須・chat限定・NULL除外・処理済みスキップ・予算制御・v65 migration）。
+
+### 操作シナリオ契約（週次 `--memory-extract`）
+
+| 段階 | 入力と正本 | 機械可読な識別子 | 永続化 | 次に読む主体 | 停止・失敗時 | 不可逆操作 |
+| --- | --- | --- | --- | --- | --- | --- |
+| 対象会話の選択 | `agent_messages` / `agent_sessions.source`（DB） | `session_id`, `message_id` | なし | 抽出プロンプト | `source IS NULL` / `task` / `workflow` と処理済みは対象外 | なし |
+| 抽出LLMへ送信 | JST週境界で選んだ未処理メッセージ（user/assistant） | `message_id` | なし | 抽出結果パーサ | LLM失敗時は未ログのまま終了。明示的な `--week` 再実行で回収 | 外部送信（会話本文） |
+| 候補検証 | LLM出力JSON | `agent://sessions/{sid}/messages/{mid}`（user entryのみ） | なし | 最終化 | 不正パス・assistant参照・引用不一致は警告付きで候補破棄 | なし |
+| 候補保存 | 検証済み候補 | `memory_id` | `memories`, `memory_events`（status=candidate） | 人間レビュー（Web/CLI） | 保存失敗時は処理ログ未記録で次回再試行 | 追記（可逆: 却下・削除可） |
+| 処理ログ | 実際に送信したメッセージ | `message_id` | `agent_message_extraction_logs` | 次回実行 | 候補保存後に記録。副作用後記録失敗時は再送され得る（at-least-once、完全一致は approved+candidate で自動却下） | 追記 |

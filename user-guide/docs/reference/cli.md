@@ -82,7 +82,7 @@ python -m obsidian_ai_hub <flag> [options]
 
 | フラグ | 引数 | 説明 |
 | --- | --- | --- |
-| `--memory-extract` | — | 週次ノートから長期メモリ候補を抽出する。 |
+| `--memory-extract` | — | 週次ノートとAIエージェントのWebチャット会話から長期メモリ候補を抽出する。 |
 | `--week` | `YYYY-MM-DD` | `--memory-extract` の対象週。 |
 | `--memory-interview` | — | インタビュー質問を生成して HITL に登録する。 |
 | `--memory-interview-week` | `YYYY-MM-DD` | `--memory-interview` の対象週。 |

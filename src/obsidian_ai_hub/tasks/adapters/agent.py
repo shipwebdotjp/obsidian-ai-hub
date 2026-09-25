@@ -184,6 +184,7 @@ class AgentAdapter:
         session = agent_store.create_session(
             agent_id,
             title=build_task_session_title(task_id, step_index, step, plan),
+            source="task",
         )
         return str(session["session_id"]), False
 
