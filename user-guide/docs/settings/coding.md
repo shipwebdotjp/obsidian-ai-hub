@@ -36,9 +36,10 @@ coding:
 - Coordinator は応答本文に `<cli_request>` を出力して委譲し、アプリが Worker を実行して結果を次の観測として返します。
 - Coordinator がツール経由で外部 CLI を起動することはなく、バックエンド名は開示されません。
 
-## Worker（OpenCode ACP）のモデル
+## Worker（OpenCode ACP）のモデルと reasoning effort
 
-- 使用モデルは毎ターンの prompt 前に `session/set_model` で固定されます。拒否された場合、そのターンは失敗します。
+- 使用モデルは毎ターンの prompt 前に ACP の `session/set_config_option`（`configId: "model"`）で固定されます。拒否された場合、そのターンは失敗します。
+- モデルが reasoning effort（カテゴリ `thought_level`）を広告する場合、`max → xhigh → high → medium → low` の優先順で最初に利用できる値を同じく `session/set_config_option` で設定します。広告がない、または優先順の値がない場合は OpenCode の既定値で実行し、診断に広告値と未対応理由を記録します。設定が拒否された場合はフォールバックせず、そのターンを失敗させます。
 - セッション作成時・ステータスバーで選択できるモデルは `opencode_models` の許可リストに限られ、自由入力は拒否されます。
 
 ## セッションごとのオーケストレーター LLM

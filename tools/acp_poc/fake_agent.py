@@ -114,10 +114,38 @@ def main() -> int:
             sid = f"sess_fake_{counter}"
             sessions[sid] = params
             send({"jsonrpc": "2.0", "id": rid, "result": {"sessionId": sid}})
-        elif method == "session/set_model":
-            # Emulate a compliant agent: accept the model pin (real OpenCode
-            # returns {} on success).
-            send({"jsonrpc": "2.0", "id": rid, "result": {}})
+        elif method == "session/set_config_option":
+            # Emulate a compliant agent: accept the config change and advertise
+            # the model plus the effort variants available for it.
+            sid = params.get("sessionId", "")
+            sessions.setdefault(sid, params)
+            value = params.get("value")
+            is_model = params.get("configId") == "model"
+            model_value = value if is_model else "fake/model"
+            effort_option = {
+                "id": "effort",
+                "name": "Effort",
+                "category": "thought_level",
+                "type": "select",
+                "currentValue": value if not is_model else "high",
+                "options": [
+                    {"value": v, "name": v}
+                    for v in ("default", "low", "medium", "high", "xhigh", "max")
+                ],
+            }
+            send({"jsonrpc": "2.0", "id": rid, "result": {
+                "configOptions": [
+                    {
+                        "id": "model",
+                        "name": "Model",
+                        "category": "model",
+                        "type": "select",
+                        "currentValue": model_value,
+                        "options": [{"value": model_value, "name": str(model_value)}],
+                    },
+                    effort_option,
+                ],
+            }})
         elif method == "session/prompt":
             sid = params.get("sessionId", "")
             prompt = params.get("prompt", [])

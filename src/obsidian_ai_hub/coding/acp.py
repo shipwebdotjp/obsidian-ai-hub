@@ -26,6 +26,15 @@ DEFAULT_ACP_TURN_TIMEOUT_S = 600.0
 # Single source of truth for the advertised elicitation capability (form only).
 ELICITATION_FORM_CAPABILITY: Dict[str, Any] = {"form": {}}
 
+# ACP session config option category for reasoning depth. OpenCode advertises
+# model variants through a select option with id "effort"; the advertised
+# option id and values are used verbatim, and only EFFORT_PRIORITY members are
+# auto-selected. Other advertised values (e.g. "default") mean the agent
+# default is kept.
+EFFORT_CATEGORY = "thought_level"
+EFFORT_OPTION_ID = "effort"
+EFFORT_PRIORITY: Tuple[str, ...] = ("max", "xhigh", "high", "medium", "low")
+
 
 def _extract_content_text(content: Any) -> List[str]:
     """Extract text parts from an ACP update ``content`` value.
@@ -132,6 +141,89 @@ def _merge_usage(acc: Dict[str, Any], found: Optional[Dict[str, Any]]) -> None:
             acc[k] = v
         elif isinstance(v, (int, float)) and v >= acc.get(k, 0):
             acc[k] = v
+
+
+@dataclass
+class EffortSelection:
+    """Resolved ACP thought_level selection for one Worker turn."""
+
+    config_id: Optional[str] = None
+    value: Optional[str] = None
+    advertised: List[str] = field(default_factory=list)
+    unsupported_reason: Optional[str] = None
+
+    @property
+    def applied(self) -> bool:
+        return self.config_id is not None and self.value is not None
+
+
+def _flatten_select_values(options: Any) -> List[str]:
+    """Return advertised select values from flat or grouped ACP option lists."""
+    values: List[str] = []
+    if not isinstance(options, list):
+        return values
+    for entry in options:
+        if not isinstance(entry, dict):
+            continue
+        value = entry.get("value")
+        if isinstance(value, str) and value:
+            values.append(value)
+            continue
+        values.extend(_flatten_select_values(entry.get("options")))
+    return values
+
+
+def _find_effort_option(config_options: Any) -> Optional[Dict[str, Any]]:
+    """Locate the thought_level select option, preferring its category.
+
+    The spec forbids requiring ``category`` for correctness, so OpenCode's
+    known option id is accepted as a fallback when no category matches.
+    """
+    if not isinstance(config_options, list):
+        return None
+    fallback: Optional[Dict[str, Any]] = None
+    for option in config_options:
+        if not isinstance(option, dict) or option.get("type") != "select":
+            continue
+        category = str(option.get("category") or "").strip().lower()
+        if category == EFFORT_CATEGORY:
+            return option
+        option_id = str(option.get("id") or option.get("configId") or "").strip().lower()
+        if fallback is None and option_id == EFFORT_OPTION_ID:
+            fallback = option
+    return fallback
+
+
+def _select_effort(config_options: Any) -> EffortSelection:
+    """Pick an advertised thought_level value in EFFORT_PRIORITY order.
+
+    Returns a selection without a value (and an ``unsupported_reason``) when
+    the agent advertises no thought_level option or none of the preferred
+    values, so the caller keeps the agent default and records why.
+    """
+    option = _find_effort_option(config_options)
+    if option is None:
+        return EffortSelection(unsupported_reason="no thought_level config option advertised")
+    advertised = _flatten_select_values(option.get("options"))
+    if not advertised:
+        return EffortSelection(
+            unsupported_reason="thought_level config option advertises no values"
+        )
+    config_id = option.get("id") or option.get("configId")
+    if not isinstance(config_id, str) or not config_id:
+        return EffortSelection(
+            advertised=advertised,
+            unsupported_reason="thought_level config option has no id",
+        )
+    for candidate in EFFORT_PRIORITY:
+        if candidate in advertised:
+            return EffortSelection(
+                config_id=config_id, value=candidate, advertised=advertised
+            )
+    return EffortSelection(
+        advertised=advertised,
+        unsupported_reason="no preferred effort advertised (max/xhigh/high/medium/low)",
+    )
 
 
 class AcpError(Exception):
@@ -533,13 +625,16 @@ class AcpClientBackend:
 
     def _apply_session_model(
         self, conn: AcpConnection, session_id: str, model: Optional[str] = None
-    ) -> str:
+    ) -> Tuple[str, List[Dict[str, Any]]]:
         """Pin the resolved OpenCode model on the ACP session.
 
-        ``model`` is the run-frozen session model; when absent or not
-        allowlisted it falls back to the configured default. Raises AcpError
-        on rejection: a misconfigured model name must fail the turn instead
-        of silently running on the agent default. Returns the model sent.
+        Uses ``session/set_config_option`` (configId ``model``); ``model`` is
+        the run-frozen session model, and when absent or not allowlisted it
+        falls back to the configured default. Raises AcpError on rejection: a
+        misconfigured model name must fail the turn instead of silently
+        running on the agent default. Returns the model sent and the
+        ``configOptions`` advertised after the change (the source for effort
+        selection).
         """
         from obsidian_ai_hub.utils.config import (
             get_available_coding_models,
@@ -560,19 +655,55 @@ class AcpClientBackend:
             )
         model = resolved
         try:
-            conn.request(
-                "session/set_model",
-                {"sessionId": session_id, "modelId": model},
+            result = conn.request(
+                "session/set_config_option",
+                {"sessionId": session_id, "configId": "model", "value": model},
                 timeout=15.0,
             )
         except AcpError as exc:
             raise AcpError(
                 f"Failed to set OpenCode model '{model}' on ACP session "
-                f"'{session_id}': {exc}. Check coding.acp.opencode_model / "
-                "CODING_OPENCODE_MODEL."
+                f"'{session_id}' via session/set_config_option: {exc}. "
+                "Check coding.acp.opencode_model / CODING_OPENCODE_MODEL."
             ) from exc
         logger.info("ACP session '%s' model set to '%s'.", session_id, model)
-        return model
+        config_options = result.get("configOptions") if isinstance(result, dict) else None
+        if not isinstance(config_options, list):
+            config_options = []
+        return model, config_options
+
+    def _apply_session_effort(
+        self, conn: AcpConnection, session_id: str, selection: EffortSelection
+    ) -> None:
+        """Set the advertised thought_level value before prompting.
+
+        No applicable advertised value is not an error: the agent default is
+        kept and reported through diagnostics. A rejected set is an error so
+        the turn fails instead of silently falling back to another effort.
+        """
+        if not selection.applied:
+            logger.info(
+                "ACP session '%s' runs with the agent default effort (%s).",
+                session_id,
+                selection.unsupported_reason,
+            )
+            return
+        try:
+            conn.request(
+                "session/set_config_option",
+                {
+                    "sessionId": session_id,
+                    "configId": selection.config_id,
+                    "value": selection.value,
+                },
+                timeout=15.0,
+            )
+        except AcpError as exc:
+            raise AcpError(
+                f"Failed to set OpenCode effort '{selection.value}' on ACP session "
+                f"'{session_id}' (configId '{selection.config_id}'): {exc}."
+            ) from exc
+        logger.info("ACP session '%s' effort set to '%s'.", session_id, selection.value)
 
     def _handle_permission_request(
         self,
@@ -761,7 +892,8 @@ class AcpClientBackend:
         session_recreated = False
         init_meta = {}
         curr_session_id = acp_session_id
-        sent_model: str = CODING_OPENCODE_MODEL
+        sent_model: Optional[str] = None
+        effort = EffortSelection()
         permissions: List[Dict[str, Any]] = []
 
         try:
@@ -809,11 +941,18 @@ class AcpClientBackend:
                 if not curr_session_id or not isinstance(curr_session_id, str):
                     raise AcpError("ACP session/new response did not return a valid session ID")
 
-            # Pin the OpenCode-side model before prompting (per-prompt model
-            # params are ignored by OpenCode; fail the turn on rejection so a
-            # misconfigured model name surfaces instead of silently running
-            # on the agent default).
-            sent_model = self._apply_session_model(conn, curr_session_id, model)
+            # Pin the OpenCode-side model via ACP config options before
+            # prompting (per-prompt model params are ignored by OpenCode; fail
+            # the turn on rejection so a misconfigured model surfaces instead
+            # of silently running on the agent default). The agent's response
+            # advertises the efforts available for that model; apply the best
+            # preferred one before prompting, or keep the agent default when
+            # none is advertised.
+            sent_model, model_config_options = self._apply_session_model(
+                conn, curr_session_id, model
+            )
+            effort = _select_effort(model_config_options)
+            self._apply_session_effort(conn, curr_session_id, effort)
 
             # Send session/prompt request asynchronously to process streaming notifications
             prompt_params = {
@@ -1010,6 +1149,9 @@ class AcpClientBackend:
                 "acp_version": init_meta.get("protocol_version"),
                 "acp_profile_id": self.profile.profile_id,
                 "acp_model": sent_model,
+                "acp_effort": effort.value,
+                "acp_effort_advertised": effort.advertised or None,
+                "acp_effort_unsupported_reason": effort.unsupported_reason,
                 "acp_agent": agent_info,
                 "acp_capabilities": init_meta.get("capabilities"),
                 "stop_reason": stop_reason,
@@ -1050,6 +1192,10 @@ class AcpClientBackend:
                     "transport": "acp",
                     "acp_session_id": curr_session_id or acp_session_id,
                     "acp_profile_id": self.profile.profile_id,
+                    "acp_model": sent_model,
+                    "acp_effort": effort.value,
+                    "acp_effort_advertised": effort.advertised or None,
+                    "acp_effort_unsupported_reason": effort.unsupported_reason,
                     "error": str(exc),
                     "permissions": permissions,
                 },

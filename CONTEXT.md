@@ -91,4 +91,4 @@
 - **AI Agent** — 子runは実行時点の設定で動作する。Taskは設定を凍結しないが、
   `specialist_agent` を含むDirectional Planの承認時点指紋を記録し、実行開始時に
   差分・削除を検出したら再承認へ回す。
-- **Coding ACP (OpenCode)** — 正規化済みProjectのGit root内で `opencode acp` 経由の単一トランスポートで動作する。実権限は既存ACP設定に委ねる。Direct CLI と Codex バックエンドは廃止済みで、旧セッションは読取専用である。使用モデルは `coding.acp.opencode_model`（未設定時は `opencode-go/muse-spark-1.3-contributor`）で、毎ターンの prompt 前に `session/set_model` で固定する。拒否時はターンを失敗させる。
+- **Coding ACP (OpenCode)** — 正規化済みProjectのGit root内で `opencode acp` 経由の単一トランスポートで動作する。実権限は既存ACP設定に委ねる。Direct CLI と Codex バックエンドは廃止済みで、旧セッションは読取専用である。使用モデルは `coding.acp.opencode_model`（未設定時は `opencode-go/muse-spark-1.3-contributor`）で、毎ターンの prompt 前に `session/set_config_option`（configId `model`）で固定する。モデルが広告する reasoning effort（カテゴリ `thought_level`）は `max → xhigh → high → medium → low` の優先順で最初に利用できる値を同じ方法で設定し、広告がない場合は既定値で実行して診断に未対応理由を残す。拒否時はターンを失敗させる。

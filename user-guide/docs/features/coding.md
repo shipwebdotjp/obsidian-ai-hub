@@ -68,7 +68,8 @@ coding:
 | `coding.acp.opencode_model` | `CODING_OPENCODE_MODEL` | `opencode-go/muse-spark-1.3-contributor` |
 | `coding.acp.opencode_models` | `CODING_OPENCODE_MODELS` | 上記 1 件 |
 
-- 使用モデルは毎ターンの prompt 前に `session/set_model` で固定されます。拒否された場合はそのターンが失敗します。
+- 使用モデルは毎ターンの prompt 前に ACP の `session/set_config_option`（`configId: "model"`）で固定されます。拒否された場合はそのターンが失敗します。
+- 選択したモデルが reasoning effort（カテゴリ `thought_level`）を広告する場合、`max → xhigh → high → medium → low` の優先順で最初に利用できる値を同じ `session/set_config_option` で設定します。広告がない、または優先順の値がない場合は OpenCode の既定値で実行し、実行診断に広告値と未対応理由を記録します。設定が拒否された場合はそのターンを失敗させ、既定値へはフォールバックしません。
 - 選択できるモデルは `opencode_models` の許可リストに限られます。
 - 旧 Direct CLI（Codex / OpenCode `run`）と Codex バックエンドは廃止済みです。既存の旧セッションは読み取り専用で、新しい実行には OpenCode ACP の新規セッションが必要です。
 

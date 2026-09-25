@@ -5,7 +5,7 @@
 - The in-flight run keeps the model frozen at run start
   (``execute_turn`` keeps receiving the old model), while the next run
   receives the changed model. The frozen model reaches ACP via
-  ``session/set_model``.
+  ``session/set_config_option`` (configId ``model``).
 """
 
 import asyncio
@@ -253,7 +253,7 @@ def test_inflight_run_keeps_frozen_model_next_run_uses_new(
     assert seen2 and all(m == "model-beta" for m in seen2)
 
 
-def test_frozen_model_reaches_acp_set_model(model_allowlist):
+def test_frozen_model_reaches_acp_session_config_option(model_allowlist):
     profile = acp.AcpLaunchProfile.get_profile("opencode")
     backend = acp.AcpClientBackend(profile)
 
@@ -263,9 +263,14 @@ def test_frozen_model_reaches_acp_set_model(model_allowlist):
         def request(self, method, params, timeout=None):
             captured["method"] = method
             captured["params"] = params
-            return {}
+            return {"configOptions": []}
 
-    sent = backend._apply_session_model(_Conn(), "sess", model="model-beta")
+    sent, config_options = backend._apply_session_model(_Conn(), "sess", model="model-beta")
     assert sent == "model-beta"
-    assert captured["method"] == "session/set_model"
-    assert captured["params"] == {"sessionId": "sess", "modelId": "model-beta"}
+    assert config_options == []
+    assert captured["method"] == "session/set_config_option"
+    assert captured["params"] == {
+        "sessionId": "sess",
+        "configId": "model",
+        "value": "model-beta",
+    }

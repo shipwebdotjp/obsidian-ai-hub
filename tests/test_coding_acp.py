@@ -243,11 +243,12 @@ def test_acp_execute_turn_mocked_success():
             assert res.cancelled is False
 
 
-def test_acp_execute_turn_pins_configured_model_before_prompt():
-    """session/set_model runs with the configured model before session/prompt."""
+def test_acp_execute_turn_pins_configured_model_and_effort_before_prompt():
+    """session/set_config_option pins model then advertised effort before prompt."""
     profile = acp.AcpLaunchProfile.get_profile("opencode")
     client = acp.AcpClientBackend(profile)
     calls = []
+    config_params = []
 
     with patch.object(acp.AcpConnection, "start"), \
          patch.object(acp.AcpConnection, "is_alive", return_value=True), \
@@ -260,9 +261,22 @@ def test_acp_execute_turn_pins_configured_model_before_prompt():
             if method == "session/new":
                 assert params == {"cwd": "/tmp", "mcpServers": []}
                 return {"sessionId": "acp_sess_new"}
-            if method == "session/set_model":
-                assert params == {"sessionId": "acp_sess_new", "modelId": acp.CODING_OPENCODE_MODEL}
-                return {}
+            if method == "session/set_config_option":
+                config_params.append(dict(params))
+                if params["configId"] == "model":
+                    assert params["value"] == acp.CODING_OPENCODE_MODEL
+                    return {"configOptions": [{
+                        "id": "effort",
+                        "name": "Effort",
+                        "category": "thought_level",
+                        "type": "select",
+                        "currentValue": "low",
+                        "options": [
+                            {"value": v, "name": v}
+                            for v in ("default", "low", "medium", "high", "xhigh", "max")
+                        ],
+                    }]}
+                return {"configOptions": []}
             return {}
 
         def fake_send_async(method, params):
@@ -276,13 +290,24 @@ def test_acp_execute_turn_pins_configured_model_before_prompt():
             res = client.execute_turn(repo_path="/tmp", prompt="Hello")
 
             assert res.exit_code == 0
-            assert "session/set_model" in calls
-            assert calls.index("session/set_model") < calls.index("session/prompt")
+            assert config_params[0] == {
+                "sessionId": "acp_sess_new",
+                "configId": "model",
+                "value": acp.CODING_OPENCODE_MODEL,
+            }
+            assert config_params[1] == {
+                "sessionId": "acp_sess_new",
+                "configId": "effort",
+                "value": "max",
+            }
+            assert calls.index("session/set_config_option") < calls.index("session/prompt")
             assert (res.diagnostics or {}).get("acp_model") == acp.CODING_OPENCODE_MODEL
+            assert res.diagnostics["acp_effort"] == "max"
+            assert "max" in res.diagnostics["acp_effort_advertised"]
 
 
 def test_acp_set_model_rejection_fails_turn():
-    """A rejected session/set_model fails the turn instead of running on default."""
+    """A rejected model config change fails the turn instead of running on default."""
     profile = acp.AcpLaunchProfile.get_profile("opencode")
     client = acp.AcpClientBackend(profile)
 
@@ -295,8 +320,8 @@ def test_acp_set_model_rejection_fails_turn():
         def fake_request(method, params, timeout=60.0):
             if method == "session/new":
                 return {"sessionId": "acp_sess_new"}
-            if method == "session/set_model":
-                raise acp.AcpError("RPC error on session/set_model: unknown model")
+            if method == "session/set_config_option":
+                raise acp.AcpError("RPC error on session/set_config_option: unknown model")
             return {}
 
         with patch.object(acp.AcpConnection, "request", side_effect=fake_request), \
