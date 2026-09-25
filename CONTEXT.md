@@ -55,6 +55,7 @@
 | **受理 (Acceptance)** | `必須効果 ⊆ 成立効果` が成り立つこと。成立した時点で `finish` を待たず `completed` として終了する。 |
 | **Approval Scope** | 承認された目的、Capability、制約の境界。範囲外のActionは実行せず再承認へ回す。 |
 | **Capability** | コードで定義されたAdapterと、DBで管理する有効状態・承認ポリシーの組。 |
+| **Capability 出力契約** | Workflow が Capability 出力をどう扱えるかのコード所有の宣言。`structured`（型付きデータフロー）、`receipt`（副作用の完了識別子）、`opaque`（型付きデータフロー非公開）に分類する。 |
 | **Approval Policy** | `auto` または `plan_required`。Planの人間承認要否を決めるCapability設定。 |
 | **Adapter** | Registry tool、AI Agent、Coding CLIの入出力をTaskのEventと結果へ正規化する層。 |
 | **Child Run** | Agent AdapterまたはCoding Adapterが作る既存のAgent/Coding run。 |

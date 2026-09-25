@@ -75,15 +75,16 @@ Node** で意図的に採用しなかった拡張余地と、Workflow 全体の�
 - **複雑な JSON Schema（`$ref` / `oneOf` / 再帰）** — 検証器と Editor の再設計。
 - **任意コード Node** — v1 では追加しない。追加時は別 ADR と不可逆操作の品質ゲートが必須。
 - **Workflow ごとの同時実行数制御・承認待ち Run の抑止/自動失効** — 運用ポリシー。
-- **Capability 出力 schema の宣言拡充** — `calendar_read` / `reminders_read` は今回 event /
-  reminder のフィールドまで宣言した。他 Capability も同様に広げると参照ピッカーと `pluck` が
-  guided になる。
+- **[Capability 入出力契約の段階的厳格化](adr/capability-input-output-contracts.md)** — 全 Capability
+  の入力は strict 化し、出力は `structured` / `receipt` / `opaque` を明示する。`calendar_read` /
+  `reminders_read` を先例に、後続 Node が実際に参照する読み取り系から schema を拡充する。副作用
+  Capability の strict 出力失敗化は、receipt・effect・再試行の契約が揃うまで既定にしない。
 - **スターターテンプレートの JSON ファイル化と UI インポート** — User Template の code 定義版。
 
 ## 優先順位の目安
 
 1. 運用課題（通知 outbox、Run 履歴） — 無人運用の価値を直接高める。
-2. 土台の拡張（`config.<alias>`、`$expr` / `pipe` の演算子追加、Capability 出力 schema 拡充）
+2. 土台の拡張（`config.<alias>`、`$expr` / `pipe` の演算子追加、Capability 入出力契約の段階的厳格化）
    — 既存契約を壊さずに表現力を足せる。
 3. 再設計（`text_template` の構造化出力、Loop ネスト、複雑な JSON Schema） — ADR と
    検証・Editor の作り直しを伴うため、需要が明確になってから。

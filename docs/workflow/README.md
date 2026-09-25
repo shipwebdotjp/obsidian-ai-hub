@@ -16,6 +16,7 @@ Status: 再設計後の仕様 Accepted (Phase 0 未実装)。実装はフェー�
 | [adr/workflow-revision-deletion.md](adr/workflow-revision-deletion.md) | Revision 削除ポリシー（draft / superseded のハード削除・Run 温存） |
 | [adr/workflow-independent-context-shared-foundation.md](adr/workflow-independent-context-shared-foundation.md) | 撤回された旧 ADR（履歴） |
 | [adr/workflow-editor-guided-forms.md](adr/workflow-editor-guided-forms.md) | エディタのガイド型フォーム（自前スキーマフォーム・型付き参照ピッカー） |
+| [adr/capability-input-output-contracts.md](adr/capability-input-output-contracts.md) | Capability 入出力契約の段階的厳格化（strict 入力・出力契約クラス・副作用での strict 利用境界） |
 
 ## 設計上の要点
 
