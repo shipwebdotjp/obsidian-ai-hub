@@ -176,7 +176,12 @@ async def run_coding_turn_stream(
         selected_skill_name: Optional[str] = None
         frozen_skill_index = None
 
-        orchestrator = CodingOrchestrator(tool_ids=effective_tool_ids)
+        orch_provider, orch_model = store.get_effective_session_orchestrator(session)
+        orchestrator = CodingOrchestrator(
+            provider=orch_provider,
+            model=orch_model,
+            tool_ids=effective_tool_ids,
+        )
         # Resume progress (cli_count/phase_turn) from prior HITL checkpoint when present.
         from obsidian_ai_hub.coding.ask_user_flow import restore_coding_progress
 

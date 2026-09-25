@@ -185,7 +185,12 @@ async def execute_coding_run(run_id: str) -> None:
                 return
             selected_skill_name = s_name
 
-        orchestrator = CodingOrchestrator(tool_ids=effective_tool_ids)
+        orch_provider, orch_model = store.get_effective_session_orchestrator(session)
+        orchestrator = CodingOrchestrator(
+            provider=orch_provider,
+            model=orch_model,
+            tool_ids=effective_tool_ids,
+        )
         # Resume progress (cli_count/phase_turn) from prior HITL checkpoint when present.
         # A corrupt prior fails the run instead of silently dropping answers.
         from obsidian_ai_hub.coding.ask_user_flow import restore_coding_progress

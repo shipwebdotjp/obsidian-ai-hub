@@ -17,6 +17,9 @@ export interface CodingConfig {
   default_backend: "opencode";
   opencode_model?: string | null;
   available_models?: string[];
+  orchestrator_provider?: string | null;
+  orchestrator_model?: string | null;
+  available_orchestrator_providers?: string[];
 }
 
 export interface GitStatus {
@@ -47,6 +50,9 @@ export interface CodingSession {
   acp_session_id?: string | null;
   acp_profile_id?: string | null;
   opencode_model?: string | null;
+  /** Per-session orchestrator override; null inherits the config default. */
+  orchestrator_provider?: string | null;
+  orchestrator_model?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -202,6 +208,11 @@ export interface CodingSessionDetail {
   session: CodingSession;
   effective_model?: string | null;
   available_models?: string[];
+  effective_orchestrator_provider?: string | null;
+  effective_orchestrator_model?: string | null;
+  available_orchestrator_providers?: string[];
+  default_orchestrator_provider?: string | null;
+  default_orchestrator_model?: string | null;
   effective_tool_ids: string[];
   has_custom_tools: boolean;
   available_tools: CodingTool[];
@@ -373,6 +384,20 @@ export function updateCodingSessionModel(
   return apiPut<CodingSessionDetail>(`/api/v1/coding/sessions/${encodeURIComponent(sessionId)}/model`, {
     opencode_model: opencodeModel,
   });
+}
+
+export function updateCodingSessionOrchestrator(
+  sessionId: string,
+  orchestratorProvider: string | null,
+  orchestratorModel: string | null,
+): Promise<CodingSessionDetail> {
+  return apiPut<CodingSessionDetail>(
+    `/api/v1/coding/sessions/${encodeURIComponent(sessionId)}/orchestrator`,
+    {
+      orchestrator_provider: orchestratorProvider,
+      orchestrator_model: orchestratorModel,
+    },
+  );
 }
 
 export function getCodingSessionDetail(sessionId: string): Promise<CodingSessionDetail> {

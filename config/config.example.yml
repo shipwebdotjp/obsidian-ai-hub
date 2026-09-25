@@ -158,6 +158,9 @@ vault_index:
 # Defaults: orchestrator provider=openai, model=gpt-5.6-terra, opencode executable=opencode on PATH.
 coding:
   orchestrator:
+    # Global default for the coordinator LLM. A coding session can override the
+    # provider/model from the Web conversation settings; unset sessions inherit
+    # these values.
     provider: openai
     model: gpt-5.6-terra
     # provider: opencode_go  # alternative: uses OPENCODE_API_KEY

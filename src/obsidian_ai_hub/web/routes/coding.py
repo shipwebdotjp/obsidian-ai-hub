@@ -15,7 +15,10 @@ from obsidian_ai_hub.coding import (
 )
 from obsidian_ai_hub.utils.config import (
     CODING_OPENCODE_MODEL,
+    CODING_ORCHESTRATOR_MODEL,
+    CODING_ORCHESTRATOR_PROVIDER,
     get_available_coding_models,
+    get_available_orchestrator_providers,
     resolve_coding_model,
 )
 from obsidian_ai_hub.web import service as web_service
@@ -31,6 +34,14 @@ class SessionCreateRequest(BaseModel):
     opencode_model: Optional[str] = Field(
         default=None,
         description="OpenCode model; must be in coding.acp.opencode_models",
+    )
+    orchestrator_provider: Optional[str] = Field(
+        default=None,
+        description="Orchestrator LLM provider; must be one of the supported providers",
+    )
+    orchestrator_model: Optional[str] = Field(
+        default=None,
+        description="Orchestrator LLM model name; required together with the provider",
     )
     tool_ids: Optional[List[str]] = Field(
         default=None, description="Optional custom tool IDs for session"
@@ -90,13 +101,27 @@ class UpdateSessionModelRequest(BaseModel):
     opencode_model: str = Field(description="New OpenCode model (allowlisted only)")
 
 
+class UpdateSessionOrchestratorRequest(BaseModel):
+    orchestrator_provider: Optional[str] = Field(
+        default=None,
+        description="New orchestrator provider, or null to inherit the config default",
+    )
+    orchestrator_model: Optional[str] = Field(
+        default=None,
+        description="New orchestrator model, or null to inherit the config default",
+    )
+
+
 @router.get("/config")
 def get_coding_config(_=Depends(require_bearer_token)):
-    """Get coding workspace config (default backend, OpenCode model)."""
+    """Get coding workspace config (default backend, OpenCode model, orchestrator defaults)."""
     return {
         "default_backend": "opencode",
         "opencode_model": CODING_OPENCODE_MODEL,
         "available_models": get_available_coding_models(),
+        "orchestrator_provider": CODING_ORCHESTRATOR_PROVIDER,
+        "orchestrator_model": CODING_ORCHESTRATOR_MODEL,
+        "available_orchestrator_providers": get_available_orchestrator_providers(),
     }
 
 
@@ -213,6 +238,8 @@ def create_session(
             tool_ids=body.tool_ids,
             transport=clean_transport,
             opencode_model=body.opencode_model,
+            orchestrator_provider=body.orchestrator_provider,
+            orchestrator_model=body.orchestrator_model,
         )
         return session
     except ValueError as exc:
@@ -260,6 +287,31 @@ def update_session_model(
     return get_session_detail(session_id)
 
 
+@router.put("/sessions/{session_id}/orchestrator")
+def update_session_orchestrator(
+    session_id: str,
+    body: UpdateSessionOrchestratorRequest,
+    _=Depends(require_bearer_token),
+):
+    """Change the session's orchestrator provider/model, or clear it to inherit config.
+
+    Active runs keep their frozen orchestrator; the new values apply from the
+    next message (next run).
+    """
+    session = coding_store.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="セッションが見つかりません")
+    try:
+        coding_store.update_session_orchestrator(
+            session_id, body.orchestrator_provider, body.orchestrator_model
+        )
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="セッションが見つかりません")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return get_session_detail(session_id)
+
+
 @router.put("/sessions/{session_id}/tools")
 def update_session_tools(
     session_id: str,
@@ -295,11 +347,20 @@ def get_session_detail(session_id: str, _=Depends(require_bearer_token)):
         session_id
     )
     ask_user_answer_history = extract_session_ask_user_history(runs)
+    (
+        effective_orchestrator_provider,
+        effective_orchestrator_model,
+    ) = coding_store.get_effective_session_orchestrator(session)
 
     return {
         "session": session,
         "effective_model": coding_store.get_effective_session_model(session),
         "available_models": get_available_coding_models(),
+        "effective_orchestrator_provider": effective_orchestrator_provider,
+        "effective_orchestrator_model": effective_orchestrator_model,
+        "available_orchestrator_providers": get_available_orchestrator_providers(),
+        "default_orchestrator_provider": CODING_ORCHESTRATOR_PROVIDER,
+        "default_orchestrator_model": CODING_ORCHESTRATOR_MODEL,
         "effective_tool_ids": effective_tool_ids,
         "has_custom_tools": has_custom,
         "available_tools": available_tools,

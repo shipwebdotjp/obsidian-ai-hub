@@ -334,6 +334,10 @@ export default function CodingPage() {
         setSessionSelectedTools={detail.setSessionSelectedTools}
         sessionTitleDraft={detail.sessionTitleDraft}
         setSessionTitleDraft={detail.setSessionTitleDraft}
+        orchestratorProviderDraft={detail.orchestratorProviderDraft}
+        onOrchestratorProviderChange={detail.handleOrchestratorProviderChange}
+        orchestratorModelDraft={detail.orchestratorModelDraft}
+        setOrchestratorModelDraft={detail.setOrchestratorModelDraft}
         savingSessionTools={detail.savingSessionTools}
         onSaveSessionTools={detail.handleSaveSessionTools}
         onResetSessionTools={detail.handleResetSessionTools}

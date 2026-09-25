@@ -745,6 +745,9 @@ def get_db_connection() -> sqlite3.Connection:
     if current_version <= 61:
         run_migration_v62(conn)
 
+    if current_version <= 62:
+        run_migration_v63(conn)
+
     return conn
 
 
@@ -1242,6 +1245,25 @@ def run_migration_v62(conn: sqlite3.Connection) -> None:
         "ON system_maintenance_findings(status, last_seen_at);"
     )
     conn.execute("PRAGMA user_version = 62;")
+    conn.commit()
+
+
+def run_migration_v63(conn: sqlite3.Connection) -> None:
+    """Run migration for version 63 (per-session orchestrator provider/model).
+
+    Both columns are NULL for sessions that inherit the global
+    ``coding.orchestrator`` config, so existing rows keep the previous
+    behaviour.
+    """
+    for statement in (
+        "ALTER TABLE coding_sessions ADD COLUMN orchestrator_provider TEXT;",
+        "ALTER TABLE coding_sessions ADD COLUMN orchestrator_model TEXT;",
+    ):
+        try:
+            conn.execute(statement)
+        except sqlite3.OperationalError as e:
+            _ignore_duplicate_schema_object(e)
+    conn.execute("PRAGMA user_version = 63;")
     conn.commit()
 
 

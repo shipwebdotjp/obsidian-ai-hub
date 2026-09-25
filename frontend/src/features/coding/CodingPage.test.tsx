@@ -27,6 +27,7 @@ vi.mock("../../api/coding", () => ({
   updateCodingSessionTools: vi.fn(),
   updateCodingSessionTitle: vi.fn(),
   updateCodingSessionModel: vi.fn(),
+  updateCodingSessionOrchestrator: vi.fn(),
   getSlashCandidates: vi.fn(),
 }));
 
@@ -378,7 +379,7 @@ describe("CodingPage", () => {
     renderPage();
 
     const modelSelect = (await screen.findByLabelText(
-      "モデルを変更",
+      "Worker:",
     )) as HTMLSelectElement;
     // The select's value is the currently selected model; no separate
     // "現在のモデル" text label is rendered.
@@ -718,7 +719,7 @@ describe("CodingPage", () => {
     const settingsBtn = screen.getByRole("button", { name: "会話設定 ⚙" });
     fireEvent.click(settingsBtn);
 
-    expect(screen.getByText("会話の利用可能ツール設定")).toBeInTheDocument();
+    expect(screen.getByText("会話設定")).toBeInTheDocument();
 
     const saveBtn = screen.getByRole("button", { name: "保存" });
     fireEvent.click(saveBtn);
@@ -798,6 +799,92 @@ describe("CodingPage", () => {
     });
     expect(codingApi.updateCodingSessionTitle).not.toHaveBeenCalled();
     expect(codingApi.updateCodingSessionTools).not.toHaveBeenCalled();
+  });
+
+  it("saves the orchestrator provider and model from conversation settings modal", async () => {
+    const baseDetail = {
+      session: mockSession,
+      effective_tool_ids: ["web_search"],
+      has_custom_tools: false,
+      available_tools: [
+        { tool_id: "web_search", name: "Web検索", description: "Tavily検索" },
+      ],
+      messages: [],
+      active_run: null,
+      latest_run: null,
+      orchestrator_tool_calls: [],
+      available_orchestrator_providers: ["openai", "opencode_go"],
+      default_orchestrator_provider: "openai",
+      default_orchestrator_model: "gpt-5.6-terra",
+    };
+    vi.mocked(codingApi.getCodingSessionDetail).mockResolvedValue(baseDetail);
+    vi.mocked(codingApi.updateCodingSessionTools).mockResolvedValue(baseDetail);
+    vi.mocked(codingApi.updateCodingSessionOrchestrator).mockResolvedValue({
+      ...baseDetail,
+      session: {
+        ...mockSession,
+        orchestrator_provider: "opencode_go",
+        orchestrator_model: "glm-5.2",
+      },
+    });
+
+    renderPage();
+    await waitFor(() => expect(screen.getByText("会話設定 ⚙")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "会話設定 ⚙" }));
+
+    fireEvent.change(screen.getByLabelText("オーケストレーター（進行役）"), {
+      target: { value: "opencode_go" },
+    });
+    fireEvent.change(screen.getByLabelText("オーケストレーターのモデル"), {
+      target: { value: "glm-5.2" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+
+    await waitFor(() => {
+      expect(codingApi.updateCodingSessionOrchestrator).toHaveBeenCalledWith(
+        "cses_111",
+        "opencode_go",
+        "glm-5.2",
+      );
+    });
+  });
+
+  it("preserves a custom orchestrator model when switching providers back and forth", async () => {
+    const baseDetail = {
+      session: {
+        ...mockSession,
+        orchestrator_provider: "openai",
+        orchestrator_model: "custom-model",
+      },
+      effective_tool_ids: ["web_search"],
+      has_custom_tools: false,
+      available_tools: [
+        { tool_id: "web_search", name: "Web検索", description: "Tavily検索" },
+      ],
+      messages: [],
+      active_run: null,
+      latest_run: null,
+      orchestrator_tool_calls: [],
+      available_orchestrator_providers: ["openai", "opencode_go"],
+      default_orchestrator_provider: "openai",
+      default_orchestrator_model: "gpt-5.6-terra",
+    };
+    vi.mocked(codingApi.getCodingSessionDetail).mockResolvedValue(baseDetail);
+
+    renderPage();
+    await waitFor(() => expect(screen.getByText("会話設定 ⚙")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "会話設定 ⚙" }));
+
+    const providerSelect = screen.getByLabelText("オーケストレーター（進行役）");
+    const modelInput = screen.getByLabelText("オーケストレーターのモデル");
+    expect(modelInput).toHaveValue("custom-model");
+
+    fireEvent.change(providerSelect, { target: { value: "opencode_go" } });
+    expect(modelInput).toHaveValue("");
+
+    fireEvent.change(providerSelect, { target: { value: "openai" } });
+    expect(modelInput).toHaveValue("custom-model");
   });
 
   it("opens user default tools modal and updates defaults", async () => {

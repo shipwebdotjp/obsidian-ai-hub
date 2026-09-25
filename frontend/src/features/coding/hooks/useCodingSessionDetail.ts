@@ -1,9 +1,10 @@
-import { useState, type MutableRefObject } from "react";
+import { useRef, useState, type MutableRefObject } from "react";
 import {
   getCodingDefaults,
   getCodingSessionDetail,
   getGitStatus,
   updateCodingDefaults,
+  updateCodingSessionOrchestrator,
   updateCodingSessionTitle,
   updateCodingSessionTools,
   type CodingDefaults,
@@ -53,6 +54,11 @@ export function useCodingSessionDetail({
   const [isSessionSettingsOpen, setIsSessionSettingsOpen] = useState(false);
   const [sessionSelectedTools, setSessionSelectedTools] = useState<string[]>([]);
   const [sessionTitleDraft, setSessionTitleDraft] = useState("");
+  const [orchestratorProviderDraft, setOrchestratorProviderDraft] = useState("");
+  const [orchestratorModelDraft, setOrchestratorModelDraft] = useState("");
+  // Remembers the model typed for each provider while the settings modal is
+  // open, so switching providers back and forth does not lose a custom model.
+  const orchestratorModelDraftsRef = useRef<Record<string, string>>({});
   const [savingSessionTools, setSavingSessionTools] = useState(false);
 
   // User default tool settings modal state
@@ -196,8 +202,36 @@ export function useCodingSessionDetail({
     if (sessionDetail && sessionDetail.session.session_id === selectedSessionId) {
       setSessionSelectedTools(sessionDetail.effective_tool_ids);
       setSessionTitleDraft(sessionDetail.session.title ?? "");
+      const provider = sessionDetail.session.orchestrator_provider ?? "";
+      const model = sessionDetail.session.orchestrator_model ?? "";
+      setOrchestratorProviderDraft(provider);
+      setOrchestratorModelDraft(model);
+      orchestratorModelDraftsRef.current = provider ? { [provider]: model } : {};
       setIsSessionSettingsOpen(true);
     }
+  };
+
+  const handleOrchestratorProviderChange = (next: string) => {
+    const previous = orchestratorProviderDraft;
+    if (previous) {
+      orchestratorModelDraftsRef.current[previous] = orchestratorModelDraft;
+    }
+    setOrchestratorProviderDraft(next);
+    if (!next) {
+      setOrchestratorModelDraft("");
+      return;
+    }
+    const remembered = orchestratorModelDraftsRef.current[next];
+    if (remembered !== undefined) {
+      setOrchestratorModelDraft(remembered);
+      return;
+    }
+    // The global default model only belongs to the default provider.
+    setOrchestratorModelDraft(
+      next === sessionDetail?.default_orchestrator_provider
+        ? sessionDetail?.default_orchestrator_model ?? ""
+        : "",
+    );
   };
 
   const handleSaveSessionTools = async () => {
@@ -206,6 +240,10 @@ export function useCodingSessionDetail({
     const trimmedTitle = sessionTitleDraft.trim();
     if (!trimmedTitle) {
       onError("セッションタイトルを入力してください");
+      return;
+    }
+    if (orchestratorProviderDraft.trim() && !orchestratorModelDraft.trim()) {
+      onError("オーケストレーターのモデルを入力してください");
       return;
     }
     setSavingSessionTools(true);
@@ -233,6 +271,30 @@ export function useCodingSessionDetail({
       setSessions((prev) =>
         prev.map((s) => (s.session_id === opSessionId ? { ...s, title: updated.session.title } : s)),
       );
+
+      const currentProvider = sessionDetail?.session.orchestrator_provider ?? "";
+      const currentModel = sessionDetail?.session.orchestrator_model ?? "";
+      const desiredProvider = orchestratorProviderDraft.trim();
+      const desiredModel = orchestratorModelDraft.trim();
+      if (
+        desiredProvider !== currentProvider ||
+        (desiredProvider !== "" && desiredModel !== currentModel)
+      ) {
+        try {
+          const orchUpdated = await updateCodingSessionOrchestrator(
+            opSessionId,
+            desiredProvider || null,
+            desiredProvider ? desiredModel : null,
+          );
+          if (selectedSessionIdRef.current !== opSessionId) return;
+          setSessionDetail(orchUpdated);
+        } catch (e: any) {
+          if (selectedSessionIdRef.current !== opSessionId) return;
+          onError(e.message || "オーケストレーター設定の保存に失敗しました");
+          return;
+        }
+      }
+
       setIsSessionSettingsOpen(false);
       await refreshSlashCandidates(opSessionId);
     } catch (e: any) {
@@ -323,6 +385,10 @@ export function useCodingSessionDetail({
     setSessionSelectedTools,
     sessionTitleDraft,
     setSessionTitleDraft,
+    orchestratorProviderDraft,
+    orchestratorModelDraft,
+    setOrchestratorModelDraft,
+    handleOrchestratorProviderChange,
     savingSessionTools,
     openSessionSettings,
     handleSaveSessionTools,

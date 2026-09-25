@@ -687,6 +687,54 @@ def resolve_effective_coding_model(session_value: object) -> str:
     if not models:
         raise ValueError("No coding models are configured.")
     return models[0]
+
+
+# Providers accepted by the orchestrator LLM (mirrors create_langchain_llm).
+CODING_ORCHESTRATOR_PROVIDERS = ("openai", "gemini", "ollama", "local", "opencode_go")
+
+
+def get_available_orchestrator_providers() -> list[str]:
+    """Return the allowlist of providers selectable for the orchestrator LLM."""
+    return list(CODING_ORCHESTRATOR_PROVIDERS)
+
+
+def resolve_orchestrator_provider(candidate: object) -> str:
+    """Return ``candidate`` if it is a supported provider, else raise ValueError."""
+    name = str(candidate or "").strip()
+    if name in get_available_orchestrator_providers():
+        return name
+    raise ValueError(
+        f"Unknown orchestrator provider '{candidate}'. "
+        f"Choose one of: {', '.join(get_available_orchestrator_providers())}."
+    )
+
+
+def resolve_orchestrator_model(candidate: object) -> str:
+    """Return the trimmed non-empty orchestrator model name, else raise ValueError.
+
+    Orchestrator models are provider-specific and not allowlisted (unlike the
+    OpenCode worker models), so only emptiness is rejected here.
+    """
+    name = str(candidate or "").strip()
+    if not name:
+        raise ValueError("Orchestrator model must not be empty.")
+    return name
+
+
+def resolve_effective_coding_orchestrator(
+    session_provider: object, session_model: object
+) -> tuple[str, str]:
+    """Resolve the per-session orchestrator provider/model.
+
+    Each field falls back to the config default independently when the session
+    value is unset, so sessions without an override use
+    ``CODING_ORCHESTRATOR_PROVIDER`` / ``CODING_ORCHESTRATOR_MODEL``.
+    """
+    provider = str(session_provider or "").strip() or CODING_ORCHESTRATOR_PROVIDER
+    model = str(session_model or "").strip() or CODING_ORCHESTRATOR_MODEL
+    return provider, model
+
+
 # Coding workspace is ACP-only with the OpenCode backend. There is no
 # backend selection: keep the constant for callers that still reference it.
 CODING_DEFAULT_BACKEND = "opencode"

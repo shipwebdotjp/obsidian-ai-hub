@@ -554,6 +554,8 @@ def create_session(
     acp_session_id: Optional[str] = None,
     acp_profile_id: Optional[str] = None,
     opencode_model: Optional[str] = None,
+    orchestrator_provider: Optional[str] = None,
+    orchestrator_model: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Create a new coding session (ACP-only, OpenCode-only).
 
@@ -585,6 +587,8 @@ def create_session(
     from obsidian_ai_hub.utils.config import (
         resolve_coding_model,
         resolve_effective_coding_model,
+        resolve_orchestrator_model,
+        resolve_orchestrator_provider,
     )
 
     session_id = f"cses_{uuid.uuid4().hex[:12]}"
@@ -593,6 +597,15 @@ def create_session(
         effective_new_model: Optional[str] = resolve_effective_coding_model(None)
     else:
         effective_new_model = resolve_coding_model(opencode_model)
+
+    # Orchestrator override is all-or-nothing: both fields unset inherit the
+    # global config, while a partial pair is rejected.
+    if orchestrator_provider in (None, "") and orchestrator_model in (None, ""):
+        orch_provider: Optional[str] = None
+        orch_model: Optional[str] = None
+    else:
+        orch_provider = resolve_orchestrator_provider(orchestrator_provider)
+        orch_model = resolve_orchestrator_model(orchestrator_model)
 
     if tool_ids is None:
         init_tool_ids = get_user_default_tool_ids(conn=conn)
@@ -671,6 +684,15 @@ def create_session(
                 now,
                 now,
             ),
+        )
+    has_orch = _has_column(
+        conn, "coding_sessions", "orchestrator_provider"
+    ) and _has_column(conn, "coding_sessions", "orchestrator_model")
+    if has_orch and (orch_provider is not None or orch_model is not None):
+        conn.execute(
+            "UPDATE coding_sessions SET orchestrator_provider = ?, orchestrator_model = ? "
+            "WHERE session_id = ?",
+            (orch_provider, orch_model, session_id),
         )
     conn.commit()
 
@@ -842,6 +864,68 @@ def update_session_model(session_id: str, opencode_model: str) -> Dict[str, Any]
         conn.execute(
             "UPDATE coding_sessions SET opencode_model = ?, updated_at = ? WHERE session_id = ?",
             (clean_model, _now_iso(), session_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    session = get_session(session_id)
+    assert session is not None
+    return session
+
+
+def get_effective_session_orchestrator(
+    session: Optional[Dict[str, Any]],
+) -> tuple[str, str]:
+    """Return the session's orchestrator (provider, model), else config defaults."""
+    from obsidian_ai_hub.utils.config import resolve_effective_coding_orchestrator
+
+    data = session or {}
+    return resolve_effective_coding_orchestrator(
+        data.get("orchestrator_provider"), data.get("orchestrator_model")
+    )
+
+
+def update_session_orchestrator(
+    session_id: str,
+    orchestrator_provider: Optional[str],
+    orchestrator_model: Optional[str],
+) -> Dict[str, Any]:
+    """Persist the session orchestrator override, or clear it when both are unset.
+
+    Provider/model are all-or-nothing: both must be provided together. Clearing
+    (both None/empty) makes the session inherit ``coding.orchestrator`` again.
+    The change is accepted even while a run is active; the in-flight run keeps
+    its frozen orchestrator, and the new values apply from the next message.
+    """
+    from obsidian_ai_hub.utils.config import (
+        resolve_orchestrator_model,
+        resolve_orchestrator_provider,
+    )
+
+    if orchestrator_provider in (None, "") and orchestrator_model in (None, ""):
+        clean_provider: Optional[str] = None
+        clean_model: Optional[str] = None
+    else:
+        clean_provider = resolve_orchestrator_provider(orchestrator_provider)
+        clean_model = resolve_orchestrator_model(orchestrator_model)
+
+    conn = get_db_connection()
+    try:
+        if not (
+            _has_column(conn, "coding_sessions", "orchestrator_provider")
+            and _has_column(conn, "coding_sessions", "orchestrator_model")
+        ):
+            raise ValueError("Session orchestrator columns are unavailable; run migrations first.")
+        cursor = conn.execute(
+            "SELECT session_id FROM coding_sessions WHERE session_id = ?",
+            (session_id,),
+        )
+        if not cursor.fetchone():
+            raise FileNotFoundError(f"Session '{session_id}' not found.")
+        conn.execute(
+            "UPDATE coding_sessions SET orchestrator_provider = ?, orchestrator_model = ?, "
+            "updated_at = ? WHERE session_id = ?",
+            (clean_provider, clean_model, _now_iso(), session_id),
         )
         conn.commit()
     finally:

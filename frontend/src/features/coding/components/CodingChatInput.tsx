@@ -172,16 +172,22 @@ export function CodingChatInput({
         </button>
       </form>
 
-      {/* Model selector: allowlisted models only (applies from the next message) */}
+      {/* Worker model selector: allowlisted models only (applies from the next message) */}
       {availableModels.length > 0 && (
-        <div className="mt-2 flex items-center">
+        <div className="mt-2 flex items-center gap-1.5">
+          <label
+            htmlFor="coding-worker-model"
+            className="text-[11px] font-medium text-slate-600"
+          >
+            Worker:
+          </label>
           <select
+            id="coding-worker-model"
             value={effectiveModel || ""}
             onChange={(e) => onChangeModel?.(e.target.value)}
             disabled={modelChanging}
             className="rounded border border-slate-300 bg-white px-1 py-0.5 text-[11px] text-slate-700 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
             title="モデルを変更（次回送信から適用）"
-            aria-label="モデルを変更"
           >
             {availableModels.map((m) => (
               <option key={m} value={m}>

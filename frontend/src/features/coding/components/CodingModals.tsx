@@ -11,6 +11,10 @@ interface CodingModalsProps {
   setSessionSelectedTools: React.Dispatch<React.SetStateAction<string[]>>;
   sessionTitleDraft: string;
   setSessionTitleDraft: React.Dispatch<React.SetStateAction<string>>;
+  orchestratorProviderDraft: string;
+  onOrchestratorProviderChange: (provider: string) => void;
+  orchestratorModelDraft: string;
+  setOrchestratorModelDraft: React.Dispatch<React.SetStateAction<string>>;
   savingSessionTools: boolean;
   onSaveSessionTools: () => void;
   onResetSessionTools: () => void;
@@ -33,6 +37,10 @@ export function CodingModals({
   setSessionSelectedTools,
   sessionTitleDraft,
   setSessionTitleDraft,
+  orchestratorProviderDraft,
+  onOrchestratorProviderChange,
+  orchestratorModelDraft,
+  setOrchestratorModelDraft,
   savingSessionTools,
   onSaveSessionTools,
   onResetSessionTools,
@@ -51,11 +59,7 @@ export function CodingModals({
       {isSessionSettingsOpen && sessionDetail && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
           <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl max-h-[90vh] flex flex-col">
-            <h3 className="text-base font-semibold text-slate-900">会話の利用可能ツール設定</h3>
-            <p className="mt-1 text-xs text-slate-500">
-              オーケストレーターがこの会話で呼び出せるツールを選択してください。
-              未選択のツールは呼び出せなくなります。
-            </p>
+            <h3 className="text-base font-semibold text-slate-900">会話設定</h3>
 
             <div className="mt-4">
               <label
@@ -73,6 +77,60 @@ export function CodingModals({
                 disabled={savingSessionTools}
                 className="mt-1 w-full rounded-md border border-slate-300 px-3 py-1.5 text-xs focus:border-slate-800 focus:outline-none disabled:bg-slate-100"
               />
+            </div>
+
+            <div className="mt-4 border-t border-slate-200 pt-4">
+              <label
+                htmlFor="coding-orchestrator-provider"
+                className="block text-xs font-medium text-slate-700"
+              >
+                オーケストレーター（進行役）
+              </label>
+              <p className="mt-1 text-[11px] text-slate-500">
+                この会話の進行役 LLM のプロバイダーとモデルを指定します。
+                「既定を使用」の場合は config の既定値を使用します。
+              </p>
+              <div className="mt-2 flex gap-2">
+                <select
+                  id="coding-orchestrator-provider"
+                  value={orchestratorProviderDraft}
+                  onChange={(e) => onOrchestratorProviderChange(e.target.value)}
+                  disabled={savingSessionTools}
+                  className="rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-700 focus:border-slate-800 focus:outline-none disabled:bg-slate-100 cursor-pointer disabled:cursor-not-allowed"
+                  title="オーケストレーターのプロバイダー"
+                >
+                  <option value="">
+                    既定を使用（{sessionDetail.default_orchestrator_provider ?? "-"}）
+                  </option>
+                  {(sessionDetail.available_orchestrator_providers ?? []).map((p) => (
+                    <option key={p} value={p}>
+                      {p}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  id="coding-orchestrator-model"
+                  type="text"
+                  aria-label="オーケストレーターのモデル"
+                  value={orchestratorModelDraft}
+                  onChange={(e) => setOrchestratorModelDraft(e.target.value)}
+                  disabled={savingSessionTools || !orchestratorProviderDraft}
+                  placeholder={
+                    orchestratorProviderDraft
+                      ? "モデル名"
+                      : `既定: ${sessionDetail.default_orchestrator_model ?? "-"}`
+                  }
+                  className="flex-1 rounded-md border border-slate-300 px-3 py-1.5 text-xs focus:border-slate-800 focus:outline-none disabled:bg-slate-100"
+                />
+              </div>
+            </div>
+
+            <div className="mt-4 border-t border-slate-200 pt-4">
+              <h4 className="text-xs font-medium text-slate-700">利用可能ツール</h4>
+              <p className="mt-1 text-[11px] text-slate-500">
+                オーケストレーターがこの会話で呼び出せるツールを選択してください。
+                未選択のツールは呼び出せなくなります。
+              </p>
             </div>
 
             <div className="mt-3 flex items-center justify-between border-b border-slate-200 pb-2 text-xs">
