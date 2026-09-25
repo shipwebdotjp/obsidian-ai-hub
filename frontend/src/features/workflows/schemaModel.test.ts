@@ -73,6 +73,36 @@ describe("schemaModel", () => {
     expect(Object.keys(schema.properties ?? {})).toEqual(["toString"]);
   });
 
+  it("accepts item count limits on arrays", () => {
+    expect(
+      validateSchemaSubset({
+        type: "array",
+        items: { type: "string" },
+        minItems: 1,
+        maxItems: 5,
+      }),
+    ).toEqual([]);
+  });
+
+  it("rejects invalid item count limits", () => {
+    const negative = validateSchemaSubset({
+      type: "array",
+      items: { type: "string" },
+      minItems: -1,
+    });
+    expect(negative.some((issue) => issue.path.endsWith(".minItems"))).toBe(true);
+
+    const inverted = validateSchemaSubset({
+      type: "array",
+      items: { type: "string" },
+      minItems: 3,
+      maxItems: 1,
+    });
+    expect(inverted.some((issue) => issue.message.includes("maxItems"))).toBe(
+      true,
+    );
+  });
+
   it("parses enum text with numeric coercion", () => {
     expect(parseEnumInput("a, b ,,c", "string")).toEqual(["a", "b", "c"]);
     expect(parseEnumInput("1, 2, x", "integer")).toEqual([1, 2, "x"]);

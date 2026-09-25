@@ -2,7 +2,7 @@ import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getWorkflowRun } from "../../api/client";
+import { deleteWorkflowRun, getWorkflowRun } from "../../api/client";
 import { subscribeRunEvents } from "../../api/runSse";
 import type { WorkflowRun, WorkflowRunNode } from "../../api/types";
 import WorkflowRunPage from "./WorkflowRunPage";
@@ -10,6 +10,7 @@ import WorkflowRunPage from "./WorkflowRunPage";
 vi.mock("../../api/client", () => ({
   approveWorkflowRun: vi.fn(),
   cancelWorkflowRun: vi.fn(),
+  deleteWorkflowRun: vi.fn(),
   getWorkflowRun: vi.fn(),
   rerunWorkflowRun: vi.fn(),
   resolveWorkflowAttention: vi.fn(),
@@ -23,6 +24,7 @@ vi.mock("../../api/runSse", () => ({
 }));
 
 const mockGetWorkflowRun = vi.mocked(getWorkflowRun);
+const mockDeleteWorkflowRun = vi.mocked(deleteWorkflowRun);
 const mockSubscribeRunEvents = vi.mocked(subscribeRunEvents);
 
 const graphNodes = [
@@ -132,6 +134,7 @@ function renderPage() {
     <MemoryRouter initialEntries={["/workflows/runs/wrun_1"]}>
       <Routes>
         <Route path="/workflows/runs/:runId" element={<WorkflowRunPage />} />
+        <Route path="/workflows" element={<div>workflow list</div>} />
       </Routes>
     </MemoryRouter>,
   );
@@ -139,8 +142,69 @@ function renderPage() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.spyOn(window, "confirm").mockReturnValue(true);
   mockSubscribeRunEvents.mockResolvedValue(undefined);
   mockGetWorkflowRun.mockResolvedValue(runningRun);
+  mockDeleteWorkflowRun.mockResolvedValue({ success: true, run_id: "wrun_1" });
+});
+
+describe("WorkflowRunPage run delete", () => {
+  it("shows the delete button for terminal runs", async () => {
+    mockGetWorkflowRun.mockResolvedValue(legacyRun);
+    renderPage();
+    await screen.findByTestId("run-status");
+    expect(screen.getByTestId("run-delete")).toBeInTheDocument();
+  });
+
+  it("hides the delete button for non-terminal runs", async () => {
+    renderPage();
+    await screen.findByTestId("run-status");
+    expect(screen.queryByTestId("run-delete")).not.toBeInTheDocument();
+  });
+
+  it("deletes a terminal run after confirmation and returns to the list", async () => {
+    const user = userEvent.setup();
+    mockGetWorkflowRun.mockResolvedValue(legacyRun);
+    renderPage();
+    await screen.findByTestId("run-status");
+    await user.click(screen.getByTestId("run-delete"));
+    expect(window.confirm).toHaveBeenCalled();
+    await waitFor(() =>
+      expect(mockDeleteWorkflowRun).toHaveBeenCalledWith("wrun_1"),
+    );
+    await screen.findByText("workflow list");
+  });
+});
+
+describe("WorkflowRunPage child run summary", () => {
+  it("shows tool call counts for an agent child run", async () => {
+    mockGetWorkflowRun.mockResolvedValue(
+      baseRun({
+        status: "completed",
+        graph_snapshot: null,
+        nodes: [
+          {
+            ...row("node-b", "act-b1", 1, "succeeded", "2026-09-21T00:00:02Z"),
+            child_kind: "agent",
+            child_run_id: "arun_1",
+            child_run: {
+              run_id: "arun_1",
+              status: "succeeded",
+              tool_calls: [
+                { tool_name: "vault_search", count: 2 },
+                { tool_name: "vault_read_file", count: 1 },
+              ],
+            },
+          },
+        ],
+        events: [],
+      }),
+    );
+    renderPage();
+    const tools = await screen.findByTestId("run-node-child-tools-act-b1");
+    expect(within(tools).getByText("vault_search ×2")).toBeInTheDocument();
+    expect(within(tools).getByText("vault_read_file ×1")).toBeInTheDocument();
+  });
 });
 
 describe("WorkflowRunPage run graph", () => {

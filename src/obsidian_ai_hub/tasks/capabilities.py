@@ -44,6 +44,7 @@ class CapabilityDefinition:
     default_approval_policy: str  # "auto" | "plan_required"
     registry_tool_id: str | None = None
     satisfied_effects: tuple[str, ...] = ()
+    read_only: bool = False
 
 
 EXCLUDED_TOOL_IDS: frozenset[str] = frozenset(
@@ -98,6 +99,35 @@ AUTO_POLICY_TOOL_IDS: frozenset[str] = frozenset(
         "research_theme_propose",
     }
 )
+
+READ_ONLY_TOOL_IDS: frozenset[str] = frozenset(
+    {
+        "web_search",
+        "web_extract",
+        "vault_search",
+        "vault_read_file",
+        "calendar_read",
+        "reminders_read",
+        "memory_search",
+        "people_search",
+        "people_get",
+        "people_relations_walk",
+        "project_search",
+        "project_get",
+        "research_context_snapshot",
+        "research_theme_history_search",
+        "activity_search",
+        "periodic_note_read",
+        "agent_conversation_search",
+        "coding_history_search",
+        "list_published_workflows",
+    }
+)
+"""Capabilities that only read data (no direct write, proposal, job or run).
+
+Used by the Workflow editor/validate to warn when a graph mixes write or
+external-operation capabilities into an otherwise read-only workflow.
+"""
 
 SPECIAL_DEFINITIONS: tuple[CapabilityDefinition, ...] = (
     CapabilityDefinition(
@@ -160,6 +190,7 @@ def get_capability_definitions(
                 default_approval_policy=policy,
                 registry_tool_id=str(tool_id),
                 satisfied_effects=EFFECTFUL_TOOL_IDS.get(str(tool_id), ()),
+                read_only=str(tool_id) in READ_ONLY_TOOL_IDS,
             )
         )
     derived.extend(SPECIAL_DEFINITIONS)

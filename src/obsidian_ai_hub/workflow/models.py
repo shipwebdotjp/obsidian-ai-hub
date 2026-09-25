@@ -8,6 +8,7 @@ grammar. See ``docs/workflow/specification.md`` for the contract.
 from __future__ import annotations
 
 import calendar
+import copy
 import re
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Iterable, Optional
@@ -157,6 +158,8 @@ _SUPPORTED_SCHEMA_KEYS = {
     "maximum",
     "minLength",
     "maxLength",
+    "minItems",
+    "maxItems",
     "pattern",
     "format",
 }
@@ -251,6 +254,22 @@ def validate_schema_subset(
                     schema["items"], path=f"{path}.items", depth=depth + 1
                 )
             )
+        for key in ("minItems", "maxItems"):
+            limit = schema.get(key)
+            if limit is not None and (
+                isinstance(limit, bool) or not isinstance(limit, int) or limit < 0
+            ):
+                errors.append(f"{path}.{key}: 非負整数が必要です")
+        min_items = schema.get("minItems")
+        max_items = schema.get("maxItems")
+        if (
+            isinstance(min_items, int)
+            and not isinstance(min_items, bool)
+            and isinstance(max_items, int)
+            and not isinstance(max_items, bool)
+            and min_items > max_items
+        ):
+            errors.append(f"{path}: minItems は maxItems 以下である必要があります")
     return errors
 
 
@@ -313,6 +332,20 @@ def validate_value_against_schema(
     elif stype == "array":
         if not isinstance(value, list):
             return [f"{path}: array が必要です"]
+        min_items = schema.get("minItems")
+        if (
+            isinstance(min_items, int)
+            and not isinstance(min_items, bool)
+            and len(value) < min_items
+        ):
+            errors.append(f"{path}: 要素数が minItems ({min_items}) 未満です")
+        max_items = schema.get("maxItems")
+        if (
+            isinstance(max_items, int)
+            and not isinstance(max_items, bool)
+            and len(value) > max_items
+        ):
+            errors.append(f"{path}: 要素数が maxItems ({max_items}) を超えています")
         items = schema.get("items")
         if isinstance(items, dict):
             for index, item in enumerate(value):
@@ -340,6 +373,45 @@ def validate_value_against_schema(
         if not isinstance(value, bool):
             errors.append(f"{path}: boolean が必要です")
     return errors
+
+
+def apply_schema_defaults(value: Any, schema: Any) -> Any:
+    """Fill object defaults declared in the v1 schema subset.
+
+    Only object properties are filled, recursively for nested objects. Present
+    keys are never overwritten, so ``$ref`` / ``$expr`` leaves and explicit
+    values keep their meaning. Array items are not filled. Returns a new value;
+    the input is not mutated.
+    """
+    if not isinstance(schema, dict) or schema.get("type") != "object":
+        return value
+    if not isinstance(value, dict):
+        return value
+    if reference_path(value) is not None or is_expression(value):
+        return value
+    properties = schema.get("properties")
+    if not isinstance(properties, dict):
+        return value
+    result = dict(value)
+    for name, prop in properties.items():
+        if not isinstance(prop, dict):
+            continue
+        if name not in result:
+            if "default" in prop:
+                result[name] = copy.deepcopy(prop["default"])
+            elif prop.get("type") == "object":
+                nested = apply_schema_defaults({}, prop)
+                if nested:
+                    result[name] = nested
+            continue
+        if (
+            prop.get("type") == "object"
+            and isinstance(result[name], dict)
+            and reference_path(result[name]) is None
+            and not is_expression(result[name])
+        ):
+            result[name] = apply_schema_defaults(result[name], prop)
+    return result
 
 
 _DATE_VALUE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")

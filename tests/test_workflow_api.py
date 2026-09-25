@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
 from fastapi.testclient import TestClient
 
+from obsidian_ai_hub.agents import store as agent_store
 from obsidian_ai_hub.scheduler_jobs import one_shot, recurring
 from obsidian_ai_hub.tasks import store as task_store
 from obsidian_ai_hub.web.app import create_app
 from obsidian_ai_hub.workflow import routes as workflow_routes
+from obsidian_ai_hub.workflow import scheduling as workflow_scheduling
 from obsidian_ai_hub.workflow import store as workflow_store
 
 
@@ -1034,6 +1038,224 @@ def test_delete_workflow_rejects_scheduler_reference(test_memory_db_path, client
 
     one_shot.cancel_one_shot_job(job["job_id"])
     assert client.delete(f"/api/v1/workflows/{workflow_id}").status_code == 200
+
+
+def test_delete_terminal_run_removes_history_and_clears_links(
+    test_memory_db_path, client
+):
+    workflow_id, _ = _publish_linear(client)
+    dispatch, run = workflow_scheduling.dispatch_recurring_slot(
+        "job1", "2026-01-01T00:00:00", workflow_id, {}
+    )
+    run_id = run["run_id"]
+    assert client.post(f"/api/v1/workflows/runs/{run_id}/cancel").status_code == 200
+    event_count = len(workflow_store.list_events(run_id))
+    assert event_count > 0
+
+    deleted = client.delete(f"/api/v1/workflows/runs/{run_id}")
+    assert deleted.status_code == 200
+    body = deleted.json()
+    assert body["success"] is True
+    assert body["events"] == event_count
+    assert "nodes" in body
+
+    assert workflow_store.get_run(run_id) is None
+    assert workflow_store.list_events(run_id) == []
+    # The dispatch row survives as a slot record with its run link cleared.
+    latest = workflow_scheduling.get_latest_dispatch("job1")
+    assert latest is not None
+    assert latest["dispatch_id"] == dispatch["dispatch_id"]
+    assert latest["run_id"] is None
+
+
+def test_delete_run_clears_rerun_lineage_and_one_shot_link(
+    test_memory_db_path, client
+):
+    workflow_id, revision_id = _publish_linear(client)
+    first = client.post(
+        f"/api/v1/workflows/revisions/{revision_id}/runs", json={"inputs": {}}
+    ).json()
+    client.post(f"/api/v1/workflows/runs/{first['run_id']}/cancel")
+    rerun = client.post(
+        f"/api/v1/workflows/runs/{first['run_id']}/rerun", json={}
+    ).json()
+    assert rerun["source_run_id"] == first["run_id"]
+
+    job = one_shot.register_one_shot_workflow_job(
+        workflow_id,
+        run_at=datetime.now(timezone.utc) - timedelta(minutes=1),
+    )
+    dispatched = one_shot.run_due_one_shot_jobs()
+    job = next(row for row in dispatched if row["job_id"] == job["job_id"])
+    assert job["workflow_run_id"]
+    client.post(f"/api/v1/workflows/runs/{job['workflow_run_id']}/cancel")
+
+    assert client.delete(f"/api/v1/workflows/runs/{first['run_id']}").status_code == 200
+    refreshed = workflow_store.get_run(rerun["run_id"])
+    assert refreshed is not None
+    assert refreshed.get("source_run_id") is None
+
+    assert (
+        client.delete(f"/api/v1/workflows/runs/{job['workflow_run_id']}").status_code
+        == 200
+    )
+    cleared = one_shot.get_one_shot_job(job["job_id"])
+    assert cleared is not None
+    assert cleared["workflow_run_id"] is None
+
+
+def test_delete_non_terminal_run_rejected(test_memory_db_path, client):
+    _, revision_id = _publish_linear(client)
+    run = client.post(
+        f"/api/v1/workflows/revisions/{revision_id}/runs", json={"inputs": {}}
+    ).json()
+    assert run["status"] == "queued"
+
+    blocked = client.delete(f"/api/v1/workflows/runs/{run['run_id']}")
+    assert blocked.status_code == 409
+    assert workflow_store.get_run(run["run_id"]) is not None
+
+    client.post(f"/api/v1/workflows/runs/{run['run_id']}/cancel")
+    assert client.delete(f"/api/v1/workflows/runs/{run['run_id']}").status_code == 200
+    assert client.delete(f"/api/v1/workflows/runs/{run['run_id']}").status_code == 404
+
+
+def test_run_inputs_are_filled_with_schema_defaults(test_memory_db_path, client):
+    task_store.sync_capabilities()
+    schema = {
+        "type": "object",
+        "properties": {
+            "query": {"type": "string"},
+            "limit": {"type": "integer", "default": 3},
+            "filters": {
+                "type": "object",
+                "properties": {"mode": {"type": "string", "default": "hybrid"}},
+            },
+        },
+        "required": ["query"],
+        "additionalProperties": False,
+    }
+    created = client.post(
+        "/api/v1/workflows", json={"name": "defaults", "inputs_schema": schema}
+    ).json()
+    revision_id = created["revision"]["revision_id"]
+    nodes, edges = _linear_graph()
+    assert (
+        client.put(
+            f"/api/v1/workflows/revisions/{revision_id}",
+            json={"inputs_schema": schema, "nodes": nodes, "edges": edges},
+        ).status_code
+        == 200
+    )
+    assert (
+        client.post(
+            f"/api/v1/workflows/revisions/{revision_id}/publish"
+        ).status_code
+        == 200
+    )
+
+    run = client.post(
+        f"/api/v1/workflows/revisions/{revision_id}/runs",
+        json={"inputs": {"query": "x"}},
+    ).json()
+    assert run["inputs"] == {
+        "query": "x",
+        "limit": 3,
+        "filters": {"mode": "hybrid"},
+    }
+
+    missing_required = client.post(
+        f"/api/v1/workflows/revisions/{revision_id}/runs", json={"inputs": {}}
+    )
+    assert missing_required.status_code == 422
+
+
+def test_get_run_attaches_agent_child_tool_summary(test_memory_db_path, client):
+    _, revision_id = _publish_linear(client)
+    run = client.post(
+        f"/api/v1/workflows/revisions/{revision_id}/runs", json={"inputs": {}}
+    ).json()
+    agent = agent_store.create_agent(name="wf-child-agent", system_prompt="p")
+    session = agent_store.create_session(agent["agent_id"], title="wf child")
+    _, child = agent_store.start_queued_run(session["session_id"], "do it")
+    child_run_id = child["run_id"]
+    agent_store.append_run_event(
+        child_run_id, "tool_call_start", {"tool_name": "vault_search"}
+    )
+    agent_store.append_run_event(
+        child_run_id, "tool_call_start", {"tool_name": "vault_search"}
+    )
+    agent_store.append_run_event(
+        child_run_id, "tool_call_start", {"tool_name": "vault_read_file"}
+    )
+    workflow_store.upsert_run_node(
+        run_id=run["run_id"],
+        node_id="n_cap",
+        activation_id="act_child",
+        attempt=1,
+        status="succeeded",
+        child_kind="agent",
+        child_run_id=child_run_id,
+    )
+
+    detail = client.get(f"/api/v1/workflows/runs/{run['run_id']}").json()
+    node = next(
+        row for row in detail["nodes"] if row.get("child_run_id") == child_run_id
+    )
+    assert node["child_run"]["status"] == child["status"]
+    assert node["child_run"]["tool_calls"] == [
+        {"tool_name": "vault_search", "count": 2},
+        {"tool_name": "vault_read_file", "count": 1},
+    ]
+
+
+def test_capability_catalog_exposes_read_only(test_memory_db_path, client):
+    items = client.get("/api/v1/workflows/capabilities").json()["items"]
+    by_key = {item["capability_key"]: item for item in items}
+    assert by_key["vault_read_file"]["read_only"] is True
+    assert by_key["vault_search"]["read_only"] is True
+    assert by_key["vault_write_file"]["read_only"] is False
+    assert by_key["hitl_wait"]["read_only"] is False
+
+
+def test_validate_returns_write_capability_warnings(test_memory_db_path, client):
+    task_store.sync_capabilities()
+    created = client.post("/api/v1/workflows", json={"name": "warn"}).json()
+    revision_id = created["revision"]["revision_id"]
+    nodes = [
+        {
+            "node_id": "n_cap",
+            "node_type": "capability",
+            "config": {
+                "capability_key": "vault_write_file",
+                "inputs": {"relative_path": "x.md", "content": "x"},
+            },
+        },
+        {
+            "node_id": "n_end",
+            "node_type": "terminal",
+            "config": {"outcome": "success"},
+        },
+    ]
+    edges = [
+        {
+            "edge_id": "e1",
+            "source_node_id": "n_cap",
+            "target_node_id": "n_end",
+            "order_index": 0,
+        }
+    ]
+    assert (
+        client.put(
+            f"/api/v1/workflows/revisions/{revision_id}",
+            json={"inputs_schema": {"type": "object"}, "nodes": nodes, "edges": edges},
+        ).status_code
+        == 200
+    )
+    result = client.post(
+        f"/api/v1/workflows/revisions/{revision_id}/validate"
+    ).json()
+    assert any("vault_write_file" in warning for warning in result["warnings"])
 
 
 def test_scheduler_references_detects_recurring_job(

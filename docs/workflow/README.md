@@ -5,7 +5,7 @@ Workflow は、人間が Web UI で設計する **Node / Edge グラフ** であ
 検証・型付きで後続 Node へ受け渡す。既存 Task Agent（自由文を LLM が動的に解釈）とは
 独立した Bounded Context である。
 
-Status: 再設計後の仕様 Accepted (Phase 0 未実装)。実装はフェーズ計画に従う。
+Status: Accepted。仕様は実装済みで、変更は specification.md と ADR を正本とする。
 
 ## 文書一覧
 
@@ -14,6 +14,8 @@ Status: 再設計後の仕様 Accepted (Phase 0 未実装)。実装はフェー�
 | [specification.md](specification.md) | 確定済みの外部契約と振る舞い（実装の正本） |
 | [adr/workflow-graph-and-agent-node.md](adr/workflow-graph-and-agent-node.md) | グラフ / Agent Node / Loop Node / 承認境界の設計判断 ADR |
 | [adr/workflow-revision-deletion.md](adr/workflow-revision-deletion.md) | Revision 削除ポリシー（draft / superseded のハード削除・Run 温存） |
+| [adr/workflow-deletion.md](adr/workflow-deletion.md) | Workflow aggregate 削除ポリシー（非終端 Run・Scheduler 参照を拒否） |
+| [adr/workflow-run-deletion.md](adr/workflow-run-deletion.md) | 終端 Run 削除ポリシー（soft link 解除・子 Run 温存） |
 | [adr/workflow-independent-context-shared-foundation.md](adr/workflow-independent-context-shared-foundation.md) | 撤回された旧 ADR（履歴） |
 | [adr/workflow-editor-guided-forms.md](adr/workflow-editor-guided-forms.md) | エディタのガイド型フォーム（自前スキーマフォーム・型付き参照ピッカー） |
 | [adr/capability-input-output-contracts.md](adr/capability-input-output-contracts.md) | Capability 入出力契約の段階的厳格化（strict 入力・出力契約クラス・副作用での strict 利用境界） |

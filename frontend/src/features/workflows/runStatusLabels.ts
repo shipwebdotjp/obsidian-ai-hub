@@ -19,3 +19,16 @@ export const RUN_STATUS_LABELS: Record<WorkflowRunStatus, string> = {
 export function runStatusLabel(status: WorkflowRunStatus | string): string {
   return RUN_STATUS_LABELS[status as WorkflowRunStatus] ?? status;
 }
+
+/** Run states whose history can be deleted (mirrors backend RUN_TERMINAL_STATUSES). */
+export const TERMINAL_RUN_STATUSES: ReadonlySet<WorkflowRunStatus> = new Set([
+  "completed",
+  "incomplete",
+  "failed",
+  "cancelled",
+]);
+
+/** Terminal check for loosely-typed values (e.g. refs held as string). */
+export function isTerminalRunStatus(status: string): boolean {
+  return TERMINAL_RUN_STATUSES.has(status as WorkflowRunStatus);
+}

@@ -33,12 +33,11 @@ from obsidian_ai_hub.workflow.capabilities import (
     WORKFLOW_ONLY_METADATA,
     WORKFLOW_ONLY_OUTPUT_SCHEMA,
     default_approval_policy,
-    is_workflow_only,
-    workflow_capability_keys,
 )
 from obsidian_ai_hub.workflow.models import (
     RUN_TERMINAL_STATUSES,
     RUN_WAITING_STATUSES,
+    apply_schema_defaults,
     validate_value_against_schema,
 )
 from obsidian_ai_hub.workflow import scheduling as workflow_scheduling
@@ -94,22 +93,15 @@ class TextTemplatePreviewRequest(BaseModel):
 
 
 def _capability_enabled() -> Any:
-    from obsidian_ai_hub.tasks import store as task_store
+    from obsidian_ai_hub.workflow.checks import capability_enabled_check
 
-    enabled = {
-        str(c["capability_key"]): bool(c["enabled"])
-        for c in task_store.list_capabilities()
-    }
-    valid_keys = workflow_capability_keys()
-    return lambda key: key in valid_keys and (
-        is_workflow_only(key) or enabled.get(key, False)
-    )
+    return capability_enabled_check()
 
 
 def _agent_exists() -> Any:
-    from obsidian_ai_hub.agents import store as agent_store
+    from obsidian_ai_hub.workflow.checks import agent_exists_check
 
-    return lambda agent_id: agent_store.get_agent(agent_id) is not None
+    return agent_exists_check()
 
 
 def _validate_revision(revision: dict[str, Any]) -> list[str]:
@@ -120,6 +112,12 @@ def _validate_revision(revision: dict[str, Any]) -> list[str]:
         capability_enabled=_capability_enabled(),
         agent_exists=_agent_exists(),
     )
+
+
+def _revision_warnings(revision: dict[str, Any]) -> list[str]:
+    from obsidian_ai_hub.workflow.checks import workflow_graph_warnings
+
+    return workflow_graph_warnings(revision)
 
 
 @router.get("")
@@ -352,6 +350,7 @@ def list_workflow_capabilities() -> dict[str, Any]:
                     record.get("approval_policy")
                     or default_approval_policy(definition.key)
                 ),
+                "read_only": bool(definition.read_only),
                 "workflow_only": False,
                 "inputs_schema": ui_input_schema(definition.key),
                 "target_schema": ui_target_schema(definition.key),
@@ -367,6 +366,7 @@ def list_workflow_capabilities() -> dict[str, Any]:
                 "description": description,
                 "enabled": True,
                 "approval_policy": default_approval_policy(key),
+                "read_only": False,
                 "workflow_only": True,
                 "inputs_schema": WORKFLOW_ONLY_INPUT_SCHEMA.get(key),
                 "target_schema": None,
@@ -543,7 +543,11 @@ def validate_revision(revision_id: str) -> dict[str, Any]:
     if revision is None:
         raise HTTPException(status_code=404, detail="revision not found")
     errors = _validate_revision(revision)
-    return {"valid": not errors, "errors": errors}
+    return {
+        "valid": not errors,
+        "errors": errors,
+        "warnings": _revision_warnings(revision),
+    }
 
 
 @router.post("/text-template/preview")
@@ -619,8 +623,11 @@ def create_run(revision_id: str, payload: RunCreate) -> dict[str, Any]:
     revision = workflow_store.get_revision(revision_id)
     if revision is None:
         raise HTTPException(status_code=404, detail="revision not found")
+    inputs = apply_schema_defaults(
+        payload.inputs, revision.get("inputs_schema") or {}
+    )
     input_errors = validate_value_against_schema(
-        payload.inputs,
+        inputs,
         revision.get("inputs_schema") or {},
         path="run.inputs",
         allow_expressions=True,
@@ -642,7 +649,7 @@ def create_run(revision_id: str, payload: RunCreate) -> dict[str, Any]:
         run = workflow_store.create_run(
             str(revision["workflow_id"]),
             revision_id,
-            payload.inputs,
+            inputs,
             initial_status=initial_status,
         )
     except ValueError as exc:
@@ -673,6 +680,7 @@ def rerun_run(run_id: str, payload: RerunRequest) -> dict[str, Any]:
         if payload.inputs is not None
         else dict(source.get("inputs") or {})
     )
+    inputs = apply_schema_defaults(inputs, snapshot.get("inputs_schema") or {})
     input_errors = validate_value_against_schema(
         inputs,
         snapshot.get("inputs_schema") or {},
@@ -706,14 +714,54 @@ def rerun_run(run_id: str, payload: RerunRequest) -> dict[str, Any]:
     return new_run
 
 
+def _attach_child_run_summaries(nodes: list[dict[str, Any]]) -> None:
+    """Attach a compact Agent child-run summary for run-detail inspection.
+
+    Verification otherwise requires digging into ``agent_run_events``; the
+    summary lists executed tool names and counts only (no arguments/results).
+    """
+    from obsidian_ai_hub.agents import store as agent_store
+
+    for node in nodes:
+        child_run_id = node.get("child_run_id")
+        if not child_run_id or str(node.get("child_kind") or "") != "agent":
+            continue
+        child = agent_store.get_run(str(child_run_id))
+        if child is None:
+            continue
+        node["child_run"] = {
+            "run_id": str(child_run_id),
+            "status": child.get("status"),
+            "tool_calls": agent_store.summarize_tool_calls(str(child_run_id)),
+        }
+
+
 @router.get("/runs/{run_id}")
 def get_run(run_id: str) -> dict[str, Any]:
     run = workflow_store.get_run(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="run not found")
     run["nodes"] = workflow_store.list_run_nodes(run_id)
+    _attach_child_run_summaries(run["nodes"])
     run["events"] = workflow_store.list_events(run_id)
     return run
+
+
+@router.delete("/runs/{run_id}")
+def delete_run(run_id: str) -> dict[str, Any]:
+    """Delete one terminal run and its history (irreversible).
+
+    Non-terminal runs are rejected so an in-flight run is never orphaned.
+    Soft run links in schedule dispatches / one-shot jobs are cleared in the
+    same transaction; child Agent / Coding / HITL runs are not touched.
+    """
+    try:
+        deleted = workflow_store.delete_run(run_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"success": True, **deleted}
 
 
 @router.post("/runs/{run_id}/approve")

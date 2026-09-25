@@ -163,7 +163,8 @@ ui_position_json TEXT
     "relative_path": {"$ref": "run.inputs.output_path"},
     "content": {"$ref": "nodes.agent_xxx.output.note_body"}
   },
-  "retry": {"max_attempts": 1, "backoff_seconds": 0}
+  "retry": {"max_attempts": 1, "backoff_seconds": 0},
+  "fail_on_output_mismatch": false
 }
 ```
 
@@ -172,6 +173,7 @@ ui_position_json TEXT
   `specialist_agent` は `agent_id`、`coding_cli` は `project_id`（任意で `backend`）を持つ。
   値は型付き参照にできない（実行時にそのまま Adapter へ渡す）。
 - `retry` は非負整数。
+- `fail_on_output_mismatch`（boolean、既定 `false`）は §8.1 の strict 出力設定。
 
 #### agent
 
@@ -272,6 +274,17 @@ order_index INTEGER NOT NULL
   最初に真になった Edge の target へ進む。
 - 条件がすべて偽で default Edge（条件なし）もない場合、Run は `failed` とする。
 - 複数の Edge が同じ target を指す **OR 合流** を許可する。Node は最初に到達した一度だけ実行する。
+- 参照先が存在しない `from_path` は false として扱い、次の Edge を評価する。そのため
+  **条件付き Edge は条件なしの default Edge より小さい `order_index` にする**。
+
+Capability が成功出力でエラーを返す場合（例: `vault_read_file` の
+`{"error": "File not found"}`）を分岐する定石は次のとおり。strict 設定（§8.1）を使えば
+条件 Edge を組まずに Node 失敗にできる。
+
+```text
+[capability ledger] --(condition: nodes.ledger.output.error exists, order 0)--> [terminal failure]
+                    --(default, order 1)---------------------------------------> [next node]
+```
 
 ### 3.5 型付き参照
 
@@ -283,6 +296,10 @@ Node 間のデータ連携は文字列テンプレート展開ではなく、以
 - `loop.state.<field_path>` — Loop Node 子グラフ内でのみ利用可能な反復状態。
 
 参照は静的検証で解決可能性を確認し、実行直前に値を解決してから Pydantic / JSON Schema で検証する。
+
+Run 作成時、`inputs_schema` の object property に `default` があり入力にキーが無い場合は、その値を
+補完してから検証・スナップショット保存する。ネストした object にも適用するが、配列要素は対象外。
+既存のキー（`$ref` / `$expr` を含む）は上書きしない。
 
 ### 3.6 型付き日時式 `$expr`
 
@@ -530,12 +547,24 @@ Node 間のデータ連携は文字列テンプレート展開ではなく、以
 - 定義 package は定義だけを扱い、実行履歴、外部成果物、Scheduler Job、秘密値を移送しない。
   秘密値は定義へ含めない。
 
+### 5.3 終端 Run の削除
+
+- API: `DELETE /api/v1/workflows/runs/:run_id`。Run が無ければ 404、終端以外は 409
+  ([ADR](adr/workflow-run-deletion.md))。
+- 同一トランザクションで soft link を解除してから
+  `workflow_events` → `workflow_run_nodes` → `workflow_activations` → `workflow_runs` を削除する。
+  - `workflow_schedule_dispatches.run_id` / `one_shot_jobs.workflow_run_id` /
+    `workflow_runs.source_run_id` は NULL にする（dispatch / one-shot の行と状態は温存）。
+- 子の Agent / Coding / Research / HITL Run は削除しない。
+- 30 日 retention（§14.3）と併存し、マイグレーションは不要。
+
 ## 6. 静的検証と動的検証
 
 ### 6.1 静的検証（保存 / 公開 / 検証 API）
 
 - `inputs_schema` / `output_schema` / `state_schema` が許可された JSON Schema サブセット内であること。
-  `format` は `date` / `date-time` のみ許可する。
+  `format` は `date` / `date-time` のみ許可する。配列の `minItems` / `maxItems` は非負整数で、
+  `minItems <= maxItems` を満たすこと。
 - 全 Node ID / Edge ID が UUID 形式で一意であること。
 - `capability_key` が `task_agent_capabilities` に存在し `enabled=1` であること。
 - target を持つ Capability は `config.target` が必須で、target schema に適合すること。
@@ -556,6 +585,9 @@ Node 間のデータ連携は文字列テンプレート展開ではなく、以
   `reasoning_effort` が対応 provider でのみ指定されていること。`output_schema` が JSON Schema
   サブセット内であること。
 - 秘密値を含む入力が固定値として保存されていないこと（UI 警告 + 検証ヒューリスティック）。
+- `read_only` でない Capability を含む場合、検証応答の `warnings` に書込・外部操作の注意を返す
+  （公開はブロックしない）。
+- strict 出力と `retry.max_attempts > 0` を併用した capability Node も `warnings` に含める。
 
 ### 6.2 動的検証（Run 開始直前 / Node 実行直前）
 
@@ -565,6 +597,7 @@ Node 間のデータ連携は文字列テンプレート展開ではなく、以
   無効なら `waiting_approval`、有効なら `queued` とする。承認判定は Run 作成時に一度だけ
   行い、スナップショット済みの既存 Run は設定変更の影響を受けない。
 - Node 入力の型付き参照を解決し、schema で完全検証する。
+- Run 入力は `inputs_schema` の `default` を補完してから検証する（§3.5）。
 - `llm` Node は承認判定の対象外。実行直前に `inputs` を解決し、取消要求があれば外部送信せず、
   1 Activation あたり外部送信は高々 1 回とする（自動再送しない）。
 - 実行時に Loop 子グラフの entry_node_id / loop_result 到達可能性を再確認する。
@@ -628,7 +661,15 @@ Node 間のデータ連携は文字列テンプレート展開ではなく、以
 - Capability Adapter を `(validated_inputs, invocation_context)` の形で呼び出す。
 - Adapter は `StepResult` を返す。`satisfied_effects` があれば Event として記録する。
 - 出力はコード宣言された出力スキーマ（読み取り/検索系・`hitl_wait` 等）と照合し、
-  不一致なら `capability_output_schema_mismatch` Event を記録する。**Node は失敗させない**（助言）。
+  不一致なら `capability_output_schema_mismatch` Event を記録する。既定では **Node は失敗させない**（助言）。
+- Node config の `fail_on_output_mismatch: true`（strict）では、次のいずれかで Node を
+  **失敗**させる。出力は後続 Node へ渡さず、`error` Edge / Run 失敗の既存伝播に乗せる。
+  - 出力 object がトップレベル `error` キーを持つ（registry tool の共通失敗形。値の真偽は問わない）。
+  - 宣言済み出力スキーマに一致しない。
+  副作用 Capability に strict を付けると、外部処理成功後でも effects が記録されないため
+  読み取り系での利用を推奨する。また strict と `retry.max_attempts > 0` の併用は、契約違反時に
+  副作用が再実行されうるため非推奨とする（検証応答の `warnings` で注意する）
+  ([ADR](adr/workflow-graph-and-agent-node.md#amendment-capability-node-の-strict-出力))。
 - 既存 Adapter 実行契約は Task 行を要求するため、実行中だけ短命のブリッジ Task を持つ。
   これは `origin = 'workflow'` として Task Agent の一覧から除外する
   ([ADR](adr/workflow-graph-and-agent-node.md#amendment-capability-ブリッジ-task-の隔離))。
@@ -852,6 +893,7 @@ Agent 指紋を含む。
 
 - 終端 Run とその Node・Activation・Event は 30 日後に削除する。
 - 非終端 Run は削除しない。
+- 人間は `DELETE /api/v1/workflows/runs/:run_id` で終端 Run を任意に削除できる（§5.3）。
 - 長期成果物（Vault ノート、Research Job、Agent 会話）は Workflow 側では削除しない。
 
 ## 15. Web UI
@@ -864,19 +906,22 @@ Agent 指紋を含む。
 - `/workflows/:id` — Revision 履歴と最近の Run。draft / 旧版 Revision に削除ボタン。
   - 公開 Revision の行に Template 保存・既存 Template の内容更新・JSON / YAML export。
     draft Revision は export / Template 保存の対象外。
+  - 終端 Run の行に削除ボタン（確認ダイアログ付き）。非終端 Run には表示しない。
   - import / instantiate 後は新しい draft の編集画面へ遷移し、サーバー検証エラーを
     既存の検証表示へ渡す。
 - `/workflows/:id/revisions/:revision_id/edit` — グラフエディタ（キャンバス）。
   - Node カタログ（Capability / Agent / Loop / Terminal）。
   - Node ごとの config 編集（schema 入力、Agent 選択、Loop 設定）。
+  - Capability 選択は read_only でないものに「書込・外部」を併記し、選択中は注意を表示する。
   - Edge 追加と条件編集。
   - Loop Node 子グラフの編集。
-  - 公開前検証ボタン。
+  - 公開前検証ボタン。検証の警告（書込・外部操作など）をエラーと区別して表示する。
   - draft / 旧版 Revision の削除ボタン（確認ダイアログ付き。published には表示しない）。
 - `/workflows/runs/:run_id` — Run 詳細。
   - グラフ上の Node 状態表示。
-  - 入出力、Error、Effect の閲覧。
+  - 入出力、Error、Effect の閲覧。Agent 子 Run を持つ Node はツール呼び出し回数を併記する。
   - 承認 / 取消 / 再開 / needs_attention 処置ボタン。
+  - 終端 Run の削除ボタン（確認ダイアログ付き）。
   - 子 Run / HITL へのリンク。
 - `/workflows/runs/:run_id/attention` — needs_attention 対応画面。
 
@@ -918,7 +963,8 @@ Agent 指紋を含む。
 | `GET /api/v1/workflows/user-templates/:template_id/export?format=json\|yaml` | Template の定義を package v1 として返す。 |
 | `POST /api/v1/workflows/import?format=json\|yaml` | 本文の package を新規 Workflow + draft Revision として取り込む。境界違反は 422 で無書込み。 |
 | `POST /api/v1/workflows/revisions/:revision_id/runs` | Run 作成。`inputs` を同梱して受領し、`inputs_schema` で検証する。`plan_required` Capability / Agent Node を含む場合は `waiting_approval` で原子的に作成する。 |
-| `GET /api/v1/workflows/runs/:run_id` | Run + Node 状態 + Events。 |
+| `GET /api/v1/workflows/runs/:run_id` | Run + Node 状態 + Events。Agent 子 Run を持つ Node には `child_run`（状態とツール呼び出し回数）を付与する。 |
+| `DELETE /api/v1/workflows/runs/:run_id` | 終端 Run を削除。非終端は 409、不在は 404。soft link を解除し、子 Run は残す。 |
 | `POST /api/v1/workflows/runs/:run_id/approve` | 承認。`waiting_approval` → `queued`。 |
 | `POST /api/v1/workflows/runs/:run_id/cancel` | 取消。 |
 | `POST /api/v1/workflows/runs/:run_id/resume` | 明示再開。`interrupted` → `queued`。 |
@@ -1214,6 +1260,17 @@ one_shot_jobs（v58 で再構築）
     なければ Run `failed`）。`agent_sessions` / `agent_messages` / `agent_runs` は増えず、
     `llm_call_logs` に `run_id = NULL` の独立行を残す。取消が送信前に届けば送信せず、送信中の
     取消は後続 Node を起動せず Run を `cancelled` にする。
+31. Capability strict 出力: `fail_on_output_mismatch: true` の Node は、出力のトップレベル `error`
+    キー（例: `vault_read_file` のファイル不在）または宣言済み出力 schema 不一致で `failed` になり、
+    後続 Node へ出力を渡さない。既定 false では mismatch Event を記録して続行する。
+32. Schema 制約: `minItems` / `maxItems` は非負整数で `minItems <= maxItems` を検証し、配列値の
+    件数が範囲外なら検証エラーになる。
+33. Run 削除: 終端 Run の `DELETE` は Node・Activation・Event を削除し、dispatch / one-shot /
+    rerun 系譜の soft link を NULL にする。非終端 Run は 409 で削除せず、子 Agent / HITL Run は
+    残る。
+34. Run 入力 default: `inputs_schema` の object property の `default` は、入力にキーが無いとき
+    補完してから検証・保存される。ネストした object にも適用し、明示値と `$ref` / `$expr` は
+    上書きしない。
 
 ## 20. MVP 対象外、将来拡張、未決事項、リスク
 

@@ -25,9 +25,9 @@ from obsidian_ai_hub.utils import config
 
 logger = logging.getLogger(__name__)
 
-TEST_JOB_FILE = config.BASE_DIR / "jobs" / "jobs.test.yml"
-DEFAULT_JOB_FILE = config.BASE_DIR / "jobs" / "jobs.yml"
-LOCAL_JOB_FILE = config.BASE_DIR / "jobs" / "jobs.local.yml"
+TEST_JOB_FILE = config.JOBS_DIR / "jobs.test.yml"
+DEFAULT_JOB_FILE = config.JOBS_DIR / "jobs.yml"
+LOCAL_JOB_FILE = config.JOBS_DIR / "jobs.local.yml"
 STATE_FILE = config.JOB_RUN_STATE_PATH
 
 LOCK_FILE = STATE_FILE.parent / ".job-config.lock"
@@ -444,7 +444,10 @@ def validate_workflow_target(workflow_id, inputs) -> dict:
     Returns the normalized ``{"workflow_id", "inputs"}``.
     """
     from obsidian_ai_hub.workflow import scheduling
-    from obsidian_ai_hub.workflow.models import validate_value_against_schema
+    from obsidian_ai_hub.workflow.models import (
+        apply_schema_defaults,
+        validate_value_against_schema,
+    )
 
     if not isinstance(workflow_id, str) or not workflow_id.strip():
         raise ValueError("workflow.workflow_id must be a non-empty string")
@@ -455,6 +458,7 @@ def validate_workflow_target(workflow_id, inputs) -> dict:
     revision = scheduling.resolve_published_revision(workflow_id)
     if revision is None:
         raise ValueError(f"Workflow '{workflow_id}' に公開済み Revision がありません")
+    inputs = apply_schema_defaults(inputs, revision.get("inputs_schema") or {})
     errors = validate_value_against_schema(
         inputs, revision.get("inputs_schema") or {}, path="workflow.inputs"
     )

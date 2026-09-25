@@ -37,9 +37,13 @@ Task Capability で入力モデルを解決して実行時検証しているが�
   まず副作用を持たない `structured` Capability で利用する。副作用 Capability は、receipt が
   effect・冪等性・不一致後の停止を正しく表現し、mismatch が自動再試行を誘発しないことを確認するまで
   strict の既定対象にしない。
-- **成功・業務エラーの共通 envelope は今回導入しない。** `error` キーの扱い、business failure の
-  分岐、retry 意味論を全 Adapter / plugin にまたがって統一する必要が生じた時点で、別 ADR として
-  設計する。
+- **成功・業務エラーの共通 envelope は今回導入しない。** business failure の分岐、retry 意味論を
+  全 Adapter / plugin にまたがって統一する必要が生じた時点で、別 ADR として設計する。
+  ただし strict（`fail_on_output_mismatch: true`）の Node では、registry tool が失敗を表す
+  事実上の共通形であるトップレベル `error` キーを契約違反として Node を失敗させる。これは
+  共通 envelope の導入ではなく strict 時の最小規則であり、`error` の分類・再試行・分岐は
+  引き続き対象外とする
+  ([amendment](workflow-graph-and-agent-node.md#amendment-capability-node-の-strict-出力))。
 
 ## Consequences
 

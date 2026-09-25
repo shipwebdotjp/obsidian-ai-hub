@@ -1139,6 +1139,15 @@ export function getWorkflowRun(runId: string): Promise<WorkflowRun> {
   );
 }
 
+export function deleteWorkflowRun(
+  runId: string,
+): Promise<{ success: boolean; run_id: string }> {
+  return request<{ success: boolean; run_id: string }>(
+    `/api/v1/workflows/runs/${encodeURIComponent(runId)}`,
+    { method: "DELETE" },
+  );
+}
+
 export function approveWorkflowRun(runId: string): Promise<WorkflowRun> {
   return request<WorkflowRun>(
     `/api/v1/workflows/runs/${encodeURIComponent(runId)}/approve`,

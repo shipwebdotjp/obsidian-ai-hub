@@ -610,7 +610,15 @@ def _compact_field(name: str, spec: dict[str, Any], required: set[str]) -> str:
                 break
     if enum:
         details.append(f"enum={list(enum)}")
-    for key in ("minimum", "maximum", "minLength", "maxLength", "pattern"):
+    for key in (
+        "minimum",
+        "maximum",
+        "minLength",
+        "maxLength",
+        "minItems",
+        "maxItems",
+        "pattern",
+    ):
         if spec.get(key) is not None:
             details.append(f"{key}={spec[key]}")
     if details:

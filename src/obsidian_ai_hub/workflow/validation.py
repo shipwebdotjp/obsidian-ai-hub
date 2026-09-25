@@ -607,6 +607,11 @@ def _validate_capability_node(
             isinstance(attempts, bool) or not isinstance(attempts, int) or attempts < 0
         ):
             errors.append(f"Node '{node_id}': retry.max_attempts は非負整数が必要です")
+    strict = config.get("fail_on_output_mismatch")
+    if strict is not None and not isinstance(strict, bool):
+        errors.append(
+            f"Node '{node_id}': fail_on_output_mismatch は boolean が必要です"
+        )
     return errors
 
 
@@ -821,6 +826,49 @@ def _validate_loop_node(
                 f"Node '{node_id}': loop_result に到達できない子 Node があります: {orphan}"
             )
     return errors
+
+
+def collect_graph_warnings(
+    *,
+    nodes: list[dict[str, Any]],
+    read_only: Optional[Callable[[str], bool]] = None,
+) -> list[str]:
+    """Return non-blocking warnings for a revision graph.
+
+    Currently flags capability Nodes whose capability can write or perform an
+    external operation, so a mostly read-only workflow does not silently gain
+    write authority. Warnings never block save or publish.
+    """
+    if read_only is None:
+        return []
+    warnings: list[str] = []
+    for node in nodes or []:
+        if node.get("node_type") != "capability":
+            continue
+        config = node.get("config") or {}
+        if not isinstance(config, dict):
+            continue
+        key = str(config.get("capability_key") or "")
+        if not key:
+            continue
+        if not read_only(key):
+            warnings.append(
+                f"Node '{node.get('node_id')}': Capability '{key}' は書込・外部操作を含みます"
+            )
+        strict = config.get("fail_on_output_mismatch") is True
+        retry = config.get("retry")
+        attempts = retry.get("max_attempts") if isinstance(retry, dict) else None
+        if (
+            strict
+            and isinstance(attempts, int)
+            and not isinstance(attempts, bool)
+            and attempts > 0
+        ):
+            warnings.append(
+                f"Node '{node.get('node_id')}': strict 出力と retry の併用は、"
+                "契約違反時に副作用が再実行されうるため非推奨です"
+            )
+    return warnings
 
 
 def _validate_scope_connectivity(

@@ -11,7 +11,8 @@ Run は **`published` Revision からのみ** 作成できます。
 エディタの **実行入力** に値を入れて **実行** を押すか、API の
 `POST /api/v1/workflows/revisions/:revision_id/runs` を使います。
 
-入力は Revision の `inputs_schema` で検証されます。
+入力は Revision の `inputs_schema` で検証されます。スキーマで `default` を設定した項目は、
+入力が空のときその値が自動で補完されます（ネストした object も対象）。
 
 ## 承認
 
@@ -48,7 +49,7 @@ Agent Node は実行時点の最新の Agent 設定（system prompt・model・�
 | ヘッダー | Run ID と状態。状態に応じた操作ボタン。 |
 | 概要 | 作成日時、結果要約、エラー要約、実行入力の JSON。 |
 | グラフ | 実行時スナップショットの読み取り専用グラフ。Node ごとの状態表示と実行回数。 |
-| Node | 選択中 Node の `status` / `attempt` / 出力（またはエラー）。未選択時は全 Node。 |
+| Node | 選択中 Node の `status` / `attempt` / 出力（またはエラー）。Agent 子 Run を持つ Node は実行したツール名と回数も表示。未選択時は全 Node。 |
 | Events | 追記のみの監査イベント一覧。 |
 
 ### グラフ表示とノード選択
@@ -133,6 +134,16 @@ Run 詳細では、要確認の理由（外部処理が**完了済み**か**結�
 - 承認要否はスナップショットの Node 集合から再判定されます。
 - 新しい Run は `source_run_id` で元 Run を参照し、`run_rerun_created` イベントが記録されます。
 - 非終端 Run は再実行できません（`409`）。
+
+### Run を削除する
+
+終端 Run（完了・未完了・失敗・取消）は、Workflow 詳細の Run 一覧または Run 詳細の **削除** から
+実行履歴を削除できます。確認後、Run・Node・Activation・Event がまとめて削除されます。
+
+- 非終端 Run は削除できません（`409`）。先に取消などで終端にしてください。
+- 削除は取り消せません。監査目的で残す場合は 30 日の保持期間に任せてください。
+- Scheduler 発火や one-shot の記録行は残り、Run へのリンクだけが外れます（一覧では「削除済み」と表示）。
+- 子の Agent / Research / Coding / HITL 実行は削除されません。それぞれの画面から確認できます。
 
 ## 保持期間と機密情報
 

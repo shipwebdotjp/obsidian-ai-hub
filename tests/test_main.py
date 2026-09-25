@@ -8,6 +8,179 @@ import pytest
 from obsidian_ai_hub import main as main_module
 
 
+def test_workflow_wait_requires_workflow_run(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["prog", "--workflow-wait"])
+
+    with patch("argparse.ArgumentParser.error") as mock_error:
+        mock_error.side_effect = SystemExit(2)
+        with patch.object(sys, "exit"):
+            try:
+                main_module.main()
+            except SystemExit:
+                pass
+        mock_error.assert_called_once()
+        assert "requires --workflow-run" in mock_error.call_args[0][0]
+
+
+def test_workflow_ops_are_exclusive(monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["prog", "--workflow-run", "wrev_1", "--workflow-import", "x.json"],
+    )
+
+    with patch("argparse.ArgumentParser.error") as mock_error:
+        mock_error.side_effect = SystemExit(2)
+        with patch.object(sys, "exit"):
+            try:
+                main_module.main()
+            except SystemExit:
+                pass
+        mock_error.assert_called_once()
+        assert "同時に指定できません" in mock_error.call_args[0][0]
+
+
+def test_workflow_timeout_requires_wait_even_at_default(monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["prog", "--workflow-run", "wrev_1", "--workflow-timeout", "1800"],
+    )
+
+    with patch("argparse.ArgumentParser.error") as mock_error:
+        mock_error.side_effect = SystemExit(2)
+        with patch.object(sys, "exit"):
+            try:
+                main_module.main()
+            except SystemExit:
+                pass
+        mock_error.assert_called_once()
+        assert "requires --workflow-wait" in mock_error.call_args[0][0]
+
+
+def test_workflow_publish_dispatches_to_cli(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["prog", "--workflow-publish", "wrev_1"])
+
+    with patch(
+        "obsidian_ai_hub.workflow.cli.publish_revision", return_value=0
+    ) as mock_publish:
+        with patch.object(sys, "exit") as mock_exit:
+            main_module.main()
+    mock_publish.assert_called_once_with("wrev_1")
+    mock_exit.assert_called_once_with(0)
+
+
+def test_vault_write_dispatches_with_file_and_overwrite(monkeypatch, tmp_path):
+    content_file = tmp_path / "note.md"
+    content_file.write_text("body", encoding="utf-8")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "prog",
+            "--vault-write",
+            "project/x.md",
+            "--vault-content",
+            str(content_file),
+            "--vault-overwrite",
+        ],
+    )
+
+    with patch(
+        "obsidian_ai_hub.vault_ops.main_vault_write", return_value=0
+    ) as mock_write:
+        with patch.object(sys, "exit") as mock_exit:
+            main_module.main()
+    mock_write.assert_called_once_with(
+        "project/x.md", str(content_file), overwrite=True
+    )
+    mock_exit.assert_called_once_with(0)
+
+
+def test_vault_write_and_workflow_ops_are_exclusive(monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["prog", "--vault-write", "a.md", "--workflow-publish", "wrev_1"],
+    )
+
+    with patch("argparse.ArgumentParser.error") as mock_error:
+        mock_error.side_effect = SystemExit(2)
+        with patch.object(sys, "exit"):
+            try:
+                main_module.main()
+            except SystemExit:
+                pass
+        mock_error.assert_called_once()
+        assert "併用できません" in mock_error.call_args[0][0]
+
+
+def test_agent_create_dispatches(monkeypatch, tmp_path):
+    spec = tmp_path / "agent.json"
+    spec.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", ["prog", "--agent-create", str(spec)])
+
+    with patch(
+        "obsidian_ai_hub.agents.cli.main_agent_create", return_value=0
+    ) as mock_create:
+        with patch.object(sys, "exit") as mock_exit:
+            main_module.main()
+    mock_create.assert_called_once_with(str(spec))
+    mock_exit.assert_called_once_with(0)
+
+
+def test_task_agent_rejects_new_operation_flags(monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["prog", "--task-agent", "do it", "--workflow-publish", "wrev_1"],
+    )
+
+    with patch("argparse.ArgumentParser.error") as mock_error:
+        mock_error.side_effect = SystemExit(2)
+        with patch.object(sys, "exit"):
+            try:
+                main_module.main()
+            except SystemExit:
+                pass
+        mock_error.assert_called_once()
+        assert "cannot be combined" in mock_error.call_args[0][0]
+
+
+def test_workflow_op_rejects_blank_value(monkeypatch):
+    monkeypatch.setattr(
+        sys, "argv", ["prog", "--workflow-import", "", "--workflow-run", "wrev_1"]
+    )
+
+    with patch("argparse.ArgumentParser.error") as mock_error:
+        mock_error.side_effect = SystemExit(2)
+        with patch.object(sys, "exit"):
+            try:
+                main_module.main()
+            except SystemExit:
+                pass
+        mock_error.assert_called_once()
+        assert "空でない値" in mock_error.call_args[0][0]
+
+
+def test_workflow_input_requires_name_value(monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["prog", "--workflow-run", "wrev_1", "--workflow-input", "bad"],
+    )
+
+    with patch("argparse.ArgumentParser.error") as mock_error:
+        mock_error.side_effect = SystemExit(2)
+        with patch.object(sys, "exit"):
+            try:
+                main_module.main()
+            except SystemExit:
+                pass
+        mock_error.assert_called_once()
+        assert "NAME=VALUE" in mock_error.call_args[0][0]
+
+
 def test_research_agent_cli_requires_theme(monkeypatch):
     monkeypatch.setattr(sys, "argv", ["prog", "--research-agent"])
 

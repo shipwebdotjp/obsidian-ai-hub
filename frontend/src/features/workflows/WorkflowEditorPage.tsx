@@ -66,6 +66,13 @@ const NODE_TYPE_LABELS: Record<WorkflowNodeType, string> = {
 
 const NODE_TYPES = Object.keys(NODE_TYPE_LABELS) as WorkflowNodeType[];
 
+function capabilityOptionSuffix(capability: WorkflowCapabilityRecord): string {
+  const parts: string[] = [];
+  if (!capability.read_only) parts.push("書込・外部");
+  if (capability.approval_policy === "plan_required") parts.push("要承認");
+  return parts.length > 0 ? ` (${parts.join("・")})` : "";
+}
+
 function JsonArea({
   label,
   value,
@@ -129,6 +136,7 @@ export default function WorkflowEditorPage() {
     () =>
       (location.state as { serverIssues?: string[] } | null)?.serverIssues ?? [],
   );
+  const [serverWarnings, setServerWarnings] = useState<string[]>([]);
   const [runInputs, setRunInputs] = useState<Record<string, unknown>>({});
   const [runErrors, setRunErrors] = useState<string[]>([]);
   const [dirty, setDirty] = useState(false);
@@ -316,6 +324,7 @@ export default function WorkflowEditorPage() {
       setDirty(false);
       setStatus("保存しました");
       setServerIssues([]);
+      setServerWarnings([]);
       return true;
     } catch (e) {
       setError(getApiErrorMessage(e, "保存に失敗しました"));
@@ -325,10 +334,12 @@ export default function WorkflowEditorPage() {
 
   const onValidate = async () => {
     setServerIssues([]);
+    setServerWarnings([]);
     if (dirty && !(await save())) return;
     try {
       const res = await validateWorkflowRevision(revisionId);
       setServerIssues(res.errors);
+      setServerWarnings(res.warnings ?? []);
       setStatus(res.valid ? "検証 OK" : "検証エラーがあります");
     } catch (e) {
       setError(getApiErrorMessage(e, "検証に失敗しました"));
@@ -483,7 +494,11 @@ export default function WorkflowEditorPage() {
         </div>
       </header>
 
-      {(error || status || localIssues.length > 0 || serverIssues.length > 0) && (
+      {(error ||
+        status ||
+        localIssues.length > 0 ||
+        serverIssues.length > 0 ||
+        serverWarnings.length > 0) && (
         <div className="border-b border-slate-200 bg-white px-4 py-2 text-xs">
           {error && <p className="text-rose-700">{error}</p>}
           {status && <p className="text-slate-600">{status}</p>}
@@ -506,6 +521,13 @@ export default function WorkflowEditorPage() {
                     issue.message
                   )}
                 </li>
+              ))}
+            </ul>
+          )}
+          {serverWarnings.length > 0 && (
+            <ul data-testid="workflow-server-warnings" className="text-amber-700">
+              {serverWarnings.map((warning) => (
+                <li key={warning}>{warning}</li>
               ))}
             </ul>
           )}
@@ -579,7 +601,7 @@ export default function WorkflowEditorPage() {
                     .map((c) => (
                       <option key={c.capability_key} value={c.capability_key}>
                         {c.capability_key}
-                        {c.approval_policy === "plan_required" ? " (要承認)" : ""}
+                        {capabilityOptionSuffix(c)}
                       </option>
                     ))}
                 </select>
@@ -717,15 +739,21 @@ export default function WorkflowEditorPage() {
                       .map((c) => (
                         <option key={c.capability_key} value={c.capability_key}>
                           {c.capability_key}
-                          {c.approval_policy === "plan_required"
-                            ? " (要承認)"
-                            : ""}
+                          {capabilityOptionSuffix(c)}
                         </option>
                       ))}
                   </select>
                   {selectedCapability?.description && (
                     <p className="text-[10px] leading-tight text-slate-500">
                       {selectedCapability.description}
+                    </p>
+                  )}
+                  {selectedCapability && !selectedCapability.read_only && (
+                    <p
+                      data-testid="cap-write-warning"
+                      className="text-[10px] leading-tight text-amber-700"
+                    >
+                      この Capability は書込・外部操作を含みます。
                     </p>
                   )}
                   {selectedCapability?.target_schema && (
@@ -804,6 +832,22 @@ export default function WorkflowEditorPage() {
                         })
                       }
                     />
+                  </label>
+                  <label className="flex items-center gap-1 text-slate-700">
+                    <input
+                      type="checkbox"
+                      className="cursor-pointer"
+                      data-testid="cap-fail-on-output-mismatch"
+                      checked={
+                        selectedNode.config.fail_on_output_mismatch === true
+                      }
+                      onChange={(event) =>
+                        updateNodeConfig({
+                          fail_on_output_mismatch: event.target.checked,
+                        })
+                      }
+                    />
+                    エラー出力・schema不一致で失敗
                   </label>
                 </>
               )}

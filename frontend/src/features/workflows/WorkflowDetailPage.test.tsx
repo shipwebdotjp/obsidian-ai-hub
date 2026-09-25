@@ -7,6 +7,7 @@ import {
   createWorkflowUserTemplate,
   deleteWorkflow,
   deleteWorkflowRevision,
+  deleteWorkflowRun,
   exportWorkflowRevision,
   getWorkflow,
   listWorkflowUserTemplates,
@@ -20,6 +21,7 @@ vi.mock("../../api/client", () => ({
   createWorkflowUserTemplate: vi.fn(),
   deleteWorkflow: vi.fn(),
   deleteWorkflowRevision: vi.fn(),
+  deleteWorkflowRun: vi.fn(),
   exportWorkflowRevision: vi.fn(),
   getWorkflow: vi.fn(),
   listWorkflowUserTemplates: vi.fn(),
@@ -30,6 +32,7 @@ vi.mock("../../api/client", () => ({
 const mockGetWorkflow = vi.mocked(getWorkflow);
 const mockCreateWorkflowRevision = vi.mocked(createWorkflowRevision);
 const mockDeleteWorkflowRevision = vi.mocked(deleteWorkflowRevision);
+const mockDeleteWorkflowRun = vi.mocked(deleteWorkflowRun);
 const mockUpdateWorkflow = vi.mocked(updateWorkflow);
 const mockDeleteWorkflow = vi.mocked(deleteWorkflow);
 const mockCreateWorkflowUserTemplate = vi.mocked(createWorkflowUserTemplate);
@@ -72,6 +75,7 @@ beforeEach(() => {
     success: true,
     revision_id: "wrev_draft",
   });
+  mockDeleteWorkflowRun.mockResolvedValue({ success: true, run_id: "wrun_done" });
   mockUpdateWorkflow.mockResolvedValue(sampleWorkflow as any);
   mockDeleteWorkflow.mockResolvedValue({ success: true, workflow_id: "wf_1" });
   mockCreateWorkflowUserTemplate.mockResolvedValue({} as any);
@@ -110,6 +114,56 @@ describe("WorkflowDetailPage revision delete", () => {
     await user.click(screen.getByRole("button", { name: "削除" }));
     expect(window.confirm).toHaveBeenCalled();
     expect(mockDeleteWorkflowRevision).not.toHaveBeenCalled();
+  });
+});
+
+describe("WorkflowDetailPage run delete", () => {
+  const runWorkflow = {
+    ...sampleWorkflow,
+    revisions: [],
+    runs: [
+      {
+        run_id: "wrun_done",
+        status: "completed",
+        created_at: "2026-09-25T00:00:00+00:00",
+      },
+      {
+        run_id: "wrun_running",
+        status: "running",
+        created_at: "2026-09-25T00:00:00+00:00",
+      },
+    ],
+  };
+
+  it("shows the delete button only for terminal runs", async () => {
+    mockGetWorkflow.mockResolvedValue(runWorkflow as any);
+    renderPage();
+    await screen.findByText("テストワークフロー");
+    expect(screen.getAllByTestId(/^run-delete-/)).toHaveLength(1);
+  });
+
+  it("deletes a terminal run after confirmation and reloads", async () => {
+    const user = userEvent.setup();
+    mockGetWorkflow.mockResolvedValue(runWorkflow as any);
+    renderPage();
+    await screen.findByText("テストワークフロー");
+    await user.click(screen.getByTestId("run-delete-wrun_done"));
+    expect(window.confirm).toHaveBeenCalled();
+    await waitFor(() =>
+      expect(mockDeleteWorkflowRun).toHaveBeenCalledWith("wrun_done"),
+    );
+    await waitFor(() => expect(mockGetWorkflow).toHaveBeenCalledTimes(2));
+  });
+
+  it("does not delete a run when the confirmation is cancelled", async () => {
+    const user = userEvent.setup();
+    vi.mocked(window.confirm).mockReturnValue(false);
+    mockGetWorkflow.mockResolvedValue(runWorkflow as any);
+    renderPage();
+    await screen.findByText("テストワークフロー");
+    await user.click(screen.getByTestId("run-delete-wrun_done"));
+    expect(window.confirm).toHaveBeenCalled();
+    expect(mockDeleteWorkflowRun).not.toHaveBeenCalled();
   });
 });
 

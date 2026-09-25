@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from obsidian_ai_hub.agents import runtime, store
@@ -150,3 +151,43 @@ def main_agent_chat(
 
     if exit_code != 0:
         sys.exit(exit_code)
+
+
+def main_agent_create(path: str) -> int:
+    """Create an Agent from a JSON file and print the stored record.
+
+    Required keys: ``name`` / ``system_prompt``. Optional: ``tool_ids`` /
+    ``delegate_agent_ids`` / ``provider`` / ``model`` / ``advanced_params``.
+    Returns 1 when the file or payload cannot be used.
+    """
+
+    def _fail(message: str) -> int:
+        print(
+            json.dumps(
+                {"created": False, "error": message},
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 1
+
+    try:
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        return _fail(str(exc))
+    if not isinstance(payload, dict):
+        return _fail("Agent JSON は object が必要です")
+    try:
+        agent = store.create_agent(
+            name=str(payload.get("name") or ""),
+            system_prompt=str(payload.get("system_prompt") or ""),
+            tool_ids=payload.get("tool_ids") or (),
+            delegate_agent_ids=payload.get("delegate_agent_ids") or (),
+            provider=payload.get("provider"),
+            model=payload.get("model"),
+            advanced_params=payload.get("advanced_params"),
+        )
+    except (ValueError, TypeError, AttributeError) as exc:
+        return _fail(str(exc))
+    print(json.dumps({"created": True, "agent": agent}, ensure_ascii=False, indent=2))
+    return 0

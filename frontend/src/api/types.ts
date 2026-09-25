@@ -1163,6 +1163,8 @@ export interface WorkflowSchemaField {
   maximum?: number;
   minLength?: number;
   maxLength?: number;
+  minItems?: number;
+  maxItems?: number;
   pattern?: string;
   format?: string;
   properties?: Record<string, WorkflowSchemaField>;
@@ -1180,6 +1182,7 @@ export interface WorkflowCapabilityRecord {
   description: string;
   enabled: boolean;
   approval_policy: string;
+  read_only: boolean;
   workflow_only: boolean;
   inputs_schema?: WorkflowSchemaField | null;
   target_schema?: WorkflowSchemaField | null;
@@ -1288,6 +1291,12 @@ export interface WorkflowRunNode {
   effects?: string[] | null;
   cancel_outcome?: WorkflowCancelOutcome | null;
   attention_reason?: string | null;
+  /** Present for Agent child nodes in the Run detail response. */
+  child_run?: {
+    run_id: string;
+    status?: string | null;
+    tool_calls: { tool_name: string; count: number }[];
+  } | null;
   started_at?: string | null;
   finished_at?: string | null;
 }
@@ -1346,6 +1355,7 @@ export interface WorkflowListResponse {
 export interface WorkflowValidationResponse {
   valid: boolean;
   errors: string[];
+  warnings?: string[];
 }
 
 export interface TextTemplatePreviewResponse {

@@ -155,7 +155,19 @@ class DefaultNodeRunner:
         output = parse_json_object(result.summary)
         if output is None:
             output = {"summary": result.summary}
-        self._warn_output_mismatch(str(key), output, context)
+        mismatch_errors = self._output_mismatch_errors(str(key), output, context)
+        if mismatch_errors and bool(config.get("fail_on_output_mismatch")):
+            # Strict mode: the capability ran, but its result cannot be trusted
+            # as the declared output. Nothing downstream may consume it.
+            return NodeOutcome(
+                status="failed",
+                error=(
+                    "Capability 出力が strict 検証に失敗しました: "
+                    + "; ".join(mismatch_errors)
+                ),
+                child_kind=result.child_kind,
+                child_run_id=result.child_run_id,
+            )
         return NodeOutcome(
             status="succeeded",
             output=output,
@@ -165,22 +177,33 @@ class DefaultNodeRunner:
         )
 
     @staticmethod
-    def _warn_output_mismatch(
+    def _output_mismatch_errors(
         key: str, output: dict[str, Any], context: dict[str, Any]
-    ) -> None:
-        """Record (never fail) a mismatch against a declared output schema."""
+    ) -> list[str]:
+        """Return output-contract violations and record them as an event.
+
+        A top-level ``error`` key counts as a violation because every
+        registry-tool wrapper reports failure that way (for example
+        ``vault_read_file`` returns ``{"error": "File not found"}`` with a
+        successful tool status). Declared schemas allow additional properties,
+        so the schema check alone would miss that shape.
+        """
         from obsidian_ai_hub.tasks.capability_schemas import (
             capability_output_schema,
         )
         from obsidian_ai_hub.workflow import store as workflow_store
         from obsidian_ai_hub.workflow.models import validate_value_against_schema
 
+        errors: list[str] = []
+        if "error" in output:
+            errors.append(f"capability がエラーを返しました: {output['error']!r}")
         schema = capability_output_schema(key)
-        if not schema:
-            return
-        errors = validate_value_against_schema(output, schema, path="output")
+        if schema:
+            errors.extend(
+                validate_value_against_schema(output, schema, path="output")
+            )
         if not errors:
-            return
+            return []
         workflow_store.append_event(
             str(context["run_id"]),
             "capability_output_schema_mismatch",
@@ -191,6 +214,7 @@ class DefaultNodeRunner:
                 "errors": errors,
             },
         )
+        return errors
 
     @staticmethod
     def _workflow_cancelling(run_id: str) -> bool:

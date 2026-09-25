@@ -43,16 +43,49 @@ temporary copy of `export.xml` (see `docs/healthcare-import/plan.md`).
 
 AGENTS.md の運用に従い、実データベース（`~/.config/obsidian-ai-hub/memory.sqlite3`）で
 サーバーを使って動作確認する場合は、確認終了後に対象データを必ず削除する。
+可能な限り先に隔離サンドボックス（後述）を使い、実データベースへの書き込みを避ける。
 
-- テスト用データ（Workflow / Agent / タスクなど）は名前に識別用プレフィックス
-  （例: `__opcheck_`）を付け、作成した ID を控えておく。
-- 確認終了後、従属レコードを依存順に削除する。Workflow の場合:
-  `workflow_events` → `workflow_activations` → `workflow_run_nodes` →
-  `workflow_runs` → `workflow_edges` → `workflow_nodes` →
-  `workflow_revisions` → `workflows`。
-- 削除前後に対象件数を数え、削除したデータの識別情報（ID・名前・作成時刻）を報告する。
-- 削除後に対象が残っていないことを SQL で確認する。
-- ユーザーデータおよび確認対象外のレコードは変更・削除しない。
+### 操作検証の定型
+
+1. 対象データには識別用プレフィックス（例: `__opcheck_`）を付け、作成した ID を控える。
+   Workflow / Agent / Vault をまとめて検証する場合は一時 Workflow と一時 Vault ファイルを作る。
+2. CLI（`--workflow-import/validate/publish/run --workflow-approve --workflow-wait`）か
+   Web API で実行する。Run の確認は `--workflow-run` の JSON、または
+   `GET /api/v1/workflows/runs/:id`（`nodes` + `events`）で行う。
+3. 失敗系は「どの Node まで実行されたか」で確認する。
+   - 停止してほしい Node の `node_started` イベントが無いこと
+   - 子 Run を持つ Node は `child_kind` / `child_run_id` が空であること
+   - Agent 子 Run の場合、子セッションが作られていないこと
+     （`agent_sessions` を Run ID の title で検索）
+4. 終端 Run の後片付けは `DELETE /api/v1/workflows/runs/:run_id` を使う
+   （非終端は 409。Workflow 本体を残したまま履歴だけ消せる）。テスト用 Workflow は
+   `DELETE /api/v1/workflows/:id` で定義ごと削除する。従属レコードは Store が一括で
+   削除するため、通常は手動 SQL を書かない。
+5. 一時 Vault ファイルを削除したら、必要に応じて `--sync-vault` でインデックスからも外す。
+6. 削除前後に対象件数を数え、削除したデータの識別情報（ID・名前・作成時刻）を報告する。
+7. 削除後に対象が残っていないことを SQL で確認する。
+8. ユーザーデータおよび確認対象外のレコードは変更・削除しない。
+
+### 隔離サンドボックス（`make opcheck-serve`）
+
+```bash
+make opcheck-serve
+# 127.0.0.1:8767 / .opcheck/ 配下の別 DB・別 Vault
+# token は起動時に表示（OAIHUB_OPCHECK_TOKEN で固定可）
+
+# 別シェルで CLI を使う場合は環境を source する（HTTP を経由せず config を直接読むため）
+source .opcheck/env.sh
+uv run -m obsidian_ai_hub --workflow-import /tmp/wf.json
+uv run -m obsidian_ai_hub --workflow-run wrev_xxx --workflow-execute --workflow-wait
+```
+
+- 本番 DB・Vault・インデックスには触れない。worker は有効で、実 LLM 呼び出しも `.env` の
+  資格情報を使って行われる。
+- サンドボックスは DB / Vault / index / ログ / healthcare / Scheduler Job 定義・状態
+  （`OBSIDIAN_AI_HUB_JOBS_DIR`）/ モデルキャッシュを sandbox 内へ向ける。`config/` と
+  `plugins/` は読み取りのみ。
+- CLI の `--workflow-run --execute` はこのプロセスで対象 Run だけを claim して実行する。
+- `.opcheck/` は gitignore 済み。やり直す場合はディレクトリごと削除してよい。
 
 ## ブラウザ E2E の扱い
 

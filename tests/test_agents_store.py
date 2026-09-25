@@ -127,6 +127,24 @@ def test_fail_run():
     assert failed_run["error_message"] == "LLM call failed"
 
 
+def test_summarize_tool_calls_counts_starts():
+    agent = store.create_agent(name="Tool Summary Agent", system_prompt="Prompt")
+    session = store.create_session(agent["agent_id"])
+    _, run = store.start_user_run(session["session_id"], "ツール集計")
+    run_id = run["run_id"]
+
+    store.append_run_event(run_id, "tool_call_detected", {"tool_name": "vault_search"})
+    store.append_run_event(run_id, "tool_call_start", {"tool_name": "vault_search"})
+    store.append_run_event(run_id, "tool_call_start", {"tool_name": "vault_search"})
+    store.append_run_event(run_id, "tool_call_start", {"tool_name": "vault_read_file"})
+    store.append_run_event(run_id, "tool_call_end", {"tool_name": "vault_search"})
+
+    assert store.summarize_tool_calls(run_id) == [
+        {"tool_name": "vault_search", "count": 2},
+        {"tool_name": "vault_read_file", "count": 1},
+    ]
+
+
 def test_cascade_deletions():
     agent = store.create_agent(name="Cascade Agent", system_prompt="Prompt")
     session = store.create_session(agent["agent_id"])

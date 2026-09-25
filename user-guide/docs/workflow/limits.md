@@ -40,7 +40,7 @@ title: 制約とトラブルシューティング
 
 許可: `object` / `properties` / `required`、primitive（string / integer / number / boolean）、`enum`、配列、
 および `additionalProperties` / `description` / `title` / `default` / `minimum` / `maximum` /
-`minLength` / `maxLength` / `pattern` など一部の制約。
+`minLength` / `maxLength` / `minItems` / `maxItems` / `pattern` など一部の制約。
 
 未対応: `$ref` / `oneOf` / `anyOf` / `allOf` / `not` / `const` / `if`-`then`-`else` / 再帰など。
 

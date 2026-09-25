@@ -36,6 +36,8 @@ const SUPPORTED_KEYS = new Set([
   "maximum",
   "minLength",
   "maxLength",
+  "minItems",
+  "maxItems",
   "pattern",
   "format",
 ]);
@@ -165,6 +167,31 @@ export function validateSchemaSubset(
       issues.push(
         ...validateSchemaSubset(node.items, `${path}.items`, depth + 1),
       );
+    }
+    for (const key of ["minItems", "maxItems"] as const) {
+      const limit = node[key];
+      if (
+        limit !== undefined &&
+        limit !== null &&
+        (!Number.isInteger(limit) || (limit as number) < 0)
+      ) {
+        issues.push({
+          path: `${path}.${key}`,
+          message: "非負整数が必要です",
+        });
+      }
+    }
+    const minItems = node.minItems;
+    const maxItems = node.maxItems;
+    if (
+      Number.isInteger(minItems) &&
+      Number.isInteger(maxItems) &&
+      (minItems as number) > (maxItems as number)
+    ) {
+      issues.push({
+        path,
+        message: "minItems は maxItems 以下である必要があります",
+      });
     }
   }
   return issues;

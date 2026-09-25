@@ -369,6 +369,12 @@ function SchemaValueField({
       );
     }
     const list = Array.isArray(value) ? value : [];
+    const minItems =
+      typeof field.minItems === "number" ? field.minItems : undefined;
+    const maxItems =
+      typeof field.maxItems === "number" ? field.maxItems : undefined;
+    const canRemove = minItems === undefined || list.length > minItems;
+    const canAdd = maxItems === undefined || list.length < maxItems;
     return (
       <div className="block text-sm">
         {header}
@@ -395,7 +401,8 @@ function SchemaValueField({
               />
               <button
                 type="button"
-                className="cursor-pointer text-rose-700"
+                className="cursor-pointer text-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={!canRemove}
                 onClick={() => onChange(list.filter((_, i) => i !== index))}
               >
                 削除
@@ -404,7 +411,8 @@ function SchemaValueField({
           ))}
           <button
             type="button"
-            className="cursor-pointer rounded border border-slate-300 px-2 py-0.5 text-[11px]"
+            className="cursor-pointer rounded border border-slate-300 px-2 py-0.5 text-[11px] disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={!canAdd}
             onClick={() => onChange([...list, ""])}
           >
             追加

@@ -21,7 +21,8 @@ Loop の入出力マッピング・Agent 入力・スキーマ定義（`inputs_s
     "relative_path": {"$ref": "run.inputs.output_path"},
     "content": {"$ref": "nodes.<agent_node_id>.output.note_body"}
   },
-  "retry": {"max_attempts": 1, "backoff_seconds": 0}
+  "retry": {"max_attempts": 1, "backoff_seconds": 0},
+  "fail_on_output_mismatch": false
 }
 ```
 
@@ -31,6 +32,13 @@ Loop の入出力マッピング・Agent 入力・スキーマ定義（`inputs_s
   値に型付き参照は使えません。
 - `inputs` は Capability の入力 schema に対応する値、または [型付き参照](data-flow.md) です。
 - `retry` は任意。`max_attempts` は非負整数です。
+- `fail_on_output_mismatch`（既定オフ）をオンにすると、Capability が次の出力を返したとき Node を
+  失敗させ、後続 Node へ渡しません（エディタの「エラー出力・schema不一致で失敗」）。
+  - 出力に `error` キーがある（例: `vault_read_file` のファイル不在 `{"error": "File not found"}`）
+  - 宣言済みの出力 schema に一致しない
+  ファイル存在の確認など「無ければ止めたい」読み取り系で使います。副作用のある Capability では、
+  外部処理が成功していても効果が記録されないため推奨しません。また `retry.max_attempts` と
+  併用すると、契約違反時に副作用が再実行されうるため、検証の警告を確認してください。
 
 ### ワークフロー専用 Capability
 

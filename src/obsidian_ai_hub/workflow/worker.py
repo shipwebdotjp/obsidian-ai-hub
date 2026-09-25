@@ -14,9 +14,21 @@ logger = logging.getLogger(__name__)
 _TERMINAL_KINDS = frozenset({"completed", "incomplete", "failed"})
 
 
-def process_one(instance_id: str, runner: object = None) -> bool:
-    """Claim and execute at most one queued run. Returns False when idle."""
-    claimed = workflow_store.claim_run(instance_id)
+def process_one(
+    instance_id: str,
+    runner: object = None,
+    *,
+    run_id: Optional[str] = None,
+) -> bool:
+    """Claim and execute at most one queued run. Returns False when idle.
+
+    ``run_id`` claims that specific queued run (CLI ``--execute``) instead of
+    the oldest queued run the Web worker prefers.
+    """
+    if run_id is not None:
+        claimed = workflow_store.claim_specific_run(instance_id, run_id)
+    else:
+        claimed = workflow_store.claim_run(instance_id)
     if claimed is None:
         return False
     run_id = str(claimed["run_id"])

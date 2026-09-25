@@ -214,6 +214,42 @@ function PropertyEditor({
               )}
             </select>
           </div>
+          <div className="flex items-center gap-2">
+            <label className="flex items-center gap-1 text-[10px] text-slate-500">
+              minItems
+              <input
+                type="number"
+                min={0}
+                data-testid={`${testIdPrefix}-min-items`}
+                className="w-16 rounded border border-slate-300 px-1 py-0.5 text-[11px]"
+                value={field.minItems ?? ""}
+                onChange={(event) => {
+                  const next: WorkflowSchemaField = { ...field, type: "array" };
+                  const raw = event.target.value;
+                  if (raw === "") delete next.minItems;
+                  else next.minItems = Math.max(0, Number(raw) || 0);
+                  onUpdate(next);
+                }}
+              />
+            </label>
+            <label className="flex items-center gap-1 text-[10px] text-slate-500">
+              maxItems
+              <input
+                type="number"
+                min={0}
+                data-testid={`${testIdPrefix}-max-items`}
+                className="w-16 rounded border border-slate-300 px-1 py-0.5 text-[11px]"
+                value={field.maxItems ?? ""}
+                onChange={(event) => {
+                  const next: WorkflowSchemaField = { ...field, type: "array" };
+                  const raw = event.target.value;
+                  if (raw === "") delete next.maxItems;
+                  else next.maxItems = Math.max(0, Number(raw) || 0);
+                  onUpdate(next);
+                }}
+              />
+            </label>
+          </div>
           {field.items?.type === "object" && (
             <SchemaAuthoringForm
               schema={field.items}

@@ -26,11 +26,10 @@ import {
   RUN_GRAPH_STATUS_LABELS,
   runGraphOf,
 } from "./runGraphModel";
-import { runStatusLabel } from "./runStatusLabels";
+import { runStatusLabel, isTerminalRunStatus, TERMINAL_RUN_STATUSES } from "./runStatusLabels";
+import { confirmAndDeleteRun } from "./runActions";
 import InputsSchemaForm from "./InputsSchemaForm";
 import WorkflowCanvas from "./WorkflowCanvas";
-
-const TERMINAL = new Set(["completed", "incomplete", "failed", "cancelled"]);
 
 const CHILD_RUN_PATHS: Record<string, string> = {
   agent: ROUTES.AGENTS,
@@ -127,7 +126,7 @@ export default function WorkflowRunPage() {
     };
     void stream();
     const poll = window.setInterval(() => {
-      if (TERMINAL.has(statusRef.current)) return;
+      if (isTerminalRunStatus(statusRef.current)) return;
       void reloadRef.current();
     }, 10000);
     return () => {
@@ -145,7 +144,7 @@ export default function WorkflowRunPage() {
       const updated = await action();
       await reload();
       setError(null);
-      if (!TERMINAL.has(updated.status)) {
+      if (!TERMINAL_RUN_STATUSES.has(updated.status)) {
         setGeneration((value) => value + 1);
       }
     } catch (e) {
@@ -165,6 +164,19 @@ export default function WorkflowRunPage() {
         ?.detail;
       setRerunErrors(Array.isArray(detail?.errors) ? detail.errors : []);
       setError(getApiErrorMessage(e, "再実行に失敗しました"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onDelete = async () => {
+    setBusy(true);
+    try {
+      if (await confirmAndDeleteRun(runId)) {
+        navigate(ROUTES.WORKFLOWS);
+      }
+    } catch (e) {
+      setError(getApiErrorMessage(e, "Run 削除に失敗しました"));
     } finally {
       setBusy(false);
     }
@@ -250,7 +262,7 @@ export default function WorkflowRunPage() {
               再開
             </button>
           )}
-          {!TERMINAL.has(run.status) && (
+          {!TERMINAL_RUN_STATUSES.has(run.status) && (
             <button
               type="button"
               disabled={busy}
@@ -306,7 +318,7 @@ export default function WorkflowRunPage() {
               </button>
             </>
           )}
-          {TERMINAL.has(run.status) && (
+          {TERMINAL_RUN_STATUSES.has(run.status) && (
             <button
               type="button"
               disabled={busy}
@@ -322,6 +334,17 @@ export default function WorkflowRunPage() {
               className="cursor-pointer rounded bg-slate-900 px-3 py-1 text-xs text-white disabled:opacity-50"
             >
               再実行
+            </button>
+          )}
+          {TERMINAL_RUN_STATUSES.has(run.status) && (
+            <button
+              type="button"
+              disabled={busy}
+              data-testid="run-delete"
+              onClick={() => void onDelete()}
+              className="cursor-pointer rounded bg-rose-800 px-3 py-1 text-xs text-white disabled:opacity-50"
+            >
+              削除
             </button>
           )}
           <Link className="rounded border border-slate-300 px-3 py-1 text-xs" to={ROUTES.WORKFLOWS}>
@@ -476,8 +499,29 @@ export default function WorkflowRunPage() {
                 </td>
                 <td className="border-b border-slate-100 px-2 py-1">{node.status}</td>
                 <td className="border-b border-slate-100 px-2 py-1">{node.attempt}</td>
-                <td className="max-w-md truncate border-b border-slate-100 px-2 py-1 font-mono text-[10px]">
-                  {node.output_json ?? node.error_summary ?? ""}
+                <td className="max-w-md border-b border-slate-100 px-2 py-1 font-mono text-[10px]">
+                  <div className="truncate">
+                    {node.output_json ?? node.error_summary ?? ""}
+                  </div>
+                  {node.child_run && (
+                    <div
+                      data-testid={`run-node-child-tools-${node.activation_id}`}
+                      className="mt-1 flex flex-wrap gap-1 font-sans text-[10px] text-slate-500"
+                    >
+                      {node.child_run.tool_calls.length === 0 ? (
+                        <span>子Runのツール呼び出しはありません</span>
+                      ) : (
+                        node.child_run.tool_calls.map((tool) => (
+                          <span
+                            key={tool.tool_name}
+                            className="rounded bg-slate-100 px-1"
+                          >
+                            {tool.tool_name} ×{tool.count}
+                          </span>
+                        ))
+                      )}
+                    </div>
+                  )}
                 </td>
               </tr>
             ))}

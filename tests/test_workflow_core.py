@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from obsidian_ai_hub.workflow.models import (
+    apply_schema_defaults,
     evaluate_condition,
     resolve_reference,
     validate_schema_subset,
@@ -47,6 +48,43 @@ def test_schema_subset_requires_items_for_array():
     assert validate_schema_subset({"type": "array"}) != []
 
 
+def test_schema_subset_accepts_item_count_limits():
+    schema = {
+        "type": "array",
+        "items": {"type": "string"},
+        "minItems": 1,
+        "maxItems": 5,
+    }
+    assert validate_schema_subset(schema) == []
+    assert validate_schema_subset(
+        {"type": "array", "items": {"type": "string"}, "minItems": -1}
+    ) != []
+    assert validate_schema_subset(
+        {"type": "array", "items": {"type": "string"}, "maxItems": True}
+    ) != []
+    assert validate_schema_subset(
+        {
+            "type": "array",
+            "items": {"type": "string"},
+            "minItems": 3,
+            "maxItems": 1,
+        }
+    ) != []
+
+
+def test_value_validation_enforces_item_count_limits():
+    schema = {
+        "type": "array",
+        "items": {"type": "string"},
+        "minItems": 1,
+        "maxItems": 2,
+    }
+    assert validate_value_against_schema([], schema) != []
+    assert validate_value_against_schema(["a"], schema) == []
+    assert validate_value_against_schema(["a", "b"], schema) == []
+    assert validate_value_against_schema(["a", "b", "c"], schema) != []
+
+
 def test_value_validation_respects_required_and_types():
     schema = {
         "type": "object",
@@ -71,6 +109,71 @@ def test_resolve_reference_paths():
         )
         == "t"
     )
+
+
+def test_apply_schema_defaults_fills_missing_object_values():
+    schema = {
+        "type": "object",
+        "properties": {
+            "focus": {"type": "string", "default": "all"},
+            "ledger_path": {"type": "string", "default": "project/ledger.md"},
+            "nested": {
+                "type": "object",
+                "properties": {"limit": {"type": "integer", "default": 5}},
+            },
+        },
+        "required": ["focus"],
+    }
+    empty: dict = {}
+    filled = apply_schema_defaults(empty, schema)
+    assert filled == {
+        "focus": "all",
+        "ledger_path": "project/ledger.md",
+        "nested": {"limit": 5},
+    }
+    assert empty == {}  # input is not mutated
+
+
+def test_apply_schema_defaults_keeps_present_values_and_expressions():
+    schema = {
+        "type": "object",
+        "properties": {
+            "focus": {"type": "string", "default": "all"},
+            "nested": {
+                "type": "object",
+                "properties": {"limit": {"type": "integer", "default": 5}},
+            },
+        },
+    }
+    expr = {"$expr": {"kind": "date_math", "version": 1, "anchor": "now"}}
+    result = apply_schema_defaults(
+        {"focus": expr, "nested": {"limit": 9}}, schema
+    )
+    assert result["focus"] is expr
+    assert result["nested"] == {"limit": 9}
+
+
+def test_apply_schema_defaults_does_not_inject_into_reference_leaves():
+    schema = {
+        "type": "object",
+        "properties": {
+            "payload": {
+                "type": "object",
+                "properties": {"limit": {"type": "integer", "default": 5}},
+            }
+        },
+    }
+    ref = {"$ref": "run.inputs.other"}
+    result = apply_schema_defaults({"payload": ref}, schema)
+    assert result["payload"] == ref
+    assert set(result["payload"]) == {"$ref"}
+
+    piped = {"$ref": "run.inputs.other", "pipe": [{"op": "upper"}]}
+    piped_result = apply_schema_defaults({"payload": piped}, schema)
+    assert piped_result["payload"] == piped
+
+    expr_root = {"$expr": {"kind": "date_math", "version": 1, "anchor": "now"}}
+    assert apply_schema_defaults(expr_root, schema) is expr_root
 
 
 def test_condition_evaluation():
@@ -258,6 +361,84 @@ def test_target_capability_requires_and_validates_target():
     )
     errors = validate_graph(nodes=[invalid, terminal], edges=edges)
     assert any("target が不正です" in e for e in errors)
+
+
+def test_capability_fail_on_output_mismatch_must_be_boolean():
+    terminal = _node("t", "terminal", {"outcome": "success"})
+    edges = [_edge("e1", "a", "t")]
+
+    invalid = _node(
+        "a",
+        "capability",
+        {
+            "capability_key": "vault_read_file",
+            "inputs": {"relative_path": "a.md"},
+            "fail_on_output_mismatch": "yes",
+        },
+    )
+    errors = validate_graph(nodes=[invalid, terminal], edges=edges)
+    assert any("fail_on_output_mismatch" in e for e in errors)
+
+    valid = _node(
+        "a",
+        "capability",
+        {
+            "capability_key": "vault_read_file",
+            "inputs": {"relative_path": "a.md"},
+            "fail_on_output_mismatch": True,
+        },
+    )
+    assert validate_graph(nodes=[valid, terminal], edges=edges) == []
+
+
+def test_collect_graph_warnings_flags_write_capabilities():
+    from obsidian_ai_hub.workflow.validation import collect_graph_warnings
+
+    nodes = [
+        _node("a", "capability", {"capability_key": "vault_read_file", "inputs": {}}),
+        _node(
+            "b",
+            "capability",
+            {"capability_key": "vault_write_file", "inputs": {}},
+        ),
+        _node("t", "terminal", {"outcome": "success"}),
+    ]
+    read_only = {"vault_read_file": True, "vault_write_file": False}
+    warnings = collect_graph_warnings(
+        nodes=nodes, read_only=lambda key: read_only.get(key, False)
+    )
+    assert len(warnings) == 1
+    assert "vault_write_file" in warnings[0]
+    assert collect_graph_warnings(nodes=nodes) == []
+
+
+def test_collect_graph_warnings_tolerates_non_object_config():
+    from obsidian_ai_hub.workflow.validation import collect_graph_warnings
+
+    nodes = [_node("a", "capability", "not-a-dict")]
+    assert collect_graph_warnings(
+        nodes=nodes, read_only=lambda key: False
+    ) == []
+
+
+def test_collect_graph_warnings_flags_strict_with_retry():
+    from obsidian_ai_hub.workflow.validation import collect_graph_warnings
+
+    nodes = [
+        _node(
+            "a",
+            "capability",
+            {
+                "capability_key": "vault_read_file",
+                "inputs": {},
+                "fail_on_output_mismatch": True,
+                "retry": {"max_attempts": 2},
+            },
+        )
+    ]
+    warnings = collect_graph_warnings(nodes=nodes, read_only=lambda key: True)
+    assert len(warnings) == 1
+    assert "strict" in warnings[0]
 
 
 def test_workflow_catalog_includes_hitl_wait_without_task_agent():

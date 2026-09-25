@@ -96,6 +96,34 @@ def test_dispatch_is_idempotent_per_slot(test_memory_db_path):
     assert len(_runs(workflow_id)) == 1
 
 
+def test_dispatch_fills_input_defaults_from_schema(test_memory_db_path):
+    schema = {
+        "type": "object",
+        "properties": {
+            "focus": {"type": "string", "default": "all"},
+            "limit": {"type": "integer", "default": 5},
+        },
+        "required": ["focus"],
+    }
+    workflow_id, _ = _publish(schema=schema)
+    _, run = scheduling.dispatch_recurring_slot(
+        "job1", "2026-01-01T00:00:00", workflow_id, {}
+    )
+    assert run is not None
+    assert run["inputs"] == {"focus": "all", "limit": 5}
+
+
+def test_one_shot_registration_fills_input_defaults(test_memory_db_path):
+    schema = {
+        "type": "object",
+        "properties": {"focus": {"type": "string", "default": "all"}},
+        "required": ["focus"],
+    }
+    workflow_id, _ = _publish(schema=schema)
+    job = one_shot.register_one_shot_workflow_job(workflow_id, {})
+    assert job["inputs"] == {"focus": "all"}
+
+
 def test_dispatch_creates_waiting_approval_without_side_effect(test_memory_db_path):
     workflow_id, _ = _publish(nodes=[_agent_node(), _terminal()])
     dispatch, run = scheduling.dispatch_recurring_slot(

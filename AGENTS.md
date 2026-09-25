@@ -84,6 +84,9 @@
   total, then stop and commit.
 - Unless the user instructs otherwise, commit the changes after completing up to
   three OCR review runs. Do not leave finished work uncommitted.
+- Instance-only changes with no repository diff (DB rows, Vault files,
+  production configuration) have no commit target: skip OCR review and commit
+  for that work, and report what changed instead.
 - Never let `ocr review` stream to the terminal. Capture its full output from
   the first run, then read the file:
   ```bash
@@ -95,6 +98,10 @@
 - `make serve` / `make serve-restart` はフォアグラウンドの開発用サーバーで、人間の端末専用。エージェントのシェルからはプロセスが残らないため使わない。Web サーバーだけを再起動する場合は `make restart-web`、状態とログは `make status-web` / `make logs-web` / `make errorlogs-web`。
 - Before finishing, stop any foreground server you started (do not leave `make serve` or a multiplexer session running); the LaunchAgent keeps the service up across runs.
 - Clean up any test data you create during operational checks before finishing, including dependent records. Use an identifying name prefix such as `__opcheck_`, report the deleted IDs/counts, and verify nothing remains. Never delete user data.
+- Prefer the isolated sandbox for workflow/agent checks: `make opcheck-serve` runs a second instance on
+  127.0.0.1:8767 with its own DB/Vault/index under `.opcheck/` (workers enabled, real LLM credentials
+  from `.env`). Source `.opcheck/env.sh` before running CLI commands (they read config directly, not
+  over HTTP). Drive runs with `--workflow-run --execute`. See [docs/testing.md](docs/testing.md#隔離サンドボックスmake-opcheck-serve).
 - http://127.0.0.1:8765
 - Production DB Path: ~/.config/obsidian-ai-hub/memory.sqlite3
 

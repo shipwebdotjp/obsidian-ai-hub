@@ -966,6 +966,80 @@ def list_runs(
     return runs, int(total)
 
 
+def delete_run(
+    run_id: str, *, conn: Optional[sqlite3.Connection] = None
+) -> dict[str, Any]:
+    """Delete one terminal run and its Node / Activation / Event history.
+
+    Non-terminal runs are rejected so an in-flight run is never orphaned.
+    Soft references are cleared in the same transaction: schedule dispatches
+    and one-shot jobs keep their rows with a NULL run link, and rerun lineage
+    (``source_run_id``) is nulled. Child runs (Agent / Coding / HITL) are not
+    touched. Raises ``FileNotFoundError`` when the run does not exist and
+    ``ValueError`` when it is non-terminal.
+    """
+    with auto_connection(conn) as (active_conn, is_generated):
+
+        def _do() -> dict[str, Any]:
+            row = active_conn.execute(
+                "SELECT status FROM workflow_runs WHERE run_id = ?;", (run_id,)
+            ).fetchone()
+            if row is None:
+                raise FileNotFoundError(f"Run '{run_id}' not found.")
+            status = str(row["status"])
+            if status not in RUN_TERMINAL_STATUSES:
+                raise ValueError(
+                    f"Run '{run_id}' is {status} and cannot be deleted."
+                )
+            counts = {
+                "events": active_conn.execute(
+                    "SELECT COUNT(*) AS n FROM workflow_events WHERE run_id = ?;",
+                    (run_id,),
+                ).fetchone()["n"],
+                "nodes": active_conn.execute(
+                    "SELECT COUNT(*) AS n FROM workflow_run_nodes WHERE run_id = ?;",
+                    (run_id,),
+                ).fetchone()["n"],
+                "activations": active_conn.execute(
+                    "SELECT COUNT(*) AS n FROM workflow_activations WHERE run_id = ?;",
+                    (run_id,),
+                ).fetchone()["n"],
+            }
+            active_conn.execute(
+                "UPDATE workflow_schedule_dispatches SET run_id = NULL, "
+                "updated_at = ? WHERE run_id = ?;",
+                (_now_iso(), run_id),
+            )
+            active_conn.execute(
+                "UPDATE one_shot_jobs SET workflow_run_id = NULL "
+                "WHERE workflow_run_id = ?;",
+                (run_id,),
+            )
+            active_conn.execute(
+                "UPDATE workflow_runs SET source_run_id = NULL "
+                "WHERE source_run_id = ?;",
+                (run_id,),
+            )
+            active_conn.execute(
+                "DELETE FROM workflow_events WHERE run_id = ?;", (run_id,)
+            )
+            active_conn.execute(
+                "DELETE FROM workflow_run_nodes WHERE run_id = ?;", (run_id,)
+            )
+            active_conn.execute(
+                "DELETE FROM workflow_activations WHERE run_id = ?;", (run_id,)
+            )
+            active_conn.execute(
+                "DELETE FROM workflow_runs WHERE run_id = ?;", (run_id,)
+            )
+            return {"run_id": run_id, **{k: int(v) for k, v in counts.items()}}
+
+        if is_generated:
+            with active_conn:
+                return _do()
+        return _do()
+
+
 def claim_run(
     worker_instance_id: str, *, conn: Optional[sqlite3.Connection] = None
 ) -> Optional[dict[str, Any]]:
@@ -980,6 +1054,37 @@ def claim_run(
             if row is None:
                 return None
             run_id = str(row["run_id"])
+            now = _now_iso()
+            cur = active_conn.execute(
+                "UPDATE workflow_runs SET status = 'running', worker_instance_id = ?, "
+                "started_at = COALESCE(started_at, ?), updated_at = ? "
+                "WHERE run_id = ? AND status = 'queued';",
+                (worker_instance_id, now, now, run_id),
+            )
+            if cur.rowcount == 0:
+                return None
+            return get_run(run_id, conn=active_conn)
+
+        if is_generated:
+            with active_conn:
+                return _execute()
+        return _execute()
+
+
+def claim_specific_run(
+    worker_instance_id: str,
+    run_id: str,
+    *,
+    conn: Optional[sqlite3.Connection] = None,
+) -> Optional[dict[str, Any]]:
+    """Atomically claim one specific queued run (``queued`` -> ``running``).
+
+    Used by the CLI ``--execute`` path so it never claims an unrelated queued
+    run; the Web worker keeps using :func:`claim_run`'s oldest-first order.
+    """
+    with auto_connection(conn) as (active_conn, is_generated):
+
+        def _execute() -> Optional[dict[str, Any]]:
             now = _now_iso()
             cur = active_conn.execute(
                 "UPDATE workflow_runs SET status = 'running', worker_instance_id = ?, "

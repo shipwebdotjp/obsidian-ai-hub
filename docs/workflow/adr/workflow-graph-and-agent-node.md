@@ -350,6 +350,46 @@ Agent Node は会話・ツール・HITL を伴う子 Run で、会話を `agent_
 - `inputs` に秘密値を入れると provider に送信される。Revision に固定保存しない運用規約は
   Agent / Capability と同様。
 
+## Amendment (Capability Node の strict 出力)
+
+Status: Accepted (2026-09-26)。
+
+Capability Node の出力契約違反は既定では助言イベント
+(`capability_output_schema_mismatch`) に留め、後続 Node へ流していた。ファイル欠落などの
+期待内エラーを「成功出力の `error` キー」で返す Capability（例: `vault_read_file`）では、
+後続の Agent / LLM が誤った入力を消費しうる。ワークフローごとに条件 Edge と failure Terminal
+を組む迂回は再発明になりやすいため、Node 単位の strict 設定を追加する。
+
+### 決定
+
+- capability Node の config に `fail_on_output_mismatch`（boolean、既定 false）を追加する。
+- true のとき、次のいずれかで Node を失敗させる。
+  - 出力 object がトップレベル `error` キーを持つ（registry tool の共通失敗形。値の真偽は問わない）。
+  - 宣言済み出力 schema（`capability_output_schema`）に一致しない。
+- 失敗時も `capability_output_schema_mismatch` イベントを記録し、`error Edge` / Run 失敗の
+  既存伝播に乗せる。出力は後続 Node へ渡さない。
+- 既定 false により既存 Revision の挙動は変えない。副作用 Capability に true を付けると、
+  外部処理が成功していても出力契約違反で失敗し effects が記録されないため、読み取り系
+  Capability での利用を推奨する。
+- strict と `retry.max_attempts > 0` の併用は、契約違反時に副作用が再実行されうる。
+  検証応答の `warnings` で注意する。
+- 出力契約の拡張（`minItems` / `maxItems` など）は schema 検証側で行い、本設定はその結果に従う。
+
+### 操作シナリオ契約（不可逆操作: なし）
+
+| 段階 | 入力・識別子 | 停止規則 |
+| --- | --- | --- |
+| 公開 | revision の Node config | 非 boolean は検証エラーで公開不可 |
+| Node 開始 | Run snapshot、activation_id、解決済み inputs | 実行前に設定を検証済み |
+| Node 終了 | 出力 object、宣言 schema | strict なら契約違反で Node 失敗、後続なし |
+| 再実行 | 同一 Activation | Capability の at-most-once 契約は変更しない |
+
+### 残余リスク
+
+- strict は「契約違反の検出」であり、Capability が返す業務エラーの分類・再試行は行わない。
+- 失敗した Node の effects は記録されない。副作用を伴う Capability の strict 利用は
+  効果契約（Run 完了判定）を弱めるため非推奨とする。
+
 ## 関連文書
 
 - [workflow-independent-context-shared-foundation.md](workflow-independent-context-shared-foundation.md) — 撤回された初期 ADR

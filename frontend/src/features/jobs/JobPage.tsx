@@ -12,7 +12,7 @@ import {
   getSchedulableWorkflows,
   createOneShotWorkflowJob,
 } from "../../api/client";
-import type { RecurringJob, RecurringJobSchedule, RecurringJobScheduleType, RecurringJobUpdate, CommandSegment, OneShotJobSummary, OneShotJobDetail, SchedulableWorkflow } from "../../api/types";
+import type { RecurringJob, RecurringJobSchedule, RecurringJobScheduleType, RecurringJobUpdate, CommandSegment, DispatchInfo, OneShotJobSummary, OneShotJobDetail, SchedulableWorkflow } from "../../api/types";
 import { workflowRunPath } from "../../constants/routes";
 import TokenPrompt from "../../components/TokenPrompt";
 import { toRecurringJobUpdate, toRecurringJobUpdates } from "./recurringJobPayload";
@@ -52,6 +52,28 @@ function renderRecurringTarget(job: RecurringJob) {
     <code className="text-xs font-mono text-slate-500 bg-slate-100 px-1 py-0.5 rounded">
       {job.command}
     </code>
+  );
+}
+
+function renderLatestDispatch(dispatch: DispatchInfo) {
+  if (dispatch.status !== "dispatched") {
+    return (
+      <span className="text-red-600" title={dispatch.failure_reason ?? ""}>
+        直近の発火: 失敗
+        {dispatch.failure_reason ? `（${dispatch.failure_reason}）` : ""}
+      </span>
+    );
+  }
+  if (!dispatch.run_id) {
+    return <span className="text-slate-500">直近の Run は削除済み</span>;
+  }
+  return (
+    <Link
+      to={workflowRunPath(dispatch.run_id)}
+      className="text-blue-600 underline"
+    >
+      直近の Run を開く
+    </Link>
   );
 }
 
@@ -740,21 +762,7 @@ export default function JobPage() {
                       <div>{formatNextRun(job.next_run)}</div>
                       {job.latest_dispatch && (
                         <div className="mt-1 font-sans text-[11px]">
-                          {job.latest_dispatch.status === "dispatched" && job.latest_dispatch.run_id ? (
-                            <Link
-                              to={workflowRunPath(job.latest_dispatch.run_id)}
-                              className="text-blue-600 underline"
-                            >
-                              直近の Run を開く
-                            </Link>
-                          ) : (
-                            <span className="text-red-600" title={job.latest_dispatch.failure_reason ?? ""}>
-                              直近の発火: 失敗
-                              {job.latest_dispatch.failure_reason
-                                ? `（${job.latest_dispatch.failure_reason}）`
-                                : ""}
-                            </span>
-                          )}
+                          {renderLatestDispatch(job.latest_dispatch)}
                         </div>
                       )}
                     </td>

@@ -415,6 +415,87 @@ def main():
         help="--coding 新規セッション、または --research-agent --research-mode project で使用するプロジェクトID",
     )
     parser.add_argument(
+        "--workflow-import",
+        dest="workflow_import",
+        type=str,
+        help="Workflow 定義 package (JSON/YAML) を新規 Workflow + draft として取り込み、結果 JSON を表示",
+    )
+    parser.add_argument(
+        "--workflow-validate",
+        dest="workflow_validate",
+        type=str,
+        help="Revision の静的検証を実行し、errors / warnings を JSON で表示",
+    )
+    parser.add_argument(
+        "--workflow-publish",
+        dest="workflow_publish",
+        type=str,
+        help="検証済み draft Revision を公開",
+    )
+    parser.add_argument(
+        "--workflow-run",
+        dest="workflow_run",
+        type=str,
+        help="published Revision から Run を作成し、結果 JSON を表示",
+    )
+    parser.add_argument(
+        "--workflow-input",
+        dest="workflow_inputs",
+        action="append",
+        default=None,
+        help="--workflow-run の入力 NAME=VALUE（複数可。値は JSON として解釈）",
+    )
+    parser.add_argument(
+        "--workflow-approve",
+        dest="workflow_approve",
+        action="store_true",
+        help="--workflow-run 直後に承認して queued にする",
+    )
+    parser.add_argument(
+        "--workflow-wait",
+        dest="workflow_wait",
+        action="store_true",
+        help="--workflow-run が終端または人間待ちになるまでポーリングする",
+    )
+    parser.add_argument(
+        "--workflow-execute",
+        dest="workflow_execute",
+        action="store_true",
+        help="--workflow-run の Run をこのプロセスで実行する（隔離環境向け）",
+    )
+    parser.add_argument(
+        "--workflow-timeout",
+        dest="workflow_timeout",
+        type=float,
+        default=None,
+        help="--workflow-wait の最大待機秒 (既定: 1800)",
+    )
+    parser.add_argument(
+        "--agent-create",
+        dest="agent_create",
+        type=str,
+        help="Agent を JSON ファイルから作成し、結果 JSON を表示",
+    )
+    parser.add_argument(
+        "--vault-write",
+        dest="vault_write",
+        type=str,
+        help="Vault 内の Markdown 相対パスへ書き込む",
+    )
+    parser.add_argument(
+        "--vault-content",
+        dest="vault_content",
+        type=str,
+        default=None,
+        help="--vault-write の内容ファイル ('-' または未指定で stdin)",
+    )
+    parser.add_argument(
+        "--vault-overwrite",
+        dest="vault_overwrite",
+        action="store_true",
+        help="--vault-write で既存ファイルを上書きする",
+    )
+    parser.add_argument(
         "prompt_args",
         nargs="*",
         help="プロンプト本文（複数可、 --coding で使用。空白で結合、stdin併用時は \\n\\nで連結）",
@@ -498,6 +579,12 @@ def main():
             getattr(args, "cleanup_line_webhooks", False),
             getattr(args, "cleanup_execution_logs", False),
             getattr(args, "import_apple_health", False),
+            getattr(args, "workflow_import", None) is not None,
+            getattr(args, "workflow_validate", None) is not None,
+            getattr(args, "workflow_publish", None) is not None,
+            getattr(args, "workflow_run", None) is not None,
+            getattr(args, "agent_create", None) is not None,
+            getattr(args, "vault_write", None) is not None,
         ]
         if any(other_action_flags):
             parser.error("--agent-chat cannot be combined with other execution flags")
@@ -542,6 +629,12 @@ def main():
             getattr(args, "cleanup_line_webhooks", False),
             getattr(args, "cleanup_execution_logs", False),
             getattr(args, "import_apple_health", False),
+            getattr(args, "workflow_import", None) is not None,
+            getattr(args, "workflow_validate", None) is not None,
+            getattr(args, "workflow_publish", None) is not None,
+            getattr(args, "workflow_run", None) is not None,
+            getattr(args, "agent_create", None) is not None,
+            getattr(args, "vault_write", None) is not None,
             getattr(args, "agent_chat", False),
             getattr(args, "coding", False),
         ]
@@ -610,6 +703,47 @@ def main():
 
     if getattr(args, "prompt_args", None) and not getattr(args, "coding", False):
         parser.error(f"unexpected positional arguments: {' '.join(args.prompt_args)}")
+
+    workflow_ops = [
+        args.workflow_import,
+        args.workflow_validate,
+        args.workflow_publish,
+        args.workflow_run,
+    ]
+    specified_ops = [op for op in workflow_ops if op is not None]
+    if any(not op.strip() for op in specified_ops):
+        parser.error(
+            "--workflow-import/validate/publish/run には空でない値が必要です"
+        )
+    if len(specified_ops) > 1:
+        parser.error(
+            "--workflow-import/validate/publish/run は同時に指定できません"
+        )
+    has_workflow_op = bool(specified_ops)
+    if (
+        args.workflow_inputs
+        or args.workflow_approve
+        or args.workflow_wait
+        or args.workflow_execute
+    ) and args.workflow_run is None:
+        parser.error(
+            "--workflow-input / --workflow-approve / --workflow-wait / "
+            "--workflow-execute requires --workflow-run"
+        )
+    if args.workflow_timeout is not None and not args.workflow_wait:
+        parser.error("--workflow-timeout requires --workflow-wait")
+    if (args.vault_content is not None or args.vault_overwrite) and args.vault_write is None:
+        parser.error("--vault-content / --vault-overwrite requires --vault-write")
+    if args.vault_write is not None and not args.vault_write.strip():
+        parser.error("--vault-write には空でない相対パスが必要です")
+    if args.vault_write is not None and has_workflow_op:
+        parser.error("--vault-write は --workflow-* と併用できません")
+    if args.agent_create is not None and not args.agent_create.strip():
+        parser.error("--agent-create には空でないパスが必要です")
+    if args.agent_create is not None and (
+        has_workflow_op or args.vault_write is not None
+    ):
+        parser.error("--agent-create は他の操作フラグと併用できません")
 
     if (
         args.research_agent
@@ -947,6 +1081,53 @@ def main():
             {"prompt_length": len(args.task_agent)},
         )
         ran = True
+    if getattr(args, "workflow_import", None) is not None:
+        from obsidian_ai_hub.workflow.cli import import_package
+
+        sys.exit(import_package(args.workflow_import))
+    if getattr(args, "workflow_validate", None) is not None:
+        from obsidian_ai_hub.workflow.cli import validate_revision
+
+        sys.exit(validate_revision(args.workflow_validate))
+    if getattr(args, "workflow_publish", None) is not None:
+        from obsidian_ai_hub.workflow.cli import publish_revision
+
+        sys.exit(publish_revision(args.workflow_publish))
+    if getattr(args, "workflow_run", None) is not None:
+        from obsidian_ai_hub.workflow.cli import parse_inputs, run_revision
+
+        try:
+            workflow_inputs = parse_inputs(args.workflow_inputs)
+        except ValueError as exc:
+            parser.error(str(exc))
+        sys.exit(
+            run_revision(
+                args.workflow_run,
+                workflow_inputs,
+                approve=args.workflow_approve,
+                wait=args.workflow_wait,
+                execute=args.workflow_execute,
+                timeout=(
+                    args.workflow_timeout
+                    if args.workflow_timeout is not None
+                    else 1800.0
+                ),
+            )
+        )
+    if getattr(args, "agent_create", None) is not None:
+        from obsidian_ai_hub.agents.cli import main_agent_create
+
+        sys.exit(main_agent_create(args.agent_create))
+    if getattr(args, "vault_write", None) is not None:
+        from obsidian_ai_hub.vault_ops import main_vault_write
+
+        sys.exit(
+            main_vault_write(
+                args.vault_write,
+                args.vault_content,
+                overwrite=args.vault_overwrite,
+            )
+        )
     if not ran:
         parser.print_help()
 

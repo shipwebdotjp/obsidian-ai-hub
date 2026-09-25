@@ -151,6 +151,40 @@ python -m obsidian_ai_hub <flag> [options]
 | `prompt` | 位置引数 | コーディングのプロンプト。 |
 | `--task-agent` | 文字列 | 自由文の依頼を Task Agent に投入する。 |
 
+## Workflow 操作
+
+エージェントやスクリプトから Workflow を HTTP なしで操作します。結果は JSON で stdout に
+出力されます。`--workflow-import/validate/publish/run` は同時に指定できません。
+
+| フラグ | 引数 | 説明 |
+| --- | --- | --- |
+| `--workflow-import` | パス | 定義 package（JSON / YAML）を新規 Workflow + draft として取り込む。検証エラーがあると終了コード 1。 |
+| `--workflow-validate` | Revision ID | 静的検証を実行し `errors` / `warnings` を表示する。 |
+| `--workflow-publish` | Revision ID | 検証済み draft を公開する。 |
+| `--workflow-run` | Revision ID | published Revision から Run を作成する。`completed` のときだけ終了コード 0。 |
+| `--workflow-input` | `NAME=VALUE` | Run 入力（複数可。値は JSON として解釈）。 |
+| `--workflow-approve` | — | 作成した Run を承認して `queued` にする。 |
+| `--workflow-wait` | — | 終端または人間待ちになるまでポーリングする。 |
+| `--workflow-execute` | — | Run をこのプロセスで実行する（隔離環境向け。対象 Run だけを claim する）。 |
+| `--workflow-timeout` | 秒 | `--workflow-wait` の最大待機秒（既定 1800）。 |
+
+```bash
+uv run python -m obsidian_ai_hub --workflow-import /tmp/wf.json
+uv run python -m obsidian_ai_hub --workflow-validate wrev_xxx
+uv run python -m obsidian_ai_hub --workflow-publish wrev_xxx
+uv run python -m obsidian_ai_hub --workflow-run wrev_xxx \
+  --workflow-input focus=all --workflow-approve --workflow-wait
+```
+
+## Agent 作成 / Vault 書き込み
+
+| フラグ | 引数 | 説明 |
+| --- | --- | --- |
+| `--agent-create` | JSON パス | Agent を作成する（`name` / `system_prompt` 必須、`tool_ids` / `provider` / `model` など任意）。 |
+| `--vault-write` | 相対パス | Vault 内の Markdown を書き込む（`.md` のみ、Vault 外・`..` は拒否）。 |
+| `--vault-content` | ファイル | 内容ファイル。`-` または未指定で stdin。 |
+| `--vault-overwrite` | — | 既存ファイルを上書きする（未指定時は既存があると失敗）。 |
+
 ## 承認待ち（HITL）
 
 | フラグ | 説明 |

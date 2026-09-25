@@ -21,7 +21,8 @@ import { formatDateTime } from "../../utils/date";
 import { getApiErrorMessage } from "../../utils/error";
 import { downloadDefinition, safeDefinitionFilename } from "./definitionDownload";
 import { REVISION_STATUS_LABEL } from "./revisionLabels";
-import { runStatusLabel } from "./runStatusLabels";
+import { confirmAndDeleteRun } from "./runActions";
+import { runStatusLabel, TERMINAL_RUN_STATUSES } from "./runStatusLabels";
 
 export default function WorkflowDetailPage() {
   const { workflowId = "" } = useParams();
@@ -117,6 +118,20 @@ export default function WorkflowDetailPage() {
       await reload();
     } catch (e) {
       setError(getApiErrorMessage(e, "Revision 作成に失敗しました"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onDeleteRun = async (runId: string) => {
+    setBusy(true);
+    setError(null);
+    try {
+      if (await confirmAndDeleteRun(runId)) {
+        await reload();
+      }
+    } catch (e) {
+      setError(getApiErrorMessage(e, "Run 削除に失敗しました"));
     } finally {
       setBusy(false);
     }
@@ -417,9 +432,22 @@ export default function WorkflowDetailPage() {
                 <span>
                   {runStatusLabel(run.status)} ・ {formatDateTime(run.created_at)}
                 </span>
-                <Link className="text-blue-700" to={workflowRunPath(run.run_id)}>
-                  詳細
-                </Link>
+                <span className="flex items-center gap-2">
+                  <Link className="text-blue-700" to={workflowRunPath(run.run_id)}>
+                    詳細
+                  </Link>
+                  {TERMINAL_RUN_STATUSES.has(run.status) && (
+                    <button
+                      type="button"
+                      className="cursor-pointer rounded bg-rose-800 px-2 py-0.5 text-xs text-white disabled:opacity-50"
+                      disabled={busy}
+                      data-testid={`run-delete-${run.run_id}`}
+                      onClick={() => void onDeleteRun(run.run_id)}
+                    >
+                      削除
+                    </button>
+                  )}
+                </span>
               </li>
             ))}
           </ul>

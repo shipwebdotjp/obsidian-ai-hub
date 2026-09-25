@@ -92,11 +92,20 @@ Node を選択すると、右パネルに対応する設定欄が表示されま
 
 - **プロパティを追加** — 名前を入れて **追加**。各行で型（`string` / `integer` / `number` / `boolean` /
   `object` / `array`）、**必須**、説明、`enum`（カンマ区切り、省略可）を設定します。
-- `object` 型は入れ子のプロパティ、`array` 型は `items` の型と（`object` のとき）そのプロパティを編集できます。
+- `object` 型は入れ子のプロパティ、`array` 型は `items` の型と（`object` のとき）そのプロパティを
+  編集できます。`minItems` / `maxItems`（省略可）も編集でき、値は **実行入力** フォームの
+  追加・削除の可否に反映されます。
 - **未定義のプロパティを許可する** で `additionalProperties` を切り替えます。
 - 上級者向けに **JSONで編集** で生 JSON に切り替えられます。ルートは `type: "object"` が必要です。
 - 許可されるのはサブセットで、`object` / `properties` / `required`、primitive、`enum`、配列などです
   （`$ref` / `oneOf` / `anyOf` / `allOf` / 再帰は未対応）。違反はフォーム下部に表示されます。
+
+## Capability と書込・外部操作
+
+Capability の選択肢には、書込・外部操作を含むものに **書込・外部** が付きます。選択中は
+説明の下に注意が表示されます。**検証** を実行すると、そうした Capability を含むグラフには
+黄色の警告（`workflow-server-warnings`）が表示されますが、公開はブロックされません。
+読み取り専用 Workflow に書き込み権限が紛れ込んでいないか確認するために使います。
 
 定義した `inputs_schema` は **実行入力** フォーム（および Run の再実行フォーム）に反映されます。
 ネストした `object` や配列にも対応します。

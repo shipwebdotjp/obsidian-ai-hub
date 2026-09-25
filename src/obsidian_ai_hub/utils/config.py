@@ -871,9 +871,14 @@ SYSTEM_MAINTENANCE_PROJECT_ID = (
     else None
 )
 
-# Scheduler job runner and knowledge sync state files
-JOB_RUN_STATE_PATH = BASE_DIR / "jobs" / "last_run.json"
-KNOWLEDGE_SYNC_STATE_PATH = BASE_DIR / "jobs" / "knowledge_sync_state.json"
+# Scheduler jobs directory and state files. ``OBSIDIAN_AI_HUB_JOBS_DIR`` lets
+# an isolated instance keep recurring job definitions/state inside its sandbox.
+_JOBS_DIR_RAW = os.getenv("OBSIDIAN_AI_HUB_JOBS_DIR")
+JOBS_DIR = (
+    Path(_JOBS_DIR_RAW).expanduser() if _JOBS_DIR_RAW else BASE_DIR / "jobs"
+)
+JOB_RUN_STATE_PATH = JOBS_DIR / "last_run.json"
+KNOWLEDGE_SYNC_STATE_PATH = JOBS_DIR / "knowledge_sync_state.json"
 
 # Healthcare (separate DB, never co-located with memory.sqlite3)
 _HEALTHCARE_SQLITE_PATH_RAW = _optional_path(
@@ -913,8 +918,9 @@ if IS_TEST_ENV:
     LOCAL_MODEL_DIR = TEST_WORKSPACE / "local-models"
     VAULT_INDEX_SQLITE_PATH = TEST_WORKSPACE / "vault-index" / "search.sqlite"
     VAULT_INDEX_CHROMA_PATH = TEST_WORKSPACE / "vault-index" / "chroma"
-    JOB_RUN_STATE_PATH = TEST_WORKSPACE / "last_run.json"
-    KNOWLEDGE_SYNC_STATE_PATH = TEST_WORKSPACE / "knowledge_sync_state.json"
+    JOBS_DIR = TEST_WORKSPACE / "jobs"
+    JOB_RUN_STATE_PATH = JOBS_DIR / "last_run.json"
+    KNOWLEDGE_SYNC_STATE_PATH = JOBS_DIR / "knowledge_sync_state.json"
     PLUGINS_TOOLS_DIR = TEST_WORKSPACE / "plugins" / "tools"
     AGENT_SKILLS_PRIMARY_ROOT = TEST_WORKSPACE / "primary_skills"
     AGENT_SKILLS_ROOT = TEST_WORKSPACE / "skills"

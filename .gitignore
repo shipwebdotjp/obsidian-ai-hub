@@ -32,6 +32,9 @@ server_output.log
 e2e_server.log
 .env.test
 
+# Isolated operational-check sandbox (scripts/opcheck_serve.sh)
+/.opcheck/
+
 # E2E test artifacts
 test-results/
 .playwright-cli/

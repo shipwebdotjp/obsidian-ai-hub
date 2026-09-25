@@ -2032,6 +2032,43 @@ def list_run_events(
         return out
 
 
+def summarize_tool_calls(
+    run_id: str, conn: Optional[sqlite3.Connection] = None
+) -> list[dict[str, Any]]:
+    """Count actual tool executions per tool name for one Agent run.
+
+    Counts ``tool_call_start`` events (the invocation, not the detected call)
+    and tolerates the events table being absent on old databases. Returns rows
+    ordered by descending count, then tool name.
+    """
+    with auto_connection(conn) as (active_conn, _):
+        try:
+            cursor = active_conn.execute(
+                "SELECT payload_json FROM agent_run_events "
+                "WHERE run_id = ? AND event_type = 'tool_call_start' "
+                "ORDER BY event_id ASC;",
+                (run_id,),
+            )
+        except sqlite3.OperationalError as e:
+            if "no such table" in str(e):
+                return []
+            raise
+        counts: dict[str, int] = {}
+        for row in cursor.fetchall():
+            try:
+                payload = json.loads(row["payload_json"]) if row["payload_json"] else {}
+            except (json.JSONDecodeError, TypeError):
+                continue
+            name = payload.get("tool_name")
+            if not isinstance(name, str) or not name:
+                continue
+            counts[name] = counts.get(name, 0) + 1
+        return [
+            {"tool_name": name, "count": count}
+            for name, count in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+        ]
+
+
 def purge_old_run_events(retention_days: int = 7, conn: Optional[sqlite3.Connection] = None) -> int:
     """Delete event rows for terminal runs finished more than retention_days ago."""
     from datetime import timedelta

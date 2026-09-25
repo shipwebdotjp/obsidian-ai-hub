@@ -18,7 +18,10 @@ from typing import Any, Optional
 from obsidian_ai_hub.database import get_db_connection
 from obsidian_ai_hub.workflow import store as workflow_store
 from obsidian_ai_hub.workflow.capabilities import default_approval_policy
-from obsidian_ai_hub.workflow.models import validate_value_against_schema
+from obsidian_ai_hub.workflow.models import (
+    apply_schema_defaults,
+    validate_value_against_schema,
+)
 
 SOURCE_RECURRING = "recurring"
 SOURCE_ONE_SHOT = "one_shot"
@@ -133,6 +136,7 @@ def create_run_for_latest_published(
         raise NoPublishedRevisionError(
             f"Workflow '{workflow_id}' に公開済み Revision がありません"
         )
+    inputs = apply_schema_defaults(inputs, revision.get("inputs_schema") or {})
     errors = validate_value_against_schema(
         inputs,
         revision.get("inputs_schema") or {},
