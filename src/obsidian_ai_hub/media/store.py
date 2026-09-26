@@ -17,11 +17,12 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sqlite3
 import tempfile
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 from obsidian_ai_hub.database import get_db_connection
 from obsidian_ai_hub.media.generation import (
@@ -99,6 +100,7 @@ def save_generated_image(
     session_id: str | None = None,
     run_id: str | None = None,
     task_id: str | None = None,
+    workflow_run_id: str | None = None,
 ) -> dict[str, Any]:
     """Atomically write *image* under the configured dir and record its row.
 
@@ -176,6 +178,7 @@ def save_generated_image(
         "session_id": session_id,
         "run_id": run_id,
         "task_id": task_id,
+        "workflow_run_id": workflow_run_id,
         "created_at": now.isoformat(),
     }
     conn = None
@@ -187,8 +190,8 @@ def save_generated_image(
                 media_id, media_type, source, relative_path, filename,
                 mime_type, width, height, byte_size, provider, model, prompt,
                 metadata_json, content_sha256, session_id, run_id, task_id,
-                created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                workflow_run_id, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 row["media_id"],
@@ -208,6 +211,7 @@ def save_generated_image(
                 row["session_id"],
                 row["run_id"],
                 row["task_id"],
+                row["workflow_run_id"],
                 row["created_at"],
             ),
         )
@@ -280,3 +284,140 @@ def resolve_generated_media_path(media_id: str) -> tuple[Path, dict[str, Any]]:
     if not path.is_file():
         raise FileNotFoundError("Media file not found")
     return path, row
+
+
+# --- Deletion ---
+#
+# Operation-scenario contract (see docs/development-quality-playbook.md):
+#
+# | 段階 | 入力と正本 | 機械可読な識別子 | 永続化 | 次に読む主体 | 停止・失敗時 | 不可逆操作 |
+# | --- | --- | --- | --- | --- | --- | --- |
+# | 手動削除 | client の `media_id` | DB 行が正本 | 行 + ファイルを削除 | ギャラリー/UI | 未知 id は削除せず False | ファイル/行の削除 |
+# | 親連動削除 | 親 ID (`session_id`/`task_id`/`workflow_run_id`) | 親 ID | source='generated' の行 + ファイルのみ削除 | 親の削除処理 | ファイル欠落・unlink 失敗はログして行削除は継続 (best-effort) | ファイル/行の削除 |
+#
+# 設計: 入力 (upload/import) は共有・再利用され得るため親連動では残す。ファイルを先に
+# unlink し、その後に行を削除する（クラッシュ時は行が欠落ファイルを指し 404 になるだけで、
+# 孤児ファイルより安全側）。親の削除はメディア処理の失敗で止めない。
+
+def _unlink_media_file(root: Path, relative_path: str) -> None:
+    """Best-effort delete of a media file; never raises."""
+    try:
+        path = _resolve_contained_path(root, relative_path)
+    except ValueError as exc:
+        logger.warning("Refusing to delete media outside output dir: %s", exc)
+        return
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        logger.warning("Failed to delete media file %s: %s", path, exc)
+
+
+def delete_media(media_id: str) -> bool:
+    """Delete one media row and its file. Returns ``False`` if unknown."""
+    row = get_generated_media(media_id)
+    if row is None:
+        return False
+    root = _resolve_output_dir()
+    _unlink_media_file(root, str(row["relative_path"]))
+    conn = get_db_connection()
+    try:
+        cur = conn.execute(
+            "DELETE FROM generated_media WHERE media_id = ?", (row["media_id"],)
+        )
+        conn.commit()
+        return cur.rowcount > 0
+    finally:
+        conn.close()
+
+
+def unlink_media_paths(relative_paths: "Sequence[str] | None") -> None:
+    """Best-effort unlink of media files by output-root-relative path."""
+    if not relative_paths:
+        return
+    try:
+        root = _resolve_output_dir()
+    except ValueError as exc:
+        logger.warning("Cannot delete media files: %s", exc)
+        return
+    for relative_path in relative_paths:
+        _unlink_media_file(root, str(relative_path))
+
+
+_PARENT_COLUMNS = {
+    "session": "session_id",
+    "task": "task_id",
+    "workflow": "workflow_run_id",
+}
+# Keep an IN(...) clause well under SQLite's bind-variable limit.
+_MEDIA_DELETE_CHUNK = 400
+
+
+def delete_generated_media_for_parents(
+    kind: str,
+    parent_ids: "Sequence[str]",
+    *,
+    conn: "sqlite3.Connection | None" = None,
+) -> list[str]:
+    """Delete generated output rows for several parents; return their paths.
+
+    ``kind`` is ``session`` / ``task`` / ``workflow``. Only ``source =
+    'generated'`` rows are removed: uploads/imports may be shared across
+    parents and are left to manual deletion.
+
+    When ``conn`` is omitted the rows are committed and the files unlinked
+    here. When ``conn`` is supplied the rows are deleted in the caller's
+    transaction and the returned paths must be unlinked by the caller *after*
+    that transaction commits (via :func:`unlink_media_paths`), so a rollback
+    never leaves live rows pointing at deleted files.
+    """
+    column = _PARENT_COLUMNS.get(kind)
+    if column is None:
+        raise ValueError(f"Unknown media parent kind: {kind!r}")
+    ids = [str(pid) for pid in parent_ids if pid]
+    if not ids:
+        return []
+
+    own_conn = conn is None
+    active = conn if conn is not None else get_db_connection()
+    removed_paths: list[str] = []
+    try:
+        # Chunk ids so the IN clause stays under SQLite's bind-variable limit
+        # even for a large purge / workflow deletion.
+        for start in range(0, len(ids), _MEDIA_DELETE_CHUNK):
+            chunk = ids[start : start + _MEDIA_DELETE_CHUNK]
+            placeholders = ",".join("?" for _ in chunk)
+            rows = active.execute(
+                f"SELECT media_id, relative_path FROM generated_media"
+                f" WHERE source = 'generated' AND {column} IN ({placeholders})",
+                chunk,
+            ).fetchall()
+            if not rows:
+                continue
+            removed_paths.extend(str(row["relative_path"]) for row in rows)
+            active.executemany(
+                "DELETE FROM generated_media WHERE media_id = ?",
+                [(row["media_id"],) for row in rows],
+            )
+        if not removed_paths:
+            return []
+        if own_conn:
+            active.commit()
+            unlink_media_paths(removed_paths)
+        return removed_paths
+    finally:
+        if own_conn:
+            active.close()
+
+
+def delete_generated_media_for_parent(
+    kind: str,
+    parent_id: str,
+    *,
+    conn: "sqlite3.Connection | None" = None,
+) -> list[str]:
+    """Delete one parent's generated output rows; return their relative paths."""
+    if not isinstance(parent_id, str) or not parent_id:
+        return []
+    return delete_generated_media_for_parents(kind, [parent_id], conn=conn)

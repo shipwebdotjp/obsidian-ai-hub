@@ -750,19 +750,36 @@ def purge_terminal_tasks(
     with auto_connection(conn) as (active_conn, is_generated):
         placeholders = ",".join("?" for _ in TASK_TERMINAL_STATUSES)
 
-        def _do() -> int:
+        def _do() -> tuple[int, list[str]]:
+            purge_ids = [
+                str(row["task_id"])
+                for row in active_conn.execute(
+                    f"SELECT task_id FROM task_agent_tasks WHERE status IN"
+                    f" ({placeholders}) AND finished_at IS NOT NULL"
+                    f" AND finished_at < ?;",
+                    (*sorted(TASK_TERMINAL_STATUSES), cutoff),
+                ).fetchall()
+            ]
+            removed = media_store.delete_generated_media_for_parents(
+                "task", purge_ids, conn=active_conn
+            )
             cur = active_conn.execute(
                 f"DELETE FROM task_agent_tasks WHERE status IN ({placeholders}) "
                 f"AND finished_at IS NOT NULL AND finished_at < ?;",
                 (*sorted(TASK_TERMINAL_STATUSES), cutoff),
             )
-            return cur.rowcount
+            return cur.rowcount, removed
+
+        from obsidian_ai_hub.media import store as media_store
 
         if is_generated:
             with active_conn:
-                return _do()
-        else:
-            return _do()
+                purged, removed = _do()
+            media_store.unlink_media_paths(removed)
+            return purged
+        # Caller owns the transaction; do not unlink files before its commit.
+        purged, _removed = _do()
+        return purged
 
 
 def list_capabilities(

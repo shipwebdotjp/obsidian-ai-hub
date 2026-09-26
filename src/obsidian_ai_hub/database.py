@@ -760,6 +760,9 @@ def get_db_connection() -> sqlite3.Connection:
     if current_version <= 66:
         run_migration_v67(conn)
 
+    if current_version <= 67:
+        run_migration_v68(conn)
+
     return conn
 
 
@@ -1425,6 +1428,37 @@ def run_migration_v67(conn: sqlite3.Connection) -> None:
         " ON generated_media(content_sha256);"
     )
     conn.execute("PRAGMA user_version = 67;")
+    conn.commit()
+
+
+def run_migration_v68(conn: sqlite3.Connection) -> None:
+    """Run migration for version 68 (workflow run linkage + parent indexes).
+
+    Adds ``generated_media.workflow_run_id`` so media produced inside a
+    Workflow capability node can be traced to and deleted with its run (the
+    bridge task id was the only link before). Adds indexes used by
+    parent-linked deletion.
+    """
+    columns = {
+        row[1]
+        for row in conn.execute("PRAGMA table_info(generated_media);").fetchall()
+    }
+    if "workflow_run_id" not in columns:
+        try:
+            conn.execute(
+                "ALTER TABLE generated_media ADD COLUMN workflow_run_id TEXT;"
+            )
+        except sqlite3.OperationalError as e:
+            _ignore_duplicate_schema_object(e)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_generated_media_task_id"
+        " ON generated_media(task_id);"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_generated_media_workflow_run_id"
+        " ON generated_media(workflow_run_id);"
+    )
+    conn.execute("PRAGMA user_version = 68;")
     conn.commit()
 
 

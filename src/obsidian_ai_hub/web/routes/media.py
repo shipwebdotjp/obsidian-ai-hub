@@ -62,3 +62,13 @@ def get_media(media_id: str, _=Depends(require_bearer_token)):
 @router.get("/media/{media_id}/download")
 def download_media(media_id: str, _=Depends(require_bearer_token)):
     return _media_response(media_id, download=True)
+
+
+@router.delete("/media/{media_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_media(media_id: str, _=Depends(require_bearer_token)):
+    """Delete one media row and its file (manual, irreversible)."""
+    if not store.delete_media(media_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Media not found"
+        )
+    return None

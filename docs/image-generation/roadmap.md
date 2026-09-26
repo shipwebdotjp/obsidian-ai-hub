@@ -169,6 +169,10 @@ Task / Workflow から編集入力に使う画像の与え方について:
 
 ## R3. メディアの削除・親連動削除・孤児回収 — P0（削除は不可逆）
 
+**状態: 親連動削除と手動削除 API を実装済み（2026-09-26）。孤児回収は見送り。**
+方針の正本は
+[削除ポリシー ADR](../image-generation/adr/media-deletion-policy.md)。
+
 **目的**: 不要なメディアとファイルを削除し、孤児ファイルを回収する。
 
 **現状/制約**
@@ -208,19 +212,22 @@ Workflow 実行単位の削除は R4（`workflow_run_id` の記録）完了ま�
 
 ## R4. 作成元（Agent 会話 / Task / Workflow）との紐付け — P1
 
+**状態: `workflow_run_id` の記録を実装済み（2026-09-26、R3 の前提として前倒し）。**
+`generated_media.workflow_run_id`（migration v68）へ bridge Task 経由で記録する。
+
 **目的**: どの会話・Task・Workflow 実行が生成したかを記録し、生成元から辿れるようにする。
 
 **現状/制約**
-- `session_id` / `run_id` / `task_id` は記録するが、Workflow 実行 ID は
-  bridge Task のコンテキストに載らず、`workflow_run_id` は常に NULL になるため現行版では削除した。
+- `session_id` / `run_id` / `task_id` は記録する。Workflow 実行 ID は bridge Task の
+  コンテキストに載っていなかったため `workflow_run_id` を追加した。
 - Workflow の capability 実行は `workflow/runners.py:_run_capability` が
   bridge Task（`origin='workflow'`）を作って Task アダプタ経由で実行する。
 
-**設計案**
-- bridge Task コンテキストに Workflow 実行 ID を載せる（`_task_context` へ伝播）か、
-  汎用の `origin_kind` / `origin_id`（`agent` / `task` / `workflow` + ID）を導入する。
-- ギャラリー詳細からセッション / Task / Workflow 実行ページへリンク。
-- 会話メッセージに `media_id` 参照を保持する場合（R5）は、どのメッセージ由来かを併記。
+**設計案（実装済みの範囲）**
+- bridge Task の `workflow_run_id` を `_task_context` 経由で trusted ctx へ伝播し、
+  `image_generate` / `image_edit` が `generated_media.workflow_run_id` に記録する。
+- 削除は R3 の親連動削除がこの列を使う。
+- 残: ギャラリー詳細からセッション / Task / Workflow 実行ページへのリンク（R2 と同時）。
 
 **影響範囲**: `workflow/runners.py`, `tasks/adapters/registry_tools.py`, `media/store.py`,
 `database.py`（列）, frontend（リンク）。
@@ -408,8 +415,8 @@ Workflow 実行単位の削除は R4（`workflow_run_id` の記録）完了ま�
 | --- | --- | --- | --- |
 | P0 | R1 画像編集 | 外部送信 + 書込み | 要 |
 | P0 | R2 ギャラリー（一覧・詳細） | 読取 | 不要 |
-| P0 | R3 削除・親連動削除・孤児回収 | 削除（不可逆） | 要 |
-| P1 | R4 作成元の紐付け | メタデータ | 不要 |
+| P0 | R3 削除・親連動削除・孤児回収（親連動+手動は完了） | 削除（不可逆） | 要 |
+| P1 | R4 作成元の紐付け（`workflow_run_id` 完了） | メタデータ | 不要 |
 | P1 | R6 Vault 連携 | Vault 書込み（不可逆） | 要 |
 | P1 | R7 モデル拡張・コスト統制 | 外部送信 | 要 |
 | P1 | R8 可観測性 | 記録 | 不要 |
@@ -428,6 +435,8 @@ R2 は読取のみでリスクが低く、R1/R3 の確認にも必要な土台�
 - **保持期間**: 設定を追加せず、親（会話 / Task / Workflow 実行）の既存削除と同時に削除する（R3）。
 - **Task/Workflow 用の新規アップロード UI**: R1 MVP では作らない。R2 のメディアピッカーで
   既存メディアを選び、必要なら汎用アップロードを後から追加する。
+- **削除**: 親連動削除は生成物（`source='generated'`）のみ、入力は残す。手動 `DELETE` API も提供。
+  ファイル削除は best-effort（ファイル→行の順）。孤児回収は見送り（R3 / [ADR](../image-generation/adr/media-deletion-policy.md)）。
 
 ## 未決事項（実装前に決める）
 

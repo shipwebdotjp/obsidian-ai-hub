@@ -107,6 +107,8 @@ def _task_context(task: dict[str, Any]) -> dict[str, Any]:
         "user_message_id": f"{task_id}-prompt",
         "user_content": str(task.get("prompt_text") or ""),
         "llm_decides_params": llm_decides_params,
+        # Workflow bridge tasks carry the workflow run id for media linkage.
+        "workflow_run_id": task.get("workflow_run_id"),
     }
 
 

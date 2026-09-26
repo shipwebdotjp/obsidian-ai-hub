@@ -1026,6 +1026,7 @@ def _make_image_generate_tool(trusted_ctx: Optional[Dict[str, Any]] = None) -> B
                         session_id=_ctx_str(ctx, "session_id"),
                         run_id=_ctx_str(ctx, "run_id"),
                         task_id=_ctx_str(ctx, "task_id"),
+                        workflow_run_id=_ctx_str(ctx, "workflow_run_id"),
                     )
                 )
             return json.dumps(
@@ -1221,6 +1222,7 @@ def _make_image_edit_tool(trusted_ctx: Optional[Dict[str, Any]] = None) -> BaseT
                         session_id=session_id,
                         run_id=run_id,
                         task_id=task_id,
+                        workflow_run_id=_ctx_str(ctx, "workflow_run_id"),
                     )
                 )
             return json.dumps(

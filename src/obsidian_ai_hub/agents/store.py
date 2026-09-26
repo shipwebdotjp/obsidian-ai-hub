@@ -1134,17 +1134,28 @@ def delete_session(session_id: str, conn: Optional[sqlite3.Connection] = None) -
                 f"('{active['run_id']}' status={active['status']}); cancel it first."
             )
 
-        def _do_delete() -> bool:
+        def _do_delete() -> tuple[bool, list[str]]:
+            # Generated media has no FK to the session; delete its rows in the
+            # same transaction and unlink the files only after commit.
+            removed = media_store.delete_generated_media_for_parent(
+                "session", session_id, conn=active_conn
+            )
             cursor = active_conn.execute(
                 "DELETE FROM agent_sessions WHERE session_id = ?;", (session_id,)
             )
-            return cursor.rowcount > 0
+            return cursor.rowcount > 0, removed
+
+        from obsidian_ai_hub.media import store as media_store
 
         if is_generated:
             with active_conn:
-                return _do_delete()
-        else:
-            return _do_delete()
+                deleted, removed = _do_delete()
+            media_store.unlink_media_paths(removed)
+            return deleted
+        # Caller owns the transaction; media files are left for the caller (or
+        # the deferred orphan sweeper) because a rollback must not lose them.
+        deleted, _removed = _do_delete()
+        return deleted
 
 
 def list_messages(session_id: str, conn: Optional[sqlite3.Connection] = None) -> list[dict[str, Any]]:

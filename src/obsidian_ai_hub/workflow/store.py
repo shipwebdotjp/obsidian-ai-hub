@@ -245,7 +245,7 @@ def delete_workflow(
     """
     with auto_connection(conn) as (active_conn, is_generated):
 
-        def _do() -> dict[str, int]:
+        def _do() -> tuple[dict[str, int], list[str]]:
             row = active_conn.execute(
                 "SELECT workflow_id FROM workflows WHERE workflow_id = ?;",
                 (workflow_id,),
@@ -268,10 +268,17 @@ def delete_workflow(
                 "WHERE workflow_id = ?;",
                 (workflow_id,),
             ).fetchone()["n"]
-            run_count = active_conn.execute(
-                "SELECT COUNT(*) AS n FROM workflow_runs WHERE workflow_id = ?;",
-                (workflow_id,),
-            ).fetchone()["n"]
+            run_ids = [
+                str(r["run_id"])
+                for r in active_conn.execute(
+                    "SELECT run_id FROM workflow_runs WHERE workflow_id = ?;",
+                    (workflow_id,),
+                ).fetchall()
+            ]
+            removed = media_store.delete_generated_media_for_parents(
+                "workflow", run_ids, conn=active_conn
+            )
+            run_count = len(run_ids)
             active_conn.execute(
                 "DELETE FROM workflow_events WHERE run_id IN "
                 "(SELECT run_id FROM workflow_runs WHERE workflow_id = ?);",
@@ -311,15 +318,24 @@ def delete_workflow(
             active_conn.execute(
                 "DELETE FROM workflows WHERE workflow_id = ?;", (workflow_id,)
             )
-            return {
-                "revisions": int(revision_count),
-                "runs": int(run_count),
-            }
+            return (
+                {
+                    "revisions": int(revision_count),
+                    "runs": int(run_count),
+                },
+                removed,
+            )
+
+        from obsidian_ai_hub.media import store as media_store
 
         if is_generated:
             with active_conn:
-                return _do()
-        return _do()
+                result, removed = _do()
+            media_store.unlink_media_paths(removed)
+            return result
+        # Caller owns the transaction; do not unlink files before its commit.
+        result, _removed = _do()
+        return result
 
 
 # --- Revisions -------------------------------------------------------------
@@ -1029,15 +1045,26 @@ def delete_run(
             active_conn.execute(
                 "DELETE FROM workflow_activations WHERE run_id = ?;", (run_id,)
             )
+            # Generated media produced by this run's capability nodes has no FK;
+            # delete its rows in the same transaction and unlink after commit.
+            removed = media_store.delete_generated_media_for_parent(
+                "workflow", run_id, conn=active_conn
+            )
             active_conn.execute(
                 "DELETE FROM workflow_runs WHERE run_id = ?;", (run_id,)
             )
-            return {"run_id": run_id, **{k: int(v) for k, v in counts.items()}}
+            return {"run_id": run_id, **{k: int(v) for k, v in counts.items()}}, removed
+
+        from obsidian_ai_hub.media import store as media_store
 
         if is_generated:
             with active_conn:
-                return _do()
-        return _do()
+                result, removed = _do()
+            media_store.unlink_media_paths(removed)
+            return result
+        # Caller owns the transaction; do not unlink files before its commit.
+        result, _removed = _do()
+        return result
 
 
 def claim_run(
@@ -1285,7 +1312,7 @@ def purge_terminal_runs(
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     with auto_connection(conn) as (active_conn, is_generated):
 
-        def _do() -> int:
+        def _do() -> tuple[int, list[str]]:
             runs = [
                 str(row["run_id"])
                 for row in active_conn.execute(
@@ -1295,6 +1322,9 @@ def purge_terminal_runs(
                     (cutoff,),
                 ).fetchall()
             ]
+            removed = media_store.delete_generated_media_for_parents(
+                "workflow", runs, conn=active_conn
+            )
             for run_id in runs:
                 active_conn.execute(
                     "DELETE FROM workflow_events WHERE run_id = ?;", (run_id,)
@@ -1308,12 +1338,17 @@ def purge_terminal_runs(
                 active_conn.execute(
                     "DELETE FROM workflow_runs WHERE run_id = ?;", (run_id,)
                 )
-            return len(runs)
+            return len(runs), removed
+
+        from obsidian_ai_hub.media import store as media_store
 
         if is_generated:
             with active_conn:
-                return _do()
-        return _do()
+                purged, removed = _do()
+            media_store.unlink_media_paths(removed)
+            return purged
+        purged, _removed = _do()
+        return purged
 
 
 # --- Run nodes & activations ----------------------------------------------

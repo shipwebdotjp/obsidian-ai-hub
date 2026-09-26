@@ -121,6 +121,7 @@ class DefaultNodeRunner:
             "task_id": bridge_id,
             "prompt_text": "",
             "allow_param_override": True,
+            "workflow_run_id": run_id,
         }
         plan = {"plan": {"purpose": "", "completion_criteria": ""}}
         try:

@@ -510,3 +510,20 @@ Status: Accepted (2026-09-26)。
     `allow_param_override` を渡し、明示入力を保持する）と、ctx なしの直接呼び出し。
 - 代替案（スキーマから `quality` を外す / ツールを分ける）は、Workflow の明示指定を
   残せない・Capability スキーマが単一正本でなくなるため不採用。実行時に文脈で切り替える。
+
+## Amendment (メディア削除と Workflow 実行紐付け)
+
+Status: Accepted (2026-09-26)。
+
+- `generated_media.workflow_run_id` を追加（migration v68）。Workflow の bridge Task から
+  実行 ID を trusted ctx 経由で伝播して記録し、実行単位の削除を可能にする。
+- 削除は親連動 + 手動の2経路:
+  - 会話セッション削除 / 終端 Task パージ（既定30日）/ Workflow 実行削除に連動し、
+    その親の **`source='generated'` の行とファイルのみ**を削除する。入力（upload/import）は
+    共有・再利用され得るため残す。
+  - 手動 `DELETE /api/v1/media/{media_id}`（未知 id は 404）。
+- 失敗時は best-effort: 先にファイルを unlink（欠落・失敗はログして継続）してから行を削除し、
+  親の削除はメディア処理の失敗で止めない。孤児ファイル回収は見送り。
+- 保持期間の設定は追加しない（親の既存ライフサイクルに合わせる）。
+- 詳細・操作シナリオ契約は
+  [生成メディアの削除ポリシー ADR](../docs/image-generation/adr/media-deletion-policy.md) を正本とする。
