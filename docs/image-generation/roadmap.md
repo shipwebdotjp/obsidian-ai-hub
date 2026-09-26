@@ -47,27 +47,67 @@
   `user_message_id` が入るため、「そのターンの添付」は参照可能。
 - 現行 `media/generation.py` は `client.images.generate` のみ。`client.images.edit` は未使用。
 
-**設計案**
-- `generated_media` に `source TEXT NOT NULL DEFAULT 'generated'`（`generated` / `upload`）を追加し、
-  ユーザー添付も「メディア」として取り込む（migration。既存行は `generated`）。
-  - 取り込みタイミングは送信時（`start_queued_run`）または編集ツール実行時の遅延取り込み。
-  - 添付の重複排除は内容ハッシュ `content_sha256` を任意列で持つと再取込を避けられる。
-- 新ツール `image_edit`（args schema 単一正本）:
-  - `prompt`（必須）、`source_media_id`（`upload`/`generated` いずれか）
-  - または `use_current_attachment: bool`（trusted ctx の `user_message_id` 添付を自動採用）
-  - `mask_media_id`（任意、透過マスク）、`size`、`quality`、`output_format`、`count`
-- `media/generation.py` に `edit_images(...)` を追加（`client.images.edit`）。
-  provider 呼び出し・書込み・参照返却は `image_generate` と共通化する。
-- Capability 既定は `plan_required`（外部送信 + 書込み）。`_OUTPUT_SCHEMAS` に出力契約を追加。
+**設計方針（推奨）: `media_id` を正本にしつつ、入口で自動取り込み（事前登録は必須にしない）**
 
-**影響範囲**: `media/generation.py`, `media/store.py`, `agents/registry.py`,
-`database.py`（migration, `source`）, `tasks/capability_schemas.py`,
-`web/routes/agents.py`（添付取込）, frontend（添付を入力候補として選べる UI）。
+入力画像の与え方は次の3案を比較した。
 
-**リスク/不可逆性**: 外部送信 + ファイル書込み。**ゲート: 要**（編集の操作シナリオ契約、fake provider 縦断テスト）。
+| 案 | 会話（添付） | Task / Workflow | 正本/来歴 | 主な欠点 |
+| --- | --- | --- | --- | --- |
+| A. 添付 or パスのみ（取り込みなし） | 添付をそのまま送る | パスを読んで送る | 入力は正本化されない | 来歴/ギャラリーが不統一。パスが唯一の識別子で任意ファイル読取の面が広がる |
+| B. 事前アップロード + DB 登録必須 → `media_id` 指定 | 事前アップ→ID 指定 | 事前アップ→ID 指定 | 統一 | 会話 UX が悪い。Task/Workflow に登録の往復と余分な承認が増える |
+| **C. `media_id` 正本 + 入口で自動取り込み（推奨）** | ターン添付を自動取り込み | パスを渡すと内部で取り込む | 統一 | 実装がやや増える（取り込み層） |
 
-**未決**: 添付を `generated_media` に取り込むか（テーブル名は generated のままか）、
-添付の保持期間、`image_edit` と `image_generate` を1ツールに統合するか。
+案 C を採る。**外から見た入力は「添付」か「パス」か「既存 media_id」だが、内部では必ず
+`generated_media` の行（`media_id`）に正規化してから provider へ送る。** これにより
+会話の手軽さと Task/Workflow の実用性を保ちつつ、来歴・ギャラリー・重複排除が一貫する。
+
+**入力モード（`image_edit` の args schema、いずれか1つ必須）**
+- `use_current_attachment: true` — 会話用。trusted ctx の `user_message_id` の添付を採用。
+- `source_path: str` — Task/Workflow 用。許可ルート配下のみ。内部で取り込む。
+- `source_media_id: str` — 既存メディア（`generated` / `upload` / `import`）を再利用。
+- 共通: `prompt`（必須）、`mask_media_id` / `mask_path`（任意）、`size`、`quality`、`output_format`、`count`。
+- 引数に base64 を載せない（ツール結果/引数は切り詰められるため）。
+
+**データモデル（migration v67）**
+- `generated_media.source TEXT NOT NULL DEFAULT 'generated'`（`generated` / `upload` / `import`）。
+- `generated_media.content_sha256 TEXT`（任意・索引）— 添付/パスの再取り込みを重複排除。
+- 出力側 `metadata_json` に `{"operation":"edit","source_media_id":...}` を記録し系列を辿れるようにする。
+
+**取り込み層（新 `media/ingest.py`）**
+- `ingest_attachment(...)`（会話）、`ingest_path(...)`（Task/Workflow）、`ingest_bytes(...)`（共通）。
+- パス許可ルート: `VAULT_PATH`、`IMAGE_GENERATION_OUTPUT_DIR`、任意の `image_generation.input_dir`。
+  絶対パスは許可ルート内のみ、相対パスは `input_dir`（既定 Vault）基準。NUL/`..`/シンボリックリンク脱出・
+  非正規ファイルを拒否（`web/services/vault.py` の containment 流用）。
+- 実体検証: Pillow で形式（png/jpeg/webp）・寸法・`Image.MAX_IMAGE_PIXELS`、`max_input_bytes` 上限。
+  マスクは入力画像と同寸法を検証（provider 要件）。
+
+**各面のフロー**
+- 会話: ターン送信時に添付を `generated_media(source='upload')` へ取り込み、当該ターンの
+  media_id をコンテキストに1行注入する。LLM は `use_current_attachment` か media_id で編集を呼べる。
+  会話履歴の base64 は LLM 再送用に残す（重複は `content_sha256` で抑制）。
+- Task: Runtime Orchestrator が履歴から詳細入力を実行時生成するため、
+  ユーザー発話中のパスを `source_path` に、または先行アクションの観測にある media_id を
+  `source_media_id` に入れて1ステップで実行できる（登録往復は不要）。
+- Workflow: 参照は配列添字に対応（`nodes.<id>.output.images[0].media_id`）。
+  `run.inputs.media_id` / 前段 Node 出力 / `source_path` のいずれかを入力にする。
+
+**共通化**
+- `media/generation.py` に `edit_images(...)`（`client.images.edit`）。provider 呼び出し・書込み・
+  参照返却は `image_generate` と共通関数へ集約。`image_generate` / `image_edit` は同一の書込み・
+  失敗補償（DB 失敗時にファイル削除）を共有する。
+- Capability 既定は `plan_required`。`_OUTPUT_SCHEMAS` に入力/出力契約を追加。
+- 取り込んだ入力メディアは失敗時も残す（ギャラリー/再試行で再利用）。出力は provider 失敗時に作らない。
+
+**影響範囲**: `media/generation.py`, `media/ingest.py`(新), `media/store.py`, `agents/registry.py`,
+`database.py`（migration v67）, `tasks/capability_schemas.py`, `web/routes/agents.py`（添付取込）,
+`web/services/vault.py`（containment 再利用）, `utils/config.py`, frontend（添付を入力候補に）。
+
+**リスク/不可逆性**: 外部送信 + ファイル書込み（+ パス読取）。**ゲート: 要**
+（操作シナリオ契約: 入力検証→取込→1回送信→保存、失敗時に外部送信しない、パス脱出拒否の fake provider 縦断テスト）。
+
+**未決**: 添付の保持期間（R3 と連動）、`image_generate` と `image_edit` を1ツールに統合するか、
+`input_dir` を追加するか Vault/出力先だけで足りるか、編集の入力に ratio/fidelity 相当のパラメータを足すか。
+実装時は本項を ADR 化する（入力契約に代替案と横断影響があるため）。
 
 ---
 
