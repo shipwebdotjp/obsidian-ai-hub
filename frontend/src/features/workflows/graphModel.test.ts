@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  STRICT_DEFAULT_CAPABILITY_KEYS,
   buildReferenceGroups,
   conditionCandidates,
   createEdge,
@@ -204,10 +205,11 @@ describe("typed reference groups", () => {
     expect(refs).not.toContain("run.inputs");
   });
 
-  it("expands a declared capability output schema", () => {
+  it("expands strict structured capability fields without whole output", () => {
     const cap = node("cap", "capability", {
       capability_key: "calendar_read",
       inputs: {},
+      fail_on_output_mismatch: true,
     });
     const refs = paths(
       buildReferenceGroups([cap], null, { type: "object", properties: {} }, {
@@ -215,21 +217,45 @@ describe("typed reference groups", () => {
           calendar_read: {
             type: "object",
             properties: { events: { type: "array", items: { type: "object" } } },
+            required: ["events"],
           },
         },
       }),
     );
-    expect(refs).toContain("nodes.cap.output");
+    expect(refs).not.toContain("nodes.cap.output");
     expect(refs).toContain("nodes.cap.output.events");
+
+    // Without strict the structured node offers no candidates.
+    const lenient = node("cap", "capability", {
+      capability_key: "calendar_read",
+      inputs: {},
+    });
+    const lenientRefs = paths(
+      buildReferenceGroups(
+        [lenient],
+        null,
+        { type: "object", properties: {} },
+        {
+          capabilityOutputSchemas: {
+            calendar_read: {
+              type: "object",
+              properties: { events: { type: "array" } },
+              required: ["events"],
+            },
+          },
+        },
+      ),
+    );
+    expect(lenientRefs).not.toContain("nodes.cap.output.events");
 
     const opaque = paths(
       buildReferenceGroups([cap], null, { type: "object", properties: {} }),
     );
-    expect(opaque).toContain("nodes.cap.output");
+    expect(opaque).not.toContain("nodes.cap.output");
     expect(opaque).not.toContain("nodes.cap.output.events");
   });
 
-  it("marks capability output as opaque and expands loop outputs", () => {
+  it("hides opaque capability outputs and expands loop outputs", () => {
     const loop = node("loop", "loop", {
       ...defaultNodeConfig("loop"),
       state_schema: {
@@ -239,10 +265,35 @@ describe("typed reference groups", () => {
     });
     const cap = node("cap", "capability", capability());
     const top = paths(buildReferenceGroups([loop, cap], null, inputsSchema));
-    expect(top).toContain("nodes.cap.output");
+    expect(top).not.toContain("nodes.cap.output");
     expect(top).toContain("nodes.loop.output.final_state.done");
     expect(top).toContain("nodes.loop.output.iterations");
     expect(top).toContain("nodes.loop.output.exit_reason");
+  });
+
+  it("creates strict-enabled nodes for P2 read capabilities", () => {
+    const strictNode = createNode(
+      "capability",
+      { x: 0, y: 0 },
+      "calendar_read",
+    );
+    expect(strictNode.config.fail_on_output_mismatch).toBe(true);
+    const plainNode = createNode("capability", { x: 0, y: 0 }, "vault_search");
+    expect(plainNode.config.fail_on_output_mismatch).toBeUndefined();
+  });
+
+  it("pins the offline strict-default set to the backend P1/P2 ledger", () => {
+    // Offline fallback only: the editor prefers the backend `strict_allowed`
+    // record when loaded. Any ledger change must update this set consciously.
+    expect(STRICT_DEFAULT_CAPABILITY_KEYS).toEqual(
+      new Set([
+        "vault_read_file",
+        "calendar_read",
+        "reminders_read",
+        "research_context_snapshot",
+        "hitl_wait",
+      ]),
+    );
   });
 
   it("adds loop.state/input/iteration inside a child scope only", () => {
@@ -399,9 +450,12 @@ describe("referenceSchemaAt", () => {
     },
   };
 
-  it("resolves nested fields of a capability output schema", () => {
+  it("resolves nested fields of a strict capability output schema", () => {
     const nodes = [
-      node("cal", "capability", { capability_key: "calendar_read" }),
+      node("cal", "capability", {
+        capability_key: "calendar_read",
+        fail_on_output_mismatch: true,
+      }),
     ];
     const outputSchemas = {
       calendar_read: {
@@ -412,9 +466,11 @@ describe("referenceSchemaAt", () => {
             items: {
               type: "object",
               properties: { title: { type: "string" } },
+              required: ["title"],
             },
           },
         },
+        required: ["events"],
       },
     };
     const events = referenceSchemaAt(

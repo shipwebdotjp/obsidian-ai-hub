@@ -710,9 +710,14 @@ class WorkflowEngine:
                     event.get("event_type") == HITL_ANSWER_EVENT
                     and payload.get("activation_id") == activation_id
                 ):
-                    output = payload.get("answer") or {}
-                    if not isinstance(output, dict):
-                        output = {"answer": output}
+                    from obsidian_ai_hub.workflow.capabilities import (
+                        normalize_hitl_answer,
+                    )
+
+                    answer = payload.get("answer")
+                    if isinstance(answer, dict) and "answer" in answer:
+                        answer = answer["answer"]
+                    output = {"answer": normalize_hitl_answer(answer)}
                     return NodeOutcome(
                         status="succeeded", output=output, satisfied_effects=stored_effects
                     )

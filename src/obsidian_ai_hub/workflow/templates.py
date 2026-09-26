@@ -36,13 +36,21 @@ def _agent_node(
 
 
 def _capability_node(
-    node_id: str, label: str, capability_key: str, inputs: dict[str, Any]
+    node_id: str,
+    label: str,
+    capability_key: str,
+    inputs: dict[str, Any],
+    *,
+    strict: bool = False,
 ) -> dict[str, Any]:
+    config: dict[str, Any] = {"capability_key": capability_key, "inputs": inputs}
+    if strict:
+        config["fail_on_output_mismatch"] = True
     return {
         "node_id": node_id,
         "node_type": "capability",
         "label": label,
-        "config": {"capability_key": capability_key, "inputs": inputs},
+        "config": config,
         "parent_loop_node_id": None,
         "ui_position": None,
     }
@@ -180,13 +188,25 @@ _CONTEXTUAL_RESEARCH: dict[str, Any] = {
         "additionalProperties": False,
     },
     "nodes": [
-        _capability_node("context", "文脈収集", "research_context_snapshot", {}),
+        _capability_node(
+            "context",
+            "文脈収集",
+            "research_context_snapshot",
+            {},
+            strict=True,
+        ),
         _agent_node(
             "theme",
             "テーマ整形",
             {
                 "topic": {"$ref": "run.inputs.topic"},
-                "context": {"$ref": "nodes.context.output"},
+                "recent_activities": {
+                    "$ref": "nodes.context.output.recent_activities"
+                },
+                "existing_themes": {
+                    "$ref": "nodes.context.output.existing_themes"
+                },
+                "daily_notes": {"$ref": "nodes.context.output.daily_notes"},
             },
             {"theme": {"type": "string"}},
         ),

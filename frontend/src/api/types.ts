@@ -1199,6 +1199,12 @@ export interface WorkflowCapabilityRecord {
   inputs_schema?: WorkflowSchemaField | null;
   target_schema?: WorkflowSchemaField | null;
   output_schema?: WorkflowSchemaField | null;
+  /** Code-owned output contract class. */
+  output_contract_class?: "structured" | "receipt" | "opaque";
+  /** ``strict_fields`` for structured, ``forbidden`` for receipt/opaque. */
+  output_reference_policy?: "strict_fields" | "forbidden";
+  /** True when ``fail_on_output_mismatch: true`` may be set. */
+  strict_allowed?: boolean;
 }
 
 export interface WorkflowCapabilityListResponse {

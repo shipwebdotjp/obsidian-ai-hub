@@ -1257,6 +1257,44 @@ def _make_image_edit_tool(trusted_ctx: Optional[Dict[str, Any]] = None) -> BaseT
     return image_edit
 
 
+def _normalize_calendar_events(events: List[Any]) -> List[Any]:
+    """Normalize Apple events to the P2 output contract.
+
+    The Apple layer never sets ``source``; recurring items already carry
+    ``source="recurring"``. Missing ``source`` is filled with ``"apple"`` so
+    every event declares title/start/end/all_day/source. Types are left
+    untouched: a provider regression surfaces as a strict contract violation
+    instead of being silently coerced.
+    """
+    out: List[Dict[str, Any]] = []
+    for event in events:
+        if not isinstance(event, dict):
+            # Keep the malformed element as-is so strict validation fails
+            # instead of laundering it into a valid-looking phantom event.
+            out.append(event)
+            continue
+        normalized = dict(event)
+        if normalized.get("source") is None:
+            normalized["source"] = "apple"
+        out.append(normalized)
+    return out
+
+
+def _normalize_reminders(reminders: List[Any]) -> List[Any]:
+    """Normalize Apple reminders to the P2 output contract (fill source)."""
+    out: List[Dict[str, Any]] = []
+    for reminder in reminders:
+        if not isinstance(reminder, dict):
+            # Keep the malformed element as-is so strict validation fails.
+            out.append(reminder)
+            continue
+        normalized = dict(reminder)
+        if normalized.get("source") is None:
+            normalized["source"] = "apple"
+        out.append(normalized)
+    return out
+
+
 @tool(args_schema=CalendarReadInput)
 def calendar_read(
     start_date: str, end_date: str, calendar_name: Optional[str] = None
@@ -1265,14 +1303,27 @@ def calendar_read(
     try:
         s_date = date.fromisoformat(start_date)
         e_date = date.fromisoformat(end_date)
+        apple_status = "ok"
+        apple_error: Optional[str] = None
         try:
             events = fetch_calendar_events(
                 s_date, e_date, calendar_name=calendar_name
             )
+        except ImportError as exc:
+            # Not on macOS / EventKit unavailable: partial result stays
+            # observable in lenient mode; strict nodes fail on the status.
+            logger.warning("calendar_read Apple fetch unavailable, continuing with recurring only: %s", exc)
+            events = []
+            apple_status = "unavailable"
+            apple_error = str(exc)
         except Exception as exc:
-            # Apple fetch may fail (e.g. not on macOS, ImportError); degrade to empty but still include recurring
+            # Apple fetch may fail; degrade to empty but still include recurring
             logger.warning("calendar_read Apple fetch failed, continuing with recurring only: %s", exc)
             events = []
+            apple_status = "error"
+            apple_error = str(exc)
+        recurring_status = "ok"
+        recurring_error: Optional[str] = None
         # Merge recurring config events (kind==event) for the same range
         try:
             from obsidian_ai_hub.planner.recurring import expand_recurring
@@ -1288,8 +1339,19 @@ def calendar_read(
                     pass
         except Exception as rexc:
             logger.warning("calendar_read recurring merge failed: %s", rexc)
+            recurring_status = "error"
+            recurring_error = str(rexc)
 
-        return json.dumps({"events": events}, ensure_ascii=False)
+        payload: Dict[str, Any] = {
+            "events": _normalize_calendar_events(list(events)),
+            "apple_status": apple_status,
+            "recurring_status": recurring_status,
+        }
+        if apple_error is not None:
+            payload["apple_error"] = apple_error
+        if recurring_error is not None:
+            payload["recurring_error"] = recurring_error
+        return json.dumps(payload, ensure_ascii=False)
     except EXPECTED_TOOL_EXCEPTIONS as exc:
         logger.warning("calendar_read failed: %s", exc)
         return json.dumps({"error": str(exc)}, ensure_ascii=False)
@@ -1301,11 +1363,22 @@ def reminders_read(start_date: str, end_date: str) -> str:
     try:
         s_date = date.fromisoformat(start_date)
         e_date = date.fromisoformat(end_date)
+        apple_status = "ok"
+        apple_error: Optional[str] = None
         try:
             reminders = fetch_incomplete_reminders(s_date, e_date)
+        except ImportError as exc:
+            logger.warning("reminders_read Apple fetch unavailable, continuing with recurring only: %s", exc)
+            reminders = []
+            apple_status = "unavailable"
+            apple_error = str(exc)
         except Exception as exc:
             logger.warning("reminders_read Apple fetch failed, continuing with recurring only: %s", exc)
             reminders = []
+            apple_status = "error"
+            apple_error = str(exc)
+        recurring_status = "ok"
+        recurring_error: Optional[str] = None
         # Merge recurring config tasks (kind==task) for the same range
         try:
             from obsidian_ai_hub.planner.recurring import expand_recurring
@@ -1320,8 +1393,19 @@ def reminders_read(start_date: str, end_date: str) -> str:
                     pass
         except Exception as rexc:
             logger.warning("reminders_read recurring merge failed: %s", rexc)
+            recurring_status = "error"
+            recurring_error = str(rexc)
 
-        return json.dumps({"reminders": reminders}, ensure_ascii=False)
+        payload = {
+            "reminders": _normalize_reminders(list(reminders)),
+            "apple_status": apple_status,
+            "recurring_status": recurring_status,
+        }
+        if apple_error is not None:
+            payload["apple_error"] = apple_error
+        if recurring_error is not None:
+            payload["recurring_error"] = recurring_error
+        return json.dumps(payload, ensure_ascii=False)
     except EXPECTED_TOOL_EXCEPTIONS as exc:
         logger.warning("reminders_read failed: %s", exc)
         return json.dumps({"error": str(exc)}, ensure_ascii=False)

@@ -118,9 +118,14 @@ Capability の選択肢には、書込・外部操作を含むものに **書込
 - `run.inputs.<field>` — `inputs_schema` の各項目（ネストも展開、配列は `[0]` の例つき）。
 - `nodes.<node_id>.output.<field>` — 先行 Node の出力。Agent と単発 LLM は `output_schema`、
   Loop は `final_state.*` / `iterations` / `exit_reason`、Loop Result は `state_schema` の項目。
-  Capability は型が宣言されているもの（読み取り/検索系・`hitl_wait`・`research_agent` など）は
-  項目を展開し、未宣言のものは `nodes.<node_id>.output` 全体のみ表示します。
+  Capability は structured かつ strict がオンの Node の宣言済み必須フィールドのみ表示します。
+  出力全体・opaque / receipt・非 strict・未宣言・必須でない経路は表示されません。
+  直接入力することもできますが、公開時のサーバー検証で拒否されます。
 - `loop.state.<field>` / `loop.input.<field>` / `loop.iteration` — Loop 子グラフ内のみ。
+
+Capability の設定欄には出力契約（`structured` / `receipt` / `opaque`）が表示されます。
+`structured` の読み取り系と `hitl_wait` を選ぶと strict が自動でオンになり、
+それ以外の Capability では strict を指定できません（チェックは無効化されます）。
 
 候補は **候補から選ぶ** で開閉でき、検索欄で絞り込めます。**コピー** でパスをコピーできます。
 候補を使わず直接入力することもできます（参照形式でない場合は警告が出ます）。

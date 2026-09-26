@@ -297,6 +297,16 @@ Node 間のデータ連携は文字列テンプレート展開ではなく、以
 
 参照は静的検証で解決可能性を確認し、実行直前に値を解決してから Pydantic / JSON Schema で検証する。
 
+Capability 出力には出力契約クラス（`structured` / `receipt` / `opaque`）の
+参照境界がある。`structured`（P2: `vault_read_file` / `calendar_read` /
+`reminders_read` / `research_context_snapshot` / `hitl_wait`）は
+`fail_on_output_mismatch: true` の Node の宣言済み必須フィールドだけを参照できる。
+`receipt` / `opaque` の出力参照、出力全体（`nodes.<id>.output`）への参照、
+未宣言フィールド・未宣言ネスト・欠落し得る必須でない経路の参照は、入力・条件・
+pipe・テンプレートの全経路で静的検証エラーになる（詳細は §6.1）。
+`fail_on_output_mismatch: true` は structured の読み取り系と `hitl_wait` にだけ
+許可し、書込み・外部操作・receipt での指定は検証エラーになる。
+
 Run 作成時、`inputs_schema` の object property に `default` があり入力にキーが無い場合は、その値を
 補完してから検証・スナップショット保存する。ネストした object にも適用するが、配列要素は対象外。
 既存のキー（`$ref` / `$expr` を含む）は上書きしない。
@@ -396,7 +406,8 @@ Run 作成時、`inputs_schema` の object property に `default` があり入�
 - `$expr` に `pipe` は付けられない。日時式の値は `text_template.inputs` 経由で文字列化する。
 - 公開時に演算子名と args のキー・型・範囲を検証する。加えて参照先の宣言型が既知のときは、
   先頭演算子の入力型（文字列 / 配列）と突き合わせる（`run.inputs`、Agent / Loop / `text_template`
-  出力が対象。Capability 出力など不透明な位置は実行時検証のみ）。
+  出力と strict structured Capability 出力が対象。`receipt` / `opaque` の Capability
+  出力など不透明な位置は実行時検証のみで、そもそも参照自体が静的検証エラーになる）。
 - 実行時に入力値の型を検証し、型不一致・`pluck`/`sort`/`unique` のキー欠落・`as:"date"` の
   パース失敗は対象 Node を失敗させる（外部呼出前）。error Edge があればそこへ進む。
 
@@ -575,7 +586,13 @@ Run 作成時、`inputs_schema` の object property に `default` があり入�
 - Loop Node の `continuation_condition` が必須であること（未指定は検証エラー）。
 - Loop Node がネストされていないこと。
 - Terminal Node に outgoing Edge がないこと。
-- 型付き参照が解決可能であり、参照先の型と一致すること。
+- 型付き参照が解決可能であり、参照先の型と一致すること。Capability 出力への参照は
+  さらに出力契約境界を満たすこと。すなわち、参照先が `receipt` / `opaque`
+  でないこと、出力全体でないこと、宣言済みの必須フィールド経路であること
+  （未宣言フィールド・未宣言ネスト・必須でない経路は不可）、参照先 structured
+  Node が `fail_on_output_mismatch: true` であること。`fail_on_output_mismatch:
+  true` は structured の読み取り系（P2 の 4 Capability）と `hitl_wait` にだけ
+  許可する。
 - `$expr` の `kind` / `version` / `math` / `timezone` / `week_starts_on` / `result` が妥当で
   あること。anchor の参照先が date / date-time と宣言されている位置ではその型と一致すること。
 - `pipe` の演算子名・args のキー/型/範囲が妥当で、args に `$ref`/`$expr` を含まないこと。
@@ -587,7 +604,8 @@ Run 作成時、`inputs_schema` の object property に `default` があり入�
 - 秘密値を含む入力が固定値として保存されていないこと（UI 警告 + 検証ヒューリスティック）。
 - `read_only` でない Capability を含む場合、検証応答の `warnings` に書込・外部操作の注意を返す
   （公開はブロックしない）。
-- strict 出力と `retry.max_attempts > 0` を併用した capability Node も `warnings` に含める。
+- strict 出力と `retry.max_attempts > 0` を併用した効果的 capability Node も `warnings`
+  に含める（読み取り系の retry に副作用の重複はないため警告しない）。
 
 ### 6.2 動的検証（Run 開始直前 / Node 実行直前）
 
@@ -660,15 +678,21 @@ Run 作成時、`inputs_schema` の object property に `default` があり入�
 - 論理的な 1 回起動単位ごとに `activation_id`（永続 UUID）を生成または再利用する。
 - Capability Adapter を `(validated_inputs, invocation_context)` の形で呼び出す。
 - Adapter は `StepResult` を返す。`satisfied_effects` があれば Event として記録する。
-- 出力はコード宣言された出力スキーマ（読み取り/検索系・`hitl_wait` 等）と照合し、
+- 出力はコード宣言された出力スキーマ（structured / receipt の宣言があるもの）と照合し、
   不一致なら `capability_output_schema_mismatch` Event を記録する。既定では **Node は失敗させない**（助言）。
+  opaque Capability には宣言スキーマがなく、`error` キーの検査のみ行う。
 - Node config の `fail_on_output_mismatch: true`（strict）では、次のいずれかで Node を
   **失敗**させる。出力は後続 Node へ渡さず、`error` Edge / Run 失敗の既存伝播に乗せる。
+  - 出力が JSON object でない。
   - 出力 object がトップレベル `error` キーを持つ（registry tool の共通失敗形。値の真偽は問わない）。
-  - 宣言済み出力スキーマに一致しない。
+  - 宣言済み出力スキーマに一致しない（required 欠落・型違い・null を含む）。
+  - `calendar_read` / `reminders_read` で Apple / recurring の取得が不完全
+    （`apple_status` / `recurring_status` が `ok` でない）。部分結果は lenient
+    実行では観測可能なまま残すが、strict Node では後続の判断・副作用へ流さない。
+  strict は structured の読み取り系（P2 の 4 Capability）と `hitl_wait` にだけ許可する。
   副作用 Capability に strict を付けると、外部処理成功後でも effects が記録されないため
-  読み取り系での利用を推奨する。また strict と `retry.max_attempts > 0` の併用は、契約違反時に
-  副作用が再実行されうるため非推奨とする（検証応答の `warnings` で注意する）
+  検証エラーになる。また効果的 Capability の strict と `retry.max_attempts > 0` の併用は、
+  契約違反時に副作用が再実行されうるため非推奨とする（検証応答の `warnings` で注意する）
   ([ADR](adr/workflow-graph-and-agent-node.md#amendment-capability-node-の-strict-出力))。
 - 既存 Adapter 実行契約は Task 行を要求するため、実行中だけ短命のブリッジ Task を持つ。
   これは `origin = 'workflow'` として Task Agent の一覧から除外する
@@ -753,7 +777,8 @@ HITL 待ちは Capability Node として実装する。`hitl_wait` Capability �
 
 - HITL へ質問を登録する。
 - Node 状態を `waiting_hitl`、Run 状態を `waiting_hitl` とし、worker claim を解放する。
-- HITL 回答後、回答値を型付き出力として返し、Node を `succeeded` とする。
+- HITL 回答後、回答値を文字列へ正規化した `{"answer": string}` として返し、
+  Node を `succeeded` とする（`answer` は required）。
 - HITL 回答は既存 `/hitl` UI で処理する。Workflow UI にはリンクを表示する。
 
 このため HITL 専用の Node 実装や状態機械を増やさず、Capability の入力 schema・監査・取消・再開の
@@ -940,6 +965,7 @@ Agent 指紋を含む。
 
 | エンドポイント | 責務 |
 | --- | --- |
+| `GET /api/v1/workflows/capabilities` | Workflow で選択可能な Capability 一覧。`inputs_schema` / `target_schema` / `output_schema` に加え、`output_contract_class`（`structured` / `receipt` / `opaque`）、`output_reference_policy`（`strict_fields` / `forbidden`）、`strict_allowed` を返す。opaque の `output_schema` は `null`。 |
 | `GET /api/v1/workflows` | Workflow 一覧（ページ送り）。 |
 | `GET /api/v1/workflows/schedulable` | Scheduler Job の対象選択用に、published Revision を持つ Workflow とその `inputs_schema` を返す。 |
 | `POST /api/v1/workflows` | 新規 Workflow + 初期 draft Revision 作成。`skip_approval` を受け付ける。 |
@@ -1263,6 +1289,17 @@ one_shot_jobs（v58 で再構築）
 31. Capability strict 出力: `fail_on_output_mismatch: true` の Node は、出力のトップレベル `error`
     キー（例: `vault_read_file` のファイル不在）または宣言済み出力 schema 不一致で `failed` になり、
     後続 Node へ出力を渡さない。既定 false では mismatch Event を記録して続行する。
+    strict 指定は structured の読み取り系と `hitl_wait` にだけ許可する。
+32. 出力契約境界: `receipt` / `opaque` の出力参照、出力全体参照、未宣言・必須でない経路の
+    参照、strict でない structured Node の出力参照は、入力・条件・pipe・テンプレートの
+    全経路で検証エラーになる。opaque の `output_schema` は `null` で、参照ピッカーに
+    候補は表示されない。
+33. P2 strict 対象: `vault_read_file`（`relative_path` / `content` 必須）、
+    `calendar_read` / `reminders_read`（一覧・各項目の型と取得状態 `apple_status` /
+    `recurring_status` が `ok` であること）、`research_context_snapshot`
+    （5 トップレベル値必須、下位ネストは参照不可）、`hitl_wait`（`answer` 文字列必須）。
+    取得不完全・ required 欠落・型違い・null は strict Node を失敗させ、error Edge が
+    なければ Run を失敗させる。部分結果は lenient 実行では観測可能なまま残る。
 32. Schema 制約: `minItems` / `maxItems` は非負整数で `minItems <= maxItems` を検証し、配列値の
     件数が範囲外なら検証エラーになる。
 33. Run 削除: 終端 Run の `DELETE` は Node・Activation・Event を削除し、dispatch / one-shot /

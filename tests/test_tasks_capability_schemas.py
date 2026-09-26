@@ -160,12 +160,90 @@ def test_capability_output_schema_declared_and_fallback():
     ui = schemas.ui_output_schema("calendar_read")
     assert "events" in ui["properties"]
 
-    # Undeclared capabilities fall back to {summary}.
-    fallback = schemas.ui_output_schema("vault_search")
-    assert "summary" in fallback["properties"]
+    # Opaque capabilities have no synthetic summary fallback (P1).
+    assert schemas.ui_output_schema("vault_search") is None
+    assert schemas.ui_output_schema("research_agent") is None
+    assert schemas.ui_output_schema("people_search") is None
+    assert schemas.ui_output_schema("periodic_note_read") is None
 
-    summary_cap = schemas.ui_output_schema("research_agent")
-    assert "summary" in summary_cap["properties"]
+    # Receipt schemas stay for audit/display but are not referencable (P3).
+    receipt_ui = schemas.ui_output_schema("calendar_create_proposal")
+    assert receipt_ui is not None
+    assert "hitl_run_id" in receipt_ui["properties"]
+
+
+def test_output_contract_ledger_covers_all_capabilities():
+    from obsidian_ai_hub.tasks.capabilities import get_capability_definitions
+
+    # Pin the explicit inventory so a ledger regression is detected (an
+    # unclassified key silently falls through to opaque).
+    assert schemas.STRUCTURED_CAPABILITY_KEYS == frozenset(
+        {
+            "vault_read_file",
+            "calendar_read",
+            "reminders_read",
+            "research_context_snapshot",
+        }
+    )
+    assert schemas.RECEIPT_CAPABILITY_KEYS
+    assert "vault_write_file" in schemas.RECEIPT_CAPABILITY_KEYS
+    assert "calendar_create_proposal" in schemas.RECEIPT_CAPABILITY_KEYS
+
+    by_key = {d.key: d for d in get_capability_definitions()}
+    for key in schemas.STRUCTURED_CAPABILITY_KEYS:
+        assert key in by_key
+        assert schemas.output_contract_class(key) == "structured"
+        assert schemas.output_reference_policy(key) == "strict_fields"
+    for key in schemas.RECEIPT_CAPABILITY_KEYS:
+        if key in by_key:
+            assert schemas.output_contract_class(key) == "receipt"
+            assert schemas.output_reference_policy(key) == "forbidden"
+    for definition in get_capability_definitions():
+        contract = schemas.output_contract_class(definition.key)
+        assert contract in ("structured", "receipt", "opaque")
+
+
+def test_dynamic_plugin_defaults_to_opaque():
+    assert schemas.output_contract_class("custom:anything") == "opaque"
+    assert schemas.output_contract_class("skills") == "opaque"
+    assert schemas.output_contract_class("unknown_capability") == "opaque"
+    assert schemas.ui_output_schema("custom:anything") is None
+
+
+def test_p2_structured_schemas_declare_required():
+    vault = schemas.capability_output_schema("vault_read_file")
+    assert set(vault["required"]) == {"relative_path", "content"}
+
+    calendar = schemas.capability_output_schema("calendar_read")
+    assert set(calendar["required"]) == {
+        "events",
+        "apple_status",
+        "recurring_status",
+    }
+    event_items = calendar["properties"]["events"]["items"]
+    assert set(event_items["required"]) == {
+        "title",
+        "start",
+        "end",
+        "all_day",
+        "source",
+    }
+
+    reminders = schemas.capability_output_schema("reminders_read")
+    assert set(reminders["required"]) == {
+        "reminders",
+        "apple_status",
+        "recurring_status",
+    }
+
+    snapshot = schemas.capability_output_schema("research_context_snapshot")
+    assert set(snapshot["required"]) == {
+        "recent_activities",
+        "existing_themes",
+        "recent_feedback",
+        "daily_notes",
+        "latest_weekly_note",
+    }
 
 
 def test_ui_target_schema_for_delegate_capabilities():

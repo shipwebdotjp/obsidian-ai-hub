@@ -59,9 +59,7 @@ def _loop_graph() -> tuple[list[dict], list[dict]]:
             "node_id": "result",
             "node_type": "loop_result",
             "label": "result",
-            "config": {
-                "output_mapping": {"done": {"$ref": "nodes.child.output"}}
-            },
+            "config": {"output_mapping": {"done": False}},
             "parent_loop_node_id": "loop",
         },
         {
@@ -253,6 +251,75 @@ def test_validate_graph_rejects_too_many_edges():
 # --- export / import -------------------------------------------------------
 
 
+def test_import_renumbers_structured_field_reference(test_memory_db_path, client):
+    """A valid strict structured field ref survives import with a new node id."""
+    task_store.sync_capabilities()
+    package_body = {
+        "format": package.PACKAGE_FORMAT,
+        "version": 1,
+        "name": "__opcheck_import_strict_ref",
+        "description": "",
+        "inputs_schema": {"type": "object"},
+        "nodes": [
+            {
+                "node_id": "reader",
+                "node_type": "capability",
+                "label": "reader",
+                "config": {
+                    "capability_key": "vault_read_file",
+                    "inputs": {"relative_path": "a.md"},
+                    "fail_on_output_mismatch": True,
+                },
+            },
+            {
+                "node_id": "themer",
+                "node_type": "agent",
+                "label": "themer",
+                "config": {
+                    "agent_id": "agent_x",
+                    "inputs": {
+                        "body": {"$ref": "nodes.reader.output.content"}
+                    },
+                    "output_schema": {"type": "object"},
+                },
+            },
+            {
+                "node_id": "end",
+                "node_type": "terminal",
+                "label": "end",
+                "config": {"outcome": "success"},
+            },
+        ],
+        "edges": [
+            {
+                "edge_id": "e1",
+                "source_node_id": "reader",
+                "target_node_id": "themer",
+                "edge_kind": "normal",
+                "condition": None,
+                "order_index": 0,
+            },
+            {
+                "edge_id": "e2",
+                "source_node_id": "themer",
+                "target_node_id": "end",
+                "edge_kind": "normal",
+                "condition": None,
+                "order_index": 0,
+            },
+        ],
+    }
+    imported = client.post(
+        "/api/v1/workflows/import?format=json",
+        content=json.dumps(package_body).encode(),
+    )
+    assert imported.status_code == 201, imported.text
+    revision = imported.json()["revision"]
+    labels = _by_label(revision)
+    ref = labels["themer"]["config"]["inputs"]["body"]["$ref"]
+    assert ref == f"nodes.{labels['reader']['node_id']}.output.content"
+
+
 def test_export_import_roundtrip_renumbers_ids(test_memory_db_path, client):
     _, revision_id = _publish_loop_workflow(client, "source")
     exported = client.get(
@@ -283,8 +350,7 @@ def test_export_import_roundtrip_renumbers_ids(test_memory_db_path, client):
     assert loop["config"]["entry_node_id"] == imported_labels["child"]["node_id"]
     assert imported_labels["child"]["parent_loop_node_id"] == loop["node_id"]
     assert (
-        imported_labels["result"]["config"]["output_mapping"]["done"]["$ref"]
-        == f"nodes.{imported_labels['child']['node_id']}.output"
+        imported_labels["result"]["config"]["output_mapping"]["done"] is False
     )
     assert loop["config"]["continuation_condition"]["from_path"] == "loop.state.done"
     assert imported_revision["inputs_schema"] == original["inputs_schema"]

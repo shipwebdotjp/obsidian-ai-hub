@@ -147,6 +147,115 @@ def _reference_errors(
     return [f"reference_scope: {path}: 未対応の参照形式です: {ref}"]
 
 
+def _capability_nodes_by_id(
+    nodes: Optional[list[dict[str, Any]]],
+) -> dict[str, dict[str, Any]]:
+    if not nodes:
+        return {}
+    return {str(n.get("node_id")): n for n in nodes if n.get("node_id")}
+
+
+def _capability_output_contract_errors(
+    ref: str,
+    *,
+    nodes: Optional[list[dict[str, Any]]],
+    path: str,
+) -> list[str]:
+    """Enforce the P1 output-reference boundary for Capability outputs.
+
+    Rejects (all paths: inputs, conditions, pipes, templates):
+    - whole-output references (``nodes.<id>.output`` with no field);
+    - any field reference into ``receipt`` / ``opaque`` capabilities;
+    - structured references from a node without ``fail_on_output_mismatch``;
+    - undeclared fields, undeclared nesting, and paths through optional
+      (non-required) properties that may be absent.
+    """
+    from obsidian_ai_hub.workflow.capabilities import (
+        output_contract_class,
+        workflow_output_schema,
+    )
+    from obsidian_ai_hub.workflow.models import _path_segments
+
+    segments = _path_segments(ref)
+    if len(segments) < 3 or segments[0] != "nodes" or segments[2] != "output":
+        return []
+    by_id = _capability_nodes_by_id(nodes)
+    source = by_id.get(str(segments[1]))
+    if source is None or source.get("node_type") != "capability":
+        return []
+    config = source.get("config")
+    if not isinstance(config, dict):
+        return []
+    key = config.get("capability_key")
+    if not isinstance(key, str) or not key.strip():
+        return []
+    tail: list[Any] = segments[3:]
+    if not tail:
+        return [
+            f"output_contract: {path}: Capability '{key}' の出力全体 "
+            f"(nodes.{segments[1]}.output) は参照できません。"
+            "宣言済みの個別フィールドを参照してください"
+        ]
+    contract = output_contract_class(key)
+    if contract != "structured":
+        return [
+            f"output_contract: {path}: Capability '{key}' "
+            f"(output_contract_class={contract}) の出力は参照できません"
+        ]
+    if config.get("fail_on_output_mismatch") is not True:
+        return [
+            f"output_contract: {path}: Capability '{key}' "
+            f"(nodes.{segments[1]}) の出力を参照するには "
+            "fail_on_output_mismatch: true が必要です"
+        ]
+    schema = workflow_output_schema(key)
+    if not isinstance(schema, dict):
+        return [
+            f"output_contract: {path}: Capability '{key}' に宣言済み出力がありません"
+        ]
+    current: Any = schema
+    for token in tail:
+        if isinstance(token, int):
+            if (
+                not isinstance(current, dict)
+                or current.get("type") != "array"
+                or not isinstance(current.get("items"), dict)
+            ):
+                return [
+                    f"output_contract: {path}: '{ref}' は未宣言のネストです"
+                ]
+            current = current["items"]
+            continue
+        if isinstance(current, dict) and current.get("type") == "array":
+            # Descending into a list requires an explicit index
+            # (``events[0].title``); a bare string token (``events.title``)
+            # can never resolve at runtime.
+            return [
+                f"output_contract: {path}: '{ref}' は未宣言のネストです"
+            ]
+        if not isinstance(current, dict) or current.get("type") not in (
+            None,
+            "object",
+        ):
+            # Leaf traversal into a scalar (e.g. ``content.length``).
+            return [
+                f"output_contract: {path}: '{ref}' は未宣言のネストです"
+            ]
+        props = current.get("properties")
+        if not isinstance(props, dict) or token not in props:
+            return [
+                f"output_contract: {path}: '{ref}' は未宣言のフィールドです"
+            ]
+        required = current.get("required")
+        if isinstance(required, list) and token not in required:
+            return [
+                f"output_contract: {path}: '{ref}' は欠落し得る "
+                "必須でない経路です"
+            ]
+        current = props[token]
+    return []
+
+
 def _condition_reference_errors(
     condition: Any,
     *,
@@ -154,17 +263,25 @@ def _condition_reference_errors(
     scope_ids: set[str],
     inputs_schema: Optional[dict[str, Any]],
     path: str,
+    nodes: Optional[list[dict[str, Any]]] = None,
 ) -> list[str]:
     errors = validate_condition(condition, path=path)
     if errors or not isinstance(condition, dict):
         return errors
-    return _reference_errors(
-        str(condition["from_path"]),
+    ref = str(condition["from_path"])
+    errors = _reference_errors(
+        ref,
         scope_id=scope_id,
         scope_ids=scope_ids,
         inputs_schema=inputs_schema,
         path=f"{path}.from_path",
     )
+    errors.extend(
+        _capability_output_contract_errors(
+            ref, nodes=nodes, path=f"{path}.from_path"
+        )
+    )
+    return errors
 
 
 _PIPE_FIRST_OP_INPUT_TYPES: dict[str, frozenset[str]] = {
@@ -230,6 +347,9 @@ def _value_reference_errors(
                 inputs_schema=inputs_schema,
                 path=path,
             )
+        )
+        errors.extend(
+            _capability_output_contract_errors(ref, nodes=nodes, path=path)
         )
     resolver = (
         _anchor_type_resolver(nodes, inputs_schema, scope_id)
@@ -332,6 +452,13 @@ def _anchor_type_resolver(
                 if tail == [TEXT_OUTPUT_KEY]:
                     return ("string", None)
                 return None
+            if node_type == "capability":
+                from obsidian_ai_hub.workflow.capabilities import (
+                    workflow_output_schema,
+                )
+
+                key = str(config.get("capability_key") or "")
+                return _schema_field_type(workflow_output_schema(key), tail)
             return None
         return None
 
@@ -354,6 +481,9 @@ def _value_expression_errors(
                 {"$expr": expr}, path=path, anchor_type_resolver=resolver
             )
         )
+    # NOTE: `$expr` anchors holding `{"$ref": ...}` are already covered by
+    # `_value_reference_errors` (`iter_references` descends into `$expr`
+    # dicts), so no separate anchor pass is needed here.
     return errors
 
 
@@ -546,6 +676,7 @@ def validate_graph(
                     scope_ids=scope_ids,
                     inputs_schema=inputs_schema,
                     path=f"edge '{edge['edge_id']}'.condition",
+                    nodes=nodes,
                 )
             )
 
@@ -612,6 +743,15 @@ def _validate_capability_node(
         errors.append(
             f"Node '{node_id}': fail_on_output_mismatch は boolean が必要です"
         )
+    elif strict is True and isinstance(key, str) and key.strip():
+        from obsidian_ai_hub.workflow.capabilities import is_strict_allowed
+
+        if not is_strict_allowed(key):
+            errors.append(
+                f"strict_policy: Node '{node_id}': Capability '{key}' "
+                "での fail_on_output_mismatch: true は許可されていません"
+                "（読み取り系 structured と hitl_wait のみ）"
+            )
     return errors
 
 
@@ -765,6 +905,7 @@ def _validate_loop_node(
             scope_ids={str(n["node_id"]) for n in nodes if n.get("parent_loop_node_id") == node_id},
             inputs_schema=inputs_schema,
             path=f"Node '{node_id}'.continuation_condition",
+            nodes=nodes,
         )
     )
     max_iterations = config.get("max_iterations")
@@ -863,7 +1004,10 @@ def collect_graph_warnings(
             and isinstance(attempts, int)
             and not isinstance(attempts, bool)
             and attempts > 0
+            and not read_only(key)
         ):
+            # Read-only strict nodes have no side effects to duplicate, so
+            # the retry warning only applies to effectful capabilities.
             warnings.append(
                 f"Node '{node.get('node_id')}': strict 出力と retry の併用は、"
                 "契約違反時に副作用が再実行されうるため非推奨です"

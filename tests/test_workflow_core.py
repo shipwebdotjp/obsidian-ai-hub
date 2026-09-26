@@ -424,7 +424,27 @@ def test_collect_graph_warnings_tolerates_non_object_config():
 def test_collect_graph_warnings_flags_strict_with_retry():
     from obsidian_ai_hub.workflow.validation import collect_graph_warnings
 
-    nodes = [
+    # Effectful strict nodes with retry warn about duplicate side effects.
+    write_nodes = [
+        _node(
+            "a",
+            "capability",
+            {
+                "capability_key": "vault_write_file",
+                "inputs": {},
+                "fail_on_output_mismatch": True,
+                "retry": {"max_attempts": 2},
+            },
+        )
+    ]
+    warnings = collect_graph_warnings(
+        nodes=write_nodes, read_only=lambda key: False
+    )
+    assert len(warnings) == 2
+    assert any("strict" in w for w in warnings)
+
+    # Read-only strict nodes have no side effects to duplicate: no warning.
+    read_nodes = [
         _node(
             "a",
             "capability",
@@ -436,9 +456,10 @@ def test_collect_graph_warnings_flags_strict_with_retry():
             },
         )
     ]
-    warnings = collect_graph_warnings(nodes=nodes, read_only=lambda key: True)
-    assert len(warnings) == 1
-    assert "strict" in warnings[0]
+    assert (
+        collect_graph_warnings(nodes=read_nodes, read_only=lambda key: True)
+        == []
+    )
 
 
 def test_workflow_catalog_includes_hitl_wait_without_task_agent():

@@ -118,9 +118,26 @@ Status: Accepted (2026-09-22)。エディタの入力候補を増やし、target
   **Node は失敗させない**（助言）。宣言範囲は安定した読み取り/検索系＋ `hitl_wait` /
   `research_agent` / `register_*_job` に限定し、必要に応じて拡張する。
 
+## Amendment (P1 出力契約: opaque の null 化と strict 連動候補)
+
+Status: Accepted (2026-09-26)。
+[Capability 入出力契約 ADR](capability-input-output-contracts.md#amendment-p1-契約台帳と参照境界--限定-p2)
+の P1/P2 に伴い、P1 amendment の出力スキーマ扱いを次のとおり変更する。
+
+- `ui_output_schema()` は opaque Capability で `null` を返す（`{summary}` の
+  synthetic フォールバックを廃止）。capabilities API の `output_schema` も同様。
+  加えて `output_contract_class` / `output_reference_policy` / `strict_allowed`
+  を返す。
+- 参照ピッカーは structured かつ strict（`fail_on_output_mismatch: true`）の
+  Node の宣言済み必須フィールドだけを候補にする。出力全体・opaque / receipt・
+  非 strict・未宣言・必須でない経路は表示しない。条件候補も同じ候補源を使う。
+- 新規の P2 Node（`vault_read_file` / `calendar_read` / `reminders_read` /
+  `research_context_snapshot` / `hitl_wait`）は strict を既定オンにする。
+  Capability 切替え時は strict フラグをポリシーに同期する。
+
 ## 対象外
 
-- Capability 出力スキーマの全面宣言（未宣言は `{summary}` フォールバック）
+- Capability 出力スキーマの全面宣言（opaque は `null`、receipt は P3 まで参照不可）
 - 定義の import / export、ユーザー管理テンプレート、複雑な JSON Schema
 
 ## 関連文書

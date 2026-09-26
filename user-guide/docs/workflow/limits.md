@@ -56,6 +56,11 @@ title: 制約とトラブルシューティング
 - **entry の数** — トップレベルに entry Node（入辺なし）がちょうど 1 つ必要です。
 - **到達不能 Node** — entry から、または `loop_result` へ到達できない子 Node がある。
 - **参照スコープ** — `reference_scope: ... 参照先 Node は同一スコープにありません` など。
+- **出力契約** — `output_contract: ...`。opaque / receipt の出力参照、出力全体参照、
+  未宣言フィールド・未宣言ネスト、必須でない経路、strict でない参照先は公開できません。
+  宣言済みの個別フィールドを参照し、参照先の strict をオンにしてください。
+- **strict ポリシー** — `strict_policy: ...`。`fail_on_output_mismatch: true` は
+  structured の読み取り系と `hitl_wait` にだけ指定できます。
 - **branch の継続条件未指定** — Loop の `continuation_condition` は必須です。
 
 エディタではローカル検証（黄色）とサーバー検証（赤色）が別々に表示されます。

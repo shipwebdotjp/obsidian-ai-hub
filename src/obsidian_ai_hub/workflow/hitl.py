@@ -30,8 +30,10 @@ def resolve_workflow_hitl(ctx: Any) -> Any:
     if not run_id or not activation_id:
         logger.warning("Workflow HITL handler got checkpoint without run/activation")
         return HitlResult.complete()
+    from obsidian_ai_hub.workflow.capabilities import normalize_hitl_answer
+
     answers = getattr(ctx, "answers_by_question_key", {}) or {}
-    answer = answers.get("workflow_answer")
+    answer = normalize_hitl_answer(answers.get("workflow_answer"))
     workflow_store.append_event(
         str(run_id),
         "hitl_answer_received",

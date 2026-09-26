@@ -429,27 +429,104 @@ def ui_target_schema(capability_key: str) -> dict[str, Any] | None:
     return _apply_field_widgets(capability_key, normalized)
 
 
-# Code-owned output contracts for capabilities whose adapter/tool returns a
-# stable JSON object. The Workflow reference picker uses these to offer typed
-# ``nodes.<capability>.output.<field>`` candidates; the runtime treats a
-# mismatch as advisory only (never fails a node). Capabilities without a
-# declaration fall back to ``{"summary": <text>}``.
+# Code-owned output contracts (P1: contract ledger).
+#
+# Every builtin capability is classified into exactly one output contract
+# class (see ``docs/workflow/adr/capability-input-output-contracts.md`` and
+# its P1/P2 amendment):
+# - ``structured``: stable data the Workflow may pass downstream as typed
+#   references. References are ``strict_fields``: only declared fields, and
+#   only from a node with ``fail_on_output_mismatch: true``.
+# - ``receipt``: write/proposal/job-registration results. The schema is kept
+#   for audit/display, but P3 まで後続 Node・条件・pipe・テンプレートからは
+#   参照できない (``forbidden``).
+# - ``opaque``: plugin, Skills, external providers and not-yet-structured
+#   read/search outputs. No typed field references (``forbidden``) and no
+#   synthetic ``summary`` fallback.
+#
+# Dynamic plugins (``custom:*`` without an explicit registration, ``skills``)
+# default to ``opaque``. ``hitl_wait`` is workflow-only and ``structured``;
+# see ``workflow/capabilities.py``.
+OUTPUT_CONTRACT_STRUCTURED = "structured"
+OUTPUT_CONTRACT_RECEIPT = "receipt"
+OUTPUT_CONTRACT_OPAQUE = "opaque"
+
+REFERENCE_POLICY_STRICT_FIELDS = "strict_fields"
+REFERENCE_POLICY_FORBIDDEN = "forbidden"
+
+# First structured targets (P2). ``hitl_wait`` lives in workflow-only and is
+# added by ``workflow/capabilities.py``.
+STRUCTURED_CAPABILITY_KEYS: frozenset[str] = frozenset(
+    {
+        "vault_read_file",
+        "calendar_read",
+        "reminders_read",
+        "research_context_snapshot",
+    }
+)
+
+# Effectful capabilities whose output is a completion receipt (P3 まで参照不可).
+RECEIPT_CAPABILITY_KEYS: frozenset[str] = frozenset(
+    {
+        "vault_write_file",
+        "calendar_create_proposal",
+        "reminder_create_proposal",
+        "research_theme_propose",
+        "register_one_shot_job",
+        "register_one_shot_workflow_job",
+        "register_recurring_job",
+        "register_recurring_workflow_job",
+        "image_generate",
+        "image_edit",
+        "run_shell",
+        "memory_propose",
+    }
+)
+
+# Capabilities allowed to set ``fail_on_output_mismatch: true`` (P1/P2).
+# Structured reads plus workflow-only ``hitl_wait`` (checked in validation
+# via ``workflow/capabilities.py``). Writes, external operations and receipts
+# are rejected.
+STRICT_ALLOWED_REGISTRY_KEYS: frozenset[str] = frozenset(
+    STRUCTURED_CAPABILITY_KEYS
+)
+
+
+def output_contract_class(capability_key: str) -> str:
+    """Return the code-owned output contract class for a registry capability.
+
+    Unknown keys and dynamic plugins (``custom:*``, ``skills``) default to
+    ``opaque`` unless an explicit contract registration exists.
+    """
+    if capability_key in STRUCTURED_CAPABILITY_KEYS:
+        return OUTPUT_CONTRACT_STRUCTURED
+    if capability_key in RECEIPT_CAPABILITY_KEYS:
+        return OUTPUT_CONTRACT_RECEIPT
+    return OUTPUT_CONTRACT_OPAQUE
+
+
+def output_reference_policy(capability_key: str) -> str:
+    """Return ``strict_fields`` for structured, else ``forbidden``."""
+    if output_contract_class(capability_key) == OUTPUT_CONTRACT_STRUCTURED:
+        return REFERENCE_POLICY_STRICT_FIELDS
+    return REFERENCE_POLICY_FORBIDDEN
+
+
 def _object_output(
-    properties: dict[str, Any], description: str = ""
+    properties: dict[str, Any],
+    description: str = "",
+    required: list[str] | None = None,
 ) -> dict[str, Any]:
     schema: dict[str, Any] = {
         "type": "object",
         "properties": properties,
         "additionalProperties": True,
     }
+    if required:
+        schema["required"] = list(required)
     if description:
         schema["description"] = description
     return schema
-
-
-_SUMMARY_OUTPUT_SCHEMA: dict[str, Any] = _object_output(
-    {"summary": {"type": "string", "description": "実行結果の要約テキスト。"}}
-)
 
 # Shared by image_generate / image_edit: a short summary plus media references.
 _IMAGE_OUTPUT_SCHEMA: dict[str, Any] = _object_output(
@@ -476,9 +553,16 @@ _IMAGE_OUTPUT_SCHEMA: dict[str, Any] = _object_output(
     }
 )
 
+# Fetch-state values for Calendar/Reminders P2 outputs. ``ok`` means both
+# Apple and recurring sources were read; any other value marks a partial
+# result that stays observable in lenient mode but fails strict nodes.
+FETCH_STATUS_OK = "ok"
+
 _OUTPUT_SCHEMAS: dict[str, dict[str, Any]] = {
+    # --- structured (P2): referencable only via strict fields ---
     "vault_read_file": _object_output(
-        {"relative_path": {"type": "string"}, "content": {"type": "string"}}
+        {"relative_path": {"type": "string"}, "content": {"type": "string"}},
+        required=["relative_path", "content"],
     ),
     "calendar_read": _object_output(
         {
@@ -493,9 +577,14 @@ _OUTPUT_SCHEMAS: dict[str, dict[str, Any]] = {
                         "all_day": {"type": "boolean"},
                         "source": {"type": "string"},
                     },
+                    "required": ["title", "start", "end", "all_day", "source"],
+                    "additionalProperties": True,
                 },
-            }
-        }
+            },
+            "apple_status": {"type": "string"},
+            "recurring_status": {"type": "string"},
+        },
+        required=["events", "apple_status", "recurring_status"],
     ),
     "reminders_read": _object_output(
         {
@@ -508,10 +597,32 @@ _OUTPUT_SCHEMAS: dict[str, dict[str, Any]] = {
                         "due": {"type": "string"},
                         "source": {"type": "string"},
                     },
+                    "required": ["title", "due", "source"],
+                    "additionalProperties": True,
                 },
-            }
-        }
+            },
+            "apple_status": {"type": "string"},
+            "recurring_status": {"type": "string"},
+        },
+        required=["reminders", "apple_status", "recurring_status"],
     ),
+    "research_context_snapshot": _object_output(
+        {
+            "recent_activities": {"type": "array", "items": {"type": "object"}},
+            "existing_themes": {"type": "array", "items": {"type": "object"}},
+            "recent_feedback": {"type": "array", "items": {"type": "object"}},
+            "daily_notes": {"type": "array", "items": {"type": "object"}},
+            "latest_weekly_note": {"type": "object"},
+        },
+        required=[
+            "recent_activities",
+            "existing_themes",
+            "recent_feedback",
+            "daily_notes",
+            "latest_weekly_note",
+        ],
+    ),
+    # --- receipt (P3 まで参照不可; schema は監査・表示用に維持) ---
     "calendar_create_proposal": _object_output(
         {
             "status": {"type": "string"},
@@ -526,33 +637,6 @@ _OUTPUT_SCHEMAS: dict[str, dict[str, Any]] = {
             "hitl_run_id": {"type": "string"},
             "message": {"type": "string"},
             "reminder": {"type": "object"},
-        }
-    ),
-    "people_search": _object_output(
-        {"people": {"type": "array", "items": {"type": "object"}}}
-    ),
-    "project_search": _object_output(
-        {"projects": {"type": "array", "items": {"type": "object"}}}
-    ),
-    "memory_search": _object_output(
-        {"memories": {"type": "array", "items": {"type": "object"}}}
-    ),
-    "periodic_note_read": _object_output(
-        {
-            "period_type": {"type": "string"},
-            "reference_date": {"type": "string"},
-            "relative_path": {"type": "string"},
-            "content": {"type": "string"},
-            "truncated": {"type": "boolean"},
-        }
-    ),
-    "research_context_snapshot": _object_output(
-        {
-            "recent_activities": {"type": "array", "items": {"type": "object"}},
-            "existing_themes": {"type": "array", "items": {"type": "object"}},
-            "recent_feedback": {"type": "array", "items": {"type": "object"}},
-            "daily_notes": {"type": "array", "items": {"type": "object"}},
-            "latest_weekly_note": {"type": "object"},
         }
     ),
     "image_generate": _IMAGE_OUTPUT_SCHEMA,
@@ -572,25 +656,53 @@ _OUTPUT_SCHEMAS: dict[str, dict[str, Any]] = {
             "run_at_utc": {"type": "string"},
         }
     ),
+    "register_one_shot_workflow_job": _object_output(
+        {"job_id": {"type": "string"}}
+    ),
     "register_recurring_job": _object_output({"job_id": {"type": "string"}}),
+    "register_recurring_workflow_job": _object_output(
+        {"job_id": {"type": "string"}}
+    ),
     "research_theme_propose": _object_output(
         {"theme_id": {"type": "string"}, "hitl_run_id": {"type": "string"}}
     ),
-    # Text-summary adapters (the workflow normalizes their output to {summary}).
-    "research_agent": _object_output({"summary": {"type": "string"}}),
-    "specialist_agent": _object_output({"summary": {"type": "string"}}),
-    "coding_cli": _object_output({"summary": {"type": "string"}}),
+    "vault_write_file": _object_output(
+        {
+            "relative_path": {"type": "string"},
+            "bytes_written": {"type": "integer"},
+            "overwritten": {"type": "boolean"},
+        }
+    ),
+    "memory_propose": _object_output(
+        {
+            "status": {"type": "string"},
+            "memory_id": {"type": "string"},
+            "message": {"type": "string"},
+        }
+    ),
 }
+
+# Opaque capabilities (plugin / Skills / not-yet-structured reads, Agent /
+# Coding / Research delegation outputs) intentionally have no entry above.
+# ``capability_output_schema`` returns ``None`` for them and ``ui_output_schema``
+# returns ``None`` as well (no synthetic ``summary`` fallback).
 
 
 def capability_output_schema(capability_key: str) -> dict[str, Any] | None:
-    """Return the declared output schema, or ``None`` when undeclared."""
+    """Return the declared output schema, or ``None`` when opaque/undeclared."""
     return _OUTPUT_SCHEMAS.get(capability_key)
 
 
 def ui_output_schema(capability_key: str) -> dict[str, Any] | None:
-    """Return the UI-facing (normalized) output schema with summary fallback."""
-    raw = capability_output_schema(capability_key) or _SUMMARY_OUTPUT_SCHEMA
+    """Return the UI-facing normalized output schema, or ``None`` for opaque.
+
+    Structured and receipt schemas are normalized for display/audit. Opaque
+    capabilities return ``None`` (no synthetic ``summary`` fallback) so the
+    reference picker offers no typed candidates.
+    """
+    raw = capability_output_schema(capability_key)
+    if raw is None:
+        return None
     defs = raw.get("$defs")
     normalized = _normalize_ui_schema(
         raw, defs if isinstance(defs, dict) else {}
@@ -598,6 +710,44 @@ def ui_output_schema(capability_key: str) -> dict[str, Any] | None:
     if not isinstance(normalized, dict) or normalized.get("x-unsupported"):
         return None
     return normalized
+
+
+def strict_completeness_errors(
+    capability_key: str, output: dict[str, Any]
+) -> list[str]:
+    """Return P2 fetch-completeness violations for strict nodes.
+
+    Calendar/Reminders merge Apple + recurring sources. A partial result stays
+    observable in lenient mode, but a strict node must fail instead of letting
+    a partial list flow into downstream decisions or side effects.
+    """
+    if capability_key == "calendar_read":
+        errors: list[str] = []
+        if output.get("apple_status") != FETCH_STATUS_OK:
+            errors.append(
+                "calendar_read の Apple 取得が不完全です "
+                f"(apple_status={output.get('apple_status')!r})"
+            )
+        if output.get("recurring_status") != FETCH_STATUS_OK:
+            errors.append(
+                "calendar_read の recurring 取得が不完全です "
+                f"(recurring_status={output.get('recurring_status')!r})"
+            )
+        return errors
+    if capability_key == "reminders_read":
+        errors = []
+        if output.get("apple_status") != FETCH_STATUS_OK:
+            errors.append(
+                "reminders_read の Apple 取得が不完全です "
+                f"(apple_status={output.get('apple_status')!r})"
+            )
+        if output.get("recurring_status") != FETCH_STATUS_OK:
+            errors.append(
+                "reminders_read の recurring 取得が不完全です "
+                f"(recurring_status={output.get('recurring_status')!r})"
+            )
+        return errors
+    return []
 
 
 def _compact_field(name: str, spec: dict[str, Any], required: set[str]) -> str:

@@ -33,6 +33,9 @@ from obsidian_ai_hub.workflow.capabilities import (
     WORKFLOW_ONLY_METADATA,
     WORKFLOW_ONLY_OUTPUT_SCHEMA,
     default_approval_policy,
+    is_strict_allowed,
+    output_contract_class,
+    output_reference_policy,
 )
 from obsidian_ai_hub.workflow.models import (
     RUN_TERMINAL_STATUSES,
@@ -355,6 +358,11 @@ def list_workflow_capabilities() -> dict[str, Any]:
                 "inputs_schema": ui_input_schema(definition.key),
                 "target_schema": ui_target_schema(definition.key),
                 "output_schema": ui_output_schema(definition.key),
+                "output_contract_class": output_contract_class(definition.key),
+                "output_reference_policy": output_reference_policy(
+                    definition.key
+                ),
+                "strict_allowed": is_strict_allowed(definition.key),
             }
         )
     for key in sorted(WORKFLOW_ONLY_KEYS):
@@ -371,6 +379,9 @@ def list_workflow_capabilities() -> dict[str, Any]:
                 "inputs_schema": WORKFLOW_ONLY_INPUT_SCHEMA.get(key),
                 "target_schema": None,
                 "output_schema": WORKFLOW_ONLY_OUTPUT_SCHEMA.get(key),
+                "output_contract_class": output_contract_class(key),
+                "output_reference_policy": output_reference_policy(key),
+                "strict_allowed": is_strict_allowed(key),
             }
         )
     return {"items": items}

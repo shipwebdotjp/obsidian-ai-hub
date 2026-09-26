@@ -39,6 +39,7 @@ import {
   createNode,
   createEdge,
   defaultInputsSchema,
+  isStrictDefaultCapability,
   moveNode,
   referenceSchemaAt,
   removeNode,
@@ -189,9 +190,16 @@ export default function WorkflowEditorPage() {
     return map;
   }, [capabilities]);
   const capabilityOutputSchemas = useMemo(() => {
+    // P1 boundary: only structured (`strict_fields`) schemas feed reference
+    // candidates. Receipt/opaque (`forbidden`) schemas stay available via the
+    // raw capability record for display, but never offer `nodes.*.output`
+    // candidates the backend would reject.
     const map: Record<string, WorkflowSchemaField> = {};
     for (const capability of capabilities) {
-      if (capability.output_schema) {
+      if (
+        capability.output_schema &&
+        capability.output_reference_policy !== "forbidden"
+      ) {
         map[capability.capability_key] = capability.output_schema;
       }
     }
@@ -262,6 +270,22 @@ export default function WorkflowEditorPage() {
       newNodeType === "capability" ? newCapabilityKey : undefined,
       parentLoopId || null,
     );
+    if (newNodeType === "capability" && newCapabilityKey) {
+      // The backend ledger is authoritative for the strict default;
+      // graphModel's hardcoded set is only the offline fallback.
+      const record = capabilities.find(
+        (c) => c.capability_key === newCapabilityKey,
+      );
+      if (record && typeof record.strict_allowed === "boolean") {
+        const nextConfig = { ...node.config };
+        if (record.strict_allowed) {
+          nextConfig.fail_on_output_mismatch = true;
+        } else {
+          delete nextConfig.fail_on_output_mismatch;
+        }
+        node.config = nextConfig;
+      }
+    }
     if (newNodeType === "agent" && newAgentId) {
       node.config = { ...node.config, agent_id: newAgentId };
     }
@@ -297,11 +321,17 @@ export default function WorkflowEditorPage() {
   const updateNodeConfig = (patch: Record<string, unknown>) => {
     if (!selectedNode) return;
     setNodes((prev) =>
-      prev.map((node) =>
-        node.node_id === selectedNode.node_id
-          ? { ...node, config: { ...node.config, ...patch } }
-          : node,
-      ),
+      prev.map((node) => {
+        if (node.node_id !== selectedNode.node_id) return node;
+        const next = { ...node.config, ...patch };
+        // An `undefined` patch value removes the key so optional flags
+        // (e.g. `fail_on_output_mismatch`, `reasoning_effort`) never persist
+        // an explicit empty value for what is logically the default.
+        for (const key of Object.keys(patch)) {
+          if (patch[key] === undefined) delete next[key];
+        }
+        return { ...node, config: next };
+      }),
     );
     markDirty();
   };
@@ -690,7 +720,9 @@ export default function WorkflowEditorPage() {
                 condition={edgeCondition}
                 candidates={
                   edgeSource
-                    ? conditionCandidates(nodes, edgeSource, inputsSchema)
+                    ? conditionCandidates(nodes, edgeSource, inputsSchema, {
+                        capabilityOutputSchemas,
+                      })
                     : []
                 }
                 groups={edgeSource ? groupsForNode(edgeSource) : []}
@@ -729,9 +761,23 @@ export default function WorkflowEditorPage() {
                   <select
                     className="w-full rounded border border-slate-300 px-1 py-0.5"
                     value={String(selectedNode.config.capability_key ?? "")}
-                    onChange={(event) =>
-                      updateNodeConfig({ capability_key: event.target.value })
-                    }
+                    onChange={(event) => {
+                      const nextKey = event.target.value;
+                      // P1/P2: strict is only meaningful for structured reads
+                      // and hitl_wait; keep the flag in sync with the policy
+                      // so publish-time validation has no surprise. The stored
+                      // flag stays editable so legacy `true` can be cleared.
+                      const record = capabilities.find(
+                        (c) => c.capability_key === nextKey,
+                      );
+                      const strictOn =
+                        record?.strict_allowed ??
+                        isStrictDefaultCapability(nextKey);
+                      updateNodeConfig({
+                        capability_key: nextKey,
+                        fail_on_output_mismatch: strictOn ? true : undefined,
+                      });
+                    }}
                   >
                     <option value="">capability を選択</option>
                     {capabilities
@@ -833,6 +879,15 @@ export default function WorkflowEditorPage() {
                       }
                     />
                   </label>
+                  {selectedCapability?.output_contract_class && (
+                    <p className="text-[10px] leading-tight text-slate-500">
+                      出力契約: {selectedCapability.output_contract_class}
+                      {selectedCapability.output_contract_class ===
+                      "structured"
+                        ? "（出力参照には下の strict が必要です）"
+                        : "（出力は参照できません）"}
+                    </p>
+                  )}
                   <label className="flex items-center gap-1 text-slate-700">
                     <input
                       type="checkbox"
@@ -843,11 +898,16 @@ export default function WorkflowEditorPage() {
                       }
                       onChange={(event) =>
                         updateNodeConfig({
-                          fail_on_output_mismatch: event.target.checked,
+                          fail_on_output_mismatch: event.target.checked
+                            ? true
+                            : undefined,
                         })
                       }
                     />
                     エラー出力・schema不一致で失敗
+                    {selectedCapability?.strict_allowed === false &&
+                      selectedNode.config.fail_on_output_mismatch === true &&
+                      "（この Capability では公開時に拒否されます）"}
                   </label>
                 </>
               )}
@@ -1280,6 +1340,7 @@ export default function WorkflowEditorPage() {
                         nodes,
                         edge.source_node_id,
                         inputsSchema,
+                        { capabilityOutputSchemas },
                       )}
                       groups={groupsForNode(edge.source_node_id)}
                       onChange={(condition) => {

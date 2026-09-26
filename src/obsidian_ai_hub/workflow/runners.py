@@ -197,6 +197,7 @@ class DefaultNodeRunner:
         """
         from obsidian_ai_hub.tasks.capability_schemas import (
             capability_output_schema,
+            strict_completeness_errors,
         )
         from obsidian_ai_hub.workflow import store as workflow_store
         from obsidian_ai_hub.workflow.models import validate_value_against_schema
@@ -209,6 +210,7 @@ class DefaultNodeRunner:
             errors.extend(
                 validate_value_against_schema(output, schema, path="output")
             )
+        errors.extend(strict_completeness_errors(key, output))
         if not errors:
             return []
         workflow_store.append_event(

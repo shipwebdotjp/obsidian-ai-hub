@@ -28,9 +28,20 @@ Node 間のデータ連携は、文字列のテンプレート展開ではなく
 }
 ```
 
-Capability Node の出力は、型が宣言されているもの（読み取り/検索系、`hitl_wait`、`research_agent`、
-`register_*_job` など）は `nodes.<node_id>.output.<field>` を参照できます。宣言のない Capability は
-`nodes.<node_id>.output` 全体（要約 `summary`、または JSON object 全体）のみ参照できます。
+Capability Node の出力には出力契約クラスがあり、参照できる範囲が決まっています。
+
+| クラス | 対象の例 | 参照 |
+| --- | --- | --- |
+| `structured` | `vault_read_file`、`calendar_read`、`reminders_read`、`research_context_snapshot`、`hitl_wait` | 宣言済みの必須フィールドのみ。参照元ではなく**参照先** Node の strict（`fail_on_output_mismatch: true`）がオンのときだけ |
+| `receipt` | 書込み・提案・ジョブ登録・画像生成など | 参照不可（schema は監査・表示用のみ） |
+| `opaque` | plugin、`skills`、外部検索、未整備の読み取り系、Agent / Coding / Research 委譲の出力 | 参照不可（`output_schema` は `null`） |
+
+出力全体（`nodes.<node_id>.output`）への参照、未宣言フィールド・未宣言ネスト、
+欠落し得る必須でない経路の参照もできません。たとえばスナップショットの出力全体を
+Agent の `context` に渡すのではなく、`nodes.<id>.output.recent_activities` のように
+宣言済みの個別フィールドを渡します。`hitl_wait` の出力は `nodes.<id>.output.answer`
+（文字列）です。
+
 Agent Node と単発 LLM Node は `output_schema` を宣言するため、そのプロパティを型付きで参照できます。
 
 ## 解決のタイミング

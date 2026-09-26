@@ -67,6 +67,69 @@ Task Capability で入力モデルを解決して実行時検証しているが�
 - **直ちに共通の success/error envelope を導入する**: 業務エラーの分岐には有効だが、Adapter、
   plugin、effect、retry の意味論を同時に移行する横断変更になるため、需要が明確になるまで分離する。
 
+## Amendment (P1 契約台帳と参照境界 + 限定 P2)
+
+Status: Accepted (2026-09-26)。Phase 1 を全面採用し、Phase 2 は高利用・読み取り系
+（`vault_read_file` / `calendar_read` / `reminders_read` /
+`research_context_snapshot` / `hitl_wait`）に限定して採用する。Phase 3
+（副作用 Capability の receipt 解放）は保留する。
+
+### 決定
+
+- **Capability ごとのコード正本を導入する。** 全組込み Capability と
+  workflow-only Capability を `structured` / `receipt` / `opaque` に必ず分類する
+  （`tasks/capability_schemas.py` の ledger + `workflow/capabilities.py` の
+  workflow-only 分）。動的 plugin（`custom:*`、明示的な契約登録のないもの）と
+  `skills` は `opaque` とする。
+- **参照ポリシーは `structured = strict_fields`、`receipt` / `opaque` =
+  `forbidden` とする。** `receipt` の schema は監査・表示用に公開するが、P3 までは
+  後続 Node・条件・pipe・テンプレートから参照できない。
+- **既存公開 Revision に互換モードを設けない。** 保存・公開・実行の全経路で
+  opaque／未検証出力への参照を拒否し、違反のある既存公開 Revision は手動で
+  後継 draft を作成・公開してから supersede する。自動変換・自動 publish はしない。
+- **静的検証で次を拒否する**（Capability / Agent / LLM / Loop 入力、Edge 条件、
+  値パイプライン、`$expr` anchor、Text Template 入力の全経路）。
+  - opaque／receipt の `nodes.<id>.output...` 参照
+  - 出力全体（`nodes.<id>.output`）への参照
+  - 未宣言フィールド、未宣言ネスト、欠落し得る必須でない経路
+  - `fail_on_output_mismatch: true` でない structured Node の出力参照
+- **`fail_on_output_mismatch: true` は structured の読み取り系と `hitl_wait` に
+  だけ許可する。** 書込み・外部操作・receipt での指定は検証エラーにする。
+- **P2 の strict 対象を最初に次の 5 つとする。**
+  - `vault_read_file`: `relative_path` と `content` を required にする。
+  - `calendar_read`: `events` を required にし、各 event の `title` / `start` /
+    `end` / `all_day` / `source` を正規化して required にする。Apple と
+    recurring の取得状態を `apple_status` / `recurring_status` で明示する。
+  - `reminders_read`: `reminders` を required にし、各 reminder の `title` /
+    `due` / `source` を正規化して required にする。取得状態も同様に明示する。
+  - `research_context_snapshot`: 現行 5 トップレベル値を required にし、下位の
+    未契約データは展開しない（ネスト参照は未宣言として拒否）。
+  - `hitl_wait.answer`: 人間入力境界で文字列へ正規化・検証する。
+- **strict は closed schema 化ではない。** 必要な required field と型・完全性だけを
+  保証し、追加フィールドは許可する。部分結果は lenient 実行では観測可能なまま残すが、
+  strict Node では契約違反として失敗させ、後続の判断・副作用へ流さない。
+- **strict + retry の併用警告は効果的 Capability に限定する。** 読み取り系の
+  retry に副作用の重複はないため警告しない。
+- **opaque に synthetic summary schema を返さない。** `ui_output_schema` は
+  opaque で `null` を返し、参照ピッカーは不適格な候補を表示しない。新規の P2
+  Node はエディタで strict を既定オンにする（既存 config の既定値は変更しない）。
+
+### 操作シナリオ契約（不可逆操作: なし — 本 amendment は参照境界の閉鎖であり、
+外部書込み・削除・認可変更を含まない）
+
+| 段階 | 入力・識別子 | 停止規則 |
+| --- | --- | --- |
+| 公開 | revision の Node config と参照 | 契約違反は検証エラーで公開不可 |
+| 実行 | strict Node の出力 object | `error` キー・required 欠落・型違い・null・取得不完全は Node 失敗、後続なし |
+| 移行 | 公開 Revision の監査 | 違反参照 0 件を確認してから後継へ supersede |
+
+### 残余リスク
+
+- 既存公開 Revision の違反参照は公開時の再検証でのみ検出される。切替前後の
+  read-only 契約監査で検出し、手動移行する。
+- `periodic_note_read`、人物・Project・検索・Skills・Agent / Coding / Research
+  出力は、P2 後の監査結果と利用実績に基づく次の structured 候補とする。
+
 ## Related
 
 - [Workflow Graph / Agent Node ADR](workflow-graph-and-agent-node.md#amendment-capability-node-の-strict-出力)

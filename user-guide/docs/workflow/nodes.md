@@ -34,17 +34,27 @@ Loop の入出力マッピング・Agent 入力・スキーマ定義（`inputs_s
 - `retry` は任意。`max_attempts` は非負整数です。
 - `fail_on_output_mismatch`（既定オフ）をオンにすると、Capability が次の出力を返したとき Node を
   失敗させ、後続 Node へ渡しません（エディタの「エラー出力・schema不一致で失敗」）。
+  指定できるのは structured の読み取り系（`vault_read_file`、`calendar_read`、
+  `reminders_read`、`research_context_snapshot`）と `hitl_wait` だけです。
+  それ以外の Capability での指定は検証エラーになります。
+  - 出力が JSON object でない
   - 出力に `error` キーがある（例: `vault_read_file` のファイル不在 `{"error": "File not found"}`）
-  - 宣言済みの出力 schema に一致しない
-  ファイル存在の確認など「無ければ止めたい」読み取り系で使います。副作用のある Capability では、
-  外部処理が成功していても効果が記録されないため推奨しません。また `retry.max_attempts` と
-  併用すると、契約違反時に副作用が再実行されうるため、検証の警告を確認してください。
+  - 宣言済みの出力 schema に一致しない（必須欠落・型違い・`null` を含む）
+  - `calendar_read` / `reminders_read` で Apple / recurring の取得が不完全
+    （部分結果はそのまま残りますが、strict Node は失敗して後続へ流しません）
+  ファイル存在の確認など「無ければ止めたい」読み取り系で使います。新規の対象 Node は
+  エディタで strict が既定オンになります。また、出力を参照するには参照先 Node の
+  strict がオンであることが必要です。効果的 Capability の strict と
+  `retry.max_attempts` の併用は、契約違反時に副作用が再実行されうるため、
+  検証の警告を確認してください（読み取り系の retry は警告されません）。
 
 ### ワークフロー専用 Capability
 
 `hitl_wait` はワークフロー専用の疑似 Capability で、常に有効・承認ポリシー `auto` です。
 HITL へ質問を登録し、人間が回答するまで Node を `waiting_hitl` で待機させます。
-回答後は自動的に再開します（[Run・承認・復旧](runs.md#hitl-待ち) を参照）。
+回答後は `{"answer": "<文字列>"}` として自動的に再開します
+（[Run・承認・復旧](runs.md#hitl-待ち) を参照）。`answer` は文字列へ正規化され、
+`nodes.<node_id>.output.answer` で参照できます（strict が必要です）。
 
 ## agent Node
 

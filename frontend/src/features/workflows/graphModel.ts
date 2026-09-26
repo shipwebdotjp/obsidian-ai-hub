@@ -70,13 +70,37 @@ export const WORKFLOW_LLM_CONFIG_KEYS = [
 
 export const WORKFLOW_LLM_DEFAULT_MAX_TOKENS = 4096;
 
+/**
+ * Capabilities whose new nodes default to strict output
+ * (``fail_on_output_mismatch: true``). Mirrors the backend P1/P2
+ * strict-allowed set (P2 structured reads + workflow-only ``hitl_wait``).
+ */
+export const STRICT_DEFAULT_CAPABILITY_KEYS: ReadonlySet<string> = new Set([
+  "vault_read_file",
+  "calendar_read",
+  "reminders_read",
+  "research_context_snapshot",
+  "hitl_wait",
+]);
+
+export function isStrictDefaultCapability(capabilityKey: string): boolean {
+  return STRICT_DEFAULT_CAPABILITY_KEYS.has(capabilityKey);
+}
+
 export function defaultNodeConfig(
   nodeType: WorkflowNodeType,
   capabilityKey?: string,
 ): Record<string, unknown> {
   switch (nodeType) {
     case "capability":
-      return { capability_key: capabilityKey ?? "", target: {}, inputs: {} };
+      return {
+        capability_key: capabilityKey ?? "",
+        target: {},
+        inputs: {},
+        ...(capabilityKey && isStrictDefaultCapability(capabilityKey)
+          ? { fail_on_output_mismatch: true }
+          : {}),
+      };
     case "agent":
       return {
         agent_id: "",
@@ -457,19 +481,15 @@ function nodeOutputFields(
     return schemaReferenceFields(stateSchema, basePath);
   }
   if (node.node_type === "capability") {
+    // P1 boundary: opaque/receipt capabilities and structured nodes without
+    // strict offer no reference candidates. Structured strict nodes offer
+    // declared required fields only (never the whole output object).
     const key = String(config.capability_key ?? "");
     const outputSchema = capabilityOutputSchemas?.[key];
-    if (outputSchema) {
-      return schemaReferenceFields(outputSchema, basePath);
+    if (!outputSchema || config.fail_on_output_mismatch !== true) {
+      return [];
     }
-    return [
-      {
-        path: basePath,
-        type: "object",
-        description:
-          "Capability 出力は型未宣言（summary、または JSON object 全体）。",
-      },
-    ];
+    return capabilityStrictReferenceFields(outputSchema, basePath);
   }
   if (node.node_type === "text_template") {
     return [
@@ -530,6 +550,77 @@ export function referenceSchemaAt(
   return null;
 }
 
+/**
+ * Declared required-only reference fields for a strict structured Capability
+ * output. Whole-output and optional (possibly-missing) paths are never
+ * offered; the backend rejects them at save/publish time.
+ */
+export function capabilityStrictReferenceFields(
+  schema: unknown,
+  basePath: string,
+): ReferenceField[] {
+  const field = asSchemaField(schema);
+  if (
+    !field ||
+    field["x-unsupported"] ||
+    field.type !== "object" ||
+    !field.properties
+  ) {
+    return [];
+  }
+  const required = new Set(
+    Array.isArray(field.required) ? field.required : [],
+  );
+  const out: ReferenceField[] = [];
+  for (const [name, sub] of Object.entries(field.properties)) {
+    if (!required.has(name)) continue;
+    const subField = asSchemaField(sub);
+    const path = `${basePath}.${name}`;
+    out.push({
+      path,
+      type: subField?.type ?? "object",
+      description: subField?.description,
+    });
+    if (subField?.type === "object" && subField.properties) {
+      out.push(...capabilityStrictReferenceFields(sub, path));
+    }
+  }
+  return out;
+}
+
+/**
+ * Project a schema to its required-only shape (recursive).
+ *
+ * Field completion must agree with the reference boundary: optional
+ * (possibly-missing) paths are rejected at save/publish, so completion and
+ * sample scaffolding resolve against the required projection.
+ */
+export function projectRequiredOnly(
+  schema: WorkflowSchemaField | null,
+): WorkflowSchemaField | null {
+  if (!schema || schema["x-unsupported"]) return schema;
+  if (schema.type === "object" && schema.properties) {
+    const required = new Set(
+      Array.isArray(schema.required) ? schema.required : [],
+    );
+    const properties: Record<string, WorkflowSchemaField> = {};
+    const kept: string[] = [];
+    for (const [name, sub] of Object.entries(schema.properties)) {
+      if (!required.has(name)) continue;
+      properties[name] = projectRequiredOnly(sub) ?? sub;
+      kept.push(name);
+    }
+    return { ...schema, properties, required: kept };
+  }
+  if (schema.type === "array" && schema.items) {
+    return {
+      ...schema,
+      items: projectRequiredOnly(schema.items) ?? schema.items,
+    };
+  }
+  return schema;
+}
+
 function nodeOutputSchema(
   node: WorkflowNode,
   nodes: WorkflowNode[],
@@ -558,8 +649,13 @@ function nodeOutputSchema(
     return asSchemaField(stateSchema);
   }
   if (node.node_type === "capability") {
+    // Field completion is only offered for strict structured nodes; other
+    // capability outputs are not referencable (P1 boundary). The schema is
+    // projected to required-only paths so completion never offers a path
+    // the backend rejects.
+    if (config.fail_on_output_mismatch !== true) return null;
     const key = String(config.capability_key ?? "");
-    return capabilityOutputSchemas?.[key] ?? null;
+    return projectRequiredOnly(capabilityOutputSchemas?.[key] ?? null);
   }
   if (node.node_type === "text_template") {
     return { type: "object", properties: { text: { type: "string" } } };
@@ -651,9 +747,17 @@ export function buildReferenceGroups(
       scopeOf(node) === scopeId && node.node_id !== options.excludeNodeId,
   );
   for (const node of scopeNodes) {
+    const fields = nodeOutputFields(
+      node,
+      nodes,
+      options.capabilityOutputSchemas,
+    );
+    // Nodes with no referencable output (opaque/receipt capabilities,
+    // non-strict structured nodes) contribute no candidates.
+    if (fields.length === 0) continue;
     groups.push({
       label: `${nodeDisplayName(node)} (${node.node_id.slice(0, 6)})`,
-      fields: nodeOutputFields(node, nodes, options.capabilityOutputSchemas),
+      fields,
     });
   }
 
@@ -681,12 +785,18 @@ export function conditionCandidates(
   nodes: WorkflowNode[],
   sourceNodeId: string,
   inputsSchema: Record<string, unknown>,
+  options: {
+    capabilityOutputSchemas?: Record<string, WorkflowSchemaField>;
+  } = {},
 ): string[] {
   const source = nodes.find((node) => node.node_id === sourceNodeId);
   if (!source) return [];
-  return buildReferenceGroups(nodes, scopeOf(source), inputsSchema).flatMap(
-    (group) => group.fields.map((field) => field.path),
-  );
+  return buildReferenceGroups(
+    nodes,
+    scopeOf(source),
+    inputsSchema,
+    options,
+  ).flatMap((group) => group.fields.map((field) => field.path));
 }
 
 /** Validate the shape of one condition object (mirrors backend validation). */
