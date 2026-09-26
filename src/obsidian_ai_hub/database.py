@@ -763,6 +763,9 @@ def get_db_connection() -> sqlite3.Connection:
     if current_version <= 67:
         run_migration_v68(conn)
 
+    if current_version <= 68:
+        run_migration_v69(conn)
+
     return conn
 
 
@@ -1459,6 +1462,18 @@ def run_migration_v68(conn: sqlite3.Connection) -> None:
         " ON generated_media(workflow_run_id);"
     )
     conn.execute("PRAGMA user_version = 68;")
+    conn.commit()
+
+
+def run_migration_v69(conn: sqlite3.Connection) -> None:
+    """Run migration for version 69 (llm_call_logs.tool_calls_json column)."""
+    try:
+        conn.execute(
+            "ALTER TABLE llm_call_logs ADD COLUMN tool_calls_json TEXT NOT NULL DEFAULT '[]';"
+        )
+    except sqlite3.OperationalError as e:
+        _ignore_duplicate_schema_object(e)
+    conn.execute("PRAGMA user_version = 69;")
     conn.commit()
 
 

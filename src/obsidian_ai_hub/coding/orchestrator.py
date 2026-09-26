@@ -11,7 +11,12 @@ from typing import Any, AsyncGenerator, Dict, List, Optional, Sequence, Tuple
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from obsidian_ai_hub.agents import registry
-from obsidian_ai_hub.utils.llm_client import create_langchain_llm
+from obsidian_ai_hub.utils import execution_logger
+from obsidian_ai_hub.utils.llm_client import (
+    _logged_ainvoke,
+    _logged_astream,
+    create_langchain_llm,
+)
 from obsidian_ai_hub.utils.config import (
     CODING_ORCHESTRATOR_MODEL,
     CODING_ORCHESTRATOR_PROVIDER,
@@ -694,7 +699,16 @@ class CodingOrchestrator:
 
             while iteration < max_tool_iterations:
                 iteration += 1
-                res = await llm_with_tools.ainvoke(messages)
+                res, llm_call_id = await _logged_ainvoke(
+                    llm_with_tools,
+                    messages,
+                    self.provider,
+                    self.model,
+                    0.7,
+                    8192,
+                    "coding_orchestrator",
+                    run_id=None,
+                )
                 messages.append(res)
 
                 tool_calls = getattr(res, "tool_calls", None)
@@ -717,9 +731,26 @@ class CodingOrchestrator:
                     yield {"type": "text", "content": final_text}
                     return
 
+                logged_tool_calls = [
+                    {
+                        "call_id": tc.get("id") or f"call_{iteration}_{i}",
+                        "provider_call_id": tc.get("id"),
+                        "tool_name": tc.get("name", ""),
+                        "args": tc.get("args", {}),
+                        "status": "running",
+                    }
+                    for i, tc in enumerate(tool_calls)
+                ]
+                execution_logger.update_llm_call_tool_calls(llm_call_id, logged_tool_calls)
+
                 # Enforce single-tool call rule for ask_user
                 ask_user_calls = [tc for tc in tool_calls if tc.get("name") == "ask_user"]
                 if ask_user_calls and len(tool_calls) > 1:
+                    for idx_tc in range(len(logged_tool_calls)):
+                        logged_tool_calls[idx_tc]["status"] = "failed"
+                        logged_tool_calls[idx_tc]["error"] = "ask_user は単独で呼び出し、複数質問は questions 配列へまとめてください。"
+                    execution_logger.update_llm_call_tool_calls(llm_call_id, logged_tool_calls)
+
                     for tc in tool_calls:
                         tcall_id = tc.get("id") or f"call_{iteration}_{tc.get('name')}"
                         messages.append(
@@ -743,6 +774,10 @@ class CodingOrchestrator:
 
                     _ask_user_error = validate_ask_user_questions(q_items)
                     if _ask_user_error is not None:
+                        logged_tool_calls[0]["status"] = "skipped"
+                        logged_tool_calls[0]["error"] = _ask_user_error
+                        execution_logger.update_llm_call_tool_calls(llm_call_id, logged_tool_calls)
+
                         messages.append(
                             ToolMessage(
                                 content=json.dumps({"error": _ask_user_error}, ensure_ascii=False),
@@ -762,6 +797,8 @@ class CodingOrchestrator:
                         "phase": phase,
                         "phase_turn": phase_turn,
                         "iteration": iteration,
+                        "llm_call_id": llm_call_id,
+                        "logged_tool_calls": logged_tool_calls,
                     }
                     return
 
@@ -811,12 +848,17 @@ class CodingOrchestrator:
                             )
                             status = "succeeded"
                             error_str = None
+                            logged_tool_calls[idx]["status"] = "succeeded"
+                            logged_tool_calls[idx]["result"] = raw_result
                         except Exception as exc:
                             status = "failed"
                             error_str = str(exc)
                             raw_result = ""
                             full_result = truncate_db_result(raw_result)
                             live_result = truncate_live_result(raw_result)
+                            logged_tool_calls[idx]["status"] = "failed"
+                            logged_tool_calls[idx]["error"] = error_str
+                            execution_logger.update_llm_call_tool_calls(llm_call_id, logged_tool_calls)
                             yield {
                                 "type": "end",
                                 "call_id": call_id,
@@ -840,6 +882,10 @@ class CodingOrchestrator:
                         raw_result = json.dumps(
                             {"error": error_str}, ensure_ascii=False
                         )
+                        logged_tool_calls[idx]["status"] = "failed"
+                        logged_tool_calls[idx]["error"] = error_str
+
+                    execution_logger.update_llm_call_tool_calls(llm_call_id, logged_tool_calls)
 
                     full_result = truncate_db_result(raw_result)
                     live_result = truncate_live_result(raw_result)
@@ -870,7 +916,16 @@ class CodingOrchestrator:
                     )
 
             # Fallback if max_tool_iterations reached
-            res = await llm.ainvoke(messages)
+            res, _ = await _logged_ainvoke(
+                llm,
+                messages,
+                self.provider,
+                self.model,
+                0.7,
+                8192,
+                "coding_orchestrator",
+                run_id=None,
+            )
             content = getattr(res, "content", "")
             final_text = content if isinstance(content, str) else str(content)
             yield {"type": "text", "content": final_text}
@@ -926,7 +981,16 @@ class CodingOrchestrator:
         messages = self._build_messages(full_history, repo_path, backend_name)
 
         try:
-            async for chunk in llm.astream(messages):
+            async for chunk in _logged_astream(
+                llm,
+                messages,
+                self.provider,
+                self.model,
+                0.7,
+                8192,
+                "coding_orchestrator",
+                run_id=None,
+            ):
                 content = getattr(chunk, "content", "")
                 if isinstance(content, str) and content:
                     yield content
