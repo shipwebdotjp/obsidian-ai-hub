@@ -521,6 +521,8 @@ def build_title_prompt(theme: str) -> str:
 
 
 def generate_research_title(theme: str) -> str:
+    if len(theme) < 100:
+        return theme.strip()
     title = llm_client.generate_llm_response(
         provider=config.RESEARCH_TITLE_GENERATION_PROVIDER,
         model=config.RESEARCH_TITLE_GENERATION_MODEL,
