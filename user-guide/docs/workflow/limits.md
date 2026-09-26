@@ -94,10 +94,11 @@ Agent / Coding などの非冪等 Node が外部操作中に中断した状態�
 Run 詳細で **採用して続行** / **再実行** / **失敗として処理** のいずれかを選びます。
 重複副作用の可能性を確認してから **再実行** してください。
 
-### Edge の条件（condition）を UI で設定できない
+### Edge の条件（condition）の編集
 
-現行のエディタは Edge の種別（`normal` / `error`）のみを編集できます。
-条件付き排他的分岐を使う場合は、API で Revision のグラフを更新してください。
+Edge の `condition`（条件付き排他的分岐）は、Edge 一覧の **条件** から編集できます。
+Loop の `continuation_condition` も同様の条件エディタで編集します。
+詳しくは [エディタ](editor.md) と [データフロー](data-flow.md) を参照してください。
 
 ## 運用上の注意
 

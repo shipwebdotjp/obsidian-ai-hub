@@ -1,6 +1,6 @@
 # Workflow 仕様書（Graph / Agent Node / Loop Node 版）
 
-Status: Accepted（再設計後 Phase 0 設計決定。実装未着手）
+Status: Accepted（実装済み。変更は本仕様書と ADR を正本とする）
 
 この文書は、`obsidian-ai-hub` における **Workflow** Bounded Context の外部契約と振る舞いを定める。
 Workflow は人間が Web UI で設計する **Node / Edge グラフ** である。制御・データフローは決定的だが、

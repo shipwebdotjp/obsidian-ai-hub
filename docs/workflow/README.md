@@ -20,6 +20,19 @@ Status: Accepted。仕様は実装済みで、変更は specification.md と ADR
 | [adr/workflow-editor-guided-forms.md](adr/workflow-editor-guided-forms.md) | エディタのガイド型フォーム（自前スキーマフォーム・型付き参照ピッカー） |
 | [adr/capability-input-output-contracts.md](adr/capability-input-output-contracts.md) | Capability 入出力契約の段階的厳格化（strict 入力・出力契約クラス・副作用での strict 利用境界） |
 
+`adr/workflow-graph-and-agent-node.md` は本文内 Amendment による追補を含む。
+機能理解には該当節を読むこと。
+
+| 追補（Amendment） | 内容 |
+| --- | --- |
+| 「Amendment (Capability ブリッジ Task の隔離)」 | Capability Node 実行時の短命ブリッジ Task と Task Agent からの隔離 |
+| 「Amendment (取消・不確実結果の追跡)」 | 取消の状態遷移（`cancelling` / `waiting_attention`）と子 Run 参照の正本 |
+| 「Amendment (Scheduler Job からの公開 Workflow 起動)」 | Scheduler 発火による公開 Workflow の起動と最新公開版追従 |
+| 「Amendment (User Template と Workflow Definition Package)」 | User Template と定義 package v1 の import / export |
+| 「Amendment (Workflow 単位の承認スキップ)」 | `skip_approval` による承認ゲートの解除 |
+| 「Amendment (会話型 Agent と単発 LLM Node の責務分離)」 | 会話を持たない単発 `llm` Node の追加 |
+| 「Amendment (Capability Node の strict 出力)」 | `fail_on_output_mismatch` による出力契約違反時の Node 失敗 |
+
 ## 設計上の要点
 
 - Workflow / Workflow Revision に分離。Revision は `draft` / `published` / `superseded` の
