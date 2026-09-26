@@ -294,12 +294,10 @@ def _format_project_candidates(candidates: Sequence[dict]) -> str:
 def build_web_research_router_prompt(
     theme: str,
     *,
-    context: Optional[str] = None,
     why_now: Optional[str] = None,
     direction: Optional[str] = None,
     projects_text: Optional[str] = None,
 ) -> str:
-    context_text = _normalize_optional_text(context) or "(なし)"
     why_now_text = _normalize_optional_text(why_now) or "(なし)"
     direction_text = _normalize_optional_text(direction) or "(なし)"
     projects_text = _normalize_optional_text(projects_text) or "(該当プロジェクトなし)"
@@ -309,9 +307,11 @@ def build_web_research_router_prompt(
         {
             "theme": theme,
             "why_now_text": why_now_text,
-            "context_text": context_text,
             "direction_text": direction_text,
             "projects_text": projects_text,
+            # Compat: custom templates may still reference ${context_text}.
+            # Collected context is never supplied to the router.
+            "context_text": "",
         },
     )
 
@@ -319,14 +319,12 @@ def build_web_research_router_prompt(
 def route_research_topic(
     theme: str,
     *,
-    context: Optional[str] = None,
     why_now: Optional[str] = None,
     direction: Optional[str] = None,
 ) -> ResearchRouteDecision:
     candidates = _list_project_router_candidates()
     p = build_web_research_router_prompt(
         theme,
-        context=context,
         why_now=why_now,
         direction=direction,
         projects_text=_format_project_candidates(candidates),
@@ -509,21 +507,24 @@ def build_research_prompt(
     )
 
 
-def build_title_prompt(theme: str, expanded_prompt: str) -> str:
+def build_title_prompt(theme: str) -> str:
     return prompt.render_prompt(
         config.RESEARCH_TITLE_PROMPT_PATH,
         {
             "theme": theme,
-            "expanded_prompt": expanded_prompt,
+            # Compat: custom templates may still reference these placeholders.
+            # Collected context and the final research prompt are never supplied.
+            "expanded_prompt": "",
+            "context_text": "",
         },
     )
 
 
-def generate_research_title(theme: str, expanded_prompt: str) -> str:
+def generate_research_title(theme: str) -> str:
     title = llm_client.generate_llm_response(
         provider=config.RESEARCH_TITLE_GENERATION_PROVIDER,
         model=config.RESEARCH_TITLE_GENERATION_MODEL,
-        prompt=build_title_prompt(theme, expanded_prompt),
+        prompt=build_title_prompt(theme),
         temperature=0.0,
         max_tokens=512,
     ).strip()
@@ -779,7 +780,6 @@ def resolve_research_route(
     overridden to ``project``. Any unusable router response falls back to the
     normal routing result.
     """
-    combined_context = collect_research_context(theme, context)
     resolved_mode = mode
     resolved_project_id = project_id
     if mode == "auto":
@@ -788,7 +788,6 @@ def resolve_research_route(
         else:
             decision = route_research_topic(
                 theme,
-                context=combined_context,
                 why_now=why_now,
                 direction=direction,
             )
@@ -796,6 +795,7 @@ def resolve_research_route(
             if decision.mode == RESEARCH_MODE_PROJECT:
                 resolved_project_id = decision.project_id
 
+    combined_context = collect_research_context(theme, context)
     normalized_mode = _normalize_research_mode(resolved_mode)
     if normalized_mode == RESEARCH_MODE_PROJECT and resolved_project_id is None:
         raise ValueError("project research mode requires a project_id")
@@ -827,7 +827,7 @@ def _produce_research_report(
         why_now=why_now,
         project_label=_resolve_project_label(route.project_id),
     )
-    title = generate_research_title(theme, p)
+    title = generate_research_title(theme)
     report_body = conduct_research(
         p,
         mode=route.mode,

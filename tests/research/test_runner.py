@@ -277,9 +277,9 @@ def test_approved_theme_not_reused_across_projects():
 
 
 def _stub_report_pipeline(monkeypatch, captured: dict | None = None):
-    monkeypatch.setattr(runner, "collect_research_context", lambda *a, **k: "")
+    monkeypatch.setattr(runner, "collect_research_context", lambda theme, ctx=None: "")
     monkeypatch.setattr(runner, "build_research_prompt", lambda *a, **k: "prompt")
-    monkeypatch.setattr(runner, "generate_research_title", lambda *a, **k: "title")
+    monkeypatch.setattr(runner, "generate_research_title", lambda theme: "title")
 
     def fake_conduct(prompt, *, mode, output_style=None, project_id=None):
         if captured is not None:
@@ -409,14 +409,124 @@ def test_route_research_topic_passes_direction_and_projects(monkeypatch):
         lambda **kwargs: '{"mode": "project", "project_id": 7, "confidence": 0.91}',
     )
 
-    decision = runner.route_research_topic(
-        "theme", context="ctx", why_now="why", direction="dir"
-    )
+    decision = runner.route_research_topic("theme", why_now="why", direction="dir")
 
     assert decision.mode == runner.RESEARCH_MODE_PROJECT
     assert decision.project_id == 7
     assert "Obsidian AI Hub" in captured["projects_text"]
     assert captured["direction_text"] == "dir"
+    assert captured["why_now_text"] == "why"
+    assert captured["theme"] == "theme"
+    # Collected context is never supplied to the router; compat value stays empty.
+    assert captured["context_text"] == ""
+    assert "ctx" not in str(captured.values())
+
+
+def test_route_research_topic_has_no_context_param():
+    import inspect
+
+    params = inspect.signature(runner.route_research_topic).parameters
+    assert "context" not in params
+    router_params = inspect.signature(runner.build_web_research_router_prompt).parameters
+    assert "context" not in router_params
+
+
+def test_resolve_route_collects_context_after_routing(monkeypatch):
+    calls: list[str] = []
+    captured_router: dict = {}
+    captured_prompt: dict = {}
+
+    def fake_router(theme, *, why_now=None, direction=None):
+        calls.append("route")
+        captured_router["theme"] = theme
+        captured_router["why_now"] = why_now
+        captured_router["direction"] = direction
+        assert "context" not in captured_router
+        return runner.ResearchRouteDecision(mode=runner.RESEARCH_MODE_INTERNAL)
+
+    def fake_collect(theme, explicit_context=None):
+        calls.append("collect")
+        assert explicit_context == "approval comment"
+        return "collected-context"
+
+    def fake_build(theme, *, mode, context=None, **kwargs):
+        captured_prompt["context"] = context
+        return "final-prompt"
+
+    monkeypatch.setattr(runner, "route_research_topic", fake_router)
+    monkeypatch.setattr(runner, "collect_research_context", fake_collect)
+    monkeypatch.setattr(runner, "build_research_prompt", fake_build)
+    monkeypatch.setattr(runner, "generate_research_title", lambda theme: "title")
+    monkeypatch.setattr(runner, "conduct_research", lambda *a, **k: "report")
+
+    route = runner.resolve_research_route(
+        "theme",
+        direction="dir",
+        why_now="why",
+        mode="auto",
+        context="approval comment",
+    )
+
+    assert calls == ["route", "collect"]
+    assert captured_router == {"theme": "theme", "why_now": "why", "direction": "dir"}
+    assert route.context == "collected-context"
+
+    report = runner.run_research(
+        theme="theme",
+        direction="dir",
+        why_now="why",
+        mode="auto",
+        context="approval comment",
+    )
+    assert captured_prompt["context"] == "collected-context"
+    assert report.markdown.startswith("---\ntitle: title")
+
+
+def test_generate_title_uses_theme_only(monkeypatch):
+    import inspect
+
+    assert "expanded_prompt" not in inspect.signature(
+        runner.generate_research_title
+    ).parameters
+    assert "expanded_prompt" not in inspect.signature(
+        runner.build_title_prompt
+    ).parameters
+
+    captured: dict = {}
+
+    def fake_render(path, context):
+        captured.update(context)
+        return "title-prompt"
+
+    monkeypatch.setattr(runner.prompt, "render_prompt", fake_render)
+    monkeypatch.setattr(
+        runner.llm_client, "generate_llm_response", lambda **kwargs: "  title  "
+    )
+
+    assert runner.generate_research_title("my theme") == "title"
+    assert captured["theme"] == "my theme"
+    assert captured["expanded_prompt"] == ""
+    assert captured["context_text"] == ""
+
+
+def test_title_prompt_compat_empty_values_for_custom_templates(tmp_path, monkeypatch):
+    custom = tmp_path / "custom_title.md"
+    custom.write_text("T:${theme} E:${expanded_prompt} C:${context_text}", encoding="utf-8")
+    monkeypatch.setattr(runner.config, "RESEARCH_TITLE_PROMPT_PATH", custom)
+    assert runner.build_title_prompt("theme-only") == "T:theme-only E: C:"
+
+
+def test_router_prompt_compat_empty_values_for_custom_templates(tmp_path, monkeypatch):
+    custom = tmp_path / "custom_router.md"
+    custom.write_text(
+        "T:${theme} D:${direction_text} W:${why_now_text} C:${context_text}",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(runner.config, "RESEARCH_ROUTER_PROMPT_PATH", custom)
+    rendered = runner.build_web_research_router_prompt(
+        "theme", why_now="why", direction="dir", projects_text="proj"
+    )
+    assert rendered == "T:theme D:dir W:why C:"
 
 
 def test_route_research_topic_unknown_project_falls_back_to_internal(monkeypatch):

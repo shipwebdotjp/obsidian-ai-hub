@@ -191,7 +191,7 @@ def _fake_llm(monkeypatch):
     monkeypatch.setattr(
         research_runner,
         "generate_research_title",
-        lambda theme, prompt: "シナリオタイトル",
+        lambda theme: "シナリオタイトル",
     )
     monkeypatch.setattr(
         research_runner, "conduct_research", lambda *a, **kw: "シナリオ本文"
@@ -251,7 +251,7 @@ def test_scenario_contract_failure_never_publishes(_sync_research_execution, mon
     monkeypatch.setattr(
         research_runner,
         "generate_research_title",
-        lambda theme, prompt: "失敗タイトル",
+        lambda theme: "失敗タイトル",
     )
     monkeypatch.setattr(research_runner, "conduct_research", boom)
     steps = [

@@ -43,7 +43,7 @@ def _fake_llm(monkeypatch):
     monkeypatch.setattr(
         research_runner,
         "generate_research_title",
-        lambda theme, prompt: "シナリオタイトル",
+        lambda theme: "シナリオタイトル",
     )
     monkeypatch.setattr(
         research_runner, "conduct_research", lambda *a, **kw: "シナリオ本文"

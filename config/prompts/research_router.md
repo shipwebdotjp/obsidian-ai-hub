@@ -41,6 +41,3 @@ ${direction_text}
 
 調べたい理由:
 ${why_now_text}
-
-背景・前提:
-${context_text}

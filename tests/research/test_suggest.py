@@ -176,6 +176,108 @@ def test_suggestion_hitl_run_approve_with_comment_and_execute(tmp_path: Path, mo
         conn.close()
 
 
+def test_suggestion_approve_comment_stays_out_of_router_and_title(
+    tmp_path: Path, monkeypatch, test_memory_db_path
+):
+    """HITL approval comment reaches the final prompt but not router/title.
+
+    New input boundary: router sees theme/direction/why_now only, the title
+    is generated from the theme only, and the job still publishes exactly once
+    with the generated title.
+    """
+    from obsidian_ai_hub.database import get_db_connection
+    from obsidian_ai_hub import hitl
+    from obsidian_ai_hub.research import db as research_db, runner
+    from obsidian_ai_hub.main import register_hitl_handlers
+
+    register_hitl_handlers()
+
+    conn = get_db_connection()
+    try:
+        theme_rec = research_db.create_theme(
+            theme="境界分離テーマ",
+            direction="方向",
+            kind="explore",
+            why_now="理由",
+            confidence=0.8,
+            status="candidate",
+            conn=conn,
+        )
+        theme_id = theme_rec["theme_id"]
+        run_id = f"hrun_suggest_{theme_id}"
+        _register_suggestion_run(conn, theme_id, run_id)
+        hitl.submit_answer(
+            run_id,
+            "confirm_suggest",
+            "action",
+            {"value": "approve", "comment": "approval-comment-sensitive"},
+            conn,
+        )
+
+        captured_router: dict = {}
+        captured_title: dict = {}
+        captured_prompt: dict = {}
+        real_collect = runner.collect_research_context
+        real_build = runner.build_research_prompt
+
+        def fake_router(theme, *, why_now=None, direction=None):
+            captured_router["theme"] = theme
+            captured_router["why_now"] = why_now
+            captured_router["direction"] = direction
+            return runner.ResearchRouteDecision(mode=runner.RESEARCH_MODE_INTERNAL)
+
+        def fake_collect(theme, explicit_context=None):
+            result = real_collect(theme, explicit_context)
+            captured_prompt["collected"] = result
+            return result
+
+        def fake_title(theme):
+            captured_title["theme"] = theme
+            return "境界タイトル"
+
+        def fake_build(theme, *, mode, context=None, **kwargs):
+            captured_prompt["final_context"] = context
+            return real_build(
+                theme, mode=mode, context=context, **kwargs
+            )
+
+        monkeypatch.setattr(runner, "route_research_topic", fake_router)
+        monkeypatch.setattr(runner, "collect_research_context", fake_collect)
+        monkeypatch.setattr(runner, "generate_research_title", fake_title)
+        monkeypatch.setattr(runner, "build_research_prompt", fake_build)
+        monkeypatch.setattr(
+            runner, "conduct_research", lambda *a, **kw: "境界本文"
+        )
+
+        processed = hitl.dispatch_runs(conn)
+        assert processed == 1
+
+        assert captured_router == {
+            "theme": "境界分離テーマ",
+            "why_now": "理由",
+            "direction": "方向",
+        }
+        assert "approval-comment-sensitive" not in str(captured_router.values())
+        assert captured_title == {"theme": "境界分離テーマ"}
+        assert "approval-comment-sensitive" in captured_prompt["collected"]
+        assert (
+            captured_prompt["final_context"] == captured_prompt["collected"]
+        )
+        assert "approval-comment-sensitive" in captured_prompt["final_context"]
+
+        job = research_db.latest_job(theme_id, conn=conn)
+        assert job["status"] == "succeeded"
+        assert job["generated_title"] == "境界タイトル"
+        assert job["is_published"] == 1
+        output = Path(job["output_path"])
+        assert output.exists()
+        assert "境界タイトル" in output.name
+        assert job["job_id"] in output.name
+        assert len(list(output.parent.glob(f"*{job['job_id']}*.md"))) == 1
+    finally:
+        conn.close()
+
+
 def _register_suggestion_run(conn, theme_id: str, run_id: str) -> None:
     from obsidian_ai_hub import hitl
 
@@ -224,7 +326,7 @@ def test_suggestion_approve_auto_project_routes_and_saves(
         _register_suggestion_run(conn, theme_id, run_id)
         hitl.submit_answer(run_id, "confirm_suggest", "action", "approve", conn)
 
-        monkeypatch.setattr(runner, "collect_research_context", lambda *a, **k: "")
+        monkeypatch.setattr(runner, "collect_research_context", lambda theme, ctx=None: "")
         monkeypatch.setattr(
             runner,
             "route_research_topic",
@@ -233,7 +335,7 @@ def test_suggestion_approve_auto_project_routes_and_saves(
             ),
         )
         monkeypatch.setattr(runner, "_resolve_project_label", lambda pid: "Obsidian AI Hub")
-        monkeypatch.setattr(runner, "generate_research_title", lambda *a, **k: "title")
+        monkeypatch.setattr(runner, "generate_research_title", lambda theme: "title")
 
         captured: dict = {}
 
@@ -292,7 +394,7 @@ def test_suggestion_approve_project_coding_failure_skips_vault(
         _register_suggestion_run(conn, theme_id, run_id)
         hitl.submit_answer(run_id, "confirm_suggest", "action", "approve", conn)
 
-        monkeypatch.setattr(runner, "collect_research_context", lambda *a, **k: "")
+        monkeypatch.setattr(runner, "collect_research_context", lambda theme, ctx=None: "")
         monkeypatch.setattr(
             runner,
             "route_research_topic",
@@ -301,7 +403,7 @@ def test_suggestion_approve_project_coding_failure_skips_vault(
             ),
         )
         monkeypatch.setattr(runner, "_resolve_project_label", lambda pid: "Obsidian AI Hub")
-        monkeypatch.setattr(runner, "generate_research_title", lambda *a, **k: "title")
+        monkeypatch.setattr(runner, "generate_research_title", lambda theme: "title")
 
         def boom(*args, **kwargs):
             raise CodingResearchError("agent boom")
