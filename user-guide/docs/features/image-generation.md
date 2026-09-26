@@ -27,19 +27,23 @@ Obsidian からも画像を閲覧できます（Vault が重くなる場合は�
 ```yaml
 image_generation:
   output_dir: /path/to/your/obsidian-ai-hub/media
+  # 相対 source_path（画像編集の入力）を解決する基準。既定は Vault。
+  # input_dir: /path/to/your/input-images
   model: gpt-image-2.5-sunburst
   default_size: 1024x1024
   default_quality: low
   max_count: 4
+  max_input_bytes: 8388608
   timeout_seconds: 180
 ```
 
 `.env` で上書きできます。
 
 - `IMAGE_GENERATION_OUTPUT_DIR` — 保存先ディレクトリ
+- `IMAGE_GENERATION_INPUT_DIR` — 画像編集の相対パス入力の基準ディレクトリ
 - `IMAGE_GENERATION_MODEL` — 使用する画像モデル
 - `IMAGE_GENERATION_DEFAULT_SIZE` / `IMAGE_GENERATION_DEFAULT_QUALITY`
-- `IMAGE_GENERATION_MAX_COUNT`
+- `IMAGE_GENERATION_MAX_COUNT` / `IMAGE_GENERATION_MAX_INPUT_BYTES`
 
 ## ツールの入力
 
@@ -61,6 +65,25 @@ OpenAI 側には `gpt-image-2.5` というエイリアスは存在せず、`gpt-
 受け付けられず、指定できる最小サイズは `1024x1024` です。
 :::
 
+## 画像を編集する（`image_edit`）
+
+既存の画像を、プロンプトで編集・加工するツールです。生成と同じく Agent / Task /
+ワークフローから利用でき、既定の承認ポリシーは `plan_required` です。
+
+入力画像は次のいずれか1つで指定します。
+
+| 入力モード | 使い方 | 説明 |
+| --- | --- | --- |
+| `use_current_attachment` | 会話 | そのターンでユーザーが添付した画像を編集します。 |
+| `source_path` | Task / ワークフロー | サーバーが読める画像パス。相対パスは `input_dir`（既定 Vault）基準、絶対パスは許可ルート（Vault / 出力先 / `input_dir`）内に限ります。 |
+| `source_media_id` | すべて | 生成済み・アップロード済み・取り込み済みの `media_id` を指定します。 |
+
+- 共通の任意入力: `mask_media_id` / `mask_path`（編集する領域を指定するマスク画像）、
+  `size`、`quality`、`output_format`、`input_fidelity`、`background`、`count`。
+- 取り込んだ入力画像もメディアとして保存され、`media_id` で再利用できます。同じ内容の画像は
+  重複して保存されません（内容ハッシュで判定）。
+- 生成物には由来（どの `media_id` を編集したか）が記録されます。
+
 ## 結果の表示とダウンロード
 
 ツールは画像そのものではなく、`media_id` を含む参照を返します。
@@ -72,8 +95,10 @@ OpenAI 側には `gpt-image-2.5` というエイリアスは存在せず、`gpt-
 
 ## 安全と再実行
 
-- パスはサーバーが生成し、保存先ルートの外へは書き込めません（絶対パス・`..`・
+- 保存パスはサーバーが生成し、保存先ルートの外へは書き込めません（絶対パス・`..`・
   シンボリックリンクによる脱出を拒否）。
+- 画像編集の `source_path` / `mask_path` は許可ルート（Vault / 出力先 / `input_dir`）内の
+  通常ファイルだけを読みます。入力は PNG / JPEG / WebP に限り、寸法・サイズ上限を検証します。
 - ファイルを書き込んだ後に DB 記録に失敗した場合は、書き込んだファイルを削除して
   中途半端な状態を残しません。
 - 1回の呼び出しは新しい `media_id` を1つ以上作ります。同じプロンプトの再実行は

@@ -130,12 +130,7 @@ def generate_images(
     if count < 1:
         raise ValueError("count must be at least 1")
 
-    if client_factory is None:
-        config.ensure_external_allowed("image generation")
-        client = _default_client_factory()
-    else:
-        client = client_factory()
-
+    client = _provider_client(client_factory)
     effective_model = model or config.IMAGE_GENERATION_MODEL
     effective_size = size or config.IMAGE_GENERATION_DEFAULT_SIZE
     effective_quality = quality or config.IMAGE_GENERATION_DEFAULT_QUALITY
@@ -153,6 +148,97 @@ def generate_images(
         kwargs["background"] = background
 
     response = client.images.generate(**kwargs)
+    raw_items = _field(response, "data") or []
+    if not raw_items:
+        raise ValueError("Provider returned no image data")
+
+    results: list[GeneratedImage] = []
+    for item in raw_items[:count]:
+        results.append(
+            GeneratedImage(
+                data=_decode_item(item),
+                mime_type=mime_for_format(effective_format),
+                output_format=effective_format,
+                revised_prompt=_field(item, "revised_prompt"),
+            )
+        )
+    return results
+
+
+def _mime_to_extension(mime: str | None) -> str:
+    mapping = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp"}
+    return mapping.get((mime or "").lower(), "png")
+
+
+def _provider_client(client_factory: Callable[[], Any] | None) -> Any:
+    if client_factory is None:
+        config.ensure_external_allowed("image generation")
+        return _default_client_factory()
+    return client_factory()
+
+
+def edit_images(
+    prompt: str,
+    image_data: bytes,
+    *,
+    image_mime: str,
+    mask_data: bytes | None = None,
+    mask_mime: str | None = None,
+    model: str | None = None,
+    size: str | None = None,
+    quality: str | None = None,
+    output_format: str | None = None,
+    background: str | None = None,
+    input_fidelity: str | None = None,
+    count: int = 1,
+    client_factory: Callable[[], Any] | None = None,
+) -> list[GeneratedImage]:
+    """Edit/rework *image_data* with *prompt* and return the produced images.
+
+    ``image_data`` is the already-ingested source bytes (see
+    :mod:`obsidian_ai_hub.media.ingest`); ``mask_data`` is an optional
+    transparent mask. ``config.ensure_external_allowed`` is enforced only for
+    the real provider; an injected ``client_factory`` (tests) is offline.
+    """
+    if not isinstance(prompt, str) or not prompt.strip():
+        raise ValueError("prompt must be a non-empty string")
+    if not isinstance(image_data, (bytes, bytearray)) or not image_data:
+        raise ValueError("image_data must be non-empty bytes")
+    if count < 1:
+        raise ValueError("count must be at least 1")
+
+    client = _provider_client(client_factory)
+    effective_model = model or config.IMAGE_GENERATION_MODEL
+    effective_format = output_format or "png"
+
+    kwargs: dict[str, Any] = {
+        "model": effective_model,
+        "prompt": prompt.strip(),
+        "image": (
+            f"source.{_mime_to_extension(image_mime)}",
+            bytes(image_data),
+            image_mime or "image/png",
+        ),
+        "n": count,
+    }
+    # Match generate_images: apply the configured defaults so an omitted
+    # size/quality does not silently fall back to the provider default.
+    kwargs["size"] = size or config.IMAGE_GENERATION_DEFAULT_SIZE
+    kwargs["quality"] = quality or config.IMAGE_GENERATION_DEFAULT_QUALITY
+    if output_format:
+        kwargs["output_format"] = output_format
+    if background:
+        kwargs["background"] = background
+    if input_fidelity:
+        kwargs["input_fidelity"] = input_fidelity
+    if mask_data is not None:
+        kwargs["mask"] = (
+            f"mask.{_mime_to_extension(mask_mime)}",
+            bytes(mask_data),
+            mask_mime or "image/png",
+        )
+
+    response = client.images.edit(**kwargs)
     raw_items = _field(response, "data") or []
     if not raw_items:
         raise ValueError("Provider returned no image data")

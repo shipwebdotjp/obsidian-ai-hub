@@ -757,6 +757,9 @@ def get_db_connection() -> sqlite3.Connection:
     if current_version <= 65:
         run_migration_v66(conn)
 
+    if current_version <= 66:
+        run_migration_v67(conn)
+
     return conn
 
 
@@ -1385,6 +1388,43 @@ def run_migration_v66(conn: sqlite3.Connection) -> None:
         " ON generated_media(session_id);"
     )
     conn.execute("PRAGMA user_version = 66;")
+    conn.commit()
+
+
+def run_migration_v67(conn: sqlite3.Connection) -> None:
+    """Run migration for version 67 (media source + content hash).
+
+    ``generated_media.source`` records how a row entered the library
+    (``generated`` / ``upload`` / ``import``) so the gallery and parent-linked
+    deletion can distinguish provider output from user-supplied inputs.
+    ``content_sha256`` deduplicates re-ingested attachments/paths and is
+    nullable (rows written before this migration have no hash). Existing rows
+    are ``generated``.
+    """
+    columns = {
+        row[1]
+        for row in conn.execute("PRAGMA table_info(generated_media);").fetchall()
+    }
+    if "source" not in columns:
+        try:
+            conn.execute(
+                "ALTER TABLE generated_media ADD COLUMN source TEXT NOT NULL"
+                " DEFAULT 'generated';"
+            )
+        except sqlite3.OperationalError as e:
+            _ignore_duplicate_schema_object(e)
+    if "content_sha256" not in columns:
+        try:
+            conn.execute(
+                "ALTER TABLE generated_media ADD COLUMN content_sha256 TEXT;"
+            )
+        except sqlite3.OperationalError as e:
+            _ignore_duplicate_schema_object(e)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_generated_media_content_sha256"
+        " ON generated_media(content_sha256);"
+    )
+    conn.execute("PRAGMA user_version = 67;")
     conn.commit()
 
 

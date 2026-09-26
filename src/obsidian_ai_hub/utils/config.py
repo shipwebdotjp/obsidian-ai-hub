@@ -67,10 +67,12 @@ _APP_ENV_VARS = [
     "CODING_OPENCODE_MODEL",
     "CODING_OPENCODE_MODELS",
     "IMAGE_GENERATION_OUTPUT_DIR",
+    "IMAGE_GENERATION_INPUT_DIR",
     "IMAGE_GENERATION_MODEL",
     "IMAGE_GENERATION_DEFAULT_SIZE",
     "IMAGE_GENERATION_DEFAULT_QUALITY",
     "IMAGE_GENERATION_MAX_COUNT",
+    "IMAGE_GENERATION_MAX_INPUT_BYTES",
 ]
 
 if IS_TEST_ENV:
@@ -1098,9 +1100,20 @@ IMAGE_GENERATION_TIMEOUT_SECONDS = _positive_int(
     _config_value("image_generation", "timeout_seconds", default=180),
     180,
 )
+# Upper bound for an input image ingested for editing (upload / path).
+IMAGE_GENERATION_MAX_INPUT_BYTES = _positive_int(
+    _env_or_config(
+        "IMAGE_GENERATION_MAX_INPUT_BYTES",
+        "image_generation",
+        "max_input_bytes",
+        default=8 * 1024 * 1024,
+    ),
+    8 * 1024 * 1024,
+)
 
 if IS_TEST_ENV:
     IMAGE_GENERATION_OUTPUT_DIR = TEST_WORKSPACE / "media"
+    IMAGE_GENERATION_INPUT_DIR = TEST_WORKSPACE / "media-input"
 else:
     _image_output_dir_raw = _env_or_config(
         "IMAGE_GENERATION_OUTPUT_DIR", "image_generation", "output_dir"
@@ -1111,4 +1124,13 @@ else:
         IMAGE_GENERATION_OUTPUT_DIR = Path(
             "~/.config/obsidian-ai-hub/media"
         ).expanduser()
+    # Root for resolving relative `source_path` inputs. Defaults to the Vault so
+    # Vault-relative paths work like other vault tools.
+    _image_input_dir_raw = _env_or_config(
+        "IMAGE_GENERATION_INPUT_DIR", "image_generation", "input_dir"
+    )
+    if _image_input_dir_raw:
+        IMAGE_GENERATION_INPUT_DIR = Path(str(_image_input_dir_raw)).expanduser()
+    else:
+        IMAGE_GENERATION_INPUT_DIR = VAULT_PATH
 

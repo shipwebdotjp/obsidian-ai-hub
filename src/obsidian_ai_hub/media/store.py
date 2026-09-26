@@ -71,7 +71,7 @@ def _resolve_contained_path(root: Path, relative_path: str) -> Path:
     return resolved
 
 
-def _reference(row: dict[str, Any]) -> dict[str, Any]:
+def media_reference(row: dict[str, Any]) -> dict[str, Any]:
     media_id = row["media_id"]
     return {
         "media_type": row["media_type"],
@@ -91,6 +91,8 @@ def save_generated_image(
     prompt: str,
     model: str,
     provider: str = "openai",
+    source: str = "generated",
+    content_sha256: str | None = None,
     width: int | None = None,
     height: int | None = None,
     metadata: dict[str, Any] | None = None,
@@ -98,7 +100,12 @@ def save_generated_image(
     run_id: str | None = None,
     task_id: str | None = None,
 ) -> dict[str, Any]:
-    """Atomically write *image* under the configured dir and record its row."""
+    """Atomically write *image* under the configured dir and record its row.
+
+    ``source`` is ``generated`` (provider output), ``upload`` (chat
+    attachment) or ``import`` (path import). ``content_sha256`` enables
+    deduplication when provided.
+    """
     if not isinstance(image.data, (bytes, bytearray)) or not image.data:
         raise ValueError("image data must be non-empty bytes")
 
@@ -154,6 +161,7 @@ def save_generated_image(
     row = {
         "media_id": media_id,
         "media_type": "image",
+        "source": source,
         "relative_path": relative_path,
         "filename": filename,
         "mime_type": image.mime_type,
@@ -164,6 +172,7 @@ def save_generated_image(
         "model": model,
         "prompt": prompt,
         "metadata_json": json.dumps(metadata or {}, ensure_ascii=False),
+        "content_sha256": content_sha256,
         "session_id": session_id,
         "run_id": run_id,
         "task_id": task_id,
@@ -175,14 +184,16 @@ def save_generated_image(
         conn.execute(
             """
             INSERT INTO generated_media (
-                media_id, media_type, relative_path, filename, mime_type,
-                width, height, byte_size, provider, model, prompt,
-                metadata_json, session_id, run_id, task_id, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                media_id, media_type, source, relative_path, filename,
+                mime_type, width, height, byte_size, provider, model, prompt,
+                metadata_json, content_sha256, session_id, run_id, task_id,
+                created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 row["media_id"],
                 row["media_type"],
+                row["source"],
                 row["relative_path"],
                 row["filename"],
                 row["mime_type"],
@@ -193,6 +204,7 @@ def save_generated_image(
                 row["model"],
                 row["prompt"],
                 row["metadata_json"],
+                row["content_sha256"],
                 row["session_id"],
                 row["run_id"],
                 row["task_id"],
@@ -213,7 +225,7 @@ def save_generated_image(
         if conn is not None:
             conn.close()
 
-    return _reference(row)
+    return media_reference(row)
 
 
 def get_generated_media(media_id: str) -> dict[str, Any] | None:
@@ -224,6 +236,27 @@ def get_generated_media(media_id: str) -> dict[str, Any] | None:
     try:
         cur = conn.execute(
             "SELECT * FROM generated_media WHERE media_id = ?", (media_id.strip(),)
+        )
+        row = cur.fetchone()
+    finally:
+        conn.close()
+    return dict(row) if row is not None else None
+
+
+def find_media_by_sha256(content_sha256: str) -> dict[str, Any] | None:
+    """Return the oldest row with *content_sha256*, or ``None``.
+
+    Used to deduplicate re-ingested attachments/paths so the same bytes do not
+    create a second file+row. Returns ``None`` for empty/unknown hashes.
+    """
+    if not isinstance(content_sha256, str) or not content_sha256.strip():
+        return None
+    conn = get_db_connection()
+    try:
+        cur = conn.execute(
+            "SELECT * FROM generated_media WHERE content_sha256 = ?"
+            " ORDER BY created_at ASC LIMIT 1",
+            (content_sha256.strip(),),
         )
         row = cur.fetchone()
     finally:

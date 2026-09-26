@@ -37,6 +37,7 @@ CONTEXT_KINDS = frozenset({"memory"})
 TASK_CONTEXT_TOOL_IDS = frozenset(
     {
         "image_generate",
+        "image_edit",
         "research_theme_propose",
         "register_one_shot_job",
         "register_recurring_job",

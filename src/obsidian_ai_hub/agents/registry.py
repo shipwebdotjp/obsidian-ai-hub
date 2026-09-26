@@ -27,7 +27,7 @@ from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
 from langchain_core.tools import BaseTool, tool
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from typing import Literal
 
 import os
@@ -197,6 +197,71 @@ class ImageGenerateInput(BaseModel):
         default=None,
         description="Optional background handling. Use 'transparent' only when the model supports it.",
     )
+
+
+class ImageEditInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    prompt: str = Field(
+        description="Instruction describing how to edit the source image. Be specific about the desired change."
+    )
+    use_current_attachment: bool = Field(
+        default=False,
+        description="Edit the image the user attached in the current conversation turn. Only valid in an Agent chat; exactly one source mode is required.",
+    )
+    source_media_id: Optional[str] = Field(
+        default=None,
+        description="Media id of an existing image (generated/uploaded/imported) to edit. Exactly one source mode is required.",
+    )
+    source_path: Optional[str] = Field(
+        default=None,
+        description="Path to an input image readable by the server (Vault / media output dir / configured input dir). Relative paths resolve under the input dir. Exactly one source mode is required.",
+    )
+    mask_media_id: Optional[str] = Field(
+        default=None, description="Optional mask image (media id) marking the region to edit."
+    )
+    mask_path: Optional[str] = Field(
+        default=None, description="Optional mask image (path) marking the region to edit."
+    )
+    size: Optional[Literal["1024x1024", "1536x1024", "1024x1536", "auto"]] = Field(
+        default=None,
+        description="Output image size. When omitted, the configured image_generation.default_size is used.",
+    )
+    quality: Optional[Literal["low", "medium", "high", "auto"]] = Field(
+        default=None,
+        description="Rendering quality. When omitted, the configured image_generation.default_quality is used.",
+    )
+    output_format: Literal["png", "jpeg", "webp"] = Field(
+        default="png", description="Output image file format."
+    )
+    input_fidelity: Optional[Literal["low", "high"]] = Field(
+        default=None,
+        description="How closely to preserve the source image details, when the model supports it.",
+    )
+    background: Optional[Literal["opaque", "transparent", "auto"]] = Field(
+        default=None, description="Optional background handling for the result."
+    )
+    count: int = Field(
+        default=1,
+        ge=1,
+        description="Number of edited images to generate. Upper bound is image_generation.max_count.",
+    )
+
+    @model_validator(mode="after")
+    def _validate_source_and_mask(self) -> "ImageEditInput":
+        sources = [
+            bool(self.use_current_attachment),
+            bool(self.source_media_id),
+            bool(self.source_path),
+        ]
+        if sum(sources) != 1:
+            raise ValueError(
+                "Exactly one of use_current_attachment / source_media_id / "
+                "source_path is required."
+            )
+        if self.mask_media_id and self.mask_path:
+            raise ValueError("Specify at most one of mask_media_id / mask_path.")
+        return self
 
 
 class CalendarReadInput(BaseModel):
@@ -1002,6 +1067,172 @@ def _ctx_str(ctx: Dict[str, Any], key: str) -> Optional[str]:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _make_image_edit_tool(trusted_ctx: Optional[Dict[str, Any]] = None) -> BaseTool:
+    """Build the ``image_edit`` tool bound to the trusted run context.
+
+    Resolves the source (current attachment / path / media id) into the media
+    library via ``obsidian_ai_hub.media.ingest`` before calling the provider,
+    so no client path or base64 payload reaches the generation call directly.
+    """
+    ctx = trusted_ctx if isinstance(trusted_ctx, dict) else {}
+
+    @tool("image_edit", args_schema=ImageEditInput)
+    def image_edit(
+        prompt: str,
+        use_current_attachment: bool = False,
+        source_media_id: Optional[str] = None,
+        source_path: Optional[str] = None,
+        mask_media_id: Optional[str] = None,
+        mask_path: Optional[str] = None,
+        size: Optional[str] = None,
+        quality: Optional[str] = None,
+        output_format: str = "png",
+        input_fidelity: Optional[str] = None,
+        background: Optional[str] = None,
+        count: int = 1,
+    ) -> str:
+        """Edit a source image with a text prompt and save the results.
+
+        Returns a JSON object with ``images`` references like ``image_generate``.
+        """
+        from obsidian_ai_hub.agents import store as agent_store
+        from obsidian_ai_hub.media import generation, ingest, store
+        from obsidian_ai_hub.utils import config as app_config
+
+        refs: List[Dict[str, Any]] = []
+        try:
+            max_count = int(
+                getattr(app_config, "IMAGE_GENERATION_MAX_COUNT", 4) or 4
+            )
+            if count > max_count:
+                raise ValueError(f"count must be at most {max_count}")
+            model = str(
+                getattr(app_config, "IMAGE_GENERATION_MODEL", "")
+                or "gpt-image-2.5-sunburst"
+            )
+            session_id = _ctx_str(ctx, "session_id")
+            run_id = _ctx_str(ctx, "run_id")
+            task_id = _ctx_str(ctx, "task_id")
+            prompt_text = prompt.strip()
+
+            if use_current_attachment:
+                user_message_id = _ctx_str(ctx, "user_message_id")
+                message = (
+                    agent_store.get_message(user_message_id)
+                    if user_message_id
+                    else None
+                )
+                source = ingest.ingest_attachment(
+                    (message or {}).get("attachments"),
+                    prompt=prompt_text,
+                    session_id=session_id,
+                    run_id=run_id,
+                    task_id=task_id,
+                )
+                if source is None:
+                    raise ValueError(
+                        "No image attachment was found in the current turn."
+                    )
+            elif source_path:
+                source = ingest.ingest_path(
+                    source_path,
+                    prompt=prompt_text,
+                    session_id=session_id,
+                    run_id=run_id,
+                    task_id=task_id,
+                )
+            else:
+                source = ingest.ingest_media_id(str(source_media_id))
+
+            source_bytes, source_mime = ingest.read_media_bytes(source["media_id"])
+
+            mask_bytes: Optional[bytes] = None
+            mask_mime: Optional[str] = None
+            if mask_path:
+                mask = ingest.ingest_path(
+                    mask_path, session_id=session_id, run_id=run_id, task_id=task_id
+                )
+                mask_bytes, mask_mime = ingest.read_media_bytes(mask["media_id"])
+            elif mask_media_id:
+                mask = ingest.ingest_media_id(mask_media_id)
+                mask_bytes, mask_mime = ingest.read_media_bytes(mask["media_id"])
+
+            if mask_bytes is not None:
+                # OpenAI edits require a PNG mask with the source dimensions.
+                if mask_mime != "image/png":
+                    raise ValueError("mask must be a PNG image")
+                if generation.image_dimensions(mask_bytes) != generation.image_dimensions(
+                    source_bytes
+                ):
+                    raise ValueError(
+                        "mask dimensions must match the source image dimensions"
+                    )
+
+            images = generation.edit_images(
+                prompt_text,
+                source_bytes,
+                image_mime=source_mime,
+                mask_data=mask_bytes,
+                mask_mime=mask_mime,
+                model=model,
+                size=size,
+                quality=quality,
+                output_format=output_format,
+                background=background,
+                input_fidelity=input_fidelity,
+                count=count,
+            )
+            for image in images:
+                width, height = generation.image_dimensions(image.data)
+                refs.append(
+                    store.save_generated_image(
+                        image,
+                        prompt=prompt_text,
+                        model=model,
+                        source="generated",
+                        metadata={
+                            "operation": "edit",
+                            "source_media_id": source["media_id"],
+                        },
+                        width=width,
+                        height=height,
+                        session_id=session_id,
+                        run_id=run_id,
+                        task_id=task_id,
+                    )
+                )
+            return json.dumps(
+                {
+                    "summary": f"画像を{len(refs)}件編集し保存しました。",
+                    "model": model,
+                    "images": refs,
+                },
+                ensure_ascii=False,
+            )
+        except (
+            ImportError,
+            RuntimeError,
+            ValueError,
+            TypeError,
+            KeyError,
+            OSError,
+            *EXPECTED_TOOL_EXCEPTIONS,
+        ) as exc:
+            logger.warning("image_edit failed: %s", exc)
+            payload: Dict[str, Any] = {"error": str(exc)}
+            if refs:
+                payload["images"] = refs
+            return json.dumps(payload, ensure_ascii=False)
+        except Exception as exc:
+            logger.exception("image_edit failed")
+            payload = {"error": _sanitize_unexpected_error(exc)}
+            if refs:
+                payload["images"] = refs
+            return json.dumps(payload, ensure_ascii=False)
+
+    return image_edit
 
 
 @tool(args_schema=CalendarReadInput)
@@ -1860,6 +2091,13 @@ _BUILTIN_TOOL_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "description": "テキストプロンプトから画像を生成し、設定された出力ディレクトリへ保存します。結果は media_id を含むJSONで返り、チャットUIで表示・ダウンロードできます。",
         "get_tool": lambda: _make_image_generate_tool(None),
         "get_tool_with_context": lambda ctx: _make_image_generate_tool(ctx),
+    },
+    "image_edit": {
+        "tool_id": "image_edit",
+        "name": "画像編集",
+        "description": "既存画像（会話の添付・ファイルパス・media_id）をプロンプトで編集し、設定された出力ディレクトリへ保存します。結果は media_id を含むJSONで返り、チャットUIで表示・ダウンロードできます。",
+        "get_tool": lambda: _make_image_edit_tool(None),
+        "get_tool_with_context": lambda ctx: _make_image_edit_tool(ctx),
     },
     "calendar_read": {
         "tool_id": "calendar_read",

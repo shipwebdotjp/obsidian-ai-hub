@@ -37,9 +37,10 @@ cp .env.example .env
 
 ### 画像生成（任意）
 
+`IMAGE_GENERATION_INPUT_DIR`（画像編集の相対パス入力の基準。既定は Vault）、
 `IMAGE_GENERATION_MODEL`、`IMAGE_GENERATION_DEFAULT_SIZE`、`IMAGE_GENERATION_DEFAULT_QUALITY`、
-`IMAGE_GENERATION_MAX_COUNT`。設定すると YAML より優先されます
-（[画像生成](../features/image-generation.md)）。
+`IMAGE_GENERATION_MAX_COUNT`、`IMAGE_GENERATION_MAX_INPUT_BYTES`。
+設定すると YAML より優先されます（[画像生成](../features/image-generation.md)）。
 
 ### 資格情報
 

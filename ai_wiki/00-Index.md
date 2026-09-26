@@ -49,6 +49,7 @@
 - [定期ジョブの Web UI 手動実行（ワンショットキュー再利用・スキーマ v64）](10-Decisions-Architecture.md#定期ジョブの-web-ui-手動実行ワンショットキュー再利用スキーマ-v64)（2026-09-25）
 - [エージェント会話を長期メモリ抽出ソースに追加（user発話限定・chatセッション限定・スキーマ v65）](10-Decisions-Architecture.md#エージェント会話を長期メモリ抽出ソースに追加user発話限定chatセッション限定スキーマ-v65)（2026-09-25）
 - [画像生成 Capability（`generated_media`・スキーマ v66）](10-Decisions-Integrations.md#画像生成-capabilitygenerated_mediaスキーマ-v66)（2026-09-26）
+- [画像編集の入力契約（media_id 正本 + 入口での自動取り込み）](../docs/image-generation/adr/image-edit-input-contract.md)（ADR、2026-09-26）
 - [Activity・サマリーの正本を SQLite へ移行（JSONL 廃止）](10-Decisions-Architecture.md#activityサマリーの正本を-sqlite-へ移行jsonl-廃止)
 - [エージェント／コーディング会話の送信キューはクライアント側に置く](10-Decisions-Web.md#エージェント会話の送信キューはクライアント側に置く)（2026-09-17）
 - [一覧のページングはページ送りを標準、会話履歴のみ逆方向キーセット](10-Decisions-Web.md#一覧のページングはページ送りを標準会話履歴のみ逆方向キーセット)（2026-09-19）

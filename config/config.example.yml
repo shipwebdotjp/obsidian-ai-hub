@@ -184,14 +184,20 @@ youtube:
 
 # Image generation (OpenAI Images API). The output directory is outside the
 # Vault by default; point it at a Vault subfolder to browse generated images in
-# Obsidian. Env IMAGE_GENERATION_OUTPUT_DIR / IMAGE_GENERATION_MODEL /
-# IMAGE_GENERATION_DEFAULT_SIZE / IMAGE_GENERATION_DEFAULT_QUALITY /
-# IMAGE_GENERATION_MAX_COUNT override these values.
+# Obsidian. Env IMAGE_GENERATION_OUTPUT_DIR / IMAGE_GENERATION_INPUT_DIR /
+# IMAGE_GENERATION_MODEL / IMAGE_GENERATION_DEFAULT_SIZE /
+# IMAGE_GENERATION_DEFAULT_QUALITY / IMAGE_GENERATION_MAX_COUNT /
+# IMAGE_GENERATION_MAX_INPUT_BYTES override these values.
 image_generation:
   output_dir: /path/to/your/obsidian-ai-hub/media
+  # Root for resolving relative `source_path` inputs to image_edit. Defaults to
+  # the Vault. Absolute source paths must still resolve inside the Vault,
+  # output_dir, or input_dir.
+  # input_dir: /path/to/your/input-images
   model: gpt-image-2.5-sunburst
   # Small/low defaults keep cost and latency low; override per call as needed.
   default_size: 1024x1024
   default_quality: low
   max_count: 4
+  max_input_bytes: 8388608
   timeout_seconds: 180
