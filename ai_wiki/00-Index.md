@@ -27,6 +27,7 @@
 
 - [不可逆変更の設計・実装品質ガイド](../docs/development-quality-playbook.md)
 - [実データベースでの動作確認と後片付け](../docs/testing.md#実データベースでの動作確認と後片付け)（`__opcheck_` 命名・失敗系の確認・終端 Run 削除・隔離サンドボックス）
+- [画像生成・生成メディア ロードマップ](../docs/image-generation/roadmap.md)（画像編集・ギャラリー・削除/保持などの今後の計画）
 
 ## 主要な決定
 
