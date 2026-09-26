@@ -1052,6 +1052,16 @@ class CommandRunDetail(BaseModel):
     llm_calls: list[ExecutionChildLLMCall] = []
 
 
+class LLMToolCallDetail(BaseModel):
+    call_id: str
+    provider_call_id: Optional[str] = None
+    tool_name: str
+    args: Any = Field(default_factory=dict)
+    status: Literal["requested", "running", "succeeded", "failed", "skipped", "interrupted"]
+    result: Optional[str] = None
+    error: Optional[str] = None
+
+
 class LLMCallDetail(BaseModel):
     call_id: str
     run_id: Optional[str] = None
@@ -1071,6 +1081,7 @@ class LLMCallDetail(BaseModel):
     exception_type: Optional[str] = None
     exception_message: Optional[str] = None
     traceback: Optional[str] = None
+    tool_calls: list[LLMToolCallDetail] = Field(default_factory=list)
 
 
 # --- Job State schemas ---

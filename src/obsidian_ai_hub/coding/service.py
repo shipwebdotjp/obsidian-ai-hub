@@ -323,6 +323,14 @@ async def run_coding_turn_stream(
                             hitl_run_id=hitl_run_id,
                         )
 
+                        llm_call_id = event.get("llm_call_id")
+                        logged_tool_calls = event.get("logged_tool_calls")
+                        if llm_call_id and logged_tool_calls and len(logged_tool_calls) > 0:
+                            from obsidian_ai_hub.utils import execution_logger
+                            logged_tool_calls[0]["status"] = "succeeded"
+                            logged_tool_calls[0]["result"] = json.dumps({"hitl_run_id": hitl_run_id}, ensure_ascii=False)
+                            execution_logger.update_llm_call_tool_calls(llm_call_id, logged_tool_calls)
+
                         user_question_payload = {
                             "hitl_run_id": hitl_run_id,
                             "question_set_id": question_set_id,

@@ -84,7 +84,7 @@ make logs-hitl-worker / make errorlogs-hitl-worker
 
 ## 実行ログを見る
 
-- **実行ログ → ログ**（`/execution-logs/logs`）— 過去 30 日の CLI 実行ログと LLM コール履歴（閲覧専用）。
+- **実行ログ → ログ**（`/execution-logs/logs`）— 過去 30 日の CLI 実行ログと LLM コール履歴（閲覧専用）。LLM 詳細では要求した Tool 名・引数・実行結果（状態、エラー、伏せ字済み JSON 等）を横断的に監査できます（対象は新規に記録されたログのみ。1 tool call あたりの実行結果保存上限は 20,000 文字で、超過時は打ち切りが明示されます）。
 - **実行ログ → ジョブ状態**（`/execution-logs/job-states`）— 定期・高頻度ジョブの最終確認・空振り・成功/スキップ/失敗。
 
 ## ネットワークとセキュリティ

@@ -23,10 +23,12 @@ from langchain_core.messages import (
 from obsidian_ai_hub.agents import registry, store
 from obsidian_ai_hub.agents import vault_context
 from obsidian_ai_hub.utils import config
+from obsidian_ai_hub.utils import execution_logger
 from obsidian_ai_hub.utils.llm_client import (
     _ai_message_from_chunk,
     _content_to_stream_delta,
     _logged_astream,
+    _logged_invoke,
     create_langchain_llm,
     generate_llm_response,
 )
@@ -566,7 +568,15 @@ def execute_subagent_core(
         while iterations < max_iterations:
             iterations += 1
 
-            ai_msg = llm_with_tools.invoke(langchain_messages)
+            ai_msg, call_id = _logged_invoke(
+                llm_with_tools,
+                langchain_messages,
+                provider,
+                model,
+                0.7,
+                max_tokens_val,
+                task,
+            )
             langchain_messages.append(ai_msg)
 
             tool_calls = _validated_tool_calls(ai_msg, tools_by_name, iterations)
@@ -574,7 +584,19 @@ def execute_subagent_core(
                 final_answer = str(ai_msg.content or "")
                 break
 
-            for call in tool_calls:
+            logged_tool_calls = [
+                {
+                    "call_id": call.get("id") or f"call_{iterations}_{i}",
+                    "provider_call_id": call.get("id"),
+                    "tool_name": call.get("name", ""),
+                    "args": call.get("args", {}),
+                    "status": "running",
+                }
+                for i, call in enumerate(tool_calls)
+            ]
+            execution_logger.update_llm_call_tool_calls(call_id, logged_tool_calls)
+
+            for i, call in enumerate(tool_calls):
                 tname = call["name"]
                 targs = call["args"]
                 tcall_id = call["id"]
@@ -586,11 +608,17 @@ def execute_subagent_core(
                         if isinstance(result, str)
                         else json.dumps(result, ensure_ascii=False)
                     )
+                    logged_tool_calls[i]["status"] = "succeeded"
+                    logged_tool_calls[i]["result"] = result_str
                 except Exception as tool_exc:
                     logger.exception("Error executing tool '%s' in subagent", tname)
                     result_str = json.dumps(
                         {"error": str(tool_exc)}, ensure_ascii=False
                     )
+                    logged_tool_calls[i]["status"] = "failed"
+                    logged_tool_calls[i]["error"] = str(tool_exc)
+
+                execution_logger.update_llm_call_tool_calls(call_id, logged_tool_calls)
 
                 if tname not in child_used_tools:
                     child_used_tools.append(tname)
@@ -610,7 +638,15 @@ def execute_subagent_core(
             if langchain_messages and isinstance(langchain_messages[-1], AIMessage):
                 final_answer = str(langchain_messages[-1].content or "")
             else:
-                final_ai_msg = llm.invoke(langchain_messages)
+                final_ai_msg, _ = _logged_invoke(
+                    llm,
+                    langchain_messages,
+                    provider,
+                    model,
+                    0.7,
+                    max_tokens_val,
+                    task,
+                )
                 final_answer = str(final_ai_msg.content or "")
 
         return {
@@ -767,6 +803,7 @@ async def _stream_llm_turn(
     iteration: int,
     prompt_for_log: str,
     max_tokens: int = 4096,
+    out_call_info: Optional[Dict[str, Any]] = None,
 ) -> AsyncGenerator[tuple[str, Any], None]:
     """Yield live text/tool-detection events, then one aggregated AI message.
 
@@ -785,6 +822,7 @@ async def _stream_llm_turn(
         temperature=0.7,
         max_tokens=max_tokens,
         prompt_for_log=prompt_for_log,
+        out_call_info=out_call_info,
     ):
         aggregate = chunk if aggregate is None else aggregate + chunk
 
@@ -1295,6 +1333,7 @@ async def generate_agent_stream(
 
             yield _format_sse({"type": "thinking", "iteration": iterations})
 
+            out_call_info: Dict[str, Any] = {}
             ai_msg: Optional[AIMessage] = None
             async for stream_event, stream_value in _stream_llm_turn(
                 llm_with_tools,
@@ -1304,6 +1343,7 @@ async def generate_agent_stream(
                 iterations,
                 user_content,
                 max_tokens_val,
+                out_call_info=out_call_info,
             ):
                 if stream_event == "text":
                     streamed_text_parts.append(stream_value)
@@ -1317,14 +1357,35 @@ async def generate_agent_stream(
                 raise RuntimeError("LLM stream did not produce a completed AI message.")
             langchain_messages.append(ai_msg)
 
+            llm_call_id = out_call_info.get("call_id")
+
             tool_calls = _validated_tool_calls(ai_msg, tools_by_name, iterations)
             if not tool_calls:
                 final_ai_msg = ai_msg
                 break
 
+            logged_tool_calls = [
+                {
+                    "call_id": c["id"],
+                    "provider_call_id": c["id"],
+                    "tool_name": c["name"],
+                    "args": c["args"],
+                    "status": "running",
+                }
+                for c in tool_calls
+            ]
+            if llm_call_id:
+                execution_logger.update_llm_call_tool_calls(llm_call_id, logged_tool_calls)
+
             # Enforce single-tool call rule for ask_user
             ask_user_calls = [c for c in tool_calls if c["name"] == "ask_user"]
             if ask_user_calls and len(tool_calls) > 1:
+                for idx_tc, c_item in enumerate(logged_tool_calls):
+                    c_item["status"] = "failed"
+                    c_item["error"] = "ask_user は単独で呼び出し、複数質問は questions 配列へまとめてください。"
+                if llm_call_id:
+                    execution_logger.update_llm_call_tool_calls(llm_call_id, logged_tool_calls)
+
                 # Returned error ToolMessage to all call IDs urging single ask_user invocation
                 for call in tool_calls:
                     langchain_messages.append(
@@ -1352,6 +1413,11 @@ async def generate_agent_stream(
 
                 _ask_user_error = validate_ask_user_questions(q_items)
                 if _ask_user_error is not None:
+                    logged_tool_calls[0]["status"] = "skipped"
+                    logged_tool_calls[0]["error"] = _ask_user_error
+                    if llm_call_id:
+                        execution_logger.update_llm_call_tool_calls(llm_call_id, logged_tool_calls)
+
                     langchain_messages.append(
                         ToolMessage(
                             content=json.dumps({"error": _ask_user_error}, ensure_ascii=False),
@@ -1432,6 +1498,11 @@ async def generate_agent_stream(
                     hitl_run_id=hitl_run_id,
                 )
 
+                logged_tool_calls[0]["status"] = "succeeded"
+                logged_tool_calls[0]["result"] = json.dumps({"hitl_run_id": hitl_run_id}, ensure_ascii=False)
+                if llm_call_id:
+                    execution_logger.update_llm_call_tool_calls(llm_call_id, logged_tool_calls)
+
                 # Emit user_question terminal SSE event
                 yield _format_sse(
                     {
@@ -1446,7 +1517,7 @@ async def generate_agent_stream(
             # Every call is fully validated before the first tool can run.  In
             # particular, this prevents a valid first call from running when a
             # later streamed call is malformed or requests an unavailable tool.
-            for call in tool_calls:
+            for call_idx, call in enumerate(tool_calls):
                 tname = call["name"]
                 targs = call["args"]
                 tcall_id = call["id"]
@@ -1478,6 +1549,8 @@ async def generate_agent_stream(
                     )
                     status = "succeeded"
                     error_msg = None
+                    logged_tool_calls[call_idx]["status"] = "succeeded"
+                    logged_tool_calls[call_idx]["result"] = result_str
                 except Exception as tool_exc:
                     logger.exception("Error executing tool '%s'", tname)
                     result_str = json.dumps(
@@ -1485,6 +1558,11 @@ async def generate_agent_stream(
                     )
                     status = "failed"
                     error_msg = str(tool_exc)
+                    logged_tool_calls[call_idx]["status"] = "failed"
+                    logged_tool_calls[call_idx]["error"] = error_msg
+
+                if llm_call_id:
+                    execution_logger.update_llm_call_tool_calls(llm_call_id, logged_tool_calls)
 
                 if tname not in used_tools:
                     used_tools.append(tname)

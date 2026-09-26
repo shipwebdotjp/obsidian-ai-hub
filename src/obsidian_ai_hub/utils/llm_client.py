@@ -1,10 +1,12 @@
+from __future__ import annotations
+
 import base64
 import json
 import mimetypes
 import os
 import time
 from pathlib import Path
-from typing import Any, AsyncGenerator, Sequence, Tuple, Optional
+from typing import Any, AsyncGenerator, Sequence, Tuple, Optional, List, Dict
 import logging
 
 from langchain_core.messages import (
@@ -273,6 +275,17 @@ def _extract_llm_metadata(
     )
 
 
+_UNSET = object()
+
+
+def _get_effective_run_id(run_id: Any) -> Optional[str]:
+    from obsidian_ai_hub.utils import execution_logger
+
+    if run_id is _UNSET:
+        return execution_logger.current_run_id.get()
+    return run_id
+
+
 def _logged_invoke(
     llm: Any,
     messages: list,
@@ -281,21 +294,24 @@ def _logged_invoke(
     temperature: float,
     max_tokens: int,
     prompt_for_log: str,
-) -> Any:
+    run_id: Any = _UNSET,
+    tool_calls: Optional[List[Dict[str, Any]]] = None,
+) -> Tuple[AIMessage, str]:
     import uuid
     from obsidian_ai_hub.utils import execution_logger
 
     call_id = str(uuid.uuid4())
-    run_id = execution_logger.current_run_id.get()
+    effective_run_id = _get_effective_run_id(run_id)
 
     execution_logger.start_llm_call(
         call_id=call_id,
-        run_id=run_id,
+        run_id=effective_run_id,
         provider=provider,
         model=model,
         temperature=temperature,
         max_tokens=max_tokens,
         prompt=prompt_for_log,
+        tool_calls=tool_calls,
     )
 
     try:
@@ -314,6 +330,20 @@ def _logged_invoke(
                 max_tokens,
             )
 
+        effective_tool_calls = tool_calls
+        msg_tool_calls = getattr(message, "tool_calls", None)
+        if msg_tool_calls and not effective_tool_calls:
+            effective_tool_calls = [
+                {
+                    "call_id": tc.get("id") or f"call_{i}",
+                    "provider_call_id": tc.get("id"),
+                    "tool_name": tc.get("name", ""),
+                    "args": tc.get("args", {}),
+                    "status": "requested",
+                }
+                for i, tc in enumerate(msg_tool_calls)
+            ]
+
         execution_logger.succeed_llm_call(
             call_id=call_id,
             response=response_text,
@@ -321,10 +351,84 @@ def _logged_invoke(
             completion_tokens=completion_tokens,
             total_tokens=total_tokens,
             finish_reason=finish_reason,
+            tool_calls=effective_tool_calls,
         )
-        return message
+        return message, call_id
     except Exception as e:
-        execution_logger.fail_llm_call(call_id, e)
+        execution_logger.fail_llm_call(call_id, e, tool_calls=tool_calls)
+        raise
+
+
+async def _logged_ainvoke(
+    llm: Any,
+    messages: list,
+    provider: str,
+    model: str,
+    temperature: float,
+    max_tokens: int,
+    prompt_for_log: str,
+    run_id: Any = _UNSET,
+    tool_calls: Optional[List[Dict[str, Any]]] = None,
+) -> Tuple[AIMessage, str]:
+    import uuid
+    from obsidian_ai_hub.utils import execution_logger
+
+    call_id = str(uuid.uuid4())
+    effective_run_id = _get_effective_run_id(run_id)
+
+    execution_logger.start_llm_call(
+        call_id=call_id,
+        run_id=effective_run_id,
+        provider=provider,
+        model=model,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        prompt=prompt_for_log,
+        tool_calls=tool_calls,
+    )
+
+    try:
+        message = await llm.ainvoke(messages)
+        prompt_tokens, completion_tokens, total_tokens, finish_reason = (
+            _extract_llm_metadata(message)
+        )
+        response_text = _content_to_text(message.content)
+
+        if finish_reason == "length":
+            logger.warning(
+                "LLM output was truncated (finish_reason=length): provider=%s model=%s "
+                "max_tokens=%s; the response may be incomplete.",
+                provider,
+                model,
+                max_tokens,
+            )
+
+        effective_tool_calls = tool_calls
+        msg_tool_calls = getattr(message, "tool_calls", None)
+        if msg_tool_calls and not effective_tool_calls:
+            effective_tool_calls = [
+                {
+                    "call_id": tc.get("id") or f"call_{i}",
+                    "provider_call_id": tc.get("id"),
+                    "tool_name": tc.get("name", ""),
+                    "args": tc.get("args", {}),
+                    "status": "requested",
+                }
+                for i, tc in enumerate(msg_tool_calls)
+            ]
+
+        execution_logger.succeed_llm_call(
+            call_id=call_id,
+            response=response_text,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+            finish_reason=finish_reason,
+            tool_calls=effective_tool_calls,
+        )
+        return message, call_id
+    except Exception as e:
+        execution_logger.fail_llm_call(call_id, e, tool_calls=tool_calls)
         raise
 
 
@@ -343,6 +447,8 @@ async def _logged_astream(
     temperature: float,
     max_tokens: int,
     prompt_for_log: str,
+    run_id: Any = _UNSET,
+    out_call_info: Optional[Dict[str, Any]] = None,
 ) -> AsyncGenerator[AIMessageChunk, None]:
     """Stream an LLM call while recording the same execution-log lifecycle.
 
@@ -355,11 +461,14 @@ async def _logged_astream(
     from obsidian_ai_hub.utils import execution_logger
 
     call_id = str(uuid.uuid4())
-    run_id = execution_logger.current_run_id.get()
+    effective_run_id = _get_effective_run_id(run_id)
+
+    if out_call_info is not None:
+        out_call_info["call_id"] = call_id
 
     execution_logger.start_llm_call(
         call_id=call_id,
-        run_id=run_id,
+        run_id=effective_run_id,
         provider=provider,
         model=model,
         temperature=temperature,
@@ -404,6 +513,20 @@ async def _logged_astream(
                 max_tokens,
             )
 
+        tool_calls = None
+        msg_tool_calls = getattr(aggregate, "tool_calls", None)
+        if msg_tool_calls:
+            tool_calls = [
+                {
+                    "call_id": tc.get("id") or f"call_{i}",
+                    "provider_call_id": tc.get("id"),
+                    "tool_name": tc.get("name", ""),
+                    "args": tc.get("args", {}),
+                    "status": "requested",
+                }
+                for i, tc in enumerate(msg_tool_calls)
+            ]
+
         execution_logger.succeed_llm_call(
             call_id=call_id,
             response=response_text,
@@ -411,6 +534,7 @@ async def _logged_astream(
             completion_tokens=completion_tokens,
             total_tokens=total_tokens,
             finish_reason=finish_reason,
+            tool_calls=tool_calls,
         )
     except Exception as exc:
         execution_logger.fail_llm_call(call_id, exc)
@@ -449,7 +573,7 @@ def generate_llm_response(
     )
 
     def _call() -> str:
-        message = _logged_invoke(
+        message, _ = _logged_invoke(
             llm, messages, provider, model, temperature, max_tokens, prompt
         )
         logger.info(f"LLM response: {message}")
@@ -500,6 +624,8 @@ def generate_llm_response_with_tools(
     llm_with_tools = llm.bind_tools(list(tools))
     tools_by_name = {tool.name: tool for tool in tools}
 
+    from obsidian_ai_hub.utils import execution_logger
+
     iterations = 0
     while iterations < max_iterations:
         iterations += 1
@@ -515,37 +641,60 @@ def generate_llm_response_with_tools(
                 prompt,
             )
 
-        ai_msg = _with_exponential_backoff(_call)
+        ai_msg, call_id = _with_exponential_backoff(_call)
         messages.append(ai_msg)
 
         tool_calls = getattr(ai_msg, "tool_calls", None)
         if not tool_calls:
             return _content_to_text(ai_msg.content)
 
-        for tool_call in tool_calls:
+        logged_tool_calls = [
+            {
+                "call_id": tc.get("id") or f"call_{iterations}_{i}",
+                "provider_call_id": tc.get("id"),
+                "tool_name": tc.get("name", ""),
+                "args": tc.get("args", {}),
+                "status": "running",
+            }
+            for i, tc in enumerate(tool_calls)
+        ]
+        execution_logger.update_llm_call_tool_calls(call_id, logged_tool_calls)
+
+        for i, tool_call in enumerate(tool_calls):
             tool_name = tool_call["name"]
+            tc_id = tool_call.get("id") or f"call_{iterations}_{i}"
             if tool_name not in tools_by_name:
+                logged_tool_calls[i]["status"] = "skipped"
+                logged_tool_calls[i]["error"] = f"Unknown tool called by LLM: {tool_name}"
+                execution_logger.update_llm_call_tool_calls(call_id, logged_tool_calls)
                 raise RuntimeError(f"Unknown tool called by LLM: {tool_name}")
 
-            result = tools_by_name[tool_name].invoke(tool_call["args"])
-            logger.debug(
-                f"Tool called: {tool_name} with args {tool_call['args']} returned result: {result}"
-            )
-            messages.append(
-                ToolMessage(
-                    content=json.dumps({"result": result}, ensure_ascii=False),
-                    tool_call_id=tool_call["id"],
+            try:
+                result = tools_by_name[tool_name].invoke(tool_call["args"])
+                logger.debug(
+                    f"Tool called: {tool_name} with args {tool_call['args']} returned result: {result}"
                 )
-            )
+                logged_tool_calls[i]["status"] = "succeeded"
+                logged_tool_calls[i]["result"] = result
+                execution_logger.update_llm_call_tool_calls(call_id, logged_tool_calls)
+                messages.append(
+                    ToolMessage(
+                        content=json.dumps({"result": result}, ensure_ascii=False),
+                        tool_call_id=tc_id,
+                    )
+                )
+            except Exception as exc:
+                logged_tool_calls[i]["status"] = "failed"
+                logged_tool_calls[i]["error"] = str(exc)
+                execution_logger.update_llm_call_tool_calls(call_id, logged_tool_calls)
+                raise
 
-    # If we reached max_iterations and the last message still requested tool calls,
-    # we need one final LLM call without tool binding to get a summary response.
     def _final_call():
         return _logged_invoke(
             llm, messages, provider, model, temperature, max_tokens, prompt
         )
 
-    final_ai_msg = _with_exponential_backoff(_final_call)
+    final_ai_msg, _ = _with_exponential_backoff(_final_call)
     return _content_to_text(final_ai_msg.content)
 
 

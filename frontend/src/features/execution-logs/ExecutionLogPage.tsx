@@ -46,6 +46,16 @@ interface CommandRunDetail {
   llm_calls: ExecutionChildLLMCall[];
 }
 
+interface LLMToolCallDetail {
+  call_id: string;
+  provider_call_id?: string | null;
+  tool_name: string;
+  args?: any;
+  status: "requested" | "running" | "succeeded" | "failed" | "skipped" | "interrupted";
+  result?: string | null;
+  error?: string | null;
+}
+
 interface LLMCallDetail {
   call_id: string;
   run_id?: string;
@@ -65,6 +75,7 @@ interface LLMCallDetail {
   exception_type?: string;
   exception_message?: string;
   traceback?: string;
+  tool_calls?: LLMToolCallDetail[];
 }
 
 export default function ExecutionLogPage() {
@@ -205,6 +216,23 @@ export default function ExecutionLogPage() {
         return "bg-amber-50 text-amber-700 border-amber-200";
       default:
         return "bg-slate-50 text-slate-700 border-slate-200";
+    }
+  };
+
+  const getToolCallStatusBadgeClass = (stat: string) => {
+    switch (stat) {
+      case "succeeded":
+        return "bg-emerald-50 text-emerald-700 border-emerald-200";
+      case "failed":
+        return "bg-rose-50 text-red-700 border-rose-200";
+      case "running":
+        return "bg-amber-50 text-amber-700 border-amber-200";
+      case "skipped":
+        return "bg-slate-100 text-slate-600 border-slate-300";
+      case "interrupted":
+        return "bg-purple-50 text-purple-700 border-purple-200";
+      default:
+        return "bg-sky-50 text-sky-700 border-sky-200";
     }
   };
 
@@ -645,6 +673,79 @@ export default function ExecutionLogPage() {
                     </pre>
                   </div>
                 </details>
+              )}
+
+              {/* Tool Calls Section */}
+              {llmDetail.tool_calls && llmDetail.tool_calls.length > 0 && (
+                <div>
+                  <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">
+                    Tool Calls ({llmDetail.tool_calls.length})
+                  </h3>
+                  <div className="space-y-3">
+                    {llmDetail.tool_calls.map((tc, idx) => (
+                      <details
+                        key={tc.call_id || idx}
+                        className="border border-slate-200 rounded bg-slate-50 overflow-hidden group"
+                        open
+                      >
+                        <summary className="px-4 py-3 bg-slate-100 hover:bg-slate-200 transition cursor-pointer select-none list-none flex justify-between items-center">
+                          <div className="flex items-center gap-2 min-w-0 pr-2">
+                            <span className={`text-[10px] uppercase font-bold border px-1.5 py-0.5 rounded shrink-0 ${getToolCallStatusBadgeClass(tc.status)}`}>
+                              {tc.status}
+                            </span>
+                            <span className="font-bold text-sm text-slate-800 truncate">
+                              {tc.tool_name}
+                            </span>
+                            <span className="text-xs font-mono text-slate-400 truncate">
+                              ({tc.call_id})
+                            </span>
+                          </div>
+                          <span className="text-[10px] text-slate-400 group-open:rotate-180 transition-transform shrink-0">▼</span>
+                        </summary>
+                        <div className="p-4 bg-white border-t border-slate-200 space-y-3 text-xs">
+                          {/* Arguments */}
+                          <div>
+                            <div className="font-semibold text-slate-500 mb-1">引数 (Args)</div>
+                            <pre className="bg-slate-50 border border-slate-200 text-slate-800 p-2.5 rounded font-mono overflow-x-auto max-h-48 whitespace-pre-wrap break-all">
+                              {(() => {
+                                if (typeof tc.args === "object" && tc.args !== null) {
+                                  return JSON.stringify(tc.args, null, 2);
+                                }
+                                return String(tc.args || "{}");
+                              })()}
+                            </pre>
+                          </div>
+
+                          {/* Error if present */}
+                          {tc.error && (
+                            <div>
+                              <div className="font-semibold text-red-600 mb-1">エラー / 理由</div>
+                              <div className="bg-rose-50 border border-rose-200 text-red-800 p-2.5 rounded font-mono whitespace-pre-wrap break-all">
+                                {tc.error}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Result if present */}
+                          {tc.result && (
+                            <div>
+                              <div className="font-semibold text-slate-500 mb-1">実行結果 (Result)</div>
+                              <pre className="bg-slate-900 text-slate-100 p-2.5 rounded font-mono overflow-x-auto max-h-64 whitespace-pre-wrap break-all leading-relaxed">
+                                {(() => {
+                                  try {
+                                    return JSON.stringify(JSON.parse(tc.result), null, 2);
+                                  } catch (_) {
+                                    return tc.result;
+                                  }
+                                })()}
+                              </pre>
+                            </div>
+                          )}
+                        </div>
+                      </details>
+                    ))}
+                  </div>
+                </div>
               )}
 
               {/* Response Accordion */}

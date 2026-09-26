@@ -263,6 +263,97 @@ def fail_command_run(run_id: str, exc: Exception) -> None:
         conn.close()
 
 
+MAX_TOOL_CALL_RESULT_LENGTH = 20000
+
+
+def process_tool_call_result(result: Any) -> Optional[str]:
+    """
+    Mask sensitive keys if result is JSON / dict / list, convert to string,
+    and cap at 20,000 characters with an explicit truncation marker.
+    """
+    if result is None:
+        return None
+
+    res_str: str
+    if isinstance(result, (dict, list)):
+        masked = mask_sensitive_dict(result)
+        res_str = json.dumps(masked, ensure_ascii=False)
+    elif isinstance(result, str):
+        stripped = result.strip()
+        if (stripped.startswith("{") and stripped.endswith("}")) or (
+            stripped.startswith("[") and stripped.endswith("]")
+        ):
+            try:
+                parsed = json.loads(result)
+                masked = mask_sensitive_dict(parsed)
+                res_str = json.dumps(masked, ensure_ascii=False)
+            except Exception:
+                res_str = result
+        else:
+            res_str = result
+    else:
+        res_str = str(result)
+
+    if len(res_str) > MAX_TOOL_CALL_RESULT_LENGTH:
+        trunc_marker = "\n...（保存表示用に 20,000 文字で省略）"
+        allowed_len = MAX_TOOL_CALL_RESULT_LENGTH - len(trunc_marker)
+        if allowed_len > 0:
+            res_str = res_str[:allowed_len] + trunc_marker
+        else:
+            res_str = res_str[:MAX_TOOL_CALL_RESULT_LENGTH]
+
+    return res_str
+
+
+def format_tool_call_item(tool_call: Dict[str, Any]) -> Dict[str, Any]:
+    """Format a tool call dictionary for storage and API exposure."""
+    call_id = str(tool_call.get("call_id") or "")
+    provider_call_id = tool_call.get("provider_call_id")
+    if provider_call_id is not None:
+        provider_call_id = str(provider_call_id)
+    tool_name = str(tool_call.get("tool_name") or tool_call.get("name") or "")
+    args = mask_sensitive_dict(tool_call.get("args", {}))
+    status = str(tool_call.get("status") or "requested")
+    raw_result = tool_call.get("result")
+    result = process_tool_call_result(raw_result) if raw_result is not None else None
+    error = tool_call.get("error")
+    if error is not None:
+        error = str(error)
+
+    return {
+        "call_id": call_id,
+        "provider_call_id": provider_call_id,
+        "tool_name": tool_name,
+        "args": args,
+        "status": status,
+        "result": result,
+        "error": error,
+    }
+
+
+def update_llm_call_tool_calls(
+    call_id: str, tool_calls: List[Dict[str, Any]]
+) -> None:
+    """Updates the tool_calls_json column for an existing LLM call log row."""
+    conn = get_db_connection()
+    try:
+        formatted = [format_tool_call_item(tc) for tc in tool_calls]
+        tool_calls_json = json.dumps(formatted, ensure_ascii=False)
+        conn.execute(
+            """
+            UPDATE llm_call_logs
+            SET tool_calls_json = ?
+            WHERE call_id = ?
+            """,
+            (tool_calls_json, call_id),
+        )
+        conn.commit()
+    except Exception as e:
+        logger.error("Failed to update LLM call tool calls: %s", e)
+    finally:
+        conn.close()
+
+
 def start_llm_call(
     call_id: str,
     run_id: Optional[str],
@@ -271,19 +362,24 @@ def start_llm_call(
     temperature: float,
     max_tokens: int,
     prompt: str,
+    tool_calls: Optional[List[Dict[str, Any]]] = None,
 ) -> None:
     """Logs the start of an LLM call."""
     conn = get_db_connection()
     try:
         started_at = datetime.now(timezone.utc).isoformat()
+        tool_calls_json = "[]"
+        if tool_calls:
+            formatted = [format_tool_call_item(tc) for tc in tool_calls]
+            tool_calls_json = json.dumps(formatted, ensure_ascii=False)
         conn.execute(
             """
             INSERT INTO llm_call_logs (
-                call_id, run_id, provider, model, temperature, max_tokens, prompt, started_at, status
+                call_id, run_id, provider, model, temperature, max_tokens, prompt, started_at, status, tool_calls_json
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'running')
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'running', ?)
             """,
-            (call_id, run_id, provider, model, temperature, max_tokens, prompt, started_at),
+            (call_id, run_id, provider, model, temperature, max_tokens, prompt, started_at, tool_calls_json),
         )
         conn.commit()
     except Exception as e:
@@ -299,19 +395,32 @@ def succeed_llm_call(
     completion_tokens: Optional[int],
     total_tokens: Optional[int],
     finish_reason: Optional[str],
+    tool_calls: Optional[List[Dict[str, Any]]] = None,
 ) -> None:
     """Logs the success of an LLM call."""
     conn = get_db_connection()
     try:
         finished_at = datetime.now(timezone.utc).isoformat()
-        conn.execute(
-            """
-            UPDATE llm_call_logs
-            SET response = ?, prompt_tokens = ?, completion_tokens = ?, total_tokens = ?, finish_reason = ?, finished_at = ?, status = 'succeeded'
-            WHERE call_id = ?
-            """,
-            (response, prompt_tokens, completion_tokens, total_tokens, finish_reason, finished_at, call_id),
-        )
+        if tool_calls is not None:
+            formatted = [format_tool_call_item(tc) for tc in tool_calls]
+            tool_calls_json = json.dumps(formatted, ensure_ascii=False)
+            conn.execute(
+                """
+                UPDATE llm_call_logs
+                SET response = ?, prompt_tokens = ?, completion_tokens = ?, total_tokens = ?, finish_reason = ?, finished_at = ?, status = 'succeeded', tool_calls_json = ?
+                WHERE call_id = ?
+                """,
+                (response, prompt_tokens, completion_tokens, total_tokens, finish_reason, finished_at, tool_calls_json, call_id),
+            )
+        else:
+            conn.execute(
+                """
+                UPDATE llm_call_logs
+                SET response = ?, prompt_tokens = ?, completion_tokens = ?, total_tokens = ?, finish_reason = ?, finished_at = ?, status = 'succeeded'
+                WHERE call_id = ?
+                """,
+                (response, prompt_tokens, completion_tokens, total_tokens, finish_reason, finished_at, call_id),
+            )
         conn.commit()
     except Exception as e:
         logger.error("Failed to succeed LLM call: %s", e)
@@ -319,7 +428,11 @@ def succeed_llm_call(
         conn.close()
 
 
-def fail_llm_call(call_id: str, exc: Exception) -> None:
+def fail_llm_call(
+    call_id: str,
+    exc: Exception,
+    tool_calls: Optional[List[Dict[str, Any]]] = None,
+) -> None:
     """Logs the failure of an LLM call."""
     conn = get_db_connection()
     try:
@@ -328,14 +441,26 @@ def fail_llm_call(call_id: str, exc: Exception) -> None:
         exc_msg = str(exc)
         tb_str = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
 
-        conn.execute(
-            """
-            UPDATE llm_call_logs
-            SET finished_at = ?, status = 'failed', exception_type = ?, exception_message = ?, traceback = ?
-            WHERE call_id = ?
-            """,
-            (finished_at, exc_type, exc_msg, tb_str, call_id),
-        )
+        if tool_calls is not None:
+            formatted = [format_tool_call_item(tc) for tc in tool_calls]
+            tool_calls_json = json.dumps(formatted, ensure_ascii=False)
+            conn.execute(
+                """
+                UPDATE llm_call_logs
+                SET finished_at = ?, status = 'failed', exception_type = ?, exception_message = ?, traceback = ?, tool_calls_json = ?
+                WHERE call_id = ?
+                """,
+                (finished_at, exc_type, exc_msg, tb_str, tool_calls_json, call_id),
+            )
+        else:
+            conn.execute(
+                """
+                UPDATE llm_call_logs
+                SET finished_at = ?, status = 'failed', exception_type = ?, exception_message = ?, traceback = ?
+                WHERE call_id = ?
+                """,
+                (finished_at, exc_type, exc_msg, tb_str, call_id),
+            )
         conn.commit()
     except Exception as e:
         logger.error("Failed to fail LLM call: %s", e)
@@ -507,6 +632,17 @@ def get_llm_call_detail(call_id: str) -> Optional[Dict[str, Any]]:
         row = cursor.fetchone()
         if not row:
             return None
-        return dict(row)
+        d = dict(row)
+        tc_json = d.pop("tool_calls_json", None)
+        tool_calls = []
+        if tc_json:
+            try:
+                parsed = json.loads(tc_json)
+                if isinstance(parsed, list):
+                    tool_calls = [format_tool_call_item(tc) for tc in parsed if isinstance(tc, dict)]
+            except Exception:
+                tool_calls = []
+        d["tool_calls"] = tool_calls
+        return d
     finally:
         conn.close()
