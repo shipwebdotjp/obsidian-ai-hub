@@ -98,6 +98,12 @@
 - Capability 既定は `plan_required`。`_OUTPUT_SCHEMAS` に入力/出力契約を追加。
 - 取り込んだ入力メディアは失敗時も残す（ギャラリー/再試行で再利用）。出力は provider 失敗時に作らない。
 
+**スコープ（R1 MVP）**
+- 会話: 添付の自動取り込み + `use_current_attachment` / `source_media_id`。
+- Task/Workflow: `source_path` / `source_media_id`。
+- **新しいアップロード UI は作らない**（手元の新規ファイルを Task/Workflow へ入れる導線は
+  R2 のメディアピッカー/共有アップロードで対応する）。
+
 **影響範囲**: `media/generation.py`, `media/ingest.py`(新), `media/store.py`, `agents/registry.py`,
 `database.py`（migration v67）, `tasks/capability_schemas.py`, `web/routes/agents.py`（添付取込）,
 `web/services/vault.py`（containment 再利用）, `utils/config.py`, frontend（添付を入力候補に）。
@@ -131,14 +137,33 @@
 - DB: `generated_media(created_at)`, `(session_id)` は既存。`media_type`/`source`/`task_id` の
   索引を必要に応じて追加。
 
-**影響範囲**: `media/store.py`（list クエリ）, `web/routes/media.py`, `web/api.py`,
-frontend `features/media/`（一覧ページ）、`Web UI マップ`。
+**追加: メディアピッカーと共有アップロード（Task/Workflow から画像を選ぶ）**
+
+Task / Workflow から編集入力に使う画像の与え方について:
+
+- **R1 MVP では専用のアップロード UI を作らない。** 次の順で既存資産を使って入力できる:
+  1. **ギャラリー / メディアピッカーで選ぶ**（`media_id`）。生成済み・会話でアップロード済みの
+     画像はこれで再利用できる。ピッカーは共有コンポーネントとして作る。
+  2. **`source_path`**（Vault / 出力ディレクトリ内の既存ファイル）。
+- それでも「手元の新規ファイルを Task/Workflow に使いたい」頻度が高いなら、**汎用のメディア
+  アップロード**を後から足す（Task/Workflow 専用にはしない）:
+  - `POST /api/v1/media/uploads`（multipart）→ `media/ingest.py` で取り込み → `media_id` を返す。
+  - 同じメディアピッカーに「アップロード」を付ける。ギャラリーにも載る。
+  - Workflow の入力フォームは `InputsSchemaForm` に `format: media`（UI ウィジェットヒント）を足し、
+    Task 作成フォームも同ピッカーを使う。既存の `x-ui` ウィジェット機構（`capability_schemas._FIELD_WIDGETS`）
+    と同じ考え方で拡張する。
+- 順序: **R2 のギャラリー/ピッカーを先に**作り、必要になったらアップロードを追加する。
+
+**影響範囲**: `media/store.py`（list クエリ）, `media/ingest.py`（アップロード時）,
+`web/routes/media.py`, `web/api.py`, frontend `features/media/`（一覧 + ピッカー）,
+`features/task-agent`（作成フォーム）, `features/workflows/InputsSchemaForm`, `Web UI マップ`。
 
 **リスク/不可逆性**: 読取のみ（P0 範囲）。**ゲート: 不要**（一覧・詳細まで）。
+アップロード追加時は外部ファイル取込みのため入力検証契約（R1 の ingest を共用）に従う。
 
 ---
 
-## R3. メディアの削除・保持期間・孤児回収 — P0（削除は不可逆）
+## R3. メディアの削除・親連動削除・孤児回収 — P0（削除は不可逆）
 
 **目的**: 不要なメディアとファイルを削除し、孤児ファイルを回収する。
 
@@ -147,21 +172,33 @@ frontend `features/media/`（一覧ページ）、`Web UI マップ`。
   DB 失敗時はファイルを消すが、クラッシュ時は孤児ファイルが残り得る（行は欠落ファイルを指さない）。
 - 削除は不可逆（アプリ外ファイル + DB 行）。
 
-**設計案**
+**決定: 保持期間の設定は当面追加しない（親と同時に削除する）**
+
+- 時間ベースの `retention_days` は設けない。メディアは所有する親（会話 / Task / Workflow 実行）の
+  既存削除と同じタイミングで削除する。
+- 既存の削除経路にフックする:
+  - 会話: `agents/store.delete_session`（セッション削除時に `session_id` 一致のメディアを削除）。
+  - Task: `tasks/store.purge_terminal_tasks`（終端 Task の既存 30 日パージに `task_id` 一致を連動）。
+  - Workflow: `workflow/store.delete_run`（実行削除時にその実行のメディアを削除）。
+- ファイル削除が必要なため DB の FK CASCADE だけでは足りない。共通ヘルパ
+  `media/store.py: delete_media_for_parent(kind, id)`（行検索 → containment 済みパスを unlink → 行削除、
+  冪等・ファイル欠落や権限エラーでも行削除は継続しログ記録）を各削除経路から呼ぶ。
+- 紐付いていないメディア（親が先に消えた、CLI 単体、R4 前の Workflow 実行など）は残り得る。
+  まずはギャラリーからの手動削除（下記）で対応し、自動回収は必要になったら追加する。
+
+**設計案（手動削除・孤児回収）**
 - `DELETE /api/v1/media/{id}`: DB 行を削除し、containment 済みパスのファイルを削除。
-  行が無い / ファイルが無い場合も冪等に成功相当とする。UI は確認ダイアログ + 論理削除ではなく物理削除。
-- 保持期間: `image_generation.retention_days`（既定は無期限 or 90 日）を設定。
-  Scheduler Job（[jobs](../../user-guide/docs/features/jobs.md)）で期限超過を削除。
-- 孤児回収: 出力ディレクトリを走査し、`generated_media.relative_path` に存在しないファイル
-  （`.part` 一時ファイル、`output_dir` 直下の管理外ファイルは除外）で一定期間経過したものを削除。
-  逆に、行があるがファイルが無い場合は行を残しつつ監査ログに記録（勝手に消さない）。
-- 削除・保持の実行主体と記録: `__opcheck_` と同様に識別子をログへ。人間が復旧できる材料を残す。
+  行が無い / ファイルが無い場合も冪等に成功相当とする。UI は確認ダイアログ + 物理削除。
+- 孤児回収（任意・後回し可）: 出力ディレクトリを走査し、`generated_media.relative_path` に存在しない
+  ファイル（`.part` 一時ファイルや管理外は除外）で一定期間経過したものを削除。逆に、行があるが
+  ファイルが無い場合は行を残しつつ監査ログに記録（勝手に消さない）。
+- 削除の実行主体と記録: `__opcheck_` と同様に識別子をログへ。人間が復旧できる材料を残す。
 
-**影響範囲**: `media/store.py`, `web/routes/media.py`, `scheduler_jobs`（新規ジョブ）, frontend（削除 UI）,
-`database.py`（監査が必要なら列追加）。
+**影響範囲**: `media/store.py`（`delete_media_for_parent` / 手動削除）, `agents/store.py`,
+`tasks/store.py`, `workflow/store.py`（削除フック）, `web/routes/media.py`, frontend（削除 UI）。
 
-**リスク/不可逆性**: 削除は不可逆。**ゲート: 要**（削除の操作シナリオ契約、失敗/部分削除時の挙動、
-保持設定の既定値決定）。
+**リスク/不可逆性**: 削除は不可逆。**ゲート: 要**（削除の操作シナリオ契約、部分削除/ファイル欠落時の挙動）。
+Workflow 実行単位の削除は R4（`workflow_run_id` の記録）完了まで正確に行えない点に注意。
 
 ---
 
@@ -367,7 +404,7 @@ frontend `features/media/`（一覧ページ）、`Web UI マップ`。
 | --- | --- | --- | --- |
 | P0 | R1 画像編集 | 外部送信 + 書込み | 要 |
 | P0 | R2 ギャラリー（一覧・詳細） | 読取 | 不要 |
-| P0 | R3 削除・保持・孤児回収 | 削除（不可逆） | 要 |
+| P0 | R3 削除・親連動削除・孤児回収 | 削除（不可逆） | 要 |
 | P1 | R4 作成元の紐付け | メタデータ | 不要 |
 | P1 | R6 Vault 連携 | Vault 書込み（不可逆） | 要 |
 | P1 | R7 モデル拡張・コスト統制 | 外部送信 | 要 |
@@ -381,10 +418,17 @@ frontend `features/media/`（一覧ページ）、`Web UI マップ`。
 推奨着手順: **R2 → R1 → R3**（閲覧できる → 編集できる → 片付けられる）。
 R2 は読取のみでリスクが低く、R1/R3 の確認にも必要な土台になる。
 
+## 決定済み
+
+- **入力画像の与え方**: `media_id` を正本にし、入口（添付 / `source_path`）で自動取り込み（R1）。
+- **保持期間**: 設定を追加せず、親（会話 / Task / Workflow 実行）の既存削除と同時に削除する（R3）。
+- **Task/Workflow 用の新規アップロード UI**: R1 MVP では作らない。R2 のメディアピッカーで
+  既存メディアを選び、必要なら汎用アップロードを後から追加する。
+
 ## 未決事項（実装前に決める）
 
-- ユーザー添付を `generated_media` に取り込むか（`source` 列の追加とテーブル名の妥当性）。
-- 保持期間の既定（無期限 / N 日）と、削除を物理か論理（猶予つき）か。
+- `image_generation.input_dir` を新設するか、Vault と出力ディレクトリの許可ルートだけで足りるか。
+- メディアピッカー/共有アップロードを R2 と同時に入れるか、R1 完了後に分けるか。
 - 画像ファイルを Vault に置く既定にするか（Vault 肥大化とのトレードオフ）。
 - 画像 API 呼び出しの実行ログを既存テーブルに載せるか、専用テーブルにするか。
 - コスト上限の単位（枚数 / 概算金額）と、上限超過時の停止範囲（全体 / エージェント単位）。
