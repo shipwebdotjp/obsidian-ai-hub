@@ -6,10 +6,12 @@ the only client-supplied identifier; the filesystem path and containment check
 come from the ``generated_media`` row plus the configured output root.
 """
 
+import json
 import logging
 import re
+from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse
 
 from obsidian_ai_hub.media import store
@@ -52,6 +54,52 @@ def _media_response(media_id: str, *, download: bool) -> FileResponse:
             "Cache-Control": "private, max-age=3600",
         },
     )
+
+
+@router.get("/media")
+def list_media(
+    media_type: Optional[str] = Query(None, description="Filter by media_type (e.g. image)"),
+    source: Optional[str] = Query(None, description="Filter by source (generated, upload, import)"),
+    session_id: Optional[str] = Query(None, description="Filter by session_id"),
+    task_id: Optional[str] = Query(None, description="Filter by task_id"),
+    workflow_run_id: Optional[str] = Query(None, description="Filter by workflow_run_id"),
+    q: Optional[str] = Query(None, description="Keyword search in prompt, filename, model"),
+    limit: int = Query(50, ge=1, le=100),
+    cursor: Optional[str] = Query(None, description="Keyset pagination cursor"),
+    _=Depends(require_bearer_token),
+):
+    """List generated media items with pagination and filtering."""
+    return store.list_generated_media(
+        media_type=media_type,
+        source=source,
+        session_id=session_id,
+        task_id=task_id,
+        workflow_run_id=workflow_run_id,
+        q=q,
+        limit=limit,
+        cursor=cursor,
+    )
+
+
+@router.get("/media/{media_id}/info")
+def get_media_info(media_id: str, _=Depends(require_bearer_token)):
+    """Get metadata detail for a specific media_id."""
+    row = store.get_generated_media(media_id)
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Media not found"
+        )
+    meta = {}
+    if row.get("metadata_json"):
+        try:
+            meta = json.loads(row["metadata_json"])
+        except Exception:
+            meta = {}
+    res = dict(row)
+    res["metadata"] = meta
+    res["url"] = f"/api/v1/media/{media_id}"
+    res["download_url"] = f"/api/v1/media/{media_id}/download"
+    return res
 
 
 @router.get("/media/{media_id}")

@@ -1,0 +1,24 @@
+INFO:     Started server process [260431]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+INFO:     127.0.0.1:32826 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:32826 - "GET /assets/index-D0KxaPES.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:32838 - "GET /assets/index-DrWK9L2S.css HTTP/1.1" 200 OK
+INFO:     127.0.0.1:32826 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:32826 - "GET /media HTTP/1.1" 200 OK
+INFO:     127.0.0.1:32838 - "GET /api/v1/memories?status=candidate HTTP/1.1" 200 OK
+INFO:     127.0.0.1:32838 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:32838 - "GET /api/v1/memories?status=candidate HTTP/1.1" 200 OK
+INFO:     127.0.0.1:32826 - "GET /api/v1/media?limit=24 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:32838 - "GET /api/v1/hitl/runs?status=pending_user&limit=1 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:32826 - "GET /api/v1/media/16b8315715104df484622b3fb55ffdd7 HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:32838 - "GET /api/v1/media/fc12f1e434cf493fb29b67c11a6b1051 HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:32868 - "GET /api/v1/media/ad8ccaba5639472eb639ca4b405cdd83 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:32850 - "GET /api/v1/media/fad47cc428074cba85e3e3140615e0bc HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:32874 - "GET /api/v1/media/e5f8f0fbbba74811ac10ba40f5c54096 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:32858 - "GET /api/v1/media/6341a4aa0953480faf06d6a026d291e6 HTTP/1.1" 404 Not Found
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [260431]

@@ -503,8 +503,9 @@ def test_generate_title_uses_theme_only(monkeypatch):
         runner.llm_client, "generate_llm_response", lambda **kwargs: "  title  "
     )
 
-    assert runner.generate_research_title("my theme") == "title"
-    assert captured["theme"] == "my theme"
+    long_theme = "my theme " + "x" * 100
+    assert runner.generate_research_title(long_theme) == "title"
+    assert captured["theme"] == long_theme
     assert captured["expanded_prompt"] == ""
     assert captured["context_text"] == ""
 
