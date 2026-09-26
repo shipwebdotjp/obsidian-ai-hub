@@ -107,6 +107,36 @@ def test_tool_writes_file_and_row(media_env):
     assert _media_count() == 2
 
 
+def test_llm_quality_locked_for_context(media_env):
+    tool = agent_registry.TOOL_DEFINITIONS["image_generate"][
+        "get_tool_with_context"
+    ]({"llm_decides_params": True})
+    tool.invoke({"prompt": "x", "quality": "high"})
+    assert media_env.fake.images.calls[-1]["quality"] == (
+        app_config.IMAGE_GENERATION_LLM_QUALITY
+    )
+
+
+def test_quality_override_allowed_without_llm_context(media_env):
+    res = json.loads(
+        agent_registry.TOOL_DEFINITIONS["image_generate"]["get_tool"]().invoke(
+            {"prompt": "x", "quality": "high"}
+        )
+    )
+    assert "error" not in res
+    assert media_env.fake.images.calls[-1]["quality"] == "high"
+
+
+def test_llm_quality_lock_can_be_disabled(media_env, monkeypatch):
+    monkeypatch.setattr(app_config, "IMAGE_GENERATION_LOCK_LLM_QUALITY", False)
+    tool = agent_registry.TOOL_DEFINITIONS["image_generate"][
+        "get_tool_with_context"
+    ]({"llm_decides_params": True})
+    res = json.loads(tool.invoke({"prompt": "x", "quality": "high"}))
+    assert "error" not in res
+    assert media_env.fake.images.calls[-1]["quality"] == "high"
+
+
 def test_provider_failure_leaves_no_artifact(monkeypatch, tmp_path: Path):
     out = tmp_path / "media-fail"
     monkeypatch.setattr(app_config, "IMAGE_GENERATION_OUTPUT_DIR", out)

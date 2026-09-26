@@ -34,6 +34,9 @@ image_generation:
   default_quality: low
   max_count: 4
   max_input_bytes: 8388608
+  # AIエージェント / Task Agent からの呼び出しでは quality を llm_quality に固定する
+  lock_llm_quality: true
+  llm_quality: low
   timeout_seconds: 180
 ```
 
@@ -44,6 +47,7 @@ image_generation:
 - `IMAGE_GENERATION_MODEL` — 使用する画像モデル
 - `IMAGE_GENERATION_DEFAULT_SIZE` / `IMAGE_GENERATION_DEFAULT_QUALITY`
 - `IMAGE_GENERATION_MAX_COUNT` / `IMAGE_GENERATION_MAX_INPUT_BYTES`
+- `IMAGE_GENERATION_LOCK_LLM_QUALITY` / `IMAGE_GENERATION_LLM_QUALITY`
 
 ## ツールの入力
 
@@ -64,6 +68,18 @@ OpenAI 側には `gpt-image-2.5` というエイリアスは存在せず、`gpt-
 `image_generation.model` を設定してください。また `512x512` は最小ピクセル数を下回るため
 受け付けられず、指定できる最小サイズは `1024x1024` です。
 :::
+
+## LLM による品質の上書きを制限する
+
+AIエージェントや Task Agent の会話では、LLM がツールの引数を決めるため、指定しないと
+`quality: high` を選びがちです。`image_generation.lock_llm_quality: true`（既定）のとき、
+**LLM 主導の呼び出しでは `quality` を無視**し、`image_generation.llm_quality`（既定 `low`）
+に固定します。
+
+- 対象: AIエージェントの会話、Task Agent（詳細入力を実行時に LLM が生成するため）。
+- 対象外: ワークフローの Capability Node や、`media_id` などを明示指定する直接呼び出し
+  （人間が設計した明示入力のため制限しません）。
+- LLM に選ばせたい場合は `lock_llm_quality: false` にします。
 
 ## 画像を編集する（`image_edit`）
 

@@ -250,6 +250,76 @@ def test_edit_rejects_non_png_mask(media_env):
     assert len(media_env.fake.images.edit_calls) == 0
 
 
+def test_edit_llm_quality_locked(media_env):
+    source = ingest._ingest_bytes(_png("red"), source="upload")
+    res = json.loads(
+        _edit_tool({"llm_decides_params": True}).invoke(
+            {"prompt": "x", "source_media_id": source["media_id"], "quality": "high"}
+        )
+    )
+    assert "error" not in res
+    assert (
+        media_env.fake.images.edit_calls[-1]["quality"]
+        == app_config.IMAGE_GENERATION_LLM_QUALITY
+    )
+
+
+def test_edit_quality_override_allowed_without_llm_context(media_env):
+    source = ingest._ingest_bytes(_png("red"), source="upload")
+    res = json.loads(
+        _edit_tool().invoke(
+            {"prompt": "x", "source_media_id": source["media_id"], "quality": "high"}
+        )
+    )
+    assert "error" not in res
+    assert media_env.fake.images.edit_calls[-1]["quality"] == "high"
+
+
+def test_task_context_locks_llm_params():
+    from obsidian_ai_hub.tasks.adapters import registry_tools
+
+    task_ctx = registry_tools._task_context({"task_id": "t1"})
+    assert task_ctx["llm_decides_params"] is True
+    workflow_ctx = registry_tools._task_context(
+        {"task_id": "t2", "allow_param_override": True}
+    )
+    assert workflow_ctx["llm_decides_params"] is False
+
+
+def test_task_adapter_locks_quality(media_env):
+    from obsidian_ai_hub.tasks import store as task_store
+    from obsidian_ai_hub.tasks.adapters import get_default_executor
+
+    (media_env.inputs / "lock.png").write_bytes(_png("red"))
+    task = task_store.create_task("edit with high quality")
+    plan = task_store.create_plan(
+        task["task_id"],
+        {
+            "purpose": "edit",
+            "steps": [
+                {
+                    "capability_key": "image_edit",
+                    "title": "edit",
+                    "target": {},
+                    "inputs": {
+                        "prompt": "recolor",
+                        "source_path": "lock.png",
+                        "quality": "high",
+                    },
+                    "side_effects": "external image edit",
+                }
+            ],
+            "completion_criteria": "done",
+        },
+        {"image_edit": "plan_required"},
+    )
+    get_default_executor().execute_step(task, plan, 0, plan["plan"]["steps"][0])
+    assert (
+        media_env.fake.images.edit_calls[-1]["quality"]
+        == app_config.IMAGE_GENERATION_LLM_QUALITY
+    )
+
+
 def test_ingest_dedup_same_bytes(media_env):
     data = _png("red")
     first = ingest._ingest_bytes(data, source="upload")

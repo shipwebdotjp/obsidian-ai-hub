@@ -490,4 +490,23 @@ OpenAI Responses API は `max_output_tokens`、Chat Completions は `max_complet
 - 画像は Vault 外が既定のため Obsidian からは見えない。Vault の重さとのトレードオフであり、`output_dir` の設定で選択できる。
 - 保存（ファイル→DB 行）間にクラッシュすると孤児ファイルが残り得る。ただし行が欠落ファイルを指す状態は作らない（配信は行が正本）。孤児の回収は将来の保守処理に委ねる。
 - `image_generate` は副作用を持つため `READ_ONLY_TOOL_IDS` には含めず、`AUTO_POLICY_TOOL_IDS` にも含めない（既定 `plan_required`）。
-- 画像編集（入力画像つき生成）は本版の対象外。テキストからの生成のみ。
+- 画像編集（入力画像つき生成）は same 決定の改訂として追加した（下記 Amendment と
+  [画像編集の入力契約 ADR](../docs/image-generation/adr/image-edit-input-contract.md) を参照）。
+
+## Amendment (画像編集 `image_edit` と LLM 品質ロック)
+
+Status: Accepted (2026-09-26)。
+
+- `image_edit` を追加する。入力は `media_id` を正本とし、会話添付 / `source_path` /
+  `source_media_id` のいずれか1つを `media/ingest.py` で `generated_media` に正規化してから
+  provider へ送る（詳細は [画像編集の入力契約 ADR](../docs/image-generation/adr/image-edit-input-contract.md)）。
+  既定 policy は `plan_required`。
+- **LLM 品質ロック**: AIエージェント / Task Agent では LLM が `quality` を `high` にしがちで
+  コストが増える。`image_generation.lock_llm_quality`（既定 `true`）のとき、LLM 主導の
+  ツール呼び出し（trusted ctx の `llm_decides_params`）では `quality` を無視し
+  `image_generation.llm_quality`（既定 `low`）に固定する。
+  - 対象: Agent runtime（サブエージェント委譲を含む）と Task Orchestrator。
+  - 対象外: ワークフローの Capability Node（`workflow/runners.py` が
+    `allow_param_override` を渡し、明示入力を保持する）と、ctx なしの直接呼び出し。
+- 代替案（スキーマから `quality` を外す / ツールを分ける）は、Workflow の明示指定を
+  残せない・Capability スキーマが単一正本でなくなるため不採用。実行時に文脈で切り替える。

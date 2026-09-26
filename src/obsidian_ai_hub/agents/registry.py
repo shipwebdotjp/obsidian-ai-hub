@@ -183,7 +183,7 @@ class ImageGenerateInput(BaseModel):
     )
     quality: Optional[Literal["low", "medium", "high", "auto"]] = Field(
         default=None,
-        description="Rendering quality. When omitted, the configured image_generation.default_quality is used.",
+        description="Rendering quality. When omitted, the configured image_generation.default_quality is used. Ignored for LLM-driven calls when image_generation.lock_llm_quality is enabled.",
     )
     output_format: Literal["png", "jpeg", "webp"] = Field(
         default="png", description="Image file format."
@@ -229,7 +229,7 @@ class ImageEditInput(BaseModel):
     )
     quality: Optional[Literal["low", "medium", "high", "auto"]] = Field(
         default=None,
-        description="Rendering quality. When omitted, the configured image_generation.default_quality is used.",
+        description="Rendering quality. When omitted, the configured image_generation.default_quality is used. Ignored for LLM-driven calls when image_generation.lock_llm_quality is enabled.",
     )
     output_format: Literal["png", "jpeg", "webp"] = Field(
         default="png", description="Output image file format."
@@ -998,6 +998,7 @@ def _make_image_generate_tool(trusted_ctx: Optional[Dict[str, Any]] = None) -> B
                 getattr(app_config, "IMAGE_GENERATION_MODEL", "")
                 or "gpt-image-2.5-sunburst"
             )
+            quality = _locked_quality(ctx, quality)
             images = generation.generate_images(
                 prompt,
                 model=model,
@@ -1067,6 +1068,24 @@ def _ctx_str(ctx: Dict[str, Any], key: str) -> Optional[str]:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _locked_quality(ctx: Dict[str, Any], quality: Optional[str]) -> Optional[str]:
+    """Force the configured quality for LLM-driven calls when locked.
+
+    Agent chat and Task Agent let the LLM choose arguments
+    (``llm_decides_params``), so when ``image_generation.lock_llm_quality`` is
+    enabled their requested ``quality`` is ignored and replaced with
+    ``image_generation.llm_quality``. Workflow capability nodes pass explicit
+    inputs (``llm_decides_params`` False) and keep their chosen quality.
+    """
+    if not ctx.get("llm_decides_params"):
+        return quality
+    from obsidian_ai_hub.utils import config as app_config
+
+    if not bool(getattr(app_config, "IMAGE_GENERATION_LOCK_LLM_QUALITY", True)):
+        return quality
+    return str(getattr(app_config, "IMAGE_GENERATION_LLM_QUALITY", "low") or "low")
 
 
 def _make_image_edit_tool(trusted_ctx: Optional[Dict[str, Any]] = None) -> BaseTool:
@@ -1170,6 +1189,7 @@ def _make_image_edit_tool(trusted_ctx: Optional[Dict[str, Any]] = None) -> BaseT
                         "mask dimensions must match the source image dimensions"
                     )
 
+            quality = _locked_quality(ctx, quality)
             images = generation.edit_images(
                 prompt_text,
                 source_bytes,

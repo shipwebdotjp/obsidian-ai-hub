@@ -187,7 +187,8 @@ youtube:
 # Obsidian. Env IMAGE_GENERATION_OUTPUT_DIR / IMAGE_GENERATION_INPUT_DIR /
 # IMAGE_GENERATION_MODEL / IMAGE_GENERATION_DEFAULT_SIZE /
 # IMAGE_GENERATION_DEFAULT_QUALITY / IMAGE_GENERATION_MAX_COUNT /
-# IMAGE_GENERATION_MAX_INPUT_BYTES override these values.
+# IMAGE_GENERATION_MAX_INPUT_BYTES / IMAGE_GENERATION_LOCK_LLM_QUALITY /
+# IMAGE_GENERATION_LLM_QUALITY override these values.
 image_generation:
   output_dir: /path/to/your/obsidian-ai-hub/media
   # Root for resolving relative `source_path` inputs to image_edit. Defaults to
@@ -200,4 +201,9 @@ image_generation:
   default_quality: low
   max_count: 4
   max_input_bytes: 8388608
+  # LLM-driven calls (Agent chat / Task Agent) cannot override `quality`; it is
+  # forced to `llm_quality`. Workflow capability nodes keep their explicit
+  # choice. Set lock_llm_quality: false to let the LLM choose.
+  lock_llm_quality: true
+  llm_quality: low
   timeout_seconds: 180

@@ -73,6 +73,8 @@ _APP_ENV_VARS = [
     "IMAGE_GENERATION_DEFAULT_QUALITY",
     "IMAGE_GENERATION_MAX_COUNT",
     "IMAGE_GENERATION_MAX_INPUT_BYTES",
+    "IMAGE_GENERATION_LOCK_LLM_QUALITY",
+    "IMAGE_GENERATION_LLM_QUALITY",
 ]
 
 if IS_TEST_ENV:
@@ -1090,6 +1092,19 @@ def _positive_int(value, default: int) -> int:
     return parsed if parsed > 0 else default
 
 
+def _bool_value(value, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    text = str(value).strip().lower()
+    if text in ("1", "true", "yes", "on"):
+        return True
+    if text in ("0", "false", "no", "off"):
+        return False
+    return default
+
+
 IMAGE_GENERATION_MAX_COUNT = _positive_int(
     _env_or_config(
         "IMAGE_GENERATION_MAX_COUNT", "image_generation", "max_count", default=4
@@ -1100,6 +1115,30 @@ IMAGE_GENERATION_TIMEOUT_SECONDS = _positive_int(
     _config_value("image_generation", "timeout_seconds", default=180),
     180,
 )
+# When true, LLM-driven calls (Agent chat / Task Agent) cannot choose the
+# `quality` parameter for image_generate / image_edit; it is forced to
+# IMAGE_GENERATION_LLM_QUALITY. Explicit Workflow capability inputs are exempt.
+IMAGE_GENERATION_LOCK_LLM_QUALITY = _bool_value(
+    _env_or_config(
+        "IMAGE_GENERATION_LOCK_LLM_QUALITY",
+        "image_generation",
+        "lock_llm_quality",
+        default=True,
+    ),
+    True,
+)
+IMAGE_GENERATION_LLM_QUALITY = (
+    str(
+        _env_or_config(
+            "IMAGE_GENERATION_LLM_QUALITY",
+            "image_generation",
+            "llm_quality",
+            default="low",
+        )
+    ).strip()
+    or "low"
+)
+
 # Upper bound for an input image ingested for editing (upload / path).
 IMAGE_GENERATION_MAX_INPUT_BYTES = _positive_int(
     _env_or_config(

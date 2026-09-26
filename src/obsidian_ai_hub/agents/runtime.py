@@ -389,6 +389,8 @@ def delegate_subagent(
         "user_content": parent_trusted_ctx.get("user_content"),
         "now": parent_trusted_ctx.get("now"),
         "delegation_ctx": delegation_ctx,
+        # A delegated sub-agent's LLM also chooses arguments: keep the lock.
+        "llm_decides_params": True,
     }
 
     try:
@@ -989,6 +991,10 @@ async def generate_agent_stream(
             "user_message_id": run.get("user_message_id"),
             "user_content": user_content,
             "now": now_jst,
+            # The LLM chooses tool arguments in a chat run, so cost-sensitive
+            # parameters (e.g. image quality) may be locked (see
+            # image_generation.lock_llm_quality).
+            "llm_decides_params": True,
         }
 
         # Pre-discover skills so skill tools bind to the same frozen index

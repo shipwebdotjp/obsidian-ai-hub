@@ -115,7 +115,13 @@ class DefaultNodeRunner:
             "target": target if isinstance(target, dict) else {},
             "inputs": inputs,
         }
-        task = {"task_id": bridge_id, "prompt_text": ""}
+        # Workflow node inputs are explicit (human-designed graph), so they may
+        # override cost-sensitive tool parameters that LLM-driven calls cannot.
+        task = {
+            "task_id": bridge_id,
+            "prompt_text": "",
+            "allow_param_override": True,
+        }
         plan = {"plan": {"purpose": "", "completion_criteria": ""}}
         try:
             result = self._executor.execute_step(task, plan, 0, step)
