@@ -1,4 +1,6 @@
-import { useEffect, useState, type MouseEvent } from "react";
+import { useEffect, useState, type KeyboardEvent, type MouseEvent } from "react";
+import { createPortal } from "react-dom";
+import Modal from "../../components/Modal";
 import { useMediaObjectUrl } from "./useMediaObjectUrl";
 import type { GeneratedMediaRef } from "../../api/types";
 
@@ -12,6 +14,11 @@ interface GeneratedMediaCardProps {
    */
   inline?: boolean;
   variant?: "light" | "dark";
+  /**
+   * Clicking the image opens an enlarged lightbox. Disable where the parent
+   * already handles clicks (e.g. the gallery grid opens its detail modal).
+   */
+  enlargeable?: boolean;
 }
 
 /**
@@ -25,13 +32,16 @@ export function GeneratedMediaCard({
   className,
   inline = false,
   variant = "light",
+  enlargeable = true,
 }: GeneratedMediaCardProps) {
   const { objectUrl, error: fetchError } = useMediaObjectUrl(media.media_id);
   const [decodeError, setDecodeError] = useState<string | null>(null);
+  const [enlarged, setEnlarged] = useState(false);
   const dark = variant === "dark";
 
   useEffect(() => {
     setDecodeError(null);
+    setEnlarged(false);
   }, [media.media_id]);
 
   const error = fetchError ?? decodeError;
@@ -52,6 +62,22 @@ export function GeneratedMediaCard({
     e.stopPropagation();
     e.preventDefault();
     handleDownload();
+  };
+
+  // Opening the lightbox also wins over surrounding links/handlers so the
+  // click never navigates away or opens a second overlay behind the modal.
+  const openEnlarged = () => setEnlarged(true);
+  const onImageClick = (e: MouseEvent<HTMLSpanElement>) => {
+    e.stopPropagation();
+    e.preventDefault();
+    openEnlarged();
+  };
+  const onImageKeyDown = (e: KeyboardEvent<HTMLSpanElement>) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.stopPropagation();
+      e.preventDefault();
+      openEnlarged();
+    }
   };
 
   const isImage =
@@ -79,7 +105,7 @@ export function GeneratedMediaCard({
         </BodyTag>
       );
     }
-    return (
+    const image = (
       <img
         src={objectUrl}
         onError={() => setDecodeError("メディアの読み込みに失敗しました")}
@@ -88,6 +114,23 @@ export function GeneratedMediaCard({
           dark ? "border-slate-600" : "border-slate-200"
         }`}
       />
+    );
+    if (!enlargeable) return image;
+    // A span (not a button) so the card stays valid inside a Markdown link.
+    return (
+      <span
+        role="button"
+        tabIndex={0}
+        aria-label={`${alt || media.filename || "画像"}を拡大表示`}
+        aria-haspopup="dialog"
+        aria-expanded={enlarged}
+        data-testid="generated-media-enlarge"
+        onClick={onImageClick}
+        onKeyDown={onImageKeyDown}
+        className="inline-block cursor-zoom-in"
+      >
+        {image}
+      </span>
     );
   }
 
@@ -99,6 +142,64 @@ export function GeneratedMediaCard({
   const RootTag = inline ? "span" : "figure";
   const CaptionTag = inline ? "span" : "figcaption";
   const StatusTag = inline ? "span" : "div";
+
+  // Shared by the card caption and the lightbox caption so the download
+  // action and caption text stay in sync.
+  function renderCaptionActions(
+    captionClassName: string,
+    captionText?: string,
+  ) {
+    return (
+      <>
+        <button
+          type="button"
+          onClick={onDownloadClick}
+          disabled={!objectUrl}
+          className="cursor-pointer rounded bg-blue-600 px-2 py-0.5 text-xs text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          ダウンロード
+        </button>
+        {captionText && (
+          <span className={captionClassName}>{captionText}</span>
+        )}
+      </>
+    );
+  }
+
+  // Portaled to document.body so the dialog never nests inside the card's
+  // inline `<span>` (or a Markdown link). The wrapper stops propagation so
+  // overlay clicks cannot bubble through the React tree to card ancestors.
+  const lightboxTitleId = `generated-media-lightbox-title-${media.media_id}`;
+  const lightbox =
+    enlarged && objectUrl
+      ? createPortal(
+          <div onClick={(e) => e.stopPropagation()}>
+            <Modal
+              onClose={() => setEnlarged(false)}
+              labelledBy={lightboxTitleId}
+              cardClassName="max-h-[90vh] max-w-[90vw] overflow-auto rounded-xl bg-slate-900 p-4 shadow-xl"
+            >
+              <h2 id={lightboxTitleId} className="sr-only">
+                {media.filename || alt || "生成画像"}
+              </h2>
+              <img
+                src={objectUrl}
+                alt={alt || media.filename || "生成画像"}
+                data-testid="generated-media-lightbox-image"
+                className="mx-auto max-h-[75vh] w-auto max-w-full cursor-zoom-out rounded object-contain"
+                onClick={() => setEnlarged(false)}
+              />
+              <div className="mt-2 flex flex-wrap items-center justify-center gap-2 text-[11px]">
+                {renderCaptionActions(
+                  "break-all text-slate-300",
+                  media.filename || alt,
+                )}
+              </div>
+            </Modal>
+          </div>,
+          document.body,
+        )
+      : null;
 
   return (
     <RootTag
@@ -112,20 +213,11 @@ export function GeneratedMediaCard({
         <>
           {renderBody(inline)}
           <CaptionTag className="mt-1 flex flex-wrap items-center gap-2 text-[11px]">
-            <button
-              type="button"
-              onClick={onDownloadClick}
-              disabled={!objectUrl}
-              className="cursor-pointer rounded bg-blue-600 px-2 py-0.5 text-xs text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              ダウンロード
-            </button>
-            {media.filename && (
-              <span className={filenameClass}>{media.filename}</span>
-            )}
+            {renderCaptionActions(filenameClass, media.filename)}
           </CaptionTag>
         </>
       )}
+      {lightbox}
     </RootTag>
   );
 }

@@ -266,6 +266,7 @@ export default function MediaGalleryPage() {
                       filename: item.filename,
                     }}
                     className="flex h-full w-full items-center justify-center"
+                    enlargeable={false}
                   />
                 </div>
                 <div className="p-2.5">

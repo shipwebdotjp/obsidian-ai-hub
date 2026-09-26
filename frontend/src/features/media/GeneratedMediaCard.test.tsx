@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GeneratedMediaCard } from "./GeneratedMediaCard";
 import type { GeneratedMediaRef } from "../../api/types";
@@ -93,5 +93,69 @@ describe("GeneratedMediaCard", () => {
       const card = screen.getByTestId("generated-media-card");
       expect(card.tagName).toBe("FIGURE");
     });
+  });
+
+  it("opens a lightbox on image click and closes on Escape", async () => {
+    getMediaBlob.mockResolvedValue(new Blob(["x"], { type: "image/png" }));
+    render(<GeneratedMediaCard media={media} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("generated-media-enlarge")).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTestId("generated-media-enlarge"));
+    const lightboxImage = await screen.findByTestId(
+      "generated-media-lightbox-image",
+    );
+    expect(lightboxImage).toHaveAttribute("src", "blob:media-abc123");
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() => {
+      expect(
+        screen.queryByTestId("generated-media-lightbox-image"),
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  it("closes the lightbox on overlay click", async () => {
+    getMediaBlob.mockResolvedValue(new Blob(["x"], { type: "image/png" }));
+    render(<GeneratedMediaCard media={media} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("generated-media-enlarge")).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTestId("generated-media-enlarge"));
+    await screen.findByTestId("generated-media-lightbox-image");
+
+    fireEvent.click(screen.getByRole("dialog"));
+    await waitFor(() => {
+      expect(
+        screen.queryByTestId("generated-media-lightbox-image"),
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  it("opens the lightbox with the keyboard", async () => {
+    getMediaBlob.mockResolvedValue(new Blob(["x"], { type: "image/png" }));
+    render(<GeneratedMediaCard media={media} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("generated-media-enlarge")).toBeInTheDocument();
+    });
+    fireEvent.keyDown(screen.getByTestId("generated-media-enlarge"), {
+      key: "Enter",
+    });
+    await screen.findByTestId("generated-media-lightbox-image");
+  });
+
+  it("does not enlarge when enlargeable is false", async () => {
+    getMediaBlob.mockResolvedValue(new Blob(["x"], { type: "image/png" }));
+    render(<GeneratedMediaCard media={media} enlargeable={false} />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("img")).toBeInTheDocument();
+    });
+    expect(
+      screen.queryByTestId("generated-media-enlarge"),
+    ).not.toBeInTheDocument();
   });
 });

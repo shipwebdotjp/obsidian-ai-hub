@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import MarkdownPreview from "./MarkdownPreview";
 
@@ -154,5 +154,19 @@ describe("MarkdownPreview images", () => {
   it("does not fetch media for non-media sources", () => {
     render(<MarkdownPreview content="![ext](https://example.com/a.png)" />);
     expect(getMediaBlob).not.toHaveBeenCalled();
+  });
+
+  it("opens a lightbox when the inline image is clicked", async () => {
+    getMediaBlob.mockResolvedValue(new Blob(["x"], { type: "image/png" }));
+    render(<MarkdownPreview content="![generated](/api/v1/media/abc123)" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("generated-media-enlarge")).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTestId("generated-media-enlarge"));
+    const lightboxImage = await screen.findByTestId(
+      "generated-media-lightbox-image",
+    );
+    expect(lightboxImage).toHaveAttribute("src", "blob:media-abc123");
   });
 });

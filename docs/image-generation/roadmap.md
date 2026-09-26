@@ -252,6 +252,9 @@ Workflow 実行単位の削除は R4（`workflow_run_id` の記録）完了ま�
   `![alt](/api/v1/media/<id>)`（`/download` 付きも可）を `GeneratedMediaCard`
  （`inline`、共有フック `useMediaObjectUrl` で Blob 取得）で描画する。
   light/dark の両 variant に対応（`variant` prop をカードへ伝播）。
+- カード画像のクリックで拡大モーダル（`components/Modal.tsx` を流用。
+  ダウンロードボタンとファイル名付き）を開く。ギャラリーのグリッドは既存の
+  詳細モーダルを優先し `enlargeable={false}`、詳細モーダル内は拡大可。
 - `media_id` 以外の src は `data:` / `javascript:` / `vbscript:` / `file:` のみ遮断し、
   http(s)・相対パスは通常の `<img>` として表示する。
 - アシスタント本文に埋め込んだ画像と同じ `media_id` のツール結果カードは
