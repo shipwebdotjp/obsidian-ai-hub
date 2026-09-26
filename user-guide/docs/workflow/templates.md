@@ -52,7 +52,7 @@ package に含まれるのは `format` / `version` / `name` / `description` / `i
 Scheduler 設定は含まれません。Node / Edge の ID は package 内だけで通用し、import 時に
 すべて新しい ID へ割り当て直されます。
 
-import 後は現在の環境の Capability / Agent で再検証されます。未知の Capability / Agent などが
+インポート後は現在の環境の Capability / Agent で再検証されます。未知の Capability / Agent などが
 あると、下書きと検証エラーが表示されるので、エディタで修正してから公開してください。
 **import だけでは公開・実行は行われません。**
 
