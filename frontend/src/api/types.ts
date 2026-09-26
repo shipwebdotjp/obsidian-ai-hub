@@ -948,6 +948,8 @@ export interface GeneratedMediaRef {
   width?: number | null;
   height?: number | null;
   filename?: string;
+  url?: string;
+  download_url?: string;
 }
 
 export type AgentRunStatus =

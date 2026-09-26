@@ -182,6 +182,75 @@ export function getMediaBlob(mediaId: string): Promise<Blob> {
   return requestBlob(`/api/v1/media/${encodeURIComponent(mediaId)}`);
 }
 
+export function listMedia(params: {
+  media_type?: string;
+  source?: string;
+  session_id?: string;
+  task_id?: string;
+  workflow_run_id?: string;
+  q?: string;
+  limit?: number;
+  cursor?: string;
+}): Promise<{
+  items: Array<{
+    media_id: string;
+    media_type: string;
+    source: string;
+    relative_path: string;
+    filename: string;
+    mime_type: string;
+    width?: number;
+    height?: number;
+    byte_size?: number;
+    provider?: string;
+    model?: string;
+    prompt?: string;
+    metadata_json?: string;
+    metadata?: Record<string, unknown>;
+    session_id?: string;
+    run_id?: string;
+    task_id?: string;
+    workflow_run_id?: string;
+    created_at: string;
+    url: string;
+    download_url: string;
+  }>;
+  next_cursor: string | null;
+  has_more: boolean;
+}> {
+  return request(withQuery("/api/v1/media", params));
+}
+
+export function getMediaInfo(mediaId: string): Promise<{
+  media_id: string;
+  media_type: string;
+  source: string;
+  relative_path: string;
+  filename: string;
+  mime_type: string;
+  width?: number;
+  height?: number;
+  byte_size?: number;
+  provider?: string;
+  model?: string;
+  prompt?: string;
+  metadata_json?: string;
+  metadata?: Record<string, unknown>;
+  session_id?: string;
+  run_id?: string;
+  task_id?: string;
+  workflow_run_id?: string;
+  created_at: string;
+  url: string;
+  download_url: string;
+}> {
+  return request(`/api/v1/media/${encodeURIComponent(mediaId)}/info`);
+}
+
+export function deleteMediaItem(mediaId: string): Promise<void> {
+  return apiDelete(`/api/v1/media/${encodeURIComponent(mediaId)}`);
+}
+
 export function listMemories(params: {
   status?: string;
   kind?: string;

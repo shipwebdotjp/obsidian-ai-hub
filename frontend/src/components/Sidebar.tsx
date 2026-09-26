@@ -107,6 +107,9 @@ export default function Sidebar({ open, onClose, id }: SidebarProps) {
         <NavLink to={ROUTES.WORKFLOWS} className={linkClass} onClick={onClose}>
           ワークフロー
         </NavLink>
+        <NavLink to={ROUTES.MEDIA} className={linkClass} onClick={onClose}>
+          メディア
+        </NavLink>
         <div>
           <button
             type="button"

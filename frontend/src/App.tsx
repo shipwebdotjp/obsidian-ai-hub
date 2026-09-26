@@ -22,6 +22,7 @@ import ProjectsPage from "./features/projects/ProjectsPage";
 import JobPage from "./features/jobs/JobPage";
 import ExecutionLogPage from "./features/execution-logs/ExecutionLogPage";
 import JobStatePage from "./features/execution-logs/JobStatePage";
+import MediaGalleryPage from "./features/media/MediaGalleryPage";
 import PlannerPage from "./features/planner/PlannerPage";
 import SettingsPage from "./features/settings/SettingsPage";
 import {
@@ -186,6 +187,7 @@ export default function App() {
           <Route path={ROUTES.HITL} element={<HitlPage />} />
           <Route path={ROUTES.TASK_AGENT} element={<TaskAgentPage />} />
           <Route path={ROUTES.WORKFLOWS} element={<WorkflowsPage />} />
+          <Route path={ROUTES.MEDIA} element={<MediaGalleryPage />} />
           <Route path={ROUTES.WORKFLOW_EDIT} element={<WorkflowEditorPage />} />
           <Route path={ROUTES.WORKFLOW_RUN} element={<WorkflowRunPage />} />
           <Route path={ROUTES.WORKFLOW_DETAIL} element={<WorkflowDetailPage />} />

@@ -20,6 +20,7 @@ export const ROUTES = {
   WORKFLOW_DETAIL: "/workflows/:workflowId",
   WORKFLOW_EDIT: "/workflows/revisions/:revisionId/edit",
   WORKFLOW_RUN: "/workflows/runs/:runId",
+  MEDIA: "/media",
   PLANNER: "/planner",
   SETTINGS: "/settings",
 } as const;

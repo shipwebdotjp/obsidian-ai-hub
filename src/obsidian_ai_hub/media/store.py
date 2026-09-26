@@ -232,6 +232,97 @@ def save_generated_image(
     return media_reference(row)
 
 
+def list_generated_media(
+    *,
+    media_type: str | None = None,
+    source: str | None = None,
+    session_id: str | None = None,
+    task_id: str | None = None,
+    workflow_run_id: str | None = None,
+    q: str | None = None,
+    limit: int = 50,
+    cursor: str | None = None,
+) -> dict[str, Any]:
+    """List ``generated_media`` rows matching filters with keyset pagination.
+
+    Ordering is ``created_at DESC, media_id DESC``.
+    *cursor* format is ``"<created_at>|<media_id>"``.
+    Returns dict with keys ``"items"``, ``"next_cursor"``, and ``"has_more"``.
+    """
+    limit = max(1, min(int(limit), 100))
+    conditions: list[str] = []
+    params: list[Any] = []
+
+    if media_type and media_type.strip():
+        conditions.append("media_type = ?")
+        params.append(media_type.strip())
+    if source and source.strip():
+        conditions.append("source = ?")
+        params.append(source.strip())
+    if session_id and session_id.strip():
+        conditions.append("session_id = ?")
+        params.append(session_id.strip())
+    if task_id and task_id.strip():
+        conditions.append("task_id = ?")
+        params.append(task_id.strip())
+    if workflow_run_id and workflow_run_id.strip():
+        conditions.append("workflow_run_id = ?")
+        params.append(workflow_run_id.strip())
+
+    if q and q.strip():
+        search_pattern = f"%{q.strip()}%"
+        conditions.append("(prompt LIKE ? OR filename LIKE ? OR model LIKE ?)")
+        params.extend([search_pattern, search_pattern, search_pattern])
+
+    if cursor and "|" in cursor:
+        cursor_created_at, cursor_media_id = cursor.split("|", 1)
+        if cursor_created_at and cursor_media_id:
+            conditions.append("(created_at < ? OR (created_at = ? AND media_id < ?))")
+            params.extend([cursor_created_at, cursor_created_at, cursor_media_id])
+
+    where_clause = f" WHERE {' AND '.join(conditions)}" if conditions else ""
+    sql = (
+        f"SELECT * FROM generated_media{where_clause}"
+        f" ORDER BY created_at DESC, media_id DESC LIMIT ?"
+    )
+    params.append(limit + 1)
+
+    conn = get_db_connection()
+    try:
+        cur = conn.execute(sql, params)
+        rows = [dict(r) for r in cur.fetchall()]
+    finally:
+        conn.close()
+
+    has_more = len(rows) > limit
+    items = rows[:limit]
+    next_cursor: str | None = None
+    if has_more and items:
+        last_item = items[-1]
+        next_cursor = f"{last_item['created_at']}|{last_item['media_id']}"
+
+    # Format items to include URLs and metadata dict
+    formatted_items: list[dict[str, Any]] = []
+    for item in items:
+        meta = {}
+        if item.get("metadata_json"):
+            try:
+                meta = json.loads(item["metadata_json"])
+            except Exception:
+                meta = {}
+        item_dict = dict(item)
+        item_dict["metadata"] = meta
+        item_dict["url"] = f"/api/v1/media/{item['media_id']}"
+        item_dict["download_url"] = f"/api/v1/media/{item['media_id']}/download"
+        formatted_items.append(item_dict)
+
+    return {
+        "items": formatted_items,
+        "next_cursor": next_cursor,
+        "has_more": has_more,
+    }
+
+
 def get_generated_media(media_id: str) -> dict[str, Any] | None:
     """Return the ``generated_media`` row for *media_id*, or ``None``."""
     if not isinstance(media_id, str) or not media_id.strip():
