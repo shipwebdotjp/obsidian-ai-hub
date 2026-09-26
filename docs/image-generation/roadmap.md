@@ -238,6 +238,8 @@ Workflow 実行単位の削除は R4（`workflow_run_id` の記録）完了ま�
 
 ## R5. アシスタント応答への画像埋め込みと Markdown 連携 — P2
 
+**状態: 実装済み（2026-09-26）。** 以下は設計の記録として残す。
+
 **目的**: 生成画像を会話本文・Markdown ノートへ自然に埋め込めるようにする。
 
 **現状/制約**
@@ -245,12 +247,27 @@ Workflow 実行単位の削除は R4（`workflow_run_id` の記録）完了ま�
   現行 UI は認証付き fetch + オブジェクト URL でカード表示する。
 - `components/MarkdownPreview.tsx` は `img` レンダラを持たず、`data:` URL は既定で除去される。
 
-**設計案**
-- `MarkdownPreview` に認証対応の `img` コンポーネントを追加し、
-  `![alt](/api/v1/media/<id>)` を `GeneratedMediaCard` 相当で描画する
-  （共有フックで Blob を取得。全 Markdown 利用箇所に影響する点に注意）。
-- アシスタントの最終応答に画像カードが既出でも、本文参照と二重表示にならないよう調整。
+**設計案（実装済みの範囲）**
+- `MarkdownPreview` に認証対応の `img` レンダラを追加し、
+  `![alt](/api/v1/media/<id>)`（`/download` 付きも可）を `GeneratedMediaCard`
+ （`inline`、共有フック `useMediaObjectUrl` で Blob 取得）で描画する。
+  light/dark の両 variant に対応（`variant` prop をカードへ伝播）。
+- `media_id` 以外の src は `data:` / `javascript:` / `vbscript:` / `file:` のみ遮断し、
+  http(s)・相対パスは通常の `<img>` として表示する。
+- アシスタント本文に埋め込んだ画像と同じ `media_id` のツール結果カードは
+  `GeneratedMediaList(excludeMediaIds)` で抑止する（本文優先。確定応答と
+  ストリーミングの両方）。Task/Workflow 面のカードは従来どおり。
+- LLM への埋め込み指示（ツール説明・システムプロンプト）は追加していない。
+  ツール結果の `url` から自力で Markdown を組み立てる前提。
 - Vault ノートへ画像を置く場合は Vault 内相対パスで `![[...]]` / Markdown 埋め込み（R6）。
+
+**影響範囲（実績）**: `components/MarkdownPreview.tsx`, `features/media/useMediaObjectUrl.ts`（新）,
+`features/media/GeneratedMediaCard.tsx`（`inline` / `variant`）, `features/media/generatedMedia.ts`
+（`mediaIdFromUrl` / `extractMediaIdsFromMarkdown`）, `features/media/GeneratedMediaList.tsx`
+（`excludeMediaIds`）, `features/agents/AgentMessageList.tsx`（本文優先の抑止）,
+user guide（`image-generation.md` / `agents.md`）。
+
+**リスク/不可逆性**: なし（表示）。**ゲート: 不要**。共有 Markdown への影響は回帰確認必須。
 
 **影響範囲**: `components/MarkdownPreview.tsx`, `features/media/*`, Agents/Coding/Research の表示。
 

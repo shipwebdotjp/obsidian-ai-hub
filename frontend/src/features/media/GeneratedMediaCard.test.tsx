@@ -70,4 +70,28 @@ describe("GeneratedMediaCard", () => {
     expect(screen.queryByRole("img")).not.toBeInTheDocument();
     expect(createObjectURL).not.toHaveBeenCalled();
   });
+
+  it("renders a span root in inline mode", async () => {
+    getMediaBlob.mockResolvedValue(new Blob(["x"], { type: "image/png" }));
+    render(<GeneratedMediaCard media={media} inline />);
+
+    await waitFor(() => {
+      const card = screen.getByTestId("generated-media-card");
+      expect(card.tagName).toBe("SPAN");
+    });
+    await waitFor(() => {
+      const img = screen.getByRole("img");
+      expect(img).toHaveAttribute("src", "blob:media-abc123");
+    });
+  });
+
+  it("renders a figure root by default", async () => {
+    getMediaBlob.mockResolvedValue(new Blob(["x"], { type: "image/png" }));
+    render(<GeneratedMediaCard media={media} />);
+
+    await waitFor(() => {
+      const card = screen.getByTestId("generated-media-card");
+      expect(card.tagName).toBe("FIGURE");
+    });
+  });
 });

@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { extractGeneratedMedia } from "./generatedMedia";
+import {
+  extractGeneratedMedia,
+  extractMediaIdsFromMarkdown,
+  mediaIdFromUrl,
+} from "./generatedMedia";
 
 const ref = {
   media_type: "image",
@@ -58,5 +62,71 @@ describe("extractGeneratedMedia", () => {
     const cyclic: Record<string, unknown> = {};
     cyclic.self = cyclic;
     expect(extractGeneratedMedia(cyclic)).toEqual([]);
+  });
+});
+
+describe("mediaIdFromUrl", () => {
+  it("extracts the id from media delivery URLs", () => {
+    expect(mediaIdFromUrl("/api/v1/media/abc123")).toBe("abc123");
+    expect(mediaIdFromUrl("/api/v1/media/abc123/download")).toBe("abc123");
+  });
+
+  it("returns null for other sources", () => {
+    expect(mediaIdFromUrl("https://example.com/a.png")).toBeNull();
+    expect(mediaIdFromUrl("relative/image.png")).toBeNull();
+    expect(mediaIdFromUrl("data:image/png;base64,AAA")).toBeNull();
+    expect(mediaIdFromUrl("javascript:alert(1)")).toBeNull();
+    expect(mediaIdFromUrl("/api/v1/media/")).toBeNull();
+    expect(mediaIdFromUrl(undefined)).toBeNull();
+    expect(mediaIdFromUrl(null)).toBeNull();
+  });
+});
+
+describe("extractMediaIdsFromMarkdown", () => {
+  it("collects ids from Markdown image syntax", () => {
+    const ids = extractMediaIdsFromMarkdown(
+      'one ![a](/api/v1/media/abc123) two ![b](/api/v1/media/def456/download) three ![c](/api/v1/media/ghi789 "title")',
+    );
+    expect(ids).toEqual(new Set(["abc123", "def456", "ghi789"]));
+  });
+
+  it("ignores non-image references so cards are not wrongly suppressed", () => {
+    expect(
+      extractMediaIdsFromMarkdown("[dl](/api/v1/media/abc123)"),
+    ).toEqual(new Set());
+    expect(
+      extractMediaIdsFromMarkdown("![a](https://host/api/v1/media/abc123)"),
+    ).toEqual(new Set());
+    expect(
+      extractMediaIdsFromMarkdown("![a](/api/v1/media/abc123?v=1)"),
+    ).toEqual(new Set());
+    expect(
+      extractMediaIdsFromMarkdown("see /api/v1/media/abc123 in prose"),
+    ).toEqual(new Set());
+  });
+
+  it("collects ids from angle-bracket destinations", () => {
+    expect(
+      extractMediaIdsFromMarkdown("![a](</api/v1/media/abc123>)"),
+    ).toEqual(new Set(["abc123"]));
+  });
+
+  it("ignores image syntax inside code blocks and inline code", () => {
+    expect(
+      extractMediaIdsFromMarkdown("```\n![a](/api/v1/media/abc123)\n```"),
+    ).toEqual(new Set());
+    expect(
+      extractMediaIdsFromMarkdown("~~~\n![a](/api/v1/media/abc123)\n~~~"),
+    ).toEqual(new Set());
+    expect(
+      extractMediaIdsFromMarkdown("see `![a](/api/v1/media/abc123)` here"),
+    ).toEqual(new Set());
+  });
+
+  it("ignores other URLs and non-string input", () => {
+    expect(
+      extractMediaIdsFromMarkdown("![x](https://example.com/a.png)"),
+    ).toEqual(new Set());
+    expect(extractMediaIdsFromMarkdown(null)).toEqual(new Set());
   });
 });

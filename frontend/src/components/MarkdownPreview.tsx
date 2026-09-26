@@ -1,5 +1,8 @@
+import type { ComponentProps } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { GeneratedMediaCard } from "../features/media/GeneratedMediaCard";
+import { mediaIdFromUrl } from "../features/media/generatedMedia";
 
 // Allow only http(s) and protocol-relative/in-app links; block javascript:, data:,
 // vbscript:, file: etc. so LLM/tool-generated Markdown cannot execute scripts.
@@ -12,6 +15,56 @@ function safeHref(href: unknown): string | undefined {
   if (/^vbscript:/i.test(trimmed)) return undefined;
   if (/^file:/i.test(trimmed)) return undefined;
   return trimmed;
+}
+
+/**
+ * Renders a Markdown image. In-app media delivery URLs
+ * (`/api/v1/media/{id}`) are fetched with the Bearer token and shown via the
+ * shared media card; any other source keeps the default `<img>` behavior
+ * except blocked (unsafe-scheme) sources, which degrade to alt text.
+ */
+function MarkdownMediaImage({
+  src,
+  alt,
+  title,
+  variant,
+}: {
+  src?: string;
+  alt?: string;
+  title?: string;
+  variant: "light" | "dark";
+}) {
+  const mediaId = mediaIdFromUrl(src);
+  if (mediaId) {
+    // In-app cards intentionally ignore the Markdown title (the card shows
+    // its own download UI); titles are forwarded only to plain <img> below.
+    return (
+      <GeneratedMediaCard
+        media={{ media_id: mediaId, media_type: "image", mime_type: "image/png" }}
+        alt={alt}
+        className="my-2 block max-w-full"
+        inline
+        variant={variant}
+      />
+    );
+  }
+  const safe = safeHref(src);
+  if (safe === undefined) {
+    return alt ? (
+      <span className={variant === "dark" ? "text-sm text-slate-400" : "text-sm text-slate-500"}>
+        {alt}
+      </span>
+    ) : null;
+  }
+  return (
+    <img src={safe} alt={alt ?? ""} title={title} loading="lazy" className="max-w-full rounded" />
+  );
+}
+
+function imgRenderer(variant: "light" | "dark") {
+  return ({ src, alt, title }: ComponentProps<"img">) => (
+    <MarkdownMediaImage src={src} alt={alt} title={title} variant={variant} />
+  );
 }
 
 const lightComponents = {
@@ -72,6 +125,7 @@ const lightComponents = {
       </a>
     );
   },
+  img: imgRenderer("light"),
 };
 
 const darkComponents = {
@@ -132,6 +186,7 @@ const darkComponents = {
       </a>
     );
   },
+  img: imgRenderer("dark"),
 };
 
 export interface MarkdownPreviewProps {

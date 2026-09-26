@@ -19,6 +19,7 @@ import {
 } from "../../components/InConversationQuestionCard";
 import { AnsweredRequirementCard } from "../../components/AnsweredRequirementCard";
 import { GeneratedMediaList } from "../media/GeneratedMediaList";
+import { extractMediaIdsFromMarkdown } from "../media/generatedMedia";
 import { formatDateTime } from "../../utils/date";
 import type { QueuedAgentMessage } from "./agentSendQueue";
 import {
@@ -112,6 +113,22 @@ export function AgentMessageList({
   const runsByMessageId = useMemo(() => buildRunsByMessageId(runs), [runs]);
   const runsByUserMessageId = useMemo(() => buildRunsByUserMessageId(runs), [runs]);
 
+  // Media ids already embedded in each assistant body. Tool-result cards for
+  // the same ids are suppressed so the artifact shows once, inline.
+  const bodyMediaIdsByMessageId = useMemo(() => {
+    const byId = new Map<string, Set<string>>();
+    for (const m of messages) {
+      if (m.role !== "assistant" || !m.content) continue;
+      const ids = extractMediaIdsFromMarkdown(m.content);
+      if (ids.size > 0) byId.set(m.message_id, ids);
+    }
+    return byId;
+  }, [messages]);
+  const streamingBodyMediaIds = useMemo(
+    () => extractMediaIdsFromMarkdown(streamingText),
+    [streamingText],
+  );
+
   return (
     <div className="flex-1 overflow-y-auto p-4 space-y-4">
       {messages.length === 0 && !isStreaming ? (
@@ -126,6 +143,9 @@ export function AgentMessageList({
               : null;
           const toolCalls: AgentToolCall[] = relatedRun?.tool_calls || [];
           const isAssistant = m.role === "assistant";
+          const bodyMediaIds = isAssistant
+            ? bodyMediaIdsByMessageId.get(m.message_id)
+            : undefined;
           const userRounds = m.role === "user"
             ? answerHistory.filter((h) => h.user_message_id === m.message_id)
             : [];
@@ -193,7 +213,7 @@ export function AgentMessageList({
                               {tc.result || "-"}
                             </pre>
                           </div>
-                          <GeneratedMediaList value={tc.result} />
+                          <GeneratedMediaList value={tc.result} excludeMediaIds={bodyMediaIds} />
                           {tc.error && (
                             <div className="text-[11px] text-rose-700 bg-rose-50 border border-rose-200 rounded px-2 py-1 break-all">
                               {tc.error}
@@ -384,7 +404,7 @@ export function AgentMessageList({
                                 </div>
                               )}
                               {tc.status !== "running" && (
-                                <GeneratedMediaList value={tc.result} />
+                                <GeneratedMediaList value={tc.result} excludeMediaIds={streamingBodyMediaIds} />
                               )}
                             </>
                           )}

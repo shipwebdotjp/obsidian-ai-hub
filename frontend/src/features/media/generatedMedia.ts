@@ -11,6 +11,48 @@ import type { GeneratedMediaRef } from "../../api/types";
 // base64 string that happens to start with "{") is never parsed.
 const MAX_JSON_SCAN_CHARS = 20000;
 
+// Matches the authenticated media delivery paths served by the backend:
+// `/api/v1/media/{media_id}` and `/api/v1/media/{media_id}/download`.
+const MEDIA_URL_RE = /^\/api\/v1\/media\/([A-Za-z0-9_-]+)(?:\/download)?$/;
+// Finds Markdown image sources so the dedup scan only collects ids that
+// `MarkdownPreview` actually renders as media cards (absolute URLs, query
+// strings, plain links, and prose mentions are intentionally excluded).
+const MARKDOWN_IMAGE_SRC_RE = /!\[[^\]]*\]\(\s*([^)\s]+)/g;
+
+/**
+ * Extracts the media id when `src` is an in-app media delivery URL, or
+ * returns null for any other source (external, relative, unsafe scheme).
+ */
+export function mediaIdFromUrl(src: unknown): string | null {
+  if (typeof src !== "string") return null;
+  const match = MEDIA_URL_RE.exec(src.trim());
+  return match ? match[1] : null;
+}
+
+/**
+ * Collects the media ids referenced as in-app delivery URLs inside Markdown
+ * image syntax. Used to prefer the inline body rendering over duplicate
+ * tool-result cards for the same artifact.
+ */
+export function extractMediaIdsFromMarkdown(text: unknown): Set<string> {
+  const ids = new Set<string>();
+  if (typeof text !== "string") return ids;
+  // Image syntax inside code renders as literal text (no media card), so code
+  // is stripped first to avoid suppressing a card that has no inline twin.
+  // Tilde fences and indented/reference-style constructs are not covered;
+  // a missed id degrades to a duplicate card, never a vanished artifact.
+  const prose = text
+    .replace(/```[\s\S]*?(?:```|$)/g, "")
+    .replace(/~~~[\s\S]*?(?:~~~|$)/g, "")
+    .replace(/`[^`\n]+`/g, "");
+  for (const match of prose.matchAll(MARKDOWN_IMAGE_SRC_RE)) {
+    // Allow CommonMark angle-bracket destinations: ![a](</api/v1/media/x>).
+    const mediaId = mediaIdFromUrl(match[1].replace(/^<|>$/g, ""));
+    if (mediaId) ids.add(mediaId);
+  }
+  return ids;
+}
+
 function isMediaRef(value: unknown): value is Record<string, unknown> {
   if (value === null || typeof value !== "object") return false;
   const v = value as Record<string, unknown>;
