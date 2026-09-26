@@ -1,8 +1,9 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import { Link } from "react-router-dom";
 import { listMedia, getMediaInfo, deleteMediaItem } from "../../api/client";
 import { GeneratedMediaCard } from "./GeneratedMediaCard";
 import { taskAgentDetailPath, workflowRunPath, ROUTES } from "../../constants/routes";
+import { formatYmdWithDow, formatDateTime } from "../../utils/date";
 
 interface MediaItem {
   media_id: string;
@@ -35,6 +36,7 @@ export default function MediaGalleryPage() {
   const [error, setError] = useState<string | null>(null);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(false);
+  const requestIdRef = useRef(0);
 
   // Filters
   const [searchQuery, setSearchQuery] = useState("");
@@ -60,6 +62,7 @@ export default function MediaGalleryPage() {
 
   const fetchMedia = useCallback(
     async (isLoadMore = false, cursorToUse?: string | null) => {
+      const currentRequestId = ++requestIdRef.current;
       if (isLoadMore) {
         setLoadingMore(true);
       } else {
@@ -76,6 +79,10 @@ export default function MediaGalleryPage() {
           cursor: isLoadMore ? cursorToUse ?? undefined : undefined,
         });
 
+        if (requestIdRef.current !== currentRequestId) {
+          return;
+        }
+
         if (isLoadMore) {
           setItems((prev) => [...prev, ...res.items]);
         } else {
@@ -84,10 +91,14 @@ export default function MediaGalleryPage() {
         setNextCursor(res.next_cursor);
         setHasMore(res.has_more);
       } catch (err: any) {
-        setError(err?.message || "メディア一覧の取得に失敗しました");
+        if (requestIdRef.current === currentRequestId) {
+          setError(err?.message || "メディア一覧の取得に失敗しました");
+        }
       } finally {
-        setLoading(false);
-        setLoadingMore(false);
+        if (requestIdRef.current === currentRequestId) {
+          setLoading(false);
+          setLoadingMore(false);
+        }
       }
     },
     [debouncedSearch, sourceFilter, typeFilter]
@@ -263,7 +274,7 @@ export default function MediaGalleryPage() {
                       {formatSourceLabel(item.source)}
                     </span>
                     <span className="text-[10px] text-slate-400">
-                      {new Date(item.created_at).toLocaleDateString("ja-JP")}
+                      {formatYmdWithDow(item.created_at.slice(0, 10))}
                     </span>
                   </div>
                   {item.prompt ? (
@@ -392,7 +403,7 @@ export default function MediaGalleryPage() {
                     </div>
                     <div>
                       <span className="font-semibold text-slate-500 block">作成日時</span>
-                      <span>{new Date(selectedDetail.created_at).toLocaleString("ja-JP")}</span>
+                      <span>{formatDateTime(selectedDetail.created_at)}</span>
                     </div>
                   </div>
 
@@ -442,19 +453,19 @@ export default function MediaGalleryPage() {
                   <div className="mt-auto border-t border-slate-200 pt-4 flex items-center justify-between">
                     {deleteConfirm ? (
                       <div className="flex items-center gap-2">
-                        <span className="text-rose-600 font-medium">本当に削除しますか？</span>
+                        <span className="text-rose-700 font-medium text-xs">本当に削除しますか？</span>
                         <button
                           type="button"
                           onClick={handleDelete}
                           disabled={deleting}
-                          className="rounded bg-rose-600 px-3 py-1 text-white hover:bg-rose-700 disabled:opacity-50"
+                          className="rounded bg-rose-800 text-white hover:bg-rose-900 cursor-pointer disabled:cursor-not-allowed px-3 py-1.5 text-xs font-medium disabled:opacity-50"
                         >
                           {deleting ? "削除中…" : "実行"}
                         </button>
                         <button
                           type="button"
                           onClick={() => setDeleteConfirm(false)}
-                          className="rounded bg-slate-200 px-3 py-1 text-slate-700 hover:bg-slate-300"
+                          className="rounded bg-slate-200 px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-300 cursor-pointer"
                         >
                           キャンセル
                         </button>
@@ -463,7 +474,7 @@ export default function MediaGalleryPage() {
                       <button
                         type="button"
                         onClick={() => setDeleteConfirm(true)}
-                        className="rounded border border-rose-200 bg-rose-50 px-3 py-1 text-rose-700 hover:bg-rose-100"
+                        className="rounded bg-rose-800 text-white hover:bg-rose-900 cursor-pointer disabled:cursor-not-allowed px-3 py-1.5 text-xs font-medium"
                       >
                         削除
                       </button>

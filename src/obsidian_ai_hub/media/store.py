@@ -270,8 +270,9 @@ def list_generated_media(
         params.append(workflow_run_id.strip())
 
     if q and q.strip():
-        search_pattern = f"%{q.strip()}%"
-        conditions.append("(prompt LIKE ? OR filename LIKE ? OR model LIKE ?)")
+        escaped_q = q.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        search_pattern = f"%{escaped_q}%"
+        conditions.append("(prompt LIKE ? ESCAPE '\\' OR filename LIKE ? ESCAPE '\\' OR model LIKE ? ESCAPE '\\')")
         params.extend([search_pattern, search_pattern, search_pattern])
 
     if cursor and "|" in cursor:
