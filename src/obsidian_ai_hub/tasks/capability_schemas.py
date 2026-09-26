@@ -530,6 +530,29 @@ _OUTPUT_SCHEMAS: dict[str, dict[str, Any]] = {
             "latest_weekly_note": {"type": "object"},
         }
     ),
+    "image_generate": _object_output(
+        {
+            "summary": {"type": "string"},
+            "model": {"type": "string"},
+            "images": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "media_type": {"type": "string"},
+                        "media_id": {"type": "string"},
+                        "url": {"type": "string"},
+                        "download_url": {"type": "string"},
+                        "mime_type": {"type": "string"},
+                        # Dimensions are best-effort metadata; null is allowed.
+                        "width": {"type": ["integer", "null"]},
+                        "height": {"type": ["integer", "null"]},
+                        "filename": {"type": "string"},
+                    },
+                },
+            },
+        }
+    ),
     "run_shell": _object_output(
         {
             "exit_code": {"type": "integer"},

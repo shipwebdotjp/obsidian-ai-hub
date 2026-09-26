@@ -754,6 +754,9 @@ def get_db_connection() -> sqlite3.Connection:
     if current_version <= 64:
         run_migration_v65(conn)
 
+    if current_version <= 65:
+        run_migration_v66(conn)
+
     return conn
 
 
@@ -1338,6 +1341,50 @@ def run_migration_v65(conn: sqlite3.Connection) -> None:
         );
     """)
     conn.execute("PRAGMA user_version = 65;")
+    conn.commit()
+
+
+def run_migration_v66(conn: sqlite3.Connection) -> None:
+    """Run migration for version 66 (generated media artifacts).
+
+    ``generated_media`` is the identity/authority for media produced by
+    capabilities such as ``image_generate``. The on-disk file lives under the
+    configured ``image_generation.output_dir``; the row stores only a path
+    relative to that root plus a server-generated ``media_id``. The serving
+    route resolves ``media_id`` -> row -> contained path, so clients never
+    supply a filesystem path. ``media_type`` keeps the schema usable for
+    future audio/video; ``relative_path``/``metadata_json``/association
+    columns are additive.
+    """
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS generated_media (
+            media_id TEXT PRIMARY KEY,
+            media_type TEXT NOT NULL,
+            relative_path TEXT NOT NULL,
+            filename TEXT NOT NULL,
+            mime_type TEXT NOT NULL,
+            width INTEGER,
+            height INTEGER,
+            byte_size INTEGER NOT NULL,
+            provider TEXT,
+            model TEXT,
+            prompt TEXT,
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            session_id TEXT,
+            run_id TEXT,
+            task_id TEXT,
+            created_at TEXT NOT NULL
+        );
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_generated_media_created_at"
+        " ON generated_media(created_at);"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_generated_media_session"
+        " ON generated_media(session_id);"
+    )
+    conn.execute("PRAGMA user_version = 66;")
     conn.commit()
 
 

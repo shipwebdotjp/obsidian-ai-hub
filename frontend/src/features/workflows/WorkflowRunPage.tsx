@@ -30,6 +30,7 @@ import { runStatusLabel, isTerminalRunStatus, TERMINAL_RUN_STATUSES } from "./ru
 import { confirmAndDeleteRun } from "./runActions";
 import InputsSchemaForm from "./InputsSchemaForm";
 import WorkflowCanvas from "./WorkflowCanvas";
+import { GeneratedMediaList } from "../media/GeneratedMediaList";
 
 const CHILD_RUN_PATHS: Record<string, string> = {
   agent: ROUTES.AGENTS,
@@ -503,6 +504,7 @@ export default function WorkflowRunPage() {
                   <div className="truncate">
                     {node.output_json ?? node.error_summary ?? ""}
                   </div>
+                  <GeneratedMediaList value={node.output_json} />
                   {node.child_run && (
                     <div
                       data-testid={`run-node-child-tools-${node.activation_id}`}

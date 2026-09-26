@@ -181,3 +181,17 @@ youtube:
   transcript_languages: [ja, en]
   whisper_model: medium
   summary_chunk_chars: 12000
+
+# Image generation (OpenAI Images API). The output directory is outside the
+# Vault by default; point it at a Vault subfolder to browse generated images in
+# Obsidian. Env IMAGE_GENERATION_OUTPUT_DIR / IMAGE_GENERATION_MODEL /
+# IMAGE_GENERATION_DEFAULT_SIZE / IMAGE_GENERATION_DEFAULT_QUALITY /
+# IMAGE_GENERATION_MAX_COUNT override these values.
+image_generation:
+  output_dir: /path/to/your/obsidian-ai-hub/media
+  model: gpt-image-2.5-sunburst
+  # Small/low defaults keep cost and latency low; override per call as needed.
+  default_size: 1024x1024
+  default_quality: low
+  max_count: 4
+  timeout_seconds: 180

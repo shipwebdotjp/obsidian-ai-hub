@@ -8,6 +8,7 @@ from obsidian_ai_hub.web.routes import (
     healthcare,
     hitl,
     line,
+    media,
     memory,
     people,
     person_properties,
@@ -27,6 +28,7 @@ router.include_router(coding.router)
 router.include_router(line.router)
 router.include_router(memory.router)
 router.include_router(research.router)
+router.include_router(media.router)
 router.include_router(vault.router)
 router.include_router(dashboard.router)
 router.include_router(projects.router)

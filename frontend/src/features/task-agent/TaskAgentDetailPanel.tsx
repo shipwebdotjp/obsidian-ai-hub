@@ -35,6 +35,7 @@ import {
   taskStatusLabel,
 } from "./taskAgentLabels";
 import { SmartText, StructuredValue } from "./StructuredValue";
+import { GeneratedMediaList } from "../media/GeneratedMediaList";
 import {
   ChildRunLink,
   HitlRunLink,
@@ -854,6 +855,7 @@ export default function TaskAgentDetailPanel({
                     : {String(e.payload?.capability_key ?? "")}
                   </div>
                   <RelatedRunLinks payload={e.payload} />
+                  <GeneratedMediaList value={e.payload} />
                   <div className="mt-1 min-w-0">
                     <StructuredValue value={e.payload} />
                   </div>
@@ -908,6 +910,7 @@ export default function TaskAgentDetailPanel({
                   {formatDateTime(e.created_at)}（seq {e.seq}）
                 </span>
                 <RelatedRunLinks payload={e.payload} />
+                <GeneratedMediaList value={e.payload} />
                 <div className="mt-1 min-w-0 text-slate-600">
                   <StructuredValue value={e.payload} />
                 </div>

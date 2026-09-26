@@ -54,6 +54,7 @@ const sidebars: SidebarsConfig = {
         'features/memory',
         'features/research',
         'features/agents',
+        'features/image-generation',
         'features/coding',
         'features/task-agent',
         'features/planner',

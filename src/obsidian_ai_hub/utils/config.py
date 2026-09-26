@@ -66,6 +66,11 @@ _APP_ENV_VARS = [
     "CODING_OPENCODE_CLI_PATH",
     "CODING_OPENCODE_MODEL",
     "CODING_OPENCODE_MODELS",
+    "IMAGE_GENERATION_OUTPUT_DIR",
+    "IMAGE_GENERATION_MODEL",
+    "IMAGE_GENERATION_DEFAULT_SIZE",
+    "IMAGE_GENERATION_DEFAULT_QUALITY",
+    "IMAGE_GENERATION_MAX_COUNT",
 ]
 
 if IS_TEST_ENV:
@@ -1035,4 +1040,75 @@ else:
             "~/.config/obsidian-ai-hub/plugins/tools"
         ).expanduser()
 
+
+# Image generation (OpenAI Images API). ``model`` is configurable so a new
+# image model can be adopted without a code change. The output directory is
+# deliberately outside the Vault by default; pointing it at a Vault subfolder
+# makes generated media browsable in Obsidian.
+IMAGE_GENERATION_MODEL = (
+    str(
+        _env_or_config(
+            "IMAGE_GENERATION_MODEL",
+            "image_generation",
+            "model",
+            default="gpt-image-2.5-sunburst",
+        )
+    ).strip()
+    or "gpt-image-2.5-sunburst"
+)
+IMAGE_GENERATION_DEFAULT_SIZE = (
+    str(
+        _env_or_config(
+            "IMAGE_GENERATION_DEFAULT_SIZE",
+            "image_generation",
+            "default_size",
+            default="1024x1024",
+        )
+    ).strip()
+    or "1024x1024"
+)
+IMAGE_GENERATION_DEFAULT_QUALITY = (
+    str(
+        _env_or_config(
+            "IMAGE_GENERATION_DEFAULT_QUALITY",
+            "image_generation",
+            "default_quality",
+            default="low",
+        )
+    ).strip()
+    or "low"
+)
+
+
+def _positive_int(value, default: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed > 0 else default
+
+
+IMAGE_GENERATION_MAX_COUNT = _positive_int(
+    _env_or_config(
+        "IMAGE_GENERATION_MAX_COUNT", "image_generation", "max_count", default=4
+    ),
+    4,
+)
+IMAGE_GENERATION_TIMEOUT_SECONDS = _positive_int(
+    _config_value("image_generation", "timeout_seconds", default=180),
+    180,
+)
+
+if IS_TEST_ENV:
+    IMAGE_GENERATION_OUTPUT_DIR = TEST_WORKSPACE / "media"
+else:
+    _image_output_dir_raw = _env_or_config(
+        "IMAGE_GENERATION_OUTPUT_DIR", "image_generation", "output_dir"
+    )
+    if _image_output_dir_raw:
+        IMAGE_GENERATION_OUTPUT_DIR = Path(str(_image_output_dir_raw)).expanduser()
+    else:
+        IMAGE_GENERATION_OUTPUT_DIR = Path(
+            "~/.config/obsidian-ai-hub/media"
+        ).expanduser()
 

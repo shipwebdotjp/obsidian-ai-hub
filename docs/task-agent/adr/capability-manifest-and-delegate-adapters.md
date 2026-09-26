@@ -77,6 +77,20 @@ Status: Accepted (2026-09-14)。
   docstring を正本とし、縦断テストは `tests/test_vault_write_file.py`
   (Registry tool 実行 + Task Adapter 実行) とする。
 
+## Amendment (画像生成のTask Capability化)
+
+Status: Accepted (2026-09-26)。
+
+- `image_generate` をTask Capabilityに含める (Agent Registry builtin toolから自動派生)。
+  入力schemaは `args_schema` (`ImageGenerateInput`) から自動導出し、出力contractは
+  `capability_schemas._OUTPUT_SCHEMAS` に宣言する。
+- 外部画像API呼び出しとアプリ外ファイル書込みを伴うため、既定policyは `plan_required`。
+  `auto` への緩和は本ADRの改訂を要する。
+- 生成物は設定ディレクトリ配下へ原子的に書き込み、`generated_media` 行を正本として
+  `media_id` で配信する。クライアントはパスを指定しない。
+- 操作シナリオ契約は `media/store.py` のdocstringを正本とし、縦断テストは
+  `tests/test_image_generate.py` (fake provider + 配信 + 失敗補償 + Task Adapter実行)。
+
 ## Consequences (当初)
 
 - 追加Capabilityにはコードとテストが必要だが、危険な能力が設定だけで公開されない。

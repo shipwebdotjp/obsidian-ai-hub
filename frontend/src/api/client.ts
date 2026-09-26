@@ -122,7 +122,9 @@ async function sendRequest(
   init: RequestInit = {},
 ): Promise<Response> {
   const headers = new Headers(init.headers || {});
-  headers.set("Accept", "application/json");
+  if (!headers.has("Accept")) {
+    headers.set("Accept", "application/json");
+  }
   const isFormData = typeof FormData !== "undefined" && init.body instanceof FormData;
   if (init.body && !isFormData && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
@@ -168,6 +170,16 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 async function requestText(path: string, init: RequestInit = {}): Promise<string> {
   const res = await sendRequest(path, init);
   return await res.text();
+}
+
+async function requestBlob(path: string): Promise<Blob> {
+  const res = await sendRequest(path, { headers: { Accept: "*/*" } });
+  return await res.blob();
+}
+
+/** Authenticated fetch of a generated media artifact as a Blob. */
+export function getMediaBlob(mediaId: string): Promise<Blob> {
+  return requestBlob(`/api/v1/media/${encodeURIComponent(mediaId)}`);
 }
 
 export function listMemories(params: {

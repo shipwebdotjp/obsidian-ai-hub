@@ -171,6 +171,34 @@ class VaultWriteFileInput(BaseModel):
     )
 
 
+class ImageGenerateInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    prompt: str = Field(
+        description="Text prompt describing the image to generate. Be specific about subject, style, composition, and mood."
+    )
+    size: Optional[Literal["1024x1024", "1536x1024", "1024x1536", "auto"]] = Field(
+        default=None,
+        description="Output image size. When omitted, the configured image_generation.default_size is used (smallest allowed is 1024x1024); use 1536x1024 for landscape and 1024x1536 for portrait.",
+    )
+    quality: Optional[Literal["low", "medium", "high", "auto"]] = Field(
+        default=None,
+        description="Rendering quality. When omitted, the configured image_generation.default_quality is used.",
+    )
+    output_format: Literal["png", "jpeg", "webp"] = Field(
+        default="png", description="Image file format."
+    )
+    count: int = Field(
+        default=1,
+        ge=1,
+        description="Number of images to generate. Each image is saved separately; the upper bound is the configured image_generation.max_count.",
+    )
+    background: Optional[Literal["opaque", "transparent", "auto"]] = Field(
+        default=None,
+        description="Optional background handling. Use 'transparent' only when the model supports it.",
+    )
+
+
 class CalendarReadInput(BaseModel):
     start_date: str = Field(
         description="Start date in YYYY-MM-DD format (e.g. '2026-08-25'). Use the current date from system context to resolve relative dates like 'today'."
@@ -861,6 +889,119 @@ def vault_write_file(relative_path: str, content: str, overwrite: bool = False) 
     except (FileExistsError, OSError, *EXPECTED_TOOL_EXCEPTIONS) as exc:
         logger.warning("vault_write_file failed: %s", exc)
         return json.dumps({"error": str(exc)}, ensure_ascii=False)
+
+
+def _make_image_generate_tool(trusted_ctx: Optional[Dict[str, Any]] = None) -> BaseTool:
+    """Build the ``image_generate`` tool bound to the trusted run context.
+
+    The provider call and file writes live in ``obsidian_ai_hub.media``; this
+    factory only attaches the trusted session/run/task ids used for the
+    ``generated_media`` row. Input validation is the shared
+    ``ImageGenerateInput`` schema.
+    """
+    ctx = trusted_ctx if isinstance(trusted_ctx, dict) else {}
+
+    @tool("image_generate", args_schema=ImageGenerateInput)
+    def image_generate(
+        prompt: str,
+        size: Optional[str] = None,
+        quality: Optional[str] = None,
+        output_format: str = "png",
+        count: int = 1,
+        background: Optional[str] = None,
+    ) -> str:
+        """Generate images from a text prompt with the configured image model.
+
+        Saves each image under the configured output directory and returns a
+        JSON object with ``images`` references (``media_id``/``url``/...). The
+        Agent/Workflow UI renders those references inline; use the returned
+        ``media_id`` in later steps instead of re-reading raw bytes.
+        """
+        from obsidian_ai_hub.media import generation, store
+        from obsidian_ai_hub.utils import config as app_config
+
+        # Kept outside the try so a mid-loop save failure can still return the
+        # references already persisted (the provider call is already paid for).
+        refs: List[Dict[str, Any]] = []
+        try:
+            max_count = int(
+                getattr(app_config, "IMAGE_GENERATION_MAX_COUNT", 4) or 4
+            )
+            if count > max_count:
+                raise ValueError(f"count must be at most {max_count}")
+            model = str(
+                getattr(app_config, "IMAGE_GENERATION_MODEL", "")
+                or "gpt-image-2.5-sunburst"
+            )
+            images = generation.generate_images(
+                prompt,
+                model=model,
+                size=size,
+                quality=quality,
+                output_format=output_format,
+                background=background,
+                count=count,
+            )
+            for image in images:
+                width, height = generation.image_dimensions(image.data)
+                metadata = (
+                    {"revised_prompt": image.revised_prompt}
+                    if image.revised_prompt
+                    else None
+                )
+                refs.append(
+                    store.save_generated_image(
+                        image,
+                        prompt=prompt.strip(),
+                        model=model,
+                        width=width,
+                        height=height,
+                        metadata=metadata,
+                        session_id=_ctx_str(ctx, "session_id"),
+                        run_id=_ctx_str(ctx, "run_id"),
+                        task_id=_ctx_str(ctx, "task_id"),
+                    )
+                )
+            return json.dumps(
+                {
+                    "summary": f"画像を{len(refs)}件生成し保存しました。",
+                    "model": model,
+                    "images": refs,
+                },
+                ensure_ascii=False,
+            )
+        except (
+            ImportError,
+            RuntimeError,
+            ValueError,
+            TypeError,
+            KeyError,
+            OSError,
+            *EXPECTED_TOOL_EXCEPTIONS,
+        ) as exc:
+            logger.warning("image_generate failed: %s", exc)
+            payload: Dict[str, Any] = {"error": str(exc)}
+            if refs:
+                payload["images"] = refs
+            return json.dumps(payload, ensure_ascii=False)
+        except Exception as exc:
+            # Unexpected DB/IO failures stay in the server log; the caller gets
+            # a sanitized message rather than internals (mirrors people_search).
+            logger.exception("image_generate failed")
+            payload = {"error": _sanitize_unexpected_error(exc)}
+            if refs:
+                payload["images"] = refs
+            return json.dumps(payload, ensure_ascii=False)
+
+    return image_generate
+
+
+def _ctx_str(ctx: Dict[str, Any], key: str) -> Optional[str]:
+    value = ctx.get(key)
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
 
 
 @tool(args_schema=CalendarReadInput)
@@ -1712,6 +1853,13 @@ _BUILTIN_TOOL_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "name": "Vaultファイル書込",
         "description": "Obsidian Vault内にUTF-8テキストファイルを書き込みます。親ディレクトリは自動作成します。上書きには overwrite=true が必要です。",
         "get_tool": lambda: vault_write_file,
+    },
+    "image_generate": {
+        "tool_id": "image_generate",
+        "name": "画像生成",
+        "description": "テキストプロンプトから画像を生成し、設定された出力ディレクトリへ保存します。結果は media_id を含むJSONで返り、チャットUIで表示・ダウンロードできます。",
+        "get_tool": lambda: _make_image_generate_tool(None),
+        "get_tool_with_context": lambda ctx: _make_image_generate_tool(ctx),
     },
     "calendar_read": {
         "tool_id": "calendar_read",

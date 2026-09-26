@@ -36,6 +36,7 @@ CONTEXT_KINDS = frozenset({"memory"})
 # capabilities (see ``tasks/capabilities.py``).
 TASK_CONTEXT_TOOL_IDS = frozenset(
     {
+        "image_generate",
         "research_theme_propose",
         "register_one_shot_job",
         "register_recurring_job",

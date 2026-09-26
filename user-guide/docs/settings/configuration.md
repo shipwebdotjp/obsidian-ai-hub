@@ -33,6 +33,13 @@ cp .env.example .env
 - `OBSIDIAN_AI_HUB_HOST` / `OBSIDIAN_AI_HUB_PORT` — 待ち受けアドレス / ポート。
 - `HEALTHCARE_SQLITE_PATH` / `HEALTHCARE_EXPORT_DIR` — ヘルスケア DB / エクスポート先。
 - `VAULT_INDEX_SQLITE_PATH` / `VAULT_INDEX_CHROMA_PATH` — Vault インデックス保存先。
+- `IMAGE_GENERATION_OUTPUT_DIR` — 生成画像の保存先（`config.yml` の `image_generation.output_dir` を上書き。既定は Vault 外）。
+
+### 画像生成（任意）
+
+`IMAGE_GENERATION_MODEL`、`IMAGE_GENERATION_DEFAULT_SIZE`、`IMAGE_GENERATION_DEFAULT_QUALITY`、
+`IMAGE_GENERATION_MAX_COUNT`。設定すると YAML より優先されます
+（[画像生成](../features/image-generation.md)）。
 
 ### 資格情報
 
@@ -66,6 +73,7 @@ cp .env.example .env
 | `research` | リサーチの既定出力スタイル・文脈・ディープリサーチ設定 |
 | `vault_index` | Vault 検索インデックスの collection / 保存先 / 埋め込みモデル |
 | `coding` | コーディングのオーケストレーターと OpenCode ACP 設定（[コーディング設定](coding.md)） |
+| `image_generation` | 画像生成の保存先・モデル・既定サイズ/品質（[画像生成](../features/image-generation.md)） |
 | `youtube` | 文字起こし言語・Whisper モデル・要約チャンク文字数 |
 
 `memory` と `healthcare` は任意の追加セクションです。

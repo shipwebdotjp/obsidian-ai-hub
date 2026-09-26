@@ -18,6 +18,7 @@ import {
   type ActiveWaitingRun,
 } from "../../components/InConversationQuestionCard";
 import { AnsweredRequirementCard } from "../../components/AnsweredRequirementCard";
+import { GeneratedMediaList } from "../media/GeneratedMediaList";
 import { formatDateTime } from "../../utils/date";
 import type { QueuedAgentMessage } from "./agentSendQueue";
 import {
@@ -192,6 +193,7 @@ export function AgentMessageList({
                               {tc.result || "-"}
                             </pre>
                           </div>
+                          <GeneratedMediaList value={tc.result} />
                           {tc.error && (
                             <div className="text-[11px] text-rose-700 bg-rose-50 border border-rose-200 rounded px-2 py-1 break-all">
                               {tc.error}
@@ -380,6 +382,9 @@ export function AgentMessageList({
                                     {truncateLiveResult(tc.result) || "-"}
                                   </pre>
                                 </div>
+                              )}
+                              {tc.status !== "running" && (
+                                <GeneratedMediaList value={tc.result} />
                               )}
                             </>
                           )}

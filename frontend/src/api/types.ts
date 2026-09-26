@@ -940,6 +940,16 @@ export interface AgentToolCall {
   iteration: number;
 }
 
+/** Reference to a media artifact recorded in ``generated_media``. */
+export interface GeneratedMediaRef {
+  media_type: string;
+  media_id: string;
+  mime_type: string;
+  width?: number | null;
+  height?: number | null;
+  filename?: string;
+}
+
 export type AgentRunStatus =
   | "queued"
   | "running"

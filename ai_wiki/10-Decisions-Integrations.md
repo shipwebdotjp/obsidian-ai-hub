@@ -469,3 +469,25 @@ OpenAI Responses API は `max_output_tokens`、Chat Completions は `max_complet
 - 全検索が1スレッドで直列化されるため、同時検索のスループットは頭打ちになる。検索負荷が課題になったら、md-hybrid-search 側のスレッド安全化（`Database` への RLock 追加、将来は per-operation 接続による並行読み取り）を再検討する。
 - `web/services/vault.py` の `_vault_search_lock` はexecutorが直列化を保証するため削除した。
 - テストは `tests/test_obsidian_vault_retriever.py` で、異スレッドからの呼び出しが同一ワーカースレッドで実行されること（旧実装では失敗すること）を検証する。
+
+## 画像生成 Capability（`generated_media`・スキーマ v66）
+
+| 項目 | 内容 |
+|------|------|
+| 決定日 | 2026-09-26 |
+| カテゴリ | 外部連携（画像生成 API）・Capability・Web UI |
+| 決定内容 | OpenAI Images API（モデルは設定可、既定 `gpt-image-2.5-sunburst`。`gpt-image-2.5` エイリアスは存在しない）で画像を生成する `image_generate` を Agent Registry の builtin tool として追加する。生成物は設定ディレクトリ（既定は Vault 外、Vault サブフォルダも指定可）へ原子的に書き込み、新設 `generated_media` テーブル（`type=image`）に `media_id` を正本として記録する。UI は認証付き `GET /api/v1/media/{media_id}` から Blob 取得してインライン表示・ダウンロードする。Task Capability の既定承認ポリシーは `plan_required` |
+
+### 結論に至った経緯
+
+- Registry の builtin tool を1つ追加すれば、Agent ツール・Task Capability・Workflow Capability に自動公開される既存の派生機構（[コード定義AdapterとDB管理Capabilityポリシー](../docs/task-agent/adr/capability-manifest-and-delegate-adapters.md)）をそのまま利用できる。Capability 側の手動登録は不要。
+- ツール結果は `agent_runs.tool_calls_json` に文字列として保存され、生 SSE は2000文字、DB は20000文字で切り詰められる。画像バイト列を返すと失われるため、結果は小さな参照（`media_id`/`url`/`mime_type`/寸法）に限定する。
+- ファイルパスをクライアントに渡すと path traversal の検証点が増える。`media_id` を唯一の識別子にし、行の `relative_path` と設定ルートの containment を serving 時に再検証する。
+- アプリ外へのファイル書込みと外部API送信を伴うため、`docs/development-quality-playbook.md` の操作シナリオ契約に従い、provider を fake に差し替えた縦断テスト（`tests/test_image_generate.py`）で保存→記録→配信→失敗補償を通す。
+
+### トレードオフ
+
+- 画像は Vault 外が既定のため Obsidian からは見えない。Vault の重さとのトレードオフであり、`output_dir` の設定で選択できる。
+- 保存（ファイル→DB 行）間にクラッシュすると孤児ファイルが残り得る。ただし行が欠落ファイルを指す状態は作らない（配信は行が正本）。孤児の回収は将来の保守処理に委ねる。
+- `image_generate` は副作用を持つため `READ_ONLY_TOOL_IDS` には含めず、`AUTO_POLICY_TOOL_IDS` にも含めない（既定 `plan_required`）。
+- 画像編集（入力画像つき生成）は本版の対象外。テキストからの生成のみ。
