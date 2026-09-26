@@ -73,7 +73,7 @@ async def test_agent_stream_binds_parent_agent_id_in_trusted_ctx():
         patch(
             "obsidian_ai_hub.agents.runtime.create_langchain_llm",
             return_value=mock_llm,
-        ),
+        ) as mock_create_llm,
         patch(
             "obsidian_ai_hub.agents.runtime.registry.resolve_tools_with_context",
             side_effect=fake_resolve,
@@ -95,6 +95,7 @@ async def test_agent_stream_binds_parent_agent_id_in_trusted_ctx():
     assert captured["ctx"]["session_id"] == session["session_id"]
     assert captured["ctx"]["run_id"] == run["run_id"]
     assert "web_search" in captured["tool_ids"]
+    assert mock_create_llm.call_args.kwargs["max_tokens"] == 8192
 
 
 @pytest.mark.anyio

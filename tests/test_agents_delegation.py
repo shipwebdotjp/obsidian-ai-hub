@@ -256,3 +256,4 @@ def test_successful_subagent_delegation_flow_with_mocked_llm():
         assert res["agent_name"] == "Child Worker"
         assert res["depth"] == 1
         assert res["final_answer"] == "子の最終回答テキスト"
+        assert mock_llm_factory.call_args.kwargs["max_tokens"] == 8192

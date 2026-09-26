@@ -55,6 +55,7 @@ _PRIOR_RUN_MAX_CHARS = 4000
 _PRIOR_TOOL_RESULT_MAX_CHARS = 1000
 _PRIOR_TOOL_ARGS_MAX_CHARS = 500
 _PRIOR_TOOL_ERROR_MAX_CHARS = 500
+DEFAULT_AGENT_MAX_TOKENS = 8192
 
 
 def _shorten_prior_text(text: str, limit: int) -> str:
@@ -535,7 +536,7 @@ def execute_subagent_core(
         elif isinstance(adv.get("reasoning_effort"), str) and adv["reasoning_effort"].strip():
             reasoning_effort = adv["reasoning_effort"].strip()
 
-    max_tokens_val = 4096
+    max_tokens_val = DEFAULT_AGENT_MAX_TOKENS
     if isinstance(adv, dict) and "max_tokens" in adv:
         try:
             mt = adv["max_tokens"]
@@ -802,7 +803,7 @@ async def _stream_llm_turn(
     model: str,
     iteration: int,
     prompt_for_log: str,
-    max_tokens: int = 4096,
+    max_tokens: int = DEFAULT_AGENT_MAX_TOKENS,
     out_call_info: Optional[Dict[str, Any]] = None,
 ) -> AsyncGenerator[tuple[str, Any], None]:
     """Yield live text/tool-detection events, then one aggregated AI message.
@@ -1290,7 +1291,7 @@ async def generate_agent_stream(
             elif isinstance(adv.get("reasoning_effort"), str) and adv["reasoning_effort"].strip():
                 reasoning_effort = adv["reasoning_effort"].strip()  # type: ignore[index]
         # Range is not constrained per product requirement (phase 1)
-        max_tokens_val = 4096
+        max_tokens_val = DEFAULT_AGENT_MAX_TOKENS
         if isinstance(adv, dict) and "max_tokens" in adv:
             try:
                 mt = adv["max_tokens"]
@@ -1299,9 +1300,17 @@ async def generate_agent_stream(
                     if parsed >= 1:
                         max_tokens_val = parsed
                     else:
-                        logger.warning("advanced_params.max_tokens %r <= 0, falling back to 4096", mt)
+                        logger.warning(
+                            "advanced_params.max_tokens %r <= 0, falling back to %s",
+                            mt,
+                            DEFAULT_AGENT_MAX_TOKENS,
+                        )
             except (ValueError, TypeError):
-                logger.warning("Invalid advanced_params.max_tokens %r, falling back to 4096", adv.get("max_tokens"))
+                logger.warning(
+                    "Invalid advanced_params.max_tokens %r, falling back to %s",
+                    adv.get("max_tokens"),
+                    DEFAULT_AGENT_MAX_TOKENS,
+                )
 
         used_tools: List[str] = list(resumed_used_tools) if resumed_used_tools else []
         created_hitl_run_ids: List[str] = list(resumed_hitl_ids) if resumed_hitl_ids else []

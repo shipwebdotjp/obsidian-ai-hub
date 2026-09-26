@@ -277,7 +277,7 @@ export function AgentFormPanel({
                   type="number"
                   value={formMaxTokens}
                   onChange={(e) => onFormMaxTokensChange(e.target.value)}
-                  placeholder="例: 4096 (空欄で既定値)"
+                  placeholder="例: 8192 (空欄で既定値)"
                   className="w-full rounded-md border border-slate-300 p-2 text-xs focus:border-slate-500 focus:outline-none"
                 />
                 <p className="mt-1 text-[10px] text-slate-500">
