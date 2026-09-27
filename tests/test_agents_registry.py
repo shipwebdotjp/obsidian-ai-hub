@@ -40,6 +40,7 @@ def test_list_available_tools():
         "periodic_note_read",
         "agent_conversation_search",
         "coding_history_search",
+        "summary_search",
         "research_theme_propose",
         "register_one_shot_job",
         "register_recurring_job",

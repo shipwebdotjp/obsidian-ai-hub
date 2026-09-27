@@ -134,6 +134,22 @@ Status: Accepted (2026-09-26)。Phase 1 を全面採用し、Phase 2 は高利�
   出力は、P2 後の監査結果と利用実績に基づく次の structured 候補とする。
   （`periodic_note_read` は 2026-09-27 に structured へ昇格した。）
 
+## Amendment (P2 昇格: 期間サマリ検索 capability `summary_search`)
+
+Status: Accepted (2026-09-27)。
+
+### 決定
+
+- **`summary_search` を `structured` Capability として公開する。**
+  - 既存の SQLite 日次・週次・月次サマリだけを根拠とし、生ノート／activity log への降格や不足サマリの自動生成は行わない。
+  - 粒度は指定期間に応じて自動調整し（1〜31日: day、32〜180日: week、181日以上: month）、範囲端や上位サマリの不足・非一致区間だけ下位サマリへ降る（重複排除）。
+  - 入力モデル `SummarySearchInput` で未知キーを拒否 (`extra="forbid"`)、必須パラメータ `start_date` / `end_date`、任意フィルタ `query`, `topics`, `project_ids`, `person_ids`, `granularity` を strict 検証する。
+  - 出力契約クラスは `structured` とし、`requested_range`, `granularity`, `entries`, `coverage`, `truncated`, `next_request` を宣言する。
+- **strict 判定 (`fail_on_output_mismatch: true`) の追加**
+  - `summary_search` を strict 許可対象 (`STRICT_ALLOWED_REGISTRY_KEYS`) に追加する。
+  - 予算上限 (~5,500 文字) により期間単位の未返却が発生した場合 (`truncated = true`)、またはエントリー本文の切詰めが発生した場合 (`entry_truncated = true`)、strict モードの Workflow Node は不完全データとして失敗させ、後続へ不完全な結果を渡さない。
+  - 範囲一覧の表示上限 (20件) 超過による `coverage.ranges_truncated` は、表示上の省略であるため strict の失敗条件に含めない。
+
 ## Related
 
 - [Workflow Graph / Agent Node ADR](workflow-graph-and-agent-node.md#amendment-capability-node-の-strict-出力)

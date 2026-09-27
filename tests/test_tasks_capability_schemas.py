@@ -189,6 +189,7 @@ def test_output_contract_ledger_covers_all_capabilities():
             "reminders_read",
             "periodic_note_read",
             "research_context_snapshot",
+            "summary_search",
         }
     )
     assert schemas.RECEIPT_CAPABILITY_KEYS

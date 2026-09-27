@@ -463,6 +463,7 @@ STRUCTURED_CAPABILITY_KEYS: frozenset[str] = frozenset(
         "reminders_read",
         "periodic_note_read",
         "research_context_snapshot",
+        "summary_search",
     }
 )
 
@@ -639,6 +640,120 @@ _OUTPUT_SCHEMAS: dict[str, dict[str, Any]] = {
             "latest_weekly_note",
         ],
     ),
+    "summary_search": _object_output(
+        {
+            "requested_range": {
+                "type": "object",
+                "properties": {
+                    "start_date": {"type": "string"},
+                    "end_date": {"type": "string"},
+                },
+                "required": ["start_date", "end_date"],
+            },
+            "granularity": {"type": "string"},
+            "entries": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "period_type": {"type": "string"},
+                        "period_key": {"type": "string"},
+                        "period_start": {"type": "string"},
+                        "period_end": {"type": "string"},
+                        "summary_id": {"type": "string"},
+                        "summary": {"type": "string"},
+                        "keywords": {"type": "array", "items": {"type": "string"}},
+                        "topics": {"type": "array", "items": {"type": "string"}},
+                        "items": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "kind": {"type": ["string", "null"]},
+                                    "body": {"type": ["string", "null"]},
+                                },
+                            },
+                        },
+                        "project_ids": {"type": "array", "items": {"type": "integer"}},
+                        "projects": {"type": "array", "items": {"type": "string"}},
+                        "people": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "person_id": {"type": ["string", "null"]},
+                                    "name": {"type": ["string", "null"]},
+                                    "note": {"type": ["string", "null"]},
+                                },
+                            },
+                        },
+                        "mood": {"type": ["string", "null"]},
+                        "sleep_hours": {"type": ["number", "null"]},
+                        "matched_fields": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
+                        "entry_truncated": {"type": "boolean"},
+                    },
+                    "required": [
+                        "period_type",
+                        "period_key",
+                        "period_start",
+                        "period_end",
+                        "summary_id",
+                        "summary",
+                        "matched_fields",
+                        "entry_truncated",
+                    ],
+                },
+            },
+            "coverage": {
+                "type": "object",
+                "properties": {
+                    "requested_days": {"type": "integer"},
+                    "source_covered_days": {"type": "integer"},
+                    "source_missing_days": {"type": "integer"},
+                    "filter_matched_days": {"type": "integer"},
+                    "filter_unmatched_days": {"type": "integer"},
+                    "returned_days": {"type": "integer"},
+                    "source_missing_ranges": {"type": "array", "items": {"type": "object"}},
+                    "filter_unmatched_ranges": {"type": "array", "items": {"type": "object"}},
+                    "returned_ranges": {"type": "array", "items": {"type": "object"}},
+                    "ranges_truncated": {
+                        "type": "object",
+                        "properties": {
+                            "source_missing": {"type": "boolean"},
+                            "filter_unmatched": {"type": "boolean"},
+                            "returned": {"type": "boolean"},
+                        },
+                        "required": ["source_missing", "filter_unmatched", "returned"],
+                    },
+                },
+                "required": [
+                    "requested_days",
+                    "source_covered_days",
+                    "source_missing_days",
+                    "filter_matched_days",
+                    "filter_unmatched_days",
+                    "returned_days",
+                    "source_missing_ranges",
+                    "filter_unmatched_ranges",
+                    "returned_ranges",
+                    "ranges_truncated",
+                ],
+            },
+            "truncated": {"type": "boolean"},
+            "next_request": {"type": ["object", "null"]},
+        },
+        required=[
+            "requested_range",
+            "granularity",
+            "entries",
+            "coverage",
+            "truncated",
+            "next_request",
+        ],
+    ),
     # --- receipt (P3 まで参照不可; schema は監査・表示用に維持) ---
     "calendar_create_proposal": _object_output(
         {
@@ -763,6 +878,21 @@ def strict_completeness_errors(
                 "reminders_read の recurring 取得が不完全です "
                 f"(recurring_status={output.get('recurring_status')!r})"
             )
+        return errors
+    if capability_key == "summary_search":
+        errors = []
+        if output.get("truncated") is True:
+            errors.append(
+                "summary_search の結果が予算制限により切詰められています (truncated=true)"
+            )
+        entries = output.get("entries") or []
+        if isinstance(entries, list):
+            for entry in entries:
+                if isinstance(entry, dict) and entry.get("entry_truncated") is True:
+                    errors.append(
+                        f"summary_search のエントリー ({entry.get('period_key')}) の本文が切詰められています"
+                    )
+                    break
         return errors
     return []
 

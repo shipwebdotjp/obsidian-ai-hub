@@ -683,6 +683,37 @@ class AgentConversationSearchInput(BaseModel):
     )
 
 
+class SummarySearchInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    start_date: str = Field(
+        description="開始日 (YYYY-MM-DD)。必須。"
+    )
+    end_date: str = Field(
+        description="終了日 (YYYY-MM-DD)。必須。"
+    )
+    query: Optional[str] = Field(
+        default=None,
+        description="検索クエリ（本文・キーワード・項目・プロジェクト/人物の表示名やメモをUnicode正規化部分一致で検索）。",
+    )
+    topics: Optional[List[str]] = Field(
+        default=None,
+        description="トピック名による絞り込み（配列内OR）。",
+    )
+    project_ids: Optional[List[int]] = Field(
+        default=None,
+        description="プロジェクトIDによる絞り込み（配列内OR）。",
+    )
+    person_ids: Optional[List[str]] = Field(
+        default=None,
+        description="人物IDによる絞り込み（配列内OR）。",
+    )
+    granularity: Literal["auto", "day", "week", "month"] = Field(
+        default="auto",
+        description="粒度: auto|day|week|month（既定: auto）。",
+    )
+
+
 class CodingHistorySearchInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -2158,6 +2189,38 @@ def coding_history_search(
         return json.dumps({"error": _sanitize_unexpected_error(exc)}, ensure_ascii=False)
 
 
+@tool(args_schema=SummarySearchInput)
+def summary_search(
+    start_date: str,
+    end_date: str,
+    query: Optional[str] = None,
+    topics: Optional[List[str]] = None,
+    project_ids: Optional[List[int]] = None,
+    person_ids: Optional[List[str]] = None,
+    granularity: str = "auto",
+) -> str:
+    """指定期間の日次・週次・月次サマリを粒度自動調整および階層フォールバック付きで検索し、構造化データとカバー率（coverage）を返します。生ノートやアクティビティへの降格・サマリ自動生成は行いません。"""
+    try:
+        from obsidian_ai_hub.summary.search import search_summaries
+
+        res = search_summaries(
+            start_date=start_date,
+            end_date=end_date,
+            query=query,
+            topics=topics,
+            project_ids=project_ids,
+            person_ids=person_ids,
+            granularity=granularity,
+        )
+        return json.dumps(res, ensure_ascii=False)
+    except EXPECTED_TOOL_EXCEPTIONS as exc:
+        logger.warning("summary_search failed: %s", exc)
+        return json.dumps({"error": str(exc)}, ensure_ascii=False)
+    except Exception as exc:
+        logger.exception("summary_search failed")
+        return json.dumps({"error": _sanitize_unexpected_error(exc)}, ensure_ascii=False)
+
+
 # --- Tool Registry Definition ---
 
 _BUILTIN_TOOL_DEFINITIONS: Dict[str, Dict[str, Any]] = {
@@ -2335,6 +2398,12 @@ _BUILTIN_TOOL_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "name": "Coding履歴検索",
         "description": "Coding Workspace 履歴からキーワードで検索し、一致箇所の短い抜粋と識別子を取得します。",
         "get_tool": lambda: coding_history_search,
+    },
+    "summary_search": {
+        "tool_id": "summary_search",
+        "name": "期間サマリ検索",
+        "description": "指定期間の日次／週次／月次サマリを階層フォールバックと関連フィルタ付きで検索します。",
+        "get_tool": lambda: summary_search,
     },
     "research_theme_propose": {
         "tool_id": "research_theme_propose",
