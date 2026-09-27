@@ -89,9 +89,10 @@ uv run -m obsidian_ai_hub --memory-compile --for make-target
 | --- | --- |
 | `make-target` | すべて。evidence 形式、ユーザースコープのみ |
 | `planner` | すべて。evidence 形式、ユーザースコープのみ |
-| `summarize-day` / `summarize-week` | 好みと意思決定方針（週次はパターンも）。承認済み人物メモリを表示名つきで別セクションに |
-| `summarize-month` | 好み・意思決定方針・パターン |
 | `review-draft` | 好みと意思決定方針。Fenced 形式 |
+
+日次・週次・月次の構造化要約には長期記憶を注入しません。対象期間の入力データだけを根拠に生成します。
+`config/config.yml` に残っている `memory.purposes.summarize-day` / `summarize-week` / `summarize-month` の設定は要約生成では参照されないため、削除できます。
 
 `--for` に未知の値を渡すと、既定（すべて・`memory.context_max_tokens`・evidence 形式・ユーザースコープのみ）にフォールバックします。
 方針は `config/config.yml` の `memory.purposes` で上書きできます（全項目の例は [設定](../settings/configuration.md) を参照）。

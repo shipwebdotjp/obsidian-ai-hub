@@ -155,3 +155,22 @@ def test_summarize_week(mock_llm, mock_render, mock_config, test_memory_db_path)
         assert row["items"][0]["body"] == "Highlight"
     finally:
         conn.close()
+
+
+@patch("obsidian_ai_hub.summerize_week.prompt.render_prompt")
+@patch("obsidian_ai_hub.summerize_week.llm_client.generate_llm_response")
+def test_get_weekly_structured_record_does_not_inject_memories(
+    mock_llm, mock_render, mock_config
+):
+    mock_render.return_value = "Rendered Prompt"
+    mock_llm.return_value = json.dumps({"summary": "Weekly Summary"})
+
+    with patch(
+        "obsidian_ai_hub.memory.context.compile_context_text",
+        side_effect=AssertionError("must not compile memories"),
+    ):
+        record = get_weekly_structured_record(datetime(2023, 10, 27), [])
+
+    assert record["summary"] == "Weekly Summary"
+    prompt_args = mock_render.call_args[0][1]
+    assert "LONG_TERM_MEMORIES" not in prompt_args

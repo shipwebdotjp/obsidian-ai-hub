@@ -1,19 +1,23 @@
 """Per-purpose policies for long-term memory compilation.
 
 Callers pass a stable purpose string (e.g. ``"make-target"``,
-``"summarize-day"``). The purpose decides which memory kinds may be injected,
+``"review-draft"``). The purpose decides which memory kinds may be injected,
 how many tokens may be spent, how the reference block is formatted, and whether
 person-scoped memories may be included.
+
+Day/week/month summaries do not inject long-term memories; they are generated
+only from the target period's input data. ``memory.purposes.summarize-day``,
+``summarize-week``, and ``summarize-month`` overrides, if present, are ignored.
 
 Operators can override any built-in policy from ``config/config.yml``::
 
     memory:
       purposes:
-        summarize-day:
+        review-draft:
           kinds: [preference, decision_policy]
           budget: 400
-          format: evidence
-          include_person: true
+          format: fenced
+          include_person: false
 
 Unknown purposes fall back to the permissive default (all kinds, the global
 ``memory.context_max_tokens`` budget, evidence format, user scope only), which
@@ -82,28 +86,6 @@ _DEFAULT_POLICY = PurposePolicy(
 _BUILTIN_POLICIES: dict[str, PurposePolicy] = {
     "make-target": _DEFAULT_POLICY,
     "planner": _DEFAULT_POLICY,
-    "summarize-day": PurposePolicy(
-        kinds=frozenset({"preference", "decision_policy"}),
-        budget=600,
-        format=FORMAT_EVIDENCE,
-        include_person=True,
-        person_kinds=ALL_MEMORY_KINDS,
-        person_budget=400,
-    ),
-    "summarize-week": PurposePolicy(
-        kinds=frozenset({"preference", "decision_policy", "pattern"}),
-        budget=800,
-        format=FORMAT_EVIDENCE,
-        include_person=True,
-        person_kinds=ALL_MEMORY_KINDS,
-        person_budget=500,
-    ),
-    "summarize-month": PurposePolicy(
-        kinds=frozenset({"preference", "decision_policy", "pattern"}),
-        budget=500,
-        format=FORMAT_EVIDENCE,
-        include_person=False,
-    ),
     "review-draft": PurposePolicy(
         kinds=frozenset({"preference", "decision_policy"}),
         budget=400,

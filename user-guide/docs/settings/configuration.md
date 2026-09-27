@@ -93,18 +93,18 @@ memory:
     max_user_chars: 4000   # ユーザー発話1件の上限（0で無制限）
     max_assistant_chars: 2000  # エージェント返答1件の上限（文脈用・0で無制限）
   purposes:
-    summarize-day:
+    review-draft:
       kinds: [preference, decision_policy]
-      budget: 600            # ユーザースコープの文脈上限
-      format: evidence       # または "fenced"
-      include_person: true
-      person_kinds: [fact, commitment, episode, pattern]
-      person_budget: 400     # 人物スコープの別枠上限
+      budget: 400            # ユーザースコープの文脈上限
+      format: fenced         # または "evidence"
+      include_person: false
 
 healthcare:
   sqlite_path: /Users/you/.config/obsidian-ai-hub/healthcare.sqlite3
   export_dir: /Users/you/.config/obsidian-ai-hub/healthcare/apple_health_export
 ```
+
+日次・週次・月次の構造化要約には長期記憶を注入しません。既存の `memory.purposes.summarize-day` / `summarize-week` / `summarize-month` の設定は要約生成では参照されないため、削除できます。
 
 ## プロンプトの上書き
 

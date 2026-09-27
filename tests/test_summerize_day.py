@@ -360,3 +360,29 @@ def test_get_daily_structured_record_project_notes(
 
     # project_ids derived from project_notes
     assert record["project_ids"] == [1, 2]
+
+
+@patch("obsidian_ai_hub.summerize_day.prompt.render_prompt")
+@patch("obsidian_ai_hub.summerize_day.llm_client.generate_llm_response")
+@patch("obsidian_ai_hub.summerize_day.reader.get_daily_note_path")
+@patch("obsidian_ai_hub.summerize_day.extracter.get_frontmatter_value")
+def test_get_daily_structured_record_does_not_inject_memories(
+    mock_fm, mock_path, mock_llm, mock_render, mock_config
+):
+    target_date = datetime(2023, 10, 27)
+    mock_fm.return_value = None
+    mock_p = MagicMock()
+    mock_p.exists.return_value = True
+    mock_path.return_value = mock_p
+    mock_llm.return_value = json.dumps({"summary": "Summary"})
+    mock_render.return_value = "Rendered Prompt"
+
+    with patch(
+        "obsidian_ai_hub.memory.context.compile_context_text",
+        side_effect=AssertionError("must not compile memories"),
+    ):
+        record = get_daily_structured_record(target_date, "Content", [], [])
+
+    assert record["summary"] == "Summary"
+    prompt_args = mock_render.call_args[0][1]
+    assert "LONG_TERM_MEMORIES" not in prompt_args

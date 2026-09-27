@@ -488,32 +488,40 @@ def test_resolve_policy_defaults_and_override(monkeypatch):
     assert default_policy.format == "evidence"
     assert default_policy.include_person is False
 
-    day_policy = memory.resolve_policy("summarize-day")
-    assert day_policy.kinds == frozenset({"preference", "decision_policy"})
-    assert day_policy.budget == 600
-    assert day_policy.include_person is True
-    assert "fact" in day_policy.resolved_person_kinds
+    # Summaries no longer inject long-term memories: abolished purposes fall
+    # back to the permissive default.
+    for abolished in ("summarize-day", "summarize-week", "summarize-month"):
+        abolished_policy = memory.resolve_policy(abolished)
+        assert abolished_policy.kinds is None
+        assert abolished_policy.budget is None
+        assert abolished_policy.format == "evidence"
+        assert abolished_policy.include_person is False
+
+    draft_policy = memory.resolve_policy("review-draft")
+    assert draft_policy.kinds == frozenset({"preference", "decision_policy"})
+    assert draft_policy.budget == 400
+    assert draft_policy.include_person is False
 
     monkeypatch.setattr(
         config,
         "MEMORY_PURPOSE_OVERRIDES",
-        {"summarize-day": {"kinds": ["fact"], "budget": 123, "format": "fenced"}},
+        {"review-draft": {"kinds": ["fact"], "budget": 123, "format": "evidence"}},
     )
-    overridden = memory.resolve_policy("summarize-day")
+    overridden = memory.resolve_policy("review-draft")
     assert overridden.kinds == frozenset({"fact"})
     assert overridden.budget == 123
-    assert overridden.format == "fenced"
+    assert overridden.format == "evidence"
     # include_person is preserved from the built-in policy when not overridden.
-    assert overridden.include_person is True
+    assert overridden.include_person is False
 
     monkeypatch.setattr(
         config,
         "MEMORY_PURPOSE_OVERRIDES",
-        {"summarize-day": {"format": "bogus", "budget": "not-a-number"}},
+        {"review-draft": {"format": "bogus", "budget": "not-a-number"}},
     )
-    invalid = memory.resolve_policy("summarize-day")
-    assert invalid.format == "evidence"
-    assert invalid.budget == 600
+    invalid = memory.resolve_policy("review-draft")
+    assert invalid.format == "fenced"
+    assert invalid.budget == 400
 
 
 def test_compile_context_purpose_filters_kinds(clean_memory_env, monkeypatch):
@@ -541,10 +549,10 @@ def test_compile_context_purpose_filters_kinds(clean_memory_env, monkeypatch):
         ]
     )
 
-    day_pack = memory.compile_context("summarize-day")
-    assert day_pack["used_memory_ids"] == ["mem_pref"]
-    assert "簡潔な日本語を好む" in day_pack["context"]
-    assert "使用言語はPython" not in day_pack["context"]
+    draft_pack = memory.compile_context("review-draft")
+    assert draft_pack["used_memory_ids"] == ["mem_pref"]
+    assert "簡潔な日本語を好む" in draft_pack["context"]
+    assert "使用言語はPython" not in draft_pack["context"]
 
     target_pack = memory.compile_context("make-target")
     assert set(target_pack["used_memory_ids"]) == {"mem_pref", "mem_fact"}
@@ -558,25 +566,41 @@ def test_compile_context_person_scope_by_purpose(clean_memory_env, monkeypatch):
         "peo_alpha", "甲", "mem_person_alpha", "甲は甘いものが苦手", kind="fact"
     )
 
+    # Abolished summary purposes fall back to the default policy, which
+    # excludes the person scope.
     day_pack = memory.compile_context("summarize-day")
-    assert "mem_person_alpha" in day_pack["used_memory_ids"]
-    assert "甲" in day_pack["context"]
-    assert "甲は甘いものが苦手" in day_pack["context"]
+    assert "mem_person_alpha" not in day_pack["used_memory_ids"]
+    assert "甲は甘いものが苦手" not in day_pack["context"]
 
     # make-target does not include person scope.
     target_pack = memory.compile_context("make-target")
     assert "mem_person_alpha" not in target_pack["used_memory_ids"]
     assert "甲は甘いものが苦手" not in target_pack["context"]
 
+    # An explicit override can still opt a purpose into the person scope.
+    monkeypatch.setattr(
+        config,
+        "MEMORY_PURPOSE_OVERRIDES",
+        {"make-target": {"include_person": True}},
+    )
+    opted_in = memory.compile_context("make-target")
+    assert "mem_person_alpha" in opted_in["used_memory_ids"]
+    assert "甲" in opted_in["context"]
+    assert "甲は甘いものが苦手" in opted_in["context"]
+
 
 def test_compile_context_person_ids_narrow_selection(clean_memory_env, monkeypatch):
     monkeypatch.setattr(config, "MEMORY_CONTEXT_MAX_TOKENS", 800)
-    monkeypatch.setattr(config, "MEMORY_PURPOSE_OVERRIDES", {})
+    monkeypatch.setattr(
+        config,
+        "MEMORY_PURPOSE_OVERRIDES",
+        {"make-target": {"include_person": True}},
+    )
 
     _save_person_memory("peo_alpha", "甲", "mem_person_alpha", "甲の情報")
     _save_person_memory("peo_beta", "乙", "mem_person_beta", "乙の情報")
 
-    pack = memory.compile_context("summarize-day", person_ids=["peo_beta"])
+    pack = memory.compile_context("make-target", person_ids=["peo_beta"])
     assert pack["used_memory_ids"] == ["mem_person_beta"]
     assert "乙" in pack["context"]
     assert "甲の情報" not in pack["context"]
