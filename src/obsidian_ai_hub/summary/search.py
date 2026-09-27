@@ -183,11 +183,13 @@ def _merge_dates_to_ranges(dates: Set[date]) -> Tuple[List[Dict[str, str]], bool
 def _sanitize_entry_for_output(
     entry: Dict[str, Any], matched_fields: List[str]
 ) -> Dict[str, Any]:
+    p_start = entry.get("period_start") or entry.get("period_key")
+    p_end = entry.get("period_end") or entry.get("period_key")
     out = {
         "period_type": entry.get("period_type"),
         "period_key": entry.get("period_key"),
-        "period_start": entry.get("period_start"),
-        "period_end": entry.get("period_end"),
+        "period_start": p_start,
+        "period_end": p_end,
         "summary_id": entry.get("summary_id"),
         "summary": entry.get("summary") or "",
         "keywords": entry.get("keywords") or [],
@@ -367,6 +369,12 @@ def search_summaries(
                             covered_matched_dates.update(w_days)
 
         # Step 3: Day candidates for remaining uncovered dates
+        for dy in day_rows:
+            if not dy.get("period_start"):
+                dy["period_start"] = dy.get("period_key")
+            if not dy.get("period_end"):
+                dy["period_end"] = dy.get("period_key")
+
         day_rows.sort(key=lambda dy: dy["period_key"], reverse=True)
         for dy in day_rows:
             dy_date = parse_date(dy["period_key"])
@@ -393,6 +401,10 @@ def search_summaries(
             filter_matched_dates = set(covered_matched_dates)
             filter_unmatched_dates = source_covered_dates - filter_matched_dates
 
+        # Precompute missing and unmatched ranges for budget estimation
+        sample_missing_ranges, sample_missing_tr = _merge_dates_to_ranges(source_missing_dates)
+        sample_unmatched_ranges, sample_unmatched_tr = _merge_dates_to_ranges(filter_unmatched_dates)
+
         # Truncation and Budget allocation
         returned_entries: List[Dict[str, Any]] = []
         returned_dates: Set[date] = set()
@@ -401,6 +413,14 @@ def search_summaries(
         last_returned_period_start: Optional[str] = None
 
         def estimate_response_size(current_entries: List[Dict[str, Any]]) -> int:
+            cur_dates: Set[date] = set()
+            for e in current_entries:
+                e_s = parse_date(e["period_start"])
+                e_e = parse_date(e["period_end"])
+                for i in range((e_e - e_s).days + 1):
+                    cur_dates.add(e_s + timedelta(days=i))
+            cur_ranges, cur_tr = _merge_dates_to_ranges(cur_dates)
+
             sample_payload = {
                 "requested_range": {"start_date": start_date, "end_date": end_date},
                 "granularity": max_gran,
@@ -411,14 +431,14 @@ def search_summaries(
                     "source_missing_days": len(source_missing_dates),
                     "filter_matched_days": len(filter_matched_dates),
                     "filter_unmatched_days": len(filter_unmatched_dates),
-                    "returned_days": 0,
-                    "source_missing_ranges": [],
-                    "filter_unmatched_ranges": [],
-                    "returned_ranges": [],
+                    "returned_days": len(cur_dates),
+                    "source_missing_ranges": sample_missing_ranges,
+                    "filter_unmatched_ranges": sample_unmatched_ranges,
+                    "returned_ranges": cur_ranges,
                     "ranges_truncated": {
-                        "source_missing": False,
-                        "filter_unmatched": False,
-                        "returned": False,
+                        "source_missing": sample_missing_tr,
+                        "filter_unmatched": sample_unmatched_tr,
+                        "returned": cur_tr,
                     },
                 },
                 "truncated": False,
