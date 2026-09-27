@@ -1,346 +1,364 @@
-# Task Agent プロアクティブ化 計画メモ（Phase A-C）
+# Task Agent 長期目標コーチ計画メモ（Phase 0–5）
 
 Status: Draft（調査・提案。実装未着手）
 
-この文書は、Task Agent を「要求駆動の実行者」から「自発的にユーザーを助け、
-支援し、成長を後押しするエージェント」へ拡張するための調査結果・設計案・
-優先順位を、将来の実装時の参考資料としてまとめたものである。意思決定の正本は
-[specification.md](specification.md) と [adr/](adr/) に置き、
-本書はロードマップと設計候補の整理に限定する。
+この文書は、Task Agent を「依頼を実行する仕組み」から、ユーザー自身が選んだ
+長期目標に向かう過程を、振り返りと小さな一歩を通じて継続支援するコーチへ
+拡張するためのロードマップである。実装の確約や決定記録ではない。確定した
+外部契約は [specification.md](specification.md)、長く残す設計判断は
+[adr/](adr/) を正とする。
 
 関連: [README.md](README.md)、[CONTEXT.md](../../CONTEXT.md)、
+[post-mvp.md](post-mvp.md)、
 [docs/development-quality-playbook.md](../../docs/development-quality-playbook.md)
 
 ---
 
-## 1. 目的と位置づけ
+## 1. 目標像
 
-- 目的: ユーザーの活動・目標・状況を継続的に観測し、必要なときに自ら気づき、
-  提案・問いかけ・フォローアップを行い、ユーザーの成長を支援する。
-- 位置づけ: 既存の要求駆動 Task（人間が依頼 → Plan → 実行）を土台として維持し、
-  その上に「自発ループ」を別レイヤーとして載せる。既存の承認境界・Event 監査・
-  冪等性の仕組みを再利用し、新しい常駐プロセスや自動実行を安易に増やさない。
+このコーチが支えるのは、締切や予定を見張ることではない。ユーザーが持つ
+大きな目標を見失わず、今週の焦点と今日できる小さな一歩に落とし、実行から
+得た学びで道筋を調整し続けることである。
 
----
-
-## 2. 現状の評価
-
-### 2.1 すでに強い点
-
-- 要求駆動の実行基盤: 承認済み Directional Plan → Runtime Orchestrator の動的ループ、
-  `capability_completed` Event による監査、二層 Observation（詳細/履歴要点）、
-  自己修正上限、scope 逸脱時の再承認（[orchestrator.py](../../src/obsidian_ai_hub/tasks/orchestrator.py),
-  [directional.py](../../src/obsidian_ai_hub/tasks/directional.py)）。
-- HITL: 対象質問・カレンダー/リマインダー提案・リサーチ提案・人物候補・メモリ候補など、
-  既存の承認基盤が揃っている（[hitl/](../../src/obsidian_ai_hub/hitl/)）。
-- 提案の冪等性: `research_suggestion_requests` と Task ID 単位のキーで重複登録を防止
-  （[research/capabilities.py](../../src/obsidian_ai_hub/research/capabilities.py)）。
-- Capability の自動派生: Agent Registry のツールを Task Capability として自動公開
-  （[tasks/capabilities.py](../../src/obsidian_ai_hub/tasks/capabilities.py)）。
-- 既存の定期実行: `job_runner` + `jobs/jobs.local.yml` + Web の `/jobs` で cron 的スケジュールを
-  管理（[README.md](../../README.md#job-runner)）。旧称 `task_runner` / `tasks/tasks.local.yml` /
-  `/task-config` は 2026-09 の改称で置換済み。
-
-### 2.2 自発性・成長支援のギャップ
-
-| 領域 | 現状 | ギャップ |
-| --- | --- | --- |
-| トリガ | 定期実行は YAML のシェルコマンド。AI 起点は `--suggest-research-theme`（毎日23:45）1本のみ | エージェント自身が起動条件・周期・フォローを持つ仕組みが無い。`task_agent_*` にトリガ条件列も無い |
-| ユーザーモデル | memory（承認済み400tok注入）、people、`projects.goal`、summaries（mood/sleep）、activity、healthcare（別DB・未接続）が断片化 | 横断スナップショットがツールとして存在しない（planner context pack は日次提案専用の内部関数） |
-| 目標・習慣 | 「今日の目標」は Daily Note への一方向テキスト。`projects.goal` 以外の構造化モデル無し | goal/OKR/habit/streak/check-in のテーブル・API・ツールが無い |
-| 結果追跡 | `planner_proposals` の状態、research feedback が部分的 | 助言の採否・効き目・フォローアップを記録する汎用ストアが無い |
-| 割り込み制御 | LINE push は best-effort（[line_notification/](../../src/obsidian_ai_hub/line_notification/)） | 静音時間・日次予算・頻度上限・重複抑止・ミュートが無い |
-| モデルハーネス | planner/runtime は JSON テキスト生成＋自前パース。role 別モデル/温度/予算は未設定 | role 別モデル、構造化 tool calling、日次トークン/コスト予算、フォールバックが無い |
-
-### 2.3 調査で確認した制約（既存文書の事実）
-
-- Task worker は FastAPI の lifespan 同居・単一。[post-mvp.md](post-mvp.md) の優先1は
-  カレンダー/リマインダー直接書込み、優先2は外部入口と Task 通知、優先3は専用常駐 worker。
-- Web サーバー停止中は Task が進まない。停止時に実行中だった Task は `interrupted` になり
-  自動再実行しない。
-- 自動ロールバック・自動再実行はしない（[adr/no-automatic-rollback-recovery-via-trace-and-hitl.md](adr/no-automatic-rollback-recovery-via-trace-and-hitl.md)）。
-- 書き込み系 Capability は既定 `plan_required`。外部書込みは HITL 経由のみ。
-
----
-
-## 3. 目標像: 自発ループ（Sense → Appraise → Act → Follow-up）
-
-```
-Sense            Appraise              Act                    Follow-up
-  |                |                     |                        |
-cron/event/idle  重要度・新規性・      通知・check_in・        outcome 記録・
- -> 統合context   実行可能性・負担で   Task生成・目標更新     フォロー予約・
- snapshot         スコアリング         提案・限定auto         memory 書き戻し
-                  policy が保留/送信を判断                       -> 次回の Sense へ
-  +---------------- Proactivity Policy（同意・静音・予算・重複抑止）----------------+
+```text
+Long-term Goal ──> Focus ──> Experiment / 今日の一歩
+       ^                 |                |
+       |                 v                v
+       +───── Reflection <──── 結果・気づき・障害
 ```
 
-- **要求駆動 Task（既存）** は「手足」。自発ループは「脳・習慣」として分離する。
-- 送信・実行の可否は LLM ではなく **policy 層**が決める（LLM は候補とスコアを出すだけ）。
-- 閉ループにする: 介入の結果（採用/却下/効き目）を記録し、次回の判断と memory に戻す。
+たとえば「数年かけて専門性を身につける」という Goal に対し、今月の Focus を
+「週に一度、学んだことを自分の言葉でまとめる」と決める。今日の一歩は
+「直近の学習メモから三行で要点を書く」かもしれない。できなかった日には
+達成を責めず、手順・量・Focus 自体を見直す材料にする。
+
+相棒感は通知量や自動実行の多さではなく、次で生まれる。
+
+- 前に大切だと言った Goal と、今日の一歩のつながりが見える。
+- その日の状態に応じて、行動を小さくしたり、休んだり、やり方を変えられる。
+- 前回の気づきや試行を覚えていて、次の問いをそこから始める。
+- 根拠がないときは、もっともらしい助言をせず沈黙する。
+
+### 非目標
+
+- カレンダーの締切管理、予定衝突の検出、Inbox の催促を主目的にしない。
+- 行動量、連続日数、未達回数でユーザーを評価しない。`streak` を初期設計に入れない。
+- 行動履歴から本人が表明していない Goal を作らない。
+- コーチの判断だけで Task、外部書込み、外部通知を実行しない。
+- 健康データから診断・叱咤・緊急性の推定をしない。
 
 ---
 
-## 4. 設計原則・安全境界
+## 2. 現状と設計上の前提
 
-1. 既定は **suggest-only**（通知・提案・質問のみ）。自動実行は可逆なものに限り段階的に。
-2. 外部書込みは既存 HITL/Plan 承認を必ず経由する。Task Agent から直接書かない。
-3. すべての介入に **evidence（根拠）と why-now** を付ける。根拠が弱ければ沈黙する。
-4. 割り込み予算（日次上限・静音時間・重要度しきい値・cooldown・mute）を最優先で尊重する。
-5. 健康データは **集計のみ・opt-in**。原レコードをプロンプトへ出さない。
-6. 追加の常駐デーモンは増やさない（当面はサーバー同居）。将来は post-mvp 優先3で再検討。
-7. 送信・副作用の直前で policy と schema を検証し、失敗時は送信せず理由を記録する。
-8. 秘密値・非公開思考過程を保存しない（既存 redaction 方針を継承）。
+### 活用できる既存資産
 
----
+- `projects.goal`、Daily/Weekly Note、activity、summaries、approved memory には、
+  Goal と振り返りの材料が断片的にある。
+- Task Agent には、Capability ごとの承認境界、Plan/Event の監査、既存 Task を
+  起動する入口がある。Task は、コーチが必要に応じてユーザーへ実行を委ねる先として使える。
+- HITL、memory review、planner proposal には、提案への人間の意思を保存する既存の仕組みがある。
+- Scheduler は `job_runner` を唯一の実行入口とし、定期 Job とワンショット Job を管理する。
 
-## 5. ロードマップ概要
+### 足りないもの
 
-| Phase | テーマ | 主な内容 |
+| 領域 | 現状 | コーチに必要なもの |
 | --- | --- | --- |
-| A | 自発性の土台 | A1 介入ストア+政策+コーチ受信箱 / A2 統合コンテキストツール / A3 自走スケジューラ / A4 通知と問いかけ / A5 目標・習慣モデル |
-| B | 自発ループと成長フィードバック | B1 朝夜ループ / B2 機会検出器 / B3 結果ループ+memory書き戻し / B4 評価ハーネス |
-| C | 成長支援と限定自律 | C1 学習・成長ループ / C2 ドメイン別限定auto / C3 個人モデル統合 / C4 モデルハーネス強化 |
+| 長期性 | `projects.goal` とノートが断片的 | Goal と今週の Focus、今日の Experiment を結ぶ道筋 |
+| 継続性 | 提案や Task の結果が個別に残る | 前回の試行・学び・保留を次回に持ち越す Coach Thread |
+| 日々の支援 | 「今日の目標」は一方向の文章 | Goal に戻れる小さな一歩と、完了/スキップ/再設計の選択 |
+| 自発性 | 23:45 のリサーチ提案など限定的 | ユーザーが望む周期で、文脈に応じて静かに表面化する支援 |
+| 学習 | リサーチ・Vault・memory はある | 学びを試行、振り返り、次の練習へつなぐ閉ループ |
 
-### 決定済みの優先順位（2026-09 時点）
+### 守る既存境界
 
-- 着手範囲: **A1 + A2 のみ**を最初に実装する。
-- 自律レベル: **suggest-only から開始**。書き込み・Task 生成は人間の操作で起動する。
-- 実行プロセス: **当面はサーバー同居**（`make serve` 中のみ動作）。専用 launchd worker は後回し。
-- 健康データ: **集計のみ opt-in** で使う。原データはプロンプトに出さない。
-
----
-
-## 6. Phase A 詳細
-
-### A1. 介入ストア・政策・コーチ受信箱（確定設計）
-
-**趣旨**: 自発的な提案を一箇所に集約する「コーチ受信箱」。suggest-only では Web に提示し、
-ユーザーが accept したときだけ Task を作る。
-
-**DB マイグレーション v48**（[database.py](../../src/obsidian_ai_hub/database.py) の
-`run_migration_v47` の次に `run_migration_v48` を連鎖追加）
-
-- `proactive_interventions`
-  - `intervention_id` (`pi_*`)
-  - `title`, `summary` (why-now), `evidence_json`
-  - `trigger_kind`（例: `manual`, `planner_proposal`, 将来の `stalled_project`）
-  - `dedupe_key`, `importance` (1-5), `novelty`, `urgency`
-  - `status` (`proposed` / `accepted` / `rejected` / `snoozed` / `muted` / `expired`)
-  - `source`, `channel`（当面 `inbox` 固定）, `created_task_id`
-  - `snooze_until`, `cooldown_until`, `expires_at`, `response_reason`
-  - `responded_at`, `created_at`, `updated_at`
-- `proactive_intervention_events`（追記のみの監査。Task Event と同型の最小列）
-- `proactive_policy`
-  - `domain` (`global` / `schedule` / `learning` / `health` / `projects` / `inbox` / `research`)
-  - `mode` (`off` / `suggest`。`approve` / `auto` は将来用に予約)
-  - `min_importance`, `daily_cap`, `quiet_start`, `quiet_end`, `cooldown_hours`,
-    `health_opt_in`, `updated_at`
-  - 初期 seed: global のみ `mode=suggest, min_importance=3, daily_cap=3, health_opt_in=0`
-- `proactive_suppressions`（`dedupe_key`, `reason`, `until`。`until IS NULL` は無期限 mute）
-- インデックス: `(status, created_at)`, `(dedupe_key, cooldown_until)`
-
-**新モジュール `src/obsidian_ai_hub/proactive/`**
-
-- `store.py`: CRUD と状態遷移、Event 追記
-- `policy.py`: `evaluate(intervention) -> allowed | suppressed(reason)`。
-  `off` / dedupe・cooldown / mute / `daily_cap` / `min_importance` / 静音時間を判定する。
-  **送信可否は LLM に決めさせない。**
-- `dedupe.py`: 正規化トピック + 対象 ID の sha256 で `dedupe_key` を決定的に生成
-  （[planner/store.py](../../src/obsidian_ai_hub/planner/store.py) の fingerprint 方式を踏襲）
-- `service.py`
-  - `create_intervention(...)`: policy → 重複 → 日次上限の順に検証し、通れば `proposed` で保存
-  - `respond(action)`: `accept` は `tasks.intake.submit_request` で Task を 1 件作成し
-    `created_task_id` を保存。**同一 intervention の再 accept は Task を増やさない**。
-    `reject` / `snooze` / `mute` は状態と抑止のみ更新
-
-**API / Web**（[web/api.py](../../src/obsidian_ai_hub/web/api.py) にルータ登録）
-
-- `GET /api/v1/proactive/interventions`（status/limit 絞り込み）
-- `POST /api/v1/proactive/interventions`（手動/内部生成。テスト・seed・UI の「気づきを追加」）
-- `POST /api/v1/proactive/interventions/{id}/respond`
-  （`accept|reject|snooze|mute` + `reason` / `snooze_hours`）
-- `GET /api/v1/proactive/policy` / `PUT /api/v1/proactive/policy/{domain}`
-- フロント `/coach`: 介入カード（title / why-now / evidence / importance / status）、
-  accept → Task 詳細へ深リンク、reject/snooze/mute、政策設定（mode・日次上限・静音・health opt-in）。
-  既存デザイン規約に従い、フロント単体テストのみ（ブラウザ E2E は追加しない）。
-
-**小さな producer 橋渡し（推奨・分離可能）**
-
-- [planner/suggest.py](../../src/obsidian_ai_hub/planner/suggest.py) が新しい
-  `planner_proposals` を保存したとき、同一 fingerprint で `trigger_kind='planner_proposal'`
-  の介入も作る。Phase B の検出器が入る前でもコーチ受信箱に実データが入る。
-
-### A2. 統合コンテキストツール（読取専用・auto）
-
-**趣旨**: 断片化したユーザー情報を 1 回で読めるようにし、Phase B の判断材料を揃える。
-
-- `src/obsidian_ai_hub/proactive/context.py`（既存 builder を再実装せず再利用）
-  - `user_context_snapshot`: principal 人物、approved memory、active projects（goal 付き）、
-    直近 day/week 要約（mood/sleep_hours）、activity 7-30 日、予定/リマインダー 7 日、
-    未処理 HITL、queued/running Task、research テーマ。セクション別に予算で切詰め
-    （[tasks/observation.py](../../src/obsidian_ai_hub/tasks/observation.py) の budget 方式を流用）。
-  - `summary_search`: `summaries` + `summary_items`（mood/sleep 含む）を期間・query で検索。
-  - `health_daily_metrics`: `proactive_policy.health_opt_in=0` なら `{"enabled": false}`。
-    有効時も [healthcare/queries.py](../../src/obsidian_ai_hub/healthcare/queries.py) の
-    日次集計のみ（睡眠・運動・HRV 等）。原レコードは返さない。
-- `agents/registry.py` に `input_model` 付きで 3 ツール追加。読取専用なので
-  [tasks/capabilities.py](../../src/obsidian_ai_hub/tasks/capabilities.py) の
-  `AUTO_POLICY_TOOL_IDS` に追加し、Task Capability へ自動露出させる。
-- `compact_schema_text` が解決できることをテストする。
-
-### A3. 自走スケジューラ
-
-- `task_schedules`（`prompt`, `cadence`, `next_run_at`, `idempotency_key`, `source`, `enabled`）
-- サーバー lifespan 内の軽量 tick（新しい常駐デーモンは増やさない）
-- `task_create` capability（冪等キー・source 付き）でエージェント自身がフォロー Task を積む
-- 既存 23:45 の `--suggest-research-theme` をこのテーブルへ移行
-- 専用 launchd worker（post-mvp 優先3）は必要になった段階で再検討
-
-### A4. 通知と問いかけ
-
-- `notify_user`（policy チェック・予算消費・delivery ログ・深リンク）
-- `check_in`（既存 HITL `ask_user` 方式の先回り質問）
-- 通知の outbox / 再送は「通知漏れが運用上問題になった段階」で追加（post-mvp 優先2）
-- チャネルはまず LINE + Web。静音時間・日次予算を実送信前に必ず適用
-
-### A5. 目標・習慣モデル
-
-- `goals`（why / metric / target / project_id / source）+ `goal_progress`
-- `goal_list` / `goal_get` / `goal_propose` / `goal_update_proposal`、`habit_propose`
-- `make_today_target` の「今日の目標」を構造化し、完了チェックを読めるようにする
-- activity / summaries と goal を紐付け、進捗を自動集計する基盤
+- Task は自由文依頼を Plan 化して実行する集約であり、コーチの状態そのものにはしない。
+  コーチから Task を作るのは、ユーザーが明示的に「この一歩を実行として依頼する」と選んだ場合だけである。
+- `plan_required` Capability、HITL、外部書込みの承認境界は変えない。
+- Scheduler の集約・実行器を複製しない。新しい `task_schedules` や Web server lifespan の
+  独自 tick は作らず、時刻ベースの評価が必要になった時点で既存 `job_runner` を使う。
+- サーバー停止後の Task を自動再実行しない。コーチの内部状態も、停止を理由に外部作用を再試行しない。
 
 ---
 
-## 7. Phase B 詳細
+## 3. 提案するドメイン言語
 
-### B1. 朝夜ループ（Task として生成）
+以下はこの Draft 内で使う候補である。Phase 1 の永続モデルを決める段階で、
+既存 `Project`・`Task` と合わせて用語集と ADR を改めて判断する。
 
-- 朝: `user_context_snapshot` → 検出器 → スコアリング → 予算内で通知/check-in/提案
-- 夜: 振り返り収集（構造化セルフレポート）→ 翌日の材料
-- ハードコード cron ではなくタスクテンプレート（A3）から生成する
+| 用語 | 意味 | 境界 |
+| --- | --- | --- |
+| **Goal** | 数か月〜年単位で、ユーザーが自分で選ぶ望ましい方向・到達像・理由 | 行動ログから自動作成しない。測定指標は任意。 |
+| **Focus** | 一つの Goal に結びつく、数週間程度の今の重点 | Focus がない Goal は休止中でもよい。複数 Goal の自動優先順位付けはしない。 |
+| **Experiment** | Focus を前進させるため、今日または今週に試す最小の行動・やり方 | 完了だけでなく、skip・縮小・変更からも学ぶ。Habit や Task と同一視しない。 |
+| **Reflection** | 実行結果、気づき、障害、次の仮説を振り返る対話または記録 | 事実とユーザーの解釈を分け、コーチの推測を事実として保存しない。 |
+| **Coach Thread** | Goal から Experiment、Reflection を時系列で結んだ継続支援の単位 | 一回限りの通知カードではない。Task/HITL への参照は持てるが、その状態を所有しない。 |
+| **Task** | 既存 Task Agent が受ける、実行境界を持つ一件の依頼 | Coach Thread の一部を実行したいときだけ、明示操作で関連付ける。 |
 
-### B2. 機会検出器（決定的ルール + LLM 判定の二段）
-
-- プロジェクト停滞、目標ドリフト、習慣未達、睡眠負債/過労（health opt-in）、
-  予定過密/衝突、Inbox 滞留、HITL 放置、リサーチ/読書のフォロー期限、間隔反復の復習期限
-- 各検出器は候補（evidence + スコア）を出し、policy が送信を決める
-
-### B3. 結果ループ
-
-- 介入への accept/reject/snooze、follow-up Task、`reflection` プロンプトで
-  memory 候補へ自動書き戻し（人間承認は既存 memory レビューを流用）
-
-### B4. 評価ハーネス
-
-- fake clock / fake tool での golden シナリオ（予算順守・静音・重複なし・弱証拠で沈黙）
-- 過去データの replay。指標: 介入数/日、accept 率、snooze/mute 率、follow-through、目標進捗
+最初のモデルでは `Experiment -> Focus -> Goal` の参照を必須にする。これにより、
+今日の行動が孤立した ToDo にならない。一方で Goal の多段階ツリー、OKR の採点、
+自動の優先順位づけは後回しにする。
 
 ---
 
-## 8. Phase C 詳細
+## 4. コーチの基本ループとポリシー
 
-- C1 学習・成長ループ: 目標 → Vault からスキル/知識マップ → 練習計画・間隔反復・進捗レポート
-- C2 ドメイン別限定 auto: 可逆・記録・undo 付き。外部書込みは HITL 経由のまま
-- C3 個人モデル統合: `copilot/core/*.md`（values 等）のバージョン管理・差分検知・全エージェント注入
-- C4 モデルハーネス強化: role 別モデル（安価な triage/検出と強力な coach）、
-  role 別 temperature / max_tokens、日次トークン・コスト予算の強制、
-  planner/runtime の構造化 tool calling 化とフォールバック
+```text
+ユーザーが Goal を選ぶ
+        ↓
+週次 Reflection で Focus と Experiment を決める
+        ↓
+日々、必要なら小さな一歩を表示する
+        ↓
+完了 / skip / 再設計を記録する
+        ↓
+次の Reflection が、結果を Goal に照らして意味づける
+```
 
----
+### 原則
 
-## 9. 具体設計の補足
+1. **ユーザーが主語であること** — Goal、優先順位、休止、終了はユーザーが決める。コーチは
+   仮説と選択肢を出すが、人生の評価をしない。
+2. **小ささを調整できること** — 疲労や多忙を未達に変換せず、「二分でできる形にする」
+   「今週は休止する」「Focus を取り替える」を同じ正当な選択肢として示す。
+3. **根拠と長期の両方を示すこと** — 表示する支援は、関連する Goal / Focus と
+   `why now` を示す。根拠の参照元をたどれ、ユーザーが訂正できる。
+4. **候補・表示・通知を分けること** — 候補を作ること、画面に表示すること、外部通知することは
+   別の policy 判定である。通知予算は表示件数とは別に消費する。
+5. **静かに始めること** — 初期は Web 内でのみ支援を表面化し、外部通知は既定で off とする。
+   通知は、ユーザーが選んだ周期・チャネル・静音時間の範囲だけで行う。
+6. **学びは承認して残すこと** — Reflection から memory に残す内容は既存の memory review を通す。
+   長期記憶に、モデルの推測や一時的な感情を自動で書き戻さない。
+7. **罪悪感を利用しないこと** — 連続記録、未達の赤表示、期限超過の催促を成功指標にしない。
 
-### 9.1 プロンプト案
+### ユーザーが制御できること
 
-- Proactive persona（コーチ人格）: 最後の一歩を 1 つ、証拠を添える、罪悪感で動かさない。
-  既存 `copilot/core/{values,response_style,decision_policy,risk_tolerance}.md` を再利用。
-- Appraise プロンプト: `importance / novelty / actionability / urgency / user_burden /
-  confidence` を JSON スコアで出力。送信判断は policy。
-- Anti-spam プロンプト: 具体証拠が無ければ提案しない、cooldown 内は再提案しない、
-  why-now と evidence を必ず添付する。
-- Reflection プロンプト: 何を提案し、ユーザーがどう応じ、何を学んだかを構造化し memory 候補へ。
-
-### 9.2 モデルハーネス案
-
-- role 別設定キー: `PROACTIVE_TRIAGE_PROVIDER/MODEL`（検出・選別、安価）、
-  `PROACTIVE_COACH_PROVIDER/MODEL`（コーチング、強力）、`TASK_PLANNER_*`。
-- role 別 temperature / max_tokens。既存の固定 0.7 / 4096 を role で上書き可能に。
-- 日次予算は `llm_call_logs` を集計し hard stop。Task 単位の予算（post-mvp 優先4）と整合。
-- planner/runtime の構造化 tool calling 化は信頼性よりも保守コストの改善として後段。
-
-### 9.3 安全・割り込み設計
-
-- ドメイン別モード: `off` / `suggest-only` / `approve-each` / `bounded-auto`。既定は suggest-only。
-- 静音時間・日次割り込み予算（重要度別）・dedupe キーの cooldown・ワンタップ mute/snooze。
-- 全メッセージに evidence + why-now + 却下手段。自動実行は可逆なもののみ、外部書込みは不可。
-- 健康データは opt-in・集計のみ。kill switch と「なぜ来たか」透明化ページ。
-
-### 9.4 操作シナリオ契約（A1 の accept → Task 作成）
-
-| 段階 | 入力と正本 | 機械可読な識別子 | 永続化 | 次に読む主体 | 停止・失敗時 | 不可逆操作 |
-| --- | --- | --- | --- | --- | --- | --- |
-| 介入生成 | `InterventionCreate` + policy | `intervention_id`, `dedupe_key` | `proactive_interventions(proposed)` | WebUI/API | off/重複/日次上限/mute/静音は保存しない（副作用なし） | なし |
-| accept | `intervention_id` + prompt 本文 | `created_task_id` | `status=accepted`, `created_task_id` | Task worker | 2 回目 accept は Task を増やさない | Task 作成（内部） |
-| reject/snooze/mute | `intervention_id` | `status` / `snooze_until` / suppressions | 状態・抑止のみ | 次回の生成 | — | なし |
+- コーチ機能全体、Goal ごと、Focus ごとの休止・終了・再開
+- 週次 Reflection と日々の一歩を表示する頻度
+- Web 内だけ / digest / 外部通知のチャネル別許可
+- 「この提案だけ不要」「この種類は不要」「この話題は扱わない」の粒度を選ぶフィードバック
+- 表示根拠の訂正、関連づけの解除、過去の Experiment のアーカイブ
 
 ---
 
-## 10. 実装順と検証手順（A1 + A2）
+## 5. 実装優先順位
 
-境界から閉じる順に進める。
+基盤の汎用性ではなく、ユーザーが Goal と今日の一歩のつながりを実感できる最短の
+縦断体験を優先する。各 Phase は、前段の利用実感とフィードバックを踏まえて次へ進む。
 
-1. v48 migration と `proactive/store.py` + policy/dedupe
-2. `proactive/service.py` の accept → Task（ここで縦断テストを先に通す）
-3. API + 認証 + フロント `/coach`
-4. `proactive/context.py` + registry ツール 3 種 + capability policy
-5. planner bridge（任意）→ ドキュメント → OCR / 実機確認
-
-**テスト**
-
-- `tests/test_proactive_store.py`: off/静音/日次上限/min_importance/cooldown/mute、
-  dedupe 安定性、遷移、accept 1 回だけ Task 作成（再 accept で増えない）
-- `tests/test_proactive_api.py`: 作成 → respond、バリデーション、政策更新、認証
-- `tests/test_proactive_context_tools.py`: snapshot に要約・活動・未処理 HITL が入る、
-  `summary_search` の期間/query、health opt-out/opt-in（healthcare はクエリ層モック）
-- `tests/test_agents_registry.py` 拡張: 3 ツール登録と schema 解決
-- Frontend: `/coach` の単体テスト（fetch モック）。ブラウザ E2E は追加しない
-
-**ドキュメント**
-
-- [specification.md](specification.md): Capability 行・操作シナリオ
-- 新規 ADR `adr/proactive-interventions-and-policy.md`: 介入ストアを
-  `planner_proposals` と分ける理由、suggest-only 既定、サーバー同居、健康 opt-in、
-  自動実行しない方針
-- [CONTEXT.md](../../CONTEXT.md): 用語「介入 / 自発性ポリシー / コーチ受信箱」
-- [ai_wiki/00-Index.md](../../ai_wiki/00-Index.md): ADR へのリンク
-
-**完了時**
-
-- `uv run pytest tests/`
-- OCR レビュー（操作シナリオ・識別子・停止条件を背景に渡す。出力はファイルへ保存して読む）
-- 実 DB で API/UI から介入作成 → accept → Task 1 件を確認
-- `make serve` でサーバー再起動
+| Phase | テーマ | 最初に提供する価値 | 後段へ回すもの |
+| --- | --- | --- | --- |
+| 0 | コーチ契約と評価境界 | どの距離感なら歓迎されるかを安全に試せる | 汎用通知、全量コンテキスト |
+| 1 | Goal と週次 Reflection | 大目標と今週の Focus を自分の言葉でつなげる | 日次通知、Habit、Task 自動作成 |
+| 2 | Experiment と日々の一歩 | 今日の小さな行動を長期の道筋に接続し続ける | streak、外部通知、広い自動検出 |
+| 3 | 静かな自発性 | ユーザーが選んだ周期で、必要な支援だけ表面化する | LINE の既定送信、任意 Task の自走 |
+| 4 | 適応的な振り返り | 試行結果・ノート・活動から、やり方を一緒に調整する | 健康の推論、強い自律実行 |
+| 5 | 学びの成長ループ | スキル・知識・練習を長期 Goal へつなぐ | ドメイン横断の自動コーチング |
 
 ---
 
-## 11. 未決事項・確認したい点
+## 6. Phase 0 — コーチ契約と評価境界
 
-1. planner bridge（`planner_proposals` → 介入）を A1 に含めるか、独立させるか。
-2. フロントの URL 名（`/coach` か `/task-agent` 配下に置くか）とナビ位置。
-3. policy の初期値（`daily_cap=3`, `min_importance=3`, `cooldown_hours`）の妥当性。
-4. 「今日の目標」の構造化方法（Daily Note の frontmatter か新テーブルか）。
-5. 将来の通知チャネル（LINE / Push / Web）の優先順位。
-6. 日次トークン・コスト予算の初期上限と、超過時の挙動（停止 / 降格 / 通知のみ）。
+### 目的
+
+実装を増やす前に、コーチが歓迎される振る舞いと、黙るべき状況を固定する。
+これは一般的な `proactive_interventions` 基盤を作る Phase ではない。
+
+### 範囲
+
+- 初回設定で、コーチの対象（Goal の振り返り / 日々の一歩 / 学び）、希望頻度、
+  外部通知の許可を明示する。既定は Web 内、週次、外部通知なしとする。
+- 「何のために今これを出したか」「どの記録を使ったか」「どの Goal に関係するか」を
+  すべての表示に要求する。
+- `helpful`、`not_now`、`already_done`、`too_much`、`wrong_connection`、
+  `do_not_raise_this_topic` を、将来の行動を変えるフィードバックとして定義する。
+- fake clock / fake source によるシナリオを先に用意する。特に、根拠不足では表示しない、
+  休止した Focus を再提示しない、skip を失敗扱いしない、通知許可なしに送信しない、を検証する。
+
+### 完了の見立て
+
+ユーザーが支援の範囲と停止方法を理解でき、テストが「役立つ候補」だけでなく
+「何もしないこと」も検証できる。文面の一致ではなく、policy と状態遷移を検証する。
 
 ---
 
-## 12. 関連文書
+## 7. Phase 1 — Goal コンパスと週次 Reflection
 
-- [post-mvp.md](post-mvp.md) — 外部入口、Task 通知、専用 worker、実行予算の位置づけ
-- [specification.md](specification.md) — Capability、承認ポリシー、操作シナリオ
-- [adr/directional-plan-and-runtime-orchestrator.md](adr/directional-plan-and-runtime-orchestrator.md) — 動的ループ
-- [adr/no-automatic-rollback-recovery-via-trace-and-hitl.md](adr/no-automatic-rollback-recovery-via-trace-and-hitl.md) — 自動復旧しない方針
-- [docs/development-quality-playbook.md](../../docs/development-quality-playbook.md) — 不可逆変更の設計・検証
-- [docs/testing.md](../../docs/testing.md) — テスト隔離と安全
+### 目的
+
+大目標を空疎な宣言で終わらせず、今週どこへ力を使うかをユーザー自身が決められるようにする。
+この Phase が最初の利用可能な縦断体験である。
+
+### 範囲
+
+- Goal を作成・編集・休止・終了できる。必須なのはユーザーの表現した到達像と理由であり、
+  数値目標・期日は任意にする。
+- 各 Goal に、ユーザーが選んだ現在の Focus を一つ以上関連づける。Focus は数週間単位の
+  仮説であり、変更してよいことを明示する。
+- 週次 Reflection では、関連ノート、最近の Experiment、既存 `projects.goal` を
+  最小限の根拠として示し、次を一緒に決める。
+  - 今週の Focus はまだ妥当か
+  - 何が進んだか、何が妨げになったか
+  - 次に試す最小の Experiment は何か
+- Goal / Focus / Reflection / Experiment を Coach Thread として時系列に表示する。
+  ユーザーは、コーチの要約や関連づけを訂正できる。
+- 初期の context は週次 Reflection 専用に最小化する。全ユーザー情報を返す
+  `user_context_snapshot` を Agent Registry や `AUTO_POLICY_TOOL_IDS` に公開しない。
+
+### 境界
+
+- Task の作成、LINE 送信、planner proposal の複製、health data の利用はしない。
+- `projects.goal` を直ちに置き換えない。Project と独立した人生・学習上の Goal を扱うため、
+  データ移行の要否は実装開始時に別途判断する。
+- 新しい永続集約を導入するため、Goal / Focus / Experiment の所有関係、アーカイブ、
+  既存 Project との関係が固まった時点で ADR 候補として評価する。
+
+### 代表シナリオ
+
+> ユーザーは「技術を深く理解して、人に説明できるようになる」を Goal にし、今月の
+> Focus を「理解を外に出す習慣を試す」と選ぶ。週次 Reflection で、今週は二回メモを
+> 書けたが長すぎて続かなかったと記録し、次週の Experiment を「一つの概念を三行で
+> 説明する」に縮小する。コーチは、量の不足ではなく、続けやすい手順を見つけた学びとして扱う。
+
+---
+
+## 8. Phase 2 — Experiment と日々の一歩
+
+### 目的
+
+週次に選んだ Focus を、場当たり的な ToDo ではない今日の小さな一歩に変換する。
+
+### 範囲
+
+- Focus ごとに、今日または今週に試す Experiment を作る。Experiment は Goal への関係と、
+  小さくする理由を表示する。
+- ユーザーがコーチ画面を開いたとき、現在の Experiment を一つだけ静かに提示する。
+  `done`、`skip`、`smaller`、`try_another_way`、`reflect_later` を同等の操作として扱う。
+- `skip` や繰り返しの未着手は、催促の根拠ではなく次の Reflection で再設計する根拠にする。
+- ユーザーが「ここは実行を頼みたい」と選んだときだけ、既存 Task Agent の依頼を作る。
+  作成後の Task は既存の Plan 承認・Capability policy に従い、Coach Thread には参照だけを残す。
+
+### 完了の見立て
+
+ユーザーは一つの画面で、`今日の一歩 -> Focus -> Goal` をたどれ、行動できない日にも
+自分で調整を選べる。日々の操作をしたことで、通知や未達の圧力が増えない。
+
+---
+
+## 9. Phase 3 — 静かな自発性
+
+### 目的
+
+ユーザーが毎回コーチ画面を思い出さなくても、選択済みの Goal と Focus に関する支援だけを
+適切なタイミングで表面化する。
+
+### 範囲
+
+- 既存 `job_runner` が、選択された週次 Reflection 時刻や Experiment の振り返り時刻に
+  Coach Thread を評価する。独自の scheduler table、FastAPI lifespan tick、エージェントの
+  任意 Task 自動作成は導入しない。
+- 評価は `candidate -> surface -> deliver` の三段に分ける。
+  - **candidate**: Focus と Experiment から支援候補を作る。
+  - **surface**: Web のコーチ受信箱や digest に表示する。
+  - **deliver**: 明示 opt-in のチャネルだけへ外部通知する。
+- 最初の検出条件は、ユーザー自身が選んだ Focus / Experiment の振り返り時期に限る。
+  活動量低下、カレンダー、睡眠、一般的な Project 停滞を根拠に割り込まない。
+- 外部通知を有効にする場合も、静音時間、チャネル別予算、snooze、topic mute、
+  根拠と `why now` を必須にする。静音時間中は捨てずに、期限を過ぎない範囲で延期する。
+
+### 評価
+
+本番送信前に shadow mode を通す。候補数や accept 率だけで最適化せず、次を観察する。
+
+- 週次 Reflection に戻る頻度と、Focus が明確になったと感じるか
+- `too_much`、mute、誤った関連づけの訂正が増えていないか
+- 提示後に Experiment を縮小・変更・休止できたか
+- 通知しなかったことで失われた価値より、不要な割り込みが少ないか
+
+---
+
+## 10. Phase 4 — 適応的な振り返りと文脈
+
+### 目的
+
+複数回の試行から、Goal に近づく方法そのものをユーザーと調整できるようにする。
+
+### 範囲
+
+- Goal / Focus に明示的に関連づけられたノート、activity、Project、Task 結果を、
+  目的別かつ予算付きで読む `coach_context` を導入する。入力は source reference と取得範囲を
+  返し、関連しない approved memory や health を一括注入しない。
+- 決定的な条件で候補を作り、LLM は要約・問い・小さな実験案を作る役に限定する。
+  例: 同じ Experiment が何度も `skip` なら、再通知ではなく「量を半分にするか、
+  Focus を変えるか」を Reflection 候補にする。
+- Reflection のうち長期に残す価値がある事実・好みは、既存 memory review の候補にする。
+  自動承認や、モデルの推測の保存はしない。
+- 候補生成とコーチ応答の品質・コストを測った後にだけ、role 別モデル、日次 LLM 予算、
+  structured tool calling を導入する。
+
+### 境界
+
+health data はこの Phase の入力に含めない。健康を扱う場合は、利用目的、集計範囲、
+保存、通知、失効を分けた opt-in と、別の安全レビューが必要である。
+
+---
+
+## 11. Phase 5 — 学びの成長ループと選択的な拡張
+
+### 目的
+
+長期 Goal に結びつく学びを、知識・練習・振り返りの循環として支える。
+
+### 範囲
+
+- Vault の学習記録から、ユーザーが確認したスキル・知識マップを作り、Focus と結びつける。
+- 学びの Experiment として、説明する、作る、振り返る、間隔を空けて復習する、といった
+  練習を提案する。提案は常に Goal / Focus と根拠を示す。
+- Habit や定量指標は、ユーザーが継続して望む場合にだけ導入する。継続日数を目的化せず、
+  Goal への寄与と負担の見直しを中心にする。
+- 限定 auto は、内部の下書き・集計など可逆で記録可能な操作から検討する。外部書込みは
+  引き続き既存 HITL または `plan_required` の承認境界を通す。
+
+---
+
+## 12. 意図的に後回しにする設計
+
+- 汎用 `proactive_interventions` を、出所の違う提案すべての共通受信箱として先に作ること。
+  まず Coach Thread で必要な状態とフィードバックを学ぶ。
+- `planner_proposals` を別の介入レコードへ複製する bridge。既存 proposal と二重の状態・
+  却下理由を持つため、必要になった時点で参照アダプタとして統合を検討する。
+- `task_schedules`、サーバー同居の独自 scheduler、任意の follow-up Task 自動作成。
+- 全データを束ねた `user_context_snapshot` の汎用 `auto` Capability 化。
+- LINE / Push の既定送信、健康シグナル、目標ドリフトや過労の自動検出。
+- streak、未達通知、達成率ランキングのような圧力を生む仕組み。
+
+---
+
+## 13. 実装・検証の共通条件
+
+- DB migration 番号は実装時点の次番号を使い、固定の過去番号を計画に書かない。
+- Goal、Focus、Experiment、Reflection の永続モデルは、データ移行と複数モジュールへの影響が
+  大きい。Phase 1 開始時に、所有関係・Project との関係・アーカイブ・保持を比較して ADR 候補かを判断する。
+- Task 作成、外部通知、外部書込みを各 Phase に加えるときは、対象ID、冪等性、承認範囲、
+  保存、失敗時の停止先を操作シナリオ契約として定める。
+- テストは prompt や画面文言ではなく、Goal との関連必須、休止中の非表示、skip の扱い、
+  通知許可、重複抑止、Task を明示操作でしか作らないことを検証する。
+- Web の検証は既存方針どおり、対象画面の手動確認と有用な単体・統合テストで行い、
+  browser E2E を追加しない。
+
+---
+
+## 14. 次に確かめる仮説
+
+この計画の最初の仮説は、「一週間に一度、大目標・Focus・小さな試行を一緒に
+見直す体験」が、日々の自動通知より先に信頼と継続性を作る、である。
+
+Phase 1 を終えたら、次を実データと利用感から見直す。
+
+1. Goal と Focus の関係は、ユーザーにとって自然に理解できたか。
+2. Experiment は負担を減らし、Goal とのつながりを感じさせたか。
+3. Reflection のどの問い・情報源が役に立ち、どれが場当たり的だったか。
+4. 日々の表示や外部通知を足す前に、どの頻度・タイミングなら歓迎されるか。
+
+この回答を得てから Phase 2 以降の細部を決める。コーチが「先回り」する範囲は、
+ユーザーの明示した Goal と、実際の振り返りで得た信頼を超えないものとする。

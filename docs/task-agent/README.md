@@ -14,7 +14,7 @@ Task Agent は、自由文の依頼を内部で実行計画へ変換し、既存
 | [CONTEXT.md](../../CONTEXT.md) | 用語、境界、不変条件 |
 | [specification.md](specification.md) | 確定済みの外部契約と振る舞い（MVP 実装済み） |
 | [post-mvp.md](post-mvp.md) | MVP後に再検討する未実装の機能・運用項目 |
-| [proactive-plan.md](proactive-plan.md) | 自発性・成長支援のロードマップと設計候補（Phase A-C、実装未着手） |
+| [proactive-plan.md](proactive-plan.md) | 長期目標コーチのロードマップと設計候補（Phase 0-5、実装未着手） |
 | [adr/](adr/) | 変更コストが高い設計判断 |
 
 実装手順・完了済み TODO は Git 履歴に残し、恒久の判断は [adr/](adr/) と `ai_wiki/` の決定記録を正とする。
