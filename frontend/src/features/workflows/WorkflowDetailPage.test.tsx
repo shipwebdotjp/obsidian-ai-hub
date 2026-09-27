@@ -4,7 +4,6 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createWorkflowRevision,
-  createWorkflowRun,
   createWorkflowUserTemplate,
   deleteWorkflow,
   deleteWorkflowRevision,
@@ -19,7 +18,6 @@ import WorkflowDetailPage from "./WorkflowDetailPage";
 
 vi.mock("../../api/client", () => ({
   createWorkflowRevision: vi.fn(),
-  createWorkflowRun: vi.fn(),
   createWorkflowUserTemplate: vi.fn(),
   deleteWorkflow: vi.fn(),
   deleteWorkflowRevision: vi.fn(),
@@ -33,7 +31,6 @@ vi.mock("../../api/client", () => ({
 
 const mockGetWorkflow = vi.mocked(getWorkflow);
 const mockCreateWorkflowRevision = vi.mocked(createWorkflowRevision);
-const mockCreateWorkflowRun = vi.mocked(createWorkflowRun);
 const mockDeleteWorkflowRevision = vi.mocked(deleteWorkflowRevision);
 const mockDeleteWorkflowRun = vi.mocked(deleteWorkflowRun);
 const mockUpdateWorkflow = vi.mocked(updateWorkflow);
@@ -89,7 +86,6 @@ beforeEach(() => {
   vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
   mockGetWorkflow.mockResolvedValue(sampleWorkflow as any);
   mockCreateWorkflowRevision.mockResolvedValue({} as any);
-  mockCreateWorkflowRun.mockResolvedValue({ run_id: "wrun_new" } as any);
   mockDeleteWorkflowRevision.mockResolvedValue({
     success: true,
     revision_id: "wrev_draft",
@@ -311,27 +307,25 @@ describe("WorkflowDetailPage published revision actions", () => {
   });
 });
 
-describe("WorkflowDetailPage run from published revision", () => {
-  it("opens the run form and starts a run, then navigates to it", async () => {
+describe("WorkflowDetailPage published revision", () => {
+  it("links to the editor to inspect and run the published revision", async () => {
     const user = userEvent.setup();
     renderPage();
     await screen.findByRole("heading", { name: "テストワークフロー" });
-    await user.click(screen.getByTestId("run-form-toggle"));
-    await user.click(screen.getByTestId("run-start"));
-    await waitFor(() =>
-      expect(mockCreateWorkflowRun).toHaveBeenCalledWith("wrev_published", {}),
-    );
-    await screen.findByText("run page");
+    await user.click(screen.getByTestId("open-published-editor"));
+    await screen.findByText("editor");
   });
 
-  it("offers no run action when nothing is published", async () => {
+  it("shows no editor link when nothing is published", async () => {
     mockGetWorkflow.mockResolvedValue({
       ...sampleWorkflow,
       revisions: [sampleWorkflow.revisions[1]],
     } as any);
     renderPage();
     await screen.findByRole("heading", { name: "テストワークフロー" });
-    expect(screen.queryByTestId("run-form-toggle")).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("open-published-editor"),
+    ).not.toBeInTheDocument();
   });
 });
 

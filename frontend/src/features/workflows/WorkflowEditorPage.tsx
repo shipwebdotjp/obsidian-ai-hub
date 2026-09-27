@@ -492,36 +492,40 @@ export default function WorkflowEditorPage() {
         | undefined)
     : undefined;
 
+  // Published/superseded revisions are immutable: show the definition
+  // read-only and allow execution only for the published one.
+  const readOnly = revision.status !== "draft";
+
   return (
     <div className="flex h-full flex-col bg-slate-50">
       <WorkflowBreadcrumb
         items={[
           { label: "ワークフロー詳細", to: workflowDetailPath(revision.workflow_id) },
-          { label: `v${revision.version} 編集` },
+          { label: readOnly ? `v${revision.version} 表示` : `v${revision.version} 編集` },
         ]}
       />
       <header className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-white px-4 py-2">
         <div className="text-sm font-semibold">
           {revision.workflow_id} / v{revision.version} ({revision.status})
           {dirty && <span className="ml-2 text-xs text-amber-700">未保存</span>}
-          {revision.status !== "draft" && (
-            <span className="ml-2 text-xs font-normal text-slate-500">
-              {revision.status === "published"
-                ? "このリビジョンは編集できません（実行のみ）"
-                : "このリビジョンは編集できません"}
-            </span>
+          {readOnly && (
+            <span className="ml-2 text-xs font-normal text-slate-500">表示のみ</span>
           )}
         </div>
         <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={save} className="cursor-pointer rounded bg-slate-900 px-3 py-1 text-xs text-white">
-            保存
-          </button>
-          <button type="button" onClick={onValidate} className="cursor-pointer rounded border border-slate-300 bg-white px-3 py-1 text-xs">
-            検証
-          </button>
-          <button type="button" onClick={onPublish} className="cursor-pointer rounded bg-emerald-600 px-3 py-1 text-xs text-white">
-            公開
-          </button>
+          {!readOnly && (
+            <>
+              <button type="button" onClick={save} className="cursor-pointer rounded bg-slate-900 px-3 py-1 text-xs text-white">
+                保存
+              </button>
+              <button type="button" onClick={onValidate} className="cursor-pointer rounded border border-slate-300 bg-white px-3 py-1 text-xs">
+                検証
+              </button>
+              <button type="button" onClick={onPublish} className="cursor-pointer rounded bg-emerald-600 px-3 py-1 text-xs text-white">
+                公開
+              </button>
+            </>
+          )}
           {revision.status === "published" ? (
             <button type="button" onClick={onStart} className="cursor-pointer rounded bg-blue-600 px-3 py-1 text-xs text-white">
               実行
@@ -612,14 +616,20 @@ export default function WorkflowEditorPage() {
             edges={edges}
             selectedNodeId={selectedNodeId}
             onSelectNode={setSelectedNodeId}
-            onMoveNode={(nodeId, position) => {
-              setNodes((prev) => moveNode(prev, nodeId, position));
-              markDirty();
-            }}
+            readOnly={readOnly}
+            onMoveNode={
+              readOnly
+                ? undefined
+                : (nodeId, position) => {
+                    setNodes((prev) => moveNode(prev, nodeId, position));
+                    markDirty();
+                  }
+            }
           />
         </div>
 
         <aside className="w-96 shrink-0 space-y-3 overflow-auto border-l border-slate-200 bg-white p-3 text-xs">
+          {!readOnly && (
           <section className="space-y-2">
             <h3 className="font-semibold">Node 追加</h3>
             <div className="flex flex-wrap gap-2">
@@ -684,7 +694,9 @@ export default function WorkflowEditorPage() {
               </button>
             </div>
           </section>
+          )}
 
+          {!readOnly && (
           <section className="space-y-2">
             <h3 className="font-semibold">Edge 追加</h3>
             <select
@@ -747,7 +759,9 @@ export default function WorkflowEditorPage() {
               />
             )}
           </section>
+          )}
 
+          <fieldset disabled={readOnly} className="space-y-3">
           <section className="space-y-2">
             <h3 className="font-semibold">入力 Schema</h3>
             <SchemaAuthoringForm
@@ -1317,7 +1331,7 @@ export default function WorkflowEditorPage() {
                       {edge.condition ? ", cond" : ""})
                     </span>
                     <span className="flex gap-2">
-                      {edge.edge_kind === "normal" && (
+                      {!readOnly && edge.edge_kind === "normal" && (
                         <button
                           type="button"
                           className="cursor-pointer text-blue-700"
@@ -1332,6 +1346,7 @@ export default function WorkflowEditorPage() {
                           条件
                         </button>
                       )}
+                      {!readOnly && (
                       <button
                         type="button"
                         className="cursor-pointer text-rose-700"
@@ -1347,9 +1362,17 @@ export default function WorkflowEditorPage() {
                       >
                         削除
                       </button>
+                      )}
                     </span>
                   </div>
-                  {editingEdgeId === edge.edge_id && (
+                  {readOnly ? (
+                    edge.condition ? (
+                      <pre className="max-h-32 overflow-auto rounded bg-slate-50 p-1 font-mono text-[11px] text-slate-600">
+                        {JSON.stringify(edge.condition, null, 2)}
+                      </pre>
+                    ) : null
+                  ) : (
+                  editingEdgeId === edge.edge_id && (
                     <ConditionEditor
                       idPrefix={`edge-${edge.edge_id}`}
                       condition={edge.condition}
@@ -1371,12 +1394,29 @@ export default function WorkflowEditorPage() {
                         markDirty();
                       }}
                     />
+                  )
                   )}
                 </li>
               ))}
             </ul>
           </section>
+          </fieldset>
 
+          {readOnly && (
+            <details className="rounded border border-slate-200 bg-white">
+              <summary
+                data-testid="inputs-schema-json-toggle"
+                className="cursor-pointer px-2 py-1 text-xs text-slate-600 hover:bg-slate-50"
+              >
+                入力 Schema を JSON で表示
+              </summary>
+              <pre className="max-h-64 overflow-auto border-t border-slate-200 p-2 font-mono text-[11px] text-slate-700">
+                {JSON.stringify(inputsSchema, null, 2)}
+              </pre>
+            </details>
+          )}
+
+          {revision.status !== "superseded" && (
           <section className="space-y-2 rounded border border-slate-200 p-2">
             <h3 className="font-semibold">実行入力</h3>
             <InputsSchemaForm
@@ -1389,6 +1429,7 @@ export default function WorkflowEditorPage() {
               expressionReferenceGroups={[runContextReferenceGroup()]}
             />
           </section>
+          )}
         </aside>
       </div>
     </div>

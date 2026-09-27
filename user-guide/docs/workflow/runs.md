@@ -8,10 +8,8 @@ title: Run・承認・復旧
 ## Run を作成する
 
 Run は **`published` Revision からのみ** 作成できます。
-Workflow 詳細の **公開中の Revision** で **実行** を押し、入力フォームに値を入れて
-**この入力で実行** を押します。エディタの **実行入力** に値を入れて **実行** を押す方法も
-ありますが、エディタの実行ボタンは公開済み Revision を開いたときだけ表示されます
-（下書きのままでは実行できません。先に **公開** してください）。
+Workflow 詳細の **公開中の Revision** で **開く** を押し、エディタの **実行入力** に
+値を入れて **実行** を押します。実行入力は式（`{"$expr": ...}` の日付式）にも対応しています。
 API では `POST /api/v1/workflows/revisions/:revision_id/runs` を使います。
 
 入力は Revision の `inputs_schema` で検証されます。スキーマで `default` を設定した項目は、

@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   createWorkflowRevision,
-  createWorkflowRun,
   createWorkflowUserTemplate,
   deleteWorkflow,
   deleteWorkflowRevision,
@@ -26,7 +25,6 @@ import { downloadDefinition, safeDefinitionFilename } from "./definitionDownload
 import { REVISION_STATUS_LABEL } from "./revisionLabels";
 import { confirmAndDeleteRun } from "./runActions";
 import { runStatusLabel, TERMINAL_RUN_STATUSES } from "./runStatusLabels";
-import InputsSchemaForm from "./InputsSchemaForm";
 import { WorkflowBreadcrumb } from "./WorkflowBreadcrumb";
 
 const NEUTRAL_BADGE =
@@ -59,9 +57,6 @@ export default function WorkflowDetailPage() {
   const [skipApprovalDraft, setSkipApprovalDraft] = useState(false);
   const [userTemplates, setUserTemplates] = useState<WorkflowUserTemplate[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
-  const [runRevisionId, setRunRevisionId] = useState<string | null>(null);
-  const [runInputs, setRunInputs] = useState<Record<string, unknown>>({});
-  const [runErrors, setRunErrors] = useState<string[]>([]);
   const [templateDialogFor, setTemplateDialogFor] = useState<string | null>(null);
   const [templateDialogError, setTemplateDialogError] = useState<string | null>(null);
   const [showOldRevisions, setShowOldRevisions] = useState(false);
@@ -146,23 +141,6 @@ export default function WorkflowDetailPage() {
       navigate(workflowEditPath(created.revision_id));
     } catch (e) {
       setError(getApiErrorMessage(e, "Revision 作成に失敗しました"));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const onStartRun = async (revisionId: string) => {
-    setBusy(true);
-    setError(null);
-    setRunErrors([]);
-    try {
-      const run = await createWorkflowRun(revisionId, runInputs);
-      navigate(workflowRunPath(run.run_id));
-    } catch (e) {
-      const detail = (e as { body?: { detail?: { errors?: string[] } } })?.body
-        ?.detail;
-      setRunErrors(Array.isArray(detail?.errors) ? detail.errors : []);
-      setError(getApiErrorMessage(e, "実行に失敗しました"));
     } finally {
       setBusy(false);
     }
@@ -399,23 +377,13 @@ export default function WorkflowDetailPage() {
                 v{publishedRevision.version} <RevisionBadge status={publishedRevision.status} />
               </span>
               <span className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setRunRevisionId(
-                      runRevisionId === publishedRevision.revision_id
-                        ? null
-                        : publishedRevision.revision_id,
-                    );
-                    setRunInputs({});
-                    setRunErrors([]);
-                  }}
-                  disabled={busy}
-                  data-testid="run-form-toggle"
-                  className="cursor-pointer rounded bg-blue-600 px-3 py-1 text-xs text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                <Link
+                  className="cursor-pointer rounded bg-blue-600 px-3 py-1 text-xs text-white hover:bg-blue-700"
+                  to={workflowEditPath(publishedRevision.revision_id)}
+                  data-testid="open-published-editor"
                 >
-                  実行
-                </button>
+                  開く
+                </Link>
                 <ActionMenu
                   testId="revision-menu"
                   disabled={busy}
@@ -450,30 +418,9 @@ export default function WorkflowDetailPage() {
                 />
               </span>
             </div>
-            {runRevisionId === publishedRevision.revision_id && (
-              <div className="mt-2 border-t border-emerald-100 pt-2">
-                <InputsSchemaForm
-                  schema={publishedRevision.inputs_schema ?? { type: "object" }}
-                  values={runInputs}
-                  onChange={setRunInputs}
-                  errors={runErrors}
-                />
-                <div className="mt-2 flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => void onStartRun(publishedRevision.revision_id)}
-                    disabled={busy}
-                    data-testid="run-start"
-                    className="cursor-pointer rounded bg-blue-600 px-3 py-1 text-xs text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    この入力で実行
-                  </button>
-                  <span className="text-[11px] text-slate-500">
-                    承認が必要な場合は承認待ちで作成されます
-                  </span>
-                </div>
-              </div>
-            )}
+            <p className="mt-1 text-[11px] text-slate-500">
+              定義の確認と実行はエディタで行います
+            </p>
           </div>
         ) : (
           <p className="text-xs text-slate-500">公開中の Revision はありません。</p>
@@ -544,7 +491,13 @@ export default function WorkflowDetailPage() {
                     v{revision.version} <RevisionBadge status={revision.status} />
                   </span>
                   <span className="flex flex-wrap items-center gap-2">
-                    <span className="text-slate-400">編集不可</span>
+                    <Link
+                      className="text-blue-700"
+                      to={workflowEditPath(revision.revision_id)}
+                      data-testid="open-old-editor"
+                    >
+                      開く
+                    </Link>
                     <button
                       type="button"
                       onClick={() =>
