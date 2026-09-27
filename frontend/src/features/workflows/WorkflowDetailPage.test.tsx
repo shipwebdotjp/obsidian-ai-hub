@@ -4,6 +4,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createWorkflowRevision,
+  createWorkflowRun,
   createWorkflowUserTemplate,
   deleteWorkflow,
   deleteWorkflowRevision,
@@ -18,6 +19,7 @@ import WorkflowDetailPage from "./WorkflowDetailPage";
 
 vi.mock("../../api/client", () => ({
   createWorkflowRevision: vi.fn(),
+  createWorkflowRun: vi.fn(),
   createWorkflowUserTemplate: vi.fn(),
   deleteWorkflow: vi.fn(),
   deleteWorkflowRevision: vi.fn(),
@@ -31,6 +33,7 @@ vi.mock("../../api/client", () => ({
 
 const mockGetWorkflow = vi.mocked(getWorkflow);
 const mockCreateWorkflowRevision = vi.mocked(createWorkflowRevision);
+const mockCreateWorkflowRun = vi.mocked(createWorkflowRun);
 const mockDeleteWorkflowRevision = vi.mocked(deleteWorkflowRevision);
 const mockDeleteWorkflowRun = vi.mocked(deleteWorkflowRun);
 const mockUpdateWorkflow = vi.mocked(updateWorkflow);
@@ -46,8 +49,18 @@ const sampleWorkflow = {
   description: "説明",
   skip_approval: false,
   revisions: [
-    { revision_id: "wrev_published", version: 1, status: "published" },
-    { revision_id: "wrev_draft", version: 2, status: "draft" },
+    {
+      revision_id: "wrev_published",
+      version: 1,
+      status: "published",
+      inputs_schema: { type: "object" },
+    },
+    {
+      revision_id: "wrev_draft",
+      version: 2,
+      status: "draft",
+      inputs_schema: { type: "object" },
+    },
   ],
   runs: [],
 };
@@ -58,6 +71,11 @@ function renderPage() {
       <Routes>
         <Route path="/workflows/:workflowId" element={<WorkflowDetailPage />} />
         <Route path="/workflows" element={<div>workflow list</div>} />
+        <Route
+          path="/workflows/revisions/:revisionId/edit"
+          element={<div>editor</div>}
+        />
+        <Route path="/workflows/runs/:runId" element={<div>run page</div>} />
       </Routes>
     </MemoryRouter>,
   );
@@ -71,6 +89,7 @@ beforeEach(() => {
   vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
   mockGetWorkflow.mockResolvedValue(sampleWorkflow as any);
   mockCreateWorkflowRevision.mockResolvedValue({} as any);
+  mockCreateWorkflowRun.mockResolvedValue({ run_id: "wrun_new" } as any);
   mockDeleteWorkflowRevision.mockResolvedValue({
     success: true,
     revision_id: "wrev_draft",
@@ -87,7 +106,7 @@ beforeEach(() => {
 describe("WorkflowDetailPage revision delete", () => {
   it("shows delete buttons only for non-published revisions", async () => {
     renderPage();
-    await screen.findByText("テストワークフロー");
+    await screen.findByRole("heading", { name: "テストワークフロー" });
     // Only the draft row gets a delete button; the published row does not.
     const deleteButtons = screen.getAllByRole("button", { name: "削除" });
     expect(deleteButtons).toHaveLength(1);
@@ -97,7 +116,7 @@ describe("WorkflowDetailPage revision delete", () => {
   it("deletes a draft revision and reloads the list", async () => {
     const user = userEvent.setup();
     renderPage();
-    await screen.findByText("テストワークフロー");
+    await screen.findByRole("heading", { name: "テストワークフロー" });
     await user.click(screen.getByRole("button", { name: "削除" }));
     expect(window.confirm).toHaveBeenCalled();
     await waitFor(() =>
@@ -110,7 +129,7 @@ describe("WorkflowDetailPage revision delete", () => {
     const user = userEvent.setup();
     vi.mocked(window.confirm).mockReturnValue(false);
     renderPage();
-    await screen.findByText("テストワークフロー");
+    await screen.findByRole("heading", { name: "テストワークフロー" });
     await user.click(screen.getByRole("button", { name: "削除" }));
     expect(window.confirm).toHaveBeenCalled();
     expect(mockDeleteWorkflowRevision).not.toHaveBeenCalled();
@@ -138,7 +157,7 @@ describe("WorkflowDetailPage run delete", () => {
   it("shows the delete button only for terminal runs", async () => {
     mockGetWorkflow.mockResolvedValue(runWorkflow as any);
     renderPage();
-    await screen.findByText("テストワークフロー");
+    await screen.findByRole("heading", { name: "テストワークフロー" });
     expect(screen.getAllByTestId(/^run-delete-/)).toHaveLength(1);
   });
 
@@ -146,7 +165,7 @@ describe("WorkflowDetailPage run delete", () => {
     const user = userEvent.setup();
     mockGetWorkflow.mockResolvedValue(runWorkflow as any);
     renderPage();
-    await screen.findByText("テストワークフロー");
+    await screen.findByRole("heading", { name: "テストワークフロー" });
     await user.click(screen.getByTestId("run-delete-wrun_done"));
     expect(window.confirm).toHaveBeenCalled();
     await waitFor(() =>
@@ -160,7 +179,7 @@ describe("WorkflowDetailPage run delete", () => {
     vi.mocked(window.confirm).mockReturnValue(false);
     mockGetWorkflow.mockResolvedValue(runWorkflow as any);
     renderPage();
-    await screen.findByText("テストワークフロー");
+    await screen.findByRole("heading", { name: "テストワークフロー" });
     await user.click(screen.getByTestId("run-delete-wrun_done"));
     expect(window.confirm).toHaveBeenCalled();
     expect(mockDeleteWorkflowRun).not.toHaveBeenCalled();
@@ -171,7 +190,7 @@ describe("WorkflowDetailPage workflow update/delete", () => {
   it("renames the workflow through the edit form", async () => {
     const user = userEvent.setup();
     renderPage();
-    await screen.findByText("テストワークフロー");
+    await screen.findByRole("heading", { name: "テストワークフロー" });
     await user.click(screen.getByRole("button", { name: "編集" }));
     const nameInput = screen.getByLabelText("名前");
     await user.clear(nameInput);
@@ -190,7 +209,7 @@ describe("WorkflowDetailPage workflow update/delete", () => {
   it("toggles approval skip through the edit form", async () => {
     const user = userEvent.setup();
     renderPage();
-    await screen.findByText("テストワークフロー");
+    await screen.findByRole("heading", { name: "テストワークフロー" });
     await user.click(screen.getByRole("button", { name: "編集" }));
     await user.click(
       screen.getByRole("checkbox", { name: "承認なしで実行する" }),
@@ -208,7 +227,7 @@ describe("WorkflowDetailPage workflow update/delete", () => {
   it("deletes the workflow after confirmation and navigates to the list", async () => {
     const user = userEvent.setup();
     renderPage();
-    await screen.findByText("テストワークフロー");
+    await screen.findByRole("heading", { name: "テストワークフロー" });
     await user.click(screen.getByRole("button", { name: "Workflow を削除" }));
     expect(window.confirm).toHaveBeenCalled();
     await waitFor(() =>
@@ -221,7 +240,7 @@ describe("WorkflowDetailPage workflow update/delete", () => {
     const user = userEvent.setup();
     vi.mocked(window.confirm).mockReturnValue(false);
     renderPage();
-    await screen.findByText("テストワークフロー");
+    await screen.findByRole("heading", { name: "テストワークフロー" });
     await user.click(screen.getByRole("button", { name: "Workflow を削除" }));
     expect(window.confirm).toHaveBeenCalled();
     expect(mockDeleteWorkflow).not.toHaveBeenCalled();
@@ -229,11 +248,16 @@ describe("WorkflowDetailPage workflow update/delete", () => {
 });
 
 describe("WorkflowDetailPage published revision actions", () => {
-  it("saves a published revision as a user template", async () => {
+  async function openMenu(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(screen.getByTestId("revision-menu"));
+  }
+
+  it("saves a published revision as a user template from the menu", async () => {
     const user = userEvent.setup();
     renderPage();
-    await screen.findByText("テストワークフロー");
-    await user.click(screen.getByRole("button", { name: "Template 保存" }));
+    await screen.findByRole("heading", { name: "テストワークフロー" });
+    await openMenu(user);
+    await user.click(screen.getByTestId("menu-save-template"));
     await waitFor(() =>
       expect(mockCreateWorkflowUserTemplate).toHaveBeenCalledWith({
         source_revision_id: "wrev_published",
@@ -243,11 +267,12 @@ describe("WorkflowDetailPage published revision actions", () => {
     );
   });
 
-  it("downloads a published revision as JSON", async () => {
+  it("downloads a published revision as JSON from the menu", async () => {
     const user = userEvent.setup();
     renderPage();
-    await screen.findByText("テストワークフロー");
-    await user.click(screen.getAllByRole("button", { name: "JSON" })[0]);
+    await screen.findByRole("heading", { name: "テストワークフロー" });
+    await openMenu(user);
+    await user.click(screen.getByTestId("menu-download-json"));
     await waitFor(() =>
       expect(mockExportWorkflowRevision).toHaveBeenCalledWith(
         "wrev_published",
@@ -256,7 +281,7 @@ describe("WorkflowDetailPage published revision actions", () => {
     );
   });
 
-  it("updates an existing template's content from a published revision", async () => {
+  it("updates an existing template's content through the dialog", async () => {
     mockListWorkflowUserTemplates.mockResolvedValue({
       items: [
         {
@@ -270,16 +295,96 @@ describe("WorkflowDetailPage published revision actions", () => {
     });
     const user = userEvent.setup();
     renderPage();
-    await screen.findByText("テストワークフロー");
+    await screen.findByRole("heading", { name: "テストワークフロー" });
+    await openMenu(user);
+    await user.click(screen.getByTestId("menu-update-template"));
     await user.selectOptions(
       screen.getByLabelText("更新するユーザーテンプレート"),
       "wtpl_1",
     );
-    await user.click(screen.getByRole("button", { name: "内容を更新" }));
+    await user.click(screen.getByTestId("template-update-confirm"));
     await waitFor(() =>
       expect(mockUpdateWorkflowUserTemplate).toHaveBeenCalledWith("wtpl_1", {
         source_revision_id: "wrev_published",
       }),
     );
+  });
+});
+
+describe("WorkflowDetailPage run from published revision", () => {
+  it("opens the run form and starts a run, then navigates to it", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByRole("heading", { name: "テストワークフロー" });
+    await user.click(screen.getByTestId("run-form-toggle"));
+    await user.click(screen.getByTestId("run-start"));
+    await waitFor(() =>
+      expect(mockCreateWorkflowRun).toHaveBeenCalledWith("wrev_published", {}),
+    );
+    await screen.findByText("run page");
+  });
+
+  it("offers no run action when nothing is published", async () => {
+    mockGetWorkflow.mockResolvedValue({
+      ...sampleWorkflow,
+      revisions: [sampleWorkflow.revisions[1]],
+    } as any);
+    renderPage();
+    await screen.findByRole("heading", { name: "テストワークフロー" });
+    expect(screen.queryByTestId("run-form-toggle")).not.toBeInTheDocument();
+  });
+});
+
+describe("WorkflowDetailPage navigation", () => {
+  it("navigates to the editor after creating a draft", async () => {
+    mockCreateWorkflowRevision.mockResolvedValue({
+      revision_id: "wrev_new",
+    } as any);
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByRole("heading", { name: "テストワークフロー" });
+    await user.click(screen.getByRole("button", { name: "新しい下書き" }));
+    await waitFor(() =>
+      expect(mockCreateWorkflowRevision).toHaveBeenCalledWith("wf_1"),
+    );
+    await screen.findByText("editor");
+  });
+
+  it("links back to the workflow list from the breadcrumb", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByRole("heading", { name: "テストワークフロー" });
+    const nav = screen.getByRole("navigation");
+    const backLink = nav.querySelector('a[href="/workflows"]');
+    expect(backLink).not.toBeNull();
+    await user.click(backLink as Element);
+    await screen.findByText("workflow list");
+  });
+});
+
+describe("WorkflowDetailPage old revisions", () => {
+  const workflowWithOld = {
+    ...sampleWorkflow,
+    revisions: [
+      ...sampleWorkflow.revisions,
+      {
+        revision_id: "wrev_old",
+        version: 0,
+        status: "superseded",
+        inputs_schema: { type: "object" },
+      },
+    ],
+  };
+
+  it("collapses superseded revisions until toggled", async () => {
+    mockGetWorkflow.mockResolvedValue(workflowWithOld as any);
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByRole("heading", { name: "テストワークフロー" });
+    expect(screen.getByTestId("old-revisions-toggle")).toBeInTheDocument();
+    // The old revision's delete button appears only after expanding.
+    expect(screen.getAllByRole("button", { name: "削除" })).toHaveLength(1);
+    await user.click(screen.getByTestId("old-revisions-toggle"));
+    expect(screen.getAllByRole("button", { name: "削除" })).toHaveLength(2);
   });
 });

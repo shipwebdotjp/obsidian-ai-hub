@@ -32,7 +32,7 @@ title: 用語と状態
 | `published` | 公開済みで不変。Run はここから作成する。 |
 | `superseded` | 新しい `published` が作成された旧版。参照は可能だが新規 Run には使わない。 |
 
-- `draft` のみ編集できます。公開済み Revision を編集するには、Workflow 詳細で **新しい下書き** を作成します。
+- `draft` のみ編集できます。公開済み Revision を編集するには、Workflow 詳細で **新しい下書き** を作成します（作成後はそのままエディタが開きます）。
 - 新しい下書きは、公開済み Revision がある場合はそのグラフ（Node / Edge / 入力 Schema・
   レイアウト・Loop 構成・型付き参照）を **複製** して開始します。複製時には新しい Node / Edge ID が
   割り当てられ、複製元の公開済み Revision は不変のまま保たれます。公開済み Revision がない場合は

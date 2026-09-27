@@ -9,7 +9,7 @@ import {
   resumeWorkflowRun,
 } from "../../api/client";
 import type { WorkflowRun } from "../../api/types";
-import { ROUTES, workflowRunPath } from "../../constants/routes";
+import { ROUTES, workflowDetailPath, workflowRunPath } from "../../constants/routes";
 import {
   loadLastAppliedId,
   saveLastAppliedId,
@@ -31,6 +31,7 @@ import { confirmAndDeleteRun } from "./runActions";
 import InputsSchemaForm from "./InputsSchemaForm";
 import WorkflowCanvas from "./WorkflowCanvas";
 import { GeneratedMediaList } from "../media/GeneratedMediaList";
+import { WorkflowBreadcrumb } from "./WorkflowBreadcrumb";
 
 const CHILD_RUN_PATHS: Record<string, string> = {
   agent: ROUTES.AGENTS,
@@ -237,6 +238,12 @@ export default function WorkflowRunPage() {
 
   return (
     <div className="flex h-full flex-col overflow-auto bg-slate-50">
+      <WorkflowBreadcrumb
+        items={[
+          { label: "ワークフロー詳細", to: workflowDetailPath(run.workflow_id) },
+          { label: "Run" },
+        ]}
+      />
       <header className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-white px-4 py-2">
         <div className="text-sm">
           <span className="font-semibold">Run</span> {run.run_id} ・{" "}
@@ -348,8 +355,8 @@ export default function WorkflowRunPage() {
               削除
             </button>
           )}
-          <Link className="rounded border border-slate-300 px-3 py-1 text-xs" to={ROUTES.WORKFLOWS}>
-            一覧
+          <Link className="rounded border border-slate-300 px-3 py-1 text-xs" to={workflowDetailPath(run.workflow_id)}>
+            ワークフローに戻る
           </Link>
         </div>
       </header>

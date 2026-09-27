@@ -29,6 +29,7 @@ import StructuredValueEditor from "./StructuredValueEditor";
 import TextTemplateEditor from "./TextTemplateEditor";
 import TextTemplatePreview from "./TextTemplatePreview";
 import WorkflowCanvas from "./WorkflowCanvas";
+import { WorkflowBreadcrumb } from "./WorkflowBreadcrumb";
 import { emptyObjectSchema } from "./schemaModel";
 import {
   WORKFLOW_LLM_DEFAULT_MAX_TOKENS,
@@ -493,13 +494,21 @@ export default function WorkflowEditorPage() {
 
   return (
     <div className="flex h-full flex-col bg-slate-50">
+      <WorkflowBreadcrumb
+        items={[
+          { label: "ワークフロー詳細", to: workflowDetailPath(revision.workflow_id) },
+          { label: `v${revision.version} 編集` },
+        ]}
+      />
       <header className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-white px-4 py-2">
         <div className="text-sm font-semibold">
           {revision.workflow_id} / v{revision.version} ({revision.status})
           {dirty && <span className="ml-2 text-xs text-amber-700">未保存</span>}
           {revision.status !== "draft" && (
             <span className="ml-2 text-xs font-normal text-slate-500">
-              このリビジョンは編集できません（実行のみ）
+              {revision.status === "published"
+                ? "このリビジョンは編集できません（実行のみ）"
+                : "このリビジョンは編集できません"}
             </span>
           )}
         </div>
@@ -513,9 +522,17 @@ export default function WorkflowEditorPage() {
           <button type="button" onClick={onPublish} className="cursor-pointer rounded bg-emerald-600 px-3 py-1 text-xs text-white">
             公開
           </button>
-          <button type="button" onClick={onStart} className="cursor-pointer rounded bg-blue-600 px-3 py-1 text-xs text-white">
-            実行
-          </button>
+          {revision.status === "published" ? (
+            <button type="button" onClick={onStart} className="cursor-pointer rounded bg-blue-600 px-3 py-1 text-xs text-white">
+              実行
+            </button>
+          ) : (
+            revision.status === "draft" && (
+              <span className="self-center text-[11px] text-slate-500">
+                公開すると実行できます
+              </span>
+            )
+          )}
           {revision.status !== "published" && (
             <button type="button" onClick={onDelete} disabled={deleting} className="cursor-pointer rounded bg-rose-800 px-3 py-1 text-xs text-white disabled:opacity-50">
               削除
