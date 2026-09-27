@@ -35,7 +35,7 @@ Loop の入出力マッピング・Agent 入力・スキーマ定義（`inputs_s
 - `fail_on_output_mismatch`（既定オフ）をオンにすると、Capability が次の出力を返したとき Node を
   失敗させ、後続 Node へ渡しません（エディタの「エラー出力・schema不一致で失敗」）。
   指定できるのは structured の読み取り系（`vault_read_file`、`calendar_read`、
-  `reminders_read`、`research_context_snapshot`）と `hitl_wait` だけです。
+  `reminders_read`、`periodic_note_read`、`research_context_snapshot`、`summary_search`）と `hitl_wait` だけです。
   それ以外の Capability での指定は検証エラーになります。
   - 出力が JSON object でない
   - 出力に `error` キーがある（例: `vault_read_file` のファイル不在 `{"error": "File not found"}`）

@@ -91,6 +91,7 @@ AUTO_POLICY_TOOL_IDS: frozenset[str] = frozenset(
         "periodic_note_read",
         "agent_conversation_search",
         "coding_history_search",
+        "summary_search",
         # Proposal tools only register an existing HITL approval run and never
         # write directly, so auto execution still requires human approval via
         # that HITL. Defaulting to auto avoids a redundant plan confirmation.
@@ -120,6 +121,7 @@ READ_ONLY_TOOL_IDS: frozenset[str] = frozenset(
         "periodic_note_read",
         "agent_conversation_search",
         "coding_history_search",
+        "summary_search",
         "list_published_workflows",
     }
 )
