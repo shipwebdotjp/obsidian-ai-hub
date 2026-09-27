@@ -95,13 +95,16 @@ Status: Accepted (2026-09-26)。Phase 1 を全面採用し、Phase 2 は高利�
   - `fail_on_output_mismatch: true` でない structured Node の出力参照
 - **`fail_on_output_mismatch: true` は structured の読み取り系と `hitl_wait` に
   だけ許可する。** 書込み・外部操作・receipt での指定は検証エラーにする。
-- **P2 の strict 対象を最初に次の 5 つとする。**
+- **P2 の strict 対象（読み取り系 structured）を次のとおりとする。**
   - `vault_read_file`: `relative_path` と `content` を required にする。
   - `calendar_read`: `events` を required にし、各 event の `title` / `start` /
     `end` / `all_day` / `source` を正規化して required にする。Apple と
     recurring の取得状態を `apple_status` / `recurring_status` で明示する。
   - `reminders_read`: `reminders` を required にし、各 reminder の `title` /
     `due` / `source` を正規化して required にする。取得状態も同様に明示する。
+  - `periodic_note_read`: `period_type` / `reference_date` / `relative_path` /
+    `content` / `truncated` を required にする。notes が無い場合は `content` を
+    空文字で返す（存在しないノートを空テンプレートとして返さない）。
   - `research_context_snapshot`: 現行 5 トップレベル値を required にし、下位の
     未契約データは展開しない（ネスト参照は未宣言として拒否）。
   - `hitl_wait.answer`: 人間入力境界で文字列へ正規化・検証する。
@@ -127,8 +130,9 @@ Status: Accepted (2026-09-26)。Phase 1 を全面採用し、Phase 2 は高利�
 
 - 既存公開 Revision の違反参照は公開時の再検証でのみ検出される。切替前後の
   read-only 契約監査で検出し、手動移行する。
-- `periodic_note_read`、人物・Project・検索・Skills・Agent / Coding / Research
+- 人物・Project・検索・Skills・Agent / Coding / Research
   出力は、P2 後の監査結果と利用実績に基づく次の structured 候補とする。
+  （`periodic_note_read` は 2026-09-27 に structured へ昇格した。）
 
 ## Related
 

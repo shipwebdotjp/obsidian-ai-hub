@@ -164,7 +164,12 @@ def test_capability_output_schema_declared_and_fallback():
     assert schemas.ui_output_schema("vault_search") is None
     assert schemas.ui_output_schema("research_agent") is None
     assert schemas.ui_output_schema("people_search") is None
-    assert schemas.ui_output_schema("periodic_note_read") is None
+
+    # Structured reads expose their declared fields for referencing.
+    periodic_ui = schemas.ui_output_schema("periodic_note_read")
+    assert periodic_ui is not None
+    assert "content" in periodic_ui["properties"]
+    assert "content" in periodic_ui["required"]
 
     # Receipt schemas stay for audit/display but are not referencable (P3).
     receipt_ui = schemas.ui_output_schema("calendar_create_proposal")
@@ -182,6 +187,7 @@ def test_output_contract_ledger_covers_all_capabilities():
             "vault_read_file",
             "calendar_read",
             "reminders_read",
+            "periodic_note_read",
             "research_context_snapshot",
         }
     )

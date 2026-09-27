@@ -100,6 +100,24 @@ def test_structured_array_field_reference_passes():
     assert _validate(nodes, edges) == []
 
 
+def test_periodic_note_read_strict_content_reference_passes():
+    nodes = [
+        _node(
+            "note",
+            "capability",
+            {
+                "capability_key": "periodic_note_read",
+                "inputs": {"period_type": "day", "reference_date": "2026-09-27"},
+                "fail_on_output_mismatch": True,
+            },
+        ),
+        _consumer("nodes.note.output.content", node_id="c2"),
+        _terminal(),
+    ]
+    edges = [_edge("e1", "note", "c2"), _edge("e2", "c2", "done")]
+    assert _validate(nodes, edges) == []
+
+
 def test_hitl_wait_answer_reference_passes_with_strict():
     nodes = [
         _node(

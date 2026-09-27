@@ -32,7 +32,7 @@ Capability Node の出力には出力契約クラスがあり、参照できる�
 
 | クラス | 対象の例 | 参照 |
 | --- | --- | --- |
-| `structured` | `vault_read_file`、`calendar_read`、`reminders_read`、`research_context_snapshot`、`hitl_wait` | 宣言済みの必須フィールドのみ。参照元ではなく**参照先** Node の strict（`fail_on_output_mismatch: true`）がオンのときだけ |
+| `structured` | `vault_read_file`、`calendar_read`、`reminders_read`、`periodic_note_read`、`research_context_snapshot`、`hitl_wait` | 宣言済みの必須フィールドのみ。参照元ではなく**参照先** Node の strict（`fail_on_output_mismatch: true`）がオンのときだけ |
 | `receipt` | 書込み・提案・ジョブ登録・画像生成など | 参照不可（schema は監査・表示用のみ） |
 | `opaque` | plugin、`skills`、外部検索、未整備の読み取り系、Agent / Coding / Research 委譲の出力 | 参照不可（`output_schema` は `null`） |
 

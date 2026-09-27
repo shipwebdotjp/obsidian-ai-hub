@@ -461,6 +461,7 @@ STRUCTURED_CAPABILITY_KEYS: frozenset[str] = frozenset(
         "vault_read_file",
         "calendar_read",
         "reminders_read",
+        "periodic_note_read",
         "research_context_snapshot",
     }
 )
@@ -563,6 +564,22 @@ _OUTPUT_SCHEMAS: dict[str, dict[str, Any]] = {
     "vault_read_file": _object_output(
         {"relative_path": {"type": "string"}, "content": {"type": "string"}},
         required=["relative_path", "content"],
+    ),
+    "periodic_note_read": _object_output(
+        {
+            "period_type": {"type": "string"},
+            "reference_date": {"type": "string"},
+            "relative_path": {"type": "string"},
+            "content": {"type": "string"},
+            "truncated": {"type": "boolean"},
+        },
+        required=[
+            "period_type",
+            "reference_date",
+            "relative_path",
+            "content",
+            "truncated",
+        ],
     ),
     "calendar_read": _object_output(
         {
