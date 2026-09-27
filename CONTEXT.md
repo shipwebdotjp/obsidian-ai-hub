@@ -1,13 +1,16 @@
-# CONTEXT.md — タスクオーケストレーション
+# CONTEXT.md — タスクオーケストレーションと長期目標コーチ
 
-この文書は obsidian-ai-hub のタスクオーケストレーションに関する用語と境界を定義する。
-仕様は [docs/task-agent/specification.md](docs/task-agent/specification.md)、判断理由は
+この文書は obsidian-ai-hub のタスクオーケストレーションと長期目標コーチに関する用語と境界を定義する。
+Task の仕様は [docs/task-agent/specification.md](docs/task-agent/specification.md)、コーチの計画は
+[docs/task-agent/proactive-plan.md](docs/task-agent/proactive-plan.md)、判断理由は
 [docs/task-agent/adr/](docs/task-agent/adr/) を参照する。
 
 ## Bounded Context
 
 - **Task Orchestration** — 自由文依頼をPlanへ変換し、承認ポリシーに従って既存能力へ委譲し、
   状態と結果を追跡する文脈。
+- **Long-term Coach** — ユーザーが選んだ長期の Goal と Focus を、週次 Reflection と時系列の
+  Coach Thread を通じて支援する文脈。Project、Task、Scheduler の状態は所有しない。
 - **HITL** — Taskの対象解決質問とカレンダー/リマインダー作成提案を保存・回答する汎用基盤。TaskのPlan承認自体は所有しない。
 - **AI Agents / Coding Workspace** — Taskが子runを作る既存の実行文脈。Taskはそれぞれの内部会話・
   権限・出力を所有しない。
@@ -32,6 +35,16 @@
 | **agent_source** | Agent 所有 Recurring Job の登録元メタデータ。欠落・破損は「未所有」として扱い、runner と一覧は停止しない。 |
 | **所有失効** | 人間が `/jobs` で Agent 所有 Job の ID・対象（command / workflow と入力）・schedule・enabled を変更した時点で `agent_source` を削除し、人間管理へ移管すること。 |
 | **Job Runner** | `job_runner` モジュール。runner lock 内で定期 Job の期限判定、Workflow 発火、ワンショット Job の claim・実行を行う。 |
+
+## ユビキタス言語（Long-term Coach）
+
+| 用語 | 定義 |
+| --- | --- |
+| **Goal** | ユーザーが自分で選ぶ、数か月から年単位の望ましい方向または到達像。Project の `goal` や Task の目的とは別の集約である。 |
+| **Focus** | 一つの Goal に属し、一定期間ユーザーが意識して振り返る成長の観点。Goal ごとに現在扱う Focus は一つだけで、選ばれていない Focus も候補と履歴として残る。 |
+| **Weekly Reflection** | 一つの Focus について、ユーザーがその週の取り組み、難しさ、気づき、次の扱いを記録する振り返り。コーチやモデルの推測を事実として保存しない。 |
+| **Focus Decision** | Weekly Reflection の後にユーザーが選ぶ、Focus の継続・縮小・変更・休止の判断。変更は別 Focus を現在の Focus にし、休止は新たな促しの対象外にする。 |
+| **Coach Thread** | Goal に結び付いた Focus の選択、Focus Decision、Weekly Reflection を時系列でたどる履歴。現在の Goal や Focus の編集によって過去の経緯を失わない。 |
 
 ## ユビキタス言語
 

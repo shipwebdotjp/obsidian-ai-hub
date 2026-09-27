@@ -89,13 +89,15 @@ Long-term Goal ──> Focus ──> Experiment / 今日の一歩
 | 用語 | 意味 | 境界 |
 | --- | --- | --- |
 | **Goal** | 数か月〜年単位で、ユーザーが自分で選ぶ望ましい方向・到達像・理由 | 行動ログから自動作成しない。測定指標は任意。 |
-| **Focus** | 一つの Goal に結びつく、数週間程度の今の重点 | Focus がない Goal は休止中でもよい。複数 Goal の自動優先順位付けはしない。 |
+| **Focus** | 一つの Goal に結びつく、数週間程度の今の重点・成長の観点 | Goal ごとに現在扱う Focus は一つ。選ばれていない Focus も候補と履歴として残り、複数 Goal の自動優先順位付けはしない。 |
 | **Experiment** | Focus を前進させるため、今日または今週に試す最小の行動・やり方 | 完了だけでなく、skip・縮小・変更からも学ぶ。Habit や Task と同一視しない。 |
-| **Reflection** | 実行結果、気づき、障害、次の仮説を振り返る対話または記録 | 事実とユーザーの解釈を分け、コーチの推測を事実として保存しない。 |
-| **Coach Thread** | Goal から Experiment、Reflection を時系列で結んだ継続支援の単位 | 一回限りの通知カードではない。Task/HITL への参照は持てるが、その状態を所有しない。 |
+| **Reflection** | 実行結果、気づき、障害、次の扱いを振り返る対話または記録 | 事実とユーザーの解釈を分け、コーチの推測を事実として保存しない。 |
+| **Focus Decision** | Reflection の後にユーザーが選ぶ、Focus の継続・縮小・変更・休止 | 変更は別 Focus を現在の Focus にし、休止は新たな促しの対象外にする。 |
+| **Coach Thread** | Goal の Focus 選択、Focus Decision、Reflection を時系列で結んだ継続支援の履歴 | 現在の Goal / Focus を編集しても過去の経緯を失わない。一回限りの通知カードではない。Task/HITL への参照は持てるが、その状態を所有しない。 |
 | **Task** | 既存 Task Agent が受ける、実行境界を持つ一件の依頼 | Coach Thread の一部を実行したいときだけ、明示操作で関連付ける。 |
 
-最初のモデルでは `Experiment -> Focus -> Goal` の参照を必須にする。これにより、
+Phase 1 の最初の永続モデルは `Reflection -> Focus -> Goal` と Coach Thread である。
+Experiment は Phase 2 で `Experiment -> Focus -> Goal` の参照を必須にして導入する。これにより、
 今日の行動が孤立した ToDo にならない。一方で Goal の多段階ツリー、OKR の採点、
 自動の優先順位づけは後回しにする。
 
@@ -106,9 +108,9 @@ Long-term Goal ──> Focus ──> Experiment / 今日の一歩
 ```text
 ユーザーが Goal を選ぶ
         ↓
-週次 Reflection で Focus と Experiment を決める
+週次 Reflection で Focus と次週の扱いを決める
         ↓
-日々、必要なら小さな一歩を表示する
+Phase 2 以降、日々必要なら小さな一歩を表示する
         ↓
 完了 / skip / 再設計を記録する
         ↓
@@ -166,8 +168,9 @@ Long-term Goal ──> Focus ──> Experiment / 今日の一歩
 
 ### 範囲
 
-- 初回設定で、コーチの対象（Goal の振り返り / 日々の一歩 / 学び）、希望頻度、
-  外部通知の許可を明示する。既定は Web 内、週次、外部通知なしとする。
+- 最初の縦切りでは、コーチは手動で開く Web 内の週次 Reflection に限定する。
+  外部通知は送らず、Scheduler も使わない。対象・頻度・通知チャネルを選ぶ設定は、
+  Phase 3 で自発性を導入するときに追加する。
 - 「何のために今これを出したか」「どの記録を使ったか」「どの Goal に関係するか」を
   すべての表示に要求する。
 - `helpful`、`not_now`、`already_done`、`too_much`、`wrong_connection`、
@@ -192,33 +195,36 @@ Long-term Goal ──> Focus ──> Experiment / 今日の一歩
 ### 範囲
 
 - Goal を作成・編集・休止・終了できる。必須なのはユーザーの表現した到達像と理由であり、
-  数値目標・期日は任意にする。
-- 各 Goal に、ユーザーが選んだ現在の Focus を一つ以上関連づける。Focus は数週間単位の
-  仮説であり、変更してよいことを明示する。
-- 週次 Reflection では、関連ノート、最近の Experiment、既存 `projects.goal` を
-  最小限の根拠として示し、次を一緒に決める。
-  - 今週の Focus はまだ妥当か
-  - 何が進んだか、何が妨げになったか
-  - 次に試す最小の Experiment は何か
-- Goal / Focus / Reflection / Experiment を Coach Thread として時系列に表示する。
-  ユーザーは、コーチの要約や関連づけを訂正できる。
-- 初期の context は週次 Reflection 専用に最小化する。全ユーザー情報を返す
+  数値目標・期日は任意にする。Goal は既存 Project とは独立した集約とする。
+- 一つの Goal に複数の Focus 候補を作り、そのうち現在扱う一つをユーザーが選ぶ。Focus は
+  数週間単位の仮説であり、継続・縮小・変更・休止できることを明示する。
+- 手動の週次 Reflection で、現在の Focus について次をユーザーが記録する。
+  - 近づけたと感じた場面
+  - 難しかったこと、できなかった理由
+  - そこから得た気づき
+  - 継続・縮小・変更・休止と、必要なら次週に試す範囲
+- Goal / Focus の選択と変更、Reflection、Focus Decision を Coach Thread として時系列に表示する。
+  Goal / Focus を後から編集しても、その時点の経緯を失わせない。
+- 初期の根拠はユーザーが入力した Goal / Focus / Reflection だけに限定する。関連ノート、
+  Activity、既存 `projects.goal`、Experiment は使わず、全ユーザー情報を返す
   `user_context_snapshot` を Agent Registry や `AUTO_POLICY_TOOL_IDS` に公開しない。
 
 ### 境界
 
 - Task の作成、LINE 送信、planner proposal の複製、health data の利用はしない。
-- `projects.goal` を直ちに置き換えない。Project と独立した人生・学習上の Goal を扱うため、
-  データ移行の要否は実装開始時に別途判断する。
-- 新しい永続集約を導入するため、Goal / Focus / Experiment の所有関係、アーカイブ、
-  既存 Project との関係が固まった時点で ADR 候補として評価する。
+- `projects.goal` を置き換えず、Project とコーチの Goal の間に初期は関連も作らない。
+- Goal / Focus / Reflection の所有関係と時系列履歴は
+  [ADR: GoalをProjectから分離し、コーチ履歴を時系列で保持する](adr/coach-goal-and-history.md)
+  を正とする。Experiment、アーカイブ、将来の Project 参照は必要になった時点で別途判断する。
 
 ### 代表シナリオ
 
-> ユーザーは「技術を深く理解して、人に説明できるようになる」を Goal にし、今月の
-> Focus を「理解を外に出す習慣を試す」と選ぶ。週次 Reflection で、今週は二回メモを
-> 書けたが長すぎて続かなかったと記録し、次週の Experiment を「一つの概念を三行で
-> 説明する」に縮小する。コーチは、量の不足ではなく、続けやすい手順を見つけた学びとして扱う。
+> ユーザーは「近づきやすい人、信頼される人として成長する」を Goal にし、
+> 「こちらから声を掛ける」「話しかけられたら手を止めてしっかり向き合う」などの
+> Focus 候補を作る。今週の Focus を一つ選び、週次 Reflection で取り組めた場面、
+> できなかった理由、気づきを記録する。続ける・小さくする・別の Focus へ変える・
+> 休止する、のいずれかを選ぶ。休止した Focus は新たな促しの対象にならず、選択と
+> Reflection は Coach Thread から後で振り返れる。
 
 ---
 
@@ -337,8 +343,9 @@ health data はこの Phase の入力に含めない。健康を扱う場合は�
 ## 13. 実装・検証の共通条件
 
 - DB migration 番号は実装時点の次番号を使い、固定の過去番号を計画に書かない。
-- Goal、Focus、Experiment、Reflection の永続モデルは、データ移行と複数モジュールへの影響が
-  大きい。Phase 1 開始時に、所有関係・Project との関係・アーカイブ・保持を比較して ADR 候補かを判断する。
+- Goal、Focus、Reflection の所有関係と時系列保持は
+  [ADR: GoalをProjectから分離し、コーチ履歴を時系列で保持する](adr/coach-goal-and-history.md)
+  に従う。Phase 2 で Experiment を永続化する際は、所有関係とアーカイブを改めて判断する。
 - Task 作成、外部通知、外部書込みを各 Phase に加えるときは、対象ID、冪等性、承認範囲、
   保存、失敗時の停止先を操作シナリオ契約として定める。
 - テストは prompt や画面文言ではなく、Goal との関連必須、休止中の非表示、skip の扱い、
@@ -350,13 +357,13 @@ health data はこの Phase の入力に含めない。健康を扱う場合は�
 
 ## 14. 次に確かめる仮説
 
-この計画の最初の仮説は、「一週間に一度、大目標・Focus・小さな試行を一緒に
+この計画の最初の仮説は、「一週間に一度、大目標・Focus・振り返りを一緒に
 見直す体験」が、日々の自動通知より先に信頼と継続性を作る、である。
 
 Phase 1 を終えたら、次を実データと利用感から見直す。
 
 1. Goal と Focus の関係は、ユーザーにとって自然に理解できたか。
-2. Experiment は負担を減らし、Goal とのつながりを感じさせたか。
+2. Focus の縮小や変更は、負担を減らし、Goal とのつながりを感じさせたか。
 3. Reflection のどの問い・情報源が役に立ち、どれが場当たり的だったか。
 4. 日々の表示や外部通知を足す前に、どの頻度・タイミングなら歓迎されるか。
 
