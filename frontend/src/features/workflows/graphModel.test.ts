@@ -7,6 +7,7 @@ import {
   createNode,
   defaultNodeConfig,
   isReferencePath,
+  nodeOptionLabel,
   parseConditionValue,
   referenceSchemaAt,
   removeNode,
@@ -592,5 +593,20 @@ describe("llm node", () => {
       referenceSchemaAt(nodes, "nodes.llm.output.answer", { type: "object" })
         ?.type,
     ).toBe("string");
+  });
+});
+
+describe("nodeOptionLabel", () => {
+  it("includes the display name, type, and short id", () => {
+    const n = node("abcdef123456", "capability", {
+      capability_key: "image_generate",
+    });
+    expect(nodeOptionLabel(n)).toBe("image_generate（capability・abcdef）");
+  });
+
+  it("prefers an explicit label and keeps distinct suffixes", () => {
+    const a = { ...node("aaaaaa111111", "capability", { capability_key: "x" }), label: "素材" };
+    const b = { ...node("bbbbbb222222", "capability", { capability_key: "x" }), label: "素材" };
+    expect(nodeOptionLabel(a)).not.toBe(nodeOptionLabel(b));
   });
 });

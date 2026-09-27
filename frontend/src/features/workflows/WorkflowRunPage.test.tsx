@@ -2,7 +2,7 @@ import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { deleteWorkflowRun, getWorkflowRun } from "../../api/client";
+import { deleteWorkflowRun, getWorkflow, getWorkflowRun } from "../../api/client";
 import { subscribeRunEvents } from "../../api/runSse";
 import type { WorkflowRun, WorkflowRunNode } from "../../api/types";
 import WorkflowRunPage from "./WorkflowRunPage";
@@ -11,10 +11,12 @@ vi.mock("../../api/client", () => ({
   approveWorkflowRun: vi.fn(),
   cancelWorkflowRun: vi.fn(),
   deleteWorkflowRun: vi.fn(),
+  getWorkflow: vi.fn(),
   getWorkflowRun: vi.fn(),
   rerunWorkflowRun: vi.fn(),
   resolveWorkflowAttention: vi.fn(),
   resumeWorkflowRun: vi.fn(),
+  updateWorkflow: vi.fn(),
 }));
 
 vi.mock("../../api/runSse", () => ({
@@ -24,6 +26,7 @@ vi.mock("../../api/runSse", () => ({
 }));
 
 const mockGetWorkflowRun = vi.mocked(getWorkflowRun);
+const mockGetWorkflow = vi.mocked(getWorkflow);
 const mockDeleteWorkflowRun = vi.mocked(deleteWorkflowRun);
 const mockSubscribeRunEvents = vi.mocked(subscribeRunEvents);
 
@@ -145,6 +148,12 @@ beforeEach(() => {
   vi.spyOn(window, "confirm").mockReturnValue(true);
   mockSubscribeRunEvents.mockResolvedValue(undefined);
   mockGetWorkflowRun.mockResolvedValue(runningRun);
+  mockGetWorkflow.mockResolvedValue({
+    workflow_id: "wf_1",
+    name: "テストWF",
+    description: "",
+    skip_approval: false,
+  } as never);
   mockDeleteWorkflowRun.mockResolvedValue({ success: true, run_id: "wrun_1" });
 });
 

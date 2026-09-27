@@ -30,6 +30,7 @@ import TextTemplateEditor from "./TextTemplateEditor";
 import TextTemplatePreview from "./TextTemplatePreview";
 import WorkflowCanvas from "./WorkflowCanvas";
 import { WorkflowBreadcrumb } from "./WorkflowBreadcrumb";
+import { WorkflowHeaderBar } from "./WorkflowHeaderBar";
 import { emptyObjectSchema } from "./schemaModel";
 import {
   WORKFLOW_LLM_DEFAULT_MAX_TOKENS,
@@ -42,6 +43,8 @@ import {
   defaultInputsSchema,
   isStrictDefaultCapability,
   moveNode,
+  nodeDisplayName,
+  nodeOptionLabel,
   referenceSchemaAt,
   removeNode,
   runContextReferenceGroup,
@@ -504,6 +507,7 @@ export default function WorkflowEditorPage() {
           { label: readOnly ? `v${revision.version} 表示` : `v${revision.version} 編集` },
         ]}
       />
+      <WorkflowHeaderBar workflowId={revision.workflow_id} />
       <header className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-white px-4 py-2">
         <div className="text-sm font-semibold">
           {revision.workflow_id} / v{revision.version} ({revision.status})
@@ -685,7 +689,7 @@ export default function WorkflowEditorPage() {
                 <option value="">親: トップ</option>
                 {loops.map((loop) => (
                   <option key={loop.node_id} value={loop.node_id}>
-                    親Loop {loop.node_id.slice(0, 6)}
+                    親Loop: {nodeOptionLabel(loop)}
                   </option>
                 ))}
               </select>
@@ -710,7 +714,7 @@ export default function WorkflowEditorPage() {
               <option value="">source</option>
               {nodes.map((node) => (
                 <option key={node.node_id} value={node.node_id}>
-                  {node.node_type} {node.node_id.slice(0, 6)}
+                  {nodeOptionLabel(node)}
                 </option>
               ))}
             </select>
@@ -722,7 +726,7 @@ export default function WorkflowEditorPage() {
               <option value="">target</option>
               {targetsInScope(edgeSource).map((node) => (
                 <option key={node.node_id} value={node.node_id}>
-                  {node.node_type} {node.node_id.slice(0, 6)}
+                  {nodeOptionLabel(node)}
                 </option>
               ))}
             </select>
@@ -787,6 +791,29 @@ export default function WorkflowEditorPage() {
                   削除
                 </button>
               </div>
+              <label className="block">
+                <span className="text-slate-700">表示名（任意）</span>
+                <input
+                  data-testid="node-label"
+                  className="w-full rounded border border-slate-300 px-1 py-0.5"
+                  value={
+                    typeof selectedNode.label === "string"
+                      ? selectedNode.label
+                      : ""
+                  }
+                  placeholder={nodeDisplayName(selectedNode)}
+                  onChange={(event) => {
+                    setNodes((prev) =>
+                      prev.map((item) =>
+                        item.node_id === selectedNode.node_id
+                          ? { ...item, label: event.target.value || null }
+                          : item,
+                      ),
+                    );
+                    markDirty();
+                  }}
+                />
+              </label>
               {selectedNode.node_type === "capability" && (
                 <>
                   <select
@@ -919,11 +946,21 @@ export default function WorkflowEditorPage() {
                         : "（出力は参照できません）"}
                     </p>
                   )}
-                  <label className="flex items-center gap-1 text-slate-700">
+                  <label
+                    className={`flex items-center gap-1 ${
+                      selectedCapability?.strict_allowed === false
+                        ? "text-slate-400"
+                        : "text-slate-700"
+                    }`}
+                  >
                     <input
                       type="checkbox"
-                      className="cursor-pointer"
+                      className="cursor-pointer disabled:cursor-not-allowed"
                       data-testid="cap-fail-on-output-mismatch"
+                      disabled={
+                        selectedCapability?.strict_allowed === false &&
+                        selectedNode.config.fail_on_output_mismatch !== true
+                      }
                       checked={
                         selectedNode.config.fail_on_output_mismatch === true
                       }
@@ -937,8 +974,7 @@ export default function WorkflowEditorPage() {
                     />
                     エラー出力・schema不一致で失敗
                     {selectedCapability?.strict_allowed === false &&
-                      selectedNode.config.fail_on_output_mismatch === true &&
-                      "（この Capability では公開時に拒否されます）"}
+                      "（この Capability の出力は参照できません）"}
                   </label>
                 </>
               )}
@@ -1208,7 +1244,7 @@ export default function WorkflowEditorPage() {
                         )
                         .map((node) => (
                           <option key={node.node_id} value={node.node_id}>
-                            {node.node_id.slice(0, 6)}
+                            {nodeOptionLabel(node)}
                           </option>
                         ))}
                     </select>
@@ -1322,11 +1358,20 @@ export default function WorkflowEditorPage() {
           <section className="space-y-2">
             <h3 className="font-semibold">Edge 一覧</h3>
             <ul className="space-y-1">
-              {edges.map((edge) => (
+              {edges.map((edge) => {
+                const sourceNode = nodes.find(
+                  (node) => node.node_id === edge.source_node_id,
+                );
+                const targetNode = nodes.find(
+                  (node) => node.node_id === edge.target_node_id,
+                );
+                return (
                 <li key={edge.edge_id} className="space-y-1">
                   <div className="flex items-center justify-between">
-                    <span className="truncate">
-                      {edge.source_node_id.slice(0, 5)}→{edge.target_node_id.slice(0, 5)}{" "}
+                    <span className="truncate" title={`${edge.source_node_id} → ${edge.target_node_id}`}>
+                      {sourceNode ? nodeDisplayName(sourceNode) : edge.source_node_id.slice(0, 5)}
+                      {" → "}
+                      {targetNode ? nodeDisplayName(targetNode) : edge.target_node_id.slice(0, 5)}{" "}
                       ({edge.edge_kind}
                       {edge.condition ? ", cond" : ""})
                     </span>
@@ -1397,7 +1442,8 @@ export default function WorkflowEditorPage() {
                   )
                   )}
                 </li>
-              ))}
+                );
+              })}
             </ul>
           </section>
           </fieldset>

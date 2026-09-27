@@ -51,12 +51,28 @@ export default function ReferencePicker({
       .filter((group) => group.fields.length > 0);
   }, [groups, filter]);
 
+  // Resolve the selected path to a readable "source · field" summary so the
+  // long `nodes.<uuid>.output.x` string does not need to be read in full.
+  const resolved = useMemo(() => {
+    const path = value.trim();
+    if (!path) return null;
+    for (const group of groups) {
+      const field = group.fields.find((candidate) => candidate.path === path);
+      if (field) {
+        const leaf = field.path.split(".").slice(-1)[0];
+        return `${group.label} · ${field.description || leaf}`;
+      }
+    }
+    return null;
+  }, [groups, value]);
+
   return (
     <div className="space-y-1">
       <div className="flex gap-1">
         <input
           data-testid={`${idPrefix}-ref-value`}
           aria-invalid={invalid}
+          title={value}
           className={`w-full rounded border px-1 py-0.5 font-mono text-[11px] ${
             invalid ? "border-amber-400" : "border-slate-300"
           }`}
@@ -83,6 +99,19 @@ export default function ReferencePicker({
           </button>
         )}
       </div>
+      {value && (
+        <div className="break-all font-mono text-[10px] leading-tight text-slate-500">
+          {value}
+        </div>
+      )}
+      {resolved && (
+        <div
+          data-testid={`${idPrefix}-ref-resolved`}
+          className="break-all text-[10px] leading-tight text-slate-600"
+        >
+          {resolved}
+        </div>
+      )}
       {invalid && (
         <p
           data-testid={`${idPrefix}-ref-warning`}
@@ -126,13 +155,13 @@ export default function ReferencePicker({
                     <button
                       key={field.path}
                       type="button"
-                      title={field.description}
+                      title={field.path}
                       onClick={() => onChange(field.path)}
-                      className={`flex w-full items-center justify-between gap-2 px-2 py-1 text-left font-mono text-[11px] hover:bg-slate-50 ${
+                      className={`flex w-full items-start justify-between gap-2 px-2 py-1 text-left font-mono text-[11px] hover:bg-slate-50 ${
                         field.path === value ? "bg-blue-50" : ""
                       }`}
                     >
-                      <span className="truncate">{field.path}</span>
+                      <span className="break-all">{field.path}</span>
                       {field.type && (
                         <span className="shrink-0 rounded bg-slate-100 px-1 text-[10px] text-slate-500">
                           {field.type}

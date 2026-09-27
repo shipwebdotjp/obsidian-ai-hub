@@ -151,6 +151,14 @@ export function nodeDisplayName(node: WorkflowNode): string {
   return node.node_type;
 }
 
+/**
+ * One-line label for selectors and lists. Shows the display name, node type,
+ * and a short id suffix so nodes with the same capability remain distinct.
+ */
+export function nodeOptionLabel(node: WorkflowNode): string {
+  return `${nodeDisplayName(node)}（${node.node_type}・${node.node_id.slice(0, 6)}）`;
+}
+
 export function createNode(
   nodeType: WorkflowNodeType,
   position: { x: number; y: number },

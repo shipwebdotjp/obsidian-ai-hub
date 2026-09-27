@@ -81,4 +81,18 @@ describe("ReferencePicker", () => {
     await userEvent.click(screen.getByText("クリア"));
     expect(onChange).toHaveBeenCalledWith("");
   });
+
+  it("shows a readable summary for the selected path", () => {
+    render(
+      <ReferencePicker
+        idPrefix="rp5"
+        groups={groups}
+        value="nodes.abc123.output.plan"
+        onChange={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("rp5-ref-resolved")).toHaveTextContent(
+      "計画 (abc123) · plan",
+    );
+  });
 });

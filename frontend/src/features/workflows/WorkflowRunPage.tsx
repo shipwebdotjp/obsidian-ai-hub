@@ -32,6 +32,7 @@ import InputsSchemaForm from "./InputsSchemaForm";
 import WorkflowCanvas from "./WorkflowCanvas";
 import { GeneratedMediaList } from "../media/GeneratedMediaList";
 import { WorkflowBreadcrumb } from "./WorkflowBreadcrumb";
+import { WorkflowHeaderBar } from "./WorkflowHeaderBar";
 
 const CHILD_RUN_PATHS: Record<string, string> = {
   agent: ROUTES.AGENTS,
@@ -244,6 +245,7 @@ export default function WorkflowRunPage() {
           { label: "Run" },
         ]}
       />
+      <WorkflowHeaderBar workflowId={run.workflow_id} />
       <header className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-white px-4 py-2">
         <div className="text-sm">
           <span className="font-semibold">Run</span> {run.run_id} ・{" "}
