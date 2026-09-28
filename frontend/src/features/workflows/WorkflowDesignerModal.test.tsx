@@ -3,6 +3,7 @@ import { MemoryRouter, useNavigate } from "react-router-dom";
 import { vi, describe, it, expect, beforeEach } from "vitest";
 import WorkflowDesignerModal from "./WorkflowDesignerModal";
 import * as client from "../../api/client";
+import type { DesignerComposeResponse, WorkflowDetail } from "../../api/types";
 
 vi.mock("../../api/client", async () => {
   const actual = await vi.importActual("../../api/client");
@@ -39,7 +40,7 @@ describe("WorkflowDesignerModal", () => {
   });
 
   it("renders requirement input form and handles compose flow with draft creation", async () => {
-    const mockComposeResponse: client.DesignerComposeResponse = {
+    const mockComposeResponse: DesignerComposeResponse = {
       package: {
         format: "obsidian-ai-hub.workflow-definition",
         version: 1,
@@ -69,7 +70,14 @@ describe("WorkflowDesignerModal", () => {
 
     vi.mocked(client.composeDesignerWorkflow).mockResolvedValue(mockComposeResponse);
     vi.mocked(client.importWorkflowDefinition).mockResolvedValue({
-      workflow: { workflow_id: "wf_1", name: "Test Draft", updated_at: "2026-09-28T00:00:00Z" },
+      workflow: {
+        workflow_id: "wf_1",
+        name: "Test Draft",
+        description: "Test description",
+        skip_approval: false,
+        created_at: "2026-09-28T00:00:00Z",
+        updated_at: "2026-09-28T00:00:00Z",
+      } as WorkflowDetail,
       revision: { revision_id: "wrev_123", revision_number: 1, status: "draft" } as any,
       validation_errors: ["Static validation notice"],
     });
@@ -114,7 +122,7 @@ describe("WorkflowDesignerModal", () => {
   });
 
   it("disables import button when structural errors exist", async () => {
-    const mockErrorResponse: client.DesignerComposeResponse = {
+    const mockErrorResponse: DesignerComposeResponse = {
       package: null,
       summary: null,
       assumptions: [],
