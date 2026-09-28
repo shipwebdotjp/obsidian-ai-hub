@@ -766,6 +766,9 @@ def get_db_connection() -> sqlite3.Connection:
     if current_version <= 68:
         run_migration_v69(conn)
 
+    if current_version <= 69:
+        run_migration_v70(conn)
+
     return conn
 
 
@@ -1474,6 +1477,90 @@ def run_migration_v69(conn: sqlite3.Connection) -> None:
     except sqlite3.OperationalError as e:
         _ignore_duplicate_schema_object(e)
     conn.execute("PRAGMA user_version = 69;")
+    conn.commit()
+
+
+def run_migration_v70(conn: sqlite3.Connection) -> None:
+    """Run migration for version 70 (Long-term Coach: coach_goals, coach_focuses, coach_weekly_reflections, coach_thread_events)."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS coach_goals (
+            goal_id TEXT PRIMARY KEY,
+            statement TEXT NOT NULL,
+            reason TEXT NOT NULL,
+            status TEXT NOT NULL CHECK (status IN ('active', 'paused', 'ended')),
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS coach_focuses (
+            focus_id TEXT PRIMARY KEY,
+            goal_id TEXT NOT NULL REFERENCES coach_goals(goal_id) ON DELETE CASCADE,
+            name TEXT NOT NULL,
+            status TEXT NOT NULL CHECK (status IN ('candidate', 'active', 'paused')),
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS coach_weekly_reflections (
+            reflection_id TEXT PRIMARY KEY,
+            focus_id TEXT NOT NULL REFERENCES coach_focuses(focus_id) ON DELETE CASCADE,
+            iso_week_monday TEXT NOT NULL,
+            worked_well TEXT,
+            difficult_reason TEXT,
+            learnings TEXT,
+            next_week_scope TEXT,
+            decision_type TEXT NOT NULL CHECK (decision_type IN ('continue', 'narrow', 'change', 'pause')),
+            target_focus_id TEXT REFERENCES coach_focuses(focus_id) ON DELETE SET NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS coach_thread_events (
+            event_id TEXT PRIMARY KEY,
+            goal_id TEXT NOT NULL REFERENCES coach_goals(goal_id) ON DELETE CASCADE,
+            focus_id TEXT REFERENCES coach_focuses(focus_id) ON DELETE SET NULL,
+            reflection_id TEXT REFERENCES coach_weekly_reflections(reflection_id) ON DELETE SET NULL,
+            event_type TEXT NOT NULL,
+            payload_json TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL
+        );
+    """)
+
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_coach_goals_status ON coach_goals(status);"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_coach_focuses_goal ON coach_focuses(goal_id);"
+    )
+    try:
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_coach_focuses_goal_active "
+            "ON coach_focuses(goal_id) WHERE status = 'active';"
+        )
+    except sqlite3.OperationalError as e:
+        _ignore_duplicate_schema_object(e)
+
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_coach_weekly_reflections_focus "
+        "ON coach_weekly_reflections(focus_id);"
+    )
+    try:
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_coach_weekly_reflections_focus_week "
+            "ON coach_weekly_reflections(focus_id, iso_week_monday);"
+        )
+    except sqlite3.OperationalError as e:
+        _ignore_duplicate_schema_object(e)
+
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_coach_thread_events_goal_created "
+        "ON coach_thread_events(goal_id, created_at DESC);"
+    )
+
+    conn.execute("PRAGMA user_version = 70;")
     conn.commit()
 
 

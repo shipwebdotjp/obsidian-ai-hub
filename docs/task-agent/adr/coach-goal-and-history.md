@@ -19,6 +19,10 @@ Accepted
 - Weekly Reflection は、その週にユーザー自身が記録した取り組み、難しさ、気づき、
   Focus Decision を保持する。Goal と Focus の現在の表現を後から編集しても、
   過去の選択と振り返りを Coach Thread から失わせない。
+- Reflection 本文（取り組み、難しさ、気づき、次週の範囲）は作成後も自由に変更・更新可能とする。
+  ただし、選択された週・Focus・決定種別（continue / narrow / change / pause）・切替先 Focus は
+  保存後に変更不可とし、その時点の Focus 選択・決定イベント（Coach Thread Event）と表示名スナップショットを
+  不変の時系列履歴として保持する。
 - Phase 1 は手動の Web 内週次 Reflection に限定し、Project/Task/活動履歴からの推測、
   Scheduler、外部通知を使わない。
 

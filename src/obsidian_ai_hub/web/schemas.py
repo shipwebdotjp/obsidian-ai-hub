@@ -1969,3 +1969,172 @@ class CapabilityUpdateRequest(BaseModel):
         if self.enabled is None and self.approval_policy is None:
             raise ValueError("Nothing to update.")
         return self
+
+
+# --- Long-term Coach schemas ---
+
+CoachGoalStatus = Literal["active", "paused", "ended"]
+CoachFocusStatus = Literal["candidate", "active", "paused"]
+CoachDecisionType = Literal["continue", "narrow", "change", "pause"]
+
+
+class CoachFocus(BaseModel):
+    focus_id: str
+    goal_id: str
+    name: str
+    status: CoachFocusStatus
+    created_at: str
+    updated_at: str
+
+
+class CoachFocusCreateRequest(BaseModel):
+    name: str
+
+    @field_validator("name")
+    @classmethod
+    def _validate_non_blank_name(cls, v: str) -> str:
+        s = v.strip()
+        if not s:
+            raise ValueError("Focus name must not be blank")
+        return s
+
+
+class CoachFocusUpdateRequest(BaseModel):
+    name: str
+
+    @field_validator("name")
+    @classmethod
+    def _validate_non_blank_name(cls, v: str) -> str:
+        s = v.strip()
+        if not s:
+            raise ValueError("Focus name must not be blank")
+        return s
+
+
+class CoachWeeklyReflection(BaseModel):
+    reflection_id: str
+    focus_id: str
+    iso_week_monday: str
+    worked_well: Optional[str] = None
+    difficult_reason: Optional[str] = None
+    learnings: Optional[str] = None
+    next_week_scope: Optional[str] = None
+    decision_type: CoachDecisionType
+    target_focus_id: Optional[str] = None
+    created_at: str
+    updated_at: str
+    focus_name: Optional[str] = None
+    target_focus_name: Optional[str] = None
+
+
+class CoachWeeklyReflectionCreateRequest(BaseModel):
+    focus_id: str
+    iso_week_monday: str
+    worked_well: Optional[str] = None
+    difficult_reason: Optional[str] = None
+    learnings: Optional[str] = None
+    next_week_scope: Optional[str] = None
+    decision_type: CoachDecisionType
+    target_focus_id: Optional[str] = None
+
+    @field_validator("iso_week_monday")
+    @classmethod
+    def _validate_iso_week_monday(cls, v: str) -> str:
+        s = v.strip()
+        if not re.match(r"^\d{4}-\d{2}-\d{2}$", s):
+            raise ValueError("iso_week_monday must be in YYYY-MM-DD format")
+        try:
+            dt = datetime.strptime(s, "%Y-%m-%d")
+        except ValueError as exc:
+            raise ValueError("iso_week_monday must be a valid date in YYYY-MM-DD format") from exc
+        if dt.weekday() != 0:
+            raise ValueError("iso_week_monday must be a Monday")
+        return s
+
+    @model_validator(mode="after")
+    def _validate_decision_requirements(self) -> "CoachWeeklyReflectionCreateRequest":
+        if self.decision_type == "narrow":
+            if not self.next_week_scope or not self.next_week_scope.strip():
+                raise ValueError("next_week_scope is required when decision_type is 'narrow'")
+        elif self.decision_type == "change":
+            if not self.target_focus_id or not self.target_focus_id.strip():
+                raise ValueError("target_focus_id is required when decision_type is 'change'")
+        return self
+
+
+class CoachWeeklyReflectionUpdateRequest(BaseModel):
+    worked_well: Optional[str] = None
+    difficult_reason: Optional[str] = None
+    learnings: Optional[str] = None
+    next_week_scope: Optional[str] = None
+
+
+class CoachGoal(BaseModel):
+    goal_id: str
+    statement: str
+    reason: str
+    status: CoachGoalStatus
+    created_at: str
+    updated_at: str
+    active_focus: Optional[CoachFocus] = None
+
+
+class CoachGoalDetail(CoachGoal):
+    focuses: list[CoachFocus] = Field(default_factory=list)
+
+
+class CoachGoalCreateRequest(BaseModel):
+    statement: str
+    reason: str
+    initial_focuses: list[str] = Field(default_factory=list)
+
+    @field_validator("statement", "reason")
+    @classmethod
+    def _validate_non_blank_str(cls, v: str) -> str:
+        s = v.strip()
+        if not s:
+            raise ValueError("Field must not be blank")
+        return s
+
+    @field_validator("initial_focuses")
+    @classmethod
+    def _validate_initial_focuses(cls, v: list[str]) -> list[str]:
+        cleaned = [item.strip() for item in v if item and item.strip()]
+        if not cleaned:
+            raise ValueError("At least one initial focus candidate is required")
+        return cleaned
+
+
+class CoachGoalUpdateRequest(BaseModel):
+    statement: Optional[str] = None
+    reason: Optional[str] = None
+
+    @field_validator("statement", "reason")
+    @classmethod
+    def _validate_non_blank_if_present(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        s = v.strip()
+        if not s:
+            raise ValueError("Field must not be blank")
+        return s
+
+
+class CoachGoalListResponse(BaseModel):
+    items: list[CoachGoalDetail]
+    total: int
+
+
+class CoachThreadEvent(BaseModel):
+    event_id: str
+    goal_id: str
+    focus_id: Optional[str] = None
+    reflection_id: Optional[str] = None
+    event_type: str
+    payload: dict[str, Any] = Field(default_factory=dict)
+    created_at: str
+
+
+class CoachThreadResponse(BaseModel):
+    items: list[CoachThreadEvent]
+    total: int

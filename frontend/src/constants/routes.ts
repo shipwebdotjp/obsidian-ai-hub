@@ -8,6 +8,8 @@ export const ROUTES = {
   HEALTHCARE: "/healthcare",
   PEOPLE: "/people",
   PROJECTS: "/projects",
+  COACH: "/coach",
+  COACH_GOAL_DETAIL: "/coach/goals/:goalId",
   JOBS: "/jobs",
   EXECUTION_LOGS: "/execution-logs",
   EXECUTION_LOGS_LOGS: "/execution-logs/logs",
@@ -39,4 +41,8 @@ export function workflowEditPath(revisionId: string): string {
 
 export function workflowRunPath(runId: string): string {
   return `/workflows/runs/${encodeURIComponent(runId)}`;
+}
+
+export function coachGoalDetailPath(goalId: string): string {
+  return `/coach/goals/${encodeURIComponent(goalId)}`;
 }

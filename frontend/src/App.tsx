@@ -19,6 +19,8 @@ import SummaryDashboardPage from "./features/summary-dashboard/SummaryDashboardP
 import HealthcarePage from "./features/healthcare/HealthcarePage";
 import PeoplePage from "./features/people/PeoplePage";
 import ProjectsPage from "./features/projects/ProjectsPage";
+import CoachOverviewPage from "./features/coach/CoachOverviewPage";
+import GoalDetailPage from "./features/coach/GoalDetailPage";
 import JobPage from "./features/jobs/JobPage";
 import ExecutionLogPage from "./features/execution-logs/ExecutionLogPage";
 import JobStatePage from "./features/execution-logs/JobStatePage";
@@ -204,6 +206,8 @@ export default function App() {
           <Route path={ROUTES.HEALTHCARE} element={<HealthcarePage />} />
           <Route path={ROUTES.PEOPLE} element={<PeoplePage />} />
           <Route path={ROUTES.PROJECTS} element={<ProjectsPage />} />
+          <Route path={ROUTES.COACH} element={<CoachOverviewPage />} />
+          <Route path={ROUTES.COACH_GOAL_DETAIL} element={<GoalDetailPage />} />
           <Route path={ROUTES.JOBS} element={<JobPage />} />
           <Route path={ROUTES.EXECUTION_LOGS} element={<Navigate to={ROUTES.EXECUTION_LOGS_LOGS} replace />} />
           <Route path={ROUTES.EXECUTION_LOGS_LOGS} element={<ExecutionLogPage />} />
