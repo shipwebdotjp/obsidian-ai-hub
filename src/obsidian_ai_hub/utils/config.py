@@ -52,6 +52,7 @@ _APP_ENV_VARS = [
     "INBOX_WEB_SUMMARY_PROMPT_PATH",
     "INBOX_CLASSIFICATION_PROMPT_PATH",
     "AI_PLANNER_PROMPT_PATH",
+    "LLM_WORKFLOW_DESIGNER_PROMPT_PATH",
     "YOUTUBE_CHUNK_SUMMARY_PROMPT_PATH",
     "ALLOW_EXTERNAL_IN_TEST",
     "AGENT_PROVIDER",
@@ -595,6 +596,29 @@ AI_PLANNER_MODEL = str(
 AI_PLANNER_PROMPT_PATH = _config_optional_path("llm", "planner", "prompt_path")
 if AI_PLANNER_PROMPT_PATH is None:
     AI_PLANNER_PROMPT_PATH = BASE_DIR / "config" / "prompts" / "ai_planner.md"
+
+# Workflow Designer LLM config (must be explicitly set in llm.workflow_designer)
+LLM_WORKFLOW_DESIGNER_PROVIDER_RAW = _config_value("llm", "workflow_designer", "provider")
+LLM_WORKFLOW_DESIGNER_PROVIDER = (
+    str(LLM_WORKFLOW_DESIGNER_PROVIDER_RAW).strip()
+    if LLM_WORKFLOW_DESIGNER_PROVIDER_RAW not in (None, "")
+    else None
+)
+
+LLM_WORKFLOW_DESIGNER_MODEL_RAW = _config_value("llm", "workflow_designer", "model")
+LLM_WORKFLOW_DESIGNER_MODEL = (
+    str(LLM_WORKFLOW_DESIGNER_MODEL_RAW).strip()
+    if LLM_WORKFLOW_DESIGNER_MODEL_RAW not in (None, "")
+    else None
+)
+
+LLM_WORKFLOW_DESIGNER_PROMPT_PATH = _config_optional_path(
+    "llm", "workflow_designer", "prompt_path"
+)
+if LLM_WORKFLOW_DESIGNER_PROMPT_PATH is None:
+    LLM_WORKFLOW_DESIGNER_PROMPT_PATH = (
+        BASE_DIR / "config" / "prompts" / "workflow_designer.md"
+    )
 
 # AI Agent default provider/model (used when agent has no provider/model set)
 AGENT_PROVIDER = str(

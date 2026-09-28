@@ -135,6 +135,23 @@ Status: Accepted (2026-09-26)。
   `research_context_snapshot` / `hitl_wait`）は strict を既定オンにする。
   Capability 切替え時は strict フラグをポリシーに同期する。
 
+## Amendment (GraphBuilder と Schema/Reference 正本の共有)
+
+Status: Accepted (2026-09-28)。
+
+Workflow Designer の GraphBuilder ツール群は、ガイド型フォームやエディタ検証と同じ
+Capability Schema、Pydantic スキーマ、型付き参照ルール、静的グラフ検証関数（`validate_graph`,
+`validate_package`, `validate_schema_subset`, `validate_condition`, `validate_pipe`）を
+単一の正本として共有する。独自設定モデルや二重スキーマを新設しない。
+
+### 決定
+
+- **正本の共有**: GraphBuilder とエディタガイドフォームは共通の Capability スキーマ正本
+  （`tasks/capability_schemas.py`）および出力契約設定（`workflow/capabilities.py`）を共有する。
+- **Strict 設定の決定的一致**: GraphBuilder が structured Capability の宣言済み出力を他 Node へ
+  参照バインドする場合、参照元の `strict_allowed` を確認し、自動かつ決定的に `fail_on_output_mismatch: true`
+  を付与する。エディタおよび静的検証と完全に同じ参照契約を維持する。
+
 ## 対象外
 
 - Capability 出力スキーマの全面宣言（opaque は `null`、receipt は P3 まで参照不可）

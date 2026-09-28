@@ -17,6 +17,7 @@ import {
 import { formatDateTime } from "../../utils/date";
 import { getApiErrorMessage } from "../../utils/error";
 import UserTemplatesSection from "./UserTemplatesSection";
+import WorkflowDesignerModal from "./WorkflowDesignerModal";
 
 export default function WorkflowsPage() {
   const navigate = useNavigate();
@@ -26,6 +27,7 @@ export default function WorkflowsPage() {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [creating, setCreating] = useState(false);
+  const [isDesignerModalOpen, setIsDesignerModalOpen] = useState(false);
   const [templates, setTemplates] = useState<WorkflowTemplate[]>([]);
   const { page, limit, offset, total, totalPages, setTotal, setPage } =
     usePagination("workflows", 20);
@@ -138,6 +140,13 @@ export default function WorkflowsPage() {
           >
             新規作成
           </button>
+          <button
+            type="button"
+            onClick={() => setIsDesignerModalOpen(true)}
+            className="cursor-pointer rounded bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700"
+          >
+            AIで下書きを作成
+          </button>
         </div>
         {error && <p className="mt-2 text-xs text-rose-700">{error}</p>}
       </section>
@@ -200,6 +209,10 @@ export default function WorkflowsPage() {
           Task Agent へ
         </Link>
       </div>
+      <WorkflowDesignerModal
+        isOpen={isDesignerModalOpen}
+        onClose={() => setIsDesignerModalOpen(false)}
+      />
     </div>
   );
 }

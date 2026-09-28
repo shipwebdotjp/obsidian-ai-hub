@@ -55,7 +55,7 @@ Capability に型付きで受け渡すフローは、線形モデルでは表現
 
 | 責務 | Task Agent | Scheduler Job | Workflow (再設計後) |
 | --- | --- | --- | --- |
-| 定義の生成主体 | LLM Planner | 人間 / Agent tool (YAML) | **人間 (Web UI グラフエディタ)** |
+| 定義の生成主体 | LLM Planner | 人間 / Agent tool (YAML) | **人間の編集に加え、LLM が draft を提案** |
 | 定義の形状 | Directional Plan(目的・範囲・制約) | OS コマンド / **公開 Workflow の起動対象 + 固定入力** | **Node/Edge グラフ + Loop 子グラフ + 型付き inputs_schema** |
 | 実行判断 | Runtime Orchestrator の動的ループ | 時刻判定 | **定義されたグラフと条件評価のみ** |
 | 非決定要素 | Planner/Orchestrator が都度判断 | なし | **Agent Node の LLM 出力のみ** |
@@ -389,6 +389,22 @@ Capability Node の出力契約違反は既定では助言イベント
 - strict は「契約違反の検出」であり、Capability が返す業務エラーの分類・再試行は行わない。
 - 失敗した Node の effects は記録されない。副作用を伴う Capability の strict 利用は
   効果契約（Run 完了判定）を弱めるため非推奨とする。
+
+## Amendment (Workflow Designer による下書き提案)
+
+Status: Accepted (2026-09-28)。
+
+Workflow 定義の生成主体を「人間の Web UI 編集」に限定せず、利用者の自然言語要求に応じて
+LLM が GraphBuilder ツール群を介してドラフトパッケージを提案・下書き作成できるようにする。
+
+### 決定
+
+- **定義生成主体**: 人間の直接編集に加え、LLM (Workflow Designer) が `draft` を提案・インポートできる。
+- **正本境界**: LLM は完成 Definition Package を直接生成せず、リクエスト内限定の `GraphBuilder` ツールを
+  呼び出して Node / Edge / Loop / 参照 / 条件 / 座標を決定的に組み立てる。
+- **インポート信頼境界**: 生成された Definition Package は既存の `POST /workflows/import` を通じて検証・保存される。
+  構造エラー時はインポート不可とし、静的検証エラー（`validation_issues`）を含む場合でも「人間の編集が必要な draft」として保存できる。
+- **承認・実行境界**: 下書き作成時に `skip_approval` は変更せず既定の `false`（要承認）を維持する。自動公開・自動実行・Run 作成は行わない。
 
 ## 関連文書
 

@@ -66,6 +66,7 @@ import type {
   WorkflowDefinitionFormat,
   WorkflowValidationResponse,
   TextTemplatePreviewResponse,
+  DesignerComposeResponse,
 } from "./types";
 
 const TOKEN_KEY = "obsidian-ai-hub:api-token";
@@ -279,6 +280,18 @@ export function reviewMemory(
       body: JSON.stringify({ action, new_content: newContent }),
     },
   );
+}
+
+export function composeDesignerWorkflow(
+  requirement: string,
+  signal?: AbortSignal,
+): Promise<DesignerComposeResponse> {
+  return request<DesignerComposeResponse>("/api/v1/workflows/designer/compose", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ requirement }),
+    signal,
+  });
 }
 
 
