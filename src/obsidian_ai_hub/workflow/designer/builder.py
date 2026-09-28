@@ -304,6 +304,17 @@ class GraphBuilder:
 
         return errors
 
+    def _reapply_all_strict_references(self) -> None:
+        """Re-scan all nodes' configs and edges' conditions to re-apply strict flags."""
+        for n in self.nodes:
+            cfg = n.get("config")
+            if isinstance(cfg, dict):
+                self._check_and_apply_strict_references(cfg)
+        for e in self.edges:
+            cond = e.get("condition")
+            if isinstance(cond, dict):
+                self._check_and_apply_strict_references(cond)
+
     def set_node_config(self, node_id: str, config: dict[str, Any]) -> dict[str, Any]:
         """Set config object for a node."""
         target_id = str(node_id or "").strip()
@@ -319,6 +330,7 @@ class GraphBuilder:
             return {"ok": False, "code": "invalid_strict_reference", "issues": strict_errors}
 
         node["config"] = config
+        self._reapply_all_strict_references()
         return {"ok": True, "node_id": target_id, "config": node["config"]}
 
     def bind_field(self, node_id: str, field_path: str, value: Any) -> dict[str, Any]:

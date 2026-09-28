@@ -64,6 +64,18 @@ export default function WorkflowDesignerModal({ isOpen, onClose }: WorkflowDesig
     setStage("input");
   };
 
+  const handleReset = () => {
+    setStage("input");
+    setComposeResult(null);
+    setError(null);
+  };
+
+  const handleCloseModal = () => {
+    handleAbort();
+    handleReset();
+    onClose();
+  };
+
   const handleCreateDraft = async () => {
     if (!composeResult || !composeResult.package) return;
     setImporting(true);
@@ -73,7 +85,7 @@ export default function WorkflowDesignerModal({ isOpen, onClose }: WorkflowDesig
       const imported = await importWorkflowDefinition(packageJson, "json");
       const revisionId = imported.revision?.revision_id;
       if (revisionId) {
-        onClose();
+        handleCloseModal();
         navigate(workflowEditPath(revisionId));
       } else {
         setError("下書きリビジョンの作成結果が見つかりませんでした");
@@ -85,12 +97,6 @@ export default function WorkflowDesignerModal({ isOpen, onClose }: WorkflowDesig
     }
   };
 
-  const handleReset = () => {
-    setStage("input");
-    setComposeResult(null);
-    setError(null);
-  };
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
       <div className="flex max-h-[85vh] w-full max-w-3xl flex-col rounded-lg bg-white shadow-xl">
@@ -98,7 +104,7 @@ export default function WorkflowDesignerModal({ isOpen, onClose }: WorkflowDesig
           <h2 className="text-base font-semibold text-slate-800">AIで下書きを作成 (Workflow Designer)</h2>
           <button
             type="button"
-            onClick={onClose}
+            onClick={handleCloseModal}
             className="text-slate-400 hover:text-slate-600"
           >
             ✕
@@ -220,7 +226,7 @@ export default function WorkflowDesignerModal({ isOpen, onClose }: WorkflowDesig
             <>
               <button
                 type="button"
-                onClick={onClose}
+                onClick={handleCloseModal}
                 className="rounded border border-slate-300 px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
               >
                 キャンセル
@@ -258,7 +264,7 @@ export default function WorkflowDesignerModal({ isOpen, onClose }: WorkflowDesig
               <div className="flex gap-2">
                 <button
                   type="button"
-                  onClick={onClose}
+                  onClick={handleCloseModal}
                   className="rounded border border-slate-300 px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
                 >
                   閉じる
@@ -267,7 +273,7 @@ export default function WorkflowDesignerModal({ isOpen, onClose }: WorkflowDesig
                   type="button"
                   onClick={handleCreateDraft}
                   disabled={importing || !composeResult?.package || (composeResult.structural_errors && composeResult.structural_errors.length > 0)}
-                  className="rounded bg-blue-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="cursor-pointer rounded bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {importing ? "下書き作成中…" : "下書きを作成"}
                 </button>

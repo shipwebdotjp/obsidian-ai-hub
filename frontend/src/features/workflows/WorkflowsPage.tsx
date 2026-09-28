@@ -143,7 +143,7 @@ export default function WorkflowsPage() {
           <button
             type="button"
             onClick={() => setIsDesignerModalOpen(true)}
-            className="cursor-pointer rounded bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700"
+            className="cursor-pointer rounded bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
           >
             AIで下書きを作成
           </button>

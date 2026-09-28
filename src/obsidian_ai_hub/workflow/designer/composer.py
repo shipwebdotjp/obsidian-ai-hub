@@ -113,12 +113,14 @@ def compose_workflow_draft(
                 max_tokens=4096,
             )
         except Exception as exc:
-            raise WorkflowDesignerProviderError(f"LLM の初期化に失敗しました: {exc}") from exc
+            logger.exception("LLM の初期化に失敗しました")
+            raise WorkflowDesignerProviderError("LLM プロバイダの初期化に失敗しました") from exc
 
     try:
         llm_with_tools = llm.bind_tools(designer_tools)
     except Exception as exc:
-        raise ToolCallingNotSupportedError(f"モデル '{model}' は tool calling に対応していません: {exc}") from exc
+        logger.exception("ツールバインディングに失敗しました")
+        raise ToolCallingNotSupportedError(f"選択されたモデル '{model}' は tool calling に対応していません") from exc
 
     messages: list[Any] = [
         SystemMessage(content=system_prompt),
@@ -152,7 +154,8 @@ def compose_workflow_draft(
             ai_msg = llm_with_tools.invoke(messages)
         except Exception as exc:
             execution_logger.fail_llm_call(call_id=call_id, exc=exc)
-            raise WorkflowDesignerProviderError(f"LLM 呼び出しに失敗しました: {exc}") from exc
+            logger.exception("LLM 呼び出しに失敗しました")
+            raise WorkflowDesignerProviderError("LLM プロバイダの呼び出しに失敗しました") from exc
 
         # Collect response metadata
         token_usage = getattr(ai_msg, "usage_metadata", None) or {}
@@ -180,8 +183,11 @@ def compose_workflow_draft(
 
         if not tool_calls_data:
             # LLM completed turn without calling further tools
-            if final_payload is None and builder.nodes:
-                final_payload = builder.finalize(summary="下書きを作成しました")
+            if final_payload is None:
+                if builder.nodes:
+                    final_payload = builder.finalize(summary="下書きを作成しました")
+                else:
+                    raise WorkflowDesignerProviderError("LLM がツールを呼び出さずに応答を終了しました")
             break
 
         total_tool_calls += len(tool_calls_data)

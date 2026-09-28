@@ -12,6 +12,7 @@ Privacy Boundary Rules:
 from __future__ import annotations
 
 import os
+from contextlib import closing
 from pathlib import Path
 from typing import Any, Optional
 
@@ -84,56 +85,56 @@ def catalog_search(query: str = "", target: str = "capability") -> list[dict[str
         return results
 
     if target_clean == "project":
-        conn = get_db_connection()
-        rows = conn.execute(
-            """
-            SELECT project_id, display_name
-            FROM projects
-            WHERE ? = '' OR LOWER(display_name) LIKE ? OR LOWER(project_id) LIKE ?
-            ORDER BY display_name ASC
-            LIMIT ?
-            """,
-            (
-                query_clean,
-                f"%{query_clean}%",
-                f"%{query_clean}%",
-                CATALOG_SEARCH_LIMIT,
-            ),
-        ).fetchall()
-        return [
-            {
-                "target": "project",
-                "project_id": str(r["project_id"]),
-                "display_name": str(r["display_name"]),
-            }
-            for r in rows
-        ]
+        with closing(get_db_connection()) as conn:
+            rows = conn.execute(
+                """
+                SELECT project_id, display_name
+                FROM projects
+                WHERE ? = '' OR LOWER(display_name) LIKE ? OR LOWER(project_id) LIKE ?
+                ORDER BY display_name ASC
+                LIMIT ?
+                """,
+                (
+                    query_clean,
+                    f"%{query_clean}%",
+                    f"%{query_clean}%",
+                    CATALOG_SEARCH_LIMIT,
+                ),
+            ).fetchall()
+            return [
+                {
+                    "target": "project",
+                    "project_id": str(r["project_id"]),
+                    "display_name": str(r["display_name"]),
+                }
+                for r in rows
+            ]
 
     if target_clean == "person":
-        conn = get_db_connection()
-        rows = conn.execute(
-            """
-            SELECT person_id, display_name
-            FROM people
-            WHERE ? = '' OR LOWER(display_name) LIKE ? OR LOWER(person_id) LIKE ?
-            ORDER BY display_name ASC
-            LIMIT ?
-            """,
-            (
-                query_clean,
-                f"%{query_clean}%",
-                f"%{query_clean}%",
-                CATALOG_SEARCH_LIMIT,
-            ),
-        ).fetchall()
-        return [
-            {
-                "target": "person",
-                "person_id": str(r["person_id"]),
-                "display_name": str(r["display_name"]),
-            }
-            for r in rows
-        ]
+        with closing(get_db_connection()) as conn:
+            rows = conn.execute(
+                """
+                SELECT person_id, display_name
+                FROM people
+                WHERE ? = '' OR LOWER(display_name) LIKE ? OR LOWER(person_id) LIKE ?
+                ORDER BY display_name ASC
+                LIMIT ?
+                """,
+                (
+                    query_clean,
+                    f"%{query_clean}%",
+                    f"%{query_clean}%",
+                    CATALOG_SEARCH_LIMIT,
+                ),
+            ).fetchall()
+            return [
+                {
+                    "target": "person",
+                    "person_id": str(r["person_id"]),
+                    "display_name": str(r["display_name"]),
+                }
+                for r in rows
+            ]
 
     if target_clean == "vault":
         vault_root = Path(VAULT_PATH)
@@ -204,44 +205,46 @@ def catalog_get_details(target: str, item_id: str) -> dict[str, Any]:
         }
 
     if target_clean == "project":
-        conn = get_db_connection()
-        r = conn.execute(
-            "SELECT project_id, display_name FROM projects WHERE project_id = ?",
-            (item_clean,),
-        ).fetchone()
-        if not r:
-            return {"ok": False, "code": "project_not_found", "message": f"Project '{item_clean}' が見つかりません"}
-        return {
-            "ok": True,
-            "target": "project",
-            "project_id": str(r["project_id"]),
-            "display_name": str(r["display_name"]),
-        }
+        with closing(get_db_connection()) as conn:
+            r = conn.execute(
+                "SELECT project_id, display_name FROM projects WHERE project_id = ?",
+                (item_clean,),
+            ).fetchone()
+            if not r:
+                return {"ok": False, "code": "project_not_found", "message": f"Project '{item_clean}' が見つかりません"}
+            return {
+                "ok": True,
+                "target": "project",
+                "project_id": str(r["project_id"]),
+                "display_name": str(r["display_name"]),
+            }
 
     if target_clean == "person":
-        conn = get_db_connection()
-        r = conn.execute(
-            "SELECT person_id, display_name FROM people WHERE person_id = ?",
-            (item_clean,),
-        ).fetchone()
-        if not r:
-            return {"ok": False, "code": "person_not_found", "message": f"Person '{item_clean}' が見つかりません"}
-        return {
-            "ok": True,
-            "target": "person",
-            "person_id": str(r["person_id"]),
-            "display_name": str(r["display_name"]),
-        }
+        with closing(get_db_connection()) as conn:
+            r = conn.execute(
+                "SELECT person_id, display_name FROM people WHERE person_id = ?",
+                (item_clean,),
+            ).fetchone()
+            if not r:
+                return {"ok": False, "code": "person_not_found", "message": f"Person '{item_clean}' が見つかりません"}
+            return {
+                "ok": True,
+                "target": "person",
+                "person_id": str(r["person_id"]),
+                "display_name": str(r["display_name"]),
+            }
 
     if target_clean == "vault":
-        vault_root = Path(VAULT_PATH)
-        full_path = vault_root / item_clean
+        vault_root = Path(VAULT_PATH).resolve()
+        try:
+            full_path = (vault_root / item_clean).resolve()
+            rel_path = str(full_path.relative_to(vault_root))
+        except (ValueError, RuntimeError):
+            return {"ok": False, "code": "invalid_vault_path", "message": f"不正な Vault パスです: {item_clean}"}
+
         if not full_path.exists() or not full_path.is_file():
             return {"ok": False, "code": "vault_path_not_found", "message": f"Vault パス '{item_clean}' が見つかりません"}
-        try:
-            rel_path = str(full_path.relative_to(vault_root))
-        except ValueError:
-            return {"ok": False, "code": "invalid_vault_path", "message": f"不正な Vault パスです: {item_clean}"}
+
         return {
             "ok": True,
             "target": "vault",
