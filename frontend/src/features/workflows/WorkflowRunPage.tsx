@@ -8,7 +8,7 @@ import {
   resolveWorkflowAttention,
   resumeWorkflowRun,
 } from "../../api/client";
-import type { WorkflowRun } from "../../api/types";
+import type { WorkflowRun, WorkflowRunNode } from "../../api/types";
 import { ROUTES, workflowDetailPath, workflowRunPath } from "../../constants/routes";
 import {
   loadLastAppliedId,
@@ -39,6 +39,108 @@ const CHILD_RUN_PATHS: Record<string, string> = {
   research: ROUTES.RESEARCH,
   coding: ROUTES.CODING,
 };
+
+const NODE_IO_PREVIEW_LENGTH = 120;
+
+function formatStoredJson(value: string): string {
+  try {
+    return JSON.stringify(JSON.parse(value), null, 2);
+  } catch {
+    return value;
+  }
+}
+
+function previewSnippet(value: string): string {
+  const flattened = value.replace(/\s+/g, " ").trim();
+  const source = flattened.length > 0 ? flattened : value;
+  return source.length > NODE_IO_PREVIEW_LENGTH
+    ? `${source.slice(0, NODE_IO_PREVIEW_LENGTH)}…`
+    : source;
+}
+
+function NodeIoDetails({ node }: { node: WorkflowRunNode }) {
+  // Controlled <details>: jsdom does not toggle native <details> on summary
+  // click, and lazy body rendering keeps the closed preview a single match.
+  const [open, setOpen] = useState(false);
+  const input = node.inputs_json ?? null;
+  const output = node.output_json ?? null;
+  const error = node.error_summary ?? null;
+  const hasInput = input !== null && input !== "";
+  const hasOutput = output !== null && output !== "";
+  const hasError = error !== null && error !== "";
+  const detailTestId = `run-node-io-${node.activation_id}-${node.attempt}`;
+
+  if (!hasInput && !hasOutput && !hasError) {
+    return <span className="text-slate-400">—</span>;
+  }
+
+  const previewSource =
+    [output, error, input].find((value) => value !== null && value !== "") ??
+    "";
+  return (
+    <details data-testid={detailTestId} open={open}>
+      <summary
+        className="cursor-pointer"
+        onClick={(event) => {
+          event.preventDefault();
+          setOpen((value) => !value);
+        }}
+      >
+        <span className="block truncate font-mono text-[10px]">
+          {previewSnippet(previewSource)}
+        </span>
+        <span className="mt-0.5 flex flex-wrap gap-x-2 font-sans text-[10px] text-slate-500">
+          {hasInput && <span>入力 {input!.length}文字</span>}
+          {hasOutput && <span>出力 {output!.length}文字</span>}
+          {open ? <span>閉じる</span> : <span>展開する</span>}
+        </span>
+      </summary>
+      {open && (
+        <div className="mt-1 space-y-2">
+          {hasInput && (
+            <section>
+              <h4 className="font-sans text-[10px] font-semibold text-slate-500">
+                入力
+              </h4>
+              <pre
+                data-testid={`${detailTestId}-input`}
+                className="overflow-auto whitespace-pre-wrap break-all rounded bg-slate-50 p-1 font-mono text-[10px]"
+              >
+                {formatStoredJson(input!)}
+              </pre>
+            </section>
+          )}
+          {hasOutput && (
+            <section>
+              <h4 className="font-sans text-[10px] font-semibold text-slate-500">
+                出力
+              </h4>
+              <pre
+                data-testid={`${detailTestId}-output`}
+                className="overflow-auto whitespace-pre-wrap break-all rounded bg-slate-50 p-1 font-mono text-[10px]"
+              >
+                {formatStoredJson(output!)}
+              </pre>
+            </section>
+          )}
+          {hasError && (
+            <section>
+              <h4 className="font-sans text-[10px] font-semibold text-slate-500">
+                エラー
+              </h4>
+              <pre
+                data-testid={`${detailTestId}-error`}
+                className="overflow-auto whitespace-pre-wrap break-all rounded bg-slate-50 p-1 font-mono text-[10px]"
+              >
+                {error}
+              </pre>
+            </section>
+          )}
+        </div>
+      )}
+    </details>
+  );
+}
 
 function attentionReasonText(reason: string | null | undefined): string | null {
   if (reason === "cancel_after_external_completion") {
@@ -496,7 +598,7 @@ export default function WorkflowRunPage() {
               </th>
               <th className="border-b border-slate-200 px-2 py-1">status</th>
               <th className="border-b border-slate-200 px-2 py-1">attempt</th>
-              <th className="border-b border-slate-200 px-2 py-1">output</th>
+              <th className="border-b border-slate-200 px-2 py-1">入出力</th>
             </tr>
           </thead>
           <tbody>
@@ -510,9 +612,7 @@ export default function WorkflowRunPage() {
                 <td className="border-b border-slate-100 px-2 py-1">{node.status}</td>
                 <td className="border-b border-slate-100 px-2 py-1">{node.attempt}</td>
                 <td className="max-w-md border-b border-slate-100 px-2 py-1 font-mono text-[10px]">
-                  <div className="truncate">
-                    {node.output_json ?? node.error_summary ?? ""}
-                  </div>
+                  <NodeIoDetails node={node} />
                   <GeneratedMediaList value={node.output_json} />
                   {node.child_run && (
                     <div

@@ -2,7 +2,12 @@ import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { deleteWorkflowRun, getWorkflow, getWorkflowRun } from "../../api/client";
+import {
+  deleteWorkflowRun,
+  getMediaBlob,
+  getWorkflow,
+  getWorkflowRun,
+} from "../../api/client";
 import { subscribeRunEvents } from "../../api/runSse";
 import type { WorkflowRun, WorkflowRunNode } from "../../api/types";
 import WorkflowRunPage from "./WorkflowRunPage";
@@ -11,6 +16,7 @@ vi.mock("../../api/client", () => ({
   approveWorkflowRun: vi.fn(),
   cancelWorkflowRun: vi.fn(),
   deleteWorkflowRun: vi.fn(),
+  getMediaBlob: vi.fn(),
   getWorkflow: vi.fn(),
   getWorkflowRun: vi.fn(),
   rerunWorkflowRun: vi.fn(),
@@ -376,6 +382,164 @@ describe("WorkflowRunPage run graph", () => {
     );
   });
 
+});
+
+describe("WorkflowRunPage node inputs/outputs", () => {
+  function ioRow(
+    activationId: string,
+    overrides: Partial<WorkflowRunNode> = {},
+  ): WorkflowRunNode {
+    return {
+      run_id: "wrun_1",
+      node_id: "node-a",
+      activation_id: activationId,
+      attempt: 1,
+      status: "succeeded",
+      started_at: "2026-09-21T00:00:01Z",
+      finished_at: null,
+      ...overrides,
+    };
+  }
+
+  function ioRun(nodes: WorkflowRunNode[]): WorkflowRun {
+    return baseRun({ status: "completed", graph_snapshot: null, nodes, events: [] });
+  }
+
+  async function openDetails(testId: string) {
+    const user = userEvent.setup();
+    const details = (await screen.findByTestId(testId)) as HTMLDetailsElement;
+    expect(details.open).toBe(false);
+    await user.click(details.querySelector("summary")!);
+    expect(details.open).toBe(true);
+    return details;
+  }
+
+  it("starts closed and reveals the full stored input and output on expand", async () => {
+    const inputs = '{"prompt":"hello"}';
+    const output = '{"answer":42,"items":[1,2]}';
+    mockGetWorkflowRun.mockResolvedValue(
+      ioRun([ioRow("act-io1", { inputs_json: inputs, output_json: output })]),
+    );
+    renderPage();
+
+    const details = (await screen.findByTestId(
+      "run-node-io-act-io1-1",
+    )) as HTMLDetailsElement;
+    expect(details.open).toBe(false);
+    // Closed preview shows the character counts without hover.
+    expect(details).toHaveTextContent(`入力 ${inputs.length}文字`);
+    expect(details).toHaveTextContent(`出力 ${output.length}文字`);
+    // Full values are not rendered until expanded (single closed preview match).
+    expect(screen.queryByTestId("run-node-io-act-io1-1-input")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("run-node-io-act-io1-1-output")).not.toBeInTheDocument();
+
+    const user = userEvent.setup();
+    await user.click(details.querySelector("summary")!);
+    expect(details.open).toBe(true);
+
+    // JSON values are pretty-printed in full (textContent: toHaveTextContent
+    // normalizes whitespace).
+    expect(screen.getByTestId("run-node-io-act-io1-1-input").textContent).toBe(
+      JSON.stringify(JSON.parse(inputs), null, 2),
+    );
+    const outputPre = screen.getByTestId("run-node-io-act-io1-1-output");
+    expect(outputPre.textContent).toBe(
+      JSON.stringify(JSON.parse(output), null, 2),
+    );
+    expect(screen.queryByTestId("run-node-io-act-io1-1-error")).not.toBeInTheDocument();
+  });
+
+  it("shows a non-JSON value as-is and an error-only node without input/output sections", async () => {
+    mockGetWorkflowRun.mockResolvedValue(
+      ioRun([
+        ioRow("act-plain", { output_json: "just plain text" }),
+        ioRow("act-err", {
+          output_json: null,
+          inputs_json: null,
+          status: "failed",
+          error_summary: "boom failed",
+        }),
+      ]),
+    );
+    renderPage();
+
+    await openDetails("run-node-io-act-plain-1");
+    expect(screen.getByTestId("run-node-io-act-plain-1-output")).toHaveTextContent(
+      "just plain text",
+    );
+    expect(
+      screen.queryByTestId("run-node-io-act-plain-1-input"),
+    ).not.toBeInTheDocument();
+
+    await openDetails("run-node-io-act-err-1");
+    expect(screen.getByTestId("run-node-io-act-err-1-error")).toHaveTextContent(
+      "boom failed",
+    );
+    expect(screen.queryByTestId("run-node-io-act-err-1-input")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("run-node-io-act-err-1-output")).not.toBeInTheDocument();
+
+    // Independent rows stay open together for comparing upstream/downstream values.
+    expect(
+      (screen.getByTestId("run-node-io-act-plain-1") as HTMLDetailsElement).open,
+    ).toBe(true);
+    expect(
+      (screen.getByTestId("run-node-io-act-err-1") as HTMLDetailsElement).open,
+    ).toBe(true);
+  });
+
+  it("reveals a long value in full without truncation", async () => {
+    const longOutput = `{"text":"${"x".repeat(500)}"}`;
+    mockGetWorkflowRun.mockResolvedValue(
+      ioRun([ioRow("act-long", { output_json: longOutput })]),
+    );
+    renderPage();
+
+    const details = (await screen.findByTestId(
+      "run-node-io-act-long-1",
+    )) as HTMLDetailsElement;
+    // Closed preview is shortened.
+    expect(details.textContent!.length).toBeLessThan(longOutput.length);
+
+    const user = userEvent.setup();
+    await user.click(details.querySelector("summary")!);
+    expect(screen.getByTestId("run-node-io-act-long-1-output").textContent).toBe(
+      JSON.stringify(JSON.parse(longOutput), null, 2),
+    );
+  });
+
+  it("keeps generated media cards visible in the row while I/O is collapsed", async () => {
+    vi.mocked(getMediaBlob).mockResolvedValue(
+      new Blob(["x"], { type: "image/png" }),
+    );
+    vi.stubGlobal("URL", {
+      ...URL,
+      createObjectURL: vi.fn(() => "blob:media"),
+      revokeObjectURL: vi.fn(),
+    });
+    try {
+      mockGetWorkflowRun.mockResolvedValue(
+        ioRun([
+          ioRow("act-media", {
+            inputs_json: '{"prompt":"a cat"}',
+            output_json:
+              '{"media_id":"m1","media_type":"image","mime_type":"image/png"}',
+          }),
+        ]),
+      );
+      renderPage();
+
+      await screen.findByTestId("run-node-io-act-media-1");
+      expect(screen.getByTestId("generated-media-list")).toBeInTheDocument();
+      expect(
+        (screen.getByTestId("run-node-io-act-media-1") as HTMLDetailsElement).open,
+      ).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
+describe("WorkflowRunPage legacy run history", () => {
   it("shows the full node history without a graph for legacy runs", async () => {
     mockGetWorkflowRun.mockResolvedValue(legacyRun);
     renderPage();
