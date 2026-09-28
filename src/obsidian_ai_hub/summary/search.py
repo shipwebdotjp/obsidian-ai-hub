@@ -16,7 +16,7 @@ from obsidian_ai_hub.summary.store import _attach_children_bulk, deserialize_sum
 
 logger = logging.getLogger(__name__)
 
-BUDGET_LIMIT_CHARS = 5500
+BUDGET_LIMIT_CHARS = 25000
 MAX_RANGES_COUNT = 20
 
 
