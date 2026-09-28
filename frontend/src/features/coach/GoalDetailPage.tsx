@@ -30,6 +30,7 @@ export default function GoalDetailPage() {
   const [goal, setGoal] = useState<CoachGoalDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [timelineKey, setTimelineKey] = useState(0);
 
   // Edit Goal modal/inline state
   const [isEditingGoal, setIsEditingGoal] = useState(false);
@@ -46,6 +47,7 @@ export default function GoalDetailPage() {
     try {
       const data = await fetchCoachGoalDetail(goalId);
       setGoal(data);
+      setTimelineKey((k) => k + 1);
     } catch (err: any) {
       setError(err?.message || "Goal の読み込みに失敗しました。");
     } finally {
@@ -57,7 +59,7 @@ export default function GoalDetailPage() {
     loadGoal();
   }, [goalId]);
 
-  if (loading) {
+  if (loading && !goal) {
     return (
       <div className="flex h-full items-center justify-center text-xs text-slate-500">
         長期目標を読み込み中…
@@ -309,10 +311,16 @@ export default function GoalDetailPage() {
       </div>
 
       {/* Focuses Management Section */}
-      <FocusSection goal={goal} onGoalUpdated={(updated) => setGoal(updated)} />
+      <FocusSection
+        goal={goal}
+        onGoalUpdated={(updated) => {
+          setGoal(updated);
+          setTimelineKey((k) => k + 1);
+        }}
+      />
 
       {/* Coach Thread Events Timeline Section */}
-      <CoachThreadTimeline goalId={goal.goal_id} />
+      <CoachThreadTimeline goalId={goal.goal_id} refreshKey={timelineKey} />
 
       {/* Reflection Form Modal */}
       {activeFocus && (

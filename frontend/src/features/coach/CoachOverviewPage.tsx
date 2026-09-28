@@ -60,7 +60,7 @@ export default function CoachOverviewPage() {
         <button
           type="button"
           onClick={() => setIsCreateModalOpen(true)}
-          className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-4 py-2 text-xs font-medium text-white shadow-sm hover:bg-slate-800 shrink-0"
+          className="inline-flex items-center gap-1.5 rounded bg-blue-600 px-4 py-2 text-xs font-medium text-white shadow-sm hover:bg-blue-700 shrink-0 cursor-pointer"
         >
           <Plus className="h-4 w-4" /> 新しい Goal を作成
         </button>
@@ -94,7 +94,7 @@ export default function CoachOverviewPage() {
                 <button
                   type="button"
                   onClick={() => setIsCreateModalOpen(true)}
-                  className="inline-flex items-center gap-1 rounded bg-slate-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-800"
+                  className="inline-flex items-center gap-1 rounded bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 cursor-pointer"
                 >
                   <Plus className="h-3.5 w-3.5" /> Goal を作成する
                 </button>

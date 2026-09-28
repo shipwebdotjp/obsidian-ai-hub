@@ -119,6 +119,8 @@ def end_goal(
         return service.end_goal(goal_id)
     except CoachGoalNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+    except CoachStateValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
 
 # --- Focus endpoints ---

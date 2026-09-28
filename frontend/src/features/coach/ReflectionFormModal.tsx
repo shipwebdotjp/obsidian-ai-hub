@@ -83,7 +83,11 @@ export default function ReflectionFormModal({
           setExistingReflections(items);
         }
       })
-      .catch(() => {});
+      .catch((err: any) => {
+        if (!cancelled) {
+          setError(err?.message || "Reflection 履歴の取得に失敗しました。");
+        }
+      });
     return () => {
       cancelled = true;
     };

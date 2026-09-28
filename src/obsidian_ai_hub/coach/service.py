@@ -439,64 +439,70 @@ class CoachService:
         refl_id = f"crefl_{uuid4().hex[:12]}"
         now = datetime.now(timezone.utc).isoformat()
 
-        with conn:
-            # Apply focus status transitions according to decision_type
-            if decision_type == "change" and target_focus:
-                # Current active focus becomes candidate, target candidate becomes active
-                self.store.update_focus(
-                    conn, focus_id=focus_id, status="candidate", updated_at=now
-                )
-                self.store.update_focus(
-                    conn, focus_id=target_focus_id, status="active", updated_at=now
-                )
-            elif decision_type == "pause":
-                # Current active focus becomes paused
-                self.store.update_focus(
-                    conn, focus_id=focus_id, status="paused", updated_at=now
+        import sqlite3
+        try:
+            with conn:
+                # Apply focus status transitions according to decision_type
+                if decision_type == "change" and target_focus:
+                    # Current active focus becomes candidate, target candidate becomes active
+                    self.store.update_focus(
+                        conn, focus_id=focus_id, status="candidate", updated_at=now
+                    )
+                    self.store.update_focus(
+                        conn, focus_id=target_focus_id, status="active", updated_at=now
+                    )
+                elif decision_type == "pause":
+                    # Current active focus becomes paused
+                    self.store.update_focus(
+                        conn, focus_id=focus_id, status="paused", updated_at=now
+                    )
+
+                # Create reflection row
+                self.store.create_reflection(
+                    conn,
+                    reflection_id=refl_id,
+                    focus_id=focus_id,
+                    iso_week_monday=iso_week_monday,
+                    worked_well=worked_well,
+                    difficult_reason=difficult_reason,
+                    learnings=learnings,
+                    next_week_scope=next_week_scope,
+                    decision_type=decision_type,
+                    target_focus_id=target_focus_id,
+                    created_at=now,
+                    updated_at=now,
                 )
 
-            # Create reflection row
-            self.store.create_reflection(
-                conn,
-                reflection_id=refl_id,
-                focus_id=focus_id,
-                iso_week_monday=iso_week_monday,
-                worked_well=worked_well,
-                difficult_reason=difficult_reason,
-                learnings=learnings,
-                next_week_scope=next_week_scope,
-                decision_type=decision_type,
-                target_focus_id=target_focus_id,
-                created_at=now,
-                updated_at=now,
-            )
+                # Build thread event payload with display name snapshots
+                payload = {
+                    "goal_statement": goal["statement"],
+                    "focus_name": focus["name"],
+                    "decision_type": decision_type,
+                    "iso_week_monday": iso_week_monday,
+                    "worked_well": worked_well,
+                    "difficult_reason": difficult_reason,
+                    "learnings": learnings,
+                    "next_week_scope": next_week_scope,
+                }
+                if decision_type == "change" and target_focus:
+                    payload["target_focus_id"] = target_focus_id
+                    payload["target_focus_name"] = target_focus["name"]
 
-            # Build thread event payload with display name snapshots
-            payload = {
-                "goal_statement": goal["statement"],
-                "focus_name": focus["name"],
-                "decision_type": decision_type,
-                "iso_week_monday": iso_week_monday,
-                "worked_well": worked_well,
-                "difficult_reason": difficult_reason,
-                "learnings": learnings,
-                "next_week_scope": next_week_scope,
-            }
-            if decision_type == "change" and target_focus:
-                payload["target_focus_id"] = target_focus_id
-                payload["target_focus_name"] = target_focus["name"]
-
-            event_id = f"cevt_{uuid4().hex[:12]}"
-            self.store.create_thread_event(
-                conn,
-                event_id=event_id,
-                goal_id=goal_id,
-                focus_id=focus_id,
-                reflection_id=refl_id,
-                event_type="reflection_created",
-                payload_json=json.dumps(payload),
-                created_at=now,
-            )
+                event_id = f"cevt_{uuid4().hex[:12]}"
+                self.store.create_thread_event(
+                    conn,
+                    event_id=event_id,
+                    goal_id=goal_id,
+                    focus_id=focus_id,
+                    reflection_id=refl_id,
+                    event_type="reflection_created",
+                    payload_json=json.dumps(payload),
+                    created_at=now,
+                )
+        except sqlite3.IntegrityError as exc:
+            raise CoachDuplicateReflectionError(
+                "Reflection or Focus constraint violation"
+            ) from exc
 
         return self.store.get_reflection(conn, refl_id)
 

@@ -14,10 +14,12 @@ import {
 
 interface CoachThreadTimelineProps {
   goalId: string;
+  refreshKey?: number;
 }
 
 export default function CoachThreadTimeline({
   goalId,
+  refreshKey,
 }: CoachThreadTimelineProps) {
   const [events, setEvents] = useState<CoachThreadEvent[]>([]);
   const [total, setTotal] = useState(0);
@@ -43,7 +45,7 @@ export default function CoachThreadTimeline({
 
   useEffect(() => {
     loadEvents(0);
-  }, [goalId]);
+  }, [goalId, refreshKey]);
 
   const renderEventIcon = (eventType: string) => {
     switch (eventType) {
