@@ -64,6 +64,7 @@ const sidebars: SidebarsConfig = {
         'features/summary-dashboard',
         'features/people',
         'features/projects',
+        'features/coach',
         'features/healthcare',
         'features/system-maintenance',
       ],

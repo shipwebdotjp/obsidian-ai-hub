@@ -98,6 +98,9 @@ export default function Sidebar({ open, onClose, id }: SidebarProps) {
         <NavLink to={ROUTES.PROJECTS} className={linkClass} onClick={onClose}>
           プロジェクト管理
         </NavLink>
+        <NavLink to={ROUTES.COACH} className={linkClass} onClick={onClose}>
+          長期目標コーチ
+        </NavLink>
         <NavLink to={ROUTES.JOBS} className={linkClass} onClick={onClose}>
           ジョブ管理
         </NavLink>

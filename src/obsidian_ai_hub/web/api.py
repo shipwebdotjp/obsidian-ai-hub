@@ -2,6 +2,7 @@ from fastapi import APIRouter
 
 from obsidian_ai_hub.web.routes import (
     agents,
+    coach,
     coding,
     dashboard,
     execution_logs,
@@ -23,6 +24,7 @@ from obsidian_ai_hub.workflow import routes as workflow_routes
 
 router = APIRouter(prefix="/api/v1")
 
+router.include_router(coach.router)
 router.include_router(agents.router)
 router.include_router(coding.router)
 router.include_router(line.router)
