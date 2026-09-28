@@ -76,7 +76,7 @@ _registry: Dict[str, Callable[[HitlContext], HitlResult]] = {}
 def register_handler(name: str, handler: Callable[[HitlContext], HitlResult]) -> None:
     """Register a handler function under a name at the composition root."""
     _registry[name] = handler
-    logger.info(f"Registered HITL handler: {name}")
+    logger.debug(f"Registered HITL handler: {name}")
 
 
 def get_handler(name: str) -> Optional[Callable[[HitlContext], HitlResult]]:
