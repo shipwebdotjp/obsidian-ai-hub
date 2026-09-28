@@ -212,6 +212,20 @@ describe("App", () => {
     expect(screen.getByRole("button", { name: "再読み込み" })).toBeInTheDocument();
   });
 
+  it("sets a non-empty document title when the app is displayed", async () => {
+    mockHealth.mockResolvedValue({ status: "ok", auth_required: false });
+    render(
+      <MemoryRouter initialEntries={["/research"]}>
+        <App />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("page-research")).toBeInTheDocument();
+    });
+    expect(document.title.length).toBeGreaterThan(0);
+  });
+
   it("redirects root path / to /memories", async () => {
     mockHealth.mockResolvedValue({ status: "ok", auth_required: false });
     render(
@@ -407,7 +421,7 @@ describe("App", () => {
     expect(
       screen.queryByRole("link", { name: "Task Capability設定" }),
     ).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Task Agent" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "タスクエージェント" })).toBeInTheDocument();
   });
 
   it("renders the capabilities settings page on direct navigation (legacy URL compat)", async () => {

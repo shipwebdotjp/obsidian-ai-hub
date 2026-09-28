@@ -105,7 +105,7 @@ export default function Sidebar({ open, onClose, id }: SidebarProps) {
           ジョブ管理
         </NavLink>
         <NavLink to={ROUTES.TASK_AGENT} className={linkClass} onClick={onClose} end>
-          Task Agent
+          タスクエージェント
         </NavLink>
         <NavLink to={ROUTES.WORKFLOWS} className={linkClass} onClick={onClose}>
           ワークフロー

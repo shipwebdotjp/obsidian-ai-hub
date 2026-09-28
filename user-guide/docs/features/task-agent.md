@@ -17,7 +17,7 @@ uv run -m obsidian_ai_hub --task-agent "Summarize this week's schedule"
 コマンドは Task を作成し、Task ID・状態・詳細 URL を表示してすぐ終了します。
 計画と実行は Web サーバープロセスが行います。
 
-Web UI の **Task Agent** 画面（`/task-agent`）では、**新規作成** から依頼を投入できます。
+Web UI の **タスクエージェント** 画面（`/task-agent`）では、**新規作成** から依頼を投入できます。
 
 :::note[Workflow の実行は一覧に表示されません]
 Workflow の Capability Node 実行は、内部の子 Run 連携・取消・監査のために短命の内部
@@ -47,7 +47,7 @@ Task 詳細の操作:
 
 ## Capability 設定
 
-**Task Agent** 画面の歯車から **Task Capability設定**（`/task-agent/capabilities`）を開きます。
+**タスクエージェント** 画面の歯車から **Task Capability設定**（`/task-agent/capabilities`）を開きます。
 Adapter 定義はコードで固定されており、ここでは次だけを変更できます。
 
 - **有効** — Capability の有効 / 無効。

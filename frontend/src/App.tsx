@@ -3,6 +3,7 @@ import { getApiErrorMessage } from "./utils/error";
 import { Navigate, Route, Routes } from "react-router-dom";
 import Sidebar from "./components/Sidebar";
 import TokenPrompt from "./components/TokenPrompt";
+import { useDocumentTitle } from "./hooks/useDocumentTitle";
 import MemoryPage from "./features/memories/MemoryPage";
 import ResearchPage from "./features/research/ResearchPage";
 import AgentsPage from "./features/agents/AgentsPage";
@@ -41,6 +42,7 @@ export default function App() {
   const [needsToken, setNeedsToken] = useState(false);
   const [healthError, setHealthError] = useState<string | null>(null);
   const [navOpen, setNavOpen] = useState(false);
+  useDocumentTitle();
 
   useEffect(() => {
     let cancelled = false;

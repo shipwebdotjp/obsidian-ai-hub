@@ -91,7 +91,7 @@ export default function TaskAgentListPage({
     <div className="flex h-full flex-col bg-slate-50">
       <header className="border-b border-slate-200 bg-white px-4 py-3">
         <div className="flex items-center justify-between gap-2">
-          <h1 className="text-lg font-semibold">Task Agent</h1>
+          <h1 className="text-lg font-semibold">タスクエージェント</h1>
           <div className="flex shrink-0 items-center gap-2">
             <button
               type="button"

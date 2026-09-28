@@ -89,13 +89,15 @@ API はすべて `/api/v1/...` 配下にあり、Bearer トークンが必要で
 | 人物管理 | `/people` | 人物候補の解決・重複統合 |
 | プロジェクト管理 | `/projects` | プロジェクトの追跡 |
 | ジョブ管理 | `/jobs` | 定期・ワンショットジョブの管理 |
-| Task Agent | `/task-agent` | 自由文依頼の計画・承認・実行 |
+| タスクエージェント | `/task-agent` | 自由文依頼の計画・承認・実行 |
 | ワークフロー | `/workflows` | Node / Edge グラフの設計と実行 |
 | 実行ログ | `/execution-logs/logs`, `/execution-logs/job-states` | CLI / LLM 実行ログ、ジョブ状態 |
 | プランナー | `/planner` | AI 提案の確認と Apple への登録 |
 | 設定 | `/settings` | API トークン、チャット入力の送信方法 |
 
 アプリのルート `/` と未定義のパスは `/memories` へリダイレクトされます。
+
+ブラウザのタブタイトルは `Obsidian AI Hub <画面名>` の形式で、開いている画面に合わせて変わります。
 
 ## チャット入力の送信キー
 
