@@ -367,35 +367,36 @@ def reassess_candidate_memories(embedder=None) -> int:
     if not candidates_to_reassess:
         return 0
 
+    # 1. Deduplication search & LLM assessment (outside DB write transaction)
+    for cand in candidates_to_reassess:
+        new_suggestions = run_deduplication(cand, approved_mems, embedder=embedder)
+        cand["dedup_suggestions"] = new_suggestions
+
+        if not new_suggestions:
+            # No duplicates remain among approved memories
+            cand["dedup_assessment"] = {
+                "decision": "new",
+                "reason": "月次再判定の結果、類似・重複する記憶が見つかりませんでした。",
+                "reassessment_required": False,
+            }
+        else:
+            # Perform LLM assessment on updated suggestions
+            perform_dedup_assessment_llm([cand], approved_mems)
+            assessment = cand.get("dedup_assessment") or {}
+            if assessment.get("decision") in ("merge", "supersede", "new"):
+                assessment["reassessment_required"] = False
+                assessment["reassessment_reason"] = None
+            else:
+                assessment["reassessment_required"] = True
+
+        cand["updated_at"] = get_current_timestamp()
+
+    # 2. Database write transaction only
     reassessed_count = 0
     conn = get_db_connection()
     try:
         with conn:
             for cand in candidates_to_reassess:
-                # Run deduplication search against approved memories
-                new_suggestions = run_deduplication(cand, approved_mems, embedder=embedder)
-                cand["dedup_suggestions"] = new_suggestions
-
-                if not new_suggestions:
-                    # No duplicates remain among approved memories
-                    cand["dedup_assessment"] = {
-                        "decision": "new",
-                        "reason": "月次再判定の結果、類似・重複する記憶が見つかりませんでした。",
-                        "reassessment_required": False,
-                    }
-                else:
-                    # Perform LLM assessment on updated suggestions
-                    perform_dedup_assessment_llm([cand], approved_mems)
-                    assessment = cand.get("dedup_assessment") or {}
-                    if assessment.get("decision") in ("merge", "supersede", "new"):
-                        assessment["reassessment_required"] = False
-                        assessment["reassessment_reason"] = None
-                    else:
-                        assessment["reassessment_required"] = True
-
-                cand["updated_at"] = get_current_timestamp()
-
-                # Persist candidate
                 db_row = serialize_memory(cand)
                 set_clause = ", ".join(
                     f"{col} = ?" for col in MEMORY_COLUMNS if col != "memory_id"

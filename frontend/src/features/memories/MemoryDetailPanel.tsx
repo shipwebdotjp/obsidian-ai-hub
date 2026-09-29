@@ -120,20 +120,9 @@ export default function MemoryDetailPanel({
       setDetail(updated);
       notify(`${memoryId} を${action === "approve" ? "承認" : "却下"}しました`);
       onChanged(updated);
-    } catch (e: any) {
-      if (e?.status === 409 || e?.body?.detail?.code === "dedup_reassessment_required") {
-        notify("対象記憶が変更されたため、再判定待ちに移行しました", "info");
-        try {
-          const updated = await getMemory(memoryId);
-          setDetail(updated);
-          onChanged(updated);
-        } catch (_) {
-          // ignore refetch error
-        }
-      } else {
-        const msg = getApiErrorMessage(e, "操作に失敗しました");
-        notify(msg, "error");
-      }
+    } catch (e) {
+      const msg = getApiErrorMessage(e, "操作に失敗しました");
+      notify(msg, "error");
     } finally {
       setIsSubmitting(false);
     }
@@ -163,9 +152,20 @@ export default function MemoryDetailPanel({
 
       notify(`${memoryId} を「${actionLabel}」で解決しました`);
       onChanged(updated);
-    } catch (e) {
-      const msg = getApiErrorMessage(e, "操作に失敗しました");
-      notify(msg, "error");
+    } catch (e: any) {
+      if (e?.status === 409 || e?.body?.detail?.code === "dedup_reassessment_required") {
+        notify("対象記憶が変更されたため、再判定待ちに移行しました", "info");
+        try {
+          const updated = await getMemory(memoryId);
+          setDetail(updated);
+          onChanged(updated);
+        } catch (_) {
+          // ignore refetch error
+        }
+      } else {
+        const msg = getApiErrorMessage(e, "操作に失敗しました");
+        notify(msg, "error");
+      }
     } finally {
       setIsSubmitting(false);
     }
