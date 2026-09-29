@@ -58,6 +58,10 @@ router = APIRouter(
 )
 
 
+class DesignerComposeRequest(BaseModel):
+    requirement: str = Field(description="自然言語でのワークフロー作成要件")
+
+
 class WorkflowCreate(BaseModel):
     name: str = Field(min_length=1)
     description: str = ""
@@ -288,6 +292,55 @@ def export_user_template(
     text = workflow_package.serialize_package(template["definition"], format)
     filename = f"{template['name']}.{format}"
     return _package_response(text, format, filename)
+
+
+@router.post("/designer/compose")
+async def compose_designer_workflow(
+    payload: DesignerComposeRequest,
+) -> dict[str, Any]:
+    """Compose a workflow draft package using the LLM GraphBuilder tool loop.
+
+    Runs composer in threadpool to keep FastAPI event loop non-blocking.
+    """
+    from obsidian_ai_hub.workflow.designer import composer
+
+    try:
+        return await run_in_threadpool(composer.compose_workflow_draft, payload.requirement)
+    except composer.WorkflowDesignerNotConfiguredError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "workflow_designer_not_configured", "message": str(exc)},
+        ) from exc
+    except composer.TurnBudgetExceededError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "turn_budget_exceeded", "message": str(exc)},
+        ) from exc
+    except composer.ToolCallBudgetExceededError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "tool_call_budget_exceeded", "message": str(exc)},
+        ) from exc
+    except composer.ContextBudgetExceededError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "context_budget_exceeded", "message": str(exc)},
+        ) from exc
+    except composer.ToolCallingNotSupportedError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "tool_calling_not_supported", "message": str(exc)},
+        ) from exc
+    except composer.WorkflowDesignerProviderError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail={"code": "llm_provider_error", "message": str(exc)},
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "invalid_requirement", "message": str(exc)},
+        ) from exc
 
 
 @router.post("/import", status_code=201)

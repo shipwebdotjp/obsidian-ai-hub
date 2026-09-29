@@ -1419,3 +1419,26 @@ export interface WorkflowImportResponse {
   revision: WorkflowRevision;
   validation_errors: string[];
 }
+
+export interface NodeAnalysis {
+  node_id: string;
+  node_type: string;
+  label: string;
+  effects: string;
+  requires_approval: boolean;
+  requires_approval_reason: string;
+}
+
+export interface GraphIssue {
+  code: string;
+  message: string;
+}
+
+export interface DesignerComposeResponse {
+  package: Record<string, unknown> | null;
+  summary: string | null;
+  assumptions: string[];
+  node_analysis: NodeAnalysis[];
+  structural_errors: GraphIssue[];
+  validation_issues: GraphIssue[];
+}
