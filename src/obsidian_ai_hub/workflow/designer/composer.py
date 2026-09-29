@@ -182,18 +182,45 @@ def compose_workflow_draft(
         messages.append(ai_msg)
 
         if not tool_calls_data:
-            # LLM completed turn without calling further tools
+            # LLM completed turn without calling further tools.
+            # A package is only returned when the LLM explicitly finalized
+            # via the graph_finalize tool; otherwise no draft can be created.
+            # When the builder holds a graph (e.g. graph_finalize was called
+            # but rejected for structural errors), surface the actual errors
+            # instead of a generic finalize_not_called.
             if final_payload is None:
                 if builder.nodes:
-                    final_payload = builder.finalize(summary="下書きを作成しました")
-                else:
-                    raise WorkflowDesignerProviderError("LLM がツールを呼び出さずに応答を終了しました")
+                    val = builder.validate()
+                    if val["structural_errors"]:
+                        return {
+                            "package": None,
+                            "summary": None,
+                            "assumptions": [],
+                            "node_analysis": [],
+                            "structural_errors": val["structural_errors"],
+                            "validation_issues": val["validation_issues"],
+                        }
+                    return {
+                        "package": None,
+                        "summary": None,
+                        "assumptions": [],
+                        "node_analysis": [],
+                        "structural_errors": [
+                            {
+                                "code": "finalize_not_called",
+                                "message": "graph_finalize が呼ばれずに終了したため package を返しません",
+                            }
+                        ],
+                        "validation_issues": [],
+                    }
+                raise WorkflowDesignerProviderError("LLM がツールを呼び出さずに応答を終了しました")
             break
 
         total_tool_calls += len(tool_calls_data)
         if total_tool_calls > MAX_TOOL_CALLS:
             raise ToolCallBudgetExceededError("累積ツール呼び出し回数上限 (128) を超えました")
 
+        logged_tool_calls: list[dict[str, Any]] = []
         for tc in tool_calls_data:
             t_name = tc.get("name")
             t_args = tc.get("args") or {}
@@ -202,11 +229,36 @@ def compose_workflow_draft(
             tool_inst = tools_by_name.get(t_name)
             if not tool_inst:
                 res_obj = {"ok": False, "code": "tool_not_found", "message": f"ツール '{t_name}' が存在しません"}
+                logged_entry = {
+                    "call_id": t_id,
+                    "provider_call_id": tc.get("id"),
+                    "tool_name": str(t_name or ""),
+                    "args": t_args,
+                    "status": "failed",
+                    "error": f"ツール '{t_name}' が存在しません",
+                }
             else:
                 try:
                     res_obj = tool_inst.invoke(t_args)
+                    logged_entry = {
+                        "call_id": t_id,
+                        "provider_call_id": tc.get("id"),
+                        "tool_name": str(t_name or ""),
+                        "args": t_args,
+                        "status": "succeeded",
+                        "result": res_obj,
+                    }
                 except Exception as exc:
                     res_obj = {"ok": False, "code": "tool_execution_error", "message": str(exc)}
+                    logged_entry = {
+                        "call_id": t_id,
+                        "provider_call_id": tc.get("id"),
+                        "tool_name": str(t_name or ""),
+                        "args": t_args,
+                        "status": "failed",
+                        "error": str(exc),
+                    }
+            logged_tool_calls.append(logged_entry)
 
             res_json = json.dumps(res_obj, ensure_ascii=False)
             res_truncated = _truncate_tool_result(res_json)
@@ -222,14 +274,16 @@ def compose_workflow_draft(
                 final_payload = res_obj
                 break
 
+        # Persist per-turn tool args/results (masked, capped) to the call log.
+        execution_logger.update_llm_call_tool_calls(call_id, logged_tool_calls)
+
         if final_payload is not None:
             break
 
     if turns >= MAX_TURNS and final_payload is None:
         raise TurnBudgetExceededError("ターン数上限 (32) を超えました")
 
-    if final_payload is None:
-        final_payload = builder.finalize(summary="要件を満たすグラフを作成できませんでした")
+    assert final_payload is not None
 
     return {
         "package": final_payload.get("package"),

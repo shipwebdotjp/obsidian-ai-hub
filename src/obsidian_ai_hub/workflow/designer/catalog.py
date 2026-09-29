@@ -11,6 +11,7 @@ Privacy Boundary Rules:
 
 from __future__ import annotations
 
+import logging
 import os
 from contextlib import closing
 from pathlib import Path
@@ -27,12 +28,36 @@ from obsidian_ai_hub.tasks.capability_schemas import (
 )
 from obsidian_ai_hub.utils.config import VAULT_PATH
 from obsidian_ai_hub.workflow.capabilities import (
+    WORKFLOW_ONLY_INPUT_SCHEMA,
+    WORKFLOW_ONLY_KEYS,
+    WORKFLOW_ONLY_METADATA,
+    WORKFLOW_ONLY_OUTPUT_SCHEMA,
     is_strict_allowed,
     output_contract_class,
+    workflow_capability_keys,
     workflow_output_schema,
 )
 
 CATALOG_SEARCH_LIMIT = 10
+
+logger = logging.getLogger(__name__)
+
+
+def _capability_enabled_map() -> dict[str, bool]:
+    """Return capability_key -> enabled from the DB policy table.
+
+    On lookup failure returns an empty map (callers treat unknown keys as
+    disabled) and logs a warning so a DB outage stays visible instead of
+    silently flipping every capability to disabled.
+    """
+    try:
+        return {
+            str(c["capability_key"]): bool(c.get("enabled"))
+            for c in task_store.list_capabilities()
+        }
+    except Exception as exc:
+        logger.warning("Capability enablement lookup failed: %s", exc)
+        return {}
 
 
 def catalog_search(query: str = "", target: str = "capability") -> list[dict[str, Any]]:
@@ -44,19 +69,26 @@ def catalog_search(query: str = "", target: str = "capability") -> list[dict[str
     target_clean = (target or "capability").strip().lower()
 
     if target_clean == "capability":
-        definitions = get_capability_definitions()
+        definitions = {c.key: c for c in get_capability_definitions()}
+        enabled_map = _capability_enabled_map()
         results: list[dict[str, Any]] = []
-        for cap in definitions:
-            key = cap.key
-            label = cap.label or key
-            desc = cap.description or ""
+        for key in sorted(workflow_capability_keys()):
+            cap = definitions.get(key)
+            if cap is not None:
+                label = cap.label or key
+                desc = cap.description or ""
+                read_only = cap.read_only
+            else:
+                label, desc = WORKFLOW_ONLY_METADATA.get(key, (key, ""))
+                read_only = False
             if not query_clean or query_clean in key.lower() or query_clean in label.lower() or query_clean in desc.lower():
                 results.append({
                     "target": "capability",
                     "capability_key": key,
                     "label": label,
                     "description": desc,
-                    "read_only": cap.read_only,
+                    "enabled": True if key in WORKFLOW_ONLY_KEYS else enabled_map.get(key, False),
+                    "read_only": read_only,
                     "output_contract_class": output_contract_class(key),
                     "strict_allowed": is_strict_allowed(key),
                 })
@@ -71,7 +103,7 @@ def catalog_search(query: str = "", target: str = "capability") -> list[dict[str
             agent_id = str(ag.get("agent_id") or "")
             name = str(ag.get("name") or "")
             desc = str(ag.get("description") or "")
-            tools = ag.get("tools") or ag.get("allowed_tools") or []
+            tools = ag.get("tool_ids") or []
             if not query_clean or query_clean in agent_id.lower() or query_clean in name.lower() or query_clean in desc.lower():
                 results.append({
                     "target": "agent",
@@ -140,7 +172,8 @@ def catalog_search(query: str = "", target: str = "capability") -> list[dict[str
         vault_root = Path(VAULT_PATH)
         matches: list[dict[str, Any]] = []
         if vault_root.exists():
-            for root, _, files in os.walk(vault_root):
+            for root, dirs, files in os.walk(vault_root):
+                dirs.sort()
                 for f in sorted(files):
                     if not f.endswith(".md"):
                         continue
@@ -174,21 +207,36 @@ def catalog_get_details(target: str, item_id: str) -> dict[str, Any]:
     if target_clean == "capability":
         definitions = {c.key: c for c in get_capability_definitions()}
         cap = definitions.get(item_clean)
-        if not cap:
+        if cap is None and item_clean not in WORKFLOW_ONLY_KEYS:
             return {"ok": False, "code": "capability_not_found", "message": f"Capability '{item_clean}' が見つかりません"}
+        if cap is not None:
+            label = cap.label or cap.key
+            description = cap.description or ""
+            read_only = cap.read_only
+            input_schema: Any = ui_input_schema(cap.key)
+            target_schema: Any = ui_target_schema(cap.key)
+            output_schema: Any = ui_output_schema(cap.key)
+        else:
+            label, description = WORKFLOW_ONLY_METADATA.get(item_clean, (item_clean, ""))
+            read_only = False
+            input_schema = WORKFLOW_ONLY_INPUT_SCHEMA.get(item_clean)
+            target_schema = None
+            output_schema = WORKFLOW_ONLY_OUTPUT_SCHEMA.get(item_clean)
+        enabled_map = _capability_enabled_map()
         return {
             "ok": True,
             "target": "capability",
-            "capability_key": cap.key,
-            "label": cap.label or cap.key,
-            "description": cap.description or "",
-            "read_only": cap.read_only,
-            "output_contract_class": output_contract_class(cap.key),
-            "strict_allowed": is_strict_allowed(cap.key),
-            "ui_input_schema": ui_input_schema(cap.key),
-            "ui_target_schema": ui_target_schema(cap.key),
-            "ui_output_schema": ui_output_schema(cap.key),
-            "workflow_output_schema": workflow_output_schema(cap.key),
+            "capability_key": item_clean,
+            "label": label,
+            "description": description,
+            "enabled": True if item_clean in WORKFLOW_ONLY_KEYS else enabled_map.get(item_clean, False),
+            "read_only": read_only,
+            "output_contract_class": output_contract_class(item_clean),
+            "strict_allowed": is_strict_allowed(item_clean),
+            "ui_input_schema": input_schema,
+            "ui_target_schema": target_schema,
+            "ui_output_schema": output_schema,
+            "workflow_output_schema": workflow_output_schema(item_clean),
         }
 
     if target_clean == "agent":
@@ -201,7 +249,7 @@ def catalog_get_details(target: str, item_id: str) -> dict[str, Any]:
             "agent_id": str(ag.get("agent_id")),
             "name": str(ag.get("name")),
             "description": str(ag.get("description") or ""),
-            "allowed_tools": list(ag.get("tools") or ag.get("allowed_tools") or []),
+            "allowed_tools": list(ag.get("tool_ids") or []),
         }
 
     if target_clean == "project":

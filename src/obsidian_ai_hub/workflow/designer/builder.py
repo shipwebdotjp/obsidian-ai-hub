@@ -7,6 +7,7 @@ they return {"ok": false, "code": "...", "issues": [...]} without mutating state
 
 from __future__ import annotations
 
+import logging
 import uuid
 from typing import Any, Optional
 
@@ -18,6 +19,7 @@ from obsidian_ai_hub.workflow.capabilities import (
     workflow_output_schema,
 )
 from obsidian_ai_hub.workflow.definition_package import (
+    PACKAGE_FORMAT,
     DefinitionPackageError,
     build_package,
     validate_package,
@@ -34,6 +36,9 @@ from obsidian_ai_hub.workflow.models import (
 from obsidian_ai_hub.workflow.validation import validate_graph
 
 
+logger = logging.getLogger(__name__)
+
+
 def derive_node_analysis(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Derive deterministic node analysis (effects & approval requirements) from nodes."""
     cap_defs = {c.key: c for c in get_capability_definitions()}
@@ -42,7 +47,10 @@ def derive_node_analysis(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
             str(c["capability_key"]): str(c.get("approval_policy") or "plan_required")
             for c in task_store.list_capabilities()
         }
-    except Exception:
+    except Exception as exc:
+        logger.warning(
+            "Capability policy lookup failed; defaulting to plan_required: %s", exc
+        )
         policies = {}
 
     analysis: list[dict[str, Any]] = []
@@ -107,7 +115,7 @@ def derive_node_analysis(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "requires_approval_reason": "テキストテンプレートノードのため承認不要",
             })
         elif ntype == "terminal":
-            outcome = config.get("outcome", "completed")
+            outcome = config.get("outcome", "success")
             analysis.append({
                 "node_id": nid,
                 "node_type": ntype,
@@ -206,7 +214,7 @@ class GraphBuilder:
 
         # Default configs
         if ntype == "terminal" and "outcome" not in cfg:
-            cfg["outcome"] = "completed"
+            cfg["outcome"] = "success"
 
         node = {
             "node_id": node_id,
@@ -235,7 +243,7 @@ class GraphBuilder:
             e for e in self.edges
             if str(e["source_node_id"]) not in to_remove and str(e["target_node_id"]) not in to_remove
         ]
-        return {"ok": True, "removed_node_ids": list(to_remove)}
+        return {"ok": True, "removed_node_ids": sorted(to_remove)}
 
     def _check_and_apply_strict_references(self, value: Any) -> list[str]:
         """Inspect value for capability references.
@@ -477,8 +485,13 @@ class GraphBuilder:
 
     def validate(self) -> dict[str, Any]:
         """Run structural package validation and static graph validation."""
+        from obsidian_ai_hub.workflow.checks import (
+            agent_exists_check,
+            capability_enabled_check,
+        )
+
         pkg_data = {
-            "format": "obsidian-ai-hub.workflow-definition",
+            "format": PACKAGE_FORMAT,
             "version": 1,
             "name": self.name or "Untitled Workflow",
             "description": self.description or "",
@@ -500,6 +513,8 @@ class GraphBuilder:
                 nodes=self.nodes,
                 edges=self.edges,
                 inputs_schema=self.inputs_schema,
+                capability_enabled=capability_enabled_check(),
+                agent_exists=agent_exists_check(),
             )
             for issue_str in raw_issues:
                 static_issues.append({"code": "graph_validation_issue", "message": issue_str})

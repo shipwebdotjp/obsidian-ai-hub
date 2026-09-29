@@ -47,7 +47,7 @@ class AddNodeInput(BaseModel):
         description="ノード種別: 'capability', 'agent', 'llm', 'loop', 'loop_result', 'terminal', 'text_template'"
     )
     label: str = Field(description="ノードの表示名")
-    config: Optional[dict[str, Any]] = Field(default=None, description="ノードの初期設定オブジェクト")
+    node_config: Optional[dict[str, Any]] = Field(default=None, description="ノードの初期設定オブジェクト")
     parent_loop_node_id: Optional[str] = Field(
         default=None, description="Loop ノード内の子グラフとして配置する場合は親 Loop Node ID"
     )
@@ -59,7 +59,7 @@ class RemoveNodeInput(BaseModel):
 
 class SetNodeConfigInput(BaseModel):
     node_id: str = Field(description="対象の Node ID")
-    config: dict[str, Any] = Field(description="設定する config オブジェクト")
+    node_config: dict[str, Any] = Field(description="設定する config オブジェクト")
 
 
 class BindFieldInput(BaseModel):
@@ -68,7 +68,7 @@ class BindFieldInput(BaseModel):
         description="設定対象フィールドのドット指定パス（例: 'inputs.vault_path', 'inputs.prompt', 'template'）"
     )
     value: Any = Field(
-        description="設定する値（リテラル、型付き参照 {'$ref': '...'}, 式 {'$expr': '...'}, パイプ {'$ref': '...', 'pipe': [...]})"
+        description="設定する値（リテラル、型付き参照 {'$ref': 'nodes.<id>.output.<field>'}、式 {'$expr': {...}}、pipe 付き参照 {'$ref': '...', 'pipe': [...]}）"
     )
 
 
@@ -76,10 +76,10 @@ class AddEdgeInput(BaseModel):
     source_node_id: str = Field(description="接続元 Node ID")
     target_node_id: str = Field(description="接続先 Node ID")
     edge_kind: str = Field(
-        default="normal", description="Edge 種別: 'normal', 'condition_true', 'condition_false', 'error'"
+        default="normal", description="Edge 種別: 'normal' または 'error'。条件分岐は condition に {'from_path': '...', 'operator': 'equals'|'exists'|'in', 'value': ...} を指定する"
     )
     condition: Optional[dict[str, Any]] = Field(
-        default=None, description="条件 Edge の場合: {'from_path': '...', 'operator': 'eq', 'value': '...'}"
+        default=None, description="条件 Edge の場合: {'from_path': '...', 'operator': 'equals'|'exists'|'in', 'value': ...}"
     )
     order_index: int = Field(default=0, description="評価順序インデックス")
 
@@ -95,7 +95,7 @@ class ConfigureLoopInput(BaseModel):
     continuation_condition: dict[str, Any] = Field(
         description="Loop 継続条件: {'from_path': '...', 'operator': '...', 'value': '...'}"
     )
-    max_iterations: int = Field(default=10, description="最大反復回数 (1..100)")
+    max_iterations: int = Field(default=10, description="最大反復回数 (1..50)")
     input_mapping: Optional[dict[str, Any]] = Field(
         default=None, description="Loop 開始時の初期状態マッピング"
     )
@@ -127,21 +127,21 @@ def create_designer_tools(builder: GraphBuilder) -> list[StructuredTool]:
     def _add_node(
         node_type: str,
         label: str,
-        config: Optional[dict[str, Any]] = None,
+        node_config: Optional[dict[str, Any]] = None,
         parent_loop_node_id: Optional[str] = None,
     ) -> Any:
         return builder.add_node(
             node_type=node_type,
             label=label,
-            config=config,
+            config=node_config,
             parent_loop_node_id=parent_loop_node_id,
         )
 
     def _remove_node(node_id: str) -> Any:
         return builder.remove_node(node_id=node_id)
 
-    def _set_node_config(node_id: str, config: dict[str, Any]) -> Any:
-        return builder.set_node_config(node_id=node_id, config=config)
+    def _set_node_config(node_id: str, node_config: dict[str, Any]) -> Any:
+        return builder.set_node_config(node_id=node_id, config=node_config)
 
     def _bind_field(node_id: str, field_path: str, value: Any) -> Any:
         return builder.bind_field(node_id=node_id, field_path=field_path, value=value)
@@ -227,13 +227,13 @@ def create_designer_tools(builder: GraphBuilder) -> list[StructuredTool]:
         StructuredTool.from_function(
             func=_set_node_config,
             name="graph_set_node_config",
-            description="Node の config 全体を設定します。参照がある場合、対応する Capability の strict 設定が自動更新されます。",
+            description="Node の node_config 全体を設定します。参照がある場合、対応する Capability の strict 設定が自動更新されます。",
             args_schema=SetNodeConfigInput,
         ),
         StructuredTool.from_function(
             func=_bind_field,
             name="graph_bind_field",
-            description="Node 内の特定フィールドにリテラル値・参照({$ref})・式({$expr})・パイプ({$pipe})をバインドします。",
+            description="Node 内の特定フィールドにリテラル値・型付き参照・$expr 式・pipe 付き参照をバインドします。",
             args_schema=BindFieldInput,
         ),
         StructuredTool.from_function(

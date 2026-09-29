@@ -151,4 +151,39 @@ describe("WorkflowDesignerModal", () => {
     const createDraftBtn = screen.getByText("下書きを作成");
     expect(createDraftBtn).toBeDisabled();
   });
+
+  it("does not call import after aborting the compose request", async () => {
+    vi.mocked(client.composeDesignerWorkflow).mockImplementation(
+      (_req: string, signal?: AbortSignal) =>
+        new Promise<DesignerComposeResponse>((_resolve, reject) => {
+          signal?.addEventListener("abort", () => {
+            const abortErr = new Error("aborted");
+            abortErr.name = "AbortError";
+            reject(abortErr);
+          });
+        })
+    );
+
+    render(
+      <MemoryRouter>
+        <WorkflowDesignerModal isOpen={true} onClose={vi.fn()} />
+      </MemoryRouter>
+    );
+
+    const textarea = screen.getByPlaceholderText(/Vault 内の daily ノート/);
+    fireEvent.change(textarea, { target: { value: "Something slow" } });
+    fireEvent.click(screen.getByText("AI で生成開始"));
+
+    await waitFor(() => {
+      expect(screen.getByText("表示中止")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText("表示中止"));
+
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText(/Vault 内の daily ノート/)).toBeInTheDocument();
+    });
+    expect(client.importWorkflowDefinition).not.toHaveBeenCalled();
+    expect(screen.queryByText("下書きを作成")).toBeNull();
+  });
 });

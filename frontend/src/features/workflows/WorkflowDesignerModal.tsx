@@ -136,7 +136,7 @@ export default function WorkflowDesignerModal({ isOpen, onClose }: WorkflowDesig
               <div className="rounded border border-amber-200 bg-amber-50/60 p-3 text-[11px] text-amber-900 space-y-1">
                 <p className="font-semibold text-amber-950">外部送信・ログ保存に関する注意事項</p>
                 <ul className="list-disc pl-4 space-y-0.5">
-                  <li>要望文、選択された名前・ID・相対パス、およびツール実行結果は外部 LLM プロバイダへ送信されます（Vault 本文・プロンプト全文は送信されません）。</li>
+                  <li>要望文、選択された名前・ID・相対パス、およびツール実行結果は外部 LLM プロバイダへ送信されます（Vault 本文・Agent のシステムプロンプト全文は送信されません）。</li>
                   <li>すべてのやり取りは <code className="bg-amber-100 px-1 py-0.5 rounded">llm_call_logs</code> に記録されます（ログ削除ジョブ未導入時は長期間保持されます）。</li>
                   <li>生成中に「表示中止」を押してもサーバー側の LLM 処理停止は保証されません。ただし「下書きを作成」を押すまでワークフローは DB に保存されません。</li>
                 </ul>
@@ -148,7 +148,7 @@ export default function WorkflowDesignerModal({ isOpen, onClose }: WorkflowDesig
             <div className="flex flex-col items-center justify-center py-12 space-y-4">
               <div className="h-8 w-8 animate-spin rounded-full border-4 border-blue-600 border-t-transparent"></div>
               <p className="text-sm font-medium text-slate-700">AI が要件を解析し、グラフ構造を下書きしています…</p>
-              <p className="text-xs text-slate-500">（通常 10秒〜30秒程度かかります）</p>
+              <p className="text-xs text-slate-500">（複雑な要望では数分かかる場合があります）</p>
             </div>
           )}
 
@@ -227,7 +227,7 @@ export default function WorkflowDesignerModal({ isOpen, onClose }: WorkflowDesig
               <button
                 type="button"
                 onClick={handleCloseModal}
-                className="rounded border border-slate-300 px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
+                className="cursor-pointer rounded border border-slate-300 px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
               >
                 キャンセル
               </button>
@@ -235,7 +235,7 @@ export default function WorkflowDesignerModal({ isOpen, onClose }: WorkflowDesig
                 type="button"
                 onClick={handleStartCompose}
                 disabled={!requirement.trim()}
-                className="rounded bg-blue-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="cursor-pointer rounded bg-blue-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 AI で生成開始
               </button>
@@ -246,7 +246,7 @@ export default function WorkflowDesignerModal({ isOpen, onClose }: WorkflowDesig
             <button
               type="button"
               onClick={handleAbort}
-              className="ml-auto rounded border border-rose-300 bg-rose-50 px-3 py-1.5 text-xs font-medium text-rose-700 hover:bg-rose-100"
+              className="cursor-pointer ml-auto rounded border border-rose-300 bg-rose-50 px-3 py-1.5 text-xs font-medium text-rose-700 hover:bg-rose-100"
             >
               表示中止
             </button>
@@ -257,7 +257,7 @@ export default function WorkflowDesignerModal({ isOpen, onClose }: WorkflowDesig
               <button
                 type="button"
                 onClick={handleReset}
-                className="rounded border border-slate-300 px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
+                className="cursor-pointer rounded border border-slate-300 px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
               >
                 要件を再入力
               </button>
@@ -265,7 +265,7 @@ export default function WorkflowDesignerModal({ isOpen, onClose }: WorkflowDesig
                 <button
                   type="button"
                   onClick={handleCloseModal}
-                  className="rounded border border-slate-300 px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
+                  className="cursor-pointer rounded border border-slate-300 px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
                 >
                   閉じる
                 </button>
