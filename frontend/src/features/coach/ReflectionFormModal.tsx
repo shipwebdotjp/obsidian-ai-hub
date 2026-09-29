@@ -7,16 +7,23 @@ import {
 import {
   CoachDecisionType,
   CoachFocus,
+  CoachFocusStatus,
   CoachGoalDetail,
   CoachWeeklyReflection,
 } from "./types";
 import { X, Calendar } from "lucide-react";
 
+const FOCUS_STATUS_SUFFIX: Record<CoachFocusStatus, string> = {
+  active: "（アクティブ）",
+  paused: "（休止中）",
+  candidate: "（候補）",
+};
+
 interface ReflectionFormModalProps {
   isOpen: boolean;
   onClose: () => void;
   goal: CoachGoalDetail;
-  activeFocus: CoachFocus;
+  defaultFocus: CoachFocus;
   onSubmitted: () => void;
 }
 
@@ -46,10 +53,15 @@ export default function ReflectionFormModal({
   isOpen,
   onClose,
   goal,
-  activeFocus,
+  defaultFocus,
   onSubmitted,
 }: ReflectionFormModalProps) {
   const weekOptions = getPastISOWeekMondays(12);
+  const [subjectFocusId, setSubjectFocusId] = useState<string>(
+    defaultFocus.focus_id
+  );
+  const subjectFocus =
+    goal.focuses.find((f) => f.focus_id === subjectFocusId) ?? defaultFocus;
   const [selectedWeek, setSelectedWeek] = useState<string>(weekOptions[0]);
 
   const [existingReflections, setExistingReflections] = useState<
@@ -69,15 +81,28 @@ export default function ReflectionFormModal({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Candidate Focuses for "change" decision
+  // Candidate Focuses for "change" decision (any non-active focus)
   const candidateFocuses = goal.focuses.filter(
-    (f) => f.focus_id !== activeFocus.focus_id && f.status === "candidate"
+    (f) => f.focus_id !== subjectFocus.focus_id && f.status !== "active"
   );
+
+  // Reset the form target each time the modal opens.
+  useEffect(() => {
+    if (!isOpen) return;
+    setSubjectFocusId(defaultFocus.focus_id);
+    // Clear the previous focus's rows so the populate effect cannot match a
+    // same-week reflection from the old focus before the refetch resolves.
+    setExistingReflections([]);
+    setExistingReflection(null);
+    setSelectedWeek(weekOptions[0]);
+    // weekOptions is derived from the current date; intentionally not a dep.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, defaultFocus.focus_id]);
 
   useEffect(() => {
     if (!isOpen) return;
     let cancelled = false;
-    fetchCoachReflectionsByFocus(activeFocus.focus_id)
+    fetchCoachReflectionsByFocus(subjectFocus.focus_id)
       .then((items) => {
         if (!cancelled) {
           setExistingReflections(items);
@@ -91,7 +116,7 @@ export default function ReflectionFormModal({
     return () => {
       cancelled = true;
     };
-  }, [isOpen, activeFocus.focus_id]);
+  }, [isOpen, subjectFocus.focus_id]);
 
   useEffect(() => {
     const found = existingReflections.find(
@@ -114,7 +139,16 @@ export default function ReflectionFormModal({
       setDecisionType("continue");
       setTargetFocusId(candidateFocuses[0]?.focus_id || "");
     }
-  }, [selectedWeek, existingReflections]);
+  }, [selectedWeek, existingReflections, subjectFocus.focus_id]);
+
+  const handleSubjectChange = (focusId: string) => {
+    setSubjectFocusId(focusId);
+    // Drop the previous focus's reflections immediately so the edit-mode
+    // effect cannot match a same-week row from the old focus while refetching.
+    setExistingReflections([]);
+    setExistingReflection(null);
+    setSelectedWeek(weekOptions[0]);
+  };
 
   if (!isOpen) return null;
 
@@ -146,8 +180,8 @@ export default function ReflectionFormModal({
         });
       } else {
         // Create mode
-        await createCoachReflection(activeFocus.focus_id, {
-          focus_id: activeFocus.focus_id,
+        await createCoachReflection(subjectFocus.focus_id, {
+          focus_id: subjectFocus.focus_id,
           iso_week_monday: selectedWeek,
           worked_well: workedWell.trim() || undefined,
           difficult_reason: difficultReason.trim() || undefined,
@@ -176,7 +210,7 @@ export default function ReflectionFormModal({
               週次 Reflection（振り返り）
             </h2>
             <p className="text-xs text-slate-500">
-              Focus: <span className="font-medium text-slate-800">{activeFocus.name}</span>
+              過去週や現在 active でない Focus についても記録できます。
             </p>
           </div>
           <button
@@ -194,6 +228,28 @@ export default function ReflectionFormModal({
               {error}
             </div>
           )}
+
+          <div className="flex items-center gap-2 rounded-lg bg-slate-50 p-3 border border-slate-200">
+            <label
+              htmlFor="reflection-subject-focus"
+              className="text-xs font-medium text-slate-700 shrink-0"
+            >
+              対象 Focus:
+            </label>
+            <select
+              id="reflection-subject-focus"
+              value={subjectFocus.focus_id}
+              onChange={(e) => handleSubjectChange(e.target.value)}
+              className="flex-1 rounded border border-slate-300 p-1.5 text-xs bg-white focus:border-slate-800 focus:outline-none"
+            >
+              {goal.focuses.map((f) => (
+                <option key={f.focus_id} value={f.focus_id}>
+                  {f.name}
+                  {FOCUS_STATUS_SUFFIX[f.status]}
+                </option>
+              ))}
+            </select>
+          </div>
 
           <div className="flex items-center gap-2 rounded-lg bg-slate-50 p-3 border border-slate-200">
             <Calendar className="h-4 w-4 text-slate-500 shrink-0" />
@@ -314,7 +370,15 @@ export default function ReflectionFormModal({
               </div>
             </div>
 
-            {decisionType === "change" && !isEditMode && (
+            {!isEditMode && (
+            <p className="text-[10px] text-slate-500">
+              切替・休止による Focus の状態変更は、その Goal
+              で最新の週を記録するときに反映されます。
+              過去週の追記は履歴として保存されます。
+            </p>
+          )}
+
+          {decisionType === "change" && !isEditMode && (
               <div className="rounded-lg bg-indigo-50/60 p-3 border border-indigo-100">
                 <label className="block text-xs font-medium text-indigo-900 mb-1">
                   切替先の Focus 候補を選択 <span className="text-red-500">*</span>

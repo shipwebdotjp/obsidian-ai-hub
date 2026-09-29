@@ -26,6 +26,26 @@ Accepted
 - Phase 1 は手動の Web 内週次 Reflection に限定し、Project/Task/活動履歴からの推測、
   Scheduler、外部通知を使わない。
 
+## 追加決定（記録摩擦の解消と Thread の単一ソース化）
+
+- Weekly Reflection は、active である Goal に属する任意の Focus（`candidate` /
+  `paused` を含む）について記録できる。登録時点の Focus `active`
+  制約は持たない。保存後に変更不可なのは選択された週・Focus・決定種別
+  （continue / narrow / change / pause）・切替先 Focus のままとする。
+- Reflection の決定による Focus 状態の変更は、その Goal
+  で最新の週を記録するときにだけ現在の Focus に適用する。
+  過去週の追記は履歴として保存し、現在の active Focus を変えない。
+- Focus の状態・名称を変更する操作は、同一トランザクション内で Coach Thread
+  Event を追記する。`change` / `pause` 決定による遷移、手動の
+  `activate` による旧 active の降格（`focus_demoted`）、Focus
+  の改称（`focus_renamed`）を含む。Goal の到達像・理由の編集は本文相当として
+  イベント化しない。
+- 投影規則「本文は可変・決定は不変」を定める。Thread Event の payload
+  は決定・識別子・表示名の作成時スナップショットを保持し、
+  Reflection 本文（取り組み、難しさ、気づき、次週の範囲）は可変として、
+  Thread 一覧の読み取り時に現在の Reflection 行から射影する。
+  本文編集が履歴表示に反映され、決定種別は保存時点のまま残る。
+
 ## Consequences
 
 - SQLite migration と Coach 専用の API/UI が必要になる。

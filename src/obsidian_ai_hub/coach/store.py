@@ -278,6 +278,27 @@ class CoachStore:
             return None
         return dict(row)
 
+    def get_latest_reflection_week_for_goal(
+        self, conn: sqlite3.Connection, goal_id: str
+    ) -> Optional[str]:
+        """Return the maximum recorded ISO week Monday for the goal, or None.
+
+        Used to decide whether a newly recorded reflection is the latest one
+        for the goal (only the latest one may change the current Focus state).
+        """
+        row = conn.execute(
+            """
+            SELECT MAX(r.iso_week_monday) AS latest_week
+            FROM coach_weekly_reflections r
+            JOIN coach_focuses f ON r.focus_id = f.focus_id
+            WHERE f.goal_id = ?
+            """,
+            (goal_id,),
+        ).fetchone()
+        if not row or row["latest_week"] is None:
+            return None
+        return row["latest_week"]
+
     def list_reflections_by_focus(
         self, conn: sqlite3.Connection, focus_id: str
     ) -> list[dict[str, Any]]:
@@ -373,10 +394,17 @@ class CoachStore:
 
         rows = conn.execute(
             """
-            SELECT event_id, goal_id, focus_id, reflection_id, event_type, payload_json, created_at
-            FROM coach_thread_events
-            WHERE goal_id = ?
-            ORDER BY created_at DESC, event_id DESC
+            SELECT e.event_id, e.goal_id, e.focus_id, e.reflection_id, e.event_type,
+                   e.payload_json, e.created_at,
+                   r.reflection_id AS refl_row_id,
+                   r.worked_well AS refl_worked_well,
+                   r.difficult_reason AS refl_difficult_reason,
+                   r.learnings AS refl_learnings,
+                   r.next_week_scope AS refl_next_week_scope
+            FROM coach_thread_events e
+            LEFT JOIN coach_weekly_reflections r ON e.reflection_id = r.reflection_id
+            WHERE e.goal_id = ?
+            ORDER BY e.created_at DESC, e.rowid DESC
             LIMIT ? OFFSET ?
             """,
             (goal_id, limit, offset),
@@ -389,6 +417,21 @@ class CoachStore:
                 item["payload"] = json.loads(item["payload_json"])
             except Exception:
                 item["payload"] = {}
+            if item.get("reflection_id") and r["refl_row_id"] is not None:
+                # Mutable body text is projected from the current reflection
+                # row; identity/decision/snapshot fields stay as recorded.
+                item["payload"]["worked_well"] = r["refl_worked_well"]
+                item["payload"]["difficult_reason"] = r["refl_difficult_reason"]
+                item["payload"]["learnings"] = r["refl_learnings"]
+                item["payload"]["next_week_scope"] = r["refl_next_week_scope"]
+            for key in (
+                "refl_row_id",
+                "refl_worked_well",
+                "refl_difficult_reason",
+                "refl_learnings",
+                "refl_next_week_scope",
+            ):
+                item.pop(key, None)
             events.append(item)
 
         return events, total

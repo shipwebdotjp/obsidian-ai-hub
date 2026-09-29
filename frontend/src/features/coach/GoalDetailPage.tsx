@@ -88,6 +88,16 @@ export default function GoalDetailPage() {
   const isActive = goal.status === "active";
   const activeFocus = goal.active_focus;
 
+  const getReflectionGuidance = (): string => {
+    if (isPaused) return "Goal が休止中のため、Reflection は登録できません。";
+    if (isEnded) return "Goal が終了したため、閲覧専用となります。";
+    if (goal.focuses.length === 0)
+      return "Focus 候補がありません。下記 Focus セクションから候補を追加してください。";
+    if (activeFocus)
+      return `現在の Focus 「${activeFocus.name}」について週次振り返りを記録します。過去週や別の Focus も選べます。`;
+    return "記録する Focus を選んで週次振り返りを記録できます（過去週・非アクティブ可）。";
+  };
+
   const handleStartEditGoal = () => {
     if (isEnded) return;
     setEditStatement(goal.statement);
@@ -288,17 +298,11 @@ export default function GoalDetailPage() {
               週次 Reflection（振り返り）
             </span>
             <span className="text-[11px] text-indigo-700">
-              {isActive && activeFocus
-                ? `現在の Focus 「${activeFocus.name}」について週次振り返りを記録します。`
-                : isPaused
-                ? "Goal が休止中のため、Reflection は登録できません。"
-                : isEnded
-                ? "Goal が終了したため、閲覧専用となります。"
-                : "Active な Focus が選択されていません。下記 Focus セクションから選択してください。"}
+              {getReflectionGuidance()}
             </span>
           </div>
 
-          {isActive && activeFocus && (
+          {isActive && goal.focuses.length > 0 && (
             <button
               type="button"
               onClick={() => setIsReflectionOpen(true)}
@@ -323,12 +327,12 @@ export default function GoalDetailPage() {
       <CoachThreadTimeline goalId={goal.goal_id} refreshKey={timelineKey} />
 
       {/* Reflection Form Modal */}
-      {activeFocus && (
+      {goal.focuses.length > 0 && (
         <ReflectionFormModal
           isOpen={isReflectionOpen}
           onClose={() => setIsReflectionOpen(false)}
           goal={goal}
-          activeFocus={activeFocus}
+          defaultFocus={activeFocus ?? goal.focuses[0]}
           onSubmitted={() => {
             loadGoal();
           }}

@@ -5,6 +5,7 @@ import {
   Calendar,
   CheckCircle2,
   Clock,
+  Edit2,
   Flag,
   PauseCircle,
   PlayCircle,
@@ -63,6 +64,10 @@ export default function CoachThreadTimeline({
         return <CheckCircle2 className="h-4 w-4 text-emerald-600" />;
       case "focus_paused":
         return <PauseCircle className="h-4 w-4 text-slate-400" />;
+      case "focus_demoted":
+        return <Clock className="h-4 w-4 text-amber-600" />;
+      case "focus_renamed":
+        return <Edit2 className="h-4 w-4 text-slate-500" />;
       case "reflection_created":
         return <RotateCcw className="h-4 w-4 text-purple-600" />;
       default:
@@ -87,6 +92,10 @@ export default function CoachThreadTimeline({
         return `Focus「${p.focus_name || ""}」をアクティブに選択しました`;
       case "focus_paused":
         return `Focus「${p.focus_name || ""}」を休止しました`;
+      case "focus_demoted":
+        return `Focus「${p.focus_name || ""}」を候補に戻しました`;
+      case "focus_renamed":
+        return `Focus を「${p.old_name || ""}」から「${p.new_name || ""}」に変更しました`;
       case "reflection_created": {
         const decLabels: Record<string, string> = {
           continue: "継続",

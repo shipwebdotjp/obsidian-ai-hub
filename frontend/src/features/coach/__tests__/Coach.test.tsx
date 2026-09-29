@@ -130,6 +130,62 @@ describe("GoalDetailPage", () => {
     expect(screen.getByText("Goal を作成しました")).toBeInTheDocument();
   });
 
+  it("opens the reflection modal with a subject focus selector", async () => {
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter initialEntries={["/coach/goals/cgoal_1"]}>
+        <Routes>
+          <Route path="/coach/goals/:goalId" element={<GoalDetailPage />} />
+        </Routes>
+      </MemoryRouter>
+    );
+
+    await screen.findByText("Focus 候補・選択");
+    await user.click(
+      screen.getByRole("button", { name: "週次 Reflection を記録" })
+    );
+
+    const select = await screen.findByLabelText("対象 Focus:");
+    expect(select).toBeInTheDocument();
+    // Active and candidate focuses are both selectable as the subject.
+    expect(
+      screen.getByRole("option", { name: /週1アウトプット/ })
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("option", { name: /毎日15分読書/ })
+    ).toBeInTheDocument();
+    expect(coachApi.fetchCoachReflectionsByFocus).toHaveBeenCalledWith(
+      "cfoc_1"
+    );
+  });
+
+  it("shows the record button even without an active focus", async () => {
+    const user = userEvent.setup();
+    vi.mocked(coachApi.fetchCoachGoalDetail).mockResolvedValue({
+      ...mockGoals[0],
+      active_focus: null,
+    });
+
+    render(
+      <MemoryRouter initialEntries={["/coach/goals/cgoal_1"]}>
+        <Routes>
+          <Route path="/coach/goals/:goalId" element={<GoalDetailPage />} />
+        </Routes>
+      </MemoryRouter>
+    );
+
+    await screen.findByText("Focus 候補・選択");
+    await user.click(
+      screen.getByRole("button", { name: "週次 Reflection を記録" })
+    );
+
+    // The modal falls back to the first focus as the subject.
+    expect(await screen.findByLabelText("対象 Focus:")).toBeInTheDocument();
+    expect(coachApi.fetchCoachReflectionsByFocus).toHaveBeenCalledWith(
+      "cfoc_1"
+    );
+  });
+
   it("handles manual focus activation", async () => {
     const user = userEvent.setup();
     vi.mocked(coachApi.activateCoachFocus).mockResolvedValue({

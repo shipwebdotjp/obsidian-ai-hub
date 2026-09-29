@@ -27,6 +27,33 @@ class CoachService:
     def __init__(self, store: Optional[CoachStore] = None) -> None:
         self.store = store or CoachStore()
 
+    def _emit_focus_event(
+        self,
+        conn: Any,
+        goal: dict[str, Any],
+        focus: dict[str, Any],
+        event_type: str,
+        extra: Optional[dict[str, Any]],
+        now: str,
+    ) -> None:
+        payload = {
+            "goal_statement": goal["statement"],
+            "focus_name": focus["name"],
+        }
+        if extra:
+            payload.update(extra)
+        event_id = f"cevt_{uuid4().hex[:12]}"
+        self.store.create_thread_event(
+            conn,
+            event_id=event_id,
+            goal_id=goal["goal_id"],
+            focus_id=focus["focus_id"],
+            reflection_id=None,
+            event_type=event_type,
+            payload_json=json.dumps(payload),
+            created_at=now,
+        )
+
     def create_goal(
         self, statement: str, reason: str, initial_focuses: list[str]
     ) -> dict[str, Any]:
@@ -293,8 +320,22 @@ class CoachService:
             raise CoachStateValidationError("Cannot edit focus on ended goal")
 
         now = datetime.now(timezone.utc).isoformat()
+        old_name = focus["name"]
         with conn:
             self.store.update_focus(conn, focus_id=focus_id, name=name_val, updated_at=now)
+            if old_name != name_val:
+                self._emit_focus_event(
+                    conn,
+                    goal,
+                    focus,
+                    "focus_renamed",
+                    {
+                        "old_name": old_name,
+                        "new_name": name_val,
+                        "status": focus["status"],
+                    },
+                    now,
+                )
 
         return self.store.get_focus(conn, focus_id)
 
@@ -323,6 +364,14 @@ class CoachService:
                     focus_id=current_active["focus_id"],
                     status="candidate",
                     updated_at=now,
+                )
+                self._emit_focus_event(
+                    conn,
+                    goal,
+                    current_active,
+                    "focus_demoted",
+                    {"to_status": "candidate"},
+                    now,
                 )
 
             self.store.update_focus(
@@ -416,8 +465,10 @@ class CoachService:
 
         if goal["status"] in ("paused", "ended"):
             raise CoachStateValidationError(f"Cannot register reflection on {goal['status']} goal")
-        if focus["status"] != "active":
-            raise CoachStateValidationError("Cannot register reflection on non-active focus")
+        # Reflections may be recorded for any focus of an active goal,
+        # regardless of the focus status. The active-only constraint was
+        # removed so past weeks can be backfilled after a focus was
+        # switched or paused.
 
         existing = self.store.get_reflection_by_focus_and_week(
             conn, focus_id, iso_week_monday
@@ -432,9 +483,17 @@ class CoachService:
         elif decision_type == "change":
             if not target_focus_id:
                 raise CoachStateValidationError("target_focus_id is required when decision_type is 'change'")
+            if target_focus_id == focus_id:
+                raise CoachStateValidationError("target_focus_id must differ from the recorded focus")
             target_focus = self.store.get_focus(conn, target_focus_id)
             if not target_focus or target_focus["goal_id"] != goal_id:
                 raise CoachStateValidationError("target_focus_id must belong to the same goal")
+
+        # A decision changes the current focus state only when this
+        # reflection is the latest one for the goal. Backfilled older weeks
+        # are recorded as history without altering the present focus.
+        latest_week = self.store.get_latest_reflection_week_for_goal(conn, goal_id)
+        apply_transition = latest_week is None or iso_week_monday >= latest_week
 
         refl_id = f"crefl_{uuid4().hex[:12]}"
         now = datetime.now(timezone.utc).isoformat()
@@ -442,20 +501,48 @@ class CoachService:
         import sqlite3
         try:
             with conn:
-                # Apply focus status transitions according to decision_type
-                if decision_type == "change" and target_focus:
-                    # Current active focus becomes candidate, target candidate becomes active
-                    self.store.update_focus(
-                        conn, focus_id=focus_id, status="candidate", updated_at=now
-                    )
-                    self.store.update_focus(
-                        conn, focus_id=target_focus_id, status="active", updated_at=now
-                    )
-                elif decision_type == "pause":
-                    # Current active focus becomes paused
-                    self.store.update_focus(
-                        conn, focus_id=focus_id, status="paused", updated_at=now
-                    )
+                if apply_transition:
+                    # Apply focus status transitions according to decision_type
+                    if decision_type == "change" and target_focus:
+                        current_active = self.store.get_active_focus_for_goal(
+                            conn, goal_id
+                        )
+                        if (
+                            current_active
+                            and current_active["focus_id"] != target_focus_id
+                        ):
+                            self.store.update_focus(
+                                conn,
+                                focus_id=current_active["focus_id"],
+                                status="candidate",
+                                updated_at=now,
+                            )
+                            self._emit_focus_event(
+                                conn,
+                                goal,
+                                current_active,
+                                "focus_demoted",
+                                {"to_status": "candidate"},
+                                now,
+                            )
+                        if target_focus["status"] != "active":
+                            self.store.update_focus(
+                                conn,
+                                focus_id=target_focus_id,
+                                status="active",
+                                updated_at=now,
+                            )
+                            self._emit_focus_event(
+                                conn, goal, target_focus, "focus_activated", None, now
+                            )
+                    elif decision_type == "pause":
+                        if focus["status"] != "paused":
+                            self.store.update_focus(
+                                conn, focus_id=focus_id, status="paused", updated_at=now
+                            )
+                            self._emit_focus_event(
+                                conn, goal, focus, "focus_paused", None, now
+                            )
 
                 # Create reflection row
                 self.store.create_reflection(
@@ -479,6 +566,7 @@ class CoachService:
                     "focus_name": focus["name"],
                     "decision_type": decision_type,
                     "iso_week_monday": iso_week_monday,
+                    "transition_applied": apply_transition,
                     "worked_well": worked_well,
                     "difficult_reason": difficult_reason,
                     "learnings": learnings,
