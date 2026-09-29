@@ -47,6 +47,9 @@ class DedupSuggestion(BaseModel):
 class DedupAssessment(BaseModel):
     decision: Literal["merge", "new", "supersede", "failed"]
     target_memory_id: Optional[str] = None
+    target_fingerprint: Optional[str] = None
+    reassessment_required: Optional[bool] = False
+    reassessment_reason: Optional[str] = None
     similarity_score: Optional[float] = None
     reason: Optional[str] = None
     integrated_content: Optional[str] = None

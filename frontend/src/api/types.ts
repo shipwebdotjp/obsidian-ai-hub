@@ -20,6 +20,9 @@ export interface DedupSuggestion {
 export interface DedupAssessment {
   decision: "merge" | "new" | "supersede" | "failed";
   target_memory_id?: string;
+  target_fingerprint?: string | null;
+  reassessment_required?: boolean | null;
+  reassessment_reason?: string | null;
   similarity_score?: number;
   reason?: string;
   integrated_content?: string;

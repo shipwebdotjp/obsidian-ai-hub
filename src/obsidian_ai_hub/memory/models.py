@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
@@ -11,6 +12,13 @@ from pathlib import Path
 from obsidian_ai_hub.utils import config
 
 logger = logging.getLogger(__name__)
+
+class DedupReassessmentRequiredError(Exception):
+    """Raised when a candidate's target memory has been modified, removed, or lacks a fingerprint."""
+    def __init__(self, message: str = "対象メモリが判定時点から変更されたため、月次メモリ保守で再判定します。"):
+        super().__init__(message)
+        self.message = message
+
 
 ALLOWED_STABILITY = frozenset({"stable", "tentative", "explicitly_settled"})
 STABILITY_DEFAULT = "tentative"
@@ -240,6 +248,59 @@ def update_target_with_candidate_data(
     target["reviewed_by"] = reviewed_by
     target["reviewed_at"] = timestamp_now
     return target
+
+
+def compute_memory_fingerprint(target: dict) -> str:
+    """Compute SHA-256 fingerprint over semantic fields of an approved memory."""
+    topics = sorted(list(set(target.get("topics") or [])))
+    tags = sorted(list(set(target.get("tags") or [])))
+    contradicts = sorted(list(set(target.get("contradicts") or [])))
+
+    evidence_items = []
+    for ev in (target.get("evidence") or []):
+        if isinstance(ev, dict):
+            evidence_items.append({
+                "observed_at": ev.get("observed_at"),
+                "path": ev.get("path") or "",
+                "quote": ev.get("quote") or "",
+            })
+    evidence_items.sort(key=lambda x: (x["path"], x["quote"], x["observed_at"] or ""))
+
+    person_ids = set()
+    raw_people = target.get("people") or []
+    for p in raw_people:
+        if isinstance(p, dict) and p.get("person_id"):
+            person_ids.add(p["person_id"])
+        elif isinstance(p, str):
+            person_ids.add(p)
+    if "person_ids" in target and isinstance(target["person_ids"], list):
+        for pid in target["person_ids"]:
+            if isinstance(pid, str):
+                person_ids.add(pid)
+    people_sorted = sorted(list(person_ids))
+
+    canonical_obj = {
+        "content": target.get("content") or "",
+        "contradicts": contradicts,
+        "evidence": evidence_items,
+        "extraction_confidence": target.get("extraction_confidence"),
+        "kind": target.get("kind"),
+        "memory_key": target.get("memory_key"),
+        "people": people_sorted,
+        "review_due_at": target.get("review_due_at"),
+        "scope": target.get("scope") or "user",
+        "sensitivity": target.get("sensitivity"),
+        "stability": target.get("stability"),
+        "status": target.get("status") or "",
+        "supersedes": target.get("supersedes"),
+        "tags": tags,
+        "topics": topics,
+        "valid_from": target.get("valid_from"),
+        "valid_until": target.get("valid_until"),
+    }
+
+    canonical_json = json.dumps(canonical_obj, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha256(canonical_json.encode("utf-8")).hexdigest()
 
 
 # Fields that the Web UI can edit. Other fields (kind, memory_key, evidence,

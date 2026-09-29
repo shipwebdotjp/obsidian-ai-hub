@@ -848,3 +848,107 @@ def test_maintenance_reproposal_notify_failure_does_not_fail_run(mock_llm_respon
         assert run_row["active_question_set_id"] == "round_2"
     finally:
         conn.close()
+
+
+@patch("obsidian_ai_hub.utils.llm_client.generate_llm_response")
+def test_reassess_candidate_memories(mock_llm_response):
+    from obsidian_ai_hub.memory import save_all_memories, load_all_memories, get_memory_events
+    from obsidian_ai_hub.memory.maintenance import reassess_candidate_memories
+    from obsidian_ai_hub.memory.models import compute_memory_fingerprint
+
+    conn = get_db_connection()
+    try:
+        conn.execute("DELETE FROM memories")
+        conn.execute("DELETE FROM memory_events")
+        conn.commit()
+    finally:
+        conn.close()
+
+    m_target = {
+        "schema_version": 1,
+        "memory_id": "mem_target_re",
+        "status": "approved",
+        "kind": "preference",
+        "memory_key": "key-re",
+        "content": "承認済みのターゲット記憶",
+        "topics": ["学習"],
+        "tags": ["英語"],
+        "evidence": [],
+        "created_at": "2026-07-01T00:00:00+09:00",
+        "updated_at": "2026-07-01T00:00:00+09:00",
+    }
+
+    # Candidate 1: reassessment_required = True
+    c1 = {
+        "schema_version": 1,
+        "memory_id": "mem_cand_re1",
+        "status": "candidate",
+        "kind": "preference",
+        "memory_key": "key-re",
+        "content": "再判定が必要な候補記憶1",
+        "topics": ["学習"],
+        "tags": ["英語"],
+        "evidence": [],
+        "dedup_suggestions": [{"target_memory_id": "mem_target_re", "relation": "duplicate"}],
+        "dedup_assessment": {
+            "decision": "merge",
+            "target_memory_id": "mem_target_re",
+            "reassessment_required": True,
+            "reassessment_reason": "対象変更",
+        },
+        "created_at": "2026-07-01T00:00:00+09:00",
+        "updated_at": "2026-07-01T00:00:00+09:00",
+    }
+
+    # Candidate 2: no matching approved memory exists anymore -> becomes "new"
+    c2 = {
+        "schema_version": 1,
+        "memory_id": "mem_cand_re2",
+        "status": "candidate",
+        "kind": "fact",
+        "memory_key": "key-orphaned",
+        "content": "対象が存在しない孤立候補記憶2",
+        "topics": ["その他"],
+        "tags": [],
+        "evidence": [],
+        "dedup_suggestions": [{"target_memory_id": "mem_non_existent", "relation": "duplicate"}],
+        "dedup_assessment": {
+            "decision": "merge",
+            "target_memory_id": "mem_non_existent",
+            "reassessment_required": True,
+        },
+        "created_at": "2026-07-01T00:00:00+09:00",
+        "updated_at": "2026-07-01T00:00:00+09:00",
+    }
+
+    save_all_memories([m_target, c1, c2])
+
+    mock_llm_response.return_value = json.dumps([
+        {
+            "candidate_id": "mem_cand_re1",
+            "decision": "merge",
+            "target_memory_id": "mem_target_re",
+            "integrated_content": "統合された新しい記憶1",
+            "reason": "再判定でのマージ",
+        }
+    ])
+
+    count = reassess_candidate_memories(embedder=None)
+    assert count == 2
+
+    all_mems = {m["memory_id"]: m for m in load_all_memories()}
+
+    # Candidate 1 was re-assessed and has fingerprint + reassessment_required = False
+    ass1 = all_mems["mem_cand_re1"]["dedup_assessment"]
+    assert ass1["decision"] == "merge"
+    assert ass1["target_fingerprint"] == compute_memory_fingerprint(m_target)
+    assert ass1["reassessment_required"] is False
+
+    # Candidate 2 has no approved target, so became "new"
+    ass2 = all_mems["mem_cand_re2"]["dedup_assessment"]
+    assert ass2["decision"] == "new"
+    assert ass2["reassessment_required"] is False
+
+    # Check audit events
+    events1 = get_memory_events("mem_cand_re1")
+    assert any(e["event_type"] == "dedup_reassessed" for e in events1)

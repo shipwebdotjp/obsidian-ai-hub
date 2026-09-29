@@ -44,10 +44,12 @@ from obsidian_ai_hub.memory.extraction import (
 )
 from obsidian_ai_hub.memory.models import (
     ALLOWED_STABILITY,
+    DedupReassessmentRequiredError,
     EDITABLE_FIELDS,
     EVENT_COLUMNS,
     MEMORY_COLUMNS,
     STABILITY_DEFAULT,
+    compute_memory_fingerprint,
     deserialize_event,
     deserialize_memory,
     estimate_tokens,
@@ -142,6 +144,8 @@ __all__ = [
     "save_all_memories",
     "serialize_event",
     "serialize_memory",
+    "compute_memory_fingerprint",
+    "DedupReassessmentRequiredError",
     "update_memory_fields",
     "update_target_with_candidate_data",
     # Test-only underscored helpers (kept for compatibility).
