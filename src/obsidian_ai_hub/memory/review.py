@@ -7,7 +7,9 @@ from typing import Optional
 from obsidian_ai_hub.database import get_db_connection
 from obsidian_ai_hub.memory.models import (
     MEMORY_COLUMNS,
+    DedupReassessmentRequiredError,
     _validate_edit_payload,
+    compute_memory_fingerprint,
     deserialize_memory,
     get_current_timestamp,
     merge_evidence,
@@ -348,10 +350,68 @@ def resolve_memory(
                 "SELECT * FROM memories WHERE memory_id = ?", (target_memory_id,)
             )
             target_row = cursor.fetchone()
-            if target_row is None:
-                raise ValueError(f"Target memory not found: {target_memory_id}")
-            target = deserialize_memory(dict(target_row))
+            target = deserialize_memory(dict(target_row)) if target_row is not None else None
 
+            if action in ("replace_existing", "merge_existing", "supersede_existing"):
+                from obsidian_ai_hub.memory.store import _attach_people_to_memories
+
+                reassessment_needed = False
+                reassessment_reason = ""
+
+                if target is None or target.get("status") != "approved":
+                    reassessment_needed = True
+                    reassessment_reason = "対象メモリが存在しないか、承認済み状態ではありません"
+                else:
+                    _attach_people_to_memories(cursor, [target])
+                    assessment = cand.get("dedup_assessment")
+                    if not isinstance(assessment, dict) or not assessment.get("target_fingerprint"):
+                        reassessment_needed = True
+                        reassessment_reason = "対象メモリの指紋(fingerprint)が未保存です"
+                    else:
+                        current_target_fp = compute_memory_fingerprint(target)
+                        if current_target_fp != assessment.get("target_fingerprint"):
+                            reassessment_needed = True
+                            reassessment_reason = "対象メモリが判定時点から変更されています"
+
+                if reassessment_needed:
+                    timestamp_now = get_current_timestamp()
+                    assessment = cand.get("dedup_assessment")
+                    if not isinstance(assessment, dict):
+                        assessment = {
+                            "decision": "failed",
+                            "reason": "対象メモリの変更・不在・指紋未保存のため再判定が必要です",
+                        }
+                    assessment["reassessment_required"] = True
+                    assessment["reassessment_reason"] = reassessment_reason
+                    cand["dedup_assessment"] = assessment
+                    cand["updated_at"] = timestamp_now
+
+                    db_row_cand = serialize_memory(cand)
+                    set_clause = ", ".join(
+                        f"{col} = ?" for col in MEMORY_COLUMNS if col != "memory_id"
+                    )
+                    values = [
+                        db_row_cand.get(col) for col in MEMORY_COLUMNS if col != "memory_id"
+                    ] + [candidate_id]
+                    conn.execute(
+                        f"UPDATE memories SET {set_clause} WHERE memory_id = ?", values
+                    )
+
+                    log_memory_event(
+                        event_type="dedup_reassessment_required",
+                        memory_id=candidate_id,
+                        previous_status="candidate",
+                        new_status="candidate",
+                        reason=f"再判定要求へ移行: {reassessment_reason}",
+                        conn=conn,
+                    )
+                    conn.commit()
+                    raise DedupReassessmentRequiredError(
+                        "対象メモリが判定時点から変更されたため、月次メモリ保守で再判定します。"
+                    )
+
+            if target is None:
+                raise ValueError(f"Target memory not found: {target_memory_id}")
             if target.get("status") != "approved":
                 raise ValueError(
                     f"Target memory {target_memory_id} is not in approved status"

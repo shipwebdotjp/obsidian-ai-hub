@@ -6,6 +6,7 @@ import logging
 from obsidian_ai_hub.utils import config, prompt
 
 from obsidian_ai_hub.memory.models import (
+    compute_memory_fingerprint,
     estimate_tokens,
     normalize_content,
 )
@@ -277,11 +278,16 @@ def perform_dedup_assessment_llm(
                             score = t["score"] if t["score"] is not None else 1.0
                             break
 
+                    target_fp = None
+                    if decision in ("merge", "supersede") and target_id and target_id in approved_map:
+                        target_fp = compute_memory_fingerprint(approved_map[target_id])
+
                     assessment = {
                         "decision": decision,
                         "target_memory_id": target_id
                         if decision in ("merge", "supersede")
                         else None,
+                        "target_fingerprint": target_fp,
                         "similarity_score": score,
                         "reason": reason,
                     }

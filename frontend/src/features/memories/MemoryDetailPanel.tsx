@@ -152,9 +152,20 @@ export default function MemoryDetailPanel({
 
       notify(`${memoryId} を「${actionLabel}」で解決しました`);
       onChanged(updated);
-    } catch (e) {
-      const msg = getApiErrorMessage(e, "操作に失敗しました");
-      notify(msg, "error");
+    } catch (e: any) {
+      if (e?.status === 409 || e?.body?.detail?.code === "dedup_reassessment_required") {
+        notify("対象記憶が変更されたため、再判定待ちに移行しました", "info");
+        try {
+          const updated = await getMemory(memoryId);
+          setDetail(updated);
+          onChanged(updated);
+        } catch (_) {
+          // ignore refetch error
+        }
+      } else {
+        const msg = getApiErrorMessage(e, "操作に失敗しました");
+        notify(msg, "error");
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -171,6 +182,15 @@ export default function MemoryDetailPanel({
   }
 
   const hasSuggestions = (detail.dedup_suggestions || []).length > 0;
+
+  const isReassessmentRequired =
+    detail.status === "candidate" &&
+    (detail.dedup_assessment?.reassessment_required === true ||
+      (detail.dedup_assessment &&
+        (detail.dedup_assessment.decision === "merge" ||
+          detail.dedup_assessment.decision === "supersede") &&
+        !detail.dedup_assessment.target_fingerprint) ||
+      (!detail.dedup_assessment && hasSuggestions));
 
   return (
     <div className="flex h-full flex-col overflow-y-auto p-4">
@@ -212,6 +232,20 @@ export default function MemoryDetailPanel({
             ))}
           </ul>
         </>
+      )}
+
+      {detail.status === "candidate" && isReassessmentRequired && (
+        <div className="mt-4 rounded border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
+          <div className="font-semibold text-amber-900">再判定待ち (Re-assessment Required)</div>
+          <div className="mt-1 text-amber-800">
+            対象の既存記憶が更新されたか、判定時点の指紋(fingerprint)情報が存在しません。次回の月次メモリ保守（--memory-maintain）で最新状態から再判定されます。対象メモリを書き換える操作（マージ・置換・既存更新）は無効化されています。
+          </div>
+          {detail.dedup_assessment?.reassessment_reason && (
+            <div className="mt-1 text-[11px] text-amber-700">
+              詳細: {detail.dedup_assessment.reassessment_reason}
+            </div>
+          )}
+        </div>
       )}
 
       {detail.status === "candidate" && detail.dedup_assessment && (
@@ -257,7 +291,7 @@ export default function MemoryDetailPanel({
                         handleResolveWithParams("merge_existing", detail.dedup_assessment.target_memory_id, integratedContent);
                       }
                     }}
-                    disabled={isSubmitting || !matching || !integratedContent.trim() || !detail.dedup_assessment?.target_memory_id}
+                    disabled={isSubmitting || !matching || !integratedContent.trim() || !detail.dedup_assessment?.target_memory_id || isReassessmentRequired}
                     className="cursor-pointer rounded bg-blue-600 px-3 py-1 text-xs text-white disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     マージ
@@ -313,7 +347,7 @@ export default function MemoryDetailPanel({
                         handleResolveWithParams("supersede_existing", detail.dedup_assessment.target_memory_id, undefined, switchDate);
                       }
                     }}
-                    disabled={isSubmitting || !matching || !/^\d{4}-\d{2}-\d{2}$/.test(switchDate) || !detail.dedup_assessment?.target_memory_id}
+                    disabled={isSubmitting || !matching || !/^\d{4}-\d{2}-\d{2}$/.test(switchDate) || !detail.dedup_assessment?.target_memory_id || isReassessmentRequired}
                     className="cursor-pointer rounded bg-purple-600 px-3 py-1 text-xs text-white disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     後継として保存
@@ -401,7 +435,7 @@ export default function MemoryDetailPanel({
                     <button
                       type="button"
                       onClick={() => handleResolve("replace_existing", s.target_memory_id)}
-                      disabled={isSubmitting || !matching}
+                      disabled={isSubmitting || !matching || isReassessmentRequired}
                       className="cursor-pointer rounded bg-amber-600 px-3 py-1 text-xs text-white disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       既存を候補で更新

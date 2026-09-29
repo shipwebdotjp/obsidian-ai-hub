@@ -1139,6 +1139,12 @@ def test_resolve_memory_merge_existing(clean_memory_env):
         "dedup_suggestions": [
             {"target_memory_id": "mem_existing_target", "relation": "duplicate"}
         ],
+        "dedup_assessment": {
+            "decision": "merge",
+            "target_memory_id": "mem_existing_target",
+            "target_fingerprint": memory.compute_memory_fingerprint(target),
+            "integrated_content": "既存の記憶内容と追加内容を統合した文章",
+        },
         "created_at": "2026-07-14T10:00:00+09:00",
         "updated_at": "2026-07-14T10:00:00+09:00",
     }
@@ -1192,6 +1198,11 @@ def test_resolve_memory_supersede_existing(clean_memory_env):
         "dedup_suggestions": [
             {"target_memory_id": "mem_existing_target", "relation": "supersedes"}
         ],
+        "dedup_assessment": {
+            "decision": "supersede",
+            "target_memory_id": "mem_existing_target",
+            "target_fingerprint": memory.compute_memory_fingerprint(target),
+        },
         "created_at": "2026-07-14T10:00:00+09:00",
         "updated_at": "2026-07-14T10:00:00+09:00",
     }

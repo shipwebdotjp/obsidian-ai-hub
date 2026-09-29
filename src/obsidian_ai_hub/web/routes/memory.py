@@ -3,6 +3,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
+from obsidian_ai_hub.memory.models import DedupReassessmentRequiredError
 from obsidian_ai_hub.web import schemas, service
 from obsidian_ai_hub.web.routes.deps import require_bearer_token
 
@@ -109,6 +110,15 @@ def resolve_memory(
             switch_date=body.switch_date,
         )
         return {"candidate": cand, "target": target}
+    except DedupReassessmentRequiredError as e:
+        logger.warning("dedup reassessment required for candidate %s: %s", candidate_id, e)
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "dedup_reassessment_required",
+                "message": str(e),
+            },
+        )
     except ValueError as e:
         logger.warning("resolve validation error for %s: %s", candidate_id, e)
         raise HTTPException(status_code=400, detail=str(e))

@@ -21,6 +21,7 @@ from unittest.mock import patch
 import pytest
 
 from obsidian_ai_hub import memory
+from obsidian_ai_hub.memory.models import compute_memory_fingerprint
 from obsidian_ai_hub.utils import config
 
 
@@ -337,6 +338,12 @@ def test_resolve_memory_replace_existing(loopback_client):
     m_cand["dedup_suggestions"] = [
         {"target_memory_id": "mem_target_2", "relation": "supersedes"}
     ]
+    m_cand["dedup_assessment"] = {
+        "decision": "supersede",
+        "target_memory_id": "mem_target_2",
+        "target_fingerprint": compute_memory_fingerprint(m_target),
+        "reason": "置換提案",
+    }
 
     memory.save_all_memories([m_target, m_cand])
 
@@ -363,6 +370,49 @@ def test_resolve_memory_replace_existing(loopback_client):
     cand_events = memory.get_memory_events("mem_candidate_2")
     assert len(cand_events) == 1
     assert cand_events[0]["event_type"] == "rejected"
+
+
+def test_resolve_memory_409_dedup_reassessment_required(loopback_client):
+    m_target = _make_candidate(
+        "mem_target_409", status="approved", content="ターゲット内容"
+    )
+    m_cand = _make_candidate(
+        "mem_candidate_409", status="candidate", content="マージ候補内容"
+    )
+    m_cand["dedup_suggestions"] = [
+        {"target_memory_id": "mem_target_409", "relation": "duplicate"}
+    ]
+    m_cand["dedup_assessment"] = {
+        "decision": "merge",
+        "target_memory_id": "mem_target_409",
+        "integrated_content": "統合された内容",
+    }
+
+    memory.save_all_memories([m_target, m_cand])
+
+    res = loopback_client.post(
+        "/api/v1/memories/mem_candidate_409/resolve",
+        json={
+            "action": "merge_existing",
+            "target_memory_id": "mem_target_409",
+            "integrated_content": "統合された内容",
+        },
+    )
+    assert res.status_code == 409
+    body = res.json()
+    assert body["detail"]["code"] == "dedup_reassessment_required"
+    assert "月次メモリ保守で再判定します" in body["detail"]["message"]
+
+    cand_detail = memory.get_memory("mem_candidate_409")
+    assert cand_detail["status"] == "candidate"
+    assert cand_detail["dedup_assessment"]["reassessment_required"] is True
+
+    events = memory.get_memory_events("mem_candidate_409")
+    assert any(e["event_type"] == "dedup_reassessment_required" for e in events)
+
+    target_detail = memory.get_memory("mem_target_409")
+    assert target_detail["status"] == "approved"
+    assert target_detail["content"] == "ターゲット内容"
 
 
 def test_resolve_memory_validation_errors(loopback_client):

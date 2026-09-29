@@ -330,6 +330,100 @@ def _build_proposal_question(
     }
 
 
+def reassess_candidate_memories(embedder=None) -> int:
+    """
+    Re-assess candidate memories requiring re-assessment at the start of memory maintain:
+    - reassessment_required == True
+    - decision in ("merge", "supersede") without target_fingerprint
+    - dedup_assessment missing/invalid but dedup_suggestions present
+    Updates proposals and fingerprints without auto-applying merges/replacements.
+    Returns count of re-assessed candidates.
+    """
+    from obsidian_ai_hub.database import get_db_connection
+    from obsidian_ai_hub.memory.dedup import run_deduplication, perform_dedup_assessment_llm
+
+    all_memories = load_all_memories()
+    approved_mems = [m for m in all_memories if m.get("status") == "approved"]
+    candidates = [m for m in all_memories if m.get("status") == "candidate"]
+
+    candidates_to_reassess = []
+    for cand in candidates:
+        assessment = cand.get("dedup_assessment")
+        suggestions = cand.get("dedup_suggestions") or []
+
+        needs_reassessment = False
+        if isinstance(assessment, dict):
+            if assessment.get("reassessment_required") is True:
+                needs_reassessment = True
+            elif assessment.get("decision") in ("merge", "supersede") and not assessment.get("target_fingerprint"):
+                needs_reassessment = True
+        else:
+            if suggestions:
+                needs_reassessment = True
+
+        if needs_reassessment:
+            candidates_to_reassess.append(cand)
+
+    if not candidates_to_reassess:
+        return 0
+
+    # 1. Deduplication search & LLM assessment (outside DB write transaction)
+    for cand in candidates_to_reassess:
+        new_suggestions = run_deduplication(cand, approved_mems, embedder=embedder)
+        cand["dedup_suggestions"] = new_suggestions
+
+        if not new_suggestions:
+            # No duplicates remain among approved memories
+            cand["dedup_assessment"] = {
+                "decision": "new",
+                "reason": "月次再判定の結果、類似・重複する記憶が見つかりませんでした。",
+                "reassessment_required": False,
+            }
+        else:
+            # Perform LLM assessment on updated suggestions
+            perform_dedup_assessment_llm([cand], approved_mems)
+            assessment = cand.get("dedup_assessment") or {}
+            if assessment.get("decision") in ("merge", "supersede", "new"):
+                assessment["reassessment_required"] = False
+                assessment["reassessment_reason"] = None
+            else:
+                assessment["reassessment_required"] = True
+
+        cand["updated_at"] = get_current_timestamp()
+
+    # 2. Database write transaction only
+    reassessed_count = 0
+    conn = get_db_connection()
+    try:
+        with conn:
+            for cand in candidates_to_reassess:
+                db_row = serialize_memory(cand)
+                set_clause = ", ".join(
+                    f"{col} = ?" for col in MEMORY_COLUMNS if col != "memory_id"
+                )
+                values = [
+                    db_row.get(col) for col in MEMORY_COLUMNS if col != "memory_id"
+                ] + [cand["memory_id"]]
+                conn.execute(
+                    f"UPDATE memories SET {set_clause} WHERE memory_id = ?", values
+                )
+
+                log_memory_event(
+                    event_type="dedup_reassessed",
+                    memory_id=cand["memory_id"],
+                    previous_status="candidate",
+                    new_status="candidate",
+                    reason="月次保守による再判定完了",
+                    conn=conn,
+                    actor="system",
+                )
+                reassessed_count += 1
+    finally:
+        conn.close()
+
+    return reassessed_count
+
+
 def run_maintenance_diagnosis(
     base_date: datetime,
     memories: List[Dict[str, Any]],
@@ -809,12 +903,17 @@ def run_maintenance_cli() -> None:
     base_date = datetime.now(timezone(timedelta(hours=9)))
     print(f"[{base_date.strftime('%Y-%m-%d %H:%M:%S')}] 長期記憶の診断メンテナンスを開始します...")
 
+    embedder = get_embedder()
+
+    reassessed_count = reassess_candidate_memories(embedder=embedder)
+    if reassessed_count > 0:
+        print(f"再判定処理完了: {reassessed_count}件の候補記憶を最新の承認済み記憶から再評価しました。")
+
     current_mems = load_all_memories()
     if not current_mems:
         print("承認済みの長期記憶が存在しません。診断をスキップします。")
         return
 
-    embedder = get_embedder()
     proposals = run_maintenance_diagnosis(base_date, current_mems, embedder=embedder)
 
     if not proposals:
