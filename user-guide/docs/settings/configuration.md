@@ -45,6 +45,7 @@ cp .env.example .env
 
 ### 資格情報
 
+- Gmail: `GMAIL_CLIENT_SECRET_PATH`（既定 `~/.config/obsidian-ai-hub/gmail/client_secret.json`）、`GMAIL_TOKEN_PATH`（既定 `~/.config/obsidian-ai-hub/gmail/token.json`）
 - LLM: `OPENAI_API_KEY`、`GEMINI_API_KEY`、`OPENCODE_API_KEY`
 - 検索 / 調査: `TAVILY_API_KEY`、`HUGGINGFACE_API_KEY`
 - Open WebUI: `OPEN_WEB_UI_API_KEY`、`OPEN_WEB_UI_BASE_URL`

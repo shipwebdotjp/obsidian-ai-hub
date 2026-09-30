@@ -67,6 +67,7 @@ const sidebars: SidebarsConfig = {
         'features/coach',
         'features/healthcare',
         'features/system-maintenance',
+        'features/gmail',
       ],
     },
     {

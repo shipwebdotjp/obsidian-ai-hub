@@ -48,6 +48,9 @@ def test_list_available_tools():
         "list_published_workflows",
         "register_one_shot_workflow_job",
         "register_recurring_workflow_job",
+            "gmail_search_messages",
+            "gmail_read_message",
+            "gmail_create_draft",
     }
     # Order is not contractual; assert membership instead.
     assert set(tool_ids) == expected_ids

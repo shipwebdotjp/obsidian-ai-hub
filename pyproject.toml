@@ -38,6 +38,9 @@ dependencies = [
     "jinja2>=3.1",
     "youtube-transcript-api",
     "yt-dlp",
+    "google-api-python-client",
+    "google-auth-httplib2",
+    "google-auth-oauthlib",
 ]
 
 [tool.setuptools.packages.find]

@@ -185,6 +185,12 @@ uv run python -m obsidian_ai_hub --workflow-run wrev_xxx \
 | `--vault-content` | ファイル | 内容ファイル。`-` または未指定で stdin。 |
 | `--vault-overwrite` | — | 既存ファイルを上書きする（未指定時は既存があると失敗）。 |
 
+## Gmail 認可
+
+| フラグ | 説明 |
+| --- | --- |
+| `--gmail-authorize` | Gmail OAuth 認可をローカルブラウザで対話的に実行し、トークンを保存する（単独実行専用）。 |
+
 ## 承認待ち（HITL）
 
 | フラグ | 説明 |
