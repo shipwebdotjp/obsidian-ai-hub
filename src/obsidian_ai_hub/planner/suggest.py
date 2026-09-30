@@ -184,6 +184,12 @@ def generate_proposals(source: str = GENERATION_SOURCE) -> list[dict]:
                 raise ValueError("LLM response 'candidates' must be a list")
             created = _persist_candidates(raw_candidates, source)
             if created:
+                if source != "manual":
+                    try:
+                        from obsidian_ai_hub.line_notification.planner import notify_planner_summary
+                        notify_planner_summary(created)
+                    except Exception as exc:
+                        logger.warning("Planner notification failed: %s", exc)
                 return created
             raise ValueError("LLM returned no valid planner candidates")
         except Exception as exc:
@@ -206,10 +212,4 @@ def main() -> list[dict]:
     proposals = generate_proposals()
     for p in proposals:
         logger.info("Created planner proposal: %s (%s) => %s", p["title"], p["kind"], p["proposal_id"])
-    try:
-        from obsidian_ai_hub.line_notification.planner import notify_planner_summary
-
-        notify_planner_summary(proposals)
-    except Exception:
-        logger.exception("Planner LINE notification failed")
     return proposals

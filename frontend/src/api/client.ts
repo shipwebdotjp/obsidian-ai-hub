@@ -1,4 +1,8 @@
 import type {
+  NotificationSettings,
+  NotificationSettingsUpdate,
+  VapidPublicKeyResponse,
+  WebPushSubscriptionMetadata,
   BatchReviewRequest,
   BatchReviewResponse,
   Memory,
@@ -279,6 +283,53 @@ export function reviewMemory(
       method: "POST",
       body: JSON.stringify({ action, new_content: newContent }),
     },
+  );
+}
+
+// --- Notification APIs ---
+
+export function getNotificationSettings(): Promise<NotificationSettings> {
+  return request<NotificationSettings>("/api/v1/notifications/settings");
+}
+
+export function updateNotificationSettings(
+  payload: NotificationSettingsUpdate,
+): Promise<NotificationSettings> {
+  return request<NotificationSettings>("/api/v1/notifications/settings", {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function getVapidPublicKey(): Promise<VapidPublicKeyResponse> {
+  return request<VapidPublicKeyResponse>("/api/v1/notifications/vapid-public-key");
+}
+
+export function listWebPushSubscriptions(): Promise<WebPushSubscriptionMetadata[]> {
+  return request<WebPushSubscriptionMetadata[]>("/api/v1/notifications/subscriptions");
+}
+
+export function registerWebPushSubscription(payload: {
+  endpoint: string;
+  p256dh: string;
+  auth: string;
+  user_agent?: string;
+}): Promise<WebPushSubscriptionMetadata> {
+  return request<WebPushSubscriptionMetadata>("/api/v1/notifications/subscriptions", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function unregisterWebPushSubscription(
+  subscriptionId?: string,
+  endpoint?: string,
+): Promise<void> {
+  return apiDelete<void>(
+    withQuery("/api/v1/notifications/subscriptions", {
+      subscription_id: subscriptionId,
+      endpoint: endpoint,
+    }),
   );
 }
 

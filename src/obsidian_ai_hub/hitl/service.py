@@ -22,6 +22,47 @@ from obsidian_ai_hub.hitl.store import (
 
 logger = logging.getLogger(__name__)
 
+_NOTIFIED_HITL_SETS: set[tuple[str, str]] = set()
+
+
+def _notify_hitl_if_needed(run_id: str, question_set_id: str, run: dict[str, Any]) -> None:
+    if run.get("status") != "pending_user":
+        return
+    if run.get("display_type") == "in_conversation_question":
+        return
+
+    key = (run_id, question_set_id)
+    if key in _NOTIFIED_HITL_SETS:
+        return
+    _NOTIFIED_HITL_SETS.add(key)
+
+    try:
+        from urllib.parse import quote
+        from obsidian_ai_hub.notifications import (
+            NotificationEvent,
+            publish_notification,
+            sanitize_notification_body,
+        )
+
+        title_text = run.get("title") or "確認事項"
+        desc_text = run.get("description") or ""
+        display_type = run.get("display_type") or "確認事項"
+
+        notif_title = f"【要対応】{display_type.strip()}の確認が必要です"
+        body_text = sanitize_notification_body(title_text or desc_text)
+
+        event = NotificationEvent(
+            event_type="hitl",
+            target_id=run_id,
+            relative_link=f"/hitl?run_id={quote(run_id)}",
+            category="action_required",
+            title=notif_title,
+            body=body_text,
+        )
+        publish_notification(event)
+    except Exception as exc:
+        logger.warning("Failed to publish HITL notification for run %s: %s", run_id, exc)
+
 
 def get_current_iso() -> str:
     """Get the current JST time in ISO-8601 format."""
@@ -224,6 +265,9 @@ def register_run_and_questions(
                 run["status"] = "pending_user"
 
             upsert_run(run, conn)
+
+        # Publish notification after transaction commits if pending_user
+        _notify_hitl_if_needed(run_id, question_set_id, run)
     except sqlite3.IntegrityError as e:
         logger.error(f"Database integrity violation in register_run_and_questions: {e}")
         raise

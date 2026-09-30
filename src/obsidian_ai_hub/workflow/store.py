@@ -46,6 +46,58 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _notify_workflow_status_change(run: dict[str, Any]) -> None:
+    status = run.get("status")
+    run_id = run["run_id"]
+    workflow_id = run.get("workflow_id")
+
+    if status == "waiting_approval":
+        category = "action_required"
+        title = "【要対応】ワークフローの承認が必要です"
+    elif status == "waiting_attention":
+        category = "action_required"
+        title = "【要対応】ワークフローの確認が必要です"
+    elif status == "failed":
+        category = "failure"
+        title = "【失敗】ワークフローの実行が失敗しました"
+    elif status == "interrupted":
+        category = "failure"
+        title = "【中断】ワークフローの実行が中断されました"
+    elif status == "incomplete":
+        category = "failure"
+        title = "【未完了】ワークフローが完了条件を満たしませんでした"
+    else:
+        return
+
+    wf_name = "ワークフロー"
+    if workflow_id:
+        try:
+            wf = get_workflow(workflow_id)
+            if wf and wf.get("name"):
+                wf_name = wf["name"]
+        except Exception:
+            pass
+
+    try:
+        from obsidian_ai_hub.notifications import (
+            NotificationEvent,
+            publish_notification,
+            sanitize_notification_body,
+        )
+
+        event = NotificationEvent(
+            event_type="workflow",
+            target_id=run_id,
+            relative_link=f"/workflows/runs/{run_id}",
+            category=category,
+            title=title,
+            body=sanitize_notification_body(wf_name),
+        )
+        publish_notification(event)
+    except Exception as exc:
+        logger.warning("Failed to publish workflow notification for %s: %s", run_id, exc)
+
+
 def _new_id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex}"
 
@@ -1170,8 +1222,11 @@ def transition_run_status(
 
         if is_generated:
             with active_conn:
-                return _do()
-        return _do()
+                res = _do()
+        else:
+            res = _do()
+        _notify_workflow_status_change(res)
+        return res
 
 
 IMMEDIATE_CANCEL_STATUSES = frozenset(

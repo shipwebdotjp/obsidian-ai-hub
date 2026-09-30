@@ -11,6 +11,7 @@ from obsidian_ai_hub.web.routes import (
     line,
     media,
     memory,
+    notifications,
     people,
     person_properties,
     planner,
@@ -26,6 +27,7 @@ router = APIRouter(prefix="/api/v1")
 
 router.include_router(coach.router)
 router.include_router(agents.router)
+router.include_router(notifications.router)
 router.include_router(coding.router)
 router.include_router(line.router)
 router.include_router(memory.router)

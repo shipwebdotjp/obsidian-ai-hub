@@ -23,6 +23,52 @@ def _now_iso() -> str:
     return datetime.now(JST).isoformat()
 
 
+def _notify_coding_status_change(run: dict[str, Any]) -> None:
+    status = run.get("status")
+    run_id = run["run_id"]
+    session_id = run.get("session_id")
+
+    if status == "waiting_user":
+        category = "action_required"
+        title = "【要対応】コーディングアシスタントからの質問があります"
+    elif status == "failed":
+        category = "failure"
+        title = "【失敗】コーディング処理が失敗しました"
+    elif status == "interrupted":
+        category = "failure"
+        title = "【中断】コーディング処理が中断されました"
+    else:
+        return
+
+    session_title = "コーディングセッション"
+    if session_id:
+        try:
+            sess = get_session(session_id)
+            if sess and sess.get("title"):
+                session_title = sess["title"]
+        except Exception:
+            pass
+
+    try:
+        from obsidian_ai_hub.notifications import (
+            NotificationEvent,
+            publish_notification,
+            sanitize_notification_body,
+        )
+
+        event = NotificationEvent(
+            event_type="coding",
+            target_id=run_id,
+            relative_link=f"/coding?session_id={session_id}",
+            category=category,
+            title=title,
+            body=sanitize_notification_body(session_title),
+        )
+        publish_notification(event)
+    except Exception as exc:
+        logger.warning("Failed to publish coding notification for %s: %s", run_id, exc)
+
+
 CODING_NON_TERMINAL_STATUSES = frozenset(
     {"queued", "running", "cancelling", "waiting_user"}
 )
@@ -1197,6 +1243,7 @@ def create_run(
     run = get_run(run_id, conn=conn)
     conn.close()
     assert run is not None
+    _notify_coding_status_change(run)
     return run
 
 
@@ -1725,6 +1772,7 @@ def transition_run_status(
         conn.commit()
         updated = get_run(run_id, conn=conn)
         assert updated is not None
+        _notify_coding_status_change(updated)
         return updated
     finally:
         conn.close()

@@ -50,28 +50,25 @@ def notify_hitl_run(
     line_target: Optional[str] = None,
     web_url: Optional[str] = None,
 ) -> bool:
-    """Best-effort push of a HITL Run notification to LINE.
-
-    Notification-only and must never fail the caller: missing configuration or
-    a Push API failure logs a warning without secrets or the notification body
-    and returns False. Only the run_id goes into the deep link; no credentials
-    are ever included.
-    """
-
-    def _build(base_url: str) -> str:
-        return build_hitl_run_text(
-            kind=kind,
-            title=title,
-            description=description,
-            run_id=run_id,
-            web_url=base_url,
-            round_number=round_number,
-        )
-
-    return push_best_effort(
-        _build,
-        label="hitl-run",
-        line_token=line_token,
-        line_target=line_target,
-        web_url=web_url,
+    """Best-effort push of a HITL Run notification via the new Notification Publisher."""
+    from urllib.parse import quote
+    from obsidian_ai_hub.notifications import (
+        NotificationEvent,
+        publish_notification,
+        sanitize_notification_body,
     )
+
+    if round_number is not None and round_number >= 2:
+        notif_title = f"【要対応】{kind}の再提案（ラウンド {round_number}）"
+    else:
+        notif_title = f"【要対応】{kind}の確認が必要です"
+
+    event = NotificationEvent(
+        event_type="hitl",
+        target_id=run_id,
+        relative_link=f"/hitl?run_id={quote(run_id)}",
+        category="action_required",
+        title=notif_title,
+        body=sanitize_notification_body(title or description),
+    )
+    return publish_notification(event)

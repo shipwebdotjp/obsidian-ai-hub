@@ -1445,3 +1445,35 @@ export interface DesignerComposeResponse {
   structural_errors: GraphIssue[];
   validation_issues: GraphIssue[];
 }
+
+export interface NotificationSettings {
+  web_push_enabled: boolean;
+  line_enabled: boolean;
+  web_push_action_required: boolean;
+  web_push_failure: boolean;
+  line_action_required: boolean;
+  line_failure: boolean;
+  updated_at: string;
+}
+
+export interface NotificationSettingsUpdate {
+  web_push_enabled?: boolean;
+  line_enabled?: boolean;
+  web_push_action_required?: boolean;
+  web_push_failure?: boolean;
+  line_action_required?: boolean;
+  line_failure?: boolean;
+}
+
+export interface VapidPublicKeyResponse {
+  vapid_public_key: string;
+}
+
+export interface WebPushSubscriptionMetadata {
+  subscription_id: string;
+  endpoint_domain: string;
+  user_agent?: string | null;
+  status: string;
+  created_at: string;
+  updated_at: string;
+}
