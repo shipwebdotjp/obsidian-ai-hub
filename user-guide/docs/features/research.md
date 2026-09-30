@@ -34,7 +34,7 @@ uv run -m obsidian_ai_hub --research-agent --theme "Local-first AI tools" \
 - `project` 経路では `--context`、活動ログ、Vault 検索結果、既存テーマなどの収集コンテキストは一切使用されません。
 - GPT Researcher に渡される追加根拠は Coding CLI のコード調査結果のみです。
 - 最終稿として保存・表示されるのは GPT Researcher のレポートのみで、生のコード調査結果は DB・Vault・レポート付録へ保存されません。
-- Markdown の frontmatter には `source: coding-agent+gpt-researcher`、`mode: project`（互換性維持のため）が記録されます。
+- Markdown の frontmatter には `source: coding-agent+gpt-researcher` が記録されます（DB のジョブ mode は互換性維持のため `project` のままです）。
 - 第1段階（Coding CLI）または第2段階（GPT Researcher）のいずれかで失敗（例外または空出力）した場合、後続処理や Vault 保存・候補テーマ自動承認は行われず、ジョブは `failed` になります。再実行は第1段階から行われます。
 
 非 `project` モードでは、収集コンテキスト（承認コメント・活動・既存テーマ・Vault 検索結果）をモード決定後に一度だけ収集し、最終レポート生成に渡します。保存用タイトルは `theme` のみを元に生成します（`why_now`・承認コメント・収集コンテキスト・調査プロンプト本文は使いません）。レポートは `<title>_<job_id>.md` として Vault へ保存されます。
