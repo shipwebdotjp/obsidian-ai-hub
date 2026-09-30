@@ -31,8 +31,18 @@ self.addEventListener('push', (event) => {
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
 
-  const relativeLink = (event.notification.data && event.notification.data.relative_link) || '/';
-  const targetUrl = new URL(relativeLink, self.location.origin).href;
+  let targetUrl = self.location.origin + '/';
+  try {
+    const relativeLink = event.notification.data && event.notification.data.relative_link;
+    if (typeof relativeLink === 'string' && relativeLink.startsWith('/')) {
+      const parsed = new URL(relativeLink, self.location.origin);
+      if (parsed.origin === self.location.origin) {
+        targetUrl = parsed.href;
+      }
+    }
+  } catch (err) {
+    targetUrl = self.location.origin + '/';
+  }
 
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
@@ -43,7 +53,13 @@ self.addEventListener('notificationclick', (event) => {
       }
       for (const client of clientList) {
         if ('focus' in client && 'navigate' in client) {
-          return client.focus().then(() => client.navigate(targetUrl));
+          return client.focus()
+            .then(() => client.navigate(targetUrl))
+            .catch(() => {
+              if (self.clients.openWindow) {
+                return self.clients.openWindow(targetUrl);
+              }
+            });
         }
       }
       if (self.clients.openWindow) {

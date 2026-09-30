@@ -665,14 +665,17 @@ def transition_task_status(
         if is_generated:
             with active_conn:
                 _do()
+            updated = get_task(task_id, conn=active_conn)
+            if updated is None:
+                raise FileNotFoundError(f"Task '{task_id}' not found after transition.")
+            _notify_task_status_change(updated)
+            return updated
         else:
             _do()
-        updated = get_task(task_id, conn=active_conn)
-    if updated is None:
-        raise FileNotFoundError(f"Task '{task_id}' not found after transition.")
-
-    _notify_task_status_change(updated)
-    return updated
+            updated = get_task(task_id, conn=active_conn)
+            if updated is None:
+                raise FileNotFoundError(f"Task '{task_id}' not found after transition.")
+            return updated
 
 
 def mark_tasks_interrupted(

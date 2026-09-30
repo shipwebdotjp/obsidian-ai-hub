@@ -56,49 +56,63 @@ def update_notification_settings(
     """Update notification settings in DB and return the updated settings."""
     conn = get_db_connection()
     try:
-        current = get_notification_settings()
-
-        new_wp_enabled = web_push_enabled if web_push_enabled is not None else current["web_push_enabled"]
-        new_line_enabled = line_enabled if line_enabled is not None else current["line_enabled"]
-        new_wp_ar = web_push_action_required if web_push_action_required is not None else current["web_push_action_required"]
-        new_wp_f = web_push_failure if web_push_failure is not None else current["web_push_failure"]
-        new_line_ar = line_action_required if line_action_required is not None else current["line_action_required"]
-        new_line_f = line_failure if line_failure is not None else current["line_failure"]
-
         now = datetime.now(timezone.utc).isoformat()
-        cursor = conn.cursor()
-        cursor.execute(
-            """
-            UPDATE notification_settings
-            SET web_push_enabled = ?,
-                line_enabled = ?,
-                web_push_action_required = ?,
-                web_push_failure = ?,
-                line_action_required = ?,
-                line_failure = ?,
-                updated_at = ?
-            WHERE id = 1;
-            """,
-            (
-                int(new_wp_enabled),
-                int(new_line_enabled),
-                int(new_wp_ar),
-                int(new_wp_f),
-                int(new_line_ar),
-                int(new_line_f),
-                now,
-            ),
-        )
-        conn.commit()
-        return {
-            "web_push_enabled": new_wp_enabled,
-            "line_enabled": new_line_enabled,
-            "web_push_action_required": new_wp_ar,
-            "web_push_failure": new_wp_f,
-            "line_action_required": new_line_ar,
-            "line_failure": new_line_f,
-            "updated_at": now,
-        }
+        with conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM notification_settings WHERE id = 1;")
+            row = cursor.fetchone()
+            if not row:
+                cursor.execute(
+                    """
+                    INSERT INTO notification_settings (
+                        id, web_push_enabled, line_enabled,
+                        web_push_action_required, web_push_failure,
+                        line_action_required, line_failure, updated_at
+                    ) VALUES (1, 0, 0, 0, 0, 0, 0, ?);
+                    """,
+                    (now,),
+                )
+                cursor.execute("SELECT * FROM notification_settings WHERE id = 1;")
+                row = cursor.fetchone()
+
+            new_wp_enabled = web_push_enabled if web_push_enabled is not None else bool(row["web_push_enabled"])
+            new_line_enabled = line_enabled if line_enabled is not None else bool(row["line_enabled"])
+            new_wp_ar = web_push_action_required if web_push_action_required is not None else bool(row["web_push_action_required"])
+            new_wp_f = web_push_failure if web_push_failure is not None else bool(row["web_push_failure"])
+            new_line_ar = line_action_required if line_action_required is not None else bool(row["line_action_required"])
+            new_line_f = line_failure if line_failure is not None else bool(row["line_failure"])
+
+            cursor.execute(
+                """
+                UPDATE notification_settings
+                SET web_push_enabled = ?,
+                    line_enabled = ?,
+                    web_push_action_required = ?,
+                    web_push_failure = ?,
+                    line_action_required = ?,
+                    line_failure = ?,
+                    updated_at = ?
+                WHERE id = 1;
+                """,
+                (
+                    int(new_wp_enabled),
+                    int(new_line_enabled),
+                    int(new_wp_ar),
+                    int(new_wp_f),
+                    int(new_line_ar),
+                    int(new_line_f),
+                    now,
+                ),
+            )
+            return {
+                "web_push_enabled": new_wp_enabled,
+                "line_enabled": new_line_enabled,
+                "web_push_action_required": new_wp_ar,
+                "web_push_failure": new_wp_f,
+                "line_action_required": new_line_ar,
+                "line_failure": new_line_f,
+                "updated_at": now,
+            }
     finally:
         conn.close()
 
@@ -114,48 +128,36 @@ def upsert_web_push_subscription(
     conn = get_db_connection()
     try:
         now = datetime.now(timezone.utc).isoformat()
+        new_sub_id = f"wps_{uuid.uuid4().hex[:12]}"
         cursor = conn.cursor()
 
         cursor.execute(
-            "SELECT subscription_id, created_at FROM web_push_subscriptions WHERE endpoint = ?;",
+            """
+            INSERT INTO web_push_subscriptions (
+                subscription_id, endpoint, p256dh, auth, user_agent, status, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, 'active', ?, ?)
+            ON CONFLICT(endpoint) DO UPDATE SET
+                p256dh = excluded.p256dh,
+                auth = excluded.auth,
+                user_agent = excluded.user_agent,
+                status = 'active',
+                updated_at = excluded.updated_at;
+            """,
+            (new_sub_id, endpoint, p256dh, auth, user_agent, now, now),
+        )
+        conn.commit()
+
+        cursor.execute(
+            "SELECT subscription_id, user_agent, status, created_at, updated_at FROM web_push_subscriptions WHERE endpoint = ?;",
             (endpoint,),
         )
-        existing = cursor.fetchone()
-
-        if existing:
-            sub_id = existing["subscription_id"]
-            created_at = existing["created_at"]
-            cursor.execute(
-                """
-                UPDATE web_push_subscriptions
-                SET p256dh = ?,
-                    auth = ?,
-                    user_agent = ?,
-                    status = 'active',
-                    updated_at = ?
-                WHERE subscription_id = ?;
-                """,
-                (p256dh, auth, user_agent, now, sub_id),
-            )
-        else:
-            sub_id = f"wps_{uuid.uuid4().hex[:12]}"
-            created_at = now
-            cursor.execute(
-                """
-                INSERT INTO web_push_subscriptions (
-                    subscription_id, endpoint, p256dh, auth, user_agent, status, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, 'active', ?, ?);
-                """,
-                (sub_id, endpoint, p256dh, auth, user_agent, now, now),
-            )
-
-        conn.commit()
+        row = cursor.fetchone()
         return {
-            "subscription_id": sub_id,
-            "user_agent": user_agent,
-            "status": "active",
-            "created_at": created_at,
-            "updated_at": now,
+            "subscription_id": row["subscription_id"],
+            "user_agent": row["user_agent"],
+            "status": row["status"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
         }
     finally:
         conn.close()

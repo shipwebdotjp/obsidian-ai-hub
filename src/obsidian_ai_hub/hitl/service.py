@@ -22,19 +22,40 @@ from obsidian_ai_hub.hitl.store import (
 
 logger = logging.getLogger(__name__)
 
-_NOTIFIED_HITL_SETS: set[tuple[str, str]] = set()
-
-
 def _notify_hitl_if_needed(run_id: str, question_set_id: str, run: dict[str, Any]) -> None:
     if run.get("status") != "pending_user":
         return
     if run.get("display_type") == "in_conversation_question":
         return
 
-    key = (run_id, question_set_id)
-    if key in _NOTIFIED_HITL_SETS:
-        return
-    _NOTIFIED_HITL_SETS.add(key)
+    now = get_current_iso()
+    conn = get_db_connection()
+    try:
+        with conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS hitl_notified_question_sets (
+                    run_id TEXT NOT NULL,
+                    question_set_id TEXT NOT NULL,
+                    notified_at TEXT NOT NULL,
+                    PRIMARY KEY (run_id, question_set_id)
+                );
+                """
+            )
+            cur = conn.execute(
+                "SELECT 1 FROM hitl_notified_question_sets WHERE run_id = ? AND question_set_id = ?;",
+                (run_id, question_set_id),
+            )
+            if cur.fetchone() is not None:
+                return
+            conn.execute(
+                "INSERT INTO hitl_notified_question_sets (run_id, question_set_id, notified_at) VALUES (?, ?, ?);",
+                (run_id, question_set_id, now),
+            )
+    except Exception as e:
+        logger.warning("Failed to record HITL notification state: %s", e)
+    finally:
+        conn.close()
 
     try:
         from urllib.parse import quote
@@ -267,7 +288,8 @@ def register_run_and_questions(
             upsert_run(run, conn)
 
         # Publish notification after transaction commits if pending_user
-        _notify_hitl_if_needed(run_id, question_set_id, run)
+        if close_conn:
+            _notify_hitl_if_needed(run_id, question_set_id, run)
     except sqlite3.IntegrityError as e:
         logger.error(f"Database integrity violation in register_run_and_questions: {e}")
         raise

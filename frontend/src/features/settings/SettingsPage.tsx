@@ -174,27 +174,36 @@ export default function SettingsPage() {
     setNotifLoading(true);
 
     try {
+      let isCurrentBrowserSub = false;
+      let browserSub: PushSubscription | null = null;
+
+      if (isSupported && "serviceWorker" in navigator) {
+        const reg = await navigator.serviceWorker.getRegistration("/service-worker.js");
+        if (reg) {
+          browserSub = await reg.pushManager.getSubscription();
+        }
+      }
+
       if (subId) {
+        const target = subscriptions.find((s) => s.subscription_id === subId);
+        if (browserSub && target && browserSub.endpoint.includes(target.endpoint_domain)) {
+          isCurrentBrowserSub = true;
+        }
         await unregisterWebPushSubscription(subId);
       } else if (subscriptions.length > 0) {
         for (const sub of subscriptions) {
           await unregisterWebPushSubscription(sub.subscription_id);
         }
+        isCurrentBrowserSub = true;
       }
 
-      // Unsubscribe locally from pushManager if available
-      if (isSupported && "serviceWorker" in navigator) {
-        const reg = await navigator.serviceWorker.getRegistration("/service-worker.js");
-        if (reg) {
-          const sub = await reg.pushManager.getSubscription();
-          if (sub) {
-            await sub.unsubscribe();
-          }
-        }
+      if (isCurrentBrowserSub && browserSub) {
+        await browserSub.unsubscribe().catch(() => {});
       }
 
+      const shouldDisableWebPush = isCurrentBrowserSub || (!subId && subscriptions.length > 0);
       const updated = await updateNotificationSettings({
-        web_push_enabled: false,
+        web_push_enabled: shouldDisableWebPush ? false : notifSettings?.web_push_enabled,
       });
 
       if (!isMounted.current) return;

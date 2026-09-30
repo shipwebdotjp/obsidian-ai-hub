@@ -62,6 +62,7 @@ def send_web_push_best_effort(
                 vapid_private_key=vapid_private_key,
                 vapid_claims=vapid_claims,
                 ttl=86400,
+                timeout=10,
             )
             success_count += 1
         except WebPushException as exc:

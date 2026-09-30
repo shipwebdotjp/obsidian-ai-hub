@@ -47,6 +47,8 @@ def _now_iso() -> str:
 
 
 def _notify_workflow_status_change(run: dict[str, Any]) -> None:
+    if run.get("parent_run_id"):
+        return
     status = run.get("status")
     run_id = run["run_id"]
     workflow_id = run.get("workflow_id")

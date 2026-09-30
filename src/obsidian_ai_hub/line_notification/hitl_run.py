@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Optional
 
 from obsidian_ai_hub.line_notification.push import push_best_effort
 from obsidian_ai_hub.line_notification.suggestion import build_suggestion_link
@@ -46,9 +46,7 @@ def notify_hitl_run(
     description: str,
     run_id: str,
     round_number: Optional[int] = None,
-    line_token: Optional[str] = None,
-    line_target: Optional[str] = None,
-    web_url: Optional[str] = None,
+    **kwargs: Any,
 ) -> bool:
     """Best-effort push of a HITL Run notification via the new Notification Publisher."""
     from urllib.parse import quote

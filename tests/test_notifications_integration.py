@@ -29,22 +29,17 @@ def test_notification_delivery_matrix_and_commit_behavior(tmp_path, monkeypatch)
     monkeypatch.setattr("obsidian_ai_hub.notifications.publisher.publish_notification", mock_publish)
 
     # 1. HITL: pending_user triggers notification
-    conn = database.get_db_connection()
-    try:
-        hitl.register_run_and_questions(
-            run_id="hrun_test_1",
-            handler="dummy",
-            checkpoint="chk",
-            question_set_id="qset_1",
-            questions_data=[
-                {"question_key": "q1", "question_type": "text", "display_text": "Need answer", "is_required": 1}
-            ],
-            display_type="タスク確認",
-            title="テストHITLタイトル",
-            conn=conn,
-        )
-    finally:
-        conn.close()
+    hitl.register_run_and_questions(
+        run_id="hrun_test_1",
+        handler="dummy",
+        checkpoint="chk",
+        question_set_id="qset_1",
+        questions_data=[
+            {"question_key": "q1", "question_type": "text", "display_text": "Need answer", "is_required": 1}
+        ],
+        display_type="タスク確認",
+        title="テストHITLタイトル",
+    )
 
     assert len(published_events) == 1
     ev = published_events[-1]
@@ -174,11 +169,11 @@ def test_adapter_failure_does_not_fail_domain_task(tmp_path, monkeypatch):
         raise RuntimeError("LINE API unreachable")
 
     monkeypatch.setattr(
-        "obsidian_ai_hub.notifications.adapters.web_push.send_web_push_best_effort",
+        "obsidian_ai_hub.notifications.publisher.send_web_push_best_effort",
         mock_web_push_error,
     )
     monkeypatch.setattr(
-        "obsidian_ai_hub.notifications.adapters.line.send_line_push_best_effort",
+        "obsidian_ai_hub.notifications.publisher.send_line_push_best_effort",
         mock_line_error,
     )
 

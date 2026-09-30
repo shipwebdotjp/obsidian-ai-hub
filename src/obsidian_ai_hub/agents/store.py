@@ -1490,13 +1490,15 @@ def update_run_hitl(
         if is_generated:
             with active_conn:
                 _do_update()
+            res = get_run(run_id, conn=active_conn)
+            assert res is not None
+            _notify_agent_status_change(res)
+            return res
         else:
             _do_update()
-
-        res = get_run(run_id, conn=active_conn)
-        assert res is not None
-        _notify_agent_status_change(res)
-        return res
+            res = get_run(run_id, conn=active_conn)
+            assert res is not None
+            return res
 
 
 def fail_run(
@@ -1511,18 +1513,8 @@ def fail_run(
 
         now = _now_iso()
 
-        if is_generated:
-            with active_conn:
-                active_conn.execute(
-                    """
-                    UPDATE agent_runs
-                    SET status = 'failed', error_message = ?, finished_at = ?
-                    WHERE run_id = ? AND status = 'running'
-                    """,
-                    (error_message, now, run_id),
-                )
-        else:
-            active_conn.execute(
+        def _do_fail():
+            cursor = active_conn.execute(
                 """
                 UPDATE agent_runs
                 SET status = 'failed', error_message = ?, finished_at = ?
@@ -1530,11 +1522,21 @@ def fail_run(
                 """,
                 (error_message, now, run_id),
             )
+            return cursor.rowcount
 
-        res = get_run(run_id, conn=active_conn)
-        assert res is not None
-        _notify_agent_status_change(res)
-        return res
+        if is_generated:
+            with active_conn:
+                rows_affected = _do_fail()
+            res = get_run(run_id, conn=active_conn)
+            assert res is not None
+            if rows_affected > 0:
+                _notify_agent_status_change(res)
+            return res
+        else:
+            _do_fail()
+            res = get_run(run_id, conn=active_conn)
+            assert res is not None
+            return res
 
 
 def get_message(message_id: str, conn: Optional[sqlite3.Connection] = None) -> dict[str, Any] | None:
@@ -1916,12 +1918,15 @@ def transition_run_status(
         if is_generated:
             with active_conn:
                 _do()
+            res = get_run(run_id, conn=active_conn)
+            assert res is not None
+            _notify_agent_status_change(res)
+            return res
         else:
             _do()
-        res = get_run(run_id, conn=active_conn)
-        assert res is not None
-        _notify_agent_status_change(res)
-        return res
+            res = get_run(run_id, conn=active_conn)
+            assert res is not None
+            return res
 
 
 def request_cancel_run(
