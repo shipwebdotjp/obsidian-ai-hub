@@ -14,8 +14,8 @@
 # 出力
 - 最終メッセージをそのまま報告書本文とする。前置き・後書き・作業ログは不要。
 - Markdown で見出し・箇条書きを使い構造化する。
-${project_section}
+
 テーマ:
-${theme}${why_now_section}${context_section}
+${theme}${direction_section}${why_now_section}${context_section}${project_section}
 想定する調査の粒度:
 ${output_style_text}
