@@ -2308,11 +2308,15 @@ def _make_gmail_create_draft_tool(trusted_ctx: Optional[Dict[str, Any]] = None) 
 
             ctx = trusted_ctx if isinstance(trusted_ctx, dict) else {}
             # Derive deterministic request key from trusted context + canonical input hash
-            ctx_key = (
-                f"task:{ctx.get('task_id')}:action:{ctx.get('action_index')}"
-                if ctx.get("task_id")
-                else f"agent_run:{ctx.get('run_id') or ctx.get('session_id') or uuid.uuid4().hex}"
-            )
+            if ctx.get("task_id"):
+                ctx_key = f"task:{ctx.get('task_id')}:action:{ctx.get('action_index')}"
+            elif ctx.get("run_id") or ctx.get("session_id"):
+                ctx_key = f"agent_run:{ctx.get('run_id') or ctx.get('session_id')}"
+            else:
+                return json.dumps(
+                    {"error": "gmail_create_draft は信頼された実行コンテキスト (task_id, run_id, session_id) が無いため呼び出せません"},
+                    ensure_ascii=False,
+                )
             canonical_input_str = json.dumps(
                 {
                     "mode": mode,

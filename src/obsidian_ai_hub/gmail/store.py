@@ -52,7 +52,8 @@ def mark_draft_request_creating(
 ) -> dict[str, str | None] | None:
     """Persist status 'creating' before making Gmail API call.
 
-    If an existing request for request_key exists:
+    Attempts atomic INSERT with ON CONFLICT(request_key) DO NOTHING first.
+    If rowcount is 0, re-reads existing record:
     - If status == 'created', return existing record (caller reuses stored receipt without API call).
     - If status in ('creating', 'unknown'), raise RuntimeError blocking automatic retry.
     """
@@ -64,26 +65,46 @@ def mark_draft_request_creating(
     now = datetime.now(timezone.utc).isoformat()
     try:
         cur = conn.cursor()
-        existing = get_draft_request(request_key, conn=conn)
-        if existing:
-            if existing["status"] == "created":
-                return existing
-            raise RuntimeError(
-                f"Draft request '{request_key}' is in status '{existing['status']}'. "
-                "Automatic retry blocked to prevent duplicate drafts in Gmail. "
-                "Please inspect Gmail Drafts before resubmitting."
-            )
-
         cur.execute(
             """
             INSERT INTO gmail_draft_requests (
                 request_key, input_sha256, status, created_at, updated_at
             ) VALUES (?, ?, 'creating', ?, ?)
+            ON CONFLICT(request_key) DO NOTHING
             """,
             (request_key, input_sha256, now, now),
         )
+        if cur.rowcount == 0:
+            existing = get_draft_request(request_key, conn=conn)
+            if existing:
+                if existing["status"] == "created":
+                    return existing
+                raise RuntimeError(
+                    f"Draft request '{request_key}' is in status '{existing['status']}'. "
+                    "Automatic retry blocked to prevent duplicate drafts in Gmail. "
+                    "Please inspect Gmail Drafts before resubmitting."
+                )
         conn.commit()
         return None
+    finally:
+        if close_conn:
+            conn.close()
+
+
+def delete_draft_request(
+    request_key: str,
+    conn: sqlite3.Connection | None = None,
+) -> None:
+    """Remove draft request row on pre-dispatch validation or auth failures."""
+    close_conn = False
+    if conn is None:
+        conn = get_db_connection()
+        close_conn = True
+
+    try:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM gmail_draft_requests WHERE request_key = ?", (request_key,))
+        conn.commit()
     finally:
         if close_conn:
             conn.close()

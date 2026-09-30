@@ -183,6 +183,16 @@ def test_draft_request_store_idempotency():
         mark_draft_request_creating(req_key_2, input_hash)
 
 
+def test_gmail_create_draft_no_trusted_ctx():
+    from obsidian_ai_hub.agents.registry import _make_gmail_create_draft_tool
+
+    tool = _make_gmail_create_draft_tool(None)
+    res_str = tool.invoke({"mode": "new", "to": "test@example.com", "body_text": "hello"})
+    res = json.loads(res_str)
+    assert "error" in res
+    assert "信頼された実行コンテキスト" in res["error"]
+
+
 def test_fake_gmail_service_create_draft(monkeypatch):
     class FakeGmailResource:
         def __init__(self):

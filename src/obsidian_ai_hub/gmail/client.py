@@ -19,6 +19,7 @@ from obsidian_ai_hub.gmail.mime import (
     validate_header_no_injection,
 )
 from obsidian_ai_hub.gmail.store import (
+    delete_draft_request,
     mark_draft_request_created,
     mark_draft_request_creating,
     mark_draft_request_unknown,
@@ -177,12 +178,13 @@ class GmailService:
                 "reused_receipt": True,
             }
 
-        srv = self._get_service()
         thread_id: str | None = None
         in_reply_to: str | None = None
         references: str | None = None
 
+        # Pre-dispatch setup & validation
         try:
+            srv = self._get_service()
             if mode == "new":
                 if not to or not to.strip():
                     raise ValueError("'to' email address is required for mode='new'")
@@ -240,33 +242,34 @@ class GmailService:
             }
             if thread_id:
                 draft_body["message"]["threadId"] = thread_id
+        except Exception as pre_exc:
+            delete_draft_request(request_key)
+            raise pre_exc
 
+        # Dispatch API call where outcome could become uncertain on transport/server failure
+        try:
             res = srv.users().drafts().create(userId="me", body=draft_body).execute()
-
-            draft_id = res.get("id", "")
-            msg_res = res.get("message", {})
-            created_msg_id = msg_res.get("id", "")
-            created_thread_id = msg_res.get("threadId", thread_id or "")
-
-            mark_draft_request_created(
-                request_key=request_key,
-                gmail_draft_id=draft_id,
-                gmail_message_id=created_msg_id,
-                gmail_thread_id=created_thread_id,
-            )
-
-            return {
-                "request_key": request_key,
-                "gmail_draft_id": draft_id,
-                "gmail_message_id": created_msg_id,
-                "gmail_thread_id": created_thread_id,
-                "status": "created",
-                "reused_receipt": False,
-            }
-
-        except Exception as exc:
-            # If the error is a pre-dispatch validation error (like ValueError),
-            # mark_draft_request_creating was already called so we update to 'unknown'
-            # to block automatic retries with uncertain outcomes.
+        except Exception as dispatch_exc:
             mark_draft_request_unknown(request_key)
-            raise exc
+            raise dispatch_exc
+
+        draft_id = res.get("id", "")
+        msg_res = res.get("message", {})
+        created_msg_id = msg_res.get("id", "")
+        created_thread_id = msg_res.get("threadId", thread_id or "")
+
+        mark_draft_request_created(
+            request_key=request_key,
+            gmail_draft_id=draft_id,
+            gmail_message_id=created_msg_id,
+            gmail_thread_id=created_thread_id,
+        )
+
+        return {
+            "request_key": request_key,
+            "gmail_draft_id": draft_id,
+            "gmail_message_id": created_msg_id,
+            "gmail_thread_id": created_thread_id,
+            "status": "created",
+            "reused_receipt": False,
+        }
