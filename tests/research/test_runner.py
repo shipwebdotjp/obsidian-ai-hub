@@ -232,18 +232,24 @@ def test_project_mode_requires_project_id():
 
 
 def test_auto_mode_with_project_id_uses_project_engine():
+    async def fake_gpt_researcher(query):
+        return "deep final report"
+
     with (
         patch.object(runner, "collect_research_context", return_value=""),
         patch.object(runner, "_resolve_project_label", return_value="Proj (path)"),
         patch.object(runner, "generate_research_title", return_value="title"),
         patch.object(runner, "build_research_prompt", return_value="prompt") as build,
-        patch.object(runner, "conduct_research", return_value="report") as conduct,
+        patch.object(runner, "conduct_research", return_value="code report") as conduct,
+        patch.object(runner, "_run_gpt_researcher", side_effect=fake_gpt_researcher),
     ):
         report = runner.run_research(theme="PJ調査", mode="auto", project_id=7)
 
     assert report.mode == runner.RESEARCH_MODE_PROJECT
     assert build.call_args.kwargs["project_label"] == "Proj (path)"
     assert conduct.call_args.kwargs["project_id"] == 7
+    assert "deep final report" in report.markdown
+    assert "source: coding-agent+gpt-researcher" in report.markdown
 
 
 def test_project_id_persisted_on_theme_and_job():
@@ -281,11 +287,16 @@ def _stub_report_pipeline(monkeypatch, captured: dict | None = None):
     monkeypatch.setattr(runner, "build_research_prompt", lambda *a, **k: "prompt")
     monkeypatch.setattr(runner, "generate_research_title", lambda theme: "title")
 
+    async def fake_gpt_researcher(query):
+        return "deep final report"
+
+    monkeypatch.setattr(runner, "_run_gpt_researcher", fake_gpt_researcher)
+
     def fake_conduct(prompt, *, mode, output_style=None, project_id=None):
         if captured is not None:
             captured["mode"] = mode
             captured["project_id"] = project_id
-        return "report"
+        return "code report"
 
     monkeypatch.setattr(runner, "conduct_research", fake_conduct)
 
@@ -665,3 +676,115 @@ def test_execute_job_project_failure_does_not_save_vault(monkeypatch):
     # The selected project is persisted before the coding agent is started.
     assert research_themes.get_theme(theme["theme_id"])["project_id"] == 7
     assert research_themes.get_job(job["job_id"])["project_id"] == 7
+
+
+def test_project_mode_skips_collect_research_context(monkeypatch):
+    collect_called = {"value": False}
+
+    def fake_collect(theme, explicit_context=None):
+        collect_called["value"] = True
+        return "collected context"
+
+    monkeypatch.setattr(runner, "collect_research_context", fake_collect)
+    route = runner.resolve_research_route("テーマ", mode="project", project_id=1, context="ignored context")
+
+    assert collect_called["value"] is False
+    assert route.context == ""
+
+
+def test_project_mode_template_missing_placeholder_raises_error(monkeypatch, tmp_path):
+    bad_template = tmp_path / "research_deep.md"
+    bad_template.write_text("テーマ: ${theme}\n", encoding="utf-8")
+
+    from obsidian_ai_hub.utils import config
+    monkeypatch.setattr(config, "RESEARCH_DEEP_PROMPT_PATH", bad_template)
+    monkeypatch.setattr(runner, "conduct_research", lambda prompt, **kwargs: "code report")
+    monkeypatch.setattr(runner, "generate_research_title", lambda theme: "title")
+    monkeypatch.setattr(runner, "_resolve_project_label", lambda pid: "PJ")
+
+    with pytest.raises(ValueError, match="code_research_section"):
+        runner.run_research(theme="テーマ", mode="project", project_id=1)
+
+
+def test_project_mode_two_stage_execution_order_and_inputs(monkeypatch):
+    calls = []
+
+    def fake_conduct(prompt, *, mode, output_style=None, project_id=None):
+        calls.append(("coding_cli", prompt, mode, project_id))
+        return "file1.py:10 - fixed bug"
+
+    async def fake_gpt_researcher(query):
+        calls.append(("gpt_researcher", query))
+        return "final report from gpt researcher"
+
+    monkeypatch.setattr(runner, "conduct_research", fake_conduct)
+    monkeypatch.setattr(runner, "_run_gpt_researcher", fake_gpt_researcher)
+    monkeypatch.setattr(runner, "generate_research_title", lambda theme: "title")
+    monkeypatch.setattr(runner, "_resolve_project_label", lambda pid: "PJ")
+
+    report = runner.run_research(
+        theme="コード調査テスト",
+        mode="project",
+        project_id=5,
+        direction="方向性",
+        why_now="理由",
+        output_style="medium",
+    )
+
+    assert len(calls) == 2
+    stage1_name, stage1_prompt, stage1_mode, stage1_pid = calls[0]
+    assert stage1_name == "coding_cli"
+    assert stage1_mode == runner.RESEARCH_MODE_PROJECT
+    assert stage1_pid == 5
+    assert "方向性" in stage1_prompt
+    assert "理由" in stage1_prompt
+
+    stage2_name, stage2_query = calls[1]
+    assert stage2_name == "gpt_researcher"
+    assert "file1.py:10 - fixed bug" in stage2_query
+    assert "方向性" in stage2_query
+    assert "理由" in stage2_query
+
+    assert report.mode == runner.RESEARCH_MODE_PROJECT
+    assert "final report from gpt researcher" in report.markdown
+    assert "file1.py" not in report.markdown
+    assert "source: coding-agent+gpt-researcher" in report.markdown
+
+
+def test_project_mode_coding_cli_failure_stops_execution(monkeypatch):
+    from obsidian_ai_hub.research.coding_research import CodingResearchError
+
+    deep_called = {"value": False}
+
+    def boom_conduct(prompt, *, mode, output_style=None, project_id=None):
+        raise CodingResearchError("coding failure")
+
+    async def fake_gpt_researcher(query):
+        deep_called["value"] = True
+        return "deep report"
+
+    monkeypatch.setattr(runner, "conduct_research", boom_conduct)
+    monkeypatch.setattr(runner, "_run_gpt_researcher", fake_gpt_researcher)
+    monkeypatch.setattr(runner, "generate_research_title", lambda theme: "title")
+    monkeypatch.setattr(runner, "_resolve_project_label", lambda pid: "PJ")
+
+    with pytest.raises(CodingResearchError, match="coding failure"):
+        runner.run_research(theme="テーマ", mode="project", project_id=1)
+
+    assert deep_called["value"] is False
+
+
+def test_project_mode_deep_failure_stops_execution(monkeypatch):
+    def fake_conduct(prompt, *, mode, output_style=None, project_id=None):
+        return "code report"
+
+    async def boom_gpt_researcher(query):
+        raise RuntimeError("deep failure")
+
+    monkeypatch.setattr(runner, "conduct_research", fake_conduct)
+    monkeypatch.setattr(runner, "_run_gpt_researcher", boom_gpt_researcher)
+    monkeypatch.setattr(runner, "generate_research_title", lambda theme: "title")
+    monkeypatch.setattr(runner, "_resolve_project_label", lambda pid: "PJ")
+
+    with pytest.raises(RuntimeError, match="deep failure"):
+        runner.run_research(theme="テーマ", mode="project", project_id=1)

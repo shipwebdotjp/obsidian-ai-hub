@@ -71,9 +71,9 @@ python -m obsidian_ai_hub <flag> [options]
 | `--suggest-research-theme` | — | Task Agent にテーマ提案を投入する。 |
 | `--theme` | 文字列 | `--research-agent` / `--add-research-theme` のテーマ。 |
 | `--direction` | 文字列 | `--add-research-theme` の調査方向（任意）。 |
-| `--context` | 文字列 | `--research-agent` の補足文脈。 |
+| `--context` | 文字列 | `--research-agent` の補足文脈（`project` / `auto-project` 経路では無視されます）。 |
 | `--output-style` | `short` / `medium` / `long` | `--research-agent` の出力長。 |
-| `--research-mode` | `auto` / `internal` / `web` / `deep` / `project` | 調査モード（既定 auto）。`project` は `--project-id` が必要。 |
+| `--research-mode` | `auto` / `internal` / `web` / `deep` / `project` | 調査モード（既定 auto）。`project` は `--project-id` が必要。`project` モードは対象リポジトリを読み取り専用でコード調査し、その調査結果を GPT Researcher の最終調査に渡す二段階処理を行います。 |
 | `--project-id` | 整数 | `--coding` の新規セッション、または `--research-agent --research-mode project` の対象プロジェクト。 |
 
 `--research-agent` / `--add-research-theme` / `--suggest-research-theme` は相互に排他的です。

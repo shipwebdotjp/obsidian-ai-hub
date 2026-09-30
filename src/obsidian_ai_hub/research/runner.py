@@ -439,10 +439,13 @@ def build_research_prompt(
     context: Optional[str] = None,
     output_style: Optional[str] = None,
     why_now: Optional[str] = None,
+    direction: Optional[str] = None,
     project_label: Optional[str] = None,
 ) -> str:
     context_text = _normalize_optional_text(context)
     why_now_text = _normalize_optional_text(why_now)
+    direction_text = _normalize_optional_text(direction)
+    direction_section = f"\n## 調査方向:\n{direction_text}\n" if direction_text else ""
     why_now_section = f"\n## 調べたい背景:\n{why_now_text}\n" if why_now_text else ""
     context_section = f"\n## 参考文脈:\n{context_text}\n" if context_text else ""
 
@@ -452,19 +455,14 @@ def build_research_prompt(
     normalized_mode = _normalize_research_mode(mode)
 
     if normalized_mode == RESEARCH_MODE_PROJECT:
-        project_label_text = _normalize_optional_text(project_label)
-        project_section = (
-            f"\n## 対象プロジェクト:\n{project_label_text}"
-            if project_label_text
-            else ""
-        )
         return prompt.render_prompt(
             config.RESEARCH_PROJECT_PROMPT_PATH,
             {
                 "theme": theme,
+                "direction_section": direction_section,
                 "why_now_section": why_now_section,
-                "context_section": context_section,
-                "project_section": project_section,
+                "context_section": "",
+                "project_section": "",
                 "output_style_text": output_style_text,
             },
         )
@@ -479,6 +477,7 @@ def build_research_prompt(
             {
                 "output_style_text": output_style_text,
                 "theme": theme,
+                "direction_section": direction_section,
                 "why_now_section": why_now_section,
                 "context_section": context_section,
                 "search_results": search_results,
@@ -490,9 +489,11 @@ def build_research_prompt(
             config.RESEARCH_DEEP_PROMPT_PATH,
             {
                 "theme": theme,
+                "direction_section": direction_section,
                 "why_now_section": why_now_section,
                 "context_section": context_section,
                 "output_style_text": output_style_text,
+                "code_research_section": "",
             },
         )
 
@@ -500,6 +501,7 @@ def build_research_prompt(
         config.RESEARCH_INTERNAL_PROMPT_PATH,
         {
             "theme": theme,
+            "direction_section": direction_section,
             "why_now_section": why_now_section,
             "context_section": context_section,
             "output_style_text": output_style_text,
@@ -797,10 +799,14 @@ def resolve_research_route(
             if decision.mode == RESEARCH_MODE_PROJECT:
                 resolved_project_id = decision.project_id
 
-    combined_context = collect_research_context(theme, context)
     normalized_mode = _normalize_research_mode(resolved_mode)
-    if normalized_mode == RESEARCH_MODE_PROJECT and resolved_project_id is None:
-        raise ValueError("project research mode requires a project_id")
+    if normalized_mode == RESEARCH_MODE_PROJECT:
+        if resolved_project_id is None:
+            raise ValueError("project research mode requires a project_id")
+        combined_context = ""
+    else:
+        combined_context = collect_research_context(theme, context)
+
     logger.info(
         "Resolved research mode for theme '%s': %s (project=%s)",
         theme,
@@ -818,30 +824,88 @@ def _produce_research_report(
     theme: str,
     route: ResolvedResearchRoute,
     *,
+    direction: Optional[str] = None,
     why_now: Optional[str] = None,
     output_style: Optional[str] = None,
 ) -> ResearchReport:
-    p = build_research_prompt(
-        theme,
-        mode=route.mode,
-        context=route.context,
-        output_style=output_style,
-        why_now=why_now,
-        project_label=_resolve_project_label(route.project_id),
-    )
     title = generate_research_title(theme)
-    report_body = conduct_research(
-        p,
-        mode=route.mode,
-        output_style=output_style,
-        project_id=route.project_id,
-    )
-    source = {
-        RESEARCH_MODE_INTERNAL: "internal-llm",
-        RESEARCH_MODE_WEB: "tavily-search",
-        RESEARCH_MODE_DEEP: "gpt-researcher",
-        RESEARCH_MODE_PROJECT: "coding-agent",
-    }.get(route.mode, "internal-llm")
+
+    if route.mode == RESEARCH_MODE_PROJECT:
+        # Stage 1: Coding CLI read-only investigation
+        p1 = build_research_prompt(
+            theme,
+            mode=RESEARCH_MODE_PROJECT,
+            direction=direction,
+            why_now=why_now,
+            output_style=output_style,
+            project_label=_resolve_project_label(route.project_id),
+        )
+        code_investigation_result = conduct_research(
+            p1,
+            mode=RESEARCH_MODE_PROJECT,
+            output_style=output_style,
+            project_id=route.project_id,
+        )
+        if not code_investigation_result or not code_investigation_result.strip():
+            raise RuntimeError("Coding CLI returned an empty report")
+
+        # Stage 2: Deep research with GPT Researcher using code investigation result
+        deep_template_path = config.RESEARCH_DEEP_PROMPT_PATH
+        if not deep_template_path.exists():
+            raise FileNotFoundError(f"Prompt template not found at {deep_template_path}")
+        with open(deep_template_path, "r", encoding="utf-8") as f:
+            deep_template_text = f.read()
+        if "code_research_section" not in deep_template_text:
+            raise ValueError(
+                f"Prompt template '{deep_template_path.name}' is missing required placeholder '${{code_research_section}}' for project research mode."
+            )
+
+        direction_text = _normalize_optional_text(direction)
+        direction_section = f"\n## 調査方向:\n{direction_text}\n" if direction_text else ""
+        why_now_text = _normalize_optional_text(why_now)
+        why_now_section = f"\n## 調べたい背景:\n{why_now_text}\n" if why_now_text else ""
+        output_style_text = _normalize_optional_text(output_style) or config.RESEARCH_DEFAULT_OUTPUT_STYLE
+        code_research_section = f"\n\n## コード調査結果:\n{code_investigation_result.strip()}"
+
+        p2 = prompt.render_prompt(
+            deep_template_path,
+            {
+                "theme": theme,
+                "direction_section": direction_section,
+                "why_now_section": why_now_section,
+                "context_section": "",
+                "output_style_text": output_style_text,
+                "code_research_section": code_research_section,
+            },
+        )
+
+        report_body = asyncio.run(_run_gpt_researcher(p2))
+        report_body = (report_body or "").strip()
+        if not report_body:
+            raise RuntimeError("GPT Researcher returned an empty report")
+
+        source = "coding-agent+gpt-researcher"
+    else:
+        p = build_research_prompt(
+            theme,
+            mode=route.mode,
+            context=route.context,
+            output_style=output_style,
+            why_now=why_now,
+            direction=direction,
+            project_label=_resolve_project_label(route.project_id),
+        )
+        report_body = conduct_research(
+            p,
+            mode=route.mode,
+            output_style=output_style,
+            project_id=route.project_id,
+        )
+        source = {
+            RESEARCH_MODE_INTERNAL: "internal-llm",
+            RESEARCH_MODE_WEB: "tavily-search",
+            RESEARCH_MODE_DEEP: "gpt-researcher",
+        }.get(route.mode, "internal-llm")
 
     body = f"## テーマ\n{theme}\n\n## 調査結果レポート\n{report_body}"
     markdown = build_markdown(title, body, source=source, output_style=output_style)
@@ -904,6 +968,7 @@ def run_research(
     return _produce_research_report(
         theme,
         route,
+        direction=direction,
         why_now=why_now,
         output_style=output_style,
     )

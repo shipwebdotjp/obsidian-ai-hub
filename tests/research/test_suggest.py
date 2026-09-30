@@ -337,6 +337,11 @@ def test_suggestion_approve_auto_project_routes_and_saves(
         monkeypatch.setattr(runner, "_resolve_project_label", lambda pid: "Obsidian AI Hub")
         monkeypatch.setattr(runner, "generate_research_title", lambda theme: "title")
 
+        async def fake_gpt_researcher(query):
+            return "deep report body"
+
+        monkeypatch.setattr(runner, "_run_gpt_researcher", fake_gpt_researcher)
+
         captured: dict = {}
 
         def fake_conduct(prompt, *, mode, output_style=None, project_id=None):
@@ -344,7 +349,7 @@ def test_suggestion_approve_auto_project_routes_and_saves(
             captured["persisted_project_id"] = research_db.get_theme(theme_id)[
                 "project_id"
             ]
-            return "report body"
+            return "code report body"
 
         monkeypatch.setattr(runner, "conduct_research", fake_conduct)
 
