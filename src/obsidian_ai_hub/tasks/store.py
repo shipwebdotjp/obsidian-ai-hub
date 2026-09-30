@@ -96,6 +96,48 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _notify_task_status_change(task: dict[str, Any]) -> None:
+    if task.get("origin") != "user":
+        return
+    status = task.get("status")
+    task_id = task["task_id"]
+    prompt = task.get("prompt_text") or ""
+
+    if status in ("waiting_approval", "waiting_reapproval"):
+        category = "action_required"
+        title = "【要対応】タスクの承認が必要です"
+    elif status == "failed":
+        category = "failure"
+        title = "【失敗】タスクの実行が失敗しました"
+    elif status == "interrupted":
+        category = "failure"
+        title = "【中断】タスクの実行が中断されました"
+    elif status == "incomplete":
+        category = "failure"
+        title = "【未完了】タスクが完了条件を満たしませんでした"
+    else:
+        return
+
+    try:
+        from obsidian_ai_hub.notifications import (
+            NotificationEvent,
+            publish_notification,
+            sanitize_notification_body,
+        )
+
+        event = NotificationEvent(
+            event_type="task",
+            target_id=task_id,
+            relative_link=f"/task-agent/{task_id}",
+            category=category,
+            title=title,
+            body=sanitize_notification_body(prompt),
+        )
+        publish_notification(event)
+    except Exception as exc:
+        logger.warning("Failed to publish task notification for %s: %s", task_id, exc)
+
+
 def _validate_task_transition(from_status: str, to_status: str) -> None:
     allowed = TASK_ALLOWED_TRANSITIONS.get(from_status, frozenset())
     if to_status not in allowed:
@@ -623,12 +665,17 @@ def transition_task_status(
         if is_generated:
             with active_conn:
                 _do()
+            updated = get_task(task_id, conn=active_conn)
+            if updated is None:
+                raise FileNotFoundError(f"Task '{task_id}' not found after transition.")
+            _notify_task_status_change(updated)
+            return updated
         else:
             _do()
-        updated = get_task(task_id, conn=active_conn)
-    if updated is None:
-        raise FileNotFoundError(f"Task '{task_id}' not found after transition.")
-    return updated
+            updated = get_task(task_id, conn=active_conn)
+            if updated is None:
+                raise FileNotFoundError(f"Task '{task_id}' not found after transition.")
+            return updated
 
 
 def mark_tasks_interrupted(

@@ -772,6 +772,9 @@ def get_db_connection() -> sqlite3.Connection:
     if current_version <= 70:
         run_migration_v71(conn)
 
+    if current_version <= 71:
+        run_migration_v72(conn)
+
     return conn
 
 
@@ -1586,6 +1589,52 @@ def run_migration_v71(conn: sqlite3.Connection) -> None:
         "ON gmail_draft_requests(status);"
     )
     conn.execute("PRAGMA user_version = 71;")
+    conn.commit()
+
+
+def run_migration_v72(conn: sqlite3.Connection) -> None:
+    """Run migration for version 72 (notification_settings and web_push_subscriptions tables)."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS notification_settings (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            web_push_enabled INTEGER NOT NULL DEFAULT 0,
+            line_enabled INTEGER NOT NULL DEFAULT 0,
+            web_push_action_required INTEGER NOT NULL DEFAULT 0,
+            web_push_failure INTEGER NOT NULL DEFAULT 0,
+            line_action_required INTEGER NOT NULL DEFAULT 0,
+            line_failure INTEGER NOT NULL DEFAULT 0,
+            updated_at TEXT NOT NULL
+        );
+    """)
+    now = datetime.now(timezone.utc).isoformat()
+    conn.execute(
+        """
+        INSERT INTO notification_settings (
+            id, web_push_enabled, line_enabled,
+            web_push_action_required, web_push_failure,
+            line_action_required, line_failure, updated_at
+        ) VALUES (1, 0, 0, 0, 0, 0, 0, ?)
+        ON CONFLICT(id) DO NOTHING;
+        """,
+        (now,),
+    )
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS web_push_subscriptions (
+            subscription_id TEXT PRIMARY KEY,
+            endpoint TEXT NOT NULL UNIQUE,
+            p256dh TEXT NOT NULL,
+            auth TEXT NOT NULL,
+            user_agent TEXT,
+            status TEXT NOT NULL CHECK (status IN ('active', 'inactive')),
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_web_push_subscriptions_status "
+        "ON web_push_subscriptions(status);"
+    )
+    conn.execute("PRAGMA user_version = 72;")
     conn.commit()
 
 

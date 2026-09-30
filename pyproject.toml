@@ -41,6 +41,7 @@ dependencies = [
     "google-api-python-client",
     "google-auth-httplib2",
     "google-auth-oauthlib",
+    "pywebpush>=1.14.0",
 ]
 
 [tool.setuptools.packages.find]

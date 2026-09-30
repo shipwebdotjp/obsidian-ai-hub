@@ -76,6 +76,9 @@ _APP_ENV_VARS = [
     "IMAGE_GENERATION_MAX_INPUT_BYTES",
     "IMAGE_GENERATION_LOCK_LLM_QUALITY",
     "IMAGE_GENERATION_LLM_QUALITY",
+    "WEB_PUSH_VAPID_PUBLIC_KEY",
+    "WEB_PUSH_VAPID_PRIVATE_KEY",
+    "WEB_PUSH_VAPID_SUBJECT",
 ]
 
 if IS_TEST_ENV:
@@ -243,6 +246,13 @@ APPLE_CALENDAR_NAME = os.getenv("APPLE_CALENDAR_NAME", "")
 # deep links (e.g. Tailscale Serve https://aihub.tail744355.ts.net). Never
 # contains secrets such as the API token.
 OBSIDIAN_AI_HUB_WEB_URL = os.getenv("OBSIDIAN_AI_HUB_WEB_URL", "").rstrip("/")
+
+# Web Push VAPID settings
+WEB_PUSH_VAPID_PUBLIC_KEY = os.getenv("WEB_PUSH_VAPID_PUBLIC_KEY", "")
+WEB_PUSH_VAPID_PRIVATE_KEY = os.getenv("WEB_PUSH_VAPID_PRIVATE_KEY", "")
+WEB_PUSH_VAPID_SUBJECT = os.getenv(
+    "WEB_PUSH_VAPID_SUBJECT", "mailto:admin@example.com"
+)
 
 # Open Web UI Knowledge Base Sync
 OPEN_WEB_UI_BASE_URL = os.getenv("OPEN_WEB_UI_BASE_URL", "http://localhost:8080")

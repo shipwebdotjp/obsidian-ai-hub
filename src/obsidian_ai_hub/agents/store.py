@@ -36,6 +36,52 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _notify_agent_status_change(run: dict[str, Any]) -> None:
+    status = run.get("status")
+    run_id = run["run_id"]
+    session_id = run.get("session_id")
+
+    if status == "waiting_user":
+        category = "action_required"
+        title = "【要対応】Agentからの質問があります"
+    elif status == "failed":
+        category = "failure"
+        title = "【失敗】Agentの実行が失敗しました"
+    elif status == "interrupted":
+        category = "failure"
+        title = "【中断】Agentの実行が中断されました"
+    else:
+        return
+
+    session_title = "会話"
+    if session_id:
+        try:
+            sess = get_session(session_id)
+            if sess and sess.get("title"):
+                session_title = sess["title"]
+        except Exception:
+            pass
+
+    try:
+        from obsidian_ai_hub.notifications import (
+            NotificationEvent,
+            publish_notification,
+            sanitize_notification_body,
+        )
+
+        event = NotificationEvent(
+            event_type="agent",
+            target_id=run_id,
+            relative_link=f"/agents?session_id={session_id}",
+            category=category,
+            title=title,
+            body=sanitize_notification_body(session_title),
+        )
+        publish_notification(event)
+    except Exception as exc:
+        logger.warning("Failed to publish agent notification for %s: %s", run_id, exc)
+
+
 def _validate_tool_ids(tool_ids: Sequence[str]) -> list[str]:
     from obsidian_ai_hub.agents.registry import TOOL_DEFINITIONS
 
@@ -1444,10 +1490,15 @@ def update_run_hitl(
         if is_generated:
             with active_conn:
                 _do_update()
+            res = get_run(run_id, conn=active_conn)
+            assert res is not None
+            _notify_agent_status_change(res)
+            return res
         else:
             _do_update()
-
-        return get_run(run_id, conn=active_conn)  # type: ignore[return-value]
+            res = get_run(run_id, conn=active_conn)
+            assert res is not None
+            return res
 
 
 def fail_run(
@@ -1462,18 +1513,8 @@ def fail_run(
 
         now = _now_iso()
 
-        if is_generated:
-            with active_conn:
-                active_conn.execute(
-                    """
-                    UPDATE agent_runs
-                    SET status = 'failed', error_message = ?, finished_at = ?
-                    WHERE run_id = ? AND status = 'running'
-                    """,
-                    (error_message, now, run_id),
-                )
-        else:
-            active_conn.execute(
+        def _do_fail():
+            cursor = active_conn.execute(
                 """
                 UPDATE agent_runs
                 SET status = 'failed', error_message = ?, finished_at = ?
@@ -1481,8 +1522,21 @@ def fail_run(
                 """,
                 (error_message, now, run_id),
             )
+            return cursor.rowcount
 
-        return get_run(run_id, conn=active_conn)  # type: ignore[return-value]
+        if is_generated:
+            with active_conn:
+                rows_affected = _do_fail()
+            res = get_run(run_id, conn=active_conn)
+            assert res is not None
+            if rows_affected > 0:
+                _notify_agent_status_change(res)
+            return res
+        else:
+            _do_fail()
+            res = get_run(run_id, conn=active_conn)
+            assert res is not None
+            return res
 
 
 def get_message(message_id: str, conn: Optional[sqlite3.Connection] = None) -> dict[str, Any] | None:
@@ -1864,9 +1918,15 @@ def transition_run_status(
         if is_generated:
             with active_conn:
                 _do()
+            res = get_run(run_id, conn=active_conn)
+            assert res is not None
+            _notify_agent_status_change(res)
+            return res
         else:
             _do()
-        return get_run(run_id, conn=active_conn)  # type: ignore[return-value]
+            res = get_run(run_id, conn=active_conn)
+            assert res is not None
+            return res
 
 
 def request_cancel_run(

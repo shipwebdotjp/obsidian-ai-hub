@@ -860,3 +860,32 @@ Scheduler Task と Task Agent Task が `task` 一語を共有し、画面・API�
 | 候補検証 | LLM出力JSON | `agent://sessions/{sid}/messages/{mid}`（user entryのみ） | なし | 最終化 | 不正パス・assistant参照・引用不一致は警告付きで候補破棄 | なし |
 | 候補保存 | 検証済み候補 | `memory_id` | `memories`, `memory_events`（status=candidate） | 人間レビュー（Web/CLI） | 保存失敗時は処理ログ未記録で次回再試行 | 追記（可逆: 却下・削除可） |
 | 処理ログ | 実際に送信したメッセージ | `message_id` | `agent_message_extraction_logs` | 次回実行 | 候補保存後に記録。副作用後記録失敗時は再送され得る（at-least-once、完全一致は approved+candidate で自動却下） | 追記 |
+
+## Web Push中心の通知基盤 v1 (単一所有者・ベストエフォート・イベント区分)
+
+| 項目 | 内容 |
+|------|------|
+| 決定日 | 2026-09-28 |
+| カテゴリ | Web Push・LINE通知・アーキテクチャ |
+| 決定内容 | 初期チャネルは Web Push と、要対応・失敗通知に限った LINE とする。対象は要対応（HITL、Task承認・再承認、Workflow承認・HITL・attention、Agent/Coding質問、Planner提案）と失敗系（failed、interrupted、Taskのincomplete）。開始・成功・取消は通知しない。送信はDBコミット後の一度だけのベストエフォートとし、outbox、再試行、送信履歴、静音時間はv1に含めない。全チャネルは移行時に初期設定offとし、設定画面で明示的に有効化する。単一所有者（個人環境）であり、複数ユーザー管理は導入しない。 |
+
+### 結論に至った経緯
+
+Web UI 画面を開いていない状態でも、人間の判断を必要とする要対応イベント（HITL、承認待ち、ask_user 質問等）やタスクの失敗を速やかに認知したいニーズがあった。LINE への通知は既存の個別 `notify_hitl_run` や `notify_planner_summary` が存在したが、配信方式・チャネル設定・イベント区分・重複抑止が統合されておらず、ブラウザ直接受信の Web Push も未対応であった。
+
+非同期アウトボックスや配信履歴を導入すると DB スキーマと複雑性が増すため、単一所有者・ベストエフォート送信方針を採用し、各種ドメインの状態変更コミット後に各チャネルアダプターへ一度だけ送信する構造とした。
+
+### 構造と運用方針
+
+- **サブパッケージ (`notifications`)**:
+  - ドメイン層から渡す正規化済みの `NotificationEvent`（`event_type`, `target_id`, `relative_link`, `category`, `title`, `body`）を Web Push（`pywebpush`）および LINE アダプターへ配信。
+  - バックエンドの Store 層は直接外部送信を行わず、トランザクションコミット後にパブリッシャー（`publish_notification`）を呼び出す。
+- **データモデル & マイグレーション v72**:
+  - `notification_settings` (id=1 の単一所有者行): `web_push_enabled`, `line_enabled`, `web_push_action_required`, `web_push_failure`, `line_action_required`, `line_failure`。すべて初期値 0 (off)。
+  - `web_push_subscriptions`: `subscription_id`, `endpoint`, `p256dh`, `auth`, `user_agent`, `status` (`active` | `inactive`), `created_at`, `updated_at`。
+  - `endpoint`, `p256dh`, `auth` は機微情報としてログや通常 API レスポンス（一覧メタデータ）に出さない。
+- **深いリンクと重複抑止**:
+  - ディープリンク: `/hitl?run_id=...`, `/task-agent/:id`, `/workflows/runs/:id`, `/agents?session_id=...`, `/coding?session_id=...`, `/planner`。
+  - URL に Bearer トークンや秘密情報は含めない。
+  - Task/Workflow 配下の子 Run / Bridge Task は通知せず、親だけが通知する。
+  - Agent/Coding の `ask_user` 質問は会話画面リンクを 1 通送信し、関連 HITL からの重複通知は抑止する。

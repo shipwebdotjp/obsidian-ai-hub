@@ -42,15 +42,19 @@ def notify_planner_summary(
     line_target: Optional[str] = None,
     web_url: Optional[str] = None,
 ) -> bool:
-    """Best-effort push of the daily planner proposal summary to LINE."""
+    """Best-effort push of the daily planner proposal summary via Notification Publisher."""
+    if not proposals:
+        return False
 
-    def _build(base_url: str) -> str:
-        return build_planner_summary_text(proposals, base_url)
+    from obsidian_ai_hub.notifications import NotificationEvent, publish_notification
 
-    return push_best_effort(
-        _build,
-        label="planner-summary",
-        line_token=line_token,
-        line_target=line_target,
-        web_url=web_url,
+    count = len(proposals)
+    event = NotificationEvent(
+        event_type="planner",
+        target_id=f"planner_batch_{proposals[0].get('proposal_id', 'batch')}",
+        relative_link="/planner",
+        category="action_required",
+        title="【要対応】新しいプランナー提案があります",
+        body=f"新しい提案が {count} 件あります",
     )
+    return publish_notification(event)
