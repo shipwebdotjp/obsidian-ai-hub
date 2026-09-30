@@ -534,3 +534,35 @@ Status: Accepted (2026-09-26)。
 - 保持期間の設定は追加しない（親の既存ライフサイクルに合わせる）。
 - 詳細・操作シナリオ契約は
   [生成メディアの削除ポリシー ADR](../docs/image-generation/adr/media-deletion-policy.md) を正本とする。
+
+## Gmail Desktop OAuth 連携（スコープ・ローカル保存・at-most-once下書き契約）
+
+| 項目 | 内容 |
+|------|------|
+| 決定日 | 2026-10-02 |
+| カテゴリ | 外部連携（Gmail API）・認証・冪等性 |
+| 決定内容 | 個人利用・単一アカウント専用の Gmail 連携を `google-api-python-client` / `google-auth-httplib2` / `google-auth-oauthlib` で追加する。認可スコープは最小限の `gmail.readonly` と `gmail.compose` に限定し、送信（`messages.send`）機能はコード境界レベルで一切公開しない。下書き作成は `gmail_draft_requests`（スキーマ v71）による at-most-once 契約を強制し、不確実な失敗時は重複作成を防ぐため自動再試行をブロックする。 |
+
+### 結論に至った経緯
+
+1. **認可スコープと個人利用前提:**
+   - 外部配布・サードパーティ配布や検証を前提としない、個人利用・単一 Google アカウントの統合とする。
+   - スコープは `gmail.readonly` および `gmail.compose` のみ要求する。過剰な権限である `gmail.modify` や `mail.google.com` は一切要求しない。
+   - Google の仕様上 `gmail.compose` はメール送信権限も含むが、本アプリケーションでは送信機能（`users.messages.send` や `users.drafts.send`）をコード境界レベルで一切提供しない。下書き作成（`users.drafts.create`）のみを最終的な外部副作用とする。
+
+2. **認可フローとローカル認証情報保護:**
+   - 認可フローは独占的 CLI フラグ `--gmail-authorize` からのみ対話的に実行する。`InstalledAppFlow.run_local_server` を `127.0.0.1`（ランダムポート）で起動し、オフラインアクセスを要求する。成功時は `users.getProfile` でアカウントを確認し、トークン・クライアントシークレット非表示で結果を出力する。
+   - 実行時ツール（`gmail_search_messages`, `gmail_read_message`, `gmail_create_draft`）はブラウザフローを一切起動しない。トークン欠落・無効・期限切れ（リフレッシュ不能）・スコープ不足時は再認可コマンド（`--gmail-authorize`）を促す行動可能なエラーで即座に失敗させる。
+   - トークンファイル（デフォルト: `~/.config/obsidian-ai-hub/gmail/token.json`）およびクライアントシークレット（デフォルト: `~/.config/obsidian-ai-hub/gmail/client_secret.json`）は所有者限定パーミッション（0600 / ディレクトリ 0700）で原子的に読み書きする。`ENV=test` 時はテストワークスペース配下に完全隔離する。
+
+3. **at-most-once 下書き作成と重複防止:**
+   - 外部副作用である下書き作成（`gmail_create_draft`）は、重複下書き作成を防ぐため `gmail_draft_requests` テーブル（スキーマ v71）により at-most-once 動作を強制する。
+   - リクエストキー（`request_key`）は信頼された実行コンテキスト（Task/Agent）および入力の正規化 SHA-256 ハッシュから決定的に生成される。
+   - API 呼び出し前に `creating` ステータスを永続化し、Gmail API の `users.drafts.create` 成功後に受領情報（`gmail_draft_id`, `gmail_message_id`, `gmail_thread_id`）とともに `created` へ更新する。
+   - 同一の `request_key` で完了済みの呼び出しは、Gmail API を再呼び出しせず保存済みの受領情報を返す。
+   - 呼び出し途中のクラッシュやネットワーク不確実性が発生した場合は `unknown` ステータスに遷移し、同じキーでの自動再試行を禁止する。人間が Gmail の「下書き」を確認した上で再投入を行う安全設計とする。
+
+### トレードオフ
+
+- 送信機能を提供しないため、メール送信は人間が Gmail Web / アプリ上で下書きを確認して手動送信する必要がある。これは安全性を最優先した設計判断である。
+- 不確実な失敗時に自動リトライを行わないため、一時的な通信障害時にも人間の下書き確認が必要となるが、重複下書きの乱立を確実に防ぐことができる。

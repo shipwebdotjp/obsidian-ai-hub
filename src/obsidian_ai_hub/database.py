@@ -769,6 +769,9 @@ def get_db_connection() -> sqlite3.Connection:
     if current_version <= 69:
         run_migration_v70(conn)
 
+    if current_version <= 70:
+        run_migration_v71(conn)
+
     return conn
 
 
@@ -1561,6 +1564,28 @@ def run_migration_v70(conn: sqlite3.Connection) -> None:
     )
 
     conn.execute("PRAGMA user_version = 70;")
+    conn.commit()
+
+
+def run_migration_v71(conn: sqlite3.Connection) -> None:
+    """Run migration for version 71 (gmail_draft_requests table for Gmail draft request idempotency)."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS gmail_draft_requests (
+            request_key TEXT PRIMARY KEY,
+            input_sha256 TEXT NOT NULL,
+            status TEXT NOT NULL CHECK (status IN ('creating', 'created', 'unknown')),
+            gmail_draft_id TEXT,
+            gmail_message_id TEXT,
+            gmail_thread_id TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_gmail_draft_requests_status "
+        "ON gmail_draft_requests(status);"
+    )
+    conn.execute("PRAGMA user_version = 71;")
     conn.commit()
 
 

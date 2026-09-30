@@ -39,6 +39,11 @@ from obsidian_ai_hub.handler.obsidian_vault_retriever import search_obsidian_vau
 from obsidian_ai_hub.handler.web_extract import web_extract
 from obsidian_ai_hub.handler.web_search import web_search
 from obsidian_ai_hub.agents.skills import create_skill_tools
+from obsidian_ai_hub.gmail.schemas import (
+    GmailCreateDraftInput,
+    GmailReadMessageInput,
+    GmailSearchMessagesInput,
+)
 from obsidian_ai_hub.planner.apple import (
     fetch_calendar_events,
     fetch_incomplete_reminders,
@@ -2221,6 +2226,139 @@ def summary_search(
         return json.dumps({"error": _sanitize_unexpected_error(exc)}, ensure_ascii=False)
 
 
+def _make_gmail_search_messages_tool(trusted_ctx: Optional[Dict[str, Any]] = None) -> BaseTool:
+    @tool(args_schema=GmailSearchMessagesInput)
+    def gmail_search_messages(
+        query: str = "",
+        label_ids: Optional[List[str]] = None,
+        page_token: Optional[str] = None,
+        include_spam_trash: bool = False,
+        max_results: int = 10,
+    ) -> str:
+        """Gmailのメッセージを検索・一覧取得します。"""
+        try:
+            from obsidian_ai_hub.gmail.auth import GmailAuthError
+            from obsidian_ai_hub.gmail.client import GmailService
+
+            srv = GmailService()
+            res = srv.search_messages(
+                query=query,
+                label_ids=label_ids,
+                page_token=page_token,
+                include_spam_trash=include_spam_trash,
+                max_results=max_results,
+            )
+            return json.dumps(res, ensure_ascii=False)
+        except GmailAuthError as exc:
+            return json.dumps({"error": str(exc)}, ensure_ascii=False)
+        except EXPECTED_TOOL_EXCEPTIONS as exc:
+            logger.warning("gmail_search_messages failed: %s", exc)
+            return json.dumps({"error": str(exc)}, ensure_ascii=False)
+        except Exception as exc:
+            logger.exception("gmail_search_messages failed")
+            return json.dumps({"error": _sanitize_unexpected_error(exc)}, ensure_ascii=False)
+
+    gmail_search_messages.name = "gmail_search_messages"  # type: ignore[attr-defined]
+    return gmail_search_messages
+
+
+def _make_gmail_read_message_tool(trusted_ctx: Optional[Dict[str, Any]] = None) -> BaseTool:
+    @tool(args_schema=GmailReadMessageInput)
+    def gmail_read_message(message_id: str) -> str:
+        """GmailメッセージIDから正規化ヘッダー・本文テキスト（20,000文字上限）・添付ファイルメタデータを取得します。"""
+        try:
+            from obsidian_ai_hub.gmail.auth import GmailAuthError
+            from obsidian_ai_hub.gmail.client import GmailService
+
+            srv = GmailService()
+            res = srv.read_message(message_id=message_id)
+            return json.dumps(res, ensure_ascii=False)
+        except GmailAuthError as exc:
+            return json.dumps({"error": str(exc)}, ensure_ascii=False)
+        except EXPECTED_TOOL_EXCEPTIONS as exc:
+            logger.warning("gmail_read_message failed: %s", exc)
+            return json.dumps({"error": str(exc)}, ensure_ascii=False)
+        except Exception as exc:
+            logger.exception("gmail_read_message failed")
+            return json.dumps({"error": _sanitize_unexpected_error(exc)}, ensure_ascii=False)
+
+    gmail_read_message.name = "gmail_read_message"  # type: ignore[attr-defined]
+    return gmail_read_message
+
+
+def _make_gmail_create_draft_tool(trusted_ctx: Optional[Dict[str, Any]] = None) -> BaseTool:
+    @tool(args_schema=GmailCreateDraftInput)
+    def gmail_create_draft(
+        mode: str,
+        body_text: str,
+        to: Optional[str] = None,
+        cc: Optional[str] = None,
+        bcc: Optional[str] = None,
+        subject: Optional[str] = None,
+        reply_to_message_id: Optional[str] = None,
+        reply_all: bool = False,
+    ) -> str:
+        """Gmailに新規または返信のメール下書きを作成します（送信は行いません）。"""
+        import hashlib
+        import uuid
+
+        try:
+            from obsidian_ai_hub.gmail.auth import GmailAuthError
+            from obsidian_ai_hub.gmail.client import GmailService
+
+            ctx = trusted_ctx if isinstance(trusted_ctx, dict) else {}
+            # Derive deterministic request key from trusted context + canonical input hash
+            if ctx.get("task_id"):
+                ctx_key = f"task:{ctx.get('task_id')}:action:{ctx.get('action_index')}"
+            elif ctx.get("run_id") or ctx.get("session_id"):
+                ctx_key = f"agent_run:{ctx.get('run_id') or ctx.get('session_id')}"
+            else:
+                return json.dumps(
+                    {"error": "gmail_create_draft は信頼された実行コンテキスト (task_id, run_id, session_id) が無いため呼び出せません"},
+                    ensure_ascii=False,
+                )
+            canonical_input_str = json.dumps(
+                {
+                    "mode": mode,
+                    "to": to or "",
+                    "cc": cc or "",
+                    "bcc": bcc or "",
+                    "subject": subject or "",
+                    "reply_to_message_id": reply_to_message_id or "",
+                    "reply_all": reply_all,
+                    "body_text": body_text,
+                },
+                sort_keys=True,
+            )
+            input_hash = hashlib.sha256(canonical_input_str.encode("utf-8")).hexdigest()
+            request_key = f"gmail_draft:{ctx_key}:{input_hash}"
+
+            srv = GmailService()
+            res = srv.create_draft(
+                mode=mode,
+                body_text=body_text,
+                request_key=request_key,
+                to=to,
+                cc=cc,
+                bcc=bcc,
+                subject=subject,
+                reply_to_message_id=reply_to_message_id,
+                reply_all=reply_all,
+            )
+            return json.dumps(res, ensure_ascii=False)
+        except GmailAuthError as exc:
+            return json.dumps({"error": str(exc)}, ensure_ascii=False)
+        except EXPECTED_TOOL_EXCEPTIONS as exc:
+            logger.warning("gmail_create_draft failed: %s", exc)
+            return json.dumps({"error": str(exc)}, ensure_ascii=False)
+        except Exception as exc:
+            logger.exception("gmail_create_draft failed")
+            return json.dumps({"error": _sanitize_unexpected_error(exc)}, ensure_ascii=False)
+
+    gmail_create_draft.name = "gmail_create_draft"  # type: ignore[attr-defined]
+    return gmail_create_draft
+
+
 # --- Tool Registry Definition ---
 
 _BUILTIN_TOOL_DEFINITIONS: Dict[str, Dict[str, Any]] = {
@@ -2404,6 +2542,27 @@ _BUILTIN_TOOL_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "name": "期間サマリ検索",
         "description": "指定期間の日次／週次／月次サマリを階層フォールバックと関連フィルタ付きで検索します。",
         "get_tool": lambda: summary_search,
+    },
+    "gmail_search_messages": {
+        "tool_id": "gmail_search_messages",
+        "name": "Gmailメッセージ検索",
+        "description": "Gmailのメッセージを検索・一覧取得します。",
+        "get_tool": lambda: _make_gmail_search_messages_tool(None),
+        "get_tool_with_context": lambda ctx: _make_gmail_search_messages_tool(ctx),
+    },
+    "gmail_read_message": {
+        "tool_id": "gmail_read_message",
+        "name": "Gmailメッセージ読取",
+        "description": "GmailメッセージIDから正規化ヘッダー・本文テキスト（20,000文字上限）・添付ファイルメタデータを取得します。",
+        "get_tool": lambda: _make_gmail_read_message_tool(None),
+        "get_tool_with_context": lambda ctx: _make_gmail_read_message_tool(ctx),
+    },
+    "gmail_create_draft": {
+        "tool_id": "gmail_create_draft",
+        "name": "Gmail下書き作成",
+        "description": "Gmailに新規または返信のメール下書きを作成します（送信は行いません）。",
+        "get_tool": lambda: _make_gmail_create_draft_tool(None),
+        "get_tool_with_context": lambda ctx: _make_gmail_create_draft_tool(ctx),
     },
     "research_theme_propose": {
         "tool_id": "research_theme_propose",

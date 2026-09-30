@@ -354,6 +354,11 @@ def main():
     )
     # AI Agent Chat command
     parser.add_argument(
+        "--gmail-authorize",
+        action="store_true",
+        help="Gmail OAuth 認証を行いローカルにトークンを保存（単独実行専用）",
+    )
+    parser.add_argument(
         "--agent-chat",
         action="store_true",
         help="AI エージェントへ1ターンメッセージを送信し会話・実行記録を永続化",
@@ -539,11 +544,62 @@ def main():
             print(f"[END] {name} at {datetime.now().isoformat()}")
             execution_logger.current_run_id.reset(token)
 
+    if getattr(args, "gmail_authorize", False):
+        other_action_flags = [
+            args.merge_inbox,
+            args.make_target,
+            args.write_today_schedule,
+            args.summerize_week,
+            args.review_draft,
+            args.summerize_month,
+            args.summerize_day,
+            args.backup,
+            args.notify_today_schedule,
+            args.sync_knowledge,
+            args.sync_vault,
+            args.sync_people,
+            args.rebuild_vault,
+            args.research_agent,
+            args.add_research_theme,
+            args.suggest_research_theme,
+            args.generate_planner_proposals,
+            args.screenshot,
+            args.scan_line_inbox,
+            args.log_activity,
+            args.vault_search,
+            args.memory_extract,
+            args.memory_interview,
+            args.memory_review,
+            args.memory_delete,
+            args.memory_compile,
+            getattr(args, "render_copilot_profile", False),
+            args.serve,
+            args.hitl_dispatch,
+            getattr(args, "hitl_worker", False),
+            getattr(args, "memory_maintain", False),
+            getattr(args, "system_maintenance", False),
+            getattr(args, "cleanup_line_webhooks", False),
+            getattr(args, "cleanup_execution_logs", False),
+            getattr(args, "import_apple_health", False),
+            getattr(args, "workflow_import", None) is not None,
+            getattr(args, "workflow_validate", None) is not None,
+            getattr(args, "workflow_publish", None) is not None,
+            getattr(args, "workflow_run", None) is not None,
+            getattr(args, "agent_create", None) is not None,
+            getattr(args, "vault_write", None) is not None,
+            getattr(args, "agent_chat", False),
+            getattr(args, "coding", False),
+            getattr(args, "task_agent", None) is not None,
+        ]
+        if any(other_action_flags) or getattr(args, "prompt_args", None):
+            parser.error("--gmail-authorize cannot be combined with other execution flags or positional prompts")
+
     if getattr(args, "agent_chat", False):
         if not args.agent_id:
             parser.error("--agent-chat requires --agent-id AGENT_ID")
 
         other_action_flags = [
+            getattr(args, "gmail_authorize", False),
             args.merge_inbox,
             args.make_target,
             args.write_today_schedule,
@@ -1011,6 +1067,21 @@ def main():
             "import_apple_health",
             {"export_dir": str(export_dir), "batch_size": batch_size, "dry_run": dry_run},
         )
+        ran = True
+    if getattr(args, "gmail_authorize", False):
+        from obsidian_ai_hub.gmail.auth import GmailAuthError, authorize_interactive
+
+        try:
+            res = authorize_interactive()
+            print("Authorized Gmail account:", res["email_address"])
+            print("Token saved to:", res["token_path"])
+            print("Requested scopes:", ", ".join(res["scopes"]))
+        except GmailAuthError as exc:
+            print(f"Error authorizing Gmail: {exc}", file=sys.stderr)
+            sys.exit(1)
+        except Exception as exc:
+            print(f"Unexpected error during Gmail authorization: {exc}", file=sys.stderr)
+            sys.exit(1)
         ran = True
     if getattr(args, "agent_chat", False):
         from obsidian_ai_hub.agents.cli import main_agent_chat
