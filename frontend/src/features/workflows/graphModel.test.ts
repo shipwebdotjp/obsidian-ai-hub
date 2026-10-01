@@ -292,6 +292,8 @@ describe("typed reference groups", () => {
         "calendar_read",
         "reminders_read",
         "research_context_snapshot",
+        "gmail_search_messages",
+        "gmail_read_message",
         "hitl_wait",
       ]),
     );

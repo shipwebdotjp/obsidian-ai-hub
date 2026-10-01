@@ -464,6 +464,8 @@ STRUCTURED_CAPABILITY_KEYS: frozenset[str] = frozenset(
         "periodic_note_read",
         "research_context_snapshot",
         "summary_search",
+        "gmail_search_messages",
+        "gmail_read_message",
     }
 )
 
@@ -752,6 +754,91 @@ _OUTPUT_SCHEMAS: dict[str, dict[str, Any]] = {
             "coverage",
             "truncated",
             "next_request",
+        ],
+    ),
+    "gmail_search_messages": _object_output(
+        {
+            "messages": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "message_id": {"type": "string"},
+                        "thread_id": {"type": "string"},
+                        "from": {"type": "string"},
+                        "to": {"type": "string"},
+                        "subject": {"type": "string"},
+                        "date": {"type": "string"},
+                        "snippet": {"type": "string"},
+                        "label_ids": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
+                    },
+                    "required": [
+                        "message_id",
+                        "thread_id",
+                        "from",
+                        "to",
+                        "subject",
+                        "date",
+                        "snippet",
+                        "label_ids",
+                    ],
+                    "additionalProperties": True,
+                },
+            },
+            "next_page_token": {"type": ["string", "null"]},
+            "result_size_estimate": {"type": "integer"},
+        },
+        required=["messages"],
+    ),
+    "gmail_read_message": _object_output(
+        {
+            "message_id": {"type": "string"},
+            "thread_id": {"type": "string"},
+            "label_ids": {
+                "type": "array",
+                "items": {"type": "string"},
+            },
+            "snippet": {"type": "string"},
+            "headers": {
+                "type": "object",
+                "properties": {
+                    "from": {"type": "string"},
+                    "to": {"type": "string"},
+                    "cc": {"type": "string"},
+                    "bcc": {"type": "string"},
+                    "subject": {"type": "string"},
+                    "date": {"type": "string"},
+                    "message_id": {"type": "string"},
+                    "in_reply_to": {"type": "string"},
+                    "references": {"type": "string"},
+                },
+                "required": [
+                    "from",
+                    "to",
+                    "cc",
+                    "bcc",
+                    "subject",
+                    "date",
+                    "message_id",
+                    "in_reply_to",
+                    "references",
+                ],
+                "additionalProperties": True,
+            },
+            "body_text": {"type": "string"},
+            "truncated": {"type": "boolean"},
+            "attachments": {"type": "array", "items": {"type": "object"}},
+        },
+        required=[
+            "message_id",
+            "snippet",
+            "headers",
+            "body_text",
+            "truncated",
+            "attachments",
         ],
     ),
     # --- receipt (P3 まで参照不可; schema は監査・表示用に維持) ---

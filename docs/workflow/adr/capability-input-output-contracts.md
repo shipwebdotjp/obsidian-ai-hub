@@ -150,6 +150,28 @@ Status: Accepted (2026-09-27)。
   - 予算上限 (~5,500 文字) により期間単位の未返却が発生した場合 (`truncated = true`)、またはエントリー本文の切詰めが発生した場合 (`entry_truncated = true`)、strict モードの Workflow Node は不完全データとして失敗させ、後続へ不完全な結果を渡さない。
   - 範囲一覧の表示上限 (20件) 超過による `coverage.ranges_truncated` は、表示上の省略であるため strict の失敗条件に含めない。
 
+## Amendment (P2 昇格: Gmail 読み取り capability)
+
+Status: Accepted (2026-10-01)。
+
+### 決定
+
+- **`gmail_search_messages` と `gmail_read_message` を `structured` Capability として公開する。**
+  - Workflow Designer で作成したグラフが、Gmail 検索結果を後続 LLM / Agent Node の `inputs` へ型付き参照で渡せなかった問題への対応。Edge は制御フロー専用でデータを運ばないため、下流 Node の `inputs` への明示バインディングだけがデータ連携手段であり、Gmail が `opaque` のままでは参照が全層で拒否された。
+  - 入力は既存の Pydantic モデル（`GmailSearchMessagesInput` / `GmailReadMessageInput`）で未知キー拒否・strict 検証済み。
+  - 出力契約は `structured` とし、実行時の正規化済み出力を宣言する。
+    - `gmail_search_messages`: `messages` を required（各 item の `message_id` / `thread_id` / `from` / `to` / `subject` / `date` / `snippet` / `label_ids` も required）。`next_page_token` / `result_size_estimate` は宣言のみ。
+    - `gmail_read_message`: `message_id` / `snippet` / `headers` / `body_text` / `truncated` / `attachments` を required。`headers` の正規化 9 フィールドも required。
+  - 両方を `STRICT_ALLOWED_REGISTRY_KEYS` の対象に加える（`STRUCTURED_CAPABILITY_KEYS` からの派生）。読み取り系 `structured` のため、参照時に参照元 Node へ `fail_on_output_mismatch: true` が自動設定され、mismatch は後続へ流れない。
+- **`gmail_read_message` の `truncated: true` は strict 失敗条件にしない。**
+  - 本文の 20,000 文字クランプは意図した安全上限であり、`periodic_note_read` の `truncated` と同様に宣言のみとする。長文メールでワークフロー全体が止まるのを避ける。
+- **Designer プロンプトに明示バインディングを必須化する。** Edge は順序のみでデータを運ばないこと、下流 Node の `inputs` への型付き参照が必須であることを `config/prompts/workflow_designer.md` に追加する。
+
+### 検討した選択肢
+
+- **Edge に沿った上流出力の自動マージ**: エンジン側で暗黙に渡せば配線漏れは起きないが、本 ADR の「型付き参照のみ」方針に反し、どのデータが後続へ流れるか監査不能になるため採用しない。
+- **gmail を `opaque` のまま残し、デザイナーだけ改善する**: 参照が検証で拒否される以上、プロンプト改善だけでは解決しないため採用しない。
+
 ## Related
 
 - [Workflow Graph / Agent Node ADR](workflow-graph-and-agent-node.md#amendment-capability-node-の-strict-出力)
