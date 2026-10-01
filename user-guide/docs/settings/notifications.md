@@ -33,6 +33,32 @@ LINE_TARGET_ID=your_line_user_id
 OBSIDIAN_AI_HUB_WEB_URL=https://aihub.example.com
 ```
 
+## VAPID 鍵の生成
+
+`WEB_PUSH_VAPID_PUBLIC_KEY` と `WEB_PUSH_VAPID_PRIVATE_KEY` はペアで新規生成します。どちらか一方だけの設定や、公開鍵と秘密鍵の組み合わせ違いでは購読に失敗します。
+
+リポジトリの venv を使って生成できます（npm 不要）:
+
+```bash
+uv run python -c "from py_vapid import Vapid; v=Vapid(); v.generate_keys(); from py_vapid.utils import b64urlencode; from cryptography.hazmat.primitives import serialization; priv=int(v.private_key.private_numbers().private_value).to_bytes(32,'big'); pub=v.public_key.public_bytes(serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint); print('PUBLIC='+str(b64urlencode(pub))); print('PRIVATE='+str(b64urlencode(priv)))"
+```
+
+または定番の `web-push` コマンドでも生成できます:
+
+```bash
+npx --yes web-push generate-vapid-keys
+```
+
+出力された公開鍵を `WEB_PUSH_VAPID_PUBLIC_KEY`、秘密鍵を `WEB_PUSH_VAPID_PRIVATE_KEY` に設定します。`WEB_PUSH_VAPID_SUBJECT` は Push サービス側に表示される連絡先で、`mailto:` か `https:` の URL を指定します。
+
+設定後は Web サーバーを再起動し、公開鍵が配信されていることを確認します:
+
+```bash
+make restart-web
+curl -H "Authorization: Bearer $OBSIDIAN_AI_HUB_API_TOKEN" \
+  http://127.0.0.1:8765/api/v1/notifications/vapid-public-key
+```
+
 ## 設定画面での有効化手順
 
 すべての通知チャネルは初期状態で **オフ** になっています。
@@ -50,3 +76,8 @@ OBSIDIAN_AI_HUB_WEB_URL=https://aihub.example.com
 
 通知をクリックすると、該当する画面へ直接遷移します（例: `/hitl?run_id=...` / `/task-agent/:id` / `/workflows/runs/:id` / `/agents?session_id=...` / `/coding?session_id=...` / `/planner`）。
 通知 URL に Bearer トークンや秘密情報は含まれません。未認証の場合はログイン／トークン入力画面へ誘導されます。
+
+## トラブルシューティング
+
+- ブラウザの許可ダイアログで「許可」を選んだのに購読ボタンが失敗表示になる場合は、まず `vapid-public-key` の応答を確認します。`vapid_public_key` が空文字なら `.env` の VAPID 鍵が未設定か、設定後の再起動漏れです。鍵を設定して `make restart-web` で再起動し、ボタンを押し直してください。
+- 鍵を後から変更すると既存の購読は無効になるため、各端末で購読し直してください。
