@@ -366,6 +366,39 @@ RESEARCH_GPT_RESEARCHER_LANGUAGE = str(
     _config_value("research", "deep", "gpt_researcher", "language", default="japanese")
 )
 
+
+def _load_gpt_researcher_llm_kwargs() -> dict | None:
+    """Load ``research.deep.gpt_researcher.llm_kwargs`` as a JSON-serializable map.
+
+    The value is forwarded to GPT Researcher through the ``LLM_KWARGS``
+    environment variable (JSON-encoded) while a deep research run executes.
+    ``{"temperature": null}`` omits the temperature parameter from OpenAI
+    requests for every LLM role, which GPT-6 requires when reasoning is
+    configured. A non-map or non-JSON-serializable value fails fast here so
+    a misconfiguration never reaches the API as a silent empty report.
+    """
+    raw = _config_value("research", "deep", "gpt_researcher", "llm_kwargs")
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise RuntimeError(
+            "Invalid configuration: research.deep.gpt_researcher.llm_kwargs "
+            f"must be a mapping, got {type(raw).__name__}"
+        )
+    try:
+        import json as _json
+
+        _json.dumps(raw)
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError(
+            "Invalid configuration: research.deep.gpt_researcher.llm_kwargs "
+            f"must be JSON-serializable: {exc}"
+        ) from exc
+    return dict(raw)
+
+
+RESEARCH_GPT_RESEARCHER_LLM_KWARGS = _load_gpt_researcher_llm_kwargs()
+
 MAKE_TODAY_TARGET_PROVIDER = str(
     _config_value("llm", "make_today_target", "provider", default="ollama")
 )

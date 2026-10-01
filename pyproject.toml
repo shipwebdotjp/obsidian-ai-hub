@@ -9,7 +9,7 @@ description = "Obsidian Daily Merge Tool"
 authors = [{name = "Ship", email = "ship@shipweb.jp"}]
 readme = "README.md"
 license = { file = "LICENSE" }
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "md-hybrid-search",
     "langchain-core",
@@ -23,7 +23,7 @@ dependencies = [
     "langchain-ollama>=1.1.0",
     "langchain-openai>=1.2.2",
     "langchain-tavily>=0.2.18",
-    "gpt-researcher>=0.14.8",
+    "gpt-researcher>=0.16.0",
     "pyobjc-framework-vision>=12.1; sys_platform == 'darwin'",
     "pyobjc-framework-quartz>=12.1; sys_platform == 'darwin'",
     "wurlitzer>=3.1.1",
