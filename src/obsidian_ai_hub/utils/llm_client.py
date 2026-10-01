@@ -5,6 +5,7 @@ import json
 import mimetypes
 import os
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, AsyncGenerator, Sequence, Tuple, Optional, List, Dict
 import logging
@@ -541,7 +542,20 @@ async def _logged_astream(
         raise
 
 
-def generate_llm_response(
+@dataclass(frozen=True)
+class LLMResult:
+    """Detailed LLM call result without breaking the existing str API.
+
+    ``text`` is the generated body, ``call_id`` is the audit-log call ID,
+    and ``finish_reason`` is the provider-reported finish reason (if any).
+    """
+
+    text: str
+    call_id: str
+    finish_reason: Optional[str]
+
+
+def generate_llm_response_detailed(
     provider: str,
     model: str,
     prompt: str,
@@ -550,12 +564,12 @@ def generate_llm_response(
     files: Sequence[Path | str] | None = None,
     system_prompt: str | None = None,
     session_id: str | None = None,
-) -> str:
+) -> LLMResult:
     """
     指定のモデルとプロンプトで OpenAI/Gemini/Local/Ollama を呼び出し、
-    生成されたテキストを返す。
+    本文・監査ログ call ID・終了理由を含む詳細結果を返す。
 
-    既存コードとの互換性のため、戻り値は str のままにしている。
+    監査ログのライフサイクルは :func:`generate_llm_response` と同一。
     """
     config.ensure_external_allowed("LLM API call")
     messages = _prepare_messages(provider, prompt, files, system_prompt=system_prompt)
@@ -572,14 +586,48 @@ def generate_llm_response(
         **extra_options,
     )
 
-    def _call() -> str:
-        message, _ = _logged_invoke(
+    def _call() -> LLMResult:
+        message, call_id = _logged_invoke(
             llm, messages, provider, model, temperature, max_tokens, prompt
         )
         logger.info(f"LLM response: {message}")
-        return _content_to_text(message.content)
+        _, _, _, finish_reason = _extract_llm_metadata(message)
+        return LLMResult(
+            text=_content_to_text(message.content),
+            call_id=call_id,
+            finish_reason=finish_reason,
+        )
 
     return _with_exponential_backoff(_call)
+
+
+def generate_llm_response(
+    provider: str,
+    model: str,
+    prompt: str,
+    temperature: float = 0.7,
+    max_tokens: int = 16384,
+    files: Sequence[Path | str] | None = None,
+    system_prompt: str | None = None,
+    session_id: str | None = None,
+) -> str:
+    """
+    指定のモデルとプロンプトで OpenAI/Gemini/Local/Ollama を呼び出し、
+    生成されたテキストを返す。
+
+    既存コードとの互換性のため、戻り値は str のままにしている。
+    詳細が必要な呼び出し側は :func:`generate_llm_response_detailed` を使う。
+    """
+    return generate_llm_response_detailed(
+        provider=provider,
+        model=model,
+        prompt=prompt,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        files=files,
+        system_prompt=system_prompt,
+        session_id=session_id,
+    ).text
 
 
 def generate_llm_response_with_tools(

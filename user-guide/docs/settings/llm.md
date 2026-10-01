@@ -38,6 +38,22 @@ llm:
 
 `review_draft` を省略した場合は `make_today_target` のプロバイダ・モデルが使われます。
 
+## 月次要約の出力上限
+
+月次要約は `make_today_target` のプロバイダ・モデルを継承し、出力上限だけ
+`llm.summarize_month.max_tokens` で変更できます（既定: 65536、正の整数のみ）。
+未使用分は消費されないため、上限到達（`finish_reason=length`）で失敗する場合は
+プロバイダの上限に合わせて調整してください。プロンプト・入力データ・項目数は削りません。
+
+```yaml
+llm:
+  summarize_month:
+    max_tokens: 65536
+```
+
+上限到達・不正 JSON・JSON object 以外・空の summary は保存せず明示的に失敗します。
+自動再試行は行いません。
+
 ## システムメンテナンス診断用の設定
 
 ```yaml

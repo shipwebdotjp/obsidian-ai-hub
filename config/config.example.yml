@@ -67,6 +67,12 @@ llm:
     provider: ollama
     model: glm-4.7:cloud
     prompt_path: /path/to/your/config/prompts/review_draft.md
+  # Monthly summary inherits the make_today_target provider/model.
+  # max_tokens controls only the monthly output budget (default: 65536).
+  # Positive integers only; adjust down to your provider's limit.
+  # Unused tokens are not consumed.
+  summarize_month:
+    max_tokens: 65536
   # Example with opencode_go:
   # make_today_target:
   #   provider: opencode_go

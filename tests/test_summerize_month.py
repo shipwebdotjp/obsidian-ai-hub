@@ -89,23 +89,29 @@ def test_load_weekly_records(mock_config, test_memory_db_path):
 
 
 @patch("obsidian_ai_hub.summerize_month.prompt.render_prompt")
-@patch("obsidian_ai_hub.utils.llm_client.generate_llm_response")
+@patch("obsidian_ai_hub.summerize_month.llm_client.generate_llm_response_detailed")
 def test_summarize_month(mock_llm, mock_render, mock_config, test_memory_db_path):
+    from obsidian_ai_hub.utils.llm_client import LLMResult
+
     mock_render.return_value = "Rendered Prompt"
-    mock_llm.return_value = json.dumps(
-        {
-            "summary": "Monthly summary test",
-            "keywords": [" Python ", "Python", "Obsidian"],
-            "topics": ["LLM・AI活用"],
-            "highlights": ["Highlight 1"],
-            "progress": ["Progress 1"],
-            "changes": ["Change 1"],
-            "learnings": ["Learning 1"],
-            "reflections": ["Reflection 1"],
-            "patterns": ["Pattern 1"],
-            "gratitude": ["Gratitude 1"],
-            "people": [{"name": "Person 1", "note": "Note 1"}],
-        }
+    mock_llm.return_value = LLMResult(
+        text=json.dumps(
+            {
+                "summary": "Monthly summary test",
+                "keywords": [" Python ", "Python", "Obsidian"],
+                "topics": ["LLM・AI活用"],
+                "highlights": ["Highlight 1"],
+                "progress": ["Progress 1"],
+                "changes": ["Change 1"],
+                "learnings": ["Learning 1"],
+                "reflections": ["Reflection 1"],
+                "patterns": ["Pattern 1"],
+                "gratitude": ["Gratitude 1"],
+                "people": [{"name": "Person 1", "note": "Note 1"}],
+            }
+        ),
+        call_id="test-call-id",
+        finish_reason="stop",
     )
 
     target_date = datetime(2024, 10, 1)
@@ -149,6 +155,8 @@ def test_summarize_month(mock_llm, mock_render, mock_config, test_memory_db_path
 
     summerize_month.summarize_month(target_date)
 
+    assert mock_llm.call_args[1]["max_tokens"] == 65536
+
     # Check SQLite output
     conn = memory.get_db_connection()
     try:
@@ -166,14 +174,19 @@ def test_summarize_month(mock_llm, mock_render, mock_config, test_memory_db_path
 
 
 @patch("obsidian_ai_hub.summerize_month.prompt.render_prompt")
-@patch("obsidian_ai_hub.utils.llm_client.generate_llm_response")
+@patch("obsidian_ai_hub.summerize_month.llm_client.generate_llm_response_detailed")
 def test_get_monthly_structured_record_does_not_inject_memories(
     mock_llm, mock_render, mock_config
 ):
     from obsidian_ai_hub.summerize_month import get_monthly_structured_record
+    from obsidian_ai_hub.utils.llm_client import LLMResult
 
     mock_render.return_value = "Rendered Prompt"
-    mock_llm.return_value = json.dumps({"summary": "Monthly summary"})
+    mock_llm.return_value = LLMResult(
+        text=json.dumps({"summary": "Monthly summary"}),
+        call_id="test-call-id",
+        finish_reason="stop",
+    )
 
     with patch(
         "obsidian_ai_hub.memory.context.compile_context_text",
@@ -185,3 +198,98 @@ def test_get_monthly_structured_record_does_not_inject_memories(
     assert record["summary"] == "Monthly summary"
     prompt_args = mock_render.call_args[0][1]
     assert "LONG_TERM_MEMORIES" not in prompt_args
+
+
+def _monthly_llm_result(text, call_id="call-123", finish_reason="stop"):
+    from obsidian_ai_hub.utils.llm_client import LLMResult
+
+    return LLMResult(text=text, call_id=call_id, finish_reason=finish_reason)
+
+
+@pytest.mark.parametrize(
+    "text,finish_reason",
+    [
+        ('{"summary": "ok", "progress": ["a"]}', "length"),
+        ('{"summary": "cut off in progress", "progress": ["a",', "stop"),
+        ('["not", "an", "object"]', "stop"),
+        (json.dumps({"summary": "   "}), "stop"),
+    ],
+)
+def test_monthly_failures_do_not_persist(
+    mock_config, test_memory_db_path, text, finish_reason
+):
+    from obsidian_ai_hub.summerize_month import get_monthly_structured_record
+
+    with (
+        patch(
+            "obsidian_ai_hub.summerize_month.prompt.render_prompt",
+            return_value="Rendered Prompt",
+        ),
+        patch(
+            "obsidian_ai_hub.summerize_month.llm_client.generate_llm_response_detailed",
+            return_value=_monthly_llm_result(
+                text, call_id="call-xyz", finish_reason=finish_reason
+            ),
+        ),
+    ):
+        with pytest.raises(ValueError) as excinfo:
+            get_monthly_structured_record(datetime(2024, 10, 1), [])
+    assert "call-xyz" in str(excinfo.value)
+
+    conn = memory.get_db_connection()
+    try:
+        assert store.get_summary_by_period("month", "2024-10", conn=conn) is None
+    finally:
+        conn.close()
+
+
+def test_monthly_truncated_does_not_overwrite_existing(
+    mock_config, test_memory_db_path
+):
+    conn = memory.get_db_connection()
+    try:
+        store.upsert_summary(
+            {
+                "period_type": "month",
+                "period_key": "2024-10",
+                "period_start": "2024-10-01",
+                "period_end": "2024-10-31",
+                "generated_at": "2024-10-01T22:00:00",
+                "summary": "Existing summary",
+                "keywords": [],
+                "mood": None,
+                "sleep_raw": None,
+                "sleep_hours": None,
+                "topics": [],
+                "projects": [],
+                "people": [],
+                "items": [],
+            },
+            conn=conn,
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    with (
+        patch(
+            "obsidian_ai_hub.summerize_month.prompt.render_prompt",
+            return_value="Rendered Prompt",
+        ),
+        patch(
+            "obsidian_ai_hub.summerize_month.llm_client.generate_llm_response_detailed",
+            return_value=_monthly_llm_result(
+                '{"summary": "cut', call_id="call-trunc", finish_reason="length"
+            ),
+        ),
+    ):
+        with pytest.raises(ValueError):
+            summerize_month.summarize_month(datetime(2024, 10, 1))
+
+    conn = memory.get_db_connection()
+    try:
+        row = store.get_summary_by_period("month", "2024-10", conn=conn)
+        assert row is not None
+        assert row["summary"] == "Existing summary"
+    finally:
+        conn.close()

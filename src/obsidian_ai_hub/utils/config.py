@@ -1217,6 +1217,15 @@ IMAGE_GENERATION_MAX_INPUT_BYTES = _positive_int(
     8 * 1024 * 1024,
 )
 
+# Monthly summary output budget. Provider/model are inherited from
+# make_today_target; only max_tokens is month-specific. Positive integers
+# only; non-positive or non-integer values fall back to the default.
+# Unused tokens are not consumed; adjust down to the provider limit.
+SUMMARIZE_MONTH_MAX_TOKENS = _positive_int(
+    _config_value("llm", "summarize_month", "max_tokens", default=65536),
+    65536,
+)
+
 if IS_TEST_ENV:
     IMAGE_GENERATION_OUTPUT_DIR = TEST_WORKSPACE / "media"
     IMAGE_GENERATION_INPUT_DIR = TEST_WORKSPACE / "media-input"
