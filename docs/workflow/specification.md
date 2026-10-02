@@ -297,13 +297,19 @@ Node 間のデータ連携は文字列テンプレート展開ではなく、以
 
 参照は静的検証で解決可能性を確認し、実行直前に値を解決してから Pydantic / JSON Schema で検証する。
 
-Capability 出力には出力契約クラス（`structured` / `receipt` / `opaque`）の
-参照境界がある。`structured`（P2: `vault_read_file` / `calendar_read` /
-`reminders_read` / `research_context_snapshot` / `hitl_wait`）は
-`fail_on_output_mismatch: true` の Node の宣言済み必須フィールドだけを参照できる。
-`receipt` / `opaque` の出力参照、出力全体（`nodes.<id>.output`）への参照、
-未宣言フィールド・未宣言ネスト・欠落し得る必須でない経路の参照は、入力・条件・
-pipe・テンプレートの全経路で静的検証エラーになる（詳細は §6.1）。
+Capability 出力には出力契約クラス（`structured` / `receipt` / `mixed` / `opaque`）の
+参照境界と、値の種別（`value_kind`: `structured` / `receipt` / `narrative`）による taint-aware データフロー制限がある。
+
+- **`structured`**: `vault_read_file`, `calendar_read`, `reminders_read`, `periodic_note_read`, `research_context_snapshot`, `summary_search`, `hitl_wait` 等。`fail_on_output_mismatch: true` が指定された Node の宣言済み必須フィールドだけを参照でき、すべての制御・条件・副作用入力に利用可能。
+- **`receipt`**: 実行完了の事実（`coding_cli.receipt.status`, `coding_cli.receipt.report_truncated` 等）。Edge condition（条件式）等の観測事実としてのみ参照可能。その他の Receipt ID や非条件入力への参照は拒否される。
+- **`mixed`**: `coding_cli` のように観測事実 `receipt` と自由文報告 `narrative` を併せ持つ出力。
+- **`narrative`**: 自由文・レポート報告テキスト（`coding_cli.narrative.text` 等）。
+  - **許可用途**: 本文・表示用プロパティ（`vault_write_file.content`、`calendar_create_proposal` の `title`/`location`/`content`、`reminder_create_proposal` の `title`/`content`、Text Template 入力変数、`input_flow_contracts` で明示的に許可した単発 LLM Node の変数）。
+  - **禁止用途**: 条件式（Edge condition）、パス（`relative_path`）、コマンド（`command`）、識別子（ID）、日時、宛先、Capability Target、Loop 状態（`input_mapping`, `continuation_condition`）。
+  - **Taint 伝播**: `narrative` を入力に持つ Text Template の出力 `text` も `narrative` として扱われ、制御・パス用途への流入が禁止される。
+  - **Declassification 境界**: 明示的に `input_flow_contracts` で `narrative` を受理した単発 LLM Node は、LLM runner による JSON Schema 検証を経て、その出力を新しい `structured` 値として降格（解除）する。Agent Node は初期対象外。
+  - **切詰め**: `coding_cli` の `narrative.text` は UTF-8 先頭 64 KiB まで保持され、超過時は `receipt.report_truncated = true` となる。
+
 `fail_on_output_mismatch: true` は structured の読み取り系と `hitl_wait` にだけ
 許可し、書込み・外部操作・receipt での指定は検証エラーになる。
 

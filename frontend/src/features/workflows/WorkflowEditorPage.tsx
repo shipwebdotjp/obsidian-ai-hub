@@ -1017,6 +1017,67 @@ export default function WorkflowEditorPage() {
                       )}
                     />
                   </div>
+                  <div className="space-y-1 rounded border border-purple-200 bg-purple-50/50 p-2">
+                    <span className="block font-semibold text-purple-900 text-[11px]">
+                      入力フロー契約 (input_flow_contracts)
+                    </span>
+                    <p className="text-[10px] text-purple-700">
+                      単発 LLM Node は Narrative (自由文) を受理できます。Schema 検証済み出力は Structured (構造化値) へ Declassification されます。
+                    </p>
+                    {Object.keys(
+                      (selectedNode.config.inputs as Record<string, unknown>) ?? {},
+                    ).length === 0 ? (
+                      <p className="text-[10px] text-slate-500">
+                        inputs に変数を追加すると契約を設定できます
+                      </p>
+                    ) : (
+                      Object.keys(
+                        (selectedNode.config.inputs as Record<string, unknown>) ?? {},
+                      ).map((varName) => {
+                        const contracts =
+                          (selectedNode.config.input_flow_contracts as Record<
+                            string,
+                            { accepted_value_kinds?: string[] }
+                          >) ?? {};
+                        const accepted =
+                          contracts[varName]?.accepted_value_kinds?.includes(
+                            "narrative",
+                          ) ?? false;
+                        return (
+                          <label
+                            key={varName}
+                            className="flex items-center gap-2 text-[11px] text-slate-700 cursor-pointer"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={accepted}
+                              onChange={(e) => {
+                                const nextContracts = { ...contracts };
+                                if (e.target.checked) {
+                                  nextContracts[varName] = {
+                                    accepted_value_kinds: ["structured", "narrative"],
+                                  };
+                                } else {
+                                  nextContracts[varName] = {
+                                    accepted_value_kinds: ["structured"],
+                                  };
+                                }
+                                updateNodeConfig({
+                                  input_flow_contracts: nextContracts,
+                                });
+                              }}
+                            />
+                            <span className="font-mono font-medium">{varName}</span>
+                            <span className="text-[10px] text-slate-500">
+                              {accepted
+                                ? "(Structured + Narrative 受理)"
+                                : "(Structured のみ)"}
+                            </span>
+                          </label>
+                        );
+                      })
+                    )}
+                  </div>
                   <div className="space-y-1">
                     <span className="block text-slate-700">output_schema</span>
                     <SchemaAuthoringForm

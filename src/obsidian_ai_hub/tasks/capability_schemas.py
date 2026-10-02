@@ -371,6 +371,60 @@ def field_widget(
     return None
 
 
+def get_input_field_contract(capability_key: str, field_name: str) -> dict[str, Any]:
+    """Return field-level input contract metadata (accepted_value_kinds)."""
+    allowed_narrative = ALLOWED_NARRATIVE_INPUT_FIELDS.get(capability_key, set())
+    if field_name in allowed_narrative:
+        return {"accepted_value_kinds": [VALUE_KIND_STRUCTURED, VALUE_KIND_NARRATIVE]}
+    return {"accepted_value_kinds": [VALUE_KIND_STRUCTURED]}
+
+
+def get_output_field_contract(capability_key: str, field_path: str) -> dict[str, Any]:
+    """Return field-level output contract metadata (value_kind, allowed_uses)."""
+    if capability_key == "coding_cli":
+        if field_path in ("receipt.status", "receipt.report_truncated"):
+            return {
+                "value_kind": VALUE_KIND_RECEIPT,
+                "allowed_uses": ALLOWED_USES_CONDITION,
+            }
+        if field_path in ("receipt.child_run_id", "receipt.session_id"):
+            return {
+                "value_kind": VALUE_KIND_RECEIPT,
+                "allowed_uses": ALLOWED_USES_NONE,
+            }
+        if field_path == "narrative.text":
+            return {
+                "value_kind": VALUE_KIND_NARRATIVE,
+                "allowed_uses": ALLOWED_USES_PAYLOAD,
+            }
+        if field_path.startswith("receipt."):
+            return {
+                "value_kind": VALUE_KIND_RECEIPT,
+                "allowed_uses": ALLOWED_USES_NONE,
+            }
+        if field_path.startswith("narrative."):
+            return {
+                "value_kind": VALUE_KIND_NARRATIVE,
+                "allowed_uses": ALLOWED_USES_PAYLOAD,
+            }
+
+    contract_class = output_contract_class(capability_key)
+    if contract_class == OUTPUT_CONTRACT_STRUCTURED:
+        return {
+            "value_kind": VALUE_KIND_STRUCTURED,
+            "allowed_uses": ALLOWED_USES_ALL,
+        }
+    if contract_class == OUTPUT_CONTRACT_RECEIPT:
+        return {
+            "value_kind": VALUE_KIND_RECEIPT,
+            "allowed_uses": ALLOWED_USES_NONE,
+        }
+    return {
+        "value_kind": OUTPUT_CONTRACT_OPAQUE,
+        "allowed_uses": ALLOWED_USES_NONE,
+    }
+
+
 def _apply_field_widgets(
     capability_key: str, schema: dict[str, Any]
 ) -> dict[str, Any]:
@@ -381,6 +435,8 @@ def _apply_field_widgets(
                 widget = field_widget(capability_key, name, spec)
                 if widget:
                     spec["x-ui"] = widget
+                contract = get_input_field_contract(capability_key, name)
+                spec["x-accepted-value-kinds"] = contract["accepted_value_kinds"]
     return schema
 
 
@@ -449,10 +505,38 @@ def ui_target_schema(capability_key: str) -> dict[str, Any] | None:
 # see ``workflow/capabilities.py``.
 OUTPUT_CONTRACT_STRUCTURED = "structured"
 OUTPUT_CONTRACT_RECEIPT = "receipt"
+OUTPUT_CONTRACT_MIXED = "mixed"
 OUTPUT_CONTRACT_OPAQUE = "opaque"
+
+VALUE_KIND_STRUCTURED = "structured"
+VALUE_KIND_RECEIPT = "receipt"
+VALUE_KIND_NARRATIVE = "narrative"
+
+ALLOWED_USES_ALL = [
+    "condition",
+    "identifier",
+    "path",
+    "command",
+    "url",
+    "destination",
+    "target",
+    "loop_state",
+    "payload",
+]
+ALLOWED_USES_CONDITION = ["condition"]
+ALLOWED_USES_PAYLOAD = ["payload"]
+ALLOWED_USES_NONE: list[str] = []
 
 REFERENCE_POLICY_STRICT_FIELDS = "strict_fields"
 REFERENCE_POLICY_FORBIDDEN = "forbidden"
+
+MIXED_CAPABILITY_KEYS: frozenset[str] = frozenset({"coding_cli"})
+
+ALLOWED_NARRATIVE_INPUT_FIELDS: dict[str, set[str]] = {
+    "vault_write_file": {"content"},
+    "calendar_create_proposal": {"title", "location", "content"},
+    "reminder_create_proposal": {"title", "content"},
+}
 
 # First structured targets (P2). ``hitl_wait`` lives in workflow-only and is
 # added by ``workflow/capabilities.py``.

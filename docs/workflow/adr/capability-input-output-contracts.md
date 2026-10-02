@@ -150,6 +150,35 @@ Status: Accepted (2026-09-27)。
   - 予算上限 (~5,500 文字) により期間単位の未返却が発生した場合 (`truncated = true`)、またはエントリー本文の切詰めが発生した場合 (`entry_truncated = true`)、strict モードの Workflow Node は不完全データとして失敗させ、後続へ不完全な結果を渡さない。
   - 範囲一覧の表示上限 (20件) 超過による `coverage.ranges_truncated` は、表示上の省略であるため strict の失敗条件に含めない。
 
+## Amendment (receipt / narrative 契約と taint-aware データフロー)
+
+Status: Accepted (2026-10-02)。
+
+### 決定
+
+- **Capability 出力の種別（value kind）と許可用途（allowed uses）の分離**
+  - Capability 単位の参照可否ではなく、出力フィールドごとの `structured` / `receipt` / `narrative` と、入力パラメータごとの `accepted_value_kinds` でデータフローを制御する。
+  - `coding_cli` は単一の出力クラスではなく `mixed` とし、観測事実である `receipt` (`status`, `child_run_id`, `session_id`, `report_truncated`) と Coordinator 自由文の `narrative` (`text`) を分離して公開する。
+- **narrative のデータフローと制約**
+  - `narrative` は本文・表示内容（`vault_write_file.content`、`calendar_create_proposal` の `title`/`location`/`content`、`reminder_create_proposal` の `title`/`content`、Text Template 変数、明示的に `input_flow_contracts` で宣言した単発 LLM Node）にのみ流すことができる。
+  - 条件式（Edge condition）、識別子（ID）、パス（`relative_path`）、コマンド（`command`）、URL、宛先、Capability Target、Loop 状態（`input_mapping`, `continuation_condition`）へは渡せない。
+  - `narrative` を含む Text Template 出力は `narrative` のまま扱う。明示的に `narrative` を受理した単発 LLM Node の schema 検証済み出力だけを、新しい `structured` 値へ変換する（Declassification 境界）。Agent Node は初期対象外とする。
+- **`coding_cli` の機械出力・切詰めと停止規則**
+  - `coding_cli` の最終報告テキストは UTF-8 先頭 64 KiB まで保持し、超過時は `receipt.report_truncated = true` とする。従来の最大 2,000 文字 `summary` は Task/UI 監査表示用として維持する。
+  - Coding child が `completed` 終了しても最終報告テキストを取得・正規化できない場合は、Child ID と観測済み `receipt` を残して `needs_attention`（`waiting_attention`）へ遷移する。Node を `failed` にせず、自動 retry も実行しない。
+- **非再試行方針と Vault 全域書込みの残余リスク**
+  - 副作用実行後の不一致・報告欠落を失敗にして自動再試行させないことで、外部処理の重複や重複書き込みを防ぐ。
+  - `vault_write_file.content` は Vault 内の任意パスで `narrative` を許可する。`relative_path` への流入は拒否するが、静的または structured path により `AGENTS.md` 等へ書ける残余リスクは明示し、既存どおり `plan_required` 承認を維持する。
+
+### 操作シナリオ契約（不可逆操作: 認可された Vault ファイル書き込み 1 回）
+
+| 段階 | 入力・識別子 | 停止規則 |
+| --- | --- | --- |
+| 1. 公開検証 | Revision の Node / Edge / Flow 契約 | `narrative` / `receipt` の不正参照は検証エラーで公開拒否 |
+| 2. 実行前永続化 | Coding 実行前の bridge / child ID | 実行前に ID とパラメータを保存（中断時も child ID 追跡可能） |
+| 3. 完了正規化 | Coding 完了時の receipt / narrative | 最終報告欠落時は `needs_attention` で停止（自動再試行しない） |
+| 4. 副作用実行 | 許可済み content への Vault 書き込み | 指定パスへ atomic に書き込み 1 回実行 |
+
 ## Related
 
 - [Workflow Graph / Agent Node ADR](workflow-graph-and-agent-node.md#amendment-capability-node-の-strict-出力)
