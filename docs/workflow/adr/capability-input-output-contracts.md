@@ -216,6 +216,39 @@ Status: Accepted (2026-10-02)。
 | 3. 完了正規化 | 委譲完了時の receipt / narrative | 最終文・報告本文の欠落時は `needs_attention` で停止（自動再試行しない） |
 | 4. 副作用実行 | 許可済み content への Vault 書き込み | 指定パスへ atomic に書き込み 1 回実行 |
 
+## Amendment (Gmail 下書き `gmail_create_draft` の receipt Capability 化と at-most-once 停止規則)
+
+Status: Accepted (2026-10-02)。
+
+### 決定
+
+- **`gmail_create_draft` を opaque から `receipt` Capability へ昇格する。**
+  - Workflow および Task Agent の両方で安全に実行可能とし、専用の `GmailDraftAdapter` で実行を管理する。
+- **入力 field contract**
+  - `narrative` 受理可能: `body_text`, `subject`
+  - `structured` 限定 (narrative 流入拒否): `mode`, `to`, `cc`, `bcc`, `reply_to_message_id`, `reply_all`
+- **出力 receipt と参照制限**
+  - 出力フィールド: `status` (created / unknown), `request_key`, `gmail_draft_id`, `gmail_message_id`, `gmail_thread_id` (未確定時は null), `reused_receipt` (bool), `receipt_persisted` (bool)
+  - 全フィールドの `allowed_uses` を空 (`[]`) とする (REFERENCE_POLICY_FORBIDDEN)。後続 Edge 条件、値参照、テンプレート、pipe からの参照はすべて静的検証で拒否する。
+- **Request Key の安定化**
+  - Workflow: `gmail_draft:wf:{run_id}:{activation_id}` (retry attempt や bridge Task ID は含めない)
+  - Task Agent: `gmail_draft:task:{task_id}:{plan_id}:{step_index}` (承認済み plan の plan_id を使用)
+- **重複防止・不確実結果の停止規則**
+  - 同一 Action で input hash が変更された場合、Gmail API を呼ばずに `needs_attention` で停止する (`attention_reason: input_hash_mismatch`)。
+  - 同一 Action で既存状態が `creating` または `unknown` の場合、自動再実行を拒否して `needs_attention` で停止する (`attention_reason: pending_or_unknown_request`)。
+  - Gmail API 呼び出し成功後に local receipt 永続化だけが失敗した場合は、取得済み ID を記録し `receipt_persisted: false` で `needs_attention` 停止する。
+  - 通信失敗や結果不明な例外が発生した場合は、status を `unknown` として `needs_attention` 停止し、自動 retry や二重下書き作成を行わない。
+
+### 操作シナリオ契約（不可逆操作: Gmail 下書き作成 1 回）
+
+| 段階 | 正本・識別子 | 停止規則 |
+| --- | --- | --- |
+| Publish | field value kind / input contract | narrative の宛先・Cc/Bcc・返信 ID・mode 流入は公開拒否 |
+| Pre-dispatch | stable action key, input hash, Gmail schema | 不一致・取消・認証不備では Gmail API を呼ばない |
+| Dispatch | gmail_draft_requests の creating 記録 | 同じ Action の再送を防止 |
+| Receipt | Gmail draft/message/thread ID | created は receipt を保存し downstream には公開しない |
+| Uncertain outcome | unknown または receipt 永続化失敗 | needs_attention、retry・自動再送なし |
+
 ## Related
 
 - [Workflow Graph / Agent Node ADR](workflow-graph-and-agent-node.md#amendment-capability-node-の-strict-出力)

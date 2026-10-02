@@ -70,14 +70,28 @@ AI エージェントおよび Task Agent で以下の3つのツールが利用�
 
 ---
 
-## 重複防止と at-most-once 契約
+## 重複防止と at-most-once 契約（receipt Capability）
 
-メール下書き作成（`gmail_create_draft`）は外部副作用を伴うため、`gmail_draft_requests` データベーステーブルにより **at-most-once (最大1回)** 動作が保証されます。
+メール下書き作成（`gmail_create_draft`）は Workflow および Task Agent の **receipt Capability** として管理され、外部副作用を伴うため `gmail_draft_requests` データベーステーブルにより **at-most-once (最大1回)** 動作が保証されます。
 
-1. **決定的なリクエストキー:** 信頼されたタスク・実行コンテキストと入力パラメータの正規化 SHA-256 ハッシュから `request_key` が生成されます。
-2. **事前保存 (`creating`):** Gmail API 呼び出し直前にステータス `creating` が永続化されます。
-3. **成功時 (`created`):** Gmail から受領情報（下書き ID、メッセージ ID、スレッド ID）が返された後、ステータスを `created` に更新します。同一リクエストキーで再実行された場合は、Gmail API を再呼び出しせず保存済みの受領情報を返します。
-4. **不確実な失敗時 (`unknown`):** 通信障害や途中クラッシュが発生した場合、ステータスは `unknown` となり、自動再試行がブロックされます。重複下書き作成を防ぐため、ユーザーが Gmail の下書き一覧を手動確認の上、再実行する安全設計となっています。
+### 1. 入出力契約
+- **入力契約:**
+  - `body_text` および `subject` は `narrative`（自由テキスト・テンプレート出力）の流入を許可します。
+  - `mode`, `to`, `cc`, `bcc`, `reply_to_message_id`, `reply_all` は `structured` 限定であり、`narrative` 値の流入は Workflow 公開時の静的検証で拒否されます。
+- **出力 receipt:**
+  - 出力フィールド: `status`, `request_key`, `gmail_draft_id`, `gmail_message_id`, `gmail_thread_id`, `reused_receipt`, `receipt_persisted`
+  - 後続 Node・条件 Edge・pipe・テンプレートからは一切参照できません（`allowed_uses: []`）。
+
+### 2. 決定的なリクエストキー
+- **Workflow:** `gmail_draft:wf:{run_id}:{activation_id}` （retry attempt や bridge Task ID は含めない）
+- **Task Agent:** `gmail_draft:task:{task_id}:{plan_id}:{step_index}` （承認済み plan の plan_id を使用）
+
+### 3. at-most-once と needs_attention 停止規則
+1. **事前保存 (`creating`):** Gmail API 呼び出し直前にステータス `creating` が永続化されます。
+2. **成功時 (`created`):** Gmail から受領情報（下書き ID、メッセージ ID、スレッド ID）が返された後、ステータスを `created` に更新します。同一リクエストキーで再実行された場合は、Gmail API を再呼び出しせず保存済みの受領情報を再利用します。
+3. **入力ハッシュ不一致時:** 同一 Action で入力ハッシュが変更された場合、Gmail API を呼び出さずに `needs_attention`（要対応）で停止します。
+4. **不確実な失敗時 (`unknown`):** 通信障害や途中クラッシュが発生した場合、ステータスは `unknown` となり、`needs_attention` で停止して自動再試行をブロックします。
+5. **DB 永続化失敗時:** Gmail API 呼び出し成功後にローカル receipt の永続化だけが失敗した場合は、取得済み ID を記録し `receipt_persisted: false` で `needs_attention` 停止します。
 
 ---
 

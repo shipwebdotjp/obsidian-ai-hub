@@ -6,6 +6,7 @@ from typing import Any, Optional
 
 from obsidian_ai_hub.tasks.adapters.agent import AgentAdapter
 from obsidian_ai_hub.tasks.adapters.coding import CodingAdapter
+from obsidian_ai_hub.tasks.adapters.gmail import GmailDraftAdapter
 from obsidian_ai_hub.tasks.adapters.registry_tools import RegistryToolExecutor
 from obsidian_ai_hub.tasks.adapters.research import ResearchAdapter
 from obsidian_ai_hub.tasks.adapters.skills import SkillsAdapter
@@ -30,6 +31,7 @@ class CompositeExecutor:
             "agent": AgentAdapter(poll_interval=poll_interval),
             "coding": CodingAdapter(poll_interval=poll_interval),
             "research": ResearchAdapter(poll_interval=poll_interval),
+            "gmail": GmailDraftAdapter(),
         }
 
     def execute_step(

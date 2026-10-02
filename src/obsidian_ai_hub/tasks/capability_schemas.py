@@ -612,6 +612,7 @@ ALLOWED_NARRATIVE_INPUT_FIELDS: dict[str, set[str]] = {
     "vault_write_file": {"content"},
     "calendar_create_proposal": {"title", "location", "content"},
     "reminder_create_proposal": {"title", "content"},
+    "gmail_create_draft": {"body_text", "subject"},
 }
 
 # First structured targets (P2). ``hitl_wait`` lives in workflow-only and is
@@ -642,6 +643,7 @@ RECEIPT_CAPABILITY_KEYS: frozenset[str] = frozenset(
         "image_edit",
         "run_shell",
         "memory_propose",
+        "gmail_create_draft",
     }
 )
 
@@ -996,6 +998,17 @@ _OUTPUT_SCHEMAS: dict[str, dict[str, Any]] = {
             "status": {"type": "string"},
             "memory_id": {"type": "string"},
             "message": {"type": "string"},
+        }
+    ),
+    "gmail_create_draft": _object_output(
+        {
+            "status": {"type": "string"},
+            "request_key": {"type": "string"},
+            "gmail_draft_id": {"type": ["string", "null"]},
+            "gmail_message_id": {"type": ["string", "null"]},
+            "gmail_thread_id": {"type": ["string", "null"]},
+            "reused_receipt": {"type": "boolean"},
+            "receipt_persisted": {"type": "boolean"},
         }
     ),
 }

@@ -71,6 +71,8 @@ MEMORY_KIND_TOOL_IDS: frozenset[str] = frozenset({"memory_propose"})
 
 SKILLS_TOOL_IDS: frozenset[str] = frozenset({"skills"})
 
+GMAIL_DRAFT_TOOL_IDS: frozenset[str] = frozenset({"gmail_create_draft"})
+
 AUTO_POLICY_TOOL_IDS: frozenset[str] = frozenset(
     {
         "web_search",
@@ -182,6 +184,8 @@ def get_capability_definitions(
             adapter_kind = "memory"
         elif tool_id in SKILLS_TOOL_IDS:
             adapter_kind = "skills"
+        elif tool_id in GMAIL_DRAFT_TOOL_IDS:
+            adapter_kind = "gmail"
         else:
             adapter_kind = "registry_tool"
         policy = "auto" if tool_id in AUTO_POLICY_TOOL_IDS else "plan_required"
