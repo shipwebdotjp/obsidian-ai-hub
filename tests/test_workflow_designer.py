@@ -264,6 +264,82 @@ def test_graph_builder_all_node_types_and_strict_auto_set():
     assert all(n["ui_position"] is not None for n in fin["package"]["nodes"])
 
 
+def test_graph_builder_gmail_search_output_binding():
+    """Verify Gmail search output can be bound into a downstream LLM node."""
+    task_store.sync_capabilities()
+    gb = builder.GraphBuilder("Gmail Workflow", "Description")
+
+    cap_res = gb.add_node("capability", "Search Gmail", {"capability_key": "gmail_search_messages", "inputs": {}})
+    assert cap_res["ok"]
+    c_node_id = cap_res["node_id"]
+
+    bind_input = gb.bind_field(
+        c_node_id, "inputs.query", "newer_than:1d"
+    )
+    assert bind_input["ok"]
+
+    llm_res = gb.add_node("llm", "Pick Important", {
+        "provider": "openai",
+        "model": "gpt-5.6-terra",
+        "system_prompt": "Pick important mail",
+        "max_tokens": 1024,
+        "inputs": {},
+        "output_schema": {
+            "type": "object",
+            "properties": {"summary": {"type": "string"}},
+            "required": ["summary"],
+        },
+    })
+    assert llm_res["ok"]
+    llm_node_id = llm_res["node_id"]
+
+    bind_res = gb.bind_field(
+        llm_node_id,
+        "inputs.messages",
+        {"$ref": f"nodes.{c_node_id}.output.messages"},
+    )
+    assert bind_res["ok"]
+
+    cap_node = next(n for n in gb.nodes if n["node_id"] == c_node_id)
+    assert cap_node["config"].get("fail_on_output_mismatch") is True
+
+    term_res = gb.add_node("terminal", "Complete", {"outcome": "success"})
+    assert term_res["ok"]
+    term_node_id = term_res["node_id"]
+
+    assert gb.add_edge(c_node_id, llm_node_id)["ok"]
+    assert gb.add_edge(llm_node_id, term_node_id)["ok"]
+
+    fin = gb.finalize("Gmail workflow summary", ["Assumption A"])
+    assert fin["ok"]
+    assert fin["package"] is not None
+    assert fin["structural_errors"] == []
+    assert fin["validation_issues"] == []
+
+
+def test_graph_builder_gmail_read_body_binding():
+    """Verify Gmail message body can be bound into a downstream LLM node."""
+    gb = builder.GraphBuilder("Gmail Read", "")
+
+    cap_res = gb.add_node("capability", "Read Mail", {"capability_key": "gmail_read_message", "inputs": {}})
+    assert cap_res["ok"]
+    c_node_id = cap_res["node_id"]
+    assert gb.bind_field(c_node_id, "inputs.message_id", "msg-1")["ok"]
+
+    llm_res = gb.add_node("llm", "Analyze", {
+        "output_schema": {"type": "object", "properties": {"res": {"type": "string"}}},
+    })
+    assert llm_res["ok"]
+    llm_node_id = llm_res["node_id"]
+
+    bind_res = gb.bind_field(
+        llm_node_id,
+        "inputs.body",
+        {"$ref": f"nodes.{c_node_id}.output.body_text"},
+    )
+    assert bind_res["ok"]
+
+
 def test_strict_capability_reference_errors():
     """Verify recoverable tool errors when referencing non-strict or receipt/opaque capabilities."""
     gb = builder.GraphBuilder("Strict Test", "")

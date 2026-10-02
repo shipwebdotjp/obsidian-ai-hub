@@ -51,18 +51,29 @@ def test_day_week_month_chain(test_memory_db_path):
     finally:
         conn.close()
 
-    responses = [
-        json.dumps(
-            {
-                "summary": "Week summary",
-                "keywords": ["Weekly keyword"],
-                "progress": ["Week progress"],
-            }
+    week_response = json.dumps(
+        {
+            "summary": "Week summary",
+            "keywords": ["Weekly keyword"],
+            "progress": ["Week progress"],
+        }
+    )
+    month_response = json.dumps(
+        {"summary": "Month summary", "keywords": ["Monthly keyword"]}
+    )
+    from obsidian_ai_hub.utils.llm_client import LLMResult
+
+    with (
+        patch(
+            "obsidian_ai_hub.utils.llm_client.generate_llm_response",
+            return_value=week_response,
         ),
-        json.dumps({"summary": "Month summary", "keywords": ["Monthly keyword"]}),
-    ]
-    with patch(
-        "obsidian_ai_hub.utils.llm_client.generate_llm_response", side_effect=responses
+        patch(
+            "obsidian_ai_hub.summerize_month.llm_client.generate_llm_response_detailed",
+            return_value=LLMResult(
+                text=month_response, call_id="chain", finish_reason="stop"
+            ),
+        ),
     ):
         # Week generation reads days from SQLite
         daily_records = [

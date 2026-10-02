@@ -45,7 +45,7 @@ google-auth==2.52.0
 google-auth-httplib2==0.2.0
 google-genai==1.75.0
 googleapis-common-protos==1.70.0
-gpt-researcher==0.14.8
+gpt-researcher==0.16.1
 greenlet==3.5.0
 grpcio==1.71.0
 grpcio-status==1.71.0

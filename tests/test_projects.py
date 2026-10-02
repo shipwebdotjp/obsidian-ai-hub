@@ -289,7 +289,16 @@ def test_weekly_and_monthly_project_inheritance(test_memory_db_path):
 
     # Now trigger monthly summarization for 2026-07-01
     from obsidian_ai_hub import summerize_month
-    with mock.patch("obsidian_ai_hub.utils.llm_client.generate_llm_response", return_value='{"summary": "Mocked month description", "keywords": [], "topics": []}'):
+    from obsidian_ai_hub.utils.llm_client import LLMResult
+
+    with mock.patch(
+        "obsidian_ai_hub.utils.llm_client.generate_llm_response_detailed",
+        return_value=LLMResult(
+            text='{"summary": "Mocked month description", "keywords": [], "topics": []}',
+            call_id="test-proj-month",
+            finish_reason="stop",
+        ),
+    ):
         summerize_month.summarize_month(dt)
 
     month_sum = summary_store.get_summary_by_period("month", "2026-07")

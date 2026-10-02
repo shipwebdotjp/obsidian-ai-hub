@@ -106,11 +106,24 @@ def compose_workflow_draft(
         llm = custom_llm
     else:
         try:
+            # gpt-5.x (e.g. gpt-5.6-terra) rejects function tools with
+            # reasoning_effort on Chat Completions (/v1/chat/completions).
+            # Use Responses API (/v1/responses) for provider=openai tool calls,
+            # matching agents/runtime.py and generate_llm_response_with_tools().
+            # provider=opencode_go already enables it for gpt- models in
+            # create_opencode_go_llm(), so no extra option is needed there.
+            openai_tool_options: dict[str, Any] = {}
+            if provider == "openai":
+                openai_tool_options = {
+                    "use_responses_api": True,
+                    "store": False,
+                }
             llm = create_langchain_llm(
                 provider=provider,
                 model=model,
                 temperature=0.2,
                 max_tokens=4096,
+                **openai_tool_options,
             )
         except Exception as exc:
             logger.exception("LLM の初期化に失敗しました")
