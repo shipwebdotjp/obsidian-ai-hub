@@ -11,7 +11,7 @@ import logging
 import re
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse
 
 from obsidian_ai_hub.media import store
@@ -53,6 +53,44 @@ def _media_response(media_id: str, *, download: bool) -> FileResponse:
             "Content-Disposition": f'{disposition}; filename="{filename}"',
             "Cache-Control": "private, max-age=3600",
         },
+    )
+
+
+@router.post("/media/upload", status_code=status.HTTP_201_CREATED)
+async def upload_media(file: UploadFile = File(...), _=Depends(require_bearer_token)):
+    """Upload an image file to the media library."""
+    if not file.content_type or not file.content_type.startswith("image/"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only image files are supported",
+        )
+    content = await file.read()
+    if not content:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="File is empty"
+        )
+
+    sub_type = file.content_type.split("/")[-1].lower()
+    if sub_type in ("jpeg", "jpg"):
+        fmt = "jpg"
+    elif sub_type in ("png", "webp", "gif"):
+        fmt = sub_type
+    else:
+        fmt = "png"
+
+    from obsidian_ai_hub.media.generation import GeneratedImage
+
+    image = GeneratedImage(
+        data=content,
+        mime_type=file.content_type,
+        output_format=fmt,
+    )
+    return store.save_generated_image(
+        image,
+        prompt=file.filename or "uploaded image",
+        model="upload",
+        provider="user",
+        source="upload",
     )
 
 
@@ -115,8 +153,13 @@ def download_media(media_id: str, _=Depends(require_bearer_token)):
 @router.delete("/media/{media_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_media(media_id: str, _=Depends(require_bearer_token)):
     """Delete one media row and its file (manual, irreversible)."""
-    if not store.delete_media(media_id):
+    try:
+        if not store.delete_media(media_id):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Media not found"
+            )
+    except store.MediaReferencedError as exc:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Media not found"
-        )
+            status_code=status.HTTP_409_CONFLICT, detail=str(exc)
+        ) from exc
     return None

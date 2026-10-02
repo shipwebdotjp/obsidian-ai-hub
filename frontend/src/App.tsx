@@ -18,6 +18,7 @@ import CapabilitySettingsPage from "./features/task-agent/CapabilitySettingsPage
 import VaultSearchPage from "./features/vault-search/VaultSearchPage";
 import SummaryDashboardPage from "./features/summary-dashboard/SummaryDashboardPage";
 import HealthcarePage from "./features/healthcare/HealthcarePage";
+import RecurringEventsPage from "./features/recurring-events/RecurringEventsPage";
 import PeoplePage from "./features/people/PeoplePage";
 import ProjectsPage from "./features/projects/ProjectsPage";
 import CoachOverviewPage from "./features/coach/CoachOverviewPage";
@@ -206,6 +207,7 @@ export default function App() {
           <Route path={ROUTES.VAULT_SEARCH} element={<VaultSearchPage />} />
           <Route path={ROUTES.SUMMARY_DASHBOARD} element={<SummaryDashboardPage />} />
           <Route path={ROUTES.HEALTHCARE} element={<HealthcarePage />} />
+          <Route path={ROUTES.RECURRING_EVENTS} element={<RecurringEventsPage />} />
           <Route path={ROUTES.PEOPLE} element={<PeoplePage />} />
           <Route path={ROUTES.PROJECTS} element={<ProjectsPage />} />
           <Route path={ROUTES.COACH} element={<CoachOverviewPage />} />
