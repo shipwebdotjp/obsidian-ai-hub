@@ -185,3 +185,41 @@ def test_get_monthly_structured_record_does_not_inject_memories(
     assert record["summary"] == "Monthly summary"
     prompt_args = mock_render.call_args[0][1]
     assert "LONG_TERM_MEMORIES" not in prompt_args
+
+
+@patch("obsidian_ai_hub.summerize_month.prompt.render_prompt")
+@patch("obsidian_ai_hub.utils.llm_client.generate_llm_response")
+def test_summarize_month_rejects_non_object_json(
+    mock_llm, mock_render, mock_config, test_memory_db_path
+):
+    """Non-object JSON never reaches the summaries table."""
+    mock_render.return_value = "Rendered Prompt"
+    mock_llm.return_value = '["not", "an", "object"]'
+
+    with pytest.raises(ValueError, match="summary is missing or empty"):
+        summerize_month.summarize_month(datetime(2024, 10, 1))
+
+    conn = memory.get_db_connection()
+    try:
+        assert store.get_summary_by_period("month", "2024-10", conn=conn) is None
+    finally:
+        conn.close()
+
+
+@patch("obsidian_ai_hub.summerize_month.prompt.render_prompt")
+@patch("obsidian_ai_hub.utils.llm_client.generate_llm_response")
+def test_summarize_month_rejects_empty_summary(
+    mock_llm, mock_render, mock_config, test_memory_db_path
+):
+    """A whitespace-only summary is not persisted."""
+    mock_render.return_value = "Rendered Prompt"
+    mock_llm.return_value = json.dumps({"summary": "   "})
+
+    with pytest.raises(ValueError, match="summary is missing or empty"):
+        summerize_month.summarize_month(datetime(2024, 10, 1))
+
+    conn = memory.get_db_connection()
+    try:
+        assert store.get_summary_by_period("month", "2024-10", conn=conn) is None
+    finally:
+        conn.close()

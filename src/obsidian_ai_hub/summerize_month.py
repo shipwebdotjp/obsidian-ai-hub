@@ -118,6 +118,11 @@ def get_monthly_structured_record(
                     cleaned_response = "\n".join(lines[1:-1])
 
         data = json.loads(cleaned_response)
+        if not isinstance(data, dict):
+            logger.error(
+                "Monthly structured record is not a JSON object; refusing to save"
+            )
+            return None
 
         scalar_fields = {"summary"}
         list_fields = {
@@ -256,6 +261,8 @@ def summarize_month(target_date: datetime) -> dict:
     # 2. 構造化レコードの生成
     structured_record = get_monthly_structured_record(target_date, weekly_records)
     if structured_record is None:
+        raise ValueError("Failed to generate monthly structured record: summary is missing or empty.")
+    if not str(structured_record.get("summary") or "").strip():
         raise ValueError("Failed to generate monthly structured record: summary is missing or empty.")
 
     # 3. SQLiteへの保存

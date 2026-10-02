@@ -371,6 +371,35 @@ def test_llm_static_validation(test_memory_db_path):
     assert any(".provider" in error for error in errors)
 
 
+def test_llm_input_flow_contracts_shape(test_memory_db_path):
+    good = _llm_config(
+        input_flow_contracts={
+            "report": {"accepted_value_kinds": ["structured", "narrative"]},
+            "other": {"accepted_value_kinds": ["structured"]},
+        }
+    )
+    assert (
+        validate_graph(
+            nodes=[_node("llm", "llm", good), _node("t", "terminal", {"outcome": "success"})],
+            edges=[_edge("e1", "llm", "t")],
+        )
+        == []
+    )
+
+    for bad_contracts in (
+        {"report": ["structured", "narrative"]},
+        {"report": {"accepted_value_kinds": []}},
+        {"report": {"accepted_value_kinds": ["receipt"]}},
+        {"report": "narrative"},
+    ):
+        bad = _llm_config(input_flow_contracts=bad_contracts)
+        errors = validate_graph(
+            nodes=[_node("llm", "llm", bad), _node("t", "terminal", {"outcome": "success"})],
+            edges=[_edge("e1", "llm", "t")],
+        )
+        assert any("input_flow_contracts" in error for error in errors), bad_contracts
+
+
 def test_llm_output_reference_type_resolution(test_memory_db_path):
     nodes = [
         _node("llm", "llm", _llm_config()),

@@ -403,10 +403,15 @@ class GraphBuilder:
                 str(destination.get("field") or ""),
             )
             return list(contract["accepted_value_kinds"])
-        if kind in ("text-template-input", "agent-input"):
+        if kind == "text-template-input":
             return ["structured", "narrative"]
         if kind == "llm-field":
+            # The editor stores per-variable contracts as
+            # ``{"accepted_value_kinds": [...]}`` dicts; accept that shape and
+            # default to structured-only when the field is missing.
             accepted = destination.get("accepted")
+            if isinstance(accepted, dict):
+                accepted = accepted.get("accepted_value_kinds")
             if isinstance(accepted, list) and accepted:
                 return [str(k) for k in accepted]
             return ["structured"]

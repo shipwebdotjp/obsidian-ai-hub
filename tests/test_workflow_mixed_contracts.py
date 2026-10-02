@@ -312,6 +312,75 @@ def test_receipt_ids_not_referencable_but_is_published_conditions():
     assert _validate(cond_nodes, cond_edges) == []
 
 
+def _llm_node(node_id="llm1", inputs=None, contracts=None):
+    config = {
+        "provider": "openai",
+        "model": "gpt-test",
+        "system_prompt": "Summarize.",
+        "max_tokens": 1024,
+        "inputs": inputs or {},
+        "output_schema": {
+            "type": "object",
+            "properties": {"summary": {"type": "string"}},
+            "required": ["summary"],
+        },
+    }
+    if contracts is not None:
+        config["input_flow_contracts"] = contracts
+    return _node(node_id, "llm", config)
+
+
+def test_llm_dict_form_flow_contract_accepts_narrative():
+    """Editor dict-form entries ({"accepted_value_kinds": [...]}) are honored."""
+    nodes = [
+        _source_node(
+            "specialist_agent", inputs={"task": "x"}, target={"agent_id": "a1"}
+        ),
+        _llm_node(
+            inputs={"report": _ref("nodes.s1.output.narrative.text")},
+            contracts={"report": {"accepted_value_kinds": ["structured", "narrative"]}},
+        ),
+        _node("done", "terminal", {"outcome": "success"}),
+    ]
+    edges = [_edge("e1", "s1", "llm1"), _edge("e2", "llm1", "done")]
+    assert _validate(nodes, edges) == []
+
+
+def test_llm_without_flow_contract_rejects_narrative():
+    nodes = [
+        _source_node(
+            "specialist_agent", inputs={"task": "x"}, target={"agent_id": "a1"}
+        ),
+        _llm_node(inputs={"report": _ref("nodes.s1.output.narrative.text")}),
+        _node("done", "terminal", {"outcome": "success"}),
+    ]
+    edges = [_edge("e1", "s1", "llm1"), _edge("e2", "llm1", "done")]
+    errors = _validate(nodes, edges)
+    assert any(e.startswith("flow_contract:") for e in errors), errors
+
+
+def test_agent_node_rejects_narrative():
+    """Agent Nodes stay structured-only; narrative declassifies via LLM Nodes."""
+    nodes = [
+        _source_node(
+            "specialist_agent", inputs={"task": "x"}, target={"agent_id": "a1"}
+        ),
+        _node(
+            "ag",
+            "agent",
+            {
+                "agent_id": "agent_x",
+                "inputs": {"context": _ref("nodes.s1.output.narrative.text")},
+                "output_schema": {"type": "object", "properties": {}},
+            },
+        ),
+        _node("done", "terminal", {"outcome": "success"}),
+    ]
+    edges = [_edge("e1", "s1", "ag"), _edge("e2", "ag", "done")]
+    errors = _validate(nodes, edges)
+    assert any(e.startswith("flow_contract:") for e in errors), errors
+
+
 # --- adapters --------------------------------------------------------------
 
 

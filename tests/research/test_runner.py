@@ -788,3 +788,14 @@ def test_project_mode_deep_failure_stops_execution(monkeypatch):
 
     with pytest.raises(RuntimeError, match="deep failure"):
         runner.run_research(theme="テーマ", mode="project", project_id=1)
+
+
+def test_produce_research_report_rejects_empty_body():
+    """Non-project modes fail fast on empty reports (project-mode parity)."""
+    route = runner.ResolvedResearchRoute(mode="internal", project_id=None, context="")
+    with (
+        patch.object(runner, "generate_research_title", return_value="title"),
+        patch.object(runner, "conduct_research", return_value="   "),
+    ):
+        with pytest.raises(RuntimeError, match="empty report"):
+            runner._produce_research_report("空テーマ", route)

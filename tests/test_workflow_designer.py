@@ -373,6 +373,84 @@ def test_builder_rejects_mixed_narrative_to_forbidden_fields():
     assert bad_target["code"] == "invalid_strict_reference"
 
 
+def test_builder_rejects_mixed_narrative_to_agent_inputs():
+    """Agent Node inputs stay structured-only in the designer too."""
+    gb, source_id = _mixed_source_builder()
+    ag_res = gb.add_node(
+        "agent",
+        "Helper",
+        {
+            "agent_id": "agent_1",
+            "inputs": {},
+            "output_schema": {"type": "object", "properties": {}},
+        },
+    )
+    assert ag_res["ok"]
+    bad = gb.bind_field(
+        ag_res["node_id"],
+        "inputs.context",
+        {"$ref": f"nodes.{source_id}.output.narrative.text"},
+    )
+    assert not bad["ok"]
+    assert bad["code"] == "invalid_strict_reference"
+
+
+def test_builder_llm_dict_form_contract():
+    """Designer honors editor dict-form input_flow_contracts entries."""
+    gb, source_id = _mixed_source_builder()
+    llm_res = gb.add_node(
+        "llm",
+        "Summarize",
+        {
+            "provider": "openai",
+            "model": "gpt-test",
+            "system_prompt": "Summarize.",
+            "max_tokens": 1024,
+            "inputs": {},
+            "output_schema": {
+                "type": "object",
+                "properties": {"summary": {"type": "string"}},
+                "required": ["summary"],
+            },
+            "input_flow_contracts": {
+                "report": {"accepted_value_kinds": ["structured", "narrative"]}
+            },
+        },
+    )
+    assert llm_res["ok"]
+    good = gb.bind_field(
+        llm_res["node_id"],
+        "inputs.report",
+        {"$ref": f"nodes.{source_id}.output.narrative.text"},
+    )
+    assert good["ok"]
+
+    plain_res = gb.add_node(
+        "llm",
+        "Plain",
+        {
+            "provider": "openai",
+            "model": "gpt-test",
+            "system_prompt": "Summarize.",
+            "max_tokens": 1024,
+            "inputs": {},
+            "output_schema": {
+                "type": "object",
+                "properties": {"summary": {"type": "string"}},
+                "required": ["summary"],
+            },
+        },
+    )
+    assert plain_res["ok"]
+    bad = gb.bind_field(
+        plain_res["node_id"],
+        "inputs.report",
+        {"$ref": f"nodes.{source_id}.output.narrative.text"},
+    )
+    assert not bad["ok"]
+    assert bad["code"] == "invalid_strict_reference"
+
+
 def test_builder_mixed_receipt_condition_binding():
     """Condition-usable receipt fields bind into edge conditions only."""
     gb, source_id = _mixed_source_builder("research_agent")

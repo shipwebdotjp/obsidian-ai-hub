@@ -65,6 +65,7 @@ export const WORKFLOW_LLM_CONFIG_KEYS = [
   "max_tokens",
   "reasoning_effort",
   "inputs",
+  "input_flow_contracts",
   "output_schema",
 ] as const;
 

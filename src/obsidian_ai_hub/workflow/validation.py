@@ -932,8 +932,7 @@ def _validate_agent_node(
             inputs_schema=inputs_schema,
             nodes=nodes,
             path=f"Node '{node_id}'.inputs",
-            accepted_value_kinds=["structured", "narrative"],
-            is_text_template_input=True,
+            accepted_value_kinds=["structured"],
         )
     )
     return errors
@@ -966,11 +965,17 @@ def _validate_llm_node(
 
     flow_contracts = config.get("input_flow_contracts") or {}
     for field_name, field_val in inputs.items():
-        accepted_kinds = (
+        entry = (
             flow_contracts.get(field_name)
             if isinstance(flow_contracts, dict) and field_name in flow_contracts
             else None
         )
+        # The editor stores per-variable contracts as
+        # ``{"accepted_value_kinds": [...]}`` dicts; accept that shape and
+        # default to structured-only when the field is missing.
+        if isinstance(entry, dict):
+            entry = entry.get("accepted_value_kinds")
+        accepted_kinds = entry if isinstance(entry, list) else None
         errors.extend(
             _value_reference_errors(
                 field_val,

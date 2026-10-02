@@ -901,6 +901,9 @@ def _produce_research_report(
             output_style=output_style,
             project_id=route.project_id,
         )
+        report_body = (report_body or "").strip()
+        if not report_body:
+            raise RuntimeError("Research returned an empty report")
         source = {
             RESEARCH_MODE_INTERNAL: "internal-llm",
             RESEARCH_MODE_WEB: "tavily-search",
