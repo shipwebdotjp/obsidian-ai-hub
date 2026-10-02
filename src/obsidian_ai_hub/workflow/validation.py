@@ -190,17 +190,15 @@ def _get_ref_source_info(
 
         if node_type == "capability":
             key = str(config.get("capability_key") or "")
-            if key == "coding_cli":
+            from obsidian_ai_hub.tasks.capability_schemas import (
+                MIXED_CAPABILITY_KEYS,
+                get_output_field_contract,
+            )
+
+            if key in MIXED_CAPABILITY_KEYS:
                 tail = ".".join(str(s) for s in segments[3:])
-                if tail in ("receipt.status", "receipt.report_truncated"):
-                    return ("receipt", ALLOWED_USES_CONDITION)
-                if tail in ("receipt.child_run_id", "receipt.session_id"):
-                    return ("receipt", ALLOWED_USES_NONE)
-                if tail == "narrative.text" or tail.startswith("narrative."):
-                    return ("narrative", ALLOWED_USES_PAYLOAD)
-                if tail.startswith("receipt."):
-                    return ("receipt", ALLOWED_USES_NONE)
-                return ("opaque", ALLOWED_USES_NONE)
+                field = get_output_field_contract(key, tail)
+                return (field["value_kind"], field["allowed_uses"])
 
             contract = output_contract_class(key)
             if contract == "structured":
@@ -323,14 +321,7 @@ def _capability_output_contract_errors(
     schema: Any = None
     if node_type == "capability":
         key = str(config.get("capability_key") or "")
-        if key == "coding_cli":
-            from obsidian_ai_hub.tasks.capability_schemas import (
-                capability_output_schema,
-            )
-
-            schema = capability_output_schema("coding_cli")
-        else:
-            schema = workflow_output_schema(key)
+        schema = workflow_output_schema(key)
     elif node_type == "agent":
         schema = config.get("output_schema")
     elif node_type == "llm":

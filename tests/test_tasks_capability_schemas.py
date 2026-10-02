@@ -205,9 +205,18 @@ def test_output_contract_ledger_covers_all_capabilities():
         if key in by_key:
             assert schemas.output_contract_class(key) == "receipt"
             assert schemas.output_reference_policy(key) == "forbidden"
+    assert schemas.MIXED_CAPABILITY_KEYS == frozenset(
+        {"coding_cli", "specialist_agent", "research_agent"}
+    )
+    for key in schemas.MIXED_CAPABILITY_KEYS:
+        assert key in by_key
+        assert schemas.output_contract_class(key) == "mixed"
+        assert schemas.output_reference_policy(key) == "forbidden"
+        # Mixed capabilities expose no synthetic summary fallback (P1).
+        assert schemas.ui_output_schema(key) is None
     for definition in get_capability_definitions():
         contract = schemas.output_contract_class(definition.key)
-        assert contract in ("structured", "receipt", "opaque")
+        assert contract in ("structured", "receipt", "mixed", "opaque")
 
 
 def test_dynamic_plugin_defaults_to_opaque():

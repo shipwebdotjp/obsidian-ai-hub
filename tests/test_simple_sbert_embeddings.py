@@ -45,21 +45,63 @@ def SimpleSbertEmbeddings():
     """Import SimpleSbertEmbeddings inside the fixture to ensure it uses the mocks."""
     # We must reload or import here. Since it might have been imported before,
     # and we are mocking dependencies, we want to ensure it sees our mocks.
-    if "obsidian_ai_hub.utils.simple_sbert_embeddings" in sys.modules:
-        del sys.modules["obsidian_ai_hub.utils.simple_sbert_embeddings"]
-    from obsidian_ai_hub.utils.simple_sbert_embeddings import SimpleSbertEmbeddings
+    # The original module is restored afterwards so the mock-bound reimport
+    # never leaks into unrelated tests (the same reason as the ``config``
+    # fixture below).
+    import obsidian_ai_hub.utils as utils_pkg
 
-    return SimpleSbertEmbeddings
+    module_name = "obsidian_ai_hub.utils.simple_sbert_embeddings"
+    original = sys.modules.get(module_name)
+    original_attr = getattr(utils_pkg, "simple_sbert_embeddings", None)
+    if module_name in sys.modules:
+        del sys.modules[module_name]
+    try:
+        from obsidian_ai_hub.utils.simple_sbert_embeddings import (
+            SimpleSbertEmbeddings,
+        )
+
+        yield SimpleSbertEmbeddings
+    finally:
+        if original is not None:
+            sys.modules[module_name] = original
+        else:
+            sys.modules.pop(module_name, None)
+        if original_attr is not None:
+            utils_pkg.simple_sbert_embeddings = original_attr
+        else:
+            utils_pkg.__dict__.pop("simple_sbert_embeddings", None)
 
 
 @pytest.fixture
 def config():
     """Ensure config is fresh and uses mocks if needed."""
-    if "obsidian_ai_hub.utils.config" in sys.modules:
-        del sys.modules["obsidian_ai_hub.utils.config"]
-    from obsidian_ai_hub.utils import config
+    # Deleting the module makes any later string-target import
+    # (``mock.patch("obsidian_ai_hub.utils.config...")``,
+    # ``monkeypatch.setattr("obsidian_ai_hub.utils.config...")``) re-execute
+    # it into a second, forked module object while already-imported modules
+    # (e.g. ``web.services.vault``) keep the original. That split silently
+    # redirects patched paths for the rest of the session, so the original
+    # entry (and the parent package attribute) is always restored.
+    import obsidian_ai_hub.utils as utils_pkg
 
-    return config
+    module_name = "obsidian_ai_hub.utils.config"
+    original_module = sys.modules.get(module_name)
+    original_attr = getattr(utils_pkg, "config", None)
+    if module_name in sys.modules:
+        del sys.modules[module_name]
+    try:
+        from obsidian_ai_hub.utils import config
+
+        yield config
+    finally:
+        if original_module is not None:
+            sys.modules[module_name] = original_module
+        else:
+            sys.modules.pop(module_name, None)
+        if original_attr is not None:
+            utils_pkg.config = original_attr
+        else:
+            utils_pkg.__dict__.pop("config", None)
 
 
 @pytest.fixture

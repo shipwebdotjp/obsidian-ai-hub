@@ -34,7 +34,8 @@ Capability Node の出力には出力契約クラスがあり、参照できる�
 | --- | --- | --- |
 | `structured` | `vault_read_file`、`calendar_read`、`reminders_read`、`periodic_note_read`、`research_context_snapshot`、`hitl_wait` | 宣言済みの必須フィールドのみ。参照元ではなく**参照先** Node の strict（`fail_on_output_mismatch: true`）がオンのときだけ |
 | `receipt` | 書込み・提案・ジョブ登録・画像生成など | 参照不可（schema は監査・表示用のみ） |
-| `opaque` | plugin、`skills`、外部検索、未整備の読み取り系、Agent / Coding / Research 委譲の出力 | 参照不可（`output_schema` は `null`） |
+| `mixed` | `coding_cli`、`specialist_agent`、`research_agent` | 観測事実の `receipt` と自由文の `narrative` を分離。`narrative.text` は本文・表示用入力（`vault_write_file` の `content` など）とテキスト組立だけに渡せる。`receipt.status`（と `research_agent` の `is_published`）は条件 Edge で使える。ID 系（`child_run_id` / `session_id` / `job_id` など）は参照不可 |
+| `opaque` | plugin、`skills`、外部検索、未整備の読み取り系 | 参照不可（`output_schema` は `null`） |
 
 出力全体（`nodes.<node_id>.output`）への参照、未宣言フィールド・未宣言ネスト、
 欠落し得る必須でない経路の参照もできません。たとえばスナップショットの出力全体を

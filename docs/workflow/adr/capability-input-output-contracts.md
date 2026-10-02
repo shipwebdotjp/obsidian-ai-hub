@@ -179,6 +179,43 @@ Status: Accepted (2026-10-02)。
 | 3. 完了正規化 | Coding 完了時の receipt / narrative | 最終報告欠落時は `needs_attention` で停止（自動再試行しない） |
 | 4. 副作用実行 | 許可済み content への Vault 書き込み | 指定パスへ atomic に書き込み 1 回実行 |
 
+## Amendment (mixed 契約の `specialist_agent` / `research_agent` への拡張)
+
+Status: Accepted (2026-10-02)。
+
+### 決定
+
+- **`specialist_agent` と `research_agent` を `mixed` 契約とする。** `coding_cli` と同じく、
+  観測事実である `receipt` と自由文の `narrative` を分離して公開する。Capability 単位の
+  参照可否ではなく、`tasks/capability_schemas.py` のフィールド契約テーブル
+  （`_MIXED_OUTPUT_FIELD_CONTRACTS`）を正本とし、静的検証はそこを参照する
+  （Capability ごとの分岐を `workflow/validation.py` に持たない）。
+  - `specialist_agent`: `receipt` は `status`（完了時は `"completed"`）、`child_run_id`、`session_id`、
+    `agent_id`。`narrative.text` は子 Agent の最終メッセージ。
+  - `research_agent`: `receipt` は `status`（完了時は `"completed"`）、`job_id`、`theme_id`、
+    `is_published`（真偽値）。`narrative.text` は生成済み research report の本文（切詰めなし）。
+- **`specialist_agent` の逸脱申告は内部プロトコルとして残す。** 最終文の
+  `<deviation_request>` 解釈と改訂 Plan 提案は Adapter 内で従来通り処理し、
+  `narrative` 公開とは別の実行制御として分離する。逸脱申告時は成功出力（`receipt` /
+  `narrative`）を返さない。
+- **子実行は成功したが最終文・報告本文を取得・正規化できない場合は `needs_attention`
+  とする。** 観測済み `receipt` と child ID を残し、Node を `failed` にせず、自動 retry
+  も実行しない（`coding_cli` と同じ停止規則）。`research_agent` では report の Vault
+  公開が既に済んでいる場合もあり、再試行による重複公開を避ける。
+- **条件 Edge での利用:** `receipt.status`（両 Capability）と `research_agent` の
+  `receipt.is_published` は条件式で利用できる。`child_run_id` / `session_id` /
+  `agent_id` / `job_id` / `theme_id` は識別子であり、将来 `receipt` ID を明示受理する
+  検証 Capability ができるまで、条件・入力参照には公開しない。
+
+### 操作シナリオ契約（不可逆操作: research の Vault 公開は research pipeline が実行済み）
+
+| 段階 | 入力・識別子 | 停止規則 |
+| --- | --- | --- |
+| 1. 公開検証 | Revision の Node / Edge / Flow 契約 | `specialist_agent` / `research_agent` の `narrative` / `receipt` 不正参照は検証エラーで公開拒否 |
+| 2. 実行前永続化 | 委譲実行前の bridge / child ID | 実行前に ID とパラメータを保存（中断時も child ID 追跡可能） |
+| 3. 完了正規化 | 委譲完了時の receipt / narrative | 最終文・報告本文の欠落時は `needs_attention` で停止（自動再試行しない） |
+| 4. 副作用実行 | 許可済み content への Vault 書き込み | 指定パスへ atomic に書き込み 1 回実行 |
+
 ## Related
 
 - [Workflow Graph / Agent Node ADR](workflow-graph-and-agent-node.md#amendment-capability-node-の-strict-出力)

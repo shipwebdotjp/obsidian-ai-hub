@@ -381,21 +381,13 @@ def get_input_field_contract(capability_key: str, field_name: str) -> dict[str, 
 
 def get_output_field_contract(capability_key: str, field_path: str) -> dict[str, Any]:
     """Return field-level output contract metadata (value_kind, allowed_uses)."""
-    if capability_key == "coding_cli":
-        if field_path in ("receipt.status", "receipt.report_truncated"):
+    per_key = _MIXED_OUTPUT_FIELD_CONTRACTS.get(capability_key)
+    if per_key is not None:
+        exact = per_key.get(field_path)
+        if exact is not None:
             return {
-                "value_kind": VALUE_KIND_RECEIPT,
-                "allowed_uses": ALLOWED_USES_CONDITION,
-            }
-        if field_path in ("receipt.child_run_id", "receipt.session_id"):
-            return {
-                "value_kind": VALUE_KIND_RECEIPT,
-                "allowed_uses": ALLOWED_USES_NONE,
-            }
-        if field_path == "narrative.text":
-            return {
-                "value_kind": VALUE_KIND_NARRATIVE,
-                "allowed_uses": ALLOWED_USES_PAYLOAD,
+                "value_kind": exact["value_kind"],
+                "allowed_uses": exact["allowed_uses"],
             }
         if field_path.startswith("receipt."):
             return {
@@ -407,6 +399,10 @@ def get_output_field_contract(capability_key: str, field_path: str) -> dict[str,
                 "value_kind": VALUE_KIND_NARRATIVE,
                 "allowed_uses": ALLOWED_USES_PAYLOAD,
             }
+        return {
+            "value_kind": OUTPUT_CONTRACT_OPAQUE,
+            "allowed_uses": ALLOWED_USES_NONE,
+        }
 
     contract_class = output_contract_class(capability_key)
     if contract_class == OUTPUT_CONTRACT_STRUCTURED:
@@ -489,13 +485,17 @@ def ui_target_schema(capability_key: str) -> dict[str, Any] | None:
 #
 # Every builtin capability is classified into exactly one output contract
 # class (see ``docs/workflow/adr/capability-input-output-contracts.md`` and
-# its P1/P2 amendment):
+# its amendments):
 # - ``structured``: stable data the Workflow may pass downstream as typed
 #   references. References are ``strict_fields``: only declared fields, and
 #   only from a node with ``fail_on_output_mismatch: true``.
 # - ``receipt``: write/proposal/job-registration results. The schema is kept
 #   for audit/display, but P3 まで後続 Node・条件・pipe・テンプレートからは
 #   参照できない (``forbidden``).
+# - ``mixed``: delegation results (``coding_cli``, ``specialist_agent``,
+#   ``research_agent``) that publish an observed ``receipt`` alongside a
+#   free-text ``narrative``. Field-level ``value_kind`` / ``allowed_uses``
+#   contracts come from ``get_output_field_contract``.
 # - ``opaque``: plugin, Skills, external providers and not-yet-structured
 #   read/search outputs. No typed field references (``forbidden``) and no
 #   synthetic ``summary`` fallback.
@@ -530,7 +530,83 @@ ALLOWED_USES_NONE: list[str] = []
 REFERENCE_POLICY_STRICT_FIELDS = "strict_fields"
 REFERENCE_POLICY_FORBIDDEN = "forbidden"
 
-MIXED_CAPABILITY_KEYS: frozenset[str] = frozenset({"coding_cli"})
+MIXED_CAPABILITY_KEYS: frozenset[str] = frozenset(
+    {"coding_cli", "specialist_agent", "research_agent"}
+)
+
+# Field-level value-kind contracts for ``mixed`` capabilities. Each entry maps
+# an output field path (relative to ``output``) to its ``value_kind`` and
+# ``allowed_uses``. Unknown ``receipt.*`` / ``narrative.*`` tails fall back to
+# receipt-without-uses / narrative-payload in :func:`get_output_field_contract`;
+# anything outside those namespaces is ``opaque``.
+_MIXED_OUTPUT_FIELD_CONTRACTS: dict[str, dict[str, dict[str, Any]]] = {
+    "coding_cli": {
+        "receipt.status": {
+            "value_kind": VALUE_KIND_RECEIPT,
+            "allowed_uses": ALLOWED_USES_CONDITION,
+        },
+        "receipt.report_truncated": {
+            "value_kind": VALUE_KIND_RECEIPT,
+            "allowed_uses": ALLOWED_USES_CONDITION,
+        },
+        "receipt.child_run_id": {
+            "value_kind": VALUE_KIND_RECEIPT,
+            "allowed_uses": ALLOWED_USES_NONE,
+        },
+        "receipt.session_id": {
+            "value_kind": VALUE_KIND_RECEIPT,
+            "allowed_uses": ALLOWED_USES_NONE,
+        },
+        "narrative.text": {
+            "value_kind": VALUE_KIND_NARRATIVE,
+            "allowed_uses": ALLOWED_USES_PAYLOAD,
+        },
+    },
+    "specialist_agent": {
+        "receipt.status": {
+            "value_kind": VALUE_KIND_RECEIPT,
+            "allowed_uses": ALLOWED_USES_CONDITION,
+        },
+        "receipt.child_run_id": {
+            "value_kind": VALUE_KIND_RECEIPT,
+            "allowed_uses": ALLOWED_USES_NONE,
+        },
+        "receipt.session_id": {
+            "value_kind": VALUE_KIND_RECEIPT,
+            "allowed_uses": ALLOWED_USES_NONE,
+        },
+        "receipt.agent_id": {
+            "value_kind": VALUE_KIND_RECEIPT,
+            "allowed_uses": ALLOWED_USES_NONE,
+        },
+        "narrative.text": {
+            "value_kind": VALUE_KIND_NARRATIVE,
+            "allowed_uses": ALLOWED_USES_PAYLOAD,
+        },
+    },
+    "research_agent": {
+        "receipt.status": {
+            "value_kind": VALUE_KIND_RECEIPT,
+            "allowed_uses": ALLOWED_USES_CONDITION,
+        },
+        "receipt.is_published": {
+            "value_kind": VALUE_KIND_RECEIPT,
+            "allowed_uses": ALLOWED_USES_CONDITION,
+        },
+        "receipt.job_id": {
+            "value_kind": VALUE_KIND_RECEIPT,
+            "allowed_uses": ALLOWED_USES_NONE,
+        },
+        "receipt.theme_id": {
+            "value_kind": VALUE_KIND_RECEIPT,
+            "allowed_uses": ALLOWED_USES_NONE,
+        },
+        "narrative.text": {
+            "value_kind": VALUE_KIND_NARRATIVE,
+            "allowed_uses": ALLOWED_USES_PAYLOAD,
+        },
+    },
+}
 
 ALLOWED_NARRATIVE_INPUT_FIELDS: dict[str, set[str]] = {
     "vault_write_file": {"content"},
@@ -581,13 +657,19 @@ STRICT_ALLOWED_REGISTRY_KEYS: frozenset[str] = frozenset(
 def output_contract_class(capability_key: str) -> str:
     """Return the code-owned output contract class for a registry capability.
 
-    Unknown keys and dynamic plugins (``custom:*``, ``skills``) default to
-    ``opaque`` unless an explicit contract registration exists.
+    ``mixed`` capabilities (``coding_cli``, ``specialist_agent``,
+    ``research_agent``) publish an observed ``receipt`` alongside a free-text
+    ``narrative``; field-level contracts come from
+    :func:`get_output_field_contract`. Unknown keys and dynamic plugins
+    (``custom:*``, ``skills``) default to ``opaque`` unless an explicit
+    contract registration exists.
     """
     if capability_key in STRUCTURED_CAPABILITY_KEYS:
         return OUTPUT_CONTRACT_STRUCTURED
     if capability_key in RECEIPT_CAPABILITY_KEYS:
         return OUTPUT_CONTRACT_RECEIPT
+    if capability_key in MIXED_CAPABILITY_KEYS:
+        return OUTPUT_CONTRACT_MIXED
     return OUTPUT_CONTRACT_OPAQUE
 
 

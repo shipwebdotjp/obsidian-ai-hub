@@ -114,7 +114,45 @@ class AgentAdapter:
         )
         status = str(final.get("status"))
         if status == "succeeded":
-            text = self._final_text(agent_store, final, run_id)
+            receipt = {
+                "status": "completed",
+                "child_run_id": run_id,
+                "session_id": session_id,
+                "agent_id": str(agent_id),
+            }
+            try:
+                text: Optional[str] = self._final_text(
+                    agent_store, final, run_id
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Child agent run '%s' succeeded but final message "
+                    "could not be retrieved: %s",
+                    run_id,
+                    exc,
+                )
+                text = None
+            if text is None or not text.strip():
+                # The child already ran; do not fail/retry. Keep the observed
+                # receipt and park for human review (coding_cli parity).
+                return StepResult(
+                    step_index=step_index,
+                    capability_key=str(step.get("capability_key")),
+                    summary="",
+                    output={
+                        "receipt": receipt,
+                        "narrative": {
+                            "text": "",
+                        },
+                    },
+                    child_kind="agent",
+                    child_run_id=run_id,
+                    needs_attention=True,
+                    attention_reason="specialist_report_unresolvable",
+                    error=f"Child agent run '{run_id}' succeeded but final message could not be retrieved.",
+                )
+            # Deviation control stays an internal protocol: it is interpreted
+            # here and never published as narrative.
             report = parse_deviation_report(text)
             if report is not None:
                 raise DeviationReported(
@@ -125,6 +163,12 @@ class AgentAdapter:
                 step_index=step_index,
                 capability_key=str(step.get("capability_key")),
                 summary=tail_text(text),
+                output={
+                    "receipt": receipt,
+                    "narrative": {
+                        "text": text,
+                    },
+                },
                 child_kind="agent",
                 child_run_id=run_id,
             )
