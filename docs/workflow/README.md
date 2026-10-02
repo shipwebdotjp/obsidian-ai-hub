@@ -32,6 +32,7 @@ Status: Accepted。仕様は実装済みで、変更は specification.md と ADR
 | 「Amendment (Workflow 単位の承認スキップ)」 | `skip_approval` による承認ゲートの解除 |
 | 「Amendment (会話型 Agent と単発 LLM Node の責務分離)」 | 会話を持たない単発 `llm` Node の追加 |
 | 「Amendment (Capability Node の strict 出力)」 | `fail_on_output_mismatch` による出力契約違反時の Node 失敗 |
+| 「Amendment (Gmail 下書き `gmail_create_draft` の receipt Capability 化)」 | Gmail 下書きの receipt Capability 昇格、narrative 制限、Request Key 安定化、needs_attention 停止規則 |
 
 ## 設計上の要点
 

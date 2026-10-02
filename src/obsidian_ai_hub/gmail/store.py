@@ -11,6 +11,22 @@ class DraftRequestExistsError(Exception):
     pass
 
 
+class DraftRequestHashMismatchError(Exception):
+    """Raised when input_sha256 differs for an existing request_key."""
+
+    def __init__(self, message: str, existing: dict[str, str | None] | None = None) -> None:
+        super().__init__(message)
+        self.existing = existing
+
+
+class DraftRequestPendingOrUnknownError(RuntimeError):
+    """Raised when request_key is in 'creating' or 'unknown' status, blocking automatic retries."""
+
+    def __init__(self, message: str, existing: dict[str, str | None] | None = None) -> None:
+        super().__init__(message)
+        self.existing = existing
+
+
 def get_draft_request(request_key: str, conn: sqlite3.Connection | None = None) -> dict[str, str | None] | None:
     close_conn = False
     if conn is None:
@@ -77,12 +93,19 @@ def mark_draft_request_creating(
         if cur.rowcount == 0:
             existing = get_draft_request(request_key, conn=conn)
             if existing:
+                if existing["input_sha256"] != input_sha256:
+                    raise DraftRequestHashMismatchError(
+                        f"Draft request '{request_key}' input hash mismatch: "
+                        f"stored={existing['input_sha256']}, current={input_sha256}",
+                        existing=existing,
+                    )
                 if existing["status"] == "created":
                     return existing
-                raise RuntimeError(
+                raise DraftRequestPendingOrUnknownError(
                     f"Draft request '{request_key}' is in status '{existing['status']}'. "
                     "Automatic retry blocked to prevent duplicate drafts in Gmail. "
-                    "Please inspect Gmail Drafts before resubmitting."
+                    "Please inspect Gmail Drafts before resubmitting.",
+                    existing=existing,
                 )
         conn.commit()
         return None

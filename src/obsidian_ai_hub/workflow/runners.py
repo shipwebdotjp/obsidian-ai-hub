@@ -122,6 +122,7 @@ class DefaultNodeRunner:
             "prompt_text": "",
             "allow_param_override": True,
             "workflow_run_id": run_id,
+            "workflow_activation_id": activation_id,
         }
         plan = {"plan": {"purpose": "", "completion_criteria": ""}}
         try:

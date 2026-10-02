@@ -26,6 +26,14 @@ from obsidian_ai_hub.gmail.store import (
 )
 
 
+class GmailDraftDispatchError(Exception):
+    """Raised when Gmail drafts().create API call fails with an uncertain outcome."""
+
+    def __init__(self, message: str, original_exception: Exception) -> None:
+        super().__init__(message)
+        self.original_exception = original_exception
+
+
 class GmailService:
     def __init__(self, service: Resource | None = None) -> None:
         self._service = service
@@ -176,6 +184,7 @@ class GmailService:
                 "gmail_thread_id": existing["gmail_thread_id"],
                 "status": "created",
                 "reused_receipt": True,
+                "receipt_persisted": True,
             }
 
         thread_id: str | None = None
@@ -251,19 +260,28 @@ class GmailService:
             res = srv.users().drafts().create(userId="me", body=draft_body).execute()
         except Exception as dispatch_exc:
             mark_draft_request_unknown(request_key)
-            raise dispatch_exc
+            raise GmailDraftDispatchError(
+                f"Gmail drafts().create dispatch failed for request key '{request_key}': {dispatch_exc}",
+                original_exception=dispatch_exc,
+            ) from dispatch_exc
 
         draft_id = res.get("id", "")
         msg_res = res.get("message", {})
         created_msg_id = msg_res.get("id", "")
         created_thread_id = msg_res.get("threadId", thread_id or "")
 
-        mark_draft_request_created(
-            request_key=request_key,
-            gmail_draft_id=draft_id,
-            gmail_message_id=created_msg_id,
-            gmail_thread_id=created_thread_id,
-        )
+        receipt_persisted = True
+        try:
+            mark_draft_request_created(
+                request_key=request_key,
+                gmail_draft_id=draft_id,
+                gmail_message_id=created_msg_id,
+                gmail_thread_id=created_thread_id,
+            )
+        except Exception as store_exc:
+            import logging
+            logging.getLogger(__name__).exception("Failed to mark draft request created in DB for %s", request_key)
+            receipt_persisted = False
 
         return {
             "request_key": request_key,
@@ -272,4 +290,5 @@ class GmailService:
             "gmail_thread_id": created_thread_id,
             "status": "created",
             "reused_receipt": False,
+            "receipt_persisted": receipt_persisted,
         }
