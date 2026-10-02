@@ -538,30 +538,6 @@ def generate_research_title(theme: str) -> str:
     return title
 
 
-def _gpt_researcher_llm_kwargs_json() -> Optional[str]:
-    """Return the JSON-encoded ``LLM_KWARGS`` for GPT Researcher.
-
-    Reads ``research.deep.gpt_researcher.llm_kwargs`` (already validated at
-    config load) and fails explicitly on a non-map or non-JSON-serializable
-    value so a misconfiguration never reaches the API silently.
-    """
-    raw = config.RESEARCH_GPT_RESEARCHER_LLM_KWARGS
-    if raw is None:
-        return None
-    if not isinstance(raw, dict):
-        raise RuntimeError(
-            "Invalid configuration: research.deep.gpt_researcher.llm_kwargs "
-            f"must be a mapping, got {type(raw).__name__}"
-        )
-    try:
-        return json.dumps(raw)
-    except (TypeError, ValueError) as exc:
-        raise RuntimeError(
-            "Invalid configuration: research.deep.gpt_researcher.llm_kwargs "
-            f"must be JSON-serializable: {exc}"
-        ) from exc
-
-
 @contextmanager
 def _gpt_researcher_environment():
     values = {
@@ -573,15 +549,10 @@ def _gpt_researcher_environment():
         "SMART_TOKEN_LIMIT": config.RESEARCH_GPT_RESEARCHER_SMART_TOKEN_LIMIT,
         "BROWSE_CHUNK_MAX_LENGTH": config.RESEARCH_GPT_RESEARCHER_BROWSE_CHUNK_MAX_LENGTH,
         "LANGUAGE": config.RESEARCH_GPT_RESEARCHER_LANGUAGE,
-        "LLM_KWARGS": _gpt_researcher_llm_kwargs_json(),
     }
     previous = {key: os.environ.get(key) for key in values}
     try:
-        for key, value in values.items():
-            if value is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = value
+        os.environ.update(values)
         yield
     finally:
         for key, value in previous.items():
@@ -591,80 +562,7 @@ def _gpt_researcher_environment():
                 os.environ[key] = value
 
 
-# Single source of truth for the empty-report failure marker. All empty
-# provider outputs raise ``"<source> returned an empty report"`` (including
-# the pre-existing Coding CLI / coding-agent messages) and the job-level
-# empty-report logging branch tests this marker, so rewording only requires
-# changing this constant.
-_EMPTY_REPORT_SUFFIX = "returned an empty report"
-
-
-def _is_empty_report_error(exc: BaseException) -> bool:
-    return _EMPTY_REPORT_SUFFIX in str(exc)
-
-
-def _require_non_empty_report(body: Optional[str], source: str) -> str:
-    """Strip a provider body and fail explicitly when it is empty.
-
-    Empty output must never become a successful artifact: callers turn the
-    ``RuntimeError("<source> returned an empty report")`` into a failed job
-    without Vault persistence or candidate auto-approval.
-    """
-    text = (body or "").strip()
-    if not text:
-        raise RuntimeError(f"{source} {_EMPTY_REPORT_SUFFIX}")
-    return text
-
-
-def _model_names_for_mode(mode: str) -> dict:
-    """Return configured model names relevant to *mode* for logging.
-
-    Only model names are included; prompts, API keys and report bodies are
-    never logged.
-    """
-    if mode == "auto":
-        return {
-            "smart_llm": config.RESEARCH_GPT_RESEARCHER_SMART_LLM,
-            "fast_llm": config.RESEARCH_GPT_RESEARCHER_FAST_LLM,
-            "strategic_llm": config.RESEARCH_GPT_RESEARCHER_STRATEGIC_LLM,
-            "internal": f"{config.RESEARCH_INTERNAL_PROVIDER}:{config.RESEARCH_INTERNAL_MODEL}",
-            "web": f"{config.RESEARCH_WEB_PROVIDER}:{config.RESEARCH_WEB_MODEL}",
-        }
-    if mode == RESEARCH_MODE_INTERNAL:
-        return {
-            "model": f"{config.RESEARCH_INTERNAL_PROVIDER}:{config.RESEARCH_INTERNAL_MODEL}"
-        }
-    if mode == RESEARCH_MODE_WEB:
-        return {
-            "model": f"{config.RESEARCH_WEB_PROVIDER}:{config.RESEARCH_WEB_MODEL}"
-        }
-    return {
-        "smart_llm": config.RESEARCH_GPT_RESEARCHER_SMART_LLM,
-        "fast_llm": config.RESEARCH_GPT_RESEARCHER_FAST_LLM,
-        "strategic_llm": config.RESEARCH_GPT_RESEARCHER_STRATEGIC_LLM,
-    }
-
-
-def _source_for_mode(mode: str) -> str:
-    """Return the artifact ``source`` persisted for *mode*.
-
-    Matches the frontmatter ``source`` written by ``build_markdown`` so job
-    completion logs correlate with stored Vault files by source.
-    """
-    return {
-        RESEARCH_MODE_INTERNAL: "internal-llm",
-        RESEARCH_MODE_WEB: "tavily-search",
-        RESEARCH_MODE_DEEP: "gpt-researcher",
-        RESEARCH_MODE_PROJECT: "coding-agent+gpt-researcher",
-    }.get(mode, "internal-llm")
-
-
 async def _run_gpt_researcher(query: str) -> str:
-    logger.info(
-        "GPT Researcher started source=gpt-researcher query_len=%d models=%s",
-        len(query or ""),
-        _model_names_for_mode(RESEARCH_MODE_DEEP),
-    )
     try:
         from gpt_researcher import GPTResearcher
     except Exception as exc:
@@ -737,20 +635,19 @@ def conduct_research(
     normalized_mode = _normalize_research_mode(mode)
 
     if normalized_mode == RESEARCH_MODE_INTERNAL:
-        body = llm_client.generate_llm_response(
+        return llm_client.generate_llm_response(
             provider=config.RESEARCH_INTERNAL_PROVIDER,
             model=config.RESEARCH_INTERNAL_MODEL,
             prompt=prompt,
             temperature=0.2,
             max_tokens=8000,
-        )
-        return _require_non_empty_report(body, "internal-llm")
+        ).strip()
 
     if normalized_mode == RESEARCH_MODE_WEB:
         from obsidian_ai_hub.handler.web_search import web_search
         from obsidian_ai_hub.handler.web_extract import web_extract
 
-        body = llm_client.generate_llm_response_with_tools(
+        return llm_client.generate_llm_response_with_tools(
             provider=config.RESEARCH_WEB_PROVIDER,
             model=config.RESEARCH_WEB_MODEL,
             prompt=prompt,
@@ -758,8 +655,7 @@ def conduct_research(
             temperature=0.2,
             max_tokens=8000,
             max_iterations=3,
-        )
-        return _require_non_empty_report(body, "tavily-search")
+        ).strip()
 
     if normalized_mode == RESEARCH_MODE_PROJECT:
         if project_id is None:
@@ -771,7 +667,7 @@ def conduct_research(
         return run_project_research_report(prompt, project_id=project_id)
 
     report = asyncio.run(_run_gpt_researcher(prompt))
-    return _require_non_empty_report(report, "GPT Researcher")
+    return report
 
 
 def build_markdown(
@@ -951,13 +847,7 @@ def _produce_research_report(
             project_id=route.project_id,
         )
         if not code_investigation_result or not code_investigation_result.strip():
-            logger.warning(
-                "Research produced an empty report mode=%s source=%s body_len=0 models=%s",
-                route.mode,
-                _source_for_mode(route.mode),
-                _model_names_for_mode(route.mode),
-            )
-            raise RuntimeError(f"Coding CLI {_EMPTY_REPORT_SUFFIX}")
+            raise RuntimeError("Coding CLI returned an empty report")
 
         # Stage 2: Deep research with GPT Researcher using code investigation result
         deep_template_path = config.RESEARCH_DEEP_PROMPT_PATH
@@ -992,15 +882,9 @@ def _produce_research_report(
         report_body = asyncio.run(_run_gpt_researcher(p2))
         report_body = (report_body or "").strip()
         if not report_body:
-            logger.warning(
-                "Research produced an empty report mode=%s source=%s body_len=0 models=%s",
-                route.mode,
-                _source_for_mode(route.mode),
-                _model_names_for_mode(route.mode),
-            )
-            raise RuntimeError(f"GPT Researcher {_EMPTY_REPORT_SUFFIX}")
+            raise RuntimeError("GPT Researcher returned an empty report")
 
-        source = _source_for_mode(route.mode)
+        source = "coding-agent+gpt-researcher"
     else:
         p = build_research_prompt(
             theme,
@@ -1017,33 +901,14 @@ def _produce_research_report(
             output_style=output_style,
             project_id=route.project_id,
         )
-        # Artifact source is the single source of truth for logging; the
-        # human-readable error name is derived from it for the exception only.
-        source = _source_for_mode(route.mode)
-        error_source = {"gpt-researcher": "GPT Researcher"}.get(source, source)
-        # Defensive re-validation: mocked conduct_research in tests (or a
-        # future provider path) must not let an empty body become an artifact.
-        try:
-            report_body = _require_non_empty_report(report_body, error_source)
-        except RuntimeError:
-            logger.warning(
-                "Research produced an empty report mode=%s source=%s body_len=0 models=%s",
-                route.mode,
-                source,
-                _model_names_for_mode(route.mode),
-            )
-            raise
+        source = {
+            RESEARCH_MODE_INTERNAL: "internal-llm",
+            RESEARCH_MODE_WEB: "tavily-search",
+            RESEARCH_MODE_DEEP: "gpt-researcher",
+        }.get(route.mode, "internal-llm")
 
     body = f"## テーマ\n{theme}\n\n## 調査結果レポート\n{report_body}"
     markdown = build_markdown(title, body, source=source, output_style=output_style)
-    logger.info(
-        "Research report ready mode=%s source=%s body_len=%d markdown_len=%d models=%s",
-        route.mode,
-        source,
-        len(report_body),
-        len(markdown),
-        _model_names_for_mode(route.mode),
-    )
 
     return ResearchReport(title=title, mode=route.mode, markdown=markdown)
 
@@ -1124,12 +989,6 @@ def run_theme_research(
     job = db.create_job(theme_id, project_id=theme_obj.get("project_id"))
     job_id = job["job_id"]
 
-    logger.info(
-        "Research job started job_id=%s requested_mode=%s models=%s",
-        job_id,
-        mode,
-        _model_names_for_mode(mode),
-    )
     try:
         db.update_job(job_id, status="running")
         report = run_research(
@@ -1153,23 +1012,8 @@ def run_theme_research(
         logger.info(
             "Research succeeded for theme '%s' (job=%s)", theme_obj["theme"], job_id
         )
-        logger.info(
-            "Research job completed job_id=%s mode=%s source=%s markdown_len=%d models=%s",
-            job_id,
-            report.mode,
-            _source_for_mode(report.mode),
-            len(report.markdown or ""),
-            _model_names_for_mode(report.mode),
-        )
     except Exception as exc:
         logger.exception("Research failed for theme '%s'", theme_obj["theme"])
-        if _is_empty_report_error(exc):
-            logger.warning(
-                "Research produced an empty report job_id=%s requested_mode=%s body_len=0 models=%s",
-                job_id,
-                mode,
-                _model_names_for_mode(mode),
-            )
         db.update_job(
             job_id,
             status="failed",
@@ -1317,12 +1161,6 @@ def execute_research_job_sync(
         db.update_job(job_id, status="failed", error=err_msg)
         return db.get_job(job_id)
 
-    logger.info(
-        "Research job started job_id=%s requested_mode=%s models=%s",
-        job_id,
-        mode,
-        _model_names_for_mode(mode),
-    )
     try:
         report = run_research(
             theme=theme_obj["theme"],
@@ -1347,14 +1185,6 @@ def execute_research_job_sync(
         logger.info(
             "Research succeeded for theme '%s' (job=%s)", theme_obj["theme"], job_id
         )
-        logger.info(
-            "Research job completed job_id=%s mode=%s source=%s markdown_len=%d models=%s",
-            job_id,
-            report.mode,
-            _source_for_mode(report.mode),
-            len(report.markdown or ""),
-            _model_names_for_mode(report.mode),
-        )
 
         try:
             save_research_to_vault(theme_id, job_id=job_id)
@@ -1371,13 +1201,6 @@ def execute_research_job_sync(
     except Exception as exc:
         err_msg = str(exc) or "Research process failed"
         logger.exception("Research failed for theme '%s'", theme_obj["theme"])
-        if _is_empty_report_error(exc):
-            logger.warning(
-                "Research produced an empty report job_id=%s requested_mode=%s body_len=0 models=%s",
-                job_id,
-                mode,
-                _model_names_for_mode(mode),
-            )
         db.update_job(job_id, status="failed", error=err_msg)
 
     return db.get_job(job_id)

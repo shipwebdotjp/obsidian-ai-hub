@@ -63,7 +63,7 @@ def load_weekly_records(target_date: datetime) -> list[dict]:
 
 def get_monthly_structured_record(
     date: datetime, weekly_records: list[dict]
-) -> dict:
+) -> dict | None:
     month_id = date.strftime("%Y-%m")
     generated_at = datetime.now().isoformat()
 
@@ -92,108 +92,91 @@ def get_monthly_structured_record(
         "items": [],
     }
 
-    rendered_prompt = prompt.render_prompt(
-        config.SUMMARIZE_MONTH_PROMPT_PATH,
-        {
-            "WEEKLY_RECORDS": json.dumps(
-                weekly_records, ensure_ascii=False, indent=2
-            ),
-            "TOPIC_CANDIDATES": json.dumps(TOPIC_ENUM, ensure_ascii=False),
-        },
-    )
-    result = llm_client.generate_llm_response_detailed(
-        provider=config.MAKE_TODAY_TARGET_PROVIDER,
-        model=config.MAKE_TODAY_TARGET_MODEL,
-        prompt=rendered_prompt,
-        max_tokens=config.SUMMARIZE_MONTH_MAX_TOKENS,
-    )
-    call_id = result.call_id
-
-    if result.finish_reason == "length":
-        raise ValueError(
-            "Failed to generate monthly structured record "
-            f"(output_truncated, call_id={call_id})."
-        )
-
-    cleaned_response = result.text.strip()
-    if cleaned_response.startswith("```"):
-        lines = cleaned_response.splitlines()
-        if len(lines) >= 2:
-            if lines[0].startswith("```json") or lines[0].startswith("```"):
-                cleaned_response = "\n".join(lines[1:-1])
-
+    data: dict = {}
     try:
+        rendered_prompt = prompt.render_prompt(
+            config.SUMMARIZE_MONTH_PROMPT_PATH,
+            {
+                "WEEKLY_RECORDS": json.dumps(
+                    weekly_records, ensure_ascii=False, indent=2
+                ),
+                "TOPIC_CANDIDATES": json.dumps(TOPIC_ENUM, ensure_ascii=False),
+            },
+        )
+        response = llm_client.generate_llm_response(
+            provider=config.MAKE_TODAY_TARGET_PROVIDER,
+            model=config.MAKE_TODAY_TARGET_MODEL,
+            prompt=rendered_prompt,
+            max_tokens=16384,
+        )
+
+        cleaned_response = response.strip()
+        if cleaned_response.startswith("```"):
+            lines = cleaned_response.splitlines()
+            if len(lines) >= 2:
+                if lines[0].startswith("```json") or lines[0].startswith("```"):
+                    cleaned_response = "\n".join(lines[1:-1])
+
         data = json.loads(cleaned_response)
-    except json.JSONDecodeError as e:
-        raise ValueError(
-            "Failed to generate monthly structured record "
-            f"(invalid_json, call_id={call_id})."
-        ) from e
 
-    if not isinstance(data, dict):
-        raise ValueError(
-            "Failed to generate monthly structured record "
-            f"(not_json_object, call_id={call_id})."
-        )
+        scalar_fields = {"summary"}
+        list_fields = {
+            "keywords",
+            "topics",
+            "highlights",
+            "progress",
+            "changes",
+            "learnings",
+            "reflections",
+            "patterns",
+            "gratitude",
+        }
 
-    scalar_fields = {"summary"}
-    list_fields = {
-        "keywords",
-        "topics",
-        "highlights",
-        "progress",
-        "changes",
-        "learnings",
-        "reflections",
-        "patterns",
-        "gratitude",
-    }
+        for key in scalar_fields | list_fields | {"people"}:
+            if key in data:
+                val = data[key]
+                if val is None:
+                    continue
 
-    for key in scalar_fields | list_fields | {"people"}:
-        if key in data:
-            val = data[key]
-            if val is None:
-                continue
-
-            if key == "people" and isinstance(val, list):
-                normalized_people = []
-                for p in val:
-                    if isinstance(p, dict) and p.get("name"):
-                        normalized_people.append(
-                            {
-                                "name": str(p.get("name", "")),
-                                "note": str(p.get("note", "")),
-                            }
+                if key == "people" and isinstance(val, list):
+                    normalized_people = []
+                    for p in val:
+                        if isinstance(p, dict) and p.get("name"):
+                            normalized_people.append(
+                                {
+                                    "name": str(p.get("name", "")),
+                                    "note": str(p.get("note", "")),
+                                }
+                            )
+                    record["people"] = normalized_people
+                elif key in scalar_fields and isinstance(val, (str, int, float)):
+                    record[key] = str(val)
+                elif key in list_fields and isinstance(val, list):
+                    clean_list = [str(item) for item in val if item not in (None, "")]
+                    if key == "keywords":
+                        record["keywords"] = normalize_keywords(val)
+                    elif key == "topics":
+                        record["topics"] = normalize_topics(clean_list)
+                    elif key in MONTH_ITEM_KINDS:
+                        record["items"].extend(
+                            {"kind": key, "body": item, "display_order": idx}
+                            for idx, item in enumerate(clean_list)
                         )
-                record["people"] = normalized_people
-            elif key in scalar_fields and isinstance(val, (str, int, float)):
-                record[key] = str(val)
-            elif key in list_fields and isinstance(val, list):
-                clean_list = [str(item) for item in val if item not in (None, "")]
-                if key == "keywords":
-                    record["keywords"] = normalize_keywords(val)
-                elif key == "topics":
-                    record["topics"] = normalize_topics(clean_list)
-                elif key in MONTH_ITEM_KINDS:
-                    record["items"].extend(
-                        {"kind": key, "body": item, "display_order": idx}
-                        for idx, item in enumerate(clean_list)
-                    )
 
-    # display_order を kind 単位で振り直す
-    record["items"].sort(
-        key=lambda x: (MONTH_ITEM_KINDS.index(x["kind"]), x["display_order"])
-    )
-    for kind in MONTH_ITEM_KINDS:
-        kind_items = [i for i in record["items"] if i["kind"] == kind]
-        for idx, item in enumerate(kind_items):
-            item["display_order"] = idx
-
-    if not record.get("summary") or not str(record["summary"]).strip():
-        raise ValueError(
-            "Failed to generate monthly structured record "
-            f"(empty_summary, call_id={call_id})."
+        # display_order を kind 単位で振り直す
+        record["items"].sort(
+            key=lambda x: (MONTH_ITEM_KINDS.index(x["kind"]), x["display_order"])
         )
+        for kind in MONTH_ITEM_KINDS:
+            kind_items = [i for i in record["items"] if i["kind"] == kind]
+            for idx, item in enumerate(kind_items):
+                item["display_order"] = idx
+
+    except Exception as e:
+        logger.error(
+            f"Failed to generate or parse structured monthly record: {e}", exc_info=True
+        )
+        return None
 
     # Collect union of project_ids and unresolved project_candidates from weekly_records without LLM
     from obsidian_ai_hub.summary.project_utils import (
@@ -270,8 +253,10 @@ def summarize_month(target_date: datetime) -> dict:
     if not weekly_records:
         logger.warning(f"No weekly records found for {target_date.strftime('%Y-%m')}")
 
-    # 2. 構造化レコードの生成（検証失敗時は例外のまま送出し、保存しない）
+    # 2. 構造化レコードの生成
     structured_record = get_monthly_structured_record(target_date, weekly_records)
+    if structured_record is None:
+        raise ValueError("Failed to generate monthly structured record: summary is missing or empty.")
 
     # 3. SQLiteへの保存
     return upsert_summary_record(structured_record)

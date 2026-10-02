@@ -52,7 +52,6 @@ def _ref(path: str) -> dict[str, str]:
 
 
 def _setup_mock_coding(monkeypatch, repo_path, orch_text="report content"):
-    monkeypatch.setattr("obsidian_ai_hub.utils.config.VAULT_PATH", repo_path)
     monkeypatch.setattr(
         projects_service,
         "get_project_detail",
@@ -163,8 +162,10 @@ def test_coding_narrative_to_template_to_vault_file_write(tmp_path, test_memory_
 
     assert outcome.kind == "completed"
 
-    # Verify real file was written to disk at tmp_path/summary.md
-    written_file = tmp_path / "summary.md"
+    from obsidian_ai_hub.utils import config as app_config
+
+    # Verify real file was written to disk inside the test VAULT_PATH
+    written_file = app_config.VAULT_PATH / "summary.md"
     assert written_file.exists()
     assert written_file.read_text("utf-8") == "# Executive Summary\n\nThe coordinator report for feature XYZ."
 

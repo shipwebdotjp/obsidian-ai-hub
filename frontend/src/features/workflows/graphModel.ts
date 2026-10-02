@@ -80,8 +80,6 @@ export const STRICT_DEFAULT_CAPABILITY_KEYS: ReadonlySet<string> = new Set([
   "calendar_read",
   "reminders_read",
   "research_context_snapshot",
-  "gmail_search_messages",
-  "gmail_read_message",
   "hitl_wait",
 ]);
 

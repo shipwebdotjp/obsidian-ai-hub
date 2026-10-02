@@ -39,8 +39,6 @@ uv run -m obsidian_ai_hub --research-agent --theme "Local-first AI tools" \
 
 非 `project` モードでは、収集コンテキスト（承認コメント・活動・既存テーマ・Vault 検索結果）をモード決定後に一度だけ収集し、最終レポート生成に渡します。保存用タイトルは `theme` のみを元に生成します（`why_now`・承認コメント・収集コンテキスト・調査プロンプト本文は使いません）。レポートは `<title>_<job_id>.md` として Vault へ保存されます。
 
-`project` 以外のモード（`internal` / `web` / `deep`）にも、`project` と同じ保存停止契約が適用されます。プロバイダから返った本文が空・空白のみの場合は、後続処理や Vault 保存・候補テーマ自動承認を行わず、ジョブは `failed` になります。失敗したジョブは詳細パネルの **再実行** から手動で再実行します（初段から再実行。自動再試行や別モデルへの自動切替はありません）。
-
 テーマ候補に追加します（任意で方向性を指定）。
 
 ```bash
@@ -112,15 +110,11 @@ research:
     gpt_researcher:
       retriever: tavily,mcp
       fast_llm: openai:gpt-5.6-terra
-      smart_llm: openai:gpt-6-astra
+      smart_llm: openai:gpt-5.6-sol
       strategic_llm: openai:gpt-5.6-terra
-      # GPT-6 は推論設定時に temperature を送ると OpenAI API が 400 を返します。
-      # 全 LLM ロールに温度指定を送らない（OpenAI リクエストから省略する）意味です。
-      llm_kwargs:
-        temperature: null
 ```
 
-ディープリサーチ（GPT Researcher）を使うには、`TAVILY_API_KEY` などの資格情報が必要です。`llm_kwargs` はマップ形式で指定し、GPT Researcher 実行中だけ JSON 化した `LLM_KWARGS` 環境変数として渡されます（実行後は復元されます）。マップ以外・JSON 化できない値は起動時に明示的に失敗します。
+ディープリサーチ（GPT Researcher）を使うには、`TAVILY_API_KEY` などの資格情報が必要です。
 
 ## 次に読む
 

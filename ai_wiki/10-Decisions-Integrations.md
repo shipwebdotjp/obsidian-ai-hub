@@ -211,14 +211,6 @@ Research 詳細から HITL に移動すると、従来はテーマを含む質�
 - **二段階の失敗規則:** 第1段階（Coding CLI）または第2段階（GPT Researcher）のいずれかで例外や空出力が発生した場合は、後続処理を行わずジョブを `failed` とする（Vault 保存・候補テーマ自動承認は行わない）。再実行は第1段階からやり直す。
 - **保存方針:** Deep（GPT Researcher）の最終出力のみを ResearchReport および Vault に保存する。中間のコード調査結果は DB・Vault・レポート付録へ保存しない。保存 Markdown の `source` は `coding-agent+gpt-researcher` とし、`research_jobs.mode` は互換性維持のため `project` のまま記載する。
 
-### 補足改定（2026-10-01: 全経路の非空完了条件・手動再実行・GPT-6 Astra 移行）
-
-deep モードのジョブ `rjob_7f6fd5534728` が空レポートのまま成功・Vault 保存されていた。原因は、GPT Researcher が gpt-6-astra に非対応の temperature を渡して OpenAI API から 400 を受けて空文字を返し、汎用経路に空出力検証がなかったことである。当該の誤成功ジョブと Vault ファイルは補正せず、そのまま残す。
-
-- **完了条件:** 成果物の「非空であること」を全経路（internal / web / deep / project）の完了条件にする。プロバイダから返った本文は Markdown 化する前に `strip()` して検証し、空なら `RuntimeError("<source> returned an empty report")` としてジョブを `failed` にする。検証失敗時は Vault 保存・候補テーマ自動承認を一切行わない。project の二段階失敗規則はこの全経路契約に包含される。
-- **復旧方針:** 復旧は既存の失敗ジョブ「再実行」導線をそのまま使う。初段からの手動再実行であり、自動再試行・別モデルへの自動フォールバック・既存誤成功データの補正は行わない。
-- **GPT-6 Astra 移行:** GPT Researcher を 0.16.0 系（Python 3.12 以上）へ更新する。`smart_llm` のみ `openai:gpt-6-astra` とし、fast / strategic は変更しない。`research.deep.gpt_researcher.llm_kwargs: { temperature: null }` を JSON 化した `LLM_KWARGS` 環境変数として GPT Researcher 実行中だけ設定・復元し、全 LLM ロールの温度指定を OpenAI リクエストから省略する。GPT-6 では推論設定時に temperature を送らない。非マップまたは JSON 化できない設定は起動時に明示的に失敗させる。
-
 # 欠損サマリの手動回復
 
 一覧では、実際の入力データがあるのに未生成の日次サマリ、そこから導かれる週次サマリ、週次サマリから導かれる月次サマリを復旧対象として示す。日・週・月の順に手動生成できるようにし、既存サマリの再生成も同じAPIで upsert する。再生成は手編集を上書きするため、UIで明示的な確認を要求する。自動スケジューラの再試行方針はこの導線と分離して維持する。

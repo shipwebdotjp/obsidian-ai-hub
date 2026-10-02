@@ -366,39 +366,6 @@ RESEARCH_GPT_RESEARCHER_LANGUAGE = str(
     _config_value("research", "deep", "gpt_researcher", "language", default="japanese")
 )
 
-
-def _load_gpt_researcher_llm_kwargs() -> dict | None:
-    """Load ``research.deep.gpt_researcher.llm_kwargs`` as a JSON-serializable map.
-
-    The value is forwarded to GPT Researcher through the ``LLM_KWARGS``
-    environment variable (JSON-encoded) while a deep research run executes.
-    ``{"temperature": null}`` omits the temperature parameter from OpenAI
-    requests for every LLM role, which GPT-6 requires when reasoning is
-    configured. A non-map or non-JSON-serializable value fails fast here so
-    a misconfiguration never reaches the API as a silent empty report.
-    """
-    raw = _config_value("research", "deep", "gpt_researcher", "llm_kwargs")
-    if raw is None:
-        return None
-    if not isinstance(raw, dict):
-        raise RuntimeError(
-            "Invalid configuration: research.deep.gpt_researcher.llm_kwargs "
-            f"must be a mapping, got {type(raw).__name__}"
-        )
-    try:
-        import json as _json
-
-        _json.dumps(raw)
-    except (TypeError, ValueError) as exc:
-        raise RuntimeError(
-            "Invalid configuration: research.deep.gpt_researcher.llm_kwargs "
-            f"must be JSON-serializable: {exc}"
-        ) from exc
-    return dict(raw)
-
-
-RESEARCH_GPT_RESEARCHER_LLM_KWARGS = _load_gpt_researcher_llm_kwargs()
-
 MAKE_TODAY_TARGET_PROVIDER = str(
     _config_value("llm", "make_today_target", "provider", default="ollama")
 )
@@ -1215,15 +1182,6 @@ IMAGE_GENERATION_MAX_INPUT_BYTES = _positive_int(
         default=8 * 1024 * 1024,
     ),
     8 * 1024 * 1024,
-)
-
-# Monthly summary output budget. Provider/model are inherited from
-# make_today_target; only max_tokens is month-specific. Positive integers
-# only; non-positive or non-integer values fall back to the default.
-# Unused tokens are not consumed; adjust down to the provider limit.
-SUMMARIZE_MONTH_MAX_TOKENS = _positive_int(
-    _config_value("llm", "summarize_month", "max_tokens", default=65536),
-    65536,
 )
 
 if IS_TEST_ENV:
