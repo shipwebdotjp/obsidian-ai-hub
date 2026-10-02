@@ -148,10 +148,14 @@ Capability の選択肢には、書込・外部操作を含むものに **書込
   Loop は `final_state.*` / `iterations` / `exit_reason`、Loop Result は `state_schema` の項目。
   Capability は structured かつ strict がオンの Node の宣言済み必須フィールドのみ表示します。
   出力全体・opaque / receipt・非 strict・未宣言・必須でない経路は表示されません。
+  `coding_cli` / `specialist_agent` / `research_agent`（`mixed`）は例外で、
+  `narrative.text`（自由文）と条件用の `receipt` フィールド（`status` など）だけを表示します。
+  表示される候補は入力先に応じて絞られます（本文・表示用入力には `narrative` のみ、
+  条件には `receipt` の条件可フィールドのみ、ID 系は表示されません）。
   直接入力することもできますが、公開時のサーバー検証で拒否されます。
 - `loop.state.<field>` / `loop.input.<field>` / `loop.iteration` — Loop 子グラフ内のみ。
 
-Capability の設定欄には出力契約（`structured` / `receipt` / `opaque`）が表示されます。
+Capability の設定欄には出力契約（`structured` / `receipt` / `mixed` / `opaque`）が表示されます。
 `structured` の読み取り系と `hitl_wait` を選ぶと strict が自動でオンになり、
 それ以外の Capability では strict を指定できません（チェックは無効化されます）。
 

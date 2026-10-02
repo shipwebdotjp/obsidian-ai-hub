@@ -288,6 +288,175 @@ def test_strict_capability_reference_errors():
     assert bind_res["code"] == "invalid_strict_reference"
 
 
+def _mixed_source_builder(key="specialist_agent"):
+    """GraphBuilder with one mixed source node; returns (gb, source_id)."""
+    gb = builder.GraphBuilder("Mixed", "")
+    target = {"agent_id": "agent_1"} if key == "specialist_agent" else None
+    inputs = (
+        {"task": "analyze"}
+        if key == "specialist_agent"
+        else {"theme": "mixed theme"}
+    )
+    config = {"capability_key": key, "inputs": inputs}
+    if target is not None:
+        config["target"] = target
+    res = gb.add_node("capability", "Source", config)
+    assert res["ok"]
+    return gb, res["node_id"]
+
+
+def test_builder_binds_mixed_narrative_to_payload_field():
+    """Narrative binds into declared payload fields without strict flags."""
+    gb, source_id = _mixed_source_builder()
+    write_res = gb.add_node(
+        "capability",
+        "Write",
+        {"capability_key": "vault_write_file", "inputs": {"relative_path": "o.md"}},
+    )
+    assert write_res["ok"]
+
+    bound = gb.bind_field(
+        write_res["node_id"],
+        "inputs.content",
+        {"$ref": f"nodes.{source_id}.output.narrative.text"},
+    )
+    assert bound["ok"]
+    source = next(n for n in gb.nodes if n["node_id"] == source_id)
+    assert source["config"].get("fail_on_output_mismatch") is not True
+
+
+def test_builder_rejects_mixed_narrative_to_forbidden_fields():
+    """Narrative never binds into paths, commands, or delegate targets."""
+    gb, source_id = _mixed_source_builder()
+    write_res = gb.add_node(
+        "capability",
+        "Write",
+        {"capability_key": "vault_write_file", "inputs": {"content": "b"}},
+    )
+    assert write_res["ok"]
+    bad_path = gb.bind_field(
+        write_res["node_id"],
+        "inputs.relative_path",
+        {"$ref": f"nodes.{source_id}.output.narrative.text"},
+    )
+    assert not bad_path["ok"]
+    assert bad_path["code"] == "invalid_strict_reference"
+
+    shell_res = gb.add_node(
+        "capability", "Shell", {"capability_key": "run_shell", "inputs": {}}
+    )
+    assert shell_res["ok"]
+    bad_command = gb.bind_field(
+        shell_res["node_id"],
+        "inputs.command",
+        {"$ref": f"nodes.{source_id}.output.narrative.text"},
+    )
+    assert not bad_command["ok"]
+    assert bad_command["code"] == "invalid_strict_reference"
+
+    spec_res = gb.add_node(
+        "capability",
+        "Delegate",
+        {
+            "capability_key": "specialist_agent",
+            "target": {"agent_id": "agent_1"},
+            "inputs": {"task": "x"},
+        },
+    )
+    assert spec_res["ok"]
+    bad_target = gb.bind_field(
+        spec_res["node_id"],
+        "target.agent_id",
+        {"$ref": f"nodes.{source_id}.output.narrative.text"},
+    )
+    assert not bad_target["ok"]
+    assert bad_target["code"] == "invalid_strict_reference"
+
+
+def test_builder_mixed_receipt_condition_binding():
+    """Condition-usable receipt fields bind into edge conditions only."""
+    gb, source_id = _mixed_source_builder("research_agent")
+    ok_res = gb.add_node("terminal", "Ok", {"outcome": "success"})
+    ng_res = gb.add_node("terminal", "Ng", {"outcome": "failure"})
+    assert ok_res["ok"] and ng_res["ok"]
+
+    good = gb.add_edge(
+        source_id,
+        ng_res["node_id"],
+        condition={
+            "from_path": f"nodes.{source_id}.output.receipt.is_published",
+            "operator": "equals",
+            "value": True,
+        },
+    )
+    assert good["ok"]
+
+    bad_narrative = gb.add_edge(
+        source_id,
+        ok_res["node_id"],
+        condition={
+            "from_path": f"nodes.{source_id}.output.narrative.text",
+            "operator": "exists",
+        },
+    )
+    assert not bad_narrative["ok"]
+    assert bad_narrative["code"] == "invalid_strict_reference"
+
+    bad_id = gb.add_edge(
+        source_id,
+        ok_res["node_id"],
+        condition={
+            "from_path": f"nodes.{source_id}.output.receipt.job_id",
+            "operator": "exists",
+        },
+    )
+    assert not bad_id["ok"]
+    assert bad_id["code"] == "invalid_strict_reference"
+
+
+def test_builder_mixed_text_template_binding():
+    """Text Template inputs accept narrative but never receipt."""
+    gb, source_id = _mixed_source_builder()
+    tmpl_res = gb.add_node(
+        "text_template",
+        "Compose",
+        {"inputs": {}, "template": "{{ report }}"},
+    )
+    assert tmpl_res["ok"]
+
+    good = gb.bind_field(
+        tmpl_res["node_id"],
+        "inputs.report",
+        {"$ref": f"nodes.{source_id}.output.narrative.text"},
+    )
+    assert good["ok"]
+
+    bad = gb.bind_field(
+        tmpl_res["node_id"],
+        "inputs.report",
+        {"$ref": f"nodes.{source_id}.output.receipt.status"},
+    )
+    assert not bad["ok"]
+    assert bad["code"] == "invalid_strict_reference"
+
+
+def test_catalog_mixed_field_contracts():
+    """Designer catalog exposes field contracts for mixed keys only."""
+    task_store.sync_capabilities()
+    for key in ("coding_cli", "specialist_agent", "research_agent"):
+        det = catalog.catalog_get_details(target="capability", item_id=key)
+        assert det["ok"] is True
+        assert det["output_contract_class"] == "mixed"
+        contracts = det["output_field_contracts"]
+        assert contracts["narrative.text"]["value_kind"] == "narrative"
+        assert contracts["narrative.text"]["allowed_uses"] == ["payload"]
+    det = catalog.catalog_get_details(
+        target="capability", item_id="vault_write_file"
+    )
+    assert det["ok"] is True
+    assert det["output_field_contracts"] is None
+
+
 def test_composer_turn_budget_exceeded():
     """Verify composer raises TurnBudgetExceededError when max_turns is reached."""
     # Endless tool call sequence

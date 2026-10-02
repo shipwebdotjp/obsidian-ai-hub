@@ -197,7 +197,8 @@ export default function WorkflowEditorPage() {
     // P1 boundary: only structured (`strict_fields`) schemas feed reference
     // candidates. Receipt/opaque (`forbidden`) schemas stay available via the
     // raw capability record for display, but never offer `nodes.*.output`
-    // candidates the backend would reject.
+    // candidates the backend would reject. Mixed capabilities are handled
+    // separately via `capabilityOutputFieldContracts` below.
     const map: Record<string, WorkflowSchemaField> = {};
     for (const capability of capabilities) {
       if (
@@ -205,6 +206,18 @@ export default function WorkflowEditorPage() {
         capability.output_reference_policy !== "forbidden"
       ) {
         map[capability.capability_key] = capability.output_schema;
+      }
+    }
+    return map;
+  }, [capabilities]);
+  const capabilityOutputFieldContracts = useMemo(() => {
+    const map: Record<
+      string,
+      Record<string, { value_kind: string; allowed_uses: string[] }>
+    > = {};
+    for (const capability of capabilities) {
+      if (capability.output_field_contracts) {
+        map[capability.capability_key] = capability.output_field_contracts;
       }
     }
     return map;
@@ -228,6 +241,9 @@ export default function WorkflowEditorPage() {
       ? buildReferenceGroups(nodes, scopeOf(selectedNode), inputsSchema, {
           excludeNodeId: selectedNode.node_id,
           capabilityOutputSchemas,
+          capabilityOutputFieldContracts,
+          // Text Template inputs accept narrative but never receipt.
+          acceptedKinds: ["structured", "narrative"],
         })
       : [];
   const textTemplateVariables = templateVariables(
@@ -239,6 +255,7 @@ export default function WorkflowEditorPage() {
     if (!variable?.refPath || !selectedNode) return null;
     return referenceSchemaAt(nodes, variable.refPath, inputsSchema, {
       capabilityOutputSchemas,
+      capabilityOutputFieldContracts,
       scopeId: scopeOf(selectedNode),
     });
   };
@@ -439,11 +456,16 @@ export default function WorkflowEditorPage() {
     return nodes.filter((node) => scopeOf(node) === scopeOf(source) && node.node_id !== sourceId);
   };
 
-  const groupsForNode = (nodeId: string): ReferenceGroup[] => {
+  const groupsForNode = (
+    nodeId: string,
+    filter: { conditionOnly?: boolean } = {},
+  ): ReferenceGroup[] => {
     const node = nodes.find((item) => item.node_id === nodeId);
     return node
       ? buildReferenceGroups(nodes, scopeOf(node), inputsSchema, {
           capabilityOutputSchemas,
+          capabilityOutputFieldContracts,
+          conditionOnly: filter.conditionOnly,
         })
       : [];
   };
@@ -755,10 +777,15 @@ export default function WorkflowEditorPage() {
                   edgeSource
                     ? conditionCandidates(nodes, edgeSource, inputsSchema, {
                         capabilityOutputSchemas,
+                        capabilityOutputFieldContracts,
                       })
                     : []
                 }
-                groups={edgeSource ? groupsForNode(edgeSource) : []}
+                groups={
+                  edgeSource
+                    ? groupsForNode(edgeSource, { conditionOnly: true })
+                    : []
+                }
                 onChange={setEdgeCondition}
               />
             )}
@@ -900,6 +927,7 @@ export default function WorkflowEditorPage() {
                           {
                             excludeNodeId: selectedNode.node_id,
                             capabilityOutputSchemas,
+                            capabilityOutputFieldContracts,
                           },
                         )}
                       />
@@ -1013,6 +1041,7 @@ export default function WorkflowEditorPage() {
                         {
                           excludeNodeId: selectedNode.node_id,
                           capabilityOutputSchemas,
+                          capabilityOutputFieldContracts,
                         },
                       )}
                     />
@@ -1149,6 +1178,7 @@ export default function WorkflowEditorPage() {
                         {
                           excludeNodeId: selectedNode.node_id,
                           capabilityOutputSchemas,
+                          capabilityOutputFieldContracts,
                         },
                       )}
                     />
@@ -1271,7 +1301,12 @@ export default function WorkflowEditorPage() {
                         nodes,
                         null,
                         inputsSchema,
-                        { capabilityOutputSchemas },
+                        {
+                          capabilityOutputSchemas,
+                          capabilityOutputFieldContracts,
+                          // Loop state accepts structured values only.
+                          acceptedKinds: ["structured"],
+                        },
                       )}
                     />
                   </div>
@@ -1327,14 +1362,22 @@ export default function WorkflowEditorPage() {
                           nodes,
                           selectedNode.node_id,
                           inputsSchema,
-                          { capabilityOutputSchemas },
+                          {
+                            capabilityOutputSchemas,
+                            capabilityOutputFieldContracts,
+                            conditionOnly: true,
+                          },
                         ),
                       )}
                       groups={buildReferenceGroups(
                         nodes,
                         selectedNode.node_id,
                         inputsSchema,
-                        { capabilityOutputSchemas },
+                        {
+                          capabilityOutputSchemas,
+                          capabilityOutputFieldContracts,
+                          conditionOnly: true,
+                        },
                       )}
                       onChange={(condition) =>
                         updateNodeConfig({ continuation_condition: condition })
@@ -1364,7 +1407,12 @@ export default function WorkflowEditorPage() {
                       nodes,
                       selectedNode.parent_loop_node_id ?? null,
                       inputsSchema,
-                      { capabilityOutputSchemas },
+                      {
+                        capabilityOutputSchemas,
+                        capabilityOutputFieldContracts,
+                        // Loop state accepts structured values only.
+                        acceptedKinds: ["structured"],
+                      },
                     )}
                   />
                 </div>
@@ -1486,9 +1534,16 @@ export default function WorkflowEditorPage() {
                         nodes,
                         edge.source_node_id,
                         inputsSchema,
-                        { capabilityOutputSchemas },
+                        {
+                          capabilityOutputSchemas,
+                          capabilityOutputFieldContracts,
+                        },
                       )}
-                      groups={groupsForNode(edge.source_node_id)}
+                      groups={
+                        groupsForNode(edge.source_node_id, {
+                          conditionOnly: true,
+                        })
+                      }
                       onChange={(condition) => {
                         setEdges((prev) =>
                           prev.map((item) =>

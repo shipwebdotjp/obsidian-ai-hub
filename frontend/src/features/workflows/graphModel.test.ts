@@ -594,6 +594,84 @@ describe("llm node", () => {
         ?.type,
     ).toBe("string");
   });
+
+  it("offers mixed narrative and condition receipt fields without strict", () => {
+    const groupPaths = (groups: { fields: { path: string }[] }[]): string[] =>
+      groups.flatMap((group) => group.fields.map((field) => field.path));
+    const contracts = {
+      specialist_agent: {
+        "receipt.status": { value_kind: "receipt", allowed_uses: ["condition"] },
+        "receipt.child_run_id": { value_kind: "receipt", allowed_uses: [] },
+        "narrative.text": { value_kind: "narrative", allowed_uses: ["payload"] },
+      },
+    };
+    const spec = node("spec", "capability", {
+      capability_key: "specialist_agent",
+      target: { agent_id: "a1" },
+      inputs: { task: "x" },
+    });
+    const refs = groupPaths(
+      buildReferenceGroups([spec], null, { type: "object" }, {
+        capabilityOutputFieldContracts: contracts,
+      }),
+    );
+    expect(refs).toContain("nodes.spec.output.narrative.text");
+    expect(refs).toContain("nodes.spec.output.receipt.status");
+    // Identifier receipts and whole outputs are never offered.
+    expect(refs).not.toContain("nodes.spec.output.receipt.child_run_id");
+    expect(refs).not.toContain("nodes.spec.output");
+    expect(
+      referenceSchemaAt(
+        [spec],
+        "nodes.spec.output.narrative.text",
+        { type: "object" },
+        { capabilityOutputFieldContracts: contracts },
+      )?.type,
+    ).toBe("string");
+  });
+
+  it("filters mixed candidates by destination", () => {
+    const groupPaths = (groups: { fields: { path: string }[] }[]): string[] =>
+      groups.flatMap((group) => group.fields.map((field) => field.path));
+    const contracts = {
+      research_agent: {
+        "receipt.status": { value_kind: "receipt", allowed_uses: ["condition"] },
+        "receipt.is_published": { value_kind: "receipt", allowed_uses: ["condition"] },
+        "receipt.job_id": { value_kind: "receipt", allowed_uses: [] },
+        "narrative.text": { value_kind: "narrative", allowed_uses: ["payload"] },
+      },
+    };
+    const options = { capabilityOutputFieldContracts: contracts };
+    const res = node("res", "capability", {
+      capability_key: "research_agent",
+      inputs: { theme: "x" },
+    });
+    const end = node("end", "terminal", { outcome: "success" });
+
+    const payloadRefs = groupPaths(
+      buildReferenceGroups([res], null, { type: "object" }, {
+        ...options,
+        acceptedKinds: ["structured", "narrative"],
+      }),
+    );
+    expect(payloadRefs).toContain("nodes.res.output.narrative.text");
+    expect(payloadRefs).not.toContain("nodes.res.output.receipt.status");
+
+    const structuredRefs = groupPaths(
+      buildReferenceGroups([res], null, { type: "object" }, {
+        ...options,
+        acceptedKinds: ["structured"],
+      }),
+    );
+    expect(structuredRefs).not.toContain("nodes.res.output.narrative.text");
+    expect(structuredRefs).not.toContain("nodes.res.output.receipt.status");
+
+    const condRefs = conditionCandidates([res, end], "res", { type: "object" }, options);
+    expect(condRefs).toContain("nodes.res.output.receipt.status");
+    expect(condRefs).toContain("nodes.res.output.receipt.is_published");
+    expect(condRefs).not.toContain("nodes.res.output.narrative.text");
+    expect(condRefs).not.toContain("nodes.res.output.receipt.job_id");
+  });
 });
 
 describe("nodeOptionLabel", () => {

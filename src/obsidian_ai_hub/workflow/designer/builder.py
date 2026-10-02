@@ -30,6 +30,7 @@ from obsidian_ai_hub.workflow.models import (
     MAX_ITERATIONS,
     MAX_NODES,
     NODE_TYPES,
+    REF_KEY,
     TERMINAL_OUTCOMES,
     iter_references,
 )
@@ -245,12 +246,16 @@ class GraphBuilder:
         ]
         return {"ok": True, "removed_node_ids": sorted(to_remove)}
 
-    def _check_and_apply_strict_references(self, value: Any) -> list[str]:
+    def _check_and_apply_strict_references(
+        self, value: Any, *, destination: Optional[dict[str, Any]] = None
+    ) -> list[str]:
         """Inspect value for capability references.
 
         If referencing a structured capability, enforces strict policy and automatically
         sets fail_on_output_mismatch: true on the source capability node.
-        Returns a list of error issue strings if invalid.
+        ``mixed`` (receipt/narrative) sources are checked against the
+        destination's accepted value kinds instead; they never auto-set
+        strict. Returns a list of error issue strings if invalid.
         """
         by_id = {str(n["node_id"]): n for n in self.nodes}
         errors: list[str] = []
@@ -279,9 +284,26 @@ class GraphBuilder:
                     )
                     continue
 
+                if contract == "mixed":
+                    errors.extend(
+                        self._check_mixed_reference(
+                            ref, key, source_id, tail, destination
+                        )
+                    )
+                    continue
+
                 if contract != "structured":
                     errors.append(
                         f"output_contract: Capability '{key}' (contract={contract}) の出力は参照できません"
+                    )
+                    continue
+
+                if destination is not None and not self._destination_accepts_structured(
+                    destination
+                ):
+                    errors.append(
+                        f"output_contract: Capability '{key}' の出力は target にバインドできません"
+                        "（target はリテラル ID が必要です）"
                     )
                     continue
 
@@ -312,16 +334,236 @@ class GraphBuilder:
 
         return errors
 
+    @staticmethod
+    def _destination_accepts_structured(destination: dict[str, Any]) -> bool:
+        """True when a structured source may flow into the destination."""
+        # Capability targets must be literal IDs; everything else that reaches
+        # this check accepts structured values.
+        return destination.get("kind") != "target"
+
+    def _check_mixed_reference(
+        self,
+        ref: str,
+        key: str,
+        source_id: str,
+        tail: list[str],
+        destination: Optional[dict[str, Any]],
+    ) -> list[str]:
+        """Enforce receipt/narrative flow rules for one mixed-source reference."""
+        from obsidian_ai_hub.tasks.capability_schemas import get_output_field_contract
+
+        field_path = ".".join(str(s) for s in tail)
+        field = get_output_field_contract(key, field_path)
+        kind = field["value_kind"]
+        uses = field["allowed_uses"]
+        dest_kind = (destination or {}).get("kind")
+
+        if dest_kind == "target":
+            return [
+                f"output_contract: Capability '{key}' の出力は target にバインドできません"
+                "（target はリテラル ID が必要です）"
+            ]
+        if kind == "opaque":
+            return [
+                f"output_contract: Node '{source_id}' の出力は参照できません (opaque)"
+            ]
+        if kind == "receipt":
+            if dest_kind == "condition" and "condition" in uses:
+                return []
+            if dest_kind == "text-template-input":
+                return [
+                    f"flow_contract: Text Template は receipt 出力 '{ref}' を受理しません"
+                ]
+            return [
+                f"output_contract: receipt 出力 '{ref}' はこの位置では参照できません"
+                "（条件 Edge で利用できるフィールドのみ）"
+            ]
+        # Narrative flows only into destinations that explicitly accept it.
+        accepted = self._accepted_value_kinds(destination)
+        if dest_kind == "condition" or "narrative" not in accepted:
+            return [
+                f"flow_contract: Narrative 出力 '{ref}' はこの位置では使用できません"
+                "（本文・表示用の許可済み入力のみ参照可能）"
+            ]
+        return []
+
+    @staticmethod
+    def _accepted_value_kinds(
+        destination: Optional[dict[str, Any]],
+    ) -> list[str]:
+        """Return the source value kinds a destination accepts."""
+        from obsidian_ai_hub.tasks.capability_schemas import get_input_field_contract
+
+        if not destination:
+            return ["structured"]
+        kind = destination.get("kind")
+        if kind == "capability-field":
+            contract = get_input_field_contract(
+                str(destination.get("key") or ""),
+                str(destination.get("field") or ""),
+            )
+            return list(contract["accepted_value_kinds"])
+        if kind in ("text-template-input", "agent-input"):
+            return ["structured", "narrative"]
+        if kind == "llm-field":
+            accepted = destination.get("accepted")
+            if isinstance(accepted, list) and accepted:
+                return [str(k) for k in accepted]
+            return ["structured"]
+        return ["structured"]
+
+    def _destination_for_field(
+        self, node: dict[str, Any], field_path: str
+    ) -> dict[str, Any]:
+        """Describe what a ``bind_field`` path accepts, mirroring validation."""
+        config = node.get("config") or {}
+        if not isinstance(config, dict):
+            config = {}
+        parts = (field_path or "").split(".")
+        node_type = node.get("node_type")
+        if node_type == "capability":
+            if parts[:1] == ["target"]:
+                return {"kind": "target"}
+            if parts[:1] == ["inputs"] and len(parts) >= 2:
+                return {
+                    "kind": "capability-field",
+                    "key": str(config.get("capability_key") or ""),
+                    "field": parts[1],
+                }
+            return {"kind": "unknown"}
+        if node_type == "text_template":
+            return {"kind": "text-template-input"}
+        if node_type == "llm":
+            if parts[:1] == ["inputs"] and len(parts) >= 2:
+                contracts = config.get("input_flow_contracts") or {}
+                accepted = (
+                    contracts.get(parts[1])
+                    if isinstance(contracts, dict)
+                    else None
+                )
+                return {"kind": "llm-field", "accepted": accepted}
+            return {"kind": "unknown"}
+        if node_type == "agent":
+            return {"kind": "agent-input"}
+        if node_type == "loop":
+            if parts[:1] == ["input_mapping"]:
+                return {"kind": "loop-mapping"}
+            return {"kind": "unknown"}
+        if node_type == "loop_result":
+            return {"kind": "loop-mapping"}
+        return {"kind": "unknown"}
+
+    def _check_node_config_refs(self, node: dict[str, Any]) -> list[str]:
+        """Check a whole node config field-by-field, mirroring validation."""
+        config = node.get("config") or {}
+        if not isinstance(config, dict):
+            return []
+        errors: list[str] = []
+        node_type = node.get("node_type")
+        if node_type == "capability":
+            errors.extend(
+                self._check_and_apply_strict_references(
+                    config.get("target"), destination={"kind": "target"}
+                )
+            )
+            inputs = config.get("inputs")
+            if isinstance(inputs, dict):
+                key = str(config.get("capability_key") or "")
+                for field_name, field_val in inputs.items():
+                    errors.extend(
+                        self._check_and_apply_strict_references(
+                            field_val,
+                            destination={
+                                "kind": "capability-field",
+                                "key": key,
+                                "field": field_name,
+                            },
+                        )
+                    )
+            return errors
+        if node_type == "llm":
+            contracts = config.get("input_flow_contracts") or {}
+            inputs = config.get("inputs")
+            if isinstance(inputs, dict):
+                for field_name, field_val in inputs.items():
+                    accepted = (
+                        contracts.get(field_name)
+                        if isinstance(contracts, dict)
+                        else None
+                    )
+                    errors.extend(
+                        self._check_and_apply_strict_references(
+                            field_val,
+                            destination={
+                                "kind": "llm-field",
+                                "accepted": accepted,
+                            },
+                        )
+                    )
+            return errors
+        if node_type == "agent":
+            errors.extend(
+                self._check_and_apply_strict_references(
+                    config.get("inputs"),
+                    destination={"kind": "agent-input"},
+                )
+            )
+            return errors
+        if node_type == "text_template":
+            errors.extend(
+                self._check_and_apply_strict_references(
+                    config.get("inputs"),
+                    destination={"kind": "text-template-input"},
+                )
+            )
+            return errors
+        if node_type == "loop":
+            errors.extend(
+                self._check_and_apply_strict_references(
+                    config.get("input_mapping"),
+                    destination={"kind": "loop-mapping"},
+                )
+            )
+            errors.extend(
+                self._check_and_apply_strict_references(
+                    config.get("continuation_condition"),
+                    destination={"kind": "condition"},
+                )
+            )
+            return errors
+        if node_type == "loop_result":
+            errors.extend(
+                self._check_and_apply_strict_references(
+                    config.get("output_mapping"),
+                    destination={"kind": "loop-mapping"},
+                )
+            )
+            return errors
+        return self._check_and_apply_strict_references(config)
+
+    def _check_condition_refs(self, condition: Any) -> list[str]:
+        """Check an edge/loop condition's ``from_path`` reference string.
+
+        Conditions carry the path as a bare string (not a ``$ref`` object),
+        so the generic config scanner cannot see it; wrap it explicitly.
+        """
+        if not isinstance(condition, dict):
+            return []
+        from_path = condition.get("from_path")
+        if not isinstance(from_path, str) or not from_path.strip():
+            return []
+        return self._check_and_apply_strict_references(
+            {REF_KEY: from_path}, destination={"kind": "condition"}
+        )
+
     def _reapply_all_strict_references(self) -> None:
         """Re-scan all nodes' configs and edges' conditions to re-apply strict flags."""
         for n in self.nodes:
-            cfg = n.get("config")
-            if isinstance(cfg, dict):
-                self._check_and_apply_strict_references(cfg)
+            self._check_node_config_refs(n)
         for e in self.edges:
             cond = e.get("condition")
             if isinstance(cond, dict):
-                self._check_and_apply_strict_references(cond)
+                self._check_condition_refs(cond)
 
     def set_node_config(self, node_id: str, config: dict[str, Any]) -> dict[str, Any]:
         """Set config object for a node."""
@@ -333,7 +575,9 @@ class GraphBuilder:
         if not isinstance(config, dict):
             return {"ok": False, "code": "invalid_config", "issues": ["config は object が必要です"]}
 
-        strict_errors = self._check_and_apply_strict_references(config)
+        probe = dict(node)
+        probe["config"] = config
+        strict_errors = self._check_node_config_refs(probe)
         if strict_errors:
             return {"ok": False, "code": "invalid_strict_reference", "issues": strict_errors}
 
@@ -352,7 +596,9 @@ class GraphBuilder:
         if not path_clean:
             return {"ok": False, "code": "invalid_field_path", "issues": ["field_path は空でない文字列が必要です"]}
 
-        strict_errors = self._check_and_apply_strict_references(value)
+        strict_errors = self._check_and_apply_strict_references(
+            value, destination=self._destination_for_field(node, path_clean)
+        )
         if strict_errors:
             return {"ok": False, "code": "invalid_strict_reference", "issues": strict_errors}
 
@@ -410,7 +656,7 @@ class GraphBuilder:
             return {"ok": False, "code": "invalid_edge_kind", "issues": [f"edge_kind '{edge_kind}' は無効です"]}
 
         if condition is not None:
-            strict_errors = self._check_and_apply_strict_references(condition)
+            strict_errors = self._check_condition_refs(condition)
             if strict_errors:
                 return {"ok": False, "code": "invalid_strict_reference", "issues": strict_errors}
 
@@ -463,9 +709,13 @@ class GraphBuilder:
         if not isinstance(continuation_condition, dict):
             return {"ok": False, "code": "invalid_continuation_condition", "issues": ["continuation_condition は object が必要です"]}
 
-        strict_errors = self._check_and_apply_strict_references(continuation_condition)
+        strict_errors = self._check_condition_refs(continuation_condition)
         if input_mapping:
-            strict_errors.extend(self._check_and_apply_strict_references(input_mapping))
+            strict_errors.extend(
+                self._check_and_apply_strict_references(
+                    input_mapping, destination={"kind": "loop-mapping"}
+                )
+            )
         if strict_errors:
             return {"ok": False, "code": "invalid_strict_reference", "issues": strict_errors}
 

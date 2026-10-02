@@ -22,6 +22,7 @@ from obsidian_ai_hub.database import get_db_connection
 from obsidian_ai_hub.tasks import store as task_store
 from obsidian_ai_hub.tasks.capabilities import get_capability_definitions
 from obsidian_ai_hub.tasks.capability_schemas import (
+    mixed_output_field_contracts,
     ui_input_schema,
     ui_output_schema,
     ui_target_schema,
@@ -90,6 +91,7 @@ def catalog_search(query: str = "", target: str = "capability") -> list[dict[str
                     "enabled": True if key in WORKFLOW_ONLY_KEYS else enabled_map.get(key, False),
                     "read_only": read_only,
                     "output_contract_class": output_contract_class(key),
+                    "output_field_contracts": mixed_output_field_contracts(key),
                     "strict_allowed": is_strict_allowed(key),
                 })
                 if len(results) >= CATALOG_SEARCH_LIMIT:
@@ -232,6 +234,7 @@ def catalog_get_details(target: str, item_id: str) -> dict[str, Any]:
             "enabled": True if item_clean in WORKFLOW_ONLY_KEYS else enabled_map.get(item_clean, False),
             "read_only": read_only,
             "output_contract_class": output_contract_class(item_clean),
+            "output_field_contracts": mixed_output_field_contracts(item_clean),
             "strict_allowed": is_strict_allowed(item_clean),
             "ui_input_schema": input_schema,
             "ui_target_schema": target_schema,

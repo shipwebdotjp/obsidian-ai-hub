@@ -337,6 +337,86 @@ export interface ReferenceField {
   path: string;
   type?: string;
   description?: string;
+  /** Source value kind for mixed receipt/narrative candidates. */
+  kind?: "structured" | "receipt" | "narrative";
+  /** Destination uses the backend allows for this mixed field. */
+  allowedUses?: string[];
+}
+
+/** One declared receipt/narrative field of a mixed capability. */
+export interface MixedOutputFieldContract {
+  value_kind: string;
+  allowed_uses: string[];
+}
+
+/**
+ * Reference candidates for a mixed capability node.
+ *
+ * Only bindable declared fields are offered: ``narrative.text`` for
+ * payload destinations and condition-allowed receipt fields. Identifier
+ * receipts (no allowed uses) are never offered.
+ */
+export function capabilityMixedReferenceFields(
+  basePath: string,
+  contracts?: Record<string, MixedOutputFieldContract> | null,
+): ReferenceField[] {
+  if (!contracts) return [];
+  const out: ReferenceField[] = [];
+  for (const [fieldPath, contract] of Object.entries(contracts)) {
+    const kind = contract.value_kind;
+    if (kind !== "receipt" && kind !== "narrative") continue;
+    if ((contract.allowed_uses ?? []).length === 0) continue;
+    const leaf = fieldPath.split(".").slice(-1)[0] ?? fieldPath;
+    out.push({
+      path: `${basePath}.${fieldPath}`,
+      type:
+        fieldPath === "receipt.is_published" ||
+        fieldPath === "receipt.report_truncated"
+          ? "boolean"
+          : "string",
+      description:
+        kind === "narrative"
+          ? `自由文 (${leaf})`
+          : `観測事実 (${leaf})`,
+      kind,
+      allowedUses: [...(contract.allowed_uses ?? [])],
+    });
+  }
+  return out;
+}
+
+/**
+ * Filter reference groups to candidates valid at one destination.
+ *
+ * ``acceptedKinds`` keeps legacy (unmarked, structured-context) candidates
+ * plus the listed mixed kinds; ``conditionOnly`` additionally requires
+ * receipt fields to allow the condition use and always drops narrative.
+ */
+export function filterReferenceGroups(
+  groups: ReferenceGroup[],
+  filter: { acceptedKinds?: string[]; conditionOnly?: boolean } = {},
+): ReferenceGroup[] {
+  const { acceptedKinds, conditionOnly } = filter;
+  if (!acceptedKinds && !conditionOnly) return groups;
+  return groups
+    .map((group) => ({
+      label: group.label,
+      fields: group.fields.filter((field) => {
+        if (conditionOnly) {
+          if (field.kind === "narrative") return false;
+          if (field.kind === "receipt") {
+            return (field.allowedUses ?? []).includes("condition");
+          }
+          return true;
+        }
+        if (acceptedKinds) {
+          if (field.kind === undefined) return true;
+          return acceptedKinds.includes(field.kind);
+        }
+        return true;
+      }),
+    }))
+    .filter((group) => group.fields.length > 0);
 }
 
 export interface ReferenceGroup {
@@ -466,6 +546,10 @@ function nodeOutputFields(
   node: WorkflowNode,
   nodes: WorkflowNode[],
   capabilityOutputSchemas?: Record<string, WorkflowSchemaField>,
+  capabilityOutputFieldContracts?: Record<
+    string,
+    Record<string, MixedOutputFieldContract>
+  >,
 ): ReferenceField[] {
   const config = (node.config ?? {}) as Record<string, unknown>;
   const basePath = `nodes.${node.node_id}.output`;
@@ -489,10 +573,17 @@ function nodeOutputFields(
     return schemaReferenceFields(stateSchema, basePath);
   }
   if (node.node_type === "capability") {
+    const key = String(config.capability_key ?? "");
+    // Mixed capabilities offer their declared receipt/narrative fields
+    // without requiring strict (strict never applies to mixed outputs).
+    const mixed = capabilityMixedReferenceFields(
+      basePath,
+      capabilityOutputFieldContracts?.[key],
+    );
+    if (mixed.length > 0) return mixed;
     // P1 boundary: opaque/receipt capabilities and structured nodes without
     // strict offer no reference candidates. Structured strict nodes offer
     // declared required fields only (never the whole output object).
-    const key = String(config.capability_key ?? "");
     const outputSchema = capabilityOutputSchemas?.[key];
     if (!outputSchema || config.fail_on_output_mismatch !== true) {
       return [];
@@ -524,6 +615,10 @@ export function referenceSchemaAt(
   inputsSchema: Record<string, unknown>,
   options: {
     capabilityOutputSchemas?: Record<string, WorkflowSchemaField>;
+    capabilityOutputFieldContracts?: Record<
+      string,
+      Record<string, MixedOutputFieldContract>
+    >;
     scopeId?: string | null;
   } = {},
 ): WorkflowSchemaField | null {
@@ -536,7 +631,12 @@ export function referenceSchemaAt(
     const node = nodes.find((item) => item.node_id === nodeMatch[1]);
     if (!node) return null;
     return walkSchemaPath(
-      nodeOutputSchema(node, nodes, options.capabilityOutputSchemas),
+      nodeOutputSchema(
+        node,
+        nodes,
+        options.capabilityOutputSchemas,
+        options.capabilityOutputFieldContracts,
+      ),
       nodeMatch[2] ?? "",
     );
   }
@@ -633,6 +733,10 @@ function nodeOutputSchema(
   node: WorkflowNode,
   nodes: WorkflowNode[],
   capabilityOutputSchemas?: Record<string, WorkflowSchemaField>,
+  capabilityOutputFieldContracts?: Record<
+    string,
+    Record<string, MixedOutputFieldContract>
+  >,
 ): WorkflowSchemaField | null {
   const config = (node.config ?? {}) as Record<string, unknown>;
   if (node.node_type === "agent" || node.node_type === "llm") {
@@ -657,12 +761,40 @@ function nodeOutputSchema(
     return asSchemaField(stateSchema);
   }
   if (node.node_type === "capability") {
+    const key = String(config.capability_key ?? "");
+    // Mixed capabilities resolve their declared receipt/narrative shape so
+    // nested completion (e.g. ``narrative.text``) agrees with the offered
+    // candidates.
+    const mixedContracts = capabilityOutputFieldContracts?.[key];
+    if (mixedContracts) {
+      const properties: Record<string, WorkflowSchemaField> = {};
+      for (const fieldPath of Object.keys(mixedContracts)) {
+        const [head, ...rest] = fieldPath.split(".");
+        if (!head || rest.length === 0) continue;
+        const leaf = rest.join(".");
+        const group = (properties[head] ??= {
+          type: "object",
+          properties: {},
+        }) as WorkflowSchemaField & {
+          properties: Record<string, WorkflowSchemaField>;
+        };
+        group.properties[leaf] = {
+          type:
+            fieldPath === "receipt.is_published" ||
+            fieldPath === "receipt.report_truncated"
+              ? "boolean"
+              : "string",
+        };
+      }
+      if (Object.keys(properties).length > 0) {
+        return { type: "object", properties };
+      }
+    }
     // Field completion is only offered for strict structured nodes; other
     // capability outputs are not referencable (P1 boundary). The schema is
     // projected to required-only paths so completion never offers a path
     // the backend rejects.
     if (config.fail_on_output_mismatch !== true) return null;
-    const key = String(config.capability_key ?? "");
     return projectRequiredOnly(capabilityOutputSchemas?.[key] ?? null);
   }
   if (node.node_type === "text_template") {
@@ -737,6 +869,12 @@ export function buildReferenceGroups(
   options: {
     excludeNodeId?: string;
     capabilityOutputSchemas?: Record<string, WorkflowSchemaField>;
+    capabilityOutputFieldContracts?: Record<
+      string,
+      Record<string, MixedOutputFieldContract>
+    >;
+    acceptedKinds?: string[];
+    conditionOnly?: boolean;
   } = {},
 ): ReferenceGroup[] {
   const groups: ReferenceGroup[] = [];
@@ -759,6 +897,7 @@ export function buildReferenceGroups(
       node,
       nodes,
       options.capabilityOutputSchemas,
+      options.capabilityOutputFieldContracts,
     );
     // Nodes with no referencable output (opaque/receipt capabilities,
     // non-strict structured nodes) contribute no candidates.
@@ -768,7 +907,6 @@ export function buildReferenceGroups(
       fields,
     });
   }
-
   if (scopeId !== null) {
     const loop = nodes.find((node) => node.node_id === scopeId);
     const loopConfig = (loop?.config ?? {}) as Record<string, unknown>;
@@ -785,6 +923,12 @@ export function buildReferenceGroups(
     fields.push({ path: "loop.iteration", type: "integer" });
     groups.push({ label: "Loop 状態", fields });
   }
+  if (options.acceptedKinds || options.conditionOnly) {
+    return filterReferenceGroups(groups, {
+      acceptedKinds: options.acceptedKinds,
+      conditionOnly: options.conditionOnly,
+    });
+  }
   return groups;
 }
 
@@ -795,16 +939,18 @@ export function conditionCandidates(
   inputsSchema: Record<string, unknown>,
   options: {
     capabilityOutputSchemas?: Record<string, WorkflowSchemaField>;
+    capabilityOutputFieldContracts?: Record<
+      string,
+      Record<string, MixedOutputFieldContract>
+    >;
   } = {},
 ): string[] {
   const source = nodes.find((node) => node.node_id === sourceNodeId);
   if (!source) return [];
-  return buildReferenceGroups(
-    nodes,
-    scopeOf(source),
-    inputsSchema,
-    options,
-  ).flatMap((group) => group.fields.map((field) => field.path));
+  return buildReferenceGroups(nodes, scopeOf(source), inputsSchema, {
+    ...options,
+    conditionOnly: true,
+  }).flatMap((group) => group.fields.map((field) => field.path));
 }
 
 /** Validate the shape of one condition object (mirrors backend validation). */

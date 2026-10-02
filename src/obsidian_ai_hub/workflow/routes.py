@@ -385,6 +385,7 @@ def list_workflow_capabilities() -> dict[str, Any]:
     from obsidian_ai_hub.tasks import store as task_store
     from obsidian_ai_hub.tasks.capabilities import get_capability_definitions
     from obsidian_ai_hub.tasks.capability_schemas import (
+        mixed_output_field_contracts,
         ui_input_schema,
         ui_output_schema,
         ui_target_schema,
@@ -413,6 +414,9 @@ def list_workflow_capabilities() -> dict[str, Any]:
                 "output_schema": ui_output_schema(definition.key),
                 "output_contract_class": output_contract_class(definition.key),
                 "output_reference_policy": output_reference_policy(
+                    definition.key
+                ),
+                "output_field_contracts": mixed_output_field_contracts(
                     definition.key
                 ),
                 "strict_allowed": is_strict_allowed(definition.key),

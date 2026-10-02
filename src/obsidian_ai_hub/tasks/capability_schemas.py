@@ -654,6 +654,26 @@ STRICT_ALLOWED_REGISTRY_KEYS: frozenset[str] = frozenset(
 )
 
 
+def mixed_output_field_contracts(capability_key: str) -> dict[str, Any] | None:
+    """Return the JSON-serializable field contract table for a mixed key.
+
+    Maps each declared output field path to ``{"value_kind", "allowed_uses"}``.
+    Returns ``None`` for non-mixed capabilities. The Workflow capability API
+    and designer catalog expose this so the editor can offer exactly the
+    bindable ``receipt`` / ``narrative`` fields.
+    """
+    per_key = _MIXED_OUTPUT_FIELD_CONTRACTS.get(capability_key)
+    if per_key is None:
+        return None
+    return {
+        field_path: {
+            "value_kind": entry["value_kind"],
+            "allowed_uses": list(entry["allowed_uses"]),
+        }
+        for field_path, entry in per_key.items()
+    }
+
+
 def output_contract_class(capability_key: str) -> str:
     """Return the code-owned output contract class for a registry capability.
 
