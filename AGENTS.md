@@ -77,21 +77,21 @@
 
 ## Code review (ocr) and commit
 
-- If there are no instructions, review using OCR after making corrections. Do not
-  accept every finding unconditionally: prioritize critical and high-severity
-  findings, assess whether each finding is valid, and fix only findings that
-  are worth addressing. After corrections, run OCR review at most three times
-  total, then stop and commit.
-- Unless the user instructs otherwise, commit the changes after completing up to
-  three OCR review runs. Do not leave finished work uncommitted.
-- Instance-only changes with no repository diff (DB rows, Vault files,
-  production configuration) have no commit target: skip OCR review and commit
-  for that work, and report what changed instead.
-- Never let `ocr review` stream to the terminal. Capture its full output from
-  the first run, then read the file:
+- Never let `ocr review` stream to the terminal. Capture its full output
+  from the first run, then read the file:
   ```bash
   ocr review --audience agent -b "..." > /tmp/ocr_review.txt 2>&1
   ```
+- When invoking OCR through OpenCode's shell/bash tool, explicitly set
+  the tool-call `timeout` to 1800000 milliseconds (30 minutes).
+  This is a tool argument, not a CLI flag or shell environment variable.
+  Do not rely on the tool's default timeout.
+- Run OCR and read its output in separate tool calls. After OCR finishes,
+  inspect the captured file and the command's exit status.
+- If the shell/bash tool times out, treat that OCR run as incomplete,
+  not as a successful review with no findings. Inspect the captured output
+  before deciding whether to retry. Count the interrupted invocation
+  toward the maximum of three OCR review runs.
 
 ## Check the operation
 - Please perform operational checks using the actual database; it is acceptable if side effects occur. After modifying the code, restart the LaunchAgent services with `make restart` (job_runner + Web サーバー + hitl-worker). 初回のみ `make install-all` で LaunchAgent を登録しておくこと。
