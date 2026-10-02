@@ -190,8 +190,6 @@ def test_output_contract_ledger_covers_all_capabilities():
             "periodic_note_read",
             "research_context_snapshot",
             "summary_search",
-            "gmail_search_messages",
-            "gmail_read_message",
         }
     )
     assert schemas.RECEIPT_CAPABILITY_KEYS
@@ -207,9 +205,18 @@ def test_output_contract_ledger_covers_all_capabilities():
         if key in by_key:
             assert schemas.output_contract_class(key) == "receipt"
             assert schemas.output_reference_policy(key) == "forbidden"
+    assert schemas.MIXED_CAPABILITY_KEYS == frozenset(
+        {"coding_cli", "specialist_agent", "research_agent"}
+    )
+    for key in schemas.MIXED_CAPABILITY_KEYS:
+        assert key in by_key
+        assert schemas.output_contract_class(key) == "mixed"
+        assert schemas.output_reference_policy(key) == "forbidden"
+        # Mixed capabilities expose no synthetic summary fallback (P1).
+        assert schemas.ui_output_schema(key) is None
     for definition in get_capability_definitions():
         contract = schemas.output_contract_class(definition.key)
-        assert contract in ("structured", "receipt", "opaque")
+        assert contract in ("structured", "receipt", "mixed", "opaque")
 
 
 def test_dynamic_plugin_defaults_to_opaque():
@@ -253,43 +260,6 @@ def test_p2_structured_schemas_declare_required():
         "daily_notes",
         "latest_weekly_note",
     }
-
-    search = schemas.capability_output_schema("gmail_search_messages")
-    assert set(search["required"]) == {"messages"}
-    message_items = search["properties"]["messages"]["items"]
-    assert set(message_items["required"]) == {
-        "message_id",
-        "thread_id",
-        "from",
-        "to",
-        "subject",
-        "date",
-        "snippet",
-        "label_ids",
-    }
-    assert schemas.ui_output_schema("gmail_search_messages") is not None
-
-    read = schemas.capability_output_schema("gmail_read_message")
-    assert set(read["required"]) == {
-        "message_id",
-        "snippet",
-        "headers",
-        "body_text",
-        "truncated",
-        "attachments",
-    }
-    assert set(read["properties"]["headers"]["required"]) == {
-        "from",
-        "to",
-        "cc",
-        "bcc",
-        "subject",
-        "date",
-        "message_id",
-        "in_reply_to",
-        "references",
-    }
-    assert schemas.ui_output_schema("gmail_read_message") is not None
 
 
 def test_ui_target_schema_for_delegate_capabilities():

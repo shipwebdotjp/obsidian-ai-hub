@@ -197,7 +197,8 @@ export default function WorkflowEditorPage() {
     // P1 boundary: only structured (`strict_fields`) schemas feed reference
     // candidates. Receipt/opaque (`forbidden`) schemas stay available via the
     // raw capability record for display, but never offer `nodes.*.output`
-    // candidates the backend would reject.
+    // candidates the backend would reject. Mixed capabilities are handled
+    // separately via `capabilityOutputFieldContracts` below.
     const map: Record<string, WorkflowSchemaField> = {};
     for (const capability of capabilities) {
       if (
@@ -205,6 +206,18 @@ export default function WorkflowEditorPage() {
         capability.output_reference_policy !== "forbidden"
       ) {
         map[capability.capability_key] = capability.output_schema;
+      }
+    }
+    return map;
+  }, [capabilities]);
+  const capabilityOutputFieldContracts = useMemo(() => {
+    const map: Record<
+      string,
+      Record<string, { value_kind: string; allowed_uses: string[] }>
+    > = {};
+    for (const capability of capabilities) {
+      if (capability.output_field_contracts) {
+        map[capability.capability_key] = capability.output_field_contracts;
       }
     }
     return map;
@@ -228,6 +241,9 @@ export default function WorkflowEditorPage() {
       ? buildReferenceGroups(nodes, scopeOf(selectedNode), inputsSchema, {
           excludeNodeId: selectedNode.node_id,
           capabilityOutputSchemas,
+          capabilityOutputFieldContracts,
+          // Text Template inputs accept narrative but never receipt.
+          acceptedKinds: ["structured", "narrative"],
         })
       : [];
   const textTemplateVariables = templateVariables(
@@ -239,6 +255,7 @@ export default function WorkflowEditorPage() {
     if (!variable?.refPath || !selectedNode) return null;
     return referenceSchemaAt(nodes, variable.refPath, inputsSchema, {
       capabilityOutputSchemas,
+      capabilityOutputFieldContracts,
       scopeId: scopeOf(selectedNode),
     });
   };
@@ -439,11 +456,16 @@ export default function WorkflowEditorPage() {
     return nodes.filter((node) => scopeOf(node) === scopeOf(source) && node.node_id !== sourceId);
   };
 
-  const groupsForNode = (nodeId: string): ReferenceGroup[] => {
+  const groupsForNode = (
+    nodeId: string,
+    filter: { conditionOnly?: boolean } = {},
+  ): ReferenceGroup[] => {
     const node = nodes.find((item) => item.node_id === nodeId);
     return node
       ? buildReferenceGroups(nodes, scopeOf(node), inputsSchema, {
           capabilityOutputSchemas,
+          capabilityOutputFieldContracts,
+          conditionOnly: filter.conditionOnly,
         })
       : [];
   };
@@ -755,10 +777,15 @@ export default function WorkflowEditorPage() {
                   edgeSource
                     ? conditionCandidates(nodes, edgeSource, inputsSchema, {
                         capabilityOutputSchemas,
+                        capabilityOutputFieldContracts,
                       })
                     : []
                 }
-                groups={edgeSource ? groupsForNode(edgeSource) : []}
+                groups={
+                  edgeSource
+                    ? groupsForNode(edgeSource, { conditionOnly: true })
+                    : []
+                }
                 onChange={setEdgeCondition}
               />
             )}
@@ -900,6 +927,7 @@ export default function WorkflowEditorPage() {
                           {
                             excludeNodeId: selectedNode.node_id,
                             capabilityOutputSchemas,
+                            capabilityOutputFieldContracts,
                           },
                         )}
                       />
@@ -1013,6 +1041,7 @@ export default function WorkflowEditorPage() {
                         {
                           excludeNodeId: selectedNode.node_id,
                           capabilityOutputSchemas,
+                          capabilityOutputFieldContracts,
                         },
                       )}
                     />
@@ -1149,9 +1178,71 @@ export default function WorkflowEditorPage() {
                         {
                           excludeNodeId: selectedNode.node_id,
                           capabilityOutputSchemas,
+                          capabilityOutputFieldContracts,
                         },
                       )}
                     />
+                  </div>
+                  <div className="space-y-1 rounded border border-purple-200 bg-purple-50/50 p-2">
+                    <span className="block font-semibold text-purple-900 text-[11px]">
+                      入力フロー契約 (input_flow_contracts)
+                    </span>
+                    <p className="text-[10px] text-purple-700">
+                      単発 LLM Node は Narrative (自由文) を受理できます。Schema 検証済み出力は Structured (構造化値) へ Declassification されます。
+                    </p>
+                    {Object.keys(
+                      (selectedNode.config.inputs as Record<string, unknown>) ?? {},
+                    ).length === 0 ? (
+                      <p className="text-[10px] text-slate-500">
+                        inputs に変数を追加すると契約を設定できます
+                      </p>
+                    ) : (
+                      Object.keys(
+                        (selectedNode.config.inputs as Record<string, unknown>) ?? {},
+                      ).map((varName) => {
+                        const contracts =
+                          (selectedNode.config.input_flow_contracts as Record<
+                            string,
+                            { accepted_value_kinds?: string[] }
+                          >) ?? {};
+                        const accepted =
+                          contracts[varName]?.accepted_value_kinds?.includes(
+                            "narrative",
+                          ) ?? false;
+                        return (
+                          <label
+                            key={varName}
+                            className="flex items-center gap-2 text-[11px] text-slate-700 cursor-pointer"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={accepted}
+                              onChange={(e) => {
+                                const nextContracts = { ...contracts };
+                                if (e.target.checked) {
+                                  nextContracts[varName] = {
+                                    accepted_value_kinds: ["structured", "narrative"],
+                                  };
+                                } else {
+                                  nextContracts[varName] = {
+                                    accepted_value_kinds: ["structured"],
+                                  };
+                                }
+                                updateNodeConfig({
+                                  input_flow_contracts: nextContracts,
+                                });
+                              }}
+                            />
+                            <span className="font-mono font-medium">{varName}</span>
+                            <span className="text-[10px] text-slate-500">
+                              {accepted
+                                ? "(Structured + Narrative 受理)"
+                                : "(Structured のみ)"}
+                            </span>
+                          </label>
+                        );
+                      })
+                    )}
                   </div>
                   <div className="space-y-1">
                     <span className="block text-slate-700">output_schema</span>
@@ -1210,7 +1301,12 @@ export default function WorkflowEditorPage() {
                         nodes,
                         null,
                         inputsSchema,
-                        { capabilityOutputSchemas },
+                        {
+                          capabilityOutputSchemas,
+                          capabilityOutputFieldContracts,
+                          // Loop state accepts structured values only.
+                          acceptedKinds: ["structured"],
+                        },
                       )}
                     />
                   </div>
@@ -1266,14 +1362,22 @@ export default function WorkflowEditorPage() {
                           nodes,
                           selectedNode.node_id,
                           inputsSchema,
-                          { capabilityOutputSchemas },
+                          {
+                            capabilityOutputSchemas,
+                            capabilityOutputFieldContracts,
+                            conditionOnly: true,
+                          },
                         ),
                       )}
                       groups={buildReferenceGroups(
                         nodes,
                         selectedNode.node_id,
                         inputsSchema,
-                        { capabilityOutputSchemas },
+                        {
+                          capabilityOutputSchemas,
+                          capabilityOutputFieldContracts,
+                          conditionOnly: true,
+                        },
                       )}
                       onChange={(condition) =>
                         updateNodeConfig({ continuation_condition: condition })
@@ -1303,7 +1407,12 @@ export default function WorkflowEditorPage() {
                       nodes,
                       selectedNode.parent_loop_node_id ?? null,
                       inputsSchema,
-                      { capabilityOutputSchemas },
+                      {
+                        capabilityOutputSchemas,
+                        capabilityOutputFieldContracts,
+                        // Loop state accepts structured values only.
+                        acceptedKinds: ["structured"],
+                      },
                     )}
                   />
                 </div>
@@ -1425,9 +1534,16 @@ export default function WorkflowEditorPage() {
                         nodes,
                         edge.source_node_id,
                         inputsSchema,
-                        { capabilityOutputSchemas },
+                        {
+                          capabilityOutputSchemas,
+                          capabilityOutputFieldContracts,
+                        },
                       )}
-                      groups={groupsForNode(edge.source_node_id)}
+                      groups={
+                        groupsForNode(edge.source_node_id, {
+                          conditionOnly: true,
+                        })
+                      }
                       onChange={(condition) => {
                         setEdges((prev) =>
                           prev.map((item) =>

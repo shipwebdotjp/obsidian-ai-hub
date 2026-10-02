@@ -159,9 +159,22 @@ class DefaultNodeRunner:
             # side-effecting node into a failure (which a retry could
             # execute twice).
             logger.warning("Bridge task '%s' bookkeeping failed", bridge_id)
-        output = parse_json_object(result.summary)
+
+        if result.needs_attention:
+            return NodeOutcome(
+                status="needs_attention",
+                output=result.output or {},
+                child_kind=result.child_kind,
+                child_run_id=result.child_run_id,
+                attention_reason=result.attention_reason or "coding_report_unresolvable",
+                error=result.error or "Coding の最終報告を取得できませんでした",
+            )
+
+        output = result.output
         if output is None:
-            output = {"summary": result.summary}
+            output = parse_json_object(result.summary)
+            if output is None:
+                output = {"summary": result.summary}
         mismatch_errors = self._output_mismatch_errors(str(key), output, context)
         if mismatch_errors and bool(config.get("fail_on_output_mismatch")):
             # Strict mode: the capability ran, but its result cannot be trusted

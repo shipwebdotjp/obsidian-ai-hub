@@ -488,6 +488,18 @@ def test_workflow_capabilities_and_new_revision(test_memory_db_path, client):
     calendar = next(c for c in items if c["capability_key"] == "calendar_read")
     assert "events" in calendar["output_schema"]["properties"]
     assert "answer" in hitl["output_schema"]["properties"]
+    # Mixed delegation capabilities expose field-level value-kind contracts
+    # so the editor can offer exactly the bindable receipt/narrative fields.
+    for key in ("coding_cli", "specialist_agent", "research_agent"):
+        mixed = next(c for c in items if c["capability_key"] == key)
+        assert mixed["output_contract_class"] == "mixed"
+        contracts = mixed["output_field_contracts"]
+        assert contracts["narrative.text"] == {
+            "value_kind": "narrative",
+            "allowed_uses": ["payload"],
+        }
+    assert vault["output_field_contracts"] is None
+    assert calendar["output_field_contracts"] is None
 
     created = client.post("/api/v1/workflows", json={"name": "rev"})
     workflow_id = created.json()["workflow_id"]

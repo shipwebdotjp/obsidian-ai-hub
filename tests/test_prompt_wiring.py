@@ -136,12 +136,8 @@ def test_prompt_externalization_wiring(mock_dependencies):
         patch("obsidian_ai_hub.summerize_month.llm_client") as mock_llm,
         patch("obsidian_ai_hub.summerize_month.prompt") as mock_prompt,
     ):
-        from obsidian_ai_hub.utils.llm_client import LLMResult
-
         mock_prompt.render_prompt.return_value = "Rendered Prompt"
-        mock_llm.generate_llm_response_detailed.return_value = LLMResult(
-            text='{"summary": "ok"}', call_id="wiring", finish_reason="stop"
-        )
+        mock_llm.generate_llm_response.return_value = "{}"
 
         summerize_month.get_monthly_structured_record(datetime.now(), [])
 

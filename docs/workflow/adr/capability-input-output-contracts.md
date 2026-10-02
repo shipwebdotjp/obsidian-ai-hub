@@ -150,27 +150,71 @@ Status: Accepted (2026-09-27)。
   - 予算上限 (~5,500 文字) により期間単位の未返却が発生した場合 (`truncated = true`)、またはエントリー本文の切詰めが発生した場合 (`entry_truncated = true`)、strict モードの Workflow Node は不完全データとして失敗させ、後続へ不完全な結果を渡さない。
   - 範囲一覧の表示上限 (20件) 超過による `coverage.ranges_truncated` は、表示上の省略であるため strict の失敗条件に含めない。
 
-## Amendment (P2 昇格: Gmail 読み取り capability)
+## Amendment (receipt / narrative 契約と taint-aware データフロー)
 
-Status: Accepted (2026-10-01)。
+Status: Accepted (2026-10-02)。
 
 ### 決定
 
-- **`gmail_search_messages` と `gmail_read_message` を `structured` Capability として公開する。**
-  - Workflow Designer で作成したグラフが、Gmail 検索結果を後続 LLM / Agent Node の `inputs` へ型付き参照で渡せなかった問題への対応。Edge は制御フロー専用でデータを運ばないため、下流 Node の `inputs` への明示バインディングだけがデータ連携手段であり、Gmail が `opaque` のままでは参照が全層で拒否された。
-  - 入力は既存の Pydantic モデル（`GmailSearchMessagesInput` / `GmailReadMessageInput`）で未知キー拒否・strict 検証済み。
-  - 出力契約は `structured` とし、実行時の正規化済み出力を宣言する。
-    - `gmail_search_messages`: `messages` を required（各 item の `message_id` / `thread_id` / `from` / `to` / `subject` / `date` / `snippet` / `label_ids` も required）。`next_page_token` / `result_size_estimate` は宣言のみ。
-    - `gmail_read_message`: `message_id` / `snippet` / `headers` / `body_text` / `truncated` / `attachments` を required。`headers` の正規化 9 フィールドも required。
-  - 両方を `STRICT_ALLOWED_REGISTRY_KEYS` の対象に加える（`STRUCTURED_CAPABILITY_KEYS` からの派生）。読み取り系 `structured` のため、参照時に参照元 Node へ `fail_on_output_mismatch: true` が自動設定され、mismatch は後続へ流れない。
-- **`gmail_read_message` の `truncated: true` は strict 失敗条件にしない。**
-  - 本文の 20,000 文字クランプは意図した安全上限であり、`periodic_note_read` の `truncated` と同様に宣言のみとする。長文メールでワークフロー全体が止まるのを避ける。
-- **Designer プロンプトに明示バインディングを必須化する。** Edge は順序のみでデータを運ばないこと、下流 Node の `inputs` への型付き参照が必須であることを `config/prompts/workflow_designer.md` に追加する。
+- **Capability 出力の種別（value kind）と許可用途（allowed uses）の分離**
+  - Capability 単位の参照可否ではなく、出力フィールドごとの `structured` / `receipt` / `narrative` と、入力パラメータごとの `accepted_value_kinds` でデータフローを制御する。
+  - `coding_cli` は単一の出力クラスではなく `mixed` とし、観測事実である `receipt` (`status`, `child_run_id`, `session_id`, `report_truncated`) と Coordinator 自由文の `narrative` (`text`) を分離して公開する。
+- **narrative のデータフローと制約**
+  - `narrative` は本文・表示内容（`vault_write_file.content`、`calendar_create_proposal` の `title`/`location`/`content`、`reminder_create_proposal` の `title`/`content`、Text Template 変数、明示的に `input_flow_contracts` で宣言した単発 LLM Node）にのみ流すことができる。
+  - 条件式（Edge condition）、識別子（ID）、パス（`relative_path`）、コマンド（`command`）、URL、宛先、Capability Target、Loop 状態（`input_mapping`, `continuation_condition`）へは渡せない。
+  - `narrative` を含む Text Template 出力は `narrative` のまま扱う。明示的に `narrative` を受理した単発 LLM Node の schema 検証済み出力だけを、新しい `structured` 値へ変換する（Declassification 境界）。Agent Node は初期対象外とする。
+- **`coding_cli` の機械出力・切詰めと停止規則**
+  - `coding_cli` の最終報告テキストは UTF-8 先頭 64 KiB まで保持し、超過時は `receipt.report_truncated = true` とする。従来の最大 2,000 文字 `summary` は Task/UI 監査表示用として維持する。
+  - Coding child が `completed` 終了しても最終報告テキストを取得・正規化できない場合は、Child ID と観測済み `receipt` を残して `needs_attention`（`waiting_attention`）へ遷移する。Node を `failed` にせず、自動 retry も実行しない。
+- **非再試行方針と Vault 全域書込みの残余リスク**
+  - 副作用実行後の不一致・報告欠落を失敗にして自動再試行させないことで、外部処理の重複や重複書き込みを防ぐ。
+  - `vault_write_file.content` は Vault 内の任意パスで `narrative` を許可する。`relative_path` への流入は拒否するが、静的または structured path により `AGENTS.md` 等へ書ける残余リスクは明示し、既存どおり `plan_required` 承認を維持する。
 
-### 検討した選択肢
+### 操作シナリオ契約（不可逆操作: 認可された Vault ファイル書き込み 1 回）
 
-- **Edge に沿った上流出力の自動マージ**: エンジン側で暗黙に渡せば配線漏れは起きないが、本 ADR の「型付き参照のみ」方針に反し、どのデータが後続へ流れるか監査不能になるため採用しない。
-- **gmail を `opaque` のまま残し、デザイナーだけ改善する**: 参照が検証で拒否される以上、プロンプト改善だけでは解決しないため採用しない。
+| 段階 | 入力・識別子 | 停止規則 |
+| --- | --- | --- |
+| 1. 公開検証 | Revision の Node / Edge / Flow 契約 | `narrative` / `receipt` の不正参照は検証エラーで公開拒否 |
+| 2. 実行前永続化 | Coding 実行前の bridge / child ID | 実行前に ID とパラメータを保存（中断時も child ID 追跡可能） |
+| 3. 完了正規化 | Coding 完了時の receipt / narrative | 最終報告欠落時は `needs_attention` で停止（自動再試行しない） |
+| 4. 副作用実行 | 許可済み content への Vault 書き込み | 指定パスへ atomic に書き込み 1 回実行 |
+
+## Amendment (mixed 契約の `specialist_agent` / `research_agent` への拡張)
+
+Status: Accepted (2026-10-02)。
+
+### 決定
+
+- **`specialist_agent` と `research_agent` を `mixed` 契約とする。** `coding_cli` と同じく、
+  観測事実である `receipt` と自由文の `narrative` を分離して公開する。Capability 単位の
+  参照可否ではなく、`tasks/capability_schemas.py` のフィールド契約テーブル
+  （`_MIXED_OUTPUT_FIELD_CONTRACTS`）を正本とし、静的検証はそこを参照する
+  （Capability ごとの分岐を `workflow/validation.py` に持たない）。
+  - `specialist_agent`: `receipt` は `status`（完了時は `"completed"`）、`child_run_id`、`session_id`、
+    `agent_id`。`narrative.text` は子 Agent の最終メッセージ。
+  - `research_agent`: `receipt` は `status`（完了時は `"completed"`）、`job_id`、`theme_id`、
+    `is_published`（真偽値）。`narrative.text` は生成済み research report の本文（切詰めなし）。
+- **`specialist_agent` の逸脱申告は内部プロトコルとして残す。** 最終文の
+  `<deviation_request>` 解釈と改訂 Plan 提案は Adapter 内で従来通り処理し、
+  `narrative` 公開とは別の実行制御として分離する。逸脱申告時は成功出力（`receipt` /
+  `narrative`）を返さない。
+- **子実行は成功したが最終文・報告本文を取得・正規化できない場合は `needs_attention`
+  とする。** 観測済み `receipt` と child ID を残し、Node を `failed` にせず、自動 retry
+  も実行しない（`coding_cli` と同じ停止規則）。`research_agent` では report の Vault
+  公開が既に済んでいる場合もあり、再試行による重複公開を避ける。
+- **条件 Edge での利用:** `receipt.status`（両 Capability）と `research_agent` の
+  `receipt.is_published` は条件式で利用できる。`child_run_id` / `session_id` /
+  `agent_id` / `job_id` / `theme_id` は識別子であり、将来 `receipt` ID を明示受理する
+  検証 Capability ができるまで、条件・入力参照には公開しない。
+
+### 操作シナリオ契約（不可逆操作: research の Vault 公開は research pipeline が実行済み）
+
+| 段階 | 入力・識別子 | 停止規則 |
+| --- | --- | --- |
+| 1. 公開検証 | Revision の Node / Edge / Flow 契約 | `specialist_agent` / `research_agent` の `narrative` / `receipt` 不正参照は検証エラーで公開拒否 |
+| 2. 実行前永続化 | 委譲実行前の bridge / child ID | 実行前に ID とパラメータを保存（中断時も child ID 追跡可能） |
+| 3. 完了正規化 | 委譲完了時の receipt / narrative | 最終文・報告本文の欠落時は `needs_attention` で停止（自動再試行しない） |
+| 4. 副作用実行 | 許可済み content への Vault 書き込み | 指定パスへ atomic に書き込み 1 回実行 |
 
 ## Related
 

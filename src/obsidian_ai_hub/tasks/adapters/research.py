@@ -135,10 +135,43 @@ class ResearchAdapter:
         if status != "succeeded":
             err = str(final.get("error") or "unknown error")
             raise ValueError(f"Research job '{job_id}' failed: {err}")
+        markdown = str(final.get("markdown") or "")
+        receipt = {
+            "status": "completed",
+            "job_id": job_id,
+            "theme_id": theme_id,
+            "is_published": bool(final.get("is_published")),
+        }
+        if not markdown.strip():
+            # The report pipeline already ran (and may have published to the
+            # Vault); do not fail/retry. Keep the observed receipt and park
+            # for human review (coding_cli parity).
+            return StepResult(
+                step_index=step_index,
+                capability_key=str(step.get("capability_key")),
+                summary="",
+                output={
+                    "receipt": receipt,
+                    "narrative": {
+                        "text": "",
+                    },
+                },
+                child_kind="research",
+                child_run_id=job_id,
+                needs_attention=True,
+                attention_reason="research_report_unresolvable",
+                error=f"Research job '{job_id}' succeeded but its report could not be retrieved.",
+            )
         return StepResult(
             step_index=step_index,
             capability_key=str(step.get("capability_key")),
             summary=self._summary(job_id, final),
+            output={
+                "receipt": receipt,
+                "narrative": {
+                    "text": markdown,
+                },
+            },
             child_kind="research",
             child_run_id=job_id,
         )

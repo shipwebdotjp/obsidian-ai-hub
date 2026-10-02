@@ -67,12 +67,6 @@ llm:
     provider: ollama
     model: glm-4.7:cloud
     prompt_path: /path/to/your/config/prompts/review_draft.md
-  # Monthly summary inherits the make_today_target provider/model.
-  # max_tokens controls only the monthly output budget (default: 65536).
-  # Positive integers only; adjust down to your provider's limit.
-  # Unused tokens are not consumed.
-  summarize_month:
-    max_tokens: 65536
   # Example with opencode_go:
   # make_today_target:
   #   provider: opencode_go
@@ -141,19 +135,12 @@ research:
     gpt_researcher:
       retriever: tavily,mcp
       fast_llm: openai:gpt-5.6-terra
-      smart_llm: openai:gpt-6-astra
+      smart_llm: openai:gpt-5.6-sol
       strategic_llm: openai:gpt-5.6-terra
       embedding: huggingface:cl-nagoya/ruri-v3-70m
       smart_token_limit: 16000
       browse_chunk_max_length: 8192
       language: japanese
-      # GPT-6 系は推論設定時に temperature を送ると OpenAI API が 400 を返します。
-      # 全 LLM ロールに温度指定を送らない (OpenAI リクエストから省略する) 意味で
-      # temperature: null を指定します。GPT Researcher 実行中だけ JSON 化した
-      # LLM_KWARGS 環境変数として渡され、実行後は復元されます。
-      # マップ以外・JSON 化できない値は起動時に明示的に失敗します。
-      llm_kwargs:
-        temperature: null
   vectorsearch_dir: /path/to/your/vectorsearch
   vectorsearch_python: uv
   vectorsearch_script: your_vectorsearch_script

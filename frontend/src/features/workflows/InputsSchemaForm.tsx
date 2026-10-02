@@ -1,6 +1,10 @@
 import { useState, type ChangeEvent, type ReactNode } from "react";
 import type { WorkflowSchemaField } from "../../api/types";
-import { isReferenceValue, type ReferenceGroup } from "./graphModel";
+import {
+  filterReferenceGroups,
+  isReferenceValue,
+  type ReferenceGroup,
+} from "./graphModel";
 import ReferenceValueEditor from "./ReferenceValueEditor";
 import ExpressionEditor from "./ExpressionEditor";
 import {
@@ -156,6 +160,16 @@ function SchemaValueField({
 }: SchemaValueFieldProps) {
   const testId = `${testIdPrefix}-${idPath}`;
   const unsupported = field["x-unsupported"] === true;
+  // Offer only the source kinds the backend accepts at this field
+  // (e.g. narrative only where `x-accepted-value-kinds` allows it).
+  // Fields without the hint default to structured, matching validation.
+  const acceptedKinds = field["x-accepted-value-kinds"] ?? ["structured"];
+  const filteredGroups = filterReferenceGroups(referenceGroups, {
+    acceptedKinds,
+  });
+  const filteredAnchors = expressionReferenceGroups
+    ? filterReferenceGroups(expressionReferenceGroups, { acceptedKinds })
+    : filteredGroups;
   const expressionCapable =
     allowExpressions && (field.type === "string" || field.type === undefined);
 
@@ -184,7 +198,7 @@ function SchemaValueField({
           idPrefix={testId}
           value={value}
           onChange={onChange}
-          referenceGroups={expressionReferenceGroups}
+          referenceGroups={filteredAnchors}
           allowNodeAnchors={allowNodeAnchors}
           expectedFormat={field.format}
         />
@@ -213,7 +227,7 @@ function SchemaValueField({
         />
         <ReferenceValueEditor
           idPrefix={testId}
-          groups={referenceGroups}
+          groups={filteredGroups}
           value={value}
           onChange={onChange}
         />

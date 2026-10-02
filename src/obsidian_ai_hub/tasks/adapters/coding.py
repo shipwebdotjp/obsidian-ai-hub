@@ -29,6 +29,16 @@ logger = logging.getLogger(__name__)
 CODING_BACKENDS = frozenset({"opencode"})
 
 
+def truncate_utf8_bytes(text: str, max_bytes: int = 64 * 1024) -> tuple[str, bool]:
+    """Truncate text to max_bytes UTF-8 limit; returns (truncated_text, is_truncated)."""
+    encoded = text.encode("utf-8")
+    if len(encoded) <= max_bytes:
+        return text, False
+    truncated_bytes = encoded[:max_bytes]
+    truncated_text = truncated_bytes.decode("utf-8", errors="ignore")
+    return truncated_text, True
+
+
 class CodingAdapter:
     """Queue and watch a child coding run for one saved plan step."""
 
@@ -123,11 +133,55 @@ class CodingAdapter:
         )
         status = str(final.get("status"))
         if status == "completed":
-            text = self._final_text(coding_store, session_id, run_id)
+            try:
+                raw_text = self._final_text(coding_store, session_id, run_id)
+            except Exception as exc:
+                logger.warning(
+                    "Child coding run '%s' completed but final text could not be retrieved: %s",
+                    run_id,
+                    exc,
+                )
+                raw_text = None
+
+            if not raw_text or not raw_text.strip():
+                return StepResult(
+                    step_index=step_index,
+                    capability_key=str(step.get("capability_key")),
+                    summary="",
+                    output={
+                        "receipt": {
+                            "status": "completed",
+                            "child_run_id": run_id,
+                            "session_id": session_id,
+                            "report_truncated": False,
+                        },
+                        "narrative": {
+                            "text": "",
+                        },
+                    },
+                    child_kind="coding",
+                    child_run_id=run_id,
+                    needs_attention=True,
+                    attention_reason="coding_report_unresolvable",
+                    error=f"Child coding run '{run_id}' completed but final report text could not be retrieved.",
+                )
+
+            text, truncated = truncate_utf8_bytes(raw_text)
             return StepResult(
                 step_index=step_index,
                 capability_key=str(step.get("capability_key")),
                 summary=tail_text(text),
+                output={
+                    "receipt": {
+                        "status": "completed",
+                        "child_run_id": run_id,
+                        "session_id": session_id,
+                        "report_truncated": truncated,
+                    },
+                    "narrative": {
+                        "text": text,
+                    },
+                },
                 child_kind="coding",
                 child_run_id=run_id,
             )

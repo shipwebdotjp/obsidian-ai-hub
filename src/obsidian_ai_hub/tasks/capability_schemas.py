@@ -371,6 +371,56 @@ def field_widget(
     return None
 
 
+def get_input_field_contract(capability_key: str, field_name: str) -> dict[str, Any]:
+    """Return field-level input contract metadata (accepted_value_kinds)."""
+    allowed_narrative = ALLOWED_NARRATIVE_INPUT_FIELDS.get(capability_key, set())
+    if field_name in allowed_narrative:
+        return {"accepted_value_kinds": [VALUE_KIND_STRUCTURED, VALUE_KIND_NARRATIVE]}
+    return {"accepted_value_kinds": [VALUE_KIND_STRUCTURED]}
+
+
+def get_output_field_contract(capability_key: str, field_path: str) -> dict[str, Any]:
+    """Return field-level output contract metadata (value_kind, allowed_uses)."""
+    per_key = _MIXED_OUTPUT_FIELD_CONTRACTS.get(capability_key)
+    if per_key is not None:
+        exact = per_key.get(field_path)
+        if exact is not None:
+            return {
+                "value_kind": exact["value_kind"],
+                "allowed_uses": exact["allowed_uses"],
+            }
+        if field_path.startswith("receipt."):
+            return {
+                "value_kind": VALUE_KIND_RECEIPT,
+                "allowed_uses": ALLOWED_USES_NONE,
+            }
+        if field_path.startswith("narrative."):
+            return {
+                "value_kind": VALUE_KIND_NARRATIVE,
+                "allowed_uses": ALLOWED_USES_PAYLOAD,
+            }
+        return {
+            "value_kind": OUTPUT_CONTRACT_OPAQUE,
+            "allowed_uses": ALLOWED_USES_NONE,
+        }
+
+    contract_class = output_contract_class(capability_key)
+    if contract_class == OUTPUT_CONTRACT_STRUCTURED:
+        return {
+            "value_kind": VALUE_KIND_STRUCTURED,
+            "allowed_uses": ALLOWED_USES_ALL,
+        }
+    if contract_class == OUTPUT_CONTRACT_RECEIPT:
+        return {
+            "value_kind": VALUE_KIND_RECEIPT,
+            "allowed_uses": ALLOWED_USES_NONE,
+        }
+    return {
+        "value_kind": OUTPUT_CONTRACT_OPAQUE,
+        "allowed_uses": ALLOWED_USES_NONE,
+    }
+
+
 def _apply_field_widgets(
     capability_key: str, schema: dict[str, Any]
 ) -> dict[str, Any]:
@@ -381,6 +431,8 @@ def _apply_field_widgets(
                 widget = field_widget(capability_key, name, spec)
                 if widget:
                     spec["x-ui"] = widget
+                contract = get_input_field_contract(capability_key, name)
+                spec["x-accepted-value-kinds"] = contract["accepted_value_kinds"]
     return schema
 
 
@@ -433,13 +485,17 @@ def ui_target_schema(capability_key: str) -> dict[str, Any] | None:
 #
 # Every builtin capability is classified into exactly one output contract
 # class (see ``docs/workflow/adr/capability-input-output-contracts.md`` and
-# its P1/P2 amendment):
+# its amendments):
 # - ``structured``: stable data the Workflow may pass downstream as typed
 #   references. References are ``strict_fields``: only declared fields, and
 #   only from a node with ``fail_on_output_mismatch: true``.
 # - ``receipt``: write/proposal/job-registration results. The schema is kept
 #   for audit/display, but P3 まで後続 Node・条件・pipe・テンプレートからは
 #   参照できない (``forbidden``).
+# - ``mixed``: delegation results (``coding_cli``, ``specialist_agent``,
+#   ``research_agent``) that publish an observed ``receipt`` alongside a
+#   free-text ``narrative``. Field-level ``value_kind`` / ``allowed_uses``
+#   contracts come from ``get_output_field_contract``.
 # - ``opaque``: plugin, Skills, external providers and not-yet-structured
 #   read/search outputs. No typed field references (``forbidden``) and no
 #   synthetic ``summary`` fallback.
@@ -449,10 +505,114 @@ def ui_target_schema(capability_key: str) -> dict[str, Any] | None:
 # see ``workflow/capabilities.py``.
 OUTPUT_CONTRACT_STRUCTURED = "structured"
 OUTPUT_CONTRACT_RECEIPT = "receipt"
+OUTPUT_CONTRACT_MIXED = "mixed"
 OUTPUT_CONTRACT_OPAQUE = "opaque"
+
+VALUE_KIND_STRUCTURED = "structured"
+VALUE_KIND_RECEIPT = "receipt"
+VALUE_KIND_NARRATIVE = "narrative"
+
+ALLOWED_USES_ALL = [
+    "condition",
+    "identifier",
+    "path",
+    "command",
+    "url",
+    "destination",
+    "target",
+    "loop_state",
+    "payload",
+]
+ALLOWED_USES_CONDITION = ["condition"]
+ALLOWED_USES_PAYLOAD = ["payload"]
+ALLOWED_USES_NONE: list[str] = []
 
 REFERENCE_POLICY_STRICT_FIELDS = "strict_fields"
 REFERENCE_POLICY_FORBIDDEN = "forbidden"
+
+MIXED_CAPABILITY_KEYS: frozenset[str] = frozenset(
+    {"coding_cli", "specialist_agent", "research_agent"}
+)
+
+# Field-level value-kind contracts for ``mixed`` capabilities. Each entry maps
+# an output field path (relative to ``output``) to its ``value_kind`` and
+# ``allowed_uses``. Unknown ``receipt.*`` / ``narrative.*`` tails fall back to
+# receipt-without-uses / narrative-payload in :func:`get_output_field_contract`;
+# anything outside those namespaces is ``opaque``.
+_MIXED_OUTPUT_FIELD_CONTRACTS: dict[str, dict[str, dict[str, Any]]] = {
+    "coding_cli": {
+        "receipt.status": {
+            "value_kind": VALUE_KIND_RECEIPT,
+            "allowed_uses": ALLOWED_USES_CONDITION,
+        },
+        "receipt.report_truncated": {
+            "value_kind": VALUE_KIND_RECEIPT,
+            "allowed_uses": ALLOWED_USES_CONDITION,
+        },
+        "receipt.child_run_id": {
+            "value_kind": VALUE_KIND_RECEIPT,
+            "allowed_uses": ALLOWED_USES_NONE,
+        },
+        "receipt.session_id": {
+            "value_kind": VALUE_KIND_RECEIPT,
+            "allowed_uses": ALLOWED_USES_NONE,
+        },
+        "narrative.text": {
+            "value_kind": VALUE_KIND_NARRATIVE,
+            "allowed_uses": ALLOWED_USES_PAYLOAD,
+        },
+    },
+    "specialist_agent": {
+        "receipt.status": {
+            "value_kind": VALUE_KIND_RECEIPT,
+            "allowed_uses": ALLOWED_USES_CONDITION,
+        },
+        "receipt.child_run_id": {
+            "value_kind": VALUE_KIND_RECEIPT,
+            "allowed_uses": ALLOWED_USES_NONE,
+        },
+        "receipt.session_id": {
+            "value_kind": VALUE_KIND_RECEIPT,
+            "allowed_uses": ALLOWED_USES_NONE,
+        },
+        "receipt.agent_id": {
+            "value_kind": VALUE_KIND_RECEIPT,
+            "allowed_uses": ALLOWED_USES_NONE,
+        },
+        "narrative.text": {
+            "value_kind": VALUE_KIND_NARRATIVE,
+            "allowed_uses": ALLOWED_USES_PAYLOAD,
+        },
+    },
+    "research_agent": {
+        "receipt.status": {
+            "value_kind": VALUE_KIND_RECEIPT,
+            "allowed_uses": ALLOWED_USES_CONDITION,
+        },
+        "receipt.is_published": {
+            "value_kind": VALUE_KIND_RECEIPT,
+            "allowed_uses": ALLOWED_USES_CONDITION,
+        },
+        "receipt.job_id": {
+            "value_kind": VALUE_KIND_RECEIPT,
+            "allowed_uses": ALLOWED_USES_NONE,
+        },
+        "receipt.theme_id": {
+            "value_kind": VALUE_KIND_RECEIPT,
+            "allowed_uses": ALLOWED_USES_NONE,
+        },
+        "narrative.text": {
+            "value_kind": VALUE_KIND_NARRATIVE,
+            "allowed_uses": ALLOWED_USES_PAYLOAD,
+        },
+    },
+}
+
+ALLOWED_NARRATIVE_INPUT_FIELDS: dict[str, set[str]] = {
+    "vault_write_file": {"content"},
+    "calendar_create_proposal": {"title", "location", "content"},
+    "reminder_create_proposal": {"title", "content"},
+}
 
 # First structured targets (P2). ``hitl_wait`` lives in workflow-only and is
 # added by ``workflow/capabilities.py``.
@@ -464,8 +624,6 @@ STRUCTURED_CAPABILITY_KEYS: frozenset[str] = frozenset(
         "periodic_note_read",
         "research_context_snapshot",
         "summary_search",
-        "gmail_search_messages",
-        "gmail_read_message",
     }
 )
 
@@ -496,16 +654,42 @@ STRICT_ALLOWED_REGISTRY_KEYS: frozenset[str] = frozenset(
 )
 
 
+def mixed_output_field_contracts(capability_key: str) -> dict[str, Any] | None:
+    """Return the JSON-serializable field contract table for a mixed key.
+
+    Maps each declared output field path to ``{"value_kind", "allowed_uses"}``.
+    Returns ``None`` for non-mixed capabilities. The Workflow capability API
+    and designer catalog expose this so the editor can offer exactly the
+    bindable ``receipt`` / ``narrative`` fields.
+    """
+    per_key = _MIXED_OUTPUT_FIELD_CONTRACTS.get(capability_key)
+    if per_key is None:
+        return None
+    return {
+        field_path: {
+            "value_kind": entry["value_kind"],
+            "allowed_uses": list(entry["allowed_uses"]),
+        }
+        for field_path, entry in per_key.items()
+    }
+
+
 def output_contract_class(capability_key: str) -> str:
     """Return the code-owned output contract class for a registry capability.
 
-    Unknown keys and dynamic plugins (``custom:*``, ``skills``) default to
-    ``opaque`` unless an explicit contract registration exists.
+    ``mixed`` capabilities (``coding_cli``, ``specialist_agent``,
+    ``research_agent``) publish an observed ``receipt`` alongside a free-text
+    ``narrative``; field-level contracts come from
+    :func:`get_output_field_contract`. Unknown keys and dynamic plugins
+    (``custom:*``, ``skills``) default to ``opaque`` unless an explicit
+    contract registration exists.
     """
     if capability_key in STRUCTURED_CAPABILITY_KEYS:
         return OUTPUT_CONTRACT_STRUCTURED
     if capability_key in RECEIPT_CAPABILITY_KEYS:
         return OUTPUT_CONTRACT_RECEIPT
+    if capability_key in MIXED_CAPABILITY_KEYS:
+        return OUTPUT_CONTRACT_MIXED
     return OUTPUT_CONTRACT_OPAQUE
 
 
@@ -754,91 +938,6 @@ _OUTPUT_SCHEMAS: dict[str, dict[str, Any]] = {
             "coverage",
             "truncated",
             "next_request",
-        ],
-    ),
-    "gmail_search_messages": _object_output(
-        {
-            "messages": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "message_id": {"type": "string"},
-                        "thread_id": {"type": "string"},
-                        "from": {"type": "string"},
-                        "to": {"type": "string"},
-                        "subject": {"type": "string"},
-                        "date": {"type": "string"},
-                        "snippet": {"type": "string"},
-                        "label_ids": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                        },
-                    },
-                    "required": [
-                        "message_id",
-                        "thread_id",
-                        "from",
-                        "to",
-                        "subject",
-                        "date",
-                        "snippet",
-                        "label_ids",
-                    ],
-                    "additionalProperties": True,
-                },
-            },
-            "next_page_token": {"type": ["string", "null"]},
-            "result_size_estimate": {"type": "integer"},
-        },
-        required=["messages"],
-    ),
-    "gmail_read_message": _object_output(
-        {
-            "message_id": {"type": "string"},
-            "thread_id": {"type": "string"},
-            "label_ids": {
-                "type": "array",
-                "items": {"type": "string"},
-            },
-            "snippet": {"type": "string"},
-            "headers": {
-                "type": "object",
-                "properties": {
-                    "from": {"type": "string"},
-                    "to": {"type": "string"},
-                    "cc": {"type": "string"},
-                    "bcc": {"type": "string"},
-                    "subject": {"type": "string"},
-                    "date": {"type": "string"},
-                    "message_id": {"type": "string"},
-                    "in_reply_to": {"type": "string"},
-                    "references": {"type": "string"},
-                },
-                "required": [
-                    "from",
-                    "to",
-                    "cc",
-                    "bcc",
-                    "subject",
-                    "date",
-                    "message_id",
-                    "in_reply_to",
-                    "references",
-                ],
-                "additionalProperties": True,
-            },
-            "body_text": {"type": "string"},
-            "truncated": {"type": "boolean"},
-            "attachments": {"type": "array", "items": {"type": "object"}},
-        },
-        required=[
-            "message_id",
-            "snippet",
-            "headers",
-            "body_text",
-            "truncated",
-            "attachments",
         ],
     ),
     # --- receipt (P3 まで参照不可; schema は監査・表示用に維持) ---

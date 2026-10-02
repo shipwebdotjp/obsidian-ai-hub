@@ -51,9 +51,14 @@ LLM_CONFIG_KEYS: frozenset[str] = frozenset(
         "max_tokens",
         "reasoning_effort",
         "inputs",
+        "input_flow_contracts",
         "output_schema",
     }
 )
+
+#: Value kinds an LLM input variable may explicitly accept. Receipt outputs
+#: can never flow into LLM inputs, so only structured/narrative are allowed.
+INPUT_FLOW_CONTRACT_KINDS: frozenset[str] = frozenset({"structured", "narrative"})
 
 
 def validate_llm_config(config: Any, *, path: str = "config") -> list[str]:
@@ -114,6 +119,28 @@ def validate_llm_config(config: Any, *, path: str = "config") -> list[str]:
     inputs = config.get("inputs")
     if inputs is not None and not isinstance(inputs, dict):
         errors.append(f"{path}.inputs: object が必要です")
+
+    flow_contracts = config.get("input_flow_contracts")
+    if flow_contracts is not None:
+        if not isinstance(flow_contracts, dict):
+            errors.append(f"{path}.input_flow_contracts: object が必要です")
+        else:
+            for field_name, entry in flow_contracts.items():
+                kinds = (
+                    entry.get("accepted_value_kinds")
+                    if isinstance(entry, dict)
+                    else None
+                )
+                if (
+                    not isinstance(kinds, list)
+                    or not kinds
+                    or any(k not in INPUT_FLOW_CONTRACT_KINDS for k in kinds)
+                ):
+                    errors.append(
+                        f"{path}.input_flow_contracts.{field_name}: "
+                        "accepted_value_kinds は structured/narrative の"
+                        "非空リストが必要です"
+                    )
     return errors
 
 

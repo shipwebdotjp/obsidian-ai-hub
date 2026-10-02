@@ -155,104 +155,213 @@ def _capability_nodes_by_id(
     return {str(n.get("node_id")): n for n in nodes if n.get("node_id")}
 
 
+def _get_ref_source_info(
+    ref: str,
+    nodes: Optional[list[dict[str, Any]]],
+    seen_templates: Optional[set[str]] = None,
+) -> tuple[str, list[str]]:
+    """Return (value_kind, allowed_uses) for a reference path."""
+    from obsidian_ai_hub.tasks.capability_schemas import (
+        ALLOWED_USES_ALL,
+        ALLOWED_USES_CONDITION,
+        ALLOWED_USES_NONE,
+        ALLOWED_USES_PAYLOAD,
+    )
+    from obsidian_ai_hub.workflow.capabilities import output_contract_class
+    from obsidian_ai_hub.workflow.models import _path_segments
+
+    segments = _path_segments(ref)
+    if not segments:
+        return ("unknown", [])
+
+    head = segments[0]
+    if head in ("run", "loop"):
+        return ("structured", ALLOWED_USES_ALL)
+
+    if head == "nodes" and len(segments) >= 3 and segments[2] == "output":
+        node_id = str(segments[1])
+        by_id = _capability_nodes_by_id(nodes)
+        source = by_id.get(node_id)
+        if source is None:
+            return ("unknown", [])
+
+        node_type = source.get("node_type")
+        config = source.get("config") or {}
+
+        if node_type == "capability":
+            key = str(config.get("capability_key") or "")
+            from obsidian_ai_hub.tasks.capability_schemas import (
+                MIXED_CAPABILITY_KEYS,
+                get_output_field_contract,
+            )
+
+            if key in MIXED_CAPABILITY_KEYS:
+                tail = ".".join(str(s) for s in segments[3:])
+                field = get_output_field_contract(key, tail)
+                return (field["value_kind"], field["allowed_uses"])
+
+            contract = output_contract_class(key)
+            if contract == "structured":
+                if config.get("fail_on_output_mismatch") is not True:
+                    return ("unsupported_structured_without_strict", [])
+                return ("structured", ALLOWED_USES_ALL)
+            if contract == "receipt":
+                return ("receipt", ALLOWED_USES_NONE)
+            return ("opaque", ALLOWED_USES_NONE)
+
+        if node_type == "llm":
+            if config.get("output_schema"):
+                return ("structured", ALLOWED_USES_ALL)
+            return ("opaque", ALLOWED_USES_NONE)
+
+        if node_type == "agent":
+            if config.get("output_schema"):
+                return ("structured", ALLOWED_USES_ALL)
+            return ("opaque", ALLOWED_USES_NONE)
+
+        if node_type == "text_template":
+            current_seen = set(seen_templates) if seen_templates else set()
+            if node_id in current_seen:
+                return ("structured", ALLOWED_USES_ALL)
+            current_seen.add(node_id)
+
+            inputs = config.get("inputs") or {}
+            has_narrative = False
+            if isinstance(inputs, dict):
+                for var_val in inputs.values():
+                    for sub_ref in iter_references(var_val):
+                        sub_kind, _ = _get_ref_source_info(
+                            sub_ref, nodes, current_seen
+                        )
+                        if sub_kind == "narrative":
+                            has_narrative = True
+                            break
+                    if has_narrative:
+                        break
+
+            if has_narrative:
+                return ("narrative", ALLOWED_USES_PAYLOAD)
+            return ("structured", ALLOWED_USES_ALL)
+
+        if node_type in ("loop", "loop_result"):
+            return ("structured", ALLOWED_USES_ALL)
+
+    return ("structured", ALLOWED_USES_ALL)
+
+
 def _capability_output_contract_errors(
     ref: str,
     *,
     nodes: Optional[list[dict[str, Any]]],
     path: str,
+    accepted_value_kinds: Optional[list[str]] = None,
+    is_condition: bool = False,
+    is_text_template_input: bool = False,
 ) -> list[str]:
-    """Enforce the P1 output-reference boundary for Capability outputs.
-
-    Rejects (all paths: inputs, conditions, pipes, templates):
-    - whole-output references (``nodes.<id>.output`` with no field);
-    - any field reference into ``receipt`` / ``opaque`` capabilities;
-    - structured references from a node without ``fail_on_output_mismatch``;
-    - undeclared fields, undeclared nesting, and paths through optional
-      (non-required) properties that may be absent.
-    """
-    from obsidian_ai_hub.workflow.capabilities import (
-        output_contract_class,
-        workflow_output_schema,
-    )
+    """Enforce output contracts and taint-aware data flow rules."""
+    from obsidian_ai_hub.workflow.capabilities import workflow_output_schema
     from obsidian_ai_hub.workflow.models import _path_segments
 
     segments = _path_segments(ref)
     if len(segments) < 3 or segments[0] != "nodes" or segments[2] != "output":
         return []
+
     by_id = _capability_nodes_by_id(nodes)
-    source = by_id.get(str(segments[1]))
-    if source is None or source.get("node_type") != "capability":
+    node_id = str(segments[1])
+    source = by_id.get(node_id)
+    if source is None:
         return []
-    config = source.get("config")
-    if not isinstance(config, dict):
-        return []
-    key = config.get("capability_key")
-    if not isinstance(key, str) or not key.strip():
-        return []
+
+    node_type = source.get("node_type")
+    config = source.get("config") or {}
     tail: list[Any] = segments[3:]
+
     if not tail:
         return [
-            f"output_contract: {path}: Capability '{key}' の出力全体 "
-            f"(nodes.{segments[1]}.output) は参照できません。"
+            f"output_contract: {path}: Node '{node_id}' の出力全体 "
+            f"(nodes.{node_id}.output) は参照できません。"
             "宣言済みの個別フィールドを参照してください"
         ]
-    contract = output_contract_class(key)
-    if contract != "structured":
+
+    source_kind, allowed_uses = _get_ref_source_info(ref, nodes)
+
+    if source_kind == "opaque":
         return [
-            f"output_contract: {path}: Capability '{key}' "
-            f"(output_contract_class={contract}) の出力は参照できません"
+            f"output_contract: {path}: Node '{node_id}' の出力は参照できません (opaque)"
         ]
-    if config.get("fail_on_output_mismatch") is not True:
+
+    if source_kind == "unsupported_structured_without_strict":
+        key = config.get("capability_key")
         return [
             f"output_contract: {path}: Capability '{key}' "
-            f"(nodes.{segments[1]}) の出力を参照するには "
+            f"(nodes.{node_id}) の出力を参照するには "
             "fail_on_output_mismatch: true が必要です"
         ]
-    schema = workflow_output_schema(key)
-    if not isinstance(schema, dict):
-        return [
-            f"output_contract: {path}: Capability '{key}' に宣言済み出力がありません"
-        ]
-    current: Any = schema
-    for token in tail:
-        if isinstance(token, int):
-            if (
-                not isinstance(current, dict)
-                or current.get("type") != "array"
-                or not isinstance(current.get("items"), dict)
+
+    if source_kind == "receipt":
+        if is_text_template_input:
+            return [
+                f"flow_contract: {path}: Text Template は receipt 出力 '{ref}' を受理しません"
+            ]
+        if is_condition and "condition" in allowed_uses:
+            pass
+        else:
+            return [
+                f"output_contract: {path}: receipt 出力 '{ref}' は参照できません (output_contract_class=receipt)"
+            ]
+
+    if source_kind == "narrative":
+        allowed_kinds = accepted_value_kinds if accepted_value_kinds is not None else ["structured"]
+        if is_condition or "narrative" not in allowed_kinds:
+            return [
+                f"flow_contract: {path}: Narrative 出力 '{ref}' はこの位置では使用できません"
+                "（本文・表示用の許可済み入力のみ参照可能）"
+            ]
+
+    schema: Any = None
+    if node_type == "capability":
+        key = str(config.get("capability_key") or "")
+        schema = workflow_output_schema(key)
+    elif node_type == "agent":
+        schema = config.get("output_schema")
+    elif node_type == "llm":
+        schema = config.get("output_schema")
+    elif node_type == "text_template":
+        schema = {
+            "type": "object",
+            "properties": {"text": {"type": "string"}},
+            "required": ["text"],
+        }
+
+    if isinstance(schema, dict):
+        current: Any = schema
+        for token in tail:
+            if isinstance(token, int):
+                if (
+                    not isinstance(current, dict)
+                    or current.get("type") != "array"
+                    or not isinstance(current.get("items"), dict)
+                ):
+                    return [f"output_contract: {path}: '{ref}' は未宣言のネストです"]
+                current = current["items"]
+                continue
+            if isinstance(current, dict) and current.get("type") == "array":
+                return [f"output_contract: {path}: '{ref}' は未宣言のネストです"]
+            if not isinstance(current, dict) or current.get("type") not in (
+                None,
+                "object",
             ):
+                return [f"output_contract: {path}: '{ref}' は未宣言のネストです"]
+            props = current.get("properties")
+            if not isinstance(props, dict) or token not in props:
+                return [f"output_contract: {path}: '{ref}' は未宣言のフィールドです"]
+            required = current.get("required")
+            if isinstance(required, list) and token not in required:
                 return [
-                    f"output_contract: {path}: '{ref}' は未宣言のネストです"
+                    f"output_contract: {path}: '{ref}' は欠落し得る 必須でない経路です"
                 ]
-            current = current["items"]
-            continue
-        if isinstance(current, dict) and current.get("type") == "array":
-            # Descending into a list requires an explicit index
-            # (``events[0].title``); a bare string token (``events.title``)
-            # can never resolve at runtime.
-            return [
-                f"output_contract: {path}: '{ref}' は未宣言のネストです"
-            ]
-        if not isinstance(current, dict) or current.get("type") not in (
-            None,
-            "object",
-        ):
-            # Leaf traversal into a scalar (e.g. ``content.length``).
-            return [
-                f"output_contract: {path}: '{ref}' は未宣言のネストです"
-            ]
-        props = current.get("properties")
-        if not isinstance(props, dict) or token not in props:
-            return [
-                f"output_contract: {path}: '{ref}' は未宣言のフィールドです"
-            ]
-        required = current.get("required")
-        if isinstance(required, list) and token not in required:
-            return [
-                f"output_contract: {path}: '{ref}' は欠落し得る "
-                "必須でない経路です"
-            ]
-        current = props[token]
+            current = props[token]
+
     return []
 
 
@@ -278,7 +387,7 @@ def _condition_reference_errors(
     )
     errors.extend(
         _capability_output_contract_errors(
-            ref, nodes=nodes, path=f"{path}.from_path"
+            ref, nodes=nodes, path=f"{path}.from_path", is_condition=True
         )
     )
     return errors
@@ -336,6 +445,9 @@ def _value_reference_errors(
     inputs_schema: Optional[dict[str, Any]],
     path: str,
     nodes: Optional[list[dict[str, Any]]] = None,
+    accepted_value_kinds: Optional[list[str]] = None,
+    is_condition: bool = False,
+    is_text_template_input: bool = False,
 ) -> list[str]:
     errors: list[str] = []
     for ref in iter_references(value):
@@ -349,7 +461,14 @@ def _value_reference_errors(
             )
         )
         errors.extend(
-            _capability_output_contract_errors(ref, nodes=nodes, path=path)
+            _capability_output_contract_errors(
+                ref,
+                nodes=nodes,
+                path=path,
+                accepted_value_kinds=accepted_value_kinds,
+                is_condition=is_condition,
+                is_text_template_input=is_text_template_input,
+            )
         )
     resolver = (
         _anchor_type_resolver(nodes, inputs_schema, scope_id)
@@ -706,16 +825,37 @@ def _validate_capability_node(
     if not isinstance(inputs, dict):
         errors.append(f"Node '{node_id}': inputs は object が必要です")
         return errors
-    errors.extend(
-        _value_reference_errors(
-            inputs,
-            scope_id=scope_id,
-            scope_ids=scope_ids,
-            inputs_schema=inputs_schema,
-            nodes=nodes,
-            path=f"Node '{node_id}'.inputs",
+
+    if isinstance(key, str) and key.strip():
+        from obsidian_ai_hub.tasks.capability_schemas import (
+            get_input_field_contract,
         )
-    )
+
+        for field_name, field_val in inputs.items():
+            contract = get_input_field_contract(key, field_name)
+            errors.extend(
+                _value_reference_errors(
+                    field_val,
+                    scope_id=scope_id,
+                    scope_ids=scope_ids,
+                    inputs_schema=inputs_schema,
+                    nodes=nodes,
+                    path=f"Node '{node_id}'.inputs.{field_name}",
+                    accepted_value_kinds=contract["accepted_value_kinds"],
+                )
+            )
+    else:
+        errors.extend(
+            _value_reference_errors(
+                inputs,
+                scope_id=scope_id,
+                scope_ids=scope_ids,
+                inputs_schema=inputs_schema,
+                nodes=nodes,
+                path=f"Node '{node_id}'.inputs",
+            )
+        )
+
     if isinstance(key, str) and key.strip():
         from obsidian_ai_hub.tasks.capability_schemas import (
             capability_has_target,
@@ -792,6 +932,7 @@ def _validate_agent_node(
             inputs_schema=inputs_schema,
             nodes=nodes,
             path=f"Node '{node_id}'.inputs",
+            accepted_value_kinds=["structured"],
         )
     )
     return errors
@@ -821,16 +962,31 @@ def _validate_llm_node(
     if not isinstance(inputs, dict):
         errors.append(f"Node '{node_id}': inputs は object が必要です")
         return errors
-    errors.extend(
-        _value_reference_errors(
-            inputs,
-            scope_id=scope_id,
-            scope_ids=scope_ids,
-            inputs_schema=inputs_schema,
-            nodes=nodes,
-            path=f"Node '{node_id}'.inputs",
+
+    flow_contracts = config.get("input_flow_contracts") or {}
+    for field_name, field_val in inputs.items():
+        entry = (
+            flow_contracts.get(field_name)
+            if isinstance(flow_contracts, dict) and field_name in flow_contracts
+            else None
         )
-    )
+        # The editor stores per-variable contracts as
+        # ``{"accepted_value_kinds": [...]}`` dicts; accept that shape and
+        # default to structured-only when the field is missing.
+        if isinstance(entry, dict):
+            entry = entry.get("accepted_value_kinds")
+        accepted_kinds = entry if isinstance(entry, list) else None
+        errors.extend(
+            _value_reference_errors(
+                field_val,
+                scope_id=scope_id,
+                scope_ids=scope_ids,
+                inputs_schema=inputs_schema,
+                nodes=nodes,
+                path=f"Node '{node_id}'.inputs.{field_name}",
+                accepted_value_kinds=accepted_kinds,
+            )
+        )
     return errors
 
 
@@ -856,6 +1012,8 @@ def _validate_text_template_node(
             inputs_schema=inputs_schema,
             nodes=nodes,
             path=f"Node '{node_id}'.inputs",
+            accepted_value_kinds=["structured", "narrative"],
+            is_text_template_input=True,
         )
     )
     errors.extend(

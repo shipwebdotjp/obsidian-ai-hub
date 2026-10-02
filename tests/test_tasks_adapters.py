@@ -526,8 +526,10 @@ def test_coding_adapter_requires_orchestrator_text(monkeypatch):
         lambda session_id: [{"role": "worker", "content": "only worker"}],
     )
     task, plan = _task_with_plan("coding_cli", {"project_id": 7})
-    with pytest.raises(ValueError, match="produced no messages"):
-        CodingAdapter().execute_step(task, plan, 0, plan["plan"]["steps"][0])
+    result = CodingAdapter().execute_step(task, plan, 0, plan["plan"]["steps"][0])
+    assert result.needs_attention is True
+    assert result.output["receipt"]["status"] == "completed"
+    assert result.output["narrative"]["text"] == ""
 
 
 def test_coding_adapter_validates_target(monkeypatch):

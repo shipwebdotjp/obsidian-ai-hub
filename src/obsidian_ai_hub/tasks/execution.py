@@ -37,6 +37,10 @@ class StepResult:
     # adapter reports them so the Runtime Orchestrator can decide completion
     # from state instead of relying on the LLM's ``finish``.
     satisfied_effects: tuple[str, ...] = ()
+    output: Optional[dict[str, Any]] = None
+    needs_attention: bool = False
+    attention_reason: Optional[str] = None
+    error: Optional[str] = None
 
 
 @dataclass(frozen=True)

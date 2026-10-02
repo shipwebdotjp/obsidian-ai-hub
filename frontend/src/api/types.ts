@@ -1191,6 +1191,8 @@ export interface WorkflowSchemaField {
   "x-unsupported"?: boolean;
   /** Backend UI widget hint (e.g. ``vault_path`` / ``project`` / ``date``). */
   "x-ui"?: string;
+  /** Source value kinds the backend accepts at this input field. */
+  "x-accepted-value-kinds"?: string[];
 }
 
 export interface WorkflowCapabilityRecord {
@@ -1205,8 +1207,13 @@ export interface WorkflowCapabilityRecord {
   target_schema?: WorkflowSchemaField | null;
   output_schema?: WorkflowSchemaField | null;
   /** Code-owned output contract class. */
-  output_contract_class?: "structured" | "receipt" | "opaque";
-  /** ``strict_fields`` for structured, ``forbidden`` for receipt/opaque. */
+  output_contract_class?: "structured" | "receipt" | "mixed" | "opaque";
+  /** Declared receipt/narrative field contracts for mixed capabilities. */
+  output_field_contracts?: Record<
+    string,
+    { value_kind: string; allowed_uses: string[] }
+  > | null;
+  /** ``strict_fields`` for structured, ``forbidden`` otherwise. */
   output_reference_policy?: "strict_fields" | "forbidden";
   /** True when ``fail_on_output_mismatch: true`` may be set. */
   strict_allowed?: boolean;

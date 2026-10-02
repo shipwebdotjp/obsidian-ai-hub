@@ -67,7 +67,6 @@ AI エージェントおよび Task Agent で以下の3つのツールが利用�
 
 - **本文テキスト抽出:** MIME 構造を解析し、`text/plain` を優先取得します。`text/plain` がない場合は標準ライブラリによる HTML-to-text 変換を行い、最大 20,000 文字にクランプします（超過時は `truncated: true`）。
 - **添付ファイル:** 添付ファイルの本文やバイナリデータは LLM に展開されません。ファイル名、MIME タイプ、バイトサイズ等のメタデータのみが返されます。
-- **ワークフローでの利用:** 検索（`gmail_search_messages`）と詳細読取（`gmail_read_message`）は structured 出力です。ワークフローでは検索結果の `messages` や本文の `body_text` を型付き参照（例: `nodes.<node_id>.output.messages`）で後続 Node の `inputs` へ渡せます（[データの受け渡し](../workflow/data-flow.md) を参照）。Edge だけではデータは渡りません。
 
 ---
 
