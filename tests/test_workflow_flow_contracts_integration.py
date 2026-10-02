@@ -52,6 +52,8 @@ def _ref(path: str) -> dict[str, str]:
 
 
 def _setup_mock_coding(monkeypatch, repo_path, orch_text="report content"):
+    from obsidian_ai_hub.utils import config as app_config
+    monkeypatch.setattr(app_config, "VAULT_PATH", repo_path)
     monkeypatch.setattr(
         projects_service,
         "get_project_detail",

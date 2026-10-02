@@ -212,7 +212,9 @@ def _get_ref_source_info(
             return ("opaque", ALLOWED_USES_NONE)
 
         if node_type == "llm":
-            return ("structured", ALLOWED_USES_ALL)
+            if config.get("output_schema"):
+                return ("structured", ALLOWED_USES_ALL)
+            return ("opaque", ALLOWED_USES_NONE)
 
         if node_type == "agent":
             if config.get("output_schema"):
@@ -220,11 +222,10 @@ def _get_ref_source_info(
             return ("opaque", ALLOWED_USES_NONE)
 
         if node_type == "text_template":
-            if seen_templates is None:
-                seen_templates = set()
-            if node_id in seen_templates:
+            current_seen = set(seen_templates) if seen_templates else set()
+            if node_id in current_seen:
                 return ("structured", ALLOWED_USES_ALL)
-            seen_templates.add(node_id)
+            current_seen.add(node_id)
 
             inputs = config.get("inputs") or {}
             has_narrative = False
@@ -232,7 +233,7 @@ def _get_ref_source_info(
                 for var_val in inputs.values():
                     for sub_ref in iter_references(var_val):
                         sub_kind, _ = _get_ref_source_info(
-                            sub_ref, nodes, seen_templates
+                            sub_ref, nodes, current_seen
                         )
                         if sub_kind == "narrative":
                             has_narrative = True
@@ -312,10 +313,8 @@ def _capability_output_contract_errors(
             ]
 
     if source_kind == "narrative":
-        if is_condition or (
-            accepted_value_kinds is not None
-            and "narrative" not in accepted_value_kinds
-        ):
+        allowed_kinds = accepted_value_kinds if accepted_value_kinds is not None else ["structured"]
+        if is_condition or "narrative" not in allowed_kinds:
             return [
                 f"flow_contract: {path}: Narrative 出力 '{ref}' はこの位置では使用できません"
                 "（本文・表示用の許可済み入力のみ参照可能）"
@@ -397,7 +396,7 @@ def _condition_reference_errors(
     )
     errors.extend(
         _capability_output_contract_errors(
-            ref, nodes=nodes, path=f"{path}.from_path"
+            ref, nodes=nodes, path=f"{path}.from_path", is_condition=True
         )
     )
     return errors
@@ -942,6 +941,8 @@ def _validate_agent_node(
             inputs_schema=inputs_schema,
             nodes=nodes,
             path=f"Node '{node_id}'.inputs",
+            accepted_value_kinds=["structured", "narrative"],
+            is_text_template_input=True,
         )
     )
     return errors
@@ -971,16 +972,25 @@ def _validate_llm_node(
     if not isinstance(inputs, dict):
         errors.append(f"Node '{node_id}': inputs は object が必要です")
         return errors
-    errors.extend(
-        _value_reference_errors(
-            inputs,
-            scope_id=scope_id,
-            scope_ids=scope_ids,
-            inputs_schema=inputs_schema,
-            nodes=nodes,
-            path=f"Node '{node_id}'.inputs",
+
+    flow_contracts = config.get("input_flow_contracts") or {}
+    for field_name, field_val in inputs.items():
+        accepted_kinds = (
+            flow_contracts.get(field_name)
+            if isinstance(flow_contracts, dict) and field_name in flow_contracts
+            else None
         )
-    )
+        errors.extend(
+            _value_reference_errors(
+                field_val,
+                scope_id=scope_id,
+                scope_ids=scope_ids,
+                inputs_schema=inputs_schema,
+                nodes=nodes,
+                path=f"Node '{node_id}'.inputs.{field_name}",
+                accepted_value_kinds=accepted_kinds,
+            )
+        )
     return errors
 
 
@@ -1006,6 +1016,8 @@ def _validate_text_template_node(
             inputs_schema=inputs_schema,
             nodes=nodes,
             path=f"Node '{node_id}'.inputs",
+            accepted_value_kinds=["structured", "narrative"],
+            is_text_template_input=True,
         )
     )
     errors.extend(
