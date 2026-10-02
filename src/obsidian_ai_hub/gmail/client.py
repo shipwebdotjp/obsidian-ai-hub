@@ -26,6 +26,14 @@ from obsidian_ai_hub.gmail.store import (
 )
 
 
+class GmailDraftDispatchError(Exception):
+    """Raised when Gmail drafts().create API call fails with an uncertain outcome."""
+
+    def __init__(self, message: str, original_exception: Exception) -> None:
+        super().__init__(message)
+        self.original_exception = original_exception
+
+
 class GmailService:
     def __init__(self, service: Resource | None = None) -> None:
         self._service = service
@@ -252,7 +260,10 @@ class GmailService:
             res = srv.users().drafts().create(userId="me", body=draft_body).execute()
         except Exception as dispatch_exc:
             mark_draft_request_unknown(request_key)
-            raise dispatch_exc
+            raise GmailDraftDispatchError(
+                f"Gmail drafts().create dispatch failed for request key '{request_key}': {dispatch_exc}",
+                original_exception=dispatch_exc,
+            ) from dispatch_exc
 
         draft_id = res.get("id", "")
         msg_res = res.get("message", {})

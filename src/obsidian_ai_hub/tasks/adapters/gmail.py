@@ -13,7 +13,7 @@ import logging
 from typing import Any
 
 from obsidian_ai_hub.gmail.auth import GmailAuthError
-from obsidian_ai_hub.gmail.client import GmailService
+from obsidian_ai_hub.gmail.client import GmailDraftDispatchError, GmailService
 from obsidian_ai_hub.gmail.store import (
     DraftRequestHashMismatchError,
     DraftRequestPendingOrUnknownError,
@@ -94,9 +94,6 @@ class GmailDraftAdapter:
                 reply_to_message_id=reply_to_message_id,
                 reply_all=reply_all,
             )
-        except GmailAuthError:
-            # Pre-dispatch authentication error: raise directly for normal node failure
-            raise
         except DraftRequestHashMismatchError as exc:
             existing = exc.existing or {}
             output = {
@@ -137,10 +134,7 @@ class GmailDraftAdapter:
                 attention_reason="pending_or_unknown_request",
                 error=f"Draft request '{request_key}' is in status '{existing.get('status')}'. Automatic re-execution blocked.",
             )
-        except (ValueError, TypeError) as exc:
-            # Pre-dispatch input/param validation failures raise directly as normal Node failure
-            raise
-        except Exception as exc:
+        except GmailDraftDispatchError as exc:
             # Dispatch error or uncertain API call outcome
             logger.exception("gmail_create_draft dispatch failed for key %s", request_key)
             output = {
@@ -159,7 +153,7 @@ class GmailDraftAdapter:
                 output=output,
                 needs_attention=True,
                 attention_reason="uncertain_outcome",
-                error=f"Gmail API dispatch failed or returned an uncertain outcome: {exc}",
+                error=f"Gmail API dispatch failed or returned an uncertain outcome: {exc.original_exception}",
             )
 
         # Check local receipt persistence
