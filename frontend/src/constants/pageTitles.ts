@@ -40,6 +40,7 @@ const PAGE_TITLE_ENTRIES: PageTitleEntry[] = [
   { pattern: ROUTES.PROJECTS, title: "プロジェクト管理" },
   { pattern: ROUTES.JOBS, title: "ジョブ管理" },
   { pattern: ROUTES.MEDIA, title: "メディア" },
+  { pattern: ROUTES.NOTIFICATIONS, title: "通知" },
   { pattern: ROUTES.PLANNER, title: "プランナー" },
   { pattern: ROUTES.SETTINGS, title: "設定" },
 ];

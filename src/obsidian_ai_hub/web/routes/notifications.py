@@ -56,6 +56,38 @@ class WebPushSubscriptionMetadataResponse(BaseModel):
     updated_at: str
 
 
+class NotificationInboxItemResponse(BaseModel):
+    notification_id: str
+    event_type: str
+    target_id: str
+    category: str
+    title: str
+    body: str
+    relative_link: str
+    created_at: str
+    read_at: Optional[str] = None
+    web_push_status: str
+    web_push_status_at: Optional[str] = None
+    web_push_failure_reason: Optional[str] = None
+    web_push_target_count: int
+    web_push_success_count: int
+    web_push_failure_count: int
+    line_status: str
+    line_status_at: Optional[str] = None
+    line_failure_reason: Optional[str] = None
+
+
+class NotificationInboxListResponse(BaseModel):
+    items: List[NotificationInboxItemResponse]
+    total: int
+    page: int
+    limit: int
+
+
+class NotificationUnreadCountResponse(BaseModel):
+    unread_count: int
+
+
 @router.get("/settings", response_model=NotificationSettingsResponse)
 def get_notification_settings():
     return store.get_notification_settings()
@@ -121,3 +153,46 @@ def unregister_subscription(
             detail="subscription_id or endpoint is required",
         )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("", response_model=NotificationInboxListResponse)
+def list_inbox_notifications(
+    status: str = Query("all", pattern="^(unread|read|all)$"),
+    category: str = Query("all", pattern="^(action_required|failure|all)$"),
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+):
+    return store.list_inbox_notifications(
+        status=status,
+        category=category,
+        page=page,
+        limit=limit,
+    )
+
+
+@router.get("/unread-count", response_model=NotificationUnreadCountResponse)
+def get_unread_notification_count():
+    count = store.get_unread_notification_count()
+    return {"unread_count": count}
+
+
+@router.get("/{notification_id}", response_model=NotificationInboxItemResponse)
+def get_inbox_notification(notification_id: str):
+    item = store.get_inbox_notification(notification_id)
+    if not item:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Notification not found",
+        )
+    return item
+
+
+@router.post("/{notification_id}/read", response_model=NotificationInboxItemResponse)
+def mark_notification_as_read(notification_id: str):
+    item = store.mark_notification_as_read(notification_id)
+    if not item:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Notification not found",
+        )
+    return item

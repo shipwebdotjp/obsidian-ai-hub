@@ -8,14 +8,10 @@ from obsidian_ai_hub.utils import config, line_messaging
 logger = logging.getLogger(__name__)
 
 
-def send_line_push_best_effort(event: NotificationEvent) -> bool:
-    """Best-effort LINE push notification.
+def send_line_push_result(event: NotificationEvent) -> str:
+    """Send LINE push notification and return line_status string.
 
-    Formats text:
-    【要対応】...
-    対象: ...
-    https://.../link
-
+    Possible return values: 'sent', 'failed', 'not_configured'.
     Never raises exceptions, and logs warnings without sensitive info.
     """
     token = config.LINE_MESSAGING_TOKEN
@@ -26,14 +22,20 @@ def send_line_push_best_effort(event: NotificationEvent) -> bool:
         logger.warning(
             "LINE notification skipped: LINE token, target, or Web URL is not configured"
         )
-        return False
+        return "not_configured"
 
     try:
         text = event.format_line_text(base_url)
         ok = line_messaging.send_line_push(token, target, text)
         if not ok:
             logger.warning("LINE notification push failed: non-2xx response")
-        return ok
+            return "failed"
+        return "sent"
     except Exception as exc:
         logger.warning("LINE notification push failed: %s", type(exc).__name__)
-        return False
+        return "failed"
+
+
+def send_line_push_best_effort(event: NotificationEvent) -> bool:
+    """Best-effort LINE push notification (backwards-compatible wrapper)."""
+    return send_line_push_result(event) == "sent"

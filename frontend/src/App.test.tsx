@@ -20,6 +20,7 @@ vi.mock("./api/client", () => ({
   listMemories: vi.fn(),
   listTaskAgentCapabilities: vi.fn(),
   updateTaskAgentCapability: vi.fn(),
+  getUnreadNotificationCount: vi.fn().mockResolvedValue({ unread_count: 0 }),
   AUTH_EXPIRED_EVENT: "auth:expired",
   ApiError: class ApiError extends Error {
     status: number;
@@ -41,6 +42,7 @@ vi.mock("./features/projects/ProjectsPage", () => ({ default: () => <div data-te
 vi.mock("./features/jobs/JobPage", () => ({ default: () => <div data-testid="page-jobs">JobPage</div> }));
 vi.mock("./features/execution-logs/ExecutionLogPage", () => ({ default: () => <div data-testid="page-execution-logs">ExecutionLogPage</div> }));
 vi.mock("./features/execution-logs/JobStatePage", () => ({ default: () => <div data-testid="page-job-states">JobStatePage</div> }));
+vi.mock("./features/notifications/NotificationsPage", () => ({ NotificationsPage: () => <div data-testid="page-notifications">NotificationsPage</div> }));
 vi.mock("./features/planner/PlannerPage", () => ({ default: () => <div data-testid="page-planner">PlannerPage</div> }));
 vi.mock("./features/settings/SettingsPage", () => ({ default: () => <div data-testid="page-settings">SettingsPage</div> }));
 

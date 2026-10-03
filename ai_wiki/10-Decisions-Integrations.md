@@ -566,3 +566,44 @@ Status: Accepted (2026-09-26)。
 
 - 送信機能を提供しないため、メール送信は人間が Gmail Web / アプリ上で下書きを確認して手動送信する必要がある。これは安全性を最優先した設計判断である。
 - 不確実な失敗時に自動リトライを行わないため、一時的な通信障害時にも人間の下書き確認が必要となるが、重複下書きの乱立を確実に防ぐことができる。
+
+## 通知受信箱・送信履歴 v1（クロスカット通知イベント永続化・配信結果可視化）
+
+| 項目 | 内容 |
+|------|------|
+| 決定日 | 2026-10-03 |
+| カテゴリ | 通知基盤・永続化・外部連携（LINE / Web Push） |
+| 決定内容 | 既存の `NotificationEvent` (`action_required` / `failure`) を SQLite `notification_inbox`（スキーマ v74）に不変スナップショットとして永続化する。パブリッシャーは通知を受信箱へ保存してからチャネル配信を一度だけ試行（ベストエフォート）し、結果（`line_status`, `web_push_status`, 送達数等）を可視化する。自動・手動再送は行わない。 |
+
+### 結論に至った経緯
+
+1. **通知イベントの永続化と不変性:**
+   - 従来は外部チャネル（LINE / Web Push）への配信のみでアプリ内に通知履歴が保持されなかった。
+   - `action_required`（要対応）および `failure`（処理失敗）の全通知を発生時点で `notification_inbox` テーブルへ不変スナップショット（題名、本文要約、深いリンク、発生時刻）として永続化する。
+   - 後続のタスク完了や手動操作によって過去の通知内容や既読状態が自動変化しない履歴独立性を確保する。
+
+2. **チャネル配信の順序と再送しない方針 (Best-Effort):**
+   - パブリッシャーはまず受信箱通知を DB 保存し、その後に外部チャネルへ一度だけ配信試行する。
+   - 配信失敗が発生した場合でも本体処理（タスクやワークフロー等）を失敗させず、未読通知と配信結果を受信箱に残す。
+   - 自動再送・手動再送は導入せず、シンプルなベストエフォート運用を維持する。
+
+3. **配信結果可視化と「閲覧保証」の定義:**
+   - 各通知に対し、LINE (`sent`, `failed`, `disabled`, `not_configured`, `skipped`) および Web Push (`sent`, `partial_success`, `failed`, `disabled`, `no_subscriptions`, `skipped`) の配信集計を保持・可視化する。
+   - 受信者トークンや宛先 endpoint、生レスポンスなどの機密情報は保存・非開示とする。
+   - 「配信成功」は「外部チャネル（LINE API / Web Push サービス）による正常受理」を意味し、ユーザーの実際の閲覧完了を保証するものではない。
+
+### Amendment: v2 のチャネル状態とリサーチ提案統合
+
+Status: Accepted (2026-10-03)。
+
+v74 の初期値 `skipped` は、API 呼出し中の例外や停止後にも「意図的に送らなかった」と読めるため、v75 でチャネルごとに `pending`、`in_progress`、`skipped`、`accepted`、`failed`、`unknown` を記録する。Web Push は複数宛先の一部受理を `partial_accepted` として追加する。全遷移で状態確定時刻を保存し、理由は `channel_disabled`、`no_active_subscriptions`、`publisher_interrupted` 等の安全な固定コードだけを保存する。例外文、API 応答本文、宛先や認証情報は保存しない。
+
+`NotificationEvent` を DB へ `pending` として commit してから、各チャネルを個別に `in_progress`、終端状態へ commit する。予期しない例外では未確定のチャネルを `unknown` にする。自動・手動再送は引き続き行わない。これにより、外部 API 呼出し後に永続化前で失敗した場合も、履歴は受理済みと推測せず「結果不明」と示す。
+
+リサーチ提案は旧来の LINE 専用 helper を通さず、同じ `NotificationEvent(action_required)` として publisher に渡す。日次予定・週次レビューは情報通知で、長文・複数メッセージの別契約を必要とするためこの v2 には含めない。
+
+| 段階 | 入力と正本 | 永続化 | 停止・失敗時 | 外部操作 |
+| --- | --- | --- | --- | --- |
+| 通知作成 | 正規化済み `NotificationEvent` | 両チャネルを `pending` として受信箱へ commit | 保存失敗なら送信しない | なし |
+| チャネル判定 | 設定と購読一覧 | `skipped` と理由コード・時刻 | 設定読取失敗は未確定チャネルを `unknown` | なし |
+| API送信 | `in_progress` を commit 済みの単一チャネル | API 結果を `accepted` / `partial_accepted` / `failed` と時刻・安全な理由で commit | 例外では残る未確定チャネルを `unknown`。再送しない | LINE / Push API に一度だけ送信 |

@@ -6,6 +6,22 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
 from obsidian_ai_hub.database import get_db_connection
+from obsidian_ai_hub.notifications.models import NotificationEvent
+
+
+_CHANNEL_STATUSES = {
+    "line": {"pending", "in_progress", "skipped", "accepted", "failed", "unknown"},
+    "web_push": {"pending", "in_progress", "skipped", "accepted", "partial_accepted", "failed", "unknown"},
+}
+_SAFE_DELIVERY_REASONS = {
+    "channel_disabled",
+    "category_disabled",
+    "configuration_missing",
+    "no_active_subscriptions",
+    "api_rejected_or_adapter_error",
+    "some_targets_failed",
+    "publisher_interrupted",
+}
 
 
 def get_notification_settings() -> Dict[str, Any]:
@@ -244,5 +260,203 @@ def list_web_push_subscription_metadata() -> List[Dict[str, Any]]:
                 }
             )
         return result
+    finally:
+        conn.close()
+
+
+def create_inbox_notification(event: NotificationEvent) -> str:
+    """Create an inbox event with neither external channel attempted yet."""
+    conn = get_db_connection()
+    try:
+        now = datetime.now(timezone.utc).isoformat()
+        notification_id = f"ntf_{uuid.uuid4().hex[:12]}"
+        conn.execute(
+            """
+            INSERT INTO notification_inbox (
+                notification_id, event_type, target_id, category, title, body,
+                relative_link, created_at, read_at, web_push_status, web_push_status_at,
+                web_push_target_count, web_push_success_count, web_push_failure_count,
+                line_status, line_status_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, 'pending', ?, 0, 0, 0, 'pending', ?);
+            """,
+            (
+                notification_id, event.event_type, event.target_id, event.category,
+                event.title, event.body, event.relative_link, now, now, now,
+            ),
+        )
+        conn.commit()
+        return notification_id
+    finally:
+        conn.close()
+
+
+def update_notification_channel_delivery(
+    notification_id: str,
+    *,
+    channel: str,
+    status: str,
+    failure_reason: Optional[str] = None,
+    target_count: Optional[int] = None,
+    success_count: Optional[int] = None,
+    failure_count: Optional[int] = None,
+) -> None:
+    """Persist one channel transition before moving to the next side effect.
+
+    ``failure_reason`` is an operator-safe reason code, never an exception
+    message or a remote response body.
+    """
+    if channel not in _CHANNEL_STATUSES:
+        raise ValueError(f"Unsupported notification channel: {channel}")
+    if status not in _CHANNEL_STATUSES[channel]:
+        raise ValueError(f"Unsupported {channel} delivery status: {status}")
+    if failure_reason is not None and failure_reason not in _SAFE_DELIVERY_REASONS:
+        raise ValueError("Unsupported notification delivery failure reason")
+
+    now = datetime.now(timezone.utc).isoformat()
+    fields = [f"{channel}_status = ?", f"{channel}_status_at = ?", f"{channel}_failure_reason = ?"]
+    params: List[Any] = [status, now, failure_reason]
+    if channel == "web_push":
+        for column, value in (
+            ("web_push_target_count", target_count),
+            ("web_push_success_count", success_count),
+            ("web_push_failure_count", failure_count),
+        ):
+            if value is not None:
+                fields.append(f"{column} = ?")
+                params.append(value)
+
+    conn = get_db_connection()
+    try:
+        conn.execute(
+            f"UPDATE notification_inbox SET {', '.join(fields)} WHERE notification_id = ?;",
+            [*params, notification_id],
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def mark_notification_delivery_unknown(notification_id: str) -> None:
+    """Mark channels left unresolved when the publisher exits unexpectedly."""
+    now = datetime.now(timezone.utc).isoformat()
+    conn = get_db_connection()
+    try:
+        for channel in ("line", "web_push"):
+            conn.execute(
+                f"""
+                UPDATE notification_inbox
+                SET {channel}_status = 'unknown', {channel}_status_at = ?,
+                    {channel}_failure_reason = 'publisher_interrupted'
+                WHERE notification_id = ? AND {channel}_status IN ('pending', 'in_progress');
+                """,
+                (now, notification_id),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def list_inbox_notifications(
+    *,
+    status: str = "all",
+    category: str = "all",
+    page: int = 1,
+    limit: int = 20,
+) -> Dict[str, Any]:
+    """Retrieve paginated list of inbox notifications with optional status/category filter."""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        where_clauses = []
+        params: List[Any] = []
+
+        if status == "unread":
+            where_clauses.append("read_at IS NULL")
+        elif status == "read":
+            where_clauses.append("read_at IS NOT NULL")
+
+        if category in ("action_required", "failure"):
+            where_clauses.append("category = ?")
+            params.append(category)
+
+        where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+
+        count_sql = f"SELECT COUNT(*) FROM notification_inbox {where_sql};"
+        cursor.execute(count_sql, params)
+        total = cursor.fetchone()[0]
+
+        offset = max(0, (page - 1) * limit)
+        data_sql = f"""
+            SELECT notification_id, event_type, target_id, category, title, body,
+                   relative_link, created_at, read_at, web_push_status, web_push_status_at,
+                   web_push_failure_reason, web_push_target_count, web_push_success_count,
+                   web_push_failure_count, line_status, line_status_at, line_failure_reason
+            FROM notification_inbox
+            {where_sql}
+            ORDER BY created_at DESC
+            LIMIT ? OFFSET ?;
+        """
+        cursor.execute(data_sql, params + [limit, offset])
+        rows = [dict(row) for row in cursor.fetchall()]
+
+        return {
+            "items": rows,
+            "total": total,
+            "page": page,
+            "limit": limit,
+        }
+    finally:
+        conn.close()
+
+
+def get_inbox_notification(notification_id: str) -> Optional[Dict[str, Any]]:
+    """Get single notification details from inbox."""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT notification_id, event_type, target_id, category, title, body,
+                   relative_link, created_at, read_at, web_push_status, web_push_status_at,
+                   web_push_failure_reason, web_push_target_count, web_push_success_count,
+                   web_push_failure_count, line_status, line_status_at, line_failure_reason
+            FROM notification_inbox
+            WHERE notification_id = ?;
+            """,
+            (notification_id,),
+        )
+        row = cursor.fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def get_unread_notification_count() -> int:
+    """Get total count of unread notifications."""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM notification_inbox WHERE read_at IS NULL;")
+        return cursor.fetchone()[0]
+    finally:
+        conn.close()
+
+
+def mark_notification_as_read(notification_id: str) -> Optional[Dict[str, Any]]:
+    """Mark notification as read and return updated notification dict."""
+    conn = get_db_connection()
+    try:
+        now = datetime.now(timezone.utc).isoformat()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            UPDATE notification_inbox
+            SET read_at = ?
+            WHERE notification_id = ? AND read_at IS NULL;
+            """,
+            (now, notification_id),
+        )
+        conn.commit()
+        return get_inbox_notification(notification_id)
     finally:
         conn.close()

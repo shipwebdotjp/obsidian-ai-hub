@@ -333,6 +333,86 @@ export function unregisterWebPushSubscription(
   );
 }
 
+export interface NotificationInboxItem {
+  notification_id: string;
+  event_type: string;
+  target_id: string;
+  category: "action_required" | "failure";
+  title: string;
+  body: string;
+  relative_link: string;
+  created_at: string;
+  read_at: string | null;
+  web_push_status:
+    | "pending"
+    | "in_progress"
+    | "skipped"
+    | "accepted"
+    | "partial_accepted"
+    | "failed"
+    | "unknown";
+  web_push_status_at: string | null;
+  web_push_failure_reason: string | null;
+  web_push_target_count: number;
+  web_push_success_count: number;
+  web_push_failure_count: number;
+  line_status: "pending" | "in_progress" | "skipped" | "accepted" | "failed" | "unknown";
+  line_status_at: string | null;
+  line_failure_reason: string | null;
+}
+
+export interface NotificationInboxList {
+  items: NotificationInboxItem[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
+export interface NotificationUnreadCountResponse {
+  unread_count: number;
+}
+
+export function getUnreadNotificationCount(): Promise<NotificationUnreadCountResponse> {
+  return request<NotificationUnreadCountResponse>("/api/v1/notifications/unread-count");
+}
+
+export function listNotifications(
+  params?: {
+    status?: "unread" | "read" | "all";
+    category?: "action_required" | "failure" | "all";
+    page?: number;
+    limit?: number;
+  },
+  signal?: AbortSignal,
+): Promise<NotificationInboxList> {
+  return request<NotificationInboxList>(
+    withQuery("/api/v1/notifications", {
+      status: params?.status,
+      category: params?.category,
+      page: params?.page,
+      limit: params?.limit,
+    }),
+    { signal },
+  );
+}
+
+export function getNotificationDetail(
+  notificationId: string,
+): Promise<NotificationInboxItem> {
+  return request<NotificationInboxItem>(
+    `/api/v1/notifications/${encodeURIComponent(notificationId)}`,
+  );
+}
+
+export function markNotificationAsRead(
+  notificationId: string,
+): Promise<NotificationInboxItem> {
+  return request<NotificationInboxItem>(
+    `/api/v1/notifications/${encodeURIComponent(notificationId)}/read`,
+    { method: "POST" },
+  );
+}
+
 export function composeDesignerWorkflow(
   requirement: string,
   signal?: AbortSignal,

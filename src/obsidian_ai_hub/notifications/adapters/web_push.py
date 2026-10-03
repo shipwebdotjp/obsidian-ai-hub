@@ -15,12 +15,13 @@ from obsidian_ai_hub.utils import config
 logger = logging.getLogger(__name__)
 
 
-def send_web_push_best_effort(
+def send_web_push_result(
     event: NotificationEvent,
     subscriptions: List[Dict[str, Any]],
-) -> bool:
-    """Best-effort Web Push delivery to active subscriptions.
+) -> Dict[str, Any]:
+    """Send Web Push delivery to subscriptions and return detailed outcome structure.
 
+    Returns dict with keys: status, target_count, success_count, failure_count.
     Handles 404/410 by deactivating subscriptions.
     Never raises exceptions, and logs warnings without sensitive info.
     """
@@ -30,10 +31,21 @@ def send_web_push_best_effort(
 
     if not vapid_private_key or not vapid_public_key:
         logger.warning("Web Push skipped: VAPID public/private key is not configured")
-        return False
+        return {
+            "status": "disabled",
+            "target_count": 0,
+            "success_count": 0,
+            "failure_count": 0,
+        }
 
-    if not subscriptions:
-        return False
+    target_count = len(subscriptions)
+    if target_count == 0:
+        return {
+            "status": "no_subscriptions",
+            "target_count": 0,
+            "success_count": 0,
+            "failure_count": 0,
+        }
 
     payload = json.dumps(
         {
@@ -47,6 +59,7 @@ def send_web_push_best_effort(
     )
 
     success_count = 0
+    failure_count = 0
     for sub in subscriptions:
         subscription_info = {
             "endpoint": sub["endpoint"],
@@ -66,6 +79,7 @@ def send_web_push_best_effort(
             )
             success_count += 1
         except WebPushException as exc:
+            failure_count += 1
             response = getattr(exc, "response", None)
             status_code = getattr(response, "status_code", None) if response is not None else None
             if status_code in (404, 410):
@@ -77,6 +91,28 @@ def send_web_push_best_effort(
             else:
                 logger.warning("Web Push delivery failed: status_code=%s", status_code)
         except Exception as exc:
+            failure_count += 1
             logger.warning("Web Push delivery failed: %s", type(exc).__name__)
 
-    return success_count > 0
+    if success_count == target_count:
+        status = "sent"
+    elif success_count > 0:
+        status = "partial_success"
+    else:
+        status = "failed"
+
+    return {
+        "status": status,
+        "target_count": target_count,
+        "success_count": success_count,
+        "failure_count": failure_count,
+    }
+
+
+def send_web_push_best_effort(
+    event: NotificationEvent,
+    subscriptions: List[Dict[str, Any]],
+) -> bool:
+    """Best-effort Web Push delivery to active subscriptions (backwards-compatible wrapper)."""
+    res = send_web_push_result(event, subscriptions)
+    return res["success_count"] > 0

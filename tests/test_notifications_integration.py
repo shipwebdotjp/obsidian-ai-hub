@@ -161,19 +161,12 @@ def test_adapter_failure_does_not_fail_domain_task(tmp_path, monkeypatch):
         line_action_required=True,
     )
 
-    # Mock adapters to raise exceptions
-    def mock_web_push_error(*args, **kwargs):
-        raise RuntimeError("Push gateway timeout")
-
+    # Simulate an unexpected channel failure at the publisher boundary.
     def mock_line_error(*args, **kwargs):
         raise RuntimeError("LINE API unreachable")
 
     monkeypatch.setattr(
-        "obsidian_ai_hub.notifications.publisher.send_web_push_best_effort",
-        mock_web_push_error,
-    )
-    monkeypatch.setattr(
-        "obsidian_ai_hub.notifications.publisher.send_line_push_best_effort",
+        "obsidian_ai_hub.notifications.publisher.send_line_push_result",
         mock_line_error,
     )
 

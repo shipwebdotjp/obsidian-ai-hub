@@ -778,6 +778,12 @@ def get_db_connection() -> sqlite3.Connection:
     if current_version <= 72:
         run_migration_v73(conn)
 
+    if current_version <= 73:
+        run_migration_v74(conn)
+
+    if current_version <= 74:
+        run_migration_v75(conn)
+
     return conn
 
 
@@ -1698,6 +1704,122 @@ def run_migration_v73(conn: sqlite3.Connection) -> None:
     )
 
     conn.execute("PRAGMA user_version = 73;")
+    conn.commit()
+
+
+def run_migration_v74(conn: sqlite3.Connection) -> None:
+    """Run migration for version 74 (notification inbox table)."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS notification_inbox (
+            notification_id TEXT PRIMARY KEY,
+            event_type TEXT NOT NULL,
+            target_id TEXT NOT NULL,
+            category TEXT NOT NULL CHECK (category IN ('action_required', 'failure')),
+            title TEXT NOT NULL,
+            body TEXT NOT NULL,
+            relative_link TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            read_at TEXT,
+            web_push_status TEXT NOT NULL CHECK (web_push_status IN ('sent', 'partial_success', 'failed', 'disabled', 'no_subscriptions', 'skipped')),
+            web_push_target_count INTEGER NOT NULL DEFAULT 0,
+            web_push_success_count INTEGER NOT NULL DEFAULT 0,
+            web_push_failure_count INTEGER NOT NULL DEFAULT 0,
+            line_status TEXT NOT NULL CHECK (line_status IN ('sent', 'failed', 'disabled', 'not_configured', 'skipped'))
+        );
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_notification_inbox_created_at "
+        "ON notification_inbox(created_at DESC);"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_notification_inbox_read_at "
+        "ON notification_inbox(read_at);"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_notification_inbox_category "
+        "ON notification_inbox(category);"
+    )
+
+    conn.execute("PRAGMA user_version = 74;")
+    conn.commit()
+
+
+def run_migration_v75(conn: sqlite3.Connection) -> None:
+    """Record durable per-channel delivery states rather than inferred skips."""
+    conn.execute("ALTER TABLE notification_inbox RENAME TO notification_inbox_v74;")
+    conn.execute("""
+        CREATE TABLE notification_inbox (
+            notification_id TEXT PRIMARY KEY,
+            event_type TEXT NOT NULL,
+            target_id TEXT NOT NULL,
+            category TEXT NOT NULL CHECK (category IN ('action_required', 'failure')),
+            title TEXT NOT NULL,
+            body TEXT NOT NULL,
+            relative_link TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            read_at TEXT,
+            web_push_status TEXT NOT NULL CHECK (web_push_status IN ('pending', 'in_progress', 'skipped', 'accepted', 'partial_accepted', 'failed', 'unknown')),
+            web_push_status_at TEXT,
+            web_push_failure_reason TEXT,
+            web_push_target_count INTEGER NOT NULL DEFAULT 0,
+            web_push_success_count INTEGER NOT NULL DEFAULT 0,
+            web_push_failure_count INTEGER NOT NULL DEFAULT 0,
+            line_status TEXT NOT NULL CHECK (line_status IN ('pending', 'in_progress', 'skipped', 'accepted', 'failed', 'unknown')),
+            line_status_at TEXT,
+            line_failure_reason TEXT
+        );
+    """)
+    conn.execute("""
+        INSERT INTO notification_inbox (
+            notification_id, event_type, target_id, category, title, body,
+            relative_link, created_at, read_at, web_push_status, web_push_status_at,
+            web_push_failure_reason, web_push_target_count, web_push_success_count,
+            web_push_failure_count, line_status, line_status_at, line_failure_reason
+        )
+        SELECT notification_id, event_type, target_id, category, title, body,
+               relative_link, created_at, read_at,
+               CASE web_push_status
+                   WHEN 'sent' THEN 'accepted'
+                   WHEN 'partial_success' THEN 'partial_accepted'
+                   WHEN 'failed' THEN 'failed'
+                   ELSE 'skipped'
+               END,
+               created_at,
+               CASE web_push_status
+                   WHEN 'disabled' THEN 'channel_disabled'
+                   WHEN 'no_subscriptions' THEN 'no_active_subscriptions'
+                   WHEN 'skipped' THEN 'category_disabled'
+                   WHEN 'failed' THEN 'legacy_failure'
+                   ELSE NULL
+               END,
+               web_push_target_count, web_push_success_count, web_push_failure_count,
+               CASE line_status
+                   WHEN 'sent' THEN 'accepted'
+                   WHEN 'failed' THEN 'failed'
+                   ELSE 'skipped'
+               END,
+               created_at,
+               CASE line_status
+                   WHEN 'disabled' THEN 'channel_disabled'
+                   WHEN 'not_configured' THEN 'configuration_missing'
+                   WHEN 'skipped' THEN 'category_disabled'
+                   WHEN 'failed' THEN 'legacy_failure'
+                   ELSE NULL
+               END
+        FROM notification_inbox_v74;
+    """)
+    conn.execute("DROP TABLE notification_inbox_v74;")
+    conn.execute(
+        "CREATE INDEX idx_notification_inbox_created_at "
+        "ON notification_inbox(created_at DESC);"
+    )
+    conn.execute(
+        "CREATE INDEX idx_notification_inbox_read_at ON notification_inbox(read_at);"
+    )
+    conn.execute(
+        "CREATE INDEX idx_notification_inbox_category ON notification_inbox(category);"
+    )
+    conn.execute("PRAGMA user_version = 75;")
     conn.commit()
 
 
