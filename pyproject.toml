@@ -42,6 +42,7 @@ dependencies = [
     "google-api-python-client",
     "google-auth-httplib2",
     "google-auth-oauthlib",
+    "grpcio==1.84.0",
     "pywebpush>=1.14.0",
 ]
 
@@ -53,11 +54,6 @@ md-hybrid-search = { git = "https://github.com/shipwebdotjp/md-hybrid-search.git
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-filterwarnings = [
-    # Third-party PQC notice from google-api-core when grpcio < 1.83.
-    # requirements.txt is already diverged, so don't touch deps here.
-    "ignore:Package google.api_core depends on grpcio.*:FutureWarning",
-]
 markers = [
     "e2e: browser end-to-end tests that require frontend/dist and Playwright Chromium",
 ]

@@ -120,7 +120,7 @@ export default function RecurringEventsPage() {
         <div>
           <h1 className="text-xl font-bold text-slate-900">定期記録</h1>
           <p className="text-xs text-slate-500 mt-0.5">
-            定期的な行為（散髪、脱毛、オイル交換など）の実績管理・リマインダー
+            定期的な行為（散髪、清掃、オイル交換など）の実績管理・リマインダー
           </p>
         </div>
 

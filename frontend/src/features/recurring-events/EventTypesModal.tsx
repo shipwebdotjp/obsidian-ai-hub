@@ -216,7 +216,7 @@ export function EventTypesModal({ onClose, onTypesUpdated }: EventTypesModalProp
             <div className="space-y-4">
               <div className="flex justify-between items-center">
                 <p className="text-sm text-slate-600">
-                  定期記録の分類（例: 散髪、脱毛、オイル交換）を管理します。
+                  定期記録の分類（例: 散髪、清掃、オイル交換）を管理します。
                 </p>
                 <button
                   type="button"
