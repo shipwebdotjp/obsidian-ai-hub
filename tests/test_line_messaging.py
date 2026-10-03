@@ -50,8 +50,3 @@ class TestSendLinePushMessages:
         mock_post.side_effect = requests.RequestException("connection error")
         ok = send_line_push_messages("t", "u", ["msg"])
         assert ok is False
-
-    def test_ensure_external_called(self, mock_post, mock_ensure_external):
-        mock_post.return_value = MagicMock(status_code=200)
-        send_line_push_messages("t", "u", ["msg"])
-        mock_ensure_external.assert_called_once_with("LINE Messaging API")

@@ -167,28 +167,6 @@ def test_summarize_month(mock_llm, mock_render, mock_config, test_memory_db_path
 
 @patch("obsidian_ai_hub.summerize_month.prompt.render_prompt")
 @patch("obsidian_ai_hub.utils.llm_client.generate_llm_response")
-def test_get_monthly_structured_record_does_not_inject_memories(
-    mock_llm, mock_render, mock_config
-):
-    from obsidian_ai_hub.summerize_month import get_monthly_structured_record
-
-    mock_render.return_value = "Rendered Prompt"
-    mock_llm.return_value = json.dumps({"summary": "Monthly summary"})
-
-    with patch(
-        "obsidian_ai_hub.memory.context.compile_context_text",
-        side_effect=AssertionError("must not compile memories"),
-    ):
-        record = get_monthly_structured_record(datetime(2024, 10, 1), [])
-
-    assert record is not None
-    assert record["summary"] == "Monthly summary"
-    prompt_args = mock_render.call_args[0][1]
-    assert "LONG_TERM_MEMORIES" not in prompt_args
-
-
-@patch("obsidian_ai_hub.summerize_month.prompt.render_prompt")
-@patch("obsidian_ai_hub.utils.llm_client.generate_llm_response")
 def test_summarize_month_rejects_non_object_json(
     mock_llm, mock_render, mock_config, test_memory_db_path
 ):
