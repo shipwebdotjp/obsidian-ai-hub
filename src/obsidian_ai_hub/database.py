@@ -775,6 +775,9 @@ def get_db_connection() -> sqlite3.Connection:
     if current_version <= 71:
         run_migration_v72(conn)
 
+    if current_version <= 72:
+        run_migration_v73(conn)
+
     return conn
 
 
@@ -1589,6 +1592,112 @@ def run_migration_v71(conn: sqlite3.Connection) -> None:
         "ON gmail_draft_requests(status);"
     )
     conn.execute("PRAGMA user_version = 71;")
+    conn.commit()
+
+
+def run_migration_v73(conn: sqlite3.Connection) -> None:
+    """Run migration for version 73 (recurring events domain tables)."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS recurring_event_types (
+            type_id TEXT PRIMARY KEY,
+            name TEXT NOT NULL UNIQUE,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS recurring_event_type_properties (
+            property_id TEXT PRIMARY KEY,
+            type_id TEXT NOT NULL REFERENCES recurring_event_types(type_id) ON DELETE CASCADE,
+            key TEXT NOT NULL,
+            display_name TEXT NOT NULL,
+            data_type TEXT NOT NULL CHECK (data_type IN ('text', 'number', 'select')),
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE (type_id, key)
+        );
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS recurring_event_type_options (
+            option_id TEXT PRIMARY KEY,
+            property_id TEXT NOT NULL REFERENCES recurring_event_type_properties(property_id) ON DELETE CASCADE,
+            option_key TEXT NOT NULL,
+            display_name TEXT NOT NULL,
+            display_order INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE (property_id, option_key)
+        );
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS recurring_event_series (
+            series_id TEXT PRIMARY KEY,
+            type_id TEXT NOT NULL REFERENCES recurring_event_types(type_id) ON DELETE RESTRICT,
+            interval_value INTEGER NOT NULL CHECK (interval_value > 0),
+            interval_unit TEXT NOT NULL CHECK (interval_unit IN ('day', 'week', 'month')),
+            props_hash TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE (type_id, props_hash)
+        );
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS recurring_event_series_property_values (
+            series_id TEXT NOT NULL REFERENCES recurring_event_series(series_id) ON DELETE CASCADE,
+            property_id TEXT NOT NULL REFERENCES recurring_event_type_properties(property_id) ON DELETE RESTRICT,
+            value_text TEXT,
+            value_number REAL,
+            option_id TEXT REFERENCES recurring_event_type_options(option_id) ON DELETE RESTRICT,
+            PRIMARY KEY (series_id, property_id)
+        );
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS recurring_event_records (
+            record_id TEXT PRIMARY KEY,
+            series_id TEXT NOT NULL REFERENCES recurring_event_series(series_id) ON DELETE CASCADE,
+            executed_on TEXT NOT NULL,
+            note TEXT,
+            media_id TEXT REFERENCES generated_media(media_id) ON DELETE SET NULL,
+            count_contribution INTEGER NOT NULL DEFAULT 1 CHECK (count_contribution >= 0),
+            is_start_record INTEGER NOT NULL DEFAULT 0 CHECK (is_start_record IN (0, 1)),
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS recurring_event_notification_attempts (
+            attempt_id TEXT PRIMARY KEY,
+            series_id TEXT NOT NULL REFERENCES recurring_event_series(series_id) ON DELETE CASCADE,
+            due_date TEXT NOT NULL,
+            status TEXT NOT NULL CHECK (status IN ('suppressed', 'sent', 'failed')),
+            error_message TEXT,
+            attempted_at TEXT NOT NULL,
+            UNIQUE (series_id, due_date)
+        );
+    """)
+
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_ret_prop_type "
+        "ON recurring_event_type_properties(type_id);"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_ret_opt_prop "
+        "ON recurring_event_type_options(property_id);"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_res_type "
+        "ON recurring_event_series(type_id);"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_rer_series_executed "
+        "ON recurring_event_records(series_id, executed_on DESC);"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_rena_series_due "
+        "ON recurring_event_notification_attempts(series_id, due_date);"
+    )
+
+    conn.execute("PRAGMA user_version = 73;")
     conn.commit()
 
 

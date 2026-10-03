@@ -35,6 +35,7 @@ const PAGE_TITLE_ENTRIES: PageTitleEntry[] = [
   { pattern: ROUTES.VAULT_SEARCH, title: "Vault 検索" },
   { pattern: ROUTES.SUMMARY_DASHBOARD, title: "サマリダッシュボード" },
   { pattern: ROUTES.HEALTHCARE, title: "ヘルスケア" },
+  { pattern: ROUTES.RECURRING_EVENTS, title: "定期記録" },
   { pattern: ROUTES.PEOPLE, title: "人物管理" },
   { pattern: ROUTES.PROJECTS, title: "プロジェクト管理" },
   { pattern: ROUTES.JOBS, title: "ジョブ管理" },

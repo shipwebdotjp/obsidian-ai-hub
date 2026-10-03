@@ -16,6 +16,7 @@ from obsidian_ai_hub.web.routes import (
     person_properties,
     planner,
     projects,
+    recurring_events,
     research,
     scheduler_jobs,
     task_agent,
@@ -36,6 +37,7 @@ router.include_router(media.router)
 router.include_router(vault.router)
 router.include_router(dashboard.router)
 router.include_router(projects.router)
+router.include_router(recurring_events.router)
 router.include_router(person_properties.router)
 router.include_router(people.router)
 router.include_router(scheduler_jobs.router)

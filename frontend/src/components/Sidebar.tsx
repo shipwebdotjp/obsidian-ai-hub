@@ -92,6 +92,9 @@ export default function Sidebar({ open, onClose, id }: SidebarProps) {
         <NavLink to={ROUTES.HEALTHCARE} className={linkClass} onClick={onClose}>
           ヘルスケア
         </NavLink>
+        <NavLink to={ROUTES.RECURRING_EVENTS} className={linkClass} onClick={onClose}>
+          定期記録
+        </NavLink>
         <NavLink to={ROUTES.PEOPLE} className={linkClass} onClick={onClose}>
           人物管理
         </NavLink>

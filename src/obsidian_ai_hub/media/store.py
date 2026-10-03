@@ -406,11 +406,39 @@ def _unlink_media_file(root: Path, relative_path: str) -> None:
         logger.warning("Failed to delete media file %s: %s", path, exc)
 
 
+class MediaReferencedError(ValueError):
+    """Raised when attempting to delete media that is referenced elsewhere."""
+    pass
+
+
+def is_media_referenced_by_recurring_events(
+    media_id: str, conn: sqlite3.Connection | None = None
+) -> bool:
+    """Check if media_id is referenced by any recurring_event_records."""
+    if not isinstance(media_id, str) or not media_id.strip():
+        return False
+    own_conn = conn is None
+    active = conn if conn is not None else get_db_connection()
+    try:
+        cur = active.execute(
+            "SELECT 1 FROM recurring_event_records WHERE media_id = ? LIMIT 1",
+            (media_id.strip(),),
+        )
+        return cur.fetchone() is not None
+    finally:
+        if own_conn:
+            active.close()
+
+
 def delete_media(media_id: str) -> bool:
     """Delete one media row and its file. Returns ``False`` if unknown."""
     row = get_generated_media(media_id)
     if row is None:
         return False
+    if is_media_referenced_by_recurring_events(row["media_id"]):
+        raise MediaReferencedError(
+            "Media is referenced by recurring event records and cannot be deleted"
+        )
     root = _resolve_output_dir()
     _unlink_media_file(root, str(row["relative_path"]))
     conn = get_db_connection()

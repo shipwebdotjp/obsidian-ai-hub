@@ -11,7 +11,7 @@ import logging
 import re
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse
 
 from obsidian_ai_hub.media import store
@@ -53,6 +53,64 @@ def _media_response(media_id: str, *, download: bool) -> FileResponse:
             "Content-Disposition": f'{disposition}; filename="{filename}"',
             "Cache-Control": "private, max-age=3600",
         },
+    )
+
+
+MAX_UPLOAD_SIZE = 20 * 1024 * 1024  # 20 MB
+
+
+def detect_image_format_from_bytes(data: bytes) -> tuple[str, str]:
+    """Detect image format and mime type from magic bytes.
+    Returns (output_format, mime_type).
+    Raises ValueError if unsupported or invalid format.
+    """
+    if data.startswith(b"\xff\xd8\xff"):
+        return "jpg", "image/jpeg"
+    elif data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "png", "image/png"
+    elif data.startswith(b"GIF87a") or data.startswith(b"GIF89a"):
+        return "gif", "image/gif"
+    elif len(data) >= 12 and data.startswith(b"RIFF") and data[8:12] == b"WEBP":
+        return "webp", "image/webp"
+    else:
+        raise ValueError("Unsupported or invalid image format")
+
+
+@router.post("/media/upload", status_code=status.HTTP_201_CREATED)
+async def upload_media(file: UploadFile = File(...), _=Depends(require_bearer_token)):
+    """Upload an image file to the media library with size limit and magic bytes validation."""
+    content = await file.read(MAX_UPLOAD_SIZE + 1)
+    if not content:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="File is empty"
+        )
+    if len(content) > MAX_UPLOAD_SIZE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"File exceeds maximum allowed upload size of {MAX_UPLOAD_SIZE // (1024 * 1024)} MB",
+        )
+
+    try:
+        fmt, mime_type = detect_image_format_from_bytes(content)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
+    from obsidian_ai_hub.media.generation import GeneratedImage
+
+    image = GeneratedImage(
+        data=content,
+        mime_type=mime_type,
+        output_format=fmt,
+    )
+    return store.save_generated_image(
+        image,
+        prompt=file.filename or "uploaded image",
+        model="upload",
+        provider="user",
+        source="upload",
     )
 
 
@@ -115,8 +173,13 @@ def download_media(media_id: str, _=Depends(require_bearer_token)):
 @router.delete("/media/{media_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_media(media_id: str, _=Depends(require_bearer_token)):
     """Delete one media row and its file (manual, irreversible)."""
-    if not store.delete_media(media_id):
+    try:
+        if not store.delete_media(media_id):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Media not found"
+            )
+    except store.MediaReferencedError as exc:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Media not found"
-        )
+            status_code=status.HTTP_409_CONFLICT, detail=str(exc)
+        ) from exc
     return None

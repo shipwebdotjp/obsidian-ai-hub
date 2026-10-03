@@ -119,9 +119,17 @@ def _run_cycle_locked(now: datetime) -> dict:
         logger.warning("Failed to prune expired one-shot jobs", exc_info=True)
         pruned = 0
 
+    recurring_event_reminders = []
+    try:
+        from obsidian_ai_hub.web.services.recurring_events import evaluate_and_send_reminders
+        recurring_event_reminders = evaluate_and_send_reminders(now=now)
+    except Exception:
+        logger.exception("Failed to evaluate recurring event reminders")
+
     return {
         "recurring": ran_recurring,
         "one_shot": [j["job_id"] for j in finished],
+        "recurring_event_reminders": recurring_event_reminders,
         "interrupted": interrupted,
         "pruned": pruned,
         "skipped": False,

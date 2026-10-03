@@ -6,6 +6,7 @@ export const ROUTES = {
   VAULT_SEARCH: "/vault-search",
   SUMMARY_DASHBOARD: "/summary-dashboard",
   HEALTHCARE: "/healthcare",
+  RECURRING_EVENTS: "/recurring-events",
   PEOPLE: "/people",
   PROJECTS: "/projects",
   COACH: "/coach",
