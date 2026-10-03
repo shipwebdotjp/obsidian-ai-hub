@@ -1,9 +1,30 @@
 import { useEffect, useState } from "react";
 import type { IntervalUnit, RecurringEventSeries } from "./types";
 import { listSeries } from "./recurringEventsApi";
+import { useMediaObjectUrl } from "../media/useMediaObjectUrl";
 import { EventTypesModal } from "./EventTypesModal";
 import { CreateSeriesModal } from "./CreateSeriesModal";
 import { SeriesDetailModal } from "./SeriesDetailModal";
+
+function SeriesPhotoThumbnail({ mediaId, filename }: { mediaId: string; filename?: string }) {
+  const { objectUrl, error } = useMediaObjectUrl(mediaId);
+
+  if (error || !objectUrl) {
+    return (
+      <div className="h-14 w-14 rounded-lg border border-slate-200 bg-slate-50 flex items-center justify-center text-[10px] text-slate-400 shrink-0">
+        {error ? "エラー" : "読み込み中..."}
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={objectUrl}
+      alt={filename || "最新写真"}
+      className="h-14 w-14 object-cover rounded-lg border border-slate-200 shrink-0"
+    />
+  );
+}
 
 export default function RecurringEventsPage() {
   const [seriesList, setSeriesList] = useState<RecurringEventSeries[]>([]);
@@ -211,10 +232,9 @@ export default function RecurringEventsPage() {
                   {/* Photo & Note Preview */}
                   <div className="flex items-center gap-3 pt-1">
                     {s.latest_photo_thumbnail ? (
-                      <img
-                        src={s.latest_photo_thumbnail.url}
-                        alt="最新写真"
-                        className="h-14 w-14 object-cover rounded-lg border border-slate-200 shrink-0"
+                      <SeriesPhotoThumbnail
+                        mediaId={s.latest_photo_thumbnail.media_id}
+                        filename={s.latest_photo_thumbnail.filename}
                       />
                     ) : (
                       <div className="h-14 w-14 rounded-lg border border-slate-200 bg-slate-50 flex items-center justify-center text-[10px] text-slate-400 shrink-0">

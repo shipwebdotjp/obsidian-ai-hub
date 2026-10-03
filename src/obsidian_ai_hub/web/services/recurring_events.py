@@ -173,10 +173,35 @@ def evaluate_and_send_reminders(now: Optional[datetime] = None, conn: Optional[s
         from obsidian_ai_hub.notifications.publisher import publish_notification
         from obsidian_ai_hub.notifications.store import get_notification_settings
 
-        all_series = list_series(conn=db)
-        due_series = [s for s in all_series if s.get("next_due_date") and s["next_due_date"] <= today_jst_str]
+        # Query series summary in a single SQL query
+        s_cur = db.execute(
+            """
+            SELECT
+                s.series_id,
+                s.type_id,
+                s.interval_value,
+                s.interval_unit,
+                t.name as type_name,
+                MAX(r.executed_on) as max_executed_on
+            FROM recurring_event_series s
+            JOIN recurring_event_types t ON s.type_id = t.type_id
+            LEFT JOIN recurring_event_records r ON s.series_id = r.series_id
+            GROUP BY s.series_id
+            """
+        )
+        rows = [dict(r) for r in s_cur.fetchall()]
 
-        if not due_series:
+        due_candidates = []
+        for r in rows:
+            if not r["max_executed_on"]:
+                continue
+            exec_date = date.fromisoformat(r["max_executed_on"])
+            next_due = compute_next_due_date(exec_date, r["interval_value"], r["interval_unit"])
+            next_due_str = next_due.isoformat()
+            if next_due_str <= today_jst_str:
+                due_candidates.append((r["series_id"], next_due_str))
+
+        if not due_candidates:
             return []
 
         settings = get_notification_settings()
@@ -185,10 +210,7 @@ def evaluate_and_send_reminders(now: Optional[datetime] = None, conn: Optional[s
             (settings.get("line_enabled") and settings.get("line_action_required"))
         )
 
-        for s in due_series:
-            series_id = s["series_id"]
-            due_date = s["next_due_date"]
-
+        for series_id, due_date in due_candidates:
             # Check if attempt already exists for (series_id, due_date)
             cur = db.execute(
                 "SELECT attempt_id FROM recurring_event_notification_attempts WHERE series_id = ? AND due_date = ?",
@@ -224,6 +246,9 @@ def evaluate_and_send_reminders(now: Optional[datetime] = None, conn: Optional[s
                 (attempt_id, series_id, due_date, attempted_at),
             )
             db.commit()
+
+            # Call get_series_detail ONLY for due series to build notification payload
+            s = get_series_detail(series_id, conn=db)
 
             # Format properties
             props_parts = []

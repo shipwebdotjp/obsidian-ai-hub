@@ -8,7 +8,62 @@ import {
   updateSeriesInterval,
   uploadMedia,
 } from "./recurringEventsApi";
+import { useMediaObjectUrl } from "../media/useMediaObjectUrl";
 import { useNativeDialog } from "../people/useNativeDialog";
+
+function RecordPhotoView({ mediaId, filename }: { mediaId: string; filename?: string }) {
+  const { objectUrl, error } = useMediaObjectUrl(mediaId);
+
+  if (error || !objectUrl) {
+    return (
+      <div className="h-20 w-20 rounded-lg border border-slate-200 bg-slate-50 flex items-center justify-center text-[10px] text-slate-400">
+        {error ? "エラー" : "読み込み中..."}
+      </div>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        const a = document.createElement("a");
+        a.href = objectUrl;
+        a.download = filename || mediaId;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      }}
+      title="クリックで保存/ダウンロード"
+      className="inline-block cursor-pointer focus:outline-none"
+    >
+      <img
+        src={objectUrl}
+        alt={filename || "実行写真"}
+        className="h-20 w-20 object-cover rounded-lg border border-slate-200 hover:opacity-90"
+      />
+    </button>
+  );
+}
+
+function RecordPhotoEditThumb({ mediaId, filename }: { mediaId: string; filename?: string }) {
+  const { objectUrl, error } = useMediaObjectUrl(mediaId);
+
+  if (error || !objectUrl) {
+    return (
+      <div className="h-10 w-10 rounded border border-slate-200 bg-slate-50 flex items-center justify-center text-[10px] text-slate-400">
+        ...
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={objectUrl}
+      alt={filename || "既存の写真"}
+      className="h-10 w-10 object-cover rounded border border-slate-200"
+    />
+  );
+}
 
 interface SeriesDetailModalProps {
   seriesId: string;
@@ -434,10 +489,9 @@ export function SeriesDetailModal({ seriesId, onClose, onUpdated }: SeriesDetail
                               <label className="block text-xs font-medium text-slate-600">写真変更 / 解除</label>
                               {rec.media && !clearMediaFlag && (
                                 <div className="mt-1 flex items-center gap-2">
-                                  <img
-                                    src={rec.media.url}
-                                    alt="既存の写真"
-                                    className="h-10 w-10 object-cover rounded border border-slate-200"
+                                  <RecordPhotoEditThumb
+                                    mediaId={rec.media.media_id}
+                                    filename={rec.media.filename}
                                   />
                                   <button
                                     type="button"
@@ -507,18 +561,10 @@ export function SeriesDetailModal({ seriesId, onClose, onUpdated }: SeriesDetail
 
                               {rec.media && (
                                 <div className="pt-2">
-                                  <a
-                                    href={rec.media.url}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    className="inline-block"
-                                  >
-                                    <img
-                                      src={rec.media.url}
-                                      alt="実行写真"
-                                      className="h-20 w-20 object-cover rounded-lg border border-slate-200 hover:opacity-90"
-                                    />
-                                  </a>
+                                  <RecordPhotoView
+                                    mediaId={rec.media.media_id}
+                                    filename={rec.media.filename}
+                                  />
                                 </div>
                               )}
                             </div>

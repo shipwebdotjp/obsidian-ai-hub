@@ -95,11 +95,12 @@ export function EventTypesModal({ onClose, onTypesUpdated }: EventTypesModalProp
   const handleAddOption = (propIndex: number) => {
     setProperties((prev) => {
       const next = [...prev];
-      const opts = next[propIndex].options || [];
-      next[propIndex].options = [
-        ...opts,
-        { option_key: "", display_name: "" },
-      ];
+      const prop = next[propIndex];
+      const opts = prop.options ? [...prop.options] : [];
+      next[propIndex] = {
+        ...prop,
+        options: [...opts, { option_key: "", display_name: "" }],
+      };
       return next;
     });
   };
@@ -107,9 +108,13 @@ export function EventTypesModal({ onClose, onTypesUpdated }: EventTypesModalProp
   const handleRemoveOption = (propIndex: number, optIndex: number) => {
     setProperties((prev) => {
       const next = [...prev];
-      const opts = [...(next[propIndex].options || [])];
+      const prop = next[propIndex];
+      const opts = prop.options ? [...prop.options] : [];
       opts.splice(optIndex, 1);
-      next[propIndex].options = opts;
+      next[propIndex] = {
+        ...prop,
+        options: opts,
+      };
       return next;
     });
   };
@@ -122,9 +127,13 @@ export function EventTypesModal({ onClose, onTypesUpdated }: EventTypesModalProp
   ) => {
     setProperties((prev) => {
       const next = [...prev];
-      const opts = [...(next[propIndex].options || [])];
+      const prop = next[propIndex];
+      const opts = prop.options ? [...prop.options] : [];
       opts[optIndex] = { ...opts[optIndex], [field]: value };
-      next[propIndex].options = opts;
+      next[propIndex] = {
+        ...prop,
+        options: opts,
+      };
       return next;
     });
   };
