@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 from unittest.mock import patch
@@ -799,3 +800,177 @@ def test_produce_research_report_rejects_empty_body():
     ):
         with pytest.raises(RuntimeError, match="empty report"):
             runner._produce_research_report("空テーマ", route)
+
+
+def test_gpt_researcher_environment_sets_llm_kwargs_and_restores(monkeypatch):
+    monkeypatch.delenv("LLM_KWARGS", raising=False)
+
+    with patch.object(
+        runner.config, "RESEARCH_GPT_RESEARCHER_LLM_KWARGS", {"temperature": None}
+    ):
+        with runner._gpt_researcher_environment():
+            assert json.loads(os.environ["LLM_KWARGS"]) == {"temperature": None}
+
+    assert "LLM_KWARGS" not in os.environ
+
+
+def test_gpt_researcher_environment_restores_prior_llm_kwargs(monkeypatch):
+    monkeypatch.setenv("LLM_KWARGS", '{"old": true}')
+
+    with patch.object(
+        runner.config, "RESEARCH_GPT_RESEARCHER_LLM_KWARGS", {"temperature": None}
+    ):
+        with runner._gpt_researcher_environment():
+            assert json.loads(os.environ["LLM_KWARGS"]) == {"temperature": None}
+
+    assert json.loads(os.environ["LLM_KWARGS"]) == {"old": True}
+
+
+def test_gpt_researcher_environment_without_llm_kwargs_removes_and_restores(
+    monkeypatch,
+):
+    monkeypatch.setenv("LLM_KWARGS", '{"old": true}')
+
+    with patch.object(runner.config, "RESEARCH_GPT_RESEARCHER_LLM_KWARGS", None):
+        with runner._gpt_researcher_environment():
+            assert "LLM_KWARGS" not in os.environ
+
+    assert json.loads(os.environ["LLM_KWARGS"]) == {"old": True}
+
+
+def test_gpt_researcher_llm_kwargs_rejects_non_map():
+    with (
+        patch.object(
+            runner.config, "RESEARCH_GPT_RESEARCHER_LLM_KWARGS", "not-a-map"
+        ),
+        pytest.raises(RuntimeError),
+    ):
+        with runner._gpt_researcher_environment():
+            pass
+
+
+def test_gpt_researcher_llm_kwargs_rejects_non_serializable():
+    with (
+        patch.object(
+            runner.config, "RESEARCH_GPT_RESEARCHER_LLM_KWARGS", {"bad": object()}
+        ),
+        pytest.raises(RuntimeError),
+    ):
+        with runner._gpt_researcher_environment():
+            pass
+
+
+@pytest.mark.parametrize("mode", ["internal", "web", "deep"])
+@pytest.mark.parametrize("body", ["", "   \n  "])
+def test_non_project_empty_body_fails_without_vault_or_approval(
+    monkeypatch, mode, body
+):
+    theme = research_themes.create_theme(
+        theme=f"空出力_{mode}_{len(body)}", kind="explore", confidence=0.8
+    )
+    job = research_themes.create_job(theme["theme_id"])
+
+    monkeypatch.setattr(runner, "collect_research_context", lambda *a, **k: "")
+    monkeypatch.setattr(runner, "build_research_prompt", lambda *a, **k: "prompt")
+    monkeypatch.setattr(runner, "generate_research_title", lambda theme: "title")
+    monkeypatch.setattr(runner, "conduct_research", lambda *a, **k: body)
+    saved = {"called": False}
+    original_save = runner.save_research_to_vault
+
+    def fake_save(*args, **kwargs):
+        saved["called"] = True
+        return original_save(*args, **kwargs)
+
+    monkeypatch.setattr(runner, "save_research_to_vault", fake_save)
+
+    result = runner.execute_research_job_sync(
+        theme["theme_id"], job["job_id"], mode=mode
+    )
+
+    assert result["status"] == "failed"
+    assert "empty report" in (result.get("error") or "")
+    assert result["output_path"] is None
+    assert saved["called"] is False
+    assert research_themes.get_theme(theme["theme_id"])["status"] == "candidate"
+
+
+def test_deep_empty_gpt_researcher_output_fails(monkeypatch):
+    theme = research_themes.create_theme(
+        theme="Deep空GPT", kind="explore", confidence=0.8
+    )
+    job = research_themes.create_job(theme["theme_id"])
+
+    monkeypatch.setattr(runner, "collect_research_context", lambda *a, **k: "")
+    monkeypatch.setattr(runner, "build_research_prompt", lambda *a, **k: "prompt")
+    monkeypatch.setattr(runner, "generate_research_title", lambda theme: "title")
+
+    async def fake_gpt_researcher(query):
+        return "   "
+
+    monkeypatch.setattr(runner, "_run_gpt_researcher", fake_gpt_researcher)
+
+    result = runner.execute_research_job_sync(
+        theme["theme_id"], job["job_id"], mode="deep"
+    )
+
+    assert result["status"] == "failed"
+    assert "empty report" in (result.get("error") or "")
+    assert result["output_path"] is None
+    assert research_themes.get_theme(theme["theme_id"])["status"] == "candidate"
+
+
+def test_deep_success_saves_vault_and_approves(monkeypatch):
+    theme = research_themes.create_theme(
+        theme="Deep正常", kind="explore", confidence=0.8
+    )
+    job = research_themes.create_job(theme["theme_id"])
+
+    monkeypatch.setattr(runner, "collect_research_context", lambda *a, **k: "")
+    monkeypatch.setattr(runner, "build_research_prompt", lambda *a, **k: "prompt")
+    monkeypatch.setattr(runner, "generate_research_title", lambda theme: "title")
+
+    async def fake_gpt_researcher(query):
+        return "real report body"
+
+    monkeypatch.setattr(runner, "_run_gpt_researcher", fake_gpt_researcher)
+
+    result = runner.execute_research_job_sync(
+        theme["theme_id"], job["job_id"], mode="deep"
+    )
+
+    assert result["status"] == "succeeded"
+    assert result["output_path"] is not None
+    assert Path(result["output_path"]).exists()
+    assert "real report body" in (result.get("markdown") or "")
+    assert research_themes.get_theme(theme["theme_id"])["status"] == "approved"
+
+
+def test_failed_job_manual_rerun_succeeds(monkeypatch):
+    theme = research_themes.create_theme(
+        theme="手動再実行", kind="explore", confidence=0.8
+    )
+    first_job = research_themes.create_job(theme["theme_id"])
+
+    monkeypatch.setattr(runner, "collect_research_context", lambda *a, **k: "")
+    monkeypatch.setattr(runner, "generate_research_title", lambda theme: "title")
+    bodies = {"current": "   "}
+    monkeypatch.setattr(
+        runner, "conduct_research", lambda *a, **k: bodies["current"]
+    )
+
+    first = runner.execute_research_job_sync(
+        theme["theme_id"], first_job["job_id"], mode="internal"
+    )
+    assert first["status"] == "failed"
+    assert research_themes.get_theme(theme["theme_id"])["status"] == "candidate"
+
+    # Manual rerun through the existing path: a new job succeeds.
+    bodies["current"] = "recovered report"
+    second_job = research_themes.create_job(theme["theme_id"])
+    second = runner.execute_research_job_sync(
+        theme["theme_id"], second_job["job_id"], mode="internal"
+    )
+
+    assert second["status"] == "succeeded"
+    assert research_themes.get_job(first_job["job_id"])["status"] == "failed"
+    assert research_themes.get_theme(theme["theme_id"])["status"] == "approved"

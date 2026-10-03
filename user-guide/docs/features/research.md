@@ -106,6 +106,8 @@ research:
   context:
     lookback_days: 7
     max_notes: 3
+  vectorsearch_dir: /path/to/your/vectorsearch
+  vectorsearch_mcp_script: mcp_jw_publication_search.py
   deep:
     gpt_researcher:
       retriever: tavily,mcp
@@ -115,6 +117,10 @@ research:
 ```
 
 ディープリサーチ（GPT Researcher）を使うには、`TAVILY_API_KEY` などの資格情報が必要です。
+
+`retriever` に `mcp` を含めると、Web 検索に加えて `vectorsearch_dir` 配下の MCP サーバー
+（`vectorsearch_mcp_script`、既定 `mcp_jw_publication_search.py`）によるローカル知識ベース検索を
+併用します。相対パスは `vectorsearch_dir` を基準に解決されます。
 
 ## 次に読む
 

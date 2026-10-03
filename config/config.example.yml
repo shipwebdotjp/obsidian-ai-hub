@@ -144,6 +144,9 @@ research:
   vectorsearch_dir: /path/to/your/vectorsearch
   vectorsearch_python: uv
   vectorsearch_script: your_vectorsearch_script
+  # MCP server script used by deep research when RETRIEVER contains "mcp".
+  # Relative paths resolve against vectorsearch_dir.
+  vectorsearch_mcp_script: mcp_jw_publication_search.py
 
 vault_index:
   collection_name: documents
