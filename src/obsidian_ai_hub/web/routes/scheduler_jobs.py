@@ -34,7 +34,7 @@ def update_recurring_jobs(
     except SchedulerJobConfigConflictError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(e))
     except Exception:
         logger.exception("Failed to update recurring jobs")
         raise HTTPException(status_code=500, detail="Failed to update scheduler jobs")
@@ -49,7 +49,7 @@ def preview_command(
     try:
         return service.preview_command(body.command)
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(e))
     except Exception:
         logger.exception("Failed to preview command")
         raise HTTPException(status_code=500, detail="Failed to preview command")
@@ -74,7 +74,7 @@ def run_recurring_job_now(job_id: str, _=Depends(require_bearer_token)):
         logger.exception("Failed to run recurring job: undecodable job config")
         raise HTTPException(status_code=500, detail="Failed to run recurring job")
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(e))
     except Exception:
         logger.exception("Failed to run recurring job")
         raise HTTPException(status_code=500, detail="Failed to run recurring job")
@@ -94,7 +94,7 @@ def create_one_shot_workflow_job(
             body.workflow_id, body.inputs, body.run_at
         )
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(e))
     except Exception:
         logger.exception("Failed to create one-shot workflow job")
         raise HTTPException(status_code=500, detail="Failed to create one-shot workflow job")
@@ -132,7 +132,7 @@ def cancel_one_shot_job(job_id: str, _=Depends(require_bearer_token)):
     except KeyError:
         raise HTTPException(status_code=404, detail="One-shot job not found")
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(e))
     except Exception:
         logger.exception("Failed to cancel one-shot job")
         raise HTTPException(status_code=500, detail="Failed to cancel one-shot job")

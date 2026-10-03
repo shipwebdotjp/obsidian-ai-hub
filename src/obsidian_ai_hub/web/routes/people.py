@@ -54,7 +54,7 @@ def search_people(
         return schemas.PersonSearchResponse(**res)
     except (service.InvalidValueError, FileNotFoundError) as e:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=str(e),
         ) from e
 
