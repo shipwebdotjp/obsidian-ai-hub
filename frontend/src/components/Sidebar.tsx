@@ -54,7 +54,7 @@ export default function Sidebar({ open, onClose, id }: SidebarProps) {
         open ? "translate-x-0" : "-translate-x-full"
       }`}
     >
-      <div className="mb-4 flex items-center justify-between">
+      <div className="mb-4 flex shrink-0 items-center justify-between">
         <h2 className="text-base font-semibold">obsidian-ai-hub</h2>
         <button
           type="button"
@@ -65,19 +65,7 @@ export default function Sidebar({ open, onClose, id }: SidebarProps) {
           ✕
         </button>
       </div>
-      <nav className="space-y-1">
-        <NavLink to={ROUTES.MEMORIES} className={linkClass} onClick={onClose}>
-          メモリ
-        </NavLink>
-        <NavLink to={ROUTES.RESEARCH} className={linkClass} onClick={onClose}>
-          リサーチ
-        </NavLink>
-        <NavLink to={ROUTES.AGENTS} className={linkClass} onClick={onClose}>
-          AIエージェント
-        </NavLink>
-        <NavLink to={ROUTES.CODING} className={linkClass} onClick={onClose}>
-          コーディング
-        </NavLink>
+      <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto">
         <NavLink to={ROUTES.HITL} className={linkClass} onClick={onClose}>
           <span className="flex items-center justify-between">
             <span>確認待ち</span>
@@ -104,11 +92,41 @@ export default function Sidebar({ open, onClose, id }: SidebarProps) {
             )}
           </span>
         </NavLink>
+        <hr className="my-2 border-slate-200" />
+
+        <NavLink to={ROUTES.AGENTS} className={linkClass} onClick={onClose}>
+          AIエージェント
+        </NavLink>
+        <NavLink to={ROUTES.CODING} className={linkClass} onClick={onClose}>
+          コーディング
+        </NavLink>
+        <NavLink to={ROUTES.TASK_AGENT} className={linkClass} onClick={onClose} end>
+          タスクエージェント
+        </NavLink>
+        <NavLink to={ROUTES.WORKFLOWS} className={linkClass} onClick={onClose}>
+          ワークフロー
+        </NavLink>
+        <hr className="my-2 border-slate-200" />
+
+        <NavLink to={ROUTES.MEMORIES} className={linkClass} onClick={onClose}>
+          メモリ
+        </NavLink>
+        <NavLink to={ROUTES.RESEARCH} className={linkClass} onClick={onClose}>
+          リサーチ
+        </NavLink>
         <NavLink to={ROUTES.VAULT_SEARCH} className={linkClass} onClick={onClose}>
           Vault 検索
         </NavLink>
         <NavLink to={ROUTES.SUMMARY_DASHBOARD} className={linkClass} onClick={onClose}>
           サマリダッシュボード
+        </NavLink>
+        <NavLink to={ROUTES.MEDIA} className={linkClass} onClick={onClose}>
+          メディア
+        </NavLink>
+        <hr className="my-2 border-slate-200" />
+
+        <NavLink to={ROUTES.PLANNER} className={linkClass} onClick={onClose}>
+          プランナー
         </NavLink>
         <NavLink to={ROUTES.HEALTHCARE} className={linkClass} onClick={onClose}>
           ヘルスケア
@@ -116,6 +134,8 @@ export default function Sidebar({ open, onClose, id }: SidebarProps) {
         <NavLink to={ROUTES.RECURRING_EVENTS} className={linkClass} onClick={onClose}>
           定期記録
         </NavLink>
+        <hr className="my-2 border-slate-200" />
+
         <NavLink to={ROUTES.PEOPLE} className={linkClass} onClick={onClose}>
           人物管理
         </NavLink>
@@ -125,17 +145,10 @@ export default function Sidebar({ open, onClose, id }: SidebarProps) {
         <NavLink to={ROUTES.COACH} className={linkClass} onClick={onClose}>
           長期目標コーチ
         </NavLink>
+        <hr className="my-2 border-slate-200" />
+
         <NavLink to={ROUTES.JOBS} className={linkClass} onClick={onClose}>
           ジョブ管理
-        </NavLink>
-        <NavLink to={ROUTES.TASK_AGENT} className={linkClass} onClick={onClose} end>
-          タスクエージェント
-        </NavLink>
-        <NavLink to={ROUTES.WORKFLOWS} className={linkClass} onClick={onClose}>
-          ワークフロー
-        </NavLink>
-        <NavLink to={ROUTES.MEDIA} className={linkClass} onClick={onClose}>
-          メディア
         </NavLink>
         <div>
           <button
@@ -168,11 +181,8 @@ export default function Sidebar({ open, onClose, id }: SidebarProps) {
             </div>
           )}
         </div>
-        <NavLink to={ROUTES.PLANNER} className={linkClass} onClick={onClose}>
-          プランナー
-        </NavLink>
       </nav>
-      <div className="mt-auto border-t border-slate-200 pt-2">
+      <div className="shrink-0 border-t border-slate-200 pt-2">
         <NavLink to={ROUTES.SETTINGS} className={linkClass} onClick={onClose}>
           設定
         </NavLink>

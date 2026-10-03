@@ -74,7 +74,9 @@ API はすべて `/api/v1/...` 配下にあり、Bearer トークンが必要で
 
 ## 画面構成
 
-サイドバーから次の画面へ移動できます。
+サイドバーから次の画面へ移動できます。サイドバーは用途別の区画に分かれ、
+区画の間は横線で区切られます。並びの詳細は
+[Web UI マップ](../reference/web-ui-map.md#サイドバーの並び) を参照してください。
 
 | 画面 | パス | 用途 |
 | --- | --- | --- |
@@ -83,14 +85,18 @@ API はすべて `/api/v1/...` 配下にあり、Bearer トークンが必要で
 | AIエージェント | `/agents` | 汎用エージェントとの会話 |
 | コーディング | `/coding` | OpenCode ACP によるコーディング会話 |
 | 確認待ち | `/hitl` | 承認・回答待ちタスクの処理 |
+| 通知 | `/notifications` | アプリ内通知の確認・既読化 |
 | Vault 検索 | `/vault-search` | Vault の全文／意味検索 |
 | サマリダッシュボード | `/summary-dashboard` | 日次・週次・月次サマリの閲覧・編集 |
 | ヘルスケア | `/healthcare` | Apple Health データの可視化 |
+| 定期記録 | `/recurring-events` | 定期記録シリーズの作成・確認 |
 | 人物管理 | `/people` | 人物候補の解決・重複統合 |
 | プロジェクト管理 | `/projects` | プロジェクトの追跡 |
+| 長期目標コーチ | `/coach` | 長期目標・焦点・週次 Reflection の管理 |
 | ジョブ管理 | `/jobs` | 定期・ワンショットジョブの管理 |
 | タスクエージェント | `/task-agent` | 自由文依頼の計画・承認・実行 |
 | ワークフロー | `/workflows` | Node / Edge グラフの設計と実行 |
+| メディア | `/media` | 生成画像の一覧・詳細 |
 | 実行ログ | `/execution-logs/logs`, `/execution-logs/job-states` | CLI / LLM 実行ログ、ジョブ状態 |
 | プランナー | `/planner` | AI 提案の確認と Apple への登録 |
 | 設定 | `/settings` | API トークン、チャット入力の送信方法 |
