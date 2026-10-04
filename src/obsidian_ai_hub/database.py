@@ -784,6 +784,9 @@ def get_db_connection() -> sqlite3.Connection:
     if current_version <= 74:
         run_migration_v75(conn)
 
+    if current_version <= 75:
+        run_migration_v76(conn)
+
     return conn
 
 
@@ -1820,6 +1823,21 @@ def run_migration_v75(conn: sqlite3.Connection) -> None:
         "CREATE INDEX idx_notification_inbox_category ON notification_inbox(category);"
     )
     conn.execute("PRAGMA user_version = 75;")
+    conn.commit()
+
+
+def run_migration_v76(conn: sqlite3.Connection) -> None:
+    """Run migration for version 76 (llm_call_logs.system_prompt column).
+
+    The system prompt sent to the provider was previously neither stored nor
+    shown. Storing it alongside the existing prompt/response makes the
+    execution log a faithful record of what was actually sent.
+    """
+    try:
+        conn.execute("ALTER TABLE llm_call_logs ADD COLUMN system_prompt TEXT;")
+    except sqlite3.OperationalError as e:
+        _ignore_duplicate_schema_object(e)
+    conn.execute("PRAGMA user_version = 76;")
     conn.commit()
 
 

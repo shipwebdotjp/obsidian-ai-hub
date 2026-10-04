@@ -198,9 +198,6 @@ def generate_llm_json(
     )
 
     call_id = str(uuid.uuid4())
-    prompt_for_log = (
-        f"{system_prompt}\n\n{human_content}" if system_prompt else human_content
-    )
     execution_logger.start_llm_call(
         call_id=call_id,
         run_id=None,
@@ -208,7 +205,8 @@ def generate_llm_json(
         model=model,
         temperature=LLM_TEMPERATURE,
         max_tokens=max_tokens,
-        prompt=prompt_for_log,
+        prompt=human_content,
+        system_prompt=system_prompt,
     )
     try:
         message = llm.invoke(messages)

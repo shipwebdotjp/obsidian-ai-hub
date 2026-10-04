@@ -362,6 +362,7 @@ def start_llm_call(
     temperature: float,
     max_tokens: int,
     prompt: str,
+    system_prompt: Optional[str] = None,
     tool_calls: Optional[List[Dict[str, Any]]] = None,
 ) -> None:
     """Logs the start of an LLM call."""
@@ -375,11 +376,11 @@ def start_llm_call(
         conn.execute(
             """
             INSERT INTO llm_call_logs (
-                call_id, run_id, provider, model, temperature, max_tokens, prompt, started_at, status, tool_calls_json
+                call_id, run_id, provider, model, temperature, max_tokens, prompt, system_prompt, started_at, status, tool_calls_json
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'running', ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'running', ?)
             """,
-            (call_id, run_id, provider, model, temperature, max_tokens, prompt, started_at, tool_calls_json),
+            (call_id, run_id, provider, model, temperature, max_tokens, prompt, system_prompt, started_at, tool_calls_json),
         )
         conn.commit()
     except Exception as e:
@@ -547,6 +548,7 @@ def list_execution_logs(
                     "provider",
                     "model",
                     "prompt",
+                    "system_prompt",
                     "response",
                     "exception_type",
                     "exception_message",

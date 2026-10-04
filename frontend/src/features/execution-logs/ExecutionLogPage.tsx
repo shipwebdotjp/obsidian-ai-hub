@@ -64,6 +64,7 @@ interface LLMCallDetail {
   temperature?: number;
   max_tokens?: number;
   prompt?: string;
+  system_prompt?: string;
   response?: string;
   prompt_tokens?: number;
   completion_tokens?: number;
@@ -658,6 +659,21 @@ export default function ExecutionLogPage() {
                     )}
                   </div>
                 </div>
+              )}
+
+              {/* System Prompt Accordion (collapsed by default) */}
+              {llmDetail.system_prompt && (
+                <details className="border border-slate-200 rounded bg-slate-50 overflow-hidden group">
+                  <summary className="font-bold text-xs text-slate-600 uppercase tracking-wider px-4 py-3 cursor-pointer select-none bg-slate-100 hover:bg-slate-200 transition list-none flex justify-between items-center">
+                    <span>システムプロンプト (System Prompt)</span>
+                    <span className="text-[10px] text-slate-400 group-open:rotate-180 transition-transform">▼</span>
+                  </summary>
+                  <div className="p-4 bg-white border-t border-slate-200">
+                    <pre className="text-xs text-slate-800 font-mono whitespace-pre-wrap break-all leading-relaxed leading-5">
+                      {llmDetail.system_prompt}
+                    </pre>
+                  </div>
+                </details>
               )}
 
               {/* Prompt Accordion */}

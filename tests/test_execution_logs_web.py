@@ -25,6 +25,7 @@ def test_execution_logs_apis(loopback_client, test_memory_db_path):
         temperature=0.7,
         max_tokens=2000,
         prompt="system prompt\nuser prompt",
+        system_prompt="You are a test assistant.",
     )
 
     execution_logger.succeed_llm_call(
@@ -87,6 +88,7 @@ def test_execution_logs_apis(loopback_client, test_memory_db_path):
     llm_detail = res_llm_detail.json()
     assert llm_detail["call_id"] == call_id
     assert llm_detail["prompt"] == "system prompt\nuser prompt"
+    assert llm_detail["system_prompt"] == "You are a test assistant."
     assert llm_detail["response"] == "hello user"
     assert llm_detail["finish_reason"] == "stop"
 

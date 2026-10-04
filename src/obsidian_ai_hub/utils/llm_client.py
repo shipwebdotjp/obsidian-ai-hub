@@ -165,6 +165,23 @@ def _content_to_text(content: Any) -> str:
     return _content_to_stream_delta(content).strip()
 
 
+def _extract_system_prompt(messages: Sequence[BaseMessage]) -> Optional[str]:
+    """Return the joined text of the SystemMessages actually sent, if any.
+
+    Deriving the system prompt from the outgoing messages keeps the execution
+    log accurate no matter which caller assembled them.
+    """
+    parts: list[str] = []
+    for message in messages:
+        if isinstance(message, SystemMessage):
+            text = _content_to_stream_delta(message.content)
+            if text:
+                parts.append(text)
+    if not parts:
+        return None
+    return "\n\n".join(parts)
+
+
 def _prepare_messages(
     provider: str,
     prompt: str,
@@ -311,6 +328,7 @@ def _logged_invoke(
         temperature=temperature,
         max_tokens=max_tokens,
         prompt=prompt_for_log,
+        system_prompt=_extract_system_prompt(messages),
         tool_calls=tool_calls,
     )
 
@@ -384,6 +402,7 @@ async def _logged_ainvoke(
         temperature=temperature,
         max_tokens=max_tokens,
         prompt=prompt_for_log,
+        system_prompt=_extract_system_prompt(messages),
         tool_calls=tool_calls,
     )
 
@@ -474,6 +493,7 @@ async def _logged_astream(
         temperature=temperature,
         max_tokens=max_tokens,
         prompt=prompt_for_log,
+        system_prompt=_extract_system_prompt(messages),
     )
 
     aggregate: AIMessageChunk | None = None

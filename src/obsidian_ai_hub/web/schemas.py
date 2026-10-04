@@ -1073,6 +1073,7 @@ class LLMCallDetail(BaseModel):
     temperature: Optional[float] = None
     max_tokens: Optional[int] = None
     prompt: Optional[str] = None
+    system_prompt: Optional[str] = None
     response: Optional[str] = None
     prompt_tokens: Optional[int] = None
     completion_tokens: Optional[int] = None
