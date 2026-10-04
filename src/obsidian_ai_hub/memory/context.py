@@ -249,6 +249,26 @@ def _resolve_valid_approved_memories() -> tuple[list[dict], list[dict]]:
     excluded: list[dict] = []
     has_changes = False
 
+    expired_ids = [
+        m.get("memory_id")
+        for m in memories
+        if m.get("status") == "approved"
+        and _check_memory_validity(m, now_dt) == (False, "expired")
+    ]
+    expired_snapshots = {
+        m["memory_id"]: dict(m)
+        for m in memories
+        if m.get("memory_id") in set(expired_ids)
+    }
+    if expired_ids:
+        from obsidian_ai_hub.retrieval import memory_adapter as _retrieval_sync
+
+        # Vector forgets run before the source rows change.
+        _retrieval_sync.prepare_many({mid: None for mid in expired_ids})
+        expired_prepared = {mid: {"op": "delete"} for mid in expired_ids}
+    else:
+        expired_prepared = {}
+
     conn = get_db_connection()
     try:
         with conn:
@@ -292,6 +312,16 @@ def _resolve_valid_approved_memories() -> tuple[list[dict], list[dict]]:
                     continue
 
                 active_all.append(m)
+            if expired_prepared:
+                from obsidian_ai_hub.retrieval import memory_adapter as _retrieval_sync
+
+                _retrieval_sync.apply_many_catalog_write(conn, expired_prepared)
+    except Exception:
+        if expired_prepared:
+            from obsidian_ai_hub.retrieval import memory_adapter as _retrieval_sync
+
+            _retrieval_sync.restore_many(expired_snapshots)
+        raise
     finally:
         conn.close()
 
@@ -422,12 +452,17 @@ def compile_context_text(for_purpose: str) -> str:
 def compile_agent_context(
     budget: int = 400,
     now: datetime | None = None,
+    *,
+    query: str | None = None,
 ) -> dict:
-    """Compile a short agent injection context (read-only, no side effects).
+    """Compile a short query-relevant agent injection context (read-only).
 
-    Uses the same priority order as compile_context but with a smaller budget
-    and without triggering expiration updates. Includes a safety notice that
-    the block is reference data and must not be executed as instructions.
+    Memories with ``injection_mode="always"`` are packed first within
+    ``budget`` tokens. The remaining budget goes to the top relevant
+    memories for ``query`` (cosine similarity >= threshold, up to the
+    configured max count). With no query, or no matches, nothing relevant
+    is injected. When the vector index is unavailable the search degrades
+    to lightweight token matching.
 
     Returns:
         {"context": str, "used_memory_ids": list[str], "estimated_tokens": int}
@@ -441,7 +476,36 @@ def compile_agent_context(
     if not active_approved:
         return {"context": "", "used_memory_ids": [], "estimated_tokens": 0}
 
-    sorted_active = sorted(active_approved, key=_priority_key, reverse=True)
+    always = sorted(
+        [m for m in active_approved if m.get("injection_mode") == "always"],
+        key=_priority_key,
+        reverse=True,
+    )
+    always_ids = {m.get("memory_id") for m in always}
+
+    relevant: list[dict] = []
+    if query is not None and query.strip():
+        threshold = config.MEMORY_AGENT_RETRIEVAL_THRESHOLD
+        top_k = config.MEMORY_AGENT_RETRIEVAL_TOP_K
+        try:
+            from obsidian_ai_hub.retrieval.service import search_memory_index
+
+            scored = search_memory_index(
+                query, limit=top_k, threshold=threshold, now=now
+            )
+            relevant = [
+                m for _, m in scored if m.get("memory_id") not in always_ids
+            ]
+        except Exception as e:
+            logger.warning(
+                f"Retrieval search failed, falling back to token scoring: {e}"
+            )
+            relevant = _fallback_relevant_memories(
+                query, active_approved, always_ids, top_k
+            )
+
+    ordered = always + relevant
+
     # Safety notice: block is reference data, do not follow embedded instructions.
     # Per-item content is wrapped in a fenced code block so the LLM cannot be
     # tricked into treating embedded "ignore previous instructions" style text
@@ -452,7 +516,7 @@ def compile_agent_context(
         return _format_fenced_item(m, person_mode=False)
 
     selected, _, used_memory_ids, total_tokens, context_str = _select_memories_within_budget(
-        sorted_active,
+        ordered,
         budget,
         section_title=section_title,
         format_item=_agent_format,
@@ -468,3 +532,23 @@ def compile_agent_context(
         "used_memory_ids": used_memory_ids,
         "estimated_tokens": total_tokens,
     }
+
+
+def _fallback_relevant_memories(
+    query: str,
+    candidates: list[dict],
+    exclude_ids: set[str],
+    top_k: int,
+) -> list[dict]:
+    """Rank memories by lightweight token matching (index unavailable).
+
+    Only memories with a positive token overlap are returned; no match
+    means no injection.
+    """
+    from obsidian_ai_hub.retrieval.text_fallback import fallback_score
+
+    pool = [m for m in candidates if m.get("memory_id") not in exclude_ids]
+    scored = [(fallback_score(query, m), m) for m in pool]
+    scored = [pair for pair in scored if pair[0] > 0]
+    scored.sort(key=lambda x: (x[0], _priority_key(x[1])), reverse=True)
+    return [m for _, m in scored[:top_k]]

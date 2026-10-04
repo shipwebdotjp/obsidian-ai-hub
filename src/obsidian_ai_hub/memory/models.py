@@ -23,6 +23,9 @@ class DedupReassessmentRequiredError(Exception):
 ALLOWED_STABILITY = frozenset({"stable", "tentative", "explicitly_settled"})
 STABILITY_DEFAULT = "tentative"
 
+ALLOWED_INJECTION_MODES = frozenset({"relevant", "always"})
+INJECTION_MODE_DEFAULT = "relevant"
+
 MEMORY_COLUMNS = [
     "schema_version",
     "memory_id",
@@ -49,6 +52,7 @@ MEMORY_COLUMNS = [
     "dedup_suggestions",
     "dedup_assessment",
     "scope",
+    "injection_mode",
 ]
 
 EVENT_COLUMNS = [
@@ -124,6 +128,8 @@ def deserialize_memory(row: dict) -> dict:
     m = dict(row)
     if "scope" not in m or not m["scope"]:
         m["scope"] = "user"
+    if "injection_mode" not in m or m["injection_mode"] not in ALLOWED_INJECTION_MODES:
+        m["injection_mode"] = INJECTION_MODE_DEFAULT
     for col in [
         "topics",
         "tags",
@@ -316,6 +322,7 @@ EDITABLE_FIELDS = (
     "review_due_at",
     "stability",
     "person_ids",
+    "injection_mode",
 )
 
 
@@ -362,6 +369,13 @@ def _validate_edit_payload(payload: dict) -> dict:
                 f"stability must be one of {sorted(ALLOWED_STABILITY)}; got {payload['stability']!r}"
             )
 
+    if "injection_mode" in payload:
+        if payload["injection_mode"] not in ALLOWED_INJECTION_MODES:
+            raise ValueError(
+                f"injection_mode must be one of {sorted(ALLOWED_INJECTION_MODES)}; "
+                f"got {payload['injection_mode']!r}"
+            )
+
     for date_field in ("valid_from", "valid_until", "review_due_at"):
         if date_field in payload:
             _validate_date_str(payload[date_field], date_field)
@@ -378,3 +392,33 @@ def _validate_edit_payload(payload: dict) -> dict:
             raise ValueError("person_ids must be a list of person_id strings")
 
     return payload
+
+
+def validate_injection_mode_for_memory(
+    injection_mode: object, *, scope: object, status: object
+) -> None:
+    """Enforce that ``always`` is only set on approved user-scope memories.
+
+    Raises ValueError when violated. ``relevant`` is always allowed.
+    """
+    if injection_mode == "always" and (scope != "user" or status != "approved"):
+        raise ValueError(
+            "injection_mode 'always' is only available for approved user-scope memories"
+        )
+
+
+def coerce_injection_mode_for_approval(target: dict) -> bool:
+    """Reset an ineligible ``always`` flag when a memory becomes approved.
+
+    ``always`` is only meaningful for user-scope memories; legacy or
+    person-scope rows fall back to ``relevant`` instead of failing approval.
+    Returns True when the value was changed.
+    """
+    current = target.get("injection_mode")
+    if current == "always" and (target.get("scope") or "user") != "user":
+        target["injection_mode"] = INJECTION_MODE_DEFAULT
+        return True
+    if current not in ALLOWED_INJECTION_MODES:
+        target["injection_mode"] = INJECTION_MODE_DEFAULT
+        return True
+    return False

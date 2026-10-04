@@ -12,6 +12,7 @@ license = { file = "LICENSE" }
 requires-python = ">=3.12"
 dependencies = [
     "md-hybrid-search",
+    "chromadb>=1.5.9",
     "langchain-core",
     "sentence-transformers",
     "pyobjc-core>=11.0; sys_platform == 'darwin'",

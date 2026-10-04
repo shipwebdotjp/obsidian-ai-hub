@@ -155,6 +155,20 @@ vault_index:
   embedder_model: cl-nagoya/ruri-v3-310m
   allow_network_fallback: true
 
+# Generic retrieval index for long-term memory agent injection and
+# memory_search. The embedding model is shared with vault_index
+# (embedder_model above); its name is stored as the model fingerprint.
+# Rebuild with --rebuild-retrieval-index after first install or a model change.
+retrieval:
+  collection_name: retrieval_documents
+  chroma_path: /path/to/your/obsidian-ai-hub/retrieval/chroma
+
+memory:
+  context_max_tokens: 800
+  agent_context_max_tokens: 400
+  agent_retrieval_threshold: 0.45
+  agent_retrieval_top_k: 5
+
 # Coding workspace: orchestrator LLM and OpenCode ACP agent (ACP-only, OpenCode only)
 # Environment variables CODING_ORCHESTRATOR_PROVIDER, CODING_ORCHESTRATOR_MODEL,
 # CODING_OPENCODE_CLI_PATH, CODING_OPENCODE_MODEL override these values if set.

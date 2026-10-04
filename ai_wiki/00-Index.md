@@ -49,6 +49,7 @@
 - [Scheduler Task から Job への完全改称とワンショット実行ジョブ導入](10-Decisions-Architecture.md#scheduler-task-から-job-への完全改称とワンショット実行ジョブ導入)（2026-09-17）
 - [定期ジョブの Web UI 手動実行（ワンショットキュー再利用・スキーマ v64）](10-Decisions-Architecture.md#定期ジョブの-web-ui-手動実行ワンショットキュー再利用スキーマ-v64)（2026-09-25）
 - [エージェント会話を長期メモリ抽出ソースに追加（user発話限定・chatセッション限定・スキーマ v65）](10-Decisions-Architecture.md#エージェント会話を長期メモリ抽出ソースに追加user発話限定chatセッション限定スキーマ-v65)（2026-09-25）
+- [クエリ関連の長期記憶注入と汎用 Retrieval 基盤](10-Decisions-Architecture.md#クエリ関連の長期記憶注入と汎用-retrieval-基盤)（2026-10-04）
 - [画像生成 Capability（`generated_media`・スキーマ v66）](10-Decisions-Integrations.md#画像生成-capabilitygenerated_mediaスキーマ-v66)（2026-09-26）
 - [画像編集の入力契約（media_id 正本 + 入口での自動取り込み）](../docs/image-generation/adr/image-edit-input-contract.md)（ADR、2026-09-26）
 - [生成メディアの削除ポリシー（親連動削除 + 手動削除）](../docs/image-generation/adr/media-deletion-policy.md)（ADR、2026-09-26）

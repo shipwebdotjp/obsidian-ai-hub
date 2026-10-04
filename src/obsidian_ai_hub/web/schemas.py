@@ -14,6 +14,7 @@ EDITABLE_FIELDS = (
     "valid_until",
     "review_due_at",
     "stability",
+    "injection_mode",
 )
 
 ALLOWED_STABILITY = {"stable", "tentative", "explicitly_settled"}
@@ -88,6 +89,7 @@ class Memory(BaseModel):
     stability: Optional[Literal["stable", "tentative", "explicitly_settled"]] = None
     sensitivity: Optional[str] = None
     extraction_confidence: Optional[float] = None
+    injection_mode: Literal["relevant", "always"] = "relevant"
     supersedes: Optional[str] = None
     contradicts: Optional[list[str]] = Field(default_factory=list)
     dedup_suggestions: Optional[list[DedupSuggestion]] = Field(default_factory=list)
@@ -138,6 +140,7 @@ class EditRequest(BaseModel):
     valid_until: Optional[str] = None
     review_due_at: Optional[str] = None
     stability: Optional[Literal["stable", "tentative", "explicitly_settled"]] = None
+    injection_mode: Optional[Literal["relevant", "always"]] = None
     person_ids: Optional[list[str]] = None
 
 

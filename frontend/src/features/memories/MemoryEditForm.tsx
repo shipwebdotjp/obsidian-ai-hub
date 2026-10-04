@@ -2,7 +2,7 @@ import { splitList } from "../../utils/list";
 import { useState } from "react";
 import { getApiErrorMessage } from "../../utils/error";
 import { editMemory } from "../../api/client";
-import type { EditPayload, Memory, MemoryDetail, Person, Stability } from "../../api/types";
+import type { EditPayload, InjectionMode, Memory, MemoryDetail, Person, Stability } from "../../api/types";
 
 const STABILITIES: Stability[] = ["stable", "tentative", "explicitly_settled"];
 
@@ -22,10 +22,16 @@ export default function MemoryEditForm({ memory, peopleOptions = [], onUpdated, 
   const [validUntil, setValidUntil] = useState(memory.valid_until || "");
   const [reviewDueAt, setReviewDueAt] = useState(memory.review_due_at || "");
   const [stability, setStability] = useState<Stability>(memory.stability || "stable");
+  const [injectionMode, setInjectionMode] = useState<InjectionMode>(memory.injection_mode || "relevant");
   const [selectedPersonIds, setSelectedPersonIds] = useState<string[]>(
     (memory.people || []).map((p) => p.person_id)
   );
   const [busy, setBusy] = useState(false);
+
+  // "always" (always inject into agent context) is only available for
+  // approved user-scope memories.
+  const canSetAlways =
+    memory.status === "approved" && (memory.scope || "user") === "user";
 
   function togglePerson(personId: string) {
     if (selectedPersonIds.includes(personId)) {
@@ -51,6 +57,9 @@ export default function MemoryEditForm({ memory, peopleOptions = [], onUpdated, 
       review_due_at: reviewDueAt || null,
       person_ids: selectedPersonIds,
     };
+    if (canSetAlways || (memory.injection_mode || "relevant") !== injectionMode) {
+      payload.injection_mode = injectionMode;
+    }
 
     try {
       const res = await editMemory(memory.memory_id, payload);
@@ -157,6 +166,20 @@ export default function MemoryEditForm({ memory, peopleOptions = [], onUpdated, 
             ))}
           </select>
         </div>
+        {canSetAlways && (
+          <div>
+            <label className="block text-xs text-slate-500">エージェントへの注入</label>
+            <select
+              aria-label="エージェントへの注入"
+              className="w-full cursor-pointer rounded border border-slate-300 p-2 text-sm"
+              value={injectionMode}
+              onChange={(e) => setInjectionMode(e.target.value as InjectionMode)}
+            >
+              <option value="relevant">クエリに関連するときだけ注入</option>
+              <option value="always">常に注入する</option>
+            </select>
+          </div>
+        )}
       </div>
       <div className="flex justify-end gap-2">
         <button

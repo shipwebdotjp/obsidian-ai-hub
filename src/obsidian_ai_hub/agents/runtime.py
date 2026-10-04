@@ -470,7 +470,7 @@ def execute_subagent_core(
             from obsidian_ai_hub.memory.context import compile_agent_context
 
             budget = getattr(config, "MEMORY_AGENT_CONTEXT_MAX_TOKENS", 400)
-            mem_ctx = compile_agent_context(budget, now_jst)
+            mem_ctx = compile_agent_context(budget, now_jst, query=task)
             if mem_ctx.get("context"):
                 memory_block = mem_ctx["context"]
         except Exception as exc:
@@ -1070,7 +1070,9 @@ async def generate_agent_stream(
                 from obsidian_ai_hub.memory.context import compile_agent_context
 
                 budget = getattr(config, "MEMORY_AGENT_CONTEXT_MAX_TOKENS", 400)
-                mem_ctx = await asyncio.to_thread(compile_agent_context, budget, now_jst)
+                mem_ctx = await asyncio.to_thread(
+                    compile_agent_context, budget, now_jst, query=user_content
+                )
                 if mem_ctx.get("context"):
                     memory_block = mem_ctx["context"]
             except Exception as exc:

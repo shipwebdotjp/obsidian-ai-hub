@@ -136,56 +136,95 @@ def save_all_memories(memories: list[dict]):
     failures once `memory_events` rows exist for the memories being kept. We
     instead insert/update the new rows and remove the surplus rows after
     detaching their event log so the cascade is safe.
+
+    Retrieval sync: vector writes run before the source transaction; a
+    vector failure raises ``RetrievalSyncError`` and the table is unchanged.
     """
+    from obsidian_ai_hub.retrieval import memory_adapter as _retrieval_sync
+
+    for m in memories:
+        scope = m.get("scope", "user")
+        if scope == "person":
+            people = m.get("people") or []
+            p_ids = [p["person_id"] if isinstance(p, dict) else str(p) for p in people]
+            if not p_ids:
+                raise ValueError(f"Person memory {m.get('memory_id')} must have at least one associated person")
+
+    keep_ids = [m.get("memory_id") for m in memories if m.get("memory_id")]
+
     conn = get_db_connection()
     try:
-        with conn:
-            cursor = conn.cursor()
-            for m in memories:
-                scope = m.get("scope", "user")
-                if scope == "person":
-                    people = m.get("people") or []
-                    p_ids = [p["person_id"] if isinstance(p, dict) else str(p) for p in people]
-                    if not p_ids:
-                        raise ValueError(f"Person memory {m.get('memory_id')} must have at least one associated person")
+        cursor = conn.cursor()
+        cursor.execute("SELECT memory_id FROM memories")
+        existing_ids = [row["memory_id"] for row in cursor.fetchall()]
+        surplus_ids = [eid for eid in existing_ids if eid not in set(keep_ids)]
 
-                db_row = serialize_memory(m)
-                if "scope" not in db_row or not db_row["scope"]:
-                    db_row["scope"] = "user"
+        # Snapshots for compensation when the source transaction fails.
+        old_snapshots: dict[str, dict | None] = {}
+        affected = list(dict.fromkeys([*(keep_ids or []), *surplus_ids]))
+        if affected:
+            placeholders = ", ".join("?" for _ in affected)
+            cursor.execute(
+                f"SELECT * FROM memories WHERE memory_id IN ({placeholders})",
+                tuple(affected),
+            )
+            for row in cursor.fetchall():
+                m = deserialize_memory(dict(row))
+                old_snapshots[m["memory_id"]] = m
+        for mid in affected:
+            old_snapshots.setdefault(mid, None)
 
-                columns = ", ".join(MEMORY_COLUMNS)
-                placeholders = ", ".join("?" for _ in MEMORY_COLUMNS)
-                update_clause = ", ".join(
-                    f"{col}=excluded.{col}"
-                    for col in MEMORY_COLUMNS
-                    if col != "memory_id"
-                )
-                cursor.execute(
-                    f"INSERT INTO memories ({columns}) VALUES ({placeholders}) "
-                    f"ON CONFLICT(memory_id) DO UPDATE SET {update_clause}",
-                    tuple(db_row.get(col) for col in MEMORY_COLUMNS),
-                )
+        new_states: dict[str, dict | None] = {
+            m["memory_id"]: m for m in memories if m.get("memory_id")
+        }
+        for sid in surplus_ids:
+            new_states[sid] = None
 
-                if "people" in m and isinstance(m["people"], list):
-                    p_ids = [p["person_id"] if isinstance(p, dict) else str(p) for p in m["people"]]
-                    set_memory_people(m["memory_id"], p_ids, conn=conn)
+        prepared = _retrieval_sync.prepare_many(new_states)
 
-            keep_ids = [m.get("memory_id") for m in memories if m.get("memory_id")]
-            cursor.execute("SELECT memory_id FROM memories")
-            existing_ids = [row["memory_id"] for row in cursor.fetchall()]
-            surplus_ids = [eid for eid in existing_ids if eid not in set(keep_ids)]
-            if surplus_ids:
-                placeholders = ", ".join("?" for _ in surplus_ids)
-                # Drop event log for the surplus IDs first so that
-                # `DELETE FROM memories` does not violate the FK.
-                cursor.execute(
-                    f"DELETE FROM memory_events WHERE memory_id IN ({placeholders})",
-                    surplus_ids,
-                )
-                cursor.execute(
-                    f"DELETE FROM memories WHERE memory_id IN ({placeholders})",
-                    surplus_ids,
-                )
+        try:
+            with conn:
+                cursor = conn.cursor()
+                for m in memories:
+                    db_row = serialize_memory(m)
+                    if "scope" not in db_row or not db_row["scope"]:
+                        db_row["scope"] = "user"
+                    if "injection_mode" not in db_row or not db_row["injection_mode"]:
+                        db_row["injection_mode"] = "relevant"
+
+                    columns = ", ".join(MEMORY_COLUMNS)
+                    placeholders = ", ".join("?" for _ in MEMORY_COLUMNS)
+                    update_clause = ", ".join(
+                        f"{col}=excluded.{col}"
+                        for col in MEMORY_COLUMNS
+                        if col != "memory_id"
+                    )
+                    cursor.execute(
+                        f"INSERT INTO memories ({columns}) VALUES ({placeholders}) "
+                        f"ON CONFLICT(memory_id) DO UPDATE SET {update_clause}",
+                        tuple(db_row.get(col) for col in MEMORY_COLUMNS),
+                    )
+
+                    if "people" in m and isinstance(m["people"], list):
+                        p_ids = [p["person_id"] if isinstance(p, dict) else str(p) for p in m["people"]]
+                        set_memory_people(m["memory_id"], p_ids, conn=conn)
+
+                if surplus_ids:
+                    placeholders = ", ".join("?" for _ in surplus_ids)
+                    # Drop event log for the surplus IDs first so that
+                    # `DELETE FROM memories` does not violate the FK.
+                    cursor.execute(
+                        f"DELETE FROM memory_events WHERE memory_id IN ({placeholders})",
+                        surplus_ids,
+                    )
+                    cursor.execute(
+                        f"DELETE FROM memories WHERE memory_id IN ({placeholders})",
+                        surplus_ids,
+                    )
+                _retrieval_sync.apply_many_catalog_write(conn, prepared)
+        except Exception:
+            _retrieval_sync.restore_many(old_snapshots)
+            raise
     finally:
         conn.close()
 

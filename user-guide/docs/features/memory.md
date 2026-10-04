@@ -80,7 +80,6 @@ uv run -m obsidian_ai_hub --memory-delete --id mem_20260713_f2ec1b --yes
 
 承認済みメモリは、用途ごとの方針に従って小さな参照セクションとして生成プロンプトへ付加されます。
 `--memory-compile --for <purpose>` で、実際に使われる文脈を確認できます。
-
 ```bash
 uv run -m obsidian_ai_hub --memory-compile --for make-target
 ```
@@ -98,6 +97,20 @@ uv run -m obsidian_ai_hub --memory-compile --for make-target
 
 `--for` に未知の値を渡すと、既定（すべて・`memory.context_max_tokens`・evidence 形式・ユーザースコープのみ）にフォールバックします。
 方針は `config/config.yml` の `memory.purposes` で上書きできます（全項目の例は [設定](../settings/configuration.md) を参照）。
+
+## AIエージェントへの注入
+
+AIエージェント（`memory_search` / `memory_propose` を使うもの）には、現在のユーザー発話（子エージェントでは委譲タスク）に意味的に近い承認済みメモリだけが自動注入されます。無関係な記憶は注入されません。
+
+- 明示的に「常に注入する」としたメモリ（`injection_mode: always`）が400 token枠へ先に入り、残り枠に類似度 `0.45` 以上の上位最大5件が入ります（類似度→信頼度→安定性→作成日時順）。件数上限は `always` には適用されず、枠超過分は優先順で省かれます。
+- `always` は承認済み・ユーザースコープのメモリにだけ設定できます。メモリ画面の編集フォームで切り替えます。
+- 検索索引が未構築・モデル変更後・障害時は語句検索へフォールバックします。
+
+```bash
+uv run -m obsidian_ai_hub --rebuild-retrieval-index
+```
+
+初回と埋め込みモデル変更後は上記で索引を再構築してください。通常の会話・検索で自動バックフィルは行いません。
 
 ## メンテナンス
 
@@ -141,6 +154,9 @@ uv run -m obsidian_ai_hub --render-copilot-profile
 ```yaml
 memory:
   context_max_tokens: 800
+  agent_context_max_tokens: 400
+  agent_retrieval_threshold: 0.45  # エージェント注入・memory_search の類似度しきい値
+  agent_retrieval_top_k: 5          # クエリ関連で注入する最大件数
   extractor:
     provider: ollama
     model: glm-4.7:cloud
@@ -149,6 +165,12 @@ memory:
     provider: openai
     model: gpt-4o
     prompt_path: /Users/you/Documents/custom-memory-render.md
+```
+
+```yaml
+retrieval:
+  chroma_path: /Users/you/.config/obsidian-ai-hub/retrieval/chroma
+  collection_name: retrieval_documents
 ```
 
 `extractor` を省略すると、日次目標の LLM プロバイダ・モデルが使われます。

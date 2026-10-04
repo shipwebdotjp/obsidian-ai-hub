@@ -2,6 +2,8 @@ import type { QuestionItem } from "../components/InConversationQuestionCard";
 
 export type Stability = "stable" | "tentative" | "explicitly_settled";
 
+export type InjectionMode = "relevant" | "always";
+
 export type MemoryStatus = "candidate" | "approved" | "rejected" | "expired" | "superseded";
 
 export interface Evidence {
@@ -62,6 +64,7 @@ export interface Memory {
   stability?: Stability;
   sensitivity?: string;
   extraction_confidence?: number;
+  injection_mode?: InjectionMode;
   supersedes?: string;
   contradicts: string[];
   dedup_suggestions: DedupSuggestion[];
@@ -91,6 +94,7 @@ export interface EditPayload {
   valid_until?: string | null;
   review_due_at?: string | null;
   stability?: Stability;
+  injection_mode?: InjectionMode;
   person_ids?: string[];
 }
 

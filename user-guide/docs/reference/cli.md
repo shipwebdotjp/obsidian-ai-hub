@@ -97,6 +97,7 @@ python -m obsidian_ai_hub <flag> [options]
 | `--for` | 文字列 | `--memory-compile` の用途（例 `make-target`）。 |
 | `--render-copilot-profile` | — | Copilot プロファイル（7 ファイル）を生成・上書きする。 |
 | `--memory-maintain` | — | 承認済みメモリのメンテナンスを手動実行する。 |
+| `--rebuild-retrieval-index` | — | 長期記憶の Retrieval 検索インデックスを再構築する（初回・埋め込みモデル変更後）。 |
 
 ## システムメンテナンス
 

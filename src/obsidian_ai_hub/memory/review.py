@@ -9,6 +9,7 @@ from obsidian_ai_hub.memory.models import (
     MEMORY_COLUMNS,
     DedupReassessmentRequiredError,
     _validate_edit_payload,
+    coerce_injection_mode_for_approval,
     compute_memory_fingerprint,
     deserialize_memory,
     get_current_timestamp,
@@ -17,9 +18,11 @@ from obsidian_ai_hub.memory.models import (
     normalize_stability,
     serialize_memory,
     update_target_with_candidate_data,
+    validate_injection_mode_for_memory,
 )
 from obsidian_ai_hub.memory.store import log_memory_event
 from obsidian_ai_hub.memory.projection import project_approved_memories
+from obsidian_ai_hub.retrieval import memory_adapter as _retrieval_sync
 
 logger = logging.getLogger(__name__)
 
@@ -29,8 +32,17 @@ def review_memory(
 ) -> bool:
     """
     Review candidate memory with specified action (approve, reject, edit).
+
+    The retrieval vector write runs before the source DB write; a vector
+    failure raises ``RetrievalSyncError`` and the memory is left unchanged.
     """
+    from obsidian_ai_hub.retrieval.service import RetrievalSyncError
+
     logger.info(f"Reviewing memory {memory_id} with action {action}")
+
+    if action not in ("approve", "reject", "edit"):
+        logger.error(f"Unknown action: {action}")
+        return False
 
     conn = get_db_connection()
     try:
@@ -51,86 +63,66 @@ def review_memory(
             logger.error(f"Cannot review a superseded memory: {memory_id}")
             return False
         timestamp_now = get_current_timestamp()
+        old_snapshot = dict(target)
 
         if action == "approve":
             target["status"] = "approved"
             target["reviewed_by"] = "user"
             target["reviewed_at"] = timestamp_now
             target["updated_at"] = timestamp_now
-
-            db_row = serialize_memory(target)
-            set_clause = ", ".join(
-                f"{col} = ?" for col in MEMORY_COLUMNS if col != "memory_id"
-            )
-            values = [
-                db_row.get(col) for col in MEMORY_COLUMNS if col != "memory_id"
-            ] + [memory_id]
-            conn.execute(
-                f"UPDATE memories SET {set_clause} WHERE memory_id = ?", values
-            )
-
-            log_memory_event(
-                event_type="approved",
-                memory_id=memory_id,
-                previous_status=prev_status,
-                new_status="approved",
-                conn=conn,
-            )
-            conn.commit()
+            coerce_injection_mode_for_approval(target)
+            event_type, new_status, changes = "approved", "approved", None
         elif action == "reject":
             target["status"] = "rejected"
             target["reviewed_by"] = "user"
             target["reviewed_at"] = timestamp_now
             target["updated_at"] = timestamp_now
-
-            db_row = serialize_memory(target)
-            set_clause = ", ".join(
-                f"{col} = ?" for col in MEMORY_COLUMNS if col != "memory_id"
-            )
-            values = [
-                db_row.get(col) for col in MEMORY_COLUMNS if col != "memory_id"
-            ] + [memory_id]
-            conn.execute(
-                f"UPDATE memories SET {set_clause} WHERE memory_id = ?", values
-            )
-
-            log_memory_event(
-                event_type="rejected",
-                memory_id=memory_id,
-                previous_status=prev_status,
-                new_status="rejected",
-                conn=conn,
-            )
-            conn.commit()
-        elif action == "edit":
+            event_type, new_status, changes = "rejected", "rejected", None
+        else:  # edit
             before_content = target.get("content", "")
             target["content"] = new_content
             target["status"] = "approved"
             target["reviewed_by"] = "user"
             target["reviewed_at"] = timestamp_now
             target["updated_at"] = timestamp_now
-
+            coerce_injection_mode_for_approval(target)
+            event_type, new_status = "edited", "approved"
             changes = {"content": {"before": before_content, "after": new_content}}
 
+        post_state = target if new_status == "approved" else None
+        try:
+            prepared = _retrieval_sync.prepare_many({memory_id: post_state})
+        except RetrievalSyncError:
+            logger.error(
+                f"Retrieval sync failed; memory {memory_id} left unchanged"
+            )
+            raise
+
+        try:
             db_row = serialize_memory(target)
-            set_clause = ", ".join(f"{col} = ?" for col in db_row if col != "memory_id")
-            values = [db_row[col] for col in db_row if col != "memory_id"] + [memory_id]
+            set_clause = ", ".join(
+                f"{col} = ?" for col in MEMORY_COLUMNS if col != "memory_id"
+            )
+            values = [
+                db_row.get(col) for col in MEMORY_COLUMNS if col != "memory_id"
+            ] + [memory_id]
             conn.execute(
                 f"UPDATE memories SET {set_clause} WHERE memory_id = ?", values
             )
 
             log_memory_event(
-                event_type="edited",
+                event_type=event_type,
                 memory_id=memory_id,
                 previous_status=prev_status,
-                new_status="approved",
+                new_status=new_status,
                 changes=changes,
                 conn=conn,
             )
+            _retrieval_sync.apply_many_catalog_write(conn, prepared)
             conn.commit()
-        else:
-            logger.error(f"Unknown action: {action}")
-            return False
+        except Exception:
+            _retrieval_sync.restore_many({memory_id: old_snapshot})
+            raise
     finally:
         conn.close()
 
@@ -150,68 +142,99 @@ def update_memory_fields(memory_id: str, fields: dict) -> dict:
 
     conn = get_db_connection()
     try:
-        with conn:
-            cursor = conn.cursor()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM memories WHERE memory_id = ?", (memory_id,))
+        row = cursor.fetchone()
+        if row is None:
+            return {"found": False, "updated": False, "changes": {}, "memory": None}
+
+        target = deserialize_memory(dict(row))
+        prev_status = target.get("status")
+        if prev_status == "superseded":
+            raise ValueError("Cannot edit a superseded memory")
+        old_snapshot = dict(target)
+        timestamp_now = get_current_timestamp()
+
+        if "injection_mode" in validated:
+            # Editing auto-approves, so eligibility is checked against the
+            # post-write approved state.
+            validate_injection_mode_for_memory(
+                validated["injection_mode"],
+                scope=target.get("scope") or "user",
+                status="approved",
+            )
+
+        person_ids_update = None
+        if "person_ids" in validated:
+            person_ids_update = validated.pop("person_ids")
+
+        changes = {}
+        for k, v in validated.items():
+            before = target.get(k)
+            if before != v:
+                changes[k] = {"before": before, "after": v}
+                target[k] = v
+
+        if person_ids_update is not None:
+            from obsidian_ai_hub.memory.store import _attach_people_to_memories, set_memory_people
+            # People linkage is written inside the transaction below.
+            changes["person_ids"] = {"updated": person_ids_update}
+
+        if not changes:
+            return {
+                "found": True,
+                "updated": False,
+                "changes": {},
+                "memory": target,
+            }
+
+        target["status"] = "approved"
+        target["reviewed_by"] = "user"
+        target["reviewed_at"] = timestamp_now
+        target["updated_at"] = timestamp_now
+        coerce_injection_mode_for_approval(target)
+
+        prepared = _retrieval_sync.prepare_many({memory_id: target})
+
+        try:
+            with conn:
+                cursor = conn.cursor()
+                if person_ids_update is not None:
+                    from obsidian_ai_hub.memory.store import set_memory_people as _set_people
+                    _set_people(memory_id, person_ids_update, conn=conn)
+
+                db_row = serialize_memory(target)
+                set_clause = ", ".join(
+                    f"{col} = ?" for col in MEMORY_COLUMNS if col != "memory_id"
+                )
+                values = [
+                    db_row.get(col) for col in MEMORY_COLUMNS if col != "memory_id"
+                ] + [memory_id]
+                conn.execute(
+                    f"UPDATE memories SET {set_clause} WHERE memory_id = ?", values
+                )
+
+                log_memory_event(
+                    event_type="edited",
+                    memory_id=memory_id,
+                    previous_status=prev_status,
+                    new_status="approved",
+                    changes=changes,
+                    conn=conn,
+                )
+                _retrieval_sync.apply_many_catalog_write(conn, prepared)
+        except Exception:
+            _retrieval_sync.restore_many({memory_id: old_snapshot})
+            raise
+
+        # Re-attach people for the response (read-only, outside the txn).
+        if person_ids_update is not None:
+            from obsidian_ai_hub.memory.store import _attach_people_to_memories as _attach
             cursor.execute("SELECT * FROM memories WHERE memory_id = ?", (memory_id,))
-            row = cursor.fetchone()
-            if row is None:
-                return {"found": False, "updated": False, "changes": {}, "memory": None}
-
-            target = deserialize_memory(dict(row))
-            prev_status = target.get("status")
-            if prev_status == "superseded":
-                raise ValueError("Cannot edit a superseded memory")
-            timestamp_now = get_current_timestamp()
-
-            person_ids_update = None
-            if "person_ids" in validated:
-                person_ids_update = validated.pop("person_ids")
-
-            changes = {}
-            for k, v in validated.items():
-                before = target.get(k)
-                if before != v:
-                    changes[k] = {"before": before, "after": v}
-                    target[k] = v
-
-            if person_ids_update is not None:
-                from obsidian_ai_hub.memory.store import _attach_people_to_memories, set_memory_people
-                set_memory_people(memory_id, person_ids_update, conn=conn)
-                _attach_people_to_memories(cursor, [target])
-                changes["person_ids"] = {"updated": person_ids_update}
-
-            if not changes:
-                return {
-                    "found": True,
-                    "updated": False,
-                    "changes": {},
-                    "memory": target,
-                }
-
-            target["status"] = "approved"
-            target["reviewed_by"] = "user"
-            target["reviewed_at"] = timestamp_now
-            target["updated_at"] = timestamp_now
-
-            db_row = serialize_memory(target)
-            set_clause = ", ".join(
-                f"{col} = ?" for col in MEMORY_COLUMNS if col != "memory_id"
-            )
-            values = [
-                db_row.get(col) for col in MEMORY_COLUMNS if col != "memory_id"
-            ] + [memory_id]
-            conn.execute(
-                f"UPDATE memories SET {set_clause} WHERE memory_id = ?", values
-            )
-
-            log_memory_event(
-                event_type="edited",
-                memory_id=memory_id,
-                previous_status=prev_status,
-                new_status="approved",
-                changes=changes,
-                conn=conn,
-            )
+            fresh = cursor.fetchone()
+            if fresh is not None:
+                target = deserialize_memory(dict(fresh))
+                _attach(cursor, [target])
     finally:
         conn.close()
 
@@ -248,49 +271,72 @@ def batch_review_memories(memory_ids: list, action: str) -> dict:
 
     conn = get_db_connection()
     try:
-        with conn:
-            cursor = conn.cursor()
-            timestamp_now = get_current_timestamp()
+        # Phase 1: load all targets without writing.
+        cursor = conn.cursor()
+        timestamp_now = get_current_timestamp()
+        targets: dict[str, dict] = {}
+        prev_statuses: dict[str, object] = {}
+        old_snapshots: dict[str, dict] = {}
+        skipped = []
+        for memory_id in memory_ids:
+            cursor.execute(
+                "SELECT * FROM memories WHERE memory_id = ?", (memory_id,)
+            )
+            row = cursor.fetchone()
+            if row is None:
+                not_found.append(memory_id)
+                continue
+            target = deserialize_memory(dict(row))
+            prev_status = target.get("status")
+            if prev_status == "superseded":
+                skipped.append(memory_id)
+                continue
+            old_snapshots[memory_id] = dict(target)
+            target["status"] = new_status
+            target["reviewed_by"] = "user"
+            target["reviewed_at"] = timestamp_now
+            target["updated_at"] = timestamp_now
+            if new_status == "approved":
+                coerce_injection_mode_for_approval(target)
+            targets[memory_id] = target
+            prev_statuses[memory_id] = prev_status
 
-            skipped = []
-            for memory_id in memory_ids:
-                cursor.execute(
-                    "SELECT * FROM memories WHERE memory_id = ?", (memory_id,)
-                )
-                row = cursor.fetchone()
-                if row is None:
-                    not_found.append(memory_id)
-                    continue
-                target = deserialize_memory(dict(row))
-                prev_status = target.get("status")
-                if prev_status == "superseded":
-                    skipped.append(memory_id)
-                    continue
-                target["status"] = new_status
-                target["reviewed_by"] = "user"
-                target["reviewed_at"] = timestamp_now
-                target["updated_at"] = timestamp_now
+        # Phase 2: vector writes before any source change.
+        post_states = {
+            mid: (t if new_status == "approved" else None)
+            for mid, t in targets.items()
+        }
+        prepared = _retrieval_sync.prepare_many(post_states)
 
-                db_row = serialize_memory(target)
-                set_clause = ", ".join(
-                    f"{col} = ?" for col in MEMORY_COLUMNS if col != "memory_id"
-                )
-                values = [
-                    db_row.get(col) for col in MEMORY_COLUMNS if col != "memory_id"
-                ] + [memory_id]
-                conn.execute(
-                    f"UPDATE memories SET {set_clause} WHERE memory_id = ?", values
-                )
+        # Phase 3: source + catalog in one transaction.
+        try:
+            with conn:
+                cursor = conn.cursor()
+                for memory_id, target in targets.items():
+                    db_row = serialize_memory(target)
+                    set_clause = ", ".join(
+                        f"{col} = ?" for col in MEMORY_COLUMNS if col != "memory_id"
+                    )
+                    values = [
+                        db_row.get(col) for col in MEMORY_COLUMNS if col != "memory_id"
+                    ] + [memory_id]
+                    conn.execute(
+                        f"UPDATE memories SET {set_clause} WHERE memory_id = ?", values
+                    )
 
-                log_memory_event(
-                    event_type=event_type,
-                    memory_id=memory_id,
-                    previous_status=prev_status,
-                    new_status=new_status,
-                    conn=conn,
-                )
-                event_count += 1
-                updated.append(memory_id)
+                    log_memory_event(
+                        event_type=event_type,
+                        memory_id=memory_id,
+                        previous_status=prev_statuses[memory_id],
+                        new_status=new_status,
+                        conn=conn,
+                    )
+                    event_count += 1
+                    updated.append(memory_id)
+                _retrieval_sync.apply_many_catalog_write(conn, prepared)
+        except Exception:
+            _retrieval_sync.restore_many(old_snapshots)
+            raise
     finally:
         conn.close()
 
@@ -327,6 +373,8 @@ def resolve_memory(
         raise ValueError(f"action must be one of {allowed_actions}")
 
     conn = get_db_connection()
+    prepared: dict | None = None
+    old_snapshots: dict[str, dict] = {}
     try:
         with conn:
             cursor = conn.cursor()
@@ -445,11 +493,18 @@ def resolve_memory(
 
             timestamp_now = get_current_timestamp()
 
+            old_snapshots[candidate_id] = dict(cand)
+            if target is not None:
+                old_snapshots[target_memory_id] = dict(target)
+
             if action == "keep_both":
                 cand["status"] = "approved"
                 cand["reviewed_by"] = "user"
                 cand["reviewed_at"] = timestamp_now
                 cand["updated_at"] = timestamp_now
+                coerce_injection_mode_for_approval(cand)
+
+                prepared = _retrieval_sync.prepare_many({candidate_id: cand})
 
                 db_row_cand = serialize_memory(cand)
                 set_clause = ", ".join(
@@ -470,6 +525,7 @@ def resolve_memory(
                     reason="手動操作: 両方保持を選択して承認",
                     conn=conn,
                 )
+                _retrieval_sync.apply_many_catalog_write(conn, prepared)
 
             elif action == "replace_existing":
                 # Save target state before update
@@ -478,6 +534,11 @@ def resolve_memory(
                 # Update target with candidate data
                 target = update_target_with_candidate_data(
                     target, cand, reviewed_by="user"
+                )
+                coerce_injection_mode_for_approval(target)
+
+                prepared = _retrieval_sync.prepare_many(
+                    {target_memory_id: target, candidate_id: None}
                 )
 
                 # Save updated target
@@ -545,6 +606,7 @@ def resolve_memory(
                     reason="手動操作: 既存記憶の置換を選択して却下",
                     conn=conn,
                 )
+                _retrieval_sync.apply_many_catalog_write(conn, prepared)
 
             elif action == "merge_existing":
                 if (
@@ -586,6 +648,11 @@ def resolve_memory(
                 target["updated_at"] = timestamp_now
                 target["reviewed_by"] = "user"
                 target["reviewed_at"] = timestamp_now
+                coerce_injection_mode_for_approval(target)
+
+                prepared = _retrieval_sync.prepare_many(
+                    {target_memory_id: target, candidate_id: None}
+                )
 
                 # Save updated target
                 db_row_target = serialize_memory(target)
@@ -652,6 +719,7 @@ def resolve_memory(
                     reason="手動操作: 既存記憶へのマージを選択して却下",
                     conn=conn,
                 )
+                _retrieval_sync.apply_many_catalog_write(conn, prepared)
 
             elif action == "supersede_existing":
                 if not switch_date or not isinstance(switch_date, str):
@@ -687,6 +755,9 @@ def resolve_memory(
                 target["status"] = "superseded"
                 target["valid_until"] = predecessor_until_str
                 target["updated_at"] = timestamp_now
+
+                # Vector write for the outgoing memory before any source change.
+                prepared = _retrieval_sync.prepare_many({target_memory_id: None})
 
                 db_row_target = serialize_memory(target)
                 set_clause = ", ".join(
@@ -726,6 +797,11 @@ def resolve_memory(
                 cand["reviewed_by"] = "user"
                 cand["reviewed_at"] = timestamp_now
                 cand["updated_at"] = timestamp_now
+                coerce_injection_mode_for_approval(cand)
+
+                # Vector write for the incoming memory before its source change.
+                _cand_prepared = _retrieval_sync.prepare_many({candidate_id: cand})
+                prepared.update(_cand_prepared)
 
                 db_row_cand = serialize_memory(cand)
                 set_clause = ", ".join(
@@ -765,6 +841,11 @@ def resolve_memory(
                     reason=f"手動操作: 既存記憶 {target_memory_id} の後継として承認",
                     conn=conn,
                 )
+                _retrieval_sync.apply_many_catalog_write(conn, prepared)
+    except Exception:
+        if prepared is not None:
+            _retrieval_sync.restore_many(old_snapshots)
+        raise
     finally:
         conn.close()
 
@@ -774,35 +855,53 @@ def resolve_memory(
 
 
 def delete_memory(memory_id: str) -> dict:
+    """Completely delete a memory and its retrieval index entries.
+
+    The Chroma delete runs before the source delete; a vector failure
+    raises ``RetrievalSyncError`` and the memory is left untouched.
+    """
     from obsidian_ai_hub.memory.store import _prune_dedup_suggestions
 
     conn = get_db_connection()
     was_approved = False
     events_deleted = 0
     target = None
+    old_snapshot: dict | None = None
     try:
-        with conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT * FROM memories WHERE memory_id = ?", (memory_id,))
-            row = cursor.fetchone()
-            if row is None:
-                return {
-                    "found": False,
-                    "deleted": False,
-                    "events_deleted": 0,
-                    "memory": None,
-                }
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM memories WHERE memory_id = ?", (memory_id,))
+        row = cursor.fetchone()
+        if row is None:
+            return {
+                "found": False,
+                "deleted": False,
+                "events_deleted": 0,
+                "memory": None,
+            }
 
-            target = deserialize_memory(dict(row))
-            was_approved = target.get("status") == "approved"
+        target = deserialize_memory(dict(row))
+        old_snapshot = dict(target)
+        was_approved = target.get("status") == "approved"
 
-            cursor.execute(
-                "DELETE FROM memory_events WHERE memory_id = ?", (memory_id,)
-            )
-            events_deleted = cursor.rowcount
+        # Chroma-first: never start the source delete on vector failure.
+        _retrieval_sync.prepare_memory_delete(memory_id)
 
-            _prune_dedup_suggestions(cursor, memory_id)
-            cursor.execute("DELETE FROM memories WHERE memory_id = ?", (memory_id,))
+        try:
+            with conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "DELETE FROM memory_events WHERE memory_id = ?", (memory_id,)
+                )
+                events_deleted = cursor.rowcount
+
+                _prune_dedup_suggestions(cursor, memory_id)
+                cursor.execute("DELETE FROM memories WHERE memory_id = ?", (memory_id,))
+                _retrieval_sync.apply_many_catalog_write(
+                    conn, {memory_id: {"op": "delete"}}
+                )
+        except Exception:
+            _retrieval_sync.restore_many({memory_id: old_snapshot})
+            raise
     finally:
         conn.close()
 
@@ -831,26 +930,41 @@ def batch_delete_memories(memory_ids: list[str]) -> dict:
     had_approved = False
 
     try:
-        with conn:
-            cursor = conn.cursor()
-            for mid in memory_ids:
-                cursor.execute("SELECT * FROM memories WHERE memory_id = ?", (mid,))
-                row = cursor.fetchone()
-                if row is None:
-                    not_found.append(mid)
-                    continue
+        # Phase 1: load targets without writing.
+        cursor = conn.cursor()
+        targets: dict[str, dict] = {}
+        for mid in memory_ids:
+            cursor.execute("SELECT * FROM memories WHERE memory_id = ?", (mid,))
+            row = cursor.fetchone()
+            if row is None:
+                not_found.append(mid)
+                continue
+            targets[mid] = deserialize_memory(dict(row))
 
-                target = deserialize_memory(dict(row))
-                if target.get("status") == "approved":
-                    had_approved = True
+        # Phase 2: Chroma-first deletes; never start source deletes on failure.
+        for mid in targets:
+            _retrieval_sync.prepare_memory_delete(mid)
+        prepared = {mid: {"op": "delete"} for mid in targets}
 
-                cursor.execute("DELETE FROM memory_events WHERE memory_id = ?", (mid,))
-                total_events += cursor.rowcount
-                cursor.execute("DELETE FROM memories WHERE memory_id = ?", (mid,))
-                deleted.append(mid)
+        # Phase 3: source + catalog in one transaction.
+        try:
+            with conn:
+                cursor = conn.cursor()
+                for mid, target in targets.items():
+                    if target.get("status") == "approved":
+                        had_approved = True
 
-            for mid in deleted:
-                _prune_dedup_suggestions(cursor, mid)
+                    cursor.execute("DELETE FROM memory_events WHERE memory_id = ?", (mid,))
+                    total_events += cursor.rowcount
+                    cursor.execute("DELETE FROM memories WHERE memory_id = ?", (mid,))
+                    deleted.append(mid)
+
+                for mid in deleted:
+                    _prune_dedup_suggestions(cursor, mid)
+                _retrieval_sync.apply_many_catalog_write(conn, prepared)
+        except Exception:
+            _retrieval_sync.restore_many(dict(targets))
+            raise
     finally:
         conn.close()
 

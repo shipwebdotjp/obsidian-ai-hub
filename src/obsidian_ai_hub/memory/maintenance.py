@@ -567,6 +567,91 @@ def check_snapshot_conflicts(p: dict, expected_snapshots: dict, current_memories
     return False
 
 
+def _apply_merge_correct_writes(
+    conn,
+    p,
+    proposal_id,
+    memories_map,
+    main_mem,
+    before_content,
+    integrated_content,
+    timestamp_now,
+    reason,
+    action,
+    main_id,
+    absorbed_ids,
+):
+    """Write the merge/correct source rows (memories + events) inside the txn."""
+    # If person memory, compute union of person_ids across main and absorbed records
+    if main_mem.get("scope") == "person":
+        union_person_ids = set()
+        for p in (main_mem.get("people") or []):
+            if isinstance(p, dict) and p.get("person_id"):
+                union_person_ids.add(p["person_id"])
+        for aid in absorbed_ids:
+            if aid in memories_map:
+                for p in (memories_map[aid].get("people") or []):
+                    if isinstance(p, dict) and p.get("person_id"):
+                        union_person_ids.add(p["person_id"])
+        if union_person_ids:
+            from obsidian_ai_hub.memory.store import set_memory_people
+            set_memory_people(main_id, sorted(union_person_ids), conn=conn)
+            main_mem["people"] = [{"person_id": pid, "display_name": ""} for pid in sorted(union_person_ids)]
+
+    db_row = serialize_memory(main_mem)
+    set_clause = ", ".join(f"{col} = ?" for col in MEMORY_COLUMNS if col != "memory_id")
+    conn.execute(
+        f"UPDATE memories SET {set_clause} WHERE memory_id = ?",  # noqa: S608
+        [db_row.get(col) for col in MEMORY_COLUMNS if col != "memory_id"] + [main_id]
+    )
+
+    # Log main record event
+    event_type = "maintenance_merged" if action == "merge" else "maintenance_corrected"
+    changes = {
+        "content": {"before": before_content, "after": integrated_content},
+        "absorbed_ids": absorbed_ids,
+        "proposal_id": proposal_id,
+    }
+    log_memory_event(
+        event_type=event_type,
+        memory_id=main_id,
+        previous_status="approved",
+        new_status="approved",
+        changes=changes,
+        reason=reason,
+        conn=conn,
+        actor="system",
+    )
+
+    # 2. Set absorbed records to superseded
+    for aid in absorbed_ids:
+        if aid in memories_map:
+            amem = memories_map[aid]
+            prev_status = amem.get("status")
+            amem["status"] = "superseded"
+            amem["updated_at"] = timestamp_now
+
+            conn.execute(
+                "UPDATE memories SET status = ?, updated_at = ? WHERE memory_id = ?",
+                ("superseded", timestamp_now, aid)
+            )
+
+            log_memory_event(
+                event_type="maintenance_superseded",
+                memory_id=aid,
+                previous_status=prev_status,
+                new_status="superseded",
+                changes={
+                    "action": action,
+                    "main_id": main_id,
+                    "proposal_id": proposal_id,
+                },
+                reason=f"マージ統合/矛盾訂正により正本ID:{main_id}へ吸収。提案ID:{proposal_id}",
+                conn=conn,
+                actor="system",
+            )
+
+
 def apply_single_proposal(
     conn: sqlite3.Connection,
     p: dict,
@@ -582,7 +667,15 @@ def apply_single_proposal(
     timestamp_now = get_current_timestamp()
 
     if action in ("merge", "correct"):
+        from obsidian_ai_hub.retrieval import memory_adapter as _retrieval_sync
+
         main_mem = memories_map[main_id]
+        main_before = dict(main_mem)
+        absorbed_before = {
+            aid: dict(memories_map[aid])
+            for aid in absorbed_ids
+            if aid in memories_map
+        }
         before_content = main_mem.get("content", "")
 
         # 1. Update main record with integrated content
@@ -610,96 +703,65 @@ def apply_single_proposal(
         main_mem["evidence"] = merged_evidence
         main_mem["updated_at"] = timestamp_now
 
-        # If person memory, compute union of person_ids across main and absorbed records
-        if main_mem.get("scope") == "person":
-            union_person_ids = set()
-            for p in (main_mem.get("people") or []):
-                if isinstance(p, dict) and p.get("person_id"):
-                    union_person_ids.add(p["person_id"])
-            for aid in absorbed_ids:
-                if aid in memories_map:
-                    for p in (memories_map[aid].get("people") or []):
-                        if isinstance(p, dict) and p.get("person_id"):
-                            union_person_ids.add(p["person_id"])
-            if union_person_ids:
-                from obsidian_ai_hub.memory.store import set_memory_people
-                set_memory_people(main_id, sorted(union_person_ids), conn=conn)
-                main_mem["people"] = [{"person_id": pid, "display_name": ""} for pid in sorted(union_person_ids)]
-
-        db_row = serialize_memory(main_mem)
-        set_clause = ", ".join(f"{col} = ?" for col in MEMORY_COLUMNS if col != "memory_id")
-        conn.execute(
-            f"UPDATE memories SET {set_clause} WHERE memory_id = ?",  # noqa: S608
-            [db_row.get(col) for col in MEMORY_COLUMNS if col != "memory_id"] + [main_id]
-        )
-
-        # Log main record event
-        event_type = "maintenance_merged" if action == "merge" else "maintenance_corrected"
-        changes = {
-            "content": {"before": before_content, "after": integrated_content},
-            "absorbed_ids": absorbed_ids,
-            "proposal_id": proposal_id,
-        }
-        log_memory_event(
-            event_type=event_type,
-            memory_id=main_id,
-            previous_status="approved",
-            new_status="approved",
-            changes=changes,
-            reason=reason,
-            conn=conn,
-            actor="system",
-        )
-
-        # 2. Set absorbed records to superseded
-        for aid in absorbed_ids:
-            if aid in memories_map:
-                amem = memories_map[aid]
-                prev_status = amem.get("status")
-                amem["status"] = "superseded"
-                amem["updated_at"] = timestamp_now
-
-                conn.execute(
-                    "UPDATE memories SET status = ?, updated_at = ? WHERE memory_id = ?",
-                    ("superseded", timestamp_now, aid)
-                )
-
-                log_memory_event(
-                    event_type="maintenance_superseded",
-                    memory_id=aid,
-                    previous_status=prev_status,
-                    new_status="superseded",
-                    changes={
-                        "action": action,
-                        "main_id": main_id,
-                        "proposal_id": proposal_id,
-                    },
-                    reason=f"マージ統合/矛盾訂正により正本ID:{main_id}へ吸収。提案ID:{proposal_id}",
-                    conn=conn,
-                    actor="system",
-                )
+        # Vector writes before any source change; absorbed records leave the index.
+        _maint_states = {main_id: main_mem}
+        for _aid in absorbed_ids:
+            if _aid in memories_map:
+                _maint_states[_aid] = None
+        _maint_old = {main_id: main_before}
+        _maint_old.update(absorbed_before)
+        _maint_prepared = _retrieval_sync.prepare_many(_maint_states)
+        try:
+            _apply_merge_correct_writes(
+                conn,
+                p,
+                proposal_id,
+                memories_map,
+                main_mem,
+                before_content,
+                integrated_content,
+                timestamp_now,
+                reason,
+                action,
+                main_id,
+                absorbed_ids,
+            )
+            _retrieval_sync.apply_many_catalog_write(conn, _maint_prepared)
+        except Exception:
+            _retrieval_sync.restore_many(_maint_old)
+            raise
 
     elif action == "expire":
+        from obsidian_ai_hub.retrieval import memory_adapter as _retrieval_sync
+
         main_mem = memories_map[main_id]
         prev_status = main_mem.get("status")
+        main_before = dict(main_mem)
         main_mem["status"] = "expired"
         main_mem["updated_at"] = timestamp_now
 
-        conn.execute(
-            "UPDATE memories SET status = ?, updated_at = ? WHERE memory_id = ?",
-            ("expired", timestamp_now, main_id)
-        )
+        # Vector forget before the source row changes.
+        _expire_prepared = _retrieval_sync.prepare_many({main_id: None})
+        try:
+            conn.execute(
+                "UPDATE memories SET status = ?, updated_at = ? WHERE memory_id = ?",
+                ("expired", timestamp_now, main_id)
+            )
 
-        log_memory_event(
-            event_type="maintenance_expired",
-            memory_id=main_id,
-            previous_status=prev_status,
-            new_status="expired",
-            changes={"proposal_id": proposal_id},
-            reason=reason,
-            conn=conn,
-            actor="system",
-        )
+            log_memory_event(
+                event_type="maintenance_expired",
+                memory_id=main_id,
+                previous_status=prev_status,
+                new_status="expired",
+                changes={"proposal_id": proposal_id},
+                reason=reason,
+                conn=conn,
+                actor="system",
+            )
+            _retrieval_sync.apply_many_catalog_write(conn, _expire_prepared)
+        except Exception:
+            _retrieval_sync.restore_many({main_id: main_before})
+            raise
 
 
 def re_diagnose_individual_proposal(

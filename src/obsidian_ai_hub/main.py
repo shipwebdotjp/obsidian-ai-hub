@@ -10,6 +10,7 @@ from obsidian_ai_hub import (
     notify_today_schedule,
     write_today_schedule,
     obsidian_inbox_merge,
+    rebuild_retrieval,
     rebuild_valut,
     research_agent,
     suggest_research_theme,
@@ -147,6 +148,11 @@ def main():
         "--rebuild-vault",
         action="store_true",
         help="Obsidian Vaultのmd-hybrid-searchインデックスを再構築",
+    )
+    parser.add_argument(
+        "--rebuild-retrieval-index",
+        action="store_true",
+        help="長期記憶のRetrieval検索インデックスを再構築（初回・埋め込みモデル変更後）",
     )
     parser.add_argument(
         "--research-agent",
@@ -868,6 +874,9 @@ def main():
         ran = True
     if args.rebuild_vault:
         run_and_log(rebuild_valut.main, "rebuild_vault", {})
+        ran = True
+    if getattr(args, "rebuild_retrieval_index", False):
+        run_and_log(rebuild_retrieval.main, "rebuild_retrieval_index", {})
         ran = True
     if args.research_agent:
         run_and_log(

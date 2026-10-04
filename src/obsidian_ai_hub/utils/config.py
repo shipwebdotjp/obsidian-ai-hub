@@ -33,6 +33,8 @@ _APP_ENV_VARS = [
     "LOCAL_MODEL_DIR",
     "VAULT_INDEX_SQLITE_PATH",
     "VAULT_INDEX_CHROMA_PATH",
+    "RETRIEVAL_CHROMA_PATH",
+    "RETRIEVAL_COLLECTION_NAME",
     "VAULT_INDEX_ALLOW_NETWORK_FALLBACK",
     "HUGGINGFACE_API_KEY",
     "SENTENCE_TRANSFORMERS_HOME",
@@ -291,6 +293,26 @@ if isinstance(VAULT_INDEX_ALLOW_NETWORK_FALLBACK, str):
         "yes",
         "on",
     )
+
+# Generic retrieval index (first corpus: approved long-term memories).
+# The embedding model is shared with the Vault index
+# (VAULT_INDEX_EMBEDDER_MODEL); its name is stored as the model fingerprint in
+# the retrieval catalog so a model change invalidates stale vectors.
+RETRIEVAL_COLLECTION_NAME = str(
+    _env_or_config(
+        "RETRIEVAL_COLLECTION_NAME",
+        "retrieval",
+        "collection_name",
+        default="retrieval_documents",
+    )
+    or "retrieval_documents"
+)
+
+RETRIEVAL_CHROMA_PATH = _optional_path(
+    "RETRIEVAL_CHROMA_PATH", "retrieval", "chroma_path"
+)
+if RETRIEVAL_CHROMA_PATH is None:
+    RETRIEVAL_CHROMA_PATH = BASE_DIR / "data" / "retrieval" / "chroma"
 
 # Research Agent
 RESEARCH_OUTPUT_DIR = VAULT_PATH / RESEARCH_DIR_NAME
@@ -861,6 +883,27 @@ MEMORY_AGENT_CONTEXT_MAX_TOKENS = int(
     _config_value("memory", "agent_context_max_tokens", default=400)
 )
 
+# Query-relevant agent injection via the generic retrieval index.
+# Similarity threshold (cosine, 0..1) and max relevant memories per turn.
+try:
+    MEMORY_AGENT_RETRIEVAL_THRESHOLD = float(
+        _config_value("memory", "agent_retrieval_threshold", default=0.45)
+    )
+except (TypeError, ValueError):
+    MEMORY_AGENT_RETRIEVAL_THRESHOLD = 0.45
+if not 0.0 <= MEMORY_AGENT_RETRIEVAL_THRESHOLD <= 1.0:
+    MEMORY_AGENT_RETRIEVAL_THRESHOLD = 0.45
+try:
+    MEMORY_AGENT_RETRIEVAL_TOP_K = int(
+        _config_value("memory", "agent_retrieval_top_k", default=5)
+    )
+except (TypeError, ValueError):
+    MEMORY_AGENT_RETRIEVAL_TOP_K = 5
+if MEMORY_AGENT_RETRIEVAL_TOP_K < 1:
+    MEMORY_AGENT_RETRIEVAL_TOP_K = 1
+if MEMORY_AGENT_RETRIEVAL_TOP_K > 10:
+    MEMORY_AGENT_RETRIEVAL_TOP_K = 10
+
 # Per-purpose overrides for long-term memory compilation. Keys are purpose
 # strings (e.g. "make-target", "review-draft") mapped to a dict with optional
 # "kinds", "budget", "format" ("evidence" | "fenced"), "include_person",
@@ -1089,6 +1132,7 @@ if IS_TEST_ENV:
     LOCAL_MODEL_DIR = TEST_WORKSPACE / "local-models"
     VAULT_INDEX_SQLITE_PATH = TEST_WORKSPACE / "vault-index" / "search.sqlite"
     VAULT_INDEX_CHROMA_PATH = TEST_WORKSPACE / "vault-index" / "chroma"
+    RETRIEVAL_CHROMA_PATH = TEST_WORKSPACE / "retrieval" / "chroma"
     JOBS_DIR = TEST_WORKSPACE / "jobs"
     JOB_RUN_STATE_PATH = JOBS_DIR / "last_run.json"
     KNOWLEDGE_SYNC_STATE_PATH = JOBS_DIR / "knowledge_sync_state.json"

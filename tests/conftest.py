@@ -214,6 +214,7 @@ def _filesystem_sandbox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(app_config, "KNOWLEDGE_SYNC_STATE_PATH", tmp_path / "knowledge_sync_state.json")
     monkeypatch.setattr(app_config, "VAULT_INDEX_SQLITE_PATH", tmp_path / "vault-index" / "search.sqlite")
     monkeypatch.setattr(app_config, "VAULT_INDEX_CHROMA_PATH", tmp_path / "vault-index" / "chroma")
+    monkeypatch.setattr(app_config, "RETRIEVAL_CHROMA_PATH", tmp_path / "retrieval" / "chroma")
     monkeypatch.setattr(app_config, "LOCAL_MODEL_DIR", tmp_path / "local-models")
     monkeypatch.setattr(app_config, "PLUGINS_TOOLS_DIR", tmp_path / "plugins" / "tools")
     # HEALTHCARE_SQLITE_PATH is isolated per test via test_healthcare_db_path

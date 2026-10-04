@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import re
-import unicodedata
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
@@ -36,118 +35,15 @@ JST = ZoneInfo("Asia/Tokyo")
 _ALLOWED_ID_PATTERN = re.compile(r"[A-Za-z0-9_-]{1,128}")
 
 # ---------------------------------------------------------------------------
-# Search helpers (embedding fallback)
+# Search helpers (retrieval index with token-match fallback)
 # ---------------------------------------------------------------------------
 
-
-def _normalize_for_search(text: str) -> str:
-    """NFKC + lower for search comparison; keeps spaces for tokenization."""
-    if not text:
-        return ""
-    text = unicodedata.normalize("NFKC", text)
-    text = text.lower()
-    return text
-
-
-def _tokenize(text: str) -> list[str]:
-    """Tokenize for fallback scoring.
-
-    Splits on whitespace and punctuation, keeps Japanese word characters.
-    Returns unique tokens (lower, NFKC) preserving order, filtered min length 1.
-    """
-    norm = _normalize_for_search(text)
-    # Replace common Japanese delimiters with space before extracting tokens.
-    # The middle dot "・" (U+30FB) is within 0x30A0-0x30FF but is a separator, not a word char.
-    norm = norm.replace("・", " ").replace("、", " ").replace("。", " ")
-    norm = norm.replace(",", " ").replace("，", " ")
-    # Use explicit ranges that exclude separators like "・", "、", "。"
-    # Hiragana: 3040-309F, Katakana (without middle dot): 30A0-30FA + 30FC-30FF, Kanji: 4E00-9FFF
-    tokens = re.findall(r"[a-zA-Z0-9_\u3040-\u309F\u30A0-\u30FA\u30FC-\u30FF\u4E00-\u9FFF]+", norm)
-    seen: set[str] = set()
-    out: list[str] = []
-    for tok in tokens:
-        if tok not in seen:
-            seen.add(tok)
-            out.append(tok)
-    # If no tokens (e.g. only symbols), fallback to whole normalized string
-    if not out and norm.strip():
-        out = [norm.strip()]
-    return out
-
-
-def _fallback_score(query: str, memory: dict) -> float:
-    """Compute token-match score across content, memory_key, topics, tags.
-
-    Scoring weights (higher = more relevant):
-      - content substring (normalized query in normalized content): +3.0
-      - content token overlap: +1.0 per matched token
-      - memory_key token/ substring: +2.0 per matched token / +2.5 if exact substring
-      - topics exact token match: +2.0 per topic
-      - tags exact/partial match: +1.5 per tag
-    """
-    q_norm = _normalize_for_search(query)
-    q_tokens = _tokenize(query)
-    if not q_norm or not q_tokens:
-        return 0.0
-
-    score = 0.0
-
-    content = memory.get("content") or ""
-    c_norm = _normalize_for_search(content)
-    c_tokens = set(_tokenize(content))
-
-    # Content substring
-    if q_norm.strip() and q_norm.strip() in c_norm:
-        score += 3.0
-
-    # Content token overlap
-    for tok in q_tokens:
-        if tok in c_tokens:
-            score += 1.0
-        elif tok in c_norm:
-            # partial substring in content even if token boundary differs
-            score += 0.5
-
-    # memory_key
-    mkey = (memory.get("memory_key") or "")
-    mk_norm = _normalize_for_search(mkey)
-    mk_tokens = set(_tokenize(mkey))
-    if q_norm.strip() and q_norm.strip() in mk_norm and mk_norm:
-        score += 2.5
-    for tok in q_tokens:
-        if tok in mk_tokens:
-            score += 2.0
-        elif tok in mk_norm and mk_norm:
-            score += 0.8
-
-    # topics
-    topics = memory.get("topics") or []
-    topics_norm = [_normalize_for_search(t) for t in topics]
-    topics_tokens = set()
-    for t in topics_norm:
-        topics_tokens.update(_tokenize(t))
-        # also consider whole normalized topic as token
-        if t:
-            topics_tokens.add(t)
-    for tok in q_tokens:
-        if tok in topics_tokens:
-            score += 2.0
-
-    # tags
-    tags = memory.get("tags") or []
-    tags_norm = [_normalize_for_search(t) for t in tags]
-    tags_tokens = set()
-    for t in tags_norm:
-        tags_tokens.update(_tokenize(t))
-        if t:
-            tags_tokens.add(t)
-    for tok in q_tokens:
-        if tok in tags_tokens:
-            score += 1.5
-        elif any(tok in tn for tn in tags_norm if tn):
-            score += 0.5
-
-    return score
+from obsidian_ai_hub.retrieval.text_fallback import (
+    fallback_score as _fallback_score,
+)
+from obsidian_ai_hub.retrieval.text_fallback import (
+    normalize_for_search as _normalize_for_search,
+)
 
 
 def search_memories(
@@ -158,8 +54,10 @@ def search_memories(
 ) -> dict:
     """Search approved, currently valid memories (read-only).
 
-    Uses embedding similarity if available, otherwise token-match fallback.
-    Never triggers expiration DB writes.
+    Uses the generic retrieval index and re-validates every candidate
+    against the catalog and the source of truth. Falls back to lightweight
+    token matching when the index is unavailable (not built, model changed,
+    or search failure). Never triggers expiration DB writes.
     """
     if not query or not query.strip():
         raise ValueError("query must be a non-empty string")
@@ -179,60 +77,24 @@ def search_memories(
     if not active:
         return {"memories": []}
 
-    # Try embedding path if available
-    embedder = None
-    try:
-        from obsidian_ai_hub.utils.embeddings import get_embedder, cosine_similarity
-
-        embedder = get_embedder()
-    except Exception:
-        embedder = None
-
     scored: list[tuple[float, dict]] = []
+    try:
+        from obsidian_ai_hub.retrieval.service import search_memory_index
 
-    if embedder is not None:
-        try:
-            q_norm = normalize_content(query)
-            if not q_norm:
-                raise ValueError("empty normalized query")
-            q_vec = embedder.embed_query(q_norm)
-
-            # Batch embeddings: avoid N+1 sequential embed_query calls.
-            m_norms: list[str] = [
-                normalize_content(m.get("content") or "") for m in active
-            ]
-            indices = [i for i, n in enumerate(m_norms) if n]
-            texts = [m_norms[i] for i in indices]
-            vecs_by_idx: dict[int, list[float]] = {}
-            if texts:
-                try:
-                    if hasattr(embedder, "embed_documents"):
-                        m_vecs = embedder.embed_documents(texts)
-                    else:
-                        m_vecs = [embedder.embed_query(t) for t in texts]
-                    for idx, vec in zip(indices, m_vecs):
-                        vecs_by_idx[idx] = vec
-                except Exception as e:
-                    logger.warning(
-                        f"Batch embedding failed, falling back to token scoring: {e}"
-                    )
-
-            if not vecs_by_idx:
-                # Embedding path failed; fall back to token scoring for all
-                scored = [(_fallback_score(query, m), m) for m in active]
-            else:
-                for i, m in enumerate(active):
-                    vec = vecs_by_idx.get(i)
-                    if vec is None:
-                        scored.append((_fallback_score(query, m), m))
-                        continue
-                    sim = cosine_similarity(q_vec, vec)
-                    fb = _fallback_score(query, m) * 0.05
-                    scored.append((sim + fb, m))
-        except Exception as e:
-            logger.warning(f"Embedding search failed, falling back to token scoring: {e}")
-            scored = [(_fallback_score(query, m), m) for m in active]
-    else:
+        # Same relevance contract as agent injection: only memories whose
+        # cosine similarity meets the configured threshold are returned,
+        # after catalog/source re-validation inside the retrieval service.
+        scored = [
+            (sim, m)
+            for sim, m in search_memory_index(
+                query, kind=kind, limit=limit, now=now
+            )
+        ]
+    except ValueError:
+        raise
+    except Exception as e:
+        logger.warning(f"Retrieval search unavailable, falling back to token scoring: {e}")
+        # Token-match fallback when the index cannot serve the query.
         scored = [(_fallback_score(query, m), m) for m in active]
 
     # Sort by score desc, then by priority (confidence, stability, created_at)
@@ -243,10 +105,9 @@ def search_memories(
         created = m.get("created_at") or ""
         return (conf, stab, created)
 
-    # Filter zero-score if we have any positive scores (avoid returning irrelevant)
-    has_positive = any(s > 0 for s, _ in scored)
-    if has_positive:
-        scored = [pair for pair in scored if pair[0] > 0]
+    # Drop zero-score candidates (no similarity / no token overlap);
+    # empty means no match.
+    scored = [pair for pair in scored if pair[0] > 0]
 
     scored.sort(key=lambda x: (x[0], priority_key(x[1])), reverse=True)
 

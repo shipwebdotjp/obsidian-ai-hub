@@ -787,6 +787,9 @@ def get_db_connection() -> sqlite3.Connection:
     if current_version <= 75:
         run_migration_v76(conn)
 
+    if current_version <= 76:
+        run_migration_v77(conn)
+
     return conn
 
 
@@ -1838,6 +1841,47 @@ def run_migration_v76(conn: sqlite3.Connection) -> None:
     except sqlite3.OperationalError as e:
         _ignore_duplicate_schema_object(e)
     conn.execute("PRAGMA user_version = 76;")
+    conn.commit()
+
+
+def run_migration_v77(conn: sqlite3.Connection) -> None:
+    """Run migration for version 77 (memory injection_mode + retrieval catalog).
+
+    - ``memories.injection_mode`` (``relevant`` | ``always``, default
+      ``relevant``) controls agent-context injection: ``always`` memories are
+      packed into the 400-token budget first, ``relevant`` only on query match.
+    - ``retrieval_documents`` is the authoritative search catalog for the
+      generic retrieval index. Chroma is a derived vector index; candidates
+      are only returned when the catalog entry matches the source of truth
+      (content hash, model fingerprint, approval/validity).
+    """
+    try:
+        conn.execute(
+            "ALTER TABLE memories ADD COLUMN injection_mode TEXT "
+            "DEFAULT 'relevant' "
+            "CHECK (injection_mode IN ('relevant', 'always'));"
+        )
+    except sqlite3.OperationalError as e:
+        _ignore_duplicate_schema_object(e)
+    conn.execute(
+        "UPDATE memories SET injection_mode = 'relevant' "
+        "WHERE injection_mode IS NULL;"
+    )
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS retrieval_documents (
+            source_type TEXT NOT NULL,
+            source_id TEXT NOT NULL,
+            content_hash TEXT NOT NULL,
+            model TEXT NOT NULL,
+            indexed_at TEXT NOT NULL,
+            PRIMARY KEY (source_type, source_id)
+        );
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_retrieval_documents_model "
+        "ON retrieval_documents(model);"
+    )
+    conn.execute("PRAGMA user_version = 77;")
     conn.commit()
 
 
