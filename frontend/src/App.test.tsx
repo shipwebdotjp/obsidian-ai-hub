@@ -8,6 +8,7 @@ import {
   ApiError,
   listHitlRuns,
   getToken,
+  getUnreadNotificationCount,
   listMemories,
   listTaskAgentCapabilities,
 } from "./api/client";
@@ -389,6 +390,27 @@ describe("App", () => {
     });
     const badge = await screen.findByTestId("hitl-pending-badge");
     expect(badge).toHaveTextContent("3");
+  });
+
+  it("refetches the unread notification count when navigating between routes", async () => {
+    mockHealth.mockResolvedValue({ status: "ok", auth_required: false });
+    const mockGetUnread = vi.mocked(getUnreadNotificationCount);
+    mockGetUnread.mockResolvedValue({ unread_count: 2 });
+    render(
+      <MemoryRouter initialEntries={["/memories"]}>
+        <App />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(mockGetUnread).toHaveBeenCalledTimes(1);
+    });
+
+    await userEvent.click(screen.getByRole("link", { name: /通知/ }));
+
+    await waitFor(() => {
+      expect(mockGetUnread).toHaveBeenCalledTimes(2);
+    });
   });
 
   it("hides the pending count badge when there are no pending runs", async () => {

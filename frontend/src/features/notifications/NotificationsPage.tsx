@@ -1,17 +1,23 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   NotificationInboxItem,
   listNotifications,
+  markAllNotificationsAsRead,
   markNotificationAsRead,
 } from "../../api/client";
 
-export function NotificationsPage() {
+interface NotificationsPageProps {
+  onUnreadCountChanged?: () => void | Promise<void>;
+}
+
+export function NotificationsPage({ onUnreadCountChanged }: NotificationsPageProps = {}) {
   const [items, setItems] = useState<NotificationInboxItem[]>([]);
   const [total, setTotal] = useState<number>(0);
   const [page, setPage] = useState<number>(1);
   const [limit] = useState<number>(20);
   const [loading, setLoading] = useState<boolean>(true);
+  const [readAllLoading, setReadAllLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
   const [statusFilter, setStatusFilter] = useState<"all" | "unread">("all");
@@ -21,46 +27,94 @@ export function NotificationsPage() {
 
   const [selectedItem, setSelectedItem] = useState<NotificationInboxItem | null>(null);
 
-  useEffect(() => {
-    const controller = new AbortController();
-    const loadData = async () => {
+  const fetchNotifications = useCallback(
+    async (signal?: AbortSignal) => {
       setLoading(true);
       setError(null);
       try {
         const res = await listNotifications(
           { status: statusFilter, category: categoryFilter, page, limit },
-          controller.signal,
+          signal,
         );
-        if (controller.signal.aborted) return;
+        if (signal?.aborted) return null;
         setItems(res.items);
         setTotal(res.total);
+        return res;
       } catch (err: unknown) {
-        if (!controller.signal.aborted) {
+        if (!signal?.aborted) {
           setError(err instanceof Error ? err.message : "通知の取得に失敗しました");
         }
+        return null;
       } finally {
-        if (!controller.signal.aborted) setLoading(false);
+        if (!signal?.aborted) setLoading(false);
       }
-    };
-    void loadData();
+    },
+    [statusFilter, categoryFilter, page, limit],
+  );
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetchNotifications(controller.signal);
     return () => controller.abort();
-  }, [statusFilter, categoryFilter, page, limit]);
+  }, [fetchNotifications]);
 
   const handleOpenDetail = async (item: NotificationInboxItem) => {
     setSelectedItem(item);
     if (!item.read_at) {
       try {
         const updated = await markNotificationAsRead(item.notification_id);
-        setSelectedItem(updated);
         setItems((prev) =>
           prev.map((i) =>
             i.notification_id === item.notification_id ? updated : i,
           ),
         );
+        // Only replace the modal content when it still shows this item;
+        // rapid prev/next navigation may have moved on to another one.
+        setSelectedItem((current) =>
+          current?.notification_id === updated.notification_id ? updated : current,
+        );
       } catch {
         setError("既読への更新に失敗しました");
+        return;
       }
     }
+    await onUnreadCountChanged?.();
+  };
+
+  const handleCloseDetail = () => {
+    setSelectedItem(null);
+    void fetchNotifications();
+  };
+
+  const handleMarkAllRead = async () => {
+    setReadAllLoading(true);
+    try {
+      await markAllNotificationsAsRead();
+      const res = await fetchNotifications();
+      if (res) {
+        const maxPage = Math.max(1, Math.ceil(res.total / limit));
+        if (page > maxPage) setPage(maxPage);
+      }
+      await onUnreadCountChanged?.();
+    } catch {
+      setError("すべて既読への更新に失敗しました");
+    } finally {
+      setReadAllLoading(false);
+    }
+  };
+
+  const selectedIndex = selectedItem
+    ? items.findIndex((i) => i.notification_id === selectedItem.notification_id)
+    : -1;
+  const canGoPrev = selectedIndex > 0;
+  const canGoNext = selectedIndex >= 0 && selectedIndex < items.length - 1;
+
+  const handleNavigate = (direction: "prev" | "next") => {
+    if (selectedIndex < 0) return;
+    const targetIndex = direction === "prev" ? selectedIndex - 1 : selectedIndex + 1;
+    const target = items[targetIndex];
+    if (!target) return;
+    void handleOpenDetail(target);
   };
 
   const totalPages = Math.ceil(total / limit) || 1;
@@ -119,7 +173,18 @@ export function NotificationsPage() {
   return (
     <div className="mx-auto max-w-5xl space-y-6 p-4">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <h1 className="text-2xl font-bold text-slate-900">通知受信箱</h1>
+        <div className="flex items-center gap-3">
+          <h1 className="text-2xl font-bold text-slate-900">通知受信箱</h1>
+          <button
+            type="button"
+            data-testid="notification-read-all"
+            onClick={() => void handleMarkAllRead()}
+            disabled={readAllLoading}
+            className="rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+          >
+            すべて既読にする
+          </button>
+        </div>
 
         {/* Filters */}
         <div className="flex flex-wrap gap-2">
@@ -204,7 +269,9 @@ export function NotificationsPage() {
       </div>
 
       {error && (
-        <div className="rounded-md bg-red-50 p-4 text-sm text-red-700">{error}</div>
+        <div role="alert" className="rounded-md bg-red-50 p-4 text-sm text-red-700">
+          {error}
+        </div>
       )}
 
       {/* Notification List */}
@@ -287,7 +354,7 @@ export function NotificationsPage() {
       {selectedItem && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-          onClick={() => setSelectedItem(null)}
+          onClick={handleCloseDetail}
         >
           <div
             className="w-full max-w-lg space-y-4 rounded-lg bg-white p-6 shadow-xl"
@@ -302,7 +369,7 @@ export function NotificationsPage() {
               </div>
               <button
                 type="button"
-                onClick={() => setSelectedItem(null)}
+                onClick={handleCloseDetail}
                 className="text-slate-400 hover:text-slate-600"
               >
                 ✕
@@ -343,25 +410,47 @@ export function NotificationsPage() {
               )}
             </div>
 
-            <div className="flex items-center justify-between border-t border-slate-100 pt-4">
-              <Link
-                to={
-                  selectedItem.relative_link.startsWith("/") && !selectedItem.relative_link.startsWith("//")
-                    ? selectedItem.relative_link
-                    : "/"
-                }
-                onClick={() => setSelectedItem(null)}
-                className="inline-flex items-center rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
-              >
-                対象画面を開く
-              </Link>
-              <button
-                type="button"
-                onClick={() => setSelectedItem(null)}
-                className="rounded-md border border-slate-300 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
-              >
-                閉じる
-              </button>
+            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-4">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  data-testid="notification-prev"
+                  disabled={!canGoPrev}
+                  onClick={() => handleNavigate("prev")}
+                  className="rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  前の通知
+                </button>
+                <button
+                  type="button"
+                  data-testid="notification-next"
+                  disabled={!canGoNext}
+                  onClick={() => handleNavigate("next")}
+                  className="rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  次の通知
+                </button>
+              </div>
+              <div className="flex items-center gap-2">
+                <Link
+                  to={
+                    selectedItem.relative_link.startsWith("/") && !selectedItem.relative_link.startsWith("//")
+                      ? selectedItem.relative_link
+                      : "/"
+                  }
+                  onClick={() => setSelectedItem(null)}
+                  className="inline-flex items-center rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+                >
+                  対象画面を開く
+                </Link>
+                <button
+                  type="button"
+                  onClick={handleCloseDetail}
+                  className="rounded-md border border-slate-300 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                >
+                  閉じる
+                </button>
+              </div>
             </div>
           </div>
         </div>

@@ -88,6 +88,10 @@ class NotificationUnreadCountResponse(BaseModel):
     unread_count: int
 
 
+class NotificationMarkAllReadResponse(BaseModel):
+    updated_count: int
+
+
 @router.get("/settings", response_model=NotificationSettingsResponse)
 def get_notification_settings():
     return store.get_notification_settings()
@@ -174,6 +178,12 @@ def list_inbox_notifications(
 def get_unread_notification_count():
     count = store.get_unread_notification_count()
     return {"unread_count": count}
+
+
+@router.post("/read-all", response_model=NotificationMarkAllReadResponse)
+def mark_all_notifications_as_read():
+    updated_count = store.mark_all_notifications_as_read()
+    return {"updated_count": updated_count}
 
 
 @router.get("/{notification_id}", response_model=NotificationInboxItemResponse)

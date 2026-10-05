@@ -39,6 +39,7 @@ uv run -m obsidian_ai_hub --summerize-month --month 2026-07
 
 週次ノートの `result::` 行が空のものに対して、レビュー下書きを生成し、LINE へ通知します。
 下書きは `result::` の直下に保存されてから通知が送られます。
+週次ノートは、その週の月曜日が属する月のフォルダに保存・参照されます（年と週番号は ISO 年・ISO 週番号のままです）。
 
 ```bash
 uv run -m obsidian_ai_hub --review-draft

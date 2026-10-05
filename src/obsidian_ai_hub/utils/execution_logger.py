@@ -433,13 +433,24 @@ def fail_llm_call(
     call_id: str,
     exc: Exception,
     tool_calls: Optional[List[Dict[str, Any]]] = None,
+    diagnostics: Optional[Dict[str, Any]] = None,
 ) -> None:
-    """Logs the failure of an LLM call."""
+    """Logs the failure of an LLM call.
+
+    ``diagnostics`` holds redacted, provider-inquiry-ready details (HTTP
+    status, request ID, attempt count, response-body summary) which are
+    appended to the stored exception message as structured JSON.
+    """
     conn = get_db_connection()
     try:
         finished_at = datetime.now(timezone.utc).isoformat()
         exc_type = type(exc).__name__
         exc_msg = str(exc)
+        if diagnostics:
+            exc_msg = (
+                f"{exc_msg}\n[llm-diagnostics] "
+                f"{json.dumps(mask_sensitive_dict(diagnostics), ensure_ascii=False, sort_keys=True)}"
+            )
         tb_str = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
 
         if tool_calls is not None:

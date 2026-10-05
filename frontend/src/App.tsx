@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { getApiErrorMessage } from "./utils/error";
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import Sidebar from "./components/Sidebar";
 import TokenPrompt from "./components/TokenPrompt";
 import { useDocumentTitle } from "./hooks/useDocumentTitle";
@@ -35,6 +35,7 @@ import {
   ApiError,
   AUTH_EXPIRED_EVENT,
   getToken,
+  getUnreadNotificationCount,
   listMemories,
 } from "./api/client";
 import { ROUTES } from "./constants/routes";
@@ -44,7 +45,23 @@ export default function App() {
   const [needsToken, setNeedsToken] = useState(false);
   const [healthError, setHealthError] = useState<string | null>(null);
   const [navOpen, setNavOpen] = useState(false);
+  const [unreadCount, setUnreadCount] = useState<number | null>(null);
+  const location = useLocation();
   useDocumentTitle();
+
+  const refreshUnreadCount = useCallback(async () => {
+    try {
+      const res = await getUnreadNotificationCount();
+      setUnreadCount(res.unread_count);
+    } catch {
+      // Keep the current badge value; auth gating happens above.
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!authed) return;
+    void refreshUnreadCount();
+  }, [authed, location.pathname, refreshUnreadCount]);
 
   useEffect(() => {
     let cancelled = false;
@@ -172,6 +189,7 @@ export default function App() {
         id="primary-nav"
         open={navOpen}
         onClose={() => setNavOpen(false)}
+        unreadCount={unreadCount}
       />
 
       {navOpen && (
@@ -194,7 +212,10 @@ export default function App() {
           <Route path={ROUTES.TASK_AGENT} element={<TaskAgentPage />} />
           <Route path={ROUTES.WORKFLOWS} element={<WorkflowsPage />} />
           <Route path={ROUTES.MEDIA} element={<MediaGalleryPage />} />
-          <Route path={ROUTES.NOTIFICATIONS} element={<NotificationsPage />} />
+          <Route
+            path={ROUTES.NOTIFICATIONS}
+            element={<NotificationsPage onUnreadCountChanged={refreshUnreadCount} />}
+          />
           <Route path={ROUTES.WORKFLOW_EDIT} element={<WorkflowEditorPage />} />
           <Route path={ROUTES.WORKFLOW_RUN} element={<WorkflowRunPage />} />
           <Route path={ROUTES.WORKFLOW_DETAIL} element={<WorkflowDetailPage />} />

@@ -442,6 +442,25 @@ def get_unread_notification_count() -> int:
         conn.close()
 
 
+def mark_all_notifications_as_read() -> int:
+    """Mark every unread notification as read and return the updated count.
+
+    Already-read notifications keep their original ``read_at`` timestamp.
+    """
+    conn = get_db_connection()
+    try:
+        now = datetime.now(timezone.utc).isoformat()
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE notification_inbox SET read_at = ? WHERE read_at IS NULL;",
+            (now,),
+        )
+        conn.commit()
+        return cursor.rowcount
+    finally:
+        conn.close()
+
+
 def mark_notification_as_read(notification_id: str) -> Optional[Dict[str, Any]]:
     """Mark notification as read and return updated notification dict."""
     conn = get_db_connection()

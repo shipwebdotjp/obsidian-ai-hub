@@ -20,6 +20,23 @@ logger = logging.getLogger(__name__)
 DAY_ITEM_KINDS = ["highlights", "activities", "learnings", "reflections", "gratitude"]
 
 
+class DailySummaryError(RuntimeError):
+    """Daily summary generation failed; target date and stage are recorded.
+
+    LLM retry exhaustion (stage ``llm_call``) and persist failures (stage
+    ``persist``) are reported with the failed date and processing stage
+    while leaving any previously persisted summary for that date untouched.
+    """
+
+    def __init__(self, target_date: datetime, stage: str, cause: BaseException):
+        self.target_date = target_date.strftime("%Y-%m-%d")
+        self.stage = stage
+        super().__init__(
+            f"Daily summary failed for {self.target_date} at stage '{stage}': "
+            f"{type(cause).__name__}: {cause}"
+        )
+
+
 def get_activity_rankings(
     activity_logs: list[dict],
 ) -> tuple[list[tuple[str, int]], list[tuple[str, int]]]:
@@ -132,13 +149,22 @@ def get_daily_structured_record(
                 ),
             },
         )
-        response = llm_client.generate_llm_response(
-            provider=config.MAKE_TODAY_TARGET_PROVIDER,
-            model=config.MAKE_TODAY_TARGET_MODEL,
-            prompt=rendered_prompt,
-            temperature=0.2,
-            max_tokens=16384,
-        )
+        try:
+            response = llm_client.generate_llm_response(
+                provider=config.MAKE_TODAY_TARGET_PROVIDER,
+                model=config.MAKE_TODAY_TARGET_MODEL,
+                prompt=rendered_prompt,
+                temperature=0.2,
+                max_tokens=16384,
+            )
+        except Exception as e:
+            logger.error(
+                "Failed to generate structured daily record via LLM "
+                "(date=%s, stage=llm_call): %s",
+                date_str,
+                e,
+            )
+            raise DailySummaryError(target_date, "llm_call", e) from e
 
         # JSONパース
         cleaned_response = response.strip()
@@ -395,8 +421,18 @@ def summarize_day(target_date: datetime) -> dict:
     if not structured_record.get("summary"):
         raise ValueError("Failed to generate structured record: summary is missing or empty.")
 
-    # 3. SQLiteへの保存 (永続化)
-    summary_res = upsert_summary_record(structured_record)
+    # 3. SQLiteへの保存 (永続化)。失敗時は例外にして既存レコードを残す。
+    # upsert_summary_record は内部でトランザクションを使うため、失敗しても
+    # 同日の既存サマリーを破損させない。
+    try:
+        summary_res = upsert_summary_record(structured_record)
+    except Exception as e:
+        logger.error(
+            "Failed to persist structured daily record (date=%s, stage=persist): %s",
+            target_date.strftime("%Y-%m-%d"),
+            e,
+        )
+        raise DailySummaryError(target_date, "persist", e) from e
 
     # 4. 確定人物を用いた第2段階人物変更候補の抽出とHITL登録
     try:

@@ -4,7 +4,10 @@ import base64
 import json
 import mimetypes
 import os
+import random
+import re
 import time
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any, AsyncGenerator, Sequence, Tuple, Optional, List, Dict
 import logging
@@ -95,34 +98,305 @@ def _temperature_kwargs(
     return {"temperature": temperature}
 
 
-def _is_network_error(exc: Exception) -> bool:
+LLM_RETRY_MAX_ATTEMPTS = 4
+LLM_RETRY_INITIAL_DELAY_SECONDS = 1.0
+LLM_RETRY_MAX_DELAY_SECONDS = 30.0
+LLM_RETRY_JITTER_RATIO = 0.25
+
+# Transient error categories that are safe to retry.  Provider-side 5xx
+# (``InternalServerError``), 429 rate limits, connection timeouts and
+# connection failures can succeed on a later attempt; everything else is
+# raised immediately.
+_RETRYABLE_ERROR_KINDS = frozenset(
+    {"server_error", "rate_limit", "timeout", "connection"}
+)
+# SDK exception names that unambiguously mean a provider-side 5xx, used when
+# the exception carries no ``status_code`` (e.g. a wrapped or re-raised
+# ``InternalServerError`` such as the summerize_day outage).
+_SERVER_ERROR_NAMES = frozenset(
+    {
+        "InternalServerError",
+        "ServiceUnavailableError",
+        "BadGatewayError",
+        "GatewayTimeoutError",
+    }
+)
+_TIMEOUT_ERROR_NAMES = frozenset(
+    {
+        "APITimeoutError",
+        "TimeoutException",
+        "TimeoutError",
+        "ReadTimeout",
+        "ConnectTimeout",
+        "WriteTimeout",
+        "PoolTimeout",
+    }
+)
+_CONNECTION_ERROR_NAMES = frozenset(
+    {
+        "APIConnectionError",
+        "ConnectError",
+        "TransportError",
+        "RemoteProtocolError",
+        "ConnectionError",
+        "ConnectionResetError",
+        "ConnectionAbortedError",
+        "BrokenPipeError",
+    }
+)
+_RATE_LIMIT_DELAY_MULTIPLIER = 2.0
+
+_MAX_ERROR_BODY_CHARS = 800
+_REQUEST_ID_HEADERS = (
+    "x-request-id",
+    "request-id",
+    "x-opencode-request-id",
+    "x-amzn-requestid",
+)
+_SECRET_TEXT_PATTERNS = (
+    re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._\-+/=]{8,}"),
+    re.compile(r"\bsk-[A-Za-z0-9_\-]{12,}\b"),
+    re.compile(r"\bAIza[0-9A-Za-z_\-]{20,}\b"),
+    re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}\b"),
+    re.compile(r"\bgithub_pat_[A-Za-z0-9_]{20,}\b"),
+    re.compile(
+        r"(?i)\b(token|api[_-]?key|apikey|password|secret|authorization)\b"
+        r"[\"']?\s*[:=]\s*[\"']?[^\s\"',;]{6,}"
+    ),
+)
+
+# Retry attempt state for the call currently in flight, so the per-attempt
+# execution log can record which attempt produced a failure.
+_llm_attempt_state: ContextVar[Tuple[int, Optional[int]]] = ContextVar(
+    "llm_attempt_state", default=(1, None)
+)
+
+
+def _http_status_code(exc: BaseException) -> Optional[int]:
+    """Return the provider HTTP status carried by an SDK/httpx exception."""
+    status = getattr(exc, "status_code", None)
+    if isinstance(status, int):
+        return status
+    response = getattr(exc, "response", None)
+    status = getattr(response, "status_code", None)
+    if isinstance(status, int):
+        return status
+    return None
+
+
+def _classify_llm_error(exc: BaseException) -> str:
+    """Classify an LLM failure for retry and logging decisions.
+
+    Returns one of ``server_error`` (HTTP 5xx), ``rate_limit`` (HTTP 429),
+    ``timeout``, ``connection`` or ``other``.  The OpenAI/Anthropic SDKs and
+    httpx all carry different class names, so both status codes and known
+    exception names are inspected without importing the SDKs at module load.
     """
-    ネットワーク系の一時的な失敗だけをリトライ対象にする。
-    ライブラリごとの差異があるため、一般的な接続/タイムアウト/一時エラー名を広めに拾う。
+    status = _http_status_code(exc)
+    if status is not None:
+        if 500 <= status <= 599:
+            return "server_error"
+        if status == 429:
+            return "rate_limit"
+
+    name = type(exc).__name__
+    if name in _SERVER_ERROR_NAMES:
+        return "server_error"
+    if isinstance(exc, TimeoutError) or name in _TIMEOUT_ERROR_NAMES:
+        return "timeout"
+    if isinstance(exc, ConnectionError) or name in _CONNECTION_ERROR_NAMES:
+        return "connection"
+    if isinstance(exc, OSError):
+        return "connection"
+    return "other"
+
+
+def _extract_request_id(exc: BaseException) -> Optional[str]:
+    """Return the provider request ID from the SDK exception or its response."""
+    request_id = getattr(exc, "request_id", None)
+    if isinstance(request_id, str) and request_id.strip():
+        return request_id.strip()
+
+    response = getattr(exc, "response", None)
+    headers = getattr(response, "headers", None)
+    if headers is not None:
+        for header in _REQUEST_ID_HEADERS:
+            try:
+                value = headers.get(header)
+            except Exception:
+                value = None
+            if value:
+                return str(value).strip()
+    return None
+
+
+def _redact_secrets(text: str) -> str:
+    redacted = text
+    for pattern in _SECRET_TEXT_PATTERNS:
+        redacted = pattern.sub("[REDACTED]", redacted)
+    return redacted
+
+
+def _safe_response_body_summary(exc: BaseException) -> Optional[str]:
+    """Return a redacted, bounded summary of the provider response body."""
+    body = getattr(exc, "body", None)
+    if body is None:
+        response = getattr(exc, "response", None)
+        if response is not None:
+            try:
+                body = response.text
+            except Exception:
+                body = None
+    if body is None:
+        return None
+
+    if isinstance(body, (dict, list)):
+        from obsidian_ai_hub.utils.execution_logger import mask_sensitive_dict
+
+        try:
+            body = json.dumps(mask_sensitive_dict(body), ensure_ascii=False)
+        except (TypeError, ValueError):
+            body = str(body)
+    else:
+        body = str(body)
+
+    summary = " ".join(_redact_secrets(body).split())
+    if len(summary) > _MAX_ERROR_BODY_CHARS:
+        summary = summary[:_MAX_ERROR_BODY_CHARS] + "...[truncated]"
+    return summary or None
+
+
+def _llm_error_diagnostics(
+    exc: BaseException,
+    *,
+    provider: Optional[str] = None,
+    model: Optional[str] = None,
+    attempt: Optional[int] = None,
+    max_attempts: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Build the persisted failure diagnostics for one LLM call attempt.
+
+    Only non-secret operational data is included: provider/model, HTTP status,
+    the SDK request ID, the attempt number and a redacted response-body
+    summary, so the provider can be contacted with a concrete request.
     """
-    network_error_types = (
-        TimeoutError,
-        ConnectionError,
-        OSError,
-    )
-    return isinstance(exc, network_error_types)
+    return {
+        "provider": provider,
+        "model": model,
+        "error_kind": _classify_llm_error(exc),
+        "http_status": _http_status_code(exc),
+        "request_id": _extract_request_id(exc),
+        "attempt": attempt,
+        "max_attempts": max_attempts,
+        "response_body": _safe_response_body_summary(exc),
+    }
+
+
+def _retry_delay(
+    attempt: int,
+    *,
+    initial_delay: float,
+    max_delay: float,
+    jitter_ratio: float,
+    error_kind: str,
+) -> float:
+    """Exponential backoff with a cap and random jitter."""
+    base = initial_delay * (2 ** (attempt - 1))
+    if error_kind == "rate_limit":
+        base *= _RATE_LIMIT_DELAY_MULTIPLIER
+    delay = min(max_delay, base)
+    if jitter_ratio > 0:
+        delay = min(max_delay, delay + random.uniform(0, delay * jitter_ratio))
+    return delay
 
 
 def _with_exponential_backoff(
-    func, *, max_attempts: int = 3, initial_delay: float = 1.0
+    func,
+    *,
+    max_attempts: int | None = None,
+    initial_delay: float | None = None,
+    max_delay: float | None = None,
+    jitter_ratio: float | None = None,
+    provider: str | None = None,
+    model: str | None = None,
 ):
+    """Run ``func`` with bounded exponential backoff for transient LLM errors.
+
+    Retries provider 5xx errors (``InternalServerError``), 429 rate limits,
+    connection timeouts and connection failures.  Non-transient errors are
+    re-raised immediately.  Each retry is logged with the provider, model,
+    error kind, HTTP status and request ID so a recurrence can be reported to
+    the provider with a concrete request identifier.
+    """
+    attempts_limit = (
+        max_attempts if max_attempts is not None else LLM_RETRY_MAX_ATTEMPTS
+    )
+    base_delay = (
+        initial_delay
+        if initial_delay is not None
+        else LLM_RETRY_INITIAL_DELAY_SECONDS
+    )
+    delay_cap = (
+        max_delay if max_delay is not None else LLM_RETRY_MAX_DELAY_SECONDS
+    )
+    jitter = jitter_ratio if jitter_ratio is not None else LLM_RETRY_JITTER_RATIO
+
     last_error: Exception | None = None
 
-    for attempt in range(1, max_attempts + 1):
+    for attempt in range(1, attempts_limit + 1):
+        token = _llm_attempt_state.set((attempt, attempts_limit))
         try:
             return func()
         except Exception as exc:
             last_error = exc
-            if attempt >= max_attempts or not _is_network_error(exc):
+            error_kind = _classify_llm_error(exc)
+            diagnostics = _llm_error_diagnostics(
+                exc,
+                provider=provider,
+                model=model,
+                attempt=attempt,
+                max_attempts=attempts_limit,
+            )
+
+            if attempt >= attempts_limit or error_kind not in _RETRYABLE_ERROR_KINDS:
+                logger.error(
+                    "LLM request failed after %d/%d attempt(s): provider=%s model=%s "
+                    "error_kind=%s http_status=%s request_id=%s response_body=%s error=%s",
+                    attempt,
+                    attempts_limit,
+                    provider,
+                    model,
+                    error_kind,
+                    diagnostics["http_status"],
+                    diagnostics["request_id"],
+                    diagnostics["response_body"],
+                    exc,
+                )
                 raise
 
-            delay = initial_delay * (2 ** (attempt - 1))
+            delay = _retry_delay(
+                attempt,
+                initial_delay=base_delay,
+                max_delay=delay_cap,
+                jitter_ratio=jitter,
+                error_kind=error_kind,
+            )
+            logger.warning(
+                "LLM request attempt %d/%d failed (%s); retrying in %.2fs: "
+                "provider=%s model=%s http_status=%s request_id=%s error=%s",
+                attempt,
+                attempts_limit,
+                error_kind,
+                delay,
+                provider,
+                model,
+                diagnostics["http_status"],
+                diagnostics["request_id"],
+                exc,
+            )
             time.sleep(delay)
+        finally:
+            _llm_attempt_state.reset(token)
 
     if last_error is not None:
         raise last_error
@@ -373,7 +647,19 @@ def _logged_invoke(
         )
         return message, call_id
     except Exception as e:
-        execution_logger.fail_llm_call(call_id, e, tool_calls=tool_calls)
+        attempt, max_attempts = _llm_attempt_state.get()
+        execution_logger.fail_llm_call(
+            call_id,
+            e,
+            tool_calls=tool_calls,
+            diagnostics=_llm_error_diagnostics(
+                e,
+                provider=provider,
+                model=model,
+                attempt=attempt,
+                max_attempts=max_attempts,
+            ),
+        )
         raise
 
 
@@ -447,7 +733,19 @@ async def _logged_ainvoke(
         )
         return message, call_id
     except Exception as e:
-        execution_logger.fail_llm_call(call_id, e, tool_calls=tool_calls)
+        attempt, max_attempts = _llm_attempt_state.get()
+        execution_logger.fail_llm_call(
+            call_id,
+            e,
+            tool_calls=tool_calls,
+            diagnostics=_llm_error_diagnostics(
+                e,
+                provider=provider,
+                model=model,
+                attempt=attempt,
+                max_attempts=max_attempts,
+            ),
+        )
         raise
 
 
@@ -557,7 +855,18 @@ async def _logged_astream(
             tool_calls=tool_calls,
         )
     except Exception as exc:
-        execution_logger.fail_llm_call(call_id, exc)
+        attempt, max_attempts = _llm_attempt_state.get()
+        execution_logger.fail_llm_call(
+            call_id,
+            exc,
+            diagnostics=_llm_error_diagnostics(
+                exc,
+                provider=provider,
+                model=model,
+                attempt=attempt,
+                max_attempts=max_attempts,
+            ),
+        )
         raise
 
 
@@ -599,7 +908,7 @@ def generate_llm_response(
         logger.info(f"LLM response: {message}")
         return _content_to_text(message.content)
 
-    return _with_exponential_backoff(_call)
+    return _with_exponential_backoff(_call, provider=provider, model=model)
 
 
 def generate_llm_response_with_tools(
@@ -661,7 +970,9 @@ def generate_llm_response_with_tools(
                 prompt,
             )
 
-        ai_msg, call_id = _with_exponential_backoff(_call)
+        ai_msg, call_id = _with_exponential_backoff(
+            _call, provider=provider, model=model
+        )
         messages.append(ai_msg)
 
         tool_calls = getattr(ai_msg, "tool_calls", None)
@@ -714,7 +1025,9 @@ def generate_llm_response_with_tools(
             llm, messages, provider, model, temperature, max_tokens, prompt
         )
 
-    final_ai_msg, _ = _with_exponential_backoff(_final_call)
+    final_ai_msg, _ = _with_exponential_backoff(
+        _final_call, provider=provider, model=model
+    )
     return _content_to_text(final_ai_msg.content)
 
 

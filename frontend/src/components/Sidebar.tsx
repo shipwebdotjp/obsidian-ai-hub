@@ -1,18 +1,18 @@
 import { useEffect, useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
-import { getUnreadNotificationCount, listHitlRuns } from "../api/client";
+import { listHitlRuns } from "../api/client";
 import { ROUTES } from "../constants/routes";
 
 interface SidebarProps {
   open: boolean;
   onClose: () => void;
   id?: string;
+  unreadCount: number | null;
 }
 
-export default function Sidebar({ open, onClose, id }: SidebarProps) {
+export default function Sidebar({ open, onClose, id, unreadCount }: SidebarProps) {
   const location = useLocation();
   const [pendingCount, setPendingCount] = useState<number | null>(null);
-  const [unreadCount, setUnreadCount] = useState<number | null>(null);
   const linkClass = ({ isActive }: { isActive: boolean }) =>
     `block rounded px-3 py-2 text-sm ${
       isActive ? "bg-slate-900 text-white" : "text-slate-700 hover:bg-slate-200"
@@ -36,12 +36,6 @@ export default function Sidebar({ open, onClose, id }: SidebarProps) {
       .catch(() => {
         // Keep the current badge value; auth gating happens in App.
       });
-
-    getUnreadNotificationCount()
-      .then((res) => {
-        if (!cancelled) setUnreadCount(res.unread_count);
-      })
-      .catch(() => {});
 
     return () => {
       cancelled = true;

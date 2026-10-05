@@ -413,6 +413,17 @@ export function markNotificationAsRead(
   );
 }
 
+export interface NotificationMarkAllReadResponse {
+  updated_count: number;
+}
+
+export function markAllNotificationsAsRead(): Promise<NotificationMarkAllReadResponse> {
+  return request<NotificationMarkAllReadResponse>(
+    "/api/v1/notifications/read-all",
+    { method: "POST" },
+  );
+}
+
 export function composeDesignerWorkflow(
   requirement: string,
   signal?: AbortSignal,

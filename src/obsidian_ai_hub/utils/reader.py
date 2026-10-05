@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 from obsidian_ai_hub.utils import config
 
 
@@ -32,9 +34,13 @@ def get_daily_note_content(date):
 def get_weekly_note_path(date):
     """
     指定された日付の週次ノートのパスを返す
+
+    月フォルダは基準日ではなく当該 ISO 週の月曜日の月を使う。
+    年とファイル名は ISO 年・ISO 週番号のまま維持する。
     """
-    iso_year, iso_week, _ = date.isocalendar()
-    month = date.strftime("%m")
+    iso_year, iso_week, iso_weekday = date.isocalendar()
+    monday = date - timedelta(days=iso_weekday - 1)
+    month = monday.strftime("%m")
     weekly_dir = config.DAILY_PATH / str(iso_year) / month
     weekly_file = weekly_dir / f"{iso_year}-W{iso_week:02d}.md"
     return weekly_file

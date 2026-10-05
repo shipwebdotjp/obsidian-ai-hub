@@ -340,6 +340,59 @@ def test_isolated_backend_scenario_contract(tmp_path, monkeypatch):
     assert res.json()["total"] == 1
 
 
+def test_mark_all_notifications_read_contract(tmp_path, monkeypatch):
+    """Contract: read-all marks only unread rows, preserves read timestamps, is idempotent."""
+    test_db = tmp_path / "test_memory.sqlite3"
+    monkeypatch.setenv("MEMORY_SQLITE_PATH", str(test_db))
+
+    from fastapi.testclient import TestClient
+    from obsidian_ai_hub.web.app import create_app
+    from obsidian_ai_hub.notifications.store import (
+        create_inbox_notification,
+        get_inbox_notification,
+    )
+
+    app = create_app(host="127.0.0.1", port=0, token="test_token")
+    client = TestClient(app, headers={"Authorization": "Bearer test_token"})
+
+    def make_notification(title: str, target_id: str) -> str:
+        return create_inbox_notification(
+            NotificationEvent(
+                event_type="workflow",
+                target_id=target_id,
+                relative_link=f"/workflows/runs/{target_id}",
+                category="action_required",
+                title=title,
+                body="body",
+            )
+        )
+
+    first_id = make_notification("first", "run_1")
+    second_id = make_notification("second", "run_2")
+
+    # Mark the first as read individually so its timestamp must survive read-all.
+    res = client.post(f"/api/v1/notifications/{first_id}/read")
+    assert res.status_code == 200
+    original_read_at = res.json()["read_at"]
+    assert original_read_at is not None
+
+    # read-all updates only the remaining unread notification.
+    res = client.post("/api/v1/notifications/read-all")
+    assert res.status_code == 200
+    assert res.json()["updated_count"] == 1
+
+    assert get_inbox_notification(first_id)["read_at"] == original_read_at
+    assert get_inbox_notification(second_id)["read_at"] is not None
+
+    res = client.get("/api/v1/notifications/unread-count")
+    assert res.json()["unread_count"] == 0
+
+    # Re-running is a successful no-op.
+    res = client.post("/api/v1/notifications/read-all")
+    assert res.status_code == 200
+    assert res.json()["updated_count"] == 0
+
+
 def test_notification_api_endpoints(tmp_path, monkeypatch):
     test_db = tmp_path / "test_memory.sqlite3"
     monkeypatch.setenv("MEMORY_SQLITE_PATH", str(test_db))
