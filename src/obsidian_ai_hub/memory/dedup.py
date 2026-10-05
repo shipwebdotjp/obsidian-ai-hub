@@ -308,6 +308,7 @@ def perform_dedup_assessment_llm(
                         "similarity_score": best_score,
                         "reason": "LLM response was invalid or failed validation checks",
                         "failure_kind": "response_invalid",
+                        "reassessment_required": True,
                     }
 
         except Exception as exc:
@@ -326,4 +327,94 @@ def perform_dedup_assessment_llm(
                     "similarity_score": best_score,
                     "reason": f"Failed to get or parse LLM response: {str(exc)}",
                     "failure_kind": failure_kind,
+                    "reassessment_required": True,
                 }
+
+
+def assess_and_persist_candidate(candidate_id: str, embedder=None) -> dict:
+    """Run dedup + LLM assessment for one candidate and persist the result.
+
+    Reloads the candidate and all approved memories so the assessment is based
+    on full rows (not a creation-time snapshot). Persists ``dedup_suggestions``,
+    ``dedup_assessment`` and ``updated_at`` in a single row update guarded by
+    ``status = 'candidate'``. A failed LLM assessment is persisted with
+    ``reassessment_required=True`` so monthly maintenance retries it.
+
+    Returns {"found": bool, "assessed": bool, "assessment": dict | None}.
+    Raises ValueError if the memory does not exist or is not a candidate.
+    """
+    from obsidian_ai_hub.database import get_db_connection
+    from obsidian_ai_hub.memory.models import (
+        get_current_timestamp,
+        serialize_memory,
+    )
+    from obsidian_ai_hub.memory.store import load_all_memories, log_memory_event
+
+    all_memories = load_all_memories()
+    cand = next(
+        (m for m in all_memories if m.get("memory_id") == candidate_id), None
+    )
+    if cand is None:
+        raise ValueError(f"Candidate memory not found: {candidate_id}")
+    if cand.get("status") != "candidate":
+        raise ValueError(
+            f"Memory {candidate_id} is not a candidate "
+            f"(current: {cand.get('status')})"
+        )
+
+    approved_mems = [m for m in all_memories if m.get("status") == "approved"]
+    suggestions = run_deduplication(cand, approved_mems, embedder=embedder)
+    cand["dedup_suggestions"] = suggestions
+    if suggestions:
+        perform_dedup_assessment_llm([cand], approved_mems)
+        assessment = cand.get("dedup_assessment") or {}
+        if assessment.get("decision") in ("merge", "supersede", "new"):
+            assessment["reassessment_required"] = False
+            assessment["reassessment_reason"] = None
+        else:
+            assessment["reassessment_required"] = True
+    else:
+        cand["dedup_assessment"] = {
+            "decision": "new",
+            "reason": "類似・重複する承認済み記憶が見つかりませんでした。",
+            "reassessment_required": False,
+        }
+    cand["updated_at"] = get_current_timestamp()
+
+    db_row = serialize_memory(cand)
+    conn = get_db_connection()
+    try:
+        with conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE memories SET dedup_suggestions = ?, dedup_assessment = ?, "
+                "updated_at = ? WHERE memory_id = ? AND status = 'candidate'",
+                (
+                    db_row.get("dedup_suggestions"),
+                    db_row.get("dedup_assessment"),
+                    db_row.get("updated_at"),
+                    candidate_id,
+                ),
+            )
+            if cursor.rowcount == 0:
+                raise ValueError(
+                    f"Candidate {candidate_id} is no longer a candidate"
+                )
+            log_memory_event(
+                event_type="dedup_assessed",
+                memory_id=candidate_id,
+                previous_status="candidate",
+                new_status="candidate",
+                reason="個別候補の重複判定を評価・保存しました",
+                conn=conn,
+                actor="system",
+            )
+    finally:
+        conn.close()
+
+    return {
+        "found": True,
+        "assessed": True,
+        "assessment": cand.get("dedup_assessment"),
+        "suggestions": cand.get("dedup_suggestions"),
+    }

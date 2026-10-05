@@ -297,6 +297,7 @@ def test_reconsolidation_with_existing_consolidated_candidate(clean_memory_env):
 
 def test_agent_memory_propose_triggers_consolidation(clean_memory_env):
     target = _make_mem("mem_target_agent", status="approved", content="UIはダークモードを好む")
+    target["memory_key"] = "dark-mode-ui"
     memory.save_all_memories([target])
 
     trusted_ctx = {
@@ -319,10 +320,11 @@ def test_agent_memory_propose_triggers_consolidation(clean_memory_env):
 
     from obsidian_ai_hub.memory.agent_tools import create_memory_candidate
 
-    with patch("obsidian_ai_hub.memory.consolidation.perform_dedup_assessment_llm", side_effect=set_assessment):
+    with patch("obsidian_ai_hub.memory.dedup.perform_dedup_assessment_llm", side_effect=set_assessment):
         res1 = create_memory_candidate(
             content="Web UIはダークモードを標準にする",
             kind="preference",
+            memory_key="dark-mode-ui",
             trusted_ctx=trusted_ctx,
         )
         assert res1["status"] == "candidate_created"
@@ -338,6 +340,7 @@ def test_agent_memory_propose_triggers_consolidation(clean_memory_env):
             res2 = create_memory_candidate(
                 content="開発ツールのUIもダークモードを使う",
                 kind="preference",
+                memory_key="dark-mode-ui",
                 trusted_ctx=trusted_ctx,
             )
             assert res2["status"] == "candidate_created"
@@ -351,3 +354,95 @@ def test_agent_memory_propose_triggers_consolidation(clean_memory_env):
     ]
     assert len(active_candidates) == 1
     assert active_candidates[0]["content"] == "Web UIおよび開発ツールのUIはダークモードを標準にする"
+
+
+def _seed_race_group(target_id: str, cand_ids: list[str]):
+    target = _make_mem(target_id, status="approved", content="毎朝ストレッチをする")
+    memory.save_all_memories([target])
+
+    cands = [
+        _make_mem(cid, status="candidate", content=f"候補の内容 {cid}", target_id=target_id, decision="merge")
+        for cid in cand_ids
+    ]
+    memory.save_all_memories([target] + cands)
+    return target
+
+
+def _race_llm_response(target_id: str) -> str:
+    return json.dumps({
+        "decision": "merge",
+        "target_memory_id": target_id,
+        "integrated_content": "統合された本文",
+        "reason": "統合のテスト",
+    })
+
+
+def test_consolidate_persists_reassessment_without_group(clean_memory_env):
+    target = _make_mem("mem_target_persist", status="approved", content="元の内容")
+    memory.save_all_memories([target])
+
+    cand1 = _make_mem("cand_p1", status="candidate", content="候補1の内容", target_id="mem_target_persist", decision="merge")
+    cand2 = _make_mem("cand_p2", status="candidate", content="候補2の内容", decision="new")
+    memory.save_all_memories([target, cand1, cand2])
+
+    # Break all similarity with the target after the assessment was saved.
+    conn = memory.get_db_connection()
+    try:
+        with conn:
+            conn.execute(
+                "UPDATE memories SET content = ?, memory_key = ? WHERE memory_id = ?",
+                ("まったく無関係の内容", "unrelated-key", "mem_target_persist"),
+            )
+    finally:
+        conn.close()
+
+    consolidated = consolidate_candidate_proposals()
+
+    assert consolidated == []
+    stored1 = memory.get_memory("cand_p1")
+    assert stored1["status"] == "candidate"
+    assert stored1["dedup_assessment"]["decision"] == "new"
+    assert stored1["dedup_assessment"].get("reassessment_required") is False
+    # The untouched candidate keeps its assessment.
+    assert memory.get_memory("cand_p2")["dedup_assessment"]["decision"] == "new"
+
+
+def test_consolidate_skips_group_when_target_edited_during_llm(clean_memory_env):
+    target_id = "mem_target_race_edit"
+    _seed_race_group(target_id, ["cand_race_e1", "cand_race_e2"])
+
+    def fake_llm(*args, **kwargs):
+        current = memory.get_memory(target_id)
+        memory.update_memory_fields(
+            target_id, {"content": current["content"] + "（追記）"}
+        )
+        return _race_llm_response(target_id)
+
+    with patch("obsidian_ai_hub.utils.llm_client.generate_llm_response", side_effect=fake_llm):
+        consolidated = consolidate_candidate_proposals()
+
+    assert consolidated == []
+    assert memory.get_memory("cand_race_e1")["status"] == "candidate"
+    assert memory.get_memory("cand_race_e2")["status"] == "candidate"
+    assert memory.get_memory(target_id)["content"].endswith("（追記）")
+
+
+def test_consolidate_skips_group_when_target_deleted_during_llm(clean_memory_env):
+    target_id = "mem_target_race_del"
+    _seed_race_group(target_id, ["cand_race_d1", "cand_race_d2"])
+
+    def fake_llm(*args, **kwargs):
+        conn = memory.get_db_connection()
+        try:
+            with conn:
+                conn.execute("DELETE FROM memories WHERE memory_id = ?", (target_id,))
+        finally:
+            conn.close()
+        return _race_llm_response(target_id)
+
+    with patch("obsidian_ai_hub.utils.llm_client.generate_llm_response", side_effect=fake_llm):
+        consolidated = consolidate_candidate_proposals()
+
+    assert consolidated == []
+    assert memory.get_memory("cand_race_d1")["status"] == "candidate"
+    assert memory.get_memory("cand_race_d2")["status"] == "candidate"

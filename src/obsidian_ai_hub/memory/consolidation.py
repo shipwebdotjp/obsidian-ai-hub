@@ -13,10 +13,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 from obsidian_ai_hub.database import get_db_connection
-from obsidian_ai_hub.memory.dedup import (
-    perform_dedup_assessment_llm,
-    run_deduplication,
-)
+from obsidian_ai_hub.memory.dedup import assess_and_persist_candidate
 from obsidian_ai_hub.memory.models import (
     MEMORY_COLUMNS,
     compute_memory_fingerprint,
@@ -138,25 +135,34 @@ def consolidate_candidate_proposals(
         if len(candidate_mems) < 2:
             return []
 
-        # Re-assess candidates that lack dedup_assessment or have fingerprint mismatches
-        candidates_to_assess = []
+        # Re-assess candidates that lack dedup_assessment or have fingerprint mismatches.
+        # Results are persisted per candidate so later steps (and retries) see
+        # the refreshed assessment instead of a stale in-memory copy.
         for cand in candidate_mems:
+            needs_reassessment = False
             assessment = cand.get("dedup_assessment")
             if not assessment or not isinstance(assessment, dict):
-                candidates_to_assess.append(cand)
+                needs_reassessment = True
             else:
                 target_id = assessment.get("target_memory_id")
                 target_fp = assessment.get("target_fingerprint")
                 if target_id and target_id in approved_map:
                     current_fp = compute_memory_fingerprint(approved_map[target_id])
                     if target_fp != current_fp:
-                        candidates_to_assess.append(cand)
+                        needs_reassessment = True
 
-        if candidates_to_assess:
-            for c in candidates_to_assess:
-                sug = run_deduplication(c, approved_mems)
-                c["dedup_suggestions"] = sug
-            perform_dedup_assessment_llm(candidates_to_assess, approved_mems)
+            if needs_reassessment:
+                try:
+                    result = assess_and_persist_candidate(cand["memory_id"])
+                except Exception as exc:
+                    logger.warning(
+                        "Candidate reassessment failed for %s: %s",
+                        cand["memory_id"],
+                        exc,
+                    )
+                    continue
+                cand["dedup_suggestions"] = result["suggestions"]
+                cand["dedup_assessment"] = result["assessment"]
 
         # Group candidates by (scope, target_memory_id)
         groups: dict[tuple[str, str], list[dict]] = {}
@@ -178,6 +184,12 @@ def consolidate_candidate_proposals(
                 continue
 
             target_mem = approved_map[target_id]
+            # Snapshot the canonical memory for the optimistic lock below.
+            # The LLM synthesis takes time, so the canonical memory is
+            # re-validated inside the write transaction before any source
+            # candidate is rejected.
+            expected_target_fp = compute_memory_fingerprint(target_mem)
+            expected_target_updated_at = target_mem.get("updated_at")
             formatted_candidates = []
             for idx, c in enumerate(source_cands, 1):
                 c_str = f"=== 候補 {idx} ===\n"
@@ -362,6 +374,56 @@ def consolidate_candidate_proposals(
             # Save consolidated candidate & transition source candidates in single transaction
             try:
                 with conn:
+                    if decision in ("merge", "supersede"):
+                        from obsidian_ai_hub.memory.models import deserialize_memory
+                        from obsidian_ai_hub.memory.store import (
+                            _attach_people_to_memories,
+                        )
+
+                        # Optimistic lock on the canonical memory: re-read it
+                        # inside the write transaction. If it was edited,
+                        # merged, superseded, or deleted during the LLM
+                        # synthesis, skip this group without touching the
+                        # source candidates so they stay reviewable.
+                        cursor = conn.execute(
+                            "SELECT * FROM memories WHERE memory_id = ?",
+                            (target_id,),
+                        )
+                        fresh_row = cursor.fetchone()
+                        if fresh_row is None:
+                            logger.warning(
+                                "Candidate consolidation skipped for target %s (scope: %s): "
+                                "target was deleted during synthesis; keeping %d source candidates",
+                                target_id,
+                                scope,
+                                len(source_cands),
+                            )
+                            continue
+                        fresh_target = deserialize_memory(dict(fresh_row))
+                        _attach_people_to_memories(cursor, [fresh_target])
+                        if fresh_target.get("status") != "approved":
+                            logger.warning(
+                                "Candidate consolidation skipped for target %s (scope: %s): "
+                                "target status is now %r; keeping %d source candidates",
+                                target_id,
+                                scope,
+                                fresh_target.get("status"),
+                                len(source_cands),
+                            )
+                            continue
+                        if (
+                            fresh_target.get("updated_at") != expected_target_updated_at
+                            or compute_memory_fingerprint(fresh_target) != expected_target_fp
+                        ):
+                            logger.warning(
+                                "Candidate consolidation skipped for target %s (scope: %s): "
+                                "target changed during synthesis; keeping %d source candidates",
+                                target_id,
+                                scope,
+                                len(source_cands),
+                            )
+                            continue
+
                     db_row = serialize_memory(consolidated_cand)
                     columns = ", ".join(MEMORY_COLUMNS)
                     placeholders = ", ".join("?" for _ in MEMORY_COLUMNS)

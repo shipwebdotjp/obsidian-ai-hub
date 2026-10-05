@@ -275,6 +275,28 @@ def test_create_candidate_stability_always_tentative():
     assert cand["stability"] == "tentative"
 
 
+def test_create_single_candidate_persists_assessment_on_llm_failure():
+    _reset_db()
+    save_all_memories([
+        _make_approved("a_keyfail", "承認済みのコーヒーの好み", memory_key="coffee-taste")
+    ])
+    with patch(
+        "obsidian_ai_hub.utils.llm_client.generate_llm_response",
+        return_value=json.dumps({"unexpected": "shape"}),
+    ):
+        res = create_memory_candidate(
+            content="別のコーヒーの好み",
+            kind="preference",
+            memory_key="coffee-taste",
+            trusted_ctx=_trusted_ctx(),
+        )
+    assert res["status"] == "candidate_created"
+    cand = memory.get_memory(res["memory_id"])
+    assert cand["status"] == "candidate"
+    assert cand["dedup_assessment"]["decision"] == "failed"
+    assert cand["dedup_assessment"]["reassessment_required"] is True
+
+
 # ---------------------------------------------------------------------------
 # registry: resolve_tools_with_context + LLM-facing validation
 # ---------------------------------------------------------------------------
