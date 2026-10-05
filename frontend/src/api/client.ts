@@ -9,6 +9,7 @@ import type {
   MemoryDetail,
   MemoryListResponse,
   EditPayload,
+  RenewPayload,
   DeleteResponse,
   BatchDeleteRequest,
   BatchDeleteResponse,
@@ -413,6 +414,19 @@ export function markNotificationAsRead(
   );
 }
 
+export function renewMemory(
+  memoryId: string,
+  payload: RenewPayload,
+): Promise<MemoryDetail> {
+  return request<MemoryDetail>(
+    `/api/v1/memories/${encodeURIComponent(memoryId)}/renew`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
 export interface NotificationMarkAllReadResponse {
   updated_count: number;
 }
@@ -436,6 +450,13 @@ export function composeDesignerWorkflow(
   });
 }
 
+
+export function reassessMemory(memoryId: string): Promise<MemoryDetail> {
+  return request<MemoryDetail>(
+    `/api/v1/memories/${encodeURIComponent(memoryId)}/reassess`,
+    { method: "POST" },
+  );
+}
 
 export function resolveMemory(
   memoryId: string,

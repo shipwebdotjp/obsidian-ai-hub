@@ -51,11 +51,14 @@ from obsidian_ai_hub.web.services.memory import (
     get_memory,
     get_memory_options,
     list_memories,
+    reassess_candidate_memory,
+    renew_memory,
     render_copilot_profile,
     resolve_memory,
     review_memory,
     update_memory,
 )
+from obsidian_ai_hub.memory.review import ReassessConflictError
 from obsidian_ai_hub.web.services.people import (
     AliasConflictError,
     AssignmentConflictError,

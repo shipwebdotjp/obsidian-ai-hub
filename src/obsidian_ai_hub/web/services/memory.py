@@ -129,3 +129,11 @@ def get_memory_options() -> dict:
 
 def render_copilot_profile() -> list[str]:
     return memory.render_copilot_profile()
+
+
+def reassess_candidate_memory(memory_id: str) -> dict:
+    return memory.reassess_candidate_memory(memory_id)
+
+
+def renew_memory(memory_id: str, payload: dict) -> dict:
+    return memory.renew_memory(memory_id, payload)

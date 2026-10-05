@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -8,6 +9,7 @@ from obsidian_ai_hub.database import get_db_connection
 from obsidian_ai_hub.memory.models import (
     MEMORY_COLUMNS,
     DedupReassessmentRequiredError,
+    _validate_date_str,
     _validate_edit_payload,
     coerce_injection_mode_for_approval,
     compute_memory_fingerprint,
@@ -25,6 +27,185 @@ from obsidian_ai_hub.memory.projection import project_approved_memories
 from obsidian_ai_hub.retrieval import memory_adapter as _retrieval_sync
 
 logger = logging.getLogger(__name__)
+
+_REASSESSING_IDS: set[str] = set()
+_REASSESSING_LOCK = threading.Lock()
+
+
+class ReassessConflictError(Exception):
+    """Raised when reassessment is already running for a candidate memory."""
+    pass
+
+
+def reassess_candidate_memory(memory_id: str) -> dict:
+    """
+    Re-assess a candidate memory using LLM dedup assessment.
+
+    - Rejects concurrent calls using _REASSESSING_IDS.
+    - Restricted to candidate memories that are not clean 'ready'.
+    - Updates proposals and target fingerprints without auto-applying merges/replacements.
+    - Validates target status & fingerprint right before saving.
+    - Logs audit events: dedup_reassessment_requested, dedup_reassessment_succeeded/failed.
+    """
+    from obsidian_ai_hub.utils.embeddings import get_embedder
+    from obsidian_ai_hub.memory.dedup import run_deduplication, perform_dedup_assessment_llm
+    from obsidian_ai_hub.memory.store import load_all_memories, get_memory_events
+
+    with _REASSESSING_LOCK:
+        if memory_id in _REASSESSING_IDS:
+            raise ReassessConflictError("Reassessment operation already in progress for this memory")
+        _REASSESSING_IDS.add(memory_id)
+
+    try:
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM memories WHERE memory_id = ?", (memory_id,))
+            row = cursor.fetchone()
+            if row is None:
+                raise LookupError(f"Memory not found: {memory_id}")
+
+            cand = deserialize_memory(dict(row))
+            if cand.get("status") != "candidate":
+                raise ValueError(f"Memory {memory_id} is not a candidate (current status: {cand.get('status')})")
+
+            rev_state = cand.get("review_state") or "ready"
+            if rev_state == "ready":
+                raise ValueError("Candidate is already ready; reassessment is not applicable")
+
+            log_memory_event(
+                event_type="dedup_reassessment_requested",
+                memory_id=memory_id,
+                previous_status="candidate",
+                new_status="candidate",
+                reason="手動操作: 再判定リクエストを受理しました",
+                conn=conn,
+                actor="user",
+            )
+            conn.commit()
+            orig_updated_at = cand.get("updated_at")
+        finally:
+            conn.close()
+
+        embedder = get_embedder()
+        all_mems = load_all_memories()
+        approved_mems = [m for m in all_mems if m.get("status") == "approved"]
+
+        suggestions = run_deduplication(cand, approved_mems, embedder=embedder)
+        cand["dedup_suggestions"] = suggestions
+
+        if not suggestions:
+            cand["dedup_assessment"] = {
+                "decision": "new",
+                "reason": "再判定の結果、類似・重複する記憶が見つかりませんでした。",
+                "reassessment_required": False,
+            }
+        else:
+            perform_dedup_assessment_llm([cand], approved_mems)
+            assessment = cand.get("dedup_assessment") or {}
+            if assessment.get("decision") in ("merge", "supersede", "new"):
+                assessment["reassessment_required"] = False
+                assessment["reassessment_reason"] = None
+            else:
+                assessment["reassessment_required"] = True
+
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM memories WHERE memory_id = ?", (memory_id,))
+            fresh_cand_row = cursor.fetchone()
+            if fresh_cand_row is None:
+                raise LookupError(f"Memory not found: {memory_id}")
+            fresh_cand = deserialize_memory(dict(fresh_cand_row))
+            if fresh_cand.get("status") != "candidate":
+                raise ReassessConflictError(
+                    f"Candidate {memory_id} status changed during reassessment "
+                    f"(current: {fresh_cand.get('status')})"
+                )
+            if fresh_cand.get("updated_at") != orig_updated_at:
+                # Candidate was updated during the LLM window: discard LLM result,
+                # keep reassessment-required state and record audit reason.
+                cand = fresh_cand
+                mismatch_reason = "候補が判定処理中に更新されました"
+            else:
+                target_id = cand.get("dedup_assessment", {}).get("target_memory_id") if isinstance(cand.get("dedup_assessment"), dict) else None
+                target_fp = cand.get("dedup_assessment", {}).get("target_fingerprint") if isinstance(cand.get("dedup_assessment"), dict) else None
+                decision = cand.get("dedup_assessment", {}).get("decision") if isinstance(cand.get("dedup_assessment"), dict) else None
+
+                mismatch_reason = None
+                if decision in ("merge", "supersede") and target_id:
+                    cursor.execute("SELECT * FROM memories WHERE memory_id = ?", (target_id,))
+                    t_row = cursor.fetchone()
+                    if t_row is None:
+                        mismatch_reason = "対象記憶が存在しません"
+                    else:
+                        t_mem = deserialize_memory(dict(t_row))
+                        if t_mem.get("status") != "approved":
+                            mismatch_reason = "対象記憶が承認済み状態ではありません"
+                        else:
+                            current_fp = compute_memory_fingerprint(t_mem)
+                            if target_fp and current_fp != target_fp:
+                                mismatch_reason = "対象記憶が判定処理中に変更されました"
+
+            if mismatch_reason:
+                cand["dedup_assessment"] = {
+                    "decision": "failed",
+                    "reason": f"保存前の不一致検証失敗: {mismatch_reason}",
+                    "reassessment_required": True,
+                    "reassessment_reason": mismatch_reason,
+                    "failure_kind": "response_invalid",
+                }
+                event_type = "dedup_reassessment_failed"
+                event_reason = f"再判定保存直前の不一致検証失敗: {mismatch_reason}"
+            else:
+                if isinstance(cand.get("dedup_assessment"), dict) and cand.get("dedup_assessment", {}).get("decision") == "failed":
+                    event_type = "dedup_reassessment_failed"
+                    event_reason = cand.get("dedup_assessment", {}).get("reason") or "LLM再判定に失敗しました"
+                else:
+                    event_type = "dedup_reassessment_succeeded"
+                    event_reason = "再判定処理が正常に完了しました"
+
+            cand["updated_at"] = get_current_timestamp()
+
+            db_row = serialize_memory(cand)
+            with conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "UPDATE memories SET dedup_suggestions = ?, dedup_assessment = ?, "
+                    "updated_at = ? WHERE memory_id = ? AND status = 'candidate'",
+                    (
+                        db_row.get("dedup_suggestions"),
+                        db_row.get("dedup_assessment"),
+                        db_row.get("updated_at"),
+                        memory_id,
+                    ),
+                )
+                if cursor.rowcount == 0:
+                    raise ReassessConflictError(
+                        f"Candidate {memory_id} is no longer in candidate status"
+                    )
+                log_memory_event(
+                    event_type=event_type,
+                    memory_id=memory_id,
+                    previous_status="candidate",
+                    new_status="candidate",
+                    reason=event_reason,
+                    conn=conn,
+                    actor="system",
+                )
+
+            cursor.execute("SELECT * FROM memories WHERE memory_id = ?", (memory_id,))
+            fresh_row = cursor.fetchone()
+            if fresh_row is None:
+                raise LookupError(f"Memory not found: {memory_id}")
+            detail = deserialize_memory(dict(fresh_row))
+            detail["events"] = get_memory_events(memory_id)
+            return detail
+        finally:
+            conn.close()
+    finally:
+        with _REASSESSING_LOCK:
+            _REASSESSING_IDS.discard(memory_id)
 
 
 def _person_ids_from_people(people) -> list[str]:
@@ -77,6 +258,14 @@ def review_memory(
         old_snapshot = dict(target)
 
         if action == "approve":
+            if target.get("status") != "candidate":
+                logger.error(f"Cannot approve memory {memory_id} with status {target.get('status')}")
+                raise ValueError("Only candidates can be approved")
+            rev_state = target.get("review_state")
+            if rev_state != "ready":
+                logger.error(f"Cannot approve candidate {memory_id} in review_state {rev_state}")
+                raise ValueError(f"Direct approval is only allowed for 'ready' candidates (current: {rev_state})")
+
             target["status"] = "approved"
             target["reviewed_by"] = "user"
             target["reviewed_at"] = timestamp_now
@@ -142,6 +331,112 @@ def review_memory(
     return True
 
 
+def renew_memory(memory_id: str, payload: dict) -> dict:
+    """
+    Reactivate an expired memory by setting status='approved' and updating review dates.
+
+    - Memory must have status='expired'.
+    - review_due_at is required and must be in the future (> today JST).
+    - valid_until (if set) must be in the future (> today JST).
+    - Writes changes, logs 'renewed' audit event, syncs retrieval index & approved.md projection.
+    """
+    from datetime import timezone
+    content = payload.get("content")
+    review_due_at = payload.get("review_due_at")
+    valid_until_present = "valid_until" in payload
+    valid_until = payload.get("valid_until")
+    reason = payload.get("reason") or "手動操作: 有効期限・定期確認日の更新による再承認"
+
+    today = datetime.now(timezone(timedelta(hours=9))).strftime("%Y-%m-%d")
+    if not review_due_at or not isinstance(review_due_at, str):
+        raise ValueError("review_due_at is required")
+    _validate_date_str(review_due_at, "review_due_at")
+    if review_due_at <= today:
+        raise ValueError("review_due_at must be in the future")
+
+    if valid_until_present and valid_until is not None:
+        _validate_date_str(valid_until, "valid_until")
+        if valid_until <= today:
+            raise ValueError("valid_until must be in the future")
+
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM memories WHERE memory_id = ?", (memory_id,))
+        row = cursor.fetchone()
+        if row is None:
+            raise LookupError(f"Memory not found: {memory_id}")
+
+        target = deserialize_memory(dict(row))
+        if target.get("status") != "expired":
+            raise ValueError(f"Only expired memories can be renewed (current status: {target.get('status')})")
+
+        timestamp_now = get_current_timestamp()
+        old_snapshot = dict(target)
+
+        if not valid_until_present:
+            valid_until = target.get("valid_until")
+
+        changes = {
+            "status": {"before": "expired", "after": "approved"},
+            "review_due_at": {"before": target.get("review_due_at"), "after": review_due_at},
+            "valid_until": {"before": target.get("valid_until"), "after": valid_until},
+        }
+
+        if content and content.strip() and content != target.get("content"):
+            changes["content"] = {"before": target.get("content"), "after": content}
+            target["content"] = content
+
+        target["status"] = "approved"
+        target["review_due_at"] = review_due_at
+        target["valid_until"] = valid_until
+        target["reviewed_by"] = "user"
+        target["reviewed_at"] = timestamp_now
+        target["updated_at"] = timestamp_now
+        coerce_injection_mode_for_approval(target)
+
+        prepared = _retrieval_sync.prepare_many({memory_id: target})
+
+        try:
+            with conn:
+                db_row = serialize_memory(target)
+                set_clause = ", ".join(
+                    f"{col} = ?" for col in MEMORY_COLUMNS if col != "memory_id"
+                )
+                values = [
+                    db_row.get(col) for col in MEMORY_COLUMNS if col != "memory_id"
+                ] + [memory_id]
+                conn.execute(
+                    f"UPDATE memories SET {set_clause} WHERE memory_id = ?", values
+                )
+
+                log_memory_event(
+                    event_type="renewed",
+                    memory_id=memory_id,
+                    previous_status="expired",
+                    new_status="approved",
+                    changes=changes,
+                    reason=reason,
+                    conn=conn,
+                    actor="user",
+                )
+                _retrieval_sync.apply_many_catalog_write(conn, prepared)
+        except Exception:
+            _retrieval_sync.restore_many({memory_id: old_snapshot})
+            raise
+
+        cursor.execute("SELECT * FROM memories WHERE memory_id = ?", (memory_id,))
+        fresh_row = cursor.fetchone()
+        detail = deserialize_memory(dict(fresh_row))
+        from obsidian_ai_hub.memory.store import get_memory_events
+        detail["events"] = get_memory_events(memory_id)
+    finally:
+        conn.close()
+
+    project_approved_memories()
+    return detail
+
+
 def update_memory_fields(memory_id: str, fields: dict) -> dict:
     """
     Web/API specific: edit EDITABLE_FIELDS and auto-approve.
@@ -163,6 +458,8 @@ def update_memory_fields(memory_id: str, fields: dict) -> dict:
         prev_status = target.get("status")
         if prev_status == "superseded":
             raise ValueError("Cannot edit a superseded memory")
+        if prev_status == "expired":
+            raise ValueError("Cannot edit an expired memory. Use renewal endpoint to reactivate it.")
         old_snapshot = dict(target)
         timestamp_now = get_current_timestamp()
 
@@ -299,9 +596,16 @@ def batch_review_memories(memory_ids: list, action: str) -> dict:
                 continue
             target = deserialize_memory(dict(row))
             prev_status = target.get("status")
-            if prev_status == "superseded":
-                skipped.append(memory_id)
-                continue
+
+            if action == "approve":
+                if prev_status != "candidate" or target.get("review_state") != "ready":
+                    skipped.append(memory_id)
+                    continue
+            elif action == "reject":
+                if prev_status != "candidate":
+                    skipped.append(memory_id)
+                    continue
+
             old_snapshots[memory_id] = dict(target)
             target["status"] = new_status
             target["reviewed_by"] = "user"

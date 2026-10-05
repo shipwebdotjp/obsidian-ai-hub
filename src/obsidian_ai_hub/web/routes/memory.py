@@ -95,6 +95,32 @@ def batch_review(
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@router.post("/memories/{memory_id}/reassess", response_model=schemas.MemoryDetail)
+def reassess_memory(memory_id: str, _=Depends(require_bearer_token)):
+    try:
+        return service.reassess_candidate_memory(memory_id)
+    except service.ReassessConflictError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/memories/{memory_id}/renew", response_model=schemas.MemoryDetail)
+def renew_memory(
+    memory_id: str,
+    body: schemas.RenewRequest,
+    _=Depends(require_bearer_token),
+):
+    try:
+        return service.renew_memory(memory_id, body.model_dump(exclude_unset=True))
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @router.post("/memories/{candidate_id}/resolve", response_model=schemas.ResolveResponse)
 def resolve_memory(
     candidate_id: str,

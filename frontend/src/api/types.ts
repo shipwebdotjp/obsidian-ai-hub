@@ -6,6 +6,13 @@ export type InjectionMode = "relevant" | "always";
 
 export type MemoryStatus = "candidate" | "approved" | "rejected" | "expired" | "superseded";
 
+export type CandidateReviewState =
+  | "ready"
+  | "merge_proposed"
+  | "supersede_proposed"
+  | "reassessment_required"
+  | "assessment_failed";
+
 export interface Evidence {
   path: string;
   quote?: string;
@@ -69,12 +76,21 @@ export interface Memory {
   contradicts: string[];
   dedup_suggestions: DedupSuggestion[];
   dedup_assessment?: DedupAssessment | null;
+  review_state?: CandidateReviewState | null;
+  expiration_reason?: "valid_until_expired" | "review_due_at_expired" | "evidence_stale" | "unknown" | null;
   provenance?: Record<string, unknown>;
   created_at?: string;
   updated_at?: string;
   reviewed_by?: string;
   reviewed_at?: string;
   people?: MemoryPersonRef[];
+}
+
+export interface RenewPayload {
+  content?: string | null;
+  review_due_at: string;
+  valid_until?: string | null;
+  reason?: string | null;
 }
 
 export interface MemoryDetail extends Memory {

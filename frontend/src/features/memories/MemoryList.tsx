@@ -21,6 +21,42 @@ export interface MemoryListProps {
   notify: (msg: string, kind?: "info" | "error") => void;
 }
 
+export function renderReviewBadge(m: Memory) {
+  if (m.status !== "candidate") return null;
+  const state = m.review_state || "ready";
+  const suggestionCount = (m.dedup_suggestions || []).length;
+  const suffix = suggestionCount > 0 ? ` (類似候補 ${suggestionCount}件)` : "";
+  if (state === "merge_proposed") {
+    return (
+      <p className="mt-1 text-xs font-medium text-blue-700">
+        マージ提案{suffix}
+      </p>
+    );
+  }
+  if (state === "supersede_proposed") {
+    return (
+      <p className="mt-1 text-xs font-medium text-purple-700">
+        置換提案{suffix}
+      </p>
+    );
+  }
+  if (state === "reassessment_required") {
+    return (
+      <p className="mt-1 text-xs font-medium text-amber-700">
+        再判定待ち{suffix}
+      </p>
+    );
+  }
+  if (state === "assessment_failed") {
+    return (
+      <p className="mt-1 text-xs font-medium text-rose-700">
+        自動判定失敗 (手動確認要)
+      </p>
+    );
+  }
+  return null;
+}
+
 export default function MemoryList({
   status,
   query,
@@ -223,23 +259,21 @@ export default function MemoryList({
                     )}
                     {m.created_at && <span>{formatDateTime(m.created_at)}</span>}
                   </div>
-                  {(m.dedup_suggestions || []).length > 0 && (
-                    <p className="mt-1 text-xs text-amber-700">
-                      重複/置換提案: {m.dedup_suggestions.map((s) => `${s.relation}→${s.target_memory_id}`).join(", ")}
-                    </p>
-                  )}
+                  {renderReviewBadge(m)}
                 </button>
               </div>
               {status === "candidate" && (
                 <div className="flex flex-col gap-1">
-                  <button
-                    type="button"
-                    onClick={() => quickAction(m.memory_id, "approve")}
-                    disabled={isProcessing.has(m.memory_id)}
-                    className="cursor-pointer rounded bg-emerald-600 px-2 py-0.5 text-xs text-white disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    {isProcessing.has(m.memory_id) ? "…" : "承認"}
-                  </button>
+                  {(m.review_state === "ready" || !m.review_state) && (
+                    <button
+                      type="button"
+                      onClick={() => quickAction(m.memory_id, "approve")}
+                      disabled={isProcessing.has(m.memory_id)}
+                      className="cursor-pointer rounded bg-emerald-600 px-2 py-0.5 text-xs text-white disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {isProcessing.has(m.memory_id) ? "…" : "承認"}
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => quickAction(m.memory_id, "reject")}

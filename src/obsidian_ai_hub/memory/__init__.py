@@ -77,9 +77,12 @@ from obsidian_ai_hub.memory.purposes import (
     resolve_policy,
 )
 from obsidian_ai_hub.memory.review import (
+    ReassessConflictError,
     batch_delete_memories,
     batch_review_memories,
     delete_memory,
+    reassess_candidate_memory,
+    renew_memory,
     resolve_memory,
     review_memory,
     update_memory_fields,
@@ -150,6 +153,9 @@ __all__ = [
     "DedupReassessmentRequiredError",
     "update_memory_fields",
     "update_target_with_candidate_data",
+    "reassess_candidate_memory",
+    "ReassessConflictError",
+    "renew_memory",
     # Test-only underscored helpers (kept for compatibility).
     "_extract_memory_source_content",
     "_load_daily_structured_record",

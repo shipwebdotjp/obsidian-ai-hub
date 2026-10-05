@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 import re
 from typing import Literal, Optional, Any
 
@@ -16,6 +16,13 @@ EDITABLE_FIELDS = (
     "stability",
     "injection_mode",
 )
+
+
+def _validate_date_str(value: str, field_name: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError(f"{field_name} must be a string in YYYY-MM-DD format")
+    datetime.strptime(value.strip(), "%Y-%m-%d")
+    return value.strip()
 
 ALLOWED_STABILITY = {"stable", "tentative", "explicitly_settled"}
 ALLOWED_STATUS = {"candidate", "approved", "rejected", "expired", "superseded"}
@@ -94,6 +101,23 @@ class Memory(BaseModel):
     contradicts: Optional[list[str]] = Field(default_factory=list)
     dedup_suggestions: Optional[list[DedupSuggestion]] = Field(default_factory=list)
     dedup_assessment: Optional[DedupAssessment] = None
+    review_state: Optional[
+        Literal[
+            "ready",
+            "merge_proposed",
+            "supersede_proposed",
+            "reassessment_required",
+            "assessment_failed",
+        ]
+    ] = None
+    expiration_reason: Optional[
+        Literal[
+            "valid_until_expired",
+            "review_due_at_expired",
+            "evidence_stale",
+            "unknown",
+        ]
+    ] = None
     provenance: Optional[dict] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
@@ -126,6 +150,45 @@ class MemoryListResponse(BaseModel):
 class ReviewRequest(BaseModel):
     action: Literal["approve", "reject", "edit"]
     new_content: Optional[str] = None
+
+
+class RenewRequest(BaseModel):
+    content: Optional[str] = None
+    review_due_at: str
+    valid_until: Optional[str] = None
+    reason: Optional[str] = None
+
+    @field_validator("review_due_at")
+    @classmethod
+    def _validate_future_review_due_at(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("review_due_at is required")
+        v = v.strip()
+        _validate_date_str(v, "review_due_at")
+        today = datetime.now(timezone(timedelta(hours=9))).strftime("%Y-%m-%d")
+        if v <= today:
+            raise ValueError("review_due_at must be in the future")
+        return v
+
+    @field_validator("valid_until")
+    @classmethod
+    def _validate_future_valid_until(cls, v: Optional[str]) -> Optional[str]:
+        if v is None or not v.strip():
+            return None
+        v = v.strip()
+        _validate_date_str(v, "valid_until")
+        today = datetime.now(timezone(timedelta(hours=9))).strftime("%Y-%m-%d")
+        if v <= today:
+            raise ValueError("valid_until must be in the future")
+        return v
+
+    @model_validator(mode="after")
+    def _validate_dates_order(self) -> "RenewRequest":
+        if self.valid_until:
+            today = datetime.now(timezone(timedelta(hours=9))).strftime("%Y-%m-%d")
+            if self.valid_until <= today:
+                raise ValueError("valid_until must be in the future")
+        return self
 
 
 class ReviewResponse(BaseModel):
@@ -161,6 +224,7 @@ class BatchReviewRequest(BaseModel):
 class BatchReviewResponse(BaseModel):
     updated: list[str]
     not_found: list[str]
+    skipped: list[str] = Field(default_factory=list)
     events: int
 
 

@@ -235,9 +235,10 @@ def test_batch_review_partial(loopback_client):
     )
     assert res.status_code == 200
     body = res.json()
-    assert set(body["updated"]) == {"mem_p1", "mem_p2"}
+    assert body["updated"] == ["mem_p1"]
+    assert body["skipped"] == ["mem_p2"]
     assert body["not_found"] == ["mem_missing"]
-    assert body["events"] == 2
+    assert body["events"] == 1
 
 
 def test_token_required_when_not_loopback():
@@ -437,6 +438,93 @@ def test_resolve_memory_validation_errors(loopback_client):
         json={"action": "invalid_action", "target_memory_id": "mem_target_3"},
     )
     assert res.status_code == 422  # Pydantic Validation Error for literal field
+
+
+def test_reassess_memory_endpoint(loopback_client):
+    # 1. 404 for unknown memory
+    res = loopback_client.post("/api/v1/memories/mem_unknown/reassess")
+    assert res.status_code == 404
+
+    # 2. 400 for non-candidate memory
+    _seed("mem_approved", status="approved")
+    res = loopback_client.post("/api/v1/memories/mem_approved/reassess")
+    assert res.status_code == 400
+
+    # 3. 400 for ready candidate memory
+    _seed("mem_ready_cand", status="candidate")
+    res = loopback_client.post("/api/v1/memories/mem_ready_cand/reassess")
+    assert res.status_code == 400
+
+    # 4. 200 for candidate needing reassessment
+    m_cand = _make_candidate("mem_reassess_cand", status="candidate", content="再判定対象内容")
+    m_cand["dedup_assessment"] = {
+        "decision": "merge",
+        "target_memory_id": "mem_target_nonexistent",
+        "reassessment_required": True,
+    }
+    memory.save_all_memories(memory.load_all_memories() + [m_cand])
+
+    res = loopback_client.post("/api/v1/memories/mem_reassess_cand/reassess")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["memory_id"] == "mem_reassess_cand"
+    assert "events" in body
+    event_types = [e["event_type"] for e in body["events"]]
+    assert "dedup_reassessment_requested" in event_types
+
+
+def test_renew_memory_endpoint(loopback_client):
+    from datetime import datetime, timezone, timedelta
+    future_date = (datetime.now(timezone(timedelta(hours=9))) + timedelta(days=30)).strftime("%Y-%m-%d")
+    past_date = "2020-01-01"
+
+    # 1. 404 for unknown memory
+    res = loopback_client.post(
+        "/api/v1/memories/mem_unknown/renew",
+        json={"review_due_at": future_date},
+    )
+    assert res.status_code == 404
+
+    # 2. 400 for non-expired memory (e.g. candidate / approved)
+    _seed("mem_cand_renew", status="candidate")
+    res = loopback_client.post(
+        "/api/v1/memories/mem_cand_renew/renew",
+        json={"review_due_at": future_date},
+    )
+    assert res.status_code == 400
+
+    # 3. 400 when review_due_at is past/today
+    _seed("mem_expired_1", status="expired")
+    res = loopback_client.post(
+        "/api/v1/memories/mem_expired_1/renew",
+        json={"review_due_at": past_date},
+    )
+    assert res.status_code in (400, 422)
+
+    # 4. Normal edit returns 400 when memory is expired
+    res = loopback_client.post(
+        "/api/v1/memories/mem_expired_1/edit",
+        json={"content": "new content"},
+    )
+    assert res.status_code == 400
+
+    # 5. 200 for expired memory with future review_due_at
+    res = loopback_client.post(
+        "/api/v1/memories/mem_expired_1/renew",
+        json={
+            "content": "renewed content",
+            "review_due_at": future_date,
+            "reason": "手動更新",
+        },
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["status"] == "approved"
+    assert body["content"] == "renewed content"
+    assert body["review_due_at"] == future_date
+
+    event_types = [e["event_type"] for e in body["events"]]
+    assert "renewed" in event_types
 
 
 def test_get_memory_options(loopback_client):

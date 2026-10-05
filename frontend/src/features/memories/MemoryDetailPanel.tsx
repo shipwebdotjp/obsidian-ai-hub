@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getApiErrorMessage } from "../../utils/error";
-import { getMemory, reviewMemory, resolveMemory, deleteMemory } from "../../api/client";
+import { getMemory, reviewMemory, resolveMemory, deleteMemory, reassessMemory, renewMemory } from "../../api/client";
 import type { MemoryDetail } from "../../api/types";
 import type { Memory } from "../../api/types";
 import MemoryEditForm from "./MemoryEditForm";
@@ -30,6 +30,10 @@ export default function MemoryDetailPanel({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [integratedContent, setIntegratedContent] = useState("");
   const [switchDate, setSwitchDate] = useState("");
+  const [renewReviewDueAt, setRenewReviewDueAt] = useState("");
+  const [renewValidUntil, setRenewValidUntil] = useState("");
+  const [renewContent, setRenewContent] = useState("");
+  const [renewReason, setRenewReason] = useState("");
   const fetchIdRef = useRef(0);
   const fetchedOnceRef = useRef(false);
 
@@ -53,6 +57,15 @@ export default function MemoryDetailPanel({
           setIntegratedContent("");
         }
         setSwitchDate(d.valid_from || "");
+        setRenewContent(d.content || "");
+        // Set a default future date (+180 days) for renewReviewDueAt (JST basis
+        // to match backend date comparison).
+        const nextDate = new Date();
+        nextDate.setDate(nextDate.getDate() + 180);
+        const jstDefault = new Date(nextDate.getTime() + 9 * 60 * 60 * 1000);
+        setRenewReviewDueAt(jstDefault.toISOString().slice(0, 10));
+        setRenewValidUntil(d.valid_until || "");
+        setRenewReason("");
 
         const targetIds = new Set<string>();
         (d.dedup_suggestions || []).forEach((s) => {
@@ -122,6 +135,43 @@ export default function MemoryDetailPanel({
       onChanged(updated);
     } catch (e) {
       const msg = getApiErrorMessage(e, "操作に失敗しました");
+      notify(msg, "error");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function handleRenew() {
+    if (detail?.memory_id !== memoryId) return;
+    setIsSubmitting(true);
+    try {
+      const updated = await renewMemory(memoryId, {
+        content: renewContent,
+        review_due_at: renewReviewDueAt,
+        valid_until: renewValidUntil || null,
+        reason: renewReason || null,
+      });
+      setDetail(updated);
+      notify(`${memoryId} を再有効化・承認しました`);
+      onChanged(updated);
+    } catch (e) {
+      const msg = getApiErrorMessage(e, "再有効化に失敗しました");
+      notify(msg, "error");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function handleReassess() {
+    if (detail?.memory_id !== memoryId) return;
+    setIsSubmitting(true);
+    try {
+      const updated = await reassessMemory(memoryId);
+      setDetail(updated);
+      notify(`${memoryId} の再判定が完了しました`);
+      onChanged(updated);
+    } catch (e) {
+      const msg = getApiErrorMessage(e, "再判定に失敗しました");
       notify(msg, "error");
     } finally {
       setIsSubmitting(false);
@@ -270,17 +320,114 @@ export default function MemoryDetailPanel({
         </>
       )}
 
+      {detail.status === "expired" && (
+        <div className="mt-4 rounded border border-rose-300 bg-rose-50 p-3 text-xs text-rose-900">
+          <div className="font-semibold text-rose-900 mb-1">
+            失効記憶 (Expired Memory) -
+            {detail.expiration_reason === "valid_until_expired" && " 有効期限切れ (valid_until)"}
+            {detail.expiration_reason === "review_due_at_expired" && " 定期確認期限切れ (review_due_at)"}
+            {detail.expiration_reason === "evidence_stale" && " 根拠情報鮮度低下 (180日以上経過)"}
+            {(detail.expiration_reason === "unknown" || !detail.expiration_reason) && " 失効 (理由不明)"}
+          </div>
+          <div className="text-rose-800 text-[11px] mb-3">
+            この記憶は失効状態です。本文を確認し、将来の定期確認予定日 (review_due_at) を設定して再承認・再有効化できます。
+          </div>
+
+          <div className="space-y-2 bg-white p-3 rounded border border-rose-200 text-slate-800">
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">本文の確認・編集:</label>
+              <textarea
+                value={renewContent}
+                onChange={(e) => setRenewContent(e.target.value)}
+                className="w-full rounded border border-slate-300 p-2 text-sm"
+                rows={3}
+              />
+            </div>
+            <div className="flex flex-wrap gap-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">定期確認予定日 (必須・将来日付):</label>
+                <input
+                  type="date"
+                  value={renewReviewDueAt}
+                  min={new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10)}
+                  onChange={(e) => setRenewReviewDueAt(e.target.value)}
+                  className="rounded border border-slate-300 px-2 py-1 text-sm bg-white"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">絶対有効期限 (任意・将来日付):</label>
+                <input
+                  type="date"
+                  value={renewValidUntil}
+                  min={new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10)}
+                  onChange={(e) => setRenewValidUntil(e.target.value)}
+                  className="rounded border border-slate-300 px-2 py-1 text-sm bg-white"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">再承認理由 (任意):</label>
+              <input
+                type="text"
+                value={renewReason}
+                onChange={(e) => setRenewReason(e.target.value)}
+                placeholder="例: 情報の再確認完了"
+                className="w-full rounded border border-slate-300 px-2 py-1 text-sm bg-white"
+              />
+            </div>
+
+            <button
+              type="button"
+              onClick={handleRenew}
+              disabled={
+                isSubmitting ||
+                !matching ||
+                !renewReviewDueAt ||
+                renewReviewDueAt <= new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10) ||
+                (renewValidUntil !== "" && renewValidUntil <= new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10))
+              }
+              className="mt-2 cursor-pointer rounded bg-emerald-700 px-3 py-1 text-xs text-white disabled:cursor-not-allowed disabled:opacity-50 font-medium"
+            >
+              {isSubmitting ? "処理中…" : "再有効化・再承認"}
+            </button>
+          </div>
+        </div>
+      )}
+
       {detail.status === "candidate" && isReassessmentRequired && (
         <div className="mt-4 rounded border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
-          <div className="font-semibold text-amber-900">再判定待ち (Re-assessment Required)</div>
+          <div className="flex items-center justify-between">
+            <div className="font-semibold text-amber-900">再判定待ち (Re-assessment Required)</div>
+            <button
+              type="button"
+              onClick={handleReassess}
+              disabled={isSubmitting || !matching}
+              className="cursor-pointer rounded bg-amber-700 px-2 py-1 text-xs text-white disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isSubmitting ? "処理中…" : "再判定実行"}
+            </button>
+          </div>
           <div className="mt-1 text-amber-800">
-            対象の既存記憶が更新されたか、判定時点の指紋(fingerprint)情報が存在しません。次回の月次メモリ保守（--memory-maintain）で最新状態から再判定されます。対象メモリを書き換える操作（マージ・置換・既存更新）は無効化されています。
+            対象の既存記憶が更新されたか、判定時点の指紋(fingerprint)情報が存在しません。手動で再判定を実行するか、定期保守で自動更新されます。対象メモリを書き換える操作（マージ・置換・既存更新）は無効化されています。
           </div>
           {detail.dedup_assessment?.reassessment_reason && (
             <div className="mt-1 text-[11px] text-amber-700">
               詳細: {detail.dedup_assessment.reassessment_reason}
             </div>
           )}
+        </div>
+      )}
+
+      {detail.status === "candidate" && !isReassessmentRequired && (detail.review_state === "merge_proposed" || detail.review_state === "supersede_proposed" || detail.review_state === "assessment_failed") && (
+        <div className="mt-2 flex justify-end">
+          <button
+            type="button"
+            onClick={handleReassess}
+            disabled={isSubmitting || !matching}
+            className="cursor-pointer rounded bg-indigo-600 px-2.5 py-1 text-xs text-white disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {isSubmitting ? "処理中…" : "再判定実行"}
+          </button>
         </div>
       )}
 
@@ -319,6 +466,11 @@ export default function MemoryDetailPanel({
                   />
                 </div>
 
+                <div className="mt-3 text-[11px] text-blue-800 space-y-1 bg-white/60 p-2 rounded border border-blue-100">
+                  <div>・<strong>マージ</strong>: 統合本文で既存記憶を更新し、候補を処理完了(却下)します。</div>
+                  <div>・<strong>新規として保存</strong>: 既存記憶を変更せず、候補を独立した新しい記憶として承認します。</div>
+                </div>
+
                 <div className="mt-3 flex gap-2 border-t border-blue-200 pt-3">
                   <button
                     type="button"
@@ -334,8 +486,12 @@ export default function MemoryDetailPanel({
                   </button>
                   <button
                     type="button"
-                    onClick={() => act("approve")}
-                    disabled={isSubmitting || !matching}
+                    onClick={() => {
+                      if (detail.dedup_assessment?.target_memory_id) {
+                        handleResolve("keep_both", detail.dedup_assessment.target_memory_id);
+                      }
+                    }}
+                    disabled={isSubmitting || !matching || !detail.dedup_assessment?.target_memory_id}
                     className="cursor-pointer rounded bg-slate-600 px-3 py-1 text-xs text-white disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     新規として保存
@@ -375,6 +531,11 @@ export default function MemoryDetailPanel({
                   />
                 </div>
 
+                <div className="mt-3 text-[11px] text-purple-800 space-y-1 bg-white/60 p-2 rounded border border-purple-100">
+                  <div>・<strong>後継として保存</strong>: 切替日で既存記憶を失効(superseded)とし、本候補を後継記憶として承認します。</div>
+                  <div>・<strong>新規として保存</strong>: 既存記憶を変更せず、本候補を独立した新しい記憶として承認します。</div>
+                </div>
+
                 <div className="mt-3 flex gap-2 border-t border-purple-200 pt-3">
                   <button
                     type="button"
@@ -390,8 +551,12 @@ export default function MemoryDetailPanel({
                   </button>
                   <button
                     type="button"
-                    onClick={() => act("approve")}
-                    disabled={isSubmitting || !matching}
+                    onClick={() => {
+                      if (detail.dedup_assessment?.target_memory_id) {
+                        handleResolve("keep_both", detail.dedup_assessment.target_memory_id);
+                      }
+                    }}
+                    disabled={isSubmitting || !matching || !detail.dedup_assessment?.target_memory_id}
                     className="cursor-pointer rounded bg-slate-600 px-3 py-1 text-xs text-white disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     新規として保存

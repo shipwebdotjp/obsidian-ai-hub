@@ -124,6 +124,71 @@ def serialize_memory(m: dict) -> dict:
     return db_row
 
 
+def get_expiration_reason(m: dict) -> str | None:
+    if m.get("status") != "expired":
+        return None
+
+    today = datetime.now(timezone(timedelta(hours=9))).strftime("%Y-%m-%d")
+    vu = m.get("valid_until")
+    if vu and vu <= today:
+        return "valid_until_expired"
+
+    rd = m.get("review_due_at")
+    if rd and rd <= today:
+        return "review_due_at_expired"
+
+    evidence_list = m.get("evidence") or []
+    latest_observed = None
+    for ev in evidence_list:
+        obs = ev.get("observed_at")
+        if obs:
+            obs_str = obs.strip()[:10]
+            if latest_observed is None or obs_str > latest_observed:
+                latest_observed = obs_str
+
+    if latest_observed:
+        try:
+            obs_dt = datetime.strptime(latest_observed, "%Y-%m-%d")
+            today_dt = datetime.strptime(today, "%Y-%m-%d")
+            if (today_dt - obs_dt).days >= 180:
+                return "evidence_stale"
+        except Exception:
+            logger.warning(
+                "Failed to parse evidence observed_at %r for memory %s",
+                latest_observed,
+                m.get("memory_id"),
+            )
+            return "unknown"
+
+    return "unknown"
+
+
+def compute_review_state(m: dict) -> str | None:
+    if m.get("status") != "candidate":
+        return None
+    assessment = m.get("dedup_assessment")
+    suggestions = m.get("dedup_suggestions") or []
+
+    if isinstance(assessment, dict):
+        if assessment.get("reassessment_required") is True:
+            return "reassessment_required"
+        decision = assessment.get("decision")
+        if decision in ("merge", "supersede") and not assessment.get("target_fingerprint"):
+            return "reassessment_required"
+        if decision == "failed" or assessment.get("failure_kind"):
+            return "assessment_failed"
+        if decision == "merge":
+            return "merge_proposed"
+        if decision == "supersede":
+            return "supersede_proposed"
+        if decision == "new":
+            return "ready"
+    elif suggestions:
+        return "reassessment_required"
+
+    return "ready"
+
+
 def deserialize_memory(row: dict) -> dict:
     m = dict(row)
     if "scope" not in m or not m["scope"]:
@@ -150,6 +215,9 @@ def deserialize_memory(row: dict) -> dict:
                     m[col],
                 )
                 m[col] = None
+
+    m["review_state"] = compute_review_state(m)
+    m["expiration_reason"] = get_expiration_reason(m)
     return m
 
 
