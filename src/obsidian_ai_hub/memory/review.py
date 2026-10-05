@@ -27,6 +27,17 @@ from obsidian_ai_hub.retrieval import memory_adapter as _retrieval_sync
 logger = logging.getLogger(__name__)
 
 
+def _person_ids_from_people(people) -> list[str]:
+    """Extract sorted-unique person_ids from an attached people list."""
+    ids: set[str] = set()
+    for p in people or []:
+        if isinstance(p, dict) and p.get("person_id"):
+            ids.add(p["person_id"])
+        elif isinstance(p, str) and p:
+            ids.add(p)
+    return sorted(ids)
+
+
 def review_memory(
     memory_id: str, action: str, new_content: Optional[str] = None
 ) -> bool:
@@ -410,7 +421,7 @@ def resolve_memory(
                     reassessment_needed = True
                     reassessment_reason = "対象メモリが存在しないか、承認済み状態ではありません"
                 else:
-                    _attach_people_to_memories(cursor, [target])
+                    _attach_people_to_memories(cursor, [target, cand])
                     assessment = cand.get("dedup_assessment")
                     if not isinstance(assessment, dict) or not assessment.get("target_fingerprint"):
                         reassessment_needed = True
@@ -530,12 +541,28 @@ def resolve_memory(
             elif action == "replace_existing":
                 # Save target state before update
                 before_target = dict(target)
+                before_person_ids = _person_ids_from_people(
+                    before_target.get("people")
+                )
 
                 # Update target with candidate data
                 target = update_target_with_candidate_data(
                     target, cand, reviewed_by="user"
                 )
                 coerce_injection_mode_for_approval(target)
+
+                # Replace target's people linkage with the candidate's.
+                # The candidate is rejected below, so without this sync a
+                # candidate-only person association would vanish from memory.
+                from obsidian_ai_hub.memory.store import (
+                    _attach_people_to_memories as _attach_people,
+                    set_memory_people as _set_people,
+                )
+
+                new_person_ids = _person_ids_from_people(cand.get("people"))
+                if new_person_ids != before_person_ids:
+                    _set_people(target_memory_id, new_person_ids, conn=conn)
+                    _attach_people(cursor, [target])
 
                 prepared = _retrieval_sync.prepare_many(
                     {target_memory_id: target, candidate_id: None}
@@ -564,6 +591,12 @@ def resolve_memory(
                     after_val = target.get(field)
                     if before_val != after_val:
                         changes_diff[field] = {"before": before_val, "after": after_val}
+                after_person_ids = _person_ids_from_people(target.get("people"))
+                if before_person_ids != after_person_ids:
+                    changes_diff["person_ids"] = {
+                        "before": before_person_ids,
+                        "after": after_person_ids,
+                    }
 
                 # Log event for target
                 log_memory_event(
@@ -620,6 +653,9 @@ def resolve_memory(
 
                 # Save target state before update
                 before_target = dict(target)
+                before_person_ids = _person_ids_from_people(
+                    before_target.get("people")
+                )
 
                 # Update target with candidate/integrated data
                 target["content"] = integrated_content
@@ -650,6 +686,21 @@ def resolve_memory(
                 target["reviewed_at"] = timestamp_now
                 coerce_injection_mode_for_approval(target)
 
+                # Union target and candidate people so a candidate-only person
+                # association survives the merge (the candidate is rejected below).
+                from obsidian_ai_hub.memory.store import (
+                    _attach_people_to_memories as _attach_people,
+                    set_memory_people as _set_people,
+                )
+
+                union_person_ids = sorted(
+                    set(before_person_ids)
+                    | set(_person_ids_from_people(cand.get("people")))
+                )
+                if union_person_ids != before_person_ids:
+                    _set_people(target_memory_id, union_person_ids, conn=conn)
+                    _attach_people(cursor, [target])
+
                 prepared = _retrieval_sync.prepare_many(
                     {target_memory_id: target, candidate_id: None}
                 )
@@ -677,6 +728,12 @@ def resolve_memory(
                     after_val = target.get(field)
                     if before_val != after_val:
                         changes_diff[field] = {"before": before_val, "after": after_val}
+                after_person_ids = _person_ids_from_people(target.get("people"))
+                if before_person_ids != after_person_ids:
+                    changes_diff["person_ids"] = {
+                        "before": before_person_ids,
+                        "after": after_person_ids,
+                    }
 
                 # Log event for target
                 log_memory_event(

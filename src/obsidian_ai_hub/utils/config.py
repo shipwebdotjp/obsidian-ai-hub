@@ -49,6 +49,7 @@ _APP_ENV_VARS = [
     "PERSON_MEMORY_EXTRACTOR_PROMPT_PATH",
     "MEMORY_AGENT_CONVERSATION_PROMPT_PATH",
     "MEMORY_AGENT_CONVERSATION_ENABLED",
+    "CANDIDATE_CONSOLIDATION_PROMPT_PATH",
     "MEMORY_RENDERER_PROMPT_PATH",
     "INBOX_TRANSCRIPT_CORRECTION_PROMPT_PATH",
     "INBOX_WEB_SUMMARY_PROMPT_PATH",
@@ -1003,6 +1004,17 @@ MEMORY_AGENT_CONVERSATION_PROMPT_PATH = _optional_path(
 if MEMORY_AGENT_CONVERSATION_PROMPT_PATH is None:
     MEMORY_AGENT_CONVERSATION_PROMPT_PATH = (
         BASE_DIR / "config" / "prompts" / "agent_memory_extract.md"
+    )
+
+CANDIDATE_CONSOLIDATION_PROMPT_PATH = _optional_path(
+    "CANDIDATE_CONSOLIDATION_PROMPT_PATH",
+    "memory",
+    "consolidation",
+    "prompt_path",
+)
+if CANDIDATE_CONSOLIDATION_PROMPT_PATH is None:
+    CANDIDATE_CONSOLIDATION_PROMPT_PATH = (
+        BASE_DIR / "config" / "prompts" / "candidate_consolidation.md"
     )
 
 _renderer_provider = _config_value("memory", "renderer", "provider")

@@ -1336,3 +1336,127 @@ def test_extract_memories_with_dedup_assessment(clean_memory_env):
             cand["dedup_assessment"]["integrated_content"]
             == "簡潔で自然な日本語の表現を好む。過度な励まし表現を避ける。"
         )
+
+
+def _seed_people_for_resolve(person_ids: list[str]):
+    conn = memory.get_db_connection()
+    try:
+        for pid in person_ids:
+            conn.execute(
+                "INSERT INTO people (person_id, display_name, normalized_name, vault_id) "
+                "VALUES (?, ?, ?, ?)",
+                (pid, pid, pid, "v1"),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _person_ids(mem: dict) -> list[str]:
+    return sorted(
+        p["person_id"] if isinstance(p, dict) else str(p)
+        for p in (mem.get("people") or [])
+    )
+
+
+def test_resolve_memory_merge_existing_unions_person_links(clean_memory_env):
+    _seed_people_for_resolve(["peo_a", "peo_b"])
+    target = {
+        "memory_id": "mem_person_merge_target",
+        "status": "approved",
+        "scope": "person",
+        "kind": "episode",
+        "memory_key": "person-key-merge",
+        "content": "A に関する記憶",
+        "people": [{"person_id": "peo_a", "display_name": "peo_a"}],
+        "created_at": "2026-07-14T10:00:00+09:00",
+        "updated_at": "2026-07-14T10:00:00+09:00",
+    }
+    cand = {
+        "memory_id": "mem_person_merge_cand",
+        "status": "candidate",
+        "scope": "person",
+        "kind": "episode",
+        "memory_key": "person-key-merge",
+        "content": "A と B に関する記憶",
+        "people": [
+            {"person_id": "peo_a", "display_name": "peo_a"},
+            {"person_id": "peo_b", "display_name": "peo_b"},
+        ],
+        "dedup_suggestions": [
+            {"target_memory_id": "mem_person_merge_target", "relation": "duplicate"}
+        ],
+        "dedup_assessment": {
+            "decision": "merge",
+            "target_memory_id": "mem_person_merge_target",
+            "target_fingerprint": memory.compute_memory_fingerprint(target),
+            "integrated_content": "A と B に関する統合記憶",
+        },
+        "created_at": "2026-07-14T10:00:00+09:00",
+        "updated_at": "2026-07-14T10:00:00+09:00",
+    }
+    memory.save_all_memories([target, cand])
+
+    new_cand, new_target = memory.resolve_memory(
+        candidate_id="mem_person_merge_cand",
+        action="merge_existing",
+        target_memory_id="mem_person_merge_target",
+        integrated_content="A と B に関する統合記憶",
+    )
+
+    assert new_cand["status"] == "rejected"
+    assert new_target["status"] == "approved"
+    assert _person_ids(new_target) == ["peo_a", "peo_b"]
+
+    stored = memory.get_memory("mem_person_merge_target")
+    assert _person_ids(stored) == ["peo_a", "peo_b"]
+    assert stored["content"] == "A と B に関する統合記憶"
+
+
+def test_resolve_memory_replace_existing_replaces_person_links(clean_memory_env):
+    _seed_people_for_resolve(["peo_a", "peo_b"])
+    target = {
+        "memory_id": "mem_person_replace_target",
+        "status": "approved",
+        "scope": "person",
+        "kind": "episode",
+        "memory_key": "person-key-replace",
+        "content": "A に関する古い記憶",
+        "people": [{"person_id": "peo_a", "display_name": "peo_a"}],
+        "created_at": "2026-07-14T10:00:00+09:00",
+        "updated_at": "2026-07-14T10:00:00+09:00",
+    }
+    cand = {
+        "memory_id": "mem_person_replace_cand",
+        "status": "candidate",
+        "scope": "person",
+        "kind": "episode",
+        "memory_key": "person-key-replace",
+        "content": "B に関する新しい記憶",
+        "people": [{"person_id": "peo_b", "display_name": "peo_b"}],
+        "dedup_suggestions": [
+            {"target_memory_id": "mem_person_replace_target", "relation": "supersedes"}
+        ],
+        "dedup_assessment": {
+            "decision": "supersede",
+            "target_memory_id": "mem_person_replace_target",
+            "target_fingerprint": memory.compute_memory_fingerprint(target),
+        },
+        "created_at": "2026-07-14T10:00:00+09:00",
+        "updated_at": "2026-07-14T10:00:00+09:00",
+    }
+    memory.save_all_memories([target, cand])
+
+    new_cand, new_target = memory.resolve_memory(
+        candidate_id="mem_person_replace_cand",
+        action="replace_existing",
+        target_memory_id="mem_person_replace_target",
+    )
+
+    assert new_cand["status"] == "rejected"
+    assert new_target["status"] == "approved"
+    assert _person_ids(new_target) == ["peo_b"]
+
+    stored = memory.get_memory("mem_person_replace_target")
+    assert _person_ids(stored) == ["peo_b"]
+    assert stored["content"] == "B に関する新しい記憶"

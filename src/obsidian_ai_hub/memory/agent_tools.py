@@ -262,7 +262,7 @@ def create_memory_candidate(
       - valid_from is today (JST) from trusted now
       - evidence.path uses trusted session/message IDs (allowlist-validated)
       - duplicate check covers approved+candidate via normalized content
-      - suggestions saved, LLM assessment deferred
+      - suggestions saved, LLM assessment performed and persisted right away
       - Single snapshot reused for both dedup suggestions and duplicate check
     """
     # ---- Validation (fail fast before DB) ----
@@ -453,6 +453,19 @@ def create_memory_candidate(
         raise
     finally:
         conn.close()
+
+    try:
+        from obsidian_ai_hub.memory.dedup import assess_and_persist_candidate
+
+        assess_and_persist_candidate(memory_id)
+    except Exception as e:
+        logger.warning(f"Failed to assess agent candidate {memory_id}: {e}")
+
+    try:
+        from obsidian_ai_hub.memory.consolidation import consolidate_candidate_proposals
+        consolidate_candidate_proposals()
+    except Exception as e:
+        logger.warning(f"Failed to run candidate consolidation in agent tool: {e}")
 
     return {
         "status": "candidate_created",

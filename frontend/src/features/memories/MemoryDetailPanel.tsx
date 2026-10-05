@@ -183,6 +183,19 @@ export default function MemoryDetailPanel({
 
   const hasSuggestions = (detail.dedup_suggestions || []).length > 0;
 
+  let provenanceObj = detail.provenance;
+  if (typeof provenanceObj === "string") {
+    try {
+      provenanceObj = JSON.parse(provenanceObj);
+    } catch (_) {
+      provenanceObj = undefined;
+    }
+  }
+  const consolidation = (provenanceObj && typeof provenanceObj === "object" ? provenanceObj.consolidation : undefined) as
+    | { source_candidate_ids?: string[]; target_memory_id?: string }
+    | undefined;
+  const sourceCandidateIds = Array.isArray(consolidation?.source_candidate_ids) ? consolidation.source_candidate_ids : [];
+
   const isReassessmentRequired =
     detail.status === "candidate" &&
     (detail.dedup_assessment?.reassessment_required === true ||
@@ -198,6 +211,11 @@ export default function MemoryDetailPanel({
         <span className="rounded bg-slate-200 px-1">{detail.kind || "?"}</span>
         {detail.scope === "person" && (
           <span className="rounded bg-indigo-100 font-medium text-indigo-800 px-1">人物</span>
+        )}
+        {sourceCandidateIds.length > 0 && (
+          <span className="rounded bg-purple-100 font-medium text-purple-800 px-1.5 py-0.5">
+            統合候補 (元候補 {sourceCandidateIds.length}件)
+          </span>
         )}
         <span>status: {detail.status}</span>
         {detail.memory_key && <span>key: {detail.memory_key}</span>}
@@ -218,6 +236,24 @@ export default function MemoryDetailPanel({
       )}
       <h2 className="text-sm font-semibold text-slate-700">本文</h2>
       <p className="mt-1 whitespace-pre-wrap text-sm">{detail.content}</p>
+
+      {sourceCandidateIds.length > 0 && (
+        <div className="mt-3 rounded border border-purple-200 bg-purple-50 p-3 text-xs text-purple-900">
+          <div className="font-semibold text-purple-900 mb-1">
+            統合候補の情報 (元候補 {sourceCandidateIds.length}件)
+          </div>
+          <div className="mt-1">
+            <span className="font-medium text-slate-700">統合元候補ID: </span>
+            <span className="font-mono text-purple-800">{sourceCandidateIds.join(", ")}</span>
+          </div>
+          {detail.dedup_assessment?.reason && (
+            <div className="mt-1">
+              <span className="font-medium text-slate-700">統合理由: </span>
+              <span>{detail.dedup_assessment.reason}</span>
+            </div>
+          )}
+        </div>
+      )}
 
       {(detail.evidence || []).length > 0 && (
         <>

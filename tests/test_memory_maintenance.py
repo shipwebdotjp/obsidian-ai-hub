@@ -952,3 +952,153 @@ def test_reassess_candidate_memories(mock_llm_response):
     # Check audit events
     events1 = get_memory_events("mem_cand_re1")
     assert any(e["event_type"] == "dedup_reassessed" for e in events1)
+
+
+def _reset_memory_tables():
+    conn = get_db_connection()
+    try:
+        conn.execute("DELETE FROM memories")
+        conn.execute("DELETE FROM memory_events")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _make_reassess_target(mid="mem_target_rs", content="承認済みの内容", key="key-rs"):
+    return {
+        "schema_version": 1,
+        "memory_id": mid,
+        "status": "approved",
+        "kind": "preference",
+        "memory_key": key,
+        "content": content,
+        "topics": ["学習"],
+        "tags": ["英語"],
+        "evidence": [],
+        "created_at": "2026-07-01T00:00:00+09:00",
+        "updated_at": "2026-07-01T00:00:00+09:00",
+    }
+
+
+def _make_reassess_candidate(cid, target_id, target_fp, key="key-rs", extra_assessment=None):
+    assessment = {
+        "decision": "merge",
+        "target_memory_id": target_id,
+        "target_fingerprint": target_fp,
+        "integrated_content": "統合内容",
+        "reason": "テスト用判定",
+    }
+    if extra_assessment:
+        assessment.update(extra_assessment)
+    return {
+        "schema_version": 1,
+        "memory_id": cid,
+        "status": "candidate",
+        "kind": "preference",
+        "memory_key": key,
+        "content": "候補の内容",
+        "topics": ["学習"],
+        "tags": ["英語"],
+        "evidence": [],
+        "dedup_suggestions": [{"target_memory_id": target_id, "relation": "duplicate"}],
+        "dedup_assessment": assessment,
+        "created_at": "2026-07-01T00:00:00+09:00",
+        "updated_at": "2026-07-01T00:00:00+09:00",
+    }
+
+
+@patch("obsidian_ai_hub.utils.llm_client.generate_llm_response")
+def test_reassess_picks_up_candidate_with_stale_target_fingerprint(mock_llm):
+    from obsidian_ai_hub.memory import save_all_memories, load_all_memories, update_memory_fields
+    from obsidian_ai_hub.memory.maintenance import reassess_candidate_memories
+    from obsidian_ai_hub.memory.models import compute_memory_fingerprint
+
+    _reset_memory_tables()
+    target = _make_reassess_target()
+    cand = _make_reassess_candidate(
+        "mem_cand_stale", "mem_target_rs", compute_memory_fingerprint(target)
+    )
+    save_all_memories([target, cand])
+
+    # Edit the target after the assessment was saved (no explicit flag).
+    update_memory_fields("mem_target_rs", {"content": "変更後の内容"})
+
+    mock_llm.return_value = json.dumps([
+        {
+            "candidate_id": "mem_cand_stale",
+            "decision": "merge",
+            "target_memory_id": "mem_target_rs",
+            "integrated_content": "統合された内容",
+            "reason": "再判定でのマージ",
+        }
+    ])
+
+    assert reassess_candidate_memories(embedder=None) == 1
+
+    stored = {m["memory_id"]: m for m in load_all_memories()}
+    ass = stored["mem_cand_stale"]["dedup_assessment"]
+    assert ass["decision"] == "merge"
+    assert ass["target_fingerprint"] == compute_memory_fingerprint(stored["mem_target_rs"])
+    assert ass.get("reassessment_required") is False
+
+
+def test_reassess_picks_up_candidate_with_deleted_target():
+    from obsidian_ai_hub.memory import save_all_memories, load_all_memories
+    from obsidian_ai_hub.memory.maintenance import reassess_candidate_memories
+    from obsidian_ai_hub.memory.models import compute_memory_fingerprint
+
+    _reset_memory_tables()
+    target = _make_reassess_target()
+    cand = _make_reassess_candidate(
+        "mem_cand_del", "mem_target_rs", compute_memory_fingerprint(target)
+    )
+    save_all_memories([target, cand])
+
+    conn = get_db_connection()
+    try:
+        with conn:
+            conn.execute("DELETE FROM memories WHERE memory_id = ?", ("mem_target_rs",))
+    finally:
+        conn.close()
+
+    assert reassess_candidate_memories(embedder=None) == 1
+
+    stored = {m["memory_id"]: m for m in load_all_memories()}
+    assert stored["mem_cand_del"]["status"] == "candidate"
+    ass = stored["mem_cand_del"]["dedup_assessment"]
+    assert ass["decision"] == "new"
+    assert ass.get("reassessment_required") is False
+
+
+@patch("obsidian_ai_hub.utils.llm_client.generate_llm_response")
+def test_reassess_retries_legacy_failed_assessment_without_flag(mock_llm):
+    from obsidian_ai_hub.memory import save_all_memories, load_all_memories
+    from obsidian_ai_hub.memory.maintenance import reassess_candidate_memories
+
+    _reset_memory_tables()
+    save_all_memories([_make_reassess_target()])
+    failed_cand = _make_reassess_candidate("mem_cand_failed", "mem_target_rs", None)
+    failed_cand["dedup_assessment"] = {
+        "decision": "failed",
+        "similarity_score": 1.0,
+        "reason": "過去の一時的なLLMエラー",
+        "failure_kind": "request_failed",
+    }
+    save_all_memories([_make_reassess_target(), failed_cand])
+
+    mock_llm.return_value = json.dumps([
+        {
+            "candidate_id": "mem_cand_failed",
+            "decision": "merge",
+            "target_memory_id": "mem_target_rs",
+            "integrated_content": "統合された内容",
+            "reason": "再試行でのマージ",
+        }
+    ])
+
+    assert reassess_candidate_memories(embedder=None) == 1
+
+    stored = {m["memory_id"]: m for m in load_all_memories()}
+    ass = stored["mem_cand_failed"]["dedup_assessment"]
+    assert ass["decision"] == "merge"
+    assert ass.get("reassessment_required") is False

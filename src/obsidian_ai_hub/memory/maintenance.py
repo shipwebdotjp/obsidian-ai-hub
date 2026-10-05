@@ -346,6 +346,12 @@ def reassess_candidate_memories(embedder=None) -> int:
     approved_mems = [m for m in all_memories if m.get("status") == "approved"]
     candidates = [m for m in all_memories if m.get("status") == "candidate"]
 
+    from obsidian_ai_hub.memory.models import compute_memory_fingerprint
+
+    approved_fps = {
+        m["memory_id"]: compute_memory_fingerprint(m) for m in approved_mems
+    }
+
     candidates_to_reassess = []
     for cand in candidates:
         assessment = cand.get("dedup_assessment")
@@ -355,8 +361,21 @@ def reassess_candidate_memories(embedder=None) -> int:
         if isinstance(assessment, dict):
             if assessment.get("reassessment_required") is True:
                 needs_reassessment = True
-            elif assessment.get("decision") in ("merge", "supersede") and not assessment.get("target_fingerprint"):
+            elif assessment.get("decision") == "failed":
+                # Past LLM failures were saved without the flag; retry them.
                 needs_reassessment = True
+            elif assessment.get("decision") in ("merge", "supersede"):
+                if not assessment.get("target_fingerprint"):
+                    needs_reassessment = True
+                else:
+                    target_id = assessment.get("target_memory_id")
+                    current_fp = approved_fps.get(target_id)
+                    if current_fp is None:
+                        # Target was deleted, superseded, or rejected after assessment.
+                        needs_reassessment = True
+                    elif current_fp != assessment.get("target_fingerprint"):
+                        # Target was edited after assessment.
+                        needs_reassessment = True
         else:
             if suggestions:
                 needs_reassessment = True
@@ -516,8 +535,8 @@ def register_maintenance_hitl_run(
     })
 
     description = (
-        f"基準日 {base_date.strftime('%Y-%m-%d')} の長期記憶定期診断に基づく、"
-        f"{len(proposals)}件 of メンテナンス提案です。"
+        f"基準日 {base_date.strftime('%Y-%m-%d')} の長期記憶定期診断に基づく"
+        f"メンテナンス提案が{len(proposals)}件あります。"
     )
 
     register_run_and_questions(

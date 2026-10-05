@@ -29,6 +29,7 @@ from obsidian_ai_hub.memory.context import (
     compile_context_text,
     get_currently_valid_approved_memories,
 )
+from obsidian_ai_hub.memory.consolidation import consolidate_candidate_proposals
 from obsidian_ai_hub.memory.dedup import (
     perform_dedup_assessment_llm,
     run_deduplication,
@@ -108,6 +109,7 @@ __all__ = [
     "PurposePolicy",
     "batch_delete_memories",
     "batch_review_memories",
+    "consolidate_candidate_proposals",
     "compile_context",
     "compile_context_text",
     "cosine_similarity",
