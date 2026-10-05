@@ -254,6 +254,30 @@ def consolidate_candidate_proposals(
                 continue
 
             # Validation succeeded. Construct consolidated candidate
+            from obsidian_ai_hub.memory.agent_tools import (
+                ALLOWED_KINDS,
+                _normalize_memory_key,
+            )
+
+            raw_kind = llm_res.get("kind") or source_cands[0].get("kind") or "fact"
+            validated_kind = raw_kind if isinstance(raw_kind, str) and raw_kind in ALLOWED_KINDS else "fact"
+            if validated_kind != raw_kind:
+                logger.warning(
+                    "Invalid kind %r for target %s; coercing to 'fact'",
+                    raw_kind,
+                    target_id,
+                )
+            try:
+                validated_memory_key = _normalize_memory_key(llm_res.get("memory_key") or "")
+            except ValueError as exc:
+                logger.warning(
+                    "Candidate consolidation memory_key validation failed for target %s (scope: %s): %s",
+                    target_id,
+                    scope,
+                    exc,
+                )
+                continue
+
             new_memory_id = generate_memory_id(today_str)
             target_fp = (
                 compute_memory_fingerprint(target_mem) if decision in ("merge", "supersede") else None
@@ -286,8 +310,8 @@ def consolidate_candidate_proposals(
                 "memory_id": new_memory_id,
                 "status": "candidate",
                 "scope": scope,
-                "kind": llm_res.get("kind") or source_cands[0].get("kind", "fact"),
-                "memory_key": llm_res.get("memory_key") or "",
+                "kind": validated_kind,
+                "memory_key": validated_memory_key,
                 "content": content.strip(),
                 "topics": combined_topics,
                 "tags": combined_tags,
@@ -336,49 +360,62 @@ def consolidate_candidate_proposals(
                 consolidated_cand["dedup_assessment"]["integrated_content"] = llm_res.get("integrated_content")
 
             # Save consolidated candidate & transition source candidates in single transaction
-            with conn:
-                db_row = serialize_memory(consolidated_cand)
-                columns = ", ".join(MEMORY_COLUMNS)
-                placeholders = ", ".join("?" for _ in MEMORY_COLUMNS)
-                conn.execute(
-                    f"INSERT INTO memories ({columns}) VALUES ({placeholders})",
-                    tuple(db_row.get(col) for col in MEMORY_COLUMNS),
-                )
-                if scope == "person":
-                    for p in combined_people:
-                        pid = p["person_id"] if isinstance(p, dict) else str(p)
-                        conn.execute(
-                            "INSERT INTO memory_people (memory_id, person_id, created_at) VALUES (?, ?, ?)",
-                            (new_memory_id, pid, timestamp_now),
-                        )
-
-                log_memory_event(
-                    event_type="created",
-                    memory_id=new_memory_id,
-                    previous_status=None,
-                    new_status="candidate",
-                    conn=conn,
-                    actor="system",
-                )
-
-                for src in source_cands:
+            try:
+                with conn:
+                    db_row = serialize_memory(consolidated_cand)
+                    columns = ", ".join(MEMORY_COLUMNS)
+                    placeholders = ", ".join("?" for _ in MEMORY_COLUMNS)
                     conn.execute(
-                        "UPDATE memories SET status = 'rejected', reviewed_by = 'system', reviewed_at = ?, updated_at = ? WHERE memory_id = ?",
-                        (timestamp_now, timestamp_now, src["memory_id"]),
+                        f"INSERT INTO memories ({columns}) VALUES ({placeholders})",
+                        tuple(db_row.get(col) for col in MEMORY_COLUMNS),
                     )
+                    if scope == "person":
+                        for p in combined_people:
+                            pid = p["person_id"] if isinstance(p, dict) else str(p)
+                            conn.execute(
+                                "INSERT INTO memory_people (memory_id, person_id, created_at) VALUES (?, ?, ?)",
+                                (new_memory_id, pid, timestamp_now),
+                            )
+
                     log_memory_event(
-                        event_type="consolidated",
-                        memory_id=src["memory_id"],
-                        previous_status="candidate",
-                        new_status="rejected",
-                        actor="system",
-                        changes={
-                            "consolidated_into_memory_id": new_memory_id,
-                            "target_memory_id": target_id,
-                        },
-                        reason="同一メモリ向けの統合候補へ再構成されたためシステム自動却下",
+                        event_type="created",
+                        memory_id=new_memory_id,
+                        previous_status=None,
+                        new_status="candidate",
                         conn=conn,
+                        actor="system",
                     )
+
+                    for src in source_cands:
+                        cursor = conn.execute(
+                            "UPDATE memories SET status = 'rejected', reviewed_by = 'system', reviewed_at = ?, updated_at = ? WHERE memory_id = ? AND status = 'candidate'",
+                            (timestamp_now, timestamp_now, src["memory_id"]),
+                        )
+                        if cursor.rowcount == 0:
+                            raise ValueError(
+                                f"source candidate {src['memory_id']} is no longer 'candidate'"
+                            )
+                        log_memory_event(
+                            event_type="consolidated",
+                            memory_id=src["memory_id"],
+                            previous_status="candidate",
+                            new_status="rejected",
+                            actor="system",
+                            changes={
+                                "consolidated_into_memory_id": new_memory_id,
+                                "target_memory_id": target_id,
+                            },
+                            reason="同一メモリ向けの統合候補へ再構成されたためシステム自動却下",
+                            conn=conn,
+                        )
+            except Exception as exc:
+                logger.warning(
+                    "Candidate consolidation DB transaction failed for target %s (scope: %s): %s",
+                    target_id,
+                    scope,
+                    exc,
+                )
+                continue
 
             created_consolidated_candidates.append(consolidated_cand)
 
