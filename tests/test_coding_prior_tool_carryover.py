@@ -177,7 +177,7 @@ async def test_only_last_three_completed_runs_carried(coding_session):
 
 
 @pytest.mark.anyio
-async def test_safety_block_always_present(coding_session):
+async def test_safety_block_omitted_when_no_prior_results(coding_session):
     sess, repo = coding_session
     orch = CodingOrchestrator(tool_ids=[])
     mock_llm, _, captured = _capture_llm()
@@ -194,9 +194,7 @@ async def test_safety_block_always_present(coding_session):
         ):
             pass
     content = _system_content(captured)
-    assert "<untrusted_prior_tool_results>" in content
-    assert "untrusted" in content.lower() or "参考情報" in content
-    assert ("再実行" in content or "再取得" in content or "re-run" in content.lower())
+    assert "<untrusted_prior_tool_results>" not in content
 
 
 @pytest.mark.anyio
