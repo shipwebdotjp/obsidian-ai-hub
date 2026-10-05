@@ -535,8 +535,8 @@ def register_maintenance_hitl_run(
     })
 
     description = (
-        f"基準日 {base_date.strftime('%Y-%m-%d')} の長期記憶定期診断に基づく、"
-        f"{len(proposals)}件 of メンテナンス提案です。"
+        f"基準日 {base_date.strftime('%Y-%m-%d')} の長期記憶定期診断に基づく"
+        f"メンテナンス提案が{len(proposals)}件あります。"
     )
 
     register_run_and_questions(

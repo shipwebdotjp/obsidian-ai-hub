@@ -171,7 +171,7 @@ export function NotificationsPage({ onUnreadCountChanged }: NotificationsPagePro
   };
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6 p-4">
+    <div className="mx-auto h-full max-w-5xl space-y-6 overflow-y-auto bg-slate-50 p-4">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3">
           <h1 className="text-2xl font-bold text-slate-900">通知受信箱</h1>
