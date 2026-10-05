@@ -112,6 +112,8 @@ API はすべて `/api/v1/...` 配下にあり、Bearer トークンが必要で
 - **Enter で送信（Shift+Enter で改行）**
 - **Enter で改行（Ctrl/Cmd+Enter で送信）**
 
+スマートフォンなどのタッチ端末では、誤送信防止のため上記の設定に関わらず Enter キーでは送信されず、送信ボタンで送信します。
+
 ## 次に読む
 
 - [CLI の基本](../daily/cli-basics.md)

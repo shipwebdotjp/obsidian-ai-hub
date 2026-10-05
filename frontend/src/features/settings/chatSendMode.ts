@@ -14,10 +14,26 @@ export function setChatSendMode(mode: ChatSendMode): void {
   window.dispatchEvent(new Event(CHANGED_EVENT_NAME));
 }
 
+/**
+ * スマートフォン等のタッチ端末では Enter 系キーでの誤送信を防ぐため、
+ * 設定に関わらず Enter 送信を無効化し送信ボタン操作に限定する。
+ */
+export function isMobileSendButtonOnly(): boolean {
+  if (typeof window === "undefined" || typeof navigator === "undefined")
+    return false;
+  if (
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(pointer: coarse)").matches
+  )
+    return true;
+  return /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent ?? "");
+}
+
 export function shouldSendOnEnter(
   e: React.KeyboardEvent<HTMLTextAreaElement>,
   mode: ChatSendMode,
 ): boolean {
+  if (isMobileSendButtonOnly()) return false;
   if (e.nativeEvent.isComposing || e.keyCode === 229) return false;
   if (e.key !== "Enter") return false;
   if (mode === "enter") {
@@ -30,6 +46,7 @@ export function getChatInputPlaceholder(
   mode: ChatSendMode,
   prefix = "メッセージを入力",
 ): string {
+  if (isMobileSendButtonOnly()) return `${prefix}…（送信ボタンで送信）`;
   return mode === "enter"
     ? `${prefix}…（Enterで送信 / Shift+Enterで改行）`
     : `${prefix}…（Enterで改行 / Ctrl+Enterで送信）`;

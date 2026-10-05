@@ -8,6 +8,7 @@ import type {
 } from "../../api/types";
 import {
   getChatInputPlaceholder,
+  isMobileSendButtonOnly,
   shouldSendOnEnter,
   useChatSendMode,
 } from "../settings/chatSendMode";
@@ -163,7 +164,11 @@ export function AgentChatInput({
     if (e.nativeEvent.isComposing || e.keyCode === 229) return;
 
     if (isPaletteActive) {
-      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+      if (
+        e.key === "Enter" &&
+        (e.metaKey || e.ctrlKey) &&
+        !isMobileSendButtonOnly()
+      ) {
         e.preventDefault();
         void onSend();
         return;
