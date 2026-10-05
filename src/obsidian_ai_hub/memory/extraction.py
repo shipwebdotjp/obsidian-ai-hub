@@ -416,6 +416,12 @@ def extract_person_memories(week_date_str: Optional[str] = None) -> list[dict]:
 
             all_created_candidates.extend(final_candidates)
 
+        try:
+            from obsidian_ai_hub.memory.consolidation import consolidate_candidate_proposals
+            consolidate_candidate_proposals()
+        except Exception as exc:
+            logger.exception("Candidate consolidation failed during person memory extraction: %s", exc)
+
         return all_created_candidates
     finally:
         conn.close()
@@ -686,6 +692,12 @@ def extract_memories(week_date_str: Optional[str] = None) -> list[dict]:
     final_candidates_to_save.extend(
         extract_agent_conversation_memories(week_date_str)
     )
+
+    try:
+        from obsidian_ai_hub.memory.consolidation import consolidate_candidate_proposals
+        consolidate_candidate_proposals()
+    except Exception as exc:
+        logger.exception("Candidate consolidation failed during weekly memory extraction: %s", exc)
 
     return final_candidates_to_save
 
@@ -998,5 +1010,11 @@ def extract_agent_conversation_memories(
                 )
     finally:
         conn.close()
+
+    try:
+        from obsidian_ai_hub.memory.consolidation import consolidate_candidate_proposals
+        consolidate_candidate_proposals()
+    except Exception as exc:
+        logger.exception("Candidate consolidation failed during agent conversation extraction: %s", exc)
 
     return final_candidates

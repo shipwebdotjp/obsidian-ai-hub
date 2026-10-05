@@ -454,6 +454,12 @@ def create_memory_candidate(
     finally:
         conn.close()
 
+    try:
+        from obsidian_ai_hub.memory.consolidation import consolidate_candidate_proposals
+        consolidate_candidate_proposals()
+    except Exception as e:
+        logger.warning(f"Failed to run candidate consolidation in agent tool: {e}")
+
     return {
         "status": "candidate_created",
         "memory_id": memory_id,

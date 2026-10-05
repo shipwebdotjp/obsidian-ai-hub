@@ -137,4 +137,45 @@ describe("MemoryDetailPanel", () => {
     });
     expect(screen.getByText("Drink water regularly")).toBeInTheDocument();
   });
+
+  it("renders consolidated candidate badge and source details", async () => {
+    const consolidatedDetail = {
+      memory_id: "mem-consolidated",
+      content: "Consolidated memory content",
+      kind: "preference",
+      status: "candidate",
+      created_at: "2026-08-01T10:00:00Z",
+      provenance: {
+        consolidation: {
+          source_candidate_ids: ["mem-src-1", "mem-src-2"],
+          target_memory_id: "mem-target-1",
+        },
+      },
+      dedup_assessment: {
+        decision: "merge",
+        target_memory_id: "mem-target-1",
+        target_fingerprint: "fp-mock-123",
+        reason: "Merged two preference candidates",
+      },
+      evidence: [{ path: "test://path", quote: "Sample quote" }],
+      events: [],
+    };
+
+    mockGetMemory.mockResolvedValue(consolidatedDetail as any);
+
+    render(
+      <MemoryDetailPanel
+        memoryId="mem-consolidated"
+        status="candidate"
+        onChanged={onChangedMock}
+        notify={notifyMock}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/統合候補 \(元候補 2件\)/)).toBeInTheDocument();
+    });
+    expect(screen.getByText("mem-src-1, mem-src-2")).toBeInTheDocument();
+    expect(screen.getByText("Merged two preference candidates")).toBeInTheDocument();
+  });
 });

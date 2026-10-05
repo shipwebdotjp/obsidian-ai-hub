@@ -456,4 +456,11 @@ def apply_interview_answers(context: HitlContext) -> HitlResult:
                 )
 
     logger.info(f"Successfully processed {len(final_candidates_to_save)} memory candidates from interview.")
+
+    try:
+        from obsidian_ai_hub.memory.consolidation import consolidate_candidate_proposals
+        consolidate_candidate_proposals(conn=conn)
+    except Exception as exc:
+        logger.exception(f"Candidate consolidation failed during interview processing: {exc}")
+
     return HitlResult.complete()
