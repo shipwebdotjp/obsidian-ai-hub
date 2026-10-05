@@ -253,7 +253,7 @@ export default function MediaGalleryPage() {
                 onClick={() => setSelectedMediaId(item.media_id)}
                 className="group relative cursor-pointer overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition hover:border-slate-400 hover:shadow"
               >
-                <div className="flex aspect-square w-full items-center justify-center overflow-hidden bg-slate-100">
+                <div className="flex aspect-square w-full items-center justify-center overflow-hidden bg-slate-100 p-1">
                   <GeneratedMediaCard
                     media={{
                       media_type: item.media_type,
@@ -265,7 +265,7 @@ export default function MediaGalleryPage() {
                       height: item.height,
                       filename: item.filename,
                     }}
-                    className="flex h-full w-full items-center justify-center"
+                    className="flex h-full w-full flex-col items-center justify-center gap-1 [&>img]:min-h-0"
                     enlargeable={false}
                   />
                 </div>
