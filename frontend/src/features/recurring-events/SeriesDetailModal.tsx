@@ -10,6 +10,8 @@ import {
 } from "./recurringEventsApi";
 import { useMediaObjectUrl } from "../media/useMediaObjectUrl";
 import { useNativeDialog } from "../people/useNativeDialog";
+import { formatYmdWithDow } from "../../utils/date";
+import { PhotoPicker } from "./PhotoPicker";
 
 function RecordPhotoView({ mediaId, filename }: { mediaId: string; filename?: string }) {
   const { objectUrl, error } = useMediaObjectUrl(mediaId);
@@ -298,7 +300,7 @@ export function SeriesDetailModal({ seriesId, onClose, onUpdated }: SeriesDetail
                 <div>
                   <span className="block text-[11px] text-slate-500">最新実行日</span>
                   <span className="text-base font-semibold text-slate-800">
-                    {series.latest_executed_on || "未実行"}
+                    {series.latest_executed_on ? formatYmdWithDow(series.latest_executed_on) : "未実行"}
                   </span>
                 </div>
                 <div>
@@ -310,7 +312,7 @@ export function SeriesDetailModal({ seriesId, onClose, onUpdated }: SeriesDetail
                 <div>
                   <span className="block text-[11px] text-slate-500">次回予定日</span>
                   <span className="text-base font-bold text-emerald-700">
-                    {series.next_due_date || "-"}
+                    {series.next_due_date ? formatYmdWithDow(series.next_due_date) : "-"}
                   </span>
                 </div>
               </div>
@@ -391,12 +393,9 @@ export function SeriesDetailModal({ seriesId, onClose, onUpdated }: SeriesDetail
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-slate-600">写真添付 (任意)</label>
-                      <input
-                        type="file"
-                        accept="image/*"
-                        onChange={(e) => setNewFile(e.target.files?.[0] || null)}
-                        className="mt-1 block w-full text-xs text-slate-500 file:mr-2 file:py-1 file:px-2.5 file:rounded file:border-0 file:text-xs file:font-semibold file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200"
-                      />
+                      <div className="mt-1">
+                        <PhotoPicker selectedFile={newFile} onSelect={setNewFile} />
+                      </div>
                     </div>
                   </div>
 
@@ -487,7 +486,7 @@ export function SeriesDetailModal({ seriesId, onClose, onUpdated }: SeriesDetail
 
                             <div>
                               <label className="block text-xs font-medium text-slate-600">写真変更 / 解除</label>
-                              {rec.media && !clearMediaFlag && (
+                              {rec.media && !clearMediaFlag && !editFile && (
                                 <div className="mt-1 flex items-center gap-2">
                                   <RecordPhotoEditThumb
                                     mediaId={rec.media.media_id}
@@ -503,19 +502,15 @@ export function SeriesDetailModal({ seriesId, onClose, onUpdated }: SeriesDetail
                                 </div>
                               )}
 
-                              {(clearMediaFlag || !rec.media) && (
-                                <div className="mt-1">
-                                  <input
-                                    type="file"
-                                    accept="image/*"
-                                    onChange={(e) => {
-                                      setEditFile(e.target.files?.[0] || null);
-                                      setClearMediaFlag(false);
-                                    }}
-                                    className="block w-full text-xs text-slate-500 file:mr-2 file:py-1 file:px-2.5 file:rounded file:border-0 file:text-xs file:font-semibold file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200"
-                                  />
-                                </div>
-                              )}
+                              <div className="mt-1">
+                                <PhotoPicker
+                                  selectedFile={editFile}
+                                  onSelect={(f) => {
+                                    setEditFile(f);
+                                    if (f) setClearMediaFlag(false);
+                                  }}
+                                />
+                              </div>
                             </div>
 
                             <div className="flex justify-end gap-2 pt-2">
@@ -541,7 +536,7 @@ export function SeriesDetailModal({ seriesId, onClose, onUpdated }: SeriesDetail
                             <div className="space-y-1">
                               <div className="flex items-center gap-2">
                                 <span className="text-sm font-bold text-slate-900">
-                                  {rec.executed_on}
+                                  {formatYmdWithDow(rec.executed_on)}
                                 </span>
                                 {rec.is_start_record && (
                                   <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800">

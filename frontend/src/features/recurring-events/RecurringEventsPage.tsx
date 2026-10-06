@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { IntervalUnit, RecurringEventSeries } from "./types";
 import { listSeries } from "./recurringEventsApi";
+import { formatYmdWithDow } from "../../utils/date";
 import { useMediaObjectUrl } from "../media/useMediaObjectUrl";
 import { EventTypesModal } from "./EventTypesModal";
 import { CreateSeriesModal } from "./CreateSeriesModal";
@@ -80,13 +81,13 @@ export default function RecurringEventsPage() {
     if (nextDueDateStr < todayStr) {
       return (
         <span className="rounded-full bg-red-100 px-2.5 py-1 text-xs font-semibold text-red-700 border border-red-200">
-          期限超過: {nextDueDateStr}
+          期限超過: {formatYmdWithDow(nextDueDateStr)}
         </span>
       );
     } else if (nextDueDateStr === todayStr) {
       return (
         <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800 border border-amber-200">
-          本日期限: {nextDueDateStr}
+          本日期限: {formatYmdWithDow(nextDueDateStr)}
         </span>
       );
     } else {
@@ -95,7 +96,7 @@ export default function RecurringEventsPage() {
       const diffDays = Math.ceil((dueDate.getTime() - todayDate.getTime()) / (1000 * 60 * 60 * 24));
       return (
         <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 border border-emerald-200">
-          次回予定: {nextDueDateStr} (あと{diffDays}日)
+          次回予定: {formatYmdWithDow(nextDueDateStr)} (あと{diffDays}日)
         </span>
       );
     }
@@ -214,7 +215,7 @@ export default function RecurringEventsPage() {
                     <div>
                       <span className="block text-[10px] text-slate-400">最新実行日</span>
                       <span className="font-semibold text-slate-800">
-                        {s.latest_executed_on || "-"}
+                        {s.latest_executed_on ? formatYmdWithDow(s.latest_executed_on) : "-"}
                       </span>
                     </div>
                     <div>

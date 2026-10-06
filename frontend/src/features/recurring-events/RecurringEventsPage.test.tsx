@@ -72,6 +72,24 @@ describe("RecurringEventsPage", () => {
     expect(screen.getByText("カットのみ")).toBeInTheDocument();
   });
 
+  it("renders API yyyy-mm-dd dates with weekday display", async () => {
+    vi.mocked(api.listSeries).mockResolvedValue(mockSeries);
+
+    render(
+      <BrowserRouter>
+        <RecurringEventsPage />
+      </BrowserRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("散髪")).toBeInTheDocument();
+    });
+
+    // 2025-03-01 is Saturday, 2025-04-01 is Tuesday.
+    expect(screen.getByText("2025/03/01(土)")).toBeInTheDocument();
+    expect(screen.getByText(/2025\/04\/01\(火\)/)).toBeInTheDocument();
+  });
+
   it("opens create series modal when button clicked", async () => {
     vi.mocked(api.listSeries).mockResolvedValue([]);
     vi.mocked(api.listEventTypes).mockResolvedValue([

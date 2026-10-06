@@ -125,6 +125,7 @@ ormsgpack==1.12.2
 packaging==26.0
 pathspec==1.1.1
 pillow==12.2.0
+pillow-heif==1.8.0
 pluggy==1.6.0
 preshed==3.0.13
 primp==1.2.3

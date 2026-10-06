@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { EventType, IntervalUnit } from "./types";
 import { createSeries, listEventTypes, uploadMedia } from "./recurringEventsApi";
 import { useNativeDialog } from "../people/useNativeDialog";
+import { PhotoPicker } from "./PhotoPicker";
 
 interface CreateSeriesModalProps {
   onClose: () => void;
@@ -262,12 +263,9 @@ export function CreateSeriesModal({ onClose, onCreated }: CreateSeriesModalProps
 
                 <div>
                   <label className="block text-xs font-medium text-slate-600">写真添付（任意）</label>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
-                    className="mt-1 block w-full text-xs text-slate-500 file:mr-2 file:py-1 file:px-3 file:rounded file:border-0 file:text-xs file:font-semibold file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200"
-                  />
+                  <div className="mt-1">
+                    <PhotoPicker selectedFile={selectedFile} onSelect={setSelectedFile} />
+                  </div>
                 </div>
               </div>
             </form>

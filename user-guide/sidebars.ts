@@ -68,6 +68,7 @@ const sidebars: SidebarsConfig = {
         'features/healthcare',
         'features/system-maintenance',
         'features/gmail',
+        'features/recurring-events',
       ],
     },
     {

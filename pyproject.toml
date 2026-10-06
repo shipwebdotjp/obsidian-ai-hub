@@ -45,6 +45,7 @@ dependencies = [
     "google-auth-oauthlib",
     "grpcio==1.84.0",
     "pywebpush>=1.14.0",
+    "pillow-heif>=1.8.0",
 ]
 
 [tool.setuptools.packages.find]
