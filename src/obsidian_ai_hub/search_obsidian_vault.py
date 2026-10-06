@@ -1,9 +1,7 @@
 import json
 import sys
 
-from obsidian_ai_hub.handler.obsidian_vault_retriever import (
-    search_obsidian_vault as retriever,
-)
+from obsidian_ai_hub.web.services import vault as vault_service
 
 
 def main(
@@ -14,37 +12,20 @@ def main(
     vault_ids: list[str] | None = None,
 ):
     """
-    CLI wrapper for searching the Obsidian vaults.
+    CLI wrapper for searching the Obsidian vaults (human actor, all Vaults by default).
     """
-    from obsidian_ai_hub.web.services import vault as vault_service
-
-    if vault_ids is not None:
+    try:
         result = vault_service.search_vault(
-            q=query, k=int(k), mode=search_mode, vault_ids=vault_ids
+            q=query, k=int(k), mode=search_mode, vault_ids=vault_ids, actor="human"
         )
-        import json as _json
-
-        result_json = _json.dumps(result["items"], ensure_ascii=False)
-    else:
-        result_json = retriever.func(query=query, k=int(k), search_mode=search_mode)
+    except (ValueError, KeyError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(1)
+    results = result["items"]
 
     if json_output:
-        # result_json is already a JSON string from the retriever
-        print(result_json)
+        print(json.dumps(results, ensure_ascii=False))
         return
-
-    try:
-        results = json.loads(result_json)
-    except json.JSONDecodeError:
-        print(
-            f"Error: Failed to parse search results. Raw output: {result_json}",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-
-    if isinstance(results, dict) and "error" in results:
-        print(f"Error: {results['error']}", file=sys.stderr)
-        sys.exit(1)
 
     if not results:
         print("No results found.")
@@ -54,9 +35,10 @@ def main(
         score = hit.get("score", 0.0)
         content = hit.get("content", "")
         metadata = hit.get("metadata", {})
-        path = metadata.get("file_path", "Unknown path")
+        vault_id = metadata.get("vault_id", "?")
+        path = metadata.get("file_path", metadata.get("relative_path", "Unknown path"))
 
-        print(f"{i}. [{score:.4f}] {path}")
+        print(f"{i}. [{score:.4f}] [{vault_id}] {path}")
         print("-" * 40)
         print(content)
         print("-" * 40)

@@ -30,7 +30,8 @@ def main_vault_write(
         else:
             content = Path(content_file).read_text(encoding="utf-8")
         result = write_vault_file(
-            relative_path, content, overwrite=overwrite, vault_id=vault_id
+            relative_path, content, overwrite=overwrite, vault_id=vault_id,
+            actor="human",
         )
     except (OSError, ValueError) as exc:
         print(

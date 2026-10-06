@@ -17,7 +17,7 @@
 ## Vault 操作と索引
 
 - [x] Vault ID 対応の安全なファイル read/list/write service を作る。
-- [ ] 人間、通常 Agent、Task／Workflow、内部 primary フローの信頼済み操作文脈を分ける。
+- [x] 人間、通常 Agent、Task／Workflow、内部 primary フローの信頼済み操作文脈を分ける。
 - [x] 全単数 `VAULT_PATH` 参照を Registry または primary Vault 解決へ置き換える。
 - [x] Vault 単位の索引保存先、検索 executor、索引 identity を作る。
 - [x] `--sync-vault`／`--rebuild-vault` に反復可能な `--vault` 指定を加える。
@@ -25,13 +25,13 @@
 
 ## API・Agent・実行器
 
-- [ ] Vault 一覧、Vault ID 付き検索、読取り、列挙 API を追加し、旧契約を削除する。
-- [ ] Agent の `default_vault_ids` migration、API、CLI、編集 UI を追加する。
-- [ ] `vault_search` の既定＋単発 `additional_vault_ids` を実装する。
-- [ ] `vault_read_file`／`vault_write_file`、Task schema、Workflow schema を Vault ID 必須にする。
-- [ ] context ref を `{vault_id, path}` に移行する。
-- [ ] AI access と main 汎用書込み拒否を副作用直前で検証する。
-- [ ] blog / ai の通常 Agent 書込みを無承認、Task／Workflow 書込みを plan-required のまま保つ。
+- [x] Vault 一覧、Vault ID 付き検索、読取り、列挙 API を追加し、旧契約を削除する。
+- [x] Agent の `default_vault_ids` migration、API、CLI を追加する（編集 UI は Phase 4 で対応）。
+- [x] `vault_search` の既定＋単発 `additional_vault_ids` を実装する。
+- [x] `vault_read_file`／`vault_write_file`、Task schema、Workflow schema を Vault ID 必須にする。
+- [x] context ref を `{vault_id, path}` に移行する。
+- [x] AI access と main 汎用書込み拒否を副作用直前で検証する。
+- [x] blog / ai の通常 Agent 書込みを無承認、Task／Workflow 書込みを plan-required のまま保つ。
 
 ## UI・文書・確認
 

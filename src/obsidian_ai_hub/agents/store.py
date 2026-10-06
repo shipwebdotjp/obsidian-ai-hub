@@ -180,6 +180,47 @@ def _advanced_params_to_json(params: Any) -> str:
     return json.dumps(normalized, ensure_ascii=False)
 
 
+def _normalize_default_vault_ids(raw: Any) -> list[str]:
+    """Normalize user-supplied default Vault IDs to a non-empty ID list.
+
+    Shape-only normalization: non-empty strings, deduped in order. Unknown
+    IDs are kept (registry membership is checked at use time); an empty
+    result falls back to ``["main"]``.
+    """
+    ids: list[str] = []
+    if isinstance(raw, (list, tuple)):
+        candidates = list(raw)
+    elif raw is None:
+        candidates = []
+    else:
+        candidates = [raw]
+    for item in candidates:
+        if not isinstance(item, str):
+            continue
+        cleaned = item.strip()
+        if cleaned and cleaned not in ids:
+            ids.append(cleaned)
+    return ids or ["main"]
+
+
+def _default_vault_ids_from_row(row: sqlite3.Row) -> list[str]:
+    try:
+        raw_json = row["default_vault_ids_json"]  # type: ignore[index]
+    except (IndexError, KeyError, ValueError):
+        return ["main"]
+    if not raw_json:
+        return ["main"]
+    try:
+        parsed = json.loads(raw_json)
+    except (json.JSONDecodeError, TypeError):
+        return ["main"]
+    return _normalize_default_vault_ids(parsed)
+
+
+def _default_vault_ids_to_json(ids: Any) -> str:
+    return json.dumps(_normalize_default_vault_ids(ids), ensure_ascii=False)
+
+
 def _row_to_agent(row: sqlite3.Row) -> dict[str, Any]:
     tool_ids = []
     if row["tool_ids_json"]:
@@ -210,6 +251,7 @@ def _row_to_agent(row: sqlite3.Row) -> dict[str, Any]:
         "model": row["model"],
         "tool_ids": tool_ids,
         "delegate_agent_ids": delegate_agent_ids,
+        "default_vault_ids": _default_vault_ids_from_row(row),
         "advanced_params": advanced_params,
         "pinned_at": pinned_at,
         "created_at": row["created_at"],
@@ -413,6 +455,7 @@ def create_agent(
     provider: Optional[str] = None,
     model: Optional[str] = None,
     advanced_params: dict[str, Any] | None = None,
+    default_vault_ids: Sequence[str] | None = None,
     conn: Optional[sqlite3.Connection] = None,
 ) -> dict[str, Any]:
     clean_name = (name or "").strip()
@@ -518,12 +561,30 @@ def create_agent(
                 else:
                     raise
 
+        default_vault_ids_json = _default_vault_ids_to_json(
+            default_vault_ids if default_vault_ids is not None else ["main"]
+        )
+
+        def _do_vault_ids_update():
+            # default_vault_ids lives in its own column (added by migration
+            # v78); tolerate pre-migration databases without that column.
+            try:
+                active_conn.execute(
+                    "UPDATE agents SET default_vault_ids_json = ? WHERE agent_id = ?;",
+                    (default_vault_ids_json, agent_id),
+                )
+            except sqlite3.OperationalError as e:
+                if "no such column" not in str(e):
+                    raise
+
         try:
             if is_generated:
                 with active_conn:
                     _do_insert()
+                    _do_vault_ids_update()
             else:
                 _do_insert()
+                _do_vault_ids_update()
         except sqlite3.IntegrityError as e:
             if "UNIQUE constraint failed" in str(e):
                 raise ValueError(f"Agent with name '{clean_name}' already exists.") from e
@@ -568,6 +629,7 @@ def update_agent(
     model: Optional[str] = None,
     advanced_params: Optional[dict[str, Any]] = None,
     pinned_at: Any = _PINNED_AT_UNSET,
+    default_vault_ids: Optional[Sequence[str]] = None,
     conn: Optional[sqlite3.Connection] = None,
 ) -> dict[str, Any]:
     with auto_connection(conn) as (active_conn, is_generated):
@@ -615,6 +677,12 @@ def update_agent(
         else:
             advanced_params_norm = _normalize_advanced_params(advanced_params)
         advanced_params_json = json.dumps(advanced_params_norm, ensure_ascii=False)
+        # default_vault_ids: None means keep existing; otherwise normalize.
+        if default_vault_ids is None:
+            clean_vault_ids = existing.get("default_vault_ids", ["main"])
+        else:
+            clean_vault_ids = _normalize_default_vault_ids(default_vault_ids)
+        default_vault_ids_json = json.dumps(clean_vault_ids, ensure_ascii=False)
         if pinned_at is _PINNED_AT_UNSET:
             clean_pinned_at = existing.get("pinned_at")
         else:
@@ -744,12 +812,24 @@ def update_agent(
                 else:
                     raise
 
+        def _do_vault_ids_update():
+            try:
+                active_conn.execute(
+                    "UPDATE agents SET default_vault_ids_json = ? WHERE agent_id = ?;",
+                    (default_vault_ids_json, agent_id),
+                )
+            except sqlite3.OperationalError as e:
+                if "no such column" not in str(e):
+                    raise
+
         try:
             if is_generated:
                 with active_conn:
                     _do_update()
+                    _do_vault_ids_update()
             else:
                 _do_update()
+                _do_vault_ids_update()
         except sqlite3.IntegrityError as e:
             if "UNIQUE constraint failed" in str(e):
                 raise ValueError(f"Agent with name '{clean_name}' already exists.") from e

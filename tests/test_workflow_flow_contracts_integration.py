@@ -52,24 +52,37 @@ def _ref(path: str) -> dict[str, str]:
 
 
 def _setup_mock_coding(monkeypatch, repo_path, orch_text="report content"):
+    from pathlib import Path as _Path
+
     from obsidian_ai_hub.utils import config as app_config
     from obsidian_ai_hub.web.services import vault as vault_service
 
-    registry = app_config.validate_vault_registry(
+    repo_path = _Path(repo_path)
+    repo_path.mkdir(parents=True, exist_ok=True)
+    primary_dir = repo_path.parent / (repo_path.name + "-primary")
+    primary_dir.mkdir(parents=True, exist_ok=True)
+    # The repo dir is the writable blog Vault; primary is a sibling dir
+    # (generic workflow writes to main stay refused).
+    blog_registry = app_config.validate_vault_registry(
         {
             "vaults": {
                 "main": {
-                    "path": str(repo_path),
+                    "path": str(primary_dir),
                     "display_name": "Test Personal",
                     "role": "primary",
                     "ai_access": "read",
                 },
+                "blog": {
+                    "path": str(repo_path),
+                    "display_name": "Test Blog",
+                    "ai_access": "write",
+                },
             }
         }
     )
-    monkeypatch.setattr(app_config, "VAULT_REGISTRY", registry)
-    monkeypatch.setattr(app_config, "PRIMARY_VAULT", registry.get_primary())
-    monkeypatch.setattr(app_config, "PRIMARY_VAULT_PATH", repo_path)
+    monkeypatch.setattr(app_config, "VAULT_REGISTRY", blog_registry)
+    monkeypatch.setattr(app_config, "PRIMARY_VAULT", blog_registry.get_primary())
+    monkeypatch.setattr(app_config, "PRIMARY_VAULT_PATH", primary_dir)
     monkeypatch.setattr(app_config, "VAULT_PATH", repo_path)
     # ``write_vault_file`` reads the config object it imported; patch that
     # exact object too so the write lands where the assertion looks, even if
@@ -145,6 +158,7 @@ def test_coding_narrative_to_template_to_vault_file_write(tmp_path, test_memory_
             {
                 "capability_key": "vault_write_file",
                 "inputs": {
+                    "vault_id": "blog",
                     "relative_path": "summary.md",
                     "content": _ref("nodes.tmpl1.output.text"),
                 },

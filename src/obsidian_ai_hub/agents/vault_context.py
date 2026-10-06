@@ -29,13 +29,14 @@ def normalize_context_refs(
     *,
     limit: int = MAX_AGENT_CONTEXT_REFS,
 ) -> list[dict[str, Any]]:
-    """Normalize raw refs into ``[{"kind", "path"}]`` preserving order.
+    """Normalize raw refs into ``[{"kind", "vault_id", "path"}]`` preserving order.
 
-    Non-dict entries, unknown kinds, and empty paths are dropped; duplicate
-    paths are collapsed; the result is capped at *limit*.
+    Non-dict entries, unknown kinds, and empty paths are dropped; duplicates
+    on ``(vault_id, path)`` are collapsed; the result is capped at *limit*.
+    Refs without ``vault_id`` (pre-multi-vault rows) resolve to ``"main"``.
     """
     normalized: list[dict[str, Any]] = []
-    seen: set[str] = set()
+    seen: set[tuple[str, str]] = set()
     for item in refs or []:
         if not isinstance(item, dict):
             continue
@@ -45,10 +46,18 @@ def normalize_context_refs(
         if not isinstance(path, str) or not path.strip():
             continue
         cleaned = path.strip()
-        if cleaned in seen:
+        vault_id = item.get("vault_id")
+        if not isinstance(vault_id, str) or not vault_id.strip():
+            vault_id = "main"
+        else:
+            vault_id = vault_id.strip()
+        key = (vault_id, cleaned)
+        if key in seen:
             continue
-        seen.add(cleaned)
-        normalized.append({"kind": VAULT_FILE_REF_KIND, "path": cleaned})
+        seen.add(key)
+        normalized.append(
+            {"kind": VAULT_FILE_REF_KIND, "vault_id": vault_id, "path": cleaned}
+        )
         if len(normalized) >= limit:
             break
     return normalized
@@ -69,20 +78,27 @@ def build_context_block(refs: Optional[Sequence[dict[str, Any]]]) -> str:
     lines = [CONTEXT_BLOCK_HEADER, CONTEXT_BLOCK_NOTE, ""]
     for ref in normalized:
         path = ref["path"]
+        vault_id = ref.get("vault_id") or "main"
+        label = f"[{vault_id}] {path}"
         try:
-            body = str(get_vault_file(path).get("content") or "")
+            # User-attached references are human-authorized; the runtime only
+            # re-reads what the user explicitly picked.
+            body = str(
+                get_vault_file(path, vault_id=vault_id, actor="human").get("content")
+                or ""
+            )
         except FileNotFoundError:
-            lines.append(f"### {path}")
+            lines.append(f"### {label}")
             lines.append("(参照ファイルが見つかりませんでした)")
             lines.append("")
             continue
-        except (ValueError, OSError) as exc:
-            logger.warning("Failed to read context ref %s: %s", path, exc)
-            lines.append(f"### {path}")
+        except (ValueError, OSError, KeyError) as exc:
+            logger.warning("Failed to read context ref %s: %s", label, exc)
+            lines.append(f"### {label}")
             lines.append("(参照ファイルを読み取れませんでした)")
             lines.append("")
             continue
-        lines.append(f"### {path}")
+        lines.append(f"### {label}")
         lines.append(body)
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"

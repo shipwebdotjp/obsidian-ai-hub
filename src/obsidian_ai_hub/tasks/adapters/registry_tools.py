@@ -43,6 +43,11 @@ TASK_CONTEXT_TOOL_IDS = frozenset(
         "register_recurring_job",
         "register_one_shot_workflow_job",
         "register_recurring_workflow_job",
+        # Vault tools bind the trusted actor (task vs workflow) so the
+        # ai_access gate and the main-write refusal apply.
+        "vault_search",
+        "vault_read_file",
+        "vault_write_file",
     }
 )
 
@@ -99,6 +104,11 @@ def _task_context(task: dict[str, Any]) -> dict[str, Any]:
     # parameters stay locked by default. A caller that supplies explicit
     # inputs (Workflow capability nodes) sets ``allow_param_override``.
     llm_decides_params = not bool(task.get("allow_param_override"))
+    # Workflow bridge tasks run under the workflow actor; plain Task Agent
+    # steps run under the task actor. Both keep plan_required for writes and
+    # both refuse generic main writes; only fixed-target internal flows use
+    # the internal actor.
+    actor_kind = "workflow" if task.get("workflow_run_id") else "task"
     return {
         "task_id": task_id,
         "agent_id": f"task-agent:{task_id}",
@@ -107,6 +117,7 @@ def _task_context(task: dict[str, Any]) -> dict[str, Any]:
         "user_message_id": f"{task_id}-prompt",
         "user_content": str(task.get("prompt_text") or ""),
         "llm_decides_params": llm_decides_params,
+        "actor_kind": actor_kind,
         # Workflow bridge tasks carry the workflow run id for media linkage.
         "workflow_run_id": task.get("workflow_run_id"),
     }

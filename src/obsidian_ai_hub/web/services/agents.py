@@ -26,6 +26,7 @@ def create_agent(
     provider: Optional[str] = None,
     model: Optional[str] = None,
     advanced_params: Optional[Dict[str, Any]] = None,
+    default_vault_ids: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     return store.create_agent(
         name=name,
@@ -35,6 +36,7 @@ def create_agent(
         provider=provider,
         model=model,
         advanced_params=advanced_params or {},
+        default_vault_ids=default_vault_ids,
     )
 
 
@@ -55,6 +57,7 @@ def update_agent(
     model: Optional[str] = None,
     advanced_params: Optional[Dict[str, Any]] = None,
     pinned: Optional[bool] = None,
+    default_vault_ids: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     kwargs: Dict[str, Any] = dict(
         agent_id=agent_id,
@@ -65,6 +68,7 @@ def update_agent(
         provider=provider,
         model=model,
         advanced_params=advanced_params,
+        default_vault_ids=default_vault_ids,
     )
     if pinned is not None:
         kwargs["pinned_at"] = _pinned_at_value(pinned)

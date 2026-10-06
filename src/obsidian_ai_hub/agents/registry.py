@@ -159,6 +159,23 @@ class VaultReadFileInput(BaseModel):
     relative_path: str = Field(
         description="Path to the markdown file relative to the Vault root (e.g. 'notes/daily.md')."
     )
+    vault_id: Optional[str] = Field(
+        default=None,
+        description="Vault ID to read from (e.g. 'main', 'blog', 'ai'). When omitted, the primary Vault is used.",
+    )
+
+
+class VaultSearchInput(BaseModel):
+    query: str = Field(description="Search query text.")
+    k: int = Field(default=10, description="Maximum number of hits to return.")
+    search_mode: str = Field(
+        default="hybrid",
+        description="Search mode: 'hybrid', 'similarity', or 'keyword'.",
+    )
+    additional_vault_ids: Optional[List[str]] = Field(
+        default=None,
+        description="Extra Vault IDs to search for this call only, in addition to the agent's default Vaults. Never stored.",
+    )
 
 
 class VaultWriteFileInput(BaseModel):
@@ -173,6 +190,10 @@ class VaultWriteFileInput(BaseModel):
     overwrite: bool = Field(
         default=False,
         description="Must be explicitly set to true to overwrite an existing file. When false (default), writing to an existing path fails instead of overwriting.",
+    )
+    vault_id: Optional[str] = Field(
+        default=None,
+        description="Vault ID to write to (e.g. 'blog', 'ai'). When omitted, the primary Vault is used. Generic writes to 'main' are always refused.",
     )
 
 
@@ -961,11 +982,128 @@ def _resolve_person_vault_note(vault_id: str) -> Optional[Dict[str, Any]]:
 # --- Tool Implementations ---
 
 
+def _vault_actor(trusted_ctx: Optional[Dict[str, Any]]) -> str:
+    """Return the trusted execution actor for Vault tools (never LLM-supplied)."""
+    if isinstance(trusted_ctx, dict):
+        actor = trusted_ctx.get("actor_kind")
+        if actor in ("agent", "task", "workflow", "internal", "human"):
+            return str(actor)
+    return "agent"
+
+
+def _vault_defaults(trusted_ctx: Optional[Dict[str, Any]]) -> List[str]:
+    """Return the trusted default Vault scope (never LLM-supplied)."""
+    if isinstance(trusted_ctx, dict):
+        raw = trusted_ctx.get("default_vault_ids")
+        if isinstance(raw, (list, tuple)):
+            ids = [str(v).strip() for v in raw if str(v).strip()]
+            if ids:
+                return ids
+    return ["main"]
+
+
+def _make_vault_search_tool(trusted_ctx: Optional[Dict[str, Any]] = None) -> BaseTool:
+    """Build the ``vault_search`` tool bound to the trusted run context.
+
+    The default scope comes from the agent's ``default_vault_ids`` in the
+    trusted context; the LLM may only add per-call ``additional_vault_ids``.
+    """
+    ctx = dict(trusted_ctx) if isinstance(trusted_ctx, dict) else {}
+    actor = _vault_actor(ctx)
+    defaults = _vault_defaults(ctx)
+
+    @tool("search_obsidian_vault", args_schema=VaultSearchInput)
+    def vault_search_bound(
+        query: str,
+        k: int = 10,
+        search_mode: str = "hybrid",
+        additional_vault_ids: Optional[List[str]] = None,
+    ) -> str:
+        """Search Vault notes (default scope plus per-call additions)."""
+        from obsidian_ai_hub.web.services import vault as vault_service
+
+        scope = list(defaults)
+        for vid in additional_vault_ids or []:
+            if isinstance(vid, str) and vid.strip() and vid.strip() not in scope:
+                scope.append(vid.strip())
+        try:
+            res = vault_service.search_vault(
+                q=query, k=k, mode=search_mode, vault_ids=scope, actor=actor  # type: ignore[arg-type]
+            )
+            return json.dumps(res.get("items", []), ensure_ascii=False)
+        except (ValueError, KeyError, PermissionError) as exc:
+            logger.warning("vault_search failed: %s", exc)
+            return json.dumps({"error": str(exc)}, ensure_ascii=False)
+
+    # Keep the established LLM-facing tool name; only the scope inputs change.
+    vault_search_bound.name = "search_obsidian_vault"  # type: ignore[attr-defined]
+    return vault_search_bound
+
+
+def _make_vault_read_tool(trusted_ctx: Optional[Dict[str, Any]] = None) -> BaseTool:
+    """Build the ``vault_read_file`` tool bound to the trusted run context."""
+    ctx = dict(trusted_ctx) if isinstance(trusted_ctx, dict) else {}
+    actor = _vault_actor(ctx)
+
+    @tool("vault_read_file", args_schema=VaultReadFileInput)
+    def vault_read_file_bound(
+        relative_path: str, vault_id: Optional[str] = None
+    ) -> str:
+        """Read content of a Markdown file inside one Vault."""
+        try:
+            res = get_vault_file(relative_path, vault_id=vault_id, actor=actor)  # type: ignore[arg-type]
+            return json.dumps(res, ensure_ascii=False)
+        except EXPECTED_TOOL_EXCEPTIONS as exc:
+            logger.warning("vault_read_file failed: %s", exc)
+            return json.dumps({"error": str(exc)}, ensure_ascii=False)
+
+    vault_read_file_bound.name = "vault_read_file"  # type: ignore[attr-defined]
+    return vault_read_file_bound
+
+
+def _make_vault_write_tool(trusted_ctx: Optional[Dict[str, Any]] = None) -> BaseTool:
+    """Build the ``vault_write_file`` tool bound to the trusted run context.
+
+    The ``ai_access`` gate and the ``main`` generic-write refusal are enforced
+    in the service immediately before the side effect.
+    """
+    ctx = dict(trusted_ctx) if isinstance(trusted_ctx, dict) else {}
+    actor = _vault_actor(ctx)
+
+    @tool("vault_write_file", args_schema=VaultWriteFileInput)
+    def vault_write_file_bound(
+        relative_path: str,
+        content: str,
+        overwrite: bool = False,
+        vault_id: Optional[str] = None,
+    ) -> str:
+        """Write UTF-8 text to a file inside one Vault.
+
+        Missing parent directories are created. The resolved path must stay
+        inside the Vault (absolute paths, '..', and symlink escapes are
+        rejected). An existing file is only replaced when overwrite is
+        explicitly true; otherwise the write fails and the file is untouched.
+        The write is atomic (temporary file + replace).
+        """
+        try:
+            res = write_vault_file(
+                relative_path, content, overwrite=overwrite,
+                vault_id=vault_id, actor=actor,  # type: ignore[arg-type]
+            )
+            return json.dumps(res, ensure_ascii=False)
+        except (FileExistsError, OSError, PermissionError, *EXPECTED_TOOL_EXCEPTIONS) as exc:
+            logger.warning("vault_write_file failed: %s", exc)
+            return json.dumps({"error": str(exc)}, ensure_ascii=False)
+
+    vault_write_file_bound.name = "vault_write_file"  # type: ignore[attr-defined]
+    return vault_write_file_bound
+
+
 @tool(args_schema=VaultReadFileInput)
-def vault_read_file(relative_path: str) -> str:
+def vault_read_file(relative_path: str, vault_id: Optional[str] = None) -> str:
     """Read content of a Markdown file inside the Obsidian Vault."""
     try:
-        res = get_vault_file(relative_path)
+        res = get_vault_file(relative_path, vault_id=vault_id, actor="agent")
         return json.dumps(res, ensure_ascii=False)
     except EXPECTED_TOOL_EXCEPTIONS as exc:
         logger.warning("vault_read_file failed: %s", exc)
@@ -973,7 +1111,12 @@ def vault_read_file(relative_path: str) -> str:
 
 
 @tool(args_schema=VaultWriteFileInput)
-def vault_write_file(relative_path: str, content: str, overwrite: bool = False) -> str:
+def vault_write_file(
+    relative_path: str,
+    content: str,
+    overwrite: bool = False,
+    vault_id: Optional[str] = None,
+) -> str:
     """Write UTF-8 text to a file inside the Obsidian Vault.
 
     Missing parent directories are created. The resolved path must stay
@@ -984,10 +1127,11 @@ def vault_write_file(relative_path: str, content: str, overwrite: bool = False) 
     """
     try:
         res = write_vault_file(
-            relative_path, content, overwrite=overwrite
+            relative_path, content, overwrite=overwrite,
+            vault_id=vault_id, actor="agent",
         )
         return json.dumps(res, ensure_ascii=False)
-    except (FileExistsError, OSError, *EXPECTED_TOOL_EXCEPTIONS) as exc:
+    except (FileExistsError, OSError, PermissionError, *EXPECTED_TOOL_EXCEPTIONS) as exc:
         logger.warning("vault_write_file failed: %s", exc)
         return json.dumps({"error": str(exc)}, ensure_ascii=False)
 
@@ -2377,20 +2521,23 @@ _BUILTIN_TOOL_DEFINITIONS: Dict[str, Dict[str, Any]] = {
     "vault_search": {
         "tool_id": "vault_search",
         "name": "Vault検索",
-        "description": "Obsidian Vault内を検索します。",
-        "get_tool": lambda: search_obsidian_vault,
+        "description": "Obsidian Vault内を検索します。対象を省略した場合はエージェントの既定Vaultを検索し、additional_vault_ids でその呼び出しだけ追加Vaultを検索できます。",
+        "get_tool": lambda: _make_vault_search_tool(None),
+        "get_tool_with_context": lambda ctx: _make_vault_search_tool(ctx),
     },
     "vault_read_file": {
         "tool_id": "vault_read_file",
         "name": "Vaultファイル読取",
-        "description": "Obsidian Vault内のMarkdownファイルを読み込みます。",
+        "description": "Obsidian Vault内のMarkdownファイルを読み込みます。vault_id を省略した場合は primary Vault から読み込みます。",
         "get_tool": lambda: vault_read_file,
+        "get_tool_with_context": lambda ctx: _make_vault_read_tool(ctx),
     },
     "vault_write_file": {
         "tool_id": "vault_write_file",
         "name": "Vaultファイル書込",
-        "description": "Obsidian Vault内にUTF-8テキストファイルを書き込みます。親ディレクトリは自動作成します。上書きには overwrite=true が必要です。",
+        "description": "Obsidian Vault内にUTF-8テキストファイルを書き込みます。親ディレクトリは自動作成します。上書きには overwrite=true が必要です。vault_id で対象Vaultを指定します（'main' への汎用書き込みは拒否されます）。",
         "get_tool": lambda: vault_write_file,
+        "get_tool_with_context": lambda ctx: _make_vault_write_tool(ctx),
     },
     "image_generate": {
         "tool_id": "image_generate",
