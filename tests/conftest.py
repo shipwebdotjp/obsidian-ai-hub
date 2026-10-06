@@ -192,7 +192,51 @@ def _patch_register_run_and_questions(monkeypatch):
 @pytest.fixture(autouse=True)
 def _filesystem_sandbox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """Redirect all writable application paths under tmp_path."""
-    vault = tmp_path / "vault"
+    main_vault = tmp_path / "vaults" / "main"
+    blog_vault = tmp_path / "vaults" / "blog"
+    ai_vault = tmp_path / "vaults" / "ai"
+    main_vault.mkdir(parents=True, exist_ok=True)
+    blog_vault.mkdir(parents=True, exist_ok=True)
+    ai_vault.mkdir(parents=True, exist_ok=True)
+
+    test_registry = app_config.validate_vault_registry(
+        {
+            "vaults": {
+                "main": {
+                    "path": str(main_vault),
+                    "display_name": "Test Personal",
+                    "role": "primary",
+                    "ai_access": "read",
+                },
+                "blog": {
+                    "path": str(blog_vault),
+                    "display_name": "Test Blog",
+                    "ai_access": "write",
+                },
+                "ai": {
+                    "path": str(ai_vault),
+                    "display_name": "Test AI Workspace",
+                    "ai_access": "write",
+                },
+            },
+            "primary_vault": {
+                "inbox": "inbox",
+                "daily": "daily",
+                "template": "template",
+                "knowledge": "copilot/knowledge",
+                "research": "research",
+                "activity": "activity",
+                "webclip": "webclip",
+                "people": "people",
+                "dashboard": "dashboard",
+            },
+        }
+    )
+    monkeypatch.setattr(app_config, "VAULT_REGISTRY", test_registry)
+    monkeypatch.setattr(app_config, "REGISTRY_ERROR", None)
+    monkeypatch.setattr(app_config, "PRIMARY_VAULT", test_registry.get_primary())
+    monkeypatch.setattr(app_config, "PRIMARY_VAULT_PATH", main_vault)
+    vault = main_vault
 
     monkeypatch.setattr(app_config, "VAULT_PATH", vault)
     monkeypatch.setattr(app_config, "INBOX_PATH", vault / app_config.INBOX_DIR_NAME)

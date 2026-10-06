@@ -1,6 +1,21 @@
 ai_log_path: /path/to/your/obsidian/copilot/copilot-jsons
 
-vault:
+vaults:
+  main:
+    path: /Users/you/Documents/Obsidian
+    display_name: Personal
+    role: primary
+    ai_access: read
+  blog:
+    path: /Users/you/Documents/Blog
+    display_name: Blog
+    ai_access: write
+  ai:
+    path: /Users/you/Documents/AI-Workspace
+    display_name: AI Workspace
+    ai_access: write
+
+primary_vault:
   inbox: inbox
   daily: daily
   template: template
@@ -8,6 +23,8 @@ vault:
   research: research
   activity: activity
   webclip: webclip
+  people: people
+  dashboard: dashboard
 
 files:
   daily_note: daily.md

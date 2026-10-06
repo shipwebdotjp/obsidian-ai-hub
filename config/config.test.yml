@@ -1,3 +1,29 @@
+vaults:
+  main:
+    path: test_vaults/main
+    display_name: Test Personal
+    role: primary
+    ai_access: read
+  blog:
+    path: test_vaults/blog
+    display_name: Test Blog
+    ai_access: write
+  ai:
+    path: test_vaults/ai
+    display_name: Test AI Workspace
+    ai_access: write
+
+primary_vault:
+  inbox: inbox
+  daily: daily
+  template: template
+  knowledge: copilot/knowledge
+  research: research
+  activity: activity
+  webclip: webclip
+  people: people
+  dashboard: dashboard
+
 backup:
   sync_folders: []
 vault_index:

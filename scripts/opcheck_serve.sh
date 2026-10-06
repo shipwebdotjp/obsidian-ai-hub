@@ -46,7 +46,7 @@ if [ -n "$PROD_DIR" ]; then
 fi
 
 export MEMORY_SQLITE_PATH="$SANDBOX_ABS/memory.sqlite3"
-export VAULT_PATH="$SANDBOX_ABS/vault"
+export OAIHUB_CONFIG_YML_PATH="$SANDBOX_ABS/config.yml"
 export VAULT_INDEX_SQLITE_PATH="$SANDBOX_ABS/vault-index/search.sqlite"
 export VAULT_INDEX_CHROMA_PATH="$SANDBOX_ABS/vault-index/chroma"
 export HEALTHCARE_SQLITE_PATH="$SANDBOX_ABS/healthcare.sqlite3"
@@ -65,7 +65,9 @@ export OBSIDIAN_AI_HUB_WEB_URL="http://127.0.0.1:$PORT"
 export OBSIDIAN_AI_HUB_API_TOKEN="$TOKEN"
 
 mkdir -p \
-  "$VAULT_PATH" \
+  "$SANDBOX_ABS/vaults/main" \
+  "$SANDBOX_ABS/vaults/blog" \
+  "$SANDBOX_ABS/vaults/ai" \
   "$AI_LOG_PATH" \
   "$SCREENSHOT_DIR" \
   "$OBSIDIAN_AI_HUB_JOBS_DIR" \
@@ -74,11 +76,44 @@ mkdir -p \
   "$IMAGE_GENERATION_OUTPUT_DIR" \
   "$IMAGE_GENERATION_INPUT_DIR"
 
+cat <<EOF > "$OAIHUB_CONFIG_YML_PATH"
+vaults:
+  main:
+    path: $SANDBOX_ABS/vaults/main
+    display_name: Opcheck Main
+    role: primary
+    ai_access: read
+  blog:
+    path: $SANDBOX_ABS/vaults/blog
+    display_name: Opcheck Blog
+    ai_access: write
+  ai:
+    path: $SANDBOX_ABS/vaults/ai
+    display_name: Opcheck AI Workspace
+    ai_access: write
+
+primary_vault:
+  inbox: inbox
+  daily: daily
+  template: template
+  knowledge: copilot/knowledge
+  research: research
+  activity: activity
+  webclip: webclip
+  people: people
+  dashboard: dashboard
+
+backup:
+  sync_folders: []
+vault_index:
+  allow_network_fallback: false
+EOF
+
 # Reusable env for follow-up CLI clients (they read config directly).
 SANDBOX_ENV_FILE="$SANDBOX_ABS/env.sh"
 {
   printf 'export %s=%q\n' MEMORY_SQLITE_PATH "$MEMORY_SQLITE_PATH"
-  printf 'export %s=%q\n' VAULT_PATH "$VAULT_PATH"
+  printf 'export %s=%q\n' OAIHUB_CONFIG_YML_PATH "$OAIHUB_CONFIG_YML_PATH"
   printf 'export %s=%q\n' VAULT_INDEX_SQLITE_PATH "$VAULT_INDEX_SQLITE_PATH"
   printf 'export %s=%q\n' VAULT_INDEX_CHROMA_PATH "$VAULT_INDEX_CHROMA_PATH"
   printf 'export %s=%q\n' HEALTHCARE_SQLITE_PATH "$HEALTHCARE_SQLITE_PATH"
@@ -101,7 +136,7 @@ cat <<EOF
 [opcheck] url     : http://127.0.0.1:$PORT
 [opcheck] token   : $TOKEN
 [opcheck] database: $MEMORY_SQLITE_PATH
-[opcheck] vault   : $VAULT_PATH
+[opcheck] vaults  : $SANDBOX_ABS/vaults (main, blog, ai)
 [opcheck] cli env : source $SANDBOX_ENV_FILE
 EOF
 

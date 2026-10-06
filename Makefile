@@ -105,7 +105,8 @@ status-hitl-worker:
 
 # Web サーバー状態確認
 status-web:
-	launchctl list | grep $(WEB_LABEL) || true
+	@launchctl list | grep $(WEB_LABEL) || true
+	@uv run python -c "from obsidian_ai_hub.utils.config import read_web_status; s = read_web_status(); print('Web startup status:', s.get('status') or 'unknown'); print('Last error:', s.get('error')) if s.get('error') else None"
 
 # 標準ログ表示
 logs:
