@@ -281,6 +281,8 @@ export default function AgentsPage() {
             agents={catalog.agents}
             formDelegateAgentIds={catalog.formDelegateAgentIds}
             onFormDelegateAgentIdsChange={catalog.setFormDelegateAgentIds}
+            formDefaultVaultIds={catalog.formDefaultVaultIds}
+            onFormDefaultVaultIdsChange={catalog.setFormDefaultVaultIds}
             copiedAgentId={catalog.copiedAgentId}
             agentIdCopyError={catalog.agentIdCopyError}
             onCopyAgentId={catalog.handleCopyAgentId}

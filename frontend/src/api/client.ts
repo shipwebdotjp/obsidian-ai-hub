@@ -21,6 +21,7 @@ import type {
   VaultSearchResponse,
   VaultFileResponse,
   VaultFilesResponse,
+  VaultListResponse,
   SummaryDetail,
   SummaryGenerateRequest,
   SummaryUpdatePayload,
@@ -102,6 +103,14 @@ export function buildQuery(params: Record<string, unknown>): string {
   const sp = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
     if (value === undefined || value === null || value === "") continue;
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        if (item !== undefined && item !== null && item !== "") {
+          sp.append(key, String(item));
+        }
+      }
+      continue;
+    }
     sp.set(key, String(value));
   }
   return sp.toString();
@@ -700,20 +709,25 @@ export function runResearchTheme(
 
 // Vault Search API
 
+export function listVaults(signal?: AbortSignal): Promise<VaultListResponse> {
+  return request<VaultListResponse>("/api/v1/vaults", { signal });
+}
+
 export function searchVault(params: {
   q: string;
   k?: number;
   mode?: "hybrid" | "keyword" | "similarity";
+  vault?: string[];
 }, signal?: AbortSignal): Promise<VaultSearchResponse> {
   return request<VaultSearchResponse>(withQuery("/api/v1/vault-search", params), { signal });
 }
 
-export function getVaultFile(path: string, signal?: AbortSignal): Promise<VaultFileResponse> {
-  return request<VaultFileResponse>(withQuery("/api/v1/vault-file", { path }), { signal });
+export function getVaultFile(path: string, vault?: string | null, signal?: AbortSignal): Promise<VaultFileResponse> {
+  return request<VaultFileResponse>(withQuery("/api/v1/vault-file", vault ? { path, vault } : { path }), { signal });
 }
 
-export function listVaultFiles(signal?: AbortSignal): Promise<VaultFilesResponse> {
-  return request<VaultFilesResponse>("/api/v1/vault-files", { signal });
+export function listVaultFiles(vault?: string | null, signal?: AbortSignal): Promise<VaultFilesResponse> {
+  return request<VaultFilesResponse>(withQuery("/api/v1/vault-files", vault ? { vault } : {}), { signal });
 }
 
 // Summary Dashboard API
@@ -898,6 +912,7 @@ export function createAgent(payload: {
   system_prompt: string;
   tool_ids?: string[];
   delegate_agent_ids?: string[];
+  default_vault_ids?: string[];
   provider?: string;
   model?: string;
   advanced_params?: { max_tokens?: number; reasoning?: { effort?: string } } | null;
@@ -919,6 +934,7 @@ export function updateAgent(
     system_prompt?: string;
     tool_ids?: string[];
     delegate_agent_ids?: string[];
+    default_vault_ids?: string[];
     provider?: string;
     model?: string;
     advanced_params?: { max_tokens?: number; reasoning?: { effort?: string } } | null;

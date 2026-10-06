@@ -35,9 +35,9 @@
 
 ## UI・文書・確認
 
-- [ ] Vault 検索の全 Vault 既定フィルターと Vault 表示を実装する。
-- [ ] ファイルエクスプローラーに main 初期値の Vault セレクターを追加する。
-- [ ] Agent の既定 Vault 選択と、Vault をまたぐ `@` 参照ピッカーを実装する。
-- [ ] 設定、Vault 検索、Agent、CLI、運用、トラブルシューティングの user guide を更新する。
-- [ ] Registry、migration、索引、認可、Agent、Task／Workflow、不可逆書込みのテストを追加・監査する。
-- [ ] 隔離 opcheck と、後片付け済みの実運用確認を行う。
+- [x] Vault 検索の全 Vault 既定フィルターと Vault 表示を実装する。
+- [x] ファイルエクスプローラーに main 初期値の Vault セレクターを追加する。
+- [x] Agent の既定 Vault 選択と、Vault をまたぐ `@` 参照ピッカーを実装する。
+- [x] 設定、Vault 検索、Agent、CLI、運用、トラブルシューティングの user guide を更新する。
+- [x] Registry、migration、索引、認可、Agent、Task／Workflow、不可逆書込みのテストを追加・監査する。
+- [x] 隔離 opcheck と、後片付け済みの実運用確認を行う。

@@ -50,7 +50,7 @@ cp .env.example .env
 `.env.example` に記載されている主な項目:
 
 - `OBSIDIAN_AI_HUB_API_TOKEN` — Web UI / API の Bearer トークン。**空だとサーバーは起動できません。**
-- `VAULT_PATH` — Obsidian Vault の絶対パス。
+- Vault のパス — `.env` ではなく `config/config.yml` の `vaults`（`main` / `blog` / `ai`）に絶対パスを記載します。詳細は [設定の構成](../settings/configuration.md)。
 - `LOCAL_MODEL_DIR` — ローカル埋め込みモデルのダウンロードキャッシュ。
 - `AI_LOG_PATH` — AI ログの出力先。
 - LLM / 外部サービスを使う場合: `OPENAI_API_KEY`、`GEMINI_API_KEY`、`TAVILY_API_KEY`、`OPENCODE_API_KEY`、`OPEN_WEB_UI_API_KEY` など。

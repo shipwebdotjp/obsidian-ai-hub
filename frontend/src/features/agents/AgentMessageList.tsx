@@ -25,6 +25,7 @@ import type { QueuedAgentMessage } from "./agentSendQueue";
 import {
   buildRunsByMessageId,
   buildRunsByUserMessageId,
+  contextRefKey,
   getLiveStatusClass,
   getLiveStatusLabel,
   truncateLiveResult,
@@ -73,15 +74,15 @@ function ContextRefChips({
     <div className="mb-1 flex flex-wrap gap-1.5">
       {refs.map((ref, index) => (
         <span
-          key={`${ref.path}-${index}`}
-          title={ref.path}
+          key={`${contextRefKey(ref)}-${index}`}
+          title={`[${ref.vault_id ?? "main"}] ${ref.path}`}
           data-testid="message-context-ref"
           className={`inline-flex max-w-full items-center gap-1 rounded-full px-2 py-0.5 font-mono text-[10px] ${
             dark ? "bg-slate-800 text-slate-200" : "bg-slate-100 text-slate-600"
           }`}
         >
           <FileText className="h-3 w-3 shrink-0" />
-          <span className="max-w-48 truncate">{ref.path}</span>
+          <span className="max-w-48 truncate">[{ref.vault_id ?? "main"}] {ref.path}</span>
         </span>
       ))}
     </div>

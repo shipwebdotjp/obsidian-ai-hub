@@ -63,9 +63,9 @@ def _configure_security(token: str) -> None:
 def create_app(
     host: str | None = None, port: int | None = None, token: str | None = None
 ) -> FastAPI:
+    from obsidian_ai_hub.utils import config as app_config
     from obsidian_ai_hub.utils.config import (
         IS_TEST_ENV,
-        TEST_WORKSPACE,
         _load_yaml_config,
         update_web_status,
         validate_vault_registry,
@@ -77,7 +77,9 @@ def create_app(
         validate_vault_registry(
             current_config,
             is_test_env=IS_TEST_ENV,
-            test_workspace=TEST_WORKSPACE if IS_TEST_ENV else None,
+            test_workspace=getattr(app_config, "TEST_WORKSPACE", None)
+            if IS_TEST_ENV
+            else None,
         )
     except Exception as exc:
         err_msg = str(exc)

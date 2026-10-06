@@ -8,6 +8,7 @@ export interface VaultSearchListProps {
   query: string;
   k: number;
   mode: "hybrid" | "keyword" | "similarity";
+  vaultIds?: string[];
   refreshKey: number;
   onSelect: (hit: VaultSearchHit) => void;
   onLoaded: (items: VaultSearchHit[], error: string | null) => void;
@@ -17,6 +18,7 @@ export default function VaultSearchList({
   query,
   k,
   mode,
+  vaultIds,
   refreshKey,
   onSelect,
   onLoaded,
@@ -42,7 +44,7 @@ export default function VaultSearchList({
     setLoading(true);
     setError(null);
 
-    searchVault({ q: query, k, mode })
+    searchVault({ q: query, k, mode, vault: vaultIds })
       .then((res) => {
         if (controller.signal.aborted) return;
         setItems(res.items);
@@ -62,7 +64,7 @@ export default function VaultSearchList({
     return () => {
       controller.abort();
     };
-  }, [query, k, mode, refreshKey, onLoaded]);
+  }, [query, k, mode, vaultIds, refreshKey, onLoaded]);
 
   if (!query) {
     return (
@@ -93,7 +95,7 @@ export default function VaultSearchList({
       </div>
       <ul className="flex-1 overflow-y-auto divide-y divide-slate-100">
         {items.map((hit, i) => (
-          <li key={`${hit.metadata.file_path}-${hit.metadata.chunk_index ?? i}`}>
+          <li key={`${hit.metadata.vault_id ?? ""}:${hit.metadata.relative_path || hit.metadata.file_path || "?"}-${hit.metadata.chunk_index ?? i}`}>
             <button
               type="button"
               className="block w-full p-3 text-left hover:bg-slate-50"
@@ -101,6 +103,11 @@ export default function VaultSearchList({
             >
               <div className="flex items-center gap-2 text-xs text-slate-500">
                 <span className="font-mono">{formatScore(hit.score)}</span>
+                {hit.metadata.vault_id && (
+                  <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] text-slate-600">
+                    {hit.metadata.vault_id}
+                  </span>
+                )}
                 <span className="truncate">{hit.metadata.relative_path || hit.metadata.file_path || "?"}</span>
               </div>
               <p className="mt-1 line-clamp-3 text-sm text-slate-800">

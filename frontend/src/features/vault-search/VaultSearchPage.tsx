@@ -4,6 +4,7 @@ import VaultExplorerTab from "./VaultExplorerTab";
 import { ToastStack, useToasts } from "../../components/Toast";
 import { listVaultFiles } from "../../api/client";
 import { getApiErrorMessage } from "../../utils/error";
+import { useVaults, vaultLabel } from "../../hooks/useVaults";
 import type { VaultFileListItem } from "../../api/types";
 import type { VaultSortKey } from "../../utils/vault";
 import {
@@ -20,17 +21,20 @@ export default function VaultSearchPage() {
   const [files, setFiles] = useState<VaultFileListItem[] | null>(null);
   const [filesLoading, setFilesLoading] = useState(false);
   const [filesError, setFilesError] = useState<string | null>(null);
+  const [explorerVault, setExplorerVault] = useState<string | null>(null);
   const filesRequestedRef = useRef(false);
+  const { vaults, primary, error: vaultsError } = useVaults();
+  const effectiveVault = explorerVault ?? primary?.vault_id ?? vaults?.[0]?.vault_id ?? "main";
 
   useEffect(() => {
     writeVaultSearchUiState(ui);
   }, [ui]);
 
-  const loadFiles = useCallback(async () => {
+  const loadFiles = useCallback(async (vault: string) => {
     setFilesLoading(true);
     setFilesError(null);
     try {
-      const res = await listVaultFiles();
+      const res = await listVaultFiles(vault);
       setFiles(res.items);
       setUi((prev) => reconcileExplorerState(prev, res.items));
     } catch (err) {
@@ -43,11 +47,18 @@ export default function VaultSearchPage() {
   }, []);
 
   useEffect(() => {
-    if (ui.activeTab === "explorer" && !filesRequestedRef.current) {
+    if (ui.activeTab === "explorer" && !filesRequestedRef.current && vaults) {
       filesRequestedRef.current = true;
-      void loadFiles();
+      void loadFiles(effectiveVault);
     }
-  }, [ui.activeTab, loadFiles]);
+  }, [ui.activeTab, effectiveVault, vaults, loadFiles]);
+
+  const handleVaultChange = useCallback((vault: string) => {
+    setExplorerVault(vault);
+    filesRequestedRef.current = true;
+    setUi((prev) => ({ ...prev, selectedDir: "", notePath: null, expandedDirs: [] }));
+    void loadFiles(vault);
+  }, [loadFiles]);
 
   const setActiveTab = useCallback((tab: VaultSearchTabId) => {
     setUi((prev) => ({ ...prev, activeTab: tab }));
@@ -99,6 +110,31 @@ export default function VaultSearchPage() {
             ファイルエクスプローラー
           </button>
         </div>
+        {ui.activeTab === "explorer" && (
+          <>
+            <label className="flex items-center gap-1 text-sm text-slate-600">
+              Vault
+              <select
+                value={effectiveVault}
+                onChange={(e) => handleVaultChange(e.target.value)}
+                aria-label="エクスプローラーのVault選択"
+                title={vaultsError ?? undefined}
+                className="cursor-pointer rounded border border-slate-300 px-2 py-1 text-sm"
+              >
+                {(vaults ?? [{ vault_id: "main", display_name: "main", is_primary: true }]).map((v) => (
+                  <option key={v.vault_id} value={v.vault_id}>
+                    {vaultLabel(v)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {vaultsError && (
+              <span className="text-xs text-red-600" title={vaultsError}>
+                Vault一覧の取得に失敗しました
+              </span>
+            )}
+          </>
+        )}
       </header>
       <div
         role="tabpanel"
@@ -120,7 +156,8 @@ export default function VaultSearchPage() {
           files={files}
           loading={filesLoading}
           error={filesError}
-          onReload={() => void loadFiles()}
+          vaultId={effectiveVault}
+          onReload={() => void loadFiles(effectiveVault)}
           expandedDirs={ui.expandedDirs}
           onToggleDir={toggleDir}
           selectedDir={ui.selectedDir}

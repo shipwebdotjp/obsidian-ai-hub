@@ -217,6 +217,7 @@ export interface VaultSearchHitMetadata {
   source_path?: string;
   file_path?: string;
   relative_path?: string;
+  vault_id?: string;
   vault_name?: string;
   chunk_index?: number;
   mtime?: number;
@@ -237,10 +238,12 @@ export interface VaultSearchResponse {
 export interface VaultFileResponse {
   content: string;
   relative_path: string;
+  vault_id?: string;
   vault_name: string;
 }
 
 export interface VaultFileListItem {
+  vault_id?: string;
   relative_path: string;
   size: number;
   mtime: number;
@@ -248,6 +251,17 @@ export interface VaultFileListItem {
 
 export interface VaultFilesResponse {
   items: VaultFileListItem[];
+  total: number;
+}
+
+export interface VaultInfo {
+  vault_id: string;
+  display_name: string;
+  is_primary: boolean;
+}
+
+export interface VaultListResponse {
+  items: VaultInfo[];
   total: number;
 }
 
@@ -897,6 +911,7 @@ export interface Agent {
   model: string | null;
   tool_ids: string[];
   delegate_agent_ids?: string[];
+  default_vault_ids?: string[];
   advanced_params?: AgentAdvancedParams | null;
   pinned_at?: string | null;
   created_at: string;
@@ -938,6 +953,7 @@ export interface AgentMessageAttachment {
 
 export interface AgentContextRef {
   kind: "vault_file";
+  vault_id?: string;
   path: string;
 }
 

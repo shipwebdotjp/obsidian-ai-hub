@@ -227,13 +227,14 @@ export function useAgentChat({
   );
 
   const handleToggleContextRef = useCallback(
-    (path: string) => {
+    (path: string, vaultId?: string) => {
+      const vid = vaultId ?? "main";
       setPendingContextRefs((prev) => {
-        if (prev.some((r) => r.path === path)) {
-          return prev.filter((r) => r.path !== path);
+        if (prev.some((r) => (r.vault_id ?? "main") === vid && r.path === path)) {
+          return prev.filter((r) => !((r.vault_id ?? "main") === vid && r.path === path));
         }
         if (prev.length >= MAX_AGENT_CONTEXT_REFS) return prev;
-        return [...prev, { kind: "vault_file", path }];
+        return [...prev, { kind: "vault_file", vault_id: vid, path }];
       });
     },
     [],

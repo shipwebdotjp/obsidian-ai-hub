@@ -28,6 +28,7 @@ export interface PendingAttachment {
 
 export interface PendingContextRef {
   kind: "vault_file";
+  vault_id?: string;
   path: string;
 }
 
@@ -35,11 +36,21 @@ export interface PendingContextRef {
 export function isValidContextRef(value: unknown): value is PendingContextRef {
   if (!value || typeof value !== "object") return false;
   const ref = value as PendingContextRef;
-  return ref.kind === "vault_file" && typeof ref.path === "string" && ref.path.length > 0;
+  return (
+    ref.kind === "vault_file" &&
+    typeof ref.path === "string" &&
+    ref.path.length > 0 &&
+    (ref.vault_id === undefined || typeof ref.vault_id === "string")
+  );
 }
 
 export function toAgentContextRef(ref: PendingContextRef): AgentContextRef {
-  return { kind: ref.kind, path: ref.path };
+  return { kind: ref.kind, vault_id: ref.vault_id ?? "main", path: ref.path };
+}
+
+/** 参照チップの表示キー（Vault をまたぐ同名ファイルを区別する）。 */
+export function contextRefKey(ref: PendingContextRef): string {
+  return `${ref.vault_id ?? "main"}:${ref.path}`;
 }
 
 // keep in sync with runtime.py _LIVE_RESULT_MAX_CHARS (DB is 20000)

@@ -1,5 +1,6 @@
 import { Trash2, X } from "lucide-react";
 import { ClipboardIcon } from "../../components/ClipboardIcon";
+import { useVaults, vaultLabel } from "../../hooks/useVaults";
 import { AGENT_DELEGATE_TOOL_ID } from "./agentViewUtils";
 import type {
   Agent,
@@ -36,6 +37,8 @@ interface AgentFormPanelProps {
   agents: Agent[];
   formDelegateAgentIds: string[];
   onFormDelegateAgentIdsChange: (ids: string[]) => void;
+  formDefaultVaultIds: string[];
+  onFormDefaultVaultIdsChange: (ids: string[]) => void;
   copiedAgentId: boolean;
   agentIdCopyError: string | null;
   onCopyAgentId: () => void;
@@ -83,6 +86,8 @@ export function AgentFormPanel({
   agents,
   formDelegateAgentIds,
   onFormDelegateAgentIdsChange,
+  formDefaultVaultIds,
+  onFormDefaultVaultIdsChange,
   copiedAgentId,
   agentIdCopyError,
   onCopyAgentId,
@@ -342,6 +347,19 @@ export function AgentFormPanel({
             </div>
           </div>
 
+          <div>
+            <label className="block font-medium text-slate-700 mb-1">
+              既定の検索対象 Vault
+            </label>
+            <p className="text-[10px] text-slate-500 mb-2">
+              対象を省略した vault 検索で使う範囲。書込み権限の上限は各 Vault の AI access 設定が決めます。
+            </p>
+            <VaultDefaultSelector
+              selected={formDefaultVaultIds}
+              onChange={onFormDefaultVaultIdsChange}
+            />
+          </div>
+
           {formToolIds.includes(AGENT_DELEGATE_TOOL_ID) && (
             <div className="rounded-md border border-slate-200 bg-white p-3">
               <label className="block font-medium text-slate-700 mb-1">
@@ -404,8 +422,6 @@ export function AgentFormPanel({
               })()}
             </div>
           )}
-
-
 
           <div className="flex justify-end gap-2 pt-2">
             <button
@@ -511,6 +527,69 @@ export function AgentFormPanel({
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function VaultDefaultSelector({
+  selected,
+  onChange,
+}: {
+  selected: string[];
+  onChange: (ids: string[]) => void;
+}) {
+  const { vaults, error } = useVaults();
+  if (error) {
+    return (
+      <p className="text-[11px] text-red-500">
+        Vault 一覧の取得に失敗しました
+      </p>
+    );
+  }
+  if (!vaults) {
+    return (
+      <p className="text-[11px] text-slate-400 italic">
+        Vault 一覧を読み込んでいます…
+      </p>
+    );
+  }
+  if (vaults.length === 0) {
+    return (
+      <p className="text-[11px] text-slate-400 italic">
+        利用可能な Vault がありません
+      </p>
+    );
+  }
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 border border-slate-200 rounded-md p-3 max-h-36 overflow-y-auto">
+      {vaults.map((v) => {
+        const checked = selected.includes(v.vault_id);
+        return (
+          <label
+            key={v.vault_id}
+            className={`flex items-center gap-2 text-xs cursor-pointer p-1 rounded ${
+              checked ? "bg-slate-100" : "hover:bg-slate-50"
+            }`}
+          >
+            <input
+              type="checkbox"
+              checked={checked}
+              onChange={(e) => {
+                if (e.target.checked) {
+                  onChange([...selected, v.vault_id]);
+                } else {
+                  const next = selected.filter((id) => id !== v.vault_id);
+                  onChange(next.length ? next : ["main"]);
+                }
+              }}
+              className="cursor-pointer"
+            />
+            <span className="font-semibold text-slate-800">
+              {vaultLabel(v)}
+            </span>
+          </label>
+        );
+      })}
     </div>
   );
 }

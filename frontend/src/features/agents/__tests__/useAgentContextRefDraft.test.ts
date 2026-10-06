@@ -14,8 +14,8 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
-function ref(path = "a/b.md"): PendingContextRef {
-  return { kind: "vault_file", path };
+function ref(path = "a/b.md", vault_id = "main"): PendingContextRef {
+  return { kind: "vault_file", vault_id, path };
 }
 
 describe("agent context ref draft storage", () => {
@@ -29,14 +29,22 @@ describe("agent context ref draft storage", () => {
     expect(buildAgentContextRefDraftKey("s")).not.toBe("agent-draft:s");
   });
 
-  it("round-trips refs as paths only", () => {
-    writeAgentContextRefDraft("asess_1", [ref("a.md"), ref("b/c.md")]);
+  it("round-trips refs with their vault ids", () => {
+    writeAgentContextRefDraft("asess_1", [ref("a.md"), ref("b/c.md", "blog")]);
     const raw = JSON.parse(window.localStorage.getItem("agent-context-refs:asess_1") || "{}");
     expect(raw.refs).toEqual([
-      { kind: "vault_file", path: "a.md" },
-      { kind: "vault_file", path: "b/c.md" },
+      { kind: "vault_file", vault_id: "main", path: "a.md" },
+      { kind: "vault_file", vault_id: "blog", path: "b/c.md" },
     ]);
-    expect(readAgentContextRefDraft("asess_1")).toEqual([ref("a.md"), ref("b/c.md")]);
+    expect(readAgentContextRefDraft("asess_1")).toEqual([ref("a.md"), ref("b/c.md", "blog")]);
+  });
+
+  it("backfills missing vault ids to main", () => {
+    window.localStorage.setItem(
+      "agent-context-refs:legacy",
+      JSON.stringify({ refs: [{ kind: "vault_file", path: "old.md" }] }),
+    );
+    expect(readAgentContextRefDraft("legacy")).toEqual([ref("old.md")]);
   });
 
   it("returns [] for missing, corrupt, or invalid drafts", () => {

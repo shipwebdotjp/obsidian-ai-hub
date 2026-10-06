@@ -21,7 +21,10 @@ title: Vault 検索
    - **Keyword**
    - **Similarity**
 3. 件数を選びます（**5件** / **10件** / **20件** / **50件**）。
-4. **検索** を押します。
+4. **Vault フィルター** を選びます（既定は **すべてのVault** で横断検索。特定 Vault に絞り込めます）。
+5. **検索** を押します。
+
+検索結果の一覧とプレビューには Vault ID（`[main]` / `[blog]` / `[ai]` など）が表示され、どの Vault のノートか曖昧になりません。
 
 ## 検索履歴
 
@@ -37,6 +40,9 @@ title: Vault 検索
 
 **ファイルエクスプローラー** タブでは、ディレクトリツリー・ファイル一覧・
 ビューアーを並べて Vault の Markdown を閲覧できます。
+
+ヘッダーの **Vault** 選択で対象 Vault を切り替えます（初期選択は `main`）。
+切替えるとツリー・一覧・選択状態はリセットされ、その Vault のファイルだけが表示されます。
 
 - ルートを選ぶと直下の Markdown、ディレクトリを選ぶとその配下の Markdown を
   再帰的に一覧表示します。
@@ -62,29 +68,35 @@ title: Vault 検索
 
 ## インデックスの更新
 
-検索対象を最新にするには、Vault の同期を行います。
+検索対象を最新にするには、Vault の同期を行います。対象未指定なら全 Vault を ID 順に同期し、
+`--vault <id>`（反復可）で個別同期できます。一 Vault が失敗しても残りを試み、失敗 ID を報告して最後に非ゼロ終了します。
 
 ```bash
 uv run -m obsidian_ai_hub --sync-vault
+uv run -m obsidian_ai_hub --sync-vault --vault blog --vault ai
 ```
 
 インデックスを完全に再構築する場合:
 
 ```bash
-uv run -m obsidian_ai_hub --rebuild-vault
+uv run -m obsidian_ai_hub --rebuild-vault --vault blog
 ```
 
 インデックスの保存先と埋め込みモデルは `config/config.yml` の `vault_index` で設定します。
+保存先は Vault ごとに `<基準>/<vault_id>/` へ分離されます。
+Vault ID の `path` を変更した場合はその ID の既存索引が無効化され、
+`--rebuild-vault --vault <id>` が成功するまで検索に使われません。
 
 ## CLI から検索する
 
 ```bash
 uv run -m obsidian_ai_hub --vault-search --query "project planning" \
   --k 5 --search-mode hybrid --json
+uv run -m obsidian_ai_hub --vault-search --query "draft" --vault blog
 ```
 
 `--k` は結果件数（既定 10）、`--search-mode` は `similarity` / `keyword` / `hybrid`（既定 hybrid）、
-`--json` は機械可読の JSON 出力です。
+`--json` は機械可読の JSON 出力です。`--vault` 未指定なら全 Vault を横断検索します。
 
 ## 次に読む
 
