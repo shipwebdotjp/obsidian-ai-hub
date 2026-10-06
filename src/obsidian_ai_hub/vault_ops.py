@@ -10,6 +10,7 @@ import json
 import sys
 from pathlib import Path
 
+from obsidian_ai_hub.utils.config import ensure_vault_registry
 from obsidian_ai_hub.web.services.vault import write_vault_file
 
 
@@ -17,9 +18,11 @@ def main_vault_write(
     relative_path: str,
     content_file: str | None,
     overwrite: bool,
+    vault_id: str | None = None,
 ) -> int:
     """Write UTF-8 content from a file (or stdin with ``-``) to the Vault."""
     try:
+        ensure_vault_registry()
         if not isinstance(relative_path, str) or not relative_path.lower().endswith(
             ".md"
         ):
@@ -28,8 +31,11 @@ def main_vault_write(
             content = sys.stdin.read()
         else:
             content = Path(content_file).read_text(encoding="utf-8")
-        result = write_vault_file(relative_path, content, overwrite=overwrite)
-    except (OSError, ValueError) as exc:
+        result = write_vault_file(
+            relative_path, content, overwrite=overwrite, vault_id=vault_id,
+            actor="human",
+        )
+    except (OSError, ValueError, KeyError) as exc:
         print(
             json.dumps(
                 {"success": False, "error": str(exc)},

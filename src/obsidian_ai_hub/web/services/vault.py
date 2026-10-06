@@ -17,36 +17,165 @@ logger = logging.getLogger(__name__)
 # SQLite connection), so no lock is needed here.
 
 
-def search_vault(q: str, k: int = 10, mode: str = "hybrid") -> dict:
-    result_json = obsidian_vault_retriever.search_obsidian_vault.func(
-        query=q, k=k, search_mode=mode
+def list_vaults() -> dict:
+    """List registered Vaults (id, display name, primary flag)."""
+    if config.VAULT_REGISTRY is None:
+        raise ValueError(
+            f"Vault Registry is unavailable: {config.REGISTRY_ERROR or 'unknown error'}"
+        )
+    primary_id = config.VAULT_REGISTRY.get_primary().vault_id
+    items = [
+        {
+            "vault_id": v.vault_id,
+            "display_name": v.display_name,
+            "is_primary": v.vault_id == primary_id,
+        }
+        for v in sorted(
+            config.VAULT_REGISTRY.list_vaults(), key=lambda v: v.vault_id
+        )
+    ]
+    return {"items": items, "total": len(items)}
+
+
+def _resolve_vault_descriptor(vault_id: str | None = None):
+    return config.resolve_vault_descriptor(vault_id)
+
+
+# Trusted execution actors. Human-operated paths (Web UI, CLI, Obsidian,
+# Finder) and fixed-target internal flows are never restricted by AI access.
+# LLM-driven paths (normal Agent, Task Agent, Workflow) are gated immediately
+# before the side effect; the LLM's free text or client-supplied labels never
+# decide the actor.
+ActorKind = str
+
+_HUMAN_ACTORS = frozenset({"human", "internal"})
+_AI_ACTORS = frozenset({"agent", "task", "workflow"})
+
+
+def check_ai_read_access(vault_id: str, actor: ActorKind = "human") -> None:
+    """Raise PermissionError when an AI actor may not search/read *vault_id*."""
+    if actor in _HUMAN_ACTORS:
+        return
+    if actor not in _AI_ACTORS:
+        raise ValueError(f"Unknown actor: {actor}")
+    descriptor = _resolve_vault_descriptor(vault_id)
+    if descriptor.ai_access == "none":
+        raise PermissionError(
+            f"AI access to vault '{descriptor.vault_id}' is not allowed"
+        )
+
+
+def check_ai_write_access(vault_id: str, actor: ActorKind = "human") -> None:
+    """Raise when an AI actor may not write *vault_id* (side-effect gate).
+
+    Generic Agent/Task/Workflow writes to ``main`` are always refused, even
+    when ``main`` would otherwise allow writes: only fixed-target internal
+    flows (actor ``internal``) may write the primary Vault.
+    """
+    if actor in _HUMAN_ACTORS:
+        return
+    if actor not in _AI_ACTORS:
+        raise ValueError(f"Unknown actor: {actor}")
+    descriptor = _resolve_vault_descriptor(vault_id)
+    if descriptor.ai_access != "write":
+        raise PermissionError(
+            f"AI write to vault '{descriptor.vault_id}' is not allowed "
+            f"(ai_access={descriptor.ai_access!r})"
+        )
+    if descriptor.vault_id == "main":
+        raise PermissionError(
+            "Generic AI writes to the 'main' vault are not allowed"
+        )
+
+
+def search_vault(
+    q: str,
+    k: int = 10,
+    mode: str = "hybrid",
+    vault_ids: list[str] | tuple[str, ...] | None = None,
+    actor: ActorKind = "human",
+) -> dict:
+    """Search Vault indexes, defaulting to all registered Vaults.
+
+    Results carry ``metadata.vault_id`` / ``vault_name`` so callers never mix
+    Vaults ambiguously. Per-Vault failures degrade to empty results for that
+    Vault unless every Vault fails, in which case the first error is raised.
+    AI actors skip Vaults whose ``ai_access`` is ``none``.
+    """
+    if config.VAULT_REGISTRY is None:
+        raise ValueError(
+            f"Vault Registry is unavailable: {config.REGISTRY_ERROR or 'unknown error'}"
+        )
+    targets = (
+        config.resolve_vault_ids(list(vault_ids) if vault_ids is not None else None)
+        if vault_ids is not None
+        else config.resolve_vault_ids(None)
     )
-    try:
-        results = json.loads(result_json)
-    except json.JSONDecodeError as e:
-        logger.error("Failed to parse vault search JSON output: %s", e)
-        raise ValueError("vault search returned invalid JSON") from e
-    if isinstance(results, dict) and "error" in results:
-        raise ValueError(results["error"])
+    merged: list[dict] = []
+    errors: list[str] = []
+    searched = 0
+    failed = 0
+    for vid in targets:
+        try:
+            check_ai_read_access(vid, actor)
+        except PermissionError as exc:
+            errors.append(f"{vid}: {exc}")
+            continue
+        searched += 1
+        try:
+            result_json = obsidian_vault_retriever.search_single_vault(
+                query=q, k=k, search_mode=mode, vault_id=vid
+            )
+        except Exception as exc:  # noqa: BLE001 - degrade per-vault
+            logger.warning("vault search failed for vault '%s': %s", vid, exc)
+            errors.append(f"{vid}: {exc}")
+            failed += 1
+            continue
+        try:
+            results = json.loads(result_json)
+        except json.JSONDecodeError as e:
+            logger.error("Failed to parse vault search JSON output: %s", e)
+            errors.append(f"{vid}: invalid JSON")
+            failed += 1
+            continue
+        if isinstance(results, dict) and "error" in results:
+            errors.append(f"{vid}: {results['error']}")
+            failed += 1
+            continue
+        try:
+            descriptor = config.VAULT_REGISTRY.get(vid)
+            vault_name = descriptor.display_name
+        except KeyError:
+            vault_name = vid
+        for hit in results:
+            if not isinstance(hit, dict):
+                continue
+            if not isinstance(hit.get("metadata"), dict):
+                hit["metadata"] = {}
+            hit["metadata"].setdefault("vault_id", vid)
+            hit["metadata"].setdefault("vault_name", vault_name)
+            merged.append(hit)
+    if not merged and errors and (failed > 0 or searched == 0):
+        # Surface why when nothing usable came back: every searchable Vault
+        # failed, or every Vault was denied. Mere denials alongside
+        # successful (empty) searches degrade to an empty result.
+        raise ValueError("; ".join(errors))
+    merged.sort(key=lambda h: h.get("score", 0), reverse=True)
+    return {"items": merged[:k], "total": len(merged[:k])}
 
-    vault_name = Path(config.VAULT_PATH).name
-    for hit in results:
-        if not isinstance(hit.get("metadata"), dict):
-            hit["metadata"] = {}
-        hit["metadata"]["vault_name"] = vault_name
-    return {"items": results, "total": len(results)}
 
-
-def _resolve_vault_file_path(relative_path: str) -> Path:
+def _resolve_vault_file_path(
+    relative_path: str, vault_id: str | None = None
+) -> Path:
     """Validate *relative_path* and return the resolved file path in the Vault.
 
     Shares the single path-safety rule used by both the reader and the
     context-reference validation: no absolute paths, no ``..`` components,
-    ``.md`` only, resolved target must stay inside ``VAULT_PATH`` and be a
-    regular file. Raises ``ValueError`` / ``FileNotFoundError``
+    ``.md`` only, resolved target must stay inside the resolved Vault root
+    and be a regular file. Raises ``ValueError`` / ``FileNotFoundError``
     with the same messages as :func:`get_vault_file`.
     """
-    vault_dir = Path(config.VAULT_PATH).resolve()
+    vault_dir = _resolve_vault_dir(vault_id)
 
     p = Path(relative_path)
     if p.is_absolute():
@@ -81,8 +210,14 @@ def _resolve_vault_file_path(relative_path: str) -> Path:
     return resolved_path
 
 
-def get_vault_file(relative_path: str) -> dict:
-    resolved_path = _resolve_vault_file_path(relative_path)
+def get_vault_file(
+    relative_path: str,
+    vault_id: str | None = None,
+    actor: ActorKind = "human",
+) -> dict:
+    descriptor = _resolve_vault_descriptor(vault_id)
+    check_ai_read_access(descriptor.vault_id, actor)
+    resolved_path = _resolve_vault_file_path(relative_path, descriptor.vault_id)
 
     with open(resolved_path, "r", encoding="utf-8") as f:
         content = f.read()
@@ -90,19 +225,23 @@ def get_vault_file(relative_path: str) -> dict:
     return {
         "content": content,
         "relative_path": relative_path,
-        "vault_name": Path(config.VAULT_PATH).name,
+        "vault_id": descriptor.vault_id,
+        "vault_name": descriptor.display_name,
     }
 
 
-def validate_vault_file_ref(relative_path: str) -> str:
+def validate_vault_file_ref(
+    relative_path: str, vault_id: str | None = None
+) -> str:
     """Validate an agent context-reference path without reading its body.
 
     Returns the normalized vault-relative POSIX path. Raises ``ValueError``
     for unsafe/non-Markdown paths and ``FileNotFoundError`` for missing
     targets, mirroring :func:`get_vault_file` semantics.
     """
-    vault_dir = Path(config.VAULT_PATH).resolve()
-    resolved = _resolve_vault_file_path(relative_path)
+    descriptor = _resolve_vault_descriptor(vault_id)
+    vault_dir = _resolve_vault_dir(descriptor.vault_id)
+    resolved = _resolve_vault_file_path(relative_path, descriptor.vault_id)
     return resolved.relative_to(vault_dir).as_posix()
 
 
@@ -144,7 +283,9 @@ def _is_listable_markdown(candidate: Path, vault_dir: Path) -> bool:
     return candidate.is_file()
 
 
-def list_vault_files() -> dict:
+def list_vault_files(
+    vault_id: str | None = None, actor: ActorKind = "human"
+) -> dict:
     """List all ``.md`` files in the Vault for the agent context picker.
 
     Returns ``{"items": [{"relative_path", "size", "mtime"}], "total"}``
@@ -152,7 +293,9 @@ def list_vault_files() -> dict:
     (``.obsidian``, ``.trash``, ``.git``, …) and symlink escapes are
     excluded. Only paths are returned; note bodies are read on demand.
     """
-    vault_dir = _resolve_vault_dir()
+    descriptor = _resolve_vault_descriptor(vault_id)
+    check_ai_read_access(descriptor.vault_id, actor)
+    vault_dir = _resolve_vault_dir(descriptor.vault_id)
     if not vault_dir.is_dir():
         raise FileNotFoundError("Vault directory not found")
     items: list[dict] = []
@@ -165,6 +308,7 @@ def list_vault_files() -> dict:
             continue
         items.append(
             {
+                "vault_id": descriptor.vault_id,
                 "relative_path": candidate.relative_to(vault_dir).as_posix(),
                 "size": stat.st_size,
                 "mtime": stat.st_mtime,
@@ -196,10 +340,14 @@ def list_vault_files() -> dict:
 # 能動的なローカル攻撃者への完全防止は保証しない。
 
 
-def _resolve_vault_dir() -> Path:
+def _resolve_vault_dir(vault_id: str | None = None) -> Path:
     # NOTE: module-level ``config`` import (not a function-local one) keeps
     # this service on the same config object the test sandbox patches, even
     # when another test module replaces sys.modules["...utils.config"].
+    # The Registry is the sole entry point; VAULT_PATH is only a legacy
+    # fallback when the registry is unavailable (startup failure path).
+    if config.VAULT_REGISTRY is not None:
+        return config.resolve_vault_descriptor(vault_id).path.resolve(strict=False)
     raw = getattr(config, "VAULT_PATH", None)
     if raw is None or (isinstance(raw, str) and raw.strip() == ""):
         raise ValueError("Vault path is not configured (VAULT_PATH is empty)")
@@ -238,18 +386,29 @@ def _resolve_contained_target(vault_dir: Path, relative_path: str) -> tuple[Path
     return candidate, resolved
 
 
-def write_vault_file(relative_path: str, content: str, overwrite: bool = False) -> dict:
+def write_vault_file(
+    relative_path: str,
+    content: str,
+    overwrite: bool = False,
+    vault_id: str | None = None,
+    actor: ActorKind = "human",
+) -> dict:
     """Write UTF-8 text to a Vault-relative file atomically.
 
     Creates missing parent directories inside the Vault. Existing files are
     only replaced when ``overwrite`` is explicitly ``True``; otherwise a
     ``FileExistsError`` is raised and the existing file is left untouched.
+    ``vault_id`` defaults to the primary Vault. AI actors are gated by
+    ``ai_access`` immediately before the side effect; ``main`` is refused
+    for generic AI writes.
     """
     if not isinstance(content, str):
         raise TypeError("content must be a string")
     if not isinstance(overwrite, bool):
         raise TypeError("overwrite must be a boolean")
-    vault_dir = _resolve_vault_dir()
+    descriptor = _resolve_vault_descriptor(vault_id)
+    check_ai_write_access(descriptor.vault_id, actor)
+    vault_dir = _resolve_vault_dir(descriptor.vault_id)
     try:
         vault_dir.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
@@ -320,6 +479,7 @@ def write_vault_file(relative_path: str, content: str, overwrite: bool = False) 
 
     normalized = Path(relative_path).as_posix()
     return {
+        "vault_id": descriptor.vault_id,
         "relative_path": normalized,
         "bytes_written": len(data),
         "overwritten": bool(already_exists),

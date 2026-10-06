@@ -790,6 +790,9 @@ def get_db_connection() -> sqlite3.Connection:
     if current_version <= 76:
         run_migration_v77(conn)
 
+    if current_version <= 77:
+        run_migration_v78(conn)
+
     return conn
 
 
@@ -1885,6 +1888,24 @@ def run_migration_v77(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def run_migration_v78(conn: sqlite3.Connection) -> None:
+    """Run migration for version 78 (agents.default_vault_ids_json).
+
+    Adds ``agents.default_vault_ids_json`` (JSON list of Vault IDs searched
+    by default, e.g. ``["main"]``). Existing rows keep the primary-Vault
+    default via the column default; no conversation history is touched.
+    """
+    try:
+        conn.execute(
+            "ALTER TABLE agents ADD COLUMN default_vault_ids_json TEXT "
+            "NOT NULL DEFAULT '[\"main\"]';"
+        )
+    except sqlite3.OperationalError as e:
+        _ignore_duplicate_schema_object(e)
+    conn.execute("PRAGMA user_version = 78;")
+    conn.commit()
+
+
 def run_migration_v72(conn: sqlite3.Connection) -> None:
     """Run migration for version 72 (notification_settings and web_push_subscriptions tables)."""
     conn.execute("""
@@ -2764,6 +2785,7 @@ def run_migration_v21(conn: sqlite3.Connection) -> None:
             tool_ids_json TEXT NOT NULL DEFAULT '[]',
             advanced_params_json TEXT NOT NULL DEFAULT '{}',
             delegate_agent_ids_json TEXT NOT NULL DEFAULT '[]',
+            default_vault_ids_json TEXT NOT NULL DEFAULT '["main"]',
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         );

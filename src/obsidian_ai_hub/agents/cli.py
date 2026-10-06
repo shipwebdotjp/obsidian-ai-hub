@@ -157,7 +157,8 @@ def main_agent_create(path: str) -> int:
     """Create an Agent from a JSON file and print the stored record.
 
     Required keys: ``name`` / ``system_prompt``. Optional: ``tool_ids`` /
-    ``delegate_agent_ids`` / ``provider`` / ``model`` / ``advanced_params``.
+    ``delegate_agent_ids`` / ``provider`` / ``model`` / ``advanced_params`` /
+    ``default_vault_ids``.
     Returns 1 when the file or payload cannot be used.
     """
 
@@ -186,6 +187,7 @@ def main_agent_create(path: str) -> int:
             provider=payload.get("provider"),
             model=payload.get("model"),
             advanced_params=payload.get("advanced_params"),
+            default_vault_ids=payload.get("default_vault_ids"),
         )
     except (ValueError, TypeError, AttributeError) as exc:
         return _fail(str(exc))

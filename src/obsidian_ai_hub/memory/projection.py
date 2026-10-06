@@ -93,12 +93,13 @@ def render_copilot_profile() -> list[str]:
         List of updated relative file paths.
     """
     logger.info("Starting copilot profile rendering")
+    config.ensure_vault_registry()
 
     # Get active/valid approved memories
     active_approved, _ = get_currently_valid_approved_memories()
 
     # Build file mapping and absolute paths
-    copilot_dir = Path(config.VAULT_PATH) / "copilot"
+    copilot_dir = Path(config.PRIMARY_VAULT_PATH) / "copilot"
     core_dir = copilot_dir / "core"
 
     copilot_dir.mkdir(parents=True, exist_ok=True)
@@ -214,7 +215,7 @@ generated_at: {timestamp}
         with open(dest_path, "w", encoding="utf-8") as f:
             f.write(markdown_content)
 
-        # relative to VAULT_PATH
+        # relative to PRIMARY_VAULT_PATH
         relative_p = _vault_relative_path(dest_path)
         updated_paths.append(relative_p)
 

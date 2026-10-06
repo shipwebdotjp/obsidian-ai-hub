@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { listVaultFiles, searchVault } from "../../api/client";
 import type { VaultFileListItem } from "../../api/types";
+import { useVaults, vaultLabel } from "../../hooks/useVaults";
 import { MAX_AGENT_CONTEXT_REFS, type PendingContextRef } from "./agentViewUtils";
 import {
   buildVaultTree,
@@ -26,6 +27,7 @@ import {
 } from "../../utils/vault";
 
 interface ContentHit {
+  vaultId: string;
   path: string;
   snippet: string;
 }
@@ -40,7 +42,7 @@ interface ContentHit {
  */
 interface AgentVaultFilePickerProps {
   selected: PendingContextRef[];
-  onToggle: (path: string) => void;
+  onToggle: (path: string, vaultId: string) => void;
   onClose: () => void;
 }
 
@@ -48,20 +50,27 @@ export function AgentVaultFilePicker({ selected, onToggle, onClose }: AgentVault
   const [files, setFiles] = useState<VaultFileListItem[] | null>(null);
   const [filesLoading, setFilesLoading] = useState(false);
   const [filesError, setFilesError] = useState<string | null>(null);
+  const { vaults: vaultList, error: vaultsError } = useVaults();
+  const [vaultId, setVaultId] = useState<string>("main");
   const [query, setQuery] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [highlight, setHighlight] = useState(0);
   const [contentHits, setContentHits] = useState<ContentHit[]>([]);
   const [contentSearching, setContentSearching] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const selectedPaths = useMemo(() => new Set(selected.map((r) => r.path)), [selected]);
+  const selectedPaths = useMemo(
+    () => new Set(selected.map((r) => `${r.vault_id ?? "main"}:${r.path}`)),
+    [selected],
+  );
   const limitReached = selected.length >= MAX_AGENT_CONTEXT_REFS;
 
-  const loadFiles = useCallback(async () => {
+  const vaults = vaultList ?? [];
+
+  const loadFiles = useCallback(async (vault: string) => {
     setFilesLoading(true);
     setFilesError(null);
     try {
-      const res = await listVaultFiles();
+      const res = await listVaultFiles(vault);
       setFiles(res.items);
       // 初回はトップレベルディレクトリだけ展開しておく
       setExpanded((prev) => {
@@ -81,8 +90,15 @@ export function AgentVaultFilePicker({ selected, onToggle, onClose }: AgentVault
   }, []);
 
   useEffect(() => {
-    void loadFiles();
-  }, [loadFiles]);
+    void loadFiles(vaultId);
+  }, [loadFiles, vaultId]);
+
+  const handleVaultChange = useCallback((next: string) => {
+    setVaultId(next);
+    setExpanded(new Set());
+    setQuery("");
+    setContentHits([]);
+  }, []);
 
   useEffect(() => {
     searchInputRef.current?.focus();
@@ -105,17 +121,19 @@ export function AgentVaultFilePicker({ selected, onToggle, onClose }: AgentVault
     setContentSearching(true);
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
-      void searchVault({ q: trimmedQuery, k: 10, mode: "hybrid" }, controller.signal)
+      void searchVault({ q: trimmedQuery, k: 10, mode: "hybrid", vault: [vaultId] }, controller.signal)
         .then((res) => {
           if (controller.signal.aborted) return;
           const seen = new Set<string>();
           const hits: ContentHit[] = [];
           for (const hit of res.items) {
             const path = hit.metadata?.relative_path;
-            if (!path || seen.has(path)) continue;
-            seen.add(path);
+            const hitVault = hit.metadata?.vault_id ?? vaultId;
+            const dedupKey = `${hitVault}:${path}`;
+            if (!path || seen.has(dedupKey)) continue;
+            seen.add(dedupKey);
             const snippet = (hit.content || "").replace(/\s+/g, " ").slice(0, 120);
-            hits.push({ path, snippet });
+            hits.push({ vaultId: hitVault, path, snippet });
             if (hits.length >= 5) break;
           }
           setContentHits(hits);
@@ -131,7 +149,7 @@ export function AgentVaultFilePicker({ selected, onToggle, onClose }: AgentVault
       controller.abort();
       window.clearTimeout(timer);
     };
-  }, [trimmedQuery]);
+  }, [trimmedQuery, vaultId]);
 
   const filenamePaths = useMemo(
     () => new Set(filenameMatches.map((f) => f.relative_path)),
@@ -166,9 +184,9 @@ export function AgentVaultFilePicker({ selected, onToggle, onClose }: AgentVault
         toggleDirectory(row.node.path);
         return;
       }
-      if (row.path) onToggle(row.path);
+      if (row.path) onToggle(row.path, vaultId);
     },
-    [onToggle, toggleDirectory],
+    [onToggle, toggleDirectory, vaultId],
   );
 
   const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -196,7 +214,7 @@ export function AgentVaultFilePicker({ selected, onToggle, onClose }: AgentVault
     navIndex: number,
     snippet?: string,
   ) => {
-    const isSelected = selectedPaths.has(path);
+    const isSelected = selectedPaths.has(`${vaultId}:${path}`);
     const isHighlight = navIndex === highlight;
     const disabled = !isSelected && limitReached;
     return (
@@ -204,7 +222,7 @@ export function AgentVaultFilePicker({ selected, onToggle, onClose }: AgentVault
         key={key}
         type="button"
         disabled={disabled}
-        onClick={() => onToggle(path)}
+        onClick={() => onToggle(path, vaultId)}
         onMouseEnter={() => setHighlight(navIndex)}
         className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs disabled:cursor-not-allowed disabled:opacity-40 ${
           isHighlight ? "bg-slate-100" : "hover:bg-slate-50"
@@ -240,8 +258,8 @@ export function AgentVaultFilePicker({ selected, onToggle, onClose }: AgentVault
 
   // ファイル一覧に無いパス（削除済み等）は候補から除外する
   const renderedContentHits = useMemo(
-    () => contentOnlyHits.filter((h) => fileByPath.has(h.path)),
-    [contentOnlyHits, fileByPath],
+    () => contentOnlyHits.filter((h) => h.vaultId === vaultId && fileByPath.has(h.path)),
+    [contentOnlyHits, fileByPath, vaultId],
   );
 
   // キーボード移動対象の可視行（描画順と一致させる）
@@ -276,6 +294,26 @@ export function AgentVaultFilePicker({ selected, onToggle, onClose }: AgentVault
       className="absolute bottom-full left-3 right-3 z-20 mb-2 flex max-h-96 flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg"
     >
       <div className="flex items-center gap-2 border-b border-slate-100 px-3 py-2">
+        {vaultsError ? (
+          <span className="shrink-0 text-[10px] text-red-500" title={vaultsError}>
+            Vault取得失敗
+          </span>
+        ) : (
+          vaults.length > 0 && (
+            <select
+              value={vaultId}
+              onChange={(e) => handleVaultChange(e.target.value)}
+              aria-label="参照するVault"
+              className="max-w-32 shrink-0 cursor-pointer rounded border border-slate-200 bg-white px-1 py-0.5 text-xs text-slate-700"
+            >
+              {vaults.map((v) => (
+                <option key={v.vault_id} value={v.vault_id}>
+                  {vaultLabel(v)}
+                </option>
+              ))}
+            </select>
+          )
+        )}
         <Search className="h-3.5 w-3.5 shrink-0 text-slate-400" />
         <input
           ref={searchInputRef}
@@ -299,7 +337,7 @@ export function AgentVaultFilePicker({ selected, onToggle, onClose }: AgentVault
         )}
         <button
           type="button"
-          onClick={() => void loadFiles()}
+          onClick={() => void loadFiles(vaultId)}
           className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-slate-600 cursor-pointer"
           aria-label="ファイル一覧を再読込"
         >
@@ -369,14 +407,14 @@ export function AgentVaultFilePicker({ selected, onToggle, onClose }: AgentVault
               }
               const item = row.node.file;
               if (!item) return null;
-              const isSelected = selectedPaths.has(item.relative_path);
+              const isSelected = selectedPaths.has(`${vaultId}:${item.relative_path}`);
               const disabled = !isSelected && limitReached;
               return (
                 <button
                   key={`tree:${row.key}`}
                   type="button"
                   disabled={disabled}
-                  onClick={() => onToggle(item.relative_path)}
+                  onClick={() => onToggle(item.relative_path, vaultId)}
                   onMouseEnter={() => setHighlight(navIndex)}
                   className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs disabled:cursor-not-allowed disabled:opacity-40 ${
                     isHighlight ? "bg-slate-100" : "hover:bg-slate-50"

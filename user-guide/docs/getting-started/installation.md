@@ -50,7 +50,7 @@ cp .env.example .env
 `.env.example` に記載されている主な項目:
 
 - `OBSIDIAN_AI_HUB_API_TOKEN` — Web UI / API の Bearer トークン。**空だとサーバーは起動できません。**
-- `VAULT_PATH` — Obsidian Vault の絶対パス。
+- Vault のパス — `.env` ではなく `config/config.yml` の `vaults`（`main` / `blog` / `ai`）に絶対パスを記載します。詳細は [設定の構成](../settings/configuration.md)。
 - `LOCAL_MODEL_DIR` — ローカル埋め込みモデルのダウンロードキャッシュ。
 - `AI_LOG_PATH` — AI ログの出力先。
 - LLM / 外部サービスを使う場合: `OPENAI_API_KEY`、`GEMINI_API_KEY`、`TAVILY_API_KEY`、`OPENCODE_API_KEY`、`OPEN_WEB_UI_API_KEY` など。
@@ -60,7 +60,9 @@ cp .env.example .env
 
 ### `config/config.yml` で設定するもの
 
-- `vault` / `files` — Vault 内のフォルダ名とファイル名。
+- `vaults` — Vault のパス（`main` / `blog` / `ai` の絶対パス）。
+- `primary_vault` — 主 Vault（`main`）内のフォルダ名（`inbox` / `daily` / `template` など。`dashboard` は `vault.dashboard` で上書き可）。
+- `files` — ファイル名（日次ノート、週次テンプレート、リサーチ候補テーマリストなど）。
 - `backup.sync_folders` — `--backup` の rsync 対象（source / destination）。
 - `llm.<name>` — 用途ごとの LLM プロバイダ・モデル・プロンプト上書き。
 - `research` — リサーチの既定出力スタイル・文脈収集・ディープリサーチ設定。

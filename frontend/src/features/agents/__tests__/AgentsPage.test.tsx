@@ -27,6 +27,10 @@ vi.mock("../../../api/client", () => ({
   startAgentRun: vi.fn(),
   cancelAgentRun: vi.fn(),
   subscribeAgentRunEvents: vi.fn(),
+  listVaults: vi.fn().mockResolvedValue({
+    items: [{ vault_id: "main", display_name: "Personal", is_primary: true }],
+    total: 1,
+  }),
   ApiError: class ApiError extends Error {
     status: number;
     constructor(status: number, message: string) {

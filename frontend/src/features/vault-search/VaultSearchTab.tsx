@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import VaultSearchList from "./VaultSearchList";
 import VaultNoteDetailPanel from "./VaultNoteDetailPanel";
 import MasterDetailLayout from "../../components/MasterDetailLayout";
 import { DEFAULT_LIST_RATIO } from "../../hooks/usePaneResize";
+import { useVaults, vaultLabel } from "../../hooks/useVaults";
 import type { VaultSearchHit } from "../../api/types";
 
 interface SearchHistoryItem {
@@ -44,6 +45,12 @@ export default function VaultSearchTab({ notify }: VaultSearchTabProps) {
   const [refreshKey, setRefreshKey] = useState(0);
   const [isSearching, setIsSearching] = useState(false);
   const [searchHistory, setSearchHistory] = useState<SearchHistoryItem[]>(loadHistory);
+  const [vaultFilter, setVaultFilter] = useState<string>("");
+  const { vaults, error: vaultsError } = useVaults();
+  const vaultIds = useMemo(
+    () => (vaultFilter ? [vaultFilter] : undefined),
+    [vaultFilter],
+  );
 
   useEffect(() => {
     persistHistory(searchHistory);
@@ -132,6 +139,25 @@ export default function VaultSearchTab({ notify }: VaultSearchTabProps) {
           <option value={20}>20件</option>
           <option value={50}>50件</option>
         </select>
+        <select
+          value={vaultFilter}
+          onChange={(e) => setVaultFilter(e.target.value)}
+          aria-label="Vaultフィルター"
+          title={vaultsError ?? undefined}
+          className="rounded border border-slate-300 px-2 py-1 text-sm"
+        >
+          <option value="">すべてのVault</option>
+          {(vaults ?? []).map((v) => (
+            <option key={v.vault_id} value={v.vault_id}>
+              {vaultLabel(v)}
+            </option>
+          ))}
+        </select>
+        {vaultsError && (
+          <span className="text-xs text-red-600" title={vaultsError}>
+            Vault一覧の取得に失敗したため絞り込めません
+          </span>
+        )}
         <button
           type="button"
           onClick={handleSearch}
@@ -181,6 +207,7 @@ export default function VaultSearchTab({ notify }: VaultSearchTabProps) {
                 query={committedQuery}
                 k={committedK}
                 mode={committedMode}
+                vaultIds={vaultIds}
                 refreshKey={refreshKey}
                 onSelect={(h) => {
                   setSelectedHit(h);
@@ -195,6 +222,7 @@ export default function VaultSearchTab({ notify }: VaultSearchTabProps) {
           selectedHit?.metadata.relative_path ? (
             <VaultNoteDetailPanel
               relativePath={selectedHit.metadata.relative_path}
+              vaultId={selectedHit.metadata.vault_id}
               score={selectedHit.score}
               chunkIndex={selectedHit.metadata.chunk_index}
               mtime={selectedHit.metadata.mtime}

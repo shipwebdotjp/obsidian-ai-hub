@@ -8,8 +8,19 @@ title: トラブルシューティング
 ## サーバーが起動しない
 
 - **`OBSIDIAN_AI_HUB_API_TOKEN` が空** — 空だとサーバーは起動に失敗します。`.env` に設定してください。
+- **Vault 設定が不正** — `config/config.yml` の `vaults`（`main` 必須・唯一の `role: primary`、存在する重複なし・入れ子なしのディレクトリ、
+  `ai_access` は `none` / `read` / `write` のいずれか）が不正だと Web は起動しません。
+  `make status-web` に `starting` / `ready` / `failed` と最後のエラー理由が表示されるので、まずここを確認します。
 - **ポートが使用中** — `--serve-port` で別ポートにするか、`lsof -ti :8765 | xargs kill` で解放します（LaunchAgent 登録後は `make restart-web` が行います）。
 - **フロントエンドが未ビルド（`503`）** — `make build-web` を実行して `frontend/dist` を生成します。
+
+## Vault 検索が使えない
+
+- **索引が古い / 無効** — Vault ID の `path` を変更した後は、その ID の既存索引は使われません。
+  `uv run -m obsidian_ai_hub --rebuild-vault --vault <id>` が成功するまで検索対象に戻りません。
+- **AI からの検索に出ない** — `ai_access: none` の Vault は AI の検索・読取り対象外です（人間の Web UI / CLI からは操作できます）。
+  AI の書込みが拒否される場合は `ai_access` が `write` か、`main` への汎用書込みでないかを確認します
+  （`main` への汎用 AI 書込みは常に拒否されます）。
 
 ## ブラウザで「接続エラー」になる
 

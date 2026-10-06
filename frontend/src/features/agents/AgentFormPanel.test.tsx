@@ -49,6 +49,8 @@ const baseProps: React.ComponentProps<typeof AgentFormPanel> = {
   agents: [agent],
   formDelegateAgentIds: [],
   onFormDelegateAgentIdsChange: vi.fn(),
+  formDefaultVaultIds: ["main"],
+  onFormDefaultVaultIdsChange: vi.fn(),
   copiedAgentId: false,
   agentIdCopyError: null,
   onCopyAgentId: vi.fn(),

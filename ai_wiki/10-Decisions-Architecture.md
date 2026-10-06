@@ -956,3 +956,34 @@ Web UI 画面を開いていない状態でも、人間の判断を必要とす�
 | 検索 | Chroma候補を正本の承認・有効性・ハッシュで再検証 | 不一致・削除済みは一切注入／返却しない |
 
 - **契約**: 縦断テストは `tests/test_retrieval_memory.py`（承認→索引→会話用取得→削除→再検索で不在、upsert・更新・期限切れ・単件／一括削除・モデル指紋不一致、クエリ別選択・低類似度空・`always` 優先・語句フォールバック、API制約）。
+
+## Multi-Vault v1 の導入と認可・設定・起動境界
+
+| 項目 | 内容 |
+|------|------|
+| 決定日 | 2026-10-06 |
+| カテゴリ | Multi-Vault・設定・起動検証・AI認可境界 |
+| 決定内容 | 単一 `VAULT_PATH` 設定を廃止し、`config.yml` 内の静的 Vault Registry (`vaults` および `primary_vault`) を唯一の Vault 構成とする。互換レイヤーは設けず旧設定は起動時検証で `failed` として拒否する。起動状態および失敗理由は `~/.config/obsidian-ai-hub/web_status.json` に保存し、`make status-web` を診断入口とする。Vault ごとの `ai_access` (`none` / `read` / `write`) を AI 操作の不可侵なサーバー側認可上限とし、`main` Vault への汎用 AI 書込みは拒否する。 |
+
+### Context
+
+個人運用の main Vault（一次情報・確定知識）に加えて、Hugo ブログ用 Vault や AI 作業用 Workspace Vault などの複数 Vault を検索・読取り・書込みの対象とする Multi-Vault 構成が求められていた。
+一方で、旧単一 `VAULT_PATH` や動的 Vault 設定を許すと、AI による main Vault の意図しない改ざんや認可の曖昧化、起動時の不整合が発生するリスクがあった。
+
+### Decision
+
+- **静的 Vault Registry**: Vault 構成は `config.yml` 内の `vaults` (小文字 ID、絶対パス、表示名、`role`、`ai_access`) および `primary_vault` (インボックスや日次ノート等のフォルダ名定義) で直接定義し、`.env` に Vault パスは置かない。
+- **破壊的な切り替えと非互換**: 旧 `VAULT_PATH` や旧 `vault:` 単数設定は互換レイヤーを設けず完全に廃止する。`main` Vault は必須かつ唯一の `role: primary` とする。重複パス・入れ子パス・存在しないディレクトリ・不正な `ai_access` 値は Web 起動時の検証で即座にエラーとする。
+- **起動状態の可視化**: 起動状態 (`starting` / `ready` / `failed`) と具体的なエラー要約を `~/.config/obsidian-ai-hub/web_status.json` に保存し、`make status-web` で表示可能にする。
+- **`ai_access` 認可上限**: `ai_access` は `none` / `read` / `write` の 3 値とし、LLM ツールを通じた操作に対してサーバー側で強制する。`main` Vault への汎用 Agent による書込みは一律拒否し、`blog` や `ai` Vault への直接書込みのみを無承認で許可する。ただしコード上で対象を primary Vault に固定した既存ドメインフロー（日次処理や人物同期等）は維持する。
+
+### Consequences
+
+- 設定エラー時は Web サーバーが起動せず、`make status-web` だけで障害原因を迅速に特定できる。
+- AI 操作における Vault 境界がサーバー側で強制され、main Vault の意図しない上書きを防げる。
+- 旧設定形式を使用している環境は `config.yml` の手動移行が必要となる（非互換）。
+
+### Alternatives
+
+- 旧 `VAULT_PATH` を `main` Vault として自動フォールバックする互換レイヤーを設ける: 構成の不透明化や重複定義の温床となるため不採用。
+- UI から動的に Vault の追加・削除・権限編集を行う: セキュリティ境界と設定の永続性を複雑化させるため v1 では非採用とし、`config.yml` の静的定義に絞る。

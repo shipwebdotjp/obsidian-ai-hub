@@ -294,6 +294,7 @@ def summarize_month(target_date: datetime) -> dict:
 
 
 def main(target_month_str: str = None):
+    config.ensure_vault_registry()
     if target_month_str:
         try:
             target_date = datetime.strptime(target_month_str, "%Y-%m")

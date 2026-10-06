@@ -24,7 +24,8 @@ cp .env.example .env
 ### 必須
 
 - `OBSIDIAN_AI_HUB_API_TOKEN` — Web UI / API の Bearer トークン。空だとサーバーは起動しません。
-- `VAULT_PATH` — Obsidian Vault の絶対パス。
+
+Vault のパスは `.env` には置きません。`config/config.yml` の `vaults` に絶対パスを直接記載します（下記）。
 
 ### 環境・保存先
 
@@ -65,7 +66,8 @@ cp .env.example .env
 | キー | 内容 |
 | --- | --- |
 | `ai_log_path` | AI ログのパス |
-| `vault` | Vault 内のフォルダ名（`inbox` / `daily` / `template` / `knowledge` / `research` / `activity` / `webclip`） |
+| `vaults` | Vault Registry（Vault ID → パス・表示名・`role`・`ai_access`）。`main` は必須かつ唯一の `role: primary`。各ルートは既存ディレクトリで重複・入れ子不可 |
+| `primary_vault` | main 専用の既存業務フォルダ名（`inbox` / `daily` / `template` / `knowledge` / `research` / `activity` / `webclip` / `people` / `dashboard`）。blog / ai に同じ構造は要求しない。`dashboard` のみ旧来の `vault.dashboard` で上書きできる |
 | `files` | ファイル名（日次ノート、週次テンプレート、リサーチ候補テーマリストなど） |
 | `backup.sync_folders` | `--backup` の rsync 対象（source / destination / 任意の excludes） |
 | `backup.rsync_executable` | `--backup` で使う rsync の実行ファイル絶対パス（未設定時は `rsync`） |
@@ -74,13 +76,34 @@ cp .env.example .env
 | `llm` | 用途ごとの LLM プロバイダ・モデル・プロンプト上書き（[LLM プロバイダ](llm.md)） |
 | `agent_skills.root` | Agent Skills のルート |
 | `research` | リサーチの既定出力スタイル・文脈・ディープリサーチ設定 |
-| `vault_index` | Vault 検索インデックスの collection / 保存先 / 埋め込みモデル |
+| `vault_index` | Vault 検索インデックスの collection / 保存先 / 埋め込みモデル。保存先は Vault ごとの基準ディレクトリとして使い、実体は `<基準>/<vault_id>/` 配下に分離される |
 | `retrieval` | 汎用 Retrieval 検索（長期記憶）の Chroma 保存先 / collection（埋め込みモデルは `vault_index.embedder_model` を流用） |
 | `coding` | コーディングのオーケストレーターと OpenCode ACP 設定（[コーディング設定](coding.md)） |
 | `image_generation` | 画像生成の保存先・モデル・既定サイズ/品質（[画像生成](../features/image-generation.md)） |
 | `youtube` | 文字起こし言語・Whisper モデル・要約チャンク文字数 |
 
 `memory` と `healthcare` は任意の追加セクションです。
+
+```yaml
+vaults:
+  main:
+    path: /Users/you/Documents/Obsidian
+    display_name: Personal
+    role: primary
+    ai_access: read      # AI の検索・読取りは可、汎用書込みは不可
+  blog:
+    path: /Users/you/Documents/Blog
+    display_name: Blog
+    ai_access: write     # 通常 Agent が無承認で書込み可
+  ai:
+    path: /Users/you/Documents/AI-Workspace
+    display_name: AI Workspace
+    ai_access: write
+```
+
+`ai_access` は `none`（AI の検索・読取りも不可）/ `read` / `write` のいずれかです。
+`main` への汎用 AI 書込みは常に拒否されます（対象を primary に固定した日次・Inbox 等の内部フローは除く）。
+設定が不正だと Web は起動せず、`make status-web` に理由が表示されます（[トラブルシューティング](../troubleshooting.md#サーバーが起動しない)）。
 
 ```yaml
 memory:

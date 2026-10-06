@@ -38,6 +38,29 @@ class AdvancedParamsRequest(BaseModel):
     model_config = {"extra": "forbid"}
 
 
+def _validate_vault_ids(values: Optional[List[str]]) -> Optional[List[str]]:
+    """Validate Vault IDs against the Registry, returning the cleaned list."""
+    if values is None:
+        return None
+    from obsidian_ai_hub.utils import config as app_config
+
+    cleaned: List[str] = []
+    for item in values:
+        if not isinstance(item, str) or not item.strip():
+            raise ValueError("default_vault_ids must be non-empty strings")
+        vid = item.strip()
+        if app_config.VAULT_REGISTRY is not None:
+            try:
+                app_config.VAULT_REGISTRY.get(vid)
+            except KeyError:
+                raise ValueError(f"Unknown vault ID: {vid}") from None
+        if vid not in cleaned:
+            cleaned.append(vid)
+    if not cleaned:
+        raise ValueError("default_vault_ids must not be empty")
+    return cleaned
+
+
 class CreateAgentRequest(BaseModel):
     name: str = Field(..., description="Agent display name")
     system_prompt: str = Field(..., description="System instructions for the agent")
@@ -53,6 +76,9 @@ class CreateAgentRequest(BaseModel):
     model: Optional[str] = Field(default=None, description="LLM model override")
     advanced_params: Optional[AdvancedParamsRequest] = Field(
         default=None, description="Advanced LLM params (max_tokens, reasoning.effort)"
+    )
+    default_vault_ids: Optional[List[str]] = Field(
+        default=None, description="Vault IDs searched by default (default [\"main\"])"
     )
 
 
@@ -73,6 +99,9 @@ class UpdateAgentRequest(BaseModel):
         default=None, description="Advanced LLM params (max_tokens, reasoning.effort)"
     )
     pinned: Optional[bool] = Field(default=None, description="Pin state for the agent")
+    default_vault_ids: Optional[List[str]] = Field(
+        default=None, description="Vault IDs searched by default"
+    )
 
 
 class CreatePromptTemplateRequest(BaseModel):
@@ -122,6 +151,9 @@ class SlashInvocationRequest(BaseModel):
 class ContextRefRequest(BaseModel):
     kind: str = Field(..., description="Reference kind ('vault_file')")
     path: str = Field(..., min_length=1, description="Vault-relative file path")
+    vault_id: Optional[str] = Field(
+        default=None, description="Vault ID (default \"main\")"
+    )
 
     model_config = {"extra": "forbid"}
 
@@ -157,26 +189,33 @@ def _validate_context_refs(
             f"At most {MAX_AGENT_CONTEXT_REFS} context files can be attached to one message."
         )
     normalized = normalize_context_refs(
-        [{"kind": r.kind, "path": r.path} for r in refs]
+        [{"kind": r.kind, "vault_id": r.vault_id, "path": r.path} for r in refs]
     )
     if len(refs) != len(normalized):
         raise ValueError(
             "Each context reference must have kind "
-            f"'{VAULT_FILE_REF_KIND}' and a non-empty, unique path."
+            f"'{VAULT_FILE_REF_KIND}' and a non-empty, unique (vault_id, path)."
         )
     validated: List[Dict[str, Any]] = []
     for ref in normalized:
+        vault_id = ref.get("vault_id") or "main"
         try:
-            resolved = web_service.validate_vault_file_ref(ref["path"])
+            resolved = web_service.validate_vault_file_ref(
+                ref["path"], vault_id=vault_id
+            )
+        except KeyError:
+            raise ValueError(f"Unknown vault ID: {vault_id}") from None
         except FileNotFoundError:
             raise ValueError(
-                f"Context file not found in the Vault: {ref['path']}"
+                f"Context file not found in the Vault: [{vault_id}] {ref['path']}"
             ) from None
         except ValueError as exc:
             raise ValueError(
-                f"Invalid context file path '{ref['path']}': {exc}"
+                f"Invalid context file path '[{vault_id}] {ref['path']}': {exc}"
             ) from None
-        validated.append({"kind": VAULT_FILE_REF_KIND, "path": resolved})
+        validated.append(
+            {"kind": VAULT_FILE_REF_KIND, "vault_id": vault_id, "path": resolved}
+        )
     return validated
 
 
@@ -236,6 +275,7 @@ def create_agent(req: CreateAgentRequest) -> Dict[str, Any]:
             provider=req.provider,
             model=req.model,
             advanced_params=adv,
+            default_vault_ids=_validate_vault_ids(req.default_vault_ids),
         )
         return {"agent": agent}
     except ValueError as e:
@@ -262,6 +302,11 @@ def update_agent(agent_id: str, req: UpdateAgentRequest) -> Dict[str, Any]:
         if "advanced_params" in req.model_fields_set:
             adv = req.advanced_params.model_dump(exclude_none=True) if req.advanced_params else {}
         pinned = req.pinned if "pinned" in req.model_fields_set else None
+        vault_ids = (
+            _validate_vault_ids(req.default_vault_ids)
+            if "default_vault_ids" in req.model_fields_set
+            else None
+        )
         agent = agent_service.update_agent(
             agent_id=agent_id,
             name=req.name,
@@ -272,6 +317,7 @@ def update_agent(agent_id: str, req: UpdateAgentRequest) -> Dict[str, Any]:
             model=req.model,
             advanced_params=adv,
             pinned=pinned,
+            default_vault_ids=vault_ids,
         )
         return {"agent": agent}
     except FileNotFoundError as e:

@@ -39,6 +39,7 @@ export interface VaultExplorerTabProps {
   files: VaultFileListItem[] | null;
   loading: boolean;
   error: string | null;
+  vaultId?: string | null;
   onReload: () => void;
   expandedDirs: string[];
   onToggleDir: (dir: string) => void;
@@ -61,6 +62,7 @@ export default function VaultExplorerTab({
   files,
   loading,
   error,
+  vaultId,
   onReload,
   expandedDirs,
   onToggleDir,
@@ -277,6 +279,7 @@ export default function VaultExplorerTab({
   const detailPane = notePath ? (
     <VaultNoteDetailPanel
       relativePath={notePath}
+      vaultId={vaultId ?? selectedFile?.vault_id ?? null}
       mtime={selectedFile?.mtime}
       notify={notify}
     />

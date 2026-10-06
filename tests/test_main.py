@@ -92,7 +92,7 @@ def test_vault_write_dispatches_with_file_and_overwrite(monkeypatch, tmp_path):
         with patch.object(sys, "exit") as mock_exit:
             main_module.main()
     mock_write.assert_called_once_with(
-        "project/x.md", str(content_file), overwrite=True
+        "project/x.md", str(content_file), overwrite=True, vault_id=None
     )
     mock_exit.assert_called_once_with(0)
 

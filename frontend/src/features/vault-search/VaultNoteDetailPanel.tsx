@@ -6,6 +6,7 @@ import { formatMtime, formatScore } from "./utils";
 
 export interface VaultNoteDetailPanelProps {
   relativePath: string;
+  vaultId?: string | null;
   notify: (msg: string, kind?: "info" | "error") => void;
   score?: number;
   chunkIndex?: number | null;
@@ -18,6 +19,7 @@ export interface VaultNoteDetailPanelProps {
  */
 export default function VaultNoteDetailPanel({
   relativePath,
+  vaultId,
   notify,
   score,
   chunkIndex,
@@ -43,7 +45,7 @@ export default function VaultNoteDetailPanel({
     setContent("");
     setVaultName(null);
 
-    getVaultFile(relativePath, controller.signal)
+    getVaultFile(relativePath, vaultId ?? null, controller.signal)
       .then((res) => {
         setContent(res.content);
         setVaultName(res.vault_name ?? null);
@@ -64,7 +66,7 @@ export default function VaultNoteDetailPanel({
     return () => {
       controller.abort();
     };
-  }, [relativePath]);
+  }, [relativePath, vaultId]);
 
   const handleOpenInObsidian = () => {
     const url = buildObsidianUrl(vaultName, relativePath);

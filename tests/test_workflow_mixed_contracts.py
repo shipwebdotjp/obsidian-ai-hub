@@ -77,8 +77,34 @@ def _validate(nodes, edges):
 
 
 def _patch_vault(monkeypatch, repo_path):
+    from pathlib import Path as _Path
+
     from obsidian_ai_hub.utils import config as app_config
 
+    repo_path = _Path(repo_path)
+    repo_path.mkdir(parents=True, exist_ok=True)
+    primary_dir = repo_path.parent / (repo_path.name + "-primary")
+    primary_dir.mkdir(parents=True, exist_ok=True)
+    registry = app_config.validate_vault_registry(
+        {
+            "vaults": {
+                "main": {
+                    "path": str(primary_dir),
+                    "display_name": "Test Personal",
+                    "role": "primary",
+                    "ai_access": "read",
+                },
+                "blog": {
+                    "path": str(repo_path),
+                    "display_name": "Test Blog",
+                    "ai_access": "write",
+                },
+            }
+        }
+    )
+    monkeypatch.setattr(app_config, "VAULT_REGISTRY", registry)
+    monkeypatch.setattr(app_config, "PRIMARY_VAULT", registry.get_primary())
+    monkeypatch.setattr(app_config, "PRIMARY_VAULT_PATH", primary_dir)
     monkeypatch.setattr(app_config, "VAULT_PATH", repo_path)
     monkeypatch.setattr(vault_service.config, "VAULT_PATH", repo_path)
 
@@ -588,6 +614,7 @@ def test_specialist_narrative_to_template_to_vault_file_write(
             {
                 "capability_key": "vault_write_file",
                 "inputs": {
+                    "vault_id": "blog",
                     "relative_path": "specialist-summary.md",
                     "content": _ref("nodes.tmpl1.output.text"),
                 },
@@ -651,6 +678,7 @@ def test_research_narrative_to_template_to_vault_file_write(
             {
                 "capability_key": "vault_write_file",
                 "inputs": {
+                    "vault_id": "blog",
                     "relative_path": "research-summary.md",
                     "content": _ref("nodes.tmpl1.output.text"),
                 },

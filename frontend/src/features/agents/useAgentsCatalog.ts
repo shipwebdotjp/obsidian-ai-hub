@@ -52,6 +52,7 @@ export function useAgentsCatalog({
   const [formModel, setFormModel] = useState("");
   const [formToolIds, setFormToolIds] = useState<string[]>([]);
   const [formDelegateAgentIds, setFormDelegateAgentIds] = useState<string[]>([]);
+  const [formDefaultVaultIds, setFormDefaultVaultIds] = useState<string[]>(["main"]);
   const [formMaxTokens, setFormMaxTokens] = useState<string>("");
   const [formReasoningEffort, setFormReasoningEffort] = useState<string>("");
   const [isAdvancedOpen, setIsAdvancedOpen] = useState(false);
@@ -144,6 +145,7 @@ export function useAgentsCatalog({
     setFormModel("");
     setFormToolIds([]);
     setFormDelegateAgentIds([]);
+    setFormDefaultVaultIds(["main"]);
     setFormMaxTokens("");
     setFormReasoningEffort("");
     setIsAdvancedOpen(false);
@@ -161,6 +163,7 @@ export function useAgentsCatalog({
     setFormModel(agent.model || "");
     setFormToolIds(agent.tool_ids || []);
     setFormDelegateAgentIds(agent.delegate_agent_ids || []);
+    setFormDefaultVaultIds(agent.default_vault_ids?.length ? agent.default_vault_ids : ["main"]);
     const adv = agent.advanced_params ?? {};
     setFormMaxTokens(adv.max_tokens != null ? String(adv.max_tokens) : "");
     setFormReasoningEffort(adv.reasoning?.effort ?? "");
@@ -209,6 +212,7 @@ export function useAgentsCatalog({
           model: formModel || undefined,
           tool_ids: formToolIds,
           delegate_agent_ids,
+          default_vault_ids: formDefaultVaultIds.length ? formDefaultVaultIds : ["main"],
           advanced_params: Object.keys(advanced_params).length ? advanced_params : undefined,
         });
         setAgents((prev) => [res.agent, ...prev]);
@@ -221,6 +225,7 @@ export function useAgentsCatalog({
           model: formModel,
           tool_ids: formToolIds,
           delegate_agent_ids,
+          default_vault_ids: formDefaultVaultIds.length ? formDefaultVaultIds : ["main"],
           advanced_params,
         });
         setAgents((prev) =>
@@ -349,6 +354,8 @@ export function useAgentsCatalog({
     setFormToolIds,
     formDelegateAgentIds,
     setFormDelegateAgentIds,
+    formDefaultVaultIds,
+    setFormDefaultVaultIds,
     formMaxTokens,
     setFormMaxTokens,
     formReasoningEffort,

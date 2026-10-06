@@ -7,6 +7,7 @@ vi.mock("../../api/client", () => ({
   searchVault: vi.fn(),
   listVaultFiles: vi.fn(),
   getVaultFile: vi.fn(),
+  listVaults: vi.fn(),
   ApiError: class ApiError extends Error {
     status: number;
     constructor(status: number, message: string) {
@@ -16,16 +17,21 @@ vi.mock("../../api/client", () => ({
   },
 }));
 
-import { searchVault, listVaultFiles, getVaultFile } from "../../api/client";
+import { searchVault, listVaultFiles, getVaultFile, listVaults } from "../../api/client";
 import { VAULT_SEARCH_UI_STORAGE_KEY } from "./vaultSearchUiState";
 
 const mockSearchVault = vi.mocked(searchVault);
 const mockListVaultFiles = vi.mocked(listVaultFiles);
 const mockGetVaultFile = vi.mocked(getVaultFile);
+const mockListVaults = vi.mocked(listVaults);
 const HISTORY_KEY = "obsidian-ai-hub:vault-search-history:v1";
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockListVaults.mockResolvedValue({
+    items: [{ vault_id: "main", display_name: "Personal", is_primary: true }],
+    total: 1,
+  });
   mockListVaultFiles.mockResolvedValue({ items: [], total: 0 });
   mockGetVaultFile.mockResolvedValue({
     content: "",

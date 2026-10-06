@@ -21,8 +21,16 @@ from obsidian_ai_hub.utils import config as app_config
 from obsidian_ai_hub.web.services import vault as vault_service
 
 
+def _blog_vault() -> Path:
+    return app_config.VAULT_REGISTRY.get("blog").path
+
+
 def _invoke_tool(payload: dict) -> dict:
-    return json.loads(agent_registry.vault_write_file.invoke(payload))
+    # The generic Agent tool targets the writable blog Vault by default;
+    # generic writes to main are refused (pass vault_id explicitly to
+    # override, e.g. to assert the refusal).
+    merged = {"vault_id": "blog", **payload}
+    return json.loads(agent_registry.vault_write_file.invoke(merged))
 
 
 def _no_tmp_leftovers(vault: Path) -> None:
@@ -35,16 +43,16 @@ def test_create_new_file():
     assert res["relative_path"] == "notes/new-note.md"
     assert res["bytes_written"] == len("# hi\n".encode("utf-8"))
     assert res["overwritten"] is False
-    target = Path(app_config.VAULT_PATH) / "notes" / "new-note.md"
+    target = _blog_vault() / "notes" / "new-note.md"
     assert target.read_text(encoding="utf-8") == "# hi\n"
-    _no_tmp_leftovers(Path(app_config.VAULT_PATH))
+    _no_tmp_leftovers(_blog_vault())
 
 
 def test_creates_parent_directories():
     res = _invoke_tool({"relative_path": "a/b/c/deep.md", "content": "deep content"})
     assert res["relative_path"] == "a/b/c/deep.md"
     assert res["bytes_written"] == len(b"deep content")
-    target = Path(app_config.VAULT_PATH) / "a" / "b" / "c" / "deep.md"
+    target = _blog_vault() / "a" / "b" / "c" / "deep.md"
     assert target.read_text(encoding="utf-8") == "deep content"
 
 
@@ -55,7 +63,7 @@ def test_explicit_overwrite():
     )
     assert res["overwritten"] is True
     assert res["bytes_written"] == len(b"v2")
-    target = Path(app_config.VAULT_PATH) / "notes" / "over.md"
+    target = _blog_vault() / "notes" / "over.md"
     assert target.read_text(encoding="utf-8") == "v2"
 
 
@@ -63,9 +71,9 @@ def test_overwrite_denied_without_flag():
     _invoke_tool({"relative_path": "notes/keep.md", "content": "original"})
     res = _invoke_tool({"relative_path": "notes/keep.md", "content": "changed"})
     assert "error" in res
-    target = Path(app_config.VAULT_PATH) / "notes" / "keep.md"
+    target = _blog_vault() / "notes" / "keep.md"
     assert target.read_text(encoding="utf-8") == "original"
-    _no_tmp_leftovers(Path(app_config.VAULT_PATH))
+    _no_tmp_leftovers(_blog_vault())
 
 
 def test_overwrite_false_is_denied_explicitly():
@@ -100,7 +108,7 @@ def test_absolute_path_rejected(tmp_path: Path):
 
 
 def test_symlink_escape_rejected(tmp_path: Path):
-    vault = Path(app_config.VAULT_PATH)
+    vault = _blog_vault()
     vault.mkdir(parents=True, exist_ok=True)
     outside_dir = tmp_path / "outside_dir"
     outside_dir.mkdir()
@@ -123,21 +131,22 @@ def test_utf8_content_roundtrip():
     content = "日本語のメモ 🎉\n\n- 箇条書き\n"
     res = _invoke_tool({"relative_path": "notes/utf8.md", "content": content})
     assert res["bytes_written"] == len(content.encode("utf-8"))
-    target = Path(app_config.VAULT_PATH) / "notes" / "utf8.md"
+    target = _blog_vault() / "notes" / "utf8.md"
     assert target.read_text(encoding="utf-8") == content
     # Read back through the existing read path.
-    read_back = vault_service.get_vault_file("notes/utf8.md")
+    read_back = vault_service.get_vault_file("notes/utf8.md", vault_id="blog")
     assert read_back["content"] == content
 
 
 def test_vault_not_configured(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(app_config, "VAULT_REGISTRY", None)
     monkeypatch.setattr(app_config, "VAULT_PATH", "")
     res = _invoke_tool({"relative_path": "notes/x.md", "content": "hi"})
     assert "error" in res
 
 
 def test_io_error_surfaced_as_tool_error():
-    vault = Path(app_config.VAULT_PATH)
+    vault = _blog_vault()
     vault.mkdir(parents=True, exist_ok=True)
     (vault / "blocker").write_text("i am a file", encoding="utf-8")
     res = _invoke_tool(
@@ -164,7 +173,7 @@ def test_dot_root_and_nul_paths_rejected():
 
 
 def test_existing_symlink_is_replaced_not_followed():
-    vault = Path(app_config.VAULT_PATH)
+    vault = _blog_vault()
     vault.mkdir(parents=True, exist_ok=True)
     real = vault / "real-target.md"
     real.write_text("real content", encoding="utf-8")
@@ -181,7 +190,7 @@ def test_existing_symlink_is_replaced_not_followed():
 
 
 def test_broken_symlink_outside_rejected_even_with_overwrite(tmp_path: Path):
-    vault = Path(app_config.VAULT_PATH)
+    vault = _blog_vault()
     vault.mkdir(parents=True, exist_ok=True)
     (vault / "dangling.md").symlink_to(tmp_path / "no-such-dir" / "x.md")
     res = _invoke_tool(
@@ -192,7 +201,7 @@ def test_broken_symlink_outside_rejected_even_with_overwrite(tmp_path: Path):
 
 
 def test_broken_symlink_inside_replaced_with_overwrite():
-    vault = Path(app_config.VAULT_PATH)
+    vault = _blog_vault()
     vault.mkdir(parents=True, exist_ok=True)
     (vault / "inner-dangling.md").symlink_to(vault / "never-created.md")
     res = _invoke_tool(
@@ -212,7 +221,7 @@ def test_concurrent_create_is_not_overwritten(monkeypatch: pytest.MonkeyPatch):
     the concurrent content must be preserved.
     """
     real_open = os.open
-    vault = Path(app_config.VAULT_PATH)
+    vault = _blog_vault()
     sentinel = "concurrent winner"
     raced: list[str] = []
 
@@ -240,7 +249,11 @@ def test_ai_agent_registry_exposes_tool():
     resolved = agent_registry.resolve_tools(["vault_write_file"])
     assert len(resolved) == 1
     assert resolved[0].name == "vault_write_file"
-    res = json.loads(resolved[0].invoke({"relative_path": "r.md", "content": "x"}))
+    res = json.loads(
+        resolved[0].invoke(
+            {"relative_path": "r.md", "content": "x", "vault_id": "blog"}
+        )
+    )
     assert res["relative_path"] == "r.md"
 
 
@@ -281,6 +294,7 @@ def test_task_adapter_executes_write_end_to_end():
                     "title": "write",
                     "target": {},
                     "inputs": {
+                        "vault_id": "blog",
                         "relative_path": "task-agent/note.md",
                         "content": "from task",
                     },
@@ -297,7 +311,8 @@ def test_task_adapter_executes_write_end_to_end():
     assert result.capability_key == "vault_write_file"
     summary = json.loads(result.summary)
     assert summary["relative_path"] == "task-agent/note.md"
-    target = Path(app_config.VAULT_PATH) / "task-agent" / "note.md"
+    assert summary["vault_id"] == "blog"
+    target = _blog_vault() / "task-agent" / "note.md"
     assert target.read_text(encoding="utf-8") == "from task"
 
     # A conflicting re-run without overwrite fails instead of overwriting.
@@ -311,6 +326,7 @@ def test_task_adapter_executes_write_end_to_end():
                     "title": "rewrite",
                     "target": {},
                     "inputs": {
+                        "vault_id": "blog",
                         "relative_path": "task-agent/note.md",
                         "content": "changed",
                     },
@@ -354,4 +370,4 @@ def test_adapter_rejects_unknown_inputs_before_writing():
     )
     with pytest.raises(ValueError, match="inputs invalid"):
         get_default_executor().execute_step(task, plan, 0, plan["plan"]["steps"][0])
-    assert not (Path(app_config.VAULT_PATH) / "x.md").exists()
+    assert not (_blog_vault() / "x.md").exists()

@@ -63,6 +63,32 @@ def _configure_security(token: str) -> None:
 def create_app(
     host: str | None = None, port: int | None = None, token: str | None = None
 ) -> FastAPI:
+    from obsidian_ai_hub.utils import config as app_config
+    from obsidian_ai_hub.utils.config import (
+        IS_TEST_ENV,
+        _load_yaml_config,
+        update_web_status,
+        validate_vault_registry,
+    )
+
+    update_web_status("starting")
+    try:
+        current_config = _load_yaml_config()
+        validate_vault_registry(
+            current_config,
+            is_test_env=IS_TEST_ENV,
+            test_workspace=getattr(app_config, "TEST_WORKSPACE", None)
+            if IS_TEST_ENV
+            else None,
+        )
+    except Exception as exc:
+        err_msg = str(exc)
+        update_web_status("failed", error=err_msg)
+        logger.error("Web server startup failed due to Vault Registry error: %s", err_msg)
+        raise RuntimeError(f"Vault Registry validation failed: {err_msg}") from exc
+
+    update_web_status("ready")
+
     if host is None:
         host = os.getenv("OBSIDIAN_AI_HUB_HOST", DEFAULT_HOST)
     if port is None:

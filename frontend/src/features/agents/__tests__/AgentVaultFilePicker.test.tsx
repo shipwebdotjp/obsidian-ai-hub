@@ -6,12 +6,14 @@ import { AgentVaultFilePicker } from "../AgentVaultFilePicker";
 vi.mock("../../../api/client", () => ({
   listVaultFiles: vi.fn(),
   searchVault: vi.fn(),
+  listVaults: vi.fn(),
 }));
 
-import { listVaultFiles, searchVault } from "../../../api/client";
+import { listVaultFiles, searchVault, listVaults } from "../../../api/client";
 
 const mockListVaultFiles = vi.mocked(listVaultFiles);
 const mockSearchVault = vi.mocked(searchVault);
+const mockListVaults = vi.mocked(listVaults);
 
 const FILES = {
   items: [
@@ -33,6 +35,10 @@ function setup(selected: { kind: "vault_file"; path: string }[] = []) {
 describe("AgentVaultFilePicker", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockListVaults.mockResolvedValue({
+      items: [{ vault_id: "main", display_name: "Personal", is_primary: true }],
+      total: 1,
+    });
     mockListVaultFiles.mockResolvedValue(FILES);
     mockSearchVault.mockResolvedValue({ items: [], total: 0 });
   });
@@ -54,7 +60,7 @@ describe("AgentVaultFilePicker", () => {
     });
     // 初回はトップレベル展開済みのはず
     await user.click(screen.getByText("2026-09-21 定例.md"));
-    expect(onToggle).toHaveBeenCalledWith("会議/2026-09-21 定例.md");
+    expect(onToggle).toHaveBeenCalledWith("会議/2026-09-21 定例.md", "main");
   });
 
   it("filters by filename as the query is typed", async () => {

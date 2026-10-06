@@ -23,7 +23,7 @@ function getLocalStorage(): Storage | null {
 }
 
 function toPendingRef(ref: AgentContextRef): PendingContextRef {
-  return { kind: "vault_file", path: ref.path };
+  return { kind: "vault_file", vault_id: ref.vault_id ?? "main", path: ref.path };
 }
 
 /** 指定セッションの参照下書きを読む。破損時は空配列。上限で切り詰める。 */
@@ -57,7 +57,7 @@ export function writeAgentContextRefDraft(sessionId: string, refs: PendingContex
     storage.setItem(
       key,
       JSON.stringify({
-        refs: refs.map((r) => ({ kind: r.kind, path: r.path })),
+        refs: refs.map((r) => ({ kind: r.kind, vault_id: r.vault_id ?? "main", path: r.path })),
         savedAt: new Date().toISOString(),
       }),
     );

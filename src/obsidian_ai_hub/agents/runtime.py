@@ -400,6 +400,9 @@ def delegate_subagent(
         "delegation_ctx": delegation_ctx,
         # A delegated sub-agent's LLM also chooses arguments: keep the lock.
         "llm_decides_params": True,
+        # The child agent searches its own default Vaults, not the parent's.
+        "actor_kind": "agent",
+        "default_vault_ids": list(child_agent.get("default_vault_ids") or ["main"]),
     }
 
     try:
@@ -1044,6 +1047,10 @@ async def generate_agent_stream(
             # parameters (e.g. image quality) may be locked (see
             # image_generation.lock_llm_quality).
             "llm_decides_params": True,
+            # Vault scope: the agent's default Vaults bound server-side; the
+            # LLM can only add per-call Vaults, never widen this default.
+            "actor_kind": "agent",
+            "default_vault_ids": list(agent.get("default_vault_ids") or ["main"]),
         }
 
         # Pre-discover skills so skill tools bind to the same frozen index

@@ -37,7 +37,7 @@ flowchart LR
     APP --> EXT["Apple カレンダー / リマインダー / LINE / LLM"]
 ```
 
-- **Vault** — ノートやサマリの保存先。`VAULT_PATH` で指定する。
+- **Vault** — ノートやサマリの保存先。`config/config.yml` の `vaults` で指定する（`main` が既定の primary Vault）。
 - **SQLite** — 承認待ち、長期メモリ、Task、ワークフロー、実行ログなどの状態を保持する。
 - **外部連携** — LLM プロバイダ、Apple カレンダー / リマインダー、LINE など。
 

@@ -58,23 +58,25 @@ class TestIsolation:
         assert out.startswith("/") or out.startswith("/private/")
         assert "/prod" not in out
         assert "obsidian-ai-hub-test-" in out
-        assert out.endswith("/vault")
+        assert out.endswith("test_vaults/main")
 
     def test_all_paths_under_test_workspace(self):
         """ENV=test → all paths share the same TEST_WORKSPACE"""
         out, _ = _run(
             "from obsidian_ai_hub.utils import config; "
-            "print(config.VAULT_PATH, config.MEMORY_SQLITE_PATH, "
+            "print(config.TEST_WORKSPACE, config.VAULT_PATH, config.MEMORY_SQLITE_PATH, "
             "config.AI_LOG_PATH, config.VAULT_INDEX_SQLITE_PATH, "
             "config.VAULT_INDEX_CHROMA_PATH, config.ACTIVITY_PATH, "
             "config.JOB_RUN_STATE_PATH, config.KNOWLEDGE_SYNC_STATE_PATH)",
             extra_env={"ENV": "test", "OAIHUB_SKIP_DOTENV": "1"},
         )
+        import os as _os
+
         parts = out.split()
-        assert len(parts) == 8
-        ws = str(Path(parts[0]).parent)  # VAULT_PATH parent == TEST_WORKSPACE
-        for p in parts:
-            assert str(p).startswith(ws), f"{p} not under {ws}"
+        assert len(parts) == 9
+        ws = _os.path.realpath(parts[0])
+        for p in parts[1:]:
+            assert str(_os.path.realpath(p)).startswith(ws), f"{p} not under {ws}"
 
     def test_env_vars_deleted(self):
         """ENV=test → OPENAI_APIKEY, LINE_TOKEN, APPLE_CALENDAR_NAME are deleted"""

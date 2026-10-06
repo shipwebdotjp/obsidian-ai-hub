@@ -27,6 +27,7 @@ def clean_copilot_env(tmp_path, monkeypatch):
     vault_path = tmp_path / "vault"
     vault_path.mkdir(exist_ok=True)
     monkeypatch.setattr(config, "VAULT_PATH", vault_path)
+    monkeypatch.setattr(config, "PRIMARY_VAULT_PATH", vault_path)
 
     # Re-register subpaths
     copilot_dir = vault_path / "copilot"

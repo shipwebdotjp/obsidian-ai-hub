@@ -16,6 +16,7 @@ import { AgentVaultFilePicker } from "./AgentVaultFilePicker";
 import {
   MAX_AGENT_CONTEXT_REFS,
   MAX_AGENT_IMAGES,
+  contextRefKey,
   type PendingAttachment,
   type PendingContextRef,
 } from "./agentViewUtils";
@@ -32,7 +33,7 @@ interface AgentChatInputProps {
   onRemoveAttachment: (index: number) => void;
   pendingContextRefs: PendingContextRef[];
   onRemoveContextRef: (index: number) => void;
-  onToggleContextRef: (path: string) => void;
+  onToggleContextRef: (path: string, vaultId?: string) => void;
   vaultPickerOpen: boolean;
   onOpenVaultPicker: () => void;
   onCloseVaultPicker: () => void;
@@ -268,13 +269,13 @@ export function AgentChatInput({
         <div className="flex flex-wrap gap-1.5" aria-label="送信前の参照コンテキスト">
           {pendingContextRefs.map((ref, index) => (
             <span
-              key={`${ref.path}-${index}`}
+              key={`${contextRefKey(ref)}-${index}`}
               className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-slate-800 py-1 pl-3 pr-1.5 text-xs text-white shadow-sm"
               data-testid="context-ref-chip"
             >
               <FileText className="h-3 w-3 shrink-0 text-slate-300" />
-              <span className="max-w-48 truncate font-mono" title={ref.path}>
-                {ref.path}
+              <span className="max-w-48 truncate font-mono" title={`[${ref.vault_id ?? "main"}] ${ref.path}`}>
+                [{ref.vault_id ?? "main"}] {ref.path}
               </span>
               <button
                 type="button"

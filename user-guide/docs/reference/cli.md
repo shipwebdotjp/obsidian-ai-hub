@@ -57,8 +57,9 @@ python -m obsidian_ai_hub <flag> [options]
 | フラグ | 引数 | 説明 |
 | --- | --- | --- |
 | `--backup` | — | 指定フォルダを rsync でバックアップする。 |
-| `--sync-vault` | — | Vault を md-hybrid-search インデックスへ同期する。 |
-| `--rebuild-vault` | — | Vault インデックスを完全に再構築する。 |
+| `--sync-vault` | — | Vault を md-hybrid-search インデックスへ同期する（未指定なら全 Vault を ID 順に同期）。 |
+| `--rebuild-vault` | — | Vault インデックスを完全に再構築する（未指定なら全 Vault）。 |
+| `--vault` | Vault ID（反復可） | `--sync-vault` / `--rebuild-vault` / `--vault-search` / `--vault-write` の対象 Vault。`--vault-write` には最大1件。 |
 | `--sync-knowledge` | — | Vault を Open WebUI のナレッジベースへ同期する。 |
 | `--sync-people` | — | 人物候補・重複を正規レコードへ統合する。 |
 
@@ -126,7 +127,7 @@ python -m obsidian_ai_hub <flag> [options]
 | `--display` | 整数 | `--screenshot` のディスプレイ番号（既定 1）。 |
 | `--scan-line-inbox` | — | 最前面の LINE から未読候補を抽出する。 |
 | `--log-activity` | — | 活動ログを記録する。 |
-| `--vault-search` | — | Vault を検索する。`--query` が必須。 |
+| `--vault-search` | — | Vault を検索する。`--query` が必須（`--vault` 未指定なら全 Vault を横断検索）。 |
 | `--query` | 文字列 | 検索クエリ。 |
 | `--k` | 整数 | 結果件数（既定 10）。 |
 | `--search-mode` | `similarity` / `keyword` / `hybrid` | 検索モード（既定 hybrid）。 |
@@ -181,8 +182,8 @@ uv run python -m obsidian_ai_hub --workflow-run wrev_xxx \
 
 | フラグ | 引数 | 説明 |
 | --- | --- | --- |
-| `--agent-create` | JSON パス | Agent を作成する（`name` / `system_prompt` 必須、`tool_ids` / `provider` / `model` など任意）。 |
-| `--vault-write` | 相対パス | Vault 内の Markdown を書き込む（`.md` のみ、Vault 外・`..` は拒否）。 |
+| `--agent-create` | JSON パス | Agent を作成する（`name` / `system_prompt` 必須、`tool_ids` / `provider` / `model` / `default_vault_ids` など任意）。 |
+| `--vault-write` | 相対パス | Vault 内の Markdown を書き込む（`.md` のみ、Vault 外・`..` は拒否。`--vault` 未指定なら primary Vault）。 |
 | `--vault-content` | ファイル | 内容ファイル。`-` または未指定で stdin。 |
 | `--vault-overwrite` | — | 既存ファイルを上書きする（未指定時は既存があると失敗）。 |
 

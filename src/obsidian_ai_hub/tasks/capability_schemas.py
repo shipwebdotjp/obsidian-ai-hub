@@ -339,8 +339,9 @@ def _normalize_ui_schema(
 # single source of truth for the field set. ``x-ui`` is advisory: an unknown
 # widget degrades to the default control.
 _FIELD_WIDGETS: dict[str, dict[str, str]] = {
-    "vault_read_file": {"relative_path": "vault_path"},
-    "vault_write_file": {"relative_path": "vault_path"},
+    "vault_read_file": {"relative_path": "vault_path", "vault_id": "vault"},
+    "vault_write_file": {"relative_path": "vault_path", "vault_id": "vault"},
+    "vault_search": {"additional_vault_ids": "vault_multi"},
     "specialist_agent": {"agent_id": "agent"},
     "coding_cli": {"project_id": "project"},
     "research_agent": {"project_id": "project"},
@@ -751,7 +752,11 @@ FETCH_STATUS_OK = "ok"
 _OUTPUT_SCHEMAS: dict[str, dict[str, Any]] = {
     # --- structured (P2): referencable only via strict fields ---
     "vault_read_file": _object_output(
-        {"relative_path": {"type": "string"}, "content": {"type": "string"}},
+        {
+            "vault_id": {"type": "string"},
+            "relative_path": {"type": "string"},
+            "content": {"type": "string"},
+        },
         required=["relative_path", "content"],
     ),
     "periodic_note_read": _object_output(
@@ -988,6 +993,7 @@ _OUTPUT_SCHEMAS: dict[str, dict[str, Any]] = {
     ),
     "vault_write_file": _object_output(
         {
+            "vault_id": {"type": "string"},
             "relative_path": {"type": "string"},
             "bytes_written": {"type": "integer"},
             "overwritten": {"type": "boolean"},

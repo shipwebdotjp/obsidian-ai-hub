@@ -507,6 +507,14 @@ def main():
         help="--vault-write で既存ファイルを上書きする",
     )
     parser.add_argument(
+        "--vault",
+        dest="vault",
+        action="append",
+        default=None,
+        help="対象 Vault ID（反復可）。--sync-vault / --rebuild-vault / "
+        "--vault-search で使用。未指定なら全 Vault（ID 順）。",
+    )
+    parser.add_argument(
         "prompt_args",
         nargs="*",
         help="プロンプト本文（複数可、 --coding で使用。空白で結合、stdin併用時は \\n\\nで連結）",
@@ -815,6 +823,8 @@ def main():
         parser.error("--vault-write には空でない相対パスが必要です")
     if args.vault_write is not None and has_workflow_op:
         parser.error("--vault-write は --workflow-* と併用できません")
+    if args.vault_write is not None and args.vault is not None and len(args.vault) > 1:
+        parser.error("--vault-write には --vault を最大1件までしか指定できません")
     if args.agent_create is not None and not args.agent_create.strip():
         parser.error("--agent-create には空でないパスが必要です")
     if args.agent_create is not None and (
@@ -880,7 +890,9 @@ def main():
         run_and_log(sync_knowledge.main, "sync_knowledge", {})
         ran = True
     if args.sync_vault:
-        run_and_log(sync_valut.main, "sync_vault", {})
+        run_and_log(
+            lambda: sync_valut.main(args.vault), "sync_vault", {"vault": args.vault}
+        )
         ran = True
     if args.sync_people:
         from obsidian_ai_hub import sync_people
@@ -888,7 +900,11 @@ def main():
         run_and_log(sync_people.main, "sync_people", {})
         ran = True
     if args.rebuild_vault:
-        run_and_log(rebuild_valut.main, "rebuild_vault", {})
+        run_and_log(
+            lambda: rebuild_valut.main(args.vault),
+            "rebuild_vault",
+            {"vault": args.vault},
+        )
         ran = True
     if getattr(args, "rebuild_retrieval_index", False):
         run_and_log(rebuild_retrieval.main, "rebuild_retrieval_index", {})
@@ -935,9 +951,10 @@ def main():
                 k=args.k,
                 search_mode=args.search_mode,
                 json_output=args.json,
+                vault_ids=args.vault,
             ),
             "vault_search",
-            {"query": args.query, "k": args.k, "search_mode": args.search_mode, "json": args.json},
+            {"query": args.query, "k": args.k, "search_mode": args.search_mode, "json": args.json, "vault": args.vault},
         )
         ran = True
     if args.memory_extract:
@@ -1219,11 +1236,13 @@ def main():
     if getattr(args, "vault_write", None) is not None:
         from obsidian_ai_hub.vault_ops import main_vault_write
 
+        vault_target = args.vault[0] if args.vault else None
         sys.exit(
             main_vault_write(
                 args.vault_write,
                 args.vault_content,
                 overwrite=args.vault_overwrite,
+                vault_id=vault_target,
             )
         )
     if not ran:

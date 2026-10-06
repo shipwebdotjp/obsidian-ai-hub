@@ -34,6 +34,21 @@ def vault_dir(monkeypatch, tmp_path):
     hidden = vault / ".obsidian"
     hidden.mkdir()
     (hidden / "hidden.md").write_text("hidden", encoding="utf-8")
+    registry = config.validate_vault_registry(
+        {
+            "vaults": {
+                "main": {
+                    "path": str(vault),
+                    "display_name": "Test Personal",
+                    "role": "primary",
+                    "ai_access": "read",
+                },
+            }
+        }
+    )
+    monkeypatch.setattr(config, "VAULT_REGISTRY", registry)
+    monkeypatch.setattr(config, "PRIMARY_VAULT", registry.get_primary())
+    monkeypatch.setattr(config, "PRIMARY_VAULT_PATH", vault)
     monkeypatch.setattr(config, "VAULT_PATH", vault)
     return vault
 
@@ -51,8 +66,8 @@ def test_normalize_context_refs_filters_and_dedupes():
         ]
     )
     assert refs == [
-        {"kind": "vault_file", "path": "a.md"},
-        {"kind": "vault_file", "path": "b.md"},
+        {"kind": "vault_file", "vault_id": "main", "path": "a.md"},
+        {"kind": "vault_file", "vault_id": "main", "path": "b.md"},
     ]
 
 
@@ -222,7 +237,7 @@ def test_start_run_accepts_context_refs(client, auth_headers, vault_dir):
     ).json()
     user_message = next(m for m in detail["messages"] if m["role"] == "user")
     assert user_message["context_refs"] == [
-        {"kind": "vault_file", "path": "note-a.md"}
+        {"kind": "vault_file", "vault_id": "main", "path": "note-a.md"}
     ]
 
 

@@ -41,7 +41,7 @@ uv run -m obsidian_ai_hub --serve
 
 Open `http://127.0.0.1:8765` in your browser. See the
 [installation guide](https://aihub.shipweb.jp/getting-started/installation)
-for configuration details (`.env`, `VAULT_PATH`, API tokens, LaunchAgent
+for configuration details (`.env`, Vault Registry, API tokens, LaunchAgent
 setup).
 
 ## Configuration
