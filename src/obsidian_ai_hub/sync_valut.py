@@ -68,8 +68,14 @@ def _read_identity(vault_id: str) -> dict | None:
             return None
         return json.loads(identity_path.read_text(encoding="utf-8"))
     except OSError as exc:
+        # An unreadable sidecar also disables verification: fail closed and
+        # require an explicit rebuild rather than serving a possibly stale
+        # index. (A missing file on first run returns None above.)
         logger.warning("cannot read vault identity for '%s': %s", vault_id, exc)
-        return None
+        raise config.VaultIndexStaleError(
+            f"Vault '{vault_id}' index identity is unreadable; "
+            f"run --rebuild-vault --vault {vault_id} before searching"
+        ) from exc
     except ValueError as exc:
         # Corrupt sidecar must not silently disable the stale-path guard:
         # fail closed and require an explicit rebuild.

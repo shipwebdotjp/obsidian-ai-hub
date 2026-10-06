@@ -240,6 +240,21 @@ def test_corrupt_identity_requires_rebuild():
         sync_valut.check_vault_index_identity("main")
 
 
+def test_unreadable_identity_requires_rebuild(monkeypatch):
+    from obsidian_ai_hub import sync_valut
+
+    identity_path = app_config.vault_index_identity_path("main")
+    identity_path.parent.mkdir(parents=True, exist_ok=True)
+    identity_path.write_text("{}", encoding="utf-8")
+
+    def failing_read_text(*args, **kwargs):
+        raise OSError("simulated read failure")
+
+    monkeypatch.setattr(Path, "read_text", failing_read_text)
+    with pytest.raises(app_config.VaultIndexStaleError, match="unreadable"):
+        sync_valut.check_vault_index_identity("main")
+
+
 def test_unknown_vault_api_returns_400(api_token):
     from fastapi.testclient import TestClient
 
