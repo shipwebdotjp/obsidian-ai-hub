@@ -489,7 +489,7 @@ def test_maintenance_snapshot_conflict_re_diagnose(mock_llm_response):
 
 @patch("obsidian_ai_hub.line_notification.notify_hitl_run")
 def test_register_maintenance_hitl_run_notifies_initial_round(mock_notify):
-    """Initial maintenance registration sends one notification with round 1."""
+    """Initial maintenance registration emits exactly one inbox notification via the central path."""
     conn = get_db_connection()
     try:
         conn.execute("DELETE FROM memories")
@@ -533,11 +533,14 @@ def test_register_maintenance_hitl_run_notifies_initial_round(mock_notify):
 
         run_id = register_maintenance_hitl_run(base_date, proposals, memories_map)
         assert run_id is not None
-        mock_notify.assert_called_once()
-        kwargs = mock_notify.call_args.kwargs
-        assert kwargs["run_id"] == run_id
-        assert kwargs["round_number"] == 1
-        assert kwargs["kind"] == "長期記憶保守"
+        # Central notification (hitl.service._notify_hitl_if_needed) is the
+        # sole initial notification; the explicit helper is not used here.
+        mock_notify.assert_not_called()
+        row = conn.execute(
+            "SELECT COUNT(*) FROM notification_inbox WHERE target_id = ?;",
+            (run_id,),
+        ).fetchone()
+        assert int(row[0]) == 1
     finally:
         conn.close()
 
@@ -590,8 +593,9 @@ def test_maintenance_reproposal_round_notifies(mock_llm_response, mock_notify):
 
         run_id = register_maintenance_hitl_run(base_date, proposals, memories_map)
         assert run_id is not None
-        mock_notify.assert_called_once()
-        assert mock_notify.call_args.kwargs["round_number"] == 1
+        # Initial round uses the central notification path, not the explicit
+        # helper; the explicit helper fires only for the re-proposal below.
+        mock_notify.assert_not_called()
         mock_notify.reset_mock()
 
         submit_answer(run_id, "round_1", "proposal_1", {"value": "feedback", "comment": "もっと自然な日本語に修正してください"})
@@ -719,9 +723,18 @@ def test_maintenance_feedback_creates_next_round(mock_llm_response):
         conn.close()
 
 
-@patch("obsidian_ai_hub.line_notification.notify_hitl_run", side_effect=RuntimeError("push down"))
-def test_register_maintenance_hitl_run_notify_failure_does_not_fail_registration(mock_notify):
-    """A raising notification must not fail the maintenance run registration."""
+def test_register_maintenance_hitl_run_notify_failure_does_not_fail_registration(monkeypatch):
+    """A raising central notification must not fail the maintenance run registration."""
+
+    def _boom(event):
+        raise RuntimeError("push down")
+
+    monkeypatch.setattr(
+        "obsidian_ai_hub.notifications.publish_notification", _boom
+    )
+    monkeypatch.setattr(
+        "obsidian_ai_hub.notifications.publisher.publish_notification", _boom
+    )
     conn = get_db_connection()
     try:
         conn.execute("DELETE FROM memories")
@@ -765,7 +778,6 @@ def test_register_maintenance_hitl_run_notify_failure_does_not_fail_registration
 
         run_id = register_maintenance_hitl_run(base_date, proposals, memories_map)
         assert run_id is not None
-        mock_notify.assert_called_once()
 
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM hitl_runs WHERE run_id = ?", (run_id,))

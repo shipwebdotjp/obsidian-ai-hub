@@ -539,6 +539,9 @@ def register_maintenance_hitl_run(
         f"メンテナンス提案が{len(proposals)}件あります。"
     )
 
+    # Notification is published centrally by register_run_and_questions
+    # via hitl/service._notify_hitl_if_needed (idempotent per
+    # run_id/question_set_id). No explicit notify_hitl_run here.
     register_run_and_questions(
         run_id=run_id,
         handler="memory.apply_maintenance_proposals",
@@ -549,26 +552,6 @@ def register_maintenance_hitl_run(
         description=description,
         display_type="長期記憶保守",
     )
-
-    # The registration transaction above has committed. Notify via LINE as a
-    # best-effort push after commit and guard the whole call so a notification
-    # failure never propagates or fails the registration.
-    try:
-        from obsidian_ai_hub.line_notification import notify_hitl_run
-
-        notify_hitl_run(
-            kind="長期記憶保守",
-            title="メモリ長期記憶 診断メンテナンス",
-            description=description,
-            run_id=run_id,
-            round_number=1,
-        )
-    except Exception as exc:
-        logger.warning(
-            "LINE maintenance notification failed after commit for run %s: %s",
-            run_id,
-            type(exc).__name__,
-        )
 
     return run_id
 

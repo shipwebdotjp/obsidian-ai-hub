@@ -129,6 +129,10 @@ def register_maintenance_hitl_run(
     )
 
     store.mark_proposed([str(p["fingerprint"]) for p in enriched], run_id)
+    # Notification is published centrally by register_run_and_questions
+    # via hitl/service._notify_hitl_if_needed (idempotent per
+    # run_id/question_set_id). Do not call notify_hitl_run here or the
+    # inbox receives two rows for the same run_id.
     register_run_and_questions(
         run_id=run_id,
         handler=SYSTEM_MAINTENANCE_HANDLER,
@@ -139,23 +143,6 @@ def register_maintenance_hitl_run(
         description=description,
         display_type=SYSTEM_MAINTENANCE_DISPLAY_TYPE,
     )
-
-    try:
-        from obsidian_ai_hub.line_notification import notify_hitl_run
-
-        notify_hitl_run(
-            kind=SYSTEM_MAINTENANCE_DISPLAY_TYPE,
-            title=SYSTEM_MAINTENANCE_TITLE,
-            description=description,
-            run_id=run_id,
-            round_number=1,
-        )
-    except Exception as exc:
-        logger.warning(
-            "LINE system maintenance notification failed after commit for run %s: %s",
-            run_id,
-            type(exc).__name__,
-        )
 
     return run_id
 

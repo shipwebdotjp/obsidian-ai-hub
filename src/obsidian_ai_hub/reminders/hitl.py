@@ -109,6 +109,9 @@ def register_reminder_approval(
     )
 
     try:
+        # Notification is published centrally by register_run_and_questions
+        # via hitl/service._notify_hitl_if_needed (idempotent per
+        # run_id/question_set_id). No explicit notify_hitl_run here.
         register_run_and_questions(
             run_id=run_id,
             handler=HANDLER_NAME,
@@ -123,23 +126,6 @@ def register_reminder_approval(
         logger.exception("Failed to register reminder approval HITL run")
         return None
 
-    # Notify via LINE as a best-effort push after commit; a notification
-    # failure must never fail the registration.
-    try:
-        from obsidian_ai_hub.line_notification import notify_hitl_run
-
-        notify_hitl_run(
-            kind=DISPLAY_TYPE,
-            title=title,
-            description=description,
-            run_id=run_id,
-        )
-    except Exception as exc:
-        logger.warning(
-            "LINE reminder notification failed after commit for run %s: %s",
-            run_id,
-            type(exc).__name__,
-        )
     return run_id
 
 
