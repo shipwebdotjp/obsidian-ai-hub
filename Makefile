@@ -8,7 +8,7 @@ WEB_PLIST=~/Library/LaunchAgents/jp.shipweb.obsidian-ai-hub.web.plist
 WEB_LABEL=jp.shipweb.obsidian-ai-hub.web
 DOMAIN=gui/$(shell id -u)
 
-.PHONY: install install-all install-hitl-worker install-web start stop restart restart-base restart-hitl-worker restart-web reload reload-hitl-worker reload-web enable enable-hitl-worker enable-web disable disable-hitl-worker disable-web status status-hitl-worker status-web logs logs-hitl-worker logs-web errorlogs errorlogs-hitl-worker errorlogs-web build-web dev-web jules-setup serve serve-debug opcheck-serve
+.PHONY: install install-all install-hitl-worker install-web start stop restart restart-base restart-hitl-worker restart-web reload reload-hitl-worker reload-web enable enable-hitl-worker enable-web disable disable-hitl-worker disable-web status status-hitl-worker status-web logs logs-hitl-worker logs-web errorlogs errorlogs-hitl-worker errorlogs-web build-web dev-web jules-setup serve serve-debug opcheck-serve opcheck-start opcheck-stop
 
 # インストール（初回のみ）
 install:
@@ -156,3 +156,10 @@ serve-debug:
 # 隔離サンドボックス（別DB・別Vault・別ポート、worker 有効。実データを変更しない）
 opcheck-serve:
 	bash ./scripts/opcheck_serve.sh
+
+# 隔離サンドボックスのバックグラウンド起動・停止（エージェント用。PID を .opcheck/server.pid に保存）
+opcheck-start:
+	bash ./scripts/opcheck_start.sh
+
+opcheck-stop:
+	bash ./scripts/opcheck_stop.sh

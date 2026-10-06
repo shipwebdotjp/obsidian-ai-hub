@@ -999,6 +999,9 @@ def main():
             )
         import uvicorn
 
+        from obsidian_ai_hub.web import app as web_app
+
+        log_config = web_app.build_uvicorn_log_config()
         if args.debug:
             _os.environ["OBSIDIAN_AI_HUB_HOST"] = host
             _os.environ["OBSIDIAN_AI_HUB_PORT"] = str(port)
@@ -1008,12 +1011,11 @@ def main():
                 host=host,
                 port=port,
                 log_level="debug",
+                log_config=log_config,
                 reload=True,
                 factory=True,
             )
         else:
-            from obsidian_ai_hub.web import app as web_app
-
             web_app.HOST = host
             web_app.PORT = port
             web_app.TOKEN = token
@@ -1022,6 +1024,7 @@ def main():
                 host=host,
                 port=port,
                 log_level="info",
+                log_config=log_config,
             )
         ran = True
     if args.hitl_dispatch:

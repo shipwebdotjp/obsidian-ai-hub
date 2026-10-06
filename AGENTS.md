@@ -95,12 +95,21 @@
 
 ## Check the operation
 - Please perform operational checks using the actual database; it is acceptable if side effects occur. After modifying the code, restart the LaunchAgent services with `make restart` (job_runner + Web サーバー + hitl-worker). 初回のみ `make install-all` で LaunchAgent を登録しておくこと。
-- `make serve` / `make serve-restart` はフォアグラウンドの開発用サーバーで、人間の端末専用。エージェントのシェルからはプロセスが残らないため使わない。Web サーバーだけを再起動する場合は `make restart-web`、状態とログは `make status-web` / `make logs-web` / `make errorlogs-web`。
+- `make serve` / `make serve-restart` はフォアグラウンドの開発用サーバーで、人間の端末専用。エージェントのシェルからはプロセスが残らないため使わない。Web サーバーだけを再起動する場合は `make restart-web`、状態確認は `make status-web` のみ使う。
+- `make logs-web` / `make errorlogs-web`（および `logs` / `errorlogs`）は `tail -f` のためエージェントのシェルからは使わない。ログは次で読む（巨大行対策に `cut -c1-500` を併用可）。
+  ```bash
+  tail -c 4000 /tmp/obsidian_web.log
+  grep -n "Uvicorn running\|ERROR\|Traceback" /tmp/obsidian_web.err | tail -5
+  ```
+- 起動待ちは `sleep` 固定や `/dev/tcp`（zsh 非対応）を使わず、`scripts/opcheck_wait_ready.sh <port>`（`/health` ポーリング）を使う。本番 `make restart` 直後はモデル読み込みで数分応答がないのが正常。
+- エージェントのシェルは zsh である。Python 実行は必ず `uv run python` を使う。GNU 式 `ls --time-style` は使えない（`stat -f` を使う）。引用符なしの `echo ===` は書かない（zsh の `=cmd` 展開で失敗するため。区切り線は `echo "--- ..."` と引用する）。
 - Before finishing, stop any foreground server you started (do not leave `make serve` or a multiplexer session running); the LaunchAgent keeps the service up across runs.
 - Clean up any test data you create during operational checks before finishing, including dependent records. Use an identifying name prefix such as `__opcheck_`, report the deleted IDs/counts, and verify nothing remains. Never delete user data.
-- Prefer the isolated sandbox for workflow/agent checks: `make opcheck-serve` runs a second instance on
+- Prefer the isolated sandbox for workflow/agent checks: `make opcheck-start` runs a second instance on
   127.0.0.1:8767 with its own DB/Vault/index under `.opcheck/` (workers enabled, real LLM credentials
-  from `.env`). Source `.opcheck/env.sh` before running CLI commands (they read config directly, not
+  from `.env`). It backgrounds the server, saves the PID to `.opcheck/server.pid`, and waits for
+  `/health` before returning. Stop it with `make opcheck-stop` (verifies the PID before signalling).
+  `make opcheck-serve` is the foreground variant for human terminals. Source `.opcheck/env.sh` before running CLI commands (they read config directly, not
   over HTTP). Drive runs with `--workflow-run --execute`. See [docs/testing.md](docs/testing.md#隔離サンドボックスmake-opcheck-serve).
 - http://127.0.0.1:8765
 - Production DB Path: ~/.config/obsidian-ai-hub/memory.sqlite3

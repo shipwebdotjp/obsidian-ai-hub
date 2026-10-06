@@ -28,6 +28,27 @@ FRONTEND_DIST = Path(
 )
 
 
+def build_uvicorn_log_config() -> dict:
+    """Uvicorn logging config with timestamps on access lines.
+
+    The default access format carries no timestamp, which makes it impossible
+    to tell pre-restart requests apart from current ones in the launchd logs
+    (e.g. when dating a past 400). Imported lazily so module import never
+    requires uvicorn.
+    """
+    import copy
+
+    from uvicorn.config import LOGGING_CONFIG
+
+    config = copy.deepcopy(LOGGING_CONFIG)
+    access_formatter = config["formatters"]["access"]
+    access_formatter["fmt"] = (
+        '%(asctime)s %(client_addr)s - "%(request_line)s" %(status_code)s'
+    )
+    access_formatter["use_colors"] = False
+    return config
+
+
 def _configure_security(token: str) -> None:
     global TOKEN
     TOKEN = token
@@ -148,4 +169,5 @@ def run() -> None:
         host=HOST,
         port=PORT,
         log_level="info",
+        log_config=build_uvicorn_log_config(),
     )
